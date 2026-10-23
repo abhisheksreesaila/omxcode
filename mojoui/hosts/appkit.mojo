@@ -741,11 +741,6 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(self.toast, "removeFromSuperview")
                 self.toast = make_toast(node.text, node.options[0] if len(node.options) > 0 else String(""), tag_for(self_addr, i), self.target, self.pal)
                 self.toast_text = node.text
-                var content = msg(self.window, "contentView")
-                if content != 0:
-                    _ = msg(content, "addSubview:positioned:relativeTo:", self.toast, 1, 0)  # NSWindowAbove: over everything
-                    _ = msg(msg(msg(self.toast, "centerXAnchor"), "constraintEqualToAnchor:", msg(content, "centerXAnchor")), "setActive:", 1)
-                    _ = msg(msg(msg(self.toast, "bottomAnchor"), "constraintEqualToAnchor:constant:", msg(content, "bottomAnchor"), Float64(-24)), "setActive:", 1)
                 _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("toastTimeout:"), ns_number(tag_for(self_addr, i)), Float64(node.size if node.size > 0 else 6))
             self.toast_claimed = True
             self.widgets[i] = self.toast
@@ -804,35 +799,45 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(msg(w, "layer"), "setBackgroundColor:", msg(ns_color(self.pal.chrome), "CGColor"))
             # justify → distribution (BETWEEN) or flexible spacers (START, CENTER, END), all native
             var grows = False
-            for c in node.children:
+            var spacers = False  # a Spacer takes the free space along its stack, as GTK's expanding one (it sat 0 pt tall
+            for c in node.children:  # and the status bar floated mid-window, GitHub's Mac, 2026-10-23)
                 grows = grows or self.rt.shown.nodes[c].grows
+                spacers = spacers or self.rt.shown.nodes[c].kind == SPACER
             if node.justify_items == BETWEEN:
                 _ = msg(w, "setDistribution:", 3)  # NSStackViewDistributionEqualSpacing
-            elif grows or node.justify_items != 0:
+            elif grows or spacers or node.justify_items != 0:
                 _ = msg(w, "setDistribution:", 0)  # fill: the lowest-hugging view takes the free space
             var lead = 0
-            if (node.justify_items == CENTER or node.justify_items == END) and not grows:  # a growing child takes it all
+            if (node.justify_items == CENTER or node.justify_items == END) and not grows and not spacers:  # a growing child (or a Spacer) takes it all
                 lead = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", lead)
+            var first_spacer = 0
             for c in node.children:
                 var child = self.build(c, self_addr)
                 _ = msg(w, "addArrangedSubview:", child)
                 ref cn = self.rt.shown.nodes[c]
                 if cn.grows:  # flex-grow: lowest hugging priority along the stack
                     hug(child, Float32(1), vertical)
-                elif grows and cn.kind != SPACER:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
+                elif cn.kind == SPACER:  # (a growing view first, if there is one)
+                    hug(child, Float32(2 if grows else 1), vertical)
+                    if first_spacer != 0:  # spacers share the free space equally, as GTK's expanding ones (a toolbar's
+                        var along = "heightAnchor" if vertical else "widthAnchor"  # middle tools sit centred)
+                        _ = msg(msg(msg(child, along), "constraintEqualToAnchor:", msg(first_spacer, along)), "setActive:", 1)
+                    else:
+                        first_spacer = child
+                elif grows or spacers:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
                     hug(child, Float32(750), vertical)
                 if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(2 * (node.pad_h if vertical else node.pad_v))
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
                     _ = msg(c2, "setActive:", 1)
-            if node.justify_items == CENTER and not grows:
+            if node.justify_items == CENTER and not grows and not spacers:
                 var trail = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", trail)
                 var side = "heightAnchor" if vertical else "widthAnchor"
                 _ = msg(msg(msg(trail, side), "constraintEqualToAnchor:", msg(lead, side)), "setActive:", 1)
-            elif node.justify_items == START and not grows:
+            elif node.justify_items == START and not grows and not spacers:
                 _ = msg(w, "addArrangedSubview:", flexible_spacer(vertical))
         if self.widgets[i] == 0:  # (some branches already stored an inner control)
             self.widgets[i] = w
@@ -935,6 +940,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(holder, "setEdgeInsets:", Float64(32), Float64(32), Float64(32), Float64(32))
             _ = msg(holder, "addArrangedSubview:", root)
             _ = msg(self.window, "setContentView:", holder)
+        self.attach_toast()
         self.fit_wraps()
         self.start_frames()
         if 0 <= self.focus < len(self.widgets) and self.rt.shown.nodes[self.focus].kind == FIELD:
@@ -1008,6 +1014,19 @@ struct AppKitHost[A: App](Movable):
             if self.rt.shown.nodes[k].kind == LAZYLIST and self.widgets[k] != 0:
                 _ = msg(self.widgets[k], "reloadData")
         self.wake()
+
+    def attach_toast(self):
+        """The toast floats over the window's content, near its bottom. Attached once the new screen is the content: built
+        into the old content, it went with it (the toast never showed on the Mac, 2026-10-23)."""
+        if self.toast == 0 or self.window == 0:
+            return
+        var content = msg(self.window, "contentView")
+        if content == 0 or msg(self.toast, "superview") == content:
+            return
+        _ = msg(self.toast, "removeFromSuperview")
+        _ = msg(content, "addSubview:positioned:relativeTo:", self.toast, 1, 0)  # NSWindowAbove: over everything
+        _ = msg(msg(msg(self.toast, "centerXAnchor"), "constraintEqualToAnchor:", msg(content, "centerXAnchor")), "setActive:", 1)
+        _ = msg(msg(msg(self.toast, "bottomAnchor"), "constraintEqualToAnchor:constant:", msg(content, "bottomAnchor"), Float64(-24)), "setActive:", 1)
 
     def in_row(self, i: Int) -> Bool:
         """Whether node i sits in an HStack."""
