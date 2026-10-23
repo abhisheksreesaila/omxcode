@@ -124,6 +124,7 @@ struct AppKitHost[A: App](Movable):
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
     var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
+    var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
     var ticks: Int  # ticks so far (the Mac report logs the first)
     var last_frame: Float64  # the link's last timestamp (seconds)
     var theme_key: String  # the app's theme (Theme.key); its palette's colours and Inter when it paints native controls (a skin, D-149, D-260)
@@ -149,6 +150,7 @@ struct AppKitHost[A: App](Movable):
         self.focus = -1
         self.canvases = List[AppleCanvas]()
         self.link = 0
+        self.resize_pending = False
         self.last_frame = 0
         self.ticks = 0
         var theme = self.rt.app.theme()
@@ -1061,8 +1063,20 @@ struct AppKitHost[A: App](Movable):
                 j -= 1
         return out^
 
+    def queue_resize(mut self, self_addr: Int):
+        """The window says its size changed, often from inside AppKit's own layout pass: the app lays out to the new
+        size on the next run-loop turn. Rebuilding there replaced the menu bar mid-layout, and macOS 26 aborts on that
+        (the owner's crash report, 2026-10-23: setMainMenu: from windowDidResize: inside layoutIfNeeded). One pending
+        turn takes every size a burst of resizes gives."""
+        if self.resize_pending:
+            return
+        self.resize_pending = True
+        var modes = msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes"))  # (live: also while an edge is dragged)
+        _ = msg(self.target, "performSelector:withObject:afterDelay:inModes:", sel("windowResizeLater:"), ns_number(self_addr), Float64(0), modes)
+
     def resized(mut self, self_addr: Int):
         """The window's content area changed size: the app lays out to it (App.resize), as on GTK and the web."""
+        self.resize_pending = False
         var b = msg[CGRect](msg(self.window, "contentView"), "bounds")
         var w = Int(b.width + 0.5)
         var h = Int(b.height + 0.5)
@@ -1382,6 +1396,11 @@ def on_debug_queued[A: App](target: Int, cmd: Int, number: Int) abi("C"):
 def on_window_resized[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
     var window = msg(notification, "object")
     var addr = msg(msg(window, "identifier"), "longLongValue")
+    host_at[A](addr)[].queue_resize(addr)
+
+
+def on_window_resize_later[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    var addr = msg(number, "longLongValue")
     host_at[A](addr)[].resized(addr)
 
 
@@ -1668,6 +1687,7 @@ def run[A: App]() -> c_int:
     add_method(c, "debugOpen:", on_debug_open[A], "v@:@")
     add_method(c, "debugQueued:", on_debug_queued[A], "v@:@")
     add_method(c, "windowDidResize:", on_window_resized[A], "v@:@")
+    add_method(c, "windowResizeLater:", on_window_resize_later[A], "v@:@")
     add_method(c, "showPopover:", on_show_popover[A], "v@:@")
     add_method(c, "popoverDidClose:", on_popover_closed[A], "v@:@")
     add_method(c, "showSheet:", on_show_sheet[A], "v@:@")
