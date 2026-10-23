@@ -123,7 +123,8 @@ struct AppKitHost[A: App](Movable):
     var widgets: List[Int]
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
-    var link: Int  # CADisplayLink: one tick per display frame, for every canvas
+    var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
+    var ticks: Int  # ticks so far (the Mac report logs the first)
     var last_frame: Float64  # the link's last timestamp (seconds)
     var theme_key: String  # the app's theme (Theme.key); its palette's colours and Inter when it paints native controls (a skin, D-149, D-260)
     var pal: Palette
@@ -149,6 +150,7 @@ struct AppKitHost[A: App](Movable):
         self.canvases = List[AppleCanvas]()
         self.link = 0
         self.last_frame = 0
+        self.ticks = 0
         var theme = self.rt.app.theme()
         self.theme_key = theme.key()
         self.pal = theme.palette.copy()
@@ -860,9 +862,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(holder, "setEdgeInsets:", Float64(32), Float64(32), Float64(32), Float64(32))
             _ = msg(holder, "addArrangedSubview:", root)
             _ = msg(self.window, "setContentView:", holder)
-        if len(self.canvases) > 0:  # one display link (macOS 14+) ticks every canvas
-            self.link = msg(self.canvases[0].view, "displayLinkWithTarget:selector:", self.canvases[0].view, sel("canvasFrame:"))
-            _ = msg(self.link, "addToRunLoop:forMode:", msg(cls("NSRunLoop"), "mainRunLoop"), ns_string("kCFRunLoopCommonModes"))
+        self.start_frames()
         if 0 <= self.focus < len(self.widgets) and self.rt.shown.nodes[self.focus].kind == FIELD:
             # Keep typing in the new field, on the next run-loop turn (after AppKit has
             # finished ending the old field's edit), with the cursor at the end.
@@ -1088,6 +1088,9 @@ struct AppKitHost[A: App](Movable):
 
     def tick(mut self, seconds: Float64, self_addr: Int):
         """Every display frame: frame events for canvases that asked, then redraws."""
+        self.ticks += 1
+        if self.ticks == 1:
+            self.report.note("frames: first tick")
         var micro = Int((seconds - self.last_frame) * 1e6) if self.last_frame > 0 and seconds - self.last_frame < 0.25 else 16667
         self.last_frame = seconds
         var k = 0
@@ -1101,7 +1104,8 @@ struct AppKitHost[A: App](Movable):
             self.draw_canvas(k, self_addr)
             k += 1
         if self.link != 0 and self.idle():  # nothing to animate or redraw: stop waking up
-            _ = msg(self.link, "setPaused:", 1)
+            _ = msg(self.link, "invalidate")
+            self.link = 0
 
     def idle(self) -> Bool:
         for ref c in self.canvases:
@@ -1109,10 +1113,20 @@ struct AppKitHost[A: App](Movable):
                 return False
         return True
 
-    def wake(self):
+    def wake(mut self):
         """Something may need drawing (a new version, frames, a new size): tick again."""
-        if self.link != 0:
-            _ = msg(self.link, "setPaused:", 0)
+        self.start_frames()
+
+    def start_frames(mut self):
+        """Ticks every canvas 60 times a second until they're idle. A plain NSTimer, in the common run-loop modes (it keeps
+        ticking while a slider or a menu tracks the mouse). The view's display link (macOS 14+) never fired on the owner's
+        Mac (macOS 26, 2026-10-22: no canvas ever drew), and a timer doesn't depend on the view being on screen."""
+        if self.link != 0 or len(self.canvases) == 0:
+            return
+        self.link = msg(cls("NSTimer"), "timerWithTimeInterval:target:selector:userInfo:repeats:", Float64(1.0 / 60.0), self.canvases[0].view, sel("canvasFrame:"), 0, 1)
+        _ = msg(msg(cls("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", self.link, ns_string("kCFRunLoopCommonModes"))
+        if self.ticks == 0:
+            self.report.note("frames: timer started for " + String(len(self.canvases)) + " canvases (" + ("ok" if self.link != 0 else "NO TIMER") + ")")
 
     def draw_canvas(mut self, k: Int, self_addr: Int):
         """Asks the app to paint canvas k at its real pixel size (if its size or version changed)."""
@@ -1133,6 +1147,9 @@ struct AppKitHost[A: App](Movable):
             self.report.note("canvas node " + String(node) + " (id " + String(self.rt.shown.nodes[node].style) + ") drew " + String(wpx) + "x" + String(hpx) + " px, "
                              + pts(bounds.width) + "x" + pts(bounds.height) + " pt")
         var image = cg_image(self.canvases[k].pixels, wpx, hpx)
+        if image == 0:
+            self.report.note("canvas node " + String(node) + ": no CGImage from its pixels")
+            return
         var picture = msg(msg(cls("NSImage"), "alloc"), "initWithCGImage:size:", image, bounds.width, bounds.height)
         _ = msg(view, "setImage:", picture)
         _ = msg(picture, "release")
@@ -1222,9 +1239,9 @@ def in_view(view: Int, p: CGPoint) -> CGPoint:
     return CGPoint(p.x, msg[CGRect](view, "bounds").height - p.y)
 
 
-def on_canvas_frame[A: App](view: Int, cmd: Int, link: Int) abi("C"):
+def on_canvas_frame[A: App](view: Int, cmd: Int, timer: Int) abi("C"):
     var t = from_tag(view)
-    host_at[A](t[0])[].tick(msg[Float64](link, "timestamp"), t[0])
+    host_at[A](t[0])[].tick(msg[Float64](msg(cls("NSProcessInfo"), "processInfo"), "systemUptime"), t[0])
 
 
 def on_canvas_resized[A: App](view: Int, cmd: Int, notification: Int) abi("C"):
