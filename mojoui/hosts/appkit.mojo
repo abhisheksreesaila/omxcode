@@ -604,7 +604,7 @@ struct AppKitHost[A: App](Movable):
         elif node.kind == BOARD:
             # A scroll view over a flipped content view (y runs down, as on every other host) where each child sits
             # at its own place; a child drags by a pan (the Board's on_move).
-            w = new("NSScrollView")
+            w = top_scroll_view()
             _ = msg(w, "setHasVerticalScroller:", 1)
             _ = msg(w, "setHasHorizontalScroller:", 1)
             _ = msg(w, "setDrawsBackground:", 0)
@@ -709,7 +709,7 @@ struct AppKitHost[A: App](Movable):
         elif node.kind == SPACER:
             w = new("NSView")
         elif node.kind == SCROLL:
-            w = new("NSScrollView")
+            w = top_scroll_view()
             _ = msg(w, "setHasVerticalScroller:", 1)
             _ = msg(w, "setDrawsBackground:", 0)
             var content = self.build(node.children[0], self_addr)
@@ -1320,7 +1320,15 @@ def on_canvas_key[A: App](view: Int, cmd: Int, event: Int) abi("C"):
 
 
 def is_flipped(view: Int, cmd: Int) abi("C") -> Int8:
-    return 1  # a Board's content counts y from the top, like every other host
+    return 1  # a Board's content and a scroll view's clip count y from the top, like every other host
+
+
+def top_scroll_view() -> Int:
+    """A scroll view whose clip view counts y from the top: content shorter than the view sits at its top, as on every
+    other host (AppKit's own clip view keeps it at the bottom: the owner's Report and inspector pages, 2026-10-23)."""
+    var w = new("NSScrollView")
+    _ = msg(w, "setContentView:", new("MojoTopClipView"))
+    return w
 
 
 def on_canvas_pinch[A: App](view: Int, cmd: Int, recognizer: Int) abi("C"):
@@ -1715,6 +1723,9 @@ def run[A: App]() -> c_int:
     var board = new_class("MojoBoardView", "NSView")  # a Board's content: y from the top
     add_method(board, "isFlipped", is_flipped, "B@:")
     register_class(board)
+    var clip = new_class("MojoTopClipView", "NSClipView")  # a scroll view's clip: short content at the top
+    add_method(clip, "isFlipped", is_flipped, "B@:")
+    register_class(clip)
     register_fonts()
     host[].target = msg(c, "new")
     _ = msg(app, "setDelegate:", host[].target)
