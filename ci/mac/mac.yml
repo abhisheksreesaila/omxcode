@@ -1,0 +1,29 @@
+# Runs the Mac builds on GitHub's Macs: each app drives itself through its steps (MOJOUI_TEST) and records a report
+# (pictures, view dumps, a log); the reports and any crash logs come back as an artifact. The builds are the
+# assets of the mac-ci pre-release, cross-compiled on Linux.
+name: mac-test
+on:
+  push:
+    branches: [mac-test]
+  workflow_dispatch:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download mac-ci -R "$GITHUB_REPOSITORY" -D zips
+      - name: Run each app through its steps
+        run: bash ci/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-${{ matrix.os }}
+          path: out/

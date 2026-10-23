@@ -1,0 +1,9 @@
+# limit 240
+tap:Open the sample;wait:4000;
+segment:0=Cell;segment:0=Table;
+menu:Insert>Chart;wait:3000;
+tap:Report;wait:3000;tap:Sum tile;tap:Chart tile;wait:3000;
+resize:1000x700;wait:2500;resize:760x600;wait:2500;resize:1440x900;wait:2500;
+menu:View>Sheet;wait:2000;
+menu:File>Settings…;wait:2000;tap:Done;
+menu:File>New blank sheet;wait:2000;tap:Report;wait:2000

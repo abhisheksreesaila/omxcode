@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Test the Mac builds on GitHub's Macs (owner, 2026-10-23: "use the Mac runner, keep pushing"):
+#   scripts/mac-ci [app…]   (default: omxplorer maccheck)
+# Uploads build/<app>/mac/*-mac.zip to the mac-ci pre-release of abhisheksreesaila/omxcode, starts the mac-test
+# workflow (an empty commit on its branch, mac-test, which holds only the workflow and each app's steps), waits, and
+# downloads the reports (pictures, view dumps, logs, crash logs) to build/mac-ci/<run id>/. Build first:
+# scripts/build.sh <app> mac. The branch's files are kept here in ci/mac/ (mac.yml goes in .github/workflows/ there):
+# change them here, copy them into build/mac-ci/branch, commit and push it.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+REPO=abhisheksreesaila/omxcode
+apps=("$@")
+[ ${#apps[@]} -gt 0 ] || apps=(omxplorer maccheck)
+mkdir -p build/mac-ci
+for app in "${apps[@]}"; do
+    zip=$(ls build/"$app"/mac/*-mac.zip | head -1)
+    cp "$zip" "build/mac-ci/$app-mac.zip"
+    gh release upload mac-ci "build/mac-ci/$app-mac.zip" --clobber -R "$REPO"
+done
+branch=build/mac-ci/branch
+if [ ! -d "$branch/.git" ]; then
+    git clone -q --branch mac-test --single-branch "https://github.com/$REPO.git" "$branch"
+fi
+git -C "$branch" pull -q
+git -C "$branch" commit -q --allow-empty -m "Test: ${apps[*]} ($(git rev-parse --short HEAD))"
+git -C "$branch" push -q origin mac-test
+sha=$(git -C "$branch" rev-parse HEAD)
+run=""
+for _ in $(seq 60); do  # the run for this commit (the newest run can still be the last one for a few seconds)
+    run=$(gh run list -R "$REPO" --branch mac-test --limit 5 --json databaseId,headSha --jq ".[] | select(.headSha == \"$sha\") | .databaseId" | head -1)
+    [ -n "$run" ] && break
+    sleep 5
+done
+[ -n "$run" ] || { echo "no run started for $sha"; exit 1; }
+echo "run $run: https://github.com/$REPO/actions/runs/$run"
+gh run watch "$run" -R "$REPO" --exit-status > /dev/null || echo "run $run failed"
+gh run download "$run" -R "$REPO" -D "build/mac-ci/$run"
+echo "reports: build/mac-ci/$run"

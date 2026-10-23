@@ -210,10 +210,25 @@ def render():
     return "\n".join(out)
 
 
+def icons_without_symbols():
+    """Icon names an app or component uses that the Apple hosts can't show: sf_symbol() has no case for them, so the
+    Mac drew a '?' box (omxplorer's inspector chevrons, the GitHub Mac runner, 2026-10-23)."""
+    used = set()
+    for folder in ("examples", "mojoui", "themes"):
+        for f in (ROOT / folder).rglob("*.mojo"):
+            used |= set(re.findall(r'icon="([a-z0-9-]+)"', f.read_text()))
+    mapped = set(re.findall(r'if name == "([a-z0-9-]+)"', (ROOT / "mojoui/hosts/objc.mojo").read_text()))
+    return sorted(used - mapped)
+
+
 def main():
     doc = render()
     path = ROOT / "docs" / "components.md"
     if "--check" in sys.argv:
+        missing = icons_without_symbols()
+        if missing:
+            print("icons with no SF Symbol in mojoui/hosts/objc.mojo sf_symbol(): " + ", ".join(missing))
+            return 1
         if not path.exists() or path.read_text() != doc:
             print("docs/components.md is stale: run pixi run python scripts/components.py")
             return 1

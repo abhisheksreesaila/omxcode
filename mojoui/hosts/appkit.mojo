@@ -6,7 +6,7 @@
 # functions. AppKit doesn't send actions when we set values ourselves, so there's
 # no echo to guard against (unlike GTK).
 
-from std.ffi import c_int
+from std.ffi import c_int, external_call
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
@@ -20,7 +20,7 @@ from mojoui.view import (
 )
 from mojoui.menus import CHECKED, DISABLED, DANGER
 from mojoui.theme import Palette, Theme, mix
-from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE
+from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
 from mojoui.app import App, Event, Runtime
 from mojoui.canvas import Surface
@@ -140,6 +140,15 @@ struct AppKitHost[A: App](Movable):
     var toast_claimed: Bool
     var has_menubar: Bool  # the screen put its own menus in the system menu bar (D-150)
     var report: MacReport  # Debug → Record: pictures and view dumps on the Desktop (mojoui/hosts/mac_report.mojo)
+    var size_w: List[Int]  # per node: its fixed-width and fixed-height constraints (0: none), so a new size is a patch
+    var size_h: List[Int]
+    var sized: List[Tuple[Int, Int, Int, Int]]  # per node: the w, h, min_w, max_w it was built with
+    var wraps: List[Int]  # a column's labels: they wrap to the width they're given (fit_wraps), as GTK's labels do
+    var parents: List[Int]  # per node: its stack's node, or -1 (worked out once per build)
+    var rebuilds: Int  # whole-window rebuilds since the last report snapshot (its log line says how many)
+    var resized_in_place: Int
+    var steps: List[String]  # MOJOUI_TEST: steps run one by one, a report recording each (the GitHub Mac runner, 2026-10-23)
+    var step_at: Int
 
     def __init__(out self):
         Self.A.init_shared()
@@ -167,6 +176,15 @@ struct AppKitHost[A: App](Movable):
         self.toast_claimed = False
         self.has_menubar = False
         self.report = MacReport()
+        self.steps = List[String]()
+        self.step_at = 0
+        self.size_w = List[Int]()
+        self.size_h = List[Int]()
+        self.wraps = List[Int]()
+        self.parents = List[Int]()
+        self.rebuilds = 0
+        self.resized_in_place = 0
+        self.sized = List[Tuple[Int, Int, Int, Int]]()
 
     def ink(self) -> Int:
         return ns_color(self.pal.ink) if self.skinned else msg(cls("NSColor"), "labelColor")
@@ -389,10 +407,22 @@ struct AppKitHost[A: App](Movable):
             elif node.value == TONE_STRONG:
                 _ = msg(w, "setTextColor:", self.ink())
                 _ = msg(w, "setFont:", skin_font("Inter-SemiBold", Float64(13)) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))
+            var p = self.parents[i] if i < len(self.parents) else -1
+            if node.w > 0 or (p >= 0 and self.rt.shown.nodes[p].kind == VSTACK and self.rt.shown.nodes[p].align_items == START):
+                _ = msg(w, "setAlignment:", 0)  # a leading column's lines (or a table's cell) read from the leading edge, as on GTK
+            if node.max_w == 0 and node.w == 0 and not self.in_row(i):  # a column's label: one line, wrapping when squeezed
+                _ = msg(w, "setLineBreakMode:", 0)  # NSLineBreakByWordWrapping
+                _ = msg(w, "setMaximumNumberOfLines:", 0)
+                # 490: it keeps its one line unless a real limit squeezes it (a scroll view's width, 495; a fixed width):
+                # at 250 a grid's labels collapsed to a letter wide (maccheck's column stats)
+                _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
+                self.wraps.append(w)
         elif node.kind == BUTTON:
             if (node.style == ICON_ONLY or node.style == ICON_ON) and node.hint != "":
                 w = msg(cls("NSButton"), "buttonWithImage:target:action:", msg(cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", ns_string(sf_symbol(node.hint)), ns_string(node.text)), self.target, sel("tap:"))
                 _ = msg(w, "setBordered:", 0)
+                # 15 pt symbols, as GTK's 16 px icons: AppKit's default (the label's 13 pt) read tiny in a toolbar (Mac, 2026-10-23)
+                _ = msg(w, "setSymbolConfiguration:", msg(cls("NSImageSymbolConfiguration"), "configurationWithPointSize:weight:", Float64(15), Float64(0)))
                 if node.style == ICON_ON:  # (a toggle that is on: the accent, pressed)
                     _ = msg(w, "setContentTintColor:", self.accent())
                     _ = msg(w, "setState:", 1)
@@ -421,6 +451,13 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(w, "setState:", 1)
             if self.skinned and node.style != TOOL_ON and node.style != ICON_ON and node.style != DESTRUCTIVE and node.style != PROMINENT:
                 _ = msg(w, "setContentTintColor:", self.ink())
+            # a button keeps its title whole: at the default 750 a row of them lost to a column's width at the same
+            # priority, squeezing one to 11 pt (maccheck's Controls page, GitHub's Mac and the owner's, 2026-10-23)
+            _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(760), 0)
+            if node.align_items == START and node.style != ICON_ONLY and node.style != ICON_ON:  # its content at the leading edge (a sidebar row)
+                _ = msg(w, "setAlignment:", 0)  # NSTextAlignmentLeft
+                if node.hint != "":
+                    _ = msg(w, "setImagePosition:", 7)  # NSImageLeading: icon, then title, from the leading edge
         elif node.kind == FIELD:
             w = msg(cls("NSTextField"), "textFieldWithString:", ns_string(node.text))
             _ = msg(w, "setPlaceholderString:", ns_string(node.hint))
@@ -464,10 +501,14 @@ struct AppKitHost[A: App](Movable):
         elif node.kind == DIVIDER:
             w = new("NSBox")
             _ = msg(w, "setBoxType:", 2)  # NSBoxSeparator
-            if not sized:  # (the app sized it: its settings decide)
-                prefer(w, "widthAnchor", Float64(280))
-            if not node.sized_height():
-                constrain(w, "heightAnchor", Float64(1))
+            if self.in_row(i) and not sized:  # between a row's groups (a toolbar): a 1 pt line across the row, as Mac toolbars have
+                # (a 280 pt line each: four of them made omxplorer's window at least 1,554 pt wide, GitHub's Mac, 2026-10-23)
+                constrain(w, "widthAnchor", Float64(1))
+            else:
+                if not sized:  # (the app sized it: its settings decide)
+                    prefer(w, "widthAnchor", Float64(280))
+                if not node.sized_height():
+                    constrain(w, "heightAnchor", Float64(1))
         elif node.kind == CANVAS:
             # A MojoCanvas (an NSImageView whose scrollWheel: is Mojo) showing the app's pixels;
             # pan, pinch and click recognisers call back into it.
@@ -580,6 +621,9 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(row, "setDistribution:", 1)  # fill equally
                     _ = msg(row, "setSpacing:", Float64(node.spacing))
                     _ = msg(w, "addArrangedSubview:", row)
+                    # every row spans the grid, its columns equal (as GTK's homogeneous grid): a row of its own size sat
+                    # centred, so the Report's chart tile was half as wide as the tiles above it (GitHub's Mac, 2026-10-23)
+                    _ = msg(msg(msg(row, "widthAnchor"), "constraintEqualToAnchor:", msg(w, "widthAnchor")), "setActive:", 1)
                 _ = msg(row, "addArrangedSubview:", self.build(node.children[k], self_addr))
         elif node.kind == LAZYLIST:
             var table = new("NSTableView")
@@ -717,7 +761,10 @@ struct AppKitHost[A: App](Movable):
             _ = msg(w, "setDocumentView:", content)
             var clip = msg(w, "contentView")
             for anchor in ["topAnchor", "leadingAnchor", "widthAnchor"]:
-                _ = msg(msg(msg(content, anchor), "constraintEqualToAnchor:", msg(clip, anchor)), "setActive:", 1)
+                var pin = msg(msg(content, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
+                if anchor == "widthAnchor":  # (content the app made wider is cut off at the edge: it never widens the window)
+                    _ = msg(pin, "setPriority:", Float32(495))  # below NSLayoutPriorityWindowSizeStayPut (500), above a wrapping label (490)
+                _ = msg(pin, "setActive:", 1)
             if not node.sized_height():
                 constrain(w, "heightAnchor", Float64(node.size))
             if not sized:  # (the app sized it: its settings decide)
@@ -733,6 +780,11 @@ struct AppKitHost[A: App](Movable):
             elif node.align_items == END:
                 align = 6 if vertical else 4  # trailing / bottom
             _ = msg(w, "setAlignment:", align)
+            # across its axis a stack is as wide (tall) as its widest view: it hugs loosely, so a row of buttons is never
+            # squeezed to a narrower row's width (maccheck's Delete button, 11 pt, GitHub's Mac, 2026-10-23)
+            _ = msg(w, "setHuggingPriority:forOrientation:", Float32(250), 0 if vertical else 1)
+            # along it, its views' own length, as a GTK box that isn't told to expand (a growing stack: hug() sets 1)
+            _ = msg(w, "setHuggingPriority:forOrientation:", Float32(750), 1 if vertical else 0)
             _ = msg(w, "setSpacing:", Float64(node.spacing))
             if node.pad_v != 0 or node.pad_h != 0:  # padding = the stack's own edge insets
                 _ = msg(w, "setEdgeInsets:", Float64(node.pad_v), Float64(node.pad_h), Float64(node.pad_v), Float64(node.pad_h))
@@ -767,7 +819,9 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", child)
                 ref cn = self.rt.shown.nodes[c]
                 if cn.grows:  # flex-grow: lowest hugging priority along the stack
-                    _ = msg(child, "setContentHuggingPriority:forOrientation:", Float32(1), 1 if vertical else 0)
+                    hug(child, Float32(1), vertical)
+                elif grows and cn.kind != SPACER:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
+                    hug(child, Float32(750), vertical)
                 if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(2 * (node.pad_h if vertical else node.pad_v))
@@ -784,9 +838,9 @@ struct AppKitHost[A: App](Movable):
             self.widgets[i] = w
         return self.apply_layout(i, w)
 
-    def apply_layout(self, i: Int, w: Int) -> Int:
+    def apply_layout(mut self, i: Int, w: Int) -> Int:
         """Maps node i's own sizes (and, for non-stacks, padding) onto Auto Layout; returns what goes in the parent."""
-        ref node = self.rt.shown.nodes[i]
+        var node = self.rt.shown.nodes[i].copy()
         var outer = w
         if node.tip != "":
             _ = msg(w, "setToolTip:", ns_string(node.tip))
@@ -795,10 +849,18 @@ struct AppKitHost[A: App](Movable):
             outer = new("NSStackView")
             _ = msg(outer, "setEdgeInsets:", Float64(node.pad_v), Float64(node.pad_h), Float64(node.pad_v), Float64(node.pad_h))
             _ = msg(outer, "addArrangedSubview:", w)
+        if i < len(self.sized):
+            self.sized[i] = (node.w, node.h, node.min_w, node.max_w)
         if node.w != 0:
-            _ = msg(msg(msg(outer, "widthAnchor"), "constraintEqualToConstant:", Float64(node.w)), "setActive:", 1)
+            var cw = msg(msg(outer, "widthAnchor"), "constraintEqualToConstant:", Float64(node.w))
+            _ = msg(cw, "setActive:", 1)
+            if i < len(self.size_w):
+                self.size_w[i] = cw
         if node.h != 0:
-            _ = msg(msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h)), "setActive:", 1)
+            var ch = msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h))
+            _ = msg(ch, "setActive:", 1)
+            if i < len(self.size_h):
+                self.size_h[i] = ch
         if node.min_w != 0:
             _ = msg(msg(msg(outer, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(node.min_w)), "setActive:", 1)
         if node.max_w != 0:
@@ -825,6 +887,15 @@ struct AppKitHost[A: App](Movable):
             _ = msg(self.window, "endSheet:", old_sheet)
             _ = msg(old_sheet, "orderOut:", 0)
         self.widgets = List[Int](length=len(self.rt.shown.nodes), fill=0)  # 0 = nil: patches become no-ops
+        self.size_w = List[Int](length=len(self.rt.shown.nodes), fill=0)
+        self.wraps = List[Int]()
+        self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
+        for k in range(len(self.rt.shown.nodes)):
+            if self.rt.shown.nodes[k].kind == HSTACK or self.rt.shown.nodes[k].kind == VSTACK:
+                for c in self.rt.shown.nodes[k].children:
+                    self.parents[c] = k
+        self.size_h = List[Int](length=len(self.rt.shown.nodes), fill=0)
+        self.sized = List[Tuple[Int, Int, Int, Int]](length=len(self.rt.shown.nodes), fill=(0, 0, 0, 0))
         self.canvases = List[AppleCanvas]()
         if self.link != 0:
             _ = msg(self.link, "invalidate")
@@ -864,6 +935,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(holder, "setEdgeInsets:", Float64(32), Float64(32), Float64(32), Float64(32))
             _ = msg(holder, "addArrangedSubview:", root)
             _ = msg(self.window, "setContentView:", holder)
+        self.fit_wraps()
         self.start_frames()
         if 0 <= self.focus < len(self.widgets) and self.rt.shown.nodes[self.focus].kind == FIELD:
             # Keep typing in the new field, on the next run-loop turn (after AppKit has
@@ -885,7 +957,10 @@ struct AppKitHost[A: App](Movable):
         self.copy_if_asked()
         if d.rebuild or len(d.patches) > 0:
             self.queue_snapshot(self_addr)
-        if d.rebuild:
+        if d.rebuild and self.resize_in_place(d):
+            self.resized_in_place += 1
+        elif d.rebuild:
+            self.rebuilds += 1
             self.show(self_addr)
             return
         for p in d.patches:
@@ -933,6 +1008,53 @@ struct AppKitHost[A: App](Movable):
             if self.rt.shown.nodes[k].kind == LAZYLIST and self.widgets[k] != 0:
                 _ = msg(self.widgets[k], "reloadData")
         self.wake()
+
+    def in_row(self, i: Int) -> Bool:
+        """Whether node i sits in an HStack."""
+        return i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].kind == HSTACK
+
+    def fit_wraps(self):
+        """Each column label wraps at the width the layout gave it: an NSTextField only wraps at a width it's told, so
+        lay out, tell each label its width, lay out again (a long inspector line ran past the panel, GitHub's Mac)."""
+        if len(self.wraps) == 0 or self.window == 0:
+            return
+        var content = msg(self.window, "contentView")
+        for l in self.wraps:
+            _ = msg(l, "setPreferredMaxLayoutWidth:", Float64(0))  # (one line again: the width the layout allows now)
+        _ = msg(content, "layoutSubtreeIfNeeded")
+        for l in self.wraps:
+            _ = msg(l, "setPreferredMaxLayoutWidth:", msg[CGRect](l, "frame").width)
+        _ = msg(content, "layoutSubtreeIfNeeded")
+
+    def resize_in_place(mut self, d: Diff) -> Bool:
+        """A partial rebuild whose only change of shape is a view's new width or height (the island morphing, 60 times a
+        second): the view's size constraints take the new numbers and every view stays. Rebuilding the window for it
+        threw the charts' drawn pictures away each frame (the GitHub Mac runner, 2026-10-23). False: rebuild."""
+        if not d.partial or len(d.resync) != 0 or len(d.kept) != len(self.rt.shown.nodes) or len(self.sized) != len(d.kept):
+            return False
+        for k in range(len(d.kept)):
+            if d.kept[k] != k:
+                return False
+        for p in d.patches:
+            if p.op != SET_SIZE:
+                continue
+            ref n = self.rt.shown.nodes[p.node]
+            var was = self.sized[p.node]
+            if n.min_w != was[2] or n.max_w != was[3] or (n.w != was[0] and self.size_w[p.node] == 0) or (n.h != was[1] and self.size_h[p.node] == 0):
+                return False  # a size it wasn't built with (or none to change): rebuild
+            if n.w == 0 or n.h == 0:
+                if (n.w == 0 and was[0] != 0) or (n.h == 0 and was[1] != 0):
+                    return False
+        for p in d.patches:
+            if p.op != SET_SIZE:
+                continue
+            ref n = self.rt.shown.nodes[p.node]
+            if n.w != self.sized[p.node][0]:
+                _ = msg(self.size_w[p.node], "setConstant:", Float64(n.w))
+            if n.h != self.sized[p.node][1]:
+                _ = msg(self.size_h[p.node], "setConstant:", Float64(n.h))
+            self.sized[p.node] = (n.w, n.h, n.min_w, n.max_w)
+        return True
 
     # ---------- the Mac report (Debug menu) ----------
 
@@ -990,6 +1112,9 @@ struct AppKitHost[A: App](Movable):
             line += " · a popover is open (not in the picture)"
         if self.sheet != 0:
             line += " · a dialog is open (not in the picture)"
+        line += " · " + String(self.rebuilds) + " rebuilds, " + String(self.resized_in_place) + " resized in place since the last"
+        self.rebuilds = 0
+        self.resized_in_place = 0
         self.report.note(line + " · " + String(len(problems)) + " problems")
         for k in range(min(len(problems), 12)):
             self.report.note("  " + problems[k])
@@ -1082,8 +1207,11 @@ struct AppKitHost[A: App](Movable):
         var h = Int(b.height + 0.5)
         if w <= 0 or h <= 0:
             return
+        var in_place = self.resized_in_place
         var d = self.rt.resize(w, h)
         self.apply(d, self_addr)
+        if not d.rebuild or self.resized_in_place > in_place:  # (a whole rebuild fitted them already)
+            self.fit_wraps()
 
     # ---------- canvases ----------
 
@@ -1210,6 +1338,15 @@ def gesture_name(kind: Int) -> String:
     return "gesture" + String(kind)
 
 
+def hug(view: Int, priority: Float32, vertical: Bool):
+    """How firmly a view keeps its own size along a stack; a stack view (a padded leaf's wrapper too) hugs its views
+    by a priority of its own."""
+    var orientation = 1 if vertical else 0
+    _ = msg(view, "setContentHuggingPriority:forOrientation:", priority, orientation)
+    if msg[Int8](view, "respondsToSelector:", sel("setHuggingPriority:forOrientation:")) != 0:
+        _ = msg(view, "setHuggingPriority:forOrientation:", priority, orientation)
+
+
 def flexible_spacer(vertical: Bool) -> Int:
     """An empty view that soaks up free space along a stack (for justify)."""
     var v = new("NSView")
@@ -1328,6 +1465,10 @@ def top_scroll_view() -> Int:
     other host (AppKit's own clip view keeps it at the bottom: the owner's Report and inspector pages, 2026-10-23)."""
     var w = new("NSScrollView")
     _ = msg(w, "setContentView:", new("MojoTopClipView"))
+    # Overlay scroll bars, whatever the system setting: a Mac with a mouse (GitHub's Macs) shows legacy bars that take
+    # 15 pt beside the content; the app sizes the content to its window, so AppKit widened the window by those points,
+    # the app filled the new width, and the window grew without end (2026-10-23).
+    _ = msg(w, "setScrollerStyle:", 1)  # NSScrollerStyleOverlay
     return w
 
 
@@ -1399,6 +1540,160 @@ def on_debug_open[A: App](target: Int, cmd: Int, item: Int) abi("C"):
 
 def on_debug_queued[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     host_at[A](msg(number, "longLongValue"))[].snapshot()
+
+
+def env(name: String) -> String:
+    var n = name
+    var p = external_call["getenv", Int](n.as_c_string_span())
+    if p == 0:
+        return ""
+    return from_ns(msg(cls("NSString"), "stringWithUTF8String:", p))
+
+
+def split_at(s: String, sep: String) -> Tuple[String, String]:
+    var i = s.find(sep)
+    if i < 0:
+        return (s, String(""))
+    return (String(s[byte=:i]), String(s[byte = i + sep.byte_length() :]))
+
+
+def to_int(s: String) -> Int:
+    try:
+        return Int(s)
+    except:
+        return 0
+
+
+def find_node[A: App](host: AppKitHost[A], kind: Int, label: String, nth: Int, by_hint: Bool = False) -> Int:
+    """The nth node of `kind` whose text (or hint) is `label` ("" = any), as the GTK host's test steps find it."""
+    var seen = 0
+    for i in range(len(host.rt.shown.nodes)):
+        ref n = host.rt.shown.nodes[i]
+        if n.kind == kind and (label == "" or (n.hint if by_hint else n.text) == label):
+            if seen == nth:
+                return i
+            seen += 1
+    return -1
+
+
+def find_menu_item[A: App](host: AppKitHost[A], under: Int, title: String) -> Int:
+    """The ITEM titled `title` anywhere under node `under` (submenus too)."""
+    for c in host.rt.shown.nodes[under].children:
+        ref n = host.rt.shown.nodes[c]
+        if n.kind == ITEM and n.text == title:
+            return c
+        var deeper = find_menu_item(host, c, title)
+        if deeper >= 0:
+            return deeper
+    return -1
+
+
+def option_index[A: App](host: AppKitHost[A], i: Int, option: String) -> Int:
+    ref opts = host.rt.shown.nodes[i].options
+    for j in range(len(opts)):
+        if opts[j] == option:
+            return j
+    return -1
+
+
+def run_step[A: App](host_addr: Int, step: String):
+    """One MOJOUI_TEST step, in the GTK host's words (tap:Label[@n], type/submit/enter:Hint=text, select:n=Option,
+    segment/tab/radio:n=Option, toggle:Label, menu:File>Item, pick:Title=/path) plus resize:WxH (the window's content)."""
+    var host = host_at[A](host_addr)
+    var vr = split_at(step, ":")
+    var verb = vr[0]
+    var rest = vr[1]
+    var kv = split_at(rest, "=")
+    if verb == "tap":
+        var t = split_at(rest, "@")
+        var i = find_node(host[], BUTTON, t[0], to_int(t[1]))
+        if i < 0:
+            host[].report.note("TEST: no button " + rest)
+            return
+        var w = host[].widgets[i] if i < len(host[].widgets) else 0
+        if w != 0 and msg[Int8](w, "respondsToSelector:", sel("performClick:")) != 0:
+            _ = msg(w, "performClick:", 0)  # AppKit's own click: the button's target and action, as a real click
+        else:
+            host[].send(i, False, "", 0, host_addr)
+    elif verb == "pick":  # a FilePicker returning that file (a native dialog can't be driven)
+        var i = find_node(host[], BUTTON, kv[0], 0)
+        if i < 0:
+            host[].report.note("TEST: no file picker " + kv[0])
+            return
+        host[].send(i, True, kv[1], 0, host_addr)
+    elif verb == "type" or verb == "submit" or verb == "enter":
+        var i = find_node(host[], FIELD, kv[0], 0, by_hint=True)
+        if i < 0:
+            host[].report.note("TEST: no field " + kv[0])
+            return
+        var w = host[].widgets[i] if i < len(host[].widgets) else 0
+        var text = kv[1]
+        if verb == "submit" and w != 0:
+            text = from_ns(msg(w, "stringValue"))
+        if w != 0:
+            _ = msg(w, "setStringValue:", ns_string(text))
+        if verb == "type" or verb == "enter":
+            host[].send(i, False, text, 0, host_addr)
+        if verb == "submit" or verb == "enter":
+            host[].send(i, True, text, 0, host_addr)
+    elif verb == "toggle":
+        var i = find_node(host[], TOGGLE, rest, 0)
+        if i < 0:
+            host[].report.note("TEST: no toggle " + rest)
+            return
+        var w = host[].widgets[i] if i < len(host[].widgets) else 0
+        if w != 0 and msg[Int8](w, "respondsToSelector:", sel("performClick:")) != 0:
+            _ = msg(w, "performClick:", 0)
+        else:
+            host[].send(i, False, "", 0 if host[].rt.shown.nodes[i].value != 0 else 1, host_addr)
+    elif verb == "select" or verb == "segment" or verb == "tab" or verb == "radio":
+        var kind = DROPDOWN if verb == "select" else (SEGMENTED if verb == "segment" else (TABS if verb == "tab" else RADIO))
+        var i = find_node(host[], kind, "", to_int(kv[0]))
+        if i < 0:
+            host[].report.note("TEST: no " + verb + " " + kv[0])
+            return
+        var index = option_index(host[], i, kv[1])
+        if index < 0:
+            host[].report.note("TEST: no option " + kv[1])
+            return
+        host[].send(i, False, kv[1], index, host_addr)
+    elif verb == "menu":  # menu:File>Save: the bar's File menu's Save item
+        var t = split_at(rest, ">")
+        var menu = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            ref n = host[].rt.shown.nodes[k]
+            if n.kind == MENU and n.text == t[0]:
+                menu = k
+        var item = find_menu_item(host[], menu, t[1]) if menu >= 0 else -1
+        if item < 0:
+            host[].report.note("TEST: no menu item " + rest)
+            return
+        host[].send(item, False, "", 0, host_addr)
+    elif verb == "resize":  # resize:900x700: the window's content size, as a drag of its edge ends
+        var wh = split_at(rest, "x")
+        _ = msg(host[].window, "setContentSize:", Float64(to_int(wh[0])), Float64(to_int(wh[1])))
+    elif verb != "wait":
+        host[].report.note("TEST: unknown step " + step)
+
+
+def on_test_step[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    """The next MOJOUI_TEST step, then a picture once the screen settles; after the last, quit."""
+    var addr = msg(number, "longLongValue")
+    var host = host_at[A](addr)
+    if host[].step_at >= len(host[].steps):
+        host[].report.note("TEST: done, " + String(len(host[].steps)) + " steps")
+        _ = msg(msg(cls("NSApplication"), "sharedApplication"), "terminate:", 0)
+        return
+    var step = host[].steps[host[].step_at]
+    host[].step_at += 1
+    host[].report.note("step " + String(host[].step_at) + ": " + step)
+    run_step[A](addr, step)
+    host[].report.cause = "step-" + String(host[].step_at)
+    host[].queue_snapshot(addr)
+    var wait = 1.5
+    if step.startswith("wait:"):
+        wait = Float64(to_int(String(step[byte=5:]))) / 1000.0
+    _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), wait)
 
 
 def on_window_resized[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
@@ -1694,6 +1989,7 @@ def run[A: App]() -> c_int:
     add_method(c, "debugSnapshot:", on_debug_snapshot[A], "v@:@")
     add_method(c, "debugOpen:", on_debug_open[A], "v@:@")
     add_method(c, "debugQueued:", on_debug_queued[A], "v@:@")
+    add_method(c, "testStep:", on_test_step[A], "v@:@")
     add_method(c, "windowDidResize:", on_window_resized[A], "v@:@")
     add_method(c, "windowResizeLater:", on_window_resize_later[A], "v@:@")
     add_method(c, "showPopover:", on_show_popover[A], "v@:@")
@@ -1747,10 +2043,19 @@ def run[A: App]() -> c_int:
     _ = msg(host[].window, "center")
     _ = msg(host[].window, "makeKeyAndOrderFront:", 0)
     _ = msg(host[].window, "setDelegate:", host[].target)  # windowDidResize: → App.resize
+    # the size it really got: a window larger than its screen is shrunk before the delegate listens (GitHub's
+    # 1024 pt screen: the app laid out to 1,432 pt in a 1,410 pt window, cutting the Report's right edge)
+    host[].queue_resize(addr)
     _ = msg(app, "activateIgnoringOtherApps:", 1)
-    if host[].rt.app.records():  # the app asks for a report from the start (the Mac check app)
+    var steps = env("MOJOUI_TEST")
+    if host[].rt.app.records() or steps != "":  # the app asks for a report from the start (the Mac check app), or a test run
         host[].start_report()
         host[].report.cause = "launch"
         host[].queue_snapshot(addr)
+    if steps != "":  # MOJOUI_TEST="tap:Open the sample;resize:900x700;…": the steps run by themselves, then the app quits
+        for part in steps.split(";"):
+            if String(part) != "":
+                host[].steps.append(String(part))
+        _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), Float64(2))
     _ = msg(app, "run")
     return 0

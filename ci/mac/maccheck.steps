@@ -1,0 +1,4 @@
+# limit 180
+tap:Run tests;wait:30000;
+tap:Show toast;wait:3000;
+resize:800x600;wait:2500;resize:1440x900;wait:2500

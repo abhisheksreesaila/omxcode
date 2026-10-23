@@ -262,6 +262,8 @@ def sf_symbol(name: String) -> String:
     if name == "export": return "square.and.arrow.up.on.square"
     if name == "upload": return "arrow.up.doc"
     if name == "chevron": return "chevron.down"
+    if name == "chevron-right": return "chevron.right"
+    if name == "back": return "chevron.left"
     if name == "bold": return "bold"
     if name == "italic": return "italic"
     if name == "underline": return "underline"
@@ -283,9 +285,10 @@ def sf_symbol(name: String) -> String:
 
 
 def prefer(view: Int, anchor: String, points: Float64):
-    """A control's default size, as a *preferred* constraint (priority 760: above the default
-    compression resistance of 750, below required). Hosts only add it when the app hasn't
-    sized the view itself."""
+    """A control's default size, as a *preferred* constraint (priority 480: above hugging (250), below the 500 at
+    which a window keeps its size and the 495 that holds a scroll view's content to its width, so a default never
+    widens a window or a panel: a divider's 280 pt ran an inspector's text past its edge, GitHub's Mac, 2026-10-23).
+    Hosts only add it when the app hasn't sized the view itself."""
     var c = msg(msg(view, anchor), "constraintEqualToConstant:", points)
-    _ = msg(c, "setPriority:", Float32(760))
+    _ = msg(c, "setPriority:", Float32(480))
     _ = msg(c, "setActive:", 1)
