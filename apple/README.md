@@ -29,7 +29,7 @@ The Mac can't be seen from Linux, so the Mac host writes down what it shows (D-2
 
 1. `scripts/build.sh maccheck mac`, copy `build/maccheck/mac/MaccheckMojo-mac.zip` over (or download `maccheck-mac-arm64.zip` from the release).
 2. Open it and press **Run tests**: it walks seven pages (controls, icons and toolbars, layout, canvases, the grid on a Board, changing text, overlays) in about 25 seconds.
-3. Zip `~/Desktop/omxcode-report-maccheck/` and send it: `log.txt` (the Mac, every event, every canvas drawn, the problems found), and per change a `NNN-<cause>.png` of the window and a `NNN-<cause>.txt` with every view's kind, text, asked size and frame.
+3. Zip `~/Desktop/omxcode-report-maccheck/` and send it. Each launch writes its own subfolder, named by its time: `log.txt` (the Mac, every event, every canvas drawn, the problems found), and per change a `NNN-<cause>.png` of the window and a `NNN-<cause>.txt` with every view's kind, text, asked size and frame.
 
 Any Mac app (omxplorer too) has **Debug → Record a report** (⌥⌘R): from then on the same files go to `~/Desktop/omxcode-report-<app>/` after every change. **Take a snapshot** (⌥⌘S) writes one; **Open the report folder** shows it.
 

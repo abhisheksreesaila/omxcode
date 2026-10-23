@@ -1,5 +1,5 @@
 # The Mac report (owner, 2026-10-22): the Mac can't be seen from Linux, so the AppKit host can write down what it
-# shows. A folder on the Desktop, omxcode-report-<app>/, gets:
+# shows. A folder on the Desktop, omxcode-report-<app>/<launch time>/, gets:
 #   log.txt          the Mac, the window, every event and every canvas drawn, as it happens
 #   NNN-<cause>.png  the window's content after a change, as AppKit draws it
 #   NNN-<cause>.txt  every view of the screen: its kind, its text, and where AppKit put it (points, from the top left)
@@ -33,7 +33,12 @@ struct MacReport(Movable):
             return
         var fm = msg(cls("NSFileManager"), "defaultManager")
         var home = from_ns(msg(msg(fm, "homeDirectoryForCurrentUser"), "path"))
-        self.dir = home + "/Desktop/omxcode-report-" + app
+        var stamp = msg(msg(cls("NSDateFormatter"), "alloc"), "init")
+        _ = msg(stamp, "setDateFormat:", ns_string("yyyy-MM-dd HH.mm.ss"))
+        var launch = from_ns(msg(stamp, "stringFromDate:", msg(cls("NSDate"), "date")))
+        _ = msg(stamp, "release")
+        # one folder per launch inside the app's folder: reopening the app overwrote the last run (Mac, 2026-10-23)
+        self.dir = home + "/Desktop/omxcode-report-" + app + "/" + launch
         _ = msg(fm, "createDirectoryAtPath:withIntermediateDirectories:attributes:error:", ns_string(self.dir), 1, 0, 0)
         self.on = True
         var info = msg(cls("NSProcessInfo"), "processInfo")
