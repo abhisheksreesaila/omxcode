@@ -44,6 +44,9 @@ Then the app quits. `apple/mac_selftest.sh` runs it and zips the folder. The own
 **M6 · Choose a file.** The file picker opens `NSOpenPanel`.
 *Check:* the owner opens a CSV on the Mac (only the owner can check this one).
 
+**M7 · The Mac's own Liquid Glass (later, the owner's call).** The owner's macOS 26 shows maccheck with the older look (2026-10-22). The binary is already stamped SDK 26.0, so that isn't the cause. Glass on macOS 26 comes mostly from system pieces the host doesn't use yet: a real `NSToolbar` with a unified title bar, a sidebar from `NSSplitViewController`, and `NSGlassEffectView` behind floating bars. On top of that, the skinned themes paint an opaque page over everything. Open question for the owner: the house style (omxqua) says no glass or blur, so native glass would be an opt-in look, e.g. a "Mac native" theme that doesn't paint the page.
+*Check:* the toolbar and the side column sit on glass in the owner's screenshot, with GTK and the web unchanged.
+
 ## Constraints
 
 - Linux and web stay green: `scripts/check` after every step.
