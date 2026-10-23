@@ -1,0 +1,8 @@
+# The screens scripts/side.py puts side by side (GTK, the web, the Mac), one launch each at 1440x900:
+# app|screen|settings.txt lines (comma-separated)|MOJOUI_TEST steps (pause:ms waits on every host)
+omxplorer|start||pause:1500
+omxplorer|sheet||tap:Open the sample;pause:4000
+omxplorer|report||tap:Open the sample;pause:4000;tap:Report;pause:2000;tap:Sum tile;tap:Chart tile;pause:3000
+omxplorer|settings||menu:File>Settings…;pause:2000
+omxplorer|sheet-ledger|skin=ledger|tap:Open the sample;pause:4000
+maccheck|start||pause:1500

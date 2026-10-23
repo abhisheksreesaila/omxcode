@@ -1691,7 +1691,7 @@ def run_step[A: App](host_addr: Int, step: String):
     elif verb == "resize":  # resize:900x700: the window's content size, as a drag of its edge ends
         var wh = split_at(rest, "x")
         _ = msg(host[].window, "setContentSize:", Float64(to_int(wh[0])), Float64(to_int(wh[1])))
-    elif verb != "wait":
+    elif verb != "wait" and verb != "pause":  # (pause:ms as GTK's and the web's; wait:ms the Mac's older word)
         host[].report.note("TEST: unknown step " + step)
 
 
@@ -1710,8 +1710,8 @@ def on_test_step[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     host[].report.cause = "step-" + String(host[].step_at)
     host[].queue_snapshot(addr)
     var wait = 1.5
-    if step.startswith("wait:"):
-        wait = Float64(to_int(String(step[byte=5:]))) / 1000.0
+    if step.startswith("wait:") or step.startswith("pause:"):
+        wait = Float64(to_int(split_at(step, ":")[1])) / 1000.0
     _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), wait)
 
 
@@ -2045,10 +2045,15 @@ def run[A: App]() -> c_int:
     host[].target = msg(c, "new")
     _ = msg(app, "setDelegate:", host[].target)
 
+    var size = host[].rt.app.window_size()
+    var forced = env("MOJOUI_WINDOW")  # tests, as GTK's: "1440x900" (scripts/side.py puts the hosts side by side at one size)
+    if forced != "":
+        var wh = split_at(forced, "x")
+        size = (to_int(wh[0]), to_int(wh[1]))
     host[].window = msg(
         msg(cls("NSWindow"), "alloc"),
         "initWithContentRect:styleMask:backing:defer:",
-        Float64(0), Float64(0), Float64(host[].rt.app.window_size()[0]), Float64(host[].rt.app.window_size()[1]),  # rect as 4 floats (arm64)
+        Float64(0), Float64(0), Float64(size[0]), Float64(size[1]),  # rect as 4 floats (arm64)
         1 | 2 | 4 | 8,  # titled, closable, miniaturizable, resizable
         2,  # NSBackingStoreBuffered
         0,  # defer: NO
@@ -2056,11 +2061,12 @@ def run[A: App]() -> c_int:
     _ = msg(host[].window, "setTitle:", ns_string(title))
     _ = msg(host[].window, "setReleasedWhenClosed:", 0)
     _ = msg(host[].window, "setIdentifier:", ns_string(String(addr)))  # (windowDidResize: finds the host by it)
-    var size = host[].rt.app.window_size()
     _ = host[].rt.resize(size[0], size[1])  # the app lays out to its window from the first screen (App.resize)
     host[].show(addr)
     _ = msg(host[].window, "center")
     _ = msg(host[].window, "makeKeyAndOrderFront:", 0)
+    if forced != "":  # (a window larger than its screen was shrunk to fit: the runner's screen is 1024 pt wide)
+        _ = msg(host[].window, "setContentSize:", Float64(size[0]), Float64(size[1]))
     _ = msg(host[].window, "setDelegate:", host[].target)  # windowDidResize: → App.resize
     # the size it really got: a window larger than its screen is shrunk before the delegate listens (GitHub's
     # 1024 pt screen: the app laid out to 1,432 pt in a 1,410 pt window, cutting the Report's right edge)
