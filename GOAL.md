@@ -1,31 +1,34 @@
-# GOAL 30: the island, and 100 million rows that never freeze the window
+# GOAL 32: one look on Linux, the web and the Mac, from components and a theme
 
-**Why (owner, 2026-10-21):** "dynamic island 100M demo is the sexiest demo." Today a median over 100M rows holds the
-window for 0.69 s and a month chart for 0.48 s (docs/goals/29/bench.txt). MX frame **23edc59** (STABLE.md) runs a query
-as a `Job` on its own thread, with progress and cancel. The island (D-255, direction B: a pill where the document and
-GPU chips are, tinted by state) shows that work while the window stays live, and the chart moves to its answer when it
-lands.
+**Why (owner, 2026-10-24):** "the claim is one language, button to kernel… it has to look identical and each
+component has to look polished… if I just drop those components and hook up the connections and databases it should
+just work out of the box, except for the custom components… if you say one language plus custom CSS, people will lose
+interest." Then speed: NVIDIA on Linux, Apple's GPU on the Mac (MAX's source is open now), the browser's GPU on the web.
 
 ## Milestones
 | # | Milestone | Proof (`scripts/check`) |
 |---|---|---|
-| M0 | The new engine, everywhere | vendor/MXFRAME_COMMIT says 23edc59; omxplorer and every example build for Linux, the web, Mac and iPhone (their platforms lists); a chart computed through a job equals the same chart computed in place, for 6 specs (tests/test_chart_job.mojo) |
-| M1 | Queries off the window | at 100M rows in memory on GTK, opening the file (added: D-276), then picking Median, then By month: the window keeps drawing while each job runs (no gap between frames over 50 ms, traced), the chart's figures equal the in-place answer, and a second pick while the first runs cancels it (only the newest lands); the status bar's figures for a selected column at 100M come from a job too |
-| M2 | `Island`, a component | `mojoui/island.mojo` with its own test: states idle, running (progress 0–1, a rate), done, undo (a countdown), error; the capsule's width, height and radius move to a new state's size over 320 ms on the calm curve, the face cross-fades, at once when less motion is asked; its actions are hit areas; drawn on a Canvas, so GTK and the web draw the same (pixel check of each state on both); in docs/components.md |
-| M3 | omxplorer wears the island | the document and GPU chips and the toasts are gone; a running query reads "Median of revenue by region · 43%" with a rate; done reads "✓ 0.69 s on <GPU>" and returns to idle after 4 s; an edit shows Undo, and tapping it undoes; an error stays until seen; tapping the island opens its panel: the document, Recent (each operation with its time, Undo on the undoable) and Device (GPU, the last 12 timings, p50 and p95); GTK and the web |
-| M4 | The 100M demo | `scripts/clips.py island` records the native window over 100M rows: open, ask "median by region", the island runs and lands, the bars move, then "by month, as a line"; a still beside it (docs/img/clip-island-100m.mp4, .jpg); each frame of the clip that shows the island running also shows the window responding (the cursor blinks in the ask field) |
-| M5 | Nothing regressed | goal 29's checks (M0–M5; every earlier goal inside them) |
+| M0 | The measure | `scripts/side.py` shoots ci/mac/side.txt's screens on GTK and the web at 1440×640 (the Mac runner's screen holds no taller window) and reads the newest Mac run, which must be built from this checkout's sources (its stamp); the Mac's view dump and the web's carry each view's tag; `scripts/parity.py` lists every tagged view's rect on both and the difference |
+| M1 | A theme is data | `mojoui/theme.mojo` has a `Look`: a type scale, control sizes (button, tool, icon, field) and surfaces (fill, corners, margin, padding, rim, shadow) by framework role; Liquid and Omarchy declare one; the GTK and web rules for those roles are written from it (no hand-written copy left in themes/); GTK and web pictures of every side.txt screen differ from the goldens taken before the change by ≤ 0.5 % of pixels; themes style only tags a framework component sets (a lint) |
+| M2 | The toolbar, the same | on the Mac, omxplorer's sheet and Report toolbars: titled tools (title beside the icon), 34 pt icon toggles, Lucide icons, dividers, the floating island from M1's look; every toolbar view's rect within 4 pt of the web's, and every button's title fits its frame |
+| M3 | Every surface the same | the in-window header row, formula bar, inspector, segmented controls, fields, sheet tabs, status bar, the table's card and Report tiles follow M1's look on the Mac; every tagged view in side.txt's screens within 4 pt (or 3 %) of the web's; each Mac picture's difference from the web's is no more than 1.5 × GTK's difference from the web's |
+| M4 | Popovers, tiles and rows | the chart sentence's choice popover (its own picture on the Mac), the Report's add tiles with their titles, the start page's disabled row in its column: within M3's tolerances |
+| M5 | The Mac's hands | CI steps on the Mac: a drag selects cells on its first press, a formula column computes the same figures as on GTK, Open reads a CSV through the file panel's test path |
+| M6 | Speed, mapped | every GPU kernel in mojoui/ and vendor/ fits Apple's 32 KB of threadgroup memory (a scan); a small Mac test app built in CI runs a MAX kernel on the GPU if the runner has one and says which device it ran on; `docs/plans/speed.md`: NVIDIA (job streams), Mac (Metal through MAX), web (WebGPU in the browser), and what's needed from MX frame |
+| M7 | Nothing regressed | goal 30's checks (M0–M5; every earlier goal inside them) |
 
 ## Out of bounds
-Tiling, tile defaults and the jitter on a combine switch (goal 31's draft: docs/goals/31-draft.md); the twin island and
-the agent's state (direction C, when the agent ships); a Mac title-bar island (Mac builds; jobs run serially there unless
-built threaded); the web host's own threads (the web runs the native binary: its jobs are the server's); pushing.
+App-specific CSS or host code (an app's own components excepted); iPhone and Android; a second app (later, as a
+proof); pushing main (the mac-test branch and the mac-ci release assets are fine: owner, 2026-10-23); paid services;
+touching `../mojo-ui-apple-test`.
 
 ## Assumptions (instead of asking)
-- 100M rows means build/data/orders_100m (goal 29's bench file), in memory on this machine's RTX 3090.
-- The island polls its jobs on its own Canvas's frames (`on_frame`) while something runs: no new host timer.
-- "Never freezes" is a 50 ms frame gap at most while a job runs (the engine's own work on the UI thread, such as
-  handing the result over, can take a frame or two; 16 ms everywhere is goal 31's).
+- The web is the reference picture: GTK already matches it, and a browser reports every view's box exactly.
+- The Mac keeps its menus in the system menu bar (a Mac app without one isn't a Mac app); the in-window row keeps the
+  app's mark and status, so that row differs by the menu titles only.
+- Fonts are the theme's (Inter); text renders a little differently per platform, which the picture threshold allows.
+- GitHub's Mac runners prove the Mac's look; only the owner's Mac proves the GPU on Apple Silicon.
 
 ## Done means
-PASS for M0–M5, the reviewer passes it, a short `docs/report.md`; merged into main locally. Budget: 80 turns.
+PASS for M0–M7, the reviewer passes it, a short `docs/report.md`; committed locally, nothing pushed to main. Budget:
+80 turns.

@@ -1169,6 +1169,8 @@ struct AppKitHost[A: App](Movable):
                 asked += " fill"
             if asked != "":
                 line += " [" + String(asked[byte=1:]) + "]"
+            if n.name != "":
+                line += " #" + n.name  # (its tag: scripts/parity.py matches it to the web's data-tag)
             var w = self.widgets[i] if i < len(self.widgets) else 0
             if w == 0:
                 if n.kind != ITEM and n.kind != MENU and n.kind != CLIPBOARD and n.kind != DIALOG and n.kind != POPOVER and n.kind != TOAST and n.kind != SPACER:

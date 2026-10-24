@@ -12,8 +12,11 @@ REPO=abhisheksreesaila/omxcode
 apps=("$@")
 [ ${#apps[@]} -gt 0 ] || apps=(omxplorer maccheck)
 mkdir -p build/mac-ci
+source_stamp=$(pixi run python scripts/side.py --stamp)  # (the sources these zips were built from: scripts/side.py's mac_fresh)
 for app in "${apps[@]}"; do
     zip=$(ls build/"$app"/mac/*-mac.zip | head -1)
+    newer=$(find mojoui themes hosts examples/"$app" apple -type f -newer "$zip" -not -path '*/__pycache__/*' | head -3)
+    [ -z "$newer" ] || { echo "$zip is older than $newer: scripts/build.sh $app mac first"; exit 1; }
     cp "$zip" "build/mac-ci/$app-mac.zip"
     gh release upload mac-ci "build/mac-ci/$app-mac.zip" --clobber -R "$REPO"
 done
@@ -35,4 +38,5 @@ done
 echo "run $run: https://github.com/$REPO/actions/runs/$run"
 gh run watch "$run" -R "$REPO" --exit-status > /dev/null || echo "run $run failed"
 gh run download "$run" -R "$REPO" -D "build/mac-ci/$run"
+echo "$source_stamp" > "build/mac-ci/$run/SOURCE"
 echo "reports: build/mac-ci/$run"

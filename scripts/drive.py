@@ -283,7 +283,17 @@ def step(page, s):
     settle(page)
 
 
-def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1):
+# Every tagged view, and each button in a tagged view, as the Mac's view dump writes it (scripts/parity.py compares them)
+RECTS = """() => { const out = []; const r = e => { const b = e.getBoundingClientRect();
+    return ' @ ' + Math.round(b.x) + ',' + Math.round(b.y) + ' ' + Math.round(b.width) + 'x' + Math.round(b.height); };
+  for (const e of document.querySelectorAll('#mojoui-root [data-tag], #mojoui-overlay [data-tag]')) {
+    out.push((e.dataset.kind || 'view') + ' #' + e.dataset.tag + r(e));
+    for (const b of e.querySelectorAll(':scope [data-kind=button]'))
+      if (b.closest('[data-tag]') === e) out.push('  button ' + JSON.stringify((b.textContent || b.title || '').trim()) + r(b)); }
+  return out.join(String.fromCharCode(10)); }"""
+
+
+def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None):
     """Returns (result, output) like a process run: result.returncode is 0 on success.
     tabs > 1: that many pages open against the one server (each runs the steps); the server's own
     log lines (e.g. SHARED: …) come after the page's state."""
@@ -327,6 +337,8 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1):
                 if line:
                     extra += line + "\n"
             out = "NATIVE: Chromium " + browser.version + "\n" + extra + page.evaluate(DUMP) + "\n"
+            if rects:
+                Path(rects).write_text(page.evaluate(RECTS) + "\n")
             if shot:
                 page.screenshot(path=shot, full_page=True)
                 out += f"SHOT: {shot}\n"

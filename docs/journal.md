@@ -350,3 +350,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - `pkill -f` with a path pattern killed its own shell again (exit 144): match the binary, not the command line.
 - M1's swap run failed once the waits stopped stalling: the old column job (2 s at 100M) landed after the median started but before the new file opened. The app now traces "JOB: dropped every job" and the check reads from there.
 - Goal 26's bench counted the island's morph (a pixel canvas) as the grid's uploads: the bench starts from a quiet window.
+
+## 2026-10-24 · goal 32 set up
+- The Mac's toolbar showed only icons: AppKit drew TOOL_INLINE as TOOL (as_tool: icon above the title) inside the 38 pt row, so every title was cut off; its icons were SF Symbols, not Lucide; no theme surface reached it (the host read the palette only).
+- First side run: GTK and the web nearly the same at 1440 wide; the Mac's window 645 tall (the runner's screen); the Settings launch timed out (menu → sheet, to look at).
+- Steps for the new screens: the sample's chart words are Sum / revenue / carrier… (not region); the grid drags with dragat:grid=300,300,200,60 (drag:K starts at 10,10, the header); the start page's picker is "Choose a file".

@@ -1,8 +1,10 @@
-# The screens scripts/side.py puts side by side (GTK, the web, the Mac), one launch each at 1440x900:
-# app|screen|settings.txt lines (comma-separated)|MOJOUI_TEST steps (pause:ms waits on every host)
 omxplorer|start||pause:1500
 omxplorer|sheet||tap:Open the sample;pause:4000
 omxplorer|report||tap:Open the sample;pause:4000;tap:Report;pause:2000;tap:Sum tile;tap:Chart tile;pause:3000
+omxplorer|sentence-popover||tap:Open the sample;pause:4000;tap:Chart;pause:1500;tap:carrier;pause:1000
+omxplorer|drag||tap:Open the sample;pause:4000;dragat:grid=300,300,200,60;pause:1000
+omxplorer|formula||tap:Open the sample;pause:4000;tap:Formula;pause:500;enter:A new column: its name, then its formula=margin = revenue - cost;pause:2000
+omxplorer|open||pick:Choose a file={ci}/small.csv;pause:2000;tap:Create table;pause:2000
 omxplorer|settings||menu:File>Settings…;pause:2000
 omxplorer|sheet-ledger|skin=ledger|tap:Open the sample;pause:4000
 maccheck|start||pause:1500

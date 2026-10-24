@@ -40,8 +40,9 @@ while IFS='|' read -r app screen settings steps; do
     exe="$bundle/Contents/MacOS/$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleExecutable)"
     config="$PWD/out/side/config-$app-$screen" && mkdir -p "$config"
     echo "$settings" | tr ',' '\n' > "$config/settings.txt"
+    steps=${steps//\{ci\}/$PWD/ci}  # ({ci}: this folder, where side.txt's files are)
     echo "== side $app $screen"
-    OMX_CONFIG="$config" MOJOUI_WINDOW=1440x900 MOJOUI_TEST="$steps" "$exe" < /dev/null > "out/side/$app-$screen.txt" 2>&1 &
+    OMX_CONFIG="$config" MOJOUI_WINDOW=1440x640 MOJOUI_TEST="$steps" "$exe" < /dev/null > "out/side/$app-$screen.txt" 2>&1 &
     pid=$! start=$(date +%s)
     while kill -0 "$pid" 2>/dev/null; do
         [ $(( $(date +%s) - start )) -gt 120 ] && { echo "TIMEOUT" >> "out/side/$app-$screen.txt"; kill "$pid"; break; }
