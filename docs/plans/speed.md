@@ -13,6 +13,13 @@ understand them, copy nothing from them.
   Mac pass must not depend on them. Plan: per-block 32-bit partials written out (no atomics), summed on the host, behind
   a capability check, so NVIDIA keeps its path.
 
+## Measured: a Mojo kernel on a Mac's GPU, in CI (2026-10-24)
+GitHub's macOS 26 runner (a virtual M1) ran `ci/mac/gpuprobe.mojo` through MAX on its GPU: `DEVICE: Apple Paravirtual
+device · metal`, `RESULT: ok` (4,096 values copied in, a kernel, copied out, checked). On its own the compiler stops at
+"Unknown GPU architecture detected" (the virtual GPU names no M-series family); `mojo run --target-accelerator metal:1`
+builds for M1's Metal family and runs. So the Mac GPU path can be tested on every push, not only on the owner's Mac;
+the owner's Mac still proves speed (a virtual GPU's timings mean little).
+
 ## Linux (NVIDIA)
 - Already: MX frame on the RTX 3090 (0.7 ms over 20M rows); queries as jobs off the window (goal 30).
 - Next: a second stream per query and an event the window polls (DeviceContext's `create_stream`,

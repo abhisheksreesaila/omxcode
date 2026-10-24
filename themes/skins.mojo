@@ -7,7 +7,7 @@
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
 from mojoui.theme import Palette, Theme, hx, mix, hex_of
-from mojoui.theme import Look, Surface, TypeScale, Controls, band
+from mojoui.theme import Look, Surface, TypeScale, Controls, Segments, band, words
 
 
 def ledger_palette() -> Palette:
@@ -68,7 +68,7 @@ def skin_css(p: Palette, cls: String) -> String:
         + w + ".mui-tag-formula-bar entry { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; }\n"
         + w + ".mui-tag-toolbar label, " + w + ".mui-tag-toolbar button { color: " + chrome_ink + "; }\n"
         # buttons: secondary with a hairline, primary filled, quiet ones flat; hover raised, pressed washed
-        + w + "button { border-radius: 6px; min-height: 30px; padding: 2px 14px; font-weight: 500; background: " + card + "; color: " + ink + "; box-shadow: inset 0 0 0 1px " + strong + "; }\n"
+        + w + "button { padding: 2px 14px; font-weight: 500; background: " + card + "; color: " + ink + "; box-shadow: inset 0 0 0 1px " + strong + "; }\n"
         + w + "button:hover { background: " + raised + "; }\n"
         + w + "button:active { background: " + wash + "; }\n"
         + w + "button:focus-visible { outline: 2px solid " + accent + "; outline-offset: 1px; }\n"
@@ -82,7 +82,6 @@ def skin_css(p: Palette, cls: String) -> String:
         + w + "button.mui-token { padding: 0 1px; min-height: 0; min-width: 0; margin: 0; border-radius: 5px; background: transparent; box-shadow: none; }\n"
         + w + "button.mui-token:hover { background: " + hex_of(mix(p.card, p.data(0), 0.12)) + "; }\n"  # (the words wear the chart's colour, not the mode's tint: a red word reads as an error)
         + w + "button.mui-token label { color: " + hex_of(p.data(0)) + "; font-weight: 600; font-size: 15px; text-decoration-line: underline; text-decoration-color: " + hex_of(mix(p.card, p.data(0), 0.45)) + "; }\n"
-        + w + ".mui-tag-sentence-line label { color: " + ink + "; font-size: 15px; font-weight: 600; }\n"
         + "@keyframes mui-token-lit { from { background-color: " + hex_of(mix(p.card, p.data(0), 0.30)) + "; } to { background-color: transparent; } }\n"
         + w + "button.mui-token-lit { animation: mui-token-lit 1400ms ease-out; }\n"
         + w + "button.destructive-action { background: " + hex_of(p.bad) + "; color: #ffffff; box-shadow: none; font-weight: 600; }\n"
@@ -91,7 +90,7 @@ def skin_css(p: Palette, cls: String) -> String:
         + w + "button.mui-tool-on { background: " + wash + "; color: " + accent + "; }\n"
         + w + "button.mui-tool-on label, " + w + "button.mui-tool-on image { color: " + accent + "; }\n"
         # fields and choices: hairline, accent ring on focus
-        + w + "entry, " + w + "textview, " + w + "dropdown > button { border-radius: 4px; background: " + card + "; color: " + ink + "; box-shadow: inset 0 0 0 1px " + strong + "; min-height: 30px; }\n"
+        + w + "entry, " + w + "textview, " + w + "dropdown > button { background: " + card + "; color: " + ink + "; box-shadow: inset 0 0 0 1px " + strong + "; }\n"
         + w + "entry:focus-within { box-shadow: inset 0 0 0 1px " + accent + ", 0 0 0 3px " + hex_of(mix(p.card, p.accent, 0.18)) + "; outline: none; }\n"
         + w + "textview text { background: " + card + "; color: " + ink + "; }\n"
         + w + "dropdown > button { padding: 2px 8px; font-weight: 400; }\n"
@@ -155,7 +154,7 @@ body.skin .text.title { font-size: 20px; line-height: 26px; font-weight: 700; } 
 body.skin .text.caption { font-size: 12px; line-height: 16px; color: var(--o-ink3); }
 body.skin .text.tone-warn { color: var(--o-warn); } body.skin .text.tone-good { color: var(--o-good); }
 body.skin .text.tone-strong { color: var(--o-ink); font-weight: 600; } body.skin .text.tone-accent { color: var(--o-accent); }
-body.skin button { border-radius: 6px; min-height: 30px; padding: 3px 14px; font-weight: 500; background: var(--o-card);
+body.skin button { padding: 3px 14px; font-weight: 500; background: var(--o-card);
   color: var(--o-ink); border: 1px solid var(--o-strong); transition: background .12s; font-family: inherit; }
 body.skin button:hover { filter: none; background: var(--o-raised); }
 body.skin button:active { transform: none; background: var(--o-wash); }
@@ -168,7 +167,6 @@ body.skin button.subtle:hover { background: var(--o-raised); color: var(--o-ink)
 body.skin button.token { padding: 0 1px; min-height: 0; border: 0; border-radius: 5px; background: transparent; color: var(--o-data); font-size: 15px; font-weight: 600;
   text-decoration: underline dotted color-mix(in srgb, var(--o-data) 55%, transparent); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 body.skin button.token:hover { background: color-mix(in srgb, var(--o-data) 12%, transparent); }
-body.skin [data-tag=sentence-line] > .text { color: var(--o-ink); font-size: 15px; font-weight: 600; }
 @keyframes token-lit { from { background: color-mix(in srgb, var(--o-data) 30%, transparent); } to { background: transparent; } }
 body.skin button.token.lit { animation: token-lit 1.4s ease-out; }
 body.skin label.picker.subtle:not(.tool):not(.icon-only) { padding: 3px 14px; min-height: 30px; border-radius: 6px; box-sizing: border-box; color: var(--o-ink2); }
@@ -179,7 +177,7 @@ body.skin label.picker.prominent:not(.tool):not(.subtle) { background: var(--o-a
 body.skin button.tool, body.skin label.picker.tool { color: var(--o-chrome-ink); }
 body.skin button.tool:hover, body.skin label.picker.tool:hover { background: color-mix(in srgb, var(--o-chrome-ink) 8%, var(--o-chrome)); }
 body.skin button.tool.on, body.skin button.icon-only.on { background: var(--o-wash); color: var(--o-accent); }
-body.skin select, body.skin input[type=text], body.skin input[type=date], body.skin textarea { border-radius: 4px; min-height: 30px;
+body.skin select, body.skin input[type=text], body.skin input[type=date], body.skin textarea {
   border: 1px solid var(--o-strong); background: var(--o-card); color: var(--o-ink); font: inherit; padding: 3px 8px; }
 body.skin input[type=text]:focus, body.skin textarea:focus, body.skin select:focus { outline: none; border-color: var(--o-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--o-accent) 18%, transparent); }
@@ -225,8 +223,10 @@ def skin_look(p: Palette) -> Look:
     Mono, square-ish 6 pt corners."""
     var status = band("status-bar", p.chrome, p.chrome_line, 0)
     status.font, status.font_size, status.ink = "JetBrains Mono", 12, p.ink3
-    var surfaces: List[Surface] = [band("toolbar", p.chrome, 0, p.chrome_line), status^, band("sheet-tabs", p.chrome, 0, 0), band("formula-bar", p.card, 0, p.line)]
-    return Look(TypeScale("Inter", "JetBrains Mono", 13, 12, 15, 20, 11), Controls(64, 58, 6, 11, 34, 10, 6, 12, 34, 6, 16, 6, 4), surfaces^)
+    var surfaces: List[Surface] = [band("toolbar", p.chrome, 0, p.chrome_line), status^, band("sheet-tabs", p.chrome, 0, 0), band("formula-bar", p.card, 0, p.line),
+                                   words("sentence-line", 15, 600, p.ink)]
+    return Look(TypeScale("Inter", "JetBrains Mono", 13, 12, 15, 20, 11), Controls(64, 58, 6, 11, 34, 10, 6, 12, 34, 6, 16, 6, 4, 30, 14, 8), surfaces^,
+                Segments(0, 6, 0, p.line, 26, 10, 4, 13, 400, p.ink2, p.accent, p.accent_ink, 600, False))  # (the sheets' toggle-group rules say the same: D-300)
 
 
 def skin(id: String, pal: Palette) -> Theme:

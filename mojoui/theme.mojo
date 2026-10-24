@@ -172,6 +172,12 @@ struct Surface(Copyable, Movable):
     var font: String
     var font_size: Float64
     var ink: UInt32
+    var font_weight: Int  # its text's weight (400, 500, 600; 0 for the body's)
+    var tracking: Float64  # its text's letter spacing in points (0: none)
+    var line_height: Float64  # its text's line height (0: the font's)
+    var outline: UInt32  # a border of its own (0: none), `outline_w` wide, dashed or solid (the add tile's dashes)
+    var outline_w: Int
+    var dashed: Bool
 
 
 @fieldwise_init
@@ -205,6 +211,33 @@ struct Controls(Copyable, Movable):
     var glyph: Int  # an icon's own size inside a button
     var button_radius: Int
     var field_radius: Int
+    var control_h: Int  # a push button's, a field's and a dropdown's height (0: the host's own)
+    var button_pad: Int  # a push button's title from its sides (GTK and the web: their sheets' padding; Apple hosts read this)
+    var field_pad: Int  # a field's text from its sides
+
+
+@fieldwise_init
+struct Segments(Copyable, Movable):
+    """A segmented control's (and tabs') look: a track holding the segments, the chosen one filled. `h` 0: the host's own."""
+
+    var track: UInt32  # the track's fill (alpha in the top byte; 0: none)
+    var track_radius: Int
+    var track_pad: Int  # the segments from the track's edge
+    var ring: UInt32  # a hairline around the track (0: none)
+    var h: Int  # a segment's height
+    var pad: Int  # its title from its sides
+    var radius: Int
+    var font_size: Float64
+    var weight: Int
+    var ink: UInt32
+    var on_fill: UInt32  # the chosen segment
+    var on_ink: UInt32
+    var on_weight: Int
+    var on_shadow: Bool  # a soft shadow under the chosen one (Liquid's white thumb)
+
+    @staticmethod
+    def none() -> Segments:
+        return Segments(0, 0, 0, 0, 0, 0, 0, 13, 400, 0, 0, 0, 400, False)
 
 
 @fieldwise_init
@@ -212,11 +245,12 @@ struct Look(Copyable, Movable):
     var type: TypeScale
     var controls: Controls
     var surfaces: List[Surface]
+    var segments: Segments
 
     @staticmethod
     def none() -> Look:
         """No look of the theme's own: each host's defaults (and no rules written)."""
-        return Look(TypeScale("", "", 13, 11, 15, 26, 11), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0), [])
+        return Look(TypeScale("", "", 13, 11, 15, 26, 11), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0), [], Segments.none())
 
     def is_none(self) -> Bool:
         return len(self.surfaces) == 0 and self.controls.tool_w == 0
@@ -234,18 +268,34 @@ def glass(role: String, radius_top: Int, radius_bottom: Int, margin_top: Int, ma
     var shadows: List[Shadow] = [Shadow(1, 0, 0, rgba(255, 255, 255, 230), True), Shadow(0, 0, 1, rgba(255, 255, 255, 191), False),
                                  Shadow(8, 32, 0, rgba(15, 23, 42, 26), False), Shadow(1, 2, 0, rgba(15, 23, 42, 15), False)]
     return Surface(role, rgba(255, 255, 255, 158), radius_top, radius_bottom, margin_top, margin_x, margin_bottom, pad, pad, pad,
-                   shadows^, 0, 0, 24, -1, "", 0, 0)
+                   shadows^, 0, 0, 24, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
 
 
 def solid(role: String, radius: Int, pad_top: Int, pad_x: Int, pad_bottom: Int) -> Surface:
     """An opaque white card with a hairline ring and a faint shadow (the content: a table, a tile)."""
     var shadows: List[Shadow] = [Shadow(0, 0, 1, rgba(15, 23, 42, 18), False), Shadow(1, 3, 0, rgba(15, 23, 42, 13), False)]
-    return Surface(role, rgba(255, 255, 255), radius, radius, -1, -1, -1, pad_top, pad_x, pad_bottom, shadows^, 0, 0, 0, -1, "", 0, 0)
+    return Surface(role, rgba(255, 255, 255), radius, radius, -1, -1, -1, pad_top, pad_x, pad_bottom, shadows^, 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
 
 
 def band(role: String, fill: UInt32, line_top: UInt32, line_bottom: UInt32) -> Surface:
     """A full-width strip in the window's chrome (the skins' toolbar and status bar): a fill and a hairline."""
-    return Surface(role, fill, 0, 0, -1, -1, -1, -1, -1, -1, [], line_top, line_bottom, 0, -1, "", 0, 0)
+    return Surface(role, fill, 0, 0, -1, -1, -1, -1, -1, -1, [], line_top, line_bottom, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+
+
+def words(role: String, size: Float64, weight: Int, ink: UInt32, tracking: Float64 = 0) -> Surface:
+    """A role whose look is its text only (a chart's sentence: 15 pt, semibold, in the ink); no panel of its own."""
+    return Surface(role, 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", size, ink, weight, tracking, 0, 0, 0, False)
+
+
+def chip(role: String, fill: UInt32, ring: UInt32, size: Float64, ink: UInt32, radius: Int, pad_v: Int, pad_h: Int) -> Surface:
+    """A small filled shape with its text (a KPI's note, a stat card): a fill, a hairline ring inside its edge, corners."""
+    var shadows: List[Shadow] = [Shadow(0, 0, 1, ring, True)] if ring != 0 else []
+    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, shadows^, 0, 0, 0, -1, "", size, ink, 0, 0, 0, 0, 0, False)
+
+
+def slot(role: String, outline: UInt32, radius: Int, min_height: Int, ink: UInt32) -> Surface:
+    """An empty place for something to come (the Report's add tile): no fill, a dashed outline, its text quiet."""
+    return Surface(role, 0, radius, radius, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, min_height, "", 0, ink, 0, 0, 0, outline, 2, True)
 
 
 

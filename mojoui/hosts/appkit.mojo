@@ -15,7 +15,7 @@ from mojoui.view import (
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
     MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
     START, CENTER, END, STRETCH, BETWEEN, Node,
-    TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON,
+    TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
 )
 from mojoui.menus import CHECKED, DISABLED, DANGER
@@ -68,6 +68,14 @@ def svg_icon(name: String, size: Float64) -> Int:
     _ = msg(image, "setSize:", size, size)
     _ = msg(image, "setTemplate:", 1)
     return image
+
+
+def look_font(family: String, weight: Int, size: Float64) -> Int:
+    """A look's font by family and weight: the faces the app registered (Inter Regular, Medium, SemiBold; JetBrains Mono
+    Regular, Bold), the nearest one for a weight between."""
+    if family == "JetBrains Mono":
+        return skin_font("JetBrainsMono-Bold" if weight >= 600 else "JetBrainsMono-Regular", size)
+    return skin_font("Inter-SemiBold" if weight >= 600 else ("Inter-Medium" if weight >= 500 else "Inter-Regular"), size)
 
 
 def skin_font(name: String, size: Float64) -> Int:
@@ -144,6 +152,9 @@ struct AppKitHost[A: App](Movable):
     var window: Int
     var target: Int  # MojoTarget object that receives every event
     var widgets: List[Int]
+    var shells: List[Int]  # per node: the box a control is drawn in when it isn't the control (a field's rounded frame); 0: none
+    var objects: List[Int]  # per node: a Board object's box when it wears its content's role (the table's card); 0: none
+    var dashes: List[Tuple[Int, Int, Int, Int]]  # (view, its dashed outline's shape layer, corner radius, width): paths follow the layout (dash_paths)
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
     var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
@@ -180,6 +191,9 @@ struct AppKitHost[A: App](Movable):
         self.window = 0
         self.target = 0
         self.widgets = List[Int]()
+        self.shells = List[Int]()
+        self.objects = List[Int]()
+        self.dashes = List[Tuple[Int, Int, Int, Int]]()
         self.focus = -1
         self.canvases = List[AppleCanvas]()
         self.link = 0
@@ -441,11 +455,16 @@ struct AppKitHost[A: App](Movable):
             var tl = self.text_look(i)
             if tl >= 0:  # a surface's own type (the status bar's figures: Inter 12 on Liquid, JetBrains Mono on the skins)
                 ref sf = self.look.surfaces[tl]
-                if sf.font != "" or sf.font_size > 0:
-                    var family = sf.font if sf.font != "" else String("Inter")
-                    _ = msg(w, "setFont:", skin_font(family.replace(" ", "") + "-Regular" if family != "JetBrains Mono" else String("JetBrainsMono-Regular"), sf.font_size if sf.font_size > 0 else Float64(13)))
+                if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0:
+                    _ = msg(w, "setFont:", look_font(sf.font, sf.font_weight, sf.font_size if sf.font_size > 0 else self.look.type.body))
                 if sf.ink != 0:
                     _ = msg(w, "setTextColor:", ns_color(sf.ink))
+                if sf.tracking != 0:  # (letter spacing: the label's string with NSKern, in its own font and colour)
+                    var attrs = new("NSMutableDictionary")
+                    _ = msg(attrs, "setObject:forKey:", msg(w, "font"), ns_string("NSFont"))
+                    _ = msg(attrs, "setObject:forKey:", msg(w, "textColor"), ns_string("NSColor"))
+                    _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", sf.tracking), ns_string("NSKern"))
+                    _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(node.text), attrs))
             if node.value == TONE_WARN:
                 _ = msg(w, "setTextColor:", ns_color(self.pal.warn) if self.skinned else msg(cls("NSColor"), "systemOrangeColor"))
             elif node.value == TONE_GOOD:
@@ -493,14 +512,37 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(w, "setImagePosition:", 1 if tool else (7 if inline else 3))  # NSImageAbove / NSImageLeading / NSImageLeft
                     _ = msg(w, "setImageHugsTitle:", 1)
             _ = msg(w, "setTag:", tag_for(self_addr, i))
+            var token = node.style == TOKEN or node.style == TOKEN_LIT
+            var drawn = self.drawn_controls() and not tool and not inline and not icon_only and not token
+            if drawn:
+                self.draw_button(w, node.style, node.text)
+            elif token:  # a sentence's word: the chart's colour, underlined, the sentence's type (its line's look), no fill
+                _ = msg(w, "setBordered:", 0)
+                var k = self.look.surface("sentence-line")
+                var size = self.look.surfaces[k].font_size if k >= 0 and self.look.surfaces[k].font_size > 0 else self.look.type.headline
+                var weight = self.look.surfaces[k].font_weight if k >= 0 else 600
+                var attrs = new("NSMutableDictionary")
+                _ = msg(attrs, "setObject:forKey:", look_font("Inter", weight, size), ns_string("NSFont"))
+                _ = msg(attrs, "setObject:forKey:", ns_color(self.pal.data(0)), ns_string("NSColor"))
+                _ = msg(attrs, "setObject:forKey:", ns_number(0x0101), ns_string("NSUnderline"))  # single, dotted (the web's)
+                _ = msg(attrs, "setObject:forKey:", ns_color(mix(self.pal.card, self.pal.data(0), 0.45)), ns_string("NSUnderlineColor"))
+                var said = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(node.text), attrs)
+                _ = msg(w, "setAttributedTitle:", said)
+                var spans = msg[CGPoint](said, "size")  # (its text and 1 pt each side, as GTK's padding: 0 1px; a bare button pads 6)
+                constrain(w, "widthAnchor", spans.x + 2)
+                constrain(w, "heightAnchor", spans.y)
             if node.style == PROMINENT:
                 if not self.submit_field_shown():  # else Return would fire the field and the button
                     _ = msg(w, "setKeyEquivalent:", ns_string("\r"))  # the blue default button; Return taps it
-                _ = msg(w, "setControlSize:", 3)  # NSControlSizeLarge
-                _ = msg(w, "setBezelColor:", self.accent())
+                if not drawn:
+                    _ = msg(w, "setControlSize:", 3)  # NSControlSizeLarge
+                    _ = msg(w, "setBezelColor:", self.accent())
             elif node.style == DESTRUCTIVE:
                 _ = msg(w, "setHasDestructiveAction:", 1)
-                _ = msg(w, "setContentTintColor:", msg(cls("NSColor"), "systemRedColor"))
+                if not drawn:
+                    _ = msg(w, "setContentTintColor:", msg(cls("NSColor"), "systemRedColor"))
+            elif drawn:
+                pass
             elif node.style == SUBTLE or tool or inline:
                 _ = msg(w, "setBordered:", 0)
                 if tool:
@@ -523,7 +565,7 @@ struct AppKitHost[A: App](Movable):
                 if self.skinned:
                     _ = msg(w, "setWantsLayer:", 1)
                     _ = msg(msg(w, "layer"), "setBackgroundColor:", msg(ns_color(self.pal.accent_wash), "CGColor"))
-            elif self.skinned and node.style != DESTRUCTIVE and node.style != PROMINENT:
+            elif self.skinned and node.style != DESTRUCTIVE and node.style != PROMINENT and not drawn and not token:
                 _ = msg(w, "setContentTintColor:", ns_color(self.pal.ink2) if (tool or inline or icon_only) else self.ink())
             # a button keeps its title whole: at the default 750 a row of them lost to a column's width at the same
             # priority, squeezing one to 11 pt (maccheck's Controls page, GitHub's Mac and the owner's, 2026-10-23)
@@ -537,12 +579,23 @@ struct AppKitHost[A: App](Movable):
             _ = msg(w, "setPlaceholderString:", ns_string(node.hint))
             _ = msg(w, "setDelegate:", self.target)  # controlTextDidChange: as you type
             self.wire(w, i, self_addr, "submit:")  # the action fires on Return
+            if self.drawn_controls():  # the look's box around a borderless field (GTK's entry, the web's input)
+                _ = msg(w, "setBezeled:", 0)
+                _ = msg(w, "setBordered:", 0)
+                _ = msg(w, "setDrawsBackground:", 0)
+                _ = msg(w, "setFocusRingType:", 1)  # NSFocusRingTypeNone (the box is the field)
+                _ = msg(w, "setFont:", skin_font("Inter-Regular", self.look.type.body))
+                _ = msg(w, "setTextColor:", self.ink())
+                w = self.shell(i, w)
             if not sized:  # (the app sized it: its settings decide)
                 prefer(w, "widthAnchor", Float64(220))
         elif node.kind == TOGGLE:
             w = msg(cls("NSButton"), "checkboxWithTitle:target:action:", ns_string(node.text), self.target, sel("toggle:"))
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             _ = msg(w, "setState:", node.value)  # NSControlStateValueOn = 1
+            if self.skinned:  # (ticked in the theme's accent, as GTK's check:checked)
+                _ = msg(w, "setBezelColor:", self.accent())
+                _ = msg(w, "setContentTintColor:", self.accent())
         elif node.kind == DROPDOWN:
             w = msg(
                 msg(cls("NSPopUpButton"), "alloc"),
@@ -554,6 +607,10 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addItemWithTitle:", ns_string(o))
             _ = msg(w, "selectItemAtIndex:", node.value)
             self.wire(w, i, self_addr, "select:")
+            if self.drawn_controls():  # the look's box (GTK's dropdown button, the web's select), its arrows inside
+                _ = msg(w, "setBordered:", 0)
+                _ = msg(w, "setFont:", skin_font("Inter-Regular", self.look.type.body))
+                w = self.shell(i, w)
         elif node.kind == SLIDER:
             w = msg(
                 cls("NSSlider"), "sliderWithValue:minValue:maxValue:target:action:",
@@ -615,6 +672,8 @@ struct AppKitHost[A: App](Movable):
                 prefer(w, "widthAnchor", Float64(node.spacing))
             if not node.sized_height():
                 constrain(w, "heightAnchor", Float64(node.size))
+        elif (node.kind == SEGMENTED or node.kind == TABS) and self.skinned and self.look.segments.h > 0:
+            w = self.segment_track(i, node.options, node.value, self_addr)
         elif node.kind == SEGMENTED or node.kind == TABS:
             w = msg(cls("NSSegmentedControl"), "segmentedControlWithLabels:trackingMode:target:action:",
                     ns_array(node.options), 0, self.target, sel("segment:"))  # 0 = select one
@@ -733,12 +792,31 @@ struct AppKitHost[A: App](Movable):
                 var cn = self.rt.shown.nodes[c].copy()  # (copy: building the child mutates self)
                 var child = self.build(c, self_addr)
                 _ = msg(child, "setTranslatesAutoresizingMaskIntoConstraints:", 1)
-                _ = msg(child, "setFrame:", Float64(cn.x), Float64(cn.y), Float64(cn.w), Float64(cn.h))
-                _ = msg(child, "setIdentifier:", ns_string(String(tag_for(self_addr, c))))
-                _ = msg(content, "addSubview:", child)
+                var placed = child
+                var look_at = self.look.surface(cn.name) if cn.name != "" else -1
+                if look_at >= 0 and self.look.surfaces[look_at].pad_top >= 0:
+                    # a Board's object wears its content's tag, as on GTK and the web: the role's box at the object's
+                    # place, its content inside the role's padding (the web's .object[data-tag=table] and its view)
+                    var sf = self.look.surfaces[look_at].copy()
+                    placed = new("MojoBoardView")
+                    self.paint_surface(placed, look_at, False)
+                    var clip = new("MojoBoardView")  # (the object clips its content, as the web's .object: overflow hidden; its shadow stays)
+                    _ = msg(clip, "setFrame:", Float64(0), Float64(0), Float64(cn.w), Float64(cn.h))
+                    _ = msg(clip, "setAutoresizingMask:", 18)  # width and height follow the box
+                    _ = msg(clip, "setWantsLayer:", 1)
+                    _ = msg(msg(clip, "layer"), "setMasksToBounds:", 1)
+                    _ = msg(msg(clip, "layer"), "setCornerRadius:", Float64(max(sf.radius_top, 0)))
+                    _ = msg(child, "setFrame:", Float64(sf.pad_x), Float64(sf.pad_top), Float64(cn.w), Float64(cn.h))
+                    _ = msg(clip, "addSubview:", child)
+                    _ = msg(placed, "addSubview:", clip)
+                    _ = msg(placed, "setTranslatesAutoresizingMaskIntoConstraints:", 1)
+                    self.objects[c] = placed
+                _ = msg(placed, "setFrame:", Float64(cn.x), Float64(cn.y), Float64(cn.w), Float64(cn.h))
+                _ = msg(placed, "setIdentifier:", ns_string(String(tag_for(self_addr, c))))
+                _ = msg(content, "addSubview:", placed)
                 if node.msg != 0:  # on_move: drag it (by anywhere on it; the title strip in practice)
                     var pan = msg(msg(cls("NSPanGestureRecognizer"), "alloc"), "initWithTarget:action:", self.target, sel("boardPan:"))
-                    _ = msg(child, "addGestureRecognizer:", pan)
+                    _ = msg(placed, "addGestureRecognizer:", pan)
             if not sized:
                 prefer(w, "widthAnchor", Float64(min(node.spacing, 760)))
             if not node.sized_height():
@@ -920,6 +998,108 @@ struct AppKitHost[A: App](Movable):
             self.widgets[i] = w
         return self.apply_layout(i, w)
 
+    def segment_track(mut self, i: Int, options: List[String], value: Int, self_addr: Int) -> Int:
+        """A segmented control in the look's shape (GTK's toggle-group, the web's .segmented): a track of borderless
+        buttons, the chosen one filled; a click sends the node's message with the segment's index (segmentPick:)."""
+        ref sg = self.look.segments
+        var track = new("NSStackView")
+        _ = msg(track, "setOrientation:", 0)
+        _ = msg(track, "setSpacing:", Float64(0))
+        _ = msg(track, "setDistribution:", 1)  # NSStackViewDistributionFillEqually (GTK's homogeneous group)
+        _ = msg(track, "setEdgeInsets:", Float64(sg.track_pad), Float64(sg.track_pad), Float64(sg.track_pad), Float64(sg.track_pad))
+        _ = msg(track, "setWantsLayer:", 1)
+        var layer = msg(track, "layer")
+        if sg.track != 0:
+            _ = msg(layer, "setBackgroundColor:", msg(ns_rgba(sg.track), "CGColor"))
+        if sg.ring != 0:
+            _ = msg(layer, "setBorderWidth:", Float64(1))
+            _ = msg(layer, "setBorderColor:", msg(ns_color(sg.ring), "CGColor"))
+        _ = msg(layer, "setCornerRadius:", Float64(min(sg.track_radius, (sg.h + 2 * sg.track_pad) // 2)))
+        _ = msg(layer, "setMasksToBounds:", 0 if sg.on_shadow else 1)
+        for j in range(len(options)):
+            var b = msg(cls("NSButton"), "buttonWithTitle:target:action:", ns_string(options[j]), self.target, sel("segmentPick:"))
+            _ = msg(b, "setBordered:", 0)
+            _ = msg(b, "setTag:", tag_for(self_addr, i))
+            _ = msg(b, "setWantsLayer:", 1)
+            constrain(b, "heightAnchor", Float64(sg.h))
+            self.style_segment(b, j == value)
+            var fit = msg[CGPoint](b, "fittingSize")
+            _ = msg(msg(msg(b, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", fit.x + Float64(2 * sg.pad)), "setActive:", 1)
+            _ = msg(track, "addArrangedSubview:", b)
+        return track
+
+    def style_segment(self, b: Int, on: Bool):
+        """One segment, chosen or not: its fill, title colour and weight, corners, and the chosen one's soft shadow."""
+        ref sg = self.look.segments
+        var layer = msg(b, "layer")
+        _ = msg(layer, "setCornerRadius:", Float64(min(sg.radius, sg.h // 2)))
+        _ = msg(layer, "setBackgroundColor:", msg(ns_color(sg.on_fill) if on else msg(cls("NSColor"), "clearColor"), "CGColor"))
+        _ = msg(layer, "setShadowOpacity:", Float32(0.12 if on and sg.on_shadow else 0.0))
+        _ = msg(layer, "setShadowRadius:", Float64(1.5))
+        _ = msg(layer, "setShadowOffset:", Float64(0), Float64(-1))
+        var attrs = new("NSMutableDictionary")
+        _ = msg(attrs, "setObject:forKey:", look_font("Inter", sg.on_weight if on else sg.weight, sg.font_size), ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", ns_color(sg.on_ink if on else sg.ink), ns_string("NSColor"))
+        _ = msg(b, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", msg(b, "title"), attrs))
+        _ = msg(b, "setState:", 1 if on else 0)
+
+    def drawn_controls(self) -> Bool:
+        """Push buttons, fields and dropdowns drawn from the look (its height, corners, hairline), not AppKit's bezels."""
+        return self.skinned and self.look.controls.control_h > 0
+
+    def shell(mut self, i: Int, control: Int) -> Int:
+        """A field's or a dropdown's box, as GTK's and the web's: the look's height and corners, the card's fill, a hairline;
+        the control sits inside it, borderless, the look's padding from its sides. Returns the box (what the layout places)."""
+        var c = self.look.controls.copy()
+        var box = new("NSView")
+        _ = msg(box, "setWantsLayer:", 1)
+        var layer = msg(box, "layer")
+        _ = msg(layer, "setBackgroundColor:", msg(ns_color(self.pal.card), "CGColor"))
+        _ = msg(layer, "setBorderWidth:", Float64(1))
+        _ = msg(layer, "setBorderColor:", msg(ns_color(self.pal.line_strong), "CGColor"))
+        _ = msg(layer, "setCornerRadius:", Float64(min(c.field_radius, c.control_h // 2)))
+        _ = msg(control, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
+        _ = msg(box, "addSubview:", control)
+        _ = msg(msg(msg(control, "leadingAnchor"), "constraintEqualToAnchor:constant:", msg(box, "leadingAnchor"), Float64(c.field_pad)), "setActive:", 1)
+        _ = msg(msg(msg(control, "trailingAnchor"), "constraintEqualToAnchor:constant:", msg(box, "trailingAnchor"), -Float64(c.field_pad)), "setActive:", 1)
+        _ = msg(msg(msg(control, "centerYAnchor"), "constraintEqualToAnchor:", msg(box, "centerYAnchor")), "setActive:", 1)
+        constrain(box, "heightAnchor", Float64(c.control_h))
+        _ = msg(box, "setContentHuggingPriority:forOrientation:", Float32(250), 0)
+        self.widgets[i] = control  # (patches and reads go to the control; the dump and the layout see the box)
+        self.shells[i] = box
+        return box
+
+    def draw_button(mut self, w: Int, style: Int, title: String):
+        """A push button in the look's shape: its fill, hairline and corners on a layer, its title in Inter, the look's
+        height and padding (GTK's `button`, the web's)."""
+        var c = self.look.controls.copy()
+        var fill = self.pal.card
+        var ink = self.pal.ink
+        var line = self.pal.line_strong
+        var weight = String("Inter-Medium")
+        if style == PROMINENT:
+            fill, ink, line, weight = self.pal.accent, self.pal.accent_ink, UInt32(0), String("Inter-SemiBold")
+        elif style == DESTRUCTIVE:
+            fill, ink, line, weight = self.pal.bad, UInt32(0xFFFFFFFF), UInt32(0), String("Inter-SemiBold")
+        elif style == SUBTLE:
+            fill, ink, line = UInt32(0), self.pal.ink2, UInt32(0)
+        _ = msg(w, "setBordered:", 0)
+        _ = msg(w, "setWantsLayer:", 1)
+        var layer = msg(w, "layer")
+        _ = msg(layer, "setBackgroundColor:", msg(ns_color(fill) if fill != 0 else msg(cls("NSColor"), "clearColor"), "CGColor"))
+        if line != 0:
+            _ = msg(layer, "setBorderWidth:", Float64(1))
+            _ = msg(layer, "setBorderColor:", msg(ns_color(line), "CGColor"))
+        _ = msg(layer, "setCornerRadius:", Float64(min(c.button_radius, c.control_h // 2)))
+        var attrs = new("NSMutableDictionary")
+        _ = msg(attrs, "setObject:forKey:", skin_font(weight, self.look.type.body), ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", ns_color(ink), ns_string("NSColor"))
+        _ = msg(w, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs))
+        _ = msg(w, "setContentTintColor:", ns_color(ink))
+        var fit = msg[CGPoint](w, "fittingSize")
+        constrain(w, "widthAnchor", fit.x + Float64(2 * c.button_pad))
+        constrain(w, "heightAnchor", Float64(c.control_h))
+
     def paint_surface(mut self, w: Int, k: Int, pad: Bool):
         """A look's surface on a stack's layer (mojoui/look.mojo; GTK and the web write the same values as CSS): its fill,
         corners (top and bottom apart), its rim as the layer's border, its widest shadow as the layer's shadow (a layer
@@ -939,9 +1119,9 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(layer, "setMaskedCorners:", (top if sf.radius_top > 0 else 0) | (bottom if sf.radius_bottom > 0 else 0))
         var blur = -1
         for sh in sf.shadows:
-            if sh.inset:
+            if sh.inset and not (sh.blur == 0 and sh.spread > 0):  # (a highlight inside the top edge: no layer equivalent)
                 continue
-            if sh.blur == 0 and sh.spread > 0:  # a ring: the layer's border
+            if sh.blur == 0 and sh.spread > 0:  # a ring (outside or inside the edge): the layer's border
                 _ = msg(layer, "setBorderWidth:", Float64(sh.spread))
                 _ = msg(layer, "setBorderColor:", msg(ns_rgba(sh.color), "CGColor"))
             elif sh.blur > blur:
@@ -964,19 +1144,40 @@ struct AppKitHost[A: App](Movable):
             for anchor in [String("leadingAnchor"), String("trailingAnchor"), String("topAnchor") if edge == 0 else String("bottomAnchor")]:
                 _ = msg(msg(msg(line, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
             constrain(line, "heightAnchor", Float64(1))
+        if sf.outline != 0 and not sf.dashed:
+            _ = msg(layer, "setBorderWidth:", Float64(sf.outline_w))
+            _ = msg(layer, "setBorderColor:", msg(ns_color(sf.outline), "CGColor"))
+        elif sf.outline != 0:  # dashes: a shape layer whose path follows the view's size (dash_paths, after each layout)
+            var shape = new("CAShapeLayer")
+            _ = msg(shape, "setStrokeColor:", msg(ns_color(sf.outline), "CGColor"))
+            _ = msg(shape, "setFillColor:", msg(msg(cls("NSColor"), "clearColor"), "CGColor"))
+            _ = msg(shape, "setLineWidth:", Float64(sf.outline_w))
+            var pattern = new("NSMutableArray")
+            _ = msg(pattern, "addObject:", ns_number(6))
+            _ = msg(pattern, "addObject:", ns_number(4))
+            _ = msg(shape, "setLineDashPattern:", pattern)
+            _ = msg(layer, "addSublayer:", shape)
+            self.dashes.append((w, shape, max(sf.radius_top, 0), sf.outline_w))
         if pad and sf.pad_top >= 0:
             _ = msg(w, "setEdgeInsets:", Float64(sf.pad_top), Float64(sf.pad_x), Float64(sf.pad_bottom), Float64(sf.pad_x))
         if sf.min_height > 0:
             _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(sf.min_height)), "setActive:", 1)
 
     def text_look(self, i: Int) -> Int:
-        """The surface whose text a label at node i wears (the nearest tagged stack above it with a font, size or ink), -1 if none."""
+        """The surface whose text a label at node i wears (its own role, else the nearest tagged stack above it with a font,
+        size or ink), -1 if none."""
+        if self.rt.shown.nodes[i].name != "":
+            var own = self.look.surface(self.rt.shown.nodes[i].name)
+            if own >= 0 and (self.look.surfaces[own].font != "" or self.look.surfaces[own].font_size > 0 or self.look.surfaces[own].ink != 0
+                             or self.look.surfaces[own].font_weight > 0):
+                return own
         var p = self.parents[i] if i < len(self.parents) else -1
         while p >= 0:
             ref n = self.rt.shown.nodes[p]
             if n.name != "":
                 var k = self.look.surface(n.name)
-                if k >= 0 and (self.look.surfaces[k].font != "" or self.look.surfaces[k].font_size > 0 or self.look.surfaces[k].ink != 0):
+                if k >= 0 and (self.look.surfaces[k].font != "" or self.look.surfaces[k].font_size > 0 or self.look.surfaces[k].ink != 0
+                               or self.look.surfaces[k].font_weight > 0):
                     return k
             p = self.parents[p] if p < len(self.parents) else -1
         return -1
@@ -992,6 +1193,18 @@ struct AppKitHost[A: App](Movable):
             outer = new("NSStackView")
             _ = msg(outer, "setEdgeInsets:", Float64(node.pad_v), Float64(node.pad_h), Float64(node.pad_v), Float64(node.pad_h))
             _ = msg(outer, "addArrangedSubview:", w)
+        var chip_at = self.look.surface(node.name) if node.name != "" and not is_stack and node.kind == TEXT else -1
+        if chip_at >= 0 and (self.look.surfaces[chip_at].fill != 0 or len(self.look.surfaces[chip_at].shadows) > 0):
+            # a label wearing a shaped role (a KPI's note chip): the shape around it, the role's padding inside
+            if outer == w:
+                outer = new("NSStackView")
+                _ = msg(outer, "addArrangedSubview:", w)
+            self.paint_surface(outer, chip_at, node.pad_v == 0 and node.pad_h == 0)
+            var r = max(self.look.surfaces[chip_at].radius_top, 0)
+            if r >= 999:  # (a pill: half its height, which a layer can't say ahead of the layout)
+                _ = msg(msg(outer, "layer"), "setCornerRadius:", Float64(10))
+            if i < len(self.shells):
+                self.shells[i] = outer
         if i < len(self.sized):
             self.sized[i] = (node.w, node.h, node.min_w, node.max_w)
         if node.w != 0:
@@ -1041,6 +1254,9 @@ struct AppKitHost[A: App](Movable):
             _ = msg(self.window, "endSheet:", old_sheet)
             _ = msg(old_sheet, "orderOut:", 0)
         self.widgets = List[Int](length=len(self.rt.shown.nodes), fill=0)  # 0 = nil: patches become no-ops
+        self.shells = List[Int](length=len(self.rt.shown.nodes), fill=0)
+        self.objects = List[Int](length=len(self.rt.shown.nodes), fill=0)
+        self.dashes = List[Tuple[Int, Int, Int, Int]]()
         self.size_w = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.wraps = List[Int]()
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
@@ -1092,6 +1308,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(self.window, "setContentView:", holder)
         self.attach_toast()
         self.fit_wraps()
+        self.dash_paths()
         self.start_frames()
         if 0 <= self.focus < len(self.widgets) and self.rt.shown.nodes[self.focus].kind == FIELD:
             # Keep typing in the new field, on the next run-loop turn (after AppKit has
@@ -1138,7 +1355,12 @@ struct AppKitHost[A: App](Movable):
                 elif kind == SLIDER or kind == PROGRESS:
                     _ = msg(w, "setDoubleValue:", Float64(p.number))
             elif p.op == SET_VALUE and (kind == SEGMENTED or kind == TABS):
-                _ = msg(w, "setSelectedSegment:", p.number)
+                if (msg(w, "isKindOfClass:", cls("NSSegmentedControl")) & 0xFF) != 0:
+                    _ = msg(w, "setSelectedSegment:", p.number)
+                else:  # (the look's track: restyle its buttons)
+                    var buttons = msg(w, "arrangedSubviews")
+                    for j in range(msg(buttons, "count")):
+                        self.style_segment(msg(buttons, "objectAtIndex:", j), j == p.number)
             elif p.op == SET_VALUE and kind == RADIO:
                 var buttons = msg(w, "arrangedSubviews")
                 for j in range(msg(buttons, "count")):
@@ -1157,7 +1379,11 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setImage:", ns_image(img.pixels, img.spacing, img.size))
             elif p.op == SET_PLACE and w != 0:  # a Board child moved or resized
                 ref moved = self.rt.shown.nodes[p.node]
-                _ = msg(w, "setFrame:", Float64(moved.x), Float64(moved.y), Float64(moved.w), Float64(moved.h))
+                var box = self.objects[p.node] if p.node < len(self.objects) else 0
+                if box != 0:  # (an object in its role's box: the box moves, the content keeps its place inside)
+                    _ = msg(box, "setFrame:", Float64(moved.x), Float64(moved.y), Float64(moved.w), Float64(moved.h))
+                else:
+                    _ = msg(w, "setFrame:", Float64(moved.x), Float64(moved.y), Float64(moved.w), Float64(moved.h))
             # SET_MSG needs nothing: events look the message up in rt.shown.
         # Ask for the visible rows of every long list again: row text isn't part of the view.
         for k in range(len(self.rt.shown.nodes)):
@@ -1181,6 +1407,16 @@ struct AppKitHost[A: App](Movable):
     def in_row(self, i: Int) -> Bool:
         """Whether node i sits in an HStack."""
         return i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].kind == HSTACK
+
+    def dash_paths(self):
+        """Each dashed outline traced around its view's laid-out bounds (the add tile's dashes)."""
+        for d in self.dashes:
+            var b = msg[CGRect](d[0], "bounds")
+            var half = Float64(d[3]) / 2
+            _ = msg(d[1], "setFrame:", b.x, b.y, b.width, b.height)
+            var path = msg(cls("NSBezierPath"), "bezierPathWithRoundedRect:xRadius:yRadius:", b.x + half, b.y + half, b.width - 2 * half, b.height - 2 * half,
+                           Float64(d[2]), Float64(d[2]))
+            _ = msg(d[1], "setPath:", msg(path, "CGPath"))
 
     def fit_wraps(self):
         """Each column label wraps at the width the layout gave it: an NSTextField only wraps at a width it's told, so
@@ -1282,7 +1518,13 @@ struct AppKitHost[A: App](Movable):
         self.report.write(name + ".txt", dump)
         var line = "snapshot " + name + ("" if pictured else " (no picture)")
         if self.popover != 0:  # (its own window: drawn into a picture of its own, NNN-popover.png)
-            var shown = self.report.save_png(msg(msg(self.popover, "contentViewController"), "view"), name + "-popover.png")
+            var pv = msg(msg(self.popover, "contentViewController"), "view")
+            _ = msg(pv, "layoutSubtreeIfNeeded")
+            if msg[CGRect](pv, "bounds").width < 1:  # (not on screen yet, or a runner's popover never shown: drawn at its own size)
+                var fit = msg[CGPoint](pv, "fittingSize")
+                _ = msg(pv, "setFrameSize:", fit.x, fit.y)
+                _ = msg(pv, "layoutSubtreeIfNeeded")
+            var shown = self.report.save_png(pv, name + "-popover.png")
             line += " · a popover is open (" + ("in " + name + "-popover.png" if shown else String("no picture")) + ")"
         if self.sheet != 0:
             var shown = self.report.save_png(msg(self.sheet, "contentView"), name + "-dialog.png")
@@ -1310,6 +1552,12 @@ struct AppKitHost[A: App](Movable):
             var line = String("")
             for _ in range(depth):
                 line += "  "
+            var box = self.objects[i] if i < len(self.objects) else 0
+            if box != 0:  # (a Board object's box, then its content: the web lists its .object and its view, both tagged)
+                var bb = msg[CGRect](box, "bounds")
+                var br = msg[CGRect](box, "convertRect:toView:", bb.x, bb.y, bb.width, bb.height, 0)
+                out += line + "Object #" + n.name + " @ " + pts(br.x) + "," + pts(cb.height - (br.y + br.height)) + " " + pts(br.width) + "x" + pts(br.height) + "\n"
+                line += "  "
             line += kind_name(n.kind)
             if n.text != "" and n.kind != IMAGE:
                 var t = n.text if n.text.byte_length() <= 60 else String(n.text[byte=:57]) + "..."
@@ -1328,6 +1576,8 @@ struct AppKitHost[A: App](Movable):
             if n.name != "":
                 line += " #" + n.name  # (its tag: scripts/parity.py matches it to the web's data-tag)
             var w = self.widgets[i] if i < len(self.widgets) else 0
+            if i < len(self.shells) and self.shells[i] != 0:
+                w = self.shells[i]  # (a field's box: what the person sees, and what GTK and the web measure)
             if w == 0:
                 if n.kind != ITEM and n.kind != MENU and n.kind != CLIPBOARD and n.kind != DIALOG and n.kind != POPOVER and n.kind != TOAST and n.kind != SPACER:
                     line += "  (no view)"
@@ -1389,6 +1639,7 @@ struct AppKitHost[A: App](Movable):
         self.apply(d, self_addr)
         if not d.rebuild or self.resized_in_place > in_place:  # (a whole rebuild fitted them already)
             self.fit_wraps()
+        self.dash_paths()
 
     # ---------- canvases ----------
 
@@ -2148,6 +2399,13 @@ def on_segment[A: App](target: Int, cmd: Int, sender: Int) abi("C"):
     host_at[A](t[0])[].send(t[1], False, from_ns(msg(sender, "labelForSegment:", index)), index, t[0])
 
 
+def on_segment_pick[A: App](target: Int, cmd: Int, sender: Int) abi("C"):
+    """A segment of the look's track (segment_track): its index among the track's buttons, as on_segment's."""
+    var t = from_tag(sender)
+    var index = msg(msg(msg(sender, "superview"), "arrangedSubviews"), "indexOfObject:", sender)
+    host_at[A](t[0])[].send(t[1], False, from_ns(msg(sender, "title")), index, t[0])
+
+
 def on_radio[A: App](target: Int, cmd: Int, sender: Int) abi("C"):
     var t = from_tag(sender)
     var index = msg(msg(msg(sender, "superview"), "arrangedSubviews"), "indexOfObject:", sender)
@@ -2267,6 +2525,7 @@ def run[A: App]() -> c_int:
     add_method(c, "controlTextDidChange:", on_text_change[A], "v@:@")
     add_method(c, "focusField:", on_focus_field, "v@:@")
     add_method(c, "segment:", on_segment[A], "v@:@")
+    add_method(c, "segmentPick:", on_segment_pick[A], "v@:@")
     add_method(c, "radio:", on_radio[A], "v@:@")
     add_method(c, "textDidChange:", on_text_did_change[A], "v@:@")
     add_method(c, "date:", on_date[A], "v@:@")

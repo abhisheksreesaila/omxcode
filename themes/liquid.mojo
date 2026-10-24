@@ -6,7 +6,7 @@
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
 from mojoui.theme import Palette, Theme, hx, mix, hex_of
-from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, glass, solid
+from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, Segments, glass, solid, words, chip, slot
 from themes.skins import skin_css, SKIN_WEB
 
 
@@ -19,10 +19,17 @@ def liquid_look(p: Palette) -> Look:
     status.font, status.font_size, status.ink = "Inter", 12, p.ink3
     var header = glass("menubar", 12, 12, 8, 10, 0, -1)
     header.min_height = 34
-    var bar = Surface("formula-bar", 0, -1, -1, 0, 10, 0, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0)  # (on the backdrop: no panel)
+    var bar = Surface("formula-bar", 0, -1, -1, 0, 10, 0, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)  # (on the backdrop: no panel)
     var surfaces: List[Surface] = [header^, glass("toolbar", 18, 18, 0, 10, 0, 6), glass("inspector", 18, 18, -1, -1, -1, 10), tabs^, status^, bar^,
-                                   solid("table", 16, 10, 12, 12), solid("tile", 16, 16, 18, 16)]
-    return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10), surfaces^)
+                                   solid("table", 16, 10, 12, 12), solid("tile", 16, 16, 18, 16), words("sentence-line", 15, 600, p.ink),
+                                   words("section-title", 0, 600, 0, 0.5), words("stat-value", 15, 600, p.ink), words("kpi-fact", 12, 0, p.ink3),
+                                   chip("stat-card", p.raised, p.line_strong, 0, 0, 12, -1, -1), chip("kpi-note", p.raised, p.line, 12, p.ink2, 999, 2, 10),
+                                   slot("add-tile", p.line_strong, 16, 120, p.ink3)]
+    var value = words("kpi-value", 34, 600, 0, -0.8)  # (a Report tile's figure: GTK's and the web's title-1 in a tile)
+    value.line_height = 40
+    surfaces.append(value^)
+    return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10, 30, 14, 8), surfaces^,
+                Segments(rgba(15, 23, 42, 15), 999, 3, 0, 24, 12, 999, 12, 500, p.ink3, rgba(255, 255, 255), p.ink, 500, True))  # (the sheet's toggle-group rules say the same: D-300)
 
 
 def liquid_palette() -> Palette:
@@ -62,15 +69,9 @@ def liquid_css(p: Palette) -> String:
         # the menu bar: one glass strip, one type
         + w + ".mui-tag-menubar .mui-menubar { background: transparent; }\n"
         + w + ".mui-tag-app-mark { font-size: 15px; font-weight: 700; color: " + ink + "; letter-spacing: -0.3px; margin-right: 4px; }\n"
-        + w + ".mui-tag-kpi-note { font-size: 12px; color: " + body + "; background: " + hex_of(p.raised) + "; border-radius: 999px; padding: 2px 10px; box-shadow: inset 0 0 0 1px " + line + "; }\n"
-        + w + ".mui-tag-kpi-fact { font-size: 12px; color: " + ink2 + "; }\n"
-        + w + ".mui-card.mui-tag-add-tile { background: transparent; border: 2px dashed " + strong + "; box-shadow: none; border-radius: 16px; min-height: 120px; }\n"
-        + w + ".mui-tag-add-tile label, " + w + ".mui-tag-add-tile image { color: " + ink2 + "; }\n"
-        + w + ".mui-tag-stat-card { background: " + hex_of(p.raised) + "; border-radius: 12px; box-shadow: 0 0 0 1px " + strong + "; }\n"
+        + w + ".mui-tag-add-tile image { color: " + ink2 + "; }\n"
         # the inspector's structure: hairlines between sections, small-caps titles (goal 26 M0: "it looked like without borders")
         + w + ".mui-tag-inspector separator { background: " + strong + "; min-height: 1px; margin: 2px 0; }\n"
-        + w + ".mui-tag-section-title { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: " + body + "; }\n"
-        + w + ".mui-tag-stat-value { font-size: 15px; font-weight: 600; color: " + ink + "; }\n"
         + w + "menubutton.mui-menu > button { font-size: 13px; padding: 3px 10px; border-radius: 8px; color: " + body + "; transition: background 150ms " + spring + "; }\n"
         + w + "menubutton.mui-menu > button:hover, " + w + "menubutton.mui-menu > button:checked { background: " + hover + "; color: " + ink + "; }\n"
         # the toolbar: one floating glass island; tools icon over label, a soft fill on hover, press scales
@@ -80,13 +81,13 @@ def liquid_css(p: Palette) -> String:
         + w + "button.mui-tool-on, " + w + "button.mui-tool-on:hover { background: " + hex_of(p.accent_wash) + "; color: " + accent + "; }\n"
         + w + ".mui-tag-toolbar separator { margin: 10px 8px; background: " + strong + "; min-width: 1px; }\n"
         # every button: pills, springy hover and press
-        + w + "button { border-radius: 999px; font-size: 13px; transition: background 150ms " + spring + ", box-shadow 150ms " + spring + ", transform 150ms " + spring + "; }\n"
+        + w + "button { font-size: 13px; transition: background 150ms " + spring + ", box-shadow 150ms " + spring + ", transform 150ms " + spring + "; }\n"
         + w + "button:active { transform: scale(0.97); }\n"
         + w + "button.image-button, " + w + "button.flat.image-button { border-radius: 10px; }\n"
         + w + "button.suggested-action { box-shadow: 0 1px 2px " + hex_of(p.accent_tint) + ", inset 0 1px rgba(255,255,255,0.18); }\n"
         # the formula bar: a field on the backdrop
         + w + ".mui-tag-formula-bar entry { font-size: 13px; }\n"
-        + w + "entry, " + w + "dropdown > button { border-radius: 10px; font-size: 13px; }\n"
+        + w + "entry, " + w + "dropdown > button { font-size: 13px; }\n"
         # content: solid white cards (the table, charts, pivots, report tiles), 16 px corners
         + w + ".mui-card { border-radius: 16px; " + solid + " }\n"
         + w + ".mui-tag-tile { animation: liquid-land 320ms cubic-bezier(0.22, 1, 0.36, 1); transition: box-shadow 150ms " + spring + "; }\n"
@@ -95,7 +96,6 @@ def liquid_css(p: Palette) -> String:
         + w + ".mui-tag-tile button, " + w + ".mui-tag-chart-tile button.image-button, " + w + ".mui-board .mui-card button.image-button { opacity: 0; transition: opacity 150ms " + spring + "; }\n"
         + w + ".mui-tag-tile:hover button, " + w + ".mui-tag-chart-tile:hover button.image-button, " + w + ".mui-board .mui-card:hover button.image-button, "
         + w + ".mui-tag-tile:focus-within button, " + w + ".mui-tag-chart-tile:focus-within button.image-button, " + w + ".mui-tag-tile button:focus-visible, " + w + ".mui-tag-chart-tile button:focus-visible, " + w + ".mui-board .mui-card button:focus-visible { opacity: 1; }\n"
-        + w + ".mui-tag-tile label.title-1 { font-size: 34px; font-weight: 600; letter-spacing: -0.8px; }\n"
         + w + "label.title-1.mui-tone-accent, " + w + "label.title-4.mui-tone-accent { color: " + accent + "; }\n"
         # the bottom strip: tabs as pills, live figures
         + w + ".mui-tag-sheet-tabs button { border-radius: 999px; padding: 2px 14px; font-weight: 500; }\n"
@@ -147,13 +147,7 @@ body.liquid .menubar {
 body.liquid .menubar { margin: 8px 10px 0; border-radius: 12px; min-height: 34px; }
 body.liquid [data-tag=menubar] .menubar { margin: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 body.liquid [data-tag=app-mark] { font-size: 15px; font-weight: 700; color: var(--o-ink); letter-spacing: -.3px; }
-body.liquid [data-tag=kpi-note] { font-size: 12px; color: var(--o-ink2); background: var(--o-raised); border-radius: 999px; padding: 2px 10px; box-shadow: inset 0 0 0 1px var(--o-line); }
-body.liquid [data-tag=kpi-fact] { font-size: 12px; color: var(--o-ink3); }
-body.liquid [data-tag=add-tile] { background: transparent; border: 2px dashed var(--o-strong); box-shadow: none; border-radius: 16px; min-height: 120px; color: var(--o-ink3); }
-body.liquid [data-tag=stat-card] { background: var(--o-raised); border-radius: 12px; box-shadow: 0 0 0 1px var(--o-strong); box-sizing: border-box; }
 body.liquid [data-tag=inspector] hr { border: 0; border-top: 1px solid var(--o-strong); margin: 2px 0; width: 100%; }
-body.liquid [data-tag=section-title] { font-size: 11px; font-weight: 600; letter-spacing: .5px; color: var(--o-ink2); }
-body.liquid [data-tag=stat-value] { font-size: 15px; font-weight: 600; color: var(--o-ink); }
 body.liquid .menu-title { font-size: 13px; padding: 4px 10px; border-radius: 8px; color: var(--o-ink2); transition: background 150ms var(--sp-snappy); }
 body.liquid .menu.open > .menu-title, body.liquid .menu-title:hover { background: rgba(15,23,42,.06); color: var(--o-ink); }
 body.liquid button.tool, body.liquid label.picker.tool { font-weight: 500; color: var(--o-ink2);
@@ -161,11 +155,10 @@ body.liquid button.tool, body.liquid label.picker.tool { font-weight: 500; color
 body.liquid button.tool:hover, body.liquid label.picker.tool:hover { background: rgba(15,23,42,.06); }
 body.liquid button.tool:active, body.liquid button:active { transform: scale(.97); }
 body.liquid button.tool.on, body.liquid button.icon-only.on { background: var(--o-wash); color: var(--o-accent); }
-body.liquid button { border-radius: 999px; transition: background 150ms var(--sp-snappy), box-shadow 150ms var(--sp-snappy), transform 150ms var(--sp-snappy); }
+body.liquid button { transition: background 150ms var(--sp-snappy), box-shadow 150ms var(--sp-snappy), transform 150ms var(--sp-snappy); }
 body.liquid button.icon-only { border-radius: 10px; }
 body.liquid button.prominent { box-shadow: 0 1px 2px var(--o-tint), inset 0 1px rgba(255,255,255,.18); }
 body.liquid [data-tag=formula-bar] input[type=text] { font-size: 13px; }
-body.liquid select, body.liquid input[type=text], body.liquid input[type=date], body.liquid textarea { border-radius: 10px; }
 body.liquid .vstack.card { background: #fff; border-radius: 16px; box-shadow: var(--solid-shadow); }
 body.liquid [data-tag=tile] { animation: liquid-land 320ms var(--sp-bouncy) both;
   transition: box-shadow 150ms var(--sp-snappy), transform 150ms var(--sp-snappy); }
@@ -174,7 +167,6 @@ body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.ico
 body.liquid [data-tag=tile]:hover button, body.liquid [data-tag=chart-tile]:hover button.icon-only, body.liquid .board > .object:hover button.icon-only,
 body.liquid [data-tag=tile] button:focus-visible, body.liquid [data-tag=chart-tile] button:focus-visible, body.liquid .board > .object button:focus-visible { opacity: 1; }
 @media (pointer: coarse) { body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.icon-only, body.liquid .board > .object button.icon-only { opacity: .6; } }
-body.liquid [data-tag=tile] .text.title { font-size: 34px; line-height: 40px; font-weight: 600; letter-spacing: -.8px; }
 body.liquid [data-tag=sheet-tabs] button { border-radius: 999px; padding: 2px 14px; }
 body.liquid .segmented, body.liquid .tabs { background: rgba(15,23,42,.06); border: 0; border-radius: 999px; padding: 3px; overflow: visible; }
 body.liquid .segmented span, body.liquid .tabs span { border-radius: 999px; min-height: 24px; padding: 0 12px; font-weight: 500; transition: background 150ms var(--sp-snappy); }
