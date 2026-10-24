@@ -50,8 +50,9 @@ while IFS='|' read -r app screen settings steps; do
     done
     wait "$pid"; echo "exit $?" >> "out/side/$app-$screen.txt"
     last=$(ls -td ~/Desktop/omxcode-report-"$app"/*/ | head -1)
-    shot=$(ls "$last"*.png 2>/dev/null | sort | tail -1)
+    shot=$(ls "$last"*.png 2>/dev/null | grep -v -- '-popover\.png$\|-dialog\.png$' | sort | tail -1)
     [ -n "$shot" ] && cp "$shot" "out/side/$app-$screen.png"
+    for extra in popover dialog; do [ -f "${shot%.png}-$extra.png" ] && cp "${shot%.png}-$extra.png" "out/side/$app-$screen-$extra.png"; done
     cp "${last}log.txt" "out/side/$app-$screen-log.txt" 2>/dev/null
     dump="${shot%.png}.txt"; [ -f "$dump" ] && cp "$dump" "out/side/$app-$screen-views.txt"
 done < ci/side.txt

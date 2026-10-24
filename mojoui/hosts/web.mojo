@@ -3,6 +3,7 @@
 # session, get the screen as JSON, and send an event (getting back what changed).
 # The HTML is made in Python by mojoui/hosts/web.py.
 
+from mojoui.look import look_web_css
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
@@ -120,7 +121,8 @@ def web_theme[A: App](handle: Int) -> String:
     """The app's theme for the page, as four parts split by U+001F: its id, its body classes, its palette as CSS
     variables (--o-page, --o-accent, …: what theme style sheets read), and its style sheet (D-260)."""
     var t = session_at[A](handle)[].app.theme()
-    return t.id + chr(31) + t.classes + chr(31) + (palette_css(t.palette) if t.id != "" else String("")) + chr(31) + t.web_css
+    var sheet = t.web_css + (look_web_css(t.look, "body." + t.id + " ") if t.id != "" else String(""))  # (the look's rules after the theme's own: hover and :focus rules stay more specific)
+    return t.id + chr(31) + t.classes + chr(31) + (palette_css(t.palette) if t.id != "" else String("")) + chr(31) + sheet
 
 
 def palette_css(p: Palette) -> String:

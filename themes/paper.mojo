@@ -10,6 +10,7 @@
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
 from mojoui.theme import Palette, Theme, hx, mix, hex_of
+from mojoui.theme import Look
 
 
 def paper_palette() -> Palette:
@@ -83,4 +84,4 @@ body.paper progress { accent-color: var(--o-accent); }
 
 def paper() -> Theme:
     var pal = paper_palette()
-    return Theme("paper", "paper", pal.copy(), paper_gtk(pal), String(PAPER_WEB), pal.ink2, pal.card, False)
+    return Theme("paper", "paper", pal.copy(), paper_gtk(pal), String(PAPER_WEB), pal.ink2, pal.card, False, Look.none())

@@ -72,7 +72,7 @@ from mojoui.omxfile import save_omx, open_document
 from mojoui.numformat import (ColumnFormat, format_number, AUTO, NUMBER, CURRENCY, PERCENT, COMPACT, DATE_LONG, DATE_MONTH, DATE_ISO,
                               NUMBER_STYLES, DATE_STYLES)
 from mojoui.inspector import Inspector, Section, Row, Stepper, StatCards, NavRow, InspectorPage
-from mojoui.sheetchrome import Tool, Toolbar, FormulaBar, StatusBar, Tab, BottomTabs
+from mojoui.sheetchrome import Tool, Toolbar, FormulaBar, StatusBar, Tab, BottomTabs, AppBar
 from mojoui.cellstyle import (CellStyle, BOLD, ITALIC, UNDERLINE, STRIKE, INK_MASK, FILL_MASK, ALIGN_MASK, ink_bits, fill_bits, align_bits,
                               AUTO_ALIGN, ALIGN_LEFT, ALIGN_CENTRE, ALIGN_RIGHT, SWATCH_NAMES, swatch_name)
 from mojoui.swatches import SwatchPicker, draw_swatches, swatch_at
@@ -84,7 +84,7 @@ from mojoui.sheetpage import (SheetObject, compute, shape_of, chart_view, chart_
 from mojoui.numformat import parse_decimal
 from mojoui.sentence import Sentence
 from mojoui.chartask import ask, ask_reply
-from mojoui.reportpage import (ReportTile, ReportFilter, ReportPage, new_tile, compute_tile, kpi_of, tile_fact, TILE_SUM, TILE_AVERAGE, TILE_COUNT,
+from mojoui.reportpage import (ReportTile, ReportFilter, ReportPage, KpiTile, ChartTile, AddTile, new_tile, compute_tile, kpi_of, tile_fact, TILE_SUM, TILE_AVERAGE, TILE_COUNT,
                                TILE_CHART, TILE_DISTINCT, TILE_MEDIAN, TILE_LAST, TILE_NAMES)
 from mojoui.chartview import ChartView
 from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE
@@ -2011,13 +2011,12 @@ struct Main(App):
             Menu("Help", [Item("About omxplorer", ABOUT, icon="file")]),
         ])
         var doc = (self.sheet_name + " · " + grouped(self.frame.rows()) + " rows") if on_sheet else String("")
-        var row: List[View] = [HStack(Icon("app-logo", 18), Text("omxplorer", HEADLINE), spacing=6).align(CENTER).tag("app-mark"), bar^, Spacer()]
         _ = doc
         var t = now_ns()
         var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0
         var says = self.island.now.lead + (" · " + self.island.now.text if self.island.now.text != "" else String(""))
-        row.append(IslandView(ISLAND_CANVAS, self.island_v, ISLAND_TAP, ISLAND_FRAME if moving else NO_MSG).tooltip(says))  # (the document, the GPU and what's happening, in one place: D-255)
-        return HStack(row^, spacing=10).fill().align(CENTER).height(38).padding(2, 10).tag("menubar")
+        var island: List[View] = [IslandView(ISLAND_CANVAS, self.island_v, ISLAND_TAP, ISLAND_FRAME if moving else NO_MSG).tooltip(says)]  # (the document, the GPU and what's happening, in one place: D-255)
+        return AppBar("omxplorer", bar^, island^)
 
     def context_menu(self) -> View:
         """The column's menu, open over the grid where the right click was."""
@@ -2048,6 +2047,7 @@ struct Main(App):
             out.append(Dialog("About omxplorer", VStack(
                 Text("omxplorer", TITLE).tone(TONE_ACCENT), Text("open data, shape it, report on it, on your GPU", CAPTION),
                 Text(self.gpu_chip(), CAPTION).tone(TONE_GOOD),
+                Text("One readable language, from button to kernel.", HEADLINE),
                 Text("Written once in Mojo with omxcode: the same app, the same look, on Linux, the web, Mac, iPhone and Android.", CAPTION),
                 HStack(Spacer(), Button("Done", ABOUT_CLOSE, PROMINENT), spacing=10).fill(),
                 spacing=10).align(START), on_close=ABOUT_CLOSE, width=480))
@@ -2402,13 +2402,12 @@ struct Main(App):
                         parts.append(v.copy())
                 parts.append(Canvas(60 + k, self.version, on_gesture=TILE_TAP + k).fill().height(240))
                 parts.append(Text(readout(t.chart, self.frame), CAPTION))
-                charts.append(Card(parts^, spacing=6).fill().tag("chart-tile"))
+                charts.append(ChartTile(parts^))
             else:
-                kpis.append(kpi_of(t, self.frame, self.filter, first_kpi).view(120 + k, self.version, TILE_CLOSE + k, tile_fact(t, self.frame)).fill().tag("tile"))
+                kpis.append(KpiTile(kpi_of(t, self.frame, self.filter, first_kpi).view(120 + k, self.version, TILE_CLOSE + k, tile_fact(t, self.frame))))
                 first_kpi = False
         if len(kpis) > 0:  # (Stitch's report: a dashed card where the next tile goes)
-            kpis.append(Card(Spacer(), HStack(Spacer(), Icon("plus", 16), Text("Add a tile from the toolbar", CAPTION), Spacer(), spacing=8).fill().align(CENTER), Spacer(),
-                             spacing=0).fill().tag("add-tile"))
+            kpis.append(AddTile("Add a tile from the toolbar"))
         var matched = String("")
         for t in self.tiles:
             if t.kind == TILE_SUM or t.kind == TILE_AVERAGE or t.kind == TILE_COUNT:

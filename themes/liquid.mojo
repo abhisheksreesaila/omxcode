@@ -6,7 +6,23 @@
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
 from mojoui.theme import Palette, Theme, hx, mix, hex_of
+from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, glass, solid
 from themes.skins import skin_css, SKIN_WEB
+
+
+def liquid_look(p: Palette) -> Look:
+    """Liquid's shapes as values (every host draws them): glass islands for the chrome (the header, the toolbar, the
+    inspector, the bottom strip), solid white cards for the content, Inter on one scale (11 12 13 15 17 22 34)."""
+    var tabs = glass("sheet-tabs", 14, 0, 0, 10, 0, -1)
+    var status = glass("status-bar", 0, 14, 0, 10, 10, -1)
+    status.shadows = [Shadow(8, 20, 0, rgba(15, 23, 42, 15), False)]
+    status.font, status.font_size, status.ink = "Inter", 12, p.ink3
+    var header = glass("menubar", 12, 12, 8, 10, 0, -1)
+    header.min_height = 34
+    var bar = Surface("formula-bar", 0, -1, -1, 0, 10, 0, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0)  # (on the backdrop: no panel)
+    var surfaces: List[Surface] = [header^, glass("toolbar", 18, 18, 0, 10, 0, 6), glass("inspector", 18, 18, -1, -1, -1, 10), tabs^, status^, bar^,
+                                   solid("table", 16, 10, 12, 12), solid("tile", 16, 16, 18, 16)]
+    return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10), surfaces^)
 
 
 def liquid_palette() -> Palette:
@@ -44,11 +60,8 @@ def liquid_css(p: Palette) -> String:
         + w + "label.caption { font-size: 12px; color: " + ink2 + "; }\n"
         + w + ".mui-board { background-color: transparent; }\n"
         # the menu bar: one glass strip, one type
-        + w + ".mui-tag-menubar { margin: 8px 10px 0; border-radius: 12px; min-height: 34px; " + glass + " }\n"
         + w + ".mui-tag-menubar .mui-menubar { background: transparent; }\n"
         + w + ".mui-tag-app-mark { font-size: 15px; font-weight: 700; color: " + ink + "; letter-spacing: -0.3px; margin-right: 4px; }\n"
-        + w + ".mui-tag-doc-chip { font-size: 12px; color: " + body + "; background: rgba(15,23,42,0.05); border-radius: 999px; padding: 2px 10px; }\n"
-        + w + ".mui-tag-gpu-chip { font-size: 12px; font-weight: 500; color: " + hex_of(p.good) + "; background: rgba(22,163,74,0.10); border-radius: 999px; padding: 2px 10px; box-shadow: inset 0 0 0 1px rgba(22,163,74,0.25); }\n"
         + w + ".mui-tag-kpi-note { font-size: 12px; color: " + body + "; background: " + hex_of(p.raised) + "; border-radius: 999px; padding: 2px 10px; box-shadow: inset 0 0 0 1px " + line + "; }\n"
         + w + ".mui-tag-kpi-fact { font-size: 12px; color: " + ink2 + "; }\n"
         + w + ".mui-card.mui-tag-add-tile { background: transparent; border: 2px dashed " + strong + "; box-shadow: none; border-radius: 16px; min-height: 120px; }\n"
@@ -61,16 +74,10 @@ def liquid_css(p: Palette) -> String:
         + w + "menubutton.mui-menu > button { font-size: 13px; padding: 3px 10px; border-radius: 8px; color: " + body + "; transition: background 150ms " + spring + "; }\n"
         + w + "menubutton.mui-menu > button:hover, " + w + "menubutton.mui-menu > button:checked { background: " + hover + "; color: " + ink + "; }\n"
         # the toolbar: one floating glass island; tools icon over label, a soft fill on hover, press scales
-        + w + ".mui-tag-toolbar { margin: 0 10px; border-radius: 18px; border-bottom: none; padding: 6px; " + glass + " }\n"
-        + w + "button.mui-tool { min-width: 62px; min-height: 52px; border-radius: 12px; font-size: 11px; font-weight: 500; color: " + body + "; background: transparent; box-shadow: none;"
+        + w + "button.mui-tool { font-weight: 500; color: " + body + "; background: transparent; box-shadow: none;"
         + " transition: background 150ms " + spring + ", transform 150ms " + spring + "; }\n"
         + w + "button.mui-tool:hover { background: " + hover + "; } " + w + "button.mui-tool:active { transform: scale(0.97); }\n"
         + w + "button.mui-tool-on, " + w + "button.mui-tool-on:hover { background: " + hex_of(p.accent_wash) + "; color: " + accent + "; }\n"
-        + w + "label.mui-tool-label { font-size: 11px; }\n"
-        # inline tools (TOOL_INLINE): the title beside the icon, one height with the icon-only toggles, one line
-        + w + "button.mui-tool.mui-tool-inline { min-width: 0; min-height: 34px; padding: 0 10px; border-radius: 10px; }\n"
-        + w + "button.mui-tool-inline label.mui-tool-label { font-size: 12px; }\n"
-        + w + ".mui-tag-toolbar button.image-button { min-width: 34px; min-height: 34px; padding: 0; border-radius: 10px; }\n"
         + w + ".mui-tag-toolbar separator { margin: 10px 8px; background: " + strong + "; min-width: 1px; }\n"
         # every button: pills, springy hover and press
         + w + "button { border-radius: 999px; font-size: 13px; transition: background 150ms " + spring + ", box-shadow 150ms " + spring + ", transform 150ms " + spring + "; }\n"
@@ -78,13 +85,11 @@ def liquid_css(p: Palette) -> String:
         + w + "button.image-button, " + w + "button.flat.image-button { border-radius: 10px; }\n"
         + w + "button.suggested-action { box-shadow: 0 1px 2px " + hex_of(p.accent_tint) + ", inset 0 1px rgba(255,255,255,0.18); }\n"
         # the formula bar: a field on the backdrop
-        + w + ".mui-tag-formula-bar { background: transparent; border-bottom: none; margin: 0 10px; }\n"
         + w + ".mui-tag-formula-bar entry { font-size: 13px; }\n"
         + w + "entry, " + w + "dropdown > button { border-radius: 10px; font-size: 13px; }\n"
         # content: solid white cards (the table, charts, pivots, report tiles), 16 px corners
-        + w + ".mui-card, " + w + ".mui-tag-table, " + w + ".mui-tag-tile { border-radius: 16px; " + solid + " }\n"
-        + w + ".mui-tag-table { padding: 10px 12px 12px; }\n"
-        + w + ".mui-tag-tile { padding: 16px 18px; animation: liquid-land 320ms cubic-bezier(0.22, 1, 0.36, 1); transition: box-shadow 150ms " + spring + "; }\n"
+        + w + ".mui-card { border-radius: 16px; " + solid + " }\n"
+        + w + ".mui-tag-tile { animation: liquid-land 320ms cubic-bezier(0.22, 1, 0.36, 1); transition: box-shadow 150ms " + spring + "; }\n"
         + w + ".mui-tag-tile:hover { box-shadow: 0 0 0 1px rgba(15,23,42,0.07), 0 10px 30px rgba(15,23,42,0.10); }\n"
         # a tile's or an object's ✕ shows on hover (or keyboard focus) only: a report reads as a report (goal 26 M0)
         + w + ".mui-tag-tile button, " + w + ".mui-tag-chart-tile button.image-button, " + w + ".mui-board .mui-card button.image-button { opacity: 0; transition: opacity 150ms " + spring + "; }\n"
@@ -92,12 +97,7 @@ def liquid_css(p: Palette) -> String:
         + w + ".mui-tag-tile:focus-within button, " + w + ".mui-tag-chart-tile:focus-within button.image-button, " + w + ".mui-tag-tile button:focus-visible, " + w + ".mui-tag-chart-tile button:focus-visible, " + w + ".mui-board .mui-card button:focus-visible { opacity: 1; }\n"
         + w + ".mui-tag-tile label.title-1 { font-size: 34px; font-weight: 600; letter-spacing: -0.8px; }\n"
         + w + "label.title-1.mui-tone-accent, " + w + "label.title-4.mui-tone-accent { color: " + accent + "; }\n"
-        # the inspector: a glass panel
-        + w + ".mui-tag-inspector { border-radius: 18px; padding: 10px; " + glass + " }\n"
         # the bottom strip: tabs as pills, live figures
-        + w + ".mui-tag-sheet-tabs { margin: 0 10px; border-radius: 14px 14px 0 0; background: rgba(255,255,255,0.62); }\n"
-        + w + ".mui-tag-status-bar { margin: 0 10px 10px; border-radius: 0 0 14px 14px; border-top: 1px solid rgba(255,255,255,0.75); background: rgba(255,255,255,0.62); box-shadow: 0 8px 20px rgba(15,23,42,0.06); }\n"
-        + w + ".mui-tag-status-bar label { font-family: 'Inter', sans-serif; font-size: 12px; color: " + ink2 + "; }\n"
         + w + ".mui-tag-sheet-tabs button { border-radius: 999px; padding: 2px 14px; font-weight: 500; }\n"
         + w + ".mui-tag-sheet-tabs button:not(.flat) { background: #ffffff; color: " + ink + "; box-shadow: 0 1px 3px rgba(15,23,42,0.12); }\n"
         # segmented controls: a soft track and a white thumb
@@ -142,14 +142,11 @@ body.liquid .board { background: transparent; }
 @keyframes liquid-arrive { from { opacity: 0; transform: scale(.98) translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes liquid-rise { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes liquid-land { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-body.liquid .menubar, body.liquid [data-tag=toolbar], body.liquid [data-tag=inspector], body.liquid [data-tag=sheet-tabs], body.liquid [data-tag=status-bar] {
+body.liquid .menubar {
   background: var(--glass-bg); -webkit-backdrop-filter: var(--glass-fx); backdrop-filter: var(--glass-fx); box-shadow: var(--glass-shadow); border: 0; }
 body.liquid .menubar { margin: 8px 10px 0; border-radius: 12px; min-height: 34px; }
-body.liquid [data-tag=menubar] { margin: 8px 10px 0; border-radius: 12px; min-height: 34px; background: var(--glass-bg); -webkit-backdrop-filter: var(--glass-fx); backdrop-filter: var(--glass-fx); box-shadow: var(--glass-shadow); }
 body.liquid [data-tag=menubar] .menubar { margin: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 body.liquid [data-tag=app-mark] { font-size: 15px; font-weight: 700; color: var(--o-ink); letter-spacing: -.3px; }
-body.liquid [data-tag=doc-chip] { font-size: 12px; color: var(--o-ink2); background: rgba(15,23,42,.05); border-radius: 999px; padding: 2px 10px; }
-body.liquid [data-tag=gpu-chip] { font-size: 12px; font-weight: 500; color: var(--o-good); background: rgba(22,163,74,.10); border-radius: 999px; padding: 2px 10px; box-shadow: inset 0 0 0 1px rgba(22,163,74,.25); }
 body.liquid [data-tag=kpi-note] { font-size: 12px; color: var(--o-ink2); background: var(--o-raised); border-radius: 999px; padding: 2px 10px; box-shadow: inset 0 0 0 1px var(--o-line); }
 body.liquid [data-tag=kpi-fact] { font-size: 12px; color: var(--o-ink3); }
 body.liquid [data-tag=add-tile] { background: transparent; border: 2px dashed var(--o-strong); box-shadow: none; border-radius: 16px; min-height: 120px; color: var(--o-ink3); }
@@ -159,23 +156,18 @@ body.liquid [data-tag=section-title] { font-size: 11px; font-weight: 600; letter
 body.liquid [data-tag=stat-value] { font-size: 15px; font-weight: 600; color: var(--o-ink); }
 body.liquid .menu-title { font-size: 13px; padding: 4px 10px; border-radius: 8px; color: var(--o-ink2); transition: background 150ms var(--sp-snappy); }
 body.liquid .menu.open > .menu-title, body.liquid .menu-title:hover { background: rgba(15,23,42,.06); color: var(--o-ink); }
-body.liquid [data-tag=toolbar] { margin: 0 10px; border-radius: 18px; padding: 6px; }
-body.liquid button.tool, body.liquid label.picker.tool { min-width: 62px; min-height: 52px; border-radius: 12px; font-size: 11px; font-weight: 500; color: var(--o-ink2);
+body.liquid button.tool, body.liquid label.picker.tool { font-weight: 500; color: var(--o-ink2);
   transition: background 150ms var(--sp-snappy), transform 150ms var(--sp-snappy); }
 body.liquid button.tool:hover, body.liquid label.picker.tool:hover { background: rgba(15,23,42,.06); }
 body.liquid button.tool:active, body.liquid button:active { transform: scale(.97); }
 body.liquid button.tool.on, body.liquid button.icon-only.on { background: var(--o-wash); color: var(--o-accent); }
-body.liquid button.tool.inline, body.liquid label.picker.tool.inline { min-width: 0; min-height: 34px; padding: 0 10px; border-radius: 10px; font-size: 12px; }
-body.liquid [data-tag=toolbar] button.icon-only { border-radius: 10px; }
 body.liquid button { border-radius: 999px; transition: background 150ms var(--sp-snappy), box-shadow 150ms var(--sp-snappy), transform 150ms var(--sp-snappy); }
 body.liquid button.icon-only { border-radius: 10px; }
 body.liquid button.prominent { box-shadow: 0 1px 2px var(--o-tint), inset 0 1px rgba(255,255,255,.18); }
-body.liquid [data-tag=formula-bar] { background: transparent; border: 0; margin: 0 10px; }
 body.liquid [data-tag=formula-bar] input[type=text] { font-size: 13px; }
 body.liquid select, body.liquid input[type=text], body.liquid input[type=date], body.liquid textarea { border-radius: 10px; }
-body.liquid .vstack.card, body.liquid [data-tag=table], body.liquid [data-tag=tile] { background: #fff; border-radius: 16px; box-shadow: var(--solid-shadow); }
-body.liquid [data-tag=table] { padding: 10px 12px 12px; box-sizing: border-box; }
-body.liquid [data-tag=tile] { padding: 16px 18px; box-sizing: border-box; animation: liquid-land 320ms var(--sp-bouncy) both;
+body.liquid .vstack.card { background: #fff; border-radius: 16px; box-shadow: var(--solid-shadow); }
+body.liquid [data-tag=tile] { animation: liquid-land 320ms var(--sp-bouncy) both;
   transition: box-shadow 150ms var(--sp-snappy), transform 150ms var(--sp-snappy); }
 body.liquid [data-tag=tile]:hover { box-shadow: 0 0 0 1px rgba(15,23,42,.07), 0 10px 30px rgba(15,23,42,.10); transform: translateY(-2px); }
 body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.icon-only, body.liquid .board > .object button.icon-only { opacity: 0; transition: opacity 150ms var(--sp-snappy); }
@@ -183,10 +175,6 @@ body.liquid [data-tag=tile]:hover button, body.liquid [data-tag=chart-tile]:hove
 body.liquid [data-tag=tile] button:focus-visible, body.liquid [data-tag=chart-tile] button:focus-visible, body.liquid .board > .object button:focus-visible { opacity: 1; }
 @media (pointer: coarse) { body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.icon-only, body.liquid .board > .object button.icon-only { opacity: .6; } }
 body.liquid [data-tag=tile] .text.title { font-size: 34px; line-height: 40px; font-weight: 600; letter-spacing: -.8px; }
-body.liquid [data-tag=inspector] { border-radius: 18px; padding: 10px; box-sizing: border-box; }
-body.liquid [data-tag=sheet-tabs] { margin: 0 10px; border-radius: 14px 14px 0 0; }
-body.liquid [data-tag=status-bar] { margin: 0 10px 10px; border-radius: 0 0 14px 14px; box-shadow: 0 8px 20px rgba(15,23,42,.06); }
-body.liquid [data-tag=status-bar] .text { font-family: Inter, sans-serif; font-size: 12px; }
 body.liquid [data-tag=sheet-tabs] button { border-radius: 999px; padding: 2px 14px; }
 body.liquid .segmented, body.liquid .tabs { background: rgba(15,23,42,.06); border: 0; border-radius: 999px; padding: 3px; overflow: visible; }
 body.liquid .segmented span, body.liquid .tabs span { border-radius: 999px; min-height: 24px; padding: 0 12px; font-weight: 500; transition: background 150ms var(--sp-snappy); }
@@ -215,4 +203,4 @@ def liquid() -> Theme:
 
 def liquid(pal: Palette) -> Theme:
     return Theme("liquid", "skin liquid", pal.copy(), skin_css(pal, "liquid") + liquid_css(pal), String(SKIN_WEB) + String(LIQUID_WEB),
-                 pal.ink2, pal.accent_ink, True)
+                 pal.ink2, pal.accent_ink, True, liquid_look(pal))

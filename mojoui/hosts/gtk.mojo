@@ -6,6 +6,7 @@
 # prints each widget's state as GTK reports it and quits. The window isn't
 # shown unless MOJOUI_SHOT=<file.png> asks GTK to render it to a PNG.
 
+from mojoui.look import look_gtk_css
 from std.ffi import external_call, c_int, c_char, c_uint
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
@@ -1874,9 +1875,10 @@ struct GtkHost[A: App](Movable):
         self.forcing_scheme = False
         if theme.id == "":  # (back to the system's: tell the app what that is now, on the next idle turn)
             _ = external_call["g_idle_add", c_uint](on_idle_appearance[Self.A], self_addr)
-        if theme.gtk_css != "":
+        var sheet = theme.gtk_css + (look_gtk_css(theme.look, "window." + theme.id + " ") if theme.id != "" else String(""))  # (the look's rules after the theme's own)
+        if sheet != "":
             self.skin_provider = external_call["gtk_css_provider_new", Int]()
-            external_call["gtk_css_provider_load_from_string", NoneType](self.skin_provider, theme.gtk_css.as_c_string_span())
+            external_call["gtk_css_provider_load_from_string", NoneType](self.skin_provider, sheet.as_c_string_span())
             external_call["gtk_style_context_add_provider_for_display", NoneType](display, self.skin_provider, c_uint(801))
         for c in theme.classes.split(" "):
             var name = String(c)

@@ -134,6 +134,121 @@ struct Palette(Copyable, Movable):
         return self.series[i % len(self.series)] if len(self.series) > 0 else self.accent
 
 
+# ---- a look: the shapes and type every host draws (mojoui/look.mojo writes GTK's and the web's rules from it) ----
+
+@fieldwise_init
+struct Shadow(Copyable, Movable):
+    """One shadow (CSS box-shadow, a CALayer's shadow): offset down, blur, spread, its colour (alpha in the top byte);
+    `inset`: drawn inside the edge (a glass panel's top highlight)."""
+
+    var y: Int
+    var blur: Int
+    var spread: Int
+    var color: UInt32
+    var inset: Bool
+
+
+@fieldwise_init
+struct Surface(Copyable, Movable):
+    """How a framework role's panel looks: `role` is the tag its component sets ("toolbar", "inspector", "tile").
+    Sizes in points; -1: the component's own. `fill` 0: no fill of its own. `blur`: a backdrop blur where the host has
+    one (the web, the Mac's visual effect view). `font`/`font_size`/`ink`: its text, "" / 0 for the body's."""
+
+    var role: String
+    var fill: UInt32
+    var radius_top: Int
+    var radius_bottom: Int
+    var margin_top: Int
+    var margin_x: Int
+    var margin_bottom: Int
+    var pad_top: Int
+    var pad_x: Int
+    var pad_bottom: Int
+    var shadows: List[Shadow]
+    var line_top: UInt32  # a 1 pt line along its top edge (0: none)
+    var line_bottom: UInt32
+    var blur: Int
+    var min_height: Int
+    var font: String
+    var font_size: Float64
+    var ink: UInt32
+
+
+@fieldwise_init
+struct TypeScale(Copyable, Movable):
+    """The theme's font and its sizes (points): body text, a caption, a headline, a title, a section's small caps title."""
+
+    var family: String  # "Inter"; "" for the platform's
+    var mono: String  # figures in a status bar or a formula ("JetBrains Mono"); "" for the family
+    var body: Float64
+    var caption: Float64
+    var headline: Float64
+    var title: Float64
+    var section: Float64
+
+
+@fieldwise_init
+struct Controls(Copyable, Movable):
+    """The controls' sizes (points): a tool (icon over its title), an inline tool (its title beside the icon), an icon
+    button, a push button, a field; their corners (999: a pill) and their titles' sizes."""
+
+    var tool_w: Int
+    var tool_h: Int
+    var tool_radius: Int
+    var tool_font: Float64
+    var inline_h: Int
+    var inline_pad: Int
+    var inline_radius: Int
+    var inline_font: Float64
+    var icon: Int  # an icon button's side
+    var icon_radius: Int
+    var glyph: Int  # an icon's own size inside a button
+    var button_radius: Int
+    var field_radius: Int
+
+
+@fieldwise_init
+struct Look(Copyable, Movable):
+    var type: TypeScale
+    var controls: Controls
+    var surfaces: List[Surface]
+
+    @staticmethod
+    def none() -> Look:
+        """No look of the theme's own: each host's defaults (and no rules written)."""
+        return Look(TypeScale("", "", 13, 11, 15, 26, 11), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0), [])
+
+    def is_none(self) -> Bool:
+        return len(self.surfaces) == 0 and self.controls.tool_w == 0
+
+    def surface(self, role: String) -> Int:
+        """The index of `role`'s surface, -1 if the look has none."""
+        for k in range(len(self.surfaces)):
+            if self.surfaces[k].role == role:
+                return k
+        return -1
+
+
+def glass(role: String, radius_top: Int, radius_bottom: Int, margin_top: Int, margin_x: Int, margin_bottom: Int, pad: Int) -> Surface:
+    """A translucent white panel with a rim, a top highlight and a soft shadow (Liquid's islands)."""
+    var shadows: List[Shadow] = [Shadow(1, 0, 0, rgba(255, 255, 255, 230), True), Shadow(0, 0, 1, rgba(255, 255, 255, 191), False),
+                                 Shadow(8, 32, 0, rgba(15, 23, 42, 26), False), Shadow(1, 2, 0, rgba(15, 23, 42, 15), False)]
+    return Surface(role, rgba(255, 255, 255, 158), radius_top, radius_bottom, margin_top, margin_x, margin_bottom, pad, pad, pad,
+                   shadows^, 0, 0, 24, -1, "", 0, 0)
+
+
+def solid(role: String, radius: Int, pad_top: Int, pad_x: Int, pad_bottom: Int) -> Surface:
+    """An opaque white card with a hairline ring and a faint shadow (the content: a table, a tile)."""
+    var shadows: List[Shadow] = [Shadow(0, 0, 1, rgba(15, 23, 42, 18), False), Shadow(1, 3, 0, rgba(15, 23, 42, 13), False)]
+    return Surface(role, rgba(255, 255, 255), radius, radius, -1, -1, -1, pad_top, pad_x, pad_bottom, shadows^, 0, 0, 0, -1, "", 0, 0)
+
+
+def band(role: String, fill: UInt32, line_top: UInt32, line_bottom: UInt32) -> Surface:
+    """A full-width strip in the window's chrome (the skins' toolbar and status bar): a fill and a hairline."""
+    return Surface(role, fill, 0, 0, -1, -1, -1, -1, -1, -1, [], line_top, line_bottom, 0, -1, "", 0, 0)
+
+
+
 @fieldwise_init
 struct Theme(Copyable, Movable):
     """What an app hands its hosts (App.theme()): hosts apply it as given and know no theme by name."""
@@ -145,15 +260,16 @@ struct Theme(Copyable, Movable):
     var icon_ink: UInt32  # the icons' ink, and on filled (accent) buttons
     var icon_on_accent: UInt32
     var paint_native: Bool  # Apple hosts: colour their native controls with the palette and set Inter (a skin), else system colours
+    var look: Look  # the type scale, control sizes and surfaces every host draws (mojoui/look.mojo); GTK and the web write their rules from it
 
     @staticmethod
     def native(dark: Bool = False) -> Theme:
         """No theme: each platform's own look (libadwaita, the system's web font and colours, AppKit, UIKit); drawn views
         take the plain palette, dark when the system is (App.appearance)."""
-        return Theme("", "", Palette.plain_dark() if dark else Palette.plain(), "", "", rgba(66, 66, 66), rgba(255, 255, 255), False)
+        return Theme("", "", Palette.plain_dark() if dark else Palette.plain(), "", "", rgba(66, 66, 66), rgba(255, 255, 255), False, Look.none())
 
     def key(self) -> String:
         """Changes whenever what hosts show would (the theme, its palette's accent, page, error tone and light or dark, its
         style sheets): hosts restyle then. (A sheet edited in place to the same length goes unnoticed: change its id too.)"""
         return (self.id + hex_of(self.palette.accent) + hex_of(self.palette.page) + hex_of(self.palette.bad) + ("d" if self.palette.dark else "l")
-                + String(self.gtk_css.byte_length()) + "/" + String(self.web_css.byte_length()))
+                + String(self.gtk_css.byte_length()) + "/" + String(self.web_css.byte_length()) + "/" + String(len(self.look.surfaces)))

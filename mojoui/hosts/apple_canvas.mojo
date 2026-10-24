@@ -62,6 +62,8 @@ struct AppleCanvas(Copyable, Movable):
     var drawn: Int  # version last drawn (-1: none)
     var pinch: Float64  # magnification so far in the current pinch (Mac)
     var moved: Bool  # the current press became a drag (so its end is a RELEASE, and it wasn't a tap)
+    var last_x: Float64  # where the pointer was at the last mouse event (a drag's deltas run from it)
+    var last_y: Float64
 
     def __init__(out self, node: Int, view: Int):
         self.node = node
@@ -72,3 +74,5 @@ struct AppleCanvas(Copyable, Movable):
         self.drawn = -1
         self.pinch = 0
         self.moved = False
+        self.last_x = 0
+        self.last_y = 0

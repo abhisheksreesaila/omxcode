@@ -3,7 +3,7 @@
 # as Excel has them, renamed in place), a formula bar and a status bar. Built from native controls, so every host that
 # has them draws it.
 
-from mojoui.view import (View, Text, Button, TextField, Tabs, HStack, VStack, Spacer, Divider, CAPTION, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, ICON_ONLY,
+from mojoui.view import (View, Text, Button, TextField, Tabs, HStack, VStack, Spacer, Divider, Icon, HEADLINE, CAPTION, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, ICON_ONLY,
                          ICON_ON, SUBTLE, PLAIN, CENTER, NO_MSG)
 
 
@@ -65,6 +65,16 @@ def Toolbar(left: List[Tool], middle: List[Tool], right: List[Tool], extra: List
     for v in extra:
         items.append(v.copy())
     return HStack(items^, spacing=2).fill().align(CENTER).padding(4, 10).tag("toolbar")
+
+
+def AppBar(name: String, var menubar: View, var trailing: List[View]) -> View:
+    """The window's header row: the app's mark (its logo and name), its menus, and what sits at the far end (a status
+    island). Tagged "menubar" (themes float it: Liquid's glass strip); on a Mac the menus live in the system menu bar
+    and the row keeps the mark and the trailing views."""
+    var row: List[View] = [HStack(Icon("app-logo", 18), Text(name, HEADLINE), spacing=6).align(CENTER).tag("app-mark"), menubar^, Spacer()]
+    for v in trailing:
+        row.append(v.copy())
+    return HStack(row^, spacing=10).fill().align(CENTER).height(38).padding(2, 10).tag("menubar")
 
 
 def SheetTabs(names: List[String], selected: Int, on_select: Int, on_add: Int = NO_MSG) -> View:

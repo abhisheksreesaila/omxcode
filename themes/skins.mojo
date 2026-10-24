@@ -7,6 +7,7 @@
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
 from mojoui.theme import Palette, Theme, hx, mix, hex_of
+from mojoui.theme import Look, Surface, TypeScale, Controls, band
 
 
 def ledger_palette() -> Palette:
@@ -64,11 +65,6 @@ def skin_css(p: Palette, cls: String) -> String:
         + w + ".mui-island { background-color: " + card + "; border-radius: 6px; padding: 6px 10px; min-height: 32px; box-shadow: inset 0 0 0 1px " + line + ", " + shadow + "; }\n"
         + w + ".mui-board { background-color: " + page + "; }\n"
         # the chrome band: toolbar, sheet tabs, status bar (tagged views)
-        + w + ".mui-tag-toolbar { background-color: " + chrome + "; border-bottom: 1px solid " + chrome_line + "; }\n"
-        + w + ".mui-tag-status-bar, " + w + ".mui-tag-sheet-tabs { background-color: " + chrome + "; color: " + ink3 + "; }\n"
-        + w + ".mui-tag-status-bar { border-top: 1px solid " + chrome_line + "; }\n"
-        + w + ".mui-tag-status-bar label { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: " + ink3 + "; }\n"
-        + w + ".mui-tag-formula-bar { background-color: " + card + "; border-bottom: 1px solid " + line + "; }\n"
         + w + ".mui-tag-formula-bar entry { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; }\n"
         + w + ".mui-tag-toolbar label, " + w + ".mui-tag-toolbar button { color: " + chrome_ink + "; }\n"
         # buttons: secondary with a hairline, primary filled, quiet ones flat; hover raised, pressed washed
@@ -90,14 +86,10 @@ def skin_css(p: Palette, cls: String) -> String:
         + "@keyframes mui-token-lit { from { background-color: " + hex_of(mix(p.card, p.data(0), 0.30)) + "; } to { background-color: transparent; } }\n"
         + w + "button.mui-token-lit { animation: mui-token-lit 1400ms ease-out; }\n"
         + w + "button.destructive-action { background: " + hex_of(p.bad) + "; color: #ffffff; box-shadow: none; font-weight: 600; }\n"
-        + w + "button.mui-tool { min-width: 64px; min-height: 58px; padding: 4px 6px; border-radius: 6px; font-size: 11px; }\n"
+        + w + "button.mui-tool { padding: 4px 6px; }\n"
         + w + "button.mui-tool:hover { background: " + hex_of(mix(p.chrome, p.chrome_ink, 0.08)) + "; }\n"
         + w + "button.mui-tool-on { background: " + wash + "; color: " + accent + "; }\n"
         + w + "button.mui-tool-on label, " + w + "button.mui-tool-on image { color: " + accent + "; }\n"
-        + w + "label.mui-tool-label { font-size: 11px; }\n"
-        + w + "button.mui-tool.mui-tool-inline { min-width: 0; min-height: 34px; padding: 0 10px; }\n"
-        + w + "button.mui-tool-inline label.mui-tool-label { font-size: 12px; }\n"
-        + w + ".mui-tag-toolbar button.image-button { min-width: 34px; min-height: 34px; padding: 0; }\n"
         # fields and choices: hairline, accent ring on focus
         + w + "entry, " + w + "textview, " + w + "dropdown > button { border-radius: 4px; background: " + card + "; color: " + ink + "; box-shadow: inset 0 0 0 1px " + strong + "; min-height: 30px; }\n"
         + w + "entry:focus-within { box-shadow: inset 0 0 0 1px " + accent + ", 0 0 0 3px " + hex_of(mix(p.card, p.accent, 0.18)) + "; outline: none; }\n"
@@ -184,10 +176,9 @@ body.skin label.picker.subtle:not(.tool):hover { background: var(--o-raised); co
 body.skin button.icon-only { padding: 3px 6px; min-width: 30px; justify-content: center; }
 body.skin label.picker:not(.tool):not(.subtle) { border: 1px solid var(--o-strong); border-radius: 6px; padding: 3px 14px; min-height: 30px; box-sizing: border-box; color: var(--o-ink); background: var(--o-card); }
 body.skin label.picker.prominent:not(.tool):not(.subtle) { background: var(--o-accent); color: var(--o-on-accent); border-color: transparent; font-weight: 600; }
-body.skin button.tool, body.skin label.picker.tool { min-width: 64px; min-height: 58px; border-radius: 6px; font-size: 11px; color: var(--o-chrome-ink); }
+body.skin button.tool, body.skin label.picker.tool { color: var(--o-chrome-ink); }
 body.skin button.tool:hover, body.skin label.picker.tool:hover { background: color-mix(in srgb, var(--o-chrome-ink) 8%, var(--o-chrome)); }
 body.skin button.tool.on, body.skin button.icon-only.on { background: var(--o-wash); color: var(--o-accent); }
-body.skin button.tool.inline, body.skin label.picker.tool.inline { min-width: 0; min-height: 34px; padding: 0 10px; font-size: 12px; }
 body.skin select, body.skin input[type=text], body.skin input[type=date], body.skin textarea { border-radius: 4px; min-height: 30px;
   border: 1px solid var(--o-strong); background: var(--o-card); color: var(--o-ink); font: inherit; padding: 3px 8px; }
 body.skin input[type=text]:focus, body.skin textarea:focus, body.skin select:focus { outline: none; border-color: var(--o-accent);
@@ -207,14 +198,9 @@ body.skin ::-webkit-scrollbar-track { background: transparent; }
 body.skin .segmented, body.skin .tabs { background: transparent; padding: 0; gap: 0; border: 1px solid var(--o-line); border-radius: 6px; overflow: hidden; }
 body.skin .segmented span, body.skin .tabs span { min-height: 26px; padding: 0 10px; border-radius: 0; font-weight: 400; color: var(--o-ink2); font-size: 12px; }
 body.skin .segmented input:checked + span, body.skin .tabs input:checked + span { background: var(--o-accent); color: var(--o-on-accent); font-weight: 600; box-shadow: none; }
-body.skin [data-tag=toolbar] { background: var(--o-chrome); border-bottom: 1px solid var(--o-chrome-line); }
 body.skin [data-tag=toolbar] .text, body.skin [data-tag=toolbar] button { color: var(--o-chrome-ink); }
-body.skin [data-tag=status-bar], body.skin [data-tag=sheet-tabs] { background: var(--o-chrome); color: var(--o-ink3); }
-body.skin [data-tag=status-bar] { border-top: 1px solid var(--o-chrome-line); }
-body.skin [data-tag=status-bar] .text { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--o-ink3); }
 body.skin [data-tag=sheet-tabs] .tabs { border: 0; border-radius: 0; }
 body.skin [data-tag=sheet-tabs] .tabs input:checked + span { background: var(--o-card); color: var(--o-ink); box-shadow: inset 0 2px var(--o-accent); }
-body.skin [data-tag=formula-bar] { background: var(--o-card); border-bottom: 1px solid var(--o-line); }
 body.skin [data-tag=formula-bar] input[type=text] { font-family: "JetBrains Mono", monospace; font-size: 12.5px; }
 body.skin label.toggle input, body.skin .radio input { accent-color: var(--o-accent); }
 body.skin dialog.alert, body.skin .lazylist { background: var(--o-card); color: var(--o-ink); border-radius: 8px; }
@@ -234,9 +220,18 @@ body.skin .hstack > hr { border-left-color: var(--o-line); }
 """
 
 
+def skin_look(p: Palette) -> Look:
+    """The skins' shapes as values: the chrome is a band (a fill and a hairline) across the window, figures in JetBrains
+    Mono, square-ish 6 pt corners."""
+    var status = band("status-bar", p.chrome, p.chrome_line, 0)
+    status.font, status.font_size, status.ink = "JetBrains Mono", 12, p.ink3
+    var surfaces: List[Surface] = [band("toolbar", p.chrome, 0, p.chrome_line), status^, band("sheet-tabs", p.chrome, 0, 0), band("formula-bar", p.card, 0, p.line)]
+    return Look(TypeScale("Inter", "JetBrains Mono", 13, 12, 15, 20, 11), Controls(64, 58, 6, 11, 34, 10, 6, 12, 34, 6, 16, 6, 4), surfaces^)
+
+
 def skin(id: String, pal: Palette) -> Theme:
     """A skin over its palette: `id` names its CSS class (window.<id> on GTK; body.skin.<id> on the web)."""
-    return Theme(id, "skin " + id, pal.copy(), skin_css(pal, id), String(SKIN_WEB), pal.ink2, pal.accent_ink, True)
+    return Theme(id, "skin " + id, pal.copy(), skin_css(pal, id), String(SKIN_WEB), pal.ink2, pal.accent_ink, True, skin_look(pal))
 
 
 def ledger() -> Theme:

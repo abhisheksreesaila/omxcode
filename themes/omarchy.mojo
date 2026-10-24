@@ -7,6 +7,7 @@ from mojoui.canvas import rgba
 from mojoui.text import MONO, MONO_BOLD
 from mojoui.shared import environment
 from mojoui.theme import Palette, Theme, hex_rgba, mix, hex_of, luminance
+from mojoui.theme import Look, TypeScale, Controls
 from std.sys import CompilationTarget
 
 comptime OMARCHY_COLORS = "/.local/state/omarchy/current/theme/colors.toml"
@@ -185,4 +186,10 @@ body.omarchy .hstack > hr { border-left-color: var(--o-line); }
 
 def omarchy() -> Theme:
     var pal = omarchy_palette()
-    return Theme("omarchy", "omarchy", pal.copy(), omarchy_css(pal), String(OMARCHY_WEB), pal.ink2, pal.accent_ink, False)
+    return Theme("omarchy", "omarchy", pal.copy(), omarchy_css(pal), String(OMARCHY_WEB), pal.ink2, pal.accent_ink, False, omarchy_look())
+
+
+def omarchy_look() -> Look:
+    """Omarchy's type as values (JetBrains Mono throughout, 13 / 11 / 13 / 18); its chrome is flat (no surfaces of
+    its own), so GTK and the web write no rules from it yet."""
+    return Look(TypeScale("JetBrains Mono", "JetBrains Mono", 13, 11, 13, 18, 11), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0), [])

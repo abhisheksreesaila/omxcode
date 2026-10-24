@@ -15,11 +15,13 @@ from mojoui.view import (
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
     MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
     START, CENTER, END, STRETCH, BETWEEN, Node,
-    TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, as_tool,
+    TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
 )
 from mojoui.menus import CHECKED, DISABLED, DANGER
 from mojoui.theme import Palette, Theme, mix
+from mojoui.theme import Look
+from mojoui.icons_data import lucide_svg
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
 from mojoui.app import App, Event, Runtime
@@ -45,6 +47,27 @@ def ns_color(c: UInt32) -> Int:
     """An NSColor from a palette colour (R in the low byte)."""
     return msg(cls("NSColor"), "colorWithSRGBRed:green:blue:alpha:", Float64(Int(c & 255)) / 255.0, Float64(Int((c >> 8) & 255)) / 255.0,
                Float64(Int((c >> 16) & 255)) / 255.0, Float64(1))
+
+
+def ns_rgba(c: UInt32) -> Int:
+    """An NSColor with the colour's own alpha (a look's glass: white at 62 %)."""
+    return msg(cls("NSColor"), "colorWithSRGBRed:green:blue:alpha:", Float64(Int(c & 255)) / 255.0, Float64(Int((c >> 8) & 255)) / 255.0,
+               Float64(Int((c >> 16) & 255)) / 255.0, Float64(Int((c >> 24) & 255)) / 255.0)
+
+
+def svg_icon(name: String, size: Float64) -> Int:
+    """A Lucide icon, the same drawing GTK and the web show, as a template NSImage (tinted like a symbol; NSImage reads
+    SVG itself on macOS 14+); 0 if the name isn't one of mojoui's icons."""
+    var svg = lucide_svg(name)
+    if svg == "":
+        return 0
+    var bytes = List[UInt8](svg.replace("currentColor", "#000000").as_bytes())
+    var image = msg(msg(cls("NSImage"), "alloc"), "initWithData:", ns_data(bytes))
+    if image == 0:
+        return 0
+    _ = msg(image, "setSize:", size, size)
+    _ = msg(image, "setTemplate:", 1)
+    return image
 
 
 def skin_font(name: String, size: Float64) -> Int:
@@ -130,6 +153,7 @@ struct AppKitHost[A: App](Movable):
     var theme_key: String  # the app's theme (Theme.key); its palette's colours and Inter when it paints native controls (a skin, D-149, D-260)
     var pal: Palette
     var skinned: Bool
+    var look: Look  # the theme's type, control sizes and surfaces (mojoui/look.mojo): what GTK and the web write their rules from
     var popover: Int  # the NSPopover showing (a Popover node, or a context menu's items), and its node
     var popover_node: Int
     var sheet: Int  # the sheet window showing (a Dialog node), and its node
@@ -166,6 +190,7 @@ struct AppKitHost[A: App](Movable):
         self.theme_key = theme.key()
         self.pal = theme.palette.copy()
         self.skinned = theme.paint_native
+        self.look = theme.look.copy()
         self.popover = 0
         self.popover_node = -1
         self.sheet = 0
@@ -277,9 +302,20 @@ struct AppKitHost[A: App](Movable):
         var holder = new("NSStackView")
         _ = msg(holder, "setOrientation:", 1)
         _ = msg(holder, "setAlignment:", 5)  # leading
-        _ = msg(holder, "setEdgeInsets:", Float64(10), Float64(12), Float64(10), Float64(12))
+        _ = msg(holder, "setEdgeInsets:", Float64(12), Float64(14), Float64(12), Float64(14))  # (the web's .popover: padding 12px 14px)
         _ = msg(holder, "addArrangedSubview:", content)
         _ = msg(vc, "setView:", holder)
+        # at least 260 wide, as the web's; its text wraps at the content's own max width (or 260 less the padding).
+        # Before, fit_wraps measured these labels before the popover was laid out and gave them almost no width: the
+        # sentence's choices read squeezed (the owner's Mac, 2026-10-23)
+        var wrap_at = Float64(232)
+        ref n = self.rt.shown.nodes[i]
+        if len(n.children) > 0 and self.rt.shown.nodes[n.children[0]].max_w > 0:
+            wrap_at = Float64(self.rt.shown.nodes[n.children[0]].max_w)
+        _ = msg(msg(msg(holder, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(260)), "setActive:", 1)
+        for l in self.wraps:
+            if (msg(l, "isDescendantOf:", holder) & 0xFF) != 0:
+                _ = msg(l, "setPreferredMaxLayoutWidth:", wrap_at)
         var popover = new("NSPopover")
         _ = msg(popover, "setContentViewController:", vc)
         _ = msg(popover, "setBehavior:", 1)  # transient: a click outside closes it
@@ -315,6 +351,9 @@ struct AppKitHost[A: App](Movable):
         _ = msg(column, "addArrangedSubview:", head)
         _ = msg(column, "addArrangedSubview:", content)
         _ = msg(msg(msg(column, "widthAnchor"), "constraintEqualToConstant:", width), "setActive:", 1)
+        for l in self.wraps:  # (its labels wrap at the sheet's width less its padding: fit_wraps sees the window only)
+            if (msg(l, "isDescendantOf:", column) & 0xFF) != 0:
+                _ = msg(l, "setPreferredMaxLayoutWidth:", width - 40)
         _ = msg(sheet, "setContentView:", column)
         if self.skinned:
             _ = msg(sheet, "setBackgroundColor:", ns_color(self.pal.card))
@@ -379,7 +418,6 @@ struct AppKitHost[A: App](Movable):
 
     def build(mut self, i: Int, self_addr: Int) -> Int:
         var node = self.rt.shown.nodes[i].copy()  # copy: building children mutates self
-        node.style = as_tool(node.style) if node.kind == BUTTON else node.style  # (inline tools: drawn as tools here)
         var sized = node.sized_width()  # the app's layout decides this view's width
         var w: Int
         if node.kind == TEXT:
@@ -396,8 +434,18 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setTextColor:", msg(cls("NSColor"), "secondaryLabelColor"))
             _ = msg(w, "setFont:", msg(cls("NSFont"), "boldSystemFontOfSize:" if bold else "systemFontOfSize:", size))
             if self.skinned:
-                _ = msg(w, "setFont:", skin_font("Inter-SemiBold" if bold else "Inter-Regular", Float64(20) if node.style == TITLE else (Float64(15) if bold else (Float64(12) if node.style == CAPTION else Float64(13)))))
+                ref ts = self.look.type
+                var sized_by = ts.title if node.style == TITLE else (ts.headline if bold else (ts.caption if node.style == CAPTION else ts.body))  # (the look's type scale: GTK's label.title-1, .title-4, .caption)
+                _ = msg(w, "setFont:", skin_font("Inter-SemiBold" if bold else "Inter-Regular", sized_by))
                 _ = msg(w, "setTextColor:", ns_color(self.pal.ink3 if node.style == CAPTION else self.pal.ink2))
+            var tl = self.text_look(i)
+            if tl >= 0:  # a surface's own type (the status bar's figures: Inter 12 on Liquid, JetBrains Mono on the skins)
+                ref sf = self.look.surfaces[tl]
+                if sf.font != "" or sf.font_size > 0:
+                    var family = sf.font if sf.font != "" else String("Inter")
+                    _ = msg(w, "setFont:", skin_font(family.replace(" ", "") + "-Regular" if family != "JetBrains Mono" else String("JetBrainsMono-Regular"), sf.font_size if sf.font_size > 0 else Float64(13)))
+                if sf.ink != 0:
+                    _ = msg(w, "setTextColor:", ns_color(sf.ink))
             if node.value == TONE_WARN:
                 _ = msg(w, "setTextColor:", ns_color(self.pal.warn) if self.skinned else msg(cls("NSColor"), "systemOrangeColor"))
             elif node.value == TONE_GOOD:
@@ -418,22 +466,33 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
                 self.wraps.append(w)
         elif node.kind == BUTTON:
-            if (node.style == ICON_ONLY or node.style == ICON_ON) and node.hint != "":
-                w = msg(cls("NSButton"), "buttonWithImage:target:action:", msg(cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", ns_string(sf_symbol(node.hint)), ns_string(node.text)), self.target, sel("tap:"))
+            var c = self.look.controls.copy()
+            var icon_only = (node.style == ICON_ONLY or node.style == ICON_ON) and node.hint != ""
+            var inline = node.style == TOOL_INLINE or node.style == TOOL_INLINE_ON
+            var tool = node.style == TOOL or node.style == TOOL_ON
+            var on = node.style == ICON_ON or node.style == TOOL_ON or node.style == TOOL_INLINE_ON
+            var glyph = Float64(c.glyph if c.glyph > 0 else 16)
+            # the icon: mojoui's Lucide drawing (what GTK and the web show); an SF Symbol for a name it doesn't have
+            var image = svg_icon(node.hint, glyph) if node.hint != "" else 0
+            var symbol = image == 0 and node.hint != ""
+            if symbol:
+                image = msg(cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", ns_string(sf_symbol(node.hint)), ns_string(node.text))
+            if icon_only:
+                w = msg(cls("NSButton"), "buttonWithImage:target:action:", image, self.target, sel("tap:"))
                 _ = msg(w, "setBordered:", 0)
-                # 15 pt symbols, as GTK's 16 px icons: AppKit's default (the label's 13 pt) read tiny in a toolbar (Mac, 2026-10-23)
-                _ = msg(w, "setSymbolConfiguration:", msg(cls("NSImageSymbolConfiguration"), "configurationWithPointSize:weight:", Float64(15), Float64(0)))
-                if node.style == ICON_ON:  # (a toggle that is on: the accent, pressed)
-                    _ = msg(w, "setContentTintColor:", self.accent())
-                    _ = msg(w, "setState:", 1)
+                _ = msg(w, "setAccessibilityLabel:", ns_string(node.text))  # (the title is the name a screen reader says)
+                if symbol:  # 15 pt symbols, as GTK's 16 px icons: AppKit's default (the label's 13 pt) read tiny in a toolbar (Mac, 2026-10-23)
+                    _ = msg(w, "setSymbolConfiguration:", msg(cls("NSImageSymbolConfiguration"), "configurationWithPointSize:weight:", Float64(15), Float64(0)))
+                if c.icon > 0:  # the look's icon button: a square, its corners rounded (GTK: min-width/min-height)
+                    constrain(w, "widthAnchor", Float64(c.icon))
+                    constrain(w, "heightAnchor", Float64(c.icon))
             else:
                 w = msg(cls("NSButton"), "buttonWithTitle:target:action:", ns_string(node.text), self.target, sel("tap:"))
-            _ = msg(w, "setTag:", tag_for(self_addr, i))
-            if node.hint != "" and node.style != ICON_ONLY and node.style != ICON_ON:
-                var image = msg(cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", ns_string(sf_symbol(node.hint)), 0)
                 if image != 0:
                     _ = msg(w, "setImage:", image)
-                    _ = msg(w, "setImagePosition:", 1 if node.style == TOOL or node.style == TOOL_ON else 3)  # NSImageAbove / NSImageLeft
+                    _ = msg(w, "setImagePosition:", 1 if tool else (7 if inline else 3))  # NSImageAbove / NSImageLeading / NSImageLeft
+                    _ = msg(w, "setImageHugsTitle:", 1)
+            _ = msg(w, "setTag:", tag_for(self_addr, i))
             if node.style == PROMINENT:
                 if not self.submit_field_shown():  # else Return would fire the field and the button
                     _ = msg(w, "setKeyEquivalent:", ns_string("\r"))  # the blue default button; Return taps it
@@ -442,19 +501,34 @@ struct AppKitHost[A: App](Movable):
             elif node.style == DESTRUCTIVE:
                 _ = msg(w, "setHasDestructiveAction:", 1)
                 _ = msg(w, "setContentTintColor:", msg(cls("NSColor"), "systemRedColor"))
-            elif node.style == SUBTLE or node.style == TOOL or node.style == TOOL_ON:
+            elif node.style == SUBTLE or tool or inline:
                 _ = msg(w, "setBordered:", 0)
-                if node.style == TOOL or node.style == TOOL_ON:
-                    _ = msg(w, "setFont:", msg(cls("NSFont"), "systemFontOfSize:", Float64(11)))
-                if node.style == TOOL_ON:
-                    _ = msg(w, "setContentTintColor:", self.accent())
-                    _ = msg(w, "setState:", 1)
-            if self.skinned and node.style != TOOL_ON and node.style != ICON_ON and node.style != DESTRUCTIVE and node.style != PROMINENT:
-                _ = msg(w, "setContentTintColor:", self.ink())
+                if tool:
+                    _ = msg(w, "setFont:", skin_font("Inter-Medium", c.tool_font) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(11)))
+                    if c.tool_w > 0:
+                        _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(c.tool_w)), "setActive:", 1)
+                        _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(c.tool_h)), "setActive:", 1)
+                elif inline:  # the icon, then the title, one line, the look's height and side padding (GTK: padding 0 10px)
+                    _ = msg(w, "setFont:", skin_font("Inter-Medium", c.inline_font) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(12)))
+                    var fit = msg[CGPoint](w, "fittingSize")
+                    constrain(w, "widthAnchor", fit.x + Float64(2 * c.inline_pad + 6))  # (6: the gap GTK leaves between icon and title)
+                    if c.inline_h > 0:
+                        constrain(w, "heightAnchor", Float64(c.inline_h))
+            if (tool or inline or icon_only) and (c.inline_radius > 0 or c.icon_radius > 0):  # a soft square behind it when on
+                _ = msg(w, "setWantsLayer:", 1)
+                _ = msg(msg(w, "layer"), "setCornerRadius:", Float64(c.icon_radius if icon_only else (c.tool_radius if tool else c.inline_radius)))
+            if on:  # (the on state: the accent on a wash, as GTK's mui-tool-on)
+                _ = msg(w, "setContentTintColor:", self.accent())
+                _ = msg(w, "setState:", 1)
+                if self.skinned:
+                    _ = msg(w, "setWantsLayer:", 1)
+                    _ = msg(msg(w, "layer"), "setBackgroundColor:", msg(ns_color(self.pal.accent_wash), "CGColor"))
+            elif self.skinned and node.style != DESTRUCTIVE and node.style != PROMINENT:
+                _ = msg(w, "setContentTintColor:", ns_color(self.pal.ink2) if (tool or inline or icon_only) else self.ink())
             # a button keeps its title whole: at the default 750 a row of them lost to a column's width at the same
             # priority, squeezing one to 11 pt (maccheck's Controls page, GitHub's Mac and the owner's, 2026-10-23)
             _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(760), 0)
-            if node.align_items == START and node.style != ICON_ONLY and node.style != ICON_ON:  # its content at the leading edge (a sidebar row)
+            if node.align_items == START and not icon_only:  # its content at the leading edge (a sidebar row)
                 _ = msg(w, "setAlignment:", 0)  # NSTextAlignmentLeft
                 if node.hint != "":
                     _ = msg(w, "setImagePosition:", 7)  # NSImageLeading: icon, then title, from the leading edge
@@ -522,12 +596,12 @@ struct AppKitHost[A: App](Movable):
                 prefer(w, "widthAnchor", Float64(320))
             if not node.sized_height():
                 prefer(w, "heightAnchor", Float64(240))
-            for kind in [("NSPanGestureRecognizer", "canvasPan:"), ("NSMagnificationGestureRecognizer", "canvasPinch:"), ("NSClickGestureRecognizer", "canvasTap:"),
-                         ("NSClickGestureRecognizer", "canvasDouble:"), ("NSClickGestureRecognizer", "canvasSecondary:")]:
+            # presses, drags and clicks come from mouseDown:/mouseDragged:/mouseUp: (on_canvas_mouse_*): a pan
+            # recognizer began only after the pointer had moved, and pressed where it had moved to, so a drag-select
+            # needed a hard press (the owner's Mac, 2026-10-23); pinches and right clicks keep their recognizers
+            for kind in [("NSMagnificationGestureRecognizer", "canvasPinch:"), ("NSClickGestureRecognizer", "canvasSecondary:")]:
                 var r = msg(msg(cls(kind[0]), "alloc"), "initWithTarget:action:", w, sel(kind[1]))
-                if kind[1] == "canvasDouble:":
-                    _ = msg(r, "setNumberOfClicksRequired:", 2)
-                elif kind[1] == "canvasSecondary:":
+                if kind[1] == "canvasSecondary:":
                     _ = msg(r, "setButtonMask:", 2)  # the right button: SECONDARY (a context menu)
                 _ = msg(w, "addGestureRecognizer:", r)
             # A new size (window resized) wakes the display link.
@@ -794,7 +868,10 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(msg(w, "layer"), "setCornerRadius:", Float64(6 if self.skinned else 10))
                 if node.pad_v == 0 and node.pad_h == 0:
                     _ = msg(w, "setEdgeInsets:", Float64(12), Float64(14), Float64(12), Float64(14))
-            if self.skinned and (node.name == "toolbar" or node.name == "status-bar" or node.name == "menubar"):  # the chrome band
+            var look_at = self.look.surface(node.name) if node.name != "" else -1
+            if look_at >= 0:  # a framework role the theme's look shapes (the toolbar's island, the inspector's panel)
+                self.paint_surface(w, look_at, node.pad_v == 0 and node.pad_h == 0)
+            elif self.skinned and (node.name == "toolbar" or node.name == "status-bar" or node.name == "menubar"):  # the chrome band
                 _ = msg(w, "setWantsLayer:", 1)
                 _ = msg(msg(w, "layer"), "setBackgroundColor:", msg(ns_color(self.pal.chrome), "CGColor"))
             # justify → distribution (BETWEEN) or flexible spacers (START, CENTER, END), all native
@@ -843,6 +920,67 @@ struct AppKitHost[A: App](Movable):
             self.widgets[i] = w
         return self.apply_layout(i, w)
 
+    def paint_surface(mut self, w: Int, k: Int, pad: Bool):
+        """A look's surface on a stack's layer (mojoui/look.mojo; GTK and the web write the same values as CSS): its fill,
+        corners (top and bottom apart), its rim as the layer's border, its widest shadow as the layer's shadow (a layer
+        has one), hairlines along its edges, its padding unless the component set its own (as on the web, where the
+        view's own padding wins over the sheet's)."""
+        var sf = self.look.surfaces[k].copy()
+        _ = msg(w, "setWantsLayer:", 1)
+        var layer = msg(w, "layer")
+        _ = msg(layer, "setBackgroundColor:", msg(ns_rgba(sf.fill) if sf.fill != 0 else msg(cls("NSColor"), "clearColor"), "CGColor"))
+        var flipped = (msg(w, "isFlipped") & 0xFF) != 0
+        var radius = max(sf.radius_top, sf.radius_bottom)
+        if radius > 0:
+            _ = msg(layer, "setCornerRadius:", Float64(radius))
+            if sf.radius_top != sf.radius_bottom:  # kCALayer{MinX,MaxX}{MinY,MaxY}Corner: MaxY is the top unless the view is flipped
+                var top = 12 if not flipped else 3
+                var bottom = 3 if not flipped else 12
+                _ = msg(layer, "setMaskedCorners:", (top if sf.radius_top > 0 else 0) | (bottom if sf.radius_bottom > 0 else 0))
+        var blur = -1
+        for sh in sf.shadows:
+            if sh.inset:
+                continue
+            if sh.blur == 0 and sh.spread > 0:  # a ring: the layer's border
+                _ = msg(layer, "setBorderWidth:", Float64(sh.spread))
+                _ = msg(layer, "setBorderColor:", msg(ns_rgba(sh.color), "CGColor"))
+            elif sh.blur > blur:
+                blur = sh.blur
+                _ = msg(layer, "setShadowColor:", msg(ns_color(sh.color), "CGColor"))
+                _ = msg(layer, "setShadowOpacity:", Float32(Float64(Int((sh.color >> 24) & 255)) / 255.0))
+                _ = msg(layer, "setShadowRadius:", Float64(sh.blur) / 2.0)  # (CSS blur is about twice a layer's radius)
+                _ = msg(layer, "setShadowOffset:", Float64(0), Float64(sh.y) if flipped else -Float64(sh.y))
+        if blur >= 0:
+            _ = msg(layer, "setMasksToBounds:", 0)
+        for edge in range(2):
+            var color = sf.line_top if edge == 0 else sf.line_bottom
+            if color == 0:
+                continue
+            var line = new("NSView")
+            _ = msg(line, "setWantsLayer:", 1)
+            _ = msg(msg(line, "layer"), "setBackgroundColor:", msg(ns_rgba(color), "CGColor"))
+            _ = msg(line, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
+            _ = msg(w, "addSubview:", line)
+            for anchor in [String("leadingAnchor"), String("trailingAnchor"), String("topAnchor") if edge == 0 else String("bottomAnchor")]:
+                _ = msg(msg(msg(line, anchor), "constraintEqualToAnchor:", msg(w, anchor)), "setActive:", 1)
+            constrain(line, "heightAnchor", Float64(1))
+        if pad and sf.pad_top >= 0:
+            _ = msg(w, "setEdgeInsets:", Float64(sf.pad_top), Float64(sf.pad_x), Float64(sf.pad_bottom), Float64(sf.pad_x))
+        if sf.min_height > 0:
+            _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(sf.min_height)), "setActive:", 1)
+
+    def text_look(self, i: Int) -> Int:
+        """The surface whose text a label at node i wears (the nearest tagged stack above it with a font, size or ink), -1 if none."""
+        var p = self.parents[i] if i < len(self.parents) else -1
+        while p >= 0:
+            ref n = self.rt.shown.nodes[p]
+            if n.name != "":
+                var k = self.look.surface(n.name)
+                if k >= 0 and (self.look.surfaces[k].font != "" or self.look.surfaces[k].font_size > 0 or self.look.surfaces[k].ink != 0):
+                    return k
+            p = self.parents[p] if p < len(self.parents) else -1
+        return -1
+
     def apply_layout(mut self, i: Int, w: Int) -> Int:
         """Maps node i's own sizes (and, for non-stacks, padding) onto Auto Layout; returns what goes in the parent."""
         var node = self.rt.shown.nodes[i].copy()
@@ -874,6 +1012,17 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setMaximumNumberOfLines:", 0)
                 _ = msg(w, "setLineBreakMode:", 0)  # word wrapping
                 _ = msg(w, "setPreferredMaxLayoutWidth:", Float64(node.max_w - 2 * node.pad_h))
+        var look_at = self.look.surface(node.name) if node.name != "" and is_stack else -1
+        if look_at >= 0 and self.look.surfaces[look_at].margin_top >= 0:  # the look's margin: the surface floats inside a holder
+            ref sf = self.look.surfaces[look_at]
+            var holder = new("NSView")
+            _ = msg(outer, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
+            _ = msg(holder, "addSubview:", outer)
+            _ = msg(msg(msg(outer, "topAnchor"), "constraintEqualToAnchor:constant:", msg(holder, "topAnchor"), Float64(sf.margin_top)), "setActive:", 1)
+            _ = msg(msg(msg(outer, "bottomAnchor"), "constraintEqualToAnchor:constant:", msg(holder, "bottomAnchor"), -Float64(sf.margin_bottom)), "setActive:", 1)
+            _ = msg(msg(msg(outer, "leadingAnchor"), "constraintEqualToAnchor:constant:", msg(holder, "leadingAnchor"), Float64(sf.margin_x)), "setActive:", 1)
+            _ = msg(msg(msg(outer, "trailingAnchor"), "constraintEqualToAnchor:constant:", msg(holder, "trailingAnchor"), -Float64(sf.margin_x)), "setActive:", 1)
+            outer = holder
         return outer
 
     def show(mut self, self_addr: Int):
@@ -910,6 +1059,7 @@ struct AppKitHost[A: App](Movable):
             self.theme_key = theme.key()
             self.pal = theme.palette.copy()
             self.skinned = theme.paint_native
+            self.look = theme.look.copy()
         if self.skinned and self.window != 0:
             _ = msg(self.window, "setBackgroundColor:", ns_color(self.pal.page))
             _ = msg(self.window, "setAppearance:", msg(cls("NSAppearance"), "appearanceNamed:", ns_string("NSAppearanceNameDarkAqua" if self.pal.dark else "NSAppearanceNameAqua")))
@@ -1038,10 +1188,14 @@ struct AppKitHost[A: App](Movable):
         if len(self.wraps) == 0 or self.window == 0:
             return
         var content = msg(self.window, "contentView")
+        var here = List[Int]()  # (a popover's or a sheet's labels are in their own window: show_popover sets theirs)
         for l in self.wraps:
+            if (msg(l, "isDescendantOf:", content) & 0xFF) != 0:
+                here.append(l)
+        for l in here:
             _ = msg(l, "setPreferredMaxLayoutWidth:", Float64(0))  # (one line again: the width the layout allows now)
         _ = msg(content, "layoutSubtreeIfNeeded")
-        for l in self.wraps:
+        for l in here:
             _ = msg(l, "setPreferredMaxLayoutWidth:", msg[CGRect](l, "frame").width)
         _ = msg(content, "layoutSubtreeIfNeeded")
 
@@ -1127,10 +1281,12 @@ struct AppKitHost[A: App](Movable):
         var dump = self.dump_views(problems)
         self.report.write(name + ".txt", dump)
         var line = "snapshot " + name + ("" if pictured else " (no picture)")
-        if self.popover != 0:
-            line += " · a popover is open (not in the picture)"
+        if self.popover != 0:  # (its own window: drawn into a picture of its own, NNN-popover.png)
+            var shown = self.report.save_png(msg(msg(self.popover, "contentViewController"), "view"), name + "-popover.png")
+            line += " · a popover is open (" + ("in " + name + "-popover.png" if shown else String("no picture")) + ")"
         if self.sheet != 0:
-            line += " · a dialog is open (not in the picture)"
+            var shown = self.report.save_png(msg(self.sheet, "contentView"), name + "-dialog.png")
+            line += " · a dialog is open (" + ("in " + name + "-dialog.png" if shown else String("no picture")) + ")"
         line += " · " + String(self.rebuilds) + " rebuilds, " + String(self.resized_in_place) + " resized in place since the last"
         self.rebuilds = 0
         self.resized_in_place = 0
@@ -1445,6 +1601,63 @@ def on_canvas_pan[A: App](view: Int, cmd: Int, recognizer: Int) abi("C"):
     host[].canvas_send(t[1], PAN, at.x, at.y, moved.x, -moved.y, 1, t[0])
 
 
+def event_point(view: Int, event: Int) -> CGPoint:
+    """A mouse event's point in a canvas, from its top-left."""
+    var w = msg[CGPoint](event, "locationInWindow")
+    return in_view(view, msg[CGPoint](view, "convertPoint:fromView:", w.x, w.y, 0))
+
+
+def on_canvas_mouse_down[A: App](view: Int, cmd: Int, event: Int) abi("C"):
+    """The button goes down: PRESS there at once (GTK's drag-begin), or DOUBLE on a second click."""
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    _ = msg(msg(view, "window"), "makeFirstResponder:", view)  # the keyboard, too
+    var at = event_point(view, event)
+    var k = host[].canvas_at(t[1])
+    if k >= 0:
+        host[].canvases[k].moved = False
+        host[].canvases[k].last_x = at.x
+        host[].canvases[k].last_y = at.y
+    if msg(event, "clickCount") >= 2:
+        host[].canvas_send(t[1], DOUBLE, at.x, at.y, 0, 0, 1, t[0])
+        return
+    host[].canvas_send(t[1], PRESS, at.x, at.y, 0, 0, 1, t[0])
+
+
+def on_canvas_mouse_dragged[A: App](view: Int, cmd: Int, event: Int) abi("C"):
+    """The pointer moves with the button down: PAN by how far it moved since the last event."""
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    var at = event_point(view, event)
+    var k = host[].canvas_at(t[1])
+    if k < 0:
+        return
+    var dx = at.x - host[].canvases[k].last_x
+    var dy = at.y - host[].canvases[k].last_y
+    if dx == 0 and dy == 0:
+        return
+    host[].canvases[k].moved = True
+    host[].canvases[k].last_x = at.x
+    host[].canvases[k].last_y = at.y
+    host[].canvas_send(t[1], PAN, at.x, at.y, dx, dy, 1, t[0])
+
+
+def on_canvas_mouse_up[A: App](view: Int, cmd: Int, event: Int) abi("C"):
+    """The button comes up: RELEASE after a drag, TAP after a click (as GTK's click gesture's released)."""
+    var t = from_tag(view)
+    var host = host_at[A](t[0])
+    var at = event_point(view, event)
+    var k = host[].canvas_at(t[1])
+    if k >= 0 and host[].canvases[k].moved:
+        host[].canvas_send(t[1], RELEASE, at.x, at.y, 0, 0, 1, t[0])
+    elif msg(event, "clickCount") < 2:
+        host[].canvas_send(t[1], TAP, at.x, at.y, 0, 0, 1, t[0])
+
+
+def accepts_first_mouse(view: Int, cmd: Int, event: Int) abi("C") -> Int8:
+    return 1  # the first click on a window in the background reaches the canvas too (a select, not just a focus)
+
+
 def on_canvas_double[A: App](view: Int, cmd: Int, recognizer: Int) abi("C"):
     var t = from_tag(view)
     var at = in_view(view, msg[CGPoint](recognizer, "locationInView:", view))
@@ -1617,6 +1830,22 @@ def option_index[A: App](host: AppKitHost[A], i: Int, option: String) -> Int:
     return -1
 
 
+def canvas_node_at[A: App](host: AppKitHost[A], which: String) -> Int:
+    """A canvas step's target: the nth canvas ("0", "1"…) or the canvas tagged `which` ("grid"), as GTK's canvas_node."""
+    var digits = which != ""
+    for c in which.codepoints():
+        if c < Codepoint.ord("0") or c > Codepoint.ord("9"):
+            digits = False
+    var seen = 0
+    for i in range(len(host.rt.shown.nodes)):
+        if host.rt.shown.nodes[i].kind != CANVAS:
+            continue
+        if (digits and seen == to_int(which)) or (not digits and host.rt.shown.nodes[i].name == which):
+            return i
+        seen += 1
+    return -1
+
+
 def run_step[A: App](host_addr: Int, step: String):
     """One MOJOUI_TEST step, in the GTK host's words (tap:Label[@n], type/submit/enter:Hint=text, select:n=Option,
     segment/tab/radio:n=Option, toggle:Label, menu:File>Item, pick:Title=/path) plus resize:WxH (the window's content)."""
@@ -1690,6 +1919,37 @@ def run_step[A: App](host_addr: Int, step: String):
             host[].report.note("TEST: no menu item " + rest)
             return
         host[].send(item, False, "", 0, host_addr)
+    elif verb == "tapat" or verb == "dragat" or verb == "drag":  # a canvas's click or drag, in GTK's words (K: the nth canvas, or its tag)
+        var node = canvas_node_at(host[], kv[0])
+        var k = host[].canvas_at(node) if node >= 0 else -1
+        if k < 0:
+            host[].report.note("TEST: no canvas " + kv[0])
+            return
+        var b = msg[CGRect](host[].canvases[k].view, "bounds")
+        var nums = List[Float64]()
+        var left = kv[1]
+        while left != "":
+            var cut = split_at(left, ",")
+            nums.append(Float64(to_int(cut[0])))
+            left = cut[1]
+        if verb == "tapat" and len(nums) >= 2:  # tapat:K=x,y thousandths: press, then the click (GTK: drag-begin, released)
+            var x = nums[0] / 1000.0 * b.width
+            var y = nums[1] / 1000.0 * b.height
+            host[].canvases[k].moved = False
+            host[].canvas_send(node, PRESS, x, y, 0, 0, 1, host_addr)
+            host[].canvas_send(node, TAP, x, y, 0, 0, 1, host_addr)
+        elif len(nums) >= 2:  # drag:K=dx,dy from (10, 10); dragat:K=fx,fy,dx,dy from (fx, fy) thousandths: press, two moves (GTK's)
+            var sx = 10.0
+            var sy = 10.0
+            var at = 0
+            if verb == "dragat" and len(nums) >= 4:
+                sx, sy, at = nums[0] / 1000.0 * b.width, nums[1] / 1000.0 * b.height, 2
+            var dx = nums[at]
+            var dy = nums[at + 1]
+            host[].canvas_send(node, PRESS, sx, sy, 0, 0, 1, host_addr)
+            host[].canvases[k].moved = True
+            host[].canvas_send(node, PAN, sx + dx / 2, sy + dy / 2, dx / 2, dy / 2, 1, host_addr)
+            host[].canvas_send(node, PAN, sx + dx, sy + dy, dx / 2, dy / 2, 1, host_addr)
     elif verb == "resize":  # resize:900x700: the window's content size, as a drag of its edge ends
         var wh = split_at(rest, "x")
         _ = msg(host[].window, "setContentSize:", Float64(to_int(wh[0])), Float64(to_int(wh[1])))
@@ -1703,6 +1963,13 @@ def on_test_step[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     var host = host_at[A](addr)
     if host[].step_at >= len(host[].steps):
         host[].report.note("TEST: done, " + String(len(host[].steps)) + " steps")
+        if host[].sheet != 0:  # (an open sheet refuses terminate: the Settings run hung until the runner killed it, 2026-10-24)
+            _ = msg(host[].window, "endSheet:", host[].sheet)
+            _ = msg(host[].sheet, "orderOut:", 0)
+            host[].sheet = 0
+        if host[].popover != 0:
+            _ = msg(host[].popover, "close")
+            host[].popover = 0
         _ = msg(msg(cls("NSApplication"), "sharedApplication"), "terminate:", 0)
         return
     var step = host[].steps[host[].step_at]
@@ -2035,6 +2302,10 @@ def run[A: App]() -> c_int:
     add_method(canvas, "canvasSecondary:", on_canvas_secondary[A], "v@:@")
     add_method(canvas, "scrollWheel:", on_canvas_scroll[A], "v@:@")
     add_method(canvas, "acceptsFirstResponder", accepts_first_responder, "B@:")
+    add_method(canvas, "acceptsFirstMouse:", accepts_first_mouse, "B@:@")
+    add_method(canvas, "mouseDown:", on_canvas_mouse_down[A], "v@:@")
+    add_method(canvas, "mouseDragged:", on_canvas_mouse_dragged[A], "v@:@")
+    add_method(canvas, "mouseUp:", on_canvas_mouse_up[A], "v@:@")
     add_method(canvas, "keyDown:", on_canvas_key[A], "v@:@")
     register_class(canvas)
     var board = new_class("MojoBoardView", "NSView")  # a Board's content: y from the top

@@ -5,7 +5,8 @@
 <h1 align="center">omxcode</h1>
 
 <p align="center">
-  <b>One Mojo file. Every screen. The GPU underneath. Agents built in.</b>
+  <b>One readable language, from button to kernel.</b><br>
+  One Mojo file. Every screen. The GPU underneath. Agents built in.
 </p>
 
 <p align="center">

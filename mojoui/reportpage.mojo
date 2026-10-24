@@ -2,7 +2,7 @@
 # column), chart tiles (a column by a text column), an empty "add" row, and filters that apply to every tile.
 # Every number is a group-by with the filter as a condition, so a filter change recomputes the whole page.
 
-from mojoui.view import (View, Text, Button, Canvas, VStack, HStack, Grid, Spacer, Card, TITLE, HEADLINE, CAPTION, SUBTLE,
+from mojoui.view import (View, Text, Button, Canvas, VStack, HStack, Grid, Spacer, Card, Icon, TITLE, HEADLINE, CAPTION, SUBTLE,
                          ICON_ONLY, CENTER, START, NO_MSG, TONE_GOOD)
 from mxframe import Expr
 from mojoui.sheet import Sheet, TEXT, DECIMAL, INT
@@ -111,6 +111,22 @@ def tile_fact(t: ReportTile, sheet: Sheet) -> String:
 
 def kpi_of(t: ReportTile, sheet: Sheet, filter: ReportFilter, accent: Bool) -> KpiView:
     return KpiView(tile_label(t, sheet), tile_value(t, sheet), filter.words(sheet), List[Float64](), accent, 0)
+
+
+def KpiTile(var card: View) -> View:
+    """A KPI's card as a Report tile (themes shape it by its role, "tile": a solid card on Liquid)."""
+    return card^.fill().tag("tile")
+
+
+def ChartTile(var parts: List[View]) -> View:
+    """A chart's card on a Report: its sentence, the chart, its readout (the role "chart-tile")."""
+    return Card(parts^, spacing=6).fill().tag("chart-tile")
+
+
+def AddTile(hint: String) -> View:
+    """The dashed card where the next tile goes, with a plus and a hint ("Add a tile from the toolbar"): the role "add-tile"."""
+    return Card(Spacer(), HStack(Spacer(), Icon("plus", 16), Text(hint, CAPTION), Spacer(), spacing=8).fill().align(CENTER), Spacer(),
+                spacing=0).fill().tag("add-tile")
 
 
 def ReportPage(title: String, subtitle: String, kpis: List[View], charts: List[View], facts: String = "") -> View:

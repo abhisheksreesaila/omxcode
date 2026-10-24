@@ -106,7 +106,7 @@ def m1():
         if "Look(" not in text:
             problems.append(f"themes/{name}.mojo declares no Look")
     # every surface role a Look names is written by the hosts, not by hand in themes/
-    roles = set(re.findall(r'Surface\("([\w-]+)"', "".join(f.read_text() for f in (ROOT / "themes").glob("*.mojo"))))
+    roles = set(re.findall(r'\b(?:Surface|glass|solid|band)\("([\w-]+)"', "".join(f.read_text() for f in (ROOT / "themes").glob("*.mojo"))))  # (with the helpers that make one: D-299)
     shape = re.compile(r"\b(background(-color)?|border-radius|margin|padding|box-shadow|border(-top|-bottom)?|min-height)\s*:")
     for f in (ROOT / "themes").glob("*.mojo"):
         text = f.read_text()

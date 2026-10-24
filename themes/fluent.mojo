@@ -5,6 +5,7 @@
 
 from mojoui.canvas import rgba
 from mojoui.theme import Palette, Theme
+from mojoui.theme import Look
 
 
 # Fluent 2 tokens for GTK (apps whose design() is FLUENT): neutral greys, the brand blue as the accent,
@@ -92,4 +93,4 @@ body.fluent .canvas { background: transparent; }
 
 
 def fluent() -> Theme:
-    return Theme("fluent", "fluent", Palette.plain(), String(FLUENT_GTK), String(FLUENT_WEB), rgba(66, 66, 66), rgba(255, 255, 255), False)
+    return Theme("fluent", "fluent", Palette.plain(), String(FLUENT_GTK), String(FLUENT_WEB), rgba(66, 66, 66), rgba(255, 255, 255), False, Look.none())
