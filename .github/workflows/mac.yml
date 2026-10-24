@@ -22,6 +22,22 @@ jobs:
         run: gh release download mac-ci -R "$GITHUB_REPOSITORY" -D zips
       - name: Run each app through its steps
         run: bash ci/run.sh
+      - name: GPU probe (a Mojo kernel through MAX on this Mac's GPU; docs/plans/speed.md)
+        if: matrix.os == 'macos-26'
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          mkdir -p out probe
+          curl -fsSL https://pixi.sh/install.sh | bash > out/gpuprobe-setup.txt 2>&1
+          export PATH="$HOME/.pixi/bin:$PATH"
+          cd probe
+          pixi init --platform osx-arm64 . >> ../out/gpuprobe-setup.txt 2>&1
+          pixi add "python=3.13.*" >> ../out/gpuprobe-setup.txt 2>&1
+          pixi add --pypi "mojo>=1.1,<1.2" "max>=26.6.0,<27" >> ../out/gpuprobe-setup.txt 2>&1
+          xcodebuild -downloadComponent MetalToolchain >> ../out/gpuprobe-setup.txt 2>&1 || true
+          system_profiler SPDisplaysDataType > ../out/gpu-hardware.txt 2>&1 || true
+          pixi run mojo run ../ci/gpuprobe.mojo > ../out/gpuprobe.txt 2>&1 || echo "exit $?" >> ../out/gpuprobe.txt
+          cat ../out/gpuprobe.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
