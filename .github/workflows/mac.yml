@@ -35,8 +35,10 @@ jobs:
           pixi add "python=3.13.*" >> ../out/gpuprobe-setup.txt 2>&1
           pixi add --pypi "mojo>=1.1,<1.2" "max>=26.6.0,<27" >> ../out/gpuprobe-setup.txt 2>&1
           xcodebuild -downloadComponent MetalToolchain >> ../out/gpuprobe-setup.txt 2>&1 || true
-          system_profiler SPDisplaysDataType > ../out/gpu-hardware.txt 2>&1 || true
-          pixi run mojo run ../ci/gpuprobe.mojo > ../out/gpuprobe.txt 2>&1 || echo "exit $?" >> ../out/gpuprobe.txt
+          # (the runner's GPU is a virtual one: "Unknown GPU architecture" on its own, so name M1's Metal family too)
+          pixi run mojo run ../ci/gpuprobe.mojo > ../out/gpuprobe-auto.txt 2>&1 || echo "exit $?" >> ../out/gpuprobe-auto.txt
+          pixi run mojo run --target-accelerator metal:1 ../ci/gpuprobe.mojo > ../out/gpuprobe.txt 2>&1 || echo "exit $?" >> ../out/gpuprobe.txt
+          ioreg -l | grep -i -m 5 '"model"\|IOGPU\|AGX\|paravirt' > ../out/gpu-hardware.txt 2>&1 || true
           cat ../out/gpuprobe.txt
       - uses: actions/upload-artifact@v4
         if: always()
