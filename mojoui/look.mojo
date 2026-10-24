@@ -113,6 +113,8 @@ def look_web_css(look: Look, scope: String) -> String:
     if look.is_none():
         return ""
     var out = String("")
+    if look.type.tabular:  # (GTK's sheet doesn't say it yet: D-301)
+        out += String(scope.strip()) + " { font-feature-settings: \"tnum\" 1; }\n"
     for s in look.surfaces:
         if not text_only(s):
             out += scope + "[data-tag=" + s.role + "] { " + surface_rule(s, True) + "}\n"

@@ -3764,8 +3764,13 @@ def run_step[A: App](host_addr: Int, step: String):
             var begin = String("drag-begin")
             var update = String("drag-update")
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, begin.as_c_string_span(), sx, sy)
-            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(), dx / 2, dy / 2)
-            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(), dx, dy)
+            # a hand's moves come after the screen has caught up with its press: the handlers drop a move sent while a
+            # rebuild runs, so the test's moves were lost and its drag selected one cell (the Mac's: 3 × 3; D-304)
+            for half in range(2):
+                var free_by = perf_counter_ns() + 3_000_000_000
+                while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
+                    pump()
+                external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(), dx * Float64(half + 1) / 2, dy * Float64(half + 1) / 2)
         elif verb == "zoom":  # the scroll controller's signal: 4 notches up = 2×
             var factor = Float64(to_int(kv[1]))
             var handled = List[c_int](length=1, fill=0)

@@ -250,6 +250,16 @@ MENU_JS = r"""
     if (!e.target.closest('.menu')) { menus.closeAll(); document.querySelectorAll('.menu.context').forEach(menus.dismiss); }
     if (!e.target.closest('.popover')) document.querySelectorAll('.popover').forEach(menus.dismiss);
   }, true);
+  // A canvas drag outlives its canvas: the press's reply can rebuild the page, and a drag's moves and its release then
+  // land on the new canvas, which never saw the press. They go to whichever canvas now shows the dragged node (st.drag),
+  // so a drag-select isn't lost on a slow reply (omxplorer's drag flaked: a 2×2 selection one run, one cell the next).
+  for (const kind of ['pointermove', 'pointerup', 'pointercancel']) document.addEventListener(kind, e => {
+    const d = window.mojouiDrag;
+    if (!d || e.mojouiHandled || e.pointerId !== d.id) return;
+    const div = document.querySelector(`[data-kind=canvas][data-node="${d.n}"]`);
+    if (div && div.mojoui && div.mojoui.drag) div.mojoui.drag(e, kind === 'pointermove' ? 'move' : 'up');
+    else if (kind !== 'pointermove') window.mojouiDrag = null;
+  });
   document.addEventListener('mouseover', e => {  // an open bar: hovering another title switches menus, as menus do
     const t = e.target.closest('.menubar > .menu > .menu-title');
     if (t && document.querySelector('.menubar > .menu.open') && !t.parentElement.classList.contains('open')) { menus.closeAll(); t.parentElement.classList.add('open'); }
@@ -531,7 +541,7 @@ CANVAS_JS = r"""
       if (e.button !== 0) return;  // a right click opens a context menu (contextmenu), it doesn't press
       if (keys) cv.focus({ preventScroll: true });
       cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId, at(e));
-      if (pointers.size === 1) { moved = false; const [x, y] = at(e); send(PRESS, x, y, mods(e), 0, 1); }  // where a drag (or tap) starts (dx: Shift, Ctrl, Alt held)
+      if (pointers.size === 1) { moved = false; const [x, y] = at(e); send(PRESS, x, y, mods(e), 0, 1); window.mojouiDrag = { n, id: e.pointerId, x, y, moved: false }; }  // where a drag (or tap) starts (dx: Shift, Ctrl, Alt held)
       if (pointers.size === 2) spread = distance();
     });
     cv.addEventListener('pointermove', e => {
@@ -539,7 +549,9 @@ CANVAS_JS = r"""
       const [x, y] = at(e), [px, py] = pointers.get(e.pointerId);
       pointers.set(e.pointerId, [x, y]);
       if (pointers.size === 1) {
+        e.mojouiHandled = true;
         if (Math.abs(x - px) + Math.abs(y - py) > 0) { if (Math.abs(x - px) + Math.abs(y - py) > 3) moved = true; send(PAN, x, y, x - px, y - py, 1); }
+        const d = window.mojouiDrag; if (d && d.id === e.pointerId) { d.x = x; d.y = y; d.moved = moved; }
       } else if (pointers.size === 2) {
         const d = distance(), [a, b] = [...pointers.values()];
         if (spread > 0 && d > 0) send(ZOOM, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 0, 0, d / spread);
@@ -548,6 +560,8 @@ CANVAS_JS = r"""
     });
     const up = e => {
       if (!pointers.has(e.pointerId)) return;
+      e.mojouiHandled = true;
+      if (window.mojouiDrag && window.mojouiDrag.id === e.pointerId) window.mojouiDrag = null;
       const [x, y] = at(e);
       pointers.delete(e.pointerId);
       // a second click within the double-click time is the DOUBLE that 'dblclick' sends, not another TAP (as on GTK)
@@ -556,6 +570,17 @@ CANVAS_JS = r"""
       else if (pointers.size === 0 && moved) send(RELEASE, x, y, 0, 0, 1);  // a drag ended
     };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    st.drag = (e, what) => {  // the rest of a drag that began on the canvas this one replaced (window.mojouiDrag)
+      const d = window.mojouiDrag, [x, y] = at(e);
+      if (what === 'move') {
+        if (Math.abs(x - d.x) + Math.abs(y - d.y) > 3) d.moved = true;
+        if (x !== d.x || y !== d.y) send(PAN, x, y, x - d.x, y - d.y, 1);
+        d.x = x; d.y = y;
+      } else {
+        window.mojouiDrag = null;
+        if (d.moved) send(RELEASE, x, y, 0, 0, 1); else if (e.type === 'pointerup') send(TAP, x, y, mods(e), 0, 1);
+      }
+    };
     cv.addEventListener('dblclick', e => { const [x, y] = at(e); send(DOUBLE, x, y, 0, 0, 1); });
     cv.addEventListener('wheel', e => {
       e.preventDefault();

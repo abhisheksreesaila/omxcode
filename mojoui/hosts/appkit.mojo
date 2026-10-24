@@ -70,19 +70,32 @@ def svg_icon(name: String, size: Float64) -> Int:
     return image
 
 
-def look_font(family: String, weight: Int, size: Float64) -> Int:
+def look_font(family: String, weight: Int, size: Float64, tabular: Bool = False) -> Int:
     """A look's font by family and weight: the faces the app registered (Inter Regular, Medium, SemiBold; JetBrains Mono
     Regular, Bold), the nearest one for a weight between."""
     if family == "JetBrains Mono":
         return skin_font("JetBrainsMono-Bold" if weight >= 600 else "JetBrainsMono-Regular", size)
-    return skin_font("Inter-SemiBold" if weight >= 600 else ("Inter-Medium" if weight >= 500 else "Inter-Regular"), size)
+    return skin_font("Inter-SemiBold" if weight >= 600 else ("Inter-Medium" if weight >= 500 else "Inter-Regular"), size, tabular)
 
 
-def skin_font(name: String, size: Float64) -> Int:
-    """The app's own font if it was registered (Inter, JetBrains Mono), else the system font."""
+def skin_font(name: String, size: Float64, tabular: Bool = False) -> Int:
+    """The app's own font if it was registered (Inter, JetBrains Mono), else the system font; with tabular figures
+    when the look asks (TypeScale.tabular: the web's font-feature-settings "tnum")."""
     var f = msg(cls("NSFont"), "fontWithName:size:", ns_string(name), size)
     if f == 0:
         f = msg(cls("NSFont"), "systemFontOfSize:", size)
+    elif tabular:  # kNumberSpacingType (6) · kMonospacedNumbersSelector (0)
+        var feature = new("NSMutableDictionary")
+        _ = msg(feature, "setObject:forKey:", ns_number(6), ns_string("CTFeatureTypeIdentifier"))
+        _ = msg(feature, "setObject:forKey:", ns_number(0), ns_string("CTFeatureSelectorIdentifier"))
+        var features = new("NSMutableArray")
+        _ = msg(features, "addObject:", feature)
+        var attrs = new("NSMutableDictionary")
+        _ = msg(attrs, "setObject:forKey:", features, ns_string("NSCTFontFeatureSettingsAttribute"))
+        var desc = msg(msg(f, "fontDescriptor"), "fontDescriptorByAddingAttributes:", attrs)
+        var tab = msg(cls("NSFont"), "fontWithDescriptor:size:", desc, size)
+        if tab != 0:
+            f = tab
     return f
 
 
@@ -450,13 +463,13 @@ struct AppKitHost[A: App](Movable):
             if self.skinned:
                 ref ts = self.look.type
                 var sized_by = ts.title if node.style == TITLE else (ts.headline if bold else (ts.caption if node.style == CAPTION else ts.body))  # (the look's type scale: GTK's label.title-1, .title-4, .caption)
-                _ = msg(w, "setFont:", skin_font("Inter-SemiBold" if bold else "Inter-Regular", sized_by))
+                _ = msg(w, "setFont:", skin_font("Inter-SemiBold" if bold else "Inter-Regular", sized_by, self.look.type.tabular))
                 _ = msg(w, "setTextColor:", ns_color(self.pal.ink3 if node.style == CAPTION else self.pal.ink2))
             var tl = self.text_look(i)
             if tl >= 0:  # a surface's own type (the status bar's figures: Inter 12 on Liquid, JetBrains Mono on the skins)
                 ref sf = self.look.surfaces[tl]
-                if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0:
-                    _ = msg(w, "setFont:", look_font(sf.font, sf.font_weight, sf.font_size if sf.font_size > 0 else self.look.type.body))
+                if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0:  # (no size of its own: the label keeps its style's, a caption's 12)
+                    _ = msg(w, "setFont:", look_font(sf.font, sf.font_weight, sf.font_size if sf.font_size > 0 else msg[Float64](msg(w, "font"), "pointSize"), self.look.type.tabular))
                 if sf.ink != 0:
                     _ = msg(w, "setTextColor:", ns_color(sf.ink))
                 if sf.tracking != 0:  # (letter spacing: the label's string with NSKern, in its own font and colour)
@@ -473,7 +486,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setTextColor:", self.accent())
             elif node.value == TONE_STRONG:
                 _ = msg(w, "setTextColor:", self.ink())
-                _ = msg(w, "setFont:", skin_font("Inter-SemiBold", Float64(13)) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))
+                _ = msg(w, "setFont:", skin_font("Inter-SemiBold", Float64(13), self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))
             var p = self.parents[i] if i < len(self.parents) else -1
             if node.w > 0 or (p >= 0 and self.rt.shown.nodes[p].kind == VSTACK and self.rt.shown.nodes[p].align_items == START):
                 _ = msg(w, "setAlignment:", 0)  # a leading column's lines (or a table's cell) read from the leading edge, as on GTK
@@ -522,7 +535,7 @@ struct AppKitHost[A: App](Movable):
                 var size = self.look.surfaces[k].font_size if k >= 0 and self.look.surfaces[k].font_size > 0 else self.look.type.headline
                 var weight = self.look.surfaces[k].font_weight if k >= 0 else 600
                 var attrs = new("NSMutableDictionary")
-                _ = msg(attrs, "setObject:forKey:", look_font("Inter", weight, size), ns_string("NSFont"))
+                _ = msg(attrs, "setObject:forKey:", look_font("Inter", weight, size, self.look.type.tabular), ns_string("NSFont"))
                 _ = msg(attrs, "setObject:forKey:", ns_color(self.pal.data(0)), ns_string("NSColor"))
                 _ = msg(attrs, "setObject:forKey:", ns_number(0x0101), ns_string("NSUnderline"))  # single, dotted (the web's)
                 _ = msg(attrs, "setObject:forKey:", ns_color(mix(self.pal.card, self.pal.data(0), 0.45)), ns_string("NSUnderlineColor"))
@@ -546,12 +559,12 @@ struct AppKitHost[A: App](Movable):
             elif node.style == SUBTLE or tool or inline:
                 _ = msg(w, "setBordered:", 0)
                 if tool:
-                    _ = msg(w, "setFont:", skin_font("Inter-Medium", c.tool_font) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(11)))
+                    _ = msg(w, "setFont:", skin_font("Inter-Medium", c.tool_font, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(11)))
                     if c.tool_w > 0:
                         _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(c.tool_w)), "setActive:", 1)
                         _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(c.tool_h)), "setActive:", 1)
                 elif inline:  # the icon, then the title, one line, the look's height and side padding (GTK: padding 0 10px)
-                    _ = msg(w, "setFont:", skin_font("Inter-Medium", c.inline_font) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(12)))
+                    _ = msg(w, "setFont:", skin_font("Inter-Medium", c.inline_font, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(12)))
                     var fit = msg[CGPoint](w, "fittingSize")
                     constrain(w, "widthAnchor", fit.x + Float64(2 * c.inline_pad + 6))  # (6: the gap GTK leaves between icon and title)
                     if c.inline_h > 0:
@@ -584,7 +597,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setBordered:", 0)
                 _ = msg(w, "setDrawsBackground:", 0)
                 _ = msg(w, "setFocusRingType:", 1)  # NSFocusRingTypeNone (the box is the field)
-                _ = msg(w, "setFont:", skin_font("Inter-Regular", self.look.type.body))
+                _ = msg(w, "setFont:", skin_font("Inter-Regular", self.look.type.body, self.look.type.tabular))
                 _ = msg(w, "setTextColor:", self.ink())
                 w = self.shell(i, w)
             if not sized:  # (the app sized it: its settings decide)
@@ -609,7 +622,7 @@ struct AppKitHost[A: App](Movable):
             self.wire(w, i, self_addr, "select:")
             if self.drawn_controls():  # the look's box (GTK's dropdown button, the web's select), its arrows inside
                 _ = msg(w, "setBordered:", 0)
-                _ = msg(w, "setFont:", skin_font("Inter-Regular", self.look.type.body))
+                _ = msg(w, "setFont:", skin_font("Inter-Regular", self.look.type.body, self.look.type.tabular))
                 w = self.shell(i, w)
         elif node.kind == SLIDER:
             w = msg(
@@ -871,7 +884,9 @@ struct AppKitHost[A: App](Movable):
             _ = msg(column, "setSpacing:", Float64(8))
             if node.hint != "":
                 var head = msg(cls("NSTextField"), "labelWithString:", ns_string(node.hint))
-                _ = msg(head, "setFont:", msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))
+                _ = msg(head, "setFont:", look_font("Inter", 600, self.look.type.body, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))  # (the web's .popover-title: 13, 600)
+                if self.skinned:
+                    _ = msg(head, "setTextColor:", self.ink())
                 _ = msg(column, "addArrangedSubview:", head)
             for c in node.children:
                 _ = msg(column, "addArrangedSubview:", self.build(c, self_addr))
@@ -947,8 +962,14 @@ struct AppKitHost[A: App](Movable):
                 if node.pad_v == 0 and node.pad_h == 0:
                     _ = msg(w, "setEdgeInsets:", Float64(12), Float64(14), Float64(12), Float64(14))
             var look_at = self.look.surface(node.name) if node.name != "" else -1
+            var inset_x = node.pad_h  # (what a filling child leaves on each side: the view's padding, or its role's)
+            var inset_y = node.pad_v
             if look_at >= 0:  # a framework role the theme's look shapes (the toolbar's island, the inspector's panel)
-                self.paint_surface(w, look_at, node.pad_v == 0 and node.pad_h == 0)
+                var own_pad = node.pad_v == 0 and node.pad_h == 0
+                self.paint_surface(w, look_at, own_pad)
+                if own_pad and self.look.surfaces[look_at].pad_top >= 0:
+                    inset_x = self.look.surfaces[look_at].pad_x
+                    inset_y = (self.look.surfaces[look_at].pad_top + self.look.surfaces[look_at].pad_bottom) // 2
             elif self.skinned and (node.name == "toolbar" or node.name == "status-bar" or node.name == "menubar"):  # the chrome band
                 _ = msg(w, "setWantsLayer:", 1)
                 _ = msg(msg(w, "layer"), "setBackgroundColor:", msg(ns_color(self.pal.chrome), "CGColor"))
@@ -984,7 +1005,7 @@ struct AppKitHost[A: App](Movable):
                     hug(child, Float32(750), vertical)
                 if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
-                    var inset = Float64(2 * (node.pad_h if vertical else node.pad_v))
+                    var inset = Float64(2 * (inset_x if vertical else inset_y))
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
                     _ = msg(c2, "setActive:", 1)
             if node.justify_items == CENTER and not grows and not spacers:
@@ -1038,7 +1059,7 @@ struct AppKitHost[A: App](Movable):
         _ = msg(layer, "setShadowRadius:", Float64(1.5))
         _ = msg(layer, "setShadowOffset:", Float64(0), Float64(-1))
         var attrs = new("NSMutableDictionary")
-        _ = msg(attrs, "setObject:forKey:", look_font("Inter", sg.on_weight if on else sg.weight, sg.font_size), ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", look_font("Inter", sg.on_weight if on else sg.weight, sg.font_size, self.look.type.tabular), ns_string("NSFont"))
         _ = msg(attrs, "setObject:forKey:", ns_color(sg.on_ink if on else sg.ink), ns_string("NSColor"))
         _ = msg(b, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", msg(b, "title"), attrs))
         _ = msg(b, "setState:", 1 if on else 0)
@@ -1092,7 +1113,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(layer, "setBorderColor:", msg(ns_color(line), "CGColor"))
         _ = msg(layer, "setCornerRadius:", Float64(min(c.button_radius, c.control_h // 2)))
         var attrs = new("NSMutableDictionary")
-        _ = msg(attrs, "setObject:forKey:", skin_font(weight, self.look.type.body), ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", skin_font(weight, self.look.type.body, self.look.type.tabular), ns_string("NSFont"))
         _ = msg(attrs, "setObject:forKey:", ns_color(ink), ns_string("NSColor"))
         _ = msg(w, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs))
         _ = msg(w, "setContentTintColor:", ns_color(ink))
@@ -1428,8 +1449,8 @@ struct AppKitHost[A: App](Movable):
         for l in self.wraps:
             if (msg(l, "isDescendantOf:", content) & 0xFF) != 0:
                 here.append(l)
-        for l in here:
-            _ = msg(l, "setPreferredMaxLayoutWidth:", Float64(0))  # (one line again: the width the layout allows now)
+        for l in here:  # one line again, the width the layout allows now: 0 meant "the frame's width" to AppKit, and inside
+            _ = msg(l, "setPreferredMaxLayoutWidth:", Float64(100000))  # a scroll view that frame started tiny, so the column shrank to 117 pt (the Report's inspector, 2026-10-24)
         _ = msg(content, "layoutSubtreeIfNeeded")
         for l in here:
             _ = msg(l, "setPreferredMaxLayoutWidth:", msg[CGRect](l, "frame").width)
@@ -1584,6 +1605,10 @@ struct AppKitHost[A: App](Movable):
             elif (msg(w, "isKindOfClass:", cls("NSView")) & 0xFF) != 0:
                 var b = msg[CGRect](w, "bounds")
                 var r = msg[CGRect](w, "convertRect:toView:", b.x, b.y, b.width, b.height, 0)
+                if n.kind == TEXT and (i >= len(self.shells) or self.shells[i] == 0):  # the text's own box: a label's frame has 2 pt each side
+                    var inset = msg[CGRect](w, "alignmentRectInsets")  # (NSEdgeInsets: top, left, bottom, right) that GTK's and the web's labels don't
+                    r.x += inset.y
+                    r.width -= inset.y + inset.height
                 var top_y = cb.height - (r.y + r.height)
                 line += " @ " + pts(r.x) + "," + pts(top_y) + " " + pts(r.width) + "x" + pts(r.height)
                 var flags = String("")

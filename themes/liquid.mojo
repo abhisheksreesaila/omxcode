@@ -28,7 +28,7 @@ def liquid_look(p: Palette) -> Look:
     var value = words("kpi-value", 34, 600, 0, -0.8)  # (a Report tile's figure: GTK's and the web's title-1 in a tile)
     value.line_height = 40
     surfaces.append(value^)
-    return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10, 30, 14, 8), surfaces^,
+    return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11, True), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10, 30, 14, 8), surfaces^,
                 Segments(rgba(15, 23, 42, 15), 999, 3, 0, 24, 12, 999, 12, 500, p.ink3, rgba(255, 255, 255), p.ink, 500, True))  # (the sheet's toggle-group rules say the same: D-300)
 
 
@@ -136,7 +136,7 @@ body.liquid { --sp-snappy: cubic-bezier(.22, 1, .36, 1);  /* calm ease-out, no o
   --glass-bg: rgba(255,255,255,.62); --glass-fx: blur(24px) saturate(1.6);
   --glass-shadow: inset 0 1px rgba(255,255,255,.9), 0 0 0 1px rgba(255,255,255,.75), 0 8px 32px rgba(15,23,42,.10), 0 1px 2px rgba(15,23,42,.06);
   --solid-shadow: 0 0 0 1px rgba(15,23,42,.07), 0 1px 3px rgba(15,23,42,.05);
-  background: linear-gradient(180deg, #eef2f7, #e4e9f1) fixed; font: 13px/18px Inter, sans-serif; font-feature-settings: "tnum" 1; }
+  background: linear-gradient(180deg, #eef2f7, #e4e9f1) fixed; font: 13px/18px Inter, sans-serif; }
 body.liquid .text.title { font-size: 22px; line-height: 28px; letter-spacing: -.3px; } body.liquid .text.caption { font-size: 12px; }
 body.liquid .board { background: transparent; }
 @keyframes liquid-arrive { from { opacity: 0; transform: scale(.98) translateY(-4px); } to { opacity: 1; transform: none; } }
