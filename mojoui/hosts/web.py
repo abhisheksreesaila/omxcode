@@ -101,6 +101,8 @@ img.image { max-width: 100%; height: auto; border-radius: 12px; image-rendering:
 .segmented label, .tabs label { position: relative; }
 .segmented input, .tabs input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
 .segmented span, .tabs span { display: inline-flex; align-items: center; min-height: 48px; padding: 0 16px; border-radius: 9px; font-weight: 600; }
+.segmented[style*="align-self:stretch"] label, .tabs[style*="align-self:stretch"] label { flex: 1 1 0; }  /* a filling one: equal segments, as GTK's homogeneous group and the Mac's */
+.segmented[style*="align-self:stretch"] span, .tabs[style*="align-self:stretch"] span { justify-content: center; width: 100%; box-sizing: border-box; }
 .segmented input:checked + span, .tabs input:checked + span { background: light-dark(#fff, #3a3a3c); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
 .segmented input:focus-visible + span, .tabs input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--accent) 60%, transparent); }
 .tabs span { padding: 0 20px; }

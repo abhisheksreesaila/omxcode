@@ -48,7 +48,7 @@ def InspectorPage(title: String, on_back: Int, sections: List[View]) -> List[Vie
 
 def Row(label: String, control: View) -> View:
     """A label on the left, its control on the right."""
-    return HStack(Text(label), Spacer(), control.copy(), spacing=8).fill().align(CENTER)
+    return HStack(Text(label), Spacer(), control.copy(), spacing=8).fill().align(CENTER).tag("inspector-row")  # (a look sets its height)
 
 
 def Stepper(value: String, on_less: Int, on_more: Int) -> View:

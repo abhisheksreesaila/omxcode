@@ -4,6 +4,9 @@ set -uo pipefail
 mkdir -p out apps
 sw_vers > out/macos.txt
 system_profiler SPDisplaysDataType > out/displays.txt 2>&1
+# Scroll bars as a trackpad Mac shows them (overlay): GitHub's Macs have a mouse, so "Automatically" means legacy bars that
+# take 17 pt from every scroll view, which AppKit keeps whatever the app asks (the person's choice; 2026-10-25)
+defaults write -g AppleShowScrollBars -string WhenScrolling
 for steps_file in ci/*.steps; do
     app=$(basename "$steps_file" .steps)
     zip=$(ls zips/"$app"-*.zip | head -1)

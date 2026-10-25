@@ -167,6 +167,7 @@ struct AppKitHost[A: App](Movable):
     var widgets: List[Int]
     var shells: List[Int]  # per node: the box a control is drawn in when it isn't the control (a field's rounded frame); 0: none
     var objects: List[Int]  # per node: a Board object's box when it wears its content's role (the table's card); 0: none
+    var boxed: Int  # the Board child being built inside its role's box (the box wears the role; the child doesn't, as on GTK)
     var dashes: List[Tuple[Int, Int, Int, Int]]  # (view, its dashed outline's shape layer, corner radius, width): paths follow the layout (dash_paths)
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
@@ -206,6 +207,7 @@ struct AppKitHost[A: App](Movable):
         self.widgets = List[Int]()
         self.shells = List[Int]()
         self.objects = List[Int]()
+        self.boxed = -1
         self.dashes = List[Tuple[Int, Int, Int, Int]]()
         self.focus = -1
         self.canvases = List[AppleCanvas]()
@@ -415,7 +417,7 @@ struct AppKitHost[A: App](Movable):
             if n.hint != "" or n.value & CHECKED != 0:
                 var image = msg(cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", ns_string("checkmark" if n.value & CHECKED != 0 else sf_symbol(n.hint)), 0)
                 _ = msg(b, "setImage:", image)
-                _ = msg(b, "setImagePosition:", 3)  # NSImageLeft
+                _ = msg(b, "setImagePosition:", 2)  # NSImageLeft (3 is NSImageRight: the icon came after the title)
             if n.value & DANGER != 0:
                 _ = msg(b, "setContentTintColor:", msg(cls("NSColor"), "systemRedColor"))
             if n.value & DISABLED != 0:
@@ -522,7 +524,9 @@ struct AppKitHost[A: App](Movable):
                 w = msg(cls("NSButton"), "buttonWithTitle:target:action:", ns_string(node.text), self.target, sel("tap:"))
                 if image != 0:
                     _ = msg(w, "setImage:", image)
-                    _ = msg(w, "setImagePosition:", 1 if tool else (7 if inline else 3))  # NSImageAbove / NSImageLeading / NSImageLeft
+                    # NSCellImagePosition: 2 left, 5 above, 7 leading (3 is right and 1 image only: the sheet tabs' icons came after
+                    # their names, and a tool's title was hidden; Mac, 2026-10-25)
+                    _ = msg(w, "setImagePosition:", 5 if tool else (7 if inline else 2))  # NSImageAbove / NSImageLeading / NSImageLeft
                     _ = msg(w, "setImageHugsTitle:", 1)
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             var token = node.style == TOKEN or node.style == TOKEN_LIT
@@ -794,24 +798,28 @@ struct AppKitHost[A: App](Movable):
         elif node.kind == BOARD:
             # A scroll view over a flipped content view (y runs down, as on every other host) where each child sits
             # at its own place; a child drags by a pan (the Board's on_move).
-            w = top_scroll_view()
-            _ = msg(w, "setHasVerticalScroller:", 1)
-            _ = msg(w, "setHasHorizontalScroller:", 1)
+            w = top_scroll_view(True)
             _ = msg(w, "setDrawsBackground:", 0)
             var content = msg(msg(cls("MojoBoardView"), "alloc"), "initWithFrame:", Float64(0), Float64(0), Float64(node.spacing), Float64(node.size))
             _ = msg(w, "setDocumentView:", content)
             for k in range(len(node.children)):
                 var c = node.children[k]
                 var cn = self.rt.shown.nodes[c].copy()  # (copy: building the child mutates self)
+                var look_at = self.look.surface(cn.name) if cn.name != "" else -1
+                var boxed = look_at >= 0 and self.look.surfaces[look_at].pad_top >= 0
+                self.boxed = c if boxed else -1
                 var child = self.build(c, self_addr)
+                self.boxed = -1
                 _ = msg(child, "setTranslatesAutoresizingMaskIntoConstraints:", 1)
                 var placed = child
-                var look_at = self.look.surface(cn.name) if cn.name != "" else -1
-                if look_at >= 0 and self.look.surfaces[look_at].pad_top >= 0:
+                if boxed:
                     # a Board's object wears its content's tag, as on GTK and the web: the role's box at the object's
                     # place, its content inside the role's padding (the web's .object[data-tag=table] and its view)
                     var sf = self.look.surfaces[look_at].copy()
                     placed = new("MojoBoardView")
+                    # its size first: the clip and the content follow the box's size changes, and grown from 0 × 0 they
+                    # came out twice the box (the table's content 2144 × 694 in a 1084 × 358 box; Mac, 2026-10-25)
+                    _ = msg(placed, "setFrame:", Float64(cn.x), Float64(cn.y), Float64(cn.w), Float64(cn.h))
                     self.paint_surface(placed, look_at, False)
                     var clip = new("MojoBoardView")  # (the object clips its content, as the web's .object: overflow hidden; its shadow stays)
                     _ = msg(clip, "setFrame:", Float64(0), Float64(0), Float64(cn.w), Float64(cn.h))
@@ -819,7 +827,9 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(clip, "setWantsLayer:", 1)
                     _ = msg(msg(clip, "layer"), "setMasksToBounds:", 1)
                     _ = msg(msg(clip, "layer"), "setCornerRadius:", Float64(max(sf.radius_top, 0)))
-                    _ = msg(child, "setFrame:", Float64(sf.pad_x), Float64(sf.pad_top), Float64(cn.w), Float64(cn.h))
+                    # inside the role's padding, filling what's left (it ran 12 pt past the box's right edge, cut there)
+                    _ = msg(child, "setFrame:", Float64(sf.pad_x), Float64(sf.pad_top), Float64(cn.w - 2 * sf.pad_x), Float64(cn.h - sf.pad_top - sf.pad_bottom))
+                    _ = msg(child, "setAutoresizingMask:", 18)
                     _ = msg(clip, "addSubview:", child)
                     _ = msg(placed, "addSubview:", clip)
                     _ = msg(placed, "setTranslatesAutoresizingMaskIntoConstraints:", 1)
@@ -915,8 +925,7 @@ struct AppKitHost[A: App](Movable):
         elif node.kind == SPACER:
             w = new("NSView")
         elif node.kind == SCROLL:
-            w = top_scroll_view()
-            _ = msg(w, "setHasVerticalScroller:", 1)
+            w = top_scroll_view(False)
             _ = msg(w, "setDrawsBackground:", 0)
             var content = self.build(node.children[0], self_addr)
             _ = msg(content, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
@@ -926,6 +935,9 @@ struct AppKitHost[A: App](Movable):
                 var pin = msg(msg(content, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
                 if anchor == "widthAnchor":  # (content the app made wider is cut off at the edge: it never widens the window)
                     _ = msg(pin, "setPriority:", Float32(495))  # below NSLayoutPriorityWindowSizeStayPut (500), above a wrapping label (490)
+                    # and never narrower than the scroll view: at 495 alone its rows' stacks (hugging at 750) drew it in to
+                    # its widest child, the inspector 251 pt in a 268 pt scroll, its text cut a line short (Mac, 2026-10-25)
+                    _ = msg(msg(msg(content, "widthAnchor"), "constraintGreaterThanOrEqualToAnchor:", msg(clip, "widthAnchor")), "setActive:", 1)
                 _ = msg(pin, "setActive:", 1)
             if not node.sized_height():
                 constrain(w, "heightAnchor", Float64(node.size))
@@ -961,7 +973,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(msg(w, "layer"), "setCornerRadius:", Float64(6 if self.skinned else 10))
                 if node.pad_v == 0 and node.pad_h == 0:
                     _ = msg(w, "setEdgeInsets:", Float64(12), Float64(14), Float64(12), Float64(14))
-            var look_at = self.look.surface(node.name) if node.name != "" else -1
+            var look_at = self.look.surface(node.name) if node.name != "" and i != self.boxed else -1  # (a boxed Board child: its box wears it)
             var inset_x = node.pad_h  # (what a filling child leaves on each side: the view's padding, or its role's)
             var inset_y = node.pad_v
             if look_at >= 0:  # a framework role the theme's look shapes (the toolbar's island, the inspector's panel)
@@ -1047,6 +1059,7 @@ struct AppKitHost[A: App](Movable):
             var fit = msg[CGPoint](b, "fittingSize")
             _ = msg(msg(msg(b, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", fit.x + Float64(2 * sg.pad)), "setActive:", 1)
             _ = msg(track, "addArrangedSubview:", b)
+        constrain(track, "heightAnchor", Float64(sg.h + 2 * sg.track_pad))  # (in a row it came out 24 pt, its insets lost: GitHub's macOS 26)
         return track
 
     def style_segment(self, b: Int, on: Bool):
@@ -1124,6 +1137,13 @@ struct AppKitHost[A: App](Movable):
         _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", fit.x + Float64(2 * c.button_pad)), "setActive:", 1)
         prefer(w, "widthAnchor", fit.x + Float64(2 * c.button_pad))
         constrain(w, "heightAnchor", Float64(c.control_h))
+
+    def box_inset(self, i: Int, name: String) -> Tuple[Int, Int]:
+        """What a Board object's role box takes from its content's size: the role's padding, across and down."""
+        var k = self.look.surface(name)
+        if k < 0 or self.look.surfaces[k].pad_top < 0:
+            return (0, 0)
+        return (2 * self.look.surfaces[k].pad_x, self.look.surfaces[k].pad_top + self.look.surfaces[k].pad_bottom)
 
     def paint_surface(mut self, w: Int, k: Int, pad: Bool):
         """A look's surface on a stack's layer (mojoui/look.mojo; GTK and the web write the same values as CSS): its fill,
@@ -1232,13 +1252,14 @@ struct AppKitHost[A: App](Movable):
                 self.shells[i] = outer
         if i < len(self.sized):
             self.sized[i] = (node.w, node.h, node.min_w, node.max_w)
+        var inset = self.box_inset(i, node.name) if i == self.boxed else (0, 0)  # (a boxed Board child fills its box's inside)
         if node.w != 0:
-            var cw = msg(msg(outer, "widthAnchor"), "constraintEqualToConstant:", Float64(node.w))
+            var cw = msg(msg(outer, "widthAnchor"), "constraintEqualToConstant:", Float64(node.w - inset[0]))
             _ = msg(cw, "setActive:", 1)
             if i < len(self.size_w):
                 self.size_w[i] = cw
         if node.h != 0:
-            var ch = msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h))
+            var ch = msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h - inset[1]))
             _ = msg(ch, "setActive:", 1)
             if i < len(self.size_h):
                 self.size_h[i] = ch
@@ -1483,10 +1504,11 @@ struct AppKitHost[A: App](Movable):
             if p.op != SET_SIZE:
                 continue
             ref n = self.rt.shown.nodes[p.node]
+            var inset = self.box_inset(p.node, n.name) if p.node < len(self.objects) and self.objects[p.node] != 0 else (0, 0)
             if n.w != self.sized[p.node][0]:
-                _ = msg(self.size_w[p.node], "setConstant:", Float64(n.w))
+                _ = msg(self.size_w[p.node], "setConstant:", Float64(n.w - inset[0]))
             if n.h != self.sized[p.node][1]:
-                _ = msg(self.size_h[p.node], "setConstant:", Float64(n.h))
+                _ = msg(self.size_h[p.node], "setConstant:", Float64(n.h - inset[1]))
             self.sized[p.node] = (n.w, n.h, n.min_w, n.max_w)
         return True
 
@@ -1630,6 +1652,15 @@ struct AppKitHost[A: App](Movable):
                         flags += " canvas " + String(self.canvases[k].wpx) + "x" + String(self.canvases[k].hpx) + " px drawn v" + String(self.canvases[k].drawn) + " of v" + String(n.value)
                         if self.canvases[k].wpx == 0:
                             problems.append("canvas node " + String(i) + " (id " + String(n.style) + ") was never drawn")
+                if (n.kind == SCROLL or n.kind == BOARD) and (msg(w, "respondsToSelector:", sel("contentView")) & 0xFF) != 0:
+                    # its clip (what the content gets), its bars' style (0 legacy, 1 overlay), the vertical bar's width and
+                    # whether it shows, and its content insets (top, left, bottom, right): where a narrow clip's points went
+                    var clip = msg[CGRect](msg(w, "contentView"), "frame")
+                    var bar = msg(w, "verticalScroller")
+                    var ins = msg[CGRect](w, "contentInsets")
+                    flags += (" clip " + pts(clip.width) + "x" + pts(clip.height) + " bars " + String(msg(w, "scrollerStyle"))
+                              + " vbar " + (pts(msg[CGRect](bar, "frame").width) + ("" if (msg(bar, "isHidden") & 0xFF) == 0 else " hidden") if bar != 0 else "none")
+                              + " insets " + pts(ins.x) + "," + pts(ins.y) + "," + pts(ins.width) + "," + pts(ins.height))
                 if n.kind == ICON or ((n.kind == BUTTON) and n.hint != ""):
                     var name = n.text if n.kind == ICON else n.hint
                     if sf_symbol(name) == "questionmark.square.dashed" and name != "app-logo":
@@ -1974,7 +2005,7 @@ def is_flipped(view: Int, cmd: Int) abi("C") -> Int8:
     return 1  # a Board's content and a scroll view's clip count y from the top, like every other host
 
 
-def top_scroll_view() -> Int:
+def top_scroll_view(across: Bool) -> Int:
     """A scroll view whose clip view counts y from the top: content shorter than the view sits at its top, as on every
     other host (AppKit's own clip view keeps it at the bottom: the owner's Report and inspector pages, 2026-10-23)."""
     var w = new("NSScrollView")
@@ -1982,6 +2013,13 @@ def top_scroll_view() -> Int:
     # Overlay scroll bars, whatever the system setting: a Mac with a mouse (GitHub's Macs) shows legacy bars that take
     # 15 pt beside the content; the app sizes the content to its window, so AppKit widened the window by those points,
     # the app filled the new width, and the window grew without end (2026-10-23).
+    # (AppKit keeps the person's own choice over this: with "Show scroll bars: Always", or a mouse and "Automatically",
+    # the bars are legacy and take 17 pt from the clip whatever is set here; the dump's "bars 0", 2026-10-25. Bars that
+    # hide while the content fits leave no white corner where two would meet.)
+    _ = msg(w, "setHasVerticalScroller:", 1)
+    if across:
+        _ = msg(w, "setHasHorizontalScroller:", 1)
+    _ = msg(w, "setAutohidesScrollers:", 1)
     _ = msg(w, "setScrollerStyle:", 1)  # NSScrollerStyleOverlay
     return w
 

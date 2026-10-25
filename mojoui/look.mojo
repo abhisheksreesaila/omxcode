@@ -118,12 +118,16 @@ def look_web_css(look: Look, scope: String) -> String:
     for s in look.surfaces:
         if not text_only(s):
             out += scope + "[data-tag=" + s.role + "] { " + surface_rule(s, True) + "}\n"
+            if s.pad_top >= 0:  # a Board object wears its content's role; the content fills its inside, no second card (as GTK)
+                out += (scope + ".board > .object[data-tag=" + s.role + "] > [data-tag=" + s.role + "] { background: none; box-shadow: none; border: 0; "
+                        + "border-radius: 0; padding: 0; margin: 0; backdrop-filter: none; width: 100% !important; height: 100% !important; }\n")
         var t = text_rule(s)
         if t != "":
             out += scope + "[data-tag=" + s.role + "] .text, " + scope + ".text[data-tag=" + s.role + "] { " + text_rule(s, True) + "}\n"
     var c = look.controls.copy()
     if c.control_h > 0:
         out += scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; }\n"
+        out += scope + "label.toggle { min-height: " + px(c.control_h) + "; }\n"  # (the base sheet's 48 px touch row made an inspector's toggle row 18 px taller than GTK's and the Mac's)
         out += (scope + "select, " + scope + "input[type=text], " + scope + "input[type=date], " + scope + "textarea { min-height: " + px(c.control_h)
                 + "; border-radius: " + px(c.field_radius) + "; }\n")
     if c.tool_w > 0:
