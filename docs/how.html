@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en" class="oq-root oq-night oq-family-dev no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How omxcode works · one readable language, from button to kernel</title>
+<meta name="description" content="One card from omxplorer, followed all the way down: one line of Mojo becomes a GTK widget on Linux, an HTML element on the web and an AppKit view on the Mac, from the same numbers.">
+<meta property="og:title" content="How omxcode works: one readable language, from button to kernel">
+<meta property="og:description" content="One line of Mojo, three native toolkits, the same card. The internals, zoomed in.">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/how/tile-mac.png">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<!-- omxqua v0.1.2 (docs/omxqua/VERSION); site.css is the landing layer the pages share -->
+<link rel="stylesheet" href="omxqua/src/fonts.css">
+<link rel="stylesheet" href="omxqua/src/tokens.css">
+<link rel="stylesheet" href="omxqua/src/components.css">
+<link rel="stylesheet" href="site.css">
+<style>
+/* ---- source lines: ink by default; the theme's numbers glow wherever they travel ---- */
+.code { margin: 0; font: 13.5px/1.75 var(--mono); color: var(--ink2); white-space: pre; overflow-x: auto; }
+.code .k { color: var(--ink); font-weight: 600; } .code .c { color: var(--ink2); opacity: .62; } .code .s { color: var(--oq-ok); }
+.code .v { color: var(--word); font-weight: 600; border-radius: 4px; transition: background .5s var(--ease), box-shadow .5s var(--ease); }
+.lit .code .v { background: color-mix(in srgb, var(--word) 22%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--word) 22%, transparent); }
+.file { font: 600 11.5px var(--mono); letter-spacing: .06em; color: var(--ink2); display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.file b { color: var(--ink); font-weight: 600; letter-spacing: 0; }
+.pane { border-radius: 20px; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); padding: 18px 20px; min-width: 0; }
+
+/* ---- the zoom: a sticky stage; scrolling walks it through six steps ---- */
+.zoom { height: 640vh; padding: 0; }
+.zoom .stick { position: sticky; top: 0; height: 100vh; height: 100dvh; display: grid; grid-template-rows: auto 1fr auto; padding: 84px 24px 28px; box-sizing: border-box; }
+.zoom .top { max-width: 1120px; width: 100%; margin: 0 auto; display: flex; align-items: center; gap: 16px; }
+.zoom .top .eyebrow { flex: 1; }
+.dots { display: flex; gap: 8px; } .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--oq-line); transition: background .3s, transform .4s var(--oq-island-spring); }
+.dots i.on { background: var(--word); transform: scale(1.35); }
+.stage2 { position: relative; max-width: 1180px; width: 100%; margin: 18px auto 0; min-height: 0; }
+.layer { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transform: translateY(24px) scale(.985); pointer-events: none;
+  transition: opacity .6s var(--ease), transform .8s var(--oq-island-spring); }
+.layer.on { opacity: 1; transform: none; pointer-events: auto; }
+.layer > figcaption { display: none; }
+.caps { position: relative; max-width: 860px; width: 100%; margin: 18px auto 0; min-height: 3.2em; text-align: center; }
+.caps p { position: absolute; inset: 0 0 auto; margin: 0; font: 500 clamp(17px, 1.7vw, 22px)/1.4 var(--sans); letter-spacing: -.01em; color: var(--ink2); opacity: 0; transform: translateY(10px); transition: opacity .5s var(--ease), transform .6s var(--ease); text-wrap: balance; }
+.caps p b { color: var(--ink); font-weight: 600; }
+.caps p.on { opacity: 1; transform: none; }
+
+/* step 0–1: the real Report, then the camera flies to one tile */
+.shotf { width: min(1120px, 100%); max-height: 100%; aspect-ratio: 1440 / 640; border-radius: 28px; overflow: hidden; box-shadow: var(--oq-shadow-4), 0 0 0 1px var(--line); background: #e9eef4; }
+/* the tile's centre (13.7 %, 34.8 % of the window) flies to the frame's centre: scale S, then shift by 50 %/S − centre */
+.shotf img { width: 100%; height: 100%; display: block; transform-origin: 0 0; transition: transform 1.3s cubic-bezier(.65, 0, .25, 1); }
+.zoom[data-step="1"] .shotf img { transform: scale(2.6) translate(5.5%, -15.6%); }
+/* step 2: the app and the framework */
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%; align-items: stretch; }
+.big { font: 700 clamp(24px, 3vw, 40px)/1.15 var(--mono); color: var(--ink); letter-spacing: -.02em; margin: 6px 0 14px; white-space: nowrap; }
+.big .v { color: var(--word); }
+.spec .big { font-size: clamp(20px, 2.3vw, 30px); }
+.note { margin: 14px 0 0; color: var(--ink2); font-size: 16px; line-height: 1.5; }
+.note b { color: var(--ink); font-weight: 600; }
+/* step 3: the theme's numbers, with the card they describe */
+.spec { display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; width: 100%; align-items: center; }
+.specimen { position: relative; aspect-ratio: 347 / 149; border-radius: 22px; background: #e9eef4; padding: 34px; box-sizing: border-box; }
+.specimen .card2 { position: relative; height: 100%; border-radius: 16px; background: #fff; box-shadow: 0 0 0 1px rgba(15,23,42,.07), 0 1px 3px rgba(15,23,42,.05); }
+.specimen .pad { position: absolute; inset: 16% 5.2%; border: 1.5px dashed color-mix(in srgb, var(--word) 75%, transparent); border-radius: 4px; }
+.specimen .lab { position: absolute; font: 600 12px var(--mono); color: #0b0b0b; background: var(--word); border-radius: 6px; padding: 2px 7px; white-space: nowrap; opacity: 0; transform: scale(.8); transition: opacity .4s, transform .5s var(--oq-island-spring); }
+.zoom[data-step="3"] .specimen .lab { opacity: 1; transform: none; }
+.specimen .lab:nth-of-type(2) { transition-delay: .15s } .specimen .lab:nth-of-type(3) { transition-delay: .3s } .specimen .lab:nth-of-type(4) { transition-delay: .45s } .specimen .lab:nth-of-type(5) { transition-delay: .6s }
+.specimen .fig { position: absolute; left: 10%; top: 38%; font: 700 clamp(18px, 2.6vw, 34px) var(--sans); color: #1e293b; letter-spacing: -.03em; }
+.vals { display: grid; gap: 8px; margin-top: 14px; }
+.vals div { display: flex; justify-content: space-between; gap: 12px; font: 13px var(--mono); color: var(--ink2); border-top: 1px solid var(--oq-line-2); padding-top: 8px; }
+.vals b { color: var(--word); font-weight: 600; }
+/* step 4: three hosts, the same numbers */
+.tri { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; width: 100%; }
+.tri .pane { padding: 16px; }
+.tri .code { font-size: 11.5px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+.host { display: flex; align-items: center; gap: 8px; font: 650 17px var(--sans); letter-spacing: -.01em; margin-bottom: 4px; }
+.host small { font: 500 12px var(--mono); color: var(--ink2); margin-left: auto; }
+.how2 { font: 13px/1.5 var(--sans); color: var(--ink2); margin: 0 0 12px; }
+.tri hr { border: 0; border-top: 1px solid var(--oq-line-2); margin: 12px 0; }
+/* step 5: the result */
+.res { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; width: 100%; }
+.res figure { margin: 0; }
+.res img { width: 100%; display: block; border-radius: 18px; box-shadow: var(--oq-shadow-3), 0 0 0 1px var(--line); }
+.res figcaption { font: 13px var(--mono); color: var(--ink2); margin-top: 12px; text-align: center; }
+.res figcaption b { color: var(--ink); font: 600 15px var(--sans); display: block; margin-bottom: 2px; }
+.zoom[data-step="5"] .res figure { animation: land .9s var(--oq-island-spring) both; }
+.res figure:nth-child(2) { animation-delay: .12s !important } .res figure:nth-child(3) { animation-delay: .24s !important }
+@keyframes land { from { opacity: 0; transform: translateY(30px) scale(.96); } }
+
+/* ---- the loop: a press travels down and comes back as a patch ---- */
+.loop { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; margin-top: 56px; }
+.rail { position: relative; display: grid; gap: 10px; padding: 22px; }
+.stepb { position: relative; display: grid; grid-template-columns: 34px 1fr; gap: 14px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--oq-surface-2); box-shadow: inset 0 0 0 1px var(--oq-line-2); transition: background .35s, box-shadow .35s; }
+.stepb .n { width: 34px; height: 34px; border-radius: 10px; background: var(--oq-surface-3); display: grid; place-items: center; font: 600 12px var(--mono); color: var(--ink2); transition: background .35s, color .35s; }
+.stepb h4 { margin: 0; font: 600 15.5px var(--sans); } .stepb code { font: 12.5px var(--mono); color: var(--ink2); }
+.stepb.on { background: color-mix(in srgb, var(--word) 10%, var(--oq-surface-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--word) 55%, transparent); }
+.stepb.on .n { background: var(--word); color: #000; }
+.fan { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.fan span { text-align: center; font: 600 12.5px var(--mono); padding: 10px 4px; border-radius: 12px; background: var(--oq-surface-2); box-shadow: inset 0 0 0 1px var(--oq-line-2); color: var(--ink2); transition: all .35s; }
+.fan span.on { color: var(--ink); background: color-mix(in srgb, var(--word) 14%, var(--oq-surface-2)); box-shadow: inset 0 0 0 1px var(--word); }
+.trace { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.trace .log { height: 300px; overflow: hidden; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); padding: 14px 16px; font: 12.5px/1.75 var(--mono); color: var(--ink2); }
+.trace .log div { white-space: pre-wrap; opacity: 0; transform: translateY(6px); transition: opacity .3s, transform .4s var(--ease); }
+.trace .log div.on { opacity: 1; transform: none; }
+.trace .log .h { color: var(--word); } .trace .log .i { color: var(--ink); }
+
+/* ---- clever things: a grid of small cards, each one idea ---- */
+.ideas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 56px; }
+.idea { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+.idea .t { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.idea h3 { font-size: 21px; }
+.idea p { margin: 0; color: var(--ink2); font-size: 15.5px; line-height: 1.5; }
+.idea .code { font-size: 12px; background: var(--bg); border-radius: 12px; padding: 10px 12px; box-shadow: inset 0 0 0 1px var(--oq-line-2); white-space: pre-wrap; }
+.idea .ref { font: 12px var(--mono); color: var(--ink2); margin-top: auto; }
+.ideas.rv .idea { transition: opacity .8s var(--ease), transform .8s var(--ease); }
+
+/* ---- the stack: one core, hosts below it ---- */
+.stack { margin-top: 56px; display: grid; gap: 12px; }
+.tier { display: grid; gap: 10px; }
+.tier.app .blk { background: color-mix(in srgb, var(--word) 12%, var(--oq-surface-1)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--word) 50%, transparent); }
+.tier.core { grid-template-columns: repeat(4, 1fr); } .tier.hosts { grid-template-columns: repeat(4, 1fr); } .tier.metal { grid-template-columns: repeat(4, 1fr); }
+.blk { border-radius: 16px; background: var(--oq-surface-1); box-shadow: inset 0 0 0 1px var(--line); padding: 14px 16px; }
+.blk b { display: block; font: 600 15.5px var(--sans); } .blk span { font: 12.5px var(--mono); color: var(--ink2); }
+.blk .badge { margin-top: 8px; }
+.tier .lbl { grid-column: 1 / -1; font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink2); margin-top: 6px; }
+
+/* ---- the GPU lanes ---- */
+.lanes3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 56px; }
+.lane3 { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.lane3 .big2 { font: 800 clamp(34px, 4vw, 52px)/1 var(--display); letter-spacing: -.04em; }
+.lane3 .big2 small { font: 500 15px var(--sans); color: var(--ink2); letter-spacing: 0; margin-left: 6px; }
+.lane3 p { margin: 0; color: var(--ink2); font-size: 15.5px; line-height: 1.5; }
+.lane3 p b { color: var(--ink); font-weight: 600; }
+.kern .code { white-space: pre-wrap; }
+.kern { margin-top: 56px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; align-items: stretch; }
+
+/* ---- proof: a wipe between two real windows ---- */
+.wipe { position: relative; margin-top: 30px; border-radius: 24px; overflow: hidden; aspect-ratio: 1440 / 640; box-shadow: var(--oq-shadow-4), 0 0 0 1px var(--line); background: #e9eef4; user-select: none; touch-action: pan-y; cursor: ew-resize; }
+.wipe img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.wipe .over { clip-path: inset(0 0 0 var(--x, 50%)); }
+.wipe .bar { position: absolute; top: 0; bottom: 0; left: var(--x, 50%); width: 2px; margin-left: -1px; background: var(--word); box-shadow: 0 0 12px var(--word); }
+.wipe .knob2 { position: absolute; top: 50%; left: var(--x, 50%); width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; background: var(--word); color: #000; display: grid; place-items: center; font: 700 14px var(--mono); box-shadow: var(--oq-shadow-2); }
+.wipe .tagl, .wipe .tagr { position: absolute; top: 14px; font: 600 12px var(--mono); padding: 4px 9px; border-radius: 8px; background: rgba(0,0,0,.72); color: #fff; }
+.wipe .tagl { left: 14px; } .wipe .tagr { right: 14px; }
+.wipebar { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 16px; }
+.gaps { margin-top: 44px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.gaps ul { margin: 10px 0 0; padding-left: 18px; color: var(--ink2); font-size: 15.5px; line-height: 1.6; }
+.gaps li b { color: var(--ink); font-weight: 600; }
+
+/* ---- download ---- */
+.dls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 48px; text-align: left; }
+.dl { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.dl h3 { display: flex; align-items: center; gap: 10px; }
+.dl p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
+.dl .cta { align-self: flex-start; height: 44px; font-size: 15px; padding: 0 20px; }
+.dl pre { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); font: 12.5px/1.7 var(--mono); color: var(--ink); overflow-x: auto; }
+.dl .fine2 { font: 12px/1.6 var(--mono); color: var(--ink2); margin-top: auto; }
+.dl .cp2 { align-self: flex-start; border: 0; cursor: pointer; background: rgb(var(--oq-state) / .08); color: var(--ink2); font: 500 12px var(--mono); height: 32px; padding: 0 14px; border-radius: 999px; }
+.dl .cp2:hover { color: var(--ink); }
+.dl .fine2 code { color: var(--ink); }
+
+.hero.center .wrap { display: block; } .hero.center .lede { margin-left: auto; max-width: 820px; } .hero.center .ctas { justify-content: center; }
+@media (max-width: 960px) {
+  .zoom { height: auto; } .zoom .stick { position: static; height: auto; display: block; padding: 96px 20px 40px; }
+  .dots, .caps { display: none; }
+  .stage2 { margin-top: 24px; display: grid; gap: 56px; }
+  .layer { position: static; opacity: 1; transform: none; display: block; }
+  .layer > figcaption { display: block; font: 500 17px/1.45 var(--sans); color: var(--ink2); margin-top: 14px; }
+  .layer > figcaption b { color: var(--ink); }
+  .shotf img { transform: none !important; }
+  .duo, .spec, .tri, .res, .loop, .ideas, .lanes3, .kern, .gaps, .dls { grid-template-columns: 1fr; }
+  .tier.core, .tier.hosts, .tier.metal { grid-template-columns: 1fr 1fr; }
+  .big { white-space: normal; font-size: 22px; }
+}
+@media (prefers-reduced-motion: reduce) { .layer, .caps p, .shotf img, .res figure { transition: none !important; animation: none !important; } }
+</style>
+<noscript><style>.rv { opacity: 1; transform: none; } .zoom { height: auto; } .zoom .stick { position: static; height: auto; display: block; } .dots, .caps { display: none; }
+  .stage2 { display: grid; gap: 56px; } .layer { position: static; opacity: 1; transform: none; display: block; } .layer > figcaption { display: block; } .trace .log div { opacity: 1; transform: none; }</style></noscript>
+</head>
+<body>
+
+<nav class="lnav">
+  <a class="brand" href="index.html"><span class="mark">ox</span>omxcode <span class="sub">· how it works</span></a>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#zoom">One card</a><a href="#loop">The loop</a><a href="#clever">Under the hood</a><a href="#gpu">The GPU</a><a href="#proof">Proof</a></div>
+  <div class="right"><a class="cta" href="#download">Download</a></div>
+</nav>
+
+<main id="top">
+
+<section class="hero center" style="padding-bottom:40px">
+  <div class="wrap">
+    <div class="eyebrow rise"><span>How it works</span></div>
+    <h1 class="rise" data-words data-step="70" data-d0="120" style="font-size:clamp(52px,8vw,112px)">One readable language, from button to kernel.</h1>
+    <p class="lede rise"><span data-words data-step="28" data-d0="700">We took one card from omxplorer and followed it all the way down: from a line of Mojo to a GTK widget, an HTML element and a Mac view.</span> <span class="two" data-words data-step="28" data-d0="1100">Same file. Same numbers. Three native toolkits.</span></p>
+    <div class="ctas rise"><span style="animation-delay:1500ms"><a class="cta" href="#zoom">Zoom in</a></span><span style="animation-delay:1580ms"><a class="more" href="#download">Download it</a></span></div>
+  </div>
+</section>
+
+<!-- One card, zoomed in: scrolling walks the stage through six steps -->
+<section class="zoom" id="zoom" data-step="0" aria-label="One card, followed from Mojo to three platforms">
+  <div class="stick">
+    <div class="top"><div class="eyebrow">One card, all the way down</div><div class="dots" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div></div>
+    <div class="stage2">
+
+      <figure class="layer on" data-s="0 1" style="margin:0">
+        <div class="shotf" style="position:relative"><img src="img/how/report-web.png" alt="omxplorer's Report over a million orders: KPI tiles above two charts"></div>
+        <figcaption><b>This is omxplorer's Report,</b> over a million orders. Look at the first tile, the sum of revenue.</figcaption>
+      </figure>
+
+      <figure class="layer" data-s="2" style="margin:0">
+        <div class="duo">
+          <div class="pane"><div class="file">THE APP · <b>examples/omxplorer/app.mojo</b></div>
+            <div class="big">KpiTile(<span class="v">card</span>)</div>
+<pre class="code"><span class="c"># one line puts a tile on the Report</span>
+kpis.append(<span class="k">KpiTile</span>(kpi.view(…)))</pre>
+            <p class="note">The app says <b>what</b> it wants: a KPI tile holding this card. No colours, no pixels, no platform.</p></div>
+          <div class="pane"><div class="file">THE FRAMEWORK · <b>mojoui/reportpage.mojo</b></div>
+            <div class="big">.tag(<span class="v">"tile"</span>)</div>
+<pre class="code"><span class="k">def</span> KpiTile(<span class="k">var</span> card: View) -&gt; View:
+    <span class="k">return</span> card^.fill().tag(<span class="s">"tile"</span>)</pre>
+            <p class="note">The component gives the card a <b>role</b>: <code class="mono">tile</code>. A role is a name every theme and every host agrees on.</p></div>
+        </div>
+        <figcaption><b>In the app it's one call.</b> In the framework it's a card with a role, "tile".</figcaption>
+      </figure>
+
+      <figure class="layer" data-s="3" style="margin:0">
+        <div class="spec">
+          <div class="pane lit"><div class="file">THE THEME · <b>themes/liquid.mojo</b></div>
+            <div class="big">solid(<span class="v">"tile"</span>, <span class="v">16</span>, <span class="v">16</span>, <span class="v">18</span>, <span class="v">16</span>)</div>
+<pre class="code"><span class="c"># mojoui/theme.mojo</span>
+<span class="k">def</span> solid(role, radius, pad_top, pad_x, pad_bottom) -&gt; Surface:
+    <span class="c">"""An opaque white card with a hairline ring
+       and a faint shadow (the content: a table, a tile)."""</span></pre>
+            <div class="vals"><div>corners<b>16</b></div><div>padding<b>16 · 18 · 16</b></div><div>fill<b>white</b></div><div>ring<b>1 pt, slate at 7 %</b></div><div>shadow<b>1 down, 3 soft, 5 %</b></div></div></div>
+          <div class="specimen" aria-hidden="true"><div class="card2"><div class="pad"></div><div class="fig">114,007,922.00</div></div>
+            <span class="lab" style="left:8px;top:8px">corners 16</span><span class="lab" style="left:42%;top:12px">pad 16</span><span class="lab" style="right:2px;top:46%">pad 18</span><span class="lab" style="left:30%;bottom:10px">ring 1</span><span class="lab" style="right:10%;bottom:10px">shadow 1·3</span></div>
+        </div>
+        <figcaption><b>The theme says what a tile looks like, as numbers.</b> Not CSS: a Mojo value any host can read.</figcaption>
+      </figure>
+
+      <figure class="layer lit" data-s="4" style="margin:0">
+        <div class="tri">
+          <div class="pane"><div class="host">Linux <small>GTK 4 · C</small></div>
+            <p class="how2">Mojo calls GTK's C functions directly, then writes the theme's numbers as GTK CSS.</p>
+<pre class="code">w = external_call[<span class="s">"gtk_box_new"</span>](VERTICAL, 0)
+add_class(w, <span class="s">"mui-tag-tile"</span>)</pre><hr>
+<pre class="code">.mui-tag-tile { background: rgb(<span class="v">255,255,255</span>);
+ border-radius: <span class="v">16px</span>; padding: <span class="v">16px 18px</span>;
+ box-shadow: 0 0 0 <span class="v">1px</span> rgba(15,23,42,<span class="v">0.07</span>),
+   0 <span class="v">1px 3px</span> rgba(15,23,42,<span class="v">0.05</span>); }</pre></div>
+          <div class="pane"><div class="host">Web <small>HTML · CSS</small></div>
+            <p class="how2">The same compiled app runs in a Python web server; the browser gets HTML, then only what changed.</p>
+<pre class="code">&lt;div class="vstack card"
+     data-tag=<span class="s">"tile"</span>&gt;</pre><hr>
+<pre class="code">[data-tag=tile] { background: rgb(<span class="v">255,255,255</span>);
+ border-radius: <span class="v">16px</span>; padding: <span class="v">16px 18px</span>;
+ box-shadow: 0 0 0 <span class="v">1px</span> rgba(15,23,42,<span class="v">0.07</span>),
+   0 <span class="v">1px 3px</span> rgba(15,23,42,<span class="v">0.05</span>); }</pre></div>
+          <div class="pane"><div class="host">Mac <small>AppKit · Core Animation</small></div>
+            <p class="how2">No Swift: Mojo sends Objective-C messages itself, and paints the layer from the same numbers.</p>
+<pre class="code">msg(layer, <span class="s">"setBackgroundColor:"</span>, <span class="v">white</span>)
+msg(layer, <span class="s">"setCornerRadius:"</span>, <span class="v">16</span>)
+msg(layer, <span class="s">"setBorderWidth:"</span>, <span class="v">1</span>)
+msg(layer, <span class="s">"setShadowRadius:"</span>, <span class="v">1.5</span>)
+msg(w, <span class="s">"setEdgeInsets:"</span>, <span class="v">16</span>, <span class="v">18</span>, <span class="v">16</span>, <span class="v">18</span>)</pre></div>
+        </div>
+        <figcaption><b>Each host translates the same numbers into its own toolkit's words.</b> The CSS on the left is what the framework wrote, verbatim; on the Mac the values are shown resolved.</figcaption>
+      </figure>
+
+      <figure class="layer" data-s="5" style="margin:0">
+        <div class="res">
+          <figure><img src="img/how/tile-gtk.png" alt="The tile drawn by GTK 4 on Linux"><figcaption><b>Linux</b>GTK 4 · 347 pt wide</figcaption></figure>
+          <figure><img src="img/how/tile-web.png" alt="The tile drawn by the browser"><figcaption><b>Web</b>Chromium · 347 pt wide</figcaption></figure>
+          <figure><img src="img/how/tile-mac.png" alt="The tile drawn by AppKit on macOS"><figcaption><b>Mac</b>AppKit, macOS 26 · 347 pt wide</figcaption></figure>
+        </div>
+        <figcaption><b>Three toolkits. One card.</b> Real pictures, not mock-ups: the same app, built from the same commit.</figcaption>
+      </figure>
+
+    </div>
+    <div class="caps" aria-live="polite">
+      <p class="on" data-s="0"><b>This is omxplorer's Report,</b> over a million orders. Watch the first tile.</p>
+      <p data-s="1"><b>One KPI tile.</b> Let's follow it down, from the app to the screen.</p>
+      <p data-s="2"><b>In the app it's one call.</b> In the framework it's a card with a role: "tile".</p>
+      <p data-s="3"><b>The theme says what a tile looks like, as numbers.</b> Not CSS: values any host can read.</p>
+      <p data-s="4"><b>Each host says the same numbers in its own toolkit's words.</b> GTK and the web get CSS written for them; the Mac gets layer calls.</p>
+      <p data-s="5"><b>Three toolkits. One card.</b> Real pictures from the same commit: Linux, the web, the Mac.</p>
+    </div>
+  </div>
+</section>
+
+<!-- The loop: one press, all the way round -->
+<section id="loop">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">The loop</div>
+      <h2 class="rv">A press goes in. <span class="two">A patch comes out.</span></h2>
+      <p class="lede rv">Every omxcode app is two functions: <b>update</b> changes the state, <b>view</b> describes the whole screen. The framework works out what changed and tells each toolkit only that.</p>
+    </div>
+    <div class="loop" id="loopv">
+      <div class="pane rail rv">
+        <div class="stepb"><span class="n">1</span><div><h4>You press "Format"</h4><code>a native button fires its signal</code></div></div>
+        <div class="stepb"><span class="n">2</span><div><h4>update(event)</h4><code>the app changes its state: plain Mojo</code></div></div>
+        <div class="stepb"><span class="n">3</span><div><h4>view()</h4><code>the whole screen, as a flat list of nodes</code></div></div>
+        <div class="stepb"><span class="n">4</span><div><h4>diff(before, after)</h4><code>same shape? a few patches. new shape? a rebuild</code></div></div>
+        <div class="stepb"><span class="n">5</span><div><h4>Each host applies it</h4><div class="fan" style="margin-top:8px"><span>GTK</span><span>Web</span><span>AppKit</span><span>Agent</span></div></div></div>
+      </div>
+      <div class="pane trace rv"><div class="file">WHAT HAPPENS · <b>one press</b></div>
+        <div class="log" id="trace"></div>
+        <p class="note" style="margin:0;font-size:14px">An illustration of the path, step by step; the functions are the real ones (<a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/architecture.md">architecture.md</a>).</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- The clever bits -->
+<section id="clever">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Under the hood</div>
+      <h2 class="rv">Seven small ideas <span class="two">doing the heavy lifting.</span></h2>
+    </div>
+    <div class="ideas">
+      <div class="idea rv"><div class="t">01 · No bindings</div><h3>Mojo calls C, and C calls Mojo.</h3>
+<pre class="code">external_call[<span class="s">"gtk_button_new_with_label"</span>](title)</pre>
+        <p>No binding generator, no wrapper library. A Mojo function marked <code class="mono">abi("C")</code> is a plain function pointer GTK can call back.</p><div class="ref">mojoui/hosts/gtk.mojo</div></div>
+      <div class="idea rv"><div class="t">02 · No Swift</div><h3>The Mac app is Mojo talking to Objective-C.</h3>
+<pre class="code">msg(button, <span class="s">"setTitle:"</span>, ns_string(<span class="s">"Go"</span>))</pre>
+        <p>Every AppKit call is a message, so Mojo sends it itself, and even makes its own classes at run time. It's cross-compiled, linked and signed on Linux.</p><div class="ref">mojoui/hosts/objc.mojo · appkit.mojo</div></div>
+      <div class="idea rv"><div class="t">03 · Screens are data</div><h3>The whole screen is one flat list.</h3>
+<pre class="code">VStack(Text(<span class="s">"Hi"</span>), Button(<span class="s">"Go"</span>, on_tap=GO))
+<span class="c"># → [VSTACK 1,2] [TEXT "Hi"] [BUTTON "Go" GO]</span></pre>
+        <p>Flat lists compare in one pass and pair one-to-one with native widgets, so a diff is cheap and a host stays thin.</p><div class="ref">mojoui/view.mojo · diff.mojo</div></div>
+      <div class="idea rv"><div class="t">04 · Messages are numbers</div><h3>Widgets never hold your code.</h3>
+<pre class="code"><span class="k">comptime</span> GO = 1</pre>
+        <p>A button carries a number, not a closure. When it fires, the host looks the number up in the current screen, so nothing ever needs rewiring.</p><div class="ref">docs/decisions.md · D-19</div></div>
+      <div class="idea rv"><div class="t">05 · A theme is values</div><h3>One set of numbers, three toolkits.</h3>
+<pre class="code">solid(<span class="s">"tile"</span>, 16, 16, 18, 16)</pre>
+        <p>GTK and the web get CSS written from it; the Mac gets layer calls. A lint stops a theme from styling anything that isn't a framework role, so a new app looks right with no CSS of its own.</p><div class="ref">mojoui/theme.mojo · look.mojo</div></div>
+      <div class="idea rv"><div class="t">06 · The agent is a host</div><h3>Every button is already a tool.</h3>
+<pre class="code">Save → file-save
+Search… → search {text}</pre>
+        <p>Next to GTK, the web and AppKit sits a fourth host that speaks MCP. A disabled button isn't a tool, so an agent can't do anything you couldn't.</p><div class="ref">docs/agent.md</div></div>
+      <div class="idea rv" style="grid-column:1/-1"><div class="t">07 · Measured, every push</div><h3>The Mac is checked against the web, to the point, on GitHub's own Macs.</h3>
+        <p>Each host writes down where every tagged view landed. A script compares the Mac's list with the browser's and fails if one is more than 4 pt (or 3 %) away. No Mac on the desk needed: the app is built on Linux, run on GitHub's macOS 15 and 26 runners, and its pictures and view lists come back for the check.</p><div class="ref">scripts/parity.py · scripts/mac-ci · ci/mac/side.txt</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- The stack -->
+<section id="stack" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">The stack</div>
+      <h2 class="rv">One core. <span class="two">A thin host per platform.</span></h2>
+      <p class="lede rv">Only the bottom row knows a platform exists. Everything above it is plain Mojo, tested on its own.</p>
+    </div>
+    <div class="stack rv">
+      <div class="tier app"><div class="blk"><b>app.mojo</b><span>state · update(event) · view() · draw(canvas) · your GPU kernels</span></div></div>
+      <div class="tier core"><div class="lbl">mojoui · the core</div>
+        <div class="blk"><b>Components</b><span>view.mojo · 36 of them</span></div><div class="blk"><b>Diff</b><span>diff.mojo · patches or rebuild</span></div>
+        <div class="blk"><b>Look</b><span>theme.mojo · look.mojo</span></div><div class="blk"><b>Data &amp; GPU</b><span>MX frame · MAX</span></div></div>
+      <div class="tier hosts"><div class="lbl">hosts · also Mojo</div>
+        <div class="blk"><b>gtk.mojo</b><span>C calls</span><br><span class="badge ok"><i></i>runs</span></div>
+        <div class="blk"><b>web.mojo + web.py</b><span>a Python module</span><br><span class="badge ok"><i></i>runs</span></div>
+        <div class="blk"><b>appkit.mojo</b><span>objc_msgSend</span><br><span class="badge ok"><i></i>runs in CI</span></div>
+        <div class="blk"><b>agent</b><span>MCP over stdio</span><br><span class="badge ok"><i></i>runs</span></div></div>
+      <div class="tier metal"><div class="lbl">what they drive</div>
+        <div class="blk"><b>GTK 4</b><span>Linux</span></div><div class="blk"><b>The browser</b><span>HTML, patches</span></div>
+        <div class="blk"><b>AppKit</b><span>macOS 15+</span></div><div class="blk"><b>Claude, any MCP client</b><span>tools by name</span></div></div>
+    </div>
+    <p class="srcline rv">Also in the repo: Android views through JNI (runs on the emulator) and UIKit for iPhone (builds, not run on hardware yet).</p>
+  </div>
+</section>
+
+<!-- The GPU -->
+<section id="gpu">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">From button to kernel</div>
+      <h2 class="rv">The GPU code is <span class="two">in the same language.</span></h2>
+      <p class="lede rv">A chart's query runs as a GPU kernel written in Mojo, compiled by Modular's MAX for whatever GPU the machine has. <b>No CUDA file, no Metal file, no second toolchain.</b></p>
+    </div>
+    <div class="kern">
+      <div class="pane rv"><div class="file">A KERNEL · <b>ci/mac/gpuprobe.mojo</b> (run on GitHub's Mac)</div>
+<pre class="code"><span class="k">def</span> add_index(data: UnsafePointer[Float32, …], n: Int32):
+    <span class="k">var</span> i = Int(global_idx.x)
+    <span class="k">if</span> i &lt; Int(n):
+        data.unsafe_offset(i)[] = data.unsafe_offset(i)[] + Float32(i)
+
+<span class="k">var</span> ctx = DeviceContext()
+print(<span class="s">"DEVICE:"</span>, ctx.name(), <span class="s">"·"</span>, ctx.api())
+ctx.enqueue_copy(dst_buf=buf, src_ptr=host.unsafe_ptr())
+ctx.enqueue_function[add_index](buf.unsafe_ptr(), Int32(N),
+                                grid_dim=N // 256, block_dim=256)</pre></div>
+      <div class="pane rv"><div class="file">WHAT IT PRINTED · <b>macOS 26 runner</b></div>
+<pre class="code"><span class="i">DEVICE:</span> Apple Paravirtual device · metal
+<span class="i">RESULT:</span> <span class="s">ok</span>   <span class="c"># 4,096 values in, each plus its index, checked</span></pre>
+        <p class="note">The same Mojo, compiled for Apple's Metal by MAX (<code class="mono">--target-accelerator metal:1</code>), on a GitHub Mac. So the Mac's GPU path can be tested on every push.</p></div>
+    </div>
+    <div class="lanes3">
+      <div class="lane3 rv"><span class="badge ok big"><i></i>runs today</span><div class="big2">0.7<small>ms</small></div><h3>NVIDIA, on Linux</h3><p>A chart grouped over a million rows on an RTX 3090, in the same process that draws the window. <b>Next:</b> a stream per query, and recorded kernel chains for repeat clicks.</p></div>
+      <div class="lane3 rv"><span class="badge soon big"><i></i>next</span><div class="big2">metal<small>proven in CI</small></div><h3>Apple, on the Mac</h3><p>A Mojo kernel runs on a Mac's GPU through MAX. <b>Next:</b> the data engine's queries there, checked against pyarrow, after the changes listed in our <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/plans/speed.md">speed plan</a>.</p></div>
+      <div class="lane3 rv"><span class="badge info big"><i></i>on the server</span><div class="big2">web<small>server GPU</small></div><h3>The browser</h3><p>The web version runs the same compiled app on a server, with its GPU. In-browser WebGPU waits for a Mojo route to it: we won't add a second language to get there.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- Proof -->
+<section id="proof">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Proof</div>
+      <h2 class="rv">Don't take our word. <span class="two">Drag the line.</span></h2>
+      <p class="lede rv">The same Report on two platforms, from the same commit at the same window size. Drag across to compare.</p>
+    </div>
+    <div class="wipe rv" id="wipe" style="--x:50%" role="slider" aria-label="Compare the two pictures" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" tabindex="0">
+      <img src="img/how/report-web.jpg" alt="The Report on the web" id="wipeA">
+      <img class="over" src="img/how/report-mac.jpg" alt="The Report on the Mac" id="wipeB">
+      <span class="tagl" id="tagA">Web</span><span class="tagr" id="tagB">Mac</span>
+      <span class="bar"></span><span class="knob2" aria-hidden="true">⇆</span>
+    </div>
+    <div class="wipebar">
+      <div class="seg2" id="pairs"><span class="knob"></span><button type="button">Web · Mac</button><button type="button">Web · Linux</button><button type="button">Linux · Mac</button></div>
+      <span class="srcline" style="margin:0">1440 × 640 · Mac: GitHub's macOS 26 runner · Linux: GTK 4 · web: Chromium</span>
+    </div>
+    <div class="nums rv">
+      <div><b>21<small>of 21</small></b><span>toolbar views on the Mac within 4 pt of the web's</span></div>
+      <div><b>4<small>pt</small></b><span>the tolerance every tagged view is held to (or 3 %)</span></div>
+      <div><b>2<small>Macs</small></b><span>macOS 15 and 26 runners, on every push to the test branch</span></div>
+    </div>
+    <div class="gaps">
+      <div class="pane rv"><h3>Still different, and being closed</h3><ul>
+        <li><b>Text</b> renders a touch wider and heavier on the Mac.</li>
+        <li>The <b>tile</b> above is the same width everywhere; on the Mac it's 8 pt shorter.</li>
+        <li>The <b>inspector's</b> line spacing is a few points off; the bottom <b>sheet tabs</b> aren't styled yet.</li>
+        <li>A tile's <b>✕</b> shows on hover on the web, always on the Mac.</li></ul></div>
+      <div class="pane rv"><h3>How it's checked</h3><ul>
+        <li><b>scripts/side.py</b> shoots each screen on GTK and the web at 1440 × 640.</li>
+        <li><b>scripts/mac-ci</b> builds the Mac app on Linux and runs the same screens on GitHub's Macs.</li>
+        <li><b>scripts/parity.py</b> compares every tagged view's rectangle, Mac against web.</li>
+        <li>The pictures are compared too: the Mac may differ from the web by no more than 1.5 × what Linux does.</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- Download -->
+<section id="download" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Download</div>
+    <h2 class="rv">Try it. <span class="two">Then read the code.</span></h2>
+    <p class="body rv">A public alpha, free and open source under MIT.</p>
+    <div class="dls">
+      <div class="dl rv"><h3>Mac <span class="badge info"><i></i>Apple Silicon</span></h3>
+        <p>omxplorer as a Mac app: open a CSV, edit it like a spreadsheet, build a report.</p>
+        <a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/mac-ci/omxplorer-mac.zip">Download for Mac</a>
+        <p class="fine2">The build GitHub's macOS 15 and 26 runners check on every push. It isn't notarised yet: if macOS refuses it, run <code>xattr -dr com.apple.quarantine OmxplorerMojo.app</code>, or open it once, then System Settings → Privacy &amp; Security → Open Anyway. Its data work runs on the CPU for now.</p></div>
+      <div class="dl rv"><h3>Linux <span class="badge ok"><i></i>best today</span></h3>
+        <p>The full app, with the GPU underneath on an NVIDIA card.</p>
+<pre id="cmdsL">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode &amp;&amp; pixi install
+scripts/omxplorer.sh</pre>
+        <button class="cp2" data-copy="#cmdsL" type="button">copy</button>
+        <p class="fine2">For the web version: <code>scripts/omxplorer.sh web</code>, then open <code>127.0.0.1:5001</code>.</p></div>
+      <div class="dl rv"><h3>The source <span class="badge"><i></i>MIT</span></h3>
+        <p>Everything on this page is in the repository: the hosts, the look, the checks.</p>
+        <a class="cta" href="https://github.com/abhisheksreesaila/omxcode/archive/refs/heads/main.zip">Download the source</a>
+        <p class="fine2">Start with <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/architecture.md">architecture.md</a>. Building with an agent? Point it at <a href="llms.txt">llms.txt</a>.</p></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="note">The pictures on this page are real screens from the same commit, shot by scripts in the repository: Linux and the web on one Linux machine, the Mac on GitHub's macOS 26 runner. Timings are from one Linux machine with an NVIDIA RTX 3090.</p>
+    <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="index.html">← Back to omxcode</a></div>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+<script>
+(() => {
+  const { $, $$, reduce } = window.omx;
+  document.documentElement.classList.remove("no-js");
+
+  // the zoom: the section's scroll position picks the step (desktop); narrow screens show every layer in order
+  const zoom = $("#zoom"), layers = $$(".layer", zoom), caps = $$(".caps p", zoom), dots = $$(".dots i", zoom);
+  const wide = matchMedia("(min-width: 961px)");
+  let step = -1;
+  const show = s => { if (s === step) return; step = s; zoom.dataset.step = s;
+    layers.forEach(l => l.classList.toggle("on", l.dataset.s.split(" ").includes(String(s))));
+    caps.forEach(c => c.classList.toggle("on", c.dataset.s === String(s)));
+    dots.forEach((d, i) => d.classList.toggle("on", i === s)); };
+  const onScroll = () => { if (!wide.matches) return;
+    const r = zoom.getBoundingClientRect(), span = r.height - innerHeight, p = Math.min(1, Math.max(0, -r.top / span));
+    show(Math.min(5, Math.floor(p * 6))); };
+  addEventListener("scroll", onScroll, { passive: true }); addEventListener("resize", onScroll); onScroll();
+
+  // the loop: lights each step and writes its line while it's on screen
+  const lines = [
+    [0, "h", "press", "the GTK button's \"clicked\" signal → a Mojo function"],
+    [1, "i", "update", "event: message FORMAT  →  self.mode = FORMAT"],
+    [2, "i", "view", "the screen again: every node, one flat list"],
+    [3, "i", "diff", "same shape  →  3 patches (a toggle, a page, a title)"],
+    [4, "h", "GTK", "set the toggle's state, swap the page"],
+    [4, "h", "web", "send 3 patches; the page swaps its nodes"],
+    [4, "h", "AppKit", "setState: on the NSButton, swap the stack's view"],
+    [4, "h", "agent", "\"Format\" is now pressed; its tools changed"]];
+  const rail = $$("#loopv .stepb"), fan = $$("#loopv .fan span"), log = $("#trace");
+  window.omx.scene($("#loopv"), async wait => {
+    log.innerHTML = ""; rail.forEach(r => r.classList.remove("on")); fan.forEach(f => f.classList.remove("on"));
+    for (const [i, cls, who, text] of lines) {
+      rail.forEach((r, j) => r.classList.toggle("on", j === i));
+      if (i === 4) fan[["GTK", "web", "AppKit", "agent"].indexOf(who)].classList.add("on");
+      const d = document.createElement("div"); d.innerHTML = `<span class="${cls}">${who.padEnd(7)}</span> ${text.replace(/</g, "&lt;")}`; log.append(d);
+      await wait(30); d.classList.add("on"); await wait(i === 4 ? 650 : 1000);
+    }
+    await wait(2600);
+  });
+
+  // proof: drag (or arrow keys) to wipe between two real windows; the switch picks the pair
+  const wipe = $("#wipe"), A = $("#wipeA"), B = $("#wipeB"), tA = $("#tagA"), tB = $("#tagB");
+  const set = x => { x = Math.max(0, Math.min(100, x)); wipe.style.setProperty("--x", x + "%"); wipe.setAttribute("aria-valuenow", Math.round(x)); };
+  const at = e => { const r = wipe.getBoundingClientRect(); set((e.clientX - r.left) / r.width * 100); };
+  let drag = false;
+  wipe.addEventListener("pointerdown", e => { drag = true; wipe.setPointerCapture(e.pointerId); at(e); });
+  wipe.addEventListener("pointermove", e => { if (drag) at(e); });
+  wipe.addEventListener("pointerup", () => drag = false); wipe.addEventListener("pointercancel", () => drag = false);
+  wipe.addEventListener("keydown", e => { const x = +wipe.getAttribute("aria-valuenow"); if (e.key === "ArrowLeft") set(x - 5); if (e.key === "ArrowRight") set(x + 5); });
+  const pairs = [["web", "Web", "mac", "Mac"], ["web", "Web", "gtk", "Linux"], ["gtk", "Linux", "mac", "Mac"]];
+  window.omx.seg($("#pairs"), i => { const [a, an, b, bn] = pairs[i]; A.src = `img/how/report-${a}.jpg`; B.src = `img/how/report-${b}.jpg`;
+    A.alt = `The Report on ${an}`; B.alt = `The Report on ${bn}`; tA.textContent = an; tB.textContent = bn; })(0, false);
+  if (!reduce) { let t = 0; const io = new IntersectionObserver(es => es.forEach(e => { if (!e.isIntersecting || t) return; t = 1;
+    const t0 = performance.now(); const sweep = n => { const p = Math.min(1, (n - t0) / 1800); set(50 + 30 * Math.sin(p * Math.PI * 2) * (1 - p)); if (p < 1 && !drag) requestAnimationFrame(sweep); };
+    requestAnimationFrame(sweep); }), { threshold: .5 }); io.observe(wipe); }
+})();
+</script>
+</body>
+</html>

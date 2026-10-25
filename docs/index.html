@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>omxcode · one Mojo file, every screen</title>
-<meta name="description" content="Write an app once, in Mojo. It runs natively on Linux, the web and Android, builds for Mac and iPhone, computes on an NVIDIA GPU, and AI agents can use it. Public alpha, MIT.">
+<meta name="description" content="Write an app once, in Mojo. It runs natively on Linux, the web, the Mac and Android, builds for iPhone, computes on an NVIDIA GPU, and AI agents can use it. Public alpha, MIT.">
 <meta property="og:title" content="omxcode: one Mojo file. Every screen. The GPU underneath. Agents built in.">
 <meta property="og:description" content="Native apps on Linux, the web and Android from one Mojo file, the GPU in the same language, and agent tools built in. Public alpha, MIT.">
 <meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/readme-report.jpg">
@@ -300,6 +300,22 @@
   .plat { grid-template-columns: 1fr; gap: 6px; } .plat .ct { text-align: left; } .sq { gap: 3px; }
 }
 @media (prefers-reduced-motion: reduce) { .strip .row { animation: none; } }
+
+/* ---- how it works: the same tile on three toolkits ---- */
+.trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 52px; }
+.trio figure { margin: 0; } .trio img { width: 100%; display: block; border-radius: 18px; box-shadow: var(--oq-shadow-3), 0 0 0 1px var(--line); }
+.trio figcaption { font: 13px var(--mono); color: var(--ink2); margin-top: 12px; } .trio figcaption b { color: var(--ink); font: 600 15px var(--sans); margin-right: 6px; }
+/* ---- downloads ---- */
+.dls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 48px; text-align: left; }
+.dl { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.dl h3 { display: flex; align-items: center; gap: 10px; }
+.dl p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
+.dl .cta { align-self: flex-start; height: 44px; font-size: 15px; padding: 0 20px; }
+.dl pre { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); font: 12.5px/1.7 var(--mono); color: var(--ink); overflow-x: auto; }
+.dl .fine2 { font: 12px/1.6 var(--mono); color: var(--ink2); margin-top: auto; } .dl .fine2 code { color: var(--ink); }
+.dl .cp2 { align-self: flex-start; border: 0; cursor: pointer; background: rgb(var(--oq-state) / .08); color: var(--ink2); font: 500 12px var(--mono); height: 32px; padding: 0 14px; border-radius: 999px; }
+.dl .cp2:hover { color: var(--ink); }
+@media (max-width: 860px) { .trio, .dls { grid-template-columns: 1fr; } }
 </style>
 <noscript><style>.rv { opacity: 1; transform: none; } .iso .slab, .iso .tile { opacity: 1; transform: none; } .iso .wire path { stroke-dashoffset: 0; }
   .made { opacity: 1; transform: none; } .gain { opacity: 1; transform: none; } .msg, .call { opacity: 1; transform: none; }</style></noscript>
@@ -308,8 +324,8 @@
 
 <nav class="lnav">
   <a class="brand" href="#top"><span class="mark">ox</span>omxcode</a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#agents">Agents</a><a href="#model">One program</a><a href="#unlocks">Unlocks</a><a href="#apps">Apps</a><a href="#components">Components</a><a href="#faq">FAQ</a></div>
-  <div class="right"><a class="cta" href="#get">Get the alpha</a></div>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#agents">Agents</a><a href="#model">One program</a><a href="#unlocks">Unlocks</a><a href="#apps">Apps</a><a href="#components">Components</a><a href="how.html">How it works</a><a href="#faq">FAQ</a></div>
+  <div class="right"><a class="cta" href="#get">Download</a></div>
 </nav>
 
 <main id="top">
@@ -320,10 +336,10 @@
     <div class="intro">
     <div class="eyebrow rise"><span>Public alpha</span></div>
     <h1 class="rise" data-words data-step="0" data-d0="120">omxcode</h1>
-    <p class="lede rise"><span data-words data-step="55" data-d0="380">Write an app once, in Mojo.</span> <span class="two" data-words data-step="40" data-d0="560">It runs natively on Linux, the web and Android, builds for Mac and iPhone, computes on an NVIDIA GPU, and AI agents can use it.</span></p>
+    <p class="lede rise"><span data-words data-step="55" data-d0="380">Write an app once, in Mojo.</span> <span class="two" data-words data-step="40" data-d0="560">It runs natively on Linux, the web, the Mac and Android, builds for iPhone, computes on an NVIDIA GPU, and AI agents can use it.</span></p>
     <div class="ctas rise"><span style="animation-delay:1100ms"><a class="cta" href="#get">Get the alpha</a></span><span style="animation-delay:1180ms"><a class="more" href="#agents">See where it's going</a></span></div>
     </div>
-    <svg class="iso" viewBox="-328 -227 818 515" role="img" aria-label="One app.mojo file holds three layers, the controls, the data engine and the GPU code. Wires run from it to Linux, Web and Android, which run, Mac and iPhone, which build, and to agent tools."><g class="wire" data-o="4"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L295.1,-12.0 L372.0,32.4"/></g><g class="wire" data-o="5"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L216.2,33.6 L293.1,78.0"/></g><g class="wire" data-o="6"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L137.2,79.2 L214.1,123.6"/></g><g class="wire" data-o="7"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L58.2,124.8 L135.1,169.2"/></g><g class="wire" data-o="8"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L-20.8,170.4 L56.1,214.8"/></g><g class="wire" data-o="9"><path pathLength="1" d="M-87.3,50.4 L-199.5,115.2"/></g><g class="plate" data-o="0"><polygon class="fy pl" points="-174.6,-8.4 0.0,92.4 0.0,100.8 -174.6,0.0"/><polygon class="fx pl" points="174.6,-8.4 0.0,92.4 0.0,100.8 174.6,0.0"/><polygon class="tp pl" points="0.0,-109.2 174.6,-8.4 0.0,92.4 -174.6,-8.4"/><text class="t-file" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-77.9,36.6)">app.mojo</text></g><g class="slab" data-o="1"><polygon class="fy sl" points="-137.2,-38.4 0.0,40.8 0.0,61.2 -137.2,-18.0"/><polygon class="fx sl" points="137.2,-38.4 0.0,40.8 0.0,61.2 137.2,-18.0"/><polygon class="tp sl" points="0.0,-117.6 137.2,-38.4 0.0,40.8 -137.2,-38.4"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,13.9)">GPU CODE</text></g><g class="slab" data-o="2"><polygon class="fy sl" points="-137.2,-67.2 0.0,12.0 0.0,32.4 -137.2,-46.8"/><polygon class="fx sl" points="137.2,-67.2 0.0,12.0 0.0,32.4 137.2,-46.8"/><polygon class="tp sl" points="0.0,-146.4 137.2,-67.2 0.0,12.0 -137.2,-67.2"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,-14.9)">DATA ENGINE</text></g><g class="slab" data-o="3"><polygon class="fy sl" points="-137.2,-96.0 0.0,-16.8 0.0,3.6 -137.2,-75.6"/><polygon class="fx sl" points="137.2,-96.0 0.0,-16.8 0.0,3.6 137.2,-75.6"/><polygon class="tp sl" points="0.0,-175.2 137.2,-96.0 0.0,-16.8 -137.2,-96.0"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,-43.7)">CONTROLS</text></g><g class="tile" data-o="4"><polygon class="fy tl" points="336.7,43.2 407.4,84.0 407.4,93.6 336.7,52.8"/><polygon class="fx tl" points="478.0,43.2 407.4,84.0 407.4,93.6 478.0,52.8"/><polygon class="tp tl" points="407.4,2.4 478.0,43.2 407.4,84.0 336.7,43.2"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,409.5,44.4)">Linux</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,428.2,55.2)">runs</text></g><g class="tile" data-o="5"><polygon class="fy tl" points="257.7,88.8 328.4,129.6 328.4,139.2 257.7,98.4"/><polygon class="fx tl" points="399.1,88.8 328.4,129.6 328.4,139.2 399.1,98.4"/><polygon class="tp tl" points="328.4,48.0 399.1,88.8 328.4,129.6 257.7,88.8"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,330.5,90.0)">Web</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,349.2,100.8)">runs</text></g><g class="tile" data-o="6"><polygon class="fy tl" points="178.7,134.4 249.4,175.2 249.4,184.8 178.7,144.0"/><polygon class="fx tl" points="320.1,134.4 249.4,175.2 249.4,184.8 320.1,144.0"/><polygon class="tp tl" points="249.4,93.6 320.1,134.4 249.4,175.2 178.7,134.4"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,251.5,135.6)">Android</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,270.2,146.4)">runs</text></g><g class="tile" data-o="7"><polygon class="fy tl" points="99.8,180.0 170.4,220.8 170.4,230.4 99.8,189.6"/><polygon class="fx tl" points="241.1,180.0 170.4,220.8 170.4,230.4 241.1,189.6"/><polygon class="tp tl" points="170.4,139.2 241.1,180.0 170.4,220.8 99.8,180.0"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,172.5,181.2)">Mac</text><text class="t-st info" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,191.2,192.0)">builds</text></g><g class="tile" data-o="8"><polygon class="fy tl" points="20.8,225.6 91.5,266.4 91.5,276.0 20.8,235.2"/><polygon class="fx tl" points="162.1,225.6 91.5,266.4 91.5,276.0 162.1,235.2"/><polygon class="tp tl" points="91.5,184.8 162.1,225.6 91.5,266.4 20.8,225.6"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,93.5,226.8)">iPhone</text><text class="t-st info" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,112.2,237.6)">builds</text></g><g class="tile agent" data-o="9"><polygon class="fy tl ag" points="-315.9,110.4 -207.8,172.8 -207.8,182.4 -315.9,120.0"/><polygon class="fx tl ag" points="-145.5,136.8 -207.8,172.8 -207.8,182.4 -145.5,146.4"/><polygon class="tp tl ag" points="-253.6,74.4 -145.5,136.8 -207.8,172.8 -315.9,110.4"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-228.6,122.4)">agent tools</text><text class="t-st" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-247.3,133.2)">buttons · fields</text></g></svg>
+    <svg class="iso" viewBox="-328 -227 818 515" role="img" aria-label="One app.mojo file holds three layers, the controls, the data engine and the GPU code. Wires run from it to Linux, Web, Android and Mac, which run, iPhone, which builds, and to agent tools."><g class="wire" data-o="4"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L295.1,-12.0 L372.0,32.4"/></g><g class="wire" data-o="5"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L216.2,33.6 L293.1,78.0"/></g><g class="wire" data-o="6"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L137.2,79.2 L214.1,123.6"/></g><g class="wire" data-o="7"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L58.2,124.8 L135.1,169.2"/></g><g class="wire" data-o="8"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L-20.8,170.4 L56.1,214.8"/></g><g class="wire" data-o="9"><path pathLength="1" d="M-87.3,50.4 L-199.5,115.2"/></g><g class="plate" data-o="0"><polygon class="fy pl" points="-174.6,-8.4 0.0,92.4 0.0,100.8 -174.6,0.0"/><polygon class="fx pl" points="174.6,-8.4 0.0,92.4 0.0,100.8 174.6,0.0"/><polygon class="tp pl" points="0.0,-109.2 174.6,-8.4 0.0,92.4 -174.6,-8.4"/><text class="t-file" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-77.9,36.6)">app.mojo</text></g><g class="slab" data-o="1"><polygon class="fy sl" points="-137.2,-38.4 0.0,40.8 0.0,61.2 -137.2,-18.0"/><polygon class="fx sl" points="137.2,-38.4 0.0,40.8 0.0,61.2 137.2,-18.0"/><polygon class="tp sl" points="0.0,-117.6 137.2,-38.4 0.0,40.8 -137.2,-38.4"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,13.9)">GPU CODE</text></g><g class="slab" data-o="2"><polygon class="fy sl" points="-137.2,-67.2 0.0,12.0 0.0,32.4 -137.2,-46.8"/><polygon class="fx sl" points="137.2,-67.2 0.0,12.0 0.0,32.4 137.2,-46.8"/><polygon class="tp sl" points="0.0,-146.4 137.2,-67.2 0.0,12.0 -137.2,-67.2"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,-14.9)">DATA ENGINE</text></g><g class="slab" data-o="3"><polygon class="fy sl" points="-137.2,-96.0 0.0,-16.8 0.0,3.6 -137.2,-75.6"/><polygon class="fx sl" points="137.2,-96.0 0.0,-16.8 0.0,3.6 137.2,-75.6"/><polygon class="tp sl" points="0.0,-175.2 137.2,-96.0 0.0,-16.8 -137.2,-96.0"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,-43.7)">CONTROLS</text></g><g class="tile" data-o="4"><polygon class="fy tl" points="336.7,43.2 407.4,84.0 407.4,93.6 336.7,52.8"/><polygon class="fx tl" points="478.0,43.2 407.4,84.0 407.4,93.6 478.0,52.8"/><polygon class="tp tl" points="407.4,2.4 478.0,43.2 407.4,84.0 336.7,43.2"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,409.5,44.4)">Linux</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,428.2,55.2)">runs</text></g><g class="tile" data-o="5"><polygon class="fy tl" points="257.7,88.8 328.4,129.6 328.4,139.2 257.7,98.4"/><polygon class="fx tl" points="399.1,88.8 328.4,129.6 328.4,139.2 399.1,98.4"/><polygon class="tp tl" points="328.4,48.0 399.1,88.8 328.4,129.6 257.7,88.8"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,330.5,90.0)">Web</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,349.2,100.8)">runs</text></g><g class="tile" data-o="6"><polygon class="fy tl" points="178.7,134.4 249.4,175.2 249.4,184.8 178.7,144.0"/><polygon class="fx tl" points="320.1,134.4 249.4,175.2 249.4,184.8 320.1,144.0"/><polygon class="tp tl" points="249.4,93.6 320.1,134.4 249.4,175.2 178.7,134.4"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,251.5,135.6)">Android</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,270.2,146.4)">runs</text></g><g class="tile" data-o="7"><polygon class="fy tl" points="99.8,180.0 170.4,220.8 170.4,230.4 99.8,189.6"/><polygon class="fx tl" points="241.1,180.0 170.4,220.8 170.4,230.4 241.1,189.6"/><polygon class="tp tl" points="170.4,139.2 241.1,180.0 170.4,220.8 99.8,180.0"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,172.5,181.2)">Mac</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,191.2,192.0)">runs</text></g><g class="tile" data-o="8"><polygon class="fy tl" points="20.8,225.6 91.5,266.4 91.5,276.0 20.8,235.2"/><polygon class="fx tl" points="162.1,225.6 91.5,266.4 91.5,276.0 162.1,235.2"/><polygon class="tp tl" points="91.5,184.8 162.1,225.6 91.5,266.4 20.8,225.6"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,93.5,226.8)">iPhone</text><text class="t-st info" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,112.2,237.6)">builds</text></g><g class="tile agent" data-o="9"><polygon class="fy tl ag" points="-315.9,110.4 -207.8,172.8 -207.8,182.4 -315.9,120.0"/><polygon class="fx tl ag" points="-145.5,136.8 -207.8,172.8 -207.8,182.4 -145.5,146.4"/><polygon class="tp tl ag" points="-253.6,74.4 -145.5,136.8 -207.8,172.8 -315.9,110.4"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-228.6,122.4)">agent tools</text><text class="t-st" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-247.3,133.2)">buttons · fields</text></g></svg>
   </div>
 </section>
 
@@ -450,6 +466,21 @@
   </div>
 </section>
 
+<!-- How it works: one card on three toolkits; the whole story is on how.html -->
+<section id="how" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">How it works <span class="badge ok big"><i></i>works today</span></div>
+    <h2 class="rv">One line of Mojo. <span class="two">Three native toolkits.</span></h2>
+    <p class="lede rv">The same <code class="mono" style="color:var(--word)">KpiTile(card)</code> becomes a GTK widget, an HTML element and an AppKit view, from one set of numbers in the theme. <b>No CSS of your own, no Swift, no second language.</b></p>
+    <div class="trio rv">
+      <figure><img src="img/how/tile-gtk.png" alt="The tile drawn by GTK on Linux" loading="lazy"><figcaption><b>Linux</b> GTK 4</figcaption></figure>
+      <figure><img src="img/how/tile-web.png" alt="The tile drawn by the browser" loading="lazy"><figcaption><b>Web</b> HTML</figcaption></figure>
+      <figure><img src="img/how/tile-mac.png" alt="The tile drawn by AppKit on macOS" loading="lazy"><figcaption><b>Mac</b> AppKit</figcaption></figure>
+    </div>
+    <div class="ctas rv"><a class="cta" href="how.html">See how it works</a><a class="more" href="how.html#proof">Compare the Mac and the web</a></div>
+  </div>
+</section>
+
 <!-- 4 · Apps built on it -->
 <section id="apps">
   <div class="wrap">
@@ -535,19 +566,29 @@
   </div>
 </section>
 
-<!-- Get it -->
+<!-- Get it: downloads, not a release page -->
 <section id="get" class="center">
   <div class="wrap">
-    <div class="eyebrow rv">Get it</div>
+    <div class="eyebrow rv">Download</div>
     <h2 class="rv">Available today.</h2>
     <p class="body rv">A public alpha, free and open source under MIT. Linux with an NVIDIA GPU is the best place to start.</p>
-    <div class="card install rv">
+    <div class="dls">
+      <div class="dl rv"><h3>Mac <span class="badge info"><i></i>Apple Silicon</span></h3>
+        <p>omxplorer as a Mac app: open a CSV, edit it like a spreadsheet, build a report.</p>
+        <a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/mac-ci/omxplorer-mac.zip">Download for Mac</a>
+        <p class="fine2">The build GitHub's macOS 15 and 26 runners check on every push. Not notarised yet: if macOS refuses it, run <code>xattr -dr com.apple.quarantine OmxplorerMojo.app</code>. Its data work runs on the CPU for now.</p></div>
+      <div class="dl rv"><h3>Linux <span class="badge ok"><i></i>best today</span></h3>
+        <p>The full app, with the GPU underneath on an NVIDIA card.</p>
 <pre id="cmds">git clone https://github.com/abhisheksreesaila/omxcode
 cd omxcode &amp;&amp; pixi install
 scripts/omxplorer.sh</pre>
-      <div class="src">three commands · Linux · NVIDIA GPU<button class="cp" data-copy="#cmds">copy</button></div>
+        <button class="cp2" data-copy="#cmds" type="button">copy</button>
+        <p class="fine2">The web version: <code>scripts/omxplorer.sh web</code>, then <code>127.0.0.1:5001</code>.</p></div>
+      <div class="dl rv"><h3>The source <span class="badge"><i></i>MIT</span></h3>
+        <p>The hosts, the look, the GPU code and the checks that keep them honest.</p>
+        <a class="cta" href="https://github.com/abhisheksreesaila/omxcode/archive/refs/heads/main.zip">Download the source</a>
+        <p class="fine2">Curious how it works? Read <a href="how.html">how it works</a>. Building with an agent? <a href="llms.txt">llms.txt</a>.</p></div>
     </div>
-    <div class="ctas rv"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode">Get it on GitHub</a><a class="more" href="https://github.com/abhisheksreesaila/omxcode#readme">Read the docs</a></div>
   </div>
 </section>
 
@@ -557,9 +598,9 @@ scripts/omxplorer.sh</pre>
   <div class="wrap">
     <p class="note">Every number here is measured on one Linux machine with an NVIDIA RTX 3090, by a script in the repository. "Runs" and "tested" mean a script drives it on that platform today. Anything marked coming soon is not in the alpha.</p>
     <div class="cols">
-      <div><h4>Start</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode">GitHub</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode#readme">README</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/releases">Releases</a></li></ul></div>
+      <div><h4>Start</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode">GitHub</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode#readme">README</a></li><li><a href="#get">Download</a></li></ul></div>
       <div><h4>See it</h4><ul><li><a href="omxplorer.html">omxplorer</a></li><li><a href="components.html">Components</a></li><li><a href="gallery/">Gallery</a></li></ul></div>
-      <div><h4>Build</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/reference.md">Reference</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/architecture.md">Architecture</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agent.md">Agent host</a></li><li><a href="llms.txt">For agents: llms.txt</a></li></ul></div>
+      <div><h4>Build</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/reference.md">Reference</a></li><li><a href="how.html">How it works</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/architecture.md">Architecture</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agent.md">Agent host</a></li><li><a href="llms.txt">For agents: llms.txt</a></li></ul></div>
       <div><h4>Follow along</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/decisions.md">Decision log</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/next.md">What's next</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/issues">Issues</a></li></ul></div>
     </div>
     <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
