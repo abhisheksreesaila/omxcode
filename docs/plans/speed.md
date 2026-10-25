@@ -59,7 +59,8 @@ the owner's Mac still proves speed (a virtual GPU's timings mean little).
   waiting for a Mojo WebGPU target. Recommendation: the server path now; a WebGPU spike only when a Mojo route exists
   (track Modular's roadmap). Decision D-297.
 
-## From MX frame: Apple's GPU, in order
+## From omxcore (MX frame): Apple's GPU, in order
+The spec to hand over: `docs/plans/omxcore-apple-gpu.md`.
 The last big piece before the announcement. Each item names what to change and how we'll know it worked.
 1. **Integers and Float32 on the GPU, no Float64.** The interpreter's word becomes an Int64 (or two 32-bit halves);
    DECIMAL columns are already scaled integers, so sums stay exact. FLOAT64 columns stay on the CPU on Apple (they

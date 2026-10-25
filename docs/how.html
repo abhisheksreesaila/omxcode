@@ -84,6 +84,9 @@
 .res figure:nth-child(2) { animation-delay: .12s !important } .res figure:nth-child(3) { animation-delay: .24s !important }
 @keyframes land { from { opacity: 0; transform: translateY(30px) scale(.96); } }
 
+.wink { font: 600 15px var(--mono); color: var(--word); margin-top: 26px; letter-spacing: .02em; }
+.wink::before { content: "// "; opacity: .6; }
+
 /* ---- the loop: a press travels down and comes back as a patch ---- */
 .loop { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; margin-top: 56px; }
 .rail { position: relative; display: grid; gap: 10px; padding: 22px; }
@@ -285,6 +288,15 @@ msg(w, <span class="s">"setEdgeInsets:"</span>, <span class="v">16</span>, <span
   </div>
 </section>
 
+<!-- The point of the zoom, said plainly -->
+<section id="spec" class="center" style="padding-top:110px;padding-bottom:40px">
+  <div class="wrap">
+    <h2 class="rv">We don't draw a single pixel. <span class="two">We hand out specs.</span></h2>
+    <p class="lede rv">Mojo says what's on the screen and what it looks like, as names and numbers. GTK, the browser and AppKit each draw it the way they draw best. <b>And the same spec that tells AppKit how to draw a tile tells an agent what it can press.</b> Agents love a good spec.</p>
+    <p class="wink rv">Agents: you're welcome.</p>
+  </div>
+</section>
+
 <!-- The loop: one press, all the way round -->
 <section id="loop">
   <div class="wrap">
@@ -354,7 +366,7 @@ Search… → search {text}</pre>
       <div class="tier app"><div class="blk"><b>app.mojo</b><span>state · update(event) · view() · draw(canvas) · your GPU kernels</span></div></div>
       <div class="tier core"><div class="lbl">mojoui · the core</div>
         <div class="blk"><b>Components</b><span>view.mojo · 36 of them</span></div><div class="blk"><b>Diff</b><span>diff.mojo · patches or rebuild</span></div>
-        <div class="blk"><b>Look</b><span>theme.mojo · look.mojo</span></div><div class="blk"><b>Data &amp; GPU</b><span>MX frame · MAX</span></div></div>
+        <div class="blk"><b>Look</b><span>theme.mojo · look.mojo</span></div><div class="blk"><b>Data &amp; GPU</b><span>omxcore · MAX</span></div></div>
       <div class="tier hosts"><div class="lbl">hosts · also Mojo</div>
         <div class="blk"><b>gtk.mojo</b><span>C calls</span><br><span class="badge ok"><i></i>runs</span></div>
         <div class="blk"><b>web.mojo + web.py</b><span>a Python module</span><br><span class="badge ok"><i></i>runs</span></div>

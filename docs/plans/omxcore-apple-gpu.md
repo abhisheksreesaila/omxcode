@@ -1,13 +1,13 @@
-# OMX frame on Apple's GPU: the spec
+# omxcore on Apple's GPU: the spec
 
-For the OMX frame session (repo `abhisheksreesaila/omxcore`). Written by the omxcode session, 2026-10-24.
+For the omxcore session (repo `abhisheksreesaila/omxcore`; the engine called MX frame in older docs). Written by the omxcode session, 2026-10-24.
 Every file and line below was checked at omxcore `3a33697` (HEAD); the app vendors `23edc59` (same lines, `mojo/mxframe/`
 before the rename to `mojo/omxcore/`).
 
 ## Why
-omxcode's claim is "one readable language, from button to kernel". On Linux, OMX frame's queries run on the NVIDIA GPU in
-the app's own process (a chart over 1M rows in 0.7 ms). On the Mac they run on the CPU, because OMX frame's GPU path is
-compiled out there. Modular's MAX now targets Apple GPUs (Metal), and its source is open to read. Getting OMX frame's
+omxcode's claim is "one readable language, from button to kernel". On Linux, omxcore's queries run on the NVIDIA GPU in
+the app's own process (a chart over 1M rows in 0.7 ms). On the Mac they run on the CPU, because omxcore's GPU path is
+compiled out there. Modular's MAX now targets Apple GPUs (Metal), and its source is open to read. Getting omxcore's
 queries onto Apple's GPU is the last big piece before omxcode is announced.
 
 ## Done means
@@ -30,7 +30,7 @@ xcodebuild -downloadComponent MetalToolchain
 pixi run mojo run --target-accelerator metal:1 probe.mojo   # without the flag: "Unknown GPU architecture detected"
 ```
 
-Suggested: one CI job on `macos-26` that builds OMX frame for Metal and runs the "done means" queries against pyarrow,
+Suggested: one CI job on `macos-26` that builds omxcore for Metal and runs the "done means" queries against pyarrow,
 printing each result beside pyarrow's. A virtual GPU's timings mean nothing; the owner's Mac measures speed at the end.
 
 ## What stops it today, and what to change (in order)

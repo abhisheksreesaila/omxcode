@@ -263,7 +263,7 @@ def m6():
         problems.append("no docs/plans/speed.md")
     else:
         text = plan.read_text()
-        problems += [f"speed.md has no '{h}' section" for h in ("## Linux", "## Mac", "## Web", "## From MX frame") if h not in text]
+        problems += [f"speed.md has no '{h}' section" for h in ("## Linux", "## Mac", "## Web", "## From omxcore") if h not in text]
     return not problems, "; ".join(problems) or "kernels fit 32 KB; the Mac probe ran; docs/plans/speed.md"
 
 

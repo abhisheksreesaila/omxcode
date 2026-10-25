@@ -1118,7 +1118,11 @@ struct AppKitHost[A: App](Movable):
         _ = msg(w, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs))
         _ = msg(w, "setContentTintColor:", ns_color(ink))
         var fit = msg[CGPoint](w, "fittingSize")
-        constrain(w, "widthAnchor", fit.x + Float64(2 * c.button_pad))
+        # its title's width is the least it takes and the width it prefers, not a fixed one: a filling button (an
+        # inspector row's title) stretches, as on GTK and the web; held to its fit, it held the Report inspector's
+        # column to 117 pt through the rows' equal widths (Mac, 2026-10-24)
+        _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", fit.x + Float64(2 * c.button_pad)), "setActive:", 1)
+        prefer(w, "widthAnchor", fit.x + Float64(2 * c.button_pad))
         constrain(w, "heightAnchor", Float64(c.control_h))
 
     def paint_surface(mut self, w: Int, k: Int, pad: Bool):
