@@ -1,0 +1,115 @@
+{
+ "recorded_at": 1792964194.376,
+ "replies": {
+  "GET /admin/bench": {
+   "file": "admin_bench.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/bench/history?limit=10": {
+   "file": "admin_bench_history@limit=10.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/gateway": {
+   "file": "admin_gateway.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/info": {
+   "file": "admin_info.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/keys": {
+   "file": "admin_keys.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/labels": {
+   "file": "admin_labels.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/learn/qwen2.5-0.5b": {
+   "file": "admin_learn_qwen2.5-0.5b.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/litellm/log?bytes=8000": {
+   "file": "admin_litellm_log@bytes=8000.txt",
+   "status": 200,
+   "type": "text/plain; charset=utf-8",
+   "headers": {}
+  },
+  "GET /admin/metrics": {
+   "file": "admin_metrics.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/models": {
+   "file": "admin_models.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/models/qwen2.5-0.5b/log": {
+   "file": "admin_models_qwen2.5-0.5b_log.txt",
+   "status": 200,
+   "type": "text/plain; charset=utf-8",
+   "headers": {
+    "x-log-truncated": "0"
+   }
+  },
+  "GET /admin/network": {
+   "file": "admin_network.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/ports": {
+   "file": "admin_ports.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/pulls": {
+   "file": "admin_pulls.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/requests?limit=40": {
+   "file": "admin_requests@limit=40.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/search?q=": {
+   "file": "admin_search@q=.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/series?range=5m": {
+   "file": "admin_series@range=5m.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  },
+  "GET /admin/system": {
+   "file": "admin_system.json",
+   "status": 200,
+   "type": "application/json",
+   "headers": {}
+  }
+ }
+}

@@ -1,0 +1,10 @@
+12:02:11.204 INFO: Starting server using Qwen/Qwen2.5-0.5B-Instruct
+12:02:11.209 INFO: Metrics initialized.
+12:02:12.880 INFO: Building and compiling model...
+12:02:19.415 INFO: Building graph took 6.534 seconds
+12:02:41.022 INFO: Compiling model took 21.607 seconds
+12:02:41.640 INFO: Paged KVCache Manager allocated 26 device blocks and 0 host blocks of 128 tokens each
+12:02:42.113 INFO: Server ready on http://127.0.0.1:41873 (Press CTRL+C to quit)
+12:03:05.551 INFO: 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+12:03:07.902 INFO: 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+12:03:12.318 INFO: 127.0.0.1 - "POST /v1/chat/completions HTTP/1.1" 200 OK

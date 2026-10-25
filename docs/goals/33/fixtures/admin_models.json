@@ -1,0 +1,58 @@
+[
+ {
+  "name": "all-minilm-l6",
+  "repo_id": "sentence-transformers/all-MiniLM-L6-v2",
+  "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "source": "huggingface",
+  "architecture": "BertModel",
+  "pinned": false,
+  "keep_alive": 300,
+  "kind": "embeddings",
+  "size_bytes": 90868378,
+  "labels": [],
+  "state": "cold",
+  "port": null,
+  "idle_seconds": null,
+  "starting_seconds": null,
+  "in_flight": 0
+ },
+ {
+  "name": "llama3.2-1b",
+  "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
+  "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "source": "huggingface",
+  "architecture": "LlamaForCausalLM",
+  "pinned": false,
+  "keep_alive": 300,
+  "kind": "chat",
+  "size_bytes": 2471645610,
+  "labels": [
+   "work"
+  ],
+  "state": "cold",
+  "port": null,
+  "idle_seconds": null,
+  "starting_seconds": null,
+  "in_flight": 0
+ },
+ {
+  "name": "qwen2.5-0.5b",
+  "repo_id": "Qwen/Qwen2.5-0.5B-Instruct",
+  "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "source": "huggingface",
+  "architecture": "Qwen2ForCausalLM",
+  "pinned": false,
+  "keep_alive": 300,
+  "kind": "chat",
+  "size_bytes": 988097826,
+  "labels": [
+   "favorites",
+   "work"
+  ],
+  "state": "ready",
+  "port": 40755,
+  "idle_seconds": 0.6696774280280806,
+  "starting_seconds": null,
+  "in_flight": 0
+ }
+]

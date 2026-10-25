@@ -1,0 +1,18 @@
+{
+ "counters_since": 1792964045.2717762,
+ "tls": {
+  "on": false,
+  "endpoint": null
+ },
+ "keys": {
+  "active": 2,
+  "revoked": 1
+ },
+ "unauthorized_today": 2,
+ "unknown_routes_today": 0,
+ "admin_refused_today": 0,
+ "enforced_by_caddy": [
+  "dot_segments",
+  "secrets"
+ ]
+}

@@ -1,0 +1,26 @@
+[
+ {
+  "app": "notes-app",
+  "prefix": "mst-vHApwU0D",
+  "created_at": 1792964045.3463933,
+  "last_used_at": 1792964110.788999,
+  "revoked_at": null,
+  "status": "active"
+ },
+ {
+  "app": "old-script",
+  "prefix": "mst-62ysDIJM",
+  "created_at": 1792964045.347156,
+  "last_used_at": 1792964046.9708805,
+  "revoked_at": 1792964047.6422586,
+  "status": "revoked"
+ },
+ {
+  "app": "zed-editor",
+  "prefix": "mst-rcYl161L",
+  "created_at": 1792964045.3467958,
+  "last_used_at": 1792964114.0693297,
+  "revoked_at": null,
+  "status": "active"
+ }
+]

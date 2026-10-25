@@ -1,0 +1,28 @@
+{
+ "requests": 103,
+ "errors": 2,
+ "ttft_p50_ms": 41.2,
+ "ttft_p95_ms": 41.8,
+ "decode_tps_p50": 159.6,
+ "window_seconds": 300,
+ "per_minute": 20.6,
+ "error_rate": 0.019,
+ "by_model": {
+  "qwen2.5-0.5b": {
+   "requests": 101,
+   "errors": 0,
+   "ttft_p50_ms": 41.2,
+   "ttft_p95_ms": 41.8,
+   "decode_tps_p50": 159.6
+  }
+ },
+ "gpus": [
+  {
+   "index": 0,
+   "name": "NVIDIA GeForce RTX 4090",
+   "used_mb": 9310,
+   "total_mb": 24564,
+   "util": 37
+  }
+ ]
+}

@@ -1,0 +1,121 @@
+{
+ "crew": [
+  {
+   "id": "daemon",
+   "kind": "daemon",
+   "name": "omxconsole daemon",
+   "state": "running",
+   "pid": 2702387,
+   "port": 11435,
+   "rss_mb": 344.5,
+   "uptime_seconds": 148
+  },
+  {
+   "id": "caddy",
+   "kind": "caddy",
+   "name": "Caddy",
+   "state": "stopped",
+   "pid": null,
+   "port": 8443,
+   "rss_mb": null,
+   "uptime_seconds": null
+  },
+  {
+   "id": "litellm",
+   "kind": "litellm",
+   "name": "LiteLLM",
+   "state": "stopped",
+   "pid": null,
+   "port": 4000,
+   "rss_mb": null,
+   "uptime_seconds": null
+  },
+  {
+   "id": "model:qwen2.5-0.5b",
+   "kind": "model",
+   "name": "qwen2.5-0.5b",
+   "state": "ready",
+   "pid": 2702393,
+   "port": 40755,
+   "rss_mb": 20.6,
+   "uptime_seconds": 147,
+   "vram_gb": 3.05
+  }
+ ],
+ "listeners": [
+  {
+   "name": "omxconsole daemon",
+   "kind": "daemon",
+   "host": "127.0.0.1",
+   "port": 11435,
+   "exposed": false,
+   "state": "listening",
+   "talks_to": "the mxc CLI, this console, your apps on this machine, LiteLLM and Caddy's key check"
+  },
+  {
+   "name": "LiteLLM",
+   "kind": "litellm",
+   "host": "127.0.0.1",
+   "port": 4000,
+   "exposed": false,
+   "state": "off",
+   "talks_to": "Caddy only (its UI opens from this machine)"
+  },
+  {
+   "name": "Caddy",
+   "kind": "caddy",
+   "host": "0.0.0.0",
+   "port": 8443,
+   "exposed": true,
+   "state": "off",
+   "talks_to": "LAN clients over HTTPS, each with an app key"
+  },
+  {
+   "name": "Caddy admin",
+   "kind": "caddy",
+   "host": "127.0.0.1",
+   "port": 2099,
+   "exposed": false,
+   "state": "off",
+   "talks_to": "Caddy itself (its config API)"
+  },
+  {
+   "name": "max serve · qwen2.5-0.5b",
+   "kind": "model",
+   "host": "127.0.0.1",
+   "port": 40755,
+   "exposed": false,
+   "state": "listening",
+   "talks_to": "the daemon only"
+  }
+ ],
+ "home": "/tmp/mxc-console-record/mxc",
+ "logs": [
+  {
+   "id": "model:all-minilm-l6",
+   "label": "all-minilm-l6"
+  },
+  {
+   "id": "model:llama3.2-1b",
+   "label": "llama3.2-1b"
+  },
+  {
+   "id": "model:qwen2.5-0.5b",
+   "label": "qwen2.5-0.5b"
+  }
+ ],
+ "gpu": {
+  "name": "NVIDIA GeForce RTX 4090",
+  "count": 1,
+  "vram_total_gb": 24.0,
+  "vram_used_gb": 9.1
+ },
+ "gpus": [
+  {
+   "index": 0,
+   "name": "NVIDIA GeForce RTX 4090",
+   "vram_total_gb": 24.0,
+   "vram_used_gb": 9.1
+  }
+ ]
+}

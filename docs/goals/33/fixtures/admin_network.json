@@ -1,0 +1,55 @@
+{
+ "host": "ablearn",
+ "expose": {
+  "caddy": false,
+  "litellm": false
+ },
+ "exposed": false,
+ "lan_endpoint": null,
+ "default_host": "ablearn.local",
+ "ca_path": "/tmp/mxc-console-record/xdg-data/caddy/pki/authorities/local/root.crt",
+ "ca_exists": false,
+ "ports": {
+  "daemon": 11435,
+  "litellm": 4000,
+  "caddy": 8443
+ },
+ "models": [
+  {
+   "name": "all-minilm-l6",
+   "state": "cold",
+   "port": null,
+   "recent": 0
+  },
+  {
+   "name": "llama3.2-1b",
+   "state": "cold",
+   "port": null,
+   "recent": 0
+  },
+  {
+   "name": "qwen2.5-0.5b",
+   "state": "ready",
+   "port": 40755,
+   "recent": 37
+  }
+ ],
+ "apps": [
+  {
+   "app": "notes-app",
+   "requests": 57,
+   "last_ts": 1792964179.9568145
+  },
+  {
+   "app": "zed-editor",
+   "requests": 30,
+   "last_ts": 1792964178.320653
+  },
+  {
+   "app": "old-script",
+   "requests": 2,
+   "last_ts": 1792964047.6414986
+  }
+ ],
+ "recent_requests": 37
+}

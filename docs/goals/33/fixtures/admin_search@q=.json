@@ -1,0 +1,84 @@
+{
+ "query": "",
+ "memory": {
+  "basis": "gpu",
+  "name": "NVIDIA GeForce RTX 4090",
+  "free_gb": 14.9,
+  "total_gb": 24.0
+ },
+ "results": [
+  {
+   "id": "qwen2.5-0.5b",
+   "repo_id": "Qwen/Qwen2.5-0.5B-Instruct",
+   "source": "max",
+   "architecture": "Qwen2ForCausalLM",
+   "params": 500000000,
+   "size_gb": 1.0,
+   "est_vram_gb": 2.2,
+   "supported": true,
+   "fit": "ok",
+   "suggestions": []
+  },
+  {
+   "id": "qwen2.5-1.5b",
+   "repo_id": "Qwen/Qwen2.5-1.5B-Instruct",
+   "source": "max",
+   "architecture": "Qwen2ForCausalLM",
+   "params": 1500000000,
+   "size_gb": 3.0,
+   "est_vram_gb": 4.6,
+   "supported": true,
+   "fit": "ok",
+   "suggestions": []
+  },
+  {
+   "id": "qwen2.5-3b",
+   "repo_id": "Qwen/Qwen2.5-3B-Instruct",
+   "source": "max",
+   "architecture": "Qwen2ForCausalLM",
+   "params": 3000000000,
+   "size_gb": 6.0,
+   "est_vram_gb": 8.2,
+   "supported": true,
+   "fit": "ok",
+   "suggestions": []
+  },
+  {
+   "id": "smollm2-1.7b",
+   "repo_id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+   "source": "max",
+   "architecture": "LlamaForCausalLM",
+   "params": 1700000000,
+   "size_gb": 3.4,
+   "est_vram_gb": 5.1,
+   "supported": true,
+   "fit": "ok",
+   "suggestions": []
+  },
+  {
+   "id": "llama3.2-1b",
+   "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
+   "source": "max",
+   "architecture": "LlamaForCausalLM",
+   "params": 1000000000,
+   "size_gb": 2.0,
+   "est_vram_gb": 3.4,
+   "supported": true,
+   "fit": "ok",
+   "suggestions": []
+  },
+  {
+   "id": "all-minilm-l6",
+   "repo_id": "sentence-transformers/all-MiniLM-L6-v2",
+   "source": "max",
+   "architecture": "BertModel",
+   "params": null,
+   "size_gb": null,
+   "est_vram_gb": null,
+   "supported": true,
+   "fit": null,
+   "suggestions": []
+  }
+ ],
+ "warnings": []
+}

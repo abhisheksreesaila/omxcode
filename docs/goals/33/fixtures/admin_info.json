@@ -1,0 +1,10 @@
+{
+ "host": "ablearn",
+ "endpoint": "http://127.0.0.1:11435/v1",
+ "docs": "http://127.0.0.1:11435/docs",
+ "lan_endpoint": null,
+ "max_version": "26.7.0.dev2026100905",
+ "uptime_seconds": 143,
+ "active_keys": 2,
+ "blocked_today": 2
+}

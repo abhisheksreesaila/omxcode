@@ -1,0 +1,84 @@
+{
+ "pulls": [
+  {
+   "id": 1,
+   "ref": "acme/helper-7b",
+   "name": "helper-7b",
+   "repo_id": "acme/helper-7b",
+   "status": "running",
+   "step": "download",
+   "message": "",
+   "hint": null,
+   "error_kind": null,
+   "started_at": 1792964053.737867,
+   "finished_at": null,
+   "total_bytes": 25206524,
+   "done_bytes": 8913596,
+   "percent": 35.4,
+   "speed": 65529,
+   "eta_seconds": 249,
+   "files": [
+    {
+     "name": "config.json",
+     "size": 700,
+     "done": 700,
+     "state": "done"
+    },
+    {
+     "name": "model.safetensors",
+     "size": 25165824,
+     "done": 8912896,
+     "state": "now"
+    },
+    {
+     "name": "tokenizer.json",
+     "size": 40000,
+     "done": 0,
+     "state": "next"
+    }
+   ],
+   "steps": [
+    {
+     "id": "resolve",
+     "label": "Resolve",
+     "state": "done",
+     "detail": "acme/helper-7b @ abc123"
+    },
+    {
+     "id": "architecture",
+     "label": "Architecture",
+     "state": "done",
+     "detail": "Qwen2ForCausalLM is supported by MAX"
+    },
+    {
+     "id": "download",
+     "label": "Download",
+     "state": "now",
+     "detail": "2 of 3 files · 8.5 MB of 24.0 MB"
+    },
+    {
+     "id": "verify",
+     "label": "Verify",
+     "state": "next",
+     "detail": ""
+    },
+    {
+     "id": "register",
+     "label": "Register",
+     "state": "next",
+     "detail": ""
+    }
+   ],
+   "model": null
+  }
+ ],
+ "curated": {
+  "qwen2.5-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
+  "qwen2.5-1.5b": "Qwen/Qwen2.5-1.5B-Instruct",
+  "qwen2.5-3b": "Qwen/Qwen2.5-3B-Instruct",
+  "smollm2-1.7b": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+  "llama3.2-1b": "meta-llama/Llama-3.2-1B-Instruct",
+  "all-minilm-l6": "sentence-transformers/all-MiniLM-L6-v2"
+ },
+ "fake_hub": true
+}

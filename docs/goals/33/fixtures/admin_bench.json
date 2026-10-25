@@ -1,0 +1,40 @@
+{
+ "running": false,
+ "progress": null,
+ "latest": {
+  "id": 1,
+  "started_at": 1792964051.003478,
+  "finished_at": 1792964052.362812,
+  "status": "done",
+  "runs": 3,
+  "max_tokens": 128,
+  "prompt_tokens": 507,
+  "models": [
+   "qwen2.5-0.5b"
+  ],
+  "results": [
+   {
+    "id": 1,
+    "run_id": 1,
+    "model": "qwen2.5-0.5b",
+    "status": "done",
+    "error": null,
+    "load_seconds": null,
+    "runs_ok": 3,
+    "errors": 0,
+    "decode_tps": 157.9,
+    "prefill_tps": 11920.6,
+    "ttft_p50_ms": 41.7,
+    "ttft_p95_ms": 42.2,
+    "duration_ms": 339.4,
+    "total_ms": 1019.6,
+    "prompt_tokens": 497,
+    "completion_tokens": 48,
+    "estimated": false,
+    "prompt_estimated": false,
+    "completion_estimated": false,
+    "place": 1
+   }
+  ]
+ }
+}
