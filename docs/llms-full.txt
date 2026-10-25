@@ -15,7 +15,8 @@ Relative links are relative to the repository root: https://github.com/abhisheks
 <h1 align="center">omxcode</h1>
 
 <p align="center">
-  <b>One Mojo file. Every screen. The GPU underneath. Agents built in.</b>
+  <b>One readable language, from button to kernel.</b><br>
+  One Mojo file. Every screen. The GPU underneath. Agents built in.
 </p>
 
 <p align="center">
@@ -709,6 +710,20 @@ a design change, and the tools that appeared or went. Enough to carry on without
 - Move Board objects, drag, or scroll a grid by gesture beyond what `pan` sends.
 - Generate UI: that is AG-UI, after MX frame (the operations log is its state).
 
+## What it costs in tokens
+Measured 2026-10-22 on omxplorer with `build/data/orders_1m.csv`, through `scripts/agent_client.py` (tokens estimated as characters ÷ 4):
+
+| Call | Characters | ≈ Tokens |
+|---|---|---|
+| `ask` "revenue by product, largest first, top 5" (what changed) | 256 | 60 |
+| `read` (the screen's texts) | 916 | 230 |
+| `insert-chart` | 1,063 | 270 |
+| `create-table`, `choose-a-file` | 2,500–2,600 | 650 |
+| `screen` (everything, a busy screen with 100 tools) | 11,393 | 2,800 |
+| `tools/list` (104 tools, as JSON) | 17,437 | 4,400 |
+
+For comparison, one screenshot costs a vision model about 1,600 tokens (Claude: width × height ÷ 750, after resizing to about 1.15 megapixels), and a screen-scraping agent takes one after every action to see what happened. So a call that answers in words is 2–25× cheaper than that screenshot; a full `screen` or a fresh tool list is not, and is worth asking for only when the screen changed a lot.
+
 
 ---
 
@@ -771,7 +786,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Card tones | `Card(tone=CARD_WARN / CARD_GOOD)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Text tones | `Text(…).tone(TONE_WARN…)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Quiet buttons | `style=SUBTLE / ICON_ONLY` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
-| Lucide icon set | `Button(icon="table")…` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Lucide icon set | `Button(icon="table")…` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | In-place editor | `TextField(…).focused()` | ✅ | ✅ | ❌ | ❌ | 🔨 | ❌ |
 | Layout modifiers | `.padding .width .grow .fill .align .justify` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: pan, zoom, tap | `on_gesture: PAN, ZOOM, TAP` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
@@ -785,11 +800,11 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Board: phone-width list | `(automatic under 720 pt)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Overlay islands | `Overlay(base, *islands) + .pin(h, v)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
-| Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Inspector pages | `NavRow(…) · InspectorPage(…) (made of buttons and stacks)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ |
 | Light and dark from the system | `def appearance(mut self, dark)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Shared data per process | `App.init_shared()` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 |
-| Toolbar button (icon over label) | `Button(style=TOOL / TOOL_ON)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Toolbar button (icon over label) | `Button(style=TOOL / TOOL_ON)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | File picker | `FilePicker(title, on_pick)` | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Keyboard shortcuts (menu items) | `Item(shortcut="Ctrl+S")` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Canvas: right-click | `on_gesture: SECONDARY (event.x, y)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
@@ -803,15 +818,15 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 
 | Component | Module | Made of | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Used by |
 |---|---|---|---|---|---|---|---|---|---|
-| `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, omxplorer, workbook |
+| `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | maccheck, mxstudio, omxplorer, workbook |
 | `PivotTable` | `mojoui/pivot.mojo` | Grid, Scroll, Text tones | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, workbook |
-| `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | mxstudio, omxplorer, workbook |
+| `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | maccheck, mxstudio, omxplorer, workbook |
 | `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `FindingCard` | `mojoui/finding.mojo` | Card tones, Text tones, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
-| `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | kit, omxplorer |
-| `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
-| `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | ❌ | 🔨 | ❌ | omxplorer |
+| `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
+| `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
+| `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | ❌ | 🔨 | ❌ | maccheck, omxplorer |
 | `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Swatch picker` | `mojoui/swatches.mojo` | Canvas, Canvas: pan, zoom, tap, Popover | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
@@ -826,7 +841,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | Linux (GTK) | 79 | 1 | 0 |
 | Web | 80 | 0 | 0 |
 | Android | 19 | 17 | 44 |
-| Mac (AppKit) | 0 | 61 | 19 |
+| Mac (AppKit) | 0 | 66 | 14 |
 | iPhone (UIKit) | 0 | 62 | 18 |
 | Agent (MCP) | 29 | 17 | 34 |
 

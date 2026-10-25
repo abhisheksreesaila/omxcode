@@ -18,7 +18,7 @@ BUNDLE_ID="${BUNDLE_PREFIX:-com.mojoui}.$EX"
 MOJO=(pixi run mojo build -I "examples/$EX" -I . -I vendor)
 # An example that uses the MX frame package (vendor/mxframe.mojoc, vendor/MXFRAME_COMMIT) links its Parquet codecs.
 LINK=()
-if grep -qx mxframe "examples/$EX/needs" 2>/dev/null; then source scripts/mxlink.sh; fi
+if grep -qx mxframe "examples/$EX/needs" 2>/dev/null && [ "$(uname)" != Darwin ]; then source scripts/mxlink.sh; fi  # (Linux's codecs)
 
 mojo_build() {  # mojo_build <args...>: fails if Mojo fails, hides the telemetry warning
   local log; log=$(mktemp)
@@ -101,11 +101,23 @@ apple_objects() {  # apple_objects <dir> <triple> <host-main>
 
 build_mac() {
   local out="build/$EX/mac"; mkdir -p "$out"
+  local app="$out/$NAME.app"
+  if [ "$(uname)" = Darwin ] && [ -n "${MAC_GPU:-}" ]; then
+    # On a Mac, with its GPU (omxcode#3): a native build, Metal kernels compiled by Apple's toolchain, Mojo's runtime
+    # linked from the pixi env (CI only for now: the runtime libraries aren't in the bundle). MAC_GPU: an accelerator
+    # (metal:1 on GitHub's virtual GPU) or "native" (MAX names this Mac's own GPU)
+    echo "== Mac ($EX): AppKit, arm64, native, GPU ($MAC_GPU)"
+    local accel=(); [ "$MAC_GPU" = native ] || accel=(--target-accelerator "$MAC_GPU")
+    rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
+    mojo_build hosts/mac_gpu_main.mojo "${accel[@]}" -o "$app/Contents/MacOS/$NAME" \
+      -Xlinker -framework -Xlinker AppKit -Xlinker -lobjc
+  else
   echo "== Mac ($EX): AppKit, arm64 macOS 14+"
   apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo
-  local app="$out/$NAME.app"; rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
+  rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
   pixi run ld64.lld -arch arm64 -e _mojo_entry -dead_strip -no_adhoc_codesign \
     -platform_version macos 14.0 26.0 -o "$app/Contents/MacOS/$NAME" "$out"/*.o apple/sdk/macos/*.tbd
+  fi
   plist apple/mac/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$app/Contents/Resources/fonts/"
   printf 'APPL????' > "$app/Contents/PkgInfo"

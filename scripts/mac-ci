@@ -20,6 +20,10 @@ for app in "${apps[@]}"; do
     cp "$zip" "build/mac-ci/$app-mac.zip"
     gh release upload mac-ci "build/mac-ci/$app-mac.zip" --clobber -R "$REPO"
 done
+# the sources too, for the macos-26 job's native GPU build of omxplorer (omxcode#3: Metal kernels need a Mac to compile)
+tar -czf build/mac-ci/omxcode-src.tar.gz --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh \
+    mojoui themes hosts examples/omxplorer examples/maccheck apple vendor
+gh release upload mac-ci build/mac-ci/omxcode-src.tar.gz --clobber -R "$REPO"
 branch=build/mac-ci/branch
 if [ ! -d "$branch/.git" ]; then
     git clone -q --branch mac-test --single-branch "https://github.com/$REPO.git" "$branch"

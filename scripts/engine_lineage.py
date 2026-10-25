@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
-LINEAGE = ["7cbcc04", "1889b7f", "321870f", "23edc59"]
+LINEAGE = ["7cbcc04", "1889b7f", "321870f", "23edc59", "3d2455d"]
 REPO = ROOT.parent.parent / "mxframe"  # (~/Projects/mxframe, next to the mxapp folder)
 
 

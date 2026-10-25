@@ -55,7 +55,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Card tones | `Card(tone=CARD_WARN / CARD_GOOD)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Text tones | `Text(…).tone(TONE_WARN…)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Quiet buttons | `style=SUBTLE / ICON_ONLY` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
-| Lucide icon set | `Button(icon="table")…` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Lucide icon set | `Button(icon="table")…` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | In-place editor | `TextField(…).focused()` | ✅ | ✅ | ❌ | ❌ | 🔨 | ❌ |
 | Layout modifiers | `.padding .width .grow .fill .align .justify` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: pan, zoom, tap | `on_gesture: PAN, ZOOM, TAP` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
@@ -69,11 +69,11 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Board: phone-width list | `(automatic under 720 pt)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Overlay islands | `Overlay(base, *islands) + .pin(h, v)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
-| Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Inspector pages | `NavRow(…) · InspectorPage(…) (made of buttons and stacks)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ |
 | Light and dark from the system | `def appearance(mut self, dark)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Shared data per process | `App.init_shared()` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 |
-| Toolbar button (icon over label) | `Button(style=TOOL / TOOL_ON)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Toolbar button (icon over label) | `Button(style=TOOL / TOOL_ON)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | File picker | `FilePicker(title, on_pick)` | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Keyboard shortcuts (menu items) | `Item(shortcut="Ctrl+S")` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Canvas: right-click | `on_gesture: SECONDARY (event.x, y)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
@@ -93,8 +93,8 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `FindingCard` | `mojoui/finding.mojo` | Card tones, Text tones, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
-| `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | kit, maccheck, omxplorer |
-| `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | maccheck, omxplorer |
+| `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
+| `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
 | `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | ❌ | 🔨 | ❌ | maccheck, omxplorer |
 | `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
@@ -110,7 +110,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | Linux (GTK) | 79 | 1 | 0 |
 | Web | 80 | 0 | 0 |
 | Android | 19 | 17 | 44 |
-| Mac (AppKit) | 0 | 61 | 19 |
+| Mac (AppKit) | 0 | 66 | 14 |
 | iPhone (UIKit) | 0 | 62 | 18 |
 | Agent (MCP) | 29 | 17 | 34 |
 

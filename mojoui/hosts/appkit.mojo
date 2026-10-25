@@ -935,9 +935,6 @@ struct AppKitHost[A: App](Movable):
                 var pin = msg(msg(content, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
                 if anchor == "widthAnchor":  # (content the app made wider is cut off at the edge: it never widens the window)
                     _ = msg(pin, "setPriority:", Float32(495))  # below NSLayoutPriorityWindowSizeStayPut (500), above a wrapping label (490)
-                    # and never narrower than the scroll view: at 495 alone its rows' stacks (hugging at 750) drew it in to
-                    # its widest child, the inspector 251 pt in a 268 pt scroll, its text cut a line short (Mac, 2026-10-25)
-                    _ = msg(msg(msg(content, "widthAnchor"), "constraintGreaterThanOrEqualToAnchor:", msg(clip, "widthAnchor")), "setActive:", 1)
                 _ = msg(pin, "setActive:", 1)
             if not node.sized_height():
                 constrain(w, "heightAnchor", Float64(node.size))

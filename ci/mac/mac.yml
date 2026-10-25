@@ -20,6 +20,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download mac-ci -R "$GITHUB_REPOSITORY" -D zips
+      - name: Build omxplorer natively with the GPU (Metal), in place of the cross-built zip (omxcode#3)
+        if: matrix.os == 'macos-26'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          mkdir -p out src
+          tar -xzf zips/omxcode-src.tar.gz -C src
+          curl -fsSL https://pixi.sh/install.sh | bash > out/native-setup.txt 2>&1
+          export PATH="$HOME/.pixi/bin:$PATH"
+          xcodebuild -downloadComponent MetalToolchain >> out/native-setup.txt 2>&1 || true
+          cd src
+          pixi install --frozen >> ../out/native-setup.txt 2>&1
+          # (the runner's GPU is a virtual one: MAX can't name it, so name M1's Metal family, as the GPU probe does)
+          if MAC_GPU=metal:1 bash scripts/build.sh omxplorer mac > ../out/native-build.txt 2>&1; then
+            rm -f ../zips/omxplorer-mac.zip && cp build/omxplorer/mac/OmxplorerMojo-mac.zip ../zips/omxplorer-mac.zip
+            echo "NATIVE GPU BUILD IN USE" | tee -a ../out/native-build.txt
+          else
+            echo "native build failed: the cross-built zip runs" | tee -a ../out/native-build.txt
+          fi
+          otool -L build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo >> ../out/native-build.txt 2>&1 || true
+          tail -30 ../out/native-build.txt
       - name: Run each app through its steps
         run: bash ci/run.sh
       - name: GPU probe (a Mojo kernel through MAX on this Mac's GPU; docs/plans/speed.md)

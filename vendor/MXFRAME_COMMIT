@@ -1,2 +1,2 @@
-mxframe.mojoc built from mxframe main 23edc59 (stable: background jobs with progress and cancel, range aggregates, block reads; everything in 321870f)
+mxframe.mojoc built from mxframe main 3d2455d (stable: omxcore on Apple GPUs (Metal), the first stable after the omxcore rename; the package's last build under the mxframe name, omxcode#3; everything in 23edc59)
 rebuild: git -C <mxframe> archive <commit> mojo kernels_aot scripts/build_mojo_pkg.sh | tar -x -C build/mxframe-src; cd build/mxframe-src && pixi run --manifest-path ../../pixi.toml bash scripts/build_mojo_pkg.sh; cp build/mxframe.mojoc ../../vendor/
