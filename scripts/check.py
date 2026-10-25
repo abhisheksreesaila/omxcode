@@ -515,8 +515,7 @@ def m3():
         t = omxqua_tokens(dark)
         shot = OUT / f"omxqua-themes-gtk-{mode}.png"
         env = {"MOJOUI_TEST": f"segment:0={THEMES_OMXQUA}", "MOJOUI_WINDOW": "900x760", "MOJOUI_SHOT": str(shot)}
-        if dark:
-            env["ADW_DEBUG_COLOR_SCHEME"] = "force-dark"
+        env["ADW_DEBUG_COLOR_SCHEME"] = "force-dark" if dark else "prefer-light"  # (libadwaita has no force-light; the system's own mode must not decide)
         r = g30.run([str(exe)], env=env, timeout=300)
         out = r.stdout + r.stderr
         if r.returncode != 0 or "TEST: " in out or not shot.exists():

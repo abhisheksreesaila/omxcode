@@ -13,6 +13,7 @@ from mojoui.theme import Theme, Palette
 from themes.paper import paper
 from themes.liquid import liquid
 from themes.skins import ledger, graphite
+from themes.omxqua import omxqua
 
 comptime PICK = 1
 comptime NAME = 2
@@ -20,10 +21,13 @@ comptime NOTIFY = 3
 comptime TIDY = 4
 comptime SIZE = 5
 comptime SAVE = 6
-comptime NAMES: List[String] = ["Native", "Paper", "Liquid", "Ledger", "Graphite"]
+comptime NAMES: List[String] = ["Native", "Paper", "Liquid", "Ledger", "Graphite", "omxqua"]
+comptime OMXQUA = 5  # (follows the system's light or dark, as the original console does)
 
 
-def theme_at(i: Int) -> Theme:
+def theme_at(i: Int, dark: Bool = False) -> Theme:
+    if i == OMXQUA:
+        return omxqua(dark)
     if i == 1:
         return paper()
     if i == 2:
@@ -68,15 +72,15 @@ struct Main(App):
 
     def appearance(mut self, dark: Bool):
         self.dark = dark
-        if self.at == 0:
-            self.look = Theme.native(dark)
+        if self.at == 0 or self.at == OMXQUA:
+            self.look = Theme.native(dark) if self.at == 0 else theme_at(self.at, dark)
             self.version += 1
 
     def update(mut self, event: Event):
         var m = event.message
         if m == PICK and 0 <= event.number < len(materialize[NAMES]()):
             self.at = event.number
-            self.look = theme_at(self.at) if self.at != 0 else Theme.native(self.dark)
+            self.look = theme_at(self.at, self.dark) if self.at != 0 else Theme.native(self.dark)
             self.version += 1
         elif m == NAME:
             self.name = event.text
@@ -105,7 +109,7 @@ struct Main(App):
             Segmented(materialize[NAMES](), self.at, PICK).tag("theme-picker"),
             Text(who, TITLE),
             Text("Native is no theme: the platform's own look. The rest are modules outside the framework." if self.at == 0
-                 else "themes/" + self.look.id + ".mojo: a palette, a GTK style sheet and a web style sheet.", CAPTION),
+                 else "themes/" + (String("omxqua") if self.at == OMXQUA else self.look.id) + ".mojo: a palette, a GTK style sheet and a web style sheet.", CAPTION),
             Card(
                 HStack(Text("Profile", HEADLINE), Spacer(), Text("saved " + String(self.saved) + "×" if self.saved > 0 else "not saved", CAPTION).tone(TONE_ACCENT), spacing=8).fill().align(CENTER),
                 TextField(self.name, "Your name", on_change=NAME).fill(),

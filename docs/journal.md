@@ -396,3 +396,14 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Web: the strip plays only while a reply is out, so the ticks reach the page through /wait, not alongside frames.
 - Mac: the stub gains the socket, poll, fcntl, getaddrinfo and two pthread calls; httpcheck builds and links. The AppKit host polls through performSelector:afterDelay:. Not run on a Mac (unverified).
 - JSON: Mojo's atof was one ulp off on 5 of 3,000 doubles; strtod_l in the C locale fixed it (D-325). The tool that writes my commands decodes printable \uXXXX escapes, so the corpus file is written with chr(92); check its bytes, not its look.
+
+## 2026-10-25 · goal 33 M3: the omxqua theme
+- M3's proof written first (scripts/check.py m3): tokens.css parsed for the Developer family, light and night; examples/themes in omxqua on the web read back through Chromium's computed styles (page, ink, card fill, corners, shadow-1, the accent and on-accent, pill and field corners, 34 px heights, the chosen segment, the spring's points and 300 ms, a held button's scale); Geist and Geist Mono must load, not just be named; GTK shots sampled for surface-0, surface-1 and the accent; goal 32's lint (factored into lint() in 32-check.py).
+- drive.py gains `hold:Title=ms` (press, wait, read the transform) and web_run(color_scheme=…).
+- Fonts: the console's woff2 decompressed to TTF (D-331); GTK's install list names them; build.sh copies them already.
+- Mojo: Look lost @fieldwise_init for two inits (four arguments as before, five with a Motion); test_look covers the press rules and that Liquid has none.
+- First GTK run: the light shot came out dark. libadwaita has no `force-light` (it warns and keeps the system's dark); `prefer-light` works.
+- PASS in 30 s. Goal 32's M1 fails on one golden, maccheck-start-web (1440×706 then, 670 now); omxqua isn't in that screen and nothing changed for Liquid's sheet, so it looks like the M1/M2 host changes (not bisected).
+- Not mapped yet (M4/M7): the top bar (.bar, brand mark, crumbs, places), the Beacon, chips, badges with dots, the table (.tbl) and its mono uppercase headers (no text-transform in a Surface), the .src source line, stats, skeleton, uppercase labels, canvas text (baked Inter, not Geist), the Mac (Inter is hard-wired for skins).
+- Goal 32's M1 fails on one golden only, maccheck-start-web.png (the page is 1440×670, the golden 1440×706). The M1/M2 agent built untouched HEAD in a temporary worktree and got the same picture, so it was already failing on main before goal 33. To fix before M8, which reruns goal 32's M1.
+- Seen by the M1/M2 agent: handing C a `Pointer(to=x)` to write into lost the value (a refused connect read as success). mxframe's start_job passes pthread_create its thread id the same way: may hide the same bug (not checked).

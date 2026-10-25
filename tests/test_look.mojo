@@ -8,6 +8,7 @@ from mojoui.canvas import rgba
 from themes.liquid import liquid
 from themes.skins import ledger
 from themes.omarchy import omarchy
+from themes.omxqua import omxqua
 
 
 def main() raises:
@@ -35,4 +36,18 @@ def main() raises:
     assert_true("border-bottom: 1px solid" in g, "the skins' toolbar band has a hairline")
     assert_equal(look_gtk_css(omarchy().look, "window.omarchy "), "", "Omarchy's look has no surfaces yet: no rules")
     assert_true(Look.none().is_none())
+    # omxqua (goal 33 M3): the press is data; the web springs on omxqua's linear(), GTK on its ease-in; no other look presses
+    var q = omxqua()
+    assert_equal(q.look.motion.press_scale, 0.96)
+    var qweb = look_web_css(q.look, "body.omxqua ")
+    var qgtk = look_gtk_css(q.look, "window.omxqua ")
+    assert_true("body.omxqua button:active, body.omxqua label.picker:active { transform: scale(0.96); }" in qweb, qweb)
+    assert_true("transition: transform 300ms linear(0, 0.02, 0.071," in qweb, "the web takes the spring itself")
+    assert_true("window.omxqua button:active { transform: scale(0.96); }" in qgtk and "300ms cubic-bezier(0.2, 0, 0, 1)" in qgtk, qgtk)
+    assert_true("body.omxqua [data-tag=tile] { background: rgb(255,255,255); border-radius: 12px; box-shadow: 0 1px 2px rgba(20,16,10,0.06), 0 0 0 1px rgba(20,16,10,0.04);" in qweb, qweb)
+    assert_true("font-family: 'Geist Mono', monospace" in qweb, "mono labels")
+    assert_true("transform: scale" not in look_web_css(l.look, "body.liquid "), "Liquid's look has no press of its own")
+    var night = omxqua(True)
+    assert_equal(night.id, "omxqua-dark")
+    assert_true("body.omxqua-dark { background: #0b0b0d;" in night.web_css, "night: surface-0")
     print("LOOK TESTS PASSED")

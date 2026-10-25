@@ -93,18 +93,9 @@ def framework_tags():
     return tags
 
 
-def m1():
-    """A theme is data: a Look in the framework, declared by Liquid and Omarchy, its rules written by the hosts; GTK and
-    the web unchanged; themes style only framework tags."""
+def lint():
+    """Themes are data and style only the framework's tags: (surface roles, problems). Goal 33's M3 runs it too."""
     problems = []
-    theme = (ROOT / "mojoui/theme.mojo").read_text()
-    if "struct Look" not in theme:
-        problems.append("mojoui/theme.mojo has no Look")
-    looks = re.findall(r"struct (\w+)\(", theme)
-    for name in ("liquid", "omarchy"):
-        text = (ROOT / f"themes/{name}.mojo").read_text()
-        if "Look(" not in text:
-            problems.append(f"themes/{name}.mojo declares no Look")
     # every surface role a Look names is written by the hosts, not by hand in themes/
     roles = set(re.findall(r'\b(?:Surface|glass|solid|band|words|chip|slot)\("([\w-]+)"', "".join(f.read_text() for f in (ROOT / "themes").glob("*.mojo"))))  # (with every helper that makes one: D-299)
     shape = re.compile(r"\b(background(-color)?|border-radius|margin|padding|box-shadow|border(-top|-bottom)?|min-height)\s*:")
@@ -122,6 +113,22 @@ def m1():
         for tag in sorted(set(re.findall(r"mui-tag-([\w-]+)", f.read_text())) | set(re.findall(r"data-tag=([\w-]+)", f.read_text()))):
             if tag not in known:
                 problems.append(f"{f.name} styles '{tag}', which no framework component sets")
+    return roles, problems
+
+
+def m1():
+    """A theme is data: a Look in the framework, declared by Liquid and Omarchy, its rules written by the hosts; GTK and
+    the web unchanged; themes style only framework tags."""
+    problems = []
+    theme = (ROOT / "mojoui/theme.mojo").read_text()
+    if "struct Look" not in theme:
+        problems.append("mojoui/theme.mojo has no Look")
+    for name in ("liquid", "omarchy"):
+        text = (ROOT / f"themes/{name}.mojo").read_text()
+        if "Look(" not in text:
+            problems.append(f"themes/{name}.mojo declares no Look")
+    roles, found = lint()
+    problems += found
     shoot()
     for app, screen in screens():
         for host in ("gtk", "web"):

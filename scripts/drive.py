@@ -129,6 +129,15 @@ def step(page, s):
     if verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip: a drawn view's words), mid-run
         el = page.locator(f"[data-tag={rest}]").first
         return f"SAYS: {rest} = " + (el.get_attribute("data-tip") or "")
+    if verb == "hold":  # hold:Title=ms: the button pressed and held that long, then its transform read (HOLD: title transform)
+        title, _, ms = rest.partition("=")
+        box = page.locator("[data-kind=button]").filter(has_text=exact(title)).first.bounding_box()
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.down()
+        page.wait_for_timeout(int(ms or 500))
+        held = page.evaluate("(t) => { const b = [...document.querySelectorAll('[data-kind=button]')].find(e => e.textContent.trim() === t); return b ? getComputedStyle(b).transform : 'none'; }", title)
+        page.mouse.up()
+        return f"HOLD: {title} {held}"
     if verb == "tap":
         title, _, nth = rest.partition("@")
         page.locator("[data-kind=button]").filter(has_text=exact(title)).nth(int(nth or 0)).click()
@@ -293,10 +302,10 @@ RECTS = """() => { const out = []; const r = e => { const b = e.getBoundingClien
   return out.join(String.fromCharCode(10)); }"""
 
 
-def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None):
+def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None, color_scheme=None):
     """Returns (result, output) like a process run: result.returncode is 0 on success.
     tabs > 1: that many pages open against the one server (each runs the steps); the server's own
-    log lines (e.g. SHARED: …) come after the page's state."""
+    log lines (e.g. SHARED: …) come after the page's state. color_scheme: "light" or "dark" (prefers-color-scheme), else Chromium's."""
     from playwright.sync_api import sync_playwright
 
     port = free_port()
@@ -318,8 +327,9 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
             return SimpleNamespace(returncode=1), "server didn't come up in 3 minutes"
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
-            page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]})
-            others = [browser.new_page(viewport={"width": viewport[0], "height": viewport[1]}) for _ in range(tabs - 1)]
+            scheme = {"color_scheme": color_scheme} if color_scheme else {}
+            page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]}, **scheme)
+            others = [browser.new_page(viewport={"width": viewport[0], "height": viewport[1]}, **scheme) for _ in range(tabs - 1)]
             for other in others:
                 other.goto(url)
                 settle(other)

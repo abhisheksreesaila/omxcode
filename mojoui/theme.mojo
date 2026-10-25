@@ -242,11 +242,37 @@ struct Segments(Copyable, Movable):
 
 
 @fieldwise_init
+struct Motion(Copyable, Movable):
+    """How a press feels: the control shrinks to `press_scale` while held and springs back over `press_ms` on `spring`
+    (a CSS easing: omxqua's linear() spring); `ease`: the same feel where a host has no linear() (GTK: a cubic-bezier).
+    press_scale 0: the host's own press."""
+
+    var press_scale: Float64
+    var press_ms: Int
+    var spring: String
+    var ease: String
+
+    @staticmethod
+    def none() -> Motion:
+        return Motion(0, 0, "", "")
+
+
 struct Look(Copyable, Movable):
     var type: TypeScale
     var controls: Controls
     var surfaces: List[Surface]
     var segments: Segments
+    var motion: Motion  # the press (omxqua's spring); Motion.none(): the host's own
+
+    def __init__(out self, type: TypeScale, controls: Controls, var surfaces: List[Surface], segments: Segments):
+        self = Look(type, controls, surfaces^, segments, Motion.none())
+
+    def __init__(out self, type: TypeScale, controls: Controls, var surfaces: List[Surface], segments: Segments, motion: Motion):
+        self.type = type.copy()
+        self.controls = controls.copy()
+        self.surfaces = surfaces^
+        self.segments = segments.copy()
+        self.motion = motion.copy()
 
     @staticmethod
     def none() -> Look:

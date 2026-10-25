@@ -5,7 +5,7 @@
 # CSS keeps only what one host alone can do (keyframes, hover springs, a backdrop blur's fallback).
 
 from mojoui.canvas import rgba
-from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls
+from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, Motion
 
 
 # ---- the rules GTK and the web write from a look ----
@@ -105,7 +105,22 @@ def look_gtk_css(look: Look, scope: String) -> String:
         out += scope + "button.mui-tool.mui-tool-inline { min-width: 0; min-height: " + px(c.inline_h) + "; padding: 0 " + px(c.inline_pad) + "; border-radius: " + px(c.inline_radius) + "; }\n"
         out += scope + "button.mui-tool-inline label.mui-tool-label { font-size: " + fpx(c.inline_font) + "; }\n"
         out += scope + ".mui-tag-toolbar button.image-button { min-width: " + px(c.icon) + "; min-height: " + px(c.icon) + "; padding: 0; border-radius: " + px(c.icon_radius) + "; }\n"
+    out += press_rules(look.motion, scope, False)
     return out
+
+
+def press_rules(m: Motion, scope: String, web: Bool) -> String:
+    """A press as the look says: the control shrinks while held and springs back (omxqua's .oq-pressable). The web takes
+    the spring itself (linear()); GTK its cubic-bezier stand-in. Colours change quickly beside it (150 ms)."""
+    if m.press_scale <= 0:
+        return ""
+    var curve = m.spring if web and m.spring != "" else m.ease
+    var quick = String("150ms ease-out")
+    var sel = scope + "button" + (", " + scope + "label.picker" if web else String(""))
+    var held = scope + "button:active" + (", " + scope + "label.picker:active" if web else String(""))
+    return (sel + " { transition: transform " + String(m.press_ms) + "ms " + curve + ", background-color " + quick + ", color " + quick
+            + ", box-shadow " + quick + ", border-color " + quick + "; }\n"
+            + held + " { transform: scale(" + String(m.press_scale) + "); }\n")
 
 
 def look_web_css(look: Look, scope: String) -> String:
@@ -134,4 +149,5 @@ def look_web_css(look: Look, scope: String) -> String:
         out += scope + "button.tool, " + scope + "label.picker.tool { min-width: " + px(c.tool_w) + "; min-height: " + px(c.tool_h) + "; border-radius: " + px(c.tool_radius) + "; font-size: " + fpx(c.tool_font) + "; }\n"
         out += scope + "button.tool.inline, " + scope + "label.picker.tool.inline { min-width: 0; min-height: " + px(c.inline_h) + "; padding: 0 " + px(c.inline_pad) + "; border-radius: " + px(c.inline_radius) + "; font-size: " + fpx(c.inline_font) + "; }\n"
         out += scope + "[data-tag=toolbar] button.icon-only { border-radius: " + px(c.icon_radius) + "; }\n"
+    out += press_rules(look.motion, scope, True)
     return out
