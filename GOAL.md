@@ -1,34 +1,40 @@
-# GOAL 32: one look on Linux, the web and the Mac, from components and a theme
+# GOAL 33: OMX Console, rebuilt in omxcode
 
-**Why (owner, 2026-10-24):** "the claim is one language, button to kernel… it has to look identical and each
-component has to look polished… if I just drop those components and hook up the connections and databases it should
-just work out of the box, except for the custom components… if you say one language plus custom CSS, people will lose
-interest." Then speed: NVIDIA on Linux, Apple's GPU on the Mac (MAX's source is open now), the browser's GPU on the web.
+**End goal (owner, 2026-10-25):** "the whole point of the framework is to build apps and it should have all the
+components necessary… let's fix this… it proves it can build a console app like this… the web should be identical,
+99%… showcase it in our gallery." The app is MXConsole (repo `mxstudio`, `mxconsole/console/`: ten screens, 4,400 lines
+of plain JS and 870 of CSS over omxqua, polling the daemon's `/admin/*` JSON API). Its Python daemon stays as it is.
+Goal 32 is parked at M0, M1, M2 PASS, with M3 in progress (archived: docs/goals/32-GOAL.md, 32-check.py); goal 31's
+draft waits.
 
 ## Milestones
 | # | Milestone | Proof (`scripts/check`) |
 |---|---|---|
-| M0 | The measure | `scripts/side.py` shoots ci/mac/side.txt's screens on GTK and the web at 1440×640 (the Mac runner's screen holds no taller window) and reads the newest Mac run, which must be built from this checkout's sources (its stamp); the Mac's view dump and the web's carry each view's tag; `scripts/parity.py` lists every tagged view's rect on both and the difference |
-| M1 | A theme is data | `mojoui/theme.mojo` has a `Look`: a type scale, control sizes (button, tool, icon, field) and surfaces (fill, corners, margin, padding, rim, shadow) by framework role; Liquid and Omarchy declare one; the GTK and web rules for those roles are written from it (no hand-written copy left in themes/); GTK and web pictures of every side.txt screen differ from the goldens taken before the change by ≤ 0.5 % of pixels; themes style only tags a framework component sets (a lint) |
-| M2 | The toolbar, the same | on the Mac, omxplorer's sheet and Report toolbars: titled tools (title beside the icon), 34 pt icon toggles, Lucide icons, dividers, the floating island from M1's look; every toolbar view's rect within 4 pt of the web's, and every button's title fits its frame |
-| M3 | Every surface the same | the in-window header row, formula bar, inspector, segmented controls, fields, sheet tabs, status bar, the table's card and Report tiles follow M1's look on the Mac; every tagged view in side.txt's screens within 4 pt (or 3 %) of the web's; each Mac picture's difference from the web's is no more than 1.5 × GTK's difference from the web's |
-| M4 | Popovers, tiles and rows | the chart sentence's choice popover (its own picture on the Mac), the Report's add tiles with their titles, the start page's disabled row in its column: within M3's tolerances |
-| M5 | The Mac's hands | CI steps on the Mac: a drag selects cells on its first press, a formula column computes the same figures as on GTK, Open reads a CSV through the file panel's test path |
-| M6 | Speed, mapped | every GPU kernel in mojoui/ and vendor/ fits Apple's 32 KB of threadgroup memory (a scan); a small Mac test app built in CI runs a MAX kernel on the GPU if the runner has one and says which device it ran on; `docs/plans/speed.md`: NVIDIA (job streams), Mac (Metal through MAX), web (WebGPU in the browser), and what's needed from MX frame |
-| M7 | Nothing regressed | goal 30's checks (M0–M5; every earlier goal inside them) |
+| M0 | The measure | `scripts/console_fixture.py` replays `/admin/*` replies recorded from a real daemon (mxconsole's fake `max`) and serves the original console's files from `MXCONSOLE_DIR`; `scripts/console_side.py` shoots its ten screens at 1440×900 and 390×844 with motion off, twice; no request misses the fixtures; the noise floor (the two runs' largest differing-pixel share) is ≤ 1 % and saved in docs/goals/33/floor.txt |
+| M1 | HTTP, a component | `mojoui/http.mojo`: a request is an effect and its reply an `Event`; `tests/test_http.mojo` against a Python test server: GET and POST JSON, a header read from an env var by name, chunked replies, a 1 MB body, a timeout, connection refused, a 500; `examples/httpcheck` draws ≥ 60 frames on GTK and the web while one reply takes 2 s, then shows it |
+| M2 | Timers and real JSON | `App.every(ms, id)` on GTK and the web: 10 ticks of 100 ms each land within ±20 ms; `mojoui/json.mojo` reads every recorded reply in docs/goals/33/fixtures and equals Python's `json.loads`, value for value (decimals, negatives, exponents, `\u` escapes, nulls) |
+| M3 | The omxqua theme | `themes/omxqua.mojo` declares a `Look` from omxqua's tokens.css (Geist and Geist Mono, its accent, surfaces, one soft shadow, the press spring), both light and dark; only framework tags styled (goal 32's lint) |
+| M4 | The console's components | in `mojoui/`, each with its own test, on GTK and the web, built for the Mac: Table (rows, tick boxes), CodeBlock with Copy, LogView (pinned to the end), Timeline (stages, elapsed), Breadcrumbs, Chip/Badge, Confirm (tap twice), Skeleton, Markdown, Sparkline, Route (`#/models/<name>/<tab>` deep links on the web); docs/components.md regenerated; the debt table holds nothing from the console |
+| M5 | My models and the model page | `examples/console` against the fixtures: the model list (table and cards, tick to change many, drag onto a label) and the model page's overview, benchmark, logs and notebook tabs; numbers follow the poll; Jupyter in an iframe on the web, the browser on GTK and the Mac |
+| M6 | The other screens | Add a model (search with fit badges, the stage timeline, the live log, the Ready card with curl to copy), Keys (create, rotate, revoke by tapping twice), Gateway, Security, Settings |
+| M7 | Identical | the web: every M0 screen at both sizes has ≥ 99 % of its pixels equal to the original's (the same tolerance M0 measured); GTK and the Mac: every tagged view's box within goal 32's parity tolerance of the web's; scripts/live.py on a live daemon (fake `max`): load a model, its numbers update, create a key and call `/v1` with it, revoke it, stop the model |
+| M8 | In the gallery, nothing regressed | the console in docs/gallery beside omxplorer (GTK, web and Mac shots); goal 32's M0–M2 and goal 30's M0–M5 pass |
 
 ## Out of bounds
-App-specific CSS or host code (an app's own components excepted); iPhone and Android; a second app (later, as a
-proof); pushing main (the mac-test branch and the mac-ci release assets are fine: owner, 2026-10-23); paid services;
-touching `../mojo-ui-apple-test`.
+Changing mxconsole's daemon or API, or anything in `~/Projects/mxstudio` (read it, never write it); the `/docs` and
+installer pages; the tray and the pywebview window; TLS; iPhone and Android; paid services; pushing; touching
+`../mojo-ui-apple-test`.
 
 ## Assumptions (instead of asking)
-- The web is the reference picture: GTK already matches it, and a browser reports every view's box exactly.
-- The Mac keeps its menus in the system menu bar (a Mac app without one isn't a Mac app); the in-window row keeps the
-  app's mark and status, so that row differs by the menu titles only.
-- Fonts are the theme's (Inter); text renders a little differently per platform, which the picture threshold allows.
-- GitHub's Mac runners prove the Mac's look; only the owner's Mac proves the GPU on Apple Silicon.
+- HTTP is our own small HTTP/1.1 client on libc sockets (the console only talks to 127.0.0.1); flare (ehsanmok/flare)
+  needs Mojo ≥ 1.2 and OpenSSL and has no iPhone or Android, so it waits behind the same `mojoui.http` API (D-310).
+- A request never blocks `update` or a frame: the host runs it on a worker and posts the reply back, as goal 30's jobs do.
+- The console is `examples/console`, given the daemon's URL; replacing mxconsole's shipped JS console is the owner's call later.
+- "Identical" is the web, in pixels; GTK and the Mac use native widgets, so they're held to boxes, not pixels.
+- Each milestone's proof is written in scripts/check.py before its work starts (todo() until then), from this table's
+  words, never weaker.
 
 ## Done means
-PASS for M0–M7, the reviewer passes it, a short `docs/report.md`; committed locally, nothing pushed to main. Budget:
-80 turns.
+`scripts/check` prints PASS for M0–M8; the reviewer passes it; a short `docs/report.md` with side-by-side shots of the
+original console and ours. Committed locally on `goal-33-console`, nothing pushed. Budget: 80 turns a run; if M5 runs
+long, M6 becomes goal 34 (logged).

@@ -374,3 +374,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - The test Mac moves the pixi env away before the app's steps, so the run proves the bundle carries everything.
 - The binary's minos is 26.0 (the runner's own), so the GPU download needs macOS 26; the CPU build stays for 14 and 15. Next: a lower deployment target, checked on the macOS 15 runner.
 - The cross-built zip at mac-ci is re-uploaded by every CI run, so the download got its own release, mac-app.
+
+## 2026-10-25 · goal 33 set
+- The gap (owner asked "can omxcode build OMX Console?"): no HTTP in mojoui, no timer outside a Canvas's on_frame, json.mojo reads whole numbers only, no omxqua theme, and about ten console widgets missing (GOAL.md M4).
+- MXConsole surveyed (~/Projects/mxstudio/mxconsole/console): a single-page app of ~30 JS modules built with an `h()` helper; hash routes; everything is fetch plus polling (0.7–15 s), no SSE or websockets; `api()` in core.js sends an admin header; omxqua copied into console/omxqua/; tests/mxconsole has a fake `max` to run the daemon without a GPU.
+- HTTP libraries: ehsanmok/flare (pixi.toml: mojo >=1.2.0, openssl, osx-arm64/linux only), Lightbug-HQ/lightbug_http (not production ready), thatstoasty's floki (libcurl + a C shim). D-310.
