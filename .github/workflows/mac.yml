@@ -36,11 +36,14 @@ jobs:
           # (the runner's GPU is a virtual one: MAX can't name it, so name M1's Metal family, as the GPU probe does)
           if MAC_GPU=metal:1 bash scripts/build.sh omxplorer mac > ../out/native-build.txt 2>&1; then
             rm -f ../zips/omxplorer-mac.zip && cp build/omxplorer/mac/OmxplorerMojo-mac.zip ../zips/omxplorer-mac.zip
-            echo "NATIVE GPU BUILD IN USE" | tee -a ../out/native-build.txt
+            cp build/omxplorer/mac/OmxplorerMojo-mac.zip ../out/omxplorer-mac-gpu.zip  # (the download, once its run is clean: D-309)
+            mv .pixi ../pixi-away  # (the app runs on what it carries, as on a Mac that never had pixi)
+            echo "NATIVE GPU BUILD IN USE (pixi env moved away)" | tee -a ../out/native-build.txt
           else
             echo "native build failed: the cross-built zip runs" | tee -a ../out/native-build.txt
           fi
-          otool -L build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo >> ../out/native-build.txt 2>&1 || true
+          otool -L build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo build/omxplorer/mac/OmxplorerMojo.app/Contents/Frameworks/*.dylib >> ../out/native-build.txt 2>&1 || true
+          otool -l build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo | grep -A2 LC_RPATH >> ../out/native-build.txt 2>&1 || true
           tail -30 ../out/native-build.txt
       - name: Run each app through its steps
         run: bash ci/run.sh
