@@ -23,13 +23,14 @@ jobs:
       - name: Build omxplorer natively with the GPU (Metal), in place of the cross-built zip (omxcode#3)
         if: matrix.os == 'macos-26'
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 15  # (a hung install leaves the job's time for the cross-built run)
         run: |
           mkdir -p out src
+          trap 'echo "native build step failed at line $LINENO: the cross-built zip runs" >> "$GITHUB_WORKSPACE/out/native-build.txt"' ERR
           tar -xzf zips/omxcode-src.tar.gz -C src
           curl -fsSL https://pixi.sh/install.sh | bash > out/native-setup.txt 2>&1
           export PATH="$HOME/.pixi/bin:$PATH"
-          xcodebuild -downloadComponent MetalToolchain >> out/native-setup.txt 2>&1 || true
+          xcodebuild -downloadComponent MetalToolchain >> out/native-setup.txt 2>&1 || echo "no Metal toolchain" >> out/native-build.txt
           cd src
           pixi install --frozen >> ../out/native-setup.txt 2>&1
           # (the runner's GPU is a virtual one: MAX can't name it, so name M1's Metal family, as the GPU probe does)
