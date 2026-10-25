@@ -39,6 +39,10 @@ comptime DIALOG = 30  # a modal panel over a dimmed page (mojoui.overlays): text
 comptime TOAST = 31  # a short message at the bottom: text, options[0] = action title, msg = on_action, msg2 = on_close, size = seconds
 comptime CLIPBOARD = 33  # puts `text` on the system clipboard whenever `value` (a version, from 1) changes; nothing on screen (mojoui.overlays.Clipboard)
 comptime POPOVER = 32  # a panel attached to the view tagged `text`: hint = title, child = content, msg2 = on_close, x/y = where in the anchor
+comptime TABLE = 34  # rows and columns that size to their content (web: a real <table>): value = columns; children = the header's cells, then
+#   the body's, row by row; hint = one letter per column (L left, R right: figures, mono); text = one letter per body row (1: selected)
+comptime ROUTE = 35  # where the app is (a path, "/models/qwen/logs"): text; nothing on screen. The web keeps it in the URL's hash (read
+#   on load, written on change, Back and Forward) and sends msg (event.text = the new path); elsewhere it's state (mojoui.route)
 comptime ITEM = 29  # a menu item: text = title, msg, hint = icon, options[0] = shortcut, value = flags (1 checked, 2 disabled, 4 danger); style 1 = separator, 2 = section label; children = a submenu
 
 # Canvas gestures (event.number)
@@ -63,7 +67,7 @@ comptime ICON_NAMES: List[String] = [
     # Lucide icons drawn the same on every host (GTK loads the same SVGs)
     "table", "pivot", "chart-bar", "note", "undo", "save", "open", "close", "sort", "filter-off", "row-plus", "row-minus",
     "view", "zoom", "category", "formula", "comment", "shape", "text", "organise", "format", "share", "import", "database", "sample", "grid", "sheet", "file", "export", "upload", "chevron",
-    "bold", "italic", "underline", "strikethrough", "text-colour", "fill", "align-left", "align-center", "align-right", "currency", "percent", "decimals-less", "decimals-more", "clear-format", "rename", "settings", "chevron-right", "back",
+    "bold", "italic", "underline", "strikethrough", "text-colour", "fill", "align-left", "align-center", "align-right", "currency", "percent", "decimals-less", "decimals-more", "clear-format", "rename", "settings", "chevron-right", "back", "copy",
 ]
 
 # Text styles (each platform maps them to its own type scale)
@@ -474,7 +478,7 @@ def _container(var root: Node, items: List[View]) -> View:
         nodes[0].children.append(base)
         for k in range(len(item.nodes)):
             var copy = item.nodes[k].copy()
-            if k == 0 and nodes[0].kind != GRID:  # the child itself: which size does this stack decide?
+            if k == 0 and nodes[0].kind != GRID and nodes[0].kind != TABLE:  # the child itself: which size does this stack decide?
                 copy.width_from_parent = (copy.fills and vertical) or (copy.grows and not vertical)
                 copy.height_from_parent = (copy.grows and vertical) or (copy.fills and not vertical)
             for i in range(len(copy.children)):
@@ -554,8 +558,19 @@ def Grid(items: List[View], columns: Int, spacing: Int = 12) -> View:
     return _container(Node(GRID, spacing=spacing, value=max(columns, 1)), items)
 
 
-def Scroll(content: View, height: Int = 320) -> View:
-    """Shows `content`, scrolling when it's taller than `height` points."""
+def Scroll(content: View, height: Int = 320, pinned: Bool = False) -> View:
+    """Shows `content`, scrolling when it's taller than `height` points. `pinned`: it stays at its end as the content
+    grows (a log), unless the person scrolls up; back at the end, it follows again."""
     var list = List[View]()
     list.append(content.copy())
-    return _container(Node(SCROLL, size=height), list)
+    return _container(Node(SCROLL, size=height, value=1 if pinned else 0), list)
+
+
+def TableGrid(var cells: List[View], columns: Int, align: String = "", selected: String = "") -> View:
+    """The raw table (mojoui.table.Table builds it): `cells` = the header's `columns` cells, then the body's, row by row;
+    `align` one letter per column (L, R); `selected` one letter per body row ("1": selected)."""
+    var cols = max(columns, 1)
+    var a = String("")
+    for k in range(cols):
+        a += String(align[byte=k]) if k < align.byte_length() and String(align[byte=k]) == "R" else String("L")
+    return _container(Node(TABLE, selected, value=cols, hint=a), cells)

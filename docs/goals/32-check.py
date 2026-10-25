@@ -97,7 +97,7 @@ def lint():
     """Themes are data and style only the framework's tags: (surface roles, problems). Goal 33's M3 runs it too."""
     problems = []
     # every surface role a Look names is written by the hosts, not by hand in themes/
-    roles = set(re.findall(r'\b(?:Surface|glass|solid|band|words|chip|slot)\("([\w-]+)"', "".join(f.read_text() for f in (ROOT / "themes").glob("*.mojo"))))  # (with every helper that makes one: D-299)
+    roles = set(re.findall(r'\b(?:Surface|glass|solid|band|words|chip|slot|box)\("([\w-]+)"', "".join(f.read_text() for f in (ROOT / "themes").glob("*.mojo"))))  # (with every helper that makes one: D-299)
     shape = re.compile(r"\b(background(-color)?|border-radius|margin|padding|box-shadow|border(-top|-bottom)?|min-height)\s*:")
     for f in (ROOT / "themes").glob("*.mojo"):
         text = f.read_text()

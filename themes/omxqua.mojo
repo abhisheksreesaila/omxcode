@@ -12,6 +12,8 @@ from mojoui.theme import Palette, Theme, hx, mix, hex_of
 from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, Segments, Motion, solid, band, words, chip, slot
 from mojoui.look import css_color, surface_rule, px, fpx
 from themes.skins import skin_css, SKIN_WEB
+from mojoui.markdown import markdown_roles
+from mojoui.timeline import timeline_roles
 
 # ---- tokens.css, the root (both modes) and the Developer family ----
 comptime FONT = "Geist"  # --oq-font
@@ -104,6 +106,92 @@ def card_box(p: Palette) -> Surface:
     return card(solid(name, RADIUS_CARD, -1, -1, -1), p.card, p.dark)
 
 
+def box(role: String, fill: UInt32, radius: Int, pad_v: Int, pad_h: Int) -> Surface:
+    """A plain box for a role: a fill (0: none), corners (-1: the component's), padding (-1: the component's)."""
+    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+
+
+def tint(c: UInt32, a: Float64) -> UInt32:
+    """`c` at alpha `a` (color-mix(in srgb, c a%, transparent))."""
+    return (c & 0xFFFFFF) | (UInt32(alpha(a)) << 24)
+
+
+comptime CODE = 0xFF0D0B0B  # --code: #0b0b0d in every mode (blades.css: the dark pane stays dark, like a terminal)
+comptime CODE_TEXT = 0xFFE7E4E4  # --code-text: #e4e4e7
+
+
+def console_surfaces(p: Palette) -> List[Surface]:
+    """The console's pieces (goal 33 M4), from the original's CSS: omxqua's .tbl, .tag chips with a hue, .badge and
+    .acc, the .count pill, .ox-code with its copy button, the Logs pane, the breadcrumb trail, an armed Confirm, .skel."""
+    var dark = p.dark
+    var out = List[Surface]()
+    # .tbl th: 500 11px mono, ink-2, uppercase (the component writes capitals), .06em, 8px 16px, a line under
+    var head = box("table-head", 0, -1, 8, 16)
+    head.line_bottom, head.font, head.font_size, head.font_weight, head.ink, head.tracking = p.line_strong, FONT_MONO, 11, 500, p.ink2, 0.66
+    out.append(head^)
+    # .tbl td: 10px 16px, a line-2 rule under each row, .92em of the body
+    var cell = box("table-cell", 0, -1, 10, 16)
+    cell.line_bottom, cell.font_size = p.line, 12.88
+    var picked = cell.copy()  # (.cx-tbl tr.sel td: the accent at 7 %)
+    picked.role, picked.fill = "table-selected", mix(p.card, p.accent, 0.07)
+    out.append(cell^)
+    out.append(picked^)
+    var num = words("table-num", 0, 0, 0)  # (.tbl .num: figures in the mono)
+    num.font = FONT_MONO
+    out.append(num^)
+    # .tag: a quiet pill (500 11.5px, 3px 9px, the state layer at .06, ink-2); .tag.k: its hue on a 13 % tint of it
+    var quiet = chip("chip", state(dark, 0.06), 0, 11.5, p.ink2, RADIUS_FULL, 3, 9)
+    quiet.font_weight = 500
+    out.append(quiet^)
+    var hues: List[String] = ["chip-1", "chip-2", "chip-3", "chip-4", "chip-5", "chip-6"]
+    for k in range(6):
+        var c = chip(hues[k], tint(p.data(k), 0.13), 0, 11.5, p.data(k), RADIUS_FULL, 3, 9)
+        c.font_weight = 500
+        out.append(c^)
+    # .badge / .acc: 500 11px/1 mono, 4px 6px inside a 1px line (drawn inside: 5px 7px), radius-xs, surface-1, a tone
+    var tones: List[String] = ["badge", "badge-ok", "badge-warn", "badge-bad"]
+    var inks: List[UInt32] = [p.ink2, p.good, p.warn, p.bad]
+    var dots: List[String] = ["dot", "dot-ok", "dot-warn", "dot-bad"]
+    for k in range(4):
+        var b = chip(tones[k], p.card, p.line_strong, 11, inks[k], RADIUS_XS, 5, 7)
+        b.font, b.font_weight, b.line_height = FONT_MONO, 500, 11
+        out.append(b^)
+        out.append(box(dots[k], inks[k], 3, -1, -1))  # (.badge i: a 6px dot in the badge's colour)
+    # .bh .count: 500 11px mono, ink-2, the state layer at .05, a pill, 2px 8px
+    var pill = chip("pill", state(dark, 0.05), 0, 11, p.ink2, RADIUS_FULL, 2, 8)
+    pill.font, pill.font_weight = FONT_MONO, 500
+    out.append(pill^)
+    # .ox-code: --code, 12 corners, 14px 16px, 12px/1.65 mono in --code-text; its button white at .1, a small pill
+    var code = box("code-block", CODE, 12, 14, 16)
+    code.font, code.font_size, code.line_height, code.ink = FONT_MONO, 12, 19.8, CODE_TEXT
+    out.append(code^)
+    var copy = box("code-copy", rgba(255, 255, 255, alpha(0.1)), RADIUS_FULL, 0, 12)
+    copy.font_size, copy.font_weight, copy.ink = 12.32, 550, CODE_TEXT
+    out.append(copy^)
+    # .lg-pane: --code, 11.5px/1.6 mono in --code-text, 10px 16px, the card's corners on top
+    var log = box("log", CODE, -1, 10, 16)
+    log.radius_top, log.radius_bottom = RADIUS_CARD, 0
+    log.font, log.font_size, log.line_height, log.ink = FONT_MONO, 11.5, 18.4, CODE_TEXT
+    out.append(log^)
+    # .crumbs a: 550 13.5px ink-2, 4px 6px, 6 corners; .here: 600 13.5px ink (.mono: 13px Geist Mono)
+    var crumb = box("crumb", 0, 6, 4, 6)
+    crumb.font_size, crumb.font_weight, crumb.ink = 13.5, 550, p.ink2
+    out.append(crumb^)
+    var here = box("crumb-here", 0, -1, 4, 6)
+    here.font_size, here.font_weight, here.ink = 13.5, 600, p.ink
+    var here_mono = here.copy()
+    here_mono.role, here_mono.font, here_mono.font_size = "crumb-here-mono", FONT_MONO, 13
+    out.append(here^)
+    out.append(here_mono^)
+    # .btn.danger.armed: the bad colour at 14 % behind it, 650, its ring kept
+    var armed = chip("confirm-armed", mix(p.card, p.bad, 0.14), mix(p.card, p.bad, 0.40), 0, p.bad, RADIUS_FULL, -1, -1)
+    armed.font_weight = 650
+    out.append(armed^)
+    # .skel: 12 high (the component's), 6 corners, line-2 (its shimmer is the sheets' own: keyframes)
+    out.append(box("skeleton", p.line, 6, -1, -1))
+    return out^
+
+
 def omxqua_look(p: Palette) -> Look:
     """omxqua's shapes as values: Geist on the console's scale, 34 pt pill controls, 10 pt fields, 12 pt cards with
     shadow-1, mono labels, the seg2 segmented control and the press spring."""
@@ -124,6 +212,9 @@ def omxqua_look(p: Palette) -> Look:
                                    card(solid("stat-card", RADIUS_CARD, -1, -1, -1), p.card, dark), card(solid("inspector", RADIUS_CARD, -1, -1, -1), p.card, dark),
                                    card(solid("toolbar", RADIUS_CARD, -1, -1, -1), surface_2(p), dark), status^, bar^, section^, value^, fact^,
                                    note^, slot("add-tile", p.line_strong, RADIUS_CARD, 120, p.ink2)]
+    surfaces += console_surfaces(p)
+    surfaces += markdown_roles(p, FONT_MONO)  # (a notebook's markdown: blade-notebook.css's .nb-md)
+    surfaces += timeline_roles(p, FONT_MONO)  # (Add a model's stages: blade-add.css's .stg)
     return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False),
                 Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12), surfaces^,
                 Segments(p.page, RADIUS_FULL, 3, p.line_strong, TARGET - 8, 14, RADIUS_FULL, 12.6, 500, p.ink2, surface_2(p), p.ink, 500, True),  # (.seg2)
@@ -221,7 +312,10 @@ def omxqua_web(p: Palette, look: Look, cls: String) -> String:
         + b + ".menubar { background: " + s0 + "; } " + b + ".menu-title { color: " + ink2 + "; border-radius: 10px; }\n"
         + b + ".menu.open > .menu-title, " + b + ".menu-title:hover { background: " + hover + "; color: " + ink + "; }\n"
         + "@media (prefers-reduced-motion: reduce) { " + b + "*, " + b + "*::before, " + b + "*::after { transition-duration: 150ms !important; animation-duration: 150ms !important; } "
-        + b + "button:active { transform: none; } }\n"
+        + b + "button:active { transform: none; } }\n"        # the skeleton's shimmer (.skel: line-2 → line → line-2 sliding across in 1.6 s); still when motion is off
+        + "@keyframes oq-skel { from { background-position: 100% 0; } to { background-position: -100% 0; } }\n"
+        + b + "[data-tag=skeleton] { background-image: linear-gradient(90deg, " + line2 + ", " + line + ", " + line2 + "); background-size: 200% 100%; animation: oq-skel 1.6s linear infinite; }\n"
+        + "@media (prefers-reduced-motion: reduce) { " + b + "[data-tag=skeleton] { animation: none; } }\n"
     )
 
 
@@ -282,7 +376,8 @@ def omxqua_gtk(p: Palette, look: Look, cls: String) -> String:
         + w + "popover > contents, " + w + "popover.menu > contents { background: " + s2 + "; color: " + ink + "; border-radius: 14px; box-shadow: " + sh3 + "; }\n"
         + "popover.mui-menu-popover button.mui-menu-item { border-radius: 8px; } popover.mui-menu-popover button.mui-menu-item:hover { background: " + hover + "; }\n"
         + "toast { background: " + s2 + "; color: " + ink + "; border-radius: 12px; font-family: '" + t.family + "', sans-serif; }\n"
-        + "toast label, toast button { color: " + ink + "; }\n"
+        + "toast label, toast button { color: " + ink + "; }\n"        + "@keyframes mui-skel { from { background-position: 100% 0; } to { background-position: -100% 0; } }\n"
+        + w + ".mui-tag-skeleton { background-image: linear-gradient(90deg, " + line2 + ", " + line + ", " + line2 + "); background-size: 200% 100%; animation: mui-skel 1.6s linear infinite; }\n"
     )
 
 

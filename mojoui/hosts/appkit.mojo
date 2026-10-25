@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
-    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
+    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
     START, CENTER, END, STRETCH, BETWEEN, Node,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
@@ -187,6 +187,7 @@ struct AppKitHost[A: App](Movable):
     var sheet_node: Int
     var toast: Int  # the toast view showing, if any
     var clip_version: Int  # the Clipboard view's version last copied (unverified on hardware)
+    var pinned: List[Int]  # Scroll nodes pinned to their end (follow_ends)
     var toast_text: String
     var toast_claimed: Bool
     var has_menubar: Bool  # the screen put its own menus in the system menu bar (D-150)
@@ -229,6 +230,7 @@ struct AppKitHost[A: App](Movable):
         self.sheet_node = -1
         self.toast = 0
         self.clip_version = 0
+        self.pinned = List[Int]()
         self.toast_text = ""
         self.toast_claimed = False
         self.has_menubar = False
@@ -925,8 +927,24 @@ struct AppKitHost[A: App](Movable):
             self.toast_claimed = True
             self.widgets[i] = self.toast
             w = new("NSView")
-        elif node.kind == SPACER:
+        elif node.kind == SPACER or node.kind == ROUTE:  # (a Route is state here: no URL)
             w = new("NSView")
+        elif node.kind == TABLE:  # rows of stacks, the columns equal (NSGridView would size them to their content: not yet)
+            w = new("NSStackView")
+            _ = msg(w, "setOrientation:", 1)
+            _ = msg(w, "setSpacing:", Float64(0))
+            var cols = max(node.value, 1)
+            var row = 0
+            for k in range(len(node.children)):
+                if k % cols == 0:
+                    row = new("NSStackView")
+                    _ = msg(row, "setOrientation:", 0)
+                    _ = msg(row, "setDistribution:", 1)  # fill equally
+                    _ = msg(row, "setSpacing:", Float64(16))
+                    _ = msg(row, "setEdgeInsets:", Float64(9), Float64(16), Float64(9), Float64(16))
+                    _ = msg(w, "addArrangedSubview:", row)
+                    _ = msg(msg(msg(row, "widthAnchor"), "constraintEqualToAnchor:", msg(w, "widthAnchor")), "setActive:", 1)
+                _ = msg(row, "addArrangedSubview:", self.build(node.children[k], self_addr))
         elif node.kind == SCROLL:
             w = top_scroll_view(False)
             _ = msg(w, "setDrawsBackground:", 0)
@@ -943,6 +961,8 @@ struct AppKitHost[A: App](Movable):
                 constrain(w, "heightAnchor", Float64(node.size))
             if not sized:  # (the app sized it: its settings decide)
                 prefer(w, "widthAnchor", Float64(320))
+            if node.value == 1:
+                self.pinned.append(i)
         else:
             w = new("NSStackView")
             var vertical = node.kind == VSTACK
@@ -1363,6 +1383,20 @@ struct AppKitHost[A: App](Movable):
         self.focus = -1
         self.add_debug_menu(self_addr)
 
+    def follow_ends(mut self):
+        """Pinned Scrolls (a log) to their end after a change (its content may have grown). Unlike GTK and the web, it
+        doesn't yet notice the person scrolled up to read (unverified on a Mac)."""
+        var keep = List[Int]()
+        for i in self.pinned:
+            if i < len(self.widgets) and i < len(self.rt.shown.nodes) and self.rt.shown.nodes[i].kind == SCROLL and self.rt.shown.nodes[i].value == 1 and self.widgets[i] != 0:
+                var doc = msg(self.widgets[i], "documentView")
+                if doc != 0:
+                    _ = msg(doc, "layoutSubtreeIfNeeded")
+                    _ = msg(doc, "scrollPoint:", Float64(0), msg[CGRect](doc, "frame").height)  # (the clip counts y from the top)
+                if i not in keep:
+                    keep.append(i)
+        self.pinned = keep^
+
     def copy_if_asked(mut self):
         """A Clipboard view whose version moved on: its text goes on the general pasteboard as plain text."""
         for ref n in self.rt.shown.nodes:
@@ -1387,6 +1421,7 @@ struct AppKitHost[A: App](Movable):
     def apply(mut self, d: Diff, self_addr: Int):
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.copy_if_asked()
+        self.follow_ends()
         if d.rebuild or len(d.patches) > 0:
             self.queue_snapshot(self_addr)
         if d.rebuild and self.resize_in_place(d):
@@ -1641,7 +1676,7 @@ struct AppKitHost[A: App](Movable):
             if i < len(self.shells) and self.shells[i] != 0:
                 w = self.shells[i]  # (a field's box: what the person sees, and what GTK and the web measure)
             if w == 0:
-                if n.kind != ITEM and n.kind != MENU and n.kind != CLIPBOARD and n.kind != DIALOG and n.kind != POPOVER and n.kind != TOAST and n.kind != SPACER:
+                if n.kind != ITEM and n.kind != MENU and n.kind != CLIPBOARD and n.kind != ROUTE and n.kind != DIALOG and n.kind != POPOVER and n.kind != TOAST and n.kind != SPACER:
                     line += "  (no view)"
             elif (msg(w, "isKindOfClass:", cls("NSView")) & 0xFF) != 0:
                 var b = msg[CGRect](w, "bounds")
@@ -1824,7 +1859,7 @@ def kind_name(kind: Int) -> String:
         (TOGGLE, "Toggle"), (DROPDOWN, "Dropdown"), (SLIDER, "Slider"), (PROGRESS, "Progress"), (DIVIDER, "Divider"), (SCROLL, "Scroll"), (IMAGE, "Image"),
         (SEGMENTED, "Segmented"), (RADIO, "Radio"), (TEXTAREA, "TextArea"), (ALERT, "Alert"), (TABS, "Tabs"), (NAVBAR, "NavBar"), (DATE, "Date"),
         (ICON, "Icon"), (GRID, "Grid"), (LAZYLIST, "LazyList"), (CANVAS, "Canvas"), (BOARD, "Board"), (OVERLAY, "Overlay"), (MENUBAR, "MenuBar"),
-        (MENU, "Menu"), (ITEM, "Item"), (DIALOG, "Dialog"), (TOAST, "Toast"), (POPOVER, "Popover"), (CLIPBOARD, "Clipboard")]
+        (MENU, "Menu"), (ITEM, "Item"), (DIALOG, "Dialog"), (TOAST, "Toast"), (POPOVER, "Popover"), (CLIPBOARD, "Clipboard"), (TABLE, "Table"), (ROUTE, "Route")]
     for p in names:
         if p[0] == kind:
             return p[1]

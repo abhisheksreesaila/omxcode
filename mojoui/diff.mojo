@@ -1,6 +1,6 @@
 # Compare the screen before and after an update, so hosts change only what changed.
 
-from mojoui.view import View, Node, NAVBAR, ALERT, CANVAS, BOARD, VSTACK, HSTACK, GRID, TOAST, AUTO, START
+from mojoui.view import View, Node, NAVBAR, ALERT, CANVAS, BOARD, VSTACK, HSTACK, GRID, TABLE, TOAST, AUTO, START
 
 comptime SET_TEXT = 1  # label text, button title, field contents, toggle label
 comptime SET_MSG = 2
@@ -131,7 +131,7 @@ def compatible(x: Node, y: Node, x_on_board: Bool, y_on_board: Bool) -> Bool:
         return False
     if not x.same_layout_but(y, True, y_on_board):  # (sizes are a patch, SET_SIZE; so is a place on a Board, SET_PLACE)
         return False  # other layout settings changed: lay it out again
-    if x.kind == GRID and x.value != y.value:  # (another number of columns: placed again)
+    if (x.kind == GRID or x.kind == TABLE) and x.value != y.value:  # (another number of columns: placed again)
         return False
     if x.kind == TOAST and x.text != y.text:  # (a toast's text can't change once it's up: a new toast)
         return False

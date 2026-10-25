@@ -547,6 +547,208 @@ def m3():
                   f"surface-0, surface-1 and the accent; goal 32's lint passes ({len(roles)} roles); shots: " + ", ".join(notes))
 
 
+# M4: the console's components. Each has its own test (tests/test_<name>.mojo printing "<name>: ok"); the sampler
+# (examples/consolekit) shows all eleven under omxqua and the drive steps exercise them on GTK and the web.
+M4_PARTS = [  # (matrix row, test name)
+    ("Table", "table"), ("CodeBlock", "codeblock"), ("LogView", "logview"), ("Timeline", "timeline"),
+    ("Breadcrumbs", "breadcrumbs"), ("Chip · Badge", "chip"), ("Confirm", "confirm"), ("Skeleton", "skeleton"),
+    ("Markdown", "markdown"), ("Sparkline", "sparkline"), ("Route", "route"),
+]
+KIT = "consolekit"
+KIT_CODE = "curl http://127.0.0.1:11435/v1/models"  # what the sampler's CodeBlock holds (its Copy must put exactly this on the clipboard)
+KIT_DEEP = "#/models/qwen2.5-0.5b/logs"  # the web opens here: the app's state must show that route
+KIT_STEPS = ";".join([
+    "tick:tick-0", "tick:tick-2",  # Table: two rows ticked
+    "tap:Copy",  # CodeBlock: the clipboard holds the code; the button says Copied
+    "tap:Revoke", "say:confirm-state", "tap:Click again to revoke",  # Confirm: the first tap only arms, the second acts
+    "tap:Add log lines", "tap:Add log lines",  # LogView: 40 new lines, still pinned to the end
+    "tap:Next stage",  # Timeline: the running stage is done, the next one runs
+])
+
+
+def m4_tests():
+    """Builds and runs each component's own test (in parallel); [problems]."""
+    from concurrent.futures import ThreadPoolExecutor
+    problems = []
+
+    def one(name):
+        src = f"tests/test_{name}.mojo"
+        if not (ROOT / src).exists():
+            return f"no {src}"
+        return g30.g20.mojo_test(src, f"{name}: ok", f"test_{name}")
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for name, err in zip([t for _, t in M4_PARTS], pool.map(one, [t for _, t in M4_PARTS])):
+            if err:
+                problems.append(err[:400])
+    return problems
+
+
+def m4_state(out, host):
+    """What the sampler's run left on screen, against what the steps did; [problems]."""
+    problems = []
+    lv = lambda p: label_value(out, p)
+    if lv("ticked:") != "qwen2.5-0.5b, llama3.2-1b":
+        problems.append(f"{host}: Table: ticking rows 0 and 2 shows ticked {lv('ticked:')!r}")
+    import re
+    t = re.search(r"^TABLE: models (\d+) rows, (\d+) columns, (\d+) selected$", out, re.M)
+    if not t or t.groups() != ("3", "8", "2"):
+        problems.append(f"{host}: Table: no 'TABLE: models 3 rows, 8 columns, 2 selected' line ({t.group(0) if t else 'none'})")
+    clip = re.search(r"^CLIPBOARD: (.*)$", out, re.M)
+    if not clip or clip.group(1) != KIT_CODE:
+        problems.append(f"{host}: CodeBlock: Copy put {clip.group(1) if clip else 'nothing'!r} on the clipboard, not {KIT_CODE!r}")
+    if "BUTTON: Copied" not in out:
+        problems.append(f"{host}: CodeBlock: its button doesn't say Copied after the tap")
+    said = re.search(r"^SAYS: confirm-state = (.*)$", out, re.M)
+    if not said or said.group(1) != "armed, revoked none":
+        problems.append(f"{host}: Confirm: after one tap the state is {said.group(1) if said else 'unread'!r}, not 'armed, revoked none'")
+    if lv("revoked:") != "notes-app (1 time)":
+        problems.append(f"{host}: Confirm: after the second tap revoked is {lv('revoked:')!r}, not 'notes-app (1 time)'")
+    if lv("log:") != "50 lines":
+        problems.append(f"{host}: LogView: {lv('log:')!r} after two Add log lines, not '50 lines'")
+    if lv("timeline:") != "2 of 4 done":
+        problems.append(f"{host}: Timeline: after Next stage it says {lv('timeline:')!r}, not '2 of 4 done'")
+    if not re.search(r"^PINNED: log at end$", out, re.M):
+        problems.append(f"{host}: LogView: not at the end after new lines ({re.findall(r'^PINNED: .*$', out, re.M)})")
+    for tag in ("breadcrumbs", "chip-1", "badge-ok", "pill", "skeleton", "code-block", "sample-markdown", "sample-sparkline", "sample-timeline"):
+        b = re.search(rf"^BOX: {re.escape(tag)} [\d.-]+ [\d.-]+ ([\d.]+) ([\d.]+)$", out, re.M)
+        if not b or float(b.group(1)) < 4 or float(b.group(2)) < 4:
+            problems.append(f"{host}: no visible view tagged {tag} ({b.group(0) if b else 'no BOX'})")
+    return problems
+
+
+def m4():
+    """The console's components: in mojoui/, each with its own test, on GTK and the web, built for the Mac: Table (rows,
+    tick boxes), CodeBlock with Copy, LogView (pinned to the end), Timeline (stages, elapsed), Breadcrumbs, Chip/Badge,
+    Confirm (tap twice), Skeleton, Markdown, Sparkline, Route (#/models/<name>/<tab> deep links on the web);
+    docs/components.md regenerated; the debt table holds nothing from the console. Proof: every test passes; the sampler
+    (examples/consolekit, omxqua) driven on GTK and the web: rows ticked, Copy read back from the clipboard, Confirm
+    acting only on its second tap, the log still at its end after new lines, the web opened at a deep link showing that
+    route, a route change writing the URL, Back going back; omxqua's values read back on the web (uppercase mono headers,
+    hue chips, pill badges, mono code, the shimmer and motion off); builds for the Mac; the matrix current; the lint."""
+    import re
+    import subprocess
+    problems = m4_tests()
+    app = ROOT / "examples" / KIT / "app.mojo"
+    if not app.exists():
+        return False, "; ".join(problems + [f"no examples/{KIT}/app.mojo"])
+    src = app.read_text()
+    for ctor in ("Table(", "CodeBlock(", "LogView(", "Timeline(", "Breadcrumbs(", "Chip(", "Badge(", "ConfirmButton(", "Skeleton(",
+                 "Markdown(", "SparklineView(", "Route(", "omxqua("):
+        if ctor not in src:
+            problems.append(f"the sampler doesn't use {ctor[:-1]}")
+    roles, found = g32.lint()
+    problems += [f"lint: {p}" for p in found]
+    c = g30.run([sys.executable, "scripts/components.py", "--check"])
+    if c.returncode != 0:
+        problems.append(c.stdout.strip()[-200:])
+    matrix = (ROOT / "docs" / "components.md").read_text()
+    for name, _ in M4_PARTS:
+        row = next((l for l in matrix.splitlines() if l.startswith(f"| `{name}` |")), None)
+        if row is None:
+            problems.append(f"docs/components.md has no row for {name}")
+            continue
+        cells = [x.strip() for x in row.split("|")[1:-1]]
+        head = next(l for l in matrix.splitlines() if l.startswith("| Component |") and ("Module" in l) == ("mojoui/" in row))
+        cols = [x.strip() for x in head.split("|")[1:-1]]
+        get = lambda h: cells[cols.index(h)] if h in cols and cols.index(h) < len(cells) else "?"
+        if get("Linux (GTK)") != "✅" or get("Web") != "✅" or get("Mac (AppKit)") == "❌":
+            problems.append(f"matrix: {name} is GTK {get('Linux (GTK)')} web {get('Web')} Mac {get('Mac (AppKit)')} (want ✅ ✅ and not ❌)")
+    debt = matrix.split("## Inside one app", 1)[-1].split("## The rule", 1)[0]
+    if re.search(r"console", debt, re.I):
+        problems.append("the debt table holds something from the console")
+    if problems:
+        return False, "; ".join(problems[:12])
+    err = build(KIT, "linux", "web", "mac")
+    if err:
+        return False, err
+    notes = []
+    # GTK: the steps, then the route as state (a tap changes it; there's no URL)
+    r, out = g5().gtk(KIT, KIT_STEPS + ";tap:Open keys;say:route-state;tap:Open qwen logs;say:route-state;tap:My models@0", shot=str(OUT / "consolekit-gtk.png"))
+    if r is None:
+        problems.append(f"GTK: {out[-400:]}")
+    else:
+        problems += m4_state(out, "GTK")
+        says = re.findall(r"^SAYS: route-state = (.*)$", out, re.M)
+        if says != ["/keys: keys", "/models/qwen2.5-0.5b/logs: model qwen2.5-0.5b, tab logs"] or not re.search(r"^ROUTE: /$", out, re.M) or label_value(out, "route:") != "/":
+            problems.append(f"GTK: Route as state: Open keys, Open qwen logs, then the My models crumb went {says} → {label_value(out, 'route:')!r} ({re.findall(r'^ROUTE: .*$', out, re.M)})")
+        notes.append("GTK")
+    # the web: opened at a deep link; the steps; a route change writes the URL; Back goes back; the crumb goes home
+    import drive
+    t = omxqua_tokens(False)
+    probes = [
+        "style:[data-role=table-head] .text=font-family", "style:[data-role=table-head] .text=font-size", "style:[data-role=table-head] .text=letter-spacing",
+        "style:[data-role=table-head] .text=color", "style:[data-role=table-head]=padding-left", "style:[data-role=table-cell]=padding-top",
+        "style:[data-role=table-cell]=border-bottom-color", "style:[data-tag=chip-1]=border-radius", "style:[data-tag=chip-1]=color",
+        "style:[data-tag=badge-ok]=border-radius", "style:[data-tag=badge-ok] .text=font-family", "style:[data-tag=pill]=border-radius",
+        "style:[data-tag=code-block]=background-color", "style:[data-tag=code-block] .text=font-family", "style:[data-tag=skeleton]=animation-name",
+    ]
+    steps = ";".join(["js:location.hash", "say:route-state"] + KIT_STEPS.split(";") + probes
+                     + ["tap:Open keys", "js:location.hash", "js:history.back()", "pause:300", "js:location.hash", "say:route-state", "tap:My models@0", "js:location.hash"])
+    try:
+        r, log = drive.web_run(g30.BUILD / KIT / "web", steps, shot=str(OUT / "consolekit-web.png"), viewport=(1440, 900), color_scheme="light", path=KIT_DEEP)
+    except Exception as e:
+        r, log = None, f"crashed: {e!r}"
+    if r is None or r.returncode != 0:
+        problems.append(f"web: {log[-400:]}")
+    else:
+        problems += m4_state(log, "web")
+        js = [l[len("JS: "):] for l in log.splitlines() if l.startswith("JS: ")]
+        says = re.findall(r"^SAYS: route-state = (.*)$", log, re.M)
+        want_js = ['"' + KIT_DEEP + '"', '"#/keys"', None, '"' + KIT_DEEP + '"', '"#/"']
+        if len(js) != 5 or any(w is not None and j != w for j, w in zip(js, want_js)):
+            problems.append(f"web: Route: the URL went {js}, not {KIT_DEEP} → #/keys → (Back) {KIT_DEEP} → #/")
+        if says[:2] != ["/models/qwen2.5-0.5b/logs: model qwen2.5-0.5b, tab logs"] * 2:
+            problems.append(f"web: Route: opened at {KIT_DEEP} (and after Back) the app says {says}")
+        st = styles_for(log, probes)
+        want = [
+            ("[data-role=table-head] .text", "font-family", lambda v: v.replace('"', "").startswith("Geist Mono"), "the table's headers in Geist Mono"),
+            ("[data-role=table-head] .text", "font-size", lambda v: v == "11px", "headers 11 px (.tbl th)"),
+            ("[data-role=table-head] .text", "letter-spacing", lambda v: v == "0.66px", "headers .06em apart"),
+            ("[data-role=table-head] .text", "color", lambda v: same_colour(v, t["--oq-ink-2"]), "headers in ink-2"),
+            ("[data-role=table-head]", "padding-left", lambda v: v == "16px", "headers 16 px in"),
+            ("[data-role=table-cell]", "padding-top", lambda v: v == "10px", "cells 10 px high padding"),
+            ("[data-role=table-cell]", "border-bottom-color", lambda v: same_colour(v, t["--oq-line-2"]), "a line-2 rule under each row"),
+            ("[data-tag=chip-1]", "border-radius", lambda v: v == "999px", "chips are pills"),
+            ("[data-tag=chip-1]", "color", lambda v: same_colour(v, t["--oq-data-1"]), "a hue chip wears its hue (data-1)"),
+            ("[data-tag=badge-ok]", "border-radius", lambda v: v == t["--oq-radius-xs"], "badges: radius-xs"),
+            ("[data-tag=badge-ok] .text", "font-family", lambda v: v.replace('"', "").startswith("Geist Mono"), "badges in Geist Mono"),
+            ("[data-tag=pill]", "border-radius", lambda v: v == "999px", "pill badges"),
+            ("[data-tag=code-block]", "background-color", lambda v: same_colour(v, "#0b0b0d"), "code on --code #0b0b0d"),
+            ("[data-tag=code-block] .text", "font-family", lambda v: v.replace('"', "").startswith("Geist Mono"), "code in Geist Mono"),
+            ("[data-tag=skeleton]", "animation-name", lambda v: v not in ("", "none"), "the skeleton shimmers"),
+        ]
+        for sel, prop, ok, what in want:
+            got = st.get((sel, prop))
+            if got is None or not ok(got):
+                problems.append(f"web: {what}: {sel} {prop} is {got!r}")
+        notes.append("web (opened at " + KIT_DEEP + ")")
+    # motion off: the skeleton holds still
+    try:
+        r, log = drive.web_run(g30.BUILD / KIT / "web", "style:[data-tag=skeleton]=animation-name", viewport=(1440, 900), color_scheme="light", reduced_motion=True)
+        got = styles_for(log, ["style:[data-tag=skeleton]=animation-name"]).get(("[data-tag=skeleton]", "animation-name"))
+        if r.returncode != 0 or got != "none":
+            problems.append(f"web, motion off: the skeleton's animation is {got!r}, not none")
+    except Exception as e:
+        problems.append(f"web, motion off: crashed {e!r}")
+    if problems:
+        return False, "; ".join(problems[:12])
+    return True, (f"{len(M4_PARTS)} components' tests pass; the sampler on " + " and ".join(notes) + ": rows ticked, Copy read back, Confirm acts on "
+                  "the second tap, the log pinned to its end, routes as state and as the URL (deep link, change, Back); omxqua's table, chip, "
+                  "badge, code and shimmer values read back, motion off holds still; Mac builds; matrix current, no console debt, lint passes")
+
+
+def styles_for(log, probes):
+    """{(selector, property): value} from drive.py's STYLE: lines, for the asked probes ("style:sel=prop")."""
+    out = {}
+    for probe in probes:
+        sel, prop = probe[len("style:"):].rsplit("=", 1)
+        head = f"STYLE: {sel} {prop} "
+        for line in log.splitlines():
+            if line.startswith(head) or line == head.rstrip():
+                out[(sel, prop)] = line[len(head):].strip()
+    return out
+
+
 def m8():
     """In the gallery, and nothing regressed: goal 32's M0–M2, goal 30's M0–M5 (goals 3–29 inside them)."""
     problems = []
@@ -568,7 +770,7 @@ MILESTONES = [
     ("M1", m1),
     ("M2", m2),
     ("M3", m3),
-    ("M4", todo("the console's components in mojoui/ (GOAL.md M4)")),
+    ("M4", m4),
     ("M5", todo("examples/console: My models and the model page (GOAL.md M5)")),
     ("M6", todo("examples/console: Add, Keys, Gateway, Security, Settings (GOAL.md M6)")),
     ("M7", todo("identical: web ≥ 99 % of pixels, GTK and Mac boxes, a live daemon (GOAL.md M7)")),

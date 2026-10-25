@@ -32,13 +32,14 @@ COMPONENTS = [
     ("LazyList", "LAZYLIST"), ("Canvas", "CANVAS"), ("Board", "BOARD"), ("Overlay", "OVERLAY"),
     ("MenuBar", "MENUBAR"), ("Menu", "MENU"), ("Item", "ITEM"), ("ContextMenu", "MENU"),
     ("Dialog", "DIALOG"), ("Toast", "TOAST"), ("Popover", "POPOVER"), ("Checkbox", "TOGGLE"), ("Clipboard", "CLIPBOARD"),
+    ("Table", "TABLE"), ("Route", "ROUTE"),
 ]
 
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck"],
-    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck"],  # (kit: goal 18 runs it on GTK and the web)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit"],
+    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit"],  # (kit: goal 18 runs it on GTK and the web)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
     "iPhone (UIKit)": [],
@@ -79,6 +80,7 @@ FEATURES = [
     ("Icon toggle shown pressed", "Button(style=ICON_ON)", r"\bICON_ON\b", "omxplorer"),
     ("HTTP requests (effects; replies as Events)", "mojoui.http: Request.get/post_json · App.requests() · comptime HTTP", r"schedule_effects|mod\.poll", "httpcheck"),
     ("Timers", "App.every() -> [Every(ms, msg)]", r"schedule_effects|mod\.poll", "httpcheck"),
+    ("Scroll pinned to its end", "Scroll(…, pinned=True)", r"on_pin_changed|data-pin|follow_ends", "consolekit"),
 ]
 
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
@@ -99,6 +101,16 @@ COMPOSITES = [
     ("Column number formats", "mojoui/numformat.mojo", ["Canvas", "Text"], "set_format("),
     ("Sheet objects (charts, pivots)", "mojoui/sheetpage.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Grid"], "object_card("),
     ("Report page (KPI and chart tiles, filters)", "mojoui/reportpage.mojo", ["Grid", "Card", "Dropdown", "Canvas"], "ReportPage("),
+    # the OMX Console's (goal 33 M4)
+    ("CodeBlock", "mojoui/codeblock.mojo", ["Text", "Button with an icon", "Clipboard", "Themes on top (themes/, or yours)"], "CodeBlock("),
+    ("LogView", "mojoui/logview.mojo", ["Scroll", "Text", "Scroll pinned to its end"], "LogView("),
+    ("Timeline", "mojoui/timeline.mojo", ["Text", "Icon", "ProgressBar", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Timeline("),
+    ("Breadcrumbs", "mojoui/breadcrumbs.mojo", ["Button", "Icon", "Text", "Quiet buttons"], "Breadcrumbs("),
+    ("Chip · Badge", "mojoui/chip.mojo", ["Text", "HStack", "Themes on top (themes/, or yours)"], "Chip("),
+    ("Confirm", "mojoui/confirm.mojo", ["Button", "Timers"], "ConfirmButton("),
+    ("Skeleton", "mojoui/skeleton.mojo", ["VStack", "Themes on top (themes/, or yours)"], "Skeleton("),
+    ("Markdown", "mojoui/markdown.mojo", ["Text", "VStack", "HStack", "Card", "Themes on top (themes/, or yours)"], "Markdown("),
+    ("Sparkline", "mojoui/sparkline.mojo", ["Canvas"], "SparklineView("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
@@ -124,9 +136,17 @@ def implemented(src, kind):
     return bool(lines)
 
 
+# Constructors that live in a module of their own: an app uses them only if it imports that module (analytics has a
+# Table of its own).
+MODULE_OF = {"Table": "mojoui.table", "Route": "mojoui.route"}
+
+
 def used_by(example, ctor):
     p = ROOT / "examples" / example / "app.mojo"
-    return p.exists() and re.search(rf"\b{ctor}\(", p.read_text()) is not None
+    if not p.exists():
+        return False
+    text = p.read_text()
+    return re.search(rf"\b{ctor}\(", text) is not None and MODULE_OF.get(ctor, "") in text
 
 
 def cell(host, src, ctor, kind):

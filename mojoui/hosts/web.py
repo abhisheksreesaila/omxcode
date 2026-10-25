@@ -29,14 +29,14 @@ from pathlib import Path
 
 from fasthtml.common import (
     Button, Canvas, Dialog, Div, FastHTML, Form, H1, H2, H3, H4, Header, Hr, I, Img, Input, Label, Link, Main, Meta, NotStr,
-    Option, P, Progress, Response, Script, Select, Span, Style, Textarea, Title, UploadFile,
+    Option, P, Progress, Response, Script, Select, Span, Style, Table, Tbody, Td, Textarea, Th, Thead, Title, Tr, UploadFile,
 )
 from PIL import Image
 
 # Mirrors mojoui/view.mojo and mojoui/diff.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
- DIALOG, TOAST, POPOVER, CLIPBOARD) = range(1, 34)
+ DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE) = range(1, 36)
 CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
@@ -97,6 +97,11 @@ button.icon-only.on { background: color-mix(in srgb, var(--accent) 14%, transpar
 .hstack > hr { width: 0; min-width: 0; align-self: center; height: var(--control-height, 28px); border-top: 0; border-left: 1px solid var(--line); margin: 0 6px; }
 img.image { max-width: 100%; height: auto; border-radius: 12px; image-rendering: auto; }
 .scroll { overflow-y: auto; width: 100%; display: flex; flex-direction: column; align-items: center; }  /* like a VStack */
+table.table { border-collapse: collapse; width: 100%; }  /* the browser's own column widths, across its parent */
+table.table th { text-align: left; font-weight: inherit; vertical-align: middle; } table.table td { vertical-align: middle; }
+table.table th.num, table.table td.num { text-align: right; } table.table tbody tr:last-child > td { border-bottom: 0; }
+table.table .text { text-align: inherit; } table.table .hstack { flex-wrap: nowrap; justify-content: flex-start; }  /* cells read from their leading edge */
+table.table td.num > .hstack { justify-content: flex-end; } table.table td.num .text { white-space: nowrap; }
 .segmented, .tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 12px; background: var(--surface); }
 .segmented label, .tabs label { position: relative; }
 .segmented input, .tabs input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
@@ -290,6 +295,39 @@ MENU_JS = r"""
     }
   });
   document.addEventListener('htmx:afterSettle', copyAsked);
+  // Scroll(pinned): stays at its end as its content grows, unless scrolled up to read (back at the end, it follows again)
+  const pin = () => document.querySelectorAll('.scroll[data-pin="1"]').forEach(e => { if (e.dataset.follow !== '0') e.scrollTop = e.scrollHeight; });
+  document.addEventListener('scroll', e => { const t = e.target;
+    if (t && t.dataset && t.dataset.pin === '1') t.dataset.follow = t.scrollHeight - t.scrollTop - t.clientHeight <= 4 ? '1' : '0'; }, true);
+  document.addEventListener('htmx:afterSettle', pin);
+  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(pin, 0));
+  addEventListener('load', pin);
+  // Route(path): the URL's hash is the app's place. A hash the app doesn't show (the page opened at a link, Back,
+  // Forward, a typed URL) goes to the app as on_change; a path the app moves to is written to the URL as a new entry.
+  const routeEl = () => document.querySelector('[data-kind=route]');
+  const hashPath = () => location.hash.replace(/^#/, '') || '/';
+  let appRoute = null, routeAsked = null;
+  const tellRoute = () => {
+    const r = routeEl(), p = hashPath();
+    if (!r || p === (r.dataset.route || '/') || p === routeAsked) return;
+    routeAsked = p;
+    const v = document.getElementById('mojoui-v');
+    htmx.ajax('POST', `/e/${r.dataset.sid}`, { values: { n: Number(r.dataset.node), text: p, v: v ? v.value : -1 }, swap: 'none', source: document.body });
+  };
+  const writeRoute = () => {
+    const r = routeEl();
+    if (!r) return;
+    const want = r.dataset.route || '/';
+    if (appRoute === null) { appRoute = want; return; }  // (what the page opened with: the hash may be a link to elsewhere)
+    if (want === appRoute) return;
+    appRoute = want; routeAsked = null;
+    if (hashPath() !== want) history.pushState(null, '', '#' + want);
+  };
+  addEventListener('load', () => { writeRoute(); tellRoute(); });
+  addEventListener('hashchange', tellRoute);
+  addEventListener('popstate', tellRoute);
+  document.addEventListener('htmx:afterSettle', writeRoute);
+  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(writeRoute, 0));
   document.addEventListener('htmx:oobAfterSwap', () => setTimeout(copyAsked, 0));
   document.addEventListener('htmx:oobAfterSwap', () => setTimeout(menus.place, 0));
   addEventListener('load', menus.place); addEventListener('resize', menus.place);
@@ -884,6 +922,22 @@ def render_node(s, i, sid):
         body = Div(*[render(s, c, sid) for c in n["children"]], cls="dialog-body")
         panel = Div(head, body, cls="dialog", role="dialog", aria_modal="true", aria_labelledby=f"{nid}-t", style=f"width:{n['w'] or 560}px")
         return Div(Div(cls="scrim"), panel, cls="dialog-layer", id=nid, data_kind="dialog", data_title=n["text"], data_node=str(i), data_sid=sid, data_v=str(s.shape))
+    if kind == TABLE:  # a real <table> (the browser sizes its columns); cells wear the roles table-head / table-cell (+ table-num, table-selected)
+        cols, kids, align, sel = max(n["value"], 1), n["children"], n["hint"], n["text"]
+
+        def cell(make, c, k, role):
+            num = k < len(align) and align[k] == "R"
+            return make(render(s, c, sid), data_role=role + (" table-num" if num else ""), cls="num" if num else None)
+        head = Tr(*[cell(Th, c, k, "table-head") for k, c in enumerate(kids[:cols])])
+        rows = []
+        for r, start in enumerate(range(cols, len(kids), cols)):
+            picked = r < len(sel) and sel[r] == "1"
+            role = "table-cell table-selected" if picked else "table-cell"
+            rows.append(Tr(*[cell(Td, c, k, role) for k, c in enumerate(kids[start:start + cols])], cls="sel" if picked else None))
+        return Table(Thead(head), Tbody(*rows), cls="table", id=nid, data_kind="table", data_rows=str(len(rows)), data_columns=str(cols),
+                     data_selected=str(sel.count("1")))
+    if kind == ROUTE:  # nothing on screen: the page keeps it in the URL's hash (ROUTE_JS)
+        return Div(id=nid, data_kind="route", data_route=n["text"] or "/", data_node=str(i), data_sid=sid, hidden=True)
     if kind == CLIPBOARD:  # nothing on screen: the page copies its text when its version moves on (CLIP_JS)
         return Div(id=nid, data_kind="clipboard", data_version=str(n["value"]), data_text=n["text"], hidden=True)
     if kind == TOAST:  # bottom centre; its action is msg, ✕ and its time running out are on_close
@@ -947,7 +1001,7 @@ def render_node(s, i, sid):
         return Div(cls="spacer", id=nid)
     kids = [render(s, c, sid) for c in n["children"]]
     if kind == SCROLL:
-        return Div(*kids, cls="scroll", id=nid, style=f"max-height:{n['size']}px")
+        return Div(*kids, cls="scroll", id=nid, style=f"max-height:{n['size']}px", data_pin="1" if n["value"] == 1 else None)
     cls = ({1: "vstack card", 2: "vstack card warn", 3: "vstack card good"}.get(n["style"], "vstack")) if kind == VSTACK else "hstack"
     return Div(*kids, cls=cls, id=nid, style=f"gap:{n['spacing']}px")
 

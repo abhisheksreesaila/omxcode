@@ -217,6 +217,7 @@ def sf_symbol(name: String) -> String:
     """mojoui icon names → SF Symbols (Apple's own icon set)."""
     if name == "star": return "star.fill"
     if name == "trash": return "trash"
+    if name == "copy": return "doc.on.doc"
     if name == "gear": return "gearshape"
     if name == "plus": return "plus"
     if name == "check": return "checkmark"

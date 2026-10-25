@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
 from mojoui.view import (
-    CLIPBOARD, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
+    CLIPBOARD, TABLE, ROUTE, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
@@ -1150,6 +1150,10 @@ struct GtkHost[A: App](Movable):
                 var content = self.build(c, self_addr)
                 external_call["gtk_widget_set_valign", NoneType](content, c_int(1))  # its own height: a taller scroll doesn't stretch it
                 external_call["gtk_scrolled_window_set_child", NoneType](w, content)
+            if node.value == 1:  # pinned: it follows its end as the content grows, unless scrolled up
+                var adj = external_call["gtk_scrolled_window_get_vadjustment", Int](w)
+                connect(adj, "changed", on_pin_changed, 0)
+                connect(adj, "value-changed", on_pin_moved, 0)
         elif node.kind == DIALOG:
             var dlg = external_call["adw_dialog_new", Int]()
             var title = node.text
@@ -1185,8 +1189,28 @@ struct GtkHost[A: App](Movable):
             self.dialog = dlg
             self.widgets[i] = dlg
             w = external_call["gtk_box_new", Int](c_int(VERTICAL), c_int(0))  # nothing in the layout itself
-        elif node.kind == CLIPBOARD:  # nothing on screen; apply() copies its text when its version changes
+        elif node.kind == CLIPBOARD or node.kind == ROUTE:  # nothing on screen (a Route is state here: no URL)
             w = external_call["gtk_box_new", Int](c_int(VERTICAL), c_int(0))
+        elif node.kind == TABLE:  # a grid whose columns size to their content; each cell in a box wearing its role
+            w = external_call["gtk_grid_new", Int]()
+            var cols = max(node.value, 1)
+            for k in range(len(node.children)):
+                var child = self.build(node.children[k], self_addr)
+                var col = k % cols
+                var row = k // cols
+                var cell = external_call["gtk_box_new", Int](c_int(HORIZONTAL), c_int(0))
+                add_class(cell, "mui-tag-table-head" if row == 0 else "mui-tag-table-cell")
+                var num = col < node.hint.byte_length() and String(node.hint[byte=col]) == "R"
+                if num:
+                    add_class(cell, "mui-tag-table-num")
+                if row > 0 and row - 1 < node.text.byte_length() and String(node.text[byte = row - 1]) == "1":
+                    add_class(cell, "mui-tag-table-selected")
+                external_call["gtk_widget_set_hexpand", NoneType](cell, c_int(1))
+                external_call["gtk_widget_set_halign", NoneType](child, c_int(2 if num else 1))  # end or start
+                external_call["gtk_widget_set_valign", NoneType](child, c_int(3))  # centre
+                external_call["gtk_widget_set_hexpand", NoneType](child, c_int(1))
+                external_call["gtk_box_append", NoneType](cell, child)
+                external_call["gtk_grid_attach", NoneType](w, cell, c_int(col), c_int(row), c_int(1), c_int(1))
         elif node.kind == TOAST:
             if self.toast != 0 and self.toast_text == node.text:  # the same toast, still up: keep it
                 set_node(self.toast, i)
@@ -1965,6 +1989,23 @@ struct GtkHost[A: App](Movable):
                 elif kind == FIELD:
                     if c_str(external_call["gtk_editable_get_text", Int](w)) != p.text:  # don't fight the typist
                         external_call["gtk_editable_set_text", NoneType](w, t.as_c_string_span())
+            if p.op == SET_TEXT and kind == TABLE:  # which rows are selected
+                var cols = max(self.rt.shown.nodes[p.node].value, 1)
+                var r = 0
+                while True:
+                    var first = external_call["gtk_grid_get_child_at", Int](w, c_int(0), c_int(r + 1))
+                    if first == 0:
+                        break
+                    var on = r < p.text.byte_length() and String(p.text[byte=r]) == "1"
+                    for k in range(cols):
+                        var cell = external_call["gtk_grid_get_child_at", Int](w, c_int(k), c_int(r + 1))
+                        if cell != 0:
+                            var name = String("mui-tag-table-selected")
+                            if on:
+                                external_call["gtk_widget_add_css_class", NoneType](cell, name.as_c_string_span())
+                            else:
+                                external_call["gtk_widget_remove_css_class", NoneType](cell, name.as_c_string_span())
+                    r += 1
             if p.op == SET_TEXT and kind == TEXTAREA:
                 var buffer = external_call["gtk_text_view_get_buffer", Int](w)
                 if buffer_text(buffer) != p.text:  # don't fight the typist
@@ -3126,6 +3167,28 @@ def on_alert_response[A: App](dialog: Int, response: Int, host_addr: Int) abi("C
     host[].send(node, False, host[].rt.shown.nodes[node].options[index], index, host_addr)
 
 
+def pin_key() -> String:
+    return "mojoui-unpinned"
+
+
+def on_pin_changed(adj: Int, data: Int) abi("C"):
+    """A pinned Scroll's content (or size) changed: back to its end, unless the person scrolled up."""
+    var key = pin_key()
+    if external_call["g_object_get_data", Int](adj, key.as_c_string_span()) != 0:
+        return
+    var end = external_call["gtk_adjustment_get_upper", Float64](adj) - external_call["gtk_adjustment_get_page_size", Float64](adj)
+    if external_call["gtk_adjustment_get_value", Float64](adj) != end:
+        external_call["gtk_adjustment_set_value", NoneType](adj, end)
+
+
+def on_pin_moved(adj: Int, data: Int) abi("C"):
+    """It scrolled: away from the end it stops following; back at the end it follows again."""
+    var key = pin_key()
+    var end = external_call["gtk_adjustment_get_upper", Float64](adj) - external_call["gtk_adjustment_get_page_size", Float64](adj)
+    var away = end - external_call["gtk_adjustment_get_value", Float64](adj) > 4.0
+    external_call["g_object_set_data", NoneType](adj, key.as_c_string_span(), 1 if away else 0)
+
+
 def on_day_selected[A: App](cal: Int, host_addr: Int) abi("C"):
     if busy():
         return
@@ -3362,6 +3425,18 @@ def run_step[A: App](host_addr: Int, step: String):
         if verb == "submit" or verb == "enter":  # "enter": Return straight after typing
             var s = String("activate")
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].widgets[i], s.as_c_string_span())
+    elif verb == "tick":  # tick:TAG: the tick box tagged TAG (a table's row has no label to find it by)
+        var i = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].kind == TOGGLE and host[].rt.shown.nodes[k].name == rest:
+                i = k
+                break
+        if i < 0:
+            print("TEST: no tick box", rest)
+            return
+        var w = host[].widgets[i]
+        var on = external_call["gtk_check_button_get_active", c_int](w)
+        external_call["gtk_check_button_set_active", NoneType](w, c_int(1) - on)
     elif verb == "toggle":
         var i = find(host[], TOGGLE, rest, 0)
         if i < 0:
@@ -3989,6 +4064,20 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
             print("DIALOG: " + n.text)
             if getenv("MOJOUI_SHOT") != "":
                 print("DIALOGSHOWN: " + ("yes" if external_call["gtk_widget_get_mapped", c_int](w) != 0 else "no"))
+        elif n.kind == ROUTE:
+            print("ROUTE: " + (n.text if n.text != "" else String("/")))
+        elif n.kind == TABLE:
+            var cols = max(n.value, 1)
+            var rows = (len(n.children) - cols) // cols
+            var picked = 0
+            for k in range(min(rows, n.text.byte_length())):
+                if String(n.text[byte=k]) == "1":
+                    picked += 1
+            print("TABLE: " + n.name + " " + String(rows) + " rows, " + String(cols) + " columns, " + String(picked) + " selected")
+        elif n.kind == SCROLL and n.value == 1:
+            var adj = external_call["gtk_scrolled_window_get_vadjustment", Int](w)
+            var end = external_call["gtk_adjustment_get_upper", Float64](adj) - external_call["gtk_adjustment_get_page_size", Float64](adj)
+            print("PINNED: " + (n.name if n.name != "" else String("?")) + (" at end" if end - external_call["gtk_adjustment_get_value", Float64](adj) <= 4.0 else " not at end"))
         elif n.kind == CLIPBOARD:
             if host[].clip_version > 0:
                 print("CLIPBOARD: " + host[].clip_text.replace("\t", "\\t").replace("\n", "\\n"))

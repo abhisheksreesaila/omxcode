@@ -59,6 +59,8 @@ DUMP = """() => [...document.querySelectorAll('#mojoui-root [data-kind], #mojoui
       'BOARD: ' + o.dataset.tag + ' at ' + o.dataset.x + ',' + o.dataset.y + ' ' + o.dataset.w + 'x' + o.dataset.h))
       .concat(list ? [] : ['INVIEW: ' + seen.join(', ')]).join(String.fromCharCode(10)); }
   if (k === 'object') return '';
+  if (k === 'table') return 'TABLE: ' + (e.dataset.tag || '') + ' ' + e.dataset.rows + ' rows, ' + e.dataset.columns + ' columns, ' + e.dataset.selected + ' selected';
+  if (k === 'route') return 'ROUTE: ' + e.dataset.route;
   if (k === 'icon') return 'ICON: ' + (e.querySelector('svg') ? e.dataset.icon : '?');
   if (k === 'grid') return 'GRID: ' + e.dataset.columns + ' columns, ' + e.children.length + ' items';
   if (k === 'canvas') { const cv = e.querySelector('canvas'), r = e.getBoundingClientRect(), st = e.mojoui;
@@ -76,7 +78,8 @@ DUMP = """() => [...document.querySelectorAll('#mojoui-root [data-kind], #mojoui
   if (k === 'list') { const r0 = e.querySelector('[data-row="0"]');
     return 'LIST: ' + e.querySelector('.rows').dataset.count + ' rows' + String.fromCharCode(10) + 'LISTROWS: ' + e.querySelectorAll('.row').length
       + (r0 ? String.fromCharCode(10) + 'LISTROW: ' + r0.textContent : ''); }
-}).filter(Boolean).concat([...document.querySelectorAll('[data-tag]')].map(e => {
+}).filter(Boolean).concat([...document.querySelectorAll('.scroll[data-pin="1"]')].map(e =>
+  'PINNED: ' + (e.dataset.tag || '?') + (e.scrollHeight - e.scrollTop - e.clientHeight <= 4 ? ' at end' : ' not at end'))).concat([...document.querySelectorAll('[data-tag]')].map(e => {
   const r = e.getBoundingClientRect();
   return 'BOX: ' + e.dataset.tag + ' ' + [r.x, r.y, r.width, r.height].map(v => v.toFixed(1)).join(' ');
 })).concat([...document.querySelectorAll('[data-kind=button], label.picker')].map(b => {
@@ -148,6 +151,8 @@ def step(page, s):
             field.fill(text)
         if verb in ("submit", "enter"):
             field.press("Enter")  # for "enter": straight after typing, no wait
+    elif verb == "tick":  # tick:TAG: the tick box tagged TAG (a table's row has no label to find it by)
+        page.locator(f"[data-tag={rest!r}] input").first.click()
     elif verb == "toggle":
         page.locator("[data-kind=toggle]").filter(has=page.locator("span", has_text=exact(rest))).first.locator("input").click()
     elif verb == "select":
@@ -302,10 +307,11 @@ RECTS = """() => { const out = []; const r = e => { const b = e.getBoundingClien
   return out.join(String.fromCharCode(10)); }"""
 
 
-def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None, color_scheme=None):
+def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None, color_scheme=None, path="", reduced_motion=False):
     """Returns (result, output) like a process run: result.returncode is 0 on success.
     tabs > 1: that many pages open against the one server (each runs the steps); the server's own
-    log lines (e.g. SHARED: …) come after the page's state. color_scheme: "light" or "dark" (prefers-color-scheme), else Chromium's."""
+    log lines (e.g. SHARED: …) come after the page's state. color_scheme: "light" or "dark" (prefers-color-scheme), else Chromium's.
+    path: what follows the host's address on the first load (a deep link: "#/models/x/logs"); reduced_motion: the system asks for less motion."""
     from playwright.sync_api import sync_playwright
 
     port = free_port()
@@ -328,6 +334,8 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
             scheme = {"color_scheme": color_scheme} if color_scheme else {}
+            if reduced_motion:
+                scheme["reduced_motion"] = "reduce"
             page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]}, **scheme)
             others = [browser.new_page(viewport={"width": viewport[0], "height": viewport[1]}, **scheme) for _ in range(tabs - 1)]
             for other in others:
@@ -338,7 +346,7 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
             if os.environ.get("DRIVE_DEBUG"):  # every event the page posts, and the server's log, on stderr
                 page.on("request", lambda r: print("REQ", r.method, r.url.split("/", 3)[-1], (r.post_data or "")[:160], file=sys.stderr) if "/e/" in r.url else None)
                 page.on("console", lambda m: print("CONSOLE", m.text[:200], file=sys.stderr))
-            page.goto(url)
+            page.goto(url + path)
             settle(page)
             extra = ""
             for s in [s for s in steps.split(";") if s]:
