@@ -407,7 +407,7 @@ ctx.enqueue_function[add_index](buf.unsafe_ptr(), Int32(N),
     </div>
     <div class="lanes3">
       <div class="lane3 rv"><span class="badge ok big"><i></i>runs today</span><div class="big2">0.7<small>ms</small></div><h3>NVIDIA, on Linux</h3><p>A chart grouped over a million rows on an RTX 3090, in the same process that draws the window. <b>Next:</b> a stream per query, and recorded kernel chains for repeat clicks.</p></div>
-      <div class="lane3 rv"><span class="badge ok big"><i></i>runs</span><div class="big2">metal<small>the app's queries</small></div><h3>Apple, on the Mac</h3><p><b>Works:</b> the app's own queries run on a Mac's GPU through Metal: on GitHub's Macs, a million-row sheet's totals and the Report's tiles and chart ran on its GPU, the totals equal to the CPU's to the cent. <b>Next:</b> timings on real Apple silicon (GitHub's GPU is a virtual one), and a download built with it: today's download still computes on the CPU.</p></div>
+      <div class="lane3 rv"><span class="badge ok big"><i></i>runs</span><div class="big2">metal<small>the app's queries</small></div><h3>Apple, on the Mac</h3><p><b>Works:</b> the app's own queries run on a Mac's GPU through Metal: on GitHub's Macs, a million-row sheet's totals and the Report's tiles and chart ran on its GPU, the totals equal to the CPU's to the cent. The download is this build (macOS 26), checked on the runner with no Mojo installed. <b>Next:</b> timings on real Apple silicon (GitHub's GPU is a virtual one), and macOS 14 and 15.</p></div>
       <div class="lane3 rv"><span class="badge info big"><i></i>on the server</span><div class="big2">web<small>server GPU</small></div><h3>The browser</h3><p>The web version runs the same compiled app on a server, with its GPU. In-browser WebGPU waits for a Mojo route to it: we won't add a second language to get there.</p></div>
     </div>
   </div>
@@ -460,8 +460,8 @@ ctx.enqueue_function[add_index](buf.unsafe_ptr(), Int32(N),
     <div class="dls">
       <div class="dl rv"><h3>Mac <span class="badge info"><i></i>Apple Silicon</span></h3>
         <p>omxplorer as a Mac app: open a CSV, edit it like a spreadsheet, build a report.</p>
-        <a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/mac-ci/omxplorer-mac.zip">Download for Mac</a>
-        <p class="fine2">The build GitHub's macOS 15 and 26 runners check on every push. It isn't notarised yet: if macOS refuses it, run <code>xattr -dr com.apple.quarantine OmxplorerMojo.app</code>, or open it once, then System Settings → Privacy &amp; Security → Open Anyway. Its data work runs on the CPU for now.</p></div>
+        <a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/mac-app/omxplorer-mac-gpu.zip">Download for Mac</a>
+        <p class="fine2">Its queries run on the Mac's GPU, through Metal. It needs macOS 26; on macOS 14 or 15, <a href="https://github.com/abhisheksreesaila/omxcode/releases/download/mac-ci/omxplorer-mac.zip">the CPU build</a> runs the same app. Checked on GitHub's macOS 26 runner, whose GPU is a virtual one: not yet timed on real Apple silicon. It carries four of Modular's runtime libraries, unmodified, with their licence (NOTICE.txt). It isn't notarised yet: if macOS refuses it, run <code>xattr -dr com.apple.quarantine OmxplorerMojo.app</code>, or open it once, then System Settings → Privacy &amp; Security → Open Anyway.</p></div>
       <div class="dl rv"><h3>Linux <span class="badge ok"><i></i>best today</span></h3>
         <p>The full app, with the GPU underneath on an NVIDIA card.</p>
 <pre id="cmdsL">git clone https://github.com/abhisheksreesaila/omxcode

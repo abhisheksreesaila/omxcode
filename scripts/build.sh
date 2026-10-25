@@ -99,12 +99,33 @@ apple_objects() {  # apple_objects <dir> <triple> <host-main>
   mojo_build mojoui/hosts/mojo_rt.mojo --target-triple "$2" --emit object -o "$1/mojo_rt.o"
 }
 
+bundle_runtime() {  # bundle_runtime <app>: Modular's runtime libraries the native build links (and theirs), byte for byte
+  # (Modular's own signatures; the executable's rpath finds them all), into the app with Modular's licence and our
+  # notice (apple/licenses), so it runs without the pixi env (D-309)
+  local exe="$1/Contents/MacOS/$NAME" fw="$1/Contents/Frameworks" dirs f dep d new=1
+  dirs=$(otool -l "$exe" | awk '$1=="cmd" && $2=="LC_RPATH" {getline; getline; print $2}' | sort -u)
+  mkdir -p "$fw" "$1/Contents/Resources/Licenses"
+  while [ $new = 1 ]; do new=0  # (until no library needs one we haven't copied)
+    for f in "$exe" "$fw"/*.dylib; do [ -e "$f" ] || continue
+      for dep in $(otool -L "$f" | awk 'NR>1 && $1 ~ /^@rpath\// {sub("@rpath/", "", $1); print $1}'); do
+        [ -e "$fw/$dep" ] && continue
+        for d in $dirs; do [ -e "$d/$dep" ] && { cp "$d/$dep" "$fw/$dep"; chmod u+w "$fw/$dep"; new=1; break; }; done
+        [ -e "$fw/$dep" ] || { echo "bundle_runtime: $dep not found in $dirs" >&2; return 1; }
+      done
+    done
+  done
+  for d in $dirs; do install_name_tool -delete_rpath "$d" "$exe"; done
+  install_name_tool -add_rpath @executable_path/../Frameworks "$exe"
+  cp apple/licenses/*.txt "$1/Contents/Resources/Licenses/"
+  echo "   bundled: $(ls "$fw")"
+}
+
 build_mac() {
   local out="build/$EX/mac"; mkdir -p "$out"
   local app="$out/$NAME.app"
   if [ "$(uname)" = Darwin ] && [ -n "${MAC_GPU:-}" ]; then
     # On a Mac, with its GPU (omxcode#3): a native build, Metal kernels compiled by Apple's toolchain, Mojo's runtime
-    # linked from the pixi env (CI only for now: the runtime libraries aren't in the bundle). MAC_GPU: an accelerator
+    # libraries bundled in the app (bundle_runtime, D-309). MAC_GPU: an accelerator
     # (metal:1 on GitHub's virtual GPU) or "native" (MAX names this Mac's own GPU)
     echo "== Mac ($EX): AppKit, arm64, native, GPU ($MAC_GPU)"
     rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
@@ -114,6 +135,7 @@ build_mac() {
     else
       mojo_build hosts/mac_gpu_main.mojo --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
     fi
+    bundle_runtime "$app"
   else
     echo "== Mac ($EX): AppKit, arm64 macOS 14+"
     apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo
@@ -126,6 +148,7 @@ build_mac() {
   printf 'APPL????' > "$app/Contents/PkgInfo"
   sign "$app"
   rm -f "$out/$NAME-mac.zip"; (cd "$out" && zip -qry "$NAME-mac.zip" "$NAME.app")
+  if [ -d "$app/Contents/Frameworks" ]; then (cd apple/licenses && zip -qj "../../$out/$NAME-mac.zip" NOTICE.txt); fi  # (beside the app)
   stamp "$out"; echo "   $app (+ $out/$NAME-mac.zip)"
 }
 

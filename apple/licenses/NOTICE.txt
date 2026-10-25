@@ -1,0 +1,23 @@
+omxplorer for Mac (the GPU build) carries four runtime libraries from Modular's Mojo
+and MAX packages, byte for byte as Modular ships them (not modified, not re-signed),
+in OmxplorerMojo.app/Contents/Frameworks:
+
+  libKGENCompilerRTShared.dylib    from mojo-compiler 1.1.0
+  libAsyncRTRuntimeGlobals.dylib   from mojo-compiler 1.1.0
+  libMSupportGlobals.dylib         from mojo-compiler 1.1.0
+  libAsyncRTMojoBindings.dylib     from max-core 26.6.0
+
+MAX is licensed by Modular Inc under the Modular MAX Community License.
+Copyright Modular Inc. IN NO EVENT SHALL MODULAR INC BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH USE OF MAX OR ANY DERIVATIVE WORK THEREOF.
+
+The licence's full text is in OmxplorerMojo.app/Contents/Resources/Licenses/
+MODULAR-MAX-COMMUNITY-LICENSE.txt, and Modular's third-party notices are in
+MODULAR-THIRD-PARTY-NOTICES.txt beside it. (The PyPI wheels these libraries come from
+name "MAX Platform Software License" and carry no licence text; the conda packages of
+the same versions ship the Modular MAX Community License, which is the text included.)
+
+omxplorer's own code is under the MIT licence: https://github.com/abhisheksreesaila/omxcode
+Modular's libraries stay under Modular's terms above; the MIT licence does not cover them.
+omxplorer is not a product of Modular and is not endorsed by Modular.
