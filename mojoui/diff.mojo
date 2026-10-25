@@ -1,6 +1,6 @@
 # Compare the screen before and after an update, so hosts change only what changed.
 
-from mojoui.view import View, Node, NAVBAR, ALERT, CANVAS, BOARD, VSTACK, HSTACK, GRID, TABLE, TOAST, AUTO, START
+from mojoui.view import View, Node, NAVBAR, ALERT, CANVAS, BOARD, VSTACK, HSTACK, GRID, TABLE, TOAST, AUTO, START, DRAG, EMBED
 
 comptime SET_TEXT = 1  # label text, button title, field contents, toggle label
 comptime SET_MSG = 2
@@ -76,6 +76,7 @@ def same_shape(a: View, b: View) -> Bool:
             or x.hint != y.hint
             or (x.msg2 != y.msg2 and x.kind != CANVAS)  # a canvas starting or stopping frames is a patch
             or (x.size != y.size and x.kind != BOARD)
+            or ((x.kind == DRAG or x.kind == EMBED) and x.text != y.text)  # (a new payload or page: built again, not patched)
         ):
             return False
         if on_board[i]:
@@ -134,6 +135,8 @@ def compatible(x: Node, y: Node, x_on_board: Bool, y_on_board: Bool) -> Bool:
     if (x.kind == GRID or x.kind == TABLE) and x.value != y.value:  # (another number of columns: placed again)
         return False
     if x.kind == TOAST and x.text != y.text:  # (a toast's text can't change once it's up: a new toast)
+        return False
+    if (x.kind == DRAG or x.kind == EMBED) and x.text != y.text:  # (a drag's payload, a frame's page: set when built)
         return False
     # A Back button appearing or going, or an alert's question changing, is a new layout.
     if x.kind == NAVBAR and (x.msg == 0) != (y.msg == 0):

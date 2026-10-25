@@ -10,16 +10,16 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit |
-| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, httpcheck, consolekit |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit |
-| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, consolekit |
-| `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer |
-| `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
-| `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit |
-| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console |
+| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console |
+| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, consolekit, console |
+| `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console |
+| `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, console |
+| `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console |
+| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, console |
 | `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, workbook, mxstudio |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
 | `Dropdown` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, analytics, workbook, mxstudio, omxplorer, themes, kit |
@@ -29,12 +29,12 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `DatePicker` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes |
 | `Image` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, gpu |
-| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer |
+| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer, console |
 | `Alert` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout |
-| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck |
+| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, console |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
 | `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
@@ -44,10 +44,13 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Dialog` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
 | `Toast` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | kit |
 | `Popover` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
-| `Checkbox` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer, themes, kit |
-| `Clipboard` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | omxplorer |
-| `Table` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
-| `Route` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
+| `Checkbox` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer, themes, kit, console |
+| `Clipboard` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | omxplorer, console |
+| `Table` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
+| `Route` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
+| `Draggable` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `WebFrame` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 
 ## Variants, gestures, layout, design languages
 
@@ -107,26 +110,28 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Column number formats` | `mojoui/numformat.mojo` | Canvas, Text | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Sheet objects (charts, pivots)` | `mojoui/sheetpage.mojo` | Board: drag, resize, snap, Canvas, Card, Grid | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
 | `Report page (KPI and chart tiles, filters)` | `mojoui/reportpage.mojo` | Grid, Card, Dropdown, Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | omxplorer |
-| `CodeBlock` | `mojoui/codeblock.mojo` | Text, Button with an icon, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
-| `LogView` | `mojoui/logview.mojo` | Scroll, Text, Scroll pinned to its end | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
+| `CodeBlock` | `mojoui/codeblock.mojo` | Text, Button with an icon, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console, consolekit |
+| `LogView` | `mojoui/logview.mojo` | Scroll, Text, Scroll pinned to its end | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console, consolekit |
 | `Timeline` | `mojoui/timeline.mojo` | Text, Icon, ProgressBar, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
-| `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | consolekit |
-| `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
+| `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | console, consolekit |
+| `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
 | `Confirm` | `mojoui/confirm.mojo` | Button, Timers | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
 | `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
-| `Markdown` | `mojoui/markdown.mojo` | Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
-| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | consolekit |
+| `Markdown` | `mojoui/markdown.mojo` | Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `Page kit (header, groups column, stat tiles, facts, tabs, flat buttons)` | `mojoui/pagekit.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Beacon (the one thing happening now)` | `mojoui/beacon.mojo` | Canvas, Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 
 ## Totals
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 93 | 1 | 0 |
-| Web | 94 | 0 | 0 |
-| Android | 19 | 18 | 57 |
-| Mac (AppKit) | 0 | 82 | 12 |
-| iPhone (UIKit) | 0 | 68 | 26 |
-| Agent (MCP) | 29 | 22 | 43 |
+| Linux (GTK) | 96 | 3 | 0 |
+| Web | 99 | 0 | 0 |
+| Android | 19 | 18 | 62 |
+| Mac (AppKit) | 0 | 87 | 12 |
+| iPhone (UIKit) | 0 | 70 | 29 |
+| Agent (MCP) | 29 | 24 | 46 |
 
 ## Inside one app, not components yet (the debt)
 

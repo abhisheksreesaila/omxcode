@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
-    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
+    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
     START, CENTER, END, STRETCH, BETWEEN, Node,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
@@ -187,6 +187,7 @@ struct AppKitHost[A: App](Movable):
     var sheet_node: Int
     var toast: Int  # the toast view showing, if any
     var clip_version: Int  # the Clipboard view's version last copied (unverified on hardware)
+    var embed_version: Int  # the WebFrame's version last opened in the browser (unverified on hardware)
     var pinned: List[Int]  # Scroll nodes pinned to their end (follow_ends)
     var toast_text: String
     var toast_claimed: Bool
@@ -230,6 +231,7 @@ struct AppKitHost[A: App](Movable):
         self.sheet_node = -1
         self.toast = 0
         self.clip_version = 0
+        self.embed_version = 0
         self.pinned = List[Int]()
         self.toast_text = ""
         self.toast_claimed = False
@@ -963,9 +965,9 @@ struct AppKitHost[A: App](Movable):
                 prefer(w, "widthAnchor", Float64(320))
             if node.value == 1:
                 self.pinned.append(i)
-        else:
+        else:  # (a Draggable, a DropTarget and a WebFrame show their one child: drag and drop isn't built here yet)
             w = new("NSStackView")
-            var vertical = node.kind == VSTACK
+            var vertical = node.kind == VSTACK or node.kind == DRAG or node.kind == DROP or node.kind == EMBED
             _ = msg(w, "setOrientation:", 1 if vertical else 0)
             # align → NSStackView alignment (NSLayoutAttribute); STRETCH = per-child constraints below
             var align = 9 if vertical else 10  # centre X / centre Y
@@ -1406,6 +1408,13 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(board, "clearContents")
                 _ = msg(board, "setString:forType:", ns_string(n.text), ns_string("public.utf8-plain-text"))
 
+    def open_if_asked(mut self):
+        """A WebFrame whose version moved on: its page opens in the browser (NSWorkspace openURL:)."""
+        for ref n in self.rt.shown.nodes:
+            if n.kind == EMBED and n.value > 0 and n.value != self.embed_version:
+                self.embed_version = n.value
+                _ = msg(msg(cls("NSWorkspace"), "sharedWorkspace"), "openURL:", msg(cls("NSURL"), "URLWithString:", ns_string(n.hint if n.hint != "" else n.text)))
+
     def schedule_effects(mut self, self_addr: Int):
         """One delayed call (effectsDue:) for when the runtime next has a reply or a tick to hand over (Runtime.wake_in);
         an earlier need cancels a later one."""
@@ -1421,6 +1430,7 @@ struct AppKitHost[A: App](Movable):
     def apply(mut self, d: Diff, self_addr: Int):
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.copy_if_asked()
+        self.open_if_asked()
         self.follow_ends()
         if d.rebuild or len(d.patches) > 0:
             self.queue_snapshot(self_addr)

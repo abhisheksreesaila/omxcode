@@ -1,0 +1,83 @@
+# The top bar on every page (topbar.js, nav.js, beacon.js): the brand (home), the breadcrumb trail, the Beacon (the one
+# thing happening now), the four places. On a phone the brand's word, the earlier crumbs and the places' words fold
+# away (the places into ⋯).
+
+from mojoui.view import View, Text, Button, Icon, HStack, VStack, Spacer, SUBTLE, ICON_ONLY, CENTER
+from mojoui.breadcrumbs import Breadcrumbs
+from mojoui.route import Place, crumbs_for
+from mojoui.pagekit import Mark, Rule, PlaceLink, QuietText, BrandName
+from mojoui.beacon import Beacon
+from data import Store, hardware, fmt, rounded
+from msgs import HOME, CRUMB, PLACE, MORE, RING
+
+comptime PLACE_KEYS: List[String] = ["keys", "gateway", "security", "settings"]
+comptime PLACE_TITLES: List[String] = ["Keys", "Gateway", "Security", "Settings"]
+comptime PLACE_ICONS: List[String] = ["key-round", "route", "lock", "sliders-horizontal"]
+
+
+@fieldwise_init
+struct BeaconState(Copyable, Movable):
+    var kind: String  # pull, port, crash, starting, running, idle, nogpu, offline, loading
+    var label: String
+    var value: String
+    var percent: Float64  # the ring (-1: unknown)
+
+
+def beacon_state(st: Store) -> BeaconState:
+    """beacon.js beaconState: a pull or port in progress > a crashed model > starting > running (live tok/s) > GPU idle."""
+    if st.pull_name != "":
+        return BeaconState("pull", "Pulling " + st.pull_name, ("…" if st.pull_percent < 0 else String(Int(rounded(st.pull_percent, 0))) + "%"), st.pull_percent)
+    if st.port_name != "":
+        return BeaconState("port", "Porting " + st.port_name, st.port_step, -1)
+    for m in st.models:
+        if m.state == "crashed":
+            return BeaconState("crash", m.name + " crashed", "", -1)
+    for m in st.models:
+        if m.state == "starting":
+            return BeaconState("starting", "Starting " + m.name, "", -1)
+    var running = 0
+    var tps = 0
+    for m in st.models:
+        if m.state == "ready":
+            running += 1
+            var pts = st.points(m.name)
+            tps += Int(rounded(pts[len(pts) - 1], 0)) if len(pts) > 0 else 0
+    if running > 0:
+        return BeaconState("running", String(running) + " running", String(tps) + " tok/s", -1)
+    if st.error != "":
+        return BeaconState("offline", "daemon offline", "", -1)
+    var hw = hardware(st)
+    if not st.loaded:
+        return BeaconState("loading", "…", "", -1)
+    if not hw.present:
+        return BeaconState("nogpu", "No GPU", "", -1)
+    return BeaconState("idle", hw.short, fmt(hw.used_gb, 1) + "/" + fmt(hw.total_gb, 1) + " GB", -1)
+
+
+def top_bar(place: Place, st: Store, phone: Bool) -> View:
+    var items: List[View] = []
+    var brand: List[View] = [Mark("omx")]
+    if not phone:
+        brand.append(BrandName("omxconsole", HOME))
+    items.append(HStack(brand^, spacing=9).align(CENTER).padding(6, 8).tag("brand"))
+    var crumbs = crumbs_for(place)
+    if phone:
+        var last: List[String] = [crumbs[len(crumbs) - 1]]
+        items.append(Breadcrumbs(last, on_tap=CRUMB + len(crumbs) - 1, mono_last=place.page == "model").grow())
+    else:
+        items.append(Rule(22))
+        items.append(Breadcrumbs(crumbs, on_tap=CRUMB, mono_last=place.page == "model"))
+        items.append(Spacer())
+    var b = beacon_state(st)
+    var pct = b.percent
+    var ring = RING if b.kind == "pull" or b.kind == "port" else -1
+    items.append(Beacon(b.label, "" if phone else b.value, ring, Int(pct * 10) if pct >= 0 else 0, live=b.kind == "running" or b.kind == "crash"))
+    if phone:
+        items.append(Button("Keys, Gateway, Security, Settings", MORE, ICON_ONLY, icon="ellipsis").tag("more"))
+    else:
+        var places: List[View] = []
+        var keys = materialize[PLACE_KEYS]()
+        for k in range(4):
+            places.append(PlaceLink(materialize[PLACE_TITLES]()[k], materialize[PLACE_ICONS]()[k], PLACE + k, here=place.page == keys[k]))
+        items.append(HStack(places^, spacing=2).align(CENTER).tag("places"))
+    return HStack(items^, spacing=6).align(CENTER).height(60).padding(0, 8 if phone else 14).fill().tag("topbar")

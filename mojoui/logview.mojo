@@ -8,11 +8,13 @@ from mojoui.view import View, Text, VStack, Scroll, START
 from mojoui.codeblock import keep_spaces
 
 
-def LogView(lines: List[String], height: Int = 320, empty: String = "") -> View:
-    """`lines` top to bottom, pinned to the last one; `empty`: what the pane says with no lines."""
+def LogView(lines: List[String], height: Int = 320, empty: String = "", exact: Bool = False) -> View:
+    """`lines` top to bottom, pinned to the last one; `empty`: what the pane says with no lines. `height` is the most it
+    takes; `exact`: always that high, a few lines or many (a pane that fills its page, as the console's Logs tab)."""
     var rows: List[View] = []
     for l in lines:
         rows.append(Text(keep_spaces(l) if l != "" else chr(160)))
     if len(rows) == 0 and empty != "":
         rows.append(Text(empty))
-    return Scroll(VStack(rows, spacing=0).align(START).fill(), height=height, pinned=True).tag("log")
+    var pane = Scroll(VStack(rows, spacing=0).align(START).fill(), height=height, pinned=True).tag("log")
+    return pane^.height(height) if exact else pane^

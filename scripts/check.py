@@ -749,6 +749,347 @@ def styles_for(log, probes):
     return out
 
 
+# M5: My models and the model page. examples/console against the fixture server (scripts/console_fixture.py), on GTK and
+# the web: what the original shows from the recorded replies (computed by its own rules: blade-home.js modelView and
+# cellsFor, model-page.js overviewView, blade-bench.js, blade-logs.js, blade-notebook.js), its writes (the requests the
+# original sends, recorded by the fixture server), its poll intervals (core.js 3 s, system-data.js 5 s, beacon.js 3 s,
+# blade-logs.js 2 s), a reply changed mid-run, Run in Jupyter (an iframe on the web, the browser on GTK).
+CONSOLE = "console"
+CONSOLE_MODEL = "qwen2.5-0.5b"
+M5_SCREENS = ["models", "overview", "bench", "logs", "notebook"]
+CONSOLE_URL_ENV, CONSOLE_KEY_ENV, OPENER_ENV = "MXC_URL", "MXC_ADMIN_KEY", "MOJOUI_OPENER"
+M5_NAMES = ["qwen2.5-0.5b", "all-minilm-l6", "llama3.2-1b"]
+M5_TOP = ["omxconsole", "Pulling helper-7b", "35%"]  # the top bar on every screen: brand, the Beacon (pulls.json: helper-7b at 35.4 %)
+M5_PLACES = ["Keys", "Gateway", "Security", "Settings"]
+M5_WANT = {
+    # blade-home.js: rows running first then by name; size, memory (system crew vram_gb), tok/s (the series' last p50),
+    # first token and requests (metrics by_model), access; the heading's sub line
+    "models": M5_NAMES + ["Qwen/Qwen2.5-0.5B-Instruct", "sentence-transformers/all-MiniLM-L6-v2", "meta-llama/Llama-3.2-1B-Instruct",
+                          "988 MB", "91 MB", "2.5 GB", "3.1 GB", "158", "41 ms", "101", "This machine", "Running", "Idle",
+                          "idle 1s of 5m", "Chat", "Embeddings", "#work", "#favorites", "My models",
+                          "3 models · 1 running · 9.1 of 24 GB GPU · 127.0.0.1:11435/v1"],
+    "cards": M5_NAMES + ["158", "3.1 GB", "101"],
+    # model-page.js: the four tiles, About, GPU fit
+    "overview": ["101", "158", "41", "3.1", "last 5 minutes", "decode, median", "time to first token", "GPU, this model",
+                 "Qwen/Qwen2.5-0.5B-Instruct", "Qwen2", "huggingface", "after 5m idle", "http://127.0.0.1:11435/v1",
+                 "3.1 GB · 13% of 24 GB", "this 3.1 GB", "others 0 GB", "free 14.9 GB of 24 GB", "#favorites", "#work"],
+    # blade-bench.js: bars, the workload line (UTC, en-US), the history
+    "benchmark": ["157.9 tok/s", "42 ms", "higher is better", "lower is better", "Decode speed · tokens/s", "Time to first token · p50",
+                  "507 prompt tokens · 48 tokens out · batch 1 · 3 runs each · Oct 25, 21:34", "1 model", "qwen2.5-0.5b · 157.9 tok/s"],
+    "logs": [l for l in (FIXTURES / "admin_models_qwen2.5-0.5b_log.txt").read_text().splitlines() if l.strip()] + ["10 lines", "qwen2.5-0.5b · max serve"],
+    # blade-notebook.js: the chapters (levels 1–2), the cells, the architecture
+    "notebook": ["qwen2.5-0.5b", "What it is", "Model card", "Qwen2.5-0.5B-Instruct", "Quickstart", "Evaluation", "Architecture",
+                 "Where the parameters live", "See inside: MAX's implementation", "Try it", "Pipeline:", "text-generation",
+                 "Qwen2ForCausalLM", "hidden_size", "896", "model running · 127.0.0.1:11435/v1", "Run in Jupyter"],
+}
+M5_TPS_NEW = 201.4  # the reply changed mid-run: the series' last decode p50 (shown as 201)
+M5_CADENCE = {"/admin/models": 3000, "/admin/metrics": 3000, "/admin/series?range=5m": 3000, "/admin/requests?limit=40": 3000,
+              "/admin/system": 5000, "/admin/pulls": 3000, "/admin/ports": 3000}
+
+
+def texts(out):
+    """Every label's and button's words (nbsp as a space, trimmed): what the screen says."""
+    out_ = set()
+    for l in out.splitlines():
+        for head in ("LABEL: ", "BUTTON: "):
+            if l.startswith(head):
+                out_.add(l[len(head):].replace(" ", " ").strip())
+    return out_
+
+
+def missing(out, want):
+    have = texts(out)
+    return [w for w in want if w not in have]
+
+
+def box_of(out, tag):
+    import re
+    m = re.findall(rf"^BOX: {re.escape(tag)} ([\d.-]+) ([\d.-]+) ([\d.]+) ([\d.]+)$", out, re.M)
+    return [tuple(float(v) for v in b) for b in m]
+
+
+def cadence(log, path, want_ms, problems, where):
+    """GETs of `path` come every want_ms (median within 15 %), from the fixture server's log."""
+    times = [r["t"] for r in log if r["method"] == "GET" and r["target"] == path]
+    if len(times) < 3:
+        problems.append(f"{where}: only {len(times)} GET {path} (it is polled every {want_ms / 1000:g} s)")
+        return
+    gaps = sorted((b - a) * 1000 for a, b in zip(times, times[1:]))
+    med = gaps[len(gaps) // 2]
+    if abs(med - want_ms) > 0.15 * want_ms:
+        problems.append(f"{where}: GET {path} every {med:.0f} ms (median), not {want_ms} ms")
+
+
+def console_env(url, token, extra=None):
+    return dict({CONSOLE_URL_ENV: url, CONSOLE_KEY_ENV: token}, **(extra or {}))
+
+
+def console_gtk(steps, env, shot=None):
+    exe = g30.BUILD / CONSOLE / "linux" / CONSOLE
+    e = dict(env, MOJOUI_TEST=steps, MOJOUI_WINDOW="1440x900")
+    if shot:
+        e["MOJOUI_SHOT"] = str(shot)
+    r = g30.run([str(exe)], env=e, timeout=300)
+    out = r.stdout + r.stderr
+    if r.returncode != 0 or "CRITICAL" in out or "TEST: " in out:
+        return None, f"GTK run failed (exit {r.returncode}): {out[-500:]}"
+    return r, out
+
+
+def console_web(steps, env, shot=None, path="", viewport=(1440, 900)):
+    import drive
+    saved = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    try:
+        r, out = drive.web_run(g30.BUILD / CONSOLE / "web", steps, shot=str(shot) if shot else None, viewport=viewport,
+                               color_scheme="light", path=path)
+    except Exception as e:
+        return None, f"web run crashed: {e!r}"
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    if r.returncode != 0:
+        return None, f"web: {out[-500:]}"
+    return r, out
+
+
+def m5_pixels(token):
+    """Information only (M7 holds the bar): each M5 screen's share of pixels equal to the original's, both sizes."""
+    import subprocess
+    import console_fixture
+    import console_side
+    fx = console_fixture.Fixtures()
+    server, url = console_fixture.serve(fx)
+    port = drive_port()
+    web = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/web.py"), str(g30.BUILD / CONSOLE / "web"), str(port)], cwd=ROOT,
+                           env=dict(os.environ, **console_env(url, token)), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        import urllib.request
+        for _ in range(300):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/static/htmx.min.js", timeout=1)
+                break
+            except OSError:
+                time.sleep(0.1)
+        screens = [s for s in console_side.SCREENS if s[0] in M5_SCREENS]
+        shots = console_side.shoot(f"http://127.0.0.1:{port}/", OUT / "ours", frozen_at=fx.recorded_at, screens=screens, path="", wait_idle=False)
+    finally:
+        web.terminate()
+        try:
+            web.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            web.kill()
+            web.wait(timeout=10)
+        server.shutdown()
+    notes = []
+    for (name, (w, h)), png in sorted(shots.items(), key=lambda kv: (M5_SCREENS.index(kv[0][0]), -kv[0][1][0])):
+        orig = OUT / "orig" / "a" / f"{name}-{w}x{h}.png"
+        notes.append(f"{name} {w}: {1 - console_side.differing(orig, png):.1%}")
+    return notes
+
+
+def drive_port():
+    import drive
+    return drive.free_port()
+
+
+def m5():
+    """My models and the model page: examples/console runs against the fixture server on GTK and on the web: the model
+    list shows the three recorded models with their numbers in a table and as cards (List/Cards); ticking two models and
+    applying a label changes both (the app sends the original's POST /admin/labels/<label>/add, recorded by the fixture
+    server); dragging a model onto a label applies it; the model page at #/models/qwen2.5-0.5b/<tab> for overview,
+    benchmark, logs and notebook shows the recorded content (stats, sparkline, hardware, the bench runs and bars, the log
+    pinned to its end, the notebook's chapters and cells); numbers follow the poll (a reply changed mid-run shows within
+    one poll period; the original's endpoints at its intervals); Run in Jupyter is an iframe on the web and opens the
+    browser on GTK (the open request logged through an opener override); the top bar (brand, crumbs, places, Beacon) on
+    every screen; builds for the Mac. Prints each screen's pixel match against the original (information only)."""
+    import json as pyjson
+    import re
+    import secrets
+    import tempfile
+    import threading
+    import console_fixture
+    problems = []
+    app = ROOT / "examples" / CONSOLE / "app.mojo"
+    if not app.exists():
+        return False, "no examples/console/app.mojo"
+    src = "".join(f.read_text() for f in (ROOT / "examples" / CONSOLE).glob("*.mojo"))
+    if len(list((ROOT / "examples" / CONSOLE).glob("*.mojo"))) < 4:
+        problems.append("examples/console isn't split by screen (app.mojo with routing, the top bar and the poll; a file per screen)")
+    plat = ROOT / "examples" / CONSOLE / "platforms"
+    if not plat.exists() or not {"linux", "web", "mac"} <= set(plat.read_text().split()):
+        problems.append("examples/console/platforms doesn't list linux web mac")
+    for need, why in [('"X-Mst-Admin"', "the original's admin header"), (f'"{CONSOLE_KEY_ENV}"', f"the admin key from ${CONSOLE_KEY_ENV}"),
+                      (f'"{CONSOLE_URL_ENV}"', f"the base URL from ${CONSOLE_URL_ENV}"), ("Every(", "App.every polls")]:
+        if need not in src:
+            problems.append(f"examples/console has no {why} ({need})")
+    for name in ("dragdrop", "embed", "pagekit"):  # the components M5 added to mojoui/, each with its own test
+        err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}")
+        if err:
+            problems.append(err[:300])
+    if problems:
+        return False, "; ".join(problems)
+    err = build(CONSOLE, "linux", "web", "mac")
+    if err:
+        return False, err
+    token = secrets.token_hex(8)
+    notes = []
+    opener_dir = Path(tempfile.mkdtemp(prefix="m5-opener-"))
+    opened = opener_dir / "opened.txt"
+    opener = opener_dir / "open.sh"
+    opener.write_text(f"#!/bin/sh\necho \"$1\" >> {opened}\n")
+    opener.chmod(0o755)
+
+    def check_writes(fx, host, want):
+        got = [(w["method"], w["path"], w["body"]) for w in fx.writes]
+        for wmeth, wpath, wbody in want:
+            if (wmeth, wpath, wbody) not in got:
+                problems.append(f"{host}: the app never sent {wmeth} {wpath} {pyjson.dumps(wbody)} (sent: {got})")
+        for w in fx.writes:
+            if w["headers"].get("x-mst-admin") != token:
+                problems.append(f"{host}: {w['method']} {w['path']} without X-Mst-Admin = ${CONSOLE_KEY_ENV}")
+                break
+        if any(r["admin"] != token for r in fx.log):
+            problems.append(f"{host}: some /admin request went without X-Mst-Admin = ${CONSOLE_KEY_ENV}")
+        if fx.misses:
+            problems.append(f"{host}: asked for what the daemon doesn't answer: {sorted(set(fx.misses))[:6]}")
+
+    def common(out, host, screen):
+        lost = missing(out, M5_TOP + M5_PLACES)
+        if lost:
+            problems.append(f"{host} {screen}: the top bar lacks {lost}")
+
+    for host in ("gtk", "web"):
+        run = console_gtk if host == "gtk" else console_web
+        # 1) the list: drag all-minilm-l6 onto #work; tick all-minilm-l6 and llama3.2-1b, tap #favorites in the bar
+        fx = console_fixture.Fixtures()
+        server, url = console_fixture.serve(fx)
+        try:
+            steps = "pause:1500;dragto:row-all-minilm-l6=label-work;pause:800;tick:tick-1;tick:tick-2;tap:#favorites;pause:4000"
+            r, out = run(steps, console_env(url, token), shot=OUT / f"console-models-{host}.png")
+        finally:
+            server.shutdown()
+        if r is None:
+            problems.append(out)
+            continue
+        lost = missing(out, M5_WANT["models"])
+        if lost:
+            problems.append(f"{host} list: missing {lost[:10]}")
+        if not re.search(r"^TABLE: models 3 rows, \d+ columns, \d+ selected$", out, re.M):
+            problems.append(f"{host} list: no 3-row table tagged models ({re.findall(r'^TABLE: .*$', out, re.M)})")
+        if out.count("LABEL: #favorites") < 3 or out.count("LABEL: #work") < 3:
+            problems.append(f"{host} list: after the drag and the label, #favorites shows {out.count('LABEL: #favorites')}× and #work "
+                            f"{out.count('LABEL: #work')}× (want 3 rows each)")
+        check_writes(fx, f"{host} list", [("POST", "/admin/labels/work/add", {"models": ["all-minilm-l6"]}),
+                                          ("POST", "/admin/labels/favorites/add", {"models": ["all-minilm-l6", "llama3.2-1b"]})])
+        common(out, host, "list")
+        # 2) cards
+        fx = console_fixture.Fixtures()
+        server, url = console_fixture.serve(fx)
+        try:
+            r, out = run("pause:1500;tap:Cards;pause:500", console_env(url, token), shot=OUT / f"console-cards-{host}.png")
+        finally:
+            server.shutdown()
+        if r is None:
+            problems.append(out)
+            continue
+        lost = missing(out, M5_WANT["cards"])
+        if lost or re.search(r"^TABLE: models", out, re.M) or not box_of(out, "cards"):
+            problems.append(f"{host} cards: missing {lost}, or the table still shows, or no view tagged cards")
+        # 3) the model page, tab by tab (the web opens each by its link; GTK taps there)
+        for tab, title in [("overview", "Overview"), ("benchmark", "Benchmark"), ("logs", "Logs"), ("notebook", "Notebook")]:
+            fx = console_fixture.Fixtures()
+            server, url = console_fixture.serve(fx)
+            changed = {}
+            if tab == "overview":  # the reply changes after the second series poll: the screen follows within one poll
+                def change():
+                    while sum(1 for x in fx.log if x["target"] == "/admin/series?range=5m") < 2:
+                        time.sleep(0.05)
+                    body = pyjson.loads((FIXTURES / "admin_series@range=5m.json").read_text())
+                    body["models"][CONSOLE_MODEL][-1]["decode_tps_p50"] = M5_TPS_NEW
+                    fx.override("GET /admin/series?range=5m", pyjson.dumps(body).encode())
+                    changed["t"] = time.monotonic()
+                threading.Thread(target=change, daemon=True).start()
+            extra = {OPENER_ENV: str(opener)} if host == "gtk" and tab == "notebook" else {}
+            if opened.exists():
+                opened.unlink()
+            pause = 11000 if tab == "overview" else (5000 if tab == "logs" else 2500)
+            go = f"pause:1500;tap:{CONSOLE_MODEL};pause:600" + ("" if tab == "overview" else f";tap:{title}")
+            # Jupyter replaces the saved view (as the original's does); Saved view brings the chapters and cells back
+            jup = ";tap:Run in Jupyter;pause:1500;js:(document.querySelector('iframe') || {}).src || '';tap:Saved view;pause:500" if tab == "notebook" else ""
+            if host == "web":
+                go = "pause:1500"
+            steps = f"{go};pause:{pause}" + (jup if host == "web" else (";tap:Run in Jupyter;pause:1500;tap:Saved view;pause:500" if tab == "notebook" else ""))
+            try:
+                r, out = run(steps, console_env(url, token, extra), shot=OUT / f"console-{tab}-{host}.png",
+                             **({"path": f"#/models/{CONSOLE_MODEL}/{tab}"} if host == "web" else {}))
+            finally:
+                server.shutdown()
+            if r is None:
+                problems.append(out)
+                continue
+            want = list(M5_WANT[tab])
+            if tab == "overview":
+                want = [w for w in want if w != "158"] + ["201"]
+            lost = missing(out, want)
+            if lost:
+                problems.append(f"{host} {tab}: missing {lost[:10]}")
+            if host == "web" and not re.search(rf'^ROUTE: /models/{re.escape(CONSOLE_MODEL)}/{tab}$', out, re.M):
+                problems.append(f"{host} {tab}: opened at #/models/{CONSOLE_MODEL}/{tab}, the route is {re.findall(r'^ROUTE: .*$', out, re.M)}")
+            if host == "gtk" and not re.search(rf'^ROUTE: /models/{re.escape(CONSOLE_MODEL)}/{tab}$', out, re.M):
+                problems.append(f"{host} {tab}: the route is {re.findall(r'^ROUTE: .*$', out, re.M)}")
+            if missing(out, ["My models", CONSOLE_MODEL]):
+                problems.append(f"{host} {tab}: no crumbs My models › {CONSOLE_MODEL}")
+            common(out, host, tab)
+            if tab == "overview":
+                sp = box_of(out, "sparkline")
+                if not sp or sp[0][2] < 200 or sp[0][3] < 40:
+                    problems.append(f"{host} overview: no sparkline drawn ({sp})")
+                if host == "web" and not re.search(r"^CANVAS: \d+x\d+ pt .* painted [1-9]", out, re.M):
+                    problems.append(f"{host} overview: the sparkline's canvas is blank")
+                if not box_of(out, "gpu-fit"):
+                    problems.append(f"{host} overview: no GPU fit bar (tag gpu-fit)")
+                after = [x["t"] for x in fx.log if x["target"] == "/admin/series?range=5m" and "t" in changed and x["t"] >= changed["t"]]
+                if "t" not in changed or not after or after[0] - changed["t"] > 3.5:
+                    problems.append(f"{host} overview: after the reply changed, the next series poll came "
+                                    f"{(after[0] - changed['t']) if after else 'never'} s later (one poll: 3 s)")
+                for path, ms in M5_CADENCE.items():  # (a run without writes: a write's own refresh comes between two ticks, as the original's does)
+                    cadence(fx.log, path, ms, problems, f"{host} overview")
+            if tab == "benchmark":
+                bars = box_of(out, "bar")
+                if len(bars) < 2 or min(b[2] for b in bars) < 200:
+                    problems.append(f"{host} benchmark: want two drawn bars (tag bar), got {bars}")
+            if tab == "logs":
+                if not re.search(r"^PINNED: log at end$", out, re.M):
+                    problems.append(f"{host} logs: the log isn't pinned to its end ({re.findall(r'^PINNED: .*$', out, re.M)})")
+                cadence(fx.log, f"/admin/models/{CONSOLE_MODEL}/log", 2000, problems, f"{host} logs")
+            if tab == "notebook":
+                check_writes(fx, f"{host} notebook", [("POST", f"/admin/learn/{CONSOLE_MODEL}/open", None)])
+                want_url = console_fixture.jupyter_urls(CONSOLE_MODEL, fx.jupyter_port)
+                if host == "web":
+                    js = [l[len("JS: "):] for l in out.splitlines() if l.startswith("JS: ")]
+                    if not js or pyjson.loads(js[-1]) != want_url["embed_url"]:
+                        problems.append(f"web notebook: Run in Jupyter shows no iframe of {want_url['embed_url']} ({js})")
+                else:
+                    got = opened.read_text().split() if opened.exists() else []
+                    if got != [want_url["url"]]:
+                        problems.append(f"gtk notebook: Run in Jupyter opened {got}, not the browser at {want_url['url']} (${OPENER_ENV})")
+        notes.append(host)
+    if problems:
+        return False, "; ".join(dict.fromkeys(problems[:14]))
+    try:
+        px = m5_pixels(token)
+    except Exception as e:
+        px = [f"unmeasured ({e!r})"]
+    return True, ("examples/console on " + " and ".join(notes) + " against the fixtures: the list (table, cards, drag onto #work, tick two "
+                  "and #favorites: both POSTs sent with the admin key), the model page's four tabs with the recorded content, the poll at "
+                  "the original's intervals and a changed reply shown within one poll, Jupyter as an iframe (web) and the browser (GTK); "
+                  "Mac builds. Pixels equal to the original (info, M7 wants 99 %): " + ", ".join(px))
+
+
 def m8():
     """In the gallery, and nothing regressed: goal 32's M0–M2, goal 30's M0–M5 (goals 3–29 inside them)."""
     problems = []
@@ -771,7 +1112,7 @@ MILESTONES = [
     ("M2", m2),
     ("M3", m3),
     ("M4", m4),
-    ("M5", todo("examples/console: My models and the model page (GOAL.md M5)")),
+    ("M5", m5),
     ("M6", todo("examples/console: Add, Keys, Gateway, Security, Settings (GOAL.md M6)")),
     ("M7", todo("identical: web ≥ 99 % of pixels, GTK and Mac boxes, a live daemon (GOAL.md M7)")),
     ("M8", m8),

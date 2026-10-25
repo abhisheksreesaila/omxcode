@@ -153,6 +153,9 @@ def step(page, s):
             field.press("Enter")  # for "enter": straight after typing, no wait
     elif verb == "tick":  # tick:TAG: the tick box tagged TAG (a table's row has no label to find it by)
         page.locator(f"[data-tag={rest!r}] input").first.click()
+    elif verb == "dragto":  # dragto:SRC=DST: the view tagged SRC dragged with the mouse onto the view tagged DST (the browser's drag and drop)
+        src, _, dst = rest.partition("=")
+        page.locator(f"[data-tag={src!r}]").first.drag_to(page.locator(f"[data-tag={dst!r}]").first)
     elif verb == "toggle":
         page.locator("[data-kind=toggle]").filter(has=page.locator("span", has_text=exact(rest))).first.locator("input").click()
     elif verb == "select":

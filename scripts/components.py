@@ -32,14 +32,14 @@ COMPONENTS = [
     ("LazyList", "LAZYLIST"), ("Canvas", "CANVAS"), ("Board", "BOARD"), ("Overlay", "OVERLAY"),
     ("MenuBar", "MENUBAR"), ("Menu", "MENU"), ("Item", "ITEM"), ("ContextMenu", "MENU"),
     ("Dialog", "DIALOG"), ("Toast", "TOAST"), ("Popover", "POPOVER"), ("Checkbox", "TOGGLE"), ("Clipboard", "CLIPBOARD"),
-    ("Table", "TABLE"), ("Route", "ROUTE"),
+    ("Table", "TABLE"), ("Route", "ROUTE"), ("Draggable", "DRAG"), ("DropTarget", "DROP"), ("WebFrame", "EMBED"),
 ]
 
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit"],
-    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit"],  # (kit: goal 18 runs it on GTK and the web)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console"],
+    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console"],  # (kit: goal 18 runs it on GTK and the web)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
     "iPhone (UIKit)": [],
@@ -111,6 +111,9 @@ COMPOSITES = [
     ("Skeleton", "mojoui/skeleton.mojo", ["VStack", "Themes on top (themes/, or yours)"], "Skeleton("),
     ("Markdown", "mojoui/markdown.mojo", ["Text", "VStack", "HStack", "Card", "Themes on top (themes/, or yours)"], "Markdown("),
     ("Sparkline", "mojoui/sparkline.mojo", ["Canvas"], "SparklineView("),
+    # the OMX Console's pages (goal 33 M5)
+    ("Page kit (header, groups column, stat tiles, facts, tabs, flat buttons)", "mojoui/pagekit.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
+    ("Beacon (the one thing happening now)", "mojoui/beacon.mojo", ["Canvas", "Text", "HStack", "Themes on top (themes/, or yours)"], "Beacon("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
@@ -141,11 +144,23 @@ def implemented(src, kind):
 MODULE_OF = {"Table": "mojoui.table", "Route": "mojoui.route"}
 
 
+def example_text(example):
+    """An example's code: app.mojo and the files beside it (the console keeps a file per page)."""
+    d = ROOT / "examples" / example
+    if not (d / "app.mojo").exists():
+        return ""
+    return "".join(f.read_text() for f in sorted(d.glob("*.mojo")))
+
+
+# Kinds a host builds whose checks drive them through a stand-in, not real input: 🔨 until one does.
+KIND_UNPROVEN = {("Linux (GTK)", "DRAG"): "the dragto: step reads the GtkDragSource's content and calls the GtkDropTarget's drop handler; a pointer drag isn't driven headless",
+                 ("Linux (GTK)", "DROP"): "the same"}
+
+
 def used_by(example, ctor):
-    p = ROOT / "examples" / example / "app.mojo"
-    if not p.exists():
+    text = example_text(example)
+    if not text:
         return False
-    text = p.read_text()
     return re.search(rf"\b{ctor}\(", text) is not None and MODULE_OF.get(ctor, "") in text
 
 
@@ -154,6 +169,8 @@ def cell(host, src, ctor, kind):
     if not (web_stacks or implemented(src, kind)):
         return "❌"
     proof = [e for e in RUN_ON[host] if used_by(e, ctor)]
+    if (host, kind) in KIND_UNPROVEN:
+        return "🔨"
     return "✅" if proof else "🔨"
 
 
@@ -206,7 +223,7 @@ def render():
             "|---|---|---|" + "---|" * len(names) + "---|"]
     comp_cells = {}
     for name, module, parts, ctor in COMPOSITES:
-        users = [e.name for e in sorted((ROOT / "examples").iterdir()) if (e / "app.mojo").exists() and ctor in (e / "app.mojo").read_text()]
+        users = [e.name for e in sorted((ROOT / "examples").iterdir()) if (e / "app.mojo").exists() and ctor in example_text(e.name)]
         row = []
         for h in names:
             states = [known[(h, part)] for part in parts]

@@ -29,14 +29,14 @@ from pathlib import Path
 
 from fasthtml.common import (
     Button, Canvas, Dialog, Div, FastHTML, Form, H1, H2, H3, H4, Header, Hr, I, Img, Input, Label, Link, Main, Meta, NotStr,
-    Option, P, Progress, Response, Script, Select, Span, Style, Table, Tbody, Td, Textarea, Th, Thead, Title, Tr, UploadFile,
+    Iframe, Option, P, Progress, Response, Script, Select, Span, Style, Table, Tbody, Td, Textarea, Th, Thead, Title, Tr, UploadFile,
 )
 from PIL import Image
 
 # Mirrors mojoui/view.mojo and mojoui/diff.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
- DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE) = range(1, 36)
+ DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED) = range(1, 39)
 CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
@@ -63,6 +63,8 @@ body { font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; 
        background: light-dark(#f5f5f7, #1c1c1e); color: light-dark(#1d1d1f, #f5f5f7); }
 #mojoui-root { padding: 32px 20px; width: 100%; max-width: 560px; display: flex; justify-content: center; }
 .vstack { display: flex; flex-direction: column; align-items: center; }
+.vstack.drag { cursor: grab; } .vstack.drop.drop-over { outline: 2px solid currentColor; outline-offset: -2px; border-radius: 10px; }
+.embed { display: flex; align-self: stretch; } .embed iframe { flex: 1; width: 100%; height: 100%; border: 0; }
 .hstack { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; justify-content: center; }
 .spacer { flex: 1; }
 .text { margin: 0; text-align: center; }
@@ -295,6 +297,33 @@ MENU_JS = r"""
     }
   });
   document.addEventListener('htmx:afterSettle', copyAsked);
+  // Posts the page makes on its own (a route, the window's size, the colour scheme, a drop) each go in a lane of their
+  // own: htmx keeps one request per source element and drops all but the last one queued behind it, so a size posted
+  // beside a deep link's route (both on load) was lost when they shared document.body.
+  const lane = name => { let el = document.getElementById('mojoui-lane-' + name);
+    if (!el) { el = document.createElement('i'); el.id = 'mojoui-lane-' + name; el.hidden = true; document.body.append(el); } return el; };
+  // Two answers that each carry the whole screen (a route and a resize posted together on load, an event racing a
+  // poll) can arrive out of order: an older screen (a lower #mojoui-v) never replaces a newer one.
+  document.addEventListener('htmx:oobBeforeSwap', e => {
+    const d = e.detail;
+    if (!d || !d.target || d.target.id !== 'mojoui-root' || !d.fragment || !d.fragment.querySelector) return;
+    const incoming = d.fragment.querySelector('#mojoui-v'), shown = document.getElementById('mojoui-v');
+    if (incoming && shown && Number(incoming.value) < Number(shown.value)) d.shouldSwap = false;
+  });
+  // Draggable / DropTarget (DND_JS): the browser's drag and drop; a drop posts the payload as the target's on_drop
+  document.addEventListener('dragstart', e => { const d = e.target.closest && e.target.closest('[data-kind=drag]');
+    if (!d) return; e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData('text/plain', d.dataset.payload || ''); });
+  const dropAt = e => e.target.closest && e.target.closest('[data-kind=drop]');
+  document.addEventListener('dragover', e => { const t = dropAt(e);
+    document.querySelectorAll('.drop-over').forEach(x => { if (x !== t) x.classList.remove('drop-over'); });
+    if (t) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; t.classList.add('drop-over'); } });
+  document.addEventListener('dragleave', e => { const t = dropAt(e); if (t && !t.contains(e.relatedTarget)) t.classList.remove('drop-over'); });
+  document.addEventListener('drop', e => { const t = dropAt(e);
+    document.querySelectorAll('.drop-over').forEach(x => x.classList.remove('drop-over'));
+    if (!t) return; e.preventDefault();
+    const v = document.getElementById('mojoui-v');
+    htmx.ajax('POST', `/e/${t.dataset.sid}`, { values: { n: Number(t.dataset.node), text: e.dataTransfer.getData('text/plain'), v: v ? v.value : -1 }, swap: 'none', source: lane('drop') });
+  });
   // Scroll(pinned): stays at its end as its content grows, unless scrolled up to read (back at the end, it follows again)
   const pin = () => document.querySelectorAll('.scroll[data-pin="1"]').forEach(e => { if (e.dataset.follow !== '0') e.scrollTop = e.scrollHeight; });
   document.addEventListener('scroll', e => { const t = e.target;
@@ -312,7 +341,7 @@ MENU_JS = r"""
     if (!r || p === (r.dataset.route || '/') || p === routeAsked) return;
     routeAsked = p;
     const v = document.getElementById('mojoui-v');
-    htmx.ajax('POST', `/e/${r.dataset.sid}`, { values: { n: Number(r.dataset.node), text: p, v: v ? v.value : -1 }, swap: 'none', source: document.body });
+    htmx.ajax('POST', `/e/${r.dataset.sid}`, { values: { n: Number(r.dataset.node), text: p, v: v ? v.value : -1, route: 1 }, swap: 'none', source: lane('route') });
   };
   const writeRoute = () => {
     const r = routeEl();
@@ -338,14 +367,14 @@ MENU_JS = r"""
     const w = Math.round(innerWidth), h = Math.round(innerHeight);
     if (!root || !root.dataset.sid || sizeSent === w + 'x' + h) return;
     sizeSent = w + 'x' + h;
-    htmx.ajax('POST', `/resize/${root.dataset.sid}`, { values: { w, h }, swap: 'none', source: document.body });
+    htmx.ajax('POST', `/resize/${root.dataset.sid}`, { values: { w, h }, swap: 'none', source: lane('size') });
   };
   addEventListener('load', tellSize);
   // The browser's colour scheme (App.appearance): on load and when the person switches.
   const scheme = matchMedia('(prefers-color-scheme: dark)');
   const tellScheme = () => {
     const root = document.getElementById('mojoui-root');
-    if (root && root.dataset.sid) htmx.ajax('POST', `/appearance/${root.dataset.sid}`, { values: { dark: scheme.matches ? 1 : 0 }, swap: 'none', source: document.body });
+    if (root && root.dataset.sid) htmx.ajax('POST', `/appearance/${root.dataset.sid}`, { values: { dark: scheme.matches ? 1 : 0 }, swap: 'none', source: lane('scheme') });
   };
   addEventListener('load', tellScheme);
   scheme.addEventListener('change', tellScheme);
@@ -938,6 +967,17 @@ def render_node(s, i, sid):
                      data_selected=str(sel.count("1")))
     if kind == ROUTE:  # nothing on screen: the page keeps it in the URL's hash (ROUTE_JS)
         return Div(id=nid, data_kind="route", data_route=n["text"] or "/", data_node=str(i), data_sid=sid, hidden=True)
+    if kind == DRAG:  # the browser's own drag and drop: dragstart puts the payload on the drag (DND_JS)
+        return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack drag", id=nid, draggable="true", data_kind="drag",
+                   data_payload=n["text"], style="gap:0px")
+    if kind == DROP:  # dragover marks it, drop posts the payload as its on_drop (DND_JS)
+        return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack drop", id=nid, data_kind="drop", data_node=str(i),
+                   data_sid=sid, style="gap:0px")
+    if kind == EMBED:  # a web page in an iframe (version 0: the stand-in child)
+        if n["value"] <= 0:
+            return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", style="gap:0px")
+        return Div(Iframe(src=n["text"], title=n["text"], allow="clipboard-read; clipboard-write"), cls="embed", id=nid, data_kind="embed",
+                   data_url=n["text"], style=f"height:{n['size'] or 600}px")
     if kind == CLIPBOARD:  # nothing on screen: the page copies its text when its version moves on (CLIP_JS)
         return Div(id=nid, data_kind="clipboard", data_version=str(n["value"]), data_text=n["text"], hidden=True)
     if kind == TOAST:  # bottom centre; its action is msg, ✕ and its time running out are on_close
@@ -1293,7 +1333,7 @@ def make_app(module_dir):
 
     @app.post("/e/{sid}")
     def event(sid: str, n: int, v: int = -1, second: int = 0, text: str = "", number: int = 0, on: str = "",
-              x: float = 0, y: float = 0, dx: float = 0, dy: float = 0, zoom: float = 1):
+              x: float = 0, y: float = 0, dx: float = 0, dy: float = 0, zoom: float = 1, route: int = 0):
         if EVENT_DELAY:  # (checks only: a slow network, so keys typed meanwhile really wait for the answer)
             time.sleep(EVENT_DELAY)
         s = sessions.get(sid)
@@ -1302,6 +1342,15 @@ def make_app(module_dir):
         with s.lock:
             if s.closed:
                 return Main(P("This page expired: reload it.", cls="text caption"), id="mojoui-root", hx_swap_oob="true")
+            if route:  # a new hash (a link, Back): it names no control, so it goes to whichever Route the screen has now (an app whose
+                found = [i for i, node in enumerate(json.loads(mod.view(s.handle))) if node["kind"] == ROUTE]  # replies rebuilt the screen meanwhile still hears it)
+                if not found:
+                    return ""
+                d = json.loads(mod.event(s.handle, found[0], 0, text, 0))
+                if d.get("ignored"):
+                    return ""
+                s.nodes = json.loads(mod.view(s.handle))
+                return changes(s, sid, {"rebuild": True} if s.pending else d, found[0], text, 0)
             if s.pending and s.pending.get("rebuild"):  # a frame changed the screen; this event names old nodes
                 return changes(s, sid, s.pending)  # send the new screen instead of acting on the wrong control
             if v != s.shape or not 0 <= n < len(s.nodes):

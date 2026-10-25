@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
 from mojoui.view import (
-    CLIPBOARD, TABLE, ROUTE, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
+    CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
@@ -36,6 +36,10 @@ comptime VERTICAL = 1
 comptime ALIGN_CENTER = 3
 comptime RTLD_DEFAULT = 0  # glibc
 comptime NODE_KEY = "mojoui-node"
+comptime DRAG_KEY = "mojoui-drag-source"  # a Draggable's box → its GtkDragSource
+comptime DROP_KEY = "mojoui-drop-target"  # a DropTarget's box → its GtkDropTarget
+comptime G_TYPE_STRING = 64  # G_TYPE_MAKE_FUNDAMENTAL(16)
+comptime GDK_ACTION_COPY = 1
 
 
 # ---------- small C helpers ----------
@@ -484,6 +488,7 @@ struct GtkHost[A: App](Movable):
     var board_drags: List[Tuple[Int, Int]]  # (Board node, its drag gesture): a Board whose objects all change keeps it
     var revealed: Int  # the last Board reveal token scrolled to (Board's value)
     var clip_version: Int  # the Clipboard view's version last copied
+    var embed_version: Int  # the WebFrame's version last opened in the browser
     var paint_t0: Int  # the frame clock's before-paint time (ns), and every frame's paint phase since bench started (ms)
     var frame_paints: List[Float64]
     var frame_times: List[Int]  # when each frame was painted (ns): the intervals between them say whether frames were on time
@@ -582,6 +587,7 @@ struct GtkHost[A: App](Movable):
         self.revealed = 0
         self.reveal_pending = -1
         self.clip_version = 0
+        self.embed_version = 0
         self.key_draws = 0
         self.paint_t0 = 0
         self.frame_paints = List[Float64]()
@@ -1435,6 +1441,34 @@ struct GtkHost[A: App](Movable):
             self.board_scrollers.append((i, w))
             if node.value != 0 and node.value != self.revealed:
                 self.reveal_pending = i
+        elif node.kind == DRAG or node.kind == DROP or node.kind == EMBED:  # one child, in a box that drags, takes drops, or stands in for a page
+            w = external_call["gtk_box_new", Int](c_int(VERTICAL), c_int(0))
+            for c in node.children:
+                external_call["gtk_box_append", NoneType](w, self.build_child(i, c, self_addr))
+            if node.kind == DRAG:  # a GtkDragSource carrying the payload as a string (a local drop reads it straight)
+                var src = external_call["gtk_drag_source_new", Int]()
+                external_call["gtk_drag_source_set_actions", NoneType](src, c_int(GDK_ACTION_COPY))
+                var gv = List[Int](length=3, fill=0)  # (a GValue: its type, then two words)
+                _ = external_call["g_value_init", Int](Int(gv.unsafe_ptr()), Int(G_TYPE_STRING))
+                var payload = node.text
+                external_call["g_value_set_string", NoneType](Int(gv.unsafe_ptr()), payload.as_c_string_span())
+                var provider = external_call["gdk_content_provider_new_for_value", Int](Int(gv.unsafe_ptr()))
+                external_call["g_value_unset", NoneType](Int(gv.unsafe_ptr()))
+                _ = gv[0]  # (keeps the GValue's memory alive through the calls above: an address doesn't)
+                external_call["gtk_drag_source_set_content", NoneType](src, provider)
+                external_call["g_object_unref", NoneType](provider)
+                external_call["gtk_widget_add_controller", NoneType](w, src)
+                var key = String(DRAG_KEY)
+                external_call["g_object_set_data", NoneType](w, key.as_c_string_span(), src)
+            elif node.kind == DROP:  # a GtkDropTarget for strings: its drop sends the node's on_drop with the text
+                var target = external_call["gtk_drop_target_new", Int](Int(G_TYPE_STRING), c_int(GDK_ACTION_COPY))
+                set_node(target, i)
+                connect_any(target, "drop", on_drop[Self.A], self_addr)
+                external_call["gtk_widget_add_controller", NoneType](w, target)
+                var key = String(DROP_KEY)
+                external_call["g_object_set_data", NoneType](w, key.as_c_string_span(), target)
+            elif node.size > 0 and not node.sized_height():
+                external_call["gtk_widget_set_size_request", NoneType](w, c_int(-1), c_int(node.size))
         else:
             var orientation = VERTICAL if node.kind == VSTACK else HORIZONTAL
             w = external_call["gtk_box_new", Int](c_int(orientation), c_int(node.spacing))
@@ -1945,6 +1979,7 @@ struct GtkHost[A: App](Movable):
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.apply_design(self_addr)
         self.copy_if_asked()
+        self.open_if_asked()
         if d.rebuild and d.partial and self.partial_ok and not self.has_pending and len(self.widgets) > 0 and not busy():
             # Only the parts that changed, on the next idle turn (never inside a signal handler: a widget that goes
             # may be the one that sent the signal). Events wait until then.
@@ -2438,6 +2473,21 @@ struct GtkHost[A: App](Movable):
                 external_call["gdk_clipboard_set_text", NoneType](external_call["gdk_display_get_clipboard", Int](display), t.as_c_string_span())
                 self.clip_text = t
 
+    def open_if_asked(mut self):
+        """A WebFrame whose version moved on: its page opens in the browser (xdg-open, or the command in $MOJOUI_OPENER)."""
+        for ref n in self.rt.shown.nodes:
+            if n.kind == EMBED and n.value > 0 and n.value != self.embed_version:
+                self.embed_version = n.value
+                var opener = getenv("MOJOUI_OPENER")
+                if opener == "":
+                    opener = "xdg-open"
+                var url = n.hint if n.hint != "" else n.text
+                var quoted = external_call["g_shell_quote", Int](url.as_c_string_span())
+                var cmd = opener + " " + c_str(quoted)
+                external_call["g_free", NoneType](quoted)
+                if external_call["g_spawn_command_line_async", c_int](cmd.as_c_string_span(), Int(0)) == 0:
+                    print("mojoui: could not run " + cmd)
+
     def canvases_drawn(self) -> Bool:
         """Whether every canvas shows its current version at its current size."""
         for ref c in self.canvases:
@@ -2468,6 +2518,16 @@ struct GtkHost[A: App](Movable):
             self.echo_node = node
             self.echo_text = text
         self.apply(d, self_addr)
+
+
+def on_drop[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: Int) abi("C") -> c_int:
+    """A string let go over a DropTarget: its on_drop, with event.text = the string."""
+    var node = get_node(target)
+    if node < 0 or busy():
+        return 0
+    var text = c_str(external_call["g_value_get_string", Int](value))
+    host_at[A](host_addr)[].send(node, False, text, 0, host_addr)
+    return 1
 
 
 def host_at[A: App](addr: Int) -> Pointer[GtkHost[A], MutUntrackedOrigin]:
@@ -3437,6 +3497,32 @@ def run_step[A: App](host_addr: Int, step: String):
         var w = host[].widgets[i]
         var on = external_call["gtk_check_button_get_active", c_int](w)
         external_call["gtk_check_button_set_active", NoneType](w, c_int(1) - on)
+    elif verb == "dragto":  # dragto:SRC=DST: the Draggable tagged SRC's content (read from its GtkDragSource) dropped on the
+        var kv = split_at(rest, "=")  # DropTarget tagged DST through its GtkDropTarget's drop handler (a pointer drag can't be driven headless)
+        var si = -1
+        var di = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            ref n = host[].rt.shown.nodes[k]
+            if n.kind == DRAG and n.name == kv[0]:
+                si = k
+            if n.kind == DROP and n.name == kv[1]:
+                di = k
+        if si < 0 or di < 0:
+            print("TEST: no draggable", kv[0], "or drop target", kv[1])
+            return
+        var key = String(DRAG_KEY)
+        var src = external_call["g_object_get_data", Int](host[].widgets[si], key.as_c_string_span())
+        var dkey = String(DROP_KEY)
+        var target = external_call["g_object_get_data", Int](host[].widgets[di], dkey.as_c_string_span())
+        var gv = List[Int](length=3, fill=0)
+        _ = external_call["g_value_init", Int](Int(gv.unsafe_ptr()), Int(G_TYPE_STRING))
+        var provider = external_call["gtk_drag_source_get_content", Int](src)
+        if src == 0 or target == 0 or external_call["gdk_content_provider_get_value", c_int](provider, Int(gv.unsafe_ptr()), Int(0)) == 0:
+            print("TEST: the drag source holds no text")
+            return
+        _ = on_drop[A](target, Int(gv.unsafe_ptr()), 0, 0, host_addr)
+        external_call["g_value_unset", NoneType](Int(gv.unsafe_ptr()))
+        _ = gv[0]  # (keeps the GValue's memory alive through the calls above)
     elif verb == "toggle":
         var i = find(host[], TOGGLE, rest, 0)
         if i < 0:

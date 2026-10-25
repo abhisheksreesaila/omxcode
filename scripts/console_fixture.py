@@ -7,6 +7,13 @@ content type and any headers the console reads). Anything it can't answer is a 4
 
     pixi run python scripts/console_fixture.py [port]       # replay; open http://127.0.0.1:<port>/console
 
+Writes (goal 33 M5): the original's writes are answered as the daemon answers them (admin_api.py) and change what later
+reads return: POST /admin/labels/<label>/add|remove {"models": [...]}, POST /admin/labels {"name"}, PATCH and DELETE
+/admin/labels/<label>, PUT /admin/labels/order, POST /admin/learn/<name>/open (Jupyter's URLs on jupyter_port, which
+serves a small page at /lab/tree/ and /doc/tree/), POST /admin/models/<name>/load|stop. Every /admin request goes on
+`log` ({method, target, t: monotonic seconds, admin: its X-Mst-Admin}), every write on `writes` ({method, path, body:
+the JSON sent or None, headers}); override(key, body) changes a reply mid-run.
+
 Record mode (used by scripts/console_record.py): Fixtures(upstream="http://127.0.0.1:<daemon port>") forwards
 /admin/* to a real daemon instead and keeps the last reply per request; save() writes them as fixtures.
 """
@@ -17,7 +24,9 @@ import os
 import re
 import sys
 import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -53,6 +62,8 @@ class Fixtures:
     def __init__(self, folder=FIXTURES, upstream=None, host=None):
         self.folder, self.upstream, self.host = Path(folder), upstream, host  # host: the Host header sent upstream
         self.misses, self.lock = [], threading.Lock()
+        self.log, self.writes = [], []
+        self.jupyter_port = 0
         self.replies = {}  # key -> {"status", "type", "headers", "body": bytes}
         self.recorded_at = None
         if upstream is None:
@@ -61,16 +72,103 @@ class Fixtures:
             for key, r in manifest["replies"].items():
                 self.replies[key] = {**r, "body": (self.folder / r["file"]).read_bytes()}
 
+    def override(self, key, body, status=200, ctype="application/json"):
+        """A reply changed mid-run (a test's new number): later requests for `key` get `body`."""
+        with self.lock:
+            self.replies[key] = {"status": status, "type": ctype, "headers": {}, "body": body}
+
     def answer(self, method, target, headers, body):
         key = f"{method} {target}"
         if self.upstream:
             return self._forward(key, method, target, headers, body)
+        low = {k.lower(): v for k, v in headers.items()}
+        with self.lock:
+            self.log.append({"method": method, "target": target, "t": time.monotonic(), "admin": low.get("x-mst-admin")})
+        if method != "GET":
+            done = self._write(method, target, low, body)
+            if done is not None:
+                return done
         r = self.replies.get(key)
         if r is None:
             with self.lock:
                 self.misses.append(key)
             return 404, "text/plain", {}, b"not in the fixtures"
         return r["status"], r["type"], r.get("headers", {}), r["body"]
+
+    # -- writes, as the daemon answers them (admin_api.py), changing what later reads return ----------------------
+    def _json(self, key):
+        return json.loads(self.replies[key]["body"])
+
+    def _put(self, key, value):
+        self.replies[key] = {**self.replies[key], "body": (json.dumps(value, indent=1) + "\n").encode()}
+
+    def _relabel(self, fn):
+        """fn(models, labels) changes both lists in place; the labels' counts follow."""
+        models, labels = self._json("GET /admin/models"), self._json("GET /admin/labels")
+        fn(models, labels)
+        for i, l in enumerate(labels):
+            l["position"], l["count"] = i, sum(1 for m in models if l["name"] in m.get("labels", []))
+        self._put("GET /admin/models", models)
+        self._put("GET /admin/labels", labels)
+
+    def _write(self, method, target, headers, body):
+        path = target.split("?", 1)[0]
+        try:
+            sent = json.loads(body) if body else None
+        except ValueError:
+            sent = "not json"
+        with self.lock:
+            self.writes.append({"method": method, "path": path, "body": sent, "headers": headers})
+        ok = lambda v: (200, "application/json", {}, json.dumps(v).encode())
+        bad = lambda code, msg: (code, "application/json", {}, json.dumps({"error": {"message": msg, "code": "invalid_request_body"}}).encode())
+        m = re.fullmatch(r"/admin/labels/([^/]+)/(add|remove)", path)
+        if method == "POST" and m:
+            label, action = urllib.parse.unquote(m.group(1)), m.group(2)
+            names = (sent or {}).get("models") if isinstance(sent, dict) else None
+            if not isinstance(names, list):
+                return bad(400, "Send JSON with `models` (a list of model names).")
+            def fn(models, labels):
+                if action == "add" and label not in [l["name"] for l in labels]:
+                    labels.append({"name": label})
+                for x in models:
+                    have = x.setdefault("labels", [])
+                    if x["name"] in names:
+                        if action == "add" and label not in have:
+                            have.append(label)
+                        if action == "remove" and label in have:
+                            have.remove(label)
+            with self.lock:
+                self._relabel(fn)
+            return ok({"name": label, "models": names})
+        if method == "POST" and path == "/admin/labels":
+            name = (sent or {}).get("name") if isinstance(sent, dict) else None
+            with self.lock:
+                self._relabel(lambda models, labels: labels.append({"name": name}) if name not in [l["name"] for l in labels] else None)
+            return ok({"name": name})
+        m = re.fullmatch(r"/admin/labels/([^/]+)", path)
+        if m and method in ("PATCH", "DELETE") and m.group(1) != "order":
+            old, new = urllib.parse.unquote(m.group(1)), (sent or {}).get("name") if isinstance(sent, dict) else None
+            def fn(models, labels):
+                for x in models:
+                    x["labels"] = [new if l == old else l for l in x.get("labels", []) if method == "PATCH" or l != old]
+                labels[:] = [{"name": new} if l["name"] == old else l for l in labels if method == "PATCH" or l["name"] != old]
+            with self.lock:
+                self._relabel(fn)
+            return ok({"name": new if method == "PATCH" else old})
+        if method == "PUT" and path == "/admin/labels/order":
+            names = (sent or {}).get("names", [])
+            with self.lock:
+                self._relabel(lambda models, labels: labels.sort(key=lambda l: names.index(l["name"]) if l["name"] in names else 99))
+            return ok({"names": names})
+        m = re.fullmatch(r"/admin/learn/([^/]+)/open", path)
+        if method == "POST" and m:
+            name = urllib.parse.unquote(m.group(1))
+            nb = json.loads(self.replies.get(f"GET /admin/learn/{name}", {"body": b"{}"})["body"])
+            return ok({"name": name, "path": nb.get("path", ""), **jupyter_urls(name, self.jupyter_port)})
+        m = re.fullmatch(r"/admin/models/([^/]+)/(load|stop)", path)
+        if method == "POST" and m:
+            return ok({"name": urllib.parse.unquote(m.group(1)), "state": "starting" if m.group(2) == "load" else "cold"})
+        return None
 
     def _forward(self, key, method, target, headers, body):
         req = urllib.request.Request(self.upstream + target, data=body or None, method=method,
@@ -105,6 +203,12 @@ class Fixtures:
             (self.folder / name).write_bytes(body)
             manifest["replies"][key] = {"file": name, "status": r["status"], "type": r["type"], "headers": r["headers"]}
         (self.folder / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
+
+
+def jupyter_urls(name, port):
+    """What Run in Jupyter gets back: Jupyter's lab view and its single-notebook view (jupyter.embed_url), on this machine."""
+    url = f"http://127.0.0.1:{port}/lab/tree/{name}.ipynb?token=fixture"
+    return {"url": url, "embed_url": url.replace("/lab/tree/", "/doc/tree/", 1)}
 
 
 def static_file(path):
@@ -158,11 +262,31 @@ def make_handler(fx):
     return H
 
 
+class _Jupyter(BaseHTTPRequestHandler):
+    """A stand-in for Jupyter's notebook page (what Run in Jupyter frames or opens)."""
+    def do_GET(self):
+        data = b"<!doctype html><title>Jupyter</title><body style='font:14px sans-serif'>Jupyter (fixture): " + self.path.encode() + b"</body>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *a):
+        pass
+
+
 def serve(fx, port=0):
-    """Start the server on a thread; returns (server, base URL). server.shutdown() stops it."""
+    """Start the server on a thread; returns (server, base URL). server.shutdown() stops it (and the Jupyter stand-in)."""
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(fx))
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    jup = ThreadingHTTPServer(("127.0.0.1", 0), _Jupyter)
+    jup.daemon_threads = True
+    threading.Thread(target=jup.serve_forever, daemon=True).start()
+    fx.jupyter_port = jup.server_address[1]
+    stop = server.shutdown
+    server.shutdown = lambda: (stop(), jup.shutdown())
     return server, f"http://127.0.0.1:{server.server_address[1]}"
 
 

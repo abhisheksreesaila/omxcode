@@ -51,8 +51,10 @@ INIT = """
 """
 
 
-def shoot(base_url, out_dir, frozen_at=None, screens=SCREENS, sizes=SIZES, path="/console", settle_s=SETTLE_S):
-    """Shoot every screen at every size; returns {(screen, (w, h)): png path}. frozen_at: epoch seconds for Date."""
+def shoot(base_url, out_dir, frozen_at=None, screens=SCREENS, sizes=SIZES, path="/console", settle_s=SETTLE_S, wait_idle=True):
+    """Shoot every screen at every size; returns {(screen, (w, h)): png path}. frozen_at: epoch seconds for Date.
+    wait_idle: wait for no fetch in flight (the original's polls); False for a page that always keeps one open (ours:
+    the web host's /wait long-poll while the app has timers), which settles by time alone."""
     from playwright.sync_api import sync_playwright
 
     out_dir = Path(out_dir)
@@ -74,7 +76,8 @@ def shoot(base_url, out_dir, frozen_at=None, screens=SCREENS, sizes=SIZES, path=
                     page.goto(base_url + path + route, wait_until="load")
                     page.evaluate("document.fonts.ready.then(() => true)")
                     time.sleep(settle_s)
-                    page.wait_for_function("window.__inflight === 0", timeout=10000)
+                    if wait_idle:
+                        page.wait_for_function("window.__inflight === 0", timeout=10000)
                     page.evaluate("document.fonts.ready.then(() => true)")
                     png = out_dir / f"{name}-{w}x{h}.png"
                     page.screenshot(path=str(png), animations="disabled", caret="hide")

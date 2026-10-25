@@ -43,6 +43,10 @@ comptime TABLE = 34  # rows and columns that size to their content (web: a real 
 #   the body's, row by row; hint = one letter per column (L left, R right: figures, mono); text = one letter per body row (1: selected)
 comptime ROUTE = 35  # where the app is (a path, "/models/qwen/logs"): text; nothing on screen. The web keeps it in the URL's hash (read
 #   on load, written on change, Back and Forward) and sends msg (event.text = the new path); elsewhere it's state (mojoui.route)
+comptime DRAG = 36  # its one child can be dragged (mojoui.dragdrop.Draggable): text = what it carries (a model's name, a list as JSON)
+comptime DROP = 37  # its one child takes drops (mojoui.dragdrop.DropTarget): msg = on_drop, event.text = what was dropped
+comptime EMBED = 38  # a web page in the screen (mojoui.embed.WebFrame): text = its URL, value = a version (from 1), size = height;
+#   the web shows it in an iframe; GTK and the Mac open it in the browser when the version moves on and show the child instead
 comptime ITEM = 29  # a menu item: text = title, msg, hint = icon, options[0] = shortcut, value = flags (1 checked, 2 disabled, 4 danger); style 1 = separator, 2 = section label; children = a submenu
 
 # Canvas gestures (event.number)
@@ -68,6 +72,7 @@ comptime ICON_NAMES: List[String] = [
     "table", "pivot", "chart-bar", "note", "undo", "save", "open", "close", "sort", "filter-off", "row-plus", "row-minus",
     "view", "zoom", "category", "formula", "comment", "shape", "text", "organise", "format", "share", "import", "database", "sample", "grid", "sheet", "file", "export", "upload", "chevron",
     "bold", "italic", "underline", "strikethrough", "text-colour", "fill", "align-left", "align-center", "align-right", "currency", "percent", "decimals-less", "decimals-more", "clear-format", "rename", "settings", "chevron-right", "back", "copy",
+    "box", "gauge", "scroll-text", "book-open", "key-round", "route", "lock", "sliders-horizontal", "layout-grid", "list", "square", "rotate-cw", "trash-2", "terminal", "play", "pause", "x", "laptop", "external-link", "loader-circle", "download", "ellipsis", "zap", "cpu",
 ]
 
 # Text styles (each platform maps them to its own type scale)

@@ -14,6 +14,8 @@ from mojoui.look import css_color, surface_rule, px, fpx
 from themes.skins import skin_css, SKIN_WEB
 from mojoui.markdown import markdown_roles
 from mojoui.timeline import timeline_roles
+from mojoui.pagekit import page_roles, card_roles, more_roles, search_roles, small_roles
+from mojoui.beacon import beacon_roles
 
 # ---- tokens.css, the root (both modes) and the Developer family ----
 comptime FONT = "Geist"  # --oq-font
@@ -215,6 +217,13 @@ def omxqua_look(p: Palette) -> Look:
     surfaces += console_surfaces(p)
     surfaces += markdown_roles(p, FONT_MONO)  # (a notebook's markdown: blade-notebook.css's .nb-md)
     surfaces += timeline_roles(p, FONT_MONO)  # (Add a model's stages: blade-add.css's .stg)
+    surfaces += card_roles(p, FONT_MONO)
+    surfaces += more_roles(p, FONT_MONO)
+    surfaces += search_roles(p)
+    surfaces += small_roles(p, FONT_MONO)
+    surfaces.append(card(solid("bare-card", RADIUS_CARD, 0, 0, 0), p.card, dark))  # (mojoui.pagekit.BareCard: a card whose parts pad themselves)
+    surfaces += page_roles(p, FONT_MONO)  # (the console's pages: topbar.css, blades.css, library.css, model-page.css)
+    surfaces += beacon_roles(p, FONT_MONO, hx("#3ccf6e"))  # (the Beacon: components.css .beacon; --oq-beacon-accent)
     return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False),
                 Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12), surfaces^,
                 Segments(p.page, RADIUS_FULL, 3, p.line_strong, TARGET - 8, 14, RADIUS_FULL, 12.6, 500, p.ink2, surface_2(p), p.ink, 500, True),  # (.seg2)
@@ -313,6 +322,10 @@ def omxqua_web(p: Palette, look: Look, cls: String) -> String:
         + b + ".menu.open > .menu-title, " + b + ".menu-title:hover { background: " + hover + "; color: " + ink + "; }\n"
         + "@media (prefers-reduced-motion: reduce) { " + b + "*, " + b + "*::before, " + b + "*::after { transition-duration: 150ms !important; animation-duration: 150ms !important; } "
         + b + "button:active { transform: none; } }\n"        # the skeleton's shimmer (.skel: line-2 → line → line-2 sliding across in 1.6 s); still when motion is off
+        # mojoui.pagekit.SearchField: the field inside the tonal box loses its own chrome (library.css .psearch input)
+        + b + "[data-tag=search-box] input[type=text] { border: 0; background: transparent; box-shadow: none; height: 46px; padding: 0; font-size: 15px; font-weight: 500; }\n"
+        + b + "[data-tag=search-box] input[type=text]:focus { box-shadow: none; } " + b + "[data-tag=search-box] input::placeholder { color: " + hex_of(p.ink3) + "; }\n"
+        + b + "[data-tag=search-box] .field { flex: 1; }\n"
         + "@keyframes oq-skel { from { background-position: 100% 0; } to { background-position: -100% 0; } }\n"
         + b + "[data-tag=skeleton] { background-image: linear-gradient(90deg, " + line2 + ", " + line + ", " + line2 + "); background-size: 200% 100%; animation: oq-skel 1.6s linear infinite; }\n"
         + "@media (prefers-reduced-motion: reduce) { " + b + "[data-tag=skeleton] { animation: none; } }\n"
@@ -375,6 +388,7 @@ def omxqua_gtk(p: Palette, look: Look, cls: String) -> String:
         + w + "separator { background: " + line2 + "; }\n"
         + w + "popover > contents, " + w + "popover.menu > contents { background: " + s2 + "; color: " + ink + "; border-radius: 14px; box-shadow: " + sh3 + "; }\n"
         + "popover.mui-menu-popover button.mui-menu-item { border-radius: 8px; } popover.mui-menu-popover button.mui-menu-item:hover { background: " + hover + "; }\n"
+        + w + ".mui-tag-search-box entry { background: transparent; box-shadow: none; min-height: 46px; padding: 0; font-size: 15px; }\n"
         + "toast { background: " + s2 + "; color: " + ink + "; border-radius: 12px; font-family: '" + t.family + "', sans-serif; }\n"
         + "toast label, toast button { color: " + ink + "; }\n"        + "@keyframes mui-skel { from { background-position: 100% 0; } to { background-position: -100% 0; } }\n"
         + w + ".mui-tag-skeleton { background-image: linear-gradient(90deg, " + line2 + ", " + line + ", " + line2 + "); background-size: 200% 100%; animation: mui-skel 1.6s linear infinite; }\n"
