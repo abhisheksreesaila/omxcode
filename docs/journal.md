@@ -386,3 +386,13 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Nothing hand-edited. Seeded straight into the store (as a pull leaves them): the three models with sparse weights files (sizes, no disk), and a short max-serve log for qwen2.5-0.5b (fake_max prints nothing). The rest went through the daemon's API: labels, keys (one revoked), chat traffic, refused keys, a benchmark, the notebook, and a pull left at about 35 %.
 - Not a capture artefact: the original's benchmark bar draws solid black at 100 % (omxqua's `.prog` fill wins over the bar's `--mc`). M7 has to match it.
 - Two runs of the twenty shots came out byte-identical (noise floor 0.000 %). The time is frozen with Playwright's clock.set_fixed_time, a fresh context per shot, a seeded Math.random, and animations disabled at the shot. One run takes about 2.3 min; check M0 takes about 4.7 min.
+
+## 2026-10-25 · goal 33 M1 and M2: HTTP and timers as effects, JSON decimals
+- M1's and M2's proofs written first (scripts/check.py m1, m2; scripts/http_server.py is the test server). M1 checks the server's side too: it saw each request, the env header's value, the POST's content type.
+- The owner asked for a generic component (D-320): Transport trait, SocketTransport today, flare later; docs/http.md.
+- Dead end: `Pointer(to=x)` handed to C as an out-parameter (getsockopt's SO_ERROR, getaddrinfo's list, pthread_create's id). The compiler kept the old value: a refused connect read as success, then "broken pipe" on send. Fixed with a List buffer C writes into (as the GTK host's `handled`). Worth a line in CLAUDE.md's Mojo rules.
+- Dead end: declaring `__errno_location` and `strerror` ourselves clashes with the standard library's own declarations ("existing function with conflicting signature"). Use std.ffi's get_errno() and ErrNo.
+- GTK frames stopped while a request was out: the 4 ms effects timeout at the default priority outranks GTK's redraw (120), and the test's pause loop dispatches one priority level per turn. Polls for replies moved to G_PRIORITY_DEFAULT_IDLE; then ticks were 27 ms late, so timers alone run at the default priority (Runtime.timer_wake_in).
+- Web: the strip plays only while a reply is out, so the ticks reach the page through /wait, not alongside frames.
+- Mac: the stub gains the socket, poll, fcntl, getaddrinfo and two pthread calls; httpcheck builds and links. The AppKit host polls through performSelector:afterDelay:. Not run on a Mac (unverified).
+- JSON: Mojo's atof was one ulp off on 5 of 3,000 doubles; strtod_l in the C locale fixed it (D-325). The tool that writes my commands decodes printable \uXXXX escapes, so the corpus file is written with chr(92); check its bytes, not its look.

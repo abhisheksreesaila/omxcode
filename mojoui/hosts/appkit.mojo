@@ -25,6 +25,7 @@ from mojoui.icons_data import lucide_svg
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
 from mojoui.app import App, Event, Runtime
+from mojoui.clock import now_ns
 from mojoui.canvas import Surface
 from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, AppleCanvas
 from mojoui.hosts.mac_report import MacReport, MAX_SHOTS, pts
@@ -172,6 +173,7 @@ struct AppKitHost[A: App](Movable):
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
     var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
+    var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
     var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
     var ticks: Int  # ticks so far (the Mac report logs the first)
     var last_frame: Float64  # the link's last timestamp (seconds)
@@ -212,6 +214,7 @@ struct AppKitHost[A: App](Movable):
         self.focus = -1
         self.canvases = List[AppleCanvas]()
         self.link = 0
+        self.fx_due = -1
         self.resize_pending = False
         self.last_frame = 0
         self.ticks = 0
@@ -1369,7 +1372,20 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(board, "clearContents")
                 _ = msg(board, "setString:forType:", ns_string(n.text), ns_string("public.utf8-plain-text"))
 
+    def schedule_effects(mut self, self_addr: Int):
+        """One delayed call (effectsDue:) for when the runtime next has a reply or a tick to hand over (Runtime.wake_in);
+        an earlier need cancels a later one."""
+        var now = now_ns() // 1000
+        var w = self.rt.wake_in(now)
+        if w < 0 or (self.fx_due >= 0 and self.fx_due <= now + w):
+            return
+        if self.fx_due >= 0:
+            _ = msg(cls("NSObject"), "cancelPreviousPerformRequestsWithTarget:selector:object:", self.target, sel("effectsDue:"), ns_number(self_addr))
+        self.fx_due = now + w
+        _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("effectsDue:"), ns_number(self_addr), Float64(w) / 1e6)
+
     def apply(mut self, d: Diff, self_addr: Int):
+        self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.copy_if_asked()
         if d.rebuild or len(d.patches) > 0:
             self.queue_snapshot(self_addr)
@@ -2089,6 +2105,15 @@ def on_debug_open[A: App](target: Int, cmd: Int, item: Int) abi("C"):
     _ = msg(msg(cls("NSWorkspace"), "sharedWorkspace"), "openURL:", msg(cls("NSURL"), "fileURLWithPath:", ns_string(host[].report.dir)))
 
 
+def on_effects_due[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    """The runtime's effects are due: replies and ticks go to update(), the screen catches up, the next call is set."""
+    var addr = msg(number, "longLongValue")
+    var host = host_at[A](addr)
+    host[].fx_due = -1
+    var d = host[].rt.poll(now_ns() // 1000)
+    host[].apply(d, addr)
+
+
 def on_debug_queued[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     host_at[A](msg(number, "longLongValue"))[].snapshot()
 
@@ -2602,6 +2627,7 @@ def run[A: App]() -> c_int:
     add_method(c, "debugSnapshot:", on_debug_snapshot[A], "v@:@")
     add_method(c, "debugOpen:", on_debug_open[A], "v@:@")
     add_method(c, "debugQueued:", on_debug_queued[A], "v@:@")
+    add_method(c, "effectsDue:", on_effects_due[A], "v@:@")
     add_method(c, "testStep:", on_test_step[A], "v@:@")
     add_method(c, "windowDidResize:", on_window_resized[A], "v@:@")
     add_method(c, "windowResizeLater:", on_window_resize_later[A], "v@:@")
@@ -2661,6 +2687,7 @@ def run[A: App]() -> c_int:
     _ = msg(host[].window, "setIdentifier:", ns_string(String(addr)))  # (windowDidResize: finds the host by it)
     _ = host[].rt.resize(size[0], size[1])  # the app lays out to its window from the first screen (App.resize)
     host[].show(addr)
+    host[].schedule_effects(addr)  # (what the starting state asked for)
     _ = msg(host[].window, "center")
     _ = msg(host[].window, "makeKeyAndOrderFront:", 0)
     if forced != "":  # (a window larger than its screen was shrunk to fit: the runner's screen is 1024 pt wide)

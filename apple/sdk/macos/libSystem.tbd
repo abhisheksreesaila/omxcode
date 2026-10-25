@@ -4,5 +4,5 @@ targets:         [ arm64-macos ]
 install-name:    '/usr/lib/libSystem.B.dylib'
 exports:
   - targets:         [ arm64-macos ]
-    symbols:         [ _dlsym, _dup, _fclose, _fdopen, _fflush, _memcpy, _memmove, _memset, _bzero, _strlen, _write, _posix_memalign, _free, _sin, _cos, ___sincos_stret, _clock_gettime_nsec_np, ___error, _close, _getpid, _lseek, _lstat, _mkdir, _mmap, _munmap, _open, _read, _rename, _stat, _strerror, _unlink, _getenv, _log10, _sysconf, _memset_pattern16, _strtod, _strtod_l, _newlocale, _freelocale ]
+    symbols:         [ _dlsym, _dup, _fclose, _fdopen, _fflush, _memcpy, _memmove, _memset, _bzero, _strlen, _write, _posix_memalign, _free, _sin, _cos, ___sincos_stret, _clock_gettime_nsec_np, ___error, _close, _getpid, _lseek, _lstat, _mkdir, _mmap, _munmap, _open, _read, _rename, _stat, _strerror, _unlink, _getenv, _log10, _sysconf, _memset_pattern16, _strtod, _strtod_l, _newlocale, _freelocale, _socket, _connect, _send, _recv, _poll, _fcntl, _getsockopt, _setsockopt, _inet_pton, _getaddrinfo, _freeaddrinfo, _pthread_create, _pthread_detach ]
 ...

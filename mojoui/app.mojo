@@ -5,6 +5,8 @@ from mojoui.diff import Diff, diff
 from mojoui.canvas import Surface
 from mojoui.scene import Scene
 from mojoui.theme import Theme
+from mojoui.http import Request
+from mojoui.effects import Every, Timer, InFlight, start, Backend, POLL_US
 
 
 struct Event(Copyable, Movable):
@@ -16,6 +18,9 @@ struct Event(Copyable, Movable):
     Canvas gestures: `number` = PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE or KEY (`text` = the key); `x`, `y` = pointer position in the canvas
     (points from its top-left); PAN: `dx`, `dy` = movement in points; ZOOM: `zoom` = scale factor.
     Canvas frames: `number` = microseconds since the previous frame.
+    HTTP replies (mojoui.http): `message` = the request's msg, `id` = its id, `number` = the status (0: no reply),
+    `text` = the body, `error` = why there's no reply ("" when there is one, a 500 too).
+    Timers (App.every): `message` = the timer's msg, `number` = how many ticks so far (1, 2, …).
     """
 
     var message: Int
@@ -26,10 +31,13 @@ struct Event(Copyable, Movable):
     var dx: Float64
     var dy: Float64
     var zoom: Float64
+    var id: Int
+    var error: String
 
     def __init__(
         out self, message: Int, text: String, number: Int,
         x: Float64 = 0, y: Float64 = 0, dx: Float64 = 0, dy: Float64 = 0, zoom: Float64 = 1,
+        id: Int = 0, error: String = "",
     ):
         self.message = message
         self.text = text
@@ -39,9 +47,15 @@ struct Event(Copyable, Movable):
         self.dx = dx
         self.dy = dy
         self.zoom = zoom
+        self.id = id
+        self.error = error
 
 
 trait App(Movable, Deinitable):
+    comptime HTTP: Bool = False
+    """True: the app sends HTTP requests (requests()), so its build links the transport (mojoui.effects.Backend: libc
+    sockets and threads). Apps that don't keep their binaries free of both (the Apple stubs list no socket calls)."""
+
     def __init__(out self):
         """The starting state. Hosts create the app themselves."""
         ...
@@ -107,6 +121,16 @@ trait App(Movable, Deinitable):
         """The app's mark as SVG ("": none): hosts install it as the icon "app-logo" (Icon("app-logo", 18))."""
         return ""
 
+    def requests(mut self) -> List[Request]:
+        """The HTTP requests asked for since the runtime last looked (it looks after every update() and once at the
+        start): keep a mojoui.http.Http outbox and return its take(). Each reply comes back to update() as an Event."""
+        return List[Request]()
+
+    def every(self) -> List[Every]:
+        """The timers the app wants now: Every(ms, msg) sends a `msg` event every `ms` milliseconds (number = the tick's
+        count), from the first poll after it appears until the app stops listing it. Asked after every update()."""
+        return List[Every]()
+
     def theme(self) -> Theme:
         """How the app looks (mojoui.theme.Theme: CSS classes, a palette, a GTK and a web style sheet), built by a theme
         module outside the framework (this repo's themes/, or yours); hosts restyle whenever its key changes (a skin
@@ -127,14 +151,105 @@ struct Runtime[A: App](Movable):
     var app: Self.A
     var shown: View
     var trace: Bool  # MOJOUI_TRACE=1: hosts print each change's time and kind (TRACE: lines); the runtime keeps no clock (Android and iOS link no timing symbols here)
+    var inflight: List[InFlight]  # HTTP requests out on their workers
+    var undeliverable: List[Event]  # replies made without sending (an app with HTTP = False), handed over at the next poll
+    var timers: List[Timer]
 
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
         self.app = app^
         self.trace = False  # (hosts that can read the environment turn it on: GTK reads MOJOUI_TRACE; iOS has no getenv)
+        self.inflight = List[InFlight]()
+        self.undeliverable = List[Event]()
+        self.timers = List[Timer]()
+        self.take_effects()  # (what the starting state asks for)
+
+    def take_effects(mut self):
+        """The requests the last update asked for go out; the timers follow what the app lists now."""
+        var reqs = self.app.requests()
+        for i in range(len(reqs)):
+            comptime if Self.A.HTTP:
+                self.inflight.append(start[Backend](reqs[i].copy()))
+            else:
+                self.undeliverable.append(Event(reqs[i].msg, "", 0, id=reqs[i].id, error="this app doesn't send HTTP (set comptime HTTP = True in it)"))
+        var wanted = self.app.every()
+        var next = List[Timer]()
+        for w in wanted:
+            var kept = False
+            for t in self.timers:
+                if t.msg == w.msg and t.ms == w.ms:
+                    next.append(t.copy())
+                    kept = True
+                    break
+            if not kept:
+                next.append(Timer(w.ms, w.msg))
+        self.timers = next^
+
+    def busy(self) -> Bool:
+        """Requests are out or timers run: the host should keep polling (wake_in)."""
+        return len(self.inflight) > 0 or len(self.undeliverable) > 0 or len(self.timers) > 0
+
+    def wake_in(self, now_us: Int) -> Int:
+        """Microseconds until the host should poll() again; -1: nothing to wait for (until the next event)."""
+        var best = -1
+        if len(self.undeliverable) > 0:
+            return 0
+        if len(self.inflight) > 0:
+            best = POLL_US
+        for t in self.timers:
+            if t.start_us < 0:
+                return 0
+            var w = max(t.due_us() - now_us, 0)
+            best = w if best < 0 else min(best, w)
+        return best
+
+    def timer_wake_in(self, now_us: Int) -> Int:
+        """Like wake_in, for the timers alone (-1: none): hosts give a timer's poll a higher priority than the
+        few-ms polls for replies, which must yield to drawing."""
+        var best = -1
+        for t in self.timers:
+            var w = 0 if t.start_us < 0 else max(t.due_us() - now_us, 0)
+            best = w if best < 0 else min(best, w)
+        return best
+
+    def poll(mut self, now_us: Int) -> Diff:
+        """Hands finished requests and due timer ticks to update(), then returns what changed on screen. `now_us`: the
+        host's monotonic clock in microseconds (the same clock every call)."""
+        var changed = False
+        for ref t in self.timers:
+            if t.start_us < 0:
+                t.start_us = now_us
+        while len(self.undeliverable) > 0:
+            var e = self.undeliverable.pop(0)
+            self.app.update(e)
+            self.take_effects()
+            changed = True
+        var i = 0
+        while i < len(self.inflight):
+            if not self.inflight[i].ready():
+                i += 1
+                continue
+            var f = self.inflight.pop(i)
+            var r = f.response()
+            self.app.update(Event(f.msg, r.text(), r.status, id=f.id, error=r.error))
+            self.take_effects()
+            changed = True
+        var due = List[Tuple[Int, Int]]()  # (msg, count): ticks to deliver, decided before any update changes the list
+        for ref t in self.timers:
+            if t.start_us >= 0 and now_us >= t.due_us():
+                t.count = (now_us - t.start_us) // (t.ms * 1000)  # (a host that slept past several ticks: one event, the count jumps)
+                due.append((t.msg, t.count))
+        for d in due:
+            self.app.update(Event(d[0], "", d[1]))
+            self.take_effects()
+            changed = True
+        if not changed:
+            return Diff(False, [])
+        return self.refresh()
 
     def dispatch(mut self, event: Event) -> Diff:
         self.app.update(event)
+        self.take_effects()
         var next = self.app.view()
         var d = diff(self.shown, next)
         self.shown = next^

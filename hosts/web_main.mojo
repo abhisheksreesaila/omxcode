@@ -6,7 +6,7 @@ from std.python.bindings import PythonModuleBuilder
 
 from app import Main
 from mojoui.shared import shared_loads
-from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo
+from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in
 
 
 @export
@@ -32,6 +32,8 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[appearance]("appearance", docstring="The browser's colour scheme (1 dark, 0 light); returns what changed as JSON.")
         m.def_function[resize]("resize", docstring="The page's viewport (width, height in CSS pixels); returns what changed as JSON.")
         m.def_function[frame]("frame", docstring="A display frame for a canvas (node, microseconds); returns what changed as JSON.")
+        m.def_function[poll]("poll", docstring="The tab's due effects (HTTP replies, timer ticks) through update(); returns what changed as JSON.")
+        m.def_function[wake_in]("wake_in", docstring="Microseconds until poll() has something to do (-1: nothing until the next event).")
         return m.finalize()
     except e:
         abort(String("mojoui: couldn't create the Python module: ", e))
@@ -114,3 +116,11 @@ def theme_key(handle: PythonObject) raises -> PythonObject:
 def logo(handle: PythonObject) raises -> PythonObject:
     return PythonObject(web_logo[Main](Int(py=handle)))
 
+
+
+def poll(handle: PythonObject) raises -> PythonObject:
+    return PythonObject(web_poll[Main](Int(py=handle)))
+
+
+def wake_in(handle: PythonObject) raises -> PythonObject:
+    return PythonObject(web_wake_in[Main](Int(py=handle)))

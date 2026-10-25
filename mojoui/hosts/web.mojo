@@ -12,6 +12,7 @@ from mojoui.diff import Diff
 from mojoui.app import App, Event, Runtime
 from mojoui.canvas import Surface
 from mojoui.theme import Palette, hex_of
+from mojoui.clock import now_ns
 
 
 def json_str(s: String) -> String:
@@ -215,6 +216,19 @@ def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number
         event_text = n.options[number] if 0 <= number < len(n.options) else String("")
     var d = rt[].dispatch(Event(message, event_text, number))
     return diff_to_json(d, rt[].shown)
+
+
+def web_poll[A: App](handle: Int) -> String:
+    """The tab's effects (HTTP replies, timer ticks) that are due, through update(); what changed (web.py's clock
+    thread calls it when web_wake_in said so)."""
+    var rt = session_at[A](handle)
+    var d = rt[].poll(now_ns() // 1000)
+    return diff_to_json(d, rt[].shown)
+
+
+def web_wake_in[A: App](handle: Int) -> Int:
+    """Microseconds until web_poll has something to do (-1: nothing until the next event)."""
+    return session_at[A](handle)[].wake_in(now_ns() // 1000)
 
 
 def web_rows[A: App](handle: Int, node: Int, first: Int, count: Int) -> String:

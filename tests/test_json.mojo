@@ -20,7 +20,20 @@ def main() raises:
     assert_equal(j.number(j.get(0, "missing"), 7), 7)
     var back = Json.parse(json_string('tab\t quote" back\\ é \x01'))
     assert_equal(back.text(0), 'tab\t quote" back\\ é \x01')
-    for bad in ["", "{", '{"a" 1}', "[1,]", '"open', "1.5", "{} x", '{"a": tru}', '"\\udc00"', '"\\udbff\\uffff"', '"\\ud800"', '"\\ud800x"', '"\\ud800\\n"']:
+    # decimals, exponents and negatives (goal 33 M2): real() reads them; number() keeps its whole part
+    var d = Json.parse('[1.5, -2.25e2, 3E-1, 7, -0.0, 1e400]')
+    assert_equal(d.real(d.at(0, 0)), 1.5)
+    assert_equal(d.number(d.at(0, 0)), 1)
+    assert_false(d.is_whole(d.at(0, 0)))
+    assert_equal(d.real(d.at(0, 1)), -225.0)
+    assert_equal(d.number(d.at(0, 1)), -225)
+    assert_equal(d.real(d.at(0, 2)), 0.3)
+    assert_true(d.is_whole(d.at(0, 3)))
+    assert_equal(d.real(d.at(0, 3)), 7.0)
+    assert_equal(d.real(d.at(0, 4)), 0.0)
+    assert_equal(d.real(d.at(0, 5)), Float64.MAX * 10, "past the range: infinity, as Python's float()")
+    assert_equal(d.real(-1, 2.5), 2.5)
+    for bad in ["", "{", '{"a" 1}', "[1,]", '"open', "01", "1.", ".5", "1e", "1e+", "-", "--1", "+1", "99999999999999999999", "{} x", '{"a": tru}', '"\\udc00"', '"\\udbff\\uffff"', '"\\ud800"', '"\\ud800x"', '"\\ud800\\n"']:
         var failed = False
         try:
             _ = Json.parse(bad)

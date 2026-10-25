@@ -315,6 +315,31 @@ MENU_JS = r"""
 })();
 """
 
+EFFECTS_JS = r"""
+// Effects (goal 33): while the app has HTTP requests out or timers running (#mojoui-busy), the page waits on /wait for
+// the server's clock thread to hand their answers to update(), then fetches what changed (/pending), as frames do.
+(() => {
+  let running = false;
+  const busy = () => { const b = document.getElementById('mojoui-busy'); return !!b && b.dataset.busy === '1'; };
+  async function loop() {
+    if (running) return;
+    running = true;
+    try {
+      while (busy()) {
+        const root = document.getElementById('mojoui-root');
+        let said = '0';
+        try { said = await (await fetch(`/wait/${root.dataset.sid}`, { cache: 'no-store' })).text(); }
+        catch (e) { await new Promise(ok => setTimeout(ok, 500)); continue; }
+        if (said === 'gone') break;
+        if (said === '1') await htmx.ajax('POST', `/pending/${root.dataset.sid}`, { values: { v: document.getElementById('mojoui-v').value }, swap: 'none', source: root });
+      }
+    } finally { running = false; }
+  }
+  document.addEventListener('DOMContentLoaded', loop);
+  document.addEventListener('htmx:afterSettle', loop);
+})();
+"""
+
 BOARD_JS = r"""
 // mojoui Board adapter (fixed, part of the web host). Drag an object's header to move it, its
 // bottom-right corner to resize it; the app gets one event at the end (PAN = moved, ZOOM = resized,
@@ -653,6 +678,16 @@ class Session:
         self.list_top = {}  # LazyList node → last scroll position, to re-send its visible rows
         self.pending = None  # screen changes made while drawing canvases, not yet sent (a diff)
         self.frame_time = {}  # canvas node → time of its last frame event
+        self.busy = False  # the app has HTTP requests out or timers running (Runtime.wake_in ≥ 0): the page waits on /wait
+        self.busy_sent = False  # what the page was last told (#mojoui-busy)
+        self.waiters = set()  # (event loop, asyncio.Event) of the page's open /wait
+        self.waiters_lock = threading.Lock()
+
+    def wake(self):
+        """Tell the page's open /wait that changes are pending."""
+        with self.waiters_lock:
+            for loop, ev in list(self.waiters):
+                loop.call_soon_threadsafe(ev.set)
 
 
 ALIGN_CSS = {1: "flex-start", 2: "center", 3: "flex-end", 4: "stretch"}  # START, CENTER, END, STRETCH
@@ -975,13 +1010,69 @@ def make_app(module_dir):
     sessions = OrderedDict()  # sid → Session, oldest first
     sessions_lock = threading.Lock()
 
+    clock = threading.Condition()
+    due = {}  # sid → (monotonic time its effects are due, its Session)
+
+    def note(sid, s):
+        """After any call that ran update() (s.lock held): when this tab's effects (HTTP replies, timer ticks) are due
+        next (Runtime.wake_in), for the clock thread."""
+        if not hasattr(mod, "wake_in"):
+            return
+        w = mod.wake_in(s.handle)
+        s.busy = w >= 0
+        with clock:
+            if w < 0:
+                due.pop(sid, None)
+            else:
+                due[sid] = (time.monotonic() + w / 1e6, s)
+                clock.notify()
+
+    def tick():
+        """The clock thread: polls each tab's runtime when its effects are due; the changes wait in the session for the
+        page (its /wait returns, it asks /pending)."""
+        while True:
+            with clock:
+                while True:
+                    if not due:
+                        clock.wait()
+                        continue
+                    sid, (at, s) = min(due.items(), key=lambda kv: kv[1][0])
+                    delay = at - time.monotonic()
+                    if delay <= 0:
+                        del due[sid]
+                        break
+                    clock.wait(delay)
+            with s.lock:
+                if s.closed:
+                    continue
+                d = json.loads(mod.poll(s.handle))
+                if d.get("rebuild") or d.get("patches"):
+                    s.pending = merge(s.pending, d)
+                    s.nodes = json.loads(mod.view(s.handle))
+                note(sid, s)
+                if has_changes(s) or s.busy != s.busy_sent:
+                    s.wake()
+
+    if hasattr(mod, "poll"):
+        threading.Thread(target=tick, daemon=True, name="mojoui-effects").start()
+
+    def has_changes(s):
+        return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches")))
+
+    def busy_mark(s, oob=False):
+        s.busy_sent = s.busy
+        mark = I(id="mojoui-busy", hidden=True, data_busy="1" if s.busy else "0")
+        if oob:
+            mark.attrs["hx-swap-oob"] = "true"
+        return mark
+
     def root(s, sid, oob=False):
         version = Input(type="hidden", id="mojoui-v", name="v", value=str(s.shape))
         alerts = [i for i, n in enumerate(s.nodes) if n["kind"] == ALERT]
         # While an alert is up the page behind is inert (no clicks, no keyboard focus);
         # the alert lives in an overlay beside it.
         full = s.nodes[0]["grows"] or s.nodes[0]["fills"]  # the screen fills the window
-        page = Main(version, render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid)
+        page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid)
         layer = Div(*[render_alert(s, i, sid) for i in alerts], id="mojoui-overlay")
         if oob:
             page.attrs["hx-swap-oob"] = "true"
@@ -995,7 +1086,7 @@ def make_app(module_dir):
 
     @app.get("/static/mojoui-canvas.js")
     def canvas_js():
-        return Response(CANVAS_JS + "\n" + BOARD_JS + "\n" + MENU_JS, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+        return Response(CANVAS_JS + "\n" + BOARD_JS + "\n" + MENU_JS + "\n" + EFFECTS_JS, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
     @app.get("/static/fonts/{name}")
     def font(name: str):
@@ -1018,6 +1109,8 @@ def make_app(module_dir):
                     mod.close(old.handle)
                 import shutil  # (its uploads go with it)
                 shutil.rmtree(Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads"))) / old_sid, ignore_errors=True)
+        with s.lock:
+            note(sid, s)  # (what the starting state asked for)
         s.theme_key = mod.theme_key(s.handle)
         s.theme_id = None
         if hasattr(mod, "logo") and "app-logo" not in ICONS:
@@ -1080,6 +1173,14 @@ def make_app(module_dir):
     def changes(s, sid, d, n=-1, text="", number=0):
         """What to send the page after a change: the whole screen on a rebuild, else the changed
         controls (out-of-band swaps). Call with s.lock held, after s.nodes was refreshed."""
+        note(sid, s)
+        out = changes_of(s, sid, d, n, text, number)
+        if s.busy != s.busy_sent:  # (requests went out, or the last one came back: the page starts or stops waiting)
+            mark = busy_mark(s, oob=True)
+            out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (mark,)
+        return out
+
+    def changes_of(s, sid, d, n=-1, text="", number=0):
         if d["rebuild"]:
             s.pending = None  # the whole screen goes out: older pending patches name old nodes
             s.shape += 1
@@ -1249,6 +1350,7 @@ def make_app(module_dir):
                 sess.frame_time[n] = now
                 sess.pending = merge(sess.pending, json.loads(mod.frame(sess.handle, n, us)))
                 sess.nodes = json.loads(mod.view(sess.handle))
+                note(sid, sess)
                 if sess.pending.get("rebuild") or sess.nodes[n]["kind"] != CANVAS:
                     return Response(status_code=409, headers={"X-Mojoui-Pending": "1"})
             else:
@@ -1268,6 +1370,31 @@ def make_app(module_dir):
                         headers={"Cache-Control": "no-store", "X-Mojoui-Pending": "1" if pending else "0", "X-Mojoui-Again": "1" if r.get("again") else "0",
                                  "X-Mojoui-Draw-Ms": f"{(time.perf_counter() - now) * 1000:.2f}"})
 
+    @app.get("/wait/{sid}")
+    async def wait(sid: str):
+        """Returns "1" once changes made by the tab's effects are pending (or the page must start or stop waiting),
+        "0" after 20 s without any, "gone" for a closed tab. Async: an open wait holds no worker thread."""
+        import asyncio
+        s = sessions.get(sid)
+        if s is None or s.closed:
+            return "gone"
+        if has_changes(s) or s.busy != s.busy_sent:
+            return "1"
+        ev = asyncio.Event()
+        entry = (asyncio.get_running_loop(), ev)
+        with s.waiters_lock:
+            s.waiters.add(entry)
+        try:
+            if has_changes(s) or s.busy != s.busy_sent:  # (it came while we registered)
+                return "1"
+            await asyncio.wait_for(ev.wait(), 20)
+            return "1"
+        except asyncio.TimeoutError:
+            return "0"
+        finally:
+            with s.waiters_lock:
+                s.waiters.discard(entry)
+
     @app.post("/pending/{sid}")
     def pending(sid: str, v: int = -1):
         """Screen changes made while drawing canvases (e.g. a frame-time label)."""
@@ -1275,8 +1402,10 @@ def make_app(module_dir):
         if s is None:
             return ""
         with s.lock:
-            if s.closed or s.pending is None:
+            if s.closed:
                 return ""
+            if s.pending is None:  # (nothing changed, but the page may have to stop waiting)
+                return busy_mark(s, oob=True) if s.busy != s.busy_sent else ""
             d, s.pending = s.pending, None
             return changes(s, sid, d)
 

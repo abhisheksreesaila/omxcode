@@ -29,6 +29,8 @@ from std.math import log2
 from std.time import perf_counter_ns, sleep
 
 comptime G_APPLICATION_NON_UNIQUE = 32
+comptime G_PRIORITY_DEFAULT = 0
+comptime G_PRIORITY_DEFAULT_IDLE = 200
 comptime HORIZONTAL = 0
 comptime VERTICAL = 1
 comptime ALIGN_CENTER = 3
@@ -546,6 +548,8 @@ struct GtkHost[A: App](Movable):
     var editor_open: Bool  # the last build showed an in-place editor
     var picker_node: Int  # the FilePicker whose dialog is open
     var editor_node: Int  # (its node there)
+    var fx_source: Int  # the GLib timeout that next polls the runtime's effects (HTTP replies, timers; 0: none)
+    var fx_due: Int  # when it fires (µs, g_get_monotonic_time)
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -622,6 +626,26 @@ struct GtkHost[A: App](Movable):
         self.editor_open = False
         self.picker_node = -1
         self.editor_node = -1
+        self.fx_source = 0
+        self.fx_due = 0
+
+    def schedule_effects(mut self, self_addr: Int):
+        """Arms one GLib timeout for when the runtime next has something to hand over (a reply, a timer's tick):
+        Runtime.wake_in. An earlier need replaces a later timeout; nothing to wait for arms nothing."""
+        var now = Int(external_call["g_get_monotonic_time", Int64]())
+        var w = self.rt.wake_in(now)
+        if w < 0:
+            return
+        var due = now + w
+        if self.fx_source != 0:
+            if self.fx_due <= due:
+                return
+            _ = external_call["g_source_remove", c_int](c_uint(self.fx_source))
+        self.fx_due = due
+        # A timer's tick at the default priority (they're far apart, and late ticks are wrong ticks); the few-ms polls
+        # for replies below GTK's redraw (120), so they never starve the frames (D-323)
+        var prio = G_PRIORITY_DEFAULT if self.rt.timer_wake_in(now) == w else G_PRIORITY_DEFAULT_IDLE
+        self.fx_source = Int(external_call["g_timeout_add_full", c_uint](c_int(prio), c_uint((w + 999) // 1000), on_effects[Self.A], self_addr, Int(0)))
 
     def padding_class(mut self, v: Int, h: Int) -> String:
         """A CSS class giving `v`/`h` padding (GTK has no padding setter; CSS does it)."""
@@ -1845,7 +1869,8 @@ struct GtkHost[A: App](Movable):
             var slash = exe.rfind("/")
             dir = (String(exe[byte=:slash]) if slash > 0 else String(".")) + "/fonts"
         var config = external_call["FcConfigGetCurrent", Int]()
-        for name in ["Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf", "JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf"]:
+        for name in ["Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf", "JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf",
+                     "Geist-Variable.ttf", "GeistMono-Variable.ttf"]:  # (Geist: the omxqua theme, D-331)
             var path = dir + "/" + name
             if external_call["FcConfigAppFontAddFile", c_int](config, path.as_c_string_span()) != 0:
                 self.fonts = True
@@ -1893,6 +1918,7 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_window_set_icon_name", NoneType](self.window, icon.as_c_string_span())  # (the window's icon, where the desktop shows one)
 
     def apply(mut self, d: Diff, self_addr: Int):
+        self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.apply_design(self_addr)
         self.copy_if_asked()
         if d.rebuild and d.partial and self.partial_ok and not self.has_pending and len(self.widgets) > 0 and not busy():
@@ -2413,6 +2439,22 @@ def on_live_report[A: App](host_addr: Int) abi("C") -> c_int:
     report[A](host_addr)
     print("LIVE: reported", flush=True)
     return 1  # G_SOURCE_CONTINUE: again at the next signal
+
+
+def on_effects[A: App](host_addr: Int) abi("C") -> c_int:
+    """The runtime's effects are due: replies and ticks go to update(), the screen catches up, the next poll is armed."""
+    var host = host_at[A](host_addr)
+    host[].fx_source = 0
+    if busy():  # (a rebuild is on its way: hand them over just after it)
+        host[].fx_due = Int(external_call["g_get_monotonic_time", Int64]()) + 5000
+        host[].fx_source = Int(external_call["g_timeout_add_full", c_uint](c_int(G_PRIORITY_DEFAULT_IDLE), c_uint(5), on_effects[A], host_addr, Int(0)))
+        return 0
+    var t0 = perf_counter_ns()
+    var d = host[].rt.poll(Int(external_call["g_get_monotonic_time", Int64]()))
+    if len(d.patches) > 0 or d.rebuild:
+        host[].trace_diff("event effects", t0, d)
+    host[].apply(d, host_addr)  # (arms the next poll)
+    return 0  # G_SOURCE_REMOVE: each poll arms its own
 
 
 def on_idle_partial[A: App](host_addr: Int) abi("C") -> c_int:
@@ -4098,6 +4140,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     if getenv("MOJOUI_LIVE_REPORT") != "":  # (scripts/live.py: SIGUSR1 prints the widgets' state, as a test run's end does)
         _ = external_call["g_unix_signal_add", c_uint](c_int(10), on_live_report[A], host_addr)
     host[].show(host_addr)
+    host[].schedule_effects(host_addr)  # (what the starting state asked for)
     var steps = getenv("MOJOUI_TEST")
     var testing = is_set("MOJOUI_TEST")  # set, even to "": report the widgets' state
     var shot = getenv("MOJOUI_SHOT")

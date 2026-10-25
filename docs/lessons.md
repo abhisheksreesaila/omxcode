@@ -50,3 +50,5 @@ One line per rule that prevents a mistake that happened.
 - Test the Mac on GitHub's Macs before asking the owner: build, `scripts/mac-ci`, read the pictures; the owner gives the feel at the end.
 - An audit that finds nothing proves only what it read: list the folders it scanned in its output, and check one known hit before trusting a clean result (gpu_audit read MX frame's mojo/ and missed kernels_aot/, D-305).
 - When a setter seems to do nothing on a platform, dump the value it should have changed before trying another fix: AppKit kept the scroll bar style the system chose, and two "set it later" attempts were spent before the dump showed `bars 0`.
+- Never hand C a `Pointer(to=x)` as an out-parameter: the compiler may keep x's old value (a refused connect read as success). Give C a `List` buffer and read it back after the call, keeping the list alive (`_ = len(buf)`).
+- A GLib timeout that fires every few ms at the default priority starves GTK's redraw (priority 120): poll background work at G_PRIORITY_DEFAULT_IDLE.
