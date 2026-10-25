@@ -1506,6 +1506,8 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(self.size_w[p.node], "setConstant:", Float64(n.w - inset[0]))
             if n.h != self.sized[p.node][1]:
                 _ = msg(self.size_h[p.node], "setConstant:", Float64(n.h - inset[1]))
+            if p.node < len(self.objects) and self.objects[p.node] != 0:  # (a boxed object resized: its box too, as SET_PLACE does)
+                _ = msg(self.objects[p.node], "setFrame:", Float64(n.x), Float64(n.y), Float64(n.w), Float64(n.h))
             self.sized[p.node] = (n.w, n.h, n.min_w, n.max_w)
         return True
 

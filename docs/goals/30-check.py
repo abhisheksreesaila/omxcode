@@ -34,9 +34,10 @@ def m0():
     """The new engine everywhere: vendored from 23edc59; every example built for every platform it lists; a chart
     through a job equals the chart in place."""
     problems = []
-    stamp = (ROOT / "vendor/MXFRAME_COMMIT").read_text().split("\n")[0]
-    if "23edc59" not in stamp:
-        problems.append(f"vendor/MXFRAME_COMMIT says {stamp[:60]}")
+    from engine_lineage import vendored_at_least  # (D-269: 23edc59 or a later stable engine, proved from its archive)
+    why = vendored_at_least("23edc59")
+    if why:
+        problems.append(why)
     for ex in APPS:
         plats = (ROOT / "examples" / ex / "platforms").read_text().split() if (ROOT / "examples" / ex / "platforms").exists() else ["linux", "web", "mac", "ios"]
         for plat in plats:

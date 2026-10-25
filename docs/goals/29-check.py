@@ -34,9 +34,10 @@ APPS = ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "len
 def m0():
     """The new engine everywhere: vendored from 321870f; every example built for every platform it lists; FLOAT columns."""
     problems = []
-    stamp = (ROOT / "vendor/MXFRAME_COMMIT").read_text()
-    if "321870f" not in stamp.split("\n")[0]:
-        problems.append(f"vendor/MXFRAME_COMMIT says {stamp.split(chr(10))[0][:60]}")
+    from engine_lineage import vendored_at_least  # (D-269: 321870f or a later stable engine, proved from its archive)
+    why = vendored_at_least("321870f")
+    if why:
+        problems.append(why)
     for ex in APPS:
         plats = (ROOT / "examples" / ex / "platforms").read_text().split() if (ROOT / "examples" / ex / "platforms").exists() else ["linux", "web", "mac", "ios"]
         for plat in plats:
