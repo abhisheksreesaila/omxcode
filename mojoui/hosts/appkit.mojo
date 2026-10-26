@@ -221,6 +221,7 @@ struct AppKitHost[A: App](Movable):
     var size_h: List[Int]
     var sized: List[Tuple[Int, Int, Int, Int]]  # per node: the w, h, min_w, max_w it was built with
     var wraps: List[Int]  # a column's labels: they wrap to the width they're given (fit_wraps), as GTK's labels do
+    var wrap_keeps: List[Int]  # fit_wraps' "at least its room" constraints on labels that wrap (D-540)
     var wrap_buttons: List[Tuple[Int, Int, Float64, Float64, Float64]]  # role buttons whose words wrap when squeezed: (button, its height constraint, its line, its padding down, across), D-537
     var parents: List[Int]  # per node: its stack's node, or -1 (worked out once per build)
     var rebuilds: Int  # whole-window rebuilds since the last report snapshot (its log line says how many)
@@ -274,6 +275,7 @@ struct AppKitHost[A: App](Movable):
         self.size_h = List[Int]()
         self.wraps = List[Int]()
         self.wrap_buttons = List[Tuple[Int, Int, Float64, Float64, Float64]]()
+        self.wrap_keeps = List[Int]()
         self.parents = List[Int]()
         self.rebuilds = 0
         self.resized_in_place = 0
@@ -1382,11 +1384,17 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(w, "setCustomSpacing:afterView:", Float64(0), last)
                 var room = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", room)
-                if not vertical and not (node.fills or (i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].align_items == STRETCH)):
-                    # (a row nothing stretches has no free room: its room hugs at 251, over its column's 250 leading pins,
-                    # so the row is its views wide, as a web flex row in a shrink-to-fit place: filter chips 940 for 220, D-539)
+                if not vertical:  # (the room after a row's views is what's left once they have their own width, never
+                    # taken from them: none at 490, over what they prefer (480) and a role button's 470 resistance, under
+                    # a stretched row's required width, as CSS's free space after flex items: filter chips 940 for 220;
+                    # at 251 a wrapping chapter gave the room 12 pt, a dot's row took a label's, D-539)
                     var none = msg(msg(room, "widthAnchor"), "constraintEqualToConstant:", Float64(0))  # (a spacer has no size of its own to hug)
-                    _ = msg(none, "setPriority:", Float32(251))
+                    var depth = 0  # (a row inside a row keeps its room more firmly than the row around it, so the outer one
+                    var up = self.parents[i] if i < len(self.parents) else -1  # takes the room: two at one priority were a tie)
+                    while up >= 0 and depth < 13:
+                        depth += 1
+                        up = self.parents[up] if up < len(self.parents) else -1
+                    _ = msg(none, "setPriority:", Float32(485 + depth))
                     _ = msg(none, "setActive:", 1)
             hold_insets(w)
             if node.align_items == CENTER or node.align_items == 0:
@@ -1856,6 +1864,7 @@ struct AppKitHost[A: App](Movable):
         self.size_w = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.wraps = List[Int]()
         self.wrap_buttons = List[Tuple[Int, Int, Float64, Float64, Float64]]()
+        self.wrap_keeps = List[Int]()
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
         for k in range(len(self.rt.shown.nodes)):
             var kk = self.rt.shown.nodes[k].kind
@@ -2316,7 +2325,7 @@ struct AppKitHost[A: App](Movable):
                            Float64(d[2]), Float64(d[2]))
             _ = msg(d[1], "setPath:", msg(path, "CGPath"))
 
-    def fit_wraps(self):
+    def fit_wraps(mut self):
         """Each column label wraps at the width the layout gave it: an NSTextField only wraps at a width it's told, so
         lay out, tell each label its width, lay out again (a long inspector line ran past the panel, GitHub's Mac)."""
         if (len(self.wraps) == 0 and len(self.wrap_buttons) == 0) or self.window == 0:
@@ -2338,6 +2347,9 @@ struct AppKitHost[A: App](Movable):
         for l in self.wraps:
             if (msg(l, "isDescendantOf:", content) & 0xFF) != 0:
                 here.append(l)
+        for c in self.wrap_keeps:
+            _ = msg(c, "setActive:", 0)
+        self.wrap_keeps = List[Int]()
         for l in here:  # one line again, the width the layout allows now: 0 meant "the frame's width" to AppKit, and inside
             _ = msg(l, "setPreferredMaxLayoutWidth:", Float64(100000))  # a scroll view that frame started tiny, so the column shrank to 117 pt (the Report's inspector, 2026-10-24)
         _ = msg(content, "layoutSubtreeIfNeeded")
@@ -2347,6 +2359,12 @@ struct AppKitHost[A: App](Movable):
             var said = msg(l, "attributedStringValue")
             var line = msg[CGPoint](said, "size").x if said != 0 and msg(said, "length") > 0 else room
             _ = msg(l, "setPreferredMaxLayoutWidth:", min(room, Float64(Int(line + 0.999))))
+            if line > room + 1:  # (words that wrap keep the room they wrap in, CSS's min(max-content, room) = room; an
+                # NSTextField hugs its widest line, so a long list item stood 612 for the web's 646, D-540)
+                var keep = msg(msg(l, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", room)
+                _ = msg(keep, "setPriority:", Float32(252))
+                _ = msg(keep, "setActive:", 1)
+                self.wrap_keeps.append(keep)
         _ = msg(content, "layoutSubtreeIfNeeded")
 
     def resize_in_place(mut self, d: Diff) -> Bool:
