@@ -691,6 +691,7 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
             if node.kind == TEXT and node.name in self.breaks_words:  # (a long word breaks anywhere, as the web's overflow-wrap: anywhere)
                 external_call["gtk_label_set_wrap_mode", NoneType](w, c_int(2))  # PANGO_WRAP_WORD_CHAR
+                external_call["gtk_label_set_natural_wrap_mode", NoneType](w, c_int(0))  # (INHERIT: one-line naturals with char wrapping made boxes ask for more height than their natural)
                 external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
         if node.tip != "":
             var tip = node.tip
@@ -826,6 +827,74 @@ struct GtkHost[A: App](Movable):
         if self.page != 0:
             external_call["gtk_scrolled_window_set_policy", NoneType](self.page, c_int(2), c_int(2))  # NEVER, NEVER
 
+    def fit_shares(self, k: Int):
+        """A Grid with column shares (52, 48): each cell asks for its column's share of the grid's width, so the columns
+        add up to it exactly (GTK has no fractional columns; the web's are fr). After each layout, as fit_measures."""
+        var grid = self.widgets[k]
+        var total = Int(external_call["gtk_widget_get_width", c_int](grid))
+        if total <= 0:
+            return
+        ref n = self.rt.shown.nodes[k]
+        var cols = max(n.value, 1)
+        var shares = List[Int]()
+        var sum = 0
+        for c in range(cols):
+            var v = 1
+            if c < len(n.options):
+                try:
+                    v = max(Int(n.options[c]), 1)
+                except:
+                    v = 1
+            shares.append(v)
+            sum += v
+        var room = total - n.spacing * (cols - 1)
+        var used = 0
+        for c in range(cols):
+            var want = room - used if c == cols - 1 else room * shares[c] // sum
+            used += want
+            for r in range((len(n.children) + cols - 1) // cols):
+                var cell = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(r))
+                if cell == 0:
+                    continue
+                var have = List[c_int](length=2, fill=0)
+                external_call["gtk_widget_get_size_request", NoneType](cell, Int(have.unsafe_ptr()), Int(have.unsafe_ptr()) + 4)
+                if Int(have[0]) != want:
+                    external_call["gtk_widget_set_size_request", NoneType](cell, c_int(want), have[1])
+
+    def fit_measures(self):
+        """A paragraph whose role has a measure (Surface.max_chars) is at most that many "0"s of its font wide (measured
+        in the label's own font, CSS's ch), from its leading edge, as the web's max-width in ch: a trailing margin takes
+        what's left of its room (D-472; GTK's max-width-chars counts an average character and its natural width for
+        wrapped words balances the lines, so the layout never settled). Runs after each layout; a change asks for another."""
+        for k in range(min(len(self.kinds), len(self.widgets), len(self.rt.shown.nodes))):
+            if self.kinds[k] == GRID and self.widgets[k] != 0 and len(self.rt.shown.nodes[k].options) > 0:
+                self.fit_shares(k)
+                continue
+            if self.kinds[k] != PARAGRAPH or self.widgets[k] == 0 or not self.measured(self.rt.shown.nodes[k]):
+                continue
+            var label = self.widgets[k]
+            var width = Int(external_call["gtk_widget_get_width", c_int](label))
+            if width <= 0:
+                continue
+            var zero = String("0")
+            var layout = external_call["gtk_widget_create_pango_layout", Int](label, zero.as_c_string_span())  # ("0" in the label's own font: CSS's ch)
+            var size = List[c_int](length=2, fill=0)
+            external_call["pango_layout_get_pixel_size", NoneType](layout, Int(size.unsafe_ptr()), Int(size.unsafe_ptr()) + 4)
+            var ch = Float64(Int(size[0]))
+            var extents = List[c_int](length=8, fill=0)  # (sub-pixel: the ink and logical rects in Pango units)
+            external_call["pango_layout_get_extents", NoneType](layout, Int(0), Int(extents.unsafe_ptr()))
+            if Int(extents[2]) > 0:
+                ch = Float64(Int(extents[2])) / 1024.0
+            external_call["g_object_unref", NoneType](layout)
+            if ch <= 0:
+                continue
+            var chars = self.look.surfaces[self.look.surface(self.rt.shown.nodes[k].name)].max_chars
+            var most = Int(ch * Float64(chars) + 0.5)
+            var room = width + Int(external_call["gtk_widget_get_margin_end", c_int](label))
+            var margin = c_int(max(room - most, 0))
+            if external_call["gtk_widget_get_margin_end", c_int](label) != margin:
+                external_call["gtk_widget_set_margin_end", NoneType](label, margin)
+
     def fit_tables(self):
         """Each Table's columns share its width as a browser's automatic table layout does (the web's is a <table>):
         every column at least its widest cell's narrowest (min-content), then the room up to each one's widest
@@ -901,6 +970,11 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_label_set_xalign", NoneType](self.widgets[c], Float32(0))
         return child
 
+    def measured(self, node: Node) -> Bool:
+        """Whether the role a view wears gives it a measure (Surface.max_chars)."""
+        var k = self.look.surface(node.name) if node.name != "" else -1
+        return k >= 0 and self.look.surfaces[k].max_chars > 0
+
     def place_child(self, parent: Node, child_node: Node, child: Int):
         """Aligns a stack's child: the stack's align, then the child's own fill/grow."""
         var vertical = parent.kind == VSTACK or parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (one child, stacked down)
@@ -963,8 +1037,6 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
             add_class(w, "mui-paragraph")
             var role = self.look.surface(node.name) if node.name != "" else -1
-            if role >= 0 and self.look.surfaces[role].max_chars > 0:  # (the role's measure: GTK counts its font's average character)
-                external_call["gtk_label_set_max_width_chars", NoneType](w, c_int(self.look.surfaces[role].max_chars))
             set_node(w, i)
             connect_any(w, "activate-link", on_activate_link[Self.A], self_addr)
         elif node.kind == BUTTON:
@@ -1230,9 +1302,11 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_grid_new", Int]()
             external_call["gtk_grid_set_row_spacing", NoneType](w, c_uint(node.spacing))
             external_call["gtk_grid_set_column_spacing", NoneType](w, c_uint(node.spacing))
-            external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(0 if node.style == 1 else 1))  # (fitted: columns to their content; shares: equal, GTK has no column shares)
+            external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(0 if node.style == 1 or len(node.options) > 0 else 1))  # (fitted: columns to their content; shares: fit_measures() sizes them)
             for k in range(len(node.children)):
                 var child = self.build(node.children[k], self_addr)
+                if node.style == 1 and not (node.hint == "E" and k % node.value == node.value - 1):  # (fitted: each item from its column's start, as the web's justify-items: start)
+                    external_call["gtk_widget_set_halign", NoneType](child, c_int(1))
                 if node.hint == "E" and k % node.value == node.value - 1:  # (the last column's items at its trailing edge)
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(2))  # GTK_ALIGN_END
                 external_call["gtk_grid_attach", NoneType](w, child, c_int(k % node.value), c_int(k // node.value), c_int(1), c_int(1))
@@ -2856,6 +2930,7 @@ def on_idle_appearance[A: App](host_addr: Int) abi("C") -> c_int:
 def on_clock_layout[A: App](clock: Int, host_addr: Int) abi("C"):
     if not busy():
         host_at[A](host_addr)[].fit_tables()
+        host_at[A](host_addr)[].fit_measures()
 
 
 def on_surface_layout[A: App](surface: Int, width: c_int, height: c_int, host_addr: Int) abi("C"):
