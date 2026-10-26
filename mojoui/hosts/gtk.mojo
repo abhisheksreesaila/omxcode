@@ -958,7 +958,8 @@ struct GtkHost[A: App](Movable):
         elif parent.align_items == END:
             cross = 2  # GTK_ALIGN_END
         var wrapper = parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (its one view across it, as the web's align-items: stretch, D-494)
-        if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER or wrapper:
+        var spans = vertical and child_node.kind == SCROLL  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502)
+        if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER or wrapper or spans:
             cross = 0  # GTK_ALIGN_FILL
         # A spacer takes room only along its stack (else a Spacer in a toolbar makes the whole bar tall); a view
         # with a fixed size along the stack never takes spare room there (as on the other hosts).

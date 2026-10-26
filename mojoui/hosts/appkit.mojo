@@ -1169,7 +1169,8 @@ struct AppKitHost[A: App](Movable):
                 if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
                     hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
                 var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED  # (its one view across it: the web's align-items: stretch, D-494)
-                if cn.fills or node.align_items == STRETCH or wrapper:  # stretch across: match the stack minus its insets
+                var spans = vertical and cn.kind == SCROLL  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502)
+                if cn.fills or node.align_items == STRETCH or wrapper or spans:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(inset_x if vertical else inset_y)
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
