@@ -48,6 +48,7 @@
   .shots { display: grid; gap: 12px; }
   .shots.two { grid-template-columns: 1fr 1fr; }
   .shots.three { grid-template-columns: repeat(3, 1fr); }
+  .shots.phones { grid-template-columns: repeat(auto-fill, minmax(160px, 220px)); }
   figure { margin: 0; }
   figure img { width: 100%; display: block; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
   figcaption { font-size: 13px; color: var(--ink2); margin-top: 6px; }
@@ -107,7 +108,62 @@
 <main class="wrap">
 <section class="show">
 
-  <article class="card focal" data-kind="both">
+  <article class="card focal" data-kind="both" id="console">
+    <div class="head"><h2>OMX Console · a real app, rebuilt from framework parts</h2><span class="tag both">Both shine</span>
+      <span class="src"><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/console">examples/console/</a></span></div>
+    <div class="body">
+      <div class="shots">
+        <figure><img src="img/console-models-web.png" alt="The console's My models screen in a browser: a table of three models with their state, labels, size and speed" loading="lazy">
+          <figcaption>Web: My models. At least 99 % of its pixels equal the original JavaScript console's, on every one of its ten screens at desktop and phone size.</figcaption></figure>
+        <div class="shots two">
+          <figure><img src="img/console-models-gtk.png" alt="The same screen in a native Linux window" loading="lazy"><figcaption>Linux (GTK): the same screen, native widgets.</figcaption></figure>
+          <figure><img src="img/console-models-mac.png" alt="The same screen in a native Mac window" loading="lazy"><figcaption>Mac (AppKit): the same screen, shot on GitHub's macOS runner.</figcaption></figure>
+          <figure><img src="img/console-overview-gtk.png" alt="A model's overview on Linux: requests, speed, latency and memory tiles, a token chart, its details" loading="lazy"><figcaption>Linux: a model's overview, numbers following the daemon's poll.</figcaption></figure>
+          <figure><img src="img/console-overview-mac.png" alt="The same overview on the Mac" loading="lazy"><figcaption>Mac: the same overview.</figcaption></figure>
+        </div>
+        <div class="shots phones">
+          <figure><img src="img/console-overview-web-phone.png" alt="The overview in a phone-size browser" loading="lazy"><figcaption>Web at phone size (390 × 844).</figcaption></figure>
+          <figure><img src="img/console-keys-web-phone.png" alt="The Keys screen in a phone-size browser" loading="lazy"><figcaption>Keys at phone size: create, rotate, revoke by tapping twice.</figcaption></figure>
+        </div>
+      </div>
+      <div class="why">
+        <div class="nums">
+          <div><b>10 screens</b><span>models, a model's four tabs, add a model, keys, gateway, security, settings</span></div>
+          <div><b>≥ 99 %</b><span>of the web's pixels equal the original's, all 20 shots</span></div>
+          <div><b>0 boxes</b><span>off on Linux (of 1,425) and the Mac (of 1,268) against the web</span></div>
+        </div>
+        <h3>What it is</h3>
+        <p>The OMX Console, the admin page of a local model server, was 4,400 lines of JavaScript and 870 of CSS. It is rebuilt here in omxcode from framework components only (Table, CodeBlock, LogView, Timeline, Breadcrumbs, Chip, Confirm, Skeleton, Markdown, Sparkline, Route) and the omxqua theme: no app CSS, no pixel nudges. It talks to the same daemon over the framework's own HTTP client.</p>
+        <h3>Where each side shines</h3>
+        <div class="split">
+          <div class="n"><b>Native</b>Linux and the Mac draw it with their own controls; held to the web's boxes, not its pixels.</div>
+          <div class="w"><b>Web</b>The same file in a browser, near pixel-equal to the original, deep links included.</div>
+        </div>
+        <p>Checked by <code>scripts/check.py</code> (goal 33, M7) against recorded daemon replies; the Mac is built here and run on GitHub's virtual Macs, not yet on hardware.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-kind="both" id="omxplorer">
+    <div class="head"><h2>omxplorer · a data explorer</h2><span class="tag both">Both shine</span>
+      <span class="src"><a href="../omxplorer.html">its page</a> · <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/examples/omxplorer/app.mojo">examples/omxplorer/app.mojo</a></span></div>
+    <div class="body">
+      <div class="shots">
+        <figure><img src="img/omxplorer-sheet-gtk.png" alt="omxplorer on Linux: a million-row orders table, the toolbar, the status bar" loading="lazy">
+          <figcaption>Linux: a million-row table in the Liquid light look.</figcaption></figure>
+        <div class="shots two">
+          <figure><img src="img/omxplorer-sheet-web.png" alt="The same in a browser" loading="lazy"><figcaption>The same file in the browser.</figcaption></figure>
+          <figure><img src="img/omxplorer-sheet-mac.png" alt="The same on the Mac" loading="lazy"><figcaption>Mac (AppKit), on GitHub's macOS runner.</figcaption></figure>
+        </div>
+      </div>
+      <div class="why">
+        <h3>What it is</h3>
+        <p>The data explorer the framework is pushed by: tables, charts you edit by their sentence, pivots and a report, with queries as background jobs on the GPU or the CPU so the window never waits. More on <a href="../omxplorer.html">omxplorer's page</a>.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="card" data-kind="both">
     <div class="head"><h2>The Workbook · tables, pivots, charts, notes on one page</h2><span class="tag both">Both shine</span>
       <span class="src"><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/examples/workbook/app.mojo">examples/workbook/app.mojo</a></span></div>
     <div class="body">
