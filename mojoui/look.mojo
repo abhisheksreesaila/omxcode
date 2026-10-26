@@ -269,8 +269,12 @@ def look_web_css(look: Look, scope: String) -> String:
                     + scope + "[data-tag=" + s.role + "] > * + * { margin-left: " + px(max(s.gap, 0)) + "; }\n")
         if s.items_shrink:  # (what it holds gives way with it: a chip keeps its border, its words cut, as .kchip)
             out += scope + "[data-tag=" + s.role + "] > * { min-width: 0; flex-shrink: 1; overflow: hidden; }\n"
-        if s.one_line:  # (its words cut with an ellipsis when squeezed, as GTK and the Mac cut them; a button wearing it keeps its width)
+        if s.one_line and not s.whole_width:  # (its words cut with an ellipsis when squeezed, as GTK and the Mac cut them; a button wearing it keeps its width.
+            # A whole-width role is never squeezed: its width is its content's, rounded to a whole pixel, and the fraction
+            # rounded away spills uncut, as the original's nowrap pill: an ellipsis there cut its title for 0.4 px, D-520)
             out += scope + "[data-tag=" + s.role + "] .text, " + scope + ".text[data-tag=" + s.role + "] { overflow: hidden; text-overflow: ellipsis; min-width: 0; }\n"
+        elif s.one_line:  # (a whole-width role's words: they give way by the rounding's fraction where they stand, drawn uncut past it)
+            out += scope + "[data-tag=" + s.role + "] .text, " + scope + ".text[data-tag=" + s.role + "] { min-width: 0; }\n"
         if s.scrolls_x:  # (a row that scrolls sideways: its items keep their own width)
             out += scope + ":where([data-tag=" + s.role + "]) > * { flex-shrink: 0; }\n"  # (weakly: an item that shrinks says so)
         var t = text_rule(s, True)
