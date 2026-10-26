@@ -1119,8 +1119,14 @@ struct AppKitHost[A: App](Movable):
                 if anchor == "widthAnchor":  # (content the app made wider is cut off at the edge: it never widens the window)
                     _ = msg(pin, "setPriority:", Float32(495))  # below NSLayoutPriorityWindowSizeStayPut (500), above a wrapping label (490)
                 _ = msg(pin, "setActive:", 1)
-            if not node.sized_height():
+            if not node.sized_height() and node.size > 0:
                 constrain(w, "heightAnchor", Float64(node.size))
+            elif not node.sized_height():  # height 0, not growing down: as tall as its content, as the web's .scroll with no
+                # max-height (a required 0 collapsed the notebook's document layout to nothing: run 40299704650, D-508);
+                # above a column's 750 hugging, below what the window holds
+                var tall = msg(msg(w, "heightAnchor"), "constraintEqualToAnchor:", msg(doc, "heightAnchor"))
+                _ = msg(tall, "setPriority:", Float32(751))
+                _ = msg(tall, "setActive:", 1)
             if not sized:  # (the app sized it: its settings decide)
                 prefer(w, "widthAnchor", Float64(320))
             if node.value == 1:
@@ -2355,7 +2361,18 @@ def hug(view: Int, priority: Float32, vertical: Bool):
     var orientation = 1 if vertical else 0
     _ = msg(view, "setContentHuggingPriority:forOrientation:", priority, orientation)
     if msg[Int8](view, "respondsToSelector:", sel("setHuggingPriority:forOrientation:")) != 0:
-        _ = msg(view, "setHuggingPriority:forOrientation:", priority, orientation)
+        if Int(msg(view, "orientation")) == orientation:  # along its own axis: it hugs its first and last views
+            _ = msg(view, "setHuggingPriority:forOrientation:", priority, orientation)
+        else:
+            # across its axis a stack's hugging pins every view's two edges to its own (NSStackView.Edge.Min, at that
+            # priority): above a view's own resistance it stands each view as tall as the tallest (the console's app bar
+            # at 750 stood brand, crumbs and the beacon slot 60 high: run 40299704650's constraint dump). So across, it
+            # pulls at most 250 and keeps its own size by a weak shrink-to-fit instead, just above that pull (D-507)
+            _ = msg(view, "setHuggingPriority:forOrientation:", min(priority, Float32(250)), orientation)
+            if priority > Float32(250):
+                var fit = msg(msg(view, "heightAnchor" if vertical else "widthAnchor"), "constraintEqualToConstant:", Float64(0))
+                _ = msg(fit, "setPriority:", Float32(251))
+                _ = msg(fit, "setActive:", 1)
 
 
 def flexible_spacer(vertical: Bool) -> Int:
