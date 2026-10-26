@@ -1025,8 +1025,23 @@ struct AppKitHost[A: App](Movable):
                 var sk = self.look.surface(role)
                 if r > 0 and r - 1 < node.text.byte_length() and String(node.text[byte = r - 1]) == "1" and self.look.surface("table-selected") >= 0:
                     sk = self.look.surface("table-selected")
+                # a dense table's cells wear the dense roles over it, as the web's: their padding and rules (on a phone the
+                # compact ones; a snug column's cells table-dense-snug); their words on one line, cut, but in a column that
+                # wraps ("W") (D-493)
+                var lim = node.options[col] if col < len(node.options) else String("")
+                var dense = node.style == 1 or node.style == 2
+                var over = -1
+                if dense:
+                    var compact = node.style == 2
+                    var snug = r > 0 and not lim.startswith("T") and lim.endswith("S")
+                    var name = ("table-dense-compact-" if compact else "table-dense-") + ("head" if r == 0 else ("snug" if snug else "cell"))
+                    over = self.look.surface(name)
+                    if over < 0:
+                        over = self.look.surface("table-dense-head" if r == 0 else ("table-dense-snug" if snug else "table-dense-cell"))
+                    if lim != "W":
+                        self.one_line_words(c)
                 if sk >= 0:
-                    self.paint_surface(cell, sk, True)
+                    self.paint_surface(cell, sk, True, over)
                 else:
                     _ = msg(cell, "setEdgeInsets:", Float64(9), Float64(16), Float64(9), Float64(16))
                 if ck == TEXT and (msg(child, "isKindOfClass:", cls("NSTextField")) & 0xFF) != 0:
@@ -1094,8 +1109,8 @@ struct AppKitHost[A: App](Movable):
                 if node.pad_v == 0 and node.pad_h == 0:
                     _ = msg(w, "setEdgeInsets:", Float64(12), Float64(14), Float64(12), Float64(14))
             var look_at = self.look.surface(node.name) if node.name != "" and i != self.boxed else -1  # (a boxed Board child: its box wears it)
-            var inset_x = node.pad_h  # (what a filling child leaves on each side: the view's padding, or its role's)
-            var inset_y = node.pad_v
+            var inset_x = 2 * node.pad_h  # (what a filling child leaves across, both sides together: the view's padding, or its role's)
+            var inset_y = 2 * node.pad_v
             if look_at >= 0:  # a framework role the theme's look shapes (the toolbar's island, the inspector's panel)
                 var own_pad = node.pad_v == 0 and node.pad_h == 0
                 self.paint_surface(w, look_at, own_pad)
@@ -1103,8 +1118,9 @@ struct AppKitHost[A: App](Movable):
                     var r = max(self.look.surfaces[look_at].radius_top, self.look.surfaces[look_at].radius_bottom)
                     _ = msg(msg(w, "layer"), "setCornerRadius:", min(Float64(r), Float64(min(node.w, node.h)) / 2))
                 if own_pad and self.look.surfaces[look_at].pad_top >= 0:
-                    inset_x = self.look.surfaces[look_at].pad_x
-                    inset_y = (self.look.surfaces[look_at].pad_top + self.look.surfaces[look_at].pad_bottom) // 2
+                    ref ps = self.look.surfaces[look_at]
+                    inset_x = (ps.pad_left if ps.pad_left >= 0 else ps.pad_x) + (ps.pad_right if ps.pad_right >= 0 else ps.pad_x)
+                    inset_y = ps.pad_top + ps.pad_bottom
             elif self.skinned and (node.name == "toolbar" or node.name == "status-bar" or node.name == "menubar"):  # the chrome band
                 _ = msg(w, "setWantsLayer:", 1)
                 _ = msg(msg(w, "layer"), "setBackgroundColor:", msg(ns_color(self.pal.chrome), "CGColor"))
@@ -1152,9 +1168,10 @@ struct AppKitHost[A: App](Movable):
                     hug(child, Float32(750), vertical)
                 if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
                     hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
-                if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
+                var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED  # (its one view across it: the web's align-items: stretch, D-494)
+                if cn.fills or node.align_items == STRETCH or wrapper:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
-                    var inset = Float64(2 * (inset_x if vertical else inset_y))
+                    var inset = Float64(inset_x if vertical else inset_y)
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
                     if vertical and cn.max_w != 0:  # (up to its widest, centred: the web's max-width with auto margins, GTK's clamp)
                         _ = msg(c2, "setPriority:", Float32(495))
@@ -1306,7 +1323,13 @@ struct AppKitHost[A: App](Movable):
         var fit = msg[CGPoint](w, "fittingSize")
         if k >= 0:  # (a role's button: its words, an icon and the web's 6 pt gap, the role's padding, as CSS measures it; a bare cell adds its own 6)
             var words = msg[CGPoint](said, "size")
-            fit.x = Float64(Int(words.x + 0.999)) + (Float64(c.glyph if c.glyph > 0 else 16) + 6 if msg(w, "image") != 0 else 0)
+            var glyph = self.look.surfaces[k].icon_size if self.look.surfaces[k].icon_size > 0 else (c.glyph if c.glyph > 0 else 16)
+            fit.x = Float64(Int(words.x + 0.999)) + (Float64(glyph) + 6 if msg(w, "image") != 0 else 0)
+            ref hs = self.look.surfaces[k]
+            if hs.height == -2 and (i < 0 or self.rt.shown.nodes[i].h == 0):  # HEIGHT_AUTO: its line and its padding, no control height (the web's
+                # height: auto; min-height: 0: a sidebar row's name, a link in a table's cell, D-498)
+                var line = Float64(hs.line_height) if hs.line_height > 0 else (size * self.look.type.line if hs.line_height == 0 and self.look.type.line > 0 else words.y)
+                high = Int(line + 0.5) + max(hs.pad_top, 0) + max(hs.pad_bottom, 0)
         # its title's width is the least it takes and the width it prefers, not a fixed one: a filling button (an
         # inspector row's title) stretches, as on GTK and the web; held to its fit, it held the Report inspector's
         # column to 117 pt through the rows' equal widths (Mac, 2026-10-24)
@@ -1322,12 +1345,19 @@ struct AppKitHost[A: App](Movable):
             return (0, 0)
         return (2 * self.look.surfaces[k].pad_x, self.look.surfaces[k].pad_top + self.look.surfaces[k].pad_bottom)
 
-    def paint_surface(mut self, w: Int, k: Int, pad: Bool):
+    def paint_surface(mut self, w: Int, k: Int, pad: Bool, pad_from: Int = -1):
         """A look's surface on a stack's layer (mojoui/look.mojo; GTK and the web write the same values as CSS): its fill,
         corners (top and bottom apart), its rim as the layer's border, its widest shadow as the layer's shadow (a layer
         has one), hairlines along its edges, its padding unless the component set its own (as on the web, where the
         view's own padding wins over the sheet's)."""
         var sf = self.look.surfaces[k].copy()
+        if pad_from >= 0:  # (its padding and hairlines from another role worn over it: a dense table's cells, D-493)
+            ref o = self.look.surfaces[pad_from]
+            sf.pad_top, sf.pad_bottom, sf.pad_x, sf.pad_left, sf.pad_right = o.pad_top, o.pad_bottom, o.pad_x, o.pad_left, o.pad_right
+            if o.line_bottom != 0:
+                sf.line_bottom = o.line_bottom
+            if o.line_top != 0:
+                sf.line_top = o.line_top
         _ = msg(w, "setWantsLayer:", 1)
         var layer = msg(w, "layer")
         _ = msg(layer, "setBackgroundColor:", msg(ns_rgba(sf.fill) if sf.fill != 0 else msg(cls("NSColor"), "clearColor"), "CGColor"))
@@ -1382,8 +1412,9 @@ struct AppKitHost[A: App](Movable):
             _ = msg(shape, "setLineDashPattern:", pattern)
             _ = msg(layer, "addSublayer:", shape)
             self.dashes.append((w, shape, max(sf.radius_top, 0), sf.outline_w))
-        if pad and sf.pad_top >= 0:
-            _ = msg(w, "setEdgeInsets:", Float64(sf.pad_top), Float64(sf.pad_x), Float64(sf.pad_bottom), Float64(sf.pad_x))
+        if pad and sf.pad_top >= 0:  # (leading and trailing apart when the role says so: the page frame's 2 | 14, D-499)
+            _ = msg(w, "setEdgeInsets:", Float64(sf.pad_top), Float64(sf.pad_left if sf.pad_left >= 0 else sf.pad_x), Float64(sf.pad_bottom),
+                    Float64(sf.pad_right if sf.pad_right >= 0 else sf.pad_x))
         if sf.min_height > 0:
             _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(sf.min_height)), "setActive:", 1)
 
@@ -1445,6 +1476,9 @@ struct AppKitHost[A: App](Movable):
             var ch = msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h - inset[1]))
             if is_stack and len(node.children) > 0:  # (a stack given a height holds it unless its content needs more: GTK's minimum; squeezed, its words went to 0 pt)
                 _ = msg(ch, "setPriority:", Float32(745))
+                # at least that, required (GTK's size request): at 745 alone the stack around it hugged it smaller (its
+                # hugging is 750: the console's 60 pt app bar stood 46 high, run 40286965370, D-500)
+                _ = msg(msg(msg(outer, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(node.h - inset[1])), "setActive:", 1)
             _ = msg(ch, "setActive:", 1)
             if i < len(self.size_h):
                 self.size_h[i] = ch
@@ -1741,6 +1775,23 @@ struct AppKitHost[A: App](Movable):
             narrow = max(narrow, msg[CGPoint](one, "size").x)
         return (Float64(Int(narrow + 0.999)), Float64(Int(widest + 0.999)))
 
+    def one_line_words(mut self, n: Int):
+        """The words in view n (and in its views) on one line, cut with an ellipsis: a dense table's cell (the web's
+        table.dense td .text: nowrap, overflow hidden, text-overflow ellipsis)."""
+        if n < 0 or n >= len(self.rt.shown.nodes) or n >= len(self.widgets):
+            return
+        var kids = self.rt.shown.nodes[n].children.copy()
+        var w = self.widgets[n]
+        if self.rt.shown.nodes[n].kind == TEXT and w != 0 and (msg(w, "isKindOfClass:", cls("NSTextField")) & 0xFF) != 0:
+            _ = msg(w, "setLineBreakMode:", 4)  # NSLineBreakByTruncatingTail
+            _ = msg(w, "setMaximumNumberOfLines:", 1)
+            _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
+            for k in range(len(self.wraps)):
+                if self.wraps[k] == w:
+                    self.wraps[k] = 0  # (fit_wraps leaves it alone)
+        for c in kids:
+            self.one_line_words(c)
+
     def fit_tables(self):
         """Each Table's columns share its width as a browser's automatic table layout does (GTK's fit_tables): at least
         each column's narrowest, the room up to its widest shared by how much each wants, more room by the widest (D-442)."""
@@ -1758,6 +1809,23 @@ struct AppKitHost[A: App](Movable):
             var room = msg[CGRect](table, "bounds").width
             var lo = List[Float64](length=cols, fill=0)
             var hi = List[Float64](length=cols, fill=0)
+            var tn = self.parents[self.tcells[start][4]] if self.tcells[start][4] < len(self.parents) else -1
+            var dense = tn >= 0 and (self.rt.shown.nodes[tn].style == 1 or self.rt.shown.nodes[tn].style == 2)
+            var lims = self.rt.shown.nodes[tn].options.copy() if tn >= 0 else List[String]()
+            var caps = List[Int](length=cols, fill=0)  # (a cut column's widest: the web's td max-width, border-box)
+            var fixed = List[Int](length=cols, fill=0)  # (a tick column's width: the web's th width)
+            for c in range(min(cols, len(lims))):
+                var lim = lims[c]
+                var digits = String(lim[byte = 1:]) if lim.startswith("T") else (String(lim[byte = 0 : lim.byte_length() - 1]) if lim.endswith("S") else lim)
+                var v = 0
+                try:
+                    v = Int(digits) if digits != "" and lim != "W" else 0
+                except:
+                    v = 0
+                if lim.startswith("T"):
+                    fixed[c] = max(v, 1)
+                elif dense:
+                    caps[c] = v
             for t in range(start, end):
                 var cell = self.tcells[t][1]
                 var ins = msg[CGRect](cell, "edgeInsets")  # (NSEdgeInsets: top, left, bottom, right)
@@ -1771,20 +1839,34 @@ struct AppKitHost[A: App](Movable):
                     continue
                 var wh = self.cell_widths(child, self.tcells[t][4])
                 var col = self.tcells[t][3]
-                lo[col] = max(lo[col], wh[0] + ins.y + ins.height)
-                hi[col] = max(hi[col], wh[1] + ins.y + ins.height)
+                var a, b = wh[0] + ins.y + ins.height, wh[1] + ins.y + ins.height
+                var lim = lims[col] if col < len(lims) else String("")
+                if dense and lim != "W" and not lim.startswith("T"):  # (one-line words: the narrowest is the widest, as the browser's
+                    a = b                                             # nowrap; a cut column's cells at most its width, the head not: D-493)
+                    if (t - start) // cols > 0 and caps[col] > 0:
+                        a, b = min(a, Float64(caps[col])), min(b, Float64(caps[col]))
+                lo[col] = max(lo[col], a)
+                hi[col] = max(hi[col], b)
             var sum_lo = Float64(0)
             var sum_hi = Float64(0)
+            var free_hi = Float64(0)
             for c in range(cols):
+                if fixed[c] > 0:  # the tick column: the theme's width overall, its box when wider; no share of more room
+                    lo[c] = max(lo[c], Float64(fixed[c]))
+                    hi[c] = lo[c]
+                else:
+                    free_hi += hi[c]
                 sum_lo += lo[c]
                 sum_hi += hi[c]
+            if free_hi <= 0:
+                free_hi = sum_hi
             for t in range(start, end):
                 var col = self.tcells[t][3]
                 if self.tcells[t][2] == 0 or room <= 0:
                     continue
                 var v = lo[col]
                 if room >= sum_hi and sum_hi > 0:
-                    v = hi[col] + (room - sum_hi) * hi[col] / sum_hi
+                    v = hi[col] + ((room - sum_hi) * hi[col] / free_hi if fixed[col] == 0 else Float64(0))
                 elif room > sum_lo and sum_hi > sum_lo:
                     v = lo[col] + (room - sum_lo) * (hi[col] - lo[col]) / (sum_hi - sum_lo)
                 _ = msg(self.tcells[t][2], "setConstant:", Float64(Int(v)))

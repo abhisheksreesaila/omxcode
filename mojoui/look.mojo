@@ -164,9 +164,11 @@ def look_gtk_css(look: Look, scope: String) -> String:
     for s in look.surfaces:
         if not text_only(s):
             out += scope + ".mui-tag-" + s.role + " { " + surface_rule(s, False) + "}\n"
-            if look.controls.control_h > 0 and (s.pad_top > 0 or s.pad_bottom > 0 or s.min_height > 0):
+            if look.controls.control_h > 0 and (s.pad_top > 0 or s.pad_bottom > 0 or s.min_height > 0) and s.height != -2:  # (HEIGHT_AUTO: its words' height, the web's height: auto; min-height: 0, D-498)
                 # a button wearing the role is a control high overall, as on the web (border-box), padding included (D-441)
                 out += scope + "button.mui-tag-" + s.role + " { min-height: " + px(gtk_content_h(s, max(look.controls.control_h, s.min_height))) + "; }\n"
+        if s.icon_size > 0:  # (its icons at the role's size, as the web's svg: a button's own and an Icon inside it, D-497)
+            out += scope + ".mui-tag-" + s.role + " image, " + scope + "image.mui-tag-" + s.role + " { -gtk-icon-size: " + px(s.icon_size) + "; }\n"
         var t = text_rule(s, False, look.type.line)
         if t != "":  # (its labels; the label that wears the role itself comes after every role's: below)
             out += scope + ".mui-tag-" + s.role + " label { " + t + "}\n"
