@@ -1109,7 +1109,6 @@ struct GtkHost[A: App](Movable):
             # A picture asks for its texture's size in pixels, which would grow the canvas each
             # redraw on a scaled screen: a scrolled window that never scrolls takes no size from it.
             self.widgets[i] = w
-            external_call["gtk_widget_set_valign", NoneType](w, c_int(1))  # (rows at their own height: any more room goes below)
             var holder = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(3))  # GTK_POLICY_EXTERNAL
             external_call["gtk_scrolled_window_set_child", NoneType](holder, w)
@@ -1314,7 +1313,7 @@ struct GtkHost[A: App](Movable):
             var holder = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(2))  # EXTERNAL across, NEVER down
             external_call["gtk_scrolled_window_set_propagate_natural_width", NoneType](holder, c_int(1))
-            external_call["gtk_scrolled_window_set_propagate_natural_height", NoneType](holder, c_int(0))  # (its rows at their least: measured for -1 width, a natural height ran 1 px a row over)
+            external_call["gtk_scrolled_window_set_propagate_natural_height", NoneType](holder, c_int(1))
             external_call["gtk_scrolled_window_set_child", NoneType](holder, w)
             w = holder
         elif node.kind == TOAST:
