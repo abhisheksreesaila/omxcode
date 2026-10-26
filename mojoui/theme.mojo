@@ -301,6 +301,12 @@ struct Controls(Copyable, Movable):
     var button_weight: Int  # its weight (0: the host's own)
     var divider_gap: Int  # a Divider's room above and below it in a column (0: the host's own: the web's hr 4 px, the Mac's 4 pt, GTK none; below 0: none on every host, D-490)
     var divider_side: Int  # its room either side where it stands up in a row (0: the host's own: the web's 6 px, the Mac's 6 pt, GTK none; below 0: none)
+    var icon_w: Int  # an icon button's width where the theme's sheet draws it narrower than its side (0: its side, `icon`): the skins' web sheet gives it 1 + 6 + its 18 px icon + 6 + 1 = 32 (D-558)
+
+
+# The web host draws a button's icon at 18 px (mojoui/hosts/web.py); a host that sizes a tool by its parts reserves the same
+# room, so an inline tool is as wide as the web's (D-558)
+comptime BUTTON_ICON = 18
 
 
 @fieldwise_init
@@ -371,7 +377,7 @@ struct Look(Copyable, Movable):
     @staticmethod
     def none() -> Look:
         """No look of the theme's own: each host's defaults (and no rules written)."""
-        return Look(TypeScale("", "", 13, 11, 15, 26, 11, False, 0), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0), [], Segments.none())
+        return Look(TypeScale("", "", 13, 11, 15, 26, 11, False, 0), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), [], Segments.none())
 
     def is_none(self) -> Bool:
         return len(self.surfaces) == 0 and self.controls.tool_w == 0

@@ -225,7 +225,7 @@ def skin_look(p: Palette) -> Look:
     status.font, status.font_size, status.ink = "JetBrains Mono", 12, p.ink3
     var surfaces: List[Surface] = [band("toolbar", p.chrome, 0, p.chrome_line), status^, band("sheet-tabs", p.chrome, 0, 0), band("formula-bar", p.card, 0, p.line),
                                    words("sentence-line", 15, 600, p.ink)]
-    return Look(TypeScale("Inter", "JetBrains Mono", 13, 12, 15, 20, 11, False, 0), Controls(64, 58, 6, 11, 34, 10, 6, 12, 34, 6, 16, 6, 4, 30, 14, 8, 0, 0, 0, 0), surfaces^,
+    return Look(TypeScale("Inter", "JetBrains Mono", 13, 12, 15, 20, 11, False, 0), Controls(64, 58, 6, 11, 34, 10, 6, 12, 34, 6, 16, 6, 4, 30, 14, 8, 0, 0, 0, 0, 32), surfaces^,
                 Segments(0, 6, 0, p.line, 26, 10, 4, 13, 400, p.ink2, p.accent, p.accent_ink, 600, False))  # (the sheets' toggle-group rules say the same: D-300)
 
 

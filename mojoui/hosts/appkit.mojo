@@ -19,7 +19,7 @@ from mojoui.view import (
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
 )
 from mojoui.menus import CHECKED, DISABLED, DANGER
-from mojoui.theme import Palette, Theme, mix
+from mojoui.theme import BUTTON_ICON, Palette, Theme, mix
 from mojoui.theme import Look
 from mojoui.look import text_only
 from mojoui.linebreak import css_breaks, label_words
@@ -630,8 +630,8 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setAccessibilityLabel:", ns_string(node.text))  # (the title is the name a screen reader says)
                 if symbol:  # 15 pt symbols, as GTK's 16 px icons: AppKit's default (the label's 13 pt) read tiny in a toolbar (Mac, 2026-10-23)
                     _ = msg(w, "setSymbolConfiguration:", msg(cls("NSImageSymbolConfiguration"), "configurationWithPointSize:weight:", Float64(15), Float64(0)))
-                if c.icon > 0:  # the look's icon button: a square, its corners rounded (GTK: min-width/min-height)
-                    constrain(w, "widthAnchor", Float64(c.icon))
+                if c.icon > 0:  # the look's icon button: its side high, as wide as its sheet draws it (icon_w, D-558), its corners rounded (GTK: min-width/min-height)
+                    constrain(w, "widthAnchor", Float64(c.icon_w if c.icon_w > 0 else c.icon))
                     constrain(w, "heightAnchor", Float64(c.icon))
             else:
                 w = msg(cls("NSButton"), "buttonWithTitle:target:action:", ns_string(node.text), self.target, sel("tap:"))
@@ -682,8 +682,10 @@ struct AppKitHost[A: App](Movable):
                         _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(c.tool_h)), "setActive:", 1)
                 elif inline:  # the icon, then the title, one line, the look's height and side padding (GTK: padding 0 10px)
                     _ = msg(w, "setFont:", look_font(self.look.type.family, 500, c.inline_font, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(12)))
-                    var fit = msg[CGPoint](w, "fittingSize")
-                    constrain(w, "widthAnchor", fit.x + Float64(2 * c.inline_pad + 6))  # (6: the gap GTK leaves between icon and title)
+                    # its words, the web's icon room and 6 between them, its padding, as the web's flex button measures them
+                    # (the button's own fitting size added its cell's insets: Save 77 for the web's 74, D-558)
+                    var words = msg[CGPoint](msg(w, "attributedTitle"), "size")
+                    constrain(w, "widthAnchor", Float64(Int(words.x + 0.999)) + Float64((BUTTON_ICON + 6 if image != 0 else 0) + 2 * c.inline_pad))
                     if c.inline_h > 0:
                         constrain(w, "heightAnchor", Float64(c.inline_h))
             if (tool or inline or icon_only) and (c.inline_radius > 0 or c.icon_radius > 0):  # a soft square behind it when on
@@ -1399,7 +1401,10 @@ struct AppKitHost[A: App](Movable):
                 if ins.x + ins.width > 0:
                     for v in built:
                         if v != 0:
-                            _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, "heightAnchor"), ins.x + ins.width), "setActive:", 1)
+                            var held = msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, "heightAnchor"), ins.x + ins.width)
+                            if node.h > 0:  # (a row given its own height keeps it; a taller view stands out of it, as the web's overflow, D-559)
+                                _ = msg(held, "setPriority:", Float32(742))
+                            _ = msg(held, "setActive:", 1)
             if node.justify_items == CENTER and not grows and not spacers:
                 var trail = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", trail)
@@ -1427,7 +1432,7 @@ struct AppKitHost[A: App](Movable):
                     var none = msg(msg(room, "widthAnchor"), "constraintEqualToConstant:", Float64(0))  # (a spacer has no size of its own to hug)
                     _ = msg(none, "setPriority:", Float32(251))
                     _ = msg(none, "setActive:", 1)
-            hold_insets(w)
+            hold_insets(w, Float32(742) if node.kind == HSTACK and node.h > 0 else Float32(1000))  # (a row given a height: its views may stand out of it, D-559)
             if node.align_items == CENTER or node.align_items == 0:
                 # centred between its insets, not in its whole bounds: NSStackView centres at 260 ('NSStackView.Align'),
                 # so a header padded 10 above and 0 below had its words 5 pt high (D-517)
@@ -1824,7 +1829,7 @@ struct AppKitHost[A: App](Movable):
             for orientation in range(2):  # (the shape hugs its words and padding, as the label would)
                 hug(outer, Float32(750), orientation == 1)
             self.paint_surface(outer, chip_at, node.pad_v == 0 and node.pad_h == 0)
-            hold_insets(outer)  # (its padding, required: painted after hug() read no insets, so a caps head lost its 4 | 8, D-515)
+            hold_insets(outer, Float32(742) if node.kind == HSTACK and node.h > 0 else Float32(1000))  # (its padding, required: painted after hug() read no insets, so a caps head lost its 4 | 8, D-515; a row given a height lets a taller view stand out of it, D-559)
             var r = max(self.look.surfaces[chip_at].radius_top, 0)
             if r >= 999:  # (a pill: half its height, which a layer can't say ahead of the layout)
                 _ = msg(msg(outer, "layer"), "setCornerRadius:", Float64(10))
@@ -1845,6 +1850,11 @@ struct AppKitHost[A: App](Movable):
                 # at least that, required (GTK's size request): at 745 alone the stack around it hugged it smaller (its
                 # hugging is 750: the console's 60 pt app bar stood 46 high, run 40286965370, D-500)
                 _ = msg(msg(msg(outer, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(node.h - inset[1])), "setActive:", 1)
+                if node.kind == HSTACK and (msg(w, "isKindOfClass:", cls("NSStackView")) & 0xFF) != 0:
+                    # a row keeps the height it was given and lets a taller view stand out of it, as the web's flex row
+                    # (overflow visible): NSStackView resists clipping its views at 1000 and grew omxplorer's 38 pt app
+                    # bar to hold its 40 pt island (44, goal 32 M2). Below the height's 745, above a row child's 740 (D-559)
+                    _ = msg(w, "setClippingResistancePriority:forOrientation:", Float32(742), 1)
             _ = msg(ch, "setActive:", 1)
             if i < len(self.size_h):
                 self.size_h[i] = ch
@@ -2829,7 +2839,7 @@ def hug(view: Int, priority: Float32, vertical: Bool):
                     _ = msg(msg(msg(view, side), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, side), pad), "setActive:", 1)
 
 
-def hold_insets(stack: Int):
+def hold_insets(stack: Int, priority: Float32 = Float32(1000)):
     """A stack's edge insets across its axis, required: NSStackView keeps them only by its hugging's Edge.Min pins (250
     across), so any weak shrink above that, an ancestor's, took a padded cell's padding away (run 40308229281: a dense
     table's head row 22 high for 38, D-515)."""
@@ -2842,7 +2852,10 @@ def hold_insets(stack: Int):
     var views = msg(stack, "arrangedSubviews")
     for j in range(msg(views, "count")):
         var v = msg(views, "objectAtIndex:", j)
-        _ = msg(msg(msg(stack, side), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, side), pad), "setActive:", 1)
+        var held = msg(msg(stack, side), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, side), pad)
+        if priority < 1000:  # (a row given its own height lets a taller view stand out of it, as the web's overflow, D-559)
+            _ = msg(held, "setPriority:", priority)
+        _ = msg(held, "setActive:", 1)
 
 
 def flexible_spacer(vertical: Bool) -> Int:
