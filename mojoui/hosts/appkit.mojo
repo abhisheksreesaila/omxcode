@@ -828,17 +828,48 @@ struct AppKitHost[A: App](Movable):
             _ = msg(w, "setOrientation:", 1)
             _ = msg(w, "setSpacing:", Float64(node.spacing))
             var row = 0
+            var fitted = node.style == 1
+            var col_gap = node.spacing
+            var gk = self.look.surface(node.name) if node.name != "" else -1
+            if gk >= 0 and self.look.surfaces[gk].column_gap >= 0:  # (a role's column gap, the web's column-gap: D-495)
+                col_gap = self.look.surfaces[gk].column_gap
+            var firsts = List[Int]()  # (fitted: the first row's holders, one per column)
             for k in range(len(node.children)):
                 if k % node.value == 0:
                     row = new("NSStackView")
                     _ = msg(row, "setOrientation:", 0)
-                    _ = msg(row, "setDistribution:", 1)  # fill equally
-                    _ = msg(row, "setSpacing:", Float64(node.spacing))
+                    _ = msg(row, "setDistribution:", 0 if fitted else 1)  # fitted: by the constraints below; else fill equally
+                    _ = msg(row, "setSpacing:", Float64(col_gap))
                     _ = msg(w, "addArrangedSubview:", row)
                     # every row spans the grid, its columns equal (as GTK's homogeneous grid): a row of its own size sat
                     # centred, so the Report's chart tile was half as wide as the tiles above it (GitHub's Mac, 2026-10-23)
                     _ = msg(msg(msg(row, "widthAnchor"), "constraintEqualToAnchor:", msg(w, "widthAnchor")), "setActive:", 1)
-                _ = msg(row, "addArrangedSubview:", self.build(node.children[k], self_addr))
+                var item = self.build(node.children[k], self_addr)
+                if not fitted:
+                    _ = msg(row, "addArrangedSubview:", item)
+                    continue
+                # fitted (a definition list): every column but the last as wide as its widest item, the last the rest;
+                # each item its own width from the column's start, centred down (the web's grid-template-columns:
+                # max-content … minmax(0, 1fr), justify-items: start, align-items: center; GTK's place_in_grid, D-495)
+                var col = k % node.value
+                var holder = new("NSStackView")
+                _ = msg(holder, "setOrientation:", 0)
+                _ = msg(holder, "setSpacing:", Float64(0))
+                _ = msg(holder, "setAlignment:", 10)  # centre Y
+                _ = msg(holder, "addArrangedSubview:", item)
+                if self.rt.shown.nodes[node.children[k]].fills:
+                    hug(item, Float32(1), False)
+                else:
+                    _ = msg(holder, "addArrangedSubview:", flexible_spacer(False))
+                _ = msg(row, "addArrangedSubview:", holder)
+                if col == node.value - 1:
+                    hug(holder, Float32(1), False)  # (the last column takes the rest)
+                    continue
+                hug(holder, Float32(740), False)  # (tight round its widest item: below a label's 750 resistance)
+                if col >= len(firsts):
+                    firsts.append(holder)
+                else:
+                    _ = msg(msg(msg(holder, "widthAnchor"), "constraintEqualToAnchor:", msg(firsts[col], "widthAnchor")), "setActive:", 1)
         elif node.kind == LAZYLIST:
             var table = new("NSTableView")
             var column = msg(msg(cls("NSTableColumn"), "alloc"), "initWithIdentifier:", ns_string("rows"))
@@ -1093,14 +1124,6 @@ struct AppKitHost[A: App](Movable):
                 align = 5 if vertical else 3  # leading / top
             elif node.align_items == END:
                 align = 6 if vertical else 4  # trailing / bottom
-            elif node.align_items == STRETCH:  # every view is stretched below; placed from the leading (top) inset, as
-                # NSStackView centres in its whole bounds and a frame padded 0 above and 14 below put its card 7 low (D-505)
-                var centred = False  # (a view held to its widest is centred on the stack: keep the centre then)
-                for c in node.children:
-                    if self.rt.shown.nodes[c].max_w != 0:
-                        centred = True
-                if not centred:
-                    align = 5 if vertical else 3
             # across its axis a stack is as wide (tall) as its widest view: it hugs loosely, so a row of buttons is never
             # squeezed to a narrower row's width (maccheck's Delete button, 11 pt, GitHub's Mac, 2026-10-23)
             _ = msg(w, "setHuggingPriority:forOrientation:", Float32(250), 0 if vertical else 1)
@@ -1140,7 +1163,7 @@ struct AppKitHost[A: App](Movable):
             var grows = False
             var spacers = False  # a Spacer takes the free space along its stack, as GTK's expanding one (it sat 0 pt tall
             for c in node.children:  # and the status bar floated mid-window, GitHub's Mac, 2026-10-23)
-                grows = grows or self.rt.shown.nodes[c].grows
+                grows = grows or self.rt.shown.nodes[c].grows or (not vertical and self.rt.shown.nodes[c].kind == TABLE)
                 spacers = spacers or self.rt.shown.nodes[c].kind == SPACER
             if node.justify_items == BETWEEN:
                 _ = msg(w, "setDistribution:", 3)  # NSStackViewDistributionEqualSpacing
@@ -1187,17 +1210,12 @@ struct AppKitHost[A: App](Movable):
                         first_spacer = child
                 elif grows or spacers:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
                     hug(child, Float32(750), vertical)
-                var child_stack = cn.kind == VSTACK or cn.kind == HSTACK
-                if not vertical and not cn.fills and node.align_items != STRETCH and child_stack:
-                    # a stack in a row not told to stretch: its own height. At 740 (and a set height's 745) NSStackView still
-                    # stood each one as high as the row (the console's 60 pt app bar: brand, crumbs, links 60 high; a
-                    # 36 pt icon square 46, run 40288990159); 760 is over its pull, and the set height's required minimum
-                    # holds (D-503)
-                    hug(child, Float32(760), True)
-                elif not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
+                if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
                     hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
                 var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED  # (its one view across it: the web's align-items: stretch, D-494)
-                var spans = vertical and cn.kind == SCROLL  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502)
+                var spans = vertical and (cn.kind == SCROLL or cn.kind == TABLE)  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502; a Table too: table.table { width: 100% })
+                if not vertical and cn.kind == TABLE and not cn.grows:  # (in a row, a Table takes the row: its width 100 %, a side-scroll's flex: 1 0 auto)
+                    hug(child, Float32(1), False)
                 if cn.fills or node.align_items == STRETCH or wrapper or spans:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(inset_x if vertical else inset_y)
