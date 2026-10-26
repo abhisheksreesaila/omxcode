@@ -63,7 +63,11 @@ def m1():
         problems.append("App: theme() replaces design() and accent()")
     gtk = (ROOT / "mojoui/hosts/gtk.mojo").read_text()
     loads = re.findall(r'"gtk_css_provider_load_from_string", NoneType\]\(self\.(\w+), (\w+(?:\.\w+)?)', gtk)
-    if sorted(loads) != [("css", "rules.as_c_string_span"), ("skin_provider", "theme.gtk_css")]:
+    # (since goal 32's M1, D-297, the theme's sheet is its own CSS followed by its Look's rules, both from App.theme():
+    # `var sheet = theme.gtk_css + (look_gtk_css(theme.look, …))`; still nothing but the padding rules and the theme, D-557)
+    from_theme = re.search(r"var sheet = theme\.gtk_css \+ \(look_gtk_css\(theme\.look, [^\n]*\)\n", gtk) is not None
+    theme_sheet = "sheet.as_c_string_span" if from_theme else "theme.gtk_css"
+    if sorted(loads) != [("css", "rules.as_c_string_span"), ("skin_provider", theme_sheet)]:
         problems.append(f"the GTK host loads style sheets besides its padding rules and the app's theme: {loads}")
     scoped = re.findall(r"window\.[a-z][\w-]*", gtk)
     if scoped:

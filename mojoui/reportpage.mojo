@@ -114,7 +114,7 @@ def kpi_of(t: ReportTile, sheet: Sheet, filter: ReportFilter, accent: Bool) -> K
 
 
 def KpiTile(var card: View) -> View:
-    """A KPI's card as a Report tile (themes shape it by its role, "tile": a solid card on Liquid)."""
+    """A KPI's card as a Report tile (themes shape it by its role, "tile": a solid card in one theme)."""
     return card^.fill().tag("tile")
 
 

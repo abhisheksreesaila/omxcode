@@ -548,7 +548,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setFont:", look_font(self.look.type.family, 600 if bold else 400, sized_by, self.look.type.tabular))
                 _ = msg(w, "setTextColor:", ns_color(self.pal.ink3 if node.style == CAPTION else self.pal.ink2))
             var tl = self.text_look(i)
-            if tl >= 0:  # a surface's own type (the status bar's figures: Inter 12 on Liquid, JetBrains Mono on the skins)
+            if tl >= 0:  # a surface's own type (the status bar's figures: one theme's Inter 12, another's JetBrains Mono)
                 ref sf = self.look.surfaces[tl]
                 var inh = self.inherited_size(i)
                 if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0 or inh > 0:  # (no size of its own: the one it inherits, else its style's, a caption's 12)

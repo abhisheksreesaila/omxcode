@@ -186,7 +186,7 @@ def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
 
 
 def look_gtk_css(look: Look, scope: String) -> String:
-    """GTK's rules for a look, every selector under `scope` ("window.liquid ")."""
+    """GTK's rules for a look, every selector under `scope` ("window.<theme id> ")."""
     if look.is_none():
         return ""
     var out = String("")
@@ -252,7 +252,7 @@ def press_rules(m: Motion, scope: String, web: Bool) -> String:
 
 
 def look_web_css(look: Look, scope: String) -> String:
-    """The web's rules for a look, every selector under `scope` ("body.liquid ")."""
+    """The web's rules for a look, every selector under `scope` ("body.<theme id> ")."""
     if look.is_none():
         return ""
     var out = String("")

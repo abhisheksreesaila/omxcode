@@ -320,7 +320,7 @@ struct Segments(Copyable, Movable):
     var on_fill: UInt32  # the chosen segment
     var on_ink: UInt32
     var on_weight: Int
-    var on_shadow: Bool  # a soft shadow under the chosen one (Liquid's white thumb)
+    var on_shadow: Bool  # a soft shadow under the chosen one (a white thumb)
 
     @staticmethod
     def none() -> Segments:
@@ -385,7 +385,7 @@ struct Look(Copyable, Movable):
 
 
 def glass(role: String, radius_top: Int, radius_bottom: Int, margin_top: Int, margin_x: Int, margin_bottom: Int, pad: Int) -> Surface:
-    """A translucent white panel with a rim, a top highlight and a soft shadow (Liquid's islands)."""
+    """A translucent white panel with a rim, a top highlight and a soft shadow (floating islands)."""
     var shadows: List[Shadow] = [Shadow(1, 0, 0, rgba(255, 255, 255, 230), True), Shadow(0, 0, 1, rgba(255, 255, 255, 191), False),
                                  Shadow(8, 32, 0, rgba(15, 23, 42, 26), False), Shadow(1, 2, 0, rgba(15, 23, 42, 15), False)]
     return Surface(role, rgba(255, 255, 255, 158), radius_top, radius_bottom, margin_top, margin_x, margin_bottom, pad, pad, pad,

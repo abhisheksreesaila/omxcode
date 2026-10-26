@@ -69,7 +69,7 @@ def Toolbar(left: List[Tool], middle: List[Tool], right: List[Tool], extra: List
 
 def AppBar(name: String, var menubar: View, var trailing: List[View]) -> View:
     """The window's header row: the app's mark (its logo and name), its menus, and what sits at the far end (a status
-    island). Tagged "menubar" (themes float it: Liquid's glass strip); on a Mac the menus live in the system menu bar
+    island). Tagged "menubar" (themes float it: a glass strip); on a Mac the menus live in the system menu bar
     and the row keeps the mark and the trailing views."""
     var row: List[View] = [HStack(Icon("app-logo", 18), Text(name, HEADLINE), spacing=6).align(CENTER).tag("app-mark"), menubar^, Spacer()]
     for v in trailing:

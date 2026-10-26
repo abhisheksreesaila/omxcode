@@ -4584,10 +4584,14 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
                 for r in runs_of(n):
                     print("LABEL: " + r.text)
         elif n.kind == TEXT:
-            print("LABEL: " + plain_words(c_str(external_call["gtk_label_get_text", Int](w))))
+            # (the app's words when the label shows them, its end spaces included, as the web's report reads its text:
+            # D-549 drops them only from what's drawn; "row 1,000,001 · " read differently on the two hosts)
+            var shown = plain_words(c_str(external_call["gtk_label_get_text", Int](w)))
+            var said = n.text if shown == plain_words(label_words(host[].rt.shown.nodes, i)) else shown
+            print("LABEL: " + said)
             var tone = tone_of(w)
             if tone != "":
-                print("TONE: " + plain_words(c_str(external_call["gtk_label_get_text", Int](w))) + " = " + tone)
+                print("TONE: " + said + " = " + tone)
         elif n.kind == BUTTON:
             if n.style == TOOL or n.style == TOOL_ON or n.style == TOOL_INLINE or n.style == TOOL_INLINE_ON:
                 print("BUTTON: " + c_str(external_call["gtk_label_get_text", Int](external_call["gtk_widget_get_last_child", Int](external_call["gtk_button_get_child", Int](w)))))
