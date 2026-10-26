@@ -22,6 +22,14 @@ def tint(c: UInt32, a: Float64) -> UInt32:
     return (c & 0xFFFFFF) | (UInt32(Int(a * 255 + 0.5)) << 24)
 
 
+def faded(over: UInt32, c: UInt32, t: Float64) -> UInt32:
+    """`c` at opacity `t` over `over` (CSS opacity): an opaque colour mixed toward it, a translucent one its alpha scaled."""
+    var a = Int((c >> 24) & 255)
+    if a < 255:
+        return (c & 0xFFFFFF) | (UInt32(Int(Float64(a) * t + 0.5)) << 24)
+    return mix(over, c, t)
+
+
 def box(role: String, fill: UInt32, radius: Int, pad_v: Int, pad_h: Int) -> Surface:
     """A role with a fill (0: none), corners (-1: none of its own) and padding (-1: none of its own)."""
     return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
@@ -466,7 +474,7 @@ def button_roles(p: Palette, mono: String) -> List[Surface]:
         if rings[k] != 0:
             a.shadows = [Shadow(0, 0, 1, rings[k], True)]
         var off = a.copy()
-        off.role, off.fill, off.ink = "small-" + looks[k] + "-off", mix(p.card, fills[k], 0.45) if fills[k] != 0 else 0, mix(p.card, inks[k], 0.45)
+        off.role, off.fill, off.ink = "small-" + looks[k] + "-off", faded(p.card, fills[k], 0.45) if fills[k] != 0 else 0, mix(p.card, inks[k], 0.45)  # (.btn[disabled]: opacity .45)
         if rings[k] != 0:
             off.shadows = [Shadow(0, 0, 1, mix(p.card, rings[k], 0.45), True)]
         out.append(a^)
