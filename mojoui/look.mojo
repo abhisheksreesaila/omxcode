@@ -67,19 +67,20 @@ def surface_rule(s: Surface, web: Bool) -> String:
         out += "-webkit-backdrop-filter: blur(" + String(s.blur) + "px) saturate(1.6); backdrop-filter: blur(" + String(s.blur) + "px) saturate(1.6); "
     if s.outline != 0:
         out += "border: " + px(s.outline_w) + (" dashed " if s.dashed else " solid ") + css_color(s.outline) + "; "
-    if s.min_height > 0:
-        out += "min-height: " + px(s.min_height) + "; "
+    if s.min_height > 0:  # (the web's boxes are border-box; GTK's min-height is the content's: padding and lines come off)
+        out += "min-height: " + px(s.min_height if web else gtk_content_h(s, s.min_height)) + "; "
     if s.height > 0:
-        out += ("height: " + px(s.height) + "; min-height: " + px(s.height) + "; ") if web else ("min-height: " + px(s.height) + "; ")
+        out += ("height: " + px(s.height) + "; min-height: " + px(s.height) + "; ") if web else ("min-height: " + px(gtk_content_h(s, s.height)) + "; ")
     elif s.height == -2:  # (HEIGHT_AUTO)
         out += "height: auto; min-height: 0; " if web else "min-height: 0; "
     if s.width > 0:
         if web and s.shrinks:
             out += "width: " + px(s.width) + "; min-width: 0 !important; flex-shrink: 1 !important; "  # (over the inline size every host gets)
         else:
-            out += ("width: " + px(s.width) + "; min-width: " + px(s.width) + "; flex-shrink: 0; ") if web else ("min-width: " + px(s.width) + "; ")
-    if s.gap >= 0:
-        out += ("gap: " + px(s.gap) + " !important; ") if web else ("border-spacing: " + px(s.gap) + "; ")  # (over the stack's own inline gap)
+            out += ("width: " + px(s.width) + "; min-width: " + px(s.width) + "; flex-shrink: 0; ") if web else ("min-width: " + px(gtk_content_w(s, s.width)) + "; ")
+    if s.gap >= 0 and web:  # (over the stack's own inline gap; GTK and the Mac take it as the stack's spacing from
+        # resolve_layout: GTK adds a box's CSS border-spacing to its spacing, so writing both doubled the gap)
+        out += "gap: " + px(s.gap) + " !important; "
     if s.text_align == 2 and web:  # (centred: a button's icon and word in its middle too)
         out += "justify-content: center; "
     if s.one_line and web:
@@ -95,7 +96,36 @@ def surface_rule(s: Surface, web: Bool) -> String:
     return out
 
 
-def text_rule(s: Surface, web: Bool = False) -> String:
+def gtk_content_h(s: Surface, outer: Int) -> Int:
+    """The content height GTK must be given for a box `outer` high overall (the web's border-box), the surface's
+    padding and lines taken off (D-441)."""
+    var inner = outer - max(s.pad_top, 0) - max(s.pad_bottom, 0)
+    if s.line_top != 0:
+        inner -= 1
+    if s.line_bottom != 0:
+        inner -= 1
+    if s.outline != 0:
+        inner -= 2 * s.outline_w
+    return max(inner, 0)
+
+
+def gtk_content_w(s: Surface, outer: Int) -> Int:
+    """The content width GTK must be given for a box `outer` wide overall (the web's border-box), its side padding and
+    outline taken off (as gtk_content_h)."""
+    var left = s.pad_left if s.pad_left >= 0 else max(s.pad_x, 0)
+    var right = s.pad_right if s.pad_right >= 0 else max(s.pad_x, 0)
+    var inner = outer - left - right
+    if s.outline != 0:
+        inner -= 2 * s.outline_w
+    return max(inner, 0)
+
+
+def line_px(v: Float64) -> String:
+    """A line height in px to a tenth."""
+    return fpx(Float64(Int(v * 10 + 0.5)) / 10)
+
+
+def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
     var out = String("")
     if s.font != "":
         out += "font-family: '" + s.font + "', " + ("monospace" if "Mono" in s.font else "sans-serif") + "; "
@@ -105,11 +135,15 @@ def text_rule(s: Surface, web: Bool = False) -> String:
         out += "font-weight: " + String(s.font_weight) + "; "
     if s.tracking != 0:
         out += "letter-spacing: " + fpx(s.tracking) + "; "
-    if web and s.line_height > 0:  # (GTK labels take the font's)
+    if web and s.line_height > 0:
         out += "line-height: " + fpx(s.line_height) + "; "
     elif web and s.line_height < 0:  # (the font's own line: CSS's normal)
         out += "line-height: normal; "
-    if web and s.one_line:  # (its words on one line too)
+    elif not web and line > 0 and (s.line_height != 0 or s.font_size > 0):
+        # (GTK: in px, as the web's lines measure, D-444; only for a look that declares its line: TypeScale.line 0 keeps
+        # GTK's labels at the font's own lines, as before: D-460; below 0: the font's own, over the look's label line)
+        out += "line-height: " + ("normal" if s.line_height < 0 else line_px(s.line_height if s.line_height > 0 else s.font_size * line)) + "; "
+    if web and s.one_line:  # (its words on one line too; GTK and the Mac cut them with an ellipsis: the hosts read one_line)
         out += "white-space: nowrap; "
     if web and s.text_align > 0:
         out += "text-align: " + ("left" if s.text_align == 1 else ("center" if s.text_align == 2 else "right")) + "; "
@@ -123,15 +157,22 @@ def look_gtk_css(look: Look, scope: String) -> String:
     if look.is_none():
         return ""
     var out = String("")
+    if look.type.line > 0 and look.type.body > 0:  # every label a line as high as the web's (body 14px/1.45: 20.3)
+        out += scope + "label { line-height: " + line_px(look.type.body * look.type.line) + "; }\n"
     for s in look.surfaces:
         if not text_only(s):
             out += scope + ".mui-tag-" + s.role + " { " + surface_rule(s, False) + "}\n"
-        var t = text_rule(s)
+            if look.controls.control_h > 0 and (s.pad_top > 0 or s.pad_bottom > 0 or s.min_height > 0):
+                # a button wearing the role is a control high overall, as on the web (border-box), padding included (D-441)
+                out += scope + "button.mui-tag-" + s.role + " { min-height: " + px(gtk_content_h(s, max(look.controls.control_h, s.min_height))) + "; }\n"
+        var t = text_rule(s, False, look.type.line)
         if t != "":  # (its labels, or the label that wears the role itself)
             out += scope + ".mui-tag-" + s.role + " label, " + scope + "label.mui-tag-" + s.role + " { " + t + "}\n"
     var c = look.controls.copy()
     if c.control_h > 0:  # push buttons, fields and dropdowns: one height, the look's corners
-        out += scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; }\n"
+        out += (scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; "
+                + ("font-size: " + line_px(c.button_font) + "; " if c.button_font > 0 else String(""))
+                + ("font-weight: " + String(c.button_weight) + "; " if c.button_weight > 0 else String("")) + "}\n")
         out += scope + "entry, " + scope + "textview, " + scope + "dropdown > button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.field_radius) + "; }\n"
     if c.tool_w > 0:
         out += scope + "button.mui-tool { min-width: " + px(c.tool_w) + "; min-height: " + px(c.tool_h) + "; border-radius: " + px(c.tool_radius) + "; font-size: " + fpx(c.tool_font) + "; }\n"
@@ -139,6 +180,12 @@ def look_gtk_css(look: Look, scope: String) -> String:
         out += scope + "button.mui-tool.mui-tool-inline { min-width: 0; min-height: " + px(c.inline_h) + "; padding: 0 " + px(c.inline_pad) + "; border-radius: " + px(c.inline_radius) + "; }\n"
         out += scope + "button.mui-tool-inline label.mui-tool-label { font-size: " + fpx(c.inline_font) + "; }\n"
         out += scope + ".mui-tag-toolbar button.image-button { min-width: " + px(c.icon) + "; min-height: " + px(c.icon) + "; padding: 0; border-radius: " + px(c.icon_radius) + "; }\n"
+    if c.divider_gap > 0:  # a Divider's room (GTK's own is none; the host marks a Divider mui-divider, a row's mui-divider-up)
+        out += scope + "separator.mui-divider { margin: " + px(c.divider_gap) + " 0; }\n"
+    if c.divider_side > 0:
+        out += scope + "separator.mui-divider-up { margin: 0 " + px(c.divider_side) + "; }\n"
+    # a button the app gave a height (.height(26)) is that high, as on the web: no control minimum, no padding to add
+    out += scope + "button.mui-fixed-h { min-height: 0; padding-top: 0; padding-bottom: 0; }\n"
     out += press_rules(look.motion, scope, False)
     return out
 
@@ -207,6 +254,13 @@ def look_web_css(look: Look, scope: String) -> String:
         out += scope + "button.tool, " + scope + "label.picker.tool { min-width: " + px(c.tool_w) + "; min-height: " + px(c.tool_h) + "; border-radius: " + px(c.tool_radius) + "; font-size: " + fpx(c.tool_font) + "; }\n"
         out += scope + "button.tool.inline, " + scope + "label.picker.tool.inline { min-width: 0; min-height: " + px(c.inline_h) + "; padding: 0 " + px(c.inline_pad) + "; border-radius: " + px(c.inline_radius) + "; font-size: " + fpx(c.inline_font) + "; }\n"
         out += scope + "[data-tag=toolbar] button.icon-only { border-radius: " + px(c.icon_radius) + "; }\n"
+    # a Divider's room, as weak as the base sheet's hr (:where): a role's own margins on a Divider still win (D-460; scoped
+    # plainly, the look's hr rule beat every role's rule-margin 0 and moved the console's pages 4 px a rule)
+    var weak = ":where(" + scope.strip() + ") "
+    if c.divider_gap > 0:
+        out += weak + "hr { margin: " + px(c.divider_gap) + " 0; }\n"
+    if c.divider_side > 0:
+        out += ":where(" + scope.strip() + " .hstack) > hr { margin: 0 " + px(c.divider_side) + "; }\n"
     out += press_rules(look.motion, scope, True)
     return out
 

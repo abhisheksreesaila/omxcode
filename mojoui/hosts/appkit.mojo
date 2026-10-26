@@ -21,6 +21,7 @@ from mojoui.view import (
 from mojoui.menus import CHECKED, DISABLED, DANGER
 from mojoui.theme import Palette, Theme, mix
 from mojoui.theme import Look
+from mojoui.look import text_only
 from mojoui.icons_data import lucide_svg
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
@@ -76,7 +77,23 @@ def look_font(family: String, weight: Int, size: Float64, tabular: Bool = False)
     Regular, Bold), the nearest one for a weight between."""
     if family == "JetBrains Mono":
         return skin_font("JetBrainsMono-Bold" if weight >= 600 else "JetBrainsMono-Regular", size)
+    if family == "Geist" or family == "Geist Mono":  # (variable faces: the weight itself on the wght axis, as CSS asks)
+        return variable_font("GeistMono-Regular" if family == "Geist Mono" else "Geist-Regular", weight if weight > 0 else 400, size, tabular)
     return skin_font("Inter-SemiBold" if weight >= 600 else ("Inter-Medium" if weight >= 500 else "Inter-Regular"), size, tabular)
+
+
+def variable_font(name: String, weight: Int, size: Float64, tabular: Bool = False) -> Int:
+    """A registered variable font (Geist) at `weight` on its wght axis; the system font if it isn't there."""
+    var f = skin_font(name, size, tabular)
+    if weight == 400 or msg(f, "fontName") == 0:
+        return f
+    var axes = new("NSMutableDictionary")
+    _ = msg(axes, "setObject:forKey:", ns_number(weight), ns_number(0x77676874))  # 'wght'
+    var attrs = new("NSMutableDictionary")
+    _ = msg(attrs, "setObject:forKey:", axes, ns_string("NSCTFontVariationAttribute"))
+    var desc = msg(msg(f, "fontDescriptor"), "fontDescriptorByAddingAttributes:", attrs)
+    var v = msg(cls("NSFont"), "fontWithDescriptor:size:", desc, size)
+    return v if v != 0 else f
 
 
 def skin_font(name: String, size: Float64, tabular: Bool = False) -> Int:
@@ -170,6 +187,8 @@ struct AppKitHost[A: App](Movable):
     var objects: List[Int]  # per node: a Board object's box when it wears its content's role (the table's card); 0: none
     var boxed: Int  # the Board child being built inside its role's box (the box wears the role; the child doesn't, as on GTK)
     var dashes: List[Tuple[Int, Int, Int, Int]]  # (view, its dashed outline's shape layer, corner radius, width): paths follow the layout (dash_paths)
+    var rounds: List[Tuple[Int, Int]]  # (view, its look's corner radius): at most half its laid-out size (dash_paths; a layer draws a star past that)
+    var tcells: List[Tuple[Int, Int, Int, Int, Int]]  # a Table's cells: (table, cell, its width constraint (0: the last column's), column, child node): fit_tables
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
     var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
@@ -213,6 +232,8 @@ struct AppKitHost[A: App](Movable):
         self.objects = List[Int]()
         self.boxed = -1
         self.dashes = List[Tuple[Int, Int, Int, Int]]()
+        self.rounds = List[Tuple[Int, Int]]()
+        self.tcells = List[Tuple[Int, Int, Int, Int, Int]]()
         self.focus = -1
         self.canvases = List[AppleCanvas]()
         self.link = 0
@@ -472,13 +493,13 @@ struct AppKitHost[A: App](Movable):
             if self.skinned:
                 ref ts = self.look.type
                 var sized_by = ts.title if node.style == TITLE else (ts.headline if bold else (ts.caption if node.style == CAPTION else ts.body))  # (the look's type scale: GTK's label.title-1, .title-4, .caption)
-                _ = msg(w, "setFont:", skin_font("Inter-SemiBold" if bold else "Inter-Regular", sized_by, self.look.type.tabular))
+                _ = msg(w, "setFont:", look_font(self.look.type.family, 600 if bold else 400, sized_by, self.look.type.tabular))
                 _ = msg(w, "setTextColor:", ns_color(self.pal.ink3 if node.style == CAPTION else self.pal.ink2))
             var tl = self.text_look(i)
             if tl >= 0:  # a surface's own type (the status bar's figures: Inter 12 on Liquid, JetBrains Mono on the skins)
                 ref sf = self.look.surfaces[tl]
                 if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0:  # (no size of its own: the label keeps its style's, a caption's 12)
-                    _ = msg(w, "setFont:", look_font(sf.font, sf.font_weight, sf.font_size if sf.font_size > 0 else msg[Float64](msg(w, "font"), "pointSize"), self.look.type.tabular))
+                    _ = msg(w, "setFont:", look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight, sf.font_size if sf.font_size > 0 else msg[Float64](msg(w, "font"), "pointSize"), self.look.type.tabular))
                 if sf.ink != 0:
                     _ = msg(w, "setTextColor:", ns_color(sf.ink))
                 if sf.tracking != 0:  # (letter spacing: the label's string with NSKern, in its own font and colour)
@@ -495,11 +516,38 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setTextColor:", self.accent())
             elif node.value == TONE_STRONG:
                 _ = msg(w, "setTextColor:", self.ink())
-                _ = msg(w, "setFont:", skin_font("Inter-SemiBold", Float64(13), self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))
+                _ = msg(w, "setFont:", look_font(self.look.type.family, 600, Float64(13), self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))
+            if self.skinned:  # the look's line height (CSS's: omxqua's body 14px/1.45), half the extra above and below (D-444)
+                var font = msg(w, "font")
+                var lh = Float64(0)
+                if tl >= 0 and self.look.surfaces[tl].line_height > 0:
+                    lh = self.look.surfaces[tl].line_height
+                elif self.look.type.line > 0:
+                    lh = msg[Float64](font, "pointSize") * self.look.type.line
+                if lh > 0:
+                    var para = new("NSMutableParagraphStyle")
+                    _ = msg(para, "setMinimumLineHeight:", lh)
+                    _ = msg(para, "setMaximumLineHeight:", lh)
+                    var attrs = new("NSMutableDictionary")
+                    _ = msg(attrs, "setObject:forKey:", font, ns_string("NSFont"))
+                    _ = msg(attrs, "setObject:forKey:", msg(w, "textColor"), ns_string("NSColor"))
+                    _ = msg(attrs, "setObject:forKey:", para, ns_string("NSParagraphStyle"))
+                    var natural = msg[Float64](font, "ascender") - msg[Float64](font, "descender")
+                    _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", (lh - natural) / 2), ns_string("NSBaselineOffset"))
+                    if tl >= 0 and self.look.surfaces[tl].tracking != 0:
+                        _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", self.look.surfaces[tl].tracking), ns_string("NSKern"))
+                    _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(node.text), attrs))
+                    # (a one-line label's cell sizes to its font, not its paragraph's lines: a line high at least)
+                    _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(Int(lh + 0.5))), "setActive:", 1)
             var p = self.parents[i] if i < len(self.parents) else -1
             if node.w > 0 or (p >= 0 and self.rt.shown.nodes[p].kind == VSTACK and self.rt.shown.nodes[p].align_items == START):
                 _ = msg(w, "setAlignment:", 0)  # a leading column's lines (or a table's cell) read from the leading edge, as on GTK
-            if node.max_w == 0 and node.w == 0 and not self.in_row(i):  # a column's label: one line, wrapping when squeezed
+            var own = self.look.surface(node.name) if node.name != "" else -1
+            if own >= 0 and self.look.surfaces[own].one_line:  # the look's one-line words: cut with an ellipsis where they don't fit
+                _ = msg(w, "setLineBreakMode:", 4)  # NSLineBreakByTruncatingTail
+                _ = msg(w, "setMaximumNumberOfLines:", 1)
+                _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
+            elif node.max_w == 0 and node.w == 0 and not self.in_row(i):  # a column's label: one line, wrapping when squeezed
                 _ = msg(w, "setLineBreakMode:", 0)  # NSLineBreakByWordWrapping
                 _ = msg(w, "setMaximumNumberOfLines:", 0)
                 # 490: it keeps its one line unless a real limit squeezes it (a scroll view's width, 495; a fixed width):
@@ -539,14 +587,14 @@ struct AppKitHost[A: App](Movable):
             var token = node.style == TOKEN or node.style == TOKEN_LIT
             var drawn = self.drawn_controls() and not tool and not inline and not icon_only and not token
             if drawn:
-                self.draw_button(w, node.style, node.text)
+                self.draw_button(w, node.style, node.text, i)
             elif token:  # a sentence's word: the chart's colour, underlined, the sentence's type (its line's look), no fill
                 _ = msg(w, "setBordered:", 0)
                 var k = self.look.surface("sentence-line")
                 var size = self.look.surfaces[k].font_size if k >= 0 and self.look.surfaces[k].font_size > 0 else self.look.type.headline
                 var weight = self.look.surfaces[k].font_weight if k >= 0 else 600
                 var attrs = new("NSMutableDictionary")
-                _ = msg(attrs, "setObject:forKey:", look_font("Inter", weight, size, self.look.type.tabular), ns_string("NSFont"))
+                _ = msg(attrs, "setObject:forKey:", look_font(self.look.type.family, weight, size, self.look.type.tabular), ns_string("NSFont"))
                 _ = msg(attrs, "setObject:forKey:", ns_color(self.pal.data(0)), ns_string("NSColor"))
                 _ = msg(attrs, "setObject:forKey:", ns_number(0x0101), ns_string("NSUnderline"))  # single, dotted (the web's)
                 _ = msg(attrs, "setObject:forKey:", ns_color(mix(self.pal.card, self.pal.data(0), 0.45)), ns_string("NSUnderlineColor"))
@@ -570,12 +618,12 @@ struct AppKitHost[A: App](Movable):
             elif node.style == SUBTLE or tool or inline:
                 _ = msg(w, "setBordered:", 0)
                 if tool:
-                    _ = msg(w, "setFont:", skin_font("Inter-Medium", c.tool_font, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(11)))
+                    _ = msg(w, "setFont:", look_font(self.look.type.family, 500, c.tool_font, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(11)))
                     if c.tool_w > 0:
                         _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(c.tool_w)), "setActive:", 1)
                         _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(c.tool_h)), "setActive:", 1)
                 elif inline:  # the icon, then the title, one line, the look's height and side padding (GTK: padding 0 10px)
-                    _ = msg(w, "setFont:", skin_font("Inter-Medium", c.inline_font, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(12)))
+                    _ = msg(w, "setFont:", look_font(self.look.type.family, 500, c.inline_font, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "systemFontOfSize:", Float64(12)))
                     var fit = msg[CGPoint](w, "fittingSize")
                     constrain(w, "widthAnchor", fit.x + Float64(2 * c.inline_pad + 6))  # (6: the gap GTK leaves between icon and title)
                     if c.inline_h > 0:
@@ -608,7 +656,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setBordered:", 0)
                 _ = msg(w, "setDrawsBackground:", 0)
                 _ = msg(w, "setFocusRingType:", 1)  # NSFocusRingTypeNone (the box is the field)
-                _ = msg(w, "setFont:", skin_font("Inter-Regular", self.look.type.body, self.look.type.tabular))
+                _ = msg(w, "setFont:", look_font(self.look.type.family, 400, self.look.type.body, self.look.type.tabular))
                 _ = msg(w, "setTextColor:", self.ink())
                 w = self.shell(i, w)
             if not sized:  # (the app sized it: its settings decide)
@@ -633,7 +681,7 @@ struct AppKitHost[A: App](Movable):
             self.wire(w, i, self_addr, "select:")
             if self.drawn_controls():  # the look's box (GTK's dropdown button, the web's select), its arrows inside
                 _ = msg(w, "setBordered:", 0)
-                _ = msg(w, "setFont:", skin_font("Inter-Regular", self.look.type.body, self.look.type.tabular))
+                _ = msg(w, "setFont:", look_font(self.look.type.family, 400, self.look.type.body, self.look.type.tabular))
                 w = self.shell(i, w)
         elif node.kind == SLIDER:
             w = msg(
@@ -659,6 +707,8 @@ struct AppKitHost[A: App](Movable):
             if self.in_row(i) and not sized:  # between a row's groups (a toolbar): a 1 pt line across the row, as Mac toolbars have
                 # (a 280 pt line each: four of them made omxplorer's window at least 1,554 pt wide, GitHub's Mac, 2026-10-23)
                 constrain(w, "widthAnchor", Float64(1))
+                if not node.sized_height():  # a control high (the web's .hstack > hr: 28)
+                    constrain(w, "heightAnchor", Float64(28))
             else:
                 if not sized:  # (the app sized it: its settings decide)
                     prefer(w, "widthAnchor", Float64(280))
@@ -761,10 +811,17 @@ struct AppKitHost[A: App](Movable):
             constrain(w, "widthAnchor", Float64(node.size))
             constrain(w, "heightAnchor", Float64(node.size))
         elif node.kind == ICON:
-            var image = msg(cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", ns_string(sf_symbol(node.text)), 0)
-            w = msg(cls("NSImageView"), "imageViewWithImage:", image)
-            var config = msg(cls("NSImageSymbolConfiguration"), "configurationWithPointSize:weight:", Float64(node.size), Float64(0))
-            _ = msg(w, "setSymbolConfiguration:", config)
+            # mojoui's Lucide drawing (what GTK and the web show) in a box its size; an SF Symbol for a name it hasn't
+            var drawing = svg_icon(node.text, Float64(node.size)) if node.size > 0 else 0
+            if drawing != 0:
+                w = msg(cls("NSImageView"), "imageViewWithImage:", drawing)
+                constrain(w, "widthAnchor", Float64(node.size))
+                constrain(w, "heightAnchor", Float64(node.size))
+            else:
+                var image = msg(cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", ns_string(sf_symbol(node.text)), 0)
+                w = msg(cls("NSImageView"), "imageViewWithImage:", image)
+                var config = msg(cls("NSImageSymbolConfiguration"), "configurationWithPointSize:weight:", Float64(node.size), Float64(0))
+                _ = msg(w, "setSymbolConfiguration:", config)
             _ = msg(w, "setContentTintColor:", msg(cls("NSColor"), "controlAccentColor"))
         elif node.kind == GRID:
             w = new("NSStackView")
@@ -901,7 +958,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(column, "setSpacing:", Float64(8))
             if node.hint != "":
                 var head = msg(cls("NSTextField"), "labelWithString:", ns_string(node.hint))
-                _ = msg(head, "setFont:", look_font("Inter", 600, self.look.type.body, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))  # (the web's .popover-title: 13, 600)
+                _ = msg(head, "setFont:", look_font(self.look.type.family, 600, self.look.type.body, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:", Float64(13)))  # (the web's .popover-title: 13, 600)
                 if self.skinned:
                     _ = msg(head, "setTextColor:", self.ink())
                 _ = msg(column, "addArrangedSubview:", head)
@@ -931,22 +988,63 @@ struct AppKitHost[A: App](Movable):
             w = new("NSView")
         elif node.kind == SPACER or node.kind == ROUTE:  # (a Route is state here: no URL)
             w = new("NSView")
-        elif node.kind == TABLE:  # rows of stacks, the columns equal (NSGridView would size them to their content: not yet)
+        elif node.kind == TABLE:  # rows of cells wearing the look's table roles; fit_tables() shares the width as the web's <table> does
             w = new("NSStackView")
             _ = msg(w, "setOrientation:", 1)
             _ = msg(w, "setSpacing:", Float64(0))
+            _ = msg(w, "setAlignment:", 5)  # leading
             var cols = max(node.value, 1)
             var row = 0
             for k in range(len(node.children)):
-                if k % cols == 0:
+                var r = k // cols
+                var col = k % cols
+                if col == 0:
                     row = new("NSStackView")
                     _ = msg(row, "setOrientation:", 0)
-                    _ = msg(row, "setDistribution:", 1)  # fill equally
-                    _ = msg(row, "setSpacing:", Float64(16))
-                    _ = msg(row, "setEdgeInsets:", Float64(9), Float64(16), Float64(9), Float64(16))
+                    _ = msg(row, "setSpacing:", Float64(0))
+                    _ = msg(row, "setAlignment:", 3)  # top: each cell is the row's height
                     _ = msg(w, "addArrangedSubview:", row)
                     _ = msg(msg(msg(row, "widthAnchor"), "constraintEqualToAnchor:", msg(w, "widthAnchor")), "setActive:", 1)
-                _ = msg(row, "addArrangedSubview:", self.build(node.children[k], self_addr))
+                var c = node.children[k]
+                var child = self.build(c, self_addr)
+                var num = col < node.hint.byte_length() and String(node.hint[byte=col]) == "R"
+                var ck = self.rt.shown.nodes[c].kind
+                var cell = new("NSStackView")
+                _ = msg(cell, "setOrientation:", 0)
+                _ = msg(cell, "setSpacing:", Float64(0))
+                _ = msg(cell, "setAlignment:", 10)  # centre Y
+                var keeps = ck == BUTTON or ck == TOGGLE  # (a button or a tick box keeps its width at its side; the rest fill, as a block in a <td>)
+                if keeps and num:
+                    _ = msg(cell, "addArrangedSubview:", flexible_spacer(False))
+                _ = msg(cell, "addArrangedSubview:", child)
+                if keeps and not num:
+                    _ = msg(cell, "addArrangedSubview:", flexible_spacer(False))
+                if not keeps:
+                    hug(child, Float32(1), False)
+                var role = String("table-head") if r == 0 else String("table-cell")
+                var sk = self.look.surface(role)
+                if r > 0 and r - 1 < node.text.byte_length() and String(node.text[byte = r - 1]) == "1" and self.look.surface("table-selected") >= 0:
+                    sk = self.look.surface("table-selected")
+                if sk >= 0:
+                    self.paint_surface(cell, sk, True)
+                else:
+                    _ = msg(cell, "setEdgeInsets:", Float64(9), Float64(16), Float64(9), Float64(16))
+                if ck == TEXT and (msg(child, "isKindOfClass:", cls("NSTextField")) & 0xFF) != 0:
+                    if self.rt.shown.nodes[c].name == "":  # (its words in the role's type: the head's caps, a figure's mono)
+                        var tk = self.look.surface("table-num") if num and r > 0 and self.look.surface("table-num") >= 0 else self.look.surface(role)
+                        if tk >= 0:
+                            self.restyle_label(child, self.rt.shown.nodes[c].text, tk)
+                    _ = msg(child, "setAlignment:", 2 if num else 0)  # NSTextAlignmentRight / Left
+                _ = msg(row, "addArrangedSubview:", cell)
+                _ = msg(msg(msg(cell, "heightAnchor"), "constraintEqualToAnchor:", msg(row, "heightAnchor")), "setActive:", 1)
+                var wc = 0
+                if col < cols - 1:
+                    wc = msg(msg(cell, "widthAnchor"), "constraintEqualToConstant:", Float64(80))
+                    _ = msg(wc, "setPriority:", Float32(999))
+                    _ = msg(wc, "setActive:", 1)
+                else:
+                    hug(cell, Float32(1), False)
+                self.tcells.append((w, cell, wc, col, c))
         elif node.kind == SCROLL:
             w = top_scroll_view(False)
             _ = msg(w, "setDrawsBackground:", 0)
@@ -1001,6 +1099,9 @@ struct AppKitHost[A: App](Movable):
             if look_at >= 0:  # a framework role the theme's look shapes (the toolbar's island, the inspector's panel)
                 var own_pad = node.pad_v == 0 and node.pad_h == 0
                 self.paint_surface(w, look_at, own_pad)
+                if node.w > 0 and node.h > 0:  # a fixed size (a dot): its corners at most half of it now
+                    var r = max(self.look.surfaces[look_at].radius_top, self.look.surfaces[look_at].radius_bottom)
+                    _ = msg(msg(w, "layer"), "setCornerRadius:", min(Float64(r), Float64(min(node.w, node.h)) / 2))
                 if own_pad and self.look.surfaces[look_at].pad_top >= 0:
                     inset_x = self.look.surfaces[look_at].pad_x
                     inset_y = (self.look.surfaces[look_at].pad_top + self.look.surfaces[look_at].pad_bottom) // 2
@@ -1022,10 +1123,20 @@ struct AppKitHost[A: App](Movable):
                 lead = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", lead)
             var first_spacer = 0
+            var before = lead  # (the view before this one in the stack: a Divider's room goes after it)
+            var built = List[Int]()
             for c in node.children:
                 var child = self.build(c, self_addr)
+                built.append(child if self.rt.shown.nodes[c].kind != SPACER else 0)
                 _ = msg(w, "addArrangedSubview:", child)
                 ref cn = self.rt.shown.nodes[c]
+                if cn.kind == DIVIDER and not (cn.sized_width() if not vertical else cn.sized_height()):
+                    # a Divider keeps its room each side, as the web's hr: 4 pt above and below in a column, 6 pt beside it in a row (D-440)
+                    var room = Float64(node.spacing + (4 if vertical else 6))
+                    if before != 0:
+                        _ = msg(w, "setCustomSpacing:afterView:", room, before)
+                    _ = msg(w, "setCustomSpacing:afterView:", room, child)
+                before = child
                 if cn.grows:  # flex-grow: lowest hugging priority along the stack
                     hug(child, Float32(1), vertical)
                 elif cn.kind == SPACER:  # (a growing view first, if there is one)
@@ -1037,11 +1148,22 @@ struct AppKitHost[A: App](Movable):
                         first_spacer = child
                 elif grows or spacers:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
                     hug(child, Float32(750), vertical)
+                if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
+                    hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
                 if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(2 * (inset_x if vertical else inset_y))
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
+                    if vertical and cn.max_w != 0:  # (up to its widest, centred: the web's max-width with auto margins, GTK's clamp)
+                        _ = msg(c2, "setPriority:", Float32(495))
+                        _ = msg(msg(msg(child, "centerXAnchor"), "constraintEqualToAnchor:", msg(w, "centerXAnchor")), "setActive:", 1)
                     _ = msg(c2, "setActive:", 1)
+            if not vertical:  # a row's padding holds above and below its tallest view (centred, a stack keeps its insets only loosely)
+                var ins = msg[CGRect](w, "edgeInsets")  # (top, left, bottom, right)
+                if ins.x + ins.width > 0:
+                    for v in built:
+                        if v != 0:
+                            _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, "heightAnchor"), ins.x + ins.width), "setActive:", 1)
             if node.justify_items == CENTER and not grows and not spacers:
                 var trail = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", trail)
@@ -1094,7 +1216,7 @@ struct AppKitHost[A: App](Movable):
         _ = msg(layer, "setShadowRadius:", Float64(1.5))
         _ = msg(layer, "setShadowOffset:", Float64(0), Float64(-1))
         var attrs = new("NSMutableDictionary")
-        _ = msg(attrs, "setObject:forKey:", look_font("Inter", sg.on_weight if on else sg.weight, sg.font_size, self.look.type.tabular), ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", look_font(self.look.type.family, sg.on_weight if on else sg.weight, sg.font_size, self.look.type.tabular), ns_string("NSFont"))
         _ = msg(attrs, "setObject:forKey:", ns_color(sg.on_ink if on else sg.ink), ns_string("NSColor"))
         _ = msg(b, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", msg(b, "title"), attrs))
         _ = msg(b, "setState:", 1 if on else 0)
@@ -1125,20 +1247,46 @@ struct AppKitHost[A: App](Movable):
         self.shells[i] = box
         return box
 
-    def draw_button(mut self, w: Int, style: Int, title: String):
-        """A push button in the look's shape: its fill, hairline and corners on a layer, its title in Inter, the look's
-        height and padding (GTK's `button`, the web's)."""
+    def draw_button(mut self, w: Int, style: Int, title: String, i: Int = -1):
+        """A push button in the look's shape: its fill, hairline and corners on a layer, its title in the look's family,
+        the look's height and padding (GTK's `button`, the web's). A button wearing a role (node i's tag) takes the role's
+        fill, corners, side padding, height at least, type and ink, as GTK's and the web's role rules do (D-445)."""
         var c = self.look.controls.copy()
         var fill = self.pal.card
         var ink = self.pal.ink
         var line = self.pal.line_strong
-        var weight = String("Inter-Medium")
+        var weight = c.button_weight if c.button_weight > 0 else 500
         if style == PROMINENT:
-            fill, ink, line, weight = self.pal.accent, self.pal.accent_ink, UInt32(0), String("Inter-SemiBold")
+            fill, ink, line, weight = self.pal.accent, self.pal.accent_ink, UInt32(0), c.button_weight if c.button_weight > 0 else 600
         elif style == DESTRUCTIVE:
-            fill, ink, line, weight = self.pal.bad, UInt32(0xFFFFFFFF), UInt32(0), String("Inter-SemiBold")
+            fill, ink, line, weight = self.pal.bad, UInt32(0xFFFFFFFF), UInt32(0), c.button_weight if c.button_weight > 0 else 600
         elif style == SUBTLE:
             fill, ink, line = UInt32(0), self.pal.ink2, UInt32(0)
+        var radius = min(c.button_radius, c.control_h // 2)
+        var pad = c.button_pad
+        var high = c.control_h
+        var size = c.button_font if c.button_font > 0 else self.look.type.body
+        var family = self.look.type.family
+        var k = self.look.surface(self.rt.shown.nodes[i].name) if i >= 0 and self.rt.shown.nodes[i].name != "" else -1
+        if k >= 0:
+            ref sf = self.look.surfaces[k]
+            if not text_only(sf):  # (a box rule: its own fill, or none)
+                fill, line = sf.fill, sf.outline
+                if sf.radius_top >= 0:
+                    radius = sf.radius_top
+                if sf.pad_top >= 0:
+                    pad = sf.pad_x
+                high = max(high, sf.min_height)
+            if sf.font_size > 0:
+                size = sf.font_size
+            if sf.font_weight > 0:
+                weight = sf.font_weight
+            if sf.font != "":
+                family = sf.font
+            if sf.ink != 0:
+                ink = sf.ink
+        if i >= 0 and self.rt.shown.nodes[i].h > 0:  # (the app's height: exactly that, as GTK's mui-fixed-h and the web)
+            high = self.rt.shown.nodes[i].h
         _ = msg(w, "setBordered:", 0)
         _ = msg(w, "setWantsLayer:", 1)
         var layer = msg(w, "layer")
@@ -1146,19 +1294,24 @@ struct AppKitHost[A: App](Movable):
         if line != 0:
             _ = msg(layer, "setBorderWidth:", Float64(1))
             _ = msg(layer, "setBorderColor:", msg(ns_color(line), "CGColor"))
-        _ = msg(layer, "setCornerRadius:", Float64(min(c.button_radius, c.control_h // 2)))
+        _ = msg(layer, "setCornerRadius:", Float64(min(radius, high // 2)))
         var attrs = new("NSMutableDictionary")
-        _ = msg(attrs, "setObject:forKey:", skin_font(weight, self.look.type.body, self.look.type.tabular), ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", look_font(family, weight, size, self.look.type.tabular), ns_string("NSFont"))
         _ = msg(attrs, "setObject:forKey:", ns_color(ink), ns_string("NSColor"))
-        _ = msg(w, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs))
+        var said = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs)
+        _ = msg(w, "setAttributedTitle:", said)
         _ = msg(w, "setContentTintColor:", ns_color(ink))
         var fit = msg[CGPoint](w, "fittingSize")
+        if k >= 0:  # (a role's button: its words, an icon and the web's 6 pt gap, the role's padding, as CSS measures it; a bare cell adds its own 6)
+            var words = msg[CGPoint](said, "size")
+            fit.x = Float64(Int(words.x + 0.999)) + (Float64(c.glyph if c.glyph > 0 else 16) + 6 if msg(w, "image") != 0 else 0)
         # its title's width is the least it takes and the width it prefers, not a fixed one: a filling button (an
         # inspector row's title) stretches, as on GTK and the web; held to its fit, it held the Report inspector's
         # column to 117 pt through the rows' equal widths (Mac, 2026-10-24)
-        _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", fit.x + Float64(2 * c.button_pad)), "setActive:", 1)
-        prefer(w, "widthAnchor", fit.x + Float64(2 * c.button_pad))
-        constrain(w, "heightAnchor", Float64(c.control_h))
+        _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", fit.x + Float64(2 * pad)), "setActive:", 1)
+        prefer(w, "widthAnchor", fit.x + Float64(2 * pad))
+        if i < 0 or self.rt.shown.nodes[i].h == 0:  # (apply_layout pins the app's own height)
+            constrain(w, "heightAnchor", Float64(high))
 
     def box_inset(self, i: Int, name: String) -> Tuple[Int, Int]:
         """What a Board object's role box takes from its content's size: the role's padding, across and down."""
@@ -1180,6 +1333,8 @@ struct AppKitHost[A: App](Movable):
         var radius = max(sf.radius_top, sf.radius_bottom)
         if radius > 0:
             _ = msg(layer, "setCornerRadius:", Float64(radius))
+            if radius > 6:  # (a pill's or a dot's 999: half its size once it's laid out, as CSS clamps it)
+                self.rounds.append((w, radius))
             if sf.radius_top != sf.radius_bottom:  # kCALayer{MinX,MaxX}{MinY,MaxY}Corner: MaxY is the top unless the view is flipped
                 var top = 12 if not flipped else 3
                 var bottom = 3 if not flipped else 12
@@ -1261,11 +1416,15 @@ struct AppKitHost[A: App](Movable):
             _ = msg(outer, "setEdgeInsets:", Float64(node.pad_v), Float64(node.pad_h), Float64(node.pad_v), Float64(node.pad_h))
             _ = msg(outer, "addArrangedSubview:", w)
         var chip_at = self.look.surface(node.name) if node.name != "" and not is_stack and node.kind == TEXT else -1
-        if chip_at >= 0 and (self.look.surfaces[chip_at].fill != 0 or len(self.look.surfaces[chip_at].shadows) > 0):
+        if chip_at >= 0 and (self.look.surfaces[chip_at].fill != 0 or len(self.look.surfaces[chip_at].shadows) > 0
+                             or self.look.surfaces[chip_at].pad_top > 0 or self.look.surfaces[chip_at].pad_x > 0 or self.look.surfaces[chip_at].pad_bottom > 0
+                             or self.look.surfaces[chip_at].line_bottom != 0 or self.look.surfaces[chip_at].line_top != 0):  # (or its padding, its rules: a group head's)
             # a label wearing a shaped role (a KPI's note chip): the shape around it, the role's padding inside
             if outer == w:
                 outer = new("NSStackView")
                 _ = msg(outer, "addArrangedSubview:", w)
+            for orientation in range(2):  # (the shape hugs its words and padding, as the label would)
+                hug(outer, Float32(750), orientation == 1)
             self.paint_surface(outer, chip_at, node.pad_v == 0 and node.pad_h == 0)
             var r = max(self.look.surfaces[chip_at].radius_top, 0)
             if r >= 999:  # (a pill: half its height, which a layer can't say ahead of the layout)
@@ -1282,6 +1441,8 @@ struct AppKitHost[A: App](Movable):
                 self.size_w[i] = cw
         if node.h != 0:
             var ch = msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h - inset[1]))
+            if is_stack and len(node.children) > 0:  # (a stack given a height holds it unless its content needs more: GTK's minimum; squeezed, its words went to 0 pt)
+                _ = msg(ch, "setPriority:", Float32(745))
             _ = msg(ch, "setActive:", 1)
             if i < len(self.size_h):
                 self.size_h[i] = ch
@@ -1325,6 +1486,8 @@ struct AppKitHost[A: App](Movable):
         self.shells = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.objects = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.dashes = List[Tuple[Int, Int, Int, Int]]()
+        self.rounds = List[Tuple[Int, Int]]()
+        self.tcells = List[Tuple[Int, Int, Int, Int, Int]]()
         self.size_w = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.wraps = List[Int]()
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
@@ -1366,7 +1529,20 @@ struct AppKitHost[A: App](Movable):
         else:
             _ = msg(msg(root, "layer"), "setBackgroundColor:", msg(msg(cls("NSColor"), "windowBackgroundColor"), "CGColor"))
         if self.rt.shown.nodes[0].grows or self.rt.shown.nodes[0].fills:  # the screen fills the window
-            _ = msg(self.window, "setContentView:", root)
+            # in a page that scrolls: a screen taller than the window scrolls, as the web's page does, instead of its
+            # words being squeezed to nothing (GTK's page scroller; D-440); across, it is the window's width
+            var page = top_scroll_view(False)
+            _ = msg(page, "setDrawsBackground:", 0)
+            _ = msg(root, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
+            _ = msg(page, "setDocumentView:", root)
+            var clip = msg(page, "contentView")
+            for anchor in ["topAnchor", "leadingAnchor", "widthAnchor"]:
+                _ = msg(msg(msg(root, anchor), "constraintEqualToAnchor:", msg(clip, anchor)), "setActive:", 1)
+            _ = msg(msg(msg(root, "heightAnchor"), "constraintGreaterThanOrEqualToAnchor:", msg(clip, "heightAnchor")), "setActive:", 1)
+            var fill = msg(msg(root, "heightAnchor"), "constraintEqualToAnchor:", msg(clip, "heightAnchor"))
+            _ = msg(fill, "setPriority:", Float32(490))  # (fills a short screen; a taller one's words hold at 750)
+            _ = msg(fill, "setActive:", 1)
+            _ = msg(self.window, "setContentView:", page)
         else:
             var holder = new("NSStackView")  # centres the app's root in the window
             _ = msg(holder, "setOrientation:", 1)
@@ -1375,6 +1551,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(holder, "addArrangedSubview:", root)
             _ = msg(self.window, "setContentView:", holder)
         self.attach_toast()
+        self.fit_tables()
         self.fit_wraps()
         self.dash_paths()
         self.start_frames()
@@ -1444,13 +1621,23 @@ struct AppKitHost[A: App](Movable):
             var w = self.widgets[p.node]
             var kind = self.rt.shown.nodes[p.node].kind
             if p.op == SET_TEXT and kind != TEXTAREA and kind != DATE and kind != NAVBAR:
-                if kind == TEXT:
-                    _ = msg(w, "setStringValue:", ns_string(p.text))
+                if kind == TEXT:  # (in the words' own attributes: the look's line height, letter spacing)
+                    var had = msg(w, "attributedStringValue")
+                    if had != 0 and msg(had, "length") > 0:
+                        var attrs = msg(had, "attributesAtIndex:effectiveRange:", 0, 0)
+                        _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(p.text), attrs))
+                    else:
+                        _ = msg(w, "setStringValue:", ns_string(p.text))
                 elif kind == FIELD:
                     if from_ns(msg(w, "stringValue")) != p.text:  # don't fight the typist
                         _ = msg(w, "setStringValue:", ns_string(p.text))
-                else:  # buttons and checkboxes
-                    _ = msg(w, "setTitle:", ns_string(p.text))
+                else:  # buttons and checkboxes (a drawn button's title keeps its type and ink)
+                    var had = msg(w, "attributedTitle") if kind == BUTTON else 0
+                    if had != 0 and msg(had, "length") > 0:
+                        var attrs = msg(had, "attributesAtIndex:effectiveRange:", 0, 0)
+                        _ = msg(w, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(p.text), attrs))
+                    else:
+                        _ = msg(w, "setTitle:", ns_string(p.text))
             elif p.op == SET_VALUE:
                 if kind == TOGGLE:
                     _ = msg(w, "setState:", p.number)
@@ -1512,8 +1699,106 @@ struct AppKitHost[A: App](Movable):
         """Whether node i sits in an HStack."""
         return i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].kind == HSTACK
 
+    def restyle_label(self, w: Int, text: String, k: Int):
+        """A label in surface k's type: its font, ink, letter spacing and line height (a table's head and figures)."""
+        ref sf = self.look.surfaces[k]
+        var font = look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight if sf.font_weight > 0 else 400,
+                             sf.font_size if sf.font_size > 0 else msg[Float64](msg(w, "font"), "pointSize"), self.look.type.tabular)
+        _ = msg(w, "setFont:", font)
+        if sf.ink != 0:
+            _ = msg(w, "setTextColor:", ns_color(sf.ink))
+        var attrs = new("NSMutableDictionary")
+        _ = msg(attrs, "setObject:forKey:", font, ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", msg(w, "textColor"), ns_string("NSColor"))
+        if sf.tracking != 0:
+            _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", sf.tracking), ns_string("NSKern"))
+        var lh = sf.line_height if sf.line_height > 0 else msg[Float64](font, "pointSize") * self.look.type.line
+        if lh > 0:
+            var para = new("NSMutableParagraphStyle")
+            _ = msg(para, "setMinimumLineHeight:", lh)
+            _ = msg(para, "setMaximumLineHeight:", lh)
+            _ = msg(attrs, "setObject:forKey:", para, ns_string("NSParagraphStyle"))
+            var natural = msg[Float64](font, "ascender") - msg[Float64](font, "descender")
+            _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", (lh - natural) / 2), ns_string("NSBaselineOffset"))
+            _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(Int(lh + 0.5))), "setActive:", 1)
+        _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(text), attrs))
+
+    def cell_widths(self, child: Int, node: Int) -> Tuple[Float64, Float64]:
+        """A table cell's content: (its narrowest: the longest word; its widest: one line), as CSS's min- and max-content."""
+        if self.rt.shown.nodes[node].kind != TEXT or (msg(child, "isKindOfClass:", cls("NSTextField")) & 0xFF) == 0:
+            var fit = msg[CGPoint](child, "fittingSize")
+            return (fit.x, fit.x)
+        var said = msg(child, "attributedStringValue")
+        if said == 0 or msg(said, "length") == 0:
+            return (Float64(0), Float64(0))
+        var attrs = msg(said, "attributesAtIndex:effectiveRange:", 0, 0)
+        var widest = msg[CGPoint](said, "size").x
+        var narrow = Float64(0)
+        for word in self.rt.shown.nodes[node].text.split(" "):
+            var one = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(String(word)), attrs)
+            narrow = max(narrow, msg[CGPoint](one, "size").x)
+        return (Float64(Int(narrow + 0.999)), Float64(Int(widest + 0.999)))
+
+    def fit_tables(self):
+        """Each Table's columns share its width as a browser's automatic table layout does (GTK's fit_tables): at least
+        each column's narrowest, the room up to its widest shared by how much each wants, more room by the widest (D-442)."""
+        if len(self.tcells) == 0 or self.window == 0:
+            return
+        _ = msg(msg(self.window, "contentView"), "layoutSubtreeIfNeeded")
+        var start = 0
+        while start < len(self.tcells):
+            var table = self.tcells[start][0]
+            var end = start
+            var cols = 0
+            while end < len(self.tcells) and self.tcells[end][0] == table:
+                cols = max(cols, self.tcells[end][3] + 1)
+                end += 1
+            var room = msg[CGRect](table, "bounds").width
+            var lo = List[Float64](length=cols, fill=0)
+            var hi = List[Float64](length=cols, fill=0)
+            for t in range(start, end):
+                var cell = self.tcells[t][1]
+                var ins = msg[CGRect](cell, "edgeInsets")  # (NSEdgeInsets: top, left, bottom, right)
+                var views = msg(cell, "arrangedSubviews")
+                var child = 0
+                for j in range(msg(views, "count")):
+                    var v = msg(views, "objectAtIndex:", j)
+                    if (msg(v, "isMemberOfClass:", cls("NSView")) & 0xFF) == 0:  # (not a spacer)
+                        child = v
+                if child == 0:
+                    continue
+                var wh = self.cell_widths(child, self.tcells[t][4])
+                var col = self.tcells[t][3]
+                lo[col] = max(lo[col], wh[0] + ins.y + ins.height)
+                hi[col] = max(hi[col], wh[1] + ins.y + ins.height)
+            var sum_lo = Float64(0)
+            var sum_hi = Float64(0)
+            for c in range(cols):
+                sum_lo += lo[c]
+                sum_hi += hi[c]
+            for t in range(start, end):
+                var col = self.tcells[t][3]
+                if self.tcells[t][2] == 0 or room <= 0:
+                    continue
+                var v = lo[col]
+                if room >= sum_hi and sum_hi > 0:
+                    v = hi[col] + (room - sum_hi) * hi[col] / sum_hi
+                elif room > sum_lo and sum_hi > sum_lo:
+                    v = lo[col] + (room - sum_lo) * (hi[col] - lo[col]) / (sum_hi - sum_lo)
+                _ = msg(self.tcells[t][2], "setConstant:", Float64(Int(v)))
+            start = end
+        _ = msg(msg(self.window, "contentView"), "layoutSubtreeIfNeeded")
+
     def dash_paths(self):
-        """Each dashed outline traced around its view's laid-out bounds (the add tile's dashes)."""
+        """Each dashed outline traced around its view's laid-out bounds (the add tile's dashes); each rounded surface's
+        corners at most half its size."""
+        if len(self.rounds) > 0 and self.window != 0:
+            _ = msg(msg(self.window, "contentView"), "layoutSubtreeIfNeeded")
+        for rd in self.rounds:
+            var rb = msg[CGRect](rd[0], "bounds")
+            var half_size = min(rb.width, rb.height) / 2
+            if half_size > 0:
+                _ = msg(msg(rd[0], "layer"), "setCornerRadius:", min(Float64(rd[1]), half_size))
         for d in self.dashes:
             var b = msg[CGRect](d[0], "bounds")
             var half = Float64(d[3]) / 2
@@ -1619,7 +1904,13 @@ struct AppKitHost[A: App](Movable):
             return
         var name = self.report.next_name()
         var content = msg(self.window, "contentView")
-        var pictured = self.report.save_png(content, name + ".png")
+        var whole = content
+        if (msg(content, "isKindOfClass:", cls("NSScrollView")) & 0xFF) != 0:
+            # a screen taller than the window: the whole page, as the web's full-page screenshot and GTK's picture (D-461)
+            var doc = msg(content, "documentView")
+            if doc != 0 and msg[CGRect](doc, "bounds").height > msg[CGRect](content, "bounds").height + 0.5:
+                whole = doc
+        var pictured = self.report.save_png(whole, name + ".png")
         var problems = List[String]()
         var dump = self.dump_views(problems)
         self.report.write(name + ".txt", dump)
@@ -1758,6 +2049,7 @@ struct AppKitHost[A: App](Movable):
         var d = self.rt.resize(w, h)
         self.apply(d, self_addr)
         if not d.rebuild or self.resized_in_place > in_place:  # (a whole rebuild fitted them already)
+            self.fit_tables()
             self.fit_wraps()
         self.dash_paths()
 
@@ -2501,7 +2793,7 @@ def make_toast(text: String, action: String, tag: Int, target: Int, pal: Palette
 def register_fonts():
     """The app's own fonts (Contents/Resources/fonts, D-155), registered for this process through CoreText."""
     var bundle = msg(cls("NSBundle"), "mainBundle")
-    for name in ["Inter-Regular", "Inter-Medium", "Inter-SemiBold", "JetBrainsMono-Regular", "JetBrainsMono-Bold"]:
+    for name in ["Inter-Regular", "Inter-Medium", "Inter-SemiBold", "JetBrainsMono-Regular", "JetBrainsMono-Bold", "Geist-Variable", "GeistMono-Variable"]:
         var url = msg(bundle, "URLForResource:withExtension:subdirectory:", ns_string(name), ns_string("ttf"), ns_string("fonts"))
         if url != 0:
             _ = cfunc[Int8]("CTFontManagerRegisterFontsForURL", url, 1, 0)  # kCTFontManagerScopeProcess

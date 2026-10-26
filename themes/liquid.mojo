@@ -31,7 +31,7 @@ def liquid_look(p: Palette) -> Look:
     var value = words("kpi-value", 34, 600, 0, -0.8)  # (a Report tile's figure: GTK's and the web's title-1 in a tile)
     value.line_height = 40
     surfaces.append(value^)
-    return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11, True), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10, 30, 14, 8), surfaces^,
+    return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11, True, 0), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10, 30, 14, 8, 0, 0, 0, 0), surfaces^,
                 Segments(rgba(15, 23, 42, 15), 999, 3, 0, 24, 12, 999, 12, 500, p.ink3, rgba(255, 255, 255), p.ink, 500, True))  # (the sheet's toggle-group rules say the same: D-300)
 
 

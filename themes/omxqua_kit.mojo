@@ -124,8 +124,11 @@ def header_roles(p: Palette, mono: String) -> List[Surface]:
     var header = layout("page-header", 12, 14, 16)  # .bh: 14px 16px, 12 between, 65 high with its rule (the Divider under it)
     header.min_height = 64
     out.append(header^)
-    out.append(words_role("page-title", 17, 650, p.ink, "", -0.34))  # .bh .t: 650 17px, -.02em
-    out.append(words_role("page-sub", 12.5, 0, p.ink2))  # .bh .s
+    var title = words_role("page-title", 17, 650, p.ink, "", -0.34)  # .bh .t: 650 17px, -.02em, one line
+    var sub = words_role("page-sub", 12.5, 0, p.ink2)  # .bh .s: one line
+    title.one_line, sub.one_line = True, True  # (nowrap + ellipsis: cut where they don't fit, D-445)
+    out.append(title^)
+    out.append(sub^)
     out.append(layout("page-tools", 8))  # .tools: 8 between
     var sq = box("icon-square", tint(p.data(0), 0.14), 10, -1, -1)  # .sq: 36 × 36, the hue at 14 %, 10 corners, the icon (16, 1.75) in the hue
     sq.width, sq.height, sq.ink, sq.icon_stroke = 36, 36, p.data(0), 1.75

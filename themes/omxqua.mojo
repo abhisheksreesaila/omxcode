@@ -10,7 +10,7 @@ from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
 from mojoui.theme import Palette, Theme, hx, mix, hex_of
 from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, Segments, Motion, solid, band, words, chip, slot
-from mojoui.look import css_color, surface_rule, px, fpx
+from mojoui.look import css_color, surface_rule, px, fpx, line_px
 from themes.skins import skin_css, SKIN_WEB
 from mojoui.markdown import markdown_roles
 from mojoui.timeline import timeline_roles
@@ -22,6 +22,7 @@ comptime FONT = "Geist"  # --oq-font
 comptime FONT_MONO = "Geist Mono"  # --oq-font-mono
 comptime TEXT = 14.0  # the console's body (blades.css: body 14px; --oq-text 13.5 is the family's, the console sets 14)
 comptime TITLE = 28.0  # --oq-title
+comptime LINE = 1.45  # the console's body line height (blades.css: body 14px/1.45)
 comptime RADIUS_XS = 4  # --oq-radius-xs: badges and tags
 comptime RADIUS_IN = 10  # --oq-radius-in: inputs
 comptime RADIUS_CARD = 12  # --oq-radius-card (.oq-family-dev)
@@ -259,8 +260,8 @@ def omxqua_look(p: Palette) -> Look:
     surfaces += markdown_roles(p, FONT_MONO)  # (a notebook's markdown: blade-notebook.css's .nb-md)
     surfaces += timeline_roles(p, FONT_MONO)  # (Add a model's stages: blade-add.css's .stg)
     surfaces += logpane_roles(p, FONT_MONO, CODE, CODE_TEXT, RADIUS_CARD)  # (Add a model's live log: blade-add.css .sr)
-    return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False),
-                Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12), surfaces^,
+    return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False, LINE),
+                Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12, TEXT * 0.95, 550, 0, 0), surfaces^,  # (a Divider: no room of its own, as omxqua's web hr { margin: 0 })
                 Segments(p.page, RADIUS_FULL, 3, p.line_strong, TARGET - 8, 14, RADIUS_FULL, 12.6, 500, p.ink2, surface_2(p), p.ink, 500, True),  # (.seg2)
                 Motion(PRESS_SCALE, SPRING_FAST_MS, String(SPRING_FAST), String(EASE_IN)), [2, 4, 8, 12, 16, 20, 24])  # (the spacing scale: SPACE_XXS … SPACE_XXL, --oq-space on the console's compact steps)
 
@@ -408,9 +409,9 @@ def omxqua_gtk(p: Palette, look: Look, cls: String) -> String:
         ":root { --accent-bg-color: " + accent + "; --accent-color: " + accent + "; --accent-fg-color: " + on + "; }\n"
         + w + "{ background-color: " + s0 + "; color: " + ink + "; font-family: '" + t.family + "', sans-serif; font-size: " + fpx(t.body) + "; }\n"
         + w + "label { color: " + ink + "; }\n"
-        + w + "label.title-1 { font-size: " + fpx(t.title) + "; font-weight: 650; letter-spacing: -0.98px; color: " + ink + "; }\n"
-        + w + "label.title-4 { font-size: " + fpx(t.headline) + "; font-weight: 600; letter-spacing: -0.14px; color: " + ink + "; }\n"
-        + w + "label.caption { font-size: " + fpx(t.caption) + "; color: " + ink2 + "; }\n"
+        + w + "label.title-1 { font-size: " + fpx(t.title) + "; line-height: " + line_px(t.title * 1.1) + "; font-weight: 650; letter-spacing: -0.98px; color: " + ink + "; }\n"
+        + w + "label.title-4 { font-size: " + fpx(t.headline) + "; line-height: " + line_px(t.headline * 1.3) + "; font-weight: 600; letter-spacing: -0.14px; color: " + ink + "; }\n"
+        + w + "label.caption { font-size: " + fpx(t.caption) + "; line-height: " + line_px(t.caption * 1.4) + "; color: " + ink2 + "; }\n"
         + w + "label.mui-tone-accent { color: " + accent + "; } " + w + "label.mui-tone-good { color: " + hex_of(p.good) + "; } " + w + "label.mui-tone-warn { color: " + hex_of(p.warn) + "; }\n"
         + w + ".mui-card { " + surface_rule(card_box(p), False) + "}\n"
         + w + ".mui-card.mui-warn { background: " + hex_of(mix(p.card, p.warn, 0.08)) + "; } " + w + ".mui-card.mui-good { background: " + hex_of(mix(p.card, p.good, 0.08)) + "; }\n"

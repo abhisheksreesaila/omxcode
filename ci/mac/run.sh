@@ -36,10 +36,25 @@ for steps_file in ci/*.steps; do
 done
 # side.txt: one launch per screen at one size; the last picture of each is out/side/<app>-<screen>.png (scripts/side.py)
 mkdir -p out/side
+# the console (goal 33 M7) polls a daemon: the recorded replies' server (scripts/console_fixture.py, shipped in the
+# sources' tarball with docs/goals/33/fixtures) runs fresh for each of its screens, the clock held at the recording's time
+mkdir -p fixture && tar -xzf zips/omxcode-src.tar.gz -C fixture scripts/console_fixture.py docs/goals/33/fixtures 2>/dev/null || echo "no console fixture in the tarball"
 while IFS='|' read -r app screen settings steps; do
     case "$app" in ''|'#'*) continue ;; esac
     bundle=$(ls -d apps/"$app"/*.app 2>/dev/null | head -1)
+    if [ -z "$bundle" ] && zip=$(ls zips/"$app"-*.zip 2>/dev/null | head -1) && [ -n "$zip" ]; then  # (an app with side lines but no steps file)
+        mkdir -p "apps/$app" && ditto -x -k "$zip" "apps/$app" && bundle=$(ls -d apps/"$app"/*.app | head -1) && xattr -cr "$bundle"
+    fi
     [ -n "$bundle" ] || continue
+    fxpid=""
+    if [ "$app" = console ] && [ -f fixture/scripts/console_fixture.py ]; then
+        python3 fixture/scripts/console_fixture.py 8765 > "out/side/$app-$screen-fixture.txt" 2>&1 &
+        fxpid=$!
+        for _ in $(seq 40); do curl -sf -o /dev/null http://127.0.0.1:8765/admin/info && break; sleep 0.25; done
+        export MXC_URL=http://127.0.0.1:8765 MXC_ADMIN_KEY=mac-ci
+        MOJOUI_NOW=$(python3 -c 'import json; print(json.load(open("fixture/docs/goals/33/fixtures/_manifest.json"))["recorded_at"])')
+        export MOJOUI_NOW
+    fi
     exe="$bundle/Contents/MacOS/$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleExecutable)"
     config="$PWD/out/side/config-$app-$screen" && mkdir -p "$config"
     echo "$settings" | tr ',' '\n' > "$config/settings.txt"
@@ -52,7 +67,8 @@ while IFS='|' read -r app screen settings steps; do
         sleep 1
     done
     wait "$pid"; echo "exit $?" >> "out/side/$app-$screen.txt"
-    last=$(ls -td ~/Desktop/omxcode-report-"$app"/*/ | head -1)
+    if [ -n "$fxpid" ]; then kill "$fxpid" 2>/dev/null; wait "$fxpid" 2>/dev/null; unset MXC_URL MXC_ADMIN_KEY MOJOUI_NOW; fi
+    last=$(ls -td ~/Desktop/omxcode-report-*/*/ | head -1)  # (this launch's: the newest; an app's folder is its title's, "omxconsole")
     shot=$(ls "$last"*.png 2>/dev/null | grep -v -- '-popover\.png$\|-dialog\.png$' | sort | tail -1)
     [ -n "$shot" ] && cp "$shot" "out/side/$app-$screen.png"
     for extra in popover dialog; do [ -f "${shot%.png}-$extra.png" ] && cp "${shot%.png}-$extra.png" "out/side/$app-$screen-$extra.png"; done

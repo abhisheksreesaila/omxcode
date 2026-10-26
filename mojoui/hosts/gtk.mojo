@@ -535,6 +535,7 @@ struct GtkHost[A: App](Movable):
     var popups: List[Int]  # popovers to pop up once the new screen is in the window
     var shortcut_keys: Int  # the window's key controller: menu shortcuts (Ctrl+S) from anywhere
     var toast_overlay: Int  # AdwToastOverlay around the screen (toasts float over it)
+    var page: Int  # GtkScrolledWindow inside it: a screen taller than the window scrolls, as a web page does
     var toast: Int  # the toast showing, if any (kept across rebuilds while its node stays)
     var toast_text: String
     var toast_claimed: Bool  # the new screen still has the toast's node
@@ -547,6 +548,7 @@ struct GtkHost[A: App](Movable):
     var fonts: Bool  # the app's own fonts (Inter, JetBrains Mono) were handed to fontconfig
     var css: Int  # one GtkCssProvider for padding classes
     var css_rules: String
+    var one_line: List[String]  # the look's roles whose words stay on one line, cut with an ellipsis
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var key_node: Int  # the canvas node that had the keyboard last (it gets it back when an in-place editor closes)
     var editor_keys: Int  # the in-place editor's key controller (test steps press Escape through it)
@@ -614,6 +616,7 @@ struct GtkHost[A: App](Movable):
         self.popups = List[Int]()
         self.shortcut_keys = 0
         self.toast_overlay = 0
+        self.page = 0
         self.toast = 0
         self.toast_text = ""
         self.toast_claimed = False
@@ -626,6 +629,7 @@ struct GtkHost[A: App](Movable):
         self.fonts = False
         self.css = 0
         self.css_rules = ""
+        self.one_line = List[String]()
         self.focus = -1
         self.key_node = -1
         self.editor_keys = 0
@@ -676,6 +680,10 @@ struct GtkHost[A: App](Movable):
             add_class(w, self.padding_class(node.pad_v, node.pad_h))
         if node.name != "":  # a tagged view can be styled by the design's CSS (.mui-tag-toolbar)
             add_class(w, "mui-tag-" + node.name)
+            if node.kind == TEXT and node.name in self.one_line:  # (the look's one-line words: cut with an ellipsis, never wrapped)
+                external_call["gtk_label_set_wrap", NoneType](w, c_int(0))
+                external_call["gtk_label_set_ellipsize", NoneType](w, c_int(3))  # PANGO_ELLIPSIZE_END
+                external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
         if node.tip != "":
             var tip = node.tip
             external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
@@ -684,6 +692,8 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_widget_set_size_request", NoneType](w, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
         # GTK size requests are minimums; AdwClamp caps the width: at max_w, or exactly at a
         # fixed width (so a fixed-width view never grows past it, as on the other hosts).
+        if node.h != 0 and node.kind == BUTTON:  # a button given a height is that high, padding and all (the look's mui-fixed-h)
+            add_class(w, "mui-fixed-h")
         if node.w != 0:  # a fixed width never takes spare room (GTK passes children's expand up)
             external_call["gtk_widget_set_hexpand", NoneType](w, c_int(0))
         if node.h != 0:
@@ -801,11 +811,83 @@ struct GtkHost[A: App](Movable):
         var want_w = max(node.w, node.min_w)
         external_call["gtk_widget_set_size_request", NoneType](target, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
 
+    def full_page(self):
+        """For a picture (MOJOUI_SHOT), after the test's report: the page scroller stops scrolling, so a screen taller
+        than the window shows whole (the window grows to it), as the web's full-page screenshot shows its whole page.
+        Before D-440 the window always grew; the boxes reported before this are the window's own size's (D-461)."""
+        if self.page != 0:
+            external_call["gtk_scrolled_window_set_policy", NoneType](self.page, c_int(2), c_int(2))  # NEVER, NEVER
+
+    def fit_tables(self):
+        """Each Table's columns share its width as a browser's automatic table layout does (the web's is a <table>):
+        every column at least its widest cell's narrowest (min-content), then the room up to each one's widest
+        (max-content) shared by how much each wants, then any more room by their widest. Runs after each layout; a
+        change asks for another (D-442)."""
+        for k in range(min(len(self.kinds), len(self.widgets), len(self.rt.shown.nodes))):
+            if self.kinds[k] != TABLE or self.widgets[k] == 0:
+                continue
+            var grid = self.widgets[k]
+            var holder = external_call["gtk_widget_get_parent", Int](grid)
+            if holder == 0:
+                continue
+            var room = Int(external_call["gtk_widget_get_width", c_int](holder))
+            if room <= 0:
+                continue
+            var cols = max(self.rt.shown.nodes[k].value, 1)
+            var rows = len(self.rt.shown.nodes[k].children) // cols
+            var lo = List[Int](length=cols, fill=0)
+            var hi = List[Int](length=cols, fill=0)
+            var m = List[c_int](length=2, fill=0)
+            for c in range(cols):
+                for r in range(rows):
+                    var cell = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(r))
+                    if cell == 0:
+                        continue
+                    external_call["gtk_widget_measure", NoneType](cell, c_int(HORIZONTAL), c_int(-1), Int(m.unsafe_ptr()), Int(m.unsafe_ptr()) + 4, Int(0), Int(0))
+                    lo[c] = max(lo[c], Int(m[0]))
+                    hi[c] = max(hi[c], Int(m[1]), Int(m[0]))
+            var sum_lo = 0
+            var sum_hi = 0
+            for c in range(cols):
+                sum_lo += lo[c]
+                sum_hi += hi[c]
+            var want = List[Int](length=cols, fill=0)
+            var given = 0
+            for c in range(cols):
+                var v = lo[c]
+                if room >= sum_hi and sum_hi > 0:
+                    v = hi[c] + (room - sum_hi) * hi[c] // sum_hi
+                elif room > sum_lo and sum_hi > sum_lo:
+                    v = lo[c] + (room - sum_lo) * (hi[c] - lo[c]) // (sum_hi - sum_lo)
+                want[c] = v
+                given += v
+            if room > given and given >= sum_lo:  # (what rounding left goes to the last column)
+                want[cols - 1] += room - given
+            for c in range(cols):
+                var spacer = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(-1))
+                if spacer == 0:
+                    continue
+                external_call["gtk_widget_get_size_request", NoneType](spacer, Int(m.unsafe_ptr()), Int(m.unsafe_ptr()) + 4)
+                if Int(m[0]) != want[c]:
+                    external_call["gtk_widget_set_size_request", NoneType](spacer, c_int(want[c]), c_int(0))
+            _ = len(m)
+
     def build_child(mut self, parent: Int, c: Int, self_addr: Int) -> Int:
         """Builds child c of stack `parent` and aligns it in the stack."""
         var child = self.build(c, self_addr)
         var node = self.rt.shown.nodes[parent].copy()
         self.place_child(node, self.rt.shown.nodes[c], child)
+        if node.kind == HSTACK and self.rt.shown.nodes[c].kind == DIVIDER and not self.rt.shown.nodes[c].sized_width():
+            # a Divider between a row's parts stands up: 1 px wide, a control high, 6 px each side (the web's .hstack > hr)
+            # (its room is the look's Controls.divider_side: GTK's own is none, as before D-440)
+            var sep = self.widgets[c]
+            var dn = self.rt.shown.nodes[c].copy()
+            external_call["gtk_orientable_set_orientation", NoneType](sep, c_int(VERTICAL))
+            external_call["gtk_widget_set_size_request", NoneType](sep, c_int(-1), c_int(dn.h if dn.h != 0 else (-1 if dn.height_from_parent else 28)))
+            external_call["gtk_widget_set_valign", NoneType](sep, c_int(ALIGN_CENTER))
+            var plain = String("mui-divider")
+            external_call["gtk_widget_remove_css_class", NoneType](sep, plain.as_c_string_span())
+            add_class(sep, "mui-divider-up")
         if node.kind == VSTACK and self.rt.shown.nodes[c].kind == TEXT and node.align_items == START:
             external_call["gtk_label_set_justify", NoneType](self.widgets[c], c_int(0))  # left-aligned lines too
             external_call["gtk_label_set_xalign", NoneType](self.widgets[c], Float32(0))
@@ -813,7 +895,7 @@ struct GtkHost[A: App](Movable):
 
     def place_child(self, parent: Node, child_node: Node, child: Int):
         """Aligns a stack's child: the stack's align, then the child's own fill/grow."""
-        var vertical = parent.kind == VSTACK
+        var vertical = parent.kind == VSTACK or parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (one child, stacked down)
         var cross = ALIGN_CENTER
         if parent.align_items == START:
             cross = 1  # GTK_ALIGN_START
@@ -894,6 +976,12 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_button_set_child", NoneType](w, content)
             else:
                 w = external_call["gtk_button_new_with_label", Int](t.as_c_string_span())
+                var words = external_call["gtk_button_get_child", Int](w)  # a squeezed title wraps, as the web's does
+                if words != 0:
+                    external_call["gtk_label_set_wrap", NoneType](words, c_int(1))
+                    external_call["gtk_label_set_natural_wrap_mode", NoneType](words, c_int(1))  # (one line when there's room)
+                    if node.align_items == START:
+                        external_call["gtk_label_set_xalign", NoneType](words, Float32(0))
             if node.align_items == START and node.style != ICON_ONLY and node.style != ICON_ON:  # its content at the leading edge (a sidebar row)
                 var child = external_call["gtk_button_get_child", Int](w)
                 if child != 0:
@@ -963,6 +1051,7 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_separator_new", Int](c_int(HORIZONTAL))
             if not sized:
                 width(w, 280)
+            add_class(w, "mui-divider")  # (its room above and below: the look's Controls.divider_gap; GTK's own is none)
         elif node.kind == IMAGE:
             var tex = texture(node.pixels, node.spacing, node.size)
             w = external_call["gtk_picture_new_for_paintable", Int](tex)
@@ -1212,11 +1301,28 @@ struct GtkHost[A: App](Movable):
                 if row > 0 and row - 1 < node.text.byte_length() and String(node.text[byte = row - 1]) == "1":
                     add_class(cell, "mui-tag-table-selected")
                 external_call["gtk_widget_set_hexpand", NoneType](cell, c_int(1))
-                external_call["gtk_widget_set_halign", NoneType](child, c_int(2 if num else 1))  # end or start
+                # a cell's view fills the cell, as a block in the web's <td> does (words keep to their side); a button or a
+                # tick box keeps its own width at its side
+                var ck = self.rt.shown.nodes[node.children[k]].kind
+                var keeps = ck == BUTTON or ck == TOGGLE
+                external_call["gtk_widget_set_halign", NoneType](child, c_int((2 if num else 1) if keeps else 0))  # end, start or fill
+                if ck == TEXT:
+                    external_call["gtk_label_set_xalign", NoneType](self.widgets[node.children[k]], Float32(1 if num else 0))
                 external_call["gtk_widget_set_valign", NoneType](child, c_int(3))  # centre
                 external_call["gtk_widget_set_hexpand", NoneType](child, c_int(1))
                 external_call["gtk_box_append", NoneType](cell, child)
                 external_call["gtk_grid_attach", NoneType](w, cell, c_int(col), c_int(row), c_int(1), c_int(1))
+            for col in range(cols):  # row -1: an empty box per column whose width fit_tables() sets (the column's share)
+                external_call["gtk_grid_attach", NoneType](w, external_call["gtk_box_new", Int](c_int(HORIZONTAL), c_int(0)), c_int(col), c_int(-1), c_int(1), c_int(1))
+            # in a scroller that never shows a bar: the columns' shares are minimums, and they mustn't hold the window
+            # at its width when it gets narrower (the next layout shares the new width)
+            self.widgets[i] = w
+            var holder = external_call["gtk_scrolled_window_new", Int]()
+            external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(2))  # EXTERNAL across, NEVER down
+            external_call["gtk_scrolled_window_set_propagate_natural_width", NoneType](holder, c_int(1))
+            external_call["gtk_scrolled_window_set_propagate_natural_height", NoneType](holder, c_int(1))
+            external_call["gtk_scrolled_window_set_child", NoneType](holder, w)
+            w = holder
         elif node.kind == TOAST:
             if self.toast != 0 and self.toast_text == node.text:  # the same toast, still up: keep it
                 set_node(self.toast, i)
@@ -1481,6 +1587,12 @@ struct GtkHost[A: App](Movable):
                     add_class(w, "mui-good")
             if node.kind == HSTACK:
                 external_call["gtk_widget_set_halign", NoneType](w, c_int(ALIGN_CENTER))
+                var growers = 0
+                for c in node.children:
+                    if self.rt.shown.nodes[c].grows and self.rt.shown.nodes[c].w == 0:
+                        growers += 1
+                if growers >= 2 and growers == len(node.children):  # (all growing from zero, as the web's flex: 1 1 0: equal shares)
+                    external_call["gtk_box_set_homogeneous", NoneType](w, c_int(1))
             # justify: GtkBox packs from the start; invisible expanding spacers do the rest.
             var j = node.justify_items
             for c in node.children:  # a growing child takes all the free space: no spacers
@@ -1549,7 +1661,12 @@ struct GtkHost[A: App](Movable):
         if self.toast_overlay == 0:  # toasts float over whatever screen is up
             self.toast_overlay = external_call["adw_toast_overlay_new", Int]()
             external_call["gtk_window_set_child", NoneType](self.window, self.toast_overlay)
-        external_call["adw_toast_overlay_set_child", NoneType](self.toast_overlay, root)
+            # (a screen taller than the window scrolls instead of growing the window past the size asked for, as the
+            # web's page does; across, the screen's own minimum still holds: D-440)
+            self.page = external_call["gtk_scrolled_window_new", Int]()
+            external_call["gtk_scrolled_window_set_policy", NoneType](self.page, c_int(2), c_int(1))  # NEVER across, AUTOMATIC down
+            external_call["adw_toast_overlay_set_child", NoneType](self.toast_overlay, self.page)
+        external_call["gtk_scrolled_window_set_child", NoneType](self.page, root)
         if self.toast != 0 and not self.toast_claimed:  # the new screen has no toast: the old one goes
             set_node(self.toast, -1)
             external_call["adw_toast_dismiss", NoneType](self.toast)
@@ -1958,6 +2075,10 @@ struct GtkHost[A: App](Movable):
         self.forcing_scheme = False
         if theme.id == "":  # (back to the system's: tell the app what that is now, on the next idle turn)
             _ = external_call["g_idle_add", c_uint](on_idle_appearance[Self.A], self_addr)
+        self.one_line = List[String]()
+        for sf in theme.look.surfaces:
+            if sf.one_line:
+                self.one_line.append(sf.role)
         var sheet = theme.gtk_css + (look_gtk_css(theme.look, "window." + theme.id + " ") if theme.id != "" else String(""))  # (the look's rules after the theme's own)
         if sheet != "":
             self.skin_provider = external_call["gtk_css_provider_new", Int]()
@@ -2675,6 +2796,11 @@ def on_idle_appearance[A: App](host_addr: Int) abi("C") -> c_int:
     return 0
 
 
+def on_clock_layout[A: App](clock: Int, host_addr: Int) abi("C"):
+    if not busy():
+        host_at[A](host_addr)[].fit_tables()
+
+
 def on_surface_layout[A: App](surface: Int, width: c_int, height: c_int, host_addr: Int) abi("C"):
     host_at[A](host_addr)[].arm_all(host_addr)  # the compositor resized the window (e.g. tiling)
     queue_resize[A](host_addr)
@@ -2715,6 +2841,8 @@ def on_window_realize[A: App](window: Int, host_addr: Int) abi("C"):
     if clock != 0 and host_at[A](host_addr)[].rt.trace:  # (MOJOUI_TRACE: the paint phase of every frame, for bench steps)
         connect(clock, "before-paint", on_before_paint[A], host_addr)
         connect(clock, "after-paint", on_after_paint[A], host_addr)
+    if clock != 0:  # (after each layout: tables share their width as the web's do)
+        connect(clock, "layout", on_clock_layout[A], host_addr)
     var surface = external_call["gtk_native_get_surface", Int](window)
     if surface != 0:
         connect_any(surface, "layout", on_surface_layout[A], host_addr)
@@ -4357,6 +4485,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
             settle()
         report[A](host_addr)
     if shot != "":
+        host[].full_page()
         save_png(host[].window, shot)
     if testing or shot != "":
         external_call["g_application_quit", NoneType](gapp)
