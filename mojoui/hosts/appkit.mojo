@@ -1172,8 +1172,11 @@ struct AppKitHost[A: App](Movable):
             # across its axis a stack is as wide (tall) as its widest view: it hugs loosely, so a row of buttons is never
             # squeezed to a narrower row's width (maccheck's Delete button, 11 pt, GitHub's Mac, 2026-10-23)
             _ = msg(w, "setHuggingPriority:forOrientation:", Float32(250), 0 if vertical else 1)
-            # along it, its views' own length, as a GTK box that isn't told to expand (a growing stack: hug() sets 1)
-            _ = msg(w, "setHuggingPriority:forOrientation:", Float32(750), 1 if vertical else 0)
+            # along it, its views' own length, as a GTK box that isn't told to expand (a growing stack: hug() sets 1).
+            # 748: under a label's 750 hugging and a stack's 749 shrink-to-fit, so a column stretched taller than its
+            # views leaves the room below them, as the web's, instead of standing one view as tall as the rest (run
+            # 40304117595: an overview panel's foot 133 high for 15, D-512)
+            _ = msg(w, "setHuggingPriority:forOrientation:", Float32(748), 1 if vertical else 0)
             _ = msg(w, "setSpacing:", Float64(node.spacing))
             if node.pad_v != 0 or node.pad_h != 0:  # padding = the stack's own edge insets
                 _ = msg(w, "setEdgeInsets:", Float64(node.pad_v), Float64(node.pad_h), Float64(node.pad_v), Float64(node.pad_h))
@@ -2432,7 +2435,7 @@ def hug(view: Int, priority: Float32, vertical: Bool):
             if priority > Float32(250):
                 var side = "heightAnchor" if vertical else "widthAnchor"
                 var fit = msg(msg(view, side), "constraintEqualToConstant:", Float64(0))
-                _ = msg(fit, "setPriority:", Float32(251))
+                _ = msg(fit, "setPriority:", Float32(749))  # (over its parent's 748 pull along, under a label's 750 resistance: D-512)
                 _ = msg(fit, "setActive:", 1)
                 # its insets hold across, required (they were the Edge.Min pins' only: a padded chip lost its padding)
                 var ins = msg[CGRect](view, "edgeInsets")  # (top, left, bottom, right)
