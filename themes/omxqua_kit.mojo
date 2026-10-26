@@ -319,9 +319,12 @@ def panel_roles(p: Palette, mono: String, shadow: List[Shadow]) -> List[Surface]
     var foot = box("card-foot", 0, 0, 9, 16)  # .src: 11.5px mono ink-2 over a line-2 rule, 9px 16px, 8 between
     foot.line_top, foot.font, foot.font_size, foot.ink, foot.gap, foot.line_height = p.line, mono, 11.5, p.ink2, 8, -1
     out.append(foot^)
-    var fw = words_role("foot-text", 0, 0, 0)  # (the foot's words, its type the foot's; the mark .src's gap 8 before them)
-    fw.gap = 8
+    var fw = words_role("foot-text", 0, 0, 0)  # (the foot's words, its type the foot's; on the web its mark and words are the foot's own items, .src's)
+    fw.gap, fw.joins_row = 8, True
     out.append(fw^)
+    var tl = words_role("foot-tail", 0, 0, 0)  # (.src .tail: margin-left auto)
+    tl.ends_row = True
+    out.append(tl^)
     out.append(words_role("foot-mark", 0, 0, tint(p.ink2, 0.6)))  # (.src::before: "$" or "↳", opacity .6)
     var cp = box("foot-copy", tint(p.ink, 0.05), 999, 0, 10)  # .src .cp: 500 11px mono ink-2, 24 high, 0 10px
     cp.font, cp.font_size, cp.font_weight, cp.ink, cp.height, cp.line_height = mono, 11, 500, p.ink2, 24, -1

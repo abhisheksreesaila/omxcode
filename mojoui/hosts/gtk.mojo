@@ -689,6 +689,9 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_label_set_wrap", NoneType](w, c_int(0))
                 external_call["gtk_label_set_ellipsize", NoneType](w, c_int(3))  # PANGO_ELLIPSIZE_END
                 external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
+            if self.ends_row(node.name):  # (the role sits at its row's end, the free room before it: the web's margin-left auto)
+                external_call["gtk_widget_set_hexpand", NoneType](w, c_int(1))
+                external_call["gtk_widget_set_halign", NoneType](w, c_int(2))  # GTK_ALIGN_END
             if node.kind == TEXT and node.name in self.breaks_words:  # (a long word breaks anywhere, as the web's overflow-wrap: anywhere)
                 external_call["gtk_label_set_wrap_mode", NoneType](w, c_int(2))  # PANGO_WRAP_WORD_CHAR
                 external_call["gtk_label_set_natural_wrap_mode", NoneType](w, c_int(0))  # (INHERIT: one-line naturals with char wrapping made boxes ask for more height than their natural)
@@ -969,6 +972,10 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_label_set_justify", NoneType](self.widgets[c], c_int(0))  # left-aligned lines too
             external_call["gtk_label_set_xalign", NoneType](self.widgets[c], Float32(0))
         return child
+
+    def ends_row(self, role: String) -> Bool:
+        var k = self.look.surface(role) if role != "" else -1
+        return k >= 0 and self.look.surfaces[k].ends_row
 
     def measured(self, node: Node) -> Bool:
         """Whether the role a view wears gives it a measure (Surface.max_chars)."""

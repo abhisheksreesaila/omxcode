@@ -57,9 +57,9 @@ def CardFoot(text: String, note: Bool = False, tail: String = "") -> View:
     """A card's foot: the command that shows the same thing after a $ (↳ for a note) over a rule, `tail` at the end
     (role card-foot)."""
     var items: List[View] = [foot_words(text, note)]
-    if tail != "":
-        items.append(Spacer())
-        items.append(Text(tail))
+    if tail != "":  # (at the foot's end, the room before it: role foot-tail, as .src .tail's margin-left auto, so the
+        # words, the tail and the gap between them share a short foot as the original's three items do)
+        items.append(Text(tail).tag("foot-tail"))
     return HStack(items^, spacing=SPACE_S).align(CENTER).justify(START).fill().tag("card-foot")
 
 
