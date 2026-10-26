@@ -542,7 +542,12 @@ struct AppKitHost[A: App](Movable):
             var p = self.parents[i] if i < len(self.parents) else -1
             if node.w > 0 or (p >= 0 and self.rt.shown.nodes[p].kind == VSTACK and self.rt.shown.nodes[p].align_items == START):
                 _ = msg(w, "setAlignment:", 0)  # a leading column's lines (or a table's cell) read from the leading edge, as on GTK
-            if node.max_w == 0 and node.w == 0 and not self.in_row(i):  # a column's label: one line, wrapping when squeezed
+            var own = self.look.surface(node.name) if node.name != "" else -1
+            if own >= 0 and self.look.surfaces[own].one_line:  # the look's one-line words: cut with an ellipsis where they don't fit
+                _ = msg(w, "setLineBreakMode:", 4)  # NSLineBreakByTruncatingTail
+                _ = msg(w, "setMaximumNumberOfLines:", 1)
+                _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
+            elif node.max_w == 0 and node.w == 0 and not self.in_row(i):  # a column's label: one line, wrapping when squeezed
                 _ = msg(w, "setLineBreakMode:", 0)  # NSLineBreakByWordWrapping
                 _ = msg(w, "setMaximumNumberOfLines:", 0)
                 # 490: it keeps its one line unless a real limit squeezes it (a scroll view's width, 495; a fixed width):

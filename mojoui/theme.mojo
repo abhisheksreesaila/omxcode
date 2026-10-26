@@ -178,6 +178,7 @@ struct Surface(Copyable, Movable):
     var outline: UInt32  # a border of its own (0: none), `outline_w` wide, dashed or solid (the add tile's dashes)
     var outline_w: Int
     var dashed: Bool
+    var one_line: Bool  # its words on one line, cut with an ellipsis where they don't fit (CSS nowrap + text-overflow)
 
 
 @fieldwise_init
@@ -298,34 +299,34 @@ def glass(role: String, radius_top: Int, radius_bottom: Int, margin_top: Int, ma
     var shadows: List[Shadow] = [Shadow(1, 0, 0, rgba(255, 255, 255, 230), True), Shadow(0, 0, 1, rgba(255, 255, 255, 191), False),
                                  Shadow(8, 32, 0, rgba(15, 23, 42, 26), False), Shadow(1, 2, 0, rgba(15, 23, 42, 15), False)]
     return Surface(role, rgba(255, 255, 255, 158), radius_top, radius_bottom, margin_top, margin_x, margin_bottom, pad, pad, pad,
-                   shadows^, 0, 0, 24, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+                   shadows^, 0, 0, 24, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False)
 
 
 def solid(role: String, radius: Int, pad_top: Int, pad_x: Int, pad_bottom: Int) -> Surface:
     """An opaque white card with a hairline ring and a faint shadow (the content: a table, a tile)."""
     var shadows: List[Shadow] = [Shadow(0, 0, 1, rgba(15, 23, 42, 18), False), Shadow(1, 3, 0, rgba(15, 23, 42, 13), False)]
-    return Surface(role, rgba(255, 255, 255), radius, radius, -1, -1, -1, pad_top, pad_x, pad_bottom, shadows^, 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    return Surface(role, rgba(255, 255, 255), radius, radius, -1, -1, -1, pad_top, pad_x, pad_bottom, shadows^, 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False)
 
 
 def band(role: String, fill: UInt32, line_top: UInt32, line_bottom: UInt32) -> Surface:
     """A full-width strip in the window's chrome (the skins' toolbar and status bar): a fill and a hairline."""
-    return Surface(role, fill, 0, 0, -1, -1, -1, -1, -1, -1, [], line_top, line_bottom, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    return Surface(role, fill, 0, 0, -1, -1, -1, -1, -1, -1, [], line_top, line_bottom, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False)
 
 
 def words(role: String, size: Float64, weight: Int, ink: UInt32, tracking: Float64 = 0) -> Surface:
     """A role whose look is its text only (a chart's sentence: 15 pt, semibold, in the ink); no panel of its own."""
-    return Surface(role, 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", size, ink, weight, tracking, 0, 0, 0, False)
+    return Surface(role, 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", size, ink, weight, tracking, 0, 0, 0, False, False)
 
 
 def chip(role: String, fill: UInt32, ring: UInt32, size: Float64, ink: UInt32, radius: Int, pad_v: Int, pad_h: Int) -> Surface:
     """A small filled shape with its text (a KPI's note, a stat card): a fill, a hairline ring inside its edge, corners."""
     var shadows: List[Shadow] = [Shadow(0, 0, 1, ring, True)] if ring != 0 else []
-    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, shadows^, 0, 0, 0, -1, "", size, ink, 0, 0, 0, 0, 0, False)
+    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, shadows^, 0, 0, 0, -1, "", size, ink, 0, 0, 0, 0, 0, False, False)
 
 
 def slot(role: String, outline: UInt32, radius: Int, min_height: Int, ink: UInt32) -> Surface:
     """An empty place for something to come (the Report's add tile): no fill, a dashed outline, its text quiet."""
-    return Surface(role, 0, radius, radius, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, min_height, "", 0, ink, 0, 0, 0, outline, 2, True)
+    return Surface(role, 0, radius, radius, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, min_height, "", 0, ink, 0, 0, 0, outline, 2, True, False)
 
 
 

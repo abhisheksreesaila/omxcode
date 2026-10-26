@@ -67,11 +67,11 @@ def beacon_roles(p: Palette, mono: String, accent: UInt32) -> List[Look]:
     0 16px 0 12px; the label 600 13px, the value 500 12px mono in a quieter grey; the live dot in `accent`."""
     var out = List[Look]()
     var pill = Look("beacon", BEACON_BG, 22, 22, -1, -1, -1, 0, 14, 0,
-                    [Shadow(10, 30, 0, rgba(0, 0, 0, 89), False), Shadow(0, 0, 1, rgba(255, 255, 255, 15), False)], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+                    [Shadow(10, 30, 0, rgba(0, 0, 0, 89), False), Shadow(0, 0, 1, rgba(255, 255, 255, 15), False)], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False)
     out.append(pill^)
     out.append(words("beacon-label", 13, 600, BEACON_INK))
     var value = words("beacon-value", 12, 500, BEACON_QUIET)
     value.font = mono
     out.append(value^)
-    out.append(Look("beacon-live", accent, 4, 4, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False))
+    out.append(Look("beacon-live", accent, 4, 4, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False))
     return out^

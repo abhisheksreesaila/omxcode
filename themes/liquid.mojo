@@ -19,10 +19,10 @@ def liquid_look(p: Palette) -> Look:
     status.font, status.font_size, status.ink = "Inter", 12, p.ink3
     var header = glass("menubar", 12, 12, 8, 10, 0, -1)
     header.min_height = 34
-    var bar = Surface("formula-bar", 0, -1, -1, 0, 10, 0, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)  # (on the backdrop: no panel)
+    var bar = Surface("formula-bar", 0, -1, -1, 0, 10, 0, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False)  # (on the backdrop: no panel)
     # an inspector row (a label, its control) as tall as a control, whichever control it holds: the Mac's checkbox (16 pt) and
     # switch rows sat closer than GTK's and the web's (2026-10-25)
-    var row = Surface("inspector-row", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, 30, "", 0, 0, 0, 0, 0, 0, 0, False)
+    var row = Surface("inspector-row", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, 30, "", 0, 0, 0, 0, 0, 0, 0, False, False)
     var surfaces: List[Surface] = [header^, row^, glass("toolbar", 18, 18, 0, 10, 0, 6), glass("inspector", 18, 18, -1, -1, -1, 10), tabs^, status^, bar^,
                                    solid("table", 16, 10, 12, 12), solid("tile", 16, 16, 18, 16), words("sentence-line", 15, 600, p.ink),
                                    words("section-title", 0, 600, 0, 0.5), words("stat-value", 15, 600, p.ink), words("kpi-fact", 12, 0, p.ink3),

@@ -114,7 +114,7 @@ def card_box(p: Palette) -> Surface:
 
 def box(role: String, fill: UInt32, radius: Int, pad_v: Int, pad_h: Int) -> Surface:
     """A plain box for a role: a fill (0: none), corners (-1: the component's), padding (-1: the component's)."""
-    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False)
 
 
 def tint(c: UInt32, a: Float64) -> UInt32:

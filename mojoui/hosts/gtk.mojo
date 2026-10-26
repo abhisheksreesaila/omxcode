@@ -548,6 +548,7 @@ struct GtkHost[A: App](Movable):
     var fonts: Bool  # the app's own fonts (Inter, JetBrains Mono) were handed to fontconfig
     var css: Int  # one GtkCssProvider for padding classes
     var css_rules: String
+    var one_line: List[String]  # the look's roles whose words stay on one line, cut with an ellipsis
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var key_node: Int  # the canvas node that had the keyboard last (it gets it back when an in-place editor closes)
     var editor_keys: Int  # the in-place editor's key controller (test steps press Escape through it)
@@ -628,6 +629,7 @@ struct GtkHost[A: App](Movable):
         self.fonts = False
         self.css = 0
         self.css_rules = ""
+        self.one_line = List[String]()
         self.focus = -1
         self.key_node = -1
         self.editor_keys = 0
@@ -678,6 +680,10 @@ struct GtkHost[A: App](Movable):
             add_class(w, self.padding_class(node.pad_v, node.pad_h))
         if node.name != "":  # a tagged view can be styled by the design's CSS (.mui-tag-toolbar)
             add_class(w, "mui-tag-" + node.name)
+            if node.kind == TEXT and node.name in self.one_line:  # (the look's one-line words: cut with an ellipsis, never wrapped)
+                external_call["gtk_label_set_wrap", NoneType](w, c_int(0))
+                external_call["gtk_label_set_ellipsize", NoneType](w, c_int(3))  # PANGO_ELLIPSIZE_END
+                external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
         if node.tip != "":
             var tip = node.tip
             external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
@@ -2057,6 +2063,10 @@ struct GtkHost[A: App](Movable):
         self.forcing_scheme = False
         if theme.id == "":  # (back to the system's: tell the app what that is now, on the next idle turn)
             _ = external_call["g_idle_add", c_uint](on_idle_appearance[Self.A], self_addr)
+        self.one_line = List[String]()
+        for sf in theme.look.surfaces:
+            if sf.one_line:
+                self.one_line.append(sf.role)
         var sheet = theme.gtk_css + (look_gtk_css(theme.look, "window." + theme.id + " ") if theme.id != "" else String(""))  # (the look's rules after the theme's own)
         if sheet != "":
             self.skin_provider = external_call["gtk_css_provider_new", Int]()

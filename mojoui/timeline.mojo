@@ -151,7 +151,7 @@ def Timeline(stages: List[Stage]) -> View:
 def _role(role: String, fill: UInt32 = 0, radius: Int = -1, font: String = "", size: Float64 = 0, ink: UInt32 = 0,
           weight: Int = 0, outline: UInt32 = 0, outline_w: Int = 0) -> Surface:
     return Surface(role, fill, radius, radius, -1, -1, -1, -1, -1, -1, List[Shadow](), 0, 0, 0, -1, font, size, ink, weight,
-                   0, 0, outline, outline_w, False)
+                   0, 0, outline, outline_w, False, False)
 
 
 def timeline_roles(p: Palette, mono: String) -> List[Surface]:

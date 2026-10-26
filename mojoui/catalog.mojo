@@ -99,7 +99,7 @@ def BackButton(on_tap: Int, title: String = "Back") -> View:
 # ---------- the look (blade-add.css, omxqua's components.css), for a theme to add to its Look's surfaces ----------
 
 def _box(role: String, fill: UInt32, radius: Int, pad_v: Int, pad_h: Int) -> Surface:
-    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False)
 
 
 def _words(role: String, size: Float64, weight: Int, ink: UInt32, font: String = "") -> Surface:

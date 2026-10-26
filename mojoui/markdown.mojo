@@ -626,7 +626,7 @@ def text_role(role: String, size: Float64, weight: Int, ink: UInt32, font: Strin
               line_height: Float64 = 0, fill: UInt32 = 0, radius: Int = -1, pad_v: Int = -1, pad_h: Int = -1) -> Surface:
     """A role for words, optionally on a small filled shape (inline code)."""
     return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, List[Shadow](), 0, 0, 0, -1, font, size, ink,
-                   weight, tracking, line_height, 0, 0, False)
+                   weight, tracking, line_height, 0, 0, False, False)
 
 
 def markdown_roles(p: Palette, mono: String) -> List[Surface]:

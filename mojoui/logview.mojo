@@ -80,17 +80,17 @@ def logpane_roles(p: Palette, mono: String, code: UInt32, code_text: UInt32, rad
     mixed toward the code text as the original's color-mix() does."""
     var dim = mix(code, code_text, 0.45)
     var out = List[Surface]()
-    var pane = Surface("log-pane", code, radius, radius, -1, -1, -1, 14, 0, 0, List[Shadow](), 0, 0, 0, -1, "", 0, code_text, 0, 0, 0, 0, 0, False)
+    var pane = Surface("log-pane", code, radius, radius, -1, -1, -1, 14, 0, 0, List[Shadow](), 0, 0, 0, -1, "", 0, code_text, 0, 0, 0, 0, 0, False, False)
     out.append(pane^)
-    var head = Surface("log-pane-head", 0, -1, -1, -1, -1, -1, 0, 16, 8, List[Shadow](), 0, 0, 0, -1, mono, 11, dim, 500, 0.66, 0, 0, 0, False)
+    var head = Surface("log-pane-head", 0, -1, -1, -1, -1, -1, 0, 16, 8, List[Shadow](), 0, 0, 0, -1, mono, 11, dim, 500, 0.66, 0, 0, 0, False, False)
     out.append(head^)
-    var toggle = Surface("log-toggle", 0, 6, 6, -1, -1, -1, 2, 6, 2, List[Shadow](), 0, 0, 0, 1, mono, 11, dim, 400, 0, 0, 0, 0, False)
+    var toggle = Surface("log-toggle", 0, 6, 6, -1, -1, -1, 2, 6, 2, List[Shadow](), 0, 0, 0, 1, mono, 11, dim, 400, 0, 0, 0, 0, False, False)
     out.append(toggle^)
-    var body = Surface("log-lines", 0, -1, -1, -1, -1, -1, 4, 16, 16, List[Shadow](), 0, 0, 0, -1, mono, 12, code_text, 0, 0, 19.2, 0, 0, False)
+    var body = Surface("log-lines", 0, -1, -1, -1, -1, -1, 4, 16, 16, List[Shadow](), 0, 0, 0, -1, mono, 12, code_text, 0, 0, 19.2, 0, 0, False, False)
     out.append(body^)
-    out.append(Surface("log-scroll", 0, -1, -1, -1, -1, -1, -1, -1, -1, List[Shadow](), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False))
+    out.append(Surface("log-scroll", 0, -1, -1, -1, -1, -1, -1, -1, -1, List[Shadow](), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False))
     var inks: List[UInt32] = [code_text, dim, mix(code_text, p.bad, 0.60), mix(code_text, p.good, 0.60), mix(code_text, p.warn, 0.60)]
     var roles: List[String] = ["log-text", "log-time", "log-er", "log-ok", "log-warn"]
     for k in range(5):
-        out.append(Surface(roles[k], 0, -1, -1, -1, -1, -1, -1, -1, -1, List[Shadow](), 0, 0, 0, -1, mono, 12, inks[k], 0, 0, 19.2, 0, 0, False))
+        out.append(Surface(roles[k], 0, -1, -1, -1, -1, -1, -1, -1, -1, List[Shadow](), 0, 0, 0, -1, mono, 12, inks[k], 0, 0, 19.2, 0, 0, False, False))
     return out^

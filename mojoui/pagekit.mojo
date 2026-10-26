@@ -145,7 +145,7 @@ def _tint(c: UInt32, a: Float64) -> UInt32:
 
 
 def _box(role: String, fill: UInt32, radius: Int, pad_v: Int, pad_h: Int) -> Surface:
-    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, False)
 
 
 def _words(role: String, size: Float64, weight: Int, ink: UInt32, font: String = "", tracking: Float64 = 0) -> Surface:
@@ -176,8 +176,11 @@ def page_roles(p: Palette, mono: String) -> List[Surface]:
     var header = _box("page-header", 0, 0, 14, 16)  # .bh: 14px 16px, a line-2 rule under it, 65 high at least
     header.line_bottom, header.min_height = p.line, 65
     out.append(header^)
-    out.append(_words("page-title", 17, 650, p.ink, "", -0.34))  # .bh .t: 650 17px, -.02em
-    out.append(_words("page-sub", 12.5, 0, p.ink2))  # .bh .s: 12.5px ink-2
+    var title = _words("page-title", 17, 650, p.ink, "", -0.34)  # .bh .t: 650 17px, -.02em, one line
+    var sub = _words("page-sub", 12.5, 0, p.ink2)  # .bh .s: 12.5px ink-2, one line
+    title.one_line, sub.one_line = True, True
+    out.append(title^)
+    out.append(sub^)
     var gh = _box("group-head", 0, -1, -1, -1)  # .gh: 500 10.5px mono, caps, .06em, faint; 14px 10px 6px
     gh.pad_top, gh.pad_x, gh.pad_bottom = 14, 10, 6
     gh.font, gh.font_size, gh.font_weight, gh.ink, gh.tracking = mono, 10.5, 500, p.ink3, 0.63
