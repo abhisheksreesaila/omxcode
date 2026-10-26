@@ -42,8 +42,7 @@ webviews (later); pushing anything but the mac-test branch.
 A webview widget inside a native app won't look native; each widget adds a webview's memory on GTK and the Mac; the
 agent sees only what the widget reports; each library needs testing on each host.
 
-## After this: goal 35 (Mojo 1.2 and flare, docs/goals/35-draft.md), then goal 36: measure the web host, then decide
+## After this: goal 35 (Mojo 1.2 and flare, docs/goals/35-draft.md), then goal 36: measure the web host only
 FastHTML is the web host and works well (owner, 2026-10-25: "are we not using FastHTML as a host already and shining
-with it?"). Goal 36 measures it first: time per update, memory per user, startup. A native Mojo host on flare
-(ehsanmok/flare) is built only if those numbers show a real cost, or deployment (a Python environment beside the app)
-becomes a real pain. Mojo 1.2 comes when flare is needed for HTTPS in `mojoui.http`, either way.
+with it?"). Goal 36 measures it first: time per update, memory per user, startup. Owner, 2026-10-26: "hold off goal 36; you can measure but no need to act." So goal 36 records the numbers and
+changes nothing; replacing FastHTML is not planned. Mojo 1.2 comes when flare is needed for HTTPS in `mojoui.http`, either way.
