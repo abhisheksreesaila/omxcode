@@ -149,8 +149,8 @@ def settings_header() -> View:
 def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
     var cards: List[View] = []
     var chosen = sp.pick if sp.pick >= 0 else (1 if dark else 0)
-    cards.append(Card([CardHead("Appearance", "kept in this browser"), CardBody([SegmentButtons(["Light", "Dark"], ["sun", "moon"], chosen, SET_THEME, framed=True),
-                                                                                Hint("Until you pick one, the console follows your system.")]),
+    cards.append(Card([CardHead("Appearance", "kept in this browser"), CardBody([HStack(SegmentButtons(["Light", "Dark"], ["sun", "moon"], chosen, SET_THEME, framed=True)).justify(START),
+                                                                                Hint("Until you pick one, the console follows your system.")], flow=True),
                        CardFoot("kept in this browser", note=True)]))
     # Idle unload
     var idle: List[View] = [Hint("A model unloads after " + dur(DEFAULT_KEEP_ALIVE) + " without a request unless you say otherwise. There is no single setting for all of them yet: it is kept per model.")]
@@ -163,7 +163,7 @@ def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
             names.append(m.name)
             values.append(FactText("pinned: never unloads" if m.pinned else "after " + dur(m.keep_alive) + " idle"))
         idle.append(FactGrid(names, values^, mono_keys=True))
-    cards.append(Card([CardHead("Idle unload", "per model"), CardBody(idle^), CopyFoot(materialize[COPIES]()[0], SET_COPY), CopyFoot(materialize[COPIES]()[1], SET_COPY + 1)]))
+    cards.append(Card([CardHead("Idle unload", "per model"), CardBody(idle^, flow=True), CopyFoot(materialize[COPIES]()[0], SET_COPY), CopyFoot(materialize[COPIES]()[1], SET_COPY + 1)]))
     # Daemon
     var daemon: List[View] = []
     if sp.has_info:

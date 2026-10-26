@@ -72,7 +72,7 @@ def main() raises:
     assert_equal(row.nodes[0].name, "panel-row")
     assert_equal(PanelRow([Panel([Text("a")])], compact=True).nodes[0].name, "panel-column")
     covered([Card([head.copy(), CardBody([Text("x")]), foot.copy()]), CardNote("Loading…"), CardStack([Text("x")]), CardColumn([Text("x")]),
-             TabBody(Text("head"), [Text("x")]), TabBody(Text("head"), [Text("x")], compact=True, tight=True), TabBody(Text("head"), [Text("x")], flush=True), ListRow([Text("x")], on=True), ColumnRow([Text("Oct 25"), Text("3 models")], Text("best")), ColumnRow([Text("Oct 25")], Text("best"), compact=True),
+             TabBody(Text("head"), [Text("x")]), TabBody(Text("head"), [Text("x")], compact=True, tight=True), TabBody(Text("head"), [Text("x")], flush=True), ListRow([Text("x")], on=True), ColumnRow([Text("Oct 25"), Text("3 models")], Text("best")), ColumnRow([Text("Oct 25")], Text("best"), compact=True), CardBody([Text("a"), Text("b")], flow=True),
              PanelGrid([row.copy()]), PanelGrid([Text("x")], compact=True), grid.copy(), FactList([fact.copy(), Fact("x", FactLink("Security ›", 1), KEYS_WIDEST)]),
              LabeledRow("Linux", Text("sudo …")), LabeledRow("macOS", Text("Open …"), compact=True)], ["[lock]", "head"])
     print("panel: ok")

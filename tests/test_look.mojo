@@ -77,4 +77,6 @@ def main() raises:
     var w1 = Surface("pillw", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, whole_width=True)
     var wcss = look_web_css(Look(Look.none().type, Look.none().controls, [w1.copy()], Look.none().segments), "body.x ")
     assert_true("--mojoui-whole-width: 1;" in wcss, wcss)  # (the web host's script sizes it to whole pixels, D-479)
+    var fl = Surface("flowing", 0, -1, -1, -1, -1, -1, 0, 16, 14, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, block_flow=True)
+    assert_true("display: block;" in surface_rule(fl, True) and "display" not in surface_rule(fl, False), surface_rule(fl, True))  # (D-481)
     print("LOOK TESTS PASSED")

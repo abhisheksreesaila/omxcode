@@ -313,6 +313,8 @@ def panel_roles(p: Palette, mono: String, shadow: List[Shadow]) -> List[Surface]
     out.append(words_role("card-sub", 12.5, 0, p.ink2))
     var body = box("card-body", 0, 0, 0, 16)  # .card-b: 0 16px 14px, 10 between
     body.pad_bottom, body.gap = 14, 10
+    out.append(body.copy())
+    body.role, body.gap, body.block_flow = "card-body-flow", -1, True  # (.card-b as the page lays it: blocks apart by their own margins)
     out.append(body^)
     var foot = box("card-foot", 0, 0, 9, 16)  # .src: 11.5px mono ink-2 over a line-2 rule, 9px 16px, 8 between
     foot.line_top, foot.font, foot.font_size, foot.ink, foot.gap, foot.line_height = p.line, mono, 11.5, p.ink2, 8, -1
@@ -419,7 +421,7 @@ def word_roles(p: Palette, mono: String) -> List[Surface]:
     out.append(words_role("cell-mono-quiet", 0, 0, p.ink2, mono))
     out.append(words_role("cell-mono-strong", 0, 600, p.ink, mono))  # (the mono alone: a cell's size and ink, .tbl td.mono)
     var hint = words_role("hint", 12.5, 0, p.ink2, "", 0, 18.75)  # .ox-note: 12.5px/1.5 ink-2, 64ch at most
-    hint.max_width = 520
+    hint.max_width, hint.margin_top, hint.margin_x, hint.margin_bottom = 520, 10, 0, 0  # (.ox-note: margin 10px 0 0; in a flowing body)
     out.append(hint^)
     out.append(words_role("muted", 14, 0, p.ink2))  # (a .bn-hrow's date: a button's inherited 14px)
     out.append(words_role("mono-muted", 14, 0, p.ink2, mono))

@@ -247,7 +247,7 @@ def gateway_view(gp: GatewayPage, st: Store, phone: Bool) -> View:
         var facts: List[View] = [FactGrid(keys, values^)]
         if not gp.litellm:
             facts.append(Hint("LiteLLM is off, so only the daemon's own /v1 answers. The routes below apply once mxc expose starts it."))
-        status.append(CardBody(facts^))
+        status.append(CardBody(facts^, flow=True))
     status.append(CopyFoot("mxc status", GW_COPY))
     cards.append(Card(status^))
     # Routes

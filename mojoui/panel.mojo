@@ -36,8 +36,12 @@ def CardHead(title: String, badge: String = "", sub: String = "", var lead: List
     return HStack(items^, spacing=SPACE_M).align(CENTER).fill().tag("card-head")
 
 
-def CardBody(var items: List[View]) -> View:
-    """A card's body between its head and foot (role card-body: its insets and spacing)."""
+def CardBody(var items: List[View], flow: Bool = False) -> View:
+    """A card's body between its head and foot (role card-body: its insets and spacing). `flow`: its items follow block
+    flow, apart by their own roles' margins (a note's 10 above it, none below: role card-body-flow), as a web page's card
+    body lays out its paragraphs and lists."""
+    if flow:
+        return VStack(items^, spacing=0).align(STRETCH).fill().tag("card-body-flow")
     return VStack(items^, spacing=SPACE_M).align(START).fill().tag("card-body")
 
 

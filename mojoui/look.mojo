@@ -32,7 +32,7 @@ def fpx(v: Float64) -> String:
 def text_only(s: Surface) -> Bool:
     """A role the look gives type only (words()): no box rule is written for it."""
     return (s.fill == 0 and s.radius_top < 0 and s.margin_top < 0 and s.pad_top < 0 and len(s.shadows) == 0 and s.line_top == 0
-            and s.line_bottom == 0 and s.min_height <= 0 and s.outline == 0 and s.gap < 0 and s.height == 0 and s.width == 0 and not s.scrolls_x and not s.shares and not s.shrinks and not s.items_shrink and not s.whole_width and s.text_align != 2 and not s.one_line and not s.inline_flow and s.max_chars == 0)
+            and s.line_bottom == 0 and s.min_height <= 0 and s.outline == 0 and s.gap < 0 and s.height == 0 and s.width == 0 and not s.scrolls_x and not s.shares and not s.shrinks and not s.items_shrink and not s.whole_width and not s.block_flow and s.text_align != 2 and not s.one_line and not s.inline_flow and s.max_chars == 0)
 
 
 def surface_rule(s: Surface, web: Bool) -> String:
@@ -88,6 +88,8 @@ def surface_rule(s: Surface, web: Bool) -> String:
     if s.one_line and web:
         out += "flex-wrap: nowrap; "
     if s.inline_flow and web:
+        out += "display: block; "
+    if s.block_flow and web:  # (block flow: margins collapse as CSS's; its children are blocks that fill its width)
         out += "display: block; "
     if s.whole_width and web:  # (the web host's script reads the marker and sets the width to the content's whole pixels)
         out += "--mojoui-whole-width: 1; "

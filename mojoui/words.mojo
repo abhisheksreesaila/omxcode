@@ -71,7 +71,8 @@ def Mono(text: String) -> View:
 
 
 def Hint(text: String) -> View:
-    """A sentence of advice in the quiet ink, kept to a readable width (role hint)."""
+    """A sentence of advice in the quiet ink, kept to a readable width, with room above it of its own (role hint: a
+    page's note, margin 10 0 0): put it in a flowing body (CardBody(flow=True)), where margins set the space."""
     return Text(text).tag("hint")
 
 
