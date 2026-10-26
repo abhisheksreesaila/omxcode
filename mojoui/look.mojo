@@ -62,9 +62,22 @@ def surface_rule(s: Surface, web: Bool) -> String:
         out += "-webkit-backdrop-filter: blur(" + String(s.blur) + "px) saturate(1.6); backdrop-filter: blur(" + String(s.blur) + "px) saturate(1.6); "
     if s.outline != 0:
         out += "border: " + px(s.outline_w) + (" dashed " if s.dashed else " solid ") + css_color(s.outline) + "; "
-    if s.min_height > 0:
-        out += "min-height: " + px(s.min_height) + "; "
+    if s.min_height > 0:  # (the web's boxes are border-box; GTK's min-height is the content's: padding and lines come off)
+        out += "min-height: " + px(s.min_height if web else gtk_content_h(s, s.min_height)) + "; "
     return out
+
+
+def gtk_content_h(s: Surface, outer: Int) -> Int:
+    """The content height GTK must be given for a box `outer` high overall (the web's border-box), the surface's
+    padding and lines taken off (D-441)."""
+    var inner = outer - max(s.pad_top, 0) - max(s.pad_bottom, 0)
+    if s.line_top != 0:
+        inner -= 1
+    if s.line_bottom != 0:
+        inner -= 1
+    if s.outline != 0:
+        inner -= 2 * s.outline_w
+    return max(inner, 0)
 
 
 def text_rule(s: Surface, web: Bool = False) -> String:
@@ -92,6 +105,9 @@ def look_gtk_css(look: Look, scope: String) -> String:
     for s in look.surfaces:
         if not text_only(s):
             out += scope + ".mui-tag-" + s.role + " { " + surface_rule(s, False) + "}\n"
+            if look.controls.control_h > 0 and (s.pad_top > 0 or s.pad_bottom > 0 or s.min_height > 0):
+                # a button wearing the role is a control high overall, as on the web (border-box), padding included (D-441)
+                out += scope + "button.mui-tag-" + s.role + " { min-height: " + px(gtk_content_h(s, max(look.controls.control_h, s.min_height))) + "; }\n"
         var t = text_rule(s)
         if t != "":  # (its labels, or the label that wears the role itself)
             out += scope + ".mui-tag-" + s.role + " label, " + scope + "label.mui-tag-" + s.role + " { " + t + "}\n"

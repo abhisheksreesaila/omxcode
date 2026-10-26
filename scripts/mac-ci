@@ -22,13 +22,18 @@ for app in "${apps[@]}"; do
 done
 # the sources too, for the macos-26 job's native GPU build of omxplorer (omxcode#3: Metal kernels need a Mac to compile)
 tar -czf build/mac-ci/omxcode-src.tar.gz --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh \
-    mojoui themes hosts examples/omxplorer examples/maccheck apple vendor
+    mojoui themes hosts examples/omxplorer examples/maccheck apple vendor scripts/console_fixture.py docs/goals/33/fixtures
 gh release upload mac-ci build/mac-ci/omxcode-src.tar.gz --clobber -R "$REPO"
 branch=build/mac-ci/branch
 if [ ! -d "$branch/.git" ]; then
     git clone -q --branch mac-test --single-branch "https://github.com/$REPO.git" "$branch"
 fi
 git -C "$branch" pull -q
+# the branch's files are ci/mac's: mac.yml as its workflow, the rest in ci/ (D-443)
+mkdir -p "$branch/.github/workflows" "$branch/ci"
+cp ci/mac/mac.yml "$branch/.github/workflows/mac.yml"
+for f in ci/mac/*; do [ "$(basename "$f")" = mac.yml ] || cp "$f" "$branch/ci/"; done
+git -C "$branch" add -A
 git -C "$branch" commit -q --allow-empty -m "Test: ${apps[*]} ($(git rev-parse --short HEAD))"
 git -C "$branch" push -q origin mac-test
 sha=$(git -C "$branch" rev-parse HEAD)

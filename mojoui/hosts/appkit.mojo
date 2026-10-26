@@ -659,6 +659,8 @@ struct AppKitHost[A: App](Movable):
             if self.in_row(i) and not sized:  # between a row's groups (a toolbar): a 1 pt line across the row, as Mac toolbars have
                 # (a 280 pt line each: four of them made omxplorer's window at least 1,554 pt wide, GitHub's Mac, 2026-10-23)
                 constrain(w, "widthAnchor", Float64(1))
+                if not node.sized_height():  # a control high (the web's .hstack > hr: 28)
+                    constrain(w, "heightAnchor", Float64(28))
             else:
                 if not sized:  # (the app sized it: its settings decide)
                     prefer(w, "widthAnchor", Float64(280))
@@ -1022,10 +1024,18 @@ struct AppKitHost[A: App](Movable):
                 lead = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", lead)
             var first_spacer = 0
+            var before = lead  # (the view before this one in the stack: a Divider's room goes after it)
             for c in node.children:
                 var child = self.build(c, self_addr)
                 _ = msg(w, "addArrangedSubview:", child)
                 ref cn = self.rt.shown.nodes[c]
+                if cn.kind == DIVIDER and not (cn.sized_width() if not vertical else cn.sized_height()):
+                    # a Divider keeps its room each side, as the web's hr: 4 pt above and below in a column, 6 pt beside it in a row (D-440)
+                    var room = Float64(node.spacing + (4 if vertical else 6))
+                    if before != 0:
+                        _ = msg(w, "setCustomSpacing:afterView:", room, before)
+                    _ = msg(w, "setCustomSpacing:afterView:", room, child)
+                before = child
                 if cn.grows:  # flex-grow: lowest hugging priority along the stack
                     hug(child, Float32(1), vertical)
                 elif cn.kind == SPACER:  # (a growing view first, if there is one)

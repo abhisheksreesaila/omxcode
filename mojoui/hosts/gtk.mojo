@@ -535,6 +535,7 @@ struct GtkHost[A: App](Movable):
     var popups: List[Int]  # popovers to pop up once the new screen is in the window
     var shortcut_keys: Int  # the window's key controller: menu shortcuts (Ctrl+S) from anywhere
     var toast_overlay: Int  # AdwToastOverlay around the screen (toasts float over it)
+    var page: Int  # GtkScrolledWindow inside it: a screen taller than the window scrolls, as a web page does
     var toast: Int  # the toast showing, if any (kept across rebuilds while its node stays)
     var toast_text: String
     var toast_claimed: Bool  # the new screen still has the toast's node
@@ -614,6 +615,7 @@ struct GtkHost[A: App](Movable):
         self.popups = List[Int]()
         self.shortcut_keys = 0
         self.toast_overlay = 0
+        self.page = 0
         self.toast = 0
         self.toast_text = ""
         self.toast_claimed = False
@@ -806,6 +808,16 @@ struct GtkHost[A: App](Movable):
         var child = self.build(c, self_addr)
         var node = self.rt.shown.nodes[parent].copy()
         self.place_child(node, self.rt.shown.nodes[c], child)
+        if node.kind == HSTACK and self.rt.shown.nodes[c].kind == DIVIDER and not self.rt.shown.nodes[c].sized_width():
+            # a Divider between a row's parts stands up: 1 px wide, a control high, 6 px each side (the web's .hstack > hr)
+            var sep = self.widgets[c]
+            external_call["gtk_orientable_set_orientation", NoneType](sep, c_int(VERTICAL))
+            external_call["gtk_widget_set_size_request", NoneType](sep, c_int(-1), c_int(-1 if self.rt.shown.nodes[c].sized_height() else 28))
+            external_call["gtk_widget_set_valign", NoneType](sep, c_int(ALIGN_CENTER))
+            external_call["gtk_widget_set_margin_start", NoneType](sep, c_int(6))
+            external_call["gtk_widget_set_margin_end", NoneType](sep, c_int(6))
+            external_call["gtk_widget_set_margin_top", NoneType](sep, c_int(0))
+            external_call["gtk_widget_set_margin_bottom", NoneType](sep, c_int(0))
         if node.kind == VSTACK and self.rt.shown.nodes[c].kind == TEXT and node.align_items == START:
             external_call["gtk_label_set_justify", NoneType](self.widgets[c], c_int(0))  # left-aligned lines too
             external_call["gtk_label_set_xalign", NoneType](self.widgets[c], Float32(0))
@@ -963,6 +975,8 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_separator_new", Int](c_int(HORIZONTAL))
             if not sized:
                 width(w, 280)
+            external_call["gtk_widget_set_margin_top", NoneType](w, c_int(4))  # (the web's hr: 4 px above and below)
+            external_call["gtk_widget_set_margin_bottom", NoneType](w, c_int(4))
         elif node.kind == IMAGE:
             var tex = texture(node.pixels, node.spacing, node.size)
             w = external_call["gtk_picture_new_for_paintable", Int](tex)
@@ -1549,7 +1563,12 @@ struct GtkHost[A: App](Movable):
         if self.toast_overlay == 0:  # toasts float over whatever screen is up
             self.toast_overlay = external_call["adw_toast_overlay_new", Int]()
             external_call["gtk_window_set_child", NoneType](self.window, self.toast_overlay)
-        external_call["adw_toast_overlay_set_child", NoneType](self.toast_overlay, root)
+            # (a screen taller than the window scrolls instead of growing the window past the size asked for, as the
+            # web's page does; across, the screen's own minimum still holds: D-440)
+            self.page = external_call["gtk_scrolled_window_new", Int]()
+            external_call["gtk_scrolled_window_set_policy", NoneType](self.page, c_int(2), c_int(1))  # NEVER across, AUTOMATIC down
+            external_call["adw_toast_overlay_set_child", NoneType](self.toast_overlay, self.page)
+        external_call["gtk_scrolled_window_set_child", NoneType](self.page, root)
         if self.toast != 0 and not self.toast_claimed:  # the new screen has no toast: the old one goes
             set_node(self.toast, -1)
             external_call["adw_toast_dismiss", NoneType](self.toast)
