@@ -1612,9 +1612,14 @@ def console_side_screens():
     return console_side.SCREENS
 
 
+_built_all = []  # (main built every example in this run)
+
+
 def m8():
     """In the gallery, and nothing regressed: goal 32's M0–M2, goal 30's M0–M5 (goals 3–29 inside them)."""
     problems = []
+    if not _built_all:  # (goal 30's checks inside goal 32's M7 run every example's builds: `check.py M8` alone builds them too)
+        g30.build_all()
     gallery = (ROOT / "docs" / "gallery" / "index.html").read_text()
     if "console" not in gallery.lower():
         problems.append("docs/gallery/index.html doesn't show the console")
@@ -1647,6 +1652,7 @@ def main():
     only = sys.argv[1:]
     if not only:
         g30.build_all()
+        _built_all.append(True)
     results = []
     for name, fn in MILESTONES:
         if only and name not in only:
