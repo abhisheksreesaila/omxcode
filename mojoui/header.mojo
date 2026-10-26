@@ -14,10 +14,13 @@ def hued(role: String, hue: Int) -> String:
     return role + ("-" + String(min(hue, 8)) if hue > 0 else String(""))
 
 
+comptime HUE_QUIET = 7  # a page's square in the quiet ink, no colour of its own (Settings)
+
+
 def IconSquare(icon: String, hue: Int = 0, tone: Int = -1) -> View:
-    """An icon on a tinted rounded square: in data colour `hue` (0 the first; role icon-square, icon-square-<hue>), or in
-    a tone when `tone` is set (mojoui.marks QUIET, GOOD, WARN, BAD: role icon-square-tone-<tone>)."""
-    var role = ("icon-square-tone-" + String(min(max(tone, 0), 3))) if tone >= 0 else ("icon-square-" + String(min(hue, 6)) if hue > 0 else String("icon-square"))
+    """An icon on a tinted rounded square: in data colour `hue` (0 the first; role icon-square, icon-square-<hue>; HUE_QUIET
+    the quiet ink), or in a tone when `tone` is set (mojoui.marks QUIET, GOOD, WARN, BAD: role icon-square-tone-<tone>)."""
+    var role = ("icon-square-tone-" + String(min(max(tone, 0), 3))) if tone >= 0 else ("icon-square-" + String(min(hue, HUE_QUIET)) if hue > 0 else String("icon-square"))
     return VStack(Icon(icon, 16), spacing=0).align(CENTER).justify(CENTER).tag(role)
 
 

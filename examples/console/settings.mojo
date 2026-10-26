@@ -11,7 +11,7 @@ from mojoui.json import Json
 from mojoui.table import Table
 from mojoui.lists import SideScroll
 from mojoui.clock import wall_seconds
-from mojoui.header import PageHeader, SegmentButtons
+from mojoui.header import PageHeader, SegmentButtons, HUE_QUIET
 from mojoui.panel import Card, CardHead, CardBody, CardFoot, CopyFoot, CardStack, CardNote, FactText, FactGrid
 from mojoui.buttons import SmallButton, ButtonRow, DANGER, TEXT
 from mojoui.words import Mono, QuietText, MonoLine, Hint
@@ -143,7 +143,7 @@ struct SettingsPage(Copyable, Movable):
 
 
 def settings_header() -> View:
-    return PageHeader("sliders-horizontal", "Settings", "", "this browser and this daemon", List[View]())
+    return PageHeader("sliders-horizontal", "Settings", "", "this browser and this daemon", List[View](), hue=HUE_QUIET)
 
 
 def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:

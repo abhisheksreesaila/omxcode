@@ -137,6 +137,9 @@ def header_roles(p: Palette, mono: String) -> List[Surface]:
         var h = sq.copy()
         h.role, h.fill, h.ink = "icon-square-" + String(k), tint(p.data(k - 1), 0.14), p.data(k - 1)
         out.append(h^)
+    var quiet = sq.copy()  # (HUE_QUIET: nav.js's Settings hue, var(--oq-ink-2))
+    quiet.role, quiet.fill, quiet.ink = "icon-square-7", tint(p.ink2, 0.14), p.ink2
+    out.append(quiet^)
     var tones: List[UInt32] = [p.ink2, p.good, p.warn, p.bad]  # .ox-tile: the tone at 14 %, its icon 18
     for k in range(4):
         var t = sq.copy()
