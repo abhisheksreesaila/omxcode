@@ -1052,8 +1052,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(content, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
             _ = msg(w, "setDocumentView:", content)
             var clip = msg(w, "contentView")
-            var capped = self.rt.shown.nodes[node.children[0]].max_w != 0  # (content with a widest: centred in the clip, as GTK's clamp and the web's auto margins)
-            for anchor in ["topAnchor", "centerXAnchor" if capped else "leadingAnchor", "widthAnchor"]:
+            for anchor in ["topAnchor", "leadingAnchor", "widthAnchor"]:
                 var pin = msg(msg(content, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
                 if anchor == "widthAnchor":  # (content the app made wider is cut off at the edge: it never widens the window)
                     _ = msg(pin, "setPriority:", Float32(495))  # below NSLayoutPriorityWindowSizeStayPut (500), above a wrapping label (490)
@@ -1150,9 +1149,7 @@ struct AppKitHost[A: App](Movable):
                 elif grows or spacers:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
                     hug(child, Float32(750), vertical)
                 if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
-                    hug(child, Float32(750), True)
-                if vertical and not cn.fills and node.align_items != STRETCH and cn.w == 0 and cn.max_w == 0 and not cn.grows:  # in a column not told to stretch: its own width
-                    hug(child, Float32(750), False)
+                    hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
                 if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(2 * (inset_x if vertical else inset_y))
