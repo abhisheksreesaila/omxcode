@@ -824,9 +824,9 @@ def console_env(url, token, extra=None):
     return dict({CONSOLE_URL_ENV: url, CONSOLE_KEY_ENV: token}, **(extra or {}))
 
 
-def console_gtk(steps, env, shot=None):
+def console_gtk(steps, env, shot=None, window="1440x900"):
     exe = g30.BUILD / CONSOLE / "linux" / CONSOLE
-    e = dict(env, MOJOUI_TEST=steps, MOJOUI_WINDOW="1440x900")
+    e = dict(env, MOJOUI_TEST=steps, MOJOUI_WINDOW=window)
     if shot:
         e["MOJOUI_SHOT"] = str(shot)
     r = g30.run([str(exe)], env=e, timeout=300)
@@ -836,13 +836,13 @@ def console_gtk(steps, env, shot=None):
     return r, out
 
 
-def console_web(steps, env, shot=None, path="", viewport=(1440, 900)):
+def console_web(steps, env, shot=None, path="", viewport=(1440, 900), rects=None):
     import drive
     saved = {k: os.environ.get(k) for k in env}
     os.environ.update(env)
     try:
         r, out = drive.web_run(g30.BUILD / CONSOLE / "web", steps, shot=str(shot) if shot else None, viewport=viewport,
-                               color_scheme="light", path=path)
+                               color_scheme="light", path=path, rects=str(rects) if rects else None)
     except Exception as e:
         return None, f"web run crashed: {e!r}"
     finally:
@@ -859,10 +859,19 @@ def console_web(steps, env, shot=None, path="", viewport=(1440, 900)):
 def m5_pixels(token, names=None, extra=None):
     """Information only (M7 holds the bar): each screen's share of pixels equal to the original's, both sizes (M5's, or
     `names`; `extra`: more env for the app, a None value replaced by the recording's time)."""
+    names = names or M5_SCREENS
+    px = web_pixels(token, names, extra)
+    return [f"{name} {w}: {share:.1%}" for (name, (w, h)), share in sorted(px.items(), key=lambda kv: (names.index(kv[0][0]), -kv[0][1][0]))]
+
+
+def web_pixels(token, names, extra=None):
+    """{(screen, (w, h)): share of pixels equal to the original's docs/goals/33/orig/a shot}: examples/console's web build
+    served against the fixture server, shot by console_side.shoot as the original was (fresh context, light, en-US in UTC,
+    reduced motion, Date frozen at the recording, seeded Math.random, animations off), equality by console_side.differing
+    (M0's per-channel tolerance). A missing original counts as 0."""
     import subprocess
     import console_fixture
     import console_side
-    names = names or M5_SCREENS
     fx = console_fixture.Fixtures()
     server, url = console_fixture.serve(fx)
     port = drive_port()
@@ -887,11 +896,11 @@ def m5_pixels(token, names=None, extra=None):
             web.kill()
             web.wait(timeout=10)
         server.shutdown()
-    notes = []
-    for (name, (w, h)), png in sorted(shots.items(), key=lambda kv: (names.index(kv[0][0]), -kv[0][1][0])):
+    px = {}
+    for (name, (w, h)), png in shots.items():
         orig = OUT / "orig" / "a" / f"{name}-{w}x{h}.png"
-        notes.append(f"{name} {w}: {1 - console_side.differing(orig, png):.1%}")
-    return notes
+        px[(name, (w, h))] = (1 - console_side.differing(orig, png)) if orig.exists() else 0.0
+    return px
 
 
 def drive_port():
@@ -1385,6 +1394,171 @@ def m6():
 M6_TESTS = ["catalog", "adminkit"]  # the components M6 added to mojoui/ (tests/test_<name>.mojo), filled as they're added
 
 
+# M7: identical. The web in pixels against the original (M0's shots and tolerance); GTK and the Mac in boxes against the
+# web (goal 32's parity: scripts/parity.py's tolerance, at goal 32's size, side.SIZE); a live daemon through the UI.
+M7_PIXELS = 0.99  # GOAL.md: ≥ 99 % of pixels equal, per screen and size
+# How GTK and the Mac reach each screen from the start (taps by text, as M5 and M6 drive them); the web opens the route.
+M7_STEPS = {
+    "models": "pause:2500",
+    "overview": f"pause:1500;tap:{CONSOLE_MODEL};pause:2500",
+    "bench": f"pause:1500;tap:{CONSOLE_MODEL};pause:800;tap:Benchmark;pause:2500",
+    "logs": f"pause:1500;tap:{CONSOLE_MODEL};pause:800;tap:Logs;pause:2500",
+    "notebook": f"pause:1500;tap:{CONSOLE_MODEL};pause:800;tap:Notebook;pause:2500",
+    "add": "pause:1500;tap:Add a model;pause:2500",
+    "keys": "pause:1500;tap:Keys;pause:2500",
+    "gateway": "pause:1500;tap:Gateway;pause:2500",
+    "security": "pause:1500;tap:Security;pause:2500",
+    "settings": "pause:1500;tap:Settings;pause:2500",
+}
+M7_LIVE = ["load", "numbers", "key", "v1", "revoke", "stop"]  # scripts/console_live.py's facts, in GOAL.md's order
+
+
+def boxes(out):
+    """{key: (x, y, w, h)} from a run's BOX: lines (GTK's widgets in the window, the web's [data-tag] views in the page):
+    a tag, or "tag/Button title"; a key's second use is "key 2" (parity._key). Views with no area (not laid out) left out."""
+    import re
+    import parity
+    got, seen = {}, {}
+    for m in re.finditer(r"^BOX: (.+) (-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)$", out, re.M):
+        r = tuple(float(v) for v in m.groups()[1:])
+        if r[2] <= 0 and r[3] <= 0:
+            continue
+        got[parity._key(seen, m.group(1))] = r
+    return got
+
+
+def box_rows(web, other):
+    """[(key, web box or None, other box or None, ok)] over both sides' keys, parity.close's tolerance (4 pt or 3 %)."""
+    import parity
+    return [(k, web.get(k), other.get(k), k in web and k in other and parity.close(web[k], other[k]))
+            for k in list(web) + [k for k in other if k not in web]]
+
+
+def m7():
+    """Identical. (1) The web: examples/console's web build against the fixture server, each of the ten screens at
+    1440×900 and 390×844 shot by console_side.shoot as M0 shot the original, has ≥ 99 % of its pixels equal to
+    docs/goals/33/orig/a's (console_side.differing: no channel off by more than M0's 8 of 255; no masking). (2) GTK and
+    the Mac: on each of the ten screens every tagged view's box (and each button in a tagged view) is within goal 32's
+    parity tolerance (scripts/parity.py: 4 pt or 3 %) of the web's, at goal 32's size (scripts/side.py SIZE, 1440×640: the
+    Mac runner's screen is 1024×768 points and a taller window is cut to it; no phone size on desktop hosts). GTK's boxes
+    are its BOX: report against the web's BOX: report (same steps' screen, the web by its route); the Mac's are the newest
+    scripts/mac-ci run's view dumps (side.txt's console lines, whose steps must be M7_STEPS) against the web's tagged
+    rects (drive.RECTS), and that run must be built from these sources (side.mac_fresh, a stamp that covers
+    examples/console). (3) Live: scripts/console_live.py runs the console on GTK against a real mxconsole daemon on its
+    fake max (temp state dirs): load, numbers update, create a key, /v1 with it is 200, revoke, /v1 is 401, stop; each
+    read back from the daemon's admin API."""
+    import json as pyjson
+    import secrets
+    import console_fixture
+    import parity
+    import side
+    problems = []
+    err = build(CONSOLE, "linux", "web")
+    if err:
+        return False, err
+    token = secrets.token_hex(8)
+
+    # (1) the web, in pixels
+    px = web_pixels(token, SCREENS, {NOW_ENV: None})
+    notes = []
+    for name in SCREENS:
+        for w, h in SIZES:
+            share = px.get((name, (w, h)))
+            if share is None:
+                problems.append(f"web {name} {w}×{h}: not shot")
+                continue
+            notes.append(f"{name} {w}: {share:.1%}")
+            if share < M7_PIXELS:
+                problems.append(f"web {name} {w}×{h}: {share:.2%} of pixels equal (want ≥ 99 %)")
+
+    # (2) GTK and the Mac, in boxes, against the web at goal 32's size
+    w, h = side.SIZE
+    routes = dict(console_side_screens())
+    side_lines = {s: steps for app, s, _, steps in side.screens() if app == CONSOLE}
+    mac_dir = side.mac_dir()
+    fresh, why = side.mac_fresh()
+    if "examples/console" not in side.SOURCES:
+        problems.append("Mac: scripts/side.py's stamp (SOURCES) doesn't cover examples/console, so no Mac run can be shown to be built from it")
+    elif not fresh:
+        problems.append(f"Mac: stale: {why}")
+    off = {"gtk": 0, "mac": 0}
+    total = {"gtk": 0, "mac": 0}
+    report = []
+    for name in SCREENS:
+        fx = console_fixture.Fixtures()
+        server, url = console_fixture.serve(fx)
+        env = console_env(url, token, {NOW_ENV: str(fx.recorded_at)})
+        rects = side.OUT / f"{CONSOLE}-{name}-web-rects.txt"
+        rects.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            rg, gtk_out = console_gtk(M7_STEPS[name], env, shot=side.OUT / f"{CONSOLE}-{name}-gtk.png", window=f"{w}x{h}")
+            rw, web_out = console_web("pause:2500", env, path=routes[name], viewport=(w, h), rects=rects,
+                                      shot=side.OUT / f"{CONSOLE}-{name}-web.png")
+        finally:
+            server.shutdown()
+        if rg is None:
+            problems.append(f"gtk {name}: {gtk_out[:300]}")
+        if rw is None:
+            problems.append(f"web {name} (boxes): {web_out[:300]}")
+        if rg is None or rw is None:
+            continue
+        web_boxes, gtk_boxes = boxes(web_out), boxes(gtk_out)
+        if not web_boxes:
+            problems.append(f"web {name}: no tagged views")
+        rows = box_rows(web_boxes, gtk_boxes)
+        bad = [r for r in rows if not r[3]]
+        total["gtk"] += len(rows)
+        off["gtk"] += len(bad)
+        report.append(f"== gtk · {name}: {len(rows) - len(bad)} of {len(rows)} close\n" + parity.table(rows).replace(" mac ", " gtk "))
+        problems += [f"gtk {name} {k}: web {parity.fmt(a)} gtk {parity.fmt(b)}" for k, a, b, _ in bad[:3]]
+        # the Mac: its view dump against the web's rects
+        if name not in side_lines:
+            problems.append(f"mac {name}: ci/mac/side.txt has no {CONSOLE}|{name} line")
+            continue
+        if side_lines[name] != M7_STEPS[name]:
+            problems.append(f"mac {name}: side.txt's steps {side_lines[name]!r} aren't M7's {M7_STEPS[name]!r}")
+        dump = mac_dir / f"{CONSOLE}-{name}-views.txt" if mac_dir else None
+        if not dump or not dump.exists():
+            problems.append(f"mac {name}: no view dump {CONSOLE}-{name}-views.txt in the newest mac-ci run ({mac_dir})")
+            continue
+        rows = parity.compare(rects.read_text(), dump.read_text())
+        bad = [r for r in rows if not r[3]]
+        total["mac"] += len(rows)
+        off["mac"] += len(bad)
+        report.append(f"== mac · {name}: {len(rows) - len(bad)} of {len(rows)} close\n" + parity.table(rows))
+        problems += [f"mac {name} {k}: web {parity.fmt(a)} mac {parity.fmt(b)}" for k, a, b, _ in bad[:3]]
+    (side.OUT / f"{CONSOLE}-parity.txt").write_text("\n".join(report) + "\n")
+    box_note = (f"boxes off: GTK {off['gtk']} of {total['gtk']}, Mac {off['mac']} of {total['mac']} "
+                f"(build/side/{CONSOLE}-parity.txt)")
+
+    # (3) live: a real daemon on its fake max, through the console's buttons
+    r = g30.run([sys.executable, str(ROOT / "scripts" / "console_live.py")], timeout=600)
+    out = r.stdout + r.stderr
+    summary = next((l[len("LIVE-SUMMARY: "):] for l in out.splitlines() if l.startswith("LIVE-SUMMARY: ")), None)
+    if summary is None:
+        problems.append(f"live: scripts/console_live.py gave no summary (exit {r.returncode}): {out[-400:]}")
+        live_note = "live: no summary"
+    else:
+        facts = {f["fact"]: f for f in pyjson.loads(summary)}
+        for f in facts.values():
+            if not f["ok"]:
+                problems.append(f"live {f['fact']}: {f['detail']}")
+        for want in M7_LIVE:
+            if want not in facts:
+                problems.append(f"live: no {want} step")
+        live_note = "live: " + ", ".join(f"{k} {'ok' if facts.get(k, {}).get('ok') else 'FAIL'}" for k in M7_LIVE)
+
+    tail = f"Pixels equal (want ≥ 99 %): {', '.join(notes)} | {box_note} | {live_note}"
+    if problems:
+        return False, "; ".join(dict.fromkeys(problems))[:2400] + " | " + tail
+    return True, "the web ≥ 99 % equal to the original on all 20 shots; GTK's and the Mac's tagged views within 4 pt or 3 % of the web's; a live daemon through the UI. " + tail
+
+
+def console_side_screens():
+    import console_side
+    return console_side.SCREENS
+
+
 def m8():
     """In the gallery, and nothing regressed: goal 32's M0–M2, goal 30's M0–M5 (goals 3–29 inside them)."""
     problems = []
@@ -1409,7 +1583,7 @@ MILESTONES = [
     ("M4", m4),
     ("M5", m5),
     ("M6", m6),
-    ("M7", todo("identical: web ≥ 99 % of pixels, GTK and Mac boxes, a live daemon (GOAL.md M7)")),
+    ("M7", m7),
     ("M8", m8),
 ]
 
