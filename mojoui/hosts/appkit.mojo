@@ -506,8 +506,9 @@ struct AppKitHost[A: App](Movable):
             var tl = self.text_look(i)
             if tl >= 0:  # a surface's own type (the status bar's figures: Inter 12 on Liquid, JetBrains Mono on the skins)
                 ref sf = self.look.surfaces[tl]
-                if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0:  # (no size of its own: the label keeps its style's, a caption's 12)
-                    _ = msg(w, "setFont:", look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight, sf.font_size if sf.font_size > 0 else msg[Float64](msg(w, "font"), "pointSize"), self.look.type.tabular))
+                var inh = self.inherited_size(i)
+                if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0 or inh > 0:  # (no size of its own: the one it inherits, else its style's, a caption's 12)
+                    _ = msg(w, "setFont:", look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight, sf.font_size if sf.font_size > 0 else (inh if inh > 0 else msg[Float64](msg(w, "font"), "pointSize")), self.look.type.tabular))
                 if sf.ink != 0:
                     _ = msg(w, "setTextColor:", ns_color(sf.ink))
                 if sf.tracking != 0:  # (letter spacing: the label's string with NSKern, in its own font and colour)
@@ -516,6 +517,8 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(attrs, "setObject:forKey:", msg(w, "textColor"), ns_string("NSColor"))
                     _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", sf.tracking), ns_string("NSKern"))
                     _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(node.text), attrs))
+            elif self.skinned and self.inherited_size(i) > 0:  # (no role of its own with type: a table cell's words at the cell's size)
+                _ = msg(w, "setFont:", look_font(self.look.type.family, 400, self.inherited_size(i), self.look.type.tabular))
             if node.value == TONE_WARN:
                 _ = msg(w, "setTextColor:", ns_color(self.pal.warn) if self.skinned else msg(cls("NSColor"), "systemOrangeColor"))
             elif node.value == TONE_GOOD:
@@ -1434,6 +1437,8 @@ struct AppKitHost[A: App](Movable):
                 high = max(high, sf.min_height)
             if sf.font_size > 0:
                 size = sf.font_size
+            elif i >= 0 and self.inherited_size(i) > 0:  # (its words at the size around it, as the web's button { font: inherit })
+                size = self.inherited_size(i)
             if sf.font_weight > 0:
                 weight = sf.font_weight
             if sf.font != "":
@@ -1556,6 +1561,34 @@ struct AppKitHost[A: App](Movable):
         if sf.min_height > 0:
             _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(sf.min_height)), "setActive:", 1)
 
+    def inherited_size(self, i: Int) -> Float64:
+        """The type size node i's words inherit, as CSS's font-size does: its own role's, else the nearest role above it
+        with a size, a table's cells their head's or cell's (a label tagged mono in a table cell was the body's 14 pt for
+        the cell's 12.88, 2 pt taller and wider; a name link 90 wide for 83, D-516). 0: none."""
+        if self.rt.shown.nodes[i].name != "":
+            var own = self.look.surface(self.rt.shown.nodes[i].name)
+            if own >= 0 and self.look.surfaces[own].font_size > 0:
+                return self.look.surfaces[own].font_size
+        var c = i
+        var p = self.parents[i] if i < len(self.parents) else -1
+        while p >= 0:
+            ref n = self.rt.shown.nodes[p]
+            if n.kind == TABLE:
+                var row = 0
+                for q in range(len(n.children)):
+                    if n.children[q] == c:
+                        row = q // max(n.value, 1)
+                var k = self.look.surface("table-head" if row == 0 else "table-cell")
+                if k >= 0 and self.look.surfaces[k].font_size > 0:
+                    return self.look.surfaces[k].font_size
+            elif n.name != "":
+                var k = self.look.surface(n.name)
+                if k >= 0 and self.look.surfaces[k].font_size > 0:
+                    return self.look.surfaces[k].font_size
+            c = p
+            p = self.parents[p] if p < len(self.parents) else -1
+        return 0
+
     def text_look(self, i: Int) -> Int:
         """The surface whose text a label at node i wears (its own role, else the nearest tagged stack above it with a font,
         size or ink), -1 if none."""
@@ -1670,8 +1703,9 @@ struct AppKitHost[A: App](Movable):
         self.wraps = List[Int]()
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
         for k in range(len(self.rt.shown.nodes)):
-            if self.rt.shown.nodes[k].kind == HSTACK or self.rt.shown.nodes[k].kind == VSTACK:
-                for c in self.rt.shown.nodes[k].children:
+            var kk = self.rt.shown.nodes[k].kind
+            if kk == HSTACK or kk == VSTACK or kk == TABLE or kk == DRAG or kk == DROP or kk == EMBED:  # (a table's cells and a
+                for c in self.rt.shown.nodes[k].children:  # wrapper's view: their words inherit through them too, D-516)
                     self.parents[c] = k
         self.size_h = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.sized = List[Tuple[Int, Int, Int, Int]](length=len(self.rt.shown.nodes), fill=(0, 0, 0, 0))
