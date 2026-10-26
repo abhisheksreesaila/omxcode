@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
 from mojoui.view import (
-    CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
+    CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
@@ -24,7 +24,8 @@ from mojoui.canvas import Surface, rgba
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE
 from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
-from mojoui.theme import Palette, Theme, hex_of, mix
+from mojoui.theme import Palette, Theme, Look, hex_of, mix
+from mojoui.paragraph import pango_markup, link_href, runs_of
 from std.math import log2
 from std.time import perf_counter_ns, sleep
 
@@ -549,6 +550,8 @@ struct GtkHost[A: App](Movable):
     var css: Int  # one GtkCssProvider for padding classes
     var css_rules: String
     var one_line: List[String]  # the look's roles whose words stay on one line, cut with an ellipsis
+    var breaks_words: List[String]  # the look's roles whose long words break anywhere (PANGO_WRAP_WORD_CHAR)
+    var look: Look  # the theme's look (a Paragraph's runs take their roles' type from it, as Pango markup)
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var key_node: Int  # the canvas node that had the keyboard last (it gets it back when an in-place editor closes)
     var editor_keys: Int  # the in-place editor's key controller (test steps press Escape through it)
@@ -630,6 +633,8 @@ struct GtkHost[A: App](Movable):
         self.css = 0
         self.css_rules = ""
         self.one_line = List[String]()
+        self.look = Look.none()
+        self.breaks_words = List[String]()
         self.focus = -1
         self.key_node = -1
         self.editor_keys = 0
@@ -683,6 +688,9 @@ struct GtkHost[A: App](Movable):
             if node.kind == TEXT and node.name in self.one_line:  # (the look's one-line words: cut with an ellipsis, never wrapped)
                 external_call["gtk_label_set_wrap", NoneType](w, c_int(0))
                 external_call["gtk_label_set_ellipsize", NoneType](w, c_int(3))  # PANGO_ELLIPSIZE_END
+                external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
+            if node.kind == TEXT and node.name in self.breaks_words:  # (a long word breaks anywhere, as the web's overflow-wrap: anywhere)
+                external_call["gtk_label_set_wrap_mode", NoneType](w, c_int(2))  # PANGO_WRAP_WORD_CHAR
                 external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
         if node.tip != "":
             var tip = node.tip
@@ -943,6 +951,22 @@ struct GtkHost[A: App](Movable):
                 add_class(w, "caption")
                 add_class(w, "dim-label")
             set_tone(w, node.value)
+        elif node.kind == PARAGRAPH:  # one wrapping label: the runs as Pango markup (escaped), GTK breaks the lines (D-470)
+            var empty = String("")
+            w = external_call["gtk_label_new", Int](empty.as_c_string_span())
+            var markup = pango_markup(node, self.look)
+            external_call["gtk_label_set_markup", NoneType](w, markup.as_c_string_span())
+            external_call["gtk_label_set_wrap", NoneType](w, c_int(1))
+            external_call["gtk_label_set_wrap_mode", NoneType](w, c_int(2))  # PANGO_WRAP_WORD_CHAR: words, a long one broken (the web's overflow-wrap: anywhere)
+            external_call["gtk_label_set_natural_wrap_mode", NoneType](w, c_int(1))  # (as a Text: one line when there's room)
+            external_call["gtk_label_set_justify", NoneType](w, c_int(0))
+            external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
+            add_class(w, "mui-paragraph")
+            var role = self.look.surface(node.name) if node.name != "" else -1
+            if role >= 0 and self.look.surfaces[role].max_chars > 0:  # (the role's measure: GTK counts its font's average character)
+                external_call["gtk_label_set_max_width_chars", NoneType](w, c_int(self.look.surfaces[role].max_chars))
+            set_node(w, i)
+            connect_any(w, "activate-link", on_activate_link[Self.A], self_addr)
         elif node.kind == BUTTON:
             var t = node.text
             if node.hint != "" and (node.style == ICON_ONLY or node.style == ICON_ON):  # just the icon; the title is the tooltip
@@ -1206,9 +1230,11 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_grid_new", Int]()
             external_call["gtk_grid_set_row_spacing", NoneType](w, c_uint(node.spacing))
             external_call["gtk_grid_set_column_spacing", NoneType](w, c_uint(node.spacing))
-            external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(0 if node.style == 1 else 1))  # (fitted: columns to their content)
+            external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(0 if node.style == 1 else 1))  # (fitted: columns to their content; shares: equal, GTK has no column shares)
             for k in range(len(node.children)):
                 var child = self.build(node.children[k], self_addr)
+                if node.hint == "E" and k % node.value == node.value - 1:  # (the last column's items at its trailing edge)
+                    external_call["gtk_widget_set_halign", NoneType](child, c_int(2))  # GTK_ALIGN_END
                 external_call["gtk_grid_attach", NoneType](w, child, c_int(k % node.value), c_int(k // node.value), c_int(1), c_int(1))
         elif node.kind == LAZYLIST:
             var model = external_call["gtk_string_list_new", Int](0)
@@ -2076,7 +2102,11 @@ struct GtkHost[A: App](Movable):
         if theme.id == "":  # (back to the system's: tell the app what that is now, on the next idle turn)
             _ = external_call["g_idle_add", c_uint](on_idle_appearance[Self.A], self_addr)
         self.one_line = List[String]()
+        self.look = theme.look.copy()
+        self.breaks_words = List[String]()
         for sf in theme.look.surfaces:
+            if sf.breaks_words:
+                self.breaks_words.append(sf.role)
             if sf.one_line:
                 self.one_line.append(sf.role)
         var sheet = theme.gtk_css + (look_gtk_css(theme.look, "window." + theme.id + " ") if theme.id != "" else String(""))  # (the look's rules after the theme's own)
@@ -2599,15 +2629,7 @@ struct GtkHost[A: App](Movable):
         for ref n in self.rt.shown.nodes:
             if n.kind == EMBED and n.value > 0 and n.value != self.embed_version:
                 self.embed_version = n.value
-                var opener = getenv("MOJOUI_OPENER")
-                if opener == "":
-                    opener = "xdg-open"
-                var url = n.hint if n.hint != "" else n.text
-                var quoted = external_call["g_shell_quote", Int](url.as_c_string_span())
-                var cmd = opener + " " + c_str(quoted)
-                external_call["g_free", NoneType](quoted)
-                if external_call["g_spawn_command_line_async", c_int](cmd.as_c_string_span(), Int(0)) == 0:
-                    print("mojoui: could not run " + cmd)
+                open_url(n.hint if n.hint != "" else n.text)
 
     def canvases_drawn(self) -> Bool:
         """Whether every canvas shows its current version at its current size."""
@@ -2648,6 +2670,41 @@ def on_drop[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: 
         return 0
     var text = c_str(external_call["g_value_get_string", Int](value))
     host_at[A](host_addr)[].send(node, False, text, 0, host_addr)
+    return 1
+
+
+def open_url(url: String):
+    """A page in the browser: xdg-open, or the command in $MOJOUI_OPENER (checks read what it was given)."""
+    var opener = getenv("MOJOUI_OPENER")
+    if opener == "":
+        opener = "xdg-open"
+    var u = url
+    var quoted = external_call["g_shell_quote", Int](u.as_c_string_span())
+    var cmd = opener + " " + c_str(quoted)
+    external_call["g_free", NoneType](quoted)
+    if external_call["g_spawn_command_line_async", c_int](cmd.as_c_string_span(), Int(0)) == 0:
+        print("mojoui: could not run " + cmd)
+
+
+def on_activate_link[A: App](label: Int, uri: Int, host_addr: Int) abi("C") -> c_int:
+    """A Paragraph's link tapped (GTK's activate-link: uri = the run's index, set by pango_markup): its on_link with
+    event.number = the run and event.text = its href from the screen; with no on_link, the href opens in the browser."""
+    var node = get_node(label)
+    var host = host_at[A](host_addr)
+    if node < 0 or node >= len(host[].rt.shown.nodes) or busy():
+        return 1
+    var index = 0
+    for c in c_str(uri).as_bytes():
+        if c < 48 or c > 57:
+            return 1
+        index = index * 10 + Int(c - 48)
+    var href = link_href(host[].rt.shown.nodes[node], index)
+    if href == "":
+        return 1
+    if host[].rt.shown.nodes[node].msg == 0:
+        open_url(href)
+        return 1
+    host[].send(node, False, href, index, host_addr)
     return 1
 
 
@@ -3613,6 +3670,22 @@ def run_step[A: App](host_addr: Int, step: String):
         if verb == "submit" or verb == "enter":  # "enter": Return straight after typing
             var s = String("activate")
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].widgets[i], s.as_c_string_span())
+    elif verb == "link":  # link:Text: a Paragraph's link of that text, through the label's own activate-link signal (as a click sends it)
+        var found = False
+        for i in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[i].kind != PARAGRAPH:
+                continue
+            var runs = runs_of(host[].rt.shown.nodes[i])
+            for k in range(len(runs)):
+                if runs[k].href != "" and runs[k].text == rest and not found:
+                    found = True
+                    var s = String("activate-link")
+                    var uri = String(k)
+                    var ret = List[c_int](length=1, fill=0)
+                    external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].widgets[i], s.as_c_string_span(), uri.as_c_string_span(), Int(ret.unsafe_ptr()))
+                    _ = len(ret)
+        if not found:
+            print("TEST: no link", rest)
     elif verb == "tick":  # tick:TAG: the tick box tagged TAG (a table's row has no label to find it by)
         var i = -1
         for k in range(len(host[].rt.shown.nodes)):
@@ -4225,7 +4298,14 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
         var w = host[].widgets[i]
         if (n.kind == ALERT) != alerts:
             continue
-        if n.kind == TEXT:
+        if n.kind == PARAGRAPH:  # its words as the label shows them (markup parsed), then each run's (as the web reports them)
+            var links = 0
+            for r in runs_of(n):
+                links += 1 if r.href != "" else 0
+            print("PARAGRAPH: " + c_str(external_call["gtk_label_get_text", Int](w)) + " (" + String(len(runs_of(n))) + " runs, " + String(links) + " links)")
+            for r in runs_of(n):
+                print("LABEL: " + r.text)
+        elif n.kind == TEXT:
             print("LABEL: " + c_str(external_call["gtk_label_get_text", Int](w)))
             var tone = tone_of(w)
             if tone != "":

@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
-    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
+    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
     START, CENTER, END, STRETCH, BETWEEN, Node,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
@@ -22,6 +22,7 @@ from mojoui.menus import CHECKED, DISABLED, DANGER
 from mojoui.theme import Palette, Theme, mix
 from mojoui.theme import Look
 from mojoui.look import text_only
+from mojoui.paragraph import Run, runs_of, link_href
 from mojoui.icons_data import lucide_svg
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
@@ -477,7 +478,22 @@ struct AppKitHost[A: App](Movable):
         var node = self.rt.shown.nodes[i].copy()  # copy: building children mutates self
         var sized = node.sized_width()  # the app's layout decides this view's width
         var w: Int
-        if node.kind == TEXT:
+        if node.kind == PARAGRAPH:  # one wrapping label: the runs as an attributed string, AppKit breaks the lines (D-470)
+            w = msg(cls("NSTextField"), "wrappingLabelWithString:", ns_string(""))
+            _ = msg(w, "setAttributedStringValue:", self.paragraph_string(i))
+            _ = msg(w, "setTag:", tag_for(self_addr, i))
+            var role = self.look.surface(node.name) if node.name != "" else -1
+            if role >= 0 and self.look.surfaces[role].max_chars > 0:  # the role's measure: that many "0"s of its font (CSS's ch)
+                var said = msg(w, "attributedStringValue")
+                if msg(said, "length") > 0:
+                    var zero = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string("0"), msg(said, "attributesAtIndex:effectiveRange:", 0, 0))
+                    var most = msg[CGPoint](zero, "size").x * Float64(self.look.surfaces[role].max_chars)
+                    _ = msg(msg(msg(w, "widthAnchor"), "constraintLessThanOrEqualToConstant:", most), "setActive:", 1)
+                    _ = msg(w, "setPreferredMaxLayoutWidth:", most)
+            if node.msg != 0 or len(node.options) > 0:  # a link's tap: the click's place in the words names the run (paragraphTap:)
+                var r = msg(msg(cls("NSClickGestureRecognizer"), "alloc"), "initWithTarget:action:", self.target, sel("paragraphTap:"))
+                _ = msg(w, "addGestureRecognizer:", r)
+        elif node.kind == TEXT:
             w = msg(cls("NSTextField"), "labelWithString:", ns_string(node.text))
             _ = msg(w, "setAlignment:", 1)  # NSTextAlignmentCenter (1 on Apple Silicon; 2 is right)
             var size = Float64(13)
@@ -1699,6 +1715,63 @@ struct AppKitHost[A: App](Movable):
         """Whether node i sits in an HStack."""
         return i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].kind == HSTACK
 
+    def paragraph_string(self, i: Int) -> Int:
+        """A Paragraph's runs as one attributed string: the paragraph's role gives the type and line height, each run's
+        role its own (font, size, weight, ink, a fill behind it); bold, italic (slanted: Geist has no italic face, as the
+        browser synthesises it), mono for code, a link underlined."""
+        ref node = self.rt.shown.nodes[i]
+        var family = self.look.type.family
+        var size = self.look.type.body if self.skinned else Float64(13)
+        var weight = 400
+        var ink = self.pal.ink2 if self.skinned else UInt32(0)
+        var lh = size * self.look.type.line if self.skinned else Float64(0)
+        var own = self.look.surface(node.name) if node.name != "" else -1
+        if own >= 0:
+            ref sf = self.look.surfaces[own]
+            family = sf.font if sf.font != "" else family
+            size = sf.font_size if sf.font_size > 0 else size
+            weight = sf.font_weight if sf.font_weight > 0 else weight
+            ink = sf.ink if sf.ink != 0 else ink
+            lh = sf.line_height if sf.line_height > 0 else size * self.look.type.line
+        var para = new("NSMutableParagraphStyle")
+        if lh > 0:
+            _ = msg(para, "setMinimumLineHeight:", lh)
+            _ = msg(para, "setMaximumLineHeight:", lh)
+        var out = new("NSMutableAttributedString")
+        for r in runs_of(node):
+            var rf, rs, rw, rink, fill = family, size, weight, ink, UInt32(0)
+            var mono = r.code
+            if r.role != "" and r.role != node.name:
+                var k = self.look.surface(r.role)
+                if k >= 0:
+                    ref sf = self.look.surfaces[k]
+                    if sf.font != "":
+                        rf, mono = sf.font, False
+                    rs = sf.font_size if sf.font_size > 0 else rs
+                    rw = sf.font_weight if sf.font_weight > 0 else rw
+                    rink = sf.ink if sf.ink != 0 else rink
+                    fill = sf.fill
+            if r.bold and rw < 600:
+                rw = 700
+            var font: Int
+            if mono:
+                font = look_font(self.look.type.mono, rw, rs) if self.skinned and self.look.type.mono != "" else msg(cls("NSFont"), "monospacedSystemFontOfSize:weight:", rs, Float64(0))
+            else:
+                font = look_font(rf, rw, rs, self.look.type.tabular) if self.skinned else msg(cls("NSFont"), "boldSystemFontOfSize:" if rw >= 600 else "systemFontOfSize:", rs)
+            var attrs = new("NSMutableDictionary")
+            _ = msg(attrs, "setObject:forKey:", font, ns_string("NSFont"))
+            _ = msg(attrs, "setObject:forKey:", ns_rgba(rink) if rink != 0 else msg(cls("NSColor"), "labelColor"), ns_string("NSColor"))
+            _ = msg(attrs, "setObject:forKey:", para, ns_string("NSParagraphStyle"))
+            if fill != 0:
+                _ = msg(attrs, "setObject:forKey:", ns_rgba(fill), ns_string("NSBackgroundColor"))
+            if r.italic:
+                _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", Float64(0.2)), ns_string("NSObliqueness"))
+            if r.href != "":
+                _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithInteger:", 1), ns_string("NSUnderline"))
+            var piece = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(r.text), attrs)
+            _ = msg(out, "appendAttributedString:", piece)
+        return out
+
     def restyle_label(self, w: Int, text: String, k: Int):
         """A label in surface k's type: its font, ink, letter spacing and line height (a table's head and figures)."""
         ref sf = self.look.surfaces[k]
@@ -2413,6 +2486,41 @@ def on_tap[A: App](target: Int, cmd: Int, sender: Int) abi("C"):
     host_at[A](t[0])[].send(t[1], False, "", 0, t[0])
 
 
+def on_paragraph_tap[A: App](target: Int, cmd: Int, recognizer: Int) abi("C"):
+    """A click on a Paragraph: the character under it (the label's words laid out again in its width, as its cell lays
+    them: 2 pt in), the run holding it; a link's run sends on_link (event.number = the run, event.text = its href), or
+    opens the href when the app doesn't listen."""
+    var label = msg(recognizer, "view")
+    var t = from_tag(label)
+    var host = host_at[A](t[0])
+    if t[1] >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[t[1]].kind != PARAGRAPH:
+        return
+    var at = in_view(label, msg[CGPoint](recognizer, "locationInView:", label))
+    var bounds = msg[CGRect](label, "bounds")
+    var storage = msg(msg(cls("NSTextStorage"), "alloc"), "initWithAttributedString:", msg(label, "attributedStringValue"))
+    var layout = new("NSLayoutManager")
+    var box = msg(msg(cls("NSTextContainer"), "alloc"), "initWithSize:", bounds.width - 4, Float64(100000))
+    _ = msg(box, "setLineFragmentPadding:", Float64(0))
+    _ = msg(layout, "addTextContainer:", box)
+    _ = msg(storage, "addLayoutManager:", layout)
+    var glyph = msg(layout, "glyphIndexForPoint:inTextContainer:", at.x - 2, at.y, box)
+    var index = msg(layout, "characterIndexForGlyphAtIndex:", glyph)
+    var runs = runs_of(host[].rt.shown.nodes[t[1]])
+    var start = 0
+    for k in range(len(runs)):
+        var n = msg(ns_string(runs[k].text), "length")  # (UTF-16 units, as the string counts)
+        if index < start + n:
+            var href = link_href(host[].rt.shown.nodes[t[1]], k)
+            if href == "":
+                return
+            if host[].rt.shown.nodes[t[1]].msg == 0:
+                _ = msg(msg(cls("NSWorkspace"), "sharedWorkspace"), "openURL:", msg(cls("NSURL"), "URLWithString:", ns_string(href)))
+                return
+            host[].send(t[1], False, href, k, t[0])
+            return
+        start += n
+
+
 def on_menu_item[A: App](target: Int, cmd: Int, item: Int) abi("C"):
     """A menu bar item (or its ⌘ shortcut): the ITEM node its tag names."""
     var t = from_tag(item)
@@ -2946,6 +3054,7 @@ def run[A: App]() -> c_int:
 
     var c = new_class("MojoTarget", "NSObject")
     add_method(c, "tap:", on_tap[A], "v@:@")
+    add_method(c, "paragraphTap:", on_paragraph_tap[A], "v@:@")
     add_method(c, "submit:", on_submit[A], "v@:@")
     add_method(c, "toggle:", on_toggle[A], "v@:@")
     add_method(c, "select:", on_select[A], "v@:@")

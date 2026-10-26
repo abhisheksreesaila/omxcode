@@ -47,6 +47,8 @@ comptime DRAG = 36  # its one child can be dragged (mojoui.dragdrop.Draggable): 
 comptime DROP = 37  # its one child takes drops (mojoui.dragdrop.DropTarget): msg = on_drop, event.text = what was dropped
 comptime EMBED = 38  # a web page in the screen (mojoui.embed.WebFrame): text = its URL, value = a version (from 1), size = height;
 #   the web shows it in an iframe; GTK and the Mac open it in the browser when the version moves on and show the child instead
+comptime PARAGRAPH = 39  # styled runs the host wraps as text (mojoui.paragraph.Paragraph): text = the plain words, msg = on_link,
+#   options = 4 strings per run (flags "b" "i" "c" "l", role, href, text)
 comptime ITEM = 29  # a menu item: text = title, msg, hint = icon, options[0] = shortcut, value = flags (1 checked, 2 disabled, 4 danger); style 1 = separator, 2 = section label; children = a submenu
 
 # Canvas gestures (event.number)
@@ -579,10 +581,15 @@ def HStack(items: List[View], spacing: Int = 8) -> View:
     return _container(Node(HSTACK, spacing=spacing), items)
 
 
-def Grid(items: List[View], columns: Int, spacing: Int = 12, fit: Bool = False) -> View:
+def Grid(items: List[View], columns: Int, spacing: Int = 12, fit: Bool = False, end: Bool = False, shares: List[Int] = []) -> View:
     """Items in rows of `columns`, the columns equal; `fit`: every column but the last as wide as its widest item, the
-    last the rest (a definition list's keys and values; style 1)."""
-    return _container(Node(GRID, style=1 if fit else 0, spacing=spacing, value=max(columns, 1)), items)
+    last the rest (a definition list's keys and values; style 1); `end`: the last column's items at its trailing edge
+    (hint "E": figures and values read from the right, D-474); `shares`: each column's share of the width (52, 48: a
+    key column 52 % wide; options), over `fit`."""
+    var opts = List[String]()
+    for s in shares:
+        opts.append(String(s))
+    return _container(Node(GRID, style=1 if fit else 0, spacing=spacing, value=max(columns, 1), options=opts^, hint="E" if end else ""), items)
 
 
 def Scroll(content: View, height: Int = 320, pinned: Bool = False) -> View:

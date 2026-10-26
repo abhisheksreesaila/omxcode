@@ -193,11 +193,13 @@ def ColumnRow(var cells: List[View], tail: View, on: Bool = False) -> View:
     return ListRow(items^, on=on)
 
 
-def FactGrid(keys: List[String], var values: List[View], mono_keys: Bool = False) -> View:
+def FactGrid(keys: List[String], var values: List[View], mono_keys: Bool = False, end: Bool = False, tight: Bool = False) -> View:
     """Keys beside their values, the keys' column as wide as the widest key (a fitted Grid; roles fact-grid: the space
-    between rows and columns, fact-grid-key; fact-grid-key-mono for keys that are names)."""
+    between rows and columns, fact-grid-key; fact-grid-key-mono for keys that are names). `end`: the values at the
+    trailing edge (figures in a side panel); `tight`: the theme's tighter list (roles fact-grid-tight, fact-grid-key-tight)."""
     var cells: List[View] = []
+    var suffix = String("-tight") if tight else String("")
     for k in range(len(keys)):
-        cells.append(Text(keys[k]).tag("fact-grid-key-mono" if mono_keys else "fact-grid-key"))
+        cells.append(Text(keys[k]).tag(("fact-grid-key-mono" if mono_keys else "fact-grid-key") + suffix))
         cells.append(values[k].copy() if k < len(values) else Text(""))
-    return Grid(cells^, columns=2, spacing=SPACE_M, fit=True).fill().tag("fact-grid")
+    return Grid(cells^, columns=2, spacing=SPACE_M, fit=True, end=end).fill().tag("fact-grid" + suffix)

@@ -8,14 +8,15 @@
 #   var blocks = parse_markdown(cell_source)     # the data: Block(kind, level, spans, items, code, lang)
 #   var toc = chapters(sources, is_markdown)     # a notebook's chapters: headings of levels 1–2 (any level if none)
 #
-# Inline styling is flattened into Runs (text + bold/italic/code/link flags) rather than a tree. A paragraph with
-# styled runs becomes lines of Text pieces (HStacks), broken at a word's edge every `line_chars` characters, as
-# mojoui.sentence does; a plain paragraph is one Text the host wraps. The look comes from roles (markdown_roles()).
+# Inline styling is flattened into Runs (mojoui.paragraph.Run: text + bold/italic/code/link flags) rather than a tree.
+# Every paragraph, heading and list item is one mojoui.paragraph.Paragraph: its runs wear roles (md-strong, md-code…)
+# and the HOST wraps them, as the browser wraps the original's <p> (D-471). The look comes from roles (markdown_roles()).
 
 from mojoui.view import View, Text, VStack, HStack, Card, BODY, HEADLINE, TONE_STRONG, START, CENTER, END
 from mojoui.theme import Palette, Surface, Shadow
 from mojoui.canvas import rgba
 from mojoui.codeblock import CodeText
+from mojoui.paragraph import Run, Paragraph
 
 comptime MD_P = 0  # a paragraph: spans
 comptime MD_HEADING = 1  # level 1–6: spans
@@ -31,33 +32,6 @@ comptime MAX_URL = 2000
 def nbsp() -> String:
     """U+00A0: a space a host never collapses (the edges of an inline piece: "Pipeline:" + " text-generation")."""
     return chr(0xA0)
-
-
-@fieldwise_init
-struct Run(Copyable, Movable, Equatable, Writable):
-    """A run of inline text and how it looks. `href` is "" unless the run is a link (always an http(s) URL)."""
-
-    var text: String
-    var bold: Bool
-    var italic: Bool
-    var code: Bool
-    var href: String
-
-    def __init__(out self, text: String):
-        self = Self(text, False, False, False, "")
-
-    def same_look(self, other: Self) -> Bool:
-        return self.bold == other.bold and self.italic == other.italic and self.code == other.code and self.href == other.href
-
-    def plain(self) -> Bool:
-        return not (self.bold or self.italic or self.code) and self.href == ""
-
-    def __eq__(self, other: Self) -> Bool:
-        return self.text == other.text and self.same_look(other)
-
-    def write_to(self, mut writer: Some[Writer]):
-        writer.write("Run('", self.text, "'", " bold" if self.bold else "", " italic" if self.italic else "",
-                     " code" if self.code else "", " href=" + self.href if self.href != "" else "", ")")
 
 
 @fieldwise_init
@@ -490,94 +464,16 @@ def role_of(span: Run, plain_role: String) -> String:
     return plain_role
 
 
-def _words(spans: List[Run]) -> List[Run]:
-    """The runs cut after each space run ("a b  c" → "a ", "b  ", "c"); code stays whole."""
-    var out = List[Run]()
-    for s in spans:
-        if s.code:
-            out.append(s.copy())
-            continue
-        var b = s.text.as_bytes()
-        var start = 0
-        var i = 0
-        while i < len(b):
-            if b[i] == 32 and (i + 1 == len(b) or b[i + 1] != 32) and i + 1 > start:
-                out.append(Run(_cut(s.text, start, i + 1), s.bold, s.italic, False, s.href))
-                start = i + 1
-            i += 1
-        if start < len(b):
-            out.append(Run(_cut(s.text, start, len(b)), s.bold, s.italic, False, s.href))
-    return out^
-
-
-def _edges(text: String) -> String:
-    """Leading and trailing spaces as no-break spaces (a host trims a label's edges; these words need them)."""
-    var b = text.as_bytes()
-    var s = 0
-    while s < len(b) and b[s] == 32:
-        s += 1
-    var e = len(b)
-    while e > s and b[e - 1] == 32:
-        e -= 1
-    var out = String("")
-    for _ in range(s):
-        out += nbsp()
-    out += _cut(text, s, e)
-    for _ in range(len(b) - e):
-        out += nbsp()
-    return out^
-
-
-def inline_lines(spans: List[Run], line_chars: Int) -> List[List[Run]]:
-    """The runs laid out in lines of at most about `line_chars` characters, broken after a space, never inside a word
-    or a `code` run; a line neither starts nor ends with a space; neighbours that look the same are one piece."""
-    var lines = List[List[Run]]()
-    var line = List[Run]()
-    var used = 0
-    for w in _words(spans):
-        var t = w.text if w.code else _trim_end(w.text)
-        var n = _chars(t, 0, t.byte_length())
-        if used > 0 and used + n > line_chars:
-            lines.append(line^)
-            line = List[Run]()
-            used = 0
-        var piece = w.copy()
-        if used == 0 and not piece.code:
-            var stripped = String(piece.text.lstrip(" "))
-            piece.text = stripped
-            if piece.text == "":
-                continue
-        used += _chars(piece.text, 0, piece.text.byte_length())
-        _push(line, piece^)
-    if len(line) > 0:
-        lines.append(line^)
-    for k in range(len(lines)):  # (a line never ends with a space)
-        var last = len(lines[k]) - 1
-        if not lines[k][last].code:
-            var stripped = String(lines[k][last].text.rstrip(" "))
-            lines[k][last].text = stripped
-    return lines^
-
-
-def _runs_view(spans: List[Run], line_chars: Int, style: Int, role: String) -> View:
-    """One Text when the runs are plain (the host wraps it); lines of pieces otherwise."""
-    if len(spans) == 0:
-        return Text("", style).tag(role)
-    if len(spans) == 1 and spans[0].plain():
-        return Text(spans[0].text, style).tag(role)
-    var rows = List[View]()
-    for ln in inline_lines(spans, line_chars):
-        var pieces = List[View]()
-        for p in ln:
-            var r = role_of(p, role)
-            var t = Text(_edges(p.text) if not p.code else p.text, style).tag(r)
-            if p.bold:
-                t = t^.tone(TONE_STRONG)
-            if p.href != "":
-                t = t^.tooltip(p.href)
-            pieces.append(t^)
-        rows.append(HStack(pieces^, spacing=0).align(CENTER).justify(START).tag("md-line"))
-    return VStack(rows^, spacing=0).align(START).tag(role)
+def _runs_view(spans: List[Run], style: Int, role: String, on_link: Int) -> View:
+    """The runs as one Paragraph wearing `role`, each run its own role (role_of); the host wraps the words."""
+    var runs = List[Run]()
+    for p in spans:
+        var r = p.copy()
+        r.role = role_of(p, role)
+        runs.append(r^)
+    if len(runs) == 0:
+        runs.append(Run("", False, False, False, "", role))
+    return Paragraph(runs, role=role, on_link=on_link, style=style).fill()
 
 
 def _gap(points: Int) -> View:
@@ -590,23 +486,23 @@ def code_block(code: String, lang: String) -> View:
     return Card(CodeText(code).tag("md-pre-text"), spacing=0).padding(12, 14).fill().tag("md-pre")
 
 
-def markdown_view(blocks: List[Block], line_chars: Int = 92, tag: String = "markdown") -> View:
+def markdown_view(blocks: List[Block], tag: String = "markdown", on_link: Int = 0) -> View:
     """Blocks as views, each tagged with its role: md-h1…md-h6, md-p, md-ul / md-ol (rows md-li beside md-bullet),
     md-pre; inline pieces md-strong, md-em, md-code, md-link, md-code-link; md-gap after each block (its margin)."""
     var items = List[View]()
     for b in blocks:
         if b.kind == MD_HEADING:
-            items.append(_runs_view(b.spans, line_chars, HEADLINE, "md-h" + String(b.level)))
+            items.append(_runs_view(b.spans, HEADLINE, "md-h" + String(b.level), on_link))
             items.append(_gap(GAP_HEADING))
         elif b.kind == MD_P:
-            items.append(_runs_view(b.spans, line_chars, BODY, "md-p"))
+            items.append(_runs_view(b.spans, BODY, "md-p", on_link))
             items.append(_gap(GAP_BLOCK))
         elif b.kind == MD_UL or b.kind == MD_OL:
             var rows = List[View]()
             for k in range(len(b.items)):
                 var mark = "•" if b.kind == MD_UL else String(k + 1) + "."
                 rows.append(HStack(Text(mark).width(BULLET_W).tag("md-bullet"),
-                                   _runs_view(b.items[k], line_chars - 3, BODY, "md-li").grow(), spacing=0).align(START).tag("md-item"))
+                                   _runs_view(b.items[k], BODY, "md-li", on_link).grow(), spacing=0).align(START).tag("md-item"))
             items.append(VStack(rows^, spacing=GAP_ITEM).align(START).tag("md-ul" if b.kind == MD_UL else "md-ol"))
             items.append(_gap(GAP_BLOCK))
         else:
@@ -615,24 +511,25 @@ def markdown_view(blocks: List[Block], line_chars: Int = 92, tag: String = "mark
     return VStack(items^, spacing=0).align(START).tag(tag)
 
 
-def Markdown(text: String, line_chars: Int = 92, tag: String = "markdown") -> View:
-    """Markdown text as views (parse_markdown, then markdown_view). Safe: never HTML, links only to http(s)."""
-    return markdown_view(parse_markdown(text), line_chars, tag)
+def Markdown(text: String, tag: String = "markdown", on_link: Int = 0) -> View:
+    """Markdown text as views (parse_markdown, then markdown_view). Safe: never HTML, links only to http(s). A link's
+    tap sends on_link (event.text = its href); with none the host opens it in the browser."""
+    return markdown_view(parse_markdown(text), tag, on_link)
 
 
 # ---------- the look (blade-notebook.css's .nb-md), for a theme to add to its Look's surfaces ----------
 
 def text_role(role: String, size: Float64, weight: Int, ink: UInt32, font: String = "", tracking: Float64 = 0,
-              line_height: Float64 = 0, fill: UInt32 = 0, radius: Int = -1, pad_v: Int = -1, pad_h: Int = -1) -> Surface:
-    """A role for words, optionally on a small filled shape (inline code)."""
+              line_height: Float64 = 0, fill: UInt32 = 0, radius: Int = -1, pad_v: Int = -1, pad_h: Int = -1, max_chars: Int = 0) -> Surface:
+    """A role for words, optionally on a small filled shape (inline code), optionally at most `max_chars` wide."""
     return Surface(role, fill, radius, radius, -1, -1, -1, pad_v, pad_h, pad_v, List[Shadow](), 0, 0, 0, -1, font, size, ink,
-                   weight, tracking, line_height, 0, 0, False)
+                   weight, tracking, line_height, 0, 0, False, max_chars=max_chars)
 
 
 def markdown_roles(p: Palette, mono: String) -> List[Surface]:
     """.nb-md's values: body 14/1.6 in ink-2; headings 650 in the ink, -.015em, 1.3 (20, 17, 15, 14…); strong and links
     in the ink; inline code 12.5 mono on the state layer at .07, corners 4, 1×5 padding; pre on the code colours
-    (#0b0b0d / #e4e4e7), corners 12, 12×14 padding. Not carried by a Surface: italics, a link's underline."""
+    (#0b0b0d / #e4e4e7), corners 12, 12×14 padding; paragraphs and lists at most 72 characters wide. Not carried by a Surface: italics, a link's underline."""
     var wash = rgba(237, 237, 239, 18) if p.dark else rgba(11, 11, 13, 18)  # rgb(var(--oq-state) / .07)
     var out: List[Surface] = [
         text_role("md-h1", 20, 650, p.ink, "", -0.3, 26),
@@ -641,14 +538,16 @@ def markdown_roles(p: Palette, mono: String) -> List[Surface]:
         text_role("md-h4", 14, 650, p.ink, "", -0.21, 18.2),
         text_role("md-h5", 14, 650, p.ink, "", -0.21, 18.2),
         text_role("md-h6", 14, 650, p.ink, "", -0.21, 18.2),
-        text_role("md-p", 14, 0, p.ink2, "", 0, 22.4),
+        text_role("md-p", 14, 0, p.ink2, "", 0, 22.4, max_chars=72),  # (p, ul, ol: max-width 72ch)
+        text_role("md-ul", 0, 0, 0, max_chars=72),
+        text_role("md-ol", 0, 0, 0, max_chars=72),
         text_role("md-li", 14, 0, p.ink2, "", 0, 22.4),
         text_role("md-bullet", 14, 0, p.ink2, "", 0, 22.4),
         text_role("md-em", 14, 0, p.ink2, "", 0, 22.4),
         text_role("md-strong", 14, 700, p.ink, "", 0, 22.4),
         text_role("md-link", 14, 0, p.ink, "", 0, 22.4),
-        text_role("md-code", 12.5, 0, p.ink, mono, 0, 0, wash, 4, 1, 5),
-        text_role("md-code-link", 12.5, 0, p.ink, mono, 0, 0, wash, 4, 1, 5),
+        text_role("md-code", 12.5, 0, p.ink, mono, 0, 20, wash, 4, 1, 5),  # (its line 1.6 of its own 12.5: 20, so it never heightens the paragraph's 22.4 line)
+        text_role("md-code-link", 12.5, 0, p.ink, mono, 0, 20, wash, 4, 1, 5),
         text_role("md-pre", 0, 0, 0, "", 0, 0, rgba(11, 11, 13), 12, 12, 14),
         text_role("md-pre-text", 12.5, 0, rgba(228, 228, 231), mono, 0, 22.4),
     ]

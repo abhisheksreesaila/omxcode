@@ -12,7 +12,7 @@ from std.math import sqrt
 
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
-    SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, PAN, ZOOM, TAP,
+    SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, PARAGRAPH, PAN, ZOOM, TAP,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE,
 )
@@ -128,7 +128,7 @@ struct AndroidHost[A: App](Movable):
         """Creates the Android view for node i (and its children); returns a local reference."""
         var node = self.rt.shown.nodes[i].copy()
         var v: Int
-        if node.kind == TEXT or node.kind == ICON or node.kind == DATE or node.kind == ALERT:
+        if node.kind == TEXT or node.kind == PARAGRAPH or node.kind == ICON or node.kind == DATE or node.kind == ALERT:  # (a Paragraph: its plain words; its runs' looks: not yet)
             v = self.view_of("android/widget/TextView")
             var look = "TextAppearance_DeviceDefault_Small" if node.style == CAPTION else (
                 "TextAppearance_DeviceDefault_Large" if node.style == TITLE or node.style == HEADLINE else "TextAppearance_DeviceDefault")

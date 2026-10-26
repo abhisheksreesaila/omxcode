@@ -8,7 +8,7 @@ from mojoui.markdown import Markdown, chapters
 from mojoui.codeblock import CodeText
 from mojoui.chip import Badge, BADGE_OK
 from mojoui.embed import WebFrame
-from mojoui.panel import Card, CardHead, CardBody, CardFoot, CardColumn, Fact, FactText, TabBody, KEYS_MEDIUM
+from mojoui.panel import Card, CardHead, CardBody, CardFoot, CardColumn, Fact, FactText, FactGrid, TabBody, KEYS_MEDIUM
 from mojoui.header import SubHeader
 from mojoui.words import MonoLine, MonoStrong, QuietText
 from mojoui.buttons import SmallButton
@@ -140,8 +140,13 @@ def notebook_view(nb: Notebook, st: Store, model: String, phone: Bool) -> View:
     for c in nb.cells:
         cells.append(cell_view(c))
     var facts: List[View] = [MonoStrong(nb.arch)]
+    var fact_keys = List[String]()
+    var fact_values: List[View] = []
     for f in nb.facts:
-        facts.append(Fact(f[0], FactText(f[1]), KEYS_MEDIUM))
+        fact_keys.append(f[0])
+        fact_values.append(FactText(f[1]))
+    if len(fact_keys) > 0:
+        facts.append(FactGrid(fact_keys, fact_values^, end=True, tight=True))
     var keys = List[String]()
     var values = List[String]()
     for r in nb.rows:

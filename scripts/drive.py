@@ -41,6 +41,8 @@ DUMP = """() => [...document.querySelectorAll('#mojoui-root [data-kind], #mojoui
   if (k === 'radio') return 'RADIO: ' + picked();
   if (k === 'textarea') return 'TEXTAREA: ' + e.value.split(String.fromCharCode(10)).join(String.fromCharCode(92) + 'n');
   if (k === 'menubar' || k === 'item') return '';
+  if (k === 'paragraph') return 'PARAGRAPH: ' + e.textContent + ' (' + e.querySelectorAll('[data-kind=run]').length + ' runs, ' + e.querySelectorAll('a[data-kind=run]').length + ' links, ' + e.children.length + ' elements)';
+  if (k === 'run') return 'LABEL: ' + e.textContent;  // (a paragraph's runs: its words, as GTK reports them)
   if (k === 'menu') { const items = box => [...box.children].map(c => {
       if (c.dataset.sep) return '\u2014';
       if (c.dataset.label) return '[' + c.textContent + ']';
@@ -151,6 +153,8 @@ def step(page, s):
             field.fill(text)
         if verb in ("submit", "enter"):
             field.press("Enter")  # for "enter": straight after typing, no wait
+    elif verb == "link":  # link:Text: the link of that text in a Paragraph, clicked
+        page.locator("a[data-kind=run]").filter(has_text=exact(rest)).first.click()
     elif verb == "tick":  # tick:TAG: the tick box tagged TAG (a table's row has no label to find it by)
         page.locator(f"[data-tag={rest!r}] input").first.click()
     elif verb == "dragto":  # dragto:SRC=DST: the view tagged SRC dragged with the mouse onto the view tagged DST (the browser's drag and drop)

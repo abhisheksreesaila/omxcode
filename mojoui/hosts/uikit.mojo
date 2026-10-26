@@ -14,7 +14,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
-    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
+    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
     START, CENTER, END, STRETCH, BETWEEN, Node,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, as_tool,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
@@ -322,7 +322,7 @@ struct UIKitHost[A: App](Movable):
         var sized = node.sized_width()  # the app's layout decides this view's width
         var w: Int
         var shown: Int  # what goes into the parent (usually w itself)
-        if node.kind == TEXT:
+        if node.kind == TEXT or node.kind == PARAGRAPH:  # (a Paragraph: its plain words in a wrapping label; its runs' looks: not yet)
             w = label(node.text, node.style)
             if self.skinned:
                 _ = msg(w, "setFont:", skin_font("Inter-SemiBold" if node.style == TITLE or node.style == HEADLINE else "Inter-Regular",

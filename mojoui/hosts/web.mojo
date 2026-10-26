@@ -7,7 +7,8 @@ from mojoui.look import look_web_css
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
-from mojoui.view import View, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LAZYLIST, CANVAS
+from mojoui.view import View, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LAZYLIST, CANVAS, PARAGRAPH
+from mojoui.paragraph import link_href
 from mojoui.diff import Diff
 from mojoui.app import App, Event, Runtime
 from mojoui.canvas import Surface
@@ -214,6 +215,10 @@ def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number
     if n.kind == DROPDOWN or n.kind == SEGMENTED or n.kind == RADIO or n.kind == TABS or n.kind == ALERT:
         # the option's text comes from the screen, not the browser
         event_text = n.options[number] if 0 <= number < len(n.options) else String("")
+    elif n.kind == PARAGRAPH:  # a link's tap: its href from the screen (number = the run), never the browser's word
+        event_text = link_href(n, number)
+        if event_text == "":
+            return '{"ignored":true}'
     var d = rt[].dispatch(Event(message, event_text, number))
     return diff_to_json(d, rt[].shown)
 

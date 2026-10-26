@@ -28,7 +28,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from fasthtml.common import (
-    Button, Canvas, Dialog, Div, FastHTML, Form, H1, H2, H3, H4, Header, Hr, I, Img, Input, Label, Link, Main, Meta, NotStr,
+    A, to_xml, Button, Canvas, Dialog, Div, FastHTML, Form, H1, H2, H3, H4, Header, Hr, I, Img, Input, Label, Link, Main, Meta, NotStr,
     Iframe, Option, P, Progress, Response, Script, Select, Span, Style, Table, Tbody, Td, Textarea, Th, Thead, Title, Tr, UploadFile,
 )
 from PIL import Image
@@ -36,7 +36,7 @@ from PIL import Image
 # Mirrors mojoui/view.mojo and mojoui/diff.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
- DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED) = range(1, 39)
+ DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH) = range(1, 40)
 CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
@@ -68,6 +68,8 @@ body { font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; 
 .hstack { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; justify-content: center; }
 .spacer { flex: 1; }
 .text { margin: 0; text-align: center; }
+.text.paragraph { text-align: start; overflow-wrap: anywhere; }  /* a Paragraph: runs inline, the browser wraps them */
+.run.strong { font-weight: 700; } .run.em { font-style: italic; } .run.code { font-family: ui-monospace, monospace; } a.run.link { color: inherit; }
 .text.title { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
 .text.headline { font-size: 17px; font-weight: 600; }
 .text.caption { font-size: 13px; color: var(--muted); }
@@ -839,6 +841,24 @@ def render(s, i, sid):
     return el
 
 
+def paragraph_runs(n, i, common):
+    """A Paragraph's runs as inline elements (FastHTML escapes their words), one element per run whose classes say bold,
+    italic, code and whose data-role is its role (the look's rule for it beats the base classes); a link is an <a>: its
+    tap posts the run's index when the app listens (htmx cancels the anchor's own navigation), else the browser opens it
+    in a new tab."""
+    out, opts = [], n["options"]
+    for k in range(len(opts) // 4):
+        flags, role, href, text = opts[4 * k:4 * k + 4]
+        cls = " ".join(["run"] + [c for f, c in (("b", "strong"), ("i", "em"), ("c", "code"), ("l", "link")) if f in flags])
+        attrs = dict(cls=cls, data_role=role or None, data_kind="run")
+        if "l" in flags:
+            listen = dict(common, hx_vals=json.dumps({"n": i, "number": k})) if n["msg"] else dict(target="_blank", rel="noopener noreferrer")
+            out.append(A(text, href=href, **attrs, **listen))
+        else:
+            out.append(Span(text, **attrs))
+    return out
+
+
 def render_node(s, i, sid):
     """One mojoui node → FastHTML components. Ids are n<i> so patches can find them;
     data-kind marks controls for tests and for anyone reading the HTML."""
@@ -851,6 +871,9 @@ def render_node(s, i, sid):
         cls += {1: " tone-warn", 2: " tone-good", 3: " tone-strong", 4: " tone-accent"}.get(n["value"], "")
         tag = H1 if n["style"] == TITLE else (H3 if n["style"] == HEADLINE else P)
         return tag(n["text"], cls=cls, id=nid, data_kind="label")
+    if kind == PARAGRAPH:  # inline runs in one block, wrapped by the browser; each run's element wears its role (data-role)
+        inner = "".join(to_xml(el, indent=False) for el in paragraph_runs(n, i, common))  # (no whitespace between or around the runs: it would be words)
+        return P(NotStr(inner), cls="text paragraph", id=nid, data_kind="paragraph")
     if kind == BUTTON:
         cls = {PROMINENT: "prominent", DESTRUCTIVE: "destructive", SUBTLE: "subtle", ICON_ONLY: "subtle icon-only",
                ICON_ON: "subtle icon-only on", TOOL: "subtle tool", TOOL_ON: "subtle tool on",
@@ -932,6 +955,14 @@ def render_node(s, i, sid):
         return Span(NotStr(svg), cls="icon", id=nid, data_kind="icon", data_icon=n["text"], aria_hidden="true")
     if kind == GRID:
         kids = [render(s, c, sid) for c in n["children"]]
+        if n["hint"] == "E":  # (the last column's items at its trailing edge: values and figures read from the right)
+            for k, el in enumerate(kids):
+                if k % max(n["value"], 1) == max(n["value"], 1) - 1:
+                    el.attrs["style"] = (el.attrs.get("style", "") + ";" if el.attrs.get("style") else "") + "justify-self:end;text-align:right"
+        if n["options"]:  # (each column its share of the width: 52fr 48fr)
+            cols = " ".join(f"minmax(0, {int(x)}fr)" for x in n["options"])
+            return Div(*kids, cls="grid", id=nid, data_kind="grid", data_columns=str(n["value"]),
+                       style=f"grid-template-columns:{cols};gap:{n['spacing']}px;justify-items:stretch;align-items:stretch")  # (as a table's cells: each fills its cell, a row as high as its tallest)
         if n["style"] == 1:  # (fitted: the first columns as wide as their widest item, the last the rest; items from their start)
             cols = (f"repeat({n['value'] - 1}, max-content) " if n["value"] > 1 else "") + "minmax(0, 1fr)"
             return Div(*kids, cls="grid", id=nid, data_kind="grid", data_columns=str(n["value"]),

@@ -552,7 +552,7 @@ def m3():
 M4_PARTS = [  # (matrix row, test name)
     ("Table", "table"), ("CodeBlock", "codeblock"), ("LogView", "logview"), ("Timeline", "timeline"),
     ("Breadcrumbs", "breadcrumbs"), ("Chip · Badge", "chip"), ("Confirm", "confirm"), ("Skeleton", "skeleton"),
-    ("Markdown", "markdown"), ("Sparkline", "sparkline"), ("Route", "route"),
+    ("Markdown", "markdown"), ("Sparkline", "sparkline"), ("Route", "route"), ("Paragraph", "paragraph"),
 ]
 KIT = "consolekit"
 KIT_CODE = "curl http://127.0.0.1:11435/v1/models"  # what the sampler's CodeBlock holds (its Copy must put exactly this on the clipboard)
@@ -563,6 +563,7 @@ KIT_STEPS = ";".join([
     "tap:Revoke", "say:confirm-state", "tap:Click again to revoke",  # Confirm: the first tap only arms, the second acts
     "tap:Add log lines", "tap:Add log lines",  # LogView: 40 new lines, still pinned to the end
     "tap:Next stage",  # Timeline: the running stage is done, the next one runs
+    "link:release notes",  # Paragraph: its link's tap sends on_link with the href and the run (D-470)
 ])
 
 
@@ -609,7 +610,12 @@ def m4_state(out, host):
         problems.append(f"{host}: Timeline: after Next stage it says {lv('timeline:')!r}, not '2 of 4 done'")
     if not re.search(r"^PINNED: log at end$", out, re.M):
         problems.append(f"{host}: LogView: not at the end after new lines ({re.findall(r'^PINNED: .*$', out, re.M)})")
-    for tag in ("breadcrumbs", "chip-1", "badge-ok", "pill", "skeleton", "code-block", "sample-markdown", "sample-sparkline", "sample-timeline"):
+    if lv("link:") != "https://example.com/notes (run 3)":
+        problems.append(f"{host}: Paragraph: tapping its link shows link {lv('link:')!r}, not 'https://example.com/notes (run 3)'")
+    para = re.search(r"^PARAGRAPH: Shown as words: <b>not bold</b> & <i> then release notes \(4 runs, 1 links(, 4 elements)?\)$", out, re.M)
+    if not para:  # (its words as the host shows them: markup-looking words stay words, one element per run)
+        problems.append(f"{host}: Paragraph: shows {re.findall(r'^PARAGRAPH: Shown.*$', out, re.M)}, not its runs' words as written")
+    for tag in ("breadcrumbs", "chip-1", "badge-ok", "pill", "skeleton", "code-block", "sample-markdown", "sample-paragraph", "sample-sparkline", "sample-timeline"):
         b = re.search(rf"^BOX: {re.escape(tag)} [\d.-]+ [\d.-]+ ([\d.]+) ([\d.]+)$", out, re.M)
         if not b or float(b.group(1)) < 4 or float(b.group(2)) < 4:
             problems.append(f"{host}: no visible view tagged {tag} ({b.group(0) if b else 'no BOX'})")
@@ -652,8 +658,9 @@ def app_lint(folder="examples/console"):
 def m4():
     """The console's components: in mojoui/, each with its own test, on GTK and the web, built for the Mac: Table (rows,
     tick boxes), CodeBlock with Copy, LogView (pinned to the end), Timeline (stages, elapsed), Breadcrumbs, Chip/Badge,
-    Confirm (tap twice), Skeleton, Markdown, Sparkline, Route (#/models/<name>/<tab> deep links on the web);
-    docs/components.md regenerated; the debt table holds nothing from the console. Proof: every test passes; the sampler
+    Confirm (tap twice), Skeleton, Markdown, Sparkline, Route (#/models/<name>/<tab> deep links on the web), and (goal 33
+    M7, D-470) Paragraph (styled runs the host wraps, a link's tap); docs/components.md regenerated; the debt table
+    holds nothing from the console. Proof: every test passes; the sampler
     (examples/consolekit, omxqua) driven on GTK and the web: rows ticked, Copy read back from the clipboard, Confirm
     acting only on its second tap, the log still at its end after new lines, the web opened at a deep link showing that
     route, a route change writing the URL, Back going back; omxqua's values read back on the web (uppercase mono headers,
@@ -666,7 +673,7 @@ def m4():
         return False, "; ".join(problems + [f"no examples/{KIT}/app.mojo"])
     src = app.read_text()
     for ctor in ("Table(", "CodeBlock(", "LogView(", "Timeline(", "Breadcrumbs(", "Chip(", "Badge(", "ConfirmButton(", "Skeleton(",
-                 "Markdown(", "SparklineView(", "Route(", "omxqua("):
+                 "Markdown(", "SparklineView(", "Route(", "Paragraph(", "omxqua("):
         if ctor not in src:
             problems.append(f"the sampler doesn't use {ctor[:-1]}")
     roles, found = g32.lint()

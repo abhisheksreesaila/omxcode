@@ -32,7 +32,7 @@ def fpx(v: Float64) -> String:
 def text_only(s: Surface) -> Bool:
     """A role the look gives type only (words()): no box rule is written for it."""
     return (s.fill == 0 and s.radius_top < 0 and s.margin_top < 0 and s.pad_top < 0 and len(s.shadows) == 0 and s.line_top == 0
-            and s.line_bottom == 0 and s.min_height <= 0 and s.outline == 0 and s.gap < 0 and s.height == 0 and s.width == 0 and not s.scrolls_x and not s.shares and s.text_align != 2 and not s.one_line and not s.inline_flow)
+            and s.line_bottom == 0 and s.min_height <= 0 and s.outline == 0 and s.gap < 0 and s.height == 0 and s.width == 0 and not s.scrolls_x and not s.shares and s.text_align != 2 and not s.one_line and not s.inline_flow and s.max_chars == 0)
 
 
 def surface_rule(s: Surface, web: Bool) -> String:
@@ -87,6 +87,8 @@ def surface_rule(s: Surface, web: Bool) -> String:
         out += "flex-wrap: nowrap; "
     if s.inline_flow and web:
         out += "display: block; "
+    if s.max_chars > 0 and web:  # (its measure; GTK's labels take it as max-width-chars, the Mac's as a width of "0"s)
+        out += "max-width: " + String(s.max_chars) + "ch; "
     if s.shares and web:
         out += "flex: 1 1 0% !important; min-width: auto !important; "
     if s.scrolls_x and web:
@@ -143,6 +145,8 @@ def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
         # (GTK: in px, as the web's lines measure, D-444; only for a look that declares its line: TypeScale.line 0 keeps
         # GTK's labels at the font's own lines, as before: D-460; below 0: the font's own, over the look's label line)
         out += "line-height: " + ("normal" if s.line_height < 0 else line_px(s.line_height if s.line_height > 0 else s.font_size * line)) + "; "
+    if web and s.breaks_words:  # (GTK: its labels wrap at any character, PANGO_WRAP_WORD_CHAR; the Mac: character wrapping)
+        out += "overflow-wrap: anywhere; "
     if web and s.one_line:  # (its words on one line too; GTK and the Mac cut them with an ellipsis: the hosts read one_line)
         out += "white-space: nowrap; "
     if web and s.text_align > 0:

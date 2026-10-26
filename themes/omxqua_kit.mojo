@@ -6,7 +6,7 @@
 
 from mojoui.canvas import rgba
 from mojoui.theme import Palette, Surface, Shadow, words, mix, HEIGHT_AUTO
-from mojoui.view import CENTER
+from mojoui.view import CENTER, START
 
 comptime BEACON_BG = 0xFF0D0B0B  # #0b0b0d (the Beacon is dark in both modes, like a terminal)
 comptime BEACON_INK = 0xFFF5F4F4  # #f4f4f5
@@ -374,6 +374,11 @@ def panel_roles(p: Palette, mono: String, shadow: List[Shadow]) -> List[Surface]
     out.append(fg^)
     out.append(words_role("fact-grid-key", 13.5, 0, p.ink2))
     out.append(words_role("fact-grid-key-mono", 13.5, 0, p.ink2, mono))
+    var ft = layout("fact-grid-tight", 6)  # .nb-kv: 6px 12px, margin-top 12 (the card body's 10, and 2)
+    ft.column_gap, ft.margin_top, ft.margin_x, ft.margin_bottom = 12, 2, 0, 0
+    out.append(ft^)
+    out.append(words_role("fact-grid-key-tight", 12.5, 0, p.ink2))
+    out.append(words_role("fact-grid-key-mono-tight", 12.5, 0, p.ink2, mono))
     out.append(layout("labeled-row", 10))  # (a strong label, 110 wide, beside its value: the certificate's how-tos)
     out.append(layout("labeled-row-compact", 2))
     var lk = words_role("labeled-row-key", 13, 650, p.ink)
@@ -771,11 +776,15 @@ def extra_roles(p: Palette, mono: String) -> List[Surface]:
     out.append(ch1.copy())
     ch1.role, ch1.font_size, ch1.font_weight = "chapter-2", 12.5, 500
     out.append(ch1^)
-    out.append(layout("spec-rows", 6))
-    out.append(layout("spec-row", 10))
-    var sk = words_role("spec-key", 11.5, 0, p.ink2, mono, 0, -1)  # 120 wide
-    sk.width = 120
+    var sr = layout("spec-rows", 0)  # .nb-rows: margin-top 14 (the card body's 10 between, and 4)
+    sr.margin_top, sr.margin_x, sr.margin_bottom = 4, 0, 0
+    out.append(sr^)
+    var sk = words_role("spec-key", 11.5, 0, p.ink2, mono)  # .nb-rows th: 4px 10px 4px 0, a line-2 rule on top, 52 % wide (the grid's share)
+    sk.pad_top, sk.pad_bottom, sk.pad_left, sk.pad_right, sk.pad_x, sk.line_top, sk.breaks_words, sk.text_align = 4, 4, 0, 10, 0, p.line, True, START
     out.append(sk^)
+    var sv = words_role("spec-value", 11.5, 0, p.ink, mono)  # .nb-rows td: 4px 0
+    sv.pad_top, sv.pad_bottom, sv.pad_x, sv.line_top, sv.breaks_words, sv.text_align = 4, 4, 0, p.line, True, START
+    out.append(sv^)
     out.append(layout("doc-layout", 0))  # .nb-grid: 210 | 1fr | 300
     out.append(layout("doc-layout-compact", 12))
     var dout = layout("doc-outline")  # 210 with its rule (the Divider)

@@ -4,7 +4,7 @@
 #
 #   DocLayout(Outline("Chapters", titles, levels, CHAPTER), VStack(cells), VStack(aside cards), compact=phone)
 
-from mojoui.view import View, Text, Button, VStack, HStack, Scroll, Divider, SUBTLE, CENTER, START, STRETCH, BASELINE, SPACE_XXS, SPACE_XS, SPACE_S, SPACE_M, SPACE_L
+from mojoui.view import View, Text, Button, VStack, HStack, Scroll, Divider, Grid, SUBTLE, CENTER, START, STRETCH, BASELINE, SPACE_XXS, SPACE_XS, SPACE_S, SPACE_M, SPACE_L
 from mojoui.markdown import Markdown
 from mojoui.codeblock import CodeText
 from mojoui.table import capitals
@@ -13,7 +13,7 @@ from mojoui.panel import Card
 
 def MarkdownCell(text: String) -> View:
     """A markdown cell: its text set as a card (roles markdown-cell; the words mojoui.markdown's)."""
-    return Card([VStack(Markdown(text, line_chars=86), spacing=0).align(START).fill().tag("markdown-cell")])
+    return Card([VStack(Markdown(text), spacing=0).align(START).fill().tag("markdown-cell")])
 
 
 def CodeCell(label: String, code: String) -> View:
@@ -35,11 +35,14 @@ def Outline(title: String, titles: List[String], levels: List[Int], on_tap: Int)
 
 
 def SpecRows(keys: List[String], values: List[String]) -> View:
-    """Key-value rows in the mono, the keys in a column (roles spec-rows, spec-row, spec-key)."""
-    var rows: List[View] = []
+    """Key-value rows in the mono, as a table of two columns, the keys' 52 % of the width (roles spec-rows: its room;
+    spec-key, spec-value: each cell's padding, rule and type; a long key breaks where it must)."""
+    var cells: List[View] = []
     for k in range(len(keys)):
-        rows.append(HStack(Text(keys[k]).tag("spec-key"), Text(values[k] if k < len(values) else String("")).tag("mono-line"), spacing=SPACE_M).align(START).justify(START).fill().tag("spec-row"))
-    return VStack(rows^, spacing=SPACE_S).align(START).fill().tag("spec-rows")
+        cells.append(Text(keys[k]).tag("spec-key"))
+        cells.append(Text(values[k] if k < len(values) else String("")).tag("spec-value"))
+    var shares: List[Int] = [52, 48]
+    return Grid(cells^, columns=2, spacing=0, shares=shares).fill().tag("spec-rows")
 
 
 def DocLayout(outline: View, cells: View, aside: View, compact: Bool = False) -> View:

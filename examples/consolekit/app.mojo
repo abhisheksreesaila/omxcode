@@ -1,7 +1,8 @@
 # consolekit: the OMX Console's components on one page, in omxqua (goal 33 M4). Each is the framework's own (mojoui/),
 # shown here the way the console uses it: the model table with tick boxes, a CodeBlock to copy, a LogView that follows
 # its end, Revoke that asks twice, chips, badges and a pill, skeletons, the breadcrumb trail and the Route (the web
-# keeps it in the URL: open #/models/qwen2.5-0.5b/logs), a notebook's Markdown, a Sparkline and Add a model's Timeline.
+# keeps it in the URL: open #/models/qwen2.5-0.5b/logs), a notebook's Markdown, a Paragraph of styled runs with a link (its
+# words that look like markup stay words), a Sparkline and Add a model's Timeline.
 
 from mojoui.view import View, Text, Button, VStack, HStack, Card, Spacer, Divider, CAPTION, HEADLINE, PROMINENT, START, CENTER
 from mojoui.app import App, Event
@@ -17,6 +18,7 @@ from mojoui.confirm import TwoStep, ConfirmButton
 from mojoui.skeleton import Skeleton
 from mojoui.route import Route, parse_route, route_for, crumbs_for, Place
 from mojoui.markdown import Markdown
+from mojoui.paragraph import Paragraph, Plain, Code, Link
 from mojoui.sparkline import Sparkline, SparklineView
 from mojoui.timeline import Timeline, Stage, STAGE_PENDING, STAGE_RUNNING, STAGE_DONE
 from themes.omxqua import omxqua
@@ -29,6 +31,7 @@ comptime DISARM = 5
 comptime ADD_LINES = 6
 comptime NEXT_STAGE = 7
 comptime OPEN_LOGS = 8
+comptime LINK = 9  # a Paragraph's (or the notes') link: event.text = its href, event.number = its run
 comptime CRUMB = 10  # + the crumb's place in the trail
 comptime TICK_ALL = 99
 comptime TICK = 100  # + the row
@@ -49,9 +52,11 @@ struct Main(App):
     var stage: Int  # the running stage
     var dark: Bool
     var themed: Theme
+    var link: String  # the last link tapped
 
     def __init__(out self):
         self.path = "/"
+        self.link = "none"
         self.ticked = [False, False, False]
         self.copies = 0
         self.keys = TwoStep()
@@ -106,6 +111,8 @@ struct Main(App):
             var n = len(self.lines)
             for k in range(20):
                 self.lines.append("12:03:" + String(n + k) + ".551 INFO: 127.0.0.1 - \"POST /v1/chat/completions HTTP/1.1\" 200 OK")
+        elif m == LINK:
+            self.link = event.text + " (run " + String(event.number) + ")"
         elif m == NEXT_STAGE:
             self.stage = min(self.stage + 1, len(materialize[STAGES]()))
 
@@ -161,7 +168,10 @@ struct Main(App):
             HStack(Chip("Chat", hue=1), Chip("Vision", hue=2), Chip("#favorites"), Badge("active", BADGE_OK, dot=True), Badge("prefix only"), spacing=6),
             VStack(Skeleton(), Skeleton(width=320), Skeleton(width=180), spacing=8).fill(),
             Divider().fill(),
-            VStack(Markdown(NOTES)).align(START).fill().tag("sample-markdown"),
+            VStack(Markdown(NOTES, on_link=LINK)).align(START).fill().tag("sample-markdown"),
+            VStack(Paragraph([Plain("Shown as words: "), Code("<b>not bold</b> & <i>", "md-code"), Plain(" then "), Link("release notes", "https://example.com/notes", "md-link")],
+                             role="md-p", on_link=LINK)).align(START).fill().tag("sample-paragraph"),
+            Text("link: " + self.link),
             spacing=14,
         ).grow()
         var right = Card(

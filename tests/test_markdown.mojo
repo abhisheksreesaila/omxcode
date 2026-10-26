@@ -4,9 +4,10 @@
 #   scripts/mxbuild.sh tests/test_markdown.mojo -o build/test_markdown && build/test_markdown
 from std.testing import assert_equal, assert_true, assert_false
 from mojoui.json import Json
-from mojoui.view import View, TEXT, HSTACK, BUTTON, TONE_STRONG
+from mojoui.view import View, TEXT, HSTACK, BUTTON, PARAGRAPH
 from mojoui.markdown import (Run, Block, Chapter, parse_markdown, parse_inline, plain_text, chapters, safe_url,
-                             inline_lines, Markdown, markdown_roles, nbsp, MD_P, MD_HEADING, MD_UL, MD_OL, MD_CODE)
+                             Markdown, markdown_roles, nbsp, MD_P, MD_HEADING, MD_UL, MD_OL, MD_CODE)
+from mojoui.paragraph import runs_of
 from mojoui.theme import Palette
 
 
@@ -37,10 +38,15 @@ def only_text(src: String, what: String) raises:
 
 
 def texts(v: View, tag: String) -> List[String]:
+    """The words wearing role `tag`: a Text's, a Paragraph's (all its words), or a Paragraph's run's."""
     var out = List[String]()
     for n in v.nodes:
-        if n.kind == TEXT and n.name == tag:
+        if (n.kind == TEXT or n.kind == PARAGRAPH) and n.name == tag:
             out.append(n.text)
+        if n.kind == PARAGRAPH:
+            for r in runs_of(n):
+                if r.role == tag and r.role != n.name:
+                    out.append(r.text)
     return out^
 
 
@@ -122,14 +128,21 @@ def notebook() raises:
     assert_equal(len(texts(v, "md-bullet")), 6)
     assert_equal(texts(v, "md-bullet")[0], "•")
     var strong_ok = False
+    var link_ok = False
     for n in v.nodes:
-        if n.name == "md-strong" and n.text == "Pipeline:":
-            strong_ok = n.value == TONE_STRONG
-        if n.name == "md-code-link":
-            assert_equal(n.tip, "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct")
-    assert_true(strong_ok, "bold pieces wear TONE_STRONG")
+        if n.kind != PARAGRAPH:
+            continue
+        for r in runs_of(n):
+            if r.role == "md-strong" and r.text == "Pipeline:":
+                strong_ok = r.bold
+            if r.role == "md-code-link":
+                link_ok = r.code and r.href == "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct"
+    assert_true(strong_ok, "bold runs are bold and wear md-strong")
+    assert_true(link_ok, "a code link is code with its href")
     var li = texts(v, "md-li")
-    assert_true(len(li) > 0 and li[0] == nbsp() + "text-generation", "a piece's leading space is a no-break space")
+    assert_true(len(li) > 0 and li[0] == "Pipeline: text-generation", "a list item is one paragraph: its words as written (the host wraps them)")
+    for n in v.nodes:  # (no line is broken by Mojo: every block is one Paragraph the host wraps)
+        assert_true(n.name != "md-line", "no md-line rows")
 
 
 def corpus() raises:
@@ -209,19 +222,6 @@ def corpus() raises:
     assert_equal(len(parse_markdown("")), 0)
     assert_equal(len(parse_markdown("\n  \n\t\n")), 0)
 
-    # lines: broken at a word's edge, never inside code, no line starts or ends with a space
-    var runs = parse_inline("one two three **four five** six `seven eight` nine ten eleven")
-    var lines = inline_lines(runs, 12)
-    assert_true(len(lines) >= 4)
-    var joined = String("")
-    for ln in lines:
-        assert_false(ln[0].text.startswith(" "))
-        assert_false(ln[len(ln) - 1].text.endswith(" "))
-        for r in ln:
-            if r.code:
-                assert_equal(r.text, "seven eight")
-        joined += plain_text(ln) + " "
-    assert_equal(joined, "one two three four five six seven eight nine ten eleven ")
     var o = Markdown("1. a\n2. b")
     assert_equal(texts(o, "md-bullet")[1], "2.")
     var c = Markdown("```\nx = 1\n    y\n```")

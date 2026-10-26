@@ -29,6 +29,7 @@ from PIL import Image
 # Mirrors mojoui/view.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE, SEGMENTED, RADIO,
  TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER) = range(1, 33)
+PARAGRAPH = 39  # styled runs: an agent reads its plain words (text)
 CHECKED, DISABLED = 1, 2  # menu item flags (mojoui/menus.mojo)
 GESTURES = {"pan": 1, "zoom": 2, "tap": 3, "press": 4, "release": 5, "double": 6, "key": 7, "secondary": 8}
 MODIFIERS = {"shift": 1, "ctrl": 2, "alt": 4}
@@ -238,7 +239,7 @@ class Host:
         def walk(i, depth):
             n = self.nodes[i]
             k, text = n["kind"], n["text"]
-            if k == TEXT:
+            if k in (TEXT, PARAGRAPH):  # (a Paragraph: its plain words; its runs' looks don't reach an agent)
                 line(depth, f'"{text}"')
             elif k == BUTTON:
                 line(depth, f'Button "{text}"' + (" = on" if n["style"] in (6, 7) else "") + (f' ({n["tip"]})' if n["tip"] else "") + arrow(i))  # (TOOL_ON, ICON_ON: pressed)
@@ -316,7 +317,7 @@ class Host:
 
         def walk(i, group):
             n = self.nodes[i]
-            if n["kind"] == TEXT:
+            if n["kind"] in (TEXT, PARAGRAPH):
                 out.append((group + ": " if group else "") + n["text"])
             for c in n["children"]:
                 walk(c, n["name"] or group)
@@ -443,7 +444,7 @@ class Host:
         texts = []
 
         def walk(j):
-            if self.nodes[j]["kind"] == TEXT:
+            if self.nodes[j]["kind"] in (TEXT, PARAGRAPH):
                 texts.append(self.nodes[j]["text"])
             for c in self.nodes[j]["children"]:
                 walk(c)

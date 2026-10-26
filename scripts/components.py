@@ -33,6 +33,7 @@ COMPONENTS = [
     ("MenuBar", "MENUBAR"), ("Menu", "MENU"), ("Item", "ITEM"), ("ContextMenu", "MENU"),
     ("Dialog", "DIALOG"), ("Toast", "TOAST"), ("Popover", "POPOVER"), ("Checkbox", "TOGGLE"), ("Clipboard", "CLIPBOARD"),
     ("Table", "TABLE"), ("Route", "ROUTE"), ("Draggable", "DRAG"), ("DropTarget", "DROP"), ("WebFrame", "EMBED"),
+    ("Paragraph", "PARAGRAPH"),
 ]
 
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
@@ -109,7 +110,7 @@ COMPOSITES = [
     ("Chip · Badge", "mojoui/chip.mojo", ["Text", "HStack", "Themes on top (themes/, or yours)"], "Chip("),
     ("Confirm", "mojoui/confirm.mojo", ["Button", "Timers"], "ConfirmButton("),
     ("Skeleton", "mojoui/skeleton.mojo", ["VStack", "Themes on top (themes/, or yours)"], "Skeleton("),
-    ("Markdown", "mojoui/markdown.mojo", ["Text", "VStack", "HStack", "Card", "Themes on top (themes/, or yours)"], "Markdown("),
+    ("Markdown", "mojoui/markdown.mojo", ["Paragraph", "Text", "VStack", "HStack", "Card", "Themes on top (themes/, or yours)"], "Markdown("),
     ("Sparkline", "mojoui/sparkline.mojo", ["Canvas"], "SparklineView("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
@@ -155,7 +156,7 @@ def implemented(src, kind):
 
 # Constructors that live in a module of their own: an app uses them only if it imports that module (analytics has a
 # Table of its own).
-MODULE_OF = {"Table": "mojoui.table", "Route": "mojoui.route"}
+MODULE_OF = {"Table": "mojoui.table", "Route": "mojoui.route", "Paragraph": "mojoui.paragraph"}
 
 
 def example_text(example):
