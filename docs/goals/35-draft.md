@@ -5,7 +5,7 @@ support to http." After goal 34 (first-class JS); order agreed by the owner. The
 docs/research/mojo12-flare.md) found 1.2 is not a drop-in: the vendored engine is tied to 1.1, one Mac line, and C
 functions declared with clashing types; after fixes 40/40 builds and 70/71 tests pass. flare 0.13 works behind
 `mojoui.http`'s Transport on worker threads, but HTTPS needs an explicit CA path on 1.2 and it won't link beside mojoui
-until the C declarations agree.
+until the C declarations agree. The HTTPS bug is reported upstream: https://github.com/ehsanmok/flare/issues/42 (2026-10-26).
 
 ## Milestones
 | # | Milestone | Proof (`scripts/check`) |
