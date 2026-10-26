@@ -1314,6 +1314,10 @@ struct GtkHost[A: App](Movable):
                 var child = self.build(node.children[k], self_addr)
                 if node.style == 1 and not (node.hint == "E" and k % node.value == node.value - 1):  # (fitted: each item from its column's start, as the web's justify-items: start)
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(1))
+                if node.style == 1:  # (each item on its row's middle, as the web's align-items: center)
+                    external_call["gtk_widget_set_valign", NoneType](child, c_int(ALIGN_CENTER))
+                if node.style == 1 and k % node.value != node.value - 1 and self.rt.shown.nodes[node.children[k]].kind == TEXT:
+                    external_call["gtk_label_set_wrap", NoneType](self.widgets[node.children[k]], c_int(0))  # (a fitted column is as wide as its widest words, never wrapped: the web's max-content)
                 if node.hint == "E" and k % node.value == node.value - 1:  # (the last column's items at its trailing edge)
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(2))  # GTK_ALIGN_END
                 external_call["gtk_grid_attach", NoneType](w, child, c_int(k % node.value), c_int(k // node.value), c_int(1), c_int(1))

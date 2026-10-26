@@ -42,7 +42,7 @@ def CardBody(var items: List[View], flow: Bool = False) -> View:
     flow, apart by their own roles' margins (a note's 10 above it, none below: role card-body-flow), as a web page's card
     body lays out its paragraphs and lists."""
     if flow:
-        return VStack(items^, spacing=0).align(STRETCH).fill().tag("card-body-flow")
+        return VStack(items^, spacing=0).align(START).fill().tag("card-body-flow")  # (the web lays it as blocks; GTK and the Mac keep each item its own width, as a block's words)
     return VStack(items^, spacing=SPACE_M).align(START).fill().tag("card-body")
 
 

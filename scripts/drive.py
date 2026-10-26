@@ -21,7 +21,13 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 CHROMIUM = "/usr/bin/chromium"
 
-DUMP = """() => [...document.querySelectorAll('#mojoui-root [data-kind], #mojoui-overlay [data-kind]')].map(e => {
+DUMP = """() => { const mojouiRect = e => {  // (a view whose parts join its row, display: contents, has no box: its parts' union is)
+  if (getComputedStyle(e).display !== 'contents') return e.getBoundingClientRect();
+  const rs = [...e.children].map(c => c.getBoundingClientRect()).filter(b => b.width || b.height);
+  if (!rs.length) return e.getBoundingClientRect();
+  const x = Math.min(...rs.map(b => b.left)), y = Math.min(...rs.map(b => b.top));
+  return { x, y, width: Math.max(...rs.map(b => b.right)) - x, height: Math.max(...rs.map(b => b.bottom)) - y }; };
+  return [...document.querySelectorAll('#mojoui-root [data-kind], #mojoui-overlay [data-kind]')].map(e => {
   const k = e.dataset.kind;
   if (k === 'label') { const tone = ['warn', 'good', 'strong', 'accent'].find(t => e.classList.contains('tone-' + t));
     return 'LABEL: ' + e.textContent + (tone ? String.fromCharCode(10) + 'TONE: ' + e.textContent + ' = ' + tone : ''); }
@@ -82,7 +88,7 @@ DUMP = """() => [...document.querySelectorAll('#mojoui-root [data-kind], #mojoui
       + (r0 ? String.fromCharCode(10) + 'LISTROW: ' + r0.textContent : ''); }
 }).filter(Boolean).concat([...document.querySelectorAll('.scroll[data-pin="1"]')].map(e =>
   'PINNED: ' + (e.dataset.tag || '?') + (e.scrollHeight - e.scrollTop - e.clientHeight <= 4 ? ' at end' : ' not at end'))).concat([...document.querySelectorAll('[data-tag]')].map(e => {
-  const r = e.getBoundingClientRect();
+  const r = mojouiRect(e);
   return 'BOX: ' + e.dataset.tag + ' ' + [r.x, r.y, r.width, r.height].map(v => v.toFixed(1)).join(' ');
 })).concat([...document.querySelectorAll('[data-kind=button], label.picker')].map(b => {
   const t = b.parentElement && b.parentElement.closest('[data-tag]'), r = b.getBoundingClientRect();
@@ -90,7 +96,7 @@ DUMP = """() => [...document.querySelectorAll('#mojoui-root [data-kind], #mojoui
 }).filter(Boolean)).concat(window.mojouiClip !== undefined ? ['CLIPBOARD: ' + window.mojouiClip.split(String.fromCharCode(9)).join(String.fromCharCode(92) + 't').split(String.fromCharCode(10)).join(String.fromCharCode(92) + 'n')] : []).concat([...document.body.classList].filter(c => c !== 'skin').map(c => 'DESIGN: ' + c)).concat(
   document.body.classList.contains('skin') && document.fonts.check('13px Inter') && document.fonts.check('13px "JetBrains Mono"') ? ["FONT: Inter, JetBrains Mono (the app's own)"] : []
 ).concat(['PAGE: ' + document.documentElement.scrollWidth + 'x' + document.documentElement.scrollHeight
-  + ' in ' + innerWidth + 'x' + innerHeight]).join(String.fromCharCode(10))"""
+  + ' in ' + innerWidth + 'x' + innerHeight]).join(String.fromCharCode(10)); }"""
 
 
 def free_port():
