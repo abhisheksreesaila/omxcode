@@ -159,6 +159,7 @@ def look_gtk_css(look: Look, scope: String) -> String:
     var out = String("")
     if look.type.line > 0 and look.type.body > 0:  # every label a line as high as the web's (body 14px/1.45: 20.3)
         out += scope + "label { line-height: " + line_px(look.type.body * look.type.line) + "; }\n"
+    var own = String("")
     for s in look.surfaces:
         if not text_only(s):
             out += scope + ".mui-tag-" + s.role + " { " + surface_rule(s, False) + "}\n"
@@ -166,8 +167,12 @@ def look_gtk_css(look: Look, scope: String) -> String:
                 # a button wearing the role is a control high overall, as on the web (border-box), padding included (D-441)
                 out += scope + "button.mui-tag-" + s.role + " { min-height: " + px(gtk_content_h(s, max(look.controls.control_h, s.min_height))) + "; }\n"
         var t = text_rule(s, False, look.type.line)
-        if t != "":  # (its labels, or the label that wears the role itself)
-            out += scope + ".mui-tag-" + s.role + " label, " + scope + "label.mui-tag-" + s.role + " { " + t + "}\n"
+        if t != "":  # (its labels; the label that wears the role itself comes after every role's: below)
+            out += scope + ".mui-tag-" + s.role + " label { " + t + "}\n"
+            own += scope + "label.mui-tag-" + s.role + " { " + t + "}\n"
+    # a label's own role has the last word over any role around it (a mono line in a table's cell: the web's words take
+    # an ancestor's type at the lowest weight, :where; GTK has no :where, so the same weight written later, D-491)
+    out += own
     var c = look.controls.copy()
     if c.control_h > 0:  # push buttons, fields and dropdowns: one height, the look's corners
         out += (scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; "
@@ -257,10 +262,10 @@ def look_web_css(look: Look, scope: String) -> String:
     # a Divider's room, as weak as the base sheet's hr (:where): a role's own margins on a Divider still win (D-460; scoped
     # plainly, the look's hr rule beat every role's rule-margin 0 and moved the console's pages 4 px a rule)
     var weak = ":where(" + scope.strip() + ") "
-    if c.divider_gap > 0:
-        out += weak + "hr { margin: " + px(c.divider_gap) + " 0; }\n"
-    if c.divider_side > 0:
-        out += ":where(" + scope.strip() + " .hstack) > hr { margin: 0 " + px(c.divider_side) + "; }\n"
+    if c.divider_gap != 0:  # (below 0: none, D-490)
+        out += weak + "hr { margin: " + px(max(c.divider_gap, 0)) + " 0; }\n"
+    if c.divider_side != 0:
+        out += ":where(" + scope.strip() + " .hstack) > hr { margin: 0 " + px(max(c.divider_side, 0)) + "; }\n"
     out += press_rules(look.motion, scope, True)
     return out
 

@@ -818,6 +818,18 @@ struct GtkHost[A: App](Movable):
         if self.page != 0:
             external_call["gtk_scrolled_window_set_policy", NoneType](self.page, c_int(2), c_int(2))  # NEVER, NEVER
 
+    def one_line_words(self, n: Int):
+        """The words in view n (and in its views) stay on one line, cut with an ellipsis: a dense table's cell (the web's
+        table.dense td .text: nowrap, overflow hidden, text-overflow ellipsis)."""
+        if n < 0 or n >= len(self.rt.shown.nodes) or n >= len(self.widgets):
+            return
+        var kids = self.rt.shown.nodes[n].children.copy()
+        if self.rt.shown.nodes[n].kind == TEXT and self.widgets[n] != 0:
+            external_call["gtk_label_set_wrap", NoneType](self.widgets[n], c_int(0))
+            external_call["gtk_label_set_ellipsize", NoneType](self.widgets[n], c_int(3))  # PANGO_ELLIPSIZE_END
+        for c in kids:
+            self.one_line_words(c)
+
     def fit_tables(self):
         """Each Table's columns share its width as a browser's automatic table layout does (the web's is a <table>):
         every column at least its widest cell's narrowest (min-content), then the room up to each one's widest
@@ -838,31 +850,61 @@ struct GtkHost[A: App](Movable):
             var lo = List[Int](length=cols, fill=0)
             var hi = List[Int](length=cols, fill=0)
             var m = List[c_int](length=2, fill=0)
+            var fixed = List[Bool](length=cols, fill=False)  # (a column of a set width: no share of more room)
+            var dense = self.rt.shown.nodes[k].style == 1 or self.rt.shown.nodes[k].style == 2
             for c in range(cols):
+                var lim = self.rt.shown.nodes[k].options[c] if c < len(self.rt.shown.nodes[k].options) else String("")
+                var cap = 0  # (a cut column's widest, the web's td max-width: border-box, a cap on its cells' widths)
+                if dense and lim != "W" and not lim.startswith("T"):
+                    var digits = String(lim[byte = 0 : lim.byte_length() - 1]) if lim.endswith("S") else lim
+                    try:
+                        cap = Int(digits) if digits != "" else 0
+                    except:
+                        cap = 0
                 for r in range(rows):
                     var cell = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(r))
                     if cell == 0:
                         continue
                     external_call["gtk_widget_measure", NoneType](cell, c_int(HORIZONTAL), c_int(-1), Int(m.unsafe_ptr()), Int(m.unsafe_ptr()) + 4, Int(0), Int(0))
-                    lo[c] = max(lo[c], Int(m[0]))
-                    hi[c] = max(hi[c], Int(m[1]), Int(m[0]))
+                    var a, b = Int(m[0]), max(Int(m[1]), Int(m[0]))
+                    if dense and lim != "W":  # (a dense cell's words are one line: its narrowest is its widest, as the
+                        a = b                # browser's nowrap; GTK's cut labels would measure an ellipsis)
+                        if cap > 0 and not (r == 0):  # (the head's words aren't cut: the web's max-width is on the td)
+                            a, b = min(a, cap), min(b, cap)
+                    lo[c] = max(lo[c], a)
+                    hi[c] = max(hi[c], b)
+                if lim.startswith("T") and lim.byte_length() > 1:  # the tick column: the theme's width overall, its box when wider (the web's th width, border-box)
+                    try:
+                        var tw = Int(lim[byte=1:])
+                        lo[c], hi[c] = max(lo[c], tw), max(lo[c], tw)
+                        fixed[c] = True
+                    except:
+                        pass
             var sum_lo = 0
             var sum_hi = 0
+            var free_hi = 0  # (the columns more room goes to: all but a set width's, unless every one is set)
+            var last_free = cols - 1
             for c in range(cols):
                 sum_lo += lo[c]
                 sum_hi += hi[c]
+                if not fixed[c]:
+                    free_hi += hi[c]
+                    last_free = c
+            var all_fixed = free_hi == 0
+            if all_fixed:
+                free_hi = sum_hi
             var want = List[Int](length=cols, fill=0)
             var given = 0
             for c in range(cols):
                 var v = lo[c]
                 if room >= sum_hi and sum_hi > 0:
-                    v = hi[c] + (room - sum_hi) * hi[c] // sum_hi
+                    v = hi[c] + ((room - sum_hi) * hi[c] // free_hi if all_fixed or not fixed[c] else 0)
                 elif room > sum_lo and sum_hi > sum_lo:
                     v = lo[c] + (room - sum_lo) * (hi[c] - lo[c]) // (sum_hi - sum_lo)
                 want[c] = v
                 given += v
-            if room > given and given >= sum_lo:  # (what rounding left goes to the last column)
-                want[cols - 1] += room - given
+            if room > given and given >= sum_lo:  # (what rounding left goes to the last column that takes more)
+                want[last_free] += room - given
             for c in range(cols):
                 var spacer = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(-1))
                 if spacer == 0:
@@ -901,7 +943,8 @@ struct GtkHost[A: App](Movable):
             cross = 1  # GTK_ALIGN_START
         elif parent.align_items == END:
             cross = 2  # GTK_ALIGN_END
-        if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER:
+        var wrapper = parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (its one view across it, as the web's align-items: stretch, D-494)
+        if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER or wrapper:
             cross = 0  # GTK_ALIGN_FILL
         # A spacer takes room only along its stack (else a Spacer in a toolbar makes the whole bar tall); a view
         # with a fixed size along the stack never takes spare room there (as on the other hosts).
@@ -1288,6 +1331,9 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_box_new", Int](c_int(VERTICAL), c_int(0))
         elif node.kind == TABLE:  # a grid whose columns size to their content; each cell in a box wearing its role
             w = external_call["gtk_grid_new", Int]()
+            add_class(w, "mui-table")  # (a theme's rules for what's in a table: its tick boxes, D-492)
+            if node.style == 2:
+                add_class(w, "mui-table-compact")
             var cols = max(node.value, 1)
             for k in range(len(node.children)):
                 var child = self.build(node.children[k], self_addr)
@@ -1295,6 +1341,22 @@ struct GtkHost[A: App](Movable):
                 var row = k // cols
                 var cell = external_call["gtk_box_new", Int](c_int(HORIZONTAL), c_int(0))
                 add_class(cell, "mui-tag-table-head" if row == 0 else "mui-tag-table-cell")
+                # a dense table's cells wear the dense roles too, as the web's (D-493): table-dense-head/-cell, on a phone
+                # the compact ones over them, a snug column's cells table-dense-snug; their words stay on one line, cut,
+                # but in a column that wraps ("W")
+                var lim = node.options[col] if col < len(node.options) else String("")
+                if node.style == 1 or node.style == 2:
+                    var compact = node.style == 2
+                    var snug = row > 0 and not lim.startswith("T") and lim.endswith("S")
+                    add_class(cell, "mui-tag-table-dense-head" if row == 0 else "mui-tag-table-dense-cell")
+                    if compact:
+                        add_class(cell, "mui-tag-table-dense-compact-head" if row == 0 else "mui-tag-table-dense-compact-cell")
+                    if snug:
+                        add_class(cell, "mui-tag-table-dense-snug")
+                        if compact:
+                            add_class(cell, "mui-tag-table-dense-compact-snug")
+                    if lim != "W":
+                        self.one_line_words(node.children[k])
                 var num = col < node.hint.byte_length() and String(node.hint[byte=col]) == "R"
                 if num:
                     add_class(cell, "mui-tag-table-num")

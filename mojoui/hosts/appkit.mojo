@@ -1131,8 +1131,10 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", child)
                 ref cn = self.rt.shown.nodes[c]
                 if cn.kind == DIVIDER and not (cn.sized_width() if not vertical else cn.sized_height()):
-                    # a Divider keeps its room each side, as the web's hr: 4 pt above and below in a column, 6 pt beside it in a row (D-440)
-                    var room = Float64(node.spacing + (4 if vertical else 6))
+                    # a Divider keeps its room each side, as the web's hr: the look's (D-490: below 0 none), else 4 pt above and below
+                    # in a column, 6 pt beside it in a row (D-440)
+                    var own = self.look.controls.divider_gap if vertical else self.look.controls.divider_side
+                    var room = Float64(node.spacing + (max(own, 0) if own != 0 else (4 if vertical else 6)))
                     if before != 0:
                         _ = msg(w, "setCustomSpacing:afterView:", room, before)
                     _ = msg(w, "setCustomSpacing:afterView:", room, child)
