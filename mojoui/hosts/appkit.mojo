@@ -492,12 +492,21 @@ struct AppKitHost[A: App](Movable):
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             var role = self.look.surface(node.name) if node.name != "" else -1
             if role >= 0 and self.look.surfaces[role].max_chars > 0:  # the role's measure: that many "0"s of its font (CSS's ch)
-                var said = msg(w, "attributedStringValue")
-                if msg(said, "length") > 0:
-                    var zero = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string("0"), msg(said, "attributesAtIndex:effectiveRange:", 0, 0))
-                    var most = msg[CGPoint](zero, "size").x * Float64(self.look.surfaces[role].max_chars)
-                    _ = msg(msg(msg(w, "widthAnchor"), "constraintLessThanOrEqualToConstant:", most), "setActive:", 1)
-                    _ = msg(w, "setPreferredMaxLayoutWidth:", most)
+                # (the paragraph's own font, as CSS's ch: its first run's could be inline code, D-522)
+                ref sf = self.look.surfaces[role]
+                var size = sf.font_size if sf.font_size > 0 else (self.look.type.body if self.skinned else Float64(13))
+                var font = look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight if sf.font_weight > 0 else 400, size, self.look.type.tabular)
+                var attrs = new("NSMutableDictionary")
+                _ = msg(attrs, "setObject:forKey:", font, ns_string("NSFont"))
+                var zero = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string("0"), attrs)
+                var most = msg[CGPoint](zero, "size").x * Float64(sf.max_chars)
+                _ = msg(msg(msg(w, "widthAnchor"), "constraintLessThanOrEqualToConstant:", most), "setActive:", 1)
+                _ = msg(w, "setPreferredMaxLayoutWidth:", most)
+            # its lines wrap at the width its column gives it, as the browser's and Pango's: 490 keeps one line unless a
+            # real limit squeezes it, and fit_wraps tells it that width (a wrapping label is otherwise as wide as its one
+            # line: the notebook's lines ran 1039 pt wide in a 914 pt column, D-521)
+            _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
+            self.wraps.append(w)
             if node.msg != 0 or len(node.options) > 0:  # a link's tap: the click's place in the words names the run (paragraphTap:)
                 var r = msg(msg(cls("NSClickGestureRecognizer"), "alloc"), "initWithTarget:action:", self.target, sel("paragraphTap:"))
                 _ = msg(w, "addGestureRecognizer:", r)

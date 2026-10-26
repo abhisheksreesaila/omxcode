@@ -727,6 +727,8 @@ struct GtkHost[A: App](Movable):
         if node.h != 0:
             external_call["gtk_widget_set_vexpand", NoneType](w, c_int(0))
         var cap = node.max_w if node.max_w != 0 else node.w
+        if cap == 0 and node.kind != PARAGRAPH and node.kind != TEXT and self.measured(node):
+            cap = 10000  # (a measured box, as the web's max-width in ch: fit_measures sets its clamp to the measure, D-524)
         if cap != 0:
             var clamp = external_call["adw_clamp_new", Int]()
             external_call["adw_clamp_set_maximum_size", NoneType](clamp, c_int(cap))
@@ -897,6 +899,25 @@ struct GtkHost[A: App](Movable):
                 if Int(have[0]) != want:
                     external_call["gtk_widget_set_size_request", NoneType](cell, c_int(want), have[1])
 
+    def fit_blocks(self, k: Int):
+        """Block words with a max width in block-flow column k: as wide as the column up to that width, from its leading
+        edge (a trailing margin takes the rest; place_child uncapped their clamp). After each layout, as fit_measures."""
+        ref n = self.rt.shown.nodes[k]
+        for c in n.children:
+            if c >= len(self.widgets) or self.widgets[c] == 0 or not self.block_words(n, self.rt.shown.nodes[c]):
+                continue
+            var cap = self.rt.shown.nodes[c].max_w
+            if cap <= 0:
+                continue
+            var label = self.widgets[c]
+            var width = Int(external_call["gtk_widget_get_width", c_int](label))
+            if width <= 0:
+                continue
+            var room = width + Int(external_call["gtk_widget_get_margin_end", c_int](label))
+            var margin = c_int(max(room - cap, 0))
+            if external_call["gtk_widget_get_margin_end", c_int](label) != margin:
+                external_call["gtk_widget_set_margin_end", NoneType](label, margin)
+
     def fit_measures(self):
         """A paragraph whose role has a measure (Surface.max_chars) is at most that many "0"s of its font wide (measured
         in the label's own font, CSS's ch), from its leading edge, as the web's max-width in ch: a trailing margin takes
@@ -906,7 +927,13 @@ struct GtkHost[A: App](Movable):
             if self.kinds[k] == GRID and self.widgets[k] != 0 and len(self.rt.shown.nodes[k].options) > 0:
                 self.fit_shares(k)
                 continue
-            if self.kinds[k] != PARAGRAPH or self.widgets[k] == 0 or not self.measured(self.rt.shown.nodes[k]):
+            if self.kinds[k] == VSTACK and self.flows(self.rt.shown.nodes[k].name):
+                self.fit_blocks(k)
+                continue
+            if self.widgets[k] == 0 or not self.measured(self.rt.shown.nodes[k]):
+                continue
+            var boxed = self.kinds[k] != PARAGRAPH and self.kinds[k] != TEXT
+            if boxed and (k >= len(self.outers) or self.outers[k] == 0 or Int(external_call["g_type_check_instance_is_a", c_int](self.outers[k], external_call["adw_clamp_get_type", Int]())) == 0):
                 continue
             var label = self.widgets[k]
             var width = Int(external_call["gtk_widget_get_width", c_int](label))
@@ -914,6 +941,12 @@ struct GtkHost[A: App](Movable):
                 continue
             var zero = String("0")
             var layout = external_call["gtk_widget_create_pango_layout", Int](label, zero.as_c_string_span())  # ("0" in the label's own font: CSS's ch)
+            if boxed:  # (a box's own font isn't its role's, which its words wear: the role's family and size, as CSS's ch)
+                ref sf = self.look.surfaces[self.look.surface(self.rt.shown.nodes[k].name)]
+                var spec = (sf.font if sf.font != "" else self.look.type.family) + " " + String(sf.font_size if sf.font_size > 0 else self.look.type.body) + "px"
+                var desc = external_call["pango_font_description_from_string", Int](spec.as_c_string_span())
+                external_call["pango_layout_set_font_description", NoneType](layout, desc)
+                external_call["pango_font_description_free", NoneType](desc)
             var size = List[c_int](length=2, fill=0)
             external_call["pango_layout_get_pixel_size", NoneType](layout, Int(size.unsafe_ptr()), Int(size.unsafe_ptr()) + 4)
             var ch = Float64(Int(size[0]))
@@ -925,6 +958,12 @@ struct GtkHost[A: App](Movable):
             if ch <= 0:
                 continue
             var chars = self.look.surfaces[self.look.surface(self.rt.shown.nodes[k].name)].max_chars
+            if boxed:  # (a box: its clamp at the measure; it hugs at most that, from its leading edge)
+                var most_box = c_int(Int(ch * Float64(chars) + 0.5))
+                if external_call["adw_clamp_get_maximum_size", c_int](self.outers[k]) != most_box:
+                    external_call["adw_clamp_set_maximum_size", NoneType](self.outers[k], most_box)
+                    external_call["adw_clamp_set_tightening_threshold", NoneType](self.outers[k], most_box)
+                continue
             var most = Int(ch * Float64(chars) + 0.5)
             var room = width + Int(external_call["gtk_widget_get_margin_end", c_int](label))
             var margin = c_int(max(room - most, 0))
@@ -1052,6 +1091,16 @@ struct GtkHost[A: App](Movable):
         var k = self.look.surface(role) if role != "" else -1
         return k >= 0 and self.look.surfaces[k].ends_row
 
+    def flows(self, role: String) -> Bool:
+        """Whether a role lays its children as block flow (Surface.block_flow)."""
+        var k = self.look.surface(role) if role != "" else -1
+        return k >= 0 and self.look.surfaces[k].block_flow
+
+    def block_words(self, parent: Node, child: Node) -> Bool:
+        """Words (a Text or Paragraph) in a block-flow column: a block, as wide as the column, at most their max width
+        (the web's display: block with max-width), not their words' width (D-523)."""
+        return (child.kind == TEXT or child.kind == PARAGRAPH) and parent.kind == VSTACK and self.flows(parent.name)
+
     def measured(self, node: Node) -> Bool:
         """Whether the role a view wears gives it a measure (Surface.max_chars)."""
         var k = self.look.surface(node.name) if node.name != "" else -1
@@ -1067,8 +1116,19 @@ struct GtkHost[A: App](Movable):
             cross = 2  # GTK_ALIGN_END
         var wrapper = parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (its one view across it, as the web's align-items: stretch, D-494)
         var spans = vertical and child_node.kind == SCROLL  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502)
-        if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER or wrapper or spans:
+        var block = self.block_words(parent, child_node)
+        if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER or wrapper or spans or block:
             cross = 0  # GTK_ALIGN_FILL
+        if block and child_node.max_w > 0 and Int(external_call["g_type_check_instance_is_a", c_int](child, external_call["adw_clamp_get_type", Int]())) != 0:
+            # (AdwClamp centres a capped child: the cap is fit_measures' trailing margin instead, from the leading edge)
+            external_call["adw_clamp_set_maximum_size", NoneType](child, c_int(10000))
+            external_call["adw_clamp_set_tightening_threshold", NoneType](child, c_int(10000))
+        if block and child_node.kind == TEXT:  # (a block's lines read from its leading edge)
+            var label = child
+            if Int(external_call["g_type_check_instance_is_a", c_int](child, external_call["adw_clamp_get_type", Int]())) != 0:
+                label = external_call["adw_clamp_get_child", Int](child)
+            external_call["gtk_label_set_xalign", NoneType](label, Float32(0))
+            external_call["gtk_label_set_justify", NoneType](label, c_int(0))
         # A spacer takes room only along its stack (else a Spacer in a toolbar makes the whole bar tall); a view
         # with a fixed size along the stack never takes spare room there (as on the other hosts).
         if vertical:
