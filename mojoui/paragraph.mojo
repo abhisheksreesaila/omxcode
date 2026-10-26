@@ -16,6 +16,7 @@
 
 from mojoui.view import View, Node, PARAGRAPH, BODY, NO_MSG
 from mojoui.theme import Look
+from mojoui.linebreak import css_breaks
 
 comptime RUN_FIELDS = 4
 
@@ -214,7 +215,7 @@ def pango_markup(node: Node, look: Look) -> String:
     for k in range(len(runs)):
         ref r = runs[k]
         var attrs = run_attributes(r, look, node.name)
-        var words = escape_markup(r.text)
+        var words = escape_markup(css_breaks(r.text))  # (the browser's line breaks, D-548)
         if attrs != "":
             words = "<span" + attrs + ">" + words + "</span>"
         if r.href != "":

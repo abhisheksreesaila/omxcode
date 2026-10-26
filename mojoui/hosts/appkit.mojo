@@ -22,6 +22,7 @@ from mojoui.menus import CHECKED, DISABLED, DANGER
 from mojoui.theme import Palette, Theme, mix
 from mojoui.theme import Look
 from mojoui.look import text_only
+from mojoui.linebreak import css_breaks, label_words
 from mojoui.paragraph import Run, runs_of, link_href
 from mojoui.icons_data import lucide_svg
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
@@ -508,7 +509,8 @@ struct AppKitHost[A: App](Movable):
                 var r = msg(msg(cls("NSClickGestureRecognizer"), "alloc"), "initWithTarget:action:", self.target, sel("paragraphTap:"))
                 _ = msg(w, "addGestureRecognizer:", r)
         elif node.kind == TEXT:
-            w = msg(cls("NSTextField"), "labelWithString:", ns_string(node.text))
+            var shown = label_words(self.rt.shown.nodes, i)  # (the browser's line breaks and ends, D-548, D-549)
+            w = msg(cls("NSTextField"), "labelWithString:", ns_string(shown))
             _ = msg(w, "setAlignment:", 1)  # NSTextAlignmentCenter (1 on Apple Silicon; 2 is right)
             var size = Float64(13)
             var bold = False
@@ -538,7 +540,7 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(attrs, "setObject:forKey:", msg(w, "font"), ns_string("NSFont"))
                     _ = msg(attrs, "setObject:forKey:", msg(w, "textColor"), ns_string("NSColor"))
                     _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", sf.tracking), ns_string("NSKern"))
-                    _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(node.text), attrs))
+                    _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(shown), attrs))
             elif self.skinned and self.inherited_size(i) > 0:  # (no role of its own with type: a table cell's words at the cell's size)
                 _ = msg(w, "setFont:", look_font(self.look.type.family, 400, self.inherited_size(i), self.look.type.tabular))
             if node.value == TONE_WARN:
@@ -573,7 +575,7 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", (lh - natural) / 2), ns_string("NSBaselineOffset"))
                     if tl >= 0 and self.look.surfaces[tl].tracking != 0:
                         _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", self.look.surfaces[tl].tracking), ns_string("NSKern"))
-                    _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(node.text), attrs))
+                    _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(shown), attrs))
                     # (a one-line label's cell sizes to its font, not its paragraph's lines: a line high at least)
                     _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(Int(lh + 0.5))), "setActive:", 1)
             var p = self.parents[i] if i < len(self.parents) else -1
@@ -1161,7 +1163,7 @@ struct AppKitHost[A: App](Movable):
                     if self.rt.shown.nodes[c].name == "":  # (its words in the role's type: the head's caps, a figure's mono)
                         var tk = self.look.surface("table-num") if num and r > 0 and self.look.surface("table-num") >= 0 else self.look.surface(role)
                         if tk >= 0:
-                            self.restyle_label(child, self.rt.shown.nodes[c].text, tk)
+                            self.restyle_label(child, self.label_text(c, self.rt.shown.nodes[c].text), tk)
                     _ = msg(child, "setAlignment:", 2 if num else 0)  # NSTextAlignmentRight / Left
                 _ = msg(row, "addArrangedSubview:", cell)
                 hold_insets(cell)
@@ -2015,9 +2017,9 @@ struct AppKitHost[A: App](Movable):
                     var had = msg(w, "attributedStringValue")
                     if had != 0 and msg(had, "length") > 0:
                         var attrs = msg(had, "attributesAtIndex:effectiveRange:", 0, 0)
-                        _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(p.text), attrs))
+                        _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(self.label_text(p.node, p.text)), attrs))
                     else:
-                        _ = msg(w, "setStringValue:", ns_string(p.text))
+                        _ = msg(w, "setStringValue:", ns_string(self.label_text(p.node, p.text)))
                 elif kind == FIELD:
                     if from_ns(msg(w, "stringValue")) != p.text:  # don't fight the typist
                         _ = msg(w, "setStringValue:", ns_string(p.text))
@@ -2175,9 +2177,13 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithInteger:", 1), ns_string("NSUnderline"))
             if kern != 0:  # (the role's letter spacing, as the web's: a heading's tighter tracking, D-526)
                 _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", kern), ns_string("NSKern"))
-            var piece = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(r.text), attrs)
+            var piece = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(css_breaks(r.text)), attrs)
             _ = msg(out, "appendAttributedString:", piece)
         return out
+
+    def label_text(self, n: Int, text: String) -> String:
+        """What TEXT node n's label shows for `text`: its words as the browser lays them out (label_words, D-548, D-549)."""
+        return label_words(self.rt.shown.nodes, n) if self.rt.shown.nodes[n].text == text else css_breaks(text)
 
     def restyle_label(self, w: Int, text: String, k: Int):
         """A label in surface k's type: its font, ink, letter spacing and line height (a table's head and figures)."""
@@ -2308,16 +2314,27 @@ struct AppKitHost[A: App](Movable):
                 sum_hi += hi[c]
             if free_hi <= 0:
                 free_hi = sum_hi
+            # Each column's exact share, then whole points by rounding where each column ends (its edge is the
+            # browser's to half a point): each cut to a whole point left the remainder, up to a point a column, to the
+            # last one, and the models table's ACCESS column stood 5 pt wide of the web's (D-550, GTK's fit_tables).
+            var widths = List[Float64](length=cols, fill=0)
+            var exact = Float64(0)
+            var edge = 0
+            for c in range(cols):
+                var v = lo[c]
+                if room >= sum_hi and sum_hi > 0:
+                    v = hi[c] + ((room - sum_hi) * hi[c] / free_hi if fixed[c] == 0 else Float64(0))
+                elif room > sum_lo and sum_hi > sum_lo:
+                    v = lo[c] + (room - sum_lo) * (hi[c] - lo[c]) / (sum_hi - sum_lo)
+                exact += v
+                var next = Int(exact + 0.5)
+                widths[c] = Float64(next - edge)
+                edge = next
             for t in range(start, end):
                 var col = self.tcells[t][3]
                 if self.tcells[t][2] == 0 or room <= 0:
                     continue
-                var v = lo[col]
-                if room >= sum_hi and sum_hi > 0:
-                    v = hi[col] + ((room - sum_hi) * hi[col] / free_hi if fixed[col] == 0 else Float64(0))
-                elif room > sum_lo and sum_hi > sum_lo:
-                    v = lo[col] + (room - sum_lo) * (hi[col] - lo[col]) / (sum_hi - sum_lo)
-                _ = msg(self.tcells[t][2], "setConstant:", Float64(Int(v)))
+                _ = msg(self.tcells[t][2], "setConstant:", widths[col])
             start = end
         _ = msg(msg(self.window, "contentView"), "layoutSubtreeIfNeeded")
 
@@ -2534,6 +2551,11 @@ struct AppKitHost[A: App](Movable):
             var w = self.widgets[i] if i < len(self.widgets) else 0
             if i < len(self.shells) and self.shells[i] != 0:
                 w = self.shells[i]  # (a field's box: what the person sees, and what GTK and the web measure)
+            if i == 0 and (n.grows or n.fills) and w != 0:
+                # a screen that fills the window: its box is the page it fills, what the window shows (the web's root is
+                # the window high and a taller screen overflows it, scrolling the page; the Mac's root is as tall as its
+                # content in the page's scroll view: models 710 for the web's 640, D-551)
+                w = content
             if w == 0:
                 if n.kind != ITEM and n.kind != MENU and n.kind != CLIPBOARD and n.kind != ROUTE and n.kind != DIALOG and n.kind != POPOVER and n.kind != TOAST and n.kind != SPACER:
                     line += "  (no view)"

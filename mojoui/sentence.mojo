@@ -6,6 +6,7 @@
 #   Sentence([Word("Sum", ASK_COMBINE, "word-combine"), Word(" of "), Word("amount", ASK_VALUE, "word-value")], width=46)
 
 from mojoui.view import View, Text, Button, HStack, VStack, HEADLINE, TOKEN, TOKEN_LIT, START, CENTER, NO_MSG
+from mojoui.linebreak import SENTENCE_LINE
 
 
 @fieldwise_init
@@ -31,7 +32,7 @@ def Sentence(words: List[Word], width: Int = 48, style: Int = HEADLINE, tag: Str
     for w in words:
         var n = w.text.byte_length()
         if used > 0 and used + n > width and (w.msg != NO_MSG or w.text.startswith(" ")):
-            lines.append(HStack(line^, spacing=0).align(CENTER).justify(START).tag("sentence-line"))
+            lines.append(HStack(line^, spacing=0).align(CENTER).justify(START).tag(SENTENCE_LINE))
             line = List[View]()
             used = 0
             if w.msg == NO_MSG:  # (a run that would open the new line drops its leading space)
@@ -46,7 +47,7 @@ def Sentence(words: List[Word], width: Int = 48, style: Int = HEADLINE, tag: Str
             line.append(Text(w.text, style))
         used += n
     if len(line) > 0:
-        lines.append(HStack(line^, spacing=0).align(CENTER).justify(START).tag("sentence-line"))
+        lines.append(HStack(line^, spacing=0).align(CENTER).justify(START).tag(SENTENCE_LINE))
     return VStack(lines^, spacing=2).align(START).tag(tag)
 
 

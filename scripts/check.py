@@ -1503,6 +1503,10 @@ def m7():
     # first page lost a deep link's route under load, and the shot showed the models page for the logs tab)
     # no answer carrying screen changes is dropped by the page (D-546: the logs tab stayed "Loading…"), and a phone's
     # page tells the app the screen's size whatever its content (D-547: the keys page at 390 laid out 780 wide)
+    # GTK's and the Mac's labels break lines and drop their end spaces as the browser does (D-548, D-549)
+    err = g30.g20.mojo_test("tests/test_linebreak.mojo", "linebreak: ok", "test_linebreak")
+    if err:
+        problems.append(err[:400])
     for test, args in (("web_first_page", [str(g30.BUILD / CONSOLE / "web")]), ("web_lanes", []),
                        ("web_viewport", [str(g30.BUILD / CONSOLE / "web")])):
         r = g30.run([sys.executable, str(ROOT / "tests" / f"test_{test}.py"), *args], timeout=180)

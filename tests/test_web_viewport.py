@@ -29,7 +29,7 @@ def main():
     module_dir = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "build" / "console" / "web").resolve()
     web_py = Path(sys.argv[2] if len(sys.argv) > 2 else ROOT / "mojoui" / "hosts" / "web.py").resolve()
     port = drive.free_port()
-    env = dict(os.environ, MXCONSOLE_URL=os.environ.get("MXCONSOLE_URL", "http://127.0.0.1:9"))
+    env = dict(os.environ, MXC_URL="http://127.0.0.1:9")  # (the console's daemon: nothing listens there)
     web = subprocess.Popen([sys.executable, str(web_py), str(module_dir), str(port)], cwd=ROOT, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     sizes = []

@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     module_dir = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "build" / "console" / "web").resolve()
     web_py = Path(sys.argv[2] if len(sys.argv) > 2 else ROOT / "mojoui" / "hosts" / "web.py").resolve()
-    os.environ.setdefault("MXCONSOLE_URL", "http://127.0.0.1:9")  # (nothing listens: its polls fail fast, still effects)
+    os.environ["MXC_URL"] = "http://127.0.0.1:9"  # (nothing listens: its polls fail fast, still effects)
 
     so = next(module_dir.glob("mojoui_app*.so"))
     spec = importlib.util.spec_from_file_location("mojoui_app", so)

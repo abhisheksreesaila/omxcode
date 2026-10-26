@@ -26,6 +26,7 @@ from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
 from mojoui.paragraph import pango_markup, link_href, runs_of
+from mojoui.linebreak import css_breaks, plain_words, label_words
 from std.math import log2
 from std.time import perf_counter_ns, sleep
 
@@ -1050,28 +1051,30 @@ struct GtkHost[A: App](Movable):
             var sum_lo = 0
             var sum_hi = 0
             var free_hi = 0  # (the columns more room goes to: all but a set width's, unless every one is set)
-            var last_free = cols - 1
             for c in range(cols):
                 sum_lo += lo[c]
                 sum_hi += hi[c]
                 if not fixed[c]:
                     free_hi += hi[c]
-                    last_free = c
             var all_fixed = free_hi == 0
             if all_fixed:
                 free_hi = sum_hi
+            # Each column's exact share, then whole pixels by rounding where each column ends (its edge is the
+            # browser's to half a pixel): the floors' remainder, up to a pixel a column, all went to the last one, and
+            # the models table's ACCESS column stood 126 for the web's 121.3 (D-550).
             var want = List[Int](length=cols, fill=0)
-            var given = 0
+            var exact = Float64(0)
+            var edge = 0
             for c in range(cols):
-                var v = lo[c]
+                var v = Float64(lo[c])
                 if room >= sum_hi and sum_hi > 0:
-                    v = hi[c] + ((room - sum_hi) * hi[c] // free_hi if all_fixed or not fixed[c] else 0)
+                    v = Float64(hi[c]) + (Float64(room - sum_hi) * Float64(hi[c]) / Float64(free_hi) if all_fixed or not fixed[c] else 0.0)
                 elif room > sum_lo and sum_hi > sum_lo:
-                    v = lo[c] + (room - sum_lo) * (hi[c] - lo[c]) // (sum_hi - sum_lo)
-                want[c] = v
-                given += v
-            if room > given and given >= sum_lo:  # (what rounding left goes to the last column that takes more)
-                want[last_free] += room - given
+                    v = Float64(lo[c]) + Float64(room - sum_lo) * Float64(hi[c] - lo[c]) / Float64(sum_hi - sum_lo)
+                exact += v
+                var next = Int(exact + 0.5)
+                want[c] = next - edge
+                edge = next
             for c in range(cols):
                 var spacer = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(-1))
                 if spacer == 0:
@@ -1168,7 +1171,7 @@ struct GtkHost[A: App](Movable):
         var sized = node.sized_width()
         var w: Int
         if node.kind == TEXT:
-            var t = node.text
+            var t = label_words(self.rt.shown.nodes, i)  # (the browser's line breaks and ends, D-548, D-549)
             w = external_call["gtk_label_new", Int](t.as_c_string_span())
             external_call["gtk_label_set_wrap", NoneType](w, c_int(1))
             external_call["gtk_label_set_natural_wrap_mode", NoneType](w, c_int(1))  # prefer one line; wrap only when squeezed
@@ -2422,7 +2425,8 @@ struct GtkHost[A: App](Movable):
             if p.op == SET_TEXT:
                 var t = p.text
                 if kind == TEXT:
-                    external_call["gtk_label_set_text", NoneType](w, t.as_c_string_span())
+                    var shown = label_words(self.rt.shown.nodes, p.node) if self.rt.shown.nodes[p.node].text == t else css_breaks(t)
+                    external_call["gtk_label_set_text", NoneType](w, shown.as_c_string_span())
                 elif kind == BUTTON and self.rt.shown.nodes[p.node].hint != "":
                     if self.rt.shown.nodes[p.node].style == TOOL or self.rt.shown.nodes[p.node].style == TOOL_ON or self.rt.shown.nodes[p.node].style == TOOL_INLINE or self.rt.shown.nodes[p.node].style == TOOL_INLINE_ON:
                         external_call["gtk_label_set_text", NoneType](external_call["gtk_widget_get_last_child", Int](external_call["gtk_button_get_child", Int](w)), t.as_c_string_span())
@@ -4539,7 +4543,13 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
             for i in range(len(host[].rt.shown.nodes)):
                 if host[].rt.shown.nodes[i].name != "":
                     var rect = List[Float32](length=4, fill=0)  # graphene_rect_t: x, y, width, height
-                    var ok = external_call["gtk_widget_compute_bounds", c_int](host[].widgets[i], host[].window, Int(rect.unsafe_ptr()))
+                    var measured = host[].widgets[i]
+                    if i == 0 and (host[].rt.shown.nodes[0].grows or host[].rt.shown.nodes[0].fills) and host[].page != 0:
+                        # a screen that fills the window: its box is the page it fills, what the window shows (the web's
+                        # root is the window high and a taller screen overflows it, scrolling the page; GTK's root is as
+                        # tall as its content inside the page scroller: models 716 for the web's 640, D-551)
+                        measured = host[].page
+                    var ok = external_call["gtk_widget_compute_bounds", c_int](measured, host[].window, Int(rect.unsafe_ptr()))
                     if ok != 0:
                         print("BOX: " + host[].rt.shown.nodes[i].name + " " + one_decimal(rect[0]) + " " + one_decimal(rect[1])
                               + " " + one_decimal(rect[2]) + " " + one_decimal(rect[3]))
@@ -4567,17 +4577,17 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
             var links = 0
             for r in runs_of(n):
                 links += 1 if r.href != "" else 0
-            var said = c_str(external_call["gtk_label_get_text", Int](w))
+            var said = plain_words(c_str(external_call["gtk_label_get_text", Int](w)))
             print("PARAGRAPH: " + said + " (" + String(len(runs_of(n))) + " runs, " + String(links) + " links)")
             print("LABEL: " + said)  # (its words whole, then each run's when it has several, as the web reports them)
             if len(runs_of(n)) > 1:
                 for r in runs_of(n):
                     print("LABEL: " + r.text)
         elif n.kind == TEXT:
-            print("LABEL: " + c_str(external_call["gtk_label_get_text", Int](w)))
+            print("LABEL: " + plain_words(c_str(external_call["gtk_label_get_text", Int](w))))
             var tone = tone_of(w)
             if tone != "":
-                print("TONE: " + c_str(external_call["gtk_label_get_text", Int](w)) + " = " + tone)
+                print("TONE: " + plain_words(c_str(external_call["gtk_label_get_text", Int](w))) + " = " + tone)
         elif n.kind == BUTTON:
             if n.style == TOOL or n.style == TOOL_ON or n.style == TOOL_INLINE or n.style == TOOL_INLINE_ON:
                 print("BUTTON: " + c_str(external_call["gtk_label_get_text", Int](external_call["gtk_widget_get_last_child", Int](external_call["gtk_button_get_child", Int](w)))))

@@ -52,7 +52,8 @@ def main() raises:
     assert_equal(escape_markup("naïve → ok"), "naïve → ok")
     var evil = Paragraph([Plain("<span foreground=\"red\">x</span> & "), Bold("<i>"), Link("<a href=\"1\">", "https://e.com/?a=1&b=<2>")], role="p")
     var m = pango_markup(evil.nodes[0], look())
-    assert_equal(m, "&lt;span foreground=&quot;red&quot;&gt;x&lt;/span&gt; &amp; <span weight=\"bold\">&lt;i&gt;</span>"
+    # (the words' "</span" keeps the browser's breaks: a word joiner after its "/", D-548)
+    assert_equal(m, "&lt;span foreground=&quot;red&quot;&gt;x&lt;/\u2060span&gt; &amp; <span weight=\"bold\">&lt;i&gt;</span>"
                     + "<a href=\"2\"><span underline=\"single\">&lt;a href=&quot;1&quot;&gt;</span></a>")
     assert_false("<i>" in m)
 
