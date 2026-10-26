@@ -1280,7 +1280,16 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", trail)
                 var side = "heightAnchor" if vertical else "widthAnchor"
                 _ = msg(msg(msg(trail, side), "constraintEqualToAnchor:", msg(lead, side)), "setActive:", 1)
-            elif node.justify_items == START and not grows and not spacers:
+            elif (node.justify_items == START or (vertical and node.justify_items == 0)) and not grows and not spacers:
+                # its views from the start, the free room after them (a column's default too, as the web's flex-start):
+                # stretched taller than its views, a column stood one of them as tall as the rest (an overview panel's
+                # foot 133 high for 15, D-514); no spacing before that room
+                var last = 0
+                for b in built:
+                    if b != 0:
+                        last = b
+                if last != 0:
+                    _ = msg(w, "setCustomSpacing:afterView:", Float64(0), last)
                 _ = msg(w, "addArrangedSubview:", flexible_spacer(vertical))
         if self.widgets[i] == 0:  # (some branches already stored an inner control)
             self.widgets[i] = w
@@ -2423,6 +2432,12 @@ def hug(view: Int, priority: Float32, vertical: Bool):
     if msg[Int8](view, "respondsToSelector:", sel("setHuggingPriority:forOrientation:")) != 0:
         if Int(msg(view, "orientation")) == orientation:  # along its own axis: it hugs its first and last views
             _ = msg(view, "setHuggingPriority:forOrientation:", priority, orientation)
+            if priority > Float32(250):  # and keeps its own length by a weak shrink-to-fit: a stack has no intrinsic size, so
+                # a row's fill distribution gave the console's crumbs (82 pt of words) the bar's free 650 pt and its Spacer
+                # none (D-513); 251: over a Spacer's 1, under a label's 750 resistance
+                var along = msg(msg(view, "heightAnchor" if vertical else "widthAnchor"), "constraintEqualToConstant:", Float64(0))
+                _ = msg(along, "setPriority:", Float32(251))
+                _ = msg(along, "setActive:", 1)
         else:
             # across its axis a stack's hugging pins every view's two edges to its own (NSStackView.Edge.Min, at that
             # priority): above a view's own resistance it stands each view as tall as the tallest (the console's app bar
