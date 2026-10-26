@@ -174,8 +174,8 @@ def look_gtk_css(look: Look, scope: String) -> String:
             out += scope + ".mui-tag-" + s.role + " image, " + scope + "image.mui-tag-" + s.role + " { -gtk-icon-size: " + px(s.icon_size) + "; }\n"
         var t = text_rule(s, False, look.type.line)
         if t != "":  # (its labels; the label that wears the role itself comes after every role's: below)
-            out += scope + ".mui-tag-" + s.role + " label { " + t + "}\n"
-            own += scope + "label.mui-tag-" + s.role + ", " + scope + "button.mui-tag-" + s.role + " > label, " + scope + "button.mui-tag-" + s.role + " > buttoncontent label { " + t + "}\n"
+            out += scope + ".mui-tag-" + s.role + " label:not(.mui-in-button) { " + t + "}\n"  # (not a button's title: D-511)
+            own += scope + "label.mui-tag-" + s.role + ":not(.mui-in-button), " + scope + "button.mui-tag-" + s.role + " > label, " + scope + "button.mui-tag-" + s.role + " > buttoncontent label { " + t + "}\n"
     # a label's own role (or its button's) has the last word over any role around it (a mono line in a table's cell, a
     # text action in a mono head: the web's words take
     # an ancestor's type at the lowest weight, :where; GTK has no :where, so the same weight written later, D-491)

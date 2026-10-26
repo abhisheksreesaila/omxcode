@@ -122,6 +122,18 @@ def add_class(widget: Int, name: String):
     external_call["gtk_widget_add_css_class", NoneType](widget, n.as_c_string_span())
 
 
+def mark_button_labels(widget: Int):
+    """A button's own labels (its title, AdwButtonContent's, a tool's) marked mui-in-button: a role's type around the
+    button doesn't reach them, as on the web, where a role's words rule is for its .text views, not a button's title
+    (the console's text action took its sidebar head's mono and tracking: 102 wide for 76, D-511)."""
+    var c = external_call["gtk_widget_get_first_child", Int](widget)
+    while c != 0:
+        if c_str(external_call["gtk_widget_get_css_name", Int](c)) == "label":
+            add_class(c, "mui-in-button")
+        mark_button_labels(c)
+        c = external_call["gtk_widget_get_next_sibling", Int](c)
+
+
 def app_data(name: String) -> Int:
     var key = name
     return external_call["g_object_get_data", Int](external_call["g_application_get_default", Int](), key.as_c_string_span())
@@ -1044,6 +1056,7 @@ struct GtkHost[A: App](Movable):
                 var child = external_call["gtk_button_get_child", Int](w)
                 if child != 0:
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(1))  # GTK_ALIGN_START
+            mark_button_labels(w)
             if node.style == PROMINENT:
                 add_class(w, "suggested-action")
                 if node.hint == "":
