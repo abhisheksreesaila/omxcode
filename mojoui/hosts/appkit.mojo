@@ -221,6 +221,7 @@ struct AppKitHost[A: App](Movable):
     var size_h: List[Int]
     var sized: List[Tuple[Int, Int, Int, Int]]  # per node: the w, h, min_w, max_w it was built with
     var wraps: List[Int]  # a column's labels: they wrap to the width they're given (fit_wraps), as GTK's labels do
+    var wrap_buttons: List[Tuple[Int, Int, Float64, Float64, Float64]]  # role buttons whose words wrap when squeezed: (button, its height constraint, its line, its padding down, across), D-537
     var parents: List[Int]  # per node: its stack's node, or -1 (worked out once per build)
     var rebuilds: Int  # whole-window rebuilds since the last report snapshot (its log line says how many)
     var resized_in_place: Int
@@ -272,6 +273,7 @@ struct AppKitHost[A: App](Movable):
         self.size_w = List[Int]()
         self.size_h = List[Int]()
         self.wraps = List[Int]()
+        self.wrap_buttons = List[Tuple[Int, Int, Float64, Float64, Float64]]()
         self.parents = List[Int]()
         self.rebuilds = 0
         self.resized_in_place = 0
@@ -675,6 +677,10 @@ struct AppKitHost[A: App](Movable):
             # a button keeps its title whole: at the default 750 a row of them lost to a column's width at the same
             # priority, squeezing one to 11 pt (maccheck's Controls page, GitHub's Mac and the owner's, 2026-10-23)
             _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(760), 0)
+            if drawn and node.name != "" and self.look.surface(node.name) >= 0:  # (a role's button is its words and padding wide,
+                # as CSS measures it: draw_button's required minimum keeps its title whole, and NSButton's own title inset
+                # no longer widens it past the width it prefers: a name link 88 for 83, a link 80 for 75, D-536)
+                _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(470), 0)
             if node.align_items == START and not icon_only:  # its content at the leading edge (a sidebar row)
                 _ = msg(w, "setAlignment:", 0)  # NSTextAlignmentLeft
                 if node.hint != "":
@@ -902,6 +908,8 @@ struct AppKitHost[A: App](Movable):
                             _ = msg(c3, "setActive:", 1)
                         else:
                             hug(item, Float32(1), False)
+                        # (its cells as tall as their row, as a table's: a value beside a key on two lines, D-538)
+                        _ = msg(msg(msg(item, "heightAnchor"), "constraintEqualToAnchor:", msg(row, "heightAnchor")), "setActive:", 1)
                     continue
                 # fitted (a definition list): every column but the last as wide as its widest item, the last the rest;
                 # each item its own width from the column's start, centred down (the web's grid-template-columns:
@@ -923,6 +931,13 @@ struct AppKitHost[A: App](Movable):
                 if col == node.value - 1:
                     hug(holder, Float32(1), False)  # (the last column takes the rest)
                     continue
+                if self.rt.shown.nodes[node.children[k]].kind == TEXT:  # (a key column is as wide as its widest words, never
+                    # wrapped: the web's max-content, GTK's D-484; a wrapping label's 490 lost to the holder's 740, D-538)
+                    _ = msg(item, "setContentCompressionResistancePriority:forOrientation:", Float32(750), 0)
+                    for q in range(len(self.wraps)):
+                        if self.wraps[q] == item:
+                            self.wraps[q] = 0
+                    _ = msg(item, "setMaximumNumberOfLines:", 1)
                 hug(holder, Float32(740), False)  # (tight round its widest item: below a label's 750 resistance)
                 if col >= len(firsts):
                     firsts.append(holder)
@@ -1355,7 +1370,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", trail)
                 var side = "heightAnchor" if vertical else "widthAnchor"
                 _ = msg(msg(msg(trail, side), "constraintEqualToAnchor:", msg(lead, side)), "setActive:", 1)
-            elif (node.justify_items == START or (vertical and node.justify_items == 0)) and not grows and not spacers and not ended:
+            elif (node.justify_items == START or node.justify_items == 0) and not grows and not spacers and not ended:  # (a row's default too, D-539)
                 # its views from the start, the free room after them (a column's default too, as the web's flex-start):
                 # stretched taller than its views, a column stood one of them as tall as the rest (an overview panel's
                 # foot 133 high for 15, D-514); no spacing before that room
@@ -1365,7 +1380,14 @@ struct AppKitHost[A: App](Movable):
                         last = b
                 if last != 0:
                     _ = msg(w, "setCustomSpacing:afterView:", Float64(0), last)
-                _ = msg(w, "addArrangedSubview:", flexible_spacer(vertical))
+                var room = flexible_spacer(vertical)
+                _ = msg(w, "addArrangedSubview:", room)
+                if not vertical and not (node.fills or (i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].align_items == STRETCH)):
+                    # (a row nothing stretches has no free room: its room hugs at 251, over its column's 250 leading pins,
+                    # so the row is its views wide, as a web flex row in a shrink-to-fit place: filter chips 940 for 220, D-539)
+                    var none = msg(msg(room, "widthAnchor"), "constraintEqualToConstant:", Float64(0))  # (a spacer has no size of its own to hug)
+                    _ = msg(none, "setPriority:", Float32(251))
+                    _ = msg(none, "setActive:", 1)
             hold_insets(w)
             if node.align_items == CENTER or node.align_items == 0:
                 # centred between its insets, not in its whole bounds: NSStackView centres at 260 ('NSStackView.Align'),
@@ -1548,6 +1570,8 @@ struct AppKitHost[A: App](Movable):
         _ = msg(w, "setAttributedTitle:", said)
         _ = msg(w, "setContentTintColor:", ns_color(ink))
         var fit = msg[CGPoint](w, "fittingSize")
+        var wraps = False  # (a role's words-only button with its line's height: its words wrap when squeezed, as the web's and GTK's, D-537)
+        var line_h = Float64(0)
         if k >= 0:  # (a role's button: its words, an icon and the web's 6 pt gap, the role's padding, as CSS measures it; a bare cell adds its own 6)
             var words = msg[CGPoint](said, "size")
             var glyph = self.look.surfaces[k].icon_size if self.look.surfaces[k].icon_size > 0 else (c.glyph if c.glyph > 0 else 16)
@@ -1557,13 +1581,38 @@ struct AppKitHost[A: App](Movable):
                 # height: auto; min-height: 0: a sidebar row's name, a link in a table's cell, D-498)
                 var line = Float64(hs.line_height) if hs.line_height > 0 else (size * self.look.type.line if hs.line_height == 0 and self.look.type.line > 0 else words.y)
                 high = Int(line + 0.5) + max(hs.pad_top, 0) + max(hs.pad_bottom, 0)
+                if not hs.one_line and msg(w, "image") == 0 and title.find(" ") >= 0:
+                    wraps, line_h = True, line
+                    var widest = Float64(0)
+                    for word in title.split(" "):
+                        var one = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(String(word)), attrs)
+                        widest = max(widest, msg[CGPoint](one, "size").x)
+                    fit.x = Float64(Int(widest + 0.999))  # (at least its widest word: below that it can't wrap)
+                    var cell = msg(w, "cell")
+                    _ = msg(cell, "setWraps:", 1)
+                    _ = msg(cell, "setLineBreakMode:", 0)  # NSLineBreakByWordWrapping
+                    if line > 0:  # (its lines at the line's height, as the web's)
+                        var para = new("NSMutableParagraphStyle")
+                        _ = msg(para, "setMinimumLineHeight:", line)
+                        _ = msg(para, "setMaximumLineHeight:", line)
+                        _ = msg(para, "setLineBreakMode:", 0)
+                        _ = msg(para, "setAlignment:", 0 if i >= 0 and self.rt.shown.nodes[i].align_items == START else 1)
+                        _ = msg(attrs, "setObject:forKey:", para, ns_string("NSParagraphStyle"))
+                        said = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs)
+                        _ = msg(w, "setAttributedTitle:", said)
         # its title's width is the least it takes and the width it prefers, not a fixed one: a filling button (an
         # inspector row's title) stretches, as on GTK and the web; held to its fit, it held the Report inspector's
         # column to 117 pt through the rows' equal widths (Mac, 2026-10-24)
         _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", fit.x + Float64(2 * pad)), "setActive:", 1)
-        prefer(w, "widthAnchor", fit.x + Float64(2 * pad))
+        if wraps:  # (it prefers its one line; fit_wraps gives it the lines its width needs)
+            prefer(w, "widthAnchor", Float64(Int(msg[CGPoint](said, "size").x + 0.999)) + Float64(2 * pad))
+        else:
+            prefer(w, "widthAnchor", fit.x + Float64(2 * pad))
         if i < 0 or self.rt.shown.nodes[i].h == 0:  # (apply_layout pins the app's own height)
-            constrain(w, "heightAnchor", Float64(high))
+            var hc = msg(msg(w, "heightAnchor"), "constraintEqualToConstant:", Float64(high))
+            _ = msg(hc, "setActive:", 1)
+            if wraps:
+                self.wrap_buttons.append((w, hc, line_h, Float64(high) - Float64(Int(line_h + 0.5)), Float64(2 * pad)))
 
     def box_inset(self, i: Int, name: String) -> Tuple[Int, Int]:
         """What a Board object's role box takes from its content's size: the role's padding, across and down."""
@@ -1806,6 +1855,7 @@ struct AppKitHost[A: App](Movable):
         self.tick_ch = List[Int]()
         self.size_w = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.wraps = List[Int]()
+        self.wrap_buttons = List[Tuple[Int, Int, Float64, Float64, Float64]]()
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
         for k in range(len(self.rt.shown.nodes)):
             var kk = self.rt.shown.nodes[k].kind
@@ -2269,9 +2319,21 @@ struct AppKitHost[A: App](Movable):
     def fit_wraps(self):
         """Each column label wraps at the width the layout gave it: an NSTextField only wraps at a width it's told, so
         lay out, tell each label its width, lay out again (a long inspector line ran past the panel, GitHub's Mac)."""
-        if len(self.wraps) == 0 or self.window == 0:
+        if (len(self.wraps) == 0 and len(self.wrap_buttons) == 0) or self.window == 0:
             return
         var content = msg(self.window, "contentView")
+        if len(self.wrap_buttons) > 0:  # (a wrapping button as high as the lines its width needs, D-537)
+            _ = msg(content, "layoutSubtreeIfNeeded")
+            for wb in self.wrap_buttons:
+                var bw = msg[CGRect](wb[0], "frame").width - wb[4]
+                if bw <= 0 or wb[2] <= 0:
+                    continue
+                var r = msg[CGRect](msg(wb[0], "attributedTitle"), "boundingRectWithSize:options:", bw, Float64(100000), 1)  # NSStringDrawingUsesLineFragmentOrigin
+                var lines = max(Int(r.height / wb[2] + 0.5), 1)
+                _ = msg(wb[1], "setConstant:", Float64(Int(Float64(lines) * wb[2] + 0.5)) + wb[3])
+            if len(self.wraps) == 0:
+                _ = msg(content, "layoutSubtreeIfNeeded")
+                return
         var here = List[Int]()  # (a popover's or a sheet's labels are in their own window: show_popover sets theirs)
         for l in self.wraps:
             if (msg(l, "isDescendantOf:", content) & 0xFF) != 0:
@@ -2446,7 +2508,7 @@ struct AppKitHost[A: App](Movable):
             elif (msg(w, "isKindOfClass:", cls("NSView")) & 0xFF) != 0:
                 var b = msg[CGRect](w, "bounds")
                 var r = msg[CGRect](w, "convertRect:toView:", b.x, b.y, b.width, b.height, 0)
-                if n.kind == TEXT and (i >= len(self.shells) or self.shells[i] == 0):  # the text's own box: a label's frame has 2 pt each side
+                if (n.kind == TEXT or n.kind == PARAGRAPH) and (i >= len(self.shells) or self.shells[i] == 0):  # the text's own box: a label's frame has 2 pt each side (a Paragraph's too, D-536)
                     var inset = msg[CGRect](w, "alignmentRectInsets")  # (NSEdgeInsets: top, left, bottom, right) that GTK's and the web's labels don't
                     r.x += inset.y
                     r.width -= inset.y + inset.height
