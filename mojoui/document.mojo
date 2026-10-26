@@ -53,4 +53,4 @@ def DocLayout(outline: View, cells: View, aside: View, compact: Bool = False) ->
         return VStack(cells.copy(), spacing=0).align(START).fill().tag("doc-layout-compact")
     return HStack(HStack(outline.copy(), spacing=0).align(START).tag("doc-outline"), Divider().fill(),
                   Scroll(HStack(cells.copy().grow(), spacing=0).align(START).fill().tag("doc-main"), height=0).grow(),
-                  HStack(aside.copy().grow(), spacing=0).align(START).tag("doc-aside"), spacing=0).align(STRETCH).fill().grow().tag("doc-layout")
+                  Scroll(HStack(aside.copy().grow(), spacing=0).align(START).fill(), height=0).tag("doc-aside"), spacing=0).align(STRETCH).fill().grow().tag("doc-layout")  # (the aside scrolls on its own, as the cells do: a tall one never stretches the page)

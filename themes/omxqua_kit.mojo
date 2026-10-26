@@ -459,6 +459,7 @@ def button_roles(p: Palette, mono: String) -> List[Surface]:
     for k in range(4):
         var a = box("small-" + looks[k], fills[k], 999, 0, 12)
         a.height, a.font_size, a.font_weight, a.ink, a.icon_size = 26, 12.32, 400, inks[k], 13  # (550 loses to blades.css's font: inherit; the blades' icons 13)
+        a.one_line = True  # (.btn: white-space nowrap: squeezed, a small button never wraps its words)
         if rings[k] != 0:
             a.shadows = [Shadow(0, 0, 1, rings[k], True)]
         var off = a.copy()
@@ -469,6 +470,7 @@ def button_roles(p: Palette, mono: String) -> List[Surface]:
         out.append(off^)
     var armed = box("small-danger-armed", mix(p.card, p.bad, 0.14), 999, 0, 12)
     armed.height, armed.font_size, armed.font_weight, armed.ink, armed.icon_size = 26, 12.32, 650, p.bad, 13
+    armed.one_line = True
     armed.shadows = [Shadow(0, 0, 1, mix(p.card, p.bad, 0.40), True)]
     out.append(armed^)
     var act = box("text-action", 0, 8, 4, 8)  # .gh .ed: 600 12px, the accent, 4px 8px, 8 corners

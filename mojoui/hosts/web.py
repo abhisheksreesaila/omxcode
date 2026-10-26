@@ -821,6 +821,8 @@ def render(s, i, sid):
         css.append("align-self:stretch")
         if n["max_w"]:
             css.append("width:100%;margin-inline:auto")  # min(max, available), centred, as GTK's clamp does
+    if n["kind"] == SCROLL and n["size"] == 0 and parent_kind(s, i) == HSTACK:
+        css.append("contain:size")  # (as tall as its row is given, never as its content: a document's cells beside its aside; GTK's scroller asks for no height either)
     if n["kind"] == BUTTON:  # (on a button, START puts its icon and title at the leading edge: a sidebar row)
         if n["align_items"] == 1:
             css.append("justify-content:flex-start;text-align:left")
@@ -851,9 +853,10 @@ def paragraph_runs(n, i, common):
         flags, role, href, text = opts[4 * k:4 * k + 4]
         cls = " ".join(["run"] + [c for f, c in (("b", "strong"), ("i", "em"), ("c", "code"), ("l", "link")) if f in flags])
         attrs = dict(cls=cls, data_role=role or None, data_kind="run")
-        if "l" in flags:
+        if "l" in flags:  # (the anchor around the run, as <a><code>…</code></a>: its underline drawn in the paragraph's type, the run's own inside)
             listen = dict(common, hx_vals=json.dumps({"n": i, "number": k})) if n["msg"] else dict(target="_blank", rel="noopener noreferrer")
-            out.append(A(text, href=href, **attrs, **listen))
+            inner = Span(text, cls=cls.replace(" link", ""), data_role=role or None)
+            out.append(A(inner, href=href, cls="run link", data_kind="run", **listen))
         else:
             out.append(Span(text, **attrs))
     return out
