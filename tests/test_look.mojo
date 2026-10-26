@@ -59,6 +59,8 @@ def main() raises:
     var w = surface_rule(s, True)
     assert_true("padding: 0 16px 0 12px;" in w and "gap: 10px !important;" in w and "height: 40px; min-height: 40px;" in w, w)
     assert_true("width: 110px; min-width: 110px; flex-shrink: 0;" in w and "flex-wrap: nowrap; overflow-x: auto;" in w and "justify-content: center;" in w, w)
+    var gcss = look_gtk_css(Look(Look.none().type, Look.none().controls, [s.copy()], Look.none().segments), "window.x ")
+    assert_true("window.x button.mui-tag-probe > buttoncontent > box > label { padding: 0; }" in gcss, gcss)  # (no Adwaita 2 px after a button's words, D-533)
     assert_false("border-spacing" in surface_rule(s, False), "GTK takes a role's gap as the stack's spacing (resolve_layout), never border-spacing as well (D-464: it doubled)")
     assert_true("line-height: normal;" in text_rule(s, True) and "text-align: center;" in text_rule(s, True), text_rule(s, True))
     var probe = Look(Look.none().type, Look.none().controls, [s.copy()], Look.none().segments)

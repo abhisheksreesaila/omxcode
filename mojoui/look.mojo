@@ -202,6 +202,9 @@ def look_gtk_css(look: Look, scope: String) -> String:
         if s.gap >= 0:  # (a button's icon and words the role's gap apart, as the web's button gap; a stack's gap is its
             # spacing from resolve_layout, not CSS: GtkBox would add the two)
             out += scope + "button.mui-tag-" + s.role + " > buttoncontent > box { border-spacing: " + px(s.gap) + "; }\n"
+            # (and nothing more: Adwaita pads an icon button's words 2 px on their trailing side, the web's button doesn't;
+            # a small button 82 for 80, a segment 79 for 76, D-533)
+            out += scope + "button.mui-tag-" + s.role + " > buttoncontent > box > label { padding: 0; }\n"
         if s.icon_size > 0:  # (its icons at the role's size, as the web's svg: a button's own and an Icon inside it, D-497)
             out += scope + ".mui-tag-" + s.role + " image, " + scope + "image.mui-tag-" + s.role + " { -gtk-icon-size: " + px(s.icon_size) + "; }\n"
         var t = text_rule(s, False, look.type.line)
