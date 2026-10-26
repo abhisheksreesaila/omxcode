@@ -1386,7 +1386,9 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", trail)
                 var side = "heightAnchor" if vertical else "widthAnchor"
                 _ = msg(msg(msg(trail, side), "constraintEqualToAnchor:", msg(lead, side)), "setActive:", 1)
-            elif (node.justify_items == START or (vertical and node.justify_items == 0)) and not grows and not spacers and not ended:
+            elif (node.justify_items == START or (node.justify_items == 0 and (vertical or node.fills))) and not grows and not spacers and not ended:
+                # (a filled row's default too: the web's flex-start; without the room its lone label took the row, a
+                # model's repo line 211 for 179, D-552)
                 # its views from the start, the free room after them (a column's default too, as the web's flex-start):
                 # stretched taller than its views, a column stood one of them as tall as the rest (an overview panel's
                 # foot 133 high for 15, D-514); no spacing before that room
@@ -1590,10 +1592,11 @@ struct AppKitHost[A: App](Movable):
         var fit = msg[CGPoint](w, "fittingSize")
         var wraps = False  # (a role's words-only button with its line's height: its words wrap when squeezed, as the web's and GTK's, D-537)
         var line_h = Float64(0)
-        if k >= 0:  # (a role's button: its words, an icon and the web's 6 pt gap, the role's padding, as CSS measures it; a bare cell adds its own 6)
+        if k >= 0:  # (a role's button: its words, an icon and its gap (the web's 6 pt unless the role says), the role's padding, as CSS measures it; a bare cell adds its own 6)
             var words = msg[CGPoint](said, "size")
             var glyph = self.look.surfaces[k].icon_size if self.look.surfaces[k].icon_size > 0 else (c.glyph if c.glyph > 0 else 16)
-            fit.x = Float64(Int(words.x + 0.999)) + (Float64(glyph) + 6 if msg(w, "image") != 0 else 0)
+            var gap = Float64(self.look.surfaces[k].gap) if self.look.surfaces[k].gap >= 0 else Float64(6)  # (the role's own gap, as the web's: tag-add's + against its word, 79 for 73, D-552)
+            fit.x = Float64(Int(words.x + 0.999)) + (Float64(glyph) + gap if msg(w, "image") != 0 else 0)
             ref hs = self.look.surfaces[k]
             if hs.height == -2 and (i < 0 or self.rt.shown.nodes[i].h == 0):  # HEIGHT_AUTO: its line and its padding, no control height (the web's
                 # height: auto; min-height: 0: a sidebar row's name, a link in a table's cell, D-498)
