@@ -74,4 +74,7 @@ def main() raises:
     assert_true("body.x [data-tag=one] .text, body.x .text[data-tag=one] { overflow: hidden; text-overflow: ellipsis; min-width: 0; }" in scss, scss)
     assert_true("body.x [data-tag=give] > * { min-width: 0; flex-shrink: 1; overflow: hidden; }" in scss, scss)
     assert_false("button[data-tag=one], body.x :where([data-role~=one]) .text, body.x [data-role~=one] { font-size: 12px; white-space: nowrap; overflow" in scss, "a one-line button keeps its width")
+    var w1 = Surface("pillw", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, whole_width=True)
+    var wcss = look_web_css(Look(Look.none().type, Look.none().controls, [w1.copy()], Look.none().segments), "body.x ")
+    assert_true("--mojoui-whole-width: 1;" in wcss, wcss)  # (the web host's script sizes it to whole pixels, D-479)
     print("LOOK TESTS PASSED")

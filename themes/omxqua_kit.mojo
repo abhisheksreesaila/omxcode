@@ -651,7 +651,7 @@ def beacon_roles(p: Palette, mono: String, accent: UInt32) -> List[Surface]:
     var out = List[Surface]()
     var pill = Surface("beacon", BEACON_BG, 22, 22, -1, -1, -1, 4, 14, 0,
                        [Shadow(10, 30, 0, rgba(0, 0, 0, 89), False), Shadow(0, 0, 1, rgba(255, 255, 255, 15), False)], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False,
-                       pad_left=12, pad_right=16, gap=10, height=40)
+                       pad_left=12, pad_right=16, gap=10, height=40, whole_width=True, one_line=True)  # (omxqua.js sizeBeacon: width = .bc-compact's scrollWidth px; .bc-compact nowrap)
     out.append(pill^)
     out.append(words("beacon-label", 13, 600, BEACON_INK))
     var value = words("beacon-value", 12, 500, BEACON_QUIET)

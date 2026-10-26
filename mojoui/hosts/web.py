@@ -339,6 +339,15 @@ MENU_JS = r"""
   document.addEventListener('scroll', e => { const t = e.target;
     if (t && t.dataset && t.dataset.pin === '1') t.dataset.follow = t.scrollHeight - t.scrollTop - t.clientHeight <= 4 ? '1' : '0'; }, true);
   document.addEventListener('htmx:afterSettle', pin);
+  // A role whose width is its content's in whole pixels (Surface.whole_width: the look writes --mojoui-whole-width), as
+  // a script that sizes a pill from scrollWidth does (omxqua's Beacon): found by the rules that carry the marker
+  const whole = () => { const sel = [];
+    for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; }
+      for (const r of rules) if (r.style && r.style.getPropertyValue('--mojoui-whole-width')) sel.push(r.selectorText); }
+    if (sel.length) document.querySelectorAll(sel.join(', ')).forEach(e => { e.style.width = ''; e.style.width = e.scrollWidth + 'px'; }); };
+  document.addEventListener('htmx:afterSettle', whole);
+  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(whole, 0));
+  addEventListener('load', whole);
   document.addEventListener('htmx:oobAfterSwap', () => setTimeout(pin, 0));
   addEventListener('load', pin);
   // Route(path): the URL's hash is the app's place. A hash the app doesn't show (the page opened at a link, Back,
