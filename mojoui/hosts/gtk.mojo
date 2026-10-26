@@ -549,6 +549,8 @@ struct GtkHost[A: App](Movable):
     var css: Int  # one GtkCssProvider for padding classes
     var css_rules: String
     var one_line: List[String]  # the look's roles whose words stay on one line, cut with an ellipsis
+    var gap_roles: List[String]  # the look's roles with a column gap of their own (a grid's: Surface.column_gap), and
+    var gap_cols: List[Int]  # that gap
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var key_node: Int  # the canvas node that had the keyboard last (it gets it back when an in-place editor closes)
     var editor_keys: Int  # the in-place editor's key controller (test steps press Escape through it)
@@ -630,6 +632,8 @@ struct GtkHost[A: App](Movable):
         self.css = 0
         self.css_rules = ""
         self.one_line = List[String]()
+        self.gap_roles = List[String]()
+        self.gap_cols = List[Int]()
         self.focus = -1
         self.key_node = -1
         self.editor_keys = 0
@@ -731,9 +735,19 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_grid_layout_child_set_row", NoneType](lc, c_int(k // cols))
             else:
                 var child = self.build(children[k], self_addr)
+                self.place_in_grid(j, children[k], child)
                 external_call["gtk_grid_attach", NoneType](grid, child, c_int(k % cols), c_int(k // cols), c_int(1), c_int(1))
                 built += 1
         return built
+
+    def place_in_grid(self, grid: Int, c: Int, child: Int):
+        """A fitted grid's item (style 1) from its start, centred down: the web's justify-items: start, align-items:
+        center (a key's or a value's box its words' width, not the column's, D-495). An item told to fill fills."""
+        if self.rt.shown.nodes[grid].style != 1:
+            return
+        if not self.rt.shown.nodes[c].fills:
+            external_call["gtk_widget_set_halign", NoneType](child, c_int(1))
+        external_call["gtk_widget_set_valign", NoneType](child, c_int(3))
 
     def board_drag(self, board: Int) -> Bool:
         """Whether Board node `board` (current numbering) has its drag gesture on record."""
@@ -1248,10 +1262,15 @@ struct GtkHost[A: App](Movable):
         elif node.kind == GRID:
             w = external_call["gtk_grid_new", Int]()
             external_call["gtk_grid_set_row_spacing", NoneType](w, c_uint(node.spacing))
-            external_call["gtk_grid_set_column_spacing", NoneType](w, c_uint(node.spacing))
+            var col_gap = node.spacing
+            for g in range(len(self.gap_roles)):  # (a role's column gap, as the web's column-gap: D-495)
+                if self.gap_roles[g] == node.name:
+                    col_gap = self.gap_cols[g]
+            external_call["gtk_grid_set_column_spacing", NoneType](w, c_uint(col_gap))
             external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(0 if node.style == 1 else 1))  # (fitted: columns to their content)
             for k in range(len(node.children)):
                 var child = self.build(node.children[k], self_addr)
+                self.place_in_grid(i, node.children[k], child)
                 external_call["gtk_grid_attach", NoneType](w, child, c_int(k % node.value), c_int(k // node.value), c_int(1), c_int(1))
         elif node.kind == LAZYLIST:
             var model = external_call["gtk_string_list_new", Int](0)
@@ -2138,9 +2157,14 @@ struct GtkHost[A: App](Movable):
         if theme.id == "":  # (back to the system's: tell the app what that is now, on the next idle turn)
             _ = external_call["g_idle_add", c_uint](on_idle_appearance[Self.A], self_addr)
         self.one_line = List[String]()
+        self.gap_roles = List[String]()
+        self.gap_cols = List[Int]()
         for sf in theme.look.surfaces:
             if sf.one_line:
                 self.one_line.append(sf.role)
+            if sf.column_gap >= 0:
+                self.gap_roles.append(sf.role)
+                self.gap_cols.append(sf.column_gap)
         var sheet = theme.gtk_css + (look_gtk_css(theme.look, "window." + theme.id + " ") if theme.id != "" else String(""))  # (the look's rules after the theme's own)
         if sheet != "":
             self.skin_provider = external_call["gtk_css_provider_new", Int]()

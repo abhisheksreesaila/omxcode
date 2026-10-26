@@ -141,8 +141,9 @@ def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
         out += "line-height: normal; "
     elif not web and line > 0 and (s.line_height != 0 or s.font_size > 0):
         # (GTK: in px, as the web's lines measure, D-444; only for a look that declares its line: TypeScale.line 0 keeps
-        # GTK's labels at the font's own lines, as before: D-460; below 0: the font's own, over the look's label line)
-        out += "line-height: " + ("normal" if s.line_height < 0 else line_px(s.line_height if s.line_height > 0 else s.font_size * line)) + "; "
+        # GTK's labels at the font's own lines, as before: D-460; below 0: the font's own, over the look's label line: GTK
+        # reads a bare number as a factor of the font's own line, so 1 (it drops "normal": the look's label line won, D-496)
+        out += "line-height: " + ("1" if s.line_height < 0 else line_px(s.line_height if s.line_height > 0 else s.font_size * line)) + "; "
     if web and s.one_line:  # (its words on one line too; GTK and the Mac cut them with an ellipsis: the hosts read one_line)
         out += "white-space: nowrap; "
     if web and s.text_align > 0:
