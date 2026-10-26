@@ -1103,6 +1103,7 @@ struct GtkHost[A: App](Movable):
             # A picture asks for its texture's size in pixels, which would grow the canvas each
             # redraw on a scaled screen: a scrolled window that never scrolls takes no size from it.
             self.widgets[i] = w
+            external_call["gtk_widget_set_valign", NoneType](w, c_int(1))  # (rows at their own height: any more room goes below)
             var holder = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(3))  # GTK_POLICY_EXTERNAL
             external_call["gtk_scrolled_window_set_child", NoneType](holder, w)
@@ -1288,7 +1289,13 @@ struct GtkHost[A: App](Movable):
                 if row > 0 and row - 1 < node.text.byte_length() and String(node.text[byte = row - 1]) == "1":
                     add_class(cell, "mui-tag-table-selected")
                 external_call["gtk_widget_set_hexpand", NoneType](cell, c_int(1))
-                external_call["gtk_widget_set_halign", NoneType](child, c_int(2 if num else 1))  # end or start
+                # a cell's view fills the cell, as a block in the web's <td> does (words keep to their side); a button or a
+                # tick box keeps its own width at its side
+                var ck = self.rt.shown.nodes[node.children[k]].kind
+                var keeps = ck == BUTTON or ck == TOGGLE
+                external_call["gtk_widget_set_halign", NoneType](child, c_int((2 if num else 1) if keeps else 0))  # end, start or fill
+                if ck == TEXT:
+                    external_call["gtk_label_set_xalign", NoneType](self.widgets[node.children[k]], Float32(1 if num else 0))
                 external_call["gtk_widget_set_valign", NoneType](child, c_int(3))  # centre
                 external_call["gtk_widget_set_hexpand", NoneType](child, c_int(1))
                 external_call["gtk_box_append", NoneType](cell, child)
@@ -1301,7 +1308,7 @@ struct GtkHost[A: App](Movable):
             var holder = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(2))  # EXTERNAL across, NEVER down
             external_call["gtk_scrolled_window_set_propagate_natural_width", NoneType](holder, c_int(1))
-            external_call["gtk_scrolled_window_set_propagate_natural_height", NoneType](holder, c_int(1))
+            external_call["gtk_scrolled_window_set_propagate_natural_height", NoneType](holder, c_int(0))  # (its rows at their least: measured for -1 width, a natural height ran 1 px a row over)
             external_call["gtk_scrolled_window_set_child", NoneType](holder, w)
             w = holder
         elif node.kind == TOAST:
