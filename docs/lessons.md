@@ -53,3 +53,5 @@ One line per rule that prevents a mistake that happened.
 - Never hand C a `Pointer(to=x)` as an out-parameter: the compiler may keep x's old value (a refused connect read as success). Give C a `List` buffer and read it back after the call, keeping the list alive (`_ = len(buf)`).
 - A GLib timeout that fires every few ms at the default priority starves GTK's redraw (priority 120): poll background work at G_PRIORITY_DEFAULT_IDLE.
 - Showcase apps compose only generic mojoui components and theme roles; never app-specific CSS, pixel nudges or app-named host code (owner, 2026-10-25). Enforced by the console lint in m4().
+- Never `git stash` or `git checkout <file>` in a worktree with uncommitted work or a merge in progress: a stash drops MERGE_HEAD, a checkout throws the edits away (both happened in goal 33's merge session). Commit a WIP first, or copy the file aside.
+- A script that imports scripts/check.py's runners must call `headless.ensure()` itself (check.py does it in main): without it the GTK app opens on the owner's display and reports unlaid boxes ("window had no frame").

@@ -492,14 +492,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(w, "setTag:", tag_for(self_addr, i))
             var role = self.look.surface(node.name) if node.name != "" else -1
             if role >= 0 and self.look.surfaces[role].max_chars > 0:  # the role's measure: that many "0"s of its font (CSS's ch)
-                # (the paragraph's own font, as CSS's ch: its first run's could be inline code, D-522)
-                ref sf = self.look.surfaces[role]
-                var size = sf.font_size if sf.font_size > 0 else (self.look.type.body if self.skinned else Float64(13))
-                var font = look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight if sf.font_weight > 0 else 400, size, self.look.type.tabular)
-                var attrs = new("NSMutableDictionary")
-                _ = msg(attrs, "setObject:forKey:", font, ns_string("NSFont"))
-                var zero = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string("0"), attrs)
-                var most = msg[CGPoint](zero, "size").x * Float64(sf.max_chars)
+                var most = self.measure_of(role)  # (the paragraph's own font, as CSS's ch: its first run's could be inline code, D-522)
                 _ = msg(msg(msg(w, "widthAnchor"), "constraintLessThanOrEqualToConstant:", most), "setActive:", 1)
                 _ = msg(w, "setPreferredMaxLayoutWidth:", most)
             # its lines wrap at the width its column gives it, as the browser's and Pango's: 490 keeps one line unless a
@@ -1160,6 +1153,18 @@ struct AppKitHost[A: App](Movable):
                 var full = msg(msg(content, "widthAnchor"), "constraintEqualToAnchor:", msg(doc, "widthAnchor"))
                 _ = msg(full, "setPriority:", Float32(494))  # (up to its widest: its own max-width is required)
                 _ = msg(full, "setActive:", 1)
+            var own = self.look.surface(node.name) if node.name != "" else -1
+            if doc == content and own >= 0 and self.look.surfaces[own].pad_top >= 0:  # its role's padding inside what scrolls,
+                ref sf = self.look.surfaces[own]  # as the web's padding on a scrolling element (the notebook's aside, D-528)
+                doc = new("NSView")
+                _ = msg(doc, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
+                _ = msg(doc, "addSubview:", content)
+                var left = Float64(sf.pad_left if sf.pad_left >= 0 else sf.pad_x)
+                var right = Float64(sf.pad_right if sf.pad_right >= 0 else sf.pad_x)
+                _ = msg(msg(msg(content, "topAnchor"), "constraintEqualToAnchor:constant:", msg(doc, "topAnchor"), Float64(sf.pad_top)), "setActive:", 1)
+                _ = msg(msg(msg(content, "leadingAnchor"), "constraintEqualToAnchor:constant:", msg(doc, "leadingAnchor"), left), "setActive:", 1)
+                _ = msg(msg(msg(doc, "trailingAnchor"), "constraintEqualToAnchor:constant:", msg(content, "trailingAnchor"), right), "setActive:", 1)
+                _ = msg(msg(msg(doc, "bottomAnchor"), "constraintEqualToAnchor:constant:", msg(content, "bottomAnchor"), Float64(max(sf.pad_bottom, 0))), "setActive:", 1)
             _ = msg(w, "setDocumentView:", doc)
             for anchor in ["topAnchor", "leadingAnchor", "widthAnchor"]:
                 var pin = msg(msg(doc, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
@@ -1168,7 +1173,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(pin, "setActive:", 1)
             if not node.sized_height() and node.size > 0:
                 constrain(w, "heightAnchor", Float64(node.size))
-            elif not node.sized_height():  # height 0, not growing down: as tall as its content, as the web's .scroll with no
+            elif not node.sized_height() and not self.in_row(i):  # height 0, not growing down: as tall as its content, as the web's .scroll with no
                 # max-height (a required 0 collapsed the notebook's document layout to nothing: run 40299704650, D-508);
                 # above a column's 750 hugging, below what the window holds
                 var tall = msg(msg(w, "heightAnchor"), "constraintEqualToAnchor:", msg(doc, "heightAnchor"))
@@ -1701,6 +1706,8 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setLineBreakMode:", 0)  # word wrapping
                 _ = msg(w, "setPreferredMaxLayoutWidth:", Float64(node.max_w - 2 * node.pad_h))
         var look_at = self.look.surface(node.name) if node.name != "" and is_stack else -1
+        if look_at >= 0 and self.look.surfaces[look_at].max_chars > 0:  # a measured box (md-ul): at most its measure, as the web's max-width in ch (D-526)
+            _ = msg(msg(msg(outer, "widthAnchor"), "constraintLessThanOrEqualToConstant:", self.measure_of(look_at)), "setActive:", 1)
         if look_at >= 0 and self.look.surfaces[look_at].margin_top >= 0:  # the look's margin: the surface floats inside a holder
             ref sf = self.look.surfaces[look_at]
             var holder = new("NSView")
@@ -1953,6 +1960,16 @@ struct AppKitHost[A: App](Movable):
         """Whether node i sits in an HStack."""
         return i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].kind == HSTACK
 
+    def measure_of(self, role: Int) -> Float64:
+        """A role's measure (Surface.max_chars) in points: that many "0"s of the role's own font, as CSS's ch."""
+        ref sf = self.look.surfaces[role]
+        var size = sf.font_size if sf.font_size > 0 else (self.look.type.body if self.skinned else Float64(13))
+        var font = look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight if sf.font_weight > 0 else 400, size, self.look.type.tabular)
+        var attrs = new("NSMutableDictionary")
+        _ = msg(attrs, "setObject:forKey:", font, ns_string("NSFont"))
+        var zero = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string("0"), attrs)
+        return msg[CGPoint](zero, "size").x * Float64(sf.max_chars)
+
     def paragraph_string(self, i: Int) -> Int:
         """A Paragraph's runs as one attributed string: the paragraph's role gives the type and line height, each run's
         role its own (font, size, weight, ink, a fill behind it); bold, italic (slanted: Geist has no italic face, as the
@@ -1963,6 +1980,7 @@ struct AppKitHost[A: App](Movable):
         var weight = 400
         var ink = self.pal.ink2 if self.skinned else UInt32(0)
         var lh = size * self.look.type.line if self.skinned else Float64(0)
+        var tracking = Float64(0)
         var own = self.look.surface(node.name) if node.name != "" else -1
         if own >= 0:
             ref sf = self.look.surfaces[own]
@@ -1971,6 +1989,7 @@ struct AppKitHost[A: App](Movable):
             weight = sf.font_weight if sf.font_weight > 0 else weight
             ink = sf.ink if sf.ink != 0 else ink
             lh = sf.line_height if sf.line_height > 0 else size * self.look.type.line
+            tracking = sf.tracking
         var para = new("NSMutableParagraphStyle")
         if lh > 0:
             _ = msg(para, "setMinimumLineHeight:", lh)
@@ -1978,6 +1997,7 @@ struct AppKitHost[A: App](Movable):
         var out = new("NSMutableAttributedString")
         for r in runs_of(node):
             var rf, rs, rw, rink, fill = family, size, weight, ink, UInt32(0)
+            var kern = tracking
             var mono = r.code
             if r.role != "" and r.role != node.name:
                 var k = self.look.surface(r.role)
@@ -1989,6 +2009,7 @@ struct AppKitHost[A: App](Movable):
                     rw = sf.font_weight if sf.font_weight > 0 else rw
                     rink = sf.ink if sf.ink != 0 else rink
                     fill = sf.fill
+                    kern = sf.tracking if sf.tracking != 0 else kern
             if r.bold and rw < 600:
                 rw = 700
             var font: Int
@@ -2006,6 +2027,8 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", Float64(0.2)), ns_string("NSObliqueness"))
             if r.href != "":
                 _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithInteger:", 1), ns_string("NSUnderline"))
+            if kern != 0:  # (the role's letter spacing, as the web's: a heading's tighter tracking, D-526)
+                _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", kern), ns_string("NSKern"))
             var piece = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(r.text), attrs)
             _ = msg(out, "appendAttributedString:", piece)
         return out
@@ -2183,8 +2206,12 @@ struct AppKitHost[A: App](Movable):
         for l in here:  # one line again, the width the layout allows now: 0 meant "the frame's width" to AppKit, and inside
             _ = msg(l, "setPreferredMaxLayoutWidth:", Float64(100000))  # a scroll view that frame started tiny, so the column shrank to 117 pt (the Report's inspector, 2026-10-24)
         _ = msg(content, "layoutSubtreeIfNeeded")
-        for l in here:
-            _ = msg(l, "setPreferredMaxLayoutWidth:", msg[CGRect](l, "frame").width)
+        for l in here:  # (at most its one line, as CSS's shrink-to-fit min(max-content, room): a short list item told its
+            # column's width hugged that width, so a list that should hug its items took the whole column, D-528)
+            var room = msg[CGRect](l, "frame").width
+            var said = msg(l, "attributedStringValue")
+            var line = msg[CGPoint](said, "size").x if said != 0 and msg(said, "length") > 0 else room
+            _ = msg(l, "setPreferredMaxLayoutWidth:", min(room, Float64(Int(line + 0.999))))
         _ = msg(content, "layoutSubtreeIfNeeded")
 
     def resize_in_place(mut self, d: Diff) -> Bool:
