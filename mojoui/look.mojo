@@ -122,7 +122,9 @@ def look_gtk_css(look: Look, scope: String) -> String:
             out += scope + ".mui-tag-" + s.role + " label, " + scope + "label.mui-tag-" + s.role + " { " + t + "}\n"
     var c = look.controls.copy()
     if c.control_h > 0:  # push buttons, fields and dropdowns: one height, the look's corners
-        out += scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; }\n"
+        out += (scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; "
+                + ("font-size: " + line_px(c.button_font) + "; " if c.button_font > 0 else String(""))
+                + ("font-weight: " + String(c.button_weight) + "; " if c.button_weight > 0 else String("")) + "}\n")
         out += scope + "entry, " + scope + "textview, " + scope + "dropdown > button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.field_radius) + "; }\n"
     if c.tool_w > 0:
         out += scope + "button.mui-tool { min-width: " + px(c.tool_w) + "; min-height: " + px(c.tool_h) + "; border-radius: " + px(c.tool_radius) + "; font-size: " + fpx(c.tool_font) + "; }\n"
@@ -130,6 +132,8 @@ def look_gtk_css(look: Look, scope: String) -> String:
         out += scope + "button.mui-tool.mui-tool-inline { min-width: 0; min-height: " + px(c.inline_h) + "; padding: 0 " + px(c.inline_pad) + "; border-radius: " + px(c.inline_radius) + "; }\n"
         out += scope + "button.mui-tool-inline label.mui-tool-label { font-size: " + fpx(c.inline_font) + "; }\n"
         out += scope + ".mui-tag-toolbar button.image-button { min-width: " + px(c.icon) + "; min-height: " + px(c.icon) + "; padding: 0; border-radius: " + px(c.icon_radius) + "; }\n"
+    # a button the app gave a height (.height(26)) is that high, as on the web: no control minimum, no padding to add
+    out += scope + "button.mui-fixed-h { min-height: 0; padding-top: 0; padding-bottom: 0; }\n"
     out += press_rules(look.motion, scope, False)
     return out
 

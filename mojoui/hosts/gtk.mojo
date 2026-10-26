@@ -686,6 +686,8 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_widget_set_size_request", NoneType](w, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
         # GTK size requests are minimums; AdwClamp caps the width: at max_w, or exactly at a
         # fixed width (so a fixed-width view never grows past it, as on the other hosts).
+        if node.h != 0 and node.kind == BUTTON:  # a button given a height is that high, padding and all (the look's mui-fixed-h)
+            add_class(w, "mui-fixed-h")
         if node.w != 0:  # a fixed width never takes spare room (GTK passes children's expand up)
             external_call["gtk_widget_set_hexpand", NoneType](w, c_int(0))
         if node.h != 0:
@@ -960,6 +962,12 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_button_set_child", NoneType](w, content)
             else:
                 w = external_call["gtk_button_new_with_label", Int](t.as_c_string_span())
+                var words = external_call["gtk_button_get_child", Int](w)  # a squeezed title wraps, as the web's does
+                if words != 0:
+                    external_call["gtk_label_set_wrap", NoneType](words, c_int(1))
+                    external_call["gtk_label_set_natural_wrap_mode", NoneType](words, c_int(1))  # (one line when there's room)
+                    if node.align_items == START:
+                        external_call["gtk_label_set_xalign", NoneType](words, Float32(0))
             if node.align_items == START and node.style != ICON_ONLY and node.style != ICON_ON:  # its content at the leading edge (a sidebar row)
                 var child = external_call["gtk_button_get_child", Int](w)
                 if child != 0:

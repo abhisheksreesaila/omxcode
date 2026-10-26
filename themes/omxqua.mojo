@@ -232,7 +232,7 @@ def omxqua_look(p: Palette) -> Look:
     surfaces += page_roles(p, FONT_MONO)  # (the console's pages: topbar.css, blades.css, library.css, model-page.css)
     surfaces += beacon_roles(p, FONT_MONO, hx("#3ccf6e"))  # (the Beacon: components.css .beacon; --oq-beacon-accent)
     return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False, LINE),
-                Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12), surfaces^,
+                Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12, TEXT * 0.95, 550), surfaces^,
                 Segments(p.page, RADIUS_FULL, 3, p.line_strong, TARGET - 8, 14, RADIUS_FULL, 12.6, 500, p.ink2, surface_2(p), p.ink, 500, True),  # (.seg2)
                 Motion(PRESS_SCALE, SPRING_FAST_MS, String(SPRING_FAST), String(EASE_IN)))
 

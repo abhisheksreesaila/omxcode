@@ -216,6 +216,8 @@ struct Controls(Copyable, Movable):
     var control_h: Int  # a push button's, a field's and a dropdown's height (0: the host's own)
     var button_pad: Int  # a push button's title from its sides (GTK and the web: their sheets' padding; Apple hosts read this)
     var field_pad: Int  # a field's text from its sides
+    var button_font: Float64  # a push button's title size (0: the body's; omxqua's .btn: .95em)
+    var button_weight: Int  # its weight (0: the host's own)
 
 
 @fieldwise_init
@@ -278,7 +280,7 @@ struct Look(Copyable, Movable):
     @staticmethod
     def none() -> Look:
         """No look of the theme's own: each host's defaults (and no rules written)."""
-        return Look(TypeScale("", "", 13, 11, 15, 26, 11, False, 0), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0), [], Segments.none())
+        return Look(TypeScale("", "", 13, 11, 15, 26, 11, False, 0), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0), [], Segments.none())
 
     def is_none(self) -> Bool:
         return len(self.surfaces) == 0 and self.controls.tool_w == 0
