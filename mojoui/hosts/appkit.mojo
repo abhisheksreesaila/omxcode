@@ -1259,12 +1259,14 @@ struct AppKitHost[A: App](Movable):
             var first_grow = 0
             var before = lead  # (the view before this one in the stack: a Divider's room goes after it)
             var built = List[Int]()
+            var ended = False  # (a view at the row's end took the free room before it: no room after the views)
             for c in node.children:
                 var child = self.build(c, self_addr)
                 built.append(child if self.rt.shown.nodes[c].kind != SPACER else 0)
                 var end_role = self.look.surface(self.rt.shown.nodes[c].name) if self.rt.shown.nodes[c].name != "" else -1
                 if not vertical and not grows and not spacers and end_role >= 0 and self.look.surfaces[end_role].ends_row:
                     # (the room before it: the web's margin-left auto, GTK's hexpand + END, D-529)
+                    ended = True
                     var room_before = flexible_spacer(False)
                     _ = msg(w, "setDistribution:", 0)
                     _ = msg(w, "addArrangedSubview:", room_before)
@@ -1286,7 +1288,12 @@ struct AppKitHost[A: App](Movable):
                     else:
                         _ = msg(msg(msg(child, "widthAnchor"), "constraintEqualToAnchor:", msg(first_grow, "widthAnchor")), "setActive:", 1)
                 if cn.grows:  # flex-grow: lowest hugging priority along the stack
-                    hug(child, Float32(1), vertical)
+                    # (words that grow in a row nothing stretches take only the room the row was given: the row hugs them in
+                    # its column, whose leading pins pull at 250, as the web's flex item in a shrink-to-fit row; a list
+                    # item's words stood the column's 650 pt for 162, D-532)
+                    var given = node.fills or (i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].align_items == STRETCH)
+                    var words = cn.kind == TEXT or cn.kind == PARAGRAPH
+                    hug(child, Float32(251 if (not vertical and words and not given) else 1), vertical)
                 elif cn.kind == SPACER:  # (a growing view first, if there is one)
                     hug(child, Float32(2 if grows else 1), vertical)
                     if first_spacer != 0:  # spacers share the free space equally, as GTK's expanding ones (a toolbar's
@@ -1302,15 +1309,17 @@ struct AppKitHost[A: App](Movable):
                 var spans = vertical and (cn.kind == SCROLL or cn.kind == TABLE)  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502; a Table too: table.table { width: 100% })
                 if not vertical and cn.kind == TABLE and not cn.grows:  # (in a row, a Table takes the row: its width 100 %, a side-scroll's flex: 1 0 auto)
                     hug(child, Float32(1), False)
-                var block = vertical and (cn.kind == TEXT or cn.kind == PARAGRAPH) and look_at >= 0 and self.look.surfaces[look_at].block_flow  # (words in block flow: a block as wide as the column up to their max width, from its leading edge, D-529)
-                if cn.fills or node.align_items == STRETCH or wrapper or spans or block:  # stretch across: match the stack minus its insets
+                if vertical and (cn.kind == TEXT or cn.kind == PARAGRAPH) and look_at >= 0 and self.look.surfaces[look_at].block_flow:
+                    # (words in block flow: a block as wide as the column up to their max width, from its leading edge: under
+                    # the column's 250 leading pins they stretch; an equality pulled the cards to the words, D-529)
+                    hug(child, Float32(249), False)
+                if cn.fills or node.align_items == STRETCH or wrapper or spans:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(inset_x if vertical else inset_y)
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
                     if vertical and cn.max_w != 0:  # (up to its widest, centred: the web's max-width with auto margins, GTK's clamp)
                         _ = msg(c2, "setPriority:", Float32(495))
-                        if not block:  # (a block of words stays at the column's leading edge)
-                            _ = msg(msg(msg(child, "centerXAnchor"), "constraintEqualToAnchor:", msg(w, "centerXAnchor")), "setActive:", 1)
+                        _ = msg(msg(msg(child, "centerXAnchor"), "constraintEqualToAnchor:", msg(w, "centerXAnchor")), "setActive:", 1)
                     _ = msg(c2, "setActive:", 1)
             if not vertical:  # a row's padding holds above and below its tallest view (centred, a stack keeps its insets only loosely)
                 var ins = msg[CGRect](w, "edgeInsets")  # (top, left, bottom, right)
@@ -1323,7 +1332,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", trail)
                 var side = "heightAnchor" if vertical else "widthAnchor"
                 _ = msg(msg(msg(trail, side), "constraintEqualToAnchor:", msg(lead, side)), "setActive:", 1)
-            elif (node.justify_items == START or (vertical and node.justify_items == 0)) and not grows and not spacers:
+            elif (node.justify_items == START or (vertical and node.justify_items == 0)) and not grows and not spacers and not ended:
                 # its views from the start, the free room after them (a column's default too, as the web's flex-start):
                 # stretched taller than its views, a column stood one of them as tall as the rest (an overview panel's
                 # foot 133 high for 15, D-514); no spacing before that room
@@ -1612,6 +1621,21 @@ struct AppKitHost[A: App](Movable):
                     Float64(sf.pad_right if sf.pad_right >= 0 else sf.pad_x))
         if sf.min_height > 0:
             _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(sf.min_height)), "setActive:", 1)
+
+    def ancestor_role(self, i: Int, field: Int) -> Int:
+        """The nearest role above node i that sets a type field its words inherit, as CSS's inherited properties
+        (0: font_size, 1: line_height, 2: font, 3: ink); -1: none."""
+        var p = self.parents[i] if i < len(self.parents) else -1
+        while p >= 0:
+            ref n = self.rt.shown.nodes[p]
+            if n.name != "":
+                var k = self.look.surface(n.name)
+                if k >= 0:
+                    ref sf = self.look.surfaces[k]
+                    if (field == 0 and sf.font_size > 0) or (field == 1 and sf.line_height != 0) or (field == 2 and sf.font != "") or (field == 3 and sf.ink != 0):
+                        return k
+            p = self.parents[p] if p < len(self.parents) else -1
+        return -1
 
     def inherited_size(self, i: Int) -> Float64:
         """The type size node i's words inherit, as CSS's font-size does: its own role's, else the nearest role above it
@@ -1991,13 +2015,27 @@ struct AppKitHost[A: App](Movable):
         var lh = size * self.look.type.line if self.skinned else Float64(0)
         var tracking = Float64(0)
         var own = self.look.surface(node.name) if node.name != "" else -1
+        # (what its role doesn't set it inherits from the roles around it, as CSS's font and line-height: a card foot's
+        # words wear the foot's 11.5 mono and its font-own line, D-531)
+        var up_size, up_line, up_font, up_ink = self.ancestor_role(i, 0), self.ancestor_role(i, 1), self.ancestor_role(i, 2), self.ancestor_role(i, 3)
+        if up_font >= 0:
+            family = self.look.surfaces[up_font].font
+        if up_size >= 0:
+            size = self.look.surfaces[up_size].font_size
+            lh = size * self.look.type.line if self.skinned else Float64(0)
+        if up_ink >= 0:
+            ink = self.look.surfaces[up_ink].ink
+        if up_line >= 0:
+            var ul = self.look.surfaces[up_line].line_height
+            lh = ul if ul > 0 else Float64(0)
         if own >= 0:
             ref sf = self.look.surfaces[own]
             family = sf.font if sf.font != "" else family
             size = sf.font_size if sf.font_size > 0 else size
             weight = sf.font_weight if sf.font_weight > 0 else weight
             ink = sf.ink if sf.ink != 0 else ink
-            lh = sf.line_height if sf.line_height > 0 else (Float64(0) if sf.line_height < 0 else size * self.look.type.line)  # (below 0: the font's own line, as a label's, D-509, D-529)
+            if sf.line_height != 0 or sf.font_size > 0:  # (below 0: the font's own line, as a label's, D-509, D-529; none: as inherited)
+                lh = sf.line_height if sf.line_height > 0 else (Float64(0) if sf.line_height < 0 or (up_line >= 0 and self.look.surfaces[up_line].line_height < 0) else size * self.look.type.line)
             tracking = sf.tracking
         var para = new("NSMutableParagraphStyle")
         if lh > 0:
