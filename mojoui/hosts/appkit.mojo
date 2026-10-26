@@ -1013,6 +1013,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(cell, "setOrientation:", 0)
                 _ = msg(cell, "setSpacing:", Float64(0))
                 _ = msg(cell, "setAlignment:", 10)  # centre Y
+                _ = msg(cell, "setDistribution:", 0)  # fill: the cell's view across it (a block in a <td>); gravity areas left a name its own width (run 40288990159)
                 var keeps = ck == BUTTON or ck == TOGGLE  # (a button or a tick box keeps its width at its side; the rest fill, as a block in a <td>)
                 if keeps and num:
                     _ = msg(cell, "addArrangedSubview:", flexible_spacer(False))
@@ -1067,7 +1068,11 @@ struct AppKitHost[A: App](Movable):
             _ = msg(content, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
             _ = msg(w, "setDocumentView:", content)
             var clip = msg(w, "contentView")
-            for anchor in ["topAnchor", "leadingAnchor", "widthAnchor"]:
+            ref inner = self.rt.shown.nodes[node.children[0]]
+            # a content narrower than the clip (a column at its widest) sits in its middle, as the web's .scroll centres
+            # it (align-items: center); else it starts at the clip's leading edge (D-504: Add's 980 column sat at the left)
+            var across = "centerXAnchor" if inner.max_w != 0 or inner.w != 0 else "leadingAnchor"
+            for anchor in ["topAnchor", across, "widthAnchor"]:
                 var pin = msg(msg(content, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
                 if anchor == "widthAnchor":  # (content the app made wider is cut off at the edge: it never widens the window)
                     _ = msg(pin, "setPriority:", Float32(495))  # below NSLayoutPriorityWindowSizeStayPut (500), above a wrapping label (490)
@@ -1088,7 +1093,14 @@ struct AppKitHost[A: App](Movable):
                 align = 5 if vertical else 3  # leading / top
             elif node.align_items == END:
                 align = 6 if vertical else 4  # trailing / bottom
-            _ = msg(w, "setAlignment:", align)
+            elif node.align_items == STRETCH:  # every view is stretched below; placed from the leading (top) inset, as
+                # NSStackView centres in its whole bounds and a frame padded 0 above and 14 below put its card 7 low (D-505)
+                var centred = False  # (a view held to its widest is centred on the stack: keep the centre then)
+                for c in node.children:
+                    if self.rt.shown.nodes[c].max_w != 0:
+                        centred = True
+                if not centred:
+                    align = 5 if vertical else 3
             # across its axis a stack is as wide (tall) as its widest view: it hugs loosely, so a row of buttons is never
             # squeezed to a narrower row's width (maccheck's Delete button, 11 pt, GitHub's Mac, 2026-10-23)
             _ = msg(w, "setHuggingPriority:forOrientation:", Float32(250), 0 if vertical else 1)
@@ -1139,6 +1151,10 @@ struct AppKitHost[A: App](Movable):
                 lead = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", lead)
             var first_spacer = 0
+            var all_grow = not vertical and len(node.children) > 1  # a row whose views all grow shares its width equally
+            for c in node.children:  # (the web's flex: 1 1 0, GTK's homogeneous box, D-447; the Mac gave each its content, D-506)
+                all_grow = all_grow and self.rt.shown.nodes[c].grows and self.rt.shown.nodes[c].w == 0
+            var first_grow = 0
             var before = lead  # (the view before this one in the stack: a Divider's room goes after it)
             var built = List[Int]()
             for c in node.children:
@@ -1155,6 +1171,11 @@ struct AppKitHost[A: App](Movable):
                         _ = msg(w, "setCustomSpacing:afterView:", room, before)
                     _ = msg(w, "setCustomSpacing:afterView:", room, child)
                 before = child
+                if all_grow:
+                    if first_grow == 0:
+                        first_grow = child
+                    else:
+                        _ = msg(msg(msg(child, "widthAnchor"), "constraintEqualToAnchor:", msg(first_grow, "widthAnchor")), "setActive:", 1)
                 if cn.grows:  # flex-grow: lowest hugging priority along the stack
                     hug(child, Float32(1), vertical)
                 elif cn.kind == SPACER:  # (a growing view first, if there is one)
@@ -1166,7 +1187,14 @@ struct AppKitHost[A: App](Movable):
                         first_spacer = child
                 elif grows or spacers:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
                     hug(child, Float32(750), vertical)
-                if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
+                var child_stack = cn.kind == VSTACK or cn.kind == HSTACK
+                if not vertical and not cn.fills and node.align_items != STRETCH and child_stack:
+                    # a stack in a row not told to stretch: its own height. At 740 (and a set height's 745) NSStackView still
+                    # stood each one as high as the row (the console's 60 pt app bar: brand, crumbs, links 60 high; a
+                    # 36 pt icon square 46, run 40288990159); 760 is over its pull, and the set height's required minimum
+                    # holds (D-503)
+                    hug(child, Float32(760), True)
+                elif not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
                     hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
                 var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED  # (its one view across it: the web's align-items: stretch, D-494)
                 var spans = vertical and cn.kind == SCROLL  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502)
@@ -1810,7 +1838,11 @@ struct AppKitHost[A: App](Movable):
             var room = msg[CGRect](table, "bounds").width
             var lo = List[Float64](length=cols, fill=0)
             var hi = List[Float64](length=cols, fill=0)
-            var tn = self.parents[self.tcells[start][4]] if self.tcells[start][4] < len(self.parents) else -1
+            var tn = -1  # (the Table's node: parents lists stacks only)
+            for q in range(len(self.rt.shown.nodes)):
+                if self.rt.shown.nodes[q].kind == TABLE and self.tcells[start][4] in self.rt.shown.nodes[q].children:
+                    tn = q
+                    break
             var dense = tn >= 0 and (self.rt.shown.nodes[tn].style == 1 or self.rt.shown.nodes[tn].style == 2)
             var lims = self.rt.shown.nodes[tn].options.copy() if tn >= 0 else List[String]()
             var caps = List[Int](length=cols, fill=0)  # (a cut column's widest: the web's td max-width, border-box)
