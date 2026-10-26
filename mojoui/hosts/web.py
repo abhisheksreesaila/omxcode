@@ -148,7 +148,7 @@ dialog.alert .buttons { display: flex; gap: 8px; justify-content: center; }
 .lazylist .row { position: absolute; left: 0; right: 0; display: flex; align-items: center; padding: 0 14px; cursor: pointer;
                  border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lazylist .row:hover, .lazylist .row:focus-visible { background: var(--surface); }
-#mojoui-root.full { max-width: none; padding: 0; height: 100dvh; align-items: stretch; }
+#mojoui-root.full { max-width: none; padding: 0; min-height: 100dvh; align-items: stretch; }
 #mojoui-root.full > div { flex: 1 1 0; min-width: 0; }
 .canvas { position: relative; overflow: hidden; background: var(--surface); }
 .overlay { position: relative; min-height: 0; overflow: hidden; }
