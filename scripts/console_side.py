@@ -6,15 +6,17 @@ shoot(base_url, out_dir, frozen_at) is general: M0 points it at the original con
 scripts/console_fixture.py; M7 points it at ours. Each shot gets its own fresh browser context (no localStorage carried
 over from the screen before), light colours, en-US in UTC, prefers-reduced-motion, Date frozen at the fixtures'
 recording time (the screens show "3 min ago" and clock times), Math.random seeded, and Playwright's
-animations="disabled" at the moment of the shot. It waits for the fonts, then for two polls (the console polls every
-3 s, the system every 5 s) and for no fetch to be in flight.
+animations="disabled" at the moment of the shot. It shoots when the page has settled, never after a fixed pause
+(D-544): the URL's hash is the screen's route, the screen's own lines (WORDS: lines both consoles show on that screen,
+with the recorded data in them) are on the page, no request is in flight (fetch or XHR; the web host's /wait
+long-poll isn't a request for something), the fonts are loaded, and nothing on the page has changed for QUIET_MS. Under
+load that takes longer, never shoots earlier; after TIMEOUT_S it fails, naming what wasn't settled.
 
 differing(a, b): the share of pixels where any channel differs by more than TOLERANCE (8 of 255): anti-aliasing
 noise below that isn't counted. Pictures of different sizes differ everywhere (1.0).
 """
 
 import sys
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,24 +39,72 @@ SCREENS = [
 ]
 SIZES = [(1440, 900), (390, 844)]
 TOLERANCE = 8  # per channel, of 255
-SETTLE_S = 6.5  # two console polls (3 s) and one system poll (5 s) after the page's first fetches
+QUIET_MS = 1000  # the page unchanged this long (no DOM change, no request) counts as settled
+TIMEOUT_S = 120  # generous: a loaded machine settles late, it never shoots early
+# Lines of words on each screen (a line of the page's innerText each), at both sizes, in both consoles: its content has
+# arrived (the recorded data). Each screen has at least one no other screen shows.
+WORDS = {
+    "models": ["All models · 3"],
+    "overview": ["3.1 GB · 13% of 24 GB"],
+    "bench": ["157.9 tok/s", "3 timed runs per model, after one warm-up"],
+    "logs": ["10 lines", "12:02:42.113 INFO: Server ready on http://127.0.0.1:41873 (Press CTRL+C to quit)"],
+    "notebook": ["/home/abhisheksreesaila/Projects/mxstudio/.pixi/envs/default/lib/python3.14/site-packages/max/pipelines/architectures/qwen2"],
+    "add": ["Qwen/Qwen2.5-3B-Instruct · Qwen2 · 3B · 6 GB"],
+    "keys": ["mxc keys ls", "revoked"],
+    "gateway": ["2 active · 1 revoked · 2 requests refused today (401)", "http://127.0.0.1:11435/v1"],  # (the status card's endpoint: the original draws that card on its own poll, which can land before /admin/info)
+    "security": ["Only this machine can call it. One click adds a certificate, a key and HTTPS."],
+    "settings": ["26.7.0.dev2026100905", "2m 23s"],
+}
 
-# Before any page script: a seeded Math.random, and a count of fetches in flight to wait on.
+# Before any page script: a seeded Math.random, a count of requests in flight (fetch and XHR, htmx's; not the web
+# host's /wait long-poll, which stays open while the app has timers) and the time of the page's last change.
 INIT = """
 (() => {
   let s = 0x2545F491;
   Math.random = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return ((s >>> 0) % 1e9) / 1e9; };
   window.__inflight = 0;
+  window.__changed = performance.now();
+  const touch = () => { window.__changed = performance.now(); };
+  const counts = (url) => !/\\/wait\\//.test(String(url));
   const f = window.fetch;
-  window.fetch = (...a) => { window.__inflight++; return f(...a).finally(() => { window.__inflight--; }); };
+  window.fetch = (...a) => {
+    const url = a[0] && a[0].url ? a[0].url : a[0];
+    if (!counts(url)) return f(...a);
+    window.__inflight++; touch();
+    return f(...a).finally(() => { window.__inflight--; touch(); });
+  };
+  const open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, url, ...rest) { this.__counts = counts(url); return open.call(this, m, url, ...rest); };
+  XMLHttpRequest.prototype.send = function (...a) {
+    if (this.__counts) {
+      window.__inflight++; touch();
+      this.addEventListener('loadend', () => { window.__inflight--; touch(); }, { once: true });
+    }
+    return send.apply(this, a);
+  };
+  new MutationObserver(touch).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
 })();
 """
 
+# What isn't settled yet ([] once it is): the shooter's wait, and its failure message.
+UNSETTLED = """
+([route, words, quiet]) => {
+  const out = [];
+  if (location.hash !== route) out.push(`hash ${location.hash || '(none)'} for ${route}`);
+  const lines = new Set((document.body ? document.body.innerText : '').split('\\n').map(l => l.trim()));
+  for (const w of words) if (!lines.has(w)) out.push(`no line "${w}"`);
+  if (window.__inflight !== 0) out.push(`${window.__inflight} request(s) in flight`);
+  if (document.fonts.status !== 'loaded') out.push('fonts loading');
+  const still = performance.now() - window.__changed;
+  if (still < quiet) out.push(`changed ${Math.round(still)} ms ago`);
+  return out;
+}
+"""
 
-def shoot(base_url, out_dir, frozen_at=None, screens=SCREENS, sizes=SIZES, path="/console", settle_s=SETTLE_S, wait_idle=True):
-    """Shoot every screen at every size; returns {(screen, (w, h)): png path}. frozen_at: epoch seconds for Date.
-    wait_idle: wait for no fetch in flight (the original's polls); False for a page that always keeps one open (ours:
-    the web host's /wait long-poll while the app has timers), which settles by time alone."""
+
+def shoot(base_url, out_dir, frozen_at=None, screens=SCREENS, sizes=SIZES, path="/console", timeout_s=TIMEOUT_S):
+    """Shoot every screen at every size, each once it has settled; returns {(screen, (w, h)): png path}. frozen_at:
+    epoch seconds for Date. Raises RuntimeError naming the screen and what wasn't settled after timeout_s."""
     from playwright.sync_api import sync_playwright
 
     out_dir = Path(out_dir)
@@ -74,11 +124,7 @@ def shoot(base_url, out_dir, frozen_at=None, screens=SCREENS, sizes=SIZES, path=
                     if frozen_at is not None:
                         page.clock.set_fixed_time(frozen_at)  # Date only: timers (the polls) keep running
                     page.goto(base_url + path + route, wait_until="load")
-                    page.evaluate("document.fonts.ready.then(() => true)")
-                    time.sleep(settle_s)
-                    if wait_idle:
-                        page.wait_for_function("window.__inflight === 0", timeout=10000)
-                    page.evaluate("document.fonts.ready.then(() => true)")
+                    settle(page, name, route, w, h, timeout_s)
                     png = out_dir / f"{name}-{w}x{h}.png"
                     page.screenshot(path=str(png), animations="disabled", caret="hide")
                     shots[(name, (w, h))] = png
@@ -86,6 +132,16 @@ def shoot(base_url, out_dir, frozen_at=None, screens=SCREENS, sizes=SIZES, path=
         finally:
             browser.close()
     return shots
+
+
+def settle(page, name, route, w, h, timeout_s=TIMEOUT_S):
+    """Wait until UNSETTLED is empty (polled every 50 ms), or raise naming what still wasn't."""
+    args = [route, WORDS[name], QUIET_MS]
+    try:
+        page.wait_for_function(f"(a) => ({UNSETTLED})(a).length === 0", arg=args, polling=50, timeout=timeout_s * 1000)
+    except Exception as e:
+        left = page.evaluate(f"(a) => ({UNSETTLED})(a)", args)
+        raise RuntimeError(f"{name} {w}x{h} ({route}) never settled in {timeout_s} s: {'; '.join(left) or repr(e)}") from None
 
 
 def shoot_original(run_id):

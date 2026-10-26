@@ -928,7 +928,7 @@ def web_pixels(token, names, extra=None):
             except OSError:
                 time.sleep(0.1)
         screens = [s for s in console_side.SCREENS if s[0] in names]
-        shots = console_side.shoot(f"http://127.0.0.1:{port}/", OUT / "ours", frozen_at=fx.recorded_at, screens=screens, path="", wait_idle=False)
+        shots = console_side.shoot(f"http://127.0.0.1:{port}/", OUT / "ours", frozen_at=fx.recorded_at, screens=screens, path="")
     finally:
         web.terminate()
         try:
@@ -1499,7 +1499,15 @@ def m7():
         return False, err
     token = secrets.token_hex(8)
 
-    # (1) the web, in pixels
+    # (1) the web, in pixels; first, the host renders a tab's first page whole while its effects run (D-545: a torn
+    # first page lost a deep link's route under load, and the shot showed the models page for the logs tab)
+    # no answer carrying screen changes is dropped by the page (D-546: the logs tab stayed "Loading…"), and a phone's
+    # page tells the app the screen's size whatever its content (D-547: the keys page at 390 laid out 780 wide)
+    for test, args in (("web_first_page", [str(g30.BUILD / CONSOLE / "web")]), ("web_lanes", []),
+                       ("web_viewport", [str(g30.BUILD / CONSOLE / "web")])):
+        r = g30.run([sys.executable, str(ROOT / "tests" / f"test_{test}.py"), *args], timeout=180)
+        if f"{test}: ok" not in r.stdout:
+            problems.append(f"tests/test_{test}.py: {(r.stdout + r.stderr)[-300:]}")
     px = web_pixels(token, SCREENS, {NOW_ENV: None})
     notes = []
     for name in SCREENS:

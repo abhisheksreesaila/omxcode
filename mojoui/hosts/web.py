@@ -311,8 +311,14 @@ MENU_JS = r"""
   // Posts the page makes on its own (a route, the window's size, the colour scheme, a drop) each go in a lane of their
   // own: htmx keeps one request per source element and drops all but the last one queued behind it, so a size posted
   // beside a deep link's route (both on load) was lost when they shared document.body.
+  // A lane is also what keeps an answer: htmx drops the answer to a request whose source element left the page while
+  // it was out (its out-of-band swaps never happen), and a whole-screen answer replaces every element under
+  // #mojoui-root. So every request whose answer carries screen changes goes from a lane (window.mojouiLane), never
+  // from #mojoui-root or a view inside it: the effects' /pending sent from the root lost the logs tab's reply under
+  // load (D-546).
   const lane = name => { let el = document.getElementById('mojoui-lane-' + name);
     if (!el) { el = document.createElement('i'); el.id = 'mojoui-lane-' + name; el.hidden = true; document.body.append(el); } return el; };
+  window.mojouiLane = lane;
   // Two answers that each carry the whole screen (a route and a resize posted together on load, an event racing a
   // poll) can arrive out of order: an older screen (a lower #mojoui-v) never replaces a newer one.
   document.addEventListener('htmx:oobBeforeSwap', e => {
@@ -372,11 +378,14 @@ MENU_JS = r"""
     appRoute = want; routeAsked = null;
     if (hashPath() !== want) history.pushState(null, '', '#' + want);
   };
-  addEventListener('load', () => { writeRoute(); tellRoute(); });
+  // After every swap too: a Route that first appears in a later screen (not on the first page) still gets the hash
+  // the page opened at (tellRoute asks once per hash; the app's own moves are written first, so they match).
+  const syncRoute = () => { writeRoute(); tellRoute(); };
+  addEventListener('load', syncRoute);
   addEventListener('hashchange', tellRoute);
   addEventListener('popstate', tellRoute);
-  document.addEventListener('htmx:afterSettle', writeRoute);
-  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(writeRoute, 0));
+  document.addEventListener('htmx:afterSettle', syncRoute);
+  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(syncRoute, 0));
   document.addEventListener('htmx:oobAfterSwap', () => setTimeout(copyAsked, 0));
   document.addEventListener('htmx:oobAfterSwap', () => setTimeout(menus.place, 0));
   addEventListener('load', menus.place); addEventListener('resize', menus.place);
@@ -418,7 +427,7 @@ EFFECTS_JS = r"""
         try { said = await (await fetch(`/wait/${root.dataset.sid}`, { cache: 'no-store' })).text(); }
         catch (e) { await new Promise(ok => setTimeout(ok, 500)); continue; }
         if (said === 'gone') break;
-        if (said === '1') await htmx.ajax('POST', `/pending/${root.dataset.sid}`, { values: { v: document.getElementById('mojoui-v').value }, swap: 'none', source: root });
+        if (said === '1') await htmx.ajax('POST', `/pending/${root.dataset.sid}`, { values: { v: document.getElementById('mojoui-v').value }, swap: 'none', source: window.mojouiLane('effects') });
       }
     } finally { running = false; }
   }
@@ -482,7 +491,7 @@ BOARD_JS = r"""
         if (mark && !resizing) place(mark);  // back where the app last put it; its answer (if it moved) follows
         const dx = ev.clientX - x0, dy = ev.clientY - y0;
         htmx.ajax('POST', `/e/${board.dataset.sid}`, { values: { n: Number(board.dataset.node), number: resizing ? ZOOM : PAN,
-          x: Number(obj.dataset.index), y: 0, dx, dy, zoom: 1, v: shape() }, swap: 'none', source: board });
+          x: Number(obj.dataset.index), y: 0, dx, dy, zoom: 1, v: shape() }, swap: 'none', source: window.mojouiLane('board') });
       };
       obj.addEventListener('pointermove', move); obj.addEventListener('pointerup', up); obj.addEventListener('pointercancel', up);
     });
@@ -619,7 +628,7 @@ CANVAS_JS = r"""
       const wait = 100 - (performance.now() - (st.updated || 0));
       if (wait > 0) { st.again = true; if (!st.timer) st.timer = setTimeout(() => { st.timer = 0; update(); }, wait); return; }
       st.updating = true; st.again = false; st.updated = performance.now();
-      htmx.ajax('POST', `/pending/${sid}`, { values: { v: shape() }, swap: 'none', source: div })
+      htmx.ajax('POST', `/pending/${sid}`, { values: { v: shape() }, swap: 'none', source: window.mojouiLane('canvas-' + n) })
         .finally(() => { st.updating = false; if (st.again) update(); });
     }
     st.pump = pump;
@@ -1164,7 +1173,10 @@ def make_app(module_dir):
     if loads:
         print(f"SHARED: {loads} load, 0 sessions", flush=True)
     app = FastHTML(default_hdrs=False, secret_key=uuid.uuid4().hex, hdrs=(  # no .sesskey file
-        Meta(charset="utf-8"), Meta(name="viewport", content="width=device-width, initial-scale=1, viewport-fit=cover"),
+        # minimum-scale=1: a phone browser otherwise widens the page's layout viewport (innerWidth, innerHeight) to fit
+        # anything wider than the screen, so a first screen laid out for a wider window read as a 780x1688 window,
+        # and the app laid itself out for that, which kept the page that wide (D-547)
+        Meta(charset="utf-8"), Meta(name="viewport", content="width=device-width, initial-scale=1, minimum-scale=1, viewport-fit=cover"),
         # No attribute inheritance: every element states its own hx-* attributes (list rows once
         # inherited their list's hx-target and silently sent nothing). Note: hx-vals is still
         # merged from ancestors even so, so elements set every key they rely on themselves.
@@ -1272,19 +1284,22 @@ def make_app(module_dir):
                     mod.close(old.handle)
                 import shutil  # (its uploads go with it)
                 shutil.rmtree(Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads"))) / old_sid, ignore_errors=True)
+        # The whole first page under the session's lock: once note() hands the tab to the clock thread, its effects'
+        # replies can change the screen at any moment, and a page rendered meanwhile was torn (a deep link's Route
+        # missing from the first page under load, so the route was never asked for; D-545).
         with s.lock:
             note(sid, s)  # (what the starting state asked for)
-        s.theme_key = mod.theme_key(s.handle)
-        s.theme_id = None
-        if hasattr(mod, "logo") and "app-logo" not in ICONS:
-            mark = mod.logo(s.handle)
-            if mark:
-                ICONS["app-logo"] = mark
-        icon = ()
-        if "app-logo" in ICONS:  # (the app's mark as the tab's icon)
-            from urllib.parse import quote
-            icon = (Link(rel="icon", type="image/svg+xml", href="data:image/svg+xml," + quote(ICONS["app-logo"])),)
-        return Title(mod.title(s.handle)), *icon, *root(s, sid), *skin(s)
+            s.theme_key = mod.theme_key(s.handle)
+            s.theme_id = None
+            if hasattr(mod, "logo") and "app-logo" not in ICONS:
+                mark = mod.logo(s.handle)
+                if mark:
+                    ICONS["app-logo"] = mark
+            icon = ()
+            if "app-logo" in ICONS:  # (the app's mark as the tab's icon)
+                from urllib.parse import quote
+                icon = (Link(rel="icon", type="image/svg+xml", href="data:image/svg+xml," + quote(ICONS["app-logo"])),)
+            return Title(mod.title(s.handle)), *icon, *root(s, sid), *skin(s)
 
     def skin(s, oob=False):
         """The app's theme on the page (D-260): its body classes, its palette as CSS variables, and its style sheet; the
