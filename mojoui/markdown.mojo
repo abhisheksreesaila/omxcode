@@ -500,8 +500,9 @@ def markdown_view(blocks: List[Block], tag: String = "markdown", on_link: Int = 
         elif b.kind == MD_UL or b.kind == MD_OL:
             var rows = List[View]()
             for k in range(len(b.items)):
-                var mark = "•" if b.kind == MD_UL else String(k + 1) + "."
-                rows.append(HStack(Text(mark).width(BULLET_W).tag("md-bullet"),
+                # a bullet is a drawn disc the look sizes and places (md-disc: the browser's 5 px disc), a number its words
+                var mark = VStack(VStack(List[View](), spacing=0).tag("md-disc"), spacing=0).align(START).width(BULLET_W).tag("md-marker") if b.kind == MD_UL else Text(String(k + 1) + ".").width(BULLET_W).tag("md-bullet")
+                rows.append(HStack(mark^,
                                    _runs_view(b.items[k], BODY, "md-li", on_link).grow(), spacing=0).align(START).tag("md-item"))
             items.append(VStack(rows^, spacing=GAP_ITEM).align(START).tag("md-ul" if b.kind == MD_UL else "md-ol"))
             items.append(_gap(GAP_BLOCK))
@@ -526,6 +527,14 @@ def text_role(role: String, size: Float64, weight: Int, ink: UInt32, font: Strin
                    weight, tracking, line_height, 0, 0, False, max_chars=max_chars)
 
 
+def disc_role(role: String, ink: UInt32) -> Surface:
+    """A list's bullet as the browser draws its disc for 14 px text: a 5 px circle in the ink, 6 px into its 22 px column,
+    its middle on the first 22.4 px line's (9 px down), measured from the original's pixels."""
+    var s = Surface(role, ink, 3, 3, 9, 6, 0, -1, -1, -1, List[Shadow](), 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+    s.width, s.height = 5, 5
+    return s^
+
+
 def markdown_roles(p: Palette, mono: String) -> List[Surface]:
     """.nb-md's values: body 14/1.6 in ink-2; headings 650 in the ink, -.015em, 1.3 (20, 17, 15, 14…); strong and links
     in the ink; inline code 12.5 mono on the state layer at .07, corners 4, 1×5 padding; pre on the code colours
@@ -543,6 +552,7 @@ def markdown_roles(p: Palette, mono: String) -> List[Surface]:
         text_role("md-ol", 0, 0, 0, max_chars=72),
         text_role("md-li", 14, 0, p.ink2, "", 0, 22.4),
         text_role("md-bullet", 14, 0, p.ink2, "", 0, 22.4),
+        disc_role("md-disc", p.ink2),
         text_role("md-em", 14, 0, p.ink2, "", 0, 22.4),
         text_role("md-strong", 14, 700, p.ink, "", 0, 22.4),
         text_role("md-link", 14, 0, p.ink, "", 0, 22.4),

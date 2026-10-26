@@ -125,8 +125,11 @@ def notebook() raises:
     assert_equal(texts(v, "md-h2")[0], "What it is")
     assert_equal(texts(v, "md-code-link")[0], "Qwen/Qwen2.5-0.5B-Instruct")
     assert_equal(texts(v, "md-code")[0], "mxc learn")
-    assert_equal(len(texts(v, "md-bullet")), 6)
-    assert_equal(texts(v, "md-bullet")[0], "•")
+    var discs = 0
+    for n in v.nodes:
+        discs += 1 if n.name == "md-disc" else 0
+    assert_equal(discs, 6)  # (a bullet is a drawn disc, not a glyph: D-480)
+    assert_equal(len(texts(v, "md-bullet")), 0)
     var strong_ok = False
     var link_ok = False
     for n in v.nodes:
