@@ -68,7 +68,7 @@ while IFS='|' read -r app screen settings steps; do
     done
     wait "$pid"; echo "exit $?" >> "out/side/$app-$screen.txt"
     if [ -n "$fxpid" ]; then kill "$fxpid" 2>/dev/null; wait "$fxpid" 2>/dev/null; unset MXC_URL MXC_ADMIN_KEY MOJOUI_NOW; fi
-    last=$(ls -td ~/Desktop/omxcode-report-"$app"/*/ | head -1)
+    last=$(ls -td ~/Desktop/omxcode-report-*/*/ | head -1)  # (this launch's: the newest; an app's folder is its title's, "omxconsole")
     shot=$(ls "$last"*.png 2>/dev/null | grep -v -- '-popover\.png$\|-dialog\.png$' | sort | tail -1)
     [ -n "$shot" ] && cp "$shot" "out/side/$app-$screen.png"
     for extra in popover dialog; do [ -f "${shot%.png}-$extra.png" ] && cp "${shot%.png}-$extra.png" "out/side/$app-$screen-$extra.png"; done
