@@ -1097,14 +1097,25 @@ struct AppKitHost[A: App](Movable):
             _ = msg(w, "setDrawsBackground:", 0)
             var content = self.build(node.children[0], self_addr)
             _ = msg(content, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
-            _ = msg(w, "setDocumentView:", content)
             var clip = msg(w, "contentView")
             ref inner = self.rt.shown.nodes[node.children[0]]
             # a content narrower than the clip (a column at its widest) sits in its middle, as the web's .scroll centres
-            # it (align-items: center); else it starts at the clip's leading edge (D-504: Add's 980 column sat at the left)
-            var across = "centerXAnchor" if inner.max_w != 0 or inner.w != 0 else "leadingAnchor"
-            for anchor in ["topAnchor", across, "widthAnchor"]:
-                var pin = msg(msg(content, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
+            # it (align-items: center): in a document view as wide as the clip (the clip scrolls to its document's
+            # origin, so a centred document sat at the left again, run 40294665922), the content centred in it (D-504)
+            var doc = content
+            if inner.max_w != 0 or inner.w != 0:
+                doc = new("NSView")
+                _ = msg(doc, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
+                _ = msg(doc, "addSubview:", content)
+                for anchor in ["topAnchor", "bottomAnchor", "centerXAnchor"]:
+                    _ = msg(msg(msg(content, anchor), "constraintEqualToAnchor:", msg(doc, anchor)), "setActive:", 1)
+                _ = msg(msg(msg(content, "widthAnchor"), "constraintLessThanOrEqualToAnchor:", msg(doc, "widthAnchor")), "setActive:", 1)
+                var full = msg(msg(content, "widthAnchor"), "constraintEqualToAnchor:", msg(doc, "widthAnchor"))
+                _ = msg(full, "setPriority:", Float32(494))  # (up to its widest: its own max-width is required)
+                _ = msg(full, "setActive:", 1)
+            _ = msg(w, "setDocumentView:", doc)
+            for anchor in ["topAnchor", "leadingAnchor", "widthAnchor"]:
+                var pin = msg(msg(doc, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
                 if anchor == "widthAnchor":  # (content the app made wider is cut off at the edge: it never widens the window)
                     _ = msg(pin, "setPriority:", Float32(495))  # below NSLayoutPriorityWindowSizeStayPut (500), above a wrapping label (490)
                 _ = msg(pin, "setActive:", 1)
