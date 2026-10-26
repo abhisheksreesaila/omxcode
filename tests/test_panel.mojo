@@ -25,7 +25,7 @@ def first(v: View, kind: Int) -> Int:
 def texts(v: View) -> List[String]:
     var out = List[String]()
     for n in v.nodes:
-        if n.kind == TEXT or n.kind == BUTTON:
+        if n.kind == TEXT or n.kind == BUTTON or n.kind == PARAGRAPH:
             out.append(n.text)
     return out^
 
@@ -45,6 +45,8 @@ def covered(views: List[View], skip: List[String] = []) raises:
             if t in skip:
                 continue
             assert_true(look.surface(t) >= 0, "no role for tag " + t)
+from mojoui.paragraph import runs_of
+from mojoui.view import PARAGRAPH
 from mojoui.panel import (Card, CardHead, CardBody, CardFoot, CopyFoot, CardNote, CardStack, CardColumn, TabBody, ListRow, ColumnRow, Panel, PanelTitle,
     PanelFoot, PanelRow, PanelGrid, StatTile, StatGrid, Fact, FactText, FactLink, FactList, LabeledRow, KEYS_NARROW, KEYS_WIDEST)
 from mojoui.view import Text, Button, BASELINE
@@ -57,7 +59,11 @@ def main() raises:
     var foot = CopyFoot("mxc status", 6210)
     assert_equal(foot.nodes[foot.nodes[0].children[0]].text, "$ mxc status")
     assert_equal(foot.nodes[tagged(foot, "foot-copy")].msg, 6210)
-    assert_equal(texts(CardFoot("kept here", note=True))[0], "↳ kept here")
+    assert_equal(texts(CardFoot("kept here", note=True))[0], "↳ kept here")  # (one Paragraph: still its words whole, D-483)
+    var marks = runs_of(foot.nodes[foot.nodes[0].children[0]])
+    assert_equal(len(marks), 3)
+    assert_equal(marks[0].role, "foot-mark")  # (the $ quieter than the words, .src::before opacity .6)
+    assert_equal(marks[1].role, "foot-gap")  # (the space as wide as the look's gap)
     var tile = StatTile("Speed", "158", "tok/s", "decode, median")
     assert_equal(tile.nodes[tile.nodes[0].children[0]].text, "SPEED")
     assert_equal(tile.nodes[tagged(tile, "stat-number")].align_items, BASELINE)

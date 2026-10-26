@@ -6,6 +6,7 @@
 #   CardStack([Card([CardHead("New key"), CardBody([…]), CardFoot("mxc keys new <app>")])])
 #   PanelGrid([PanelRow(Panel([PanelTitle("gauge", "Right now", 1), StatGrid(tiles), PanelFoot("mxc status")]), …)])
 
+from mojoui.paragraph import Paragraph, Plain, Run
 from mojoui.view import View, Text, Button, VStack, HStack, Spacer, Grid, SUBTLE, CENTER, START, STRETCH, BASELINE, SPACE_XXS, SPACE_XS, SPACE_S, SPACE_M, SPACE_L, Node, VSTACK, _container
 from mojoui.chip import Badge
 from mojoui.marks import HueIcon
@@ -45,10 +46,17 @@ def CardBody(var items: List[View], flow: Bool = False) -> View:
     return VStack(items^, spacing=SPACE_M).align(START).fill().tag("card-body")
 
 
+def foot_words(text: String, note: Bool) -> View:
+    """A foot's words: its mark ($, or ↳ for a note) quieter than them (role foot-mark), the space after it as wide as the
+    look's gap (role foot-gap), then the words: one Paragraph, so it still reads "$ text" whole (roles foot-text)."""
+    var runs: List[Run] = [Plain("↳" if note else "$", "foot-mark"), Plain(" ", "foot-gap"), Plain(text)]
+    return Paragraph(runs, role="foot-text")
+
+
 def CardFoot(text: String, note: Bool = False, tail: String = "") -> View:
     """A card's foot: the command that shows the same thing after a $ (↳ for a note) over a rule, `tail` at the end
     (role card-foot)."""
-    var items: List[View] = [Text(("↳ " if note else "$ ") + text)]
+    var items: List[View] = [foot_words(text, note)]
     if tail != "":
         items.append(Spacer())
         items.append(Text(tail))
@@ -58,7 +66,7 @@ def CardFoot(text: String, note: Bool = False, tail: String = "") -> View:
 def CopyFoot(command: String, on_copy: Int, note: Bool = False) -> View:
     """A card's foot with a small copy button at its end (roles card-foot, foot-copy); the copy is the app's
     (a mojoui.overlays.Clipboard) on `on_copy`."""
-    return HStack(Text(("↳ " if note else "$ ") + command), Spacer(), Button("copy", on_copy, SUBTLE).tag("foot-copy"),
+    return HStack(foot_words(command, note), Spacer(), Button("copy", on_copy, SUBTLE).tag("foot-copy"),
                   spacing=SPACE_S).align(CENTER).fill().tag("card-foot")
 
 

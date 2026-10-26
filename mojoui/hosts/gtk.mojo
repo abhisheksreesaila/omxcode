@@ -4377,9 +4377,12 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
             var links = 0
             for r in runs_of(n):
                 links += 1 if r.href != "" else 0
-            print("PARAGRAPH: " + c_str(external_call["gtk_label_get_text", Int](w)) + " (" + String(len(runs_of(n))) + " runs, " + String(links) + " links)")
-            for r in runs_of(n):
-                print("LABEL: " + r.text)
+            var said = c_str(external_call["gtk_label_get_text", Int](w))
+            print("PARAGRAPH: " + said + " (" + String(len(runs_of(n))) + " runs, " + String(links) + " links)")
+            print("LABEL: " + said)  # (its words whole, then each run's when it has several, as the web reports them)
+            if len(runs_of(n)) > 1:
+                for r in runs_of(n):
+                    print("LABEL: " + r.text)
         elif n.kind == TEXT:
             print("LABEL: " + c_str(external_call["gtk_label_get_text", Int](w)))
             var tone = tone_of(w)
