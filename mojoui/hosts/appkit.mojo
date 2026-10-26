@@ -1430,6 +1430,8 @@ struct AppKitHost[A: App](Movable):
                 self.size_w[i] = cw
         if node.h != 0:
             var ch = msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h - inset[1]))
+            if is_stack and len(node.children) > 0:  # (a stack given a height holds it unless its content needs more: GTK's minimum; squeezed, its words went to 0 pt)
+                _ = msg(ch, "setPriority:", Float32(740))
             _ = msg(ch, "setActive:", 1)
             if i < len(self.size_h):
                 self.size_h[i] = ch
