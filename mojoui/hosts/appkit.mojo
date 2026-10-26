@@ -1101,6 +1101,7 @@ struct AppKitHost[A: App](Movable):
                             self.restyle_label(child, self.rt.shown.nodes[c].text, tk)
                     _ = msg(child, "setAlignment:", 2 if num else 0)  # NSTextAlignmentRight / Left
                 _ = msg(row, "addArrangedSubview:", cell)
+                hold_insets(cell)
                 _ = msg(msg(msg(cell, "heightAnchor"), "constraintEqualToAnchor:", msg(row, "heightAnchor")), "setActive:", 1)
                 var wc = 0
                 if col < cols - 1:
@@ -1291,6 +1292,7 @@ struct AppKitHost[A: App](Movable):
                 if last != 0:
                     _ = msg(w, "setCustomSpacing:afterView:", Float64(0), last)
                 _ = msg(w, "addArrangedSubview:", flexible_spacer(vertical))
+            hold_insets(w)
         if self.widgets[i] == 0:  # (some branches already stored an inner control)
             self.widgets[i] = w
         return self.apply_layout(i, w)
@@ -2456,6 +2458,22 @@ def hug(view: Int, priority: Float32, vertical: Bool):
                 for j in range(msg(views, "count")):
                     var v = msg(views, "objectAtIndex:", j)
                     _ = msg(msg(msg(view, side), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, side), pad), "setActive:", 1)
+
+
+def hold_insets(stack: Int):
+    """A stack's edge insets across its axis, required: NSStackView keeps them only by its hugging's Edge.Min pins (250
+    across), so any weak shrink above that, an ancestor's, took a padded cell's padding away (run 40308229281: a dense
+    table's head row 22 high for 38, D-515)."""
+    var ins = msg[CGRect](stack, "edgeInsets")  # (top, left, bottom, right)
+    var vertical_stack = Int(msg(stack, "orientation")) == 1
+    var pad = (ins.y + ins.height) if vertical_stack else (ins.x + ins.width)
+    if pad <= 0:
+        return
+    var side = "widthAnchor" if vertical_stack else "heightAnchor"
+    var views = msg(stack, "arrangedSubviews")
+    for j in range(msg(views, "count")):
+        var v = msg(views, "objectAtIndex:", j)
+        _ = msg(msg(msg(stack, side), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, side), pad), "setActive:", 1)
 
 
 def flexible_spacer(vertical: Bool) -> Int:
