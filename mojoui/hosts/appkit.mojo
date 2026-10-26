@@ -869,11 +869,23 @@ struct AppKitHost[A: App](Movable):
             if gk >= 0 and self.look.surfaces[gk].column_gap >= 0:  # (a role's column gap, the web's column-gap: D-495)
                 col_gap = self.look.surfaces[gk].column_gap
             var firsts = List[Int]()  # (fitted: the first row's holders, one per column)
+            var shares = List[Float64]()  # (column shares, Grid(shares=[52, 48]): the web's fr columns, D-535)
+            var share_sum = Float64(0)
+            if not fitted:
+                for v in node.options:
+                    var f = Float64(1)
+                    try:
+                        f = Float64(max(Int(v), 1))
+                    except:
+                        f = 1
+                    shares.append(f)
+                    share_sum += f
+            var shared = len(shares) == node.value and share_sum > 0
             for k in range(len(node.children)):
                 if k % node.value == 0:
                     row = new("NSStackView")
                     _ = msg(row, "setOrientation:", 0)
-                    _ = msg(row, "setDistribution:", 0 if fitted else 1)  # fitted: by the constraints below; else fill equally
+                    _ = msg(row, "setDistribution:", 0 if fitted or shared else 1)  # fitted, shared: by the constraints below; else fill equally
                     _ = msg(row, "setSpacing:", Float64(col_gap))
                     _ = msg(w, "addArrangedSubview:", row)
                     # every row spans the grid, its columns equal (as GTK's homogeneous grid): a row of its own size sat
@@ -882,6 +894,14 @@ struct AppKitHost[A: App](Movable):
                 var item = self.build(node.children[k], self_addr)
                 if not fitted:
                     _ = msg(row, "addArrangedSubview:", item)
+                    if shared:  # (each column its share of the row less the gaps; the last the rest, as fit_shares on GTK)
+                        var col_k = k % node.value
+                        if col_k < node.value - 1:
+                            var part = shares[col_k] / share_sum
+                            var c3 = msg(msg(item, "widthAnchor"), "constraintEqualToAnchor:multiplier:constant:", msg(row, "widthAnchor"), part, -Float64(col_gap * (node.value - 1)) * part)
+                            _ = msg(c3, "setActive:", 1)
+                        else:
+                            hug(item, Float32(1), False)
                     continue
                 # fitted (a definition list): every column but the last as wide as its widest item, the last the rest;
                 # each item its own width from the column's start, centred down (the web's grid-template-columns:
@@ -891,10 +911,13 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(holder, "setOrientation:", 0)
                 _ = msg(holder, "setSpacing:", Float64(0))
                 _ = msg(holder, "setAlignment:", 10)  # centre Y
+                var at_end = node.hint == "E" and col == node.value - 1  # (Grid(end=True): the last column's items at its trailing edge, D-535)
+                if at_end and not self.rt.shown.nodes[node.children[k]].fills:
+                    _ = msg(holder, "addArrangedSubview:", flexible_spacer(False))
                 _ = msg(holder, "addArrangedSubview:", item)
                 if self.rt.shown.nodes[node.children[k]].fills:
                     hug(item, Float32(1), False)
-                else:
+                elif not at_end:
                     _ = msg(holder, "addArrangedSubview:", flexible_spacer(False))
                 _ = msg(row, "addArrangedSubview:", holder)
                 if col == node.value - 1:
@@ -1312,7 +1335,7 @@ struct AppKitHost[A: App](Movable):
                 if vertical and (cn.kind == TEXT or cn.kind == PARAGRAPH) and look_at >= 0 and self.look.surfaces[look_at].block_flow:
                     # (words in block flow: a block as wide as the column up to their max width, from its leading edge: under
                     # the column's 250 leading pins they stretch; an equality pulled the cards to the words, D-529)
-                    hug(child, Float32(249), False)
+                    hug(self.widgets[c] if c < len(self.widgets) and self.widgets[c] != 0 else child, Float32(249), False)  # (the words, not a margin's holder)
                 if cn.fills or node.align_items == STRETCH or wrapper or spans:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(inset_x if vertical else inset_y)
@@ -1741,6 +1764,9 @@ struct AppKitHost[A: App](Movable):
         var look_at = self.look.surface(node.name) if node.name != "" and is_stack else -1
         if look_at >= 0 and self.look.surfaces[look_at].max_chars > 0:  # a measured box (md-ul): at most its measure, as the web's max-width in ch (D-526)
             _ = msg(msg(msg(outer, "widthAnchor"), "constraintLessThanOrEqualToConstant:", self.measure_of(look_at)), "setActive:", 1)
+        var words_at = self.look.surface(node.name) if node.name != "" and (node.kind == TEXT or node.kind == PARAGRAPH) else -1
+        if words_at >= 0 and self.look.surfaces[words_at].margin_top >= 0:  # (words with a margin of their own, a note's 10 above it in a flowing body, D-534)
+            look_at = words_at
         if look_at >= 0 and self.look.surfaces[look_at].margin_top >= 0:  # the look's margin: the surface floats inside a holder
             ref sf = self.look.surfaces[look_at]
             var holder = new("NSView")
