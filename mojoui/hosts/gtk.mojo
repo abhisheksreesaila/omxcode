@@ -727,8 +727,8 @@ struct GtkHost[A: App](Movable):
         if node.h != 0:
             external_call["gtk_widget_set_vexpand", NoneType](w, c_int(0))
         var cap = node.max_w if node.max_w != 0 else node.w
-        if cap == 0 and node.kind != PARAGRAPH and node.kind != TEXT and self.measured(node):
-            cap = 10000  # (a measured box, as the web's max-width in ch: fit_measures sets its clamp to the measure, D-524)
+        if cap == 0 and node.kind != TEXT and self.measured(node):
+            cap = UNMEASURED  # (a measured box or paragraph, as the web's max-width in ch: fit_measures sets its clamp to the measure, D-524, D-525)
         if cap != 0:
             var clamp = external_call["adw_clamp_new", Int]()
             external_call["adw_clamp_set_maximum_size", NoneType](clamp, c_int(cap))
@@ -933,7 +933,8 @@ struct GtkHost[A: App](Movable):
             if self.widgets[k] == 0 or not self.measured(self.rt.shown.nodes[k]):
                 continue
             var boxed = self.kinds[k] != PARAGRAPH and self.kinds[k] != TEXT
-            if boxed and (k >= len(self.outers) or self.outers[k] == 0 or Int(external_call["g_type_check_instance_is_a", c_int](self.outers[k], external_call["adw_clamp_get_type", Int]())) == 0):
+            var clamped = k < len(self.outers) and self.outers[k] != 0 and Int(external_call["g_type_check_instance_is_a", c_int](self.outers[k], external_call["adw_clamp_get_type", Int]())) != 0
+            if boxed and not clamped:
                 continue
             var label = self.widgets[k]
             var width = Int(external_call["gtk_widget_get_width", c_int](label))
@@ -965,6 +966,20 @@ struct GtkHost[A: App](Movable):
                     external_call["adw_clamp_set_tightening_threshold", NoneType](self.outers[k], most_box)
                 continue
             var most = Int(ch * Float64(chars) + 0.5)
+            if clamped:  # (its clamp caps its natural width at the measure, so a column that hugs it is the web's width; in
+                # a column wider than the measure the clamp would centre it: then the clamp takes the column and the margin
+                # below holds the measure from the leading edge, D-525)
+                var outer = self.outers[k]
+                var cap_now = Int(external_call["adw_clamp_get_maximum_size", c_int](outer))
+                var given = Int(external_call["gtk_widget_get_width", c_int](outer))
+                var want = cap_now
+                if cap_now == UNMEASURED:
+                    want = most
+                elif given > max(cap_now, most) + 1:
+                    want = given
+                if want != cap_now:
+                    external_call["adw_clamp_set_maximum_size", NoneType](outer, c_int(want))
+                    external_call["adw_clamp_set_tightening_threshold", NoneType](outer, c_int(want))
             var room = width + Int(external_call["gtk_widget_get_margin_end", c_int](label))
             var margin = c_int(max(room - most, 0))
             if external_call["gtk_widget_get_margin_end", c_int](label) != margin:
@@ -3097,6 +3112,9 @@ def on_idle_appearance[A: App](host_addr: Int) abi("C") -> c_int:
     if d.rebuild or len(d.patches) > 0:
         host[].apply(d, host_addr)
     return 0
+
+
+comptime UNMEASURED = 10000  # a measured view's clamp before fit_measures has measured it
 
 
 def on_clock_layout[A: App](clock: Int, host_addr: Int) abi("C"):
