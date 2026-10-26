@@ -1124,8 +1124,10 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", lead)
             var first_spacer = 0
             var before = lead  # (the view before this one in the stack: a Divider's room goes after it)
+            var built = List[Int]()
             for c in node.children:
                 var child = self.build(c, self_addr)
+                built.append(child if self.rt.shown.nodes[c].kind != SPACER else 0)
                 _ = msg(w, "addArrangedSubview:", child)
                 ref cn = self.rt.shown.nodes[c]
                 if cn.kind == DIVIDER and not (cn.sized_width() if not vertical else cn.sized_height()):
@@ -1147,12 +1149,18 @@ struct AppKitHost[A: App](Movable):
                 elif grows or spacers:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
                     hug(child, Float32(750), vertical)
                 if not vertical and not cn.fills and node.align_items != STRETCH:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
-                    hug(child, Float32(750), True)
+                    hug(child, Float32(740), True)  # (below a height the app gave it, 745)
                 if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(2 * (inset_x if vertical else inset_y))
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
                     _ = msg(c2, "setActive:", 1)
+            if not vertical:  # a row's padding holds above and below its tallest view (centred, a stack keeps its insets only loosely)
+                var ins = msg[CGRect](w, "edgeInsets")  # (top, left, bottom, right)
+                if ins.x + ins.width > 0:
+                    for v in built:
+                        if v != 0:
+                            _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, "heightAnchor"), ins.x + ins.width), "setActive:", 1)
             if node.justify_items == CENTER and not grows and not spacers:
                 var trail = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", trail)
@@ -1431,7 +1439,7 @@ struct AppKitHost[A: App](Movable):
         if node.h != 0:
             var ch = msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h - inset[1]))
             if is_stack and len(node.children) > 0:  # (a stack given a height holds it unless its content needs more: GTK's minimum; squeezed, its words went to 0 pt)
-                _ = msg(ch, "setPriority:", Float32(740))
+                _ = msg(ch, "setPriority:", Float32(745))
             _ = msg(ch, "setActive:", 1)
             if i < len(self.size_h):
                 self.size_h[i] = ch
