@@ -84,13 +84,14 @@ def TabHeader(tabs: View, actions: View, compact: Bool = False) -> View:
     return HStack(tabs.copy(), Spacer(), actions.copy(), spacing=SPACE_M).align(CENTER).fill().tag("tab-header")
 
 
-def SubHeader(text: String, var tools: List[View], compact: Bool = False) -> View:
+def SubHeader(text: String, var tools: List[View], compact: Bool = False, status: Bool = False) -> View:
     """A line that says what a tab shows, in the mono, its tools at the end (roles sub-header, sub-header-compact,
-    sub-header-text, sub-header-tools). Short of room, the words give way first, then the first tool (a status chip:
-    role sub-header-status), never the line wrapping."""
+    sub-header-text, sub-header-tools). Short of room, the words give way first, never the line wrapping; `status`:
+    the first tool is a status chip that gives way next, cut (role sub-header-status)."""
     var items: List[View] = [Text(text).grow().tag("sub-header-text")]
-    if len(tools) > 0:
+    if status and len(tools) > 0:
         tools[0] = HStack(tools[0].copy(), spacing=0).align(CENTER).tag("sub-header-status")
+    if len(tools) > 0:
         items.append(HStack(tools^, spacing=SPACE_S).align(CENTER).tag("sub-header-tools"))
     return HStack(items^, spacing=SPACE_M).align(CENTER).fill().tag("sub-header-compact" if compact else "sub-header")
 

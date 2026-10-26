@@ -32,7 +32,7 @@ def fpx(v: Float64) -> String:
 def text_only(s: Surface) -> Bool:
     """A role the look gives type only (words()): no box rule is written for it."""
     return (s.fill == 0 and s.radius_top < 0 and s.margin_top < 0 and s.pad_top < 0 and len(s.shadows) == 0 and s.line_top == 0
-            and s.line_bottom == 0 and s.min_height <= 0 and s.outline == 0 and s.gap < 0 and s.height == 0 and s.width == 0 and not s.scrolls_x and not s.shares and s.text_align != 2 and not s.one_line and not s.inline_flow and s.max_chars == 0)
+            and s.line_bottom == 0 and s.min_height <= 0 and s.outline == 0 and s.gap < 0 and s.height == 0 and s.width == 0 and not s.scrolls_x and not s.shares and not s.shrinks and not s.items_shrink and s.text_align != 2 and not s.one_line and not s.inline_flow and s.max_chars == 0)
 
 
 def surface_rule(s: Surface, web: Bool) -> String:
@@ -150,7 +150,7 @@ def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
     if web and s.breaks_words:  # (GTK: its labels wrap at any character, PANGO_WRAP_WORD_CHAR; the Mac: character wrapping)
         out += "overflow-wrap: anywhere; "
     if web and s.one_line:  # (its words on one line too, cut with an ellipsis when squeezed, as GTK and the Mac cut them)
-        out += "white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; "
+        out += "white-space: nowrap; "
     if web and s.text_align > 0:
         out += "text-align: " + ("left" if s.text_align == 1 else ("center" if s.text_align == 2 else "right")) + "; "
     if s.ink != 0:
@@ -229,6 +229,10 @@ def look_web_css(look: Look, scope: String) -> String:
             out += scope + "[data-tag=" + s.role + "] { " + text_rule(s, True) + "}\n"
             out += (scope + "[data-tag=" + s.role + "] > .text { display: inline; } " + scope + "[data-tag=" + s.role + "] > button { display: inline-flex; vertical-align: middle; } "
                     + scope + "[data-tag=" + s.role + "] > * + * { margin-left: " + px(max(s.gap, 0)) + "; }\n")
+        if s.items_shrink:  # (what it holds gives way with it: a chip keeps its border, its words cut, as .kchip)
+            out += scope + "[data-tag=" + s.role + "] > * { min-width: 0; flex-shrink: 1; overflow: hidden; }\n"
+        if s.one_line:  # (its words cut with an ellipsis when squeezed, as GTK and the Mac cut them; a button wearing it keeps its width)
+            out += scope + "[data-tag=" + s.role + "] .text, " + scope + ".text[data-tag=" + s.role + "] { overflow: hidden; text-overflow: ellipsis; min-width: 0; }\n"
         if s.scrolls_x:  # (a row that scrolls sideways: its items keep their own width)
             out += scope + ":where([data-tag=" + s.role + "]) > * { flex-shrink: 0; }\n"  # (weakly: an item that shrinks says so)
         var t = text_rule(s, True)

@@ -740,7 +740,7 @@ def extra_roles(p: Palette, mono: String) -> List[Surface]:
     sts.one_line, sts.shrinks = True, True
     out.append(sts^)
     var ss = layout("sub-header-status")  # .kchip: overflow hidden, min-width 0 (cut on a phone)
-    ss.shrinks = True
+    ss.shrinks, ss.items_shrink = True, True
     out.append(ss^)
     var tr = layout("tool-row", 12)
     tr.scrolls_x = True  # (one line)

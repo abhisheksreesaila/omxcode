@@ -45,7 +45,7 @@ def covered(views: List[View], skip: List[String] = []) raises:
             if t in skip:
                 continue
             assert_true(look.surface(t) >= 0, "no role for tag " + t)
-from mojoui.header import PageHeader, IconSquare, FilterBar, PillTabs, SegmentButtons, ActionGroup, TabHeader, SubHeader, ToolRow, hued
+from mojoui.header import PageHeader, IconSquare, FilterBar, PillTabs, SegmentButtons, ActionGroup, TabHeader, SubHeader, ToolRow, hued, HUE_QUIET
 from mojoui.view import Text, Button
 
 
@@ -64,9 +64,15 @@ def main() raises:
     assert_equal(IconSquare("lock", tone=1).nodes[0].name, "icon-square-tone-1")
     assert_equal(IconSquare("x", hue=3).nodes[0].name, "icon-square-3")
     assert_equal(hued("flat", 8), "flat-8")
+    assert_equal(IconSquare("x", hue=HUE_QUIET).nodes[0].name, "icon-square-7")  # (the quiet ink: Settings, D-476)
+    var sub = SubHeader("qwen · notebook", [Text("model running"), Button("Run", 1)], compact=True, status=True)
+    assert_true(tagged(sub, "sub-header-status") > 0, "a status chip first: it gives way, cut (D-475)")
+    var plain = SubHeader("qwen", [Button("Pause", 1)])
+    assert_equal(tagged(plain, "sub-header-status"), -1)  # (a plain first tool keeps its width)
+    assert_true(tagged(plain, "sub-header-tools") > 0, "its tools are shown")
     var th = TabHeader(tabs.copy(), ActionGroup([Button("Stop", 1)]), compact=True)
     assert_equal(th.nodes[0].name, "tab-header-compact")
     covered([h.copy(), tabs.copy(), seg.copy(), SegmentButtons(["a", "b"], [], 1, 1), FilterBar([Text("x")]), th.copy(),
-             TabHeader(tabs.copy(), ActionGroup([Button("Stop", 1)], fill=True)), SubHeader("qwen · max serve", [Button("Copy", 1)]), ToolRow([Text("x")]),
+             TabHeader(tabs.copy(), ActionGroup([Button("Stop", 1)], fill=True)), SubHeader("qwen · max serve", [Button("Copy", 1)]), sub.copy(), ToolRow([Text("x")]),
              IconSquare("x"), IconSquare("x", tone=3)])
     print("header: ok")

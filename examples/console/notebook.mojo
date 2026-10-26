@@ -110,7 +110,7 @@ def notebook_view(nb: Notebook, st: Store, model: String, phone: Bool) -> View:
         running = st.models[k].state == "ready"
     var chip = Badge(("model running · " + short_endpoint(st.endpoint_now())) if running else "start it to run cells", BADGE_OK if running else 0, dot=True)
     var head = SubHeader(model + ((" · " + nb.path) if nb.path != "" else String("")),
-                         [chip^, SmallButton("Saved view" if nb.jupyter else "Run in Jupyter", NB_RUN, "book-open" if nb.jupyter else "play")], compact=phone)
+                         [chip^, SmallButton("Saved view" if nb.jupyter else "Run in Jupyter", NB_RUN, "book-open" if nb.jupyter else "play")], compact=phone, status=True)
     var items: List[View] = []
     if nb.problem != "":
         items.append(QuietText(nb.problem + " Fix: jupyter lab " + (nb.path if nb.path != "" else String("<notebook>.ipynb"))))

@@ -198,6 +198,7 @@ struct Surface(Copyable, Movable):
     var shrinks: Bool  # its width gives way when its row is short of room (a filter field on a phone)
     var shares: Bool  # it takes an equal share of its row, never less than its own width (flex 1, a phone.s tabs and verbs)
     var breaks_words: Bool  # a word too long for its line breaks anywhere (CSS's overflow-wrap: anywhere; a long config key)
+    var items_shrink: Bool  # its items give way with it, below their content, what overflows cut (a chip keeps its border, its words cut)
     var max_chars: Int  # its measure: lines at most this many characters long (CSS's ch: the width of "0"; 0: no limit, D-472)
 
     def __init__(out self, role: String, fill: UInt32, radius_top: Int, radius_bottom: Int, margin_top: Int, margin_x: Int,
@@ -205,7 +206,7 @@ struct Surface(Copyable, Movable):
                  line_bottom: UInt32, blur: Int, min_height: Int, font: String, font_size: Float64, ink: UInt32, font_weight: Int,
                  tracking: Float64, line_height: Float64, outline: UInt32, outline_w: Int, dashed: Bool, pad_left: Int = -1,
                  pad_right: Int = -1, gap: Int = -1, height: Int = 0, icon_size: Int = 0, icon_stroke: Float64 = 0,
-                 icon_ink: UInt32 = 0, text_align: Int = 0, width: Int = 0, max_width: Int = 0, column_gap: Int = -1, scrolls_x: Bool = False, shares: Bool = False, shrinks: Bool = False, one_line: Bool = False, inline_flow: Bool = False, max_chars: Int = 0, breaks_words: Bool = False):
+                 icon_ink: UInt32 = 0, text_align: Int = 0, width: Int = 0, max_width: Int = 0, column_gap: Int = -1, scrolls_x: Bool = False, shares: Bool = False, shrinks: Bool = False, one_line: Bool = False, inline_flow: Bool = False, max_chars: Int = 0, breaks_words: Bool = False, items_shrink: Bool = False):
         """Every field in order (the first 24 as they always were); line_height below 0: the font's normal line."""
         self.role = role
         self.fill = fill
@@ -249,6 +250,7 @@ struct Surface(Copyable, Movable):
         self.inline_flow = inline_flow
         self.max_chars = max_chars
         self.breaks_words = breaks_words
+        self.items_shrink = items_shrink
 
 
 @fieldwise_init
