@@ -9,16 +9,17 @@ from mojoui.theme import Palette, Surface, Shadow, mix
 from mojoui.codeblock import keep_spaces
 
 
-def LogView(lines: List[String], height: Int = 320, empty: String = "", exact: Bool = False) -> View:
+def LogView(lines: List[String], height: Int = 320, empty: String = "", exact: Bool = False, short: Bool = False) -> View:
     """`lines` top to bottom, pinned to the last one; `empty`: what the pane says with no lines. `height` is the most it
-    takes; `exact`: always that high, a few lines or many (a pane that fills its page, as the console's Logs tab)."""
+    takes (0: as tall as it's given); `exact`: always that high, a few lines or many (a pane that fills its page, as the
+    console's Logs tab); `short`: a few lines' height inside a card, the theme's (role log-short)."""
     var rows: List[View] = []
     for l in lines:
         rows.append(Text(keep_spaces(l) if l != "" else chr(160)))
     if len(rows) == 0 and empty != "":
         rows.append(Text(empty))
-    var pane = Scroll(VStack(rows, spacing=0).align(START).fill(), height=height, pinned=True).tag("log")
-    return pane^.height(height) if exact else pane^
+    var pane = Scroll(VStack(rows, spacing=0).align(START).fill(), height=0 if short else height, pinned=True).tag("log-short" if short else "log")
+    return pane^.height(height) if exact and not short else pane^
 
 
 # ---------- LogPane (goal 33 M6): a live log with a head, a toggle to hide it, and lines that say what they are ----------
@@ -70,7 +71,8 @@ def LogPane(title: String, lines: List[LogLine], open: Bool, on_toggle: Int, hei
                 words.append(Text(l.stamp + chr(160)).tag("log-time"))
             words.append(Text(keep_spaces(l.text) if l.text != "" else chr(160)).tag(log_role(l.kind)).grow())
             rows.append(HStack(words^, spacing=0).align(START).fill())
-        items.append(Scroll(VStack(rows^, spacing=0).align(START).fill().tag("log-lines"), height=height, pinned=True).fill().tag("log-scroll"))
+        var sc = Scroll(VStack(rows^, spacing=0).align(START).fill().tag("log-lines"), height=height, pinned=True).fill().tag("log-scroll")
+        items.append(sc^.grow() if height == 0 else sc^)  # (0: as tall as the pane is given)
     return VStack(items^, spacing=0).align(START).tag("log-pane")
 
 

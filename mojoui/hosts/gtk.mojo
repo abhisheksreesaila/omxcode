@@ -1117,7 +1117,7 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_grid_new", Int]()
             external_call["gtk_grid_set_row_spacing", NoneType](w, c_uint(node.spacing))
             external_call["gtk_grid_set_column_spacing", NoneType](w, c_uint(node.spacing))
-            external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(1))
+            external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(0 if node.style == 1 else 1))  # (fitted: columns to their content)
             for k in range(len(node.children)):
                 var child = self.build(node.children[k], self_addr)
                 external_call["gtk_grid_attach", NoneType](w, child, c_int(k % node.value), c_int(k // node.value), c_int(1), c_int(1))
@@ -1149,7 +1149,7 @@ struct GtkHost[A: App](Movable):
         elif node.kind == SCROLL:
             w = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](w, c_int(2), c_int(1))  # never, automatic
-            external_call["gtk_scrolled_window_set_max_content_height", NoneType](w, c_int(node.size))
+            external_call["gtk_scrolled_window_set_max_content_height", NoneType](w, c_int(node.size if node.size > 0 else -1))  # (0: as tall as it is given)
             external_call["gtk_scrolled_window_set_propagate_natural_height", NoneType](w, c_int(1))
             external_call["gtk_scrolled_window_set_propagate_natural_width", NoneType](w, c_int(1))
             for c in node.children:
@@ -4308,7 +4308,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     host[].dark_told = 1 if external_call["adw_style_manager_get_dark", c_int](styles) != 0 else 0
     host[].rt.app.appearance(host[].dark_told == 1)  # (and again when the person switches)
     connect3(styles, "notify::dark", on_dark_changed[A], host_addr)
-    host[].rt.shown = host[].rt.app.view()
+    host[].rt.shown = host[].rt.view()  # (its spacing tokens in the theme's points)
     for prop in ["notify::default-width", "notify::default-height", "notify::maximized", "notify::fullscreened"]:
         connect3(host[].window, prop, on_window_resized[A], host_addr)
     connect(host[].window, "realize", on_window_realize[A], host_addr)

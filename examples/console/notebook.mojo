@@ -8,7 +8,11 @@ from mojoui.markdown import Markdown, chapters
 from mojoui.codeblock import CodeText
 from mojoui.chip import Badge, BADGE_OK
 from mojoui.embed import WebFrame
-from mojoui.pagekit import MonoLine, BareCard, CardHead, CardBody, CardFoot, FlatButton, Fact, FactText, GroupHead, QuietText, SmallButton
+from mojoui.panel import Card, CardHead, CardBody, CardFoot, CardColumn, Fact, FactText, TabBody, KEYS_MEDIUM
+from mojoui.header import SubHeader
+from mojoui.words import MonoLine, MonoStrong, QuietText
+from mojoui.buttons import SmallButton
+from mojoui.document import MarkdownCell, CodeCell, Outline, SpecRows, DocLayout
 from data import Cell, ArchRow, json_value, compact, fmt, short_endpoint, Store
 from msgs import NB_RUN, NB_CHAPTER
 
@@ -95,33 +99,31 @@ struct Notebook(Copyable, Movable):
 
 def cell_view(c: Cell) -> View:
     if not c.code:
-        return BareCard([VStack(Markdown(c.source, line_chars=86), spacing=0).align(START).padding(16, 18).fill()]).fill()
-    var n = String("[ ]") if c.count < 0 else "[" + String(c.count) + "]"
-    return BareCard([HStack(MonoLine(n).width(36), CodeText(c.source).grow(), spacing=8).align(START).padding(12, 14).fill()]).fill()
+        return MarkdownCell(c.source)
+    return CodeCell(String("[ ]") if c.count < 0 else "[" + String(c.count) + "]", c.source)
 
 
-def notebook_view(nb: Notebook, st: Store, model: String, phone: Bool, height: Int) -> View:
+def notebook_view(nb: Notebook, st: Store, model: String, phone: Bool) -> View:
     var running = False
     var k = st.model(model)
     if k >= 0:
         running = st.models[k].state == "ready"
     var chip = Badge(("model running · " + short_endpoint(st.endpoint_now())) if running else "start it to run cells", BADGE_OK if running else 0, dot=True)
-    var head = HStack(MonoLine(model + ((" · " + nb.path) if nb.path != "" else String(""))), Spacer(), chip,
-                      SmallButton("Saved view" if nb.jupyter else "Run in Jupyter", NB_RUN, "book-open" if nb.jupyter else "play"),
-                      spacing=10).align(CENTER).fill()
-    var items: List[View] = [head^]
+    var head = SubHeader(model + ((" · " + nb.path) if nb.path != "" else String("")),
+                         [chip^, SmallButton("Saved view" if nb.jupyter else "Run in Jupyter", NB_RUN, "book-open" if nb.jupyter else "play")], compact=phone)
+    var items: List[View] = []
     if nb.problem != "":
         items.append(QuietText(nb.problem + " Fix: jupyter lab " + (nb.path if nb.path != "" else String("<notebook>.ipynb"))))
     if nb.starting:
         items.append(QuietText("Starting Jupyter… the first start takes a few seconds."))
     if nb.jupyter:
-        items.append(WebFrame(nb.embed, nb.opened, QuietText("Jupyter opened in your browser: " + nb.url), height=height, open_url=nb.url).fill())
-        return VStack(items^, spacing=12).align(START).padding(10, 18).fill()
+        items.append(WebFrame(nb.embed, nb.opened, QuietText("Jupyter opened in your browser: " + nb.url), height=0, open_url=nb.url).fill().grow())
+        return TabBody(head^, items^, compact=phone).grow()
     if not nb.loaded:
-        items.append(BareCard([CardHead("Building the notebook" if nb.error == "" else "Could not build the notebook"),
-                               CardBody([QuietText(nb.error if nb.error != "" else "Reading the model's config and card from Hugging Face the first time, then it is saved for next time.")]),
-                               CardFoot("mxc learn " + model)]).fill())
-        return VStack(items^, spacing=12).align(START).padding(10, 18).fill()
+        items.append(Card([CardHead("Building the notebook" if nb.error == "" else "Could not build the notebook"),
+                           CardBody([QuietText(nb.error if nb.error != "" else "Reading the model's config and card from Hugging Face the first time, then it is saved for next time.")]),
+                           CardFoot("mxc learn " + model)]))
+        return TabBody(head^, items^, compact=phone)
     # chapters
     var sources = List[String]()
     var md = List[Bool]()
@@ -129,30 +131,25 @@ def notebook_view(nb: Notebook, st: Store, model: String, phone: Bool, height: I
         sources.append(c.source)
         md.append(not c.code)
     var chs = chapters(sources, md)
-    var toc: List[View] = [GroupHead("Chapters")]
-    for i in range(len(chs)):
-        toc.append(HStack(MonoLine(String(i + 1)).width(18), Button(chs[i].title, NB_CHAPTER + i, SUBTLE).align(START).grow().tag("chapter-" + String(chs[i].level)),
-                          spacing=6).align(CENTER).fill())
+    var titles = List[String]()
+    var levels = List[Int]()
+    for c in chs:
+        titles.append(c.title)
+        levels.append(c.level)
     var cells: List[View] = []
     for c in nb.cells:
         cells.append(cell_view(c))
-    var facts: List[View] = [MonoLine(nb.arch).tag("arch-name")]
+    var facts: List[View] = [MonoStrong(nb.arch)]
     for f in nb.facts:
-        facts.append(Fact(f[0], FactText(f[1]), key_width=88))
-    var rows: List[View] = []
+        facts.append(Fact(f[0], FactText(f[1]), KEYS_MEDIUM))
+    var keys = List[String]()
+    var values = List[String]()
     for r in nb.rows:
-        rows.append(HStack(MonoLine(r.field).width(120), MonoLine(r.value), spacing=10).align(START).justify(START).fill().tag("arch-row"))
-    facts.append(VStack(rows^, spacing=6).align(START).fill())
-    var side = VStack(BareCard([CardHead("Architecture"), CardBody(facts^), CardFoot("read from the model's config", note=True)]).fill(),
-                      BareCard([CardHead("Kernel"), CardBody([QuietText(nb.kernel)]), CardFoot("Run in Jupyter above to execute cells", note=True)]).fill(),
-                      BareCard([CardHead("File"), CardBody([MonoLine(nb.path)]), CardFoot("mxc learn " + model)]).fill(),
-                      spacing=14).align(START)
-    if phone:
-        items.append(VStack(cells^, spacing=12).align(START).fill())
-        items.append(side^.fill())
-        return VStack(items^, spacing=12).align(START).padding(10, 12).fill()
-    var body = HStack(VStack(toc^, spacing=4).align(START).width(190),
-                      Scroll(VStack(cells^, spacing=12).align(START).fill(), height=height).grow(),
-                      side^.width(284), spacing=20).align(START).fill()
-    items.append(body^)
-    return VStack(items^, spacing=12).align(START).padding(10, 18).fill()
+        keys.append(r.field)
+        values.append(r.value)
+    facts.append(SpecRows(keys, values))
+    var aside = CardColumn([Card([CardHead("Architecture"), CardBody(facts^), CardFoot("read from the model's config", note=True)]),
+                                Card([CardHead("Kernel"), CardBody([QuietText(nb.kernel)]), CardFoot("Run in Jupyter above to execute cells", note=True)]),
+                                Card([CardHead("File"), CardBody([MonoLine(nb.path)]), CardFoot("mxc learn " + model)])])
+    items.append(DocLayout(Outline("Chapters", titles, levels, NB_CHAPTER), CardColumn(cells^), aside^, compact=phone))
+    return TabBody(head^, items^, compact=phone, flush=True).grow()

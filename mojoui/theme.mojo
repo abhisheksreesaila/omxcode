@@ -148,7 +148,9 @@ struct Shadow(Copyable, Movable):
     var inset: Bool
 
 
-@fieldwise_init
+comptime HEIGHT_AUTO = -2  # Surface.height: as tall as its content (a name to tap in a table: no control height)
+
+
 struct Surface(Copyable, Movable):
     """How a framework role's panel looks: `role` is the tag its component sets ("toolbar", "inspector", "tile").
     Sizes in points; -1: the component's own. `fill` 0: no fill of its own. `blur`: a backdrop blur where the host has
@@ -178,6 +180,71 @@ struct Surface(Copyable, Movable):
     var outline: UInt32  # a border of its own (0: none), `outline_w` wide, dashed or solid (the add tile's dashes)
     var outline_w: Int
     var dashed: Bool
+    # (goal 33 M7, D-410: what the console's pieces needed beyond the above, each optional; -1 / 0: the component's own)
+    var pad_left: Int  # its leading and trailing padding when they differ from pad_x (the Beacon's 0 16 0 12)
+    var pad_right: Int
+    var gap: Int  # the space between its children, over the stack's own
+    var height: Int  # a fixed height (HEIGHT_AUTO: its content's, over a control's own)
+    var icon_size: Int  # the icons inside it: their size (below 0: none shown), stroke width and colour (Lucide's 24-unit stroke)
+    var icon_stroke: Float64
+    var icon_ink: UInt32
+    var text_align: Int  # its text's alignment (START, CENTER, END of mojoui.view)
+    var width: Int  # a fixed width (a sidebar, a key column)
+    var max_width: Int  # the most it is wide, centred in what it is given (a column of text on a wide window)
+    var column_gap: Int  # a grid's space between its columns when it differs from its rows' (gap)
+    var scrolls_x: Bool  # a row that stays one line and scrolls sideways (a phone's chip row)
+    var inline_flow: Bool  # its children flow as words in a paragraph (a button at the end of a sentence), `gap` before each
+    var one_line: Bool  # a row whose items never wrap onto a second line (they shrink instead)
+    var shrinks: Bool  # its width gives way when its row is short of room (a filter field on a phone)
+    var shares: Bool  # it takes an equal share of its row, never less than its own width (flex 1, a phone.s tabs and verbs)
+
+    def __init__(out self, role: String, fill: UInt32, radius_top: Int, radius_bottom: Int, margin_top: Int, margin_x: Int,
+                 margin_bottom: Int, pad_top: Int, pad_x: Int, pad_bottom: Int, var shadows: List[Shadow], line_top: UInt32,
+                 line_bottom: UInt32, blur: Int, min_height: Int, font: String, font_size: Float64, ink: UInt32, font_weight: Int,
+                 tracking: Float64, line_height: Float64, outline: UInt32, outline_w: Int, dashed: Bool, pad_left: Int = -1,
+                 pad_right: Int = -1, gap: Int = -1, height: Int = 0, icon_size: Int = 0, icon_stroke: Float64 = 0,
+                 icon_ink: UInt32 = 0, text_align: Int = 0, width: Int = 0, max_width: Int = 0, column_gap: Int = -1, scrolls_x: Bool = False, shares: Bool = False, shrinks: Bool = False, one_line: Bool = False, inline_flow: Bool = False):
+        """Every field in order (the first 24 as they always were); line_height below 0: the font's normal line."""
+        self.role = role
+        self.fill = fill
+        self.radius_top = radius_top
+        self.radius_bottom = radius_bottom
+        self.margin_top = margin_top
+        self.margin_x = margin_x
+        self.margin_bottom = margin_bottom
+        self.pad_top = pad_top
+        self.pad_x = pad_x
+        self.pad_bottom = pad_bottom
+        self.shadows = shadows^
+        self.line_top = line_top
+        self.line_bottom = line_bottom
+        self.blur = blur
+        self.min_height = min_height
+        self.font = font
+        self.font_size = font_size
+        self.ink = ink
+        self.font_weight = font_weight
+        self.tracking = tracking
+        self.line_height = line_height
+        self.outline = outline
+        self.outline_w = outline_w
+        self.dashed = dashed
+        self.pad_left = pad_left
+        self.pad_right = pad_right
+        self.gap = gap
+        self.height = height
+        self.icon_size = icon_size
+        self.icon_stroke = icon_stroke
+        self.icon_ink = icon_ink
+        self.text_align = text_align
+        self.width = width
+        self.max_width = max_width
+        self.column_gap = column_gap
+        self.scrolls_x = scrolls_x
+        self.shares = shares
+        self.shrinks = shrinks
+        self.one_line = one_line
+        self.inline_flow = inline_flow
 
 
 @fieldwise_init
@@ -257,22 +324,30 @@ struct Motion(Copyable, Movable):
         return Motion(0, 0, "", "")
 
 
+def default_space() -> List[Int]:
+    """The spacing scale with no theme's own: SPACE_XXS … SPACE_XXL of mojoui.view, in points (D-412)."""
+    return [2, 4, 8, 12, 16, 24, 32]
+
+
 struct Look(Copyable, Movable):
     var type: TypeScale
     var controls: Controls
     var surfaces: List[Surface]
     var segments: Segments
     var motion: Motion  # the press (omxqua's spring); Motion.none(): the host's own
+    var space: List[Int]  # the spacing scale (SPACE_XXS … SPACE_XXL, mojoui.view): what an app's spacing and padding tokens become
 
     def __init__(out self, type: TypeScale, controls: Controls, var surfaces: List[Surface], segments: Segments):
         self = Look(type, controls, surfaces^, segments, Motion.none())
 
-    def __init__(out self, type: TypeScale, controls: Controls, var surfaces: List[Surface], segments: Segments, motion: Motion):
+    def __init__(out self, type: TypeScale, controls: Controls, var surfaces: List[Surface], segments: Segments, motion: Motion,
+                 var space: List[Int] = default_space()):
         self.type = type.copy()
         self.controls = controls.copy()
         self.surfaces = surfaces^
         self.segments = segments.copy()
         self.motion = motion.copy()
+        self.space = space^
 
     @staticmethod
     def none() -> Look:

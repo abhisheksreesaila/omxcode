@@ -97,6 +97,7 @@ hr { width: var(--control-width, 280px); border: 0; border-top: 1px solid var(--
 [data-tag=status-bar] { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; flex-shrink: 0; }  /* one line, as on GTK: a long message is cut, not wrapped */
 button.icon-only.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .hstack > hr { width: 0; min-width: 0; align-self: center; height: var(--control-height, 28px); border-top: 0; border-left: 1px solid var(--line); margin: 0 6px; }
+.hstack > hr[style*="align-self:stretch"] { height: auto; }  /* a filling divider in a row: its full height */
 img.image { max-width: 100%; height: auto; border-radius: 12px; image-rendering: auto; }
 .scroll { overflow-y: auto; width: 100%; display: flex; flex-direction: column; align-items: center; }  /* like a VStack */
 table.table { border-collapse: collapse; width: 100%; }  /* the browser's own column widths, across its parent */
@@ -104,6 +105,13 @@ table.table th { text-align: left; font-weight: inherit; vertical-align: middle;
 table.table th.num, table.table td.num { text-align: right; } table.table tbody tr:last-child > td { border-bottom: 0; }
 table.table .text { text-align: inherit; } table.table .hstack { flex-wrap: nowrap; justify-content: flex-start; }  /* cells read from their leading edge */
 table.table td.num > .hstack { justify-content: flex-end; } table.table td.num .text { white-space: nowrap; }
+table.table.dense th, table.table.dense td { white-space: nowrap; } table.table.dense td { overflow: hidden; text-overflow: ellipsis; }
+table.table.dense td.wrap { white-space: normal; } table.table.dense td.wrap .hstack { flex-wrap: wrap; row-gap: 4px; }
+table.table.dense td .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }  /* (one line, cut: the cell's widest) */
+table.table.dense td.wrap .text { white-space: nowrap; overflow: visible; }
+[data-tag=side-scroll] { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; } [data-tag=side-scroll] > table.table { flex: 1 0 auto; }
+[data-tag=side-scroll] table.table td { white-space: nowrap; }  /* (mojoui.lists.SideScroll: a wide table scrolls, its cells on one line) */
+table.table label.toggle { min-height: 0; display: flex; } label.toggle.check span:empty { display: none; }  /* (a tick box alone: no gap for an empty title) */
 .segmented, .tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 12px; background: var(--surface); }
 .segmented label, .tabs label { position: relative; }
 .segmented input, .tabs input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
@@ -757,7 +765,7 @@ class Session:
                 loop.call_soon_threadsafe(ev.set)
 
 
-ALIGN_CSS = {1: "flex-start", 2: "center", 3: "flex-end", 4: "stretch"}  # START, CENTER, END, STRETCH
+ALIGN_CSS = {1: "flex-start", 2: "center", 3: "flex-end", 4: "stretch", 6: "baseline"}  # START, CENTER, END, STRETCH, BASELINE
 JUSTIFY_CSS = {1: "flex-start", 2: "center", 3: "flex-end", 5: "space-between"}  # START, CENTER, END, BETWEEN
 SIZED_CONTROLS = (FIELD, TEXTAREA, SLIDER, PROGRESS, DROPDOWN, DATE, LAZYLIST, DIVIDER, SCROLL)
 
@@ -797,7 +805,7 @@ def render(s, i, sid):
     if n["pad_v"] or n["pad_h"]:
         css.append(f"padding:{n['pad_v']}px {n['pad_h']}px")
     if n["w"]:
-        css.append(f"width:{n['w']}px;flex-shrink:0")
+        css.append(f"width:{n['w']}px;flex-shrink:0")  # (a role that shrinks says so in the theme's sheet, over this)
     if n["h"]:
         css.append(f"height:{n['h']}px")
     if n["min_w"]:
@@ -924,6 +932,10 @@ def render_node(s, i, sid):
         return Span(NotStr(svg), cls="icon", id=nid, data_kind="icon", data_icon=n["text"], aria_hidden="true")
     if kind == GRID:
         kids = [render(s, c, sid) for c in n["children"]]
+        if n["style"] == 1:  # (fitted: the first columns as wide as their widest item, the last the rest; items from their start)
+            cols = (f"repeat({n['value'] - 1}, max-content) " if n["value"] > 1 else "") + "minmax(0, 1fr)"
+            return Div(*kids, cls="grid", id=nid, data_kind="grid", data_columns=str(n["value"]),
+                       style=f"grid-template-columns:{cols};gap:{n['spacing']}px;justify-items:start;align-items:center")
         return Div(*kids, cls="grid", id=nid, data_kind="grid", data_columns=str(n["value"]),
                    style=f"grid-template-columns:repeat({n['value']}, minmax(0, 1fr));gap:{n['spacing']}px")  # (equal columns, as GTK's homogeneous grid)
     if kind == LAZYLIST:
@@ -953,31 +965,40 @@ def render_node(s, i, sid):
         return Div(Div(cls="scrim"), panel, cls="dialog-layer", id=nid, data_kind="dialog", data_title=n["text"], data_node=str(i), data_sid=sid, data_v=str(s.shape))
     if kind == TABLE:  # a real <table> (the browser sizes its columns); cells wear the roles table-head / table-cell (+ table-num, table-selected)
         cols, kids, align, sel = max(n["value"], 1), n["children"], n["hint"], n["text"]
+        dense, compact, limits = n["style"] in (1, 2), n["style"] == 2, n["options"]
 
         def cell(make, c, k, role):
             num = k < len(align) and align[k] == "R"
-            return make(render(s, c, sid), data_role=role + (" table-num" if num else ""), cls="num" if num else None)
-        head = Tr(*[cell(Th, c, k, "table-head") for k, c in enumerate(kids[:cols])])
+            lim = limits[k] if k < len(limits) else ""
+            snug = lim.endswith("S") and make is Td
+            lim = lim.rstrip("S") if not lim.startswith("T") else lim
+            role = role + (" table-dense-snug" if snug else "") + (" table-dense-compact-snug" if snug and compact else "")
+            cls = " ".join(x for x in ("num" if num else "", "wrap" if lim == "W" else "") if x) or None
+            tick_w = lim[1:] if lim.startswith("T") and lim[1:].isdigit() else "1"
+            style = f"max-width:{lim}px" if lim.isdigit() and make is Td else (f"width:{tick_w}px" if lim.startswith("T") and make is Th else None)
+            # (a dense table's cells stay on one line, cut at their widest; the tick column as narrow as its box: no share of the room)
+            return make(render(s, c, sid), data_role=role + (" table-num" if num else ""), cls=cls, style=style)
+        head = Tr(*[cell(Th, c, k, "table-head table-dense-head" + (" table-dense-compact-head" if compact else "") if dense else "table-head") for k, c in enumerate(kids[:cols])])
         rows = []
         for r, start in enumerate(range(cols, len(kids), cols)):
             picked = r < len(sel) and sel[r] == "1"
-            role = "table-cell table-selected" if picked else "table-cell"
+            role = "table-cell" + (" table-dense-cell" if dense else "") + (" table-dense-compact-cell" if compact else "") + (" table-selected" if picked else "")
             rows.append(Tr(*[cell(Td, c, k, role) for k, c in enumerate(kids[start:start + cols])], cls="sel" if picked else None))
-        return Table(Thead(head), Tbody(*rows), cls="table", id=nid, data_kind="table", data_rows=str(len(rows)), data_columns=str(cols),
-                     data_selected=str(sel.count("1")))
+        return Table(Thead(head), Tbody(*rows), cls=("table dense compact" if compact else "table dense") if dense else "table", id=nid, data_kind="table", data_rows=str(len(rows)),
+                     data_columns=str(cols), data_selected=str(sel.count("1")))
     if kind == ROUTE:  # nothing on screen: the page keeps it in the URL's hash (ROUTE_JS)
         return Div(id=nid, data_kind="route", data_route=n["text"] or "/", data_node=str(i), data_sid=sid, hidden=True)
     if kind == DRAG:  # the browser's own drag and drop: dragstart puts the payload on the drag (DND_JS)
         return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack drag", id=nid, draggable="true", data_kind="drag",
-                   data_payload=n["text"], style="gap:0px")
+                   data_payload=n["text"], style="gap:0px;align-items:stretch")  # (a wrapper: its view where it would be, full width)
     if kind == DROP:  # dragover marks it, drop posts the payload as its on_drop (DND_JS)
         return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack drop", id=nid, data_kind="drop", data_node=str(i),
-                   data_sid=sid, style="gap:0px")
+                   data_sid=sid, style="gap:0px;align-items:stretch")
     if kind == EMBED:  # a web page in an iframe (version 0: the stand-in child)
         if n["value"] <= 0:
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", style="gap:0px")
         return Div(Iframe(src=n["text"], title=n["text"], allow="clipboard-read; clipboard-write"), cls="embed", id=nid, data_kind="embed",
-                   data_url=n["text"], style=f"height:{n['size'] or 600}px")
+                   data_url=n["text"], style=f"height:{n['size']}px" if n["size"] > 0 else "flex:1 1 0;min-height:0")  # (0: as tall as it's given)
     if kind == CLIPBOARD:  # nothing on screen: the page copies its text when its version moves on (CLIP_JS)
         return Div(id=nid, data_kind="clipboard", data_version=str(n["value"]), data_text=n["text"], hidden=True)
     if kind == TOAST:  # bottom centre; its action is msg, ✕ and its time running out are on_close
@@ -1041,7 +1062,7 @@ def render_node(s, i, sid):
         return Div(cls="spacer", id=nid)
     kids = [render(s, c, sid) for c in n["children"]]
     if kind == SCROLL:
-        return Div(*kids, cls="scroll", id=nid, style=f"max-height:{n['size']}px", data_pin="1" if n["value"] == 1 else None)
+        return Div(*kids, cls="scroll", id=nid, style=f"max-height:{n['size']}px" if n["size"] > 0 else None, data_pin="1" if n["value"] == 1 else None)  # (0: as tall as it's given)
     cls = ({1: "vstack card", 2: "vstack card warn", 3: "vstack card good"}.get(n["style"], "vstack")) if kind == VSTACK else "hstack"
     return Div(*kids, cls=cls, id=nid, style=f"gap:{n['spacing']}px")
 

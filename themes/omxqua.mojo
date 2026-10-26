@@ -14,11 +14,8 @@ from mojoui.look import css_color, surface_rule, px, fpx
 from themes.skins import skin_css, SKIN_WEB
 from mojoui.markdown import markdown_roles
 from mojoui.timeline import timeline_roles
-from mojoui.pagekit import page_roles, card_roles, more_roles, search_roles, small_roles
-from mojoui.adminkit import admin_roles
-from mojoui.catalog import catalog_roles
 from mojoui.logview import logpane_roles
-from mojoui.beacon import beacon_roles
+from themes.omxqua_kit import kit_roles
 
 # ---- tokens.css, the root (both modes) and the Developer family ----
 comptime FONT = "Geist"  # --oq-font
@@ -47,16 +44,16 @@ def state(dark: Bool, a: Float64) -> UInt32:
 
 
 def omxqua_palette(dark: Bool = False) -> Palette:
-    """The Developer family's colours (.oq-family-dev.oq-light / .oq-night). omxqua has two inks: ink-2 is also the quiet
-    text; line-2 is the quiet hairline (gridlines, row rules), line the strong one (fields, badges, headers)."""
+    """The Developer family's colours (.oq-family-dev.oq-light / .oq-night). omxqua's inks: ink, ink-2 (the quiet text) and
+    ink-faint (ink3: the console's --faint, its faintest words: group heads, counts, hints); line-2 is the quiet hairline (gridlines, row rules), line the strong one (fields, badges, headers)."""
     var p: Palette
     if dark:
-        p = Palette(True, hx("#0b0b0d"), hx("#151518"), hx("#1d1d21"), hx("#ededef"), hx("#a9a9b1"), hx("#a9a9b1"),
+        p = Palette(True, hx("#0b0b0d"), hx("#151518"), hx("#1d1d21"), hx("#ededef"), hx("#a9a9b1"), hx("#3a3a40"),
                     hx("#202025"), hx("#2a2a30"), hx("#ededef"), hx("#0b0b0d"), mix(hx("#151518"), hx("#ededef"), 0.40), mix(hx("#151518"), hx("#ededef"), 0.08),
                     hx("#8b7bff"), hx("#3ccf6e"), hx("#f2555a"), hx("#f5a524"), REGULAR, MEDIUM,
                     [hx("#8b7bff"), hx("#3aa0ff"), hx("#2bc3ad"), hx("#ff8a3d"), hx("#f2555a"), hx("#e0b400")], hx("#0b0b0d"), hx("#ededef"), hx("#202025"))
     else:
-        p = Palette(False, hx("#eeeef1"), hx("#ffffff"), hx("#ffffff"), hx("#0b0b0d"), hx("#5b5b63"), hx("#5b5b63"),
+        p = Palette(False, hx("#eeeef1"), hx("#ffffff"), hx("#ffffff"), hx("#0b0b0d"), hx("#5b5b63"), hx("#c9c9cf"),
                     hx("#efeff2"), hx("#e3e3e8"), hx("#0b0b0d"), hx("#ffffff"), mix(hx("#ffffff"), hx("#0b0b0d"), 0.40), mix(hx("#ffffff"), hx("#0b0b0d"), 0.08),
                     hx("#6d5cf0"), hx("#137036"), hx("#c01f25"), hx("#8f5400"), REGULAR, MEDIUM,
                     [hx("#6d5cf0"), hx("#0a7fe0"), hx("#0f9483"), hx("#e0661a"), hx("#d42a2f"), hx("#a88400")], hx("#eeeef1"), hx("#0b0b0d"), hx("#efeff2"))
@@ -133,6 +130,7 @@ def console_surfaces(p: Palette) -> List[Surface]:
     # .tbl th: 500 11px mono, ink-2, uppercase (the component writes capitals), .06em, 8px 16px, a line under
     var head = box("table-head", 0, -1, 8, 16)
     head.line_bottom, head.font, head.font_size, head.font_weight, head.ink, head.tracking = p.line_strong, FONT_MONO, 11, 500, p.ink2, 0.66
+    head.line_height = -1
     out.append(head^)
     # .tbl td: 10px 16px, a line-2 rule under each row, .92em of the body
     var cell = box("table-cell", 0, -1, 10, 16)
@@ -141,17 +139,49 @@ def console_surfaces(p: Palette) -> List[Surface]:
     picked.role, picked.fill = "table-selected", mix(p.card, p.accent, 0.07)
     out.append(cell^)
     out.append(picked^)
+    var dense_head = box("table-dense-head", 0, -1, 8, 10)  # (a dense table, the console's model list: .b-home .tbl th 8px 10px, td 12px 10px)
+    dense_head.line_bottom = p.line_strong
+    out.append(dense_head^)
+    var dense_cell = box("table-dense-cell", 0, -1, 12, 10)
+    dense_cell.line_bottom = p.line
+    out.append(dense_cell^)
+    var cut = box("table-cut", 0, -1, -1, -1)  # (.b-home .tbl td: max-width 260; .cx-tbl td.nm 220)
+    cut.width = 260
+    out.append(cut.copy())
+    cut.role, cut.width = "table-cut-name", 220
+    out.append(cut.copy())
+    cut.role, cut.width = "table-cut-compact", 260  # (≤ 760: the name 190)
+    out.append(cut.copy())
+    cut.role, cut.width = "table-cut-name-compact", 140  # (library.css ≤ 760: .b-home .cx-tbl td.nm 140)
+    out.append(cut.copy())
+    cut.role, cut.width = "table-tick", 30  # (.cx-tbl .ck: 30, 46 on a phone; its box wins when wider)
+    out.append(cut.copy())
+    cut.role, cut.width = "table-tick-compact", 46
+    out.append(cut^)
+    var snug = box("table-dense-snug", 0, -1, 8, 10)  # (.b-home .tbl td.nm: 8px 10px)
+    snug.line_bottom = p.line
+    out.append(snug^)
+    var ch = box("table-dense-compact-head", 0, -1, 8, 6)  # (≤ 760 .b-home .tbl th, td: 6px at the sides)
+    ch.line_bottom = p.line_strong
+    out.append(ch^)
+    var cc = box("table-dense-compact-cell", 0, -1, 12, 6)
+    cc.line_bottom = p.line
+    out.append(cc^)
+    var cs = box("table-dense-compact-snug", 0, -1, 8, 6)
+    cs.line_bottom = p.line
+    out.append(cs^)
     var num = words("table-num", 0, 0, 0)  # (.tbl .num: figures in the mono)
     num.font = FONT_MONO
     out.append(num^)
     # .tag: a quiet pill (500 11.5px, 3px 9px, the state layer at .06, ink-2); .tag.k: its hue on a 13 % tint of it
     var quiet = chip("chip", state(dark, 0.06), 0, 11.5, p.ink2, RADIUS_FULL, 3, 9)
-    quiet.font_weight = 500
+    quiet.font_weight, quiet.line_height = 500, -1
     out.append(quiet^)
-    var hues: List[String] = ["chip-1", "chip-2", "chip-3", "chip-4", "chip-5", "chip-6"]
-    for k in range(6):
-        var c = chip(hues[k], tint(p.data(k), 0.13), 0, 11.5, p.data(k), RADIUS_FULL, 3, 9)
-        c.font_weight = 500
+    var hues: List[String] = ["chip-1", "chip-2", "chip-3", "chip-4", "chip-5", "chip-6", "chip-8"]
+    var chip_inks: List[UInt32] = [p.data(0), p.data(1), p.data(2), p.data(3), p.data(4), p.data(5), p.warn]
+    for k in range(7):
+        var c = chip(hues[k], tint(chip_inks[k], 0.13), 0, 11.5, chip_inks[k], RADIUS_FULL, 3, 9)
+        c.font_weight, c.line_height = 500, -1
         out.append(c^)
     # .badge / .acc: 500 11px/1 mono, 4px 6px inside a 1px line (drawn inside: 5px 7px), radius-xs, surface-1, a tone
     var tones: List[String] = ["badge", "badge-ok", "badge-warn", "badge-bad"]
@@ -159,12 +189,12 @@ def console_surfaces(p: Palette) -> List[Surface]:
     var dots: List[String] = ["dot", "dot-ok", "dot-warn", "dot-bad"]
     for k in range(4):
         var b = chip(tones[k], p.card, p.line_strong, 11, inks[k], RADIUS_XS, 5, 7)
-        b.font, b.font_weight, b.line_height = FONT_MONO, 500, 11
+        b.font, b.font_weight, b.line_height, b.one_line = FONT_MONO, 500, 11, True  # (.badge: nowrap)
         out.append(b^)
         out.append(box(dots[k], inks[k], 3, -1, -1))  # (.badge i: a 6px dot in the badge's colour)
     # .bh .count: 500 11px mono, ink-2, the state layer at .05, a pill, 2px 8px
     var pill = chip("pill", state(dark, 0.05), 0, 11, p.ink2, RADIUS_FULL, 2, 8)
-    pill.font, pill.font_weight = FONT_MONO, 500
+    pill.font, pill.font_weight, pill.line_height, pill.tracking = FONT_MONO, 500, -1, -0.34  # (it sits in .bh .t: the title's -.02em of 17px)
     out.append(pill^)
     # .ox-code: --code, 12 corners, 14px 16px, 12px/1.65 mono in --code-text; its button white at .1, a small pill
     var code = box("code-block", CODE, 12, 14, 16)
@@ -180,14 +210,20 @@ def console_surfaces(p: Palette) -> List[Surface]:
     out.append(log^)
     # .crumbs a: 550 13.5px ink-2, 4px 6px, 6 corners; .here: 600 13.5px ink (.mono: 13px Geist Mono)
     var crumb = box("crumb", 0, 6, 4, 6)
-    crumb.font_size, crumb.font_weight, crumb.ink = 13.5, 550, p.ink2
+    crumb.font_size, crumb.font_weight, crumb.ink, crumb.line_height = 13.5, 550, p.ink2, -1
     out.append(crumb^)
     var here = box("crumb-here", 0, -1, 4, 6)
-    here.font_size, here.font_weight, here.ink = 13.5, 600, p.ink
+    here.font_size, here.font_weight, here.ink, here.line_height = 13.5, 600, p.ink, -1
     var here_mono = here.copy()
     here_mono.role, here_mono.font, here_mono.font_size = "crumb-here-mono", FONT_MONO, 13
+    var here_c = here.copy()  # (≤ 760: the here alone, 15px)
+    here_c.role, here_c.font_size = "crumb-here-compact", 15
+    var here_cm = here_mono.copy()
+    here_cm.role, here_cm.font_size = "crumb-here-compact-mono", 13  # (.crumbs .here.mono wins over the phone's 15)
     out.append(here^)
     out.append(here_mono^)
+    out.append(here_c^)
+    out.append(here_cm^)
     # .btn.danger.armed: the bad colour at 14 % behind it, 650, its ring kept
     var armed = chip("confirm-armed", mix(p.card, p.bad, 0.14), mix(p.card, p.bad, 0.40), 0, p.bad, RADIUS_FULL, -1, -1)
     armed.font_weight = 650
@@ -217,23 +253,16 @@ def omxqua_look(p: Palette) -> Look:
                                    card(solid("stat-card", RADIUS_CARD, -1, -1, -1), p.card, dark), card(solid("inspector", RADIUS_CARD, -1, -1, -1), p.card, dark),
                                    card(solid("toolbar", RADIUS_CARD, -1, -1, -1), surface_2(p), dark), status^, bar^, section^, value^, fact^,
                                    note^, slot("add-tile", p.line_strong, RADIUS_CARD, 120, p.ink2)]
+    surfaces += kit_roles(p, FONT_MONO, shadow_1(dark), hx("#3ccf6e"))  # (mojoui's page components in the console's measures:
+    # themes/omxqua_kit.mojo; first, so a leaf role inside a container has the last word; --oq-beacon-accent)
     surfaces += console_surfaces(p)
     surfaces += markdown_roles(p, FONT_MONO)  # (a notebook's markdown: blade-notebook.css's .nb-md)
     surfaces += timeline_roles(p, FONT_MONO)  # (Add a model's stages: blade-add.css's .stg)
-    surfaces += card_roles(p, FONT_MONO)
-    surfaces += more_roles(p, FONT_MONO)
-    surfaces += search_roles(p)
-    surfaces += small_roles(p, FONT_MONO)
-    surfaces += admin_roles(p, FONT_MONO, CODE, CODE_TEXT)  # (the console's Keys, Gateway, Security, Settings: blade-settings.css's ox- pieces)
-    surfaces += catalog_roles(p, FONT_MONO)  # (Add a model: blade-add.css's search, filters, results, fit marks)
     surfaces += logpane_roles(p, FONT_MONO, CODE, CODE_TEXT, RADIUS_CARD)  # (Add a model's live log: blade-add.css .sr)
-    surfaces.append(card(solid("bare-card", RADIUS_CARD, 0, 0, 0), p.card, dark))  # (mojoui.pagekit.BareCard: a card whose parts pad themselves)
-    surfaces += page_roles(p, FONT_MONO)  # (the console's pages: topbar.css, blades.css, library.css, model-page.css)
-    surfaces += beacon_roles(p, FONT_MONO, hx("#3ccf6e"))  # (the Beacon: components.css .beacon; --oq-beacon-accent)
     return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False),
                 Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12), surfaces^,
                 Segments(p.page, RADIUS_FULL, 3, p.line_strong, TARGET - 8, 14, RADIUS_FULL, 12.6, 500, p.ink2, surface_2(p), p.ink, 500, True),  # (.seg2)
-                Motion(PRESS_SCALE, SPRING_FAST_MS, String(SPRING_FAST), String(EASE_IN)))
+                Motion(PRESS_SCALE, SPRING_FAST_MS, String(SPRING_FAST), String(EASE_IN)), [2, 4, 8, 12, 16, 20, 24])  # (the spacing scale: SPACE_XXS … SPACE_XXL, --oq-space on the console's compact steps)
 
 
 def fonts_web() -> String:
@@ -279,11 +308,13 @@ def omxqua_web(p: Palette, look: Look, cls: String) -> String:
         + b + ".vstack.card { " + surface_rule(cardbox, True) + "}\n"
         + b + ".vstack.card.warn { background: " + hex_of(mix(p.card, p.warn, 0.08)) + "; } " + b + ".vstack.card.good { background: " + hex_of(mix(p.card, p.good, 0.08)) + "; }\n"
         # buttons (.btn): pills a target high; tonal by default, the accent filled for the loud one, text for the quiet one
-        + b + "button { height: " + px(c.control_h) + "; padding: 0 " + px(c.button_pad) + "; font-weight: 550; font-size: 0.95em; border: 0; color: " + ink + "; background: " + s2 + "; box-shadow: " + sh1 + "; }\n"
-        + b + "button:hover { filter: none; background: " + s2 + "; background-image: linear-gradient(" + hover + ", " + hover + "); }\n"
+        + b + "button { height: " + px(c.control_h) + "; padding: 0 " + px(c.button_pad) + "; font-weight: 400; font-size: 1em; border: 0; color: " + ink + "; background: " + css_color(state(dark, 0.06)) + "; box-shadow: none; }\n"
+        + b + "button:hover { filter: none; background-image: linear-gradient(" + hover + ", " + hover + "); }\n"
+        + b + "button.with-icon { gap: 8px; } " + b + ".icon svg, " + b + "button svg { stroke-width: 1.6px; }\n"  # (.btn's 8 between icon and word; icons.js draws 1.6 wide)
+        + b + "hr { margin: 0; }\n"
         + b + "button:focus-visible, " + b + "input:focus-visible { outline: 2px solid " + accent + "; outline-offset: 2px; }\n"
-        + b + "button.prominent { background: " + accent + "; color: " + on + "; box-shadow: " + sh1 + "; font-weight: 550; }\n"
-        + b + "button.prominent:hover { background: " + accent + "; background-image: none; box-shadow: " + sh2 + "; }\n"
+        + b + "button.prominent { background: " + accent + "; color: " + on + "; box-shadow: none; font-weight: 400; }\n"
+        + b + "button.prominent:hover { background: " + accent + "; background-image: none; }\n"
         + b + "button.subtle { background: transparent; box-shadow: none; color: " + ink2 + "; }\n"
         + b + "button.destructive { background: transparent; color: " + hex_of(p.bad) + "; box-shadow: inset 0 0 0 1px " + hex_of(mix(p.card, p.bad, 0.40)) + "; }\n"
         + b + "button.icon-only { width: " + px(c.icon) + "; min-width: " + px(c.icon) + "; padding: 0; justify-content: center; border-radius: " + px(c.icon_radius) + "; }\n"
@@ -307,6 +338,12 @@ def omxqua_web(p: Palette, look: Look, cls: String) -> String:
         + b + "label.toggle.check input:checked { background: " + accent + "; box-shadow: none; }\n"
         + b + "label.toggle.check input:checked::after { content: \"\"; width: 9px; height: 5px; border-left: 2px solid " + on + "; border-bottom: 2px solid " + on + "; transform: rotate(-45deg) translate(1px, -1px); }\n"
         + b + ".radio input { accent-color: " + accent + "; }\n"
+        # a table's tick boxes (library.css .cb): 22 pt, 7 corners, a 1.5 pt line; ticked, the accent
+        + b + "table.table label.toggle.check input { width: 22px; height: 22px; border-radius: 7px; box-shadow: none; border: 1.5px solid " + line + "; }\n"
+        + b + "[data-tag=beacon] { position: relative; z-index: 5; }\n"
+        + b + "[data-tag=link] { text-decoration: underline; text-underline-offset: 2px; } " + "\n"  # (the Beacon's shadow over the page below it: .bar's z-index)
+        + b + "table.table label.toggle.check input:checked { background: " + accent + "; box-shadow: none; }\n"
+        + b + "table.table.compact label.toggle.check input { width: 26px; height: 26px; }\n"  # (≤ 760 .cb: 26)
         # the segmented control (.seg2): a surface-0 track ringed by a line, the chosen one surface-2 with shadow-1
         + b + ".segmented, " + b + ".tabs { background: " + hex_of(g.track) + "; box-shadow: inset 0 0 0 1px " + hex_of(g.ring) + "; border: 0; border-radius: " + px(g.track_radius)
         + "; padding: " + px(g.track_pad) + "; gap: 0; overflow: visible; }\n"
@@ -328,13 +365,15 @@ def omxqua_web(p: Palette, look: Look, cls: String) -> String:
         + b + ".menu.open > .menu-title, " + b + ".menu-title:hover { background: " + hover + "; color: " + ink + "; }\n"
         + "@media (prefers-reduced-motion: reduce) { " + b + "*, " + b + "*::before, " + b + "*::after { transition-duration: 150ms !important; animation-duration: 150ms !important; } "
         + b + "button:active { transform: none; } }\n"        # the skeleton's shimmer (.skel: line-2 → line → line-2 sliding across in 1.6 s); still when motion is off
-        # mojoui.pagekit.SearchField: the field inside the tonal box loses its own chrome (library.css .psearch input)
-        + b + "[data-tag=search-box] input[type=text] { border: 0; background: transparent; box-shadow: none; height: 46px; padding: 0; font-size: 15px; font-weight: 500; }\n"
+        # mojoui.fields.SearchField: the field inside the tonal box loses its own chrome (library.css .psearch input)
+        + b + "[data-tag=search-box] input[type=text] { border: 0; background: transparent; box-shadow: none; height: 46px; padding: 1px 2px; font-size: 15px; font-weight: 500; }\n"
         + b + "[data-tag=search-box] input[type=text]:focus { box-shadow: none; } " + b + "[data-tag=search-box] input::placeholder { color: " + hex_of(p.ink3) + "; }\n"
         + b + "[data-tag=search-box] .field { flex: 1; }\n"
         + b + "[data-tag=outlined-field] input[type=text] { border: 0; background: transparent; box-shadow: none; height: 44px; min-height: 0; padding: 0; font-size: " + fpx(t.body) + "; }\n"
         + b + "[data-tag=outlined-field] input[type=text]:focus { box-shadow: none; } " + b + "[data-tag=outlined-field]:focus-within { box-shadow: inset 0 0 0 2px " + accent + "; }\n"
-        + b + ".text[data-tag=page-title], " + b + ".text[data-tag=page-sub], " + b + ".text[data-tag=result-meta], " + b + "[data-tag=result-name] "
+        + b + ".text[data-tag=page-title], " + b + ".text[data-tag=page-sub], " + b + ".text[data-tag=result-meta], " + b + "[data-tag=result-name], "
+        + b + ".text[data-tag=crumb-here], " + b + ".text[data-tag=crumb-here-mono], " + b + ".text[data-tag=crumb-here-compact], " + b + ".text[data-tag=crumb-here-compact-mono], "
+        + b + ".text[data-tag=sub-header-text] "
         + "{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%; }\n"  # (one line, cut with an ellipsis: .bh .t, .bh .s, .res .nm, .res .mt)
         + "body." + cls + " > #mojoui-root { min-width: 0; }\n"
         + b + "[data-tag=card-foot] { flex-wrap: nowrap; }\n"  # (.src: one row; its words wrap inside their own column)  # (the page is a grid item: a one-line text's full width mustn't widen it past the window)

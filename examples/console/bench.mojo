@@ -2,10 +2,15 @@
 # (lower is better) across the models of the latest run, this model outlined; the workload; Run again; the history.
 # Data: GET /admin/bench every 5 s (1 s while a run goes), GET /admin/bench/history?limit=10 when the latest run changes.
 
-from mojoui.view import View, Text, Button, VStack, HStack, Spacer, Card, PLAIN, PROMINENT, SUBTLE, CENTER, START
+from mojoui.view import View, Text, Button, VStack, HStack, Spacer, PLAIN, SUBTLE, CENTER, START
 from mojoui.json import Json
 from mojoui.sparkline import BarView, bar_fractions, bar_order
-from mojoui.pagekit import CardHead, CardFoot, CardBody, BareCard, HueDot, MonoLine, NoteBox, FlatButton, QuietText, SmallButton, MonoStrong, ListRow
+from mojoui.panel import Card, CardHead, CardBody, CardFoot, ColumnRow, TabBody
+from mojoui.header import SubHeader
+from mojoui.meter import ChartRow, ShareBar
+from mojoui.words import MonoLine, QuietText, Muted, MonoParagraph
+from mojoui.buttons import SmallButton, PrimaryButton, FILL
+from mojoui.feedback import Note, NoteAction
 from data import BenchRun, BenchResult, read_run, fmt, date_time
 from msgs import BENCH_RUN, BENCH_ALL, HIST, BAR
 
@@ -63,7 +68,7 @@ def workload(run: BenchRun) -> String:
             + " each · " + date_time(run.started_at))
 
 
-def bars(run: BenchRun, decode: Bool, me: String, first_bar: Int, mut fractions: List[Float64], mut mine: List[Bool]) -> List[View]:
+def bars(run: BenchRun, decode: Bool, me: String, first_bar: Int, mut fractions: List[Float64], mut mine: List[Bool], phone: Bool = False) -> List[View]:
     """barRows: only finished models with a number get a bar; length = value / largest; sorted best first. Each bar's
     fraction and whether it's this model go on `fractions` and `mine` (draw() paints them)."""
     var names = List[String]()
@@ -81,8 +86,8 @@ def bars(run: BenchRun, decode: Bool, me: String, first_bar: Int, mut fractions:
         fractions.append(fr[i])
         mine.append(names[i] == me)
         var value = (fmt(values[i], 1) + " tok/s") if decode else (fmt(values[i]) + " ms")
-        rows.append(HStack(HStack(HueDot(k % 5 + 1, 9), MonoStrong(names[i]) if names[i] == me else MonoLine(names[i]), spacing=8).align(CENTER).width(150),
-                           BarView(BAR + first_bar + k, Int(fr[i] * 1000)), MonoStrong(value) if k == 0 else MonoLine(value), spacing=10).align(CENTER).fill())
+        var bar = HStack(ShareBar(Int(fr[i] * 100 + 0.5), mine=names[i] == me), spacing=0).align(CENTER).grow().tag("bar")  # (tag bar: M5 finds it)
+        rows.append(ChartRow(k % 5 + 1, names[i], bar^, value, strong=names[i] == me, figure_strong=k == 0, compact=phone))
     return rows^
 
 
@@ -96,35 +101,33 @@ def bench_bars(b: Bench, model: String) -> Tuple[List[Float64], List[Bool]]:
     return (fr^, mine^)
 
 
-def bench_view(b: Bench, model: String) -> View:
+def bench_view(b: Bench, model: String, phone: Bool) -> View:
     var fr = List[Float64]()
     var mine = List[Bool]()
     var items: List[View] = []
     var sub = model + " · " + ("latest run · " + date_time(b.latest.started_at) if b.has_latest else String("no runs yet"))
-    var head: List[View] = [MonoLine(sub), Spacer()]
+    var tools: List[View] = []
     if b.has_latest or b.running:
-        head.append(SmallButton("Running…" if b.running else "Run again", BENCH_RUN, "rotate-cw", filled=True))
-    items.append(HStack(head^, spacing=10).align(CENTER).fill())
+        tools.append(SmallButton("Running…" if b.running else "Run again", BENCH_RUN, "rotate-cw", FILL))
+    var head = SubHeader(sub, tools^, compact=phone)
     if not b.loaded:
         items.append(QuietText("Loading…"))
     elif not b.has_latest:
-        items.append(Card([Text("No benchmark has run yet").tag("card-title"),
-                           QuietText("A run loads the model if it is not running, sends one warm-up request that is not counted, then 5 timed ones."),
-                           Button("Run benchmark", BENCH_RUN, PROMINENT, icon="gauge"), CardFoot("mxc bench " + model)], spacing=10).fill())
+        items.append(Card([CardHead("No benchmark has run yet"),
+                           CardBody([QuietText("A run loads the model if it is not running, sends one warm-up request that is not counted, then 5 timed ones."),
+                                     PrimaryButton("Run benchmark", BENCH_RUN, "gauge")]), CardFoot("mxc bench " + model)]))
     else:
         var run = b.latest.copy()
-        var decode = bars(run, True, model, 0, fr, mine)
+        var decode = bars(run, True, model, 0, fr, mine, phone)
         var nd = len(decode)
-        var ttft = bars(run, False, model, nd, fr, mine)
+        var ttft = bars(run, False, model, nd, fr, mine, phone)
         if nd > 0:
-            items.append(BareCard([CardHead("Decode speed · tokens/s", "higher is better"), CardBody(decode^), CardFoot(String(run.runs) + " timed runs per model, after one warm-up", note=True)],
-                              spacing=0).fill())
+            items.append(Card([CardHead("Decode speed · tokens/s", "higher is better"), CardBody(decode^), CardFoot(String(run.runs) + " timed runs per model, after one warm-up", note=True)]))
         if len(ttft) > 0:
-            items.append(BareCard([CardHead("Time to first token · p50", "lower is better"), CardBody(ttft^), CardFoot("the median of " + String(run.runs) + " timed runs", note=True)],
-                              spacing=0).fill())
+            items.append(Card([CardHead("Time to first token · p50", "lower is better"), CardBody(ttft^), CardFoot("the median of " + String(run.runs) + " timed runs", note=True)]))
         if nd == 1:
-            items.append(NoteBox([Text("Only this model has a result. To compare it with the others, run all of them."), SmallButton("Run all models", BENCH_ALL)]))
-        items.append(BareCard([CardHead("This run"), CardBody([MonoLine(workload(run))]), CardFoot("mxc bench " + model)], spacing=0).fill())
+            items.append(Note([Text("Only this model has a result. To compare it with the others, run all of them."), NoteAction("Run all models", BENCH_ALL)]))
+        items.append(Card([CardHead("This run"), CardBody([MonoParagraph(workload(run))]), CardFoot("mxc bench " + model)]))
         if len(b.history) > 0:
             var rows: List[View] = []
             for k in range(len(b.history)):
@@ -134,8 +137,10 @@ def bench_view(b: Bench, model: String) -> View:
                     if r.status == "done" and r.decode_tps > 0:
                         best = r.model + " · " + fmt(r.decode_tps, 1) + " tok/s"
                         break
-                rows.append(ListRow([QuietText(date_time(h.started_at)).width(130), Text(String(h.models) + " model" + ("" if h.models == 1 else "s")).width(80),
-                                     Spacer(), MonoLine(best)], on=h.id == run.id))
-            items.append(BareCard([CardHead("History", String(len(b.history)) + " run" + ("" if len(b.history) == 1 else "s")), VStack(rows^, spacing=0).fill(),
-                               CardFoot("pick a run to chart it; newest first", note=True)], spacing=0).fill())
-    return VStack(items^, spacing=14).align(START).padding(10, 18).fill()
+                var cols: List[View] = [Muted(date_time(h.started_at))]
+                if not phone:  # (a phone leaves out who ran: .bn-hwho)
+                    cols.append(Text(String(h.models) + " model" + ("" if h.models == 1 else "s")))
+                rows.append(ColumnRow(cols^, Muted(best, mono=True), on=h.id == run.id))
+            items.append(Card([CardHead("History", String(len(b.history)) + " run" + ("" if len(b.history) == 1 else "s")), VStack(rows^, spacing=0).fill(),
+                               CardFoot("pick a run to chart it; newest first", note=True)]))
+    return TabBody(head^, items^, compact=phone)

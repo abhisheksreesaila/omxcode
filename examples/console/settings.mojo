@@ -9,9 +9,14 @@ from mojoui.app import Event
 from mojoui.effects import Every
 from mojoui.json import Json
 from mojoui.table import Table
+from mojoui.lists import SideScroll
 from mojoui.clock import wall_seconds
-from mojoui.pagekit import PageHeader, BareCard, CardHead, CardBody, CardFoot, SmallButton, QuietText, MonoLine, Fact, FactText, SegButtons
-from mojoui.adminkit import StateMark, ActionButton, CopyFoot, WarnBox, GOOD, WARN, QUIET, DANGER, TEXT
+from mojoui.header import PageHeader, SegmentButtons
+from mojoui.panel import Card, CardHead, CardBody, CardFoot, CopyFoot, CardStack, CardNote, FactText, FactGrid
+from mojoui.buttons import SmallButton, ButtonRow, DANGER, TEXT
+from mojoui.words import Mono, QuietText, MonoLine, Hint
+from mojoui.marks import StatusMark, GOOD, WARN, QUIET
+from mojoui.feedback import Warning, EmptyState
 from api import Api
 from data import Store, dur, real_or
 from msgs import *
@@ -144,56 +149,56 @@ def settings_header() -> View:
 def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
     var cards: List[View] = []
     var chosen = sp.pick if sp.pick >= 0 else (1 if dark else 0)
-    cards.append(BareCard([CardHead("Appearance", "kept in this browser"), CardBody([HStack(SegButtons(["Light", "Dark"], ["sun", "moon"], chosen, SET_THEME), spacing=0),
-                                                                                    QuietText("Until you pick one, the console follows your system.")], spacing=10),
-                           CardFoot("kept in this browser", note=True)]).fill())
+    cards.append(Card([CardHead("Appearance", "kept in this browser"), CardBody([SegmentButtons(["Light", "Dark"], ["sun", "moon"], chosen, SET_THEME, framed=True),
+                                                                                Hint("Until you pick one, the console follows your system.")]),
+                       CardFoot("kept in this browser", note=True)]))
     # Idle unload
-    var idle: List[View] = [QuietText("A model unloads after " + dur(DEFAULT_KEEP_ALIVE) + " without a request unless you say otherwise. There is no single setting for all of them yet: it is kept per model.").width(520)]
+    var idle: List[View] = [Hint("A model unloads after " + dur(DEFAULT_KEEP_ALIVE) + " without a request unless you say otherwise. There is no single setting for all of them yet: it is kept per model.")]
     if len(st.models) == 0:
-        idle.append(VStack(Text("No models yet").tag("strong"), QuietText("Add one and its idle time shows here."), SmallButton("Add a model", SET_ADD, "plus", filled=True),
-                           spacing=8).align(CENTER).padding(26, 16).fill())
+        idle.append(EmptyState("box", "No models yet", "Add one and its idle time shows here.", "Add a model", SET_ADD))
     else:
-        var rows: List[View] = []
+        var names: List[String] = []
+        var values: List[View] = []
         for m in st.models:
-            rows.append(Fact(m.name, FactText("pinned: never unloads" if m.pinned else "after " + dur(m.keep_alive) + " idle"), key_width=109))
-        idle.append(VStack(rows^, spacing=9).align(START).fill())
-    cards.append(BareCard([CardHead("Idle unload", "per model"), CardBody(idle^, spacing=4), CopyFoot(materialize[COPIES]()[0], SET_COPY), CopyFoot(materialize[COPIES]()[1], SET_COPY + 1)]).fill())
+            names.append(m.name)
+            values.append(FactText("pinned: never unloads" if m.pinned else "after " + dur(m.keep_alive) + " idle"))
+        idle.append(FactGrid(names, values^, mono_keys=True))
+    cards.append(Card([CardHead("Idle unload", "per model"), CardBody(idle^), CopyFoot(materialize[COPIES]()[0], SET_COPY), CopyFoot(materialize[COPIES]()[1], SET_COPY + 1)]))
     # Daemon
     var daemon: List[View] = []
     if sp.has_info:
-        var kw = 88
         var elapsed = max(0.0, wall_seconds() - sp.info_at)
-        var facts: List[View] = [Fact("Host", FactText(sp.host), key_width=kw), Fact("Endpoint", FactText(sp.endpoint), key_width=kw),
-                                 Fact("LAN endpoint", FactText(sp.lan if sp.lan != "" else String("off: this machine only")), key_width=kw),
-                                 Fact("MAX version", FactText(sp.max_version if sp.max_version != "" else String("—")), key_width=kw),
-                                 Fact("Uptime", FactText(uptime(sp.uptime_seconds + elapsed)), key_width=kw), Fact("Active keys", FactText(sp.active_keys), key_width=kw)]
+        var keys: List[String] = ["Host", "Endpoint", "LAN endpoint", "MAX version", "Uptime", "Active keys"]
+        var values: List[View] = [FactText(sp.host), FactText(sp.endpoint), FactText(sp.lan if sp.lan != "" else String("off: this machine only")),
+                                  FactText(sp.max_version if sp.max_version != "" else String("—")), FactText(uptime(sp.uptime_seconds + elapsed)), FactText(sp.active_keys)]
         if sp.home != "":
-            facts.append(Fact("MXC_HOME", FactText(sp.home), key_width=kw))
-        daemon.append(VStack(facts^, spacing=9).align(START).fill())
+            keys.append("MXC_HOME")
+            values.append(FactText(sp.home))
+        daemon.append(FactGrid(keys, values^))
     else:
         daemon.append(QuietText("Loading…"))
     if sp.stopping:
-        daemon.append(StateMark("Stopping… the console goes offline in a moment.", WARN))
+        daemon.append(StatusMark("Stopping… the console goes offline in a moment.", WARN))
     elif sp.confirming:
-        daemon.append(WarnBox([QuietText("Stop the daemon? Every model unloads and this console goes offline until you run mxc daemon (or any command that starts it) again."),
-                               HStack(ActionButton("Stop daemon", SET_STOP_SURE, "square", DANGER), ActionButton("Cancel", SET_CANCEL, "", TEXT), spacing=8).align(CENTER)]))
+        daemon.append(Warning([QuietText("Stop the daemon? Every model unloads and this console goes offline until you run mxc daemon (or any command that starts it) again."),
+                               ButtonRow([SmallButton("Stop daemon", SET_STOP_SURE, "square", DANGER), SmallButton("Cancel", SET_CANCEL, "", TEXT)])]))
     else:
-        daemon.append(HStack(ActionButton("Stop daemon", SET_STOP, "square", DANGER), spacing=0))
-    cards.append(BareCard([CardHead("Daemon"), CardBody(daemon^, spacing=16), CopyFoot(materialize[COPIES]()[2], SET_COPY + 2)]).fill())
+        daemon.append(ButtonRow([SmallButton("Stop daemon", SET_STOP, "square", DANGER)]))
+    cards.append(Card([CardHead("Daemon"), CardBody(daemon^), CopyFoot(materialize[COPIES]()[2], SET_COPY + 2)]))
     # Ports & processes
     var ports: List[View] = [CardHead("Ports & processes", "most listen on this machine only")]
     if len(sp.listeners) > 0:
         var cells: List[View] = []
         for l in sp.listeners:
-            cells.append(FactText(l.name))
-            cells.append(FactText(l.address))
+            cells.append(Mono(l.name))
+            cells.append(Mono(l.address))
             cells.append(Text(l.reach))
-            cells.append(StateMark(l.state, GOOD if l.on else QUIET))
+            cells.append(StatusMark(l.state, GOOD if l.on else QUIET))
             cells.append(QuietText(l.talks_to))
-        ports.append(Table(["Listener", "Address", "Reachable from", "State", "What talks to it"], cells, align="LLLLL").fill().tag("ports"))
+        ports.append(SideScroll(Table(["Listener", "Address", "Reachable from", "State", "What talks to it"], cells, align="LLLLL").fill().tag("ports")))
     else:
-        ports.append(QuietText("No listeners reported." if sp.system_at else "Loading…").padding(0, 16))
-    ports.append(QuietText("Apps talk to the daemon, which starts one max serve per model on a loopback port. Only Caddy listens beyond this machine, and only after you make a model secure.").padding(12, 16))
+        ports.append(CardNote("No listeners reported." if sp.system_at else "Loading…"))
+    ports.append(CardNote("Apps talk to the daemon, which starts one max serve per model on a loopback port. Only Caddy listens beyond this machine, and only after you make a model secure."))
     ports.append(CopyFoot(materialize[COPIES]()[3], SET_COPY + 3))
-    cards.append(BareCard(ports^).fill())
-    return VStack(cards^, spacing=14).align(START).padding(16, 16).fill()
+    cards.append(Card(ports^))
+    return CardStack(cards^)

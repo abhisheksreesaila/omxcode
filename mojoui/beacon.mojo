@@ -1,14 +1,14 @@
 # mojoui.beacon: one dark pill that says the one thing happening now (goal 33 M5, the OMX Console's Beacon, omxqua's
 # .beacon): a lead (a progress ring for a job, a live dot while models run), a label and a value in the mono. Ring draws
-# the ring into a Canvas (the app's draw() calls it for the Beacon's canvas). Roles: beacon, beacon-label,
-# beacon-value, beacon-live; beacon_roles(palette, mono) gives a theme their look (#0b0b0d in both modes, like a terminal).
+# the ring into a Canvas (the app's draw() calls it for the Beacon's canvas). Roles: beacon-slot, beacon, beacon-ring,
+# beacon-live, beacon-label, beacon-value (a theme gives their look: themes/omxqua_kit.mojo).
 #
-#   Beacon("Pulling helper-7b", "35%", RING_CANVAS, version=35)          app.draw: Ring(35.4, accent).draw(surface)
+#   Beacon("Pulling helper-7b", "35%", RING_CANVAS, version=35)          app.draw: Ring.themed(35.4, theme.look).draw(surface)
 
-from mojoui.view import View, Text, Canvas, VStack, HStack, CENTER
+from mojoui.view import View, Text, Canvas, VStack, HStack, CENTER, START, SPACE_S
 from mojoui.canvas import Surface, rgba
 from mojoui.draw import line
-from mojoui.theme import Palette, Surface as Look, Shadow, words
+from mojoui.theme import Look
 from std.math import cos, sin, pi
 
 comptime BEACON_BG = 0xFF0D0B0B  # #0b0b0d
@@ -17,18 +17,20 @@ comptime BEACON_QUIET = 0xFFAAA1A1  # #a1a1aa
 comptime RING_TRACK = 0xFF2F2D2D  # rgb(255 255 255 / .14) over #0b0b0d, opaque (overlapping strokes must not add up)
 
 
-def Beacon(label: String, value: String, ring: Int = -1, version: Int = 0, live: Bool = False) -> View:
-    """The pill: a ring (`ring`: its canvas id, the app draws a Ring), else a live dot when `live`, then the label and
-    the value (the value only when there is one)."""
+def Beacon(label: String, value: String, ring: Int = -1, version: Int = 0, live: Bool = False, compact: Bool = False) -> View:
+    """The pill in its slot at the top of a bar: a ring (`ring`: its canvas id, the app's draw() paints a Ring), else a
+    live dot when `live`, then the label and the value (when there is one) (roles beacon-slot or beacon-slot-compact,
+    beacon, beacon-ring, beacon-live, beacon-label, beacon-value)."""
     var items: List[View] = []
     if ring >= 0:
-        items.append(Canvas(ring, version).width(20).height(20).tag("beacon-ring"))
+        items.append(Canvas(ring, version).tag("beacon-ring"))
     elif live:
-        items.append(VStack(spacing=0).width(8).height(8).tag("beacon-live"))
+        items.append(VStack(spacing=0).tag("beacon-live"))
     items.append(Text(label).tag("beacon-label"))
     if value != "":
         items.append(Text(value).tag("beacon-value"))
-    return HStack(items^, spacing=10).align(CENTER).height(40).tag("beacon")
+    var pill = HStack(items^, spacing=SPACE_S).align(CENTER).tag("beacon")
+    return VStack(pill^, spacing=0).align(START).tag("beacon-slot-compact" if compact else "beacon-slot")
 
 
 @fieldwise_init
@@ -41,6 +43,13 @@ struct Ring(Copyable, Movable):
     @staticmethod
     def themed(percent: Float64, accent: UInt32) -> Ring:
         return Ring(percent, accent, RING_TRACK, BEACON_BG)
+
+    @staticmethod
+    def themed(percent: Float64, look: Look) -> Ring:
+        """In the look's colours: the arc in the live dot's (role beacon-live), on the pill's (role beacon)."""
+        var live = look.surface("beacon-live")
+        var pill = look.surface("beacon")
+        return Ring(percent, look.surfaces[live].fill if live >= 0 else 0xFF6ECF3C, RING_TRACK, look.surfaces[pill].fill if pill >= 0 else BEACON_BG)
 
     def draw(self, mut s: Surface):
         """A 2.5 pt ring of radius 8 in a 20 × 20 box, its arc from the top, clockwise."""
@@ -60,18 +69,3 @@ struct Ring(Copyable, Movable):
                 var a0 = 2 * pi * Float64(i) / N - pi / 2
                 var a1 = 2 * pi * Float64(i + 1) / N - pi / 2
                 line(s, cx + r * cos(a0), cy + r * sin(a0), cx + r * cos(a1), cy + r * sin(a1), w, self.arc if arc == 1 else self.track)
-
-
-def beacon_roles(p: Palette, mono: String, accent: UInt32) -> List[Look]:
-    """The Beacon's look (omxqua's components.css .beacon, topbar.css): #0b0b0d with a deep soft shadow, 22 corners,
-    0 16px 0 12px; the label 600 13px, the value 500 12px mono in a quieter grey; the live dot in `accent`."""
-    var out = List[Look]()
-    var pill = Look("beacon", BEACON_BG, 22, 22, -1, -1, -1, 0, 14, 0,
-                    [Shadow(10, 30, 0, rgba(0, 0, 0, 89), False), Shadow(0, 0, 1, rgba(255, 255, 255, 15), False)], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
-    out.append(pill^)
-    out.append(words("beacon-label", 13, 600, BEACON_INK))
-    var value = words("beacon-value", 12, 500, BEACON_QUIET)
-    value.font = mono
-    out.append(value^)
-    out.append(Look("beacon-live", accent, 4, 4, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False))
-    return out^

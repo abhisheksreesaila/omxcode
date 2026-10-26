@@ -9,9 +9,14 @@ from mojoui.app import Event
 from mojoui.effects import Every
 from mojoui.json import Json, J_NUMBER, J_BOOL
 from mojoui.table import Table
+from mojoui.lists import SideScroll
 from mojoui.logview import LogView
-from mojoui.pagekit import PageHeader, BareCard, CardHead, CardBody, CardFoot, SmallButton, QuietText, Fact, FactText
-from mojoui.adminkit import StateMark, ActionButton, CopyFoot, GOOD, QUIET, BAD, TONAL
+from mojoui.header import PageHeader
+from mojoui.panel import Card, CardHead, CardBody, CardFoot, CopyFoot, CardStack, CardNote, FactText, FactGrid
+from mojoui.buttons import SmallButton, ButtonRow, TONAL, FILL
+from mojoui.words import Mono, QuietText, Hint
+from mojoui.marks import StatusMark, GOOD, QUIET, BAD
+from mojoui.feedback import EmptyState
 from api import Api
 from data import Store, fmt, real_or
 from msgs import *
@@ -225,7 +230,7 @@ struct GatewayPage(Copyable, Movable):
 
 def gateway_header(gp: GatewayPage) -> View:
     return PageHeader("route", "Gateway", "", "LiteLLM · one endpoint routes to every model",
-                      [ActionButton("Restart", GW_RESTART, "refresh-cw", TONAL, off=gp.busy or not gp.litellm)], hue=6)
+                      [SmallButton("Restart", GW_RESTART, "refresh-cw", TONAL, off=gp.busy or not gp.litellm)], hue=6)
 
 
 def gateway_view(gp: GatewayPage, st: Store, phone: Bool) -> View:
@@ -233,18 +238,18 @@ def gateway_view(gp: GatewayPage, st: Store, phone: Bool) -> View:
     # Status
     var status: List[View] = [CardHead("Status")]
     if not gp.loaded:
-        status.append(QuietText(("Could not load the gateway: " + gp.failed) if gp.failed != "" else "Loading…").padding(0, 16))
+        status.append(CardNote(("Could not load the gateway: " + gp.failed) if gp.failed != "" else "Loading…"))
     else:
-        var kw = 95  # (.ox-dl: the keys' column as wide as "Caddy (HTTPS)")
-        var facts: List[View] = [Fact("LiteLLM", StateMark(("running · :" + String(gp.litellm_port)) if gp.litellm else "off", GOOD if gp.litellm else QUIET, mono=True), key_width=kw),
-                                 Fact("Caddy (HTTPS)", StateMark("running" if gp.caddy else "off", GOOD if gp.caddy else QUIET, mono=True), key_width=kw),
-                                 Fact("Local endpoint", FactText(st.endpoint if st.endpoint != "" else String("—")), key_width=kw),
-                                 Fact("LAN endpoint", FactText(gp.lan if gp.lan != "" else String("off")), key_width=kw)]
+        var keys: List[String] = ["LiteLLM", "Caddy (HTTPS)", "Local endpoint", "LAN endpoint"]
+        var values: List[View] = [StatusMark(("running · :" + String(gp.litellm_port)) if gp.litellm else "off", GOOD if gp.litellm else QUIET, mono=True),
+                                  StatusMark("running" if gp.caddy else "off", GOOD if gp.caddy else QUIET, mono=True),
+                                  FactText(st.endpoint if st.endpoint != "" else String("—")), FactText(gp.lan if gp.lan != "" else String("off"))]
+        var facts: List[View] = [FactGrid(keys, values^)]
         if not gp.litellm:
-            facts.append(QuietText("LiteLLM is off, so only the daemon's own /v1 answers. The routes below apply once mxc expose starts it.").width(520))
-        status.append(CardBody(facts^, spacing=9))
+            facts.append(Hint("LiteLLM is off, so only the daemon's own /v1 answers. The routes below apply once mxc expose starts it."))
+        status.append(CardBody(facts^))
     status.append(CopyFoot("mxc status", GW_COPY))
-    cards.append(BareCard(status^).fill())
+    cards.append(Card(status^))
     # Routes
     if gp.loaded:
         var daemon = "http://127.0.0.1:" + String(gp.daemon_port) + "/v1"
@@ -252,53 +257,51 @@ def gateway_view(gp: GatewayPage, st: Store, phone: Bool) -> View:
         if len(gp.routes) > 0:
             var cells: List[View] = []
             for r in gp.routes:
-                cells.append(FactText(r.name))
-                cells.append(FactText("openai/" + r.name))
-                cells.append(FactText((":" + String(r.port)) if r.port > 0 else ("starting" if r.state == "starting" else "idle")))
-                cells.append(FactText(fmt(Float64(r.recent))))
-            routes.append(Table(["Model name", "Upstream model", "max serve", "Req · 1 min"], cells, align="LLLR").fill().tag("routes"))
+                cells.append(Mono(r.name))
+                cells.append(Mono("openai/" + r.name))
+                cells.append(Mono((":" + String(r.port)) if r.port > 0 else ("starting" if r.state == "starting" else "idle")))
+                cells.append(Mono(fmt(Float64(r.recent))))
+            routes.append(SideScroll(Table(["Model name", "Upstream model", "max serve", "Req · 1 min"], cells, align="LLLR").fill().tag("routes")))
             routes.append(CardFoot("every route goes to " + daemon, note=True))
         else:
-            routes.append(VStack(Text("No routes yet").tag("strong"), QuietText("Add a model and it gets a route."), SmallButton("Add a model", GW_ADD, "plus", filled=True),
-                                 spacing=8).align(CENTER).padding(26, 16).fill())
+            routes.append(EmptyState("route", "No routes yet", "Add a model and it gets a route.", "Add a model", GW_ADD))
             routes.append(CardFoot("a route appears for each model you add", note=True))
-        cards.append(BareCard(routes^).fill())
+        cards.append(Card(routes^))
     # Recent requests
     var recent: List[View] = [CardHead("Recent requests", "newest first · kept for 7 days")]
     if len(gp.requests) > 0:
         var cells: List[View] = []
         for r in gp.requests:
-            cells.append(FactText(clock(r.ts)))
+            cells.append(Mono(clock(r.ts)))
             cells.append(Text(app_label(r.app)))
-            cells.append(FactText(r.model))
-            cells.append(FactText(r.route))
-            cells.append(StateMark(String(r.status), GOOD if r.status < 400 else BAD, mono=True))
-            cells.append(FactText(r.tokens))
-            cells.append(FactText(r.ttft))
-            cells.append(FactText(r.duration))
-        recent.append(Table(["Time", "App", "Model", "Route", "Status", "Tokens in → out", "TTFT", "Duration"], cells, align="LLLLLLLL").fill().tag("requests"))
+            cells.append(Mono(r.model))
+            cells.append(Mono(r.route))
+            cells.append(StatusMark(String(r.status), GOOD if r.status < 400 else BAD, mono=True))
+            cells.append(Mono(r.tokens))
+            cells.append(Mono(r.ttft))
+            cells.append(Mono(r.duration))
+        recent.append(SideScroll(Table(["Time", "App", "Model", "Route", "Status", "Tokens in → out", "TTFT", "Duration"], cells, align="LLLLLLLL").fill().tag("requests")))
     elif gp.requests_loaded:
-        recent.append(VStack(Text("No requests yet").tag("strong"), QuietText("They show up here once an app calls /v1."), spacing=8).align(CENTER).padding(26, 16).fill())
+        recent.append(EmptyState("scroll-text", "No requests yet", "They show up here once an app calls /v1."))
     else:
-        recent.append(QuietText("Loading…").padding(0, 16))
+        recent.append(CardNote("Loading…"))
     recent.append(CopyFoot("mxc requests --limit 200", GW_COPY + 1))
-    cards.append(BareCard(recent^).fill())
+    cards.append(Card(recent^))
     # Safeguards
     if gp.has_gw:
-        var kw = 150
-        cards.append(BareCard([CardHead("Safeguards", "counted today"), CardBody([
-            Fact("Encrypted on your LAN", FactText(("HTTPS on · " + gp.tls_endpoint) if gp.tls_on else "off: nothing listens beyond this machine"), key_width=kw),
-            Fact("One key per app", FactText(String(gp.keys_active) + " active · " + String(gp.keys_revoked) + " revoked · " + counted(gp.unauthorized, "request", "requests") + " refused today (401)"), key_width=kw),
-            Fact("Only four doors open", FactText(counted(gp.unknown_routes, "request", "requests") + " to other /v1 paths today"), key_width=kw),
-            Fact("Admin stays home", FactText(counted(gp.admin_refused, "refusal", "refusals") + " today"), key_width=kw)], spacing=9), CopyFoot("mxc status", GW_COPY)]).fill())
+        cards.append(Card([CardHead("Safeguards", "counted today"), CardBody([FactGrid(["Encrypted on your LAN", "One key per app", "Only four doors open", "Admin stays home"],
+            [FactText(("HTTPS on · " + gp.tls_endpoint) if gp.tls_on else "off: nothing listens beyond this machine"),
+             FactText(String(gp.keys_active) + " active · " + String(gp.keys_revoked) + " revoked · " + counted(gp.unauthorized, "request", "requests") + " refused today (401)"),
+             FactText(counted(gp.unknown_routes, "request", "requests") + " to other /v1 paths today"),
+             FactText(counted(gp.admin_refused, "refusal", "refusals") + " today")])]), CopyFoot("mxc status", GW_COPY)]))
     # The LiteLLM log
     var lines = gp.log_lines()
     var empty = String("Loading…") if not gp.log_loaded else (("Could not read the LiteLLM log: " + gp.log_failed) if gp.log_failed != "" else "No LiteLLM log yet: it appears once `mxc expose` starts LiteLLM.")
-    cards.append(BareCard([CardHead("LiteLLM log", "last lines"), CardBody([LogView(lines.copy() if gp.log_failed == "" else List[String](), height=220, empty=empty, exact=True).fill()]),
-                           CardFoot("refreshed every few seconds", note=True)]).fill())
+    cards.append(Card([CardHead("LiteLLM log", "last lines"), CardBody([LogView(lines.copy() if gp.log_failed == "" else List[String](), empty=empty, short=True).fill()]),
+                       CardFoot("refreshed every few seconds", note=True)]))
     # The API reference, the terminal
-    cards.append(BareCard([CardHead("API reference"), CardBody([QuietText("Base URL, auth, every endpoint and a request you can copy."),
-                                                                SmallButton("Open the API reference", GW_DOCS, "book-open", filled=True)], spacing=12),
-                           CopyFoot("mxc console api", GW_COPY + 2)]).fill())
-    cards.append(BareCard([CardHead("From the terminal"), CopyFoot("mxc status", GW_COPY), CopyFoot("mxc expose", GW_COPY + 3), CopyFoot("mxc expose --stop", GW_COPY + 4)]).fill())
-    return VStack(cards^, spacing=14).align(START).padding(16, 16).fill()
+    cards.append(Card([CardHead("API reference"), CardBody([QuietText("Base URL, auth, every endpoint and a request you can copy."),
+                                                            ButtonRow([SmallButton("Open the API reference", GW_DOCS, "book-open", FILL)])]),
+                       CopyFoot("mxc console api", GW_COPY + 2)]))
+    cards.append(Card([CardHead("From the terminal"), CopyFoot("mxc status", GW_COPY), CopyFoot("mxc expose", GW_COPY + 3), CopyFoot("mxc expose --stop", GW_COPY + 4)]))
+    return CardStack(cards^)

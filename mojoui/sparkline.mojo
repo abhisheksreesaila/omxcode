@@ -11,7 +11,7 @@
 
 from mojoui.canvas import Surface, rgba
 from mojoui.draw import line, area, rect, with_alpha
-from mojoui.theme import Palette
+from mojoui.theme import Palette, Look
 from mojoui.view import View, Canvas
 
 comptime BOX_W = 600.0  # the original's viewBox (600 × 84), stretched to the canvas (preserveAspectRatio none)
@@ -52,6 +52,12 @@ struct Sparkline(Copyable, Movable):
     def themed(values: List[Float64], p: Palette, series: Int = 0) -> Sparkline:
         """In the palette's `series` colour, quiet in its ink3."""
         return Sparkline(values.copy(), p.series[series % len(p.series)], p.ink3)
+
+    @staticmethod
+    def signal(values: List[Float64], look: Look, p: Palette, k: Int = 1) -> Sparkline:
+        """In the look's k-th signal colour (role signal-dot-<k>: a thing's own colour), quiet in the palette's ink3."""
+        var at = look.surface("signal-dot-" + String(k))
+        return Sparkline(values.copy(), look.surfaces[at].fill if at >= 0 else p.series[0], p.ink3)
 
     def live(self) -> Bool:
         return len(self.values) > 1

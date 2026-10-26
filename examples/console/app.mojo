@@ -17,8 +17,9 @@ from mojoui.overlays import Clipboard
 from mojoui.confirm import TwoStep
 from mojoui.sparkline import Sparkline, BarTrack
 from mojoui.beacon import Ring
-from mojoui.draw import rect
-from mojoui.pagekit import BareCard, PageHeader, MonoLine
+from mojoui.meter import Usage
+from mojoui.shell import Shell, PageCard, is_compact
+from mojoui.panel import CardNote
 from mojoui.json import json_string
 from themes.omxqua import omxqua
 from api import Api
@@ -37,13 +38,8 @@ from security import SecurityPage, security_view, security_header
 from settings import SettingsPage, settings_view, settings_header
 from msgs import *
 
-comptime PHONE = 760  # the shell's phone width (blade-home.js PHONE)
 comptime CONFIRM_REMOVE = 0  # TwoStep keys
 comptime CONFIRM_REMOVE_TICKED = 1
-
-
-def gap(w: Int) -> View:
-    return VStack(spacing=0).width(w)
 
 
 struct Main(App):
@@ -121,7 +117,7 @@ struct Main(App):
         return parse_route(self.path)
 
     def phone(self) -> Bool:
-        return self.width <= PHONE
+        return is_compact(self.width)
 
     # ---- the poll ----
 
@@ -430,23 +426,14 @@ struct Main(App):
         var pal = self.themed.palette.copy()
         var p = self.place()
         if canvas == RING:
-            Ring.themed(self.store.pull_percent, 0xFF6ECF3C).draw(surface)
+            Ring.themed(self.store.pull_percent, self.themed.look).draw(surface)
         elif canvas == SPARK:
             surface.fill(pal.raised)
-            Sparkline.themed(self.store.points(p.model), pal, 0).draw(surface)
+            Sparkline.signal(self.store.points(p.model), self.themed.look, pal, 1).draw(surface)  # (colorOf: the model's own colour)
         elif canvas == FIT:
-            surface.fill(pal.raised)
             var fit = fit_of(self.store, p.model)
-            var w = Float64(surface.width)
-            var h = Float64(surface.height)
-            rect(surface, 0, 0, w, h, mix(pal.raised, pal.ink, 0.08), h / 2)
-            if fit.present and fit.total_gb > 0:
-                var x = 0.0
-                var others = w * fit.others_gb / fit.total_gb
-                if others > 0:
-                    rect(surface, 0, 0, others, h, pal.ink3, 0)
-                    x = others
-                rect(surface, x, 0, w * fit.this_gb / fit.total_gb, h, pal.series[0], 0)
+            var whole = fit.total_gb if fit.present and fit.total_gb > 0 else 1.0
+            Usage.themed(fit.this_gb / whole if fit.present else 0.0, fit.others_gb / whole if fit.present else 0.0, self.themed.look, pal).draw(surface)
         elif canvas >= BAR:
             surface.fill(pal.card)
             var k = canvas - BAR
@@ -458,12 +445,12 @@ struct Main(App):
 
     # ---- the screen ----
 
-    def page(self, p: Place, card_h: Int) -> View:
+    def page(self, p: Place) -> View:
         var phone = self.phone()
         if p.page == "home":
-            return BareCard([home_view(self.store, self.lib, phone)]).height(card_h).grow()
+            return PageCard([home_view(self.store, self.lib, phone)])
         if p.page == "add":
-            return add_page(self.add, now_ms(), phone, card_h)
+            return add_page(self.add, now_ms(), phone)
         if p.page == "keys" or p.page == "gateway" or p.page == "security" or p.page == "settings":
             var header = settings_header()
             var body: View
@@ -478,40 +465,28 @@ struct Main(App):
                 body = security_view(self.sp, self.store, phone)
             else:
                 body = settings_view(self.setp, self.store, self.dark, phone)
-            return BareCard([header^, Scroll(body^, height=card_h - 66).fill()]).height(card_h).grow()
+            return PageCard([header^, Divider().fill(), Scroll(body^, height=0).grow().fill()])
         if p.page == "model":
             var k = self.store.model(p.model)
             if k < 0:
                 var msg = "Loading…" if not self.store.loaded else "This model is not registered any more."
-                return BareCard([MonoLine(msg).padding(14, 16)]).height(card_h).grow()
+                return PageCard([CardNote(msg)])
             var model = self.store.models[k].copy()
-            var body_h = card_h - (130 if phone else 61)
             var body: View
             if p.tab == "benchmark":
-                body = bench_view(self.bench, p.model)
+                body = bench_view(self.bench, p.model, phone)
             elif p.tab == "logs":
-                body = logs_view(self.logs, p.model, max(card_h - (300 if phone else 229), 160), phone)  # (the pane fills the page: logs.css .lg-card flex 1)
+                body = logs_view(self.logs, p.model, phone)
             elif p.tab == "notebook":
-                body = notebook_view(self.nb, self.store, p.model, phone, max(body_h - 70, 200))
+                body = notebook_view(self.nb, self.store, p.model, phone)
             else:
                 body = overview_view(self.store, model, phone, self.copies)
             var scrolls = p.tab != "logs" and not (p.tab == "notebook" and not phone)
-            return BareCard([model_header(model, p.tab, phone), Divider().fill(), Scroll(body^, height=body_h).fill() if scrolls else body^]).height(card_h).grow()
-        # Add, Keys, Gateway, Security, Settings: M6
-        var names: List[String] = ["add", "keys", "gateway", "security", "settings"]
-        var titles: List[String] = ["Add a model", "API keys", "Gateway", "Security", "Settings"]
-        var icons: List[String] = ["download", "key-round", "route", "lock", "sliders-horizontal"]
-        var k = 0
-        for i in range(len(names)):
-            if names[i] == p.page:
-                k = i
-        return BareCard([PageHeader(icons[k], titles[k], "", "coming in goal 33 M6", List[View]())]).height(card_h).grow()
+            return PageCard([model_header(model, p.tab, phone), Divider().fill(), Scroll(body^, height=0).grow().fill() if scrolls else body^.grow()])
+        return PageCard([CardNote("Nothing here.")])
 
     def view(self) -> View:
         var p = self.place()
         var phone = self.phone()
-        var card_h = max(self.height - 60 - (8 if phone else 14), 300)
-        var page = self.page(p, card_h)
-        var row = HStack(gap(8 if phone else 2), page^, gap(8 if phone else 14), spacing=0).align(START).fill()
-        return VStack(top_bar(p, self.store, phone), row^, Route(self.path, ROUTE), Clipboard(self.clip, self.clip_version),
+        return VStack(Shell(top_bar(p, self.store, phone), self.page(p), compact=phone), Route(self.path, ROUTE), Clipboard(self.clip, self.clip_version),
                       spacing=0).align(START).fill().tag("console")

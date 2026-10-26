@@ -7,16 +7,26 @@
 # helpers, ported) and the screen; addflow.mojo is what each message and reply does.
 
 from std.math import floor
-from mojoui.view import View, Text, VStack, HStack, Spacer, Scroll, START, CENTER, END
+from mojoui.view import View, Text, VStack, HStack, Spacer, Scroll, Divider, START, CENTER, END
 from mojoui.json import Json, J_NULL, J_NUMBER, J_STRING, J_ARRAY, J_OBJECT
 from mojoui.timeline import Timeline, Stage, STAGE_PENDING, STAGE_RUNNING, STAGE_DONE, STAGE_FAILED, STAGE_CANCELLED, elapsed_text, stage_elapsed
 from mojoui.logview import LogPane, LogLine, LOG_PLAIN, LOG_ERROR, LOG_OK, LOG_WARN
 from mojoui.codeblock import CodeBlock
 from mojoui.chip import Badge, BADGE_OK, BADGE_WARN, BADGE_PLAIN
 from mojoui.skeleton import Skeleton
-from mojoui.catalog import OutlinedField, FieldWithHelp, FilterChips, ResultRow, Meter, EmptyState, BackButton
-from mojoui.adminkit import ActionButton, EndpointRow, ToneSquare, TONAL, FILL, TEXT, WARN
-from mojoui.pagekit import BareCard, PageHeader, CardHead, CardFoot, CardBody, QuietText, Fact, FactText, IconSquare
+from mojoui.fields import OutlinedField, FieldWithHelp, FilterChips
+from mojoui.results import ResultRow, SuggestionTile, SuggestionRow
+from mojoui.meter import Meter
+from mojoui.feedback import EmptyState
+from mojoui.buttons import SmallButton, BackButton, ButtonRow, TONAL, FILL, TEXT
+from mojoui.copy import CopyRow
+from mojoui.marks import StatusMark, GOOD, WARN, BAD, INFO, QUIET
+from mojoui.header import PageHeader, IconSquare
+from mojoui.panel import Card, CardHead, CardFoot, CardBody, CardColumn, Fact, FactText, FactList
+from mojoui.words import QuietText, WarnLine
+from mojoui.lists import PageColumn, MainAside
+from mojoui.skeleton import SkeletonList
+from mojoui.shell import PageCard
 from data import fmt
 from msgs import *
 
@@ -540,12 +550,25 @@ def fit_chip(fit: String) -> Tuple[String, String]:
     return ("inst", "size unknown")
 
 
+def fit_tone(key: String) -> Int:
+    """A fit's tone: fits good, tight a warning, won't fit bad, needs porting to do (INFO), unknown quiet."""
+    if key == "ok":
+        return GOOD
+    if key == "tight":
+        return WARN
+    if key == "no":
+        return BAD
+    if key == "port":
+        return INFO
+    return QUIET
+
+
 def result_row(r: Pick, row: Int) -> View:
     var hf = r.source == "hf"
     var meta = joined([arch_short(r.arch), params_text(r.params), size_text(r.size_gb)])
     var chip = fit_chip(r.fit)
     var repo = r.repo if r.repo != "" else r.id
-    return ResultRow("HF" if hf else "MAX", 4 if hf else 3, r.id, ADD_PICK + row, joined([repo if repo != r.id else String(""), meta]), chip[0], chip[1],
+    return ResultRow("HF" if hf else "MAX", 4 if hf else 3, r.id, ADD_PICK + row, joined([repo if repo != r.id else String(""), meta]), StatusMark(chip[1], fit_tone(chip[0])),
                      ("~" + trim1(r.est_gb) + " GB VRAM") if r.est_gb >= 0 else String(""))
 
 
@@ -555,10 +578,7 @@ def results_view(a: Add) -> View:
     if a.error != "":
         return EmptyState("triangle-alert", "Search failed", a.error, "Try again", ADD_EMPTY)
     if not a.answered:
-        var bars: List[View] = []
-        for _ in range(4):
-            bars.append(Skeleton(0, 34))
-        return VStack(bars^, spacing=14).padding(12, 16).fill().tag("add-skeleton")
+        return SkeletonList(4)
     var rows = a.shown()
     if len(rows) == 0:
         if len(a.results) == 0 or query != "":
@@ -588,15 +608,14 @@ def warn_card(a: Add) -> View:
         var picks: List[View] = []
         for k in range(len(r.suggestions)):
             var s = r.suggestions[k].copy()
-            picks.append(VStack(ActionButton(s.repo, ADD_SUGGEST + k, look=TEXT), Text("fits · ~" + trim1(s.est_gb) + " GB").tag("fit-ok"),
-                                Text(joined([arch_short(s.arch), params_text(s.params), size_text(s.size_gb)])).tag("result-meta"),
-                                Text("$ " + twin("pull", s.id)).tag("result-size"), spacing=6).align(START).padding(12, 12).grow().tag("suggestion"))
-        body.append(HStack(picks^, spacing=10).align(START).fill())
+            picks.append(SuggestionTile([SmallButton(s.repo, ADD_SUGGEST + k, look=TEXT), Text("fits · ~" + trim1(s.est_gb) + " GB").tag("status-good"),
+                                         Text(joined([arch_short(s.arch), params_text(s.params), size_text(s.size_gb)])).tag("result-meta"),
+                                         Text("$ " + twin("pull", s.id)).tag("result-figure")]))
+        body.append(SuggestionRow(picks^))
     else:
         body.append(QuietText("Nothing smaller in the catalog fits either."))
-    return BareCard([HStack(ToneSquare("triangle-alert", WARN), Text(heading).tag("card-title").grow(), Badge("nothing downloaded", BADGE_WARN, dot=True),
-                            spacing=10).align(CENTER).fill().tag("card-head"),
-                     CardBody(body^), CardFoot("hardware check against " + gpu, note=True)]).fill()
+    return Card([CardHead(heading, lead=[IconSquare("triangle-alert", tone=WARN)], tail=[Badge("nothing downloaded", BADGE_WARN, dot=True)]),
+                 CardBody(body^), CardFoot("hardware check against " + gpu, note=True)])
 
 
 def port_card(a: Add) -> View:
@@ -605,25 +624,24 @@ def port_card(a: Add) -> View:
     var mref = r.repo if r.repo != "" else r.id
     var body: List[View] = [QuietText(PORT_NOTE)]
     if a.guided:
-        body.append(Text("Automatic porting is not in this daemon yet. Run the guided port from a terminal instead:").tag("warn-text"))
+        body.append(WarnLine("Automatic porting is not in this daemon yet. Run the guided port from a terminal instead:"))
     if a.note != "":
-        body.append(Text(a.note).tag("warn-text"))
+        body.append(WarnLine(a.note))
     if a.refused != "":
-        body.append(Text(a.refused).tag("warn-text"))
+        body.append(WarnLine(a.refused))
     if a.sandbox:
         body.append(QuietText("Without a sandbox the agent would run with your full permissions, so it is not offered here. If you accept that, the terminal can: "
                               + twin("port", mref) + " --unsandboxed"))
-    body.append(Fact("architecture", FactText(r.arch if r.arch != "" else String("unknown"))))
     var size = joined([params_text(r.params), size_text(r.size_gb)])
-    body.append(Fact("size", FactText(size if size != "" else String("unknown"))))
-    body.append(Fact("skill", FactText("import-model")))
+    body.append(FactList([Fact("architecture", FactText(r.arch if r.arch != "" else String("unknown"))), Fact("size", FactText(size if size != "" else String("unknown"))),
+                          Fact("skill", FactText("import-model"))]))
     if a.guided:
-        body.append(ActionButton("Copy the command", ADD_COPY_CMD, "copy"))
+        body.append(ButtonRow([SmallButton("Copy the command", ADD_COPY_CMD, "copy")]))
     elif a.refused == "":
-        body.append(ActionButton("Port it", ADD_PORT_IT, "hammer", FILL))
-    return BareCard([HStack(IconSquare("hammer", hue=1), Text(last_part(mref) + " uses " + (r.arch if r.arch != "" else String("an architecture")) + ", which MAX cannot run yet.").tag("card-title").grow(),
-                            Badge("architecture check"), spacing=10).align(CENTER).fill().tag("card-head"),
-                     CardBody(body^), CardFoot(twin("guided", mref) if a.guided or a.refused != "" else twin("port", mref))]).fill()
+        body.append(ButtonRow([SmallButton("Port it", ADD_PORT_IT, "hammer", FILL)]))
+    return Card([CardHead(last_part(mref) + " uses " + (r.arch if r.arch != "" else String("an architecture")) + ", which MAX cannot run yet.",
+                          lead=[IconSquare("hammer", hue=1)], tail=[Badge("architecture check")]),
+                 CardBody(body^), CardFoot(twin("guided", mref) if a.guided or a.refused != "" else twin("port", mref))])
 
 
 def find_view(a: Add, phone: Bool) -> View:
@@ -638,53 +656,44 @@ def find_view(a: Add, phone: Bool) -> View:
     if a.answered and a.error == "" and len(a.results) > 0:
         title = (String(len(a.results)) + " result" + ("" if len(a.results) == 1 else "s")) if query != "" else String("Curated models")
     var mem = a.memory_text()
-    items.append(BareCard([CardHead(title), results_view(a), CardFoot(twin("search", query) if query != "" else String("mxc search <query>"),
-                                                                      tail=("fit checked against " + mem) if mem != "" else String(""))]).fill())
-    return VStack(items^, spacing=14).align(START).padding(14 if phone else 18, 12 if phone else 20).max_width(980).fill().tag("add-find")
+    items.append(Card([CardHead(title), results_view(a), CardFoot(twin("search", query) if query != "" else String("mxc search <query>"),
+                                                                  tail=("fit checked against " + mem) if mem != "" else String(""))]))
+    return PageColumn(items^, compact=phone)
 
 
 def ready_card(a: Add, name: String, endpoint: String) -> View:
-    return BareCard([HStack(Text(name + " is serving.").tag("card-title").grow(), Badge("ready · localhost", BADGE_OK, dot=True), spacing=10).align(CENTER).fill().tag("card-head"),
-                     CardBody([EndpointRow("local", endpoint, "Copied" if a.copied_ep else "Copy", ADD_COPY_EP),
-                               CodeBlock(curl_for(endpoint, name), on_copy=ADD_COPY_CURL, copies=a.copies, copied=a.copies > 0, title="Copy curl").fill(),
-                               QuietText("It is on localhost only. Make it secure to reach it from your phone or another machine with HTTPS and an API key."),
-                               HStack(ActionButton("Open", ADD_OPEN, "chevron-right", FILL), ActionButton("Make it secure", ADD_SECURE, "lock"),
-                                      ActionButton("Add another", ADD_ANOTHER, "plus", TEXT), spacing=8).align(CENTER)], spacing=12),
-                     CardFoot(twin("serve", name))]).fill()
+    return Card([CardHead(name + " is serving.", tail=[Badge("ready · localhost", BADGE_OK, dot=True)]),
+                 CardBody([CopyRow("local", endpoint, ADD_COPY_EP, "Copied" if a.copied_ep else "Copy"),
+                           CodeBlock(curl_for(endpoint, name), on_copy=ADD_COPY_CURL, copies=a.copies, copied=a.copies > 0, title="Copy curl").fill(),
+                           QuietText("It is on localhost only. Make it secure to reach it from your phone or another machine with HTTPS and an API key."),
+                           ButtonRow([SmallButton("Open", ADD_OPEN, "chevron-right", FILL), SmallButton("Make it secure", ADD_SECURE, "lock"),
+                                      SmallButton("Add another", ADD_ANOTHER, "plus", TEXT)])]),
+                 CardFoot(twin("serve", name))])
 
 
-def setup_view(a: Add, now: Float64, phone: Bool, height: Int) -> View:
+def setup_view(a: Add, now: Float64, phone: Bool) -> View:
     """Stages on the left, the live log on the right (below on a phone)."""
-    var left: List[View] = [BareCard([VStack(Timeline(setup_stages(a.run, now)), spacing=0).padding(10, 16).fill(), CardFoot(a.sub)]).fill()]
+    var left: List[View] = [Card([CardBody([Timeline(setup_stages(a.run, now))]), CardFoot(a.sub)])]
     if a.acts == 1:
-        left.append(HStack(ActionButton("Cancel", ADD_CANCEL, "x"), spacing=8).align(CENTER))
+        left.append(ButtonRow([SmallButton("Cancel", ADD_CANCEL, "x")]))
     elif a.acts >= 2:
-        left.append(HStack(ActionButton("Try again" if a.acts == 2 else "Start again", ADD_RETRY, "refresh-cw", FILL),
-                           ActionButton("Back to search", ADD_TO_SEARCH, "search"), spacing=8).align(CENTER))
+        left.append(ButtonRow([SmallButton("Try again" if a.acts == 2 else "Start again", ADD_RETRY, "refresh-cw", FILL), SmallButton("Back to search", ADD_TO_SEARCH, "search")]))
     if a.ready:
         left.append(ready_card(a, a.run.name, a.run.endpoint))
     var lines = a.pre.copy()
     lines += a.tail.copy()
     lines += a.post.copy()
-    if phone:
-        var pane = LogPane("LIVE LOG", lines, a.log_open, ADD_LOG, 300 - 40).fill()
-        left.append(pane^)
-        return VStack(left^, spacing=14).align(START).padding(12, 12).fill().tag("add-setup")
-    var pane_h = max(height - 32 - 40, 160)
-    var right = LogPane("LIVE LOG", lines, a.log_open, ADD_LOG, pane_h)
-    var cols = HStack(Scroll(VStack(left^, spacing=14).align(START).fill(), height=height - 32).grow(), right^.width(150).tag("add-log") if not a.log_open else right^.grow().tag("add-log"),
-                      spacing=14).align(START).padding(16, 16).fill()
-    return cols^
+    var pane = LogPane("LIVE LOG", lines, a.log_open, ADD_LOG, 0).grow()
+    return MainAside(CardColumn(left^), pane^, aside_wide=a.log_open, compact=phone)
 
 
-def add_page(a: Add, now: Float64, phone: Bool, card_h: Int) -> View:
+def add_page(a: Add, now: Float64, phone: Bool) -> View:
     var header = PageHeader("plus", a.title, "", a.sub, List[View](), hue=3, lead=[BackButton(ADD_BACK)])
-    var body_h = card_h - 66
     var body: View
     if a.setup:
-        body = setup_view(a, now, phone, body_h)
+        body = setup_view(a, now, phone)
         if phone:
-            body = Scroll(body^, height=body_h).fill()
+            body = Scroll(body^, height=0).grow().fill()
     else:
-        body = Scroll(find_view(a, phone), height=body_h).fill()
-    return BareCard([header^, body^]).height(card_h).grow()
+        body = Scroll(find_view(a, phone), height=0).grow().fill()
+    return PageCard([header^, Divider().fill(), body^])

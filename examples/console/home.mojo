@@ -7,7 +7,15 @@ from mojoui.table import Table
 from mojoui.chip import Chip
 from mojoui.overlays import Checkbox
 from mojoui.dragdrop import Draggable, DropTarget
-from mojoui.pagekit import PageHeader, GroupHead, GroupItem, HueDot, StatTile, SourceLine, MonoLine, SegButtons, StateWord, Panel, FlatButton, NameButton, HashMark, QuietAction, Strong, QuietText, SearchField
+from mojoui.chip import ChipRow
+from mojoui.header import PageHeader, FilterBar, SegmentButtons
+from mojoui.sidebar import Sidebar, SidebarHead, SidebarItem
+from mojoui.marks import SignalDot, StatusMark, GOOD, QUIET
+from mojoui.panel import Panel, StatTile, StatGrid
+from mojoui.words import MonoLine, MonoText, Strong, QuietText, CommandLine
+from mojoui.buttons import FlatButton, PrimaryButton, TextAction, NameLink
+from mojoui.fields import SearchField
+from mojoui.lists import SplitView, ListCount, ListBody, ListEmpty, CardGrid, SelectionBar, NameCell, CellStack
 from mojoui.json import json_string
 from data import Store, Model, Row, row_of, sorted_models, kind_name, kind_hue, hardware, fmt, short_endpoint, KINDS, KIND_NAMES, KIND_HUES
 from msgs import ADD, SEARCH, VIEW, GROUP, LABEL_GROUP, DROP_LABEL, TICK, TICK_ALL, OPEN, TAP_LABEL, CLEAR, REMOVE_TICKED, EDIT_LABELS
@@ -164,7 +172,7 @@ def tags_view(r: Row) -> View:
     var tags: List[View] = [Chip(kind_name(r.kind), hue=kind_hue(r.kind))]
     for l in r.labels:
         tags.append(Chip("#" + l))
-    return HStack(tags^, spacing=4).align(CENTER)
+    return ChipRow(tags^)
 
 
 def name_cell(r: Row, row: Int, hue: Int, lib: Library) -> View:
@@ -172,42 +180,40 @@ def name_cell(r: Row, row: Int, hue: Int, lib: Library) -> View:
     var names = drag_names(r.name, lib)
     for k in range(len(names)):
         payload += ("\n" if k > 0 else "") + names[k]
-    var cell = VStack(HStack(HueDot(hue, 9), NameButton(r.name, OPEN + row), spacing=9).align(CENTER),
-                      MonoLine(r.repo), spacing=2).align(START)
-    return Draggable(cell, payload).tag("row-" + r.name)
+    return Draggable(NameCell(r.name, OPEN + row, r.repo, signal=hue), payload).tag("row-" + r.name)
 
 
-def groups_column(st: Store, lib: Library) -> View:
+def groups_column(st: Store, lib: Library, phone: Bool) -> View:
     var running = 0
     for m in st.models:
         if m.state == "ready":
             running += 1
-    var items: List[View] = [GroupHead("Show"),
-                             GroupItem(Icon("box", 16), "All models", String(len(st.models)), GROUP + 0, lib.group == "all"),
-                             GroupItem(HueDot(7), "Running", String(running), GROUP + 1, lib.group == "running"),
-                             GroupHead("Kind", "· automatic")]
+    var items: List[View] = [SidebarHead("Show", compact=phone),
+                             SidebarItem("All models", String(len(st.models)), GROUP + 0, lib.group == "all", icon="box", compact=phone),
+                             SidebarItem("Running", String(running), GROUP + 1, lib.group == "running", dot=7, compact=phone),
+                             SidebarHead("Kind", "· automatic", compact=phone)]
     var kinds = materialize[KINDS]()
     for k in range(len(kinds)):
         var n = 0
         for m in st.models:
             if m.kind == kinds[k]:
                 n += 1
-        items.append(GroupItem(HueDot(materialize[KIND_HUES]()[k]), materialize[KIND_NAMES]()[k], String(n), GROUP + 2 + k, lib.group == "kind:" + kinds[k]))
-    items.append(HStack(GroupHead("Your labels"), Spacer(), QuietAction("Edit labels", EDIT_LABELS), spacing=6).align(CENTER).fill())
+        items.append(SidebarItem(materialize[KIND_NAMES]()[k], String(n), GROUP + 2 + k, lib.group == "kind:" + kinds[k], dot=materialize[KIND_HUES]()[k], compact=phone))
+    items.append(SidebarHead("Your labels", tail=[TextAction("Edit labels", EDIT_LABELS)], compact=phone))
     for k in range(len(st.labels)):
         var l = st.labels[k]
-        var row = GroupItem(HashMark(), l, String(count_label(st, l)), LABEL_GROUP + k, lib.group == "label:" + l)
+        var row = SidebarItem(l, String(count_label(st, l)), LABEL_GROUP + k, lib.group == "label:" + l, hash=True, compact=phone)
         items.append(DropTarget(row, DROP_LABEL + k).fill().tag("label-" + l))
-    items.append(GroupItem(Icon("plus", 15), "New label", "", EDIT_LABELS))
-    return VStack(items^, spacing=1).align(START).width(228).padding(6, 10).tag("groups")
+    items.append(SidebarItem("New label", "", EDIT_LABELS, icon="plus", quiet=True, compact=phone))
+    return Sidebar(items^, compact=phone)
 
 
 def card_of(r: Row, row: Int, hue: Int, lib: Library) -> View:
-    var top = HStack(Checkbox("", lib.is_ticked(r.name), TICK + row).tag("tick-" + String(row)), HueDot(hue, 9),
-                     NameButton(r.name, OPEN + row), Spacer(), StateWord(r.state_label, r.running), spacing=8).align(CENTER).fill()
-    var k3 = HStack(StatTile("tok/s", r.tps, "", ""), StatTile("Memory", r.memory, "", ""), StatTile("Requests", r.requests, "", ""), spacing=6).fill()
+    var top = HStack(Checkbox("", lib.is_ticked(r.name), TICK + row).tag("tick-" + String(row)), SignalDot(hue),
+                     NameLink(r.name, OPEN + row), Spacer(), StatusMark(r.state_label, GOOD if r.running else QUIET, live=r.running)).align(CENTER).fill()
+    var k3 = StatGrid([StatTile("tok/s", r.tps, "", ""), StatTile("Memory", r.memory, "", ""), StatTile("Requests", r.requests, "", "")], columns=3)
     var items: List[View] = [top^, k3^, tags_view(r)]
-    return Draggable(Panel(items^, spacing=10).fill(), r.name).tag("card-" + r.name)
+    return Draggable(Panel(items^), r.name).tag("card-" + r.name)
 
 
 def tick_bar(st: Store, lib: Library) -> View:
@@ -221,7 +227,7 @@ def tick_bar(st: Store, lib: Library) -> View:
     items.append(Spacer())
     items.append(FlatButton("Clear", CLEAR))
     items.append(FlatButton("Remove " + String(n), REMOVE_TICKED, icon="trash-2", danger=True))
-    return HStack(items^, spacing=6).align(CENTER).padding(10, 18).fill().tag("selbar")
+    return SelectionBar(items^)
 
 
 def home_view(st: Store, lib: Library, phone: Bool) -> View:
@@ -235,14 +241,13 @@ def home_view(st: Store, lib: Library, phone: Bool) -> View:
     var sub = String(len(all)) + " model" + ("" if len(all) == 1 else "s") + " · " + String(running) + " running" + \
         ((" · " + fmt(hw.used_gb, 1) + " of " + fmt(hw.total_gb, 1) + " GB GPU") if hw.present else String("")) + " · " + short_endpoint(st.endpoint_now())
     var tools: List[View] = []
-    if phone:
-        tools.append(Button("Add a model", ADD, ICON_ONLY, icon="plus"))
-    else:
-        tools.append(SourceLine("mxc ls"))
-        tools.append(Button("Add a model", ADD, PROMINENT, icon="plus"))
-    var header = PageHeader("layout-grid", "My models", String(len(all)), sub, tools^)
-    var search = SearchField(lib.q, "Search " + String(len(all)) + " model" + ("" if len(all) == 1 else "s") + " by name, kind or #label", SEARCH).grow()
-    var hbar = HStack(search, SegButtons(["List", "Cards"], ["list", "layout-grid"], 1 if lib.cards else 0, VIEW), spacing=10).align(CENTER).padding(12, 18).fill()
+    if not phone:
+        tools.append(CommandLine("mxc ls"))
+    tools.append(PrimaryButton("Add a model", ADD, icon="plus", compact=phone))
+    var header = PageHeader("layout-grid", "My models", String(len(all)), sub, tools^, compact=phone)
+    var search = SearchField(lib.q, "Search " + String(len(all)) + " model" + ("" if len(all) == 1 else "s") + " by name, kind or #label", SEARCH,
+                             key="" if phone else "/").grow()
+    var filters = FilterBar([search^, SegmentButtons(["List", "Cards"], ["list", "layout-grid"], 1 if lib.cards else 0, VIEW, icons_only=phone)], compact=phone)
     # the results
     var shown = List[Row]()
     for m in rows:
@@ -250,16 +255,15 @@ def home_view(st: Store, lib: Library, phone: Bool) -> View:
     var hues = List[Int]()  # colorOf: one colour per model, in the order they're first seen (core.js SIGNAL)
     for k in range(len(shown)):
         hues.append(k % 5 + 1)
-    var results: List[View] = [HStack(MonoLine(group_name(lib.group) + " · " + String(len(shown)) + ((" matching “" + lib.q + "”") if lib.q != "" else String(""))),
-                                      Spacer(), MonoLine("" if phone else "tick models to label many at once, or drag them onto a label", quiet=True),
-                                      spacing=10).align(CENTER).padding(12, 18).fill()]
+    var results: List[View] = [ListCount(group_name(lib.group) + " · " + String(len(shown)) + ((" matching “" + lib.q + "”") if lib.q != "" else String("")),
+                                         "" if phone else "tick models to label many at once, or drag them onto a label", compact=phone)]
     if len(shown) == 0:
-        results.append(QuietText("Nothing matches. Try another group or clear the search.").padding(30, 18))
+        results.append(ListEmpty("Nothing matches. Try another group or clear the search."))
     elif lib.cards:
         var cards: List[View] = []
         for k in range(len(shown)):
             cards.append(card_of(shown[k], k, hues[k], lib))
-        results.append(Grid(cards^, columns=1 if phone else 4, spacing=10).padding(4, 18).fill().tag("cards"))
+        results.append(ListBody(HStack(CardGrid(cards^, 1 if phone else 4), spacing=0).fill().tag("cards"), compact=phone))  # (tag cards: M5 finds it)
     else:
         var cells: List[View] = []
         var ticked = List[Bool]()
@@ -267,10 +271,10 @@ def home_view(st: Store, lib: Library, phone: Bool) -> View:
             ref r = shown[k]
             ticked.append(lib.is_ticked(r.name))
             cells.append(name_cell(r, k, hues[k], lib))
-            var state: List[View] = [StateWord(r.state_label, r.running)]
+            var state: List[View] = [StatusMark(r.state_label, GOOD if r.running else QUIET, live=r.running, cell=True)]
             if r.note != "":
                 state.append(MonoLine(r.note))
-            cells.append(VStack(state^, spacing=2).align(START))
+            cells.append(CellStack(state^))
             if phone:
                 cells.append(Text(r.tps))
             else:
@@ -280,17 +284,13 @@ def home_view(st: Store, lib: Library, phone: Bool) -> View:
                 cells.append(Text(r.tps))
                 cells.append(Text(r.ttft))
                 cells.append(Text(r.requests))
-                cells.append(MonoLine(r.access))
+                cells.append(MonoText(r.access))
         var cols: List[String] = ["Model", "State", "tok/s"] if phone else ["Model", "State", "Kind · labels", "Size", "Memory", "tok/s", "First token", "Requests", "Access"]
-        results.append(VStack(Table(cols, cells, align="LLR" if phone else "LLLRRRRRL", ticked=ticked, on_tick=TICK, on_tick_all=TICK_ALL).fill().tag("models"),
-                              spacing=0).padding(0, 18 if not phone else 12).fill())
-    var body: List[View] = [header^, Divider().fill(), hbar^, Divider().fill()]
-    if phone:
-        body.append(groups_column(st, lib))  # (on a phone the column is a row of chips: here, the same rows above the list)
-        body.append(Divider().fill())
-        body.append(VStack(results^, spacing=0).align(START).fill())
-    else:
-        body.append(HStack(groups_column(st, lib), Divider(), VStack(results^, spacing=0).align(START).grow(), spacing=0).align(START).grow().fill())
+        # (the dense table: one line per cell, the name over its repo, the labels wrapping)
+        results.append(ListBody(Table(cols, cells, align="LLR" if phone else "LLLRRRRRL", ticked=ticked, on_tick=TICK, on_tick_all=TICK_ALL,
+                                      dense=True, fit="N" if phone else "NCW", compact=phone).tag("models"), compact=phone))
+    var body: List[View] = [header^, Divider().fill(), filters^, Divider().fill(),
+                            SplitView(groups_column(st, lib, phone), VStack(results^, spacing=0).align(START), compact=phone)]
     if len(lib.ticked) > 0:
         body.append(Divider().fill())
         body.append(tick_bar(st, lib))

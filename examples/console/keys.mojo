@@ -8,9 +8,16 @@ from mojoui.app import Event
 from mojoui.effects import Every
 from mojoui.json import Json, json_string
 from mojoui.table import Table
+from mojoui.lists import SideScroll
 from mojoui.clock import wall_seconds
-from mojoui.pagekit import PageHeader, BareCard, CardHead, CardBody, CardFoot, SmallButton, QuietText, MonoLine, MonoStrong
-from mojoui.adminkit import StateMark, ActionButton, SecretBox, ToneSquare, GOOD, QUIET, TONAL, FILL, TEXT, DANGER
+from mojoui.header import PageHeader, IconSquare, ActionGroup
+from mojoui.panel import Card, CardHead, CardBody, CardFoot, CardStack, CardNote
+from mojoui.buttons import SmallButton, ButtonRow, TONAL, FILL, TEXT, DANGER
+from mojoui.words import QuietText, MonoLine, MonoStrong, ErrorLine, CellText
+from mojoui.marks import StatusMark, GOOD, QUIET
+from mojoui.copy import SecretField
+from mojoui.fields import ShortField
+from mojoui.feedback import EmptyState
 from api import Api
 from data import date_time, real_or
 from msgs import *
@@ -220,45 +227,42 @@ def message_of(text: String, default: String) -> String:
 
 def keys_header(phone: Bool) -> View:
     return PageHeader("key-round", "API keys", "", "shared by every model · requests without a valid key get 401",
-                      [SmallButton("New key", KEYS_NEW, "plus", filled=True)], hue=4)
+                      [SmallButton("New key", KEYS_NEW, "plus", FILL)], hue=4)
 
 
 def keys_view(kp: KeysPage, phone: Bool) -> View:
     var now = wall_seconds()
     var cards: List[View] = []
     if kp.form:
-        var body: List[View] = [TextField(kp.name, placeholder="App name, e.g. my-app", on_change=KEYS_NAME).width(260 if not phone else 300)]
+        var body: List[View] = [ShortField(kp.name, "App name, e.g. my-app", KEYS_NAME, compact=phone)]
         if kp.form_error != "":
-            body.append(Text(kp.form_error).tag("mark-bad"))
-        body.append(HStack(ActionButton("Create key", KEYS_CREATE, "plus", FILL), ActionButton("Cancel", KEYS_CANCEL, "", TEXT), spacing=8).align(CENTER))
-        cards.append(BareCard([CardHead("New key"), CardBody(body^, spacing=12), CardFoot("mxc keys new <app>")]).fill())
+            body.append(ErrorLine(kp.form_error))
+        body.append(ButtonRow([SmallButton("Create key", KEYS_CREATE, "plus", FILL), SmallButton("Cancel", KEYS_CANCEL, "", TEXT)]))
+        cards.append(Card([CardHead("New key"), CardBody(body^), CardFoot("mxc keys new <app>")]))
     if kp.secret != "":
-        var head = HStack(ToneSquare("key-round", GOOD), Text(kp.secret_title).tag("card-title"), Spacer(), Button("Done", KEYS_DONE, ICON_ONLY, icon="x"),
-                          spacing=10).align(CENTER).fill().tag("card-head")
-        cards.append(BareCard([head^, CardBody([QuietText(kp.secret_note), HStack(SecretBox(kp.secret), SmallButton("Copy", KEYS_COPY, "copy"), spacing=10).align(CENTER).fill()],
-                                               spacing=12), CardFoot(kp.secret_twin)]).fill())
+        var head = CardHead(kp.secret_title, lead=[IconSquare("key-round", tone=GOOD)], tail=[Button("Done", KEYS_DONE, ICON_ONLY, icon="x")])
+        cards.append(Card([head^, CardBody([QuietText(kp.secret_note), SecretField(kp.secret, "Copy", KEYS_COPY)]), CardFoot(kp.secret_twin)]))
     var table: List[View] = [CardHead("Keys", "prefix only")]
     if kp.loaded and len(kp.rows) == 0 and kp.error == "":
-        table.append(VStack(Text("No keys yet").tag("strong"), QuietText("Create one for each app that calls your models."),
-                            SmallButton("New key", KEYS_NEW, "plus", filled=True), spacing=8).align(CENTER).padding(26, 16).fill())
+        table.append(EmptyState("key-round", "No keys yet", "Create one for each app that calls your models.", "New key", KEYS_NEW))
     elif not kp.loaded:
-        table.append(QuietText("Could not load keys: " + kp.error if kp.error != "" else "Loading…").padding(12, 16))
+        table.append(CardNote("Could not load keys: " + kp.error if kp.error != "" else "Loading…"))
     else:
         var cells: List[View] = []
         for k in range(len(kp.rows)):
             ref r = kp.rows[k]
             var active = not r.revoked
-            cells.append(MonoStrong(r.app))
-            cells.append(MonoLine(r.prefix + "…"))
-            cells.append(QuietText(date_time(r.created_at) if r.created_at > 0 else String("—")))
-            cells.append(QuietText(ago(r.last_used_at, now)))
-            cells.append(StateMark("active" if active else "revoked", GOOD if active else QUIET))
+            cells.append(CellText(r.app, mono=True, strong=True))
+            cells.append(CellText(r.prefix + "…", mono=True, quiet=True))
+            cells.append(CellText(date_time(r.created_at) if r.created_at > 0 else String("—"), quiet=True))
+            cells.append(CellText(ago(r.last_used_at, now), quiet=True))
+            cells.append(StatusMark("active" if active else "revoked", GOOD if active else QUIET))
             var rot = kp.is_armed(r.app, ROTATE)
             var rev = kp.is_armed(r.app, REVOKE)
-            cells.append(HStack(Spacer(), ActionButton("Click again to rotate: the old key stops working now" if rot else "Rotate", KEYS_ROTATE + k, "rotate-cw", TONAL),
-                                ActionButton("Click again to revoke" if rev else "Revoke", KEYS_REVOKE + k, "trash-2", DANGER, armed=rev, off=not active),
-                                spacing=6).align(CENTER).fill())
-        table.append(Table(["App", "Key", "Created", "Last used", "Status", ""], cells, align="LLLLLR").fill().tag("keys"))
+            cells.append(HStack(Spacer(), ActionGroup([SmallButton("Click again to rotate: the old key stops working now" if rot else "Rotate", KEYS_ROTATE + k, "rotate-cw", TONAL),
+                                                       SmallButton("Click again to revoke" if rev else "Revoke", KEYS_REVOKE + k, "trash-2", DANGER, armed=rev, off=not active)]),
+                                spacing=0).align(CENTER).fill())
+        table.append(SideScroll(Table(["App", "Key", "Created", "Last used", "Status", ""], cells, align="LLLLLL").fill().tag("keys")))
     table.append(CardFoot("mxc keys ls"))
-    cards.append(BareCard(table^).fill())
-    return VStack(cards^, spacing=14).align(START).padding(16, 16).fill()
+    cards.append(Card(table^))
+    return CardStack(cards^)

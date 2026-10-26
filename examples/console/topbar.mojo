@@ -2,10 +2,10 @@
 # thing happening now), the four places. On a phone the brand's word, the earlier crumbs and the places' words fold
 # away (the places into ⋯).
 
-from mojoui.view import View, Text, Button, Icon, HStack, VStack, Spacer, SUBTLE, ICON_ONLY, CENTER
+from mojoui.view import View, Text, Button, Icon, HStack, VStack, Spacer, SUBTLE, ICON_ONLY, CENTER, START
 from mojoui.breadcrumbs import Breadcrumbs
 from mojoui.route import Place, crumbs_for
-from mojoui.pagekit import Mark, Rule, PlaceLink, QuietText, BrandName
+from mojoui.shell import AppBar, Brand, BarRule, NavLink, NavLinks, NavMore
 from mojoui.beacon import Beacon
 from data import Store, hardware, fmt, rounded
 from msgs import HOME, CRUMB, PLACE, MORE, RING
@@ -13,6 +13,7 @@ from msgs import HOME, CRUMB, PLACE, MORE, RING
 comptime PLACE_KEYS: List[String] = ["keys", "gateway", "security", "settings"]
 comptime PLACE_TITLES: List[String] = ["Keys", "Gateway", "Security", "Settings"]
 comptime PLACE_ICONS: List[String] = ["key-round", "route", "lock", "sliders-horizontal"]
+comptime PLACE_HUES: List[Int] = [3, 2, 8, 0]  # (nav.js: data-3, data-2, warn, ink-2)
 
 
 @fieldwise_init
@@ -55,29 +56,24 @@ def beacon_state(st: Store) -> BeaconState:
 
 
 def top_bar(place: Place, st: Store, phone: Bool) -> View:
-    var items: List[View] = []
-    var brand: List[View] = [Mark("omx")]
-    if not phone:
-        brand.append(BrandName("omxconsole", HOME))
-    items.append(HStack(brand^, spacing=9).align(CENTER).padding(6, 8).tag("brand"))
+    var items: List[View] = [Brand("omx", "" if phone else "omxconsole", HOME)]
     var crumbs = crumbs_for(place)
+    items.append(BarRule(compact=phone))
     if phone:
-        var last: List[String] = [crumbs[len(crumbs) - 1]]
-        items.append(Breadcrumbs(last, on_tap=CRUMB + len(crumbs) - 1, mono_last=place.page == "model").grow())
+        items.append(Breadcrumbs(crumbs, on_tap=CRUMB, mono_last=place.page == "model", compact=True).grow())
     else:
-        items.append(Rule(22))
         items.append(Breadcrumbs(crumbs, on_tap=CRUMB, mono_last=place.page == "model"))
         items.append(Spacer())
     var b = beacon_state(st)
     var pct = b.percent
     var ring = RING if b.kind == "pull" or b.kind == "port" else -1
-    items.append(Beacon(b.label, "" if phone else b.value, ring, Int(pct * 10) if pct >= 0 else 0, live=b.kind == "running" or b.kind == "crash"))
+    items.append(Beacon(b.label, "" if phone else b.value, ring, Int(pct * 10) if pct >= 0 else 0, live=b.kind == "running" or b.kind == "crash", compact=phone))
     if phone:
-        items.append(Button("Keys, Gateway, Security, Settings", MORE, ICON_ONLY, icon="ellipsis").tag("more"))
+        items.append(NavMore("Keys, Gateway, Security, Settings", MORE))
     else:
-        var places: List[View] = []
+        var links: List[View] = []
         var keys = materialize[PLACE_KEYS]()
         for k in range(4):
-            places.append(PlaceLink(materialize[PLACE_TITLES]()[k], materialize[PLACE_ICONS]()[k], PLACE + k, here=place.page == keys[k]))
-        items.append(HStack(places^, spacing=2).align(CENTER).tag("places"))
-    return HStack(items^, spacing=6).align(CENTER).height(60).padding(0, 8 if phone else 14).fill().tag("topbar")
+            links.append(NavLink(materialize[PLACE_TITLES]()[k], materialize[PLACE_ICONS]()[k], PLACE + k, here=place.page == keys[k], hue=materialize[PLACE_HUES]()[k]))
+        items.append(NavLinks(links^))
+    return AppBar(items^, compact=phone)

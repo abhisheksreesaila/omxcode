@@ -616,6 +616,39 @@ def m4_state(out, host):
     return problems
 
 
+# The app is a showcase that composes the framework (owner 2026-10-25, D-413): examples/console sets no sizes, spacing,
+# padding, colours or fonts of its own and reaches no host or drawing module; the look is the theme's, the parts mojoui's.
+APP_LINT = [
+    (r"\.(padding|width|height|min_width|max_width)\(", "sizes or pads a view itself"),
+    (r"\bspacing=\s*[1-9]", "spaces a stack in points (use the theme's SPACE_… tokens or a component)"),
+    (r"\bheight=\s*[1-9]", "gives a view a height in points"),
+    (r"0x[0-9A-Fa-f]{6,8}\b|\bhx\(|\brgba?\(|\"#[0-9a-fA-F]{3,8}\"", "writes a colour"),
+    (r"\"(Geist|Inter|JetBrains)|\bfont\s*=", "names a font"),
+    (r"mojoui\.hosts|mojoui\.draw\b", "imports a host or drawing module"),
+]
+
+
+def app_lint(folder="examples/console"):
+    """examples/console composes mojoui and its theme only: [problems], one per line that breaks a rule (comments aside)."""
+    import re
+    out = []
+    for f in sorted((ROOT / folder).glob("*.mojo")):
+        for n, line in enumerate(f.read_text().splitlines(), 1):
+            if line.lstrip().startswith(("\"\"\"", "'")):
+                continue
+            code = ""  # (the line with its comment cut and its strings blanked, but for a colour or a font name)
+            for m in re.finditer(r'"[^"]*"|#.*$|[^"#]+', line):
+                t = m.group(0)
+                if t.startswith("#"):
+                    break
+                code += t if not t.startswith('"') or re.fullmatch(r'"(#[0-9a-fA-F]{3,8}|(Geist|Inter|JetBrains)[^"]*)"', t) else '""'
+
+            for pat, why in APP_LINT:
+                if re.search(pat, code):
+                    out.append(f"{f.relative_to(ROOT)}:{n} {why}: {line.strip()[:90]}")
+    return out
+
+
 def m4():
     """The console's components: in mojoui/, each with its own test, on GTK and the web, built for the Mac: Table (rows,
     tick boxes), CodeBlock with Copy, LogView (pinned to the end), Timeline (stages, elapsed), Breadcrumbs, Chip/Badge,
@@ -638,6 +671,7 @@ def m4():
             problems.append(f"the sampler doesn't use {ctor[:-1]}")
     roles, found = g32.lint()
     problems += [f"lint: {p}" for p in found]
+    problems += [f"app lint: {p}" for p in app_lint()]
     c = g30.run([sys.executable, "scripts/components.py", "--check"])
     if c.returncode != 0:
         problems.append(c.stdout.strip()[-200:])
@@ -938,7 +972,7 @@ def m5():
                       (f'"{CONSOLE_URL_ENV}"', f"the base URL from ${CONSOLE_URL_ENV}"), ("Every(", "App.every polls")]:
         if need not in src:
             problems.append(f"examples/console has no {why} ({need})")
-    for name in ("dragdrop", "embed", "pagekit"):  # the components M5 added to mojoui/, each with its own test
+    for name in ("dragdrop", "embed", "shell", "header", "sidebar", "panel", "marks", "words", "buttons", "lists", "document"):  # the components M5 added to mojoui/, each with its own test (pagekit split into generic modules by M7, D-414)
         err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}")
         if err:
             problems.append(err[:300])
@@ -1391,7 +1425,7 @@ def m6():
                   "admin key; Mac builds. " + tail)
 
 
-M6_TESTS = ["catalog", "adminkit"]  # the components M6 added to mojoui/ (tests/test_<name>.mojo), filled as they're added
+M6_TESTS = ["copy", "fields", "results", "meter", "feedback"]  # the components M6 added to mojoui/ (tests/test_<name>.mojo; catalog and adminkit made generic by M7, D-414)
 
 
 # M7: identical. The web in pixels against the original (M0's shots and tolerance); GTK and the Mac in boxes against the

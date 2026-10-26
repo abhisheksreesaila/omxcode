@@ -111,13 +111,22 @@ COMPOSITES = [
     ("Skeleton", "mojoui/skeleton.mojo", ["VStack", "Themes on top (themes/, or yours)"], "Skeleton("),
     ("Markdown", "mojoui/markdown.mojo", ["Text", "VStack", "HStack", "Card", "Themes on top (themes/, or yours)"], "Markdown("),
     ("Sparkline", "mojoui/sparkline.mojo", ["Canvas"], "SparklineView("),
-    # the OMX Console's pages (goal 33 M5)
-    ("Page kit (header, groups column, stat tiles, facts, tabs, flat buttons)", "mojoui/pagekit.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
+    # page components (goal 33 M5–M7, made generic in M7: D-414)
+    ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
+    ("Page header (icon square, pill tabs, segments, tab header)", "mojoui/header.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
+    ("Sidebar (heads, rows to pick, chips when compact)", "mojoui/sidebar.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Sidebar("),
+    ("Cards and panels (head, body, foot, stat tiles, facts)", "mojoui/panel.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PanelGrid("),
+    ("Marks (hue and signal dots, status marks, hued icons)", "mojoui/marks.mojo", ["Text", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "StatusMark("),
+    ("Words (quiet, strong, mono lines, command lines)", "mojoui/words.mojo", ["Text", "HStack", "Themes on top (themes/, or yours)"], "CommandLine("),
+    ("Buttons (flat, primary, small looks, text actions, links, Back)", "mojoui/buttons.mojo", ["Button", "Button with an icon", "Themes on top (themes/, or yours)"], "SmallButton("),
+    ("Lists (split view, count line, name cells, selection bar)", "mojoui/lists.mojo", ["Text", "Button", "VStack", "HStack", "Divider", "Themes on top (themes/, or yours)"], "SplitView("),
+    ("Document (markdown and code cells, outline, three columns)", "mojoui/document.mojo", ["Text", "Button", "Scroll", "Card", "Themes on top (themes/, or yours)"], "DocLayout("),
     ("Beacon (the one thing happening now)", "mojoui/beacon.mojo", ["Canvas", "Text", "HStack", "Themes on top (themes/, or yours)"], "Beacon("),
-    # the OMX Console's other screens (goal 33 M6: Keys, Gateway, Security, Settings)
-    ("Admin kit (copy foot, state marks, small action buttons, endpoint row, secret box, warning box)", "mojoui/adminkit.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Clipboard", "Themes on top (themes/, or yours)"], "ActionButton("),
-    # Add a model (goal 33 M6)
-    ("Catalog search (outlined field, filter chips, result rows with fit marks, meter, empty state, Back)", "mojoui/catalog.mojo", ["TextField", "Button", "Text", "Icon", "ProgressBar", "VStack", "HStack", "Themes on top (themes/, or yours)"], "ResultRow("),
+    ("Copy (copy row, labeled value, code panel, secret)", "mojoui/copy.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Clipboard", "Themes on top (themes/, or yours)"], "CopyRow("),
+    ("Fields (search box, outlined field, filter chips, short field)", "mojoui/fields.mojo", ["TextField", "Button", "Text", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "OutlinedField("),
+    ("Search results (result rows, source badges, suggestions)", "mojoui/results.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "ResultRow("),
+    ("Meter (meter, usage bar, chart rows)", "mojoui/meter.mojo", ["Text", "ProgressBar", "Canvas", "HStack", "Themes on top (themes/, or yours)"], "Meter("),
+    ("Feedback (note, warning, empty state)", "mojoui/feedback.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "EmptyState("),
     ("LogPane (a live log with its head, Hide log, coloured lines)", "mojoui/logview.mojo", ["Scroll pinned to its end", "Text", "Button", "Icon", "Themes on top (themes/, or yours)"], "LogPane("),
 ]
 

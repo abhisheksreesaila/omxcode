@@ -3,7 +3,11 @@
 
 from mojoui.view import View, Text, Button, TextField, VStack, HStack, Spacer, CENTER, START
 from mojoui.logview import LogView
-from mojoui.pagekit import MonoLine, FlatButton, BareCard, CardFoot, SmallButton
+from mojoui.panel import Card, CardFoot, TabBody
+from mojoui.header import SubHeader, ToolRow
+from mojoui.words import MonoLine
+from mojoui.buttons import SmallButton
+from mojoui.fields import ShortField
 from msgs import LOG_FOLLOW, LOG_COPY, LOG_FILTER
 
 comptime MAX_LINES = 2000
@@ -61,7 +65,7 @@ struct Logs(Copyable, Movable):
         return out
 
 
-def logs_view(lg: Logs, model: String, pane_height: Int, phone: Bool) -> View:
+def logs_view(lg: Logs, model: String, phone: Bool) -> View:
     var t = lg.lines()
     var shown = t[0].copy()
     var total = t[1]
@@ -69,10 +73,9 @@ def logs_view(lg: Logs, model: String, pane_height: Int, phone: Bool) -> View:
     if lg.error == "" and lg.loaded:
         count = (String(len(shown)) + " of " + String(total) + " lines") if String(lg.needle.strip()) != "" else (String(total) + " line" + ("" if total == 1 else "s"))
     var empty = String("Loading…") if not lg.loaded else (lg.error if lg.error != "" else ("No line matches the filter." if total > 0 else "Nothing in this log yet."))
-    var head = HStack(MonoLine(model + " · max serve"), Spacer(), SmallButton("Pause" if lg.follow else "Follow", LOG_FOLLOW, "pause" if lg.follow else "play"),
-                      SmallButton("Copy", LOG_COPY, "copy"), spacing=8).align(CENTER).fill()
-    var bar = HStack(TextField(lg.needle, placeholder="Filter lines", on_change=LOG_FILTER).width(340 if not phone else 270), Spacer(), MonoLine(count),
-                     spacing=12).align(CENTER).fill()
-    var pane = BareCard([LogView(shown.copy() if lg.error == "" else List[String](), height=pane_height, empty=empty, exact=True).fill(),
-                         CardFoot("mxc logs " + model + " -f", tail="the last 8 KB · refreshes every 2 s")]).fill()
-    return VStack(head, bar, pane, spacing=12).align(START).padding(10, 18).fill()
+    var head = SubHeader(model + " · max serve", [SmallButton("Pause" if lg.follow else "Follow", LOG_FOLLOW, "pause" if lg.follow else "play"),
+                                                  SmallButton("Copy", LOG_COPY, "copy")], compact=phone)
+    var bar = ToolRow([ShortField(lg.needle, "Filter lines", LOG_FILTER, compact=phone, filter=True), Spacer(), MonoLine(count)])
+    var pane = Card([LogView(shown.copy() if lg.error == "" else List[String](), height=0, empty=empty, exact=True).grow(),
+                     CardFoot("mxc logs " + model + " -f", tail="the last 8 KB · refreshes every 2 s")]).grow()
+    return TabBody(head^, [bar^, pane^], compact=phone, tight=True).grow()

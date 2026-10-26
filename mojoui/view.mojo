@@ -124,6 +124,26 @@ comptime CENTER = 2
 comptime END = 3
 comptime STRETCH = 4  # align only
 comptime BETWEEN = 5  # justify only
+comptime BASELINE = 6  # align only: a row's children on their first line's baseline (a number and its unit; GTK and the Mac: centred)
+
+# The theme's spacing scale (D-412): pass these as a stack's spacing or a view's padding and the runtime puts the theme's
+# value in (Look.space; with no theme 2, 4, 8, 12, 16, 24, 32 points). An app that spaces with them changes with its theme
+# and writes no sizes of its own.
+comptime SPACE_XXS = -1
+comptime SPACE_XS = -2
+comptime SPACE_S = -3
+comptime SPACE_M = -4
+comptime SPACE_L = -5
+comptime SPACE_XL = -6
+comptime SPACE_XXL = -7
+
+
+def space_value(v: Int, scale: List[Int]) -> Int:
+    """A spacing or padding token (SPACE_…) as points on `scale`; a value of 0 or more is itself."""
+    if v >= 0:
+        return v
+    var k = -v - 1
+    return scale[k] if k < len(scale) else 0
 
 
 struct Node(Copyable, Movable, Equatable, Writable):
@@ -559,24 +579,29 @@ def HStack(items: List[View], spacing: Int = 8) -> View:
     return _container(Node(HSTACK, spacing=spacing), items)
 
 
-def Grid(items: List[View], columns: Int, spacing: Int = 12) -> View:
-    """Items in rows of `columns`."""
-    return _container(Node(GRID, spacing=spacing, value=max(columns, 1)), items)
+def Grid(items: List[View], columns: Int, spacing: Int = 12, fit: Bool = False) -> View:
+    """Items in rows of `columns`, the columns equal; `fit`: every column but the last as wide as its widest item, the
+    last the rest (a definition list's keys and values; style 1)."""
+    return _container(Node(GRID, style=1 if fit else 0, spacing=spacing, value=max(columns, 1)), items)
 
 
 def Scroll(content: View, height: Int = 320, pinned: Bool = False) -> View:
-    """Shows `content`, scrolling when it's taller than `height` points. `pinned`: it stays at its end as the content
+    """Shows `content`, scrolling when it's taller than `height` points (0: as tall as its stack gives it: grow() it). `pinned`: it stays at its end as the content
     grows (a log), unless the person scrolls up; back at the end, it follows again."""
     var list = List[View]()
     list.append(content.copy())
     return _container(Node(SCROLL, size=height, value=1 if pinned else 0), list)
 
 
-def TableGrid(var cells: List[View], columns: Int, align: String = "", selected: String = "") -> View:
+def TableGrid(var cells: List[View], columns: Int, align: String = "", selected: String = "", dense: Bool = False,
+              var limits: List[String] = [], compact: Bool = False) -> View:
     """The raw table (mojoui.table.Table builds it): `cells` = the header's `columns` cells, then the body's, row by row;
-    `align` one letter per column (L, R); `selected` one letter per body row ("1": selected)."""
+    `align` one letter per column (L, R); `selected` one letter per body row ("1": selected); `dense`: the dense cells
+    (style 1; 2 dense and compact); `limits` per column: "" none, "W" its cells wrap, a number its cells' widest (they stay on one line, cut),
+    "T" a tick column (as narrow as its box); a trailing "S": its cells snug (role table-dense-snug). Table writes C and N
+    for the theme's widths, which the runtime turns into numbers (mojoui.look.resolve_layout)."""
     var cols = max(columns, 1)
     var a = String("")
     for k in range(cols):
         a += String(align[byte=k]) if k < align.byte_length() and String(align[byte=k]) == "R" else String("L")
-    return _container(Node(TABLE, selected, value=cols, hint=a), cells)
+    return _container(Node(TABLE, selected, style=(2 if compact else 1) if dense else 0, value=cols, options=limits^, hint=a), cells)

@@ -2,8 +2,8 @@
 # hand-written rules said (Liquid's toolbar: glass, 18 px corners, 10 px in from the sides, 6 px inside).
 #   scripts/mxbuild.sh -I . tests/test_look.mojo -o build/test_look && build/test_look
 from std.testing import assert_equal, assert_true, assert_false
-from mojoui.theme import Look
-from mojoui.look import look_gtk_css, look_web_css, css_color
+from mojoui.theme import Look, Surface
+from mojoui.look import look_gtk_css, look_web_css, css_color, surface_rule, text_rule
 from mojoui.canvas import rgba
 from themes.liquid import liquid
 from themes.skins import ledger
@@ -22,7 +22,7 @@ def main() raises:
     var gtk = look_gtk_css(l.look, "window.liquid ")
     var web = look_web_css(l.look, "body.liquid ")
     assert_true("window.liquid .mui-tag-toolbar { background: rgba(255,255,255,0.62); border-radius: 18px; margin: 0 10px 0; padding: 6px;" in gtk, gtk)
-    assert_true("body.liquid [data-tag=toolbar], body.liquid [data-role~=toolbar] { background: rgba(255,255,255,0.62); border-radius: 18px; margin: 0 10px 0; padding: 6px; box-sizing: border-box;" in web, web)
+    assert_true("body.liquid [data-tag=toolbar], body.liquid button[data-tag=toolbar], body.liquid [data-role~=toolbar] { background: rgba(255,255,255,0.62); border-radius: 18px; margin: 0 10px 0; padding: 6px; box-sizing: border-box;" in web, web)
     assert_true("backdrop-filter: blur(24px)" in web and "backdrop-filter" not in gtk, "the blur is the web's alone")
     assert_true("border-radius: 0 0 14px 14px" in gtk, "the status bar's bottom corners")
     assert_true("window.liquid .mui-tag-status-bar label, window.liquid label.mui-tag-status-bar { font-family: 'Inter', sans-serif; font-size: 12px;" in gtk, gtk)
@@ -44,13 +44,24 @@ def main() raises:
     assert_true("body.omxqua button:active, body.omxqua label.picker:active { transform: scale(0.96); }" in qweb, qweb)
     assert_true("transition: transform 300ms linear(0, 0.02, 0.071," in qweb, "the web takes the spring itself")
     assert_true("window.omxqua button:active { transform: scale(0.96); }" in qgtk and "300ms cubic-bezier(0.2, 0, 0, 1)" in qgtk, qgtk)
-    assert_true("body.omxqua [data-tag=tile], body.omxqua [data-role~=tile] { background: rgb(255,255,255); border-radius: 12px; box-shadow: 0 1px 2px rgba(20,16,10,0.06), 0 0 0 1px rgba(20,16,10,0.04);" in qweb, qweb)
+    assert_true("body.omxqua [data-tag=tile], body.omxqua button[data-tag=tile], body.omxqua [data-role~=tile] { background: rgb(255,255,255); border-radius: 12px; box-shadow: 0 1px 2px rgba(20,16,10,0.06), 0 0 0 1px rgba(20,16,10,0.04);" in qweb, qweb)
     assert_true("font-family: 'Geist Mono', monospace" in qweb, "mono labels")
     # a table's cells wear roles without being views (data-role, two at once: "table-cell table-num"); a tagged button's title wears its role's type
-    assert_true("body.omxqua [data-tag=table-head], body.omxqua [data-role~=table-head] { background: transparent; padding: 8px 16px;" in qweb, qweb)
-    assert_true("body.omxqua button[data-tag=crumb], body.omxqua [data-role~=crumb] .text { font-size: 13.5px; font-weight: 550;" in qweb, qweb)
+    assert_true("body.omxqua [data-tag=table-head], body.omxqua button[data-tag=table-head], body.omxqua [data-role~=table-head] { background: transparent; padding: 8px 16px;" in qweb, qweb)
+    assert_true("body.omxqua button[data-tag=crumb], body.omxqua :where([data-role~=crumb]) .text, body.omxqua [data-role~=crumb] { font-size: 13.5px; font-weight: 550;" in qweb, qweb)
     assert_true("transform: scale" not in look_web_css(l.look, "body.liquid "), "Liquid's look has no press of its own")
     var night = omxqua(True)
     assert_equal(night.id, "omxqua-dark")
     assert_true("body.omxqua-dark { background: #0b0b0d;" in night.web_css, "night: surface-0")
+    # goal 33 M7 (D-410): a surface's optional fields reach the web's and GTK's rules
+    var s = Surface("probe", 0, -1, -1, -1, -1, -1, 0, 14, 0, [], 0, 0, 0, -1, "", 0, 0, 0, 0, -1, 0, 0, False, pad_left=12, pad_right=16, gap=10, height=40,
+                    icon_size=15, icon_stroke=1.75, text_align=2, width=110, max_width=980, scrolls_x=True)
+    var w = surface_rule(s, True)
+    assert_true("padding: 0 16px 0 12px;" in w and "gap: 10px !important;" in w and "height: 40px; min-height: 40px;" in w, w)
+    assert_true("width: 110px; min-width: 110px; flex-shrink: 0;" in w and "flex-wrap: nowrap; overflow-x: auto;" in w and "justify-content: center;" in w, w)
+    assert_true("border-spacing: 10px;" in surface_rule(s, False), "GTK spaces a box with border-spacing")
+    assert_true("line-height: normal;" in text_rule(s, True) and "text-align: center;" in text_rule(s, True), text_rule(s, True))
+    var probe = Look(Look.none().type, Look.none().controls, [s.copy()], Look.none().segments)
+    var css = look_web_css(probe, "body.x ")
+    assert_true("body.x [data-tag=probe] svg, body.x [data-role~=probe] svg { width: 15px; height: 15px; stroke-width: 1.75px; }" in css, css)
     print("LOOK TESTS PASSED")

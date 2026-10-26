@@ -481,7 +481,7 @@ def sorted_models(st: Store) -> List[Model]:
 
 comptime KINDS: List[String] = ["chat", "coder", "vision", "embeddings", "image"]
 comptime KIND_NAMES: List[String] = ["Chat", "Coder", "Vision", "Embeddings", "Image"]
-comptime KIND_HUES: List[Int] = [1, 4, 2, 3, 6]  # library.js KIND_COLOUR: data-1, data-4, data-2, data-3, warn (the palette's 6th)
+comptime KIND_HUES: List[Int] = [1, 4, 2, 3, 8]  # library.js KIND_COLOUR: data-1, data-4, data-2, data-3, warn (HueDot's 8)
 
 
 def kind_name(k: String) -> String:

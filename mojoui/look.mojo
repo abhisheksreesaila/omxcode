@@ -6,6 +6,7 @@
 
 from mojoui.canvas import rgba
 from mojoui.theme import Look, Surface, Shadow, TypeScale, Controls, Motion
+from mojoui.view import View, VSTACK, HSTACK, GRID, TABLE, space_value
 
 
 # ---- the rules GTK and the web write from a look ----
@@ -31,7 +32,7 @@ def fpx(v: Float64) -> String:
 def text_only(s: Surface) -> Bool:
     """A role the look gives type only (words()): no box rule is written for it."""
     return (s.fill == 0 and s.radius_top < 0 and s.margin_top < 0 and s.pad_top < 0 and len(s.shadows) == 0 and s.line_top == 0
-            and s.line_bottom == 0 and s.min_height <= 0 and s.outline == 0)
+            and s.line_bottom == 0 and s.min_height <= 0 and s.outline == 0 and s.gap < 0 and s.height == 0 and s.width == 0 and not s.scrolls_x and not s.shares and s.text_align != 2 and not s.one_line and not s.inline_flow)
 
 
 def surface_rule(s: Surface, web: Bool) -> String:
@@ -46,7 +47,11 @@ def surface_rule(s: Surface, web: Bool) -> String:
     if s.margin_top >= 0:
         out += "margin: " + px(s.margin_top) + " " + px(s.margin_x) + " " + px(s.margin_bottom) + "; "
     if s.pad_top >= 0:
-        out += "padding: " + px(s.pad_top) + (" " + px(s.pad_x) if s.pad_x != s.pad_top or s.pad_bottom != s.pad_top else "") + (" " + px(s.pad_bottom) if s.pad_bottom != s.pad_top else "") + "; "
+        if s.pad_left >= 0 or s.pad_right >= 0:  # (leading and trailing apart: top right bottom left)
+            out += ("padding: " + px(s.pad_top) + " " + px(s.pad_right if s.pad_right >= 0 else s.pad_x) + " " + px(s.pad_bottom) + " "
+                    + px(s.pad_left if s.pad_left >= 0 else s.pad_x) + "; ")
+        else:
+            out += "padding: " + px(s.pad_top) + (" " + px(s.pad_x) if s.pad_x != s.pad_top or s.pad_bottom != s.pad_top else "") + (" " + px(s.pad_bottom) if s.pad_bottom != s.pad_top else "") + "; "
         if web:
             out += "box-sizing: border-box; "
     var shadow = String("")
@@ -64,6 +69,29 @@ def surface_rule(s: Surface, web: Bool) -> String:
         out += "border: " + px(s.outline_w) + (" dashed " if s.dashed else " solid ") + css_color(s.outline) + "; "
     if s.min_height > 0:
         out += "min-height: " + px(s.min_height) + "; "
+    if s.height > 0:
+        out += ("height: " + px(s.height) + "; min-height: " + px(s.height) + "; ") if web else ("min-height: " + px(s.height) + "; ")
+    elif s.height == -2:  # (HEIGHT_AUTO)
+        out += "height: auto; min-height: 0; " if web else "min-height: 0; "
+    if s.width > 0:
+        if web and s.shrinks:
+            out += "width: " + px(s.width) + "; min-width: 0 !important; flex-shrink: 1 !important; "  # (over the inline size every host gets)
+        else:
+            out += ("width: " + px(s.width) + "; min-width: " + px(s.width) + "; flex-shrink: 0; ") if web else ("min-width: " + px(s.width) + "; ")
+    if s.gap >= 0:
+        out += ("gap: " + px(s.gap) + " !important; ") if web else ("border-spacing: " + px(s.gap) + "; ")  # (over the stack's own inline gap)
+    if s.text_align == 2 and web:  # (centred: a button's icon and word in its middle too)
+        out += "justify-content: center; "
+    if s.one_line and web:
+        out += "flex-wrap: nowrap; "
+    if s.inline_flow and web:
+        out += "display: block; "
+    if s.shares and web:
+        out += "flex: 1 1 0% !important; min-width: auto !important; "
+    if s.scrolls_x and web:
+        out += "flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; "
+    if s.column_gap >= 0 and web:
+        out += "column-gap: " + px(s.column_gap) + " !important; "
     return out
 
 
@@ -79,6 +107,12 @@ def text_rule(s: Surface, web: Bool = False) -> String:
         out += "letter-spacing: " + fpx(s.tracking) + "; "
     if web and s.line_height > 0:  # (GTK labels take the font's)
         out += "line-height: " + fpx(s.line_height) + "; "
+    elif web and s.line_height < 0:  # (the font's own line: CSS's normal)
+        out += "line-height: normal; "
+    if web and s.one_line:  # (its words on one line too)
+        out += "white-space: nowrap; "
+    if web and s.text_align > 0:
+        out += "text-align: " + ("left" if s.text_align == 1 else ("center" if s.text_align == 2 else "right")) + "; "
     if s.ink != 0:
         out += "color: " + css_color(s.ink) + "; "
     return out
@@ -134,16 +168,35 @@ def look_web_css(look: Look, scope: String) -> String:
         # a role is worn by a tagged view (data-tag) or by a part of one that isn't a view of its own (data-role: a
         # table's cells, which may wear two: "table-cell table-num")
         if not text_only(s):
-            out += scope + "[data-tag=" + s.role + "], " + scope + "[data-role~=" + s.role + "] { " + surface_rule(s, True) + "}\n"
+            out += scope + "[data-tag=" + s.role + "], " + scope + "button[data-tag=" + s.role + "], " + scope + "[data-role~=" + s.role + "] { " + surface_rule(s, True) + "}\n"  # (a button wearing it: over the theme's button.subtle)
             if s.pad_top >= 0:  # a Board object wears its content's role; the content fills its inside, no second card (as GTK)
                 out += (scope + ".board > .object[data-tag=" + s.role + "] > [data-tag=" + s.role + "] { background: none; box-shadow: none; border: 0; "
                         + "border-radius: 0; padding: 0; margin: 0; backdrop-filter: none; width: 100% !important; height: 100% !important; }\n")
-        var t = text_rule(s)
+        if s.inline_flow:  # (its children as words in a line: text inline, a button inline beside it, a space and `gap` apart; its own type sets the line)
+            out += scope + "[data-tag=" + s.role + "] { " + text_rule(s, True) + "}\n"
+            out += (scope + "[data-tag=" + s.role + "] > .text { display: inline; } " + scope + "[data-tag=" + s.role + "] > button { display: inline-flex; vertical-align: middle; } "
+                    + scope + "[data-tag=" + s.role + "] > * + * { margin-left: " + px(max(s.gap, 0)) + "; }\n")
+        if s.scrolls_x:  # (a row that scrolls sideways: its items keep their own width)
+            out += scope + ":where([data-tag=" + s.role + "]) > * { flex-shrink: 0; }\n"  # (weakly: an item that shrinks says so)
+        var t = text_rule(s, True)
         if t != "":
             out += (scope + "[data-tag=" + s.role + "] .text, " + scope + ".text[data-tag=" + s.role + "], " + scope + "button[data-tag=" + s.role + "], "
-                    + scope + "[data-role~=" + s.role + "] .text { " + text_rule(s, True) + "}\n")
+                    + scope + ":where([data-role~=" + s.role + "]) .text, " + scope + "[data-role~=" + s.role + "] { " + text_rule(s, True) + "}\n")
+            # (a part, a table's cell: its own type too, for what's in it to inherit; its words take it at the lowest
+            # weight, so a role of their own (a mono line in a cell) has the last word)
         if s.ink != 0:  # (an Icon right inside the role's view takes its ink, as its words do)
             out += scope + "[data-tag=" + s.role + "] > .icon { color: " + css_color(s.ink) + "; }\n"
+        if s.icon_size != 0 or s.icon_stroke > 0 or s.icon_ink != 0:  # (its icons: a button's own, or an Icon inside it)
+            var ic = String("")
+            if s.icon_size < 0:  # (none: a compact tab shows its word alone)
+                ic += "display: none; "
+            elif s.icon_size > 0:
+                ic += "width: " + px(s.icon_size) + "; height: " + px(s.icon_size) + "; "
+            if s.icon_stroke > 0:
+                ic += "stroke-width: " + fpx(s.icon_stroke) + "; "
+            if s.icon_ink != 0:
+                ic += "color: " + css_color(s.icon_ink) + "; "
+            out += scope + "[data-tag=" + s.role + "] svg, " + scope + "[data-role~=" + s.role + "] svg { " + ic + "}\n"
     var c = look.controls.copy()
     if c.control_h > 0:
         out += scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; }\n"
@@ -156,3 +209,47 @@ def look_web_css(look: Look, scope: String) -> String:
         out += scope + "[data-tag=toolbar] button.icon-only { border-radius: " + px(c.icon_radius) + "; }\n"
     out += press_rules(look.motion, scope, True)
     return out
+
+
+# ---- the layout a look gives views (D-412, D-416): every host gets plain points ----
+
+def resolve_layout(mut view: View, look: Look):
+    """In place, before any host sees the screen: spacing and padding tokens (SPACE_…) become the look's points, and a
+    view wearing a role whose surface sets a gap, a width or a height takes them (so GTK, the Mac and the web lay it
+    out alike; the look's CSS paints the rest)."""
+    var roles = Dict[String, Int]()
+    for k in range(len(look.surfaces)):
+        roles[look.surfaces[k].role] = k
+    for i in range(len(view.nodes)):
+        ref n = view.nodes[i]
+        var stack = n.kind == VSTACK or n.kind == HSTACK or n.kind == GRID
+        if n.spacing < 0 and stack:
+            n.spacing = space_value(n.spacing, look.space)
+        if n.pad_v < 0:
+            n.pad_v = space_value(n.pad_v, look.space)
+        if n.pad_h < 0:
+            n.pad_h = space_value(n.pad_h, look.space)
+        if n.kind == TABLE and len(n.options) > 0:  # (a dense table's cut columns: the theme's widths, table-cut and table-cut-name)
+            var cut = look.surface("table-cut-compact" if n.style == 2 else "table-cut")
+            var name = look.surface("table-cut-name-compact" if n.style == 2 else "table-cut-name")
+            var tick = look.surface("table-tick-compact" if n.style == 2 else "table-tick")
+            for j in range(len(n.options)):
+                if n.options[j] == "T" and tick >= 0:  # (the tick column: the theme's width, at least its box)
+                    n.options[j] = "T" + String(look.surfaces[tick].width)
+                elif n.options[j] == "C":
+                    n.options[j] = String(look.surfaces[cut].width) if cut >= 0 else String("")
+                elif n.options[j] == "N":
+                    n.options[j] = (String(look.surfaces[name].width) if name >= 0 else String("")) + "S"
+        if n.name != "" and n.name in roles:
+            var k = roles.get(n.name, -1)
+            if k < 0:
+                continue
+            ref sf = look.surfaces[k]
+            if sf.gap >= 0 and stack:
+                n.spacing = sf.gap
+            if sf.width > 0 and n.w == 0:
+                n.w = sf.width
+            if sf.height > 0 and n.h == 0:
+                n.h = sf.height
+            if sf.max_width > 0 and n.max_w == 0:
+                n.max_w = sf.max_width

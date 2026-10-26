@@ -52,3 +52,4 @@ One line per rule that prevents a mistake that happened.
 - When a setter seems to do nothing on a platform, dump the value it should have changed before trying another fix: AppKit kept the scroll bar style the system chose, and two "set it later" attempts were spent before the dump showed `bars 0`.
 - Never hand C a `Pointer(to=x)` as an out-parameter: the compiler may keep x's old value (a refused connect read as success). Give C a `List` buffer and read it back after the call, keeping the list alive (`_ = len(buf)`).
 - A GLib timeout that fires every few ms at the default priority starves GTK's redraw (priority 120): poll background work at G_PRIORITY_DEFAULT_IDLE.
+- Showcase apps compose only generic mojoui components and theme roles; never app-specific CSS, pixel nudges or app-named host code (owner, 2026-10-25). Enforced by the console lint in m4().

@@ -1,6 +1,7 @@
 # What an app provides, and the platform-independent loop every host runs.
 
 from mojoui.view import View, CANVAS, BOARD, FIELD, PAN, ZOOM, KEY
+from mojoui.look import resolve_layout
 from mojoui.diff import Diff, diff
 from mojoui.canvas import Surface
 from mojoui.scene import Scene
@@ -157,6 +158,7 @@ struct Runtime[A: App](Movable):
 
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
+        resolve_layout(self.shown, app.theme().look)
         self.app = app^
         self.trace = False  # (hosts that can read the environment turn it on: GTK reads MOJOUI_TRACE; iOS has no getenv)
         self.inflight = List[InFlight]()
@@ -247,10 +249,16 @@ struct Runtime[A: App](Movable):
             return Diff(False, [])
         return self.refresh()
 
+    def view(self) -> View:
+        """The app's screen with its spacing tokens in the theme's points (what every host shows)."""
+        var v = self.app.view()
+        resolve_layout(v, self.app.theme().look)
+        return v^
+
     def dispatch(mut self, event: Event) -> Diff:
         self.app.update(event)
         self.take_effects()
-        var next = self.app.view()
+        var next = self.view()
         var d = diff(self.shown, next)
         self.shown = next^
         return d^
@@ -261,7 +269,7 @@ struct Runtime[A: App](Movable):
 
     def refresh(mut self) -> Diff:
         """The screen again after state changed outside update() (e.g. in draw())."""
-        var next = self.app.view()
+        var next = self.view()
         var d = diff(self.shown, next)
         self.shown = next^
         return d^

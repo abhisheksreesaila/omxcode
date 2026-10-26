@@ -52,6 +52,7 @@ comptime CMD_START = 324
 comptime COPY_CURL = 326
 comptime REMOVE_LABEL = 330  # + the label's index on this model
 comptime KEYS = 351
+comptime ADD_LABEL = 352  # the About card's + label (labelsEditor: the field comes later)
 # Benchmark (bench.mojo)
 comptime BENCH_RUN = 360
 comptime BENCH_ALL = 361

@@ -17,9 +17,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console |
 | `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, consolekit, console |
 | `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console |
-| `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, console |
+| `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console |
-| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, console |
+| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck |
 | `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, workbook, mxstudio |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
 | `Dropdown` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, analytics, workbook, mxstudio, omxplorer, themes, kit |
@@ -29,12 +29,12 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `DatePicker` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes |
 | `Image` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, gpu |
-| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer, console |
+| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer |
 | `Alert` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout |
-| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, console |
+| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
 | `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
@@ -116,25 +116,36 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | console, consolekit |
 | `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
 | `Confirm` | `mojoui/confirm.mojo` | Button, Timers | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
-| `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
-| `Markdown` | `mojoui/markdown.mojo` | Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
+| `Markdown` | `mojoui/markdown.mojo` | Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
 | `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | console, consolekit |
-| `Page kit (header, groups column, stat tiles, facts, tabs, flat buttons)` | `mojoui/pagekit.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `App shell (bar, brand, nav links, page card)` | `mojoui/shell.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Page header (icon square, pill tabs, segments, tab header)` | `mojoui/header.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Sidebar (heads, rows to pick, chips when compact)` | `mojoui/sidebar.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Cards and panels (head, body, foot, stat tiles, facts)` | `mojoui/panel.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Marks (hue and signal dots, status marks, hued icons)` | `mojoui/marks.mojo` | Text, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Words (quiet, strong, mono lines, command lines)` | `mojoui/words.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Buttons (flat, primary, small looks, text actions, links, Back)` | `mojoui/buttons.mojo` | Button, Button with an icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Lists (split view, count line, name cells, selection bar)` | `mojoui/lists.mojo` | Text, Button, VStack, HStack, Divider, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Document (markdown and code cells, outline, three columns)` | `mojoui/document.mojo` | Text, Button, Scroll, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Beacon (the one thing happening now)` | `mojoui/beacon.mojo` | Canvas, Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
-| `Admin kit (copy foot, state marks, small action buttons, endpoint row, secret box, warning box)` | `mojoui/adminkit.mojo` | Text, Button, Icon, VStack, HStack, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
-| `Catalog search (outlined field, filter chips, result rows with fit marks, meter, empty state, Back)` | `mojoui/catalog.mojo` | TextField, Button, Text, Icon, ProgressBar, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Copy (copy row, labeled value, code panel, secret)` | `mojoui/copy.mojo` | Text, Button, Icon, VStack, HStack, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `Fields (search box, outlined field, filter chips, short field)` | `mojoui/fields.mojo` | TextField, Button, Text, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Search results (result rows, source badges, suggestions)` | `mojoui/results.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Meter (meter, usage bar, chart rows)` | `mojoui/meter.mojo` | Text, ProgressBar, Canvas, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 
 ## Totals
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 99 | 3 | 0 |
-| Web | 102 | 0 | 0 |
-| Android | 19 | 18 | 65 |
-| Mac (AppKit) | 0 | 90 | 12 |
-| iPhone (UIKit) | 0 | 71 | 31 |
-| Agent (MCP) | 29 | 25 | 48 |
+| Linux (GTK) | 110 | 3 | 0 |
+| Web | 113 | 0 | 0 |
+| Android | 19 | 18 | 76 |
+| Mac (AppKit) | 0 | 101 | 12 |
+| iPhone (UIKit) | 0 | 82 | 31 |
+| Agent (MCP) | 29 | 36 | 48 |
 
 ## Inside one app, not components yet (the debt)
 
