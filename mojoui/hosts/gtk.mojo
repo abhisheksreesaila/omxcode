@@ -1580,6 +1580,12 @@ struct GtkHost[A: App](Movable):
                     add_class(w, "mui-good")
             if node.kind == HSTACK:
                 external_call["gtk_widget_set_halign", NoneType](w, c_int(ALIGN_CENTER))
+                var growers = 0
+                for c in node.children:
+                    if self.rt.shown.nodes[c].grows and self.rt.shown.nodes[c].w == 0:
+                        growers += 1
+                if growers >= 2 and growers == len(node.children):  # (all growing from zero, as the web's flex: 1 1 0: equal shares)
+                    external_call["gtk_box_set_homogeneous", NoneType](w, c_int(1))
             # justify: GtkBox packs from the start; invisible expanding spacers do the rest.
             var j = node.justify_items
             for c in node.children:  # a growing child takes all the free space: no spacers
