@@ -311,7 +311,11 @@ def step(page, s):
 
 
 # Every tagged view, and each button in a tagged view, as the Mac's view dump writes it (scripts/parity.py compares them)
-RECTS = """() => { const out = []; const r = e => { const b = e.getBoundingClientRect();
+RECTS = """() => { const out = []; const r = e => { let b = e.getBoundingClientRect();
+    if (getComputedStyle(e).display === 'contents') {  // (its parts join its row: their union is its box, as DUMP's mojouiRect)
+      const rs = [...e.children].map(c => c.getBoundingClientRect()).filter(c => c.width || c.height);
+      if (rs.length) { const x = Math.min(...rs.map(c => c.left)), y = Math.min(...rs.map(c => c.top));
+        b = { x, y, width: Math.max(...rs.map(c => c.right)) - x, height: Math.max(...rs.map(c => c.bottom)) - y }; } }
     return ' @ ' + Math.round(b.x) + ',' + Math.round(b.y) + ' ' + Math.round(b.width) + 'x' + Math.round(b.height); };
   for (const e of document.querySelectorAll('#mojoui-root [data-tag], #mojoui-overlay [data-tag]')) {
     out.push((e.dataset.kind || 'view') + ' #' + e.dataset.tag + r(e));

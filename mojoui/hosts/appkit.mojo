@@ -1262,6 +1262,13 @@ struct AppKitHost[A: App](Movable):
             for c in node.children:
                 var child = self.build(c, self_addr)
                 built.append(child if self.rt.shown.nodes[c].kind != SPACER else 0)
+                var end_role = self.look.surface(self.rt.shown.nodes[c].name) if self.rt.shown.nodes[c].name != "" else -1
+                if not vertical and not grows and not spacers and end_role >= 0 and self.look.surfaces[end_role].ends_row:
+                    # (the room before it: the web's margin-left auto, GTK's hexpand + END, D-529)
+                    var room_before = flexible_spacer(False)
+                    _ = msg(w, "setDistribution:", 0)
+                    _ = msg(w, "addArrangedSubview:", room_before)
+                    _ = msg(w, "setCustomSpacing:afterView:", Float64(0), room_before)
                 _ = msg(w, "addArrangedSubview:", child)
                 ref cn = self.rt.shown.nodes[c]
                 if cn.kind == DIVIDER and not (cn.sized_width() if not vertical else cn.sized_height()):
@@ -1295,13 +1302,15 @@ struct AppKitHost[A: App](Movable):
                 var spans = vertical and (cn.kind == SCROLL or cn.kind == TABLE)  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502; a Table too: table.table { width: 100% })
                 if not vertical and cn.kind == TABLE and not cn.grows:  # (in a row, a Table takes the row: its width 100 %, a side-scroll's flex: 1 0 auto)
                     hug(child, Float32(1), False)
-                if cn.fills or node.align_items == STRETCH or wrapper or spans:  # stretch across: match the stack minus its insets
+                var block = vertical and (cn.kind == TEXT or cn.kind == PARAGRAPH) and look_at >= 0 and self.look.surfaces[look_at].block_flow  # (words in block flow: a block as wide as the column up to their max width, from its leading edge, D-529)
+                if cn.fills or node.align_items == STRETCH or wrapper or spans or block:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(inset_x if vertical else inset_y)
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
                     if vertical and cn.max_w != 0:  # (up to its widest, centred: the web's max-width with auto margins, GTK's clamp)
                         _ = msg(c2, "setPriority:", Float32(495))
-                        _ = msg(msg(msg(child, "centerXAnchor"), "constraintEqualToAnchor:", msg(w, "centerXAnchor")), "setActive:", 1)
+                        if not block:  # (a block of words stays at the column's leading edge)
+                            _ = msg(msg(msg(child, "centerXAnchor"), "constraintEqualToAnchor:", msg(w, "centerXAnchor")), "setActive:", 1)
                     _ = msg(c2, "setActive:", 1)
             if not vertical:  # a row's padding holds above and below its tallest view (centred, a stack keeps its insets only loosely)
                 var ins = msg[CGRect](w, "edgeInsets")  # (top, left, bottom, right)
@@ -1988,7 +1997,7 @@ struct AppKitHost[A: App](Movable):
             size = sf.font_size if sf.font_size > 0 else size
             weight = sf.font_weight if sf.font_weight > 0 else weight
             ink = sf.ink if sf.ink != 0 else ink
-            lh = sf.line_height if sf.line_height > 0 else size * self.look.type.line
+            lh = sf.line_height if sf.line_height > 0 else (Float64(0) if sf.line_height < 0 else size * self.look.type.line)  # (below 0: the font's own line, as a label's, D-509, D-529)
             tracking = sf.tracking
         var para = new("NSMutableParagraphStyle")
         if lh > 0:
@@ -2414,13 +2423,15 @@ struct AppKitHost[A: App](Movable):
                 # MOJOUI_CONSTRAINTS (tags, comma-separated): what lays this view out vertically, for the report (its
                 # hugging and resistance, then every constraint AppKit says affects its height: a row's views standing
                 # the row's height on the Mac, D-507). Lines start "~" (scripts/parity.py reads only "@ x,y wxh")
-                out += line[byte=0 : depth * 2] + "  ~ hug v " + String(Int(msg[Float32](w, "contentHuggingPriorityForOrientation:", 1)))
-                out += " resist v " + String(Int(msg[Float32](w, "contentCompressionResistancePriorityForOrientation:", 1)))
+                var axis = 0 if env("MOJOUI_CONSTRAINTS_AXIS") == "h" else 1  # (h: what lays it out across, its width)
+                var an = String("h") if axis == 0 else String("v")
+                out += line[byte=0 : depth * 2] + "  ~ hug " + an + " " + String(Int(msg[Float32](w, "contentHuggingPriorityForOrientation:", axis)))
+                out += " resist " + an + " " + String(Int(msg[Float32](w, "contentCompressionResistancePriorityForOrientation:", axis)))
                 if (msg(w, "isKindOfClass:", cls("NSStackView")) & 0xFF) != 0:
                     out += " stack-hug v " + String(Int(msg[Float32](w, "huggingPriorityForOrientation:", 1))) + " h " + String(Int(msg[Float32](w, "huggingPriorityForOrientation:", 0)))
                     out += " align " + String(msg(w, "alignment")) + " dist " + String(msg(w, "distribution"))
                 out += "\n"
-                var cs = msg(w, "constraintsAffectingLayoutForOrientation:", 1)
+                var cs = msg(w, "constraintsAffectingLayoutForOrientation:", axis)
                 for q in range(min(msg(cs, "count"), 40)):
                     var c = msg(cs, "objectAtIndex:", q)
                     out += line[byte=0 : depth * 2] + "  ~ " + String(Int(msg[Float32](c, "priority"))) + " " + from_ns(msg(c, "description")).replace("\n", " ") + "\n"
