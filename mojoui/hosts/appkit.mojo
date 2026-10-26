@@ -1130,7 +1130,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(cell, "addArrangedSubview:", child)
                 if keeps and not num:
                     _ = msg(cell, "addArrangedSubview:", flexible_spacer(False))
-                if ck == VSTACK:  # (a column in a cell is its own height, centred, as a block in a <td>: the cell's 250 pins
+                if ck == VSTACK or ck == DRAG or ck == DROP:  # (a column in a cell is its own height, centred, as a block in a <td>: the cell's 250 pins
                     hug(child, Float32(750), True)  # stood a model's name cell 44 high for 37, D-542)
                 if not keeps:
                     hug(child, Float32(1), False)
@@ -1344,7 +1344,11 @@ struct AppKitHost[A: App](Movable):
                     else:
                         first_spacer = child
                 elif grows or spacers:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
-                    hug(child, Float32(750), vertical)
+                    var wrapping = False  # (a wrapping button's own size is its wrapped one: it keeps its line by D-537's 491 instead)
+                    for wb in self.wrap_buttons:
+                        if wb[0] == child:
+                            wrapping = True
+                    hug(child, Float32(490 if wrapping and not vertical else 750), vertical)
                 if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
                     hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
                 var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED  # (its one view across it: the web's align-items: stretch, D-494)
