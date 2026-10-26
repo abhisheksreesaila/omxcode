@@ -91,7 +91,7 @@ from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE
 from mojoui.sample import sample_table
 from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, IDLE as ISLAND_IDLE, RUNNING as ISLAND_RUNNING, UNDO as ISLAND_UNDO, ERROR as ISLAND_ERROR
 from mojoui.sheetjobs import ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
-from mojoui.clock import now_ns
+from mojoui.clock import now_ns, shown_ms
 from mojoui.draw import rect as draw_rect, with_alpha
 
 # screens
@@ -1150,7 +1150,7 @@ struct Main(App):
                     start_move(obj, before)  # (the bars move from what they showed to the answer)
                 self.objects[cref] = obj^
                 self.timed(done.milliseconds)
-                var took = fixed(done.milliseconds / 1000.0, 2) + " s on " + self.device_words(self.charts.landed_gpu)
+                var took = fixed(shown_ms(done.milliseconds) / 1000.0, 2) + " s on " + self.device_words(self.charts.landed_gpu)
                 if self.trace:
                     print("JOB: landed chart" + String(cref) + " " + fixed(done.milliseconds, 1) + " ms")
                     print("CHART: chart" + String(cref) + "\n" + chart_text(self.objects[cref], self.frame).replace("\t", " | "))
@@ -1481,7 +1481,7 @@ struct Main(App):
                 if problem != "":  # (said, not replaced by the chart's timing)
                     self.message = "Couldn't compute the " + ("chart" if m == INSERT_CHART else "pivot") + ": " + problem
                 else:
-                    self.message = ("Chart: " if m == INSERT_CHART else "Pivot: ") + object_title(self.objects[self.active], self.frame) + " (" + fixed(self.objects[self.active].milliseconds, 1) + " ms on " + self.frame.last_device() + (", streamed from disk" if self.frame.streamed() else "") + ")"  # (once, when it lands: where it ran)
+                    self.message = ("Chart: " if m == INSERT_CHART else "Pivot: ") + object_title(self.objects[self.active], self.frame) + " (" + fixed(shown_ms(self.objects[self.active].milliseconds), 1) + " ms on " + self.frame.last_device() + (", streamed from disk" if self.frame.streamed() else "") + ")"  # (once, when it lands: where it ran)
             self.version += 1
         elif m == MOVE or m == RESIZE:  # a sheet object (child 0: the table) dragged by its title bar, or by its corner
             var k = event.number - 1
@@ -2112,9 +2112,9 @@ struct Main(App):
             var p95 = sorted_ms[min(len(sorted_ms) - 1, Int(Float64(len(sorted_ms)) * 0.95))]
             var last = String("")
             for v in self.timings:
-                last += (" · " if last != "" else "") + fixed(v, 1)
+                last += (" · " if last != "" else "") + fixed(shown_ms(v), 1)
             parts.append(Row("Last " + String(len(self.timings)), Text(last + " ms", CAPTION)))
-            parts.append(Row("p50 · p95", Text(fixed(p50, 1) + " ms · " + fixed(p95, 1) + " ms").tag("island-p50")))
+            parts.append(Row("p50 · p95", Text(fixed(shown_ms(p50), 1) + " ms · " + fixed(shown_ms(p95), 1) + " ms").tag("island-p50")))
         return VStack(parts^, spacing=8).align(STRETCH).width(380)
 
     def toolbar(self) -> View:
@@ -2364,7 +2364,7 @@ struct Main(App):
                 items.append(t)
             if self.message != "":
                 items.append(self.message)
-            return StatusBar(items, (fixed(self.milliseconds, 1) + " ms on " + (self.frame.device_name if self.ran_gpu else "CPU")) if self.show_timings else "")
+            return StatusBar(items, (fixed(shown_ms(self.milliseconds), 1) + " ms on " + (self.frame.device_name if self.ran_gpu else "CPU")) if self.show_timings else "")
         if col >= 0 and self.grid.cur_row >= 0:
             items.append("Selection " + self.frame.name(col) + " · row " + grouped(self.grid.cur_row + 1) + " · " + self.frame.display(col, self.grid.cur_row))
         elif col >= 0:
@@ -2378,7 +2378,7 @@ struct Main(App):
             items.append(self.message)
         if self.frame.read_problem() != "":
             items.append("Couldn't read the file: " + self.frame.read_problem())
-        return StatusBar(items, (fixed(self.milliseconds, 1) + " ms on " + (self.frame.device_name if self.ran_gpu else "CPU")) if self.show_timings else "")
+        return StatusBar(items, (fixed(shown_ms(self.milliseconds), 1) + " ms on " + (self.frame.device_name if self.ran_gpu else "CPU")) if self.show_timings else "")
 
     def sheet_width(self) -> Int:
         return self.win_w - 40 - (INSPECTOR_W + 16 if self.inspector_open else 0)
@@ -2413,7 +2413,7 @@ struct Main(App):
             if t.kind == TILE_SUM or t.kind == TILE_AVERAGE or t.kind == TILE_COUNT:
                 matched = " · " + grouped(t.count) + " of " + grouped(self.frame.rows()) + " rows"
                 break
-        var ran = " · " + fixed(self.milliseconds, 1) + " ms on " + ("the GPU" if self.ran_gpu else "the CPU") if self.show_timings else String("")
+        var ran = " · " + fixed(shown_ms(self.milliseconds), 1) + " ms on " + ("the GPU" if self.ran_gpu else "the CPU") if self.show_timings else String("")
         var facts = String(matched + ran)
         if facts.startswith(" · "):
             var cut = String(facts[byte=len(String(" · ").as_bytes()):])  # (the dot is two bytes: " · " is four)

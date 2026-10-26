@@ -8,6 +8,19 @@ from std.time import perf_counter_ns
 from std.os import getenv
 
 comptime NOW_ENV = "MOJOUI_NOW"
+comptime ELAPSED_ENV = "MOJOUI_ELAPSED_MS"
+
+
+def shown_ms(ms: Float64) -> Float64:
+    """A measured duration as an app shows it ("0.4 ms on the GPU"): $MOJOUI_ELAPSED_MS (a number) holds every shown
+    timing at that value for tests and shots, as $MOJOUI_NOW holds the wall clock; the measurement itself is untouched."""
+    var fixed = getenv(ELAPSED_ENV)
+    if fixed != "":
+        try:
+            return atof(fixed)
+        except:
+            pass
+    return ms
 
 
 def now_ns() -> Int:

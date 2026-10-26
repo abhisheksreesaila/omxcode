@@ -5,6 +5,7 @@
 
 from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER, START, NO_MSG
 from mxframe import Expr, col, lit, least, greatest
+from mojoui.clock import shown_ms
 from mojoui.sheet import Sheet, TEXT, DECIMAL, INT, DATE, BOOL
 from mojoui.sentence import Word, Sentence, sentence_text
 from mojoui.chartview import ChartView
@@ -720,7 +721,7 @@ def object_card(obj: SheetObject, sheet: Sheet, canvas: Int, version: Int, on_ta
     var title = Sentence(chart_words(obj, sheet, on_word, cref, lit), width=max(24, (obj.w - 130) // 8), tag="sentence-" + String(cref)) if obj.kind == OBJ_CHART and on_word != NO_MSG else Button(object_title(obj, sheet), on_pick, style=SUBTLE)
     var head_h = SENTENCE_H if obj.kind == OBJ_CHART and on_word != NO_MSG else HEADER_H - 8  # (a sentence takes two lines)
     var head = HStack(title^, Spacer(),
-                      Text(fixed(obj.milliseconds, 1) + " ms", CAPTION),
+                      Text(fixed(shown_ms(obj.milliseconds), 1) + " ms", CAPTION),
                       Button("Remove", on_close, ICON_ONLY, icon="close"), spacing=8).fill().align(START if on_word != NO_MSG else CENTER).height(head_h)
     var body: View
     if obj.kind == OBJ_CHART:

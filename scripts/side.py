@@ -37,7 +37,9 @@ def env_for(settings):
     config = Path(tempfile.mkdtemp(prefix="side-config-"))
     (config / "settings.txt").write_text("".join(s + "\n" for s in settings))
     docs = Path(tempfile.mkdtemp(prefix="side-docs-"))
-    return {"OMX_CONFIG": str(config), "OMX_DOCUMENTS": str(docs)}
+    # every shown timing held at 0.5 ms (mojoui.clock.shown_ms; the goldens' most common reading), as MOJOUI_NOW holds the
+    # clock: "0.3 ms" against "0.7 ms" moved goal 32's formula shot across its bar from run to run (D-553)
+    return {"OMX_CONFIG": str(config), "OMX_DOCUMENTS": str(docs), "MOJOUI_ELAPSED_MS": "0.5"}
 
 
 def shoot_gtk(app, screen, settings, steps):

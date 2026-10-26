@@ -47,7 +47,7 @@ def covered(views: List[View], skip: List[String] = []) raises:
             assert_true(look.surface(t) >= 0, "no role for tag " + t)
 from mojoui.feedback import Note, NoteAction, Warning, EmptyState
 from mojoui.logview import LogPane, LogLine, LOG_PLAIN, LOG_OK, LOG_ERROR, log_kind_of, log_role
-from mojoui.clock import wall_seconds
+from mojoui.clock import wall_seconds, shown_ms
 from mojoui.view import Text
 from std.os import setenv, unsetenv
 
@@ -72,4 +72,9 @@ def main() raises:
     assert_equal(wall_seconds(), 1792964194.376)
     _ = unsetenv("MOJOUI_NOW")
     assert_true(wall_seconds() > 1.7e9)
+    # a shown timing held at $MOJOUI_ELAPSED_MS (goal 32's shots: "0.3 ms" against "0.7 ms" moved a shot, D-553)
+    assert_equal(shown_ms(3.25), 3.25)
+    _ = setenv("MOJOUI_ELAPSED_MS", "0.5")
+    assert_equal(shown_ms(3.25), 0.5)
+    _ = unsetenv("MOJOUI_ELAPSED_MS")
     print("feedback: ok")
