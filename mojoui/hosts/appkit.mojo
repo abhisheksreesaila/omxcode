@@ -1130,6 +1130,8 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(cell, "addArrangedSubview:", child)
                 if keeps and not num:
                     _ = msg(cell, "addArrangedSubview:", flexible_spacer(False))
+                if ck == VSTACK:  # (a column in a cell is its own height, centred, as a block in a <td>: the cell's 250 pins
+                    hug(child, Float32(750), True)  # stood a model's name cell 44 high for 37, D-542)
                 if not keeps:
                     hug(child, Float32(1), False)
                 var role = String("table-head") if r == 0 else String("table-cell")
@@ -1353,6 +1355,12 @@ struct AppKitHost[A: App](Movable):
                     # (words in block flow: a block as wide as the column up to their max width, from its leading edge: under
                     # the column's 250 leading pins they stretch; an equality pulled the cards to the words, D-529)
                     hug(self.widgets[c] if c < len(self.widgets) and self.widgets[c] != 0 else child, Float32(249), False)  # (the words, not a margin's holder)
+                if vertical and (cn.kind == VSTACK or cn.kind == HSTACK) and len(cn.children) == 0 and cn.w == 0 and not cn.fills and node.align_items != STRETCH:
+                    # (an empty view in a column is as wide as its content, nothing, as the web's: the column's 250
+                    # leading pins stood a markdown gap 668 wide, D-541)
+                    var nothing = msg(msg(child, "widthAnchor"), "constraintEqualToConstant:", Float64(0))
+                    _ = msg(nothing, "setPriority:", Float32(251))
+                    _ = msg(nothing, "setActive:", 1)
                 if cn.fills or node.align_items == STRETCH or wrapper or spans:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(inset_x if vertical else inset_y)
@@ -1609,7 +1617,13 @@ struct AppKitHost[A: App](Movable):
         # column to 117 pt through the rows' equal widths (Mac, 2026-10-24)
         _ = msg(msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", fit.x + Float64(2 * pad)), "setActive:", 1)
         if wraps:  # (it prefers its one line; fit_wraps gives it the lines its width needs)
-            prefer(w, "widthAnchor", Float64(Int(msg[CGPoint](said, "size").x + 0.999)) + Float64(2 * pad))
+            var one_line = Float64(Int(msg[CGPoint](said, "size").x + 0.999)) + Float64(2 * pad)
+            prefer(w, "widthAnchor", one_line)
+            # (and keeps it over a wrapping label's 490: it wraps only where its row can't give it room, a chapter in its
+            # outline column, not a text action beside a head, which wrapped to 65 x 40 for 76 x 24, D-537)
+            var keep = msg(msg(w, "widthAnchor"), "constraintGreaterThanOrEqualToConstant:", one_line)
+            _ = msg(keep, "setPriority:", Float32(491))
+            _ = msg(keep, "setActive:", 1)
         else:
             prefer(w, "widthAnchor", fit.x + Float64(2 * pad))
         if i < 0 or self.rt.shown.nodes[i].h == 0:  # (apply_layout pins the app's own height)
