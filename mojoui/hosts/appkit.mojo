@@ -1020,7 +1020,7 @@ struct AppKitHost[A: App](Movable):
                 if keeps and not num:
                     _ = msg(cell, "addArrangedSubview:", flexible_spacer(False))
                 if not keeps:
-                    _ = msg(child, "setContentHuggingPriority:forOrientation:", Float32(1), 0)
+                    hug(child, Float32(1), False)
                 var role = String("table-head") if r == 0 else String("table-cell")
                 var sk = self.look.surface(role)
                 if r > 0 and r - 1 < node.text.byte_length() and String(node.text[byte = r - 1]) == "1" and self.look.surface("table-selected") >= 0:
@@ -1029,7 +1029,7 @@ struct AppKitHost[A: App](Movable):
                     self.paint_surface(cell, sk, True)
                 else:
                     _ = msg(cell, "setEdgeInsets:", Float64(9), Float64(16), Float64(9), Float64(16))
-                if ck == TEXT:
+                if ck == TEXT and (msg(child, "isKindOfClass:", cls("NSTextField")) & 0xFF) != 0:
                     if self.rt.shown.nodes[c].name == "":  # (its words in the role's type: the head's caps, a figure's mono)
                         var tk = self.look.surface("table-num") if num and r > 0 and self.look.surface("table-num") >= 0 else self.look.surface(role)
                         if tk >= 0:
@@ -1043,7 +1043,7 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(wc, "setPriority:", Float32(999))
                     _ = msg(wc, "setActive:", 1)
                 else:
-                    _ = msg(cell, "setHuggingPriority:forOrientation:", Float32(1), 0)
+                    hug(cell, Float32(1), False)
                 self.tcells.append((w, cell, wc, col, c))
         elif node.kind == SCROLL:
             w = top_scroll_view(False)
@@ -1147,7 +1147,7 @@ struct AppKitHost[A: App](Movable):
                 elif grows or spacers:  # beside a growing view, keep to its own size (a chevron took a row's spare room, Mac)
                     hug(child, Float32(750), vertical)
                 if not vertical and not cn.fills and node.align_items != STRETCH:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
-                    _ = msg(child, "setHuggingPriority:forOrientation:", Float32(750), 1)
+                    hug(child, Float32(750), True)
                 if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
                     var inset = Float64(2 * (inset_x if vertical else inset_y))
@@ -1413,7 +1413,7 @@ struct AppKitHost[A: App](Movable):
                 outer = new("NSStackView")
                 _ = msg(outer, "addArrangedSubview:", w)
             for orientation in range(2):  # (the shape hugs its words and padding, as the label would)
-                _ = msg(outer, "setHuggingPriority:forOrientation:", Float32(750), orientation)
+                hug(outer, Float32(750), orientation == 1)
             self.paint_surface(outer, chip_at, node.pad_v == 0 and node.pad_h == 0)
             var r = max(self.look.surfaces[chip_at].radius_top, 0)
             if r >= 999:  # (a pill: half its height, which a layer can't say ahead of the layout)
@@ -1712,7 +1712,7 @@ struct AppKitHost[A: App](Movable):
 
     def cell_widths(self, child: Int, node: Int) -> Tuple[Float64, Float64]:
         """A table cell's content: (its narrowest: the longest word; its widest: one line), as CSS's min- and max-content."""
-        if self.rt.shown.nodes[node].kind != TEXT:
+        if self.rt.shown.nodes[node].kind != TEXT or (msg(child, "isKindOfClass:", cls("NSTextField")) & 0xFF) == 0:
             var fit = msg[CGPoint](child, "fittingSize")
             return (fit.x, fit.x)
         var said = msg(child, "attributedStringValue")
