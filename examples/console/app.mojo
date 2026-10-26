@@ -29,6 +29,12 @@ from modelpage import model_header, overview_view, tab_index, curl_for, fit_of, 
 from bench import Bench, bench_view, bench_bars
 from logs import Logs, logs_view
 from notebook import Notebook, notebook_view
+from add import Add, add_page
+from addflow import add_update, add_every, add_enter, now_ms
+from keys import KeysPage, keys_view, keys_header
+from gateway import GatewayPage, gateway_view, gateway_header
+from security import SecurityPage, security_view, security_header
+from settings import SettingsPage, settings_view, settings_header
 from msgs import *
 
 comptime PHONE = 760  # the shell's phone width (blade-home.js PHONE)
@@ -51,6 +57,11 @@ struct Main(App):
     var bench: Bench
     var logs: Logs
     var nb: Notebook
+    var add: Add
+    var kp: KeysPage  # Keys, Gateway, Security, Settings (M6 part a)
+    var gp: GatewayPage
+    var sp: SecurityPage
+    var setp: SettingsPage
     var core_ticks: Int  # core polls since /admin/info was last read (it's read every 15 s)
     var clip: String
     var clip_version: Int
@@ -69,6 +80,11 @@ struct Main(App):
         self.bench = Bench()
         self.logs = Logs()
         self.nb = Notebook()
+        self.add = Add()
+        self.kp = KeysPage()
+        self.gp = GatewayPage()
+        self.sp = SecurityPage()
+        self.setp = SettingsPage()
         self.core_ticks = 0
         self.clip = ""
         self.clip_version = 0
@@ -93,7 +109,7 @@ struct Main(App):
 
     def appearance(mut self, dark: Bool):
         self.dark = dark
-        self.themed = omxqua(dark)
+        self.themed = omxqua(dark if self.setp.pick < 0 else self.setp.pick == 1)  # (Settings' Light or Dark, once picked)
 
     def theme(self) -> Theme:
         return self.themed.copy()
@@ -131,12 +147,30 @@ struct Main(App):
             out.append(Every(1000 if self.bench.running else 5000, POLL_BENCH))
         if p.page == "model" and p.tab == "logs" and self.logs.follow:
             out.append(Every(2000, POLL_LOG))
+        if p.page == "add":
+            out += add_every(self.add)
+        if p.page == "keys":
+            out += self.kp.every()
+        if p.page == "gateway":
+            out += self.gp.every()
+        if p.page == "security":
+            out += self.sp.every()
         out += self.confirm.every(DISARM)
         return out^
 
     def enter(mut self):
         """A new place: what its page reads first (each tab's own data, read once on arrival)."""
         var p = self.place()
+        if p.page == "add":
+            add_enter(self.add, self.api)
+        if p.page == "keys":
+            self.kp.enter(self.api)
+        if p.page == "gateway":
+            self.gp.enter(self.api)
+        if p.page == "security":
+            self.sp.enter(self.api)
+        if p.page == "settings":
+            self.setp.enter(self.api)
         if p.page != "model":
             return
         if p.tab == "logs":
@@ -190,6 +224,33 @@ struct Main(App):
             self.api.get(GOT_LOG, "/admin/models/" + p.model + "/log")
         elif m == DISARM:
             self.confirm.disarm()
+        elif ADD_FIRST <= m <= ADD_LAST:
+            var o = add_update(self.add, self.api, self.store, m, event)
+            if o.clip != "":
+                self.copy(o.clip)
+            if o.refresh:
+                self.poll_core()
+            if o.go != "":
+                self.go(o.go)
+        elif KEYS_FIRST <= m <= SET_LAST:  # Keys, Gateway, Security, Settings: each page's taps and replies
+            var clip = String("")
+            if m <= KEYS_LAST:
+                clip = self.kp.update(m, event, self.api)
+            elif m <= GW_LAST:
+                clip = self.gp.update(m, event, self.api)
+            elif m <= SEC_LAST:
+                clip = self.sp.update(m, event, self.api, self.store)
+            else:
+                clip = self.setp.update(m, event, self.api)
+                self.themed = omxqua(self.dark if self.setp.pick < 0 else self.setp.pick == 1)
+            if clip != "":
+                self.copy(clip)
+            if m == GW_ADD or m == SET_ADD:
+                self.go("/add")
+            if self.sp.go_to != "":
+                var to = self.sp.go_to
+                self.sp.go_to = ""
+                self.go(to)
         elif GOT_MODELS <= m <= GOT_OPEN:
             self.reply(m, event, failed)
         elif m == HOME:
@@ -328,8 +389,12 @@ struct Main(App):
                 read_series(event.text, self.store)
             elif m == GOT_INFO:
                 read_info(event.text, self.store)
+                self.setp.read_info(event.text)
             elif m == GOT_SYSTEM:
                 read_system(event.text, self.store)
+                self.setp.read_system(event.text)
+            elif m == GOT_REQUESTS:
+                self.gp.read_requests(event.text)
             elif m == GOT_LABELS:
                 read_labels(event.text, self.store)
             elif m == GOT_PULLS:
@@ -397,6 +462,23 @@ struct Main(App):
         var phone = self.phone()
         if p.page == "home":
             return BareCard([home_view(self.store, self.lib, phone)]).height(card_h).grow()
+        if p.page == "add":
+            return add_page(self.add, now_ms(), phone, card_h)
+        if p.page == "keys" or p.page == "gateway" or p.page == "security" or p.page == "settings":
+            var header = settings_header()
+            var body: View
+            if p.page == "keys":
+                header = keys_header(phone)
+                body = keys_view(self.kp, phone)
+            elif p.page == "gateway":
+                header = gateway_header(self.gp)
+                body = gateway_view(self.gp, self.store, phone)
+            elif p.page == "security":
+                header = security_header()
+                body = security_view(self.sp, self.store, phone)
+            else:
+                body = settings_view(self.setp, self.store, self.dark, phone)
+            return BareCard([header^, Scroll(body^, height=card_h - 66).fill()]).height(card_h).grow()
         if p.page == "model":
             var k = self.store.model(p.model)
             if k < 0:

@@ -290,6 +290,9 @@ def sf_symbol(name: String) -> String:
     if name == "key-round": return "key"
     if name == "route": return "point.topleft.down.to.point.bottomright.curvepath"
     if name == "lock": return "lock"
+    if name == "unlock": return "lock.open"
+    if name == "sun": return "sun.max"
+    if name == "moon": return "moon"
     if name == "sliders-horizontal": return "slider.horizontal.3"
     if name == "layout-grid": return "square.grid.2x2"
     if name == "list": return "list.bullet"
@@ -307,6 +310,9 @@ def sf_symbol(name: String) -> String:
     if name == "ellipsis": return "ellipsis"
     if name == "zap": return "bolt"
     if name == "cpu": return "cpu"
+    if name == "triangle-alert": return "exclamationmark.triangle"
+    if name == "hammer": return "hammer"
+    if name == "refresh-cw": return "arrow.clockwise"
     return "questionmark.square.dashed"
 
 

@@ -114,6 +114,11 @@ COMPOSITES = [
     # the OMX Console's pages (goal 33 M5)
     ("Page kit (header, groups column, stat tiles, facts, tabs, flat buttons)", "mojoui/pagekit.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
     ("Beacon (the one thing happening now)", "mojoui/beacon.mojo", ["Canvas", "Text", "HStack", "Themes on top (themes/, or yours)"], "Beacon("),
+    # the OMX Console's other screens (goal 33 M6: Keys, Gateway, Security, Settings)
+    ("Admin kit (copy foot, state marks, small action buttons, endpoint row, secret box, warning box)", "mojoui/adminkit.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Clipboard", "Themes on top (themes/, or yours)"], "ActionButton("),
+    # Add a model (goal 33 M6)
+    ("Catalog search (outlined field, filter chips, result rows with fit marks, meter, empty state, Back)", "mojoui/catalog.mojo", ["TextField", "Button", "Text", "Icon", "ProgressBar", "VStack", "HStack", "Themes on top (themes/, or yours)"], "ResultRow("),
+    ("LogPane (a live log with its head, Hide log, coloured lines)", "mojoui/logview.mojo", ["Scroll pinned to its end", "Text", "Button", "Icon", "Themes on top (themes/, or yours)"], "LogPane("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.

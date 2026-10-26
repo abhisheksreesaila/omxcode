@@ -30,19 +30,20 @@ def PlaceLink(title: String, icon: String, on_tap: Int, here: Bool = False) -> V
     return Button(title, on_tap, SUBTLE, icon).height(36).tag("place-here" if here else "place")
 
 
-def IconSquare(icon: String, size: Int = 36) -> View:
-    """An icon on a tinted rounded square (role icon-square)."""
-    return VStack(Icon(icon, 16), spacing=0).width(size).height(size).align(CENTER).justify(CENTER).tag("icon-square")
+def IconSquare(icon: String, size: Int = 36, hue: Int = 0) -> View:
+    """An icon on a tinted rounded square (role icon-square: data colour 1; hue 1–6: role icon-square-<hue>)."""
+    return VStack(Icon(icon, 16), spacing=0).width(size).height(size).align(CENTER).justify(CENTER).tag(
+        "icon-square-" + String(min(hue, 6)) if hue > 0 else "icon-square")
 
 
-def PageHeader(icon: String, title: String, count: String, sub: String, var tools: List[View]) -> View:
-    """A page's header: its icon square, the title with a count beside it, one line under it, then its tools at the
-    trailing edge (role page-header: a rule under it)."""
+def PageHeader(icon: String, title: String, count: String, sub: String, var tools: List[View], hue: Int = 0, var lead: List[View] = []) -> View:
+    """A page's header: its icon square (in data colour `hue`, 0 the first), the title with a count beside it, one line
+    under it, then its tools at the trailing edge (role page-header: a rule under it); `lead`: views before the square (a Back)."""
     var head: List[View] = [Text(title).tag("page-title")]
     if count != "":
         head.append(Pill(count))
-    var items: List[View] = [IconSquare(icon), VStack(HStack(head^, spacing=8).align(CENTER), Text(sub).tag("page-sub"), spacing=2).align(START).grow(),
-                             Spacer()]
+    var items: List[View] = lead^
+    items += [IconSquare(icon, hue=hue), VStack(HStack(head^, spacing=8).align(CENTER), Text(sub).tag("page-sub"), spacing=2).align(START).grow()]  # (.tt: flex 1)
     for t in tools:
         items.append(t.copy())
     return HStack(items^, spacing=12).align(CENTER).fill().tag("page-header")
@@ -168,6 +169,10 @@ def page_roles(p: Palette, mono: String) -> List[Surface]:
     out.append(place^)
     out.append(here^)
     out.append(_box("icon-square", _tint(p.data(0), 0.14), 10, -1, -1))  # .sq: the hue at 14 %, 10 corners
+    for k in range(1, 7):  # (blades.css --hue-add data-3, --hue-network data-2, --hue-keys data-4, ...)
+        var sq = _box("icon-square-" + String(k), _tint(p.data(k - 1), 0.14), 10, -1, -1)
+        sq.ink = p.data(k - 1)
+        out.append(sq^)
     var header = _box("page-header", 0, 0, 14, 16)  # .bh: 14px 16px, a line-2 rule under it, 65 high at least
     header.line_bottom, header.min_height = p.line, 65
     out.append(header^)

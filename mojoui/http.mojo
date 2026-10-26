@@ -219,3 +219,18 @@ struct Url(Copyable, Movable):
         if host.byte_length() == 0:
             raise Error("no host in " + url)
         return Url(scheme, host, port, target)
+
+
+def uri_component(s: String) -> String:
+    """JavaScript's encodeURIComponent: every byte but A–Z a–z 0–9 - _ . ! ~ * ' ( ) as %XX (UTF-8), for a query value
+    or a path part ("owner/name" → "owner%2Fname")."""
+    var hexd = String("0123456789ABCDEF")
+    var keep = String("-_.!~*'()")
+    var out = String("")
+    for b in s.as_bytes():
+        var c = Int(b)
+        if (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or (c < 128 and chr(c) in keep):
+            out += chr(c)
+        else:
+            out += "%" + String(hexd[byte = c // 16]) + String(hexd[byte = c % 16])
+    return out

@@ -856,16 +856,19 @@ def console_web(steps, env, shot=None, path="", viewport=(1440, 900)):
     return r, out
 
 
-def m5_pixels(token):
-    """Information only (M7 holds the bar): each M5 screen's share of pixels equal to the original's, both sizes."""
+def m5_pixels(token, names=None, extra=None):
+    """Information only (M7 holds the bar): each screen's share of pixels equal to the original's, both sizes (M5's, or
+    `names`; `extra`: more env for the app, a None value replaced by the recording's time)."""
     import subprocess
     import console_fixture
     import console_side
+    names = names or M5_SCREENS
     fx = console_fixture.Fixtures()
     server, url = console_fixture.serve(fx)
     port = drive_port()
+    more = {k: (str(fx.recorded_at) if v is None else v) for k, v in (extra or {}).items()}
     web = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/web.py"), str(g30.BUILD / CONSOLE / "web"), str(port)], cwd=ROOT,
-                           env=dict(os.environ, **console_env(url, token)), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                           env=dict(os.environ, **console_env(url, token, more)), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         import urllib.request
         for _ in range(300):
@@ -874,7 +877,7 @@ def m5_pixels(token):
                 break
             except OSError:
                 time.sleep(0.1)
-        screens = [s for s in console_side.SCREENS if s[0] in M5_SCREENS]
+        screens = [s for s in console_side.SCREENS if s[0] in names]
         shots = console_side.shoot(f"http://127.0.0.1:{port}/", OUT / "ours", frozen_at=fx.recorded_at, screens=screens, path="", wait_idle=False)
     finally:
         web.terminate()
@@ -885,7 +888,7 @@ def m5_pixels(token):
             web.wait(timeout=10)
         server.shutdown()
     notes = []
-    for (name, (w, h)), png in sorted(shots.items(), key=lambda kv: (M5_SCREENS.index(kv[0][0]), -kv[0][1][0])):
+    for (name, (w, h)), png in sorted(shots.items(), key=lambda kv: (names.index(kv[0][0]), -kv[0][1][0])):
         orig = OUT / "orig" / "a" / f"{name}-{w}x{h}.png"
         notes.append(f"{name} {w}: {1 - console_side.differing(orig, png):.1%}")
     return notes
@@ -1090,6 +1093,298 @@ def m5():
                   "Mac builds. Pixels equal to the original (info, M7 wants 99 %): " + ", ".join(px))
 
 
+# M6: the other screens. examples/console against the fixture server, on GTK and the web, the clock at the recording's
+# time ($MOJOUI_NOW: "84 s ago" reads as the original's shot): Add a model (blade-add.js), Keys (blade-keys.js), Gateway
+# (blade-gateway.js), Security (blade-security.js), Settings (blade-settings.js, system-data.js). What each shows is the
+# original's own rules over the recorded replies; its writes are the original's requests, read from the server's log.
+NOW_ENV = "MOJOUI_NOW"
+M6_SCREENS = ["add", "keys", "gateway", "security", "settings"]
+M6_PLACES = {"add": "Add a model", "keys": "Keys", "gateway": "Gateway", "security": "Security", "settings": "Settings"}
+M6_ENDPOINT = "http://127.0.0.1:11435/v1"
+M6_LAN = "https://ablearn.local:8443/v1"
+M6_CA = "/tmp/mxc-console-record/xdg-data/caddy/pki/authorities/local/root.crt"
+M6_PULL = "qwen2.5-1.5b"  # Add a model picks it from a search for "qwen" (not one of My models yet)
+M6_WANT = {
+    # blade-add.js find view: the hint, the filters, the results for "qwen" with their fit badges and VRAM, the source line
+    "add-search": ["Add a model", "Search the MAX catalog and Hugging Face · every result is checked against this machine's memory",
+                   "Search the MAX catalog, or paste a Hugging Face repo id (owner/name)", "All", "Fits", "Needs porting", "3 results",
+                   "qwen2.5-0.5b", M6_PULL, "qwen2.5-3b", "MAX", "fits", "~2.2 GB VRAM", "~4.6 GB VRAM", "~8.2 GB VRAM",
+                   "Qwen/Qwen2.5-1.5B-Instruct · Qwen2 · 1.5B · 3 GB", "$ mxc search qwen",
+                   "fit checked against NVIDIA GeForce RTX 4090 · 14.9 GB free of 24 GB"],
+    # setupStages after a pull run to the end, the live log's head, showReady's card
+    "add-ready": [f"{M6_PULL} is ready", "Check hardware", "Fetch the model", "Compile graph", "Serve on localhost", "Smoke test",
+                  "needs ~4.6 GB · 14.9 GB free on NVIDIA GeForce RTX 4090", "1.5 GB on disk · files verified", "graph compiled",
+                  f"answering at {M6_ENDPOINT}", "“Hello there, nice to meet you!”", f"mxc pull {M6_PULL}", f"mxc serve {M6_PULL}", "mxc ps",
+                  "LIVE LOG", "Hide log", f"{M6_PULL} is serving.", "ready · localhost", M6_ENDPOINT, "Open", "Make it secure", "Add another",
+                  f"$ mxc serve {M6_PULL}",
+                  "It is on localhost only. Make it secure to reach it from your phone or another machine with HTTPS and an API key."],
+    # blade-keys.js: the table (prefix only, dateTime, ago at the recording's time), the actions, the source line
+    "keys": ["API keys", "shared by every model · requests without a valid key get 401", "New key", "Keys", "prefix only",
+             "notes-app", "old-script", "zed-editor", "mst-vHApwU0D…", "mst-62ysDIJM…", "Oct 25, 21:34", "84 s ago", "2 min ago",
+             "active", "revoked", "Rotate", "Revoke", "$ mxc keys ls", "ci-bot", "Key for ci-bot",
+             "Copy it now. It is shown once and cannot be recovered; rotate it if you lose it.", "$ mxc keys new ci-bot", "never"],
+    # blade-gateway.js with LiteLLM running: status, routes, recent requests (UTC clock), the safeguards' counters, the log
+    "gateway": ["Gateway", "LiteLLM · one endpoint routes to every model", "Restart", "Status", "LiteLLM", "running · :4000",
+                "Caddy (HTTPS)", "off", "Local endpoint", M6_ENDPOINT, "LAN endpoint", "Routes", "openai/all-minilm-l6", "openai/llama3.2-1b",
+                "openai/qwen2.5-0.5b", ":40755", "idle", "37", f"↳ every route goes to {M6_ENDPOINT}", "$ mxc status", "copy",
+                "Recent requests", "newest first · kept for 7 days", "21:36:33", "zed-editor", "notes-app", "chat", "200", "16 → 48",
+                "42 ms", "340 ms", "$ mxc requests --limit 200", "Safeguards", "counted today", "Encrypted on your LAN",
+                "off: nothing listens beyond this machine", "One key per app", "2 active · 1 revoked · 2 requests refused today (401)",
+                "Only four doors open", "0 requests to other /v1 paths today", "Admin stays home", "0 refusals today", "LiteLLM log",
+                "last lines", "↳ refreshed every few seconds", "API reference", "Open the API reference", "$ mxc console api",
+                "From the terminal", "$ mxc expose", "$ mxc expose --stop"],
+    # blade-security.js after Make it secure: the steps done, the endpoint, the CA and how to trust it, the curl
+    "security-on": ["Security", "certificate, key and HTTPS on your LAN", "Secure on your network",
+                    "HTTPS with a key. Other devices on your Wi-Fi can call it.", "secure", "Issue a local certificate", "for ablearn.local",
+                    "Create the gateway key", "mxc gateway key", "Open HTTPS on your LAN", "port 8443", "Manage API keys", "Stop exposing",
+                    "$ mxc expose --stop", "Endpoint", M6_LAN, "$ mxc status", "Trust the certificate",
+                    "The CA file is created the first time Caddy starts; it is not there yet.", M6_CA, "Linux",
+                    "sudo cp root.crt /usr/local/share/ca-certificates/mxconsole.crt && sudo update-ca-certificates", "macOS",
+                    "Open root.crt in Keychain Access, then set it to Always Trust", "↳ trust it once on each device",
+                    "From another device on your Wi-Fi", "↳ replace <model> with a model name", "What “Make it secure” does",
+                    "↳ all three happen in one request"],
+    "security-off": ["Localhost only", "Only this machine can call it. One click adds a certificate, a key and HTTPS.", "localhost only",
+                     "Make it secure", "$ mxc expose", "Certificate", "a local CA, “mxconsole local”, signs a certificate for this machine's name",
+                     "API key", "the gateway has its own key; requests without a valid app key get 401", "HTTPS",
+                     "Caddy and LiteLLM listen on your LAN; localhost keeps working over HTTP"],
+    # blade-settings.js: the theme, idle unload per model, the daemon (/admin/info, MXC_HOME from /admin/system), the ports
+    "settings": ["Settings", "this browser and this daemon", "Appearance", "kept in this browser", "Light", "Dark",
+                 "Until you pick one, the console follows your system.", "↳ kept in this browser", "Idle unload", "per model",
+                 "A model unloads after 5m without a request unless you say otherwise. There is no single setting for all of them yet: it is kept per model.",
+                 "all-minilm-l6", "llama3.2-1b", "qwen2.5-0.5b", "after 5m idle", "$ mxc set <model> --keep-alive 10m", "$ mxc set <model> --pin",
+                 "Daemon", "Host", "ablearn", "Endpoint", M6_ENDPOINT, "LAN endpoint", "off: this machine only", "MAX version",
+                 "26.7.0.dev2026100905", "Uptime", "2m 23s", "Active keys", "2", "MXC_HOME", "/tmp/mxc-console-record/mxc", "$ mxc stop --all",
+                 "Ports & processes", "most listen on this machine only", "omxconsole daemon", "127.0.0.1:11435", "LiteLLM", "127.0.0.1:4000",
+                 "Caddy", "0.0.0.0:8443", "Caddy admin", "127.0.0.1:2099", "max serve · qwen2.5-0.5b", "127.0.0.1:40755", "this machine",
+                 "your LAN", "Listening", "Off", "the daemon only", "LAN clients over HTTPS, each with an app key",
+                 "Apps talk to the daemon, which starts one max serve per model on a loopback port. Only Caddy listens beyond this machine, and only after you make a model secure.",
+                 "$ mxc ps"],
+}
+M6_LITELLM_LOG = ["21:35:02 LiteLLM: Proxy initialized with Config", "21:35:02 LiteLLM: routes qwen2.5-0.5b, llama3.2-1b, all-minilm-l6",
+                  "21:35:03 INFO: Uvicorn running on http://127.0.0.1:4000"]
+M6_LITELLM_NEW = "21:36:40 INFO: POST /v1/chat/completions 200"  # the log grows mid-run: shown within one poll (4 s)
+M6_CADENCE = {"/admin/network": 4000, "/admin/gateway": 4000, "/admin/litellm/log?bytes=8000": 4000}  # blade-gateway.js POLL (a chain)
+
+
+def security_curl(url, ca):
+    """blade-security.js securityView().curl."""
+    return (f"curl --cacert {ca} {url}/chat/completions \\\n  -H \"Authorization: Bearer $MXC_API_KEY\" \\\n"
+            f"  -H \"Content-Type: application/json\" \\\n  -d '{{\"model\":\"<model>\",\"messages\":[{{\"role\":\"user\",\"content\":\"hi\"}}]}}'")
+
+
+def add_curl(endpoint, name):
+    """blade-add.js curlFor."""
+    import json as pyjson
+    return (f"curl {endpoint}/chat/completions \\\n  -H \"Authorization: Bearer $MXC_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n"
+            f"  -d '{{\"model\": {pyjson.dumps(name)}, \"messages\": [{{\"role\": \"user\", \"content\": \"Hello\"}}]}}'")
+
+
+def clipboard(out):
+    import re
+    m = re.findall(r"^CLIPBOARD: (.*)$", out, re.M)
+    return m[-1].replace("\\n", "\n").replace("\\t", "\t") if m else None
+
+
+def has_part(out, part):
+    """Some label or button holds `part` (a live log line carries its time in front)."""
+    return any(part in t for t in texts(out))
+
+
+def m6():
+    """The other screens: examples/console runs against the fixture server on GTK and on the web, the clock at the
+    recording's time. Add a model: a search shows the original's results with fit badges and VRAM; picking one runs the
+    original's requests (POST /admin/pulls, the job polled, load, the smoke test) through the stage timeline (five stages,
+    elapsed times), the live log, and the Ready card whose curl copies. Keys: the table as the original shows it; Rotate
+    and Revoke act only on the second tap (a single tap on another row's Revoke sends nothing); New key sends the
+    original's POST and shows the new key once with Copy (the clipboard holds it). Gateway: status, routes, recent
+    requests, the safeguards' counters, the LiteLLM log (a line added mid-run shows within one poll), the original's
+    4 s poll; Restart sends POST /admin/litellm/restart. Security: Make it secure sends POST /admin/expose and shows the
+    endpoint, the CA and the curl (Copy puts it on the clipboard); Stop exposing sends POST /admin/expose/stop on the
+    second tap. Settings: the daemon's info from /admin/info and /admin/system, the ports, idle unload; Stop daemon sends
+    POST /admin/shutdown only on the second tap. Every write carries the admin key; nothing asked misses the fixtures.
+    Builds for the Mac. Prints each M6 screen's pixel match against the original (information only)."""
+    import json as pyjson
+    import re
+    import secrets
+    import threading
+    import console_fixture
+    problems = {s: [] for s in M6_SCREENS}
+    pre = []
+    folder = ROOT / "examples" / CONSOLE
+    for name in ("keys", "gateway", "security", "settings"):
+        if not (folder / f"{name}.mojo").exists():
+            problems[name].append(f"no examples/console/{name}.mojo (a file per screen)")
+    if not list(folder.glob("add*.mojo")):
+        problems["add"].append("no examples/console/add*.mojo (a file per screen)")
+    for name in M6_TESTS:  # the components M6 added to mojoui/, each with its own test
+        err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}")
+        if err:
+            pre.append(err[:300])
+    err = build(CONSOLE, "linux", "web", "mac")
+    if err:
+        return False, err
+    token = secrets.token_hex(8)
+
+    def run(host, screen, steps, fx, shot=None):
+        server, url = console_fixture.serve(fx)
+        env = console_env(url, token, {NOW_ENV: str(fx.recorded_at)})
+        try:
+            if host == "gtk":
+                go = "pause:1500;tap:" + M6_PLACES[screen] + ";pause:1200;"
+                return console_gtk(go + steps, env, shot=shot)
+            return console_web("pause:1500;" + steps, env, shot=shot, path="#/" + screen)
+        finally:
+            server.shutdown()
+
+    def writes_ok(fx, where, screen, want, never=()):
+        got = [(w["method"], w["path"], w["body"]) for w in fx.writes]
+        for item in want:
+            if item not in got:
+                problems[screen].append(f"{where}: the app never sent {item[0]} {item[1]} {pyjson.dumps(item[2])} (sent: {got[:6]})")
+        for item in never:
+            if any(g[:2] == item for g in got):
+                problems[screen].append(f"{where}: sent {item[0]} {item[1]} after a single tap (the original asks for a second)")
+        if any(r["admin"] != token for r in fx.log):
+            problems[screen].append(f"{where}: some /admin request went without X-Mst-Admin = ${CONSOLE_KEY_ENV}")
+        if fx.misses:
+            problems[screen].append(f"{where}: asked for what the daemon doesn't answer: {sorted(set(fx.misses))[:6]}")
+
+    def shown(out, where, screen, want):
+        lost = missing(out, want)
+        if lost:
+            problems[screen].append(f"{where}: missing {lost[:10]}")
+        lost = missing(out, M5_TOP + M5_PLACES)
+        if lost:
+            problems[screen].append(f"{where}: the top bar lacks {lost}")
+
+    def got(r, out, screen):
+        if r is None:
+            problems[screen].append(out)
+            return False
+        return True
+
+    for host in ("gtk", "web"):
+        # -- Add a model: the search, then a pull run to the Ready card ---------------------------------------
+        fx = console_fixture.Fixtures()
+        r, out = run(host, "add", "type:Search models=qwen;pause:2000", fx, shot=OUT / f"console-add-{host}.png")
+        if got(r, out, "add"):
+            shown(out, f"{host} add (search)", "add", M6_WANT["add-search"])
+            if not any(x["target"] == "/admin/search?q=qwen" for x in fx.log):
+                problems["add"].append(f"{host} add: no GET /admin/search?q=qwen")
+            writes_ok(fx, f"{host} add (search)", "add", [])
+        fx = console_fixture.Fixtures()
+        r, out = run(host, "add", f"type:Search models=qwen;pause:2000;tap:{M6_PULL};pause:9000;tap:Copy curl;pause:300", fx,
+                     shot=OUT / f"console-add-ready-{host}.png")
+        if got(r, out, "add"):
+            shown(out, f"{host} add (ready)", "add", M6_WANT["add-ready"])
+            for line in [f"hardware: needs ~4.6 GB", f"pull #100 started for {M6_PULL}",
+                         f"loading {M6_PULL} · compiling the graph (mxc serve {M6_PULL})", f"serving on {M6_ENDPOINT}",
+                         "reply: Hello there, nice to meet you!"]:
+                if not has_part(out, line):
+                    problems["add"].append(f"{host} add: the live log has no line with {line!r}")
+            elapsed = [t for t in texts(out) if re.fullmatch(r"\d+\.\ds", t)]
+            if len(elapsed) < 4:
+                problems["add"].append(f"{host} add: the timeline shows {len(elapsed)} elapsed times (want one per finished stage, ≥ 4)")
+            if clipboard(out) != add_curl(M6_ENDPOINT, M6_PULL):
+                problems["add"].append(f"{host} add: Copy curl put {clipboard(out)!r} on the clipboard")
+            writes_ok(fx, f"{host} add (ready)", "add", [("POST", "/admin/pulls", {"ref": M6_PULL}), ("POST", f"/admin/models/{M6_PULL}/load", None),
+                      ("POST", "/admin/try/chat", {"model": M6_PULL, "messages": [{"role": "user", "content": "Say hello in five words."}], "max_tokens": 24})])
+            polls = [x for x in fx.log if x["target"] == "/admin/pulls/100"]
+            if len(polls) < 3:
+                problems["add"].append(f"{host} add: the pull was polled {len(polls)}× (the job moves one step per poll)")
+            else:
+                cadence(fx.log, "/admin/pulls/100", 700, problems["add"], f"{host} add")
+        # -- Keys: one tap on notes-app's Revoke, rotate zed-editor, a new key, copy it, revoke it ------------
+        fx = console_fixture.Fixtures()
+        steps = ("pause:800;tap:Revoke@0;tap:Rotate@2;tap:Click again to rotate: the old key stops working now;pause:1200;tap:New key;"
+                 "type:App name, e.g. my-app=ci-bot;tap:Create key;pause:1500;tap:Copy;pause:300;tap:Revoke@0;tap:Click again to revoke;pause:1500")
+        r, out = run(host, "keys", steps, fx, shot=OUT / f"console-keys-{host}.png")
+        if got(r, out, "keys"):
+            secret, rotated = fx.issued.get("ci-bot", "?"), fx.issued.get("zed-editor", "?")
+            shown(out, f"{host} keys", "keys", M6_WANT["keys"] + [secret, rotated[:12] + "…", secret[:12] + "…"])
+            if clipboard(out) != secret:
+                problems["keys"].append(f"{host} keys: Copy put {clipboard(out)!r} on the clipboard, not the new key")
+            if not re.search(r"^TABLE: keys 4 rows", out, re.M):
+                problems["keys"].append(f"{host} keys: no 4-row table tagged keys ({re.findall(r'^TABLE: .*$', out, re.M)})")
+            if out.count("revoked") < 2:
+                problems["keys"].append(f"{host} keys: ci-bot isn't shown revoked after the second tap")
+            writes_ok(fx, f"{host} keys", "keys", [("POST", "/admin/keys/zed-editor/rotate", None), ("POST", "/admin/keys", {"app": "ci-bot"}),
+                                                   ("DELETE", "/admin/keys/ci-bot", None)], never=[("DELETE", "/admin/keys/notes-app")])
+        # -- Gateway: LiteLLM running, its log growing mid-run, Restart ----------------------------------------
+        fx = console_fixture.Fixtures()
+        net = pyjson.loads(fx.replies["GET /admin/network"]["body"])
+        net["expose"]["litellm"] = True
+        fx.override("GET /admin/network", pyjson.dumps(net).encode())
+        fx.override("GET /admin/litellm/log?bytes=8000", ("\n".join(M6_LITELLM_LOG) + "\n").encode(), ctype="text/plain; charset=utf-8")
+        changed = {}
+
+        def grow():
+            while sum(1 for x in fx.log if x["target"] == "/admin/litellm/log?bytes=8000") < 2:
+                time.sleep(0.05)
+            fx.override("GET /admin/litellm/log?bytes=8000", ("\n".join(M6_LITELLM_LOG + [M6_LITELLM_NEW]) + "\n").encode(), ctype="text/plain; charset=utf-8")
+            changed["t"] = time.monotonic()
+        threading.Thread(target=grow, daemon=True).start()
+        r, out = run(host, "gateway", "pause:500;tap:Restart;pause:14000", fx, shot=OUT / f"console-gateway-{host}.png")
+        if got(r, out, "gateway"):
+            shown(out, f"{host} gateway", "gateway", M6_WANT["gateway"] + M6_LITELLM_LOG + [M6_LITELLM_NEW])
+            writes_ok(fx, f"{host} gateway", "gateway", [("POST", "/admin/litellm/restart", None)])
+            after = [x["t"] for x in fx.log if x["target"] == "/admin/litellm/log?bytes=8000" and "t" in changed and x["t"] >= changed["t"]]
+            if not after or after[0] - changed["t"] > 4.6:
+                problems["gateway"].append(f"{host} gateway: after the log grew, the next read came {(after[0] - changed['t']) if after else 'never'} s later (one poll: 4 s)")
+            for path, ms in M6_CADENCE.items():
+                cadence(fx.log, path, ms, problems["gateway"], f"{host} gateway")
+        # -- Security: Make it secure, copy the curl; then (shared already) Stop exposing on the second tap ------
+        fx = console_fixture.Fixtures()
+        r, out = run(host, "security", "pause:800;tap:Make it secure;pause:2500;tap:copy;pause:300", fx, shot=OUT / f"console-security-{host}.png")
+        if got(r, out, "security"):
+            shown(out, f"{host} security (on)", "security", M6_WANT["security-on"])
+            if clipboard(out) != security_curl(M6_LAN, M6_CA):
+                problems["security"].append(f"{host} security: copy put {clipboard(out)!r} on the clipboard, not the curl example")
+            writes_ok(fx, f"{host} security (on)", "security", [("POST", "/admin/expose", {})])
+            at = next((i for i, x in enumerate(fx.log) if x["method"] == "POST" and x["target"] == "/admin/expose"), None)
+            if at is None or not any(x["target"] == "/admin/info" for x in fx.log[at:]) or not any(x["target"] == "/admin/network" for x in fx.log[at:]):
+                problems["security"].append(f"{host} security: /admin/info and /admin/network weren't read again after the expose")
+        fx = console_fixture.Fixtures()
+        fx.set_exposed(True)
+        r, out = run(host, "security", "pause:800;tap:Stop exposing;pause:600;tap:Click again to stop exposing;pause:2000", fx)
+        if got(r, out, "security"):
+            shown(out, f"{host} security (off)", "security", M6_WANT["security-off"])
+            writes_ok(fx, f"{host} security (off)", "security", [("POST", "/admin/expose/stop", None)])
+        # -- Settings: one tap on Stop daemon asks; the second sends -------------------------------------------
+        fx = console_fixture.Fixtures()
+        r, out = run(host, "settings", "pause:1500;tap:Stop daemon;pause:800", fx, shot=OUT / f"console-settings-{host}.png")
+        if got(r, out, "settings"):
+            shown(out, f"{host} settings", "settings", M6_WANT["settings"] + ["Cancel"])
+            if not has_part(out, "Stop the daemon? Every model unloads and this console goes offline until you run"):
+                problems["settings"].append(f"{host} settings: one tap on Stop daemon didn't ask (the warning box)")
+            writes_ok(fx, f"{host} settings", "settings", [], never=[("POST", "/admin/shutdown")])
+            for path in ("/admin/info", "/admin/system"):
+                if not any(x["target"] == path for x in fx.log):
+                    problems["settings"].append(f"{host} settings: never read {path}")
+        fx = console_fixture.Fixtures()
+        r, out = run(host, "settings", "pause:1500;tap:Stop daemon;pause:500;tap:Stop daemon;pause:1500", fx)
+        if got(r, out, "settings"):
+            shown(out, f"{host} settings (stop)", "settings", ["Stopping… the console goes offline in a moment."])
+            writes_ok(fx, f"{host} settings (stop)", "settings", [("POST", "/admin/shutdown", None)])
+    passing = [s for s in M6_SCREENS if not problems[s]]
+    failing = [f"{s}: " + "; ".join(dict.fromkeys(problems[s]))[:900] for s in M6_SCREENS if problems[s]]
+    try:
+        px = m5_pixels(token, M6_SCREENS, {NOW_ENV: None})
+    except Exception as e:
+        px = [f"unmeasured ({e!r})"]
+    tail = "Pixels equal to the original (info, M7 wants 99 %): " + ", ".join(px)
+    if pre or failing:
+        return False, "; ".join(pre + failing) + f" | passing: {', '.join(passing) or 'none'} | " + tail
+    return True, ("examples/console on GTK and the web against the fixtures: Add a model (search with fit badges, a pull through the "
+                  "five stages with elapsed times and the live log, the Ready card's curl copied), Keys (rotate and revoke on the second tap, "
+                  "a new key shown once and copied), Gateway (counters, routes, requests, the LiteLLM log growing within one poll, Restart), "
+                  "Security (expose and stop sent, the curl copied), Settings (info, ports, shutdown on the second tap); every write with the "
+                  "admin key; Mac builds. " + tail)
+
+
+M6_TESTS = ["catalog", "adminkit"]  # the components M6 added to mojoui/ (tests/test_<name>.mojo), filled as they're added
+
+
 def m8():
     """In the gallery, and nothing regressed: goal 32's M0–M2, goal 30's M0–M5 (goals 3–29 inside them)."""
     problems = []
@@ -1113,7 +1408,7 @@ MILESTONES = [
     ("M3", m3),
     ("M4", m4),
     ("M5", m5),
-    ("M6", todo("examples/console: Add, Keys, Gateway, Security, Settings (GOAL.md M6)")),
+    ("M6", m6),
     ("M7", todo("identical: web ≥ 99 % of pixels, GTK and Mac boxes, a live daemon (GOAL.md M7)")),
     ("M8", m8),
 ]

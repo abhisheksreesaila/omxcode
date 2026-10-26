@@ -73,6 +73,7 @@ comptime ICON_NAMES: List[String] = [
     "view", "zoom", "category", "formula", "comment", "shape", "text", "organise", "format", "share", "import", "database", "sample", "grid", "sheet", "file", "export", "upload", "chevron",
     "bold", "italic", "underline", "strikethrough", "text-colour", "fill", "align-left", "align-center", "align-right", "currency", "percent", "decimals-less", "decimals-more", "clear-format", "rename", "settings", "chevron-right", "back", "copy",
     "box", "gauge", "scroll-text", "book-open", "key-round", "route", "lock", "sliders-horizontal", "layout-grid", "list", "square", "rotate-cw", "trash-2", "terminal", "play", "pause", "x", "laptop", "external-link", "loader-circle", "download", "ellipsis", "zap", "cpu",
+    "unlock", "sun", "moon",  # (the console's Security and Settings, goal 33 M6)
 ]
 
 # Text styles (each platform maps them to its own type scale)

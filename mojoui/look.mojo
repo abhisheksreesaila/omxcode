@@ -142,6 +142,8 @@ def look_web_css(look: Look, scope: String) -> String:
         if t != "":
             out += (scope + "[data-tag=" + s.role + "] .text, " + scope + ".text[data-tag=" + s.role + "], " + scope + "button[data-tag=" + s.role + "], "
                     + scope + "[data-role~=" + s.role + "] .text { " + text_rule(s, True) + "}\n")
+        if s.ink != 0:  # (an Icon right inside the role's view takes its ink, as its words do)
+            out += scope + "[data-tag=" + s.role + "] > .icon { color: " + css_color(s.ink) + "; }\n"
     var c = look.controls.copy()
     if c.control_h > 0:
         out += scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; }\n"
