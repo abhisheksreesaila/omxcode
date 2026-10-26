@@ -159,6 +159,16 @@ def console_surfaces(p: Palette) -> List[Surface]:
     out.append(cut.copy())
     cut.role, cut.width = "table-tick-compact", 46
     out.append(cut^)
+    # a tick box with no words, as the web draws it (label.toggle.check input: 18, 5 corners, a 1.5 ink-2 ring; in a
+    # table library.css .cb: 22, 7 corners, a 1.5 line; ticked: the accent); hosts that draw their own read these (D-510)
+    var tick_box = box("tick-box", 0, 5, -1, -1)
+    tick_box.width, tick_box.height, tick_box.outline, tick_box.outline_w = 18, 18, p.ink2, 1
+    out.append(tick_box^)
+    var table_tick_box = box("tick-box-table", 0, 7, -1, -1)
+    table_tick_box.width, table_tick_box.height, table_tick_box.outline, table_tick_box.outline_w = 22, 22, p.line_strong, 1
+    out.append(table_tick_box.copy())
+    table_tick_box.role, table_tick_box.width, table_tick_box.height = "tick-box-table-compact", 26, 26
+    out.append(table_tick_box^)
     var snug = box("table-dense-snug", 0, -1, 8, 10)  # (.b-home .tbl td.nm: 8px 10px)
     snug.line_bottom = p.line
     out.append(snug^)

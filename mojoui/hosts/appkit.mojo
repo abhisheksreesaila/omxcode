@@ -188,6 +188,10 @@ struct AppKitHost[A: App](Movable):
     var boxed: Int  # the Board child being built inside its role's box (the box wears the role; the child doesn't, as on GTK)
     var dashes: List[Tuple[Int, Int, Int, Int]]  # (view, its dashed outline's shape layer, corner radius, width): paths follow the layout (dash_paths)
     var rounds: List[Tuple[Int, Int]]  # (view, its look's corner radius): at most half its laid-out size (dash_paths; a layer draws a star past that)
+    var tick_boxes: List[Int]  # drawn tick boxes (D-510): the button, its look role, its width and height constraints
+    var tick_k: List[Int]
+    var tick_cw: List[Int]
+    var tick_ch: List[Int]
     var tcells: List[Tuple[Int, Int, Int, Int, Int]]  # a Table's cells: (table, cell, its width constraint (0: the last column's), column, child node): fit_tables
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
@@ -234,6 +238,10 @@ struct AppKitHost[A: App](Movable):
         self.dashes = List[Tuple[Int, Int, Int, Int]]()
         self.rounds = List[Tuple[Int, Int]]()
         self.tcells = List[Tuple[Int, Int, Int, Int, Int]]()
+        self.tick_boxes = List[Int]()
+        self.tick_k = List[Int]()
+        self.tick_cw = List[Int]()
+        self.tick_ch = List[Int]()
         self.focus = -1
         self.canvases = List[AppleCanvas]()
         self.link = 0
@@ -522,6 +530,10 @@ struct AppKitHost[A: App](Movable):
                 var lh = Float64(0)
                 if tl >= 0 and self.look.surfaces[tl].line_height > 0:
                     lh = self.look.surfaces[tl].line_height
+                elif tl >= 0 and self.look.surfaces[tl].line_height < 0 and self.look.type.line > 0:
+                    # the font's own line (CSS's normal: its ascender, descender and line gap), not the look's body line:
+                    # a mono line at 11.5 pt was 17 high for the web's 15 (D-509)
+                    lh = msg[Float64](font, "ascender") - msg[Float64](font, "descender") + msg[Float64](font, "leading")
                 elif self.look.type.line > 0:
                     lh = msg[Float64](font, "pointSize") * self.look.type.line
                 if lh > 0:
@@ -668,6 +680,8 @@ struct AppKitHost[A: App](Movable):
             if self.skinned:  # (ticked in the theme's accent, as GTK's check:checked)
                 _ = msg(w, "setBezelColor:", self.accent())
                 _ = msg(w, "setContentTintColor:", self.accent())
+            if self.skinned and node.text == "" and self.look.surface("tick-box") >= 0:  # a tick box with no words: the look's (D-510)
+                self.draw_tick(w, self.look.surface("tick-box"), node.value != 0)
         elif node.kind == DROPDOWN:
             w = msg(
                 msg(cls("NSPopUpButton"), "alloc"),
@@ -1040,6 +1054,10 @@ struct AppKitHost[A: App](Movable):
                 var child = self.build(c, self_addr)
                 var num = col < node.hint.byte_length() and String(node.hint[byte=col]) == "R"
                 var ck = self.rt.shown.nodes[c].kind
+                if ck == TOGGLE and self.rt.shown.nodes[c].text == "" and self.skinned:  # (a table's tick box: the table's size, D-510)
+                    var tk = self.look.surface("tick-box-table-compact" if node.style == 2 else "tick-box-table")
+                    if tk >= 0 and self.widgets[c] != 0:
+                        self.draw_tick(self.widgets[c], tk, self.rt.shown.nodes[c].value != 0)
                 var cell = new("NSStackView")
                 _ = msg(cell, "setOrientation:", 0)
                 _ = msg(cell, "setSpacing:", Float64(0))
@@ -1340,6 +1358,39 @@ struct AppKitHost[A: App](Movable):
         self.shells[i] = box
         return box
 
+    def draw_tick(mut self, w: Int, k: Int, on: Bool):
+        """A tick box drawn from the look's role k (its size, corners and ring; ticked: the accent with a white tick),
+        not AppKit's 16 pt check box: a theme's 22 pt table box is 22 here too, as on GTK and the web (D-510)."""
+        ref sf = self.look.surfaces[k]
+        _ = msg(w, "setButtonType:", 1)  # NSButtonTypePushOnPushOff: it keeps its state; the app's update says the rest
+        _ = msg(w, "setBordered:", 0)
+        _ = msg(w, "setImage:", 0)
+        _ = msg(w, "setWantsLayer:", 1)
+        var layer = msg(w, "layer")
+        _ = msg(layer, "setCornerRadius:", Float64(max(sf.radius_top, 0)))
+        _ = msg(layer, "setBorderWidth:", Float64(0) if on else Float64(max(sf.outline_w, 1)) * 1.5)
+        _ = msg(layer, "setBorderColor:", msg(ns_color(sf.outline), "CGColor"))
+        _ = msg(layer, "setBackgroundColor:", msg(self.accent() if on else msg(cls("NSColor"), "clearColor"), "CGColor"))
+        var attrs = new("NSMutableDictionary")
+        _ = msg(attrs, "setObject:forKey:", look_font(self.look.type.family, 700, Float64(sf.width) * 0.6, False), ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", ns_color(self.pal.accent_ink), ns_string("NSColor"))
+        _ = msg(w, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string("✓" if on else ""), attrs))
+        _ = msg(w, "setState:", 1 if on else 0)
+        for q in range(len(self.tick_boxes)):  # (sized once; a table's box takes the table's size: the same constraints)
+            if self.tick_boxes[q] == w:
+                self.tick_k[q] = k
+                _ = msg(self.tick_cw[q], "setConstant:", Float64(sf.width))
+                _ = msg(self.tick_ch[q], "setConstant:", Float64(sf.height))
+                return
+        var cw = msg(msg(w, "widthAnchor"), "constraintEqualToConstant:", Float64(sf.width))
+        var ch = msg(msg(w, "heightAnchor"), "constraintEqualToConstant:", Float64(sf.height))
+        _ = msg(cw, "setActive:", 1)
+        _ = msg(ch, "setActive:", 1)
+        self.tick_boxes.append(w)
+        self.tick_k.append(k)
+        self.tick_cw.append(cw)
+        self.tick_ch.append(ch)
+
     def draw_button(mut self, w: Int, style: Int, title: String, i: Int = -1):
         """A push button in the look's shape: its fill, hairline and corners on a layer, its title in the look's family,
         the look's height and padding (GTK's `button`, the web's). A button wearing a role (node i's tag) takes the role's
@@ -1391,6 +1442,8 @@ struct AppKitHost[A: App](Movable):
         var attrs = new("NSMutableDictionary")
         _ = msg(attrs, "setObject:forKey:", look_font(family, weight, size, self.look.type.tabular), ns_string("NSFont"))
         _ = msg(attrs, "setObject:forKey:", ns_color(ink), ns_string("NSColor"))
+        if k >= 0 and self.look.surfaces[k].tracking != 0:  # (its letter spacing, as the web's: the brand's -.02em, D-509)
+            _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", self.look.surfaces[k].tracking), ns_string("NSKern"))
         var said = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs)
         _ = msg(w, "setAttributedTitle:", said)
         _ = msg(w, "setContentTintColor:", ns_color(ink))
@@ -1598,6 +1651,10 @@ struct AppKitHost[A: App](Movable):
         self.dashes = List[Tuple[Int, Int, Int, Int]]()
         self.rounds = List[Tuple[Int, Int]]()
         self.tcells = List[Tuple[Int, Int, Int, Int, Int]]()
+        self.tick_boxes = List[Int]()
+        self.tick_k = List[Int]()
+        self.tick_cw = List[Int]()
+        self.tick_ch = List[Int]()
         self.size_w = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.wraps = List[Int]()
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
@@ -1751,6 +1808,9 @@ struct AppKitHost[A: App](Movable):
             elif p.op == SET_VALUE:
                 if kind == TOGGLE:
                     _ = msg(w, "setState:", p.number)
+                    for q in range(len(self.tick_boxes)):  # (a drawn tick box: its fill and tick again)
+                        if self.tick_boxes[q] == w:
+                            self.draw_tick(w, self.tick_k[q], p.number != 0)
                 elif kind == DROPDOWN:
                     _ = msg(w, "selectItemAtIndex:", p.number)
                 elif kind == SLIDER or kind == PROGRESS:
@@ -2370,9 +2430,17 @@ def hug(view: Int, priority: Float32, vertical: Bool):
             # pulls at most 250 and keeps its own size by a weak shrink-to-fit instead, just above that pull (D-507)
             _ = msg(view, "setHuggingPriority:forOrientation:", min(priority, Float32(250)), orientation)
             if priority > Float32(250):
-                var fit = msg(msg(view, "heightAnchor" if vertical else "widthAnchor"), "constraintEqualToConstant:", Float64(0))
+                var side = "heightAnchor" if vertical else "widthAnchor"
+                var fit = msg(msg(view, side), "constraintEqualToConstant:", Float64(0))
                 _ = msg(fit, "setPriority:", Float32(251))
                 _ = msg(fit, "setActive:", 1)
+                # its insets hold across, required (they were the Edge.Min pins' only: a padded chip lost its padding)
+                var ins = msg[CGRect](view, "edgeInsets")  # (top, left, bottom, right)
+                var pad = (ins.x + ins.width) if vertical else (ins.y + ins.height)
+                var views = msg(view, "arrangedSubviews")
+                for j in range(msg(views, "count")):
+                    var v = msg(views, "objectAtIndex:", j)
+                    _ = msg(msg(msg(view, side), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, side), pad), "setActive:", 1)
 
 
 def flexible_spacer(vertical: Bool) -> Int:
