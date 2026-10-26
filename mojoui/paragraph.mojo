@@ -84,8 +84,10 @@ def Link(text: String, href: String, role: String = "") -> Run:
     return Run(text, False, False, False, href, role)
 
 
-def Paragraph(runs: List[Run], role: String = "paragraph", on_link: Int = NO_MSG, style: Int = BODY) -> View:
-    """One block of runs the host wraps. Empty runs are dropped."""
+def Paragraph(runs: List[Run], role: String = "paragraph", on_link: Int = NO_MSG, style: Int = BODY, lead: Bool = False) -> View:
+    """One block of runs the host wraps. Empty runs are dropped. `lead`: the first run stands in a column of its own,
+    the others wrapping beside it, both on the middle and the role's gap apart (a command's "$ ": the web's flex item;
+    GTK and the Mac keep it inline). value = 1."""
     var opts = List[String]()
     var plain = String("")
     for r in runs:
@@ -96,7 +98,7 @@ def Paragraph(runs: List[Run], role: String = "paragraph", on_link: Int = NO_MSG
         opts.append(r.href)
         opts.append(r.text)
         plain += r.text
-    var node = Node(PARAGRAPH, plain, on_link, style=style, options=opts^)
+    var node = Node(PARAGRAPH, plain, on_link, style=style, value=1 if lead else 0, options=opts^)
     node.name = role
     var nodes = List[Node]()
     nodes.append(node^)

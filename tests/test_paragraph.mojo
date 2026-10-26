@@ -67,4 +67,8 @@ def main() raises:
     assert_equal(run_attributes(Plain("x", "md-p"), lk, "md-p"), "")  # (the paragraph's own role: nothing to add)
     assert_equal(run_attributes(Plain("x", "nope"), lk, "md-p"), "")  # (a role the look doesn't know: the paragraph's type)
     assert_equal(run_attributes(Italic("x"), Look.none(), "p"), " style=\"italic\"")
+    var led = Paragraph([Plain("$ "), Plain("mxc search <query>")], role="foot-text", lead=True)
+    assert_equal(led.nodes[0].value, 1)  # (the first run a column of its own; the words still "$ mxc…" whole)
+    assert_equal(led.nodes[0].text, "$ mxc search <query>")
+    assert_equal(Paragraph([Plain("a")]).nodes[0].value, 0)
     print("paragraph: ok")

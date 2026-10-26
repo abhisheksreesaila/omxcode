@@ -319,11 +319,10 @@ def panel_roles(p: Palette, mono: String, shadow: List[Shadow]) -> List[Surface]
     var foot = box("card-foot", 0, 0, 9, 16)  # .src: 11.5px mono ink-2 over a line-2 rule, 9px 16px, 8 between
     foot.line_top, foot.font, foot.font_size, foot.ink, foot.gap, foot.line_height = p.line, mono, 11.5, p.ink2, 8, -1
     out.append(foot^)
-    out.append(words_role("foot-text", 0, 0, 0))  # (the foot's words: its type the foot's)
+    var fw = words_role("foot-text", 0, 0, 0)  # (the foot's words, its type the foot's; the mark .src's gap 8 before them)
+    fw.gap = 8
+    out.append(fw^)
     out.append(words_role("foot-mark", 0, 0, tint(p.ink2, 0.6)))  # (.src::before: "$" or "↳", opacity .6)
-    var gap = words_role("foot-gap", 0, 0, 0)  # (the space after the mark as wide as .src's gap 8: Geist Mono's 11.5 px space is 6.9)
-    gap.tracking = 1.1
-    out.append(gap^)
     var cp = box("foot-copy", tint(p.ink, 0.05), 999, 0, 10)  # .src .cp: 500 11px mono ink-2, 24 high, 0 10px
     cp.font, cp.font_size, cp.font_weight, cp.ink, cp.height, cp.line_height = mono, 11, 500, p.ink2, 24, -1
     out.append(cp^)
@@ -806,6 +805,9 @@ def extra_roles(p: Palette, mono: String) -> List[Surface]:
     out.append(ch1.copy())
     ch1.role, ch1.font_size, ch1.font_weight = "chapter-2", 12.5, 500
     out.append(ch1^)
+    var stt = words_role("spec-title", 13, 600, p.ink, mono)  # .nb-arch: 13px 600 mono in the ink, its line the body's 1.45
+    stt.line_height, stt.breaks_words = 13 * 1.45, True
+    out.append(stt^)
     var sr = layout("spec-rows", 0)  # .nb-rows: margin-top 14 (the card body's 10 between, and 4)
     sr.margin_top, sr.margin_x, sr.margin_bottom = 4, 0, 0
     out.append(sr^)

@@ -37,8 +37,7 @@ def PageHeader(icon: String, title: String, count: String, sub: String, var tool
     if not compact:
         words.append(Text(sub).tag("page-sub"))
     items += [IconSquare(icon, hue=hue), VStack(words^, spacing=SPACE_XXS).align(START).grow()]
-    if len(tools) > 0:
-        items.append(HStack(tools^, spacing=SPACE_S).align(CENTER).tag("page-tools"))
+    items.append(HStack(tools^, spacing=SPACE_S).align(CENTER).tag("page-tools"))  # (always there, empty or not: its gap is kept, as the original's .tools)
     return HStack(items^, spacing=SPACE_M).align(CENTER).fill().tag("page-header")
 
 

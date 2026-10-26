@@ -69,6 +69,7 @@ body { font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; 
 .spacer { flex: 1; }
 .text { margin: 0; text-align: center; }
 .text.paragraph { text-align: start; overflow-wrap: anywhere; }  /* a Paragraph: runs inline, the browser wraps them */
+.text.paragraph.lead { display: flex; align-items: center; }  /* a lead run in a column of its own (its trailing space hangs) */
 .run.strong { font-weight: 700; } .run.em { font-style: italic; } .run.code { font-family: ui-monospace, monospace; } a.run.link { color: inherit; }
 .text.title { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
 .text.headline { font-size: 17px; font-weight: 600; }
@@ -884,7 +885,11 @@ def render_node(s, i, sid):
         tag = H1 if n["style"] == TITLE else (H3 if n["style"] == HEADLINE else P)
         return tag(n["text"], cls=cls, id=nid, data_kind="label")
     if kind == PARAGRAPH:  # inline runs in one block, wrapped by the browser; each run's element wears its role (data-role)
-        inner = "".join(to_xml(el, indent=False) for el in paragraph_runs(n, i, common))  # (no whitespace between or around the runs: it would be words)
+        runs = paragraph_runs(n, i, common)
+        if n["value"] == 1 and len(runs) > 1:  # a lead: the first run a column of its own, the rest wrapping beside it
+            inner = to_xml(runs[0], indent=False) + to_xml(Span(NotStr("".join(to_xml(el, indent=False) for el in runs[1:])), cls="rest"), indent=False)
+            return P(NotStr(inner), cls="text paragraph lead", id=nid, data_kind="paragraph")
+        inner = "".join(to_xml(el, indent=False) for el in runs)  # (no whitespace between or around the runs: it would be words)
         return P(NotStr(inner), cls="text paragraph", id=nid, data_kind="paragraph")
     if kind == BUTTON:
         cls = {PROMINENT: "prominent", DESTRUCTIVE: "destructive", SUBTLE: "subtle", ICON_ONLY: "subtle icon-only",

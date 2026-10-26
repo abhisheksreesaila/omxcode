@@ -47,10 +47,10 @@ def CardBody(var items: List[View], flow: Bool = False) -> View:
 
 
 def foot_words(text: String, note: Bool) -> View:
-    """A foot's words: its mark ($, or ↳ for a note) quieter than them (role foot-mark), the space after it as wide as the
-    look's gap (role foot-gap), then the words: one Paragraph, so it still reads "$ text" whole (roles foot-text)."""
-    var runs: List[Run] = [Plain("↳" if note else "$", "foot-mark"), Plain(" ", "foot-gap"), Plain(text)]
-    return Paragraph(runs, role="foot-text")
+    """A foot's words: its mark ($, or ↳ for a note) quieter than them in a column of its own (role foot-mark), the words
+    beside it the look's gap away (role foot-text): one Paragraph, so it still reads "$ text" whole."""
+    var runs: List[Run] = [Plain(("↳" if note else "$") + " ", "foot-mark"), Plain(text)]
+    return Paragraph(runs, role="foot-text", lead=True)
 
 
 def CardFoot(text: String, note: Bool = False, tail: String = "") -> View:

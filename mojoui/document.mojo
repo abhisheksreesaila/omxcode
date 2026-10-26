@@ -34,6 +34,11 @@ def Outline(title: String, titles: List[String], levels: List[Int], on_tap: Int)
     return VStack(items^, spacing=SPACE_XXS).align(START).fill().tag("outline")
 
 
+def SpecTitle(text: String) -> View:
+    """The name a spec's rows describe (a model's architecture), strong in the mono, breaking where it must (role spec-title)."""
+    return Text(text).tag("spec-title")
+
+
 def SpecRows(keys: List[String], values: List[String]) -> View:
     """Key-value rows in the mono, as a table of two columns, the keys' 52 % of the width (roles spec-rows: its room;
     spec-key, spec-value: each cell's padding, rule and type; a long key breaks where it must)."""
