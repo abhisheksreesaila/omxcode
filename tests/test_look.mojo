@@ -79,4 +79,6 @@ def main() raises:
     assert_true("--mojoui-whole-width: 1;" in wcss, wcss)  # (the web host's script sizes it to whole pixels, D-479)
     var fl = Surface("flowing", 0, -1, -1, -1, -1, -1, 0, 16, 14, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False, block_flow=True)
     assert_true("display: block;" in surface_rule(fl, True) and "display" not in surface_rule(fl, False), surface_rule(fl, True))  # (D-481)
+    var lined = Surface("lined", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, -1, "", 11.5, 0, 0, 0, 18.4, 0, 0, False)
+    assert_true("line-height: 1.6;" in text_rule(lined, True), text_rule(lined, True))  # (a number, as the original's CSS: D-482)
     print("LOOK TESTS PASSED")

@@ -128,6 +128,20 @@ def gtk_content_w(s: Surface, outer: Int) -> Int:
     return max(inner, 0)
 
 
+def ratio(v: Float64) -> String:
+    """A number to four places, trailing zeros dropped (1.6, 1.45, 1.3)."""
+    var n = Int(v * 10000 + 0.5)
+    var out = String(n // 10000)
+    var frac = n % 10000
+    if frac != 0:
+        var digits = String(frac + 10000)  # ("1" + four digits)
+        var end = 5
+        while end > 2 and digits.as_bytes()[end - 1] == 48:  # (trailing zeros dropped)
+            end -= 1
+        out += "." + String(digits[byte = 1 : end])
+    return out^
+
+
 def line_px(v: Float64) -> String:
     """A line height in px to a tenth."""
     return fpx(Float64(Int(v * 10 + 0.5)) / 10)
@@ -143,7 +157,11 @@ def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
         out += "font-weight: " + String(s.font_weight) + "; "
     if s.tracking != 0:
         out += "letter-spacing: " + fpx(s.tracking) + "; "
-    if web and s.line_height > 0:
+    if web and s.line_height > 0 and s.font_size > 0:  # (a line set against its own size is written as CSS's number, 1.6, which
+        # the browser resolves as the original's unitless line-heights do: 11.5 × 1.6 rounds down to 18.39 px, while 18.4px
+        # rounds up to 18.41 and a log's lines drifted a pixel in fifteen, D-482)
+        out += "line-height: " + ratio(s.line_height / s.font_size) + "; "
+    elif web and s.line_height > 0:
         out += "line-height: " + fpx(s.line_height) + "; "
     elif web and s.line_height < 0:  # (the font's own line: CSS's normal)
         out += "line-height: normal; "
