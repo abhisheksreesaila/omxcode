@@ -52,7 +52,7 @@ def mac_rects(text):
             continue
         r = tuple(int(v) for v in m.groups())
         body = line.strip()
-        tag = re.search(r" #([\w-]+)", body)
+        tag = re.search(r" #(\S+)", body)  # (a tag is everything to the space, as web_rects reads it: a model's name has dots, D-501)
         if tag:
             key = _key(seen, tag.group(1))
             out[key] = r

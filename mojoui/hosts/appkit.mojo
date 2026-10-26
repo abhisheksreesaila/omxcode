@@ -189,6 +189,10 @@ struct AppKitHost[A: App](Movable):
     var boxed: Int  # the Board child being built inside its role's box (the box wears the role; the child doesn't, as on GTK)
     var dashes: List[Tuple[Int, Int, Int, Int]]  # (view, its dashed outline's shape layer, corner radius, width): paths follow the layout (dash_paths)
     var rounds: List[Tuple[Int, Int]]  # (view, its look's corner radius): at most half its laid-out size (dash_paths; a layer draws a star past that)
+    var tick_boxes: List[Int]  # drawn tick boxes (D-510): the button, its look role, its width and height constraints
+    var tick_k: List[Int]
+    var tick_cw: List[Int]
+    var tick_ch: List[Int]
     var tcells: List[Tuple[Int, Int, Int, Int, Int]]  # a Table's cells: (table, cell, its width constraint (0: the last column's), column, child node): fit_tables
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var canvases: List[AppleCanvas]
@@ -235,6 +239,10 @@ struct AppKitHost[A: App](Movable):
         self.dashes = List[Tuple[Int, Int, Int, Int]]()
         self.rounds = List[Tuple[Int, Int]]()
         self.tcells = List[Tuple[Int, Int, Int, Int, Int]]()
+        self.tick_boxes = List[Int]()
+        self.tick_k = List[Int]()
+        self.tick_cw = List[Int]()
+        self.tick_ch = List[Int]()
         self.focus = -1
         self.canvases = List[AppleCanvas]()
         self.link = 0
@@ -514,8 +522,9 @@ struct AppKitHost[A: App](Movable):
             var tl = self.text_look(i)
             if tl >= 0:  # a surface's own type (the status bar's figures: Inter 12 on Liquid, JetBrains Mono on the skins)
                 ref sf = self.look.surfaces[tl]
-                if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0:  # (no size of its own: the label keeps its style's, a caption's 12)
-                    _ = msg(w, "setFont:", look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight, sf.font_size if sf.font_size > 0 else msg[Float64](msg(w, "font"), "pointSize"), self.look.type.tabular))
+                var inh = self.inherited_size(i)
+                if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0 or inh > 0:  # (no size of its own: the one it inherits, else its style's, a caption's 12)
+                    _ = msg(w, "setFont:", look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight, sf.font_size if sf.font_size > 0 else (inh if inh > 0 else msg[Float64](msg(w, "font"), "pointSize")), self.look.type.tabular))
                 if sf.ink != 0:
                     _ = msg(w, "setTextColor:", ns_color(sf.ink))
                 if sf.tracking != 0:  # (letter spacing: the label's string with NSKern, in its own font and colour)
@@ -524,6 +533,8 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(attrs, "setObject:forKey:", msg(w, "textColor"), ns_string("NSColor"))
                     _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", sf.tracking), ns_string("NSKern"))
                     _ = msg(w, "setAttributedStringValue:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(node.text), attrs))
+            elif self.skinned and self.inherited_size(i) > 0:  # (no role of its own with type: a table cell's words at the cell's size)
+                _ = msg(w, "setFont:", look_font(self.look.type.family, 400, self.inherited_size(i), self.look.type.tabular))
             if node.value == TONE_WARN:
                 _ = msg(w, "setTextColor:", ns_color(self.pal.warn) if self.skinned else msg(cls("NSColor"), "systemOrangeColor"))
             elif node.value == TONE_GOOD:
@@ -538,6 +549,10 @@ struct AppKitHost[A: App](Movable):
                 var lh = Float64(0)
                 if tl >= 0 and self.look.surfaces[tl].line_height > 0:
                     lh = self.look.surfaces[tl].line_height
+                elif tl >= 0 and self.look.surfaces[tl].line_height < 0 and self.look.type.line > 0:
+                    # the font's own line (CSS's normal: its ascender, descender and line gap), not the look's body line:
+                    # a mono line at 11.5 pt was 17 high for the web's 15 (D-509)
+                    lh = msg[Float64](font, "ascender") - msg[Float64](font, "descender") + msg[Float64](font, "leading")
                 elif self.look.type.line > 0:
                     lh = msg[Float64](font, "pointSize") * self.look.type.line
                 if lh > 0:
@@ -684,6 +699,8 @@ struct AppKitHost[A: App](Movable):
             if self.skinned:  # (ticked in the theme's accent, as GTK's check:checked)
                 _ = msg(w, "setBezelColor:", self.accent())
                 _ = msg(w, "setContentTintColor:", self.accent())
+            if self.skinned and node.text == "" and self.look.surface("tick-box") >= 0:  # a tick box with no words: the look's (D-510)
+                self.draw_tick(w, self.look.surface("tick-box"), node.value != 0)
         elif node.kind == DROPDOWN:
             w = msg(
                 msg(cls("NSPopUpButton"), "alloc"),
@@ -844,17 +861,48 @@ struct AppKitHost[A: App](Movable):
             _ = msg(w, "setOrientation:", 1)
             _ = msg(w, "setSpacing:", Float64(node.spacing))
             var row = 0
+            var fitted = node.style == 1
+            var col_gap = node.spacing
+            var gk = self.look.surface(node.name) if node.name != "" else -1
+            if gk >= 0 and self.look.surfaces[gk].column_gap >= 0:  # (a role's column gap, the web's column-gap: D-495)
+                col_gap = self.look.surfaces[gk].column_gap
+            var firsts = List[Int]()  # (fitted: the first row's holders, one per column)
             for k in range(len(node.children)):
                 if k % node.value == 0:
                     row = new("NSStackView")
                     _ = msg(row, "setOrientation:", 0)
-                    _ = msg(row, "setDistribution:", 1)  # fill equally
-                    _ = msg(row, "setSpacing:", Float64(node.spacing))
+                    _ = msg(row, "setDistribution:", 0 if fitted else 1)  # fitted: by the constraints below; else fill equally
+                    _ = msg(row, "setSpacing:", Float64(col_gap))
                     _ = msg(w, "addArrangedSubview:", row)
                     # every row spans the grid, its columns equal (as GTK's homogeneous grid): a row of its own size sat
                     # centred, so the Report's chart tile was half as wide as the tiles above it (GitHub's Mac, 2026-10-23)
                     _ = msg(msg(msg(row, "widthAnchor"), "constraintEqualToAnchor:", msg(w, "widthAnchor")), "setActive:", 1)
-                _ = msg(row, "addArrangedSubview:", self.build(node.children[k], self_addr))
+                var item = self.build(node.children[k], self_addr)
+                if not fitted:
+                    _ = msg(row, "addArrangedSubview:", item)
+                    continue
+                # fitted (a definition list): every column but the last as wide as its widest item, the last the rest;
+                # each item its own width from the column's start, centred down (the web's grid-template-columns:
+                # max-content … minmax(0, 1fr), justify-items: start, align-items: center; GTK's place_in_grid, D-495)
+                var col = k % node.value
+                var holder = new("NSStackView")
+                _ = msg(holder, "setOrientation:", 0)
+                _ = msg(holder, "setSpacing:", Float64(0))
+                _ = msg(holder, "setAlignment:", 10)  # centre Y
+                _ = msg(holder, "addArrangedSubview:", item)
+                if self.rt.shown.nodes[node.children[k]].fills:
+                    hug(item, Float32(1), False)
+                else:
+                    _ = msg(holder, "addArrangedSubview:", flexible_spacer(False))
+                _ = msg(row, "addArrangedSubview:", holder)
+                if col == node.value - 1:
+                    hug(holder, Float32(1), False)  # (the last column takes the rest)
+                    continue
+                hug(holder, Float32(740), False)  # (tight round its widest item: below a label's 750 resistance)
+                if col >= len(firsts):
+                    firsts.append(holder)
+                else:
+                    _ = msg(msg(msg(holder, "widthAnchor"), "constraintEqualToAnchor:", msg(firsts[col], "widthAnchor")), "setActive:", 1)
         elif node.kind == LAZYLIST:
             var table = new("NSTableView")
             var column = msg(msg(cls("NSTableColumn"), "alloc"), "initWithIdentifier:", ns_string("rows"))
@@ -1025,10 +1073,15 @@ struct AppKitHost[A: App](Movable):
                 var child = self.build(c, self_addr)
                 var num = col < node.hint.byte_length() and String(node.hint[byte=col]) == "R"
                 var ck = self.rt.shown.nodes[c].kind
+                if ck == TOGGLE and self.rt.shown.nodes[c].text == "" and self.skinned:  # (a table's tick box: the table's size, D-510)
+                    var tk = self.look.surface("tick-box-table-compact" if node.style == 2 else "tick-box-table")
+                    if tk >= 0 and self.widgets[c] != 0:
+                        self.draw_tick(self.widgets[c], tk, self.rt.shown.nodes[c].value != 0)
                 var cell = new("NSStackView")
                 _ = msg(cell, "setOrientation:", 0)
                 _ = msg(cell, "setSpacing:", Float64(0))
                 _ = msg(cell, "setAlignment:", 10)  # centre Y
+                _ = msg(cell, "setDistribution:", 0)  # fill: the cell's view across it (a block in a <td>); gravity areas left a name its own width (run 40288990159)
                 var keeps = ck == BUTTON or ck == TOGGLE  # (a button or a tick box keeps its width at its side; the rest fill, as a block in a <td>)
                 if keeps and num:
                     _ = msg(cell, "addArrangedSubview:", flexible_spacer(False))
@@ -1041,8 +1094,23 @@ struct AppKitHost[A: App](Movable):
                 var sk = self.look.surface(role)
                 if r > 0 and r - 1 < node.text.byte_length() and String(node.text[byte = r - 1]) == "1" and self.look.surface("table-selected") >= 0:
                     sk = self.look.surface("table-selected")
+                # a dense table's cells wear the dense roles over it, as the web's: their padding and rules (on a phone the
+                # compact ones; a snug column's cells table-dense-snug); their words on one line, cut, but in a column that
+                # wraps ("W") (D-493)
+                var lim = node.options[col] if col < len(node.options) else String("")
+                var dense = node.style == 1 or node.style == 2
+                var over = -1
+                if dense:
+                    var compact = node.style == 2
+                    var snug = r > 0 and not lim.startswith("T") and lim.endswith("S")
+                    var name = ("table-dense-compact-" if compact else "table-dense-") + ("head" if r == 0 else ("snug" if snug else "cell"))
+                    over = self.look.surface(name)
+                    if over < 0:
+                        over = self.look.surface("table-dense-head" if r == 0 else ("table-dense-snug" if snug else "table-dense-cell"))
+                    if lim != "W":
+                        self.one_line_words(c)
                 if sk >= 0:
-                    self.paint_surface(cell, sk, True)
+                    self.paint_surface(cell, sk, True, over)
                 else:
                     _ = msg(cell, "setEdgeInsets:", Float64(9), Float64(16), Float64(9), Float64(16))
                 if ck == TEXT and (msg(child, "isKindOfClass:", cls("NSTextField")) & 0xFF) != 0:
@@ -1052,6 +1120,7 @@ struct AppKitHost[A: App](Movable):
                             self.restyle_label(child, self.rt.shown.nodes[c].text, tk)
                     _ = msg(child, "setAlignment:", 2 if num else 0)  # NSTextAlignmentRight / Left
                 _ = msg(row, "addArrangedSubview:", cell)
+                hold_insets(cell)
                 _ = msg(msg(msg(cell, "heightAnchor"), "constraintEqualToAnchor:", msg(row, "heightAnchor")), "setActive:", 1)
                 var wc = 0
                 if col < cols - 1:
@@ -1066,15 +1135,36 @@ struct AppKitHost[A: App](Movable):
             _ = msg(w, "setDrawsBackground:", 0)
             var content = self.build(node.children[0], self_addr)
             _ = msg(content, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
-            _ = msg(w, "setDocumentView:", content)
             var clip = msg(w, "contentView")
+            ref inner = self.rt.shown.nodes[node.children[0]]
+            # a content narrower than the clip (a column at its widest) sits in its middle, as the web's .scroll centres
+            # it (align-items: center): in a document view as wide as the clip (the clip scrolls to its document's
+            # origin, so a centred document sat at the left again, run 40294665922), the content centred in it (D-504)
+            var doc = content
+            if inner.max_w != 0 or inner.w != 0:
+                doc = new("NSView")
+                _ = msg(doc, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
+                _ = msg(doc, "addSubview:", content)
+                for anchor in ["topAnchor", "bottomAnchor", "centerXAnchor"]:
+                    _ = msg(msg(msg(content, anchor), "constraintEqualToAnchor:", msg(doc, anchor)), "setActive:", 1)
+                _ = msg(msg(msg(content, "widthAnchor"), "constraintLessThanOrEqualToAnchor:", msg(doc, "widthAnchor")), "setActive:", 1)
+                var full = msg(msg(content, "widthAnchor"), "constraintEqualToAnchor:", msg(doc, "widthAnchor"))
+                _ = msg(full, "setPriority:", Float32(494))  # (up to its widest: its own max-width is required)
+                _ = msg(full, "setActive:", 1)
+            _ = msg(w, "setDocumentView:", doc)
             for anchor in ["topAnchor", "leadingAnchor", "widthAnchor"]:
-                var pin = msg(msg(content, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
+                var pin = msg(msg(doc, anchor), "constraintEqualToAnchor:", msg(clip, anchor))
                 if anchor == "widthAnchor":  # (content the app made wider is cut off at the edge: it never widens the window)
                     _ = msg(pin, "setPriority:", Float32(495))  # below NSLayoutPriorityWindowSizeStayPut (500), above a wrapping label (490)
                 _ = msg(pin, "setActive:", 1)
-            if not node.sized_height():
+            if not node.sized_height() and node.size > 0:
                 constrain(w, "heightAnchor", Float64(node.size))
+            elif not node.sized_height():  # height 0, not growing down: as tall as its content, as the web's .scroll with no
+                # max-height (a required 0 collapsed the notebook's document layout to nothing: run 40299704650, D-508);
+                # above a column's 750 hugging, below what the window holds
+                var tall = msg(msg(w, "heightAnchor"), "constraintEqualToAnchor:", msg(doc, "heightAnchor"))
+                _ = msg(tall, "setPriority:", Float32(751))
+                _ = msg(tall, "setActive:", 1)
             if not sized:  # (the app sized it: its settings decide)
                 prefer(w, "widthAnchor", Float64(320))
             if node.value == 1:
@@ -1089,6 +1179,15 @@ struct AppKitHost[A: App](Movable):
                 align = 5 if vertical else 3  # leading / top
             elif node.align_items == END:
                 align = 6 if vertical else 4  # trailing / bottom
+            elif node.align_items == STRETCH:  # every view is stretched below; placed from the leading (top) inset, as
+                # NSStackView centres a stretched view in its whole bounds: a frame padded 0 above and 14 below put its
+                # card 7 pt low and everything under it (D-505)
+                var centred = False  # (a view held to its widest is centred on the stack: keep the centre then)
+                for c in node.children:
+                    if self.rt.shown.nodes[c].max_w != 0:
+                        centred = True
+                if not centred:
+                    align = 5 if vertical else 3
             _ = msg(w, "setAlignment:", align)
             # across its axis a stack is as wide (tall) as its widest view: it hugs loosely, so a row of buttons is never
             # squeezed to a narrower row's width (maccheck's Delete button, 11 pt, GitHub's Mac, 2026-10-23)
@@ -1110,8 +1209,8 @@ struct AppKitHost[A: App](Movable):
                 if node.pad_v == 0 and node.pad_h == 0:
                     _ = msg(w, "setEdgeInsets:", Float64(12), Float64(14), Float64(12), Float64(14))
             var look_at = self.look.surface(node.name) if node.name != "" and i != self.boxed else -1  # (a boxed Board child: its box wears it)
-            var inset_x = node.pad_h  # (what a filling child leaves on each side: the view's padding, or its role's)
-            var inset_y = node.pad_v
+            var inset_x = 2 * node.pad_h  # (what a filling child leaves across, both sides together: the view's padding, or its role's)
+            var inset_y = 2 * node.pad_v
             if look_at >= 0:  # a framework role the theme's look shapes (the toolbar's island, the inspector's panel)
                 var own_pad = node.pad_v == 0 and node.pad_h == 0
                 self.paint_surface(w, look_at, own_pad)
@@ -1119,8 +1218,9 @@ struct AppKitHost[A: App](Movable):
                     var r = max(self.look.surfaces[look_at].radius_top, self.look.surfaces[look_at].radius_bottom)
                     _ = msg(msg(w, "layer"), "setCornerRadius:", min(Float64(r), Float64(min(node.w, node.h)) / 2))
                 if own_pad and self.look.surfaces[look_at].pad_top >= 0:
-                    inset_x = self.look.surfaces[look_at].pad_x
-                    inset_y = (self.look.surfaces[look_at].pad_top + self.look.surfaces[look_at].pad_bottom) // 2
+                    ref ps = self.look.surfaces[look_at]
+                    inset_x = (ps.pad_left if ps.pad_left >= 0 else ps.pad_x) + (ps.pad_right if ps.pad_right >= 0 else ps.pad_x)
+                    inset_y = ps.pad_top + ps.pad_bottom
             elif self.skinned and (node.name == "toolbar" or node.name == "status-bar" or node.name == "menubar"):  # the chrome band
                 _ = msg(w, "setWantsLayer:", 1)
                 _ = msg(msg(w, "layer"), "setBackgroundColor:", msg(ns_color(self.pal.chrome), "CGColor"))
@@ -1128,7 +1228,7 @@ struct AppKitHost[A: App](Movable):
             var grows = False
             var spacers = False  # a Spacer takes the free space along its stack, as GTK's expanding one (it sat 0 pt tall
             for c in node.children:  # and the status bar floated mid-window, GitHub's Mac, 2026-10-23)
-                grows = grows or self.rt.shown.nodes[c].grows
+                grows = grows or self.rt.shown.nodes[c].grows or (not vertical and self.rt.shown.nodes[c].kind == TABLE)
                 spacers = spacers or self.rt.shown.nodes[c].kind == SPACER
             if node.justify_items == BETWEEN:
                 _ = msg(w, "setDistribution:", 3)  # NSStackViewDistributionEqualSpacing
@@ -1139,6 +1239,10 @@ struct AppKitHost[A: App](Movable):
                 lead = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", lead)
             var first_spacer = 0
+            var all_grow = not vertical and len(node.children) > 1  # a row whose views all grow shares its width equally
+            for c in node.children:  # (the web's flex: 1 1 0, GTK's homogeneous box, D-447; the Mac gave each its content, D-506)
+                all_grow = all_grow and self.rt.shown.nodes[c].grows and self.rt.shown.nodes[c].w == 0
+            var first_grow = 0
             var before = lead  # (the view before this one in the stack: a Divider's room goes after it)
             var built = List[Int]()
             for c in node.children:
@@ -1147,12 +1251,19 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", child)
                 ref cn = self.rt.shown.nodes[c]
                 if cn.kind == DIVIDER and not (cn.sized_width() if not vertical else cn.sized_height()):
-                    # a Divider keeps its room each side, as the web's hr: 4 pt above and below in a column, 6 pt beside it in a row (D-440)
-                    var room = Float64(node.spacing + (4 if vertical else 6))
+                    # a Divider keeps its room each side, as the web's hr: the look's (D-490: below 0 none), else 4 pt above and below
+                    # in a column, 6 pt beside it in a row (D-440)
+                    var own = self.look.controls.divider_gap if vertical else self.look.controls.divider_side
+                    var room = Float64(node.spacing + (max(own, 0) if own != 0 else (4 if vertical else 6)))
                     if before != 0:
                         _ = msg(w, "setCustomSpacing:afterView:", room, before)
                     _ = msg(w, "setCustomSpacing:afterView:", room, child)
                 before = child
+                if all_grow:
+                    if first_grow == 0:
+                        first_grow = child
+                    else:
+                        _ = msg(msg(msg(child, "widthAnchor"), "constraintEqualToAnchor:", msg(first_grow, "widthAnchor")), "setActive:", 1)
                 if cn.grows:  # flex-grow: lowest hugging priority along the stack
                     hug(child, Float32(1), vertical)
                 elif cn.kind == SPACER:  # (a growing view first, if there is one)
@@ -1166,9 +1277,13 @@ struct AppKitHost[A: App](Movable):
                     hug(child, Float32(750), vertical)
                 if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
                     hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
-                if cn.fills or node.align_items == STRETCH:  # stretch across: match the stack minus its insets
+                var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED  # (its one view across it: the web's align-items: stretch, D-494)
+                var spans = vertical and (cn.kind == SCROLL or cn.kind == TABLE)  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502; a Table too: table.table { width: 100% })
+                if not vertical and cn.kind == TABLE and not cn.grows:  # (in a row, a Table takes the row: its width 100 %, a side-scroll's flex: 1 0 auto)
+                    hug(child, Float32(1), False)
+                if cn.fills or node.align_items == STRETCH or wrapper or spans:  # stretch across: match the stack minus its insets
                     var side = "widthAnchor" if vertical else "heightAnchor"
-                    var inset = Float64(2 * (inset_x if vertical else inset_y))
+                    var inset = Float64(inset_x if vertical else inset_y)
                     var c2 = msg(msg(child, side), "constraintEqualToAnchor:constant:", msg(w, side), -inset)
                     if vertical and cn.max_w != 0:  # (up to its widest, centred: the web's max-width with auto margins, GTK's clamp)
                         _ = msg(c2, "setPriority:", Float32(495))
@@ -1185,8 +1300,31 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", trail)
                 var side = "heightAnchor" if vertical else "widthAnchor"
                 _ = msg(msg(msg(trail, side), "constraintEqualToAnchor:", msg(lead, side)), "setActive:", 1)
-            elif node.justify_items == START and not grows and not spacers:
+            elif (node.justify_items == START or (vertical and node.justify_items == 0)) and not grows and not spacers:
+                # its views from the start, the free room after them (a column's default too, as the web's flex-start):
+                # stretched taller than its views, a column stood one of them as tall as the rest (an overview panel's
+                # foot 133 high for 15, D-514); no spacing before that room
+                var last = 0
+                for b in built:
+                    if b != 0:
+                        last = b
+                if last != 0:
+                    _ = msg(w, "setCustomSpacing:afterView:", Float64(0), last)
                 _ = msg(w, "addArrangedSubview:", flexible_spacer(vertical))
+            hold_insets(w)
+            if node.align_items == CENTER or node.align_items == 0:
+                # centred between its insets, not in its whole bounds: NSStackView centres at 260 ('NSStackView.Align'),
+                # so a header padded 10 above and 0 below had its words 5 pt high (D-517)
+                var ins = msg[CGRect](w, "edgeInsets")  # (top, left, bottom, right)
+                var shift = (ins.x - ins.width) / 2 if not vertical else (ins.y - ins.height) / 2
+                if shift != 0:
+                    var axis = "centerYAnchor" if not vertical else "centerXAnchor"
+                    var views = msg(w, "arrangedSubviews")
+                    for j in range(msg(views, "count")):
+                        var v = msg(views, "objectAtIndex:", j)
+                        var c = msg(msg(v, axis), "constraintEqualToAnchor:constant:", msg(w, axis), shift)
+                        _ = msg(c, "setPriority:", Float32(270))
+                        _ = msg(c, "setActive:", 1)
         if self.widgets[i] == 0:  # (some branches already stored an inner control)
             self.widgets[i] = w
         return self.apply_layout(i, w)
@@ -1263,6 +1401,39 @@ struct AppKitHost[A: App](Movable):
         self.shells[i] = box
         return box
 
+    def draw_tick(mut self, w: Int, k: Int, on: Bool):
+        """A tick box drawn from the look's role k (its size, corners and ring; ticked: the accent with a white tick),
+        not AppKit's 16 pt check box: a theme's 22 pt table box is 22 here too, as on GTK and the web (D-510)."""
+        ref sf = self.look.surfaces[k]
+        _ = msg(w, "setButtonType:", 1)  # NSButtonTypePushOnPushOff: it keeps its state; the app's update says the rest
+        _ = msg(w, "setBordered:", 0)
+        _ = msg(w, "setImage:", 0)
+        _ = msg(w, "setWantsLayer:", 1)
+        var layer = msg(w, "layer")
+        _ = msg(layer, "setCornerRadius:", Float64(max(sf.radius_top, 0)))
+        _ = msg(layer, "setBorderWidth:", Float64(0) if on else Float64(max(sf.outline_w, 1)) * 1.5)
+        _ = msg(layer, "setBorderColor:", msg(ns_color(sf.outline), "CGColor"))
+        _ = msg(layer, "setBackgroundColor:", msg(self.accent() if on else msg(cls("NSColor"), "clearColor"), "CGColor"))
+        var attrs = new("NSMutableDictionary")
+        _ = msg(attrs, "setObject:forKey:", look_font(self.look.type.family, 700, Float64(sf.width) * 0.6, False), ns_string("NSFont"))
+        _ = msg(attrs, "setObject:forKey:", ns_color(self.pal.accent_ink), ns_string("NSColor"))
+        _ = msg(w, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string("✓" if on else ""), attrs))
+        _ = msg(w, "setState:", 1 if on else 0)
+        for q in range(len(self.tick_boxes)):  # (sized once; a table's box takes the table's size: the same constraints)
+            if self.tick_boxes[q] == w:
+                self.tick_k[q] = k
+                _ = msg(self.tick_cw[q], "setConstant:", Float64(sf.width))
+                _ = msg(self.tick_ch[q], "setConstant:", Float64(sf.height))
+                return
+        var cw = msg(msg(w, "widthAnchor"), "constraintEqualToConstant:", Float64(sf.width))
+        var ch = msg(msg(w, "heightAnchor"), "constraintEqualToConstant:", Float64(sf.height))
+        _ = msg(cw, "setActive:", 1)
+        _ = msg(ch, "setActive:", 1)
+        self.tick_boxes.append(w)
+        self.tick_k.append(k)
+        self.tick_cw.append(cw)
+        self.tick_ch.append(ch)
+
     def draw_button(mut self, w: Int, style: Int, title: String, i: Int = -1):
         """A push button in the look's shape: its fill, hairline and corners on a layer, its title in the look's family,
         the look's height and padding (GTK's `button`, the web's). A button wearing a role (node i's tag) takes the role's
@@ -1295,6 +1466,8 @@ struct AppKitHost[A: App](Movable):
                 high = max(high, sf.min_height)
             if sf.font_size > 0:
                 size = sf.font_size
+            elif i >= 0 and self.inherited_size(i) > 0:  # (its words at the size around it, as the web's button { font: inherit })
+                size = self.inherited_size(i)
             if sf.font_weight > 0:
                 weight = sf.font_weight
             if sf.font != "":
@@ -1314,13 +1487,21 @@ struct AppKitHost[A: App](Movable):
         var attrs = new("NSMutableDictionary")
         _ = msg(attrs, "setObject:forKey:", look_font(family, weight, size, self.look.type.tabular), ns_string("NSFont"))
         _ = msg(attrs, "setObject:forKey:", ns_color(ink), ns_string("NSColor"))
+        if k >= 0 and self.look.surfaces[k].tracking != 0:  # (its letter spacing, as the web's: the brand's -.02em, D-509)
+            _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", self.look.surfaces[k].tracking), ns_string("NSKern"))
         var said = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs)
         _ = msg(w, "setAttributedTitle:", said)
         _ = msg(w, "setContentTintColor:", ns_color(ink))
         var fit = msg[CGPoint](w, "fittingSize")
         if k >= 0:  # (a role's button: its words, an icon and the web's 6 pt gap, the role's padding, as CSS measures it; a bare cell adds its own 6)
             var words = msg[CGPoint](said, "size")
-            fit.x = Float64(Int(words.x + 0.999)) + (Float64(c.glyph if c.glyph > 0 else 16) + 6 if msg(w, "image") != 0 else 0)
+            var glyph = self.look.surfaces[k].icon_size if self.look.surfaces[k].icon_size > 0 else (c.glyph if c.glyph > 0 else 16)
+            fit.x = Float64(Int(words.x + 0.999)) + (Float64(glyph) + 6 if msg(w, "image") != 0 else 0)
+            ref hs = self.look.surfaces[k]
+            if hs.height == -2 and (i < 0 or self.rt.shown.nodes[i].h == 0):  # HEIGHT_AUTO: its line and its padding, no control height (the web's
+                # height: auto; min-height: 0: a sidebar row's name, a link in a table's cell, D-498)
+                var line = Float64(hs.line_height) if hs.line_height > 0 else (size * self.look.type.line if hs.line_height == 0 and self.look.type.line > 0 else words.y)
+                high = Int(line + 0.5) + max(hs.pad_top, 0) + max(hs.pad_bottom, 0)
         # its title's width is the least it takes and the width it prefers, not a fixed one: a filling button (an
         # inspector row's title) stretches, as on GTK and the web; held to its fit, it held the Report inspector's
         # column to 117 pt through the rows' equal widths (Mac, 2026-10-24)
@@ -1336,12 +1517,19 @@ struct AppKitHost[A: App](Movable):
             return (0, 0)
         return (2 * self.look.surfaces[k].pad_x, self.look.surfaces[k].pad_top + self.look.surfaces[k].pad_bottom)
 
-    def paint_surface(mut self, w: Int, k: Int, pad: Bool):
+    def paint_surface(mut self, w: Int, k: Int, pad: Bool, pad_from: Int = -1):
         """A look's surface on a stack's layer (mojoui/look.mojo; GTK and the web write the same values as CSS): its fill,
         corners (top and bottom apart), its rim as the layer's border, its widest shadow as the layer's shadow (a layer
         has one), hairlines along its edges, its padding unless the component set its own (as on the web, where the
         view's own padding wins over the sheet's)."""
         var sf = self.look.surfaces[k].copy()
+        if pad_from >= 0:  # (its padding and hairlines from another role worn over it: a dense table's cells, D-493)
+            ref o = self.look.surfaces[pad_from]
+            sf.pad_top, sf.pad_bottom, sf.pad_x, sf.pad_left, sf.pad_right = o.pad_top, o.pad_bottom, o.pad_x, o.pad_left, o.pad_right
+            if o.line_bottom != 0:
+                sf.line_bottom = o.line_bottom
+            if o.line_top != 0:
+                sf.line_top = o.line_top
         _ = msg(w, "setWantsLayer:", 1)
         var layer = msg(w, "layer")
         _ = msg(layer, "setBackgroundColor:", msg(ns_rgba(sf.fill) if sf.fill != 0 else msg(cls("NSColor"), "clearColor"), "CGColor"))
@@ -1396,10 +1584,39 @@ struct AppKitHost[A: App](Movable):
             _ = msg(shape, "setLineDashPattern:", pattern)
             _ = msg(layer, "addSublayer:", shape)
             self.dashes.append((w, shape, max(sf.radius_top, 0), sf.outline_w))
-        if pad and sf.pad_top >= 0:
-            _ = msg(w, "setEdgeInsets:", Float64(sf.pad_top), Float64(sf.pad_x), Float64(sf.pad_bottom), Float64(sf.pad_x))
+        if pad and sf.pad_top >= 0:  # (leading and trailing apart when the role says so: the page frame's 2 | 14, D-499)
+            _ = msg(w, "setEdgeInsets:", Float64(sf.pad_top), Float64(sf.pad_left if sf.pad_left >= 0 else sf.pad_x), Float64(sf.pad_bottom),
+                    Float64(sf.pad_right if sf.pad_right >= 0 else sf.pad_x))
         if sf.min_height > 0:
             _ = msg(msg(msg(w, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(sf.min_height)), "setActive:", 1)
+
+    def inherited_size(self, i: Int) -> Float64:
+        """The type size node i's words inherit, as CSS's font-size does: its own role's, else the nearest role above it
+        with a size, a table's cells their head's or cell's (a label tagged mono in a table cell was the body's 14 pt for
+        the cell's 12.88, 2 pt taller and wider; a name link 90 wide for 83, D-516). 0: none."""
+        if self.rt.shown.nodes[i].name != "":
+            var own = self.look.surface(self.rt.shown.nodes[i].name)
+            if own >= 0 and self.look.surfaces[own].font_size > 0:
+                return self.look.surfaces[own].font_size
+        var c = i
+        var p = self.parents[i] if i < len(self.parents) else -1
+        while p >= 0:
+            ref n = self.rt.shown.nodes[p]
+            if n.kind == TABLE:
+                var row = 0
+                for q in range(len(n.children)):
+                    if n.children[q] == c:
+                        row = q // max(n.value, 1)
+                var k = self.look.surface("table-head" if row == 0 else "table-cell")
+                if k >= 0 and self.look.surfaces[k].font_size > 0:
+                    return self.look.surfaces[k].font_size
+            elif n.name != "":
+                var k = self.look.surface(n.name)
+                if k >= 0 and self.look.surfaces[k].font_size > 0:
+                    return self.look.surfaces[k].font_size
+            c = p
+            p = self.parents[p] if p < len(self.parents) else -1
+        return 0
 
     def text_look(self, i: Int) -> Int:
         """The surface whose text a label at node i wears (its own role, else the nearest tagged stack above it with a font,
@@ -1442,6 +1659,7 @@ struct AppKitHost[A: App](Movable):
             for orientation in range(2):  # (the shape hugs its words and padding, as the label would)
                 hug(outer, Float32(750), orientation == 1)
             self.paint_surface(outer, chip_at, node.pad_v == 0 and node.pad_h == 0)
+            hold_insets(outer)  # (its padding, required: painted after hug() read no insets, so a caps head lost its 4 | 8, D-515)
             var r = max(self.look.surfaces[chip_at].radius_top, 0)
             if r >= 999:  # (a pill: half its height, which a layer can't say ahead of the layout)
                 _ = msg(msg(outer, "layer"), "setCornerRadius:", Float64(10))
@@ -1459,6 +1677,9 @@ struct AppKitHost[A: App](Movable):
             var ch = msg(msg(outer, "heightAnchor"), "constraintEqualToConstant:", Float64(node.h - inset[1]))
             if is_stack and len(node.children) > 0:  # (a stack given a height holds it unless its content needs more: GTK's minimum; squeezed, its words went to 0 pt)
                 _ = msg(ch, "setPriority:", Float32(745))
+                # at least that, required (GTK's size request): at 745 alone the stack around it hugged it smaller (its
+                # hugging is 750: the console's 60 pt app bar stood 46 high, run 40286965370, D-500)
+                _ = msg(msg(msg(outer, "heightAnchor"), "constraintGreaterThanOrEqualToConstant:", Float64(node.h - inset[1])), "setActive:", 1)
             _ = msg(ch, "setActive:", 1)
             if i < len(self.size_h):
                 self.size_h[i] = ch
@@ -1504,12 +1725,17 @@ struct AppKitHost[A: App](Movable):
         self.dashes = List[Tuple[Int, Int, Int, Int]]()
         self.rounds = List[Tuple[Int, Int]]()
         self.tcells = List[Tuple[Int, Int, Int, Int, Int]]()
+        self.tick_boxes = List[Int]()
+        self.tick_k = List[Int]()
+        self.tick_cw = List[Int]()
+        self.tick_ch = List[Int]()
         self.size_w = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.wraps = List[Int]()
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
         for k in range(len(self.rt.shown.nodes)):
-            if self.rt.shown.nodes[k].kind == HSTACK or self.rt.shown.nodes[k].kind == VSTACK:
-                for c in self.rt.shown.nodes[k].children:
+            var kk = self.rt.shown.nodes[k].kind
+            if kk == HSTACK or kk == VSTACK or kk == TABLE or kk == DRAG or kk == DROP or kk == EMBED:  # (a table's cells and a
+                for c in self.rt.shown.nodes[k].children:  # wrapper's view: their words inherit through them too, D-516)
                     self.parents[c] = k
         self.size_h = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.sized = List[Tuple[Int, Int, Int, Int]](length=len(self.rt.shown.nodes), fill=(0, 0, 0, 0))
@@ -1657,6 +1883,9 @@ struct AppKitHost[A: App](Movable):
             elif p.op == SET_VALUE:
                 if kind == TOGGLE:
                     _ = msg(w, "setState:", p.number)
+                    for q in range(len(self.tick_boxes)):  # (a drawn tick box: its fill and tick again)
+                        if self.tick_boxes[q] == w:
+                            self.draw_tick(w, self.tick_k[q], p.number != 0)
                 elif kind == DROPDOWN:
                     _ = msg(w, "selectItemAtIndex:", p.number)
                 elif kind == SLIDER or kind == PROGRESS:
@@ -1812,6 +2041,23 @@ struct AppKitHost[A: App](Movable):
             narrow = max(narrow, msg[CGPoint](one, "size").x)
         return (Float64(Int(narrow + 0.999)), Float64(Int(widest + 0.999)))
 
+    def one_line_words(mut self, n: Int):
+        """The words in view n (and in its views) on one line, cut with an ellipsis: a dense table's cell (the web's
+        table.dense td .text: nowrap, overflow hidden, text-overflow ellipsis)."""
+        if n < 0 or n >= len(self.rt.shown.nodes) or n >= len(self.widgets):
+            return
+        var kids = self.rt.shown.nodes[n].children.copy()
+        var w = self.widgets[n]
+        if self.rt.shown.nodes[n].kind == TEXT and w != 0 and (msg(w, "isKindOfClass:", cls("NSTextField")) & 0xFF) != 0:
+            _ = msg(w, "setLineBreakMode:", 4)  # NSLineBreakByTruncatingTail
+            _ = msg(w, "setMaximumNumberOfLines:", 1)
+            _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
+            for k in range(len(self.wraps)):
+                if self.wraps[k] == w:
+                    self.wraps[k] = 0  # (fit_wraps leaves it alone)
+        for c in kids:
+            self.one_line_words(c)
+
     def fit_tables(self):
         """Each Table's columns share its width as a browser's automatic table layout does (GTK's fit_tables): at least
         each column's narrowest, the room up to its widest shared by how much each wants, more room by the widest (D-442)."""
@@ -1829,6 +2075,27 @@ struct AppKitHost[A: App](Movable):
             var room = msg[CGRect](table, "bounds").width
             var lo = List[Float64](length=cols, fill=0)
             var hi = List[Float64](length=cols, fill=0)
+            var tn = -1  # (the Table's node: parents lists stacks only)
+            for q in range(len(self.rt.shown.nodes)):
+                if self.rt.shown.nodes[q].kind == TABLE and self.tcells[start][4] in self.rt.shown.nodes[q].children:
+                    tn = q
+                    break
+            var dense = tn >= 0 and (self.rt.shown.nodes[tn].style == 1 or self.rt.shown.nodes[tn].style == 2)
+            var lims = self.rt.shown.nodes[tn].options.copy() if tn >= 0 else List[String]()
+            var caps = List[Int](length=cols, fill=0)  # (a cut column's widest: the web's td max-width, border-box)
+            var fixed = List[Int](length=cols, fill=0)  # (a tick column's width: the web's th width)
+            for c in range(min(cols, len(lims))):
+                var lim = lims[c]
+                var digits = String(lim[byte = 1:]) if lim.startswith("T") else (String(lim[byte = 0 : lim.byte_length() - 1]) if lim.endswith("S") else lim)
+                var v = 0
+                try:
+                    v = Int(digits) if digits != "" and lim != "W" else 0
+                except:
+                    v = 0
+                if lim.startswith("T"):
+                    fixed[c] = max(v, 1)
+                elif dense:
+                    caps[c] = v
             for t in range(start, end):
                 var cell = self.tcells[t][1]
                 var ins = msg[CGRect](cell, "edgeInsets")  # (NSEdgeInsets: top, left, bottom, right)
@@ -1842,20 +2109,34 @@ struct AppKitHost[A: App](Movable):
                     continue
                 var wh = self.cell_widths(child, self.tcells[t][4])
                 var col = self.tcells[t][3]
-                lo[col] = max(lo[col], wh[0] + ins.y + ins.height)
-                hi[col] = max(hi[col], wh[1] + ins.y + ins.height)
+                var a, b = wh[0] + ins.y + ins.height, wh[1] + ins.y + ins.height
+                var lim = lims[col] if col < len(lims) else String("")
+                if dense and lim != "W" and not lim.startswith("T"):  # (one-line words: the narrowest is the widest, as the browser's
+                    a = b                                             # nowrap; a cut column's cells at most its width, the head not: D-493)
+                    if (t - start) // cols > 0 and caps[col] > 0:
+                        a, b = min(a, Float64(caps[col])), min(b, Float64(caps[col]))
+                lo[col] = max(lo[col], a)
+                hi[col] = max(hi[col], b)
             var sum_lo = Float64(0)
             var sum_hi = Float64(0)
+            var free_hi = Float64(0)
             for c in range(cols):
+                if fixed[c] > 0:  # the tick column: the theme's width overall, its box when wider; no share of more room
+                    lo[c] = max(lo[c], Float64(fixed[c]))
+                    hi[c] = lo[c]
+                else:
+                    free_hi += hi[c]
                 sum_lo += lo[c]
                 sum_hi += hi[c]
+            if free_hi <= 0:
+                free_hi = sum_hi
             for t in range(start, end):
                 var col = self.tcells[t][3]
                 if self.tcells[t][2] == 0 or room <= 0:
                     continue
                 var v = lo[col]
                 if room >= sum_hi and sum_hi > 0:
-                    v = hi[col] + (room - sum_hi) * hi[col] / sum_hi
+                    v = hi[col] + ((room - sum_hi) * hi[col] / free_hi if fixed[col] == 0 else Float64(0))
                 elif room > sum_lo and sum_hi > sum_lo:
                     v = lo[col] + (room - sum_lo) * (hi[col] - lo[col]) / (sum_hi - sum_lo)
                 _ = msg(self.tcells[t][2], "setConstant:", Float64(Int(v)))
@@ -2013,6 +2294,7 @@ struct AppKitHost[A: App](Movable):
         var content = msg(self.window, "contentView")
         var cb = msg[CGRect](content, "bounds")
         var out = String("window content " + pts(cb.width) + " x " + pts(cb.height) + " pt · x, y from the top left\n")
+        var watch = env("MOJOUI_CONSTRAINTS")
         out += "kind 'text' [asked] @ x,y w x h  flags\n\n"
         var stack: List[Tuple[Int, Int]] = [(0, 0)]
         while len(stack) > 0:
@@ -2083,7 +2365,7 @@ struct AppKitHost[A: App](Movable):
                     var bar = msg(w, "verticalScroller")
                     var ins = msg[CGRect](w, "contentInsets")
                     flags += (" clip " + pts(clip.width) + "x" + pts(clip.height) + " bars " + String(msg(w, "scrollerStyle"))
-                              + " vbar " + (pts(msg[CGRect](bar, "frame").width) + ("" if (msg(bar, "isHidden") & 0xFF) == 0 else " hidden") if bar != 0 else "none")
+                              + " vbar " + (pts(msg[CGRect](bar, "frame").width) + ("" if (msg(bar, "isHidden") & 0xFF) == 0 else " unshown") if bar != 0 else "none")  # ("unshown": parity.py skips a line saying " hidden", a hidden view; a hidden bar isn't one, D-518)
                               + " insets " + pts(ins.x) + "," + pts(ins.y) + "," + pts(ins.width) + "," + pts(ins.height))
                 if n.kind == ICON or ((n.kind == BUTTON) and n.hint != ""):
                     var name = n.text if n.kind == ICON else n.hint
@@ -2092,6 +2374,20 @@ struct AppKitHost[A: App](Movable):
                         problems.append("icon '" + name + "' has no SF Symbol")
                 line += flags
             out += line + "\n"
+            if n.name != "" and w != 0 and ("," + watch + ",").find("," + n.name + ",") >= 0:
+                # MOJOUI_CONSTRAINTS (tags, comma-separated): what lays this view out vertically, for the report (its
+                # hugging and resistance, then every constraint AppKit says affects its height: a row's views standing
+                # the row's height on the Mac, D-507). Lines start "~" (scripts/parity.py reads only "@ x,y wxh")
+                out += line[byte=0 : depth * 2] + "  ~ hug v " + String(Int(msg[Float32](w, "contentHuggingPriorityForOrientation:", 1)))
+                out += " resist v " + String(Int(msg[Float32](w, "contentCompressionResistancePriorityForOrientation:", 1)))
+                if (msg(w, "isKindOfClass:", cls("NSStackView")) & 0xFF) != 0:
+                    out += " stack-hug v " + String(Int(msg[Float32](w, "huggingPriorityForOrientation:", 1))) + " h " + String(Int(msg[Float32](w, "huggingPriorityForOrientation:", 0)))
+                    out += " align " + String(msg(w, "alignment")) + " dist " + String(msg(w, "distribution"))
+                out += "\n"
+                var cs = msg(w, "constraintsAffectingLayoutForOrientation:", 1)
+                for q in range(min(msg(cs, "count"), 40)):
+                    var c = msg(cs, "objectAtIndex:", q)
+                    out += line[byte=0 : depth * 2] + "  ~ " + String(Int(msg[Float32](c, "priority"))) + " " + from_ns(msg(c, "description")).replace("\n", " ") + "\n"
             var kids = n.children.copy()
             var j = len(kids) - 1
             while j >= 0:
@@ -2257,7 +2553,48 @@ def hug(view: Int, priority: Float32, vertical: Bool):
     var orientation = 1 if vertical else 0
     _ = msg(view, "setContentHuggingPriority:forOrientation:", priority, orientation)
     if msg[Int8](view, "respondsToSelector:", sel("setHuggingPriority:forOrientation:")) != 0:
-        _ = msg(view, "setHuggingPriority:forOrientation:", priority, orientation)
+        if Int(msg(view, "orientation")) == orientation:  # along its own axis: it hugs its first and last views
+            _ = msg(view, "setHuggingPriority:forOrientation:", priority, orientation)
+            if priority > Float32(250):  # and keeps its own length by a weak shrink-to-fit: a stack has no intrinsic size, so
+                # a row's fill distribution gave the console's crumbs (82 pt of words) the bar's free 650 pt and its Spacer
+                # none (D-513); 251: over a Spacer's 1, under a label's 750 resistance
+                var along = msg(msg(view, "heightAnchor" if vertical else "widthAnchor"), "constraintEqualToConstant:", Float64(0))
+                _ = msg(along, "setPriority:", Float32(251))
+                _ = msg(along, "setActive:", 1)
+        else:
+            # across its axis a stack's hugging pins every view's two edges to its own (NSStackView.Edge.Min, at that
+            # priority): above a view's own resistance it stands each view as tall as the tallest (the console's app bar
+            # at 750 stood brand, crumbs and the beacon slot 60 high: run 40299704650's constraint dump). So across, it
+            # pulls at most 250 and keeps its own size by a weak shrink-to-fit instead, just above that pull (D-507)
+            _ = msg(view, "setHuggingPriority:forOrientation:", min(priority, Float32(250)), orientation)
+            if priority > Float32(250):
+                var side = "heightAnchor" if vertical else "widthAnchor"
+                var fit = msg(msg(view, side), "constraintEqualToConstant:", Float64(0))
+                _ = msg(fit, "setPriority:", Float32(251))
+                _ = msg(fit, "setActive:", 1)
+                # its insets hold across, required (they were the Edge.Min pins' only: a padded chip lost its padding)
+                var ins = msg[CGRect](view, "edgeInsets")  # (top, left, bottom, right)
+                var pad = (ins.x + ins.width) if vertical else (ins.y + ins.height)
+                var views = msg(view, "arrangedSubviews")
+                for j in range(msg(views, "count")):
+                    var v = msg(views, "objectAtIndex:", j)
+                    _ = msg(msg(msg(view, side), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, side), pad), "setActive:", 1)
+
+
+def hold_insets(stack: Int):
+    """A stack's edge insets across its axis, required: NSStackView keeps them only by its hugging's Edge.Min pins (250
+    across), so any weak shrink above that, an ancestor's, took a padded cell's padding away (run 40308229281: a dense
+    table's head row 22 high for 38, D-515)."""
+    var ins = msg[CGRect](stack, "edgeInsets")  # (top, left, bottom, right)
+    var vertical_stack = Int(msg(stack, "orientation")) == 1
+    var pad = (ins.y + ins.height) if vertical_stack else (ins.x + ins.width)
+    if pad <= 0:
+        return
+    var side = "widthAnchor" if vertical_stack else "heightAnchor"
+    var views = msg(stack, "arrangedSubviews")
+    for j in range(msg(views, "count")):
+        var v = msg(views, "objectAtIndex:", j)
+        _ = msg(msg(msg(stack, side), "constraintGreaterThanOrEqualToAnchor:constant:", msg(v, side), pad), "setActive:", 1)
 
 
 def flexible_spacer(vertical: Bool) -> Int:

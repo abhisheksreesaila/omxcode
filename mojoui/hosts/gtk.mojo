@@ -123,6 +123,18 @@ def add_class(widget: Int, name: String):
     external_call["gtk_widget_add_css_class", NoneType](widget, n.as_c_string_span())
 
 
+def mark_button_labels(widget: Int):
+    """A button's own labels (its title, AdwButtonContent's, a tool's) marked mui-in-button: a role's type around the
+    button doesn't reach them, as on the web, where a role's words rule is for its .text views, not a button's title
+    (the console's text action took its sidebar head's mono and tracking: 102 wide for 76, D-511)."""
+    var c = external_call["gtk_widget_get_first_child", Int](widget)
+    while c != 0:
+        if c_str(external_call["gtk_widget_get_css_name", Int](c)) == "label":
+            add_class(c, "mui-in-button")
+        mark_button_labels(c)
+        c = external_call["gtk_widget_get_next_sibling", Int](c)
+
+
 def app_data(name: String) -> Int:
     var key = name
     return external_call["g_object_get_data", Int](external_call["g_application_get_default", Int](), key.as_c_string_span())
@@ -552,6 +564,8 @@ struct GtkHost[A: App](Movable):
     var one_line: List[String]  # the look's roles whose words stay on one line, cut with an ellipsis
     var breaks_words: List[String]  # the look's roles whose long words break anywhere (PANGO_WRAP_WORD_CHAR)
     var look: Look  # the theme's look (a Paragraph's runs take their roles' type from it, as Pango markup)
+    var gap_roles: List[String]  # the look's roles with a column gap of their own (a grid's: Surface.column_gap), and
+    var gap_cols: List[Int]  # that gap
     var focus: Int  # text field to keep focused across the next rebuild (-1: none)
     var key_node: Int  # the canvas node that had the keyboard last (it gets it back when an in-place editor closes)
     var editor_keys: Int  # the in-place editor's key controller (test steps press Escape through it)
@@ -635,6 +649,8 @@ struct GtkHost[A: App](Movable):
         self.one_line = List[String]()
         self.look = Look.none()
         self.breaks_words = List[String]()
+        self.gap_roles = List[String]()
+        self.gap_cols = List[Int]()
         self.focus = -1
         self.key_node = -1
         self.editor_keys = 0
@@ -743,9 +759,26 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_grid_layout_child_set_row", NoneType](lc, c_int(k // cols))
             else:
                 var child = self.build(children[k], self_addr)
+                self.place_in_grid(j, children[k], child)
                 external_call["gtk_grid_attach", NoneType](grid, child, c_int(k % cols), c_int(k // cols), c_int(1), c_int(1))
                 built += 1
         return built
+
+    def column_gap(self, role: String, spacing: Int) -> Int:
+        """A grid's column gap: its role's own (Surface.column_gap, D-495), else its spacing."""
+        for g in range(len(self.gap_roles)):
+            if self.gap_roles[g] == role:
+                return self.gap_cols[g]
+        return spacing
+
+    def place_in_grid(self, grid: Int, c: Int, child: Int):
+        """A fitted grid's item (style 1) from its start, centred down: the web's justify-items: start, align-items:
+        center (a key's or a value's box its words' width, not the column's, D-495). An item told to fill fills."""
+        if self.rt.shown.nodes[grid].style != 1:
+            return
+        if not self.rt.shown.nodes[c].fills:
+            external_call["gtk_widget_set_halign", NoneType](child, c_int(1))
+        external_call["gtk_widget_set_valign", NoneType](child, c_int(3))
 
     def board_drag(self, board: Int) -> Bool:
         """Whether Board node `board` (current numbering) has its drag gesture on record."""
@@ -850,7 +883,7 @@ struct GtkHost[A: App](Movable):
                     v = 1
             shares.append(v)
             sum += v
-        var room = total - n.spacing * (cols - 1)
+        var room = total - self.column_gap(n.name, n.spacing) * (cols - 1)
         var used = 0
         for c in range(cols):
             var want = room - used if c == cols - 1 else room * shares[c] // sum
@@ -898,6 +931,18 @@ struct GtkHost[A: App](Movable):
             if external_call["gtk_widget_get_margin_end", c_int](label) != margin:
                 external_call["gtk_widget_set_margin_end", NoneType](label, margin)
 
+    def one_line_words(self, n: Int):
+        """The words in view n (and in its views) stay on one line, cut with an ellipsis: a dense table's cell (the web's
+        table.dense td .text: nowrap, overflow hidden, text-overflow ellipsis)."""
+        if n < 0 or n >= len(self.rt.shown.nodes) or n >= len(self.widgets):
+            return
+        var kids = self.rt.shown.nodes[n].children.copy()
+        if self.rt.shown.nodes[n].kind == TEXT and self.widgets[n] != 0:
+            external_call["gtk_label_set_wrap", NoneType](self.widgets[n], c_int(0))
+            external_call["gtk_label_set_ellipsize", NoneType](self.widgets[n], c_int(3))  # PANGO_ELLIPSIZE_END
+        for c in kids:
+            self.one_line_words(c)
+
     def fit_tables(self):
         """Each Table's columns share its width as a browser's automatic table layout does (the web's is a <table>):
         every column at least its widest cell's narrowest (min-content), then the room up to each one's widest
@@ -918,31 +963,61 @@ struct GtkHost[A: App](Movable):
             var lo = List[Int](length=cols, fill=0)
             var hi = List[Int](length=cols, fill=0)
             var m = List[c_int](length=2, fill=0)
+            var fixed = List[Bool](length=cols, fill=False)  # (a column of a set width: no share of more room)
+            var dense = self.rt.shown.nodes[k].style == 1 or self.rt.shown.nodes[k].style == 2
             for c in range(cols):
+                var lim = self.rt.shown.nodes[k].options[c] if c < len(self.rt.shown.nodes[k].options) else String("")
+                var cap = 0  # (a cut column's widest, the web's td max-width: border-box, a cap on its cells' widths)
+                if dense and lim != "W" and not lim.startswith("T"):
+                    var digits = String(lim[byte = 0 : lim.byte_length() - 1]) if lim.endswith("S") else lim
+                    try:
+                        cap = Int(digits) if digits != "" else 0
+                    except:
+                        cap = 0
                 for r in range(rows):
                     var cell = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(r))
                     if cell == 0:
                         continue
                     external_call["gtk_widget_measure", NoneType](cell, c_int(HORIZONTAL), c_int(-1), Int(m.unsafe_ptr()), Int(m.unsafe_ptr()) + 4, Int(0), Int(0))
-                    lo[c] = max(lo[c], Int(m[0]))
-                    hi[c] = max(hi[c], Int(m[1]), Int(m[0]))
+                    var a, b = Int(m[0]), max(Int(m[1]), Int(m[0]))
+                    if dense and lim != "W":  # (a dense cell's words are one line: its narrowest is its widest, as the
+                        a = b                # browser's nowrap; GTK's cut labels would measure an ellipsis)
+                        if cap > 0 and not (r == 0):  # (the head's words aren't cut: the web's max-width is on the td)
+                            a, b = min(a, cap), min(b, cap)
+                    lo[c] = max(lo[c], a)
+                    hi[c] = max(hi[c], b)
+                if lim.startswith("T") and lim.byte_length() > 1:  # the tick column: the theme's width overall, its box when wider (the web's th width, border-box)
+                    try:
+                        var tw = Int(lim[byte=1:])
+                        lo[c], hi[c] = max(lo[c], tw), max(lo[c], tw)
+                        fixed[c] = True
+                    except:
+                        pass
             var sum_lo = 0
             var sum_hi = 0
+            var free_hi = 0  # (the columns more room goes to: all but a set width's, unless every one is set)
+            var last_free = cols - 1
             for c in range(cols):
                 sum_lo += lo[c]
                 sum_hi += hi[c]
+                if not fixed[c]:
+                    free_hi += hi[c]
+                    last_free = c
+            var all_fixed = free_hi == 0
+            if all_fixed:
+                free_hi = sum_hi
             var want = List[Int](length=cols, fill=0)
             var given = 0
             for c in range(cols):
                 var v = lo[c]
                 if room >= sum_hi and sum_hi > 0:
-                    v = hi[c] + (room - sum_hi) * hi[c] // sum_hi
+                    v = hi[c] + ((room - sum_hi) * hi[c] // free_hi if all_fixed or not fixed[c] else 0)
                 elif room > sum_lo and sum_hi > sum_lo:
                     v = lo[c] + (room - sum_lo) * (hi[c] - lo[c]) // (sum_hi - sum_lo)
                 want[c] = v
                 given += v
-            if room > given and given >= sum_lo:  # (what rounding left goes to the last column)
-                want[cols - 1] += room - given
+            if room > given and given >= sum_lo:  # (what rounding left goes to the last column that takes more)
+                want[last_free] += room - given
             for c in range(cols):
                 var spacer = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(-1))
                 if spacer == 0:
@@ -990,7 +1065,9 @@ struct GtkHost[A: App](Movable):
             cross = 1  # GTK_ALIGN_START
         elif parent.align_items == END:
             cross = 2  # GTK_ALIGN_END
-        if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER:
+        var wrapper = parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (its one view across it, as the web's align-items: stretch, D-494)
+        var spans = vertical and child_node.kind == SCROLL  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502)
+        if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER or wrapper or spans:
             cross = 0  # GTK_ALIGN_FILL
         # A spacer takes room only along its stack (else a Spacer in a toolbar makes the whole bar tall); a view
         # with a fixed size along the stack never takes spare room there (as on the other hosts).
@@ -1089,6 +1166,7 @@ struct GtkHost[A: App](Movable):
                 var child = external_call["gtk_button_get_child", Int](w)
                 if child != 0:
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(1))  # GTK_ALIGN_START
+            mark_button_labels(w)
             if node.style == PROMINENT:
                 add_class(w, "suggested-action")
                 if node.hint == "":
@@ -1308,17 +1386,16 @@ struct GtkHost[A: App](Movable):
         elif node.kind == GRID:
             w = external_call["gtk_grid_new", Int]()
             external_call["gtk_grid_set_row_spacing", NoneType](w, c_uint(node.spacing))
-            external_call["gtk_grid_set_column_spacing", NoneType](w, c_uint(node.spacing))
+            var col_gap = self.column_gap(node.name, node.spacing)  # (a role's column gap, as the web's column-gap: D-495)
+            external_call["gtk_grid_set_column_spacing", NoneType](w, c_uint(col_gap))
             external_call["gtk_grid_set_column_homogeneous", NoneType](w, c_int(0 if node.style == 1 or len(node.options) > 0 else 1))  # (fitted: columns to their content; shares: fit_measures() sizes them)
             for k in range(len(node.children)):
                 var child = self.build(node.children[k], self_addr)
-                if node.style == 1 and not (node.hint == "E" and k % node.value == node.value - 1):  # (fitted: each item from its column's start, as the web's justify-items: start)
-                    external_call["gtk_widget_set_halign", NoneType](child, c_int(1))
-                if node.style == 1:  # (each item on its row's middle, as the web's align-items: center)
-                    external_call["gtk_widget_set_valign", NoneType](child, c_int(ALIGN_CENTER))
-                if node.style == 1 and k % node.value != node.value - 1 and self.rt.shown.nodes[node.children[k]].kind == TEXT:
+                self.place_in_grid(i, node.children[k], child)
+                var last = k % node.value == node.value - 1
+                if node.style == 1 and not last and self.rt.shown.nodes[node.children[k]].kind == TEXT:
                     external_call["gtk_label_set_wrap", NoneType](self.widgets[node.children[k]], c_int(0))  # (a fitted column is as wide as its widest words, never wrapped: the web's max-content)
-                if node.hint == "E" and k % node.value == node.value - 1:  # (the last column's items at its trailing edge)
+                if node.hint == "E" and last:  # (the last column's items at its trailing edge)
                     external_call["gtk_widget_set_halign", NoneType](child, c_int(2))  # GTK_ALIGN_END
                 external_call["gtk_grid_attach", NoneType](w, child, c_int(k % node.value), c_int(k // node.value), c_int(1), c_int(1))
         elif node.kind == LAZYLIST:
@@ -1399,6 +1476,9 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_box_new", Int](c_int(VERTICAL), c_int(0))
         elif node.kind == TABLE:  # a grid whose columns size to their content; each cell in a box wearing its role
             w = external_call["gtk_grid_new", Int]()
+            add_class(w, "mui-table")  # (a theme's rules for what's in a table: its tick boxes, D-492)
+            if node.style == 2:
+                add_class(w, "mui-table-compact")
             var cols = max(node.value, 1)
             for k in range(len(node.children)):
                 var child = self.build(node.children[k], self_addr)
@@ -1406,6 +1486,22 @@ struct GtkHost[A: App](Movable):
                 var row = k // cols
                 var cell = external_call["gtk_box_new", Int](c_int(HORIZONTAL), c_int(0))
                 add_class(cell, "mui-tag-table-head" if row == 0 else "mui-tag-table-cell")
+                # a dense table's cells wear the dense roles too, as the web's (D-493): table-dense-head/-cell, on a phone
+                # the compact ones over them, a snug column's cells table-dense-snug; their words stay on one line, cut,
+                # but in a column that wraps ("W")
+                var lim = node.options[col] if col < len(node.options) else String("")
+                if node.style == 1 or node.style == 2:
+                    var compact = node.style == 2
+                    var snug = row > 0 and not lim.startswith("T") and lim.endswith("S")
+                    add_class(cell, "mui-tag-table-dense-head" if row == 0 else "mui-tag-table-dense-cell")
+                    if compact:
+                        add_class(cell, "mui-tag-table-dense-compact-head" if row == 0 else "mui-tag-table-dense-compact-cell")
+                    if snug:
+                        add_class(cell, "mui-tag-table-dense-snug")
+                        if compact:
+                            add_class(cell, "mui-tag-table-dense-compact-snug")
+                    if lim != "W":
+                        self.one_line_words(node.children[k])
                 var num = col < node.hint.byte_length() and String(node.hint[byte=col]) == "R"
                 if num:
                     add_class(cell, "mui-tag-table-num")
@@ -2189,11 +2285,16 @@ struct GtkHost[A: App](Movable):
         self.one_line = List[String]()
         self.look = theme.look.copy()
         self.breaks_words = List[String]()
+        self.gap_roles = List[String]()
+        self.gap_cols = List[Int]()
         for sf in theme.look.surfaces:
             if sf.breaks_words:
                 self.breaks_words.append(sf.role)
             if sf.one_line:
                 self.one_line.append(sf.role)
+            if sf.column_gap >= 0:
+                self.gap_roles.append(sf.role)
+                self.gap_cols.append(sf.column_gap)
         var sheet = theme.gtk_css + (look_gtk_css(theme.look, "window." + theme.id + " ") if theme.id != "" else String(""))  # (the look's rules after the theme's own)
         if sheet != "":
             self.skin_provider = external_call["gtk_css_provider_new", Int]()

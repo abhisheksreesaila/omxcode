@@ -171,11 +171,12 @@ def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
         out += "line-height: normal; "
     elif not web and line > 0 and (s.line_height != 0 or s.font_size > 0):
         # (GTK: in px, as the web's lines measure, D-444; only for a look that declares its line: TypeScale.line 0 keeps
-        # GTK's labels at the font's own lines, as before: D-460; below 0: the font's own, over the look's label line)
-        out += "line-height: " + ("normal" if s.line_height < 0 else line_px(s.line_height if s.line_height > 0 else s.font_size * line)) + "; "
+        # GTK's labels at the font's own lines, as before: D-460; below 0: the font's own, over the look's label line: GTK
+        # reads a bare number as a factor of the font's own line, so 1 (it drops "normal": the look's label line won, D-496)
+        out += "line-height: " + ("1" if s.line_height < 0 else line_px(s.line_height if s.line_height > 0 else s.font_size * line)) + "; "
     if web and s.breaks_words:  # (GTK: its labels wrap at any character, PANGO_WRAP_WORD_CHAR; the Mac: character wrapping)
         out += "overflow-wrap: anywhere; "
-    if web and s.one_line:  # (its words on one line too, cut with an ellipsis when squeezed, as GTK and the Mac cut them)
+    if web and s.one_line:  # (its words on one line too; GTK and the Mac cut them with an ellipsis: the hosts read one_line)
         out += "white-space: nowrap; "
     if web and s.text_align > 0:
         out += "text-align: " + ("left" if s.text_align == 1 else ("center" if s.text_align == 2 else "right")) + "; "
@@ -191,15 +192,26 @@ def look_gtk_css(look: Look, scope: String) -> String:
     var out = String("")
     if look.type.line > 0 and look.type.body > 0:  # every label a line as high as the web's (body 14px/1.45: 20.3)
         out += scope + "label { line-height: " + line_px(look.type.body * look.type.line) + "; }\n"
+    var own = String("")
     for s in look.surfaces:
         if not text_only(s):
             out += scope + ".mui-tag-" + s.role + " { " + surface_rule(s, False) + "}\n"
-            if look.controls.control_h > 0 and (s.pad_top > 0 or s.pad_bottom > 0 or s.min_height > 0):
+            if look.controls.control_h > 0 and (s.pad_top > 0 or s.pad_bottom > 0 or s.min_height > 0) and s.height != -2:  # (HEIGHT_AUTO: its words' height, the web's height: auto; min-height: 0, D-498)
                 # a button wearing the role is a control high overall, as on the web (border-box), padding included (D-441)
                 out += scope + "button.mui-tag-" + s.role + " { min-height: " + px(gtk_content_h(s, max(look.controls.control_h, s.min_height))) + "; }\n"
+        if s.gap >= 0:  # (a button's icon and words the role's gap apart, as the web's button gap; a stack's gap is its
+            # spacing from resolve_layout, not CSS: GtkBox would add the two)
+            out += scope + "button.mui-tag-" + s.role + " > buttoncontent > box { border-spacing: " + px(s.gap) + "; }\n"
+        if s.icon_size > 0:  # (its icons at the role's size, as the web's svg: a button's own and an Icon inside it, D-497)
+            out += scope + ".mui-tag-" + s.role + " image, " + scope + "image.mui-tag-" + s.role + " { -gtk-icon-size: " + px(s.icon_size) + "; }\n"
         var t = text_rule(s, False, look.type.line)
-        if t != "":  # (its labels, or the label that wears the role itself)
-            out += scope + ".mui-tag-" + s.role + " label, " + scope + "label.mui-tag-" + s.role + " { " + t + "}\n"
+        if t != "":  # (its labels; the label that wears the role itself comes after every role's: below)
+            out += scope + ".mui-tag-" + s.role + " label:not(.mui-in-button) { " + t + "}\n"  # (not a button's title: D-511)
+            own += scope + "label.mui-tag-" + s.role + ":not(.mui-in-button), " + scope + "button.mui-tag-" + s.role + " > label, " + scope + "button.mui-tag-" + s.role + " > buttoncontent label { " + t + "}\n"
+    # a label's own role (or its button's) has the last word over any role around it (a mono line in a table's cell, a
+    # text action in a mono head: the web's words take
+    # an ancestor's type at the lowest weight, :where; GTK has no :where, so the same weight written later, D-491)
+    out += own
     var c = look.controls.copy()
     if c.control_h > 0:  # push buttons, fields and dropdowns: one height, the look's corners
         out += (scope + "button { min-height: " + px(c.control_h) + "; border-radius: " + px(c.button_radius) + "; "
@@ -293,10 +305,10 @@ def look_web_css(look: Look, scope: String) -> String:
     # a Divider's room, as weak as the base sheet's hr (:where): a role's own margins on a Divider still win (D-460; scoped
     # plainly, the look's hr rule beat every role's rule-margin 0 and moved the console's pages 4 px a rule)
     var weak = ":where(" + scope.strip() + ") "
-    if c.divider_gap > 0:
-        out += weak + "hr { margin: " + px(c.divider_gap) + " 0; }\n"
-    if c.divider_side > 0:
-        out += ":where(" + scope.strip() + " .hstack) > hr { margin: 0 " + px(c.divider_side) + "; }\n"
+    if c.divider_gap != 0:  # (below 0: none, D-490)
+        out += weak + "hr { margin: " + px(max(c.divider_gap, 0)) + " 0; }\n"
+    if c.divider_side != 0:
+        out += ":where(" + scope.strip() + " .hstack) > hr { margin: 0 " + px(max(c.divider_side, 0)) + "; }\n"
     out += press_rules(look.motion, scope, True)
     return out
 

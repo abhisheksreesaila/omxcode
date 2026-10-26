@@ -25,7 +25,7 @@ def main() raises:
     assert_true("body.liquid [data-tag=toolbar], body.liquid button[data-tag=toolbar], body.liquid [data-role~=toolbar] { background: rgba(255,255,255,0.62); border-radius: 18px; margin: 0 10px 0; padding: 6px; box-sizing: border-box;" in web, web)
     assert_true("backdrop-filter: blur(24px)" in web and "backdrop-filter" not in gtk, "the blur is the web's alone")
     assert_true("border-radius: 0 0 14px 14px" in gtk, "the status bar's bottom corners")
-    assert_true("window.liquid .mui-tag-status-bar label, window.liquid label.mui-tag-status-bar { font-family: 'Inter', sans-serif; font-size: 12px;" in gtk, gtk)
+    assert_true("window.liquid .mui-tag-status-bar label:not(.mui-in-button) { font-family: 'Inter', sans-serif; font-size: 12px;" in gtk, gtk)
     # a Board object wears its content's role: the content inside fills it with no second card (the web drew two)
     assert_true("body.liquid .board > .object[data-tag=table] > [data-tag=table] { background: none; box-shadow: none;" in web, web)
     assert_true("body.liquid label.toggle { min-height: 30px; }" in web, "the toggle row is a control's height, not the 48 px touch row")

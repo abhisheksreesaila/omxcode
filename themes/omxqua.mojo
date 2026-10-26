@@ -159,6 +159,16 @@ def console_surfaces(p: Palette) -> List[Surface]:
     out.append(cut.copy())
     cut.role, cut.width = "table-tick-compact", 46
     out.append(cut^)
+    # a tick box with no words, as the web draws it (label.toggle.check input: 18, 5 corners, a 1.5 ink-2 ring; in a
+    # table library.css .cb: 22, 7 corners, a 1.5 line; ticked: the accent); hosts that draw their own read these (D-510)
+    var tick_box = box("tick-box", 0, 5, -1, -1)
+    tick_box.width, tick_box.height, tick_box.outline, tick_box.outline_w = 18, 18, p.ink2, 1
+    out.append(tick_box^)
+    var table_tick_box = box("tick-box-table", 0, 7, -1, -1)
+    table_tick_box.width, table_tick_box.height, table_tick_box.outline, table_tick_box.outline_w = 22, 22, p.line_strong, 1
+    out.append(table_tick_box.copy())
+    table_tick_box.role, table_tick_box.width, table_tick_box.height = "tick-box-table-compact", 26, 26
+    out.append(table_tick_box^)
     var snug = box("table-dense-snug", 0, -1, 8, 10)  # (.b-home .tbl td.nm: 8px 10px)
     snug.line_bottom = p.line
     out.append(snug^)
@@ -261,7 +271,7 @@ def omxqua_look(p: Palette) -> Look:
     surfaces += timeline_roles(p, FONT_MONO)  # (Add a model's stages: blade-add.css's .stg)
     surfaces += logpane_roles(p, FONT_MONO, CODE, CODE_TEXT, RADIUS_CARD)  # (Add a model's live log: blade-add.css .sr)
     return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False, LINE),
-                Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12, TEXT * 0.95, 550, 0, 0), surfaces^,  # (a Divider: no room of its own, as omxqua's web hr { margin: 0 })
+                Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12, TEXT * 0.95, 550, -1, -1), surfaces^,  # (a Divider: no room on any host, as omxqua's web hr { margin: 0 }, D-490)
                 Segments(p.page, RADIUS_FULL, 3, p.line_strong, TARGET - 8, 14, RADIUS_FULL, 12.6, 500, p.ink2, surface_2(p), p.ink, 500, True),  # (.seg2)
                 Motion(PRESS_SCALE, SPRING_FAST_MS, String(SPRING_FAST), String(EASE_IN)), [2, 4, 8, 12, 16, 20, 24])  # (the spacing scale: SPACE_XXS … SPACE_XXL, --oq-space on the console's compact steps)
 
@@ -431,8 +441,12 @@ def omxqua_gtk(p: Palette, look: Look, cls: String) -> String:
         + w + "switch { min-width: 40px; min-height: 24px; border-radius: 999px; background: " + line + "; padding: 0; border: 0; }\n"
         + w + "switch:checked { background: " + accent + "; } " + w + "switch slider { min-width: 18px; min-height: 18px; margin: 3px; border-radius: 9px; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }\n"
         + w + "switch:checked slider { background: " + on + "; }\n"
-        + w + "checkbutton check { min-width: 18px; min-height: 18px; border-radius: 5px; border: 0; background: transparent; box-shadow: inset 0 0 0 1.5px " + ink2 + "; }\n"
+        + w + "checkbutton check { min-width: 18px; min-height: 18px; padding: 0; border-radius: 5px; border: 0; background: transparent; box-shadow: inset 0 0 0 1.5px " + ink2 + "; }\n"
         + w + "checkbutton check:checked { background: " + accent + "; box-shadow: none; color: " + on + "; }\n"
+        # a table's tick boxes, as the web's (library.css .cb): 22 pt, 7 corners, a 1.5 pt line, the box alone (no padding:
+        # Adwaita's checkbutton and check have 3 px each; the web's input is its 18 or 22 px alone)
+        + w + "grid.mui-table checkbutton { padding: 0; min-height: 0; } " + w + "grid.mui-table checkbutton check { min-width: 22px; min-height: 22px; margin: 0; border-radius: 7px; box-shadow: inset 0 0 0 1.5px " + line + "; }\n"
+        + w + "grid.mui-table checkbutton check:checked { box-shadow: none; } " + w + "grid.mui-table-compact checkbutton check { min-width: 26px; min-height: 26px; }\n"
         + w + "toggle-group { background: " + hex_of(g.track) + "; box-shadow: inset 0 0 0 1px " + hex_of(g.ring) + "; border-radius: " + px(g.track_radius) + "; padding: " + px(g.track_pad) + "; }\n"
         + w + "toggle-group > toggle { min-height: " + px(g.h) + "; padding: 0 " + px(g.pad) + "; border-radius: " + px(g.radius) + "; font-size: " + fpx(g.font_size) + "; font-weight: " + String(g.weight)
         + "; color: " + hex_of(g.ink) + "; background: transparent; box-shadow: none; }\n"

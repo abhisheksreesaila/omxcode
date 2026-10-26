@@ -299,8 +299,8 @@ struct Controls(Copyable, Movable):
     var field_pad: Int  # a field's text from its sides
     var button_font: Float64  # a push button's title size (0: the body's; omxqua's .btn: .95em)
     var button_weight: Int  # its weight (0: the host's own)
-    var divider_gap: Int  # a Divider's room above and below it in a column (0: the host's own: the web's hr 4 px, GTK none)
-    var divider_side: Int  # its room either side where it stands up in a row (0: the host's own: the web's 6 px, GTK none)
+    var divider_gap: Int  # a Divider's room above and below it in a column (0: the host's own: the web's hr 4 px, the Mac's 4 pt, GTK none; below 0: none on every host, D-490)
+    var divider_side: Int  # its room either side where it stands up in a row (0: the host's own: the web's 6 px, the Mac's 6 pt, GTK none; below 0: none)
 
 
 @fieldwise_init
