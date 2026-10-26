@@ -2096,6 +2096,7 @@ struct AppKitHost[A: App](Movable):
         var content = msg(self.window, "contentView")
         var cb = msg[CGRect](content, "bounds")
         var out = String("window content " + pts(cb.width) + " x " + pts(cb.height) + " pt · x, y from the top left\n")
+        var watch = env("MOJOUI_CONSTRAINTS")
         out += "kind 'text' [asked] @ x,y w x h  flags\n\n"
         var stack: List[Tuple[Int, Int]] = [(0, 0)]
         while len(stack) > 0:
@@ -2175,6 +2176,20 @@ struct AppKitHost[A: App](Movable):
                         problems.append("icon '" + name + "' has no SF Symbol")
                 line += flags
             out += line + "\n"
+            if n.name != "" and w != 0 and ("," + watch + ",").find("," + n.name + ",") >= 0:
+                # MOJOUI_CONSTRAINTS (tags, comma-separated): what lays this view out vertically, for the report (its
+                # hugging and resistance, then every constraint AppKit says affects its height: a row's views standing
+                # the row's height on the Mac, D-507). Lines start "~" (scripts/parity.py reads only "@ x,y wxh")
+                out += line[byte=0 : depth * 2] + "  ~ hug v " + String(Int(msg[Float32](w, "contentHuggingPriorityForOrientation:", 1)))
+                out += " resist v " + String(Int(msg[Float32](w, "contentCompressionResistancePriorityForOrientation:", 1)))
+                if (msg(w, "isKindOfClass:", cls("NSStackView")) & 0xFF) != 0:
+                    out += " stack-hug v " + String(Int(msg[Float32](w, "huggingPriorityForOrientation:", 1))) + " h " + String(Int(msg[Float32](w, "huggingPriorityForOrientation:", 0)))
+                    out += " align " + String(msg(w, "alignment")) + " dist " + String(msg(w, "distribution"))
+                out += "\n"
+                var cs = msg(w, "constraintsAffectingLayoutForOrientation:", 1)
+                for q in range(min(msg(cs, "count"), 40)):
+                    var c = msg(cs, "objectAtIndex:", q)
+                    out += line[byte=0 : depth * 2] + "  ~ " + String(Int(msg[Float32](c, "priority"))) + " " + from_ns(msg(c, "description")).replace("\n", " ") + "\n"
             var kids = n.children.copy()
             var j = len(kids) - 1
             while j >= 0:
