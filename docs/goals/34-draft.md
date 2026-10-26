@@ -1,8 +1,19 @@
-# GOAL 34 (draft, 2026-10-25): the JS ecosystem as components
+# GOAL 34 (draft, 2026-10-25): first-class JS
 
 **Why (owner, 2026-10-25):** "after you finish this today, start on the JS widget component and prove it with an app (simple app for now). iframe is not secure. We also need to manage minification of JS and the security part." Earlier: "I thought FastHTML gave us access to JS… we need that… that's a big gap, we will lose an
 entire JS ecosystem." Today the web host draws a fixed list of component kinds; `WebFrame` (goal 33) only shows a page
 in an iframe. A Mojo app can't place a JS widget, feed it values, or hear its events. After goal 33.
+
+**Owner, 2026-10-26:** "We need first-class JS support or else web dev will be stalled on this framework."
+
+## First class means
+- npm packages by name: a `web/package.json` + lockfile per app, installed with Node from conda-forge (pixi), bundled
+  offline by esbuild at build time; TypeScript works the same way. No CDN, no run-time downloads.
+- Writing your own widget is ~20 lines of JS or TS (a documented `defineWidget({props, events, mount, update})`), with
+  a guide and a template (`scripts/new_widget.sh`).
+- Both directions: props and events, plus commands (Mojo calls a widget's method: focus, scroll to, set selection)
+  and replies (a widget answers a request: e.g. the editor's text), all as plain data.
+- A fast loop: change the JS, reload the page, the Mojo app keeps its state.
 
 ## The idea
 One generic view, `WebComponent(tag, props, on_event)`: on the web the host mounts any registered Web Component or JS
@@ -19,6 +30,7 @@ webview for that one view (WebKitGTK, WKWebView), or a native stand-in where one
 | M2 | Native, the same widget | the same app on GTK (WebKitGTK) and the Mac (WKWebView, through GitHub's runners): the editor mounts, typing reaches `update()`, Mojo sets its text; the widget's box matches the web's (goal 32's parity) |
 | M3 | Agents still see it | the agent (MCP) host lists a WebComponent with what it reports (`describe()` from the widget: e.g. its text), and an agent can set its value |
 | M4 | A second library | a map or a chart library (proposed: Leaflet with offline tiles, or Apache ECharts) through the same seam, no host changes: the proof that it's generic |
+| M4b | First-class workflow | an npm package added by name to examples/widgets' web/package.json (lockfile committed) is bundled by esbuild and used with no host change; a TypeScript widget compiles in the same build; `scripts/new_widget.sh` makes a working widget from a template; Mojo calls a widget command (focus, set selection) and gets a reply; docs/js.md walks all of it |
 | M5 | Security and size | every widget's JS and CSS is vendored at a pinned version, bundled and minified at build time (esbuild from conda-forge), served from our origin with its hash; the page sends a strict CSP (no inline script, no eval, script-src only our hashed files) and the proof app runs under it with no CSP violations; props cross as JSON data, never code; a lint fails the build on an unvendored, unhashed or unlisted asset; untrusted widgets only in a sandboxed iframe (no allow-same-origin) speaking postMessage; WebFrame gains a sandbox by default |
 | M6 | Nothing regressed | goal 33's checks |
 
