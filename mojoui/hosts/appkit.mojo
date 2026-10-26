@@ -1124,6 +1124,16 @@ struct AppKitHost[A: App](Movable):
                 align = 5 if vertical else 3  # leading / top
             elif node.align_items == END:
                 align = 6 if vertical else 4  # trailing / bottom
+            elif node.align_items == STRETCH:  # every view is stretched below; placed from the leading (top) inset, as
+                # NSStackView centres a stretched view in its whole bounds: a frame padded 0 above and 14 below put its
+                # card 7 pt low and everything under it (D-505)
+                var centred = False  # (a view held to its widest is centred on the stack: keep the centre then)
+                for c in node.children:
+                    if self.rt.shown.nodes[c].max_w != 0:
+                        centred = True
+                if not centred:
+                    align = 5 if vertical else 3
+            _ = msg(w, "setAlignment:", align)
             # across its axis a stack is as wide (tall) as its widest view: it hugs loosely, so a row of buttons is never
             # squeezed to a narrower row's width (maccheck's Delete button, 11 pt, GitHub's Mac, 2026-10-23)
             _ = msg(w, "setHuggingPriority:forOrientation:", Float32(250), 0 if vertical else 1)
