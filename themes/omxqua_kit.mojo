@@ -756,6 +756,9 @@ def extra_roles(p: Palette, mono: String) -> List[Surface]:
     var c2 = layout("column-2")
     c2.width = 80
     out.append(c2^)
+    var ct = layout("column-tail-compact")  # ≤ 420: minmax(0, 1fr) var(--bn-val: 92px), the best run's words cut (.trunc)
+    ct.width, ct.one_line = 92, True
+    out.append(ct^)
     var md = layout("markdown-cell", -1, 16, 18)  # .nb-md: 16px 18px 8px
     md.pad_bottom = 8
     out.append(md^)

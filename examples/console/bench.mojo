@@ -137,10 +137,8 @@ def bench_view(b: Bench, model: String, phone: Bool) -> View:
                     if r.status == "done" and r.decode_tps > 0:
                         best = r.model + " · " + fmt(r.decode_tps, 1) + " tok/s"
                         break
-                var cols: List[View] = [Muted(date_time(h.started_at))]
-                if not phone:  # (a phone leaves out who ran: .bn-hwho)
-                    cols.append(Text(String(h.models) + " model" + ("" if h.models == 1 else "s")))
-                rows.append(ColumnRow(cols^, Muted(best, mono=True), on=h.id == run.id))
+                var cols: List[View] = [Muted(date_time(h.started_at)), Text(String(h.models) + " model" + ("" if h.models == 1 else "s"))]
+                rows.append(ColumnRow(cols^, Muted(best, mono=True), on=h.id == run.id, compact=phone))  # (a phone leaves out who ran: .bn-hwho)
             items.append(Card([CardHead("History", String(len(b.history)) + " run" + ("" if len(b.history) == 1 else "s")), VStack(rows^, spacing=0).fill(),
                                CardFoot("pick a run to chart it; newest first", note=True)]))
     return TabBody(head^, items^, compact=phone)

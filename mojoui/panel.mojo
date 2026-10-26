@@ -182,10 +182,16 @@ def FactList(var facts: List[View]) -> View:
     return VStack(facts^, spacing=SPACE_S).align(START).fill().tag("fact-list")
 
 
-def ColumnRow(var cells: List[View], tail: View, on: Bool = False) -> View:
+def ColumnRow(var cells: List[View], tail: View, on: Bool = False, compact: Bool = False) -> View:
     """A list row whose first cells line up in columns down the list (roles column-1, column-2, …: their widths), then
-    `tail` at the end (a ListRow)."""
+    `tail` at the end (a ListRow). Compact (a phone): the first cell takes the room, the tail a column of the theme's
+    width, cut to one line (role column-tail-compact); the other cells are left out."""
     var items: List[View] = []
+    if compact:
+        if len(cells) > 0:
+            items.append(HStack(cells[0].copy(), spacing=0).align(CENTER).justify(START).grow())
+        items.append(HStack(tail.copy(), spacing=0).align(CENTER).justify(START).tag("column-tail-compact"))
+        return ListRow(items^, on=on)
     for k in range(len(cells)):
         items.append(HStack(cells[k].copy(), spacing=0).align(CENTER).justify(START).tag("column-" + String(k + 1)))
     items.append(Spacer())

@@ -150,7 +150,7 @@ def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
     if web and s.breaks_words:  # (GTK: its labels wrap at any character, PANGO_WRAP_WORD_CHAR; the Mac: character wrapping)
         out += "overflow-wrap: anywhere; "
     if web and s.one_line:  # (its words on one line too, cut with an ellipsis when squeezed, as GTK and the Mac cut them)
-        out += "white-space: nowrap; overflow: hidden; text-overflow: ellipsis; "
+        out += "white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; "
     if web and s.text_align > 0:
         out += "text-align: " + ("left" if s.text_align == 1 else ("center" if s.text_align == 2 else "right")) + "; "
     if s.ink != 0:
