@@ -811,6 +811,13 @@ struct GtkHost[A: App](Movable):
         var want_w = max(node.w, node.min_w)
         external_call["gtk_widget_set_size_request", NoneType](target, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
 
+    def full_page(self):
+        """For a picture (MOJOUI_SHOT), after the test's report: the page scroller stops scrolling, so a screen taller
+        than the window shows whole (the window grows to it), as the web's full-page screenshot shows its whole page.
+        Before D-440 the window always grew; the boxes reported before this are the window's own size's (D-461)."""
+        if self.page != 0:
+            external_call["gtk_scrolled_window_set_policy", NoneType](self.page, c_int(2), c_int(2))  # NEVER, NEVER
+
     def fit_tables(self):
         """Each Table's columns share its width as a browser's automatic table layout does (the web's is a <table>):
         every column at least its widest cell's narrowest (min-content), then the room up to each one's widest
@@ -872,14 +879,15 @@ struct GtkHost[A: App](Movable):
         self.place_child(node, self.rt.shown.nodes[c], child)
         if node.kind == HSTACK and self.rt.shown.nodes[c].kind == DIVIDER and not self.rt.shown.nodes[c].sized_width():
             # a Divider between a row's parts stands up: 1 px wide, a control high, 6 px each side (the web's .hstack > hr)
+            # (its room is the look's Controls.divider_side: GTK's own is none, as before D-440)
             var sep = self.widgets[c]
+            var dn = self.rt.shown.nodes[c].copy()
             external_call["gtk_orientable_set_orientation", NoneType](sep, c_int(VERTICAL))
-            external_call["gtk_widget_set_size_request", NoneType](sep, c_int(-1), c_int(-1 if self.rt.shown.nodes[c].sized_height() else 28))
+            external_call["gtk_widget_set_size_request", NoneType](sep, c_int(-1), c_int(dn.h if dn.h != 0 else (-1 if dn.height_from_parent else 28)))
             external_call["gtk_widget_set_valign", NoneType](sep, c_int(ALIGN_CENTER))
-            external_call["gtk_widget_set_margin_start", NoneType](sep, c_int(6))
-            external_call["gtk_widget_set_margin_end", NoneType](sep, c_int(6))
-            external_call["gtk_widget_set_margin_top", NoneType](sep, c_int(0))
-            external_call["gtk_widget_set_margin_bottom", NoneType](sep, c_int(0))
+            var plain = String("mui-divider")
+            external_call["gtk_widget_remove_css_class", NoneType](sep, plain.as_c_string_span())
+            add_class(sep, "mui-divider-up")
         if node.kind == VSTACK and self.rt.shown.nodes[c].kind == TEXT and node.align_items == START:
             external_call["gtk_label_set_justify", NoneType](self.widgets[c], c_int(0))  # left-aligned lines too
             external_call["gtk_label_set_xalign", NoneType](self.widgets[c], Float32(0))
@@ -1043,8 +1051,7 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_separator_new", Int](c_int(HORIZONTAL))
             if not sized:
                 width(w, 280)
-            external_call["gtk_widget_set_margin_top", NoneType](w, c_int(4))  # (the web's hr: 4 px above and below)
-            external_call["gtk_widget_set_margin_bottom", NoneType](w, c_int(4))
+            add_class(w, "mui-divider")  # (its room above and below: the look's Controls.divider_gap; GTK's own is none)
         elif node.kind == IMAGE:
             var tex = texture(node.pixels, node.spacing, node.size)
             w = external_call["gtk_picture_new_for_paintable", Int](tex)
@@ -4478,6 +4485,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
             settle()
         report[A](host_addr)
     if shot != "":
+        host[].full_page()
         save_png(host[].window, shot)
     if testing or shot != "":
         external_call["g_application_quit", NoneType](gapp)

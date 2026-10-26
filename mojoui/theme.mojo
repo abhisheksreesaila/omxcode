@@ -219,6 +219,8 @@ struct Controls(Copyable, Movable):
     var field_pad: Int  # a field's text from its sides
     var button_font: Float64  # a push button's title size (0: the body's; omxqua's .btn: .95em)
     var button_weight: Int  # its weight (0: the host's own)
+    var divider_gap: Int  # a Divider's room above and below it in a column (0: the host's own: the web's hr 4 px, GTK none)
+    var divider_side: Int  # its room either side where it stands up in a row (0: the host's own: the web's 6 px, GTK none)
 
 
 @fieldwise_init
@@ -281,7 +283,7 @@ struct Look(Copyable, Movable):
     @staticmethod
     def none() -> Look:
         """No look of the theme's own: each host's defaults (and no rules written)."""
-        return Look(TypeScale("", "", 13, 11, 15, 26, 11, False, 0), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0), [], Segments.none())
+        return Look(TypeScale("", "", 13, 11, 15, 26, 11, False, 0), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0), [], Segments.none())
 
     def is_none(self) -> Bool:
         return len(self.surfaces) == 0 and self.controls.tool_w == 0

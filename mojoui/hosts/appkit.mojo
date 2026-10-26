@@ -1904,7 +1904,13 @@ struct AppKitHost[A: App](Movable):
             return
         var name = self.report.next_name()
         var content = msg(self.window, "contentView")
-        var pictured = self.report.save_png(content, name + ".png")
+        var whole = content
+        if (msg(content, "isKindOfClass:", cls("NSScrollView")) & 0xFF) != 0:
+            # a screen taller than the window: the whole page, as the web's full-page screenshot and GTK's picture (D-461)
+            var doc = msg(content, "documentView")
+            if doc != 0 and msg[CGRect](doc, "bounds").height > msg[CGRect](content, "bounds").height + 0.5:
+                whole = doc
+        var pictured = self.report.save_png(whole, name + ".png")
         var problems = List[String]()
         var dump = self.dump_views(problems)
         self.report.write(name + ".txt", dump)
