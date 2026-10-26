@@ -803,6 +803,60 @@ struct GtkHost[A: App](Movable):
         var want_w = max(node.w, node.min_w)
         external_call["gtk_widget_set_size_request", NoneType](target, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
 
+    def fit_tables(self):
+        """Each Table's columns share its width as a browser's automatic table layout does (the web's is a <table>):
+        every column at least its widest cell's narrowest (min-content), then the room up to each one's widest
+        (max-content) shared by how much each wants, then any more room by their widest. Runs after each layout; a
+        change asks for another (D-442)."""
+        for k in range(min(len(self.kinds), len(self.widgets), len(self.rt.shown.nodes))):
+            if self.kinds[k] != TABLE or self.widgets[k] == 0:
+                continue
+            var grid = self.widgets[k]
+            var holder = external_call["gtk_widget_get_parent", Int](grid)
+            if holder == 0:
+                continue
+            var room = Int(external_call["gtk_widget_get_width", c_int](holder))
+            if room <= 0:
+                continue
+            var cols = max(self.rt.shown.nodes[k].value, 1)
+            var rows = len(self.rt.shown.nodes[k].children) // cols
+            var lo = List[Int](length=cols, fill=0)
+            var hi = List[Int](length=cols, fill=0)
+            var m = List[c_int](length=2, fill=0)
+            for c in range(cols):
+                for r in range(rows):
+                    var cell = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(r))
+                    if cell == 0:
+                        continue
+                    external_call["gtk_widget_measure", NoneType](cell, c_int(HORIZONTAL), c_int(-1), Int(m.unsafe_ptr()), Int(m.unsafe_ptr()) + 4, Int(0), Int(0))
+                    lo[c] = max(lo[c], Int(m[0]))
+                    hi[c] = max(hi[c], Int(m[1]), Int(m[0]))
+            var sum_lo = 0
+            var sum_hi = 0
+            for c in range(cols):
+                sum_lo += lo[c]
+                sum_hi += hi[c]
+            var want = List[Int](length=cols, fill=0)
+            var given = 0
+            for c in range(cols):
+                var v = lo[c]
+                if room >= sum_hi and sum_hi > 0:
+                    v = hi[c] + (room - sum_hi) * hi[c] // sum_hi
+                elif room > sum_lo and sum_hi > sum_lo:
+                    v = lo[c] + (room - sum_lo) * (hi[c] - lo[c]) // (sum_hi - sum_lo)
+                want[c] = v
+                given += v
+            if room > given and given >= sum_lo:  # (what rounding left goes to the last column)
+                want[cols - 1] += room - given
+            for c in range(cols):
+                var spacer = external_call["gtk_grid_get_child_at", Int](grid, c_int(c), c_int(-1))
+                if spacer == 0:
+                    continue
+                external_call["gtk_widget_get_size_request", NoneType](spacer, Int(m.unsafe_ptr()), Int(m.unsafe_ptr()) + 4)
+                if Int(m[0]) != want[c]:
+                    external_call["gtk_widget_set_size_request", NoneType](spacer, c_int(want[c]), c_int(0))
+            _ = len(m)
+
     def build_child(mut self, parent: Int, c: Int, self_addr: Int) -> Int:
         """Builds child c of stack `parent` and aligns it in the stack."""
         var child = self.build(c, self_addr)
@@ -825,7 +879,7 @@ struct GtkHost[A: App](Movable):
 
     def place_child(self, parent: Node, child_node: Node, child: Int):
         """Aligns a stack's child: the stack's align, then the child's own fill/grow."""
-        var vertical = parent.kind == VSTACK
+        var vertical = parent.kind == VSTACK or parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (one child, stacked down)
         var cross = ALIGN_CENTER
         if parent.align_items == START:
             cross = 1  # GTK_ALIGN_START
@@ -1231,6 +1285,17 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_widget_set_hexpand", NoneType](child, c_int(1))
                 external_call["gtk_box_append", NoneType](cell, child)
                 external_call["gtk_grid_attach", NoneType](w, cell, c_int(col), c_int(row), c_int(1), c_int(1))
+            for col in range(cols):  # row -1: an empty box per column whose width fit_tables() sets (the column's share)
+                external_call["gtk_grid_attach", NoneType](w, external_call["gtk_box_new", Int](c_int(HORIZONTAL), c_int(0)), c_int(col), c_int(-1), c_int(1), c_int(1))
+            # in a scroller that never shows a bar: the columns' shares are minimums, and they mustn't hold the window
+            # at its width when it gets narrower (the next layout shares the new width)
+            self.widgets[i] = w
+            var holder = external_call["gtk_scrolled_window_new", Int]()
+            external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(2))  # EXTERNAL across, NEVER down
+            external_call["gtk_scrolled_window_set_propagate_natural_width", NoneType](holder, c_int(1))
+            external_call["gtk_scrolled_window_set_propagate_natural_height", NoneType](holder, c_int(1))
+            external_call["gtk_scrolled_window_set_child", NoneType](holder, w)
+            w = holder
         elif node.kind == TOAST:
             if self.toast != 0 and self.toast_text == node.text:  # the same toast, still up: keep it
                 set_node(self.toast, i)
@@ -2694,6 +2759,11 @@ def on_idle_appearance[A: App](host_addr: Int) abi("C") -> c_int:
     return 0
 
 
+def on_clock_layout[A: App](clock: Int, host_addr: Int) abi("C"):
+    if not busy():
+        host_at[A](host_addr)[].fit_tables()
+
+
 def on_surface_layout[A: App](surface: Int, width: c_int, height: c_int, host_addr: Int) abi("C"):
     host_at[A](host_addr)[].arm_all(host_addr)  # the compositor resized the window (e.g. tiling)
     queue_resize[A](host_addr)
@@ -2734,6 +2804,8 @@ def on_window_realize[A: App](window: Int, host_addr: Int) abi("C"):
     if clock != 0 and host_at[A](host_addr)[].rt.trace:  # (MOJOUI_TRACE: the paint phase of every frame, for bench steps)
         connect(clock, "before-paint", on_before_paint[A], host_addr)
         connect(clock, "after-paint", on_after_paint[A], host_addr)
+    if clock != 0:  # (after each layout: tables share their width as the web's do)
+        connect(clock, "layout", on_clock_layout[A], host_addr)
     var surface = external_call["gtk_native_get_surface", Int](window)
     if surface != 0:
         connect_any(surface, "layout", on_surface_layout[A], host_addr)

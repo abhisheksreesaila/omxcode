@@ -192,4 +192,4 @@ def omarchy() -> Theme:
 def omarchy_look() -> Look:
     """Omarchy's type as values (JetBrains Mono throughout, 13 / 11 / 13 / 18); its chrome is flat (no surfaces of
     its own), so GTK and the web write no rules from it yet."""
-    return Look(TypeScale("JetBrains Mono", "JetBrains Mono", 13, 11, 13, 18, 11, False), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0), [], Segments.none())
+    return Look(TypeScale("JetBrains Mono", "JetBrains Mono", 13, 11, 13, 18, 11, False, 0), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0), [], Segments.none())

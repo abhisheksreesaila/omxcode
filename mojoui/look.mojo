@@ -80,7 +80,12 @@ def gtk_content_h(s: Surface, outer: Int) -> Int:
     return max(inner, 0)
 
 
-def text_rule(s: Surface, web: Bool = False) -> String:
+def line_px(v: Float64) -> String:
+    """A line height in px to a tenth."""
+    return fpx(Float64(Int(v * 10 + 0.5)) / 10)
+
+
+def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
     var out = String("")
     if s.font != "":
         out += "font-family: '" + s.font + "', " + ("monospace" if "Mono" in s.font else "sans-serif") + "; "
@@ -90,8 +95,10 @@ def text_rule(s: Surface, web: Bool = False) -> String:
         out += "font-weight: " + String(s.font_weight) + "; "
     if s.tracking != 0:
         out += "letter-spacing: " + fpx(s.tracking) + "; "
-    if web and s.line_height > 0:  # (GTK labels take the font's)
+    if web and s.line_height > 0:
         out += "line-height: " + fpx(s.line_height) + "; "
+    elif not web and (s.line_height > 0 or (s.font_size > 0 and line > 0)):  # (GTK: in px, as the web's lines measure; D-444)
+        out += "line-height: " + line_px(s.line_height if s.line_height > 0 else s.font_size * line) + "; "
     if s.ink != 0:
         out += "color: " + css_color(s.ink) + "; "
     return out
@@ -102,13 +109,15 @@ def look_gtk_css(look: Look, scope: String) -> String:
     if look.is_none():
         return ""
     var out = String("")
+    if look.type.line > 0 and look.type.body > 0:  # every label a line as high as the web's (body 14px/1.45: 20.3)
+        out += scope + "label { line-height: " + line_px(look.type.body * look.type.line) + "; }\n"
     for s in look.surfaces:
         if not text_only(s):
             out += scope + ".mui-tag-" + s.role + " { " + surface_rule(s, False) + "}\n"
             if look.controls.control_h > 0 and (s.pad_top > 0 or s.pad_bottom > 0 or s.min_height > 0):
                 # a button wearing the role is a control high overall, as on the web (border-box), padding included (D-441)
                 out += scope + "button.mui-tag-" + s.role + " { min-height: " + px(gtk_content_h(s, max(look.controls.control_h, s.min_height))) + "; }\n"
-        var t = text_rule(s)
+        var t = text_rule(s, False, look.type.line)
         if t != "":  # (its labels, or the label that wears the role itself)
             out += scope + ".mui-tag-" + s.role + " label, " + scope + "label.mui-tag-" + s.role + " { " + t + "}\n"
     var c = look.controls.copy()

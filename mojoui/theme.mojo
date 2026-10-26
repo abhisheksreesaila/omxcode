@@ -192,6 +192,7 @@ struct TypeScale(Copyable, Movable):
     var title: Float64
     var section: Float64
     var tabular: Bool  # figures all one width ("tnum": columns of numbers line up)
+    var line: Float64  # a line's height as a share of its text's size (CSS's unitless line-height: 1.45); 0: the font's own
 
 
 @fieldwise_init
@@ -277,7 +278,7 @@ struct Look(Copyable, Movable):
     @staticmethod
     def none() -> Look:
         """No look of the theme's own: each host's defaults (and no rules written)."""
-        return Look(TypeScale("", "", 13, 11, 15, 26, 11, False), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0), [], Segments.none())
+        return Look(TypeScale("", "", 13, 11, 15, 26, 11, False, 0), Controls(0, 0, 0, 11, 0, 0, 0, 12, 0, 0, 16, 0, 0, 0, 0, 0), [], Segments.none())
 
     def is_none(self) -> Bool:
         return len(self.surfaces) == 0 and self.controls.tool_w == 0
