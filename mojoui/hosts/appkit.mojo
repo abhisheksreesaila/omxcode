@@ -59,6 +59,26 @@ def ns_rgba(c: UInt32) -> Int:
                Float64(Int((c >> 16) & 255)) / 255.0, Float64(Int((c >> 24) & 255)) / 255.0)
 
 
+def cut_with_ellipsis(w: Int):
+    """Label w on one line, cut at its end with "…" where it doesn't fit (the web's text-overflow: ellipsis). The cell's
+    mode alone isn't enough: a label whose words carry a paragraph style (the look's line height) breaks by that style's
+    mode, word wrapping, and was cut bare at a break ("sentence-transformers/all-"), so the style's mode is set too and
+    kept by later text patches, which reuse the words' attributes."""
+    _ = msg(w, "setLineBreakMode:", 4)  # NSLineBreakByTruncatingTail
+    _ = msg(w, "setMaximumNumberOfLines:", 1)
+    var said = msg(w, "attributedStringValue")
+    if said == 0 or msg(said, "length") == 0:
+        return
+    var style = msg(said, "attribute:atIndex:effectiveRange:", ns_string("NSParagraphStyle"), 0, 0)
+    if style == 0:
+        return  # (no style of its own: the cell's mode holds)
+    var cut = msg(style, "mutableCopy")
+    _ = msg(cut, "setLineBreakMode:", 4)
+    var words = msg(said, "mutableCopy")
+    _ = msg(words, "addAttribute:value:range:", ns_string("NSParagraphStyle"), cut, 0, msg(words, "length"))  # (NSRange in two registers)
+    _ = msg(w, "setAttributedStringValue:", words)
+
+
 def svg_icon(name: String, size: Float64) -> Int:
     """A Lucide icon, the same drawing GTK and the web show, as a template NSImage (tinted like a symbol; NSImage reads
     SVG itself on macOS 14+); 0 if the name isn't one of mojoui's icons."""
@@ -534,7 +554,7 @@ struct AppKitHost[A: App](Movable):
                 if sf.font != "" or sf.font_size > 0 or sf.font_weight > 0 or inh > 0:  # (no size of its own: the one it inherits, else its style's, a caption's 12)
                     _ = msg(w, "setFont:", look_font(sf.font if sf.font != "" else self.look.type.family, sf.font_weight, sf.font_size if sf.font_size > 0 else (inh if inh > 0 else msg[Float64](msg(w, "font"), "pointSize")), self.look.type.tabular))
                 if sf.ink != 0:
-                    _ = msg(w, "setTextColor:", ns_color(sf.ink))
+                    _ = msg(w, "setTextColor:", ns_rgba(sf.ink))
                 if sf.tracking != 0:  # (letter spacing: the label's string with NSKern, in its own font and colour)
                     var attrs = new("NSMutableDictionary")
                     _ = msg(attrs, "setObject:forKey:", msg(w, "font"), ns_string("NSFont"))
@@ -583,8 +603,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "setAlignment:", 0)  # a leading column's lines (or a table's cell) read from the leading edge, as on GTK
             var own = self.look.surface(node.name) if node.name != "" else -1
             if own >= 0 and self.look.surfaces[own].one_line:  # the look's one-line words: cut with an ellipsis where they don't fit
-                _ = msg(w, "setLineBreakMode:", 4)  # NSLineBreakByTruncatingTail
-                _ = msg(w, "setMaximumNumberOfLines:", 1)
+                cut_with_ellipsis(w)
                 _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
             elif node.max_w == 0 and node.w == 0 and not self.in_row(i):  # a column's label: one line, wrapping when squeezed
                 _ = msg(w, "setLineBreakMode:", 0)  # NSLineBreakByWordWrapping
@@ -1509,7 +1528,7 @@ struct AppKitHost[A: App](Movable):
         var layer = msg(w, "layer")
         _ = msg(layer, "setCornerRadius:", Float64(max(sf.radius_top, 0)))
         _ = msg(layer, "setBorderWidth:", Float64(0) if on else Float64(max(sf.outline_w, 1)) * 1.5)
-        _ = msg(layer, "setBorderColor:", msg(ns_color(sf.outline), "CGColor"))
+        _ = msg(layer, "setBorderColor:", msg(ns_rgba(sf.outline), "CGColor"))
         _ = msg(layer, "setBackgroundColor:", msg(self.accent() if on else msg(cls("NSColor"), "clearColor"), "CGColor"))
         var attrs = new("NSMutableDictionary")
         _ = msg(attrs, "setObject:forKey:", look_font(self.look.type.family, 700, Float64(sf.width) * 0.6, False), ns_string("NSFont"))
@@ -1576,19 +1595,19 @@ struct AppKitHost[A: App](Movable):
         _ = msg(w, "setBordered:", 0)
         _ = msg(w, "setWantsLayer:", 1)
         var layer = msg(w, "layer")
-        _ = msg(layer, "setBackgroundColor:", msg(ns_color(fill) if fill != 0 else msg(cls("NSColor"), "clearColor"), "CGColor"))
+        _ = msg(layer, "setBackgroundColor:", msg(ns_rgba(fill) if fill != 0 else msg(cls("NSColor"), "clearColor"), "CGColor"))
         if line != 0:
             _ = msg(layer, "setBorderWidth:", Float64(1))
-            _ = msg(layer, "setBorderColor:", msg(ns_color(line), "CGColor"))
+            _ = msg(layer, "setBorderColor:", msg(ns_rgba(line), "CGColor"))
         _ = msg(layer, "setCornerRadius:", Float64(min(radius, high // 2)))
         var attrs = new("NSMutableDictionary")
         _ = msg(attrs, "setObject:forKey:", look_font(family, weight, size, self.look.type.tabular), ns_string("NSFont"))
-        _ = msg(attrs, "setObject:forKey:", ns_color(ink), ns_string("NSColor"))
+        _ = msg(attrs, "setObject:forKey:", ns_rgba(ink), ns_string("NSColor"))
         if k >= 0 and self.look.surfaces[k].tracking != 0:  # (its letter spacing, as the web's: the brand's -.02em, D-509)
             _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", self.look.surfaces[k].tracking), ns_string("NSKern"))
         var said = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs)
         _ = msg(w, "setAttributedTitle:", said)
-        _ = msg(w, "setContentTintColor:", ns_color(ink))
+        _ = msg(w, "setContentTintColor:", ns_rgba(ink))
         var fit = msg[CGPoint](w, "fittingSize")
         var wraps = False  # (a role's words-only button with its line's height: its words wrap when squeezed, as the web's and GTK's, D-537)
         var line_h = Float64(0)
@@ -1703,10 +1722,10 @@ struct AppKitHost[A: App](Movable):
             constrain(line, "heightAnchor", Float64(1))
         if sf.outline != 0 and not sf.dashed:
             _ = msg(layer, "setBorderWidth:", Float64(sf.outline_w))
-            _ = msg(layer, "setBorderColor:", msg(ns_color(sf.outline), "CGColor"))
+            _ = msg(layer, "setBorderColor:", msg(ns_rgba(sf.outline), "CGColor"))
         elif sf.outline != 0:  # dashes: a shape layer whose path follows the view's size (dash_paths, after each layout)
             var shape = new("CAShapeLayer")
-            _ = msg(shape, "setStrokeColor:", msg(ns_color(sf.outline), "CGColor"))
+            _ = msg(shape, "setStrokeColor:", msg(ns_rgba(sf.outline), "CGColor"))
             _ = msg(shape, "setFillColor:", msg(msg(cls("NSColor"), "clearColor"), "CGColor"))
             _ = msg(shape, "setLineWidth:", Float64(sf.outline_w))
             var pattern = new("NSMutableArray")
@@ -2195,7 +2214,7 @@ struct AppKitHost[A: App](Movable):
                              sf.font_size if sf.font_size > 0 else msg[Float64](msg(w, "font"), "pointSize"), self.look.type.tabular)
         _ = msg(w, "setFont:", font)
         if sf.ink != 0:
-            _ = msg(w, "setTextColor:", ns_color(sf.ink))
+            _ = msg(w, "setTextColor:", ns_rgba(sf.ink))
         var attrs = new("NSMutableDictionary")
         _ = msg(attrs, "setObject:forKey:", font, ns_string("NSFont"))
         _ = msg(attrs, "setObject:forKey:", msg(w, "textColor"), ns_string("NSColor"))
@@ -2236,8 +2255,7 @@ struct AppKitHost[A: App](Movable):
         var kids = self.rt.shown.nodes[n].children.copy()
         var w = self.widgets[n]
         if self.rt.shown.nodes[n].kind == TEXT and w != 0 and (msg(w, "isKindOfClass:", cls("NSTextField")) & 0xFF) != 0:
-            _ = msg(w, "setLineBreakMode:", 4)  # NSLineBreakByTruncatingTail
-            _ = msg(w, "setMaximumNumberOfLines:", 1)
+            cut_with_ellipsis(w)
             _ = msg(w, "setContentCompressionResistancePriority:forOrientation:", Float32(490), 0)
             for k in range(len(self.wraps)):
                 if self.wraps[k] == w:
