@@ -48,9 +48,9 @@ def SpecRows(keys: List[String], values: List[String]) -> View:
 def DocLayout(outline: View, cells: View, aside: View, compact: Bool = False) -> View:
     """The outline, a rule, the cells (scrolling, taking the rest) and an aside side by side (roles doc-layout,
     doc-outline, doc-main, doc-aside: the side columns' widths and every column's insets); compact: the cells over the
-    aside, no outline (doc-layout-compact)."""
+    cells alone, no outline and no aside, as a narrow page folds both away (doc-layout-compact: the cells' insets)."""
     if compact:
-        return VStack(cells.copy(), aside.copy().fill(), spacing=SPACE_M).align(START).fill().tag("doc-layout-compact")
+        return VStack(cells.copy(), spacing=0).align(START).fill().tag("doc-layout-compact")
     return HStack(HStack(outline.copy(), spacing=0).align(START).tag("doc-outline"), Divider().fill(),
                   Scroll(HStack(cells.copy().grow(), spacing=0).align(START).fill().tag("doc-main"), height=0).grow(),
                   HStack(aside.copy().grow(), spacing=0).align(START).tag("doc-aside"), spacing=0).align(STRETCH).fill().grow().tag("doc-layout")

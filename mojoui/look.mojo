@@ -73,6 +73,8 @@ def surface_rule(s: Surface, web: Bool) -> String:
         out += ("height: " + px(s.height) + "; min-height: " + px(s.height) + "; ") if web else ("min-height: " + px(gtk_content_h(s, s.height)) + "; ")
     elif s.height == -2:  # (HEIGHT_AUTO)
         out += "height: auto; min-height: 0; " if web else "min-height: 0; "
+    if s.width == 0 and s.shrinks and web:  # (no set width: it gives way below its content when its row is short, what overflows cut)
+        out += "min-width: 0 !important; flex-shrink: 1 !important; overflow: hidden; "
     if s.width > 0:
         if web and s.shrinks:
             out += "width: " + px(s.width) + "; min-width: 0 !important; flex-shrink: 1 !important; "  # (over the inline size every host gets)
@@ -147,8 +149,8 @@ def text_rule(s: Surface, web: Bool = False, line: Float64 = 0) -> String:
         out += "line-height: " + ("normal" if s.line_height < 0 else line_px(s.line_height if s.line_height > 0 else s.font_size * line)) + "; "
     if web and s.breaks_words:  # (GTK: its labels wrap at any character, PANGO_WRAP_WORD_CHAR; the Mac: character wrapping)
         out += "overflow-wrap: anywhere; "
-    if web and s.one_line:  # (its words on one line too; GTK and the Mac cut them with an ellipsis: the hosts read one_line)
-        out += "white-space: nowrap; "
+    if web and s.one_line:  # (its words on one line too, cut with an ellipsis when squeezed, as GTK and the Mac cut them)
+        out += "white-space: nowrap; overflow: hidden; text-overflow: ellipsis; "
     if web and s.text_align > 0:
         out += "text-align: " + ("left" if s.text_align == 1 else ("center" if s.text_align == 2 else "right")) + "; "
     if s.ink != 0:

@@ -715,13 +715,20 @@ def extra_roles(p: Palette, mono: String) -> List[Surface]:
     (blade-notebook.css), a secret with its copy."""
     var out = List[Surface]()
     out.append(layout("shell", 0))
-    var sub = layout("sub-header", 10, 10, 18)  # .blade.embed > .bh: 10px 18px 0, 10 between, its line 12px mono, its tools 8 apart
-    sub.pad_bottom = 0
+    var sub = layout("sub-header", 10, 10, 18)  # .blade.embed > .bh: 10px 18px 0, 10 between, its line 12px mono, its tools 8 apart; one line
+    sub.pad_bottom, sub.one_line = 0, True
     out.append(sub.copy())
     sub.role, sub.pad_top, sub.pad_x = "sub-header-compact", 8, 12  # ≤ 760: 8px 12px 0
     out.append(sub^)
-    out.append(words_role("sub-header-text", 12, 0, p.ink2, mono, 0, -1))
-    out.append(layout("sub-header-tools", 8))
+    var st = words_role("sub-header-text", 12, 0, p.ink2, mono, 0, -1)  # .bh .s: nowrap, cut
+    st.one_line = True
+    out.append(st^)
+    var sts = layout("sub-header-tools", 8)  # .b-notebook .tools: min-width 0, one line
+    sts.one_line, sts.shrinks = True, True
+    out.append(sts^)
+    var ss = layout("sub-header-status")  # .kchip: overflow hidden, min-width 0 (cut on a phone)
+    ss.shrinks = True
+    out.append(ss^)
     var tr = layout("tool-row", 12)
     tr.scrolls_x = True  # (one line)
     out.append(tr^)
@@ -786,7 +793,9 @@ def extra_roles(p: Palette, mono: String) -> List[Surface]:
     sv.pad_top, sv.pad_bottom, sv.pad_x, sv.line_top, sv.breaks_words, sv.text_align = 4, 4, 0, p.line, True, START
     out.append(sv^)
     out.append(layout("doc-layout", 0))  # .nb-grid: 210 | 1fr | 300
-    out.append(layout("doc-layout-compact", 12))
+    var dlc = layout("doc-layout-compact", 0, 16, 12)  # .nb-main ≤ 720: 16px clamp(12px, 2vw, 24px) 60px, no outline, no side panels
+    dlc.pad_bottom = 60
+    out.append(dlc^)
     var dout = layout("doc-outline")  # 210 with its rule (the Divider)
     dout.width = 209
     out.append(dout^)
