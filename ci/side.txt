@@ -8,3 +8,14 @@ omxplorer|open||pick:Choose a file={ci}/small.csv;pause:2000;tap:Create table;pa
 omxplorer|settings||menu:File>Settings…;pause:2000
 omxplorer|sheet-ledger|skin=ledger|tap:Open the sample;pause:4000
 maccheck|start||pause:1500
+# goal 33 M7: the console on the fixture server (ci/run.sh starts scripts/console_fixture.py for these); steps = check.py M7_STEPS
+console|models||pause:2500
+console|overview||pause:1500;tap:qwen2.5-0.5b;pause:2500
+console|bench||pause:1500;tap:qwen2.5-0.5b;pause:800;tap:Benchmark;pause:2500
+console|logs||pause:1500;tap:qwen2.5-0.5b;pause:800;tap:Logs;pause:2500
+console|notebook||pause:1500;tap:qwen2.5-0.5b;pause:800;tap:Notebook;pause:2500
+console|add||pause:1500;tap:Add a model;pause:2500
+console|keys||pause:1500;tap:Keys;pause:2500
+console|gateway||pause:1500;tap:Gateway;pause:2500
+console|security||pause:1500;tap:Security;pause:2500
+console|settings||pause:1500;tap:Settings;pause:2500
