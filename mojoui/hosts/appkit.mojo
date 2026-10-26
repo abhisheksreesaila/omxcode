@@ -1296,6 +1296,19 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(w, "setCustomSpacing:afterView:", Float64(0), last)
                 _ = msg(w, "addArrangedSubview:", flexible_spacer(vertical))
             hold_insets(w)
+            if node.align_items == CENTER or node.align_items == 0:
+                # centred between its insets, not in its whole bounds: NSStackView centres at 260 ('NSStackView.Align'),
+                # so a header padded 10 above and 0 below had its words 5 pt high (D-517)
+                var ins = msg[CGRect](w, "edgeInsets")  # (top, left, bottom, right)
+                var shift = (ins.x - ins.width) / 2 if not vertical else (ins.y - ins.height) / 2
+                if shift != 0:
+                    var axis = "centerYAnchor" if not vertical else "centerXAnchor"
+                    var views = msg(w, "arrangedSubviews")
+                    for j in range(msg(views, "count")):
+                        var v = msg(views, "objectAtIndex:", j)
+                        var c = msg(msg(v, axis), "constraintEqualToAnchor:constant:", msg(w, axis), shift)
+                        _ = msg(c, "setPriority:", Float32(270))
+                        _ = msg(c, "setActive:", 1)
         if self.widgets[i] == 0:  # (some branches already stored an inner control)
             self.widgets[i] = w
         return self.apply_layout(i, w)
@@ -1630,6 +1643,7 @@ struct AppKitHost[A: App](Movable):
             for orientation in range(2):  # (the shape hugs its words and padding, as the label would)
                 hug(outer, Float32(750), orientation == 1)
             self.paint_surface(outer, chip_at, node.pad_v == 0 and node.pad_h == 0)
+            hold_insets(outer)  # (its padding, required: painted after hug() read no insets, so a caps head lost its 4 | 8, D-515)
             var r = max(self.look.surfaces[chip_at].radius_top, 0)
             if r >= 999:  # (a pill: half its height, which a layer can't say ahead of the layout)
                 _ = msg(msg(outer, "layer"), "setCornerRadius:", Float64(10))
@@ -2278,7 +2292,7 @@ struct AppKitHost[A: App](Movable):
                     var bar = msg(w, "verticalScroller")
                     var ins = msg[CGRect](w, "contentInsets")
                     flags += (" clip " + pts(clip.width) + "x" + pts(clip.height) + " bars " + String(msg(w, "scrollerStyle"))
-                              + " vbar " + (pts(msg[CGRect](bar, "frame").width) + ("" if (msg(bar, "isHidden") & 0xFF) == 0 else " hidden") if bar != 0 else "none")
+                              + " vbar " + (pts(msg[CGRect](bar, "frame").width) + ("" if (msg(bar, "isHidden") & 0xFF) == 0 else " unshown") if bar != 0 else "none")  # ("unshown": parity.py skips a line saying " hidden", a hidden view; a hidden bar isn't one, D-518)
                               + " insets " + pts(ins.x) + "," + pts(ins.y) + "," + pts(ins.width) + "," + pts(ins.height))
                 if n.kind == ICON or ((n.kind == BUTTON) and n.hint != ""):
                     var name = n.text if n.kind == ICON else n.hint
