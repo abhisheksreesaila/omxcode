@@ -1372,7 +1372,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", trail)
                 var side = "heightAnchor" if vertical else "widthAnchor"
                 _ = msg(msg(msg(trail, side), "constraintEqualToAnchor:", msg(lead, side)), "setActive:", 1)
-            elif (node.justify_items == START or node.justify_items == 0) and not grows and not spacers and not ended:  # (a row's default too, D-539)
+            elif (node.justify_items == START or (vertical and node.justify_items == 0)) and not grows and not spacers and not ended:
                 # its views from the start, the free room after them (a column's default too, as the web's flex-start):
                 # stretched taller than its views, a column stood one of them as tall as the rest (an overview panel's
                 # foot 133 high for 15, D-514); no spacing before that room
@@ -1384,17 +1384,13 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(w, "setCustomSpacing:afterView:", Float64(0), last)
                 var room = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", room)
-                if not vertical:  # (the room after a row's views is what's left once they have their own width, never
-                    # taken from them: none at 490, over what they prefer (480) and a role button's 470 resistance, under
-                    # a stretched row's required width, as CSS's free space after flex items: filter chips 940 for 220;
-                    # at 251 a wrapping chapter gave the room 12 pt, a dot's row took a label's, D-539)
+                if not vertical and not (node.fills or (i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].align_items == STRETCH)):
+                    # (a row nothing stretches has no free room: none at 251, over its column's 250 leading pins, so the row
+                    # is its views wide, as a web flex row in a shrink-to-fit place: filter chips 940 for 220, D-539. Tried
+                    # and not kept: a room after every row's views (a row's default justify too) at 251 or 485 + depth:
+                    # labels hug at 250, so words took the room; runs 40340434761, 40343522058)
                     var none = msg(msg(room, "widthAnchor"), "constraintEqualToConstant:", Float64(0))  # (a spacer has no size of its own to hug)
-                    var depth = 0  # (a row inside a row keeps its room more firmly than the row around it, so the outer one
-                    var up = self.parents[i] if i < len(self.parents) else -1  # takes the room: two at one priority were a tie)
-                    while up >= 0 and depth < 9:  # (at most 494: under the 495 that holds a scroll view's content to its width)
-                        depth += 1
-                        up = self.parents[up] if up < len(self.parents) else -1
-                    _ = msg(none, "setPriority:", Float32(485 + depth))
+                    _ = msg(none, "setPriority:", Float32(251))
                     _ = msg(none, "setActive:", 1)
             hold_insets(w)
             if node.align_items == CENTER or node.align_items == 0:
