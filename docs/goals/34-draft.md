@@ -30,8 +30,8 @@ webviews (later); pushing anything but the mac-test branch.
 A webview widget inside a native app won't look native; each widget adds a webview's memory on GTK and the Mac; the
 agent sees only what the widget reports; each library needs testing on each host.
 
-## Next after this (goal 35, proposed)
-Mojo 1.2, then a native Mojo web host on flare (ehsanmok/flare: HTTP server, WebSocket, SSE, TLS): one binary with no
-Python, no Mojo↔Python bridge per update, server push instead of a held /wait request, and flare behind `mojoui.http`
-for HTTPS. Cons: the 1.2 upgrade touches every example and check; Starlette's maturity traded for a younger server;
-web.py's ~1,200 lines rewritten (the browser side stays).
+## Next after this (goal 35, proposed): measure the web host, then decide
+FastHTML is the web host and works well (owner, 2026-10-25: "are we not using FastHTML as a host already and shining
+with it?"). Goal 35 measures it first: time per update, memory per user, startup. A native Mojo host on flare
+(ehsanmok/flare) is built only if those numbers show a real cost, or deployment (a Python environment beside the app)
+becomes a real pain. Mojo 1.2 comes when flare is needed for HTTPS in `mojoui.http`, either way.
