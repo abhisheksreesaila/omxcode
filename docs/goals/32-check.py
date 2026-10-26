@@ -30,17 +30,18 @@ g20 = g30.g20
 run, BUILD = g20.run, g20.BUILD
 GOLDEN = ROOT / "docs" / "goals" / "32" / "golden"
 _shot = {}
+GOAL32_APPS = ("omxplorer", "maccheck")  # goal 32's screens; side.txt's console lines are goal 33's (they need its fixture server)
 
 
 def shoot():
     """GTK and the web shot once per check run (every milestone reads the same pictures)."""
     if "problems" not in _shot:
-        _shot["problems"] = side.shoot_all()
+        _shot["problems"] = side.shoot_all(only=GOAL32_APPS)
     return _shot["problems"]
 
 
 def screens():
-    return [(a, s) for a, s, _, _ in side.screens()]
+    return [(a, s) for a, s, _, _ in side.screens() if a in GOAL32_APPS]
 
 
 def rows_for(app, screen):
