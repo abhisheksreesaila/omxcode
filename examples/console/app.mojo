@@ -8,11 +8,12 @@
 
 from mojoui.view import View, Text, Button, VStack, HStack, Scroll, Divider, Spacer, CENTER, START
 from mojoui.app import App, Event
-from mojoui.http import Request
+from mojoui.http import Request, uri_component
 from mojoui.effects import Every
 from mojoui.canvas import Surface
 from mojoui.theme import Theme, mix
-from mojoui.route import Route, Place, parse_route, route_for
+from mojoui.route import Route
+from places import Place, parse_route, route_for
 from mojoui.overlays import Clipboard
 from mojoui.confirm import TwoStep
 from mojoui.sparkline import Sparkline, BarTrack
@@ -22,11 +23,11 @@ from mojoui.shell import Shell, PageCard, is_compact
 from mojoui.panel import CardNote
 from mojoui.json import json_string
 from themes.omxqua import omxqua
-from api import Api
-from data import Store, read_models, read_metrics, read_series, read_info, read_system, read_labels, read_pulls, read_ports, round1
+from api import Api, chat_curl
+from data import Store, read_models, read_metrics, read_series, read_info, read_system, read_labels, read_pulls, read_ports
 from topbar import top_bar
 from home import Library, home_view, visible, label_models, names_json, bulk_state
-from modelpage import model_header, overview_view, tab_index, curl_for, fit_of, TAB_KEYS
+from modelpage import model_header, overview_view, tab_index, fit_of, TAB_KEYS
 from bench import Bench, bench_view, bench_bars
 from logs import Logs, logs_view
 from notebook import Notebook, notebook_view
@@ -171,14 +172,14 @@ struct Main(App):
             return
         if p.tab == "logs":
             self.logs = Logs()
-            self.api.get(GOT_LOG, "/admin/models/" + p.model + "/log")
+            self.api.get(GOT_LOG, "/admin/models/" + uri_component(p.model) + "/log")
         elif p.tab == "benchmark":
             self.api.get(GOT_BENCH, "/admin/bench")
         elif p.tab == "notebook":
             if self.nb.model != p.model:
                 self.nb = Notebook()
                 self.nb.model = p.model
-                self.api.get(GOT_LEARN, "/admin/learn/" + p.model)
+                self.api.get(GOT_LEARN, "/admin/learn/" + uri_component(p.model))
             self.nb.jupyter = False
 
     def go(mut self, path: String):
@@ -196,7 +197,7 @@ struct Main(App):
         if len(names) == 0:
             return
         label_models(self.store, names, label, add)
-        self.api.post(GOT_WRITE, "/admin/labels/" + label + ("/add" if add else "/remove"), names_json(names))
+        self.api.post(GOT_WRITE, "/admin/labels/" + uri_component(label) + ("/add" if add else "/remove"), names_json(names))
 
     # ---- update ----
 
@@ -217,7 +218,7 @@ struct Main(App):
         elif m == POLL_BENCH:
             self.api.get(GOT_BENCH, "/admin/bench")
         elif m == POLL_LOG and p.page == "model":
-            self.api.get(GOT_LOG, "/admin/models/" + p.model + "/log")
+            self.api.get(GOT_LOG, "/admin/models/" + uri_component(p.model) + "/log")
         elif m == DISARM:
             self.confirm.disarm()
         elif ADD_FIRST <= m <= ADD_LAST:
@@ -308,25 +309,25 @@ struct Main(App):
         elif m == REMOVE_TICKED:
             if self.confirm.tap(CONFIRM_REMOVE_TICKED):
                 for n in self.lib.ticked:
-                    self.api.send(GOT_WRITE, "DELETE", "/admin/models/" + n)
+                    self.api.send(GOT_WRITE, "DELETE", "/admin/models/" + uri_component(n))
                 self.lib.ticked = List[String]()
         elif TAB <= m < TAB + 4 and p.page == "model":
             self.go(route_for(Place("model", p.model, materialize[TAB_KEYS]()[m - TAB])))
         elif m == CMD_STOP and p.page == "model":
-            self.api.post(GOT_WRITE, "/admin/models/" + p.model + "/stop")
+            self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/stop")
         elif m == CMD_START and p.page == "model":
-            self.api.post(GOT_WRITE, "/admin/models/" + p.model + "/load")
+            self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/load")
         elif m == CMD_RESTART and p.page == "model":
-            self.api.post(GOT_WRITE, "/admin/models/" + p.model + "/stop", id=1)  # (then load, when the stop is answered)
+            self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/stop", id=1)  # (then load, when the stop is answered)
         elif m == CMD_COPY:
             self.copy(self.store.lan_endpoint if self.store.lan_endpoint != "" else self.store.endpoint_now())
         elif m == CMD_REMOVE and p.page == "model":
             if self.confirm.tap(CONFIRM_REMOVE):
-                self.api.send(GOT_WRITE, "DELETE", "/admin/models/" + p.model)
+                self.api.send(GOT_WRITE, "DELETE", "/admin/models/" + uri_component(p.model))
                 self.go("/")
         elif m == COPY_CURL and p.page == "model":
             self.copies += 1
-            self.copy(curl_for(self.store.endpoint_now(), p.model))
+            self.copy(chat_curl(self.store.endpoint_now(), p.model, "hi"))
         elif REMOVE_LABEL <= m < REMOVE_LABEL + 20 and p.page == "model":
             var k = self.store.model(p.model)
             if k >= 0 and m - REMOVE_LABEL < len(self.store.models[k].labels):
@@ -339,7 +340,7 @@ struct Main(App):
         elif m == LOG_FOLLOW:
             self.logs.follow = not self.logs.follow
             if self.logs.follow and p.page == "model":
-                self.api.get(GOT_LOG, "/admin/models/" + p.model + "/log")
+                self.api.get(GOT_LOG, "/admin/models/" + uri_component(p.model) + "/log")
         elif m == LOG_COPY:
             self.copy(self.logs.visible_text())
         elif m == LOG_FILTER:
@@ -352,7 +353,7 @@ struct Main(App):
             elif not self.nb.starting:
                 self.nb.starting = True
                 self.nb.problem = ""
-                self.api.post(GOT_OPEN, "/admin/learn/" + p.model + "/open")
+                self.api.post(GOT_OPEN, "/admin/learn/" + uri_component(p.model) + "/open")
 
     def reply(mut self, m: Int, event: Event, failed: Bool):
         var p = self.place()
@@ -399,7 +400,7 @@ struct Main(App):
                 read_ports(event.text, self.store)
             elif m == GOT_WRITE:
                 if event.id == 1 and p.page == "model":  # Restart: the stop is done, now the load
-                    self.api.post(GOT_WRITE, "/admin/models/" + p.model + "/load")
+                    self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/load")
                 self.poll_core()
                 self.api.get(GOT_LABELS, "/admin/labels")
             elif m == GOT_BENCH:

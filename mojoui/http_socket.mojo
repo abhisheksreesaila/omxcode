@@ -6,7 +6,7 @@
 from std.ffi import external_call, c_int, get_errno, ErrNo
 from std.sys import CompilationTarget, is_defined
 from std.os import getenv
-from mojoui.http import Request, Response, Transport, Url, TLS_NEEDED
+from mojoui.http import Request, Response, Transport, Url, TLS_NEEDED, request_problem, has_control
 from mojoui.clock import now_ns
 
 comptime APPLE = not CompilationTarget.is_linux()  # (BSD sockets: sin_len, other constants)
@@ -151,9 +151,9 @@ struct SocketTransport(Transport):
             return Response.failed(String(e))
         if url.scheme == "https":
             return Response.failed(TLS_NEEDED)
-        for v in req.values:
-            if v.find("\r") >= 0 or v.find("\n") >= 0:
-                return Response.failed("a header's value holds a line break")
+        var problem = request_problem(req)
+        if problem != "":
+            return Response.failed(problem)
         var deadline = now_ns() + max(req.timeout_ms, 1) * 1_000_000
         var where = url.host + ":" + String(url.port)
         var addr: UInt32
@@ -207,8 +207,8 @@ struct SocketTransport(Transport):
             head += req.names[i] + ": " + req.values[i] + "\r\n"
         for i in range(len(req.env_names)):
             var v = getenv(req.env_vars[i])
-            if v.find("\r") >= 0 or v.find("\n") >= 0:
-                return Response.failed("$" + req.env_vars[i] + " holds a line break")
+            if has_control(v):
+                return Response.failed("$" + req.env_vars[i] + " holds a control character")
             if v.byte_length() > 0:
                 head += req.env_names[i] + ": " + v + "\r\n"
         if req.body.byte_length() > 0 or req.method == "POST" or req.method == "PUT" or req.method == "PATCH":

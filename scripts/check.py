@@ -162,9 +162,17 @@ def m1():
         problems.append("the server never got X-Test-Key with $HTTP_TEST_SECRET's value")
     if not any(r["method"] == "POST" and r["headers"].get("content-type") == "application/json" for r in seen):
         problems.append("the POST didn't say Content-Type: application/json")
+    want("SPLITS", lambda v: v == "ok", "targets, methods and header names that would split the request are refused (D-570)")
+    forged = [r for r in seen if "evil" in r["path"].lower() or "x-evil" in r["headers"] or "evil" in r["method"].lower()]
+    if forged:
+        problems.append(f"the server got a request the transport should have refused: {forged[0]['method']} {forged[0]['path']!r}")
     if problems:
         return False, "; ".join(problems)
-    # examples/httpcheck: frames keep coming on GTK and the web while one reply takes 2 s, then the reply shows
+    # examples/httpcheck: frames keep coming on GTK and the web while one reply takes 2 s, then the reply shows (its strip
+    # is mojoui.activity's, with its own test, D-575)
+    err = g30.g20.mojo_test("tests/test_activity.mojo", "activity: ok", "test_activity")
+    if err:
+        return False, err[:400]
     err = build("httpcheck", "linux", "web", "mac")
     if err:
         return False, err
@@ -622,36 +630,95 @@ def m4_state(out, host):
     return problems
 
 
-# The app is a showcase that composes the framework (owner 2026-10-25, D-413): examples/console sets no sizes, spacing,
-# padding, colours or fonts of its own and reaches no host or drawing module; the look is the theme's, the parts mojoui's.
+# The app is a showcase that composes the framework (owner 2026-10-25, D-413): the goal's example apps (the console, the
+# sampler, httpcheck) set no sizes, spacing, gaps, margins, columns, padding, colours or fonts of their own and reach no
+# host or drawing module; the look is the theme's, the parts mojoui's. Stricter since the review (D-575): every file
+# under each folder, docstrings and strings blanked rather than lines skipped, only real comments cut.
+APP_LINT_FOLDERS = ("examples/console", "examples/consolekit", "examples/httpcheck")
 APP_LINT = [
-    (r"\.(padding|width|height|min_width|max_width)\(", "sizes or pads a view itself"),
-    (r"\bspacing=\s*[1-9]", "spaces a stack in points (use the theme's SPACE_… tokens or a component)"),
-    (r"\bheight=\s*[1-9]", "gives a view a height in points"),
+    (r"\.(padding|width|height|min_width|max_width|min_height|max_height|margin\w*|gap|spacing|columns)\(", "sizes, spaces or pads a view itself"),
+    (r"\.size\([^()]*,", "sizes a view or a chart itself (.size(w, h); a Json's j.size(node) is a count)"),
+    (r"(?<![.\w])(spacing|gap|columns|width|height|size|margin\w*|padding|min_\w+|max_\w+)\s*=(?!=)\s*-?\d*[1-9]",
+     "gives a view a size, gap, margin or column count in numbers (use the theme's tokens or a component)"),
+    (r"\bmargin", "sets a margin"),
     (r"0x[0-9A-Fa-f]{6,8}\b|\bhx\(|\brgba?\(|\"#[0-9a-fA-F]{3,8}\"", "writes a colour"),
     (r"\"(Geist|Inter|JetBrains)|\bfont\s*=", "names a font"),
     (r"mojoui\.hosts|mojoui\.draw\b", "imports a host or drawing module"),
 ]
 
 
-def app_lint(folder="examples/console"):
-    """examples/console composes mojoui and its theme only: [problems], one per line that breaks a rule (comments aside)."""
+def code_lines(text):
+    """A Mojo file's lines as code: comments cut, every string's words blanked ("" kept, so a call still reads as one),
+    triple-quoted strings across lines too; a string that is a colour or a font name stays (the lint looks for those)."""
+    import re
+    keep = re.compile(r'"(#[0-9a-fA-F]{3,8}|(Geist|Inter|JetBrains)[^"]*)"')
+    out, cur, i, n = [], [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            out.append("".join(cur))
+            cur = []
+            i += 1
+        elif c == "#":
+            while i < n and text[i] != "\n":
+                i += 1
+        elif text.startswith('"""', i) or text.startswith("'''", i):
+            q = text[i:i + 3]
+            j = text.find(q, i + 3)
+            j = n if j < 0 else j + 3
+            cur.append('""')
+            for _ in range(text.count("\n", i, j)):  # (its lines are words, not code: each stays a line, empty)
+                out.append("".join(cur))
+                cur = []
+            i = j
+        elif c in "\"'":
+            j = i + 1
+            while j < n and text[j] != c and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            lit = text[i:j + 1]
+            cur.append(lit if c == '"' and keep.fullmatch(lit) else '""')
+            i = j + 1
+        else:
+            cur.append(c)
+            i += 1
+    out.append("".join(cur))
+    return out
+
+
+def app_lint(folders=APP_LINT_FOLDERS):
+    """The goal's example apps compose mojoui and its theme only: [problems], one per line that breaks a rule (comments
+    and strings aside), over every .mojo file under each folder."""
     import re
     out = []
-    for f in sorted((ROOT / folder).glob("*.mojo")):
-        for n, line in enumerate(f.read_text().splitlines(), 1):
-            if line.lstrip().startswith(("\"\"\"", "'")):
-                continue
-            code = ""  # (the line with its comment cut and its strings blanked, but for a colour or a font name)
-            for m in re.finditer(r'"[^"]*"|#.*$|[^"#]+', line):
-                t = m.group(0)
-                if t.startswith("#"):
-                    break
-                code += t if not t.startswith('"') or re.fullmatch(r'"(#[0-9a-fA-F]{3,8}|(Geist|Inter|JetBrains)[^"]*)"', t) else '""'
+    for folder in folders:
+        files = sorted((ROOT / folder).rglob("*.mojo"))
+        if not files:
+            out.append(f"{folder}: no .mojo files to lint")
+        for f in files:
+            raw = f.read_text().splitlines()
+            for n, code in enumerate(code_lines(f.read_text()), 1):
+                for pat, why in APP_LINT:
+                    if re.search(pat, code):
+                        out.append(f"{f.relative_to(ROOT)}:{n} {why}: {(raw[n - 1] if n <= len(raw) else code).strip()[:90]}")
+                        break
+    return out
 
-            for pat, why in APP_LINT:
-                if re.search(pat, code):
-                    out.append(f"{f.relative_to(ROOT)}:{n} {why}: {line.strip()[:90]}")
+LINT_HITS = ['x.padding(16)', 'VStack(a, spacing=8)', 'Grid(cells, columns=3)', 'Skeleton(width=320)', 'LogView(l, height=180)',
+             'x.margin_top(4)', 'Row(a, gap=6)', 'chart.size(400, 300)', 'Box(min_w=12)', '"words" + x.width(5)', 'c = rgba(1, 2, 3)',
+             'v.fill(0xFF0000FF)', 'Text("a", font="Geist")', 'from mojoui.hosts.gtk import x']
+LINT_MISSES = ['Scroll(body, height=0)', 'for k in range(j.size(0)):', 'self.width = 1440', '"""a doc: x.padding(16), spacing=8"""',
+               'x  # .width(3) in a comment', 'Text("spacing=8")']
+
+
+def lint_selftest():
+    """The lint flags what it should and only that (an audit that finds nothing proves only what it read): [problems]."""
+    import re
+    out = []
+    for line in LINT_HITS + LINT_MISSES:
+        code = code_lines(line)[0]
+        hit = any(re.search(p, code) for p, _ in APP_LINT)
+        if hit != (line in LINT_HITS):
+            out.append(f"{line!r} {'not flagged' if line in LINT_HITS else 'flagged'}")
     return out
 
 
@@ -679,6 +746,7 @@ def m4():
     roles, found = g32.lint()
     problems += [f"lint: {p}" for p in found]
     problems += [f"app lint: {p}" for p in app_lint()]
+    problems += [f"app lint misses: {p}" for p in lint_selftest()]
     c = g30.run([sys.executable, "scripts/components.py", "--check"])
     if c.returncode != 0:
         problems.append(c.stdout.strip()[-200:])
@@ -798,6 +866,8 @@ def styles_for(log, probes):
 CONSOLE = "console"
 CONSOLE_MODEL = "qwen2.5-0.5b"
 M5_SCREENS = ["models", "overview", "bench", "logs", "notebook"]
+FORGED_LINK = "#/models/x%0d%0aX-Forged:%201/logs"  # (a name with a line break and a header in it, as a link would carry it)
+FORGED_TARGET = "/admin/models/x%0D%0AX-Forged%3A%201/log"
 CONSOLE_URL_ENV, CONSOLE_KEY_ENV, OPENER_ENV = "MXC_URL", "MXC_ADMIN_KEY", "MOJOUI_OPENER"
 M5_NAMES = ["qwen2.5-0.5b", "all-minilm-l6", "llama3.2-1b"]
 M5_TOP = ["omxconsole", "Pulling helper-7b", "35%"]  # the top bar on every screen: brand, the Beacon (pulls.json: helper-7b at 35.4 %)
@@ -949,6 +1019,27 @@ def drive_port():
     return drive.free_port()
 
 
+def forged_link(token):
+    """A crafted deep link forges nothing (reviewer, D-570): a model name holding an escaped line break and a header goes
+    into the log's path escaped (uri_component), and the daemon gets no extra header line. None, or the problem."""
+    import console_fixture
+    fx = console_fixture.Fixtures()
+    server, url = console_fixture.serve(fx)
+    try:
+        r, out = console_web("pause:2500", console_env(url, token), path=FORGED_LINK)
+    finally:
+        server.shutdown()
+    if r is None:
+        return f"web forged link: {out}"
+    forged = [x for x in fx.log if "x-forged" in x.get("names", []) or any(c in x["target"] for c in "\r\n\t ")]
+    logs = [x["target"] for x in fx.log if x["target"].startswith("/admin/models/x")]
+    if forged:
+        return f"web forged link: the daemon got a forged header or path: {forged[0]}"
+    if logs[:1] != [FORGED_TARGET]:
+        return f"web forged link: the log's request went to {logs[:2]}, not {FORGED_TARGET} (the name escaped)"
+    return None
+
+
 def m5():
     """My models and the model page: examples/console runs against the fixture server on GTK and on the web: the model
     list shows the three recorded models with their numbers in a table and as cards (List/Cards); ticking two models and
@@ -979,8 +1070,15 @@ def m5():
                       (f'"{CONSOLE_URL_ENV}"', f"the base URL from ${CONSOLE_URL_ENV}"), ("Every(", "App.every polls")]:
         if need not in src:
             problems.append(f"examples/console has no {why} ({need})")
-    for name in ("dragdrop", "embed", "shell", "header", "sidebar", "panel", "marks", "words", "buttons", "lists", "document"):  # the components M5 added to mojoui/, each with its own test (pagekit split into generic modules by M7, D-414)
+    for name in ("dragdrop", "embed", "shell", "header", "sidebar", "panel", "marks", "words", "buttons", "lists", "document", "textformat"):  # the components M5 added to mojoui/, each with its own test (pagekit split into generic modules by M7, D-414)
         err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}")
+        if err:
+            problems.append(err[:300])
+    wl = g30.run([sys.executable, "tests/test_web_links.py"], timeout=120)  # (the web host follows and frames http(s) only, D-576)
+    if wl.returncode != 0 or "web_links: ok" not in wl.stdout:
+        problems.append("tests/test_web_links.py fails: " + (wl.stdout + wl.stderr)[-300:])
+    for name in ("console_places", "console_api"):  # (the console's route table on mojoui's Router, D-571; its one curl, D-574)
+        err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}", "examples/console")
         if err:
             problems.append(err[:300])
     if problems:
@@ -1131,6 +1229,11 @@ def m5():
                     if got != [want_url["url"]]:
                         problems.append(f"gtk notebook: Run in Jupyter opened {got}, not the browser at {want_url['url']} (${OPENER_ENV})")
         notes.append(host)
+    err = forged_link(token)
+    if err:
+        problems.append(err)
+    else:
+        notes.append("a forged deep link sends nothing forged")
     if problems:
         return False, "; ".join(dict.fromkeys(problems[:14]))
     try:

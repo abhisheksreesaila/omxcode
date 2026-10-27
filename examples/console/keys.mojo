@@ -7,6 +7,7 @@ from mojoui.view import View, Text, Button, TextField, VStack, HStack, Spacer, I
 from mojoui.app import Event
 from mojoui.effects import Every
 from mojoui.json import Json, json_string
+from mojoui.http import uri_component
 from mojoui.table import Table
 from mojoui.lists import SideScroll
 from mojoui.clock import wall_seconds
@@ -19,8 +20,9 @@ from mojoui.copy import SecretField
 from mojoui.fields import ShortField
 from mojoui.feedback import EmptyState
 from api import Api
-from data import date_time, real_or
+from data import real_or
 from msgs import *
+from mojoui.numformat import utc_date_time
 
 comptime ROTATE = 0  # the armed action
 comptime REVOKE = 1
@@ -159,13 +161,13 @@ struct KeysPage(Copyable, Movable):
             if k < len(self.rows):
                 var app = self.rows[k].app.copy()
                 if self.tap_twice(app, ROTATE):
-                    api.post(KEYS_GOT_ROTATE, "/admin/keys/" + app + "/rotate")
+                    api.post(KEYS_GOT_ROTATE, "/admin/keys/" + uri_component(app) + "/rotate")
         elif KEYS_REVOKE <= m < KEYS_GOT_LIST:
             var k = m - KEYS_REVOKE
             if k < len(self.rows) and not self.rows[k].revoked:
                 var app = self.rows[k].app.copy()
                 if self.tap_twice(app, REVOKE):
-                    api.send(KEYS_GOT_REVOKE, "DELETE", "/admin/keys/" + app)
+                    api.send(KEYS_GOT_REVOKE, "DELETE", "/admin/keys/" + uri_component(app))
         elif m == KEYS_GOT_LIST:
             if failed:
                 self.error = why
@@ -254,7 +256,7 @@ def keys_view(kp: KeysPage, phone: Bool) -> View:
             var active = not r.revoked
             cells.append(CellText(r.app, mono=True, strong=True))
             cells.append(CellText(r.prefix + "…", mono=True, quiet=True))
-            cells.append(CellText(date_time(r.created_at) if r.created_at > 0 else String("—"), quiet=True))
+            cells.append(CellText(utc_date_time(r.created_at) if r.created_at > 0 else String("—"), quiet=True))
             cells.append(CellText(ago(r.last_used_at, now), quiet=True))
             cells.append(StatusMark("active" if active else "revoked", GOOD if active else QUIET))
             var rot = kp.is_armed(r.app, ROTATE)

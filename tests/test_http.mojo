@@ -118,7 +118,37 @@ def main() raises:
         assert_true(failed, "refuses " + bad)
     # the transport on its own, and a header that would split the request
     assert_equal(SocketTransport.send(Request.get(0, "https://example.com/")).error, TLS_NEEDED)
-    assert_true(SocketTransport.send(Request.get(0, getenv("HTTP_TEST_URL") + "json").header("X-Bad", "a\r\nX-Evil: 1")).error.find("line break") >= 0)
+    assert_true(SocketTransport.send(Request.get(0, getenv("HTTP_TEST_URL") + "json").header("X-Bad", "a\r\nX-Evil: 1")).error.find("control character") >= 0)
+    # nothing that would split the request line or the headers is sent (reviewer, D-570): a target with a space or a
+    # control character, a method or a header name that isn't an HTTP token, a host that isn't a host name. Each comes
+    # back as an error and never reaches the server (scripts/check.py M1 reads the server's log: no "evil" arrived).
+    var base = getenv("HTTP_TEST_URL")
+    for bad in [base + "evil x", base + "evil\r\nX-Evil: 1", base + "evil\tx", base + "evil\x7f", "http://evil\r\nX-Evil/", "http://ev il/"]:
+        var failed = False
+        try:
+            _ = Url.parse(bad)
+        except:
+            failed = True
+        assert_true(failed, "Url.parse refuses a target or host with a space or a control character")
+        var r = SocketTransport.send(Request.get(0, bad))
+        assert_equal(r.status, 0)
+        assert_true(r.error.find("URL") >= 0, "the transport says why: " + r.error)
+    for method in ["GET /evil HTTP/1.1\r\nX-Evil: 1\r\n\r\nGET", "GET /evil", "", "G\nET", "GÉT"]:
+        var r = SocketTransport.send(Request(0, method, base + "evil"))
+        assert_equal(r.status, 0)
+        assert_true(r.error.find("method") >= 0, "a method that isn't a token: " + r.error)
+    for name in ["X-Evil: 1\r\nX-A", "X Evil", "", "X-Evil:", "X-\x01"]:
+        var r = SocketTransport.send(Request.get(0, base + "evil").header(name, "1"))
+        assert_true(r.status == 0 and r.error.find("header name") >= 0, "a header name that isn't a token: " + r.error)
+        var e = SocketTransport.send(Request.get(0, base + "evil").header_from_env(name, "HTTP_TEST_SECRET"))
+        assert_true(e.status == 0 and e.error.find("header name") >= 0, "an env header's name that isn't a token: " + e.error)
+    for value in ["a\x01b", "a\x7fb", "a\rb", "a\nb", "a\x00b"]:
+        var r = SocketTransport.send(Request.get(0, base + "evil").header("X-Evil", value))
+        assert_true(r.status == 0 and r.error.find("control character") >= 0, "a header value with a control character: " + r.error)
+    var tabbed = SocketTransport.send(Request.get(0, base + "header?name=X-Tab").header("X-Tab", "a\tb c"))  # (a tab inside a value is allowed)
+    assert_equal(tabbed.status, 200)
+    assert_equal(tabbed.text(), "a\tb c")
+    print("SPLITS: ok")
     # through the runtime: one update asks for every case; it returns at once, the replies come later
     var rt = Runtime(Probe())
     assert_equal(rt.wake_in(0), -1)

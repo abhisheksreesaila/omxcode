@@ -27,8 +27,10 @@ from mojoui.words import QuietText, WarnLine
 from mojoui.lists import PageColumn, MainAside
 from mojoui.skeleton import SkeletonList
 from mojoui.shell import PageCard
-from data import fmt
+
+from api import chat_curl
 from msgs import *
+from mojoui.numformat import en_number
 
 comptime DEFAULT_SUB = "Search the MAX catalog and Hugging Face · every result is checked against this machine's memory"
 comptime ORDER: List[String] = ["check", "fetch", "compile", "serve", "smoke"]
@@ -43,7 +45,7 @@ comptime PORT_NOTE = ("“Port it” runs Claude Code with Modular’s import-mo
 
 def trim1(n: Float64) -> String:
     """String(Number(n.toFixed(1))): 24.0 → "24", 14.94 → "14.9"."""
-    return fmt(n, 1).replace(",", "")
+    return en_number(n, 1).replace(",", "")
 
 
 def size_text(gb: Float64) -> String:
@@ -99,12 +101,6 @@ def twin(kind: String, mref: String) -> String:
     if kind == "ps":
         return "mxc ps"
     return ""
-
-
-def curl_for(endpoint: String, name: String) -> String:
-    """blade-add.js curlFor: the chat completion call, the key from $MXC_API_KEY."""
-    return ("curl " + endpoint + "/chat/completions \\\n  -H \"Authorization: Bearer $MXC_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n"
-            + "  -d '{\"model\": \"" + name + "\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]}'")
 
 
 def joined(parts: List[String]) -> String:
@@ -664,7 +660,7 @@ def find_view(a: Add, phone: Bool) -> View:
 def ready_card(a: Add, name: String, endpoint: String) -> View:
     return Card([CardHead(name + " is serving.", tail=[Badge("ready · localhost", BADGE_OK, dot=True)]),
                  CardBody([CopyRow("local", endpoint, ADD_COPY_EP, "Copied" if a.copied_ep else "Copy"),
-                           CodeBlock(curl_for(endpoint, name), on_copy=ADD_COPY_CURL, copies=a.copies, copied=a.copies > 0, title="Copy curl").fill(),
+                           CodeBlock(chat_curl(endpoint, name, "Hello", spaced=True), on_copy=ADD_COPY_CURL, copies=a.copies, copied=a.copies > 0, title="Copy curl").fill(),
                            QuietText("It is on localhost only. Make it secure to reach it from your phone or another machine with HTTPS and an API key."),
                            ButtonRow([SmallButton("Open", ADD_OPEN, "chevron-right", FILL), SmallButton("Make it secure", ADD_SECURE, "lock"),
                                       SmallButton("Add another", ADD_ANOTHER, "plus", TEXT)])]),

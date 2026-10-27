@@ -195,30 +195,89 @@ struct Url(Copyable, Movable):
             scheme = "https"
             rest = String(url[byte = 8 :])
         else:
-            raise Error("not an http:// or https:// URL: " + url)
+            raise Error("not an http:// or https:// URL: " + shown(url))
         var slash = rest.find("/")
         var authority = rest if slash < 0 else String(rest[byte = : slash])
         var target = String("/") if slash < 0 else String(rest[byte = slash :])
         var port = 80 if scheme == "http" else 443
         var host = authority
         if authority.startswith("["):
-            raise Error("IPv6 addresses aren't supported yet: " + url)
+            raise Error("IPv6 addresses aren't supported yet: " + shown(url))
         var colon = authority.rfind(":")
         if colon >= 0:
             host = String(authority[byte = : colon])
             var digits = String(authority[byte = colon + 1 :])
             if digits.byte_length() == 0 or digits.byte_length() > 5:
-                raise Error("a bad port in " + url)
+                raise Error("a bad port in " + shown(url))
             port = 0
             for b in digits.as_bytes():
                 if b < 48 or b > 57:
-                    raise Error("a bad port in " + url)
+                    raise Error("a bad port in " + shown(url))
                 port = port * 10 + Int(b) - 48
             if port == 0 or port > 65535:
-                raise Error("a bad port in " + url)
+                raise Error("a bad port in " + shown(url))
         if host.byte_length() == 0:
-            raise Error("no host in " + url)
+            raise Error("no host in " + shown(url))
+        for b in host.as_bytes():  # (a host name or an IPv4 address: it goes into the Host header)
+            var c = Int(b)
+            if not ((c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 45 or c == 46 or c == 95):
+                raise Error("a host that isn't a host name in the URL (" + shown(host) + ")")
+        for b in target.as_bytes():  # (the request line: printable ASCII, no spaces; escape the rest with uri_component)
+            if Int(b) <= 32 or Int(b) >= 127:
+                raise Error("a space or a control character in the URL's path (" + shown(target) + "): escape it (uri_component)")
         return Url(scheme, host, port, target)
+
+
+def shown(s: String) -> String:
+    """`s` for an error message: control characters and non-ASCII bytes as \\xNN (a message never splits a line)."""
+    var hexd = String("0123456789abcdef")
+    var out = String("")
+    for b in s.as_bytes():
+        var c = Int(b)
+        if c >= 32 and c < 127:
+            out += chr(c)
+        else:
+            out += "\\x" + String(hexd[byte = c // 16]) + String(hexd[byte = c % 16])
+    return out
+
+
+def is_token(s: String) -> Bool:
+    """An HTTP token (RFC 9110 §5.6.2): a method or a header name. One or more of A–Z a–z 0–9 ! # $ % & ' * + - . ^ _ ` | ~."""
+    if s.byte_length() == 0:
+        return False
+    var marks = String("!#$%&'*+-.^_`|~")
+    for b in s.as_bytes():
+        var c = Int(b)
+        if not ((c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or (c < 128 and chr(c) in marks)):
+            return False
+    return True
+
+
+def has_control(s: String) -> Bool:
+    """A control character a header value may not hold (any below 32 but the tab, and DEL): it would split the request."""
+    for b in s.as_bytes():
+        var c = Int(b)
+        if (c < 32 and c != 9) or c == 127:
+            return True
+    return False
+
+
+def request_problem(req: Request) -> String:
+    """Why `req` can't go out as written ("": it can), for every transport: a method or header name that isn't a token,
+    a header value with a control character. (The URL's own rules are Url.parse's; an env header's value is checked
+    where it's read, on the worker.) Never sent, so no request is ever split into another (reviewer, D-570)."""
+    if not is_token(req.method):
+        return "a method that isn't an HTTP token (" + shown(req.method) + ")"
+    for n in req.names:
+        if not is_token(n):
+            return "a header name that isn't an HTTP token (" + shown(n) + ")"
+    for n in req.env_names:
+        if not is_token(n):
+            return "a header name that isn't an HTTP token (" + shown(n) + ")"
+    for i in range(len(req.values)):
+        if has_control(req.values[i]):
+            return "the header " + req.names[i] + "'s value holds a control character"
+    return ""
 
 
 def uri_component(s: String) -> String:

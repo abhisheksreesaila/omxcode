@@ -25,6 +25,7 @@ from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, O
 from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
+from mojoui.embed import is_web_url
 from mojoui.paragraph import pango_markup, link_href, runs_of
 from mojoui.linebreak import css_breaks, plain_words, label_words
 from std.math import log2
@@ -2940,6 +2941,9 @@ def on_drop[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: 
 
 def open_url(url: String):
     """A page in the browser: xdg-open, or the command in $MOJOUI_OPENER (checks read what it was given)."""
+    if not is_web_url(url):  # (http and https only, D-576)
+        print("mojoui: refused to open " + String(url.split(":")[0]) + ": (not an http or https URL)")
+        return
     var opener = getenv("MOJOUI_OPENER")
     if opener == "":
         opener = "xdg-open"

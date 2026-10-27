@@ -2,6 +2,8 @@
 # dates. One format per column, never per cell (docs/plans/formatting.md): it's applied only to what's on screen,
 # so it costs nothing on 100M rows. Values arrive as the engine stores them: integers scaled by 10^scale.
 
+from std.math import floor
+
 comptime AUTO = 0  # as the column's type says (the engine's own text)
 comptime NUMBER = 1  # 1,234.50
 comptime CURRENCY = 2  # $1,234.50
@@ -222,3 +224,81 @@ def format_date(days: Int64, f: ColumnFormat) -> String:
     if f.style == DATE_MONTH:
         return months[ymd[1] - 1] + " " + String(ymd[0])
     return String(ymd[0]) + "-" + ("0" if ymd[1] < 10 else "") + String(ymd[1]) + "-" + ("0" if ymd[2] < 10 else "") + String(ymd[2])
+
+
+# ---------- a measured value as people read it (en-US; an app's numbers, not a column's) ----------
+
+
+def rounded(v: Float64, digits: Int) -> Float64:
+    """v rounded half away from zero to `digits` decimals (JavaScript's Math.round(v * 10^d) / 10^d for v ≥ 0)."""
+    var m = 1.0
+    for _ in range(digits):
+        m *= 10
+    return floor(abs(v) * m + 0.5) / m * (1.0 if v >= 0 else -1.0)
+
+
+def round1(v: Float64) -> Float64:
+    return rounded(v, 1)
+
+
+def grouped(n: Int) -> String:
+    """A whole number with en-US thousands commas: 1234567 → "1,234,567"."""
+    return ("-" if n < 0 else "") + group_digits(String(abs(n)))
+
+
+def en_number(v: Float64, digits: Int = 0) -> String:
+    """toLocaleString("en-US", {maximumFractionDigits: digits}): thousands with commas, no trailing zeros
+    (1234.5, 2 → "1,234.5"; 0.04, 1 → "0"; -2.25, 1 → "-2.3")."""
+    var r = rounded(v, digits)
+    var whole = Int(floor(abs(r)))
+    var frac = abs(r) - Float64(whole)
+    var out = grouped(whole)
+    if digits > 0:
+        var m = 1
+        for _ in range(digits):
+            m *= 10
+        var f = Int(floor(frac * Float64(m) + 0.5))
+        if f >= m:
+            out = grouped(whole + 1)
+            f = 0
+        if f > 0:
+            var t = String(f)
+            while t.byte_length() < digits:
+                t = "0" + t
+            while t.endswith("0"):
+                var shorter = String(t[byte = : t.byte_length() - 1])
+                t = shorter^
+            out += "." + t
+    return ("-" if r < 0 else "") + out
+
+
+def duration_short(seconds: Float64) -> String:
+    """A duration in its largest whole unit: "45s", "5m", "1h", "1m 5s"."""
+    var sec = Int(floor(seconds + 0.5))
+    if sec >= 3600 and sec % 3600 == 0:
+        return String(sec // 3600) + "h"
+    if sec >= 60 and sec % 60 == 0:
+        return String(sec // 60) + "m"
+    if sec >= 60:
+        return String(sec // 60) + "m " + String(sec % 60) + "s"
+    return String(sec) + "s"
+
+
+def byte_size(bytes: Float64) -> String:
+    """A size in decimal units as a file manager shows it: "988 MB", "2.5 GB", "–" when unknown (0 or less)."""
+    if bytes <= 0:
+        return "–"
+    var mb = max(1, Int(floor(bytes / 1e6 + 0.5)))
+    if mb >= 1000:
+        var tenths = Int(floor(bytes / 1e8 + 0.5))
+        return String(tenths // 10) + "." + String(tenths % 10) + " GB"
+    return String(mb) + " MB"
+
+
+def utc_date_time(ts: Float64) -> String:
+    """Seconds since 1970 as an en-US month, day and 24-hour time in UTC: "Oct 25, 21:34"."""
+    var secs = Int(floor(ts))
+    var days = secs // 86400
+    var rem = secs - days * 86400
+    var ymd = civil(days)
+    return materialize[MONTHS]()[ymd[1] - 1] + " " + String(ymd[2]) + ", " + two(rem // 3600) + ":" + two((rem % 3600) // 60)

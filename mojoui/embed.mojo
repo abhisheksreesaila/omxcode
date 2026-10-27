@@ -14,3 +14,20 @@ def WebFrame(url: String, version: Int, instead: View, height: Int = 600, open_u
     browser (`open_url` if given, else `url`); 0 shows `instead` and opens nothing."""
     var items: List[View] = [instead.copy()]
     return _container(Node(EMBED, url, value=version, size=height, hint=open_url), items)
+
+
+def is_web_url(url: String) -> Bool:
+    """http:// or https:// (in any case) with a host, and no space or control character in it: the only links and pages
+    a host opens in the browser or frames (D-576). Anything else (javascript:, data:, file:, an app's own scheme) is
+    refused; goal 34 adds a sandbox for more."""
+    var low = url.lower()
+    var at = 7 if low.startswith("http://") else (8 if low.startswith("https://") else 0)
+    if at == 0 or url.byte_length() <= at:
+        return False
+    var first = Int(url.as_bytes()[at])
+    if first == 47 or first == 63 or first == 35:  # (/ ? #: no host)
+        return False
+    for b in url.as_bytes():
+        if Int(b) <= 32 or Int(b) == 127:
+            return False
+    return True

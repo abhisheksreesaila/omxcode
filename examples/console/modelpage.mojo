@@ -13,8 +13,10 @@ from mojoui.words import CommandLines
 from mojoui.copy import CopyRow, LabeledValue, CodePanel
 from mojoui.meter import UsageBar
 from mojoui.chip import TagEditor
-from data import Store, Model, row_of, hardware, fmt, dur, rounded, round1, strip_arch
+from api import chat_curl
+from data import Store, Model, row_of, hardware, strip_arch
 from msgs import PLACE, TAB, CMD_STOP, CMD_RESTART, CMD_COPY, CMD_REMOVE, CMD_START, COPY_CURL, REMOVE_LABEL, ADD_LABEL, KEYS, SPARK, FIT
+from mojoui.numformat import rounded, round1, en_number, duration_short
 
 comptime TAB_KEYS: List[String] = ["overview", "benchmark", "logs", "notebook"]
 comptime TAB_TITLES: List[String] = ["Overview", "Benchmark", "Logs", "Notebook"]
@@ -28,11 +30,6 @@ def tab_index(tab: String) -> Int:
         if keys[k] == tab:
             return k
     return 0
-
-
-def curl_for(url: String, name: String) -> String:
-    return ("curl " + url + "/chat/completions \\\n  -H \"Authorization: Bearer $MXC_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n"
-            + "  -d '{\"model\":\"" + name + "\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'")
 
 
 @fieldwise_init
@@ -81,17 +78,17 @@ def overview_view(st: Store, m: Model, phone: Bool, copies: Int) -> View:
     var url = st.lan_endpoint if st.lan_endpoint != "" else st.endpoint_now()
     # Right now: the same four tiles, always in this order (metricsView)
     var req = r.requests_value if r.requests_value >= 0 else 0
-    var tiles = StatGrid([StatTile("Requests", fmt(Float64(req)), "", "last 5 minutes"),
-                          StatTile("Speed", fmt(r.tps_value) if r.tps_value >= 0 else String("—"), "tok/s" if r.tps_value >= 0 else String(""), "decode, median"),
-                          StatTile("Latency p50", fmt(r.ttft_value) if r.ttft_value >= 0 else String("—"), "ms" if r.ttft_value >= 0 else String(""), "time to first token"),
-                          StatTile("Memory", fmt(fit.this_gb, 1) if fit.this_gb > 0 else String("—"), "GB" if fit.this_gb > 0 else String(""), "GPU, this model")])
+    var tiles = StatGrid([StatTile("Requests", en_number(Float64(req)), "", "last 5 minutes"),
+                          StatTile("Speed", en_number(r.tps_value) if r.tps_value >= 0 else String("—"), "tok/s" if r.tps_value >= 0 else String(""), "decode, median"),
+                          StatTile("Latency p50", en_number(r.ttft_value) if r.ttft_value >= 0 else String("—"), "ms" if r.ttft_value >= 0 else String(""), "time to first token"),
+                          StatTile("Memory", en_number(fit.this_gb, 1) if fit.this_gb > 0 else String("—"), "GB" if fit.this_gb > 0 else String(""), "GPU, this model")])
     var right_now = Panel([PanelTitle("gauge", "Right now", 1), tiles^, PanelFoot("mxc status")])
     var tokens = Panel([PanelTitle("scroll-text", "Tokens", 1), SparklineView(SPARK, len(st.points(m.name)) * 1000 + Int(r.tps_value)), PanelFoot("mxc metrics --json")])
     # About
-    var unload = "never (pinned)" if m.pinned else (("after " + dur(m.keep_alive) + " idle") if m.keep_alive > 0 else String("—"))
+    var unload = "never (pinned)" if m.pinned else (("after " + duration_short(m.keep_alive) + " idle") if m.keep_alive > 0 else String("—"))
     var vram = String("—")
     if fit.this_gb > 0:
-        vram = fmt(fit.this_gb, 1) + " GB" + ((" · " + String(Int(rounded(fit.this_gb / fit.total_gb * 100, 0))) + "% of " + fmt(fit.total_gb, 1) + " GB") if fit.total_gb > 0 else String(""))
+        vram = en_number(fit.this_gb, 1) + " GB" + ((" · " + String(Int(rounded(fit.this_gb / fit.total_gb * 100, 0))) + "% of " + en_number(fit.total_gb, 1) + " GB") if fit.total_gb > 0 else String(""))
     var state_text = r.state_label + ((" · " + r.note) if r.note != "" else String(""))
     var keys = KEYS_COMPACT if phone else KEYS_WIDE
     var facts = FactList([Fact("Repository", FactText(r.repo if r.repo != "" else String("—")), keys),
@@ -104,13 +101,13 @@ def overview_view(st: Store, m: Model, phone: Bool, copies: Int) -> View:
                           Fact("State", StatusMark(state_text, GOOD if r.running else QUIET, mono=True, live=r.running), keys),
                           Fact("Labels", TagEditor(m.labels, REMOVE_LABEL, "label", ADD_LABEL), keys)])
     var about = Panel([PanelTitle("box", "About", 2), facts^, PanelFoot("mxc ls --json")])
-    var figures: List[String] = ["this " + fmt(fit.this_gb, 1) + " GB" if fit.present else "no GPU found", ("others " + fmt(fit.others_gb, 1) + " GB") if fit.present else "",
-                                 ("free " + fmt(fit.free_gb, 1) + " GB of " + fmt(fit.total_gb, 1) + " GB") if fit.present else ""]
+    var figures: List[String] = ["this " + en_number(fit.this_gb, 1) + " GB" if fit.present else "no GPU found", ("others " + en_number(fit.others_gb, 1) + " GB") if fit.present else "",
+                                 ("free " + en_number(fit.free_gb, 1) + " GB of " + en_number(fit.total_gb, 1) + " GB") if fit.present else ""]
     var gpu = Panel([PanelTitle("gauge", "GPU fit", 3), HStack(UsageBar(FIT, Int(fit.this_gb * 10) + Int(fit.total_gb * 1000), figures).grow(), spacing=0).fill().tag("gpu-fit")])
     var call = Panel([PanelTitle("terminal", "Call it", 4),
                       CopyRow("local" if st.lan_endpoint == "" else "https · lan", url, CMD_COPY),
                       LabeledValue("API key", "$MXC_API_KEY", "manage keys", KEYS),
-                      CodePanel(curl_for(url, m.name), on_copy=COPY_CURL, copies=copies, copied=copies > 0),
+                      CodePanel(chat_curl(url, m.name, "hi"), on_copy=COPY_CURL, copies=copies, copied=copies > 0),
                       PanelFoot("mxc keys new <app>")])
     var power = ("mxc stop " if m.state == "ready" or m.state == "starting" else "mxc serve ") + m.name
     var twins = CommandLines([power, "mxc rm " + m.name])

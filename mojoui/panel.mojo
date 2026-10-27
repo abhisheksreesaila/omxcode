@@ -158,6 +158,12 @@ def StatGrid(var tiles: List[View], columns: Int = 2) -> View:
     return VStack(rows^, spacing=SPACE_M).align(START).fill().tag("stat-grid")
 
 
+def StatRow(var tiles: List[View]) -> View:
+    """Stat tiles side by side in one row, all the same width (a card's few numbers; roles stat-grid, stat-row)."""
+    var n = len(tiles)
+    return StatGrid(tiles^, columns=max(n, 1))
+
+
 comptime KEYS_WIDE = 0  # a Fact's key column: roles fact-key (wide), fact-key-compact, fact-key-narrow, fact-key-medium, fact-key-widest
 comptime KEYS_COMPACT = 1
 comptime KEYS_NARROW = 2
