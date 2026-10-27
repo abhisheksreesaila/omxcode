@@ -18,8 +18,9 @@ from mojoui.words import Mono, QuietText, MonoLine, Hint
 from mojoui.marks import StatusMark, GOOD, WARN, QUIET
 from mojoui.feedback import Warning, EmptyState
 from api import Api
-from data import Store, dur, real_or
+from data import Store, real_or
 from msgs import *
+from mojoui.numformat import duration_short
 
 comptime DEFAULT_KEEP_ALIVE = 300.0  # models registered without --keep-alive unload after this long
 comptime COPIES: List[String] = ["mxc set <model> --keep-alive 10m", "mxc set <model> --pin", "mxc stop --all", "mxc ps"]
@@ -153,7 +154,7 @@ def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
                                                                                 Hint("Until you pick one, the console follows your system.")], flow=True),
                        CardFoot("kept in this browser", note=True)]))
     # Idle unload
-    var idle: List[View] = [Hint("A model unloads after " + dur(DEFAULT_KEEP_ALIVE) + " without a request unless you say otherwise. There is no single setting for all of them yet: it is kept per model.")]
+    var idle: List[View] = [Hint("A model unloads after " + duration_short(DEFAULT_KEEP_ALIVE) + " without a request unless you say otherwise. There is no single setting for all of them yet: it is kept per model.")]
     if len(st.models) == 0:
         idle.append(EmptyState("box", "No models yet", "Add one and its idle time shows here.", "Add a model", SET_ADD))
     else:
@@ -161,7 +162,7 @@ def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
         var values: List[View] = []
         for m in st.models:
             names.append(m.name)
-            values.append(FactText("pinned: never unloads" if m.pinned else "after " + dur(m.keep_alive) + " idle"))
+            values.append(FactText("pinned: never unloads" if m.pinned else "after " + duration_short(m.keep_alive) + " idle"))
         idle.append(FactGrid(names, values^, mono_keys=True))
     cards.append(Card([CardHead("Idle unload", "per model"), CardBody(idle^, flow=True), CopyFoot(materialize[COPIES]()[0], SET_COPY), CopyFoot(materialize[COPIES]()[1], SET_COPY + 1)]))
     # Daemon

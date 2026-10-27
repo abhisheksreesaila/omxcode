@@ -1,0 +1,40 @@
+# mojoui.numformat's measured values as people read them (en-US, the console's core.js and library-logic.js rules):
+# rounded, grouped, en_number (toLocaleString with maximumFractionDigits), duration_short, byte_size, utc_date_time.
+from std.testing import assert_equal
+from mojoui.numformat import rounded, round1, grouped, en_number, duration_short, byte_size, utc_date_time
+
+
+def main() raises:
+    assert_equal(rounded(2.25, 1), 2.3)
+    assert_equal(rounded(-2.25, 1), -2.3)
+    assert_equal(rounded(158.4, 0), 158.0)
+    assert_equal(round1(3.14159), 3.1)
+    assert_equal(grouped(0), "0")
+    assert_equal(grouped(999), "999")
+    assert_equal(grouped(1000), "1,000")
+    assert_equal(grouped(1234567), "1,234,567")
+    assert_equal(grouped(-1234), "-1,234")
+    assert_equal(en_number(1234.5, 2), "1,234.5")
+    assert_equal(en_number(1234.5), "1,235")
+    assert_equal(en_number(0.04, 1), "0")
+    assert_equal(en_number(14.9, 1), "14.9")
+    assert_equal(en_number(24.0, 1), "24")
+    assert_equal(en_number(9.96, 1), "10")
+    assert_equal(en_number(-2.25, 1), "-2.3")
+    assert_equal(en_number(1000000.0), "1,000,000")
+    assert_equal(en_number(0.125, 2), "0.13")
+    assert_equal(duration_short(45), "45s")
+    assert_equal(duration_short(300), "5m")
+    assert_equal(duration_short(3600), "1h")
+    assert_equal(duration_short(65), "1m 5s")
+    assert_equal(duration_short(143), "2m 23s")
+    assert_equal(duration_short(0.4), "0s")
+    assert_equal(byte_size(0), "–")
+    assert_equal(byte_size(91e6), "91 MB")
+    assert_equal(byte_size(988e6), "988 MB")
+    assert_equal(byte_size(2.5e9), "2.5 GB")
+    assert_equal(byte_size(1e3), "1 MB")
+    assert_equal(utc_date_time(0), "Jan 1, 00:00")
+    assert_equal(utc_date_time(1761428040), "Oct 25, 21:34")
+    assert_equal(utc_date_time(951782400 + 3600 * 23 + 59 * 60 + 59.9), "Feb 29, 23:59")  # (a leap day, 2000)
+    print("textformat: ok")

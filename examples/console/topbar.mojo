@@ -7,8 +7,9 @@ from mojoui.breadcrumbs import Breadcrumbs
 from places import Place, crumbs_for
 from mojoui.shell import AppBar, Brand, BarRule, NavLink, NavLinks, NavMore
 from mojoui.beacon import Beacon
-from data import Store, hardware, fmt, rounded
+from data import Store, hardware
 from msgs import HOME, CRUMB, PLACE, MORE, RING
+from mojoui.numformat import rounded, en_number
 
 comptime PLACE_KEYS: List[String] = ["keys", "gateway", "security", "settings"]
 comptime PLACE_TITLES: List[String] = ["Keys", "Gateway", "Security", "Settings"]
@@ -52,7 +53,7 @@ def beacon_state(st: Store) -> BeaconState:
         return BeaconState("loading", "…", "", -1)
     if not hw.present:
         return BeaconState("nogpu", "No GPU", "", -1)
-    return BeaconState("idle", hw.short, fmt(hw.used_gb, 1) + "/" + fmt(hw.total_gb, 1) + " GB", -1)
+    return BeaconState("idle", hw.short, en_number(hw.used_gb, 1) + "/" + en_number(hw.total_gb, 1) + " GB", -1)
 
 
 def top_bar(place: Place, st: Store, phone: Bool) -> View:

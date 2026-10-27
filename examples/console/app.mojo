@@ -24,7 +24,7 @@ from mojoui.panel import CardNote
 from mojoui.json import json_string
 from themes.omxqua import omxqua
 from api import Api
-from data import Store, read_models, read_metrics, read_series, read_info, read_system, read_labels, read_pulls, read_ports, round1
+from data import Store, read_models, read_metrics, read_series, read_info, read_system, read_labels, read_pulls, read_ports
 from topbar import top_bar
 from home import Library, home_view, visible, label_models, names_json, bulk_state
 from modelpage import model_header, overview_view, tab_index, curl_for, fit_of, TAB_KEYS

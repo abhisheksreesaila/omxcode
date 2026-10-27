@@ -13,8 +13,9 @@ from mojoui.header import SubHeader
 from mojoui.words import MonoLine, QuietText
 from mojoui.buttons import SmallButton
 from mojoui.document import MarkdownCell, CodeCell, Outline, SpecRows, SpecTitle, DocLayout
-from data import Cell, ArchRow, json_value, compact, fmt, short_endpoint, Store
+from data import Cell, ArchRow, json_value, compact, short_endpoint, Store
 from msgs import NB_RUN, NB_CHAPTER
+from mojoui.numformat import en_number
 
 
 struct Notebook(Copyable, Movable):
@@ -69,12 +70,12 @@ struct Notebook(Copyable, Movable):
             self.arch = j.text(j.get(a, "architecture"), "unknown architecture")
             var p = j.get(a, "parameters")
             if j.kind(p) == J_OBJECT:
-                self.facts.append(("Layers", fmt(j.real(j.get(p, "layers")))))
+                self.facts.append(("Layers", en_number(j.real(j.get(p, "layers")))))
                 self.facts.append(("Parameters", compact(j.real(j.get(p, "total"))) + " (from config)"))
                 self.facts.append(("Embeddings", compact(j.real(j.get(p, "embeddings")))))
                 self.facts.append(("Per layer", "attn " + compact(j.real(j.get(p, "attention_per_layer"))) + " · mlp " + compact(j.real(j.get(p, "mlp_per_layer")))))
                 if j.real(j.get(p, "experts")) > 1:
-                    self.facts.append(("Experts", fmt(j.real(j.get(p, "experts")))))
+                    self.facts.append(("Experts", en_number(j.real(j.get(p, "experts")))))
             var st = j.get(a, "safetensors_total")
             if j.real(st) > 0:
                 self.facts.append(("Weights", compact(j.real(st)) + " (safetensors)"))

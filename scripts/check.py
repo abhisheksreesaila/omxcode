@@ -1006,7 +1006,7 @@ def m5():
                       (f'"{CONSOLE_URL_ENV}"', f"the base URL from ${CONSOLE_URL_ENV}"), ("Every(", "App.every polls")]:
         if need not in src:
             problems.append(f"examples/console has no {why} ({need})")
-    for name in ("dragdrop", "embed", "shell", "header", "sidebar", "panel", "marks", "words", "buttons", "lists", "document"):  # the components M5 added to mojoui/, each with its own test (pagekit split into generic modules by M7, D-414)
+    for name in ("dragdrop", "embed", "shell", "header", "sidebar", "panel", "marks", "words", "buttons", "lists", "document", "textformat"):  # the components M5 added to mojoui/, each with its own test (pagekit split into generic modules by M7, D-414)
         err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}")
         if err:
             problems.append(err[:300])

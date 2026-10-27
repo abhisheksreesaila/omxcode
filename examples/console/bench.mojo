@@ -11,8 +11,9 @@ from mojoui.meter import ChartRow, ShareBar
 from mojoui.words import MonoLine, QuietText, Muted, MonoParagraph
 from mojoui.buttons import SmallButton, PrimaryButton, FILL
 from mojoui.feedback import Note, NoteAction
-from data import BenchRun, BenchResult, read_run, fmt, date_time
+from data import BenchRun, BenchResult, read_run
 from msgs import BENCH_RUN, BENCH_ALL, HIST, BAR
+from mojoui.numformat import en_number, utc_date_time
 
 
 struct Bench(Copyable, Movable):
@@ -59,13 +60,13 @@ struct Bench(Copyable, Movable):
 
 def workload(run: BenchRun) -> String:
     """workloadLine: what was sent, what came back, how often, when."""
-    var out_tokens = String("up to ") + fmt(Float64(run.max_tokens)) + " tokens out"
+    var out_tokens = String("up to ") + en_number(Float64(run.max_tokens)) + " tokens out"
     for r in run.results:
         if r.status == "done" and r.completion_tokens > 0:
-            out_tokens = fmt(Float64(r.completion_tokens)) + " tokens out"
+            out_tokens = en_number(Float64(r.completion_tokens)) + " tokens out"
             break
-    return (fmt(Float64(run.prompt_tokens)) + " prompt tokens · " + out_tokens + " · batch 1 · " + String(run.runs) + " run" + ("" if run.runs == 1 else "s")
-            + " each · " + date_time(run.started_at))
+    return (en_number(Float64(run.prompt_tokens)) + " prompt tokens · " + out_tokens + " · batch 1 · " + String(run.runs) + " run" + ("" if run.runs == 1 else "s")
+            + " each · " + utc_date_time(run.started_at))
 
 
 def bars(run: BenchRun, decode: Bool, me: String, first_bar: Int, mut fractions: List[Float64], mut mine: List[Bool], phone: Bool = False) -> List[View]:
@@ -85,7 +86,7 @@ def bars(run: BenchRun, decode: Bool, me: String, first_bar: Int, mut fractions:
         var i = order[k]
         fractions.append(fr[i])
         mine.append(names[i] == me)
-        var value = (fmt(values[i], 1) + " tok/s") if decode else (fmt(values[i]) + " ms")
+        var value = (en_number(values[i], 1) + " tok/s") if decode else (en_number(values[i]) + " ms")
         var bar = HStack(ShareBar(Int(fr[i] * 100 + 0.5), mine=names[i] == me), spacing=0).align(CENTER).grow().tag("bar")  # (tag bar: M5 finds it)
         rows.append(ChartRow(k % 5 + 1, names[i], bar^, value, strong=names[i] == me, figure_strong=k == 0, compact=phone))
     return rows^
@@ -105,7 +106,7 @@ def bench_view(b: Bench, model: String, phone: Bool) -> View:
     var fr = List[Float64]()
     var mine = List[Bool]()
     var items: List[View] = []
-    var sub = model + " · " + ("latest run · " + date_time(b.latest.started_at) if b.has_latest else String("no runs yet"))
+    var sub = model + " · " + ("latest run · " + utc_date_time(b.latest.started_at) if b.has_latest else String("no runs yet"))
     var tools: List[View] = []
     if b.has_latest or b.running:
         tools.append(SmallButton("Running…" if b.running else "Run again", BENCH_RUN, "rotate-cw", FILL))
@@ -135,9 +136,9 @@ def bench_view(b: Bench, model: String, phone: Bool) -> View:
                 var best = String("no result")
                 for r in h.results:
                     if r.status == "done" and r.decode_tps > 0:
-                        best = r.model + " · " + fmt(r.decode_tps, 1) + " tok/s"
+                        best = r.model + " · " + en_number(r.decode_tps, 1) + " tok/s"
                         break
-                var cols: List[View] = [Muted(date_time(h.started_at)), Text(String(h.models) + " model" + ("" if h.models == 1 else "s"))]
+                var cols: List[View] = [Muted(utc_date_time(h.started_at)), Text(String(h.models) + " model" + ("" if h.models == 1 else "s"))]
                 rows.append(ColumnRow(cols^, Muted(best, mono=True), on=h.id == run.id, compact=phone))  # (a phone leaves out who ran: .bn-hwho)
             items.append(Card([CardHead("History", String(len(b.history)) + " run" + ("" if len(b.history) == 1 else "s")), VStack(rows^, spacing=0).fill(),
                                CardFoot("pick a run to chart it; newest first", note=True)]))

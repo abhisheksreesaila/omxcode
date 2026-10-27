@@ -27,8 +27,9 @@ from mojoui.words import QuietText, WarnLine
 from mojoui.lists import PageColumn, MainAside
 from mojoui.skeleton import SkeletonList
 from mojoui.shell import PageCard
-from data import fmt
+
 from msgs import *
+from mojoui.numformat import en_number
 
 comptime DEFAULT_SUB = "Search the MAX catalog and Hugging Face · every result is checked against this machine's memory"
 comptime ORDER: List[String] = ["check", "fetch", "compile", "serve", "smoke"]
@@ -43,7 +44,7 @@ comptime PORT_NOTE = ("“Port it” runs Claude Code with Modular’s import-mo
 
 def trim1(n: Float64) -> String:
     """String(Number(n.toFixed(1))): 24.0 → "24", 14.94 → "14.9"."""
-    return fmt(n, 1).replace(",", "")
+    return en_number(n, 1).replace(",", "")
 
 
 def size_text(gb: Float64) -> String:

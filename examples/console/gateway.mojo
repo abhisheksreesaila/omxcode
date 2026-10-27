@@ -18,8 +18,9 @@ from mojoui.words import Mono, QuietText, Hint
 from mojoui.marks import StatusMark, GOOD, QUIET, BAD
 from mojoui.feedback import EmptyState
 from api import Api
-from data import Store, fmt, real_or
+from data import Store, real_or
 from msgs import *
+from mojoui.numformat import en_number
 
 comptime LOG_LINES = 60
 comptime COPIES: List[String] = ["mxc status", "mxc requests --limit 200", "mxc console api", "mxc expose", "mxc expose --stop"]
@@ -66,7 +67,7 @@ def app_label(name: String) -> String:
 
 
 def counted(v: Int, one: String, many: String) -> String:
-    return fmt(Float64(v)) + " " + (one if v == 1 else many)
+    return en_number(Float64(v)) + " " + (one if v == 1 else many)
 
 
 struct GatewayPage(Copyable, Movable):
@@ -202,12 +203,12 @@ struct GatewayPage(Copyable, Movable):
                 var comp = j.get(r, "completion_tokens")
                 var tokens = String("—")
                 if j.kind(comp) == J_NUMBER:
-                    tokens = fmt(real_or(j, j.get(r, "prompt_tokens"), 0)) + " → " + ("~" if j.flag(j.get(r, "estimated")) else "") + fmt(j.real(comp))
+                    tokens = en_number(real_or(j, j.get(r, "prompt_tokens"), 0)) + " → " + ("~" if j.flag(j.get(r, "estimated")) else "") + en_number(j.real(comp))
                 var tt = j.get(r, "ttft_ms")
                 var model = j.text(j.get(r, "model"))
                 out.append(RequestRow(real_or(j, j.get(r, "ts"), 0), j.text(j.get(r, "app")), model if model != "" else String("—"), j.text(j.get(r, "route")),
-                                      Int(real_or(j, j.get(r, "status"), 0)), tokens, (fmt(j.real(tt)) + " ms") if j.kind(tt) == J_NUMBER else String("—"),
-                                      fmt(real_or(j, j.get(r, "duration_ms"), 0)) + " ms"))
+                                      Int(real_or(j, j.get(r, "status"), 0)), tokens, (en_number(j.real(tt)) + " ms") if j.kind(tt) == J_NUMBER else String("—"),
+                                      en_number(real_or(j, j.get(r, "duration_ms"), 0)) + " ms"))
             self.requests = out^
             self.requests_loaded = True
         except:
@@ -260,7 +261,7 @@ def gateway_view(gp: GatewayPage, st: Store, phone: Bool) -> View:
                 cells.append(Mono(r.name))
                 cells.append(Mono("openai/" + r.name))
                 cells.append(Mono((":" + String(r.port)) if r.port > 0 else ("starting" if r.state == "starting" else "idle")))
-                cells.append(Mono(fmt(Float64(r.recent))))
+                cells.append(Mono(en_number(Float64(r.recent))))
             routes.append(SideScroll(Table(["Model name", "Upstream model", "max serve", "Req · 1 min"], cells, align="LLLR").fill().tag("routes")))
             routes.append(CardFoot("every route goes to " + daemon, note=True))
         else:

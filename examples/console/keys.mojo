@@ -20,8 +20,9 @@ from mojoui.copy import SecretField
 from mojoui.fields import ShortField
 from mojoui.feedback import EmptyState
 from api import Api
-from data import date_time, real_or
+from data import real_or
 from msgs import *
+from mojoui.numformat import utc_date_time
 
 comptime ROTATE = 0  # the armed action
 comptime REVOKE = 1
@@ -255,7 +256,7 @@ def keys_view(kp: KeysPage, phone: Bool) -> View:
             var active = not r.revoked
             cells.append(CellText(r.app, mono=True, strong=True))
             cells.append(CellText(r.prefix + "…", mono=True, quiet=True))
-            cells.append(CellText(date_time(r.created_at) if r.created_at > 0 else String("—"), quiet=True))
+            cells.append(CellText(utc_date_time(r.created_at) if r.created_at > 0 else String("—"), quiet=True))
             cells.append(CellText(ago(r.last_used_at, now), quiet=True))
             cells.append(StatusMark("active" if active else "revoked", GOOD if active else QUIET))
             var rot = kp.is_armed(r.app, ROTATE)

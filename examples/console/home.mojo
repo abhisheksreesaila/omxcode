@@ -17,8 +17,9 @@ from mojoui.buttons import FlatButton, PrimaryButton, TextAction, NameLink
 from mojoui.fields import SearchField
 from mojoui.lists import SplitView, ListCount, ListBody, ListEmpty, CardGrid, SelectionBar, NameCell, CellStack
 from mojoui.json import json_string
-from data import Store, Model, Row, row_of, sorted_models, kind_name, kind_hue, hardware, fmt, short_endpoint, KINDS, KIND_NAMES, KIND_HUES
+from data import Store, Model, Row, row_of, sorted_models, kind_name, kind_hue, hardware, short_endpoint, KINDS, KIND_NAMES, KIND_HUES
 from msgs import ADD, SEARCH, VIEW, GROUP, LABEL_GROUP, DROP_LABEL, TICK, TICK_ALL, OPEN, TAP_LABEL, CLEAR, REMOVE_TICKED, EDIT_LABELS
+from mojoui.numformat import en_number
 
 
 struct Library(Copyable, Movable):
@@ -239,7 +240,7 @@ def home_view(st: Store, lib: Library, phone: Bool) -> View:
             running += 1
     var hw = hardware(st)
     var sub = String(len(all)) + " model" + ("" if len(all) == 1 else "s") + " · " + String(running) + " running" + \
-        ((" · " + fmt(hw.used_gb, 1) + " of " + fmt(hw.total_gb, 1) + " GB GPU") if hw.present else String("")) + " · " + short_endpoint(st.endpoint_now())
+        ((" · " + en_number(hw.used_gb, 1) + " of " + en_number(hw.total_gb, 1) + " GB GPU") if hw.present else String("")) + " · " + short_endpoint(st.endpoint_now())
     var tools: List[View] = []
     if not phone:
         tools.append(CommandLine("mxc ls"))

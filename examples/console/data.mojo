@@ -4,6 +4,7 @@
 
 from mojoui.json import Json, J_NULL, J_NUMBER, J_STRING, J_ARRAY, J_OBJECT, J_BOOL
 from mojoui.shared import floored
+from mojoui.numformat import rounded, round1, en_number, duration_short, byte_size
 
 
 @fieldwise_init
@@ -280,100 +281,7 @@ def json_value(j: Json, node: Int) -> String:
     return "…"
 
 
-# ---------- formatting (core.js, library-logic.js) ----------
-
-def rounded(v: Float64, digits: Int) -> Float64:
-    var m = 1.0
-    for _ in range(digits):
-        m *= 10
-    return floored(abs(v) * m + 0.5) / m * (1.0 if v >= 0 else -1.0)
-
-
-def round1(v: Float64) -> Float64:
-    return rounded(v, 1)
-
-
-def grouped(n: Int) -> String:
-    var s = String(abs(n))
-    var out = String("")
-    var count = 0
-    for i in range(s.byte_length() - 1, -1, -1):
-        if count > 0 and count % 3 == 0:
-            out = "," + out
-        out = String(s[byte=i]) + out
-        count += 1
-    return ("-" if n < 0 else "") + out
-
-
-def fmt(v: Float64, digits: Int = 0) -> String:
-    """toLocaleString(en-US, maximumFractionDigits: digits): thousands with commas, no trailing zeros."""
-    var r = rounded(v, digits)
-    var whole = Int(floored(abs(r)))
-    var frac = abs(r) - Float64(whole)
-    var out = grouped(whole)
-    if digits > 0:
-        var m = 1
-        for _ in range(digits):
-            m *= 10
-        var f = Int(floored(frac * Float64(m) + 0.5))
-        if f >= m:
-            out = grouped(whole + 1)
-            f = 0
-        if f > 0:
-            var t = String(f)
-            while t.byte_length() < digits:
-                t = "0" + t
-            while t.endswith("0"):
-                var shorter = String(t[byte = : t.byte_length() - 1])
-                t = shorter^
-            out += "." + t
-    return ("-" if r < 0 else "") + out
-
-
-def dur(seconds: Float64) -> String:
-    """core.js dur: 1s, 5m, 1h, 1m 5s."""
-    var sec = Int(floored(seconds + 0.5))
-    if sec >= 3600 and sec % 3600 == 0:
-        return String(sec // 3600) + "h"
-    if sec >= 60 and sec % 60 == 0:
-        return String(sec // 60) + "m"
-    if sec >= 60:
-        return String(sec // 60) + "m " + String(sec % 60) + "s"
-    return String(sec) + "s"
-
-
-def size_label(bytes: Float64) -> String:
-    """library-logic.js sizeLabel: 988 MB, 2.5 GB, – when unknown."""
-    if bytes <= 0:
-        return "–"
-    var mb = max(1, Int(floored(bytes / 1e6 + 0.5)))
-    if mb >= 1000:
-        var tenths = Int(floored(bytes / 1e8 + 0.5))
-        return String(tenths // 10) + "." + String(tenths % 10) + " GB"
-    return String(mb) + " MB"
-
-
-comptime MONTHS: List[String] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-
-def date_time(ts: Float64) -> String:
-    """core.js dateTime in en-US, UTC: "Oct 25, 21:34"."""
-    var secs = Int(floored(ts))
-    var days = secs // 86400
-    var rem = secs % 86400
-    # civil from days (Howard Hinnant)
-    var z = days + 719468
-    var era = z // 146097
-    var doe = z - era * 146097
-    var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
-    var doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
-    var mp = (5 * doy + 2) // 153
-    var d = doy - (153 * mp + 2) // 5 + 1
-    var m = mp + 3 if mp < 10 else mp - 9
-    var hh = rem // 3600
-    var mm = (rem % 3600) // 60
-    return materialize[MONTHS]()[m - 1] + " " + String(d) + ", " + ("0" if hh < 10 else "") + String(hh) + ":" + ("0" if mm < 10 else "") + String(mm)
-
+# ---------- formatting: mojoui.numformat (rounded, en_number, duration_short, byte_size, utc_date_time) ----------
 
 def short_endpoint(url: String) -> String:
     if url.startswith("http://"):
@@ -386,10 +294,10 @@ def short_endpoint(url: String) -> String:
 def compact(n: Float64) -> String:
     """blade-notebook.js compact: 494 M, 136.1 M, 1.2 B."""
     if n >= 1e9:
-        return fmt(n / 1e9, 2) + " B"
+        return en_number(n / 1e9, 2) + " B"
     if n >= 1e6:
-        return fmt(n / 1e6, 1) + " M"
-    return fmt(n)
+        return en_number(n / 1e6, 1) + " M"
+    return en_number(n)
 
 
 # ---------- the original's views of the data ----------
@@ -441,18 +349,18 @@ def row_of(st: Store, m: Model) -> Row:
     var live = pts[len(pts) - 1] if len(pts) > 0 else by.tps
     var note = String("")
     if m.state == "starting":
-        note = ("compiling · " + dur(m.starting_seconds)) if m.starting_seconds >= 0 else String("starting")
+        note = ("compiling · " + duration_short(m.starting_seconds)) if m.starting_seconds >= 0 else String("starting")
     elif m.pinned:
         note = "pinned"
     elif running and m.idle_seconds >= 0 and m.keep_alive > 0:
-        note = "idle " + dur(m.idle_seconds) + " of " + dur(m.keep_alive)
+        note = "idle " + duration_short(m.idle_seconds) + " of " + duration_short(m.keep_alive)
     var tps = rounded(live, 0) if running and live >= 0 else -1.0
     var ttft = by.ttft if running and by.ttft >= 0 else -1.0
     var req = by.requests if by.requests >= 0 else (0 if running else -1)
     var vram = st.vram(m.name)
-    return Row(m.name, m.repo, running, state_label(m.state), note, strip_arch(m.arch), m.kind, m.labels.copy(), size_label(m.size_bytes),
-               (fmt(vram, 1) + " GB") if vram > 0 else String("–"), fmt(tps) if tps >= 0 else String("–"),
-               (fmt(ttft) + " ms") if ttft >= 0 else String("–"), fmt(Float64(req)) if req >= 0 else String("–"),
+    return Row(m.name, m.repo, running, state_label(m.state), note, strip_arch(m.arch), m.kind, m.labels.copy(), byte_size(m.size_bytes),
+               (en_number(vram, 1) + " GB") if vram > 0 else String("–"), en_number(tps) if tps >= 0 else String("–"),
+               (en_number(ttft) + " ms") if ttft >= 0 else String("–"), en_number(Float64(req)) if req >= 0 else String("–"),
                "Secure · LAN" if st.lan_endpoint != "" else "This machine", tps, ttft, req, vram)
 
 
