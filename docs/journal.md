@@ -632,3 +632,4 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - gtk_webview: tests/test_gtk_webview.mojo for file names, SRI, error cut and reply ownership: red, then the fixes (D-620). Crash: webkit_web_view_terminate_web_process from a webkill: step; one kill reloads (counter back to Mojo's label, count 0), two show the stand-in (D-621). Views now outlive an unbuilt node while the key stays shown (D-622).
 - I ran `pkill -f "Xvfb :97"` to clean up the M3 prototype display: it matched and killed my own shell, the lesson docs/lessons.md already states. Stop only PIDs I started.
 
+- Full run after the fixes: M0 PASS (17 s), M1 PASS (18 s), M2 PASS (105 s), M3 PASS (adds the crash and forged-reply proofs), M4 PASS (515 s).
