@@ -13,6 +13,7 @@ from mojoui.words import CommandLines
 from mojoui.copy import CopyRow, LabeledValue, CodePanel
 from mojoui.meter import UsageBar
 from mojoui.chip import TagEditor
+from api import chat_curl
 from data import Store, Model, row_of, hardware, strip_arch
 from msgs import PLACE, TAB, CMD_STOP, CMD_RESTART, CMD_COPY, CMD_REMOVE, CMD_START, COPY_CURL, REMOVE_LABEL, ADD_LABEL, KEYS, SPARK, FIT
 from mojoui.numformat import rounded, round1, en_number, duration_short
@@ -29,11 +30,6 @@ def tab_index(tab: String) -> Int:
         if keys[k] == tab:
             return k
     return 0
-
-
-def curl_for(url: String, name: String) -> String:
-    return ("curl " + url + "/chat/completions \\\n  -H \"Authorization: Bearer $MXC_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n"
-            + "  -d '{\"model\":\"" + name + "\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'")
 
 
 @fieldwise_init
@@ -111,7 +107,7 @@ def overview_view(st: Store, m: Model, phone: Bool, copies: Int) -> View:
     var call = Panel([PanelTitle("terminal", "Call it", 4),
                       CopyRow("local" if st.lan_endpoint == "" else "https · lan", url, CMD_COPY),
                       LabeledValue("API key", "$MXC_API_KEY", "manage keys", KEYS),
-                      CodePanel(curl_for(url, m.name), on_copy=COPY_CURL, copies=copies, copied=copies > 0),
+                      CodePanel(chat_curl(url, m.name, "hi"), on_copy=COPY_CURL, copies=copies, copied=copies > 0),
                       PanelFoot("mxc keys new <app>")])
     var power = ("mxc stop " if m.state == "ready" or m.state == "starting" else "mxc serve ") + m.name
     var twins = CommandLines([power, "mxc rm " + m.name])

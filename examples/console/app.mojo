@@ -23,11 +23,11 @@ from mojoui.shell import Shell, PageCard, is_compact
 from mojoui.panel import CardNote
 from mojoui.json import json_string
 from themes.omxqua import omxqua
-from api import Api
+from api import Api, chat_curl
 from data import Store, read_models, read_metrics, read_series, read_info, read_system, read_labels, read_pulls, read_ports
 from topbar import top_bar
 from home import Library, home_view, visible, label_models, names_json, bulk_state
-from modelpage import model_header, overview_view, tab_index, curl_for, fit_of, TAB_KEYS
+from modelpage import model_header, overview_view, tab_index, fit_of, TAB_KEYS
 from bench import Bench, bench_view, bench_bars
 from logs import Logs, logs_view
 from notebook import Notebook, notebook_view
@@ -327,7 +327,7 @@ struct Main(App):
                 self.go("/")
         elif m == COPY_CURL and p.page == "model":
             self.copies += 1
-            self.copy(curl_for(self.store.endpoint_now(), p.model))
+            self.copy(chat_curl(self.store.endpoint_now(), p.model, "hi"))
         elif REMOVE_LABEL <= m < REMOVE_LABEL + 20 and p.page == "model":
             var k = self.store.model(p.model)
             if k >= 0 and m - REMOVE_LABEL < len(self.store.models[k].labels):

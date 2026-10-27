@@ -18,6 +18,7 @@ from mojoui.copy import CopyRow
 from mojoui.feedback import Warning
 from api import Api
 from data import Store, real_or
+from api import chat_curl
 from msgs import *
 
 comptime STEP_LABELS: List[String] = ["Issue a local certificate", "Create the gateway key", "Open HTTPS on your LAN"]
@@ -25,9 +26,7 @@ comptime STEP_LABELS: List[String] = ["Issue a local certificate", "Create the g
 
 def security_curl(url: String, ca: String) -> String:
     """securityView's curl: the LAN URL, the CA to trust, the app key from $MXC_API_KEY."""
-    var cacert = ("--cacert " + ca + " ") if ca != "" else String("")
-    return ("curl " + cacert + url + "/chat/completions \\\n  -H \"Authorization: Bearer $MXC_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n"
-            + "  -d '{\"model\":\"<model>\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'")
+    return chat_curl(url, "<model>", "hi", cacert=ca)
 
 
 def host_of(url: String) -> String:

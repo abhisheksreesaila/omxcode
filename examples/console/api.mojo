@@ -4,6 +4,7 @@
 
 from mojoui.http import Http, Request
 from mojoui.shared import environment
+from mojoui.json import json_string
 
 comptime DEFAULT_URL = "http://127.0.0.1:8765"
 
@@ -39,3 +40,17 @@ struct Api(Movable):
 
     def take(mut self) -> List[Request]:
         return self.http.take()
+
+
+def chat_curl(endpoint: String, model: String, say: String, spaced: Bool = False, cacert: String = "") -> String:
+    """The chat completion call to paste in a terminal, the key from $MXC_API_KEY (model-page.js, blade-add.js curlFor,
+    blade-security.js): the model's name and the words go through json_string and the JSON sits in single quotes for
+    the shell, a ' in it written '\\''. `spaced`: blade-add.js's {"model": …} spacing, else the compact {"model":…};
+    `cacert`: the CA file to trust (the LAN endpoint)."""
+    var colon = String(": ") if spaced else String(":")
+    var comma = String(", ") if spaced else String(",")
+    var body = ("{\"model\"" + colon + json_string(model) + comma + "\"messages\"" + colon + "[{\"role\"" + colon + "\"user\"" + comma
+                + "\"content\"" + colon + json_string(say) + "}]}")
+    var trust = ("--cacert " + cacert + " ") if cacert != "" else String("")
+    return ("curl " + trust + endpoint + "/chat/completions \\\n  -H \"Authorization: Bearer $MXC_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n"
+            + "  -d '" + body.replace("'", "'\\''") + "'")

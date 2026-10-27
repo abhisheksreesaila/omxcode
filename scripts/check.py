@@ -1010,7 +1010,7 @@ def m5():
         err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}")
         if err:
             problems.append(err[:300])
-    for name in ("console_places",):  # (the console's own route table on mojoui's Router, D-571)
+    for name in ("console_places", "console_api"):  # (the console's route table on mojoui's Router, D-571; its one curl, D-574)
         err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}", "examples/console")
         if err:
             problems.append(err[:300])

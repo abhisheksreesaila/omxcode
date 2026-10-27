@@ -10,8 +10,8 @@ from mojoui.json import Json, json_string, J_OBJECT, J_STRING, J_ARRAY
 from mojoui.http import uri_component
 from mojoui.clock import now_ns, clock_time
 from mojoui.logview import LogLine, LOG_PLAIN, LOG_ERROR, LOG_OK, LOG_WARN, log_kind_of
-from add import Add, Run, Pick, Sugg, Job, read_pick, read_job, pull_detail, twin, curl_for, last_part, trim1, DEFAULT_SUB, NOTICE_NONE, NOTICE_WARN, NOTICE_PORT
-from api import Api
+from add import Add, Run, Pick, Sugg, Job, read_pick, read_job, pull_detail, twin, last_part, trim1, DEFAULT_SUB, NOTICE_NONE, NOTICE_WARN, NOTICE_PORT
+from api import Api, chat_curl
 from data import Store
 from msgs import *
 
@@ -371,7 +371,7 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
         out.clip = a.run.endpoint
     elif m == ADD_COPY_CURL:
         a.copies += 1
-        out.clip = curl_for(a.run.endpoint, a.run.name)
+        out.clip = chat_curl(a.run.endpoint, a.run.name, "Hello", spaced=True)
     elif m == ADD_OPEN:
         out.go = "/models/" + a.run.name + "/overview"
     elif m == ADD_SECURE:
