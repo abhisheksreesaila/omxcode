@@ -26,6 +26,13 @@ from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
 from mojoui.embed import is_web_url
+from mojoui.webcomponent import is_widget_tag
+from mojoui.json import json_string
+from mojoui.view import NO_MSG
+from mojoui.hosts.gtk_webview import (
+    WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
+    take_message, theme_message, IN_EVENT, IN_REPLY,
+)
 from mojoui.paragraph import pango_markup, link_href, runs_of
 from mojoui.linebreak import css_breaks, plain_words, label_words
 from std.math import log2
@@ -576,6 +583,8 @@ struct GtkHost[A: App](Movable):
     var editor_node: Int  # (its node there)
     var fx_source: Int  # the GLib timeout that next polls the runtime's effects (HTTP replies, timers; 0: none)
     var fx_due: Int  # when it fires (µs, g_get_monotonic_time)
+    var webviews: Int  # the WebComponents' WebKitGTK views (mojoui/hosts/gtk_webview.mojo), on the heap: its address
+    var webview_focus: Int  # a view that had the keyboard when a rebuild moved it (it gets it back), or 0
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -661,6 +670,10 @@ struct GtkHost[A: App](Movable):
         self.editor_node = -1
         self.fx_source = 0
         self.fx_due = 0
+        var wv = alloc(Layout[WebViews].single()).unsafe_leak()  # (lives as long as the window: WebKit's callbacks hold its address)
+        wv.unsafe_write(WebViews())
+        self.webviews = Int(wv)
+        self.webview_focus = 0
 
     def schedule_effects(mut self, self_addr: Int):
         """Arms one GLib timeout for when the runtime next has something to hand over (a reply, a timer's tick):
@@ -1859,6 +1872,8 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_widget_add_controller", NoneType](w, target)
                 var key = String(DROP_KEY)
                 external_call["g_object_set_data", NoneType](w, key.as_c_string_span(), target)
+            elif node.kind == WEBCOMP:  # its widget in a WebKitGTK view of its own (kept across rebuilds), else `instead`
+                self.place_webview(i, w, self_addr)
             elif node.size > 0 and not node.sized_height():
                 external_call["gtk_widget_set_size_request", NoneType](w, c_int(-1), c_int(node.size))
         else:
@@ -1968,6 +1983,7 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_popover_popup", NoneType](pop)
         self.popups = List[Int]()
         self.focus_after_build(List[Bool](length=len(self.rt.shown.nodes), fill=True))
+        self.sync_webviews(self_addr)
         set_busy(False)
         if self.rt.trace:
             print("TRACE: rebuild " + ms(perf_counter_ns() - t_show) + " widgets " + String(len(self.rt.shown.nodes)))
@@ -2183,7 +2199,7 @@ struct GtkHost[A: App](Movable):
             var cur = external_call["gtk_widget_get_first_child", Int](box)
             while cur != 0:
                 var next = external_call["gtk_widget_get_next_sibling", Int](cur)
-                if cur not in want:
+                if cur not in want and not is_webview(cur):  # (a WebComponent's view stays: sync_webviews owns it)
                     external_call["gtk_box_remove", NoneType](box, cur)
                 cur = next
             var prev = 0
@@ -2393,6 +2409,7 @@ struct GtkHost[A: App](Movable):
 
     def apply(mut self, d: Diff, self_addr: Int):
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
+        self.send_commands(self_addr)  # (and the widget commands it asked for go to their pages)
         self.apply_design(self_addr)
         self.copy_if_asked()
         self.open_if_asked()
@@ -2536,7 +2553,108 @@ struct GtkHost[A: App](Movable):
                     external_call["gtk_text_buffer_set_text", NoneType](buffer, want.as_c_string_span(), c_int(-1))
         self.echo_node = -1
         self.arm_all(self_addr)  # a new version, frames starting, or a layout change: canvases look again
+        self.sync_webviews(self_addr)
         set_busy(False)
+
+    # ---------- WebComponents (goal 34 M3: mojoui/hosts/gtk_webview.mojo) ----------
+
+    def place_webview(mut self, i: Int, box: Int, self_addr: Int):
+        """WebComponent node i's view into its box: the one its key (tag, id) already has (moved from the old screen's
+        box: it is never loaded again), or a new one. Without WebKitGTK the box keeps its `instead` view."""
+        ref n = self.rt.shown.nodes[i]
+        if not is_widget_tag(n.hint) or not webviews_start(self.webviews, Self.A.web_assets()):
+            return
+        var wv = webviews_at(self.webviews)
+        var k = wv[].slot_of(n.hint, n.value)
+        if k < 0:
+            k = new_view(self.webviews, n.hint, n.value, on_webview_message[Self.A], self_addr)
+        var view = wv[].slots[k].view
+        var parent = external_call["gtk_widget_get_parent", Int](view)
+        if parent != box:
+            if parent != 0:
+                var root = external_call["gtk_widget_get_root", Int](view)
+                var focus = external_call["gtk_root_get_focus", Int](root) if root != 0 else 0
+                if focus != 0 and (focus == view or external_call["gtk_widget_is_ancestor", c_int](focus, view) != 0):
+                    self.webview_focus = view  # (someone is typing in it: the keyboard follows it into the new screen)
+                external_call["gtk_box_remove", NoneType](parent, view)
+            external_call["gtk_box_append", NoneType](box, view)
+        var c = external_call["gtk_widget_get_first_child", Int](box)
+        while c != 0:  # (the stand-in stays built, hidden: patches still find it)
+            if c != view:
+                external_call["gtk_widget_set_visible", NoneType](c, c_int(0))
+            c = external_call["gtk_widget_get_next_sibling", Int](c)
+
+    def sync_webviews(mut self, self_addr: Int):
+        """After a build or patches: each shown WebComponent's page gets the theme and its props when they changed (JSON,
+        through mojoui.native.receive; the widget's update(), never a remount), and views whose key left go."""
+        var wv = webviews_at(self.webviews)
+        if wv[].state != 1:
+            return
+        for ref slot in wv[].slots:
+            slot.seen = False
+        var theme_key = String("")
+        var theme_msg = String("")
+        for i in range(len(self.rt.shown.nodes)):
+            ref n = self.rt.shown.nodes[i]
+            if n.kind != WEBCOMP or i >= len(self.widgets) or self.widgets[i] == 0:
+                continue
+            var k = wv[].slot_of(n.hint, n.value)
+            if k < 0:
+                continue
+            wv[].slots[k].seen = True
+            if theme_msg == "":
+                var t = self.rt.app.theme()
+                theme_key = t.key()
+                theme_msg = theme_message(t)
+            if wv[].slots[k].theme != theme_key:
+                wv[].slots[k].theme = theme_key
+                webview_send(self.webviews, k, theme_msg)
+            if wv[].slots[k].props != n.text:
+                wv[].slots[k].props = n.text
+                webview_send(self.webviews, k, '{"widget":{"tag":' + json_string(n.hint) + ',"id":' + String(n.value) + ',"props":' + json_string(n.text) + "}}")
+        var k = len(wv[].slots) - 1
+        while k >= 0:
+            if not wv[].slots[k].seen:
+                if wv[].slots[k].view == self.webview_focus:
+                    self.webview_focus = 0
+                webview_drop(self.webviews, k)
+            k -= 1
+        if self.webview_focus != 0 and external_call["gtk_widget_get_root", Int](self.webview_focus) != 0:
+            _ = external_call["gtk_widget_grab_focus", c_int](self.webview_focus)
+            self.webview_focus = 0
+        self.send_commands(self_addr)
+
+    def send_commands(mut self, self_addr: Int):
+        """The widget commands the app asked for, each to its widget's page; one whose widget isn't on the screen is
+        answered with an error (through the inbox, on the next idle turn, as a page's reply is)."""
+        var commands = self.rt.take_commands()
+        if len(commands) == 0:
+            return
+        var wv = webviews_at(self.webviews)
+        for c in commands:
+            var k = wv[].slot_of(c.tag, c.widget) if wv[].state == 1 else -1
+            if k >= 0:
+                webview_send(self.webviews, k, '{"commands":[' + c.json() + "]}")
+            elif c.reply != NO_MSG:
+                var why = "no widget " + c.tag + "#" + String(c.widget) + " on the screen" + ("" if wv[].state == 1 else " (WebKitGTK isn't installed)")
+                wv[].inbox.append(Inbound(IN_REPLY, c.tag, c.widget, "", "null", c.seq, why))
+                arm_webview_inbox[Self.A](self_addr)
+
+    def webview_inbox(mut self, self_addr: Int) -> Bool:
+        """Hands the pages' events and replies to update(), in order, while the screen is the shown one (True: some wait)."""
+        var wv = webviews_at(self.webviews)
+        while len(wv[].inbox) > 0:
+            if busy() or self.has_pending:
+                return True
+            var m = wv[].inbox.pop(0)
+            if m.kind == IN_EVENT:  # (by its key, not a node number: the screen may have been rebuilt since, D-595)
+                for i in range(len(self.rt.shown.nodes)):
+                    if self.rt.shown.nodes[i].kind == WEBCOMP and self.rt.shown.nodes[i].hint == m.tag and self.rt.shown.nodes[i].value == m.id:
+                        self.apply(self.rt.widget_event(i, m.name, m.data), self_addr)
+                        break
+            elif self.rt.knows_reply(m.seq):
+                self.apply(self.rt.reply(m.seq, m.data, m.error), self_addr)
+        return False
 
     # ---------- canvases ----------
 
@@ -2975,6 +3093,35 @@ def on_activate_link[A: App](label: Int, uri: Int, host_addr: Int) abi("C") -> c
         return 1
     host[].send(node, False, href, index, host_addr)
     return 1
+
+
+def is_webview(widget: Int) -> Bool:
+    var key = String("mojoui-webview")
+    return external_call["g_object_get_data", Int](widget, key.as_c_string_span()) != 0
+
+
+def arm_webview_inbox[A: App](host_addr: Int):
+    var host = host_at[A](host_addr)
+    var wv = webviews_at(host[].webviews)
+    if not wv[].armed:
+        wv[].armed = True
+        _ = external_call["g_idle_add", c_uint](on_webview_inbox[A], host_addr)
+
+
+def on_webview_message[A: App](ucm: Int, value: Int, host_addr: Int) abi("C"):
+    """A page's message (the "mojoui" script message handler): checked in gtk_webview.take_message; events and replies
+    reach update() on the next idle turn (never inside WebKit's callback)."""
+    var host = host_at[A](host_addr)
+    if take_message(host[].webviews, ucm, value):
+        arm_webview_inbox[A](host_addr)
+
+
+def on_webview_inbox[A: App](host_addr: Int) abi("C") -> c_int:
+    var host = host_at[A](host_addr)
+    if host[].webview_inbox(host_addr):
+        return 1  # (the screen is being rebuilt: again on the next idle turn)
+    webviews_at(host[].webviews)[].armed = False
+    return 0
 
 
 def host_at[A: App](addr: Int) -> Pointer[GtkHost[A], MutUntrackedOrigin]:
@@ -4165,6 +4312,19 @@ def run_step[A: App](host_addr: Int, step: String):
               + " within-9.5ms " + one_decimal(Float32(share_within(intervals(host[].frame_times), 9.5))) + "%"
               + " cells built " + String(host[].cells_built) + " uploads " + String(host[].uploads)
               + " layers built " + String(host[].nodes_built) + " reused " + String(host[].nodes_reused) + " seconds " + one_decimal(Float32(secs)))
+    elif verb == "webjs":  # webjs:<tag>#<id>=<expression>: its value (awaited) in that widget's page, printed as JS: <json>
+        var kv = split_at(rest, "=")
+        var key = split_at(kv[0], "#")
+        var wv = webviews_at(host[].webviews)
+        var k = wv[].slot_of(key[0], to_int(key[1])) if wv[].state == 1 else -1
+        if k < 0:
+            print("TEST: no web view", kv[0])
+            return
+        webview_probe(host[].webviews, k, kv[1])
+        var by = perf_counter_ns() + 10_000_000_000
+        while not webviews_at(host[].webviews)[].probe_done and perf_counter_ns() < by:
+            pump()
+        print("JS: " + (webviews_at(host[].webviews)[].probe_result if webviews_at(host[].webviews)[].probe_done else String('"timed out"')))
     elif verb == "pause":  # pause:3000: keep the main loop running that long (a screen grab of the display can catch popovers)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until:
@@ -4524,6 +4684,23 @@ def run_step[A: App](host_addr: Int, step: String):
         print("TEST: unknown step", step)
 
 
+def wait_webviews[A: App](host_addr: Int):
+    """(Test runs) Until every WebComponent's page has loaded and its widget mounted and measured (up to 20 s): steps
+    and the report then see the widgets, as the web's checks wait for theirs."""
+    var host = host_at[A](host_addr)
+    var by = perf_counter_ns() + 20_000_000_000
+    while perf_counter_ns() < by:
+        var wv = webviews_at(host[].webviews)
+        var waiting = False
+        for ref slot in wv[].slots:
+            if not slot.loaded or slot.mounts < 1 or slot.height < 0:
+                waiting = True
+        if not waiting:
+            break
+        pump()
+    settle()
+
+
 def report[A: App](host_addr: Int):
     """Prints every widget's state as GTK reports it, in screen order (alerts last,
     since they float above the page on every host)."""
@@ -4559,6 +4736,13 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
                               + " " + one_decimal(rect[2]) + " " + one_decimal(rect[3]))
                     _ = len(rect)
                     report_buttons(host[], i, host[].rt.shown.nodes[i].name)
+    if not alerts:  # each WebComponent's view, as the host saw it, and the widget's own line (the web's WIDGET:)
+        var wv = webviews_at(host[].webviews)
+        for ref slot in wv[].slots:
+            var ready = slot.loaded and slot.mounts >= 1
+            print("WEBVIEW: " + slot.key() + (" ready" if ready else " loading") + " mounts=" + String(slot.mounts) + " csp=" + String(slot.csp)
+                  + " refused=" + String(slot.refused) + " blocked=" + String(slot.blocked) + " h=" + String(slot.height))
+            print("WIDGET: " + slot.key() + ": " + slot.describe)
     for i in range(len(host[].rt.shown.nodes)):
         if host[].rt.shown.nodes[i].kind == BOARD and not alerts:
             print("LAYOUT: " + ("list" if host[].board_list else "board"))
@@ -4835,6 +5019,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
             pump()
         settle()
     if testing:
+        wait_webviews[A](host_addr)
         for step in steps.split(";"):
             if String(step) != "":
                 run_step[A](host_addr, String(step))

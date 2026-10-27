@@ -47,6 +47,6 @@ mojoui.defineWidget<Props, Host>({
   },
   describe(el) {
     const v = el.mojouiView;
-    return v ? `${v.state.doc.length} characters, cursor at ${v.state.selection.main.head}` : 'no editor';
+    return v ? `${v.state.doc.length} characters, cursor at ${v.state.selection.main.head}: ${JSON.stringify(v.state.doc.toString().slice(0, 80))}` : 'no editor';
   },
 });

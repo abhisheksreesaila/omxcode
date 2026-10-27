@@ -3,7 +3,7 @@
 A Mojo app can place any JavaScript widget (an editor, a map, a chart library) in its screen. The widget is a custom
 element; Mojo gives it **props** (JSON), hears its **events** in `update()`, and can call its **commands** (the answer
 comes back to `update()` later, as an HTTP reply does). The app keeps every line of state; the widget keeps only its own
-(a cursor, a scroll position, a counter's count). Runs on the web today; GTK shows a stand-in until goal 34's M3.
+(a cursor, a scroll position, a counter's count). Runs on the web and on GTK (§6); the Mac shows `instead` until 34b.
 
 The example is `examples/widgets` (a note in CodeMirror 6, a word count, a chart, and a plain-JS counter).
 
@@ -114,3 +114,30 @@ Arguments that aren't JSON never leave the runtime (an error Event instead).
   sandbox): `WebFrame(url, v, instead, sandbox="allow-same-origin")`.
 - Widgets from people you don't trust: only in a WebFrame of their own origin, never as a WebComponent (a widget runs
   with the page's rights).
+
+## 6. On GTK (Linux)
+
+Each WebComponent gets a **WebKitGTK 6.0** view of its own (`mojoui/hosts/gtk_webview.mojo`), loading the **same files**
+as the web: `scripts/build.sh <app> linux` runs the same esbuild step into `build/<app>/linux/webview/assets/` (same
+bytes, same hashed names) and copies the web host's `mojoui-widgets.js` and `mojoui.css` beside them. Your widget code
+doesn't change: `mojoui-widgets.js` sees the WebKit message handler and talks to the GTK host instead of htmx.
+
+- **The page** is `mojoui://app/widget.html`, served by the host from that folder: the host's sheet, the app's theme
+  (palette and sheet, as on the web), the runtime and the bundles `web_assets()` lists, with SRI. The origin serves
+  those files and the app's fonts, nothing else.
+- **Props** go in as JSON through one function call, `mojoui.native.receive(m)`, with the message as its argument (a
+  string, never code); the widget's `update()` runs, it is never mounted again. A rebuild of the screen moves the live
+  view into the new box (keyed by tag and id, as on the web), so typing, focus and the widget's own state stay.
+- **Events and replies** come back through WebKit's script message handler `mojoui` as JSON text; the host refuses a
+  message that isn't a string holding a JSON object, names another widget, or carries a payload that isn't JSON, then
+  hands the rest to `update()` exactly as the web does (`Event(on_event, text=payload, id, name)`). Commands work the same.
+- **The view's height** is the widget's height in its page (a ResizeObserver tells the host); its width is the box's.
+- **Security**: the web's CSP (with `frame-src 'none'`) on every file; no network (an ephemeral session whose requests go
+  to a proxy that isn't there); no navigation away and no new windows (decide-policy); no file access beyond the bundle;
+  no developer tools. `MOJOUI_TRACE=1` prints the page's console.
+- **Getting WebKitGTK**: it is loaded the first time a WebComponent shows (apps without one never need it). Install your
+  distribution's `webkitgtk-6.0`; where it isn't installed (and you can't), `scripts/webkitgtk.sh` fetches Arch Linux's
+  package once, checks its pinned SHA-256 and unpacks it into `build/webkitgtk-6.0/`, and `build.sh` makes
+  `build/<app>/linux/<app>` a launcher that lays it over `/usr/lib` with bubblewrap (no root; WebKit's own sandbox still
+  runs inside). conda-forge has no WebKitGTK for GTK 4. Without WebKitGTK a WebComponent shows its `instead` view.
+

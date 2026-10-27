@@ -139,7 +139,7 @@ struct Main(App):
         note_items.append(WebComponent("mx-editor", Props().text("doc", self.loaded).number("rev", self.rev).text("placeholder", "Write a note"),
                                        on_event=EDITED, id=1).fill().tag("editor"))
         note_items.append(HStack(Text("Words: " + String(words)), Text("words after each edit", CAPTION), Spacer(),
-                                 Button("Load sample", on_tap=LOAD), spacing=SPACE_S).fill())
+                                 Button("Load sample", on_tap=LOAD), spacing=SPACE_S).fill().tag("note-bar"))
         note_items.append(SparklineView(CHART, len(self.history)))
         var note = Card(note_items, spacing=SPACE_S).align(START).fill().grow()
         var counter_items: List[View] = [
@@ -147,7 +147,7 @@ struct Main(App):
             Text("A vendored plain-JS widget: its count is its own; its label and step come from Mojo.", CAPTION),
             WebComponent("mx-counter", Props().text("label", COUNTER_LABEL).number("step", self.step), on_event=COUNTER, id=1).fill().tag("counter"),
             HStack(Button("Bigger steps", on_tap=BIGGER), Button("Ask the counter", on_tap=ASK, style=PROMINENT),
-                   Button("Hide details" if self.details else "Show details", on_tap=DETAILS), spacing=SPACE_S),
+                   Button("Hide details" if self.details else "Show details", on_tap=DETAILS), spacing=SPACE_S).tag("counter-bar"),
             Text("Clicks seen by Mojo: " + String(self.clicks)),
             Text("Last count: " + String(self.last_count)),
             Text("Step: " + String(self.step)),

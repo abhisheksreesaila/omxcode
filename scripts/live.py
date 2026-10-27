@@ -34,6 +34,22 @@ from Xlib.ext import xtest  # noqa: E402
 from PIL import Image  # noqa: E402
 
 
+def app_pid(pid):
+    """The app itself: through a launcher that runs it under bubblewrap (scripts/build.sh, WebKitGTK laid over /usr/lib:
+    D-608) its child, since bwrap doesn't pass signals on (SIGUSR1 would end bwrap, and the app with it)."""
+    for _ in range(4):
+        try:
+            if Path(f"/proc/{pid}/comm").read_text().strip() != "bwrap":
+                return pid
+            kids = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+        except OSError:
+            return pid
+        if not kids:
+            return pid
+        pid = int(kids[0])
+    return pid
+
+
 def main():
     args = sys.argv[1:]
     exe, commands = args[0], args[1]
@@ -151,7 +167,7 @@ def main():
             time.sleep(0.2)
         elif verb == "report":
             import signal
-            app.send_signal(signal.SIGUSR1)
+            os.kill(app_pid(app.pid), signal.SIGUSR1)
             time.sleep(1.0)
         elif verb == "type":
             for ch in rest:

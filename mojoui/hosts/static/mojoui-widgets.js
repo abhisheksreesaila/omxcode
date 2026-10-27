@@ -10,6 +10,11 @@
 // event to the app (/w/<sid>), in order; a command from the app (#mojoui-cmds) calls the widget's command and posts its
 // answer (/reply/<sid>). Everything that crosses is JSON text: props are parsed with JSON.parse, payloads and replies are
 // JSON.stringify'd; nothing is eval'd or written as HTML (docs/js.md: security).
+//
+// On GTK (goal 34 M3) each widget has a WebKitGTK view of its own, with this same file and the same bundles: there is no
+// htmx and no page around it. The host calls mojoui.native.receive(json) (props, the theme, commands: JSON text handed
+// in as a function argument, never as code), and everything this side sends goes to the host's script message handler
+// (window.webkit.messageHandlers.mojoui) as JSON text: events, replies, the widget's height, its one-line description.
 (() => {
   const mojoui = window.mojoui = window.mojoui || {};
   const specs = new Map();  // tag → the widget's spec
@@ -32,12 +37,14 @@
   // ---- events and replies to the app: one at a time, in order ----
   const queue = [];
   let sending = false;
+  const native = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mojoui;  // (GTK's WebKitGTK host)
   async function flush() {
     if (sending) return;
     sending = true;
     try {
       while (queue.length) {
         const { path, values } = queue.shift();
+        if (native) { native.postMessage(JSON.stringify(Object.assign({ path }, values))); continue; }
         const root = document.getElementById('mojoui-root');
         if (!root || !root.dataset.sid) break;
         try { await htmx.ajax('POST', `/${path}/${root.dataset.sid}`, { values, swap: 'none', source: window.mojouiLane('widgets') }); }
@@ -60,6 +67,7 @@
         last.values = values;  // (latest: an unsent event of the same name is replaced, e.g. a whole text)
       } else queue.push({ path: 'w', values });
       flush();
+      tell();
     };
   }
 
@@ -79,6 +87,7 @@
         mounts[spec.tag] = (mounts[spec.tag] || 0) + 1;
         try { spec.mount(this, parse(w.dataset.props, {}), emitter(this, spec)); }
         catch (e) { console.error(`mojoui: ${spec.tag}.mount failed`, e); }
+        tell();
       }
       connectedMoveCallback() { /* moved by the host (moveBefore): kept as it is */ }
       disconnectedCallback() {
@@ -118,6 +127,7 @@
       if (el.mojouiMounted && spec && el.mojouiProps !== w.dataset.props) {
         el.mojouiProps = w.dataset.props;
         try { if (spec.update) spec.update(el, parse(w.dataset.props, {})); } catch (e) { console.error(`mojoui: ${tag}.update failed`, e); }
+        tell();
       }
     }
   }
@@ -177,7 +187,9 @@
   let lastSeq = 0;
   function runCommands() {
     const box = document.getElementById('mojoui-cmds');
-    const list = box ? parse(box.dataset.cmds || '[]', []) : [];
+    runList(box ? parse(box.dataset.cmds || '[]', []) : []);
+  }
+  function runList(list) {
     if (!Array.isArray(list)) return;
     for (const c of list) {
       if (!c || !(Number(c.seq) > lastSeq)) continue;
@@ -200,5 +212,62 @@
     try { text = JSON.stringify(data); if (text === undefined) text = 'null'; } catch (e) { error = error || "the reply isn't JSON"; }
     queue.push({ path: 'reply', values: { seq: c.seq, data: text, error } });
     flush();
+    tell();
+  }
+
+  // ---- GTK: one widget in a WebKitGTK view of its own (the host's page: an empty #mojoui-root) ----
+  let told = '', telling = false;
+  function tell() {  // (GTK) the widget's one line and its mounts, for the host's report, once things settle
+    if (!native || telling) return;
+    telling = true;
+    setTimeout(() => {
+      telling = false;
+      const w = wrappers()[0];
+      if (!w) return;
+      const now = JSON.stringify([mojoui.describe(w), mounts[w.dataset.widget] || 0]);
+      if (now === told) return;
+      told = now;
+      queue.push({ path: 'describe', values: { text: JSON.parse(now)[0], mounts: JSON.parse(now)[1] } });
+      flush();
+    }, 30);
+  }
+  if (native) {
+    let height = -1;
+    const sizes = new ResizeObserver(() => {  // the view is as tall as its widget, as the web's box is
+      const w = wrappers()[0];
+      const h = w ? Math.ceil(w.getBoundingClientRect().height) : 0;
+      if (h !== height) { height = h; queue.push({ path: 'size', values: { height: h } }); flush(); }
+    });
+    document.addEventListener('securitypolicyviolation', e => { queue.push({ path: 'csp', values: { directive: String(e.effectiveDirective || '') } }); flush(); });
+    mojoui.native = {
+      receive(text) {  // the host's message: {theme: {classes, css}}, {widget: {tag, id, props (JSON text)}}, {commands: [...]}
+        const m = parse(String(text), null);
+        if (!m || typeof m !== 'object') return false;
+        if (m.theme && typeof m.theme === 'object') {
+          document.body.className = String(m.theme.classes || '');
+          let st = document.getElementById('mojoui-theme');
+          if (!st) { st = document.createElement('style'); st.id = 'mojoui-theme'; document.head.prepend(st); }
+          st.textContent = String(m.theme.css || '');  // (CSS text, as the web's theme <style>: style-src allows it, script-src doesn't)
+        }
+        if (m.widget && typeof m.widget === 'object' && TAG.test(String(m.widget.tag))) {
+          const root = document.getElementById('mojoui-root');
+          let w = wrappers()[0];
+          if (!w) {
+            w = document.createElement('div');
+            w.dataset.kind = 'webcomponent';
+            w.dataset.widget = String(m.widget.tag);
+            w.dataset.widgetId = String(m.widget.id);
+            w.dataset.props = String(m.widget.props);
+            root.append(w);
+            sizes.observe(w);
+          } else if (w.dataset.widget !== String(m.widget.tag) || w.dataset.widgetId !== String(m.widget.id)) {
+            return false;  // (a view holds one widget for good: its key never changes)
+          } else w.dataset.props = String(m.widget.props);
+          adopt();
+        }
+        if (Array.isArray(m.commands)) runList(m.commands);
+        return true;
+      },
+    };
   }
 })();

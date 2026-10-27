@@ -2,7 +2,8 @@
 # hands it props as JSON data, and hears its events in update(); it can ask the widget to run one of its commands, whose
 # reply comes back to update() later, as an HTTP reply does (mojoui.http). The widget itself is a script bundle the app
 # lists in App.web_assets() (built by scripts/web_assets.py from the app's web/ folder); the web host mounts it once and
-# keeps it across rebuilds. Hosts without a web view show `instead`.
+# keeps it across rebuilds; GTK runs it in a WebKitGTK view of its own (mojoui/hosts/gtk_webview.mojo). Hosts without a
+# web view (the Mac until 34b, GTK without WebKitGTK) show `instead`.
 #
 #   WebComponent("mx-counter", Props().text("label", "Clicks").number("step", self.step), on_event=COUNTER, id=1)
 #   ...
@@ -114,7 +115,7 @@ def WebComponent(tag: String, props: Props, on_event: Int = NO_MSG, id: Int = 0)
 
 
 def WebComponent(tag: String, props: Props, instead: View, on_event: Int = NO_MSG, id: Int = 0) -> View:
-    """As above; hosts without a web view (GTK and the Mac until goal 34's M3) show `instead`."""
+    """As above; hosts without a web view (the Mac until 34b, GTK without WebKitGTK 6.0) show `instead`."""
     return WebComponent(tag, props.json(), instead, on_event, id)
 
 

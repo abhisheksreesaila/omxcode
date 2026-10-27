@@ -42,6 +42,20 @@ build_linux() {
   mojo_build hosts/linux_main.mojo -o "$out/$EX" \
     -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}"
   mkdir -p "$out/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$out/fonts/"  # the app's own fonts, beside the binary (D-155)
+  # Its JavaScript (docs/js.md, goal 34 M3): each WebComponent runs in a WebKitGTK view loading the web's own bundles,
+  # built into $out/webview by the same esbuild step. Where WebKitGTK 6.0 isn't installed, scripts/webkitgtk.sh fetches
+  # the pinned package and $out/$EX becomes a launcher that lays it over /usr/lib (bubblewrap, no root: D-608)
+  rm -f "$out/$EX.bin"
+  pixi run python scripts/web_assets.py --webview "$out/webview" "$EX"
+  if [ -f "$out/webview/assets/manifest.json" ]; then
+    local wk; wk="$(scripts/webkitgtk.sh)"
+    if [ -n "$wk" ]; then
+      mv "$out/$EX" "$out/$EX.bin"
+      printf '%s\n' '#!/bin/sh' "# WebKitGTK 6.0 from $wk (scripts/webkitgtk.sh), laid over /usr/lib for this app only (D-608)" \
+        "exec bwrap --dev-bind / / --overlay-src /usr/lib --overlay-src '$wk/usr/lib' --ro-overlay /usr/lib --die-with-parent \"\$(dirname \"\$0\")/$EX.bin\" \"\$@\"" > "$out/$EX"
+      chmod +x "$out/$EX"
+    fi
+  fi
   stamp "$out"; echo "   $out/$EX"
 }
 

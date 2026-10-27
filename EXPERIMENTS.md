@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Experiment 34 M3 (2026-10-27): the widgets app on GTK, each JS widget in a WebKitGTK view (goal 34)
+- **Setup:** WebKitGTK 6.0 (GTK 4) isn't on conda-forge and needs root to install here: Arch's signed package, pinned by SHA-256, unpacked into build/ and laid over /usr/lib by a bubblewrap launcher (scripts/webkitgtk.sh, D-608).
+- **Worked:** each WebComponent gets its own WebKitGTK view loading the web's bundles byte for byte and the same mojoui-widgets.js from mojoui://app with the web's CSP. Real typing (XTest) in CodeMirror reaches update(); the view survives partial and full rebuilds (one mount, keyboard kept); Load sample shows Mojo's text; counter clicks, props and a command's reply work; the boxes match the web's within goal 32's tolerance. eval, inline script, remote and file loads, popups and navigation are blocked; non-JSON or forged messages are refused.
+- **Broke and fixed:** scripts didn't run (the response headers dropped the content type, and nosniff blocked them); JavaScriptCore took SIGUSR1 from the live report; a focused view lost the keyboard when a full rebuild moved it.
+- **Means:** one widget runs unchanged on the web and on Linux. The cost is a 130 MB engine and one web process per widget.
+- **Next:** the reviewer; then 34b (the Mac's WKWebView).
+
+---
+
 ## Experiment 30 (2026-10-21/22): the island, and 100M rows that never freeze the window (goal 30)
 - **Setup:** MX frame 23edc59 (`start_job`/`Job`: a query on its own thread, with progress and cancel); the island (D-255, direction B) in place of the document chip, the GPU chip and the toasts.
 - **Worked:**

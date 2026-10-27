@@ -3,6 +3,8 @@ web module is built, for every app.
 
   pixi run python scripts/web_assets.py <example>          build, then lint
   pixi run python scripts/web_assets.py --lint <example>   the lint only
+  pixi run python scripts/web_assets.py --webview <dir> <example>   GTK: the same bundles into <dir>/assets, and the
+                                                           host's widget runtime beside them (nothing for an app without)
 
 Build: an app with examples/<example>/web/package.json gets its packages installed from the committed lockfile
 (`npm ci --ignore-scripts`: no package runs code at install time) into build/<example>/npm/ (never next to the app, never
@@ -64,13 +66,13 @@ def install(example, web):
     return npm_dir / "node_modules"
 
 
-def build(example):
+def build(example, out=None):
     web = ROOT / "examples" / example / "web"
-    out = ROOT / "build" / example / "web" / "assets"
+    out = out or ROOT / "build" / example / "web" / "assets"
     shutil.rmtree(out, ignore_errors=True)  # (only what this build makes ships)
     entries = sorted(p for p in (web / "widgets").glob("*") if p.suffix in ENTRY_TYPES) if (web / "widgets").is_dir() else []
     if not entries:
-        return
+        return False
     modules = install(example, web)
     names = {}
     for p in entries:
@@ -99,6 +101,19 @@ def build(example):
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     for name, m in sorted(manifest.items()):
         print(f"   assets/{m['file']}  ({m['bytes'] // 1024} KB, from web/{m['source']})")
+    return True
+
+
+def webview(example, folder):
+    """GTK's copy (goal 34 M3): the same esbuild bundles (same inputs, same bytes, same hashed names) into
+    <folder>/assets, and the web host's widget runtime (mojoui-widgets.js) and style sheet (mojoui.css) beside them. The GTK host serves these to
+    each WebComponent's WebKitGTK view and nothing else; it loads only what App.web_assets() lists (the lint runs with
+    the web build, which reads that list from the web module)."""
+    shutil.rmtree(folder, ignore_errors=True)
+    if build(example, folder / "assets"):
+        for name in ("mojoui-widgets.js", "mojoui.css"):  # (the web host's widget runtime and its style sheet, as they are)
+            shutil.copy(ROOT / "mojoui" / "hosts" / "static" / name, folder / name)
+        print(f"web_assets: {example}: bundles for GTK's web views in {folder.relative_to(ROOT) if folder.is_relative_to(ROOT) else folder}")
 
 
 def listed(example):
@@ -149,6 +164,8 @@ def lint_problems(example):
 
 def main():
     args = sys.argv[1:]
+    if args[:1] == ["--webview"] and len(args) == 3:
+        return webview(args[2], Path(args[1]).resolve())
     lint_only = "--lint" in args
     args = [a for a in args if a != "--lint"]
     if len(args) != 1:

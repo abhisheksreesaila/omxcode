@@ -600,6 +600,8 @@ GTK_PROBES = [
     ("unlisted", "fetch('/assets/manifest.json').then(r => r.ok ? 'loaded' : 'refused', () => 'blocked')"),
     ("popup", "String(window.open('https://example.com/'))"),
     ("navigate", "(location.href = 'https://example.com/', 'asked')"),
+    ("link", "(a => (a.href = 'https://example.com/', document.body.append(a), a.click(), 'clicked'))(document.createElement('a'))"),
+    ("link-new", "(a => (a.href = 'https://example.com/', a.target = '_blank', document.body.append(a), a.click(), 'clicked'))(document.createElement('a'))"),
     ("msg-object", "(webkit.messageHandlers.mojoui.postMessage({path: 'w', tag: 'mx-counter', id: '1', name: 'click', data: '{}'}), 'sent')"),
     ("msg-not-json", "(webkit.messageHandlers.mojoui.postMessage('{not json'), 'sent')"),
     ("msg-forged", "(webkit.messageHandlers.mojoui.postMessage(JSON.stringify({path: 'w', tag: 'mx-editor', id: '1', name: 'change', data: JSON.stringify({text: 'forged words from the counter'})})), 'sent')"),
@@ -607,7 +609,7 @@ GTK_PROBES = [
     ("where", "new Promise(r => setTimeout(() => r(location.href), 800))"),
 ]
 GTK_PROBE_WANT = {"eval": "blocked", "inline": "blocked", "remote-fetch": "blocked", "remote-img": "blocked", "file": "blocked",
-                  "popup": "null", "navigate": "asked", "msg-object": "sent", "msg-not-json": "sent", "msg-forged": "sent", "msg-bad-payload": "sent"}
+                  "popup": "null", "navigate": "asked", "link": "clicked", "link-new": "clicked", "msg-object": "sent", "msg-not-json": "sent", "msg-forged": "sent", "msg-bad-payload": "sent"}
 
 
 def m3():
@@ -689,8 +691,9 @@ def m3():
     OUT.mkdir(parents=True, exist_ok=True)
     cmds = ";".join([
         "wait:7000", f"click:{center(ed, 30)}", "type:one two three", "wait:1200", "report",     # A: typing reaches update()
-        "type: four five six", "wait:1200", "type: seven", "wait:1200", "report",                 # B: a rebuild mid-typing (Long note)
-        f"click:{load}", "wait:1500", "report",                                                   # C: Mojo sets the text
+        f"click:{load}", "wait:1500", "report",                                                   # C: Mojo sets the text (9 words: Long note shows)
+        f"click:{center(ed, 80)}", "key:Control+a", "key:BackSpace", "wait:1200",                 # (empty again: Long note goes, a rebuild)
+        "type:one two three four five six seven", "wait:1500", "report",                          # B: a rebuild mid-typing (at "six")
         f"click:{inc}", f"click:{inc}", f"click:{inc}", "wait:800", f"click:{bigger}", "wait:800",  # the counter: 3 clicks, then props
         f"click:{inc}", "wait:800", f"click:{ask}", "wait:1500", f"click:{details}", "wait:1500", "report",  # D: reply, rebuild
         f"shot:{shot}",
@@ -699,9 +702,9 @@ def m3():
     parts = reports(out2)
     if len(parts) != 4:
         return False, f"the live run made {len(parts)} reports, not 4: " + out2[-800:]
-    a, b, c, d = parts
-    la, lb, lc, ld = (lines_with(p, "LABEL: ") for p in parts)
-    wa, wb, wc, wd = (widget_lines(p) for p in parts)
+    a, c, b, d = parts
+    la, lc, lb, ld = (lines_with(p, "LABEL: ") for p in parts)
+    wa, wc, wb, wd = (widget_lines(p) for p in parts)
     if "Words: 3" not in la or '"one two three"' not in wa.get("mx-editor#1", ""):
         problems.append(f"typing on GTK: labels {[l for l in la if l.startswith('Words')]}, editor {wa.get('mx-editor#1')}")
     if "Words: 7" not in lb or "Long note" not in lb or '"one two three four five six seven"' not in wb.get("mx-editor#1", ""):
@@ -725,7 +728,8 @@ def m3():
         im = Image.open(shot).convert("RGB")
         x, y, w, h = (int(v) for v in ed)
         crop = im.crop((x + 4, y + 4, x + w - 4, min(y + 60, y + h - 4)))
-        dark = sum(1 for p in crop.getdata() if sum(p) < 300)
+        px = crop.tobytes()
+        dark = sum(1 for i in range(0, len(px), 3) if px[i] + px[i + 1] + px[i + 2] < 300)
         if dark < 80:
             problems.append(f"the GTK screenshot shows no text in the editor's box ({dark} dark pixels)")
     # 2) full rebuilds (MOJOUI_NO_PARTIAL=1): the WebView moves into the new screen, typing goes on
