@@ -653,8 +653,9 @@ CANVAS_JS = r"""
           const res = await fetch(`/frame/${sid}/${n}?w=${w}&h=${h}&scale=${dpr}&v=${shape()}&tick=${tick}&still=${still}`);
           if (res.status !== 200) {
             if (res.headers.get('X-Mojoui-Pending') === '1') update();  // e.g. a frame changed the screen's shape
-            if (res.status === 409) await new Promise(ok => setTimeout(ok, 50));
-            if (res.status === 404) return;
+            if (res.headers.get('X-Mojoui-Retry') === '1') await new Promise(ok => setTimeout(ok, 50));
+            if (res.headers.get('X-Mojoui-Gone') === '1' || res.status === 404) return;
+            if (res.status !== 204) await new Promise(ok => setTimeout(ok, 50));  // (anything else: a short wait, then again)
             continue;
           }
           const img = await createImageBitmap(await res.blob());
@@ -1787,18 +1788,20 @@ def make_app(module_dir):
     def frame(sid: str, n: int, w: int = 0, h: int = 0, scale: float = 1, v: int = -1, tick: int = 0, still: int = 0):
         """One canvas frame as a JPEG, painted by the app at w × h pixels. With tick=1 (the
         canvas asked for frames), a frame event goes to the app first. Changes to the rest of
-        the screen wait in the session until the page asks for /pending."""
+        the screen wait in the session until the page asks for /pending. No frame: 204 with X-Mojoui-Retry (the screen
+        changed under it: ask again once the page has caught up) or X-Mojoui-Gone (the tab or the canvas is gone), never a
+        4xx, which every browser logs as a console error (goal 34 M2 reads the console)."""
         sess = sessions.get(sid)
         if sess is None:
-            return Response(status_code=404)
+            return Response(status_code=204, headers={"X-Mojoui-Gone": "1"})
         with sess.lock:
             if sess.closed:
-                return Response(status_code=404)
+                return Response(status_code=204, headers={"X-Mojoui-Gone": "1"})
             if v != sess.shape or not 0 <= n < len(sess.nodes) or sess.nodes[n]["kind"] != CANVAS:
-                return Response(status_code=409)  # the screen changed under it: the page will catch up
+                return Response(status_code=204, headers={"X-Mojoui-Retry": "1"})  # the screen changed under it: the page will catch up
             now = time.perf_counter()
             if sess.pending and sess.pending.get("rebuild"):  # the page must catch up first; don't run the app on
-                return Response(status_code=409, headers={"X-Mojoui-Pending": "1"})
+                return Response(status_code=204, headers={"X-Mojoui-Retry": "1", "X-Mojoui-Pending": "1"})
             if tick and sess.nodes[n]["msg2"]:
                 last = sess.frame_time.get(n)
                 us = int((now - last) * 1e6) if last else 16667
@@ -1807,7 +1810,7 @@ def make_app(module_dir):
                 sess.nodes = json.loads(mod.view(sess.handle))
                 note(sid, sess)
                 if sess.pending.get("rebuild") or sess.nodes[n]["kind"] != CANVAS:
-                    return Response(status_code=409, headers={"X-Mojoui-Pending": "1"})
+                    return Response(status_code=204, headers={"X-Mojoui-Retry": "1", "X-Mojoui-Pending": "1"})
             else:
                 sess.frame_time.pop(n, None)
             r = json.loads(mod.draw(sess.handle, n, w, h, scale, still))

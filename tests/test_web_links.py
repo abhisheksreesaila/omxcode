@@ -40,6 +40,20 @@ def main():
         html = to_xml(web.render_node(s, 0, "sid"))
         assert ("<iframe" in html) == framed and (url in html) == framed, html
         assert framed or ("Opened in your browser" in html and 'data-refused="1"' in html), html
+        if framed:  # (goal 34: sandboxed by default, D-606)
+            assert 'sandbox="allow-scripts allow-forms"' in html and "allow-same-origin" not in html, html
+    # the sandbox: the default, what an app may add, allow-same-origin only for another origin, nothing else
+    page = "http://127.0.0.1:5001"
+    for asked, url, want in [("", "http://127.0.0.1:8888/lab", "allow-scripts allow-forms"),
+                             ("allow-same-origin allow-downloads", "http://127.0.0.1:8888/lab", "allow-scripts allow-forms allow-downloads allow-same-origin"),
+                             ("allow-same-origin", page + "/other", "allow-scripts allow-forms"),  # (our own origin: never)
+                             ("allow-same-origin", page, "allow-scripts allow-forms"),
+                             ("allow-top-navigation allow-popups-to-escape-sandbox allow-popups", "https://example.com", "allow-scripts allow-forms allow-popups")]:
+        node = dict(base, kind=web.EMBED, text=url, value=1, options=[asked] if asked else [])
+        got = web.frame_sandbox(node, page)
+        assert got == want, (asked, url, got)
+        s = SimpleNamespace(nodes=[dict(node, children=[1]), dict(base, kind=web.TEXT, text="stand-in")], origin=page)
+        assert f'sandbox="{want}"' in to_xml(web.render_node(s, 0, "sid")), (asked, url)
     print("web_links: ok")
 
 

@@ -610,3 +610,9 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - First run: after the rebuild mid-typing (a "Long note" line appears past five words) the next keys landed at the start: "ixone two three four five s". The park/adopt moves reset the DOM selection and CodeMirror took it on selectionchange, because focus and selection were put back only in a later task. Now restored in htmx:oobAfterSwap, synchronously (D-604): text, cursor, focus and the one mount survive.
 - The editor first drew in CodeMirror's monospace: its own theme's `.ͼ1 .cm-scroller` beat my rule; a more specific one gives the note the app's face.
 - M1's build.sh check flagged its own comment's "web/widgets/" as an app name: the check now looks for an app name, not that folder.
+
+## 2026-10-27 · goal 34 M2
+- The first M2 run read the headers through dict(r.headers), and the host sends lower-case names: the check now reads them case-insensitively.
+- Widgets: 0 CSP violations. The injected inline script, inline handler and string setTimeout were all blocked and reported (script-src-elem, script-src-attr, script-src). Non-JSON payloads and non-word event names change nothing. The lint fails on a stray file and on a listed name nobody bundled.
+- Console: the CSP was clean, but its logs and notebook pages logged "409 (Conflict)" from the canvas frame protocol: the endpoint now answers 204 with headers (D-607). WebFrame sandbox + the console's Jupyter opt-in (D-606); tests/test_web_links.py and test_embed prove it.
+- The session restarted mid-M2: the uncommitted work was intact (no stash or checkout), and no stray processes were left.

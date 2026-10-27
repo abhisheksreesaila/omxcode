@@ -346,7 +346,7 @@ def new_widget_probe():
 def fetch(url):
     import urllib.request
     with urllib.request.urlopen(url, timeout=10) as r:
-        return r.status, dict(r.headers), r.read()
+        return r.status, r.headers, r.read()  # (an HTTPMessage: names read case-insensitively)
 
 
 def serve(module_dir, env=None):
@@ -434,8 +434,8 @@ def m2():
         return False, err
     # 1) headers and HTML of the widgets app and the console
     for where, mod in (("widgets", BUILD / WIDGETS / "web"), ("console", BUILD / "console" / "web")):
-        if not (mod / "mojoui_app.so").exists():
-            e = build(mod.parent.name, "web")
+        if where == "console":  # (built from this tree: goal 34 changed the host and the console's frame)
+            e = build("console", "web")
             if e:
                 problems.append(e)
                 continue
@@ -492,7 +492,7 @@ def m2():
     src = (ROOT / "tests/test_web_links.py").read_text()
     if "allow-scripts allow-forms" not in src or "allow-same-origin" not in src:
         problems.append("tests/test_web_links.py doesn't prove WebFrame's default sandbox")
-    return not problems, "; ".join(problems[:8]) or ("strict CSP (script-src 'self', no eval, no inline script or handler), every asset by its "
+    return not problems, "; ".join(problems[:12]) or ("strict CSP (script-src 'self', no eval, no inline script or handler), every asset by its "
                                                      "content hash with immutable caching; the widgets app and the console ran with 0 CSP "
                                                      "violations and 0 console errors; injected script, handler and string-eval blocked; "
                                                      "non-JSON events refused; the asset lint fails a stray or unbundled asset; WebFrame "
