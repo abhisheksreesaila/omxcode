@@ -276,6 +276,14 @@ def android_run(example, steps, shot=None, landscape=False, dpi=None):
         if any(n["package"] == pkg and n["cls"].endswith((".TextView", ".Button", ".EditText")) and n["bounds"][2] > 0 for n in nodes(dump())):
             break
         time.sleep(1)
+    # and until its window has the input focus: after the density and rotation settings and the system-dialog close,
+    # a tap sent while the window manager still hands focus over is dropped (goal 33 M8: "click 2" after 3 taps in
+    # two full runs, "no text changed 2 s after a tap"; 3 of 3 on their own). Still no retried taps.
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if f"mCurrentFocus=Window{{" in (w := adb("shell", "dumpsys", "window")) and re.search(r"mCurrentFocus=Window\{[^}]*" + re.escape(pkg) + "/", w):
+            break
+        time.sleep(0.5)
     time.sleep(1.5)
     scale = density()
     out, failed = "", False
