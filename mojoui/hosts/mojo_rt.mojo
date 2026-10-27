@@ -12,6 +12,9 @@ from std.ffi import external_call, c_int
 def aligned_alloc(align: Int, size: Int) abi("C") -> Int:
     var out: Int = 0
     var a = align if align >= 8 else 8  # posix_memalign needs >= pointer size
+    # (Pointer(to=out) is passed as a typed pointer, so the compiler sees `out` escape and reads it after the call:
+    # checked in the LLVM IR and the arm64-apple-macosx assembly, `ldr x8, [sp, #8]` after `bl _posix_memalign`, D-577.
+    # The lesson's lost write was an Int(address); and a List buffer here would allocate inside the allocator.)
     if external_call["posix_memalign", c_int](Pointer(to=out), a, size) != 0:
         return 0
     return out
