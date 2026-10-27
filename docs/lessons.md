@@ -57,3 +57,4 @@ One line per rule that prevents a mistake that happened.
 - A script that imports scripts/check.py's runners must call `headless.ensure()` itself (check.py does it in main): without it the GTK app opens on the owner's display and reports unlaid boxes ("window had no frame").
 - Worktrees share one pixi env through a .pixi symlink to ../mojo-ui/.pixi: never change pixi.toml or run `pixi install` in a linked worktree (it changes every checkout at once); give the worktree its own env first (remove the symlink) — the Mojo 1.2 probe upgraded all checkouts for a minute (2026-10-26).
 - 2026-10-26 · Android: a tap sent before the app's window has the input focus is dropped (after density/rotation settings and a system-dialog close): android_drive waits for mCurrentFocus before its first step (D-562).
+- 2026-10-27 · (encoded) docs/llms-full.txt went stale after a matrix regeneration twice in goal 33's M8 runs: scripts/components.py now rewrites it with the matrix (D-580).

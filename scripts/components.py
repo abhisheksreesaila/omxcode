@@ -1,6 +1,6 @@
 """The component × platform matrix, generated from the code (docs/components.md), so it can't drift.
 
-  pixi run python scripts/components.py          # rewrite docs/components.md
+  pixi run python scripts/components.py          # rewrite docs/components.md (and docs/llms-full.txt, which embeds it)
   pixi run python scripts/components.py --check  # exit 1 if docs/components.md is out of date (scripts/check runs this)
 
 A cell is:
@@ -290,6 +290,11 @@ def main():
         return 0
     path.write_text(doc)
     print(f"wrote {path}")
+    # docs/llms-full.txt embeds this matrix: rewrite it too, or a regenerated matrix leaves it stale (twice in goal 33, D-580)
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import llms
+    llms.OUT.write_text(llms.build())
+    print(f"wrote {llms.OUT}")
     return 0
 
 
