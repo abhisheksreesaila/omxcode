@@ -4,7 +4,7 @@
 
 from mojoui.view import View, Text, Button, Icon, HStack, VStack, Spacer, SUBTLE, ICON_ONLY, CENTER, START
 from mojoui.breadcrumbs import Breadcrumbs
-from mojoui.route import Place, crumbs_for
+from places import Place, crumbs_for
 from mojoui.shell import AppBar, Brand, BarRule, NavLink, NavLinks, NavMore
 from mojoui.beacon import Beacon
 from data import Store, hardware, fmt, rounded

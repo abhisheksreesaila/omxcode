@@ -16,7 +16,7 @@ from mojoui.breadcrumbs import Breadcrumbs
 from mojoui.chip import Chip, Badge, Pill, BADGE_OK
 from mojoui.confirm import TwoStep, ConfirmButton
 from mojoui.skeleton import Skeleton
-from mojoui.route import Route, parse_route, route_for, crumbs_for, Place
+from mojoui.route import Route, Router, Match
 from mojoui.markdown import Markdown
 from mojoui.paragraph import Paragraph, Plain, Code, Link
 from mojoui.sparkline import Sparkline, SparklineView
@@ -36,6 +36,15 @@ comptime CRUMB = 10  # + the crumb's place in the trail
 comptime TICK_ALL = 99
 comptime TICK = 100  # + the row
 comptime SPARK = 0  # the sparkline's canvas
+
+
+
+def pages() -> Router:
+    """The sampler's places, as the console's: a table of patterns and their trails (mojoui.route matches and writes)."""
+    return (Router("home").page("home", "/", ["My models"])
+            .page("keys", "/keys", ["API keys"])
+            .page("model", "/models/:model*/:tab(overview|benchmark|logs|notebook)?", ["My models", ":model"]))
+
 
 comptime CODE = "curl http://127.0.0.1:11435/v1/models"
 comptime NOTES = "## Notes\nRun **qwen2.5-0.5b** with `mxc run qwen2.5-0.5b`, then ask it anything.\n\n- answers stay on this machine\n- [docs](https://example.com/docs)"
@@ -84,11 +93,11 @@ struct Main(App):
     def update(mut self, event: Event):
         var m = event.message
         if m == ROUTE:
-            self.path = route_for(parse_route(event.text))  # (its canonical form: "#" alone is home, "/")
+            self.path = pages().canonical(event.text)  # (its canonical form: "#" alone is home, "/")
         elif m == OPEN_KEYS:
             self.path = "/keys"
         elif m == OPEN_LOGS:
-            self.path = route_for(Place("model", "qwen2.5-0.5b", "logs"))
+            self.path = pages().path_for(Match("model").with_param("model", "qwen2.5-0.5b").with_param("tab", "logs"))
         elif CRUMB <= m < CRUMB + 4:
             if m == CRUMB:
                 self.path = "/"
@@ -138,8 +147,8 @@ struct Main(App):
         return out^
 
     def view(self) -> View:
-        var place = parse_route(self.path)
-        var said = self.path + ": " + (("model " + place.model + ", tab " + place.tab) if place.page == "model" else place.page)
+        var place = pages().parse(self.path)
+        var said = self.path + ": " + (("model " + place["model"] + ", tab " + place["tab"]) if place.page == "model" else place.page)
         var names: List[String] = ["qwen2.5-0.5b", "all-minilm-l6", "llama3.2-1b"]
         var ids: List[String] = ["Qwen/Qwen2.5-0.5B-Instruct", "sentence-transformers/all-MiniLM-L6-v2", "meta-llama/Llama-3.2-1B-Instruct"]
         var cells: List[View] = []
@@ -159,7 +168,7 @@ struct Main(App):
         var confirm_state = ("armed" if self.keys.is_armed(0) else "idle") + ", revoked " + ("none" if self.revoked == 0 else "notes-app")
         var done = min(self.stage, len(materialize[STAGES]()))
         var left = Card(
-            Breadcrumbs(crumbs_for(place), on_tap=CRUMB, mono_last=place.page == "model"),
+            Breadcrumbs(pages().crumbs(place), on_tap=CRUMB, mono_last=place.page == "model"),
             HStack(Text("route: " + self.path).tooltip(said).tag("route-state"), Spacer(), Button("Open qwen logs", on_tap=OPEN_LOGS), Button("Open keys", on_tap=OPEN_KEYS), spacing=8).align(CENTER).fill(),
             HStack(Text("My models", HEADLINE), Pill("3"), spacing=8).align(CENTER),
             Table(["Model", "State", "Kind · labels", "Size", "Memory", "Tok/s", "Access"], cells, align="LLLRRRL",

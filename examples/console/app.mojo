@@ -12,7 +12,8 @@ from mojoui.http import Request, uri_component
 from mojoui.effects import Every
 from mojoui.canvas import Surface
 from mojoui.theme import Theme, mix
-from mojoui.route import Route, Place, parse_route, route_for
+from mojoui.route import Route
+from places import Place, parse_route, route_for
 from mojoui.overlays import Clipboard
 from mojoui.confirm import TwoStep
 from mojoui.sparkline import Sparkline, BarTrack
