@@ -1,3 +1,3 @@
 Goal 26: the Scene (MOJOUI_SCENE=1), same run as the baseline
 glide: 2180x1074 px, 130 draws, build p50 0.2 ms p95 0.2 ms, replay p50 0.0 ms p95 0.1 ms, frame interval p50 16.7 p99 16.7, cells built 0, textures 0
-scroll: 2180x1074 px, 60 draws, build p50 0.2 ms p95 0.2 ms, replay p50 0.6 ms p95 0.7 ms, frame interval p50 16.7 p99 16.7, cells built 60, textures 0
+scroll: 2180x1074 px, 60 draws, build p50 0.2 ms p95 0.2 ms, replay p50 0.6 ms p95 0.6 ms, frame interval p50 16.7 p99 16.7, cells built 60, textures 0
