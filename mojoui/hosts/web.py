@@ -850,28 +850,44 @@ FRAME_EXTRA = ("allow-popups", "allow-modals", "allow-downloads", "allow-same-or
 
 
 FRAME_ALLOW = ("clipboard-read", "clipboard-write", "fullscreen")  # what a WebFrame may ask for (options[1]); none by default
-LOOPBACK = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"}
+# Names of the machine the host runs on. localhost and 127.0.0.1 reach the same server only because the host binds
+# 127.0.0.1 (main(): uvicorn.run(host="127.0.0.1")); IPv6 literals ([::1]) are never plain (origin_parts), so not listed.
+LOOPBACK = {"localhost", "127.0.0.1", "0.0.0.0"}
+PLAIN_URL = re.compile(r"(?i)(https?)://([^/?#]*)")
+DOTTED_IPV4 = re.compile(r"(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}")
+DNS_LABEL = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 
 
 def origin_parts(url):
-    """(scheme, host, port) as a browser compares origins: the scheme and host in lower case, the default port filled in,
-    user info and everything after the host dropped; None for anything that isn't a plain http(s) URL with a host."""
-    try:
-        p = urlsplit(url.strip())
-        scheme = p.scheme.lower()
-        host = (p.hostname or "").rstrip(".").lower()
-        port = p.port
-    except ValueError:
+    """(scheme, host, port) of a URL whose authority is plain, else None. Python's urlsplit and the browser's URL parser
+    disagree on unusual URLs (a backslash, "%" escapes, user info, IPv4 written as 127.1, 2130706433 or 0x7f.0.0.1, IPv6
+    literals), so this doesn't try to out-parse the browser: only a plain authority counts (D-624): no backslash anywhere,
+    no "@" or "%" in it, a host that is a dotted IPv4 address written the one plain way or a DNS name (labels of a-z, 0-9
+    and inner hyphens, the last with a letter; upper case is lowered, one trailing dot dropped), and a port of digits."""
+    if "\\" in url or url != url.strip() or any(ord(c) <= 32 or ord(c) == 127 for c in url):
         return None
-    if scheme not in ("http", "https") or not host:
+    m = PLAIN_URL.match(url)
+    if not m:
         return None
-    return scheme, host, port or (443 if scheme == "https" else 80)
+    scheme, authority = m.group(1).lower(), m.group(2)
+    if "@" in authority or "%" in authority or "[" in authority or "]" in authority:
+        return None
+    host, _, port = authority.partition(":")
+    if ":" in port or (port and not (port.isdigit() and len(port) <= 5 and int(port) <= 65535)):
+        return None
+    host = host.lower()
+    host = host[:-1] if host.endswith(".") else host
+    if not DOTTED_IPV4.fullmatch(host):
+        labels = host.split(".")
+        if not host or not all(DNS_LABEL.fullmatch(l) for l in labels) or not any(c.isalpha() for c in labels[-1]):
+            return None
+    return scheme, host, int(port) if port else (443 if scheme == "https" else 80)
 
 
 def same_origin_or_unsure(url, origin):
     """Whether `url` may be on this page's own origin: the same scheme, host and port, or two names of this machine on
     the same port (localhost and 127.0.0.1: the browser would call them two origins, but they reach the same server), or
-    either side unknown (no origin known, or one that can't be parsed): unsure counts as ours."""
+    either side unknown (no origin known, or a URL whose authority isn't plain, origin_parts): unsure counts as ours."""
     a, b = origin_parts(url), origin_parts(origin) if origin else None
     if a is None or b is None:
         return True

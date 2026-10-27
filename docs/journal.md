@@ -633,3 +633,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - I ran `pkill -f "Xvfb :97"` to clean up the M3 prototype display: it matched and killed my own shell, the lesson docs/lessons.md already states. Stop only PIDs I started.
 
 - Full run after the fixes: M0 PASS (17 s), M1 PASS (18 s), M2 PASS (105 s), M3 PASS (adds the crash and forged-reply proofs), M4 PASS (515 s).
+
+## 2026-10-27 · goal 34 review round 2 (NEEDS WORK → fixes)
+- The reviewer's spellings first (`\@`, 127.1, 2130706433, 0x7f.0.0.1, %31, [::ffff:127.0.0.1], [::1], octal, zero-padded, user info, % in a name, numeric last label, _ and leading hyphens): red at the first; then origin_parts accepts only a plain authority (D-624). Jupyter's 127.0.0.1:8888 and plain foreign names still get allow-same-origin.
+- Launcher: a fake bwrap that answers --help but can't run, and a WebKitGTK path with a quote, space and $: red, then a trial `bwrap … true` and the path read from a file (D-625, D-626).
+- After: tests/test_web_links.py and tests/test_webkit_launcher.sh ok; check M2 PASS (89 s), M3 PASS.

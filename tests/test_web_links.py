@@ -67,6 +67,18 @@ def main():
     for url, origin in [("https://example.com/a", "http://example.com"), ("http://127.0.0.1:8888/lab", page), ("http://other.host:5001/", page)]:
         node = dict(base, kind=web.EMBED, text=url, value=1, options=["allow-same-origin"])
         assert "allow-same-origin" in web.frame_sandbox(node, origin), (url, origin)
+    # where Python's urlsplit and the browser's URL parser read a URL differently (reviewer round 2, D-624): a backslash,
+    # "%" or "@" in the authority, an IPv4 address in any spelling but the plain dotted one, an IPv6 literal, a host that
+    # isn't a DNS name: none gets allow-same-origin (the browser may read our own origin there)
+    for url in ["http://127.0.0.1:5001\\@evil.com/", "http://evil.com\\@127.0.0.1:5001/", "http://127.1:5001/", "http://2130706433:5001/",
+                "http://0x7f.0.0.1:5001/", "http://127.0.0.%31:5001/", "http://[::ffff:127.0.0.1]:5001/", "http://[::1]:5001/",
+                "http://0177.0.0.1:5001/", "http://127.000.000.001:5001/", "http://evil.com@example.org/", "http://exa%6dple.com/",
+                "http://example.123/", "http://exa_mple.com/", "http://-bad.com/", "http://a..b.com/", "http://evil.com:5001\\x"]:
+        node = dict(base, kind=web.EMBED, text=url, value=1, options=["allow-same-origin"])
+        assert "allow-same-origin" not in web.frame_sandbox(node, page), url
+    for url in ["https://jupyter.example.org/lab", "http://notebook.local:8888/", "http://127.0.0.1:8888/lab", "HTTPS://Example.com/x"]:
+        node = dict(base, kind=web.EMBED, text=url, value=1, options=["allow-same-origin"])
+        assert "allow-same-origin" in web.frame_sandbox(node, page), url  # (a plain foreign name, or our machine on another port)
     # unsure of our own origin (none known, or behind a proxy that rewrote it): never allow-same-origin
     node = dict(base, kind=web.EMBED, text="http://127.0.0.1:8888/lab", value=1, options=["allow-same-origin"])
     assert "allow-same-origin" not in web.frame_sandbox(node, ""), "no origin"
