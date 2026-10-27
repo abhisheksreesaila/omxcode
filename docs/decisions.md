@@ -592,3 +592,6 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 - D-625 · the GTK launcher runs `bwrap <the same overlay> true` first and runs the app directly if it fails (user namespaces off, an overlay refused), not only when bwrap is missing or old · reversible? yes
 - D-626 · the launcher reads the WebKitGTK folder's path from <app>.webkitgtk beside it at run time, so a quote, space or $ in the path is never shell code; tests/test_webkit_launcher.sh covers a path with all three and a bwrap that can't run · reversible? yes
 - D-627 · a frame's host counts as a DNS name only when its last label starts with a letter (every TLD does; xn-- too): the browser reads a last label like 0x1, 0x or 1e3 as a number and the host as IPv4, so 127.0.0.0x1 or 0x7f.0x0.0x0.0x1 is our 127.0.0.1 (reviewer round 3); ports are ASCII digits only; the redundant strip test removed · reversible? yes
+
+## Goal 34b: JS widgets everywhere, and agents see them (2026-10-27)
+- D-630 · order: agents first (the cover page claims every app is agent-usable), then a second library (ECharts, offline, no tile server), then the Mac's WKWebView through mac-ci · reversible? yes
