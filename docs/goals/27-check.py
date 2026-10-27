@@ -127,7 +127,9 @@ def m3():
     shots.shoot(head, others_only=True)
     meant = {"fluent-gtk.png": "P9: bars lost their track", "fluent-web.png": "P9: bars lost their track",  # (the polish's own changes)
              "omarchy-gtk.png": "MX Studio follows the desktop's live Omarchy theme (it changed on 2026-10-19 21:34, after M0)",
-             "omarchy-web.png": "the same: the move itself is proven by after-move, shot before the change (D-267)"}
+             "omarchy-web.png": "the same: the move itself is proven by after-move, shot before the change (D-267)",
+             "kit-web.png": "goal 32's D-307: segments fill their row equally and a toggle row is a control high on the web; the footer says omxcode (D-289)",
+             "kit-graphite-web.png": "the same (D-307, D-289; D-560)"}
     drift = [(n, s) for n, s in shots.compare(a, head) if s is not None and n not in meant and s > noise.get(n, 0) + 0.002]
     missing = [n for n, s in shots.compare(a, head) if s is None and not n.startswith("omx-")]
     if drift or missing:

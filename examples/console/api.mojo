@@ -3,7 +3,7 @@
 # ADMIN: "1" when unset, as the original sends). Replies come back to update() as Events.
 
 from mojoui.http import Http, Request
-from std.os import getenv
+from mojoui.shared import environment
 
 comptime DEFAULT_URL = "http://127.0.0.1:8765"
 
@@ -14,25 +14,25 @@ struct Api(Movable):
 
     def __init__(out self):
         self.http = Http()
-        var url = getenv("MXC_URL", DEFAULT_URL)
+        var url = environment("MXC_URL", DEFAULT_URL)
         self.base = String(url.rstrip("/"))
 
     def admin(self, var r: Request) -> Request:
-        if getenv("MXC_ADMIN_KEY") != "":
+        if environment("MXC_ADMIN_KEY") != "":
             return r^.header_from_env("X-Mst-Admin", "MXC_ADMIN_KEY").timeout(15000)
         return r^.header("X-Mst-Admin", "1").timeout(15000)
 
-    def get(mut self, msg: Int, path: String, id: Int = 0):
-        self.http.send(self.admin(Request.get(msg, self.base + path).tagged(id)))
+    def get(mut self, message: Int, path: String, id: Int = 0):
+        self.http.send(self.admin(Request.get(message, self.base + path).tagged(id)))
 
-    def post(mut self, msg: Int, path: String, json: String = "", id: Int = 0):
+    def post(mut self, message: Int, path: String, json: String = "", id: Int = 0):
         if json == "":
-            self.http.send(self.admin(Request(msg, "POST", self.base + path, "").tagged(id)))
+            self.http.send(self.admin(Request(message, "POST", self.base + path, "").tagged(id)))
         else:
-            self.http.send(self.admin(Request.post_json(msg, self.base + path, json).tagged(id)))
+            self.http.send(self.admin(Request.post_json(message, self.base + path, json).tagged(id)))
 
-    def send(mut self, msg: Int, method: String, path: String, json: String = "", id: Int = 0):
-        var r = Request(msg, method, self.base + path, json)
+    def send(mut self, message: Int, method: String, path: String, json: String = "", id: Int = 0):
+        var r = Request(message, method, self.base + path, json)
         if json != "":
             r = r^.header("Content-Type", "application/json")
         self.http.send(self.admin(r^.tagged(id)))

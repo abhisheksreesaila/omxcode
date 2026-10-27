@@ -270,8 +270,10 @@ def g3_m6():
             problems.append(msg)
     for src in sorted((ROOT / "examples").glob("*/app.mojo")):  # every app that exists
         ex = src.parent.name
-        code = "\n".join(l.split("#")[0] for l in src.read_text().splitlines())
-        bad_imports = [i for i in re.findall(r"^\s*(?:from|import)\s+([\w.]+)", code, re.M) if not (i.startswith("mojoui") or i.startswith("themes."))]  # (themes are plain Mojo on top of mojoui, platform-free: D-264)
+        # (an app may be split into modules in its own folder, examples/console's: each is read as the app is, D-560)
+        own = {p.stem for p in src.parent.glob("*.mojo")}
+        code = "\n".join(l.split("#")[0] for p in sorted(src.parent.glob("*.mojo")) for l in p.read_text().splitlines())
+        bad_imports = [i for i in re.findall(r"^\s*(?:from|import)\s+([\w.]+)", code, re.M) if not (i.startswith("mojoui") or i.startswith("themes.") or i in own)]  # (themes are plain Mojo on top of mojoui, platform-free: D-264)
         leaks = sorted(set(PLATFORM_WORDS.findall(code)))
         if bad_imports or leaks:
             problems.append(f"{ex}: imports {bad_imports}, platform words {leaks}")

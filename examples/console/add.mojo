@@ -6,7 +6,7 @@
 # is polled every 0.7 s; the stages' clock ticks every 0.5 s. This file is the state and its rules (the original's pure
 # helpers, ported) and the screen; addflow.mojo is what each message and reply does.
 
-from std.math import floor
+from mojoui.shared import floored
 from mojoui.view import View, Text, VStack, HStack, Spacer, Scroll, Divider, START, CENTER, END
 from mojoui.json import Json, J_NULL, J_NUMBER, J_STRING, J_ARRAY, J_OBJECT
 from mojoui.timeline import Timeline, Stage, STAGE_PENDING, STAGE_RUNNING, STAGE_DONE, STAGE_FAILED, STAGE_CANCELLED, elapsed_text, stage_elapsed
@@ -55,7 +55,7 @@ def params_text(n: Float64) -> String:
         return ""
     if n >= 1e9:
         return trim1(n / 1e9) + "B"
-    return String(Int(floor(n / 1e6 + 0.5))) + "M"
+    return String(Int(floored(n / 1e6 + 0.5))) + "M"
 
 
 def bytes_text(n: Float64) -> String:
@@ -64,17 +64,17 @@ def bytes_text(n: Float64) -> String:
     if n >= 1e9:
         return trim1(n / 1e9) + " GB"
     if n >= 1e6:
-        return String(Int(floor(n / 1e6 + 0.5))) + " MB"
+        return String(Int(floored(n / 1e6 + 0.5))) + " MB"
     if n >= 1e3:
-        return String(Int(floor(n / 1e3 + 0.5))) + " KB"
+        return String(Int(floored(n / 1e3 + 0.5))) + " KB"
     return String(Int(n)) + " B"
 
 
 def eta_text(sec: Float64) -> String:
     if sec < 60:
-        return String(Int(floor(sec + 0.5))) + "s"
-    var r = Int(floor(sec - 60 * floor(sec / 60) + 0.5))
-    return String(Int(floor(sec / 60))) + "m " + ("0" if r < 10 else "") + String(r) + "s"
+        return String(Int(floored(sec + 0.5))) + "s"
+    var r = Int(floored(sec - 60 * floored(sec / 60) + 0.5))
+    return String(Int(floored(sec / 60))) + "m " + ("0" if r < 10 else "") + String(r) + "s"
 
 
 def arch_short(a: String) -> String:

@@ -143,9 +143,9 @@ struct SecurityPage(Copyable, Movable):
 def message_or(event: Event) -> String:
     try:
         var j = Json.parse(event.text)
-        var msg = j.text(j.get(j.get(0, "error"), "message"))
-        if msg != "":
-            return msg
+        var said = j.text(j.get(j.get(0, "error"), "message"))
+        if said != "":
+            return said
     except:
         pass
     return event.error if event.error != "" else "HTTP " + String(event.number)

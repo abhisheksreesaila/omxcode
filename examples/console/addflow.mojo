@@ -45,9 +45,9 @@ def problem(event: Event) -> String:
     try:
         var j = Json.parse(event.text)
         var e = j.get(0, "error")
-        var msg = j.text(j.get(e, "message")) if j.kind(e) == J_OBJECT else j.text(e)
-        if msg != "":
-            return msg
+        var said = j.text(j.get(e, "message")) if j.kind(e) == J_OBJECT else j.text(e)
+        if said != "":
+            return said
     except:
         pass
     return "HTTP " + String(event.number)

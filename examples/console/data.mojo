@@ -3,7 +3,7 @@
 # Pure: no views, no requests. Every screen reads a Store.
 
 from mojoui.json import Json, J_NULL, J_NUMBER, J_STRING, J_ARRAY, J_OBJECT, J_BOOL
-from std.math import floor
+from mojoui.shared import floored
 
 
 @fieldwise_init
@@ -274,7 +274,7 @@ def json_value(j: Json, node: Int) -> String:
         return "null"
     if k == J_NUMBER:
         var v = j.real(node)
-        if v == floor(v) and abs(v) < 1e15:
+        if v == floored(v) and abs(v) < 1e15:
             return String(Int(v))
         return String(v)
     return "…"
@@ -286,7 +286,7 @@ def rounded(v: Float64, digits: Int) -> Float64:
     var m = 1.0
     for _ in range(digits):
         m *= 10
-    return floor(abs(v) * m + 0.5) / m * (1.0 if v >= 0 else -1.0)
+    return floored(abs(v) * m + 0.5) / m * (1.0 if v >= 0 else -1.0)
 
 
 def round1(v: Float64) -> Float64:
@@ -308,14 +308,14 @@ def grouped(n: Int) -> String:
 def fmt(v: Float64, digits: Int = 0) -> String:
     """toLocaleString(en-US, maximumFractionDigits: digits): thousands with commas, no trailing zeros."""
     var r = rounded(v, digits)
-    var whole = Int(floor(abs(r)))
+    var whole = Int(floored(abs(r)))
     var frac = abs(r) - Float64(whole)
     var out = grouped(whole)
     if digits > 0:
         var m = 1
         for _ in range(digits):
             m *= 10
-        var f = Int(floor(frac * Float64(m) + 0.5))
+        var f = Int(floored(frac * Float64(m) + 0.5))
         if f >= m:
             out = grouped(whole + 1)
             f = 0
@@ -332,7 +332,7 @@ def fmt(v: Float64, digits: Int = 0) -> String:
 
 def dur(seconds: Float64) -> String:
     """core.js dur: 1s, 5m, 1h, 1m 5s."""
-    var sec = Int(floor(seconds + 0.5))
+    var sec = Int(floored(seconds + 0.5))
     if sec >= 3600 and sec % 3600 == 0:
         return String(sec // 3600) + "h"
     if sec >= 60 and sec % 60 == 0:
@@ -346,9 +346,9 @@ def size_label(bytes: Float64) -> String:
     """library-logic.js sizeLabel: 988 MB, 2.5 GB, – when unknown."""
     if bytes <= 0:
         return "–"
-    var mb = max(1, Int(floor(bytes / 1e6 + 0.5)))
+    var mb = max(1, Int(floored(bytes / 1e6 + 0.5)))
     if mb >= 1000:
-        var tenths = Int(floor(bytes / 1e8 + 0.5))
+        var tenths = Int(floored(bytes / 1e8 + 0.5))
         return String(tenths // 10) + "." + String(tenths % 10) + " GB"
     return String(mb) + " MB"
 
@@ -358,7 +358,7 @@ comptime MONTHS: List[String] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"
 
 def date_time(ts: Float64) -> String:
     """core.js dateTime in en-US, UTC: "Oct 25, 21:34"."""
-    var secs = Int(floor(ts))
+    var secs = Int(floored(ts))
     var days = secs // 86400
     var rem = secs % 86400
     # civil from days (Howard Hinnant)

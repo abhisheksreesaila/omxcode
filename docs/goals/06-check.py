@@ -251,7 +251,9 @@ def m7():
                         "mojoui/hosts/uikit.mojo": ["CANVAS", "UIImageView", "CADisplayLink", "UIPanGestureRecognizer",
                                                      "UIPinchGestureRecognizer", "draw_canvas"]}.items():
         text = (ROOT / host).read_text()
-        missing = [w for w in words if w not in text]
+        # (the Mac's canvases tick from a 60 Hz NSTimer since 6ce216a: the view's display link never fired on macOS 26;
+        # either clock counts as the frame clock, D-560)
+        missing = [w for w in words if w not in text and not (w == "displayLinkWithTarget" and "timerWithTimeInterval:target:selector:userInfo:repeats:" in text)]
         if missing:
             problems.append(f"{host} lacks {missing}")
     bad = g5.same_source("lens", ["linux", "web", "mac", "ios"])

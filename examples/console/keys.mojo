@@ -219,8 +219,8 @@ def message_of(text: String, default: String) -> String:
     """The daemon's error message ({"error": {"message"}}), or `default`."""
     try:
         var j = Json.parse(text)
-        var msg = j.text(j.get(j.get(0, "error"), "message"))
-        return msg if msg != "" else default
+        var said = j.text(j.get(j.get(0, "error"), "message"))
+        return said if said != "" else default
     except:
         return default
 

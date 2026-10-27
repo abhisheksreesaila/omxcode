@@ -3,7 +3,7 @@
 # /admin/gateway and /admin/litellm/log?bytes=8000 on arrival and every 4 s; the recent requests are core.js's poll
 # (/admin/requests?limit=40, handed over by app.mojo); POST /admin/litellm/restart.
 
-from std.math import floor
+from mojoui.shared import floored
 from mojoui.view import View, Text, VStack, HStack, Spacer, CENTER, START
 from mojoui.app import Event
 from mojoui.effects import Every
@@ -47,7 +47,7 @@ struct RequestRow(Copyable, Movable):
 
 def clock(ts: Float64) -> String:
     """core.js clock: the time of day, 21:36:33 (UTC, as the shots read it)."""
-    var s = Int(floor(ts)) % 86400
+    var s = Int(floored(ts)) % 86400
     var h = s // 3600
     var m = (s % 3600) // 60
     var sec = s % 60

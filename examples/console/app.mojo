@@ -469,8 +469,8 @@ struct Main(App):
         if p.page == "model":
             var k = self.store.model(p.model)
             if k < 0:
-                var msg = "Loading…" if not self.store.loaded else "This model is not registered any more."
-                return PageCard([CardNote(msg)])
+                var said = "Loading…" if not self.store.loaded else "This model is not registered any more."
+                return PageCard([CardNote(said)])
             var model = self.store.models[k].copy()
             var body: View
             if p.tab == "benchmark":

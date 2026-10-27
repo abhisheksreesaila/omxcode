@@ -9,6 +9,7 @@
 #   def __init__(out self):
 #       self.frame = Frame(get_shared(0))
 
+from std.math import floor
 from std.os import getenv, setenv, makedirs
 from std.ffi import external_call, c_int
 from std.memory.alloc import alloc, Layout
@@ -31,6 +32,11 @@ def get_shared(slot: Int) -> Int:
         return Int(text)
     except:
         return 0
+
+
+def floored(x: Float64) -> Float64:
+    """The largest whole number not above x (apps import this rather than std.math, so they stay platform-free)."""
+    return floor(x)
 
 
 def environment(name: String, default: String = "") -> String:
