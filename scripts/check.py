@@ -172,7 +172,9 @@ def m0():
     if not any(l.startswith("mx-counter#1: count 7, step 2") for l in lines_with(out, "WIDGET: ")):
         problems.append(f"the dump doesn't describe the widget as count 7, step 2 ({lines_with(out, 'WIDGET: ')})")
     # the note: a placeholder editor (a text area), a word count, a small chart drawn by mojoui
-    ok2, out2 = widgets_web("textarea:0=one two three four", shot="m0-note-web.png")
+    # (M0 typed into a text area standing in for the editor; since M1 it's the editor itself)
+    ok2, out2 = widgets_web("keys:mx-editor .cm-content=one two three four" if (ROOT / "examples/widgets/web/widgets/editor.ts").exists()
+                            else "textarea:0=one two three four", shot="m0-note-web.png")
     if not ok2:
         problems.append("note run failed: " + out2[-400:])
     elif "Words: 4" not in lines_with(out2, "LABEL: ") or not re.search(r"^CANVAS: ", out2, re.M) and "[data-kind=canvas]" not in out2:
@@ -219,7 +221,7 @@ def m1():
         if f not in tracked:
             problems.append(f"{f} isn't committed")
     bs = (ROOT / "scripts/build.sh").read_text()
-    if "web/package.json" not in bs or "web_assets.py" not in bs or "widgets" in bs:
+    if "web/package.json" not in bs or "web_assets.py" not in bs or re.search(r"examples/widgets|\bwidgets\b(?!/)", bs):  # (no app named: web/widgets/ is every app's folder)
         problems.append("scripts/build.sh doesn't run the npm/esbuild step generically (for any app with a web/package.json)")
     doc = (ROOT / "docs/js.md").read_text().lower()
     for topic in ("package.json", "definewidget", "webcomponent(", "command", "security", "content-security-policy", "new_widget.sh"):
@@ -272,7 +274,7 @@ def m1():
         problems.append(f"the word count didn't follow (labels {labels[:12]})")
     if "Long note" not in labels:
         problems.append("the rebuild-making line (Long note) never showed")
-    problems += csp_clean(out, "editor run") if (ROOT / "mojoui/hosts/static/csp.txt").exists() else []
+    problems += csp_clean(out, "editor run")
     problems += new_widget_probe()
     return not problems, "; ".join(problems) or ("CodeMirror 6 from npm (lockfile), bundled and minified offline by esbuild, its widget in "
                                                  "TypeScript; typing reaches update() (word count), a rebuild mid-typing keeps the text, cursor, "

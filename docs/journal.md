@@ -604,3 +604,9 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - The step format splits on ";": the checks' js probes are expressions without one.
 - A 404 for /favicon.ico was a console error on every page: the host answers 204.
 - The CSP went in with M0's host changes (the M2 proof was already written): M0 PASS, M4 (goal 33's M1, M2, M4, M5) PASS under it.
+
+## 2026-10-27 · goal 34 M1
+- CodeMirror 6 (@codemirror/state 6.5.2, view 6.38.1, commands 6.8.1; lockfile from `npm install --package-lock-only --ignore-scripts`), its widget in TypeScript (editor.ts, 257 KB minified with CodeMirror). Mojo builds of the app take ~13 s; npm ci is skipped after the first build.
+- First run: after the rebuild mid-typing (a "Long note" line appears past five words) the next keys landed at the start: "ixone two three four five s". The park/adopt moves reset the DOM selection and CodeMirror took it on selectionchange, because focus and selection were put back only in a later task. Now restored in htmx:oobAfterSwap, synchronously (D-604): text, cursor, focus and the one mount survive.
+- The editor first drew in CodeMirror's monospace: its own theme's `.ͼ1 .cm-scroller` beat my rule; a more specific one gives the note the app's face.
+- M1's build.sh check flagged its own comment's "web/widgets/" as an app name: the check now looks for an app name, not that folder.

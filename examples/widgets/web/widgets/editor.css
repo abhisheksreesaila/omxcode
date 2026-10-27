@@ -1,0 +1,9 @@
+/* mx-editor's frame in the app's theme (the palette's --o-* variables): CodeMirror styles its own insides. */
+mx-editor { display: block; min-height: 220px; border-radius: 10px; border: 1px solid var(--o-line, rgba(120, 120, 128, .28));
+  background: var(--o-card, #fff); color: var(--o-ink, inherit); overflow: hidden; }
+mx-editor:focus-within { border-color: var(--o-accent, #0a84ff); box-shadow: 0 0 0 3px var(--o-wash, rgba(10, 132, 255, .15)); }
+mx-editor .cm-editor { min-height: 220px; font-size: 14px; line-height: 1.55; }
+mx-editor .cm-editor.cm-focused { outline: none; }
+mx-editor .cm-editor .cm-scroller { font-family: inherit; line-height: inherit; }  /* (the app's text face, not CodeMirror's monospace: it's a note) */
+mx-editor .cm-content { padding: 12px 14px; caret-color: var(--o-accent, currentColor); }
+mx-editor .cm-placeholder { color: var(--o-ink3, #8e8e93); }

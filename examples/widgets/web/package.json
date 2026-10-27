@@ -1,0 +1,11 @@
+{
+  "name": "mojoui-widgets-example",
+  "private": true,
+  "description": "examples/widgets' npm packages: bundled by scripts/web_assets.py (esbuild) at build time, installed from package-lock.json with npm ci",
+  "license": "MIT",
+  "dependencies": {
+    "@codemirror/commands": "6.8.1",
+    "@codemirror/state": "6.5.2",
+    "@codemirror/view": "6.38.1"
+  }
+}

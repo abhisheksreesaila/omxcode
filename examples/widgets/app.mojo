@@ -1,9 +1,10 @@
-# widgets: a note with JavaScript inside (goal 34). The note's editor, its word count and a small chart of the count
-# over edits are the app; a vendored counter widget (web/widgets/counter.js) proves the seam both ways: its props come
-# from Mojo, its clicks reach update(), Mojo asks it for its count (a command) and hears the answer. Every line of state
-# is Mojo; each widget is a script bundle the app lists in web_assets() (scripts/web_assets.py builds them).
+# widgets: a note with JavaScript inside (goal 34). The note's editor is CodeMirror 6 from npm (web/package.json, its
+# widget in TypeScript: web/widgets/editor.ts); its word count and a small chart of the count over edits are Mojo. A
+# vendored counter widget (web/widgets/counter.js) proves the seam both ways: its props come from Mojo, its clicks reach
+# update(), Mojo asks it for its count (a command) and hears the answer. Every line of state is Mojo; each widget is a
+# script bundle the app lists in web_assets() (scripts/web_assets.py builds them).
 
-from mojoui.view import View, Text, Button, TextArea, VStack, HStack, Card, CAPTION, HEADLINE, TITLE, PROMINENT, START, SPACE_XS, SPACE_S, SPACE_M, SPACE_L
+from mojoui.view import View, Text, Button, VStack, HStack, Card, Spacer, CAPTION, HEADLINE, TITLE, PROMINENT, START, SPACE_XS, SPACE_S, SPACE_M, SPACE_L
 from mojoui.app import App, Event
 from mojoui.canvas import Surface
 from mojoui.theme import Theme
@@ -12,13 +13,16 @@ from mojoui.sparkline import Sparkline, SparklineView
 from mojoui.webcomponent import WebComponent, Props, Command, Widgets
 from themes.omxqua import omxqua
 
-comptime TYPED = 1  # the note's text changed (event.text)
 comptime COUNTER = 2  # the counter's events (event.name "click", event.text {"count", "step"})
 comptime BIGGER = 3
 comptime ASK = 4
 comptime READ = 5  # the counter's answer to "read"
 comptime DETAILS = 6
+comptime EDITED = 7  # the editor's events (event.name "change", event.text {"text"})
+comptime LOAD = 8
+comptime LONG = 5  # past this many words the note says so (a line appears: the screen is rebuilt around the editor)
 comptime CHART = 0  # the word-count chart's canvas
+comptime SAMPLE = "The quick brown fox jumps over the lazy dog"
 comptime COUNTER_LABEL = "Clicks & <b>counts</b> <img src=x>"  # (shown as text by the widget: props are data, never HTML)
 
 
@@ -34,7 +38,9 @@ def word_count(text: String) -> Int:
 
 
 struct Main(App):
-    var text: String
+    var text: String  # the note, as the editor last said
+    var loaded: String  # the text Mojo last gave the editor (its doc prop)
+    var rev: Int  # moves on when Mojo sets the text: the editor takes doc only then
     var history: List[Float64]  # the word count after each edit (the chart)
     var clicks: Int  # counter events heard
     var last_count: Int
@@ -47,6 +53,8 @@ struct Main(App):
 
     def __init__(out self):
         self.text = ""
+        self.loaded = ""
+        self.rev = 0
         self.history = List[Float64]()
         self.clicks = 0
         self.last_count = 0
@@ -65,7 +73,7 @@ struct Main(App):
 
     @staticmethod
     def web_assets() -> List[String]:
-        return ["counter.js", "counter.css"]
+        return ["counter.js", "counter.css", "editor.js", "editor.css"]
 
     def appearance(mut self, dark: Bool):
         self.dark = dark
@@ -85,8 +93,16 @@ struct Main(App):
 
     def update(mut self, event: Event):
         var m = event.message
-        if m == TYPED:
-            self.set_text(event.text)
+        if m == EDITED and event.name == "change":
+            try:
+                var j = Json.parse(event.text)
+                self.set_text(j.text(j.get(0, "text")))
+            except:
+                pass
+        elif m == LOAD:
+            self.loaded = SAMPLE
+            self.rev += 1
+            self.set_text(SAMPLE)
         elif m == COUNTER and event.name == "click":
             self.clicks += 1
             try:
@@ -117,13 +133,15 @@ struct Main(App):
 
     def view(self) -> View:
         var words = word_count(self.text)
-        var note = Card(
-            Text("Note", style=HEADLINE),
-            TextArea(self.text, placeholder="Write a note", on_change=TYPED, height=220).fill().tag("editor"),
-            HStack(Text("Words: " + String(words)), Text("words after each edit", CAPTION), spacing=SPACE_S),
-            SparklineView(CHART, len(self.history)),
-            spacing=SPACE_S,
-        ).align(START).fill().grow()
+        var note_items: List[View] = [Text("Note", style=HEADLINE)]
+        if words > LONG:  # (a line that comes and goes: the screen is rebuilt around the editor, which keeps its cursor)
+            note_items.append(Text("Long note", CAPTION).tag("long"))
+        note_items.append(WebComponent("mx-editor", Props().text("doc", self.loaded).number("rev", self.rev).text("placeholder", "Write a note"),
+                                       on_event=EDITED, id=1).fill().tag("editor"))
+        note_items.append(HStack(Text("Words: " + String(words)), Text("words after each edit", CAPTION), Spacer(),
+                                 Button("Load sample", on_tap=LOAD), spacing=SPACE_S).fill())
+        note_items.append(SparklineView(CHART, len(self.history)))
+        var note = Card(note_items, spacing=SPACE_S).align(START).fill().grow()
         var counter_items: List[View] = [
             Text("Counter", style=HEADLINE),
             Text("A vendored plain-JS widget: its count is its own; its label and step come from Mojo.", CAPTION),

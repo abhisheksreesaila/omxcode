@@ -129,18 +129,29 @@
     for (const w of list) {
       const el = w.firstElementChild;
       if (!el || !el.mojouiKey) continue;
-      if (el.contains(document.activeElement)) focus = { el, active: document.activeElement };
+      if (el.contains(document.activeElement)) {  // (its keyboard focus and its text selection go back after the swap)
+        const sel = document.getSelection();
+        const range = sel && sel.rangeCount && el.contains(sel.anchorNode) && el.contains(sel.focusNode)
+          ? [sel.anchorNode, sel.anchorOffset, sel.focusNode, sel.focusOffset] : null;
+        focus = { el, active: document.activeElement, range };
+      }
       move(keep(), el);
     }
   }
-  function settle() {
+  function restore() {  // in the same task as the swap: before the browser reports a selection change to the widget
     adopt();
-    for (const el of [...keep().children]) el.remove();  // (its key left the screen: disconnected, destroyed)
-    if (focus) {
-      const { el, active } = focus;
-      focus = null;
-      if (el.isConnected && active.isConnected && !el.contains(document.activeElement)) active.focus({ preventScroll: true });
+    if (!focus) return;
+    const { el, active, range } = focus;
+    focus = null;
+    if (!el.isConnected || !active.isConnected || el.parentElement === keep()) return;
+    if (!el.contains(document.activeElement)) active.focus({ preventScroll: true });
+    if (range && range.every((n, k) => k % 2 || el.contains(n))) {
+      try { document.getSelection().setBaseAndExtent(range[0], range[1], range[2], range[3]); } catch (e) { /* (the widget changed its DOM meanwhile) */ }
     }
+  }
+  function settle() {
+    restore();
+    for (const el of [...keep().children]) el.remove();  // (its key left the screen: disconnected, destroyed)
     runCommands();
   }
 
@@ -158,6 +169,7 @@
     }
     setTimeout(settle, 0);  // (after every swap of this answer: they run back to back)
   });
+  document.addEventListener('htmx:oobAfterSwap', restore);
   document.addEventListener('htmx:afterSettle', settle);
   document.addEventListener('DOMContentLoaded', settle);
 
