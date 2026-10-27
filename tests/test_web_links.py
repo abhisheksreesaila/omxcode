@@ -73,10 +73,14 @@ def main():
     for url in ["http://127.0.0.1:5001\\@evil.com/", "http://evil.com\\@127.0.0.1:5001/", "http://127.1:5001/", "http://2130706433:5001/",
                 "http://0x7f.0.0.1:5001/", "http://127.0.0.%31:5001/", "http://[::ffff:127.0.0.1]:5001/", "http://[::1]:5001/",
                 "http://0177.0.0.1:5001/", "http://127.000.000.001:5001/", "http://evil.com@example.org/", "http://exa%6dple.com/",
-                "http://example.123/", "http://exa_mple.com/", "http://-bad.com/", "http://a..b.com/", "http://evil.com:5001\\x"]:
+                "http://example.123/", "http://exa_mple.com/", "http://-bad.com/", "http://a..b.com/", "http://evil.com:5001\\x",
+                # a last label the browser may read as a number (hex 0x…, digits): IPv4 to it (reviewer round 3, D-627)
+                "http://127.0.0.0x1:5001/", "http://0x7f.0x0.0x0.0x1:5001/", "http://127.0.0.0x:5001/", "http://x.1e3:5001/",
+                "http://a.0x1:5001/", "http://localhost:٣٣/"]:
         node = dict(base, kind=web.EMBED, text=url, value=1, options=["allow-same-origin"])
         assert "allow-same-origin" not in web.frame_sandbox(node, page), url
-    for url in ["https://jupyter.example.org/lab", "http://notebook.local:8888/", "http://127.0.0.1:8888/lab", "HTTPS://Example.com/x"]:
+    for url in ["https://jupyter.example.org/lab", "http://notebook.local:8888/", "http://127.0.0.1:8888/lab", "HTTPS://Example.com/x",
+                "http://a.b0x1.com/", "http://127.0.0.1x.example/", "http://xn--bcher-kva.example/"]:
         node = dict(base, kind=web.EMBED, text=url, value=1, options=["allow-same-origin"])
         assert "allow-same-origin" in web.frame_sandbox(node, page), url  # (a plain foreign name, or our machine on another port)
     # unsure of our own origin (none known, or behind a proxy that rewrote it): never allow-same-origin

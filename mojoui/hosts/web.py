@@ -863,8 +863,8 @@ def origin_parts(url):
     disagree on unusual URLs (a backslash, "%" escapes, user info, IPv4 written as 127.1, 2130706433 or 0x7f.0.0.1, IPv6
     literals), so this doesn't try to out-parse the browser: only a plain authority counts (D-624): no backslash anywhere,
     no "@" or "%" in it, a host that is a dotted IPv4 address written the one plain way or a DNS name (labels of a-z, 0-9
-    and inner hyphens, the last with a letter; upper case is lowered, one trailing dot dropped), and a port of digits."""
-    if "\\" in url or url != url.strip() or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+    and inner hyphens, the last starting with a letter; upper case is lowered, one trailing dot dropped), and a port of digits."""
+    if "\\" in url or any(ord(c) <= 32 or ord(c) == 127 for c in url):
         return None
     m = PLAIN_URL.match(url)
     if not m:
@@ -873,14 +873,14 @@ def origin_parts(url):
     if "@" in authority or "%" in authority or "[" in authority or "]" in authority:
         return None
     host, _, port = authority.partition(":")
-    if ":" in port or (port and not (port.isdigit() and len(port) <= 5 and int(port) <= 65535)):
+    if ":" in port or (port and not (port.isascii() and port.isdigit() and len(port) <= 5 and int(port) <= 65535)):
         return None
     host = host.lower()
     host = host[:-1] if host.endswith(".") else host
     if not DOTTED_IPV4.fullmatch(host):
         labels = host.split(".")
-        if not host or not all(DNS_LABEL.fullmatch(l) for l in labels) or not any(c.isalpha() for c in labels[-1]):
-            return None
+        if not host or not all(DNS_LABEL.fullmatch(l) for l in labels) or not labels[-1][0].isalpha():
+            return None  # (the last label starts with a letter, as every TLD does: the browser reads 0x1, 1e3 or 7 there as a number, D-627)
     return scheme, host, int(port) if port else (443 if scheme == "https" else 80)
 
 
