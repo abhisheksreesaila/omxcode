@@ -48,12 +48,16 @@ build_linux() {
   rm -f "$out/$EX.bin"
   pixi run python scripts/web_assets.py --webview "$out/webview" "$EX"
   if [ -f "$out/webview/assets/manifest.json" ]; then
-    local wk; wk="$(scripts/webkitgtk.sh)"
+    # (a system WebKitGTK 6.0: webkitgtk.sh prints nothing, no launcher; it can't be fetched (offline, not x86_64): a
+    # warning, no launcher, and the app's WebComponents show their `instead` views, D-619)
+    local wk=""
+    if ! wk="$(scripts/webkitgtk.sh)"; then
+      echo "   warning: no WebKitGTK 6.0 (install webkitgtk-6.0, or run scripts/webkitgtk.sh online): WebComponents show their stand-ins" >&2
+      wk=""
+    fi
     if [ -n "$wk" ]; then
       mv "$out/$EX" "$out/$EX.bin"
-      printf '%s\n' '#!/bin/sh' "# WebKitGTK 6.0 from $wk (scripts/webkitgtk.sh), laid over /usr/lib for this app only (D-608)" \
-        "exec bwrap --dev-bind / / --overlay-src /usr/lib --overlay-src '$wk/usr/lib' --ro-overlay /usr/lib --die-with-parent \"\$(dirname \"\$0\")/$EX.bin\" \"\$@\"" > "$out/$EX"
-      chmod +x "$out/$EX"
+      scripts/webkit_launcher.sh "$out" "$EX" "$wk"
     fi
   fi
   stamp "$out"; echo "   $out/$EX"

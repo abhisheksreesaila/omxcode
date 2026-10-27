@@ -16,7 +16,7 @@ fi
 VERSION=2.52.6-1
 FILE="webkitgtk-6.0-$VERSION-x86_64.pkg.tar.zst"
 SHA256=1e50283612a5f835d5c505fb7735d2f9cb83dd5d75a9d76328efb68a98a8ee67  # (its Arch signature checked when pinned, D-608)
-DEST="$PWD/build/webkitgtk-6.0"
+DEST="${WEBKITGTK_DEST:-$PWD/build/webkitgtk-6.0}"  # (WEBKITGTK_DEST, WEBKITGTK_MIRRORS: tests/test_webkit_launcher.sh)
 if [ -f "$DEST/usr/lib/libwebkitgtk-6.0.so.4" ] && [ "$(cat "$DEST/sha256" 2>/dev/null)" = "$SHA256" ]; then
   echo "$DEST"; exit 0
 fi
@@ -24,9 +24,9 @@ fi
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/dl" "$tmp/x"
 got=""
-for base in https://stable-mirror.omarchy.org/extra/os/x86_64 https://geo.mirror.pkgbuild.com/extra/os/x86_64 \
-            https://archive.archlinux.org/packages/w/webkitgtk-6.0; do
-  if curl -fsSL --retry 2 -o "$tmp/dl/$FILE" "$base/$FILE"; then got=$base; break; fi
+MIRRORS="${WEBKITGTK_MIRRORS:-https://stable-mirror.omarchy.org/extra/os/x86_64 https://geo.mirror.pkgbuild.com/extra/os/x86_64 https://archive.archlinux.org/packages/w/webkitgtk-6.0}"
+for base in $MIRRORS; do
+  if curl -fsSL --retry 2 --connect-timeout 10 -o "$tmp/dl/$FILE" "$base/$FILE"; then got=$base; break; fi
 done
 [ -n "$got" ] || { echo "webkitgtk.sh: couldn't download $FILE (install webkitgtk-6.0 from your distribution instead)" >&2; exit 1; }
 echo "$SHA256  $tmp/dl/$FILE" | sha256sum -c --quiet - >&2 || { echo "webkitgtk.sh: $FILE from $got doesn't match the pinned SHA-256" >&2; exit 1; }
