@@ -13,6 +13,7 @@ Run: pixi run python mojoui/hosts/web.py build/hello/web [port]
 """
 
 import ctypes
+import hashlib
 import os
 import importlib
 import io
@@ -36,7 +37,7 @@ from PIL import Image
 # Mirrors mojoui/view.mojo and mojoui/diff.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
- DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH) = range(1, 40)
+ DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH, WEBCOMP) = range(1, 41)
 CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
@@ -65,6 +66,7 @@ body { font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; 
 .vstack { display: flex; flex-direction: column; align-items: center; }
 .vstack.drag { cursor: grab; } .vstack.drop.drop-over { outline: 2px solid currentColor; outline-offset: -2px; border-radius: 10px; }
 .embed { display: flex; align-self: stretch; } .embed iframe { flex: 1; width: 100%; height: 100%; border: 0; }
+.webcomponent { display: block; min-width: 0; }  /* a JS widget's box (mojoui-widgets.js puts the widget's element in it) */
 .hstack { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; justify-content: center; }
 .spacer { flex: 1; }
 .text { margin: 0; text-align: center; }
@@ -436,6 +438,53 @@ EFFECTS_JS = r"""
 })();
 """
 
+PAGE_JS = r"""
+// The page's own behaviour as listeners: the Content-Security-Policy allows no inline script, inline handler or eval
+// (D-593), so what used to sit in onclick/onfocus/onkeydown attributes, htmx's eval'd trigger filters and hx-vals "js:"
+// lives here, keyed by data attributes the host renders.
+(() => {
+  const skinClasses = () => {  // the theme's body classes (skin(): #mojoui-skin-classes)
+    const s = document.getElementById('mojoui-skin-classes');
+    if (s && document.body.className !== (s.dataset.classes || '')) document.body.className = s.dataset.classes || '';
+  };
+  document.addEventListener('DOMContentLoaded', skinClasses);
+  document.addEventListener('htmx:oobAfterSwap', skinClasses);
+  // an in-place editor: focus selects its text (data-focus=select) or puts the caret at its end (end)
+  document.addEventListener('focusin', e => {
+    const t = e.target;
+    if (!t.matches || !t.matches('input[data-focus]')) return;
+    if (t.dataset.focus === 'end') { const k = t.value.length; t.setSelectionRange(k, k); } else t.select();
+  });
+  // a field with on_cancel: Escape posts it (second=2) with its text. Capture phase, as the inline handler it replaces
+  // saw synthetic (non-bubbling) keys too; a listener before it that stopped the key (an open menu, held keys) wins.
+  document.addEventListener('keydown', e => {
+    const t = e.target;
+    if (e.key !== 'Escape' || e.cancelBubble || !t.matches || !t.matches('input[data-cancel]')) return;
+    e.preventDefault();
+    htmx.ajax('POST', t.dataset.cancel, { values: { n: Number(t.dataset.node), second: 2, text: t.value, v: document.getElementById('mojoui-v').value }, swap: 'none', source: document.body });
+  }, true);
+  document.addEventListener('click', e => {
+    const title = e.target.closest && e.target.closest('.menu-title[data-toggle]');
+    if (title) window.mojouiMenu.toggle(title);
+    if (e.target.closest && e.target.closest('[data-kind=item][data-closes]')) window.mojouiMenu.closeAll();
+  });
+  // an alert: Escape answers like its first button (Cancel)
+  document.addEventListener('keyup', e => {
+    if (e.key !== 'Escape') return;
+    const b = document.querySelector('#mojoui-overlay dialog.alert .buttons button');
+    if (b) b.click();
+  });
+  // a long list: Enter and Space choose a row as a click does; each request for rows says where the list is scrolled
+  document.addEventListener('keyup', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.lazylist .row')) e.target.click();
+  });
+  document.addEventListener('htmx:configRequest', e => {
+    const el = e.detail && e.detail.elt;
+    if (el && el.dataset && el.dataset.kind === 'list') e.detail.parameters.top = el.scrollTop;
+  });
+})();
+"""
+
 BOARD_JS = r"""
 // mojoui Board adapter (fixed, part of the web host). Drag an object's header to move it, its
 // bottom-right corner to resize it; the app gets one event at the end (PAN = moved, ZOOM = resized,
@@ -751,6 +800,84 @@ def png(rgba, w, h):
             + chunk(b"IDAT", zlib.compress(rows, 6)) + chunk(b"IEND", b""))
 
 
+# Secure by default (goal 34 M2, D-593–D-596): every response carries these headers. Scripts come only from our origin,
+# by content hash (no inline script, no inline handler, no eval: the page's behaviour is in the hashed host bundle and the
+# app's bundles). Styles allow 'unsafe-inline' (docs/js.md): every view's layout is a style attribute (padding, sizes,
+# gaps) and the theme's palette and sheet are <style> elements swapped in live; CSS can't run script, and what it could
+# load is held to our origin by img-src and font-src. Frames: any http(s) page, always sandboxed (frame_sandbox).
+CSP = "; ".join([
+    "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self'",
+    "connect-src 'self'", "frame-src 'self' http: https:", "object-src 'none'", "base-uri 'none'", "form-action 'self'",
+    "frame-ancestors 'self'",
+])
+SECURITY_HEADERS = [(k.lower().encode(), v.encode()) for k, v in (
+    ("Content-Security-Policy", CSP), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "same-origin"),
+    ("X-Frame-Options", "SAMEORIGIN"), ("Cross-Origin-Opener-Policy", "same-origin"))]
+IMMUTABLE = "public, max-age=31536000, immutable"  # a file named by its content's hash never changes
+FONT_URLS = {}  # font file name → its hashed URL (theme sheets name /static/fonts/<name>; skin() rewrites them)
+FONT_REF = re.compile(r"url\(/static/fonts/([A-Za-z0-9_.-]+\.ttf)\)")
+
+
+class SecurityHeaders:
+    """ASGI middleware: SECURITY_HEADERS on every HTTP response (a route's own header of the same name wins)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                have = {k.lower() for k, _ in headers}
+                headers += [(k, v) for k, v in SECURITY_HEADERS if k not in have]
+                message = dict(message, headers=headers)
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+def content_name(name, data):
+    """name.js → name.<sha256[:16]>.js: the file's URL changes whenever its bytes do."""
+    stem, ext = name.rsplit(".", 1)
+    return f"{stem}.{hashlib.sha256(data).hexdigest()[:16]}.{ext}"
+
+
+def host_files():
+    """The host's own files, by content hash: {name: (hashed name, bytes, media type)}. mojoui.js is every adapter
+    (canvas, board, menus, effects, the page's listeners, widgets) in one script."""
+    js = "\n".join([CANVAS_JS, BOARD_JS, MENU_JS, EFFECTS_JS, PAGE_JS, (STATIC / "mojoui-widgets.js").read_text()]).encode()
+    out = {}
+    for name, data, media in (("htmx.min.js", (STATIC / "htmx.min.js").read_bytes(), "text/javascript"),
+                              ("mojoui.js", js, "text/javascript"), ("mojoui.css", CSS.encode(), "text/css")):
+        out[name] = (content_name(name, data), data, media)
+    return out
+
+
+def app_assets(module_dir, mod):
+    """The app's bundles (App.web_assets(), built by scripts/web_assets.py): ({hashed file: (bytes, media type)}, the
+    page's tags for them). A listed name the build didn't make, or a file whose bytes don't match its hash, stops the
+    server: nothing unlisted or unbundled is served."""
+    names = json.loads(mod.web_assets()) if hasattr(mod, "web_assets") else []
+    folder = Path(module_dir) / "assets"
+    manifest = json.loads((folder / "manifest.json").read_text()) if (folder / "manifest.json").exists() else {}
+    files, tags = {}, []
+    for name in names:
+        m = manifest.get(name)
+        if m is None:
+            raise SystemExit(f"mojoui web: the app lists {name} in web_assets(), but its build has none (scripts/build.sh <app> web)")
+        data = (folder / m["file"]).read_bytes()
+        if content_name(name, data) != m["file"]:
+            raise SystemExit(f"mojoui web: assets/{m['file']} doesn't match its hash (rebuild it)")
+        js = name.endswith(".js")
+        files[m["file"]] = (data, "text/javascript" if js else "text/css")
+        tags.append(Script(src=f"/assets/{m['file']}", defer=True, integrity=m["integrity"]) if js else
+                    Link(rel="stylesheet", href=f"/assets/{m['file']}", integrity=m["integrity"]))
+    return files, tags
+
+
 ENGINE_LOCK = threading.Lock()  # apps with shared data: one call into Mojo at a time (shared GPU scratch)
 SESSIONS_MADE = [0]
 
@@ -778,6 +905,8 @@ class Session:
         self.busy_sent = False  # what the page was last told (#mojoui-busy)
         self.waiters = set()  # (event loop, asyncio.Event) of the page's open /wait
         self.waiters_lock = threading.Lock()
+        self.commands = []  # widget commands the app asked for (mojoui.webcomponent), not yet sent to the page
+        self.origin = ""  # this page's origin (WebFrame: allow-same-origin only for another one)
 
     def wake(self):
         """Tell the page's open /wait that changes are pending."""
@@ -872,6 +1001,31 @@ def web_url(url):
     return url
 
 
+WIDGET_TAG = re.compile(r"^[a-z][a-z0-9._]*-[a-z0-9._-]*$")
+RESERVED_TAGS = {"annotation-xml", "color-profile", "font-face", "font-face-src", "font-face-uri", "font-face-format", "font-face-name", "missing-glyph"}
+EVENT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
+MAX_WIDGET_BYTES = 8 << 20  # an event's payload or a command's reply, as JSON text
+
+
+def widget_tag(tag):
+    """A custom element's name the page may create (mojoui.webcomponent.is_widget_tag: the same rule)."""
+    return bool(WIDGET_TAG.match(tag)) and len(tag) <= 64 and tag not in RESERVED_TAGS
+
+
+FRAME_SANDBOX = "allow-scripts allow-forms"  # every WebFrame's sandbox: its page runs, in an origin of its own (D-596)
+FRAME_EXTRA = ("allow-popups", "allow-modals", "allow-downloads", "allow-same-origin")
+
+
+def frame_sandbox(n, origin=""):
+    """WebFrame's iframe sandbox: FRAME_SANDBOX plus what the app asked for from FRAME_EXTRA (options[0]). allow-same-origin
+    only for a page on another origin than this one (it then keeps its own cookies; with ours it could lift its sandbox)."""
+    asked = n["options"][0].split() if n.get("options") else []
+    url = n["text"]
+    same = bool(origin) and (url.lower() == origin.lower() or url.lower().startswith(origin.lower() + "/"))
+    extra = [t for t in FRAME_EXTRA if t in asked and not (t == "allow-same-origin" and same)]
+    return " ".join([FRAME_SANDBOX] + extra)
+
+
 def paragraph_runs(n, i, common):
     """A Paragraph's runs as inline elements (FastHTML escapes their words), one element per run whose classes say bold,
     italic, code and whose data-role is its role (the look's rule for it beats the base classes); a link is an <a>: its
@@ -942,13 +1096,11 @@ def render_node(s, i, sid):
         # hx-vals is inherited from ancestors, so the input says second=0 explicitly
         # (otherwise it would pick up the form's second=1 and every keystroke would "submit").
         editor = n["value"] in (1, 3)  # an in-place editor: .focused() (1) takes the keyboard, its text selected; .echo() (3) doesn't
-        at_end = "const k = this.value.length; this.setSelectionRange(k, k)"
-        cancel = (f"if (event.key === 'Escape') {{ event.preventDefault(); htmx.ajax('POST', '{post}', "
-                  f"{{ values: {{ n: {i}, second: 2, text: this.value, v: document.getElementById('mojoui-v').value }}, swap: 'none', source: document.body }}); }}"  # (not the input: its hx-vals would win)
-                  if n["size"] else None)
+        # (no inline handlers, D-593: PAGE_JS selects the text or puts the caret at the end on focus (data-focus), and posts
+        # Escape as on_cancel (data-cancel), from document.body: the input's own hx-vals would win)
         field = Input(type="text", name="text", value=n["text"], placeholder=n["hint"], data_kind="field",
-                      cls="cell-editor" if editor else None, onfocus=(at_end if n["value"] == 3 else "this.select()") if editor else None,
-                      onkeydown=cancel,
+                      cls="cell-editor" if editor else None, data_focus=("end" if n["value"] == 3 else "select") if editor else None,
+                      data_cancel=post if n["size"] else None, data_node=str(i) if n["size"] else None,
                       autocomplete="off", autofocus=(s.focus == i or n["value"] == 1), hx_trigger="input",
                       hx_sync="closest form:queue all", **dict(common, hx_vals=json.dumps({"n": i, "second": 0})))
         return Form(field, cls="field", id=nid, hx_post=post, hx_vals=json.dumps({"n": i, "second": 1}),
@@ -1017,7 +1169,7 @@ def render_node(s, i, sid):
                    cls="lazylist", id=nid, data_kind="list", data_row_height=str(row_h), style=f"height:{n['size']}px",
                    hx_post=f"/rows/{sid}/{i}", hx_trigger="scroll throttle:60ms, scroll delay:150ms",
                    hx_target=f"#rows{i}", hx_swap="outerHTML", hx_sync="this:replace",
-                   hx_vals="js:{top: event.target.scrollTop}", hx_include="#mojoui-v")
+                   hx_include="#mojoui-v")  # (its scroll position goes with each request: PAGE_JS, htmx:configRequest)
     if kind == BOARD:
         kids = []
         for k, c in enumerate(n["children"]):
@@ -1070,8 +1222,19 @@ def render_node(s, i, sid):
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", style="gap:0px")
         if web_url(n["text"]) is None:  # (http and https only, D-576: the stand-in instead of the frame)
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", data_refused="1", style="gap:0px")
-        return Div(Iframe(src=n["text"], title=n["text"], allow="clipboard-read; clipboard-write"), cls="embed", id=nid, data_kind="embed",
+        return Div(Iframe(src=n["text"], title=n["text"], sandbox=frame_sandbox(n, getattr(s, "origin", "")), referrerpolicy="no-referrer",
+                          allow="clipboard-read; clipboard-write"), cls="embed", id=nid, data_kind="embed",
                    data_url=n["text"], style=f"height:{n['size']}px" if n["size"] > 0 else "flex:1 1 0;min-height:0")  # (0: as tall as it's given)
+    if kind == WEBCOMP:  # a JS widget (mojoui.webcomponent): mojoui-widgets.js puts its element in and keeps it across rebuilds
+        tag, props = n["hint"], n["text"] or "{}"
+        if not widget_tag(tag):
+            return Div(cls="webcomponent", id=nid, data_kind="webcomponent", data_refused="1")
+        try:
+            ok = isinstance(json.loads(props), dict)
+        except ValueError:
+            ok = False
+        return Div(cls="webcomponent", id=nid, data_kind="webcomponent", data_widget=tag, data_widget_id=str(n["value"]),
+                   data_props=props if ok else "{}", data_refused=None if ok else "1")  # (FastHTML escapes the attribute)
     if kind == CLIPBOARD:  # nothing on screen: the page copies its text when its version moves on (CLIP_JS)
         return Div(id=nid, data_kind="clipboard", data_version=str(n["value"]), data_text=n["text"], hidden=True)
     if kind == TOAST:  # bottom centre; its action is msg, ✕ and its time running out are on_close
@@ -1093,7 +1256,7 @@ def render_node(s, i, sid):
         if n["style"] == 1:  # a context menu: open where the app said, inside its anchor; closes through on_close
             return Div(items, cls="menu context open", id=nid, data_kind="menu", data_title="context", data_anchor=n["text"],
                        data_x=str(n["x"]), data_y=str(n["y"]), data_node=str(i), data_sid=sid, data_v=str(s.shape))
-        return Div(Button(n["text"], type="button", cls="menu-title", onclick="mojouiMenu.toggle(this)", aria_haspopup="menu"), items,
+        return Div(Button(n["text"], type="button", cls="menu-title", data_toggle="1", aria_haspopup="menu"), items,
                    cls="menu", id=nid, data_kind="menu", data_title=n["text"])
     if kind == ITEM:
         if n["style"] == 1:
@@ -1110,7 +1273,7 @@ def render_node(s, i, sid):
         cls = "mi" + (" danger" if flags & DANGER else "") + (" checked" if flags & CHECKED else "")
         return Button(lead, Span(n["text"], cls="mi-title"), Span(shortcut, cls="mi-key") if shortcut else "", type="button", cls=cls, id=nid,
                       data_kind="item", data_title=n["text"], data_shortcut=shortcut or None, data_checked="1" if flags & CHECKED else None,
-                      disabled=bool(flags & DISABLED), role="menuitem", onclick="mojouiMenu.closeAll()", **dict(common, hx_vals=json.dumps({"n": i, "second": 0})))
+                      disabled=bool(flags & DISABLED), role="menuitem", data_closes="1", **dict(common, hx_vals=json.dumps({"n": i, "second": 0})))
     if kind == OVERLAY:
         kids = []
         for k, c in enumerate(n["children"]):
@@ -1157,8 +1320,7 @@ def render_alert(s, i, sid):
                       hx_vals=json.dumps({"n": i, "number": j}), **common) for j, o in enumerate(n["options"])]
     dialog = Dialog(H3(n["text"], id=f"{mid}-t"), P(n["hint"]), Div(*buttons, cls="buttons"), open=True,
                     cls="alert", data_kind="alert", role="alertdialog", aria_labelledby=f"{mid}-t", aria_modal="true")
-    return Div(Div(cls="alert-backdrop"), dialog, id=mid, hx_trigger="keyup[key=='Escape'] from:body",
-               hx_vals=json.dumps({"n": i, "number": 0}), **common)
+    return Div(Div(cls="alert-backdrop"), dialog, id=mid)  # (Escape: PAGE_JS clicks its first button)
 
 
 def rows_div(s, i, sid, top):
@@ -1176,7 +1338,7 @@ def rows_html(s, i, sid, top):
     first = max(0, top // row_h - 5)
     texts = json.loads(s.mod.rows(s.handle, i, first, LIST_WINDOW))
     return [Div(t, cls="row", data_row=str(first + k), style=f"top:{(first + k) * row_h}px;height:{row_h}px",
-                role="button", tabindex="0", hx_trigger="click, keyup[key=='Enter'], keyup[key==' ']",
+                role="button", tabindex="0", hx_trigger="click",  # (Enter and Space click it: PAGE_JS)
                 hx_post=f"/e/{sid}", hx_vals=json.dumps({"n": i, "number": first + k}), hx_swap="none",
                 hx_target="this",  # htmx inherits hx-target: without this, rows inherit the list's
                 hx_include="#mojoui-v") for k, t in enumerate(texts)]  # "find .rows", fail to find it, and silently send nothing
@@ -1188,6 +1350,14 @@ def make_app(module_dir):
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
     if loads:
         print(f"SHARED: {loads} load, 0 sessions", flush=True)
+    files = host_files()
+    by_name = {hashed: (data, media) for hashed, data, media in files.values()}
+    fonts = {}
+    for f in sorted((STATIC / "fonts").glob("*.ttf")):
+        data = f.read_bytes()
+        fonts[content_name(f.name, data)] = data
+        FONT_URLS[f.name] = f"/static/fonts/{content_name(f.name, data)}"
+    assets, asset_tags = app_assets(module_dir, mod)
     app = FastHTML(default_hdrs=False, secret_key=uuid.uuid4().hex, hdrs=(  # no .sesskey file
         # minimum-scale=1: a phone browser otherwise widens the page's layout viewport (innerWidth, innerHeight) to fit
         # anything wider than the screen, so a first screen laid out for a wider window read as a 780x1688 window,
@@ -1196,8 +1366,11 @@ def make_app(module_dir):
         # No attribute inheritance: every element states its own hx-* attributes (list rows once
         # inherited their list's hx-target and silently sent nothing). Note: hx-vals is still
         # merged from ancestors even so, so elements set every key they rely on themselves.
-        Meta(name="htmx-config", content='{"disableInheritance": true}'),
-        Script(src="/static/htmx.min.js"), Script(src="/static/mojoui-canvas.js"), Style(CSS)))
+        # No eval and no scripts from answers (the CSP forbids both anyway); no inline style for htmx's indicators.
+        Meta(name="htmx-config", content='{"disableInheritance": true, "allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'),
+        Script(src=f"/static/{files['htmx.min.js'][0]}"), Script(src=f"/static/{files['mojoui.js'][0]}"),
+        Link(rel="stylesheet", href=f"/static/{files['mojoui.css'][0]}"), *asset_tags))
+    app.add_middleware(SecurityHeaders)
     sessions = OrderedDict()  # sid → Session, oldest first
     sessions_lock = threading.Lock()
 
@@ -1207,6 +1380,10 @@ def make_app(module_dir):
     def note(sid, s):
         """After any call that ran update() (s.lock held): when this tab's effects (HTTP replies, timer ticks) are due
         next (Runtime.wake_in), for the clock thread."""
+        if hasattr(mod, "commands"):  # (widget commands the update asked for: sent with the next answer, cmds_mark)
+            taken = json.loads(mod.commands(s.handle))
+            if taken:
+                s.commands.extend(taken)
         if not hasattr(mod, "wake_in"):
             return
         w = mod.wake_in(s.handle)
@@ -1248,7 +1425,15 @@ def make_app(module_dir):
         threading.Thread(target=tick, daemon=True, name="mojoui-effects").start()
 
     def has_changes(s):
-        return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches")))
+        return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches"))) or bool(s.commands)
+
+    def cmds_mark(s, oob=False):
+        """The widget commands waiting for the page (mojoui-widgets.js runs each once, by its seq), then none."""
+        batch, s.commands = s.commands, []
+        mark = I(id="mojoui-cmds", hidden=True, data_cmds=json.dumps(batch))
+        if oob:
+            mark.attrs["hx-swap-oob"] = "true"
+        return mark
 
     def busy_mark(s, oob=False):
         s.busy_sent = s.busy
@@ -1275,22 +1460,43 @@ def make_app(module_dir):
         return Response((STATIC / "htmx.min.js").read_bytes(), media_type="text/javascript",
                         headers={"Cache-Control": "public, max-age=86400"})
 
-    @app.get("/static/mojoui-canvas.js")
-    def canvas_js():
-        return Response(CANVAS_JS + "\n" + BOARD_JS + "\n" + MENU_JS + "\n" + EFFECTS_JS, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
-
     @app.get("/static/fonts/{name}")
     def font(name: str):
-        """The app's own fonts (Inter, JetBrains Mono: SIL OFL), so every browser shows the same type (D-155)."""
+        """The app's own fonts (Inter, JetBrains Mono, Geist: SIL OFL), so every browser shows the same type (D-155): by
+        content hash (what the page names), or by plain name for older pages."""
+        if name in fonts:
+            return Response(fonts[name], media_type="font/ttf", headers={"Cache-Control": IMMUTABLE})
         path = STATIC / "fonts" / Path(name).name
         if path.suffix != ".ttf" or not path.exists():
             return Response(status_code=404)
         return Response(path.read_bytes(), media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
 
+    @app.get("/favicon.ico")
+    def favicon():
+        """No icon file (an app's logo is its icon, inline): an empty answer, not a 404 in the console."""
+        return Response(status_code=204, headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.get("/static/{name}")
+    def static_file(name: str):
+        """The host's scripts and style sheet, by content hash."""
+        if name not in by_name:
+            return Response(status_code=404)
+        data, media = by_name[name]
+        return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
+
+    @app.get("/assets/{name}")
+    def asset(name: str):
+        """The app's bundles (App.web_assets()), by content hash; nothing else."""
+        if name not in assets:
+            return Response(status_code=404)
+        data, media = assets[name]
+        return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
+
     @app.get("/")
-    def index():
+    def index(req):
         sid = uuid.uuid4().hex  # one app session per page load (tab)
         s = Session(mod, shared=bool(loads))
+        s.origin = f"{req.url.scheme}://{req.url.netloc}"
         with sessions_lock:
             sessions[sid] = s
             while len(sessions) > MAX_SESSIONS:
@@ -1315,16 +1521,16 @@ def make_app(module_dir):
             if "app-logo" in ICONS:  # (the app's mark as the tab's icon)
                 from urllib.parse import quote
                 icon = (Link(rel="icon", type="image/svg+xml", href="data:image/svg+xml," + quote(ICONS["app-logo"])),)
-            return Title(mod.title(s.handle)), *icon, *root(s, sid), *skin(s)
+            return Title(mod.title(s.handle)), *icon, *root(s, sid), cmds_mark(s), *skin(s)
 
     def skin(s, oob=False):
         """The app's theme on the page (D-260): its body classes, its palette as CSS variables, and its style sheet; the
         host knows no theme. oob: after a change (Settings → Appearance, a mode's tint), swapped into the open page
         (D-156); the style sheet goes again only when the theme itself changed, not just its palette."""
         tid, classes, css_vars, css = mod.theme(s.handle).split("\x1f")
-        parts = (Style(css_vars, id="mojoui-skin"), Script(f"document.body.className = '{classes}'", id="mojoui-skin-js"))
+        parts = (Style(css_vars, id="mojoui-skin"), I(hidden=True, id="mojoui-skin-classes", data_classes=classes))  # (PAGE_JS applies them)
         if (tid, len(css)) != s.theme_id:  # (the sheet itself changed: a new theme, or a theme's new sheet)
-            parts += (Style(css, id="mojoui-theme"),)
+            parts += (Style(FONT_REF.sub(lambda m: f"url({FONT_URLS.get(m.group(1), '/static/fonts/' + m.group(1))})", css), id="mojoui-theme"),)
             s.theme_id = (tid, len(css))
         if oob:
             for el in parts:
@@ -1372,6 +1578,8 @@ def make_app(module_dir):
         if s.busy != s.busy_sent:  # (requests went out, or the last one came back: the page starts or stops waiting)
             mark = busy_mark(s, oob=True)
             out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (mark,)
+        if s.commands:  # (after the screen: a command can name a widget this answer puts on it)
+            out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (cmds_mark(s, oob=True),)
         return out
 
     def changes_of(s, sid, d, n=-1, text="", number=0):
@@ -1471,6 +1679,50 @@ def make_app(module_dir):
             s.nodes = json.loads(mod.view(s.handle))  # the screen as Mojo now has it
             return changes(s, sid, d, n, text, number)  # (restyles too, when the skin or the tint changed)
 
+    @app.post("/w/{sid}")
+    def widget_event(sid: str, tag: str = "", id: int = 0, name: str = "", data: str = ""):
+        """A widget's event (mojoui-widgets.js emit): the widget by its key (tag, id), not its node, so an event sent
+        while the screen was rebuilt still lands. Only a word for a name and JSON for the payload get through."""
+        s = sessions.get(sid)
+        if s is None or not hasattr(mod, "widget_event") or not widget_tag(tag) or not EVENT_NAME.match(name) or len(data) > MAX_WIDGET_BYTES:
+            return ""
+        try:
+            json.loads(data)
+        except ValueError:
+            return ""
+        with s.lock:
+            if s.closed:
+                return ""
+            found = [i for i, node in enumerate(s.nodes) if node["kind"] == WEBCOMP and node["hint"] == tag and node["value"] == id]
+            if not found:
+                return ""
+            d = json.loads(mod.widget_event(s.handle, found[0], name, data))
+            if d.get("ignored"):
+                return ""
+            if s.pending:  # (changes waiting from frames or effects go with it)
+                d, s.pending = merge(s.pending, d), None
+            s.nodes = json.loads(mod.view(s.handle))
+            return changes(s, sid, d, found[0])
+
+    @app.post("/reply/{sid}")
+    def widget_reply(sid: str, seq: int = 0, data: str = "", error: str = ""):
+        """A widget's answer to command `seq` (or why it has none): the runtime takes it once, as JSON."""
+        s = sessions.get(sid)
+        if s is None or not hasattr(mod, "reply"):
+            return ""
+        if len(data) > MAX_WIDGET_BYTES:
+            data, error = "", "the reply is too big"
+        with s.lock:
+            if s.closed:
+                return ""
+            d = json.loads(mod.reply(s.handle, seq, data, error[:500]))
+            if d.get("ignored"):
+                return ""
+            if s.pending:
+                d, s.pending = merge(s.pending, d), None
+            s.nodes = json.loads(mod.view(s.handle))
+            return changes(s, sid, d)
+
     @app.post("/resize/{sid}")
     def resize(sid: str, w: int = 0, h: int = 0):
         s = sessions.get(sid)
@@ -1562,7 +1814,7 @@ def make_app(module_dir):
             sess.pending = merge(sess.pending, r["diff"])
             sess.nodes = json.loads(mod.view(sess.handle))
             rgba = ctypes.string_at(r["address"], r["width"] * r["height"] * 4)
-            pending = bool(sess.pending and (sess.pending.get("rebuild") or sess.pending.get("patches")))
+            pending = bool(sess.pending and (sess.pending.get("rebuild") or sess.pending.get("patches"))) or bool(sess.commands)
         out = io.BytesIO()
         picture = Image.frombuffer("RGBA", (r["width"], r["height"]), rgba, "raw", "RGBA", 0, 1).convert("RGB")
         if tick:  # animating: small, fast JPEG frames
@@ -1607,8 +1859,10 @@ def make_app(module_dir):
         with s.lock:
             if s.closed:
                 return ""
-            if s.pending is None:  # (nothing changed, but the page may have to stop waiting)
-                return busy_mark(s, oob=True) if s.busy != s.busy_sent else ""
+            if s.pending is None:  # (nothing changed, but the page may have to stop waiting, or run a widget's command)
+                out = (busy_mark(s, oob=True),) if s.busy != s.busy_sent else ()
+                out += (cmds_mark(s, oob=True),) if s.commands else ()
+                return out or ""
             d, s.pending = s.pending, None
             return changes(s, sid, d)
 

@@ -1,0 +1,6 @@
+/* mx-counter's look: the theme's own variables (--o-*: mojoui.theme's palette on the page), so it wears the app's theme. */
+mx-counter { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px;
+  background: var(--o-raised, rgba(120, 120, 128, .08)); color: var(--o-ink, inherit); }
+mx-counter .label { flex: 1; font-size: 13px; color: var(--o-ink2, inherit); }
+mx-counter .count { min-width: 3ch; text-align: right; font: 600 22px/1 var(--o-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
+mx-counter .inc { min-width: 56px; }

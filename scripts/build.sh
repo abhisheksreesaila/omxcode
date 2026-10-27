@@ -49,6 +49,10 @@ build_web() {
   local out="build/$EX/web"; mkdir -p "$out"; rm -f "$out/mojoui_app.so"
   echo "== Web ($EX): Mojo Python module for FastHTML"
   mojo_build hosts/web_main.mojo --emit shared-lib "${LINK[@]}" -o "$out/mojoui_app.so"
+  # Its JavaScript and CSS (docs/js.md), for every app: examples/$EX/web/widgets/* bundled by esbuild into $out/assets
+  # by content hash (a web/package.json is installed first with npm ci from its lockfile, into build/$EX/npm), then
+  # the lint: every asset App.web_assets() lists was bundled, and nothing else is there
+  pixi run python scripts/web_assets.py "$EX"
   stamp "$out"; echo "   $out/mojoui_app.so  (serve: pixi run python mojoui/hosts/web.py $out)"
 }
 

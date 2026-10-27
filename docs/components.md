@@ -52,6 +52,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `WebFrame` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `Paragraph` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | consolekit |
+| `WebComponent` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | — |
 
 ## Variants, gestures, layout, design languages
 
@@ -119,7 +120,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Confirm` | `mojoui/confirm.mojo` | Button, Timers | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
 | `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
-| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | console, consolekit, widgets |
 | `App shell (bar, brand, nav links, page card)` | `mojoui/shell.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Page header (icon square, pill tabs, segments, tab header)` | `mojoui/header.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Sidebar (heads, rows to pick, chips when compact)` | `mojoui/sidebar.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
@@ -141,12 +142,12 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 111 | 3 | 0 |
-| Web | 114 | 0 | 0 |
-| Android | 19 | 19 | 76 |
-| Mac (AppKit) | 0 | 102 | 12 |
-| iPhone (UIKit) | 0 | 83 | 31 |
-| Agent (MCP) | 29 | 37 | 48 |
+| Linux (GTK) | 111 | 4 | 0 |
+| Web | 115 | 0 | 0 |
+| Android | 19 | 19 | 77 |
+| Mac (AppKit) | 0 | 103 | 12 |
+| iPhone (UIKit) | 0 | 83 | 32 |
+| Agent (MCP) | 29 | 37 | 49 |
 
 ## Inside one app, not components yet (the debt)
 

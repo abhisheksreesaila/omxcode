@@ -6,7 +6,7 @@ from std.python.bindings import PythonModuleBuilder
 
 from app import Main
 from mojoui.shared import shared_loads
-from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in
+from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_widget_event, web_reply, web_commands, web_assets
 
 
 @export
@@ -33,6 +33,10 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[resize]("resize", docstring="The page's viewport (width, height in CSS pixels); returns what changed as JSON.")
         m.def_function[frame]("frame", docstring="A display frame for a canvas (node, microseconds); returns what changed as JSON.")
         m.def_function[poll]("poll", docstring="The tab's due effects (HTTP replies, timer ticks) through update(); returns what changed as JSON.")
+        m.def_function[widget_event]("widget_event", docstring="A widget's event (node, name, payload JSON); returns what changed as JSON.")
+        m.def_function[reply]("reply", docstring="A widget's answer to a command (seq, text JSON, error); returns what changed as JSON.")
+        m.def_function[commands]("commands", docstring="The widget commands asked for since the last call, as JSON.")
+        m.def_function[assets]("web_assets", docstring="App.web_assets(): the bundles the page loads, as a JSON list.")
         m.def_function[wake_in]("wake_in", docstring="Microseconds until poll() has something to do (-1: nothing until the next event).")
         return m.finalize()
     except e:
@@ -124,3 +128,19 @@ def poll(handle: PythonObject) raises -> PythonObject:
 
 def wake_in(handle: PythonObject) raises -> PythonObject:
     return PythonObject(web_wake_in[Main](Int(py=handle)))
+
+
+def widget_event(handle: PythonObject, node: PythonObject, name: PythonObject, payload: PythonObject) raises -> PythonObject:
+    return PythonObject(web_widget_event[Main](Int(py=handle), Int(py=node), String(py=name), String(py=payload)))
+
+
+def reply(handle: PythonObject, seq: PythonObject, text: PythonObject, error: PythonObject) raises -> PythonObject:
+    return PythonObject(web_reply[Main](Int(py=handle), Int(py=seq), String(py=text), String(py=error)))
+
+
+def commands(handle: PythonObject) raises -> PythonObject:
+    return PythonObject(web_commands[Main](Int(py=handle)))
+
+
+def assets() raises -> PythonObject:
+    return PythonObject(web_assets[Main]())

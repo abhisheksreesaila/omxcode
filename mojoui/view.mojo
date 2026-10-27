@@ -49,6 +49,9 @@ comptime EMBED = 38  # a web page in the screen (mojoui.embed.WebFrame): text = 
 #   the web shows it in an iframe; GTK and the Mac open it in the browser when the version moves on and show the child instead
 comptime PARAGRAPH = 39  # styled runs the host wraps as text (mojoui.paragraph.Paragraph): text = the plain words, msg = on_link,
 #   options = 4 strings per run (flags "b" "i" "c" "l", role, href, text)
+comptime WEBCOMP = 40  # a JavaScript widget (mojoui.webcomponent.WebComponent): hint = its custom element's tag, value = its id,
+#   text = its props (a JSON object), msg = on_event (event.id = the id, event.name = the event, event.text = its JSON payload);
+#   its one child is what hosts without a web view show. The web mounts the widget once per (tag, id) and keeps it
 comptime ITEM = 29  # a menu item: text = title, msg, hint = icon, options[0] = shortcut, value = flags (1 checked, 2 disabled, 4 danger); style 1 = separator, 2 = section label; children = a submenu
 
 # Canvas gestures (event.number)

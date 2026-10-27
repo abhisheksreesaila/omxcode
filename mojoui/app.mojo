@@ -1,6 +1,6 @@
 # What an app provides, and the platform-independent loop every host runs.
 
-from mojoui.view import View, CANVAS, BOARD, FIELD, PAN, ZOOM, KEY
+from mojoui.view import View, CANVAS, BOARD, FIELD, WEBCOMP, NO_MSG, PAN, ZOOM, KEY
 from mojoui.look import resolve_layout
 from mojoui.diff import Diff, diff
 from mojoui.canvas import Surface
@@ -8,6 +8,8 @@ from mojoui.scene import Scene
 from mojoui.theme import Theme
 from mojoui.http import Request
 from mojoui.effects import Every, Timer, InFlight, start, Backend, POLL_US
+from mojoui.webcomponent import Command, is_event_name, is_widget_tag
+from mojoui.json import Json
 
 
 struct Event(Copyable, Movable):
@@ -22,6 +24,9 @@ struct Event(Copyable, Movable):
     HTTP replies (mojoui.http): `message` = the request's msg, `id` = its id, `number` = the status (0: no reply),
     `text` = the body, `error` = why there's no reply ("" when there is one, a 500 too).
     Timers (App.every): `message` = the timer's msg, `number` = how many ticks so far (1, 2, …).
+    Widgets (mojoui.webcomponent): an event: `message` = on_event, `id` = the widget's id, `name` = the event, `text` = its
+    payload (JSON). A command's reply: `message` = its reply msg, `id` = its id, `name` = the command, `text` = the answer
+    (JSON), `number` = 1 (0 when there's none), `error` = why there's none.
     """
 
     var message: Int
@@ -34,11 +39,12 @@ struct Event(Copyable, Movable):
     var zoom: Float64
     var id: Int
     var error: String
+    var name: String
 
     def __init__(
         out self, message: Int, text: String, number: Int,
         x: Float64 = 0, y: Float64 = 0, dx: Float64 = 0, dy: Float64 = 0, zoom: Float64 = 1,
-        id: Int = 0, error: String = "",
+        id: Int = 0, error: String = "", name: String = "",
     ):
         self.message = message
         self.text = text
@@ -50,6 +56,7 @@ struct Event(Copyable, Movable):
         self.zoom = zoom
         self.id = id
         self.error = error
+        self.name = name
 
 
 trait App(Movable, Deinitable):
@@ -132,6 +139,17 @@ trait App(Movable, Deinitable):
         count), from the first poll after it appears until the app stops listing it. Asked after every update()."""
         return List[Every]()
 
+    def commands(mut self) -> List[Command]:
+        """The widget commands asked for since the runtime last looked (after every update()): keep a
+        mojoui.webcomponent.Widgets outbox and return its take(). Each answer comes back to update() as an Event."""
+        return List[Command]()
+
+    @staticmethod
+    def web_assets() -> List[String]:
+        """The script and style bundles the app's web page loads ("editor.js", "editor.css"): built from the app's
+        web/widgets/ by scripts/web_assets.py, served by their content hash; the build fails on one not listed here."""
+        return List[String]()
+
     def theme(self) -> Theme:
         """How the app looks (mojoui.theme.Theme: CSS classes, a palette, a GTK and a web style sheet), built by a theme
         module outside the framework (this repo's themes/, or yours); hosts restyle whenever its key changes (a skin
@@ -155,6 +173,9 @@ struct Runtime[A: App](Movable):
     var inflight: List[InFlight]  # HTTP requests out on their workers
     var undeliverable: List[Event]  # replies made without sending (an app with HTTP = False), handed over at the next poll
     var timers: List[Timer]
+    var commands_out: List[Command]  # widget commands for the host to take (take_commands)
+    var awaiting: List[Command]  # sent, waiting for their answer (reply)
+    var command_seq: Int
 
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
@@ -164,6 +185,9 @@ struct Runtime[A: App](Movable):
         self.inflight = List[InFlight]()
         self.undeliverable = List[Event]()
         self.timers = List[Timer]()
+        self.commands_out = List[Command]()
+        self.awaiting = List[Command]()
+        self.command_seq = 0
         self.take_effects()  # (what the starting state asks for)
 
     def take_effects(mut self):
@@ -186,6 +210,79 @@ struct Runtime[A: App](Movable):
             if not kept:
                 next.append(Timer(w.ms, w.msg))
         self.timers = next^
+        var cmds = self.app.commands()
+        for i in range(len(cmds)):
+            var c = cmds[i].copy()
+            self.command_seq += 1
+            c.seq = self.command_seq
+            var problem = String("")
+            if not is_widget_tag(c.tag):
+                problem = "the command's widget tag isn't a custom element's name"
+            elif not is_event_name(c.name):
+                problem = "the command's name isn't a word"
+            else:
+                try:
+                    _ = Json.parse(c.args)
+                except:
+                    problem = "the command's args aren't JSON"
+            if problem == "":
+                self.commands_out.append(c^)
+            elif c.reply != NO_MSG:
+                self.undeliverable.append(Event(c.reply, "", 0, id=c.id, error=problem, name=c.name))
+
+    def take_commands(mut self) -> List[Command]:
+        """The widget commands asked for since the host last took them (each once, numbered by seq); the ones that
+        want an answer wait for reply()."""
+        var out = self.commands_out^
+        self.commands_out = List[Command]()
+        for c in out:
+            if c.reply != NO_MSG:
+                self.awaiting.append(c.copy())
+        while len(self.awaiting) > 256:  # (a page that never answers: the oldest are forgotten)
+            _ = self.awaiting.pop(0)
+        return out^
+
+    def knows_reply(self, seq: Int) -> Bool:
+        for c in self.awaiting:
+            if c.seq == seq:
+                return True
+        return False
+
+    def reply(mut self, seq: Int, text: String, error: String) -> Diff:
+        """The answer to command `seq` (or why there's none): update() hears it once, as the command's reply message.
+        An answer that isn't JSON arrives as an error; an unknown or answered seq changes nothing."""
+        for k in range(len(self.awaiting)):
+            if self.awaiting[k].seq == seq:
+                var c = self.awaiting.pop(k)
+                var why = error
+                if why == "":
+                    try:
+                        _ = Json.parse(text)
+                    except:
+                        why = "the widget's reply isn't JSON"
+                return self.dispatch(Event(c.reply, text if why == "" else String(""), 1 if why == "" else 0, id=c.id, error=why, name=c.name))
+        return Diff(False, [])
+
+    def accepts_widget_event(self, node: Int, name: String, payload: String) -> Bool:
+        """Whether node `node` is a widget that listens, `name` a word and `payload` JSON."""
+        if node < 0 or node >= len(self.shown.nodes) or self.shown.nodes[node].kind != WEBCOMP or self.shown.nodes[node].msg == NO_MSG:
+            return False
+        if not is_event_name(name):
+            return False
+        try:
+            _ = Json.parse(payload)
+        except:
+            return False
+        return True
+
+    def widget_event(mut self, node: Int, name: String, payload: String) -> Diff:
+        """Widget node `node` emitted `name` with `payload` (JSON): its on_event message, with its id and the event's
+        name. Anything accepts_widget_event refuses changes nothing."""
+        if not self.accepts_widget_event(node, name, payload):
+            return Diff(False, [])
+        var msg = self.shown.nodes[node].msg
+        var id = self.shown.nodes[node].value
+        return self.dispatch(Event(msg, payload, 0, id=id, name=name))
 
     def busy(self) -> Bool:
         """Requests are out or timers run: the host should keep polling (wake_in)."""

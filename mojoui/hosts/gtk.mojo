@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
 from mojoui.view import (
-    CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
+    CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
@@ -1127,13 +1127,13 @@ struct GtkHost[A: App](Movable):
 
     def place_child(self, parent: Node, child_node: Node, child: Int):
         """Aligns a stack's child: the stack's align, then the child's own fill/grow."""
-        var vertical = parent.kind == VSTACK or parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (one child, stacked down)
+        var vertical = parent.kind == VSTACK or parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED or parent.kind == WEBCOMP  # (one child, stacked down)
         var cross = ALIGN_CENTER
         if parent.align_items == START:
             cross = 1  # GTK_ALIGN_START
         elif parent.align_items == END:
             cross = 2  # GTK_ALIGN_END
-        var wrapper = parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED  # (its one view across it, as the web's align-items: stretch, D-494)
+        var wrapper = parent.kind == DRAG or parent.kind == DROP or parent.kind == EMBED or parent.kind == WEBCOMP  # (its one view across it, as the web's align-items: stretch, D-494)
         var spans = vertical and child_node.kind == SCROLL  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502)
         var block = self.block_words(parent, child_node)
         if parent.align_items == STRETCH or child_node.fills or child_node.kind == SPACER or wrapper or spans or block:
@@ -1833,7 +1833,7 @@ struct GtkHost[A: App](Movable):
             self.board_scrollers.append((i, w))
             if node.value != 0 and node.value != self.revealed:
                 self.reveal_pending = i
-        elif node.kind == DRAG or node.kind == DROP or node.kind == EMBED:  # one child, in a box that drags, takes drops, or stands in for a page
+        elif node.kind == DRAG or node.kind == DROP or node.kind == EMBED or node.kind == WEBCOMP:  # one child, in a box that drags, takes drops, or stands in for a page
             w = external_call["gtk_box_new", Int](c_int(VERTICAL), c_int(0))
             for c in node.children:
                 external_call["gtk_box_append", NoneType](w, self.build_child(i, c, self_addr))

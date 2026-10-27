@@ -596,3 +596,11 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Links (D-576): http(s) only on every host; the web's refused link has no href. GTK and Mac guards proven only through the shared rule's test.
 - mojo_rt (D-577): no change: the typed pointer is read after the call in both IR and Apple assembly.
 - Proof run: M2, M5 (forged link included), M6 and goal 32 M1 PASS first time. M1 failed on my own line name (the checker reads `^[A-Z0-9]+: `, so REFUSED_SPLITS was never seen: now SPLITS). M4 failed twice from the consolekit rework: LogView(short) renames the log's tag to log-short, and MainAside's scroller put a button outside the web viewport; now LogView(lines) and two growing columns with SPACE_L between. Rerun: M1 and M4 PASS.
+
+## 2026-10-27 · goal 34 M0 (worktree mojo-ui-js, branch goal-34-js)
+- Proofs for M0–M2 written into scripts/check.py first. Baseline M4: the first run failed only because build/ didn't exist yet (33-M1 writes build/test_http without making the folder); the second only on the matrix, stale from my new mojoui file.
+- mojoui/webcomponent.mojo (Props, WebComponent, Command, Widgets), the runtime's half (commands numbered, replies once, events keyed), the web host's half (mojoui-widgets.js: defineWidget, park and adopt, the event queue, commands). tests/test_webcomponent.mojo passed on its first build.
+- First drive: the widget never mounted: render() writes `data-tag` from `.tag()` and overwrote mine. The widget's tag is `data-widget` now.
+- The step format splits on ";": the checks' js probes are expressions without one.
+- A 404 for /favicon.ico was a console error on every page: the host answers 204.
+- The CSP went in with M0's host changes (the M2 proof was already written): M0 PASS, M4 (goal 33's M1, M2, M4, M5) PASS under it.

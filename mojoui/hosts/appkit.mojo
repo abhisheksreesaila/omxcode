@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
-    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
+    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
     START, CENTER, END, STRETCH, BETWEEN, Node,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
@@ -1257,7 +1257,7 @@ struct AppKitHost[A: App](Movable):
                 self.pinned.append(i)
         else:  # (a Draggable, a DropTarget and a WebFrame show their one child: drag and drop isn't built here yet)
             w = new("NSStackView")
-            var vertical = node.kind == VSTACK or node.kind == DRAG or node.kind == DROP or node.kind == EMBED
+            var vertical = node.kind == VSTACK or node.kind == DRAG or node.kind == DROP or node.kind == EMBED or node.kind == WEBCOMP
             _ = msg(w, "setOrientation:", 1 if vertical else 0)
             # align → NSStackView alignment (NSLayoutAttribute); STRETCH = per-child constraints below
             var align = 9 if vertical else 10  # centre X / centre Y
@@ -1381,7 +1381,7 @@ struct AppKitHost[A: App](Movable):
                     hug(child, Float32(490 if wrapping and not vertical else 750), vertical)
                 if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
                     hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
-                var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED  # (its one view across it: the web's align-items: stretch, D-494)
+                var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED or node.kind == WEBCOMP  # (its one view across it: the web's align-items: stretch, D-494)
                 var spans = vertical and (cn.kind == SCROLL or cn.kind == TABLE)  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502; a Table too: table.table { width: 100% })
                 if not vertical and cn.kind == TABLE and not cn.grows:  # (in a row, a Table takes the row: its width 100 %, a side-scroll's flex: 1 0 auto)
                     hug(child, Float32(1), False)
@@ -1937,7 +1937,7 @@ struct AppKitHost[A: App](Movable):
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
         for k in range(len(self.rt.shown.nodes)):
             var kk = self.rt.shown.nodes[k].kind
-            if kk == HSTACK or kk == VSTACK or kk == TABLE or kk == DRAG or kk == DROP or kk == EMBED:  # (a table's cells and a
+            if kk == HSTACK or kk == VSTACK or kk == TABLE or kk == DRAG or kk == DROP or kk == EMBED or kk == WEBCOMP:  # (a table's cells and a
                 for c in self.rt.shown.nodes[k].children:  # wrapper's view: their words inherit through them too, D-516)
                     self.parents[c] = k
         self.size_h = List[Int](length=len(self.rt.shown.nodes), fill=0)

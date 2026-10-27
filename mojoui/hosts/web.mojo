@@ -11,6 +11,7 @@ from mojoui.view import View, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LA
 from mojoui.paragraph import link_href
 from mojoui.diff import Diff
 from mojoui.app import App, Event, Runtime
+from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
 from mojoui.theme import Palette, hex_of
 from mojoui.clock import now_ns
@@ -221,6 +222,34 @@ def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number
             return '{"ignored":true}'
     var d = rt[].dispatch(Event(message, event_text, number))
     return diff_to_json(d, rt[].shown)
+
+
+def web_widget_event[A: App](handle: Int, node: Int, name: String, payload: String) -> String:
+    """Widget node `node` emitted `name` with `payload` (JSON): its on_event through update(); what changed."""
+    var rt = session_at[A](handle)
+    if not rt[].accepts_widget_event(node, name, payload):
+        return '{"ignored":true}'
+    var d = rt[].widget_event(node, name, payload)
+    return diff_to_json(d, rt[].shown)
+
+
+def web_reply[A: App](handle: Int, seq: Int, text: String, error: String) -> String:
+    """A widget's answer to command `seq` (or why there's none) through update(); what changed."""
+    var rt = session_at[A](handle)
+    if not rt[].knows_reply(seq):
+        return '{"ignored":true}'
+    var d = rt[].reply(seq, text, error)
+    return diff_to_json(d, rt[].shown)
+
+
+def web_commands[A: App](handle: Int) -> String:
+    """The widget commands the app asked for since the last call, as JSON: [{seq, tag, widget, name, args}]."""
+    return commands_json(session_at[A](handle)[].take_commands())
+
+
+def web_assets[A: App]() -> String:
+    """App.web_assets() as a JSON list of bundle names."""
+    return assets_json(A.web_assets())
 
 
 def web_poll[A: App](handle: Int) -> String:
