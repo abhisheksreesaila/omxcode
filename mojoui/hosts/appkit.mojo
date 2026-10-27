@@ -22,7 +22,7 @@ from mojoui.menus import CHECKED, DISABLED, DANGER
 from mojoui.theme import BUTTON_ICON, Palette, Theme, mix
 from mojoui.theme import Look
 from mojoui.look import text_only
-from mojoui.linebreak import css_breaks, label_words
+from mojoui.linebreak import css_breaks, label_words, WJ
 from mojoui.paragraph import Run, runs_of, link_href
 from mojoui.icons_data import lucide_svg
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
@@ -57,6 +57,12 @@ def ns_rgba(c: UInt32) -> Int:
     """An NSColor with the colour's own alpha (a look's glass: white at 62 %)."""
     return msg(cls("NSColor"), "colorWithSRGBRed:green:blue:alpha:", Float64(Int(c & 255)) / 255.0, Float64(Int((c >> 8) & 255)) / 255.0,
                Float64(Int((c >> 16) & 255)) / 255.0, Float64(Int((c >> 24) & 255)) / 255.0)
+
+
+# What AppKit leaves between a button's image and its title on its own (read from run 40423006656's pictures: about 2 pt
+# where the web's role gap is 7), so a role's gap is opened by the difference (D-561)
+comptime APPKIT_IMAGE_GAP = 2.0
+comptime ICON_GAP_MARK = "\u200a"  # a hair space: the room before a role button's words, kerned to its gap
 
 
 def cut_with_ellipsis(w: Int):
@@ -1555,6 +1561,20 @@ struct AppKitHost[A: App](Movable):
         self.tick_cw.append(cw)
         self.tick_ch.append(ch)
 
+    def icon_spaced(self, w: Int, said: Int, k: Int) -> Int:
+        """A role button's title as shown beside its icon: the role's gap between them (the web's 6 pt unless the role
+        names one), where AppKit leaves only its own ~2 pt (the console's Restart, its tabs). A hair space kerned by the
+        difference opens it (a word joiner's kern was dropped: run 40425105160); `said` (no joiner) stays what the width is measured from (D-552, D-561)."""
+        if k < 0 or msg(w, "image") == 0 or msg(said, "length") == 0:
+            return said
+        var gap = Float64(self.look.surfaces[k].gap) if self.look.surfaces[k].gap >= 0 else Float64(6)
+        var spaced = msg(msg(cls("NSMutableAttributedString"), "alloc"), "initWithString:attributes:", ns_string(ICON_GAP_MARK),
+                         msg(said, "attributesAtIndex:effectiveRange:", 0, 0))
+        var hair = msg[CGPoint](spaced, "size").x  # (the hair space's own width counts toward the gap)
+        _ = msg(spaced, "addAttribute:value:range:", ns_string("NSKern"), msg(cls("NSNumber"), "numberWithDouble:", max(gap - APPKIT_IMAGE_GAP - hair, Float64(0))), 0, 1)
+        _ = msg(spaced, "appendAttributedString:", said)
+        return spaced
+
     def draw_button(mut self, w: Int, style: Int, title: String, i: Int = -1):
         """A push button in the look's shape: its fill, hairline and corners on a layer, its title in the look's family,
         the look's height and padding (GTK's `button`, the web's). A button wearing a role (node i's tag) takes the role's
@@ -1611,7 +1631,7 @@ struct AppKitHost[A: App](Movable):
         if k >= 0 and self.look.surfaces[k].tracking != 0:  # (its letter spacing, as the web's: the brand's -.02em, D-509)
             _ = msg(attrs, "setObject:forKey:", msg(cls("NSNumber"), "numberWithDouble:", self.look.surfaces[k].tracking), ns_string("NSKern"))
         var said = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs)
-        _ = msg(w, "setAttributedTitle:", said)
+        _ = msg(w, "setAttributedTitle:", self.icon_spaced(w, said, k))
         _ = msg(w, "setContentTintColor:", ns_rgba(ink))
         var fit = msg[CGPoint](w, "fittingSize")
         var wraps = False  # (a role's words-only button with its line's height: its words wrap when squeezed, as the web's and GTK's, D-537)
@@ -1644,7 +1664,7 @@ struct AppKitHost[A: App](Movable):
                         _ = msg(para, "setAlignment:", 0 if i >= 0 and self.rt.shown.nodes[i].align_items == START else 1)
                         _ = msg(attrs, "setObject:forKey:", para, ns_string("NSParagraphStyle"))
                         said = msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(title), attrs)
-                        _ = msg(w, "setAttributedTitle:", said)
+                        _ = msg(w, "setAttributedTitle:", self.icon_spaced(w, said, k))
         # its title's width is the least it takes and the width it prefers, not a fixed one: a filling button (an
         # inspector row's title) stretches, as on GTK and the web; held to its fit, it held the Report inspector's
         # column to 117 pt through the rows' equal widths (Mac, 2026-10-24)
@@ -2058,8 +2078,9 @@ struct AppKitHost[A: App](Movable):
                 else:  # buttons and checkboxes (a drawn button's title keeps its type and ink)
                     var had = msg(w, "attributedTitle") if kind == BUTTON else 0
                     if had != 0 and msg(had, "length") > 0:
-                        var attrs = msg(had, "attributesAtIndex:effectiveRange:", 0, 0)
-                        _ = msg(w, "setAttributedTitle:", msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(p.text), attrs))
+                        var attrs = msg(had, "attributesAtIndex:effectiveRange:", msg(had, "length") - 1, 0)  # (its words' own, not an icon gap's joiner, D-561)
+                        var role = self.look.surface(self.rt.shown.nodes[p.node].name) if self.rt.shown.nodes[p.node].name != "" and from_ns(msg(had, "string")).startswith(ICON_GAP_MARK) else -1
+                        _ = msg(w, "setAttributedTitle:", self.icon_spaced(w, msg(msg(cls("NSAttributedString"), "alloc"), "initWithString:attributes:", ns_string(p.text), attrs), role))
                     else:
                         _ = msg(w, "setTitle:", ns_string(p.text))
             elif p.op == SET_VALUE:
