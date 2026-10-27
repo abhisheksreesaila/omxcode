@@ -4,7 +4,7 @@
 # keeps it in the URL: open #/models/qwen2.5-0.5b/logs), a notebook's Markdown, a Paragraph of styled runs with a link (its
 # words that look like markup stay words), a Sparkline and Add a model's Timeline.
 
-from mojoui.view import View, Text, Button, VStack, HStack, Card, Spacer, Divider, CAPTION, HEADLINE, PROMINENT, START, CENTER
+from mojoui.view import View, Text, Button, VStack, HStack, Card, Spacer, Divider, CAPTION, HEADLINE, PROMINENT, START, CENTER, SPACE_XXS, SPACE_XS, SPACE_S, SPACE_M
 from mojoui.app import App, Event
 from mojoui.canvas import Surface
 from mojoui.effects import Every
@@ -16,6 +16,7 @@ from mojoui.breadcrumbs import Breadcrumbs
 from mojoui.chip import Chip, Badge, Pill, BADGE_OK
 from mojoui.confirm import TwoStep, ConfirmButton
 from mojoui.skeleton import Skeleton
+from mojoui.lists import MainAside
 from mojoui.route import Route, Router, Match
 from mojoui.markdown import Markdown
 from mojoui.paragraph import Paragraph, Plain, Code, Link
@@ -153,9 +154,9 @@ struct Main(App):
         var ids: List[String] = ["Qwen/Qwen2.5-0.5B-Instruct", "sentence-transformers/all-MiniLM-L6-v2", "meta-llama/Llama-3.2-1B-Instruct"]
         var cells: List[View] = []
         for r in range(3):
-            cells.append(VStack(Text(names[r]), Text(ids[r], CAPTION), spacing=2).align(START))
+            cells.append(VStack(Text(names[r]), Text(ids[r], CAPTION), spacing=SPACE_XXS).align(START))
             cells.append(Badge("Running", BADGE_OK, dot=True) if r == 0 else Badge("Idle"))
-            cells.append(HStack(Chip("Chat", hue=1) if r != 1 else Chip("Embeddings", hue=3), Chip("#work"), spacing=4))
+            cells.append(HStack(Chip("Chat", hue=1) if r != 1 else Chip("Embeddings", hue=3), Chip("#work"), spacing=SPACE_XS))
             cells.append(Text(["988 MB", "91 MB", "2.5 GB"][r]))
             cells.append(Text("3.1 GB" if r == 0 else "–"))
             cells.append(Text("158" if r == 0 else "–"))
@@ -169,32 +170,32 @@ struct Main(App):
         var done = min(self.stage, len(materialize[STAGES]()))
         var left = Card(
             Breadcrumbs(pages().crumbs(place), on_tap=CRUMB, mono_last=place.page == "model"),
-            HStack(Text("route: " + self.path).tooltip(said).tag("route-state"), Spacer(), Button("Open qwen logs", on_tap=OPEN_LOGS), Button("Open keys", on_tap=OPEN_KEYS), spacing=8).align(CENTER).fill(),
-            HStack(Text("My models", HEADLINE), Pill("3"), spacing=8).align(CENTER),
+            HStack(Text("route: " + self.path).tooltip(said).tag("route-state"), Spacer(), Button("Open qwen logs", on_tap=OPEN_LOGS), Button("Open keys", on_tap=OPEN_KEYS), spacing=SPACE_S).align(CENTER).fill(),
+            HStack(Text("My models", HEADLINE), Pill("3"), spacing=SPACE_S).align(CENTER),
             Table(["Model", "State", "Kind · labels", "Size", "Memory", "Tok/s", "Access"], cells, align="LLLRRRL",
                   ticked=self.ticked, on_tick=TICK, on_tick_all=TICK_ALL).fill().tag("models"),
             Text("ticked: " + ticked),
-            HStack(Chip("Chat", hue=1), Chip("Vision", hue=2), Chip("#favorites"), Badge("active", BADGE_OK, dot=True), Badge("prefix only"), spacing=6),
-            VStack(Skeleton(), Skeleton(width=320), Skeleton(width=180), spacing=8).fill(),
+            HStack(Chip("Chat", hue=1), Chip("Vision", hue=2), Chip("#favorites"), Badge("active", BADGE_OK, dot=True), Badge("prefix only"), spacing=SPACE_XS),
+            VStack(Skeleton(), Skeleton(), Skeleton(), spacing=SPACE_S).fill(),
             Divider().fill(),
             VStack(Markdown(NOTES, on_link=LINK)).align(START).fill().tag("sample-markdown"),
             VStack(Paragraph([Plain("Shown as words: "), Code("<b>not bold</b> & <i>", "md-code"), Plain(" then "), Link("release notes", "https://example.com/notes", "md-link")],
                              role="md-p", on_link=LINK)).align(START).fill().tag("sample-paragraph"),
             Text("link: " + self.link),
-            spacing=14,
+            spacing=SPACE_M,
         ).grow()
         var right = Card(
             Text("Copy the endpoint", HEADLINE),
             CodeBlock(CODE, on_copy=COPY, copies=self.copies, copied=self.copies > 0).fill(),
             HStack(Text("notes-app"), Spacer(), ConfirmButton("Revoke", "Click again to revoke", self.keys.is_armed(0), REVOKE, icon="trash"),
-                   spacing=8).align(CENTER).fill().tooltip(confirm_state).tag("confirm-state"),
+                   spacing=SPACE_S).align(CENTER).fill().tooltip(confirm_state).tag("confirm-state"),
             Text("revoked: " + revoked),
-            HStack(Text("log: " + String(len(self.lines)) + " lines"), Spacer(), Button("Add log lines", on_tap=ADD_LINES), spacing=8).align(CENTER).fill(),
-            LogView(self.lines, height=180).fill(),
+            HStack(Text("log: " + String(len(self.lines)) + " lines"), Spacer(), Button("Add log lines", on_tap=ADD_LINES), spacing=SPACE_S).align(CENTER).fill(),
+            LogView(self.lines, short=True).fill(),
             VStack(SparklineView(SPARK, 1)).fill().tag("sample-sparkline"),
             HStack(Text("timeline: " + String(done) + " of " + String(len(materialize[STAGES]())) + " done"), Spacer(), Button("Next stage", on_tap=NEXT_STAGE),
-                   spacing=8).align(CENTER).fill(),
+                   spacing=SPACE_S).align(CENTER).fill(),
             VStack(Timeline(self.stages())).align(START).fill().tag("sample-timeline"),
-            spacing=12,
-        ).width(560)
-        return VStack(HStack(left, right, spacing=16).align(START).fill(), Route(self.path, ROUTE), spacing=0).padding(16).fill()
+            spacing=SPACE_M,
+        )
+        return VStack(MainAside(left, right, aside_wide=True), Route(self.path, ROUTE), spacing=0).fill()

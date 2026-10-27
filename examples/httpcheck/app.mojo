@@ -3,8 +3,10 @@
 # Start ticks runs a 100 ms timer ten times and lists when each tick landed (ms after the tap); the strip is still then,
 # so on the web the ticks reach the page through its /wait, not alongside frames.
 
-from mojoui import App, Event, View, VStack, HStack, Text, Button, TextField, Canvas, CAPTION, HEADLINE, PROMINENT
-from mojoui.canvas import Surface, rgba
+from mojoui import App, Event, View, HStack, Text, Button, TextField, CAPTION, HEADLINE, PROMINENT
+from mojoui.view import Card, SPACE_S, SPACE_M, NO_MSG
+from mojoui.canvas import Surface
+from mojoui.activity import ActivityStrip, Strip
 from mojoui.http import Http, Request
 from mojoui.effects import Every
 from mojoui.clock import now_ns
@@ -98,23 +100,17 @@ struct Main(App):
         return out^
 
     def draw(mut self, canvas: Int, mut surface: Surface):
-        surface.fill(rgba(238, 240, 244))
-        var w = surface.width
-        var bar = max(w // 8, 1)
-        var x0 = (self.phase * 6) % (w + bar) - bar
-        for y in range(surface.height):
-            for x in range(max(x0, 0), min(x0 + bar, w)):
-                surface.set(x, y, rgba(42, 110, 230))
+        Strip(self.phase, self.theme().palette).draw(surface)
 
     def view(self) -> View:
         var ticks = String("")
         for t in self.ticks:
             ticks += " " + String(t)
-        return VStack(
+        return Card(
             Text("httpcheck · requests and timers off the main thread", style=HEADLINE),
             TextField(self.url, placeholder="URL", on_change=URL),
-            HStack(Button("Fetch", on_tap=FETCH, style=PROMINENT), Button("Start ticks", on_tap=START_TICKS), spacing=8),
-            Canvas(0, self.phase, on_frame=FRAME if self.waiting else 0).fill().height(36).tag("strip"),
+            HStack(Button("Fetch", on_tap=FETCH, style=PROMINENT), Button("Start ticks", on_tap=START_TICKS), spacing=SPACE_S),
+            ActivityStrip(0, self.phase, on_frame=FRAME if self.waiting else NO_MSG).tag("strip"),
             Text("status: " + ("waiting" if self.waiting else "idle")),
             Text("frames while waiting: " + String(self.frames)),
             Text("waited: " + String(Int(self.waited_ms)) + " ms"),
@@ -122,5 +118,5 @@ struct Main(App):
             Text("reply: " + (self.reply if self.reply.byte_length() <= 120 else String(self.reply[byte = :120]))),
             Text("ticks:" + ticks),
             Text("Every line of this app is Mojo.", style=CAPTION),
-            spacing=10,
-        ).padding(16)
+            spacing=SPACE_M,
+        ).fill()

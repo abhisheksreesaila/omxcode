@@ -11,7 +11,7 @@ from mojoui.chip import ChipRow
 from mojoui.header import PageHeader, FilterBar, SegmentButtons
 from mojoui.sidebar import Sidebar, SidebarHead, SidebarItem
 from mojoui.marks import SignalDot, StatusMark, GOOD, QUIET
-from mojoui.panel import Panel, StatTile, StatGrid
+from mojoui.panel import Panel, StatTile, StatRow
 from mojoui.words import MonoLine, MonoText, Strong, QuietText, CommandLine
 from mojoui.buttons import FlatButton, PrimaryButton, TextAction, NameLink
 from mojoui.fields import SearchField
@@ -212,7 +212,7 @@ def groups_column(st: Store, lib: Library, phone: Bool) -> View:
 def card_of(r: Row, row: Int, hue: Int, lib: Library) -> View:
     var top = HStack(Checkbox("", lib.is_ticked(r.name), TICK + row).tag("tick-" + String(row)), SignalDot(hue),
                      NameLink(r.name, OPEN + row), Spacer(), StatusMark(r.state_label, GOOD if r.running else QUIET, live=r.running)).align(CENTER).fill()
-    var k3 = StatGrid([StatTile("tok/s", r.tps, "", ""), StatTile("Memory", r.memory, "", ""), StatTile("Requests", r.requests, "", "")], columns=3)
+    var k3 = StatRow([StatTile("tok/s", r.tps, "", ""), StatTile("Memory", r.memory, "", ""), StatTile("Requests", r.requests, "", "")])
     var items: List[View] = [top^, k3^, tags_view(r)]
     return Draggable(Panel(items^), r.name).tag("card-" + r.name)
 

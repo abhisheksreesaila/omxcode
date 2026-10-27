@@ -48,7 +48,7 @@ def covered(views: List[View], skip: List[String] = []) raises:
 from mojoui.paragraph import runs_of
 from mojoui.view import PARAGRAPH
 from mojoui.panel import (Card, CardHead, CardBody, CardFoot, CopyFoot, CardNote, CardStack, CardColumn, TabBody, ListRow, ColumnRow, Panel, PanelTitle,
-    PanelFoot, PanelRow, PanelGrid, StatTile, StatGrid, Fact, FactText, FactLink, FactList, LabeledRow, KEYS_NARROW, KEYS_WIDEST)
+    PanelFoot, PanelRow, PanelGrid, StatTile, StatGrid, StatRow, Fact, FactText, FactLink, FactList, LabeledRow, KEYS_NARROW, KEYS_WIDEST)
 from mojoui.view import Text, Button, BASELINE
 
 
@@ -69,6 +69,10 @@ def main() raises:
     assert_equal(tile.nodes[tagged(tile, "stat-number")].align_items, BASELINE)
     var grid = StatGrid([tile.copy(), tile.copy(), tile.copy()], columns=2)
     assert_equal(len(grid.nodes[0].children), 2)  # (rows of two)
+    var one = StatRow([tile.copy(), tile.copy(), tile.copy()])
+    assert_equal(len(one.nodes[0].children), 1)  # (one row of three)
+    assert_equal(one.nodes[0].name, "stat-grid")
+    assert_equal(len(one.nodes[one.nodes[0].children[0]].children), 3)
     var fact = Fact("Certificate", FactText("a local CA"), KEYS_NARROW)
     assert_true(tagged(fact, "fact-key-narrow") > 0)
     var look = omxqua(False).look.copy()
