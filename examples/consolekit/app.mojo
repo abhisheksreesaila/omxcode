@@ -4,7 +4,7 @@
 # keeps it in the URL: open #/models/qwen2.5-0.5b/logs), a notebook's Markdown, a Paragraph of styled runs with a link (its
 # words that look like markup stay words), a Sparkline and Add a model's Timeline.
 
-from mojoui.view import View, Text, Button, VStack, HStack, Card, Spacer, Divider, CAPTION, HEADLINE, PROMINENT, START, CENTER, SPACE_XXS, SPACE_XS, SPACE_S, SPACE_M
+from mojoui.view import View, Text, Button, VStack, HStack, Card, Spacer, Divider, CAPTION, HEADLINE, PROMINENT, START, CENTER, SPACE_XXS, SPACE_XS, SPACE_S, SPACE_M, SPACE_L
 from mojoui.app import App, Event
 from mojoui.canvas import Surface
 from mojoui.effects import Every
@@ -16,7 +16,6 @@ from mojoui.breadcrumbs import Breadcrumbs
 from mojoui.chip import Chip, Badge, Pill, BADGE_OK
 from mojoui.confirm import TwoStep, ConfirmButton
 from mojoui.skeleton import Skeleton
-from mojoui.lists import MainAside
 from mojoui.route import Route, Router, Match
 from mojoui.markdown import Markdown
 from mojoui.paragraph import Paragraph, Plain, Code, Link
@@ -191,11 +190,11 @@ struct Main(App):
                    spacing=SPACE_S).align(CENTER).fill().tooltip(confirm_state).tag("confirm-state"),
             Text("revoked: " + revoked),
             HStack(Text("log: " + String(len(self.lines)) + " lines"), Spacer(), Button("Add log lines", on_tap=ADD_LINES), spacing=SPACE_S).align(CENTER).fill(),
-            LogView(self.lines, short=True).fill(),
+            LogView(self.lines).fill(),
             VStack(SparklineView(SPARK, 1)).fill().tag("sample-sparkline"),
             HStack(Text("timeline: " + String(done) + " of " + String(len(materialize[STAGES]())) + " done"), Spacer(), Button("Next stage", on_tap=NEXT_STAGE),
                    spacing=SPACE_S).align(CENTER).fill(),
             VStack(Timeline(self.stages())).align(START).fill().tag("sample-timeline"),
             spacing=SPACE_M,
         )
-        return VStack(MainAside(left, right, aside_wide=True), Route(self.path, ROUTE), spacing=0).fill()
+        return VStack(HStack(left, right^.grow(), spacing=SPACE_L).align(START).fill(), Route(self.path, ROUTE), spacing=0).fill()

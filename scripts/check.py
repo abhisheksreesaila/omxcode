@@ -162,7 +162,7 @@ def m1():
         problems.append("the server never got X-Test-Key with $HTTP_TEST_SECRET's value")
     if not any(r["method"] == "POST" and r["headers"].get("content-type") == "application/json" for r in seen):
         problems.append("the POST didn't say Content-Type: application/json")
-    want("REFUSED_SPLITS", lambda v: v == "ok", "targets, methods and header names that would split the request are refused (D-570)")
+    want("SPLITS", lambda v: v == "ok", "targets, methods and header names that would split the request are refused (D-570)")
     forged = [r for r in seen if "evil" in r["path"].lower() or "x-evil" in r["headers"] or "evil" in r["method"].lower()]
     if forged:
         problems.append(f"the server got a request the transport should have refused: {forged[0]['method']} {forged[0]['path']!r}")

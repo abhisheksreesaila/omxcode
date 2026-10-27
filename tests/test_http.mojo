@@ -148,7 +148,7 @@ def main() raises:
     var tabbed = SocketTransport.send(Request.get(0, base + "header?name=X-Tab").header("X-Tab", "a\tb c"))  # (a tab inside a value is allowed)
     assert_equal(tabbed.status, 200)
     assert_equal(tabbed.text(), "a\tb c")
-    print("REFUSED_SPLITS: ok")
+    print("SPLITS: ok")
     # through the runtime: one update asks for every case; it returns at once, the replies come later
     var rt = Runtime(Probe())
     assert_equal(rt.wake_in(0), -1)
