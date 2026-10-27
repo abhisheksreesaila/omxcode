@@ -46,6 +46,8 @@ import os
 import re
 import subprocess
 
+import parity
+
 WIDGETS = "widgets"
 BUILD = ROOT / "build"
 OUT = ROOT / "docs" / "goals" / "34"
@@ -546,11 +548,248 @@ def console_runs():
     return problems
 
 
+# ---- goal 34 M3: the same widgets app on GTK, each WebComponent in a WebKitGTK view ----
+LIVE_SIZE = (1280, 860)  # (the web's viewport in widgets_web: the boxes are compared at the same size)
+SAMPLE = "The quick brown fox jumps over the lazy dog"
+
+
+def gtk_live(commands, env=None):
+    """The widgets app's GTK build with real input (XTest, scripts/live.py) on its own headless display."""
+    args = ["pixi", "run", "python", "scripts/live.py", str(BUILD / WIDGETS / "linux" / WIDGETS), commands, "--size", f"{LIVE_SIZE[0]}x{LIVE_SIZE[1]}"]
+    for k, v in (env or {}).items():
+        args += ["--env", f"{k}={v}"]
+    r = run(args, timeout=300)
+    return r.stdout + r.stderr
+
+
+def reports(out):
+    """Each live `report`'s lines (live.py: the app prints them, then LIVE: reported)."""
+    return [part for part in out.split("LIVE: reported")[:-1]]
+
+
+def webviews(part):
+    """{key: {ready, mounts, csp, refused, blocked, h}} from a report's WEBVIEW: lines (the GTK host's own account)."""
+    got = {}
+    for m in re.finditer(r"^WEBVIEW: (\S+) (\w+)((?: \w+=-?\d+)*)$", part, re.M):
+        d = {"state": m.group(2)}
+        for kv in m.group(3).split():
+            k, v = kv.split("=")
+            d[k] = int(v)
+        got[m.group(1)] = d
+    return got
+
+
+def widget_lines(part):
+    return {l.split(": ", 1)[0]: l.split(": ", 1)[1] if ": " in l else "" for l in lines_with(part, "WIDGET: ")}
+
+
+def center(b, dy=None):
+    x, y, w, h = b
+    return f"{x + w / 2:.0f},{y + (dy if dy is not None else h / 2):.0f}"
+
+
+# Security probes inside a widget's WebView (MOJOUI_TEST's webjs: step; expressions without ";", which separates steps)
+GTK_PROBES = [
+    ("csp", "fetch('/widget.html').then(r => r.headers.get('Content-Security-Policy'), e => 'failed ' + e)"),
+    ("eval", "(() => { try { return 'ran ' + eval('1 + 1') } catch (e) { return 'blocked' } })()"),
+    ("inline", "(s => (s.textContent = 'window.pwned = 1', document.head.append(s), new Promise(r => setTimeout(() => r(window.pwned ? 'ran' : 'blocked'), 300))))(document.createElement('script'))"),
+    ("remote-fetch", "fetch('https://example.com/').then(() => 'loaded', () => 'blocked')"),
+    ("remote-img", "(i => new Promise(r => (i.onload = () => r('loaded'), i.onerror = () => r('blocked'), i.src = 'https://example.com/x.png')))(new Image())"),
+    ("file", "fetch('file:///etc/hostname').then(r => r.text().then(t => 'loaded ' + t.length), () => 'blocked')"),
+    ("outside", "fetch('/static/fonts/..%2F..%2F..%2F..%2F..%2Fetc%2Fhostname').then(r => r.ok ? 'loaded' : 'refused', () => 'blocked')"),
+    ("unlisted", "fetch('/assets/manifest.json').then(r => r.ok ? 'loaded' : 'refused', () => 'blocked')"),
+    ("popup", "String(window.open('https://example.com/'))"),
+    ("navigate", "(location.href = 'https://example.com/', 'asked')"),
+    ("msg-object", "(webkit.messageHandlers.mojoui.postMessage({path: 'w', tag: 'mx-counter', id: '1', name: 'click', data: '{}'}), 'sent')"),
+    ("msg-not-json", "(webkit.messageHandlers.mojoui.postMessage('{not json'), 'sent')"),
+    ("msg-forged", "(webkit.messageHandlers.mojoui.postMessage(JSON.stringify({path: 'w', tag: 'mx-editor', id: '1', name: 'change', data: JSON.stringify({text: 'forged words from the counter'})})), 'sent')"),
+    ("msg-bad-payload", "(webkit.messageHandlers.mojoui.postMessage(JSON.stringify({path: 'w', tag: 'mx-counter', id: '1', name: 'click', data: '{nope'})), 'sent')"),
+    ("where", "new Promise(r => setTimeout(() => r(location.href), 800))"),
+]
+GTK_PROBE_WANT = {"eval": "blocked", "inline": "blocked", "remote-fetch": "blocked", "remote-img": "blocked", "file": "blocked",
+                  "popup": "null", "navigate": "asked", "msg-object": "sent", "msg-not-json": "sent", "msg-forged": "sent", "msg-bad-payload": "sent"}
+
+
+def m3():
+    """Linux, the same widget: the widgets app on GTK, each WebComponent in a WebKitGTK (6.0, GTK 4) view of its own,
+    loading the same esbuild bundle and the same mojoui-widgets.js runtime from a local origin (mojoui://) with the web's
+    CSP, no network; the view kept across rebuilds (props go in as JSON through a function call, never a remount); events
+    come back through a WebKit script message handler as JSON into update() as on the web; commands and replies work.
+    Proof with real input (XTest on the headless display): typing in the CodeMirror editor reaches update() (the word
+    count follows), also across a rebuild mid-typing (partial and full rebuilds: the keyboard and the one mount stay);
+    Load sample sets the text and the editor shows it; the counter's clicks reach Mojo, a props change keeps its count,
+    a command gets its reply; the widgets' boxes match the web's within goal 32's tolerance (parity.close); a screenshot.
+    Security: no navigation away, no popups, no remote loads, no file access beyond the bundle, no eval or inline script;
+    JS→native messages that aren't JSON text, or name another widget, are refused. Generic: no app's name in the host.
+    The matrix marks WebComponent ✅ on GTK."""
+    problems = []
+    for f in ("scripts/webkitgtk.sh", "mojoui/hosts/gtk_webview.mojo"):
+        if not (ROOT / f).exists():
+            problems.append(f"no {f}")
+    if problems:
+        return False, "; ".join(problems)
+    host_src = (ROOT / "mojoui/hosts/gtk_webview.mojo").read_text() + (ROOT / "mojoui/hosts/gtk.mojo").read_text()
+    for name in ("mx-editor", "mx-counter", "examples/widgets", "Load sample"):
+        if name in host_src:
+            problems.append(f"the GTK host names {name!r}: it must work for any WebComponent in any app")
+    for need in ("webkit_user_content_manager_register_script_message_handler", "decide-policy", "webkit_web_context_register_uri_scheme",
+                 "webkit_web_view_call_async_javascript_function"):
+        if need not in host_src:
+            problems.append(f"the GTK host doesn't use {need}")
+    doc = (ROOT / "docs/js.md").read_text()
+    if "WebKitGTK" not in doc:
+        problems.append("docs/js.md doesn't say how widgets run on GTK (WebKitGTK)")
+    err = build(WIDGETS, "web", "linux")
+    if err:
+        return False, "; ".join(problems + [err])
+    # the same bundle: the GTK build serves the web's files, byte for byte, and the same runtime
+    web_assets, gtk_assets = BUILD / WIDGETS / "web" / "assets", BUILD / WIDGETS / "linux" / "webview" / "assets"
+    wm = json.loads((web_assets / "manifest.json").read_text()) if (web_assets / "manifest.json").exists() else {}
+    gm = json.loads((gtk_assets / "manifest.json").read_text()) if (gtk_assets / "manifest.json").exists() else {}
+    if not wm or {k: v["file"] for k, v in wm.items()} != {k: v["file"] for k, v in gm.items()}:
+        problems.append(f"the GTK build's bundles aren't the web's ({sorted(v['file'] for v in gm.values())} vs {sorted(v['file'] for v in wm.values())})")
+    else:
+        for v in wm.values():
+            if (web_assets / v["file"]).read_bytes() != (gtk_assets / v["file"]).read_bytes():
+                problems.append(f"{v['file']} differs between the web and GTK builds")
+    rt_js = BUILD / WIDGETS / "linux" / "webview" / "mojoui-widgets.js"
+    if not rt_js.exists() or rt_js.read_bytes() != (ROOT / "mojoui/hosts/static/mojoui-widgets.js").read_bytes():
+        problems.append("the GTK build's mojoui-widgets.js isn't the web host's runtime")
+    # 1) the layout, untouched: both views ready, one mount each, no CSP violation; boxes against the web's
+    out1 = gtk_live("wait:7000;report")
+    parts = reports(out1)
+    if not parts:
+        return False, "; ".join(problems + ["the GTK run printed no report: " + out1[-600:]])
+    first = parts[-1]
+    views = webviews(first)
+    for key in ("mx-editor#1", "mx-counter#1"):
+        v = views.get(key)
+        if not v or v["state"] != "ready" or v.get("mounts") != 1 or v.get("csp") != 0:
+            problems.append(f"{key}'s WebView on GTK: {v} (wants ready, mounts=1, csp=0): " + (out1[-400:] if not v else ""))
+    gbox = g33.boxes(first)
+    ok, wout = widgets_web("pause:600", viewport=LIVE_SIZE)
+    if not ok:
+        problems.append("web run for the boxes failed: " + wout[-300:])
+    wbox = g33.boxes(wout)
+    for key in ("editor", "counter", "note-bar/Load sample", "counter-bar/Ask the counter"):
+        if key not in gbox or key not in wbox:
+            problems.append(f"no box {key!r} (GTK {sorted(gbox)[:12]}, web {sorted(wbox)[:12]})")
+        elif not parity.close(gbox[key], wbox[key]):
+            problems.append(f"{key}: GTK {gbox[key]} vs web {wbox[key]} (beyond 4 pt / 3 %)")
+    if problems:
+        return False, "; ".join(problems[:10])
+    ed, ctr = gbox["editor"], gbox["counter"]
+    inc = f"{ctr[0] + ctr[2] - 12 - 28:.0f},{ctr[1] + ctr[3] / 2:.0f}"  # (the counter's +step button: its right end)
+    load, ask = center(gbox["note-bar/Load sample"]), center(gbox["counter-bar/Ask the counter"])
+    bigger = center(gbox["counter-bar/Bigger steps"]) if "counter-bar/Bigger steps" in gbox else None
+    details = center(gbox["counter-bar/Show details"]) if "counter-bar/Show details" in gbox else None
+    if not bigger or not details:
+        return False, f"no boxes for the counter's buttons ({sorted(gbox)})"
+    shot = OUT / "m3-widgets-gtk.png"
+    OUT.mkdir(parents=True, exist_ok=True)
+    cmds = ";".join([
+        "wait:7000", f"click:{center(ed, 30)}", "type:one two three", "wait:1200", "report",     # A: typing reaches update()
+        "type: four five six", "wait:1200", "type: seven", "wait:1200", "report",                 # B: a rebuild mid-typing (Long note)
+        f"click:{load}", "wait:1500", "report",                                                   # C: Mojo sets the text
+        f"click:{inc}", f"click:{inc}", f"click:{inc}", "wait:800", f"click:{bigger}", "wait:800",  # the counter: 3 clicks, then props
+        f"click:{inc}", "wait:800", f"click:{ask}", "wait:1500", f"click:{details}", "wait:1500", "report",  # D: reply, rebuild
+        f"shot:{shot}",
+    ])
+    out2 = gtk_live(cmds)
+    parts = reports(out2)
+    if len(parts) != 4:
+        return False, f"the live run made {len(parts)} reports, not 4: " + out2[-800:]
+    a, b, c, d = parts
+    la, lb, lc, ld = (lines_with(p, "LABEL: ") for p in parts)
+    wa, wb, wc, wd = (widget_lines(p) for p in parts)
+    if "Words: 3" not in la or '"one two three"' not in wa.get("mx-editor#1", ""):
+        problems.append(f"typing on GTK: labels {[l for l in la if l.startswith('Words')]}, editor {wa.get('mx-editor#1')}")
+    if "Words: 7" not in lb or "Long note" not in lb or '"one two three four five six seven"' not in wb.get("mx-editor#1", ""):
+        problems.append(f"typing across the rebuild: labels {[l for l in lb if l.startswith('Words') or l == 'Long note']}, editor {wb.get('mx-editor#1')}")
+    if "Words: 9" not in lc or json.dumps(SAMPLE) not in wc.get("mx-editor#1", ""):
+        problems.append(f"Load sample on GTK: labels {[l for l in lc if l.startswith('Words')]}, editor {wc.get('mx-editor#1')}")
+    for want in ("Clicks seen by Mojo: 4", "Last count: 5", "Step: 2", "Counter replied: count 5", "Details shown"):
+        if want not in ld:
+            problems.append(f"the counter on GTK: no label {want!r} ({[l for l in ld if ':' in l][:10]})")
+    if not wd.get("mx-counter#1", "").startswith("count 5, step 2"):
+        problems.append(f"the counter's own state on GTK: {wd.get('mx-counter#1')} (wants count 5, step 2: kept across props and a rebuild)")
+    end = webviews(d)
+    for key in ("mx-editor#1", "mx-counter#1"):
+        v = end.get(key, {})
+        if v.get("mounts") != 1 or v.get("csp") != 0 or v.get("refused") != 0:
+            problems.append(f"{key} after the run: {v} (wants mounts=1, csp=0, refused=0: one view, never remounted)")
+    if not shot.exists():
+        problems.append("no GTK screenshot")
+    else:
+        from PIL import Image
+        im = Image.open(shot).convert("RGB")
+        x, y, w, h = (int(v) for v in ed)
+        crop = im.crop((x + 4, y + 4, x + w - 4, min(y + 60, y + h - 4)))
+        dark = sum(1 for p in crop.getdata() if sum(p) < 300)
+        if dark < 80:
+            problems.append(f"the GTK screenshot shows no text in the editor's box ({dark} dark pixels)")
+    # 2) full rebuilds (MOJOUI_NO_PARTIAL=1): the WebView moves into the new screen, typing goes on
+    out3 = gtk_live(";".join(["wait:7000", f"click:{center(ed, 30)}", "type:one two three four five", "wait:600", "type: six seven", "wait:1200", "report"]),
+                    env={"MOJOUI_NO_PARTIAL": "1"})
+    parts = reports(out3)
+    if not parts:
+        problems.append("the full-rebuild run printed no report: " + out3[-400:])
+    else:
+        l3, w3, v3 = lines_with(parts[-1], "LABEL: "), widget_lines(parts[-1]), webviews(parts[-1])
+        if "Words: 7" not in l3 or '"one two three four five six seven"' not in w3.get("mx-editor#1", "") or v3.get("mx-editor#1", {}).get("mounts") != 1:
+            problems.append(f"across full rebuilds: words {[l for l in l3 if l.startswith('Words')]}, editor {w3.get('mx-editor#1')}, view {v3.get('mx-editor#1')}")
+    # 3) security, inside the counter's WebView (MOJOUI_TEST steps, the GTK host's webjs: probe)
+    steps = ";".join(f"webjs:mx-counter#1={js}" for _, js in GTK_PROBES)
+    r = run([str(BUILD / WIDGETS / "linux" / WIDGETS)], env={"MOJOUI_TEST": steps, "MOJOUI_WINDOW": f"{LIVE_SIZE[0]}x{LIVE_SIZE[1]}",
+                                                              "MOJOUI_SHOT": str(OUT / "m3-security-gtk.png")}, timeout=300)
+    out4 = r.stdout + r.stderr
+    vals = js_values(out4)
+    if len(vals) != len(GTK_PROBES):
+        problems.append(f"the security probes returned {len(vals)} of {len(GTK_PROBES)} values: " + out4[-600:])
+    else:
+        got = dict(zip([n for n, _ in GTK_PROBES], vals))
+        want_csp = (CSP_WEB().replace("frame-src 'self' http: https:", "frame-src 'none'"))
+        if got["csp"] != want_csp:
+            problems.append(f"the WebView's CSP is {got['csp']!r}, not the web's (frame-src 'none'): {want_csp!r}")
+        for k, v in GTK_PROBE_WANT.items():
+            if got[k] != v:
+                problems.append(f"probe {k}: {got[k]!r} (wants {v!r})")
+        for k in ("outside", "unlisted"):
+            if got[k] == "loaded":
+                problems.append(f"probe {k}: a file outside the bundle was served")
+        if not str(got["where"]).startswith("mojoui://"):
+            problems.append(f"the WebView navigated away: {got['where']!r}")
+        labels4 = lines_with(out4, "LABEL: ")
+        if "Clicks seen by Mojo: 0" not in labels4 or "Words: 0" not in labels4:
+            problems.append(f"a refused message reached update() ({[l for l in labels4 if 'Clicks' in l or 'Words' in l]})")
+        v4 = webviews(out4).get("mx-counter#1", {})
+        if v4.get("refused", 0) < 4 or v4.get("blocked", 0) < 2:
+            problems.append(f"the host didn't count the refused messages and blocked navigations: {v4}")
+    # 4) the matrix
+    mat = (ROOT / "docs/components.md").read_text()
+    row = next((l for l in mat.splitlines() if l.startswith("| `WebComponent`")), "")
+    if not row or row.split("|")[2].strip() != "✅":
+        problems.append(f"docs/components.md doesn't mark WebComponent ✅ on GTK: {row}")
+    return not problems, "; ".join(problems[:12]) or (
+        "each WebComponent in its own WebKitGTK 6.0 view (mojoui:// origin, the web's bundles byte for byte, the web's CSP with "
+        "frame-src 'none', no network): real typing reaches update() (Words 3, 7 across partial and full rebuilds, one mount), "
+        "Load sample shows Mojo's text, 4 counter clicks reach Mojo, props keep its count, a command's reply arrives; boxes "
+        f"within parity of the web's; eval, inline script, remote and file loads, popups and navigation blocked; non-JSON, "
+        f"forged and bad-payload messages refused; shot {shot.relative_to(ROOT)}")
+
+
+def CSP_WEB():
+    """The web host's CSP (mojoui/hosts/web.py), read from its source."""
+    src = (ROOT / "mojoui/hosts/web.py").read_text()
+    body = re.search(r'^CSP = "; "\.join\(\[(.*?)\]\)', src, re.M | re.S).group(1)
+    return "; ".join(re.findall(r'"([^"]+)"', body))
+
+
 MILESTONES = [
     ("M0", m0),
     ("M1", m1),
     ("M2", m2),
-    ("M3", todo("the widget in a WebKitGTK view on GTK (GOAL.md M3)")),
+    ("M3", m3),
     ("M4", m4),
 ]
 
