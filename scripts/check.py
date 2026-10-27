@@ -605,11 +605,12 @@ GTK_PROBES = [
     ("msg-object", "(webkit.messageHandlers.mojoui.postMessage({path: 'w', tag: 'mx-counter', id: '1', name: 'click', data: '{}'}), 'sent')"),
     ("msg-not-json", "(webkit.messageHandlers.mojoui.postMessage('{not json'), 'sent')"),
     ("msg-forged", "(webkit.messageHandlers.mojoui.postMessage(JSON.stringify({path: 'w', tag: 'mx-editor', id: '1', name: 'change', data: JSON.stringify({text: 'forged words from the counter'})})), 'sent')"),
+    ("msg-forged-reply", "(webkit.messageHandlers.mojoui.postMessage(JSON.stringify({path: 'reply', seq: 999, data: '{}', error: ''})), 'sent')"),
     ("msg-bad-payload", "(webkit.messageHandlers.mojoui.postMessage(JSON.stringify({path: 'w', tag: 'mx-counter', id: '1', name: 'click', data: '{nope'})), 'sent')"),
     ("where", "new Promise(r => setTimeout(() => r(location.href), 800))"),
 ]
 GTK_PROBE_WANT = {"eval": "blocked", "inline": "blocked", "remote-fetch": "blocked", "remote-img": "blocked", "file": "blocked",
-                  "popup": "null", "navigate": "asked", "link": "clicked", "link-new": "clicked", "msg-object": "sent", "msg-not-json": "sent", "msg-forged": "sent", "msg-bad-payload": "sent"}
+                  "popup": "null", "navigate": "asked", "link": "clicked", "link-new": "clicked", "msg-object": "sent", "msg-not-json": "sent", "msg-forged": "sent", "msg-forged-reply": "sent", "msg-bad-payload": "sent"}
 
 
 def m3():
@@ -769,7 +770,19 @@ def m3():
         v4 = webviews(out4).get("mx-counter#1", {})
         if v4.get("refused", 0) < 4 or v4.get("blocked", 0) < 2:
             problems.append(f"the host didn't count the refused messages and blocked navigations: {v4}")
-    # 4) the matrix
+    # 4) a widget's web process ending (review, D-621): the first time the page loads again and the widget mounts afresh
+    # with Mojo's props; the second time the view gives up and the WebComponent's `instead` shows
+    for kills, want in ((1, "ready"), (2, "gone")):
+        steps = ";".join(["webkill:mx-counter#1"] * kills)
+        r = run([str(BUILD / WIDGETS / "linux" / WIDGETS)], env={"MOJOUI_TEST": steps, "MOJOUI_WINDOW": f"{LIVE_SIZE[0]}x{LIVE_SIZE[1]}",
+                                                                  "MOJOUI_SHOT": str(OUT / f"m3-crash{kills}-gtk.png")}, timeout=300)
+        o = r.stdout + r.stderr
+        v = webviews(o).get("mx-counter#1", {})
+        if v.get("state") != want or v.get("crashes") != kills:
+            problems.append(f"after {kills} ended web process(es) the counter's view is {v} (wants {want}, crashes={kills}): " + o[-300:])
+        elif want == "ready" and not widget_lines(o).get("mx-counter#1", "").startswith("count 0, step 1, label " + LABEL_PROP):
+            problems.append(f"the reloaded counter didn't get Mojo's props again: {widget_lines(o).get('mx-counter#1')}")
+    # 5) the matrix
     mat = (ROOT / "docs/components.md").read_text()
     row = next((l for l in mat.splitlines() if l.startswith("| `WebComponent`")), "")
     if not row or row.split("|")[2].strip() != "✅":

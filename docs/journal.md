@@ -625,3 +625,10 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - M3's first full run: the Load sample click missed (the "Long note" line had moved the button below where the first report put it): the run now loads the sample before the note grows. With MOJOUI_NO_PARTIAL=1 the keys after "s" went nowhere: moving the focused view into a rebuilt box loses GTK's focus; the host gives it back (D-609). window.open never reaches decide-policy (JS can't open windows at all), so the probe set gained two link clicks that do.
 - Parity: the editor's and counter's boxes on GTK match the web's at 1280×860 (the view's height is the widget's, reported by a ResizeObserver).
 - Full run: M0 PASS (28 s), M1 PASS (22 s), M2 PASS (106 s), M3 PASS, M4 PASS (534 s).
+
+## 2026-10-27 · goal 34 review round 1 (NEEDS WORK → fixes)
+- WebFrame same-origin: test cases first (query/fragment after the port, user info, :80, upper case, trailing dot, localhost vs 127.0.0.1, unknown or proxied origin): red, then urlsplit-based origins (D-616). Iframe permissions now opt-in (D-617); fullmatch for names (D-618).
+- Launcher: tests/test_webkit_launcher.sh with fake bwraps (none, no --overlay-src, new) and an offline fetch: red, then scripts/webkit_launcher.sh and a warning-not-abort build (D-619).
+- gtk_webview: tests/test_gtk_webview.mojo for file names, SRI, error cut and reply ownership: red, then the fixes (D-620). Crash: webkit_web_view_terminate_web_process from a webkill: step; one kill reloads (counter back to Mojo's label, count 0), two show the stand-in (D-621). Views now outlive an unbuilt node while the key stays shown (D-622).
+- I ran `pkill -f "Xvfb :97"` to clean up the M3 prototype display: it matched and killed my own shell, the lesson docs/lessons.md already states. Stop only PIDs I started.
+

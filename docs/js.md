@@ -148,5 +148,9 @@ doesn't change: `mojoui-widgets.js` sees the WebKit message handler and talks to
   distribution's `webkitgtk-6.0`; where it isn't installed (and you can't), `scripts/webkitgtk.sh` fetches Arch Linux's
   package once, checks its pinned SHA-256 and unpacks it into `build/webkitgtk-6.0/`, and `build.sh` makes
   `build/<app>/linux/<app>` a launcher that lays it over `/usr/lib` with bubblewrap (no root; WebKit's own sandbox still
-  runs inside). conda-forge has no WebKitGTK for GTK 4. Without WebKitGTK a WebComponent shows its `instead` view.
+  runs inside). The launcher checks at run time and runs the app directly when it can't use that copy (an installed
+  WebKitGTK, no bubblewrap, a bubblewrap older than 0.10); an offline build skips it with a warning. conda-forge has no
+  WebKitGTK for GTK 4. Without WebKitGTK a WebComponent shows its `instead` view.
+- **A crashed widget**: if its web process ends, the page loads again once and the widget mounts afresh with Mojo's
+  props (its own state is lost); a second time, the WebComponent shows its `instead` view.
 

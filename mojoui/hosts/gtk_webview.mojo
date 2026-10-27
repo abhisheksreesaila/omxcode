@@ -95,16 +95,45 @@ def file_text(path: String) -> String:
     return text
 
 
-def plain_name(s: String) -> Bool:
-    """A bundler's file name or an SRI hash: letters, digits and - _ . + / = only (safe inside an HTML attribute)."""
-    if s.byte_length() == 0 or s.byte_length() > 200:
+def plain_file(s: String) -> Bool:
+    """A bundler's file name (name.<hash>.js): letters, digits, - _ and single dots, not starting with a dot: no folder,
+    no "..", nothing an HTML attribute or a path could read differently (D-620)."""
+    if s.byte_length() == 0 or s.byte_length() > 200 or s.startswith(".") or ".." in s:
         return False
     for b in s.as_bytes():
         var c = Int(b)
-        var ok = (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 45 or c == 95 or c == 46 or c == 43 or c == 47 or c == 61
+        var ok = (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 45 or c == 95 or c == 46
         if not ok:
             return False
     return True
+
+
+def plain_sri(s: String) -> Bool:
+    """An SRI hash as the bundler writes it: sha256-, sha384- or sha512- and base64 (letters, digits, + / =)."""
+    var body = String("")
+    for prefix in ["sha256-", "sha384-", "sha512-"]:
+        if s.startswith(prefix):
+            body = String(s[byte = prefix.byte_length() :])
+    if body.byte_length() == 0 or body.byte_length() > 200:
+        return False
+    for b in body.as_bytes():
+        var c = Int(b)
+        var ok = (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 43 or c == 47 or c == 61
+        if not ok:
+            return False
+    return True
+
+
+def clip_error(text: String) -> String:
+    """A reply's error, at most 500 bytes (as the web host's widget_reply), cut between characters."""
+    if text.byte_length() <= 500:
+        return text
+    var out = String("")
+    for c in text.codepoint_slices():
+        if out.byte_length() + c.byte_length() > 500:
+            break
+        out += c
+    return out
 
 
 def fonts() -> List[String]:
@@ -140,6 +169,10 @@ struct WebSlot(Copyable, Movable):
     var blocked: Int  # navigations and new windows refused
     var height: Int  # the widget's height in the page (the view's height), -1 until told
     var seen: Bool  # (sync: still on the screen)
+    var crashes: Int  # times its web process ended: the first reloads the page (the widget mounts again with Mojo's
+    var gone: Bool  # props and theme), the second gives up: the view hides and the WebComponent's `instead` shows
+    var sent_theme: String  # the last theme and widget messages (what a reload sends again)
+    var sent_widget: String
 
     def __init__(out self, tag: String, id: Int, view: Int, ucm: Int):
         self.tag = tag
@@ -157,6 +190,10 @@ struct WebSlot(Copyable, Movable):
         self.blocked = 0
         self.height = -1
         self.seen = True
+        self.crashes = 0
+        self.gone = False
+        self.sent_theme = ""
+        self.sent_widget = ""
 
     def key(self) -> String:
         return self.tag + "#" + String(self.id)
@@ -197,6 +234,7 @@ struct WebViews(Movable):
     var armed: Bool  # an idle callback will hand the inbox to update()
     var probe_done: Bool  # (test steps: webjs's answer)
     var probe_result: String
+    var sent: List[Tuple[Int, String, Int]]  # (seq, tag, id) of each command sent that wants a reply: who may answer it
 
     def __init__(out self):
         self.state = 0
@@ -210,6 +248,21 @@ struct WebViews(Movable):
         self.armed = False
         self.probe_done = False
         self.probe_result = ""
+        self.sent = List[Tuple[Int, String, Int]]()
+
+    def sent_to(mut self, seq: Int, tag: String, id: Int):
+        """Command `seq` went to widget (tag, id): only its page may answer it (D-620)."""
+        self.sent.append((seq, tag, id))
+        while len(self.sent) > 256:  # (as the runtime forgets unanswered commands)
+            _ = self.sent.pop(0)
+
+    def answers(mut self, seq: Int, tag: String, id: Int) -> Bool:
+        """Whether widget (tag, id) may answer command `seq` (once: the answer is taken)."""
+        for k in range(len(self.sent)):
+            if self.sent[k][0] == seq and self.sent[k][1] == tag and self.sent[k][2] == id:
+                _ = self.sent.pop(k)
+                return True
+        return False
 
     def slot_of(self, tag: String, id: Int) -> Int:
         for k in range(len(self.slots)):
@@ -243,7 +296,7 @@ def start(addr: Int, assets: List[String]) -> Bool:
     _ = external_call["setenv", c_int](gc_name.as_c_string_span(), gc_sig.as_c_string_span(), c_int(0))
     var lib = String("libwebkitgtk-6.0.so.4")
     if external_call["dlopen", Int](lib.as_c_string_span(), c_int(RTLD_NOW | RTLD_GLOBAL)) == 0:
-        print("mojoui: WebKitGTK 6.0 (libwebkitgtk-6.0.so.4) isn't installed: WebComponents show their stand-ins (scripts/webkitgtk.sh)")
+        print("mojoui: WebKitGTK 6.0 didn't load (" + cstr(external_call["dlerror", Int]()) + "): WebComponents show their stand-ins (scripts/webkitgtk.sh)")
         return False
     var exe_link = String("/proc/self/exe")
     var exe = cstr(external_call["g_file_read_link", Int](exe_link.as_c_string_span(), 0))
@@ -263,7 +316,7 @@ def start(addr: Int, assets: List[String]) -> Bool:
             var e = j.get(0, name)
             var file = j.text(j.get(e, "file"))
             var sri = j.text(j.get(e, "integrity"))
-            if e < 0 or not plain_name(file) or not plain_name(sri):
+            if e < 0 or not plain_file(file) or not plain_sri(sri):
                 print("mojoui: web_assets() lists " + name + ", which isn't bundled in " + wv[].dir + "/assets (scripts/build.sh)")
                 continue
             wv[].files.append(file)
@@ -341,6 +394,12 @@ def new_view[F: AnyType](addr: Int, tag: String, id: Int, on_message: F, host_ad
 def send(addr: Int, k: Int, message: String):
     """Hands the page of slot k one message (JSON text), now or once it has loaded."""
     var wv = webviews_at(addr)
+    if message.startswith('{"theme":'):
+        wv[].slots[k].sent_theme = message
+    elif message.startswith('{"widget":'):
+        wv[].slots[k].sent_widget = message
+    if wv[].slots[k].gone:
+        return
     if not wv[].slots[k].loaded:
         wv[].slots[k].pending.append(message)
         return
@@ -365,6 +424,11 @@ def probe(addr: Int, k: Int, expression: String):
     wv[].probe_done = False
     wv[].probe_result = ""
     call(wv[].slots[k].view, "return (" + expression + ")", "null", addr)
+
+
+def kill(addr: Int, k: Int):
+    """(Test steps: webkill:) Ends slot k's web process, as a crash would."""
+    _ = wk("webkit_web_view_terminate_web_process", webviews_at(addr)[].slots[k].view)
 
 
 def drop(addr: Int, k: Int):
@@ -479,10 +543,42 @@ def on_load_changed(view: Int, event: c_int, addr: Int) abi("C"):
         call(view, "return mojoui.native.receive(m)", m, 0)
 
 
+def show_instead(view: Int):
+    """The view hides and its box's other children (the WebComponent's `instead` view) show."""
+    external_call["gtk_widget_set_visible", NoneType](view, c_int(0))
+    var parent = external_call["gtk_widget_get_parent", Int](view)
+    var c = external_call["gtk_widget_get_first_child", Int](parent) if parent != 0 else 0
+    while c != 0:
+        if c != view:
+            external_call["gtk_widget_set_visible", NoneType](c, c_int(1))
+        c = external_call["gtk_widget_get_next_sibling", Int](c)
+
+
 def on_terminated(view: Int, reason: c_int, addr: Int) abi("C"):
+    """Its web process ended (a crash, memory, or a kill): the first time the page loads again and the widget mounts
+    afresh with Mojo's props and theme (its own state, a cursor or a count, is lost); the second time the WebComponent
+    shows its `instead` view for good (D-621)."""
     var wv = webviews_at(addr)
     var k = wv[].slot_by(view)
-    print("mojoui: a widget's web process ended (" + (wv[].slots[k].key() if k >= 0 else String("?")) + ", reason " + String(Int(reason)) + ")")
+    if k < 0:
+        return
+    wv[].slots[k].crashes += 1
+    wv[].slots[k].loaded = False
+    wv[].slots[k].mounts = 0
+    wv[].slots[k].describe = ""
+    print("mojoui: " + wv[].slots[k].key() + "'s web process ended (reason " + String(Int(reason)) + ")"
+          + ("; loading it again" if wv[].slots[k].crashes == 1 else "; showing its stand-in"))
+    if wv[].slots[k].crashes == 1:
+        var again = List[String]()
+        if wv[].slots[k].sent_theme != "":
+            again.append(wv[].slots[k].sent_theme)
+        if wv[].slots[k].sent_widget != "":
+            again.append(wv[].slots[k].sent_widget)
+        wv[].slots[k].pending = again^  # (commands sent to the old page are lost with it: their replies never come)
+        _ = wk("webkit_web_view_reload", view)
+    else:
+        wv[].slots[k].gone = True
+        show_instead(view)
 
 
 def on_call_done(view: Int, result: Int, probe_addr: Int) abi("C"):
@@ -538,9 +634,10 @@ def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
             return True
         elif path == "reply":
             var seq = j.get(0, "seq")
-            if not j.is_whole(seq):
-                raise Error("no seq")
-            wv[].inbox.append(Inbound(IN_REPLY, wv[].slots[k].tag, wv[].slots[k].id, "", j.text(j.get(0, "data"), "null"), j.number(seq), j.text(j.get(0, "error"))))
+            if not j.is_whole(seq) or not wv[].answers(j.number(seq), wv[].slots[k].tag, wv[].slots[k].id):
+                raise Error("not a command this widget was sent")
+            wv[].inbox.append(Inbound(IN_REPLY, wv[].slots[k].tag, wv[].slots[k].id, "", j.text(j.get(0, "data"), "null"), j.number(seq),
+                                      clip_error(j.text(j.get(0, "error")))))
             return True
         elif path == "size":
             var h = j.number(j.get(0, "height"), -1)

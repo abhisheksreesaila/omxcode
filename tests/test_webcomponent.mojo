@@ -138,5 +138,13 @@ def main() raises:
     _ = rt.poll(0)
     assert_equal(rt.app.heard[4], "reply 0 read error the command's args aren't JSON")
 
+    # Command.json splices args in as they are, so Json.parse must refuse anything after the value (review, D-623)
+    for spliced in ["{} , \"name\": \"x\"", "null}", "1 2", "{\"k\": 1}}", "[1]]"]:
+        var refused = False
+        try:
+            _ = Json.parse(spliced)
+        except:
+            refused = True
+        assert_true(refused, spliced)
     assert_equal(assets_json(Probe.web_assets()), "[\"probe.js\"]")
     print("webcomponent: ok")

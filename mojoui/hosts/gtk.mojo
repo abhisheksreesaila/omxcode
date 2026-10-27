@@ -31,7 +31,7 @@ from mojoui.json import json_string
 from mojoui.view import NO_MSG
 from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
-    take_message, theme_message, IN_EVENT, IN_REPLY,
+    take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
 from mojoui.paragraph import pango_markup, link_href, runs_of
 from mojoui.linebreak import css_breaks, plain_words, label_words
@@ -2578,6 +2578,9 @@ struct GtkHost[A: App](Movable):
                     self.webview_focus = view  # (someone is typing in it: the keyboard follows it into the new screen)
                 external_call["gtk_box_remove", NoneType](parent, view)
             external_call["gtk_box_append", NoneType](box, view)
+        if wv[].slots[k].gone:  # (its web process ended twice: the stand-in shows, D-621)
+            show_instead(view)
+            return
         var c = external_call["gtk_widget_get_first_child", Int](box)
         while c != 0:  # (the stand-in stays built, hidden: patches still find it)
             if c != view:
@@ -2596,12 +2599,14 @@ struct GtkHost[A: App](Movable):
         var theme_msg = String("")
         for i in range(len(self.rt.shown.nodes)):
             ref n = self.rt.shown.nodes[i]
-            if n.kind != WEBCOMP or i >= len(self.widgets) or self.widgets[i] == 0:
+            if n.kind != WEBCOMP:
                 continue
             var k = wv[].slot_of(n.hint, n.value)
             if k < 0:
                 continue
-            wv[].slots[k].seen = True
+            wv[].slots[k].seen = True  # (on the screen, even where nothing is built for it now: its view and state wait, D-622)
+            if i >= len(self.widgets) or self.widgets[i] == 0:
+                continue
             if theme_msg == "":
                 var t = self.rt.app.theme()
                 theme_key = t.key()
@@ -2634,6 +2639,8 @@ struct GtkHost[A: App](Movable):
         for c in commands:
             var k = wv[].slot_of(c.tag, c.widget) if wv[].state == 1 else -1
             if k >= 0:
+                if c.reply != NO_MSG:
+                    wv[].sent_to(c.seq, c.tag, c.widget)  # (only this widget's page may answer it, D-620)
                 webview_send(self.webviews, k, '{"commands":[' + c.json() + "]}")
             elif c.reply != NO_MSG:
                 var why = "no widget " + c.tag + "#" + String(c.widget) + " on the screen" + ("" if wv[].state == 1 else " (WebKitGTK isn't installed)")
@@ -4325,6 +4332,20 @@ def run_step[A: App](host_addr: Int, step: String):
         while not webviews_at(host[].webviews)[].probe_done and perf_counter_ns() < by:
             pump()
         print("JS: " + (webviews_at(host[].webviews)[].probe_result if webviews_at(host[].webviews)[].probe_done else String('"timed out"')))
+    elif verb == "webkill":  # webkill:<tag>#<id>: ends that widget's web process, as a crash would (then waits for the reload)
+        var key = split_at(rest, "#")
+        var wv = webviews_at(host[].webviews)
+        var k = wv[].slot_of(key[0], to_int(key[1])) if wv[].state == 1 else -1
+        if k < 0:
+            print("TEST: no web view", rest)
+            return
+        webview_kill(host[].webviews, k)
+        var by = perf_counter_ns() + 15_000_000_000
+        while perf_counter_ns() < by:
+            pump()
+            var s = webviews_at(host[].webviews)[].slots[k].copy()
+            if s.gone or (s.crashes > 0 and s.loaded and s.mounts >= 1):
+                break
     elif verb == "pause":  # pause:3000: keep the main loop running that long (a screen grab of the display can catch popovers)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until:
@@ -4693,7 +4714,7 @@ def wait_webviews[A: App](host_addr: Int):
         var wv = webviews_at(host[].webviews)
         var waiting = False
         for ref slot in wv[].slots:
-            if not slot.loaded or slot.mounts < 1 or slot.height < 0:
+            if not slot.gone and (not slot.loaded or slot.mounts < 1 or slot.height < 0):
                 waiting = True
         if not waiting:
             break
@@ -4740,8 +4761,10 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
         var wv = webviews_at(host[].webviews)
         for ref slot in wv[].slots:
             var ready = slot.loaded and slot.mounts >= 1
-            print("WEBVIEW: " + slot.key() + (" ready" if ready else " loading") + " mounts=" + String(slot.mounts) + " csp=" + String(slot.csp)
-                  + " refused=" + String(slot.refused) + " blocked=" + String(slot.blocked) + " h=" + String(slot.height))
+            var state = " gone" if slot.gone else (" ready" if ready else " loading")
+            print("WEBVIEW: " + slot.key() + state + " mounts=" + String(slot.mounts) + " csp=" + String(slot.csp)
+                  + " refused=" + String(slot.refused) + " blocked=" + String(slot.blocked) + " h=" + String(slot.height)
+                  + " crashes=" + String(slot.crashes))
             print("WIDGET: " + slot.key() + ": " + slot.describe)
     for i in range(len(host[].rt.shown.nodes)):
         if host[].rt.shown.nodes[i].kind == BOARD and not alerts:
