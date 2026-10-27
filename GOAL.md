@@ -1,40 +1,29 @@
-# GOAL 33: OMX Console, rebuilt in omxcode
+# GOAL 34: first-class JS
 
-**End goal (owner, 2026-10-25):** "the whole point of the framework is to build apps and it should have all the
-components necessary… let's fix this… it proves it can build a console app like this… the web should be identical,
-99%… showcase it in our gallery." The app is MXConsole (repo `mxstudio`, `mxconsole/console/`: ten screens, 4,400 lines
-of plain JS and 870 of CSS over omxqua, polling the daemon's `/admin/*` JSON API). Its Python daemon stays as it is.
-Goal 32 is parked at M0, M1, M2 PASS, with M3 in progress (archived: docs/goals/32-GOAL.md, 32-check.py); goal 31's
-draft waits.
+**End goal (owner, 2026-10-25/27):** "we need first-class JS support or else web dev will be stalled on this
+framework… start on the JS widget component and prove it with an app (simple app for now). iframe is not secure. We
+also need to manage minification of JS and the security part." And: "check only minimal and move on… I want to wrap up
+in a few hours… once we reach a good stable point, then run all of them." Draft: docs/goals/34-draft.md.
 
-## Milestones
+## Milestones (this cut: the web and Linux; 34b adds the Mac's webview, agent visibility and a second library)
 | # | Milestone | Proof (`scripts/check`) |
 |---|---|---|
-| M0 | The measure | `scripts/console_fixture.py` replays `/admin/*` replies recorded from a real daemon (mxconsole's fake `max`) and serves the original console's files from `MXCONSOLE_DIR`; `scripts/console_side.py` shoots its ten screens at 1440×900 and 390×844 with motion off, twice; no request misses the fixtures; the noise floor (the two runs' largest differing-pixel share) is ≤ 1 % and saved in docs/goals/33/floor.txt |
-| M1 | HTTP, a component | `mojoui/http.mojo`: a request is an effect and its reply an `Event`; `tests/test_http.mojo` against a Python test server: GET and POST JSON, a header read from an env var by name, chunked replies, a 1 MB body, a timeout, connection refused, a 500; `examples/httpcheck` draws ≥ 60 frames on GTK and the web while one reply takes 2 s, then shows it |
-| M2 | Timers and real JSON | `App.every(ms, id)` on GTK and the web: 10 ticks of 100 ms each land within ±20 ms; `mojoui/json.mojo` reads every recorded reply in docs/goals/33/fixtures and equals Python's `json.loads`, value for value (decimals, negatives, exponents, `\u` escapes, nulls) |
-| M3 | The omxqua theme | `themes/omxqua.mojo` declares a `Look` from omxqua's tokens.css (Geist and Geist Mono, its accent, surfaces, one soft shadow, the press spring), both light and dark; only framework tags styled (goal 32's lint) |
-| M4 | The console's components | in `mojoui/`, each with its own test, on GTK and the web, built for the Mac: Table (rows, tick boxes), CodeBlock with Copy, LogView (pinned to the end), Timeline (stages, elapsed), Breadcrumbs, Chip/Badge, Confirm (tap twice), Skeleton, Markdown, Sparkline, Route (`#/models/<name>/<tab>` deep links on the web); docs/components.md regenerated; the debt table holds nothing from the console |
-| M5 | My models and the model page | `examples/console` against the fixtures: the model list (table and cards, tick to change many, drag onto a label) and the model page's overview, benchmark, logs and notebook tabs; numbers follow the poll; Jupyter in an iframe on the web, the browser on GTK and the Mac |
-| M6 | The other screens | Add a model (search with fit badges, the stage timeline, the live log, the Ready card with curl to copy), Keys (create, rotate, revoke by tapping twice), Gateway, Security, Settings |
-| M7 | Identical | the web: every M0 screen at both sizes has ≥ 99 % of its pixels equal to the original's (the same tolerance M0 measured); GTK and the Mac: every tagged view's box within goal 32's parity tolerance of the web's; scripts/live.py on a live daemon (fake `max`): load a model, its numbers update, create a key and call `/v1` with it, revoke it, stop the model |
-| M8 | In the gallery, nothing regressed | the console in docs/gallery beside omxplorer (GTK, web and Mac shots); goal 32's M0–M2 and goal 30's M0–M5 pass |
+| M0 | The seam, in a simple app | `mojoui/webcomponent.mojo`: `WebComponent(tag, props, on_event)`, commands (Mojo calls a widget's method) and replies, `App.web_assets()`; a JS side `defineWidget({props, events, commands, mount, update})` in the web host; `examples/widgets` (a note: a live editor, a word count, a small chart) on the web: a vendored counter widget mounts, takes props from Mojo, its clicks reach `update()`, a props change reaches it without remounting (its own state survives), a command gets a reply; its own test |
+| M1 | npm and TypeScript | `examples/widgets/web/package.json` + lockfile: CodeMirror 6 from npm, bundled offline by esbuild at build time (Node and esbuild from pixi); a widget written in TypeScript compiles in the same build; typing in the editor reaches `update()` (the word count follows), Mojo sets the text and the editor shows it, the cursor survives an unrelated rebuild; `scripts/new_widget.sh` makes a working widget from a template; `docs/js.md` walks it |
+| M2 | Secure by default | the page sends a strict CSP (no inline script, no eval, script-src only our hashed files); every asset is served by its content hash from our origin; the app runs with zero CSP violations (read from the browser); props and events are JSON data only; a lint fails the build on an asset not listed by `web_assets()` or not bundled; `WebFrame` is sandboxed by default (no allow-same-origin), http(s) only |
+| M3 | Linux, the same widget | the same app on GTK: the widget runs in a WebKitGTK view for that one component, gets the same bundle, typing reaches `update()`, Mojo sets its text; the widget's box matches the web's (goal 32's parity) |
+| M4 | Nothing regressed (minimal) | goal 33's M1, M2, M4 and M5 pass (the full chain waits for the next stable point: owner) |
 
 ## Out of bounds
-Changing mxconsole's daemon or API, or anything in `~/Projects/mxstudio` (read it, never write it); the `/docs` and
-installer pages; the tray and the pywebview window; TLS; iPhone and Android; paid services; pushing; touching
-`../mojo-ui-apple-test`.
+A JS framework inside omxcode (React, Vue); run-time downloads or CDNs; the Mac and phones (34b); pushing; touching
+`../mojo-ui-apple-test` or other worktrees' envs (this worktree has its own .pixi).
 
 ## Assumptions (instead of asking)
-- HTTP is our own small HTTP/1.1 client on libc sockets (the console only talks to 127.0.0.1); flare (ehsanmok/flare)
-  needs Mojo ≥ 1.2 and OpenSSL and has no iPhone or Android, so it waits behind the same `mojoui.http` API (D-310).
-- A request never blocks `update` or a frame: the host runs it on a worker and posts the reply back, as goal 30's jobs do.
-- The console is `examples/console`, given the daemon's URL; replacing mxconsole's shipped JS console is the owner's call later.
-- "Identical" is the web, in pixels; GTK and the Mac use native widgets, so they're held to boxes, not pixels.
-- Each milestone's proof is written in scripts/check.py before its work starts (todo() until then), from this table's
-  words, never weaker.
+- Node and esbuild come from conda-forge through pixi (this worktree's own env; .pixi is skip-worktree in git here).
+- npm installs run at build time from the committed lockfile (`npm ci`), with node_modules outside git; the bundle is
+  the artifact, hashed and served from our origin.
+- Each milestone's proof is written in scripts/check.py before its work starts, from this table's words, never weaker.
 
 ## Done means
-`scripts/check` prints PASS for M0–M8; the reviewer passes it; a short `docs/report.md` with side-by-side shots of the
-original console and ours. Committed locally on `goal-33-console`, nothing pushed. Budget: 80 turns a run; if M5 runs
-long, M6 becomes goal 34 (logged).
+`scripts/check` prints PASS for M0–M4; the reviewer passes it; a short report with shots of the editor in the widgets
+app on the web and GTK. Committed on `goal-34-js`, nothing pushed.
