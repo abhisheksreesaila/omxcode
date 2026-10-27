@@ -741,16 +741,16 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit |
-| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit |
-| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit |
-| `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console |
+| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console |
+| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, consolekit, console |
+| `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console |
 | `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
-| `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit |
-| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit |
+| `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console |
+| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck |
 | `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, workbook, mxstudio |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
 | `Dropdown` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, analytics, workbook, mxstudio, omxplorer, themes, kit |
@@ -765,7 +765,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout |
-| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit |
+| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
 | `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
@@ -775,8 +775,14 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Dialog` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
 | `Toast` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | kit |
 | `Popover` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
-| `Checkbox` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer, themes, kit |
-| `Clipboard` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | omxplorer |
+| `Checkbox` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer, themes, kit, console |
+| `Clipboard` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | omxplorer, console |
+| `Table` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
+| `Route` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
+| `Draggable` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `WebFrame` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `Paragraph` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | consolekit |
 
 ## Variants, gestures, layout, design languages
 
@@ -787,7 +793,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Text tones | `Text(…).tone(TONE_WARN…)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Quiet buttons | `style=SUBTLE / ICON_ONLY` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Lucide icon set | `Button(icon="table")…` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
-| In-place editor | `TextField(…).focused()` | ✅ | ✅ | ❌ | ❌ | 🔨 | ❌ |
+| In-place editor | `TextField(…).focused()` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Layout modifiers | `.padding .width .grow .fill .align .justify` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: pan, zoom, tap | `on_gesture: PAN, ZOOM, TAP` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: press, release, double | `PRESS, RELEASE, DOUBLE` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
@@ -811,6 +817,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Submenus, checked, disabled and danger items | `Submenu(…), Item(checked=, disabled=, danger=)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Tooltips | `.tooltip(text)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ |
 | Icon toggle shown pressed | `Button(style=ICON_ON)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ |
+| HTTP requests (effects; replies as Events) | `mojoui.http: Request.get/post_json · App.requests() · comptime HTTP` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
+| Timers | `App.every() -> [Every(ms, msg)]` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
+| Scroll pinned to its end | `Scroll(…, pinned=True)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 
 ## Composite components (Mojo, built from the ones above)
 
@@ -826,24 +835,49 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
 | `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
-| `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | ❌ | 🔨 | ❌ | maccheck, omxplorer |
+| `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | maccheck, omxplorer |
 | `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Swatch picker` | `mojoui/swatches.mojo` | Canvas, Canvas: pan, zoom, tap, Popover | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Column number formats` | `mojoui/numformat.mojo` | Canvas, Text | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Sheet objects (charts, pivots)` | `mojoui/sheetpage.mojo` | Board: drag, resize, snap, Canvas, Card, Grid | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
 | `Report page (KPI and chart tiles, filters)` | `mojoui/reportpage.mojo` | Grid, Card, Dropdown, Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | omxplorer |
+| `CodeBlock` | `mojoui/codeblock.mojo` | Text, Button with an icon, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console, consolekit |
+| `LogView` | `mojoui/logview.mojo` | Scroll, Text, Scroll pinned to its end | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console, consolekit |
+| `Timeline` | `mojoui/timeline.mojo` | Text, Icon, ProgressBar, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | console, consolekit |
+| `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `Confirm` | `mojoui/confirm.mojo` | Button, Timers | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
+| `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
+| `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
+| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `App shell (bar, brand, nav links, page card)` | `mojoui/shell.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Page header (icon square, pill tabs, segments, tab header)` | `mojoui/header.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Sidebar (heads, rows to pick, chips when compact)` | `mojoui/sidebar.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Cards and panels (head, body, foot, stat tiles, facts)` | `mojoui/panel.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Marks (hue and signal dots, status marks, hued icons)` | `mojoui/marks.mojo` | Text, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Words (quiet, strong, mono lines, command lines)` | `mojoui/words.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Buttons (flat, primary, small looks, text actions, links, Back)` | `mojoui/buttons.mojo` | Button, Button with an icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Lists (split view, count line, name cells, selection bar)` | `mojoui/lists.mojo` | Text, Button, VStack, HStack, Divider, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Document (markdown and code cells, outline, three columns)` | `mojoui/document.mojo` | Text, Button, Scroll, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Beacon (the one thing happening now)` | `mojoui/beacon.mojo` | Canvas, Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Copy (copy row, labeled value, code panel, secret)` | `mojoui/copy.mojo` | Text, Button, Icon, VStack, HStack, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `Fields (search box, outlined field, filter chips, short field)` | `mojoui/fields.mojo` | TextField, Button, Text, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Search results (result rows, source badges, suggestions)` | `mojoui/results.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Meter (meter, usage bar, chart rows)` | `mojoui/meter.mojo` | Text, ProgressBar, Canvas, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
+| `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 
 ## Totals
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 79 | 1 | 0 |
-| Web | 80 | 0 | 0 |
-| Android | 19 | 17 | 44 |
-| Mac (AppKit) | 0 | 66 | 14 |
-| iPhone (UIKit) | 0 | 62 | 18 |
-| Agent (MCP) | 29 | 17 | 34 |
+| Linux (GTK) | 111 | 3 | 0 |
+| Web | 114 | 0 | 0 |
+| Android | 19 | 19 | 76 |
+| Mac (AppKit) | 0 | 102 | 12 |
+| iPhone (UIKit) | 0 | 83 | 31 |
+| Agent (MCP) | 29 | 37 | 48 |
 
 ## Inside one app, not components yet (the debt)
 
