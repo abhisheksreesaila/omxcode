@@ -862,6 +862,16 @@ def render(s, i, sid):
     return el
 
 
+def web_url(url):
+    """`url` when it's http:// or https:// (in any case) with a host and no space or control character, else None: the only
+    links and pages the page follows or frames (D-576; mojoui.embed.is_web_url, the same rule for GTK and the Mac)."""
+    low = url.lower()
+    at = 7 if low.startswith("http://") else 8 if low.startswith("https://") else 0
+    if not at or len(url) <= at or url[at] in "/?#" or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        return None
+    return url
+
+
 def paragraph_runs(n, i, common):
     """A Paragraph's runs as inline elements (FastHTML escapes their words), one element per run whose classes say bold,
     italic, code and whose data-role is its role (the look's rule for it beats the base classes); a link is an <a>: its
@@ -875,7 +885,11 @@ def paragraph_runs(n, i, common):
         if "l" in flags:  # (the anchor around the run, as <a><code>…</code></a>: its underline drawn in the paragraph's type, the run's own inside)
             listen = dict(common, hx_vals=json.dumps({"n": i, "number": k})) if n["msg"] else dict(target="_blank", rel="noopener noreferrer")
             inner = Span(text, cls=cls.replace(" link", ""), data_role=role or None)
-            out.append(A(inner, href=href, cls="run link", data_kind="run", **listen))
+            if web_url(href) is None:  # (not http(s): no href, so the browser never follows it; a tap still reaches the app)
+                listen.pop("target", None), listen.pop("rel", None)
+                out.append(A(inner, cls="run link", data_kind="run", data_refused="1", **listen))
+            else:
+                out.append(A(inner, href=href, cls="run link", data_kind="run", **listen))
         else:
             out.append(Span(text, **attrs))
     return out
@@ -1054,6 +1068,8 @@ def render_node(s, i, sid):
     if kind == EMBED:  # a web page in an iframe (version 0: the stand-in child)
         if n["value"] <= 0:
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", style="gap:0px")
+        if web_url(n["text"]) is None:  # (http and https only, D-576: the stand-in instead of the frame)
+            return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", data_refused="1", style="gap:0px")
         return Div(Iframe(src=n["text"], title=n["text"], allow="clipboard-read; clipboard-write"), cls="embed", id=nid, data_kind="embed",
                    data_url=n["text"], style=f"height:{n['size']}px" if n["size"] > 0 else "flex:1 1 0;min-height:0")  # (0: as tall as it's given)
     if kind == CLIPBOARD:  # nothing on screen: the page copies its text when its version moves on (CLIP_JS)

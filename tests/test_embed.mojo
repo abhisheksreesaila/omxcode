@@ -1,7 +1,7 @@
 # mojoui.embed: a WebFrame holds its URL, its version, its height, the browser's URL (hint) and the stand-in child.
 from std.testing import assert_equal, assert_true, assert_false
 from mojoui import Text, VStack, EMBED
-from mojoui.embed import WebFrame
+from mojoui.embed import WebFrame, is_web_url
 from mojoui.diff import diff, SET_VALUE
 
 
@@ -20,4 +20,10 @@ def main() raises:
     assert_false(d.rebuild)  # (opened again: the version is a patch)
     assert_equal(d.patches[0].op, SET_VALUE)
     assert_true(diff(a, VStack(WebFrame("http://b", 1, Text("s")))).rebuild)  # (another page: built again)
+    # what a host opens or frames: http and https with a host only (D-576)
+    for ok in ["http://127.0.0.1:8888/lab", "https://example.com", "HTTPS://Example.com/a?b#c", "http://h"]:
+        assert_true(is_web_url(ok), ok)
+    for bad in ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,x", "file:///etc/passwd", "vscode://x", "", "http://",
+                "https:///path", "http://?q", " http://a", "http://a b", "http://a\nb", "http://a\x7f", "//example.com", "mailto:a@b"]:
+        assert_false(is_web_url(bad), bad)
     print("embed: ok")

@@ -24,6 +24,7 @@ from mojoui.theme import Look
 from mojoui.look import text_only
 from mojoui.linebreak import css_breaks, label_words, WJ
 from mojoui.paragraph import Run, runs_of, link_href
+from mojoui.embed import is_web_url
 from mojoui.icons_data import lucide_svg
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
@@ -2034,7 +2035,9 @@ struct AppKitHost[A: App](Movable):
         for ref n in self.rt.shown.nodes:
             if n.kind == EMBED and n.value > 0 and n.value != self.embed_version:
                 self.embed_version = n.value
-                _ = msg(msg(cls("NSWorkspace"), "sharedWorkspace"), "openURL:", msg(cls("NSURL"), "URLWithString:", ns_string(n.hint if n.hint != "" else n.text)))
+                var url = n.hint if n.hint != "" else n.text
+                if is_web_url(url):  # (http and https only, D-576)
+                    _ = msg(msg(cls("NSWorkspace"), "sharedWorkspace"), "openURL:", msg(cls("NSURL"), "URLWithString:", ns_string(url)))
 
     def schedule_effects(mut self, self_addr: Int):
         """One delayed call (effectsDue:) for when the runtime next has a reply or a tick to hand over (Runtime.wake_in);
@@ -3133,7 +3136,8 @@ def on_paragraph_tap[A: App](target: Int, cmd: Int, recognizer: Int) abi("C"):
             if href == "":
                 return
             if host[].rt.shown.nodes[t[1]].msg == 0:
-                _ = msg(msg(cls("NSWorkspace"), "sharedWorkspace"), "openURL:", msg(cls("NSURL"), "URLWithString:", ns_string(href)))
+                if is_web_url(href):  # (http and https only, D-576)
+                    _ = msg(msg(cls("NSWorkspace"), "sharedWorkspace"), "openURL:", msg(cls("NSURL"), "URLWithString:", ns_string(href)))
                 return
             host[].send(t[1], False, href, k, t[0])
             return

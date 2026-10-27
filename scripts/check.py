@@ -1074,6 +1074,9 @@ def m5():
         err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}")
         if err:
             problems.append(err[:300])
+    wl = g30.run([sys.executable, "tests/test_web_links.py"], timeout=120)  # (the web host follows and frames http(s) only, D-576)
+    if wl.returncode != 0 or "web_links: ok" not in wl.stdout:
+        problems.append("tests/test_web_links.py fails: " + (wl.stdout + wl.stderr)[-300:])
     for name in ("console_places", "console_api"):  # (the console's route table on mojoui's Router, D-571; its one curl, D-574)
         err = g30.g20.mojo_test(f"tests/test_{name}.mojo", f"{name}: ok", f"test_{name}", "examples/console")
         if err:
