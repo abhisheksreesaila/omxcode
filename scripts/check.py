@@ -162,6 +162,10 @@ def m1():
         problems.append("the server never got X-Test-Key with $HTTP_TEST_SECRET's value")
     if not any(r["method"] == "POST" and r["headers"].get("content-type") == "application/json" for r in seen):
         problems.append("the POST didn't say Content-Type: application/json")
+    want("REFUSED_SPLITS", lambda v: v == "ok", "targets, methods and header names that would split the request are refused (D-570)")
+    forged = [r for r in seen if "evil" in r["path"].lower() or "x-evil" in r["headers"] or "evil" in r["method"].lower()]
+    if forged:
+        problems.append(f"the server got a request the transport should have refused: {forged[0]['method']} {forged[0]['path']!r}")
     if problems:
         return False, "; ".join(problems)
     # examples/httpcheck: frames keep coming on GTK and the web while one reply takes 2 s, then the reply shows
@@ -798,6 +802,8 @@ def styles_for(log, probes):
 CONSOLE = "console"
 CONSOLE_MODEL = "qwen2.5-0.5b"
 M5_SCREENS = ["models", "overview", "bench", "logs", "notebook"]
+FORGED_LINK = "#/models/x%0d%0aX-Forged:%201/logs"  # (a name with a line break and a header in it, as a link would carry it)
+FORGED_TARGET = "/admin/models/x%0D%0AX-Forged%3A%201/log"
 CONSOLE_URL_ENV, CONSOLE_KEY_ENV, OPENER_ENV = "MXC_URL", "MXC_ADMIN_KEY", "MOJOUI_OPENER"
 M5_NAMES = ["qwen2.5-0.5b", "all-minilm-l6", "llama3.2-1b"]
 M5_TOP = ["omxconsole", "Pulling helper-7b", "35%"]  # the top bar on every screen: brand, the Beacon (pulls.json: helper-7b at 35.4 %)
@@ -947,6 +953,27 @@ def web_pixels(token, names, extra=None):
 def drive_port():
     import drive
     return drive.free_port()
+
+
+def forged_link(token):
+    """A crafted deep link forges nothing (reviewer, D-570): a model name holding an escaped line break and a header goes
+    into the log's path escaped (uri_component), and the daemon gets no extra header line. None, or the problem."""
+    import console_fixture
+    fx = console_fixture.Fixtures()
+    server, url = console_fixture.serve(fx)
+    try:
+        r, out = console_web("pause:2500", console_env(url, token), path=FORGED_LINK)
+    finally:
+        server.shutdown()
+    if r is None:
+        return f"web forged link: {out}"
+    forged = [x for x in fx.log if "x-forged" in x.get("names", []) or any(c in x["target"] for c in "\r\n\t ")]
+    logs = [x["target"] for x in fx.log if x["target"].startswith("/admin/models/x")]
+    if forged:
+        return f"web forged link: the daemon got a forged header or path: {forged[0]}"
+    if logs[:1] != [FORGED_TARGET]:
+        return f"web forged link: the log's request went to {logs[:2]}, not {FORGED_TARGET} (the name escaped)"
+    return None
 
 
 def m5():
@@ -1131,6 +1158,11 @@ def m5():
                     if got != [want_url["url"]]:
                         problems.append(f"gtk notebook: Run in Jupyter opened {got}, not the browser at {want_url['url']} (${OPENER_ENV})")
         notes.append(host)
+    err = forged_link(token)
+    if err:
+        problems.append(err)
+    else:
+        notes.append("a forged deep link sends nothing forged")
     if problems:
         return False, "; ".join(dict.fromkeys(problems[:14]))
     try:

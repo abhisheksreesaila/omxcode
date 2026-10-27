@@ -7,6 +7,7 @@ from mojoui.view import View, Text, Button, TextField, VStack, HStack, Spacer, I
 from mojoui.app import Event
 from mojoui.effects import Every
 from mojoui.json import Json, json_string
+from mojoui.http import uri_component
 from mojoui.table import Table
 from mojoui.lists import SideScroll
 from mojoui.clock import wall_seconds
@@ -159,13 +160,13 @@ struct KeysPage(Copyable, Movable):
             if k < len(self.rows):
                 var app = self.rows[k].app.copy()
                 if self.tap_twice(app, ROTATE):
-                    api.post(KEYS_GOT_ROTATE, "/admin/keys/" + app + "/rotate")
+                    api.post(KEYS_GOT_ROTATE, "/admin/keys/" + uri_component(app) + "/rotate")
         elif KEYS_REVOKE <= m < KEYS_GOT_LIST:
             var k = m - KEYS_REVOKE
             if k < len(self.rows) and not self.rows[k].revoked:
                 var app = self.rows[k].app.copy()
                 if self.tap_twice(app, REVOKE):
-                    api.send(KEYS_GOT_REVOKE, "DELETE", "/admin/keys/" + app)
+                    api.send(KEYS_GOT_REVOKE, "DELETE", "/admin/keys/" + uri_component(app))
         elif m == KEYS_GOT_LIST:
             if failed:
                 self.error = why

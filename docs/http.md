@@ -72,4 +72,9 @@ No app changes: apps only see `Request`, `Http` and the reply `Event`. tests/tes
 ## Limits today
 
 IPv4 and `localhost` only (IPv6 literals are refused), no TLS, no redirects followed, no keep-alive, no streaming
-(the whole body arrives in one Event), a 256 MB cap, header values with a line break are refused.
+(the whole body arrives in one Event), a 256 MB cap.
+
+Nothing that could split a request is sent (D-570): the URL's path must be printable ASCII without spaces (escape a
+path part with `uri_component`), the host a host name or IPv4 address, the method and every header name an HTTP token,
+and no header value (an env header's too) may hold a control character but a tab. Such a request comes back at once as
+an error Event (`mojoui.http.request_problem`, `Url.parse`), for every transport.

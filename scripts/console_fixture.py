@@ -112,7 +112,7 @@ class Fixtures:
             return self._forward(key, method, target, headers, body)
         low = {k.lower(): v for k, v in headers.items()}
         with self.lock:
-            self.log.append({"method": method, "target": target, "t": time.monotonic(), "admin": low.get("x-mst-admin")})
+            self.log.append({"method": method, "target": target, "t": time.monotonic(), "admin": low.get("x-mst-admin"), "names": sorted(low)})
         if method != "GET":
             done = self._write(method, target, low, body)
             if done is not None:

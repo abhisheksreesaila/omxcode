@@ -8,7 +8,7 @@
 
 from mojoui.view import View, Text, Button, VStack, HStack, Scroll, Divider, Spacer, CENTER, START
 from mojoui.app import App, Event
-from mojoui.http import Request
+from mojoui.http import Request, uri_component
 from mojoui.effects import Every
 from mojoui.canvas import Surface
 from mojoui.theme import Theme, mix
@@ -171,14 +171,14 @@ struct Main(App):
             return
         if p.tab == "logs":
             self.logs = Logs()
-            self.api.get(GOT_LOG, "/admin/models/" + p.model + "/log")
+            self.api.get(GOT_LOG, "/admin/models/" + uri_component(p.model) + "/log")
         elif p.tab == "benchmark":
             self.api.get(GOT_BENCH, "/admin/bench")
         elif p.tab == "notebook":
             if self.nb.model != p.model:
                 self.nb = Notebook()
                 self.nb.model = p.model
-                self.api.get(GOT_LEARN, "/admin/learn/" + p.model)
+                self.api.get(GOT_LEARN, "/admin/learn/" + uri_component(p.model))
             self.nb.jupyter = False
 
     def go(mut self, path: String):
@@ -196,7 +196,7 @@ struct Main(App):
         if len(names) == 0:
             return
         label_models(self.store, names, label, add)
-        self.api.post(GOT_WRITE, "/admin/labels/" + label + ("/add" if add else "/remove"), names_json(names))
+        self.api.post(GOT_WRITE, "/admin/labels/" + uri_component(label) + ("/add" if add else "/remove"), names_json(names))
 
     # ---- update ----
 
@@ -217,7 +217,7 @@ struct Main(App):
         elif m == POLL_BENCH:
             self.api.get(GOT_BENCH, "/admin/bench")
         elif m == POLL_LOG and p.page == "model":
-            self.api.get(GOT_LOG, "/admin/models/" + p.model + "/log")
+            self.api.get(GOT_LOG, "/admin/models/" + uri_component(p.model) + "/log")
         elif m == DISARM:
             self.confirm.disarm()
         elif ADD_FIRST <= m <= ADD_LAST:
@@ -308,21 +308,21 @@ struct Main(App):
         elif m == REMOVE_TICKED:
             if self.confirm.tap(CONFIRM_REMOVE_TICKED):
                 for n in self.lib.ticked:
-                    self.api.send(GOT_WRITE, "DELETE", "/admin/models/" + n)
+                    self.api.send(GOT_WRITE, "DELETE", "/admin/models/" + uri_component(n))
                 self.lib.ticked = List[String]()
         elif TAB <= m < TAB + 4 and p.page == "model":
             self.go(route_for(Place("model", p.model, materialize[TAB_KEYS]()[m - TAB])))
         elif m == CMD_STOP and p.page == "model":
-            self.api.post(GOT_WRITE, "/admin/models/" + p.model + "/stop")
+            self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/stop")
         elif m == CMD_START and p.page == "model":
-            self.api.post(GOT_WRITE, "/admin/models/" + p.model + "/load")
+            self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/load")
         elif m == CMD_RESTART and p.page == "model":
-            self.api.post(GOT_WRITE, "/admin/models/" + p.model + "/stop", id=1)  # (then load, when the stop is answered)
+            self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/stop", id=1)  # (then load, when the stop is answered)
         elif m == CMD_COPY:
             self.copy(self.store.lan_endpoint if self.store.lan_endpoint != "" else self.store.endpoint_now())
         elif m == CMD_REMOVE and p.page == "model":
             if self.confirm.tap(CONFIRM_REMOVE):
-                self.api.send(GOT_WRITE, "DELETE", "/admin/models/" + p.model)
+                self.api.send(GOT_WRITE, "DELETE", "/admin/models/" + uri_component(p.model))
                 self.go("/")
         elif m == COPY_CURL and p.page == "model":
             self.copies += 1
@@ -339,7 +339,7 @@ struct Main(App):
         elif m == LOG_FOLLOW:
             self.logs.follow = not self.logs.follow
             if self.logs.follow and p.page == "model":
-                self.api.get(GOT_LOG, "/admin/models/" + p.model + "/log")
+                self.api.get(GOT_LOG, "/admin/models/" + uri_component(p.model) + "/log")
         elif m == LOG_COPY:
             self.copy(self.logs.visible_text())
         elif m == LOG_FILTER:
@@ -352,7 +352,7 @@ struct Main(App):
             elif not self.nb.starting:
                 self.nb.starting = True
                 self.nb.problem = ""
-                self.api.post(GOT_OPEN, "/admin/learn/" + p.model + "/open")
+                self.api.post(GOT_OPEN, "/admin/learn/" + uri_component(p.model) + "/open")
 
     def reply(mut self, m: Int, event: Event, failed: Bool):
         var p = self.place()
@@ -399,7 +399,7 @@ struct Main(App):
                 read_ports(event.text, self.store)
             elif m == GOT_WRITE:
                 if event.id == 1 and p.page == "model":  # Restart: the stop is done, now the load
-                    self.api.post(GOT_WRITE, "/admin/models/" + p.model + "/load")
+                    self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/load")
                 self.poll_core()
                 self.api.get(GOT_LABELS, "/admin/labels")
             elif m == GOT_BENCH:
