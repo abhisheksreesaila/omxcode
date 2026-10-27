@@ -14,14 +14,18 @@
 from mojoui.view import View, Node, EMBED, _container
 
 
-def WebFrame(url: String, version: Int, instead: View, height: Int = 600, open_url: String = "", sandbox: String = "") -> View:
+def WebFrame(url: String, version: Int, instead: View, height: Int = 600, open_url: String = "", sandbox: String = "",
+             allow: String = "") -> View:
     """The page at `url`, `height` points high. A new `version` (counting from 1) opens it again where it opens in the
     browser (`open_url` if given, else `url`); 0 shows `instead` and opens nothing. `sandbox`: more sandbox tokens for
-    the web's iframe (see above; "" keeps the default)."""
+    the web's iframe (see above; "" keeps the default). `allow`: the iframe's permissions, from clipboard-read,
+    clipboard-write and fullscreen (space-separated; none by default, D-617)."""
     var items: List[View] = [instead.copy()]
     var options = List[String]()
-    if sandbox != "":
+    if sandbox != "" or allow != "":
         options.append(sandbox)
+    if allow != "":
+        options.append(allow)
     return _container(Node(EMBED, url, value=version, size=height, hint=open_url, options=options^), items)
 
 

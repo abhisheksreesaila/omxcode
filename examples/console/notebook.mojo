@@ -121,7 +121,8 @@ def notebook_view(nb: Notebook, st: Store, model: String, phone: Bool) -> View:
         # (Jupyter is another origin than the console's and needs its own cookies: allow-same-origin, which the host grants
         # only for another origin; scripts and forms are the default sandbox, D-606)
         items.append(WebFrame(nb.embed, nb.opened, QuietText("Jupyter opened in your browser: " + nb.url), height=0, open_url=nb.url,
-                              sandbox="allow-same-origin allow-downloads").fill().grow())
+                              sandbox="allow-same-origin allow-downloads",
+                              allow="clipboard-read clipboard-write").fill().grow())  # (copy and paste in its cells: asked for, D-617)
         return TabBody(head^, items^, compact=phone).grow()
     if not nb.loaded:
         items.append(Card([CardHead("Building the notebook" if nb.error == "" else "Could not build the notebook"),

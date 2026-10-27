@@ -22,6 +22,7 @@ import re
 import time
 import struct
 import sys
+from urllib.parse import urlsplit
 import threading
 import uuid
 import zlib
@@ -836,21 +837,71 @@ MAX_WIDGET_BYTES = 8 << 20  # an event's payload or a command's reply, as JSON t
 
 def widget_tag(tag):
     """A custom element's name the page may create (mojoui.webcomponent.is_widget_tag: the same rule)."""
-    return bool(WIDGET_TAG.match(tag)) and len(tag) <= 64 and tag not in RESERVED_TAGS
+    return bool(WIDGET_TAG.fullmatch(tag)) and len(tag) <= 64 and tag not in RESERVED_TAGS  # (fullmatch: "$" lets a trailing \n by, D-618)
+
+
+def event_name(name):
+    """A widget's event or command name (mojoui.webcomponent.is_event_name: the same rule)."""
+    return bool(EVENT_NAME.fullmatch(name))
 
 
 FRAME_SANDBOX = "allow-scripts allow-forms"  # every WebFrame's sandbox: its page runs, in an origin of its own (D-596)
 FRAME_EXTRA = ("allow-popups", "allow-modals", "allow-downloads", "allow-same-origin")
 
 
+FRAME_ALLOW = ("clipboard-read", "clipboard-write", "fullscreen")  # what a WebFrame may ask for (options[1]); none by default
+LOOPBACK = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"}
+
+
+def origin_parts(url):
+    """(scheme, host, port) as a browser compares origins: the scheme and host in lower case, the default port filled in,
+    user info and everything after the host dropped; None for anything that isn't a plain http(s) URL with a host."""
+    try:
+        p = urlsplit(url.strip())
+        scheme = p.scheme.lower()
+        host = (p.hostname or "").rstrip(".").lower()
+        port = p.port
+    except ValueError:
+        return None
+    if scheme not in ("http", "https") or not host:
+        return None
+    return scheme, host, port or (443 if scheme == "https" else 80)
+
+
+def same_origin_or_unsure(url, origin):
+    """Whether `url` may be on this page's own origin: the same scheme, host and port, or two names of this machine on
+    the same port (localhost and 127.0.0.1: the browser would call them two origins, but they reach the same server), or
+    either side unknown (no origin known, or one that can't be parsed): unsure counts as ours."""
+    a, b = origin_parts(url), origin_parts(origin) if origin else None
+    if a is None or b is None:
+        return True
+    return a == b or (a[0] == b[0] and a[2] == b[2] and a[1] in LOOPBACK and b[1] in LOOPBACK)
+
+
+def page_origin(scheme, netloc, headers):
+    """This page's origin as its browser sees it, from the request; "" (unknown) when a proxy may have rewritten the host
+    or scheme (X-Forwarded-*, Forwarded): then WebFrame never gets allow-same-origin (D-616)."""
+    if any(h in headers for h in ("forwarded", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-original-host")):
+        return ""
+    return f"{scheme}://{netloc}"
+
+
 def frame_sandbox(n, origin=""):
     """WebFrame's iframe sandbox: FRAME_SANDBOX plus what the app asked for from FRAME_EXTRA (options[0]). allow-same-origin
-    only for a page on another origin than this one (it then keeps its own cookies; with ours it could lift its sandbox)."""
+    only for a page surely on another origin than this one (it then keeps its own cookies; with ours it could lift its
+    sandbox): compared as origins (origin_parts), never as strings, and refused when unsure (D-616). A URL check can't see
+    where the framed page goes next: a page on another origin that redirects back to ours runs there with
+    allow-same-origin (docs/js.md §5)."""
     asked = n["options"][0].split() if n.get("options") else []
-    url = n["text"]
-    same = bool(origin) and (url.lower() == origin.lower() or url.lower().startswith(origin.lower() + "/"))
+    same = same_origin_or_unsure(n["text"], origin)
     extra = [t for t in FRAME_EXTRA if t in asked and not (t == "allow-same-origin" and same)]
     return " ".join([FRAME_SANDBOX] + extra)
+
+
+def frame_allow(n):
+    """The iframe's permissions policy: only what the app asked for (options[1]) from FRAME_ALLOW; none by default (D-617)."""
+    asked = n["options"][1].split() if len(n.get("options") or []) > 1 else []
+    return "; ".join(t for t in FRAME_ALLOW if t in asked)
 
 
 def paragraph_runs(n, i, common):
@@ -1050,7 +1101,7 @@ def render_node(s, i, sid):
         if web_url(n["text"]) is None:  # (http and https only, D-576: the stand-in instead of the frame)
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", data_refused="1", style="gap:0px")
         return Div(Iframe(src=n["text"], title=n["text"], sandbox=frame_sandbox(n, getattr(s, "origin", "")), referrerpolicy="no-referrer",
-                          allow="clipboard-read; clipboard-write"), cls="embed", id=nid, data_kind="embed",
+                          allow=frame_allow(n) or None), cls="embed", id=nid, data_kind="embed",
                    data_url=n["text"], style=f"height:{n['size']}px" if n["size"] > 0 else "flex:1 1 0;min-height:0")  # (0: as tall as it's given)
     if kind == WEBCOMP:  # a JS widget (mojoui.webcomponent): mojoui-widgets.js puts its element in and keeps it across rebuilds
         tag, props = n["hint"], n["text"] or "{}"
@@ -1323,7 +1374,7 @@ def make_app(module_dir):
     def index(req):
         sid = uuid.uuid4().hex  # one app session per page load (tab)
         s = Session(mod, shared=bool(loads))
-        s.origin = f"{req.url.scheme}://{req.url.netloc}"
+        s.origin = page_origin(req.url.scheme, req.url.netloc, {k.lower(): v for k, v in req.headers.items()})
         with sessions_lock:
             sessions[sid] = s
             while len(sessions) > MAX_SESSIONS:
@@ -1511,7 +1562,7 @@ def make_app(module_dir):
         """A widget's event (mojoui-widgets.js emit): the widget by its key (tag, id), not its node, so an event sent
         while the screen was rebuilt still lands. Only a word for a name and JSON for the payload get through."""
         s = sessions.get(sid)
-        if s is None or not hasattr(mod, "widget_event") or not widget_tag(tag) or not EVENT_NAME.match(name) or len(data) > MAX_WIDGET_BYTES:
+        if s is None or not hasattr(mod, "widget_event") or not widget_tag(tag) or not event_name(name) or len(data) > MAX_WIDGET_BYTES:
             return ""
         try:
             json.loads(data)
@@ -1618,7 +1669,8 @@ def make_app(module_dir):
         changed under it: ask again once the page has caught up) or X-Mojoui-Gone (the tab or the canvas is gone), never a
         4xx, which every browser logs as a console error (goal 34 M2 reads the console)."""
         sess = sessions.get(sid)
-        if sess is None:
+        if sess is None:  # a gone session (a closed or expired tab, a restarted server) reads as 204 + X-Mojoui-Gone, no
+            # longer 404 (D-607): the page's poller stops on the header as it did on 404, and the browser logs no error
             return Response(status_code=204, headers={"X-Mojoui-Gone": "1"})
         with sess.lock:
             if sess.closed:

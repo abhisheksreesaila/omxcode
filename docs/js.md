@@ -22,8 +22,9 @@ cd examples/<app>/web && pixi run npm install --package-lock-only --ignore-scrip
 ```
 
 `scripts/build.sh <app> web` does the rest (`scripts/web_assets.py`): `npm ci --ignore-scripts` from the lockfile into
-`build/<app>/npm/` (no package runs code at install time), then esbuild bundles and minifies each file in `web/widgets/`
-offline (TypeScript too: esbuild strips the types; it doesn't check them) into
+`build/<app>/npm/` (no package runs code at install time; the first install, or one after the lockfile changes, downloads
+the pinned packages from the npm registry unless npm's cache already has them), then esbuild bundles and minifies each
+file in `web/widgets/` with no network (TypeScript too: esbuild strips the types; it doesn't check them) into
 `build/<app>/web/assets/<name>.<hash>.js` with a `manifest.json`. No CDN, nothing downloaded when the app runs.
 
 ## 2. Write a widget
@@ -111,7 +112,15 @@ Arguments that aren't JSON never leave the runtime (an error Event instead).
 - **WebFrame** (an iframe) is sandboxed: `allow-scripts allow-forms`, no `allow-same-origin` (its page gets an origin
   of its own), http(s) URLs only. An app can add `allow-popups`, `allow-modals`, `allow-downloads`, and
   `allow-same-origin` only for a page on another origin (Jupyter keeps its own cookies; with ours it could lift its
-  sandbox): `WebFrame(url, v, instead, sandbox="allow-same-origin")`.
+  sandbox): `WebFrame(url, v, instead, sandbox="allow-same-origin")`. "Another origin" is decided by parsing the URL
+  (scheme, host in lower case, port with the default filled in; user info, query and fragment don't change it), and
+  two names of this machine on the same port count as ours. When the host can't be sure of its own origin (behind a
+  proxy that sends X-Forwarded-* or Forwarded headers) it never grants allow-same-origin.
+  **Not a guarantee:** this checks the URL the frame starts at. A page on another origin can redirect or navigate the
+  frame to our origin, and it then runs there with allow-same-origin and could lift its sandbox. Only grant it to a
+  page you trust as much as your own (the console's local Jupyter).
+  The iframe gets no permissions (no `allow=`) unless the app asks: `WebFrame(…, allow="clipboard-read clipboard-write")`
+  (clipboard-read, clipboard-write and fullscreen; anything else is dropped).
 - Widgets from people you don't trust: only in a WebFrame of their own origin, never as a WebComponent (a widget runs
   with the page's rights).
 

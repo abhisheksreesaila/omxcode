@@ -54,6 +54,35 @@ def main():
         assert got == want, (asked, url, got)
         s = SimpleNamespace(nodes=[dict(node, children=[1]), dict(base, kind=web.TEXT, text="stand-in")], origin=page)
         assert f'sandbox="{want}"' in to_xml(web.render_node(s, 0, "sid")), (asked, url)
+    # the same origin, however it's spelled (D-616): a query or fragment right after the port, user info, the default
+    # port written out, upper-case host, a trailing dot: allow-same-origin never goes to our own origin
+    for url in [page + "?x", page + "#x", "http://user@127.0.0.1:5001/", "http://user:pw@127.0.0.1:5001/lab", "HTTP://127.0.0.1:5001/a",
+                "http://127.0.0.1:5001./a", "http://localhost:5001/a"]:
+        node = dict(base, kind=web.EMBED, text=url, value=1, options=["allow-same-origin"])
+        assert "allow-same-origin" not in web.frame_sandbox(node, page), url
+    for url, origin in [("http://example.com:80/a", "http://example.com"), ("https://example.com/a", "https://example.com:443"),
+                        ("https://Example.COM/x", "https://example.com")]:
+        node = dict(base, kind=web.EMBED, text=url, value=1, options=["allow-same-origin"])
+        assert "allow-same-origin" not in web.frame_sandbox(node, origin), (url, origin)
+    for url, origin in [("https://example.com/a", "http://example.com"), ("http://127.0.0.1:8888/lab", page), ("http://other.host:5001/", page)]:
+        node = dict(base, kind=web.EMBED, text=url, value=1, options=["allow-same-origin"])
+        assert "allow-same-origin" in web.frame_sandbox(node, origin), (url, origin)
+    # unsure of our own origin (none known, or behind a proxy that rewrote it): never allow-same-origin
+    node = dict(base, kind=web.EMBED, text="http://127.0.0.1:8888/lab", value=1, options=["allow-same-origin"])
+    assert "allow-same-origin" not in web.frame_sandbox(node, ""), "no origin"
+    assert web.page_origin("http", "127.0.0.1:5001", {}) == page
+    assert web.page_origin("http", "127.0.0.1:5001", {"x-forwarded-host": "app.example.com"}) == ""
+    assert web.page_origin("http", "127.0.0.1:5001", {"forwarded": "host=app.example.com;proto=https"}) == ""
+    # the iframe's permissions: none unless the app asks (clipboard, fullscreen); anything else dropped (D-617)
+    framed = dict(base, kind=web.EMBED, text="http://127.0.0.1:8888/lab", value=1, children=[1])
+    s = SimpleNamespace(nodes=[framed, dict(base, kind=web.TEXT, text="s")], origin=page)
+    assert " allow=" not in to_xml(web.render_node(s, 0, "sid")), "an iframe with permissions nobody asked for"
+    s.nodes[0] = dict(framed, options=["", "clipboard-read clipboard-write camera"])
+    html = to_xml(web.render_node(s, 0, "sid"))
+    assert 'allow="clipboard-read; clipboard-write"' in html and "camera" not in html, html
+    # names: a trailing newline isn't a word or a tag (fullmatch, D-618)
+    assert not web.widget_tag("mx-counter\n") and not web.EVENT_NAME.fullmatch("click\n") and web.widget_tag("mx-counter")
+    assert not web.event_name("click\n") and web.event_name("click")
     print("web_links: ok")
 
 
