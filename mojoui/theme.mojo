@@ -550,12 +550,26 @@ def theme_tokens(t: Theme) -> String:
             + ',"corners":' + corners + "}")
 
 
+def _css_font_name(name: String) -> String:
+    """A font's name, safe inside tokens_css's single-quoted CSS string (D-682): letters, digits, spaces, '-', '_', '.'
+    and any non-ASCII character kept; quotes, backslashes, braces, ';', '<' and control characters dropped."""
+    var out = String("")
+    for c in name.codepoint_slices():
+        var b = Int(c.as_bytes()[0])
+        if c.byte_length() > 1 or (b >= 0x30 and b <= 0x39) or (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) \
+                or b == 0x20 or b == 0x2D or b == 0x5F or b == 0x2E:
+            out += String(c)
+    return out^
+
+
 def tokens_css(t: Theme) -> String:
     """The tokens palette_css doesn't carry, as CSS variables on the page's body: the fonts (--o-font, --o-mono,
     --o-font-size) and the corners (--o-radius-card, --o-radius-button, --o-radius-field), for a widget's own sheet."""
     var ty = t.look.type.copy()
-    var family = ("'" + ty.family + "', " if ty.family != "" else String("")) + "system-ui, sans-serif"
-    var mono = ("'" + ty.mono + "', " if ty.mono != "" else String("")) + "ui-monospace, monospace"
+    var fam = _css_font_name(ty.family)
+    var mon = _css_font_name(ty.mono)
+    var family = ("'" + fam + "', " if fam != "" else String("")) + "system-ui, sans-serif"
+    var mono = ("'" + mon + "', " if mon != "" else String("")) + "ui-monospace, monospace"
     var c = t.look.controls.copy()
     return ("body {--o-font: " + family + ";--o-mono: " + mono + ";--o-font-size: " + _num(ty.body) + "px;--o-radius-card: "
             + String(card_radius(t)) + "px;--o-radius-button: " + String(c.button_radius) + "px;--o-radius-field: " + String(c.field_radius) + "px;}")
