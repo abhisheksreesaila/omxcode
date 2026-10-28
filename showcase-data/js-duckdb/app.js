@@ -12,6 +12,13 @@
 //   ("mismatch in shared state of memory"), so parquet-wasm decodes the file into Arrow for it (loadViaParquetWasm).
 //   coi is fragile here: 1-3 threads hang, 6 and 16 run out of memory ("offset is out of bounds"), 8 is slower than 4,
 //   and at 4 the load failed the same way at ~90M rows until the wasm memory is grown once up front (see there).
+// - The table is stored in table order (day descending, id ascending; SPEC: a build may reorder the rows at load, and
+//   the time counts in its load). DuckDB keeps each row group's min/max (zone maps), so a date range skips the row
+//   groups outside it and the newest-50 query's top-N filter stops reading after the first few. 10M: one ORDER BY in
+//   CREATE TABLE. 100M (compressed): an unsorted load, then re-inserted day range by day range (newest first, ~10M
+//   rows each, CHECKPOINT after each) so the sort's staging never holds more than one range (sortChunked).
+//   Measured (input-to-pixels median, unsorted → sorted): 10M 110 → 40 ms (load 2.0 → 3.7 s); 100M 709 → 109 ms
+//   (the sort adds ~13 s to a ~42 s load). Numbers above this bullet are from before the sort.
 //
 // URL params (defaults by file size, as above):
 //   rows=10M|100M      which data/orders-<rows>.parquet to open (default 10M)
@@ -21,8 +28,15 @@
 //   threads=N          coi's thread count (default 4)
 //   compress=auto|1|0  auto: only when the uncompressed table would not fit
 //   types=enum|plain   plain: keep the Parquet's strings (for comparison)
-//   load=table|file    file: query the Parquet file on every change (for comparison)
+//   load=table|file    file: query the Parquet file on every change (for comparison; table is the default)
+//   sort=day|none      none: keep the file's row order (for comparison)
+//   fold=1|0|par       1 (default): the KPIs/chart and the table in one SQL statement (one round trip to the worker);
+//                      0: two statements; par: two statements on two connections at once. Measured at 100M (coi, 4
+//                      threads, sorted): input-to-pixels median 105 (fold) vs 109 (two) vs 121 ms (par): the worker
+//                      runs one statement at a time, so two connections don't overlap; folding saves a round trip.
 //   scripted=1&steps=S drive steps.json's first S changes, then POST answers.json + timings.json to the server
+//   scripted=external  show step 0, then wait: window.extStep(n) applies steps.json's step n through its control and
+//                      resolves after the frame that shows it (external.py drives it; see README.md)
 import * as duckdb from "@duckdb/duckdb-wasm";
 import initParquetWasm, { ParquetFile } from "parquet-wasm";
 
@@ -32,6 +46,10 @@ const LOAD = P.get("load") || "table";
 const TYPES = P.get("types") || "enum";
 const COMPRESS = { "1": true, "0": false }[P.get("compress")] ?? "auto";
 const SCRIPTED = P.get("scripted") === "1";
+const EXTERNAL = P.get("scripted") === "external";
+const SORT = P.get("sort") || "day";
+const FOLD = (P.get("fold") ?? "1") === "1", PAR = P.get("fold") === "par";
+const ORDER = "day DESC, id ASC";   // the table's order (SPEC), and the rows' order in storage
 const TOP = 20, IDS = 50;
 
 const $ = (id) => document.getElementById(id);
@@ -49,7 +67,7 @@ const nextPaint = () => new Promise((res) => requestAnimationFrame(() => {
 }));
 
 let lastSplit = {};
-let db, conn, qAgg = {}, qRows = {}, source;
+let db, conn, conn2, qAgg = {}, qRows = {}, qFold = {}, source;
 const log = { setup: {}, steps: [] };
 
 // ----------------------------------------------------------------------------------------------------------------
@@ -78,6 +96,7 @@ async function openDuckDB() {
   log.setup.duckdb_start_ms = performance.now() - t0;   // worker + wasm compile + open
   log.setup.threads = Number(threads);
   log.setup.crossOriginIsolated = self.crossOriginIsolated;
+  log.setup.hardwareConcurrency = navigator.hardwareConcurrency;
   log.setup.duckdb = await db.getVersion();
 }
 
@@ -123,7 +142,7 @@ async function loadData() {
       }
       const cols = COLS[TYPES] || "*";
       if (!compress) {
-        await conn.query(`CREATE TABLE o AS SELECT ${cols} FROM ${f}`);
+        await conn.query(`CREATE TABLE o AS SELECT ${cols} FROM ${f}` + (SORT === "day" ? ` ORDER BY ${ORDER}` : ""));
       } else {
         // Compressed storage is written at CHECKPOINT; load 10M rows at a time (id is the row number and the row groups
         // hold ids in order, so `id` ranges skip the other row groups) and checkpoint after each, so the uncompressed
@@ -135,6 +154,7 @@ async function loadData() {
           log.setup.loaded = { rows: Math.min(rows, lo + 1e7), ms: performance.now() - t0 };
           if (SCRIPTED) post("progress", log);
         }
+        if (SORT === "day") await sortChunked(t0);
       }
       const n = Number((await conn.query("SELECT count(*)::DOUBLE AS n FROM o")).getChild("n").get(0));
       if (n !== rows) throw new Error(`loaded ${n} rows of ${rows}`);
@@ -159,7 +179,19 @@ async function loadData() {
         sum((${A} - ${C}) / ${A}) AS m FROM ${source} WHERE ${where} GROUP BY product`);
     const cols = `id::DOUBLE AS id, day, region::VARCHAR AS region, product::VARCHAR AS product, ${A} AS amount,
         ${C} AS cost, paid`;
-    qRows[all] = await conn.prepare(`SELECT ${cols} FROM ${source} WHERE ${where} ORDER BY day DESC, id ASC LIMIT ${IDS}`);
+    if (PAR && !conn2) {
+      conn2 = await db.connect();
+      if (log.setup.compress) await conn2.query("USE mem");
+    }
+    qRows[all] = await (PAR ? conn2 : conn).prepare(`SELECT ${cols} FROM ${source} WHERE ${where} ORDER BY day DESC, id ASC LIMIT ${IDS}`);
+    // fold=1: both in one statement (k = 0: a product's group, k = 1: a table row), one round trip to the worker.
+    const w = `day BETWEEN CAST($1 AS DATE) AND CAST($2 AS DATE) AND amount >= $3` + (all ? "" : " AND region = $4");
+    qFold[all] = await conn.prepare(`SELECT 0 AS k, product::VARCHAR AS product, count(*)::DOUBLE AS n, sum(${A}) AS s,
+        sum((${A} - ${C}) / ${A}) AS m, NULL::DOUBLE AS id, NULL::DATE AS day, NULL::VARCHAR AS region, NULL::DOUBLE AS amount,
+        NULL::DOUBLE AS cost, NULL::BOOLEAN AS paid FROM ${source} WHERE ${w} GROUP BY product
+      UNION ALL (SELECT 1, product::VARCHAR, NULL, NULL, NULL, id::DOUBLE, day, region::VARCHAR, ${A}, ${C}, paid
+        FROM ${source} WHERE ${w} ORDER BY day DESC, id ASC LIMIT ${IDS})
+      ORDER BY k, day DESC, id`);
   }
 }
 
@@ -209,28 +241,66 @@ async function loadViaParquetWasm(url, t0) {
     }
   }
   await conn.query("DROP TABLE IF EXISTS stage");
+  if (SORT === "day") {
+    if (compress) await sortChunked(t0);
+    else { await conn.query(`CREATE TABLE s AS SELECT * FROM o ORDER BY ${ORDER}`); await conn.query("DROP TABLE o; ALTER TABLE s RENAME TO o"); }
+  }
   const n = Number((await conn.query("SELECT count(*)::DOUBLE AS n FROM o")).getChild("n").get(0));
   if (n !== rows) throw new Error(`loaded ${n} rows of ${rows}`);
+}
+
+// The compressed table in table order without a global sort (4 GB of wasm can't stage 100M uncompressed rows): copy
+// it day range by day range, newest first, each range sorted, into a new table, CHECKPOINT after each so only one
+// range is ever uncompressed, then drop the unsorted copy. The result is fully sorted (the ranges don't overlap).
+async function sortChunked(t0) {
+  const r = (await conn.query("SELECT (min(day) - DATE '1970-01-01')::DOUBLE AS lo, (max(day) - DATE '1970-01-01')::DOUBLE AS hi, count(*)::DOUBLE AS n FROM o")).toArray()[0];
+  const lo = Number(r.lo), hi = Number(r.hi), parts = Math.max(1, Math.ceil(Number(r.n) / 1e7));
+  const span = Math.ceil((hi - lo + 1) / parts);
+  await conn.query("CREATE TABLE s AS SELECT * FROM o LIMIT 0");
+  const t1 = performance.now();
+  for (let top = hi; top >= lo; top -= span) {
+    const bottom = Math.max(lo, top - span + 1);
+    await conn.query(`INSERT INTO s SELECT * FROM o WHERE day BETWEEN DATE '1970-01-01' + ${bottom} AND DATE '1970-01-01' + ${top} ORDER BY ${ORDER}`);
+    await conn.query("CHECKPOINT mem");
+  }
+  await conn.query("DROP TABLE o");
+  await conn.query("ALTER TABLE s RENAME TO o");
+  await conn.query("CHECKPOINT mem");
+  log.setup.sort = { parts, ms: performance.now() - t1 };
 }
 
 async function compute(st) {
   const all = st.region === "all";
   const args = [st.from, st.to, st.min_amount, ...(all ? [] : [st.region])];
   const a0 = performance.now();
-  const agg = await qAgg[all].query(...args);
-  const a1 = performance.now();
-  const rows = await qRows[all].query(...args);
-  lastSplit = { agg_ms: a1 - a0, rows_ms: performance.now() - a1 };
+  let agg, rows, nAgg, first = 0;
+  if (FOLD) {
+    agg = rows = await qFold[all].query(...args);
+    const k = agg.getChild("k").toArray();
+    nAgg = k.indexOf(1) < 0 ? k.length : k.indexOf(1);
+    first = nAgg;
+    lastSplit = { fold_ms: performance.now() - a0 };
+  } else if (PAR) {
+    [agg, rows] = await Promise.all([qAgg[all].query(...args), qRows[all].query(...args)]);
+    nAgg = agg.numRows;
+    lastSplit = { par_ms: performance.now() - a0 };
+  } else {
+    agg = await qAgg[all].query(...args);
+    const a1 = performance.now();
+    rows = await qRows[all].query(...args);
+    nAgg = agg.numRows;
+    lastSplit = { agg_ms: a1 - a0, rows_ms: performance.now() - a1 };
+  }
   const prod = agg.getChild("product").toArray(), n = agg.getChild("n").toArray(),
         s = agg.getChild("s").toArray(), m = agg.getChild("m").toArray();
   let count = 0, sum = 0, msum = 0;
   const groups = [];
-  for (let i = 0; i < prod.length; i++) { count += n[i]; sum += s[i]; msum += m[i]; groups.push([prod[i], s[i]]); }
+  for (let i = 0; i < nAgg; i++) { count += n[i]; sum += s[i]; msum += m[i]; groups.push([prod[i], s[i]]); }
   groups.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const cols = ["id", "day", "region", "product", "amount", "cost", "paid"].map((c) => rows.getChild(c).toArray());
   const table = [];
   // DATE arrives as epoch milliseconds (Arrow DateDay); format only the 50 shown rows, not every candidate row in SQL.
-  for (let i = 0; i < rows.numRows; i++) {
+  for (let i = first; i < rows.numRows; i++) {
     const row = cols.map((c) => c[i]);
     row[1] = new Date(row[1]).toISOString().slice(0, 10);
     table.push(row);
@@ -321,6 +391,7 @@ async function main() {
   log.setup.first_dashboard_ms = s0.shown;   // from navigation start to the first dashboard on screen
   log.setup.gpu = gpuName();
   ui.status.textContent = `${ROWS} rows · ready in ${(s0.shown / 1000).toFixed(1)} s`;
+  if (EXTERNAL) return external(s0);
   if (!SCRIPTED) return;
   const plan = await (await fetch("/steps.json")).json();
   const S = Math.min(Number(P.get("steps") || plan.steps.length), plan.steps.length);
@@ -343,6 +414,33 @@ async function main() {
   await post("timings", { build: "A js-duckdb", rows: ROWS, ...log });
   await post("done", {});
 }
+// scripted=external: the page shows step 0 and waits. external.py (CDP) calls window.extStep(n), which applies step n's
+// change through its control, exactly as the scripted run does, and resolves after the frame that shows it.
+async function external(s0) {
+  const plan = await (await fetch("/steps.json")).json();
+  const byStep = new Map(plan.steps.map((st) => [st.step, st]));
+  const answers = [answer(0, s0.r)];
+  log.steps.push(timing(0, s0));
+  window.extStep = async (n) => {
+    const step = byStep.get(n);
+    if (!step) throw new Error(`no step ${n} in steps.json`);
+    await nextPaint();
+    const el = { from: ui.from, to: ui.to, min_amount: ui.min, region: ui.region }[step.change];
+    const next = shownOnce();
+    // The other controls already hold step n's state when the steps come in order; set them anyway (no event).
+    ui.from.value = step.from; ui.to.value = step.to; ui.min.value = String(step.min_amount); ui.minv.value = ui.min.value;
+    ui.region.value = step.region;
+    el.dispatchEvent(new Event(step.change === "min_amount" ? "input" : "change"));
+    const x = await next;
+    answers.push(answer(n, x.r));
+    const t = timing(n, x);
+    log.steps.push(t);
+    return t;
+  };
+  window.extResults = () => ({ answers: { build: "A js-duckdb", rows: ROWS, steps: answers },
+                               timings: { build: "A js-duckdb", rows: ROWS, ...log } });
+  window.extReady = { first_dashboard_ms: s0.shown, ...log.setup };
+}
 const timing = (k, x) => ({ step: k, input_to_pixels_ms: x.input_to_pixels_ms, query_ms: x.query_ms, render_ms: x.render_ms, ...x.split });
 
 function gpuName() {
@@ -356,5 +454,6 @@ function gpuName() {
 main().catch(async (e) => {
   const msg = String(e && e.message || e);
   ui.status.textContent = "Error: " + msg;
+  window.extError = msg;
   if (SCRIPTED) { await post("error", { error: msg, setup: log.setup }); await post("done", {}); }
 });
