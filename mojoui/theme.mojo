@@ -261,9 +261,9 @@ struct Surface(Copyable, Movable):
         self.ends_row = ends_row
 
 
-@fieldwise_init
 struct TypeScale(Copyable, Movable):
-    """The theme's font and its sizes (points): body text, a caption, a headline, a title, a section's small caps title."""
+    """The theme's font and its sizes (points): body text, a caption, a headline, a title, a section's small caps title;
+    and the line heights its text styles take (CSS's unitless line-height; 0: the body's `line`)."""
 
     var family: String  # "Inter"; "" for the platform's
     var mono: String  # figures in a status bar or a formula ("JetBrains Mono"); "" for the family
@@ -274,6 +274,39 @@ struct TypeScale(Copyable, Movable):
     var section: Float64
     var tabular: Bool  # figures all one width ("tnum": columns of numbers line up)
     var line: Float64  # a line's height as a share of its text's size (CSS's unitless line-height: 1.45); 0: the font's own
+    var title_line: Float64  # a title's, a headline's and a caption's own (omxqua's .text.title 1.1, .headline 1.3,
+    var headline_line: Float64  # .caption 1.4); 0: `line`. Apple hosts read them (GTK and the web: the theme's sheets,
+    var caption_line: Float64  # written from them), D-669
+    var text_ink: Int  # which of the palette's inks body text (and titles) and captions wear: 1 ink, 2 ink2, 3 ink3
+    var caption_ink: Int  # (omxqua: 1 and 2, its sheets' .text and .caption; the skins: 2 and 3). Apple hosts read them, D-676
+
+    def __init__(out self, family: String, mono: String, body: Float64, caption: Float64, headline: Float64, title: Float64,
+                 section: Float64, tabular: Bool, line: Float64, title_line: Float64 = 0, headline_line: Float64 = 0,
+                 caption_line: Float64 = 0, text_ink: Int = 2, caption_ink: Int = 3):
+        self.family = family
+        self.mono = mono
+        self.body = body
+        self.caption = caption
+        self.headline = headline
+        self.title = title
+        self.section = section
+        self.tabular = tabular
+        self.line = line
+        self.title_line = title_line
+        self.headline_line = headline_line
+        self.caption_line = caption_line
+        self.text_ink = text_ink
+        self.caption_ink = caption_ink
+
+    def ink_of(self, p: Palette, caption: Bool) -> UInt32:
+        """The ink text of this style wears: body text and titles text_ink, captions caption_ink (1, 2 or 3)."""
+        var k = self.caption_ink if caption else self.text_ink
+        return p.ink if k <= 1 else (p.ink2 if k == 2 else p.ink3)
+
+    def line_of(self, title: Bool, headline: Bool, caption: Bool) -> Float64:
+        """The line height (a share of the text's size) of a title, a headline, a caption or body text."""
+        var own = self.title_line if title else (self.headline_line if headline else (self.caption_line if caption else Float64(0)))
+        return own if own > 0 else self.line
 
 
 @fieldwise_init
@@ -450,3 +483,79 @@ struct Theme(Copyable, Movable):
         style sheets): hosts restyle then. (A sheet edited in place to the same length goes unnoticed: change its id too.)"""
         return (self.id + hex_of(self.palette.accent) + hex_of(self.palette.page) + hex_of(self.palette.bad) + ("d" if self.palette.dark else "l")
                 + String(self.gtk_css.byte_length()) + "/" + String(self.web_css.byte_length()) + "/" + String(len(self.look.surfaces)))
+
+
+def palette_css(p: Palette) -> String:
+    """A palette as a page's CSS variables (the vocabulary every web theme reads): the web host's page and GTK's
+    WebComponent views (goal 34 M3)."""
+    var shadow = "0 6px 20px rgba(0,0,0,.55), 0 0 0 1px #34363b" if p.dark else "0 4px 16px rgba(16,24,40,.12), 0 1px 3px rgba(16,24,40,.08)"
+    return ("body {--o-page: " + hex_of(p.page) + ";--o-card: " + hex_of(p.card) + ";--o-raised: " + hex_of(p.raised)
+            + ";--o-ink: " + hex_of(p.ink) + ";--o-ink2: " + hex_of(p.ink2) + ";--o-ink3: " + hex_of(p.ink3) + ";--o-line: " + hex_of(p.line)
+            + ";--o-strong: " + hex_of(p.line_strong) + ";--o-accent: " + hex_of(p.accent) + ";--o-on-accent: " + hex_of(p.accent_ink)
+            + ";--o-wash: " + hex_of(p.accent_wash) + ";--o-bad: " + hex_of(p.bad) + ";--o-good: " + hex_of(p.good) + ";--o-warn: " + hex_of(p.warn)
+            + ";--o-formula: " + hex_of(p.formula) + ";--o-chrome: " + hex_of(p.chrome) + ";--o-chrome-ink: " + hex_of(p.chrome_ink)
+            + ";--o-chrome-line: " + hex_of(p.chrome_line) + ";--o-tint: " + hex_of(p.accent_tint) + ";--o-data: " + hex_of(p.data(0)) + ";--o-shadow: " + shadow + ";"
+            + ("color-scheme: dark;" if p.dark else "color-scheme: light;") + "}")
+
+
+# ---- the Look's tokens for JavaScript widgets (goal 34b M1b) ----
+
+def _jstr(s: String) -> String:
+    """A JSON string literal (names and colours: no control characters reach here, quotes and backslashes are escaped)."""
+    var out = String('"')
+    for c in s.codepoint_slices():
+        if c == '"':
+            out += '\\"'
+        elif c == "\\":
+            out += "\\\\"
+        elif c.byte_length() == 1 and Int(c.as_bytes()[0]) < 0x20:
+            out += " "
+        else:
+            out += c
+    return out + '"'
+
+
+def _num(v: Float64) -> String:
+    var whole = Int(v)
+    return String(whole) if Float64(whole) == v else String(v)
+
+
+def card_radius(t: Theme) -> Int:
+    """The corner of a Card in this theme (its "card" surface), 12 when the look has none."""
+    var k = t.look.surface("card")
+    return t.look.surfaces[k].radius_top if k >= 0 and t.look.surfaces[k].radius_top >= 0 else 12
+
+
+def theme_tokens(t: Theme) -> String:
+    """The theme as JSON data for widgets: {id, dark, palette: {page, card, …, data: [six series colours]}, font: {family,
+    mono, size, caption, line}, corners: {card, button, field}}. Hosts hand it to every widget's theme(el, tokens), on
+    mount and whenever the theme changes (light/dark, another theme): data only, never code or CSS."""
+    var p = t.palette.copy()
+    var pal = ('{"page":' + _jstr(hex_of(p.page)) + ',"card":' + _jstr(hex_of(p.card)) + ',"raised":' + _jstr(hex_of(p.raised))
+               + ',"ink":' + _jstr(hex_of(p.ink)) + ',"ink2":' + _jstr(hex_of(p.ink2)) + ',"ink3":' + _jstr(hex_of(p.ink3))
+               + ',"line":' + _jstr(hex_of(p.line)) + ',"strong":' + _jstr(hex_of(p.line_strong)) + ',"accent":' + _jstr(hex_of(p.accent))
+               + ',"on_accent":' + _jstr(hex_of(p.accent_ink)) + ',"wash":' + _jstr(hex_of(p.accent_wash)) + ',"good":' + _jstr(hex_of(p.good))
+               + ',"bad":' + _jstr(hex_of(p.bad)) + ',"warn":' + _jstr(hex_of(p.warn)) + ',"data":[')
+    for i in range(6):
+        if i > 0:
+            pal += ","
+        pal += _jstr(hex_of(p.data(i)))
+    pal += "]}"
+    var ty = t.look.type.copy()
+    var font = ('{"family":' + _jstr(ty.family) + ',"mono":' + _jstr(ty.mono) + ',"size":' + _num(ty.body) + ',"caption":' + _num(ty.caption)
+                + ',"line":' + _num(ty.line) + "}")
+    var c = t.look.controls.copy()
+    var corners = ('{"card":' + String(card_radius(t)) + ',"button":' + String(c.button_radius) + ',"field":' + String(c.field_radius) + "}")
+    return ('{"id":' + _jstr(t.id) + ',"dark":' + ("true" if p.dark else "false") + ',"palette":' + pal + ',"font":' + font
+            + ',"corners":' + corners + "}")
+
+
+def tokens_css(t: Theme) -> String:
+    """The tokens palette_css doesn't carry, as CSS variables on the page's body: the fonts (--o-font, --o-mono,
+    --o-font-size) and the corners (--o-radius-card, --o-radius-button, --o-radius-field), for a widget's own sheet."""
+    var ty = t.look.type.copy()
+    var family = ("'" + ty.family + "', " if ty.family != "" else String("")) + "system-ui, sans-serif"
+    var mono = ("'" + ty.mono + "', " if ty.mono != "" else String("")) + "ui-monospace, monospace"
+    var c = t.look.controls.copy()
+    return ("body {--o-font: " + family + ";--o-mono: " + mono + ";--o-font-size: " + _num(ty.body) + "px;--o-radius-card: "
+            + String(card_radius(t)) + "px;--o-radius-button: " + String(c.button_radius) + "px;--o-radius-field: " + String(c.field_radius) + "px;}")

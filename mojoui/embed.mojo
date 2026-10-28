@@ -5,15 +5,28 @@
 #   WebFrame(url, version=self.opened, instead=Text("Opened in your browser"), height=640).fill()
 #   (open_url: what the browser opens instead of `url`, when the framed page and the full page differ: Jupyter's
 #   single-notebook view in the frame, its lab view in a browser tab)
+#
+# The web's iframe is always sandboxed (goal 34, D-606): "allow-scripts allow-forms", so the page runs in an origin of
+# its own and can't reach the app's. `sandbox` adds from allow-popups, allow-modals, allow-downloads and allow-same-origin;
+# the host grants allow-same-origin only for a page on another origin than the app's (then it keeps its own cookies, as
+# Jupyter needs; with the app's own origin it could lift its sandbox), and drops anything else.
 
 from mojoui.view import View, Node, EMBED, _container
 
 
-def WebFrame(url: String, version: Int, instead: View, height: Int = 600, open_url: String = "") -> View:
+def WebFrame(url: String, version: Int, instead: View, height: Int = 600, open_url: String = "", sandbox: String = "",
+             allow: String = "") -> View:
     """The page at `url`, `height` points high. A new `version` (counting from 1) opens it again where it opens in the
-    browser (`open_url` if given, else `url`); 0 shows `instead` and opens nothing."""
+    browser (`open_url` if given, else `url`); 0 shows `instead` and opens nothing. `sandbox`: more sandbox tokens for
+    the web's iframe (see above; "" keeps the default). `allow`: the iframe's permissions, from clipboard-read,
+    clipboard-write and fullscreen (space-separated; none by default, D-617)."""
     var items: List[View] = [instead.copy()]
-    return _container(Node(EMBED, url, value=version, size=height, hint=open_url), items)
+    var options = List[String]()
+    if sandbox != "" or allow != "":
+        options.append(sandbox)
+    if allow != "":
+        options.append(allow)
+    return _container(Node(EMBED, url, value=version, size=height, hint=open_url, options=options^), items)
 
 
 def is_web_url(url: String) -> Bool:

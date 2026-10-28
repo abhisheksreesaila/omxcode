@@ -596,3 +596,107 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Links (D-576): http(s) only on every host; the web's refused link has no href. GTK and Mac guards proven only through the shared rule's test.
 - mojo_rt (D-577): no change: the typed pointer is read after the call in both IR and Apple assembly.
 - Proof run: M2, M5 (forged link included), M6 and goal 32 M1 PASS first time. M1 failed on my own line name (the checker reads `^[A-Z0-9]+: `, so REFUSED_SPLITS was never seen: now SPLITS). M4 failed twice from the consolekit rework: LogView(short) renames the log's tag to log-short, and MainAside's scroller put a button outside the web viewport; now LogView(lines) and two growing columns with SPACE_L between. Rerun: M1 and M4 PASS.
+
+## 2026-10-27 · goal 34 M0 (worktree mojo-ui-js, branch goal-34-js)
+- Proofs for M0–M2 written into scripts/check.py first. Baseline M4: the first run failed only because build/ didn't exist yet (33-M1 writes build/test_http without making the folder); the second only on the matrix, stale from my new mojoui file.
+- mojoui/webcomponent.mojo (Props, WebComponent, Command, Widgets), the runtime's half (commands numbered, replies once, events keyed), the web host's half (mojoui-widgets.js: defineWidget, park and adopt, the event queue, commands). tests/test_webcomponent.mojo passed on its first build.
+- First drive: the widget never mounted: render() writes `data-tag` from `.tag()` and overwrote mine. The widget's tag is `data-widget` now.
+- The step format splits on ";": the checks' js probes are expressions without one.
+- A 404 for /favicon.ico was a console error on every page: the host answers 204.
+- The CSP went in with M0's host changes (the M2 proof was already written): M0 PASS, M4 (goal 33's M1, M2, M4, M5) PASS under it.
+
+## 2026-10-27 · goal 34 M1
+- CodeMirror 6 (@codemirror/state 6.5.2, view 6.38.1, commands 6.8.1; lockfile from `npm install --package-lock-only --ignore-scripts`), its widget in TypeScript (editor.ts, 257 KB minified with CodeMirror). Mojo builds of the app take ~13 s; npm ci is skipped after the first build.
+- First run: after the rebuild mid-typing (a "Long note" line appears past five words) the next keys landed at the start: "ixone two three four five s". The park/adopt moves reset the DOM selection and CodeMirror took it on selectionchange, because focus and selection were put back only in a later task. Now restored in htmx:oobAfterSwap, synchronously (D-604): text, cursor, focus and the one mount survive.
+- The editor first drew in CodeMirror's monospace: its own theme's `.ͼ1 .cm-scroller` beat my rule; a more specific one gives the note the app's face.
+- M1's build.sh check flagged its own comment's "web/widgets/" as an app name: the check now looks for an app name, not that folder.
+
+## 2026-10-27 · goal 34 M2
+- The first M2 run read the headers through dict(r.headers), and the host sends lower-case names: the check now reads them case-insensitively.
+- Widgets: 0 CSP violations. The injected inline script, inline handler and string setTimeout were all blocked and reported (script-src-elem, script-src-attr, script-src). Non-JSON payloads and non-word event names change nothing. The lint fails on a stray file and on a listed name nobody bundled.
+- Console: the CSP was clean, but its logs and notebook pages logged "409 (Conflict)" from the canvas frame protocol: the endpoint now answers 204 with headers (D-607). WebFrame sandbox + the console's Jupyter opt-in (D-606); tests/test_web_links.py and test_embed prove it.
+- The session restarted mid-M2: the uncommitted work was intact (no stash or checkout), and no stray processes were left.
+
+## 2026-10-27 · goal 34 M3
+- WebKitGTK for GTK 4: conda-forge has only webkitgtk-cos6 1.4.3 (GTK 2); the system has webkit2gtk-4.1 (GTK 3) and webkitgtk-6.0 is in Arch's extra repo, but installing needs root (no sudo). Downloaded Arch's package, checked its signature against a copy of the pacman keyring (heftig's key, good), extracted it: the library loads, but WebKit's helper processes live at a compiled-in /usr/lib/webkitgtk-6.0 (WEBKIT_EXEC_PATH is developer builds only). A C probe under `bwrap --overlay-src /usr/lib --overlay-src <pkg>/usr/lib --ro-overlay /usr/lib` ran a WebView on Xvfb with WebKit's own sandbox nested inside, and posted a script message back: the route (D-608).
+- Second C probe: a mojoui:// scheme handler with a CSP header blocked an inline script and eval, ran an SRI'd script, exposed the header to fetch(), and call_async_javascript_function passed a GVariant string argument. Then the Mojo host.
+- First Mojo run: pages loaded, every call said "Can't find variable: mojoui": set_http_headers replaces the response's content type, and with nosniff a script without one doesn't run (a probe read content-type null). Content-Type now goes in the headers.
+- JSC took SIGUSR1 ("Overriding existing handler for signal 10"), the live-report signal; and live.py's SIGUSR1 went to bwrap, which died with the app. JSC_SIGNAL_FOR_GC=30 around WebKit's start; live.py signals bwrap's child (D-614).
+- M3's first full run: the Load sample click missed (the "Long note" line had moved the button below where the first report put it): the run now loads the sample before the note grows. With MOJOUI_NO_PARTIAL=1 the keys after "s" went nowhere: moving the focused view into a rebuilt box loses GTK's focus; the host gives it back (D-609). window.open never reaches decide-policy (JS can't open windows at all), so the probe set gained two link clicks that do.
+- Parity: the editor's and counter's boxes on GTK match the web's at 1280×860 (the view's height is the widget's, reported by a ResizeObserver).
+- Full run: M0 PASS (28 s), M1 PASS (22 s), M2 PASS (106 s), M3 PASS, M4 PASS (534 s).
+
+## 2026-10-27 · goal 34 review round 1 (NEEDS WORK → fixes)
+- WebFrame same-origin: test cases first (query/fragment after the port, user info, :80, upper case, trailing dot, localhost vs 127.0.0.1, unknown or proxied origin): red, then urlsplit-based origins (D-616). Iframe permissions now opt-in (D-617); fullmatch for names (D-618).
+- Launcher: tests/test_webkit_launcher.sh with fake bwraps (none, no --overlay-src, new) and an offline fetch: red, then scripts/webkit_launcher.sh and a warning-not-abort build (D-619).
+- gtk_webview: tests/test_gtk_webview.mojo for file names, SRI, error cut and reply ownership: red, then the fixes (D-620). Crash: webkit_web_view_terminate_web_process from a webkill: step; one kill reloads (counter back to Mojo's label, count 0), two show the stand-in (D-621). Views now outlive an unbuilt node while the key stays shown (D-622).
+- I ran `pkill -f "Xvfb :97"` to clean up the M3 prototype display: it matched and killed my own shell, the lesson docs/lessons.md already states. Stop only PIDs I started.
+
+- Full run after the fixes: M0 PASS (17 s), M1 PASS (18 s), M2 PASS (105 s), M3 PASS (adds the crash and forged-reply proofs), M4 PASS (515 s).
+
+## 2026-10-27 · goal 34 review round 2 (NEEDS WORK → fixes)
+- The reviewer's spellings first (`\@`, 127.1, 2130706433, 0x7f.0.0.1, %31, [::ffff:127.0.0.1], [::1], octal, zero-padded, user info, % in a name, numeric last label, _ and leading hyphens): red at the first; then origin_parts accepts only a plain authority (D-624). Jupyter's 127.0.0.1:8888 and plain foreign names still get allow-same-origin.
+- Launcher: a fake bwrap that answers --help but can't run, and a WebKitGTK path with a quote, space and $: red, then a trial `bwrap … true` and the path read from a file (D-625, D-626).
+- After: tests/test_web_links.py and tests/test_webkit_launcher.sh ok; check M2 PASS (89 s), M3 PASS.
+
+## 2026-10-27 · goal 34b M0: agents see JS widgets
+- Proof first (scripts/check.py m0): the agent client attached to the widgets app on the web (headless Chromium page open) and on GTK (the app on the headless display), editor-set/read, counter-set/read, update() hearing both, undeclared and mistyped sets refused by the agent host and, sent raw to the link, by the page; a scratch app's widget without describe reads "no description".
+- The question was how an agent reads a widget's state: the agent host ran its own session with no web view, so no widget ever ran there. Chose an agent link on the running host (D-631): the agent is still "just another host" reading the same tree, now over a socket, plus what each widget says about itself, which the hosts already collected for their reports (GTK's describe line; the web now posts it while an agent is attached).
+- A first JS edit sliced from `let told` to the first `  if (native) {`, which matched an indented line earlier in the file: the empty slice scattered the new text between every character. Restored that one file from HEAD (only my edits in it) and redid it with asserts on each anchor.
+- web.py's handler class `Link` shadowed FastHTML's `Link` tag inside make_app (UnboundLocalError at start): renamed.
+- GTK worked on its first run: libc socket + g_unix_fd_add on the main loop, set through Runtime.set_widget and send_commands.
+- M0 PASS (81 s).
+
+## 2026-10-27 · goal 34b M1: Apache ECharts, no host changes
+- Proof first: exact pin + lockfile integrity (echarts, zrender), a tree-shaken import, no eval/new Function in the bundle, the same bytes in GTK's views, Mojo's series in the chart's describe line, a click on point 2 reaching update() on the web (real mouse) and GTK (DOM mouse events in the page), 0 CSP violations on both, and no change in mojoui/hosts since a87c7cc.
+- ECharts 6.1.0 needed nothing from the hosts: one TS file, one CSS file, two names in web_assets().
+- First look: omxqua's accent is near-black, so the line drew black on a grey wash, off from mojoui's own sparkline. Switched the chart to the palette's data colour (--o-data) with a soft gradient of it.
+- One run reported "gtk: no screenshot" with everything else passing; a rerun and a run by hand both wrote it. The proof now deletes the old shot first and prints the host's SHOT line if it is missing again.
+- M1 PASS (22 s).
+
+## 2026-10-27 · goal 34b M1b: widgets as first-class citizens
+- Coordinator added M1b (owner: "we want first-class integration"); proof first: tokens in a Mojo test, CodeMirror's background/ink and ECharts' label ink equal to the tokens in light and after a live switch to dark (one mount) on the web and GTK, Tab/Shift+Tab through six stops both ways (web: Playwright keys; GTK: XTest keys, the host's new FOCUS: line), matrix rows and gallery images.
+- Web: theme and Tab worked once the chart became a Tab stop (focusable: true).
+- GTK theme: the app went dark but the pages kept light tokens: only a rebuild resent the theme. theme_webviews() now runs from apply() and from a switch with no view change.
+- GTK Tab: WebKit kept the keyboard: (1) the page now hands Tab past its edge to the host, (2) child_focus(window) from inside a view stayed in the view until the view is made unable to take focus for that one move, (3) the sparkline's scrolled window was an extra stop (it grabs focus by can-focus), (4) after entering a view by Shift+Tab, WebKit delivered only Shift to the page, so the host now takes Tab while a view has the keyboard and hands it in as a message. Debugged with temporary prints and the CSP counter as a key counter (removed).
+- Seen, not fixed (outside this goal): mojoui's own sparkline canvas stays light after a live switch to dark on both hosts: a canvas redraws when its version changes, and appearance doesn't change it.
+- Coordinator: M1's host proof is now pinned to a87c7cc..760bb66 so the Mac branch's merge can't trip it.
+- M1b PASS (60 s).
+
+## 2026-10-27 · goal 34b final run, and the GTK screenshot flake
+- M0 M1 M1b M3: M0 and M1b PASS; M1 failed on "SHOT: skipped (window had no frame to capture)" (second time); M3 failed on my own docstring naming mx-editor in gtk.mojo (goal 34 forbids app names in hosts): fixed.
+- The flake (coordinator: fix it, don't rerun): reproduced 4 of 10 with the old binary. Cause: gtk_widget_paintable gives the last drawn frame, none while a redraw is queued. save_png now requests a paint and snapshots after each drawn frame until it has one (non-blocking pump, 10 s deadline, a clear failure line). After: 10 of 10, 4 having waited. M1 keeps the 10-shot loop.
+- Rerun: M1 PASS (31 s; 3 of 10 waited), M3 PASS (328 s).
+
+## 2026-10-27 · goal 34b M1c: the developer loop
+- Coordinator added M1c; proof first: a scratch copy of the widgets app under scripts/dev.sh, edits to counter.js, counter.css and editor.ts reaching the open page (same window object, the typed note and Words: 4 kept, mounts 2), the counter's thrown error as widgets/counter.js:<line> in the dev log and in a GTK debug build's log, the inspector shown in the debug build and refused in release, release builds without maps or dev endpoints, the dev CSP equal to release.
+- Web and GTK each passed on their first run; rebuilds take about 0.3 s.
+- M1c PASS (84 s).
+## Goal 34b M2: the Mac's WKWebView (2026-10-27, worktree mojo-ui-js-mac)
+- m2() written first (scripts/check.py: build, the same bundle in the app, llvm-nm -u against apple/sdk, side.txt's widgets lines = MAC_STEPS, then the newest fresh mac-ci run's dumps and logs: typing, Load sample, the counter, GTK's security probes, two crashes, boxes against the web's at side.SIZE, a picture).
+- mojoui/hosts/appkit_webview.mojo: WKWebView per widget, WKURLSchemeHandler for mojoui://app (the GTK page, fixed file list, the web's CSP), WKScriptMessageHandler (strings from the main frame, GTK's rules), navigation and UI delegates, a content rule list, callAsyncJavaScript with m as data. Built first time; `llvm-nm -u`: the same 27 symbols, none new.
+- Run 40607584136 (one push, ci/apps.txt so only widgets ran): everything worked first time on macOS 26 (typing "Words: 3", Load sample, 4 real clicks + the reply "count 5", one mount across the rebuild, all 18 probes with GTK's answers, crash once → reload with Mojo's props, twice → `instead`); the report's pictures show the web views (WebKit's snapshots drawn in). Only the boxes failed: same sizes, 105 pt low.
+- Cause 1 (generic AppKit): the header VStack stood 155 high for 64: a child stack's inner room and the column's room are equally free. Fix D-668 (251 shrink-to-fit for a column's non-growing child stacks). Run 40608308578: header 64, boxes 14 pt low.
+- Cause 2: the Mac gave omxqua's title the body's 1.45 line (41 high; the web's .text.title is 1.1 → 31). Fix D-669 (TypeScale title/headline/caption lines; the sheets' bytes unchanged). Run 40608629943: editor 48,140 vs the web's 48,139; counter 984,183 vs 182; Load sample, Ask the counter within 1 pt. `scripts/check M2` PASS.
+- "Objective-C protocol not found: WKScriptMessageHandler": a protocol no class in the process names has no runtime object; WebKit asks by selector, so the class adds only the protocols that exist.
+- Regression for D-668/D-669 (they change every omxqua app's Mac layout): run 40609114384 (widgets + console, fresh): the console's ten screens 1268 of 1268 boxes within parity of the web's (goal 33 M7's Mac part); `scripts/check M2` PASS on it; `scripts/check M3` PASS (399 s).
+
+## 2026-10-27 · goal 34b: the Mac branch merged
+- goal-34b-mac (bb7017c) merged into goal-34b: decisions and journal kept both; check.py keeps m0, m1, m1b, m1c and the Mac's m2. Both branches had used D-650–D-655: the Mac's D-650–D-660 renumbered to D-660–D-670 first (4ea5267, D-671).
+
+## 2026-10-27 · goal 34b: drawn views follow a live theme switch
+- m1b's proof made stricter first: the sparkline under the note (a mojoui Canvas) must be dark in the dark pictures and light in the light ones (median tone of its box). Red on the old pictures: web and GTK dark both 241 of 255 (the light card, never redrawn: a canvas redraws only on a new version).
+- Fix D-673 (hosts, not the app): GTK's apply_design forgets the drawn versions on a new theme key; the web's canvas adapter redraws when the skin it drew in changes. M1b's sparkline parts pass; pictures m1b-{web,gtk}-{light,dark}.png show it dark in dark.
+
+## 2026-10-27 · goal 34b: the Mac gets M0's and M1b's features
+- m2 first: two new Mac screens (ci/mac/side.txt = MAC_STEPS): `light` (the light picture) and `theme` (tokens in light, an agent's set of the counter and the editor, a live switch to dark, tokens again); m2 requires the chart now (no skip), the tokens to match in both modes, one mount each, the sparkline dark in dark, the sets in update() (Last count: 42, Words: 4), describe()'s facts back (WIDGETFACTS:), release views not inspectable.
+- Shared take_text (D-672): GTK's M0 passes on it (77 s). The Mac: facts, mojoui.set's sent_to, system appearance (it never told apps light/dark before), scheme:/set: steps, isInspectable and maps under DEVTOOLS (D-674). Builds for mac first time.
+
+## 2026-10-27 · goal 34b: shared JS widgets
+- git mv examples/widgets/web/{package.json,package-lock.json,widgets/editor.*,widgets/chart.*} → mojoui/widgets/; examples/widgets/web/shared.json picks editor and chart; the counter stays the app's own (D-675).
+- web_assets.py: shared_entries + install_from; the bundles came out byte for byte the same (editor.791f6708…, chart.42ca8fb5…). docs/js.md §0 says how any app adds them; the matrix's debt table no longer lists them.
+
+## 2026-10-27 · goal 34b: a fresh Mac run, then the whole check
+- The Mac's washed-out text was ours (D-676), not the runner's inactive window: every skinned Text took ink2 (captions ink3) while omxqua's sheets say ink and ink2. Fixed before the run.
+- scripts/mac-ci widgets console → run 40617272485 (fresh, stamp 7ce14f5cda6059f5). m2 PASS on its first try: the chart drew, tokens matched in light and dark with one mount each, the sparkline dark in dark (m2-widgets-mac-dark.png), Last count: 42 and Words: 4 from the sets, the facts back, WEBINSPECT 0. The console's Mac boxes after D-673/D-676: 1268 of 1268 within parity of the web's (goal 33 M7's Mac part, run by hand).
+- `pixi run python scripts/check.py`: M0, M1, M1b, M1c, M2, M3 PASS (M3 380 s).

@@ -33,18 +33,18 @@ COMPONENTS = [
     ("MenuBar", "MENUBAR"), ("Menu", "MENU"), ("Item", "ITEM"), ("ContextMenu", "MENU"),
     ("Dialog", "DIALOG"), ("Toast", "TOAST"), ("Popover", "POPOVER"), ("Checkbox", "TOGGLE"), ("Clipboard", "CLIPBOARD"),
     ("Table", "TABLE"), ("Route", "ROUTE"), ("Draggable", "DRAG"), ("DropTarget", "DROP"), ("WebFrame", "EMBED"),
-    ("Paragraph", "PARAGRAPH"),
+    ("Paragraph", "PARAGRAPH"), ("WebComponent", "WEBCOMP"),
 ]
 
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console"],
-    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console"],  # (kit: goal 18 runs it on GTK and the web)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets"],  # (widgets: goal 34 M3, WebKitGTK views)
+    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets"],  # (kit: goal 18 runs it on GTK and the web)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
     "iPhone (UIKit)": [],
-    "Agent (MCP)": ["kit", "omxplorer"],
+    "Agent (MCP)": ["kit", "omxplorer", "widgets"],  # (widgets: goal 34b M0, the agent attached to the web and GTK hosts)
 }
 
 # Variants, gestures, layout and design languages: (name, the API, a pattern that shows a host implements it,
@@ -201,6 +201,55 @@ def feature_cell(host, src, pattern, example, name=""):
     return "✅" if example in RUN_ON[host] else "🔨"
 
 
+LIBRARIES = [("@codemirror/", "CodeMirror 6"), ("echarts", "Apache ECharts")]
+
+
+def shared_users(stem):
+    """The apps that pick shared widget `stem` (mojoui/widgets/) in their web/shared.json."""
+    import json
+    users = []
+    for f in sorted(ROOT.glob("examples/*/web/shared.json")):
+        if f.parent.parent.name.startswith("zz_"):
+            continue
+        try:
+            if stem in json.loads(f.read_text()).get("widgets", []):
+                users.append(f.parent.parent.name)
+        except ValueError:
+            pass
+    return users
+
+
+def js_widgets():
+    """Every JS widget: an app's own (examples/*/web/widgets/*.js|ts) and the shared ones (mojoui/widgets/*.js|ts, used
+    by the apps that pick them in web/shared.json): (tag, file, apps, library, what agents and themes get)."""
+    found = []
+    files = sorted(ROOT.glob("examples/*/web/widgets/*.[jt]s")) + sorted((ROOT / "mojoui" / "widgets").glob("*.[jt]s"))
+    for f in files:
+        shared = f.parent == ROOT / "mojoui" / "widgets"
+        if f.name.endswith(".d.ts") or (not shared and f.parent.parent.parent.name.startswith("zz_")):
+            continue
+        src = f.read_text()
+        m = re.search(r"tag:\s*'([a-z][a-z0-9._-]*-[a-z0-9._-]*)'", src)
+        if not m:
+            continue
+        pkg = (f.parent if shared else f.parent.parent) / "package.json"
+        deps = {}
+        if pkg.exists():
+            import json
+            deps = json.loads(pkg.read_text()).get("dependencies", {})
+        lib = "plain JS (vendored)"
+        for prefix, name in LIBRARIES:
+            hit = re.search(r"from '(" + re.escape(prefix) + r"[^']*)'", src)
+            if hit:
+                pkg_name = next((d for d in deps if hit.group(1) == d or hit.group(1).startswith(d + "/")), "")
+                lib = name + (f" ({pkg_name} {deps[pkg_name]})" if pkg_name else "")
+        traits = [t for t, pat in (("agent read", r"\bdescribe\("), ("agent set", r"\bfields:"), ("theme", r"\btheme\(el"), ("Tab stop", r"focusable:\s*true|contenteditable|<button|createElement\('button'\)|EditorView"))
+                  if re.search(pat, src)]
+        apps = shared_users(f.stem) if shared else [f.parent.parent.parent.name]
+        found.append((m.group(1), str(f.relative_to(ROOT)), apps, lib, traits))
+    return found
+
+
 def render():
     srcs = {h: host_text(p) for h, p in HOSTS}
     names = [h for h, _ in HOSTS]
@@ -248,6 +297,22 @@ def render():
             row.append(state)
             comp_cells.setdefault(h, []).append(state)
         out.append(f"| `{name}` | `{module}` | {', '.join(parts)} | " + " | ".join(row) + f" | {', '.join(users) or '—'} |")
+    out += ["", "## JavaScript widgets (WebComponent)", "",
+            "Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent's state on that host, ✅ only "
+            "where a check runs the app that ships the widget. Agent: ✅ where the widget describes itself and the agent's "
+            "checks drive the app attached to a host (goal 34b M0).", "",
+            "| Widget | Library | Gets | " + " | ".join(names) + " | Lives in |",
+            "|---|---|---|" + "---|" * len(names) + "---|"]
+    for tag, path, apps, lib, traits in js_widgets():
+        row = []
+        for h in names:
+            state = known[(h, "WebComponent")]
+            if state == "✅" and not any(a in RUN_ON[h] for a in apps):
+                state = "🔨"
+            if h == "Agent (MCP)" and state == "✅" and "agent read" not in traits:
+                state = "🔨"
+            row.append(state)
+        out.append(f"| `{tag}` | {lib} | {', '.join(traits) or '—'} | " + " | ".join(row) + f" | `{path}` |")
     totals = {h: [cell(h, srcs[h], c, k) for c, k in COMPONENTS] + [feature_cell(h, srcs[h], p, e, n) for n, _, p, e in FEATURES] + comp_cells[h] for h in names}
     out += ["", "## Totals", "", "| Platform | ✅ | 🔨 | ❌ |", "|---|---|---|---|"]
     for h in names:

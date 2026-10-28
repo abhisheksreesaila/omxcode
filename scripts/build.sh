@@ -39,9 +39,28 @@ plist() {  # plist <template> <out>
 build_linux() {
   local out="build/$EX/linux"; mkdir -p "$out"; rm -f "$out/$EX"
   echo "== Linux ($EX): GTK4 + libadwaita"
-  mojo_build hosts/linux_main.mojo -o "$out/$EX" \
+  local debug=(); [ "${MOJOUI_DEBUG:-}" = 1 ] && debug=(-D MOJOUI_DEBUG) && echo "   (debug build: WebKit's inspector for widget views, source maps)"
+  mojo_build hosts/linux_main.mojo "${debug[@]}" -o "$out/$EX" \
     -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}"
   mkdir -p "$out/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$out/fonts/"  # the app's own fonts, beside the binary (D-155)
+  # Its JavaScript (docs/js.md, goal 34 M3): each WebComponent runs in a WebKitGTK view loading the web's own bundles,
+  # built into $out/webview by the same esbuild step. Where WebKitGTK 6.0 isn't installed, scripts/webkitgtk.sh fetches
+  # the pinned package and $out/$EX becomes a launcher that lays it over /usr/lib (bubblewrap, no root: D-608)
+  rm -f "$out/$EX.bin"
+  pixi run python scripts/web_assets.py --webview "$out/webview" "$EX"
+  if [ -f "$out/webview/assets/manifest.json" ]; then
+    # (a system WebKitGTK 6.0: webkitgtk.sh prints nothing, no launcher; it can't be fetched (offline, not x86_64): a
+    # warning, no launcher, and the app's WebComponents show their `instead` views, D-619)
+    local wk=""
+    if ! wk="$(scripts/webkitgtk.sh)"; then
+      echo "   warning: no WebKitGTK 6.0 (install webkitgtk-6.0, or run scripts/webkitgtk.sh online): WebComponents show their stand-ins" >&2
+      wk=""
+    fi
+    if [ -n "$wk" ]; then
+      mv "$out/$EX" "$out/$EX.bin"
+      scripts/webkit_launcher.sh "$out" "$EX" "$wk"
+    fi
+  fi
   stamp "$out"; echo "   $out/$EX"
 }
 
@@ -49,6 +68,10 @@ build_web() {
   local out="build/$EX/web"; mkdir -p "$out"; rm -f "$out/mojoui_app.so"
   echo "== Web ($EX): Mojo Python module for FastHTML"
   mojo_build hosts/web_main.mojo --emit shared-lib "${LINK[@]}" -o "$out/mojoui_app.so"
+  # Its JavaScript and CSS (docs/js.md), for every app: examples/$EX/web/widgets/* bundled by esbuild into $out/assets
+  # by content hash (a web/package.json is installed first with npm ci from its lockfile, into build/$EX/npm), then
+  # the lint: every asset App.web_assets() lists was bundled, and nothing else is there
+  pixi run python scripts/web_assets.py "$EX"
   stamp "$out"; echo "   $out/mojoui_app.so  (serve: pixi run python mojoui/hosts/web.py $out)"
 }
 
@@ -145,6 +168,9 @@ build_mac() {
   fi
   plist apple/mac/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$app/Contents/Resources/fonts/"
+  # Its JavaScript (docs/js.md, goal 34b M2): each WebComponent runs in a WKWebView loading the web's own bundles, built
+  # into Resources/webview by the same esbuild step (nothing for an app without web/widgets/)
+  pixi run python scripts/web_assets.py --webview "$app/Contents/Resources/webview" "$EX"
   printf 'APPL????' > "$app/Contents/PkgInfo"
   sign "$app"
   rm -f "$out/$NAME-mac.zip"; (cd "$out" && zip -qry "$NAME-mac.zip" "$NAME.app")

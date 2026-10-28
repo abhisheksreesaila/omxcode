@@ -33,6 +33,10 @@ git -C "$branch" pull -q
 mkdir -p "$branch/.github/workflows" "$branch/ci"
 cp ci/mac/mac.yml "$branch/.github/workflows/mac.yml"
 for f in ci/mac/*; do [ "$(basename "$f")" = mac.yml ] || cp "$f" "$branch/ci/"; done
+# apps named here run alone (ci/apps.txt: run.sh skips the release's other zips, mac.yml the GPU build and probe unless
+# omxplorer is one); with none named, every app the release holds runs, as before
+rm -f "$branch/ci/apps.txt"
+[ $# -eq 0 ] || printf '%s\n' "${apps[@]}" > "$branch/ci/apps.txt"
 git -C "$branch" add -A
 git -C "$branch" commit -q --allow-empty -m "Test: ${apps[*]} ($(git rev-parse --short HEAD))"
 git -C "$branch" push -q origin mac-test

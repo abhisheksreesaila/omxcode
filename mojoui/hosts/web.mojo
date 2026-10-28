@@ -11,8 +11,9 @@ from mojoui.view import View, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LA
 from mojoui.paragraph import link_href
 from mojoui.diff import Diff
 from mojoui.app import App, Event, Runtime
+from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
-from mojoui.theme import Palette, hex_of
+from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
 from mojoui.clock import now_ns
 
 
@@ -120,23 +121,13 @@ def web_theme_key[A: App](handle: Int) -> String:
 
 
 def web_theme[A: App](handle: Int) -> String:
-    """The app's theme for the page, as four parts split by U+001F: its id, its body classes, its palette as CSS
-    variables (--o-page, --o-accent, …: what theme style sheets read), and its style sheet (D-260)."""
+    """The app's theme for the page, as five parts split by U+001F: its id, its body classes, its palette, fonts and
+    corners as CSS variables (--o-page, --o-accent, --o-font, --o-radius-card…: what theme style sheets and widgets read),
+    its style sheet (D-260), and its tokens as JSON for widgets' theme(el, tokens) (goal 34b)."""
     var t = session_at[A](handle)[].app.theme()
     var sheet = t.web_css + (look_web_css(t.look, "body." + t.id + " ") if t.id != "" else String(""))  # (the look's rules after the theme's own: hover and :focus rules stay more specific)
-    return t.id + chr(31) + t.classes + chr(31) + (palette_css(t.palette) if t.id != "" else String("")) + chr(31) + sheet
-
-
-def palette_css(p: Palette) -> String:
-    """A palette as the page's CSS variables (the vocabulary every web theme reads)."""
-    var shadow = "0 6px 20px rgba(0,0,0,.55), 0 0 0 1px #34363b" if p.dark else "0 4px 16px rgba(16,24,40,.12), 0 1px 3px rgba(16,24,40,.08)"
-    return ("body {--o-page: " + hex_of(p.page) + ";--o-card: " + hex_of(p.card) + ";--o-raised: " + hex_of(p.raised)
-            + ";--o-ink: " + hex_of(p.ink) + ";--o-ink2: " + hex_of(p.ink2) + ";--o-ink3: " + hex_of(p.ink3) + ";--o-line: " + hex_of(p.line)
-            + ";--o-strong: " + hex_of(p.line_strong) + ";--o-accent: " + hex_of(p.accent) + ";--o-on-accent: " + hex_of(p.accent_ink)
-            + ";--o-wash: " + hex_of(p.accent_wash) + ";--o-bad: " + hex_of(p.bad) + ";--o-good: " + hex_of(p.good) + ";--o-warn: " + hex_of(p.warn)
-            + ";--o-formula: " + hex_of(p.formula) + ";--o-chrome: " + hex_of(p.chrome) + ";--o-chrome-ink: " + hex_of(p.chrome_ink)
-            + ";--o-chrome-line: " + hex_of(p.chrome_line) + ";--o-tint: " + hex_of(p.accent_tint) + ";--o-data: " + hex_of(p.data(0)) + ";--o-shadow: " + shadow + ";"
-            + ("color-scheme: dark;" if p.dark else "color-scheme: light;") + "}")
+    var vars = (palette_css(t.palette) + tokens_css(t)) if t.id != "" else String("")
+    return t.id + chr(31) + t.classes + chr(31) + vars + chr(31) + sheet + chr(31) + theme_tokens(t)
 
 
 def web_logo[A: App](handle: Int) -> String:
@@ -205,12 +196,23 @@ def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number
     """A control changed: look its message up in the current screen (like the native
     hosts do), run update(), and return what changed. Bad node → nothing happens."""
     var rt = session_at[A](handle)
-    if node < 0 or node >= len(rt[].shown.nodes):
+    var e = control_event(rt[].shown, node, second, text, number)
+    if e.message == 0:
         return '{"ignored":true}'
-    ref n = rt[].shown.nodes[node]
+    var d = rt[].dispatch(e)
+    return diff_to_json(d, rt[].shown)
+
+
+def control_event(shown: View, node: Int, second: Bool, text: String, number: Int) -> Event:
+    """The event a control of the shown screen sends (node, its second message or not, the text and number it reports);
+    message 0: no such node, it doesn't listen, or a link with no href. An option's text and a link's href come from the
+    screen, never from the sender (the web host, the agent link)."""
+    if node < 0 or node >= len(shown.nodes):
+        return Event(0, "", 0)
+    ref n = shown.nodes[node]
     var message = n.msg2 if second else n.msg
     if message == 0:
-        return '{"ignored":true}'
+        return Event(0, "", 0)
     var event_text = text
     if n.kind == DROPDOWN or n.kind == SEGMENTED or n.kind == RADIO or n.kind == TABS or n.kind == ALERT:
         # the option's text comes from the screen, not the browser
@@ -218,9 +220,41 @@ def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number
     elif n.kind == PARAGRAPH:  # a link's tap: its href from the screen (number = the run), never the browser's word
         event_text = link_href(n, number)
         if event_text == "":
-            return '{"ignored":true}'
-    var d = rt[].dispatch(Event(message, event_text, number))
+            return Event(0, "", 0)
+    return Event(message, event_text, number)
+
+
+def web_widget_event[A: App](handle: Int, node: Int, name: String, payload: String) -> String:
+    """Widget node `node` emitted `name` with `payload` (JSON): its on_event through update(); what changed."""
+    var rt = session_at[A](handle)
+    if not rt[].accepts_widget_event(node, name, payload):
+        return '{"ignored":true}'
+    var d = rt[].widget_event(node, name, payload)
     return diff_to_json(d, rt[].shown)
+
+
+def web_reply[A: App](handle: Int, seq: Int, text: String, error: String) -> String:
+    """A widget's answer to command `seq` (or why there's none) through update(); what changed."""
+    var rt = session_at[A](handle)
+    if not rt[].knows_reply(seq):
+        return '{"ignored":true}'
+    var d = rt[].reply(seq, text, error)
+    return diff_to_json(d, rt[].shown)
+
+
+def web_commands[A: App](handle: Int) -> String:
+    """The widget commands the app asked for since the last call, as JSON: [{seq, tag, widget, name, args}]."""
+    return commands_json(session_at[A](handle)[].take_commands())
+
+
+def web_set_widget[A: App](handle: Int, tag: String, id: Int, field: String, value: String) -> Bool:
+    """An agent's set (Runtime.set_widget): the widget's mojoui.set command, taken with the next web_commands."""
+    return session_at[A](handle)[].set_widget(tag, id, field, value)
+
+
+def web_assets[A: App]() -> String:
+    """App.web_assets() as a JSON list of bundle names."""
+    return assets_json(A.web_assets())
 
 
 def web_poll[A: App](handle: Int) -> String:

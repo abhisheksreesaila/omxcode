@@ -4,6 +4,7 @@ speaks JSON-RPC, keeps the notifications it gets.
   pixi run python scripts/agent_client.py build/kit/web screen
   pixi run python scripts/agent_client.py build/kit/web file-save
   pixi run python scripts/agent_client.py build/kit/web act name=open-dialog
+  pixi run python scripts/agent_client.py --attach /tmp/widgets.sock editor-read     (a running host's agent link)
 """
 
 import json
@@ -15,9 +16,12 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class Client:
-    def __init__(self, module_dir, env=None):
+    def __init__(self, module_dir=None, env=None, attach=None):
+        """module_dir: the agent host runs its own session of that web build; attach: it attaches to a running host's
+        agent link instead (MOJOUI_AGENT_SOCKET; the widgets run there)."""
         import os
-        self.p = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/agent.py"), str(module_dir)], cwd=ROOT, env=dict(os.environ, **(env or {})),
+        target = ["--attach", str(attach)] if attach else [str(module_dir)]
+        self.p = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/agent.py"), *target], cwd=ROOT, env=dict(os.environ, **(env or {})),
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
         self.next_id = 1
         self.notifications = []
@@ -72,10 +76,12 @@ class Client:
 
 
 if __name__ == "__main__":
-    c = Client(sys.argv[1])
-    name = sys.argv[2] if len(sys.argv) > 2 else "screen"
+    argv = sys.argv[1:]
+    c = Client(attach=argv[1]) if argv[0] == "--attach" else Client(argv[0])
+    rest = argv[2:] if argv[0] == "--attach" else argv[1:]
+    name = rest[0] if rest else "screen"
     args = {}
-    for kv in sys.argv[3:]:
+    for kv in rest[1:]:
         k, _, v = kv.partition("=")
         args[k] = json.loads(v) if v[:1] in "{[0123456789tf" else v
     text, images, err = c.call(name, **args)

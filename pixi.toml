@@ -17,6 +17,8 @@ python-fasthtml = ">=0.14.13,<0.15"
 pillow = ">=12.3.0,<13"
 pyarrow = ">=25.0.0,<26"
 python-xlib = ">=0.33,<0.34"
+nodejs = ">=26.12.1,<26.13"
+esbuild = ">=0.28.1,<0.29"
 
 [pypi-dependencies]
 mojo = ">=1.1, <1.2"

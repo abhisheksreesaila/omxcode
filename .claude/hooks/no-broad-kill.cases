@@ -1,0 +1,8 @@
+2|pkill -f check.py
+2|cd x && pkill -f y
+2|sudo killall python
+2|ls; killall z
+0|kill 1234
+0|echo "- the pkill -f / killall lesson"
+0|pkill -x foo
+0|git commit -m "a hook blocks pkill -f and killall"

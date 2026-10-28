@@ -47,6 +47,7 @@ DUMP = """() => { const mojouiRect = e => {  // (a view whose parts join its row
   if (k === 'radio') return 'RADIO: ' + picked();
   if (k === 'textarea') return 'TEXTAREA: ' + e.value.split(String.fromCharCode(10)).join(String.fromCharCode(92) + 'n');
   if (k === 'menubar' || k === 'item') return '';
+  if (k === 'webcomponent') return 'WIDGET: ' + e.dataset.widget + '#' + e.dataset.widgetId + ': ' + (window.mojoui && window.mojoui.describe ? window.mojoui.describe(e) : 'no host script');
   if (k === 'paragraph') return 'PARAGRAPH: ' + e.textContent + ' (' + e.querySelectorAll('[data-kind=run]').length + ' runs, ' + e.querySelectorAll('a[data-kind=run]').length + ' links, ' + e.children.length + ' elements)' + String.fromCharCode(10) + 'LABEL: ' + e.textContent;
   if (k === 'run') return e.parentElement && e.parentElement.children.length > 1 ? 'LABEL: ' + e.textContent : '';  // (a paragraph's runs when it has several: its words whole first, as GTK reports them)
   if (k === 'menu') { const items = box => [...box.children].map(c => {
@@ -132,6 +133,7 @@ def settle(page):
     page.wait_for_function("() => !document.querySelector('.htmx-request')", timeout=10000)
     page.wait_for_function("() => [...document.images].every(i => i.complete)", timeout=10000)
     page.wait_for_function(CANVASES_DRAWN, timeout=20000)
+    page.wait_for_function("() => !(window.mojoui && window.mojoui.widgetBusy && window.mojoui.widgetBusy()) && !document.querySelector('.htmx-request')", timeout=10000)
     page.wait_for_timeout(50)
 
 
@@ -149,7 +151,16 @@ def step(page, s):
         held = page.evaluate("(t) => { const b = [...document.querySelectorAll('[data-kind=button]')].find(e => e.textContent.trim() === t); return b ? getComputedStyle(b).transform : 'none'; }", title)
         page.mouse.up()
         return f"HOLD: {title} {held}"
-    if verb == "tap":
+    if verb == "click":  # click:SELECTOR: a real click on the first match (a JS widget's own button)
+        page.locator(rest).first.click()
+    elif verb == "keys":  # keys:SELECTOR=text: click into the first match, then type the text with real key presses
+        sel, _, text = rest.partition("=")
+        el = page.locator(sel).first
+        el.click()
+        page.keyboard.type(text, delay=40)
+    elif verb == "press":  # press:Key: one real key press to whatever has the keyboard (Home, Enter, x)
+        page.keyboard.press(rest)
+    elif verb == "tap":
         title, _, nth = rest.partition("@")
         page.locator("[data-kind=button]").filter(has_text=exact(title)).nth(int(nth or 0)).click()
     elif verb in ("type", "submit", "enter"):
@@ -324,16 +335,22 @@ RECTS = """() => { const out = []; const r = e => { let b = e.getBoundingClientR
   return out.join(String.fromCharCode(10)); }"""
 
 
-def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None, color_scheme=None, path="", reduced_motion=False):
+CSP_PROBE = """window.mojouiCsp = [];
+document.addEventListener('securitypolicyviolation', e => window.mojouiCsp.push({ directive: e.violatedDirective, uri: String(e.blockedURI || ''), sample: String(e.sample || '').slice(0, 80) }), true);"""
+
+
+def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None, color_scheme=None, path="", reduced_motion=False, env=None, during=None):
     """Returns (result, output) like a process run: result.returncode is 0 on success.
     tabs > 1: that many pages open against the one server (each runs the steps); the server's own
     log lines (e.g. SHARED: …) come after the page's state. color_scheme: "light" or "dark" (prefers-color-scheme), else Chromium's.
-    path: what follows the host's address on the first load (a deep link: "#/models/x/logs"); reduced_motion: the system asks for less motion."""
+    path: what follows the host's address on the first load (a deep link: "#/models/x/logs"); reduced_motion: the system asks for less motion.
+    env: more environment for the server (MOJOUI_AGENT_SOCKET); during(page): called after the steps, with the page open
+    (an agent attached to the server acts meanwhile), its returned text joins the output."""
     from playwright.sync_api import sync_playwright
 
     port = free_port()
     server = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/web.py"), str(module_dir), str(port)],
-                              cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                              cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=dict(os.environ, **(env or {})))
     url = f"http://127.0.0.1:{port}/"
     try:
         up = False
@@ -360,6 +377,10 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
                 settle(other)
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
+            # Every run reads the page's Content-Security-Policy violations and console errors (goal 34 M2)
+            console_errors = []
+            page.on("console", lambda m: console_errors.append(m.text[:300]) if m.type == "error" else None)
+            page.add_init_script(CSP_PROBE)
             if os.environ.get("DRIVE_DEBUG"):  # every event the page posts, and the server's log, on stderr
                 page.on("request", lambda r: print("REQ", r.method, r.url.split("/", 3)[-1], (r.post_data or "")[:160], file=sys.stderr) if "/e/" in r.url else None)
                 page.on("console", lambda m: print("CONSOLE", m.text[:200], file=sys.stderr))
@@ -371,12 +392,19 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
                 settle(page)  # (a menu item's click posts and rebuilds the page: the next step must not land mid-rebuild)
                 if line:
                     extra += line + "\n"
+            if during:
+                extra += during(page) or ""
+                settle(page)
             out = "NATIVE: Chromium " + browser.version + "\n" + extra + page.evaluate(DUMP) + "\n"
             if rects:
                 Path(rects).write_text(page.evaluate(RECTS) + "\n")
             if shot:
                 page.screenshot(path=shot, full_page=True)
                 out += f"SHOT: {shot}\n"
+            seen = page.evaluate("() => window.mojouiCsp || []")
+            out += f"CSP: {len(seen)} violations" + "".join(f" | {v['directive']} {v['uri']} {v['sample']}" for v in seen) + "\n"
+            if console_errors:
+                out += "CONSOLE ERRORS: " + " | ".join(console_errors) + "\n"
             if errors:
                 out += "PAGE ERRORS: " + "; ".join(errors) + "\n"
             browser.close()

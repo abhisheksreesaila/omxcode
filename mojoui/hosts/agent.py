@@ -8,7 +8,13 @@ a list's rows) and render (a canvas as a PNG). The tool list follows the screen 
 the server sends notifications/tools/list_changed, so a dialog's or a context menu's items are tools only
 while it is open. An agent can do nothing a person couldn't.
 
-Run:          pixi run python mojoui/hosts/agent.py build/kit/web
+A JavaScript widget (WebComponent) is a tool pair (goal 34b): <name>-read returns what it describes (its describe() JSON)
+and <name>-set sets the fields it declares, typed (a command to the widget; the widget reports the change as its own
+event, so update() hears it). Widgets run only in a host with a web view, so to see them the agent attaches to a running
+host through its agent link (MOJOUI_AGENT_SOCKET, docs/agent.md): the web host (a page open in a browser) or the GTK app.
+
+Run:          pixi run python mojoui/hosts/agent.py build/kit/web             (its own session: no widgets run)
+Attached:     pixi run python mojoui/hosts/agent.py --attach /run/user/1000/kit.sock   (the host's MOJOUI_AGENT_SOCKET)
 Claude Code:  claude mcp add kit -- pixi run python mojoui/hosts/agent.py build/kit/web
 The protocol is MCP's JSON-RPC over stdio (D-161): one JSON object per line; logs go to stderr.
 """
@@ -20,6 +26,7 @@ import io
 import json
 import os
 import re
+import socket
 import sys
 import time
 from pathlib import Path
@@ -30,6 +37,8 @@ from PIL import Image
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE, SEGMENTED, RADIO,
  TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER) = range(1, 33)
 PARAGRAPH = 39  # styled runs: an agent reads its plain words (text)
+WEBCOMP = 40  # a JavaScript widget (mojoui.webcomponent): hint = its tag, value = its id
+JSON_TYPES = {"string": (str,), "number": (int, float), "integer": (int,), "boolean": (bool,), "array": (list,), "object": (dict,)}
 CHECKED, DISABLED = 1, 2  # menu item flags (mojoui/menus.mojo)
 GESTURES = {"pan": 1, "zoom": 2, "tap": 3, "press": 4, "release": 5, "double": 6, "key": 7, "secondary": 8}
 MODIFIERS = {"shift": 1, "ctrl": 2, "alt": 4}
@@ -60,23 +69,70 @@ class Action:
         return {"name": self.name, "description": self.description, "inputSchema": self.schema}
 
 
+def fits(kind, value):
+    """value (parsed JSON) is of JSON type `kind` (a bool is no number; a whole float counts as an integer)."""
+    if isinstance(value, bool):
+        return kind == "boolean"
+    if kind == "integer" and isinstance(value, float):
+        return value.is_integer()
+    return isinstance(value, JSON_TYPES.get(kind, ()))
+
+
+class Link:
+    """A running host's agent link (MOJOUI_AGENT_SOCKET): one JSON request per line, one JSON answer per line. The host
+    owns the session; this side only reads its tree and sends what a person could."""
+
+    def __init__(self, path):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(30)
+        self.sock.connect(str(path))
+        self.buf = b""
+
+    def call(self, op):
+        self.sock.sendall((json.dumps(op) + "\n").encode())
+        while b"\n" not in self.buf:
+            chunk = self.sock.recv(1 << 20)
+            if not chunk:
+                raise ConnectionError("the host closed its agent link")
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1)
+        return json.loads(line)
+
+    def ok(self, op):
+        r = self.call(op)
+        if not r.get("ok"):
+            raise ValueError(r.get("error") or f"the host refused {op.get('op')}")
+        return r
+
+
 class Host:
-    def __init__(self, module_dir):
-        sys.path.insert(0, str(Path(module_dir).resolve()))
-        self.mod = importlib.import_module("mojoui_app")
-        if hasattr(self.mod, "init_shared"):
-            self.mod.init_shared()
-        self.handle = self.mod.new_session()
-        self.title = self.mod.title(self.handle)
+    def __init__(self, module_dir=None, attach=None):
+        self.link = Link(attach) if attach else None
+        self.mod = self.handle = None
+        if self.link is None:
+            sys.path.insert(0, str(Path(module_dir).resolve()))
+            self.mod = importlib.import_module("mojoui_app")
+            if hasattr(self.mod, "init_shared"):
+                self.mod.init_shared()
+            self.handle = self.mod.new_session()
+            self.title = self.mod.title(self.handle)
         self.nodes = []
         self.actions = []
+        self.widgets = {}  # (tag, id) → what the widget says about itself (attached hosts only)
+        self.busy = False
         self.reload()
 
     # ---------- the tree ----------
 
     def reload(self):
-        self.nodes = json.loads(self.mod.view(self.handle))
-        self.design = (self.mod.theme(self.handle).split("\x1f")[0] or "native").capitalize()  # the theme's id (D-260)
+        if self.link is not None:
+            r = self.link.ok({"op": "view"})
+            self.title, self.nodes, self.busy = r["title"], r["nodes"], bool(r.get("busy"))
+            self.design = (r.get("design") or "native").capitalize()
+            self.widgets = {(w.get("tag"), w.get("id")): w for w in r.get("widgets", []) if isinstance(w, dict)}
+        else:
+            self.nodes = json.loads(self.mod.view(self.handle))
+            self.design = (self.mod.theme(self.handle).split("\x1f")[0] or "native").capitalize()  # the theme's id (D-260)
         self.actions = []
         self.names = set(CORE)
         self.walk(0, "")
@@ -155,6 +211,8 @@ class Host:
                          {"gesture": prop("string", "what happened", enum=list(GESTURES)), "x": prop("number", "points from the left"), "y": prop("number", "points from the top"),
                           "key": prop("string", 'for "key": the key\'s name (ArrowDown, Enter, Escape, F2, a, 7…)'),
                           "modifiers": prop("array", "for \"key\": shift, ctrl, alt", items={"type": "string"})}, how="gesture", required=("gesture",), prefix=prefix)
+        elif k == WEBCOMP:
+            self.widget_tools(i, prefix)
         elif k == NAVBAR:
             if n["msg"]:
                 self.add("back", i, f'Go back from "{text}"', prefix=prefix)
@@ -176,6 +234,44 @@ class Host:
         elif k in (VSTACK, HSTACK, SCROLL, GRID, BOARD, OVERLAY):  # containers: what's inside
             for c in n["children"]:
                 self.walk(c, prefix)
+
+    def widget(self, i):
+        """What widget node i says about itself: its facts from the host (None: not running here, or not reported yet)."""
+        n = self.nodes[i]
+        return self.widgets.get((n["hint"], n["value"]))
+
+    def widget_what(self, i):
+        n, f = self.nodes[i], self.widget(i)
+        what = (f or {}).get("description") or n["tip"]
+        if f is None:
+            return f"Widget {n['hint']}" + (f": {what}" if what else "") + (" (not running here: no web view in the agent's own session)" if self.link is None else " (not mounted yet)")
+        if f.get("said") is None:
+            return f"Widget {n['hint']}" + (f": {what}" if what else "") + " (no description)"
+        return f"Widget {n['hint']}" + (f": {what}" if what else "")
+
+    def widget_tools(self, i, prefix):
+        """A WebComponent as tools (goal 34b): <name>-read always; <name>-set when it declares fields, one typed argument each."""
+        n, f = self.nodes[i], self.widget(i)
+        base = n["name"] or n["hint"]
+        self.add(base + "-read", i, self.widget_what(i) + ". Read what it shows, as JSON (its describe())", how="widget-read", prefix=prefix)
+        fields = (f or {}).get("fields") or {}
+        fields = {k: v for k, v in fields.items() if isinstance(k, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,63}", k) and v in JSON_TYPES}
+        if fields and n["msg"]:
+            self.add(base + "-set", i, self.widget_what(i) + ". Set " + ", ".join(f"{k} ({v})" for k, v in fields.items())
+                     + ": the widget changes and tells the app, as if a person did it",
+                     {k: prop(v, f"its new {k}") for k, v in fields.items()}, how="widget-set", prefix=prefix)
+
+    def widget_read(self, i):
+        n, f = self.nodes[i], self.widget(i)
+        key = f"{n['hint']}#{n['value']}"
+        if f is None:
+            if self.link is None:
+                return (f"{key}: not running in the agent's own session (it has no web view). Run the app with MOJOUI_AGENT_SOCKET=<path> "
+                        "(the web host with a page open, or the GTK app) and start the agent with --attach <path> (docs/agent.md).")
+            return f"{key}: not mounted yet"
+        if f.get("said") is None:
+            return f"{key}: no description"
+        return f"{key}: " + json.dumps(f["said"], ensure_ascii=False)
 
     def item(self, i, prefix, path=()):
         n = self.nodes[i]
@@ -272,6 +368,10 @@ class Host:
             elif k == CANVAS:
                 size = f"{n['w']}×{n['h']}" if n["w"] and n["h"] else "fills"
                 line(depth, f"Canvas {size} (render it; read it)" + arrow(i))
+            elif k == WEBCOMP:
+                f = self.widget(i)
+                said = (f or {}).get("said")
+                line(depth, f"{self.widget_what(i)} #{n['value']}" + (f": {said.get('text')}" if isinstance(said, dict) and said.get("text") else "") + arrow(i))
             elif k == MENUBAR:
                 line(depth, "Menu bar: " + ", ".join(self.nodes[c]["text"] for c in n["children"]))
                 for c in n["children"]:
@@ -329,32 +429,69 @@ class Host:
 
     # ---------- doing ----------
 
+    # (the two backends: this process's own session, or a running host's agent link)
+    def send_event(self, i, second, text, number):
+        if self.link is not None:
+            return self.link.ok({"op": "event", "node": i, "second": int(second), "text": text, "number": int(number)})
+        return self.mod.event(self.handle, i, second, text, number)
+
+    def send_gesture(self, i, kind, x, y, dx, dy, zoom):
+        if self.link is not None:
+            return self.link.ok({"op": "gesture", "node": i, "kind": kind, "x": x, "y": y, "dx": dx, "dy": dy, "zoom": zoom})
+        return self.mod.gesture(self.handle, i, kind, x, y, dx, dy, zoom)
+
+    def send_key(self, i, name, mods):
+        if self.link is not None:
+            return self.link.ok({"op": "key", "node": i, "name": name, "modifiers": mods})
+        return self.mod.key(self.handle, i, name, mods)
+
+    def widget_set(self, i, args):
+        """A declared field set to a value of its type: the agent host checks, the host's runtime checks it's JSON, the
+        page's runtime checks the field and type again and runs the widget's setter."""
+        n, f = self.nodes[i], self.widget(i)
+        fields = ((f or {}).get("fields") or {})
+        if not args:
+            raise ValueError(f"give one of its fields: {', '.join(f'{k} ({v})' for k, v in fields.items())}")
+        for k, v in args.items():
+            if k not in fields:
+                raise ValueError(f"{n['hint']} has no settable field {k!r}; its fields: " + (", ".join(f"{a} ({b})" for a, b in fields.items()) or "none"))
+            if not fits(fields[k], v):
+                raise ValueError(f"{n['hint']}.{k} takes {fields[k]}, not {type(v).__name__}")
+        if self.link is None:
+            raise ValueError("widgets don't run in the agent's own session: attach to a running host (docs/agent.md)")
+        for k, v in args.items():
+            self.link.ok({"op": "set", "tag": n["hint"], "id": n["value"], "field": k, "value": json.dumps(v)})
+
     def dispatch(self, a, args):
         n = self.nodes[a.node]
-        mod, h, i = self.mod, self.handle, a.node
+        i = a.node
+        if a.how == "widget-read":
+            return None
+        if a.how == "widget-set":
+            return self.widget_set(i, args)
         if a.how == "msg":
-            return mod.event(h, i, 0, "", 0)
+            return self.send_event(i, 0, "", 0)
         if a.how == "second":
-            return mod.event(h, i, 1, "", 0)
+            return self.send_event(i, 1, "", 0)
         if a.how == "pick":
-            return mod.event(h, i, 1, str(args.get("path", "")), 0)
+            return self.send_event(i, 1, str(args.get("path", "")), 0)
         if a.how == "field":
             text = str(args.get("text", ""))
-            r = mod.event(h, i, 0, text, 0) if n["msg"] else None
+            r = self.send_event(i, 0, text, 0) if n["msg"] else None
             if args.get("submit") and n["msg2"]:
-                r = mod.event(h, i, 1, text, 0)
+                r = self.send_event(i, 1, text, 0)
             return r
         if a.how == "text":
-            return mod.event(h, i, 0, str(args.get("text", args.get("date", ""))), 0)
+            return self.send_event(i, 0, str(args.get("text", args.get("date", ""))), 0)
         if a.how == "toggle":
-            return mod.event(h, i, 0, "", 1 if args.get("on") else 0)
+            return self.send_event(i, 0, "", 1 if args.get("on") else 0)
         if a.how == "number":
-            return mod.event(h, i, 0, "", int(args.get("value", args.get("row", 0))))
+            return self.send_event(i, 0, "", int(args.get("value", args.get("row", 0))))
         if a.how == "option":
             want = str(args.get("option", args.get("button", "")))
             if want not in n["options"]:
                 raise ValueError(f'no option "{want}": ' + ", ".join(n["options"]))
-            return mod.event(h, i, 0, "", n["options"].index(want))
+            return self.send_event(i, 0, "", n["options"].index(want))
         if a.how == "gesture":
             g = str(args.get("gesture", "tap"))
             if g not in GESTURES:
@@ -362,25 +499,34 @@ class Host:
             x, y = float(args.get("x", 0)), float(args.get("y", 0))
             if g == "key":
                 mods = sum(MODIFIERS.get(str(m).lower(), 0) for m in args.get("modifiers", []) or [])
-                return mod.key(h, i, str(args.get("key", "")), mods)
+                return self.send_key(i, str(args.get("key", "")), mods)
             if g == "pan":
-                return mod.gesture(h, i, GESTURES[g], x, y, float(args.get("dx", 0)), float(args.get("dy", 0)), 1.0)
+                return self.send_gesture(i, GESTURES[g], x, y, float(args.get("dx", 0)), float(args.get("dy", 0)), 1.0)
             if g == "zoom":
-                return mod.gesture(h, i, GESTURES[g], x, y, 0.0, 0.0, float(args.get("zoom", 2.0)))
+                return self.send_gesture(i, GESTURES[g], x, y, 0.0, 0.0, float(args.get("zoom", 2.0)))
             if g == "double":  # (a double click follows the tap of its first click, like every host)
-                mod.gesture(h, i, GESTURES["tap"], x, y, 0.0, 0.0, 1.0)
-            return mod.gesture(h, i, GESTURES[g], x, y, 0.0, 0.0, 1.0)
+                self.send_gesture(i, GESTURES["tap"], x, y, 0.0, 0.0, 1.0)
+            return self.send_gesture(i, GESTURES[g], x, y, 0.0, 0.0, 1.0)
         raise ValueError(f"can't do {a.how}")
 
     def act(self, name, args):
+        if self.link is not None:  # (a running host's screen moves on by itself: act on what it shows now)
+            self.reload()
         a = self.action(name)
         if a is None:
             raise ValueError(f'no tool "{name}" on this screen; the tools are: ' + ", ".join(x.name for x in self.actions))
+        if a.how == "widget-read":
+            self.reload()
+            return self.widget_read(a.node)
         before_texts, before_over, before_design, before_names = self.texts(), self.overlays(), self.design, {x.name for x in self.actions}
+        before_said = {k: json.dumps(w.get("said"), sort_keys=True) for k, w in self.widgets.items()}
         self.dispatch(a, args)
         self.reload()
-        self.settle()
+        self.settle(widget=(self.nodes[a.node]["hint"], self.nodes[a.node]["value"]) if a.how == "widget-set" else None, said=before_said)
         out = [f"Did {name}."]
+        for key, w in self.widgets.items():
+            if json.dumps(w.get("said"), sort_keys=True) != before_said.get(key) and isinstance(w.get("said"), dict):
+                out.append(f"Now: {key[0]}#{key[1]}: {w['said'].get('text') or json.dumps(w['said'], ensure_ascii=False)[:300]}")
         gone = [t for t in before_texts if t not in self.texts()]
         new = [t for t in self.texts() if t not in before_texts]
         for t in new:
@@ -401,10 +547,12 @@ class Host:
             out.append(f"Tools now {len(names)}" + (f"; new: {', '.join(added)}" if added else "") + (f"; gone: {', '.join(removed)}" if removed else ""))
         return "\n".join(out)
 
-    def settle(self):
+    def settle(self, widget=None, said=None):
         """Display frames to the canvases that ask for them, until none does: an agent gets the settled screen. Work
         an app polls on its frames (a background job behind the island, D-283) lands before the tool answers. A canvas
         that animates for good gets 2 s; the island waits for its job (up to MOJOUI_AGENT_SETTLE_S, 300 s)."""
+        if self.link is not None:  # (a running host draws its own frames: wait until its screen and widgets stop changing)
+            return self.settle_link(widget, said or {})
         if not hasattr(self.mod, "frame"):
             return
         t0 = last = time.perf_counter()
@@ -426,6 +574,21 @@ class Host:
             self.reload()  # (frame()'s own answer isn't needed: whether a canvas still asks is in the tree, msg2)
             time.sleep(0.016)
 
+    def settle_link(self, widget, said):
+        """An attached host's screen settles: nothing pending for its page, the same tree and widget facts for 0.3 s; after
+        a set, until the widget said something new (its own event has run through update()). At most 5 s."""
+        t0, last, since = time.perf_counter(), None, time.perf_counter()
+        while time.perf_counter() - t0 < 5.0:
+            time.sleep(0.1)
+            self.reload()
+            sig = json.dumps([self.nodes, sorted(self.widgets.items(), key=str)], sort_keys=True, default=str)
+            if sig != last:
+                last, since = sig, time.perf_counter()
+                continue
+            waiting = widget is not None and json.dumps((self.widgets.get(widget) or {}).get("said"), sort_keys=True) == said.get(widget)
+            if not self.busy and not waiting and time.perf_counter() - since >= 0.3:
+                return
+
     def read(self, name, first, count):
         if not name:
             return "\n".join(self.texts()) or "(no text on screen)"
@@ -433,6 +596,13 @@ class Host:
         if i < 0:
             raise ValueError(f'nothing called "{name}" on this screen')
         n = self.nodes[i]
+        if n["kind"] == WEBCOMP:
+            return self.widget_read(i)
+        if n["kind"] == CANVAS and self.link is not None:
+            return self.link.ok({"op": "describe", "node": i, "first": int(first), "count": int(count)})["text"] or "This view has no text to offer."
+        if n["kind"] == LAZYLIST and self.link is not None:
+            rows = self.link.ok({"op": "rows", "node": i, "first": int(first), "count": int(count) if count > 0 else 50})["rows"]
+            return "\n".join(f"{int(first) + k}\t{t}" for k, t in enumerate(rows)) or "(no rows)"
         if n["kind"] == CANVAS:
             if not hasattr(self.mod, "describe"):
                 return "This app doesn't offer its drawn views as text; render it instead."
@@ -452,6 +622,8 @@ class Host:
         return "\n".join(texts) or f'"{n["text"]}"'
 
     def render(self, name, width, height):
+        if self.link is not None:
+            raise ValueError("render draws in the agent's own session (agent.py <build dir>); an attached host draws its canvases itself")
         i = self.by_tag(name) if name else next((j for j, n in enumerate(self.nodes) if n["kind"] == CANVAS), -1)
         if i < 0 or self.nodes[i]["kind"] != CANVAS:
             raise ValueError(f'"{name}" is not a canvas on this screen; the canvases are: '
@@ -470,6 +642,8 @@ class Host:
     # ---------- MCP ----------
 
     def tools(self):
+        if self.link is not None:
+            self.reload()
         core = [
             {"name": "screen", "description": f"What {self.title} shows right now: every view as text, and the tools a person could use on it.", "inputSchema": NO_ARGS},
             {"name": "act", "description": "Use one tool on the screen by name (the same as calling it directly), with its value.",
@@ -545,7 +719,7 @@ def serve(host):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or (sys.argv[1] == "--attach" and len(sys.argv) < 3):
         print(__doc__, file=sys.stderr)
         sys.exit(2)
-    serve(Host(sys.argv[1]))
+    serve(Host(attach=sys.argv[2]) if sys.argv[1] == "--attach" else Host(sys.argv[1]))

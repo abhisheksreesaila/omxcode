@@ -5,3 +5,4 @@ __pycache__/
 .sesskey
 .env
 dist/
+node_modules/

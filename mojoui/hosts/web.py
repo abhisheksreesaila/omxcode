@@ -13,6 +13,7 @@ Run: pixi run python mojoui/hosts/web.py build/hello/web [port]
 """
 
 import ctypes
+import hashlib
 import os
 import importlib
 import io
@@ -21,6 +22,7 @@ import re
 import time
 import struct
 import sys
+from urllib.parse import urlsplit
 import threading
 import uuid
 import zlib
@@ -36,7 +38,7 @@ from PIL import Image
 # Mirrors mojoui/view.mojo and mojoui/diff.mojo.
 (TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
  SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY, MENUBAR, MENU, ITEM,
- DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH) = range(1, 40)
+ DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH, WEBCOMP) = range(1, 41)
 CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
@@ -45,6 +47,9 @@ SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TI
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
 CHECKED, DISABLED, DANGER = 1, 2, 4  # menu item flags (mojoui/menus.mojo)
+AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")
+DEV = os.environ.get("MOJOUI_DEV") == "1"  # scripts/dev.sh's server (goal 34b M1c): widgets reload when their sources change, source maps
+DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")  # are served; never set by a release run (only 127.0.0.1 may ask)  # an agent host may attach here (docs/agent.md: the agent link)
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 JPEG_QUALITY = 85
 MAX_SESSIONS = 200  # oldest tabs are closed beyond this
@@ -53,181 +58,8 @@ ICONS = {p.stem: re.sub(r">\s+<", "><", re.sub(r"\s+", " ", p.read_text().split(
          for p in (STATIC / "icons").glob("*.svg")}  # Lucide (ISC)
 LIST_WINDOW = 30  # rows sent around the visible part of a LazyList
 
-CSS = """
-:root { color-scheme: light dark; --accent: #0a84ff; --danger: #ff453a; --muted: #8e8e93;
-        --surface: rgba(120,120,128,.16); --line: rgba(120,120,128,.28); }
-* { box-sizing: border-box; }
-html, body { margin: 0; }
-body { font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: grid; place-items: center;
-       min-height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-       background: light-dark(#f5f5f7, #1c1c1e); color: light-dark(#1d1d1f, #f5f5f7); }
-#mojoui-root { padding: 32px 20px; width: 100%; max-width: 560px; display: flex; justify-content: center; }
-.vstack { display: flex; flex-direction: column; align-items: center; }
-.vstack.drag { cursor: grab; } .vstack.drop.drop-over { outline: 2px solid currentColor; outline-offset: -2px; border-radius: 10px; }
-.embed { display: flex; align-self: stretch; } .embed iframe { flex: 1; width: 100%; height: 100%; border: 0; }
-.hstack { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; justify-content: center; }
-.spacer { flex: 1; }
-.text { margin: 0; text-align: center; }
-.text.paragraph { text-align: start; overflow-wrap: anywhere; }  /* a Paragraph: runs inline, the browser wraps them */
-.text.paragraph.lead { display: flex; align-items: center; }  /* a lead run in a column of its own (its trailing space hangs) */
-.run.strong { font-weight: 700; } .run.em { font-style: italic; } .run.code { font-family: ui-monospace, monospace; } a.run.link { color: inherit; }
-.text.title { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
-.text.headline { font-size: 17px; font-weight: 600; }
-.text.caption { font-size: 13px; color: var(--muted); }
-button { font: inherit; font-weight: 600; border: 0; border-radius: 999px; padding: 10px 20px; min-height: 48px;
-         cursor: pointer; background: var(--surface); color: inherit; transition: transform .08s, filter .15s; }
-button:hover { filter: brightness(1.08); }
-button:active { transform: scale(.97); }
-button.prominent { background: var(--accent); color: #fff; padding: 10px 26px; }
-button.destructive { color: var(--danger); }
-button.token { background: transparent; padding: 0 3px; min-height: 0; border-radius: 4px; font-weight: 600; color: var(--accent);
-  text-decoration: underline dotted; text-decoration-thickness: 1.5px; text-underline-offset: 3px; transition: background .15s; }
-button.token:hover { filter: none; background: color-mix(in srgb, var(--accent) 12%, transparent); }
-[data-tag=sentence-line] { flex-wrap: nowrap; }
-[data-tag=sentence-line] > .text { white-space: pre; text-align: left; }
-:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
-form.field { margin: 0; }
-form.field { display: flex; }
-input[type=text] { font: inherit; width: var(--control-width, 220px); max-width: 70vw; min-height: 48px; padding: 8px 12px; border-radius: 12px;
-                   border: 1px solid var(--line); background: light-dark(#fff, #2c2c2e); color: inherit; }
-label.toggle { display: inline-flex; gap: 10px; align-items: center; min-height: 48px; cursor: pointer; }
-label.toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
-select { font: inherit; width: var(--control-width, auto); min-height: 48px; padding: 6px 12px; border-radius: 12px; border: 1px solid var(--line);
-         background: light-dark(#fff, #2c2c2e); color: inherit; }
-input[type=range] { width: var(--control-width, 240px); min-height: 48px; accent-color: var(--accent); }
-progress { width: var(--control-width, 240px); height: 8px; accent-color: var(--accent); }
-hr { width: var(--control-width, 280px); border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
-[data-tag=status-bar] { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; flex-shrink: 0; }  /* one line, as on GTK: a long message is cut, not wrapped */
-button.icon-only.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.hstack > hr { width: 0; min-width: 0; align-self: center; height: var(--control-height, 28px); border-top: 0; border-left: 1px solid var(--line); margin: 0 6px; }
-.hstack > hr[style*="align-self:stretch"] { height: auto; }  /* a filling divider in a row: its full height */
-img.image { max-width: 100%; height: auto; border-radius: 12px; image-rendering: auto; }
-.scroll { overflow-y: auto; width: 100%; display: flex; flex-direction: column; align-items: center; }  /* like a VStack */
-table.table { border-collapse: collapse; width: 100%; }  /* the browser's own column widths, across its parent */
-table.table th { text-align: left; font-weight: inherit; vertical-align: middle; } table.table td { vertical-align: middle; }
-table.table th.num, table.table td.num { text-align: right; } table.table tbody tr:last-child > td { border-bottom: 0; }
-table.table .text { text-align: inherit; } table.table .hstack { flex-wrap: nowrap; justify-content: flex-start; }  /* cells read from their leading edge */
-table.table td.num > .hstack { justify-content: flex-end; } table.table td.num .text { white-space: nowrap; }
-table.table.dense th, table.table.dense td { white-space: nowrap; } table.table.dense td { overflow: hidden; text-overflow: ellipsis; }
-table.table.dense td.wrap { white-space: normal; } table.table.dense td.wrap .hstack { flex-wrap: wrap; row-gap: 4px; }
-table.table.dense td .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }  /* (one line, cut: the cell's widest) */
-table.table.dense td.wrap .text { white-space: nowrap; overflow: visible; }
-[data-tag=side-scroll] { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; } [data-tag=side-scroll] > table.table { flex: 1 0 auto; }
-[data-tag=side-scroll] table.table td { white-space: nowrap; }  /* (mojoui.lists.SideScroll: a wide table scrolls, its cells on one line) */
-table.table label.toggle { min-height: 0; display: flex; } label.toggle.check span:empty { display: none; }  /* (a tick box alone: no gap for an empty title) */
-.segmented, .tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 12px; background: var(--surface); }
-.segmented label, .tabs label { position: relative; }
-.segmented input, .tabs input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
-.segmented span, .tabs span { display: inline-flex; align-items: center; min-height: 48px; padding: 0 16px; border-radius: 9px; font-weight: 600; }
-.segmented[style*="align-self:stretch"] label, .tabs[style*="align-self:stretch"] label { flex: 1 1 0; }  /* a filling one: equal segments, as GTK's homogeneous group and the Mac's */
-.segmented[style*="align-self:stretch"] span, .tabs[style*="align-self:stretch"] span { justify-content: center; width: 100%; box-sizing: border-box; }
-.segmented input:checked + span, .tabs input:checked + span { background: light-dark(#fff, #3a3a3c); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
-.segmented input:focus-visible + span, .tabs input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--accent) 60%, transparent); }
-.tabs span { padding: 0 20px; }
-.radio { display: flex; flex-direction: column; gap: 2px; }
-.radio label { display: inline-flex; gap: 10px; align-items: center; min-height: 48px; cursor: pointer; }
-.radio input { width: 20px; height: 20px; accent-color: var(--accent); }
-textarea { font: inherit; width: var(--control-width, 320px); max-width: 80vw; padding: 10px 12px; border-radius: 12px; resize: vertical;
-           border: 1px solid var(--line); background: light-dark(#fff, #2c2c2e); color: inherit; }
-input[type=date] { font: inherit; min-height: 48px; padding: 6px 12px; border-radius: 12px; border: 1px solid var(--line);
-                   background: light-dark(#fff, #2c2c2e); color: inherit; }
-header.nav { display: flex; align-items: center; gap: 8px; width: 100%; max-width: 420px; }
-header.nav h2 { margin: 0; font-size: 22px; }
-header.nav button { padding: 10px 14px; }
-.alert-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 10; }
-dialog.alert { position: fixed; inset: 0; margin: auto; height: fit-content; z-index: 11; border: 0; border-radius: 18px;
-               padding: 22px; max-width: 320px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,.3);
-               background: light-dark(#fff, #2c2c2e); color: inherit; }
-dialog.alert h3 { margin: 0 0 6px; } dialog.alert p { margin: 0 0 16px; color: var(--muted); }
-dialog.alert .buttons { display: flex; gap: 8px; justify-content: center; }
-.icon { display: inline-flex; color: var(--accent); }
-.grid { display: grid; justify-items: center; align-items: center; }
-.grid > [style*="align-self:stretch"] { justify-self: stretch; }  /* a child that fills takes its cell's width, as on GTK */
-.lazylist { position: relative; overflow-y: auto; width: var(--control-width, 340px); max-width: 90vw; border-radius: 12px;
-            background: light-dark(#fff, #2c2c2e); border: 1px solid var(--line); }
-.lazylist .row { position: absolute; left: 0; right: 0; display: flex; align-items: center; padding: 0 14px; cursor: pointer;
-                 border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lazylist .row:hover, .lazylist .row:focus-visible { background: var(--surface); }
-#mojoui-root.full { max-width: none; padding: 0; height: 100dvh; align-items: stretch; }
-#mojoui-root.full > div { flex: 1 1 0; min-width: 0; }
-.canvas { position: relative; overflow: hidden; background: var(--surface); }
-.overlay { position: relative; min-height: 0; overflow: hidden; }
-.overlay > .overlay-base { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.overlay > .overlay-base > * { flex: 1 1 0; min-height: 0; }
-.overlay > .island { position: absolute; z-index: 5; margin: 12px; }
-.overlay > .island.h-start { left: 0; } .overlay > .island.h-end { right: 0; }
-.overlay > .island.h-center { left: 50%; transform: translateX(-50%); }
-.overlay > .island.v-start { top: 0; } .overlay > .island.v-end { bottom: 0; }
-.menubar { display: flex; align-items: center; gap: 2px; }
-.menu { position: relative; }
-.menu-title { border: 0; background: transparent; padding: 4px 9px; border-radius: 4px; font: inherit; font-size: 12.5px; cursor: default; color: inherit; }
-.menu.open > .menu-title { background: var(--surface); }
-.menu > .menu-items { display: none; position: absolute; left: 0; top: 100%; z-index: 20; min-width: 270px; padding: 4px; border-radius: 6px;
-  background: light-dark(#fff, #2c2c2e); color: inherit; box-shadow: 0 4px 16px rgba(16,24,40,.12), 0 0 0 1px var(--line); }
-.menu.open > .menu-items, .menu.context > .menu-items { display: block; }
-.menu.context { position: fixed; z-index: 30; }
-.menu.context > .menu-items { position: static; }
-.menu.sub { position: relative; } .menu.sub > .menu-items { left: 100%; top: -4px; }
-.menu.sub:hover > .menu-items { display: block; }
-.mi { display: flex; align-items: center; gap: 10px; width: 100%; height: 28px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent;
-  color: inherit; font: inherit; font-size: 12.5px; text-align: left; white-space: nowrap; cursor: default; }
-.mi:hover:not([disabled]) { background: var(--surface); }
-.mi[disabled] { opacity: .5; } .mi.danger { color: var(--danger); } .mi svg { stroke: currentColor; fill: none; stroke-width: 1.6; flex: none; opacity: .75; }
-.mi .mi-blank { width: 15px; flex: none; } .mi .mi-title { flex: 1; } .mi .mi-key { margin-left: 24px; font-size: 11px; opacity: .6; font-family: "JetBrains Mono", monospace; }
-.menu-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
-.menu-label { padding: 6px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; opacity: .6; }
-.dialog-layer { position: fixed; inset: 0; z-index: 40; display: grid; place-items: start center; padding-top: 80px; }
-.dialog-layer .scrim { position: absolute; inset: 0; background: rgba(17,22,28,.32); }
-.dialog { position: relative; max-width: calc(100vw - 32px); max-height: calc(100vh - 100px); display: flex; flex-direction: column; border-radius: 8px;
-  background: light-dark(#fff, #2c2c2e); color: inherit; box-shadow: 0 16px 48px rgba(0,0,0,.28); overflow: hidden; }
-.dialog-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px 14px 20px; border-bottom: 1px solid var(--line); }
-.dialog-head h3 { margin: 0; font-size: 15px; font-weight: 600; flex: 1; }
-.dialog-close, .toast-close { border: 0; background: transparent; font: inherit; padding: 2px 8px; min-height: 0; border-radius: 4px; color: inherit; opacity: .7; }
-.dialog-body { padding: 16px 20px; overflow: auto; display: flex; flex-direction: column; }
-.toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 12px;
-  padding: 10px 10px 10px 14px; border-radius: 6px; background: #1b1f24; color: #fff; font-size: 12.5px; box-shadow: 0 4px 16px rgba(16,24,40,.25); white-space: nowrap; }
-.toast-action { border: 0; background: transparent; color: #7fd1d8; font: inherit; font-weight: 600; min-height: 0; padding: 2px 6px; }
-.toast .toast-close { color: #fff; }
-.popover { position: fixed; z-index: 35; min-width: 260px; padding: 12px 14px; border-radius: 6px; display: flex; flex-direction: column; gap: 8px;
-  background: light-dark(#fff, #2c2c2e); color: inherit; box-shadow: 0 4px 16px rgba(16,24,40,.12), 0 0 0 1px var(--line); }
-.popover-title { margin: 0; font-size: 13px; font-weight: 600; }
-label.toggle.check input { accent-color: var(--accent); }
-.board-scroll { overflow: auto; position: relative; min-height: 0; }
-.board { position: relative; flex: none; min-width: 100%; min-height: 100%; box-sizing: border-box; }
-.board > .object[data-tag=cell-editor] { overflow: visible; z-index: 4; }
-.board > .object[data-tag=cell-editor]::after { display: none; }
-.board > .object[data-tag=cell-editor] form, .board > .object[data-tag=cell-editor] input { width: 100%; height: 100%; box-sizing: border-box; margin: 0; }
-.board > .object.revealed { animation: mojoui-revealed 1.2s ease-out; }
-@media (prefers-reduced-motion: reduce) { .board > .object.revealed { animation: none; } }
-@keyframes mojoui-revealed { from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); } to { box-shadow: 0 0 0 3px transparent; } }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-button.with-icon, button.icon-only { display: inline-flex; align-items: center; gap: 6px; }
-button svg { flex: none; }
-.board > .object { position: absolute; box-sizing: border-box; overflow: hidden; }  /* content never covers the resize corner */
-.board > .object > .vstack.card > :first-child { touch-action: none; cursor: move; }
-.board > .object > .vstack.card { width: 100%; height: 100%; box-sizing: border-box; }
-.board > .object::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 12px; height: 12px; cursor: nwse-resize;
-  border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); border-radius: 0 0 4px 0; }
-.board > .object.moving { opacity: .92; box-shadow: 0 12px 32px rgba(0,0,0,.18); z-index: 2; }
-@media (max-width: 719px) { .board > .object[data-tag=cell-editor] { display: none !important; }  /* (no place over a cell in the list) */
-  .board { width: auto !important; height: auto !important; display: flex; flex-direction: column; gap: 16px; }
-  .board > .object { position: static !important; width: auto !important; left: auto; top: auto; } .board > .object::after { display: none; }
-  .board > .object > .vstack.card > :first-child { touch-action: auto; cursor: default; } }
-.canvas canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
-.canvas canvas:active { cursor: grabbing; }
-.vstack.card { background: light-dark(#fff, #2c2c2e); border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 0 0 1px var(--line); }
-@media (prefers-reduced-motion: reduce) { button { transition: none; } button:active { transform: none; } }
-/* the components' own layout (tools, the file picker, islands): every theme builds on it */
-.island .hstack { flex-wrap: nowrap; white-space: nowrap; }
-label.picker { position: relative; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-label.picker.tool { flex-direction: column; } label.picker input.picker-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
-button.tool { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 58px; min-height: 48px; padding: 4px 6px; }
-button.tool span { font-size: 11px; line-height: 13px; }
-button.tool.inline, label.picker.tool.inline { flex-direction: row; gap: 6px; min-width: 0; min-height: 34px; padding: 0 10px; }
-button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
-[data-tag=toolbar] button.icon-only, [data-tag=toolbar] label.picker.icon-only { min-width: 34px; min-height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
-@media (pointer: coarse) { [data-tag=toolbar] button.icon-only, [data-tag=toolbar] label.picker.icon-only, button.tool.inline, label.picker.tool.inline { min-width: 48px; min-height: 48px; } }
-"""
+# The host's own style sheet (served as mojoui.css by content hash; GTK's WebComponent views load it too, goal 34 M3).
+CSS = (STATIC / "mojoui.css").read_text()
 
 
 MENU_JS = r"""
@@ -436,6 +268,53 @@ EFFECTS_JS = r"""
 })();
 """
 
+PAGE_JS = r"""
+// The page's own behaviour as listeners: the Content-Security-Policy allows no inline script, inline handler or eval
+// (D-593), so what used to sit in onclick/onfocus/onkeydown attributes, htmx's eval'd trigger filters and hx-vals "js:"
+// lives here, keyed by data attributes the host renders.
+(() => {
+  const skinClasses = () => {  // the theme's body classes (skin(): #mojoui-skin-classes)
+    const s = document.getElementById('mojoui-skin-classes');
+    if (s && document.body.className !== (s.dataset.classes || '')) document.body.className = s.dataset.classes || '';
+  };
+  document.addEventListener('DOMContentLoaded', skinClasses);
+  document.addEventListener('htmx:oobAfterSwap', skinClasses);
+  // an in-place editor: focus selects its text (data-focus=select) or puts the caret at its end (end)
+  document.addEventListener('focusin', e => {
+    const t = e.target;
+    if (!t.matches || !t.matches('input[data-focus]')) return;
+    if (t.dataset.focus === 'end') { const k = t.value.length; t.setSelectionRange(k, k); } else t.select();
+  });
+  // a field with on_cancel: Escape posts it (second=2) with its text. Capture phase, as the inline handler it replaces
+  // saw synthetic (non-bubbling) keys too; a listener before it that stopped the key (an open menu, held keys) wins.
+  document.addEventListener('keydown', e => {
+    const t = e.target;
+    if (e.key !== 'Escape' || e.cancelBubble || !t.matches || !t.matches('input[data-cancel]')) return;
+    e.preventDefault();
+    htmx.ajax('POST', t.dataset.cancel, { values: { n: Number(t.dataset.node), second: 2, text: t.value, v: document.getElementById('mojoui-v').value }, swap: 'none', source: document.body });
+  }, true);
+  document.addEventListener('click', e => {
+    const title = e.target.closest && e.target.closest('.menu-title[data-toggle]');
+    if (title) window.mojouiMenu.toggle(title);
+    if (e.target.closest && e.target.closest('[data-kind=item][data-closes]')) window.mojouiMenu.closeAll();
+  });
+  // an alert: Escape answers like its first button (Cancel)
+  document.addEventListener('keyup', e => {
+    if (e.key !== 'Escape') return;
+    const b = document.querySelector('#mojoui-overlay dialog.alert .buttons button');
+    if (b) b.click();
+  });
+  // a long list: Enter and Space choose a row as a click does; each request for rows says where the list is scrolled
+  document.addEventListener('keyup', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.lazylist .row')) e.target.click();
+  });
+  document.addEventListener('htmx:configRequest', e => {
+    const el = e.detail && e.detail.elt;
+    if (el && el.dataset && el.dataset.kind === 'list') e.detail.parameters.top = el.scrollTop;
+  });
+})();
+"""
+
 BOARD_JS = r"""
 // mojoui Board adapter (fixed, part of the web host). Drag an object's header to move it, its
 // bottom-right corner to resize it; the app gets one event at the end (PAN = moved, ZOOM = resized,
@@ -511,6 +390,9 @@ CANVAS_JS = r"""
 (() => {
   const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8;
   const shape = () => document.getElementById('mojoui-v').value;
+  // the theme a canvas was drawn in (skin()'s classes and tokens): a drawn view paints from the theme, so a switch
+  // (light/dark, a skin) redraws it even when its version didn't move (D-673)
+  const skinNow = () => { const k = document.getElementById('mojoui-skin-classes'); return k ? (k.dataset.classes || '') + '|' + (k.dataset.tokens || '') : ''; };
   // keys a canvas uses itself (the page mustn't scroll or move focus on them)
   const OWN_KEYS = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'PageDown', 'PageUp', 'Home', 'End', 'Backspace', 'Delete', 'Escape', 'F2', ' ']);
   // Keys typed on a canvas before the in-place editor they open has appeared (a round trip later) wait here, then
@@ -586,7 +468,7 @@ CANVAS_JS = r"""
     if (div.mojoui) return;
     const cv = div.querySelector('canvas'), g = cv.getContext('2d');
     const n = Number(div.dataset.node), sid = div.dataset.sid;
-    const st = div.mojoui = { want: true, busy: false, drawn: -1, count: 0, times: [], queue: [], sending: false, updating: false };
+    const st = div.mojoui = { want: true, busy: false, drawn: -1, skin: '', count: 0, times: [], queue: [], sending: false, updating: false };
     const meta = () => document.getElementById('n' + n + '-meta');
     const playing = () => { const m = meta(); return !!m && m.dataset.frames !== '0'; };
     async function pump() {
@@ -596,7 +478,7 @@ CANVAS_JS = r"""
         while (div.isConnected && (st.want || playing())) {
           const tick = playing() ? 1 : 0, m = meta();
           if (tick) await new Promise(ok => requestAnimationFrame(ok));  // at most one frame per display refresh
-          const version = m ? m.dataset.version : '';
+          const version = m ? m.dataset.version : '', skin = skinNow();
           st.want = false;
           const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
@@ -604,18 +486,19 @@ CANVAS_JS = r"""
           const res = await fetch(`/frame/${sid}/${n}?w=${w}&h=${h}&scale=${dpr}&v=${shape()}&tick=${tick}&still=${still}`);
           if (res.status !== 200) {
             if (res.headers.get('X-Mojoui-Pending') === '1') update();  // e.g. a frame changed the screen's shape
-            if (res.status === 409) await new Promise(ok => setTimeout(ok, 50));
-            if (res.status === 404) return;
+            if (res.headers.get('X-Mojoui-Retry') === '1') await new Promise(ok => setTimeout(ok, 50));
+            if (res.headers.get('X-Mojoui-Gone') === '1' || res.status === 404) return;
+            if (res.status !== 204) await new Promise(ok => setTimeout(ok, 50));  // (anything else: a short wait, then again)
             continue;
           }
           const img = await createImageBitmap(await res.blob());
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
           g.drawImage(img, 0, 0);
-          st.drawn = version; st.count++; st.times.push(performance.now());
+          st.drawn = version; st.skin = skin; st.count++; st.times.push(performance.now());
           if (st.times.length > 1200) st.times.splice(0, 600);  // (frame times, for tests; bounded)
           div.dataset.frame = `${st.count} ${cv.width}x${cv.height} ${r.width.toFixed(0)}x${r.height.toFixed(0)} ${dpr}`;
           if (res.headers.get('X-Mojoui-Pending') === '1') update();
-          if (meta() && meta().dataset.version !== String(st.drawn)) st.want = true;
+          if ((meta() && meta().dataset.version !== String(st.drawn)) || st.skin !== skinNow()) st.want = true;
           if (meta() && (meta().dataset.tip || '') !== (div.dataset.tip || '')) { div.dataset.tip = meta().dataset.tip || ''; div.title = div.dataset.tip; }  // (SET_TIP: a drawn view's words)
           if (res.headers.get('X-Mojoui-Again') === '1') { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); }  // mid-animation (a gliding ring): the next frame
         }
@@ -733,7 +616,7 @@ CANVAS_JS = r"""
     if (back && kdiv.dataset.keys === '1' && (!document.activeElement || document.activeElement === document.body)) back.focus({ preventScroll: true });
     document.querySelectorAll('[data-kind=canvas]').forEach(div => {
       const st = div.mojoui, m = document.getElementById('n' + div.dataset.node + '-meta');
-      if (st && m && (m.dataset.version !== String(st.drawn) || m.dataset.frames !== '0')) { st.want = true; st.pump(); }
+      if (st && m && (m.dataset.version !== String(st.drawn) || m.dataset.frames !== '0' || st.skin !== skinNow())) { st.want = true; st.pump(); }
     });
   });
 })();
@@ -749,6 +632,86 @@ def png(rgba, w, h):
     rows = b"".join(b"\x00" + rgba[y * w * 4:(y + 1) * w * 4] for y in range(h))
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(rows, 6)) + chunk(b"IEND", b""))
+
+
+# Secure by default (goal 34 M2, D-593–D-596): every response carries these headers. Scripts come only from our origin,
+# by content hash (no inline script, no inline handler, no eval: the page's behaviour is in the hashed host bundle and the
+# app's bundles). Styles allow 'unsafe-inline' (docs/js.md): every view's layout is a style attribute (padding, sizes,
+# gaps) and the theme's palette and sheet are <style> elements swapped in live; CSS can't run script, and what it could
+# load is held to our origin by img-src and font-src. Frames: any http(s) page, always sandboxed (frame_sandbox).
+CSP = "; ".join([
+    "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self'",
+    "connect-src 'self'", "frame-src 'self' http: https:", "object-src 'none'", "base-uri 'none'", "form-action 'self'",
+    "frame-ancestors 'self'",
+])
+SECURITY_HEADERS = [(k.lower().encode(), v.encode()) for k, v in (
+    ("Content-Security-Policy", CSP), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "same-origin"),
+    ("X-Frame-Options", "SAMEORIGIN"), ("Cross-Origin-Opener-Policy", "same-origin"))]
+IMMUTABLE = "public, max-age=31536000, immutable"  # a file named by its content's hash never changes
+FONT_URLS = {}  # font file name → its hashed URL (theme sheets name /static/fonts/<name>; skin() rewrites them)
+FONT_REF = re.compile(r"url\(/static/fonts/([A-Za-z0-9_.-]+\.ttf)\)")
+
+
+class SecurityHeaders:
+    """ASGI middleware: SECURITY_HEADERS on every HTTP response (a route's own header of the same name wins)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                have = {k.lower() for k, _ in headers}
+                headers += [(k, v) for k, v in SECURITY_HEADERS if k not in have]
+                message = dict(message, headers=headers)
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+def content_name(name, data):
+    """name.js → name.<sha256[:16]>.js: the file's URL changes whenever its bytes do."""
+    stem, ext = name.rsplit(".", 1)
+    return f"{stem}.{hashlib.sha256(data).hexdigest()[:16]}.{ext}"
+
+
+def host_files():
+    """The host's own files, by content hash: {name: (hashed name, bytes, media type)}. mojoui.js is every adapter
+    (canvas, board, menus, effects, the page's listeners, widgets) in one script."""
+    js = "\n".join([CANVAS_JS, BOARD_JS, MENU_JS, EFFECTS_JS, PAGE_JS, (STATIC / "mojoui-widgets.js").read_text()]).encode()
+    out = {}
+    for name, data, media in (("htmx.min.js", (STATIC / "htmx.min.js").read_bytes(), "text/javascript"),
+                              ("mojoui.js", js, "text/javascript"), ("mojoui.css", CSS.encode(), "text/css")):
+        out[name] = (content_name(name, data), data, media)
+    return out
+
+
+def app_assets(module_dir, mod):
+    """The app's bundles (App.web_assets(), built by scripts/web_assets.py): ({hashed file: (bytes, media type)}, the
+    page's tags for them). A listed name the build didn't make, or a file whose bytes don't match its hash, stops the
+    server: nothing unlisted or unbundled is served."""
+    names = json.loads(mod.web_assets()) if hasattr(mod, "web_assets") else []
+    folder = Path(module_dir) / "assets"
+    manifest = json.loads((folder / "manifest.json").read_text()) if (folder / "manifest.json").exists() else {}
+    files, tags = {}, []
+    for name in names:
+        m = manifest.get(name)
+        if m is None:
+            raise SystemExit(f"mojoui web: the app lists {name} in web_assets(), but its build has none (scripts/build.sh <app> web)")
+        data = (folder / m["file"]).read_bytes()
+        if content_name(name, data) != m["file"]:
+            raise SystemExit(f"mojoui web: assets/{m['file']} doesn't match its hash (rebuild it)")
+        js = name.endswith(".js")
+        files[m["file"]] = (data, "text/javascript" if js else "text/css")
+        if DEV and m.get("map") and (folder / m["map"]).exists():  # (a debug build's source map: served only by the dev server)
+            files[m["map"]] = ((folder / m["map"]).read_bytes(), "application/json")
+        tags.append(Script(src=f"/assets/{m['file']}", defer=True, integrity=m["integrity"]) if js else
+                    Link(rel="stylesheet", href=f"/assets/{m['file']}", integrity=m["integrity"]))
+    return files, tags
 
 
 ENGINE_LOCK = threading.Lock()  # apps with shared data: one call into Mojo at a time (shared GPU scratch)
@@ -778,6 +741,9 @@ class Session:
         self.busy_sent = False  # what the page was last told (#mojoui-busy)
         self.waiters = set()  # (event loop, asyncio.Event) of the page's open /wait
         self.waiters_lock = threading.Lock()
+        self.commands = []  # widget commands the app asked for (mojoui.webcomponent), not yet sent to the page
+        self.origin = ""  # this page's origin (WebFrame: allow-same-origin only for another one)
+        self.widget_facts = {}  # (tag, id) → what the widget says about itself (mojoui-widgets.js facts), while an agent is attached
 
     def wake(self):
         """Tell the page's open /wait that changes are pending."""
@@ -872,6 +838,97 @@ def web_url(url):
     return url
 
 
+WIDGET_TAG = re.compile(r"^[a-z][a-z0-9._]*-[a-z0-9._-]*$")
+RESERVED_TAGS = {"annotation-xml", "color-profile", "font-face", "font-face-src", "font-face-uri", "font-face-format", "font-face-name", "missing-glyph"}
+EVENT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
+MAX_WIDGET_BYTES = 8 << 20  # an event's payload or a command's reply, as JSON text
+
+
+def widget_tag(tag):
+    """A custom element's name the page may create (mojoui.webcomponent.is_widget_tag: the same rule)."""
+    return bool(WIDGET_TAG.fullmatch(tag)) and len(tag) <= 64 and tag not in RESERVED_TAGS  # (fullmatch: "$" lets a trailing \n by, D-618)
+
+
+def event_name(name):
+    """A widget's event or command name (mojoui.webcomponent.is_event_name: the same rule)."""
+    return bool(EVENT_NAME.fullmatch(name))
+
+
+FRAME_SANDBOX = "allow-scripts allow-forms"  # every WebFrame's sandbox: its page runs, in an origin of its own (D-596)
+FRAME_EXTRA = ("allow-popups", "allow-modals", "allow-downloads", "allow-same-origin")
+
+
+FRAME_ALLOW = ("clipboard-read", "clipboard-write", "fullscreen")  # what a WebFrame may ask for (options[1]); none by default
+# Names of the machine the host runs on. localhost and 127.0.0.1 reach the same server only because the host binds
+# 127.0.0.1 (main(): uvicorn.run(host="127.0.0.1")); IPv6 literals ([::1]) are never plain (origin_parts), so not listed.
+LOOPBACK = {"localhost", "127.0.0.1", "0.0.0.0"}
+PLAIN_URL = re.compile(r"(?i)(https?)://([^/?#]*)")
+DOTTED_IPV4 = re.compile(r"(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}")
+DNS_LABEL = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+
+
+def origin_parts(url):
+    """(scheme, host, port) of a URL whose authority is plain, else None. Python's urlsplit and the browser's URL parser
+    disagree on unusual URLs (a backslash, "%" escapes, user info, IPv4 written as 127.1, 2130706433 or 0x7f.0.0.1, IPv6
+    literals), so this doesn't try to out-parse the browser: only a plain authority counts (D-624): no backslash anywhere,
+    no "@" or "%" in it, a host that is a dotted IPv4 address written the one plain way or a DNS name (labels of a-z, 0-9
+    and inner hyphens, the last starting with a letter; upper case is lowered, one trailing dot dropped), and a port of digits."""
+    if "\\" in url or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        return None
+    m = PLAIN_URL.match(url)
+    if not m:
+        return None
+    scheme, authority = m.group(1).lower(), m.group(2)
+    if "@" in authority or "%" in authority or "[" in authority or "]" in authority:
+        return None
+    host, _, port = authority.partition(":")
+    if ":" in port or (port and not (port.isascii() and port.isdigit() and len(port) <= 5 and int(port) <= 65535)):
+        return None
+    host = host.lower()
+    host = host[:-1] if host.endswith(".") else host
+    if not DOTTED_IPV4.fullmatch(host):
+        labels = host.split(".")
+        if not host or not all(DNS_LABEL.fullmatch(l) for l in labels) or not labels[-1][0].isalpha():
+            return None  # (the last label starts with a letter, as every TLD does: the browser reads 0x1, 1e3 or 7 there as a number, D-627)
+    return scheme, host, int(port) if port else (443 if scheme == "https" else 80)
+
+
+def same_origin_or_unsure(url, origin):
+    """Whether `url` may be on this page's own origin: the same scheme, host and port, or two names of this machine on
+    the same port (localhost and 127.0.0.1: the browser would call them two origins, but they reach the same server), or
+    either side unknown (no origin known, or a URL whose authority isn't plain, origin_parts): unsure counts as ours."""
+    a, b = origin_parts(url), origin_parts(origin) if origin else None
+    if a is None or b is None:
+        return True
+    return a == b or (a[0] == b[0] and a[2] == b[2] and a[1] in LOOPBACK and b[1] in LOOPBACK)
+
+
+def page_origin(scheme, netloc, headers):
+    """This page's origin as its browser sees it, from the request; "" (unknown) when a proxy may have rewritten the host
+    or scheme (X-Forwarded-*, Forwarded): then WebFrame never gets allow-same-origin (D-616)."""
+    if any(h in headers for h in ("forwarded", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-original-host")):
+        return ""
+    return f"{scheme}://{netloc}"
+
+
+def frame_sandbox(n, origin=""):
+    """WebFrame's iframe sandbox: FRAME_SANDBOX plus what the app asked for from FRAME_EXTRA (options[0]). allow-same-origin
+    only for a page surely on another origin than this one (it then keeps its own cookies; with ours it could lift its
+    sandbox): compared as origins (origin_parts), never as strings, and refused when unsure (D-616). A URL check can't see
+    where the framed page goes next: a page on another origin that redirects back to ours runs there with
+    allow-same-origin (docs/js.md §5)."""
+    asked = n["options"][0].split() if n.get("options") else []
+    same = same_origin_or_unsure(n["text"], origin)
+    extra = [t for t in FRAME_EXTRA if t in asked and not (t == "allow-same-origin" and same)]
+    return " ".join([FRAME_SANDBOX] + extra)
+
+
+def frame_allow(n):
+    """The iframe's permissions policy: only what the app asked for (options[1]) from FRAME_ALLOW; none by default (D-617)."""
+    asked = n["options"][1].split() if len(n.get("options") or []) > 1 else []
+    return "; ".join(t for t in FRAME_ALLOW if t in asked)
+
+
 def paragraph_runs(n, i, common):
     """A Paragraph's runs as inline elements (FastHTML escapes their words), one element per run whose classes say bold,
     italic, code and whose data-role is its role (the look's rule for it beats the base classes); a link is an <a>: its
@@ -942,13 +999,11 @@ def render_node(s, i, sid):
         # hx-vals is inherited from ancestors, so the input says second=0 explicitly
         # (otherwise it would pick up the form's second=1 and every keystroke would "submit").
         editor = n["value"] in (1, 3)  # an in-place editor: .focused() (1) takes the keyboard, its text selected; .echo() (3) doesn't
-        at_end = "const k = this.value.length; this.setSelectionRange(k, k)"
-        cancel = (f"if (event.key === 'Escape') {{ event.preventDefault(); htmx.ajax('POST', '{post}', "
-                  f"{{ values: {{ n: {i}, second: 2, text: this.value, v: document.getElementById('mojoui-v').value }}, swap: 'none', source: document.body }}); }}"  # (not the input: its hx-vals would win)
-                  if n["size"] else None)
+        # (no inline handlers, D-593: PAGE_JS selects the text or puts the caret at the end on focus (data-focus), and posts
+        # Escape as on_cancel (data-cancel), from document.body: the input's own hx-vals would win)
         field = Input(type="text", name="text", value=n["text"], placeholder=n["hint"], data_kind="field",
-                      cls="cell-editor" if editor else None, onfocus=(at_end if n["value"] == 3 else "this.select()") if editor else None,
-                      onkeydown=cancel,
+                      cls="cell-editor" if editor else None, data_focus=("end" if n["value"] == 3 else "select") if editor else None,
+                      data_cancel=post if n["size"] else None, data_node=str(i) if n["size"] else None,
                       autocomplete="off", autofocus=(s.focus == i or n["value"] == 1), hx_trigger="input",
                       hx_sync="closest form:queue all", **dict(common, hx_vals=json.dumps({"n": i, "second": 0})))
         return Form(field, cls="field", id=nid, hx_post=post, hx_vals=json.dumps({"n": i, "second": 1}),
@@ -1017,7 +1072,7 @@ def render_node(s, i, sid):
                    cls="lazylist", id=nid, data_kind="list", data_row_height=str(row_h), style=f"height:{n['size']}px",
                    hx_post=f"/rows/{sid}/{i}", hx_trigger="scroll throttle:60ms, scroll delay:150ms",
                    hx_target=f"#rows{i}", hx_swap="outerHTML", hx_sync="this:replace",
-                   hx_vals="js:{top: event.target.scrollTop}", hx_include="#mojoui-v")
+                   hx_include="#mojoui-v")  # (its scroll position goes with each request: PAGE_JS, htmx:configRequest)
     if kind == BOARD:
         kids = []
         for k, c in enumerate(n["children"]):
@@ -1070,8 +1125,19 @@ def render_node(s, i, sid):
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", style="gap:0px")
         if web_url(n["text"]) is None:  # (http and https only, D-576: the stand-in instead of the frame)
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", data_refused="1", style="gap:0px")
-        return Div(Iframe(src=n["text"], title=n["text"], allow="clipboard-read; clipboard-write"), cls="embed", id=nid, data_kind="embed",
+        return Div(Iframe(src=n["text"], title=n["text"], sandbox=frame_sandbox(n, getattr(s, "origin", "")), referrerpolicy="no-referrer",
+                          allow=frame_allow(n) or None), cls="embed", id=nid, data_kind="embed",
                    data_url=n["text"], style=f"height:{n['size']}px" if n["size"] > 0 else "flex:1 1 0;min-height:0")  # (0: as tall as it's given)
+    if kind == WEBCOMP:  # a JS widget (mojoui.webcomponent): mojoui-widgets.js puts its element in and keeps it across rebuilds
+        tag, props = n["hint"], n["text"] or "{}"
+        if not widget_tag(tag):
+            return Div(cls="webcomponent", id=nid, data_kind="webcomponent", data_refused="1")
+        try:
+            ok = isinstance(json.loads(props), dict)
+        except ValueError:
+            ok = False
+        return Div(cls="webcomponent", id=nid, data_kind="webcomponent", data_widget=tag, data_widget_id=str(n["value"]),
+                   data_props=props if ok else "{}", data_refused=None if ok else "1")  # (FastHTML escapes the attribute)
     if kind == CLIPBOARD:  # nothing on screen: the page copies its text when its version moves on (CLIP_JS)
         return Div(id=nid, data_kind="clipboard", data_version=str(n["value"]), data_text=n["text"], hidden=True)
     if kind == TOAST:  # bottom centre; its action is msg, ✕ and its time running out are on_close
@@ -1093,7 +1159,7 @@ def render_node(s, i, sid):
         if n["style"] == 1:  # a context menu: open where the app said, inside its anchor; closes through on_close
             return Div(items, cls="menu context open", id=nid, data_kind="menu", data_title="context", data_anchor=n["text"],
                        data_x=str(n["x"]), data_y=str(n["y"]), data_node=str(i), data_sid=sid, data_v=str(s.shape))
-        return Div(Button(n["text"], type="button", cls="menu-title", onclick="mojouiMenu.toggle(this)", aria_haspopup="menu"), items,
+        return Div(Button(n["text"], type="button", cls="menu-title", data_toggle="1", aria_haspopup="menu"), items,
                    cls="menu", id=nid, data_kind="menu", data_title=n["text"])
     if kind == ITEM:
         if n["style"] == 1:
@@ -1110,7 +1176,7 @@ def render_node(s, i, sid):
         cls = "mi" + (" danger" if flags & DANGER else "") + (" checked" if flags & CHECKED else "")
         return Button(lead, Span(n["text"], cls="mi-title"), Span(shortcut, cls="mi-key") if shortcut else "", type="button", cls=cls, id=nid,
                       data_kind="item", data_title=n["text"], data_shortcut=shortcut or None, data_checked="1" if flags & CHECKED else None,
-                      disabled=bool(flags & DISABLED), role="menuitem", onclick="mojouiMenu.closeAll()", **dict(common, hx_vals=json.dumps({"n": i, "second": 0})))
+                      disabled=bool(flags & DISABLED), role="menuitem", data_closes="1", **dict(common, hx_vals=json.dumps({"n": i, "second": 0})))
     if kind == OVERLAY:
         kids = []
         for k, c in enumerate(n["children"]):
@@ -1157,8 +1223,7 @@ def render_alert(s, i, sid):
                       hx_vals=json.dumps({"n": i, "number": j}), **common) for j, o in enumerate(n["options"])]
     dialog = Dialog(H3(n["text"], id=f"{mid}-t"), P(n["hint"]), Div(*buttons, cls="buttons"), open=True,
                     cls="alert", data_kind="alert", role="alertdialog", aria_labelledby=f"{mid}-t", aria_modal="true")
-    return Div(Div(cls="alert-backdrop"), dialog, id=mid, hx_trigger="keyup[key=='Escape'] from:body",
-               hx_vals=json.dumps({"n": i, "number": 0}), **common)
+    return Div(Div(cls="alert-backdrop"), dialog, id=mid)  # (Escape: PAGE_JS clicks its first button)
 
 
 def rows_div(s, i, sid, top):
@@ -1176,7 +1241,7 @@ def rows_html(s, i, sid, top):
     first = max(0, top // row_h - 5)
     texts = json.loads(s.mod.rows(s.handle, i, first, LIST_WINDOW))
     return [Div(t, cls="row", data_row=str(first + k), style=f"top:{(first + k) * row_h}px;height:{row_h}px",
-                role="button", tabindex="0", hx_trigger="click, keyup[key=='Enter'], keyup[key==' ']",
+                role="button", tabindex="0", hx_trigger="click",  # (Enter and Space click it: PAGE_JS)
                 hx_post=f"/e/{sid}", hx_vals=json.dumps({"n": i, "number": first + k}), hx_swap="none",
                 hx_target="this",  # htmx inherits hx-target: without this, rows inherit the list's
                 hx_include="#mojoui-v") for k, t in enumerate(texts)]  # "find .rows", fail to find it, and silently send nothing
@@ -1188,6 +1253,16 @@ def make_app(module_dir):
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
     if loads:
         print(f"SHARED: {loads} load, 0 sessions", flush=True)
+    files = host_files()
+    by_name = {hashed: (data, media) for hashed, data, media in files.values()}
+    fonts = {}
+    for f in sorted((STATIC / "fonts").glob("*.ttf")):
+        data = f.read_bytes()
+        fonts[content_name(f.name, data)] = data
+        FONT_URLS[f.name] = f"/static/fonts/{content_name(f.name, data)}"
+    assets, asset_tags = app_assets(module_dir, mod)
+    dev_state = {"version": 0, "tags": asset_tags, "waiters": set(), "lock": threading.Lock()}  # (dev: the bundles change under the page)
+    head_tags = () if DEV else tuple(asset_tags)  # (dev: the page's bundles are named per page load, the current build's)
     app = FastHTML(default_hdrs=False, secret_key=uuid.uuid4().hex, hdrs=(  # no .sesskey file
         # minimum-scale=1: a phone browser otherwise widens the page's layout viewport (innerWidth, innerHeight) to fit
         # anything wider than the screen, so a first screen laid out for a wider window read as a 780x1688 window,
@@ -1196,8 +1271,11 @@ def make_app(module_dir):
         # No attribute inheritance: every element states its own hx-* attributes (list rows once
         # inherited their list's hx-target and silently sent nothing). Note: hx-vals is still
         # merged from ancestors even so, so elements set every key they rely on themselves.
-        Meta(name="htmx-config", content='{"disableInheritance": true}'),
-        Script(src="/static/htmx.min.js"), Script(src="/static/mojoui-canvas.js"), Style(CSS)))
+        # No eval and no scripts from answers (the CSP forbids both anyway); no inline style for htmx's indicators.
+        Meta(name="htmx-config", content='{"disableInheritance": true, "allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'),
+        Script(src=f"/static/{files['htmx.min.js'][0]}"), Script(src=f"/static/{files['mojoui.js'][0]}"),
+        Link(rel="stylesheet", href=f"/static/{files['mojoui.css'][0]}"), *head_tags))
+    app.add_middleware(SecurityHeaders)
     sessions = OrderedDict()  # sid → Session, oldest first
     sessions_lock = threading.Lock()
 
@@ -1207,10 +1285,14 @@ def make_app(module_dir):
     def note(sid, s):
         """After any call that ran update() (s.lock held): when this tab's effects (HTTP replies, timer ticks) are due
         next (Runtime.wake_in), for the clock thread."""
+        if hasattr(mod, "commands"):  # (widget commands the update asked for: sent with the next answer, cmds_mark)
+            taken = json.loads(mod.commands(s.handle))
+            if taken:
+                s.commands.extend(taken)
         if not hasattr(mod, "wake_in"):
             return
         w = mod.wake_in(s.handle)
-        s.busy = w >= 0
+        s.busy = w >= 0 or bool(AGENT_SOCKET)  # (an attached agent changes the screen behind the page: it keeps waiting on /wait)
         with clock:
             if w < 0:
                 due.pop(sid, None)
@@ -1248,7 +1330,15 @@ def make_app(module_dir):
         threading.Thread(target=tick, daemon=True, name="mojoui-effects").start()
 
     def has_changes(s):
-        return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches")))
+        return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches"))) or bool(s.commands)
+
+    def cmds_mark(s, oob=False):
+        """The widget commands waiting for the page (mojoui-widgets.js runs each once, by its seq), then none."""
+        batch, s.commands = s.commands, []
+        mark = I(id="mojoui-cmds", hidden=True, data_cmds=json.dumps(batch))
+        if oob:
+            mark.attrs["hx-swap-oob"] = "true"
+        return mark
 
     def busy_mark(s, oob=False):
         s.busy_sent = s.busy
@@ -1263,7 +1353,8 @@ def make_app(module_dir):
         # While an alert is up the page behind is inert (no clicks, no keyboard focus);
         # the alert lives in an overlay beside it.
         full = s.nodes[0]["grows"] or s.nodes[0]["fills"]  # the screen fills the window
-        page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid)
+        page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid,
+                    data_agent="1" if AGENT_SOCKET else None, data_dev="1" if DEV else None)  # (widgets tell the host what they show only while an agent may read it)
         layer = Div(*[render_alert(s, i, sid) for i in alerts], id="mojoui-overlay")
         if oob:
             page.attrs["hx-swap-oob"] = "true"
@@ -1275,22 +1366,43 @@ def make_app(module_dir):
         return Response((STATIC / "htmx.min.js").read_bytes(), media_type="text/javascript",
                         headers={"Cache-Control": "public, max-age=86400"})
 
-    @app.get("/static/mojoui-canvas.js")
-    def canvas_js():
-        return Response(CANVAS_JS + "\n" + BOARD_JS + "\n" + MENU_JS + "\n" + EFFECTS_JS, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
-
     @app.get("/static/fonts/{name}")
     def font(name: str):
-        """The app's own fonts (Inter, JetBrains Mono: SIL OFL), so every browser shows the same type (D-155)."""
+        """The app's own fonts (Inter, JetBrains Mono, Geist: SIL OFL), so every browser shows the same type (D-155): by
+        content hash (what the page names), or by plain name for older pages."""
+        if name in fonts:
+            return Response(fonts[name], media_type="font/ttf", headers={"Cache-Control": IMMUTABLE})
         path = STATIC / "fonts" / Path(name).name
         if path.suffix != ".ttf" or not path.exists():
             return Response(status_code=404)
         return Response(path.read_bytes(), media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
 
+    @app.get("/favicon.ico")
+    def favicon():
+        """No icon file (an app's logo is its icon, inline): an empty answer, not a 404 in the console."""
+        return Response(status_code=204, headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.get("/static/{name}")
+    def static_file(name: str):
+        """The host's scripts and style sheet, by content hash."""
+        if name not in by_name:
+            return Response(status_code=404)
+        data, media = by_name[name]
+        return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
+
+    @app.get("/assets/{name}")
+    def asset(name: str):
+        """The app's bundles (App.web_assets()), by content hash; nothing else."""
+        if name not in assets:
+            return Response(status_code=404)
+        data, media = assets[name]
+        return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
+
     @app.get("/")
-    def index():
+    def index(req):
         sid = uuid.uuid4().hex  # one app session per page load (tab)
         s = Session(mod, shared=bool(loads))
+        s.origin = page_origin(req.url.scheme, req.url.netloc, {k.lower(): v for k, v in req.headers.items()})
         with sessions_lock:
             sessions[sid] = s
             while len(sessions) > MAX_SESSIONS:
@@ -1315,16 +1427,17 @@ def make_app(module_dir):
             if "app-logo" in ICONS:  # (the app's mark as the tab's icon)
                 from urllib.parse import quote
                 icon = (Link(rel="icon", type="image/svg+xml", href="data:image/svg+xml," + quote(ICONS["app-logo"])),)
-            return Title(mod.title(s.handle)), *icon, *root(s, sid), *skin(s)
+            return Title(mod.title(s.handle)), *icon, *root(s, sid), cmds_mark(s), *skin(s), *(dev_state["tags"] if DEV else ())
 
     def skin(s, oob=False):
         """The app's theme on the page (D-260): its body classes, its palette as CSS variables, and its style sheet; the
         host knows no theme. oob: after a change (Settings → Appearance, a mode's tint), swapped into the open page
         (D-156); the style sheet goes again only when the theme itself changed, not just its palette."""
-        tid, classes, css_vars, css = mod.theme(s.handle).split("\x1f")
-        parts = (Style(css_vars, id="mojoui-skin"), Script(f"document.body.className = '{classes}'", id="mojoui-skin-js"))
+        tid, classes, css_vars, css, *more = mod.theme(s.handle).split("\x1f")
+        tokens = more[0] if more else "{}"  # (the Look's tokens as JSON, for widgets' theme(el, tokens): goal 34b)
+        parts = (Style(css_vars, id="mojoui-skin"), I(hidden=True, id="mojoui-skin-classes", data_classes=classes, data_tokens=tokens))  # (PAGE_JS applies them)
         if (tid, len(css)) != s.theme_id:  # (the sheet itself changed: a new theme, or a theme's new sheet)
-            parts += (Style(css, id="mojoui-theme"),)
+            parts += (Style(FONT_REF.sub(lambda m: f"url({FONT_URLS.get(m.group(1), '/static/fonts/' + m.group(1))})", css), id="mojoui-theme"),)
             s.theme_id = (tid, len(css))
         if oob:
             for el in parts:
@@ -1372,6 +1485,8 @@ def make_app(module_dir):
         if s.busy != s.busy_sent:  # (requests went out, or the last one came back: the page starts or stops waiting)
             mark = busy_mark(s, oob=True)
             out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (mark,)
+        if s.commands:  # (after the screen: a command can name a widget this answer puts on it)
+            out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (cmds_mark(s, oob=True),)
         return out
 
     def changes_of(s, sid, d, n=-1, text="", number=0):
@@ -1471,6 +1586,221 @@ def make_app(module_dir):
             s.nodes = json.loads(mod.view(s.handle))  # the screen as Mojo now has it
             return changes(s, sid, d, n, text, number)  # (restyles too, when the skin or the tint changed)
 
+    @app.post("/w/{sid}")
+    def widget_event(sid: str, tag: str = "", id: int = 0, name: str = "", data: str = ""):
+        """A widget's event (mojoui-widgets.js emit): the widget by its key (tag, id), not its node, so an event sent
+        while the screen was rebuilt still lands. Only a word for a name and JSON for the payload get through."""
+        s = sessions.get(sid)
+        if s is None or not hasattr(mod, "widget_event") or not widget_tag(tag) or not event_name(name) or len(data) > MAX_WIDGET_BYTES:
+            return ""
+        try:
+            json.loads(data)
+        except ValueError:
+            return ""
+        with s.lock:
+            if s.closed:
+                return ""
+            found = [i for i, node in enumerate(s.nodes) if node["kind"] == WEBCOMP and node["hint"] == tag and node["value"] == id]
+            if not found:
+                return ""
+            d = json.loads(mod.widget_event(s.handle, found[0], name, data))
+            if d.get("ignored"):
+                return ""
+            if s.pending:  # (changes waiting from frames or effects go with it)
+                d, s.pending = merge(s.pending, d), None
+            s.nodes = json.loads(mod.view(s.handle))
+            return changes(s, sid, d, found[0])
+
+    @app.post("/reply/{sid}")
+    def widget_reply(sid: str, seq: int = 0, data: str = "", error: str = ""):
+        """A widget's answer to command `seq` (or why it has none): the runtime takes it once, as JSON."""
+        s = sessions.get(sid)
+        if s is None or not hasattr(mod, "reply"):
+            return ""
+        if len(data) > MAX_WIDGET_BYTES:
+            data, error = "", "the reply is too big"
+        with s.lock:
+            if s.closed:
+                return ""
+            d = json.loads(mod.reply(s.handle, seq, data, error[:500]))
+            if d.get("ignored"):
+                return ""
+            if s.pending:
+                d, s.pending = merge(s.pending, d), None
+            s.nodes = json.loads(mod.view(s.handle))
+            return changes(s, sid, d)
+
+    jslog_counts = {}
+
+    @app.post("/jslog/{sid}")
+    def jslog(sid: str, message: str = "", source: str = "", line: int = 0, column: int = 0, widget: str = ""):
+        """A widget's uncaught JS error, with its original file and line where the page could read the bundle's source map
+        (debug builds): one line in the app's log. Plain text only, cut short, at most 100 per page."""
+        if sid not in sessions:
+            return ""
+        jslog_counts[sid] = jslog_counts.get(sid, 0) + 1
+        if jslog_counts[sid] > 100:
+            return ""
+        clean = lambda t, n: re.sub(r"[\x00-\x1f\x7f]", " ", str(t))[:n]
+        where = f"{clean(source, 200)}:{int(line)}:{int(column)}" if source else "(no position)"
+        print(f"JS ERROR: {where}: {clean(message, 500)}" + (f" ({clean(widget, 80)})" if widget else ""), flush=True)
+        return ""
+
+    if DEV:
+        from starlette.responses import JSONResponse
+
+        def local(req):
+            return req.client is not None and req.client.host == "127.0.0.1"
+
+        @app.get("/dev/assets")
+        def dev_assets(req):
+            """(dev) The bundles this build has now: [{name, file, integrity}], for the page to load the new ones."""
+            if not local(req):
+                return Response(status_code=403)
+            names = json.loads(mod.web_assets()) if hasattr(mod, "web_assets") else []
+            folder = Path(module_dir) / "assets"
+            manifest = json.loads((folder / "manifest.json").read_text()) if (folder / "manifest.json").exists() else {}
+            return JSONResponse([{"name": n, "file": manifest[n]["file"], "integrity": manifest[n]["integrity"]} for n in names if n in manifest])
+
+        @app.post("/dev/reload")
+        def dev_reload(req, token: str = ""):
+            """(dev) scripts/dev.py rebuilt the bundles: serve the new ones, tell the open pages."""
+            import hmac
+            if not local(req) or not DEV_TOKEN or not hmac.compare_digest(token, DEV_TOKEN):
+                return Response(status_code=403)
+            try:
+                fresh, tags = app_assets(module_dir, mod)
+            except SystemExit as e:
+                print(f"dev: not reloaded: {e}", flush=True)
+                return Response(str(e), status_code=409)
+            with dev_state["lock"]:
+                assets.update(fresh)
+                dev_state["tags"] = tags
+                dev_state["version"] += 1
+                for loop, ev in list(dev_state["waiters"]):
+                    loop.call_soon_threadsafe(ev.set)
+            return str(dev_state["version"])
+
+        @app.get("/dev/wait/{seen}")
+        async def dev_wait(req, seen: int):
+            """(dev) Returns the bundles' version once it is past `seen` (20 s at most): the page then reloads its widgets."""
+            import asyncio
+            if not local(req):
+                return Response(status_code=403)
+            if dev_state["version"] > seen:
+                return str(dev_state["version"])
+            ev = asyncio.Event()
+            entry = (asyncio.get_running_loop(), ev)
+            with dev_state["lock"]:
+                dev_state["waiters"].add(entry)
+            try:
+                if dev_state["version"] <= seen:
+                    await asyncio.wait_for(ev.wait(), 20)
+            except asyncio.TimeoutError:
+                pass
+            finally:
+                with dev_state["lock"]:
+                    dev_state["waiters"].discard(entry)
+            return str(dev_state["version"])
+
+    @app.post("/describe/{sid}")
+    def widget_describe(sid: str, tag: str = "", id: int = 0, data: str = ""):
+        """What a widget says about itself (mojoui-widgets.js facts: its description, describe()'s JSON, its fields), kept for
+        an attached agent. Only with an agent link; only JSON, a widget tag and a widget on the screen."""
+        s = sessions.get(sid)
+        if not AGENT_SOCKET or s is None or not widget_tag(tag) or len(data) > MAX_WIDGET_BYTES:
+            return ""
+        try:
+            facts = json.loads(data)
+        except ValueError:
+            return ""
+        if not isinstance(facts, dict):
+            return ""
+        with s.lock:
+            if not s.closed and any(n["kind"] == WEBCOMP and n["hint"] == tag and n["value"] == id for n in s.nodes):
+                s.widget_facts[(tag, id)] = facts
+        return ""
+
+    def link_session():
+        """The agent link's session: the newest page (a tab opened later takes over)."""
+        with sessions_lock:
+            for sid in reversed(sessions):
+                if not sessions[sid].closed:
+                    return sid, sessions[sid]
+        return None, None
+
+    def link_call(op):
+        """One agent-link request (docs/agent.md): view, event, gesture, key, set, describe, rows. Changes are pushed to
+        the page the way an effect's are (pending + /wait)."""
+        sid, s = link_session()
+        if s is None:
+            return {"ok": False, "error": "no page is open: open the app in a browser"}
+        what = op.get("op")
+        with s.lock:
+            if s.closed:
+                return {"ok": False, "error": "the page closed"}
+            h = s.handle
+            if what == "view":
+                nodes = json.loads(mod.view(h))
+                keys = {(n["hint"], n["value"]) for n in nodes if n["kind"] == WEBCOMP}
+                s.widget_facts = {k: v for k, v in s.widget_facts.items() if k in keys}
+                return {"ok": True, "title": mod.title(h), "design": mod.theme(h).split("\x1f")[0], "nodes": nodes,
+                        "widgets": list(s.widget_facts.values()), "busy": has_changes(s) or s.busy_sent != s.busy}
+            n = int(op.get("node", -1))
+            if what in ("event", "gesture", "key", "describe", "rows") and not 0 <= n < len(s.nodes):
+                return {"ok": False, "error": f"no node {n} on the screen"}
+            if what == "describe":
+                return {"ok": True, "text": mod.describe(h, n, int(op.get("first", 0)), int(op.get("count", 0)))}
+            if what == "rows":
+                return {"ok": True, "rows": json.loads(mod.rows(h, n, int(op.get("first", 0)), int(op.get("count", 50))))}
+            if what == "set":
+                tag, field, value = str(op.get("tag", "")), str(op.get("field", "")), str(op.get("value", ""))
+                if not widget_tag(tag) or not event_name(field) or len(value) > MAX_WIDGET_BYTES:
+                    return {"ok": False, "error": "a set names a widget's tag, a field (a word) and a JSON value"}
+                ok = bool(mod.set_widget(h, tag, int(op.get("id", 0)), field, value))
+                note(sid, s)
+                s.wake()
+                return {"ok": ok} if ok else {"ok": False, "error": f"no widget {tag}#{op.get('id')} on the screen, or the value isn't JSON"}
+            if what == "event":
+                d = json.loads(mod.event(h, n, int(op.get("second", 0)), str(op.get("text", "")), int(op.get("number", 0))))
+            elif what == "gesture":
+                d = json.loads(mod.gesture(h, n, int(op.get("kind", 3)), float(op.get("x", 0)), float(op.get("y", 0)), float(op.get("dx", 0)),
+                                           float(op.get("dy", 0)), float(op.get("zoom", 1))))
+            elif what == "key":
+                d = json.loads(mod.key(h, n, str(op.get("name", "")), int(op.get("modifiers", 0))))
+            else:
+                return {"ok": False, "error": f"no op {what!r}"}
+            if not d.get("ignored"):
+                s.pending = merge(s.pending, d)
+                s.nodes = json.loads(mod.view(h))
+            note(sid, s)
+            s.wake()
+            return {"ok": not d.get("ignored")}
+
+    if AGENT_SOCKET:
+        import socketserver
+
+        class LinkHandler(socketserver.StreamRequestHandler):
+            def handle(self):
+                for raw in self.rfile:
+                    try:
+                        op = json.loads(raw)
+                        out = link_call(op) if isinstance(op, dict) else {"ok": False, "error": "a request is a JSON object"}
+                    except Exception as ex:  # (a bad request is the agent's mistake: say so, keep the link)
+                        out = {"ok": False, "error": f"{type(ex).__name__}: {ex}"}
+                    self.wfile.write((json.dumps(out, ensure_ascii=False) + "\n").encode())
+                    self.wfile.flush()
+
+        Path(AGENT_SOCKET).unlink(missing_ok=True)
+        old_mask = os.umask(0o177)  # (the socket is the user's alone: 0600)
+        try:
+            link = socketserver.ThreadingUnixStreamServer(AGENT_SOCKET, LinkHandler)
+        finally:
+            os.umask(old_mask)
+        link.daemon_threads = True
+        threading.Thread(target=link.serve_forever, daemon=True, name="mojoui-agent-link").start()
+        print(f"mojoui web: agent link at {AGENT_SOCKET}", flush=True)
+
     @app.post("/resize/{sid}")
     def resize(sid: str, w: int = 0, h: int = 0):
         s = sessions.get(sid)
@@ -1535,18 +1865,21 @@ def make_app(module_dir):
     def frame(sid: str, n: int, w: int = 0, h: int = 0, scale: float = 1, v: int = -1, tick: int = 0, still: int = 0):
         """One canvas frame as a JPEG, painted by the app at w × h pixels. With tick=1 (the
         canvas asked for frames), a frame event goes to the app first. Changes to the rest of
-        the screen wait in the session until the page asks for /pending."""
+        the screen wait in the session until the page asks for /pending. No frame: 204 with X-Mojoui-Retry (the screen
+        changed under it: ask again once the page has caught up) or X-Mojoui-Gone (the tab or the canvas is gone), never a
+        4xx, which every browser logs as a console error (goal 34 M2 reads the console)."""
         sess = sessions.get(sid)
-        if sess is None:
-            return Response(status_code=404)
+        if sess is None:  # a gone session (a closed or expired tab, a restarted server) reads as 204 + X-Mojoui-Gone, no
+            # longer 404 (D-607): the page's poller stops on the header as it did on 404, and the browser logs no error
+            return Response(status_code=204, headers={"X-Mojoui-Gone": "1"})
         with sess.lock:
             if sess.closed:
-                return Response(status_code=404)
+                return Response(status_code=204, headers={"X-Mojoui-Gone": "1"})
             if v != sess.shape or not 0 <= n < len(sess.nodes) or sess.nodes[n]["kind"] != CANVAS:
-                return Response(status_code=409)  # the screen changed under it: the page will catch up
+                return Response(status_code=204, headers={"X-Mojoui-Retry": "1"})  # the screen changed under it: the page will catch up
             now = time.perf_counter()
             if sess.pending and sess.pending.get("rebuild"):  # the page must catch up first; don't run the app on
-                return Response(status_code=409, headers={"X-Mojoui-Pending": "1"})
+                return Response(status_code=204, headers={"X-Mojoui-Retry": "1", "X-Mojoui-Pending": "1"})
             if tick and sess.nodes[n]["msg2"]:
                 last = sess.frame_time.get(n)
                 us = int((now - last) * 1e6) if last else 16667
@@ -1555,14 +1888,14 @@ def make_app(module_dir):
                 sess.nodes = json.loads(mod.view(sess.handle))
                 note(sid, sess)
                 if sess.pending.get("rebuild") or sess.nodes[n]["kind"] != CANVAS:
-                    return Response(status_code=409, headers={"X-Mojoui-Pending": "1"})
+                    return Response(status_code=204, headers={"X-Mojoui-Retry": "1", "X-Mojoui-Pending": "1"})
             else:
                 sess.frame_time.pop(n, None)
             r = json.loads(mod.draw(sess.handle, n, w, h, scale, still))
             sess.pending = merge(sess.pending, r["diff"])
             sess.nodes = json.loads(mod.view(sess.handle))
             rgba = ctypes.string_at(r["address"], r["width"] * r["height"] * 4)
-            pending = bool(sess.pending and (sess.pending.get("rebuild") or sess.pending.get("patches")))
+            pending = bool(sess.pending and (sess.pending.get("rebuild") or sess.pending.get("patches"))) or bool(sess.commands)
         out = io.BytesIO()
         picture = Image.frombuffer("RGBA", (r["width"], r["height"]), rgba, "raw", "RGBA", 0, 1).convert("RGB")
         if tick:  # animating: small, fast JPEG frames
@@ -1607,8 +1940,10 @@ def make_app(module_dir):
         with s.lock:
             if s.closed:
                 return ""
-            if s.pending is None:  # (nothing changed, but the page may have to stop waiting)
-                return busy_mark(s, oob=True) if s.busy != s.busy_sent else ""
+            if s.pending is None:  # (nothing changed, but the page may have to stop waiting, or run a widget's command)
+                out = (busy_mark(s, oob=True),) if s.busy != s.busy_sent else ()
+                out += (cmds_mark(s, oob=True),) if s.commands else ()
+                return out or ""
             d, s.pending = s.pending, None
             return changes(s, sid, d)
 

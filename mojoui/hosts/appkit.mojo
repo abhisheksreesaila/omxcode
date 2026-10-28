@@ -13,8 +13,8 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
-    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
-    START, CENTER, END, STRETCH, BETWEEN, Node,
+    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
+    START, CENTER, END, STRETCH, BETWEEN, Node, NO_MSG,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
 )
@@ -33,6 +33,15 @@ from mojoui.clock import now_ns
 from mojoui.canvas import Surface
 from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, AppleCanvas
 from mojoui.hosts.mac_report import MacReport, MAX_SHOTS, pts
+from mojoui.hosts.appkit_webview import (
+    MacWebViews, mac_at, start as webviews_start, new_view as webview_new, send as webview_send, drop as webview_drop,
+    show_instead as webview_instead, report_lines as webview_report, probe as webview_probe, kill as webview_kill,
+    type_text as webview_type, click as webview_click, step_busy as webview_busy, pages_ready as webviews_ready,
+    shoot as webview_shoot, arm_inbox as webview_arm,
+)
+from mojoui.hosts.gtk_webview import Inbound, IN_EVENT, IN_REPLY, theme_message
+from mojoui.webcomponent import is_widget_tag
+from mojoui.json import json_string
 from mojoui.hosts.objc import (
     cls, sel, msg, new, ns_string, ns_data, ns_array, ns_number, ns_date, date_text, sf_symbol, from_ns, constrain, prefer,
     new_class, add_method, add_protocol, register_class, pool_push,
@@ -256,6 +265,12 @@ struct AppKitHost[A: App](Movable):
     var resized_in_place: Int
     var steps: List[String]  # MOJOUI_TEST: steps run one by one, a report recording each (the GitHub Mac runner, 2026-10-23)
     var step_at: Int
+    var webviews: Int  # the WebComponents' WKWebViews (mojoui/hosts/appkit_webview.mojo), on the heap: its address
+    var web_focus: Int  # a WKWebView that had the keyboard when a rebuild moved it (it gets it back), or 0
+    var shots_taken: Bool  # the web views' pictures for the next snapshot have arrived
+    var step_wait_from: Int  # (test steps) when the next step started waiting for the pages (ns; 0: not waiting)
+    var probe_pending: Bool  # (test steps) a webjs: step's answer is still to be written in the log
+    var dark_told: Int  # the system's light (0) or dark (1) mode as the app last heard it (App.appearance); -1: not yet
 
     def __init__(out self):
         Self.A.init_shared()
@@ -299,6 +314,14 @@ struct AppKitHost[A: App](Movable):
         self.report = MacReport()
         self.steps = List[String]()
         self.step_at = 0
+        var wv = alloc(Layout[MacWebViews].single()).unsafe_leak()  # (lives as long as the window: WebKit's callbacks hold its address)
+        wv.unsafe_write(MacWebViews())
+        self.webviews = Int(wv)
+        self.web_focus = 0
+        self.shots_taken = False
+        self.step_wait_from = 0
+        self.probe_pending = False
+        self.dark_told = -1
         self.size_w = List[Int]()
         self.size_h = List[Int]()
         self.wraps = List[Int]()
@@ -553,7 +576,7 @@ struct AppKitHost[A: App](Movable):
                 ref ts = self.look.type
                 var sized_by = ts.title if node.style == TITLE else (ts.headline if bold else (ts.caption if node.style == CAPTION else ts.body))  # (the look's type scale: GTK's label.title-1, .title-4, .caption)
                 _ = msg(w, "setFont:", look_font(self.look.type.family, 600 if bold else 400, sized_by, self.look.type.tabular))
-                _ = msg(w, "setTextColor:", ns_color(self.pal.ink3 if node.style == CAPTION else self.pal.ink2))
+                _ = msg(w, "setTextColor:", ns_color(self.look.type.ink_of(self.pal, node.style == CAPTION)))  # (the look's inks: omxqua's ink and ink2, as its sheets, D-676)
             var tl = self.text_look(i)
             if tl >= 0:  # a surface's own type (the status bar's figures: one theme's Inter 12, another's JetBrains Mono)
                 ref sf = self.look.surfaces[tl]
@@ -588,8 +611,8 @@ struct AppKitHost[A: App](Movable):
                     # the font's own line (CSS's normal: its ascender, descender and line gap), not the look's body line:
                     # a mono line at 11.5 pt was 17 high for the web's 15 (D-509)
                     lh = msg[Float64](font, "ascender") - msg[Float64](font, "descender") + msg[Float64](font, "leading")
-                elif self.look.type.line > 0:
-                    lh = msg[Float64](font, "pointSize") * self.look.type.line
+                elif self.look.type.line > 0:  # (its style's own: a title's 1.1, not the body's 1.45, D-669)
+                    lh = msg[Float64](font, "pointSize") * self.look.type.line_of(node.style == TITLE, bold and node.style != TITLE, node.style == CAPTION)
                 if lh > 0:
                     var para = new("NSMutableParagraphStyle")
                     _ = msg(para, "setMinimumLineHeight:", lh)
@@ -1257,7 +1280,7 @@ struct AppKitHost[A: App](Movable):
                 self.pinned.append(i)
         else:  # (a Draggable, a DropTarget and a WebFrame show their one child: drag and drop isn't built here yet)
             w = new("NSStackView")
-            var vertical = node.kind == VSTACK or node.kind == DRAG or node.kind == DROP or node.kind == EMBED
+            var vertical = node.kind == VSTACK or node.kind == DRAG or node.kind == DROP or node.kind == EMBED or node.kind == WEBCOMP
             _ = msg(w, "setOrientation:", 1 if vertical else 0)
             # align → NSStackView alignment (NSLayoutAttribute); STRETCH = per-child constraints below
             var align = 9 if vertical else 10  # centre X / centre Y
@@ -1381,7 +1404,7 @@ struct AppKitHost[A: App](Movable):
                     hug(child, Float32(490 if wrapping and not vertical else 750), vertical)
                 if not vertical and not cn.fills and node.align_items != STRETCH and cn.h == 0:  # in a row not told to stretch: its own height (a trail in a 60 pt bar stood 60 high)
                     hug(child, Float32(740), True)  # (740: at 750 a model page's head stood 81 high, run 40263008055; a column's 750 squeezed wrapping words)
-                var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED  # (its one view across it: the web's align-items: stretch, D-494)
+                var wrapper = node.kind == DRAG or node.kind == DROP or node.kind == EMBED or node.kind == WEBCOMP  # (its one view across it: the web's align-items: stretch, D-494)
                 var spans = vertical and (cn.kind == SCROLL or cn.kind == TABLE)  # (a Scroll spans its column: the web's .scroll { width: 100% }, D-502; a Table too: table.table { width: 100% })
                 if not vertical and cn.kind == TABLE and not cn.grows:  # (in a row, a Table takes the row: its width 100 %, a side-scroll's flex: 1 0 auto)
                     hug(child, Float32(1), False)
@@ -1431,6 +1454,15 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(w, "setCustomSpacing:afterView:", Float64(0), last)
                 var room = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", room)
+                if vertical:  # (a column's own stacks keep their content's height, so the free room is the room's, as the
+                    # web's flex-start: a stack has no size of its own, and the widgets app's header stood 155 high for its
+                    # 64, D-668. 251: over the room's nothing, under a label's 750 resistance and a default's 480)
+                    for q in range(len(node.children)):
+                        ref cq = self.rt.shown.nodes[node.children[q]]
+                        if built[q] != 0 and cq.kind == VSTACK and not cq.grows and cq.h == 0:
+                            var fit = msg(msg(built[q], "heightAnchor"), "constraintEqualToConstant:", Float64(0))
+                            _ = msg(fit, "setPriority:", Float32(251))
+                            _ = msg(fit, "setActive:", 1)
                 if not vertical and not (node.fills or (i < len(self.parents) and self.parents[i] >= 0 and self.rt.shown.nodes[self.parents[i]].align_items == STRETCH)):
                     # (a row nothing stretches has no free room: none at 251, over its column's 250 leading pins, so the row
                     # is its views wide, as a web flex row in a shrink-to-fit place: filter chips 940 for 220, D-539. Tried
@@ -1453,6 +1485,8 @@ struct AppKitHost[A: App](Movable):
                         var c = msg(msg(v, axis), "constraintEqualToAnchor:constant:", msg(w, axis), shift)
                         _ = msg(c, "setPriority:", Float32(270))
                         _ = msg(c, "setActive:", 1)
+        if node.kind == WEBCOMP:  # its widget in a WKWebView of its own (kept across rebuilds), else `instead`
+            self.place_webview(i, w, self_addr)
         if self.widgets[i] == 0:  # (some branches already stored an inner control)
             self.widgets[i] = w
         return self.apply_layout(i, w)
@@ -1937,7 +1971,7 @@ struct AppKitHost[A: App](Movable):
         self.parents = List[Int](length=len(self.rt.shown.nodes), fill=-1)
         for k in range(len(self.rt.shown.nodes)):
             var kk = self.rt.shown.nodes[k].kind
-            if kk == HSTACK or kk == VSTACK or kk == TABLE or kk == DRAG or kk == DROP or kk == EMBED:  # (a table's cells and a
+            if kk == HSTACK or kk == VSTACK or kk == TABLE or kk == DRAG or kk == DROP or kk == EMBED or kk == WEBCOMP:  # (a table's cells and a
                 for c in self.rt.shown.nodes[k].children:  # wrapper's view: their words inherit through them too, D-516)
                     self.parents[c] = k
         self.size_h = List[Int](length=len(self.rt.shown.nodes), fill=0)
@@ -2006,6 +2040,7 @@ struct AppKitHost[A: App](Movable):
             _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("focusField:"), self.widgets[self.focus], Float64(0))
         self.focus = -1
         self.add_debug_menu(self_addr)
+        self.sync_webviews(self_addr)
 
     def follow_ends(mut self):
         """Pinned Scrolls (a log) to their end after a change (its content may have grown). Unlike GTK and the web, it
@@ -2056,6 +2091,13 @@ struct AppKitHost[A: App](Movable):
         self.copy_if_asked()
         self.open_if_asked()
         self.follow_ends()
+        if self.window != 0 and self.rt.app.theme().key() != self.theme_key:
+            # the theme switched (light/dark, a skin) with or without new views: native views and drawn canvases carry
+            # its colours, so the screen is built again (the widgets' views are kept and get the new tokens, D-673)
+            self.queue_snapshot(self_addr)
+            self.rebuilds += 1
+            self.show(self_addr)
+            return
         if d.rebuild or len(d.patches) > 0:
             self.queue_snapshot(self_addr)
         if d.rebuild and self.resize_in_place(d):
@@ -2067,6 +2109,8 @@ struct AppKitHost[A: App](Movable):
         for p in d.patches:
             var w = self.widgets[p.node]
             var kind = self.rt.shown.nodes[p.node].kind
+            if kind == WEBCOMP:  # (new props: sync_webviews hands them to its page)
+                continue
             if p.op == SET_TEXT and kind != TEXTAREA and kind != DATE and kind != NAVBAR:
                 if kind == TEXT:  # (in the words' own attributes: the look's line height, letter spacing)
                     var had = msg(w, "attributedStringValue")
@@ -2131,6 +2175,7 @@ struct AppKitHost[A: App](Movable):
         for k in range(len(self.rt.shown.nodes)):
             if self.rt.shown.nodes[k].kind == LAZYLIST and self.widgets[k] != 0:
                 _ = msg(self.widgets[k], "reloadData")
+        self.sync_webviews(self_addr)
         self.wake()
 
     def attach_toast(self):
@@ -2528,6 +2573,13 @@ struct AppKitHost[A: App](Movable):
         _ = msg(self.target, "performSelector:withObject:afterDelay:", sel("debugQueued:"), ns_number(self_addr), Float64(0.4))
 
     def snapshot(mut self):
+        if self.report.on and self.report.count < MAX_SHOTS and self.window != 0 and not self.shots_taken:
+            # (a WKWebView draws out of process: cacheDisplayInRect: leaves it blank, so WebKit pictures each first and
+            # the last picture to arrive calls this again)
+            if webview_shoot(self.webviews) > 0:
+                self.shots_taken = True
+                return
+        self.shots_taken = False
         self.report.pending = False
         if not self.report.on or self.report.count >= MAX_SHOTS or self.window == 0:
             return
@@ -2539,7 +2591,7 @@ struct AppKitHost[A: App](Movable):
             var doc = msg(content, "documentView")
             if doc != 0 and msg[CGRect](doc, "bounds").height > msg[CGRect](content, "bounds").height + 0.5:
                 whole = doc
-        var pictured = self.report.save_png(whole, name + ".png")
+        var pictured = self.report.save_png(whole, name + ".png", self.webviews)
         var problems = List[String]()
         var dump = self.dump_views(problems)
         self.report.write(name + ".txt", dump)
@@ -2675,6 +2727,8 @@ struct AppKitHost[A: App](Movable):
             while j >= 0:
                 stack.append((kids[j], depth + 1))
                 j -= 1
+        if mac_at(self.webviews)[].core.state == 1:  # each WebComponent's view, as the host saw it (GTK's WEBVIEW:/WIDGET: lines)
+            out += "\n" + webview_report(self.webviews)
         return out^
 
     def queue_resize(mut self, self_addr: Int):
@@ -2805,6 +2859,139 @@ struct AppKitHost[A: App](Movable):
         var d = self.rt.dispatch(Event(message, text, number))
         self.apply(d, self_addr)
 
+    # ---------- WebComponents (goal 34b M2: mojoui/hosts/appkit_webview.mojo) ----------
+
+    def place_webview(mut self, i: Int, box: Int, self_addr: Int):
+        """WebComponent node i's WKWebView into its box: the one its key (tag, id) already has (moved from the old
+        screen's box: it is never loaded again), or a new one. Without WebKit the box keeps its `instead` view."""
+        ref n = self.rt.shown.nodes[i]
+        if not is_widget_tag(n.hint) or not webviews_start(self.webviews, Self.A.web_assets(), self.target, self_addr):
+            return
+        var mw = mac_at(self.webviews)
+        var k = mw[].core.slot_of(n.hint, n.value)
+        if k < 0:
+            k = webview_new(self.webviews, n.hint, n.value)
+        var view = mw[].core.slots[k].view
+        var parent = msg(view, "superview")
+        if parent != box:
+            if parent != 0:
+                var fr = msg(self.window, "firstResponder") if self.window != 0 else 0
+                if fr != 0 and (fr == view or ((msg(fr, "isKindOfClass:", cls("NSView")) & 0xFF) != 0 and (msg(fr, "isDescendantOf:", view) & 0xFF) != 0)):
+                    self.web_focus = view  # (someone is typing in it: the keyboard follows it into the new screen)
+                _ = msg(view, "removeFromSuperview")
+            _ = msg(box, "setDetachesHiddenViews:", 1)
+            _ = msg(box, "addArrangedSubview:", view)
+            _ = msg(msg(msg(view, "widthAnchor"), "constraintEqualToAnchor:", msg(box, "widthAnchor")), "setActive:", 1)
+        if mw[].core.slots[k].gone:  # (its web process ended twice: the stand-in shows, D-621)
+            webview_instead(view)
+            return
+        _ = msg(view, "setHidden:", 0)
+        var views = msg(box, "arrangedSubviews")
+        for j in range(msg(views, "count")):  # (the stand-in stays built, hidden)
+            var v = msg(views, "objectAtIndex:", j)
+            if v != view:
+                _ = msg(v, "setHidden:", 1)
+
+    def system_dark(self) -> Bool:
+        """Whether the system (or the app's NSApp appearance, which a test step sets) is in dark mode."""
+        var app = msg(cls("NSApplication"), "sharedApplication")
+        var look = msg(app, "effectiveAppearance")
+        return look != 0 and "Dark" in from_ns(msg(look, "name"))
+
+    def follow_appearance(mut self, self_addr: Int):
+        """The system's light/dark mode, told to the app (App.appearance) when the window opens and whenever it changes
+        (a run-loop turn after the system says so, never inside its notification); the screen follows (apply)."""
+        var dark = self.system_dark()
+        if (1 if dark else 0) == self.dark_told:
+            return
+        var first = self.dark_told < 0
+        self.dark_told = 1 if dark else 0
+        var d = self.rt.appearance(dark)
+        if not first:
+            if self.report.on:
+                self.report.cause = "appearance " + ("dark" if dark else "light")
+            self.apply(d, self_addr)
+
+    def sync_webviews(mut self, self_addr: Int):
+        """After a build or patches: each shown WebComponent's page gets the theme and its props when they changed (JSON,
+        through mojoui.native.receive: the widget's update(), never a remount); views whose key left go; commands go out."""
+        var mw = mac_at(self.webviews)
+        if mw[].core.state != 1:
+            self.send_commands(self_addr)
+            return
+        for ref slot in mw[].core.slots:
+            slot.seen = False
+        var theme_key = String("")
+        var theme_msg = String("")
+        for i in range(len(self.rt.shown.nodes)):
+            ref n = self.rt.shown.nodes[i]
+            if n.kind != WEBCOMP:
+                continue
+            var k = mw[].core.slot_of(n.hint, n.value)
+            if k < 0:
+                continue
+            mw[].core.slots[k].seen = True
+            if theme_msg == "":
+                var t = self.rt.app.theme()
+                theme_key = t.key()
+                theme_msg = theme_message(t)
+            if mw[].core.slots[k].theme != theme_key:
+                mw[].core.slots[k].theme = theme_key
+                webview_send(self.webviews, k, theme_msg)
+            if mw[].core.slots[k].props != n.text:
+                mw[].core.slots[k].props = n.text
+                webview_send(self.webviews, k, '{"widget":{"tag":' + json_string(n.hint) + ',"id":' + String(n.value) + ',"props":' + json_string(n.text) + "}}")
+        var k = len(mw[].core.slots) - 1
+        while k >= 0:
+            if not mw[].core.slots[k].seen:
+                if mw[].core.slots[k].view == self.web_focus:
+                    self.web_focus = 0
+                webview_drop(self.webviews, k)
+            k -= 1
+        if self.web_focus != 0 and msg(self.web_focus, "window") != 0:
+            _ = msg(msg(self.web_focus, "window"), "makeFirstResponder:", self.web_focus)
+            self.web_focus = 0
+        self.send_commands(self_addr)
+
+    def send_commands(mut self, self_addr: Int):
+        """The widget commands the app asked for, each to its widget's page; one whose widget isn't on the screen is
+        answered with an error (through the inbox, on the next run-loop turn, as a page's reply is)."""
+        var commands = self.rt.take_commands()
+        if len(commands) == 0:
+            return
+        var mw = mac_at(self.webviews)
+        for c in commands:
+            var k = mw[].core.slot_of(c.tag, c.widget) if mw[].core.state == 1 else -1
+            if k >= 0:
+                if c.reply != NO_MSG or c.name == "mojoui.set":  # (an agent's set: its answer is taken, then dropped by the runtime, D-636)
+                    mw[].core.sent_to(c.seq, c.tag, c.widget)  # (only this widget's page may answer it, D-620)
+                webview_send(self.webviews, k, '{"commands":[' + c.json() + "]}")
+            elif c.reply != NO_MSG:
+                var why = "no widget " + c.tag + "#" + String(c.widget) + " on the screen" + ("" if mw[].core.state == 1 else " (no WebKit)")
+                mw[].core.inbox.append(Inbound(IN_REPLY, c.tag, c.widget, "", "null", c.seq, why))
+                mw[].target = self.target
+                mw[].host_addr = self_addr
+                webview_arm(self.webviews)
+
+    def webview_inbox(mut self, self_addr: Int):
+        """Hands the pages' events and replies to update(), in order (by key, not node number: the screen may have been
+        rebuilt since, D-595)."""
+        var mw = mac_at(self.webviews)
+        mw[].core.armed = False
+        while len(mw[].core.inbox) > 0:
+            var m = mw[].core.inbox.pop(0)
+            if m.kind == IN_EVENT:
+                for i in range(len(self.rt.shown.nodes)):
+                    if self.rt.shown.nodes[i].kind == WEBCOMP and self.rt.shown.nodes[i].hint == m.tag and self.rt.shown.nodes[i].value == m.id:
+                        if self.report.on:
+                            self.report.cause = "widget " + m.tag + " " + m.name
+                        self.apply(self.rt.widget_event(i, m.name, m.data), self_addr)
+                        break
+            elif self.rt.knows_reply(m.seq):
+                if self.report.on:
+                    self.report.cause = "reply " + m.tag
+                self.apply(self.rt.reply(m.seq, m.data, m.error), self_addr)
+
 
 def kind_name(kind: Int) -> String:
     """A node's kind, for the report."""
@@ -2812,7 +2999,7 @@ def kind_name(kind: Int) -> String:
         (TOGGLE, "Toggle"), (DROPDOWN, "Dropdown"), (SLIDER, "Slider"), (PROGRESS, "Progress"), (DIVIDER, "Divider"), (SCROLL, "Scroll"), (IMAGE, "Image"),
         (SEGMENTED, "Segmented"), (RADIO, "Radio"), (TEXTAREA, "TextArea"), (ALERT, "Alert"), (TABS, "Tabs"), (NAVBAR, "NavBar"), (DATE, "Date"),
         (ICON, "Icon"), (GRID, "Grid"), (LAZYLIST, "LazyList"), (CANVAS, "Canvas"), (BOARD, "Board"), (OVERLAY, "Overlay"), (MENUBAR, "MenuBar"),
-        (MENU, "Menu"), (ITEM, "Item"), (DIALOG, "Dialog"), (TOAST, "Toast"), (POPOVER, "Popover"), (CLIPBOARD, "Clipboard"), (TABLE, "Table"), (ROUTE, "Route")]
+        (MENU, "Menu"), (ITEM, "Item"), (DIALOG, "Dialog"), (TOAST, "Toast"), (POPOVER, "Popover"), (CLIPBOARD, "Clipboard"), (TABLE, "Table"), (ROUTE, "Route"), (WEBCOMP, "WebComponent")]
     for p in names:
         if p[0] == kind:
             return p[1]
@@ -3360,6 +3547,37 @@ def run_step[A: App](host_addr: Int, step: String):
             host[].canvases[k].moved = True
             host[].canvas_send(node, PAN, sx + dx / 2, sy + dy / 2, dx / 2, dy / 2, 1, host_addr)
             host[].canvas_send(node, PAN, sx + dx, sy + dy, dx / 2, dy / 2, 1, host_addr)
+    elif verb == "webjs" or verb == "webkill" or verb == "webtype" or verb == "webclick":
+        # webjs:<tag>#<id>=<expression>: its value (awaited) in that widget's page, in the log as JS: <json>;
+        # webkill:<tag>#<id>: ends its web process, as a crash would; webtype:<tag>#<id>=<text>: a click into the view,
+        # then real key events; webclick:<tag>#<id>=<CSS selector>: a real click on that element (the next step waits)
+        var key = split_at(kv[0], "#")
+        var mw = mac_at(host[].webviews)
+        var k = mw[].core.slot_of(key[0], to_int(key[1])) if mw[].core.state == 1 else -1
+        if k < 0:
+            host[].report.note("TEST: no web view " + kv[0])
+            if verb == "webjs":
+                host[].report.note('JS: "no web view"')
+            return
+        if verb == "webjs":
+            host[].probe_pending = True
+            webview_probe(host[].webviews, k, kv[1])
+        elif verb == "webkill":
+            webview_kill(host[].webviews, k)
+        elif verb == "webtype":
+            webview_type(host[].webviews, k, kv[1])
+        else:
+            webview_click(host[].webviews, k, kv[1])
+    elif verb == "scheme":  # scheme:dark / scheme:light: the app's appearance switches, as the system's would (GTK's word)
+        var app = msg(cls("NSApplication"), "sharedApplication")
+        _ = msg(app, "setAppearance:", msg(cls("NSAppearance"), "appearanceNamed:", ns_string("NSAppearanceNameDarkAqua" if rest == "dark" else "NSAppearanceNameAqua")))
+        host[].follow_appearance(host_addr)
+    elif verb == "set":  # set:<tag>#<id>.<field>=<JSON>: what an agent's set does (Runtime.set_widget → "mojoui.set" to the page)
+        var key = split_at(kv[0], "#")
+        var at = split_at(key[1], ".")
+        if not host[].rt.set_widget(key[0], to_int(at[0]), at[1], kv[1]):
+            host[].report.note("TEST: no widget " + kv[0] + " on the screen, or a value that isn't JSON")
+        host[].send_commands(host_addr)
     elif verb == "resize":  # resize:900x700: the window's content size, as a drag of its edge ends
         var wh = split_at(rest, "x")
         _ = msg(host[].window, "setContentSize:", Float64(to_int(wh[0])), Float64(to_int(wh[1])))
@@ -3371,6 +3589,22 @@ def on_test_step[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     """The next MOJOUI_TEST step, then a picture once the screen settles; after the last, quit."""
     var addr = msg(number, "longLongValue")
     var host = host_at[A](addr)
+    # (web views: the first step waits for every page to load and its widget to mount, as GTK's runs do (20 s at
+    # most); a web step's probe, click or crash finishes before the next (15 s at most))
+    var waits = (host[].step_at == 0 and not webviews_ready(host[].webviews)) or webview_busy(host[].webviews)
+    if waits:
+        if host[].step_wait_from == 0:
+            host[].step_wait_from = Int(now_ns())
+        if Int(now_ns()) - host[].step_wait_from < (20_000_000_000 if host[].step_at == 0 else 15_000_000_000):
+            _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), Float64(0.05))
+            return
+        host[].report.note("TEST: the web views didn't settle in time")
+    host[].step_wait_from = 0
+    mac_at(host[].webviews)[].busy = False
+    if host[].probe_pending:
+        host[].probe_pending = False
+        var mw = mac_at(host[].webviews)
+        host[].report.note("JS: " + (mw[].core.probe_result if mw[].core.probe_done else String('"timed out"')))
     if host[].step_at >= len(host[].steps):
         host[].report.note("TEST: done, " + String(len(host[].steps)) + " steps")
         if host[].sheet != 0:  # (an open sheet refuses terminate: the Settings run hung until the runner killed it, 2026-10-24)
@@ -3392,6 +3626,30 @@ def on_test_step[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     if step.startswith("wait:") or step.startswith("pause:"):
         wait = Float64(to_int(split_at(step, ":")[1])) / 1000.0
     _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), wait)
+
+
+def on_web_inbox[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    """The pages' events and replies, on a run-loop turn of their own (never inside WebKit's callback)."""
+    var addr = msg(number, "longLongValue")
+    host_at[A](addr)[].webview_inbox(addr)
+
+
+def on_system_appearance[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
+    """The system switched light/dark: only queued (NSApp's appearance settles a moment later; never rebuild inside a
+    notification, docs/lessons.md)."""
+    var addr = 0
+    var wins = msg(msg(cls("NSApplication"), "sharedApplication"), "windows")
+    for i in range(msg(wins, "count")):  # (the host's window: its delegate is this target, its identifier the host's address)
+        var w = msg(wins, "objectAtIndex:", i)
+        if msg(w, "delegate") == target and msg(w, "identifier") != 0:
+            addr = msg(msg(w, "identifier"), "longLongValue")
+    if addr != 0:
+        _ = msg(target, "performSelector:withObject:afterDelay:", sel("appearanceLater:"), ns_number(addr), Float64(0.1))
+
+
+def on_appearance_later[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    var addr = msg(number, "longLongValue")
+    host_at[A](addr)[].follow_appearance(addr)
 
 
 def on_window_resized[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
@@ -3698,6 +3956,9 @@ def run[A: App]() -> c_int:
     add_method(c, "debugQueued:", on_debug_queued[A], "v@:@")
     add_method(c, "effectsDue:", on_effects_due[A], "v@:@")
     add_method(c, "testStep:", on_test_step[A], "v@:@")
+    add_method(c, "webInbox:", on_web_inbox[A], "v@:@")
+    add_method(c, "systemAppearance:", on_system_appearance[A], "v@:@")
+    add_method(c, "appearanceLater:", on_appearance_later[A], "v@:@")
     add_method(c, "windowDidResize:", on_window_resized[A], "v@:@")
     add_method(c, "windowResizeLater:", on_window_resize_later[A], "v@:@")
     add_method(c, "showPopover:", on_show_popover[A], "v@:@")
@@ -3755,6 +4016,9 @@ def run[A: App]() -> c_int:
     _ = msg(host[].window, "setReleasedWhenClosed:", 0)
     _ = msg(host[].window, "setIdentifier:", ns_string(String(addr)))  # (windowDidResize: finds the host by it)
     _ = host[].rt.resize(size[0], size[1])  # the app lays out to its window from the first screen (App.resize)
+    host[].follow_appearance(addr)  # (light or dark, before the first screen: App.appearance, D-673)
+    _ = msg(msg(cls("NSDistributedNotificationCenter"), "defaultCenter"), "addObserver:selector:name:object:", host[].target,
+            sel("systemAppearance:"), ns_string("AppleInterfaceThemeChangedNotification"), 0)
     host[].show(addr)
     host[].schedule_effects(addr)  # (what the starting state asked for)
     _ = msg(host[].window, "center")
