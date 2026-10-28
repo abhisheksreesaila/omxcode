@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Experiment 35 (2026-10-27): AG-UI, agents that build the screen (goal 35)
+- **Setup:** this worktree's own pixi env gained the official AG-UI Python SDK (ag-ui-protocol 1.0.0), anthropic, jsonpatch and jsonschema (the last two only as the checks' independent oracles).
+- **Worked:** streams in mojoui.http (each SSE event its own Event, then the end; cancel; idle timeout; Transport.stream is the seam); mojoui.jsonpatch (RFC 6902, 37 cases agree with the jsonpatch library); mojoui.agui (every listed AG-UI event, five SDK-recorded streams read into the same conversation and state as an independent Python reading; RunAgentInputs valid by the SDK's models); mojoui.genui (one catalog → the render_ui JSON Schema, the validator, the native renderer; 24 cases agree with jsonschema); examples/agentchat on GTK and the web: streamed words, a chart and a form built by the agent, a button as the tool result, edits as state, refused UI reported to the agent. The live backend speaks the OpenAI-compatible API (the OMX Console by default, Claude optional) and repairs small models' tool JSON.
+- **Broke and fixed:** a sparkline drew black on the web (fill the card first), the web capped a filling text field at 70vw (D-693), agent cards centred; Mojo aliasing errors in JDoc (copy a list element before a `mut self` call).
+- **Means:** an agent can build native UI in a mojoui app as validated data, never code, through an open protocol. Unverified: a run against a real model (the checks use a stand-in server); the Mac.
+- **Next:** the reviewer; a live run against the OMX Console by hand.
+
 ## Experiment 34 M3 (2026-10-27): the widgets app on GTK, each JS widget in a WebKitGTK view (goal 34)
 - **Setup:** WebKitGTK 6.0 (GTK 4) isn't on conda-forge and needs root to install here: Arch's signed package, pinned by SHA-256, unpacked into build/ and laid over /usr/lib by a bubblewrap launcher (scripts/webkitgtk.sh, D-608).
 - **Worked:** each WebComponent gets its own WebKitGTK view loading the web's bundles byte for byte and the same mojoui-widgets.js from mojoui://app with the web's CSP. Real typing (XTest) in CodeMirror reaches update(); the view survives partial and full rebuilds (one mount, keyboard kept); Load sample shows Mojo's text; counter clicks, props and a command's reply work; the boxes match the web's within goal 32's tolerance. eval, inline script, remote and file loads, popups and navigation are blocked; non-JSON or forged messages are refused.
