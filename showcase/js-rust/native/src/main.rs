@@ -48,15 +48,17 @@ struct Args {
     out: std::path::PathBuf,
     shot: Option<std::path::PathBuf>,
     offscreen: bool,
+    positions: bool, // --no-positions: skip positions.bin (benchmarks: no 8N-byte readback at the end)
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { n: SIZES[0], scripted: false, frames: 600, out: ".".into(), shot: None, offscreen: false };
+    let mut a = Args { n: SIZES[0], scripted: false, frames: 600, out: ".".into(), shot: None, offscreen: false, positions: true };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         match k.as_str() {
             "--scripted" => a.scripted = true,
             "--offscreen" => a.offscreen = true,
+            "--no-positions" => a.positions = false,
             "--n" => a.n = it.next().and_then(|s| s.parse().ok()).expect("--n N"),
             "--frames" => a.frames = it.next().and_then(|s| s.parse().ok()).expect("--frames F"),
             "--out" => a.out = it.next().expect("--out DIR").into(),
@@ -541,7 +543,9 @@ impl App {
         let mut steps = gpu.steps.clone();
         steps.resize(self.args.frames as usize, f64::NAN);
         std::fs::create_dir_all(&self.args.out).unwrap();
-        std::fs::write(self.args.out.join("positions.bin"), gpu.read_positions()).unwrap();
+        if self.args.positions {
+            std::fs::write(self.args.out.join("positions.bin"), gpu.read_positions()).unwrap();
+        }
         let js = |v: &[f64]| v.iter().map(|x| if x.is_nan() { "null".to_string() } else { format!("{x:.4}") }).collect::<Vec<_>>().join(",");
         let present = match &gpu.target {
             Target::Window { config, .. } => format!("{:?}", config.present_mode),

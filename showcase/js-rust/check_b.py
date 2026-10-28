@@ -90,7 +90,7 @@ def free_port():
         return s.getsockname()[1]
 
 
-def run_wasm(n, frames, out, shot=None, threads=None):
+def run_wasm(n, frames, out, shot=None, threads=None, positions=True):
     """threads: the rayon pool's size (default: navigator.hardwareConcurrency). Cold start counts from before
     Chromium's launch, like the other rows."""
     from playwright.sync_api import sync_playwright
@@ -124,7 +124,7 @@ def run_wasm(n, frames, out, shot=None, threads=None):
                 page.on("pageerror", lambda e: errors.append(str(e)))
                 page.on("crash", lambda _: errors.append("renderer crashed"))
                 page.on("console", lambda m: m.type == "error" and errors.append(m.text))
-                page.goto(f"http://127.0.0.1:{port}/index.html?scripted=1&n={n}&frames={frames}" + (f"&threads={threads}" if threads else ""))
+                page.goto(f"http://127.0.0.1:{port}/index.html?scripted=1&n={n}&frames={frames}" + (f"&threads={threads}" if threads else "") + ("" if positions else "&positions=0"))
                 page.on("console", lambda m: os.environ.get("CHECK_B_VERBOSE") and print("console:", m.type, m.text))
                 try:
                     page.wait_for_function("document.title === 'done'", timeout=int(os.environ.get("CHECK_B_TIMEOUT_MS", "600000")), polling=200)
@@ -154,11 +154,11 @@ def run_wasm(n, frames, out, shot=None, threads=None):
         srv.wait()
 
 
-def run_native(n, frames, out, shot=None):
+def run_native(n, frames, out, shot=None, positions=True):
     out.mkdir(parents=True, exist_ok=True)
     headless.ensure()
     env = {**os.environ, "WGPU_BACKEND": "vulkan"}
-    cmd = [str(NATIVE), "--scripted", "--offscreen", "--n", str(n), "--frames", str(frames), "--out", str(out)]
+    cmd = [str(NATIVE), "--scripted", "--offscreen", "--n", str(n), "--frames", str(frames), "--out", str(out)] + ([] if positions else ["--no-positions"])
     ppm = None
     if shot:
         ppm = out / "shot.ppm"

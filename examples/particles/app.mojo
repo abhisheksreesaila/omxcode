@@ -143,6 +143,7 @@ struct Main(App):
     var scripted: Bool
     var frames: Int
     var out: String
+    var positions: Bool  # --positions 0: don't write positions.bin (benchmarks: no 8N-byte copy at the end)
     var totals: List[Float64]
     var steps: List[Float64]
     var works: List[Float64]
@@ -152,6 +153,7 @@ struct Main(App):
         self.n = number(flag("--n", "PARTICLES_N", "1000000"), 1_000_000)
         self.frames = number(flag("--frames", "PARTICLES_FRAMES", "600"), 600)
         self.out = flag("--out", "PARTICLES_OUT", ".")
+        self.positions = flag("--positions", "PARTICLES_POSITIONS", "1") != "0"
         var sizes = materialize[SIZES]()
         self.size = 0
         for i in range(len(sizes)):
@@ -256,14 +258,17 @@ struct Main(App):
 
     def finish(mut self):
         """Scripted: positions after `frames` steps, the timings, then quit."""
-        self.cloud.download()  # (the GPU's points into the cloud's own CPU copy: no second copy of all of them)
-        var xy = List[Float32](length=2 * self.n, fill=0)
-        for i in range(self.n):
-            xy[2 * i] = self.cloud.host[4 * i]
-            xy[2 * i + 1] = self.cloud.host[4 * i + 1]
+        var xy = List[Float32]()
+        if self.positions:
+            self.cloud.download()  # (the GPU's points into the cloud's own CPU copy: no second copy of all of them)
+            xy = List[Float32](length=2 * self.n, fill=0)
+            for i in range(self.n):
+                xy[2 * i] = self.cloud.host[4 * i]
+                xy[2 * i + 1] = self.cloud.host[4 * i + 1]
         try:
-            with open(self.out + "/positions.bin", "w") as f:
-                f.write_bytes(Span(unsafe_ptr=xy.unsafe_ptr().bitcast[UInt8](), length=8 * self.n))
+            if self.positions:
+                with open(self.out + "/positions.bin", "w") as f:
+                    f.write_bytes(Span(unsafe_ptr=xy.unsafe_ptr().bitcast[UInt8](), length=8 * self.n))
             var parts = self.measure()
             with open(self.out + "/timings.json", "w") as f:
                 f.write(

@@ -92,7 +92,8 @@ function tick(now) {
 }
 
 async function finish() {
-  const positions = new Float32Array(new Float32Array(wasm.memory.buffer, field.pos_ptr(), 2 * n)); // copy out of shared memory
+  // copy out of shared memory (&positions=0: skip it, for benchmarks)
+  const positions = q.get('positions') === '0' ? new Float32Array(0) : new Float32Array(new Float32Array(wasm.memory.buffer, field.pos_ptr(), 2 * n));
   const timings = {
     row: 'B-wasm', n, frames, threads: isolated ? threads : 1, crossOriginIsolated: isolated, renderer, simd: true,
     first_frame_ms: firstFrame, first_frame_epoch_ms: performance.timeOrigin + firstFrame,

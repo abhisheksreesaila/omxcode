@@ -30,12 +30,13 @@ def build():
         sys.exit("C: FAIL build\n" + "\n".join(l for l in (r.stdout + r.stderr).splitlines() if "error" in l)[:4000])
 
 
-def scripted(n, frames, out):
+def scripted(n, frames, out, positions=True, env=None):
     """Runs the app scripted; returns (timings, cold start ms to the first drawn frame, peak RSS MiB)."""
     headless.ensure()
     t0 = time.perf_counter()
-    p = subprocess.Popen([str(APP), "--scripted", "--n", str(n), "--frames", str(frames), "--out", str(out)],
-                         cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    p = subprocess.Popen([str(APP), "--scripted", "--n", str(n), "--frames", str(frames), "--out", str(out)]
+                         + ([] if positions else ["--positions", "0"]),
+                         cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=dict(os.environ, **(env or {})))
     cold = None
     log = []
     for line in p.stdout:
