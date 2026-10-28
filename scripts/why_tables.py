@@ -113,7 +113,7 @@ def verdict(res):
         f"{f2(c20['readback_ms'])} ms copying the finished picture to the CPU; with one wait a frame that is {f2(c20.get('work_ms'))} ms. "
         f"The other {f2(rest)} ms of its {f2(c20['frame_ms'])} ms frame is inferred, not measured: the frame minus that work. "
         f"We read it as the GTK host taking the picture as a texture and compositing it (here with GTK's software renderer on a virtual display), "
-        f"because it hardly depends on N: omxcode's frame is {f2(c1['frame_ms'])} ms at 1M and {f2(c20['frame_ms'])} ms at {mn(top)}, "
+        f"because it hardly depends on N: the same residual is {f2(c1['frame_ms'] - c1['work_ms'])} ms at 1M and {f2(rest)} ms at {mn(top)}, "
         f"{top // 1_000_000} times the particles. The copy and that path, not the GPU, are what make omxcode slower today; "
         "drawing straight from the GPU into the window is not built yet.</li>",
         f"<li><b>omxcode's frame is noisy.</b> Its spread across the three runs is up to ±{f2(max(row(res, 'C', n)['frame_ms_spread'] for n in res['protocol']['sizes']))} ms"
@@ -216,7 +216,8 @@ SEAMS = {
          "COOP/COEP headers, a worker (rayon blocks its caller), <code>-Z build-std</code> unlocked on a stable compiler, and a "
          "<code>sed</code> patch to a generated file. The native build repeats the step in WGSL and pads its structs by hand.",
     "C": "One Mojo file. The step is a Mojo function (<code>advance</code>) handed to the GPU as a parameter; the slider and "
-         "the readout are widgets in the same <code>view()</code>. No glue, no second language, one build.",
+         "the readout are widgets in the same <code>view()</code>. No glue, no second language, one build. It leans on the "
+         "framework's PointCloud, which this goal extended (counted in chapter 2).",
 }
 
 
@@ -380,7 +381,8 @@ def mcp():
     out.append("</div>")
     out.append(f"<p style='font-size:13.5px'>Recorded {E(t['date'])} by scripts/why_mcp.py: {E(t['app'])}; the agent host attached "
                "to it. Printed here from the committed transcript (docs/goals/36/mcp-transcript.json, every JSON-RPC line after the "
-               "MCP handshake), unedited. Nothing in <code>app.mojo</code> was written for it.</p>")
+               "MCP handshake), unedited. The fps in it is the app's own smoothed readout with an agent attached, not the measurement. "
+               "Nothing in <code>app.mojo</code> was written for it.</p>")
     return "\n".join(out)
 
 

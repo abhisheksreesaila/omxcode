@@ -1,0 +1,117 @@
+{
+ "date": "2026-10-28 03:49",
+ "commit": "7680e98",
+ "app": "build/particles/linux/particles: the native GTK build, on the headless display (Xvfb), GDK_DEBUG=no-vsync",
+ "agent": "mojoui/hosts/agent.py --attach <MOJOUI_AGENT_SOCKET>, driven by scripts/agent_client.py's Client",
+ "load1": 2.92,
+ "messages": [
+  {
+   "from": "agent",
+   "t": 1793184543.75,
+   "msg": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+     "name": "screen",
+     "arguments": {}
+    }
+   }
+  },
+  {
+   "from": "agent host",
+   "t": 1793184543.758,
+   "msg": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+     "content": [
+      {
+       "type": "text",
+       "text": "Particles · design: Omxqua-dark · 2 tools on this screen\n\n\"Particles\"\n\"1M particles · 173 fps · step 0.10 ms on NVIDIA GeForce RTX 3090\"\n\"Press and drag to pull\"\n\"Count\"\nSlider 0 → slider\n\"1M\"\nCanvas 1280×720 (render it; read it) → canvas-0\n\nTools (call them by name, or act with name + value):\n  slider — Slider (now 0)\n  canvas-0 — A drawn view (1280×720 points): tap, double, secondary (a right click), press, release, or a key"
+      }
+     ],
+     "isError": false
+    }
+   }
+  },
+  {
+   "from": "agent",
+   "t": 1793184543.758,
+   "msg": {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+     "name": "slider",
+     "arguments": {
+      "value": 50
+     }
+    }
+   }
+  },
+  {
+   "from": "agent host",
+   "t": 1793184543.758,
+   "msg": {
+    "jsonrpc": "2.0",
+    "method": "notifications/tools/list_changed"
+   }
+  },
+  {
+   "from": "agent host",
+   "t": 1793184548.876,
+   "msg": {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "result": {
+     "content": [
+      {
+       "type": "text",
+       "text": "Did slider.\nNow: 5M particles · 195 fps · step 0.20 ms on NVIDIA GeForce RTX 3090\nNow: 5M"
+      }
+     ],
+     "isError": false
+    }
+   }
+  },
+  {
+   "from": "agent",
+   "t": 1793184551.876,
+   "msg": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "tools/call",
+    "params": {
+     "name": "read",
+     "arguments": {}
+    }
+   }
+  },
+  {
+   "from": "agent host",
+   "t": 1793184551.876,
+   "msg": {
+    "jsonrpc": "2.0",
+    "method": "notifications/tools/list_changed"
+   }
+  },
+  {
+   "from": "agent host",
+   "t": 1793184551.877,
+   "msg": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "result": {
+     "content": [
+      {
+       "type": "text",
+       "text": "Particles\n5M particles · 195 fps · step 0.20 ms on NVIDIA GeForce RTX 3090\nPress and drag to pull\nCount\n5M"
+      }
+     ],
+     "isError": false
+    }
+   }
+  }
+ ]
+}

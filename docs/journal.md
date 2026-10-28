@@ -746,3 +746,5 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Item 4: A's splat got the load-first skip (D-731); check_a still 100 % within 1e-3. Item 8: PSS beside RSS (D-732). Item 3: B split, C's framework lines counted from git (D-733): 164 in mojoui/gpu.mojo, 88 in its test. Item 10: GOAL.md wording (D-730).
 - `git diff` here has diff.mnemonicPrefix on (w/ and i/ prefixes): the counter passes --src-prefix/--dst-prefix explicitly.
 - One full gated rerun (every row) rather than A alone: the bench script itself changed (PSS, counts), so every row's freshness hash changed anyway, and one run keeps one protocol.
+- The gated rerun (3206 s): every row through the quiet gate, PSS beside RSS. A's load-first skip measured slower for A at large N (10M 1.51 → 1.70 ms, 20M 2.67 → 3.26 ms against 349eb23's run); the ranking didn't move; the page says so beside the table.
+- MCP transcript recorded on the GTK build (attached, no-vsync): 173 fps at 1M, 195 fps at 5M in the app's own readout; the page prints it from docs/goals/36/mcp-transcript.json.
