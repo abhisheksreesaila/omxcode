@@ -192,10 +192,15 @@ def _splat_kernel[f: PlaceFn, g: TintFn](
         var p = pts.unsafe_offset(4 * i).unsafe_load[width=4]()
         var at = f(p, Int(w32), Int(h32), k)
         if at >= 0:
+            # Saturation early-out: a channel's sum only grows and the picture clamps it at GLOW_ONE, so once it is
+            # there more light changes nothing: skip that channel's atomic (where particles pile up, most of them).
+            # (A load, not fetch_add's old value: the tint is the app's, so no channel is known to fill last.)
+            comptime one = UInt32(Int(GLOW_ONE))
             var add = _glow(g(p, k))
-            _ = Atomic.fetch_add[ordering=Ordering.RELAXED](light.unsafe_offset(3 * at), add[0])
-            _ = Atomic.fetch_add[ordering=Ordering.RELAXED](light.unsafe_offset(3 * at + 1), add[1])
-            _ = Atomic.fetch_add[ordering=Ordering.RELAXED](light.unsafe_offset(3 * at + 2), add[2])
+            var px = light.unsafe_offset(3 * at)
+            comptime for c in range(3):
+                if add[c] > 0 and Atomic.load[ordering=Ordering.RELAXED](px + c) < one:
+                    _ = Atomic.fetch_add[ordering=Ordering.RELAXED](px + c, add[c])
 
 
 def _light_rgba(r: UInt32, g: UInt32, b: UInt32) -> UInt32:
@@ -232,6 +237,8 @@ struct PointCloud(Movable):
     var uploads: Int
     var milliseconds: Float64  # last bin() + shade(), including the copy to the screen's memory
     var light: Optional[DeviceBuffer[DType.uint32]]  # splat(): added light, three channels per pixel, then the picture
+    var splat_ms: Float64  # splat(timed=True): the GPU's part (clear, splat, resolve), then the copy to the CPU
+    var readback_ms: Float64
     var host_light: List[UInt32]
     var light_capacity: Int
 
@@ -258,6 +265,8 @@ struct PointCloud(Movable):
         self.light = None
         self.host_light = List[UInt32]()
         self.light_capacity = 0
+        self.splat_ms = 0
+        self.readback_ms = 0
         self.upload()
 
     def __init__(out self, var points: List[Float32], use_gpu: Bool = True):
@@ -279,6 +288,8 @@ struct PointCloud(Movable):
         self.light = None
         self.host_light = List[UInt32]()
         self.light_capacity = 0
+        self.splat_ms = 0
+        self.readback_ms = 0
         self.upload()
 
     def upload(mut self):
@@ -405,8 +416,9 @@ struct PointCloud(Movable):
     #   cloud.splat[place, tint](surface, k)                    # each point adds its light to one pixel (additive)
     #   var xyab = cloud.points()                               # the current points, back on the CPU
 
-    def step[f: StepFn](mut self, k: Knobs):
-        """Replaces every point with f(point, k), in place; returns once it's done (milliseconds: how long)."""
+    def step[f: StepFn](mut self, k: Knobs, timed: Bool = False):
+        """Replaces every point with f(point, k), in place. On the GPU it is queued: the next splat(), download() or
+        points() waits for it (one wait a frame). timed=True waits here and sets milliseconds (the CPU always does)."""
         var t0 = now_ns()
         comptime if GPU_BUILD:
             if self.on_gpu():
@@ -416,8 +428,9 @@ struct PointCloud(Movable):
                         self.device.value().unsafe_ptr(), Int32(self.count), k,
                         grid_dim=ceildiv(self.count, 256), block_dim=256,
                     )
-                    ctx.synchronize()
-                    self.milliseconds = Float64(now_ns() - t0) / 1e6
+                    if timed:
+                        ctx.synchronize()
+                        self.milliseconds = Float64(now_ns() - t0) / 1e6
                     return
                 except e:
                     self.download()  # (the last good points) then the CPU from now on
@@ -444,10 +457,11 @@ struct PointCloud(Movable):
         self.download()
         return self.host.copy()
 
-    def splat[f: PlaceFn, g: TintFn](mut self, mut surface: Surface, k: Knobs):
+    def splat[f: PlaceFn, g: TintFn](mut self, mut surface: Surface, k: Knobs, timed: Bool = False):
         """Paints the surface black, then each point adds g(point)'s light to the pixel f(point) picks (OUTSIDE or
         FILTERED: none), clamped at white: additive blending. Light adds up as whole numbers, so the GPU and the CPU
-        make the same picture. milliseconds: how long, including the copy into the surface."""
+        make the same picture. milliseconds: how long, including the copy into the surface (and any step() still
+        queued); timed=True also splits it into splat_ms (GPU) and readback_ms (the copy), at the cost of a second wait."""
         var t0 = now_ns()
         var w = surface.width
         var h = surface.height
@@ -469,10 +483,18 @@ struct PointCloud(Movable):
                     ctx.enqueue_function[_resolve_kernel](
                         light.unsafe_ptr(), image.unsafe_ptr(), Int32(total), grid_dim=ceildiv(total, 256), block_dim=256,
                     )
+                    var t1 = t0
+                    if timed:  # (measuring: wait for the kernels, so the copy to the CPU is timed on its own)
+                        ctx.synchronize()
+                        t1 = now_ns()
+                        self.splat_ms = Float64(t1 - t0) / 1e6
                     var dst = UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=surface.address)
                     ctx.enqueue_copy(dst_ptr=dst, src_buf=image)
                     ctx.synchronize()
-                    self.milliseconds = Float64(now_ns() - t0) / 1e6
+                    var t2 = now_ns()
+                    if timed:
+                        self.readback_ms = Float64(t2 - t1) / 1e6
+                    self.milliseconds = Float64(t2 - t0) / 1e6
                     return
                 except e:
                     self.download()

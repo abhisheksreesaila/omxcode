@@ -88,8 +88,25 @@ def test_gpu_matches_cpu() raises:
     _ = len(pb)
 
 
+def test_timed_parts() raises:
+    """step() is queued on the GPU; timed=True waits and times it; splat(timed=True) splits its time in two."""
+    if not gpu_present():
+        return
+    var g = cloud(100_000, True)
+    var k = Knobs(9.8, 1.0 / 60.0, 0, 0, 0, 0, 0, 0)
+    g.step[fall](k, timed=True)
+    assert_true(g.milliseconds > 0)
+    var pa = List[UInt32](length=320 * 200, fill=0)
+    var sa = Surface(Int(pa.unsafe_ptr()), 320, 200, 1.0)
+    g.splat[pixel, red](sa, k, timed=True)
+    assert_true(g.splat_ms > 0 and g.readback_ms > 0)
+    assert_true(g.milliseconds >= g.splat_ms + g.readback_ms - 1e-6)
+    _ = len(pa)
+
+
 def main() raises:
     test_step_moves_points_in_place()
     test_splat_adds_light_and_clamps()
     test_gpu_matches_cpu()
+    test_timed_parts()
     print("test_pointcloud_step: ok")

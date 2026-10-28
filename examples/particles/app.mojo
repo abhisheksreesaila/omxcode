@@ -7,7 +7,9 @@
 #
 # Scripted (for measuring): particles --scripted --n 10000 --frames 120 [--out DIR] (or PARTICLES_SCRIPTED=1,
 # PARTICLES_N, PARTICLES_FRAMES, PARTICLES_OUT): no input, the attractor follows c(t), then DIR/positions.bin
-# (N × 2 float32) and DIR/timings.json (per frame: total = frame to frame, step = the GPU step, work = step + draw).
+# (N × 2 float32) and DIR/timings.json (per frame: total = frame to frame, work = step + splat + the copy to the CPU,
+# one GPU wait a frame; then a separate measurement pass of as many frames, each part waited for on its own:
+# step, splat = the GPU's draw, readback = the picture's copy to the CPU).
 
 from std.sys import argv, exit
 from std.os import getenv
@@ -128,7 +130,6 @@ struct Main(App):
     var holding: Bool  # the pointer is down on the field: it is the attractor
     var cx: Float32
     var cy: Float32
-    var version: Int
     var fps: Float64
     var step_ms: Float64
     var shown_fps: Float64  # what the readout says (refreshed four times a second, so it can be read)
@@ -162,7 +163,6 @@ struct Main(App):
         var c = orbit(0)
         self.cx = c[0]
         self.cy = c[1]
-        self.version = 0
         self.fps = 0
         self.step_ms = 0
         self.shown_fps = 0
@@ -214,17 +214,18 @@ struct Main(App):
                 var c = orbit(self.frame)
                 self.cx = c[0]
                 self.cy = c[1]
-            self.cloud.step[advance](self.knobs())
-            self.step_ms = self.cloud.milliseconds
-            if self.scripted:
-                self.steps.append(self.step_ms)
+            # Queued, not waited for: draw()'s splat waits once for both. The readout's step time comes from one
+            # timed step four times a second (never in scripted runs: finish() measures the step on its own pass).
+            var show = t0 - self.shown_at > 250_000_000
+            self.cloud.step[advance](self.knobs(), timed=show and not self.scripted)
             self.frame += 1
-            self.version += 1
             self.undrawn = True
-            if t0 - self.shown_at > 250_000_000:
+            if show:
                 self.shown_at = t0
                 self.shown_fps = self.fps
-                self.shown_step = self.step_ms
+                if not self.scripted:
+                    self.step_ms = self.cloud.milliseconds
+                    self.shown_step = self.step_ms
         elif event.message == GESTURE and not self.scripted:
             if event.number == PRESS or event.number == PAN:
                 self.holding = True
@@ -243,6 +244,7 @@ struct Main(App):
 
     def draw(mut self, canvas: Int, mut surface: Surface):
         self.cloud.splat[place, tint](surface, self.knobs())
+        surface.again = True  # (the field always moves: the host draws it again next frame, no version to bump)
         if not self.drawn_once:
             self.drawn_once = True
             print("particles: first frame", flush=True)
@@ -262,11 +264,13 @@ struct Main(App):
         try:
             with open(self.out + "/positions.bin", "w") as f:
                 f.write_bytes(Span(unsafe_ptr=xy.unsafe_ptr().bitcast[UInt8](), length=8 * self.n))
+            var parts = self.measure()
             with open(self.out + "/timings.json", "w") as f:
                 f.write(
                     '{"n": ' + String(self.n) + ', "frames": ' + String(self.frames) + ', "device": "'
-                    + self.cloud.device_name() + '",\n "total": ' + json_list(self.totals) + ',\n "step": '
-                    + json_list(self.steps) + ',\n "work": ' + json_list(self.works) + "}\n"
+                    + self.cloud.device_name() + '",\n "total": ' + json_list(self.totals) + ',\n "work": '
+                    + json_list(self.works) + ',\n "measured_separately": "step, splat, readback: a second pass, each waited for",\n "step": '
+                    + json_list(self.steps) + ',\n "splat": ' + json_list(parts[0]) + ',\n "readback": ' + json_list(parts[1]) + "}\n"
                 )
         except e:
             print("particles: couldn't write the results: " + String(e))
@@ -274,6 +278,26 @@ struct Main(App):
         _ = len(xy)
         print("particles: wrote " + self.out + "/positions.bin and timings.json", flush=True)
         exit(0)
+
+    def measure(mut self) -> Tuple[List[Float64], List[Float64]]:
+        """Scripted, after the positions are saved: `frames` more frames into a scratch picture, each part waited for on
+        its own (the frame loop waits once a frame, so it can't split them): steps, then (splat GPU ms, readback ms)."""
+        var pixels = List[UInt32](length=W * H, fill=0)
+        var surface = Surface(Int(pixels.unsafe_ptr()), W, H, 1.0)
+        var splats = List[Float64]()
+        var reads = List[Float64]()
+        for _ in range(self.frames):
+            var c = orbit(self.frame)
+            self.cx = c[0]
+            self.cy = c[1]
+            self.cloud.step[advance](self.knobs(), timed=True)
+            self.steps.append(self.cloud.milliseconds)
+            self.cloud.splat[place, tint](surface, self.knobs(), timed=True)
+            splats.append(self.cloud.splat_ms)
+            reads.append(self.cloud.readback_ms)
+            self.frame += 1
+        _ = len(pixels)
+        return (splats^, reads^)
 
     def view(self) -> View:
         # One bar above the field, not islands over it: the field is the whole picture, and nothing has to be
@@ -294,6 +318,6 @@ struct Main(App):
         ).padding(10, 18).height(BAR).align(CENTER).fill()
         return VStack(
             bar^,
-            Canvas(0, self.version, on_gesture=GESTURE, on_frame=FRAME).width(W).height(H),
+            Canvas(0, 0, on_gesture=GESTURE, on_frame=FRAME).width(W).height(H),
             spacing=0,
         ).grow().fill()
