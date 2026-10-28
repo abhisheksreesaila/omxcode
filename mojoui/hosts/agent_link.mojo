@@ -5,8 +5,7 @@
 # checks a person's input does (the runtime's set_widget, the page's declared fields). Plain libc calls; the host
 # watches the descriptors on its main loop (g_unix_fd_add), so requests run between GTK's own events, never inside one.
 
-from std.ffi import external_call, c_int, c_char, c_uint
-from std.memory import Pointer
+from std.ffi import external_call, c_int, c_uint
 from mojoui.json import json_string
 
 comptime AF_UNIX = 1
@@ -48,21 +47,48 @@ def accept_one(fd: Int) -> Int:
     return Int(external_call["accept4", c_int](c_int(fd), Int(0), Int(0), c_int(SOCK_CLOEXEC)))
 
 
-def read_some(fd: Int) -> Tuple[Int, String]:
-    """What has arrived on `fd` without waiting: (bytes read, as text); 0 bytes: the other side closed; -1: nothing yet
-    or an error."""
-    var buf = List[UInt8](length=65537, fill=0)
+def read_some(fd: Int, mut into: List[UInt8]) -> Int:
+    """Appends what has arrived on `fd` (without waiting) to `into`, as raw bytes: decoded only once a line is whole
+    (next_line), so a character split across two reads stays whole. Bytes read; 0: the other side closed; -1: nothing
+    yet or an error."""
+    var buf = List[UInt8](length=65536, fill=0)
     var n = Int(external_call["recv", Int](c_int(fd), Int(buf.unsafe_ptr()), Int(65536), c_int(MSG_DONTWAIT)))
-    if n <= 0:
-        _ = len(buf)
-        return (n, String(""))
-    for k in range(n):
-        if buf[k] == 0:  # (a NUL is never JSON text: the line is refused as not JSON)
-            buf[k] = 1
-    buf[n] = 0
-    var text = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=Int(buf.unsafe_ptr())))
     _ = len(buf)
-    return (n, text^)
+    for k in range(max(n, 0)):
+        into.append(buf[k])
+    return n
+
+
+comptime LINE_NONE = 0  # next_line's answers: no whole line yet
+comptime LINE_OK = 1  # a line, decoded
+comptime LINE_BAD = 2  # a line that isn't UTF-8 text (or holds a NUL): taken out, to be refused
+
+
+def next_line(mut buf: List[UInt8]) -> Tuple[Int, String]:
+    """The first whole line in `buf` (its bytes and newline taken out): (LINE_OK, its text), (LINE_BAD, "") when it
+    isn't valid UTF-8 or holds a NUL (never JSON text), or (LINE_NONE, "") while no newline has arrived."""
+    var at = -1
+    for k in range(len(buf)):
+        if buf[k] == 0x0A:
+            at = k
+            break
+    if at < 0:
+        return (LINE_NONE, String(""))
+    var line = List[UInt8](capacity=at)
+    var nul = False
+    for k in range(at):
+        nul = nul or buf[k] == 0
+        line.append(buf[k])
+    var rest = List[UInt8](capacity=len(buf) - at - 1)
+    for k in range(at + 1, len(buf)):
+        rest.append(buf[k])
+    buf = rest^
+    if nul:
+        return (LINE_BAD, String(""))
+    try:
+        return (LINE_OK, String(from_utf8=Span(line)))
+    except:
+        return (LINE_BAD, String(""))
 
 
 def send_all(fd: Int, text: String) -> Bool:

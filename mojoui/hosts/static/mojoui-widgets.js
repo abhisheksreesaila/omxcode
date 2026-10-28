@@ -61,7 +61,7 @@
   const wrappers = () => document.querySelectorAll('#mojoui-root [data-kind=webcomponent][data-widget]');
   const keep = () => {  // where live widgets wait while the page around them is swapped
     let k = document.getElementById('mojoui-keep');
-    if (!k) { k = document.createElement('div'); k.id = 'mojoui-keep'; k.hidden = true; document.body.append(k); }
+    if (!k) { k = document.createElement('div'); k.id = 'mojoui-keep'; k.hidden = true; (document.body || document.documentElement).append(k); }  // (GTK's page: scanned before its body exists)
     return k;
   };
   const move = (parent, el) => {

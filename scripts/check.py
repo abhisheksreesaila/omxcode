@@ -139,6 +139,89 @@ def raw_link(path, op):
     return json.loads(buf or b"{}")
 
 
+def raw_lines(path, chunks, want):
+    """Raw bytes to the host's agent link, sent in pieces (a pause between them): its first `want` answer lines."""
+    with _socket.socket(_socket.AF_UNIX) as s:
+        s.settimeout(10)
+        s.connect(str(path))
+        for chunk in chunks:
+            s.sendall(chunk)
+            time.sleep(0.3)
+        buf = b""
+        while buf.count(b"\n") < want:
+            got = s.recv(65536)
+            if not got:
+                break
+            buf += got
+    return [json.loads(l) for l in buf.split(b"\n")[:want]]
+
+
+def link_bytes_problems(path, where):
+    """(D-677) A UTF-8 character split across two reads is read whole; a line that isn't UTF-8 is refused as one line
+    (the link answers it and the next), never a crash."""
+    problems = []
+    whole = '{"op":"view","note":"café"}\n'.encode()
+    cut = whole.index(0xC3) + 1
+    bad = b'{"op":"view","note":"\xff\xfe"}\n'
+    try:
+        a, b, c = raw_lines(path, [whole[:cut], whole[cut:] + bad, b'{"op":"view"}\n'], 3)
+    except (OSError, ValueError) as e:
+        return [f"{where}: the agent link broke on split or invalid UTF-8 ({e})"]
+    if not a.get("ok"):
+        problems.append(f"{where}: a request with a character split across reads was refused ({str(a)[:160]})")
+    if b.get("ok") or "UTF-8" not in str(b.get("error", "")):
+        problems.append(f"{where}: a line that isn't UTF-8 wasn't refused as such ({str(b)[:160]})")
+    if not c.get("ok"):
+        problems.append(f"{where}: the line after an invalid one wasn't answered ({str(c)[:160]})")
+    return problems
+
+
+def socket_mode_problems(path, where):
+    """(D-677) The agent link's socket file is the user's alone: mode 0600."""
+    import stat
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    return [] if mode == 0o600 else [f"{where}: the agent socket's mode is {oct(mode)}, not 0o600"]
+
+
+def listening_unix_paths(pid):
+    """Unix sockets with a path that process `pid` listens on (/proc: its descriptors' inodes against /proc/net/unix)."""
+    inodes = set()
+    for fd in Path(f"/proc/{pid}/fd").iterdir():
+        try:
+            t = os.readlink(fd)
+        except OSError:
+            continue
+        if t.startswith("socket:["):
+            inodes.add(t[8:-1])
+    out = []
+    for line in Path("/proc/net/unix").read_text().splitlines()[1:]:
+        f = line.split()
+        if len(f) >= 8 and f[6] in inodes and int(f[3], 16) & 0x10000 and not f[7].startswith("@"):  # (__SO_ACCEPTCON, a path)
+            out.append(f[7])
+    return out
+
+
+def no_socket_unset(cmd, where, env=None, ready=None, seconds=8):
+    """(D-677) With MOJOUI_AGENT_SOCKET unset the host opens no agent link: no listening Unix socket with a path."""
+    e = {k: v for k, v in os.environ.items() if k != "MOJOUI_AGENT_SOCKET"}
+    e.update(env or {})
+    proc = subprocess.Popen(cmd, cwd=ROOT, env=e, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        time.sleep(seconds)
+        if proc.poll() is not None:
+            return [f"{where}: the host ended before it could be looked at: {proc.stdout.read()[-300:]}"]
+        paths = []
+        for pid in [proc.pid] + [int(c) for c in Path(f"/proc/{proc.pid}/task/{proc.pid}/children").read_text().split()]:
+            paths += listening_unix_paths(pid)
+        return [f"{where}: with MOJOUI_AGENT_SOCKET unset the host listens on {paths}"] if paths else []
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def page_side_refusal(c, path, where):
     """The widget's runtime refuses what the agent host would: an undeclared field and a wrong type, sent raw."""
     problems = []
@@ -165,6 +248,8 @@ def m0_web():
         if not wait_socket(sock, None, 30):
             problems.append("web: the host opened no agent link (MOJOUI_AGENT_SOCKET)")
             return ""
+        problems += socket_mode_problems(sock, "web")
+        problems += link_bytes_problems(sock, "web")
         c = agent_client.Client(attach=sock)
         try:
             p, s = widget_story(c, "web")
@@ -208,6 +293,8 @@ def m0_gtk():
             log.seek(0)
             return [f"gtk: the app opened no agent link: {log.read()[-500:]}"], samples
         time.sleep(1.5)  # (its web views load their widgets)
+        problems += socket_mode_problems(sock, "gtk")
+        problems += link_bytes_problems(sock, "gtk")
         c = agent_client.Client(attach=sock)
         try:
             p, s = widget_story(c, "gtk")
@@ -769,6 +856,41 @@ def add_throw(counter_js):
     return at + 1
 
 
+def listen_addresses(port):
+    """(D-678) The local addresses something listens on at TCP `port` (/proc/net/tcp and tcp6, state LISTEN): what the
+    server really bound, not what a script says."""
+    out = []
+    for table in ("tcp", "tcp6"):
+        for line in Path(f"/proc/net/{table}").read_text().splitlines()[1:]:
+            f = line.split()
+            addr, p = f[1].split(":")
+            if f[3] == "0A" and int(p, 16) == port:
+                if table == "tcp":
+                    out.append(".".join(str(int(addr[i:i + 2], 16)) for i in (6, 4, 2, 0)))
+                else:
+                    out.append("v6:" + addr)
+    return out
+
+
+def dev_endpoint_problems(url, port):
+    """(D-678) The running dev server: bound to 127.0.0.1 only; /dev/reload with a wrong token or none is refused."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    problems = []
+    bound = listen_addresses(port)
+    if bound != ["127.0.0.1"]:
+        problems.append(f"the dev server listens on {bound}, not 127.0.0.1 alone")
+    for token in ("wrong-token", ""):
+        try:
+            code = urllib.request.urlopen(urllib.request.Request(url + "dev/reload", data=urllib.parse.urlencode({"token": token}).encode()), timeout=10).status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        if code != 403:
+            problems.append(f"/dev/reload with token {token!r} answered {code}, not 403")
+    return problems
+
+
 def m1c_web(d):
     """dev.sh on the scratch app: edits to a .js, a .css and a .ts reach the open page without a page load, Mojo's state
     and the typed note stay; the counter's thrown error reaches the server's log as widgets/counter.js:<line>."""
@@ -788,6 +910,10 @@ def m1c_web(d):
             time.sleep(0.5)
         if "dev: watching" not in open(log.name).read():
             return ["dev.sh never started watching"], ""
+        problems += dev_endpoint_problems(url, port)
+        t = run([sys.executable, "tests/test_web_dev.py", str(BUILD / DEV_APP / "web"), str(BUILD / "widgets" / "web")], timeout=600)
+        if t.returncode != 0 or "web_dev: ok" not in t.stdout:  # (MOJOUI_DEV refused on a release build; /dev/* local only)
+            problems.append("tests/test_web_dev.py: " + (t.stdout + t.stderr)[-500:])
         with sync_playwright() as pw:
             b = pw.chromium.launch(executable_path=drive.CHROMIUM, headless=True)
             page = b.new_page(viewport={"width": 1280, "height": 860}, color_scheme="light")
@@ -906,6 +1032,23 @@ def m1c_gtk(d, line):
     return problems
 
 
+def m1c_mac(d):
+    """(D-679) The Mac's debug build compiles its inspector branch: MOJOUI_DEBUG=1 scripts/build.sh <app> mac names
+    setInspectable: and ships source maps; the release build has neither. Built here (cross-compiled), run on GitHub's
+    Macs only by M2 (release)."""
+    problems = []
+    for debug in (True, False):
+        b = run(["scripts/build.sh", DEV_APP, "mac"], env={"MOJOUI_DEBUG": "1" if debug else ""})
+        what = "debug" if debug else "release"
+        if b.returncode != 0:
+            return [f"the {what} Mac build failed: {(b.stdout + b.stderr)[-400:]}"]
+        obj = (BUILD / DEV_APP / "mac" / "app.o").read_bytes()
+        maps = list((BUILD / DEV_APP / "mac").glob("*.app/Contents/Resources/webview/assets/*.map"))
+        if (b"setInspectable:" in obj) != debug or bool(maps) != debug:
+            problems.append(f"mac {what}: setInspectable: {'named' if b'setInspectable:' in obj else 'absent'}, {len(maps)} source maps")
+    return problems
+
+
 def m1c():
     """The developer loop (GOAL.md M1c): scripts/dev.sh <app> watches the app's web/ sources: saving a .ts/.js/.css file
     rebuilds the bundle and the open page reloads its widgets while the Mojo app keeps its state (a typed note
@@ -915,14 +1058,11 @@ def m1c():
     problems = []
     if not (ROOT / "scripts/dev.sh").exists():
         return False, "no scripts/dev.sh"
-    src = (ROOT / "scripts/dev.sh").read_text() + ((ROOT / "scripts/dev.py").read_text() if (ROOT / "scripts/dev.py").exists() else "")
-    if "127.0.0.1" not in src or "0.0.0.0" in src:
-        problems.append("the dev server isn't held to 127.0.0.1")
     hook = (ROOT / "mojoui/hosts/devtools.mojo")
     if not hook.exists() or "Mac" not in hook.read_text() or "MOJOUI_DEBUG" not in hook.read_text():
         problems.append("no marked devtools hook for the Mac (mojoui/hosts/devtools.mojo)")
     doc = (ROOT / "docs/js.md").read_text()
-    for topic in ("scripts/dev.sh", "source map", "inspector", "MOJOUI_DEBUG"):
+    for topic in ("scripts/dev.sh", "source map", "inspector", "MOJOUI_DEBUG", "deployed host"):
         if topic not in doc:
             problems.append(f"docs/js.md doesn't walk {topic}")
     for host in ("web", "linux"):  # (the release builds the other milestones use)
@@ -935,6 +1075,8 @@ def m1c():
         problems += p
         line = next(i + 1 for i, l in enumerate((d / "web/widgets/counter.js").read_text().splitlines()) if "boom from the counter" in l)
         problems += m1c_gtk(d, line)
+        problems += m1c_mac(d)
+        problems += gtk_jslog_limit()
     finally:
         shutil.rmtree(d, ignore_errors=True)
         shutil.rmtree(BUILD / DEV_APP, ignore_errors=True)
@@ -945,10 +1087,44 @@ def m1c():
     return not problems, "; ".join(problems[:12]) or (
         "scripts/dev.sh rebuilt .js, .css and .ts edits into the open page (same page, the typed note and Words: 4 kept, widgets "
         "mounted again); the counter's error logged as widgets/counter.js:<line> on the web and GTK (source maps, dev only); "
-        "GTK debug build opens WebKit's inspector, release refuses; release builds carry no maps or dev endpoints; CSP unchanged")
+        "GTK debug build opens WebKit's inspector, release refuses; the Mac's debug build names setInspectable: and maps, release "
+        "neither; the dev server binds 127.0.0.1 alone, refuses a wrong token, a non-local client and a release build; release "
+        "builds carry no maps or dev endpoints; CSP unchanged")
 
 
 M0_SAMPLES = []
+
+
+CRASH_STEPS = ("pause:2500;webjs:mx-counter#1=(mojoui.native.receive = () => true, 'deaf');tap:Ask the counter;pause:800;"
+               "webkill:mx-counter#1;pause:1500;tap:Bigger steps;pause:500")
+
+
+def gtk_lost_commands():
+    """(D-680) GTK: a command the page never answered (its page made deaf, then its web process killed) is answered with
+    an error once the process ends: update() hears it ("Counter replied: error: …"), the runtime's waiting entry ends."""
+    r = run([str(BUILD / "widgets" / "linux" / "widgets")], env={"MOJOUI_TEST": CRASH_STEPS, "MOJOUI_WINDOW": "1280x860"}, timeout=300)
+    o = r.stdout + r.stderr
+    if '"deaf"' not in o:
+        return [f"gtk crash: the page wasn't made deaf ({[l for l in o.splitlines() if l.startswith('JS:')][-2:]})"]
+    if "1 command(s) answered with an error" not in o or "Counter replied: error: the widget's web process ended" not in o:
+        return [f"gtk crash: the lost command wasn't answered ({[l for l in o.splitlines() if 'web process' in l or 'replied' in l][-3:]})"]
+    return []
+
+
+FLOOD = ("webjs:mx-counter#1=(Array.from({ length: 150 }, (_, i) => dispatchEvent(new ErrorEvent('error', { message: 'flood ' + i }))), "
+         "'flooded');pause:2500")  # (each one the page's own error listener reports, as an uncaught error; steps split on ';')
+
+
+def gtk_jslog_limit():
+    """(D-681) GTK logs at most 100 widget errors per window, as the web logs 100 per page; it says the rest were dropped."""
+    r = run([str(BUILD / "widgets" / "linux" / "widgets")], env={"MOJOUI_TEST": "pause:2500;" + FLOOD, "MOJOUI_WINDOW": "1280x860"}, timeout=300)
+    o = r.stdout + r.stderr
+    n = sum(1 for l in o.splitlines() if l.startswith("JS ERROR: ") and "flood " in l)
+    other = [l for l in o.splitlines() if l.startswith("JS ERROR: ") and "flood " not in l]
+    problems = [f"gtk jslog: errors besides the flood: {other[:2]}"] if other else []
+    if n != 100 or "the rest aren't logged" not in o:
+        problems.append(f"gtk jslog: {n} flood errors logged (want 100, then a note)")
+    return problems
 
 
 def m0():
@@ -965,6 +1141,10 @@ def m0():
     dts = (ROOT / "mojoui/hosts/static/mojoui-widgets.d.ts").read_text()
     if "fields" not in dts or "describe" not in dts:
         problems.append("mojoui-widgets.d.ts doesn't type describe and fields")
+    for name in ("agent_link", "gtk_webview"):  # (the link's bytes: split characters, invalid UTF-8; the views' rules)
+        err = g34.mojo_test(name, name + ": ok")
+        if err:
+            problems.append(err)
     t = run([sys.executable, "tests/test_agent_widgets.py"], timeout=300)
     if t.returncode != 0 or "agent_widgets: ok" not in t.stdout:
         problems.append("tests/test_agent_widgets.py: " + (t.stdout + t.stderr)[-500:])
@@ -980,6 +1160,9 @@ def m0():
     p, gtk_samples = m0_gtk()
     problems += p
     problems += m0_no_describe()
+    problems += gtk_lost_commands()
+    problems += no_socket_unset([str(BUILD / "widgets" / "linux" / "widgets")], "gtk", env={"MOJOUI_WINDOW": "1280x860"})
+    problems += no_socket_unset([sys.executable, "mojoui/hosts/web.py", str(BUILD / "widgets" / "web"), str(free_port())], "web")
     M0_SAMPLES[:] = web_samples + gtk_samples
     for line in M0_SAMPLES:
         print("AGENT: " + line.replace("\n", "\\n"), flush=True)

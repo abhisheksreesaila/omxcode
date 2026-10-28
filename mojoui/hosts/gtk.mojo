@@ -35,7 +35,7 @@ from mojoui.hosts.gtk_webview import (
 )
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect
 from mojoui.hosts.devtools import DEVTOOLS
-from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, send_all, close_fd, link_error, MAX_LINE
+from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, next_line, send_all, close_fd, link_error, MAX_LINE, LINE_NONE, LINE_BAD
 from mojoui.hosts.web import view_to_json, control_event
 from mojoui.json import Json
 from mojoui.paragraph import pango_markup, link_href, runs_of
@@ -591,7 +591,7 @@ struct GtkHost[A: App](Movable):
     var webviews: Int  # the WebComponents' WebKitGTK views (mojoui/hosts/gtk_webview.mojo), on the heap: its address
     var webview_focus: Int  # a view that had the keyboard when a rebuild moved it (it gets it back), or 0
     var link_fds: List[Int]  # the agent link's connections (MOJOUI_AGENT_SOCKET, docs/agent.md), and what each has sent
-    var link_bufs: List[String]  # so far without a newline
+    var link_bufs: List[List[UInt8]]  # raw bytes so far without a newline (decoded a whole line at a time)
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -682,7 +682,7 @@ struct GtkHost[A: App](Movable):
         self.webviews = Int(wv)
         self.webview_focus = 0
         self.link_fds = List[Int]()
-        self.link_bufs = List[String]()
+        self.link_bufs = List[List[UInt8]]()
 
     def schedule_effects(mut self, self_addr: Int):
         """Arms one GLib timeout for when the runtime next has something to hand over (a reply, a timer's tick):
@@ -2582,7 +2582,7 @@ struct GtkHost[A: App](Movable):
         var wv = webviews_at(self.webviews)
         var k = wv[].slot_of(n.hint, n.value)
         if k < 0:
-            k = new_view(self.webviews, n.hint, n.value, on_webview_message[Self.A], self_addr)
+            k = new_view(self.webviews, n.hint, n.value, on_webview_message[Self.A], on_webview_ended[Self.A], self_addr)
         var view = wv[].slots[k].view
         var parent = external_call["gtk_widget_get_parent", Int](view)
         if parent != box:
@@ -3226,6 +3226,14 @@ def on_webview_message[A: App](ucm: Int, value: Int, host_addr: Int) abi("C"):
         arm_webview_inbox[A](host_addr)
 
 
+def on_webview_ended[A: App](view: Int, reason: c_int, host_addr: Int) abi("C"):
+    """A widget's web process ended (after gtk_webview.on_terminated): the error replies it left in the inbox for the
+    commands that page never answered reach update() on the next idle turn (D-680)."""
+    var host = host_at[A](host_addr)
+    if len(webviews_at(host[].webviews)[].inbox) > 0:
+        arm_webview_inbox[A](host_addr)
+
+
 def on_webview_inbox[A: App](host_addr: Int) abi("C") -> c_int:
     var host = host_at[A](host_addr)
     if host[].webview_inbox(host_addr):
@@ -3240,7 +3248,7 @@ def on_link_accept[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C"
     if c >= 0:
         var host = host_at[A](host_addr)
         host[].link_fds.append(c)
-        host[].link_bufs.append(String(""))
+        host[].link_bufs.append(List[UInt8]())
         _ = external_call["g_unix_fd_add", c_uint](c_int(c), c_uint(1 | 8 | 16), on_link_read[A], host_addr)  # G_IO_IN | ERR | HUP
     return 1  # (keep listening)
 
@@ -3254,28 +3262,24 @@ def on_link_read[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C") 
             k = i
     if k < 0:
         return 0
-    var got = read_some(Int(fd))
-    if got[0] == 0 or (got[0] < 0 and (Int(condition) & (8 | 16)) != 0):
+    var got = read_some(Int(fd), host[].link_bufs[k])
+    if got == 0 or (got < 0 and (Int(condition) & (8 | 16)) != 0):
         close_fd(Int(fd))
         _ = host[].link_fds.pop(k)
         _ = host[].link_bufs.pop(k)
         return 0
-    if got[0] < 0:
+    if got < 0:
         return 1
-    host[].link_bufs[k] += got[1]
     while True:
-        var buf = host[].link_bufs[k]
-        var at = buf.find("\n")
-        if at < 0:
-            if buf.byte_length() > MAX_LINE:
+        var line = next_line(host[].link_bufs[k])
+        if line[0] == LINE_NONE:
+            if len(host[].link_bufs[k]) > MAX_LINE:
                 close_fd(Int(fd))
                 _ = host[].link_fds.pop(k)
                 _ = host[].link_bufs.pop(k)
                 return 0
             return 1
-        var line = String(buf[byte=0:at])
-        host[].link_bufs[k] = String(buf[byte=at + 1:])
-        var answer = host[].link_request(line, host_addr)
+        var answer = link_error("not UTF-8 JSON text") if line[0] == LINE_BAD else host[].link_request(line[1], host_addr)
         if not send_all(Int(fd), answer + "\n"):
             close_fd(Int(fd))
             _ = host[].link_fds.pop(k)

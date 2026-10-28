@@ -47,9 +47,12 @@ SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TI
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
 CHECKED, DISABLED, DANGER = 1, 2, 4  # menu item flags (mojoui/menus.mojo)
-AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")
-DEV = os.environ.get("MOJOUI_DEV") == "1"  # scripts/dev.sh's server (goal 34b M1c): widgets reload when their sources change, source maps
-DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")  # are served; never set by a release run (only 127.0.0.1 may ask)  # an agent host may attach here (docs/agent.md: the agent link)
+AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an agent host may attach here (docs/agent.md: the agent link)
+# scripts/dev.sh's server (goal 34b M1c): widgets reload when their sources change, source maps are served; only
+# 127.0.0.1 may ask, /dev/reload only with the token. Refused unless the app's build is a debug build (D-678), and never
+# to be set on a deployed host (docs/js.md).
+DEV = os.environ.get("MOJOUI_DEV") == "1"
+DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 JPEG_QUALITY = 85
 MAX_SESSIONS = 200  # oldest tabs are closed beyond this
@@ -690,6 +693,18 @@ def host_files():
     return out
 
 
+def debug_build(module_dir):
+    """Whether the app's build is a debug build (MOJOUI_DEBUG=1 scripts/build.sh <app> web): its manifest lists bundles
+    and names each one's source map, there beside it. A release build has no maps (scripts/web_assets.py)."""
+    folder = Path(module_dir) / "assets"
+    try:
+        manifest = json.loads((folder / "manifest.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(manifest, dict) and bool(manifest) and all(
+        isinstance(m, dict) and m.get("map") and (folder / m["map"]).is_file() for m in manifest.values())
+
+
 def app_assets(module_dir, mod):
     """The app's bundles (App.web_assets(), built by scripts/web_assets.py): ({hashed file: (bytes, media type)}, the
     page's tags for them). A listed name the build didn't make, or a file whose bytes don't match its hash, stops the
@@ -1248,6 +1263,9 @@ def rows_html(s, i, sid, top):
 
 
 def make_app(module_dir):
+    if DEV and not debug_build(module_dir):  # (the dev server's endpoints never run on a release build, D-678)
+        raise SystemExit(f"mojoui web: MOJOUI_DEV=1 needs a debug build ({module_dir} is a release build: "
+                         "MOJOUI_DEBUG=1 scripts/build.sh <app> web, or scripts/dev.sh <app>); never set it on a deployed host")
     sys.path.insert(0, str(Path(module_dir).resolve()))
     mod = importlib.import_module("mojoui_app")
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
@@ -1784,8 +1802,10 @@ def make_app(module_dir):
             def handle(self):
                 for raw in self.rfile:
                     try:
-                        op = json.loads(raw)
+                        op = json.loads(raw.decode("utf-8"))  # (a line that isn't UTF-8 is refused as one, as GTK's link does)
                         out = link_call(op) if isinstance(op, dict) else {"ok": False, "error": "a request is a JSON object"}
+                    except UnicodeDecodeError:
+                        out = {"ok": False, "error": "not UTF-8 JSON text"}
                     except Exception as ex:  # (a bad request is the agent's mistake: say so, keep the link)
                         out = {"ok": False, "error": f"{type(ex).__name__}: {ex}"}
                     self.wfile.write((json.dumps(out, ensure_ascii=False) + "\n").encode())

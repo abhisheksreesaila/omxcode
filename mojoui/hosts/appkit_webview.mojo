@@ -640,14 +640,19 @@ def on_terminated(obj: Int, cmd: Int, view: Int) abi("C"):
     mw[].core.slots[k].loaded = False
     mw[].core.slots[k].mounts = 0
     mw[].core.slots[k].describe = ""
-    print("mojoui: " + mw[].core.slots[k].key() + "'s web process ended" + ("; loading it again" if mw[].core.slots[k].crashes == 1 else "; showing its stand-in"))
+    mw[].core.slots[k].facts = ""
+    var lost = mw[].core.lose_commands(k)  # (their replies would never come: each is answered with an error, as on GTK, D-680)
+    print("mojoui: " + mw[].core.slots[k].key() + "'s web process ended" + (", " + String(lost) + " command(s) answered with an error" if lost > 0 else "")
+          + ("; loading it again" if mw[].core.slots[k].crashes == 1 else "; showing its stand-in"))
+    if lost > 0:
+        arm_inbox(addr)
     if mw[].core.slots[k].crashes == 1:
         var again = List[String]()
         if mw[].core.slots[k].sent_theme != "":
             again.append(mw[].core.slots[k].sent_theme)
         if mw[].core.slots[k].sent_widget != "":
             again.append(mw[].core.slots[k].sent_widget)
-        mw[].core.slots[k].pending = again^  # (commands sent to the old page are lost with it: their replies never come)
+        mw[].core.slots[k].pending = again^  # (commands sent to the old page went with it: answered above with an error)
         _ = msg(view, "reload")
     else:
         mw[].core.slots[k].gone = True

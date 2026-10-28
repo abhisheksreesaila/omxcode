@@ -37,4 +37,12 @@ def main() raises:
     var dark = check(omxqua(True), True)
     assert_true(light != dark)
     assert_true(card_radius(omxqua(False)) == card_radius(omxqua(True)))
+    # (D-682) a font's name can't end its CSS string or rule: quotes, backslashes, braces, '<' and control characters go
+    var odd = omxqua(False)
+    odd.look.type.family = "Inter'; } body { color: red } <\\x"
+    odd.look.type.mono = 'Mono"\n'
+    var css = tokens_css(odd)
+    assert_true("--o-font: 'Inter  body  color red  x', system-ui" in css, css)
+    assert_true("--o-mono: 'Mono', ui-monospace" in css, css)
+    assert_false("<" in css or "}" in css[byte=0:css.byte_length() - 1] or '"' in css or "\\" in css or ";" in css[byte=0:css.find("system-ui")], css)
     print("theme_tokens: ok")
