@@ -1,7 +1,7 @@
 {
-  "name": "mojoui-widgets-example",
+  "name": "mojoui-shared-widgets",
   "private": true,
-  "description": "examples/widgets' npm packages: bundled by scripts/web_assets.py (esbuild) at build time, installed from package-lock.json with npm ci",
+  "description": "mojoui's shared JS widgets' npm packages (CodeMirror 6, Apache ECharts): an app picks a widget in web/shared.json; bundled by scripts/web_assets.py (esbuild) at build time, installed from package-lock.json with npm ci",
   "license": "MIT",
   "dependencies": {
     "@codemirror/commands": "6.8.1",

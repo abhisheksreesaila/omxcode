@@ -5,8 +5,34 @@ element; Mojo gives it **props** (JSON), hears its **events** in `update()`, and
 comes back to `update()` later, as an HTTP reply does). The app keeps every line of state; the widget keeps only its own
 (a cursor, a scroll position, a counter's count). Runs on the web, on GTK (§6) and on the Mac (§7).
 
-The example is `examples/widgets` (a note in CodeMirror 6, a word count drawn by mojoui and by Apache ECharts, and a
-plain-JS counter).
+The example is `examples/widgets` (a note in mojoui's shared CodeMirror 6 editor, a word count drawn by mojoui and by
+the shared Apache ECharts chart, and a plain-JS counter of its own).
+
+## 0. Use a shared widget (any app)
+
+mojoui ships widgets any app can use, in `mojoui/widgets/` with their own pinned `package.json` and `package-lock.json`:
+
+| Name | Tag | Library | Props | Events |
+|---|---|---|---|---|
+| `editor` | `mx-editor` | CodeMirror 6 | `doc`, `rev`, `placeholder` | `change {text}` (commands: `focus`, `selection`, `text`; agents set `text`) |
+| `chart` | `mx-chart` | Apache ECharts 6 (line) | `series` (a JSON list of numbers) | `pick {index, value}` |
+
+To add one to your app, pick it by name and list its bundles:
+
+```
+examples/<app>/web/shared.json        {"widgets": ["editor", "chart"]}
+```
+```mojo
+    @staticmethod
+    def web_assets() -> List[String]:
+        return ["editor.js", "editor.css", "chart.js", "chart.css"]    # beside your own widgets' names
+```
+
+Then place it like any widget (`WebComponent("mx-editor", 1, Props().text("doc", self.note)…)`, §3). The build bundles
+the picked widgets with your own (their npm packages come from mojoui/widgets' lockfile, installed once into
+`build/_shared/npm`); they wear your theme (`theme(el, tokens)`), speak to agents (`describe`, fields) and run on the
+web, GTK and the Mac like your own. A name you also have in `web/widgets/` fails the build; nothing is bundled that the
+app doesn't pick and list. `scripts/dev.sh <app>` watches the shared files the app picks too.
 
 ## 1. Add a package
 
@@ -89,9 +115,9 @@ read the theme's palette (`var(--o-accent)`, `--o-card`, `--o-ink`, `--o-line`�
 TypeScript widgets get types from `mojoui/hosts/static/mojoui-widgets.d.ts` (`/// <reference path=…>`).
 
 ### A second library: Apache ECharts (goal 34b)
-`examples/widgets/web/widgets/chart.ts` is ECharts 6 from npm (`"echarts": "6.1.0"`, exact, in the lockfile), added
+`mojoui/widgets/chart.ts` is ECharts 6 from npm (`"echarts": "6.1.0"`, exact, in mojoui/widgets' lockfile), added
 with no change to the hosts: `npm install --package-lock-only --ignore-scripts --save-exact echarts@6.1.0`, one widget
-file, two names in `web_assets()`. Import it **tree-shaken** (`echarts/core` plus the chart, components and renderer you
+file, two names in `web_assets()` (it was examples/widgets' own until D-675 made it shared, §0). Import it **tree-shaken** (`echarts/core` plus the chart, components and renderer you
 use: `LineChart`, `GridComponent`, `SVGRenderer`), so the bundle carries only those; ECharts needs no `eval` or
 `new Function`, so it runs under the CSP as it is. Mojo owns the data (`Props().raw("series", …)`); the widget reads the
 theme's palette (`--o-data`, `--o-card`, `--o-ink2`, `--o-line`) and the page's font, and a click on a point emits

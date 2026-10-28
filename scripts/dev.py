@@ -3,7 +3,8 @@
 1. Builds the app for the web as a debug build (MOJOUI_DEBUG=1: each bundle with its source map).
 2. Serves it with mojoui/hosts/web.py on 127.0.0.1 only, as the dev server (MOJOUI_DEV=1: /dev/* endpoints, source maps;
    a random token so only this script can say "rebuilt").
-3. Watches examples/<app>/web/ (widgets/*.js|ts|css, package.json, the lockfile): on a save it runs the bundler again
+3. Watches examples/<app>/web/ (widgets/*.js|ts|css, package.json, the lockfile, shared.json) and the shared widgets the
+   app picks (mojoui/widgets/<name>.*, its package.json and lockfile): on a save it runs the bundler again
    (scripts/web_assets.py, with the lint) and tells the server, whose open pages load the new bundles and mount those
    widgets again from Mojo's props. The Mojo app keeps running, with its state.
 The server's log (JS ERROR: lines, with source files and lines) comes out here. A change to app.mojo needs a restart.
@@ -24,8 +25,16 @@ HOST = "127.0.0.1"  # never another interface: the dev server is for this machin
 
 def sources(web):
     files = {}
-    for f in list((web / "widgets").glob("*")) + [web / "package.json", web / "package-lock.json"]:
-        if f.is_file() and (f.suffix in (".js", ".ts", ".css") or f.name.startswith("package")):
+    shared = []
+    try:  # (the shared widgets the app picks: mojoui/widgets/<name>.*, and their packages)
+        import json
+        names = json.loads((web / "shared.json").read_text()).get("widgets", []) if (web / "shared.json").exists() else []
+        shared = [f for n in names if isinstance(n, str) for f in (ROOT / "mojoui" / "widgets").glob(n + ".*")]
+        shared += [ROOT / "mojoui" / "widgets" / "package.json", ROOT / "mojoui" / "widgets" / "package-lock.json"] if names else []
+    except (ValueError, AttributeError):
+        pass  # (the bundler says what's wrong with it)
+    for f in list((web / "widgets").glob("*")) + [web / "package.json", web / "package-lock.json", web / "shared.json"] + shared:
+        if f.is_file() and (f.suffix in (".js", ".ts", ".css") or f.name.startswith("package") or f.name == "shared.json"):
             files[f] = f.stat().st_mtime_ns
     return files
 

@@ -1,9 +1,9 @@
-// mx-editor: CodeMirror 6 (from npm: web/package.json, pinned by package-lock.json) as a mojoui widget, in TypeScript.
+// mx-editor: CodeMirror 6 (from npm: mojoui/widgets/package.json, pinned by its package-lock.json) as a shared mojoui widget, in TypeScript.
 // esbuild bundles and minifies it with CodeMirror at build time (scripts/web_assets.py). Props: doc and rev (Mojo's text
 // replaces the editor's only when rev moves on: Load sample), placeholder. Each edit emits "change" {text}; commands:
 // focus, selection (→ {anchor, head}), text (→ {text}). Agents read its text and line count (describe) and may set its
 // text (the field text, a string): a set is an edit like typing, so it emits "change" and update() hears it.
-/// <reference path="../../../../mojoui/hosts/static/mojoui-widgets.d.ts" />
+/// <reference path="../hosts/static/mojoui-widgets.d.ts" />
 import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';

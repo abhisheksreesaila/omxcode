@@ -175,7 +175,7 @@ def m0():
         problems.append(f"the dump doesn't describe the widget as count 7, step 2 ({lines_with(out, 'WIDGET: ')})")
     # the note: a placeholder editor (a text area), a word count, a small chart drawn by mojoui
     # (M0 typed into a text area standing in for the editor; since M1 it's the editor itself)
-    ok2, out2 = widgets_web("keys:mx-editor .cm-content=one two three four" if (ROOT / "examples/widgets/web/widgets/editor.ts").exists()
+    ok2, out2 = widgets_web("keys:mx-editor .cm-content=one two three four" if (ROOT / "examples/widgets/web/widgets/editor.ts").exists() or (ROOT / "mojoui/widgets/editor.ts").exists()
                             else "textarea:0=one two three four", shot="m0-note-web.png")
     if not ok2:
         problems.append("note run failed: " + out2[-400:])
@@ -200,10 +200,17 @@ def m1():
     it, the cursor survives an unrelated rebuild; scripts/new_widget.sh makes a working widget from a template (generated,
     built, mounted); docs/js.md walks it; build.sh runs the npm/esbuild step for any app with a web/package.json."""
     problems = []
-    web = ROOT / "examples" / WIDGETS / "web"
-    for f in ("package.json", "package-lock.json", "widgets/editor.ts"):
+    # (goal 34b, D-675: the editor became a shared widget, mojoui/widgets/ with its own package.json and lockfile, which
+    # examples/widgets picks in web/shared.json; the same files, pins and bundle are required there)
+    web = ROOT / "mojoui" / "widgets"
+    for f in ("package.json", "package-lock.json", "editor.ts"):
         if not (web / f).exists():
-            problems.append(f"no examples/widgets/web/{f}")
+            problems.append(f"no mojoui/widgets/{f}")
+    try:
+        if "editor" not in json.loads((ROOT / "examples" / WIDGETS / "web" / "shared.json").read_text()).get("widgets", []):
+            problems.append("examples/widgets/web/shared.json doesn't pick the shared editor")
+    except (OSError, ValueError):
+        problems.append("no examples/widgets/web/shared.json picking the shared editor")
     for f in ("scripts/new_widget.sh", "docs/js.md", "scripts/web_assets.py"):
         if not (ROOT / f).exists():
             problems.append(f"no {f}")
@@ -219,7 +226,7 @@ def m1():
     tracked = run(["git", "ls-files"]).stdout.splitlines()
     if any("node_modules" in t for t in tracked):
         problems.append("node_modules is in git")
-    for f in ("examples/widgets/web/package.json", "examples/widgets/web/package-lock.json", "examples/widgets/web/widgets/editor.ts"):
+    for f in ("mojoui/widgets/package.json", "mojoui/widgets/package-lock.json", "mojoui/widgets/editor.ts", "examples/widgets/web/shared.json"):
         if f not in tracked:
             problems.append(f"{f} isn't committed")
     bs = (ROOT / "scripts/build.sh").read_text()
@@ -235,8 +242,8 @@ def m1():
     assets = BUILD / WIDGETS / "web" / "assets"
     manifest = json.loads((assets / "manifest.json").read_text()) if (assets / "manifest.json").exists() else {}
     ed = manifest.get("editor.js", {})
-    if not ed or ed.get("source") != "widgets/editor.ts":
-        problems.append(f"the build's manifest has no editor.js bundled from widgets/editor.ts ({ed})")
+    if not ed or ed.get("source") != "mojoui/widgets/editor.ts":
+        problems.append(f"the build's manifest has no editor.js bundled from mojoui/widgets/editor.ts ({ed})")
     else:
         body = (assets / ed["file"]).read_text()
         if "cm-content" not in body or "\n  " in body[:2000]:

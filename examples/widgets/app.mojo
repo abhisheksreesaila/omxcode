@@ -1,9 +1,10 @@
-# widgets: a note with JavaScript inside (goal 34). The note's editor is CodeMirror 6 from npm (web/package.json, its
-# widget in TypeScript: web/widgets/editor.ts); its word count and a small chart of the count over edits are Mojo. A
-# vendored counter widget (web/widgets/counter.js) proves the seam both ways: its props come from Mojo, its clicks reach
-# update(), Mojo asks it for its count (a command) and hears the answer. Apache ECharts from npm (web/widgets/chart.ts)
-# draws the same word-count series Mojo keeps (props), and a click on one of its points comes back to update(). Every line of state is Mojo; each widget is a
-# script bundle the app lists in web_assets() (scripts/web_assets.py builds them).
+# widgets: a note with JavaScript inside (goal 34). The note's editor is mojoui's shared CodeMirror 6 widget (mx-editor,
+# mojoui/widgets/editor.ts, picked in web/shared.json); its word count and a small chart of the count over edits are Mojo.
+# A vendored counter widget of the app's own (web/widgets/counter.js) proves the seam both ways: its props come from
+# Mojo, its clicks reach update(), Mojo asks it for its count (a command) and hears the answer. The shared Apache ECharts
+# widget (mx-chart, mojoui/widgets/chart.ts) draws the same word-count series Mojo keeps (props), and a click on one of
+# its points comes back to update(). Every line of state is Mojo; each widget is a script bundle the app lists in
+# web_assets() (scripts/web_assets.py builds them).
 
 from mojoui.view import View, Text, Button, VStack, HStack, Card, Spacer, CAPTION, HEADLINE, TITLE, PROMINENT, START, SPACE_XS, SPACE_S, SPACE_M, SPACE_L
 from mojoui.app import App, Event

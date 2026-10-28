@@ -691,3 +691,7 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 ## 2026-10-27 · goal 34b: the Mac gets M0's and M1b's features
 - m2 first: two new Mac screens (ci/mac/side.txt = MAC_STEPS): `light` (the light picture) and `theme` (tokens in light, an agent's set of the counter and the editor, a live switch to dark, tokens again); m2 requires the chart now (no skip), the tokens to match in both modes, one mount each, the sparkline dark in dark, the sets in update() (Last count: 42, Words: 4), describe()'s facts back (WIDGETFACTS:), release views not inspectable.
 - Shared take_text (D-672): GTK's M0 passes on it (77 s). The Mac: facts, mojoui.set's sent_to, system appearance (it never told apps light/dark before), scheme:/set: steps, isInspectable and maps under DEVTOOLS (D-674). Builds for mac first time.
+
+## 2026-10-27 · goal 34b: shared JS widgets
+- git mv examples/widgets/web/{package.json,package-lock.json,widgets/editor.*,widgets/chart.*} → mojoui/widgets/; examples/widgets/web/shared.json picks editor and chart; the counter stays the app's own (D-675).
+- web_assets.py: shared_entries + install_from; the bundles came out byte for byte the same (editor.791f6708…, chart.42ca8fb5…). docs/js.md §0 says how any app adds them; the matrix's debt table no longer lists them.

@@ -1,9 +1,9 @@
-// mx-chart: Apache ECharts (from npm: web/package.json, pinned by package-lock.json) as a mojoui widget, in TypeScript.
+// mx-chart: Apache ECharts (from npm: mojoui/widgets/package.json, pinned by its package-lock.json) as a shared mojoui widget, in TypeScript.
 // Tree-shaken: only ECharts' core, the line chart, the grid and the SVG renderer are bundled (esbuild, at build time);
 // ECharts needs no eval or new Function, so it runs under the page's CSP as it is. Mojo owns the data: props.series is
 // the note's word count after each edit (a JSON list of numbers); the widget only draws it, in the app's theme (the
 // palette's --o-* variables). A click on a point emits "pick" {index, value}; agents read the series (describe).
-/// <reference path="../../../../mojoui/hosts/static/mojoui-widgets.d.ts" />
+/// <reference path="../hosts/static/mojoui-widgets.d.ts" />
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
 import { GridComponent } from 'echarts/components';
