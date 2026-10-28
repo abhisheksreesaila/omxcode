@@ -438,7 +438,7 @@ BUILDS = {
 # C's app is one file, but this goal also added code to the framework it calls (PointCloud's step, splat and their
 # test): counted from git, from the commit that set the goal, so the page can say both numbers.
 GOAL_BASE = "858eff5"
-FRAMEWORK = ["mojoui", "themes", "tests/test_pointcloud_step.mojo"]
+FRAMEWORK = ["mojoui", "themes", "tests/test_pointcloud_step.mojo", "tests/test_canvas_present.mojo", "tests/test_canvas_blend.mojo"]
 
 
 def framework_added():

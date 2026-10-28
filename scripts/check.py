@@ -1,4 +1,4 @@
-"""Milestone checker for GOAL.md (goal 36: three stacks, one particle field). Prints PASS/FAIL per milestone.
+"""Milestone checker for GOAL.md (goal 36: three stacks, one particle field; goal 36b: M6-M8). Prints PASS/FAIL per milestone.
 
 Run: scripts/check   (a subset: scripts/check M0 M4)
 Each milestone's proof comes from GOAL.md's words (never weaker). M1-M3 run each build's own check script and need
@@ -211,6 +211,100 @@ def m5():
                   + ", ".join(f"{r} {wt.mn(v)}" for r, v in big.items()))
 
 
+_C_OK = {}
+
+
+def c_ok():
+    """showcase/omxcode/check_c.py (the particle app's correctness check), run once for M6, M6b and M6c."""
+    if "r" not in _C_OK:
+        _C_OK["r"] = needs_ok(["showcase/omxcode/check_c.py"], ["C"])
+    return _C_OK["r"]
+
+
+def mojo_test(path, ok_line):
+    r = run(["pixi", "run", "mojo", "run", "-I", ".", path], 1800)
+    out = r.stdout + r.stderr
+    lines = [l.strip() for l in out.splitlines() if l.startswith("  ") and "warning" not in l and not l.strip().startswith(("^", "~", "Pointer", "unsafe_"))]
+    if r.returncode != 0 or ok_line not in out:
+        return False, f"{path}: exit {r.returncode}: " + " | ".join(l for l in out.splitlines() if "error" in l.lower() or "Assert" in l or "SKIP" in l)[-600:], []
+    return True, f"{path}: {ok_line}", [l for l in lines if l and not l.startswith(("def ", "var ", "pts", "Mojo/"))][:8]
+
+
+def m6():
+    """Zero-copy presentation (GOAL.md 36b M6): (a) tests/test_canvas_present.mojo; (b) headless: the fallback is
+    reported and C still ok; (c) the desktop proof (present-desktop.json) fresh, zero readbacks; the app unchanged."""
+    import particles_bench as pb
+    import headless
+    problems, notes = [], []
+    ok, msg, lines = mojo_test("tests/test_canvas_present.mojo", "canvas present: ok")
+    (notes if ok else problems).append(msg)
+    if ok and not any("byte for byte" in l for l in lines):
+        problems.append("the test didn't compare the GL texture with the readback picture")
+    cok, cmsg = c_ok()  # (builds the app)
+    (notes if cok else problems).append(cmsg)
+    headless.ensure()
+    with tempfile.TemporaryDirectory() as d:
+        r = subprocess.run([str(ROOT / "build/particles/linux/particles"), "--scripted", "--n", "10000", "--frames", "30",
+                            "--out", d, "--positions", "0"], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, MOJOUI_PRESENT_STATS="1"))
+    out = r.stdout + r.stderr
+    told = next((l for l in out.splitlines() if l.startswith("mojoui: GPU canvas pictures")), "")
+    if "copied to the CPU for the screen (" not in told:
+        problems.append(f"headless: the fallback wasn't reported (got {told!r})")
+    else:
+        notes.append("headless: " + told[len("mojoui: "):])
+    pd = OUT / "present-desktop.json"
+    if not pd.exists():
+        problems.append("docs/goals/36/present-desktop.json missing: run scripts/present_smoke.py on the desktop")
+    else:
+        d = json.loads(pd.read_text())
+        if d.get("sources_sha256") != pb.sources_sha():
+            problems.append("present-desktop.json is stale (the sources changed): rerun scripts/present_smoke.py")
+        if d.get("cpu_copied") != 0 or d.get("gpu_presented", 0) < d.get("frames", 1) - 1 or "without a copy" not in d.get("path", ""):
+            problems.append(f"desktop: {d.get('cpu_copied')} readbacks, {d.get('gpu_presented')} of {d.get('frames')} frames from the GPU")
+        else:
+            notes.append(f"desktop: {d['gpu_presented']} of {d['frames']} frames shown from the GPU, 0 readbacks "
+                         f"({d['gsk_renderer']} renderer, {d['frame_ms_mean']:.2f} ms/frame at 1M)")
+    if run(["git", "diff", "--quiet", "216c2b5", "--", "examples/particles/app.mojo"]).returncode != 0:
+        problems.append("examples/particles/app.mojo changed since goal 36 (M6 must be the framework's)")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "; ".join(notes)
+
+
+def m6b():
+    """Hardware-blended drawing (GOAL.md 36b M6b): tests/test_canvas_blend.mojo, C still ok, no particle names in mojoui."""
+    problems, notes = [], []
+    ok, msg, lines = mojo_test("tests/test_canvas_blend.mojo", "canvas blend: ok")
+    (notes if ok else problems).append(msg)
+    if ok:
+        notes += [l for l in lines if l.startswith(("additive", "lines", "over", "MOJOUI_BLEND"))]
+    hits = run(["git", "grep", "-n", "-i", "particle", "--", "mojoui"]).stdout.strip()
+    if hits:
+        problems.append("particle names in mojoui: " + hits[:300])
+    cok, cmsg = c_ok()
+    (notes if cok else problems).append(cmsg)
+    return (not problems), "; ".join(problems or notes)
+
+
+def m6c():
+    """A cheaper compute splat (GOAL.md 36b M6c): two atomics a point, exact (tests/test_pointcloud_step.mojo), C ok."""
+    problems, notes = [], []
+    ok, msg, lines = mojo_test("tests/test_pointcloud_step.mojo", "test_pointcloud_step: ok")
+    (notes if ok else problems).append(msg)
+    if ok and not any("no bleed" in l for l in lines):
+        problems.append("the packed-splat case didn't run")
+    elif ok:
+        notes += [l for l in lines if "packed" in l]
+    src = (ROOT / "mojoui/gpu.mojo").read_text()
+    body = src[src.index("def _splat2_kernel"):src.index("def _resolve_kernel")]
+    if body.count("Atomic.fetch_add") != 2:
+        problems.append(f"the packed splat has {body.count('Atomic.fetch_add')} atomic adds, not 2")
+    cok, cmsg = c_ok()
+    (notes if cok else problems).append(cmsg)
+    return (not problems), "; ".join(problems or notes)
+
+
 MILESTONES = [
     ("M0", m0),
     ("M1", m1),
@@ -218,6 +312,9 @@ MILESTONES = [
     ("M3", m3),
     ("M4", m4),
     ("M5", m5),
+    ("M6", m6),
+    ("M6b", m6b),
+    ("M6c", m6c),
 ]
 
 

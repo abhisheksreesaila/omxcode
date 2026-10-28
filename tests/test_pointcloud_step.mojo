@@ -104,9 +104,60 @@ def test_timed_parts() raises:
     _ = len(pa)
 
 
+def colour(p: Point, k: Knobs) -> SIMD[DType.float32, 4]:
+    """k[0..2]: the light every point adds (r, g, b)."""
+    return SIMD[DType.float32, 4](k[0], k[1], k[2], 0)
+
+
+def test_packed_splat() raises:
+    """Goal 36b M6c: red and green share one 64-bit atomic. The picture equals goal 36's three-atomic splat and the
+    CPU's, and a channel driven far past saturation (200,000 points on one pixel) never bleeds into its neighbour."""
+    if not gpu_present():
+        return
+    var k = Knobs(9.8, 1.0 / 60.0, 0, 0, 0, 0, 0, 0)
+    var g = cloud(100_000, True)
+    var three = cloud(100_000, True)
+    three.three_atomics = True
+    var c = cloud(100_000, False)
+    var pg = List[UInt32](length=320 * 200, fill=0)
+    var p3 = List[UInt32](length=320 * 200, fill=0)
+    var pc = List[UInt32](length=320 * 200, fill=0)
+    var sg = Surface(Int(pg.unsafe_ptr()), 320, 200, 1.0)
+    var s3 = Surface(Int(p3.unsafe_ptr()), 320, 200, 1.0)
+    var sc = Surface(Int(pc.unsafe_ptr()), 320, 200, 1.0)
+    g.splat[pixel, red](sg, k)
+    three.splat[pixel, red](s3, k)
+    c.splat[pixel, red](sc, k)
+    for i in range(len(pg)):
+        assert_equal(pg[i], p3[i], "packed = three atomics")
+        assert_equal(pg[i], pc[i], "packed = CPU")
+    # one pixel, 200,000 points, full red (or green, or blue) each: the others stay 0
+    var n = 200_000
+    var pts = List[Float32](length=4 * n, fill=0)
+    for i in range(n):
+        pts[4 * i] = 0.5
+        pts[4 * i + 1] = 0.5
+    var pile = PointCloud(pts^)
+    for ch in range(3):
+        var px = List[UInt32](length=8 * 8, fill=0)
+        var s = Surface(Int(px.unsafe_ptr()), 8, 8, 1.0)
+        var kk = Knobs(0)
+        kk[ch] = 1
+        pile.splat[pixel, colour](s, kk)
+        var v = px[4 * 8 + 4]
+        for other in range(3):
+            assert_equal(Int((v >> UInt32(8 * other)) & 255), 255 if other == ch else 0, "no bleed between channels")
+        _ = len(px)
+    print("  packed splat (2 atomics a point): = three atomics = CPU on 320×200; 200,000 on one pixel: no bleed")
+    _ = len(pg)
+    _ = len(p3)
+    _ = len(pc)
+
+
 def main() raises:
     test_step_moves_points_in_place()
     test_splat_adds_light_and_clamps()
     test_gpu_matches_cpu()
     test_timed_parts()
+    test_packed_splat()
     print("test_pointcloud_step: ok")

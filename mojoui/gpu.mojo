@@ -12,6 +12,9 @@ from std.sys import CompilationTarget, is_defined
 from max.gpu.host import DeviceContext
 from std.math import ceildiv
 from mojoui.clock import now_ns
+from std.os import getenv
+from std.memory import bitcast
+from mojoui.present import Presenter, VERTEX_BYTES
 
 # The GPU path is compiled for Linux desktops only: Apple and Android builds (built with
 # -D MOJOUI_ANDROID) use the CPU path, since MAX's GPU runtime isn't linked into them.
@@ -46,18 +49,32 @@ struct Gpu(Movable):
 
     var ctx: Optional[DeviceContext]
     var name: String
+    var device: Int  # the CUDA device number (-1: none)
 
     def __init__(out self, use: Bool = True):
-        """use=False: act as if there were no GPU (to compare with the CPU)."""
+        """use=False: act as if there were no GPU (to compare with the CPU). MOJOUI_GPU_DEVICE=n picks GPU n; a desktop
+        host sets it to the display's GPU (mojoui.present), so pictures can go to the screen without leaving it."""
         self.ctx = None
         self.name = "no GPU found"
+        self.device = -1
         if not use:
             return
         comptime if GPU_BUILD:  # (Apple builds: the CPU path; MAX's Apple GPU runtime isn't linked)
             try:
-                if DeviceContext.number_of_devices() > 0:
-                    var ctx = DeviceContext()
+                var count = DeviceContext.number_of_devices()
+                if count > 0:
+                    var want = 0
+                    var env = getenv("MOJOUI_GPU_DEVICE")
+                    if env != "":
+                        try:
+                            want = Int(env)
+                        except:
+                            want = 0
+                    if want < 0 or want >= count:
+                        want = 0
+                    var ctx = DeviceContext(device_id=want)
                     self.name = ctx.name()
+                    self.device = want
                     self.ctx = ctx^
             except:
                 self.ctx = None
@@ -169,6 +186,9 @@ def _shade_kernel[g: ColourFn](
 
 comptime StepFn = def(Point, Knobs) thin -> Point  # a point's next state (a simulation step)
 comptime TintFn = def(Point, Knobs) thin -> SIMD[DType.float32, 4]  # the light a point adds: r, g, b in 0–1
+comptime TRIAL_FRAMES = 8  # PointCloud.decide_blend: frames each way, of which the first TRIAL_SKIP are warm-up
+comptime TRIAL_SKIP = 3
+comptime RECHECK = 60
 comptime GLOW_ONE = Float32(1024)  # splat(): fixed point for added light (whole numbers, so GPU and CPU agree)
 
 
@@ -193,7 +213,7 @@ def _splat_kernel[f: PlaceFn, g: TintFn](
         var at = f(p, Int(w32), Int(h32), k)
         if at >= 0:
             # Saturation early-out: a channel's sum only grows and the picture clamps it at GLOW_ONE, so once it is
-            # there more light changes nothing: skip that channel's atomic (where particles pile up, most of them).
+            # there more light changes nothing: skip that channel's atomic (where points pile up, most of them).
             # (A load, not fetch_add's old value: the tint is the app's, so no channel is known to fill last.)
             comptime one = UInt32(Int(GLOW_ONE))
             var add = _glow(g(p, k))
@@ -212,10 +232,62 @@ def _light_rgba(r: UInt32, g: UInt32, b: UInt32) -> UInt32:
     return ri | (gi << 8) | (bi << 16) | (UInt32(255) << 24)
 
 
-def _resolve_kernel(light: UnsafePointer[UInt32, MutAnyOrigin], dst: UnsafePointer[UInt32, MutAnyOrigin], total: Int32):
+def _splat2_kernel[f: PlaceFn, g: TintFn](
+    pts: UnsafePointer[Float32, MutAnyOrigin], n: Int32, light: UnsafePointer[UInt32, MutAnyOrigin],
+    w32: Int32, h32: Int32, k: Knobs,
+):
+    """The same light with two atomics a point instead of three (goal 36b M6c): four words a pixel, red and green
+    one 64-bit word (red the low half), blue the third. Exact as before: a half only carries into the other past
+    2^32 (four million times GLOW_ONE), which the saturation skip keeps out of reach, as it kept a 32-bit channel
+    from wrapping."""
+    var i = Int(global_idx.x)
+    if i < Int(n):
+        var p = pts.unsafe_offset(4 * i).unsafe_load[width=4]()
+        var at = f(p, Int(w32), Int(h32), k)
+        if at >= 0:
+            comptime one = UInt32(Int(GLOW_ONE))
+            var add = _glow(g(p, k))
+            var px = light.unsafe_offset(4 * at)
+            if add[0] > 0 or add[1] > 0:
+                var rg = px.bitcast[UInt64]()
+                var now = Atomic.load[ordering=Ordering.RELAXED](rg)
+                var r_add = UInt64(add[0]) if UInt32(now & 0xFFFFFFFF) < one else UInt64(0)
+                var g_add = UInt64(add[1]) if UInt32(now >> 32) < one else UInt64(0)
+                var both = r_add | (g_add << 32)
+                if both > 0:
+                    _ = Atomic.fetch_add[ordering=Ordering.RELAXED](rg, both)
+            if add[2] > 0 and Atomic.load[ordering=Ordering.RELAXED](px + 2) < one:
+                _ = Atomic.fetch_add[ordering=Ordering.RELAXED](px + 2, add[2])
+
+
+def _resolve_kernel(light: UnsafePointer[UInt32, MutAnyOrigin], dst: UnsafePointer[UInt32, MutAnyOrigin], total: Int32, words: Int32):
+    """words: the light's words a pixel (3: one per channel; 4: the packed form, red and green first)."""
     var i = Int(global_idx.x)
     if i < Int(total):
-        dst.unsafe_offset(i)[] = _light_rgba(light.unsafe_offset(3 * i)[], light.unsafe_offset(3 * i + 1)[], light.unsafe_offset(3 * i + 2)[])
+        var w = Int(words)
+        dst.unsafe_offset(i)[] = _light_rgba(light.unsafe_offset(w * i)[], light.unsafe_offset(w * i + 1)[], light.unsafe_offset(w * i + 2)[])
+
+
+def _project_kernel[f: PlaceFn, g: TintFn](
+    pts: UnsafePointer[Float32, MutAnyOrigin], n: Int32, verts: UnsafePointer[UInt32, MutAnyOrigin],
+    w32: Int32, h32: Int32, k: Knobs, pairs: Int32,
+):
+    """One vertex a point for the GPU's blending (mojoui.present): its pixel (f; -1: none) and its light (g, in the
+    splat's 1024ths, exact in float16), VERTEX_BYTES = 12: Int32, then r, g, b, a as float16."""
+    var i = Int(global_idx.x)
+    if i < Int(n):
+        var p = pts.unsafe_offset(4 * i).unsafe_load[width=4]()
+        var at = f(p, Int(w32), Int(h32), k)
+        if pairs != 0 and at >= 0:  # lines: a segment with an end off the picture is left out (both ends)
+            var j = i ^ 1
+            if j >= Int(n) or f(pts.unsafe_offset(4 * j).unsafe_load[width=4](), Int(w32), Int(h32), k) < 0:
+                at = -1
+        var v = verts.unsafe_offset(3 * i)
+        v[] = UInt32(at) if at >= 0 else UInt32(0xFFFFFFFF)
+        var c = (_glow(g(p, k)).cast[DType.float32]() * Float32(1.0 / 1024.0)).cast[DType.float16]()
+        var bits = bitcast[DType.uint32, 2](c)
+        v.unsafe_offset(1)[] = bits[0]
+        v.unsafe_offset(2)[] = bits[1]
 
 
 struct PointCloud(Movable):
@@ -241,6 +313,18 @@ struct PointCloud(Movable):
     var readback_ms: Float64
     var host_light: List[UInt32]
     var light_capacity: Int
+    var read_back: Int  # pictures copied from the GPU into a surface's CPU memory (bin/shade, splat)
+    var handed: Int  # pictures left on the GPU for the host to show (surface.gpu_ok, goal 36b): no copy
+    var blended: Int  # of those, drawn by the GPU's fixed-function blending (surface.gpu_painter)
+    var three_atomics: Bool  # MOJOUI_SPLAT_ATOMICS=3: goal 36's splat (one atomic per channel), to compare
+    # Additive points with a GPU painter on offer: blending or the compute splat, whichever is faster here (measured on
+    # the first frames, D-739); MOJOUI_BLEND=1 always blends, 0 never
+    var blend_pref: Int  # 0: measure, 1: always, 2: never
+    var blend_choice: Int  # 0: not decided yet, 1: blending, 2: compute splat
+    var trial_ns: List[Int]  # TRIAL_FRAMES blending, then TRIAL_FRAMES compute
+    var since_trial: Int  # frames since the last decision: the work changes (points pile up, so the splat's saturation
+    var interval: Int  # skip pays more), so both are measured again after `interval` frames: 60, doubling while the
+    var told: Int  # choice holds, back to 60 when it flips (told: the choice last printed)
 
     def __init__(out self, x: List[Float32], y: List[Float32], a: List[Float32], b: List[Float32], use_gpu: Bool = True):
         self.gpu = Gpu(use_gpu)
@@ -267,6 +351,20 @@ struct PointCloud(Movable):
         self.light_capacity = 0
         self.splat_ms = 0
         self.readback_ms = 0
+        self.read_back = 0
+        self.handed = 0
+        self.blended = 0
+        self.three_atomics = False
+        self.blend_pref = 0
+        comptime if GPU_BUILD:  # (Apple and Android builds have neither path, and no getenv in their stubs)
+            self.three_atomics = getenv("MOJOUI_SPLAT_ATOMICS") == "3"
+            var bp = getenv("MOJOUI_BLEND")
+            self.blend_pref = 1 if bp == "1" else (2 if bp == "0" else 0)
+        self.blend_choice = 0
+        self.trial_ns = List[Int]()
+        self.since_trial = 0
+        self.told = 0
+        self.interval = RECHECK
         self.upload()
 
     def __init__(out self, var points: List[Float32], use_gpu: Bool = True):
@@ -290,6 +388,20 @@ struct PointCloud(Movable):
         self.light_capacity = 0
         self.splat_ms = 0
         self.readback_ms = 0
+        self.read_back = 0
+        self.handed = 0
+        self.blended = 0
+        self.three_atomics = False
+        self.blend_pref = 0
+        comptime if GPU_BUILD:  # (Apple and Android builds have neither path, and no getenv in their stubs)
+            self.three_atomics = getenv("MOJOUI_SPLAT_ATOMICS") == "3"
+            var bp = getenv("MOJOUI_BLEND")
+            self.blend_pref = 1 if bp == "1" else (2 if bp == "0" else 0)
+        self.blend_choice = 0
+        self.trial_ns = List[Int]()
+        self.since_trial = 0
+        self.told = 0
+        self.interval = RECHECK
         self.upload()
 
     def upload(mut self):
@@ -393,9 +505,18 @@ struct PointCloud(Movable):
                         self.counts.value().unsafe_ptr(), image.unsafe_ptr(), Int32(total), k,
                         grid_dim=ceildiv(total, 256), block_dim=256,
                     )
+                    surface.gpu_drawn = True
+                    if surface.gpu_ok:  # the host shows it from GPU memory (mojoui.present): no copy to the CPU
+                        ctx.synchronize()
+                        surface.gpu_address = Int(image.unsafe_ptr())
+                        surface.gpu_device = self.gpu.device
+                        self.handed += 1
+                        self.milliseconds += Float64(now_ns() - t0) / 1e6
+                        return
                     var dst = UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=surface.address)
                     ctx.enqueue_copy(dst_ptr=dst, src_buf=image)
                     ctx.synchronize()
+                    self.read_back += 1
                     self.milliseconds += Float64(now_ns() - t0) / 1e6
                     return
                 except e:
@@ -457,40 +578,215 @@ struct PointCloud(Movable):
         self.download()
         return self.host.copy()
 
+    def blend_points(mut self, surface: Surface) -> Bool:
+        """Whether this frame's additive points may go to the GPU painter (offered, same GPU, not ruled out)."""
+        if surface.gpu_painter == 0 or self.blend_pref == 2:
+            return False
+        var pp = Pointer[Presenter, MutUntrackedOrigin](unsafe_from_address=surface.gpu_painter)
+        if not pp[].blend_ok or pp[].device != self.gpu.device:
+            return False
+        if self.blend_pref == 1:
+            self.blend_choice = 1
+        elif self.blend_choice != 0:
+            self.since_trial += 1
+            if self.since_trial >= self.interval:
+                self.blend_choice = 0
+                self.trial_ns = List[Int]()
+        return True
+
+    def decide_blend(mut self):
+        """TRIAL_FRAMES frames blending, then as many with the compute splat (in blocks: switching between GL and CUDA
+        work every frame costs both); the first TRIAL_SKIP of each block are warm-up. Keeps the faster by the median
+        whole draw, the GPU's part included (blending waits for GL to finish while it's being timed)."""
+        if len(self.trial_ns) < 2 * TRIAL_FRAMES:
+            return
+        var blend = List[Int]()
+        var comp = List[Int]()
+        for i in range(TRIAL_SKIP, TRIAL_FRAMES):
+            blend.append(self.trial_ns[i])
+            comp.append(self.trial_ns[TRIAL_FRAMES + i])
+        sort(blend)
+        sort(comp)
+        var b = Float64(blend[len(blend) // 2]) / 1e6
+        var c = Float64(comp[len(comp) // 2]) / 1e6
+        var choice = 1 if b < c else 2
+        if self.told == 1 and c > b * 0.9:  # (a switch has to win by a tenth: no flapping when they're close)
+            choice = 1
+        elif self.told == 2 and b > c * 0.9:
+            choice = 2
+        self.interval = min(self.interval * 2, 64 * RECHECK) if choice == self.told else RECHECK
+        self.blend_choice = choice
+        self.since_trial = 0
+        if self.told == self.blend_choice:
+            return
+        self.told = self.blend_choice
+        print("mojoui: additive points (" + String(self.count) + "): GPU blending " + String(Float64(Int(b * 1000)) / 1000)
+              + " ms, compute splat " + String(Float64(Int(c * 1000)) / 1000) + " ms → " + ("GPU blending" if b < c else "compute splat"), flush=True)
+
+    def paint_on_gpu[f: PlaceFn, g: TintFn](mut self, mut surface: Surface, k: Knobs, lines: Bool, over: Bool, timed: Bool, finish: Bool = False) -> Bool:
+        """The GPU's own blending, when the host offers it (surface.gpu_painter, mojoui.present): a kernel writes one
+        vertex a point (place f, light g) into the painter's vertex buffer, and the painter blends them into one of its
+        textures, which the host shows (surface.gpu_slot). False: not offered or it failed (the caller draws another
+        way)."""
+        comptime if GPU_BUILD:
+            if surface.gpu_painter == 0 or not self.on_gpu():
+                return False
+            var pp = Pointer[Presenter, MutUntrackedOrigin](unsafe_from_address=surface.gpu_painter)
+            if not pp[].blend_ok or pp[].device != self.gpu.device:
+                return False
+            var t0 = now_ns()
+            var w = surface.width
+            var h = surface.height
+            var slot = pp[].acquire(w, h)
+            if slot < 0:
+                return False
+            var verts = pp[].begin_vertices(self.count)
+            if verts == 0:
+                return False
+            try:
+                ref ctx = self.gpu.ctx.value()
+                ctx.enqueue_function[_project_kernel[f, g]](
+                    self.device.value().unsafe_ptr(), Int32(self.count), UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=verts),
+                    Int32(w), Int32(h), k, Int32(1 if lines else 0), grid_dim=ceildiv(self.count, 256), block_dim=256,
+                )
+                ctx.synchronize()
+            except e:
+                _ = pp[].draw_vertices(slot, w, h, 0, lines, over)  # (unmaps the buffer)
+                pp[].give_up_blend("the vertex kernel failed: " + String(e))
+                return False
+            var t1 = now_ns()
+            if not pp[].draw_vertices(slot, w, h, self.count, lines, over, finish):
+                return False
+            surface.gpu_slot = slot
+            surface.gpu_drawn = True
+            self.handed += 1
+            self.blended += 1
+            if timed:
+                self.splat_ms = Float64(t1 - t0) / 1e6
+                self.readback_ms = 0
+            self.milliseconds = Float64(now_ns() - t0) / 1e6
+            return True
+        return False
+
+    def paint[f: PlaceFn, g: TintFn](mut self, mut surface: Surface, k: Knobs, lines: Bool = False, over: Bool = False):
+        """Draws the points (lines=True: each pair 2i, 2i+1 is a segment) with light g at the pixels f picks, blended
+        additively (over=False: light adds up, clamped at white) or "over" in point order (g's fourth number is the
+        opacity), on black. On the GPU's fixed-function blending when the host offers it; else additive points use the
+        compute splat (splat()), and lines or "over" are drawn on the CPU (the points read back first)."""
+        if not lines and not over:
+            self.splat[f, g](surface, k)
+            return
+        comptime if GPU_BUILD:
+            if self.on_gpu() and self.paint_on_gpu[f, g](surface, k, lines, over, False):
+                return
+            if self.on_gpu():
+                self.download()
+        var w = surface.width
+        var h = surface.height
+        var acc = List[Float32](length=3 * w * h, fill=0)
+        var pts = self.host.unsafe_ptr()
+        var step = 2 if lines else 1
+        var i = 0
+        while i + step <= self.count:
+            var p = pts.unsafe_offset(4 * i).unsafe_load[width=4]()
+            var a = f(p, w, h, k)
+            var c = _glow(g(p, k)).cast[DType.float32]() * Float32(1.0 / 1024.0)
+            var spots = List[Int]()
+            if not lines:
+                if a >= 0:
+                    spots.append(a)
+            else:
+                var q = pts.unsafe_offset(4 * (i + 1)).unsafe_load[width=4]()
+                var b = f(q, w, h, k)
+                if a >= 0 and b >= 0:  # (pixel centres; the end pixel left out, as GL's diamond rule does)
+                    var x0 = a % w
+                    var y0 = a // w
+                    var dx = b % w - x0
+                    var dy = b // w - y0
+                    var steps = max(abs(dx), abs(dy))
+                    for s in range(steps):
+                        var x = x0 + Int(Float64(dx * s) / Float64(steps) + (0.5 if dx * s >= 0 else -0.5))
+                        var y = y0 + Int(Float64(dy * s) / Float64(steps) + (0.5 if dy * s >= 0 else -0.5))
+                        spots.append(y * w + x)
+            for at in spots:
+                comptime for ch in range(3):
+                    if over:
+                        acc[3 * at + ch] = acc[3 * at + ch] * (Float32(1) - c[3]) + c[ch] * c[3]
+                    else:
+                        acc[3 * at + ch] += c[ch]
+            i += step
+        var px = surface.pixels()
+        for j in range(w * h):
+            var r = UInt32(Int(min(acc[3 * j], Float32(1)) * 1024 + 0.5))
+            var gg = UInt32(Int(min(acc[3 * j + 1], Float32(1)) * 1024 + 0.5))
+            var b = UInt32(Int(min(acc[3 * j + 2], Float32(1)) * 1024 + 0.5))
+            px.unsafe_offset(j)[] = _light_rgba(r, gg, b)
+
     def splat[f: PlaceFn, g: TintFn](mut self, mut surface: Surface, k: Knobs, timed: Bool = False):
         """Paints the surface black, then each point adds g(point)'s light to the pixel f(point) picks (OUTSIDE or
         FILTERED: none), clamped at white: additive blending. Light adds up as whole numbers, so the GPU and the CPU
         make the same picture. milliseconds: how long, including the copy into the surface (and any step() still
-        queued); timed=True also splits it into splat_ms (GPU) and readback_ms (the copy), at the cost of a second wait."""
+        queued); timed=True also splits it into splat_ms (GPU) and readback_ms (the copy), at the cost of a second wait.
+        When the host can show a GPU picture (surface.gpu_ok), the picture stays on the GPU and the surface says where
+        (surface.gpu_address): no copy to the CPU, one wait."""
         var t0 = now_ns()
         var w = surface.width
         var h = surface.height
         var total = w * h
         comptime if GPU_BUILD:
+            if self.on_gpu() and self.blend_points(surface):
+                var trial = self.blend_choice == 0
+                var at = len(self.trial_ns)
+                if (not trial and self.blend_choice == 1) or (trial and at < TRIAL_FRAMES):
+                    if self.paint_on_gpu[f, g](surface, k, False, False, timed, trial):
+                        if trial:
+                            self.trial_ns.append(Int(now_ns() - t0))
+                        return
+                    self.blend_choice = 2  # (it failed: the painter said why; the compute splat from now on)
             if self.on_gpu():
                 try:
                     ref ctx = self.gpu.ctx.value()
-                    if self.light_capacity < total:  # light (3 per pixel), then the picture (1 per pixel)
-                        self.light = ctx.enqueue_create_buffer[DType.uint32](4 * total)
+                    if self.light_capacity < total:  # light (up to 4 words per pixel), then the picture (1 per pixel)
+                        self.light = ctx.enqueue_create_buffer[DType.uint32](5 * total)
                         self.light_capacity = total
-                    var light = self.light.value().create_sub_buffer[DType.uint32](0, 3 * total)
-                    var image = self.light.value().create_sub_buffer[DType.uint32](3 * total, total)
+                    var words = 3 if self.three_atomics else 4
+                    var light = self.light.value().create_sub_buffer[DType.uint32](0, words * total)
+                    var image = self.light.value().create_sub_buffer[DType.uint32](4 * total, total)
                     ctx.enqueue_memset(light, 0)
-                    ctx.enqueue_function[_splat_kernel[f, g]](
-                        self.device.value().unsafe_ptr(), Int32(self.count), light.unsafe_ptr(), Int32(w), Int32(h), k,
-                        grid_dim=ceildiv(self.count, 256), block_dim=256,
-                    )
+                    if self.three_atomics:
+                        ctx.enqueue_function[_splat_kernel[f, g]](
+                            self.device.value().unsafe_ptr(), Int32(self.count), light.unsafe_ptr(), Int32(w), Int32(h), k,
+                            grid_dim=ceildiv(self.count, 256), block_dim=256,
+                        )
+                    else:
+                        ctx.enqueue_function[_splat2_kernel[f, g]](
+                            self.device.value().unsafe_ptr(), Int32(self.count), light.unsafe_ptr(), Int32(w), Int32(h), k,
+                            grid_dim=ceildiv(self.count, 256), block_dim=256,
+                        )
                     ctx.enqueue_function[_resolve_kernel](
-                        light.unsafe_ptr(), image.unsafe_ptr(), Int32(total), grid_dim=ceildiv(total, 256), block_dim=256,
+                        light.unsafe_ptr(), image.unsafe_ptr(), Int32(total), Int32(words), grid_dim=ceildiv(total, 256), block_dim=256,
                     )
+                    surface.gpu_drawn = True
                     var t1 = t0
-                    if timed:  # (measuring: wait for the kernels, so the copy to the CPU is timed on its own)
+                    if timed or surface.gpu_ok:  # (measuring: wait for the kernels, so the copy to the CPU is timed on its own)
                         ctx.synchronize()
                         t1 = now_ns()
                         self.splat_ms = Float64(t1 - t0) / 1e6
+                    if surface.gpu_ok:  # the host shows the picture from GPU memory (mojoui.present): no readback
+                        surface.gpu_address = Int(image.unsafe_ptr())
+                        surface.gpu_device = self.gpu.device
+                        self.handed += 1
+                        if timed:
+                            self.readback_ms = 0
+                        self.milliseconds = Float64(t1 - t0) / 1e6
+                        if self.blend_choice == 0 and surface.gpu_painter != 0 and len(self.trial_ns) >= TRIAL_FRAMES:
+                            self.trial_ns.append(Int(t1 - t0))
+                            self.decide_blend()
+                        return
                     var dst = UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=surface.address)
                     ctx.enqueue_copy(dst_ptr=dst, src_buf=image)
                     ctx.synchronize()
+                    self.read_back += 1
                     var t2 = now_ns()
                     if timed:
                         self.readback_ms = Float64(t2 - t1) / 1e6
