@@ -17,7 +17,7 @@ The protocol, the same for all rows:
   B-native renders offscreen (NVIDIA's Vulkan driver can't present to Xvfb). Every GPU row asserts an NVIDIA adapter
   (never SwiftShader or llvmpipe).
 - 60 warm-up frames, then 600 measured; three runs; each figure is the median of the three runs' figures, with the
-  spread (max - min).
+  spread (max - min). Within a run the headline is a mean (below), not a median.
 - Headline frame ms = throughput: the measured window's wall time / 600 (the mean interval between frame starts,
   vsync and frame limiters off). Not the median interval: a pipelined loop runs in bursts (A's median rAF interval
   was 0.5 ms while its GPU needed 2.8 ms a frame), so only the mean counts every frame's work.
@@ -30,9 +30,11 @@ The protocol, the same for all rows:
 - Reported separately, labelled: step ms (GPU timestamps for A and B-native, C's separate timed pass, the CPU for
   A-cpu and B-wasm), GPU frame ms, CPU encode ms, C's readback ms.
 - Cold start: from just before the process (or browser) is launched to the first drawn frame (its work done).
-- Peak memory: one method for all rows: this script samples the resident memory (RSS) of the whole process tree it
-  launched every 20 ms (the harness's own Python, Node (Playwright) and nvidia-smi excluded; GPU memory not counted);
-  no row copies its positions out at the end (positions off).
+- Peak memory: one method for all rows: this script samples the process tree it launched (the harness's own Python,
+  Node (Playwright) and nvidia-smi excluded; GPU memory not counted): RSS every 20 ms, and PSS (proportional set size,
+  /proc/<pid>/smaps_rollup, as smem reports it: a page shared by k processes counts 1/k in each) every 100 ms. PSS is the
+  headline: RSS counts a shared page once per process, which inflates a multi-process browser. No row copies its
+  positions out at the end (positions off).
 """
 import argparse
 import hashlib
@@ -173,15 +175,16 @@ _EXCLUDE = {"python", "python3", "python3.13", "node", "nvidia-smi", "pixi", "Xv
 
 
 class TreeRss:
-    """Peak RSS (MB) of every process this script started (its descendants), sampled every 20 ms."""
+    """Peak RSS (MB) of every process this script started (its descendants), sampled every 20 ms, and peak PSS (MB),
+    from smaps_rollup every fifth sample (100 ms)."""
 
     def __init__(self):
-        self.peak, self._stop = 0, threading.Event()
+        self.peak, self.peak_pss, self._stop = 0, 0, threading.Event()
         self._t = threading.Thread(target=self._run, daemon=True)
         self._t.start()
 
     @staticmethod
-    def sample():
+    def sample(pss=False):
         kids, comm, rss = {}, {}, {}
         for p in Path("/proc").iterdir():
             if not p.name.isdigit():
@@ -195,23 +198,34 @@ class TreeRss:
                 rss[pid] = int(rest[21]) * 4  # rss pages -> kB (4 kB pages)
             except (OSError, ValueError, IndexError):
                 pass
-        total, todo = 0, list(kids.get(os.getpid(), []))
+        total, ptotal, todo = 0, 0, list(kids.get(os.getpid(), []))
         while todo:
             q = todo.pop()
             todo += kids.get(q, [])
             if comm.get(q) not in _EXCLUDE:
                 total += rss.get(q, 0)
-        return total / 1024
+                if pss:
+                    try:
+                        m = re.search(r"^Pss:\s+(\d+) kB", Path(f"/proc/{q}/smaps_rollup").read_text(), re.M)
+                        ptotal += int(m.group(1)) if m else 0
+                    except OSError:
+                        pass
+        return total / 1024, ptotal / 1024
 
     def _run(self):
+        i = 0
         while not self._stop.is_set():
-            self.peak = max(self.peak, self.sample())
+            rss, pss = self.sample(pss=i % 5 == 0)
+            self.peak = max(self.peak, rss)
+            if i % 5 == 0:
+                self.peak_pss = max(self.peak_pss, pss)
+            i += 1
             self._stop.wait(0.02)
 
     def stop(self):
         self._stop.set()
         self._t.join()
-        return round(self.peak, 1)
+        return round(self.peak, 1), round(self.peak_pss, 1)
 
 
 def quiet_harness():
@@ -330,8 +344,9 @@ def one(row, n, threads=None):
         else:
             r, out = run_c(n)
     finally:
-        peak = mem.stop()
+        peak, peak_pss = mem.stop()
     r["peak_rss_mb"] = peak
+    r["peak_pss_mb"] = peak_pss
     subprocess.run(["rm", "-r", "--", str(out)], check=False)  # (only the temp folder this run made)
     return r
 
@@ -339,7 +354,7 @@ def one(row, n, threads=None):
 # ---------- the protocol ----------
 
 FIELDS = ["frame_ms", "p95_interval_ms", "median_interval_ms", "step_ms", "gpu_frame_ms", "cpu_encode_ms", "readback_ms",
-          "work_ms", "splat_ms", "cold_start_ms", "peak_rss_mb"]
+          "work_ms", "splat_ms", "cold_start_ms", "peak_rss_mb", "peak_pss_mb"]
 
 
 def combine(runs):
@@ -392,7 +407,7 @@ def bench(rows, sizes, runs, log, gate=None):
                 rr.append(r)
                 log(f"  {row:8} {n:>10,} run {i + 1}: frame {r['frame_ms']:.3f} ms (p95 {r['p95_interval_ms']:.2f}), "
                     f"step {r['step_ms'] if r['step_ms'] is None else round(r['step_ms'], 3)}, cold {r['cold_start_ms']:.0f} ms, "
-                    f"peak {r['peak_rss_mb']:.0f} MB; load {q['load1']}, GPU apps {len(q['compute_apps'])}")
+                    f"peak {r['peak_pss_mb']:.0f} MB PSS ({r['peak_rss_mb']:.0f} RSS); load {q['load1']}, GPU apps {len(q['compute_apps'])}")
             c = combine(rr)
             c["machine"] = {"load1_max": max(r["machine"]["load1"] for r in rr), "gated": all(r["machine"]["gated"] for r in rr),
                             "compute_apps_at_start": [r["machine"]["compute_apps"] for r in rr]}
@@ -410,9 +425,35 @@ BUILDS = {
     # the files a person writes for the build (no checks, screenshots, build outputs or lock files)
     "A": {"dir": "showcase/js-webgpu", "skip": ["check_a.py", "cpu.js"]},
     "A-cpu": {"files": ["showcase/js-webgpu/cpu.js", "showcase/js-webgpu/index.html", "showcase/js-webgpu/serve.py"]},
-    "B": {"dir": "showcase/js-rust", "skip": ["check_b.py", "Cargo.lock"]},
+    "B": {"dir": "showcase/js-rust", "skip": ["check_b.py", "Cargo.lock"]},  # both apps together
+    "B-wasm": {"files": ["showcase/js-rust/Cargo.toml", "showcase/js-rust/build.sh", "showcase/js-rust/serve.py",
+                         "showcase/js-rust/sim/Cargo.toml", "showcase/js-rust/sim/src/lib.rs", "showcase/js-rust/wasm/Cargo.toml",
+                         "showcase/js-rust/wasm/src/lib.rs", "showcase/js-rust/web/index.html", "showcase/js-rust/web/main.js",
+                         "showcase/js-rust/web/worker.js"]},
+    "B-native": {"files": ["showcase/js-rust/Cargo.toml", "showcase/js-rust/sim/Cargo.toml", "showcase/js-rust/sim/src/lib.rs",
+                           "showcase/js-rust/native/Cargo.toml", "showcase/js-rust/native/src/main.rs",
+                           "showcase/js-rust/native/src/shader.wgsl"]},
     "C": {"dir": "examples/particles", "skip": []},
 }
+# C's app is one file, but this goal also added code to the framework it calls (PointCloud's step, splat and their
+# test): counted from git, from the commit that set the goal, so the page can say both numbers.
+GOAL_BASE = "858eff5"
+FRAMEWORK = ["mojoui", "themes", "tests/test_pointcloud_step.mojo"]
+
+
+def framework_added():
+    """Lines (not blank, not only a comment) this goal added to the framework and its tests, per file, from git."""
+    diff = subprocess.run(["git", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--unified=0", GOAL_BASE, "--", *FRAMEWORK], cwd=ROOT, capture_output=True,
+                          text=True).stdout
+    per, cur = {}, None
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            cur = line[6:] if line.startswith("+++ b/") else None
+        elif cur and line.startswith("+") and not line.startswith("+++"):
+            t = line[1:].strip()
+            if t and not t.startswith("#") and not t.startswith('"""'):
+                per[cur] = per.get(cur, 0) + 1
+    return per
 
 
 def build_files(b):
@@ -516,6 +557,11 @@ def effort():
         "B": ["pixi install  (Rust 1.99, wasm32 std, rust-src, wasm-bindgen-cli, binaryen)", *b_build,
               "python showcase/js-rust/serve.py  (COOP/COEP headers, for wasm threads)", "open http://127.0.0.1:<port>/index.html",
               "target/release/particles-native  (the native row)"],
+        "B-wasm": ["pixi install  (Rust 1.99, wasm32 std, rust-src, wasm-bindgen-cli, binaryen)",
+                   *[c for c in b_build if "particles-native" not in c],
+                   "python showcase/js-rust/serve.py  (COOP/COEP headers, for wasm threads)", "open http://127.0.0.1:<port>/index.html"],
+        "B-native": ["pixi install  (Rust 1.99)", *[c for c in b_build if "particles-native" in c],
+                     "target/release/particles-native"],
         "C": ["pixi install  (Mojo 1.1, MAX 26.6)", *shell_commands_c(), "build/particles/linux/particles"],
     }
     out = {}
@@ -525,15 +571,19 @@ def effort():
         for s in steps[b]:
             w = s.split()[0]
             t = TOOLCHAIN.get(w) or (TOOLCHAIN["cargo"] if w.startswith("RUSTC_BOOTSTRAP") else None)
+            if t == TOOLCHAIN["cargo"] and b == "B-native":
+                t = "Rust (rustc + cargo)"
             if t and t not in tools:
                 tools.append(t)
-        if b in ("A", "A-cpu", "B"):
+        if b in ("A", "A-cpu", "B", "B-wasm"):
             tools.append("Chromium with WebGPU" if b == "A" else "Chromium")
         out[b] = {
             "files": len(files), "lines": sum(code_lines(f) for f in files),
             "by_file": {str(f.relative_to(ROOT)): code_lines(f) for f in files},
             "languages": languages(files), "build_steps": len(steps[b]), "steps": steps[b], "toolchains": tools,
         }
+    fw = framework_added()
+    out["C"]["framework_added"] = {"lines": sum(fw.values()), "by_file": fw, "since": GOAL_BASE}
     return out
 
 
@@ -574,7 +624,7 @@ def report(res):
                  f"(compute apps over {g['gpu_apps_over_mib']} MiB; idle desktop clients hold 6 MiB); waited {g['waited_s']} s in all.\n")
     L.append(f"Commit `{res['commit']}`, sources sha256 `{res['sources_sha256'][:12]}`, {res['date']}; {res['machine']}.\n"
              f"Protocol: scripts/particles_bench.py (docstring): {WARM} warm-up + {MEAS} measured frames, {RUNS} runs, "
-             "median of the runs (± spread = max - min).\n")
+             "each run's frame ms is the mean frame interval (throughput); the table shows the median of the runs (± spread = max - min).\n")
     L.append("## Headline: frame ms (throughput, vsync off) and the largest N at 60 fps\n")
     L.append("Holds 60 fps = frame ms ≤ 16.7 and the 95th-percentile frame interval ≤ 20 ms.\n")
     sizes = SIZES
@@ -596,13 +646,13 @@ def report(res):
         r = next(iter(R[row].values()))
         L.append(f"- {LABEL[row]}: {r['frame_ms_is']}.")
     L.append("\n## Separately (labelled; not comparable across rows unless the label matches)\n")
-    L.append("| Row | N | p95 interval | step ms | step is | GPU frame ms | CPU encode ms | readback ms | cold start ms | peak RSS MB |")
-    L.append("|---|---|---|---|---|---|---|---|---|---|")
+    L.append("| Row | N | p95 interval | step ms | step is | GPU frame ms | CPU encode ms | readback ms | cold start ms | peak PSS MB | peak RSS MB |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|")
     for row in R:
         for n, r in sorted(R[row].items(), key=lambda kv: int(kv[0])):
             L.append(f"| {row} | {mill(int(n))} | {fmt(r.get('p95_interval_ms'))} | {fmt(r.get('step_ms'), 3)} | {r['step_ms_is']} | "
                      f"{fmt(r.get('gpu_frame_ms'), 3)} | {fmt(r.get('cpu_encode_ms'), 3)} | {fmt(r.get('readback_ms'), 3)} | "
-                     f"{fmt(r.get('cold_start_ms'), 0)} | {fmt(r.get('peak_rss_mb'), 0)} |")
+                     f"{fmt(r.get('cold_start_ms'), 0)} | {fmt(r.get('peak_pss_mb'), 0)} | {fmt(r.get('peak_rss_mb'), 0)} |")
     L.append("\nGPU frame ms: A = GPU timestamps from the step's start to the tone pass's end; C = its timed step + splat "
              "(the separate pass). CPU encode: A = JS encode + submit; B-wasm = step + pack + upload + draw call on the CPU. "
              "C's work per frame (step + splat + readback, one wait) is in results.json (work_ms).")
@@ -614,10 +664,16 @@ def report(res):
     L.append("| Build | lines of code | files | languages | build steps | toolchains to install |")
     L.append("|---|---|---|---|---|---|")
     for b, e in E.items():
-        L.append(f"| {b} | {e['lines']} | {e['files']} | {', '.join(e['languages'])} | {e['build_steps']} | {'; '.join(e['toolchains'])} |")
-    L.append("\nLines exclude blank and comment-only lines (and docstrings). C counts the app (examples/particles) only: "
-             "mojoui (the framework, including PointCloud's step/splat kernels) is a library, as WebGPU, wgpu, "
-             "wasm-bindgen and rayon are. Build steps, clean checkout to running:\n")
+        name = {"B": "B (both apps: wasm and native)"}.get(b, b)
+        L.append(f"| {name} | {e['lines']} | {e['files']} | {', '.join(e['languages'])} | {e['build_steps']} | {'; '.join(e['toolchains'])} |")
+    fw = E["C"].get("framework_added", {})
+    L.append("\nLines exclude blank and comment-only lines (and docstrings). B-wasm and B-native share the sim crate and the "
+             "workspace Cargo.toml (counted in both); B is the two apps together. C counts the app (examples/particles) only: "
+             "mojoui (the framework) is a library, as WebGPU, wgpu, wasm-bindgen and rayon are. But this goal also added "
+             f"{fw.get('lines', 0)} lines to the framework and its tests for C ("
+             + ", ".join(f"{f} +{n}" for f, n in fw.get("by_file", {}).items())
+             + f"; added lines that aren't blank or a comment, git diff from {fw.get('since')}): PointCloud's step, splat and "
+             "readback, reusable by any app. Build steps, clean checkout to running:\n")
     for b, e in E.items():
         L.append(f"- {b}: " + " → ".join(f"`{s}`" for s in e["steps"]))
     L.append("\n## Caveats (every one)\n")
@@ -627,11 +683,12 @@ def report(res):
 
 
 CAVEATS = [
-    "A draws with an atomic compute rasteriser (two u32 atomics per on-screen particle) and skips the second atomic once "
-    "a pixel is saturated (its count is past the tone map's white for the dimmest channel); its look is a tone map, not "
-    "the SPEC's clamp. ?render=points (hardware point blending) exists and is about half as fast at 20M.",
+    "A draws with an atomic compute rasteriser (two u32 atomics per on-screen particle): it loads the pixel's count first "
+    "and skips both atomics once the pixel is saturated (past the tone map's white for the dimmest channel), as C does; "
+    "its look is a tone map, not the SPEC's clamp. ?render=points (hardware point blending) exists and is not measured here.",
     "C's splat is the framework's generic PointCloud.splat: three u32 atomics per particle (r, g, b), each skipped once "
-    "that channel's sum is saturated (an atomic load first; exact: the GPU still matches the CPU path).",
+    "that channel's sum is saturated (an atomic load first; exact: the GPU still matches the CPU path). That skip was "
+    "modelled on A's (a fair-play fix after review); A then got C's load-first form, so both skip the same way.",
     "B draws with hardware blending (WebGL2 points / wgpu point list, additive). B-wasm steps on the CPU (wasm SIMD + a "
     "rayon pool in a worker) and uploads one packed u32 per particle to the GPU every frame.",
     "C copies its finished picture (1280 × 720 × 4 bytes) from the GPU to the CPU every frame and hands it to GTK as a "
@@ -643,14 +700,20 @@ CAVEATS = [
     "C's frame clock is capped at 60 fps by GTK unless GDK_DEBUG=no-vsync (verified: 16.7 ms at every N with the cap, "
     "4.8 ms at 1M without), so its headline is measured uncapped.",
     "A's headline comes from &await=0 with the queue drained at the warm-up's end: Chromium's onSubmittedWorkDone round "
-    "trip (5-9 ms here) would otherwise dominate, and the rAF interval alone runs ahead of the GPU.",
+    "trip (5-9 ms here) would otherwise dominate, and the rAF interval alone runs ahead of the GPU. So A's p95 is a rAF "
+    "interval that runs ahead of the GPU: for A the p95 test never binds, the throughput figure does.",
+    "A's CPU encode reads 0.100 ms at every size: Chromium clamps performance.now() to 100 µs on a page that isn't "
+    "cross-origin isolated, so it means 'under about 0.1 ms'.",
+    "B-wasm's thread count was chosen by its own probe (every core, and cores - 2, one run each; the faster used).",
     "B-native renders offscreen only (NVIDIA's Vulkan driver can't present to Xvfb), two frames in flight: it never "
-    "presents to a window here.",
+    "presents to a window here, so its frame, cold start and memory have no window or swapchain in them.",
     "B-wasm runs in headless Chromium (no Xvfb), WebGL2 through ANGLE on NVIDIA's EGL (OpenGL), the fastest path found.",
     "A-cpu is single-threaded by design (plain JS on the main thread, the 'JS alone' baseline); it uses no GPU for the "
     "step, and Chromium composites its canvas.",
-    "Peak memory is the RSS of the launched process tree (Chromium's processes, or the one native process), sampled every "
-    "20 ms; GPU memory is not included. C keeps a CPU copy of all points (16 bytes each) by design of PointCloud.",
+    "Peak memory is the PSS of the launched process tree (Chromium's processes, or the one native process), from "
+    "smaps_rollup every 100 ms: a page shared by several processes counts once in all. RSS (every 20 ms) is in "
+    "results.json too; it counts a shared page once per process, which inflates the multi-process browser rows. GPU "
+    "memory is not included. C keeps a CPU copy of all points (16 bytes each) by design of PointCloud.",
     "Cold start includes each runtime's own start: Chromium's for A, A-cpu and B-wasm; the GPU driver's for all.",
     "The machine has two RTX 3090s; each runtime picks its own (all report an NVIDIA GeForce RTX 3090). Each run's "
     "1-minute load and the GPU's compute apps at its start are in results.json.",

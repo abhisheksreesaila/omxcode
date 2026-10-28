@@ -91,7 +91,7 @@ def m4():
     p = res.get("protocol", {})
     if (p.get("warmup"), p.get("frames"), p.get("runs")) != (60, 600, 3):
         problems.append(f"protocol {p.get('warmup')}/{p.get('frames')}/{p.get('runs')}, not 60 warm-up / 600 frames / 3 runs")
-    need = ["frame_ms", "frame_ms_spread", "p95_interval_ms", "cold_start_ms", "peak_rss_mb", "holds_60", "frame_ms_is", "step_ms_is"]
+    need = ["frame_ms", "frame_ms_spread", "p95_interval_ms", "cold_start_ms", "peak_rss_mb", "peak_pss_mb", "holds_60", "frame_ms_is", "step_ms_is"]
     for row in pb.ROWS:
         rows = res.get("rows", {}).get(row)
         if not rows:
@@ -119,7 +119,9 @@ def m4():
                 problems.append(f"B-wasm {n}: not multi-threaded")
             if r.get("holds_60") != (r.get("frame_ms", 99) <= 1000 / 60 and r.get("p95_interval_ms", 99) <= 20):
                 problems.append(f"{row} {n}: holds_60 disagrees with its numbers")
-    for b in ("A", "A-cpu", "B", "C"):
+    if not (res.get("effort", {}).get("C", {}).get("framework_added") or {}).get("lines"):
+        problems.append("effort C: the framework lines this goal added aren't counted")
+    for b in ("A", "A-cpu", "B", "B-wasm", "B-native", "C"):
         e = res.get("effort", {}).get(b, {})
         if not all(e.get(k) for k in ("lines", "files", "languages", "build_steps", "toolchains")):
             problems.append(f"effort {b}: incomplete")
