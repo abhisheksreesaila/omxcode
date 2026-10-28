@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Particle field · JS + WebGPU</title>
+<style>
+  :root { color-scheme: dark; --surface: #17161d; --on: #e9e6f5; --dim: #9a95b3; --accent: #7b6cf0; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: grid; place-items: center; font: 500 13px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--on); }
+  canvas { width: min(100vw, calc(100vh * 16 / 9)); aspect-ratio: 16 / 9; display: block; touch-action: none; cursor: crosshair; }
+  .bar { position: fixed; left: 16px; top: 16px; display: flex; gap: 14px; align-items: center; padding: 8px 14px;
+         background: var(--surface); border-radius: 999px; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+  .stat { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stat b { font-weight: 650; } .stat span { color: var(--dim); }
+  input[type=range] { width: 140px; accent-color: var(--accent); }
+  .err { position: fixed; inset: 0; display: grid; place-items: center; color: #f7b; font-size: 16px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div class="bar" id="bar">
+  <div class="stat"><b id="n">1M</b> <span>particles</span></div>
+  <input id="slider" type="range" min="0" max="4" step="1" value="0" aria-label="particle count">
+  <div class="stat"><b id="fps">–</b> <span>fps</span></div>
+  <div class="stat"><b id="step">–</b> <span>ms step</span></div>
+</div>
+<script type="module" src="main.js"></script>
+</body>
+</html>
