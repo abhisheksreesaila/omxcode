@@ -418,19 +418,20 @@ async function main() {
 // change through its control, exactly as the scripted run does, and resolves after the frame that shows it.
 async function external(s0) {
   const plan = await (await fetch("/steps.json")).json();
-  const byStep = new Map(plan.steps.map((st) => [st.step, st]));
+  const byStep = new Map([[0, plan.opening], ...plan.steps.map((st) => [st.step, st])]);
   const answers = [answer(0, s0.r)];
   log.steps.push(timing(0, s0));
   window.extStep = async (n) => {
     const step = byStep.get(n);
     if (!step) throw new Error(`no step ${n} in steps.json`);
     await nextPaint();
-    const el = { from: ui.from, to: ui.to, min_amount: ui.min, region: ui.region }[step.change];
+    const el = { from: ui.from, to: ui.to, min_amount: ui.min, region: ui.region }[step.change];   // step 0: none
     const next = shownOnce();
     // The other controls already hold step n's state when the steps come in order; set them anyway (no event).
     ui.from.value = step.from; ui.to.value = step.to; ui.min.value = String(step.min_amount); ui.minv.value = ui.min.value;
     ui.region.value = step.region;
-    el.dispatchEvent(new Event(step.change === "min_amount" ? "input" : "change"));
+    if (el) el.dispatchEvent(new Event(step.change === "min_amount" ? "input" : "change"));
+    else update(performance.now());
     const x = await next;
     answers.push(answer(n, x.r));
     const t = timing(n, x);
@@ -439,7 +440,18 @@ async function external(s0) {
   };
   window.extResults = () => ({ answers: { build: "A js-duckdb", rows: ROWS, steps: answers },
                                timings: { build: "A js-duckdb", rows: ROWS, ...log } });
-  window.extReady = { first_dashboard_ms: s0.shown, ...log.setup };
+  window.extKpi = kpiRect;
+  window.extReady = { first_dashboard_ms: s0.shown, ...log.setup, ...kpiRect() };
+}
+// The three KPI tiles (not the query-time tile beside them), in window logical pixels: the viewport's rect plus the
+// window frame's offset (a title bar, if the window has one).
+function kpiRect() {
+  const tiles = [ui.rows, ui.sum, ui.margin].map((x) => x.closest(".kpi").getBoundingClientRect());
+  const x = Math.min(...tiles.map((r) => r.left)), y = Math.min(...tiles.map((r) => r.top));
+  const w = Math.max(...tiles.map((r) => r.right)) - x, h = Math.max(...tiles.map((r) => r.bottom)) - y;
+  const dx = Math.max(0, (outerWidth - innerWidth) / 2), dy = Math.max(0, outerHeight - innerHeight);
+  return { kpi_rect: [x + dx, y + dy, w, h], kpi_rect_viewport: [x, y, w, h], inner: [innerWidth, innerHeight],
+           outer: [outerWidth, outerHeight] };
 }
 const timing = (k, x) => ({ step: k, input_to_pixels_ms: x.input_to_pixels_ms, query_ms: x.query_ms, render_ms: x.render_ms, ...x.split });
 
