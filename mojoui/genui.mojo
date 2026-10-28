@@ -46,7 +46,8 @@ comptime P_POINTER = 6
 comptime P_WORD = 7
 comptime P_CHILDREN = 8
 
-comptime POINTER_PATTERN = "^(/[A-Za-z0-9_-]{1,40}){1,6}$"
+comptime POINTER_PATTERN = "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$"  # (no "-": a bind never appends)
+comptime NUMBER_LIMIT = 1_000_000_000_000_000  # numbers an agent sends: within ±1e15 (finite, drawable)
 comptime WORD_PATTERN = "^[a-z][a-z0-9_]{0,39}$"
 
 
@@ -136,9 +137,9 @@ def prop_schema(p: Prop) -> String:
     if p.kind == P_TEXTS:
         return '{"type":"array","minItems":' + String(p.low) + ',"maxItems":' + String(p.limit) + ',"items":{"type":"string","maxLength":100}' + about + "}"
     if p.kind == P_NUMBERS:
-        return '{"type":"array","maxItems":' + String(p.limit) + ',"items":{"type":"number"}' + about + "}"
+        return '{"type":"array","maxItems":' + String(p.limit) + ',"items":{"type":"number","minimum":-' + String(NUMBER_LIMIT) + ',"maximum":' + String(NUMBER_LIMIT) + "}" + about + "}"
     if p.kind == P_ROWS:
-        return ('{"type":"array","maxItems":' + String(p.limit) + ',"items":{"type":"array","maxItems":10,"items":{"type":["string","number"],"maxLength":200}}' + about + "}")
+        return ('{"type":"array","maxItems":' + String(p.limit) + ',"items":{"type":"array","maxItems":10,"items":{"type":["string","number"],"maxLength":200,"minimum":-' + String(NUMBER_LIMIT) + ',"maximum":' + String(NUMBER_LIMIT) + "}}" + about + "}")
     if p.kind == P_POINTER:
         return '{"type":"string","pattern":' + json_string(POINTER_PATTERN) + about + "}"
     if p.kind == P_WORD:
@@ -180,7 +181,7 @@ def spec_index(specs: List[Spec], name: String) -> Int:
 
 
 def is_pointer(s: String) -> Bool:
-    """POINTER_PATTERN: 1–6 parts of 1–40 letters, digits, _ or -."""
+    """POINTER_PATTERN: 1–6 parts of 1–40 letters, digits, _ or -, none starting with - (so never "-", which appends)."""
     if not s.startswith("/"):
         return False
     var parts = String(s[byte = 1 :]).split("/")
@@ -188,7 +189,7 @@ def is_pointer(s: String) -> Bool:
         return False
     for p in parts:
         var t = String(p)
-        if t.byte_length() < 1 or t.byte_length() > 40:
+        if t.byte_length() < 1 or t.byte_length() > 40 or t.startswith("-"):
             return False
         for b in t.as_bytes():
             var c = Int(b)
@@ -209,6 +210,14 @@ def is_word(s: String) -> Bool:
         if not ((c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95):
             return False
     return True
+
+
+def bounded(j: Json, n: Int) -> Bool:
+    """A number within ±NUMBER_LIMIT (so never inf or nan)."""
+    if j.kind(n) != J_NUMBER:
+        return False
+    var r = j.real(n)
+    return r == r and r >= -Float64(NUMBER_LIMIT) and r <= Float64(NUMBER_LIMIT)
 
 
 def chars(s: String) -> Int:
@@ -250,8 +259,8 @@ def check_prop(j: Json, v: Int, p: Prop, where: String, comp: String) raises:
         if k != J_ARRAY or j.size(v) > p.limit:
             raise Error(bad + " must be a list of at most " + String(p.limit) + " numbers")
         for i in range(j.size(v)):
-            if j.kind(j.at(v, i)) != J_NUMBER:
-                raise Error(bad + " must hold numbers only")
+            if not bounded(j, j.at(v, i)):
+                raise Error(bad + " must hold numbers within ±1e15 only")
     elif p.kind == P_ROWS:
         if k != J_ARRAY or j.size(v) > p.limit:
             raise Error(bad + " must be a list of at most " + String(p.limit) + " rows")
@@ -264,8 +273,8 @@ def check_prop(j: Json, v: Int, p: Prop, where: String, comp: String) raises:
                 if j.kind(cell) == J_STRING:
                     if chars(j.text(cell)) > 200:
                         raise Error(bad + ": a cell is longer than 200 characters")
-                elif j.kind(cell) != J_NUMBER:
-                    raise Error(bad + ": a cell must be a string or a number")
+                elif not bounded(j, cell):
+                    raise Error(bad + ": a cell must be a string or a number within ±1e15")
     elif p.kind == P_POINTER:
         if k != J_STRING or not is_pointer(j.text(v)):
             raise Error(bad + " must be a state path like \"/form/name\"")

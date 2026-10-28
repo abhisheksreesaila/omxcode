@@ -10,6 +10,7 @@ generic pieces any app can use; `examples/agentchat` only composes them.
 | `mojoui.jsonpatch` | `JDoc`, a JSON document you can change, and RFC 6902 JSON Patch on it (atomic) |
 | `mojoui.agui` | `Agent`: runs the agent, reads every event, keeps the conversation and the shared state, frontend tools |
 | `mojoui.genui` | the catalog → JSON Schema generator and the validated "UI from data" renderer (M2) |
+| `mojoui.agentui` | `Screens`: an agent's render_ui calls shown or refused (told why), capped, their actions answered |
 
 ## The client
 

@@ -209,7 +209,9 @@
          "string",
          "number"
         ],
-        "maxLength": 200
+        "maxLength": 200,
+        "minimum": -1000000000000000,
+        "maximum": 1000000000000000
        }
       },
       "description": "each row: a list of strings or numbers"
@@ -233,13 +235,15 @@
       "type": "array",
       "maxItems": 500,
       "items": {
-       "type": "number"
+       "type": "number",
+       "minimum": -1000000000000000,
+       "maximum": 1000000000000000
       },
       "description": "the numbers (or bind them to the state)"
      },
      "bind": {
       "type": "string",
-      "pattern": "^(/[A-Za-z0-9_-]{1,40}){1,6}$",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
       "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
      },
      "label": {
@@ -324,7 +328,7 @@
      },
      "bind": {
       "type": "string",
-      "pattern": "^(/[A-Za-z0-9_-]{1,40}){1,6}$",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
       "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
      }
     },
@@ -347,7 +351,7 @@
      },
      "bind": {
       "type": "string",
-      "pattern": "^(/[A-Za-z0-9_-]{1,40}){1,6}$",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
       "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
      }
     },
@@ -377,7 +381,7 @@
      },
      "bind": {
       "type": "string",
-      "pattern": "^(/[A-Za-z0-9_-]{1,40}){1,6}$",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
       "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
      },
      "action": {

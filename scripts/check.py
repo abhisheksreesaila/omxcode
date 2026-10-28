@@ -501,6 +501,8 @@ def m2_schema():
     if t.returncode != 0 or "test_genui: done" not in out:
         return ["tests/test_genui.mojo fails: " + out[-700:]], None
     k = keyed(out)
+    if k.get("SCREENS", [""])[0] != "ok":  # (reviewer item 6: screens capped, refusals told in JSON)
+        problems.append("tests/test_genui.mojo didn't prove Screens (SCREENS: ok)")
     try:
         schema = json.loads(k["SCHEMA"][0])
     except Exception as e:
@@ -537,7 +539,7 @@ def m2_schema():
         if v is None:
             problems.append(f"case {i}: no verdict")
             continue
-        schema_ok = validator.is_valid(c["ui"])
+        schema_ok = validator.is_valid(c["ui"] if "ui" in c else json.loads(c["args_text"]))  # (args_text: exact bytes)
         if c["expect"] == "ok":
             if not v.startswith("OK "):
                 problems.append(f"case {i} ({c['why']}): refused: {v[:160]}")
