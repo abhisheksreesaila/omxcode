@@ -414,8 +414,8 @@ def m1():
             return False, "; ".join(problems + [f"widgets doesn't build for {host}: " + (b.stdout + b.stderr)[-600:]])
     manifest = json.loads((BUILD / "widgets/web/assets/manifest.json").read_text())
     ch = manifest.get("chart.js", {})
-    if not ch.get("source", "").startswith("widgets/chart."):
-        problems.append(f"the build has no chart.js bundled from widgets/chart.* ({ch})")
+    if not ch.get("source", "").startswith("mojoui/widgets/chart."):
+        problems.append(f"the build has no chart.js bundled from mojoui/widgets/chart.* (the shared widget, D-675) ({ch})")
     else:
         body = (BUILD / "widgets/web/assets" / ch["file"]).read_text()
         if _re.search(r"\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\(\s*['\"]", body):
