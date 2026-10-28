@@ -277,10 +277,12 @@ struct TypeScale(Copyable, Movable):
     var title_line: Float64  # a title's, a headline's and a caption's own (omxqua's .text.title 1.1, .headline 1.3,
     var headline_line: Float64  # .caption 1.4); 0: `line`. Apple hosts read them (GTK and the web: the theme's sheets,
     var caption_line: Float64  # written from them), D-669
+    var text_ink: Int  # which of the palette's inks body text (and titles) and captions wear: 1 ink, 2 ink2, 3 ink3
+    var caption_ink: Int  # (omxqua: 1 and 2, its sheets' .text and .caption; the skins: 2 and 3). Apple hosts read them, D-676
 
     def __init__(out self, family: String, mono: String, body: Float64, caption: Float64, headline: Float64, title: Float64,
                  section: Float64, tabular: Bool, line: Float64, title_line: Float64 = 0, headline_line: Float64 = 0,
-                 caption_line: Float64 = 0):
+                 caption_line: Float64 = 0, text_ink: Int = 2, caption_ink: Int = 3):
         self.family = family
         self.mono = mono
         self.body = body
@@ -293,6 +295,13 @@ struct TypeScale(Copyable, Movable):
         self.title_line = title_line
         self.headline_line = headline_line
         self.caption_line = caption_line
+        self.text_ink = text_ink
+        self.caption_ink = caption_ink
+
+    def ink_of(self, p: Palette, caption: Bool) -> UInt32:
+        """The ink text of this style wears: body text and titles text_ink, captions caption_ink (1, 2 or 3)."""
+        var k = self.caption_ink if caption else self.text_ink
+        return p.ink if k <= 1 else (p.ink2 if k == 2 else p.ink3)
 
     def line_of(self, title: Bool, headline: Bool, caption: Bool) -> Float64:
         """The line height (a share of the text's size) of a title, a headline, a caption or body text."""

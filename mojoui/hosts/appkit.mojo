@@ -576,7 +576,7 @@ struct AppKitHost[A: App](Movable):
                 ref ts = self.look.type
                 var sized_by = ts.title if node.style == TITLE else (ts.headline if bold else (ts.caption if node.style == CAPTION else ts.body))  # (the look's type scale: GTK's label.title-1, .title-4, .caption)
                 _ = msg(w, "setFont:", look_font(self.look.type.family, 600 if bold else 400, sized_by, self.look.type.tabular))
-                _ = msg(w, "setTextColor:", ns_color(self.pal.ink3 if node.style == CAPTION else self.pal.ink2))
+                _ = msg(w, "setTextColor:", ns_color(self.look.type.ink_of(self.pal, node.style == CAPTION)))  # (the look's inks: omxqua's ink and ink2, as its sheets, D-676)
             var tl = self.text_look(i)
             if tl >= 0:  # a surface's own type (the status bar's figures: one theme's Inter 12, another's JetBrains Mono)
                 ref sf = self.look.surfaces[tl]
