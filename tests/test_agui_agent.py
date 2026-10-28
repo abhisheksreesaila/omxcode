@@ -64,7 +64,8 @@ def main():
                 ("no Content-Length", dict(length=None, body=b""), 411),
                 ("a negative Content-Length", dict(length="-5", body=b""), 400),
                 ("a Content-Length that isn't a number", dict(length="12x", body=b""), 400),
-                ("a body over 1 MB", dict(length=str(2 * 1024 * 1024), body=b"{}"), 413),
+                ("a body over 8 MB", dict(length=str(9 * 1024 * 1024), body=b"{}"), 413),
+                ("a Content-Length in other digits (١٢)", dict(length="١٢".encode(), body=b""), 400),
                 ("not a RunAgentInput", dict(body=b'{"hello": 1}'), 422),
             ]
             for why, kw, want in cases:
@@ -80,6 +81,23 @@ def main():
                 problems.append(f"the local request made {len(llm.seen)} model calls (want 1)")
             if srv.inputs:
                 problems.append("a server outside test mode kept the RunAgentInputs")
+            for host in (f"localhost:{port}", f"[::1]:{port}"):
+                status, _ = post(port, headers={"Host": host})
+                if status != 200:
+                    problems.append(f"the Host {host} was refused ({status})")
+    # one budget (round 2, D-724): the server takes more than the Mojo client ever sends, and a 2 MB input goes through
+    import re
+    mojo = (ROOT / "mojoui/agui.mojo").read_text()
+    m = re.search(r"^comptime MAX_INPUT_BYTES = (\d+) \* 1024 \* 1024", mojo, re.M)
+    if not m or agui_agent.MAX_BODY < int(m.group(1)) * 1024 * 1024:
+        problems.append(f"the server's MAX_BODY ({agui_agent.MAX_BODY}) is below the client's MAX_INPUT_BYTES ({m and m.group(1)} MB)")
+    with agui_agent.Server("chat") as srv:
+        port = int(srv.url.rsplit(":", 1)[1].strip("/"))
+        two = json.loads(GOOD)
+        two["state"] = {"blob": "x" * (2 * 1024 * 1024)}
+        status, body = post(port, body=json.dumps(two).encode())
+        if status != 200 or b"RUN_FINISHED" not in body:
+            problems.append(f"a 2 MB RunAgentInput was refused: {status}")
     with agui_agent.Server("chat", record=True) as srv:
         port = int(srv.url.rsplit(":", 1)[1].strip("/"))
         status, _ = post(port)

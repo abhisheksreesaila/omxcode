@@ -20,7 +20,7 @@ No key is ever printed, logged or stored, and a request carrying one never follo
 JSON is repaired before it reaches the app (small models break it); the app still validates everything.
 
 Only a local app may start a run (D-722): a JSON content type, a localhost Host on this port, no foreign Origin, a body
-of at most 1 MB with its Content-Length. RunAgentInputs are kept (Server.inputs) only when a test asks (record=True).
+of at most 8 MB with its Content-Length (the client sends at most 6 MB: mojoui.agui.MAX_INPUT_BYTES). RunAgentInputs are kept (Server.inputs) only when a test asks (record=True).
 """
 
 import json
@@ -43,7 +43,8 @@ from ag_ui.core import AssistantMessage, ToolMessage, UserMessage, ToolCall, Fun
 from ag_ui.encoder import EventEncoder
 
 ENC = EventEncoder()
-MAX_BODY = 1024 * 1024  # a RunAgentInput's bytes (D-722)
+MAX_BODY = 8 * 1024 * 1024  # a RunAgentInput's bytes (D-722, D-724): above mojoui.agui's MAX_INPUT_BYTES (6 MB), the most
+                            # the Mojo client ever sends (it trims the oldest messages to fit), so a run never meets a 413
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 GREETING = "Hello! I'm a scripted AG-UI agent. My words arrive a few at a time."
 QUARTER = [12, 15, 14, 18, 21, 19, 24, 26, 25, 29, 31, 34]
@@ -493,10 +494,10 @@ class Handler(BaseHTTPRequestHandler):
         n = self.headers.get("Content-Length")
         if n is None:
             return 411, "a run needs its Content-Length"
-        if not n.isdigit():
+        if not (n.isascii() and n.isdigit()):
             return 400, "a bad Content-Length"
         if int(n) > MAX_BODY:
-            return 413, "a RunAgentInput of more than 1 MB"
+            return 413, "a RunAgentInput of more than 8 MB"
         return 0, ""
 
     def do_POST(self):

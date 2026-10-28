@@ -123,5 +123,17 @@ def main() raises:
         out_of_range = True
     assert_true(out_of_range, "set refuses an index past the end")
     assert_equal(arr.dump(), '{"list":["z","b"]}')
+    # a refused set changes nothing: no parents made on the way (round 2, D-724)
+    var keep = JDoc.parse('{"a": 1}')
+    var deep_set = String("")
+    for _ in range(40):
+        deep_set += "/p"
+    var set_refused = False
+    try:
+        keep.set(deep_set, "1")
+    except:
+        set_refused = True
+    assert_true(set_refused)
+    assert_equal(keep.dump(), '{"a":1}', "a refused set leaves the document as it was")
     print("BOUNDS: ok")
     print("test_jsonpatch: done")

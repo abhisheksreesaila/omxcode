@@ -9,8 +9,9 @@ from std.testing import assert_equal, assert_true
 from mojoui.app import App, Event, Runtime
 from mojoui import View, Text
 from mojoui.http import Http, Request
-from mojoui.agui import Agent, Tool, EV_TOOL_END, EV_TEXT, EV_TEXT_START, EV_TOOL_START, EV_MESSAGES, EV_STREAM_END, EV_BAD, EV_STATE_REFUSED, MAX_TEXT, MAX_MESSAGES
+from mojoui.agui import Agent, Tool, EV_TOOL_END, EV_TEXT, EV_TEXT_START, EV_TOOL_START, EV_MESSAGES, EV_STREAM_END, EV_BAD, EV_STATE_REFUSED, MAX_TEXT, MAX_MESSAGES, MAX_INPUT_BYTES
 from mojoui.clock import now_ns
+from mojoui.json import json_string
 
 comptime ASK = 1
 comptime PIECE = 2
@@ -152,4 +153,29 @@ def main() raises:
         until_ends(rt, 2)
         assert_equal(rt.app.agent.ended, "finished")
         print("LIVE: answered ask_user; agent said '" + rt.app.agent.last_text() + "'")
+        # the client's budget (round 2, D-724): a ~2 MB state goes through; a conversation past the budget is trimmed,
+        # oldest first, never refused by the agent (413)
+        var blob = String("0123456789abcdef")
+        while blob.byte_length() < 2 * 1024 * 1024:  # (2 MB)
+            var copy = blob.copy()
+            blob += copy
+        assert_true(rt.app.agent.set_state("/blob", json_string(blob)))
+        rt.app.agent.say("Ask me")
+        _ = rt.app.agent.run(rt.app.http)
+        rt.take_effects()
+        until_ends(rt, 3)
+        assert_equal(rt.app.agent.ended, "finished", "a 2 MB state is accepted end to end")
+        assert_equal(rt.app.agent.trimmed, 0)
+        var big = String("")
+        for _ in range(900):
+            big += blob[byte = 0 : 1024]
+        for _ in range(8):
+            rt.app.agent.say(big)  # (8 × 900 KB: past the budget with the state)
+        assert_true(rt.app.agent.input_json().byte_length() <= MAX_INPUT_BYTES, "what's sent fits the budget")
+        assert_true(rt.app.agent.trimmed > 0, "the oldest messages were left out, and the agent says so")
+        _ = rt.app.agent.run(rt.app.http)
+        rt.take_effects()
+        until_ends(rt, 4)
+        assert_equal(rt.app.agent.ended, "finished", "a conversation past the budget is trimmed, not refused")
+        print("BUDGET: ok (trimmed " + String(rt.app.agent.trimmed) + " messages)")
     print("test_agui: all passed")

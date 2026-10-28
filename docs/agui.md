@@ -24,6 +24,10 @@ for c in agent.pending(): agent.answer(c.id, '{"answer": "blue"}')              
 agent.run(self.http)                                          # the answer and the state go with the next run
 ```
 
+- What's sent fits one budget: a RunAgentInput is at most 6 MB (`mojoui.agui.MAX_INPUT_BYTES`: the state, ≤ 4 MB, plus
+  the newest messages that fit; the oldest are left out first and `agent.trimmed` says how many). The agent backend
+  (scripts/agui_agent.py) accepts up to 8 MB (`MAX_BODY`), so a long chat is trimmed, never refused with a 413
+  (tests/test_agui_agent.py checks the two numbers).
 - Events read: RUN_STARTED/FINISHED/ERROR, TEXT_MESSAGE_START/CONTENT/END/CHUNK, TOOL_CALL_START/ARGS/END/CHUNK/RESULT,
   STATE_SNAPSHOT, STATE_DELTA (JSON Patch; a delta that doesn't apply leaves the state as it was: `EV_STATE_REFUSED`,
   `state_error`), MESSAGES_SNAPSHOT, STEP_STARTED/FINISHED, CUSTOM. Others (REASONING_*, RAW, ACTIVITY_*) are counted

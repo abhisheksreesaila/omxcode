@@ -468,6 +468,8 @@ def m1():
     k = keyed(out)
     if k.get("BOUNDS", [""])[0] != "ok":  # (reviewer, D-718: snapshots, forged roles, caps)
         problems.append("tests/test_agui.mojo didn't prove the client's bounds (BOUNDS: ok)")
+    if not k.get("BUDGET", [""])[0].startswith("ok (trimmed "):  # (round 2, D-724: a 2 MB state through, a long chat trimmed)
+        problems.append(f"tests/test_agui.mojo didn't prove the client's budget (BUDGET: {k.get('BUDGET')})")
     if k.get("LIVE", [""])[0] != "answered ask_user; agent said 'You picked blue.'":
         problems.append(f"LIVE: {k.get('LIVE')} (the live round trip)")
     if problems:

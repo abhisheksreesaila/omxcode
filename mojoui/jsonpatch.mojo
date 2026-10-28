@@ -240,7 +240,13 @@ struct JDoc(Copyable, Movable):
     # ---- changing ----
 
     def set(mut self, pointer: String, value_json: String) raises:
-        """Adds or replaces the value at `pointer` (missing parents are made as objects): an app's edit of shared state."""
+        """Adds or replaces the value at `pointer` (missing parents are made as objects): an app's edit of shared state.
+        Atomic, like patch: done on a copy that replaces the document only when it succeeded within the bounds."""
+        var work = self.copy()
+        work.set_here(pointer, value_json)
+        self = work^
+
+    def set_here(mut self, pointer: String, value_json: String) raises:
         var v = JDoc.parse(value_json)
         var toks = tokens(pointer)
         if len(toks) == 0:

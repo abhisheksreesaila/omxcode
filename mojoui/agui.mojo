@@ -43,6 +43,9 @@ comptime MAX_MESSAGES = 2000
 comptime MAX_TEXT = 1024 * 1024  # one message's words (D-718): deltas past it are refused
 comptime MAX_ARGS = 32_768  # one tool call's arguments: past it the call is marked too_big and its arguments dropped
 comptime MAX_TYPES = 64  # event types counted by name (the rest under "OTHER")
+comptime MAX_INPUT_BYTES = 6 * 1024 * 1024  # the most a RunAgentInput may be (D-724): the state (≤ 4 MB, mojoui.jsonpatch)
+# plus the newest messages that fit, oldest left out first (`trimmed` says how many). scripts/agui_agent.py accepts up to
+# 8 MB (its MAX_BODY), so a run never meets a 413; tests/test_agui_agent.py checks the two numbers agree.
 
 
 @fieldwise_init
@@ -108,6 +111,7 @@ struct Agent(Movable):
     var last_type: String
     var last_message: String  # the id of the message the last event touched
     var problem: String  # why the last event was refused (EV_BAD)
+    var trimmed: Int  # the oldest messages the last RunAgentInput left out to fit MAX_INPUT_BYTES
 
     def __init__(out self, url: String, piece_msg: Int, end_msg: Int, thread_id: String = "thread-1", tag: Int = 3500):
         self.url = url
@@ -132,6 +136,7 @@ struct Agent(Movable):
         self.last_type = ""
         self.last_message = ""
         self.problem = ""
+        self.trimmed = 0
 
     # ---- the app's side ----
 
@@ -177,28 +182,47 @@ struct Agent(Movable):
         except:
             return False
 
-    def input_json(self) -> String:
-        """The next RunAgentInput: thread, run, state, messages, tools (AG-UI's camelCase)."""
-        var msgs = String("[")
-        for i in range(len(self.messages)):
-            ref m = self.messages[i]
-            var one = '{"id":' + json_string(m.id) + ',"role":' + json_string(m.role) + ',"content":' + json_string(m.content)
-            if len(m.calls) > 0:
-                one += ',"toolCalls":['
-                for k in range(len(m.calls)):
-                    ref c = m.calls[k]
-                    one += ("," if k > 0 else "") + '{"id":' + json_string(c.id) + ',"type":"function","function":{"name":' + json_string(c.name) + ',"arguments":' + json_string(c.arguments) + "}}"
-                one += "]"
-            if m.tool_call_id.byte_length() > 0:
-                one += ',"toolCallId":' + json_string(m.tool_call_id)
-            msgs += ("," if i > 0 else "") + one + "}"
-        msgs += "]"
+    def message_json(self, i: Int) -> String:
+        ref m = self.messages[i]
+        var one = '{"id":' + json_string(m.id) + ',"role":' + json_string(m.role) + ',"content":' + json_string(m.content)
+        if len(m.calls) > 0:
+            one += ',"toolCalls":['
+            for k in range(len(m.calls)):
+                ref c = m.calls[k]
+                one += ("," if k > 0 else "") + '{"id":' + json_string(c.id) + ',"type":"function","function":{"name":' + json_string(c.name) + ',"arguments":' + json_string(c.arguments) + "}}"
+            one += "]"
+        if m.tool_call_id.byte_length() > 0:
+            one += ',"toolCallId":' + json_string(m.tool_call_id)
+        return one + "}"
+
+    def input_json(mut self) -> String:
+        """The next RunAgentInput: thread, run, state, tools, and the newest messages that fit MAX_INPUT_BYTES (the oldest
+        are left out first, never a tool result without the call before it; `trimmed` counts them)."""
         var tools = String("[")
         for i in range(len(self.tools)):
             tools += ("," if i > 0 else "") + '{"name":' + json_string(self.tools[i].name) + ',"description":' + json_string(self.tools[i].description) + ',"parameters":' + self.tools[i].parameters + "}"
         tools += "]"
-        return ('{"threadId":' + json_string(self.thread_id) + ',"runId":' + json_string(self.run_id) + ',"state":' + self.state.dump()
-                + ',"messages":' + msgs + ',"tools":' + tools + ',"context":[],"forwardedProps":{}}')
+        var head = ('{"threadId":' + json_string(self.thread_id) + ',"runId":' + json_string(self.run_id) + ',"state":' + self.state.dump()
+                    + ',"tools":' + tools + ',"context":[],"forwardedProps":{},"messages":[')
+        var room = MAX_INPUT_BYTES - head.byte_length() - 2
+        var parts = List[String]()
+        var used = 0
+        var start = len(self.messages)
+        while start > 0:
+            var one = self.message_json(start - 1)
+            if used + one.byte_length() + 1 > room:
+                break
+            used += one.byte_length() + 1
+            parts.append(one^)
+            start -= 1
+        while start < len(self.messages) and self.messages[start].role == "tool":  # (its call was left out)
+            _ = parts.pop()
+            start += 1
+        self.trimmed = start
+        var msgs = String("")
+        for k in range(len(parts) - 1, -1, -1):
+            msgs += ("," if k < len(parts) - 1 else "") + parts[k]
+        return head + msgs + "]}"
 
     def run(mut self, mut http: Http) -> Bool:
         """Starts a run (POST RunAgentInput, the events streamed back to update()). False while one runs."""
@@ -271,6 +295,7 @@ struct Agent(Movable):
 
     def add_args(mut self, at: Int, k: Int, delta: String) -> Int:
         if self.messages[at].calls[k].too_big:
+            self.problem = "tool call arguments longer than " + String(MAX_ARGS) + " bytes"
             return EV_BAD
         if self.messages[at].calls[k].arguments.byte_length() + delta.byte_length() > MAX_ARGS:
             self.messages[at].calls[k].arguments = ""
