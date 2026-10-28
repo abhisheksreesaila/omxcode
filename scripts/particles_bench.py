@@ -6,6 +6,15 @@
 
 Writes docs/goals/36/results.json and docs/goals/36/results.md (full runs only).
 
+    pixi run python scripts/particles_bench.py --desktop       # goal 36b M7: the same protocol on the live desktop
+
+--desktop (goal 36b, D-735): every row on the owner's Hyprland desktop (Wayland, GPU-composited) instead of Xvfb:
+C in GTK on Wayland (GTK's GL renderer, GPU canvas pictures handed over without a readback, the field at 1280×720
+pixels: MOJOUI_CANVAS_SCALE=1), A and A-cpu and B-wasm in headed Chromium on Wayland (the same binary and flags for
+all three, vsync and the frame limiter off), B-native in a Wayland window (B-native) and offscreen as before
+(B-native-off), plus C's feature rows at 1M/5M/20M (each 36b feature switched off in turn, FEATURES below). Same gate,
+same 60 + 600 frames, 3 runs, median ± spread. Writes results-desktop.json/.md and present-desktop.json.
+
 The protocol, the same for all rows:
 - One build at a time, nothing else running: the quiet gate. Before every run (each row and size, each of the three
   runs, B-wasm's thread probes) it waits until the 1-minute load average is < GATE_LOAD and no other process holds
@@ -70,6 +79,81 @@ LABEL = {
     "A": "A · JS + WebGPU", "A-cpu": "A-cpu · plain JS (CPU)", "B-wasm": "B-wasm · JS + Rust/wasm",
     "B-native": "B-native · Rust + wgpu", "C": "C · omxcode (Mojo)",
 }
+DESKTOP = False  # --desktop (goal 36b M7)
+DESKTOP_ROWS = ["A", "A-cpu", "B-wasm", "B-native", "B-native-off", "C"]
+# C's 36b features switched off in turn (D-743), at FEATURE_SIZES: the per-feature effect
+FEATURES = {
+    "C-36": {"MOJOUI_CANVAS_GPU": "0", "MOJOUI_SPLAT_ATOMICS": "3"},  # goal 36's path, on this desktop
+    "C+M6": {"MOJOUI_SPLAT_ATOMICS": "3", "MOJOUI_BLEND": "0"},  # + zero-copy presentation
+    "C+M6c": {"MOJOUI_BLEND": "0"},  # + the two-atomic splat (C itself adds M6b: blending, measured at run time)
+    "C-blend": {"MOJOUI_BLEND": "1"},  # M6b always on (hardware blending every frame)
+    "C-hidpi": {"MOJOUI_CANVAS_SCALE": ""},  # C at the screen's own scale (1.6: 2048×1152 pixels)
+}
+FEATURE_SIZES = [1_000_000, 5_000_000, 20_000_000]
+LABEL.update({
+    "B-native": "B-native · Rust + wgpu", "B-native-off": "B-native · Rust + wgpu (offscreen)",
+    "C-36": "C · goal 36's path (readback, 3 atomics)", "C+M6": "C · + M6 zero-copy", "C+M6c": "C · + M6c packed splat",
+    "C-blend": "C · M6b blending always", "C-hidpi": "C · at the screen's 1.6× (2048×1152)",
+})
+# Chromium on Wayland for A, A-cpu and B-wasm alike: the binary (not /usr/bin/chromium, whose wrapper adds the
+# desktop's own flags and extensions), no Vulkan compositing (Chromium refuses it on Wayland), WebGPU through Dawn
+DESKTOP_CHROME = "/usr/lib/chromium/chromium"
+DESKTOP_A_FLAGS = [
+    "--ozone-platform=wayland", "--enable-unsafe-webgpu", "--disable-gpu-sandbox", "--enable-webgpu-developer-features",
+    "--ignore-gpu-blocklist", "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+    "--password-store=basic", "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows", "--window-size=1280,800",
+]
+DESKTOP_C_ENV = {"GDK_BACKEND": "wayland", "MOJOUI_CANVAS_SCALE": "1", "MOJOUI_PRESENT_STATS": "1"}
+
+
+def use_desktop():
+    """--desktop: the owner's Wayland session for every row (D-735); never the headless display."""
+    global DESKTOP, OUT_JSON
+    wl = os.environ.get("WAYLAND_DISPLAY")
+    rt = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    if not wl or not (rt / wl).exists():
+        raise SystemExit("particles_bench --desktop: no Wayland desktop (WAYLAND_DISPLAY)")
+    DESKTOP = True
+    os.environ["MOJOUI_HEADLESS"] = "0"
+    for k in ("GSK_RENDERER", "GDK_DISABLE", "GDK_SCALE", "GDK_BACKEND", "MOJOUI_PRIVATE_DISPLAY"):
+        os.environ.pop(k, None)
+    import check_a
+    import check_b
+    check_a.CHROME = DESKTOP_CHROME
+    check_a.FLAGS = DESKTOP_A_FLAGS
+    check_b.CHROMIUM = DESKTOP_CHROME
+    check_b.HEADLESS_ARGS = ["--ozone-platform=wayland", "--disable-extensions", "--password-store=basic",
+                             "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"]
+
+
+def desktop_setup():
+    """What the desktop run ran on, recorded with the results."""
+    def sh(*cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout.strip()
+        except Exception as e:
+            return f"({e})"
+    mon = {}
+    try:
+        m = json.loads(sh("hyprctl", "monitors", "-j"))[0]
+        mon = {k: m.get(k) for k in ("name", "description", "width", "height", "refreshRate", "scale", "vrr", "dpmsStatus", "activelyTearing")}
+    except Exception as e:
+        mon = {"error": str(e)}
+    return {
+        "compositor": sh("hyprctl", "version").splitlines()[0] if sh("hyprctl", "version") else "?",
+        "monitor": mon, "wayland_display": os.environ.get("WAYLAND_DISPLAY"),
+        "gtk": sh("pkg-config", "--modversion", "gtk4"), "chromium": sh(DESKTOP_CHROME, "--version"),
+        "vsync": "off for every row: C GDK_DEBUG=no-vsync (GTK's frame clock uncapped); A, A-cpu, B-wasm Chromium "
+                 "--disable-gpu-vsync --disable-frame-rate-limit; B-native wgpu present mode Immediate (in a window the "
+                 "compositor still paces it) or offscreen",
+        "canvas_pixels": "1280×720 for every row (C: MOJOUI_CANVAS_SCALE=1; the browsers' and wgpu's canvases are 1280×720 "
+                         "pixels and the compositor or browser scales them to the 1.6× monitor); C-hidpi: 2048×1152",
+        "windows": "each row's window opens tiled on the active workspace beside the one window already there; "
+                   "closed after its run",
+    }
+
+
 # the sources a result was built from (freshness: m4 recomputes this)
 SOURCES = ["showcase", "examples/particles", "mojoui", "themes", "scripts/particles_bench.py", "scripts/headless.py",
            "scripts/build.sh"]
@@ -302,6 +386,7 @@ def run_b(row, n, threads=None):
         adapter = t["renderer"]
         step_is = f"CPU: wasm step + pack, {t['threads']} threads (wall)"
     else:
+        check_b.NATIVE_ARGS = [] if (DESKTOP and row == "B-native") else ["--offscreen"]
         t = check_b.run_native(n, frames, out / "n", positions=False)
         adapter = t["adapter"]
         step_is = "GPU timestamp queries around the compute pass"
@@ -310,7 +395,9 @@ def run_b(row, n, threads=None):
     s = _stats(iv)
     return {
         "frame_ms": s["mean_interval_ms"],
-        "frame_ms_is": "mean rAF interval, vsync/limiter off (headless)" if row == "B-wasm" else "mean loop interval (offscreen, two frames in flight)",
+        "frame_ms_is": ("mean rAF interval, vsync/limiter off" + ("" if DESKTOP else " (headless)")) if row == "B-wasm" else (
+            "mean loop interval (a Wayland window, present mode " + str(t.get("present")) + ")" if t.get("present") not in (None, "offscreen")
+            and DESKTOP and row == "B-native" else "mean loop interval (offscreen, two frames in flight)"),
         **s, "step_ms": _med(t["step"][WARM:]), "step_ms_is": step_is,
         "gpu_frame_ms": None, "cpu_encode_ms": _med(t["work"][WARM:]) if row == "B-wasm" else None,
         "readback_ms": None, "cold_start_ms": t["cold_start_ms"], "adapter": adapter,
@@ -318,20 +405,40 @@ def run_b(row, n, threads=None):
     }, out
 
 
-def run_c(n):
+def run_c(n, row="C"):
     import check_c
+    import re as _re
     out = Path(tempfile.mkdtemp(prefix="bench_c_"))
-    t, cold, _ = check_c.scripted(n, WARM + MEAS, out, positions=False, env={"GDK_DEBUG": "no-vsync"})
+    env = {"GDK_DEBUG": "no-vsync"}
+    if DESKTOP:
+        env.update(DESKTOP_C_ENV)
+        env.update(FEATURES.get(row, {}))
+        if env.get("MOJOUI_CANVAS_SCALE") == "":
+            env.pop("MOJOUI_CANVAS_SCALE")
+            os.environ.pop("MOJOUI_CANVAS_SCALE", None)
+    t, cold, _ = check_c.scripted(n, WARM + MEAS, out, positions=False, env=env)
     _nvidia(t["device"], "C")
     s = _stats(t["total"][WARM:])
     step, splat, rb = _med(t["step"][WARM:]), _med(t["splat"][WARM:]), _med(t["readback"][WARM:])
-    return {
+    r = {
         "frame_ms": s["mean_interval_ms"], "frame_ms_is": "mean canvas frame interval, GDK_DEBUG=no-vsync (GTK's frame clock uncapped)",
         **s, "step_ms": step, "step_ms_is": "GPU step, timed on a separate pass (each part waited for on its own)",
         "gpu_frame_ms": step + splat, "cpu_encode_ms": None, "readback_ms": rb,
         "work_ms": _med(t["work"][WARM:]), "splat_ms": splat,
         "cold_start_ms": cold, "adapter": t["device"],
-    }, out
+    }
+    if DESKTOP:  # the host's own account of each frame's picture (MOJOUI_PRESENT_STATS)
+        log = "".join(check_c.LAST_LOG)
+        m = _re.search(r"present stats: gpu_blended (\d+), gpu_copied (\d+), cpu_copied (\d+), .*renderer (\S*)", log)
+        if not m:
+            raise RuntimeError(f"{row}: no present stats in the app's output")
+        b, c, cpu = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        r.update({"gpu_blended": b, "gpu_copied": c, "cpu_copied": cpu, "gsk_renderer": m.group(4),
+                  "present_path": next((l.strip() for l in log.splitlines() if l.startswith("mojoui: GPU canvas pictures")), ""),
+                  "blend_choices": [l.strip() for l in log.splitlines() if l.startswith("mojoui: additive points")]})
+        if cpu == 0:  # no picture went through the CPU in the frame loop: the readback isn't part of these frames
+            r["readback_ms"] = None
+    return r, out
 
 
 def one(row, n, threads=None):
@@ -342,7 +449,7 @@ def one(row, n, threads=None):
         elif row.startswith("B"):
             r, out = run_b(row, n, threads)
         else:
-            r, out = run_c(n)
+            r, out = run_c(n, row)
     finally:
         peak, peak_pss = mem.stop()
     r["peak_rss_mb"] = peak
@@ -364,9 +471,14 @@ def combine(runs):
         if xs:
             out[k] = round(statistics.median(xs), 3)
             out[k + "_spread"] = round(max(xs) - min(xs), 3)
-    for k in ("frame_ms_is", "step_ms_is", "adapter", "threads", "crossOriginIsolated", "present"):
+    for k in ("frame_ms_is", "step_ms_is", "adapter", "threads", "crossOriginIsolated", "present", "present_path", "gsk_renderer"):
         if k in runs[0]:
             out[k] = runs[0][k]
+    if "cpu_copied" in runs[0]:  # (C on the desktop: every run's picture path, worst case)
+        out["cpu_copied_max"] = max(r["cpu_copied"] for r in runs)
+        out["gpu_presented_min"] = min(r["gpu_copied"] + r["gpu_blended"] for r in runs)
+        out["gpu_blended_max"] = max(r["gpu_blended"] for r in runs)
+        out["blend_choices"] = sorted({c for r in runs for c in r.get("blend_choices", [])})
     out["holds_60"] = out["frame_ms"] <= FRAME_60 and out["p95_interval_ms"] <= P95_MAX
     out["runs"] = runs
     return out
@@ -387,7 +499,7 @@ def bench(rows, sizes, runs, log, gate=None):
     results = {}
     for row in rows:
         results[row] = {}
-        for n in EXTRA.get(row, []) + sizes:
+        for n in EXTRA.get(row, []) + ([x for x in FEATURE_SIZES if x in sizes] if row in FEATURES else sizes):
             threads = None
             probe = None
             if row == "B-wasm":  # the pool at every core and at cores - 2: keep the better (one probe run each)
@@ -617,6 +729,16 @@ def report(res):
         L.append("**PROVISIONAL: measured without the quiet gate, while another project's builds and GPU tests ran "
                  "(1-minute load up to " + str(max(r["machine"]["load1_max"] for row in R.values() for r in row.values() if "machine" in r))
                  + " on 24 cores, other processes on the RTX 3090; per-row load and GPU apps in the JSON). Not the result.**\n")
+    elif res.get("desktop"):
+        L.append("# Goal 36b M7 · the particle field on the real desktop\n")
+        g = res["protocol"]["gate"]
+        L.append(f"Every run passed the quiet gate: 1-minute load < {g['load1_below']} and no other process on the GPU "
+                 f"(compute apps over {g['gpu_apps_over_mib']} MiB); waited {g['waited_s']} s in all.\n")
+        d = res["setup"]
+        m = d["monitor"]
+        L.append(f"Setup: {d['compositor'].split(' built')[0]} on Wayland ({d['wayland_display']}), monitor {m.get('name')} "
+                 f"{m.get('width')}×{m.get('height')} @ {m.get('refreshRate')} Hz, scale {m.get('scale')}, VRR {m.get('vrr')}, "
+                 f"DPMS on {m.get('dpmsStatus')}; GTK {d['gtk']}; {d['chromium']}. Vsync: {d['vsync']}. Pixels: {d['canvas_pixels']}.\n")
     else:
         L.append("# Goal 36 M4 · the particle field, measured\n")
         g = res["protocol"]["gate"]
@@ -630,13 +752,27 @@ def report(res):
     sizes = SIZES
     L.append("| Row | largest N at 60 fps | " + " | ".join(mill(n) for n in sizes) + " |")
     L.append("|---|---|" + "---|" * len(sizes))
-    for row in R:
+    for row in [r for r in R if r not in FEATURES]:
         big = largest_60(R[row])
         cells = []
         for n in sizes:
             r = R[row].get(str(n))
             cells.append("–" if not r else f"{fmt(r['frame_ms'])} ±{fmt(r['frame_ms_spread'])}" + ("" if r["holds_60"] else " ✗"))
         L.append(f"| {LABEL[row]} | {mill(big) if big else 'none'} | " + " | ".join(cells) + " |")
+    if any(r in R for r in FEATURES):
+        L.append("\n## Each 36b feature's effect on C (frame ms, the same protocol)\n")
+        fs = FEATURE_SIZES
+        L.append("| C with | " + " | ".join(mill(n) for n in fs) + " |")
+        L.append("|---|" + "---|" * len(fs))
+        for row in ["C-36", "C+M6", "C+M6c", "C", "C-blend", "C-hidpi"]:
+            if row in R:
+                name = {"C": "C · + M6b (all of 36b: blending measured at run time)"}.get(row, LABEL[row])
+                L.append(f"| {name} | " + " | ".join(f"{fmt(R[row][str(n)]['frame_ms'])} ±{fmt(R[row][str(n)]['frame_ms_spread'])}"
+                                                    if str(n) in R[row] else "–" for n in fs) + " |")
+        steps = [("M6 zero-copy presentation", "C-36", "C+M6"), ("M6c packed splat", "C+M6", "C+M6c"), ("M6b blending, measured", "C+M6c", "C")]
+        L.append("\nEffect of each (frame ms saved, before → after): " + "; ".join(
+            f"{name}: " + ", ".join(f"{mill(n)} {fmt(R[a][str(n)]['frame_ms'] - R[b][str(n)]['frame_ms'])}" for n in fs
+                                    if str(n) in R.get(a, {}) and str(n) in R.get(b, {})) for name, a, b in steps if a in R and b in R) + ".")
     if "100000" in R.get("A-cpu", {}):
         r = R["A-cpu"]["100000"]
         L.append(f"\nA-cpu at 100k: {fmt(r['frame_ms'])} ms ±{fmt(r['frame_ms_spread'])}"
@@ -677,22 +813,63 @@ def report(res):
     for b, e in E.items():
         L.append(f"- {b}: " + " → ".join(f"`{s}`" for s in e["steps"]))
     L.append("\n## Caveats (every one)\n")
-    for c in CAVEATS:
+    for c in res.get("caveats", CAVEATS):
         L.append(f"- {c}")
     return "\n".join(L) + "\n"
+
+
+DESKTOP_CAVEATS = [
+    "The desktop: the owner's Hyprland session (Wayland, GPU-composited), measured while the owner was away (D-735); "
+    "each row's window opened tiled on the active workspace beside one other window and was closed after its run. The "
+    "monitor runs at 59.97 Hz, scale 1.6, VRR and tearing off. With vsync off, GTK and Chromium render frames faster "
+    "than the screen shows them (the compositor shows the newest); the headline is frames rendered (throughput), as in goal 36.",
+    "Every field is 1280 × 720 pixels: C with MOJOUI_CANVAS_SCALE=1 (GTK scales the texture to the 1.6× monitor on the "
+    "GPU), the browsers' canvases are 1280 × 720 pixels at any scale, wgpu's surface is 1280 × 720 physical pixels. "
+    "C-hidpi shows C at the screen's own scale (2048 × 1152 pixels, 2.56× the pixels).",
+    "C on the desktop: GTK 4.22 on Wayland with its GL renderer (asked for by the framework when CUDA↔GL works, D-737); "
+    "the picture goes from CUDA memory into a GL texture GPU→GPU (or is blended into one), no readback: each run's "
+    "present counters (gpu_copied, gpu_blended, cpu_copied = 0) are in results-desktop.json. The host waits for the "
+    "GPU once a frame before GTK draws (NVIDIA stalls GL behind queued CUDA work, D-746); one frame in flight is opt-in "
+    "and off here (D-747).",
+    "C's additive points use the compute splat, and blending is measured against it after 120 frames and then 240, "
+    "480… (D-739): inside the 600 measured frames that is two short measurements of 8 frames each way; C-blend has "
+    "blending on every frame.",
+    "C's splat is the framework's PointCloud.splat: two atomics per particle (M6c; C-36 and C+M6 run goal 36's three), "
+    "each channel skipped once saturated, exact (GPU = CPU picture).",
+    "C's step ms and GPU frame ms come from a separate timed pass after the measured frames (each part waited for on its "
+    "own), with the compute splat; readback ms is shown only for rows whose frames copy the picture to the CPU (C-36).",
+    "A, A-cpu and B-wasm run in headed Chromium 152 on Wayland (/usr/lib/chromium/chromium, the same flags for all three; "
+    "Chromium refuses Vulkan compositing on Wayland, so it composites with GL; WebGPU uses Dawn on Vulkan). Goal 36 ran "
+    "B-wasm headless through the /usr/bin/chromium wrapper.",
+    "A draws with an atomic compute rasteriser (two u32 atomics per on-screen particle, skipped once the pixel is "
+    "saturated, the same load-first form as C); A's headline is &await=0 with the queue drained at the warm-up's end, "
+    "as in goal 36. B draws with hardware blending (WebGL2 points / wgpu point list, additive).",
+    "B-native in a Wayland window is paced by the compositor: ~18.5 ms a frame at every N, with present mode Immediate "
+    "or Mailbox (both tried, both offered by the driver; GTK with its frame clock capped reads 18.8 ms here too). Its "
+    "throughput is only measurable offscreen, so B-native-off is the same binary offscreen (two frames in flight), as in "
+    "goal 36.",
+    "A-cpu is single-threaded by design (plain JS on the main thread). B-wasm's thread count is chosen by its own probe.",
+    "Peak memory is the PSS of the launched process tree, as in goal 36; GPU memory is not included. Cold start "
+    "includes each runtime's own start.",
+    "The machine has two RTX 3090s; the compositor and GTK's GL run on the second (CUDA 1), and the framework puts C's "
+    "GPU work there too (D-738); A, B pick their own.",
+]
 
 
 CAVEATS = [
     "A draws with an atomic compute rasteriser (two u32 atomics per on-screen particle): it loads the pixel's count first "
     "and skips both atomics once the pixel is saturated (past the tone map's white for the dimmest channel), as C does; "
     "its look is a tone map, not the SPEC's clamp. ?render=points (hardware point blending) exists and is not measured here.",
-    "C's splat is the framework's generic PointCloud.splat: three u32 atomics per particle (r, g, b), each skipped once "
-    "that channel's sum is saturated (an atomic load first; exact: the GPU still matches the CPU path). That skip was "
+    "C's splat is the framework's generic PointCloud.splat: two atomics per particle since goal 36b M6c (red and green "
+    "packed in one 64-bit atomic, blue in a 32-bit one; goal 36 measured three u32 atomics), each channel skipped once "
+    "its sum is saturated (an atomic load first; exact: the GPU still matches the CPU path). That skip was "
     "modelled on A's (a fair-play fix after review); A then got C's load-first form, so both skip the same way.",
     "B draws with hardware blending (WebGL2 points / wgpu point list, additive). B-wasm steps on the CPU (wasm SIMD + a "
     "rayon pool in a worker) and uploads one packed u32 per particle to the GPU every frame.",
     "C copies its finished picture (1280 × 720 × 4 bytes) from the GPU to the CPU every frame and hands it to GTK as a "
-    "texture: that is the framework's Canvas path today. readback ms is that copy alone, measured on the separate pass.",
+    "texture here: on Xvfb there is no GL, so the framework's zero-copy path (goal 36b M6) reports it can't be used "
+    "and falls back to this copy. readback ms is that copy alone, measured on the separate pass. On a real desktop "
+    "there is no readback (results-desktop.md).",
     "C's step ms comes from a separate timed pass after the measured frames (Mojo 1.1's DeviceEvent has no elapsed time; "
     "the frame loop waits for the GPU once a frame, so it can't split step from splat).",
     "C runs in the real GTK host on Xvfb, where GTK composites with its cairo (software) renderer; on a real display GTK "
@@ -728,11 +905,16 @@ def main():
     ap.add_argument("--count", action="store_true")
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--provisional", action="store_true", help="no quiet gate (busy machine): results marked PROVISIONAL")
+    ap.add_argument("--desktop", action="store_true", help="goal 36b M7: every row on the live Wayland desktop")
     a = ap.parse_args()
+    if a.desktop:
+        use_desktop()
+        if a.rows == ROWS:
+            a.rows = DESKTOP_ROWS + list(FEATURES)
     if a.count:
         print(json.dumps(effort(), indent=1))
         return
-    full = a.rows == ROWS and a.sizes == SIZES and a.runs == RUNS
+    full = a.rows == (DESKTOP_ROWS + list(FEATURES) if a.desktop else ROWS) and a.sizes == SIZES and a.runs == RUNS
     if full and dirty():
         raise SystemExit("particles_bench: commit the sources first (results must come from a commit):\n" + dirty())
     headless.ensure()
@@ -760,14 +942,16 @@ def main():
                      **({"gate": None} if a.provisional else
                         {"gate": {"load1_below": GATE_LOAD, "gpu_apps_over_mib": GATE_IDLE_MIB, "poll_s": GATE_POLL_S,
                                   "budget_s": GATE_BUDGET_S, "waited_s": gate.waited}})},
-        "rows": rows, "largest_n_at_60": {row: largest_60(rows[row]) for row in rows},
-        "effort": effort(), "caveats": CAVEATS,
+        "rows": rows, "largest_n_at_60": {row: largest_60(rows[row]) for row in rows if row not in FEATURES},
+        "effort": effort(), "caveats": DESKTOP_CAVEATS if a.desktop else CAVEATS,
+        **({"desktop": True, "setup": desktop_setup(), "features": FEATURES, "feature_sizes": FEATURE_SIZES} if a.desktop else {}),
     }
     if not full:
         print(json.dumps({r: {n: {k: v for k, v in x.items() if k != "runs"} for n, x in rows[r].items()} for r in rows}, indent=1))
         return
     OUT.mkdir(parents=True, exist_ok=True)
-    name = "results-provisional" if a.provisional else "results"
+    name = ("results-desktop-provisional" if a.provisional else "results-desktop") if a.desktop else (
+        "results-provisional" if a.provisional else "results")
     (OUT / f"{name}.json").write_text(json.dumps(res, indent=1) + "\n")
     (OUT / f"{name}.md").write_text(report(res))
     print(f"wrote {OUT / name}.json and {name}.md ({res['seconds']} s)")
