@@ -446,6 +446,10 @@ struct GtkCanvas(Copyable, Movable):
     var spare: Scene  # the list before that, recycled for the next frame (its memory, not its content)
     var prev: Scene  # the display list last drawn (MOJOUI_SCENE): a layer that comes again unchanged keeps its nodes
     var layer_nodes: List[Int]  # the GskRenderNode built for each of prev's layers
+    var pending: Int  # a GPU picture queued last frame, shown once this frame's GPU work is queued (-1: none, D-746)
+    var pending_w: Int
+    var pending_h: Int
+    var pending_blended: Bool
 
     def __init__(out self, node: Int, widget: Int):
         self.node = node
@@ -482,6 +486,10 @@ struct GtkCanvas(Copyable, Movable):
         self.prev = Scene(0, 0, 1)
         self.spare = Scene(0, 0, 1)
         self.layer_nodes = List[Int]()
+        self.pending = -1
+        self.pending_w = 0
+        self.pending_h = 0
+        self.pending_blended = False
 
 
 struct BoardChild(Copyable, Movable):
@@ -604,6 +612,7 @@ struct GtkHost[A: App](Movable):
     var gpu_copied: Int  # left in CUDA memory, copied GPU→GPU into a texture
     var cpu_copied: Int  # drawn on the GPU but copied to the CPU (the old path: no interop, or it failed)
     var present_ns: Int
+    var present_lag: Bool  # MOJOUI_PRESENT_LAG=1: an animating canvas's GPU picture is shown a frame later (D-747)
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -622,6 +631,7 @@ struct GtkHost[A: App](Movable):
         self.gpu_copied = 0
         self.cpu_copied = 0
         self.present_ns = 0
+        self.present_lag = getenv("MOJOUI_PRESENT_LAG") == "1"
         self.partial_ok = getenv("MOJOUI_NO_PARTIAL") == ""
         self.scene_mode = getenv("MOJOUI_SCENE") != "0"  # (the default since goal 27, D-261; 0: the pixel path)
         self.layouts = Dict[String, Int]()
@@ -2824,7 +2834,7 @@ struct GtkHost[A: App](Movable):
     def presenter(self) -> Pointer[Presenter, MutUntrackedOrigin]:
         return Pointer[Presenter, MutUntrackedOrigin](unsafe_from_address=self.pres)
 
-    def show_gpu_picture(mut self, widget: Int, mut surface: Surface, w: Int, h: Int) -> Bool:
+    def show_gpu_picture(mut self, ci: Int, widget: Int, mut surface: Surface, w: Int, h: Int, again: Bool) -> Bool:
         """A picture the canvas left on the GPU (surface.gpu_slot: blended into a texture; surface.gpu_address: in CUDA
         memory, copied GPU→GPU into one) goes to the picture as a GdkGLTexture, no copy to the CPU. False: show
         the pixels in CPU memory instead (copied back here first if the GPU path failed)."""
@@ -2850,17 +2860,17 @@ struct GtkHost[A: App](Movable):
                 print("mojoui: GPU canvas pictures are copied to the CPU for the screen (" + why + ")", flush=True)
             return False
         var pr = self.presenter()
-        var b = external_call["gdk_gl_texture_builder_new", Int]()
-        external_call["gdk_gl_texture_builder_set_context", NoneType](b, self.gl_ctx)
-        external_call["gdk_gl_texture_builder_set_id", NoneType](b, c_uint(pr[].tex[slot]))
-        external_call["gdk_gl_texture_builder_set_width", NoneType](b, c_int(w))
-        external_call["gdk_gl_texture_builder_set_height", NoneType](b, c_int(h))
-        external_call["gdk_gl_texture_builder_set_format", NoneType](b, c_int(5))  # GDK_MEMORY_R8G8B8A8, as texture()
-        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=pr[].busy_flag(slot))[] = 1
-        var tex = external_call["gdk_gl_texture_builder_build", Int](b, on_gl_texture_released, pr[].busy_flag(slot))
-        external_call["g_object_unref", NoneType](b)
-        external_call["gtk_picture_set_paintable", NoneType](widget, tex)
-        external_call["g_object_unref", NoneType](tex)
+        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=pr[].busy_flag(slot))[] = 1  # (in flight: the ring skips it)
+        var last = self.canvases[ci].pending
+        if last >= 0:  # last frame's picture: finished by now (its work was queued a frame ago)
+            self.hand_texture(widget, last, self.canvases[ci].pending_w, self.canvases[ci].pending_h)
+            self.canvases[ci].pending = -1
+        if again and self.present_lag:  # animating, opted in: show it next frame while the GPU works on it (D-747)
+            self.canvases[ci].pending = slot
+            self.canvases[ci].pending_w = w
+            self.canvases[ci].pending_h = h
+        else:
+            self.hand_texture(widget, slot, w, h)
         if surface.gpu_slot >= 0:
             self.gpu_blended += 1
         else:
@@ -2870,6 +2880,23 @@ struct GtkHost[A: App](Movable):
             self.present_told = True
             print("mojoui: GPU canvas pictures go to the screen without a copy to the CPU (" + how + "; " + pr[].why + ")", flush=True)
         return True
+
+    def hand_texture(mut self, widget: Int, slot: Int, w: Int, h: Int):
+        """A finished ring texture → the picture, as a GdkGLTexture (GTK's release callback frees the slot)."""
+        var pr = self.presenter()
+        var sync = pr[].settle(slot)  # (a copy finished and unmapped; a painted one's GL fence for GTK to wait on)
+        var b = external_call["gdk_gl_texture_builder_new", Int]()
+        if sync != 0:
+            external_call["gdk_gl_texture_builder_set_sync", NoneType](b, sync)
+        external_call["gdk_gl_texture_builder_set_context", NoneType](b, self.gl_ctx)
+        external_call["gdk_gl_texture_builder_set_id", NoneType](b, c_uint(pr[].tex[slot]))
+        external_call["gdk_gl_texture_builder_set_width", NoneType](b, c_int(w))
+        external_call["gdk_gl_texture_builder_set_height", NoneType](b, c_int(h))
+        external_call["gdk_gl_texture_builder_set_format", NoneType](b, c_int(5))  # GDK_MEMORY_R8G8B8A8, as texture()
+        var tex = external_call["gdk_gl_texture_builder_build", Int](b, on_gl_texture_released, pr[].busy_flag(slot))
+        external_call["g_object_unref", NoneType](b)
+        external_call["gtk_picture_set_paintable", NoneType](widget, tex)
+        external_call["g_object_unref", NoneType](tex)
 
     def draw_canvas(mut self, ci: Int, self_addr: Int):
         """Asks the app to paint canvas ci at its real pixel size (if its size or version changed)."""
@@ -2920,7 +2947,7 @@ struct GtkHost[A: App](Movable):
             d = self.rt.draw(node, surface)
             again = surface.again
             t1 = perf_counter_ns()
-            if not self.show_gpu_picture(widget, surface, wpx, hpx):
+            if not self.show_gpu_picture(ci, widget, surface, wpx, hpx, again):
                 var tex = texture(self.canvases[ci].pixels, wpx, hpx)
                 external_call["gtk_picture_set_paintable", NoneType](widget, tex)
                 external_call["g_object_unref", NoneType](tex)

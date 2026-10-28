@@ -6,6 +6,10 @@
 #     (copy_in, CUDA↔GL interop) and shows that texture, or
 #   - draws straight into a GL texture with the GPU's fixed-function blending (begin_vertices/draw_vertices: points or
 #     lines, additive or "over"), from vertices a Mojo kernel wrote (surface.gpu_slot).
+# Ordering (D-745, D-746): copies and maps go on CUDA's legacy default stream (0); Mojo's DeviceContext stream is a
+# blocking stream, so work on either waits for what was queued on the other before it (probed: a stream-0 copy waited
+# 2.7 ms for a Mojo kernel). A copied texture stays mapped for CUDA until settle() sees its copy finished; the host
+# shows it a frame later (one frame in flight), so the CPU queues the next frame while the GPU finishes this one.
 # Today this is CUDA + OpenGL (NVIDIA on Linux, GTK's GL renderer). A Metal host (Mac) or a Vulkan/OpenCL-class phone
 # GPU would implement the same five calls (acquire, copy_in, begin_vertices, draw_vertices, release through the
 # busy flags) on its own textures; nothing above this file names CUDA or GL. Not built yet: only this one exists.
@@ -139,6 +143,9 @@ struct Presenter(Movable):
     var tw: List[Int]
     var th: List[Int]
     var busy: List[Int]  # 1 while the host shows the texture; the host's release callback writes 0 (fixed length: stable address)
+    var done: List[Int]  # a CUDA event per slot, recorded after the work that fills it (fence)
+    var gl_done: List[Int]  # a GL sync object per slot when the painter filled it (fence), else 0
+    var mapped: List[Int]  # 1: the slot's texture is still mapped for CUDA (its copy may still be running)
     var out: List[Int]  # scratch out-parameters for C (kept alive past each call)
     var copies: Int
     var copy_ns: Int
@@ -161,7 +168,7 @@ struct Presenter(Movable):
     var ah: Int
     var fbo_accum: Int
     var fbo_out: Int
-    var mapped: Bool
+    var vbo_mapped: Bool
 
     def __init__(out self):
         self.ok = False
@@ -176,6 +183,9 @@ struct Presenter(Movable):
         self.tw = List[Int](length=SLOTS, fill=0)
         self.th = List[Int](length=SLOTS, fill=0)
         self.busy = List[Int](length=SLOTS, fill=0)
+        self.done = List[Int](length=SLOTS, fill=0)
+        self.gl_done = List[Int](length=SLOTS, fill=0)
+        self.mapped = List[Int](length=SLOTS, fill=0)
         self.out = List[Int](length=64, fill=0)
         self.copies = 0
         self.copy_ns = 0
@@ -197,7 +207,7 @@ struct Presenter(Movable):
         self.ah = 0
         self.fbo_accum = 0
         self.fbo_out = 0
-        self.mapped = False
+        self.vbo_mapped = False
 
     # ---------- C ----------
 
@@ -281,9 +291,9 @@ struct Presenter(Movable):
         when all SLOTS are still held by the toolkit."""
         var pick = -1
         for i in range(SLOTS):
-            if self.busy[i] == 0 and self.tex[i] != 0 and self.tw[i] == w and self.th[i] == h:
+            if self.busy[i] == 0 and self.mapped[i] == 0 and self.tex[i] != 0 and self.tw[i] == w and self.th[i] == h:
                 return i
-            if pick < 0 and self.busy[i] == 0:
+            if pick < 0 and self.busy[i] == 0 and self.mapped[i] == 0:
                 pick = i
         if pick < 0:
             self.full += 1
@@ -337,10 +347,16 @@ struct Presenter(Movable):
                 self.out[8 + 12] = self.out[2]
                 self.out[8 + 14] = w * 4
                 self.out[8 + 15] = h
-                r = fcall[Int32](self.cu("cuMemcpy2D_v2"), self.at(8))
-            var r2 = fcall[Int32](self.cu("cuGraphicsUnmapResources"), c_uint(1), self.at(1), 0)
-            if r == 0:
-                r = r2
+                r = fcall[Int32](self.cu("cuMemcpy2DAsync_v2"), self.at(8), 0)
+            if r == 0:  # (left mapped, with an event after the copy: settle() unmaps once it's done, D-746)
+                self.mapped[slot] = 1
+                if self.done[slot] == 0:
+                    r = fcall[Int32](self.cu("cuEventCreate"), self.at(0), c_uint(2))  # CU_EVENT_DISABLE_TIMING
+                    self.done[slot] = self.out[0]
+                if r == 0:
+                    r = fcall[Int32](self.cu("cuEventRecord"), self.done[slot], 0)
+            else:
+                _ = fcall[Int32](self.cu("cuGraphicsUnmapResources"), c_uint(1), self.at(1), 0)
         self.pop()
         if r != 0:
             self.give_up("CUDA → GL copy: " + self.cu_error(r))
@@ -348,6 +364,20 @@ struct Presenter(Movable):
         self.copies += 1
         self.copy_ns += Int(perf_counter_ns() - t0)
         return True
+
+    def settle(mut self, slot: Int) -> Int:
+        """Before the toolkit draws the slot's texture: a CUDA copy into it must have finished and the texture be given
+        back to GL (unmapped); waits for that, spinning (by then it's usually over). GL touching a texture while CUDA
+        work is queued before an unmap makes NVIDIA's driver stall ~4.7 ms (measured, D-746), so the unmap waits until
+        the copy is done. Returns the GL sync object to hand GTK with a painter-filled texture (0: none)."""
+        if self.mapped[slot] != 0:
+            self.push()
+            _ = fcall[Int32](self.cu("cuEventSynchronize"), self.done[slot])
+            self.out[1] = self.res[slot]
+            _ = fcall[Int32](self.cu("cuGraphicsUnmapResources"), c_uint(1), self.at(1), 0)
+            self.pop()
+            self.mapped[slot] = 0
+        return self.gl_done[slot]
 
     def download(mut self, src: Int, dst: Int, bytes: Int) -> Bool:
         """A picture left in CUDA memory, copied into CPU memory (the fallback when it can't be shown from the GPU)."""
@@ -448,8 +478,6 @@ struct Presenter(Movable):
         self.push()
         self.out[1] = self.vbo_res
         var r = fcall[Int32](self.cu("cuGraphicsMapResources"), c_uint(1), self.at(1), 0)
-        if r == 0:  # (the last frame's draw may still read the buffer: the map orders it on stream 0; wait for that)
-            r = fcall[Int32](self.cu("cuStreamSynchronize"), 0)
         if r == 0:
             r = fcall[Int32](self.cu("cuGraphicsResourceGetMappedPointer_v2"), self.at(2), self.at(3), self.vbo_res)
             if r != 0:
@@ -458,7 +486,7 @@ struct Presenter(Movable):
         if r != 0:
             self.give_up_blend("mapping the vertex buffer: " + self.cu_error(r))
             return 0
-        self.mapped = True
+        self.vbo_mapped = True
         return self.out[2]
 
     def draw_vertices(mut self, slot: Int, w: Int, h: Int, n: Int, lines: Bool, over: Bool, finish: Bool = False) -> Bool:
@@ -471,7 +499,7 @@ struct Presenter(Movable):
             self.out[1] = self.vbo_res
             var r = fcall[Int32](self.cu("cuGraphicsUnmapResources"), c_uint(1), self.at(1), 0)
             self.pop()
-            self.mapped = False
+            self.vbo_mapped = False
             if r != 0:
                 self.give_up_blend("unmapping the vertex buffer: " + self.cu_error(r))
                 return False
@@ -522,6 +550,9 @@ struct Presenter(Movable):
         fcall[NoneType](self.g("glBindVertexArray"), c_uint(0))
         fcall[NoneType](self.g("glUseProgram"), c_uint(0))
         fcall[NoneType](self.g("glBindFramebuffer"), c_uint(GL_FRAMEBUFFER), c_uint(0))
+        if self.gl_done[slot] != 0:  # (the toolkit has let go of this slot: its old sync object is no longer waited on)
+            fcall[NoneType](self.g("glDeleteSync"), self.gl_done[slot])
+        self.gl_done[slot] = fcall[Int](self.g("glFenceSync"), c_uint(0x9117), c_uint(0))  # GL_SYNC_GPU_COMMANDS_COMPLETE
         fcall[NoneType](self.g("glFinish" if finish else "glFlush"))  # (finish: timing it, the GPU's part included)
         var err = fcall[c_uint](self.g("glGetError"))
         if err != 0:

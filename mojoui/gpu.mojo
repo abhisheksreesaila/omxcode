@@ -188,7 +188,7 @@ comptime StepFn = def(Point, Knobs) thin -> Point  # a point's next state (a sim
 comptime TintFn = def(Point, Knobs) thin -> SIMD[DType.float32, 4]  # the light a point adds: r, g, b in 0–1
 comptime TRIAL_FRAMES = 8  # PointCloud.decide_blend: frames each way, of which the first TRIAL_SKIP are warm-up
 comptime TRIAL_SKIP = 3
-comptime RECHECK = 60
+comptime RECHECK = 120
 comptime GLOW_ONE = Float32(1024)  # splat(): fixed point for added light (whole numbers, so GPU and CPU agree)
 
 
@@ -320,7 +320,8 @@ struct PointCloud(Movable):
     # Additive points with a GPU painter on offer: blending or the compute splat, whichever is faster here (measured on
     # the first frames, D-739); MOJOUI_BLEND=1 always blends, 0 never
     var blend_pref: Int  # 0: measure, 1: always, 2: never
-    var blend_choice: Int  # 0: not decided yet, 1: blending, 2: compute splat
+    var blend_choice: Int  # 0: measuring now, 1: blending, 2: compute splat (the start: points tend to pile up, and
+    # blending can't skip saturated pixels; a first decision made on the first frames chose wrongly, D-739)
     var trial_ns: List[Int]  # TRIAL_FRAMES blending, then TRIAL_FRAMES compute
     var since_trial: Int  # frames since the last decision: the work changes (points pile up, so the splat's saturation
     var interval: Int  # skip pays more), so both are measured again after `interval` frames: 60, doubling while the
@@ -360,7 +361,7 @@ struct PointCloud(Movable):
             self.three_atomics = getenv("MOJOUI_SPLAT_ATOMICS") == "3"
             var bp = getenv("MOJOUI_BLEND")
             self.blend_pref = 1 if bp == "1" else (2 if bp == "0" else 0)
-        self.blend_choice = 0
+        self.blend_choice = 2  # (the compute splat first; blending is measured against it after RECHECK frames)
         self.trial_ns = List[Int]()
         self.since_trial = 0
         self.told = 0
@@ -397,7 +398,7 @@ struct PointCloud(Movable):
             self.three_atomics = getenv("MOJOUI_SPLAT_ATOMICS") == "3"
             var bp = getenv("MOJOUI_BLEND")
             self.blend_pref = 1 if bp == "1" else (2 if bp == "0" else 0)
-        self.blend_choice = 0
+        self.blend_choice = 2  # (the compute splat first; blending is measured against it after RECHECK frames)
         self.trial_ns = List[Int]()
         self.since_trial = 0
         self.told = 0
@@ -506,8 +507,7 @@ struct PointCloud(Movable):
                         grid_dim=ceildiv(total, 256), block_dim=256,
                     )
                     surface.gpu_drawn = True
-                    if surface.gpu_ok:  # the host shows it from GPU memory (mojoui.present): no copy to the CPU
-                        ctx.synchronize()
+                    if surface.gpu_ok:  # the host shows it from GPU memory (mojoui.present): no copy, no wait (D-745)
                         surface.gpu_address = Int(image.unsafe_ptr())
                         surface.gpu_device = self.gpu.device
                         self.handed += 1
@@ -590,7 +590,7 @@ struct PointCloud(Movable):
         elif self.blend_choice != 0:
             self.since_trial += 1
             if self.since_trial >= self.interval:
-                self.blend_choice = 0
+                self.blend_choice = 0  # (measure both again)
                 self.trial_ns = List[Int]()
         return True
 
@@ -649,7 +649,7 @@ struct PointCloud(Movable):
                     self.device.value().unsafe_ptr(), Int32(self.count), UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=verts),
                     Int32(w), Int32(h), k, Int32(1 if lines else 0), grid_dim=ceildiv(self.count, 256), block_dim=256,
                 )
-                ctx.synchronize()
+                ctx.synchronize()  # (GL must not start on vertices CUDA is still writing: the driver would stall, D-746)
             except e:
                 _ = pp[].draw_vertices(slot, w, h, 0, lines, over)  # (unmaps the buffer)
                 pp[].give_up_blend("the vertex kernel failed: " + String(e))
@@ -728,7 +728,8 @@ struct PointCloud(Movable):
         make the same picture. milliseconds: how long, including the copy into the surface (and any step() still
         queued); timed=True also splits it into splat_ms (GPU) and readback_ms (the copy), at the cost of a second wait.
         When the host can show a GPU picture (surface.gpu_ok), the picture stays on the GPU and the surface says where
-        (surface.gpu_address): no copy to the CPU, one wait."""
+        (surface.gpu_address): no copy to the CPU and no wait: the host's GPU→GPU copy is queued after these kernels
+        (D-745), so the CPU goes on to the next frame while the GPU works."""
         var t0 = now_ns()
         var w = surface.width
         var h = surface.height
@@ -768,11 +769,14 @@ struct PointCloud(Movable):
                     )
                     surface.gpu_drawn = True
                     var t1 = t0
-                    if timed or surface.gpu_ok:  # (measuring: wait for the kernels, so the copy to the CPU is timed on its own)
+                    if timed:  # (measuring: wait for the kernels, so the copy to the CPU is timed on its own)
                         ctx.synchronize()
                         t1 = now_ns()
                         self.splat_ms = Float64(t1 - t0) / 1e6
                     if surface.gpu_ok:  # the host shows the picture from GPU memory (mojoui.present): no readback
+                        if self.blend_choice == 0 and surface.gpu_painter != 0:  # (measuring against blending: whole work)
+                            ctx.synchronize()
+                            t1 = now_ns()
                         surface.gpu_address = Int(image.unsafe_ptr())
                         surface.gpu_device = self.gpu.device
                         self.handed += 1

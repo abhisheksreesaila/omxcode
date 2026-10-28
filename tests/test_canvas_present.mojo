@@ -26,6 +26,15 @@ def tint(p: Point, k: Knobs) -> SIMD[DType.float32, 4]:
     return SIMD[DType.float32, 4](p[2] * k[0], p[3] * k[0], (p[2] + p[3]) * Float32(0.5) * k[0], 0)
 
 
+def drift(p: Point, k: Knobs) -> Point:
+    """A step that takes the GPU a while (so a missing wait would copy a picture not finished yet)."""
+    var q = p
+    for _ in range(64):
+        q[0] = q[0] * Float32(0.999) + Float32(0.0005)
+        q[1] = q[1] * Float32(0.999) + Float32(0.0005)
+    return q
+
+
 def cloud(n: Int, use_gpu: Bool) -> PointCloud:
     """Points piled towards the middle (so some pixels saturate), with light that varies point by point."""
     var pts = List[Float32](length=4 * n, fill=0)
@@ -67,6 +76,7 @@ def picture_through_gl(mut pr: Presenter, mut c: PointCloud, w: Int, h: Int, k: 
     var slot = pr.acquire(w, h)
     assert_true(slot >= 0)
     assert_true(pr.copy_in(slot, s.gpu_address, w, h), "CUDA → GL copy: " + pr.why)
+    _ = pr.settle(slot)  # (as the host does before GTK draws it: the copy finished, the texture back with GL)
     var got = List[UInt32](length=w * h, fill=0)
     assert_true(pr.read_slot(slot, Int(got.unsafe_ptr())), "read the texture back")
     return got^
@@ -126,7 +136,21 @@ def main() raises:
                 white += 1
         assert_true(lit > 1000 and white > 0, "a picture with light and saturated pixels")
         print("  " + String(w) + "×" + String(h) + ": GL texture = readback picture, byte for byte (" + String(lit) + " lit, " + String(white) + " white pixels)")
-    # 4. The ring: a texture the toolkit holds is never handed out again until it's released
+    # 4. Ordering without a wait (D-745): 20 heavy steps and the splat are only queued; the copy into the texture is
+    #    queued after them on the GPU, and the texture still equals the picture read back after a full wait
+    var big = cloud(2_000_000, True)
+    var ref_ = cloud(2_000_000, True)
+    for _ in range(20):
+        big.step[drift](k)
+        ref_.step[drift](k)
+    var want2 = List[UInt32](length=1280 * 720, fill=0)
+    var sr = Surface(Int(want2.unsafe_ptr()), 1280, 720, 1.0)
+    ref_.splat[place, tint](sr, k)
+    var got2 = picture_through_gl(pp[], big, 1280, 720, k)
+    for i in range(1280 * 720):
+        assert_equal(got2[i], want2[i], "queued steps + splat + copy, no CPU wait: the finished picture")
+    print("  2M points, 20 queued steps, no CPU wait before the copy: the texture is the finished picture")
+    # 5. The ring: a texture the toolkit holds is never handed out again until it's released
     var held = List[Int]()
     for _ in range(SLOTS):
         var s = pp[].acquire(64, 32)

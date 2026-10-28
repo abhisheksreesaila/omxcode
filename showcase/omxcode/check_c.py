@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import headless  # noqa: E402
 
 APP = ROOT / "build/particles/linux/particles"
+LAST_LOG = []  # the last scripted run's output (the host's present path and counters, goal 36b)
 
 
 def build():
@@ -44,6 +45,7 @@ def scripted(n, frames, out, positions=True, env=None):
         if cold is None and "first frame" in line:
             cold = (time.perf_counter() - t0) * 1000
     _, status, usage = os.wait4(p.pid, 0)
+    LAST_LOG[:] = log
     p.returncode = os.waitstatus_to_exitcode(status)
     if p.returncode != 0 or not (out / "timings.json").exists():
         sys.exit(f"C: FAIL scripted run (exit {p.returncode})\n" + "".join(log[-30:]))
