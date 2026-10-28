@@ -1,8 +1,14 @@
 # Build C: Rust + Polars + egui/eframe (glow)
 
 The goal 38 dashboard (../SPEC.md) as one native binary. The data side: `src/engine.rs` (Polars lazy; rows sorted by
-day descending at load, as build B, so a date range is a slice; the group-by on Polars' streaming engine; the table
-is the plain `filter + head(50)`). The window: `src/main.rs`.
+day at load, so a date range is a slice; the group-by on Polars' streaming engine). The window: `src/main.rs`.
+
+The table's "newest 50 matching rows" is a **hand-written optimisation**, not plain Polars: since the rows are sorted
+by day, it searches a growing window at the slice's end for the 50 last matching rows, takes the earliest one's day,
+and sorts only the matching rows from that day on. Build D has an equivalent shortcut (a per-day histogram that finds
+the cutoff day), so C keeps its own (coordinator's fair-play decision, 2026-10-28). The plain Polars forms measured at
+100M, for the record: sort + limit (top-k) median 96 ms, p95 2.3 s; filter + head(50) on a day-descending frame
+median 65–91 ms, p95 466–711 ms.
 
 - Build: `pixi run cargo build --release` **from this folder** (cargo reads `.cargo/config.toml` from the working
   directory: `target-cpu=native`, which D's Mojo compiler also uses by default; `ready` and timings.json say

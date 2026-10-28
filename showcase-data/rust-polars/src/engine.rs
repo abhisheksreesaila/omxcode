@@ -1,9 +1,9 @@
 //! The data side: the orders table in memory (Polars), and one query per filter state.
 //!
 //! Loaded once: the Parquet file is read with Polars' lazy scan, `region` and `product` become categoricals (u8
-//! codes), and the rows are sorted by `day` descending (stable, so `id` stays ascending within a day: the table's
-//! order, as build B does). The sort is the one layout choice: a date range becomes a zero-copy slice found by binary
-//! search, so a narrow range never touches the rest, and the table is the first 50 matching rows. Every filter change then runs over every row in that slice: no pre-aggregation, no cached results.
+//! codes), and the rows are sorted by `day` (stable, so `id` stays ascending within a day). The sort is the one
+//! layout choice: a date range becomes a zero-copy slice found by binary search, so a narrow range never touches the
+//! rest. Every filter change then runs over every row in that slice: no pre-aggregation, no cached results.
 
 use polars::prelude::*;
 use std::path::Path;
@@ -41,7 +41,7 @@ pub struct Answer {
 }
 
 pub struct Data {
-    df: DataFrame,      // sorted by day descending, then id ascending
+    df: DataFrame,      // sorted by day, then id
     day: Vec<i32>,      // the sorted day column, for the binary search
     pub regions: Vec<String>,
     pub load_ms: f64,
@@ -53,7 +53,7 @@ impl Data {
         let cat = |name: &str| DataType::from_categories(Categories::new(name.into(), "dash".into(), CategoricalPhysical::U8));
         let mut df = LazyFrame::scan_parquet(PlRefPath::new(path.to_str().unwrap()), ScanArgsParquet::default())?
             .with_columns([col("region").cast(cat("region")), col("product").cast(cat("product"))])
-            .sort(["day"], SortMultipleOptions::default().with_order_descending(true).with_maintain_order(true))
+            .sort(["day"], SortMultipleOptions::default().with_maintain_order(true))
             .collect()?;
         df.rechunk_mut_par();
         let day: Vec<i32> = df.column("day")?.date()?.physical().cont_slice()?.to_vec();
@@ -75,8 +75,8 @@ impl Data {
     }
 
     pub fn query(&self, f: &Filter) -> PolarsResult<Answer> {
-        let lo = self.day.partition_point(|&d| d > f.to); // days descending
-        let hi = self.day.partition_point(|&d| d >= f.from).max(lo);
+        let lo = self.day.partition_point(|&d| d < f.from);
+        let hi = self.day.partition_point(|&d| d <= f.to).max(lo);
         let mut pred = col("amount").gt_eq(lit(f.min_amount));
         if f.region != "all" {
             pred = pred.and(col("region").eq(lit(f.region.as_str())));
@@ -96,13 +96,36 @@ impl Data {
             .collect_with_engine(Engine::Streaming)?
             .unwrap_single();
 
-        // The table: the frame is already in table order (day descending, id ascending), so it is the first 50
-        // matching rows, the plain Polars way (filter + head), as build B does. (A sort + limit here, Polars' top-k,
-        // measured at 100M: median 96 ms, p95 2.3 s per change: it gathers every matching row's seven columns first.)
-        let table = matched(lo, hi)
-            .limit(IDS as IdxSize)
-            .with_columns([col("region").cast(DataType::String), col("product").cast(DataType::String)])
-            .collect()?;
+        // The table: a hand-written optimisation (not plain Polars; build D has an equivalent, a per-day histogram that
+        // finds the cutoff day). The first 50 by day descending, then id ascending. The rows are sorted by day, so the answer
+        // sits at the slice's end: find the 50 last matching rows in a growing suffix (usually the first 64K rows
+        // hold them), and the day d of the earliest; then sort only the matching rows from day d on.
+        let mut w = 1usize << 16;
+        let last = loop {
+            let start = hi.saturating_sub(w).max(lo);
+            let tail = matched(start, hi).select([col("day")]).tail(IDS as IdxSize).collect()?;
+            if tail.height() == IDS || start == lo {
+                break if tail.height() == 0 { None } else { tail.column("day")?.date()?.physical().get(0) };
+            }
+            w *= 8;
+        };
+        let table = match last {
+            None => DataFrame::empty(),
+            Some(d) => {
+                let from = self.day[lo..hi].partition_point(|&x| x < d) + lo;
+                matched(from, hi)
+                    .sort_by_exprs(
+                        [col("day"), col("id")],
+                        SortMultipleOptions {
+                            limit: Some(IDS as IdxSize),
+                            ..SortMultipleOptions::default().with_order_descending_multi([true, false])
+                        },
+                    )
+                    .limit(IDS as IdxSize)
+                    .with_columns([col("region").cast(DataType::String), col("product").cast(DataType::String)])
+                    .collect()?
+            }
+        };
 
         let names = groups.column("product")?.str()?;
         let n = groups.column("n")?.idx()?;
