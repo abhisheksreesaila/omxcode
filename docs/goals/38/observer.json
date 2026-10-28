@@ -1,0 +1,61 @@
+{
+ "method": "wlr-screencopy v3 capture_output_region + copy_with_damage (scripts/screen_observer.c), shm, region only",
+ "compositor": "Hyprland 0.56.2 built from branch v0.56.2 at commit efb50993780079460b0cbed1363e2166a2de1d9f clean ([gha] Nix: update inputs).",
+ "monitor": {
+  "name": "HEADLESS-1",
+  "width": 1920,
+  "height": 1080,
+  "refreshRate": 60.0,
+  "scale": 1
+ },
+ "probe_clock_id": 1,
+ "flips": 120,
+ "seen": 120,
+ "missed": 0,
+ "region_px": {
+  "width_px": 120,
+  "height_px": 40,
+  "stride": 480,
+  "format": 0
+ },
+ "probe_commit_to_present_ms_observer_off": {
+  "n": 60,
+  "median": 8.155,
+  "p95": 16.461,
+  "min": 0.899,
+  "max": 19.687
+ },
+ "probe_commit_to_present_ms_observer_on": {
+  "n": 120,
+  "median": 4.241,
+  "p95": 16.675,
+  "min": 1.21,
+  "max": 27.289
+ },
+ "observer_timestamp_minus_presented_ms": {
+  "n": 120,
+  "median": -0.496,
+  "p95": -0.364,
+  "min": -6.838,
+  "max": -0.332
+ },
+ "observer_receipt_minus_presented_ms": {
+  "n": 120,
+  "median": 0.072,
+  "p95": 0.211,
+  "min": 0.049,
+  "max": 2.059
+ },
+ "observer_frame_interval_ms_under_continuous_change": {
+  "n": 58,
+  "median": 16.662,
+  "p95": 17.241,
+  "min": 16.053,
+  "max": 35.036
+ },
+ "refresh_ms": 16.667,
+ "when": "2026-10-28 16:20:12",
+ "load1": 13.74,
+ "observer_timestamp_equals_presented": "63 of 120 within 0.5 ms",
+ "matching": "each flip's frame found by the expected pixel hash of the probe's new colour"
+}

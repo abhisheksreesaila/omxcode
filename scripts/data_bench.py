@@ -6,6 +6,7 @@
     pixi run python scripts/data_bench.py count                # effort only (lines, files, languages, build steps)
     pixi run python scripts/data_bench.py calibrate B          # one build on the desktop: window + KPI-region pictures
     pixi run python scripts/data_bench.py run                  # THE measurement → docs/goals/38/results.json + .md
+        [--display headless|desktop]  (default headless: a separate headless Hyprland, screen_observer.HeadlessHyprland)
         [--builds A B C D] [--passes 20] [--runs 3] [--cold 3] [--rows 100M] [--provisional]
     pixi run python scripts/data_bench.py report               # results.md again from results.json
 
@@ -14,7 +15,8 @@ The protocol (docs/goals/38/README.md; the fairness reviewer's, 2026-10-28):
    data.lock). Quiet gate before every run: 1-minute load < 0.5 (after GATE_STRICT_S of waiting, < 2 with the value
    recorded), GPU utilisation < 5 %, no other GPU process above 16 MiB except the desktop session's graphics clients
    (processes running before the harness started with only graphics contexts); the screen must be live (unlocked).
-2. The owner's live Hyprland desktop (D-765): one window, floated to exactly 1280 × 800 logical pixels, closed after
+2. A separate headless Hyprland on the GPU (default since 2026-10-28: the owner's session is locked; recorded as such
+   in results.json, with a caveat), or the owner's live Hyprland desktop (D-765, --display desktop): one window, floated to exactly 1280 × 800 logical pixels, closed after
    its run; only processes this script started are ever stopped. A and B: the same Chromium binary and flags
    (CHROMIUM, CHROMIUM_FLAGS, handed to each driver; the browser's real command line is read back from /proc).
 3. Input-to-pixels: CLOCK_MONOTONIC right before the harness writes "step N" to the build's driver → the compositor's
@@ -139,6 +141,11 @@ CAVEATS = [
 ]
 
 
+HEADLESS_CAVEAT = ("Measured on a separate headless Hyprland (the owner's session was locked), not the physical monitor: "
+                   "output HEADLESS-1 %dx%d @ %s Hz paced by a timer, GPU-rendered (%s, %s through EGL/GBM), no scanout; "
+                   "the window and its pixels are real compositor frames, but there is no monitor latency in any number.")
+
+
 def mono_ns():
     return time.clock_gettime_ns(time.CLOCK_MONOTONIC)
 
@@ -184,7 +191,7 @@ def environment():
     return {
         "cpu": f"{cpu} ({os.cpu_count()} threads)", "memory_gb": round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30, 1),
         "gpu": gpus, "driver": sh("nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader").splitlines()[0],
-        "kernel": platform.release(), "compositor": sh("hyprctl", "version", env=so.desktop_env()).splitlines()[0],
+        "kernel": platform.release(), "compositor": so.hyprctl("version").splitlines()[0],
         "chromium": sh(CHROMIUM, "--version"), "rust": pixi("rustc", "--version"), "mojo": pixi("mojo", "--version"),
         "polars": pixi("python", "-c", "import polars; print(polars.__version__)"),
         "duckdb": pixi("python", "-c", "import duckdb; print(duckdb.__version__)"),
@@ -200,13 +207,23 @@ def _npm_version(d, pkg):
     return json.loads(p.read_text())["version"] if p.exists() else None
 
 
-def desktop():
+def desktop(headless=None):
+    """Where the windows were drawn: the owner's live desktop, or (headless: HeadlessHyprland.record()) a separate
+    headless Hyprland on the GPU, which is not the physical monitor."""
     env = so.desktop_env()
     m = so.monitor()
-    return {"wayland_display": env.get("WAYLAND_DISPLAY"), "display": env.get("DISPLAY", ":0"),
-            "compositor": sh("hyprctl", "version", env=env).splitlines()[0], "headless": False,
-            "monitor": {k: m.get(k) for k in ("name", "description", "width", "height", "refreshRate", "scale", "vrr")},
-            "window": [W, H], "window_note": "floated and resized to exactly 1280 × 800 logical pixels, centred, one at a time"}
+    d = {"wayland_display": env.get("WAYLAND_DISPLAY"), "display": env.get("DISPLAY"),
+         "compositor": so.hyprctl("version").splitlines()[0], "headless": bool(headless),
+         "monitor": {k: m.get(k) for k in ("name", "description", "width", "height", "refreshRate", "scale", "vrr")},
+         "window": [W, H], "window_note": "floated and resized to exactly 1280 × 800 logical pixels, centred, one at a time"}
+    if headless:
+        d.update({"kind": headless["kind"], "headless_compositor": headless,
+                  "note": "the owner's session was locked (travelling), so every window ran on a separate headless "
+                          "Hyprland as the same user, GPU-rendered (EGL/GBM) on the RTX 3090 without a monitor; its "
+                          "HEADLESS-1 output paces frames at 60 Hz by a timer, with no scanout to a physical monitor"})
+    else:
+        d["kind"] = "the owner's live Hyprland desktop (D-765)"
+    return d
 
 
 def ancestry_pids():
@@ -339,7 +356,7 @@ class Memory:
         self.phase, self.gpu_ok = "load", True
         self.pss = {}  # phase -> [MB]
         self.gpu = {}  # phase -> [MiB]
-        self.names, self.cost_ms, self.peak_names, self.scan_ms = set(), [], {}, []
+        self.names, self.cost_ms, self.peak_names, self.scan_ms, self.gpus = set(), [], {}, [], set()
         self._stop = threading.Event()
         self._t = [threading.Thread(target=self._pss_loop, daemon=True), threading.Thread(target=self._gpu_loop, daemon=True)]
         for t in self._t:
@@ -377,6 +394,7 @@ class Memory:
                 procs = gpu_processes()
                 if self.gpu_ok:  # still outside a timed step when nvidia-smi returned
                     self.gpu.setdefault(ph, []).append(sum(p[4] for p in procs if p[1] in pids))
+                    self.gpus.update(p[0] for p in procs if p[1] in pids)
             self._stop.wait(GPU_S)
 
     def stop(self):
@@ -391,7 +409,7 @@ class Memory:
             "pss_peak_by_process": self.peak_names.get("measured", self.peak_names.get("load", (0, {})))[1],
             "gpu_load_peak_mib": max(self.gpu.get("load", [0])),
             "gpu_steady_peak_mib": max(self.gpu.get("warm", []) + self.gpu.get("reset", []) or [0]),
-            "processes": sorted(self.names), "sample_ms": PSS_MS,
+            "processes": sorted(self.names), "sample_ms": PSS_MS, "gpu_indices": sorted(self.gpus),
             "sampler_cost_ms_median": round(statistics.median(self.cost_ms), 2) if self.cost_ms else None,
             "tree_scan_ms_median": round(statistics.median(self.scan_ms), 2) if self.scan_ms else None,
         }
@@ -452,7 +470,11 @@ class Session:
 
     def environment(self):
         env = dict(self.env) if self.env is not None else so.desktop_env()
-        env.setdefault("DISPLAY", ":0")
+        if so.TARGET["headless"]:
+            env.pop("DISPLAY", None)  # Wayland only: nothing may reach the owner's X server
+            env["GDK_BACKEND"] = "wayland"
+        else:
+            env.setdefault("DISPLAY", ":0")
         env.update({"DATA_BENCH_CHROMIUM": CHROMIUM, "DATA_BENCH_CHROMIUM_FLAGS": " ".join(CHROMIUM_FLAGS),
                     "MOJOUI_HEADLESS": "0", "PYTHONUNBUFFERED": "1"})
         for k in ("MOJOUI_PRIVATE_DISPLAY", "GSK_RENDERER", "GDK_DISABLE", "GDK_SCALE"):
@@ -839,6 +861,7 @@ def summarise(b, runs, colds, colds_warm_browser):
             "gpu_load_peak_mib": max(m["gpu_load_peak_mib"] for m in mems),
             "gpu_steady_peak_mib": max(m["gpu_steady_peak_mib"] for m in mems),
             "processes": sorted({p for m in mems for p in m["processes"]}), "sample_ms": PSS_MS,
+            "gpu_indices": sorted({g for m in mems for g in m.get("gpu_indices", [])}),
             "pss_peak_by_process": next((m["pss_peak_by_process"] for m in mems if m["pss_steady_peak_mb"]), mems[0]["pss_peak_by_process"]),
             "sampler_cost_ms_median": med([m["sampler_cost_ms_median"] for m in mems])}
     return out
@@ -943,8 +966,21 @@ def plan(builds=ORDER, runs=RUNS, passes=PASSES, cold=COLD):
 
 
 def run_all(a, log):
+    comp = None
+    if a.display == "headless":
+        comp = so.HeadlessHyprland()
+        rec = comp.start()
+        log(f"headless Hyprland: {rec['wayland_display']}, {rec['output']}, {rec.get('renderer')} ({rec.get('render_node')})")
+    try:
+        return _run_all(a, log, rec if comp else None)
+    finally:
+        if comp:
+            comp.stop()
+
+
+def _run_all(a, log, headless):
     env = environment()
-    desk = desktop()
+    desk = desktop(headless)
     log(f"env: {env['cpu']}; {env['gpu'].splitlines()[0]}; driver {env['driver']}; {env['compositor']}; {env['commit']}")
     desktop_pids = {p[1] for p in gpu_processes() if p[2] == "G"}
     gate = (lambda what: no_gate(log)) if a.provisional else Gate(log, desktop_pids).wait
@@ -983,6 +1019,9 @@ def run_all(a, log):
         argv = next((r.get("chromium_argv") for r in runs[b] if r.get("chromium_argv")), None)
         if BUILDS[b]["web"]:
             res["chromium"][b] = argv
+    if headless:
+        res["caveats"].insert(0, HEADLESS_CAVEAT % (headless["output"]["width"], headless["output"]["height"],
+                                                    headless["output"]["refreshRate"], headless.get("renderer"), headless["drm_device"]))
     res["caveats"] += data_caveats(res)
     return res
 
@@ -1101,7 +1140,18 @@ def write(res):
 # calibrate: one build, its window and the KPI region, as pictures
 # ---------------------------------------------------------------------------------------------------------------------
 
-def calibrate(b, rows, log):
+def calibrate(b, rows, log, display="headless"):
+    comp = so.HeadlessHyprland() if display == "headless" else None
+    if comp:
+        comp.start()
+    try:
+        _calibrate(b, rows, log)
+    finally:
+        if comp:
+            comp.stop()
+
+
+def _calibrate(b, rows, log):
     """Launch b on the desktop, place its window, save the whole window before and after step 1 (PPM) and the KPI
     region it uses, so a person can check (or set) BUILDS[b]['kpi']. Closes everything."""
     out = WORK / f"calibrate-{b}"
@@ -1296,6 +1346,9 @@ def main():
     ap.add_argument("--passes", type=int, default=PASSES)
     ap.add_argument("--runs", type=int, default=RUNS)
     ap.add_argument("--cold", type=int, default=COLD)
+    ap.add_argument("--display", choices=["headless", "desktop"], default="headless",
+                    help="headless: a separate headless Hyprland on the GPU (default; the owner's session is locked); "
+                         "desktop: the owner's live desktop (D-765)")
     ap.add_argument("--full", action="store_true", help="selftest: the fake build at the protocol's full shape (~9 min)")
     ap.add_argument("--provisional", action="store_true", help="no quiet gate (a busy machine): results-provisional.*")
     a = ap.parse_args()
@@ -1310,11 +1363,17 @@ def main():
         print("FAIL:\n  " + "\n  ".join(fails) if fails else "selftest: PASS")
         sys.exit(1 if fails else 0)
     elif a.cmd == "env":
-        print(json.dumps(environment(), indent=1))
+        comp = so.HeadlessHyprland() if a.display == "headless" else None
+        rec = comp.start() if comp else None
+        try:
+            print(json.dumps({"environment": environment(), "desktop": desktop(rec)}, indent=1))
+        finally:
+            if comp:
+                comp.stop()
     elif a.cmd == "count":
         print(json.dumps({b: {k: v for k, v in e.items() if k != "by_file"} for b, e in effort().items()}, indent=1))
     elif a.cmd == "calibrate":
-        calibrate(a.build, a.rows, log)
+        calibrate(a.build, a.rows, log, a.display)
     elif a.cmd == "report":
         p = OUT / "results.json"
         (OUT / "results.md").write_text(report(json.loads(p.read_text())))

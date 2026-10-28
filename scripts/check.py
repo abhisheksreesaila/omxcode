@@ -295,7 +295,17 @@ def m5():
     if missing:
         return False, f"setup not recorded: {missing}"
     d = res.get("desktop") or {}
-    if d.get("wayland_display") != "wayland-1" or "Hyprland" not in str(d.get("compositor")) or d.get("headless"):
+    if "Hyprland" not in str(d.get("compositor")):
+        return False, f"not measured under Hyprland: {d.get('compositor')}"
+    if d.get("headless"):
+        # the coordinator's change (2026-10-28, the owner's session locked while travelling): a separate headless
+        # Hyprland is allowed only GPU-rendered on the NVIDIA card at 60 Hz, never the owner's socket, and said so
+        h = d.get("headless_compositor") or {}
+        if "NVIDIA" not in str(h.get("renderer")) or (h.get("output") or {}).get("refreshRate") != 60 \
+                or d.get("wayland_display") == "wayland-1" or not any("headless Hyprland" in c and "not the physical monitor" in c
+                                                                      for c in res.get("caveats") or []):
+            return False, f"headless display not a stated, GPU-rendered 60 Hz compositor of its own: {h}"
+    elif d.get("wayland_display") != "wayland-1":
         return False, f"not measured on the owner's live Hyprland desktop: {d}"
     obs = res.get("observer") or {}
     st = obs.get("selftest") or {}

@@ -2,6 +2,7 @@
 
     pixi run python scripts/screen_observer.py build        # build/observer/screen_observer (wayland-scanner + cc)
     pixi run python scripts/screen_observer.py selftest     # on the live desktop (D-765): writes docs/goals/38/observer.json
+    pixi run python scripts/screen_observer.py selftest --headless   # on a separate headless Hyprland (HeadlessHyprland)
 
 The method (docs/goals/38/README.md "The observer"): a small wlr-screencopy v3 client (scripts/screen_observer.c)
 captures only a region of the compositor's output (the KPI row of the measured window) with capture_output_region +
@@ -16,6 +17,7 @@ Only processes this module starts are ever stopped (Popen handles; never by name
 import json
 import os
 import random
+import re
 import statistics
 import subprocess
 import sys
@@ -58,15 +60,131 @@ def build():
     return BIN
 
 
+# Which compositor everything here talks to: the owner's live desktop (D-765: wayland-1, its own Hyprland instance) or
+# a separate headless Hyprland this module started (HeadlessHyprland.start sets it). hyprctl always names the instance.
+OWNER_WAYLAND = "wayland-1"
+TARGET = {"wayland": OWNER_WAYLAND, "instance": None, "headless": False}
+
+
 def desktop_env():
-    """The owner's live Hyprland session (D-765), never the headless display."""
+    """The target compositor's environment: the owner's live Hyprland session (D-765), or the separate headless
+    Hyprland (then no DISPLAY at all, so nothing can reach the owner's X server)."""
     env = dict(os.environ)
-    env.setdefault("WAYLAND_DISPLAY", "wayland-1")
+    env["WAYLAND_DISPLAY"] = TARGET["wayland"]
     env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
     if not (Path(env["XDG_RUNTIME_DIR"]) / env["WAYLAND_DISPLAY"]).exists():
-        raise SystemExit(f"screen_observer: no Wayland desktop at {env['WAYLAND_DISPLAY']}")
+        raise SystemExit(f"screen_observer: no Wayland compositor at {env['WAYLAND_DISPLAY']}")
     env.pop("MOJOUI_PRIVATE_DISPLAY", None)
+    if TARGET["headless"]:
+        env.pop("DISPLAY", None)
+        env.pop("HYPRLAND_INSTANCE_SIGNATURE", None)
     return env
+
+
+HEADLESS_DIR = ROOT / "build/hyprbench"
+HEADLESS_CONFIG = """-- goal 38: a separate headless Hyprland for measurement (scripts/screen_observer.py writes this; never the owner's)
+hl.monitor({ output = "HEADLESS-1", mode = "%dx%d@%d", position = "0x0", scale = 1 })
+hl.config({
+    xwayland = { enabled = false },
+    misc = { disable_hyprland_logo = true, force_default_wallpaper = 0, disable_autoreload = true },
+    -- a headless output has no cursor plane: the compositor would draw its cursor into every frame (it sat at the
+    -- centre, over the measured region); there is no pointer here anyway
+    cursor = { invisible = true },
+})
+"""
+
+
+class HeadlessHyprland:
+    """A second Hyprland, as this user, on the GPU without a monitor (card1: the RTX 3090 at 2f:00.0; the owner's
+    monitor hangs off card2), with a virtual HEADLESS-1 output at 1920×1080@60 and no lock or idle daemon (it runs no
+    autostart). It never touches the owner's session: libseat's noop backend (no logind, so session 2 is never asked
+    for control), Xwayland off, HYPRLAND_NO_SD_VARS (the owner's systemd/dbus environment is left alone), no
+    WAYLAND_DISPLAY/DISPLAY/instance of theirs in its environment; input devices aren't readable by this user, so it
+    sees no keyboard. Aquamarine's DRM backend on card1 finds no connected connector and so never modesets; the
+    renderer is EGL/GBM on renderD128. Stopped by its own PID."""
+
+    def __init__(self, card="/dev/dri/card1", width=1920, height=1080, hz=60):
+        self.card, self.mode = card, (width, height, hz)
+        self.p = self.instance = self.wayland = None
+
+    def start(self, timeout=20):
+        HEADLESS_DIR.mkdir(parents=True, exist_ok=True)
+        cfg = HEADLESS_DIR / "hyprland.lua"
+        cfg.write_text(HEADLESS_CONFIG % self.mode)
+        before = {i["instance"] for i in _instances()}
+        env = {"HOME": os.environ["HOME"], "USER": os.environ.get("USER", ""), "PATH": "/usr/bin:/bin",
+               "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
+               "LIBSEAT_BACKEND": "noop", "AQ_DRM_DEVICES": self.card, "HYPRLAND_NO_SD_VARS": "1",
+               "HYPRLAND_NO_SD_NOTIFY": "1", "HYPRLAND_NO_CRASHREPORTER": "1"}
+        self.log = open(HEADLESS_DIR / "hyprland.stdout", "w")
+        self.p = subprocess.Popen(["Hyprland", "--config", str(cfg)], env=env, stdin=subprocess.DEVNULL, stdout=self.log,
+                                  stderr=subprocess.STDOUT, start_new_session=True)
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            new = [i for i in _instances() if i["instance"] not in before and i.get("pid") == self.p.pid]
+            if new:
+                self.instance, self.wayland = new[0]["instance"], new[0]["wl_socket"]
+                break
+            if self.p.poll() is not None:
+                raise RuntimeError(f"headless Hyprland exited ({self.p.returncode}): see {HEADLESS_DIR / 'hyprland.stdout'}")
+            time.sleep(0.1)
+        else:
+            self.stop()
+            raise RuntimeError("headless Hyprland: no instance appeared")
+        if self.wayland == OWNER_WAYLAND:
+            self.stop()
+            raise RuntimeError("headless Hyprland took the owner's socket name")
+        TARGET.update({"wayland": self.wayland, "instance": self.instance, "headless": True})
+        out = hyprctl("output", "create", "headless", "HEADLESS-1").strip()
+        t0 = time.time()
+        while time.time() - t0 < 10:
+            mons = json.loads(hyprctl("monitors", "-j") or "[]")
+            if mons:
+                break
+            time.sleep(0.1)
+        if not mons:
+            self.stop()
+            raise RuntimeError(f"headless Hyprland: no output ({out})")
+        return self.record()
+
+    def renderer(self):
+        try:
+            text = (Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "hypr" / self.instance / "hyprland.log").read_text()
+        except OSError:
+            return None
+        m = re.findall(r"Renderer: (.+)", text)
+        g = re.findall(r"Creating CDRMRenderer on gpu (\S+)", text)
+        v = re.findall(r"Using: (OpenGL.+)", text)
+        return {"renderer": m[-1] if m else None, "render_node": g[-1] if g else None, "gl": v[-1] if v else None}
+
+    def record(self):
+        m = json.loads(hyprctl("monitors", "-j"))[0]
+        return {"kind": "a separate headless Hyprland on the GPU (not the physical monitor)", "pid": self.p.pid,
+                "instance": self.instance, "wayland_display": self.wayland, "drm_device": self.card,
+                "seat": "libseat noop (no logind session)", "xwayland": False,
+                "output": {k: m.get(k) for k in ("name", "width", "height", "refreshRate", "scale")},
+                "compositor": hyprctl("version").splitlines()[0], **(self.renderer() or {})}
+
+    def stop(self):
+        """Stop only the Hyprland this object started; point everything back at the owner's desktop."""
+        TARGET.update({"wayland": OWNER_WAYLAND, "instance": None, "headless": False})
+        if self.p and self.p.poll() is None:
+            self.p.terminate()
+            try:
+                self.p.wait(10)
+            except subprocess.TimeoutExpired:
+                self.p.kill()
+                self.p.wait(5)
+        if getattr(self, "log", None):
+            self.log.close()
+
+
+def _instances():
+    try:
+        r = subprocess.run(["hyprctl", "instances", "-j"], capture_output=True, text=True, timeout=10)
+        return json.loads(r.stdout or "[]")
+    except (json.JSONDecodeError, subprocess.TimeoutExpired):
+        return []
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -74,7 +192,9 @@ def desktop_env():
 # ---------------------------------------------------------------------------------------------------------------------
 
 def hyprctl(*args, env=None):
-    r = subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=10, env=env or desktop_env())
+    """hyprctl against the target compositor (with -i when it is the headless instance: never the owner's by default)."""
+    inst = ["-i", TARGET["instance"]] if TARGET["instance"] else []
+    r = subprocess.run(["hyprctl", *inst, *args], capture_output=True, text=True, timeout=10, env=env or desktop_env())
     return r.stdout
 
 
@@ -235,6 +355,14 @@ def first_match(frames, t0_ns, final_hash):
 # Self-test: the observer against the compositor's own presentation feedback
 # ---------------------------------------------------------------------------------------------------------------------
 
+def solid_hash(rgb, w_px, h_px):
+    """screen_observer.c's hash of a region filled with one colour (FNV-1a 64 over 24-bit pixels)."""
+    h, p = 1469598103934665603, rgb & 0xFFFFFF
+    for _ in range(w_px * h_px):
+        h = ((h ^ p) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return f"{h:016x}"
+
+
 class ScreenNotLive(RuntimeError):
     pass
 
@@ -300,10 +428,12 @@ class Probe:
             return line
 
     def flip(self):
-        """Paint a new colour; (t_commit_ns, t_presented_ns or None) from the probe's own clock and feedback."""
+        """Paint a new colour; (t_commit_ns, t_presented_ns or None, refresh) from the probe's own clock and feedback;
+        self.color is the colour painted (0xRRGGBB)."""
         self.p.stdin.write("flip\n")
         self.p.stdin.flush()
         c = self.expect("C")
+        self.color = int(c[2], 16)
         try:
             p = self.expect("P", timeout=2)
         except RuntimeError:
@@ -362,12 +492,14 @@ def selftest(flips=120, write=True):
         rows = []
         try:
             time.sleep(0.3)
+            wpx, hpx = obs.info["width_px"], obs.info["height_px"]
             for _ in range(flips):
                 time.sleep(0.05 + random.random() * 0.1)
                 tc, tp, refresh = probe.flip()
-                ok = obs.wait(lambda fr: fr[-1][1] >= (tp or tc), 1.0)
-                fr = obs.since(tc)
-                hit = next((f for f in fr), None) if ok else None
+                want = solid_hash(probe.color, wpx, hpx)
+                n0 = len(obs.frames)
+                ok = obs.wait(lambda fr: any(f[3] == want for f in fr[n0 - 1:]), 1.0)
+                hit = next((f for f in obs.frames[n0 - 1:] if f[3] == want), None) if ok else None
                 rows.append({"commit": tc, "presented": tp, "obs_present": hit[1] if hit else None,
                              "obs_recv": hit[2] if hit else None})
             info, nframes = obs.info, len(obs.frames)
@@ -409,14 +541,14 @@ def selftest(flips=120, write=True):
     }
     exact = sum(1 for e in err if abs(e) < 0.5)
     res["observer_timestamp_equals_presented"] = f"{exact} of {len(err)} within 0.5 ms"
+    res["matching"] = "each flip's frame found by the expected pixel hash of the probe's new colour"
     if write:
         RESULT.parent.mkdir(parents=True, exist_ok=True)
         RESULT.write_text(json.dumps(res, indent=1) + "\n")
     return res
 
 
-if __name__ == "__main__":
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "build"
+def _main(cmd):
     if cmd == "build":
         print(build())
     elif cmd == "stream":
@@ -427,3 +559,16 @@ if __name__ == "__main__":
         print(json.dumps(selftest(), indent=1))
     else:
         raise SystemExit(__doc__)
+
+
+if __name__ == "__main__":
+    comp = None
+    if "--headless" in sys.argv:  # against a separate headless Hyprland, started and stopped here
+        sys.argv.remove("--headless")
+        comp = HeadlessHyprland()
+        print(json.dumps(comp.start(), indent=1))
+    try:
+        _main(sys.argv[1] if len(sys.argv) > 1 else "build")
+    finally:
+        if comp:
+            comp.stop()

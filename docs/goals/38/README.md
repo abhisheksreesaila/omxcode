@@ -13,6 +13,23 @@ pixi run python scripts/data_bench.py calibrate B   # one build on the desktop: 
 pixi run python scripts/data_bench.py run           # the measurement (waits at the quiet gate)
 ```
 
+## The display: a separate headless Hyprland (default since 2026-10-28)
+
+The owner is travelling and their session is locked (a locked session presents no window: the probe's commits were
+all discarded), so `run` starts **its own Hyprland** (`screen_observer.HeadlessHyprland`) and stops it after:
+- as the owner's user, no root: libseat's `noop` backend (logind is never asked, so the owner's session 2 is never
+  touched), `AQ_DRM_DEVICES=/dev/dri/card1` (the RTX 3090 at 2f:00.0, which has no monitor; the owner's monitor is on
+  card2), `HYPRLAND_NO_SD_VARS` (their systemd/dbus environment is left alone), Xwayland off, no autostart (so no
+  lock or idle daemon), the cursor invisible (a headless output has no cursor plane: it was drawn into the frames);
+  the input devices aren't readable by this user, so it sees no keyboard; its DRM backend finds no connected
+  connector on card1, so it never modesets;
+- its own socket (`wayland-2`, never `wayland-1`) and instance signature; every `hyprctl` names that instance; apps get
+  `WAYLAND_DISPLAY` of it and **no `DISPLAY`** (nothing reaches the owner's X server);
+- a virtual `HEADLESS-1` output, 1920 × 1080 @ 60 Hz, scale 1; GPU-rendered: "NVIDIA GeForce RTX 3090", OpenGL ES 3.2
+  NVIDIA 610.57.04, EGL/GBM on renderD128 (from its log, recorded in results.json);
+- results.json's `desktop` block says it is a headless GPU compositor, not the physical monitor, and a caveat says so
+  (no scanout: the 60 Hz is the compositor's timer). `--display desktop` measures on the owner's live desktop instead.
+
 ## The observer
 
 A small wlr-screencopy v3 client (`scripts/screen_observer.c`, ~400 lines of C, built by `screen_observer.py` with
@@ -35,7 +52,15 @@ Measured so far (the session was locked, so on the lock screen's own 60 Hz repai
 - each frame reaches the observer 4.3 ms (median; p95 4.4) after its timestamp: the copy's cost, which the harness
   does **not** add to latencies (it uses the timestamp).
 
-Still to measure (needs the session unlocked): `screen_observer.py selftest` flips a probe window's colour 120 times
+On the headless Hyprland (`screen_observer.py selftest --headless`, 2026-10-28 16:20, load 13.7 from other agents;
+region 120 × 40 px; docs/goals/38/observer.json): **120 of 120 probe flips seen**, each found by the expected pixel
+hash of its new colour; the observer's timestamp is **0.50 ms before** the compositor's own `wp_presentation` time
+for the same commit (median; p95 0.36 ms before, worst 6.8 ms before: the copy is taken while the frame is rendered,
+just before it is presented); it reaches the observer 0.07 ms after that presentation (p95 0.21); frames every
+16.66 ms under continuous change (p95 17.2). So latencies are reported to the observer's timestamp, about half a
+millisecond earlier than presentation, the same for every build.
+
+The self-test itself: `screen_observer.py selftest` flips a probe window's colour 120 times
 at random phases and compares the observer's timestamp for each flip with the compositor's own `wp_presentation`
 feedback for that commit (the observer's error, which should be 0 when both name the same frame), its delivery
 delay, missed flips, and the probe's commit → present latency with the observer off and on (its cost to the
@@ -68,7 +93,7 @@ the browser's real command line back from /proc to prove A and B ran the same on
 1. Every build's driver meets the contract above (B, C, D: their READMEs; A: step 0, the flags, `--warm-browser`,
    `kpi_rect`), then `BUILDS[…]["cmd"]` filled in from each README.
 2. The fairness review in `docs/goals/38/fairness.md` (m5 requires it, and that it didn't change after the run).
-3. The owner's session unlocked and left alone (no screen lock or DPMS during the run); `screen_observer.py selftest`
-   passes with no missed flips; one `calibrate` per build, looking at its pictures.
+3. `screen_observer.py selftest --headless` passes with no missed flips (it does now); one `calibrate` per build on
+   the headless display, looking at its pictures. Browser builds must run Chromium on Wayland (there is no DISPLAY).
 4. The scheduled full regression (22:00) finished: the quiet gate (load < 0.5, else < 2 after 15 minutes, recorded;
    GPU < 5 %; no other GPU process above 16 MiB) holds the run until then anyway.
