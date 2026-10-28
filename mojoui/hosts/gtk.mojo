@@ -2582,7 +2582,7 @@ struct GtkHost[A: App](Movable):
         var wv = webviews_at(self.webviews)
         var k = wv[].slot_of(n.hint, n.value)
         if k < 0:
-            k = new_view(self.webviews, n.hint, n.value, on_webview_message[Self.A], self_addr)
+            k = new_view(self.webviews, n.hint, n.value, on_webview_message[Self.A], on_webview_ended[Self.A], self_addr)
         var view = wv[].slots[k].view
         var parent = external_call["gtk_widget_get_parent", Int](view)
         if parent != box:
@@ -3223,6 +3223,14 @@ def on_webview_message[A: App](ucm: Int, value: Int, host_addr: Int) abi("C"):
     reach update() on the next idle turn (never inside WebKit's callback)."""
     var host = host_at[A](host_addr)
     if take_message(host[].webviews, ucm, value):
+        arm_webview_inbox[A](host_addr)
+
+
+def on_webview_ended[A: App](view: Int, reason: c_int, host_addr: Int) abi("C"):
+    """A widget's web process ended (after gtk_webview.on_terminated): the error replies it left in the inbox for the
+    commands that page never answered reach update() on the next idle turn (D-680)."""
+    var host = host_at[A](host_addr)
+    if len(webviews_at(host[].webviews)[].inbox) > 0:
         arm_webview_inbox[A](host_addr)
 
 

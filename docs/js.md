@@ -149,13 +149,17 @@ so the line names the bundle's own position.
 **WebKit's inspector** for a widget's view on GTK: build with `MOJOUI_DEBUG=1 scripts/build.sh <app> linux` and
 right-click the widget, *Inspect Element* (the test step `inspect:<tag>#<id>` opens it too). A release build
 (`scripts/build.sh <app> linux`) has no inspector: the choice is made when the app is compiled
-(`mojoui/hosts/devtools.mojo`, `-D MOJOUI_DEBUG`), not at run time. The Mac's WKWebView takes the same switch
-(`isInspectable`; the hook is marked in that file).
+(`mojoui/hosts/devtools.mojo`, `-D MOJOUI_DEBUG`), not at run time. The Mac takes the same switch:
+`MOJOUI_DEBUG=1 scripts/build.sh <app> mac` makes each widget's WKWebView inspectable from Safari's Develop menu
+(`isInspectable`, macOS 13.3+) and ships the source maps. That debug build is proven to compile (M1c checks it names
+`setInspectable:`, the release build doesn't); it has not been run on a Mac yet, only the release build has (M2).
 
 What stays the same in the loop: the Content-Security-Policy (the dev server sends the release one), bundles by
 content hash with SRI, and nothing from another origin. The dev endpoints (`/dev/assets`, `/dev/wait`, `/dev/reload`,
 the last one only with dev.sh's random token) and source maps exist only when the server runs with `MOJOUI_DEV=1`, which
-only dev.sh sets.
+only dev.sh sets. They answer 127.0.0.1 alone, and the host refuses to start with `MOJOUI_DEV=1` unless the app's build
+is a debug build (its manifest names a source map for every bundle). **Never set `MOJOUI_DEV` on a deployed host**: a
+deployed app is a release build, served by `mojoui/hosts/web.py` without it.
 
 ## 3. Use it from Mojo
 
@@ -278,7 +282,7 @@ doesn't change: WKWebView offers the same `window.webkit.messageHandlers.mojoui`
 - **Security**: the CSP holds the page to its origin; a content rule list blocks every http(s), ws(s), ftp and file
   load besides; a non-persistent data store (nothing on disk); the navigation delegate allows only the page itself in
   its main frame (no navigation away, no target=_blank), the UI delegate opens no window, and JavaScript can't open
-  windows. No inspector.
+  windows. No inspector in release builds (a debug build, `MOJOUI_DEBUG=1 scripts/build.sh <app> mac`, compiles one; not yet run on a Mac).
 - **A crashed widget**: if its web content process ends, the page loads again once and the widget mounts afresh with
   Mojo's props; a second time, the WebComponent shows its `instead` view.
 - **WebKit.framework** is loaded (NSBundle) the first time a WebComponent shows; it is part of macOS, so nothing to

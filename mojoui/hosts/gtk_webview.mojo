@@ -27,6 +27,7 @@ comptime RTLD_GLOBAL = 256
 comptime PAGE_URI = "mojoui://app/widget.html"
 comptime SCHEME = "mojoui"
 comptime MAX_MESSAGE = 1 << 20  # bytes: a message from the page past this is refused
+comptime MAX_JSLOGS = 100  # widget errors logged per window (the web host logs 100 per page, D-681)
 # The web host's CSP (mojoui/hosts/web.py), with frame-src 'none': a widget's view frames nothing.
 comptime CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
                 + "connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
@@ -242,6 +243,8 @@ struct WebViews(Movable):
     var tab_back: Bool  # keyboard enters right after focuses its first (or last) stop, as a page's own Tab would
     var tab_out: Int  # a page asked to pass the keyboard on (Tab past its last stop): 1 forward, 2 back, 0 none
     var tab_view: Int  # the view that asked
+    var jslogs: Int  # widget errors the pages reported, and how many of them reached the log (MAX_JSLOGS at most, D-681)
+    var jslogged: Int
 
     def __init__(out self):
         self.state = 0
@@ -260,6 +263,8 @@ struct WebViews(Movable):
         self.tab_back = False
         self.tab_out = 0
         self.tab_view = 0
+        self.jslogs = 0
+        self.jslogged = 0
 
     def sent_to(mut self, seq: Int, tag: String, id: Int):
         """Command `seq` went to widget (tag, id): only its page may answer it (D-620)."""
@@ -274,6 +279,21 @@ struct WebViews(Movable):
                 _ = self.sent.pop(k)
                 return True
         return False
+
+    def lose_commands(mut self, k: Int) -> Int:
+        """Slot k's page is gone (its web process ended): every command sent to it that waits for a reply is answered
+        now with an error, through the inbox as a page's reply is, so the runtime's waiting entries end (D-680). How many."""
+        var lost = 0
+        var i = 0
+        while i < len(self.sent):
+            if self.sent[i][1] == self.slots[k].tag and self.sent[i][2] == self.slots[k].id:
+                self.inbox.append(Inbound(IN_REPLY, self.slots[k].tag, self.slots[k].id, "", "null", self.sent[i][0],
+                                          "the widget's web process ended before it answered"))
+                _ = self.sent.pop(i)
+                lost += 1
+            else:
+                i += 1
+        return lost
 
     def slot_of(self, tag: String, id: Int) -> Int:
         for k in range(len(self.slots)):
@@ -364,8 +384,9 @@ def start(addr: Int, assets: List[String]) -> Bool:
     return True
 
 
-def new_view[F: AnyType](addr: Int, tag: String, id: Int, on_message: F, host_addr: Int) -> Int:
-    """A view for widget (tag, id), loading the page; its slot is added. Returns the slot's index."""
+def new_view[F: AnyType, G: AnyType](addr: Int, tag: String, id: Int, on_message: F, on_ended: G, host_addr: Int) -> Int:
+    """A view for widget (tag, id), loading the page; its slot is added. Returns the slot's index. `on_ended` (the
+    host's) runs after on_terminated when the web process ends: it hands the lost commands' error replies to update()."""
     var wv = webviews_at(addr)
     var settings = wk("webkit_settings_new")
     _ = wk("webkit_settings_set_enable_developer_extras", settings, c_int(1 if DEVTOOLS else 0))  # (debug builds only: WebKit's inspector)
@@ -399,6 +420,7 @@ def new_view[F: AnyType](addr: Int, tag: String, id: Int, on_message: F, host_ad
     wk_connect(view, "decide-policy", on_decide_policy, addr)
     wk_connect(view, "load-changed", on_load_changed, addr)
     wk_connect(view, "web-process-terminated", on_terminated, addr)
+    wk_connect(view, "web-process-terminated", on_ended, host_addr)  # (after on_terminated: connected in this order)
     var focus = external_call["gtk_event_controller_focus_new", Int]()  # (Tab into the view: its first or last stop takes the keyboard)
     wk_connect(focus, "enter", on_view_focus_enter, addr)
     external_call["gtk_widget_add_controller", NoneType](view, focus)
@@ -584,7 +606,9 @@ def on_terminated(view: Int, reason: c_int, addr: Int) abi("C"):
     wv[].slots[k].mounts = 0
     wv[].slots[k].describe = ""
     wv[].slots[k].facts = ""
+    var lost = wv[].lose_commands(k)  # (their replies would never come: each is answered with an error, D-680)
     print("mojoui: " + wv[].slots[k].key() + "'s web process ended (reason " + String(Int(reason)) + ")"
+          + (", " + String(lost) + " command(s) answered with an error" if lost > 0 else "")
           + ("; loading it again" if wv[].slots[k].crashes == 1 else "; showing its stand-in"))
     if wv[].slots[k].crashes == 1:
         var again = List[String]()
@@ -592,7 +616,7 @@ def on_terminated(view: Int, reason: c_int, addr: Int) abi("C"):
             again.append(wv[].slots[k].sent_theme)
         if wv[].slots[k].sent_widget != "":
             again.append(wv[].slots[k].sent_widget)
-        wv[].slots[k].pending = again^  # (commands sent to the old page are lost with it: their replies never come)
+        wv[].slots[k].pending = again^  # (commands sent to the old page went with it: answered above with an error)
         _ = wk("webkit_web_view_reload", view)
     else:
         wv[].slots[k].gone = True
@@ -729,6 +753,12 @@ def take_text(mut wv: WebViews, k: Int, text: String) -> Int:
         elif path == "csp":
             wv.slots[k].csp += 1
         elif path == "jslog":  # a widget's uncaught error: one line in the app's log (its source file and line in debug builds)
+            wv.jslogs += 1
+            if wv.jslogged >= MAX_JSLOGS:  # (as the web host: at most 100 a page, here a window; the rest counted, not logged)
+                if wv.jslogs == MAX_JSLOGS + 1:
+                    print("mojoui: more than " + String(MAX_JSLOGS) + " widget errors: the rest aren't logged", flush=True)
+                return TOOK_NOTHING
+            wv.jslogged += 1
             var src = j.text(j.get(0, "source"))
             print("JS ERROR: " + (clean(src, 200) + ":" + String(j.number(j.get(0, "line"))) + ":" + String(j.number(j.get(0, "column"))) if src != "" else String("(no position)"))
                   + ": " + clean(j.text(j.get(0, "message")), 500) + " (" + wv.slots[k].key() + ")", flush=True)
