@@ -177,7 +177,7 @@ def verdict_desktop(d, x):
         f"{f2(s20['C'], 3)} ms in omxcode: the same arithmetic on the same GPU, within {round((hi / lo - 1) * 100)} % of each other.</li>",
         f"<li><b>What closed the gap.</b> Goal 36 measured omxcode at {f2(x1['frame_ms'])} ms a frame at 1M on a virtual display and guessed "
         f"that most of it was GTK's software renderer. On this desktop, with GTK's GPU renderer, goal 36's path still takes {f2(old1['frame_ms'])} ms: "
-        "the guess was wrong. The cost was handing GTK a picture in CPU memory every frame (the copy from the GPU, then GTK uploading it again). "
+        "the guess was wrong. The cost was handing GTK the picture through CPU memory every frame (the copy from the GPU and the picture's trip back to the screen): the same frame with the picture kept on the GPU is the measured difference. "
         f"The framework now hands GTK the picture on the GPU (no copy to the CPU), and the frame is {f2(c1['frame_ms'])} ms. Each step's effect is in the table below.</li>",
         f"<li><b>Where omxcode's frame goes now.</b> At {mn(top)} its GPU work is {f2(c20['gpu_frame_ms'])} ms (step and draw, timed on their own); "
         f"the rest of its {f2(c20['frame_ms'])} ms frame is the host and GTK (the frame event, the view, handing the texture over, GTK drawing it) and the wait "
@@ -205,14 +205,22 @@ def features(d):
     steps = [("M6, the picture stays on the GPU", "C-36", "C+M6"), ("M6c, two atomics", "C+M6", "C+M6c"), ("M6b, blending when it's faster", "C+M6c", "C")]
     eff = "; ".join(f"<b>{name}</b>: " + ", ".join(f"{mn(n)} {f2(row(d, a, n)['frame_ms'] - row(d, b, n)['frame_ms'])} ms" for n in fs)
                     for name, a, b in steps)
-    blended = sorted({c.split(': ', 1)[1] for n in fs for c in (row(d, 'C', n) or {}).get('blend_choices', [])})
+    picks = {}
+    for n in fs:
+        for c in (row(d, "C", n) or {}).get("blend_choices", []):
+            m = re.search(r"GPU blending ([\d.]+) ms, compute splat ([\d.]+) ms → (.*)$", c)
+            if m:
+                picks.setdefault(n, []).append((float(m.group(1)), float(m.group(2)), m.group(3)))
+    blended = "; ".join(f"{mn(n)}: " + (f"the {ps[0][2]} in all {len(ps)} runs" if len({p[2] for p in ps}) == 1 else "mixed")
+                        + f" (blending {min(p[0] for p in ps):g}–{max(p[0] for p in ps):g} ms, the splat {min(p[1] for p in ps):g}–{max(p[1] for p in ps):g} ms)"
+                        for n, ps in picks.items())
     return f"""<div class="tscroll"><table class="mtable feat">
 <thead><tr><th>omxcode with</th>{''.join(f'<th>Frame ms · {mn(n)}</th>' for n in fs)}</tr></thead>
 <tbody>
 {chr(10).join(body)}
 </tbody></table></div>
 <p class="tnote">Frame ms saved by each, before → after: {eff}. Negative means it cost time. The run-time choice between blending and the
-compute splat, as each C run reported it: {E('; '.join(blended)) or 'the compute splat throughout'}.</p>"""
+compute splat, as the C runs reported it: {E(blended) or 'the compute splat throughout'}.</p>"""
 
 
 def setup(d):
