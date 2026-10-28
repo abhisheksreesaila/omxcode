@@ -695,3 +695,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 ## 2026-10-27 · goal 34b: shared JS widgets
 - git mv examples/widgets/web/{package.json,package-lock.json,widgets/editor.*,widgets/chart.*} → mojoui/widgets/; examples/widgets/web/shared.json picks editor and chart; the counter stays the app's own (D-675).
 - web_assets.py: shared_entries + install_from; the bundles came out byte for byte the same (editor.791f6708…, chart.42ca8fb5…). docs/js.md §0 says how any app adds them; the matrix's debt table no longer lists them.
+
+## 2026-10-27 · goal 34b: a fresh Mac run, then the whole check
+- The Mac's washed-out text was ours (D-676), not the runner's inactive window: every skinned Text took ink2 (captions ink3) while omxqua's sheets say ink and ink2. Fixed before the run.
+- scripts/mac-ci widgets console → run 40617272485 (fresh, stamp 7ce14f5cda6059f5). m2 PASS on its first try: the chart drew, tokens matched in light and dark with one mount each, the sparkline dark in dark (m2-widgets-mac-dark.png), Last count: 42 and Words: 4 from the sets, the facts back, WEBINSPECT 0. The console's Mac boxes after D-673/D-676: 1268 of 1268 within parity of the web's (goal 33 M7's Mac part, run by hand).
+- `pixi run python scripts/check.py`: M0, M1, M1b, M1c, M2, M3 PASS (M3 380 s).
