@@ -406,8 +406,12 @@ def m8():
                   "Measured with vsync off on a virtual display, not a real screen"):
         if stale in page:
             problems.append(f"the page still says: {stale!r}")
-    if "the guess was wrong" not in page and "C-36" not in page:
+    if "the guess was wrong" not in page:
         problems.append("the page doesn't say what became of goal 36's inferred residual")
+    if "is GTK's renderer choice" not in page or "C-36gl" not in json.dumps(d["rows"].keys().__repr__()) and "C-36gl" not in d["rows"]:
+        problems.append("the page doesn't split M6's saving into the renderer and the readback (review item 3)")
+    if "capped (compositor" not in page or "didn't speed up this benchmark" not in page or "within the runs' spread" not in page and "tie" not in page:
+        problems.append("review items 7/8/10: ties, the capped window row, M6b's role")
     ok5, msg5 = m5()
     if not ok5:
         problems.append("M5: " + msg5)

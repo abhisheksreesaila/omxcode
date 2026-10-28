@@ -4,19 +4,19 @@
  "device": "NVIDIA GeForce RTX 3090",
  "path": "mojoui: GPU canvas pictures go to the screen without a copy to the CPU (GPU\u2192GPU copy into a GL texture; CUDA device 1 \u2192 GL texture on NVIDIA GeForce RTX 3090/PCIe/SSE2)",
  "additive_points_choice": [
-  "mojoui: additive points (1000000): GPU blending 0.557 ms, compute splat 0.309 ms \u2192 compute splat"
+  "mojoui: additive points (1000000): GPU blending 0.519 ms, compute splat 0.287 ms \u2192 compute splat"
  ],
  "gpu_blended": 8,
  "gpu_copied": 651,
  "cpu_copied": 0,
  "gpu_presented": 659,
- "hand_over_ms_mean": 0.33573427314112286,
- "gpu_copy_ms_mean": 0.024849554531490015,
- "blend_issue_ms_mean": 0.675730625,
+ "hand_over_ms_mean": 0.32681966009104707,
+ "gpu_copy_ms_mean": 0.024434751152073733,
+ "blend_issue_ms_mean": 0.6745805,
  "gsk_renderer": "gl",
- "frame_ms_mean": 1.2250941666666668,
- "when": "2026-10-28 08:20",
- "sources_sha256": "ea4349124f02ddd18346468012c49671649c9c45aaacda27541f74493fa39f9f",
+ "frame_ms_mean": 1.2210143333333334,
+ "when": "2026-10-28 10:25",
+ "sources_sha256": "8bd35549e625cbeac7fe8d5fda5513e7e3ec1ba9f46e0c320876ee59ebd57f98",
  "display": "Wayland wayland-1",
  "canvas_pixels": "1280x720 (MOJOUI_CANVAS_SCALE=1)"
 }

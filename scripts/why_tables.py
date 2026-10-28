@@ -28,7 +28,8 @@ NAMES = {"A-cpu": "Plain JS (CPU)", "A": "JS + WebGPU", "B-wasm": "JS + Rust/was
 ORDER = ["A-cpu", "A", "B-wasm", "B-native", "C"]
 DNAMES = {**NAMES, "B-native": "Rust + wgpu (native, in a window)", "B-native-off": "Rust + wgpu (native, offscreen)"}
 DORDER = ["A-cpu", "A", "B-wasm", "B-native", "B-native-off", "C"]
-FEATURE_ROWS = [("C-36", "goal 36's path: the picture copied to the CPU, three atomics"), ("C+M6", "+ M6: the picture stays on the GPU"),
+FEATURE_ROWS = [("C-36", "goal 36's path: the picture copied to the CPU, three atomics"),
+                ("C-36gl", "the same, on GTK's GL renderer"), ("C+M6", "+ M6: the picture stays on the GPU"),
                 ("C+M6c", "+ M6c: the two-atomic splat"), ("C", "+ M6b: GPU blending, measured against the splat at run time (omxcode as shipped)"),
                 ("C-blend", "M6b forced: GPU blending every frame"), ("C-hidpi", "omxcode at the screen's own 1.6× (2048 × 1152 pixels)")]
 EFFORT_NAMES = {"A-cpu": "Plain JS (CPU)", "A": "JS + WebGPU", "B": "JS + Rust (wasm and native)", "C": "omxcode",
@@ -81,20 +82,26 @@ def headline(res, d=None):
 
 
 def compare(res, x, y="C", names=None):
-    """One plain sentence: how y (omxcode) does against x at every size."""
+    """One plain sentence: how y (omxcode) does against x at every size. A difference within the two rows' combined
+    run-to-run spread (max − min of three runs each) is a tie, not a win."""
     names = names or NAMES
     sizes = res["protocol"]["sizes"]
-    pairs = [(n, row(res, x, n)["frame_ms"], row(res, y, n)["frame_ms"]) for n in sizes if row(res, x, n) and row(res, y, n)]
-    faster = [n for n, xm, ym in pairs if ym < xm]
-    slower = [n for n, xm, ym in pairs if ym > xm]
-    ends = (f"{f2(pairs[0][1])} ms against omxcode's {f2(pairs[0][2])} ms at {mn(pairs[0][0])}; "
-            f"{f2(pairs[-1][1])} against {f2(pairs[-1][2])} ms at {mn(pairs[-1][0])}")
-    if not faster:
-        return f"<b>{names[x]} is faster than omxcode at every size measured</b> ({ends})."
-    if not slower:
-        return f"<b>omxcode is faster than {names[x]} at every size measured</b> ({ends})."
-    return (f"<b>omxcode is faster than {names[x]} at {', '.join(mn(n) for n in faster)} and slower at "
-            f"{', '.join(mn(n) for n in slower)}</b> ({ends}).")
+    pairs = [(n, row(res, x, n), row(res, y, n)) for n in sizes if row(res, x, n) and row(res, y, n)]
+    tie = [n for n, a, b in pairs if abs(a["frame_ms"] - b["frame_ms"]) <= a["frame_ms_spread"] + b["frame_ms_spread"]]
+    faster = [n for n, a, b in pairs if n not in tie and b["frame_ms"] < a["frame_ms"]]
+    slower = [n for n, a, b in pairs if n not in tie and b["frame_ms"] > a["frame_ms"]]
+    ends = (f"{f2(pairs[0][1]['frame_ms'])} ms against omxcode's {f2(pairs[0][2]['frame_ms'])} ms at {mn(pairs[0][0])}; "
+            f"{f2(pairs[-1][1]['frame_ms'])} against {f2(pairs[-1][2]['frame_ms'])} ms at {mn(pairs[-1][0])}")
+    parts = []
+    if faster:
+        parts.append(f"omxcode is faster than {names[x]} at {', '.join(mn(n) for n in faster)}")
+    if tie:
+        parts.append(("they tie" if parts else f"omxcode and {names[x]} tie") + f" at {', '.join(mn(n) for n in tie)} (within the runs' spread)")
+    if slower:
+        parts.append((f"omxcode is slower at " if parts else f"{names[x]} is faster than omxcode at ") + ", ".join(mn(n) for n in slower))
+    if len(parts) == 1 and not tie:
+        parts[0] += " — every size measured"
+    return "<b>" + "; ".join(parts) + f"</b> ({ends})."
 
 
 def verdict(res):
@@ -134,6 +141,12 @@ def verdict(res):
         "drawing straight from the GPU into the window is not built yet.</li>",
         f"<li><b>omxcode's frame is noisy.</b> Its spread across the three runs is up to ±{f2(max(row(res, 'C', n)['frame_ms_spread'] for n in res['protocol']['sizes']))} ms"
         + (f", and its {mn(dip)} figure ({f2(row(res, 'C', dip)['frame_ms'])} ms) is below its 1M one: read its line as flat within that noise.</li>" if dip else ": read its line as flat within that noise.</li>"),
+        "<li><b>Hardware blending didn't speed this up.</b> The framework can now draw points and lines with the GPU's own "
+        "blending (additive or \"over\"), the technique native Rust uses, but here it lost to the compute splat at every size "
+        "(points pile up and the splat skips saturated pixels; blending can't), so the run-time measurement kept the splat in "
+        "every run. It is there for other apps: lines, \"over\", and scenes where nothing saturates.</li>",
+        "<li><b>The lever not pulled.</b> Fusing the step and the draw into one pass (reading each particle once) is the next "
+        "lever for every stack; it was not tuned for omxcode alone, under the fair-play rule.</li>",
         f"<li><b>Start and memory.</b> At 1M, cold start to the first drawn frame: " + ", ".join(f"{NAMES[r]} {f2(ms, 0)} ms" for ms, r in starts) +
         ". Native Rust has no window or swapchain to make, as it renders offscreen. Peak memory (the process tree's PSS, so pages Chromium's processes share count once; GPU memory not included): " + ", ".join(f"{NAMES[r]} {f2(mb, 0)} MB" for mb, r in mem) +
         ". The browser rows carry Chromium itself in both.</li>",
@@ -147,7 +160,8 @@ def verdict_desktop(d, x):
     big, top = d["largest_n_at_60"], max(d["protocol"]["sizes"])
     held = {}
     for r in DORDER:
-        held.setdefault(big[r], []).append(DNAMES[r])
+        if r != "B-native":  # (in a window it is capped by the compositor: see below)
+            held.setdefault(big[r], []).append(DNAMES[r])
     lines = []
     for n in sorted(held, key=lambda v: v or 0, reverse=True):
         who = held[n]
@@ -161,10 +175,13 @@ def verdict_desktop(d, x):
     c1, c20 = row(d, "C", 1_000_000), row(d, "C", top)
     win = row(d, "B-native", 1_000_000)
     old1, x1 = row(d, "C-36", 1_000_000), row(x, "C", 1_000_000)
+    gl1, m6 = row(d, "C-36gl", 1_000_000), row(d, "C+M6", 1_000_000)
     starts = sorted((row(d, r, 1_000_000)["cold_start_ms"], r) for r in DORDER)
     mem = sorted((row(d, r, 1_000_000)["peak_pss_mb"], r) for r in DORDER)
     out = [
         "<p>" + "; ".join(lines) + ".</p>",
+        f"<p>Rust + wgpu in a window is capped by the compositor at one frame a refresh ({f2(win['frame_ms'])} ms at every size), so the "
+        "speed comparisons use its offscreen row.</p>",
         "<p>The fastest frame: " + "; ".join(f"{DNAMES[r]} at {mn(n)} ({f2(ms)} ms)" for n, (ms, r) in fastest.items()) + ".</p>",
         "<ul class='verdict'>",
         f"<li>{compare(d, 'B-native-off', names=DNAMES)} Offscreen, native Rust never shows a frame: in a Wayland window the same "
@@ -174,11 +191,15 @@ def verdict_desktop(d, x):
         f"<li>{compare(d, 'B-wasm', names=DNAMES)}</li>",
         f"<li>{compare(d, 'A-cpu', names=DNAMES)}</li>",
         f"<li><b>The GPU step itself is a tie.</b> At {mn(top)} it takes {f2(s20['A'], 3)} ms in JS + WebGPU, {f2(s20['B-native-off'], 3)} ms in Rust + wgpu and "
-        f"{f2(s20['C'], 3)} ms in omxcode: the same arithmetic on the same GPU, within {round((hi / lo - 1) * 100)} % of each other.</li>",
+        f"{f2(s20['C'], 3)} ms in omxcode: the same arithmetic on the same GPU, within {round((hi / lo - 1) * 100)} % of each other. "
+        "Three timing methods (GPU timestamps for JS + WebGPU and Rust, a separate pass waited for on its own for omxcode), "
+        "so read it as a tie, not a ranking.</li>",
         f"<li><b>What closed the gap.</b> Goal 36 measured omxcode at {f2(x1['frame_ms'])} ms a frame at 1M on a virtual display and guessed "
-        f"that most of it was GTK's software renderer. On this desktop, with GTK's GPU renderer, goal 36's path still takes {f2(old1['frame_ms'])} ms: "
-        "the guess was wrong. The cost was handing GTK the picture through CPU memory every frame (the copy from the GPU and the picture's trip back to the screen): the same frame with the picture kept on the GPU is the measured difference. "
-        f"The framework now hands GTK the picture on the GPU (no copy to the CPU), and the frame is {f2(c1['frame_ms'])} ms. Each step's effect is in the table below.</li>",
+        f"that most of it was GTK's software renderer. On this desktop goal 36's path still takes {f2(old1['frame_ms'])} ms on GTK's default "
+        f"GPU renderer (Vulkan) and {f2(gl1['frame_ms'])} ms on its GL renderer: the guess was wrong. Keeping the picture on the GPU "
+        f"(no copy to the CPU, GL renderer too) takes {f2(m6['frame_ms'])} ms. So of the {f2(old1['frame_ms'] - m6['frame_ms'])} ms saved at 1M, "
+        f"{f2(old1['frame_ms'] - gl1['frame_ms'])} ms is GTK's renderer choice and {f2(gl1['frame_ms'] - m6['frame_ms'])} ms is the readback and "
+        "the picture's trip through CPU memory, each measured as the difference between two rows of the table below.</li>",
         f"<li><b>Where omxcode's frame goes now.</b> At {mn(top)} its GPU work is {f2(c20['gpu_frame_ms'])} ms (step and draw, timed on their own); "
         f"the rest of its {f2(c20['frame_ms'])} ms frame is the host and GTK (the frame event, the view, handing the texture over, GTK drawing it) and the wait "
         f"between them, inferred as the frame minus that work: {f2(c20['frame_ms'] - c20['gpu_frame_ms'])} ms at {mn(top)}, "
@@ -201,8 +222,10 @@ def features(d):
             continue
         cls = " class='r-C'" if r == "C" else ""
         cells = "".join(f"<td>{f2(row(d, r, n)['frame_ms'])}<small>±{f2(row(d, r, n)['frame_ms_spread'])}</small></td>" if row(d, r, n) else "<td>–</td>" for n in fs)
-        body.append(f"<tr{cls}><th scope='row'>{E(what)}</th>{cells}</tr>")
-    steps = [("M6, the picture stays on the GPU", "C-36", "C+M6"), ("M6c, two atomics", "C+M6", "C+M6c"), ("M6b, blending when it's faster", "C+M6c", "C")]
+        used = ", ".join(u.replace("Gsk", "").replace("Renderer", "") for u in next(iter(d["rows"][r].values())).get("renderer_used", []))
+        body.append(f"<tr{cls}><th scope='row'>{E(what)}<small class='is'>GTK renderer: {E(used)}</small></th>{cells}</tr>")
+    steps = [("GTK's GL renderer instead of Vulkan", "C-36", "C-36gl"), ("M6, the picture stays on the GPU", "C-36gl", "C+M6"),
+             ("M6c, two atomics", "C+M6", "C+M6c"), ("M6b, blending when it's faster", "C+M6c", "C")]
     eff = "; ".join(f"<b>{name}</b>: " + ", ".join(f"{mn(n)} {f2(row(d, a, n)['frame_ms'] - row(d, b, n)['frame_ms'])} ms" for n in fs)
                     for name, a, b in steps)
     picks = {}
@@ -219,7 +242,8 @@ def features(d):
 <tbody>
 {chr(10).join(body)}
 </tbody></table></div>
-<p class="tnote">Frame ms saved by each, before → after: {eff}. Negative means it cost time. The run-time choice between blending and the
+<p class="tnote">Frame ms saved by each, before → after: {eff}. Negative means it cost time. M6b (hardware blending)
+is there for other apps (lines, "over", scenes where it wins): it didn't speed up this benchmark. The run-time choice between blending and the
 compute splat, as the C runs reported it: {E(blended) or 'the compute splat throughout'}.</p>"""
 
 
@@ -259,9 +283,12 @@ def perf(res, names=None, order=None):
     head = ("<tr><th>Build</th><th>Largest N at 60 fps</th>" + "".join(f"<th>Frame ms · {mn(n)}</th>" for n in SIZES) +
             f"<th>Step ms · {mn(top)}</th><th>Cold start ms · 1M</th><th>Peak memory MB (PSS) · 1M / {mn(top)}</th></tr>")
     cols = {n: best([row(res, r, n)["frame_ms"] for r in order if row(res, r, n)]) for n in SIZES}
+    # (a ✗ in a capped row is the compositor's pacing, said in its largest-N cell)
     body = []
     for r in order:
-        cells = [f"<th scope='row'>{names[r]}</th>", f"<td>{mn(res['largest_n_at_60'][r])}</td>"]
+        capped = res.get("desktop") and r == "B-native"
+        big = f"capped (compositor, {f2(row(res, r, 1_000_000)['frame_ms'], 1)} ms)" if capped else mn(res['largest_n_at_60'][r])
+        cells = [f"<th scope='row'>{names[r]}</th>", f"<td>{big}</td>"]
         for n in SIZES:
             d = row(res, r, n)
             if not d:
