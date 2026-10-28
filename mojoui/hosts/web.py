@@ -1350,6 +1350,33 @@ def make_app(module_dir):
     def has_changes(s):
         return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches"))) or bool(s.commands)
 
+    def jobs_ended(fd):
+        """mojoui.jobs: a background job ended (its wake pipe is readable): App.jobs_message through every tab's update()
+        at once, and the page told as an effect's changes are (pending + /wait); the frame poll stays the fallback."""
+        while True:
+            try:
+                if not os.read(fd, 4096):
+                    return
+            except OSError:
+                return
+            with sessions_lock:
+                live = list(sessions.items())
+            for sid, s in live:
+                with s.lock:
+                    if s.closed:
+                        continue
+                    d = json.loads(mod.jobs(s.handle))
+                    if d.get("rebuild") or d.get("patches"):
+                        s.pending = merge(s.pending, d)
+                        s.nodes = json.loads(mod.view(s.handle))
+                    note(sid, s)
+                    if has_changes(s) or s.busy != s.busy_sent:
+                        s.wake()
+
+    wake_fd = mod.wake_fd() if hasattr(mod, "wake_fd") else -1  # (before the first session: its jobs wake the tab too)
+    if wake_fd >= 0:
+        threading.Thread(target=jobs_ended, args=(wake_fd,), daemon=True, name="mojoui-jobs").start()
+
     def cmds_mark(s, oob=False):
         """The widget commands waiting for the page (mojoui-widgets.js runs each once, by its seq), then none."""
         batch, s.commands = s.commands, []

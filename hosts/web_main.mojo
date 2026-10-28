@@ -6,7 +6,7 @@ from std.python.bindings import PythonModuleBuilder
 
 from app import Main
 from mojoui.shared import shared_loads
-from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_widget_event, web_reply, web_commands, web_assets, web_set_widget
+from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_jobs, web_wake_fd, web_widget_event, web_reply, web_commands, web_assets, web_set_widget
 
 
 @export
@@ -32,6 +32,8 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[appearance]("appearance", docstring="The browser's colour scheme (1 dark, 0 light); returns what changed as JSON.")
         m.def_function[resize]("resize", docstring="The page's viewport (width, height in CSS pixels); returns what changed as JSON.")
         m.def_function[frame]("frame", docstring="A display frame for a canvas (node, microseconds); returns what changed as JSON.")
+        m.def_function[jobs]("jobs", docstring="A background job ended: App.jobs_message through update(); returns what changed as JSON.")
+        m.def_function[wake_fd]("wake_fd", docstring="The read end of the jobs' wake pipe (readable when a background job ends).")
         m.def_function[poll]("poll", docstring="The tab's due effects (HTTP replies, timer ticks) through update(); returns what changed as JSON.")
         m.def_function[widget_event]("widget_event", docstring="A widget's event (node, name, payload JSON); returns what changed as JSON.")
         m.def_function[reply]("reply", docstring="A widget's answer to a command (seq, text JSON, error); returns what changed as JSON.")
@@ -125,6 +127,14 @@ def logo(handle: PythonObject) raises -> PythonObject:
 
 def poll(handle: PythonObject) raises -> PythonObject:
     return PythonObject(web_poll[Main](Int(py=handle)))
+
+
+def jobs(handle: PythonObject) raises -> PythonObject:
+    return PythonObject(web_jobs[Main](Int(py=handle)))
+
+
+def wake_fd() raises -> PythonObject:
+    return PythonObject(web_wake_fd())
 
 
 def wake_in(handle: PythonObject) raises -> PythonObject:

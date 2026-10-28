@@ -2,8 +2,9 @@
 # region; every change recomputes the KPIs, the top-20 products and the newest 50 rows from all of them, on the GPU.
 #
 # The data is read once by MX frame and put on the GPU once (dashdata.mojo); each change runs as a job off the UI thread
-# (the window never waits), polled once a display frame while one runs. The screen is mojoui components only: date
-# pickers, a slider, a dropdown, KPI cards, a ChartView on a Canvas and a Table, in omxqua.
+# (the window never waits); a job that ends wakes the UI at once (mojoui.jobs, App.jobs_message), and frames poll it
+# too. The screen is mojoui components only: date pickers, a slider, a dropdown, KPI cards, a ChartView on a Canvas
+# and a Table, in omxqua.
 #
 # Scripted (for measuring): dashboard --scripted --rows 10M|100M [--steps S] [--out DIR] (or DASH_SCRIPTED=1, DASH_ROWS,
 # DASH_STEPS, DASH_OUT; --data FILE for another file): opens data/orders-<rows>.parquet, shows the opening state, then
@@ -39,7 +40,8 @@ from mojoui.text import Font
 from mojoui.clock import now_ns
 from mojoui.theme import Theme, Palette
 from themes.omxqua import omxqua, omxqua_palette
-from mxframe import Job, JOB_RUNNING, start_job
+from mxframe import Job, JOB_RUNNING
+from mojoui.jobs import start_ui_job
 from dashdata import (Orders, Answer, Filters, LoadJob, StepJob, ALL, TOP, money, day_number, day_text, ms_since)
 
 comptime FRAME = 1
@@ -205,7 +207,7 @@ struct Main(App):
         self.answers = List[String]()
         self.timings = List[String]()
         self.first_ms = 0
-        self.loading = start_job(LoadJob(self.path))
+        self.loading = start_ui_job(LoadJob(self.path))
 
     def title(self) -> String:
         return "Orders dashboard"
@@ -218,6 +220,9 @@ struct Main(App):
 
     def input_lines(self) -> Int:
         return STEP_LINE if self.external else 0
+
+    def jobs_message(self) -> Int:
+        return FRAME  # (a job ended: poll now, as a frame would; frames stay the fallback)
 
     # ---------- work ----------
 
@@ -233,7 +238,7 @@ struct Main(App):
             return
         self.pending = False
         self.running_step = self.step
-        self.running = start_job(StepJob(self.orders.value(), self.filters))
+        self.running = start_ui_job(StepJob(self.orders.value(), self.filters))
 
     def changed(mut self):
         self.change_ns = now_ns()

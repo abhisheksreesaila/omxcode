@@ -138,6 +138,13 @@ trait App(Movable, Deinitable):
         """The app's mark as SVG ("": none): hosts install it as the icon "app-logo" (Icon("app-logo", 18))."""
         return ""
 
+    def jobs_message(self) -> Int:
+        """A message update() gets on the UI thread as soon as a background job started with mojoui.jobs.start_ui_job
+        ends (0: none; the app polls its jobs on its own, e.g. at display frames). Every host watches the jobs' wake
+        pipe on its main loop, so the result reaches the screen at the next frame the display allows, not a frame
+        later. The event says only "a job ended": update() polls its jobs as it would on a frame. The default: 0."""
+        return 0
+
     def input_lines(self) -> Int:
         """A message for the lines another program writes to this one's standard input (0: stdin isn't read). Desktop
         hosts (GTK) watch stdin on their main loop: each whole line reaches update() as Event(message, text=line),

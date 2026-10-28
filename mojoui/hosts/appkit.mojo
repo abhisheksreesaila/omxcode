@@ -3652,6 +3652,23 @@ def on_appearance_later[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     host_at[A](addr)[].follow_appearance(addr)
 
 
+def on_jobs_ended[A: App](target: Int, cmd: Int, nothing: Int) abi("C"):
+    """mojoui.jobs: a background job ended: App.jobs_message to update() on this run-loop turn, the screen patched."""
+    var addr = 0
+    var wins = msg(msg(cls("NSApplication"), "sharedApplication"), "windows")
+    for i in range(msg(wins, "count")):  # (the host's window: its delegate is this target, its identifier the host's address)
+        var w = msg(wins, "objectAtIndex:", i)
+        if msg(w, "delegate") == target and msg(w, "identifier") != 0:
+            addr = msg(msg(w, "identifier"), "longLongValue")
+    if addr == 0:
+        return
+    var host = host_at[A](addr)
+    var m = host[].rt.app.jobs_message()
+    if m != 0:
+        var d = host[].rt.dispatch(Event(m, String(""), 0))
+        host[].apply(d, addr)
+
+
 def on_window_resized[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
     var window = msg(notification, "object")
     var addr = msg(msg(window, "identifier"), "longLongValue")
@@ -3960,6 +3977,7 @@ def run[A: App]() -> c_int:
     add_method(c, "systemAppearance:", on_system_appearance[A], "v@:@")
     add_method(c, "appearanceLater:", on_appearance_later[A], "v@:@")
     add_method(c, "windowDidResize:", on_window_resized[A], "v@:@")
+    add_method(c, "jobsEnded:", on_jobs_ended[A], "v@:@")  # (mojoui.jobs: a background job ended → App.jobs_message)
     add_method(c, "windowResizeLater:", on_window_resize_later[A], "v@:@")
     add_method(c, "showPopover:", on_show_popover[A], "v@:@")
     add_method(c, "popoverDidClose:", on_popover_closed[A], "v@:@")

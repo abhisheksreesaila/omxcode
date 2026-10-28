@@ -36,6 +36,7 @@ from mojoui.hosts.gtk_webview import (
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
+from mojoui.jobs import wake_pipe, drain_wakes
 from mojoui.hosts.devtools import DEVTOOLS
 from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, next_line, send_all, close_fd, link_error, MAX_LINE, LINE_NONE, LINE_BAD
 from mojoui.hosts.web import view_to_json, control_event
@@ -3279,6 +3280,14 @@ struct GtkHost[A: App](Movable):
         except e:
             return link_error("not a request: " + String(e))
 
+    def jobs_now(mut self, self_addr: Int) -> Bool:
+        """App.jobs_message to update(), and the screen patched; False while a rebuild is under way."""
+        if busy() or self.has_pending:
+            return False
+        var d = self.rt.dispatch(Event(self.rt.app.jobs_message(), String(""), 0))
+        self.apply(d, self_addr)
+        return True
+
     def input_lines_now(mut self, self_addr: Int) -> Bool:
         """App.input_lines: every whole line read from stdin so far goes to update(), then the end once stdin closed.
         False when the screen is being rebuilt (they wait for the next idle turn)."""
@@ -3462,6 +3471,20 @@ def on_input_read[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C")
         host[].input_armed = True
         _ = external_call["g_timeout_add", c_uint](c_uint(1), on_input_retry[A], host_addr)
     return 0 if closed else 1
+
+
+def on_jobs_woken[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C") -> c_int:
+    """App.jobs_message: a background job ended (mojoui.jobs wrote to the pipe): update() now, unless a rebuild is
+    under way (then in a millisecond)."""
+    _ = drain_wakes(Int(fd))
+    var host = host_at[A](host_addr)
+    if not host[].jobs_now(host_addr):
+        _ = external_call["g_timeout_add", c_uint](c_uint(1), on_jobs_retry[A], host_addr)
+    return 1
+
+
+def on_jobs_retry[A: App](host_addr: Int) abi("C") -> c_int:
+    return 0 if host_at[A](host_addr)[].jobs_now(host_addr) else 1
 
 
 def on_input_retry[A: App](host_addr: Int) abi("C") -> c_int:
@@ -5433,6 +5456,10 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         else:
             _ = external_call["g_unix_fd_add", c_uint](c_int(lfd), c_uint(1), on_link_accept[A], host_addr)
             print("mojoui: agent link at " + link_path, flush=True)
+    var wake = wake_pipe()
+    var wake_on = getenv("MOJOUI_JOB_WAKE") != "0"  # (0: frames alone pick finished jobs up, to compare)
+    if host[].rt.app.jobs_message() != 0 and wake >= 0 and wake_on:  # (a background job ended: update() at once, App.jobs_message)
+        _ = external_call["g_unix_fd_add_full", c_uint](c_int(G_PRIORITY_DEFAULT), c_int(wake), c_uint(1 | 8 | 16), on_jobs_woken[A], host_addr, Int(0))
     if host[].rt.app.input_lines() != 0:  # (a driver steps the app through stdin: App.input_lines)
         _ = external_call["g_unix_fd_add", c_uint](c_int(0), c_uint(1 | 8 | 16), on_input_read[A], host_addr)  # G_IO_IN | ERR | HUP
     if getenv("MOJOUI_LIVE_REPORT") != "":  # (scripts/live.py: SIGUSR1 prints the widgets' state, as a test run's end does)
@@ -5575,6 +5602,7 @@ def run[A: App]() -> Int:
     pres.unsafe_write(Presenter())
     var gl_ctx = probe_gpu_canvases[A](Int(pres))  # (before the app makes its GPU objects: they pick the display's GPU)
     A.init_shared()
+    _ = wake_pipe()  # (before the app exists: the jobs it starts in __init__ wake the UI too; App.jobs_message)
     host.unsafe_write(GtkHost[A](A()))
     host[].pres = Int(pres)
     host[].gl_ctx = gl_ctx
