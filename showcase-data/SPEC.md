@@ -23,7 +23,8 @@ One window (desktop) or page (web), 1280 × 800:
 - a **KPI row**: rows matched, sum of amount, average margin ((amount − cost) / amount);
 - a **table**: the first 50 matching rows, sorted by `day` descending.
 Every control change recomputes all three from the full 100M rows (no pre-aggregation, no sampling, no caching of
-results across different filter values).
+results across different filter values). A build may reorder the rows at load; the time to do so counts in its
+load and cold-start figures.
 
 Pinned (goal 38 M0):
 - **Filters:** a row matches when `from ≤ day ≤ to` (both ends inclusive), `amount ≥ min_amount`, and `region` equals
