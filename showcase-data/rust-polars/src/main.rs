@@ -8,6 +8,10 @@
 //!   shows step 0, applies steps 1..S of showcase-data/steps.json one at a time, and per step records compute time
 //!   (the worker's query) and input-to-pixels (the change → the end of the first frame that shows its numbers: the
 //!   frame after it starts, so the showing frame was painted and swapped); writes answers.json and timings.json.
+//! Driven:       dash --scripted-external --rows 100M [--out DIR]
+//!   shows step 0, prints `ready <json>`, then waits for stdin lines: `step N` applies steps.json's step N (its full
+//!   state) and prints `shown N <ms> <json>` after the frame that shows it; `quit` (or EOF) writes answers.json and
+//!   timings.json (the steps in the order applied) and closes the window. See README.md.
 
 mod engine;
 
@@ -20,6 +24,7 @@ use std::time::Instant;
 
 struct Args {
     scripted: bool,
+    external: bool,
     rows: String,
     steps: Option<usize>,
     root: PathBuf,
@@ -29,11 +34,12 @@ struct Args {
 
 fn args() -> Args {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut a = Args { scripted: false, rows: "10M".into(), steps: None, root: root.clone(), out: PathBuf::from("."), shot: None };
+    let mut a = Args { scripted: false, external: false, rows: "10M".into(), steps: None, root: root.clone(), out: PathBuf::from("."), shot: None };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         match k.as_str() {
             "--scripted" => a.scripted = true,
+            "--scripted-external" => (a.scripted, a.external) = (true, true),
             "--rows" => a.rows = it.next().expect("--rows 10M|100M"),
             "--steps" => a.steps = Some(it.next().unwrap().parse().expect("--steps S")),
             "--root" => a.root = it.next().unwrap().into(),
@@ -140,6 +146,27 @@ struct Script {
     cold_start_ms: f64,
     shot: Option<Arc<Mutex<Option<Arc<egui::ColorImage>>>>>,
     finished: bool,
+    commands: Option<Receiver<String>>, // --scripted-external: stdin's lines
+}
+
+/// --scripted-external: stdin's lines go to the UI thread, which wakes for each; EOF is `quit`.
+fn read_commands(ctx: egui::Context) -> Receiver<String> {
+    let (tx, rx) = channel();
+    std::thread::Builder::new()
+        .name("stdin".into())
+        .spawn(move || {
+            for line in std::io::stdin().lines() {
+                let Ok(line) = line else { break };
+                if !line.trim().is_empty() && tx.send(line.trim().to_string()).is_err() {
+                    return;
+                }
+                ctx.request_repaint();
+            }
+            let _ = tx.send("quit".into());
+            ctx.request_repaint();
+        })
+        .unwrap();
+    rx
 }
 
 struct Dash {
@@ -162,6 +189,7 @@ struct Dash {
     shown_compute_ms: f64,
     error: Option<String>,
     script: Option<Script>,
+    kpi_rect: Option<egui::Rect>, // the KPI row, in window logical pixels (for an external screen observer)
 }
 
 fn to_jiff(z: i32) -> jiff::civil::Date {
@@ -181,7 +209,7 @@ impl Dash {
         let states = load_states(&args.root);
         let open = states[0].2.clone();
         let script = args.scripted.then(|| {
-            let s = args.steps.unwrap_or(states.len() - 1).min(states.len() - 1);
+            let s = if args.external { states.len() - 1 } else { args.steps.unwrap_or(states.len() - 1).min(states.len() - 1) };
             Script {
                 states: states[..=s].to_vec(),
                 k: 0,
@@ -192,6 +220,7 @@ impl Dash {
                 cold_start_ms: 0.0,
                 shot: None,
                 finished: false,
+                commands: args.external.then(|| read_commands(cc.egui_ctx.clone())),
             }
         });
         Dash {
@@ -212,6 +241,7 @@ impl Dash {
             shown_compute_ms: 0.0,
             error: None,
             script,
+            kpi_rect: None,
         }
     }
 
@@ -226,6 +256,7 @@ impl Dash {
         self.to = to_jiff(f.to);
         self.min_amount = f.min_amount;
         self.region = f.region;
+        self.sent = None; // recompute even when the state didn't change (a step sent twice)
         let s = self.script.as_mut().unwrap();
         s.k = k;
         s.t_change = Instant::now();
@@ -238,13 +269,27 @@ impl Dash {
             // The frame that showed step k's numbers has been painted and swapped.
             let ms = s.t_change.elapsed().as_secs_f64() * 1e3;
             let (step, change, _) = s.states[s.k].clone();
-            if step == 0 {
+            if s.records.is_empty() {
                 s.cold_start_ms = self.t_main.elapsed().as_secs_f64() * 1e3;
             }
             s.records.push(StepRecord { step, change, compute_ms, input_to_pixels_ms: ms });
             s.answers.push(answer_json(step, self.shown.as_ref().unwrap()));
             s.phase = Phase::Idle;
-            if s.k + 1 < s.states.len() {
+            if s.commands.is_some() {
+                let r = s.records.last().unwrap();
+                let rec = serde_json::json!({"step": r.step, "change": r.change, "compute_ms": r.compute_ms,
+                                             "input_to_pixels_ms": r.input_to_pixels_ms});
+                if s.records.len() == 1 {
+                    let k = self.kpi_rect.unwrap_or(egui::Rect::NOTHING);
+                    println!("ready {}", serde_json::json!({"rows": self.rows_total, "load_ms": self.load_ms,
+                        "cold_start_ms": s.cold_start_ms, "first": rec, "target_cpu": TARGET_CPU,
+                        "kpi_rect": [k.min.x, k.min.y, k.width(), k.height()]}));
+                } else {
+                    println!("shown {step} {ms:.2} {rec}");
+                }
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+            } else if s.k + 1 < s.states.len() {
                 let k = s.k + 1;
                 self.apply(k);
             } else if let Some(path) = self.args.shot.clone() {
@@ -255,6 +300,32 @@ impl Dash {
                 let _ = path;
             } else {
                 s.finished = true;
+            }
+        }
+        let s = self.script.as_mut().unwrap();
+        if s.phase == Phase::Idle && !s.finished && s.k != usize::MAX && !s.records.is_empty() {
+            if let Some(line) = s.commands.as_ref().and_then(|c| c.try_recv().ok()) {
+                let w: Vec<&str> = line.split_whitespace().collect();
+                let k = match w.as_slice() {
+                    ["step", n] => n.parse::<usize>().ok().and_then(|n| s.states.iter().position(|st| st.0 == n)),
+                    _ => None,
+                };
+                match (w.as_slice(), k) {
+                    (["quit"], _) => s.finished = true,
+                    (["kpi"], _) => {
+                        let k = self.kpi_rect.unwrap_or(egui::Rect::NOTHING);
+                        println!("kpi {}", serde_json::json!({"kpi_rect": [k.min.x, k.min.y, k.width(), k.height()]}));
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                    }
+                    (_, Some(k)) => self.apply(k),
+                    _ => {
+                        println!("error unknown command {line:?} (step N | kpi | quit)");
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                    }
+                }
+                ctx.request_repaint(); // the next command, if one is queued
             }
         }
         let s = self.script.as_mut().unwrap();
@@ -291,6 +362,7 @@ impl Dash {
             "rows": self.rows_total, "file": format!("orders-{}.parquet", self.args.rows),
             "load_ms": self.load_ms, "cold_start_ms": s.cold_start_ms,
             "polars_threads": std::thread::available_parallelism().map_or(0, |n| n.get()),
+            "target_cpu": TARGET_CPU,
             "steps": steps,
         });
         std::fs::write(self.args.out.join("timings.json"), serde_json::to_string_pretty(&timings).unwrap()).unwrap();
@@ -336,6 +408,15 @@ impl Dash {
         }
     }
 }
+
+/// .cargo/config.toml builds for this machine's CPU (target-cpu=native), as D's Mojo compiler does by default.
+const TARGET_CPU: &str = if cfg!(target_feature = "avx512f") {
+    "native (avx512f)"
+} else if cfg!(target_feature = "avx2") {
+    "native (avx2)"
+} else {
+    "generic"
+};
 
 fn answer_json(step: usize, a: &Answer) -> serde_json::Value {
     serde_json::json!({
@@ -513,11 +594,12 @@ impl eframe::App for Dash {
                 return;
             };
             let w = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
-            ui.horizontal(|ui| {
+            let row = ui.horizontal(|ui| {
                 kpi(ui, w, "Rows matched", thousands(a.rows));
                 kpi(ui, w, "Sum of amount", money(a.sum_amount));
                 kpi(ui, w, "Average margin", a.avg_margin.map_or("–".into(), |m| format!("{:.2} %", m * 100.0)));
             });
+            self.kpi_rect = Some(row.response.rect);
             ui.add_space(8.0);
             let h = ui.available_height();
             ui.horizontal_top(|ui| {
@@ -556,5 +638,10 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
-    eframe::run_native("Orders", options, Box::new(move |cc| Ok(Box::new(Dash::new(cc, t_main, args)))))
+    let external = args.external;
+    let r = eframe::run_native("Orders", options, Box::new(move |cc| Ok(Box::new(Dash::new(cc, t_main, args)))));
+    if external {
+        println!("bye");
+    }
+    r
 }

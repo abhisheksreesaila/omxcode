@@ -1,3 +1,6 @@
 # A native binary built for this machine (what you'd ship to run on it): AVX2/AVX-512 where the CPU has them.
+# Both native builds get it: D's Mojo compiler targets the host CPU by default (`mojo build --target-cpu`: "Defaults to
+# the host CPU"). A (wasm) and B (Polars' prebuilt package) can't. timings.json and `ready` record it (target_cpu).
+# cargo reads this file from the working directory: build from this folder (check_c.py does), else it is generic.
 [build]
 rustflags = ["-C", "target-cpu=native"]
