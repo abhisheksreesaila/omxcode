@@ -739,3 +739,10 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - MUST 1, tests first: BUDGET in tests/test_agui.mojo (a 2 MB state through the scripted agent; 8 × 900 KB messages trimmed to fit, still finished) and tests/test_agui_agent.py (MAX_BODY ≥ MAX_INPUT_BYTES read from the Mojo source; a 2 MB input accepted; [::1] and localhost Hosts accepted; "١٢" as a Content-Length refused: Python's isdigit says yes to it, hence isascii). My first "2 MB" state was 1.3 MB (a short literal): it now doubles a string to 2 MB; the server logged 2,098,374 and 5,530,217 bytes.
 - SHOULD 2: a refused 40-level set leaves dump() unchanged (it now runs on a copy).
 - SHOULD 3, tests first: SCREENS in tests/test_genui.mojo (6 refused calls → exactly 3 reruns, then gave_up; reset() clears it) and M2 runs a "stubborn" scripted agent on GTK and the web: 4 runs (the first and 3 reruns), then "stopped" in the status line. M2 PASS (71 s).
+
+## 2026-10-28 · goal 36 M5 and the reviewer's NEEDS WORK
+- M5: docs/why.html in four chapters; scripts/why_tables.py writes every number, every "who is faster" sentence and the code excerpts (cut by line range from the builds' files) between why: markers; m5 regenerates and compares.
+- The MCP example first came from the streamed web build (54 fps at 5M in the agent host's own session); redone on the native GTK build attached through MOJOUI_AGENT_SOCKET with GDK_DEBUG=no-vsync, the measured context, transcript committed (reviewer item 2).
+- Item 4: A's splat got the load-first skip (D-731); check_a still 100 % within 1e-3. Item 8: PSS beside RSS (D-732). Item 3: B split, C's framework lines counted from git (D-733): 164 in mojoui/gpu.mojo, 88 in its test. Item 10: GOAL.md wording (D-730).
+- `git diff` here has diff.mnemonicPrefix on (w/ and i/ prefixes): the counter passes --src-prefix/--dst-prefix explicitly.
+- One full gated rerun (every row) rather than A alone: the bench script itself changed (PSS, counts), so every row's freshness hash changed anyway, and one run keeps one protocol.
