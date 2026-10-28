@@ -1,0 +1,3 @@
+# A native binary built for this machine (what you'd ship to run on it): AVX2/AVX-512 where the CPU has them.
+[build]
+rustflags = ["-C", "target-cpu=native"]
