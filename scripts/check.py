@@ -305,6 +305,99 @@ def m6c():
     return (not problems), "; ".join(problems or notes)
 
 
+def m7():
+    """Every row on the real desktop (GOAL.md 36b M7): results-desktop.json, gated, fresh, goal 36's protocol, every row
+    and size, C's zero-copy path in every C run (0 readbacks, GTK's GL renderer), the setup recorded."""
+    import particles_bench as pb
+    path, md = OUT / "results-desktop.json", OUT / "results-desktop.md"
+    if not path.exists() or not md.exists():
+        return False, "docs/goals/36/results-desktop.json/.md missing: run scripts/particles_bench.py --desktop (D-735)"
+    res = json.loads(path.read_text())
+    problems = []
+    if not res.get("desktop") or res.get("provisional") is not False or res.get("gated") is not True:
+        problems.append("not the gated desktop measurement")
+    if res.get("sources_sha256") != pb.sources_sha():
+        problems.append("stale: the sources changed since results-desktop.json (rerun particles_bench.py --desktop)")
+    p = res.get("protocol", {})
+    if (p.get("warmup"), p.get("frames"), p.get("runs"), p.get("sizes")) != (60, 600, 3, pb.SIZES):
+        problems.append("not goal 36's protocol (60 warm-up, 600 frames, 3 runs, the same sizes)")
+    need = ["frame_ms", "frame_ms_spread", "p95_interval_ms", "cold_start_ms", "peak_pss_mb", "holds_60", "frame_ms_is"]
+    rows = res.get("rows", {})
+    for row in pb.DESKTOP_ROWS + list(pb.FEATURES):
+        sizes = pb.FEATURE_SIZES if row in pb.FEATURES else pb.EXTRA.get(row, []) + pb.SIZES
+        for n in sizes:
+            r = rows.get(row, {}).get(str(n))
+            if not r:
+                problems.append(f"{row} {n}: missing")
+                continue
+            if [k for k in need if r.get(k) is None] or len(r.get("runs", [])) != 3:
+                problems.append(f"{row} {n}: incomplete")
+            if not all((x.get("machine") or {}).get("gated") for x in r["runs"]):
+                problems.append(f"{row} {n}: a run didn't pass the quiet gate")
+            if row != "A-cpu" and "nvidia" not in (r.get("adapter") or "").lower():
+                problems.append(f"{row} {n}: adapter {r.get('adapter')}")
+            if row.startswith("C") and row != "C-36":
+                if r.get("cpu_copied_max") != 0 or r.get("gpu_presented_min", 0) < 600 or r.get("gsk_renderer") != "gl":
+                    problems.append(f"{row} {n}: not the zero-copy path ({r.get('cpu_copied_max')} readbacks, {r.get('gpu_presented_min')} from the GPU, renderer {r.get('gsk_renderer')})")
+            if row == "C-36" and not r.get("cpu_copied_max"):
+                problems.append(f"C-36 {n}: goal 36's path should copy to the CPU")
+            if r.get("holds_60") != (r["frame_ms"] <= 1000 / 60 and r["p95_interval_ms"] <= 20):
+                problems.append(f"{row} {n}: holds_60 disagrees with its numbers")
+    if "Wayland window" not in (rows.get("B-native", {}).get("1000000", {}).get("frame_ms_is") or ""):
+        problems.append("B-native didn't present to a window")
+    st = res.get("setup", {})
+    m = st.get("monitor", {})
+    if not st.get("compositor", "").startswith("Hyprland") or not m.get("refreshRate") or not m.get("scale") or "off" not in st.get("vsync", ""):
+        problems.append("the setup (compositor, refresh, scale, vsync) isn't recorded")
+    text = md.read_text()
+    for word in ("Setup:", "Each 36b feature's effect", "compositor", "1280 × 720"):
+        if word not in text:
+            problems.append(f"results-desktop.md doesn't state '{word}'")
+    if problems:
+        return False, "; ".join(problems[:12])
+    c = rows["C"]
+    return True, (f"results-desktop.json fresh (commit {res['commit']}), {st['compositor'].split(' built')[0]}, "
+                  f"{m.get('refreshRate'):.2f} Hz ×{m.get('scale')}; C frame ms "
+                  + ", ".join(f"{pb.mill(n)} {c[str(n)]['frame_ms']:.2f}" for n in pb.SIZES)
+                  + f"; 0 readbacks in every C run ({sum(1 for r in rows if r.startswith('C'))} C rows)")
+
+
+def m8():
+    """The page from the desktop (GOAL.md 36b M8): chapter 1 generated from results-desktop.json (and goal 36's table
+    from results.json), the setup stated, no claim left from the inferred software-renderer reading, M5 still passing."""
+    import why_tables as wt
+    page = (ROOT / "docs" / "why.html").read_text()
+    problems = []
+    d = wt.load_desktop()
+    if not d:
+        return False, "results-desktop.json missing or provisional: the page can't come from the desktop"
+    res = json.loads((OUT / "results.json").read_text())
+    frags = wt.fragments(res, d)
+    if wt.apply(page, frags) != page:
+        problems.append("the page differs from what results-desktop.json and results.json give: rerun scripts/why_tables.py")
+    for part in ("setup", "features", "perf_xvfb"):
+        if f"<!-- why:{part} -->" not in page:
+            problems.append(f"no {part} part on the page")
+    for word in ("Hyprland", "Hz", "Vsync", "1280 × 720", "GPU-composited"):
+        if word not in frags["setup"] + frags["headline"]:
+            problems.append(f"the setup doesn't state '{word}'")
+    for stale in ("GTK's software renderer on a virtual display", "drawing straight from the GPU into the window is not built yet",
+                  "Measured with vsync off on a virtual display, not a real screen"):
+        if stale in page:
+            problems.append(f"the page still says: {stale!r}")
+    if "the guess was wrong" not in page and "C-36" not in page:
+        problems.append("the page doesn't say what became of goal 36's inferred residual")
+    ok5, msg5 = m5()
+    if not ok5:
+        problems.append("M5: " + msg5)
+    if problems:
+        return False, "; ".join(problems[:10])
+    c = d["rows"]["C"]
+    return True, (f"docs/why.html chapter 1 from results-desktop.json (commit {d['commit']}): omxcode "
+                  + ", ".join(f"{wt.mn(n)} {c[str(n)]['frame_ms']:.2f} ms" for n in (1_000_000, 5_000_000, 20_000_000))
+                  + f"; setup, feature effects and goal 36's Xvfb table on the page; M5 PASS")
+
+
 MILESTONES = [
     ("M0", m0),
     ("M1", m1),
@@ -315,6 +408,8 @@ MILESTONES = [
     ("M6", m6),
     ("M6b", m6b),
     ("M6c", m6c),
+    ("M7", m7),
+    ("M8", m8),
 ]
 
 

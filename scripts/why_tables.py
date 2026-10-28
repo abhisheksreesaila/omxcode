@@ -1,4 +1,5 @@
-"""Writes docs/why.html's generated parts from docs/goals/36/results.json and the builds' real files (goal 36 M5).
+"""Writes docs/why.html's generated parts from docs/goals/36/results-desktop.json (goal 36b: the real desktop),
+docs/goals/36/results.json (goal 36: the virtual display) and the builds' real files (goal 36 M5, goal 36b M8).
 
   pixi run python scripts/why_tables.py               # rewrite the page's generated parts from results.json
   pixi run python scripts/why_tables.py --check       # exit 1 if the page differs from what results.json gives
@@ -19,11 +20,17 @@ ROOT = Path(__file__).resolve().parent.parent
 PAGE = ROOT / "docs" / "why.html"
 RESULTS = ROOT / "docs" / "goals" / "36" / "results.json"
 PROVISIONAL = ROOT / "docs" / "goals" / "36" / "results-provisional.json"
+DESKTOP = ROOT / "docs" / "goals" / "36" / "results-desktop.json"
 REPO = "https://github.com/abhisheksreesaila/omxcode/blob/main/"
 
 NAMES = {"A-cpu": "Plain JS (CPU)", "A": "JS + WebGPU", "B-wasm": "JS + Rust/wasm", "B-native": "Rust + wgpu (native, offscreen)",
          "C": "omxcode (Mojo)"}
 ORDER = ["A-cpu", "A", "B-wasm", "B-native", "C"]
+DNAMES = {**NAMES, "B-native": "Rust + wgpu (native, in a window)", "B-native-off": "Rust + wgpu (native, offscreen)"}
+DORDER = ["A-cpu", "A", "B-wasm", "B-native", "B-native-off", "C"]
+FEATURE_ROWS = [("C-36", "goal 36's path: the picture copied to the CPU, three atomics"), ("C+M6", "+ M6: the picture stays on the GPU"),
+                ("C+M6c", "+ M6c: the two-atomic splat"), ("C", "+ M6b: GPU blending, measured against the splat at run time (omxcode as shipped)"),
+                ("C-blend", "M6b forced: GPU blending every frame"), ("C-hidpi", "omxcode at the screen's own 1.6× (2048 × 1152 pixels)")]
 EFFORT_NAMES = {"A-cpu": "Plain JS (CPU)", "A": "JS + WebGPU", "B": "JS + Rust (wasm and native)", "C": "omxcode",
                 "B-wasm": "JS + Rust/wasm", "B-native": "Rust + wgpu (native)"}
 EFFORT_ORDER = ["A-cpu", "A", "B", "C"]
@@ -47,26 +54,35 @@ def row(res, r, n):
 
 # ---------- the measured parts ----------
 
-def headline(res):
-    c, a, b = (row(res, r, 1_000_000) for r in ("C", "A", "B-native"))
-    big = res["largest_n_at_60"]
-    same = [NAMES[r] for r in ("A", "B-native", "B-wasm", "A-cpu") if big.get(r) == big["C"]]
+def headline(res, d=None):
+    """The three numbers at the top: from the real desktop when measured (goal 36b), else goal 36's virtual display."""
+    src = d or res
+    names = DNAMES if d else NAMES
+    fast = "B-native-off" if d else "B-native"
+    c, a, b = (row(src, r, 1_000_000) for r in ("C", "A", fast))
+    big = src["largest_n_at_60"]
+    same = [names[r] for r in ("A", fast, "B-wasm", "A-cpu") if big.get(r) == big["C"]]
     ef = res["effort"]
-    top = max(res["protocol"]["sizes"])
     held = mn(big["C"])
     byf = ef["C"].get("framework_added", {}).get("by_file", {})
     fw = sum(n for f, n in byf.items() if not f.startswith("tests/"))
     fwt = sum(n for f, n in byf.items() if f.startswith("tests/"))
     bw, bn = ef["B-wasm"], ef["B-native"]
+    where = ("Measured with vsync off on a real desktop (Hyprland on Wayland, GPU-composited), every field 1280 × 720 pixels."
+             if d else "Measured with vsync off on a virtual display, not a real screen.")
+    lead = min((row(src, r, 1_000_000)["frame_ms"], r) for r in ("A", fast, "B-wasm", "A-cpu"))
+    tail = ("omxcode is the fastest here." if c["frame_ms"] < lead[0] else
+            f"{names[lead[1]]} is faster at 1M; the table says where omxcode is ahead." if d else "omxcode is slower, and the page says why.")
     return f"""<div class="nums whynums">
-  <div><b>{held}</b><span>particles, the largest size tested, with omxcode's frames averaging under 16.7 ms (60 fps) and the slowest one in twenty under 20 ms. Measured with vsync off on a virtual display, not a real screen. {(' and '.join(same) + (' do' if len(same) > 1 else ' does') + ' it too.') if same else ''}</span></div>
-  <div><b>{ef['C']['lines']}<small>app lines</small></b><span>in {ef['C']['files']} Mojo file for omxcode, plus {fw} framework lines (and {fwt} test lines) this goal added for it: PointCloud's step and draw, reusable by any app. JS + WebGPU: {ef['A']['lines']:,} lines, {ef['A']['files']} files, {len(ef['A']['languages'])} languages. JS + Rust is two apps: {bw['lines']:,} lines, {bw['files']} files, {len(bw['languages'])} languages for wasm; {bn['lines']:,}, {bn['files']} and {len(bn['languages'])} for native.</span></div>
-  <div><b>{f2(c['frame_ms'])}<small>ms</small></b><span>an omxcode frame at 1M. JS + WebGPU takes {f2(a['frame_ms'])} ms and native Rust + wgpu (offscreen) {f2(b['frame_ms'])} ms: {'omxcode is slower, and the page says why.' if c['frame_ms'] > min(a['frame_ms'], b['frame_ms']) else 'omxcode is the fastest here.'}</span></div>
+  <div><b>{held}</b><span>particles, the largest size tested, with omxcode's frames averaging under 16.7 ms (60 fps) and the slowest one in twenty under 20 ms. {where} {(' and '.join(same) + (' do' if len(same) > 1 else ' does') + ' it too.') if same else ''}</span></div>
+  <div><b>{ef['C']['lines']}<small>app lines</small></b><span>in {ef['C']['files']} Mojo file for omxcode, plus {fw} framework lines (and {fwt} test lines) goals 36 and 36b added for it: PointCloud's step and draw, the GPU-to-screen hand-over and GPU blending, reusable by any app. JS + WebGPU: {ef['A']['lines']:,} lines, {ef['A']['files']} files, {len(ef['A']['languages'])} languages. JS + Rust is two apps: {bw['lines']:,} lines, {bw['files']} files, {len(bw['languages'])} languages for wasm; {bn['lines']:,}, {bn['files']} and {len(bn['languages'])} for native.</span></div>
+  <div><b>{f2(c['frame_ms'])}<small>ms</small></b><span>an omxcode frame at 1M. JS + WebGPU takes {f2(a['frame_ms'])} ms and native Rust + wgpu (offscreen) {f2(b['frame_ms'])} ms: {tail}</span></div>
 </div>"""
 
 
-def compare(res, x, y="C"):
+def compare(res, x, y="C", names=None):
     """One plain sentence: how y (omxcode) does against x at every size."""
+    names = names or NAMES
     sizes = res["protocol"]["sizes"]
     pairs = [(n, row(res, x, n)["frame_ms"], row(res, y, n)["frame_ms"]) for n in sizes if row(res, x, n) and row(res, y, n)]
     faster = [n for n, xm, ym in pairs if ym < xm]
@@ -74,10 +90,10 @@ def compare(res, x, y="C"):
     ends = (f"{f2(pairs[0][1])} ms against omxcode's {f2(pairs[0][2])} ms at {mn(pairs[0][0])}; "
             f"{f2(pairs[-1][1])} against {f2(pairs[-1][2])} ms at {mn(pairs[-1][0])}")
     if not faster:
-        return f"<b>{NAMES[x]} is faster than omxcode at every size measured</b> ({ends})."
+        return f"<b>{names[x]} is faster than omxcode at every size measured</b> ({ends})."
     if not slower:
-        return f"<b>omxcode is faster than {NAMES[x]} at every size measured</b> ({ends})."
-    return (f"<b>omxcode is faster than {NAMES[x]} at {', '.join(mn(n) for n in faster)} and slower at "
+        return f"<b>omxcode is faster than {names[x]} at every size measured</b> ({ends})."
+    return (f"<b>omxcode is faster than {names[x]} at {', '.join(mn(n) for n in faster)} and slower at "
             f"{', '.join(mn(n) for n in slower)}</b> ({ends}).")
 
 
@@ -126,19 +142,118 @@ def verdict(res):
     return "\n".join(out)
 
 
+def verdict_desktop(d, x):
+    """Chapter 1's findings from the real desktop (goal 36b), with goal 36's virtual display for what changed."""
+    big, top = d["largest_n_at_60"], max(d["protocol"]["sizes"])
+    held = {}
+    for r in DORDER:
+        held.setdefault(big[r], []).append(DNAMES[r])
+    lines = []
+    for n in sorted(held, key=lambda v: v or 0, reverse=True):
+        who = held[n]
+        verb = "hold" if len(who) > 1 else "holds"
+        lines.append(f"{' and '.join([', '.join(who[:-1]), who[-1]] if len(who) > 1 else who)} "
+                     + (f"{verb} 60 fps up to {mn(n)}{' (the largest size tested)' if n == top else ''}" if n else f"{'do' if len(who) > 1 else 'does'} not hold 60 fps at any size"))
+    order = [r for r in DORDER if r != "B-native"]
+    fastest = {n: min((row(d, r, n)["frame_ms"], r) for r in order if row(d, r, n)) for n in SIZES}
+    s20 = {r: row(d, r, top)["step_ms"] for r in ("A", "B-native-off", "C")}
+    lo, hi = min(s20.values()), max(s20.values())
+    c1, c20 = row(d, "C", 1_000_000), row(d, "C", top)
+    win = row(d, "B-native", 1_000_000)
+    old1, x1 = row(d, "C-36", 1_000_000), row(x, "C", 1_000_000)
+    starts = sorted((row(d, r, 1_000_000)["cold_start_ms"], r) for r in DORDER)
+    mem = sorted((row(d, r, 1_000_000)["peak_pss_mb"], r) for r in DORDER)
+    out = [
+        "<p>" + "; ".join(lines) + ".</p>",
+        "<p>The fastest frame: " + "; ".join(f"{DNAMES[r]} at {mn(n)} ({f2(ms)} ms)" for n, (ms, r) in fastest.items()) + ".</p>",
+        "<ul class='verdict'>",
+        f"<li>{compare(d, 'B-native-off', names=DNAMES)} Offscreen, native Rust never shows a frame: in a Wayland window the same "
+        f"binary takes {f2(win['frame_ms'])} ms a frame at 1M (and {f2(row(d, 'B-native', top)['frame_ms'])} at {mn(top)}), paced by the compositor "
+        "whatever present mode it asks for, so its speed can only be read offscreen.</li>",
+        f"<li>{compare(d, 'A', names=DNAMES)}</li>",
+        f"<li>{compare(d, 'B-wasm', names=DNAMES)}</li>",
+        f"<li>{compare(d, 'A-cpu', names=DNAMES)}</li>",
+        f"<li><b>The GPU step itself is a tie.</b> At {mn(top)} it takes {f2(s20['A'], 3)} ms in JS + WebGPU, {f2(s20['B-native-off'], 3)} ms in Rust + wgpu and "
+        f"{f2(s20['C'], 3)} ms in omxcode: the same arithmetic on the same GPU, within {round((hi / lo - 1) * 100)} % of each other.</li>",
+        f"<li><b>What closed the gap.</b> Goal 36 measured omxcode at {f2(x1['frame_ms'])} ms a frame at 1M on a virtual display and guessed "
+        f"that most of it was GTK's software renderer. On this desktop, with GTK's GPU renderer, goal 36's path still takes {f2(old1['frame_ms'])} ms: "
+        "the guess was wrong. The cost was handing GTK a picture in CPU memory every frame (the copy from the GPU, then GTK uploading it again). "
+        f"The framework now hands GTK the picture on the GPU (no copy to the CPU), and the frame is {f2(c1['frame_ms'])} ms. Each step's effect is in the table below.</li>",
+        f"<li><b>Where omxcode's frame goes now.</b> At {mn(top)} its GPU work is {f2(c20['gpu_frame_ms'])} ms (step and draw, timed on their own); "
+        f"the rest of its {f2(c20['frame_ms'])} ms frame is the host and GTK (the frame event, the view, handing the texture over, GTK drawing it) and the wait "
+        f"between them, inferred as the frame minus that work: {f2(c20['frame_ms'] - c20['gpu_frame_ms'])} ms at {mn(top)}, "
+        f"{f2(c1['frame_ms'] - c1['gpu_frame_ms'])} ms at 1M. The host waits for the GPU once a frame before GTK draws: NVIDIA's driver stalls "
+        "GL behind queued CUDA work, so it can't overlap the two (measured).</li>",
+        f"<li><b>Start and memory.</b> At 1M, cold start to the first drawn frame: " + ", ".join(f"{DNAMES[r]} {f2(ms, 0)} ms" for ms, r in starts) +
+        ". Peak memory (the process tree's PSS; GPU memory not included): " + ", ".join(f"{DNAMES[r]} {f2(mb, 0)} MB" for mb, r in mem) +
+        ". The browser rows carry Chromium itself in both.</li>",
+        "</ul>",
+    ]
+    return "\n".join(out)
+
+
+def features(d):
+    """Goal 36b's per-feature effect on omxcode's frame (the same protocol, each feature switched off in turn)."""
+    fs = d.get("feature_sizes", [1_000_000, 5_000_000, 20_000_000])
+    body = []
+    for r, what in FEATURE_ROWS:
+        if r not in d["rows"]:
+            continue
+        cls = " class='r-C'" if r == "C" else ""
+        cells = "".join(f"<td>{f2(row(d, r, n)['frame_ms'])}<small>±{f2(row(d, r, n)['frame_ms_spread'])}</small></td>" if row(d, r, n) else "<td>–</td>" for n in fs)
+        body.append(f"<tr{cls}><th scope='row'>{E(what)}</th>{cells}</tr>")
+    steps = [("M6, the picture stays on the GPU", "C-36", "C+M6"), ("M6c, two atomics", "C+M6", "C+M6c"), ("M6b, blending when it's faster", "C+M6c", "C")]
+    eff = "; ".join(f"<b>{name}</b>: " + ", ".join(f"{mn(n)} {f2(row(d, a, n)['frame_ms'] - row(d, b, n)['frame_ms'])} ms" for n in fs)
+                    for name, a, b in steps)
+    blended = sorted({c.split(': ', 1)[1] for n in fs for c in (row(d, 'C', n) or {}).get('blend_choices', [])})
+    return f"""<div class="tscroll"><table class="mtable feat">
+<thead><tr><th>omxcode with</th>{''.join(f'<th>Frame ms · {mn(n)}</th>' for n in fs)}</tr></thead>
+<tbody>
+{chr(10).join(body)}
+</tbody></table></div>
+<p class="tnote">Frame ms saved by each, before → after: {eff}. Negative means it cost time. The run-time choice between blending and the
+compute splat, as each C run reported it: {E('; '.join(blended)) or 'the compute splat throughout'}.</p>"""
+
+
+def setup(d):
+    st, m = d["setup"], d["setup"]["monitor"]
+    return (f"<p class='tnote'><b>Where:</b> the owner's desktop, measured while they were away: {E(st['compositor'].split(' built')[0])} "
+            f"(Wayland, GPU-composited), {E(str(m.get('description') or m.get('name')))} at {m.get('refreshRate'):.2f} Hz, scale {m.get('scale')}, "
+            f"VRR {'on' if m.get('vrr') else 'off'}; GTK {E(st['gtk'])}; {E(st['chromium'])}. <b>Vsync:</b> {E(st['vsync'])}. "
+            f"<b>Pixels:</b> {E(st['canvas_pixels'])}. Each row's window opened beside one other window and closed after its run; "
+            f"the quiet gate held every run (1-minute load under {d['protocol']['gate']['load1_below']}, no other GPU compute).</p>")
+
+
+def perf_xvfb(res):
+    """Goal 36's table from the virtual display, kept beside the desktop one (labelled)."""
+    cells = []
+    for r in ORDER:
+        tds = "".join(f"<td>{f2(row(res, r, n)['frame_ms'])}</td>" for n in SIZES)
+        cells.append(f"<tr class='r-{r}'><th scope='row'>{NAMES[r]}</th>{tds}</tr>")
+    return f"""<details class="more"><summary>Goal 36's numbers, on a virtual display (Xvfb), for comparison</summary>
+<div class="tscroll"><table class="mtable perf">
+<thead><tr><th>Build</th>{''.join(f'<th>Frame ms · {mn(n)}</th>' for n in SIZES)}</tr></thead>
+<tbody>
+{chr(10).join(cells)}
+</tbody></table></div>
+<p class="tnote">The same protocol on Xvfb (GTK's software renderer, no GL, so omxcode copies its picture to the CPU there; Chromium on ANGLE/Vulkan;
+native Rust offscreen), re-measured at commit {E(res['commit'])} on {E(res['date'])}: docs/goals/36/results.json.</p></details>"""
+
+
 def best(values, low=True):
     vals = [v for v in values if v is not None]
     return (min(vals) if low else max(vals)) if vals else None
 
 
-def perf(res):
+def perf(res, names=None, order=None):
+    names, order = names or NAMES, order or ORDER
     top = max(res["protocol"]["sizes"])
     head = ("<tr><th>Build</th><th>Largest N at 60 fps</th>" + "".join(f"<th>Frame ms · {mn(n)}</th>" for n in SIZES) +
             f"<th>Step ms · {mn(top)}</th><th>Cold start ms · 1M</th><th>Peak memory MB (PSS) · 1M / {mn(top)}</th></tr>")
-    cols = {n: best([row(res, r, n)["frame_ms"] for r in ORDER if row(res, r, n)]) for n in SIZES}
+    cols = {n: best([row(res, r, n)["frame_ms"] for r in order if row(res, r, n)]) for n in SIZES}
     body = []
-    for r in ORDER:
-        cells = [f"<th scope='row'>{NAMES[r]}</th>", f"<td>{mn(res['largest_n_at_60'][r])}</td>"]
+    for r in order:
+        cells = [f"<th scope='row'>{names[r]}</th>", f"<td>{mn(res['largest_n_at_60'][r])}</td>"]
         for n in SIZES:
             d = row(res, r, n)
             if not d:
@@ -154,7 +269,7 @@ def perf(res):
         cells.append(f"<td>{f2(d1['cold_start_ms'], 0)}</td>")
         cells.append(f"<td>{f2(d1['peak_pss_mb'], 0)} / {f2(d20['peak_pss_mb'], 0)}</td>")
         body.append(f"<tr class='r-{r}'>" + "".join(cells) + "</tr>")
-    how = "".join(f"<li><b>{NAMES[r]}:</b> {E(row(res, r, 1_000_000)['frame_ms_is'])}.</li>" for r in ORDER)
+    how = "".join(f"<li><b>{names[r]}:</b> {E(row(res, r, 1_000_000)['frame_ms_is'])}.</li>" for r in order)
     extra = res["protocol"].get("extra_sizes", {}).get("A-cpu", [])
     small = "".join(f" Plain JS at {mn(n)}: {f2(row(res, 'A-cpu', n)['frame_ms'])} ms (p95 interval {f2(row(res, 'A-cpu', n)['p95_interval_ms'])} ms)."
                     for n in extra if row(res, "A-cpu", n))
@@ -172,9 +287,12 @@ def caveats(res):
     return "<ul class='caveats'>" + "".join(f"<li>{E(c)}</li>" for c in res["caveats"]) + "</ul>"
 
 
-def provenance(res):
+def provenance(res, d=None):
     flag = "" if not res.get("provisional") else " <b class='prov'>PROVISIONAL: measured on a busy machine, not the result.</b>"
-    return (f"Measured by scripts/particles_bench.py at commit {E(res['commit'])} on {E(res['date'])} "
+    desk = (f"Chapter 1's tables were measured on the real desktop by scripts/particles_bench.py --desktop at commit {E(d['commit'])} on "
+            f"{E(d['date'])} (sources sha256 {E(d['sources_sha256'][:12])}; docs/goals/36/results-desktop.json); goal 36's virtual-display run: "
+            if d else "Measured by scripts/particles_bench.py ")
+    return (f"{desk}at commit {E(res['commit'])} on {E(res['date'])} "
             f"({E(res['machine'].split(',')[0])}, {E(res['machine'].split(',')[1].strip())}; Chromium for the browser rows, Mojo 1.1); "
             f"sources sha256 {E(res['sources_sha256'][:12])}; the raw numbers are in docs/goals/36/results.json.{flag}")
 
@@ -200,9 +318,9 @@ def effort(res):
 </tbody></table></div>
 <p class="tnote">Counted by scripts/particles_bench.py, not by hand: blank and comment-only lines (and docstrings) left out.
 The two Rust apps share the sim crate and the workspace Cargo.toml (counted in each). omxcode's row is the app; mojoui, the framework, is a library,
-as WebGPU, wgpu, wasm-bindgen and rayon are. But this goal also added {fw.get('lines', 0)} lines to the framework and its test for omxcode
-({', '.join(f'{E(f)} +{n}' for f, n in fw.get('by_file', {}).items())}; from git, since the goal began): PointCloud's step, draw and readback,
-which any app can now use. Build steps run from a clean checkout to the app on screen.</p>
+as WebGPU, wgpu, wasm-bindgen and rayon are. But this goal also added {fw.get('lines', 0)} lines to the framework and its tests for omxcode
+({', '.join(f'{E(f)} +{n}' for f, n in fw.get('by_file', {}).items())}; from git, since goal 36 began): PointCloud's step and draw, the
+GPU-to-screen hand-over and GPU blending (goal 36b), which any app can now use. Build steps run from a clean checkout to the app on screen.</p>
 <div class="stepsrow">{steps}</div>"""
 
 
@@ -342,7 +460,7 @@ def code():
 # ---------- the page ----------
 
 def problem(res):
-    """Chapter 1's first card: where plain JS stops keeping up, from its rows."""
+    """Chapter 1's first card: where plain JS stops keeping up, from its rows (the desktop's when measured)."""
     rows = {int(n): d for n, d in res["rows"]["A-cpu"].items()}
     ok = [n for n, d in sorted(rows.items()) if d["holds_60"]]
     fails = [(n, d) for n, d in sorted(rows.items()) if not d["holds_60"]]
@@ -386,10 +504,24 @@ def mcp():
     return "\n".join(out)
 
 
-def fragments(res):
-    return {"headline": headline(res), "verdict": verdict(res), "perf": perf(res), "caveats": caveats(res),
-            "provenance": provenance(res), "effort": effort(res), "writes": writes(res), "code": code(),
-            "problem": problem(res), "mcp": mcp()}
+def load_desktop():
+    """The real-desktop measurement (goal 36b), when it exists: chapter 1 is drawn from it."""
+    if not DESKTOP.exists():
+        return None
+    d = json.loads(DESKTOP.read_text())
+    return None if d.get("provisional") else d
+
+
+def fragments(res, d="load"):
+    d = load_desktop() if d == "load" else d
+    if not d:
+        return {"headline": headline(res), "verdict": verdict(res), "perf": perf(res), "caveats": caveats(res),
+                "provenance": provenance(res), "effort": effort(res), "writes": writes(res), "code": code(),
+                "problem": problem(res), "mcp": mcp()}
+    return {"headline": headline(res, d), "verdict": verdict_desktop(d, res), "perf": perf(d, DNAMES, DORDER),
+            "caveats": caveats(d), "provenance": provenance(res, d), "effort": effort(res), "writes": writes(res),
+            "code": code(), "problem": problem(d), "mcp": mcp(), "setup": setup(d), "features": features(d),
+            "perf_xvfb": perf_xvfb(res)}
 
 
 def apply(text, frags):

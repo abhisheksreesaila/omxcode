@@ -91,7 +91,7 @@ FEATURES = {
 }
 FEATURE_SIZES = [1_000_000, 5_000_000, 20_000_000]
 LABEL.update({
-    "B-native": "B-native · Rust + wgpu", "B-native-off": "B-native · Rust + wgpu (offscreen)",
+    "B-native-off": "B-native · Rust + wgpu (offscreen)",
     "C-36": "C · goal 36's path (readback, 3 atomics)", "C+M6": "C · + M6 zero-copy", "C+M6c": "C · + M6c packed splat",
     "C-blend": "C · M6b blending always", "C-hidpi": "C · at the screen's 1.6× (2048×1152)",
 })
@@ -115,6 +115,7 @@ def use_desktop():
     if not wl or not (rt / wl).exists():
         raise SystemExit("particles_bench --desktop: no Wayland desktop (WAYLAND_DISPLAY)")
     DESKTOP = True
+    LABEL["B-native"] = "B-native · Rust + wgpu (in a window)"
     os.environ["MOJOUI_HEADLESS"] = "0"
     for k in ("GSK_RENDERER", "GDK_DISABLE", "GDK_SCALE", "GDK_BACKEND", "MOJOUI_PRIVATE_DISPLAY"):
         os.environ.pop(k, None)
@@ -832,8 +833,8 @@ DESKTOP_CAVEATS = [
     "GPU once a frame before GTK draws (NVIDIA stalls GL behind queued CUDA work, D-746); one frame in flight is opt-in "
     "and off here (D-747).",
     "C's additive points use the compute splat, and blending is measured against it after 120 frames and then 240, "
-    "480… (D-739): inside the 600 measured frames that is two short measurements of 8 frames each way; C-blend has "
-    "blending on every frame.",
+    "480… (D-739): inside the 600 measured frames that is two short measurements (6 frames of the splat, then blending "
+    "until it is clearly slower, at most 6 frames); C-blend has blending on every frame.",
     "C's splat is the framework's PointCloud.splat: two atomics per particle (M6c; C-36 and C+M6 run goal 36's three), "
     "each channel skipped once saturated, exact (GPU = CPU picture).",
     "C's step ms and GPU frame ms come from a separate timed pass after the measured frames (each part waited for on its "
@@ -844,10 +845,10 @@ DESKTOP_CAVEATS = [
     "A draws with an atomic compute rasteriser (two u32 atomics per on-screen particle, skipped once the pixel is "
     "saturated, the same load-first form as C); A's headline is &await=0 with the queue drained at the warm-up's end, "
     "as in goal 36. B draws with hardware blending (WebGL2 points / wgpu point list, additive).",
-    "B-native in a Wayland window is paced by the compositor: ~18.5 ms a frame at every N, with present mode Immediate "
-    "or Mailbox (both tried, both offered by the driver; GTK with its frame clock capped reads 18.8 ms here too). Its "
-    "throughput is only measurable offscreen, so B-native-off is the same binary offscreen (two frames in flight), as in "
-    "goal 36.",
+    "B-native in a Wayland window is paced by the compositor, about one frame per screen refresh at every N, with present "
+    "mode Immediate or Mailbox (both tried in a probe, both offered by the driver; that probe read 18.5 ms a frame, and "
+    "GTK with its frame clock capped read 18.8 ms then). Its throughput is only measurable offscreen, so B-native-off is "
+    "the same binary offscreen (two frames in flight), as in goal 36.",
     "A-cpu is single-threaded by design (plain JS on the main thread). B-wasm's thread count is chosen by its own probe.",
     "Peak memory is the PSS of the launched process tree, as in goal 36; GPU memory is not included. Cold start "
     "includes each runtime's own start.",

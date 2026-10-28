@@ -186,8 +186,8 @@ def _shade_kernel[g: ColourFn](
 
 comptime StepFn = def(Point, Knobs) thin -> Point  # a point's next state (a simulation step)
 comptime TintFn = def(Point, Knobs) thin -> SIMD[DType.float32, 4]  # the light a point adds: r, g, b in 0–1
-comptime TRIAL_FRAMES = 8  # PointCloud.decide_blend: frames each way, of which the first TRIAL_SKIP are warm-up
-comptime TRIAL_SKIP = 3
+comptime TRIAL_FRAMES = 6  # PointCloud.decide_blend: frames each way (compute first, then blending), of which the
+comptime TRIAL_SKIP = 3  # first TRIAL_SKIP are warm-up (1 after the first measurement: the shaders are built by then)
 comptime RECHECK = 120
 comptime GLOW_ONE = Float32(1024)  # splat(): fixed point for added light (whole numbers, so GPU and CPU agree)
 
@@ -322,7 +322,8 @@ struct PointCloud(Movable):
     var blend_pref: Int  # 0: measure, 1: always, 2: never
     var blend_choice: Int  # 0: measuring now, 1: blending, 2: compute splat (the start: points tend to pile up, and
     # blending can't skip saturated pixels; a first decision made on the first frames chose wrongly, D-739)
-    var trial_ns: List[Int]  # TRIAL_FRAMES blending, then TRIAL_FRAMES compute
+    var trial_ns: List[Int]  # TRIAL_FRAMES compute, then up to TRIAL_FRAMES blending (stopped early when it's clearly slower)
+    var trials: Int  # measurements so far
     var since_trial: Int  # frames since the last decision: the work changes (points pile up, so the splat's saturation
     var interval: Int  # skip pays more), so both are measured again after `interval` frames: 60, doubling while the
     var told: Int  # choice holds, back to 60 when it flips (told: the choice last printed)
@@ -365,6 +366,7 @@ struct PointCloud(Movable):
         self.trial_ns = List[Int]()
         self.since_trial = 0
         self.told = 0
+        self.trials = 0
         self.interval = RECHECK
         self.upload()
 
@@ -402,6 +404,7 @@ struct PointCloud(Movable):
         self.trial_ns = List[Int]()
         self.since_trial = 0
         self.told = 0
+        self.trials = 0
         self.interval = RECHECK
         self.upload()
 
@@ -595,20 +598,28 @@ struct PointCloud(Movable):
         return True
 
     def decide_blend(mut self):
-        """TRIAL_FRAMES frames blending, then as many with the compute splat (in blocks: switching between GL and CUDA
-        work every frame costs both); the first TRIAL_SKIP of each block are warm-up. Keeps the faster by the median
+        """Measures the compute splat for TRIAL_FRAMES frames, then blending for as many (in blocks: switching between GL
+        and CUDA work every frame costs both); the first TRIAL_SKIP of each block are warm-up (1 after the first time).
+        Blending stops early once a frame of it costs half again the splat's median. Keeps the faster by the median
         whole draw, the GPU's part included (blending waits for GL to finish while it's being timed)."""
-        if len(self.trial_ns) < 2 * TRIAL_FRAMES:
+        var skip = TRIAL_SKIP if self.trials == 0 else 1
+        var done = len(self.trial_ns) - TRIAL_FRAMES  # blending frames measured
+        if done <= skip:
+            return
+        var comp = List[Int]()
+        for i in range(skip, TRIAL_FRAMES):
+            comp.append(self.trial_ns[i])
+        sort(comp)
+        var c = Float64(comp[len(comp) // 2]) / 1e6
+        var last = Float64(self.trial_ns[len(self.trial_ns) - 1]) / 1e6
+        if done < TRIAL_FRAMES and last < c * 1.5:
             return
         var blend = List[Int]()
-        var comp = List[Int]()
-        for i in range(TRIAL_SKIP, TRIAL_FRAMES):
+        for i in range(TRIAL_FRAMES + skip, len(self.trial_ns)):
             blend.append(self.trial_ns[i])
-            comp.append(self.trial_ns[TRIAL_FRAMES + i])
         sort(blend)
-        sort(comp)
         var b = Float64(blend[len(blend) // 2]) / 1e6
-        var c = Float64(comp[len(comp) // 2]) / 1e6
+        self.trials += 1
         var choice = 1 if b < c else 2
         if self.told == 1 and c > b * 0.9:  # (a switch has to win by a tenth: no flapping when they're close)
             choice = 1
@@ -738,10 +749,11 @@ struct PointCloud(Movable):
             if self.on_gpu() and self.blend_points(surface):
                 var trial = self.blend_choice == 0
                 var at = len(self.trial_ns)
-                if (not trial and self.blend_choice == 1) or (trial and at < TRIAL_FRAMES):
+                if (not trial and self.blend_choice == 1) or (trial and at >= TRIAL_FRAMES):
                     if self.paint_on_gpu[f, g](surface, k, False, False, timed, trial):
                         if trial:
                             self.trial_ns.append(Int(now_ns() - t0))
+                            self.decide_blend()
                         return
                     self.blend_choice = 2  # (it failed: the painter said why; the compute splat from now on)
             if self.on_gpu():
@@ -783,9 +795,8 @@ struct PointCloud(Movable):
                         if timed:
                             self.readback_ms = 0
                         self.milliseconds = Float64(t1 - t0) / 1e6
-                        if self.blend_choice == 0 and surface.gpu_painter != 0 and len(self.trial_ns) >= TRIAL_FRAMES:
+                        if self.blend_choice == 0 and surface.gpu_painter != 0 and len(self.trial_ns) < TRIAL_FRAMES:
                             self.trial_ns.append(Int(t1 - t0))
-                            self.decide_blend()
                         return
                     var dst = UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=surface.address)
                     ctx.enqueue_copy(dst_ptr=dst, src_buf=image)
