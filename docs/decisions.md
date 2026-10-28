@@ -595,3 +595,4 @@ One line per fork: `D-nn · chose X over Y · why · reversible?`
 
 ## Goal 34b: JS widgets everywhere, and agents see them (2026-10-27)
 - D-630 · order: agents first (the cover page claims every app is agent-usable), then a second library (ECharts, offline, no tile server), then the Mac's WKWebView through mac-ci · reversible? yes
+- D-631a · M1b added (owner, 2026-10-27: "we want first-class integration"): widgets wear the theme live (tokens as CSS variables + theme()), Tab order crosses native controls and widgets, widgets in the component matrix and the gallery; added before its work started, from the owner's words · reversible? yes
