@@ -19,10 +19,10 @@ M0, M1, M1b, M1c, M2, M3 PASS (Mac run 40617272485). Reviewer round 1: PASS (no 
 - **First-class citizens:** widgets wear the theme (tokens as CSS variables and `theme()`), switch light/dark live;
   Tab order crosses native controls and widgets; CodeMirror and ECharts live in `mojoui/widgets/` for any app.
 - **The developer loop:** `scripts/dev.sh <app>`: save, rebuild, reload with the Mojo state kept; JS errors with their
-  real file and line; WebKit's inspector in debug builds (GTK; the Mac's debug build isn't wired into build.sh yet).
+  real file and line; WebKit's inspector in debug builds (GTK runs it; the Mac's debug build, `MOJOUI_DEBUG=1 scripts/build.sh <app> mac`, compiles with it but hasn't run on a Mac).
 - **The Mac:** each widget in its own WKWebView, the same bundle, CSP, JSON-only messages and checks as GTK.
 
 ## Known gaps
-An outside agent can't attach to the Mac app yet (needs socket stubs in apple/sdk); the reviewer's should-fixes
-(tests for the agent socket's mode and the dev token, UTF-8-safe agent link reads on GTK, jslog rate limits on GTK
-and the Mac, error replies for commands lost in a crash) are the next small step.
+An outside agent can't attach to the Mac app yet (needs socket stubs in apple/sdk); the reviewer's should-fixes are done (D-677–D-682, check M0 M1c M1b M3 PASS on 2026-10-27): the agent link decodes whole
+lines, the socket's mode and the dev server's bind, token and debug-only start are tested, jslog is limited on GTK and
+the Mac, and a crashed page's commands get an error reply.
