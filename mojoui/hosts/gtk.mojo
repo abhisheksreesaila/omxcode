@@ -21,7 +21,7 @@ from mojoui.view import (
 from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP
 from mojoui.app import App, Event, Runtime, ms
 from mojoui.canvas import Surface, rgba
-from mojoui.present import Presenter
+from mojoui.present import Presenter, gpu_canvas_gate
 from mojoui.gpu import GPU_BUILD
 from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE
 from std.collections import Dict
@@ -2826,6 +2826,7 @@ struct GtkHost[A: App](Movable):
             self.canvases[ci].quiet += 1
             if self.canvases[ci].quiet >= 30:  # (~0.5 s: lets late relayouts, e.g. lists filling in, settle)
                 self.canvases[ci].armed = False
+                self.flush_pending(ci, True)
                 return False
         elif ci < len(self.canvases):
             self.canvases[ci].quiet = 0
@@ -2839,6 +2840,7 @@ struct GtkHost[A: App](Movable):
         memory, copied GPU→GPU into one) goes to the picture as a GdkGLTexture, no copy to the CPU. False: show
         the pixels in CPU memory instead (copied back here first if the GPU path failed)."""
         if not surface.gpu_drawn:
+            self.flush_pending(ci, False)  # (a CPU picture this time: a GPU one still waiting is dropped, its slot freed)
             return False
         var t0 = perf_counter_ns()
         var slot = surface.gpu_slot
@@ -2880,6 +2882,19 @@ struct GtkHost[A: App](Movable):
             self.present_told = True
             print("mojoui: GPU canvas pictures go to the screen without a copy to the CPU (" + how + "; " + pr[].why + ")", flush=True)
         return True
+
+    def flush_pending(mut self, ci: Int, show: Bool):
+        """MOJOUI_PRESENT_LAG=1 keeps a canvas's last GPU picture back a frame: when the canvas stops redrawing, show it
+        (show=True); when a CPU picture replaces it, free its slot (review item 6)."""
+        if ci < 0 or ci >= len(self.canvases) or self.canvases[ci].pending < 0 or self.pres == 0:
+            return
+        var slot = self.canvases[ci].pending
+        self.canvases[ci].pending = -1
+        if show:
+            self.hand_texture(self.canvases[ci].widget, slot, self.canvases[ci].pending_w, self.canvases[ci].pending_h)
+        else:
+            _ = self.presenter()[].settle(slot)
+            Pointer[Int, MutUntrackedOrigin](unsafe_from_address=self.presenter()[].busy_flag(slot))[] = 0
 
     def hand_texture(mut self, widget: Int, slot: Int, w: Int, h: Int):
         """A finished ring texture → the picture, as a GdkGLTexture (GTK's release callback frees the slot)."""
@@ -5423,7 +5438,7 @@ def on_gl_texture_released(flag: Int) abi("C"):
     Pointer[Int, MutUntrackedOrigin](unsafe_from_address=flag)[] = 0
 
 
-def probe_gpu_canvases(pres: Int) -> Int:
+def probe_gpu_canvases[A: App](pres: Int) -> Int:
     """Before the app starts (its GPU objects pick their device): can GPU canvas pictures go to the screen on the GPU?
     Needs a GDK GL context whose GPU CUDA can reach. Returns the GL context (0: no; the Presenter says why). When yes,
     GTK's GL renderer is asked for (its Vulkan renderer copies GL textures through the CPU on NVIDIA, D-737) and the
@@ -5432,12 +5447,7 @@ def probe_gpu_canvases(pres: Int) -> Int:
     comptime if not GPU_BUILD:
         pr[].why = "no GPU in this build"
         return 0
-    if getenv("MOJOUI_CANVAS_GPU") == "0":
-        pr[].why = "turned off (MOJOUI_CANVAS_GPU=0)"
-        return 0
-    var renderer = getenv("GSK_RENDERER")
-    if renderer != "" and renderer != "gl" and renderer != "ngl" and renderer != "opengl":
-        pr[].why = "GSK_RENDERER=" + renderer + " (only GTK's GL renderer shows a GL texture without a copy)"
+    if not gpu_canvas_gate(A.GPU_CANVAS, pr[]):  # (apps without a GPU canvas: no probe, no renderer or env change)
         return 0
     if external_call["gtk_init_check", c_int]() == 0:
         pr[].why = "no display"
@@ -5468,6 +5478,19 @@ def probe_gpu_canvases(pres: Int) -> Int:
     return ctx
 
 
+def on_app_shutdown[A: App](gapp: Int, host_addr: Int) abi("C"):
+    """The app is closing: release the GPU canvases' CUDA and GL objects in their GL context, then the context
+    (review item 4)."""
+    var host = host_at[A](host_addr)
+    if host[].pres == 0 or host[].gl_ctx == 0:
+        return
+    external_call["gdk_gl_context_make_current", NoneType](host[].gl_ctx)
+    host[].presenter()[].close()
+    external_call["gdk_gl_context_clear_current", NoneType]()
+    external_call["g_object_unref", NoneType](host[].gl_ctx)
+    host[].gl_ctx = 0
+
+
 def on_exit_stats[A: App]() abi("C"):
     """MOJOUI_PRESENT_STATS=1: how this run's GPU canvas pictures reached the screen (scripts/present_smoke.py)."""
     var key = String("mojoui-host")
@@ -5487,7 +5510,8 @@ def on_exit_stats[A: App]() abi("C"):
         paint_mean = Float64(host[].presenter()[].paint_ns) / Float64(max(host[].presenter()[].painted, 1)) / 1e6
     print("mojoui: present stats: gpu_blended " + String(host[].gpu_blended) + ", gpu_copied " + String(host[].gpu_copied)
           + ", cpu_copied " + String(host[].cpu_copied) + ", hand-over ms " + String(mean) + ", gpu copy ms " + String(copy_mean)
-          + ", blend ms " + String(paint_mean) + ", renderer " + getenv("GSK_RENDERER"), flush=True)
+          + ", blend ms " + String(paint_mean) + ", gpu device '" + getenv("MOJOUI_GPU_DEVICE") + "', why '"
+          + (host[].presenter()[].why if host[].pres != 0 else String("")) + "', renderer " + getenv("GSK_RENDERER"), flush=True)
 
 
 def run[A: App]() -> Int:
@@ -5495,7 +5519,7 @@ def run[A: App]() -> Int:
     var host = alloc(Layout[GtkHost[A]].single()).unsafe_leak()  # lives as long as the app
     var pres = alloc(Layout[Presenter].single()).unsafe_leak()  # (the GPU canvases' textures: a fixed address too)
     pres.unsafe_write(Presenter())
-    var gl_ctx = probe_gpu_canvases(Int(pres))  # (before the app makes its GPU objects: they pick the display's GPU)
+    var gl_ctx = probe_gpu_canvases[A](Int(pres))  # (before the app makes its GPU objects: they pick the display's GPU)
     A.init_shared()
     host.unsafe_write(GtkHost[A](A()))
     host[].pres = Int(pres)
@@ -5507,4 +5531,5 @@ def run[A: App]() -> Int:
         external_call["g_object_set_data", NoneType](gapp, key.as_c_string_span(), Int(host))
         _ = external_call["atexit", c_int](on_exit_stats[A])
     connect(gapp, "activate", on_activate[A], Int(host))
+    connect(gapp, "shutdown", on_app_shutdown[A], Int(host))
     return Int(external_call["g_application_run", c_int](gapp, c_int(0), 0))

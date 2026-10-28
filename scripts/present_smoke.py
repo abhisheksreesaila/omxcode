@@ -43,7 +43,7 @@ def run(n=1_000_000, frames=660, extra=None):
             sys.exit(f"present_smoke: the app failed (exit {r.returncode}):\n{out[-2000:]}")
         t = json.loads((Path(d) / "timings.json").read_text())
     stats = re.search(r"present stats: gpu_blended (\d+), gpu_copied (\d+), cpu_copied (\d+), hand-over ms ([\d.e-]+), "
-                      r"gpu copy ms ([\d.e-]+), blend ms ([\d.e-]+), renderer (\S*)", out)
+                      r"gpu copy ms ([\d.e-]+), blend ms ([\d.e-]+),.*renderer (\S*)", out)
     path = next((l for l in out.splitlines() if l.startswith("mojoui: GPU canvas pictures")), "")
     choice = [l for l in out.splitlines() if l.startswith("mojoui: additive points")]
     if not stats:

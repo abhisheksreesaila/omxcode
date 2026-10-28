@@ -123,6 +123,7 @@ def number(s: String, fallback: Int) -> Int:
 # ---------- the app ----------
 
 struct Main(App):
+    comptime GPU_CANVAS = True  # (its canvas draws on the GPU: a desktop host may show it straight from there)
     var cloud: PointCloud
     var size: Int  # index into SIZES (the slider's stop)
     var n: Int

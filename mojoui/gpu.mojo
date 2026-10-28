@@ -237,9 +237,10 @@ def _splat2_kernel[f: PlaceFn, g: TintFn](
     w32: Int32, h32: Int32, k: Knobs,
 ):
     """The same light with two atomics a point instead of three (goal 36b M6c): four words a pixel, red and green
-    one 64-bit word (red the low half), blue the third. Exact as before: a half only carries into the other past
-    2^32 (four million times GLOW_ONE), which the saturation skip keeps out of reach, as it kept a 32-bit channel
-    from wrapping."""
+    one 64-bit word (red the low half), blue the third. The exactness bound is goal 36's: a channel is exact while its
+    sum stays under 2^32, i.e. while fewer than about four million additions (2^32 / GLOW_ONE at full light) race
+    past the saturation check on one pixel at once. Past that, a 32-bit channel used to wrap; here red would carry
+    into green (D-741)."""
     var i = Int(global_idx.x)
     if i < Int(n):
         var p = pts.unsafe_offset(4 * i).unsafe_load[width=4]()

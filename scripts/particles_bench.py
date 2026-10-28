@@ -84,6 +84,7 @@ DESKTOP_ROWS = ["A", "A-cpu", "B-wasm", "B-native", "B-native-off", "C"]
 # C's 36b features switched off in turn (D-743), at FEATURE_SIZES: the per-feature effect
 FEATURES = {
     "C-36": {"MOJOUI_CANVAS_GPU": "0", "MOJOUI_SPLAT_ATOMICS": "3"},  # goal 36's path, on this desktop
+    "C-36gl": {"MOJOUI_CANVAS_GPU": "0", "MOJOUI_SPLAT_ATOMICS": "3", "GSK_RENDERER": "gl"},  # the same, on GTK's GL renderer
     "C+M6": {"MOJOUI_SPLAT_ATOMICS": "3", "MOJOUI_BLEND": "0"},  # + zero-copy presentation
     "C+M6c": {"MOJOUI_BLEND": "0"},  # + the two-atomic splat (C itself adds M6b: blending, measured at run time)
     "C-blend": {"MOJOUI_BLEND": "1"},  # M6b always on (hardware blending every frame)
@@ -92,7 +93,7 @@ FEATURES = {
 FEATURE_SIZES = [1_000_000, 5_000_000, 20_000_000]
 LABEL.update({
     "B-native-off": "B-native · Rust + wgpu (offscreen)",
-    "C-36": "C · goal 36's path (readback, 3 atomics)", "C+M6": "C · + M6 zero-copy", "C+M6c": "C · + M6c packed splat",
+    "C-36": "C · goal 36's path (readback, 3 atomics)", "C-36gl": "C · goal 36's path on GTK's GL renderer", "C+M6": "C · + M6 zero-copy", "C+M6c": "C · + M6c packed splat",
     "C-blend": "C · M6b blending always", "C-hidpi": "C · at the screen's 1.6× (2048×1152)",
 })
 # Chromium on Wayland for A, A-cpu and B-wasm alike: the binary (not /usr/bin/chromium, whose wrapper adds the
@@ -104,7 +105,7 @@ DESKTOP_A_FLAGS = [
     "--password-store=basic", "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows", "--window-size=1280,800",
 ]
-DESKTOP_C_ENV = {"GDK_BACKEND": "wayland", "MOJOUI_CANVAS_SCALE": "1", "MOJOUI_PRESENT_STATS": "1"}
+DESKTOP_C_ENV = {"GDK_BACKEND": "wayland", "MOJOUI_CANVAS_SCALE": "1", "MOJOUI_PRESENT_STATS": "1", "GSK_DEBUG": "renderer"}
 
 
 def use_desktop():
@@ -434,7 +435,10 @@ def run_c(n, row="C"):
         if not m:
             raise RuntimeError(f"{row}: no present stats in the app's output")
         b, c, cpu = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        r.update({"gpu_blended": b, "gpu_copied": c, "cpu_copied": cpu, "gsk_renderer": m.group(4),
+        used = _re.search(r"Using renderer '(\w+)'", log)  # (GSK_DEBUG=renderer: what GTK actually drew with)
+        if not used:
+            raise RuntimeError(f"{row}: GTK didn't say which renderer it used")
+        r.update({"gpu_blended": b, "gpu_copied": c, "cpu_copied": cpu, "gsk_renderer": m.group(4), "renderer_used": used.group(1),
                   "present_path": next((l.strip() for l in log.splitlines() if l.startswith("mojoui: GPU canvas pictures")), ""),
                   "blend_choices": [l.strip() for l in log.splitlines() if l.startswith("mojoui: additive points")]})
         if cpu == 0:  # no picture went through the CPU in the frame loop: the readback isn't part of these frames
@@ -473,6 +477,11 @@ def combine(runs):
             out[k] = round(statistics.median(xs), 3)
             out[k + "_spread"] = round(max(xs) - min(xs), 3)
     for k in ("frame_ms_is", "step_ms_is", "adapter", "threads", "crossOriginIsolated", "present", "present_path", "gsk_renderer"):
+        if k in runs[0]:
+            out[k] = runs[0][k]
+    if "renderer_used" in runs[0]:
+        out["renderer_used"] = sorted({r["renderer_used"] for r in runs})
+    for k in ():
         if k in runs[0]:
             out[k] = runs[0][k]
     if "cpu_copied" in runs[0]:  # (C on the desktop: every run's picture path, worst case)
@@ -763,14 +772,17 @@ def report(res):
     if any(r in R for r in FEATURES):
         L.append("\n## Each 36b feature's effect on C (frame ms, the same protocol)\n")
         fs = FEATURE_SIZES
-        L.append("| C with | " + " | ".join(mill(n) for n in fs) + " |")
+        L.append("| C with (GTK renderer used) | " + " | ".join(mill(n) for n in fs) + " |")
         L.append("|---|" + "---|" * len(fs))
-        for row in ["C-36", "C+M6", "C+M6c", "C", "C-blend", "C-hidpi"]:
+        for row in ["C-36", "C-36gl", "C+M6", "C+M6c", "C", "C-blend", "C-hidpi"]:
             if row in R:
                 name = {"C": "C · + M6b (all of 36b: blending measured at run time)"}.get(row, LABEL[row])
-                L.append(f"| {name} | " + " | ".join(f"{fmt(R[row][str(n)]['frame_ms'])} ±{fmt(R[row][str(n)]['frame_ms_spread'])}"
+                used = "/".join(next(iter(R[row].values())).get("renderer_used", []))
+                L.append(f"| {name} ({used}) | " + " | ".join(f"{fmt(R[row][str(n)]['frame_ms'])} ±{fmt(R[row][str(n)]['frame_ms_spread'])}"
                                                     if str(n) in R[row] else "–" for n in fs) + " |")
-        steps = [("M6 zero-copy presentation", "C-36", "C+M6"), ("M6c packed splat", "C+M6", "C+M6c"), ("M6b blending, measured", "C+M6c", "C")]
+        steps = [("GTK's GL renderer instead of its Vulkan one (goal 36's path both)", "C-36", "C-36gl"),
+                 ("M6 the picture kept on the GPU (no readback, no CPU hand-over; GL renderer both)", "C-36gl", "C+M6"),
+                 ("M6c packed splat", "C+M6", "C+M6c"), ("M6b blending, measured", "C+M6c", "C")]
         L.append("\nEffect of each (frame ms saved, before → after): " + "; ".join(
             f"{name}: " + ", ".join(f"{mill(n)} {fmt(R[a][str(n)]['frame_ms'] - R[b][str(n)]['frame_ms'])}" for n in fs
                                     if str(n) in R.get(a, {}) and str(n) in R.get(b, {})) for name, a, b in steps if a in R and b in R) + ".")
@@ -831,7 +843,9 @@ DESKTOP_CAVEATS = [
     "the picture goes from CUDA memory into a GL texture GPU→GPU (or is blended into one), no readback: each run's "
     "present counters (gpu_copied, gpu_blended, cpu_copied = 0) are in results-desktop.json. The host waits for the "
     "GPU once a frame before GTK draws (NVIDIA stalls GL behind queued CUDA work, D-746); one frame in flight is opt-in "
-    "and off here (D-747).",
+    "and off here (D-747). The renderer GTK actually drew with is recorded for every C run (GSK_DEBUG=renderer): goal "
+    "36's path (C-36) uses GTK's default, Vulkan; C-36gl is the same path on GL, so the renderer and the readback "
+    "are measured apart.",
     "C's additive points use the compute splat, and blending is measured against it after 120 frames and then 240, "
     "480… (D-739): inside the 600 measured frames that is two short measurements (6 frames of the splat, then blending "
     "until it is clearly slower, at most 6 frames); C-blend has blending on every frame.",

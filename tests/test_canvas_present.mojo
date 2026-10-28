@@ -163,4 +163,24 @@ def main() raises:
     Pointer[Int, MutUntrackedOrigin](unsafe_from_address=pp[].busy_flag(held[2]))[] = 0  # (the toolkit lets go of one)
     assert_equal(pp[].acquire(64, 32), held[2], "the released one comes back")
     print("  ring: " + String(SLOTS) + " held → none handed out; the one released comes back")
+    # 6. A GPU failure gives every texture back to GL (nothing left mapped); close() releases everything, twice safely
+    for i in range(SLOTS):
+        Pointer[Int, MutUntrackedOrigin](unsafe_from_address=pp[].busy_flag(i))[] = 0
+    var c6 = cloud(10_000, True)
+    var b6 = List[UInt32](length=64 * 32, fill=0)
+    var s6 = Surface(Int(b6.unsafe_ptr()), 64, 32, 1.0)
+    s6.gpu_ok = True
+    c6.splat[place, tint](s6, k)
+    var slot6 = pp[].acquire(64, 32)
+    assert_true(pp[].copy_in(slot6, s6.gpu_address, 64, 32))
+    assert_equal(pp[].mapped_count(), 1, "the copy's texture stays mapped until settled")
+    pp[].give_up("a test failure")
+    assert_equal(pp[].mapped_count(), 0, "giving up leaves nothing mapped")
+    assert_false(pp[].ok)
+    pp[].close()
+    for i in range(SLOTS):
+        assert_true(pp[].res[i] == 0 and pp[].done[i] == 0 and pp[].tex[i] == 0, "slot released")
+    assert_true(pp[].cu_ctx == 0 and pp[].vbo_res == 0 and pp[].prog_points == 0)
+    pp[].close()
+    print("  give_up: nothing left mapped; close(): registrations, events and GL objects released (twice: safe)")
     print("canvas present: ok")

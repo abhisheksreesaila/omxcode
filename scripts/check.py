@@ -265,8 +265,25 @@ def m6():
         else:
             notes.append(f"desktop: {d['gpu_presented']} of {d['frames']} frames shown from the GPU, 0 readbacks "
                          f"({d['gsk_renderer']} renderer, {d['frame_ms_mean']:.2f} ms/frame at 1M)")
-    if run(["git", "diff", "--quiet", "216c2b5", "--", "examples/particles/app.mojo"]).returncode != 0:
-        problems.append("examples/particles/app.mojo changed since goal 36 (M6 must be the framework's)")
+    # (review item 1, D-752: the app's only change is declaring its GPU canvas)
+    added = [l for l in run(["git", "diff", "-U0", "216c2b5", "--", "examples/particles/app.mojo"]).stdout.splitlines()
+             if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+    if added and (len(added) != 1 or "comptime GPU_CANVAS = True" not in added[0]):
+        problems.append("examples/particles/app.mojo changed beyond declaring its GPU canvas: " + "; ".join(added)[:300])
+    ok_t, msg_t, _ = mojo_test("tests/test_gpu_canvas_gate.mojo", "gpu canvas gate: ok")
+    (notes if ok_t else problems).append(msg_t)
+    hb = run(["scripts/build.sh", "hello", "linux"], 900)
+    hello = ROOT / "build/hello/linux/hello"
+    if hb.returncode != 0 or not hello.exists():
+        problems.append("couldn't build examples/hello")
+    else:
+        r = subprocess.run([str(hello)], cwd=ROOT, capture_output=True, text=True, timeout=120,
+                           env=dict(os.environ, MOJOUI_PRESENT_STATS="1", MOJOUI_TEST=""))
+        st = next((l for l in (r.stdout + r.stderr).splitlines() if "present stats" in l), "")
+        if "gpu device ''" not in st or "declares no GPU canvas" not in st:
+            problems.append(f"a non-GPU app (hello) wasn't left alone: {st!r}")
+        else:
+            notes.append("hello (no GPU canvas): not probed, MOJOUI_GPU_DEVICE unset, renderer as the host set it")
     if problems:
         return False, "; ".join(problems)
     return True, "; ".join(notes)
@@ -339,8 +356,12 @@ def m7():
             if row.startswith("C") and row != "C-36":
                 if r.get("cpu_copied_max") != 0 or r.get("gpu_presented_min", 0) < 600 or r.get("gsk_renderer") != "gl":
                     problems.append(f"{row} {n}: not the zero-copy path ({r.get('cpu_copied_max')} readbacks, {r.get('gpu_presented_min')} from the GPU, renderer {r.get('gsk_renderer')})")
-            if row == "C-36" and not r.get("cpu_copied_max"):
-                problems.append(f"C-36 {n}: goal 36's path should copy to the CPU")
+            if row in ("C-36", "C-36gl") and not r.get("cpu_copied_max"):
+                problems.append(f"{row} {n}: goal 36's path should copy to the CPU")
+            if row.startswith("C") and not r.get("renderer_used"):
+                problems.append(f"{row} {n}: the renderer GTK used isn't recorded")
+            if row in ("C-36gl", "C", "C+M6", "C+M6c") and r.get("renderer_used") != ["GskGLRenderer"]:
+                problems.append(f"{row} {n}: drew with {r.get('renderer_used')}, not GTK's GL renderer")
             if r.get("holds_60") != (r["frame_ms"] <= 1000 / 60 and r["p95_interval_ms"] <= 20):
                 problems.append(f"{row} {n}: holds_60 disagrees with its numbers")
     if "Wayland window" not in (rows.get("B-native", {}).get("1000000", {}).get("frame_ms_is") or ""):

@@ -167,6 +167,11 @@ def main() raises:
         for ch in range(3):
             assert_true(abs(chan(gl_over[i], ch) - chan(cpu_over[i], ch)) <= 2, "GL and CPU 'over' agree")
 
+    # 3b. Drawing with no vertex buffer mapped (nothing written this frame): no bogus unmap, the painter stays on
+    var s0 = pp[].acquire(32, 16)
+    assert_true(pp[].draw_vertices(s0, 32, 16, 0, False, False), "an empty draw with nothing mapped")
+    assert_true(pp[].blend_ok, "the painter didn't give up: " + pp[].blend_why)
+    print("  an empty draw with nothing mapped: ok, the painter stays on")
     # 4. MOJOUI_BLEND=0: no painter; the compute splat leaves the picture in CUDA memory instead
     setenv("MOJOUI_BLEND", "0")
     var off = alloc(Layout[Presenter].single()).unsafe_leak()

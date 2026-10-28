@@ -273,16 +273,103 @@ struct Presenter(Movable):
         return True
 
     def give_up(mut self, why: String):
-        """A call failed mid-run: say so once; every canvas uses the copy from now on."""
+        """A call failed mid-run: say so once; every canvas uses the copy from now on. Nothing is left mapped."""
         print("mojoui: GPU pictures go back to the CPU copy (" + why + ")", flush=True)
+        self.unmap_all()
+        self.release_cuda()  # (GL textures the toolkit may still show stay until close())
         self.ok = False
         self.blend_ok = False
         self.why = why
 
     def give_up_blend(mut self, why: String):
         print("mojoui: hardware blending off, the compute splat instead (" + why + ")", flush=True)
+        self.unmap_vbo()
         self.blend_ok = False
         self.blend_why = why
+
+    def unmap_vbo(mut self):
+        if self.vbo_mapped and self.vbo_res != 0:
+            self.push()
+            self.out[1] = self.vbo_res
+            _ = fcall[Int32](self.cu("cuGraphicsUnmapResources"), c_uint(1), self.at(1), 0)
+            self.pop()
+        self.vbo_mapped = False
+
+    def unmap_all(mut self):
+        """Gives every texture and the vertex buffer back to GL (waiting for their CUDA work first)."""
+        if self.cu_ctx == 0:
+            return
+        for i in range(SLOTS):
+            if self.mapped[i] != 0:
+                _ = self.settle(i)
+        self.unmap_vbo()
+
+    def mapped_count(self) -> Int:
+        var n = 1 if self.vbo_mapped else 0
+        for i in range(SLOTS):
+            n += self.mapped[i]
+        return n
+
+    def release_cuda(mut self):
+        """Unregisters every CUDA↔GL registration and destroys the events (after unmap_all)."""
+        if self.cu_ctx == 0:
+            return
+        self.unmap_all()
+        self.push()
+        for i in range(SLOTS):
+            if self.res[i] != 0:
+                _ = fcall[Int32](self.cu("cuGraphicsUnregisterResource"), self.res[i])
+                self.res[i] = 0
+            if self.done[i] != 0:
+                _ = fcall[Int32](self.cu("cuEventDestroy_v2"), self.done[i])
+                self.done[i] = 0
+        if self.vbo_res != 0:
+            _ = fcall[Int32](self.cu("cuGraphicsUnregisterResource"), self.vbo_res)
+            self.vbo_res = 0
+            self.vbo_bytes = 0
+        self.pop()
+
+    def close(mut self):
+        """Releases everything (the window is closing, or the GPU failed): CUDA registrations and events, then the GL
+        textures, buffers, programs and sync objects (the GL context must be current for those; the host unrefs it).
+        Safe to call twice; ok is False afterwards."""
+        self.release_cuda()
+        if self.gl != 0:
+            for i in range(SLOTS):
+                if self.gl_done[i] != 0:
+                    fcall[NoneType](self.g("glDeleteSync"), self.gl_done[i])
+                    self.gl_done[i] = 0
+                if self.tex[i] != 0:
+                    self.out[0] = self.tex[i]
+                    fcall[NoneType](self.g("glDeleteTextures"), c_int(1), self.at(0))
+                    self.tex[i] = 0
+            for name in ["accum", "vbo", "vao", "fbo_accum", "fbo_out"]:
+                var id = self.accum if name == "accum" else (self.vbo if name == "vbo" else (self.vao if name == "vao" else (self.fbo_accum if name == "fbo_accum" else self.fbo_out)))
+                if id == 0:
+                    continue
+                self.out[0] = id
+                var del_fn = "glDeleteTextures" if name == "accum" else ("glDeleteBuffers" if name == "vbo" else ("glDeleteVertexArrays" if name == "vao" else "glDeleteFramebuffers"))
+                fcall[NoneType](self.g(del_fn), c_int(1), self.at(0))
+            self.accum = 0
+            self.vbo = 0
+            self.vao = 0
+            self.fbo_accum = 0
+            self.fbo_out = 0
+            self.vbo_bytes = 0
+            self.aw = 0
+            self.ah = 0
+            for prog in [self.prog_points, self.prog_resolve]:
+                if prog != 0:
+                    fcall[NoneType](self.g("glDeleteProgram"), c_uint(prog))
+            self.prog_points = 0
+            self.prog_resolve = 0
+        if self.cu_ctx != 0:
+            var dev = self.device
+            _ = fcall[Int32](self.cu("cuDevicePrimaryCtxRelease_v2"), c_int(dev))
+            self.cu_ctx = 0
+        self.ok = False
+        self.blend_ok = False
+        self.why = "closed"
 
     # ---------- the texture ring ----------
 
@@ -337,25 +424,30 @@ struct Presenter(Movable):
         if r == 0:
             r = fcall[Int32](self.cu("cuGraphicsSubResourceGetMappedArray"), self.at(2), self.res[slot], c_uint(0), c_uint(0))
             if r == 0:
-                # CUDA_MEMCPY2D: 16 eight-byte fields (the memory types are 4-byte enums in 8-byte slots)
+                # CUDA_MEMCPY2D: 16 eight-byte fields (the memory types are 4-byte enums in 8-byte slots), in order:
+                #  0 srcXInBytes  1 srcY  2 srcMemoryType  3 srcHost  4 srcDevice  5 srcArray  6 srcPitch
+                #  7 dstXInBytes  8 dstY  9 dstMemoryType 10 dstHost 11 dstDevice 12 dstArray 13 dstPitch
+                # 14 WidthInBytes 15 Height. (A Metal port: a blit from the picture's MTLBuffer into the slot's texture.)
                 for k in range(16):
                     self.out[8 + k] = 0
                 self.out[8 + 2] = CU_MEMORYTYPE_DEVICE
-                self.out[8 + 4] = src
+                self.out[8 + 4] = src  # the picture, rows of w pixels with no gaps
                 self.out[8 + 6] = w * 4
                 self.out[8 + 9] = CU_MEMORYTYPE_ARRAY
-                self.out[8 + 12] = self.out[2]
+                self.out[8 + 12] = self.out[2]  # the texture's CUDA array (mapped above)
                 self.out[8 + 14] = w * 4
                 self.out[8 + 15] = h
                 r = fcall[Int32](self.cu("cuMemcpy2DAsync_v2"), self.at(8), 0)
+            if r == 0 and self.done[slot] == 0:
+                r = fcall[Int32](self.cu("cuEventCreate"), self.at(0), c_uint(2))  # CU_EVENT_DISABLE_TIMING
+                if r == 0:
+                    self.done[slot] = self.out[0]
+            if r == 0:
+                r = fcall[Int32](self.cu("cuEventRecord"), self.done[slot], 0)
             if r == 0:  # (left mapped, with an event after the copy: settle() unmaps once it's done, D-746)
                 self.mapped[slot] = 1
-                if self.done[slot] == 0:
-                    r = fcall[Int32](self.cu("cuEventCreate"), self.at(0), c_uint(2))  # CU_EVENT_DISABLE_TIMING
-                    self.done[slot] = self.out[0]
-                if r == 0:
-                    r = fcall[Int32](self.cu("cuEventRecord"), self.done[slot], 0)
-            else:
+            else:  # (any failure: never leave the texture mapped)
+                self.out[1] = self.res[slot]
                 _ = fcall[Int32](self.cu("cuGraphicsUnmapResources"), c_uint(1), self.at(1), 0)
         self.pop()
         if r != 0:
@@ -494,7 +586,7 @@ struct Presenter(Movable):
         picture (additive: ONE, ONE; over: SRC_ALPHA, ONE_MINUS_SRC_ALPHA, in vertex order), then resolves it into the
         slot's texture. GL context current."""
         var t0 = perf_counter_ns()
-        if self.mapped:
+        if self.vbo_mapped:
             self.push()
             self.out[1] = self.vbo_res
             var r = fcall[Int32](self.cu("cuGraphicsUnmapResources"), c_uint(1), self.at(1), 0)
@@ -575,6 +667,25 @@ struct Presenter(Movable):
         fcall[NoneType](self.g("glReadPixels"), c_int(0), c_int(0), c_int(self.tw[slot]), c_int(self.th[slot]), c_uint(GL_RGBA), c_uint(GL_UNSIGNED_BYTE), dst)
         fcall[NoneType](self.g("glBindFramebuffer"), c_uint(GL_FRAMEBUFFER), c_uint(0))
         return fcall[c_uint](self.g("glGetError")) == 0
+
+
+# ---------- which apps may use it ----------
+
+def gpu_canvas_gate(declared: Bool, mut pr: Presenter) -> Bool:
+    """Whether a host should probe for GPU pictures at all (before touching the toolkit or the environment): only for
+    an app that declares a GPU canvas (App.GPU_CANVAS), unless turned off or a renderer that can't take a GL texture
+    without a copy was chosen. Sets pr.why when not (D-752)."""
+    if not declared:
+        pr.why = "the app declares no GPU canvas (App.GPU_CANVAS)"
+        return False
+    if getenv("MOJOUI_CANVAS_GPU") == "0":
+        pr.why = "turned off (MOJOUI_CANVAS_GPU=0)"
+        return False
+    var renderer = getenv("GSK_RENDERER")
+    if renderer != "" and renderer != "gl" and renderer != "ngl" and renderer != "opengl":
+        pr.why = "GSK_RENDERER=" + renderer + " (only GTK's GL renderer shows a GL texture without a copy)"
+        return False
+    return True
 
 
 # ---------- a GL context with no window (tests, and offscreen pictures) ----------
