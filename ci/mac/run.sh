@@ -7,8 +7,12 @@ system_profiler SPDisplaysDataType > out/displays.txt 2>&1
 # Scroll bars as a trackpad Mac shows them (overlay): GitHub's Macs have a mouse, so "Automatically" means legacy bars that
 # take 17 pt from every scroll view, which AppKit keeps whatever the app asks (the person's choice; 2026-10-25)
 defaults write -g AppleShowScrollBars -string WhenScrolling
+# ci/apps.txt (scripts/mac-ci <app>…): only those apps run; without it, every app whose zip the release holds
+only=""; [ -f ci/apps.txt ] && only=" $(tr '\n' ' ' < ci/apps.txt)"
+wanted() { [ -z "$only" ] || case "$only" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 for steps_file in ci/*.steps; do
     app=$(basename "$steps_file" .steps)
+    wanted "$app" || continue
     zip=$(ls zips/"$app"-*.zip | head -1)
     rm -rf "apps/$app" && mkdir -p "apps/$app" && ditto -x -k "$zip" "apps/$app"
     bundle=$(ls -d apps/"$app"/*.app | head -1)
@@ -41,6 +45,7 @@ mkdir -p out/side
 mkdir -p fixture && tar -xzf zips/omxcode-src.tar.gz -C fixture scripts/console_fixture.py docs/goals/33/fixtures 2>/dev/null || echo "no console fixture in the tarball"
 while IFS='|' read -r app screen settings steps; do
     case "$app" in ''|'#'*) continue ;; esac
+    wanted "$app" || continue
     bundle=$(ls -d apps/"$app"/*.app 2>/dev/null | head -1)
     if [ -z "$bundle" ] && zip=$(ls zips/"$app"-*.zip 2>/dev/null | head -1) && [ -n "$zip" ]; then  # (an app with side lines but no steps file)
         mkdir -p "apps/$app" && ditto -x -k "$zip" "apps/$app" && bundle=$(ls -d apps/"$app"/*.app | head -1) && xattr -cr "$bundle"

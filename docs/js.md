@@ -3,7 +3,7 @@
 A Mojo app can place any JavaScript widget (an editor, a map, a chart library) in its screen. The widget is a custom
 element; Mojo gives it **props** (JSON), hears its **events** in `update()`, and can call its **commands** (the answer
 comes back to `update()` later, as an HTTP reply does). The app keeps every line of state; the widget keeps only its own
-(a cursor, a scroll position, a counter's count). Runs on the web and on GTK (§6); the Mac shows `instead` until 34b.
+(a cursor, a scroll position, a counter's count). Runs on the web, on GTK (§6) and on the Mac (§7).
 
 The example is `examples/widgets` (a note in CodeMirror 6, a word count drawn by mojoui and by Apache ECharts, and a
 plain-JS counter).
@@ -231,3 +231,33 @@ doesn't change: `mojoui-widgets.js` sees the WebKit message handler and talks to
 - **A crashed widget**: if its web process ends, the page loads again once and the widget mounts afresh with Mojo's
   props (its own state is lost); a second time, the WebComponent shows its `instead` view.
 
+
+## 7. On the Mac (AppKit)
+
+Each WebComponent gets a **WKWebView** of its own (`mojoui/hosts/appkit_webview.mojo`), loading the **same files** as
+the web and GTK: `scripts/build.sh <app> mac` runs the same esbuild step into the app's `Contents/Resources/webview/`
+(same bytes, same hashed names, the web host's `mojoui-widgets.js` and `mojoui.css` beside them). Your widget code
+doesn't change: WKWebView offers the same `window.webkit.messageHandlers.mojoui` that WebKitGTK does.
+
+- **The page** is `mojoui://app/widget.html`, the same page GTK builds, answered by a `WKURLSchemeHandler` from that
+  folder: the page, the runtime, the host's sheet, the bundles `web_assets()` lists (with SRI) and the app's fonts,
+  nothing else (any other path fails). Every answer carries the web's CSP with `frame-src 'none'`, nosniff and an
+  explicit type.
+- **Props, the theme and commands** go in through `callAsyncJavaScript` with the message as its argument `m` (data,
+  never code): `return mojoui.native.receive(m)`. A rebuild moves the live view into the new box (keyed by tag and id),
+  so typing, focus and the widget's own state stay; it is never loaded again.
+- **Events and replies** come back through the `mojoui` `WKScriptMessageHandler`: only a string holding a JSON object,
+  from the page's main frame, naming the view's own widget; a reply only from the widget its command went to, once.
+  The same rules as GTK, counted when refused.
+- **Security**: the CSP holds the page to its origin; a content rule list blocks every http(s), ws(s), ftp and file
+  load besides; a non-persistent data store (nothing on disk); the navigation delegate allows only the page itself in
+  its main frame (no navigation away, no target=_blank), the UI delegate opens no window, and JavaScript can't open
+  windows. No inspector.
+- **A crashed widget**: if its web content process ends, the page loads again once and the widget mounts afresh with
+  Mojo's props; a second time, the WebComponent shows its `instead` view.
+- **WebKit.framework** is loaded (NSBundle) the first time a WebComponent shows; it is part of macOS, so nothing to
+  install, and the app links no new C function (Objective-C goes by name).
+- **Test steps** (MOJOUI_TEST, GitHub's Macs through `scripts/mac-ci`): `webtype:<tag>#<id>=text` (a click into the
+  view, then real key events), `webclick:<tag>#<id>=<CSS selector>` (a real click on that element), `webjs:` and
+  `webkill:` as on GTK. The report's pictures draw each view in from WebKit's own snapshot (a WKWebView draws out of
+  process, so AppKit's picture of the window leaves it blank).

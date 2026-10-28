@@ -26,6 +26,7 @@ jobs:
         timeout-minutes: 15  # (a hung install leaves the job's time for the cross-built run)
         run: |
           mkdir -p out src
+          if [ -f ci/apps.txt ] && ! grep -qx omxplorer ci/apps.txt; then echo "omxplorer isn't in this run (ci/apps.txt)"; exit 0; fi
           trap 'echo "native build step failed at line $LINENO: the cross-built zip runs" >> "$GITHUB_WORKSPACE/out/native-build.txt"' ERR
           tar -xzf zips/omxcode-src.tar.gz -C src
           curl -fsSL https://pixi.sh/install.sh | bash > out/native-setup.txt 2>&1
@@ -53,6 +54,7 @@ jobs:
         timeout-minutes: 20
         run: |
           mkdir -p out probe
+          if [ -f ci/apps.txt ] && ! grep -qx omxplorer ci/apps.txt; then echo "omxplorer isn't in this run (ci/apps.txt)"; exit 0; fi
           curl -fsSL https://pixi.sh/install.sh | bash > out/gpuprobe-setup.txt 2>&1
           export PATH="$HOME/.pixi/bin:$PATH"
           cd probe
