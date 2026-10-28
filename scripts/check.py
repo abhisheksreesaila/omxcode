@@ -139,14 +139,14 @@ def m4():
 
 
 def m5():
-    """The page: docs/why.html in four chapters, its generated parts equal to what the final results.json gives
+    """The page: docs/why-details.html in four chapters, its generated parts equal to what the final results.json gives
     (scripts/why_tables.py --check), no provisional text, every ✓ in the feature table links to something that exists,
     every ✗ says why, and every image it shows exists."""
     import re
     import why_tables as wt
-    page_path = ROOT / "docs" / "why.html"
+    page_path = ROOT / "docs" / "why-details.html"
     if not page_path.exists():
-        return False, "docs/why.html missing"
+        return False, "docs/why-details.html missing"
     page = page_path.read_text()
     problems = []
     for cid in ("performance", "code", "agents", "features"):
@@ -206,7 +206,7 @@ def m5():
     if problems:
         return False, "; ".join(problems[:12])
     big = res["largest_n_at_60"]
-    return True, (f"docs/why.html: four chapters, tables match results.json (commit {res['commit']}), feature table {yes} ✓ "
+    return True, (f"docs/why-details.html: four chapters, tables match results.json (commit {res['commit']}), feature table {yes} ✓ "
                   f"all linked, {no} ✗/partial all explained; largest N at 60 fps on the page: "
                   + ", ".join(f"{r} {wt.mn(v)}" for r, v in big.items()))
 
@@ -387,7 +387,7 @@ def m8():
     """The page from the desktop (GOAL.md 36b M8): chapter 1 generated from results-desktop.json (and goal 36's table
     from results.json), the setup stated, no claim left from the inferred software-renderer reading, M5 still passing."""
     import why_tables as wt
-    page = (ROOT / "docs" / "why.html").read_text()
+    page = (ROOT / "docs" / "why-details.html").read_text()
     problems = []
     d = wt.load_desktop()
     if not d:
@@ -419,7 +419,7 @@ def m8():
     if problems:
         return False, "; ".join(problems[:10])
     c = d["rows"]["C"]
-    return True, (f"docs/why.html chapter 1 from results-desktop.json (commit {d['commit']}): omxcode "
+    return True, (f"docs/why-details.html chapter 1 from results-desktop.json (commit {d['commit']}): omxcode "
                   + ", ".join(f"{wt.mn(n)} {c[str(n)]['frame_ms']:.2f} ms" for n in (1_000_000, 5_000_000, 20_000_000))
                   + f"; setup, feature effects and goal 36's Xvfb table on the page; M5 PASS")
 

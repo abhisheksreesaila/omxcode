@@ -1,4 +1,4 @@
-"""Records the MCP session docs/why.html shows (goal 36 M5, reviewer item 2): an agent drives the native particle app.
+"""Records the MCP session docs/why-details.html shows (goal 36 M5, reviewer item 2): an agent drives the native particle app.
 
     pixi run python scripts/why_mcp.py      # writes docs/goals/36/mcp-transcript.json
 

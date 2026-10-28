@@ -1,4 +1,4 @@
-"""Writes docs/why.html's generated parts from docs/goals/36/results-desktop.json (goal 36b: the real desktop),
+"""Writes docs/why-details.html's generated parts from docs/goals/36/results-desktop.json (goal 36b: the real desktop),
 docs/goals/36/results.json (goal 36: the virtual display) and the builds' real files (goal 36 M5, goal 36b M8).
 
   pixi run python scripts/why_tables.py               # rewrite the page's generated parts from results.json
@@ -6,7 +6,7 @@ docs/goals/36/results.json (goal 36: the virtual display) and the builds' real f
   pixi run python scripts/why_tables.py --provisional # from results-provisional.json (marked PROVISIONAL on the page)
 
 Every number on the page, and every sentence that says who is faster, comes from here, so the final measurement drops
-in by rerunning it. Each part lives between <!-- why:NAME --> and <!-- /why:NAME --> in docs/why.html. The code
+in by rerunning it. Each part lives between <!-- why:NAME --> and <!-- /why:NAME --> in docs/why-details.html. The code
 excerpts are cut from the builds' files by line range and highlighted here (plain CSS classes, no library).
 """
 
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PAGE = ROOT / "docs" / "why.html"
+PAGE = ROOT / "docs" / "why-details.html"
 RESULTS = ROOT / "docs" / "goals" / "36" / "results.json"
 PROVISIONAL = ROOT / "docs" / "goals" / "36" / "results-provisional.json"
 DESKTOP = ROOT / "docs" / "goals" / "36" / "results-desktop.json"
@@ -564,7 +564,7 @@ def apply(text, frags):
     for name, body in frags.items():
         rx = re.compile(f"(<!-- why:{name} -->)(.*?)(<!-- /why:{name} -->)", re.S)
         if not rx.search(text):
-            raise SystemExit(f"docs/why.html has no <!-- why:{name} --> … <!-- /why:{name} --> markers")
+            raise SystemExit(f"docs/why-details.html has no <!-- why:{name} --> … <!-- /why:{name} --> markers")
         text = rx.sub(lambda m: m.group(1) + "\n" + body + "\n" + m.group(3), text, count=1)
     return text
 
@@ -582,12 +582,12 @@ def main(args):
     new = apply(page, fragments(res))
     if "--check" in args:
         if new != page:
-            print("docs/why.html differs from what results.json gives: rerun scripts/why_tables.py")
+            print("docs/why-details.html differs from what results.json gives: rerun scripts/why_tables.py")
             return 1
-        print("docs/why.html matches results.json")
+        print("docs/why-details.html matches results.json")
         return 0
     PAGE.write_text(new)
-    print(f"docs/why.html: {len(fragments(res))} parts written from {'results-provisional.json (PROVISIONAL)' if res.get('provisional') else 'results.json'}")
+    print(f"docs/why-details.html: {len(fragments(res))} parts written from {'results-provisional.json (PROVISIONAL)' if res.get('provisional') else 'results.json'}")
     return 0
 
 
