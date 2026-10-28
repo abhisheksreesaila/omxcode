@@ -69,7 +69,9 @@ trait App(Movable, Deinitable):
     comptime GPU_CANVAS: Bool = False
     """True: a canvas draws on the GPU (mojoui.gpu). A desktop host may then show its pictures straight from the GPU
     (mojoui.present): it probes CUDA↔GL before the app is made and, when that works, asks GTK for its GL renderer and
-    points the app's GPU work at the display's GPU (D-737, D-738). Other apps keep the host's defaults (D-752)."""
+    points the app's GPU work at the display's GPU (D-737, D-738). Other apps keep the host's defaults (D-752).
+    Opt-in on purpose: a GPU canvas that doesn't declare it (examples/gpu, examples/lens today) still works, through
+    the CPU copy; declaring it is a one-line change once an app is checked on the zero-copy path."""
 
     def __init__(out self):
         """The starting state. Hosts create the app themselves."""
