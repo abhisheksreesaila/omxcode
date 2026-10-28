@@ -14,6 +14,10 @@ How it works
   rows it needs.
 - The compute time is sent back in a `Server-Timing` header (and `X-Compute-Ms`), so the page can separate it
   from the HTTP hop and its own drawing.
+- The group-by runs on Polars' streaming engine (`collect(engine="streaming")`, morsels across every core: the
+  same lever build C uses); the 50-row head runs on the default engine.
+- Responses are serialised with orjson (FastAPI's ORJSONResponse) when it is installed, else the standard JSONResponse;
+  uvicorn runs with httptools (its C HTTP parser) and uvloop. /api/meta says which ran.
 - One uvicorn process, one worker: the data lives in this process's memory, so more workers would mean more
   copies of it. Requests are handled in FastAPI's thread pool; Polars runs each query on all cores.
 """
@@ -31,6 +35,15 @@ import polars as pl
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+
+try:
+    import orjson  # noqa: F401
+    from fastapi.responses import ORJSONResponse as FastJSON
+    JSON_LIB = "orjson"
+except ImportError:  # not in this pixi env yet (see README.md)
+    FastJSON, JSON_LIB = JSONResponse, "json (orjson not installed)"
+import httptools  # noqa: F401,E402  (uvicorn's fast HTTP parser; fail loudly if it is missing)
+import uvloop  # noqa: F401,E402
 from fastapi.staticfiles import StaticFiles
 
 HERE = Path(__file__).resolve().parent
@@ -75,7 +88,7 @@ def query(day_from, day_to, min_amount, region):
     groups = (matched.group_by("product")
                      .agg(pl.len().alias("n"), pl.col("amount").sum().alias("s"),
                           ((pl.col("amount") - pl.col("cost")) / pl.col("amount")).sum().alias("m"))
-                     .collect())
+                     .collect(engine="streaming"))
     table = matched.head(ROWS_SHOWN).collect()
     rows = int(groups["n"].sum()) if groups.height else 0
     total = float(groups["s"].sum()) if groups.height else 0.0
@@ -100,7 +113,8 @@ def parse_day(s):
 @app.get("/api/meta")
 def meta():
     return {"file": DATA["file"], "rows": DATA["df"].height, "load_ms": DATA["load_ms"], "regions": DATA["regions"],
-            "first_day": DATA["first_day"], "last_day": DATA["last_day"]}
+            "first_day": DATA["first_day"], "last_day": DATA["last_day"], "json": JSON_LIB, "http": "httptools",
+            "loop": "uvloop", "polars": pl.__version__, "polars_threads": pl.thread_pool_size()}
 
 
 @app.get("/api/query")
@@ -112,7 +126,7 @@ def api_query(day_from: str, day_to: str, min_amount: float, region: str = "all"
     t0 = time.perf_counter()
     result = query(parse_day(day_from), parse_day(day_to), min_amount, region)
     ms = (time.perf_counter() - t0) * 1000
-    return JSONResponse(result, headers={"Server-Timing": f"compute;dur={ms:.3f}", "X-Compute-Ms": f"{ms:.3f}",
+    return FastJSON(result, headers={"Server-Timing": f"compute;dur={ms:.3f}", "X-Compute-Ms": f"{ms:.3f}",
                                          "Cache-Control": "no-store"})
 
 
@@ -126,7 +140,8 @@ async def results(request: Request):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "answers.json").write_text(json.dumps(body["answers"]) + "\n")
-    (out / "timings.json").write_text(json.dumps({"load_ms": DATA["load_ms"], **body["timings"]}, indent=1) + "\n")
+    (out / "timings.json").write_text(json.dumps({"load_ms": DATA["load_ms"], "json": JSON_LIB, "http": "httptools", "loop": "uvloop",
+                                                 "polars": pl.__version__, **body["timings"]}, indent=1) + "\n")
     (out / "done").write_text("ok\n")
     return Response(status_code=204)
 
@@ -149,7 +164,7 @@ def main():
     if a.out:
         os.environ["B_OUT"] = str(a.out.resolve())
     # One process, one worker: the data is in this process's memory (see the module docstring).
-    uvicorn.run(app, host="127.0.0.1", port=a.port, workers=1, log_level="warning")
+    uvicorn.run(app, host="127.0.0.1", port=a.port, workers=1, log_level="warning", http="httptools", loop="uvloop")
 
 
 if __name__ == "__main__":

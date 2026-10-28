@@ -30,6 +30,13 @@ import headless  # noqa: E402
 import reference  # noqa: E402
 
 CHROMIUM = "/usr/lib/chromium/chromium"
+# Build A's binary and flags exactly (check_a.py), so both web builds run the same browser: real GPU through ANGLE on
+# Vulkan; --disable-vulkan-surface because NVIDIA's Vulkan can't present to Xvfb (the GPU process crash-loops without it).
+FLAGS = ["--ozone-platform=x11", "--enable-features=Vulkan", "--use-angle=vulkan", "--ignore-gpu-blocklist",
+         "--disable-vulkan-surface", "--disable-gpu-sandbox", "--force-device-scale-factor=1",
+         "--no-first-run", "--no-default-browser-check", "--disable-background-timer-throttling",
+         "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--window-position=0,0",
+         "--window-size=1280,800", "--password-store=basic", "--disable-extensions"]
 STEPS = len(reference.states()) - 1
 
 
@@ -112,7 +119,7 @@ def run(rows, shot=True):
     mem.start()
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(executable_path=CHROMIUM, headless=False, args=["--ozone-platform=x11"])
+            browser = pw.chromium.launch(executable_path=CHROMIUM, headless=False, args=FLAGS)
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             while True:                                        # the server accepts once the data is in memory
                 if server.poll() is not None:
@@ -156,7 +163,8 @@ def check(rows):
         return False
     steps = timings["steps"][1:]
     print(f"B: ok ({rows})  [{STEPS} steps; input-to-pixels median {stats([s['input_to_pixels_ms'] for s in steps])['median']} ms, "
-          f"server compute median {stats([s['server_compute_ms'] for s in steps])['median']} ms; cold start {cold_ms / 1000:.1f} s]")
+          f"server compute median {stats([s['server_compute_ms'] for s in steps])['median']} ms, serialise + transfer "
+          f"{stats([s['serialise_transfer_ms'] for s in steps])['median']} ms; {timings.get('json', '?')}; cold start {cold_ms / 1000:.1f} s]")
     return True
 
 
@@ -170,6 +178,7 @@ def bench(rows):
         "input_to_pixels_ms": stats([s["input_to_pixels_ms"] for s in steps]),
         "server_compute_ms": stats([s["server_compute_ms"] for s in steps]),
         "fetch_ms": stats([s["fetch_ms"] for s in steps]),
+        "serialise_transfer_ms": stats([s["serialise_transfer_ms"] for s in steps]),
         "data_load_ms": round(timings["load_ms"], 1),
         "cold_start_to_first_dashboard_ms": round(cold_ms, 1),
         "peak_pss_mb": {k: round(v, 1) for k, v in peak.items()},

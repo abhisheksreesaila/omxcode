@@ -1,6 +1,7 @@
 // Build B's page: plain JS. Every control change asks the API for the new numbers and redraws.
 // Scripted mode (?scripted=1&steps=S): applies steps.json's changes through the same controls, timing each one from
 // the change to the frame after the new numbers are drawn, then posts answers.json and timings.json to the server.
+// External mode (?scripted=external): shows step 0 and waits; external.py calls window.extStep(n) (see README.md).
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -52,7 +53,7 @@ async function refresh(t0 = performance.now()) {
   const tPixels = await afterPaint();
   el.time.textContent = `${compute.toFixed(1)} ms · ${(tPixels - t0).toFixed(0)} ms`;
   last = { state: s, data, t: { input_to_pixels_ms: tPixels - t0, server_compute_ms: compute,
-    fetch_ms: tData - tFetch, draw_ms: tDrawn - tData, paint_wait_ms: tPixels - tDrawn }, tPixels };
+    fetch_ms: tData - tFetch, serialise_transfer_ms: tData - tFetch - compute, draw_ms: tDrawn - tData, paint_wait_ms: tPixels - tDrawn }, tPixels };
   return last;
 }
 
@@ -114,6 +115,7 @@ async function start() {
   window.addEventListener("resize", () => last && drawChart(last.data.top));
 
   if (!params.has("scripted")) { await refresh(); return; }
+  if (params.get("scripted") === "external") { await external(); return; }
   await scripted(Number(params.get("steps") || 0));
 }
 
@@ -148,4 +150,51 @@ async function scripted(n) {
   document.title = "done";
 }
 
-start().catch((e) => { document.title = "error"; document.body.dataset.error = String(e.stack || e); console.error(e); });
+// The three KPI tiles (not the timing tile beside them, which changes a frame later), in window logical pixels:
+// the viewport's rect plus the window frame's offset (a title bar, if the window has one).
+function kpiRect() {
+  const tiles = [el.rows, el.sum, el.margin].map((x) => x.closest(".kpi").getBoundingClientRect());
+  const x = Math.min(...tiles.map((r) => r.left)), y = Math.min(...tiles.map((r) => r.top));
+  const w = Math.max(...tiles.map((r) => r.right)) - x, h = Math.max(...tiles.map((r) => r.bottom)) - y;
+  const dx = Math.max(0, (outerWidth - innerWidth) / 2), dy = Math.max(0, outerHeight - innerHeight);
+  return { kpi_rect: [x + dx, y + dy, w, h], kpi_rect_viewport: [x, y, w, h], inner: [innerWidth, innerHeight],
+           outer: [outerWidth, outerHeight] };
+}
+
+async function external() {
+  const all = await (await fetch("/steps.json")).json();
+  const byStep = new Map([[0, all.opening], ...all.steps.map((st) => [st.step, st])]);
+  const answers = [], timings = [];
+  const record = (st, r) => {
+    const d = r.data;
+    answers.push({ step: st.step, rows: d.rows, sum_amount: d.sum_amount, avg_margin: d.avg_margin, top: d.top,
+      ids: d.table.rows.map((row) => row[0]) });
+    const t = { step: st.step, change: st.change || "open", ...r.t };
+    timings.push(t);
+    return t;
+  };
+  setControls(all.opening);
+  const first = await refresh();
+  record(all.opening, first);
+  window.extStep = async (n) => {
+    const st = byStep.get(n);
+    if (!st) throw new Error(`no step ${n} in steps.json`);
+    await afterPaint();
+    const t0 = performance.now();
+    setControls(st);   // the full state (any order works); the event is the changed control's (step 0: a refresh)
+    if (st.change) el[CONTROL[st.change]].dispatchEvent(new Event(st.change === "min_amount" ? "input" : "change"));
+    else onChange();
+    const r = await current;
+    r.t.input_to_pixels_ms = r.tPixels - t0;
+    return record(st, r);
+  };
+  window.extResults = () => ({ answers: { steps: answers },
+    timings: { file: meta.file, server: meta, first_dashboard_epoch_ms: performance.timeOrigin + first.tPixels, steps: timings } });
+  window.extKpi = kpiRect;
+  window.extReady = { file: meta.file, rows: meta.rows, load_ms: meta.load_ms, json: meta.json, http: meta.http,
+    loop: meta.loop, polars: meta.polars, polars_threads: meta.polars_threads,
+    first_dashboard_ms: first.tPixels, first: first.t, ...kpiRect() };
+}
+
+start().catch((e) => {
+  window.extError = String(e && e.message || e); document.title = "error"; document.body.dataset.error = String(e.stack || e); console.error(e); });
