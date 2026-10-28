@@ -351,6 +351,23 @@ def m1_series(widget_line):
     return [int(x) for x in m.group(2).split(",") if x.strip()] if m else None
 
 
+def gtk_shots_reliable(n=10):
+    """The GTK host's screenshot never skips (D-649): the widgets app shot n times in a row (the M1 steps: its web views
+    resize as the chart fills), every run writes its picture. Problems, and how many runs had to wait for a frame."""
+    problems, waited = [], 0
+    for k in range(n):
+        shot = OUT / f"m1-repeat-{k}.png"
+        shot.unlink(missing_ok=True)
+        r = run([str(BUILD / "widgets" / "linux" / "widgets")], env={"MOJOUI_TEST": "tap:Load sample;tap:Load sample", "MOJOUI_WINDOW": "1280x860",
+                                                                     "MOJOUI_SHOT": str(shot)}, timeout=300)
+        lines = [l for l in (r.stdout + r.stderr).splitlines() if l.startswith("SHOT")]
+        waited += any("waited" in l for l in lines)
+        if not shot.exists() or shot.stat().st_size < 10000:
+            problems.append(f"gtk shot {k + 1}/{n} missing ({' | '.join(lines)})")
+        shot.unlink(missing_ok=True)
+    return problems, waited
+
+
 def m1():
     """A second library, no host changes (GOAL.md M1): Apache ECharts from npm (pinned, lockfile) as a chart widget in
     examples/widgets, fed from Mojo (the word-count series as data), its click on a point reaching update(); no file in
@@ -452,10 +469,12 @@ def m1():
         problems.append(f"gtk: the chart's view {gv} (wants ready, csp=0, refused=0)")
     if not shot.exists():
         problems.append("gtk: no screenshot (" + " | ".join(l for l in o.splitlines() if l.startswith("SHOT")) + ")")
+    p, waited = gtk_shots_reliable()
+    problems += p
     return not problems, "; ".join(problems) or (f"ECharts {ver} from npm (lockfile, npm ci --ignore-scripts), tree-shaken (echarts/core, SVG renderer), "
                                                  f"no eval/new Function; fed Mojo's word counts {series}; a click on point 2 reaches update() on "
                                                  f"the web (real mouse) and GTK; no host file changed ({where}); 0 CSP violations on both; "
-                                                 f"shots {OUT.relative_to(ROOT)}/m1-chart-web.png, m1-chart-gtk.png")
+                                                 f"10 more GTK shots all written ({waited} waited for a frame); shots {OUT.relative_to(ROOT)}/m1-chart-web.png, m1-chart-gtk.png")
 
 
 # ---- M1b: widgets as first-class citizens: the Look's tokens live, Tab order across native and widgets, matrix, gallery ----

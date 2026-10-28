@@ -662,3 +662,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Seen, not fixed (outside this goal): mojoui's own sparkline canvas stays light after a live switch to dark on both hosts: a canvas redraws when its version changes, and appearance doesn't change it.
 - Coordinator: M1's host proof is now pinned to a87c7cc..760bb66 so the Mac branch's merge can't trip it.
 - M1b PASS (60 s).
+
+## 2026-10-27 · goal 34b final run, and the GTK screenshot flake
+- M0 M1 M1b M3: M0 and M1b PASS; M1 failed on "SHOT: skipped (window had no frame to capture)" (second time); M3 failed on my own docstring naming mx-editor in gtk.mojo (goal 34 forbids app names in hosts): fixed.
+- The flake (coordinator: fix it, don't rerun): reproduced 4 of 10 with the old binary. Cause: gtk_widget_paintable gives the last drawn frame, none while a redraw is queued. save_png now requests a paint and snapshots after each drawn frame until it has one (non-blocking pump, 10 s deadline, a clear failure line). After: 10 of 10, 4 having waited. M1 keeps the 10-shot loop.
+- Rerun: M1 PASS (31 s; 3 of 10 waited), M3 PASS (328 s).

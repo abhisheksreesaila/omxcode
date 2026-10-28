@@ -4905,7 +4905,7 @@ def report[A: App](host_addr: Int):
 
 
 def focus_label[A: App](host_addr: Int) -> String:
-    """What has the keyboard: a widget's key (mx-editor#1) when it is inside a WebComponent's view, "button:<title>" for a
+    """What has the keyboard: a widget's key (<tag>#<id>) when it is inside a WebComponent's view, "button:<title>" for a
     button, else the node's kind; "none" (scripts/check M1b reads it for the Tab order)."""
     var host = host_at[A](host_addr)
     var w = external_call["gtk_root_get_focus", Int](host[].window) if host[].window != 0 else 0
@@ -5163,15 +5163,36 @@ def save_png(window: Int, path: String):
     for _ in range(60):  # let layout and drawing settle (~300 ms of frames)
         settle()
         external_call["g_usleep", NoneType](c_uint(5000))
+    # The window's paintable is its last drawn frame, and there is none while a redraw is queued (a widget's web view
+    # sizing itself, full_page() letting the page grow, a dialog's first frame): so ask the frame clock for a paint and
+    # take the picture straight after that frame is drawn, again until one is there (up to 10 s; never skipped).
     var paintable = external_call["gtk_widget_paintable_new", Int](window)
-    var w = external_call["gtk_widget_get_width", c_int](window)
-    var h = external_call["gtk_widget_get_height", c_int](window)
-    var snap = external_call["gtk_snapshot_new", Int]()
-    external_call["gdk_paintable_snapshot", NoneType](paintable, snap, Float64(Int(w)), Float64(Int(h)))
-    var node = external_call["gtk_snapshot_free_to_node", Int](snap)
-    if node == 0:  # nothing drawn yet (e.g. a dialog window took the first frame)
-        print("SHOT: skipped (window had no frame to capture)")
+    var clock = external_call["gtk_widget_get_frame_clock", Int](window)
+    var node = 0
+    var tries = 0
+    var give_up = perf_counter_ns() + 10_000_000_000
+    while True:
+        var w = external_call["gtk_widget_get_width", c_int](window)
+        var h = external_call["gtk_widget_get_height", c_int](window)
+        var snap = external_call["gtk_snapshot_new", Int]()
+        external_call["gdk_paintable_snapshot", NoneType](paintable, snap, Float64(Int(w)), Float64(Int(h)))
+        node = external_call["gtk_snapshot_free_to_node", Int](snap)
+        tries += 1
+        if node != 0 or perf_counter_ns() > give_up or clock == 0:
+            break
+        var before = external_call["gdk_frame_clock_get_frame_counter", Int64](clock)
+        external_call["gtk_widget_queue_draw", NoneType](window)
+        external_call["gdk_frame_clock_request_phase", NoneType](clock, c_int(1 << 4))  # GDK_FRAME_CLOCK_PHASE_PAINT
+        var frame_by = perf_counter_ns() + 1_000_000_000
+        while external_call["gdk_frame_clock_get_frame_counter", Int64](clock) == before and perf_counter_ns() < frame_by:
+            pump()  # (never blocks: the deadline is read every turn)
+            external_call["g_usleep", NoneType](c_uint(1000))
+        pump()  # (the frame's after-paint: its render node is kept)
+    if node == 0:
+        print("SHOT: failed (no drawn frame in 10 s, " + String(tries) + " tries: the window never finished a paint)")
         return
+    if tries > 1:
+        print("SHOT: waited for a drawn frame (" + String(tries) + " tries)")
     var renderer = external_call["gtk_native_get_renderer", Int](window)
     var texture = external_call["gsk_renderer_render_texture", Int](renderer, node, 0)
     var p = path

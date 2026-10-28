@@ -59,3 +59,4 @@ One line per rule that prevents a mistake that happened.
 - 2026-10-26 · Android: a tap sent before the app's window has the input focus is dropped (after density/rotation settings and a system-dialog close): android_drive waits for mCurrentFocus before its first step (D-562).
 - 2026-10-27 · (encoded) docs/llms-full.txt went stale after a matrix regeneration twice in goal 33's M8 runs: scripts/components.py now rewrites it with the matrix (D-580).
 - Broad kills by command text killed agents' own shells twice in goal 34 despite the line above: a PreToolUse hook (.claude/hooks/no-broad-kill.sh, cases in no-broad-kill.cases) now blocks them (Encode Lessons in Structure).
+- 2026-10-27 · A check failure that passes on rerun is a bug with a rate, not noise: "SHOT: skipped (no frame)" hit M1 twice before anyone counted it (4 of 10 runs). Reproduce it in a loop, fix the cause, and keep the loop as the proof (scripts/check.py gtk_shots_reliable).
