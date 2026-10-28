@@ -15,7 +15,8 @@ for a in "$@"; do
 done
 port=${AGUI_PORT:-8765}
 [ -e "build/agentchat/$host" ] || scripts/build.sh agentchat "$host"
-pixi run python scripts/agui_agent.py --serve --port "$port" "${mode[@]}" &
+py=$(pixi run python -c 'import sys; print(sys.executable)')  # (run python itself, so $! is the agent, not pixi)
+"$py" scripts/agui_agent.py --serve --port "$port" "${mode[@]}" &
 agent=$!
 trap 'kill "$agent" 2>/dev/null || true' EXIT
 export AGUI_URL="http://127.0.0.1:$port/"

@@ -14,9 +14,13 @@ Live (owner, 2026-10-27, D-710): one OpenAI-compatible path. By default the OMX 
   AGUI_LLM_BASE_URL   http://127.0.0.1:11435/v1   (the console's OpenAI-compatible endpoint)
   AGUI_LLM_MODEL      qwen2.5-0.5b                 (any model the console serves: `mxc serve <model>`)
   AGUI_LLM_KEY_VAR    MXC_API_KEY                  (the NAME of the env var holding the key; sent as a Bearer token)
-Claude: AGUI_LLM_PROVIDER=anthropic uses the Anthropic SDK, which reads ANTHROPIC_API_KEY itself (model claude-opus-5-5,
-or AGUI_LLM_MODEL). No key is ever printed, logged or stored. The model's tool-call JSON is repaired before it reaches
-the app (small models break it); the app still validates everything against the schema.
+Claude: AGUI_LLM_PROVIDER=anthropic uses the Anthropic SDK's plain Messages API, which reads ANTHROPIC_API_KEY itself
+(model claude-opus-5-5, or AGUI_LLM_MODEL). NOT RUN: no key here; the OpenAI-compatible path is the one the checks prove.
+No key is ever printed, logged or stored, and a request carrying one never follows a redirect. The model's tool-call
+JSON is repaired before it reaches the app (small models break it); the app still validates everything.
+
+Only a local app may start a run (D-722): a JSON content type, a localhost Host on this port, no foreign Origin, a body
+of at most 1 MB with its Content-Length. RunAgentInputs are kept (Server.inputs) only when a test asks (record=True).
 """
 
 import json
@@ -39,6 +43,8 @@ from ag_ui.core import AssistantMessage, ToolMessage, UserMessage, ToolCall, Fun
 from ag_ui.encoder import EventEncoder
 
 ENC = EventEncoder()
+MAX_BODY = 1024 * 1024  # a RunAgentInput's bytes (D-722)
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 GREETING = "Hello! I'm a scripted AG-UI agent. My words arrive a few at a time."
 QUARTER = [12, 15, 14, 18, 21, 19, 24, 26, 25, 29, 31, 34]
 YEAR = [120, 132, 128, 150, 171, 165, 190, 204, 199, 230, 248, 270]
@@ -349,6 +355,11 @@ def sse_lines(resp):
                 continue
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # (a 3xx becomes an error: the run ends with RUN_ERROR)
+
+
 def live_openai(inp, r):
     base = os.environ.get("AGUI_LLM_BASE_URL", "http://127.0.0.1:11435/v1").rstrip("/")
     model = os.environ.get("AGUI_LLM_MODEL", "qwen2.5-0.5b")
@@ -361,7 +372,7 @@ def live_openai(inp, r):
                                  headers={"Content-Type": "application/json", "Accept": "text/event-stream",
                                           **({"Authorization": "Bearer " + key} if key else {})})
     mid, text, calls = None, "", {}
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.build_opener(NoRedirect).open(req, timeout=120) as resp:  # (the key never follows a redirect)
         for chunk in sse_lines(resp):
             for choice in chunk.get("choices", []):
                 d = choice.get("delta") or {}
@@ -416,10 +427,7 @@ def live_anthropic(inp, r):
             convo.append({"role": m["role"], "content": m["content"] or "…"})
     tools = [{"name": t["function"]["name"], "description": t["function"]["description"], "input_schema": t["function"]["parameters"]} for t in small_tools(inp)]
     mid = None
-    with client.messages.stream(model=model, max_tokens=16000, system=system, messages=convo, tools=tools,
-                                output_config={"effort": "low"},
-                                extra_headers={"anthropic-beta": "server-side-fallback-2026-07-01"},
-                                extra_body={"fallbacks": "default"}) as stream:
+    with client.messages.stream(model=model, max_tokens=16000, system=system, messages=convo, tools=tools) as stream:  # (NOT RUN: no key here)
         for event in stream:
             if event.type == "text":
                 if mid is None:
@@ -459,9 +467,44 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def refuse(self, status, why):
+        msg = why.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(msg)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(msg)
+        self.close_connection = True
+
+    def local(self):
+        """Why this request may not start a run ("" when it may): only a local app, never a web page."""
+        if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+            return 415, "a run is a JSON POST (Content-Type: application/json)"
+        port = self.server.server_address[1]
+        if self.headers.get("Host", "") not in tuple(f"{h}:{port}" for h in LOCAL_HOSTS):
+            return 403, "only this machine's apps may start a run (Host)"
+        origin = self.headers.get("Origin")
+        if origin is not None:
+            from urllib.parse import urlparse
+            o = urlparse(origin)
+            if o.scheme not in ("http", "https") or (o.hostname or "") not in ("127.0.0.1", "localhost", "::1"):
+                return 403, "only this machine's apps may start a run (Origin)"
+        n = self.headers.get("Content-Length")
+        if n is None:
+            return 411, "a run needs its Content-Length"
+        if not n.isdigit():
+            return 400, "a bad Content-Length"
+        if int(n) > MAX_BODY:
+            return 413, "a RunAgentInput of more than 1 MB"
+        return 0, ""
+
     def do_POST(self):
-        n = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(n)
+        status, why = self.local()
+        if status:
+            self.refuse(status, why)
+            return
+        raw = self.rfile.read(int(self.headers["Content-Length"]))
         try:
             body = json.loads(raw)
             inp = RunAgentInput.model_validate(body)
@@ -473,7 +516,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(msg)
             return
-        self.server.inputs.append(body)
+        if self.server.record:
+            self.server.inputs.append(body)
         events = live(inp) if self.server.scenario == "live" else scripted(inp, self.server.scenario)
         self.send_response(200)
         self.send_header("Content-Type", ENC.get_content_type())
@@ -494,12 +538,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class Server:
-    """The agent on a free port in a thread (`url` ends with '/'); `inputs` keeps every RunAgentInput it got (as sent)."""
+    """The agent on a free port in a thread (`url` ends with '/'); with record=True (tests) `inputs` keeps every
+    RunAgentInput it got, as sent."""
 
-    def __init__(self, scenario="chat", port=0):
+    def __init__(self, scenario="chat", port=0, record=False):
         self.httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         self.httpd.daemon_threads = True
         self.httpd.inputs = []
+        self.httpd.record = record
         self.httpd.scenario = scenario
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/"
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)

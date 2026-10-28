@@ -94,8 +94,9 @@ matched case-insensitively with common synonyms (chart → Sparkline, row → HS
 values). A UI written into the words instead of a tool call is lifted out. The model sees a short render_ui schema and
 an explicit list of the components in its system prompt; the app still validates the full schema and refuses the rest.
 
-**Claude (optional).** `AGUI_LLM_PROVIDER=anthropic` uses the Anthropic SDK, which reads `ANTHROPIC_API_KEY` itself
-(model `claude-opus-5-5` unless `AGUI_LLM_MODEL` says otherwise; low effort; the server-side refusal fallback on):
+**Claude (optional, not run: there is no key here).** `AGUI_LLM_PROVIDER=anthropic` uses the Anthropic SDK's plain
+Messages API (`messages.stream` with the tools), which reads `ANTHROPIC_API_KEY` itself; the model is `claude-opus-5-5`
+unless `AGUI_LLM_MODEL` says otherwise:
 
 ```bash
 export ANTHROPIC_API_KEY=…  AGUI_LLM_PROVIDER=anthropic

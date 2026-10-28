@@ -421,7 +421,7 @@ def m1():
     if err:
         return False, "; ".join(problems + [err])
     import agui_agent
-    with agui_agent.Server(scenario="tools") as srv:
+    with agui_agent.Server(scenario="tools", record=True) as srv:
         t = run([str(exe), str(FIXTURES)], env={"AGUI_TEST_URL": srv.url}, timeout=180)
         inputs = list(srv.inputs)
     out = t.stdout + t.stderr
@@ -564,7 +564,7 @@ def m2_schema():
 def chat_run(host, scenario, steps, shot=None, log=None):
     """examples/agentchat on GTK or the web against the scripted agent: (output, the runs the agent got) or raises."""
     import agui_agent
-    with agui_agent.Server(scenario=scenario) as srv:
+    with agui_agent.Server(scenario=scenario, record=True) as srv:
         env_steps = f"type:Agent URL={srv.url};" + steps
         os.environ["AGUI_URL"] = srv.url  # (the app reads it at start; the test step sets it too)
         try:
@@ -775,6 +775,9 @@ def m3():
                 problems.append(f"web: the composer doesn't fill its row (field, its box, window: {row})")
         notes.append(f"{host}: streamed {pieces}, chart built, range edit seen")
     problems += m3_live()
+    t = run([sys.executable, "tests/test_agui_agent.py"], timeout=300)  # (reviewer item 4: only a local app starts a run)
+    if t.returncode != 0 or "agui_agent: ok" not in t.stdout:
+        problems.append("tests/test_agui_agent.py: " + (t.stdout + t.stderr)[-600:])
     th = (ROOT / "examples/agentchat/app.mojo").read_text()
     if "omxqua" not in th:
         problems.append("agentchat doesn't wear the omxqua theme")
