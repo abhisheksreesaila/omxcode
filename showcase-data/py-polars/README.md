@@ -6,6 +6,14 @@ rows; the group-by on Polars' streaming engine; orjson (ORJSONResponse); uvicorn
 says which). The page: `web/app.js` (one GET per change; timings split server compute, serialise + transfer =
 fetch − compute, draw and paint).
 
+The table's "first 50 matching rows" is a **hand-written optimisation**, not plain Polars (`server.py` newest()):
+the frame is in table order, so the answer sits at the date slice's start; B filters a growing window there (64K
+rows, then x8) until it holds 50 matches, instead of filtering the whole slice. Build C does the same at its slice's
+end and build D has an equivalent (a per-day histogram that finds the cutoff day): fair-play round 2, 2026-10-28.
+Measured at 100M (one bench each, load ~2): server compute median 26 -> 19 ms, p95 134 -> 121 ms; input-to-pixels
+median 44 -> 42 ms, p95 149 -> 139 ms. The p95 is the full-range group-by, not the table. Running both queries at
+once (pl.collect_all) wasn't kept: the window's head is ~1 ms beside a group-by that already uses every core.
+
 - Check: `pixi run python showcase-data/py-polars/check_b.py` (10M and 100M on the repo's Xvfb; prints `B: ok (…)`).
   Chromium: build A's binary and flags (check_b.py FLAGS), through Playwright.
 - Bench: `check_b.py --bench 100M` (JSON).

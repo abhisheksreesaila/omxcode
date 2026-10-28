@@ -10,8 +10,8 @@ How it works
 - Each filter change is one GET /api/query. The date range becomes a contiguous slice of the sorted frame
   (two binary searches), then the amount and region filters run inside it. Two Polars queries over that slice:
   a group-by product (count, sum of amount, sum of margin) from which the KPIs and the top 20 both come, and the
-  first 50 matching rows (already in table order). Nothing is cached between requests; every request scans the
-  rows it needs.
+  first 50 matching rows (already in table order; found in a growing window at the slice's start, see newest()).
+  Nothing is cached between requests; every request scans the rows it needs.
 - The compute time is sent back in a `Server-Timing` header (and `X-Compute-Ms`), so the page can separate it
   from the HTTP hop and its own drawing.
 - The group-by runs on Polars' streaming engine (`collect(engine="streaming")`, morsels across every core: the
@@ -72,6 +72,20 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 
 
+def newest(df, lo, hi, cond):
+    """The first 50 matching rows of the slice [lo, hi): a hand-written optimisation (as build C's engine.rs; build D
+    has an equivalent). The frame is already in table order (day descending, id ascending), so they sit at the
+    slice's start: filter a growing window there (64K rows, then x8) until it holds 50 matches or covers the slice,
+    instead of filtering the whole slice for 50 rows."""
+    w = 1 << 16
+    while True:
+        n = min(w, max(hi - lo, 0))
+        table = df.slice(lo, n).lazy().filter(cond).head(ROWS_SHOWN).collect()
+        if table.height == ROWS_SHOWN or n == max(hi - lo, 0):
+            return table
+        w *= 8
+
+
 def query(day_from, day_to, min_amount, region):
     df, day = DATA["df"], DATA["day"]
     # The frame is sorted by day descending: rows with day in [from, to] are one slice.
@@ -85,7 +99,7 @@ def query(day_from, day_to, min_amount, region):
                      .agg(pl.len().alias("n"), pl.col("amount").sum().alias("s"),
                           ((pl.col("amount") - pl.col("cost")) / pl.col("amount")).sum().alias("m"))
                      .collect(engine="streaming"))
-    table = matched.head(ROWS_SHOWN).collect()
+    table = newest(df, lo, hi, cond)
     rows = int(groups["n"].sum()) if groups.height else 0
     total = float(groups["s"].sum()) if groups.height else 0.0
     margin = float(groups["m"].sum()) / rows if rows else None
