@@ -464,7 +464,7 @@ def m1():
 def catalog_components():
     """Every component name the component catalog knows (docs/components.md's matrix)."""
     text = (ROOT / "docs/components.md").read_text()
-    return set(re.findall(r"^\| `([A-Za-z]+)`", text, re.M))
+    return set(re.findall(r"^\| `([A-Za-z]+)[ `]", text, re.M))  # ("`Meter (meter, usage bar, chart rows)`" too)
 
 
 def m2_schema():
@@ -720,7 +720,7 @@ def m3():
     for host in ("gtk", "web"):
         steps = ("type:Message=Hello there;tap:Send;pause:2500;"
                  "type:Message=Show me sales as a chart;tap:Send;pause:1500;"
-                 "segment:Range=Year;pause:1500")
+                 "segment:0=Year;pause:1500")  # (the hosts' grammar: segment:<index>=<option>)
         try:
             out, inputs = chat_run(host, "chat", steps, shot=str(OUT / f"agentchat-{host}.png"))
         except RuntimeError as e:

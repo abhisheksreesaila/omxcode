@@ -1,0 +1,398 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "render_ui",
+ "description": "A screen built only from catalogued mojoui components, drawn natively by the app. Data, never code: text is shown as text. Beyond this schema the app refuses more than 8 levels, 200 components or 32768 bytes.",
+ "type": "object",
+ "properties": {
+  "ui": {
+   "$ref": "#/$defs/node"
+  }
+ },
+ "required": [
+  "ui"
+ ],
+ "additionalProperties": false,
+ "$defs": {
+  "node": {
+   "oneOf": [
+    {
+     "$ref": "#/$defs/components/Card"
+    },
+    {
+     "$ref": "#/$defs/components/VStack"
+    },
+    {
+     "$ref": "#/$defs/components/HStack"
+    },
+    {
+     "$ref": "#/$defs/components/Text"
+    },
+    {
+     "$ref": "#/$defs/components/Paragraph"
+    },
+    {
+     "$ref": "#/$defs/components/Divider"
+    },
+    {
+     "$ref": "#/$defs/components/Table"
+    },
+    {
+     "$ref": "#/$defs/components/Sparkline"
+    },
+    {
+     "$ref": "#/$defs/components/Meter"
+    },
+    {
+     "$ref": "#/$defs/components/Button"
+    },
+    {
+     "$ref": "#/$defs/components/TextField"
+    },
+    {
+     "$ref": "#/$defs/components/Toggle"
+    },
+    {
+     "$ref": "#/$defs/components/Segmented"
+    }
+   ]
+  },
+  "components": {
+   "Card": {
+    "type": "object",
+    "description": "a surface holding components, with an optional title",
+    "properties": {
+     "component": {
+      "const": "Card"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "children": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+       "$ref": "#/$defs/node"
+      },
+      "description": "the components inside, in order"
+     }
+    },
+    "required": [
+     "component"
+    ],
+    "additionalProperties": false
+   },
+   "VStack": {
+    "type": "object",
+    "description": "components in a column",
+    "properties": {
+     "component": {
+      "const": "VStack"
+     },
+     "children": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+       "$ref": "#/$defs/node"
+      },
+      "description": "the components inside, in order"
+     }
+    },
+    "required": [
+     "component"
+    ],
+    "additionalProperties": false
+   },
+   "HStack": {
+    "type": "object",
+    "description": "components in a row",
+    "properties": {
+     "component": {
+      "const": "HStack"
+     },
+     "children": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+       "$ref": "#/$defs/node"
+      },
+      "description": "the components inside, in order"
+     }
+    },
+    "required": [
+     "component"
+    ],
+    "additionalProperties": false
+   },
+   "Text": {
+    "type": "object",
+    "description": "a line of text (shown as text, never markup)",
+    "properties": {
+     "component": {
+      "const": "Text"
+     },
+     "text": {
+      "type": "string",
+      "maxLength": 2000
+     },
+     "style": {
+      "enum": [
+       "body",
+       "title",
+       "headline",
+       "caption"
+      ]
+     }
+    },
+    "required": [
+     "component",
+     "text"
+    ],
+    "additionalProperties": false
+   },
+   "Paragraph": {
+    "type": "object",
+    "description": "wrapping text",
+    "properties": {
+     "component": {
+      "const": "Paragraph"
+     },
+     "text": {
+      "type": "string",
+      "maxLength": 4000
+     }
+    },
+    "required": [
+     "component",
+     "text"
+    ],
+    "additionalProperties": false
+   },
+   "Divider": {
+    "type": "object",
+    "description": "a rule between components",
+    "properties": {
+     "component": {
+      "const": "Divider"
+     }
+    },
+    "required": [
+     "component"
+    ],
+    "additionalProperties": false
+   },
+   "Table": {
+    "type": "object",
+    "description": "rows of cells under column titles",
+    "properties": {
+     "component": {
+      "const": "Table"
+     },
+     "columns": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+       "type": "string",
+       "maxLength": 100
+      },
+      "description": "the column titles"
+     },
+     "rows": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+       "type": "array",
+       "maxItems": 10,
+       "items": {
+        "type": [
+         "string",
+         "number"
+        ],
+        "maxLength": 200
+       }
+      },
+      "description": "each row: a list of strings or numbers"
+     }
+    },
+    "required": [
+     "component",
+     "columns",
+     "rows"
+    ],
+    "additionalProperties": false
+   },
+   "Sparkline": {
+    "type": "object",
+    "description": "a small line chart of numbers",
+    "properties": {
+     "component": {
+      "const": "Sparkline"
+     },
+     "values": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+       "type": "number"
+      },
+      "description": "the numbers (or bind them to the state)"
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_-]{1,40}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200
+     }
+    },
+    "required": [
+     "component"
+    ],
+    "additionalProperties": false
+   },
+   "Meter": {
+    "type": "object",
+    "description": "how full something is",
+    "properties": {
+     "component": {
+      "const": "Meter"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "value": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "0 to 100"
+     },
+     "figure": {
+      "type": "string",
+      "maxLength": 100
+     }
+    },
+    "required": [
+     "component",
+     "label",
+     "value"
+    ],
+    "additionalProperties": false
+   },
+   "Button": {
+    "type": "object",
+    "description": "a button that reports its action",
+    "properties": {
+     "component": {
+      "const": "Button"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 100
+     },
+     "action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a word reported back to the agent (the render_ui tool's result) when used"
+     },
+     "style": {
+      "enum": [
+       "plain",
+       "prominent"
+      ]
+     }
+    },
+    "required": [
+     "component",
+     "label",
+     "action"
+    ],
+    "additionalProperties": false
+   },
+   "TextField": {
+    "type": "object",
+    "description": "a text input that edits the state at bind",
+    "properties": {
+     "component": {
+      "const": "TextField"
+     },
+     "placeholder": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_-]{1,40}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     }
+    },
+    "required": [
+     "component",
+     "bind"
+    ],
+    "additionalProperties": false
+   },
+   "Toggle": {
+    "type": "object",
+    "description": "an on/off switch that edits the state at bind",
+    "properties": {
+     "component": {
+      "const": "Toggle"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_-]{1,40}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     }
+    },
+    "required": [
+     "component",
+     "label",
+     "bind"
+    ],
+    "additionalProperties": false
+   },
+   "Segmented": {
+    "type": "object",
+    "description": "one choice of a few, editing the state at bind",
+    "properties": {
+     "component": {
+      "const": "Segmented"
+     },
+     "options": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 8,
+      "items": {
+       "type": "string",
+       "maxLength": 100
+      },
+      "description": "2 to 8 choices"
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_-]{1,40}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     },
+     "action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a word reported back to the agent (the render_ui tool's result) when used"
+     }
+    },
+    "required": [
+     "component",
+     "options",
+     "bind"
+    ],
+    "additionalProperties": false
+   }
+  }
+ }
+}

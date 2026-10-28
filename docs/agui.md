@@ -35,3 +35,25 @@ agent.run(self.http)                                          # the answer and t
 
 The official SDK's events and `EventEncoder` over HTTP. `--serve --scenario chat|ui|bad|tools` is the scripted,
 deterministic agent every check uses; `--serve --live` is a real model (below).
+
+## UI from data (mojoui.genui)
+
+An agent builds UI by calling the frontend tool `render_ui` with `{"ui": node}`; a node is one catalogued component:
+
+```json
+{"ui": {"component": "Card", "title": "Signup", "children": [
+  {"component": "TextField", "placeholder": "Your name", "bind": "/form/name"},
+  {"component": "Toggle", "label": "Subscribe", "bind": "/form/subscribe"},
+  {"component": "Button", "label": "Submit", "action": "submit", "style": "prominent"}]}}
+```
+
+- The components: Card, VStack, HStack, Text, Paragraph, Divider, Table, Sparkline, Meter, Button, TextField, Toggle,
+  Segmented. Their props and limits are one catalog (`mojoui.genui.catalog()`), printed as a JSON Schema
+  (docs/genui.schema.json, the tool's parameters).
+- Refused, with a message to the agent (a tool result `{"error": "refused: …"}`): an unknown component (WebFrame,
+  Script, "card"…), a bad prop (unknown, wrong type, out of range, missing, an action that isn't one word, a bind that
+  isn't a state path), more than 8 levels, more than 200 components or 32 KB.
+- Text is text: `<script>` an agent writes is shown as words on every host. No component the agent can name runs code,
+  loads a page or draws pixels it brings.
+- `bind` reads and edits the shared state at a JSON pointer; `action` reports a word back: the first one is render_ui's
+  tool result (`{"action": "submit"}`), and the edited state goes with the run.

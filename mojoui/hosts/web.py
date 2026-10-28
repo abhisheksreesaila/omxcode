@@ -813,7 +813,7 @@ def render(s, i, sid):
     if n["justify_items"] in JUSTIFY_CSS:
         css.append(f"justify-content:{JUSTIFY_CSS[n['justify_items']]}")
     if n["kind"] in SIZED_CONTROLS and (n["w"] or n["grows"] or n["fills"]):
-        css.append("--control-width:100%")  # the control inside takes the size it was given
+        css.append("--control-width:100%;--control-max:100%")  # the control inside takes the size it was given (no viewport cap: goal 35)
     if css:
         old = el.attrs.get("style", "")
         el.attrs["style"] = (old + ";" if old else "") + ";".join(css)

@@ -683,3 +683,9 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - mojoui/jsonpatch.mojo (JDoc + RFC 6902) passed 37 cases on its second build (two aliasing fixes: copy a list element before passing it with `mut self`; initialise every field before calling a method in __init__).
 - scripts/agui_agent.py: scripted scenarios with ag_ui.core events and EventEncoder; `--record` writes five streams (17 event types incl. RAW, MESSAGES_SNAPSHOT, RUN_ERROR).
 - mojoui/agui.mojo built first try; M1 PASS (8 s).
+
+## 2026-10-27 · goal 35 M2: generative UI
+- mojoui/genui.mojo: catalog → schema → validator → renderer; 24 validation cases agree with jsonschema. GenUi.view made read-only (App.view takes self): controls are indexed once at parse time, in drawing order.
+- examples/agentchat composes Agent + GenUi. The form round trip worked on its first GTK run. Fixed after looking at the shots: agent cards centred (wrapped in a row with a Spacer), the sparkline drew black on the web (fill the card colour first, as the widgets app does), the web composer capped at 70vw (D-693).
+- The check's M3 step `segment:Range=Year` used a grammar no host has: corrected to `segment:0=Year` (the hosts' `segment:<index>=<option>`), same proof.
+- M2 PASS (48 s).
