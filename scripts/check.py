@@ -164,6 +164,14 @@ def m5():
     mcp = re.search(r"<!-- why:mcp -->(.*?)<!-- /why:mcp -->", page, re.S)
     if not mcp or "<pre" not in mcp.group(1):
         problems.append("no example MCP tool call in chapter 3")
+    if not wt.TRANSCRIPT.exists():
+        problems.append("docs/goals/36/mcp-transcript.json (scripts/why_mcp.py) missing")
+    else:
+        tr = json.loads(wt.TRANSCRIPT.read_text())
+        if "linux/particles" not in tr.get("app", "") or "no-vsync" not in tr.get("app", ""):
+            problems.append("the MCP transcript isn't from the native GTK build with vsync off")
+        elif mcp and wt.mcp() not in mcp.group(1):
+            problems.append("the page's MCP session differs from the committed transcript")
 
     def exists(href):
         href = href.split("#")[0]

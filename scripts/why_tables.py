@@ -21,11 +21,14 @@ RESULTS = ROOT / "docs" / "goals" / "36" / "results.json"
 PROVISIONAL = ROOT / "docs" / "goals" / "36" / "results-provisional.json"
 REPO = "https://github.com/abhisheksreesaila/omxcode/blob/main/"
 
-NAMES = {"A-cpu": "Plain JS (CPU)", "A": "JS + WebGPU", "B-wasm": "JS + Rust/wasm", "B-native": "Rust + wgpu (native)",
+NAMES = {"A-cpu": "Plain JS (CPU)", "A": "JS + WebGPU", "B-wasm": "JS + Rust/wasm", "B-native": "Rust + wgpu (native, offscreen)",
          "C": "omxcode (Mojo)"}
 ORDER = ["A-cpu", "A", "B-wasm", "B-native", "C"]
-EFFORT_NAMES = {"A-cpu": "Plain JS (CPU)", "A": "JS + WebGPU", "B": "JS + Rust (wasm and native)", "C": "omxcode"}
+EFFORT_NAMES = {"A-cpu": "Plain JS (CPU)", "A": "JS + WebGPU", "B": "JS + Rust (wasm and native)", "C": "omxcode",
+                "B-wasm": "JS + Rust/wasm", "B-native": "Rust + wgpu (native)"}
 EFFORT_ORDER = ["A-cpu", "A", "B", "C"]
+COUNT_ORDER = ["A-cpu", "A", "B-wasm", "B-native", "B", "C"]
+TRANSCRIPT = ROOT / "docs" / "goals" / "36" / "mcp-transcript.json"
 SIZES = [1_000_000, 5_000_000, 20_000_000]
 E = html.escape
 
@@ -50,11 +53,15 @@ def headline(res):
     same = [NAMES[r] for r in ("A", "B-native", "B-wasm", "A-cpu") if big.get(r) == big["C"]]
     ef = res["effort"]
     top = max(res["protocol"]["sizes"])
-    held = mn(big['C'])
+    held = mn(big["C"])
+    byf = ef["C"].get("framework_added", {}).get("by_file", {})
+    fw = sum(n for f, n in byf.items() if not f.startswith("tests/"))
+    fwt = sum(n for f, n in byf.items() if f.startswith("tests/"))
+    bw, bn = ef["B-wasm"], ef["B-native"]
     return f"""<div class="nums whynums">
-  <div><b>{held}</b><span>particles at 60 fps in omxcode{' (the largest size tested)' if big['C'] == top else ''}. {(' and '.join(same) + (' hold' if len(same) > 1 else ' holds') + ' it too.') if same else ''}</span></div>
-  <div><b>{ef['C']['lines']}<small>lines</small></b><span>{ef['C']['files']} file, {len(ef['C']['languages'])} language, for omxcode; {ef['A']['lines']:,} lines in {ef['A']['files']} files and {len(ef['A']['languages'])} languages for JS + WebGPU; {ef['B']['lines']:,} in {ef['B']['files']} files and {len(ef['B']['languages'])} languages for JS + Rust.</span></div>
-  <div><b>{f2(c['frame_ms'])}<small>ms</small></b><span>an omxcode frame at 1M. JS + WebGPU takes {f2(a['frame_ms'])} ms and native Rust + wgpu {f2(b['frame_ms'])} ms: {'omxcode is slower, and the page says why.' if c['frame_ms'] > min(a['frame_ms'], b['frame_ms']) else 'omxcode is the fastest here.'}</span></div>
+  <div><b>{held}</b><span>particles, the largest size tested, with omxcode's frames averaging under 16.7 ms (60 fps) and the slowest one in twenty under 20 ms. Measured with vsync off on a virtual display, not a real screen. {(' and '.join(same) + (' do' if len(same) > 1 else ' does') + ' it too.') if same else ''}</span></div>
+  <div><b>{ef['C']['lines']}<small>app lines</small></b><span>in {ef['C']['files']} Mojo file for omxcode, plus {fw} framework lines (and {fwt} test lines) this goal added for it: PointCloud's step and draw, reusable by any app. JS + WebGPU: {ef['A']['lines']:,} lines, {ef['A']['files']} files, {len(ef['A']['languages'])} languages. JS + Rust is two apps: {bw['lines']:,} lines, {bw['files']} files, {len(bw['languages'])} languages for wasm; {bn['lines']:,}, {bn['files']} and {len(bn['languages'])} for native.</span></div>
+  <div><b>{f2(c['frame_ms'])}<small>ms</small></b><span>an omxcode frame at 1M. JS + WebGPU takes {f2(a['frame_ms'])} ms and native Rust + wgpu (offscreen) {f2(b['frame_ms'])} ms: {'omxcode is slower, and the page says why.' if c['frame_ms'] > min(a['frame_ms'], b['frame_ms']) else 'omxcode is the fastest here.'}</span></div>
 </div>"""
 
 
@@ -90,7 +97,8 @@ def verdict(res):
     fastest = {n: min((row(res, r, n)["frame_ms"], r) for r in ORDER if row(res, r, n)) for n in SIZES}
     c1, a1, b1 = (row(res, r, 1_000_000) for r in ("C", "A", "B-native"))
     starts = sorted((row(res, r, 1_000_000)["cold_start_ms"], r) for r in ORDER)
-    mem = sorted((row(res, r, 1_000_000)["peak_rss_mb"], r) for r in ORDER)
+    mem = sorted((row(res, r, 1_000_000)["peak_pss_mb"], r) for r in ORDER)
+    dip = next((n for n in res["protocol"]["sizes"][1:] if round(row(res, "C", n)["frame_ms"], 2) < round(c1["frame_ms"], 2)), None)
     out = [
         "<p>" + "; ".join(lines) + ".</p>",
         "<p>The fastest frame: " + "; ".join(f"{NAMES[r]} at {mn(n)} ({f2(ms)} ms)" for n, (ms, r) in fastest.items()) + ".</p>",
@@ -103,11 +111,15 @@ def verdict(res):
         f"{f2(s20['C'], 3)} ms in omxcode: the same arithmetic on the same GPU, within {round((hi / lo - 1) * 100)} % of each other.</li>",
         f"<li><b>Where omxcode's frame goes.</b> At {mn(top)} its GPU work is {f2(c20['gpu_frame_ms'])} ms (step and draw) plus "
         f"{f2(c20['readback_ms'])} ms copying the finished picture to the CPU; with one wait a frame that is {f2(c20.get('work_ms'))} ms. "
-        f"The other {f2(rest)} ms of its {f2(c20['frame_ms'])} ms frame (the frame minus that work) is the GTK host: taking that picture as a texture and compositing it, "
-        "here with GTK's software renderer on a virtual display. The copy and that path, not the GPU, are what make omxcode slower today; "
+        f"The other {f2(rest)} ms of its {f2(c20['frame_ms'])} ms frame is inferred, not measured: the frame minus that work. "
+        f"We read it as the GTK host taking the picture as a texture and compositing it (here with GTK's software renderer on a virtual display), "
+        f"because it hardly depends on N: omxcode's frame is {f2(c1['frame_ms'])} ms at 1M and {f2(c20['frame_ms'])} ms at {mn(top)}, "
+        f"{top // 1_000_000} times the particles. The copy and that path, not the GPU, are what make omxcode slower today; "
         "drawing straight from the GPU into the window is not built yet.</li>",
+        f"<li><b>omxcode's frame is noisy.</b> Its spread across the three runs is up to ±{f2(max(row(res, 'C', n)['frame_ms_spread'] for n in res['protocol']['sizes']))} ms"
+        + (f", and its {mn(dip)} figure ({f2(row(res, 'C', dip)['frame_ms'])} ms) is below its 1M one: read its line as flat within that noise.</li>" if dip else ": read its line as flat within that noise.</li>"),
         f"<li><b>Start and memory.</b> At 1M, cold start to the first drawn frame: " + ", ".join(f"{NAMES[r]} {f2(ms, 0)} ms" for ms, r in starts) +
-        ". Peak memory (the process tree's RSS, GPU memory not included): " + ", ".join(f"{NAMES[r]} {f2(mb, 0)} MB" for mb, r in mem) +
+        ". Native Rust has no window or swapchain to make, as it renders offscreen. Peak memory (the process tree's PSS, so pages Chromium's processes share count once; GPU memory not included): " + ", ".join(f"{NAMES[r]} {f2(mb, 0)} MB" for mb, r in mem) +
         ". The browser rows carry Chromium itself in both.</li>",
         "</ul>",
     ]
@@ -122,7 +134,7 @@ def best(values, low=True):
 def perf(res):
     top = max(res["protocol"]["sizes"])
     head = ("<tr><th>Build</th><th>Largest N at 60 fps</th>" + "".join(f"<th>Frame ms · {mn(n)}</th>" for n in SIZES) +
-            f"<th>Step ms · {mn(top)}</th><th>Cold start ms · 1M</th><th>Peak memory MB · 1M / {mn(top)}</th></tr>")
+            f"<th>Step ms · {mn(top)}</th><th>Cold start ms · 1M</th><th>Peak memory MB (PSS) · 1M / {mn(top)}</th></tr>")
     cols = {n: best([row(res, r, n)["frame_ms"] for r in ORDER if row(res, r, n)]) for n in SIZES}
     body = []
     for r in ORDER:
@@ -140,7 +152,7 @@ def perf(res):
         d20, d1 = row(res, r, top), row(res, r, 1_000_000)
         cells.append(f"<td>{f2(d20['step_ms'], 3)}<small class='is'>{E(d20['step_ms_is'])}</small></td>")
         cells.append(f"<td>{f2(d1['cold_start_ms'], 0)}</td>")
-        cells.append(f"<td>{f2(d1['peak_rss_mb'], 0)} / {f2(d20['peak_rss_mb'], 0)}</td>")
+        cells.append(f"<td>{f2(d1['peak_pss_mb'], 0)} / {f2(d20['peak_pss_mb'], 0)}</td>")
         body.append(f"<tr class='r-{r}'>" + "".join(cells) + "</tr>")
     how = "".join(f"<li><b>{NAMES[r]}:</b> {E(row(res, r, 1_000_000)['frame_ms_is'])}.</li>" for r in ORDER)
     extra = res["protocol"].get("extra_sizes", {}).get("A-cpu", [])
@@ -152,7 +164,7 @@ def perf(res):
 <tbody>
 {chr(10).join(body)}
 </tbody></table></div>
-<p class="tnote">Median of {p['runs']} runs of {p['warmup']} warm-up and {p['frames']} measured frames, vsync off (± is the spread, max − min). Holds 60 fps = frame ≤ {p['frame_60_ms']} ms and the 95th-percentile frame interval ≤ {p['p95_max_ms']:g} ms; ✗ = it doesn't. The fastest in each column is marked.{small}</p>
+<p class="tnote">Median of {p['runs']} runs of {p['warmup']} warm-up and {p['frames']} measured frames, vsync off (± is the spread, max − min). Holds 60 fps = frame ≤ {p['frame_60_ms']} ms and the 95th-percentile frame interval ≤ {p['p95_max_ms']:g} ms; ✗ = it doesn't. The fastest in each column is marked. A's p95 is a rAF interval that runs ahead of its GPU, so for A the p95 test never binds; its throughput does.{small}</p>
 <ul class="hownote">{how}</ul>"""
 
 
@@ -170,23 +182,27 @@ def provenance(res):
 def effort(res):
     ef = res["effort"]
     rows = []
-    for k in EFFORT_ORDER:
+    fw = ef["C"].get("framework_added", {})
+    for k in COUNT_ORDER:
         e = ef[k]
-        cls = " class='r-C'" if k == "C" else ""
-        rows.append(f"<tr{cls}><th scope='row'>{EFFORT_NAMES[k]}</th><td>{e['lines']:,}</td><td>{e['files']}</td>"
+        cls = " class='r-C'" if k == "C" else " class='sum'" if k == "B" else ""
+        name = {"B": "JS + Rust, both apps", "C": "omxcode (the app)"}.get(k, EFFORT_NAMES[k])
+        rows.append(f"<tr{cls}><th scope='row'>{name}</th><td>{e['lines']:,}</td><td>{e['files']}</td>"
                     f"<td>{len(e['languages'])}<small class='is'>{E(', '.join(e['languages']))}</small></td>"
                     f"<td>{e['build_steps']}</td><td class='tc'>{E('; '.join(e['toolchains']))}</td></tr>")
     steps = "".join(
         f"<div class='steps'><b>{EFFORT_NAMES[k]}</b><ol>" + "".join(f"<li><code>{E(s)}</code></li>" for s in ef[k]["steps"]) + "</ol></div>"
-        for k in ("B", "C"))
+        for k in ("B-wasm", "B-native", "C"))
     return f"""<div class="tscroll"><table class="mtable effort">
 <thead><tr><th>Build</th><th>Lines of code</th><th>Files</th><th>Languages</th><th>Build steps</th><th>Toolchains to install</th></tr></thead>
 <tbody>
 {chr(10).join(rows)}
 </tbody></table></div>
-<p class="tnote">Counted by scripts/particles_bench.py, not by hand: blank and comment-only lines (and docstrings) left out. omxcode counts the app only;
-mojoui (the framework, with PointCloud's step and draw kernels) is a library, as WebGPU, wgpu, wasm-bindgen and rayon are.
-Build steps run from a clean checkout to the app on screen.</p>
+<p class="tnote">Counted by scripts/particles_bench.py, not by hand: blank and comment-only lines (and docstrings) left out.
+The two Rust apps share the sim crate and the workspace Cargo.toml (counted in each). omxcode's row is the app; mojoui, the framework, is a library,
+as WebGPU, wgpu, wasm-bindgen and rayon are. But this goal also added {fw.get('lines', 0)} lines to the framework and its test for omxcode
+({', '.join(f'{E(f)} +{n}' for f, n in fw.get('by_file', {}).items())}; from git, since the goal began): PointCloud's step, draw and readback,
+which any app can now use. Build steps run from a clean checkout to the app on screen.</p>
 <div class="stepsrow">{steps}</div>"""
 
 
@@ -324,9 +340,54 @@ def code():
 
 # ---------- the page ----------
 
+def problem(res):
+    """Chapter 1's first card: where plain JS stops keeping up, from its rows."""
+    rows = {int(n): d for n, d in res["rows"]["A-cpu"].items()}
+    ok = [n for n, d in sorted(rows.items()) if d["holds_60"]]
+    fails = [(n, d) for n, d in sorted(rows.items()) if not d["holds_60"]]
+    parts = [f"At {mn(max(ok))} particles it keeps up ({f2(rows[max(ok)]['frame_ms'])} ms a frame)." if ok else ""]
+    for n, d in fails[:2]:
+        if d["frame_ms"] <= res["protocol"]["frame_60_ms"]:
+            parts.append(f"At {mn(n)} its average frame still fits ({f2(d['frame_ms'])} ms), but it stutters: the slowest frame in "
+                         f"twenty takes {f2(d['p95_interval_ms'], 1)} ms.")
+        else:
+            parts.append(f"At {mn(n)} a frame takes {f2(d['frame_ms'])} ms on average: it can't keep 60 fps, and it only gets worse from there.")
+            break
+    return ("<p>One thread steps every particle and paints every pixel. " + " ".join(p for p in parts if p) +
+            " It is single-threaded on purpose: it is the \"JavaScript alone\" baseline.</p>")
+
+
+def mcp():
+    """Chapter 3's session, printed from the committed transcript (scripts/why_mcp.py), never typed by hand."""
+    t = json.loads(TRANSCRIPT.read_text())
+    msgs = t["messages"]
+    out = ["<div class='call'>",
+           "<div class='who'>Once: <code>scripts/agent.sh particles</code> prints the <code>claude mcp add</code> line</div>"]
+    calls = {m["msg"]["id"]: m["msg"] for m in msgs if m["from"] == "agent" and m["msg"].get("method") == "tools/call"}
+    said = {"screen": "The agent calls screen", "slider": "Then moves the slider (an MCP tools/call)", "read": "Three seconds later it reads the screen"}
+    for m in msgs:
+        r = m["msg"]
+        if m["from"] != "agent host" or r.get("id") not in calls:
+            continue
+        call = calls[r["id"]]
+        name = call["params"]["name"]
+        out.append(f"<div class='who'>{E(said.get(name, name))}</div>")
+        if name == "slider":
+            out.append(f"<pre>{E(json.dumps({'method': call['method'], 'params': call['params']}))}</pre>")
+            out.append("<div class='who'>And gets back what changed, in words</div>")
+        text = "\n".join(c["text"] for c in r["result"]["content"] if c["type"] == "text")
+        out.append(f"<pre class='res'>{E(text)}</pre>")
+    out.append("</div>")
+    out.append(f"<p style='font-size:13.5px'>Recorded {E(t['date'])} by scripts/why_mcp.py: {E(t['app'])}; the agent host attached "
+               "to it. Printed here from the committed transcript (docs/goals/36/mcp-transcript.json, every JSON-RPC line after the "
+               "MCP handshake), unedited. Nothing in <code>app.mojo</code> was written for it.</p>")
+    return "\n".join(out)
+
+
 def fragments(res):
     return {"headline": headline(res), "verdict": verdict(res), "perf": perf(res), "caveats": caveats(res),
-            "provenance": provenance(res), "effort": effort(res), "writes": writes(res), "code": code()}
+            "provenance": provenance(res), "effort": effort(res), "writes": writes(res), "code": code(),
+            "problem": problem(res), "mcp": mcp()}
 
 
 def apply(text, frags):

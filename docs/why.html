@@ -189,12 +189,15 @@ details.more::after, details.more summary::after { content: none !important; }
     <div class="head">
       <div class="chap rv">1 · Performance</div>
       <h2 class="rv">JavaScript runs out of frames. <span class="two">The usual fixes add languages.</span></h2>
-      <p class="lede rv">Every build follows one spec (<a href="https://github.com/abhisheksreesaila/omxcode/blob/main/showcase/SPEC.md">showcase/SPEC.md</a>) and matches the same NumPy reference within 1e-3 after 120 steps. Each was written by its own agent from its stack's official docs, then reviewed for performance mistakes.</p>
+      <p class="lede rv">Every build follows one spec (<a href="https://github.com/abhisheksreesaila/omxcode/blob/main/showcase/SPEC.md">showcase/SPEC.md</a>) and matches the same NumPy reference within 1e-3 after 120 steps.</p>
+      <p class="body rv" style="font-size:16px">How they were written: each by its own agent from its stack's official docs, under a contract that said not to read the other builds. Git can't show what an agent read; it shows that JS + WebGPU, omxcode and JS + Rust were committed at 22:57, 22:58 and 23:24 on 27 October, each commit touching only its own folders (omxcode's also the framework and one test), all before any measurement. A reviewer then looked for performance mistakes in each, and every build got fixes: JS + WebGPU stopped waiting on the GPU every frame; omxcode's skip of saturated pixels was modelled on JS + WebGPU's, and JS + WebGPU later got omxcode's load-first form of it; JS + Rust got its own thread-count probe and a cold start counted from the browser's launch.</p>
     </div>
 
     <div class="three rv">
       <div class="tcard pain"><div class="tag">The problem</div><h3>Plain JS drops frames as N grows</h3>
-        <p>One thread steps every particle and paints every pixel. At a hundred thousand particles it keeps up; by a million it is behind the screen, and it only gets worse from there. It is single-threaded on purpose: it is the "JavaScript alone" baseline.</p></div>
+<!-- why:problem -->
+<!-- /why:problem -->
+      </div>
       <div class="tcard fix"><div class="tag">The usual fixes</div><h3>Move the work, add a language</h3>
         <ul><li><b>WebGPU:</b> two languages, JavaScript and WGSL shaders, joined by hand-packed buffers.</li>
           <li><b>Rust → wasm:</b> three or more languages, generated bindings, threads behind special headers, and a boundary crossed every frame: each particle is uploaded from wasm memory to the GPU.</li>
@@ -469,24 +472,6 @@ Build steps run from a clean checkout to the app on screen.</p>
         <h3>omxcode: every app is an MCP server</h3>
         <p>The agent host turns the same view tree the screen shows into tools: the slider is a tool, the readout is text it can read, nothing to write. One command gives the app to Claude Code; a real session with this particle app:</p>
 <!-- why:mcp -->
-        <div class="call">
-          <div class="who">Claude Code, once: <code>scripts/agent.sh particles</code> prints the <code>claude mcp add</code> line</div>
-          <div class="who">The agent calls screen</div>
-<pre class="res">Particles · design: Omxqua-dark · 2 tools on this screen
-"1M particles · 0 fps · step 0.00 ms on NVIDIA GeForce RTX 3090"
-Slider 0 → slider
-Canvas 1280×720 (render it; read it) → canvas-0
-Tools (call them by name, or act with name + value):
-  slider — Slider (now 0)
-  canvas-0 — A drawn view (1280×720 points): tap, double, secondary (a right click), press, release, or a key</pre>
-          <div class="who">Then moves the slider (MCP tools/call)</div>
-<pre>{"method": "tools/call", "params": {"name": "slider", "arguments": {"value": 50}}}</pre>
-          <div class="who">And gets back what changed, in words</div>
-<pre class="res">Did slider.
-Now: 5M particles · 54 fps · step 0.22 ms on NVIDIA GeForce RTX 3090
-Now: 5M</pre>
-        </div>
-        <p style="font-size:13.5px">Run on 2026-10-28 with <code>scripts/agent_client.py</code> against <code>build/particles/web</code> (the screen's answer shortened: four of its text lines left out). The agent host runs its own session of the app, on the GPU; nothing in <code>app.mojo</code> was written for it.</p>
 <!-- /why:mcp -->
       </div>
     </div>
@@ -544,8 +529,8 @@ Now: 5M</pre>
         <tr><th scope="row">One file for UI and GPU</th>
           <td><span class="m no">✗</span><span class="note">Three files and no GPU.</span></td>
           <td><span class="m no">✗</span><span class="note">Eight files, five of them shaders.</span></td>
-          <td><span class="m no">✗</span><span class="note">Thirteen files over three crates and a web folder.</span></td>
-          <td class="me"><span class="m yes">✓</span><span class="note"><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/examples/particles/app.mojo">examples/particles/app.mojo</a>, the whole app.</span></td></tr>
+          <td><span class="m no">✗</span><span class="note">Thirteen files over three crates and a web folder, for its two apps.</span></td>
+          <td class="me"><span class="m yes">✓</span><span class="note"><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/examples/particles/app.mojo">examples/particles/app.mojo</a>, the whole app. The GPU kernels' plumbing it calls lives in the framework (counted in chapter 2).</span></td></tr>
         <tr><th scope="row">A theme by default</th>
           <td><span class="m no">✗</span><span class="note">You write the CSS.</span></td>
           <td><span class="m no">✗</span><span class="note">You write the CSS.</span></td>
@@ -555,7 +540,7 @@ Now: 5M</pre>
           <td><span class="m part">partial</span><span class="note">The browser's sandbox, stronger than any native app's; a CSP you write.</span></td>
           <td><span class="m part">partial</span><span class="note">As plain JS.</span></td>
           <td><span class="m part">partial</span><span class="note">The sandbox in the browser; the native build is an ordinary program.</span></td>
-          <td class="me"><span class="m yes">✓</span><span class="note"><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/js.md">A strict CSP on the web host</a>, agent UI as data only. Native builds run as ordinary programs, with no browser sandbox.</span></td></tr>
+          <td class="me"><span class="m part">partial</span><span class="note"><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/js.md">A strict CSP on the web host</a> by default, agent UI as data only (<a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agui.md">refused otherwise</a>). But native builds run as ordinary programs, with no browser sandbox.</span></td></tr>
         <tr><th scope="row">Runs in the browser</th>
           <td><span class="m yes">✓</span><span class="note"><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/showcase/js-webgpu/cpu.js">Fully in the page</a>, any browser.</span></td>
           <td><span class="m yes">✓</span><span class="note"><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/showcase/js-webgpu/main.js">Fully in the page</a>, in browsers with WebGPU.</span></td>
