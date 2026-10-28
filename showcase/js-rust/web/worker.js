@@ -65,8 +65,6 @@ function tick(now) {
     const ms = now - last;
     totals.push(ms);
     fps = 0.9 * fps + 0.1 * (1000 / ms);
-  } else {
-    firstFrame = performance.now();
   }
   last = now;
   const [cx, cy] = cursor && !scripted ? cursor : attractor(frame);
@@ -77,6 +75,7 @@ function tick(now) {
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArrays(gl.POINTS, 0, n);
   const t2 = performance.now();
+  if (!firstFrame) { gl.finish(); firstFrame = performance.now(); } // cold start ends at the first drawn frame, as in the other builds
   steps.push(t1 - t0);
   works.push(t2 - t0);
   stepAvg = 0.9 * stepAvg + 0.1 * (t1 - t0);

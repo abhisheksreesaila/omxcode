@@ -510,12 +510,16 @@ impl App {
             let ms = (now - prev).as_secs_f64() * 1000.0;
             self.totals.push(ms);
             self.fps = 0.9 * self.fps + 0.1 * (1000.0 / ms);
-        } else {
+        }
+        let first = self.last_frame.is_none();
+        self.last_frame = Some(now);
+        gpu.frame(self.frame, c, shot.as_deref());
+        if first {
+            // cold start ends when the first frame is drawn (its GPU work done), as in the other builds
+            let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
             self.first_frame_ms = self.t_start.elapsed().as_secs_f64() * 1000.0;
             self.first_frame_epoch_ms = epoch_ms();
         }
-        self.last_frame = Some(now);
-        gpu.frame(self.frame, c, shot.as_deref());
         gpu.drain_timestamps(false);
         if let Some(v) = gpu.steps.iter().rev().find(|v| !v.is_nan()) {
             self.step_ms = *v;

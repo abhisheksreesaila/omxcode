@@ -90,7 +90,9 @@ def free_port():
         return s.getsockname()[1]
 
 
-def run_wasm(n, frames, out, shot=None):
+def run_wasm(n, frames, out, shot=None, threads=None):
+    """threads: the rayon pool's size (default: navigator.hardwareConcurrency). Cold start counts from before
+    Chromium's launch, like the other rows."""
     from playwright.sync_api import sync_playwright
 
     out.mkdir(parents=True, exist_ok=True)
@@ -102,6 +104,7 @@ def run_wasm(n, frames, out, shot=None):
         # Chromium started by us (so its process tree, GPU process included, is ours to measure), driven over CDP
         cdp = free_port()
         profile = tempfile.mkdtemp(prefix="chromium_", dir=out)
+        t0 = time.time() * 1000  # (before the browser starts: cold start is launch to first drawn frame)
         chrome = subprocess.Popen([CHROMIUM, "--headless=new", f"--remote-debugging-port={cdp}", f"--user-data-dir={profile}",
                                    "--no-first-run", "--no-default-browser-check", *CHROME_ARGS, "about:blank"],
                                   env={**os.environ, **CHROME_ENV}, stdout=subprocess.DEVNULL, stderr=open(out / "chrome.log", "w"))
@@ -121,8 +124,7 @@ def run_wasm(n, frames, out, shot=None):
                 page.on("pageerror", lambda e: errors.append(str(e)))
                 page.on("crash", lambda _: errors.append("renderer crashed"))
                 page.on("console", lambda m: m.type == "error" and errors.append(m.text))
-                t0 = time.time() * 1000
-                page.goto(f"http://127.0.0.1:{port}/index.html?scripted=1&n={n}&frames={frames}")
+                page.goto(f"http://127.0.0.1:{port}/index.html?scripted=1&n={n}&frames={frames}" + (f"&threads={threads}" if threads else ""))
                 page.on("console", lambda m: os.environ.get("CHECK_B_VERBOSE") and print("console:", m.type, m.text))
                 try:
                     page.wait_for_function("document.title === 'done'", timeout=int(os.environ.get("CHECK_B_TIMEOUT_MS", "600000")), polling=200)
@@ -142,6 +144,8 @@ def run_wasm(n, frames, out, shot=None):
         if errors:
             raise RuntimeError("page errors: " + "; ".join(errors))
         t = json.loads((out / "timings.json").read_text())
+        if not t.get("crossOriginIsolated") or t.get("threads", 1) <= 1:
+            raise RuntimeError(f"B-wasm ran single-threaded (crossOriginIsolated={t.get('crossOriginIsolated')}, threads={t.get('threads')})")
         t["cold_start_ms"] = t["first_frame_epoch_ms"] - t0
         t["peak_rss_mb"] = peak / 1024
         return t
