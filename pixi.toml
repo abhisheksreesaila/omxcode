@@ -25,6 +25,10 @@ mojo = ">=1.1, <1.2"
 playwright = ">=1.64.0, <2"
 max = ">=26.6.0, <27"
 mxframe = "==0.6.0"
+ag-ui-protocol = ">=1.0.0, <2"
+anthropic = ">=2.3.0, <3"
+jsonpatch = ">=1.38, <2"
+jsonschema = ">=4.26.0, <5"
 
 [target.linux-glibc-234.dependencies]
 xorg-xvfb-server = ">=21.1.25,<22"
