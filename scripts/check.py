@@ -136,10 +136,69 @@ def m4():
                   + ", ".join(f"{r} {pb.mill(v) if v else 'none'}" for r, v in big.items()))
 
 
-def todo(what):
-    def fn():
-        return False, f"not built yet: {what}"
-    return fn
+def m5():
+    """The page: docs/why.html in four chapters, its generated parts equal to what the final results.json gives
+    (scripts/why_tables.py --check), no provisional text, every ✓ in the feature table links to something that exists,
+    every ✗ says why, and every image it shows exists."""
+    import re
+    import why_tables as wt
+    page_path = ROOT / "docs" / "why.html"
+    if not page_path.exists():
+        return False, "docs/why.html missing"
+    page = page_path.read_text()
+    problems = []
+    for cid in ("performance", "code", "agents", "features"):
+        if f'id="{cid}"' not in page:
+            problems.append(f"no chapter #{cid}")
+    if not (OUT / "results.json").exists():
+        return False, "docs/goals/36/results.json missing (the final measurement): the page can't be checked against it"
+    res = json.loads((OUT / "results.json").read_text())
+    if res.get("provisional") is not False:
+        problems.append("results.json is provisional")
+    if wt.apply(page, wt.fragments(res)) != page:
+        problems.append("the page's tables differ from results.json: rerun scripts/why_tables.py")
+    if "provisional" in page.lower():
+        problems.append("the page says 'provisional'")
+    mcp = re.search(r"<!-- why:mcp -->(.*?)<!-- /why:mcp -->", page, re.S)
+    if not mcp or "<pre" not in mcp.group(1):
+        problems.append("no example MCP tool call in chapter 3")
+
+    def exists(href):
+        href = href.split("#")[0]
+        if href.startswith(wt.REPO):
+            return (ROOT / href[len(wt.REPO):]).exists()
+        if href.startswith("https://"):
+            return True  # outside the repo (npm, crates.io, the AG-UI docs): not checked offline
+        return bool(href) and (ROOT / "docs" / href).exists()
+
+    table = re.search(r'<table class="mtable ftable">(.*?)</table>', page, re.S)
+    yes = no = 0
+    if not table:
+        problems.append("no feature table")
+    else:
+        for tr in re.findall(r"<tr>(.*?)</tr>", table.group(1), re.S):
+            feature = re.sub(r"<.*?>", "", (re.search(r"<th[^>]*>(.*?)</th>", tr, re.S) or [None, "?"])[1])
+            for td in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S):
+                note = re.sub(r"<.*?>", "", td.split("</span>", 1)[-1]).strip()
+                if 'class="m yes"' in td:
+                    yes += 1
+                    hrefs = re.findall(r'href="([^"]+)"', td)
+                    if not hrefs:
+                        problems.append(f"{feature}: a ✓ without a link")
+                    problems += [f"{feature}: ✓ links to {h}, which doesn't exist" for h in hrefs if not exists(h)]
+                elif 'class="m no"' in td or 'class="m part"' in td:
+                    no += 1
+                    if len(note) < 12:
+                        problems.append(f"{feature}: a ✗ or partial without a reason")
+    for src in re.findall(r'<img[^>]+src="([^"]+)"', page) + re.findall(r'href="(img/[^"]+)"', page):
+        if not (ROOT / "docs" / src).exists():
+            problems.append(f"image {src} missing")
+    if problems:
+        return False, "; ".join(problems[:12])
+    big = res["largest_n_at_60"]
+    return True, (f"docs/why.html: four chapters, tables match results.json (commit {res['commit']}), feature table {yes} ✓ "
+                  f"all linked, {no} ✗/partial all explained; largest N at 60 fps on the page: "
+                  + ", ".join(f"{r} {wt.mn(v)}" for r, v in big.items()))
 
 
 MILESTONES = [
@@ -148,7 +207,7 @@ MILESTONES = [
     ("M2", m2),
     ("M3", m3),
     ("M4", m4),
-    ("M5", todo("docs/why.html, the page in four chapters")),
+    ("M5", m5),
 ]
 
 
