@@ -167,6 +167,52 @@ def _shade_kernel[g: ColourFn](
         dst.unsafe_offset(i)[] = g(counts.unsafe_offset(i)[], k)
 
 
+comptime StepFn = def(Point, Knobs) thin -> Point  # a point's next state (a simulation step)
+comptime TintFn = def(Point, Knobs) thin -> SIMD[DType.float32, 4]  # the light a point adds: r, g, b in 0–1
+comptime GLOW_ONE = Float32(1024)  # splat(): fixed point for added light (whole numbers, so GPU and CPU agree)
+
+
+def _step_kernel[f: StepFn](pts: UnsafePointer[Float32, MutAnyOrigin], n: Int32, k: Knobs):
+    var i = Int(global_idx.x)
+    if i < Int(n):
+        var at = pts.unsafe_offset(4 * i)
+        at.unsafe_store[width=4](f(at.unsafe_load[width=4](), k))
+
+
+def _glow(t: SIMD[DType.float32, 4]) -> SIMD[DType.uint32, 4]:
+    return (min(max(t, SIMD[DType.float32, 4](0)), SIMD[DType.float32, 4](1)) * GLOW_ONE).cast[DType.uint32]()
+
+
+def _splat_kernel[f: PlaceFn, g: TintFn](
+    pts: UnsafePointer[Float32, MutAnyOrigin], n: Int32, light: UnsafePointer[UInt32, MutAnyOrigin],
+    w32: Int32, h32: Int32, k: Knobs,
+):
+    var i = Int(global_idx.x)
+    if i < Int(n):
+        var p = pts.unsafe_offset(4 * i).unsafe_load[width=4]()
+        var at = f(p, Int(w32), Int(h32), k)
+        if at >= 0:
+            var add = _glow(g(p, k))
+            _ = Atomic.fetch_add[ordering=Ordering.RELAXED](light.unsafe_offset(3 * at), add[0])
+            _ = Atomic.fetch_add[ordering=Ordering.RELAXED](light.unsafe_offset(3 * at + 1), add[1])
+            _ = Atomic.fetch_add[ordering=Ordering.RELAXED](light.unsafe_offset(3 * at + 2), add[2])
+
+
+def _light_rgba(r: UInt32, g: UInt32, b: UInt32) -> UInt32:
+    """Added light → a pixel, clamped like additive blending (ONE, ONE) on black."""
+    comptime one = UInt32(Int(GLOW_ONE))
+    var ri = min(r, one) * 255 // one
+    var gi = min(g, one) * 255 // one
+    var bi = min(b, one) * 255 // one
+    return ri | (gi << 8) | (bi << 16) | (UInt32(255) << 24)
+
+
+def _resolve_kernel(light: UnsafePointer[UInt32, MutAnyOrigin], dst: UnsafePointer[UInt32, MutAnyOrigin], total: Int32):
+    var i = Int(global_idx.x)
+    if i < Int(total):
+        dst.unsafe_offset(i)[] = _light_rgba(light.unsafe_offset(3 * i)[], light.unsafe_offset(3 * i + 1)[], light.unsafe_offset(3 * i + 2)[])
+
+
 struct PointCloud(Movable):
     """Up to four float32 columns of the same length, kept on the GPU (uploaded once) when there
     is one, and always on the CPU. Columns are what a dataframe hands over (e.g. MX frame)."""
@@ -185,6 +231,9 @@ struct PointCloud(Movable):
     var shown: Int  # of those, points inside the picture
     var uploads: Int
     var milliseconds: Float64  # last bin() + shade(), including the copy to the screen's memory
+    var light: Optional[DeviceBuffer[DType.uint32]]  # splat(): added light, three channels per pixel, then the picture
+    var host_light: List[UInt32]
+    var light_capacity: Int
 
     def __init__(out self, x: List[Float32], y: List[Float32], a: List[Float32], b: List[Float32], use_gpu: Bool = True):
         self.gpu = Gpu(use_gpu)
@@ -206,6 +255,34 @@ struct PointCloud(Movable):
         self.shown = 0
         self.uploads = 0
         self.milliseconds = 0
+        self.light = None
+        self.host_light = List[UInt32]()
+        self.light_capacity = 0
+        self.upload()
+
+    def __init__(out self, var points: List[Float32], use_gpu: Bool = True):
+        """Points already laid out four floats each (x, y, a, b), e.g. a simulation's (x, y, vx, vy): no copy."""
+        self.gpu = Gpu(use_gpu)
+        self.count = len(points) // 4
+        self.host = points^
+        self.device = None
+        self.counts = None
+        self.image = None
+        self.host_counts = List[UInt32]()
+        self.capacity = 0
+        self.w = 0
+        self.h = 0
+        self.matched = 0
+        self.shown = 0
+        self.uploads = 0
+        self.milliseconds = 0
+        self.light = None
+        self.host_light = List[UInt32]()
+        self.light_capacity = 0
+        self.upload()
+
+    def upload(mut self):
+        """Copies the points to the GPU (once, from __init__), when there is one."""
         comptime if GPU_BUILD:
             if self.gpu.available() and self.count > 0:
                 try:
@@ -230,6 +307,8 @@ struct PointCloud(Movable):
             self.counts = None
             self.image = None
             self.capacity = 0
+            self.light = None
+            self.light_capacity = 0
 
     def device_name(self) -> String:
         return self.gpu.name if self.on_gpu() else String("CPU")
@@ -316,6 +395,106 @@ struct PointCloud(Movable):
         for i in range(total):
             p.unsafe_offset(i)[] = g(self.host_counts[i] if i < len(self.host_counts) else 0, k)
         self.milliseconds += Float64(now_ns() - t0) / 1e6
+
+
+    # ---------- simulations: points that move ----------
+    #
+    #   def advance(p: Point, k: Knobs) -> Point: ...          # p = (x, y, vx, vy) → the next state
+    #   def tint(p: Point, k: Knobs) -> SIMD[DType.float32, 4]: ...   # the light it adds (r, g, b, 0–1)
+    #   cloud.step[advance](k)                                  # every point, in place (on the GPU when there is one)
+    #   cloud.splat[place, tint](surface, k)                    # each point adds its light to one pixel (additive)
+    #   var xyab = cloud.points()                               # the current points, back on the CPU
+
+    def step[f: StepFn](mut self, k: Knobs):
+        """Replaces every point with f(point, k), in place; returns once it's done (milliseconds: how long)."""
+        var t0 = now_ns()
+        comptime if GPU_BUILD:
+            if self.on_gpu():
+                try:
+                    ref ctx = self.gpu.ctx.value()
+                    ctx.enqueue_function[_step_kernel[f]](
+                        self.device.value().unsafe_ptr(), Int32(self.count), k,
+                        grid_dim=ceildiv(self.count, 256), block_dim=256,
+                    )
+                    ctx.synchronize()
+                    self.milliseconds = Float64(now_ns() - t0) / 1e6
+                    return
+                except e:
+                    self.download()  # (the last good points) then the CPU from now on
+                    self.give_up_gpu(String(e))
+        var pts = self.host.unsafe_ptr()
+        for i in range(self.count):
+            var at = pts.unsafe_offset(4 * i)
+            at.unsafe_store[width=4](f(at.unsafe_load[width=4](), k))
+        self.milliseconds = Float64(now_ns() - t0) / 1e6
+
+    def download(mut self):
+        """Copies the GPU's points back into the CPU's copy (after step(), the GPU's are the current ones)."""
+        comptime if GPU_BUILD:
+            if self.on_gpu():
+                try:
+                    ref ctx = self.gpu.ctx.value()
+                    ctx.enqueue_copy(dst_ptr=self.host.unsafe_ptr(), src_buf=self.device.value())
+                    ctx.synchronize()
+                except e:
+                    print("mojoui.gpu: couldn't read the points back (" + String(e) + ")")
+
+    def points(mut self) -> List[Float32]:
+        """The current points, four floats each (a copy, read back from the GPU when they live there)."""
+        self.download()
+        return self.host.copy()
+
+    def splat[f: PlaceFn, g: TintFn](mut self, mut surface: Surface, k: Knobs):
+        """Paints the surface black, then each point adds g(point)'s light to the pixel f(point) picks (OUTSIDE or
+        FILTERED: none), clamped at white: additive blending. Light adds up as whole numbers, so the GPU and the CPU
+        make the same picture. milliseconds: how long, including the copy into the surface."""
+        var t0 = now_ns()
+        var w = surface.width
+        var h = surface.height
+        var total = w * h
+        comptime if GPU_BUILD:
+            if self.on_gpu():
+                try:
+                    ref ctx = self.gpu.ctx.value()
+                    if self.light_capacity < total:  # light (3 per pixel), then the picture (1 per pixel)
+                        self.light = ctx.enqueue_create_buffer[DType.uint32](4 * total)
+                        self.light_capacity = total
+                    var light = self.light.value().create_sub_buffer[DType.uint32](0, 3 * total)
+                    var image = self.light.value().create_sub_buffer[DType.uint32](3 * total, total)
+                    ctx.enqueue_memset(light, 0)
+                    ctx.enqueue_function[_splat_kernel[f, g]](
+                        self.device.value().unsafe_ptr(), Int32(self.count), light.unsafe_ptr(), Int32(w), Int32(h), k,
+                        grid_dim=ceildiv(self.count, 256), block_dim=256,
+                    )
+                    ctx.enqueue_function[_resolve_kernel](
+                        light.unsafe_ptr(), image.unsafe_ptr(), Int32(total), grid_dim=ceildiv(total, 256), block_dim=256,
+                    )
+                    var dst = UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=surface.address)
+                    ctx.enqueue_copy(dst_ptr=dst, src_buf=image)
+                    ctx.synchronize()
+                    self.milliseconds = Float64(now_ns() - t0) / 1e6
+                    return
+                except e:
+                    self.download()
+                    self.give_up_gpu(String(e))
+        if len(self.host_light) != 3 * total:
+            self.host_light = List[UInt32](length=3 * total, fill=0)
+        else:
+            for i in range(3 * total):
+                self.host_light[i] = 0
+        var pts = self.host.unsafe_ptr()
+        for i in range(self.count):
+            var p = pts.unsafe_offset(4 * i).unsafe_load[width=4]()
+            var at = f(p, w, h, k)
+            if at >= 0:
+                var add = _glow(g(p, k))
+                self.host_light[3 * at] += add[0]
+                self.host_light[3 * at + 1] += add[1]
+                self.host_light[3 * at + 2] += add[2]
+        var px = surface.pixels()
+        for i in range(total):
+            px.unsafe_offset(i)[] = _light_rgba(self.host_light[3 * i], self.host_light[3 * i + 1], self.host_light[3 * i + 2])
+        self.milliseconds = Float64(now_ns() - t0) / 1e6
 
 
 # ---------- tables: millions of rows → exact group totals ----------
