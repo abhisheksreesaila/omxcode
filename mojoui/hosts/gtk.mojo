@@ -1400,6 +1400,8 @@ struct GtkHost[A: App](Movable):
             var holder = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(3))  # GTK_POLICY_EXTERNAL
             external_call["gtk_scrolled_window_set_child", NoneType](holder, w)
+            if node.size != 1:  # (no Tab stop of its own, as on the web: only a canvas that takes keys is one; the scrolled
+                external_call["gtk_widget_set_can_focus", NoneType](holder, c_int(0))  # window grabs itself by can-focus, not focusable)
             external_call["gtk_widget_set_size_request", NoneType](holder, c_int(-1 if sized else 320), c_int(-1 if node.sized_height() else 240))
             external_call["gtk_widget_set_size_request", NoneType](w, c_int(-1), c_int(-1))
             w = holder
@@ -2419,6 +2421,7 @@ struct GtkHost[A: App](Movable):
         self.schedule_effects(self_addr)  # (every event comes through here: what it asked for gets its poll)
         self.send_commands(self_addr)  # (and the widget commands it asked for go to their pages)
         self.apply_design(self_addr)
+        self.theme_webviews()  # (a new theme reaches the widgets' pages even when no view changed)
         self.copy_if_asked()
         self.open_if_asked()
         if d.rebuild and d.partial and self.partial_ok and not self.has_pending and len(self.widgets) > 0 and not busy():
@@ -2595,6 +2598,23 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_widget_set_visible", NoneType](c, c_int(0))
             c = external_call["gtk_widget_get_next_sibling", Int](c)
 
+    def theme_webviews(mut self):
+        """The app's theme changed without a rebuild (light/dark, a tint): every live widget page gets the new theme and
+        tokens (its theme(el, tokens) restyles it in place). Pages already wearing this theme get nothing."""
+        var wv = webviews_at(self.webviews)
+        if wv[].state != 1 or len(wv[].slots) == 0:
+            return
+        var t = self.rt.app.theme()
+        var key = t.key()
+        var msg = String("")
+        for k in range(len(wv[].slots)):
+            if wv[].slots[k].gone or wv[].slots[k].theme == key:
+                continue
+            if msg == "":
+                msg = theme_message(t)
+            wv[].slots[k].theme = key
+            webview_send(self.webviews, k, msg)
+
     def sync_webviews(mut self, self_addr: Int):
         """After a build or patches: each shown WebComponent's page gets the theme and its props when they changed (JSON,
         through mojoui.native.receive; the widget's update(), never a remount), and views whose key left go."""
@@ -2658,6 +2678,21 @@ struct GtkHost[A: App](Movable):
     def webview_inbox(mut self, self_addr: Int) -> Bool:
         """Hands the pages' events and replies to update(), in order, while the screen is the shown one (True: some wait)."""
         var wv = webviews_at(self.webviews)
+        if wv[].tab_out != 0:  # a page passed the keyboard on: GTK's own Tab move, from that view, wrapping at the ends
+            var direction = c_int(0 if wv[].tab_out == 1 else 1)  # GTK_DIR_TAB_FORWARD, GTK_DIR_TAB_BACKWARD
+            wv[].tab_out = 0
+            wv[].tab_at = Int(external_call["g_get_monotonic_time", Int64]())
+            wv[].tab_back = Int(direction) == 1
+            var view = wv[].tab_view
+            # (WebKit's view claims any focus move that starts inside it: for this one move it can't take the keyboard,
+            # so GTK carries on to the next widget in the window's own order; then it can again)
+            if view != 0:
+                external_call["gtk_widget_set_can_focus", NoneType](view, c_int(0))
+            if external_call["gtk_widget_child_focus", c_int](self.window, direction) == 0:
+                external_call["gtk_window_set_focus", NoneType](self.window, 0)
+                _ = external_call["gtk_widget_child_focus", c_int](self.window, direction)
+            if view != 0:
+                external_call["gtk_widget_set_can_focus", NoneType](view, c_int(1))
         while len(wv[].inbox) > 0:
             if busy() or self.has_pending:
                 return True
@@ -3386,6 +3421,9 @@ def on_idle_appearance[A: App](host_addr: Int) abi("C") -> c_int:
     host[].arm_all(host_addr)
     if d.rebuild or len(d.patches) > 0:
         host[].apply(d, host_addr)
+    else:
+        host[].apply_design(host_addr)
+        host[].theme_webviews()  # (the widgets' pages follow light/dark live)
     return 0
 
 
@@ -3715,6 +3753,19 @@ def shortcut_name(keyval: Int, state: Int) -> String:
 
 def on_shortcut_pressed[A: App](controller: Int, keyval: c_uint, keycode: c_uint, state: c_uint, host_addr: Int) abi("C") -> c_int:
     """A key pressed anywhere in the window: the menu item declaring it as its shortcut fires (and the key stops here)."""
+    if Int(keyval) == 0xff09 or Int(keyval) == 0xfe20:  # Tab, ISO_Left_Tab (goal 34b M1b)
+        var host = host_at[A](host_addr)
+        var wv = webviews_at(host[].webviews)
+        wv[].tab_at = Int(external_call["g_get_monotonic_time", Int64]())
+        wv[].tab_back = Int(keyval) == 0xfe20 or (Int(state) & 1) != 0
+        var w = external_call["gtk_root_get_focus", Int](host[].window)
+        while w != 0:  # a widget's view has the keyboard: its page takes the Tab (its widget first, then its next stop or out)
+            var k = wv[].slot_by(w)
+            if k >= 0:
+                webview_send(host[].webviews, k, '{"tab":"' + ("back" if wv[].tab_back else "forward") + '"}')
+                return 1
+            w = external_call["gtk_widget_get_parent", Int](w)
+        return 0  # (elsewhere GTK moves the focus; a view it lands in focuses its first or last stop)
     if busy():
         return 0
     var name = shortcut_name(Int(keyval), Int(state))
@@ -4459,6 +4510,16 @@ def run_step[A: App](host_addr: Int, step: String):
             var s = webviews_at(host[].webviews)[].slots[k].copy()
             if s.gone or (s.crashes > 0 and s.loaded and s.mounts >= 1):
                 break
+    elif verb == "scheme":  # scheme:dark / scheme:light: the system's colour scheme switches, live (App.appearance, the widgets' tokens)
+        var styles = external_call["adw_style_manager_get_default", Int]()
+        external_call["adw_style_manager_set_color_scheme", NoneType](styles, c_int(4 if rest == "dark" else 1))  # ADW_COLOR_SCHEME_FORCE_DARK / FORCE_LIGHT
+        var want = 1 if rest == "dark" else 0
+        var by = perf_counter_ns() + 5_000_000_000
+        while (host[].dark_told != want or busy() or host[].has_pending) and perf_counter_ns() < by:
+            pump()
+        var until = perf_counter_ns() + 400_000_000  # (the widgets' pages restyle from their new tokens)
+        while Int(perf_counter_ns()) < until:
+            pump()
     elif verb == "pause":  # pause:3000: keep the main loop running that long (a screen grab of the display can catch popovers)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until:
@@ -4840,6 +4901,25 @@ def report[A: App](host_addr: Int):
     since they float above the page on every host)."""
     report_pass[A](host_addr, False)
     report_pass[A](host_addr, True)
+    print("FOCUS: " + focus_label[A](host_addr))
+
+
+def focus_label[A: App](host_addr: Int) -> String:
+    """What has the keyboard: a widget's key (mx-editor#1) when it is inside a WebComponent's view, "button:<title>" for a
+    button, else the node's kind; "none" (scripts/check M1b reads it for the Tab order)."""
+    var host = host_at[A](host_addr)
+    var w = external_call["gtk_root_get_focus", Int](host[].window) if host[].window != 0 else 0
+    var wv = webviews_at(host[].webviews)
+    while w != 0:
+        var k = wv[].slot_by(w)
+        if k >= 0:
+            return wv[].slots[k].key()
+        var node = get_node(w)
+        if 0 <= node < len(host[].rt.shown.nodes):
+            ref n = host[].rt.shown.nodes[node]
+            return ("button:" + n.text) if n.kind == BUTTON else ("kind:" + String(n.kind))
+        w = external_call["gtk_widget_get_parent", Int](w)
+    return "none"
 
 
 def report_pass[A: App](host_addr: Int, alerts: Bool):

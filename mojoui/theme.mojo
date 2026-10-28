@@ -463,3 +463,66 @@ def palette_css(p: Palette) -> String:
             + ";--o-formula: " + hex_of(p.formula) + ";--o-chrome: " + hex_of(p.chrome) + ";--o-chrome-ink: " + hex_of(p.chrome_ink)
             + ";--o-chrome-line: " + hex_of(p.chrome_line) + ";--o-tint: " + hex_of(p.accent_tint) + ";--o-data: " + hex_of(p.data(0)) + ";--o-shadow: " + shadow + ";"
             + ("color-scheme: dark;" if p.dark else "color-scheme: light;") + "}")
+
+
+# ---- the Look's tokens for JavaScript widgets (goal 34b M1b) ----
+
+def _jstr(s: String) -> String:
+    """A JSON string literal (names and colours: no control characters reach here, quotes and backslashes are escaped)."""
+    var out = String('"')
+    for c in s.codepoint_slices():
+        if c == '"':
+            out += '\\"'
+        elif c == "\\":
+            out += "\\\\"
+        elif c.byte_length() == 1 and Int(c.as_bytes()[0]) < 0x20:
+            out += " "
+        else:
+            out += c
+    return out + '"'
+
+
+def _num(v: Float64) -> String:
+    var whole = Int(v)
+    return String(whole) if Float64(whole) == v else String(v)
+
+
+def card_radius(t: Theme) -> Int:
+    """The corner of a Card in this theme (its "card" surface), 12 when the look has none."""
+    var k = t.look.surface("card")
+    return t.look.surfaces[k].radius_top if k >= 0 and t.look.surfaces[k].radius_top >= 0 else 12
+
+
+def theme_tokens(t: Theme) -> String:
+    """The theme as JSON data for widgets: {id, dark, palette: {page, card, …, data: [six series colours]}, font: {family,
+    mono, size, caption, line}, corners: {card, button, field}}. Hosts hand it to every widget's theme(el, tokens), on
+    mount and whenever the theme changes (light/dark, another theme): data only, never code or CSS."""
+    var p = t.palette.copy()
+    var pal = ('{"page":' + _jstr(hex_of(p.page)) + ',"card":' + _jstr(hex_of(p.card)) + ',"raised":' + _jstr(hex_of(p.raised))
+               + ',"ink":' + _jstr(hex_of(p.ink)) + ',"ink2":' + _jstr(hex_of(p.ink2)) + ',"ink3":' + _jstr(hex_of(p.ink3))
+               + ',"line":' + _jstr(hex_of(p.line)) + ',"strong":' + _jstr(hex_of(p.line_strong)) + ',"accent":' + _jstr(hex_of(p.accent))
+               + ',"on_accent":' + _jstr(hex_of(p.accent_ink)) + ',"wash":' + _jstr(hex_of(p.accent_wash)) + ',"good":' + _jstr(hex_of(p.good))
+               + ',"bad":' + _jstr(hex_of(p.bad)) + ',"warn":' + _jstr(hex_of(p.warn)) + ',"data":[')
+    for i in range(6):
+        if i > 0:
+            pal += ","
+        pal += _jstr(hex_of(p.data(i)))
+    pal += "]}"
+    var ty = t.look.type.copy()
+    var font = ('{"family":' + _jstr(ty.family) + ',"mono":' + _jstr(ty.mono) + ',"size":' + _num(ty.body) + ',"caption":' + _num(ty.caption)
+                + ',"line":' + _num(ty.line) + "}")
+    var c = t.look.controls.copy()
+    var corners = ('{"card":' + String(card_radius(t)) + ',"button":' + String(c.button_radius) + ',"field":' + String(c.field_radius) + "}")
+    return ('{"id":' + _jstr(t.id) + ',"dark":' + ("true" if p.dark else "false") + ',"palette":' + pal + ',"font":' + font
+            + ',"corners":' + corners + "}")
+
+
+def tokens_css(t: Theme) -> String:
+    """The tokens palette_css doesn't carry, as CSS variables on the page's body: the fonts (--o-font, --o-mono,
+    --o-font-size) and the corners (--o-radius-card, --o-radius-button, --o-radius-field), for a widget's own sheet."""
+    var ty = t.look.type.copy()
+    var family = ("'" + ty.family + "', " if ty.family != "" else String("")) + "system-ui, sans-serif"
+    var mono = ("'" + ty.mono + "', " if ty.mono != "" else String("")) + "ui-monospace, monospace"
+    var c = t.look.controls.copy()
+    return ("body {--o-font: " + family + ";--o-mono: " + mono + ";--o-font-size: " + _num(ty.body) + "px;--o-radius-card: "
+            + String(card_radius(t)) + "px;--o-radius-button: " + String(c.button_radius) + "px;--o-radius-field: " + String(c.field_radius) + "px;}")

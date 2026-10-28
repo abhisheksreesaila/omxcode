@@ -1,5 +1,5 @@
 /* mx-editor's frame in the app's theme (the palette's --o-* variables): CodeMirror styles its own insides. */
-mx-editor { display: block; min-height: 220px; border-radius: 10px; border: 1px solid var(--o-line, rgba(120, 120, 128, .28));
+mx-editor { display: block; min-height: 220px; border-radius: var(--o-radius-field, 10px); border: 1px solid var(--o-line, rgba(120, 120, 128, .28));
   background: var(--o-card, #fff); color: var(--o-ink, inherit); overflow: hidden; }
 mx-editor:focus-within { border-color: var(--o-accent, #0a84ff); box-shadow: 0 0 0 3px var(--o-wash, rgba(10, 132, 255, .15)); }
 mx-editor .cm-editor { min-height: 220px; font-size: 14px; line-height: 1.55; }

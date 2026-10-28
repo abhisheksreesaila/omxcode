@@ -313,7 +313,6 @@ def m0_no_describe():
 
 # ---- M1: a second library (Apache ECharts from npm) with no host changes ----
 M0_PASSED = "a87c7cc"  # the commit where M0 passed: M0 legitimately changed host files, so M1 is diffed against it
-M1_PREFIX = "Goal 34b M1:"
 # a real click on the chart's point 1 (the page's own coordinates: ECharts' convertToPixel), through ECharts' own events
 CHART_POINT = ("(c => ((p, r) => [r.left + p[0], r.top + p[1]])(c.convertToPixel({seriesIndex: 0}, [1, c.getOption().series[0].data[1]]),"
                " c.getDom().getBoundingClientRect()))(document.querySelector('mx-chart').mojouiChart)")
@@ -328,17 +327,21 @@ def git(*args):
     return run(["git", *args]).stdout
 
 
+M1_DONE = "760bb66"  # the commit where M1 passed: ECharts' whole change set is M0_PASSED..M1_DONE
+
+
 def m1_hosts_unchanged():
-    """No file in mojoui/hosts changed for M1: the M1 commit's range when it exists, else the working tree, against the commit
-    where M0 passed."""
-    m1 = git("log", "--format=%h", f"--grep=^{M1_PREFIX}", f"{M0_PASSED}..HEAD").split()
-    if m1:  # (later milestones may change hosts: M1's own commits must not have)
-        changed = git("diff", "--name-only", M0_PASSED, m1[-1], "--", "mojoui/hosts").split()
-        where = f"{M0_PASSED}..{m1[-1]}"
-    else:
-        changed = git("diff", "--name-only", M0_PASSED, "--", "mojoui/hosts").split() + git("ls-files", "--others", "--exclude-standard", "mojoui/hosts").split()
-        where = f"{M0_PASSED}..working tree"
-    return ([f"M1 changed host files ({where}): {', '.join(changed)}"] if changed else []), where
+    """No file in mojoui/hosts changed for M1: the change set that added ECharts (M0_PASSED, just before it, to M1_DONE,
+    where M1 passed), pinned by SHA so later work and merges (M1b's theming, the Mac's AppKit web view) don't touch it."""
+    where = f"{M0_PASSED}..{M1_DONE}"
+    if run(["git", "cat-file", "-e", M1_DONE + "^{commit}"]).returncode != 0:
+        return [f"no commit {M1_DONE} in this history"], where
+    changed = git("diff", "--name-only", M0_PASSED, M1_DONE, "--", "mojoui/hosts").split()
+    added = git("diff", "--name-only", M0_PASSED, M1_DONE, "--", "examples/widgets/web").split()
+    problems = [f"M1 changed host files ({where}): {', '.join(changed)}"] if changed else []
+    if "examples/widgets/web/widgets/chart.ts" not in added:
+        problems.append(f"{where} isn't the change set that added the ECharts widget")
+    return problems, where
 
 
 def m1_series(widget_line):
@@ -455,6 +458,216 @@ def m1():
                                                  f"shots {OUT.relative_to(ROOT)}/m1-chart-web.png, m1-chart-gtk.png")
 
 
+# ---- M1b: widgets as first-class citizens: the Look's tokens live, Tab order across native and widgets, matrix, gallery ----
+# What each widget shows of the theme, read from its page (the same expression on the web and in GTK's views; no ";")
+THEME_PROBE = ("((t, e, x, w) => ((cs) => [t, e ? getComputedStyle(e).backgroundColor : null, e ? getComputedStyle(e).color : null,"
+               " x ? x.getAttribute('fill') : null, cs ? cs.getPropertyValue('--o-radius-card').trim() : '', cs ? cs.getPropertyValue('--o-font').trim() : '',"
+               " window.mojoui.mounts || {}])(w ? getComputedStyle(w) : null))(window.mojoui.tokens || null, document.querySelector('mx-editor .cm-editor'),"
+               " document.querySelector('mx-chart svg text'), document.querySelector('[data-kind=webcomponent]'))")
+TAB_STOPS = ["button:Load sample", "mx-counter#1", "button:Bigger steps", "button:Ask the counter", "button:Show details", "mx-chart#1"]
+
+
+def rgb(color):
+    """'#rrggbb', 'rgb(r, g, b)' or 'rgba(…)' as (r, g, b); None if neither."""
+    import re as _re
+    c = (color or "").strip().lower()
+    m = _re.fullmatch(r"#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})", c)
+    if m:
+        return tuple(int(g, 16) for g in m.groups())
+    m = _re.match(r"rgba?\((\d+),\s*(\d+),\s*(\d+)", c)
+    return tuple(int(g) for g in m.groups()) if m else None
+
+
+def theme_problems(where, got, dark, mounts_by_tag=None):
+    """A THEME_PROBE answer (from the editor's page and the chart's page, or the one web page) against the tokens it carries."""
+    problems = []
+    t = got.get("tokens")
+    if not isinstance(t, dict):
+        return [f"{where}: the widgets got no tokens ({str(got)[:200]})"]
+    for key in ("palette", "font", "corners", "dark"):
+        if key not in t:
+            problems.append(f"{where}: the tokens have no {key} ({sorted(t)})")
+    if problems:
+        return problems
+    pal = t["palette"]
+    if t["dark"] is not dark:
+        problems.append(f"{where}: tokens say dark={t['dark']}, the app is {'dark' if dark else 'light'}")
+    if rgb(got.get("editor_bg")) != rgb(pal.get("card")) or rgb(got.get("editor_ink")) != rgb(pal.get("ink")):
+        problems.append(f"{where}: CodeMirror shows {got.get('editor_bg')} on {got.get('editor_ink')}, the tokens' card {pal.get('card')} and ink {pal.get('ink')}")
+    if rgb(got.get("chart_ink")) != rgb(pal.get("ink2")):
+        problems.append(f"{where}: ECharts' labels are {got.get('chart_ink')}, the tokens' ink2 is {pal.get('ink2')}")
+    if not got.get("radius") or not got.get("font"):
+        problems.append(f"{where}: the widget's CSS variables lack --o-radius-card / --o-font ({got.get('radius')!r}, {got.get('font')!r})")
+    for tag, n in (mounts_by_tag or {}).items():
+        if n != 1:
+            problems.append(f"{where}: {tag} mounted {n} times (a live switch must not remount)")
+    return problems
+
+
+def web_probe(page):
+    v = page.evaluate("() => " + THEME_PROBE)
+    return {"tokens": v[0], "editor_bg": v[1], "editor_ink": v[2], "chart_ink": v[3], "radius": v[4], "font": v[5], "mounts": v[6]}
+
+
+def focus_label_web(page):
+    return page.evaluate("""() => { const a = document.activeElement; if (!a) return 'none';
+      const w = a.closest('[data-kind=webcomponent]'); if (w) return w.dataset.widget + '#' + w.dataset.widgetId;
+      if (a.matches('button')) return 'button:' + a.textContent.trim(); return (a.dataset && a.dataset.kind) || a.tagName.toLowerCase(); }""")
+
+
+def m1b_web():
+    import drive
+    problems, light, dark = [], {}, {}
+    order = {}
+
+    def during(page):
+        light.update(web_probe(page))
+        page.screenshot(path=str(OUT / "m1b-web-light.png"), full_page=True)
+        # Tab order: from inside the editor, forward through native controls and widgets, then back
+        page.click("mx-editor .cm-content")
+        fwd, back = [], []
+        for _ in TAB_STOPS:
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(60)
+            fwd.append(focus_label_web(page))
+        for _ in TAB_STOPS:
+            page.keyboard.press("Shift+Tab")
+            page.wait_for_timeout(60)
+            back.append(focus_label_web(page))
+        order["fwd"], order["back"] = fwd, back
+        page.keyboard.press("Escape")
+        # light → dark live: the system's scheme changes; the app, its theme and its widgets follow without a reload
+        page.emulate_media(color_scheme="dark")
+        page.wait_for_timeout(400)
+        drive.settle(page)
+        page.wait_for_timeout(500)
+        dark.update(web_probe(page))
+        return ""
+
+    r, out = drive.web_run(BUILD / "widgets" / "web", "tap:Load sample;tap:Load sample", shot=str(OUT / "m1b-web-dark.png"), viewport=(1280, 860),
+                           color_scheme="light", during=during)
+    if r.returncode != 0:
+        problems.append("web run failed: " + out[-400:])
+    problems += theme_problems("web light", light, False)
+    problems += theme_problems("web dark", dark, True, {k: v for k, v in (dark.get("mounts") or {}).items()})
+    if light.get("tokens") and dark.get("tokens") and light["tokens"]["palette"].get("card") == dark["tokens"]["palette"].get("card"):
+        problems.append("web: light and dark tokens have the same card colour")
+    if order.get("fwd") != TAB_STOPS:
+        problems.append(f"web: Tab from the editor goes {order.get('fwd')}, not {TAB_STOPS}")
+    want_back = list(reversed(TAB_STOPS[:-1])) + ["mx-editor#1"]
+    if order.get("back") != want_back:
+        problems.append(f"web: Shift+Tab back goes {order.get('back')}, not {want_back}")
+    csp = [l for l in out.splitlines() if l.startswith("CSP: ")]
+    if not csp or not csp[-1].startswith("CSP: 0 violations"):
+        problems.append(f"web: CSP {csp[-1:] or 'not read'}")
+    return problems, order
+
+
+def gtk_probe(out_lines, k):
+    """The k-th pair of webjs probes (editor's page, then chart's page) from a GTK test run's JS: lines."""
+    vals = [json.loads(l[len("JS: "):]) for l in out_lines if l.startswith("JS: ")]
+    if len(vals) < 2 * k + 2:
+        return {}
+    ed, ch = vals[2 * k], vals[2 * k + 1]
+    if not isinstance(ed, list) or not isinstance(ch, list):
+        return {"tokens": None, "raw": [ed, ch]}
+    return {"tokens": ed[0], "editor_bg": ed[1], "editor_ink": ed[2], "chart_ink": ch[3], "radius": ed[4], "font": ch[5],
+            "chart_tokens": ch[0]}
+
+
+def m1b_gtk():
+    problems = []
+    exe = str(BUILD / "widgets" / "linux" / "widgets")
+    probes = f"webjs:mx-editor#1={THEME_PROBE};webjs:mx-chart#1={THEME_PROBE}"
+    steps = ";".join(["tap:Load sample", "tap:Load sample", "scheme:light", probes, "scheme:dark", probes])
+    shot = OUT / "m1b-gtk-dark.png"
+    shot.unlink(missing_ok=True)
+    r = run([exe], env={"MOJOUI_TEST": steps, "MOJOUI_WINDOW": "1280x860", "MOJOUI_SHOT": str(shot)}, timeout=300)
+    o = (r.stdout + r.stderr).splitlines()
+    light, dark = gtk_probe(o, 0), gtk_probe(o, 1)
+    problems += theme_problems("gtk light", light, False)
+    problems += theme_problems("gtk dark", dark, True)
+    if light.get("chart_tokens") != light.get("tokens") or dark.get("chart_tokens") != dark.get("tokens"):
+        problems.append("gtk: the editor's and the chart's views got different tokens")
+    v = g34.webviews("\n".join(o))
+    for key in ("mx-editor#1", "mx-chart#1", "mx-counter#1"):
+        if v.get(key, {}).get("mounts") != 1 or v.get(key, {}).get("csp", -1) != 0:
+            problems.append(f"gtk: {key}'s view after the switch: {v.get(key)} (one mount, no CSP violation)")
+    if not shot.exists():
+        problems.append("gtk: no dark screenshot")
+    lshot = OUT / "m1b-gtk-light.png"
+    lshot.unlink(missing_ok=True)
+    run([exe], env={"MOJOUI_TEST": "tap:Load sample;tap:Load sample;scheme:light", "MOJOUI_WINDOW": "1280x860", "MOJOUI_SHOT": str(lshot)}, timeout=300)
+    if not lshot.exists():
+        problems.append("gtk: no light screenshot")
+    # Tab order with real keys (XTest on the headless display): from inside the editor, forward, then back
+    first = g34.gtk_live("wait:1500;report")
+    box = g33.boxes(first).get("editor")
+    if not box:
+        return problems + [f"gtk: no box for the editor ({first[-300:]})"], {}
+    keys = [f"click:{g34.center(box, 30)}", "wait:400"]
+    for _ in TAB_STOPS:
+        keys += ["key:Tab", "wait:350", "report"]
+    for _ in TAB_STOPS:
+        keys += ["key:Shift+Tab", "wait:350", "report"]
+    out = g34.gtk_live(";".join(keys))
+    focus = [next((l[len("FOCUS: "):] for l in part.splitlines() if l.startswith("FOCUS: ")), "none") for part in g34.reports(out)]
+    order = {"fwd": focus[:len(TAB_STOPS)], "back": focus[len(TAB_STOPS):]}
+    if order["fwd"] != TAB_STOPS:
+        problems.append(f"gtk: Tab from the editor goes {order['fwd']}, not {TAB_STOPS}")
+    want_back = list(reversed(TAB_STOPS[:-1])) + ["mx-editor#1"]
+    if order["back"] != want_back:
+        problems.append(f"gtk: Shift+Tab back goes {order['back']}, not {want_back}")
+    return problems, order
+
+
+def m1b():
+    """First-class citizens (GOAL.md M1b): widgets wear the theme (the host hands every widget the Look's tokens: palette,
+    fonts, corners, light or dark, as CSS variables and a theme(el, tokens) call; CodeMirror and ECharts follow omxqua and
+    switch light/dark live with the app, pictures on the web and GTK in both); keyboard focus moves between native
+    controls and widgets with Tab and Shift+Tab, in order, both ways; widgets in docs/components.md and the gallery."""
+    problems = []
+    js = (ROOT / "mojoui/hosts/static/mojoui-widgets.js").read_text()
+    if "spec.theme(" not in js or "tokens" not in js:
+        problems.append("mojoui-widgets.js doesn't call a widget's theme(el, tokens)")
+    if "theme?(" not in (ROOT / "mojoui/hosts/static/mojoui-widgets.d.ts").read_text():
+        problems.append("mojoui-widgets.d.ts doesn't type theme(el, tokens)")
+    for f, lib in (("editor.ts", "CodeMirror"), ("chart.ts", "ECharts")):
+        if "theme(el" not in (ROOT / "examples/widgets/web/widgets" / f).read_text():
+            problems.append(f"{lib}'s widget ({f}) has no theme(el, tokens)")
+    err = g34.mojo_test("theme_tokens", "theme_tokens: ok")
+    if err:
+        problems.append(err)
+    for host in ("web", "linux"):
+        b = run(["scripts/build.sh", "widgets", host])
+        if b.returncode != 0:
+            return False, "; ".join(problems + [f"widgets doesn't build for {host}: " + (b.stdout + b.stderr)[-600:]])
+    p, web_order = m1b_web()
+    problems += p
+    p, gtk_order = m1b_gtk()
+    problems += p
+    # the matrix and the gallery
+    c = run([sys.executable, "scripts/components.py", "--check"])
+    if c.returncode != 0:
+        problems.append("docs/components.md is stale: " + (c.stdout + c.stderr)[-200:])
+    mat = (ROOT / "docs/components.md").read_text()
+    for tag, lib in (("mx-editor", "CodeMirror"), ("mx-chart", "ECharts"), ("mx-counter", "")):
+        row = next((l for l in mat.splitlines() if l.startswith("|") and f"`{tag}`" in l), "")
+        if not row or (lib and lib not in row) or "✅" not in row:
+            problems.append(f"docs/components.md has no JS widget row for {tag} ({row[:120]!r})")
+    gal = (ROOT / "docs/gallery/index.html").read_text()
+    for img in ("widgets-web-light.png", "widgets-web-dark.png", "widgets-gtk-light.png", "widgets-gtk-dark.png"):
+        if img not in gal or not (ROOT / "docs/gallery/img" / img).exists():
+            problems.append(f"the gallery doesn't show {img}")
+    if "CodeMirror" not in gal or "ECharts" not in gal:
+        problems.append("the gallery's widgets section doesn't name CodeMirror and ECharts")
+    return not problems, "; ".join(problems[:14]) or (
+        "the host hands every widget the Look's tokens (palette, fonts, corners, dark) as CSS variables and theme(el, tokens); "
+        "CodeMirror and ECharts match them in light and dark, switched live (one mount) on the web and GTK; Tab/Shift+Tab "
+        f"cross native controls and widgets in order both ways on the web and GTK ({' → '.join(TAB_STOPS)}); widgets in "
+        f"docs/components.md and the gallery; shots {OUT.relative_to(ROOT)}/m1b-*.png")
+
+
 M0_SAMPLES = []
 
 
@@ -515,6 +728,7 @@ def m3():
 MILESTONES = [
     ("M0", m0),
     ("M1", m1),
+    ("M1b", m1b),
     ("M2", todo("WKWebView on the Mac via mac-ci (GOAL.md M2)")),
     ("M3", m3),
 ]

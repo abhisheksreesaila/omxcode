@@ -67,6 +67,20 @@ The agent host lists the widget as `<name>-read` and `<name>-set` tools; the pag
 command `mojoui.set`) only for a declared field with a value of its declared type. Without `describe` the agent sees the
 widget by its tag with "no description".
 
+**It wears the app's theme** (goal 34b M1b): the page carries the Look's tokens as CSS variables (`--o-card`, `--o-ink`,
+`--o-ink2`, `--o-accent`, `--o-data`, `--o-line`, `--o-font`, `--o-mono`, `--o-font-size`, `--o-radius-card`,
+`--o-radius-button`, `--o-radius-field`) for the widget's CSS, and the runtime calls `theme(el, tokens)` with the same
+values as JSON data (`{id, dark, palette: {card, ink, ink2, accent, wash, data: […], …}, font: {family, mono, size},
+corners: {card, button, field}}`) after mount and whenever the app's theme changes (light/dark, live). Restyle in place:
+CodeMirror reconfigures a `Compartment` with `EditorView.theme({...}, {dark})`, ECharts calls `setOption` again.
+`mojoui.tokens` holds the latest.
+
+**Keyboard**: a widget is in the page's Tab order with its own focusable parts (CodeMirror's text, the counter's button).
+One with nothing focusable inside (a chart) says `focusable: true`: the element takes Tab itself, labelled by its
+`description`, and handles keys in `mount` (the chart: arrows move along the points, Enter picks one). On GTK the host
+carries Tab and Shift+Tab across its views: inside a view the page moves to its next stop (after the widget had its
+chance to keep the key), past the last it hands the keyboard back, and a view Tab enters focuses its first or last stop.
+
 The host mounts it once per key (tag + id) and **keeps it**: a props change calls `update()`, and a rebuild of the whole
 page moves the live element into the new screen (`Element.moveBefore`: focus, selection and scroll stay). Its CSS can
 read the theme's palette (`var(--o-accent)`, `--o-card`, `--o-ink`, `--o-line`…), so it wears the app's theme.

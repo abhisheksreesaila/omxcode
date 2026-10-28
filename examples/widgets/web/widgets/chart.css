@@ -1,2 +1,4 @@
 /* mx-chart's box in the app's theme: ECharts draws inside it (SVG). The card around it is mojoui's. */
 mx-chart { display: block; height: 180px; width: 100%; color: var(--o-ink, inherit); cursor: pointer; }
+mx-chart:focus { outline: none; }
+mx-chart:focus-visible { outline: 2px solid var(--o-accent, #0a84ff); outline-offset: 4px; border-radius: var(--o-radius-field, 8px); }

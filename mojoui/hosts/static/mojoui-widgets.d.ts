@@ -22,12 +22,27 @@ declare namespace mojoui {
      *  count), anything else it wants to say (lines, a series). A string is read as {text}. Without describe, an agent
      *  sees the widget by its tag with "no description". */
     describe?(el: E): Description | string;
+    /** The app's theme changed (or it just mounted): restyle in place from the Look's tokens (data). The same values are
+     *  CSS variables on the page (--o-card, --o-ink, --o-font, --o-radius-card…) for the widget's sheet. */
+    theme?(el: E, tokens: Tokens): void;
+    /** It has nothing focusable inside but should be a Tab stop (a chart): the element itself takes the keyboard
+     *  (tabindex 0, its description as its label); handle keys in mount. */
+    focusable?: boolean;
     /** What it is, for an agent's tool (one sentence). */
     description?: string;
     /** What an agent may set: name → its JSON type and the setter. The host refuses any other name or type; set() changes
      *  the widget and the widget reports it as its own event (emit), so update() hears it as from a person. */
     fields?: Record<string, Field<E>>;
   }
+  interface Tokens {
+    id: string; dark: boolean;
+    palette: { page: string; card: string; raised: string; ink: string; ink2: string; ink3: string; line: string; strong: string;
+               accent: string; on_accent: string; wash: string; good: string; bad: string; warn: string; data: string[] };
+    font: { family: string; mono: string; size: number; caption: number; line: number };
+    corners: { card: number; button: number; field: number };
+  }
+  /** The tokens the host last handed the widgets (null before the first). */
+  const tokens: Tokens | null;
   type JsonType = 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
   interface Description { text?: string; value?: unknown; [more: string]: unknown }
   interface Field<E extends HTMLElement = HTMLElement> { type: JsonType; set(el: E, value: any): void | Promise<void> }

@@ -44,7 +44,7 @@ RUN_ON = {
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
     "iPhone (UIKit)": [],
-    "Agent (MCP)": ["kit", "omxplorer"],
+    "Agent (MCP)": ["kit", "omxplorer", "widgets"],  # (widgets: goal 34b M0, the agent attached to the web and GTK hosts)
 }
 
 # Variants, gestures, layout and design languages: (name, the API, a pattern that shows a host implements it,
@@ -133,6 +133,8 @@ COMPOSITES = [
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
 APP_LOCAL = [
+    ("CodeEditor widget (CodeMirror 6)", "examples/widgets/web/widgets/editor.ts", "a JS widget other apps would want (a note, a query, a formula); move with its package.json entries to a shared widgets folder the build can list from any app"),
+    ("Chart widget (Apache ECharts)", "examples/widgets/web/widgets/chart.ts", "a JS widget other apps would want; same move as the editor"),
     ("FormulaBar", "examples/workbook", "what's selected, its value, a formula field; migrate to mojoui.sheetchrome.FormulaBar"),
     ("Inspector", "examples/mxstudio", "the side panel: Comes from, Feeds, Your edits, Undo all (lineage and the edit log); migrate to mojoui.inspector"),
     ("Toolbar / StatusBar islands", "examples/workbook", "the island contents (title, Insert buttons, status) are assembled by the app; migrate to mojoui.sheetchrome"),
@@ -201,6 +203,36 @@ def feature_cell(host, src, pattern, example, name=""):
     return "✅" if example in RUN_ON[host] else "🔨"
 
 
+LIBRARIES = [("@codemirror/", "CodeMirror 6"), ("echarts", "Apache ECharts")]
+
+
+def js_widgets():
+    """Every JS widget an app ships (examples/*/web/widgets/*.js|ts): (tag, file, library, what agents and themes get)."""
+    found = []
+    for f in sorted(ROOT.glob("examples/*/web/widgets/*.[jt]s")):
+        if f.name.endswith(".d.ts") or f.parent.parent.parent.name.startswith("zz_"):
+            continue
+        src = f.read_text()
+        m = re.search(r"tag:\s*'([a-z][a-z0-9._-]*-[a-z0-9._-]*)'", src)
+        if not m:
+            continue
+        pkg = f.parent.parent / "package.json"
+        deps = {}
+        if pkg.exists():
+            import json
+            deps = json.loads(pkg.read_text()).get("dependencies", {})
+        lib = "plain JS (vendored)"
+        for prefix, name in LIBRARIES:
+            hit = re.search(r"from '(" + re.escape(prefix) + r"[^']*)'", src)
+            if hit:
+                pkg_name = next((d for d in deps if hit.group(1) == d or hit.group(1).startswith(d + "/")), "")
+                lib = name + (f" ({pkg_name} {deps[pkg_name]})" if pkg_name else "")
+        traits = [t for t, pat in (("agent read", r"\bdescribe\("), ("agent set", r"\bfields:"), ("theme", r"\btheme\(el"), ("Tab stop", r"focusable:\s*true|contenteditable|<button|createElement\('button'\)|EditorView"))
+                  if re.search(pat, src)]
+        found.append((m.group(1), str(f.relative_to(ROOT)), f.parent.parent.parent.name, lib, traits))
+    return found
+
+
 def render():
     srcs = {h: host_text(p) for h, p in HOSTS}
     names = [h for h, _ in HOSTS]
@@ -248,6 +280,22 @@ def render():
             row.append(state)
             comp_cells.setdefault(h, []).append(state)
         out.append(f"| `{name}` | `{module}` | {', '.join(parts)} | " + " | ".join(row) + f" | {', '.join(users) or '—'} |")
+    out += ["", "## JavaScript widgets (WebComponent)", "",
+            "Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent's state on that host, ✅ only "
+            "where a check runs the app that ships the widget. Agent: ✅ where the widget describes itself and the agent's "
+            "checks drive the app attached to a host (goal 34b M0).", "",
+            "| Widget | Library | Gets | " + " | ".join(names) + " | Lives in |",
+            "|---|---|---|" + "---|" * len(names) + "---|"]
+    for tag, path, app, lib, traits in js_widgets():
+        row = []
+        for h in names:
+            state = known[(h, "WebComponent")]
+            if state == "✅" and app not in RUN_ON[h]:
+                state = "🔨"
+            if h == "Agent (MCP)" and state == "✅" and "agent read" not in traits:
+                state = "🔨"
+            row.append(state)
+        out.append(f"| `{tag}` | {lib} | {', '.join(traits) or '—'} | " + " | ".join(row) + f" | `{path}` |")
     totals = {h: [cell(h, srcs[h], c, k) for c, k in COMPONENTS] + [feature_cell(h, srcs[h], p, e, n) for n, _, p, e in FEATURES] + comp_cells[h] for h in names}
     out += ["", "## Totals", "", "| Platform | ✅ | 🔨 | ❌ |", "|---|---|---|---|"]
     for h in names:

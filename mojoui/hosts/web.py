@@ -1424,8 +1424,9 @@ def make_app(module_dir):
         """The app's theme on the page (D-260): its body classes, its palette as CSS variables, and its style sheet; the
         host knows no theme. oob: after a change (Settings → Appearance, a mode's tint), swapped into the open page
         (D-156); the style sheet goes again only when the theme itself changed, not just its palette."""
-        tid, classes, css_vars, css = mod.theme(s.handle).split("\x1f")
-        parts = (Style(css_vars, id="mojoui-skin"), I(hidden=True, id="mojoui-skin-classes", data_classes=classes))  # (PAGE_JS applies them)
+        tid, classes, css_vars, css, *more = mod.theme(s.handle).split("\x1f")
+        tokens = more[0] if more else "{}"  # (the Look's tokens as JSON, for widgets' theme(el, tokens): goal 34b)
+        parts = (Style(css_vars, id="mojoui-skin"), I(hidden=True, id="mojoui-skin-classes", data_classes=classes, data_tokens=tokens))  # (PAGE_JS applies them)
         if (tid, len(css)) != s.theme_id:  # (the sheet itself changed: a new theme, or a theme's new sheet)
             parts += (Style(FONT_REF.sub(lambda m: f"url({FONT_URLS.get(m.group(1), '/static/fonts/' + m.group(1))})", css), id="mojoui-theme"),)
             s.theme_id = (tid, len(css))

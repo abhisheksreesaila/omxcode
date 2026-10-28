@@ -13,7 +13,7 @@ from mojoui.diff import Diff
 from mojoui.app import App, Event, Runtime
 from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
-from mojoui.theme import Palette, hex_of, palette_css
+from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
 from mojoui.clock import now_ns
 
 
@@ -121,11 +121,13 @@ def web_theme_key[A: App](handle: Int) -> String:
 
 
 def web_theme[A: App](handle: Int) -> String:
-    """The app's theme for the page, as four parts split by U+001F: its id, its body classes, its palette as CSS
-    variables (--o-page, --o-accent, …: what theme style sheets read), and its style sheet (D-260)."""
+    """The app's theme for the page, as five parts split by U+001F: its id, its body classes, its palette, fonts and
+    corners as CSS variables (--o-page, --o-accent, --o-font, --o-radius-card…: what theme style sheets and widgets read),
+    its style sheet (D-260), and its tokens as JSON for widgets' theme(el, tokens) (goal 34b)."""
     var t = session_at[A](handle)[].app.theme()
     var sheet = t.web_css + (look_web_css(t.look, "body." + t.id + " ") if t.id != "" else String(""))  # (the look's rules after the theme's own: hover and :focus rules stay more specific)
-    return t.id + chr(31) + t.classes + chr(31) + (palette_css(t.palette) if t.id != "" else String("")) + chr(31) + sheet
+    var vars = (palette_css(t.palette) + tokens_css(t)) if t.id != "" else String("")
+    return t.id + chr(31) + t.classes + chr(31) + vars + chr(31) + sheet + chr(31) + theme_tokens(t)
 
 
 def web_logo[A: App](handle: Int) -> String:

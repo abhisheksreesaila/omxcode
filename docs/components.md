@@ -52,7 +52,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `WebFrame` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `Paragraph` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | consolekit |
-| `WebComponent` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | widgets |
+| `WebComponent` | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | widgets |
 
 ## Variants, gestures, layout, design languages
 
@@ -120,7 +120,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Confirm` | `mojoui/confirm.mojo` | Button, Timers | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
 | `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
-| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | console, consolekit, widgets |
+| `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | console, consolekit, widgets |
 | `App shell (bar, brand, nav links, page card)` | `mojoui/shell.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Page header (icon square, pill tabs, segments, tab header)` | `mojoui/header.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Sidebar (heads, rows to pick, chips when compact)` | `mojoui/sidebar.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
@@ -138,6 +138,16 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 
+## JavaScript widgets (WebComponent)
+
+Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent's state on that host, ✅ only where a check runs the app that ships the widget. Agent: ✅ where the widget describes itself and the agent's checks drive the app attached to a host (goal 34b M0).
+
+| Widget | Library | Gets | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Lives in |
+|---|---|---|---|---|---|---|---|---|---|
+| `mx-chart` | Apache ECharts (echarts 6.1.0) | agent read, theme, Tab stop | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | `examples/widgets/web/widgets/chart.ts` |
+| `mx-counter` | plain JS (vendored) | agent read, agent set, Tab stop | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | `examples/widgets/web/widgets/counter.js` |
+| `mx-editor` | CodeMirror 6 (@codemirror/state 6.5.2) | agent read, agent set, theme, Tab stop | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | `examples/widgets/web/widgets/editor.ts` |
+
 ## Totals
 
 | Platform | ✅ | 🔨 | ❌ |
@@ -147,12 +157,14 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | Android | 19 | 19 | 77 |
 | Mac (AppKit) | 0 | 103 | 12 |
 | iPhone (UIKit) | 0 | 83 | 32 |
-| Agent (MCP) | 29 | 37 | 49 |
+| Agent (MCP) | 31 | 36 | 48 |
 
 ## Inside one app, not components yet (the debt)
 
 | Should become | Lives in | What it is |
 |---|---|---|
+| `CodeEditor widget (CodeMirror 6)` | examples/widgets/web/widgets/editor.ts | a JS widget other apps would want (a note, a query, a formula); move with its package.json entries to a shared widgets folder the build can list from any app |
+| `Chart widget (Apache ECharts)` | examples/widgets/web/widgets/chart.ts | a JS widget other apps would want; same move as the editor |
 | `FormulaBar` | examples/workbook | what's selected, its value, a formula field; migrate to mojoui.sheetchrome.FormulaBar |
 | `Inspector` | examples/mxstudio | the side panel: Comes from, Feeds, Your edits, Undo all (lineage and the edit log); migrate to mojoui.inspector |
 | `Toolbar / StatusBar islands` | examples/workbook | the island contents (title, Insert buttons, status) are assembled by the app; migrate to mojoui.sheetchrome |

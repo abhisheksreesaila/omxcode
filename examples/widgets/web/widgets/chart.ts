@@ -12,7 +12,8 @@ import { SVGRenderer } from 'echarts/renderers';
 echarts.use([LineChart, GridComponent, SVGRenderer]);
 
 type Props = { series?: unknown };
-type Host = HTMLElement & { mojouiChart?: echarts.ECharts; mojouiSeries?: number[]; mojouiSizes?: ResizeObserver };
+type Host = HTMLElement & { mojouiChart?: echarts.ECharts; mojouiSeries?: number[]; mojouiSizes?: ResizeObserver; mojouiTokens?: mojoui.Tokens;
+  mojouiAt?: number };
 
 const numbers = (v: unknown): number[] => (Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : []);
 
@@ -21,7 +22,12 @@ const alpha = (color: string, a: number) => {  // '#rrggbb' at opacity a (anythi
   return m ? `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})` : color;
 };
 
-function palette(el: HTMLElement) {  // the app's theme, as the page wears it (body's --o-* variables)
+function palette(el: Host) {  // the app's theme: the Look's tokens (theme()), else the page's --o-* variables
+  const t = el.mojouiTokens;
+  if (t) {
+    const face = t.font.family ? `'${t.font.family.replace(/'/g, '')}', system-ui, sans-serif` : getComputedStyle(el).fontFamily;
+    return { data: t.palette.data[0] || t.palette.accent, card: t.palette.card, ink2: t.palette.ink2, line: t.palette.line, font: face };
+  }
   const css = getComputedStyle(el);
   const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
   return {
@@ -62,6 +68,7 @@ function option(el: Host, series: number[]): echarts.EChartsCoreOption {
 mojoui.defineWidget<Props, Host>({
   tag: 'mx-chart',
   events: ['pick'],
+  focusable: true,  // (a Tab stop of its own: arrows move along the points, Enter or Space picks one)
   description: "The note's word count after each edit, drawn by Apache ECharts",
   mount(el, props, emit) {
     el.mojouiSeries = numbers(props.series);
@@ -71,12 +78,32 @@ mojoui.defineWidget<Props, Host>({
     chart.on('click', (e: { componentType?: string; dataIndex?: number; value?: unknown }) => {
       if (e.componentType === 'series' && typeof e.dataIndex === 'number') emit('pick', { index: e.dataIndex, value: Number(e.value) });
     });
+    el.addEventListener('keydown', (e: KeyboardEvent) => {
+      const s = el.mojouiSeries ?? [];
+      if (!s.length) return;
+      const at = el.mojouiAt ?? s.length - 1;
+      const step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+      if (step) {
+        e.preventDefault();
+        chart.dispatchAction({ type: 'downplay', seriesIndex: 0, dataIndex: at });
+        el.mojouiAt = Math.min(s.length - 1, Math.max(0, (el.mojouiAt === undefined ? s.length : at) + step));
+        chart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: el.mojouiAt });
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        emit('pick', { index: at, value: s[at] });
+      }
+    });
+    el.addEventListener('blur', () => chart.dispatchAction({ type: 'downplay', seriesIndex: 0 }));
     el.mojouiSizes = new ResizeObserver(() => chart.resize());
     el.mojouiSizes.observe(el);
   },
   update(el, props) {
     el.mojouiSeries = numbers(props.series);
     el.mojouiChart?.setOption(option(el, el.mojouiSeries));
+  },
+  theme(el, tokens) {  // (on mount and on every theme change: light/dark live; the series stays)
+    el.mojouiTokens = tokens;
+    el.mojouiChart?.setOption(option(el, el.mojouiSeries ?? []));
   },
   destroy(el) {
     el.mojouiSizes?.disconnect();

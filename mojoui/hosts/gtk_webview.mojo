@@ -18,7 +18,7 @@ from std.memory import Pointer
 
 from mojoui.json import Json, json_string
 from mojoui.webcomponent import is_widget_tag, is_event_name
-from mojoui.theme import Theme, palette_css
+from mojoui.theme import Theme, palette_css, tokens_css, theme_tokens
 from mojoui.look import look_web_css
 
 comptime RTLD_NOW = 2
@@ -143,12 +143,12 @@ def fonts() -> List[String]:
 
 
 def theme_message(t: Theme) -> String:
-    """The app's theme for a widget's page, as the web page wears it: the body's classes, the palette as --o-* variables
-    and the theme's sheet (D-260)."""
+    """The app's theme for a widget's page, as the web page wears it: the body's classes, the palette, fonts and corners
+    as --o-* variables, the theme's sheet (D-260), and the tokens (JSON data) for the widget's theme(el, tokens)."""
     var css = String("")
     if t.id != "":
-        css = palette_css(t.palette) + "\n" + t.web_css + look_web_css(t.look, "body." + t.id + " ")
-    return '{"theme":{"classes":' + json_string(t.classes) + ',"css":' + json_string(css) + "}}"
+        css = palette_css(t.palette) + tokens_css(t) + "\n" + t.web_css + look_web_css(t.look, "body." + t.id + " ")
+    return '{"theme":{"classes":' + json_string(t.classes) + ',"css":' + json_string(css) + ',"tokens":' + theme_tokens(t) + "}}"
 
 
 struct WebSlot(Copyable, Movable):
@@ -237,6 +237,10 @@ struct WebViews(Movable):
     var probe_done: Bool  # (test steps: webjs's answer)
     var probe_result: String
     var sent: List[Tuple[Int, String, Int]]  # (seq, tag, id) of each command sent that wants a reply: who may answer it
+    var tab_at: Int  # when Tab (or Shift+Tab) was last pressed in the window (µs, monotonic), and which way: a view the
+    var tab_back: Bool  # keyboard enters right after focuses its first (or last) stop, as a page's own Tab would
+    var tab_out: Int  # a page asked to pass the keyboard on (Tab past its last stop): 1 forward, 2 back, 0 none
+    var tab_view: Int  # the view that asked
 
     def __init__(out self):
         self.state = 0
@@ -251,6 +255,10 @@ struct WebViews(Movable):
         self.probe_done = False
         self.probe_result = ""
         self.sent = List[Tuple[Int, String, Int]]()
+        self.tab_at = 0
+        self.tab_back = False
+        self.tab_out = 0
+        self.tab_view = 0
 
     def sent_to(mut self, seq: Int, tag: String, id: Int):
         """Command `seq` went to widget (tag, id): only its page may answer it (D-620)."""
@@ -387,6 +395,9 @@ def new_view[F: AnyType](addr: Int, tag: String, id: Int, on_message: F, host_ad
     wk_connect(view, "decide-policy", on_decide_policy, addr)
     wk_connect(view, "load-changed", on_load_changed, addr)
     wk_connect(view, "web-process-terminated", on_terminated, addr)
+    var focus = external_call["gtk_event_controller_focus_new", Int]()  # (Tab into the view: its first or last stop takes the keyboard)
+    wk_connect(focus, "enter", on_view_focus_enter, addr)
+    external_call["gtk_widget_add_controller", NoneType](view, focus)
     wv[].slots.append(WebSlot(tag, id, view, ucm))
     var uri = String(PAGE_URI)
     _ = wk("webkit_web_view_load_uri", view, uri.as_c_string_span())
@@ -605,6 +616,19 @@ def on_call_done(view: Int, result: Int, probe_addr: Int) abi("C"):
         print("mojoui: a call into a widget's page failed: " + why)
 
 
+def on_view_focus_enter(controller: Int, addr: Int) abi("C"):
+    """The keyboard entered a widget's view: right after a Tab (Shift+Tab) in the window, the page focuses its first
+    (last) stop, so Tab order runs on through the widget as through the web page (goal 34b M1b). A click focuses where
+    it lands, as WebKit does."""
+    var wv = webviews_at(addr)
+    var now = Int(external_call["g_get_monotonic_time", Int64]())
+    if wv[].tab_at == 0 or now - wv[].tab_at > 400_000:
+        return
+    var k = wv[].slot_by(external_call["gtk_event_controller_get_widget", Int](controller))
+    if k >= 0:
+        send(addr, k, '{"focus":"' + ("last" if wv[].tab_back else "first") + '"}')
+
+
 def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
     """The page's message (the script message handler): JSON text naming this view's own widget. Events and replies go
     to the inbox for update() (True: something to hand over); the widget's height, line and CSP reports are kept here.
@@ -660,6 +684,10 @@ def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
             wv[].slots[k].facts = facts
         elif path == "csp":
             wv[].slots[k].csp += 1
+        elif path == "tab":  # (Tab past the page's last stop, or Shift+Tab before its first: the host moves the keyboard on)
+            wv[].tab_out = 1 if j.flag(j.get(0, "forward"), True) else 2
+            wv[].tab_view = wv[].slots[k].view
+            return True
         else:
             raise Error("no such message")
     except:

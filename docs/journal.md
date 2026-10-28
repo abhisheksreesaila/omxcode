@@ -653,3 +653,12 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - First look: omxqua's accent is near-black, so the line drew black on a grey wash, off from mojoui's own sparkline. Switched the chart to the palette's data colour (--o-data) with a soft gradient of it.
 - One run reported "gtk: no screenshot" with everything else passing; a rerun and a run by hand both wrote it. The proof now deletes the old shot first and prints the host's SHOT line if it is missing again.
 - M1 PASS (22 s).
+
+## 2026-10-27 · goal 34b M1b: widgets as first-class citizens
+- Coordinator added M1b (owner: "we want first-class integration"); proof first: tokens in a Mojo test, CodeMirror's background/ink and ECharts' label ink equal to the tokens in light and after a live switch to dark (one mount) on the web and GTK, Tab/Shift+Tab through six stops both ways (web: Playwright keys; GTK: XTest keys, the host's new FOCUS: line), matrix rows and gallery images.
+- Web: theme and Tab worked once the chart became a Tab stop (focusable: true).
+- GTK theme: the app went dark but the pages kept light tokens: only a rebuild resent the theme. theme_webviews() now runs from apply() and from a switch with no view change.
+- GTK Tab: WebKit kept the keyboard: (1) the page now hands Tab past its edge to the host, (2) child_focus(window) from inside a view stayed in the view until the view is made unable to take focus for that one move, (3) the sparkline's scrolled window was an extra stop (it grabs focus by can-focus), (4) after entering a view by Shift+Tab, WebKit delivered only Shift to the page, so the host now takes Tab while a view has the keyboard and hands it in as a message. Debugged with temporary prints and the CSP counter as a key counter (removed).
+- Seen, not fixed (outside this goal): mojoui's own sparkline canvas stays light after a live switch to dark on both hosts: a canvas redraws when its version changes, and appearance doesn't change it.
+- Coordinator: M1's host proof is now pinned to a87c7cc..760bb66 so the Mac branch's merge can't trip it.
+- M1b PASS (60 s).

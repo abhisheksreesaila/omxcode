@@ -4,12 +4,26 @@
 // focus, selection (→ {anchor, head}), text (→ {text}). Agents read its text and line count (describe) and may set its
 // text (the field text, a string): a set is an edit like typing, so it emits "change" and update() hears it.
 /// <reference path="../../../../mojoui/hosts/static/mojoui-widgets.d.ts" />
-import { Annotation, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 
 type Props = { doc?: string; rev?: number; placeholder?: string };
-type Host = HTMLElement & { mojouiView?: EditorView; mojouiRev?: number };
+type Host = HTMLElement & { mojouiView?: EditorView; mojouiRev?: number; mojouiLook?: Compartment };
+
+// The app's theme as CodeMirror's own (goal 34b M1b): colours, type and caret from the Look's tokens; dark tells
+// CodeMirror which base styles to start from (its selection and cursor defaults). Swapped live through a compartment.
+function look(t: mojoui.Tokens) {
+  const p = t.palette;
+  const face = t.font.family ? `'${t.font.family.replace(/'/g, '')}', system-ui, sans-serif` : 'inherit';
+  return EditorView.theme({
+    '&': { color: p.ink, backgroundColor: p.card, fontFamily: face, fontSize: `${Math.max(12, t.font.size + 1)}px` },
+    '.cm-content': { caretColor: p.accent },
+    '.cm-cursor, .cm-dropCursor': { borderLeftColor: p.accent },
+    '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': { backgroundColor: p.wash },
+    '.cm-placeholder': { color: p.ink3 },
+  }, { dark: t.dark });
+}
 
 const fromMojo = Annotation.define<boolean>();  // (a change Mojo made: not sent back as an edit)
 
@@ -19,6 +33,7 @@ mojoui.defineWidget<Props, Host>({
   description: 'The note, in a CodeMirror 6 text editor',
   mount(el, props, emit) {
     el.mojouiRev = props.rev ?? 0;
+    el.mojouiLook = new Compartment();
     const sendEdits = EditorView.updateListener.of(u => {
       if (u.docChanged && !u.transactions.some(t => t.annotation(fromMojo))) emit('change', { text: u.state.doc.toString() }, { latest: true });
     });
@@ -27,7 +42,7 @@ mojoui.defineWidget<Props, Host>({
       state: EditorState.create({
         doc: props.doc ?? '',
         extensions: [history(), keymap.of([...defaultKeymap, ...historyKeymap]), placeholder(props.placeholder ?? ''),
-          EditorView.lineWrapping, EditorView.contentAttributes.of({ 'aria-label': 'Note' }), sendEdits],
+          EditorView.lineWrapping, EditorView.contentAttributes.of({ 'aria-label': 'Note' }), sendEdits, el.mojouiLook.of([])],
       }),
     });
   },
@@ -37,6 +52,9 @@ mojoui.defineWidget<Props, Host>({
     el.mojouiRev = props.rev;
     const doc = props.doc ?? '';
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc }, selection: { anchor: doc.length }, annotations: fromMojo.of(true) });
+  },
+  theme(el, tokens) {  // (on mount and on every theme change: light/dark live)
+    if (el.mojouiView && el.mojouiLook) el.mojouiView.dispatch({ effects: el.mojouiLook.reconfigure(look(tokens)) });
   },
   destroy(el) {
     el.mojouiView?.destroy();

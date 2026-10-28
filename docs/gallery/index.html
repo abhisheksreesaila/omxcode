@@ -144,6 +144,37 @@
     </div>
   </article>
 
+  <article class="card" data-kind="both" id="widgets">
+    <div class="head"><h2>JavaScript widgets · CodeMirror and ECharts beside native components</h2><span class="tag both">Both shine</span>
+      <span class="src"><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/widgets">examples/widgets/</a></span></div>
+    <div class="body">
+      <div class="shots">
+        <figure><img src="img/widgets-web-light.png" alt="The widgets app in a browser: a note in CodeMirror, a word count drawn by mojoui, a counter, and an ECharts line chart of the word count" loading="lazy">
+          <figcaption>Web, light: CodeMirror 6 and Apache ECharts from npm, in omxqua, beside mojoui's own buttons, texts and sparkline.</figcaption></figure>
+        <div class="shots two">
+          <figure><img src="img/widgets-web-dark.png" alt="The same page after the system switched to dark" loading="lazy"><figcaption>Web, dark: switched live; each widget restyled from the theme's tokens, not reloaded.</figcaption></figure>
+          <figure><img src="img/widgets-gtk-light.png" alt="The same app in a native Linux window" loading="lazy"><figcaption>Linux (GTK): each widget in a WebKitGTK view of its own, the same bundles.</figcaption></figure>
+          <figure><img src="img/widgets-gtk-dark.png" alt="The Linux window after the switch to dark" loading="lazy"><figcaption>Linux, dark: the same live switch.</figcaption></figure>
+        </div>
+      </div>
+      <div class="why">
+        <div class="nums">
+          <div><b>0</b><span>CSP violations (no eval, no inline script) on the web and GTK</span></div>
+          <div><b>1 mount</b><span>per widget across rebuilds and a light/dark switch</span></div>
+          <div><b>Tab</b><span>runs through native controls and widgets in order, both ways</span></div>
+        </div>
+        <h3>What it is</h3>
+        <p>A Mojo app places any JavaScript widget with <code>WebComponent(tag, props)</code>: props go down as JSON, events come back into <code>update()</code>. The host hands every widget the theme's tokens (palette, fonts, corners, light or dark) as CSS variables and a <code>theme(el, tokens)</code> call. An agent attached to the running app reads each widget's <code>describe()</code> and sets the fields it declares (docs/agent.md).</p>
+        <h3>Where each side shines</h3>
+        <div class="split">
+          <div class="n"><b>Native</b>On Linux each widget is a WebKitGTK view inside GTK's own layout and focus order.</div>
+          <div class="w"><b>Web</b>The same bundles in the page, hashed, with SRI and a strict Content-Security-Policy.</div>
+        </div>
+        <p>Checked by <code>scripts/check.py</code> (goal 34b, M0, M1, M1b). The Mac's WKWebView is goal 34b's M2, not shown here yet.</p>
+      </div>
+    </div>
+  </article>
+
   <article class="card" data-kind="both" id="omxplorer">
     <div class="head"><h2>omxplorer · a data explorer</h2><span class="tag both">Both shine</span>
       <span class="src"><a href="../omxplorer.html">its page</a> · <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/examples/omxplorer/app.mojo">examples/omxplorer/app.mojo</a></span></div>

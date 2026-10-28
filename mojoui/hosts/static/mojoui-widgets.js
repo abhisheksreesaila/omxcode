@@ -10,6 +10,10 @@
 // (on the web only while an agent is attached); a set arrives as the built-in command "mojoui.set" {field, value}, which
 // runs only a declared field's set() with a value of its declared JSON type; the widget reports the change itself, by
 // emitting its own event.
+// Widgets wear the app's theme (goal 34b M1b): the page carries the Look's tokens as CSS variables (--o-card, --o-ink,
+// --o-font, --o-radius-card…) for a widget's sheet, and the runtime calls the widget's theme(el, tokens) with the same
+// tokens as JSON data ({dark, palette, font, corners}) when it mounts and whenever the app's theme changes (light/dark
+// live): the widget restyles itself in place, it is never mounted again.
 // The screen holds a WebComponent view per widget: <div data-kind=webcomponent data-widget (its tag) data-widget-id data-props>.
 // The host puts one element of that tag in it and keeps it for as long as the screen shows that key (tag + id): a
 // rebuild of the whole page moves the live element into the new screen (Element.moveBefore where the browser has it:
@@ -32,6 +36,26 @@
   const MAX_FACTS = 256 * 1024;  // (the web host's limit for what crosses: MAX_WIDGET_BYTES)
   const typeOf = v => v === null ? 'null' : Array.isArray(v) ? 'array' : Number.isInteger(v) ? 'integer' : typeof v;
   const fits = (type, v) => typeOf(v) === type || (type === 'number' && typeOf(v) === 'integer');
+  let tokens = null, tokensText = '';  // the Look's tokens (data), as the host last handed them
+  Object.defineProperty(mojoui, 'tokens', { get: () => tokens });
+  function themeOne(el, spec) {
+    if (!tokens || !spec || typeof spec.theme !== 'function' || !el.mojouiMounted || el.mojouiTokens === tokensText) return;
+    el.mojouiTokens = tokensText;
+    try { spec.theme(el, tokens); } catch (e) { console.error(`mojoui: ${spec.tag}.theme failed`, e); }
+  }
+  function takeTokens(text) {  // new tokens (JSON text): every mounted widget restyles once
+    if (typeof text !== 'string' || text === tokensText) return;
+    const t = parse(text, null);
+    if (!t || typeof t !== 'object' || Array.isArray(t)) return;
+    tokens = t;
+    tokensText = text;
+    for (const w of wrappers()) themeOne(w.firstElementChild, specs.get(w.dataset.widget));
+    tell();
+  }
+  function pageTokens() {  // (the web) the skin's data-tokens, swapped in with the theme
+    const k = document.getElementById('mojoui-skin-classes');
+    if (k && k.dataset.tokens) takeTokens(k.dataset.tokens);
+  }
   const keyOf = w => w.dataset.widget + '#' + w.dataset.widgetId;
   const parse = (text, fallback) => { try { return JSON.parse(text); } catch (e) { return fallback; } };
   const wrappers = () => document.querySelectorAll('#mojoui-root [data-kind=webcomponent][data-widget]');
@@ -104,6 +128,12 @@
         mounts[spec.tag] = (mounts[spec.tag] || 0) + 1;
         try { spec.mount(this, parse(w.dataset.props, {}), emitter(this, spec)); }
         catch (e) { console.error(`mojoui: ${spec.tag}.mount failed`, e); }
+        if (spec.focusable && !this.hasAttribute('tabindex')) {  // (a widget with nothing focusable inside takes Tab itself)
+          this.tabIndex = 0;
+          if (!this.hasAttribute('aria-label') && typeof spec.description === 'string') this.setAttribute('aria-label', spec.description.slice(0, 200));
+        }
+        if (!native) pageTokens();
+        themeOne(this, spec);
         tell();
       }
       connectedMoveCallback() { /* moved by the host (moveBefore): kept as it is */ }
@@ -196,6 +226,7 @@
     }
   }
   function settle() {
+    pageTokens();
     restore();
     for (const el of [...keep().children]) el.remove();  // (its key left the screen: disconnected, destroyed)
     runCommands();
@@ -215,7 +246,7 @@
     }
     setTimeout(settle, 0);  // (after every swap of this answer: they run back to back)
   });
-  document.addEventListener('htmx:oobAfterSwap', restore);
+  document.addEventListener('htmx:oobAfterSwap', () => { restore(); pageTokens(); });
   document.addEventListener('htmx:afterSettle', settle);
   document.addEventListener('DOMContentLoaded', settle);
 
@@ -297,6 +328,25 @@
       if (h !== height) { height = h; queue.push({ path: 'size', values: { height: h } }); flush(); }
     });
     document.addEventListener('securitypolicyviolation', e => { queue.push({ path: 'csp', values: { directive: String(e.effectiveDirective || '') } }); flush(); });
+    // Tab order across the window (goal 34b M1b): the host hands this page Tab and Shift+Tab while its view has the
+    // keyboard ({tab: 'forward' | 'back'}). The widget sees it first, as a keydown it may take (a code editor indenting);
+    // otherwise the keyboard goes to the page's next stop, or, past its last (before its first), back to the host, which
+    // moves it on through the window. The host's {focus: 'first' | 'last'} puts it on this page's first or last stop when
+    // Tab brings it in.
+    const STOPS = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]),'
+      + ' [tabindex]:not([tabindex="-1"]), [contenteditable=""], [contenteditable="true"]';
+    const stops = () => [...document.querySelectorAll('#mojoui-root ' + STOPS.split(', ').join(', #mojoui-root '))]
+      .filter(e => e.getClientRects().length > 0);
+    function tab(back) {
+      const a = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+      const ev = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', shiftKey: back, bubbles: true, cancelable: true });
+      if (a && !a.dispatchEvent(ev)) return;  // (the widget took it)
+      const list = stops(), i = a ? list.findIndex(s => s === a || s.contains(a)) : -1;
+      const j = i < 0 ? (back ? list.length - 1 : 0) : i + (back ? -1 : 1);
+      if (j >= 0 && j < list.length) { list[j].focus({ preventScroll: false }); return; }
+      queue.push({ path: 'tab', values: { forward: !back } });
+      flush();
+    }
     mojoui.native = {
       receive(text) {  // the host's message: {theme: {classes, css}}, {widget: {tag, id, props (JSON text)}}, {commands: [...]}
         const m = parse(String(text), null);
@@ -306,6 +356,7 @@
           let st = document.getElementById('mojoui-theme');
           if (!st) { st = document.createElement('style'); st.id = 'mojoui-theme'; document.head.prepend(st); }
           st.textContent = String(m.theme.css || '');  // (CSS text, as the web's theme <style>: style-src allows it, script-src doesn't)
+          if (m.theme.tokens && typeof m.theme.tokens === 'object') takeTokens(JSON.stringify(m.theme.tokens));
         }
         if (m.widget && typeof m.widget === 'object' && TAG.test(String(m.widget.tag))) {
           const root = document.getElementById('mojoui-root');
@@ -324,6 +375,11 @@
           adopt();
         }
         if (Array.isArray(m.commands)) runList(m.commands);
+        if (m.tab === 'forward' || m.tab === 'back') tab(m.tab === 'back');
+        if (m.focus === 'first' || m.focus === 'last') {
+          const list = stops(), el = m.focus === 'last' ? list[list.length - 1] : list[0];
+          if (el) el.focus({ preventScroll: true });
+        }
         return true;
       },
     };
