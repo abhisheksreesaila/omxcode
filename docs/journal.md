@@ -638,3 +638,11 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - The reviewer's spellings first (`\@`, 127.1, 2130706433, 0x7f.0.0.1, %31, [::ffff:127.0.0.1], [::1], octal, zero-padded, user info, % in a name, numeric last label, _ and leading hyphens): red at the first; then origin_parts accepts only a plain authority (D-624). Jupyter's 127.0.0.1:8888 and plain foreign names still get allow-same-origin.
 - Launcher: a fake bwrap that answers --help but can't run, and a WebKitGTK path with a quote, space and $: red, then a trial `bwrap … true` and the path read from a file (D-625, D-626).
 - After: tests/test_web_links.py and tests/test_webkit_launcher.sh ok; check M2 PASS (89 s), M3 PASS.
+
+## 2026-10-27 · goal 34b M0: agents see JS widgets
+- Proof first (scripts/check.py m0): the agent client attached to the widgets app on the web (headless Chromium page open) and on GTK (the app on the headless display), editor-set/read, counter-set/read, update() hearing both, undeclared and mistyped sets refused by the agent host and, sent raw to the link, by the page; a scratch app's widget without describe reads "no description".
+- The question was how an agent reads a widget's state: the agent host ran its own session with no web view, so no widget ever ran there. Chose an agent link on the running host (D-631): the agent is still "just another host" reading the same tree, now over a socket, plus what each widget says about itself, which the hosts already collected for their reports (GTK's describe line; the web now posts it while an agent is attached).
+- A first JS edit sliced from `let told` to the first `  if (native) {`, which matched an indented line earlier in the file: the empty slice scattered the new text between every character. Restored that one file from HEAD (only my edits in it) and redid it with asserts on each anchor.
+- web.py's handler class `Link` shadowed FastHTML's `Link` tag inside make_app (UnboundLocalError at start): renamed.
+- GTK worked on its first run: libc socket + g_unix_fd_add on the main loop, set through Runtime.set_widget and send_commands.
+- M0 PASS (81 s).

@@ -1,11 +1,14 @@
 // mx-counter: a tiny counter widget in plain JavaScript, vendored with the app (no npm package): goal 34's first widget.
 // Its own state is its count (Mojo never sends it); its props are a label and a step; each click emits "click"
 // {count, step}; the command "read" answers {count, step}. Text goes in with textContent only: a label is never HTML.
+// Agents read its count (describe) and may set it (the field count, an integer): the widget then emits "change" {count, step}.
 mojoui.defineWidget({
   tag: 'mx-counter',
-  events: ['click'],
+  events: ['click', 'change'],
+  description: 'A counter: its count is its own; each click adds its step',
   mount(el, props, emit) {
     el.count = 0;
+    el.emit = emit;
     el.step = Number(props.step) || 1;
     const label = document.createElement('span');
     label.className = 'label';
@@ -32,5 +35,14 @@ mojoui.defineWidget({
   commands: {
     read(el) { return { count: el.count, step: el.step }; },
   },
-  describe(el) { return `count ${el.count}, step ${el.step}, label ${el.querySelector('.label').textContent}`; },
+  fields: {
+    count: { type: 'integer', set(el, value) {
+      el.count = value;
+      el.querySelector('.count').textContent = String(el.count);
+      el.emit('change', { count: el.count, step: el.step });
+    } },
+  },
+  describe(el) {
+    return { text: `count ${el.count}, step ${el.step}, label ${el.querySelector('.label').textContent}`, value: el.count, count: el.count, step: el.step };
+  },
 });

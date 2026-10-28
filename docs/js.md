@@ -50,6 +50,22 @@ mojoui.defineWidget({
 });
 ```
 
+**Agents see it** (goal 34b, docs/agent.md): `describe(el)` returns JSON data, `{text, value, …}` (`text`: one line
+about it; `value`: its value; anything else it wants to say); a string is read as `{text}`. `description` is one sentence
+for the agent's tool. `fields` lists what an agent may set, each with its JSON type (`string`, `number`, `integer`,
+`boolean`, `array`, `object`) and a setter that changes the widget and **emits the widget's own event**, so `update()`
+hears the change as from a person:
+
+```js
+  description: 'A counter: its count is its own',
+  fields: { count: { type: 'integer', set(el, value) { el.count = value; render(el); el.emit('change', { count: value }); } } },
+  describe(el) { return { text: `count ${el.count}`, value: el.count, count: el.count }; },
+```
+
+The agent host lists the widget as `<name>-read` and `<name>-set` tools; the page's runtime runs a set (the built-in
+command `mojoui.set`) only for a declared field with a value of its declared type. Without `describe` the agent sees the
+widget by its tag with "no description".
+
 The host mounts it once per key (tag + id) and **keeps it**: a props change calls `update()`, and a rebuild of the whole
 page moves the live element into the new screen (`Element.moveBefore`: focus, selection and scroll stay). Its CSS can
 read the theme's palette (`var(--o-accent)`, `--o-card`, `--o-ink`, `--o-line`…), so it wears the app's theme.
@@ -106,6 +122,9 @@ Arguments that aren't JSON never leave the runtime (an error Event instead).
 - **Assets by content hash** from our origin (`/static/…`, `/assets/<name>.<hash>.js`), cached a year, `immutable`, with
   SRI `integrity`. The build's lint (`scripts/web_assets.py --lint`) fails on a listed name nobody bundled, a bundle
   nobody listed, or any file in `assets/` the bundler didn't make; the server refuses to start on a mismatch.
+- **Agents** set only the fields a widget declares, with a value of the declared JSON type (checked by the agent host,
+  the runtime and the page); on the web a widget's description goes to the server only while an agent is attached
+  (`MOJOUI_AGENT_SOCKET`), and the link is a Unix socket of the user's (0600), not a network port.
 - **JSON only**: props are JSON the host parses before the page sees them (attributes are escaped); a payload, reply or
   argument that isn't JSON, an event name that isn't a word, or a tag that isn't a custom element's name is refused.
   Nothing crossing is eval'd or written as HTML: write text with `textContent`.

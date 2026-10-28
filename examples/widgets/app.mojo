@@ -13,7 +13,7 @@ from mojoui.sparkline import Sparkline, SparklineView
 from mojoui.webcomponent import WebComponent, Props, Command, Widgets
 from themes.omxqua import omxqua
 
-comptime COUNTER = 2  # the counter's events (event.name "click", event.text {"count", "step"})
+comptime COUNTER = 2  # the counter's events (event.name "click" or "change", event.text {"count", "step"})
 comptime BIGGER = 3
 comptime ASK = 4
 comptime READ = 5  # the counter's answer to "read"
@@ -103,6 +103,12 @@ struct Main(App):
             self.loaded = SAMPLE
             self.rev += 1
             self.set_text(SAMPLE)
+        elif m == COUNTER and event.name == "change":  # (its count was set: by an agent, through the widget's field)
+            try:
+                var j = Json.parse(event.text)
+                self.last_count = j.number(j.get(0, "count"))
+            except:
+                pass
         elif m == COUNTER and event.name == "click":
             self.clicks += 1
             try:

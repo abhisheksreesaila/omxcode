@@ -339,16 +339,18 @@ CSP_PROBE = """window.mojouiCsp = [];
 document.addEventListener('securitypolicyviolation', e => window.mojouiCsp.push({ directive: e.violatedDirective, uri: String(e.blockedURI || ''), sample: String(e.sample || '').slice(0, 80) }), true);"""
 
 
-def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None, color_scheme=None, path="", reduced_motion=False):
+def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=None, color_scheme=None, path="", reduced_motion=False, env=None, during=None):
     """Returns (result, output) like a process run: result.returncode is 0 on success.
     tabs > 1: that many pages open against the one server (each runs the steps); the server's own
     log lines (e.g. SHARED: …) come after the page's state. color_scheme: "light" or "dark" (prefers-color-scheme), else Chromium's.
-    path: what follows the host's address on the first load (a deep link: "#/models/x/logs"); reduced_motion: the system asks for less motion."""
+    path: what follows the host's address on the first load (a deep link: "#/models/x/logs"); reduced_motion: the system asks for less motion.
+    env: more environment for the server (MOJOUI_AGENT_SOCKET); during(page): called after the steps, with the page open
+    (an agent attached to the server acts meanwhile), its returned text joins the output."""
     from playwright.sync_api import sync_playwright
 
     port = free_port()
     server = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/web.py"), str(module_dir), str(port)],
-                              cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                              cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=dict(os.environ, **(env or {})))
     url = f"http://127.0.0.1:{port}/"
     try:
         up = False
@@ -390,6 +392,9 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
                 settle(page)  # (a menu item's click posts and rebuilds the page: the next step must not land mid-rebuild)
                 if line:
                     extra += line + "\n"
+            if during:
+                extra += during(page) or ""
+                settle(page)
             out = "NATIVE: Chromium " + browser.version + "\n" + extra + page.evaluate(DUMP) + "\n"
             if rects:
                 Path(rects).write_text(page.evaluate(RECTS) + "\n")

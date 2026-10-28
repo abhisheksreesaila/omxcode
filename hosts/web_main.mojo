@@ -6,7 +6,7 @@ from std.python.bindings import PythonModuleBuilder
 
 from app import Main
 from mojoui.shared import shared_loads
-from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_widget_event, web_reply, web_commands, web_assets
+from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_widget_event, web_reply, web_commands, web_assets, web_set_widget
 
 
 @export
@@ -36,6 +36,7 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[widget_event]("widget_event", docstring="A widget's event (node, name, payload JSON); returns what changed as JSON.")
         m.def_function[reply]("reply", docstring="A widget's answer to a command (seq, text JSON, error); returns what changed as JSON.")
         m.def_function[commands]("commands", docstring="The widget commands asked for since the last call, as JSON.")
+        m.def_function[set_widget]("set_widget", docstring="An agent's set (tag, id, field, value JSON): the widget's built-in mojoui.set command; True if sent.")
         m.def_function[assets]("web_assets", docstring="App.web_assets(): the bundles the page loads, as a JSON list.")
         m.def_function[wake_in]("wake_in", docstring="Microseconds until poll() has something to do (-1: nothing until the next event).")
         return m.finalize()
@@ -136,6 +137,10 @@ def widget_event(handle: PythonObject, node: PythonObject, name: PythonObject, p
 
 def reply(handle: PythonObject, seq: PythonObject, text: PythonObject, error: PythonObject) raises -> PythonObject:
     return PythonObject(web_reply[Main](Int(py=handle), Int(py=seq), String(py=text), String(py=error)))
+
+
+def set_widget(handle: PythonObject, tag: PythonObject, id: PythonObject, field: PythonObject, value: PythonObject) raises -> PythonObject:
+    return PythonObject(web_set_widget[Main](Int(py=handle), String(py=tag), Int(py=id), String(py=field), String(py=value)))
 
 
 def commands(handle: PythonObject) raises -> PythonObject:

@@ -1,7 +1,8 @@
 // mx-editor: CodeMirror 6 (from npm: web/package.json, pinned by package-lock.json) as a mojoui widget, in TypeScript.
 // esbuild bundles and minifies it with CodeMirror at build time (scripts/web_assets.py). Props: doc and rev (Mojo's text
 // replaces the editor's only when rev moves on: Load sample), placeholder. Each edit emits "change" {text}; commands:
-// focus, selection (→ {anchor, head}), text (→ {text}).
+// focus, selection (→ {anchor, head}), text (→ {text}). Agents read its text and line count (describe) and may set its
+// text (the field text, a string): a set is an edit like typing, so it emits "change" and update() hears it.
 /// <reference path="../../../../mojoui/hosts/static/mojoui-widgets.d.ts" />
 import { Annotation, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
@@ -15,6 +16,7 @@ const fromMojo = Annotation.define<boolean>();  // (a change Mojo made: not sent
 mojoui.defineWidget<Props, Host>({
   tag: 'mx-editor',
   events: ['change'],
+  description: 'The note, in a CodeMirror 6 text editor',
   mount(el, props, emit) {
     el.mojouiRev = props.rev ?? 0;
     const sendEdits = EditorView.updateListener.of(u => {
@@ -45,8 +47,17 @@ mojoui.defineWidget<Props, Host>({
     selection(el) { const s = el.mojouiView!.state.selection.main; return { anchor: s.anchor, head: s.head }; },
     text(el) { return { text: el.mojouiView!.state.doc.toString() }; },
   },
+  fields: {
+    text: { type: 'string', set(el, value: string) {  // (not from Mojo: the edit goes back to update() as typing does)
+      const view = el.mojouiView;
+      if (view) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, selection: { anchor: value.length } });
+    } },
+  },
   describe(el) {
     const v = el.mojouiView;
-    return v ? `${v.state.doc.length} characters, cursor at ${v.state.selection.main.head}: ${JSON.stringify(v.state.doc.toString().slice(0, 80))}` : 'no editor';
+    if (!v) return { text: 'no editor' };
+    const doc = v.state.doc.toString();
+    return { text: `${doc.length} characters, cursor at ${v.state.selection.main.head}: ${JSON.stringify(doc.slice(0, 80))}`,
+             value: doc, lines: v.state.doc.lines, characters: doc.length, cursor: v.state.selection.main.head };
   },
 });

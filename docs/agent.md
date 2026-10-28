@@ -49,11 +49,39 @@ After every call the server sends `notifications/tools/list_changed` (D-164): ca
 see what the screen offers now. A wrong name or value comes back as an error result that lists the tools, so the agent
 can correct itself.
 
+## JavaScript widgets, and attaching to a running host (goal 34b)
+A `WebComponent` is a tool pair, named by its tag (or, without one, its custom element's tag):
+- **`<name>-read`** · what the widget describes: its `describe(el)` result as JSON (`{text, value, …}`). The editor:
+  `mx-editor#1: {"text": "42 characters, cursor at 42: …", "value": "Agents can write here\nand on a second line", "lines": 2, …}`.
+  A widget without `describe` reads `mx-plain#3: no description`.
+- **`<name>-set`** · only when the widget declares `fields` in `defineWidget`: one typed argument per field
+  (`editor-set {"text": "…"}`, `counter-set {"count": 42}`). The set goes to the widget as the built-in command
+  `mojoui.set {field, value}`; the widget's setter changes it and the widget emits its own event, so `update()` hears it
+  exactly as from a person (the note's word count follows). An undeclared field or a value of the wrong JSON type is
+  refused by the agent host, by the runtime (JSON only) and again by the page's runtime (declared fields only).
+
+Widgets run only where there is a web view, so an agent sees them by **attaching** to a running host instead of running
+its own session (D-631). Start the host with `MOJOUI_AGENT_SOCKET=<path>` and the agent with `--attach <path>`:
+```
+MOJOUI_AGENT_SOCKET=/run/user/$UID/widgets.sock pixi run python mojoui/hosts/web.py build/widgets/web   # then open the page
+MOJOUI_AGENT_SOCKET=/run/user/$UID/widgets.sock build/widgets/linux/widgets                             # or the GTK app
+claude mcp add widgets -- pixi run python mojoui/hosts/agent.py --attach /run/user/$UID/widgets.sock
+```
+**The agent link** is the host's side: a Unix socket (mode 0600, only when the variable is set), one JSON request per
+line, one JSON answer per line. `{"op":"view"}` → `{ok, title, design, nodes, widgets, busy}` (the tree every host
+reads, plus what each widget says about itself); `event {node, second, text, number}`, `gesture {node, kind, x, y, dx,
+dy, zoom}`, `key {node, name, modifiers}`, `set {tag, id, field, value: JSON text}`, `describe {node, first, count}`,
+`rows {node, first, count}`. The web host serves it from web.py for the newest open page and pushes changes to the page
+as effects do (`/wait`); the GTK host from its main loop (`mojoui/hosts/agent_link.mojo`, `g_unix_fd_add`). On the web
+the widgets report what they show to the server only while an agent is attached (`data-agent` on the page).
+Attached, `render` isn't offered (the host draws its own canvases); everything else works as in the agent's own session.
+
 ## What an agent gets back from act
 What changed, in words: the new texts (`Now: status-bar: Saved kit.omx`), what opened or closed (`Opened: dialog "Settings"`),
 a design change, and the tools that appeared or went. Enough to carry on without a second call.
 
 ## What it can't do yet
+- Attached to a host: `render` (it draws in the agent's own session only), and the Mac's host has no agent link yet.
 - Read cells on any app but omxplorer (the others don't `describe` their canvases); omxplorer reads the shown rows, not a range.
 - Move Board objects, drag, or scroll a grid by gesture beyond what `pan` sends.
 - Generate UI: that is AG-UI, after MX frame (the operations log is its state).

@@ -194,12 +194,23 @@ def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number
     """A control changed: look its message up in the current screen (like the native
     hosts do), run update(), and return what changed. Bad node → nothing happens."""
     var rt = session_at[A](handle)
-    if node < 0 or node >= len(rt[].shown.nodes):
+    var e = control_event(rt[].shown, node, second, text, number)
+    if e.message == 0:
         return '{"ignored":true}'
-    ref n = rt[].shown.nodes[node]
+    var d = rt[].dispatch(e)
+    return diff_to_json(d, rt[].shown)
+
+
+def control_event(shown: View, node: Int, second: Bool, text: String, number: Int) -> Event:
+    """The event a control of the shown screen sends (node, its second message or not, the text and number it reports);
+    message 0: no such node, it doesn't listen, or a link with no href. An option's text and a link's href come from the
+    screen, never from the sender (the web host, the agent link)."""
+    if node < 0 or node >= len(shown.nodes):
+        return Event(0, "", 0)
+    ref n = shown.nodes[node]
     var message = n.msg2 if second else n.msg
     if message == 0:
-        return '{"ignored":true}'
+        return Event(0, "", 0)
     var event_text = text
     if n.kind == DROPDOWN or n.kind == SEGMENTED or n.kind == RADIO or n.kind == TABS or n.kind == ALERT:
         # the option's text comes from the screen, not the browser
@@ -207,9 +218,8 @@ def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number
     elif n.kind == PARAGRAPH:  # a link's tap: its href from the screen (number = the run), never the browser's word
         event_text = link_href(n, number)
         if event_text == "":
-            return '{"ignored":true}'
-    var d = rt[].dispatch(Event(message, event_text, number))
-    return diff_to_json(d, rt[].shown)
+            return Event(0, "", 0)
+    return Event(message, event_text, number)
 
 
 def web_widget_event[A: App](handle: Int, node: Int, name: String, payload: String) -> String:
@@ -233,6 +243,11 @@ def web_reply[A: App](handle: Int, seq: Int, text: String, error: String) -> Str
 def web_commands[A: App](handle: Int) -> String:
     """The widget commands the app asked for since the last call, as JSON: [{seq, tag, widget, name, args}]."""
     return commands_json(session_at[A](handle)[].take_commands())
+
+
+def web_set_widget[A: App](handle: Int, tag: String, id: Int, field: String, value: String) -> Bool:
+    """An agent's set (Runtime.set_widget): the widget's mojoui.set command, taken with the next web_commands."""
+    return session_at[A](handle)[].set_widget(tag, id, field, value)
 
 
 def web_assets[A: App]() -> String:

@@ -33,6 +33,10 @@ from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
+from mojoui.hosts.gtk_webview import facts_json
+from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, send_all, close_fd, link_error, MAX_LINE
+from mojoui.hosts.web import view_to_json, control_event
+from mojoui.json import Json
 from mojoui.paragraph import pango_markup, link_href, runs_of
 from mojoui.linebreak import css_breaks, plain_words, label_words
 from std.math import log2
@@ -585,6 +589,8 @@ struct GtkHost[A: App](Movable):
     var fx_due: Int  # when it fires (µs, g_get_monotonic_time)
     var webviews: Int  # the WebComponents' WebKitGTK views (mojoui/hosts/gtk_webview.mojo), on the heap: its address
     var webview_focus: Int  # a view that had the keyboard when a rebuild moved it (it gets it back), or 0
+    var link_fds: List[Int]  # the agent link's connections (MOJOUI_AGENT_SOCKET, docs/agent.md), and what each has sent
+    var link_bufs: List[String]  # so far without a newline
 
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
@@ -674,6 +680,8 @@ struct GtkHost[A: App](Movable):
         wv.unsafe_write(WebViews())
         self.webviews = Int(wv)
         self.webview_focus = 0
+        self.link_fds = List[Int]()
+        self.link_bufs = List[String]()
 
     def schedule_effects(mut self, self_addr: Int):
         """Arms one GLib timeout for when the runtime next has something to hand over (a reply, a timer's tick):
@@ -2639,7 +2647,7 @@ struct GtkHost[A: App](Movable):
         for c in commands:
             var k = wv[].slot_of(c.tag, c.widget) if wv[].state == 1 else -1
             if k >= 0:
-                if c.reply != NO_MSG:
+                if c.reply != NO_MSG or c.name == "mojoui.set":  # (an agent's set: its answer is taken, then dropped by the runtime)
                     wv[].sent_to(c.seq, c.tag, c.widget)  # (only this widget's page may answer it, D-620)
                 webview_send(self.webviews, k, '{"commands":[' + c.json() + "]}")
             elif c.reply != NO_MSG:
@@ -3037,6 +3045,62 @@ struct GtkHost[A: App](Movable):
             print("TRACE: " + what + " " + ms(perf_counter_ns() - t0) + " nodes " + String(len(self.rt.shown.nodes))
                   + (" REBUILD" if d.rebuild else " patches " + String(len(d.patches))))
 
+    def link_request(mut self, line: String, self_addr: Int) -> String:
+        """One agent-link request (docs/agent.md; the protocol web.py's link speaks): the answer, one JSON line. Events go
+        through the same paths a person's do; a set goes through the runtime's checks and the page's declared fields."""
+        try:
+            var j = Json.parse(line)
+            var op = j.text(j.get(0, "op"))
+            if op == "view":
+                var busy_now = busy() or self.has_pending or len(webviews_at(self.webviews)[].inbox) > 0
+                return ('{"ok":true,"title":' + json_string(self.rt.app.title()) + ',"design":' + json_string(self.rt.app.theme().id)
+                        + ',"nodes":' + view_to_json(self.rt.shown) + ',"widgets":' + facts_json(self.webviews)
+                        + ',"busy":' + ("true" if busy_now else "false") + "}")
+            if op == "set":
+                var tag = j.text(j.get(0, "tag"))
+                var id = j.number(j.get(0, "id"))
+                if not self.rt.set_widget(tag, id, j.text(j.get(0, "field")), j.text(j.get(0, "value"))):
+                    return link_error("no widget " + tag + "#" + String(id) + " on the screen, a field that isn't a word, or a value that isn't JSON")
+                self.send_commands(self_addr)
+                return '{"ok":true}'
+            var node = j.number(j.get(0, "node"), -1)
+            if node < 0 or node >= len(self.rt.shown.nodes):
+                return link_error("no node " + String(node) + " on the screen")
+            if busy() or self.has_pending:
+                return link_error("the screen is being rebuilt: ask again")
+            if op == "describe":
+                ref n = self.rt.shown.nodes[node]
+                var text = self.rt.app.describe(n.style, j.number(j.get(0, "first")), j.number(j.get(0, "count"))) if n.kind == CANVAS else String("")
+                return '{"ok":true,"text":' + json_string(text) + "}"
+            if op == "rows":
+                ref n = self.rt.shown.nodes[node]
+                var out = String('{"ok":true,"rows":[')
+                if n.kind == LAZYLIST:
+                    var first = max(j.number(j.get(0, "first")), 0)
+                    var last = min(first + j.number(j.get(0, "count"), 50), n.value)
+                    for r in range(first, last):
+                        if r > first:
+                            out += ","
+                        out += json_string(self.rt.app.row(n.msg2, r))
+                return out + "]}"
+            var d: Diff
+            if op == "event":
+                var e = control_event(self.rt.shown, node, j.number(j.get(0, "second")) != 0, j.text(j.get(0, "text")), j.number(j.get(0, "number")))
+                if e.message == 0:
+                    return link_error("that control doesn't listen")
+                d = self.rt.dispatch(e)
+            elif op == "gesture":
+                d = self.rt.gesture(node, j.number(j.get(0, "kind"), TAP), j.real(j.get(0, "x")), j.real(j.get(0, "y")), j.real(j.get(0, "dx")),
+                                    j.real(j.get(0, "dy")), j.real(j.get(0, "zoom"), 1.0))
+            elif op == "key":
+                d = self.rt.key(node, j.text(j.get(0, "name")), j.number(j.get(0, "modifiers")))
+            else:
+                return link_error("no op " + op)
+            self.apply(d, self_addr)
+            return '{"ok":true}'
+        except e:
+            return link_error("not a request: " + String(e))
+
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
         """A widget changed: build the event, run update(), patch the widgets."""
         ref n = self.rt.shown.nodes[node]
@@ -3129,6 +3193,55 @@ def on_webview_inbox[A: App](host_addr: Int) abi("C") -> c_int:
         return 1  # (the screen is being rebuilt: again on the next idle turn)
     webviews_at(host[].webviews)[].armed = False
     return 0
+
+
+def on_link_accept[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C") -> c_int:
+    """An agent host connects to the agent link (MOJOUI_AGENT_SOCKET): its requests are read on the main loop."""
+    var c = accept_one(Int(fd))
+    if c >= 0:
+        var host = host_at[A](host_addr)
+        host[].link_fds.append(c)
+        host[].link_bufs.append(String(""))
+        _ = external_call["g_unix_fd_add", c_uint](c_int(c), c_uint(1 | 8 | 16), on_link_read[A], host_addr)  # G_IO_IN | ERR | HUP
+    return 1  # (keep listening)
+
+
+def on_link_read[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C") -> c_int:
+    """Requests on an agent-link connection, one JSON line each, answered in order; a closed connection is dropped."""
+    var host = host_at[A](host_addr)
+    var k = -1
+    for i in range(len(host[].link_fds)):
+        if host[].link_fds[i] == Int(fd):
+            k = i
+    if k < 0:
+        return 0
+    var got = read_some(Int(fd))
+    if got[0] == 0 or (got[0] < 0 and (Int(condition) & (8 | 16)) != 0):
+        close_fd(Int(fd))
+        _ = host[].link_fds.pop(k)
+        _ = host[].link_bufs.pop(k)
+        return 0
+    if got[0] < 0:
+        return 1
+    host[].link_bufs[k] += got[1]
+    while True:
+        var buf = host[].link_bufs[k]
+        var at = buf.find("\n")
+        if at < 0:
+            if buf.byte_length() > MAX_LINE:
+                close_fd(Int(fd))
+                _ = host[].link_fds.pop(k)
+                _ = host[].link_bufs.pop(k)
+                return 0
+            return 1
+        var line = String(buf[byte=0:at])
+        host[].link_bufs[k] = String(buf[byte=at + 1:])
+        var answer = host[].link_request(line, host_addr)
+        if not send_all(Int(fd), answer + "\n"):
+            close_fd(Int(fd))
+            _ = host[].link_fds.pop(k)
+            _ = host[].link_bufs.pop(k)
+            return 0
 
 
 def host_at[A: App](addr: Int) -> Pointer[GtkHost[A], MutUntrackedOrigin]:
@@ -5013,6 +5126,14 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     for prop in ["notify::default-width", "notify::default-height", "notify::maximized", "notify::fullscreened"]:
         connect3(host[].window, prop, on_window_resized[A], host_addr)
     connect(host[].window, "realize", on_window_realize[A], host_addr)
+    var link_path = getenv("MOJOUI_AGENT_SOCKET")  # an agent host may attach here (docs/agent.md: the agent link)
+    if link_path != "":
+        var lfd = listen_unix(link_path)
+        if lfd < 0:
+            print("mojoui: no agent link at " + link_path + " (a path under 108 bytes in a folder you can write)")
+        else:
+            _ = external_call["g_unix_fd_add", c_uint](c_int(lfd), c_uint(1), on_link_accept[A], host_addr)
+            print("mojoui: agent link at " + link_path, flush=True)
     if getenv("MOJOUI_LIVE_REPORT") != "":  # (scripts/live.py: SIGUSR1 prints the widgets' state, as a test run's end does)
         _ = external_call["g_unix_signal_add", c_uint](c_int(10), on_live_report[A], host_addr)
     host[].show(host_addr)

@@ -164,6 +164,7 @@ struct WebSlot(Copyable, Movable):
     var theme: String  # the theme key last sent
     var describe: String  # the widget's own line (describe()), and how many times it mounted, as the page said
     var mounts: Int
+    var facts: String  # what the widget says about itself for agents (mojoui-widgets.js facts: a JSON object), "" until told
     var csp: Int  # CSP violations the page reported
     var refused: Int  # messages from the page the host refused
     var blocked: Int  # navigations and new windows refused
@@ -185,6 +186,7 @@ struct WebSlot(Copyable, Movable):
         self.theme = ""
         self.describe = ""
         self.mounts = 0
+        self.facts = ""
         self.csp = 0
         self.refused = 0
         self.blocked = 0
@@ -566,6 +568,7 @@ def on_terminated(view: Int, reason: c_int, addr: Int) abi("C"):
     wv[].slots[k].loaded = False
     wv[].slots[k].mounts = 0
     wv[].slots[k].describe = ""
+    wv[].slots[k].facts = ""
     print("mojoui: " + wv[].slots[k].key() + "'s web process ended (reason " + String(Int(reason)) + ")"
           + ("; loading it again" if wv[].slots[k].crashes == 1 else "; showing its stand-in"))
     if wv[].slots[k].crashes == 1:
@@ -647,8 +650,14 @@ def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
                 wv[].slots[k].height = h
                 external_call["gtk_widget_set_size_request", NoneType](wv[].slots[k].view, c_int(-1), c_int(max(h, 1)))
         elif path == "describe":
+            var facts = j.text(j.get(0, "facts"))
+            if facts != "":  # (for agents: a JSON object naming this view's own widget, or refused)
+                var f = Json.parse(facts)
+                if f.text(f.get(0, "tag")) != wv[].slots[k].tag or f.number(f.get(0, "id"), -1) != wv[].slots[k].id:
+                    raise Error("facts about another widget")
             wv[].slots[k].describe = j.text(j.get(0, "text"))
             wv[].slots[k].mounts = j.number(j.get(0, "mounts"))
+            wv[].slots[k].facts = facts
         elif path == "csp":
             wv[].slots[k].csp += 1
         else:
@@ -656,3 +665,20 @@ def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
     except:
         wv[].slots[k].refused += 1
     return False
+
+
+def facts_json(addr: Int) -> String:
+    """What the widgets on the screen say about themselves, for an attached agent: a JSON list of their facts objects."""
+    var out = String("[")
+    if addr == 0:
+        return "[]"
+    var wv = webviews_at(addr)
+    var first = True
+    for k in range(len(wv[].slots)):
+        if wv[].slots[k].facts == "" or wv[].slots[k].gone:
+            continue
+        if not first:
+            out += ","
+        first = False
+        out += wv[].slots[k].facts
+    return out + "]"

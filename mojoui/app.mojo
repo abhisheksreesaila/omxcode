@@ -9,7 +9,7 @@ from mojoui.theme import Theme
 from mojoui.http import Request
 from mojoui.effects import Every, Timer, InFlight, start, Backend, POLL_US
 from mojoui.webcomponent import Command, is_event_name, is_widget_tag
-from mojoui.json import Json
+from mojoui.json import Json, json_string
 
 
 struct Event(Copyable, Movable):
@@ -241,6 +241,29 @@ struct Runtime[A: App](Movable):
         while len(self.awaiting) > 256:  # (a page that never answers: the oldest are forgotten)
             _ = self.awaiting.pop(0)
         return out^
+
+    def set_widget(mut self, tag: String, id: Int, field: String, value: String) -> Bool:
+        """An agent's set (goal 34b): asks widget (tag, id) on the screen to set its field `field` to `value` (JSON), as
+        the built-in command "mojoui.set" {field, value}. The page's runtime runs only a field the widget declares, with
+        a value of its declared JSON type, and the widget reports the change as its own event. False (nothing sent): no
+        such widget on the screen, a field name that isn't a word, or a value that isn't JSON."""
+        if not is_widget_tag(tag) or not is_event_name(field):
+            return False
+        try:
+            _ = Json.parse(value)
+        except:
+            return False
+        var shown = False
+        for n in self.shown.nodes:
+            if n.kind == WEBCOMP and n.hint == tag and n.value == id:
+                shown = True
+        if not shown:
+            return False
+        self.command_seq += 1
+        var c = Command(tag, id, "mojoui.set", '{"field":' + json_string(field) + ',"value":' + value + "}")
+        c.seq = self.command_seq
+        self.commands_out.append(c^)
+        return True
 
     def knows_reply(self, seq: Int) -> Bool:
         for c in self.awaiting:

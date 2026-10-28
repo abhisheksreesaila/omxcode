@@ -147,4 +147,29 @@ def main() raises:
             refused = True
         assert_true(refused, spliced)
     assert_equal(assets_json(Probe.web_assets()), "[\"probe.js\"]")
+
+    # an agent's set (goal 34b): the built-in command mojoui.set {field, value}, only for a widget on the screen, a word
+    # for a field and JSON for a value; numbered like the app's commands, no answer wanted
+    var art = Runtime(Probe())
+    _ = art.take_commands()
+    assert_true(art.set_widget("mx-probe", 3, "label", "\"hi \\\"there\\\"\""))
+    var sets = art.take_commands()
+    assert_equal(len(sets), 1)
+    assert_equal(sets[0].name, "mojoui.set")
+    assert_equal(sets[0].reply, NO_MSG)
+    var sj = Json.parse(sets[0].json())
+    assert_equal(sj.text(sj.get(0, "tag")), "mx-probe")
+    var args = sj.get(0, "args")
+    assert_equal(sj.text(sj.get(args, "field")), "label")
+    assert_equal(sj.text(sj.get(args, "value")), "hi \"there\"")
+    assert_true(sets[0].seq > 0)
+    assert_true(art.set_widget("mx-probe", 3, "count", "42"))
+    assert_true(art.take_commands()[0].seq > sets[0].seq)  # (seq only grows)
+    assert_false(art.set_widget("mx-probe", 4, "label", "1"))  # not on the screen
+    assert_false(art.set_widget("mx-other", 3, "label", "1"))
+    assert_false(art.set_widget("Probe", 3, "label", "1"))  # not a custom element's name
+    assert_false(art.set_widget("mx-probe", 3, "x\"}", "1"))  # not a word
+    assert_false(art.set_widget("mx-probe", 3, "label", "1, \"field\": \"innerHTML\""))  # not one JSON value
+    assert_false(art.set_widget("mx-probe", 3, "label", "alert(1)"))
+    assert_equal(len(art.take_commands()), 0)
     print("webcomponent: ok")

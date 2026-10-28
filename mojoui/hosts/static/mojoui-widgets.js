@@ -2,7 +2,14 @@
 //
 // A bundle registers its widget once:
 //   mojoui.defineWidget({ tag: 'mx-counter', events: ['click'], commands: { read(el, args) { return {...}; } },
-//     mount(el, props, emit) { ... },  update(el, props) { ... },  destroy(el) { ... },  describe(el) { return '...'; } })
+//     mount(el, props, emit) { ... },  update(el, props) { ... },  destroy(el) { ... },
+//     describe(el) { return { text: 'one line', value: ... }; },             // what it shows, as JSON (agents read it)
+//     description: 'What it is, for agents',
+//     fields: { count: { type: 'integer', set(el, value) { ... } } } })    // what an agent may set (JSON types only)
+// Agents (goal 34b, docs/agent.md) see every widget: its description, describe()'s JSON and its fields go to the host
+// (on the web only while an agent is attached); a set arrives as the built-in command "mojoui.set" {field, value}, which
+// runs only a declared field's set() with a value of its declared JSON type; the widget reports the change itself, by
+// emitting its own event.
 // The screen holds a WebComponent view per widget: <div data-kind=webcomponent data-widget (its tag) data-widget-id data-props>.
 // The host puts one element of that tag in it and keeps it for as long as the screen shows that key (tag + id): a
 // rebuild of the whole page moves the live element into the new screen (Element.moveBefore where the browser has it:
@@ -21,6 +28,10 @@
   const mounts = mojoui.mounts = {};  // tag → how many times mount() ran (checks read it: a kept widget mounts once)
   const TAG = /^[a-z][a-z0-9._]*-[a-z0-9._-]*$/;
   const NAME = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/;
+  const TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object']);
+  const MAX_FACTS = 256 * 1024;  // (the web host's limit for what crosses: MAX_WIDGET_BYTES)
+  const typeOf = v => v === null ? 'null' : Array.isArray(v) ? 'array' : Number.isInteger(v) ? 'integer' : typeof v;
+  const fits = (type, v) => typeOf(v) === type || (type === 'number' && typeOf(v) === 'integer');
   const keyOf = w => w.dataset.widget + '#' + w.dataset.widgetId;
   const parse = (text, fallback) => { try { return JSON.parse(text); } catch (e) { return fallback; } };
   const wrappers = () => document.querySelectorAll('#mojoui-root [data-kind=webcomponent][data-widget]');
@@ -76,6 +87,12 @@
     if (!spec || typeof spec.tag !== 'string' || !TAG.test(spec.tag)) throw new Error('defineWidget: give a tag with a hyphen (mx-name)');
     if (typeof spec.mount !== 'function') throw new Error(`defineWidget(${spec.tag}): mount(el, props, emit) is required`);
     if (specs.has(spec.tag)) return;  // (its bundle loaded twice)
+    const fields = spec.fields || {};
+    if (typeof fields !== 'object' || Array.isArray(fields)) throw new Error(`defineWidget(${spec.tag}): fields is an object {name: {type, set(el, value)}}`);
+    for (const [name, f] of Object.entries(fields)) {
+      if (!NAME.test(name) || !f || !TYPES.has(f.type) || typeof f.set !== 'function')
+        throw new Error(`defineWidget(${spec.tag}): field ${name} needs a word for a name, a JSON type (${[...TYPES].join(', ')}) and set(el, value)`);
+    }
     specs.set(spec.tag, spec);
     class Widget extends HTMLElement {
       connectedCallback() {
@@ -102,11 +119,30 @@
     adopt();
   };
 
-  mojoui.describe = w => {  // what the widget says about itself (scripts/drive.py's WIDGET: line; agents later)
+  function said(w) {  // what describe() says: {text, value, …} as plain JSON data; null: no describe, or not mounted
+    const el = w.firstElementChild, spec = specs.get(w.dataset.widget);
+    if (!el || !spec || !el.mojouiMounted || typeof spec.describe !== 'function') return null;
+    try {
+      const d = spec.describe(el);
+      const obj = d !== null && typeof d === 'object' && !Array.isArray(d) ? d : { text: String(d) };
+      return JSON.parse(JSON.stringify(obj));  // (data only: no functions, no elements, no cycles)
+    } catch (e) { return { text: 'describe failed' }; }
+  }
+  mojoui.describe = w => {  // one line about the widget (scripts/drive.py's WIDGET: line, GTK's report)
     const el = w.firstElementChild, spec = specs.get(w.dataset.widget);
     if (!el || !spec) return 'not defined';
     if (!el.mojouiMounted) return 'not mounted';
-    try { return spec.describe ? String(spec.describe(el)) : 'mounted'; } catch (e) { return 'describe failed'; }
+    if (!spec.describe) return 'no description';
+    const d = said(w);
+    return d && typeof d.text === 'string' ? d.text : JSON.stringify(d);
+  };
+  mojoui.facts = w => {  // what an agent sees of a widget: {tag, id, defined, mounted, description, said, fields: {name: type}}
+    const spec = specs.get(w.dataset.widget), el = w.firstElementChild;
+    const fields = {};
+    for (const [name, f] of Object.entries((spec && spec.fields) || {})) fields[name] = f.type;
+    return { tag: w.dataset.widget, id: Number(w.dataset.widgetId), defined: !!spec, mounted: !!(el && el.mojouiMounted),
+             description: spec && typeof spec.description === 'string' ? spec.description.slice(0, 500) : '',
+             said: said(w), fields };
   };
 
   // Every WebComponent view gets its live element: the one it had, the one parked for its key, or a new one (mounted
@@ -203,11 +239,23 @@
       const w = [...wrappers()].find(x => x.dataset.widget === c.tag && x.dataset.widgetId === String(c.widget));
       const el = w && w.firstElementChild, spec = specs.get(c.tag);
       if (!el || !spec || !el.mojouiMounted) throw new Error(`no widget ${c.tag}#${c.widget} on the page`);
-      const fn = spec.commands && Object.prototype.hasOwnProperty.call(spec.commands, c.name) ? spec.commands[c.name] : null;
-      if (typeof fn !== 'function') throw new Error(`${c.tag} has no command ${c.name}`);
-      data = await fn(el, c.args);
+      if (c.name === 'mojoui.set') {  // (an agent's set: a declared field, a value of its JSON type, nothing else)
+        const a = c.args && typeof c.args === 'object' ? c.args : {};
+        const f = spec.fields && typeof a.field === 'string' && Object.prototype.hasOwnProperty.call(spec.fields, a.field) ? spec.fields[a.field] : null;
+        if (!f) throw new Error(`${c.tag} has no settable field ${String(a.field).slice(0, 64)}`);
+        if (!fits(f.type, a.value)) throw new Error(`${c.tag}.${a.field} takes ${f.type}, not ${typeOf(a.value)}`);
+        await f.set(el, a.value);
+        data = { set: a.field };
+      } else {
+        const fn = spec.commands && Object.prototype.hasOwnProperty.call(spec.commands, c.name) ? spec.commands[c.name] : null;
+        if (typeof fn !== 'function') throw new Error(`${c.tag} has no command ${c.name}`);
+        data = await fn(el, c.args);
+      }
       if (data === undefined) data = null;
-    } catch (e) { error = String((e && e.message) || e || 'failed').slice(0, 500); }
+    } catch (e) {
+      error = String((e && e.message) || e || 'failed').slice(0, 500);
+      if (c.name === 'mojoui.set') console.warn('mojoui: set refused: ' + error);
+    }
     let text = 'null';
     try { text = JSON.stringify(data); if (text === undefined) text = 'null'; } catch (e) { error = error || "the reply isn't JSON"; }
     queue.push({ path: 'reply', values: { seq: c.seq, data: text, error } });
@@ -216,21 +264,31 @@
   }
 
   // ---- GTK: one widget in a WebKitGTK view of its own (the host's page: an empty #mojoui-root) ----
-  let told = '', telling = false;
-  function tell() {  // (GTK) the widget's one line and its mounts, for the host's report, once things settle
-    if (!native || telling) return;
+  // ---- what the widgets say about themselves, for the host: GTK always (its report), the web while an agent is attached ----
+  let telling = false;
+  const told = new Map();  // key → what the host last heard
+  const agentAttached = () => { const r = document.getElementById('mojoui-root'); return !!(r && r.dataset.agent === '1'); };
+  function tell() {
+    if (telling || (!native && !agentAttached())) return;
     telling = true;
     setTimeout(() => {
       telling = false;
-      const w = wrappers()[0];
-      if (!w) return;
-      const now = JSON.stringify([mojoui.describe(w), mounts[w.dataset.widget] || 0]);
-      if (now === told) return;
-      told = now;
-      queue.push({ path: 'describe', values: { text: JSON.parse(now)[0], mounts: JSON.parse(now)[1] } });
+      for (const w of wrappers()) {
+        let facts = JSON.stringify(mojoui.facts(w));
+        if (facts.length > MAX_FACTS) facts = JSON.stringify(Object.assign(mojoui.facts(w), { said: { text: 'too big to describe' } }));
+        const key = keyOf(w), line = mojoui.describe(w), mounted = mounts[w.dataset.widget] || 0;
+        const now = JSON.stringify([line, mounted, facts]);
+        if (told.get(key) === now) continue;
+        told.set(key, now);
+        if (native) queue.push({ path: 'describe', values: { text: line, mounts: mounted, facts } });
+        else queue.push({ path: 'describe', values: { tag: w.dataset.widget, id: w.dataset.widgetId, data: facts } });
+      }
       flush();
     }, 30);
   }
+  mojoui.tell = tell;  // (a widget whose state changes without an event may call it; every emit, mount, update and command does)
+  document.addEventListener('htmx:afterSettle', () => tell());
+  document.addEventListener('DOMContentLoaded', () => tell());
   if (native) {
     let height = -1;
     const sizes = new ResizeObserver(() => {  // the view is as tall as its widget, as the web's box is

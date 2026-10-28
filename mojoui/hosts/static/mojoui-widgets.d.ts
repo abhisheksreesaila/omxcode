@@ -18,8 +18,20 @@ declare namespace mojoui {
     destroy?(el: E): void;
     /** Commands Mojo can call (mojoui.webcomponent.Command): the value returned (or resolved) is the JSON reply. */
     commands?: Record<string, (el: E, args: any) => unknown>;
-    /** One line about its state, for tests and agents. */
-    describe?(el: E): string;
+    /** What it shows, as JSON data for agents and tests: text is one line about it, value its value (an editor's text, a
+     *  count), anything else it wants to say (lines, a series). A string is read as {text}. Without describe, an agent
+     *  sees the widget by its tag with "no description". */
+    describe?(el: E): Description | string;
+    /** What it is, for an agent's tool (one sentence). */
+    description?: string;
+    /** What an agent may set: name → its JSON type and the setter. The host refuses any other name or type; set() changes
+     *  the widget and the widget reports it as its own event (emit), so update() hears it as from a person. */
+    fields?: Record<string, Field<E>>;
   }
+  type JsonType = 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
+  interface Description { text?: string; value?: unknown; [more: string]: unknown }
+  interface Field<E extends HTMLElement = HTMLElement> { type: JsonType; set(el: E, value: any): void | Promise<void> }
+  /** Tell the host the widget's description changed (emits, mounts, updates and commands already do). */
+  function tell(): void;
   function defineWidget<P = Record<string, unknown>, E extends HTMLElement = HTMLElement>(spec: Widget<P, E>): void;
 }

@@ -47,6 +47,7 @@ SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TI
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
 CHECKED, DISABLED, DANGER = 1, 2, 4  # menu item flags (mojoui/menus.mojo)
+AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an agent host may attach here (docs/agent.md: the agent link)
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 JPEG_QUALITY = 85
 MAX_SESSIONS = 200  # oldest tabs are closed beyond this
@@ -735,6 +736,7 @@ class Session:
         self.waiters_lock = threading.Lock()
         self.commands = []  # widget commands the app asked for (mojoui.webcomponent), not yet sent to the page
         self.origin = ""  # this page's origin (WebFrame: allow-same-origin only for another one)
+        self.widget_facts = {}  # (tag, id) → what the widget says about itself (mojoui-widgets.js facts), while an agent is attached
 
     def wake(self):
         """Tell the page's open /wait that changes are pending."""
@@ -1281,7 +1283,7 @@ def make_app(module_dir):
         if not hasattr(mod, "wake_in"):
             return
         w = mod.wake_in(s.handle)
-        s.busy = w >= 0
+        s.busy = w >= 0 or bool(AGENT_SOCKET)  # (an attached agent changes the screen behind the page: it keeps waiting on /wait)
         with clock:
             if w < 0:
                 due.pop(sid, None)
@@ -1342,7 +1344,8 @@ def make_app(module_dir):
         # While an alert is up the page behind is inert (no clicks, no keyboard focus);
         # the alert lives in an overlay beside it.
         full = s.nodes[0]["grows"] or s.nodes[0]["fills"]  # the screen fills the window
-        page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid)
+        page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid,
+                    data_agent="1" if AGENT_SOCKET else None)  # (widgets tell the host what they show only while an agent may read it)
         layer = Div(*[render_alert(s, i, sid) for i in alerts], id="mojoui-overlay")
         if oob:
             page.attrs["hx-swap-oob"] = "true"
@@ -1616,6 +1619,104 @@ def make_app(module_dir):
                 d, s.pending = merge(s.pending, d), None
             s.nodes = json.loads(mod.view(s.handle))
             return changes(s, sid, d)
+
+    @app.post("/describe/{sid}")
+    def widget_describe(sid: str, tag: str = "", id: int = 0, data: str = ""):
+        """What a widget says about itself (mojoui-widgets.js facts: its description, describe()'s JSON, its fields), kept for
+        an attached agent. Only with an agent link; only JSON, a widget tag and a widget on the screen."""
+        s = sessions.get(sid)
+        if not AGENT_SOCKET or s is None or not widget_tag(tag) or len(data) > MAX_WIDGET_BYTES:
+            return ""
+        try:
+            facts = json.loads(data)
+        except ValueError:
+            return ""
+        if not isinstance(facts, dict):
+            return ""
+        with s.lock:
+            if not s.closed and any(n["kind"] == WEBCOMP and n["hint"] == tag and n["value"] == id for n in s.nodes):
+                s.widget_facts[(tag, id)] = facts
+        return ""
+
+    def link_session():
+        """The agent link's session: the newest page (a tab opened later takes over)."""
+        with sessions_lock:
+            for sid in reversed(sessions):
+                if not sessions[sid].closed:
+                    return sid, sessions[sid]
+        return None, None
+
+    def link_call(op):
+        """One agent-link request (docs/agent.md): view, event, gesture, key, set, describe, rows. Changes are pushed to
+        the page the way an effect's are (pending + /wait)."""
+        sid, s = link_session()
+        if s is None:
+            return {"ok": False, "error": "no page is open: open the app in a browser"}
+        what = op.get("op")
+        with s.lock:
+            if s.closed:
+                return {"ok": False, "error": "the page closed"}
+            h = s.handle
+            if what == "view":
+                nodes = json.loads(mod.view(h))
+                keys = {(n["hint"], n["value"]) for n in nodes if n["kind"] == WEBCOMP}
+                s.widget_facts = {k: v for k, v in s.widget_facts.items() if k in keys}
+                return {"ok": True, "title": mod.title(h), "design": mod.theme(h).split("\x1f")[0], "nodes": nodes,
+                        "widgets": list(s.widget_facts.values()), "busy": has_changes(s) or s.busy_sent != s.busy}
+            n = int(op.get("node", -1))
+            if what in ("event", "gesture", "key", "describe", "rows") and not 0 <= n < len(s.nodes):
+                return {"ok": False, "error": f"no node {n} on the screen"}
+            if what == "describe":
+                return {"ok": True, "text": mod.describe(h, n, int(op.get("first", 0)), int(op.get("count", 0)))}
+            if what == "rows":
+                return {"ok": True, "rows": json.loads(mod.rows(h, n, int(op.get("first", 0)), int(op.get("count", 50))))}
+            if what == "set":
+                tag, field, value = str(op.get("tag", "")), str(op.get("field", "")), str(op.get("value", ""))
+                if not widget_tag(tag) or not event_name(field) or len(value) > MAX_WIDGET_BYTES:
+                    return {"ok": False, "error": "a set names a widget's tag, a field (a word) and a JSON value"}
+                ok = bool(mod.set_widget(h, tag, int(op.get("id", 0)), field, value))
+                note(sid, s)
+                s.wake()
+                return {"ok": ok} if ok else {"ok": False, "error": f"no widget {tag}#{op.get('id')} on the screen, or the value isn't JSON"}
+            if what == "event":
+                d = json.loads(mod.event(h, n, int(op.get("second", 0)), str(op.get("text", "")), int(op.get("number", 0))))
+            elif what == "gesture":
+                d = json.loads(mod.gesture(h, n, int(op.get("kind", 3)), float(op.get("x", 0)), float(op.get("y", 0)), float(op.get("dx", 0)),
+                                           float(op.get("dy", 0)), float(op.get("zoom", 1))))
+            elif what == "key":
+                d = json.loads(mod.key(h, n, str(op.get("name", "")), int(op.get("modifiers", 0))))
+            else:
+                return {"ok": False, "error": f"no op {what!r}"}
+            if not d.get("ignored"):
+                s.pending = merge(s.pending, d)
+                s.nodes = json.loads(mod.view(h))
+            note(sid, s)
+            s.wake()
+            return {"ok": not d.get("ignored")}
+
+    if AGENT_SOCKET:
+        import socketserver
+
+        class LinkHandler(socketserver.StreamRequestHandler):
+            def handle(self):
+                for raw in self.rfile:
+                    try:
+                        op = json.loads(raw)
+                        out = link_call(op) if isinstance(op, dict) else {"ok": False, "error": "a request is a JSON object"}
+                    except Exception as ex:  # (a bad request is the agent's mistake: say so, keep the link)
+                        out = {"ok": False, "error": f"{type(ex).__name__}: {ex}"}
+                    self.wfile.write((json.dumps(out, ensure_ascii=False) + "\n").encode())
+                    self.wfile.flush()
+
+        Path(AGENT_SOCKET).unlink(missing_ok=True)
+        old_mask = os.umask(0o177)  # (the socket is the user's alone: 0600)
+        try:
+            link = socketserver.ThreadingUnixStreamServer(AGENT_SOCKET, LinkHandler)
+        finally:
+            os.umask(old_mask)
+        link.daemon_threads = True
+        threading.Thread(target=link.serve_forever, daemon=True, name="mojoui-agent-link").start()
+        print(f"mojoui web: agent link at {AGENT_SOCKET}", flush=True)
 
     @app.post("/resize/{sid}")
     def resize(sid: str, w: int = 0, h: int = 0):
