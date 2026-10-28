@@ -6,7 +6,7 @@
 // Nothing per particle crosses to JS after the initial upload.
 //
 // URL params: ?scripted=1&n=N&frames=F (scripted measurement run, results POSTed to serve.py)
-//             &wg=256 (workgroup size)  &positions=0 (skip the positions upload)  &gain= &exposure= (look)
+//             &mode=cpu (plain-JS CPU baseline, cpu.js)  &wg=256 (workgroup size)  &positions=0 (skip the positions upload)  &gain= &exposure= (look)
 
 const SIZES = [1e6, 2e6, 5e6, 10e6, 20e6];
 const W = 1280, H = 720;
@@ -364,4 +364,5 @@ async function main() {
   }
 }
 
-main().catch((e) => { console.error(e); if (SCRIPTED) post('/result/error.txt', String(e.stack || e), 'text/plain').then(() => post('/done', '{}')); });
+const start = q.get('mode') === 'cpu' ? () => import('./cpu.js').then((m) => m.runCpu()) : main; // ?mode=cpu: the plain-JS row
+start().catch((e) => { console.error(e); if (SCRIPTED) post('/result/error.txt', String(e.stack || e), 'text/plain').then(() => post('/done', '{}')); });

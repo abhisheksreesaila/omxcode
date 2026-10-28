@@ -2,6 +2,8 @@
 
     pixi run python showcase/js-webgpu/check_a.py                  # N=10,000, 120 frames vs the reference -> "A: ok"
     pixi run python showcase/js-webgpu/check_a.py --bench N FRAMES # JSON: median frame/step ms, cold start, memory
+    pixi run python showcase/js-webgpu/check_a.py --cpu            # the plain-JS CPU row (?mode=cpu) -> "A-cpu: ok"
+    pixi run python showcase/js-webgpu/check_a.py --bench cpu N FRAMES
     pixi run python showcase/js-webgpu/check_a.py --shot N FRAMES out.png   # screenshot after F frames
 
 Headless GPU: Chromium runs on the repo's Xvfb display (scripts/headless.py) with real NVIDIA WebGPU through Dawn's
@@ -156,9 +158,11 @@ def check_adapter(t):
         raise SystemExit(f"A: FAIL not on the NVIDIA GPU (adapter: {t['adapter']})")
 
 
-def correctness(n=10000, frames=120):
-    t, out, _ = run(n, frames)
-    check_adapter(t)
+def correctness(n=10000, frames=120, cpu=False):
+    tag = "A-cpu" if cpu else "A"
+    t, out, _ = run(n, frames, "&mode=cpu" if cpu else "")
+    if not cpu:
+        check_adapter(t)
     ref = out / "ref.bin"
     subprocess.run([sys.executable, str(HERE.parent / "reference.py"), str(n), str(frames), str(ref)], check=True)
     got = np.fromfile(out / "positions.bin", "<f4").reshape(-1, 2)
@@ -167,22 +171,23 @@ def correctness(n=10000, frames=120):
         raise SystemExit(f"A: FAIL shape {got.shape} != {want.shape}")
     err = np.abs(got - want).max(axis=1)
     frac = float((err <= 1e-3).mean())
-    print(f"A: {frac * 100:.3f}% within 1e-3 (max err {err.max():.2e}); median frame {statistics.median(t['total_ms']):.3f} ms"
+    print(f"{tag}: {frac * 100:.3f}% within 1e-3 (max err {err.max():.2e}); median frame {statistics.median(t['total_ms']):.3f} ms"
           + (f", step {statistics.median(t['step_ms']):.4f} ms" if t["step_ms"] else ""))
     if frac < 0.999:
-        raise SystemExit("A: FAIL positions differ from the reference")
-    print(f"A: ok (adapter: {t['adapter']})")
+        raise SystemExit(f"{tag}: FAIL positions differ from the reference")
+    print(f"{tag}: ok (adapter: {t['adapter']})")
     shutil.rmtree(out, ignore_errors=True)
 
 
-def bench(n, frames, warmup, params=""):
-    t, out, extra = run(n, frames, "&positions=0" + params)
-    check_adapter(t)
+def bench(n, frames, warmup, params="", cpu=False):
+    t, out, extra = run(n, frames, "&positions=0" + ("&mode=cpu" if cpu else "") + params)
+    if not cpu:
+        check_adapter(t)
     w = warmup if warmup is not None else (60 if frames > 120 else 0)
     med = lambda xs: statistics.median(xs[w:]) if xs else None  # noqa: E731
     iv = [x for x in t["raf_interval_ms"][w:] if x is not None]
     print(json.dumps({
-        "build": "js-webgpu", "adapter": t["adapter"], "n": n, "frames": frames, "warmup": w,
+        "build": t["build"], "adapter": t["adapter"], "n": n, "frames": frames, "warmup": w,
         "median_frame_ms": med(t["total_ms"]), "median_step_ms": med(t["step_ms"]), "median_draw_ms": med(t["draw_ms"]), "median_gpu_frame_ms": med(t["gpu_frame_ms"]), "median_cpu_encode_ms": med(t["cpu_encode_ms"]),
         "median_raf_interval_ms": statistics.median(iv) if iv else None,
         "late_frames": round(sum(x > 20 for x in iv) / len(iv), 3) if iv else None,  # rAF gaps > 20 ms
@@ -195,15 +200,20 @@ def bench(n, frames, warmup, params=""):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bench", nargs=2, type=int, metavar=("N", "FRAMES"))
+    ap.add_argument("--bench", nargs="+", metavar="[cpu] N FRAMES", help="cpu N FRAMES for the plain-JS row")
     ap.add_argument("--warmup", type=int)
+    ap.add_argument("--cpu", action="store_true", help="correctness of the plain-JS CPU row (A-cpu)")
     ap.add_argument("--params", default="", help="extra URL params, e.g. &wg=128")
     ap.add_argument("--shot", nargs=3, metavar=("N", "FRAMES", "PNG"))
     a = ap.parse_args()
     if a.bench:
-        bench(*a.bench, a.warmup, a.params)
+        cpu = a.bench[0] == "cpu"
+        n, f = (int(x) for x in (a.bench[1:] if cpu else a.bench))
+        bench(n, f, a.warmup, a.params, cpu)
     elif a.shot:
         t, out, _ = run(int(a.shot[0]), int(a.shot[1]), "&positions=0" + a.params, shot=Path(a.shot[2]).resolve())
         print(f"shot: {a.shot[2]} ({t['adapter']})")
+    elif a.cpu:
+        correctness(cpu=True)
     else:
         correctness()
