@@ -23,6 +23,12 @@
 from std.atomic import Atomic
 from std.memory.alloc import unsafe_alloc
 
+comptime MAX_SSE_LINE = 1024 * 1024  # stream bounds (D-719): one line, one event's data
+comptime MAX_SSE_EVENT = 1024 * 1024
+comptime MAX_STREAM_BYTES = 64 * 1024 * 1024  # a stream's body, by default (Request.limit)
+comptime MAX_STREAM_MS = 600_000  # how long a stream may last, by default (its timeout is the longest silence)
+comptime MAX_STREAM_CHUNK = 4 * 1024 * 1024  # one HTTP chunk of a stream
+
 comptime GET = "GET"
 comptime POST = "POST"
 comptime TLS_NEEDED = "https needs a TLS backend (flare, Mojo ≥ 1.2); this build has plain HTTP only"
@@ -42,6 +48,8 @@ struct Request(Copyable, Movable):
     var body: String
     var timeout_ms: Int  # the whole request: connect, send, wait, read (a stream: the longest silence)
     var stream_end: Int  # -1: one reply; else a stream, and this is the message its end comes back as
+    var stream_max_bytes: Int  # a stream ends with an error past these (Request.limit)
+    var stream_max_ms: Int
     var cancels: Bool  # not a request: Http.cancel(id) asking the runtime to stop request `id`
 
     def __init__(out self, msg: Int, method: String, url: String, body: String = ""):
@@ -56,6 +64,8 @@ struct Request(Copyable, Movable):
         self.body = body
         self.timeout_ms = 30_000
         self.stream_end = -1
+        self.stream_max_bytes = MAX_STREAM_BYTES
+        self.stream_max_ms = MAX_STREAM_MS
         self.cancels = False
 
     @staticmethod
@@ -92,6 +102,13 @@ struct Request(Copyable, Movable):
         back as its own `msg` Event, then one `end_msg` Event with the status (and the body, for a status that isn't
         2xx: no pieces then). The timeout becomes the longest wait for the next bytes (30 s unless set)."""
         self.stream_end = end_msg
+        return self^
+
+    def limit(var self, max_bytes: Int, max_ms: Int) -> Self:
+        """A stream's bounds: it ends with an error past `max_bytes` of body or `max_ms` in all (64 MB and 10 minutes
+        unless set; each event is at most 1 MB whatever this says)."""
+        self.stream_max_bytes = max(max_bytes, 1)
+        self.stream_max_ms = max(max_ms, 1)
         return self^
 
 
@@ -187,23 +204,31 @@ struct Piece(Copyable, Movable):
 struct SseReader(Movable):
     """Server-sent events from bytes as they arrive (the WHATWG event-stream format): `feed` returns the events finished
     so far. Lines end in LF or CRLF; `data:` lines join with LF; `event:` names the type; comments (":") and `id:` /
-    `retry:` are read and ignored. A UTF-8 character split across feeds is kept until it's whole."""
+    `retry:` are read and ignored. A UTF-8 character split across feeds is kept until it's whole. A line or an event's
+    data past 1 MB stops the reader: `error` says why, and it reads nothing more."""
 
     var line: List[UInt8]
-    var data: String
+    var data: List[UInt8]
     var has_data: Bool
     var name: String
+    var error: String
 
     def __init__(out self):
         self.line = List[UInt8]()
-        self.data = ""
+        self.data = List[UInt8]()
         self.has_data = False
         self.name = ""
+        self.error = ""
 
     def feed(mut self, bytes: Span[UInt8, _]) -> List[Piece]:
         var out = List[Piece]()
+        if self.error != "":
+            return out^
         for b in bytes:
             if b != 10:
+                if len(self.line) >= MAX_SSE_LINE:
+                    self.error = "a line longer than " + String(MAX_SSE_LINE) + " bytes"
+                    return out^
                 self.line.append(b)
                 continue
             if len(self.line) > 0 and self.line[len(self.line) - 1] == 13:
@@ -212,8 +237,8 @@ struct SseReader(Movable):
             self.line.clear()
             if text.byte_length() == 0:
                 if self.has_data:
-                    out.append(Piece(self.name if self.name.byte_length() > 0 else String("message"), self.data))
-                self.data = ""
+                    out.append(Piece(self.name if self.name.byte_length() > 0 else String("message"), utf8_lossy(self.data)))
+                self.data.clear()
                 self.has_data = False
                 self.name = ""
                 continue
@@ -226,7 +251,13 @@ struct SseReader(Movable):
                 var trimmed = String(value[byte = 1 :])
                 value = trimmed
             if field == "data":
-                self.data = (self.data + "\n" + value) if self.has_data else value
+                if len(self.data) + value.byte_length() + 1 > MAX_SSE_EVENT:
+                    self.error = "an event larger than " + String(MAX_SSE_EVENT) + " bytes"
+                    return out^
+                if self.has_data:
+                    self.data.append(10)
+                for c in value.as_bytes():
+                    self.data.append(c)
                 self.has_data = True
             elif field == "event":
                 self.name = value

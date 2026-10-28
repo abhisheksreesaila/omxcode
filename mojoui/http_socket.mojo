@@ -6,7 +6,7 @@
 from std.ffi import external_call, c_int, get_errno, ErrNo
 from std.sys import CompilationTarget, is_defined
 from std.os import getenv
-from mojoui.http import Request, Response, Transport, Url, TLS_NEEDED, request_problem, has_control, Sink, SseReader, Piece, utf8_whole, utf8_lossy
+from mojoui.http import Request, Response, Transport, Url, TLS_NEEDED, request_problem, has_control, Sink, SseReader, Piece, utf8_whole, utf8_lossy, MAX_STREAM_CHUNK
 from mojoui.clock import now_ns
 
 comptime APPLE = not CompilationTarget.is_linux()  # (BSD sockets: sin_len, other constants)
@@ -363,10 +363,14 @@ struct SocketTransport(Transport):
         var done = False
         var reader = SseReader()
         var last = now_ns()
+        var began = last
+        var total = 0  # body bytes so far
         while not done:
             if sink.cancelled():
                 return Response.failed("cancelled")
             var now = now_ns()
+            if (now - began) // 1_000_000 >= req.stream_max_ms:
+                return Response.failed("the stream from " + where + " lasted longer than " + String(req.stream_max_ms) + " ms")
             if now - last >= idle:
                 return Response.failed("timed out after " + String(req.timeout_ms) + " ms waiting for the stream from " + where)
             if not wait_for(fd, POLLIN, min(last + idle, now + 50_000_000)):
@@ -380,6 +384,10 @@ struct SocketTransport(Transport):
             if n == 0:
                 break  # the server closed
             last = now_ns()
+            if head_done:
+                total += n
+                if total > req.stream_max_bytes:
+                    return Response.failed("the stream from " + where + " is larger than " + String(req.stream_max_bytes) + " bytes")
             if not head_done:
                 for k in range(n):
                     head.append(chunk[k])
@@ -423,10 +431,14 @@ struct SocketTransport(Transport):
                         var d = c - 48 if c >= 48 and c <= 57 else (c - 87 if c >= 97 and c <= 102 else (c - 55 if c >= 65 and c <= 70 else -1))
                         if d < 0:
                             break
-                        size = size * 16 + d
                         digits += 1
-                    if digits == 0 or size > MAX_BODY:
+                        if digits > 8:  # (no Int overflow, no size that moves backwards)
+                            return Response.failed("a bad chunk size (more than 8 hex digits) in the stream from " + where)
+                        size = size * 16 + d
+                    if digits == 0:
                         return Response.failed("a bad chunk in the stream from " + where)
+                    if size > MAX_STREAM_CHUNK:
+                        return Response.failed("a chunk larger than " + String(MAX_STREAM_CHUNK) + " bytes in the stream from " + where)
                     if size == 0:
                         done = True
                         i = len(raw)
@@ -459,6 +471,8 @@ struct SocketTransport(Transport):
                 data.clear()
                 for ref ev in events:
                     sink.push(ev.copy())
+                if reader.error != "":
+                    return Response.failed("the stream from " + where + " sent " + reader.error)
             else:
                 var whole = utf8_whole(data)
                 if whole > 0:

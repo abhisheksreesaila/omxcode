@@ -122,6 +122,36 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 self.server.gone[self.path] = time.monotonic()
                 self.close_connection = True
+        elif url.path == "/bigevent":  # (one event of four 600 KB lines: past a reader's 1 MB event cap)
+            self.sse_start()
+            try:
+                self.sse("\n".join(["x" * 600_000] * 4))
+                self.sse_end()
+            except OSError:
+                pass
+        elif url.path == "/flood":  # (1 KB events as fast as the client reads, until it leaves)
+            self.sse_start()
+            try:
+                while True:
+                    self.sse("y" * 1024)
+            except OSError:
+                self.server.gone[self.path] = time.monotonic()
+        elif url.path == "/hugechunk":  # (a chunk size of 17 hex digits: past any Int)
+            self.sse_start()
+            try:
+                self.wfile.write(b"FFFFFFFFFFFFFFFFF\r\ndata: x\n\n\r\n")
+                self.wfile.flush()
+                time.sleep(2)
+            except OSError:
+                pass
+        elif url.path == "/bigchunk":  # (a declared 256 MB chunk that never comes)
+            self.sse_start()
+            try:
+                self.wfile.write(b"10000000\r\ndata: x")
+                self.wfile.flush()
+                time.sleep(2)
+            except OSError:
+                pass
         elif url.path == "/json":
             self.reply(200, json.dumps(JSON_REPLY).encode(), "application/json")
         elif url.path == "/header":

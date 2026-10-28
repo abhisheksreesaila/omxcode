@@ -6,10 +6,10 @@ from std.testing import assert_equal, assert_true
 from std.os import getenv
 from mojoui.app import App, Event, Runtime
 from mojoui import View, Text
-from mojoui.http import Http, Request, SseReader, utf8_whole
+from mojoui.http import Http, Request, SseReader, utf8_whole, MAX_SSE_LINE
 from mojoui.clock import now_ns
 
-comptime CASES = 8
+comptime CASES = 13
 comptime ORDER = 0
 comptime CHUNKS = 1
 comptime TRICKLE = 2
@@ -19,7 +19,12 @@ comptime CANCEL = 5
 comptime REFUSED = 6
 comptime POST = 7
 comptime STATUS = 8
-comptime PIECE = 100  # PIECE + case: a piece; END + case: the end (ranges 100–108, 200–208)
+comptime BIGEVENT = 9  # bounds (reviewer, D-719): one event past 1 MB, a stream that never ends, one that lasts, chunk sizes
+comptime FLOOD = 10
+comptime LONG = 11
+comptime HUGECHUNK = 12
+comptime BIGCHUNK = 13
+comptime PIECE = 100  # PIECE + case: a piece; END + case: the end (ranges 100–113, 200–213)
 comptime END = 200
 
 
@@ -193,5 +198,32 @@ def main() raises:
     _ = rt.dispatch(0)
     _ = until(rt, STATUS, 20)
     print("STATUS: " + String(len(rt.app.pieces[STATUS])) + " events; " + end_of(rt.app, STATUS) + " " + shown(rt.app.ends[STATUS][0].text))
+    # bounds: an event past 1 MB; a flood past the stream's byte limit; a drip past its time limit; chunk sizes
+    rt.app.open(BIGEVENT, Request.get(PIECE + BIGEVENT, base + "bigevent"))
+    _ = rt.dispatch(0)
+    _ = until(rt, BIGEVENT, 20)
+    print("BIGEVENT: " + String(len(rt.app.pieces[BIGEVENT])) + " events; " + end_of(rt.app, BIGEVENT))
+    rt.app.open(FLOOD, Request.get(PIECE + FLOOD, base + "flood").limit(1_000_000, 60_000))
+    _ = rt.dispatch(0)
+    _ = until(rt, FLOOD, 20)
+    print("FLOOD: " + String(len(rt.app.pieces[FLOOD])) + " events; " + end_of(rt.app, FLOOD))
+    rt.app.open(LONG, Request.get(PIECE + LONG, base + "forever").limit(64_000_000, 600))
+    _ = rt.dispatch(0)
+    _ = until(rt, LONG, 20)
+    print("LONG: " + String(len(rt.app.pieces[LONG])) + " events; " + end_of(rt.app, LONG))
+    rt.app.open(HUGECHUNK, Request.get(PIECE + HUGECHUNK, base + "hugechunk"))
+    _ = rt.dispatch(0)
+    _ = until(rt, HUGECHUNK, 20)
+    print("HUGECHUNK: " + String(len(rt.app.pieces[HUGECHUNK])) + " events; " + end_of(rt.app, HUGECHUNK))
+    rt.app.open(BIGCHUNK, Request.get(PIECE + BIGCHUNK, base + "bigchunk"))
+    _ = rt.dispatch(0)
+    _ = until(rt, BIGCHUNK, 20)
+    print("BIGCHUNK: " + String(len(rt.app.pieces[BIGCHUNK])) + " events; " + end_of(rt.app, BIGCHUNK))
+    # the reader alone: a line past its cap stops it
+    var capped = SseReader()
+    var long_line = List[UInt8](length=MAX_SSE_LINE + 10, fill=97)
+    _ = capped.feed(Span(long_line))
+    assert_true(capped.error.find("longer") >= 0, "a line past the cap: " + capped.error)
+    assert_equal(len(capped.feed("data: more\n\n".as_bytes())), 0, "a stopped reader reads nothing more")
     assert_equal(len(rt.inflight), 0, "nothing left out")
     print("test_stream: all passed")

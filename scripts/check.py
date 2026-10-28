@@ -200,6 +200,16 @@ def m0():
     v = one("STATUS")
     if v is not None and v != "0 events; end 500 '' 'boom'":
         problems.append(f"STATUS: {v!r} (a 500 to a stream: no events, the end carries status and body)")
+    # bounds (reviewer, D-719): an event past 1 MB, a never-ending stream past its byte limit, one past its time limit,
+    # a chunk size past any Int, a declared chunk past 4 MB: each ends with an error, nothing hangs
+    for key, pattern in [("BIGEVENT", r"^0 events; end 0 '.*event larger than 1048576 bytes'$"),
+                         ("FLOOD", r"^\d+ events; end 0 '.*larger than 1000000 bytes'$"),
+                         ("LONG", r"^\d+ events; end 0 '.*lasted longer than 600 ms'$"),
+                         ("HUGECHUNK", r"^0 events; end 0 '.*bad chunk size.*'$"),
+                         ("BIGCHUNK", r"^0 events; end 0 '.*chunk larger than.*'$")]:
+        v = one(key)
+        if v is not None and not re.match(pattern, v):
+            problems.append(f"{key}: {v!r}")
     if problems:
         return False, "; ".join(problems)
     # frames keep drawing on GTK and the web while a stream trickles (examples/httpcheck's Stream)
@@ -212,6 +222,8 @@ def m0():
         with http_server.TestServer() as srv:
             steps = f"type:URL={srv.url}trickle?n=20&ms=100;tap:Stream;pause:3500"
             shot = str(OUT / f"m0-stream-{host}.png")
+            if host == "web":  # (and an unsized text field keeps the web's 70vw cap: reviewer item 9, D-713)
+                steps += ";js:[getComputedStyle(document.querySelector('input[placeholder=URL]')).maxWidth, innerWidth]"
             r, o = g5().gtk("httpcheck", steps, shot=shot) if host == "gtk" else g5().web("httpcheck", steps, shot=shot)
         if r is None:
             problems.append(f"{host}: {o[-400:]}")
@@ -226,6 +238,11 @@ def m0():
             problems.append(f"{host}: {frames} frames while 20 events trickled over 2 s (< 60)")
         if float(gap.split()[0]) > 250:
             problems.append(f"{host}: a {gap} gap between frames while streaming")
+        if host == "web":
+            vals = [json.loads(l[4:]) for l in o.splitlines() if l.startswith("JS: ")]
+            cap = vals[-1] if vals else None
+            if not cap or not cap[0].endswith("px") or abs(float(cap[0][:-2]) - 0.7 * cap[1]) > 2:
+                problems.append(f"web: an unsized text field's max-width is {cap} (want 70vw of the window)")
         notes.append(f"{host} {frames} frames, gap {gap}")
     if problems:
         return False, "; ".join(problems)
@@ -725,6 +742,9 @@ def m3():
         steps = ("type:Message=Hello there;tap:Send;pause:2500;"
                  "type:Message=Show me sales as a chart;tap:Send;pause:1500;"
                  "segment:0=Year;pause:1500")  # (the hosts' grammar: segment:<index>=<option>)
+        if host == "web":  # (the composer, a field told to grow, fills its row: reviewer item 9, D-713)
+            steps += (";js:[document.querySelector('input[placeholder=Message]').getBoundingClientRect().width, "
+                      "document.querySelector('input[placeholder=Message]').parentElement.getBoundingClientRect().width, innerWidth]")
         try:
             out, inputs = chat_run(host, "chat", steps, shot=str(OUT / f"agentchat-{host}.png"))
         except RuntimeError as e:
@@ -746,6 +766,11 @@ def m3():
         shot = OUT / f"agentchat-{host}.png"
         if not shot.exists() or time.time() - shot.stat().st_mtime > 600 or shot.stat().st_size < 20_000:
             problems.append(f"{host}: no fresh screenshot {shot.relative_to(ROOT)}")
+        if host == "web":
+            vals = [json.loads(l[4:]) for l in out.splitlines() if l.startswith("JS: ")]
+            row = vals[-1] if vals else None
+            if not row or row[0] < row[1] - 2 or row[0] < 0.7 * row[2]:
+                problems.append(f"web: the composer doesn't fill its row (field, its box, window: {row})")
         notes.append(f"{host}: streamed {pieces}, chart built, range edit seen")
     problems += m3_live()
     th = (ROOT / "examples/agentchat/app.mojo").read_text()
