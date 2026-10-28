@@ -19,8 +19,15 @@ let WG = parseInt(q.get('wg') || '256', 10);
 // 'atomic' (compute rasteriser, the default: ~2x faster than hardware points at 20M) or 'points' (point-list + blending)
 const RENDER = q.get('render') || 'atomic';
 const EXPOSURE = parseFloat(q.get('exposure') || '1.0');
-// &await=0: don't wait for the GPU each scripted frame (total_ms is then CPU encode+submit only; use raf_interval_ms)
+// &await=0 (throughput runs): don't wait for each scripted frame's GPU work. Chromium's onSubmittedWorkDone round
+// trip is 5-9 ms here even when the frame's GPU work is 0.16 ms, so waiting per frame (or keeping a bounded number
+// in flight, &inflight=K) measures that IPC, not the work. Unbounded, rAF runs ahead of the GPU, so the rAF interval
+// alone means nothing (0.2 ms at 20M against 2.8 ms of GPU work); the throughput figure is window_ms_per_frame: the
+// queue is drained at frame &window=W (default 60, the warm-up), then wall time to the last frame's GPU completion
+// over the frames in between (measured 2026-10-27).
 const AWAIT = q.get('await') !== '0';
+const INFLIGHT = Math.max(1, parseInt(q.get('inflight') || '1000000000', 10));
+const WINDOW = parseInt(q.get('window') || '60', 10);
 const GAIN = parseFloat(q.get('gain') || '0.08'); // light per particle at 1M
 const $ = (id) => document.getElementById(id);
 const fmtN = (n) => (n >= 1e6 ? `${n / 1e6}M` : n >= 1e3 ? `${n / 1e3}k` : `${n}`);
@@ -295,15 +302,20 @@ async function main() {
       device.createQuerySet({ type: 'timestamp', count: 4 * PER })) : [];
     const total = new Array(F), interval = new Array(F), cpu = new Array(F);
     let firstFrameMs = null, prevRaf = null;
+    const queued = []; // (await=0, &inflight=K) promises for the frames still on the GPU
+    let windowStart = null;
     for (let f = 0; f < F; f++) {
       const raf = await nextFrame();
       interval[f] = prevRaf == null ? null : raf - prevRaf;
       prevRaf = raf;
+      if (f === WINDOW) { await device.queue.onSubmittedWorkDone(); queued.length = 0; windowStart = performance.now(); }
       const a = performance.now();
+      if (!AWAIT && queued.length >= INFLIGHT) await queued.shift();
       const ts = hasTS ? { set: sets[Math.floor(f / PER)], base: (f % PER) * 4 } : null;
       device.queue.submit([encodeFrame(attractorPath(f), true, ts).finish()]);
       cpu[f] = performance.now() - a;
-      if (AWAIT) await device.queue.onSubmittedWorkDone();
+      if (AWAIT || f === 0) await device.queue.onSubmittedWorkDone(); // (the first frame always: cold start = a drawn frame)
+      else if (INFLIGHT < 1e9) queued.push(device.queue.onSubmittedWorkDone());
       total[f] = performance.now() - a;
       if (f === 0) {
         firstFrameMs = performance.now();
@@ -311,6 +323,8 @@ async function main() {
       }
       tickReadout();
     }
+    await device.queue.onSubmittedWorkDone();
+    const windowMs = windowStart == null ? null : (performance.now() - windowStart) / (F - WINDOW);
     let step = null, draw = null, gpu = null;
     if (hasTS) {
       step = new Array(F); draw = new Array(F); gpu = new Array(F);
@@ -335,7 +349,8 @@ async function main() {
     }
     if (step) { stepEma = [...step].sort((a, b) => a - b)[step.length >> 1]; $('step').textContent = stepEma.toFixed(2); }
     const timings = {
-      build: 'js-webgpu', adapter: adapterName, n, frames: F, workgroup: WG, render: RENDER,
+      build: 'js-webgpu', adapter: adapterName, n, frames: F, workgroup: WG, render: RENDER, await: AWAIT, inflight: AWAIT ? 1 : INFLIGHT, window: WINDOW,
+      window_ms_per_frame: windowMs, // wall time from a drained queue at frame WINDOW to the last frame's GPU completion, per frame
       timestamps: hasTS ? 'gpu timestamp-query' : 'none',
       total_ms: total, cpu_encode_ms: cpu, gpu_frame_ms: gpu, step_ms: step, draw_ms: draw, raf_interval_ms: interval,
       init_ms: firstFrameMs - tInit, // seed + upload + first frame

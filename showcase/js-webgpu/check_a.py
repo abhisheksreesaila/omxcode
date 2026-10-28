@@ -179,8 +179,12 @@ def correctness(n=10000, frames=120, cpu=False):
     shutil.rmtree(out, ignore_errors=True)
 
 
-def bench(n, frames, warmup, params="", cpu=False):
-    t, out, extra = run(n, frames, "&positions=0" + ("&mode=cpu" if cpu else "") + params)
+def bench(n, frames, warmup, params="", cpu=False, throughput=False):
+    """throughput=True: vsync and the frame-rate limit off, and (GPU row) &await=0, so the rAF interval is the
+    frame's throughput instead of 16.7 ms or a per-frame GPU round trip."""
+    if throughput and not cpu:
+        params += "&await=0"
+    t, out, extra = run(n, frames, "&positions=0" + ("&mode=cpu" if cpu else "") + params, flags=UNCAPPED if throughput else ())
     if not cpu:
         check_adapter(t)
     w = warmup if warmup is not None else (60 if frames > 120 else 0)
@@ -193,7 +197,8 @@ def bench(n, frames, warmup, params="", cpu=False):
         "late_frames": round(sum(x > 20 for x in iv) / len(iv), 3) if iv else None,  # rAF gaps > 20 ms
         "cold_start_ms": extra["cold_start_ms"], "init_ms": t["init_ms"],
         "peak_rss_mb": round(extra["rss_mb"], 1), "peak_gpu_mem_mb": extra["gpu_mb"], "js_heap_mb": t["js_heap_mb"],
-        "timing": "frame = wall ms from encode to GPU done (awaits onSubmittedWorkDone, whose round trip in Chromium is most of it); gpu_frame/step/draw = GPU timestamp-query; cpu_encode = JS encode+submit; raf_interval with vsync (16.7 = holds 60 fps)",
+        "throughput": throughput,
+        "timing": ("throughput: vsync/limiter off, no per-frame await; raf_interval = frame throughput; " if throughput else "frame = wall ms from encode to GPU done (awaits onSubmittedWorkDone); raf_interval with vsync (16.7 = holds 60 fps); ") + "gpu_frame/step/draw = GPU timestamp-query; cpu_encode = JS encode+submit",
     }))
     shutil.rmtree(out, ignore_errors=True)
 
@@ -204,12 +209,13 @@ if __name__ == "__main__":
     ap.add_argument("--warmup", type=int)
     ap.add_argument("--cpu", action="store_true", help="correctness of the plain-JS CPU row (A-cpu)")
     ap.add_argument("--params", default="", help="extra URL params, e.g. &wg=128")
+    ap.add_argument("--throughput", action="store_true", help="bench: vsync off, &await=0 (headline = rAF interval)")
     ap.add_argument("--shot", nargs=3, metavar=("N", "FRAMES", "PNG"))
     a = ap.parse_args()
     if a.bench:
         cpu = a.bench[0] == "cpu"
         n, f = (int(x) for x in (a.bench[1:] if cpu else a.bench))
-        bench(n, f, a.warmup, a.params, cpu)
+        bench(n, f, a.warmup, a.params, cpu, a.throughput)
     elif a.shot:
         t, out, _ = run(int(a.shot[0]), int(a.shot[1]), "&positions=0" + a.params, shot=Path(a.shot[2]).resolve())
         print(f"shot: {a.shot[2]} ({t['adapter']})")
