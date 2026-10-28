@@ -689,3 +689,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - examples/agentchat composes Agent + GenUi. The form round trip worked on its first GTK run. Fixed after looking at the shots: agent cards centred (wrapped in a row with a Spacer), the sparkline drew black on the web (fill the card colour first, as the widgets app does), the web composer capped at 70vw (D-693).
 - The check's M3 step `segment:Range=Year` used a grammar no host has: corrected to `segment:0=Year` (the hosts' `segment:<index>=<option>`), same proof.
 - M2 PASS (48 s).
+
+## 2026-10-27 · goal 35 M3: the chat app
+- Coordinator (owner direction): the live agent speaks the OpenAI-compatible API, the OMX Console by default, Claude optional (D-690). The proof was extended before the work: m3_live uses a stand-in server, checks the Bearer key from the named variable, the repaired UI, and the docs.
+- The stand-in's broken JSON (```json fences, single quotes, trailing commas, "card", "chart", "data") came out as Card(Sparkline values=…) on the first try; through the app on GTK the chart card appears (docs/goals/35/m3-live-standin-gtk.png); no key in any output.
+- M3 PASS (39 s). Shots: docs/goals/35/agentchat-gtk.png, agentchat-web.png.

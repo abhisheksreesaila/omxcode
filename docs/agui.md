@@ -57,3 +57,51 @@ An agent builds UI by calling the frontend tool `render_ui` with `{"ui": node}`;
   loads a page or draws pixels it brings.
 - `bind` reads and edits the shared state at a JSON pointer; `action` reports a word back: the first one is render_ui's
   tool result (`{"action": "submit"}`), and the edited state goes with the run.
+
+## Run it
+
+```bash
+scripts/agentchat.sh            # the scripted agent and the app on GTK ("Hello", "Show me sales as a chart", "Make me a signup form")
+scripts/agentchat.sh --web      # the same on the web
+```
+
+## The live demo (an agent backed by a real model)
+
+One OpenAI-compatible path (owner, 2026-10-27, D-690). Every setting is an environment variable, read by name; no key
+is printed, logged or stored, and none ever reaches the app (the backend holds it).
+
+**The OMX Console (the default: local models, no cloud, no key leaves the machine).** The console serves models behind
+an OpenAI-compatible endpoint at `http://127.0.0.1:11435/v1`, with a key per app:
+
+```bash
+cd ~/Projects/mxstudio/mxconsole
+pixi run mxc serve qwen2.5-0.5b        # (or a bigger model: small ones are weak at tool calls)
+pixi run mxc keys new agentchat        # prints a key once
+export MXC_API_KEY=…                   # in the shell that runs the demo
+cd ~/Projects/mxapp/mojo-ui-agui && scripts/agentchat.sh --live
+```
+
+| Variable | Default | What |
+|---|---|---|
+| `AGUI_LLM_BASE_URL` | `http://127.0.0.1:11435/v1` | any OpenAI-compatible chat API |
+| `AGUI_LLM_MODEL` | `qwen2.5-0.5b` | a model the endpoint serves (`qwen2.5-7b-instruct` or larger builds UI more reliably) |
+| `AGUI_LLM_KEY_VAR` | `MXC_API_KEY` | the NAME of the variable holding the key (sent as `Authorization: Bearer …`; unset: no header) |
+
+Small models break tool-call JSON, so the backend repairs it before it reaches the app: code fences and chatter
+stripped, single quotes, trailing commas and Python literals fixed, a bare node wrapped in `{"ui": …}`, component names
+matched case-insensitively with common synonyms (chart → Sparkline, row → HStack), common prop synonyms (data →
+values). A UI written into the words instead of a tool call is lifted out. The model sees a short render_ui schema and
+an explicit list of the components in its system prompt; the app still validates the full schema and refuses the rest.
+
+**Claude (optional).** `AGUI_LLM_PROVIDER=anthropic` uses the Anthropic SDK, which reads `ANTHROPIC_API_KEY` itself
+(model `claude-opus-5-5` unless `AGUI_LLM_MODEL` says otherwise; low effort; the server-side refusal fallback on):
+
+```bash
+export ANTHROPIC_API_KEY=…  AGUI_LLM_PROVIDER=anthropic
+scripts/agentchat.sh --live
+```
+
+Proved without a model by scripts/check.py M3: a stand-in OpenAI-compatible server (scripts/fake_llm.py) answers like a
+small model with broken tool JSON; the stream the backend sends validates with the AG-UI SDK, carries the repaired UI,
+and the key arrives as a Bearer token and is printed nowhere. The live run against a real model is by hand (unverified
+by the checks).
