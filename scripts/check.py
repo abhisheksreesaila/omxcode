@@ -1,10 +1,12 @@
-"""Milestone checker for GOAL.md (goal 36: three stacks, one particle field; goal 36b: M6-M8). Prints PASS/FAIL per milestone.
+"""Milestone checker for GOAL.md (goal 38: 100M rows, four stacks). Prints PASS/FAIL per milestone.
 
-Run: scripts/check   (a subset: scripts/check M0 M4)
-Each milestone's proof comes from GOAL.md's words (never weaker). M1-M3 run each build's own check script and need
-its "ok" lines; M4 checks docs/goals/36/results.json, written by scripts/particles_bench.py.
+Run: scripts/check   (a subset: scripts/check M0 M7)
+Each milestone's proof was written before its work started, from GOAL.md's words (never weaker). M1-M6 are todo
+until their work starts; M7 runs goal 36's M0 and M5 and goal 35's M2 through their archived checks.
 """
 
+import copy
+import importlib.util
 import json
 import os
 import subprocess
@@ -15,428 +17,203 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-OUT = ROOT / "docs" / "goals" / "36"
+DATA = ROOT / "showcase-data"
+REGIONS = ["US East", "US West", "Canada", "Brazil", "UK", "Germany", "India", "Japan"]
 
 
-def run(cmd, timeout=3600):
+def run(cmd, timeout=1800):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
 
 
-def needs_ok(cmd, labels, timeout=3600):
-    """Runs a build's check; every label must print '<label>: ok'."""
-    r = run([sys.executable, *cmd], timeout)
-    out = r.stdout + r.stderr
-    lines = [l.strip() for l in out.splitlines()]
-    missing = [lab for lab in labels if not any(l.startswith(f"{lab}: ok") for l in lines)]
-    if r.returncode != 0 or missing:
-        tail = " | ".join(l for l in lines if l)[-900:]
-        return False, f"{' '.join(cmd)}: exit {r.returncode}, no ok for {missing or labels}: {tail}"
-    return True, "; ".join(next(l for l in lines if l.startswith(f"{lab}: ok")) for lab in labels)
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, ROOT / path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def reference():
+    sys.path.insert(0, str(DATA))
+    import reference as ref
+    return ref
+
+
+def sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while b := f.read(1 << 24):
+            h.update(b)
+    return h.hexdigest()
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# M0: data, steps, reference
+# ---------------------------------------------------------------------------------------------------------------------
+
+def m0_data():
+    lock = json.loads((DATA / "data.lock").read_text())["files"]
+    with tempfile.TemporaryDirectory() as d:
+        files = []
+        for k in range(2):
+            p = Path(d) / f"o{k}.parquet"
+            r = run([sys.executable, "showcase-data/make_data.py", "--rows", "10M", "--out", str(p)], 900)
+            if r.returncode != 0 or not p.exists():
+                return f"make_data.py failed: {(r.stdout + r.stderr)[-500:]}"
+            files.append(p)
+        if files[0].read_bytes() != files[1].read_bytes():
+            return "two make_data.py runs at 10M differ"
+        if (files[0].stat().st_size, sha256(files[0])) != (lock["orders-10M.parquet"]["bytes"], lock["orders-10M.parquet"]["sha256"]):
+            return "make_data.py's 10M bytes are not data.lock's"
+    import pyarrow.parquet as pq
+    for name, rows in (("orders-10M.parquet", 10_000_000), ("orders-100M.parquet", 100_000_000)):
+        p = ROOT / "data" / name
+        if not p.exists() or p.stat().st_size != lock[name]["bytes"] or sha256(p) != lock[name]["sha256"]:
+            return f"data/{name} missing or not data.lock's bytes (run showcase-data/make_data.py)"
+        meta = pq.ParquetFile(p).metadata
+        if meta.num_rows != rows or [meta.schema.column(i).name for i in range(meta.num_columns)] != \
+                ["id", "day", "region", "product", "amount", "cost", "paid"]:
+            return f"data/{name}: {meta.num_rows} rows, columns not the SPEC's"
+    return None
+
+
+def m0_steps(answers):
+    s = json.loads((DATA / "steps.json").read_text())
+    states = [s["opening"], *s["steps"]]
+    if not 25 <= len(s["steps"]) <= 40:
+        return f"{len(s['steps'])} steps, want 25–40"
+    keys = ("from", "to", "min_amount", "region")
+    for k, st in enumerate(states):
+        if st.get("step") != k or any(x not in st for x in keys):
+            return f"state {k} incomplete or misnumbered"
+        if not ("2024-01-01" <= st["from"] <= st["to"] <= "2025-12-31") or not 1 <= st["min_amount"] <= 5000 \
+                or st["region"] not in REGIONS + ["all"]:
+            return f"state {k} out of range: {st}"
+        if k and sum(st[x] != states[k - 1][x] for x in keys) != 1:
+            return f"step {k} doesn't change exactly one control"
+        if k and st["change"] not in keys or (k and st[st["change"]] == states[k - 1][st["change"]]):
+            return f"step {k}'s change field doesn't name the control that moved"
+    run_, best = 0, 0
+    for k in range(1, len(states)):
+        small = states[k]["change"] == "min_amount" and abs(states[k]["min_amount"] - states[k - 1]["min_amount"]) <= 100
+        run_ = run_ + 1 if small else 0
+        best = max(best, run_)
+    if best < 4:
+        return f"the longest run of small slider moves is {best}, want ≥ 4"
+    if sum(states[k]["change"] == "region" for k in range(1, len(states))) < 3:
+        return "fewer than 3 region switches"
+    for total, ans in answers.items():
+        a, name = ans["steps"], f"{total // 1_000_000}M"
+        if len(a) != len(states):
+            return f"answers-{name}.json has {len(a)} answers for {len(states)} states"
+        if not any(x["rows"] == total for x in a[1:]):
+            return f"no step matches every row at {name}"
+        if sum(x["rows"] < total * 1e-4 for x in a) < 2:
+            return f"fewer than two steps match < 0.01 % of rows at {name}"
+    return None
+
+
+def m0_compare(ref, want):
+    if ref.compare(want, want):
+        return f"compare(reference, reference) finds problems: {ref.compare(want, want)[:2]}"
+    k = next(i for i, x in enumerate(want["steps"]) if len(x["ids"]) == 50 and x["rows"] > 1000)
+    bad = {}
+    g = copy.deepcopy(want); g["steps"][k]["ids"][7] += 1; bad["a wrong id"] = g
+    g = copy.deepcopy(want); g["steps"][k]["sum_amount"] *= 1 + 1e-5; bad["a sum off by 1e-5"] = g
+    g = copy.deepcopy(want); g["steps"][k]["top"][3][1] *= 1 - 1e-5; bad["a product's sum off by 1e-5"] = g
+    g = copy.deepcopy(want); g["steps"][k]["rows"] += 1; bad["a wrong row count"] = g
+    g = copy.deepcopy(want); g["steps"][k]["avg_margin"] *= 1 + 1e-5; bad["a margin off by 1e-5"] = g
+    g = copy.deepcopy(want); del g["steps"][-1]; bad["a missing step"] = g
+    g = copy.deepcopy(want); t = g["steps"][k]["top"]; t[0][0], t[1][0] = t[1][0], t[0][0]; bad["two products swapped"] = g
+    for why, g in bad.items():
+        if not ref.compare(g, want):
+            return f"compare accepts {why}"
+    g = copy.deepcopy(want)
+    for x in g["steps"]:
+        x["sum_amount"] *= 1 + 1e-9
+        x["top"] = [[p, s * (1 - 1e-9)] for p, s in x["top"]]
+    if ref.compare(g, want):
+        return f"compare rejects a 1e-9 change: {ref.compare(g, want)[:2]}"
+    if ref.compare({"steps": want["steps"][:6]}, want, steps=5):
+        return "compare rejects a 5-step run"
+    return None
 
 
 def m0():
-    """The spec and the reference: SPEC.md and reference.py; N = 10,000 after 120 steps, two runs byte-equal."""
-    for f in ("showcase/SPEC.md", "showcase/reference.py"):
-        if not (ROOT / f).exists():
-            return False, f"{f} missing"
+    """GOAL.md M0: data reproducible and locked, steps fixed and shaped as stated, reference answers for every state,
+    re-made and cross-checked by a second engine, compare's own behaviour, SPEC pinned."""
+    t0 = time.time()
+    why = m0_data()
+    if why:
+        return False, why
+    t_data = time.time() - t0
+    lock = json.loads((DATA / "data.lock").read_text())["files"]
+    answers = {}
+    for name in ("10M", "100M"):
+        p = DATA / f"answers-{name}.json"
+        if not p.exists():
+            return False, f"{p.name} missing"
+        answers[name] = json.loads(p.read_text())
+        if answers[name]["sha256"] != lock[f"orders-{name}.parquet"]["sha256"]:
+            return False, f"{p.name} was made from other bytes than data.lock's"
+    why = m0_steps({10_000_000: answers["10M"], 100_000_000: answers["100M"]})
+    if why:
+        return False, why
+    ref = reference()
+    for name, total in (("10M", 10_000_000), ("100M", 100_000_000)):
+        if answers[name]["steps"][0]["rows"] != total:
+            return False, f"the opening state doesn't match every row at {name}"
     with tempfile.TemporaryDirectory() as d:
-        outs = []
-        for k in range(2):
-            p = Path(d) / f"ref{k}.bin"
-            r = run([sys.executable, "showcase/reference.py", "10000", "120", str(p)], 600)
-            if r.returncode != 0 or not p.exists():
-                return False, f"reference.py failed: {r.stderr[-500:]}"
-            outs.append(p.read_bytes())
-    if len(outs[0]) != 10000 * 2 * 4:
-        return False, f"reference wrote {len(outs[0])} bytes, not 10,000 × 2 float32"
-    if outs[0] != outs[1]:
-        return False, "two reference runs differ"
-    import hashlib
-    return True, f"reference N=10,000 F=120: two runs byte-equal ({len(outs[0])} bytes, sha256 {hashlib.sha256(outs[0]).hexdigest()[:12]})"
+        for engine in ("duckdb", "numpy"):
+            out = Path(d) / f"{engine}.json"
+            r = run([sys.executable, "showcase-data/reference.py", "10M", "--engine", engine, "--out", str(out)], 900)
+            if r.returncode != 0:
+                return False, f"reference.py --engine {engine} failed: {(r.stdout + r.stderr)[-500:]}"
+            problems = ref.compare(json.loads(out.read_text()), answers["10M"])
+            if problems:
+                return False, f"{engine} at 10M disagrees with answers-10M.json: {problems[:3]}"
+    why = m0_compare(ref, answers["10M"]) or m0_compare(ref, answers["100M"])
+    if why:
+        return False, why
+    spec = (DATA / "SPEC.md").read_text()
+    for word in ("`id` int64", "Parquet DATE", "`id` ascending", "product name ascending", "`(amount − cost) / amount`",
+                 "answers.json", "data.lock", "reference.compare"):
+        if word not in spec:
+            return False, f"SPEC.md doesn't pin {word!r}"
+    ms = answers["100M"]["step_ms"]
+    return True, (f"10M twice byte-equal ({lock['orders-10M.parquet']['bytes']:,} B, {lock['orders-10M.parquet']['sha256'][:12]}), "
+                  f"100M locked ({lock['orders-100M.parquet']['bytes']:,} B, {lock['orders-100M.parquet']['sha256'][:12]}) "
+                  f"[{t_data:.0f} s]; {len(answers['10M']['steps']) - 1} steps; DuckDB and NumPy agree at 10M; "
+                  f"compare rejects 7 faults, accepts 1e-9; DuckDB 100M per step median {sorted(ms)[len(ms) // 2]:.0f} ms")
 
 
-def m1():
-    """A · JS + WebGPU on the RTX 3090 matches the reference, and the plain-JS CPU row (A-cpu)."""
-    ok1, msg1 = needs_ok(["showcase/js-webgpu/check_a.py"], ["A"])
-    ok2, msg2 = needs_ok(["showcase/js-webgpu/check_a.py", "--cpu"], ["A-cpu"])
-    return ok1 and ok2, f"{msg1}; {msg2}"
+# ---------------------------------------------------------------------------------------------------------------------
+# M1-M6: todo until their work starts (their proofs are GOAL.md's words)
+# ---------------------------------------------------------------------------------------------------------------------
+
+def todo(name):
+    return lambda: (False, f"todo: {name} not started")
 
 
-def m2():
-    """B · JS + Rust: the wasm row and the native wgpu row both match the reference."""
-    return needs_ok(["showcase/js-rust/check_b.py"], ["B-wasm", "B-native"])
-
-
-def m3():
-    """C · omxcode: examples/particles on GTK (GPU) matches the reference."""
-    return needs_ok(["showcase/omxcode/check_c.py"], ["C"])
-
-
-def m4():
-    """The measure: results.json is the final gated measurement (not provisional), every row at every size, from one
-    protocol, fresh for these sources."""
-    import particles_bench as pb
-    path = OUT / "results.json"
-    if not path.exists() or not (OUT / "results.md").exists():
-        prov = " (only the PROVISIONAL busy-machine results exist: results-provisional.json)" if (OUT / "results-provisional.json").exists() else ""
-        return False, "docs/goals/36/results.json or results.md missing: run scripts/particles_bench.py through the quiet gate" + prov
-    res = json.loads(path.read_text())
-    problems = []
-    if res.get("provisional") is not False or res.get("gated") is not True or not (res.get("protocol", {}).get("gate") or {}).get("load1_below"):
-        problems.append("results.json is not the final gated measurement (provisional or ungated)")
-    if "PROVISIONAL" in (OUT / "results.md").read_text():
-        problems.append("results.md is marked PROVISIONAL")
-    if res.get("sources_sha256") != pb.sources_sha():
-        problems.append("stale: the sources changed since results.json was measured (rerun scripts/particles_bench.py)")
-    p = res.get("protocol", {})
-    if (p.get("warmup"), p.get("frames"), p.get("runs")) != (60, 600, 3):
-        problems.append(f"protocol {p.get('warmup')}/{p.get('frames')}/{p.get('runs')}, not 60 warm-up / 600 frames / 3 runs")
-    need = ["frame_ms", "frame_ms_spread", "p95_interval_ms", "cold_start_ms", "peak_rss_mb", "peak_pss_mb", "holds_60", "frame_ms_is", "step_ms_is"]
-    for row in pb.ROWS:
-        rows = res.get("rows", {}).get(row)
-        if not rows:
-            problems.append(f"{row}: no results")
-            continue
-        for n in pb.EXTRA.get(row, []) + pb.SIZES:
-            r = rows.get(str(n))
-            if not r:
-                problems.append(f"{row} {n}: missing")
-                continue
-            miss = [k for k in need if r.get(k) is None]
-            if miss:
-                problems.append(f"{row} {n}: no {miss}")
-            if not all((x.get("machine") or {}).get("gated") for x in r.get("runs", [])) or not r.get("machine", {}).get("gated"):
-                problems.append(f"{row} {n}: a run didn't pass the quiet gate")
-            if len(r.get("runs", [])) != 3:
-                problems.append(f"{row} {n}: {len(r.get('runs', []))} runs")
-            if row != "A-cpu":
-                a = (r.get("adapter") or "").lower()
-                if "nvidia" not in a or "swiftshader" in a or "llvmpipe" in a:
-                    problems.append(f"{row} {n}: adapter {r.get('adapter')}")
-            if row == "C" and r.get("readback_ms") is None:
-                problems.append(f"C {n}: no readback_ms")
-            if row == "B-wasm" and (not r.get("crossOriginIsolated") or r.get("threads", 1) <= 1):
-                problems.append(f"B-wasm {n}: not multi-threaded")
-            if r.get("holds_60") != (r.get("frame_ms", 99) <= 1000 / 60 and r.get("p95_interval_ms", 99) <= 20):
-                problems.append(f"{row} {n}: holds_60 disagrees with its numbers")
-    if not (res.get("effort", {}).get("C", {}).get("framework_added") or {}).get("lines"):
-        problems.append("effort C: the framework lines this goal added aren't counted")
-    for b in ("A", "A-cpu", "B", "B-wasm", "B-native", "C"):
-        e = res.get("effort", {}).get(b, {})
-        if not all(e.get(k) for k in ("lines", "files", "languages", "build_steps", "toolchains")):
-            problems.append(f"effort {b}: incomplete")
-    if res.get("effort") and res["effort"] != pb.effort():
-        problems.append("effort counts differ from a fresh count")
-    md = (OUT / "results.md").read_text()
-    for word in ("atomic", "saturat", "hardware blending", "readback", "offscreen", "single-threaded"):
-        if word not in md:
-            problems.append(f"results.md doesn't state the caveat '{word}'")
-    if problems:
-        return False, "; ".join(problems[:12])
-    big = res["largest_n_at_60"]
-    return True, (f"results.json fresh (commit {res['commit']}, sources {res['sources_sha256'][:10]}); largest N at 60 fps: "
-                  + ", ".join(f"{r} {pb.mill(v) if v else 'none'}" for r, v in big.items()))
-
-
-def m5():
-    """The page: docs/why.html in four chapters, its generated parts equal to what the final results.json gives
-    (scripts/why_tables.py --check), no provisional text, every ✓ in the feature table links to something that exists,
-    every ✗ says why, and every image it shows exists."""
-    import re
-    import why_tables as wt
-    page_path = ROOT / "docs" / "why.html"
-    if not page_path.exists():
-        return False, "docs/why.html missing"
-    page = page_path.read_text()
-    problems = []
-    for cid in ("performance", "code", "agents", "features"):
-        if f'id="{cid}"' not in page:
-            problems.append(f"no chapter #{cid}")
-    if not (OUT / "results.json").exists():
-        return False, "docs/goals/36/results.json missing (the final measurement): the page can't be checked against it"
-    res = json.loads((OUT / "results.json").read_text())
-    if res.get("provisional") is not False:
-        problems.append("results.json is provisional")
-    if wt.apply(page, wt.fragments(res)) != page:
-        problems.append("the page's tables differ from results.json: rerun scripts/why_tables.py")
-    if "provisional" in page.lower():
-        problems.append("the page says 'provisional'")
-    mcp = re.search(r"<!-- why:mcp -->(.*?)<!-- /why:mcp -->", page, re.S)
-    if not mcp or "<pre" not in mcp.group(1):
-        problems.append("no example MCP tool call in chapter 3")
-    if not wt.TRANSCRIPT.exists():
-        problems.append("docs/goals/36/mcp-transcript.json (scripts/why_mcp.py) missing")
-    else:
-        tr = json.loads(wt.TRANSCRIPT.read_text())
-        if "linux/particles" not in tr.get("app", "") or "no-vsync" not in tr.get("app", ""):
-            problems.append("the MCP transcript isn't from the native GTK build with vsync off")
-        elif mcp and wt.mcp() not in mcp.group(1):
-            problems.append("the page's MCP session differs from the committed transcript")
-
-    def exists(href):
-        href = href.split("#")[0]
-        if href.startswith(wt.REPO):
-            return (ROOT / href[len(wt.REPO):]).exists()
-        if href.startswith("https://"):
-            return True  # outside the repo (npm, crates.io, the AG-UI docs): not checked offline
-        return bool(href) and (ROOT / "docs" / href).exists()
-
-    table = re.search(r'<table class="mtable ftable">(.*?)</table>', page, re.S)
-    yes = no = 0
-    if not table:
-        problems.append("no feature table")
-    else:
-        for tr in re.findall(r"<tr>(.*?)</tr>", table.group(1), re.S):
-            feature = re.sub(r"<.*?>", "", (re.search(r"<th[^>]*>(.*?)</th>", tr, re.S) or [None, "?"])[1])
-            for td in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S):
-                note = re.sub(r"<.*?>", "", td.split("</span>", 1)[-1]).strip()
-                if 'class="m yes"' in td:
-                    yes += 1
-                    hrefs = re.findall(r'href="([^"]+)"', td)
-                    if not hrefs:
-                        problems.append(f"{feature}: a ✓ without a link")
-                    problems += [f"{feature}: ✓ links to {h}, which doesn't exist" for h in hrefs if not exists(h)]
-                elif 'class="m no"' in td or 'class="m part"' in td:
-                    no += 1
-                    if len(note) < 12:
-                        problems.append(f"{feature}: a ✗ or partial without a reason")
-    for src in re.findall(r'<img[^>]+src="([^"]+)"', page) + re.findall(r'href="(img/[^"]+)"', page):
-        if not (ROOT / "docs" / src).exists():
-            problems.append(f"image {src} missing")
-    if problems:
-        return False, "; ".join(problems[:12])
-    big = res["largest_n_at_60"]
-    return True, (f"docs/why.html: four chapters, tables match results.json (commit {res['commit']}), feature table {yes} ✓ "
-                  f"all linked, {no} ✗/partial all explained; largest N at 60 fps on the page: "
-                  + ", ".join(f"{r} {wt.mn(v)}" for r, v in big.items()))
-
-
-_C_OK = {}
-
-
-def c_ok():
-    """showcase/omxcode/check_c.py (the particle app's correctness check), run once for M6, M6b and M6c."""
-    if "r" not in _C_OK:
-        _C_OK["r"] = needs_ok(["showcase/omxcode/check_c.py"], ["C"])
-    return _C_OK["r"]
-
-
-def mojo_test(path, ok_line):
-    r = run(["pixi", "run", "mojo", "run", "-I", ".", path], 1800)
-    out = r.stdout + r.stderr
-    lines = [l.strip() for l in out.splitlines() if l.startswith("  ") and "warning" not in l and not l.strip().startswith(("^", "~", "Pointer", "unsafe_"))]
-    if r.returncode != 0 or ok_line not in out:
-        return False, f"{path}: exit {r.returncode}: " + " | ".join(l for l in out.splitlines() if "error" in l.lower() or "Assert" in l or "SKIP" in l)[-600:], []
-    return True, f"{path}: {ok_line}", [l for l in lines if l and not l.startswith(("def ", "var ", "pts", "Mojo/"))][:8]
-
-
-def m6():
-    """Zero-copy presentation (GOAL.md 36b M6): (a) tests/test_canvas_present.mojo; (b) headless: the fallback is
-    reported and C still ok; (c) the desktop proof (present-desktop.json) fresh, zero readbacks; the app unchanged."""
-    import particles_bench as pb
-    import headless
-    problems, notes = [], []
-    ok, msg, lines = mojo_test("tests/test_canvas_present.mojo", "canvas present: ok")
-    (notes if ok else problems).append(msg)
-    if ok and not any("byte for byte" in l for l in lines):
-        problems.append("the test didn't compare the GL texture with the readback picture")
-    cok, cmsg = c_ok()  # (builds the app)
-    (notes if cok else problems).append(cmsg)
-    headless.ensure()
-    with tempfile.TemporaryDirectory() as d:
-        r = subprocess.run([str(ROOT / "build/particles/linux/particles"), "--scripted", "--n", "10000", "--frames", "30",
-                            "--out", d, "--positions", "0"], cwd=ROOT, capture_output=True, text=True, timeout=300,
-                           env=dict(os.environ, MOJOUI_PRESENT_STATS="1"))
-    out = r.stdout + r.stderr
-    told = next((l for l in out.splitlines() if l.startswith("mojoui: GPU canvas pictures")), "")
-    if "copied to the CPU for the screen (" not in told:
-        problems.append(f"headless: the fallback wasn't reported (got {told!r})")
-    else:
-        notes.append("headless: " + told[len("mojoui: "):])
-    pd = OUT / "present-desktop.json"
-    if not pd.exists():
-        problems.append("docs/goals/36/present-desktop.json missing: run scripts/present_smoke.py on the desktop")
-    else:
-        d = json.loads(pd.read_text())
-        if d.get("sources_sha256") != pb.sources_sha():
-            problems.append("present-desktop.json is stale (the sources changed): rerun scripts/present_smoke.py")
-        if d.get("cpu_copied") != 0 or d.get("gpu_presented", 0) < d.get("frames", 1) - 1 or "without a copy" not in d.get("path", ""):
-            problems.append(f"desktop: {d.get('cpu_copied')} readbacks, {d.get('gpu_presented')} of {d.get('frames')} frames from the GPU")
-        else:
-            notes.append(f"desktop: {d['gpu_presented']} of {d['frames']} frames shown from the GPU, 0 readbacks "
-                         f"({d['gsk_renderer']} renderer, {d['frame_ms_mean']:.2f} ms/frame at 1M)")
-    # (review item 1, D-752: the app's only change is declaring its GPU canvas)
-    added = [l for l in run(["git", "diff", "-U0", "216c2b5", "--", "examples/particles/app.mojo"]).stdout.splitlines()
-             if l[:1] in "+-" and not l.startswith(("+++", "---"))]
-    if added and (len(added) != 1 or "comptime GPU_CANVAS = True" not in added[0]):
-        problems.append("examples/particles/app.mojo changed beyond declaring its GPU canvas: " + "; ".join(added)[:300])
-    ok_t, msg_t, _ = mojo_test("tests/test_gpu_canvas_gate.mojo", "gpu canvas gate: ok")
-    (notes if ok_t else problems).append(msg_t)
-    hb = run(["scripts/build.sh", "hello", "linux"], 900)
-    hello = ROOT / "build/hello/linux/hello"
-    if hb.returncode != 0 or not hello.exists():
-        problems.append("couldn't build examples/hello")
-    else:
-        r = subprocess.run([str(hello)], cwd=ROOT, capture_output=True, text=True, timeout=120,
-                           env=dict(os.environ, MOJOUI_PRESENT_STATS="1", MOJOUI_TEST=""))
-        st = next((l for l in (r.stdout + r.stderr).splitlines() if "present stats" in l), "")
-        if "gpu device ''" not in st or "declares no GPU canvas" not in st:
-            problems.append(f"a non-GPU app (hello) wasn't left alone: {st!r}")
-        else:
-            notes.append("hello (no GPU canvas): not probed, MOJOUI_GPU_DEVICE unset, renderer as the host set it")
-    if problems:
-        return False, "; ".join(problems)
-    return True, "; ".join(notes)
-
-
-def m6b():
-    """Hardware-blended drawing (GOAL.md 36b M6b): tests/test_canvas_blend.mojo, C still ok, no particle names in mojoui."""
-    problems, notes = [], []
-    ok, msg, lines = mojo_test("tests/test_canvas_blend.mojo", "canvas blend: ok")
-    (notes if ok else problems).append(msg)
-    if ok:
-        notes += [l for l in lines if l.startswith(("additive", "lines", "over", "MOJOUI_BLEND"))]
-    hits = run(["git", "grep", "-n", "-i", "particle", "--", "mojoui"]).stdout.strip()
-    if hits:
-        problems.append("particle names in mojoui: " + hits[:300])
-    cok, cmsg = c_ok()
-    (notes if cok else problems).append(cmsg)
-    return (not problems), "; ".join(problems or notes)
-
-
-def m6c():
-    """A cheaper compute splat (GOAL.md 36b M6c): two atomics a point, exact (tests/test_pointcloud_step.mojo), C ok."""
-    problems, notes = [], []
-    ok, msg, lines = mojo_test("tests/test_pointcloud_step.mojo", "test_pointcloud_step: ok")
-    (notes if ok else problems).append(msg)
-    if ok and not any("no bleed" in l for l in lines):
-        problems.append("the packed-splat case didn't run")
-    elif ok:
-        notes += [l for l in lines if "packed" in l]
-    src = (ROOT / "mojoui/gpu.mojo").read_text()
-    body = src[src.index("def _splat2_kernel"):src.index("def _resolve_kernel")]
-    if body.count("Atomic.fetch_add") != 2:
-        problems.append(f"the packed splat has {body.count('Atomic.fetch_add')} atomic adds, not 2")
-    cok, cmsg = c_ok()
-    (notes if cok else problems).append(cmsg)
-    return (not problems), "; ".join(problems or notes)
-
+# ---------------------------------------------------------------------------------------------------------------------
+# M7: regression
+# ---------------------------------------------------------------------------------------------------------------------
 
 def m7():
-    """Every row on the real desktop (GOAL.md 36b M7): results-desktop.json, gated, fresh, goal 36's protocol, every row
-    and size, C's zero-copy path in every C run (0 readbacks, GTK's GL renderer), the setup recorded."""
-    import particles_bench as pb
-    path, md = OUT / "results-desktop.json", OUT / "results-desktop.md"
-    if not path.exists() or not md.exists():
-        return False, "docs/goals/36/results-desktop.json/.md missing: run scripts/particles_bench.py --desktop (D-735)"
-    res = json.loads(path.read_text())
-    problems = []
-    if not res.get("desktop") or res.get("provisional") is not False or res.get("gated") is not True:
-        problems.append("not the gated desktop measurement")
-    if res.get("sources_sha256") != pb.sources_sha():
-        problems.append("stale: the sources changed since results-desktop.json (rerun particles_bench.py --desktop)")
-    p = res.get("protocol", {})
-    if (p.get("warmup"), p.get("frames"), p.get("runs"), p.get("sizes")) != (60, 600, 3, pb.SIZES):
-        problems.append("not goal 36's protocol (60 warm-up, 600 frames, 3 runs, the same sizes)")
-    need = ["frame_ms", "frame_ms_spread", "p95_interval_ms", "cold_start_ms", "peak_pss_mb", "holds_60", "frame_ms_is"]
-    rows = res.get("rows", {})
-    for row in pb.DESKTOP_ROWS + list(pb.FEATURES):
-        sizes = pb.FEATURE_SIZES if row in pb.FEATURES else pb.EXTRA.get(row, []) + pb.SIZES
-        for n in sizes:
-            r = rows.get(row, {}).get(str(n))
-            if not r:
-                problems.append(f"{row} {n}: missing")
-                continue
-            if [k for k in need if r.get(k) is None] or len(r.get("runs", [])) != 3:
-                problems.append(f"{row} {n}: incomplete")
-            if not all((x.get("machine") or {}).get("gated") for x in r["runs"]):
-                problems.append(f"{row} {n}: a run didn't pass the quiet gate")
-            if row != "A-cpu" and "nvidia" not in (r.get("adapter") or "").lower():
-                problems.append(f"{row} {n}: adapter {r.get('adapter')}")
-            if row.startswith("C") and row not in ("C-36", "C-36gl"):
-                if r.get("cpu_copied_max") != 0 or r.get("gpu_presented_min", 0) < 600 or r.get("gsk_renderer") != "gl":
-                    problems.append(f"{row} {n}: not the zero-copy path ({r.get('cpu_copied_max')} readbacks, {r.get('gpu_presented_min')} from the GPU, renderer {r.get('gsk_renderer')})")
-            if row in ("C-36", "C-36gl") and not r.get("cpu_copied_max"):
-                problems.append(f"{row} {n}: goal 36's path should copy to the CPU")
-            if row.startswith("C") and not r.get("renderer_used"):
-                problems.append(f"{row} {n}: the renderer GTK used isn't recorded")
-            if row in ("C-36gl", "C", "C+M6", "C+M6c") and r.get("renderer_used") != ["GskGLRenderer"]:
-                problems.append(f"{row} {n}: drew with {r.get('renderer_used')}, not GTK's GL renderer")
-            if r.get("holds_60") != (r["frame_ms"] <= 1000 / 60 and r["p95_interval_ms"] <= 20):
-                problems.append(f"{row} {n}: holds_60 disagrees with its numbers")
-    if "Wayland window" not in (rows.get("B-native", {}).get("1000000", {}).get("frame_ms_is") or ""):
-        problems.append("B-native didn't present to a window")
-    st = res.get("setup", {})
-    m = st.get("monitor", {})
-    if not st.get("compositor", "").startswith("Hyprland") or not m.get("refreshRate") or not m.get("scale") or "off" not in st.get("vsync", ""):
-        problems.append("the setup (compositor, refresh, scale, vsync) isn't recorded")
-    text = md.read_text()
-    for word in ("Setup:", "Each 36b feature's effect", "compositor", "1280 × 720"):
-        if word not in text:
-            problems.append(f"results-desktop.md doesn't state '{word}'")
-    if problems:
-        return False, "; ".join(problems[:12])
-    c = rows["C"]
-    return True, (f"results-desktop.json fresh (commit {res['commit']}), {st['compositor'].split(' built')[0]}, "
-                  f"{m.get('refreshRate'):.2f} Hz ×{m.get('scale')}; C frame ms "
-                  + ", ".join(f"{pb.mill(n)} {c[str(n)]['frame_ms']:.2f}" for n in pb.SIZES)
-                  + f"; 0 readbacks in every 36b C run ({sum(1 for r in rows if r.startswith('C') and r not in ('C-36', 'C-36gl'))} rows; goal 36's path C-36/C-36gl copies, as it should)")
+    """Goal 36's M0 and M5, goal 35's M2, through their archived checks."""
+    g36 = load("goal36", "docs/goals/36-check.py")
+    g35 = load("goal35", "docs/goals/35-check.py")
+    out, ok = [], True
+    for label, fn in (("36 M0", g36.m0), ("36 M5", g36.m5), ("35 M2", g35.m2)):
+        good, msg = fn()
+        ok &= bool(good)
+        out.append(f"{label} {'PASS' if good else 'FAIL'}: {msg[:200]}")
+    return ok, " | ".join(out)
 
 
-def m8():
-    """The page from the desktop (GOAL.md 36b M8): chapter 1 generated from results-desktop.json (and goal 36's table
-    from results.json), the setup stated, no claim left from the inferred software-renderer reading, M5 still passing."""
-    import why_tables as wt
-    page = (ROOT / "docs" / "why.html").read_text()
-    problems = []
-    d = wt.load_desktop()
-    if not d:
-        return False, "results-desktop.json missing or provisional: the page can't come from the desktop"
-    res = json.loads((OUT / "results.json").read_text())
-    frags = wt.fragments(res, d)
-    if wt.apply(page, frags) != page:
-        problems.append("the page differs from what results-desktop.json and results.json give: rerun scripts/why_tables.py")
-    for part in ("setup", "features", "perf_xvfb"):
-        if f"<!-- why:{part} -->" not in page:
-            problems.append(f"no {part} part on the page")
-    for word in ("Hyprland", "Hz", "Vsync", "1280 × 720", "GPU-composited"):
-        if word not in frags["setup"] + frags["headline"]:
-            problems.append(f"the setup doesn't state '{word}'")
-    for stale in ("GTK's software renderer on a virtual display", "drawing straight from the GPU into the window is not built yet",
-                  "Measured with vsync off on a virtual display, not a real screen"):
-        if stale in page:
-            problems.append(f"the page still says: {stale!r}")
-    if "the guess was wrong" not in page:
-        problems.append("the page doesn't say what became of goal 36's inferred residual")
-    if "is GTK's renderer choice" not in page or "C-36gl" not in d["rows"]:
-        problems.append("the page doesn't split M6's saving into the renderer and the readback (review item 3)")
-    if ("capped (compositor" not in page or "didn't speed up this benchmark" not in page
-            or "within the runs' spread" not in page or "omxcode and JS + WebGPU tie" not in page):
-        problems.append("review items 7/8/10: ties, the capped window row, M6b's role")
-    ok5, msg5 = m5()
-    if not ok5:
-        problems.append("M5: " + msg5)
-    if problems:
-        return False, "; ".join(problems[:10])
-    c = d["rows"]["C"]
-    return True, (f"docs/why.html chapter 1 from results-desktop.json (commit {d['commit']}): omxcode "
-                  + ", ".join(f"{wt.mn(n)} {c[str(n)]['frame_ms']:.2f} ms" for n in (1_000_000, 5_000_000, 20_000_000))
-                  + f"; setup, feature effects and goal 36's Xvfb table on the page; M5 PASS")
-
-
-MILESTONES = [
-    ("M0", m0),
-    ("M1", m1),
-    ("M2", m2),
-    ("M3", m3),
-    ("M4", m4),
-    ("M5", m5),
-    ("M6", m6),
-    ("M6b", m6b),
-    ("M6c", m6c),
-    ("M7", m7),
-    ("M8", m8),
-]
+MILESTONES = [("M0", m0), ("M1", todo("A · JS + DuckDB-WASM")), ("M2", todo("B · JS + FastAPI + Polars")),
+              ("M3", todo("C · Rust + Polars + egui")), ("M4", todo("D · omxcode + omxcore")),
+              ("M5", todo("the measure")), ("M6", todo("the page")), ("M7", m7)]
 
 
 def main():

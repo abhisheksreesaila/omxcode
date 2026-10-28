@@ -7,6 +7,15 @@ Every build implements exactly this, so the numbers compare.
 2025-12-31), `region` (text, 8 values), `product` (text, 40 values), `amount` (float64, 1 … 5,000), `cost` (float64),
 `paid` (bool). Also a 10,000,000-row file for smaller machines and the correctness checks.
 
+Pinned before any build (goal 38 M0, 2026-10-28):
+- **Files:** `data/orders-100M.parquet` and `data/orders-10M.parquet` (git-ignored; `make_data.py` writes them in ~30 s
+  and ~3 s). Their sizes and SHA-256s are in `showcase-data/data.lock`; every build reads exactly those bytes. The 10M
+  file holds the same rows as the first 10M of the 100M file.
+- **Columns, in order:** `id` int64 (added: the row number, 0 … N − 1, unique: the table's tie-break and its answer),
+  `day` Parquet DATE (int32 days since 1970-01-01), `region` and `product` UTF-8 strings (the values are listed in
+  make_data.py), `amount` float64 (cents, 1.00 ≤ amount < 5,000), `cost` float64 (cents, 0 < cost < amount), `paid`
+  bool. No nulls. Snappy, row groups of 1,000,000 rows, rows not sorted.
+
 ## The app
 One window (desktop) or page (web), 1280 × 800:
 - a **date range** (two ends) and a **minimum amount** slider, plus a **region** filter (all or one);
@@ -16,6 +25,16 @@ One window (desktop) or page (web), 1280 × 800:
 Every control change recomputes all three from the full 100M rows (no pre-aggregation, no sampling, no caching of
 results across different filter values).
 
+Pinned (goal 38 M0):
+- **Filters:** a row matches when `from ≤ day ≤ to` (both ends inclusive), `amount ≥ min_amount`, and `region` equals
+  the chosen region (or any, for `all`). The slider runs 1 … 5,000; the opening state (step 0 in steps.json) is the
+  full range, 1 and `all`, which matches every row.
+- **KPIs:** rows matched; sum of amount (0 when nothing matches); average margin = the mean over matched rows of
+  `(amount − cost) / amount` (none when nothing matches).
+- **Bar chart:** products by sum of amount, descending, ties by product name ascending, at most 20 (fewer if fewer
+  products match).
+- **Table:** all seven columns of the first 50 matching rows ordered by `day` descending, then `id` ascending.
+
 ## Scripted mode (for measurement)
 `--scripted --rows 100M --steps S`: open the file, then apply a fixed sequence of S filter changes (in
 showcase-data/steps.json: date ranges, slider values, regions), and for each record the time from the change to the
@@ -23,6 +42,19 @@ first frame showing the new numbers (input-to-pixels), plus compute time if the 
 `answers.json` (per step: rows matched, the KPIs, the top-20 products with sums, the 50 rows' ids) and
 `timings.json`, then exit.
 
+Pinned (goal 38 M0): `--rows` takes `10M` or `100M` (the file in data/); the build first shows the opening state
+(step 0), then applies steps 1 … S of steps.json in order (each entry holds the full state after its change; `change`
+names the one control that moved). `answers.json` is
+`{"steps": [{"step": k, "rows": int, "sum_amount": float, "avg_margin": float or null, "top": [[product, sum], …],
+"ids": [int, …]}, …]}` with S + 1 entries, step 0 first. Numbers are plain JSON numbers (full float64 precision).
+
 ## Correctness
 Every step's answers equal DuckDB's on the same file (sums within 1e-6 relative, ids exact), computed by
 showcase-data/reference.py.
+
+Pinned (goal 38 M0): `showcase-data/answers-10M.json` and `answers-100M.json` hold DuckDB's answers (plus the 21st
+product, `next`, for ties at the cut); M0 checks a second engine (NumPy) gives the same at 10M. A build's check calls
+`reference.compare(got, reference.expected("10M"), steps=S)`, which returns the problems (none when right): rows
+exact; sum and average margin within 1e-6 relative (both none when nothing matches); the top 20's sums position by
+position within 1e-6 and its names exact, except at a position whose reference sum ties a neighbour's within that
+tolerance; the ids exact and in order.

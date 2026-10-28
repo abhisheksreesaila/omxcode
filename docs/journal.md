@@ -766,3 +766,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Not done, on purpose: fusing step and splat into one pass (saves reading every point twice; would likely put C ahead of A at 5M+). A and B also run two passes, and tuning C after seeing A's desktop numbers without giving A the same chance is out of bounds (GOAL.md fair play). Next lever, for all three stacks alike.
 - Review (NEEDS WORK) fixes: draw_vertices tested a List (always true) instead of vbo_mapped — an empty draw gave up blending (new failing test, then fixed); App.GPU_CANVAS gate with tests/test_gpu_canvas_gate.mojo and an end-to-end check that hello isn't probed; close()/release_cuda with a test (and "why 'closed'" seen at a desktop shutdown); copy_in/give_up never leave anything mapped; one-in-flight pending picture freed or shown when the canvas stops. Probe of the confound (one run each, 1M): goal 36's path 5.66 ms on Vulkan, 4.44 on GL, the picture kept on the GPU 1.24: about 1.2 ms was the renderer, 3.2 the readback and CPU hand-over.
 - The lever not pulled (fair play): fusing step and draw into one pass is the next lever for every stack; not tuned for omxcode alone.
+
+## Goal 38 M0 (2026-10-28): data, steps, reference
+- make_data.py: 100M rows in 27.5 s (1.30 GB), 10M in 2.9 s (130 MB), peak RSS 280 MB; two 10M runs byte-equal; hashes in showcase-data/data.lock.
+- steps.json: opening + 32 steps; at 10M rows matched run 10M → 0 (step 19, one day in Japan ≥ 4,900) → 10M (step 27).
+- reference.py: DuckDB 2.0 (24 threads, table in memory) per step median 33 ms at 10M, 254 ms at 100M (worst 334 ms); load 0.2 s / 1.2 s. NumPy agrees at 10M.

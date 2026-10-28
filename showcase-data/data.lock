@@ -1,0 +1,22 @@
+{
+  "generator": "showcase-data/make_data.py",
+  "seed": 42,
+  "row_group": 1000000,
+  "numpy": "2.5.4",
+  "pyarrow": "25.0.0",
+  "python": "3.13.16",
+  "files": {
+    "orders-10M.parquet": {
+      "rows": 10000000,
+      "bytes": 129857101,
+      "sha256": "7896e9ffbd9fe663443f9b0d369bcf078dad450afb0e06c9759cfdd88c08ec7f",
+      "seconds": 2.9
+    },
+    "orders-100M.parquet": {
+      "rows": 100000000,
+      "bytes": 1298715883,
+      "sha256": "0ac1bfcf8da988e2f787881271099f0e44b18c81a08f3c59a7957d1286402f48",
+      "seconds": 27.5
+    }
+  }
+}

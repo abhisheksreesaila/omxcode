@@ -24,6 +24,7 @@ rust-std-wasm32-unknown-unknown = "==1.99.1"
 rust-src = "==1.99.1"
 wasm-bindgen-cli = "==0.2.129"
 binaryen = ">=121"
+python-duckdb = ">=2.0.0,<3"
 
 [pypi-dependencies]
 mojo = ">=1.1, <1.2"
