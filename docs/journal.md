@@ -683,3 +683,7 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 
 ## 2026-10-27 · goal 34b: the Mac branch merged
 - goal-34b-mac (bb7017c) merged into goal-34b: decisions and journal kept both; check.py keeps m0, m1, m1b, m1c and the Mac's m2. Both branches had used D-650–D-655: the Mac's D-650–D-660 renumbered to D-660–D-670 first (4ea5267, D-671).
+
+## 2026-10-27 · goal 34b: drawn views follow a live theme switch
+- m1b's proof made stricter first: the sparkline under the note (a mojoui Canvas) must be dark in the dark pictures and light in the light ones (median tone of its box). Red on the old pictures: web and GTK dark both 241 of 255 (the light card, never redrawn: a canvas redraws only on a new version).
+- Fix D-673 (hosts, not the app): GTK's apply_design forgets the drawn versions on a new theme key; the web's canvas adapter redraws when the skin it drew in changes. M1b's sparkline parts pass; pictures m1b-{web,gtk}-{light,dark}.png show it dark in dark.

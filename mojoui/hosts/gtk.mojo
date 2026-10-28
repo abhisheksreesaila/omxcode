@@ -2372,6 +2372,9 @@ struct GtkHost[A: App](Movable):
         if key == self.skin_key:
             return
         self.skin_key = key
+        for ref c in self.canvases:  # (drawn views paint from the theme: a switch redraws them, not only a new version, D-673)
+            c.drawn = -1
+        self.arm_all(self_addr)
         var display = external_call["gdk_display_get_default", Int]()
         if self.skin_provider != 0:
             external_call["gtk_style_context_remove_provider_for_display", NoneType](display, self.skin_provider)

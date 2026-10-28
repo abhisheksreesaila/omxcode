@@ -390,6 +390,9 @@ CANVAS_JS = r"""
 (() => {
   const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8;
   const shape = () => document.getElementById('mojoui-v').value;
+  // the theme a canvas was drawn in (skin()'s classes and tokens): a drawn view paints from the theme, so a switch
+  // (light/dark, a skin) redraws it even when its version didn't move (D-673)
+  const skinNow = () => { const k = document.getElementById('mojoui-skin-classes'); return k ? (k.dataset.classes || '') + '|' + (k.dataset.tokens || '') : ''; };
   // keys a canvas uses itself (the page mustn't scroll or move focus on them)
   const OWN_KEYS = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'PageDown', 'PageUp', 'Home', 'End', 'Backspace', 'Delete', 'Escape', 'F2', ' ']);
   // Keys typed on a canvas before the in-place editor they open has appeared (a round trip later) wait here, then
@@ -465,7 +468,7 @@ CANVAS_JS = r"""
     if (div.mojoui) return;
     const cv = div.querySelector('canvas'), g = cv.getContext('2d');
     const n = Number(div.dataset.node), sid = div.dataset.sid;
-    const st = div.mojoui = { want: true, busy: false, drawn: -1, count: 0, times: [], queue: [], sending: false, updating: false };
+    const st = div.mojoui = { want: true, busy: false, drawn: -1, skin: '', count: 0, times: [], queue: [], sending: false, updating: false };
     const meta = () => document.getElementById('n' + n + '-meta');
     const playing = () => { const m = meta(); return !!m && m.dataset.frames !== '0'; };
     async function pump() {
@@ -475,7 +478,7 @@ CANVAS_JS = r"""
         while (div.isConnected && (st.want || playing())) {
           const tick = playing() ? 1 : 0, m = meta();
           if (tick) await new Promise(ok => requestAnimationFrame(ok));  // at most one frame per display refresh
-          const version = m ? m.dataset.version : '';
+          const version = m ? m.dataset.version : '', skin = skinNow();
           st.want = false;
           const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
@@ -491,11 +494,11 @@ CANVAS_JS = r"""
           const img = await createImageBitmap(await res.blob());
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
           g.drawImage(img, 0, 0);
-          st.drawn = version; st.count++; st.times.push(performance.now());
+          st.drawn = version; st.skin = skin; st.count++; st.times.push(performance.now());
           if (st.times.length > 1200) st.times.splice(0, 600);  // (frame times, for tests; bounded)
           div.dataset.frame = `${st.count} ${cv.width}x${cv.height} ${r.width.toFixed(0)}x${r.height.toFixed(0)} ${dpr}`;
           if (res.headers.get('X-Mojoui-Pending') === '1') update();
-          if (meta() && meta().dataset.version !== String(st.drawn)) st.want = true;
+          if ((meta() && meta().dataset.version !== String(st.drawn)) || st.skin !== skinNow()) st.want = true;
           if (meta() && (meta().dataset.tip || '') !== (div.dataset.tip || '')) { div.dataset.tip = meta().dataset.tip || ''; div.title = div.dataset.tip; }  // (SET_TIP: a drawn view's words)
           if (res.headers.get('X-Mojoui-Again') === '1') { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); }  // mid-animation (a gliding ring): the next frame
         }
@@ -613,7 +616,7 @@ CANVAS_JS = r"""
     if (back && kdiv.dataset.keys === '1' && (!document.activeElement || document.activeElement === document.body)) back.focus({ preventScroll: true });
     document.querySelectorAll('[data-kind=canvas]').forEach(div => {
       const st = div.mojoui, m = document.getElementById('n' + div.dataset.node + '-meta');
-      if (st && m && (m.dataset.version !== String(st.drawn) || m.dataset.frames !== '0')) { st.want = true; st.pump(); }
+      if (st && m && (m.dataset.version !== String(st.drawn) || m.dataset.frames !== '0' || st.skin !== skinNow())) { st.want = true; st.pump(); }
     });
   });
 })();

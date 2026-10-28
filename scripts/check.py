@@ -523,6 +523,32 @@ def theme_problems(where, got, dark, mounts_by_tag=None):
     return problems
 
 
+SPARK_JS = "() => (e => e ? (r => [r.left + scrollX, r.top + scrollY, r.width, r.height])(e.getBoundingClientRect()) : null)(document.querySelector('[data-tag=sparkline]'))"
+
+
+def spark_problems(where, shot, box, dark, width=1280):
+    """mojoui's own drawn view (the sparkline under the note, a Canvas) in a picture: it must wear the mode the app is in
+    (its median tone dark in dark mode, light in light), drawn again on a live switch even though its version didn't
+    move (D-673)."""
+    from PIL import Image
+    if not box or not Path(shot).exists():
+        return [f"{where}: no sparkline box ({box}) or picture ({shot})"]
+    im = Image.open(shot).convert("RGB")
+    sx = im.width / float(width)
+    x, y, w, h = (int(round(v * sx)) for v in box)
+    crop = im.crop((x + 3, y + 3, x + w - 3, y + h - 3))
+    px = crop.tobytes()
+    tones = sorted((px[i] + px[i + 1] + px[i + 2]) // 3 for i in range(0, len(px), 3))
+    if not tones:
+        return [f"{where}: the sparkline's box is empty ({box})"]
+    median = tones[len(tones) // 2]
+    if dark and median > 90:
+        return [f"{where}: the sparkline stayed light in dark mode (median tone {median} of 255): a drawn view didn't redraw on the switch"]
+    if not dark and median < 170:
+        return [f"{where}: the sparkline is dark in light mode (median tone {median} of 255)"]
+    return []
+
+
 def web_probe(page):
     v = page.evaluate("() => " + THEME_PROBE)
     return {"tokens": v[0], "editor_bg": v[1], "editor_ink": v[2], "chart_ink": v[3], "radius": v[4], "font": v[5], "mounts": v[6]}
@@ -538,9 +564,11 @@ def m1b_web():
     import drive
     problems, light, dark = [], {}, {}
     order = {}
+    boxes = {}
 
     def during(page):
         light.update(web_probe(page))
+        boxes["light"] = page.evaluate(SPARK_JS)
         page.screenshot(path=str(OUT / "m1b-web-light.png"), full_page=True)
         # Tab order: from inside the editor, forward through native controls and widgets, then back
         page.click("mx-editor .cm-content")
@@ -561,6 +589,8 @@ def m1b_web():
         drive.settle(page)
         page.wait_for_timeout(500)
         dark.update(web_probe(page))
+        page.wait_for_timeout(600)  # (the canvas's next frame, if its theme moved on)
+        boxes["dark"] = page.evaluate(SPARK_JS)
         return ""
 
     r, out = drive.web_run(BUILD / "widgets" / "web", "tap:Load sample;tap:Load sample", shot=str(OUT / "m1b-web-dark.png"), viewport=(1280, 860),
@@ -569,6 +599,8 @@ def m1b_web():
         problems.append("web run failed: " + out[-400:])
     problems += theme_problems("web light", light, False)
     problems += theme_problems("web dark", dark, True, {k: v for k, v in (dark.get("mounts") or {}).items()})
+    problems += spark_problems("web light", OUT / "m1b-web-light.png", boxes.get("light"), False)
+    problems += spark_problems("web dark", OUT / "m1b-web-dark.png", boxes.get("dark"), True)
     if light.get("tokens") and dark.get("tokens") and light["tokens"]["palette"].get("card") == dark["tokens"]["palette"].get("card"):
         problems.append("web: light and dark tokens have the same card colour")
     if order.get("fwd") != TAB_STOPS:
@@ -614,11 +646,15 @@ def m1b_gtk():
             problems.append(f"gtk: {key}'s view after the switch: {v.get(key)} (one mount, no CSP violation)")
     if not shot.exists():
         problems.append("gtk: no dark screenshot")
+    else:  # (light first, then the live switch: the sparkline drawn in light must be drawn again in dark)
+        problems += spark_problems("gtk dark", shot, g33.boxes("\n".join(o)).get("sparkline"), True)
     lshot = OUT / "m1b-gtk-light.png"
     lshot.unlink(missing_ok=True)
-    run([exe], env={"MOJOUI_TEST": "tap:Load sample;tap:Load sample;scheme:light", "MOJOUI_WINDOW": "1280x860", "MOJOUI_SHOT": str(lshot)}, timeout=300)
+    rl = run([exe], env={"MOJOUI_TEST": "tap:Load sample;tap:Load sample;scheme:light", "MOJOUI_WINDOW": "1280x860", "MOJOUI_SHOT": str(lshot)}, timeout=300)
     if not lshot.exists():
         problems.append("gtk: no light screenshot")
+    else:
+        problems += spark_problems("gtk light", lshot, g33.boxes(rl.stdout + rl.stderr).get("sparkline"), False)
     # Tab order with real keys (XTest on the headless display): from inside the editor, forward, then back
     first = g34.gtk_live("wait:1500;report")
     box = g33.boxes(first).get("editor")
@@ -682,7 +718,8 @@ def m1b():
         problems.append("the gallery's widgets section doesn't name CodeMirror and ECharts")
     return not problems, "; ".join(problems[:14]) or (
         "the host hands every widget the Look's tokens (palette, fonts, corners, dark) as CSS variables and theme(el, tokens); "
-        "CodeMirror and ECharts match them in light and dark, switched live (one mount) on the web and GTK; Tab/Shift+Tab "
+        "CodeMirror and ECharts match them in light and dark, switched live (one mount) on the web and GTK, and mojoui's own "
+        "drawn sparkline is drawn again in the new mode (dark in dark, light in light); Tab/Shift+Tab "
         f"cross native controls and widgets in order both ways on the web and GTK ({' → '.join(TAB_STOPS)}); widgets in "
         f"docs/components.md and the gallery; shots {OUT.relative_to(ROOT)}/m1b-*.png")
 
