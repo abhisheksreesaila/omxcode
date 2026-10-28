@@ -609,7 +609,7 @@ struct AppKitHost[A: App](Movable):
                     # the font's own line (CSS's normal: its ascender, descender and line gap), not the look's body line:
                     # a mono line at 11.5 pt was 17 high for the web's 15 (D-509)
                     lh = msg[Float64](font, "ascender") - msg[Float64](font, "descender") + msg[Float64](font, "leading")
-                elif self.look.type.line > 0:  # (its style's own: a title's 1.1, not the body's 1.45, D-659)
+                elif self.look.type.line > 0:  # (its style's own: a title's 1.1, not the body's 1.45, D-669)
                     lh = msg[Float64](font, "pointSize") * self.look.type.line_of(node.style == TITLE, bold and node.style != TITLE, node.style == CAPTION)
                 if lh > 0:
                     var para = new("NSMutableParagraphStyle")
@@ -1454,7 +1454,7 @@ struct AppKitHost[A: App](Movable):
                 _ = msg(w, "addArrangedSubview:", room)
                 if vertical:  # (a column's own stacks keep their content's height, so the free room is the room's, as the
                     # web's flex-start: a stack has no size of its own, and the widgets app's header stood 155 high for its
-                    # 64, D-658. 251: over the room's nothing, under a label's 750 resistance and a default's 480)
+                    # 64, D-668. 251: over the room's nothing, under a label's 750 resistance and a default's 480)
                     for q in range(len(node.children)):
                         ref cq = self.rt.shown.nodes[node.children[q]]
                         if built[q] != 0 and cq.kind == VSTACK and not cq.grows and cq.h == 0:

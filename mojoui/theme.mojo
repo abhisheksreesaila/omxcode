@@ -276,7 +276,7 @@ struct TypeScale(Copyable, Movable):
     var line: Float64  # a line's height as a share of its text's size (CSS's unitless line-height: 1.45); 0: the font's own
     var title_line: Float64  # a title's, a headline's and a caption's own (omxqua's .text.title 1.1, .headline 1.3,
     var headline_line: Float64  # .caption 1.4); 0: `line`. Apple hosts read them (GTK and the web: the theme's sheets,
-    var caption_line: Float64  # written from them), D-659
+    var caption_line: Float64  # written from them), D-669
 
     def __init__(out self, family: String, mono: String, body: Float64, caption: Float64, headline: Float64, title: Float64,
                  section: Float64, tabular: Bool, line: Float64, title_line: Float64 = 0, headline_line: Float64 = 0,
