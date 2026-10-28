@@ -646,3 +646,10 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - web.py's handler class `Link` shadowed FastHTML's `Link` tag inside make_app (UnboundLocalError at start): renamed.
 - GTK worked on its first run: libc socket + g_unix_fd_add on the main loop, set through Runtime.set_widget and send_commands.
 - M0 PASS (81 s).
+
+## 2026-10-27 · goal 34b M1: Apache ECharts, no host changes
+- Proof first: exact pin + lockfile integrity (echarts, zrender), a tree-shaken import, no eval/new Function in the bundle, the same bytes in GTK's views, Mojo's series in the chart's describe line, a click on point 2 reaching update() on the web (real mouse) and GTK (DOM mouse events in the page), 0 CSP violations on both, and no change in mojoui/hosts since a87c7cc.
+- ECharts 6.1.0 needed nothing from the hosts: one TS file, one CSS file, two names in web_assets().
+- First look: omxqua's accent is near-black, so the line drew black on a grey wash, off from mojoui's own sparkline. Switched the chart to the palette's data colour (--o-data) with a soft gradient of it.
+- One run reported "gtk: no screenshot" with everything else passing; a rerun and a run by hand both wrote it. The proof now deletes the old shot first and prints the host's SHOT line if it is missing again.
+- M1 PASS (22 s).

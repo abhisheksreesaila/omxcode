@@ -5,7 +5,8 @@ element; Mojo gives it **props** (JSON), hears its **events** in `update()`, and
 comes back to `update()` later, as an HTTP reply does). The app keeps every line of state; the widget keeps only its own
 (a cursor, a scroll position, a counter's count). Runs on the web and on GTK (§6); the Mac shows `instead` until 34b.
 
-The example is `examples/widgets` (a note in CodeMirror 6, a word count, a chart, and a plain-JS counter).
+The example is `examples/widgets` (a note in CodeMirror 6, a word count drawn by mojoui and by Apache ECharts, and a
+plain-JS counter).
 
 ## 1. Add a package
 
@@ -72,6 +73,15 @@ read the theme's palette (`var(--o-accent)`, `--o-card`, `--o-ink`, `--o-line`�
 
 `emit(name, payload, { latest: true })` replaces an unsent event of the same name (a whole text on every keystroke).
 TypeScript widgets get types from `mojoui/hosts/static/mojoui-widgets.d.ts` (`/// <reference path=…>`).
+
+### A second library: Apache ECharts (goal 34b)
+`examples/widgets/web/widgets/chart.ts` is ECharts 6 from npm (`"echarts": "6.1.0"`, exact, in the lockfile), added
+with no change to the hosts: `npm install --package-lock-only --ignore-scripts --save-exact echarts@6.1.0`, one widget
+file, two names in `web_assets()`. Import it **tree-shaken** (`echarts/core` plus the chart, components and renderer you
+use: `LineChart`, `GridComponent`, `SVGRenderer`), so the bundle carries only those; ECharts needs no `eval` or
+`new Function`, so it runs under the CSP as it is. Mojo owns the data (`Props().raw("series", …)`); the widget reads the
+theme's palette (`--o-data`, `--o-card`, `--o-ink2`, `--o-line`) and the page's font, and a click on a point emits
+`pick {index, value}`.
 
 ## 3. Use it from Mojo
 

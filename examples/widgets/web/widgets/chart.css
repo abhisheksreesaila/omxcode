@@ -1,0 +1,2 @@
+/* mx-chart's box in the app's theme: ECharts draws inside it (SVG). The card around it is mojoui's. */
+mx-chart { display: block; height: 180px; width: 100%; color: var(--o-ink, inherit); cursor: pointer; }

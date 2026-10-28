@@ -1,7 +1,8 @@
 # widgets: a note with JavaScript inside (goal 34). The note's editor is CodeMirror 6 from npm (web/package.json, its
 # widget in TypeScript: web/widgets/editor.ts); its word count and a small chart of the count over edits are Mojo. A
 # vendored counter widget (web/widgets/counter.js) proves the seam both ways: its props come from Mojo, its clicks reach
-# update(), Mojo asks it for its count (a command) and hears the answer. Every line of state is Mojo; each widget is a
+# update(), Mojo asks it for its count (a command) and hears the answer. Apache ECharts from npm (web/widgets/chart.ts)
+# draws the same word-count series Mojo keeps (props), and a click on one of its points comes back to update(). Every line of state is Mojo; each widget is a
 # script bundle the app lists in web_assets() (scripts/web_assets.py builds them).
 
 from mojoui.view import View, Text, Button, VStack, HStack, Card, Spacer, CAPTION, HEADLINE, TITLE, PROMINENT, START, SPACE_XS, SPACE_S, SPACE_M, SPACE_L
@@ -20,6 +21,7 @@ comptime READ = 5  # the counter's answer to "read"
 comptime DETAILS = 6
 comptime EDITED = 7  # the editor's events (event.name "change", event.text {"text"})
 comptime LOAD = 8
+comptime PICK = 9  # a point picked on the ECharts chart (event.name "pick", event.text {"index", "value"})
 comptime LONG = 5  # past this many words the note says so (a line appears: the screen is rebuilt around the editor)
 comptime CHART = 0  # the word-count chart's canvas
 comptime SAMPLE = "The quick brown fox jumps over the lazy dog"
@@ -47,6 +49,7 @@ struct Main(App):
     var step: Int
     var replied: String
     var details: Bool
+    var picked: String  # the chart's point last clicked
     var widgets: Widgets
     var dark: Bool
     var themed: Theme
@@ -61,6 +64,7 @@ struct Main(App):
         self.step = 1
         self.replied = "(not asked)"
         self.details = False
+        self.picked = "tap a point"
         self.widgets = Widgets()
         self.dark = False
         self.themed = omxqua(False)
@@ -73,7 +77,7 @@ struct Main(App):
 
     @staticmethod
     def web_assets() -> List[String]:
-        return ["counter.js", "counter.css", "editor.js", "editor.css"]
+        return ["counter.js", "counter.css", "editor.js", "editor.css", "chart.js", "chart.css"]
 
     def appearance(mut self, dark: Bool):
         self.dark = dark
@@ -131,20 +135,36 @@ struct Main(App):
                     self.replied = "(not JSON)"
         elif m == DETAILS:
             self.details = not self.details
+        elif m == PICK and event.name == "pick":
+            try:
+                var j = Json.parse(event.text)
+                self.picked = "edit " + String(j.number(j.get(0, "index")) + 1) + ", " + String(j.number(j.get(0, "value"))) + " words"
+            except:
+                pass
 
     def draw(mut self, canvas: Int, mut surface: Surface):
         var p = self.themed.palette.copy()
         surface.fill(p.card)
         Sparkline.themed(self.history, p).draw(surface)
 
+    def series(self) -> String:
+        """The word count after each edit, as a JSON list (the chart's data)."""
+        var out = String("[")
+        for i in range(len(self.history)):
+            if i > 0:
+                out += ","
+            out += String(Int(self.history[i]))
+        return out + "]"
+
     def view(self) -> View:
         var words = word_count(self.text)
+        var edits = len(self.history)
         var note_items: List[View] = [Text("Note", style=HEADLINE)]
         if words > LONG:  # (a line that comes and goes: the screen is rebuilt around the editor, which keeps its cursor)
             note_items.append(Text("Long note", CAPTION).tag("long"))
         note_items.append(WebComponent("mx-editor", Props().text("doc", self.loaded).number("rev", self.rev).text("placeholder", "Write a note"),
                                        on_event=EDITED, id=1).fill().tag("editor"))
-        note_items.append(HStack(Text("Words: " + String(words)), Text("words after each edit", CAPTION), Spacer(),
+        note_items.append(HStack(Text("Words: " + String(words)), Text("words after each of " + String(edits) + (" edit" if edits == 1 else " edits"), CAPTION), Spacer(),
                                  Button("Load sample", on_tap=LOAD), spacing=SPACE_S).fill().tag("note-bar"))
         note_items.append(SparklineView(CHART, len(self.history)))
         var note = Card(note_items, spacing=SPACE_S).align(START).fill().grow()
@@ -162,9 +182,17 @@ struct Main(App):
         if self.details:
             counter_items.append(Text("Details shown"))
             counter_items.append(Text("The page was rebuilt around the widget: it kept its element, its count and its focus.", CAPTION))
-        var counter = Card(counter_items, spacing=SPACE_S).align(START).width(440)
+        var counter = Card(counter_items, spacing=SPACE_S).align(START).fill()
+        var chart = Card(
+            Text("Words over edits", style=HEADLINE),
+            Text("Apache ECharts from npm, drawing the series Mojo keeps. Tap a point.", CAPTION),
+            WebComponent("mx-chart", Props().raw("series", self.series()), on_event=PICK, id=1).fill().tag("chart"),
+            Text("Picked: " + self.picked).tag("picked"),
+            spacing=SPACE_S,
+        ).align(START).fill()
+        var side = VStack(counter, chart, spacing=SPACE_L).align(START).width(440)
         return VStack(
             VStack(Text("Widgets", style=TITLE), Text("A note with JavaScript inside: every line of state is Mojo.", CAPTION), spacing=SPACE_XS).align(START),
-            HStack(note, counter, spacing=SPACE_L).align(START).fill(),
+            HStack(note, side, spacing=SPACE_L).align(START).fill(),
             spacing=SPACE_M,
         ).align(START).padding(32).fill().grow()
