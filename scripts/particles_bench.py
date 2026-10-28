@@ -10,7 +10,7 @@ The protocol, the same for all rows:
 - One build at a time, nothing else running: the quiet gate. Before every run (each row and size, each of the three
   runs, B-wasm's thread probes) it waits until the 1-minute load average is < GATE_LOAD and no other process holds
   the GPU (nvidia-smi compute apps not started by this script, above GATE_IDLE_MIB: the desktop's idle graphics
-  clients hold 6 MiB each), polling every 60 s, for up to 4 hours in all; if the machine never gets quiet it stops
+  clients hold 6 MiB each), polling every 60 s, for up to 4 hours of waiting in all; if the machine never gets quiet it stops
   and writes nothing. Each run records the load and the compute apps it started with.
   --provisional: no gate and no waiting (a busy machine); written as results-provisional.json/.md, marked PROVISIONAL.
 - A, A-cpu and C run on the same Xvfb display (scripts/headless.py); B-wasm runs in headless Chromium on the same GPU;
@@ -136,10 +136,11 @@ class NotQuiet(Exception):
 
 
 class Gate:
-    """The quiet gate: load < GATE_LOAD and no other process on the GPU; one 4-hour budget for the whole run."""
+    """The quiet gate: load < GATE_LOAD and no other process on the GPU; 4 hours of waiting in all (the runs' own time
+    doesn't count against it)."""
 
     def __init__(self, log):
-        self.log, self.deadline, self.waited = log, time.time() + GATE_BUDGET_S, 0
+        self.log, self.waited = log, 0
 
     def wait(self, what):
         t0 = time.time()
@@ -154,7 +155,7 @@ class Gate:
                     self.log(f"  (quiet after {w} s: load {load:.2f})")
                 return {"gated": True, "load1": round(load, 2), "waited_s": w,
                         "compute_apps": [f"{pid},{name},{mib} MiB" for pid, name, mib in apps]}
-            if time.time() > self.deadline:
+            if self.waited + (time.time() - t0) > GATE_BUDGET_S:
                 raise NotQuiet(f"never quiet before {what}: load {load:.2f}, GPU held by "
                                + "; ".join(f"{pid} {Path(name).name} {mib} MiB" for pid, name, mib in busy))
             if time.time() - t0 < 1 or int(time.time() - t0) % 600 < GATE_POLL_S:
