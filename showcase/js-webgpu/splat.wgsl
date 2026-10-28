@@ -23,7 +23,9 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   let pix = u32(fy) * W + u32(fx);
   let k = min(length(s.zw) * (1.0 / 1.5), 1.0);
   // Once a pixel's count passes P.saturated it is white after the tone map in every channel (1 - exp(-8) or
-  // more), so its speed sum no longer matters: skip that second atomic where particles pile up.
+  // more), so nothing more changes it: look first (counts only grow within a frame) and skip both atomics there,
+  // as C's PointCloud.splat does; past the load, skip the speed sum once this add crosses the line.
+  if (atomicLoad(&A[pix]) >= P.saturated) { return; }
   if (atomicAdd(&A[pix], 1u) >= P.saturated) { return; }
   atomicAdd(&A[W * H + pix], u32(k * KSCALE + 0.5));
 }
