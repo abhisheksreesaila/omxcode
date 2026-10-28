@@ -687,6 +687,213 @@ def m1b():
         f"docs/components.md and the gallery; shots {OUT.relative_to(ROOT)}/m1b-*.png")
 
 
+# ---- M1c: the developer loop (scripts/dev.sh: watch, rebuild, reload keeping Mojo's state; source-mapped JS errors; inspector in debug builds) ----
+DEV_APP = "zz_dev_widgets"  # a scratch copy of examples/widgets the proof edits (removed after)
+THROW_LINE = "      if (el.count >= 2) throw new Error('boom from the counter');  // (M1c's proof: a widget's error, by file and line)"
+
+
+def free_port():
+    with _socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def dev_copy():
+    d = ROOT / "examples" / DEV_APP
+    shutil.rmtree(d, ignore_errors=True)
+    shutil.rmtree(BUILD / DEV_APP, ignore_errors=True)
+    shutil.copytree(ROOT / "examples" / "widgets", d, ignore=shutil.ignore_patterns("node_modules"))
+    return d
+
+
+def add_throw(counter_js):
+    """Puts THROW_LINE as the first line of the counter's click handler; returns its 1-based line number."""
+    lines = counter_js.read_text().splitlines()
+    at = next(i for i, l in enumerate(lines) if "inc.addEventListener('click'" in l) + 1
+    lines.insert(at, THROW_LINE)
+    counter_js.write_text("\n".join(lines) + "\n")
+    return at + 1
+
+
+def m1c_web(d):
+    """dev.sh on the scratch app: edits to a .js, a .css and a .ts reach the open page without a page load, Mojo's state
+    and the typed note stay; the counter's thrown error reaches the server's log as widgets/counter.js:<line>."""
+    from playwright.sync_api import sync_playwright
+    import drive
+    problems = []
+    port = free_port()
+    log = open(BUILD / f"{DEV_APP}-dev.log", "w+")
+    dev = subprocess.Popen(["scripts/dev.sh", DEV_APP, "--port", str(port)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                           start_new_session=True)  # (its own process group: stopping it stops its server, nothing else)
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 600 and "dev: watching" not in open(log.name).read():
+            if dev.poll() is not None:
+                return [f"dev.sh ended: {open(log.name).read()[-600:]}"], ""
+            time.sleep(0.5)
+        if "dev: watching" not in open(log.name).read():
+            return ["dev.sh never started watching"], ""
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(executable_path=drive.CHROMIUM, headless=True)
+            page = b.new_page(viewport={"width": 1280, "height": 860}, color_scheme="light")
+            console = []
+            page.on("console", lambda m: console.append(m.text) if m.type == "error" else None)
+            page.add_init_script(drive.CSP_PROBE)
+            page.goto(url)
+            drive.settle(page)
+            csp_dev = page.evaluate("() => fetch('/').then(r => r.headers.get('Content-Security-Policy'))")
+            page.evaluate("() => { window.mojouiKeep = 'same page' }")
+            page.click("mx-editor .cm-content")
+            page.keyboard.type("dev loop keeps this")
+            drive.settle(page)
+            # 1) .js: the counter's button says "plus N" and throws on its third click
+            cj = d / "web/widgets/counter.js"
+            cj.write_text(cj.read_text().replace("inc.textContent = `+${el.step}`;", "inc.textContent = `plus ${el.step}`;"))
+            line = add_throw(cj)
+            try:
+                page.wait_for_function("() => (document.querySelector('mx-counter .inc') || {}).textContent === 'plus 1'", timeout=60000)
+            except Exception:
+                problems.append("web: saving counter.js didn't reach the open page in 60 s")
+            # 2) .css: the counter's count gets letter spacing
+            cc = d / "web/widgets/counter.css"
+            cc.write_text(cc.read_text() + "\nmx-counter .count { letter-spacing: 3px; }\n")
+            try:
+                page.wait_for_function("() => getComputedStyle(document.querySelector('mx-counter .count')).letterSpacing === '3px'", timeout=60000)
+            except Exception:
+                problems.append("web: saving counter.css didn't restyle the open page")
+            # 3) .ts: the editor's label changes; the editor remounts with the note Mojo kept
+            et = d / "web/widgets/editor.ts"
+            et.write_text(et.read_text().replace("'aria-label': 'Note'", "'aria-label': 'Note (dev)'"))
+            try:
+                page.wait_for_function("() => (document.querySelector('mx-editor .cm-content') || {getAttribute: () => ''}).getAttribute('aria-label') === 'Note (dev)'", timeout=60000)
+            except Exception:
+                problems.append("web: saving editor.ts didn't reach the open page")
+            drive.settle(page)
+            state = page.evaluate("""() => [window.mojouiKeep || 'reloaded', (document.querySelector('mx-editor .cm-content') || {}).textContent,
+              [...document.querySelectorAll('[data-kind=label]')].map(e => e.textContent).filter(t => t.startsWith('Words:'))[0], window.mojoui.mounts]""")
+            if state[0] != "same page":
+                problems.append("web: the page itself reloaded (its window state is gone)")
+            if state[1] != "dev loop keeps this" or state[2] != "Words: 4":
+                problems.append(f"web: after the reloads the editor holds {state[1]!r}, Mojo says {state[2]!r} (the typed note must survive)")
+            if (state[3] or {}).get("mx-counter", 0) < 2 or (state[3] or {}).get("mx-editor", 0) < 2:
+                problems.append(f"web: the widgets weren't mounted again from their new bundles (mounts {state[3]})")
+            for _ in range(3):
+                page.click("mx-counter .inc")
+            page.wait_for_timeout(1500)
+            csp_seen = page.evaluate("() => window.mojouiCsp || []")
+            b.close()
+        logged = open(log.name).read()
+        want = f"widgets/counter.js:{line}:"
+        if not any(l.startswith("JS ERROR: ") and want in l and "boom from the counter" in l for l in logged.splitlines()):
+            problems.append(f"web: the counter's error didn't reach the log as {want} ({[l for l in logged.splitlines() if 'JS ERROR' in l][-3:]})")
+        if csp_seen:
+            problems.append(f"web dev: CSP violations {csp_seen[:3]}")
+        if "rebuilt" not in logged:
+            problems.append("dev.sh didn't say it rebuilt")
+        return problems, csp_dev
+    finally:
+        import signal
+        try:
+            os.killpg(dev.pid, signal.SIGTERM)  # (the group this proof started: dev.sh, pixi, dev.py, its web server)
+            dev.wait(timeout=15)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            try:
+                os.killpg(dev.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        log.close()
+
+
+def m1c_release_web():
+    """A release build (examples/widgets, as scripts/build.sh makes it) has no source maps and no dev endpoints."""
+    import drive
+    problems = []
+    found = {}
+
+    def during(page):
+        found["csp"] = page.evaluate("() => fetch('/').then(r => r.headers.get('Content-Security-Policy'))")
+        found["dev"] = page.evaluate("() => fetch('/dev/assets').then(r => r.status)")
+        files = page.evaluate("() => [...document.scripts].map(s => s.src).filter(s => s.includes('/assets/'))")
+        found["maps"] = [page.evaluate(f"() => fetch('{f}.map').then(r => r.status)") for f in files]
+        found["urls"] = page.evaluate("() => Promise.all([...document.scripts].filter(s => s.src.includes('/assets/')).map(s => fetch(s.src).then(r => r.text()))).then(ts => ts.filter(t => t.includes('sourceMappingURL')).length)")
+        return ""
+    r, out = drive.web_run(BUILD / "widgets" / "web", "", viewport=(900, 600), during=during)
+    if found.get("dev") != 404:
+        problems.append(f"release web: /dev/assets answers {found.get('dev')}")
+    if any(m != 404 for m in found.get("maps", [1])) or found.get("urls"):
+        problems.append(f"release web: source maps served or named ({found.get('maps')}, {found.get('urls')} bundles name one)")
+    if list((BUILD / "widgets/web/assets").glob("*.map")):
+        problems.append("release web: the build has .map files")
+    return problems, found.get("csp")
+
+
+def m1c_gtk(d, line):
+    """GTK: the debug build (MOJOUI_DEBUG=1) reports the counter's error as widgets/counter.js:<line> and opens WebKit's
+    inspector for a widget's view; the release build (examples/widgets) can't."""
+    problems = []
+    b = run(["scripts/build.sh", DEV_APP, "linux"], env={"MOJOUI_DEBUG": "1"})
+    if b.returncode != 0:
+        return [f"the debug GTK build failed: {(b.stdout + b.stderr)[-500:]}"]
+    click = "webjs:mx-counter#1=(b => (b.click(), b.click(), setTimeout(() => b.click(), 0), 'clicked'))(document.querySelector('.inc'))"
+    r = run([str(BUILD / DEV_APP / "linux" / DEV_APP)], env={"MOJOUI_TEST": click + ";pause:1500;inspect:mx-counter#1;pause:500", "MOJOUI_WINDOW": "1280x860"}, timeout=300)
+    o = r.stdout + r.stderr
+    want = f"widgets/counter.js:{line}:"
+    if not any(l.startswith("JS ERROR: ") and want in l and "boom from the counter" in l for l in o.splitlines()):
+        problems.append(f"gtk debug: the counter's error didn't reach the log as {want} ({[l for l in o.splitlines() if 'JS ERROR' in l][-3:]})")
+    if "INSPECTOR: shown mx-counter#1" not in o or "DEVTOOLS: on" not in o:
+        problems.append(f"gtk debug: no inspector ({[l for l in o.splitlines() if l.startswith(('INSPECTOR', 'DEVTOOLS'))]})")
+    r = run([str(BUILD / "widgets" / "linux" / "widgets")], env={"MOJOUI_TEST": "inspect:mx-counter#1", "MOJOUI_WINDOW": "1280x860"}, timeout=300)
+    o = r.stdout + r.stderr
+    if "INSPECTOR: unavailable" not in o or "DEVTOOLS: off" not in o:
+        problems.append(f"gtk release: the inspector isn't refused ({[l for l in o.splitlines() if l.startswith(('INSPECTOR', 'DEVTOOLS'))]})")
+    if list((BUILD / "widgets/linux/webview/assets").glob("*.map")):
+        problems.append("gtk release: the build has .map files")
+    return problems
+
+
+def m1c():
+    """The developer loop (GOAL.md M1c): scripts/dev.sh <app> watches the app's web/ sources: saving a .ts/.js/.css file
+    rebuilds the bundle and the open page reloads its widgets while the Mojo app keeps its state (a typed note
+    survives); a widget's thrown JS error reaches the app's log with its original file and line (source maps), on the web
+    and GTK; debug builds can open WebKit's inspector for widget views on GTK (a marked hook for the Mac), release builds
+    can't; docs/js.md walks the loop. Local only (127.0.0.1), out of release builds, the CSP unchanged."""
+    problems = []
+    if not (ROOT / "scripts/dev.sh").exists():
+        return False, "no scripts/dev.sh"
+    src = (ROOT / "scripts/dev.sh").read_text() + ((ROOT / "scripts/dev.py").read_text() if (ROOT / "scripts/dev.py").exists() else "")
+    if "127.0.0.1" not in src or "0.0.0.0" in src:
+        problems.append("the dev server isn't held to 127.0.0.1")
+    hook = (ROOT / "mojoui/hosts/devtools.mojo")
+    if not hook.exists() or "Mac" not in hook.read_text() or "MOJOUI_DEBUG" not in hook.read_text():
+        problems.append("no marked devtools hook for the Mac (mojoui/hosts/devtools.mojo)")
+    doc = (ROOT / "docs/js.md").read_text()
+    for topic in ("scripts/dev.sh", "source map", "inspector", "MOJOUI_DEBUG"):
+        if topic not in doc:
+            problems.append(f"docs/js.md doesn't walk {topic}")
+    for host in ("web", "linux"):  # (the release builds the other milestones use)
+        b = run(["scripts/build.sh", "widgets", host])
+        if b.returncode != 0:
+            return False, f"widgets doesn't build for {host}: " + (b.stdout + b.stderr)[-400:]
+    d = dev_copy()
+    try:
+        p, csp_dev = m1c_web(d)
+        problems += p
+        line = next(i + 1 for i, l in enumerate((d / "web/widgets/counter.js").read_text().splitlines()) if "boom from the counter" in l)
+        problems += m1c_gtk(d, line)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(BUILD / DEV_APP, ignore_errors=True)
+    p, csp_rel = m1c_release_web()
+    problems += p
+    if not csp_dev or csp_dev != csp_rel:
+        problems.append(f"the dev server's CSP differs from release ({csp_dev!r} vs {csp_rel!r})")
+    return not problems, "; ".join(problems[:12]) or (
+        "scripts/dev.sh rebuilt .js, .css and .ts edits into the open page (same page, the typed note and Words: 4 kept, widgets "
+        "mounted again); the counter's error logged as widgets/counter.js:<line> on the web and GTK (source maps, dev only); "
+        "GTK debug build opens WebKit's inspector, release refuses; release builds carry no maps or dev endpoints; CSP unchanged")
+
+
 M0_SAMPLES = []
 
 
@@ -748,6 +955,7 @@ MILESTONES = [
     ("M0", m0),
     ("M1", m1),
     ("M1b", m1b),
+    ("M1c", m1c),
     ("M2", todo("WKWebView on the Mac via mac-ci (GOAL.md M2)")),
     ("M3", m3),
 ]

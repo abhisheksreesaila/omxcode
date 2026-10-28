@@ -39,7 +39,8 @@ plist() {  # plist <template> <out>
 build_linux() {
   local out="build/$EX/linux"; mkdir -p "$out"; rm -f "$out/$EX"
   echo "== Linux ($EX): GTK4 + libadwaita"
-  mojo_build hosts/linux_main.mojo -o "$out/$EX" \
+  local debug=(); [ "${MOJOUI_DEBUG:-}" = 1 ] && debug=(-D MOJOUI_DEBUG) && echo "   (debug build: WebKit's inspector for widget views, source maps)"
+  mojo_build hosts/linux_main.mojo "${debug[@]}" -o "$out/$EX" \
     -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}"
   mkdir -p "$out/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$out/fonts/"  # the app's own fonts, beside the binary (D-155)
   # Its JavaScript (docs/js.md, goal 34 M3): each WebComponent runs in a WebKitGTK view loading the web's own bundles,

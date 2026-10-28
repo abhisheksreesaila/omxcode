@@ -20,6 +20,7 @@ from mojoui.json import Json, json_string
 from mojoui.webcomponent import is_widget_tag, is_event_name
 from mojoui.theme import Theme, palette_css, tokens_css, theme_tokens
 from mojoui.look import look_web_css
+from mojoui.hosts.devtools import DEVTOOLS
 
 comptime RTLD_NOW = 2
 comptime RTLD_GLOBAL = 256
@@ -330,6 +331,9 @@ def start(addr: Int, assets: List[String]) -> Bool:
                 print("mojoui: web_assets() lists " + name + ", which isn't bundled in " + wv[].dir + "/assets (scripts/build.sh)")
                 continue
             wv[].files.append(file)
+            var map_file = j.text(j.get(e, "map"))
+            if DEVTOOLS and map_file != "" and plain_file(map_file):  # (debug builds: its source map, for the page's error lines)
+                wv[].files.append(map_file)
             if name.endswith(".css"):
                 links += '<link rel="stylesheet" href="/assets/' + file + '" integrity="' + sri + '">'
             else:
@@ -364,7 +368,7 @@ def new_view[F: AnyType](addr: Int, tag: String, id: Int, on_message: F, host_ad
     """A view for widget (tag, id), loading the page; its slot is added. Returns the slot's index."""
     var wv = webviews_at(addr)
     var settings = wk("webkit_settings_new")
-    _ = wk("webkit_settings_set_enable_developer_extras", settings, c_int(0))
+    _ = wk("webkit_settings_set_enable_developer_extras", settings, c_int(1 if DEVTOOLS else 0))  # (debug builds only: WebKit's inspector)
     _ = wk("webkit_settings_set_javascript_can_open_windows_automatically", settings, c_int(0))
     _ = wk("webkit_settings_set_allow_file_access_from_file_urls", settings, c_int(0))
     _ = wk("webkit_settings_set_allow_universal_access_from_file_urls", settings, c_int(0))
@@ -508,7 +512,7 @@ def on_scheme_request(request: Int, addr: Int) abi("C"):
         for f in wv[].files:
             if f == name:
                 file = wv[].dir + "/assets/" + name
-                media = "text/javascript" if name.endswith(".js") else "text/css"
+                media = "application/json" if name.endswith(".map") else ("text/javascript" if name.endswith(".js") else "text/css")
     elif path.startswith("/static/fonts/"):
         var name = String(path[byte=14:])
         for f in fonts():
@@ -629,6 +633,29 @@ def on_view_focus_enter(controller: Int, addr: Int) abi("C"):
         send(addr, k, '{"focus":"' + ("last" if wv[].tab_back else "first") + '"}')
 
 
+def clean(text: String, most: Int) -> String:
+    """Text from a page for a log line: control characters as spaces, at most `most` bytes (whole characters)."""
+    var out = String("")
+    for c in text.codepoint_slices():
+        if out.byte_length() + c.byte_length() > most:
+            break
+        out += " " if c.byte_length() == 1 and (Int(c.as_bytes()[0]) < 0x20 or Int(c.as_bytes()[0]) == 0x7f) else String(c)
+    return out
+
+
+def inspect(addr: Int, tag: String, id: Int) -> String:
+    """Opens WebKit's inspector for widget (tag, id)'s view: debug builds only (DEVTOOLS); what happened, for the log."""
+    comptime if not DEVTOOLS:
+        return "unavailable (a release build: MOJOUI_DEBUG=1 scripts/build.sh <app> linux)"
+    var wv = webviews_at(addr)
+    var k = wv[].slot_of(tag, id) if wv[].state == 1 else -1
+    if k < 0:
+        return "no web view " + tag + "#" + String(id)
+    var inspector = wk("webkit_web_view_get_inspector", wv[].slots[k].view)
+    _ = wk("webkit_web_inspector_show", inspector)
+    return "shown " + tag + "#" + String(id) if inspector != 0 else String("no inspector")
+
+
 def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
     """The page's message (the script message handler): JSON text naming this view's own widget. Events and replies go
     to the inbox for update() (True: something to hand over); the widget's height, line and CSP reports are kept here.
@@ -684,6 +711,10 @@ def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
             wv[].slots[k].facts = facts
         elif path == "csp":
             wv[].slots[k].csp += 1
+        elif path == "jslog":  # a widget's uncaught error: one line in the app's log (its source file and line in debug builds)
+            var src = j.text(j.get(0, "source"))
+            print("JS ERROR: " + (clean(src, 200) + ":" + String(j.number(j.get(0, "line"))) + ":" + String(j.number(j.get(0, "column"))) if src != "" else String("(no position)"))
+                  + ": " + clean(j.text(j.get(0, "message")), 500) + " (" + wv[].slots[k].key() + ")", flush=True)
         elif path == "tab":  # (Tab past the page's last stop, or Shift+Tab before its first: the host moves the keyboard on)
             wv[].tab_out = 1 if j.flag(j.get(0, "forward"), True) else 2
             wv[].tab_view = wv[].slots[k].view

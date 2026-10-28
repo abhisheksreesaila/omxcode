@@ -106,28 +106,156 @@
     };
   }
 
+  // ---- a widget's uncaught error, to the app's log with its original file and line (goal 34b M1c) ----
+  // Debug builds name a source map at each bundle's end (scripts/web_assets.py, MOJOUI_DEBUG=1); the page reads it from
+  // its own origin (the dev server, GTK's debug views) and turns the bundle's line and column into the source's
+  // (widgets/counter.js:12). Release builds have no maps: the bundle's own position is logged.
+  let hot = false;
+  const replaced = new Set();  // (dev) the tags whose code a reload replaced
+  const maps = new Map();  // bundle URL → Promise of its decoded map, or null
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function vlq(text) {
+    const out = [];
+    let shift = 0, value = 0;
+    for (const ch of text) {
+      const d = B64.indexOf(ch);
+      if (d < 0) return out;
+      value += (d & 31) << shift;
+      if (d & 32) shift += 5;
+      else { out.push(value & 1 ? -(value >>> 1) : value >>> 1); value = 0; shift = 0; }
+    }
+    return out;
+  }
+  function decode(mappings) {  // → per generated line: [[column, source, line, column] …], all 0-based
+    const lines = [];
+    let src = 0, line = 0, col = 0;
+    for (const l of String(mappings || '').split(';')) {
+      const segs = [];
+      let gen = 0;
+      for (const seg of l.split(',')) {
+        if (!seg) continue;
+        const v = vlq(seg);
+        gen += v[0];
+        if (v.length >= 4) { src += v[1]; line += v[2]; col += v[3]; segs.push([gen, src, line, col]); }
+      }
+      lines.push(segs);
+    }
+    return lines;
+  }
+  function mapOf(url) {
+    if (!maps.has(url)) maps.set(url, (async () => {
+      const u = new URL(url, location.href);
+      if (u.protocol !== location.protocol || u.host !== location.host || !u.pathname.startsWith('/assets/')) return null;  // (our bundles only)
+      const text = await (await fetch(u.href)).text();
+      const m = /[#@] sourceMappingURL=([\w.-]+\.map)/.exec(text.slice(-200));
+      if (!m) return null;
+      const r = await fetch(new URL(m[1], u.href).href);
+      if (!r.ok) return null;
+      const j = await r.json();
+      return { sources: Array.isArray(j.sources) ? j.sources : [], lines: decode(j.mappings) };
+    })().catch(() => null));
+    return maps.get(url);
+  }
+  async function original(url, line, column) {
+    const plain = { source: url ? String(url).split('/').pop() : '', line, column };
+    const m = url ? await mapOf(url) : null;
+    if (!m) return plain;
+    let best = null;
+    for (const s of m.lines[line - 1] || []) { if (s[0] <= column - 1) best = s; else break; }
+    return best ? { source: String(m.sources[best[1]] || plain.source), line: best[2] + 1, column: best[3] + 1 } : plain;
+  }
+  const FRAME = /((?:https?|mojoui):\/\/[^\s()]+):(\d+):(\d+)\)?\s*$/;
+  async function report(message, url, line, column, widget) {
+    try {
+      const at = await original(url, Number(line) || 0, Number(column) || 0);
+      const one = native && wrappers()[0];
+      queue.push({ path: 'jslog', values: { message: String(message).slice(0, 500), source: at.source, line: at.line, column: at.column,
+                                            widget: widget || (one ? keyOf(one) : '') } });
+      flush();
+    } catch (e) { /* (the report itself failed: nothing to tell) */ }
+  }
+  function reportCaught(e, widget) {  // an error the runtime caught (a widget's mount, update or theme): its first frame
+    const f = String((e && e.stack) || '').split('\n').map(l => FRAME.exec(l)).find(Boolean);
+    report((e && e.message) || e, f && f[1], f ? f[2] : 0, f ? f[3] : 0, widget);
+  }
+  addEventListener('error', e => { if (e.message) report(e.message, e.filename, e.lineno, e.colno); });
+  addEventListener('unhandledrejection', e => reportCaught(e.reason));
+
+  // ---- (dev) scripts/dev.sh rebuilt a bundle: load the new code, mount its widgets again with Mojo's props ----
+  async function devLoop() {
+    const root = document.getElementById('mojoui-root');
+    if (native || !root || root.dataset.dev !== '1' || devLoop.running) return;
+    devLoop.running = true;
+    let seen = -1;
+    for (;;) {
+      let v = seen;
+      try { v = Number(await (await fetch(`/dev/wait/${seen}`, { cache: 'no-store' })).text()); }
+      catch (e) { await new Promise(ok => setTimeout(ok, 1000)); continue; }
+      if (seen >= 0 && v > seen) { try { await devReload(); } catch (e) { console.warn('mojoui: dev reload failed', e); } }
+      seen = v;
+    }
+  }
+  async function devReload() {
+    const list = await (await fetch('/dev/assets', { cache: 'no-store' })).json();
+    const have = new Set([...document.querySelectorAll('script[src*="/assets/"], link[href*="/assets/"]')].map(e => (e.src || e.href).split('/').pop()));
+    const fresh = list.filter(a => !have.has(a.file));
+    for (const a of fresh.filter(a => a.name.endsWith('.css'))) {  // a sheet: the new one in, the old one out once it applies
+      const stem = a.name.replace(/\.css$/, '.');
+      const old = [...document.querySelectorAll('link[href*="/assets/"]')].find(l => l.href.split('/').pop().startsWith(stem));
+      const l = document.createElement('link');
+      l.rel = 'stylesheet'; l.href = '/assets/' + a.file; l.integrity = a.integrity;
+      l.onload = () => { if (old) old.remove(); };
+      if (old) old.after(l); else document.head.append(l);
+    }
+    hot = true;
+    replaced.clear();
+    try {
+      await Promise.all(fresh.filter(a => a.name.endsWith('.js')).map(a => new Promise(ok => {
+        const sc = document.createElement('script');
+        sc.src = '/assets/' + a.file; sc.integrity = a.integrity; sc.onload = sc.onerror = ok;
+        document.body.append(sc);
+      })));
+    } finally { hot = false; }
+    for (const w of wrappers()) {  // widgets whose code changed: torn down, then mounted afresh from the wrapper's props (Mojo's)
+      const el = w.firstElementChild;
+      if (!el || !replaced.has(w.dataset.widget)) continue;
+      const spec = el.mojouiSpec;
+      el.mojouiMounted = false;
+      try { if (spec && spec.destroy) spec.destroy(el); } catch (e) { console.error(`mojoui: ${w.dataset.widget}.destroy failed`, e); }
+      el.remove();
+    }
+    adopt();
+    tell();
+  }
+  document.addEventListener('DOMContentLoaded', devLoop);
+
   // ---- defineWidget: the widget as a custom element ----
   mojoui.defineWidget = spec => {
     if (!spec || typeof spec.tag !== 'string' || !TAG.test(spec.tag)) throw new Error('defineWidget: give a tag with a hyphen (mx-name)');
     if (typeof spec.mount !== 'function') throw new Error(`defineWidget(${spec.tag}): mount(el, props, emit) is required`);
-    if (specs.has(spec.tag)) return;  // (its bundle loaded twice)
     const fields = spec.fields || {};
     if (typeof fields !== 'object' || Array.isArray(fields)) throw new Error(`defineWidget(${spec.tag}): fields is an object {name: {type, set(el, value)}}`);
     for (const [name, f] of Object.entries(fields)) {
       if (!NAME.test(name) || !f || !TYPES.has(f.type) || typeof f.set !== 'function')
         throw new Error(`defineWidget(${spec.tag}): field ${name} needs a word for a name, a JSON type (${[...TYPES].join(', ')}) and set(el, value)`);
     }
+    if (specs.has(spec.tag)) {  // (its bundle loaded twice; or, while the dev server reloads it, its new code: kept for the next mount)
+      if (hot) { specs.set(spec.tag, spec); replaced.add(spec.tag); }
+      return;
+    }
     specs.set(spec.tag, spec);
-    class Widget extends HTMLElement {
+    class Widget extends HTMLElement {  // (its spec is looked up at each mount: a dev reload swaps it, the element class stays)
       connectedCallback() {
         if (this.mojouiMounted) return;  // (moved without moveBefore: it stays as it is)
+        const spec = specs.get(this.localName);
         const w = this.parentElement && this.parentElement.closest('[data-kind=webcomponent]');
         if (!w || w.dataset.widget !== spec.tag) return;
         this.mojouiMounted = true;
+        this.mojouiSpec = spec;
         this.mojouiProps = w.dataset.props;
         mounts[spec.tag] = (mounts[spec.tag] || 0) + 1;
         try { spec.mount(this, parse(w.dataset.props, {}), emitter(this, spec)); }
-        catch (e) { console.error(`mojoui: ${spec.tag}.mount failed`, e); }
+        catch (e) { console.error(`mojoui: ${spec.tag}.mount failed`, e); reportCaught(e, spec.tag); }
         if (spec.focusable && !this.hasAttribute('tabindex')) {  // (a widget with nothing focusable inside takes Tab itself)
           this.tabIndex = 0;
           if (!this.hasAttribute('aria-label') && typeof spec.description === 'string') this.setAttribute('aria-label', spec.description.slice(0, 200));
@@ -141,7 +269,8 @@
         setTimeout(() => {  // (gone for good only if nothing put it back by the next turn)
           if (this.isConnected || !this.mojouiMounted) return;
           this.mojouiMounted = false;
-          try { if (spec.destroy) spec.destroy(this); } catch (e) { console.error(`mojoui: ${spec.tag}.destroy failed`, e); }
+          const spec = this.mojouiSpec;
+          try { if (spec && spec.destroy) spec.destroy(this); } catch (e) { console.error(`mojoui: ${spec.tag}.destroy failed`, e); }
         }, 0);
       }
     }

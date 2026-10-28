@@ -667,3 +667,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - M0 M1 M1b M3: M0 and M1b PASS; M1 failed on "SHOT: skipped (window had no frame to capture)" (second time); M3 failed on my own docstring naming mx-editor in gtk.mojo (goal 34 forbids app names in hosts): fixed.
 - The flake (coordinator: fix it, don't rerun): reproduced 4 of 10 with the old binary. Cause: gtk_widget_paintable gives the last drawn frame, none while a redraw is queued. save_png now requests a paint and snapshots after each drawn frame until it has one (non-blocking pump, 10 s deadline, a clear failure line). After: 10 of 10, 4 having waited. M1 keeps the 10-shot loop.
 - Rerun: M1 PASS (31 s; 3 of 10 waited), M3 PASS (328 s).
+
+## 2026-10-27 · goal 34b M1c: the developer loop
+- Coordinator added M1c; proof first: a scratch copy of the widgets app under scripts/dev.sh, edits to counter.js, counter.css and editor.ts reaching the open page (same window object, the typed note and Words: 4 kept, mounts 2), the counter's thrown error as widgets/counter.js:<line> in the dev log and in a GTK debug build's log, the inspector shown in the debug build and refused in release, release builds without maps or dev endpoints, the dev CSP equal to release.
+- Web and GTK each passed on their first run; rebuilds take about 0.3 s.
+- M1c PASS (84 s).

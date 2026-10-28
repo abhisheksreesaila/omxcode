@@ -47,7 +47,9 @@ SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TI
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
 CHECKED, DISABLED, DANGER = 1, 2, 4  # menu item flags (mojoui/menus.mojo)
-AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an agent host may attach here (docs/agent.md: the agent link)
+AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")
+DEV = os.environ.get("MOJOUI_DEV") == "1"  # scripts/dev.sh's server (goal 34b M1c): widgets reload when their sources change, source maps
+DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")  # are served; never set by a release run (only 127.0.0.1 may ask)  # an agent host may attach here (docs/agent.md: the agent link)
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 JPEG_QUALITY = 85
 MAX_SESSIONS = 200  # oldest tabs are closed beyond this
@@ -702,6 +704,8 @@ def app_assets(module_dir, mod):
             raise SystemExit(f"mojoui web: assets/{m['file']} doesn't match its hash (rebuild it)")
         js = name.endswith(".js")
         files[m["file"]] = (data, "text/javascript" if js else "text/css")
+        if DEV and m.get("map") and (folder / m["map"]).exists():  # (a debug build's source map: served only by the dev server)
+            files[m["map"]] = ((folder / m["map"]).read_bytes(), "application/json")
         tags.append(Script(src=f"/assets/{m['file']}", defer=True, integrity=m["integrity"]) if js else
                     Link(rel="stylesheet", href=f"/assets/{m['file']}", integrity=m["integrity"]))
     return files, tags
@@ -1254,6 +1258,8 @@ def make_app(module_dir):
         fonts[content_name(f.name, data)] = data
         FONT_URLS[f.name] = f"/static/fonts/{content_name(f.name, data)}"
     assets, asset_tags = app_assets(module_dir, mod)
+    dev_state = {"version": 0, "tags": asset_tags, "waiters": set(), "lock": threading.Lock()}  # (dev: the bundles change under the page)
+    head_tags = () if DEV else tuple(asset_tags)  # (dev: the page's bundles are named per page load, the current build's)
     app = FastHTML(default_hdrs=False, secret_key=uuid.uuid4().hex, hdrs=(  # no .sesskey file
         # minimum-scale=1: a phone browser otherwise widens the page's layout viewport (innerWidth, innerHeight) to fit
         # anything wider than the screen, so a first screen laid out for a wider window read as a 780x1688 window,
@@ -1265,7 +1271,7 @@ def make_app(module_dir):
         # No eval and no scripts from answers (the CSP forbids both anyway); no inline style for htmx's indicators.
         Meta(name="htmx-config", content='{"disableInheritance": true, "allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'),
         Script(src=f"/static/{files['htmx.min.js'][0]}"), Script(src=f"/static/{files['mojoui.js'][0]}"),
-        Link(rel="stylesheet", href=f"/static/{files['mojoui.css'][0]}"), *asset_tags))
+        Link(rel="stylesheet", href=f"/static/{files['mojoui.css'][0]}"), *head_tags))
     app.add_middleware(SecurityHeaders)
     sessions = OrderedDict()  # sid → Session, oldest first
     sessions_lock = threading.Lock()
@@ -1345,7 +1351,7 @@ def make_app(module_dir):
         # the alert lives in an overlay beside it.
         full = s.nodes[0]["grows"] or s.nodes[0]["fills"]  # the screen fills the window
         page = Main(version, busy_mark(s), render(s, 0, sid), id="mojoui-root", cls="full" if full else None, inert=bool(alerts), data_sid=sid,
-                    data_agent="1" if AGENT_SOCKET else None)  # (widgets tell the host what they show only while an agent may read it)
+                    data_agent="1" if AGENT_SOCKET else None, data_dev="1" if DEV else None)  # (widgets tell the host what they show only while an agent may read it)
         layer = Div(*[render_alert(s, i, sid) for i in alerts], id="mojoui-overlay")
         if oob:
             page.attrs["hx-swap-oob"] = "true"
@@ -1418,7 +1424,7 @@ def make_app(module_dir):
             if "app-logo" in ICONS:  # (the app's mark as the tab's icon)
                 from urllib.parse import quote
                 icon = (Link(rel="icon", type="image/svg+xml", href="data:image/svg+xml," + quote(ICONS["app-logo"])),)
-            return Title(mod.title(s.handle)), *icon, *root(s, sid), cmds_mark(s), *skin(s)
+            return Title(mod.title(s.handle)), *icon, *root(s, sid), cmds_mark(s), *skin(s), *(dev_state["tags"] if DEV else ())
 
     def skin(s, oob=False):
         """The app's theme on the page (D-260): its body classes, its palette as CSS variables, and its style sheet; the
@@ -1620,6 +1626,79 @@ def make_app(module_dir):
                 d, s.pending = merge(s.pending, d), None
             s.nodes = json.loads(mod.view(s.handle))
             return changes(s, sid, d)
+
+    jslog_counts = {}
+
+    @app.post("/jslog/{sid}")
+    def jslog(sid: str, message: str = "", source: str = "", line: int = 0, column: int = 0, widget: str = ""):
+        """A widget's uncaught JS error, with its original file and line where the page could read the bundle's source map
+        (debug builds): one line in the app's log. Plain text only, cut short, at most 100 per page."""
+        if sid not in sessions:
+            return ""
+        jslog_counts[sid] = jslog_counts.get(sid, 0) + 1
+        if jslog_counts[sid] > 100:
+            return ""
+        clean = lambda t, n: re.sub(r"[\x00-\x1f\x7f]", " ", str(t))[:n]
+        where = f"{clean(source, 200)}:{int(line)}:{int(column)}" if source else "(no position)"
+        print(f"JS ERROR: {where}: {clean(message, 500)}" + (f" ({clean(widget, 80)})" if widget else ""), flush=True)
+        return ""
+
+    if DEV:
+        from starlette.responses import JSONResponse
+
+        def local(req):
+            return req.client is not None and req.client.host == "127.0.0.1"
+
+        @app.get("/dev/assets")
+        def dev_assets(req):
+            """(dev) The bundles this build has now: [{name, file, integrity}], for the page to load the new ones."""
+            if not local(req):
+                return Response(status_code=403)
+            names = json.loads(mod.web_assets()) if hasattr(mod, "web_assets") else []
+            folder = Path(module_dir) / "assets"
+            manifest = json.loads((folder / "manifest.json").read_text()) if (folder / "manifest.json").exists() else {}
+            return JSONResponse([{"name": n, "file": manifest[n]["file"], "integrity": manifest[n]["integrity"]} for n in names if n in manifest])
+
+        @app.post("/dev/reload")
+        def dev_reload(req, token: str = ""):
+            """(dev) scripts/dev.py rebuilt the bundles: serve the new ones, tell the open pages."""
+            import hmac
+            if not local(req) or not DEV_TOKEN or not hmac.compare_digest(token, DEV_TOKEN):
+                return Response(status_code=403)
+            try:
+                fresh, tags = app_assets(module_dir, mod)
+            except SystemExit as e:
+                print(f"dev: not reloaded: {e}", flush=True)
+                return Response(str(e), status_code=409)
+            with dev_state["lock"]:
+                assets.update(fresh)
+                dev_state["tags"] = tags
+                dev_state["version"] += 1
+                for loop, ev in list(dev_state["waiters"]):
+                    loop.call_soon_threadsafe(ev.set)
+            return str(dev_state["version"])
+
+        @app.get("/dev/wait/{seen}")
+        async def dev_wait(req, seen: int):
+            """(dev) Returns the bundles' version once it is past `seen` (20 s at most): the page then reloads its widgets."""
+            import asyncio
+            if not local(req):
+                return Response(status_code=403)
+            if dev_state["version"] > seen:
+                return str(dev_state["version"])
+            ev = asyncio.Event()
+            entry = (asyncio.get_running_loop(), ev)
+            with dev_state["lock"]:
+                dev_state["waiters"].add(entry)
+            try:
+                if dev_state["version"] <= seen:
+                    await asyncio.wait_for(ev.wait(), 20)
+            except asyncio.TimeoutError:
+                pass
+            finally:
+                with dev_state["lock"]:
+                    dev_state["waiters"].discard(entry)
+            return str(dev_state["version"])
 
     @app.post("/describe/{sid}")
     def widget_describe(sid: str, tag: str = "", id: int = 0, data: str = ""):

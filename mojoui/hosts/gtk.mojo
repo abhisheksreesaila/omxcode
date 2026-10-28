@@ -33,7 +33,8 @@ from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
-from mojoui.hosts.gtk_webview import facts_json
+from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect
+from mojoui.hosts.devtools import DEVTOOLS
 from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, send_all, close_fd, link_error, MAX_LINE
 from mojoui.hosts.web import view_to_json, control_event
 from mojoui.json import Json
@@ -4510,6 +4511,10 @@ def run_step[A: App](host_addr: Int, step: String):
             var s = webviews_at(host[].webviews)[].slots[k].copy()
             if s.gone or (s.crashes > 0 and s.loaded and s.mounts >= 1):
                 break
+    elif verb == "inspect":  # inspect:<tag>#<id>: WebKit's inspector for that widget's view (debug builds; release refuses)
+        var key = split_at(rest, "#")
+        print("INSPECTOR: " + webview_inspect(host[].webviews, key[0], to_int(key[1])))
+        pump()
     elif verb == "scheme":  # scheme:dark / scheme:light: the system's colour scheme switches, live (App.appearance, the widgets' tokens)
         var styles = external_call["adw_style_manager_get_default", Int]()
         external_call["adw_style_manager_set_color_scheme", NoneType](styles, c_int(4 if rest == "dark" else 1))  # ADW_COLOR_SCHEME_FORCE_DARK / FORCE_LIGHT
@@ -4902,6 +4907,7 @@ def report[A: App](host_addr: Int):
     report_pass[A](host_addr, False)
     report_pass[A](host_addr, True)
     print("FOCUS: " + focus_label[A](host_addr))
+    print("DEVTOOLS: " + ("on" if DEVTOOLS else "off"))
 
 
 def focus_label[A: App](host_addr: Int) -> String:

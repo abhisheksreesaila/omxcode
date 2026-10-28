@@ -84,24 +84,57 @@ def build(example, out=None):
     manifest = {}
     with tempfile.TemporaryDirectory(prefix="web-assets-") as tmp:
         env = dict(os.environ, NODE_PATH=str(modules) if modules else "")
+        debug = os.environ.get("MOJOUI_DEBUG") == "1"  # (a debug build: each bundle gets a source map, goal 34b M1c; release has none)
         cmd = [tool("esbuild"), *[str(p) for p in entries], "--bundle", "--minify", "--format=iife", "--target=es2020",
                "--platform=browser", "--charset=utf8", "--legal-comments=eof", f"--outdir={tmp}", "--entry-names=[name]",
-               "--log-level=warning"]
+               "--log-level=warning", *(["--sourcemap=linked", "--sources-content=false"] if debug else [])]
         r = subprocess.run(cmd, cwd=web, capture_output=True, text=True, env=env)
         if r.returncode != 0:
             fail("esbuild failed:\n" + (r.stdout + r.stderr)[-2000:])
         for name, src in names.items():
             data = (Path(tmp) / name).read_bytes()
-            digest = hashlib.sha256(data).hexdigest()[:16]
             stem, ext = name.rsplit(".", 1)
+            map_file = None
+            if debug and (Path(tmp) / (name + ".map")).exists():
+                data, map_file = with_map(Path(tmp), name, data, web, modules, out)
+            digest = hashlib.sha256(data).hexdigest()[:16]
             file = f"{stem}.{digest}.{ext}"
             (out / file).write_bytes(data)
             manifest[name] = {"file": file, "integrity": "sha384-" + base64.b64encode(hashlib.sha384(data).digest()).decode(),
                               "source": str(src.relative_to(web)), "bytes": len(data)}
+            if map_file:
+                manifest[name]["map"] = map_file
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     for name, m in sorted(manifest.items()):
         print(f"   assets/{m['file']}  ({m['bytes'] // 1024} KB, from web/{m['source']})")
     return True
+
+
+def with_map(tmp, name, data, web, modules, out):
+    """(debug builds) The bundle's source map, its sources named from the app's web/ folder (widgets/editor.ts) or npm
+    (npm/@codemirror/view/…), saved by its own content hash; the bundle's last line names it. Returns (bundle, map file)."""
+    m = json.loads((tmp / (name + ".map")).read_text())
+    named = []
+    for src in m.get("sources", []):
+        full = (tmp / src).resolve()
+        if full.is_relative_to(web.resolve()):
+            named.append(str(full.relative_to(web.resolve())))
+        elif modules and full.is_relative_to(Path(modules).resolve()):
+            named.append("npm/" + str(full.relative_to(Path(modules).resolve())))
+        else:
+            named.append(full.name)
+    m["sources"] = named
+    m.pop("sourceRoot", None)
+    body = json.dumps(m, separators=(",", ":")).encode()
+    stem, ext = name.rsplit(".", 1)
+    map_file = f"{stem}.{hashlib.sha256(body).hexdigest()[:16]}.{ext}.map"
+    (out / map_file).write_bytes(body)
+    text = data.decode()
+    cut = max(text.rfind("//# sourceMappingURL="), text.rfind("/*# sourceMappingURL="))
+    if cut >= 0:
+        text = text[:cut].rstrip("\n")
+    text += f"\n/*# sourceMappingURL={map_file} */\n" if ext == "css" else f"\n//# sourceMappingURL={map_file}\n"
+    return text.encode(), map_file
 
 
 def webview(example, folder):
@@ -144,9 +177,14 @@ def lint_problems(example):
         if n not in names:
             problems.append(f"{n} is bundled but web_assets() doesn't list it (an asset nobody asked for doesn't ship)")
     made = {m["file"]: m for m in manifest.values()}
+    maps = {m["map"] for m in manifest.values() if m.get("map")}
     if assets.is_dir():
         for f in sorted(assets.iterdir()):
             if f.name == "manifest.json":
+                continue
+            if f.name in maps:  # (a debug build's source map: named by its own hash)
+                if hashlib.sha256(f.read_bytes()).hexdigest()[:16] != f.name.rsplit(".", 3)[-3]:
+                    problems.append(f"assets/{f.name} changed after bundling (its hash doesn't match)")
                 continue
             m = made.get(f.name)
             if m is None:

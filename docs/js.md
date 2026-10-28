@@ -97,6 +97,40 @@ use: `LineChart`, `GridComponent`, `SVGRenderer`), so the bundle carries only th
 theme's palette (`--o-data`, `--o-card`, `--o-ink2`, `--o-line`) and the page's font, and a click on a point emits
 `pick {index, value}`.
 
+### The developer loop (goal 34b M1c)
+
+```
+scripts/dev.sh widgets              # http://127.0.0.1:5001/  (--port N for another)
+```
+
+`scripts/dev.sh <app>` builds the app for the web as a **debug build** (`MOJOUI_DEBUG=1`: each bundle gets a source
+map), serves it on **127.0.0.1 only**, and watches `examples/<app>/web/`. Save a `.ts`, `.js` or `.css` file and it
+rebuilds the bundles (about 0.3 s) and every open page loads the new code: a style sheet is swapped, a script's widgets
+are torn down (`destroy`) and mounted again from the props Mojo gives them now. The Mojo app is never restarted, so its
+state stays (the note you typed is still the note: the editor's `doc` prop is Mojo's text). A change to `app.mojo` needs
+a restart.
+
+A widget's uncaught error (or one thrown in `mount`, `update` or `theme`) reaches the app's log as one line, with the
+**original file and line** read from the bundle's source map:
+
+```
+JS ERROR: widgets/counter.js:24:32: Uncaught Error: boom from the counter
+```
+
+On GTK the same line comes from the widget's view (with its key, `(mx-counter#1)`). Release builds have no source maps,
+so the line names the bundle's own position.
+
+**WebKit's inspector** for a widget's view on GTK: build with `MOJOUI_DEBUG=1 scripts/build.sh <app> linux` and
+right-click the widget, *Inspect Element* (the test step `inspect:<tag>#<id>` opens it too). A release build
+(`scripts/build.sh <app> linux`) has no inspector: the choice is made when the app is compiled
+(`mojoui/hosts/devtools.mojo`, `-D MOJOUI_DEBUG`), not at run time. The Mac's WKWebView takes the same switch
+(`isInspectable`; the hook is marked in that file).
+
+What stays the same in the loop: the Content-Security-Policy (the dev server sends the release one), bundles by
+content hash with SRI, and nothing from another origin. The dev endpoints (`/dev/assets`, `/dev/wait`, `/dev/reload`,
+the last one only with dev.sh's random token) and source maps exist only when the server runs with `MOJOUI_DEV=1`, which
+only dev.sh sets.
+
 ## 3. Use it from Mojo
 
 ```mojo

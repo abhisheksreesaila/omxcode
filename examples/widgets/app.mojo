@@ -41,8 +41,7 @@ def word_count(text: String) -> Int:
 
 struct Main(App):
     var text: String  # the note, as the editor last said
-    var loaded: String  # the text Mojo last gave the editor (its doc prop)
-    var rev: Int  # moves on when Mojo sets the text: the editor takes doc only then
+    var rev: Int  # moves on when Mojo sets the text: a mounted editor takes doc only then (a new mount, after a dev reload, starts from it)
     var history: List[Float64]  # the word count after each edit (the chart)
     var clicks: Int  # counter events heard
     var last_count: Int
@@ -56,7 +55,6 @@ struct Main(App):
 
     def __init__(out self):
         self.text = ""
-        self.loaded = ""
         self.rev = 0
         self.history = List[Float64]()
         self.clicks = 0
@@ -104,7 +102,6 @@ struct Main(App):
             except:
                 pass
         elif m == LOAD:
-            self.loaded = SAMPLE
             self.rev += 1
             self.set_text(SAMPLE)
         elif m == COUNTER and event.name == "change":  # (its count was set: by an agent, through the widget's field)
@@ -162,7 +159,7 @@ struct Main(App):
         var note_items: List[View] = [Text("Note", style=HEADLINE)]
         if words > LONG:  # (a line that comes and goes: the screen is rebuilt around the editor, which keeps its cursor)
             note_items.append(Text("Long note", CAPTION).tag("long"))
-        note_items.append(WebComponent("mx-editor", Props().text("doc", self.loaded).number("rev", self.rev).text("placeholder", "Write a note"),
+        note_items.append(WebComponent("mx-editor", Props().text("doc", self.text).number("rev", self.rev).text("placeholder", "Write a note"),
                                        on_event=EDITED, id=1).fill().tag("editor"))
         note_items.append(HStack(Text("Words: " + String(words)), Text("words after each of " + String(edits) + (" edit" if edits == 1 else " edits"), CAPTION), Spacer(),
                                  Button("Load sample", on_tap=LOAD), spacing=SPACE_S).fill().tag("note-bar"))
