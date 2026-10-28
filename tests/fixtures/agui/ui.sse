@@ -1,0 +1,26 @@
+data: {"type":"RUN_STARTED","threadId":"t-rec","runId":"r-ui"}
+
+data: {"type":"STATE_SNAPSHOT","snapshot":{"form":{"name":"","subscribe":false}}}
+
+data: {"type":"TEXT_MESSAGE_START","messageId":"r-ui-m1","role":"assistant"}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-ui-m1","delta":"Here is "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-ui-m1","delta":"a form."}
+
+data: {"type":"TEXT_MESSAGE_END","messageId":"r-ui-m1"}
+
+data: {"type":"TOOL_CALL_START","toolCallId":"r-ui-call2","toolCallName":"render_ui","parentMessageId":"r-ui-m1"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"r-ui-call2","delta":"{\"ui\": {\"component\": \"Card\", \"title\": \"Signup\", \"children\": [{\"component\": \"Text\", \"text\": \"Te"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"r-ui-call2","delta":"ll us who you are.\", \"style\": \"caption\"}, {\"component\": \"TextField\", \"placeholder\": \"Your name"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"r-ui-call2","delta":"\", \"bind\": \"/form/name\"}, {\"component\": \"Toggle\", \"label\": \"Subscribe\", \"bind\": \"/form/subscri"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"r-ui-call2","delta":"be\"}, {\"component\": \"Button\", \"label\": \"Submit\", \"action\": \"submit\", \"style\": \"prominent\"}]}}"}
+
+data: {"type":"TOOL_CALL_END","toolCallId":"r-ui-call2"}
+
+data: {"type":"RUN_FINISHED","threadId":"t-rec","runId":"r-ui"}
+

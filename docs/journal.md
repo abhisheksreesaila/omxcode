@@ -678,3 +678,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - AG-UI read from the SDK's source itself (ag_ui/_generated/models.py, encoder: `data: <json>\n\n`, camelCase): 31 event types; RunAgentInput needs threadId, runId, messages (state, tools, context, forwardedProps optional).
 - Streams: Request.stream(END), SseReader, Sink (lock-free list), Transport.stream; SocketTransport reads in 50 ms slices. Two compile fixes (raises on a helper; iterating List[InFlight] needs an index loop: InFlight isn't Copyable). tests/test_stream.mojo passed on its first run.
 - M0 PASS (29 s): GTK 74 frames, web 118 frames while 20 events trickled over 2 s.
+
+## 2026-10-27 · goal 35 M1: the AG-UI client
+- mojoui/jsonpatch.mojo (JDoc + RFC 6902) passed 37 cases on its second build (two aliasing fixes: copy a list element before passing it with `mut self`; initialise every field before calling a method in __init__).
+- scripts/agui_agent.py: scripted scenarios with ag_ui.core events and EventEncoder; `--record` writes five streams (17 event types incl. RAW, MESSAGES_SNAPSHOT, RUN_ERROR).
+- mojoui/agui.mojo built first try; M1 PASS (8 s).

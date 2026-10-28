@@ -1,0 +1,8 @@
+data: {"type":"RUN_STARTED","threadId":"t-rec","runId":"r-err"}
+
+data: {"type":"TEXT_MESSAGE_START","messageId":"r-err-m1","role":"assistant"}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-err-m1","delta":"Working on "}
+
+data: {"type":"RUN_ERROR","message":"the model ran out of time","code":"timeout"}
+

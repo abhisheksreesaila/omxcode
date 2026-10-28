@@ -1,0 +1,42 @@
+data: {"type":"RUN_STARTED","threadId":"t-rec","runId":"r-chat"}
+
+data: {"type":"STEP_STARTED","stepName":"greet"}
+
+data: {"type":"TEXT_MESSAGE_START","messageId":"r-chat-m1","role":"assistant"}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"Hello! "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"I'm "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"a "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"scripted "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"AG-UI "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"agent. "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"My "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"words "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"arrive "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"a "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"few "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"at "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"a "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-chat-m1","delta":"time."}
+
+data: {"type":"TEXT_MESSAGE_END","messageId":"r-chat-m1"}
+
+data: {"type":"STEP_FINISHED","stepName":"greet"}
+
+data: {"type":"CUSTOM","name":"mood","value":{"cheerful":true}}
+
+data: {"type":"RUN_FINISHED","threadId":"t-rec","runId":"r-chat"}
+

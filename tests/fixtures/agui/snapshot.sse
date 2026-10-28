@@ -1,0 +1,16 @@
+data: {"type":"RUN_STARTED","threadId":"t-rec","runId":"r-snap"}
+
+data: {"type":"MESSAGES_SNAPSHOT","messages":[{"id":"u1","role":"user","content":"What's 2+2?"},{"id":"a1","role":"assistant","content":"Let me check.","toolCalls":[{"id":"c1","type":"function","function":{"name":"add","arguments":"{\"a\":2,\"b\":2}"}}]},{"id":"t1","role":"tool","content":"4","toolCallId":"c1"}]}
+
+data: {"type":"TEXT_MESSAGE_START","messageId":"r-snap-m1","role":"assistant"}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-snap-m1","delta":"It's "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-snap-m1","delta":"4."}
+
+data: {"type":"TEXT_MESSAGE_END","messageId":"r-snap-m1"}
+
+data: {"type":"RAW","event":{"vendor":"example","note":"a raw event, passed through"},"source":"example"}
+
+data: {"type":"RUN_FINISHED","threadId":"t-rec","runId":"r-snap"}
+

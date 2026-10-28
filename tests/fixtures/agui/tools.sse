@@ -1,0 +1,40 @@
+data: {"type":"RUN_STARTED","threadId":"t-rec","runId":"r-tools"}
+
+data: {"type":"STATE_SNAPSHOT","snapshot":{"count":1,"items":["a"],"a/b":{"~":0}}}
+
+data: {"type":"STATE_DELTA","delta":[{"op":"replace","path":"/count","value":3},{"op":"add","path":"/items/-","value":"b"},{"op":"replace","path":"/a~1b/~0","value":1}]}
+
+data: {"type":"STEP_STARTED","stepName":"lookup"}
+
+data: {"type":"TOOL_CALL_START","toolCallId":"r-tools-call1","toolCallName":"lookup"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"r-tools-call1","delta":"{\"q\": \"colours\"}"}
+
+data: {"type":"TOOL_CALL_END","toolCallId":"r-tools-call1"}
+
+data: {"type":"TOOL_CALL_RESULT","messageId":"r-tools-t2","toolCallId":"r-tools-call1","content":"[\"red\",\"blue\"]","role":"tool"}
+
+data: {"type":"STEP_FINISHED","stepName":"lookup"}
+
+data: {"type":"TEXT_MESSAGE_START","messageId":"r-tools-m3","role":"assistant"}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-tools-m3","delta":"Let me "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-tools-m3","delta":"ask "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"r-tools-m3","delta":"you."}
+
+data: {"type":"TEXT_MESSAGE_END","messageId":"r-tools-m3"}
+
+data: {"type":"TOOL_CALL_START","toolCallId":"r-tools-call4","toolCallName":"ask_user","parentMessageId":"r-tools-m3"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"r-tools-call4","delta":"{\"question\": \"Which "}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"r-tools-call4","delta":"colour?\", \"options\":"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"r-tools-call4","delta":" [\"red\", \"blue\"]}"}
+
+data: {"type":"TOOL_CALL_END","toolCallId":"r-tools-call4"}
+
+data: {"type":"RUN_FINISHED","threadId":"t-rec","runId":"r-tools"}
+

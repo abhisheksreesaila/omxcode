@@ -330,7 +330,7 @@ def m1_patch():
             continue
         line = got[i]
         try:
-            lib = jsonpatch.apply_patch(c["doc"], c["patch"])
+            lib = jsonpatch.apply_patch(c["doc"], c["patch"] if "patch" in c else json.loads(c["patch_text"]))
             lib_err = None
         except Exception as e:
             lib, lib_err = None, e
