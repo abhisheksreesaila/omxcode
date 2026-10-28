@@ -16,7 +16,9 @@
 # DIR] (or DASH_EXTERNAL=1): opens the file, shows the opening state (step 0), then waits; each line "step N" on stdin
 # applies steps.json's state N (read on the main loop as it arrives: App.input_lines), "quit" or the end of stdin
 # writes DIR/answers.json and DIR/timings.json for the steps shown, in the order asked (once the last one asked for is
-# on screen), and exits.
+# on screen), and exits. Stdout speaks the harness's driver contract (docs/goals/38/README.md): `ready <json>` once
+# step 0 is drawn (the load figures), `shown N <ms> <json>` as each later step is drawn (ms: change → that frame; json:
+# gpu_ms, compute_ms), `error <text>`, `bye`.
 
 from std.sys import argv, exit
 from std.os import getenv
@@ -248,6 +250,8 @@ struct Main(App):
             except e:
                 self.problem = "couldn't open " + self.path + ": " + String(e)
                 print("dashboard: " + self.problem, flush=True)
+                if self.external:
+                    print("error " + self.problem, flush=True)
                 if self.scripted:
                     exit(1)
         if self.running and self.running.value().poll() != JOB_RUNNING:
@@ -259,6 +263,8 @@ struct Main(App):
             except e:
                 self.problem = String(e)
                 print("dashboard: step " + String(self.running_step) + " failed: " + self.problem, flush=True)
+                if self.external:
+                    print("error step " + String(self.running_step) + ": " + self.problem, flush=True)
                 if self.scripted:
                     exit(1)
             if self.pending:
@@ -322,7 +328,7 @@ struct Main(App):
                 self.filters = self.states[n].copy()
                 self.changed()
                 return
-        print("dashboard: not a step: '" + String(line) + "' (send 'step N', N from 0 to " + String(len(self.states) - 1) + ", or 'quit')", flush=True)
+        print("error not a step: '" + String(line) + "' (send 'step N', N from 0 to " + String(len(self.states) - 1) + ", or 'quit')", flush=True)
 
     def region_names(self) -> List[String]:
         """The regions, A to Z."""
@@ -373,6 +379,15 @@ struct Main(App):
         self.answers.append('{"step": ' + String(self.step) + ', "rows": ' + String(a.rows) + ', "sum_amount": '
                             + String(a.sum_amount()) + ', "avg_margin": ' + (String(a.avg_profit()) if a.rows > 0 else "null")
                             + ', "top": ' + top + '], "ids": ' + ids + "]}")
+        if self.external:  # (the harness's driver contract, docs/goals/38/README.md: the app's own figures, nothing else)
+            if len(self.answers) == 1:
+                ref o = self.orders.value()
+                print('ready {"data_load_ms": ' + fixed(o.read_ms + o.cents_ms + o.sort_ms + o.upload_ms, 1) + ', "read_ms": '
+                      + fixed(o.read_ms, 1) + ', "cents_ms": ' + fixed(o.cents_ms, 1) + ', "sort_ms": ' + fixed(o.sort_ms, 1)
+                      + ', "upload_ms": ' + fixed(o.upload_ms, 1) + ', "first_dashboard_ms": ' + fixed(self.first_ms, 1) + "}", flush=True)
+            else:
+                print("shown " + String(self.step) + " " + fixed(shown_ms, 3) + ' {"gpu_ms": ' + fixed(a.query_ms + a.rows_ms, 3)
+                      + ', "compute_ms": ' + fixed(a.compute_ms, 3) + "}", flush=True)
         self.timings.append('{"step": ' + String(self.step) + ', "change": ' + json_string(self.changes[self.step])
                             + ', "rows": ' + String(a.rows) + ', "input_to_pixels_ms": ' + fixed(shown_ms, 3)
                             + ', "compute_ms": ' + fixed(a.compute_ms, 3) + ', "query_ms": ' + fixed(a.query_ms, 3)
@@ -401,6 +416,8 @@ struct Main(App):
             print("dashboard: couldn't write the results: " + String(e), flush=True)
             exit(1)
         print("dashboard: wrote " + self.out + "/answers.json and timings.json", flush=True)
+        if self.external:
+            print("bye", flush=True)
         exit(0)
 
     # ---------- the screen ----------
