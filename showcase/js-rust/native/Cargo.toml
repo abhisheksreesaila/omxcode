@@ -1,0 +1,11 @@
+[package]
+name = "particles-native"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sim = { path = "../sim" }
+wgpu = "30"
+winit = "0.30"
+pollster = "1"
+bytemuck = { version = "1", features = ["derive"] }

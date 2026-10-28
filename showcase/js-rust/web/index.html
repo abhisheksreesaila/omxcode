@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>particles · JS + Rust/wasm</title>
+<style>
+  html, body { margin: 0; background: #000; color: #e6e6f0; font: 13px/1.4 ui-monospace, monospace; }
+  canvas { display: block; width: 1280px; height: 720px; }
+  #hud { position: absolute; top: 10px; left: 12px; display: flex; gap: 14px; align-items: center;
+         background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px; }
+  #hud select { background: #111; color: inherit; border: 1px solid #333; border-radius: 4px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="hud">
+  <label>N <select id="n">
+    <option value="1000000">1M</option><option value="2000000">2M</option><option value="5000000">5M</option>
+    <option value="10000000">10M</option><option value="20000000">20M</option>
+  </select></label>
+  <span id="readout">starting…</span>
+</div>
+<script type="module" src="main.js"></script>
+</body>
+</html>
