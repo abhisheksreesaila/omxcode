@@ -1,28 +1,26 @@
-# GOAL 35: AG-UI, agents that build the screen
+# GOAL 36: three stacks, one particle field
 
-**End goal (owner, 2026-10-27):** "let's plan to wrap up 34b and AG-UI tonight; I want to submit to a tech fund."
-Earlier: "we provide an agent-native framework… we give agents metadata for rendering UI… by supporting AG-UI, by
-spitting out metadata, not the actual interface, and having the runtime do it… people can put their own harness."
-AG-UI (docs.ag-ui.com) is an open event protocol between an agent backend and a UI: a run streams text, tool calls
-and shared state as events over HTTP (SSE).
+**End goal (owner, 2026-10-27):** "the particle showcase, where JS, JS + Rust and omxcode: what the difference is…
+show something where JS alone just doesn't work; then people put in Rust and swap the hard paths… they don't have
+this… front and centre, its own page." Eye-catching and simple (docs/goals/showcase-draft.md). Spec: showcase/SPEC.md.
 
 ## Milestones
 | # | Milestone | Proof (`scripts/check`) |
 |---|---|---|
-| M0 | Streaming HTTP | `mojoui.http` streams: a request may ask for a stream; each SSE event (or chunk) arrives as its own `Event` in `update()` while frames keep drawing, then an end Event; through the Transport seam (sockets today); tests against a Python SSE server: 200 events in order, a slow trickle, a dropped connection mid-stream, a timeout, cancel by the app |
-| M1 | The AG-UI client | `mojoui/agui.mojo`: runs an agent (POST RunAgentInput: thread, run, messages, state, tools), reads the AG-UI event stream (RUN_STARTED/FINISHED/ERROR, TEXT_MESSAGE_START/CONTENT/END, TOOL_CALL_START/ARGS/END/RESULT, STATE_SNAPSHOT, STATE_DELTA as JSON Patch, MESSAGES_SNAPSHOT, STEP_*, CUSTOM), keeps the conversation and the shared state, applies JSON Patch exactly (RFC 6902 tests), and lets the app answer frontend tool calls; its own tests against recorded streams from the official AG-UI Python SDK |
-| M2 | Generative UI | the agent sends UI as data, never code: a frontend tool (e.g. `render_ui`) whose arguments are a view description built only from catalogued omxcode components (a JSON schema generated from the component catalog: Text, Card, Table, Chart/Sparkline, Button, TextField, Toggle, Segmented, Meter, Paragraph…); the app validates it against the schema (unknown component, bad prop, too deep or too big → refused with a message to the agent) and renders it natively; a button in agent-built UI reports back to the agent as a tool result; shared state edited in the UI reaches the agent as state |
-| M3 | A chat app on the web and Linux | `examples/agentchat`: a chat panel; the agent streams its words, builds a chart or a form in the conversation, the user edits it and the agent sees the change; a scripted AG-UI agent (Python, official SDK, deterministic) makes the checks repeatable; a live agent runs when configured by env var names (owner, D-710: the OpenAI-compatible API, the OMX Console's local models by default, Claude optional; keys never stored or logged); on GTK and the web; screenshots |
-| M4 | Nothing regressed (minimal) | goal 34b's M0 and goal 34's M2 and goal 33's M1 pass |
+| M0 | The spec and the reference | showcase/SPEC.md and showcase/reference.py; the reference's 120-step positions for N = 10,000 are reproducible (two runs byte-equal) |
+| M1 | A · JS + WebGPU | showcase/js-webgpu: plain JS + WGSL compute and render, no framework; runs in Chromium on the RTX 3090 (WebGPU, headless with a GPU); scripted mode writes positions.bin and timings.json; positions match the reference (SPEC "Correctness") at N = 10,000 |
+| M2 | B · JS + Rust | showcase/js-rust: the UI in JS/HTML, the step in Rust compiled to wasm (wasm-bindgen; SIMD + threads if the browser allows) and a second row: the same Rust with wgpu natively (a window, compute + render); both scripted, both match the reference at N = 10,000 |
+| M3 | C · omxcode | examples/particles: one Mojo file (UI + GPU step + draw through the framework's Canvas/GPU path), native on GTK (and builds for the web host); scripted mode; matches the reference at N = 10,000 |
+| M4 | The measure | scripts/particles_bench.py runs each build scripted on the same machine: for N in the slider steps, median frame ms and step ms over 600 frames after 60 warm-up; the largest N each holds at ≥ 60 fps; cold start; peak memory; plus lines of code, files, languages and build steps per build (counted by a script, not by hand); writes docs/goals/36/results.json and a table |
+| M5 | The page | docs/why.html (the site's style, omxqua dark): the problem (JS alone drops frames), the usual fix (add Rust/wasm: languages, bindings, builds, a boundary every frame), omxcode (one file, native, the GPU in the same language); a side-by-side clip/shots of the three at the same N, the measured table with every loss stated plainly; linked from the cover's developer strip |
+
+## Fair play
+Each build is written by its own agent from that stack's official docs and idiomatic examples, without reading the
+other builds; then a reviewer looks for performance mistakes in each. Numbers come only from M4's script on one
+machine (RTX 3090, Chromium 152, Mojo 1.1). Losses are reported as plainly as wins.
 
 ## Out of bounds
-Running untrusted code from the agent; storing keys; the Mac (later, through the same seam); AG-UI server hosting
-beyond localhost; pushing.
-
-## Assumptions
-- Streaming goes through our own HTTP/1.1 socket transport (plain HTTP to a local agent); flare stays goal 37.
-- The scripted agent drives every check; the live agent (OMX Console by default, Claude optional) is a demo path.
-- Each milestone's proof is written before its work, from this table's words, never weaker.
+Pushing (the owner decides); tuning one build after seeing another's numbers without giving the others the same chance.
 
 ## Done means
-`scripts/check` PASS for M0–M4; the reviewer passes it; a short report with the agent building UI in the chat app.
+`scripts/check` PASS for M0–M5; the reviewer passes it; docs/why.html previewed for the owner.
