@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mojo-ui showcase · one Mojo file, every platform</title>
+<title>omxcode gallery · one Mojo file, every platform</title>
 <meta name="description" content="Apps written once in Mojo, drawn with each platform's own controls, with the GPU in the same language.">
 <style>
   :root { --ink: #1b1f24; --ink2: #57606a; --line: #e4e7eb; --page: #f6f7f9; --brand: #0f6cbd; --brand-wash: #ebf3fc;
@@ -78,7 +78,7 @@
 <header class="hero">
   <div class="wrap">
     <h1>One Mojo file.<br><em>Every platform.</em> The GPU included.</h1>
-    <p class="lead">mojo-ui is an experiment: write an app once in Mojo, a language that reads like Python and compiles like C++,
+    <p class="lead">omxcode is an experiment: write an app once in Mojo, a language that reads like Python and compiles like C++,
       and get a Linux app, a web app, a Mac app, an iPhone app and an Android app, each drawn with the platform's own controls.
       When there's a GPU, the same file uses it.</p>
     <div class="flow">
@@ -109,7 +109,7 @@
 <section class="show">
 
   <article class="card focal" data-kind="both" id="console">
-    <div class="head"><h2>OMX Console · a real app, rebuilt from framework parts</h2><span class="tag both">Both shine</span>
+    <div class="head"><h2>omxconsole · a real app, rebuilt from framework parts</h2><span class="tag both">Both shine</span>
       <span class="src"><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/console">examples/console/</a></span></div>
     <div class="body">
       <div class="shots">
@@ -133,7 +133,7 @@
           <div><b>0 boxes</b><span>off on Linux (of 1,425) and the Mac (of 1,268) against the web</span></div>
         </div>
         <h3>What it is</h3>
-        <p>The OMX Console, the admin page of a local model server, was 4,400 lines of JavaScript and 870 of CSS. It is rebuilt here in omxcode from framework components only (Table, CodeBlock, LogView, Timeline, Breadcrumbs, Chip, Confirm, Skeleton, Markdown, Sparkline, Route) and the omxqua theme: no app CSS, no pixel nudges. It talks to the same daemon over the framework's own HTTP client.</p>
+        <p>omxconsole, the admin page of a local model server, was 4,400 lines of JavaScript and 870 of CSS. It is rebuilt here in omxcode from framework components only (Table, CodeBlock, LogView, Timeline, Breadcrumbs, Chip, Confirm, Skeleton, Markdown, Sparkline, Route) and the omxqua theme: no app CSS, no pixel nudges. It talks to the same daemon over the framework's own HTTP client.</p>
         <h3>Where each side shines</h3>
         <div class="split">
           <div class="n"><b>Native</b>Linux and the Mac draw it with their own controls; held to the web's boxes, not its pixels.</div>
@@ -149,8 +149,8 @@
       <span class="src"><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/widgets">examples/widgets/</a></span></div>
     <div class="body">
       <div class="shots">
-        <figure><img src="img/widgets-web-light.png" alt="The widgets app in a browser: a note in CodeMirror, a word count drawn by mojoui, a counter, and an ECharts line chart of the word count" loading="lazy">
-          <figcaption>Web, light: CodeMirror 6 and Apache ECharts from npm, in omxqua, beside mojoui's own buttons, texts and sparkline.</figcaption></figure>
+        <figure><img src="img/widgets-web-light.png" alt="The widgets app in a browser: a note in CodeMirror, a word count drawn by omxcode, a counter, and an ECharts line chart of the word count" loading="lazy">
+          <figcaption>Web, light: CodeMirror 6 and Apache ECharts from npm, in omxqua, beside omxcode's own buttons, texts and sparkline.</figcaption></figure>
         <div class="shots two">
           <figure><img src="img/widgets-web-dark.png" alt="The same page after the system switched to dark" loading="lazy"><figcaption>Web, dark: switched live; each widget restyled from the theme's tokens, not reloaded.</figcaption></figure>
           <figure><img src="img/widgets-gtk-light.png" alt="The same app in a native Linux window" loading="lazy"><figcaption>Linux (GTK): each widget in a WebKitGTK view of its own, the same bundles.</figcaption></figure>
@@ -238,7 +238,7 @@
       <div class="why">
         <div class="nums">
           <div><b>6–9 ms</b><span>7 group-bys over 20M rows (GPU)</span></div>
-          <div><b>~115 ms</b><span>the same through MX frame (CPU)</span></div>
+          <div><b>~115 ms</b><span>the same through omxcore (CPU)</span></div>
           <div><b>exact</b><span>to the cent, every engine</span></div>
         </div>
         <h3>Where each side shines</h3>
@@ -249,8 +249,8 @@
         <h3>What makes it work</h3>
         <ul>
           <li>Every chart is a <a href="https://microsoft.github.io/flint-chart/">Flint</a> spec: the chart language AI agents write.</li>
-          <li>mojoui renders Flint natively (the same pixels on every platform it runs on); the specs also run through Flint's own Vega-Lite backend.</li>
-          <li>Three engines behind one switch: Mojo GPU kernels, Mojo on the CPU, and <b>MX frame</b>, a Mojo dataframe engine.</li>
+          <li>omxcode renders Flint natively (the same pixels on every platform it runs on); the specs also run through Flint's own Vega-Lite backend.</li>
+          <li>Three engines behind one switch: Mojo GPU kernels, Mojo on the CPU, and <b>omxcore</b>, a Mojo dataframe engine.</li>
         </ul>
       </div>
     </div>
@@ -264,8 +264,8 @@
   "semantic_types": { "category": "Category", "revenue": "Price" },
   "data": { "values": [ { "category": "Electronics", "revenue": 161… }, … ] } }</pre>
       <div class="compare">
-        <figure><img src="img/flint-category-mojoui.png" alt="The chart drawn natively by mojoui" loading="lazy">
-          <figcaption>Drawn by mojoui in Mojo (running on Linux and the web; the renderer also builds for Mac, iPhone and Android, unverified there).</figcaption></figure>
+        <figure><img src="img/flint-category-mojoui.png" alt="The chart drawn natively by omxcode" loading="lazy">
+          <figcaption>Drawn by omxcode in Mojo (running on Linux and the web; the renderer also builds for Mac, iPhone and Android, unverified there).</figcaption></figure>
         <figure><img src="img/flint-category-vega.svg" alt="The same spec compiled by Flint to Vega-Lite and rendered by Vega" loading="lazy">
           <figcaption>The same spec through Flint → Vega-Lite → Vega (JavaScript).</figcaption></figure>
       </div>
@@ -329,7 +329,7 @@
     <div class="body single">
       <div class="why">
         <ul>
-          <li>Type a question; an AI model writes a Flint chart and the query; MX frame runs it on the GPU; mojoui draws it.</li>
+          <li>Type a question; an AI model writes a Flint chart and the query; omxcore runs it on the GPU; omxcode draws it.</li>
           <li>Native: your model on your GPU, private. Web: one server GPU for every viewer. One Mojo file either way.</li>
         </ul>
       </div>
