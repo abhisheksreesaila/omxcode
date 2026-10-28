@@ -1,4 +1,4 @@
-"""Milestone checker for GOAL.md (goal 36: three stacks, one particle field). Prints PASS/FAIL per milestone.
+"""Milestone checker for GOAL.md (goal 36: three stacks, one particle field; goal 36b: M6-M8). Prints PASS/FAIL per milestone.
 
 Run: scripts/check   (a subset: scripts/check M0 M4)
 Each milestone's proof comes from GOAL.md's words (never weaker). M1-M3 run each build's own check script and need
@@ -211,6 +211,219 @@ def m5():
                   + ", ".join(f"{r} {wt.mn(v)}" for r, v in big.items()))
 
 
+_C_OK = {}
+
+
+def c_ok():
+    """showcase/omxcode/check_c.py (the particle app's correctness check), run once for M6, M6b and M6c."""
+    if "r" not in _C_OK:
+        _C_OK["r"] = needs_ok(["showcase/omxcode/check_c.py"], ["C"])
+    return _C_OK["r"]
+
+
+def mojo_test(path, ok_line):
+    r = run(["pixi", "run", "mojo", "run", "-I", ".", path], 1800)
+    out = r.stdout + r.stderr
+    lines = [l.strip() for l in out.splitlines() if l.startswith("  ") and "warning" not in l and not l.strip().startswith(("^", "~", "Pointer", "unsafe_"))]
+    if r.returncode != 0 or ok_line not in out:
+        return False, f"{path}: exit {r.returncode}: " + " | ".join(l for l in out.splitlines() if "error" in l.lower() or "Assert" in l or "SKIP" in l)[-600:], []
+    return True, f"{path}: {ok_line}", [l for l in lines if l and not l.startswith(("def ", "var ", "pts", "Mojo/"))][:8]
+
+
+def m6():
+    """Zero-copy presentation (GOAL.md 36b M6): (a) tests/test_canvas_present.mojo; (b) headless: the fallback is
+    reported and C still ok; (c) the desktop proof (present-desktop.json) fresh, zero readbacks; the app unchanged."""
+    import particles_bench as pb
+    import headless
+    problems, notes = [], []
+    ok, msg, lines = mojo_test("tests/test_canvas_present.mojo", "canvas present: ok")
+    (notes if ok else problems).append(msg)
+    if ok and not any("byte for byte" in l for l in lines):
+        problems.append("the test didn't compare the GL texture with the readback picture")
+    cok, cmsg = c_ok()  # (builds the app)
+    (notes if cok else problems).append(cmsg)
+    headless.ensure()
+    with tempfile.TemporaryDirectory() as d:
+        r = subprocess.run([str(ROOT / "build/particles/linux/particles"), "--scripted", "--n", "10000", "--frames", "30",
+                            "--out", d, "--positions", "0"], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, MOJOUI_PRESENT_STATS="1"))
+    out = r.stdout + r.stderr
+    told = next((l for l in out.splitlines() if l.startswith("mojoui: GPU canvas pictures")), "")
+    if "copied to the CPU for the screen (" not in told:
+        problems.append(f"headless: the fallback wasn't reported (got {told!r})")
+    else:
+        notes.append("headless: " + told[len("mojoui: "):])
+    pd = OUT / "present-desktop.json"
+    if not pd.exists():
+        problems.append("docs/goals/36/present-desktop.json missing: run scripts/present_smoke.py on the desktop")
+    else:
+        d = json.loads(pd.read_text())
+        if d.get("sources_sha256") != pb.sources_sha():
+            problems.append("present-desktop.json is stale (the sources changed): rerun scripts/present_smoke.py")
+        if d.get("cpu_copied") != 0 or d.get("gpu_presented", 0) < d.get("frames", 1) - 1 or "without a copy" not in d.get("path", ""):
+            problems.append(f"desktop: {d.get('cpu_copied')} readbacks, {d.get('gpu_presented')} of {d.get('frames')} frames from the GPU")
+        else:
+            notes.append(f"desktop: {d['gpu_presented']} of {d['frames']} frames shown from the GPU, 0 readbacks "
+                         f"({d['gsk_renderer']} renderer, {d['frame_ms_mean']:.2f} ms/frame at 1M)")
+    # (review item 1, D-752: the app's only change is declaring its GPU canvas)
+    added = [l for l in run(["git", "diff", "-U0", "216c2b5", "--", "examples/particles/app.mojo"]).stdout.splitlines()
+             if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+    if added and (len(added) != 1 or "comptime GPU_CANVAS = True" not in added[0]):
+        problems.append("examples/particles/app.mojo changed beyond declaring its GPU canvas: " + "; ".join(added)[:300])
+    ok_t, msg_t, _ = mojo_test("tests/test_gpu_canvas_gate.mojo", "gpu canvas gate: ok")
+    (notes if ok_t else problems).append(msg_t)
+    hb = run(["scripts/build.sh", "hello", "linux"], 900)
+    hello = ROOT / "build/hello/linux/hello"
+    if hb.returncode != 0 or not hello.exists():
+        problems.append("couldn't build examples/hello")
+    else:
+        r = subprocess.run([str(hello)], cwd=ROOT, capture_output=True, text=True, timeout=120,
+                           env=dict(os.environ, MOJOUI_PRESENT_STATS="1", MOJOUI_TEST=""))
+        st = next((l for l in (r.stdout + r.stderr).splitlines() if "present stats" in l), "")
+        if "gpu device ''" not in st or "declares no GPU canvas" not in st:
+            problems.append(f"a non-GPU app (hello) wasn't left alone: {st!r}")
+        else:
+            notes.append("hello (no GPU canvas): not probed, MOJOUI_GPU_DEVICE unset, renderer as the host set it")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "; ".join(notes)
+
+
+def m6b():
+    """Hardware-blended drawing (GOAL.md 36b M6b): tests/test_canvas_blend.mojo, C still ok, no particle names in mojoui."""
+    problems, notes = [], []
+    ok, msg, lines = mojo_test("tests/test_canvas_blend.mojo", "canvas blend: ok")
+    (notes if ok else problems).append(msg)
+    if ok:
+        notes += [l for l in lines if l.startswith(("additive", "lines", "over", "MOJOUI_BLEND"))]
+    hits = run(["git", "grep", "-n", "-i", "particle", "--", "mojoui"]).stdout.strip()
+    if hits:
+        problems.append("particle names in mojoui: " + hits[:300])
+    cok, cmsg = c_ok()
+    (notes if cok else problems).append(cmsg)
+    return (not problems), "; ".join(problems or notes)
+
+
+def m6c():
+    """A cheaper compute splat (GOAL.md 36b M6c): two atomics a point, exact (tests/test_pointcloud_step.mojo), C ok."""
+    problems, notes = [], []
+    ok, msg, lines = mojo_test("tests/test_pointcloud_step.mojo", "test_pointcloud_step: ok")
+    (notes if ok else problems).append(msg)
+    if ok and not any("no bleed" in l for l in lines):
+        problems.append("the packed-splat case didn't run")
+    elif ok:
+        notes += [l for l in lines if "packed" in l]
+    src = (ROOT / "mojoui/gpu.mojo").read_text()
+    body = src[src.index("def _splat2_kernel"):src.index("def _resolve_kernel")]
+    if body.count("Atomic.fetch_add") != 2:
+        problems.append(f"the packed splat has {body.count('Atomic.fetch_add')} atomic adds, not 2")
+    cok, cmsg = c_ok()
+    (notes if cok else problems).append(cmsg)
+    return (not problems), "; ".join(problems or notes)
+
+
+def m7():
+    """Every row on the real desktop (GOAL.md 36b M7): results-desktop.json, gated, fresh, goal 36's protocol, every row
+    and size, C's zero-copy path in every C run (0 readbacks, GTK's GL renderer), the setup recorded."""
+    import particles_bench as pb
+    path, md = OUT / "results-desktop.json", OUT / "results-desktop.md"
+    if not path.exists() or not md.exists():
+        return False, "docs/goals/36/results-desktop.json/.md missing: run scripts/particles_bench.py --desktop (D-735)"
+    res = json.loads(path.read_text())
+    problems = []
+    if not res.get("desktop") or res.get("provisional") is not False or res.get("gated") is not True:
+        problems.append("not the gated desktop measurement")
+    if res.get("sources_sha256") != pb.sources_sha():
+        problems.append("stale: the sources changed since results-desktop.json (rerun particles_bench.py --desktop)")
+    p = res.get("protocol", {})
+    if (p.get("warmup"), p.get("frames"), p.get("runs"), p.get("sizes")) != (60, 600, 3, pb.SIZES):
+        problems.append("not goal 36's protocol (60 warm-up, 600 frames, 3 runs, the same sizes)")
+    need = ["frame_ms", "frame_ms_spread", "p95_interval_ms", "cold_start_ms", "peak_pss_mb", "holds_60", "frame_ms_is"]
+    rows = res.get("rows", {})
+    for row in pb.DESKTOP_ROWS + list(pb.FEATURES):
+        sizes = pb.FEATURE_SIZES if row in pb.FEATURES else pb.EXTRA.get(row, []) + pb.SIZES
+        for n in sizes:
+            r = rows.get(row, {}).get(str(n))
+            if not r:
+                problems.append(f"{row} {n}: missing")
+                continue
+            if [k for k in need if r.get(k) is None] or len(r.get("runs", [])) != 3:
+                problems.append(f"{row} {n}: incomplete")
+            if not all((x.get("machine") or {}).get("gated") for x in r["runs"]):
+                problems.append(f"{row} {n}: a run didn't pass the quiet gate")
+            if row != "A-cpu" and "nvidia" not in (r.get("adapter") or "").lower():
+                problems.append(f"{row} {n}: adapter {r.get('adapter')}")
+            if row.startswith("C") and row not in ("C-36", "C-36gl"):
+                if r.get("cpu_copied_max") != 0 or r.get("gpu_presented_min", 0) < 600 or r.get("gsk_renderer") != "gl":
+                    problems.append(f"{row} {n}: not the zero-copy path ({r.get('cpu_copied_max')} readbacks, {r.get('gpu_presented_min')} from the GPU, renderer {r.get('gsk_renderer')})")
+            if row in ("C-36", "C-36gl") and not r.get("cpu_copied_max"):
+                problems.append(f"{row} {n}: goal 36's path should copy to the CPU")
+            if row.startswith("C") and not r.get("renderer_used"):
+                problems.append(f"{row} {n}: the renderer GTK used isn't recorded")
+            if row in ("C-36gl", "C", "C+M6", "C+M6c") and r.get("renderer_used") != ["GskGLRenderer"]:
+                problems.append(f"{row} {n}: drew with {r.get('renderer_used')}, not GTK's GL renderer")
+            if r.get("holds_60") != (r["frame_ms"] <= 1000 / 60 and r["p95_interval_ms"] <= 20):
+                problems.append(f"{row} {n}: holds_60 disagrees with its numbers")
+    if "Wayland window" not in (rows.get("B-native", {}).get("1000000", {}).get("frame_ms_is") or ""):
+        problems.append("B-native didn't present to a window")
+    st = res.get("setup", {})
+    m = st.get("monitor", {})
+    if not st.get("compositor", "").startswith("Hyprland") or not m.get("refreshRate") or not m.get("scale") or "off" not in st.get("vsync", ""):
+        problems.append("the setup (compositor, refresh, scale, vsync) isn't recorded")
+    text = md.read_text()
+    for word in ("Setup:", "Each 36b feature's effect", "compositor", "1280 × 720"):
+        if word not in text:
+            problems.append(f"results-desktop.md doesn't state '{word}'")
+    if problems:
+        return False, "; ".join(problems[:12])
+    c = rows["C"]
+    return True, (f"results-desktop.json fresh (commit {res['commit']}), {st['compositor'].split(' built')[0]}, "
+                  f"{m.get('refreshRate'):.2f} Hz ×{m.get('scale')}; C frame ms "
+                  + ", ".join(f"{pb.mill(n)} {c[str(n)]['frame_ms']:.2f}" for n in pb.SIZES)
+                  + f"; 0 readbacks in every 36b C run ({sum(1 for r in rows if r.startswith('C') and r not in ('C-36', 'C-36gl'))} rows; goal 36's path C-36/C-36gl copies, as it should)")
+
+
+def m8():
+    """The page from the desktop (GOAL.md 36b M8): chapter 1 generated from results-desktop.json (and goal 36's table
+    from results.json), the setup stated, no claim left from the inferred software-renderer reading, M5 still passing."""
+    import why_tables as wt
+    page = (ROOT / "docs" / "why.html").read_text()
+    problems = []
+    d = wt.load_desktop()
+    if not d:
+        return False, "results-desktop.json missing or provisional: the page can't come from the desktop"
+    res = json.loads((OUT / "results.json").read_text())
+    frags = wt.fragments(res, d)
+    if wt.apply(page, frags) != page:
+        problems.append("the page differs from what results-desktop.json and results.json give: rerun scripts/why_tables.py")
+    for part in ("setup", "features", "perf_xvfb"):
+        if f"<!-- why:{part} -->" not in page:
+            problems.append(f"no {part} part on the page")
+    for word in ("Hyprland", "Hz", "Vsync", "1280 × 720", "GPU-composited"):
+        if word not in frags["setup"] + frags["headline"]:
+            problems.append(f"the setup doesn't state '{word}'")
+    for stale in ("GTK's software renderer on a virtual display", "drawing straight from the GPU into the window is not built yet",
+                  "Measured with vsync off on a virtual display, not a real screen"):
+        if stale in page:
+            problems.append(f"the page still says: {stale!r}")
+    if "the guess was wrong" not in page:
+        problems.append("the page doesn't say what became of goal 36's inferred residual")
+    if "is GTK's renderer choice" not in page or "C-36gl" not in d["rows"]:
+        problems.append("the page doesn't split M6's saving into the renderer and the readback (review item 3)")
+    if ("capped (compositor" not in page or "didn't speed up this benchmark" not in page
+            or "within the runs' spread" not in page or "omxcode and JS + WebGPU tie" not in page):
+        problems.append("review items 7/8/10: ties, the capped window row, M6b's role")
+    ok5, msg5 = m5()
+    if not ok5:
+        problems.append("M5: " + msg5)
+    if problems:
+        return False, "; ".join(problems[:10])
+    c = d["rows"]["C"]
+    return True, (f"docs/why.html chapter 1 from results-desktop.json (commit {d['commit']}): omxcode "
+                  + ", ".join(f"{wt.mn(n)} {c[str(n)]['frame_ms']:.2f} ms" for n in (1_000_000, 5_000_000, 20_000_000))
+                  + f"; setup, feature effects and goal 36's Xvfb table on the page; M5 PASS")
+
+
 MILESTONES = [
     ("M0", m0),
     ("M1", m1),
@@ -218,6 +431,11 @@ MILESTONES = [
     ("M3", m3),
     ("M4", m4),
     ("M5", m5),
+    ("M6", m6),
+    ("M6b", m6b),
+    ("M6c", m6c),
+    ("M7", m7),
+    ("M8", m8),
 ]
 
 

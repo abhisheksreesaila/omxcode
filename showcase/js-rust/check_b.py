@@ -32,6 +32,10 @@ CHROME_ARGS = [
     "--use-gl=angle", "--use-angle=gl-egl", "--ignore-gpu-blocklist", "--enable-gpu",
     "--disable-gpu-vsync", "--disable-frame-rate-limit", "--window-size=1280,720",
 ]
+# goal 36b (desktop measurement, D-735): particles_bench --desktop swaps these for a headed window on Wayland and a
+# native window instead of --offscreen
+HEADLESS_ARGS = ["--headless=new"]
+NATIVE_ARGS = ["--offscreen"]
 # glvnd would otherwise hand Chromium Mesa's EGL (llvmpipe, a CPU renderer)
 CHROME_ENV = {"__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/10_nvidia.json"}
 
@@ -105,7 +109,7 @@ def run_wasm(n, frames, out, shot=None, threads=None, positions=True):
         cdp = free_port()
         profile = tempfile.mkdtemp(prefix="chromium_", dir=out)
         t0 = time.time() * 1000  # (before the browser starts: cold start is launch to first drawn frame)
-        chrome = subprocess.Popen([CHROMIUM, "--headless=new", f"--remote-debugging-port={cdp}", f"--user-data-dir={profile}",
+        chrome = subprocess.Popen([CHROMIUM, *HEADLESS_ARGS, f"--remote-debugging-port={cdp}", f"--user-data-dir={profile}",
                                    "--no-first-run", "--no-default-browser-check", *CHROME_ARGS, "about:blank"],
                                   env={**os.environ, **CHROME_ENV}, stdout=subprocess.DEVNULL, stderr=open(out / "chrome.log", "w"))
         try:
@@ -158,7 +162,7 @@ def run_native(n, frames, out, shot=None, positions=True):
     out.mkdir(parents=True, exist_ok=True)
     headless.ensure()
     env = {**os.environ, "WGPU_BACKEND": "vulkan"}
-    cmd = [str(NATIVE), "--scripted", "--offscreen", "--n", str(n), "--frames", str(frames), "--out", str(out)] + ([] if positions else ["--no-positions"])
+    cmd = [str(NATIVE), "--scripted", *NATIVE_ARGS, "--n", str(n), "--frames", str(frames), "--out", str(out)] + ([] if positions else ["--no-positions"])
     ppm = None
     if shot:
         ppm = out / "shot.ppm"

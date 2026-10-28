@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 36b: zero-copy presentation, measured on the real desktop (2026-10-28)
+- **Setup:** RTX 3090 ×2, driver 610.57.04, GTK 4.22.4, Mojo 1.1, Hyprland 0.56.2 (owner's desktop, D-735), Chromium 152.
+- **Worked:** a GPU Canvas picture reaches GTK with no GPU→CPU readback: CUDA copies it GPU→GPU into a GL texture (or blends into one), handed over as a GdkGLTexture; GTK's GL renderer (its Vulkan renderer downloads GL textures on NVIDIA). Generic in mojoui (mojoui/present.mojo, Surface's gpu fields, PointCloud, the GTK host); the particle app is unchanged. Hardware-blended points and lines from the app's own Mojo place/tint, equal to the compute splat byte for byte; a two-atomic splat.
+- **Broke and fixed:** CUDA dmabuf export unsupported (801); GBM dmabuf into GTK's Vulkan aborts on the second GPU; GL stalls ~4.7 ms when it starts behind queued CUDA work (the host now waits once a frame); a blending/splat choice made on the first frames picked wrong (now the splat first, measured later).
+- **Result (desktop, gated, frame ms 1M/5M/20M):** omxcode 1.20/1.57/3.10 (goal 36 on Xvfb: 5.33/5.74/7.63); JS + WebGPU 1.23/1.37/3.01; Rust + wgpu offscreen 0.34/1.52/5.98 (in a window: compositor-paced, 16.7). Zero-copy saved 4.4–4.8 ms, the packed splat up to 0.78, blending never won here. Goal 36's guess that the gap was GTK's software renderer was wrong: goal 36's path still costs 5.61 ms at 1M on the GPU-rendered desktop.
+- **Next small step:** a fused step + draw pass (offered to every stack alike, fair play) is the lever left at 5M+.
+
 ## Experiment 35 (2026-10-27): AG-UI, agents that build the screen (goal 35)
 - **Setup:** this worktree's own pixi env gained the official AG-UI Python SDK (ag-ui-protocol 1.0.0), anthropic, jsonpatch and jsonschema (the last two only as the checks' independent oracles).
 - **Worked:** streams in mojoui.http (each SSE event its own Event, then the end; cancel; idle timeout; Transport.stream is the seam); mojoui.jsonpatch (RFC 6902, 37 cases agree with the jsonpatch library); mojoui.agui (every listed AG-UI event, five SDK-recorded streams read into the same conversation and state as an independent Python reading; RunAgentInputs valid by the SDK's models); mojoui.genui (one catalog → the render_ui JSON Schema, the validator, the native renderer; 24 cases agree with jsonschema); examples/agentchat on GTK and the web: streamed words, a chart and a form built by the agent, a button as the tool result, edits as state, refused UI reported to the agent. The live backend speaks the OpenAI-compatible API (the OMX Console by default, Claude optional) and repairs small models' tool JSON.
