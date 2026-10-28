@@ -139,6 +139,89 @@ def raw_link(path, op):
     return json.loads(buf or b"{}")
 
 
+def raw_lines(path, chunks, want):
+    """Raw bytes to the host's agent link, sent in pieces (a pause between them): its first `want` answer lines."""
+    with _socket.socket(_socket.AF_UNIX) as s:
+        s.settimeout(10)
+        s.connect(str(path))
+        for chunk in chunks:
+            s.sendall(chunk)
+            time.sleep(0.3)
+        buf = b""
+        while buf.count(b"\n") < want:
+            got = s.recv(65536)
+            if not got:
+                break
+            buf += got
+    return [json.loads(l) for l in buf.split(b"\n")[:want]]
+
+
+def link_bytes_problems(path, where):
+    """(D-677) A UTF-8 character split across two reads is read whole; a line that isn't UTF-8 is refused as one line
+    (the link answers it and the next), never a crash."""
+    problems = []
+    whole = '{"op":"view","note":"café"}\n'.encode()
+    cut = whole.index(0xC3) + 1
+    bad = b'{"op":"view","note":"\xff\xfe"}\n'
+    try:
+        a, b, c = raw_lines(path, [whole[:cut], whole[cut:] + bad, b'{"op":"view"}\n'], 3)
+    except (OSError, ValueError) as e:
+        return [f"{where}: the agent link broke on split or invalid UTF-8 ({e})"]
+    if not a.get("ok"):
+        problems.append(f"{where}: a request with a character split across reads was refused ({str(a)[:160]})")
+    if b.get("ok") or "UTF-8" not in str(b.get("error", "")):
+        problems.append(f"{where}: a line that isn't UTF-8 wasn't refused as such ({str(b)[:160]})")
+    if not c.get("ok"):
+        problems.append(f"{where}: the line after an invalid one wasn't answered ({str(c)[:160]})")
+    return problems
+
+
+def socket_mode_problems(path, where):
+    """(D-677) The agent link's socket file is the user's alone: mode 0600."""
+    import stat
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    return [] if mode == 0o600 else [f"{where}: the agent socket's mode is {oct(mode)}, not 0o600"]
+
+
+def listening_unix_paths(pid):
+    """Unix sockets with a path that process `pid` listens on (/proc: its descriptors' inodes against /proc/net/unix)."""
+    inodes = set()
+    for fd in Path(f"/proc/{pid}/fd").iterdir():
+        try:
+            t = os.readlink(fd)
+        except OSError:
+            continue
+        if t.startswith("socket:["):
+            inodes.add(t[8:-1])
+    out = []
+    for line in Path("/proc/net/unix").read_text().splitlines()[1:]:
+        f = line.split()
+        if len(f) >= 8 and f[6] in inodes and int(f[3], 16) & 0x10000 and not f[7].startswith("@"):  # (__SO_ACCEPTCON, a path)
+            out.append(f[7])
+    return out
+
+
+def no_socket_unset(cmd, where, env=None, ready=None, seconds=8):
+    """(D-677) With MOJOUI_AGENT_SOCKET unset the host opens no agent link: no listening Unix socket with a path."""
+    e = {k: v for k, v in os.environ.items() if k != "MOJOUI_AGENT_SOCKET"}
+    e.update(env or {})
+    proc = subprocess.Popen(cmd, cwd=ROOT, env=e, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        time.sleep(seconds)
+        if proc.poll() is not None:
+            return [f"{where}: the host ended before it could be looked at: {proc.stdout.read()[-300:]}"]
+        paths = []
+        for pid in [proc.pid] + [int(c) for c in Path(f"/proc/{proc.pid}/task/{proc.pid}/children").read_text().split()]:
+            paths += listening_unix_paths(pid)
+        return [f"{where}: with MOJOUI_AGENT_SOCKET unset the host listens on {paths}"] if paths else []
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def page_side_refusal(c, path, where):
     """The widget's runtime refuses what the agent host would: an undeclared field and a wrong type, sent raw."""
     problems = []
@@ -165,6 +248,8 @@ def m0_web():
         if not wait_socket(sock, None, 30):
             problems.append("web: the host opened no agent link (MOJOUI_AGENT_SOCKET)")
             return ""
+        problems += socket_mode_problems(sock, "web")
+        problems += link_bytes_problems(sock, "web")
         c = agent_client.Client(attach=sock)
         try:
             p, s = widget_story(c, "web")
@@ -208,6 +293,8 @@ def m0_gtk():
             log.seek(0)
             return [f"gtk: the app opened no agent link: {log.read()[-500:]}"], samples
         time.sleep(1.5)  # (its web views load their widgets)
+        problems += socket_mode_problems(sock, "gtk")
+        problems += link_bytes_problems(sock, "gtk")
         c = agent_client.Client(attach=sock)
         try:
             p, s = widget_story(c, "gtk")
@@ -965,6 +1052,10 @@ def m0():
     dts = (ROOT / "mojoui/hosts/static/mojoui-widgets.d.ts").read_text()
     if "fields" not in dts or "describe" not in dts:
         problems.append("mojoui-widgets.d.ts doesn't type describe and fields")
+    for name in ("agent_link", "gtk_webview"):  # (the link's bytes: split characters, invalid UTF-8; the views' rules)
+        err = g34.mojo_test(name, name + ": ok")
+        if err:
+            problems.append(err)
     t = run([sys.executable, "tests/test_agent_widgets.py"], timeout=300)
     if t.returncode != 0 or "agent_widgets: ok" not in t.stdout:
         problems.append("tests/test_agent_widgets.py: " + (t.stdout + t.stderr)[-500:])
@@ -980,6 +1071,8 @@ def m0():
     p, gtk_samples = m0_gtk()
     problems += p
     problems += m0_no_describe()
+    problems += no_socket_unset([str(BUILD / "widgets" / "linux" / "widgets")], "gtk", env={"MOJOUI_WINDOW": "1280x860"})
+    problems += no_socket_unset([sys.executable, "mojoui/hosts/web.py", str(BUILD / "widgets" / "web"), str(free_port())], "web")
     M0_SAMPLES[:] = web_samples + gtk_samples
     for line in M0_SAMPLES:
         print("AGENT: " + line.replace("\n", "\\n"), flush=True)

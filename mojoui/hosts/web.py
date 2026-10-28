@@ -1784,8 +1784,10 @@ def make_app(module_dir):
             def handle(self):
                 for raw in self.rfile:
                     try:
-                        op = json.loads(raw)
+                        op = json.loads(raw.decode("utf-8"))  # (a line that isn't UTF-8 is refused as one, as GTK's link does)
                         out = link_call(op) if isinstance(op, dict) else {"ok": False, "error": "a request is a JSON object"}
+                    except UnicodeDecodeError:
+                        out = {"ok": False, "error": "not UTF-8 JSON text"}
                     except Exception as ex:  # (a bad request is the agent's mistake: say so, keep the link)
                         out = {"ok": False, "error": f"{type(ex).__name__}: {ex}"}
                     self.wfile.write((json.dumps(out, ensure_ascii=False) + "\n").encode())
