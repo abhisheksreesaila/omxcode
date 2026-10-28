@@ -261,9 +261,9 @@ struct Surface(Copyable, Movable):
         self.ends_row = ends_row
 
 
-@fieldwise_init
 struct TypeScale(Copyable, Movable):
-    """The theme's font and its sizes (points): body text, a caption, a headline, a title, a section's small caps title."""
+    """The theme's font and its sizes (points): body text, a caption, a headline, a title, a section's small caps title;
+    and the line heights its text styles take (CSS's unitless line-height; 0: the body's `line`)."""
 
     var family: String  # "Inter"; "" for the platform's
     var mono: String  # figures in a status bar or a formula ("JetBrains Mono"); "" for the family
@@ -274,6 +274,30 @@ struct TypeScale(Copyable, Movable):
     var section: Float64
     var tabular: Bool  # figures all one width ("tnum": columns of numbers line up)
     var line: Float64  # a line's height as a share of its text's size (CSS's unitless line-height: 1.45); 0: the font's own
+    var title_line: Float64  # a title's, a headline's and a caption's own (omxqua's .text.title 1.1, .headline 1.3,
+    var headline_line: Float64  # .caption 1.4); 0: `line`. Apple hosts read them (GTK and the web: the theme's sheets,
+    var caption_line: Float64  # written from them), D-659
+
+    def __init__(out self, family: String, mono: String, body: Float64, caption: Float64, headline: Float64, title: Float64,
+                 section: Float64, tabular: Bool, line: Float64, title_line: Float64 = 0, headline_line: Float64 = 0,
+                 caption_line: Float64 = 0):
+        self.family = family
+        self.mono = mono
+        self.body = body
+        self.caption = caption
+        self.headline = headline
+        self.title = title
+        self.section = section
+        self.tabular = tabular
+        self.line = line
+        self.title_line = title_line
+        self.headline_line = headline_line
+        self.caption_line = caption_line
+
+    def line_of(self, title: Bool, headline: Bool, caption: Bool) -> Float64:
+        """The line height (a share of the text's size) of a title, a headline, a caption or body text."""
+        var own = self.title_line if title else (self.headline_line if headline else (self.caption_line if caption else Float64(0)))
+        return own if own > 0 else self.line
 
 
 @fieldwise_init

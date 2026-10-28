@@ -67,7 +67,7 @@ def shoot_web(app, screen, settings, steps):
     return None if r.returncode == 0 else f"{app} {screen} web: {log[-300:]}"
 
 
-SOURCES = ["mojoui", "themes", "hosts", "examples/omxplorer", "examples/maccheck", "examples/console", "ci/mac", "apple"]
+SOURCES = ["mojoui", "themes", "hosts", "examples/omxplorer", "examples/maccheck", "examples/console", "examples/widgets", "ci/mac", "apple"]
 
 
 def stamp():

@@ -167,6 +167,9 @@ build_mac() {
   fi
   plist apple/mac/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$app/Contents/Resources/fonts/"
+  # Its JavaScript (docs/js.md, goal 34b M2): each WebComponent runs in a WKWebView loading the web's own bundles, built
+  # into Resources/webview by the same esbuild step (nothing for an app without web/widgets/)
+  pixi run python scripts/web_assets.py --webview "$app/Contents/Resources/webview" "$EX"
   printf 'APPL????' > "$app/Contents/PkgInfo"
   sign "$app"
   rm -f "$out/$NAME-mac.zip"; (cd "$out" && zip -qry "$NAME-mac.zip" "$NAME.app")

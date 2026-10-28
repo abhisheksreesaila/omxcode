@@ -8,6 +8,7 @@
 
 from mojoui.hosts.objc import cls, msg, ns_string, from_ns
 from mojoui.hosts.apple_canvas import CGRect
+from mojoui.hosts.appkit_webview import paint_shots
 
 comptime MAX_SHOTS = 400  # a long session stops taking pictures here (the log goes on)
 
@@ -82,8 +83,9 @@ struct MacReport(Movable):
                 break
         return n + "-" + (cause if cause.byte_length() > 0 else "change")
 
-    def save_png(self, view: Int, name: String) -> Bool:
-        """The view as AppKit draws it, into NNN.png (cacheDisplayInRect: draws it again, off screen)."""
+    def save_png(self, view: Int, name: String, webviews: Int = 0) -> Bool:
+        """The view as AppKit draws it, into NNN.png (cacheDisplayInRect: draws it again, off screen), with the web views'
+        last pictures drawn in where they are (`webviews`: the host's MacWebViews; a WKWebView draws out of process)."""
         var b = msg[CGRect](view, "bounds")
         if b.width < 1 or b.height < 1:
             return False
@@ -91,6 +93,7 @@ struct MacReport(Movable):
         if rep == 0:
             return False
         _ = msg(view, "cacheDisplayInRect:toBitmapImageRep:", b.x, b.y, b.width, b.height, rep)
+        paint_shots(webviews, rep, view)
         var png = msg(rep, "representationUsingType:properties:", 4, msg(cls("NSDictionary"), "dictionary"))  # NSBitmapImageFileTypePNG
         if png == 0:
             return False
