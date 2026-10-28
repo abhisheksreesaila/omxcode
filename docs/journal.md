@@ -672,6 +672,34 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Coordinator added M1c; proof first: a scratch copy of the widgets app under scripts/dev.sh, edits to counter.js, counter.css and editor.ts reaching the open page (same window object, the typed note and Words: 4 kept, mounts 2), the counter's thrown error as widgets/counter.js:<line> in the dev log and in a GTK debug build's log, the inspector shown in the debug build and refused in release, release builds without maps or dev endpoints, the dev CSP equal to release.
 - Web and GTK each passed on their first run; rebuilds take about 0.3 s.
 - M1c PASS (84 s).
+## Goal 34b M2: the Mac's WKWebView (2026-10-27, worktree mojo-ui-js-mac)
+- m2() written first (scripts/check.py: build, the same bundle in the app, llvm-nm -u against apple/sdk, side.txt's widgets lines = MAC_STEPS, then the newest fresh mac-ci run's dumps and logs: typing, Load sample, the counter, GTK's security probes, two crashes, boxes against the web's at side.SIZE, a picture).
+- mojoui/hosts/appkit_webview.mojo: WKWebView per widget, WKURLSchemeHandler for mojoui://app (the GTK page, fixed file list, the web's CSP), WKScriptMessageHandler (strings from the main frame, GTK's rules), navigation and UI delegates, a content rule list, callAsyncJavaScript with m as data. Built first time; `llvm-nm -u`: the same 27 symbols, none new.
+- Run 40607584136 (one push, ci/apps.txt so only widgets ran): everything worked first time on macOS 26 (typing "Words: 3", Load sample, 4 real clicks + the reply "count 5", one mount across the rebuild, all 18 probes with GTK's answers, crash once → reload with Mojo's props, twice → `instead`); the report's pictures show the web views (WebKit's snapshots drawn in). Only the boxes failed: same sizes, 105 pt low.
+- Cause 1 (generic AppKit): the header VStack stood 155 high for 64: a child stack's inner room and the column's room are equally free. Fix D-668 (251 shrink-to-fit for a column's non-growing child stacks). Run 40608308578: header 64, boxes 14 pt low.
+- Cause 2: the Mac gave omxqua's title the body's 1.45 line (41 high; the web's .text.title is 1.1 → 31). Fix D-669 (TypeScale title/headline/caption lines; the sheets' bytes unchanged). Run 40608629943: editor 48,140 vs the web's 48,139; counter 984,183 vs 182; Load sample, Ask the counter within 1 pt. `scripts/check M2` PASS.
+- "Objective-C protocol not found: WKScriptMessageHandler": a protocol no class in the process names has no runtime object; WebKit asks by selector, so the class adds only the protocols that exist.
+- Regression for D-668/D-669 (they change every omxqua app's Mac layout): run 40609114384 (widgets + console, fresh): the console's ten screens 1268 of 1268 boxes within parity of the web's (goal 33 M7's Mac part); `scripts/check M2` PASS on it; `scripts/check M3` PASS (399 s).
+
+## 2026-10-27 · goal 34b: the Mac branch merged
+- goal-34b-mac (bb7017c) merged into goal-34b: decisions and journal kept both; check.py keeps m0, m1, m1b, m1c and the Mac's m2. Both branches had used D-650–D-655: the Mac's D-650–D-660 renumbered to D-660–D-670 first (4ea5267, D-671).
+
+## 2026-10-27 · goal 34b: drawn views follow a live theme switch
+- m1b's proof made stricter first: the sparkline under the note (a mojoui Canvas) must be dark in the dark pictures and light in the light ones (median tone of its box). Red on the old pictures: web and GTK dark both 241 of 255 (the light card, never redrawn: a canvas redraws only on a new version).
+- Fix D-673 (hosts, not the app): GTK's apply_design forgets the drawn versions on a new theme key; the web's canvas adapter redraws when the skin it drew in changes. M1b's sparkline parts pass; pictures m1b-{web,gtk}-{light,dark}.png show it dark in dark.
+
+## 2026-10-27 · goal 34b: the Mac gets M0's and M1b's features
+- m2 first: two new Mac screens (ci/mac/side.txt = MAC_STEPS): `light` (the light picture) and `theme` (tokens in light, an agent's set of the counter and the editor, a live switch to dark, tokens again); m2 requires the chart now (no skip), the tokens to match in both modes, one mount each, the sparkline dark in dark, the sets in update() (Last count: 42, Words: 4), describe()'s facts back (WIDGETFACTS:), release views not inspectable.
+- Shared take_text (D-672): GTK's M0 passes on it (77 s). The Mac: facts, mojoui.set's sent_to, system appearance (it never told apps light/dark before), scheme:/set: steps, isInspectable and maps under DEVTOOLS (D-674). Builds for mac first time.
+
+## 2026-10-27 · goal 34b: shared JS widgets
+- git mv examples/widgets/web/{package.json,package-lock.json,widgets/editor.*,widgets/chart.*} → mojoui/widgets/; examples/widgets/web/shared.json picks editor and chart; the counter stays the app's own (D-675).
+- web_assets.py: shared_entries + install_from; the bundles came out byte for byte the same (editor.791f6708…, chart.42ca8fb5…). docs/js.md §0 says how any app adds them; the matrix's debt table no longer lists them.
+
+## 2026-10-27 · goal 34b: a fresh Mac run, then the whole check
+- The Mac's washed-out text was ours (D-676), not the runner's inactive window: every skinned Text took ink2 (captions ink3) while omxqua's sheets say ink and ink2. Fixed before the run.
+- scripts/mac-ci widgets console → run 40617272485 (fresh, stamp 7ce14f5cda6059f5). m2 PASS on its first try: the chart drew, tokens matched in light and dark with one mount each, the sparkline dark in dark (m2-widgets-mac-dark.png), Last count: 42 and Words: 4 from the sets, the facts back, WEBINSPECT 0. The console's Mac boxes after D-673/D-676: 1268 of 1268 within parity of the web's (goal 33 M7's Mac part, run by hand).
+- `pixi run python scripts/check.py`: M0, M1, M1b, M1c, M2, M3 PASS (M3 380 s).
 
 ## 2026-10-27 · goal 35 M0: streaming HTTP
 - scripts/check.py written first (M0–M4, from GOAL.md); pixi gains ag-ui-protocol 1.0.0, anthropic, jsonpatch, jsonschema (this worktree's own env).
@@ -686,11 +714,15 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 
 ## 2026-10-27 · goal 35 M2: generative UI
 - mojoui/genui.mojo: catalog → schema → validator → renderer; 24 validation cases agree with jsonschema. GenUi.view made read-only (App.view takes self): controls are indexed once at parse time, in drawing order.
-- examples/agentchat composes Agent + GenUi. The form round trip worked on its first GTK run. Fixed after looking at the shots: agent cards centred (wrapped in a row with a Spacer), the sparkline drew black on the web (fill the card colour first, as the widgets app does), the web composer capped at 70vw (D-693).
+- examples/agentchat composes Agent + GenUi. The form round trip worked on its first GTK run. Fixed after looking at the shots: agent cards centred (wrapped in a row with a Spacer), the sparkline drew black on the web (fill the card colour first, as the widgets app does), the web composer capped at 70vw (D-713).
 - The check's M3 step `segment:Range=Year` used a grammar no host has: corrected to `segment:0=Year` (the hosts' `segment:<index>=<option>`), same proof.
 - M2 PASS (48 s).
 
 ## 2026-10-27 · goal 35 M3: the chat app
-- Coordinator (owner direction): the live agent speaks the OpenAI-compatible API, the OMX Console by default, Claude optional (D-690). The proof was extended before the work: m3_live uses a stand-in server, checks the Bearer key from the named variable, the repaired UI, and the docs.
+- Coordinator (owner direction): the live agent speaks the OpenAI-compatible API, the OMX Console by default, Claude optional (D-710). The proof was extended before the work: m3_live uses a stand-in server, checks the Bearer key from the named variable, the repaired UI, and the docs.
 - The stand-in's broken JSON (```json fences, single quotes, trailing commas, "card", "chart", "data") came out as Card(Sparkline values=…) on the first try; through the app on GTK the chart card appears (docs/goals/35/m3-live-standin-gtk.png); no key in any output.
 - M3 PASS (39 s). Shots: docs/goals/35/agentchat-gtk.png, agentchat-web.png.
+
+## 2026-10-27 · goal 35: origin/main merged
+- origin/main (7b61640: goal 33, the cover page, goal 34b with its reviewer follow-ups) merged into goal-35-agui. GOAL.md and scripts/check.py stay goal 35's; docs/goals/34b-GOAL.md and 34b-check.py re-archived from 34b's final GOAL.md/check.py (ROOT line fixed); decisions and journal keep both; goal 33's httpcheck shots keep goal 35's (with the Stream button); the matrix regenerated.
+- Decision numbers collided (34b's follow-ups D-677–D-682, goal 35's D-680–D-695): goal 35's renumbered to D-700–D-715 everywhere (D-716).

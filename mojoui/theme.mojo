@@ -261,9 +261,9 @@ struct Surface(Copyable, Movable):
         self.ends_row = ends_row
 
 
-@fieldwise_init
 struct TypeScale(Copyable, Movable):
-    """The theme's font and its sizes (points): body text, a caption, a headline, a title, a section's small caps title."""
+    """The theme's font and its sizes (points): body text, a caption, a headline, a title, a section's small caps title;
+    and the line heights its text styles take (CSS's unitless line-height; 0: the body's `line`)."""
 
     var family: String  # "Inter"; "" for the platform's
     var mono: String  # figures in a status bar or a formula ("JetBrains Mono"); "" for the family
@@ -274,6 +274,39 @@ struct TypeScale(Copyable, Movable):
     var section: Float64
     var tabular: Bool  # figures all one width ("tnum": columns of numbers line up)
     var line: Float64  # a line's height as a share of its text's size (CSS's unitless line-height: 1.45); 0: the font's own
+    var title_line: Float64  # a title's, a headline's and a caption's own (omxqua's .text.title 1.1, .headline 1.3,
+    var headline_line: Float64  # .caption 1.4); 0: `line`. Apple hosts read them (GTK and the web: the theme's sheets,
+    var caption_line: Float64  # written from them), D-669
+    var text_ink: Int  # which of the palette's inks body text (and titles) and captions wear: 1 ink, 2 ink2, 3 ink3
+    var caption_ink: Int  # (omxqua: 1 and 2, its sheets' .text and .caption; the skins: 2 and 3). Apple hosts read them, D-676
+
+    def __init__(out self, family: String, mono: String, body: Float64, caption: Float64, headline: Float64, title: Float64,
+                 section: Float64, tabular: Bool, line: Float64, title_line: Float64 = 0, headline_line: Float64 = 0,
+                 caption_line: Float64 = 0, text_ink: Int = 2, caption_ink: Int = 3):
+        self.family = family
+        self.mono = mono
+        self.body = body
+        self.caption = caption
+        self.headline = headline
+        self.title = title
+        self.section = section
+        self.tabular = tabular
+        self.line = line
+        self.title_line = title_line
+        self.headline_line = headline_line
+        self.caption_line = caption_line
+        self.text_ink = text_ink
+        self.caption_ink = caption_ink
+
+    def ink_of(self, p: Palette, caption: Bool) -> UInt32:
+        """The ink text of this style wears: body text and titles text_ink, captions caption_ink (1, 2 or 3)."""
+        var k = self.caption_ink if caption else self.text_ink
+        return p.ink if k <= 1 else (p.ink2 if k == 2 else p.ink3)
+
+    def line_of(self, title: Bool, headline: Bool, caption: Bool) -> Float64:
+        """The line height (a share of the text's size) of a title, a headline, a caption or body text."""
+        var own = self.title_line if title else (self.headline_line if headline else (self.caption_line if caption else Float64(0)))
+        return own if own > 0 else self.line
 
 
 @fieldwise_init
@@ -517,12 +550,26 @@ def theme_tokens(t: Theme) -> String:
             + ',"corners":' + corners + "}")
 
 
+def _css_font_name(name: String) -> String:
+    """A font's name, safe inside tokens_css's single-quoted CSS string (D-682): letters, digits, spaces, '-', '_', '.'
+    and any non-ASCII character kept; quotes, backslashes, braces, ';', '<' and control characters dropped."""
+    var out = String("")
+    for c in name.codepoint_slices():
+        var b = Int(c.as_bytes()[0])
+        if c.byte_length() > 1 or (b >= 0x30 and b <= 0x39) or (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) \
+                or b == 0x20 or b == 0x2D or b == 0x5F or b == 0x2E:
+            out += String(c)
+    return out^
+
+
 def tokens_css(t: Theme) -> String:
     """The tokens palette_css doesn't carry, as CSS variables on the page's body: the fonts (--o-font, --o-mono,
     --o-font-size) and the corners (--o-radius-card, --o-radius-button, --o-radius-field), for a widget's own sheet."""
     var ty = t.look.type.copy()
-    var family = ("'" + ty.family + "', " if ty.family != "" else String("")) + "system-ui, sans-serif"
-    var mono = ("'" + ty.mono + "', " if ty.mono != "" else String("")) + "ui-monospace, monospace"
+    var fam = _css_font_name(ty.family)
+    var mon = _css_font_name(ty.mono)
+    var family = ("'" + fam + "', " if fam != "" else String("")) + "system-ui, sans-serif"
+    var mono = ("'" + mon + "', " if mon != "" else String("")) + "ui-monospace, monospace"
     var c = t.look.controls.copy()
     return ("body {--o-font: " + family + ";--o-mono: " + mono + ";--o-font-size: " + _num(ty.body) + "px;--o-radius-card: "
             + String(card_radius(t)) + "px;--o-radius-button: " + String(c.button_radius) + "px;--o-radius-field: " + String(c.field_radius) + "px;}")

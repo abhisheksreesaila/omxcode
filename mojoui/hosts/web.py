@@ -47,9 +47,12 @@ SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TI
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
 CHECKED, DISABLED, DANGER = 1, 2, 4  # menu item flags (mojoui/menus.mojo)
-AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")
-DEV = os.environ.get("MOJOUI_DEV") == "1"  # scripts/dev.sh's server (goal 34b M1c): widgets reload when their sources change, source maps
-DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")  # are served; never set by a release run (only 127.0.0.1 may ask)  # an agent host may attach here (docs/agent.md: the agent link)
+AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an agent host may attach here (docs/agent.md: the agent link)
+# scripts/dev.sh's server (goal 34b M1c): widgets reload when their sources change, source maps are served; only
+# 127.0.0.1 may ask, /dev/reload only with the token. Refused unless the app's build is a debug build (D-678), and never
+# to be set on a deployed host (docs/js.md).
+DEV = os.environ.get("MOJOUI_DEV") == "1"
+DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 JPEG_QUALITY = 85
 MAX_SESSIONS = 200  # oldest tabs are closed beyond this
@@ -390,6 +393,9 @@ CANVAS_JS = r"""
 (() => {
   const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8;
   const shape = () => document.getElementById('mojoui-v').value;
+  // the theme a canvas was drawn in (skin()'s classes and tokens): a drawn view paints from the theme, so a switch
+  // (light/dark, a skin) redraws it even when its version didn't move (D-673)
+  const skinNow = () => { const k = document.getElementById('mojoui-skin-classes'); return k ? (k.dataset.classes || '') + '|' + (k.dataset.tokens || '') : ''; };
   // keys a canvas uses itself (the page mustn't scroll or move focus on them)
   const OWN_KEYS = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'PageDown', 'PageUp', 'Home', 'End', 'Backspace', 'Delete', 'Escape', 'F2', ' ']);
   // Keys typed on a canvas before the in-place editor they open has appeared (a round trip later) wait here, then
@@ -465,7 +471,7 @@ CANVAS_JS = r"""
     if (div.mojoui) return;
     const cv = div.querySelector('canvas'), g = cv.getContext('2d');
     const n = Number(div.dataset.node), sid = div.dataset.sid;
-    const st = div.mojoui = { want: true, busy: false, drawn: -1, count: 0, times: [], queue: [], sending: false, updating: false };
+    const st = div.mojoui = { want: true, busy: false, drawn: -1, skin: '', count: 0, times: [], queue: [], sending: false, updating: false };
     const meta = () => document.getElementById('n' + n + '-meta');
     const playing = () => { const m = meta(); return !!m && m.dataset.frames !== '0'; };
     async function pump() {
@@ -475,7 +481,7 @@ CANVAS_JS = r"""
         while (div.isConnected && (st.want || playing())) {
           const tick = playing() ? 1 : 0, m = meta();
           if (tick) await new Promise(ok => requestAnimationFrame(ok));  // at most one frame per display refresh
-          const version = m ? m.dataset.version : '';
+          const version = m ? m.dataset.version : '', skin = skinNow();
           st.want = false;
           const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
@@ -491,11 +497,11 @@ CANVAS_JS = r"""
           const img = await createImageBitmap(await res.blob());
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
           g.drawImage(img, 0, 0);
-          st.drawn = version; st.count++; st.times.push(performance.now());
+          st.drawn = version; st.skin = skin; st.count++; st.times.push(performance.now());
           if (st.times.length > 1200) st.times.splice(0, 600);  // (frame times, for tests; bounded)
           div.dataset.frame = `${st.count} ${cv.width}x${cv.height} ${r.width.toFixed(0)}x${r.height.toFixed(0)} ${dpr}`;
           if (res.headers.get('X-Mojoui-Pending') === '1') update();
-          if (meta() && meta().dataset.version !== String(st.drawn)) st.want = true;
+          if ((meta() && meta().dataset.version !== String(st.drawn)) || st.skin !== skinNow()) st.want = true;
           if (meta() && (meta().dataset.tip || '') !== (div.dataset.tip || '')) { div.dataset.tip = meta().dataset.tip || ''; div.title = div.dataset.tip; }  // (SET_TIP: a drawn view's words)
           if (res.headers.get('X-Mojoui-Again') === '1') { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); }  // mid-animation (a gliding ring): the next frame
         }
@@ -613,7 +619,7 @@ CANVAS_JS = r"""
     if (back && kdiv.dataset.keys === '1' && (!document.activeElement || document.activeElement === document.body)) back.focus({ preventScroll: true });
     document.querySelectorAll('[data-kind=canvas]').forEach(div => {
       const st = div.mojoui, m = document.getElementById('n' + div.dataset.node + '-meta');
-      if (st && m && (m.dataset.version !== String(st.drawn) || m.dataset.frames !== '0')) { st.want = true; st.pump(); }
+      if (st && m && (m.dataset.version !== String(st.drawn) || m.dataset.frames !== '0' || st.skin !== skinNow())) { st.want = true; st.pump(); }
     });
   });
 })();
@@ -685,6 +691,18 @@ def host_files():
                               ("mojoui.js", js, "text/javascript"), ("mojoui.css", CSS.encode(), "text/css")):
         out[name] = (content_name(name, data), data, media)
     return out
+
+
+def debug_build(module_dir):
+    """Whether the app's build is a debug build (MOJOUI_DEBUG=1 scripts/build.sh <app> web): its manifest lists bundles
+    and names each one's source map, there beside it. A release build has no maps (scripts/web_assets.py)."""
+    folder = Path(module_dir) / "assets"
+    try:
+        manifest = json.loads((folder / "manifest.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(manifest, dict) and bool(manifest) and all(
+        isinstance(m, dict) and m.get("map") and (folder / m["map"]).is_file() for m in manifest.values())
 
 
 def app_assets(module_dir, mod):
@@ -1245,6 +1263,9 @@ def rows_html(s, i, sid, top):
 
 
 def make_app(module_dir):
+    if DEV and not debug_build(module_dir):  # (the dev server's endpoints never run on a release build, D-678)
+        raise SystemExit(f"mojoui web: MOJOUI_DEV=1 needs a debug build ({module_dir} is a release build: "
+                         "MOJOUI_DEBUG=1 scripts/build.sh <app> web, or scripts/dev.sh <app>); never set it on a deployed host")
     sys.path.insert(0, str(Path(module_dir).resolve()))
     mod = importlib.import_module("mojoui_app")
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
@@ -1781,8 +1802,10 @@ def make_app(module_dir):
             def handle(self):
                 for raw in self.rfile:
                     try:
-                        op = json.loads(raw)
+                        op = json.loads(raw.decode("utf-8"))  # (a line that isn't UTF-8 is refused as one, as GTK's link does)
                         out = link_call(op) if isinstance(op, dict) else {"ok": False, "error": "a request is a JSON object"}
+                    except UnicodeDecodeError:
+                        out = {"ok": False, "error": "not UTF-8 JSON text"}
                     except Exception as ex:  # (a bad request is the agent's mistake: say so, keep the link)
                         out = {"ok": False, "error": f"{type(ex).__name__}: {ex}"}
                     self.wfile.write((json.dumps(out, ensure_ascii=False) + "\n").encode())

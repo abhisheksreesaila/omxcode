@@ -67,7 +67,7 @@ scripts/agentchat.sh --web      # the same on the web
 
 ## The live demo (an agent backed by a real model)
 
-One OpenAI-compatible path (owner, 2026-10-27, D-690). Every setting is an environment variable, read by name; no key
+One OpenAI-compatible path (owner, 2026-10-27, D-710). Every setting is an environment variable, read by name; no key
 is printed, logged or stored, and none ever reaches the app (the backend holds it).
 
 **The OMX Console (the default: local models, no cloud, no key leaves the machine).** The console serves models behind

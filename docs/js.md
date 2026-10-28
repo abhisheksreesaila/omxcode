@@ -3,10 +3,36 @@
 A Mojo app can place any JavaScript widget (an editor, a map, a chart library) in its screen. The widget is a custom
 element; Mojo gives it **props** (JSON), hears its **events** in `update()`, and can call its **commands** (the answer
 comes back to `update()` later, as an HTTP reply does). The app keeps every line of state; the widget keeps only its own
-(a cursor, a scroll position, a counter's count). Runs on the web and on GTK (§6); the Mac shows `instead` until 34b.
+(a cursor, a scroll position, a counter's count). Runs on the web, on GTK (§6) and on the Mac (§7).
 
-The example is `examples/widgets` (a note in CodeMirror 6, a word count drawn by mojoui and by Apache ECharts, and a
-plain-JS counter).
+The example is `examples/widgets` (a note in mojoui's shared CodeMirror 6 editor, a word count drawn by mojoui and by
+the shared Apache ECharts chart, and a plain-JS counter of its own).
+
+## 0. Use a shared widget (any app)
+
+mojoui ships widgets any app can use, in `mojoui/widgets/` with their own pinned `package.json` and `package-lock.json`:
+
+| Name | Tag | Library | Props | Events |
+|---|---|---|---|---|
+| `editor` | `mx-editor` | CodeMirror 6 | `doc`, `rev`, `placeholder` | `change {text}` (commands: `focus`, `selection`, `text`; agents set `text`) |
+| `chart` | `mx-chart` | Apache ECharts 6 (line) | `series` (a JSON list of numbers) | `pick {index, value}` |
+
+To add one to your app, pick it by name and list its bundles:
+
+```
+examples/<app>/web/shared.json        {"widgets": ["editor", "chart"]}
+```
+```mojo
+    @staticmethod
+    def web_assets() -> List[String]:
+        return ["editor.js", "editor.css", "chart.js", "chart.css"]    # beside your own widgets' names
+```
+
+Then place it like any widget (`WebComponent("mx-editor", 1, Props().text("doc", self.note)…)`, §3). The build bundles
+the picked widgets with your own (their npm packages come from mojoui/widgets' lockfile, installed once into
+`build/_shared/npm`); they wear your theme (`theme(el, tokens)`), speak to agents (`describe`, fields) and run on the
+web, GTK and the Mac like your own. A name you also have in `web/widgets/` fails the build; nothing is bundled that the
+app doesn't pick and list. `scripts/dev.sh <app>` watches the shared files the app picks too.
 
 ## 1. Add a package
 
@@ -89,9 +115,9 @@ read the theme's palette (`var(--o-accent)`, `--o-card`, `--o-ink`, `--o-line`�
 TypeScript widgets get types from `mojoui/hosts/static/mojoui-widgets.d.ts` (`/// <reference path=…>`).
 
 ### A second library: Apache ECharts (goal 34b)
-`examples/widgets/web/widgets/chart.ts` is ECharts 6 from npm (`"echarts": "6.1.0"`, exact, in the lockfile), added
+`mojoui/widgets/chart.ts` is ECharts 6 from npm (`"echarts": "6.1.0"`, exact, in mojoui/widgets' lockfile), added
 with no change to the hosts: `npm install --package-lock-only --ignore-scripts --save-exact echarts@6.1.0`, one widget
-file, two names in `web_assets()`. Import it **tree-shaken** (`echarts/core` plus the chart, components and renderer you
+file, two names in `web_assets()` (it was examples/widgets' own until D-675 made it shared, §0). Import it **tree-shaken** (`echarts/core` plus the chart, components and renderer you
 use: `LineChart`, `GridComponent`, `SVGRenderer`), so the bundle carries only those; ECharts needs no `eval` or
 `new Function`, so it runs under the CSP as it is. Mojo owns the data (`Props().raw("series", …)`); the widget reads the
 theme's palette (`--o-data`, `--o-card`, `--o-ink2`, `--o-line`) and the page's font, and a click on a point emits
@@ -123,13 +149,17 @@ so the line names the bundle's own position.
 **WebKit's inspector** for a widget's view on GTK: build with `MOJOUI_DEBUG=1 scripts/build.sh <app> linux` and
 right-click the widget, *Inspect Element* (the test step `inspect:<tag>#<id>` opens it too). A release build
 (`scripts/build.sh <app> linux`) has no inspector: the choice is made when the app is compiled
-(`mojoui/hosts/devtools.mojo`, `-D MOJOUI_DEBUG`), not at run time. The Mac's WKWebView takes the same switch
-(`isInspectable`; the hook is marked in that file).
+(`mojoui/hosts/devtools.mojo`, `-D MOJOUI_DEBUG`), not at run time. The Mac takes the same switch:
+`MOJOUI_DEBUG=1 scripts/build.sh <app> mac` makes each widget's WKWebView inspectable from Safari's Develop menu
+(`isInspectable`, macOS 13.3+) and ships the source maps. That debug build is proven to compile (M1c checks it names
+`setInspectable:`, the release build doesn't); it has not been run on a Mac yet, only the release build has (M2).
 
 What stays the same in the loop: the Content-Security-Policy (the dev server sends the release one), bundles by
 content hash with SRI, and nothing from another origin. The dev endpoints (`/dev/assets`, `/dev/wait`, `/dev/reload`,
 the last one only with dev.sh's random token) and source maps exist only when the server runs with `MOJOUI_DEV=1`, which
-only dev.sh sets.
+only dev.sh sets. They answer 127.0.0.1 alone, and the host refuses to start with `MOJOUI_DEV=1` unless the app's build
+is a debug build (its manifest names a source map for every bundle). **Never set `MOJOUI_DEV` on a deployed host**: a
+deployed app is a release build, served by `mojoui/hosts/web.py` without it.
 
 ## 3. Use it from Mojo
 
@@ -231,3 +261,33 @@ doesn't change: `mojoui-widgets.js` sees the WebKit message handler and talks to
 - **A crashed widget**: if its web process ends, the page loads again once and the widget mounts afresh with Mojo's
   props (its own state is lost); a second time, the WebComponent shows its `instead` view.
 
+
+## 7. On the Mac (AppKit)
+
+Each WebComponent gets a **WKWebView** of its own (`mojoui/hosts/appkit_webview.mojo`), loading the **same files** as
+the web and GTK: `scripts/build.sh <app> mac` runs the same esbuild step into the app's `Contents/Resources/webview/`
+(same bytes, same hashed names, the web host's `mojoui-widgets.js` and `mojoui.css` beside them). Your widget code
+doesn't change: WKWebView offers the same `window.webkit.messageHandlers.mojoui` that WebKitGTK does.
+
+- **The page** is `mojoui://app/widget.html`, the same page GTK builds, answered by a `WKURLSchemeHandler` from that
+  folder: the page, the runtime, the host's sheet, the bundles `web_assets()` lists (with SRI) and the app's fonts,
+  nothing else (any other path fails). Every answer carries the web's CSP with `frame-src 'none'`, nosniff and an
+  explicit type.
+- **Props, the theme and commands** go in through `callAsyncJavaScript` with the message as its argument `m` (data,
+  never code): `return mojoui.native.receive(m)`. A rebuild moves the live view into the new box (keyed by tag and id),
+  so typing, focus and the widget's own state stay; it is never loaded again.
+- **Events and replies** come back through the `mojoui` `WKScriptMessageHandler`: only a string holding a JSON object,
+  from the page's main frame, naming the view's own widget; a reply only from the widget its command went to, once.
+  The same rules as GTK, counted when refused.
+- **Security**: the CSP holds the page to its origin; a content rule list blocks every http(s), ws(s), ftp and file
+  load besides; a non-persistent data store (nothing on disk); the navigation delegate allows only the page itself in
+  its main frame (no navigation away, no target=_blank), the UI delegate opens no window, and JavaScript can't open
+  windows. No inspector in release builds (a debug build, `MOJOUI_DEBUG=1 scripts/build.sh <app> mac`, compiles one; not yet run on a Mac).
+- **A crashed widget**: if its web content process ends, the page loads again once and the widget mounts afresh with
+  Mojo's props; a second time, the WebComponent shows its `instead` view.
+- **WebKit.framework** is loaded (NSBundle) the first time a WebComponent shows; it is part of macOS, so nothing to
+  install, and the app links no new C function (Objective-C goes by name).
+- **Test steps** (MOJOUI_TEST, GitHub's Macs through `scripts/mac-ci`): `webtype:<tag>#<id>=text` (a click into the
+  view, then real key events), `webclick:<tag>#<id>=<CSS selector>` (a real click on that element), `webjs:` and
+  `webkill:` as on GTK. The report's pictures draw each view in from WebKit's own snapshot (a WKWebView draws out of
+  process, so AppKit's picture of the window leaves it blank).

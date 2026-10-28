@@ -12,7 +12,7 @@
 #       def requests(mut self) -> List[Request]:
 #           return self.http.take()
 #
-# Streams (goal 35, D-680): `Request.post_json(PIECE, url, body).stream(END)`: each SSE event (or, for any other body, each
+# Streams (goal 35, D-700): `Request.post_json(PIECE, url, body).stream(END)`: each SSE event (or, for any other body, each
 # piece as it arrives) comes to update() as its own `PIECE` Event (name = the SSE event's type, "message" by default, or
 # "chunk"; text = its data; number = 1, 2, …), then one `END` Event (number = the status, error = why it stopped early:
 # dropped, timed out, cancelled). `Http.cancel(id)` stops a tagged request; a stream's timeout is its longest silence.

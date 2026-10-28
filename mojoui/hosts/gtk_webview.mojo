@@ -27,6 +27,7 @@ comptime RTLD_GLOBAL = 256
 comptime PAGE_URI = "mojoui://app/widget.html"
 comptime SCHEME = "mojoui"
 comptime MAX_MESSAGE = 1 << 20  # bytes: a message from the page past this is refused
+comptime MAX_JSLOGS = 100  # widget errors logged per window (the web host logs 100 per page, D-681)
 # The web host's CSP (mojoui/hosts/web.py), with frame-src 'none': a widget's view frames nothing.
 comptime CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
                 + "connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'")
@@ -242,6 +243,8 @@ struct WebViews(Movable):
     var tab_back: Bool  # keyboard enters right after focuses its first (or last) stop, as a page's own Tab would
     var tab_out: Int  # a page asked to pass the keyboard on (Tab past its last stop): 1 forward, 2 back, 0 none
     var tab_view: Int  # the view that asked
+    var jslogs: Int  # widget errors the pages reported, and how many of them reached the log (MAX_JSLOGS at most, D-681)
+    var jslogged: Int
 
     def __init__(out self):
         self.state = 0
@@ -260,6 +263,8 @@ struct WebViews(Movable):
         self.tab_back = False
         self.tab_out = 0
         self.tab_view = 0
+        self.jslogs = 0
+        self.jslogged = 0
 
     def sent_to(mut self, seq: Int, tag: String, id: Int):
         """Command `seq` went to widget (tag, id): only its page may answer it (D-620)."""
@@ -274,6 +279,21 @@ struct WebViews(Movable):
                 _ = self.sent.pop(k)
                 return True
         return False
+
+    def lose_commands(mut self, k: Int) -> Int:
+        """Slot k's page is gone (its web process ended): every command sent to it that waits for a reply is answered
+        now with an error, through the inbox as a page's reply is, so the runtime's waiting entries end (D-680). How many."""
+        var lost = 0
+        var i = 0
+        while i < len(self.sent):
+            if self.sent[i][1] == self.slots[k].tag and self.sent[i][2] == self.slots[k].id:
+                self.inbox.append(Inbound(IN_REPLY, self.slots[k].tag, self.slots[k].id, "", "null", self.sent[i][0],
+                                          "the widget's web process ended before it answered"))
+                _ = self.sent.pop(i)
+                lost += 1
+            else:
+                i += 1
+        return lost
 
     def slot_of(self, tag: String, id: Int) -> Int:
         for k in range(len(self.slots)):
@@ -364,8 +384,9 @@ def start(addr: Int, assets: List[String]) -> Bool:
     return True
 
 
-def new_view[F: AnyType](addr: Int, tag: String, id: Int, on_message: F, host_addr: Int) -> Int:
-    """A view for widget (tag, id), loading the page; its slot is added. Returns the slot's index."""
+def new_view[F: AnyType, G: AnyType](addr: Int, tag: String, id: Int, on_message: F, on_ended: G, host_addr: Int) -> Int:
+    """A view for widget (tag, id), loading the page; its slot is added. Returns the slot's index. `on_ended` (the
+    host's) runs after on_terminated when the web process ends: it hands the lost commands' error replies to update()."""
     var wv = webviews_at(addr)
     var settings = wk("webkit_settings_new")
     _ = wk("webkit_settings_set_enable_developer_extras", settings, c_int(1 if DEVTOOLS else 0))  # (debug builds only: WebKit's inspector)
@@ -399,6 +420,7 @@ def new_view[F: AnyType](addr: Int, tag: String, id: Int, on_message: F, host_ad
     wk_connect(view, "decide-policy", on_decide_policy, addr)
     wk_connect(view, "load-changed", on_load_changed, addr)
     wk_connect(view, "web-process-terminated", on_terminated, addr)
+    wk_connect(view, "web-process-terminated", on_ended, host_addr)  # (after on_terminated: connected in this order)
     var focus = external_call["gtk_event_controller_focus_new", Int]()  # (Tab into the view: its first or last stop takes the keyboard)
     wk_connect(focus, "enter", on_view_focus_enter, addr)
     external_call["gtk_widget_add_controller", NoneType](view, focus)
@@ -584,7 +606,9 @@ def on_terminated(view: Int, reason: c_int, addr: Int) abi("C"):
     wv[].slots[k].mounts = 0
     wv[].slots[k].describe = ""
     wv[].slots[k].facts = ""
+    var lost = wv[].lose_commands(k)  # (their replies would never come: each is answered with an error, D-680)
     print("mojoui: " + wv[].slots[k].key() + "'s web process ended (reason " + String(Int(reason)) + ")"
+          + (", " + String(lost) + " command(s) answered with an error" if lost > 0 else "")
           + ("; loading it again" if wv[].slots[k].crashes == 1 else "; showing its stand-in"))
     if wv[].slots[k].crashes == 1:
         var again = List[String]()
@@ -592,7 +616,7 @@ def on_terminated(view: Int, reason: c_int, addr: Int) abi("C"):
             again.append(wv[].slots[k].sent_theme)
         if wv[].slots[k].sent_widget != "":
             again.append(wv[].slots[k].sent_widget)
-        wv[].slots[k].pending = again^  # (commands sent to the old page are lost with it: their replies never come)
+        wv[].slots[k].pending = again^  # (commands sent to the old page went with it: answered above with an error)
         _ = wk("webkit_web_view_reload", view)
     else:
         wv[].slots[k].gone = True
@@ -656,10 +680,15 @@ def inspect(addr: Int, tag: String, id: Int) -> String:
     return "shown " + tag + "#" + String(id) if inspector != 0 else String("no inspector")
 
 
+comptime TOOK_NOTHING = 0  # take_text's answers: kept here (a line, a CSP report) or refused
+comptime TOOK_INBOX = 1  # an event or a reply waits for update()
+comptime TOOK_SIZE = 2  # the widget's height changed (the host sizes its view)
+comptime TOOK_TAB = 3  # the page passes the keyboard on (tab_out, tab_view)
+
+
 def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
-    """The page's message (the script message handler): JSON text naming this view's own widget. Events and replies go
-    to the inbox for update() (True: something to hand over); the widget's height, line and CSP reports are kept here.
-    Anything else is refused (counted)."""
+    """The page's message (the script message handler): a JSC string, checked by take_text. True: something for the
+    host's idle turn (an event or reply for update(), or the keyboard passed on)."""
     var wv = webviews_at(addr)
     var k = wv[].slot_by(ucm)
     if k < 0:
@@ -670,9 +699,20 @@ def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
     var raw = wk("jsc_value_to_string", value)
     var text = cstr(raw)
     external_call["g_free", NoneType](raw)
+    var took = take_text(wv[], k, text)
+    if took == TOOK_SIZE:
+        external_call["gtk_widget_set_size_request", NoneType](wv[].slots[k].view, c_int(-1), c_int(max(wv[].slots[k].height, 1)))
+    return took == TOOK_INBOX or took == TOOK_TAB
+
+
+def take_text(mut wv: WebViews, k: Int, text: String) -> Int:
+    """A page's message for slot k, by one set of rules on every host (GTK's take_message, the Mac's script message
+    handler; D-611, D-620): JSON text naming this view's own widget. Events and replies go to the inbox for update()
+    (TOOK_INBOX); the widget's height (TOOK_SIZE), its line and facts, CSP reports and errors are kept here; Tab past
+    the page's ends asks the host to move the keyboard on (TOOK_TAB). Anything else is refused (counted)."""
     if text.byte_length() > MAX_MESSAGE:
-        wv[].slots[k].refused += 1
-        return False
+        wv.slots[k].refused += 1
+        return TOOK_NOTHING
     try:
         var j = Json.parse(text)
         var path = j.text(j.get(0, "path"))
@@ -681,63 +721,74 @@ def take_message(addr: Int, ucm: Int, value: Int) -> Bool:
             var id = j.text(j.get(0, "id"))
             var name = j.text(j.get(0, "name"))
             var data = j.text(j.get(0, "data"))
-            if tag != wv[].slots[k].tag or id != String(wv[].slots[k].id) or not is_event_name(name):
+            if tag != wv.slots[k].tag or id != String(wv.slots[k].id) or not is_event_name(name):
                 raise Error("not this view's widget, or not an event's name")
             _ = Json.parse(data)  # (the payload is JSON, or refused)
-            wv[].inbox.append(Inbound(IN_EVENT, tag, wv[].slots[k].id, name, data, 0, ""))
-            return True
+            wv.inbox.append(Inbound(IN_EVENT, tag, wv.slots[k].id, name, data, 0, ""))
+            return TOOK_INBOX
         elif path == "reply":
             var seq = j.get(0, "seq")
-            if not j.is_whole(seq) or not wv[].answers(j.number(seq), wv[].slots[k].tag, wv[].slots[k].id):
+            var t = wv.slots[k].tag
+            var i = wv.slots[k].id
+            if not j.is_whole(seq) or not wv.answers(j.number(seq), t, i):
                 raise Error("not a command this widget was sent")
-            wv[].inbox.append(Inbound(IN_REPLY, wv[].slots[k].tag, wv[].slots[k].id, "", j.text(j.get(0, "data"), "null"), j.number(seq),
-                                      clip_error(j.text(j.get(0, "error")))))
-            return True
+            wv.inbox.append(Inbound(IN_REPLY, t, i, "", j.text(j.get(0, "data"), "null"), j.number(seq), clip_error(j.text(j.get(0, "error")))))
+            return TOOK_INBOX
         elif path == "size":
             var h = j.number(j.get(0, "height"), -1)
             if h < 0 or h > 100000:
                 raise Error("not a height")
-            if h != wv[].slots[k].height:
-                wv[].slots[k].height = h
-                external_call["gtk_widget_set_size_request", NoneType](wv[].slots[k].view, c_int(-1), c_int(max(h, 1)))
+            if h != wv.slots[k].height:
+                wv.slots[k].height = h
+                return TOOK_SIZE
         elif path == "describe":
             var facts = j.text(j.get(0, "facts"))
             if facts != "":  # (for agents: a JSON object naming this view's own widget, or refused)
                 var f = Json.parse(facts)
-                if f.text(f.get(0, "tag")) != wv[].slots[k].tag or f.number(f.get(0, "id"), -1) != wv[].slots[k].id:
+                if f.text(f.get(0, "tag")) != wv.slots[k].tag or f.number(f.get(0, "id"), -1) != wv.slots[k].id:
                     raise Error("facts about another widget")
-            wv[].slots[k].describe = j.text(j.get(0, "text"))
-            wv[].slots[k].mounts = j.number(j.get(0, "mounts"))
-            wv[].slots[k].facts = facts
+            wv.slots[k].describe = j.text(j.get(0, "text"))
+            wv.slots[k].mounts = j.number(j.get(0, "mounts"))
+            wv.slots[k].facts = facts
         elif path == "csp":
-            wv[].slots[k].csp += 1
+            wv.slots[k].csp += 1
         elif path == "jslog":  # a widget's uncaught error: one line in the app's log (its source file and line in debug builds)
+            wv.jslogs += 1
+            if wv.jslogged >= MAX_JSLOGS:  # (as the web host: at most 100 a page, here a window; the rest counted, not logged)
+                if wv.jslogs == MAX_JSLOGS + 1:
+                    print("mojoui: more than " + String(MAX_JSLOGS) + " widget errors: the rest aren't logged", flush=True)
+                return TOOK_NOTHING
+            wv.jslogged += 1
             var src = j.text(j.get(0, "source"))
             print("JS ERROR: " + (clean(src, 200) + ":" + String(j.number(j.get(0, "line"))) + ":" + String(j.number(j.get(0, "column"))) if src != "" else String("(no position)"))
-                  + ": " + clean(j.text(j.get(0, "message")), 500) + " (" + wv[].slots[k].key() + ")", flush=True)
+                  + ": " + clean(j.text(j.get(0, "message")), 500) + " (" + wv.slots[k].key() + ")", flush=True)
         elif path == "tab":  # (Tab past the page's last stop, or Shift+Tab before its first: the host moves the keyboard on)
-            wv[].tab_out = 1 if j.flag(j.get(0, "forward"), True) else 2
-            wv[].tab_view = wv[].slots[k].view
-            return True
+            wv.tab_out = 1 if j.flag(j.get(0, "forward"), True) else 2
+            wv.tab_view = wv.slots[k].view
+            return TOOK_TAB
         else:
             raise Error("no such message")
     except:
-        wv[].slots[k].refused += 1
-    return False
+        wv.slots[k].refused += 1
+    return TOOK_NOTHING
 
 
 def facts_json(addr: Int) -> String:
     """What the widgets on the screen say about themselves, for an attached agent: a JSON list of their facts objects."""
-    var out = String("[")
     if addr == 0:
         return "[]"
-    var wv = webviews_at(addr)
+    return facts_of(webviews_at(addr)[])
+
+
+def facts_of(wv: WebViews) -> String:
+    """facts_json for any host's views (the Mac's sit inside its own struct)."""
+    var out = String("[")
     var first = True
-    for k in range(len(wv[].slots)):
-        if wv[].slots[k].facts == "" or wv[].slots[k].gone:
+    for k in range(len(wv.slots)):
+        if wv.slots[k].facts == "" or wv.slots[k].gone:
             continue
         if not first:
             out += ","
         first = False
-        out += wv[].slots[k].facts
+        out += wv.slots[k].facts
     return out + "]"

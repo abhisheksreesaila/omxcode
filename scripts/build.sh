@@ -116,9 +116,9 @@ build_android() {  # a signed APK: the app + mojoui as libmojoui.so (arm64 phone
   stamp "$out"; echo "   $out/$NAME.apk ($pkg)"
 }
 
-apple_objects() {  # apple_objects <dir> <triple> <host-main>
+apple_objects() {  # apple_objects <dir> <triple> <host-main> [Mojo flags, e.g. -D MOJOUI_DEBUG]
   rm -f "$1"/*.o
-  mojo_build "$3" --target-triple "$2" --emit object -o "$1/app.o"
+  mojo_build "$3" ${4+"${@:4}"} --target-triple "$2" --emit object -o "$1/app.o"  # (${4+…}: macOS's bash 3.2 under set -u)
   mojo_build mojoui/hosts/mojo_rt.mojo --target-triple "$2" --emit object -o "$1/mojo_rt.o"
 }
 
@@ -146,6 +146,9 @@ bundle_runtime() {  # bundle_runtime <app>: Modular's runtime libraries the nati
 build_mac() {
   local out="build/$EX/mac"; mkdir -p "$out"
   local app="$out/$NAME.app"
+  # MOJOUI_DEBUG=1: a debug build, as on Linux (D-679): each widget's WKWebView inspectable from Safari's Develop menu,
+  # bundles with source maps; release builds (the default) have neither
+  local debug="${MOJOUI_DEBUG:-}"; [ "$debug" = 1 ] && echo "   (debug build: WebKit's inspector for widget views, source maps)"
   if [ "$(uname)" = Darwin ] && [ -n "${MAC_GPU:-}" ]; then
     # On a Mac, with its GPU (omxcode#3): a native build, Metal kernels compiled by Apple's toolchain, Mojo's runtime
     # libraries bundled in the app (bundle_runtime, D-309). MAC_GPU: an accelerator
@@ -154,20 +157,27 @@ build_mac() {
     rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
     local frameworks=(-Xlinker -framework -Xlinker AppKit -Xlinker -lobjc)
     if [ "$MAC_GPU" = native ]; then  # (two calls: an empty array is "unbound" under set -u in macOS's bash 3.2)
-      mojo_build hosts/mac_gpu_main.mojo -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
+      if [ "$debug" = 1 ]; then mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_DEBUG -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
+      else mojo_build hosts/mac_gpu_main.mojo -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"; fi
+    elif [ "$debug" = 1 ]; then
+      mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_DEBUG --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
     else
       mojo_build hosts/mac_gpu_main.mojo --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
     fi
     bundle_runtime "$app"
   else
     echo "== Mac ($EX): AppKit, arm64 macOS 14+"
-    apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo
+    if [ "$debug" = 1 ]; then apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo -D MOJOUI_DEBUG
+    else apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo; fi
     rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
     pixi run ld64.lld -arch arm64 -e _mojo_entry -dead_strip -no_adhoc_codesign \
       -platform_version macos 14.0 26.0 -o "$app/Contents/MacOS/$NAME" "$out"/*.o apple/sdk/macos/*.tbd
   fi
   plist apple/mac/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$app/Contents/Resources/fonts/"
+  # Its JavaScript (docs/js.md, goal 34b M2): each WebComponent runs in a WKWebView loading the web's own bundles, built
+  # into Resources/webview by the same esbuild step (nothing for an app without web/widgets/)
+  pixi run python scripts/web_assets.py --webview "$app/Contents/Resources/webview" "$EX"
   printf 'APPL????' > "$app/Contents/PkgInfo"
   sign "$app"
   rm -f "$out/$NAME-mac.zip"; (cd "$out" && zip -qry "$NAME-mac.zip" "$NAME.app")

@@ -1,4 +1,4 @@
-# mojoui.jsonpatch: a JSON document you can change, and JSON Patch (RFC 6902) on it (goal 35 M1, D-685). AG-UI's
+# mojoui.jsonpatch: a JSON document you can change, and JSON Patch (RFC 6902) on it (goal 35 M1, D-705). AG-UI's
 # STATE_DELTA is a JSON Patch; an app's shared state is a JDoc. Pointers are RFC 6901 ("/a/b~1c/0", "-" past an array's end).
 #
 #   var state = JDoc.parse('{"count": 1}')

@@ -78,7 +78,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Inspector pages | `NavRow(…) · InspectorPage(…) (made of buttons and stacks)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ |
-| Light and dark from the system | `def appearance(mut self, dark)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Light and dark from the system | `def appearance(mut self, dark)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Shared data per process | `App.init_shared()` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 |
 | Toolbar button (icon over label) | `Button(style=TOOL / TOOL_ON)` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
 | File picker | `FilePicker(title, on_pick)` | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -145,9 +145,9 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Widget | Library | Gets | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Lives in |
 |---|---|---|---|---|---|---|---|---|---|
-| `mx-chart` | Apache ECharts (echarts 6.1.0) | agent read, theme, Tab stop | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | `examples/widgets/web/widgets/chart.ts` |
 | `mx-counter` | plain JS (vendored) | agent read, agent set, Tab stop | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | `examples/widgets/web/widgets/counter.js` |
-| `mx-editor` | CodeMirror 6 (@codemirror/state 6.5.2) | agent read, agent set, theme, Tab stop | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | `examples/widgets/web/widgets/editor.ts` |
+| `mx-chart` | Apache ECharts (echarts 6.1.0) | agent read, theme, Tab stop | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | `mojoui/widgets/chart.ts` |
+| `mx-editor` | CodeMirror 6 (@codemirror/state 6.5.2) | agent read, agent set, theme, Tab stop | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | `mojoui/widgets/editor.ts` |
 
 ## Totals
 
@@ -156,7 +156,7 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 | Linux (GTK) | 113 | 3 | 0 |
 | Web | 113 | 0 | 3 |
 | Android | 19 | 19 | 78 |
-| Mac (AppKit) | 0 | 104 | 12 |
+| Mac (AppKit) | 0 | 105 | 11 |
 | iPhone (UIKit) | 0 | 83 | 33 |
 | Agent (MCP) | 31 | 36 | 49 |
 
@@ -164,8 +164,6 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Should become | Lives in | What it is |
 |---|---|---|
-| `CodeEditor widget (CodeMirror 6)` | examples/widgets/web/widgets/editor.ts | a JS widget other apps would want (a note, a query, a formula); move with its package.json entries to a shared widgets folder the build can list from any app |
-| `Chart widget (Apache ECharts)` | examples/widgets/web/widgets/chart.ts | a JS widget other apps would want; same move as the editor |
 | `FormulaBar` | examples/workbook | what's selected, its value, a formula field; migrate to mojoui.sheetchrome.FormulaBar |
 | `Inspector` | examples/mxstudio | the side panel: Comes from, Feeds, Your edits, Undo all (lineage and the edit log); migrate to mojoui.inspector |
 | `Toolbar / StatusBar islands` | examples/workbook | the island contents (title, Insert buttons, status) are assembled by the app; migrate to mojoui.sheetchrome |

@@ -1,4 +1,4 @@
-# mojoui.genui: UI from data (goal 35 M2, D-689). An agent describes a screen as JSON built only from catalogued mojoui
+# mojoui.genui: UI from data (goal 35 M2, D-709). An agent describes a screen as JSON built only from catalogued mojoui
 # components; the app validates it against one catalog (the same one that prints the JSON Schema agents are given) and
 # renders it with native components. Nothing in it is code: text is shown as text, actions are words reported back,
 # inputs edit the shared state at a JSON pointer.

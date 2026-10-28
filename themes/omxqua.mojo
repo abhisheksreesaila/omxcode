@@ -270,7 +270,7 @@ def omxqua_look(p: Palette) -> Look:
     surfaces += markdown_roles(p, FONT_MONO)  # (a notebook's markdown: blade-notebook.css's .nb-md)
     surfaces += timeline_roles(p, FONT_MONO)  # (Add a model's stages: blade-add.css's .stg)
     surfaces += logpane_roles(p, FONT_MONO, CODE, CODE_TEXT, RADIUS_CARD)  # (Add a model's live log: blade-add.css .sr)
-    return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False, LINE),
+    return Look(TypeScale(FONT, FONT_MONO, TEXT, 12.5, 14.28, TITLE, 11, False, LINE, 1.1, 1.3, 1.4, 1, 2),
                 Controls(0, 0, 0, 11, 0, 0, 0, 12, TARGET, RADIUS_FULL, 16, RADIUS_FULL, RADIUS_IN, TARGET, 16, 12, TEXT * 0.95, 550, -1, -1, 0), surfaces^,  # (a Divider: no room on any host, as omxqua's web hr { margin: 0 }, D-490)
                 Segments(p.page, RADIUS_FULL, 3, p.line_strong, TARGET - 8, 14, RADIUS_FULL, 12.6, 500, p.ink2, surface_2(p), p.ink, 500, True),  # (.seg2)
                 Motion(PRESS_SCALE, SPRING_FAST_MS, String(SPRING_FAST), String(EASE_IN)), [2, 4, 8, 12, 16, 20, 24])  # (the spacing scale: SPACE_XXS … SPACE_XXL, --oq-space on the console's compact steps)
@@ -309,10 +309,10 @@ def omxqua_web(p: Palette, look: Look, cls: String) -> String:
         fonts_web()
         + "body." + cls + " { background: " + s0 + "; color: " + ink + "; font: " + fpx(t.body) + "/1.45 \"" + t.family + "\", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }\n"
         + b + ".num, " + b + ".mono, " + b + "[data-tag=formula-bar] input[type=text], " + b + ".mi .mi-key { font-family: \"" + t.mono + "\", ui-monospace, monospace; }\n"
-        + b + ".text { color: " + ink + "; }\n"
-        + b + ".text.title { font-size: " + fpx(t.title) + "; line-height: 1.1; font-weight: 650; letter-spacing: -0.035em; color: " + ink + "; }\n"
-        + b + ".text.headline { font-size: " + fpx(t.headline) + "; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; color: " + ink + "; }\n"
-        + b + ".text.caption { font-size: " + fpx(t.caption) + "; line-height: 1.4; color: " + ink2 + "; }\n"
+        + b + ".text { color: " + hex_of(t.ink_of(p, False)) + "; }\n"
+        + b + ".text.title { font-size: " + fpx(t.title) + "; line-height: " + String(t.title_line) + "; font-weight: 650; letter-spacing: -0.035em; color: " + ink + "; }\n"
+        + b + ".text.headline { font-size: " + fpx(t.headline) + "; line-height: " + String(t.headline_line) + "; font-weight: 600; letter-spacing: -0.01em; color: " + ink + "; }\n"
+        + b + ".text.caption { font-size: " + fpx(t.caption) + "; line-height: " + String(t.caption_line) + "; color: " + hex_of(t.ink_of(p, True)) + "; }\n"
         + b + ".text.tone-accent { color: " + accent + "; } " + b + ".text.tone-good { color: " + hex_of(p.good) + "; } " + b + ".text.tone-warn { color: " + hex_of(p.warn) + "; }\n"
         + b + ".text.tone-strong { color: " + ink + "; font-weight: 600; }\n"
         # cards: surface-1, card corners, shadow-1 (the framework's writer, from the same Surface the look's roles use)
@@ -418,10 +418,10 @@ def omxqua_gtk(p: Palette, look: Look, cls: String) -> String:
     return (
         ":root { --accent-bg-color: " + accent + "; --accent-color: " + accent + "; --accent-fg-color: " + on + "; }\n"
         + w + "{ background-color: " + s0 + "; color: " + ink + "; font-family: '" + t.family + "', sans-serif; font-size: " + fpx(t.body) + "; }\n"
-        + w + "label { color: " + ink + "; }\n"
-        + w + "label.title-1 { font-size: " + fpx(t.title) + "; line-height: " + line_px(t.title * 1.1) + "; font-weight: 650; letter-spacing: -0.98px; color: " + ink + "; }\n"
-        + w + "label.title-4 { font-size: " + fpx(t.headline) + "; line-height: " + line_px(t.headline * 1.3) + "; font-weight: 600; letter-spacing: -0.14px; color: " + ink + "; }\n"
-        + w + "label.caption { font-size: " + fpx(t.caption) + "; line-height: " + line_px(t.caption * 1.4) + "; color: " + ink2 + "; }\n"
+        + w + "label { color: " + hex_of(t.ink_of(p, False)) + "; }\n"
+        + w + "label.title-1 { font-size: " + fpx(t.title) + "; line-height: " + line_px(t.title * t.title_line) + "; font-weight: 650; letter-spacing: -0.98px; color: " + ink + "; }\n"
+        + w + "label.title-4 { font-size: " + fpx(t.headline) + "; line-height: " + line_px(t.headline * t.headline_line) + "; font-weight: 600; letter-spacing: -0.14px; color: " + ink + "; }\n"
+        + w + "label.caption { font-size: " + fpx(t.caption) + "; line-height: " + line_px(t.caption * t.caption_line) + "; color: " + hex_of(t.ink_of(p, True)) + "; }\n"
         + w + "label.mui-tone-accent { color: " + accent + "; } " + w + "label.mui-tone-good { color: " + hex_of(p.good) + "; } " + w + "label.mui-tone-warn { color: " + hex_of(p.warn) + "; }\n"
         + w + ".mui-card { " + surface_rule(card_box(p), False) + "}\n"
         + w + ".mui-card.mui-warn { background: " + hex_of(mix(p.card, p.warn, 0.08)) + "; } " + w + ".mui-card.mui-good { background: " + hex_of(mix(p.card, p.good, 0.08)) + "; }\n"

@@ -10,7 +10,7 @@ Scripted scenarios (every check uses them): "tools" (state snapshot + delta, a f
 the next run), "ui" (a signup form built with render_ui; its Submit comes back as the tool result), "bad" (UI outside
 the catalog: the app refuses it and says why), "chat" (streamed words, a chart whose range the user edits).
 
-Live (owner, 2026-10-27, D-690): one OpenAI-compatible path. By default the OMX Console (mxconsole) on this machine:
+Live (owner, 2026-10-27, D-710): one OpenAI-compatible path. By default the OMX Console (mxconsole) on this machine:
   AGUI_LLM_BASE_URL   http://127.0.0.1:11435/v1   (the console's OpenAI-compatible endpoint)
   AGUI_LLM_MODEL      qwen2.5-0.5b                 (any model the console serves: `mxc serve <model>`)
   AGUI_LLM_KEY_VAR    MXC_API_KEY                  (the NAME of the env var holding the key; sent as a Bearer token)

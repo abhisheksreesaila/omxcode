@@ -12,6 +12,12 @@ in git); then esbuild bundles and minifies each entry in examples/<example>/web/
 and each output is saved as build/<example>/web/assets/<name>.<sha256[:16]>.<ext> with manifest.json mapping the name the
 app lists (counter.js; editor.ts → editor.js) to that file, its SRI integrity and its source.
 
+Shared widgets (mojoui/widgets/: CodeMirror's editor, ECharts' chart, with their own package.json and lockfile): an app
+picks them by name in examples/<example>/web/shared.json, {"widgets": ["editor", "chart"]}; each brings its .ts/.js and
+.css entries into the same bundle step (their npm packages installed once from mojoui/widgets' lockfile into
+build/_shared/npm), and the app lists their bundles in web_assets() like its own (editor.js, editor.css). A shared name
+the app also has in web/widgets/ fails the build.
+
 Lint (fails the build): every name App.web_assets() lists is a bundled asset; every bundled asset is listed; every file
 in assets/ is one the bundler made, with the bytes its name's hash says. MOJOUI_ASSETS_LISTED (a JSON list) stands in for
 web_assets() in checks.
@@ -43,14 +49,41 @@ def tool(name):
     return path
 
 
+SHARED = ROOT / "mojoui" / "widgets"  # widgets any app may use (shared.json), with their own package.json and lockfile
+
+
+def shared_entries(web):
+    """The mojoui/widgets entries the app picks in web/shared.json ({"widgets": [names]}): a list of paths."""
+    f = web / "shared.json"
+    if not f.exists():
+        return []
+    try:
+        names = json.loads(f.read_text()).get("widgets", [])
+    except (ValueError, AttributeError):
+        fail(f"{f.relative_to(ROOT)} isn't {{\"widgets\": [names]}}")
+    out = []
+    for n in names:
+        if not isinstance(n, str) or not n.replace("-", "").isalnum() or not n[:1].isalpha():
+            fail(f"{f.relative_to(ROOT)} names {n!r}: a shared widget's name (editor, chart), no paths")
+        got = sorted(p for p in SHARED.glob(n + ".*") if p.suffix in ENTRY_TYPES and p.stem == n)
+        if not got:
+            fail(f"{f.relative_to(ROOT)} names {n}, which mojoui/widgets/ doesn't have")
+        out += got
+    return out
+
+
 def install(example, web):
     """npm ci from the committed lockfile into build/<example>/npm/; skipped when the lockfile hasn't changed."""
+    return install_from(web, ROOT / "build" / example / "npm")
+
+
+def install_from(web, npm_dir):
+    """npm ci from web/'s committed lockfile into npm_dir; skipped when the lockfile hasn't changed. None: no package.json."""
     pkg, lock = web / "package.json", web / "package-lock.json"
     if not pkg.exists():
         return None
     if not lock.exists():
         fail(f"{pkg.relative_to(ROOT)} has no package-lock.json beside it (npm install once, then commit the lockfile)")
-    npm_dir = ROOT / "build" / example / "npm"
     stamp = npm_dir / "lock.sha256"
     want = hashlib.sha256(pkg.read_bytes() + lock.read_bytes()).hexdigest()
     if stamp.exists() and stamp.read_text() == want and (npm_dir / "node_modules").exists():
@@ -70,20 +103,23 @@ def build(example, out=None):
     web = ROOT / "examples" / example / "web"
     out = out or ROOT / "build" / example / "web" / "assets"
     shutil.rmtree(out, ignore_errors=True)  # (only what this build makes ships)
-    entries = sorted(p for p in (web / "widgets").glob("*") if p.suffix in ENTRY_TYPES) if (web / "widgets").is_dir() else []
+    own = sorted(p for p in (web / "widgets").glob("*") if p.suffix in ENTRY_TYPES) if (web / "widgets").is_dir() else []
+    shared = shared_entries(web)
+    entries = own + shared
     if not entries:
         return False
     modules = install(example, web)
+    shared_modules = install_from(SHARED, ROOT / "build" / "_shared" / "npm") if shared else None
     names = {}
     for p in entries:
         name = p.stem + ENTRY_TYPES[p.suffix]
         if name in names:
-            fail(f"{p.name} and {names[name].name} both make {name}")
+            fail(f"{source_name(p, web)} and {source_name(names[name], web)} both make {name}")
         names[name] = p
     out.mkdir(parents=True)
     manifest = {}
     with tempfile.TemporaryDirectory(prefix="web-assets-") as tmp:
-        env = dict(os.environ, NODE_PATH=str(modules) if modules else "")
+        env = dict(os.environ, NODE_PATH=os.pathsep.join(str(m) for m in (modules, shared_modules) if m))  # (the app's packages first)
         debug = os.environ.get("MOJOUI_DEBUG") == "1"  # (a debug build: each bundle gets a source map, goal 34b M1c; release has none)
         cmd = [tool("esbuild"), *[str(p) for p in entries], "--bundle", "--minify", "--format=iife", "--target=es2020",
                "--platform=browser", "--charset=utf8", "--legal-comments=eof", f"--outdir={tmp}", "--entry-names=[name]",
@@ -96,31 +132,42 @@ def build(example, out=None):
             stem, ext = name.rsplit(".", 1)
             map_file = None
             if debug and (Path(tmp) / (name + ".map")).exists():
-                data, map_file = with_map(Path(tmp), name, data, web, modules, out)
+                data, map_file = with_map(Path(tmp), name, data, web, [m for m in (modules, shared_modules) if m], out)
             digest = hashlib.sha256(data).hexdigest()[:16]
             file = f"{stem}.{digest}.{ext}"
             (out / file).write_bytes(data)
             manifest[name] = {"file": file, "integrity": "sha384-" + base64.b64encode(hashlib.sha384(data).digest()).decode(),
-                              "source": str(src.relative_to(web)), "bytes": len(data)}
+                              "source": source_name(src, web), "bytes": len(data)}
             if map_file:
                 manifest[name]["map"] = map_file
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     for name, m in sorted(manifest.items()):
-        print(f"   assets/{m['file']}  ({m['bytes'] // 1024} KB, from web/{m['source']})")
+        print(f"   assets/{m['file']}  ({m['bytes'] // 1024} KB, from {m['source'] if m['source'].startswith('mojoui/') else 'web/' + m['source']})")
     return True
 
 
+def source_name(p, web):
+    """An entry's name in the manifest: from the app's web/ folder (widgets/counter.js), or the shared one's from the
+    repository (mojoui/widgets/editor.ts)."""
+    p = p.resolve()
+    return str(p.relative_to(web.resolve())) if p.is_relative_to(web.resolve()) else str(p.relative_to(ROOT))
+
+
 def with_map(tmp, name, data, web, modules, out):
-    """(debug builds) The bundle's source map, its sources named from the app's web/ folder (widgets/editor.ts) or npm
-    (npm/@codemirror/view/…), saved by its own content hash; the bundle's last line names it. Returns (bundle, map file)."""
+    """(debug builds) The bundle's source map, its sources named from the app's web/ folder (widgets/counter.js), the
+    shared folder (mojoui/widgets/editor.ts) or npm (npm/@codemirror/view/…), saved by its own content hash; the bundle's
+    last line names it. Returns (bundle, map file). modules: the npm folders searched."""
     m = json.loads((tmp / (name + ".map")).read_text())
     named = []
     for src in m.get("sources", []):
         full = (tmp / src).resolve()
+        npm = next((Path(m).resolve() for m in modules if full.is_relative_to(Path(m).resolve())), None)
         if full.is_relative_to(web.resolve()):
             named.append(str(full.relative_to(web.resolve())))
-        elif modules and full.is_relative_to(Path(modules).resolve()):
-            named.append("npm/" + str(full.relative_to(Path(modules).resolve())))
+        elif npm is not None:
+            named.append("npm/" + str(full.relative_to(npm)))
+        elif full.is_relative_to(SHARED.resolve()):
+            named.append(str(full.relative_to(ROOT.resolve())))
         else:
             named.append(full.name)
     m["sources"] = named
@@ -172,7 +219,7 @@ def lint_problems(example):
         if "/" in n or "\\" in n or n.startswith(".") or Path(n).suffix not in (".js", ".css"):
             problems.append(f"web_assets() lists {n!r}: a bundle's name (name.js or name.css), no folders")
         elif n not in manifest:
-            problems.append(f"web_assets() lists {n}, which the bundler didn't make (no web/widgets/{Path(n).stem}.js|.ts|.css)")
+            problems.append(f"web_assets() lists {n}, which the bundler didn't make (no web/widgets/{Path(n).stem}.js|.ts|.css, nor a shared one named in web/shared.json)")
     for n in manifest:
         if n not in names:
             problems.append(f"{n} is bundled but web_assets() doesn't list it (an asset nobody asked for doesn't ship)")
