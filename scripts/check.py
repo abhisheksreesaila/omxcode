@@ -353,7 +353,7 @@ def m7():
                 problems.append(f"{row} {n}: a run didn't pass the quiet gate")
             if row != "A-cpu" and "nvidia" not in (r.get("adapter") or "").lower():
                 problems.append(f"{row} {n}: adapter {r.get('adapter')}")
-            if row.startswith("C") and row != "C-36":
+            if row.startswith("C") and row not in ("C-36", "C-36gl"):
                 if r.get("cpu_copied_max") != 0 or r.get("gpu_presented_min", 0) < 600 or r.get("gsk_renderer") != "gl":
                     problems.append(f"{row} {n}: not the zero-copy path ({r.get('cpu_copied_max')} readbacks, {r.get('gpu_presented_min')} from the GPU, renderer {r.get('gsk_renderer')})")
             if row in ("C-36", "C-36gl") and not r.get("cpu_copied_max"):
