@@ -23,6 +23,9 @@ struct Event(Copyable, Movable):
     Canvas frames: `number` = microseconds since the previous frame.
     HTTP replies (mojoui.http): `message` = the request's msg, `id` = its id, `number` = the status (0: no reply),
     `text` = the body, `error` = why there's no reply ("" when there is one, a 500 too).
+    HTTP streams (Request.stream(end)): each piece: `message` = the request's msg, `id`, `name` = the SSE event's type
+    ("message") or "chunk", `text` = its data, `number` = 1, 2, …; then the end: `message` = end, `number` = the status,
+    `text` = the body (a status that isn't 2xx), `error` = why it stopped early ("cancelled", "timed out…", "ended early…").
     Timers (App.every): `message` = the timer's msg, `number` = how many ticks so far (1, 2, …).
     Widgets (mojoui.webcomponent): an event: `message` = on_event, `id` = the widget's id, `name` = the event, `text` = its
     payload (JSON). A command's reply: `message` = its reply msg, `id` = its id, `name` = the command, `text` = the answer
@@ -194,6 +197,11 @@ struct Runtime[A: App](Movable):
         """The requests the last update asked for go out; the timers follow what the app lists now."""
         var reqs = self.app.requests()
         for i in range(len(reqs)):
+            if reqs[i].cancels:  # (Http.cancel: the runtime ends it at its next poll)
+                for k in range(len(self.inflight)):
+                    if self.inflight[k].id == reqs[i].id and not self.inflight[k].cancelled:
+                        self.inflight[k].cancel()
+                continue
             comptime if Self.A.HTTP:
                 self.inflight.append(start[Backend](reqs[i].copy()))
             else:
@@ -347,13 +355,33 @@ struct Runtime[A: App](Movable):
             self.take_effects()
             changed = True
         var i = 0
-        while i < len(self.inflight):
-            if not self.inflight[i].ready():
+        while i < len(self.inflight):  # (update() may add requests; they join the end of the list)
+            if self.inflight[i].cancelled:  # its end now, nothing of it after (the worker stops and frees on its own)
+                var f = self.inflight.pop(i)
+                var end = f.stream_end if f.stream_end >= 0 else f.msg
+                self.app.update(Event(end, "", 0, id=f.id, error="cancelled"))
+                self.take_effects()
+                changed = True
+                continue
+            var done = self.inflight[i].ready()  # (read before the pieces: every piece pushed before it is there)
+            if self.inflight[i].stream_end >= 0:
+                var pieces = self.inflight[i].take_pieces()
+                var seq = self.inflight[i].pieces - len(pieces)
+                for ref p in pieces:
+                    if self.inflight[i].cancelled:
+                        break
+                    seq += 1
+                    self.app.update(Event(self.inflight[i].msg, p.data, seq, id=self.inflight[i].id, name=p.name))
+                    self.take_effects()
+                    changed = True
+                if self.inflight[i].cancelled:
+                    continue
+            if not done:
                 i += 1
                 continue
             var f = self.inflight.pop(i)
             var r = f.response()
-            self.app.update(Event(f.msg, r.text(), r.status, id=f.id, error=r.error))
+            self.app.update(Event(f.stream_end if f.stream_end >= 0 else f.msg, r.text(), r.status, id=f.id, error=r.error))
             self.take_effects()
             changed = True
         var due = List[Tuple[Int, Int]]()  # (msg, count): ticks to deliver, decided before any update changes the list

@@ -1,7 +1,8 @@
 # httpcheck: proves mojoui.http and App.every never hold up the screen (goal 33 M1, M2). A strip animates on every display
 # frame; Fetch asks for the URL typed above, and the frames counted while the reply is out show nothing waited for it.
 # Start ticks runs a 100 ms timer ten times and lists when each tick landed (ms after the tap); the strip is still then,
-# so on the web the ticks reach the page through its /wait, not alongside frames.
+# so on the web the ticks reach the page through its /wait, not alongside frames. Stream reads the URL as a stream (goal
+# 35 M0): each server-sent event is its own Event, counted, while the strip keeps moving.
 
 from mojoui import App, Event, View, HStack, Text, Button, TextField, CAPTION, HEADLINE, PROMINENT
 from mojoui.view import Card, SPACE_S, SPACE_M, NO_MSG
@@ -18,6 +19,9 @@ comptime FRAME = 4
 comptime START_TICKS = 5
 comptime TICK = 6
 comptime TICKS = 10
+comptime STREAM = 7
+comptime PIECE = 8
+comptime STREAM_END = 9
 
 
 struct Main(App):
@@ -35,6 +39,9 @@ struct Main(App):
     var ticking: Bool
     var tick_from_ns: Int
     var ticks: List[Int]  # ms after the tap, one per tick
+    var streamed: Bool  # the last request was a stream
+    var pieces: Int
+    var stream_end: String
 
     def __init__(out self):
         self.http = Http()
@@ -50,12 +57,15 @@ struct Main(App):
         self.ticking = False
         self.tick_from_ns = 0
         self.ticks = List[Int]()
+        self.streamed = False
+        self.pieces = 0
+        self.stream_end = "open"
 
     def title(self) -> String:
         return "httpcheck"
 
     def window_size(self) -> Tuple[Int, Int]:
-        return (560, 520)
+        return (600, 600)
 
     def update(mut self, event: Event):
         if event.message == URL:
@@ -68,6 +78,24 @@ struct Main(App):
             self.gap_ms = 0
             self.last_frame_ns = self.sent_ns
             self.reply = "(waiting)"
+        elif event.message == STREAM and not self.waiting:
+            self.http.send(Request.get(PIECE, self.url).stream(STREAM_END).timeout(10_000))
+            self.waiting = True
+            self.streamed = True
+            self.pieces = 0
+            self.stream_end = "open"
+            self.sent_ns = now_ns()
+            self.frames = 0
+            self.gap_ms = 0
+            self.last_frame_ns = self.sent_ns
+        elif event.message == PIECE:
+            self.pieces += 1
+        elif event.message == STREAM_END:
+            self.waiting = False
+            var now = now_ns()
+            self.waited_ms = Float64(now - self.sent_ns) / 1e6
+            self.gap_ms = max(self.gap_ms, Float64(now - self.last_frame_ns) / 1e6)
+            self.stream_end = ("error " + event.error) if event.error != "" else String(event.number)
         elif event.message == GOT:
             self.waiting = False
             var now = now_ns()
@@ -109,7 +137,7 @@ struct Main(App):
         return Card(
             Text("httpcheck · requests and timers off the main thread", style=HEADLINE),
             TextField(self.url, placeholder="URL", on_change=URL),
-            HStack(Button("Fetch", on_tap=FETCH, style=PROMINENT), Button("Start ticks", on_tap=START_TICKS), spacing=SPACE_S),
+            HStack(Button("Fetch", on_tap=FETCH, style=PROMINENT), Button("Stream", on_tap=STREAM), Button("Start ticks", on_tap=START_TICKS), spacing=SPACE_S),
             ActivityStrip(0, self.phase, on_frame=FRAME if self.waiting else NO_MSG).tag("strip"),
             Text("status: " + ("waiting" if self.waiting else "idle")),
             Text("frames while waiting: " + String(self.frames)),
@@ -117,6 +145,8 @@ struct Main(App):
             Text("longest frame gap: " + String(Int(self.gap_ms)) + " ms"),
             Text("reply: " + (self.reply if self.reply.byte_length() <= 120 else String(self.reply[byte = :120]))),
             Text("ticks:" + ticks),
+            Text("stream events: " + String(self.pieces) + ", end " + self.stream_end),
+            Text("frames while streaming: " + String(self.frames if self.streamed else 0)),
             Text("Every line of this app is Mojo.", style=CAPTION),
             spacing=SPACE_M,
         ).fill()

@@ -672,3 +672,9 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Coordinator added M1c; proof first: a scratch copy of the widgets app under scripts/dev.sh, edits to counter.js, counter.css and editor.ts reaching the open page (same window object, the typed note and Words: 4 kept, mounts 2), the counter's thrown error as widgets/counter.js:<line> in the dev log and in a GTK debug build's log, the inspector shown in the debug build and refused in release, release builds without maps or dev endpoints, the dev CSP equal to release.
 - Web and GTK each passed on their first run; rebuilds take about 0.3 s.
 - M1c PASS (84 s).
+
+## 2026-10-27 · goal 35 M0: streaming HTTP
+- scripts/check.py written first (M0–M4, from GOAL.md); pixi gains ag-ui-protocol 1.0.0, anthropic, jsonpatch, jsonschema (this worktree's own env).
+- AG-UI read from the SDK's source itself (ag_ui/_generated/models.py, encoder: `data: <json>\n\n`, camelCase): 31 event types; RunAgentInput needs threadId, runId, messages (state, tools, context, forwardedProps optional).
+- Streams: Request.stream(END), SseReader, Sink (lock-free list), Transport.stream; SocketTransport reads in 50 ms slices. Two compile fixes (raises on a helper; iterating List[InFlight] needs an index loop: InFlight isn't Copyable). tests/test_stream.mojo passed on its first run.
+- M0 PASS (29 s): GTK 74 frames, web 118 frames while 20 events trickled over 2 s.

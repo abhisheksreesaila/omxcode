@@ -6,7 +6,7 @@
 from std.ffi import external_call, c_int, get_errno, ErrNo
 from std.sys import CompilationTarget, is_defined
 from std.os import getenv
-from mojoui.http import Request, Response, Transport, Url, TLS_NEEDED, request_problem, has_control
+from mojoui.http import Request, Response, Transport, Url, TLS_NEEDED, request_problem, has_control, Sink, SseReader, Piece, utf8_whole, utf8_lossy
 from mojoui.clock import now_ns
 
 comptime APPLE = not CompilationTarget.is_linux()  # (BSD sockets: sin_len, other constants)
@@ -170,6 +170,14 @@ struct SocketTransport(Transport):
 
     @staticmethod
     def exchange(fd: c_int, addr: UInt32, url: Url, where: String, req: Request, deadline: Int) -> Response:
+        var problem = SocketTransport.open_send(fd, addr, url, where, req, deadline)
+        if problem != "":
+            return Response.failed(problem)
+        return SocketTransport.receive(fd, where, req, deadline)
+
+    @staticmethod
+    def open_send(fd: c_int, addr: UInt32, url: Url, where: String, req: Request, deadline: Int) -> String:
+        """Connects and sends the request: "" or why not."""
         var flags = external_call["fcntl", c_int, num_fixed_args=2](fd, c_int(F_GETFL))
         _ = external_call["fcntl", c_int, num_fixed_args=2](fd, c_int(F_SETFL), flags | c_int(O_NONBLOCK))
         comptime if APPLE:
@@ -191,15 +199,15 @@ struct SocketTransport(Transport):
         if rc != 0:
             var e = errno()
             if e != EINPROGRESS and e != EINTR:
-                return Response.failed(SocketTransport.connect_error(e, where))
+                return SocketTransport.connect_error(e, where)
             if not wait_for(fd, POLLOUT, deadline):
-                return Response.failed("timed out after " + String(req.timeout_ms) + " ms connecting to " + where)
+                return "timed out after " + String(req.timeout_ms) + " ms connecting to " + where
             var out = List[c_int](length=2, fill=0)  # SO_ERROR's value, and its size (a buffer: C writes into it)
             out[1] = 4
             _ = external_call["getsockopt", c_int](fd, c_int(SOL_SOCKET), c_int(SO_ERROR), Int(out.unsafe_ptr()), Int(out.unsafe_ptr()) + 4)
             var err = Int(out[0])
             if err != 0:
-                return Response.failed(SocketTransport.connect_error(err, where))
+                return SocketTransport.connect_error(err, where)
         # send
         var head = req.method + " " + url.target + " HTTP/1.1\r\nHost: " + url.host + ("" if url.port == 80 else ":" + String(url.port))
         head += "\r\nUser-Agent: mojoui\r\nAccept: */*\r\nConnection: close\r\n"
@@ -208,7 +216,7 @@ struct SocketTransport(Transport):
         for i in range(len(req.env_names)):
             var v = getenv(req.env_vars[i])
             if has_control(v):
-                return Response.failed("$" + req.env_vars[i] + " holds a control character")
+                return "$" + req.env_vars[i] + " holds a control character"
             if v.byte_length() > 0:
                 head += req.env_names[i] + ": " + v + "\r\n"
         if req.body.byte_length() > 0 or req.method == "POST" or req.method == "PUT" or req.method == "PATCH":
@@ -228,10 +236,14 @@ struct SocketTransport(Transport):
             var e = errno()
             if n < 0 and (e == EAGAIN or e == EINTR):
                 if not wait_for(fd, POLLOUT, deadline):
-                    return Response.failed("timed out after " + String(req.timeout_ms) + " ms sending to " + where)
+                    return "timed out after " + String(req.timeout_ms) + " ms sending to " + where
                 continue
-            return Response.failed("the connection to " + where + " broke while sending: " + why(e))
+            return "the connection to " + where + " broke while sending: " + why(e)
         _ = len(out)
+        return ""
+
+    @staticmethod
+    def receive(fd: c_int, where: String, req: Request, deadline: Int) -> Response:
         # receive
         var buf = List[UInt8]()
         var chunk = List[UInt8](length=CHUNK, fill=0)
@@ -300,6 +312,171 @@ struct SocketTransport(Transport):
         r.body = List[UInt8](capacity=end - body_at)
         for k in range(body_at, end):
             r.body.append(buf[k])
+        return r^
+
+    @staticmethod
+    def stream(req: Request, mut sink: Sink) -> Response:
+        var url: Url
+        try:
+            url = Url.parse(req.url)
+        except e:
+            return Response.failed(String(e))
+        if url.scheme == "https":
+            return Response.failed(TLS_NEEDED)
+        var problem = request_problem(req)
+        if problem != "":
+            return Response.failed(problem)
+        var idle = max(req.timeout_ms, 1) * 1_000_000
+        var where = url.host + ":" + String(url.port)
+        var addr: UInt32
+        try:
+            addr = ipv4(url.host)
+        except e:
+            return Response.failed(String(e))
+        var fd = external_call["socket", c_int](c_int(AF_INET), c_int(SOCK_STREAM), c_int(0))
+        if fd < 0:
+            return Response.failed("no socket: " + why(errno()))
+        var sent = SocketTransport.open_send(fd, addr, url, where, req, now_ns() + idle)
+        var r: Response
+        if sent != "":
+            r = Response.failed(sent)
+        else:
+            r = SocketTransport.read_stream(fd, where, req, idle, sink)
+        _ = external_call["close", c_int](fd)
+        return r^
+
+    @staticmethod
+    def read_stream(fd: c_int, where: String, req: Request, idle: Int, mut sink: Sink) -> Response:
+        """Reads the reply as it comes, handing each SSE event (or body piece) to the sink. Waits in 50 ms slices so a
+        cancel is seen soon; `idle` is the longest silence allowed."""
+        var head = List[UInt8]()
+        var raw = List[UInt8]()  # body bytes not yet de-chunked
+        var data = List[UInt8]()  # body bytes not yet handed on
+        var chunk = List[UInt8](length=CHUNK, fill=0)
+        var r = Response()
+        var head_done = False
+        var chunked = False
+        var length = -1
+        var got = 0
+        var sse = False
+        var good = False
+        var done = False
+        var reader = SseReader()
+        var last = now_ns()
+        while not done:
+            if sink.cancelled():
+                return Response.failed("cancelled")
+            var now = now_ns()
+            if now - last >= idle:
+                return Response.failed("timed out after " + String(req.timeout_ms) + " ms waiting for the stream from " + where)
+            if not wait_for(fd, POLLIN, min(last + idle, now + 50_000_000)):
+                continue
+            var n = external_call["recv", Int](fd, Int(chunk.unsafe_ptr()), CHUNK, c_int(0))
+            if n < 0:
+                var e = errno()
+                if e == EAGAIN or e == EINTR:
+                    continue
+                return Response.failed("the stream from " + where + " broke: " + why(e))
+            if n == 0:
+                break  # the server closed
+            last = now_ns()
+            if not head_done:
+                for k in range(n):
+                    head.append(chunk[k])
+                var end = find(head, "\r\n\r\n", 0)
+                if end < 0:
+                    if len(head) > 1 << 20:
+                        return Response.failed("a reply head larger than 1 MB from " + where)
+                    continue
+                try:
+                    SocketTransport.read_head(head, end, r)
+                except e:
+                    return Response.failed(String(e) + " (from " + where + ")")
+                head_done = True
+                good = r.status >= 200 and r.status < 300
+                chunked = r.header("transfer-encoding").lower().find("chunked") >= 0
+                sse = r.header("content-type").lower().startswith("text/event-stream")
+                var cl = r.header("content-length")
+                if cl.byte_length() > 0 and not chunked:
+                    try:
+                        length = atol(cl.strip())
+                    except:
+                        return Response.failed("a bad Content-Length from " + where)
+                if r.status == 204 or r.status == 304 or (r.status >= 100 and r.status < 200) or req.method == "HEAD":
+                    return r^
+                for k in range(end + 4, len(head)):
+                    raw.append(head[k])
+            else:
+                for k in range(n):
+                    raw.append(chunk[k])
+            # de-chunk what's whole
+            if chunked:
+                var i = 0
+                while True:
+                    var eol = find(raw, "\r\n", i)
+                    if eol < 0:
+                        break
+                    var size = 0
+                    var digits = 0
+                    for k in range(i, eol):
+                        var c = Int(raw[k])
+                        var d = c - 48 if c >= 48 and c <= 57 else (c - 87 if c >= 97 and c <= 102 else (c - 55 if c >= 65 and c <= 70 else -1))
+                        if d < 0:
+                            break
+                        size = size * 16 + d
+                        digits += 1
+                    if digits == 0 or size > MAX_BODY:
+                        return Response.failed("a bad chunk in the stream from " + where)
+                    if size == 0:
+                        done = True
+                        i = len(raw)
+                        break
+                    if eol + 2 + size + 2 > len(raw):
+                        break
+                    for k in range(eol + 2, eol + 2 + size):
+                        data.append(raw[k])
+                    i = eol + 2 + size + 2
+                var rest = List[UInt8](capacity=len(raw) - i)
+                for k in range(i, len(raw)):
+                    rest.append(raw[k])
+                raw = rest^
+            else:
+                for b in raw:
+                    data.append(b)
+                got += len(raw)
+                raw.clear()
+                if length >= 0 and got >= length:
+                    done = True
+            # hand on what's whole
+            if not good:
+                for b in data:
+                    r.body.append(b)
+                data.clear()
+                if len(r.body) > MAX_BODY:
+                    return Response.failed("the reply from " + where + " is larger than 256 MB")
+            elif sse:
+                var events = reader.feed(Span(data))
+                data.clear()
+                for ref ev in events:
+                    sink.push(ev.copy())
+            else:
+                var whole = utf8_whole(data)
+                if whole > 0:
+                    var part = List[UInt8](capacity=whole)
+                    for k in range(whole):
+                        part.append(data[k])
+                    sink.push(Piece("chunk", utf8_lossy(part)))
+                    var rest = List[UInt8]()
+                    for k in range(whole, len(data)):
+                        rest.append(data[k])
+                    data = rest^
+        _ = len(chunk)
+        if not head_done:
+            return Response.failed(where + " closed the connection without a reply" if len(head) == 0 else "a reply without its headers from " + where)
+        if not done and (chunked or length >= 0):
+            return Response.failed("the stream from " + where + " ended early (the connection dropped)")
+        if good and not sse and len(data) > 0:
+            sink.push(Piece("chunk", utf8_lossy(data)))
         return r^
 
     @staticmethod

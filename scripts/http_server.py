@@ -6,6 +6,10 @@
 Routes: GET /json, POST /echo (the JSON body back, with the method and content type), GET /header?name=N (that request
 header's value), GET /chunked (Transfer-Encoding: chunked, four chunks), GET /big (1 MiB, Content-Length), GET
 /slow?ms=N (answers after N ms), GET /fail (a 500). Every request is kept in `seen` (method, path, headers, body).
+
+Streams (goal 35 M0), server-sent events in chunks: GET /sse?n=N (data 0 … N-1), GET /trickle?n=N&ms=M (one every M ms),
+GET /drop (3 events, then the connection cut mid-chunk), GET /stall (1 event, then silence), GET /forever (one every
+50 ms until the client leaves: `gone[path]` = when), POST /sse (three events, the last "got <the JSON body>").
 """
 
 import json
@@ -59,11 +63,66 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def sse_start(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+
+    def sse(self, data, name=None):
+        block = (f"event: {name}\n" if name else "") + "".join(f"data: {line}\n" for line in data.split("\n")) + "\n"
+        b = block.encode()
+        self.wfile.write(f"{len(b):X}\r\n".encode() + b + b"\r\n")
+        self.wfile.flush()
+
+    def sse_end(self):
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
     def do_GET(self):
         self.keep()
         url = urlparse(self.path)
         q = parse_qs(url.query)
-        if url.path == "/json":
+        if url.path == "/sse":
+            self.sse_start()
+            self.wfile.write(b"9\r\n: hello\n\n\r\n")  # (a comment, which a reader skips)
+            for k in range(int(q.get("n", ["200"])[0])):
+                self.sse(str(k))
+            self.sse_end()
+        elif url.path == "/trickle":
+            self.sse_start()
+            for k in range(int(q.get("n", ["10"])[0])):
+                self.sse(f"tick {k}", name="tick")
+                time.sleep(int(q.get("ms", ["150"])[0]) / 1000)
+            self.sse_end()
+        elif url.path == "/drop":
+            self.sse_start()
+            for k in range(3):
+                self.sse(f"part {k}")
+            self.wfile.write(b"40\r\ndata: cut")  # (a chunk that never ends)
+            self.wfile.flush()
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.close_connection = True
+        elif url.path == "/stall":
+            self.sse_start()
+            self.sse("only one")
+            time.sleep(4)
+            try:
+                self.sse_end()
+            except OSError:
+                pass
+        elif url.path == "/forever":
+            self.sse_start()
+            try:
+                for k in range(600):
+                    self.sse(f"beat {k}")
+                    time.sleep(0.05)
+                self.sse_end()
+            except OSError:
+                self.server.gone[self.path] = time.monotonic()
+                self.close_connection = True
+        elif url.path == "/json":
             self.reply(200, json.dumps(JSON_REPLY).encode(), "application/json")
         elif url.path == "/header":
             self.reply(200, self.headers.get(q.get("name", [""])[0], "(none)").encode())
@@ -101,6 +160,13 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self.reply(400, b"not JSON")
             return
+        if urlparse(self.path).path == "/sse":
+            self.sse_start()
+            self.sse("one")
+            self.sse("two")
+            self.sse("got " + json.dumps(value))
+            self.sse_end()
+            return
         out = {"method": "POST", "type": self.headers.get("Content-Type", ""), "body": value}
         self.reply(200, json.dumps(out).encode(), "application/json")
 
@@ -112,6 +178,7 @@ class TestServer:
         self.httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         self.httpd.daemon_threads = True
         self.httpd.seen = []
+        self.httpd.gone = {}
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/"
         with socket.socket() as s:  # a port that was free a moment ago: connecting is refused
             s.bind(("127.0.0.1", 0))

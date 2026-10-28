@@ -12,8 +12,16 @@
 #       def requests(mut self) -> List[Request]:
 #           return self.http.take()
 #
+# Streams (goal 35, D-680): `Request.post_json(PIECE, url, body).stream(END)`: each SSE event (or, for any other body, each
+# piece as it arrives) comes to update() as its own `PIECE` Event (name = the SSE event's type, "message" by default, or
+# "chunk"; text = its data; number = 1, 2, …), then one `END` Event (number = the status, error = why it stopped early:
+# dropped, timed out, cancelled). `Http.cancel(id)` stops a tagged request; a stream's timeout is its longest silence.
+#
 # The transport (how bytes reach the server) sits behind `Transport`: today mojoui.http_socket (HTTP/1.1 over libc sockets,
 # http:// only); later flare (TLS, HTTP/2–3) as one more file and a build switch (mojoui/effects.mojo, docs/http.md).
+
+from std.atomic import Atomic
+from std.memory.alloc import unsafe_alloc
 
 comptime GET = "GET"
 comptime POST = "POST"
@@ -32,7 +40,9 @@ struct Request(Copyable, Movable):
     var env_names: List[String]  # headers whose value is read from an environment variable when the request is sent
     var env_vars: List[String]
     var body: String
-    var timeout_ms: Int  # the whole request: connect, send, wait, read
+    var timeout_ms: Int  # the whole request: connect, send, wait, read (a stream: the longest silence)
+    var stream_end: Int  # -1: one reply; else a stream, and this is the message its end comes back as
+    var cancels: Bool  # not a request: Http.cancel(id) asking the runtime to stop request `id`
 
     def __init__(out self, msg: Int, method: String, url: String, body: String = ""):
         self.msg = msg
@@ -45,6 +55,8 @@ struct Request(Copyable, Movable):
         self.env_vars = List[String]()
         self.body = body
         self.timeout_ms = 30_000
+        self.stream_end = -1
+        self.cancels = False
 
     @staticmethod
     def get(msg: Int, url: String) -> Request:
@@ -73,6 +85,13 @@ struct Request(Copyable, Movable):
 
     def tagged(var self, id: Int) -> Self:
         self.id = id
+        return self^
+
+    def stream(var self, end_msg: Int) -> Self:
+        """Read the reply as it comes: each SSE event (a `text/event-stream` reply) or each piece of any other body comes
+        back as its own `msg` Event, then one `end_msg` Event with the status (and the body, for a status that isn't
+        2xx: no pieces then). The timeout becomes the longest wait for the next bytes (30 s unless set)."""
+        self.stream_end = end_msg
         return self^
 
 
@@ -149,6 +168,127 @@ trait Transport:
     def send(req: Request) -> Response:
         ...
 
+    @staticmethod
+    def stream(req: Request, mut sink: Sink) -> Response:
+        """`req` as a stream: each SSE event (or body piece) handed to `sink.push` as it arrives (only for a 2xx status;
+        another status's body goes in the Response), returning when the stream ends; stops early when
+        `sink.cancelled()`. The Response carries the status and headers, or `error`."""
+        ...
+
+
+@fieldwise_init
+struct Piece(Copyable, Movable):
+    """One SSE event (or one piece of a streamed body)."""
+
+    var name: String  # the SSE event's type ("message" when it names none), or "chunk"
+    var data: String  # its data lines joined by "\n" (a chunk's text)
+
+
+struct SseReader(Movable):
+    """Server-sent events from bytes as they arrive (the WHATWG event-stream format): `feed` returns the events finished
+    so far. Lines end in LF or CRLF; `data:` lines join with LF; `event:` names the type; comments (":") and `id:` /
+    `retry:` are read and ignored. A UTF-8 character split across feeds is kept until it's whole."""
+
+    var line: List[UInt8]
+    var data: String
+    var has_data: Bool
+    var name: String
+
+    def __init__(out self):
+        self.line = List[UInt8]()
+        self.data = ""
+        self.has_data = False
+        self.name = ""
+
+    def feed(mut self, bytes: Span[UInt8, _]) -> List[Piece]:
+        var out = List[Piece]()
+        for b in bytes:
+            if b != 10:
+                self.line.append(b)
+                continue
+            if len(self.line) > 0 and self.line[len(self.line) - 1] == 13:
+                _ = self.line.pop()
+            var text = utf8_lossy(self.line)
+            self.line.clear()
+            if text.byte_length() == 0:
+                if self.has_data:
+                    out.append(Piece(self.name if self.name.byte_length() > 0 else String("message"), self.data))
+                self.data = ""
+                self.has_data = False
+                self.name = ""
+                continue
+            if text.startswith(":"):
+                continue
+            var colon = text.find(":")
+            var field = text if colon < 0 else String(text[byte = : colon])
+            var value = String("") if colon < 0 else String(text[byte = colon + 1 :])
+            if value.startswith(" "):
+                var trimmed = String(value[byte = 1 :])
+                value = trimmed
+            if field == "data":
+                self.data = (self.data + "\n" + value) if self.has_data else value
+                self.has_data = True
+            elif field == "event":
+                self.name = value
+        return out^
+
+
+def utf8_whole(b: List[UInt8]) -> Int:
+    """How many leading bytes of `b` end on a whole UTF-8 character (a sequence cut at the end is held back)."""
+    var n = len(b)
+    var back = 0
+    while back < 3 and back < n and (Int(b[n - 1 - back]) & 0xC0) == 0x80:
+        back += 1
+    if back < n:
+        var lead = Int(b[n - 1 - back])
+        var need = 1 if lead < 0x80 else (2 if lead >= 0xC0 and lead < 0xE0 else (3 if lead >= 0xE0 and lead < 0xF0 else (4 if lead >= 0xF0 else 1)))
+        if need > back + 1:
+            return n - back - 1
+    return n
+
+
+comptime _A = Atomic[Scalar[DType.int64]]
+comptime _P = Pointer[Int64, MutUntrackedOrigin]
+comptime S_CANCEL = 3  # the request's shared words (mojoui.effects): 1 once the app cancelled
+comptime S_HEAD = 4  # the reader's last node
+
+
+def _word(words: Int, k: Int) -> _P:
+    return _P(unsafe_from_address=words + 8 * k)
+
+
+def new_node(piece_addr: Int) -> Int:
+    """A list node: [next node's address (0: none yet), its piece's address]."""
+    var n = unsafe_alloc[Int64](2)
+    _A.store(_word(Int(n), 0), 0)
+    _A.store(_word(Int(n), 1), Int64(piece_addr))
+    return Int(n)
+
+
+struct Sink(Movable):
+    """Where a transport's worker puts a stream's pieces: a list one thread writes and the runtime reads (each node is
+    linked only once it's whole), and the app's cancel flag."""
+
+    var words: Int
+    var tail: Int
+    var count: Int
+
+    def __init__(out self, words: Int, tail: Int):
+        self.words = words
+        self.tail = tail
+        self.count = 0
+
+    def push(mut self, var piece: Piece):
+        var p = unsafe_alloc[Piece](1)
+        p.unsafe_write(piece^)
+        var node = new_node(Int(p))
+        _A.store(_word(self.tail, 0), Int64(node))  # (after the node is written: the reader sees all of it)
+        self.tail = node
+        self.count += 1
+
+    def cancelled(self) -> Bool:
+        return _A.load(_word(self.words, S_CANCEL)) != 0
+
 
 struct Http(Movable):
     """An app's outbox: requests asked for since the runtime last looked (App.requests returns take())."""
@@ -163,6 +303,14 @@ struct Http(Movable):
 
     def get(mut self, msg: Int, url: String):
         self.send(Request.get(msg, url))
+
+    def cancel(mut self, id: Int):
+        """Stop the request (or stream) tagged `id`: its end comes back at once with the error "cancelled" (a stream's
+        end message; a plain request's own message); nothing of it after that. An id not out changes nothing."""
+        var r = Request(0, "", "")
+        r.id = id
+        r.cancels = True
+        self.queued.append(r^)
 
     def take(mut self) -> List[Request]:
         var out = self.queued^

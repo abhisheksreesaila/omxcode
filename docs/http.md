@@ -34,6 +34,28 @@ struct Main(App):
 - Timers live beside it: `def every(self) -> List[Every]` lists `Every(ms, msg)`; each tick is an Event with
   `number` = the tick's count. Ticks keep to the start's grid, so they don't drift (D-324).
 
+## Streams (goal 35)
+
+```mojo
+self.http.send(Request.post_json(PIECE, url, body).header("Accept", "text/event-stream").stream(END).tagged(7))
+...
+elif e.message == PIECE:   # one per SSE event: e.name = its type ("message"), e.text = its data, e.number = 1, 2, …
+elif e.message == END:     # once: e.number = the status, e.error = "" or why it stopped early
+...
+self.http.cancel(7)        # its END comes at the next poll with error "cancelled"; nothing of it after that
+```
+
+- A `text/event-stream` reply is read as server-sent events (`mojoui.http.SseReader`: LF or CRLF, `data:` lines joined,
+  `event:`, comments skipped). Any other body comes as pieces as they arrive (`name` = "chunk", whole UTF-8 only).
+- A status that isn't 2xx sends no pieces: its body is the END Event's `text`.
+- `.timeout(ms)` on a stream is the longest silence (30 s by default). A connection cut before a chunked or sized body
+  ends is an error ("ended early"); a close-delimited body just ends.
+- The worker hands pieces over through a list only it writes and the runtime reads (`mojoui.http.Sink`; each node is
+  linked once it's whole), and looks at the cancel flag every 50 ms. `Transport.stream(req, sink)` is the seam: flare
+  would implement it the same way.
+- Proved by tests/test_stream.mojo (200 events in order, a trickle, a drop, a timeout, cancel, POST, a 500) and
+  examples/httpcheck's Stream button on GTK and the web (frames keep coming), goal 35 M0.
+
 ## The seam
 
 ```
@@ -71,8 +93,8 @@ No app changes: apps only see `Request`, `Http` and the reply `Event`. tests/tes
 
 ## Limits today
 
-IPv4 and `localhost` only (IPv6 literals are refused), no TLS, no redirects followed, no keep-alive, no streaming
-(the whole body arrives in one Event), a 256 MB cap.
+IPv4 and `localhost` only (IPv6 literals are refused), no TLS, no redirects followed, no keep-alive, a 256 MB cap
+(streams: per error body).
 
 Nothing that could split a request is sent (D-570): the URL's path must be printable ASCII without spaces (escape a
 path part with `uri_component`), the host a host name or IPv4 address, the method and every header name an HTTP token,
