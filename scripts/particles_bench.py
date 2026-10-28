@@ -7,8 +7,12 @@
 Writes docs/goals/36/results.json and docs/goals/36/results.md (full runs only).
 
 The protocol, the same for all rows:
-- One build at a time, nothing else of ours running; before each run it waits (up to 3 min) for the 1-minute load
-  average to fall to LOAD_MAX and the GPU to be idle, and records both.
+- One build at a time, nothing else running: the quiet gate. Before every run (each row and size, each of the three
+  runs, B-wasm's thread probes) it waits until the 1-minute load average is < GATE_LOAD and no other process holds
+  the GPU (nvidia-smi compute apps not started by this script, above GATE_IDLE_MIB: the desktop's idle graphics
+  clients hold 6 MiB each), polling every 60 s, for up to 4 hours in all; if the machine never gets quiet it stops
+  and writes nothing. Each run records the load and the compute apps it started with.
+  --provisional: no gate and no waiting (a busy machine); written as results-provisional.json/.md, marked PROVISIONAL.
 - A, A-cpu and C run on the same Xvfb display (scripts/headless.py); B-wasm runs in headless Chromium on the same GPU;
   B-native renders offscreen (NVIDIA's Vulkan driver can't present to Xvfb). Every GPU row asserts an NVIDIA adapter
   (never SwiftShader or llvmpipe).
@@ -56,7 +60,10 @@ EXTRA = {"A-cpu": [100_000]}
 WARM, MEAS, RUNS = 60, 600, 3
 FRAME_60 = 1000 / 60  # 16.7 ms
 P95_MAX = 20.0
-LOAD_MAX = 6.0  # 1-minute load average (24 cores: a quarter busy) under which a run may start
+GATE_LOAD = 2.0  # the quiet gate: 1-minute load average below this
+GATE_IDLE_MIB = 16  # GPU compute apps at or under this (idle desktop graphics clients) don't count as busy
+GATE_POLL_S = 60
+GATE_BUDGET_S = 4 * 3600
 LABEL = {
     "A": "A · JS + WebGPU", "A-cpu": "A-cpu · plain JS (CPU)", "B-wasm": "B-wasm · JS + Rust/wasm",
     "B-native": "B-native · Rust + wgpu", "C": "C · omxcode (Mojo)",
@@ -91,16 +98,74 @@ def gpu_util():
         return -1
 
 
+def ours():
+    """Pids this script started (its descendants)."""
+    kids = {}
+    for p in Path("/proc").iterdir():
+        if p.name.isdigit():
+            try:
+                st = (p / "stat").read_text()
+                kids.setdefault(int(st[st.rindex(")") + 2:].split()[1]), []).append(int(p.name))
+            except (OSError, ValueError, IndexError):
+                pass
+    out, todo = set(), [os.getpid()]
+    while todo:
+        q = todo.pop()
+        out.add(q)
+        todo += kids.get(q, [])
+    return out
+
+
+def compute_apps():
+    """nvidia-smi --query-compute-apps=pid,process_name,used_memory: [(pid, name, MiB)]."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except Exception as e:
+        return [(-1, f"nvidia-smi failed: {e}", -1)]
+    apps = []
+    for line in out.splitlines():
+        f = [x.strip() for x in line.split(",")]
+        if len(f) >= 3 and f[0].isdigit():
+            apps.append((int(f[0]), f[1], int(f[2]) if f[2].isdigit() else -1))
+    return apps
+
+
+class NotQuiet(Exception):
+    pass
+
+
+class Gate:
+    """The quiet gate: load < GATE_LOAD and no other process on the GPU; one 4-hour budget for the whole run."""
+
+    def __init__(self, log):
+        self.log, self.deadline, self.waited = log, time.time() + GATE_BUDGET_S, 0
+
+    def wait(self, what):
+        t0 = time.time()
+        while True:
+            load, mine = os.getloadavg()[0], ours()
+            apps = compute_apps()
+            busy = [a for a in apps if a[0] not in mine and (a[2] > GATE_IDLE_MIB or a[2] < 0)]
+            if load < GATE_LOAD and not busy:
+                w = round(time.time() - t0)
+                self.waited += w
+                if w:
+                    self.log(f"  (quiet after {w} s: load {load:.2f})")
+                return {"gated": True, "load1": round(load, 2), "waited_s": w,
+                        "compute_apps": [f"{pid},{name},{mib} MiB" for pid, name, mib in apps]}
+            if time.time() > self.deadline:
+                raise NotQuiet(f"never quiet before {what}: load {load:.2f}, GPU held by "
+                               + "; ".join(f"{pid} {Path(name).name} {mib} MiB" for pid, name, mib in busy))
+            if time.time() - t0 < 1 or int(time.time() - t0) % 600 < GATE_POLL_S:
+                self.log(f"  (waiting for quiet before {what}: load {load:.2f}, {len(busy)} other GPU apps)")
+            time.sleep(GATE_POLL_S)
+
+
 def wait_quiet(log):
-    """Waits for a quiet machine (load and GPU); returns what it found when it started."""
-    t0 = time.time()
-    while True:
-        load, util = os.getloadavg()[0], gpu_util()
-        if (load <= LOAD_MAX and util <= 10) or time.time() - t0 > 180:
-            if time.time() - t0 > 180:
-                log(f"  (still busy after 3 min: load {load:.1f}, GPU {util}%; running anyway, recorded)")
-            return {"load1": round(load, 2), "gpu_util": util, "waited_s": round(time.time() - t0)}
-        time.sleep(5)
+    """--provisional: no waiting (the machine is known to be busy); records the load and the GPU's compute apps."""
+    return {"gated": False, "load1": round(os.getloadavg()[0], 2), "gpu_util": gpu_util(), "waited_s": 0,
+            "compute_apps": [f"{pid},{name},{mib} MiB" for pid, name, mib in compute_apps()]}
 
 
 _EXCLUDE = {"python", "python3", "python3.13", "node", "nvidia-smi", "pixi", "Xvfb", "sh", "bash"}
@@ -301,7 +366,8 @@ def build(log):
         raise SystemExit("C build failed:\n" + (c.stdout + c.stderr)[-3000:])
 
 
-def bench(rows, sizes, runs, log):
+def bench(rows, sizes, runs, log, gate=None):
+    quiet = (lambda what: gate.wait(what)) if gate else (lambda what: wait_quiet(log))
     results = {}
     for row in rows:
         results[row] = {}
@@ -312,21 +378,23 @@ def bench(rows, sizes, runs, log):
                 cores = os.cpu_count()
                 tried = {}
                 for th in (cores, cores - 2):
-                    q = wait_quiet(log)
+                    q = quiet(f"{row} {n} probe {th}")
                     tried[th] = one(row, n, th)["frame_ms"]
                     log(f"  B-wasm {n:>10,} probe {th} threads: {tried[th]:.3f} ms (load {q['load1']})")
                 threads = min(tried, key=tried.get)
                 probe = {str(k): round(v, 3) for k, v in tried.items()}
             rr = []
             for i in range(runs):
-                q = wait_quiet(log)
+                q = quiet(f"{row} {n} run {i + 1}")
                 r = one(row, n, threads)
                 r["machine"] = q
                 rr.append(r)
                 log(f"  {row:8} {n:>10,} run {i + 1}: frame {r['frame_ms']:.3f} ms (p95 {r['p95_interval_ms']:.2f}), "
                     f"step {r['step_ms'] if r['step_ms'] is None else round(r['step_ms'], 3)}, cold {r['cold_start_ms']:.0f} ms, "
-                    f"peak {r['peak_rss_mb']:.0f} MB; load {q['load1']}, GPU {q['gpu_util']}%")
+                    f"peak {r['peak_rss_mb']:.0f} MB; load {q['load1']}, GPU apps {len(q['compute_apps'])}")
             c = combine(rr)
+            c["machine"] = {"load1_max": max(r["machine"]["load1"] for r in rr), "gated": all(r["machine"]["gated"] for r in rr),
+                            "compute_apps_at_start": [r["machine"]["compute_apps"] for r in rr]}
             if probe:
                 c["thread_probe_ms"] = probe
             results[row][str(n)] = c
@@ -493,7 +561,16 @@ def mill(n):
 def report(res):
     R = res["rows"]
     L = []
-    L.append("# Goal 36 M4 · the particle field, measured\n")
+    if res.get("provisional"):
+        L.append("# PROVISIONAL · Goal 36 M4 · the particle field, measured on a busy machine\n")
+        L.append("**PROVISIONAL: measured without the quiet gate, while another project's builds and GPU tests ran "
+                 "(1-minute load up to " + str(max(r["machine"]["load1_max"] for row in R.values() for r in row.values() if "machine" in r))
+                 + " on 24 cores, other processes on the RTX 3090; per-row load and GPU apps in the JSON). Not the result.**\n")
+    else:
+        L.append("# Goal 36 M4 · the particle field, measured\n")
+        g = res["protocol"]["gate"]
+        L.append(f"Every run passed the quiet gate: 1-minute load < {g['load1_below']} and no other process on the GPU "
+                 f"(compute apps over {g['gpu_apps_over_mib']} MiB; idle desktop clients hold 6 MiB); waited {g['waited_s']} s in all.\n")
     L.append(f"Commit `{res['commit']}`, sources sha256 `{res['sources_sha256'][:12]}`, {res['date']}; {res['machine']}.\n"
              f"Protocol: scripts/particles_bench.py (docstring): {WARM} warm-up + {MEAS} measured frames, {RUNS} runs, "
              "median of the runs (± spread = max - min).\n")
@@ -574,8 +651,8 @@ CAVEATS = [
     "Peak memory is the RSS of the launched process tree (Chromium's processes, or the one native process), sampled every "
     "20 ms; GPU memory is not included. C keeps a CPU copy of all points (16 bytes each) by design of PointCloud.",
     "Cold start includes each runtime's own start: Chromium's for A, A-cpu and B-wasm; the GPU driver's for all.",
-    "The machine has two RTX 3090s; each runtime picks its own (all report an NVIDIA GeForce RTX 3090). Runs wait for a "
-    f"1-minute load ≤ {LOAD_MAX} and an idle GPU; each run's load is recorded.",
+    "The machine has two RTX 3090s; each runtime picks its own (all report an NVIDIA GeForce RTX 3090). Each run's "
+    "1-minute load and the GPU's compute apps at its start are in results.json.",
 ]
 
 
@@ -586,6 +663,7 @@ def main():
     ap.add_argument("--runs", type=int, default=RUNS)
     ap.add_argument("--count", action="store_true")
     ap.add_argument("--no-build", action="store_true")
+    ap.add_argument("--provisional", action="store_true", help="no quiet gate (busy machine): results marked PROVISIONAL")
     a = ap.parse_args()
     if a.count:
         print(json.dumps(effort(), indent=1))
@@ -600,7 +678,11 @@ def main():
     if not a.no_build:
         build(log)
     t0 = time.time()
-    rows = bench(a.rows, a.sizes, a.runs, log)
+    gate = None if a.provisional else Gate(log)
+    try:
+        rows = bench(a.rows, a.sizes, a.runs, log, gate)
+    except NotQuiet as e:
+        raise SystemExit(f"particles_bench: STOPPED, the machine was never quiet within 4 hours ({e}); nothing written")
     if sources_sha() != sha:
         raise SystemExit("particles_bench: the sources changed during the run; results not written")
     gpu = subprocess.run(["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"], capture_output=True, text=True).stdout.strip().splitlines()
@@ -608,8 +690,12 @@ def main():
         "commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip(),
         "sources_sha256": sha, "date": time.strftime("%Y-%m-%d %H:%M"), "seconds": round(time.time() - t0),
         "machine": f"{os.cpu_count()} cores, {', '.join(gpu)}",
+        "provisional": bool(a.provisional), "gated": not a.provisional,
         "protocol": {"warmup": WARM, "frames": MEAS, "runs": RUNS, "sizes": SIZES, "extra_sizes": EXTRA,
-                     "frame_60_ms": round(FRAME_60, 3), "p95_max_ms": P95_MAX, "load_max": LOAD_MAX},
+                     "frame_60_ms": round(FRAME_60, 3), "p95_max_ms": P95_MAX,
+                     **({"gate": None} if a.provisional else
+                        {"gate": {"load1_below": GATE_LOAD, "gpu_apps_over_mib": GATE_IDLE_MIB, "poll_s": GATE_POLL_S,
+                                  "budget_s": GATE_BUDGET_S, "waited_s": gate.waited}})},
         "rows": rows, "largest_n_at_60": {row: largest_60(rows[row]) for row in rows},
         "effort": effort(), "caveats": CAVEATS,
     }
@@ -617,9 +703,10 @@ def main():
         print(json.dumps({r: {n: {k: v for k, v in x.items() if k != "runs"} for n, x in rows[r].items()} for r in rows}, indent=1))
         return
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "results.json").write_text(json.dumps(res, indent=1) + "\n")
-    (OUT / "results.md").write_text(report(res))
-    print(f"wrote {OUT / 'results.json'} and results.md ({res['seconds']} s)")
+    name = "results-provisional" if a.provisional else "results"
+    (OUT / f"{name}.json").write_text(json.dumps(res, indent=1) + "\n")
+    (OUT / f"{name}.md").write_text(report(res))
+    print(f"wrote {OUT / name}.json and {name}.md ({res['seconds']} s)")
 
 
 if __name__ == "__main__":

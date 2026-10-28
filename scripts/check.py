@@ -73,13 +73,19 @@ def m3():
 
 
 def m4():
-    """The measure: results.json has every row at every size, from one protocol, fresh for these sources."""
+    """The measure: results.json is the final gated measurement (not provisional), every row at every size, from one
+    protocol, fresh for these sources."""
     import particles_bench as pb
     path = OUT / "results.json"
     if not path.exists() or not (OUT / "results.md").exists():
-        return False, "docs/goals/36/results.json or results.md missing (run scripts/particles_bench.py)"
+        prov = " (only the PROVISIONAL busy-machine results exist: results-provisional.json)" if (OUT / "results-provisional.json").exists() else ""
+        return False, "docs/goals/36/results.json or results.md missing: run scripts/particles_bench.py through the quiet gate" + prov
     res = json.loads(path.read_text())
     problems = []
+    if res.get("provisional") is not False or res.get("gated") is not True or not (res.get("protocol", {}).get("gate") or {}).get("load1_below"):
+        problems.append("results.json is not the final gated measurement (provisional or ungated)")
+    if "PROVISIONAL" in (OUT / "results.md").read_text():
+        problems.append("results.md is marked PROVISIONAL")
     if res.get("sources_sha256") != pb.sources_sha():
         problems.append("stale: the sources changed since results.json was measured (rerun scripts/particles_bench.py)")
     p = res.get("protocol", {})
@@ -99,6 +105,8 @@ def m4():
             miss = [k for k in need if r.get(k) is None]
             if miss:
                 problems.append(f"{row} {n}: no {miss}")
+            if not all((x.get("machine") or {}).get("gated") for x in r.get("runs", [])) or not r.get("machine", {}).get("gated"):
+                problems.append(f"{row} {n}: a run didn't pass the quiet gate")
             if len(r.get("runs", [])) != 3:
                 problems.append(f"{row} {n}: {len(r.get('runs', []))} runs")
             if row != "A-cpu":
