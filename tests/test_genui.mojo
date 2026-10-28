@@ -8,7 +8,7 @@ from mojoui.jsonpatch import JDoc
 from mojoui.genui import GenUi, schema, catalog, ACT_STATE, ACT_ACTION
 from mojoui.app import Event
 from mojoui.agui import Agent, Tool
-from mojoui.agentui import Screens
+from mojoui.agentui import Screens, MAX_RETRIES
 from mojoui.view import BUTTON, FIELD, TOGGLE
 
 
@@ -74,5 +74,22 @@ def main() raises:
             assert_true(m.content.find("refused") >= 0)
             told += 1
     assert_equal(told, 3, "the refused one and the two past the cap were told why")
+    # an agent that keeps sending refused UI gets at most MAX_RETRIES reruns, then the app stops (round 2, D-725)
+    var stubborn = Agent("http://unused/", 1, 2)
+    stubborn.offer(Tool("render_ui", "UI", schema()))
+    var tries = Screens(30_000, 4000, 40)
+    _ = stubborn.on_json('{"type":"TEXT_MESSAGE_START","messageId":"s1","role":"assistant"}')
+    var reruns = 0
+    for k in range(6):
+        var id = "b" + String(k)
+        _ = stubborn.on_json('{"type":"TOOL_CALL_START","toolCallId":"' + id + '","toolCallName":"render_ui","parentMessageId":"s1"}')
+        _ = stubborn.on_json('{"type":"TOOL_CALL_ARGS","toolCallId":"' + id + '","delta":' + json_string(bad) + "}")
+        _ = stubborn.on_json('{"type":"TOOL_CALL_END","toolCallId":"' + id + '"}')
+        if tries.take(stubborn):
+            reruns += 1
+    assert_equal(reruns, MAX_RETRIES, "three reruns, then no more")
+    assert_true(tries.gave_up)
+    tries.reset()
+    assert_true(not tries.gave_up, "the user's next message starts again")
     print("SCREENS: ok")
     print("test_genui: done")

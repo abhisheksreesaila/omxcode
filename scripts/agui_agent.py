@@ -216,7 +216,13 @@ def scenario_chat(inp, r):
     r.say(text, pieces=words(text), delay=30)
 
 
-SCENARIOS = {"tools": scenario_tools, "ui": scenario_ui, "bad": scenario_bad, "chat": scenario_chat}
+def scenario_stubborn(inp, r):
+    """Sends UI outside the catalog every run, refused or not (the app must stop rerunning it)."""
+    mid = r.say("Trying again." if last_tool(inp) is not None else "Let me show you.")
+    r.call("render_ui", {"ui": {"component": "Script", "code": "EVIL()"}}, parent=mid)
+
+
+SCENARIOS = {"stubborn": scenario_stubborn, "tools": scenario_tools, "ui": scenario_ui, "bad": scenario_bad, "chat": scenario_chat}
 
 
 def scripted(inp, scenario):

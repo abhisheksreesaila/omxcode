@@ -9,7 +9,8 @@
 #
 # Each render_ui call is shown (a GenUi) or refused (the agent is told why in a tool result: {"error": "refused: …"});
 # past `max` screens every call is refused. The first action in a screen is its call's tool result; later ones a user
-# message. Calls the app didn't offer are left alone.
+# message. Calls the app didn't offer are left alone. After MAX_RETRIES refusals in a row take() stops asking for reruns
+# (gave_up); a screen shown, or reset() (the user's next message), starts the count again.
 
 from mojoui.agui import Agent
 from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES
@@ -21,6 +22,7 @@ from mojoui.theme import Palette
 from mojoui.app import Event
 
 comptime MAX_SCREENS = 40
+comptime MAX_RETRIES = 3  # reruns after refused UI in a row; then take() stops asking and gave_up says so (D-725)
 
 
 struct Screens(Movable):
@@ -30,6 +32,8 @@ struct Screens(Movable):
     var base: Int
     var canvas_base: Int
     var max: Int
+    var streak: Int  # refusals in a row
+    var gave_up: Bool  # past MAX_RETRIES: no more reruns until reset()
 
     def __init__(out self, base: Int, canvas_base: Int, max: Int = MAX_SCREENS):
         self.uis = List[GenUi]()
@@ -38,6 +42,13 @@ struct Screens(Movable):
         self.base = base
         self.canvas_base = canvas_base
         self.max = max
+        self.streak = 0
+        self.gave_up = False
+
+    def reset(mut self):
+        """The user spoke: refusals count from zero again."""
+        self.streak = 0
+        self.gave_up = False
 
     def known(self, call_id: String) -> Bool:
         for c in self.calls:
@@ -47,7 +58,7 @@ struct Screens(Movable):
 
     def take(mut self, mut agent: Agent, tool: String = "render_ui") -> Bool:
         """Every finished `tool` call not yet seen: shown, or refused with a message to the agent. True when one was
-        refused (run the agent again so it hears why)."""
+        refused and the agent should run again to hear why (at most MAX_RETRIES times in a row: then gave_up)."""
         var refused = False
         for c in agent.pending():
             if c.name != tool or self.known(c.id):
@@ -66,10 +77,18 @@ struct Screens(Movable):
             if ui.problem != "":
                 agent.answer(c.id, '{"error":' + json_string("refused: " + ui.problem) + "}")
                 refused = True
+            else:
+                self.streak = 0
             self.uis.append(ui^)
             self.calls.append(c.id)
             self.messages.append(agent.last_message)
-        return refused
+        if not refused:
+            return False
+        self.streak += 1
+        if self.streak > MAX_RETRIES:
+            self.gave_up = True
+            return False
+        return True
 
     def owns(self, message: Int) -> Bool:
         return message >= self.base and message < self.base + len(self.uis) * MAX_CONTROLS

@@ -18,7 +18,7 @@ from mojoui.theme import Theme
 from mojoui.http import Http, Request
 from mojoui.agui import Agent, Tool, EV_TEXT, EV_TOOL_END, EV_STATE, EV_STREAM_END
 from mojoui.genui import schema, MAX_CONTROLS
-from mojoui.agentui import Screens
+from mojoui.agentui import Screens, MAX_RETRIES
 from themes.omxqua import omxqua
 
 # messages (no ranges below 10_000; agent-built UI k uses UI_BASE + k * MAX_CONTROLS … + 999, k < MAX_UIS: Screens)
@@ -95,6 +95,7 @@ struct Main(App):
             for c in self.agent.pending():  # (UI nobody used: the agent hears it was shown, so the conversation stays whole)
                 self.agent.answer(c.id, '{"shown":true}')
             self.agent.say(self.draft)
+            self.screens.reset()
             self.draft = ""
             self.run()
         elif e.message == STOP:
@@ -141,6 +142,10 @@ struct Main(App):
         if len(items) == 0:
             items.append(Text("Say hello, or ask for a chart or a form.", style=CAPTION))
         var status = ("thinking… " + self.agent.step if self.agent.running else ("ready" if self.agent.ended == "open" or self.agent.ended == "finished" else self.agent.ended))
+        if self.screens.gave_up and not self.agent.running:
+            status = "the agent's UI was refused " + String(MAX_RETRIES + 1) + " times in a row: stopped (send a message to go on)"
+        if self.agent.trimmed > 0:
+            status += " · the oldest " + String(self.agent.trimmed) + " messages weren't sent (too long)"
         return VStack(
             HStack(Text("Agent chat", style=TITLE), Spacer(), TextField(self.url, placeholder="Agent URL", on_change=URL).width(300), spacing=SPACE_M).align(CENTER).fill(),
             Scroll(VStack(items^, spacing=SPACE_M).align(START).fill(), height=560, pinned=True).fill().grow(),

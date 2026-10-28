@@ -654,7 +654,17 @@ def m2():
             problems.append(f"{host}: something of the refused UI is on screen")
         if not any("couldn't show" in l.lower() or "refused" in l.lower() for l in labels(out)):
             problems.append(f"{host}: the chat doesn't say the agent's UI was refused")
-        notes.append(f"{host}: form built, edited, submitted; refused UI reported")
+        # an agent that keeps sending refused UI: three reruns, then the app stops and says so (round 2, D-725)
+        try:
+            out, inputs = chat_run(host, "stubborn", "type:Message=Show me anything;tap:Send;pause:3000")
+        except RuntimeError as e:
+            problems.append(str(e))
+            continue
+        if len(inputs) != 4:
+            problems.append(f"{host}: a stubborn agent was run {len(inputs)} times (want the first run and 3 reruns)")
+        if not any("stopped" in l for l in labels(out)):
+            problems.append(f"{host}: the chat doesn't say it stopped after the refusals: {labels(out)[-4:]}")
+        notes.append(f"{host}: form built, edited, submitted; refused UI reported; a stubborn agent stopped after 3 reruns")
     # the web shows agent text as text: a <script> the agent writes into a Text adds no script element and runs nothing
     if not problems:
         try:
