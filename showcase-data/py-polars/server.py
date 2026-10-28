@@ -16,8 +16,7 @@ How it works
   from the HTTP hop and its own drawing.
 - The group-by runs on Polars' streaming engine (`collect(engine="streaming")`, morsels across every core: the
   same lever build C uses); the 50-row head runs on the default engine.
-- Responses are serialised with orjson (FastAPI's ORJSONResponse) when it is installed, else the standard JSONResponse;
-  uvicorn runs with httptools (its C HTTP parser) and uvloop. /api/meta says which ran.
+- Responses are serialised with orjson (FastAPI's ORJSONResponse); uvicorn runs with httptools (its C HTTP parser) and uvloop. /api/meta says which ran.
 - One uvicorn process, one worker: the data lives in this process's memory, so more workers would mean more
   copies of it. Requests are handled in FastAPI's thread pool; Polars runs each query on all cores.
 """
@@ -34,14 +33,11 @@ from pathlib import Path
 import polars as pl
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 
-try:
-    import orjson  # noqa: F401
-    from fastapi.responses import ORJSONResponse as FastJSON
-    JSON_LIB = "orjson"
-except ImportError:  # not in this pixi env yet (see README.md)
-    FastJSON, JSON_LIB = JSONResponse, "json (orjson not installed)"
+from fastapi.responses import ORJSONResponse as FastJSON  # orjson serialises the responses
+
+JSON_LIB = "orjson"
 import httptools  # noqa: F401,E402  (uvicorn's fast HTTP parser; fail loudly if it is missing)
 import uvloop  # noqa: F401,E402
 from fastapi.staticfiles import StaticFiles

@@ -2,16 +2,14 @@
 
 The goal 38 dashboard (../SPEC.md) as the common web stack. How the server works and why: `server.py`'s docstring
 (data in memory once, sorted by day descending so a date range is a slice and the table is the first 50 matching
-rows; the group-by on Polars' streaming engine; orjson when installed; uvicorn with httptools and uvloop; /api/meta
+rows; the group-by on Polars' streaming engine; orjson (ORJSONResponse); uvicorn with httptools and uvloop; /api/meta
 says which). The page: `web/app.js` (one GET per change; timings split server compute, serialise + transfer =
 fetch − compute, draw and paint).
 
 - Check: `pixi run python showcase-data/py-polars/check_b.py` (10M and 100M on the repo's Xvfb; prints `B: ok (…)`).
   Chromium: build A's binary and flags (check_b.py FLAGS), through Playwright.
 - Bench: `check_b.py --bench 100M` (JSON).
-- Missing from the pixi env: **orjson** (FastAPI's ORJSONResponse needs it; `pixi add orjson` is the owner's call,
-  this build doesn't touch pixi.toml). Until then responses use the standard JSONResponse and `json` in timings says
-  `json (orjson not installed)`. httptools 0.9 and uvloop 0.22 are installed and used.
+- Libraries: orjson 3.13 (ORJSONResponse), httptools 0.9, uvloop 0.22; timings.json and `ready` name them.
 
 ## Driven from outside (the shared harness)
 
