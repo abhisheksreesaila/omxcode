@@ -194,8 +194,9 @@ def verdict_desktop(d, x):
         f"{f2(s20['C'], 3)} ms in omxcode: the same arithmetic on the same GPU, within {round((hi / lo - 1) * 100)} % of each other. "
         "Three timing methods (GPU timestamps for JS + WebGPU and Rust, a separate pass waited for on its own for omxcode), "
         "so read it as a tie, not a ranking.</li>",
-        f"<li><b>What closed the gap.</b> Goal 36 measured omxcode at {f2(x1['frame_ms'])} ms a frame at 1M on a virtual display and guessed "
-        f"that most of it was GTK's software renderer. On this desktop goal 36's path still takes {f2(old1['frame_ms'])} ms on GTK's default "
+        f"<li><b>What closed the gap.</b> On a virtual display, where there is no GL and omxcode must copy its picture to the CPU, "
+        f"a frame at 1M takes {f2(x1['frame_ms'])} ms (re-measured with today's framework); goal 36 guessed that most of such a frame "
+        f"was GTK's software renderer. On this desktop goal 36's path still takes {f2(old1['frame_ms'])} ms on GTK's default "
         f"GPU renderer (Vulkan) and {f2(gl1['frame_ms'])} ms on its GL renderer: the guess was wrong. Keeping the picture on the GPU "
         f"(no copy to the CPU, GL renderer too) takes {f2(m6['frame_ms'])} ms. So of the {f2(old1['frame_ms'] - m6['frame_ms'])} ms saved at 1M, "
         f"{f2(old1['frame_ms'] - gl1['frame_ms'])} ms is GTK's renderer choice and {f2(gl1['frame_ms'] - m6['frame_ms'])} ms is the readback and "

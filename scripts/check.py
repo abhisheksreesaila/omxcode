@@ -380,7 +380,7 @@ def m7():
     return True, (f"results-desktop.json fresh (commit {res['commit']}), {st['compositor'].split(' built')[0]}, "
                   f"{m.get('refreshRate'):.2f} Hz ×{m.get('scale')}; C frame ms "
                   + ", ".join(f"{pb.mill(n)} {c[str(n)]['frame_ms']:.2f}" for n in pb.SIZES)
-                  + f"; 0 readbacks in every C run ({sum(1 for r in rows if r.startswith('C'))} C rows)")
+                  + f"; 0 readbacks in every 36b C run ({sum(1 for r in rows if r.startswith('C') and r not in ('C-36', 'C-36gl'))} rows; goal 36's path C-36/C-36gl copies, as it should)")
 
 
 def m8():
