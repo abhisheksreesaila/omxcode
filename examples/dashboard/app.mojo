@@ -347,7 +347,7 @@ struct Main(App):
                 f.write("]}\n")
             with open(self.out + "/timings.json", "w") as f:
                 f.write('{"build": "D omxcode", "rows": ' + String(o.rows()) + ', "device": ' + json_string(o.device)
-                        + ', "read_ms": ' + fixed(o.read_ms, 1) + ', "cents_ms": ' + fixed(o.cents_ms, 1)
+                        + ', "read_ms": ' + fixed(o.read_ms, 1) + ', "cents_ms": ' + fixed(o.cents_ms, 1) + ', "sort_ms": ' + fixed(o.sort_ms, 1)
                         + ', "upload_ms": ' + fixed(o.upload_ms, 1) + ', "first_dashboard_ms": ' + fixed(self.first_ms, 1)
                         + ', "gpu_table_bytes": ' + String(o.gpu_bytes()) + ',\n "steps": [\n')
                 for i in range(len(self.timings)):

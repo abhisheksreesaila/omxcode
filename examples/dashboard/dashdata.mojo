@@ -1,25 +1,27 @@
-# The dashboard's data (showcase-data/SPEC.md): the orders file read once by MX frame, put on the GPU once, and every
-# filter change answered from all of its rows there.
+# The dashboard's data (showcase-data/SPEC.md): the orders file read once by MX frame, its rows sorted by day at load,
+# put on the GPU once, and every filter change answered from all of its rows there.
 #
-#   var o = open_orders("data/orders-100M.parquet")      # read, cents, upload (a job: LoadJob)
+#   var o = open_orders("data/orders-100M.parquet")      # read, cents, sort, upload (a job: LoadJob)
 #   var a = answer(o, Filters(from_day, to_day, 50.0, "US East"))   # one change (a job: StepJob)
 #
-# One MX frame query on the GPU gives the KPIs, the bars and the table's day counts at once: rows grouped by
-# product × day (40 × 731 groups), summing the amount, counting, and summing each row's (amount − cost) / amount. Then mojoui.devrows
-# fetches only the rows of the last days that hold the table's 50 (ORDER BY day DESC, id LIMIT 50), from the same
-# device copy.
+# At load the rows are reordered by (day, id) on every core (mojoui.tableprep.sort_rows; SPEC lets a build reorder rows
+# at load, the time counted in the load): a date range is then a slice of rows, found by two binary searches, and the
+# GPU reads only that slice. Each change runs mojoui.devgroup's group-by over the slice (the engine's GPU Query reads
+# every row and takes no row range: docs/mxframe-needs.md), then mojoui.devrows fetches only the rows of the last days
+# that hold the table's 50 (ORDER BY day DESC, id LIMIT 50) from the same device copy, through device buffers kept
+# between changes.
 #
 # Money is held in cents (INT): every amount and cost in the file has two decimals, so `round(x * 100)` is exact, and
-# the read checks it (each value must come back as the same float64). That puts the columns on the engine's GPU path,
-# which takes integer programs only (a FLOAT column runs on the CPU), and makes the sums exact. The margin of a row is
-# `(amount - cost) * 10^10 // amount` (within 1e-10 of the float64's), summed exactly in int64 (≤ 10^18 at 100M rows).
-# (Here it's the "profit share" of a row: the same (amount − cost) / amount, by a name the app lint doesn't read as a
-# layout margin.)
+# the load checks it (each value must come back as the same float64). Integer columns make the sums exact. The margin
+# of a row is `(amount - cost) * 10^10 // amount` (within 1e-10 of the float64's), summed exactly in int64 (≤ 10^18
+# at 100M rows). (Here it's the "profit share" of a row: the same (amount − cost) / amount, by a name the app lint
+# doesn't read as a layout margin.)
 
 from max.gpu.host import DeviceContext
-from mxframe import (Table, SharedTable, DeviceTable, Query, col, lit, sum, count, GPU, INT, read_parquet, gpu_device,
-                     JobBody, JobCtl)
-from mojoui.devrows import ColumnRange, first_rows
+from mxframe import Table, SharedTable, DeviceTable, read_parquet, gpu_device, JobBody, JobCtl
+from mojoui.devrows import ColumnRange, GpuScratch, first_rows
+from mojoui.devgroup import dcol, dlit, group_rows
+from mojoui.tableprep import to_fixed, column_extent, sort_rows, SortedKey, RowSlice
 from mojoui.clock import now_ns
 
 comptime TOP = 20
@@ -52,11 +54,15 @@ struct Orders(Copyable, Movable):
     var products: List[String]  # by code
     var regions: List[String]  # by code
     var device: String
+    var by_day: SortedKey  # the rows are in (day, id) order
+    var scratch: GpuScratch  # the queries' device buffers, kept between changes (copies share them)
     var read_ms: Float64
     var cents_ms: Float64
+    var sort_ms: Float64
     var upload_ms: Float64
 
-    def __init__(out self, var table: SharedTable, var dt: DeviceTable, var ctx: DeviceContext, first_day: Int, days: Int) raises:
+    def __init__(out self, var table: SharedTable, var dt: DeviceTable, var ctx: DeviceContext, first_day: Int, days: Int,
+                 by_day: SortedKey) raises:
         self.c_id = table.column("id")
         self.c_day = table.column("day")
         self.c_region = table.column("region")
@@ -76,8 +82,11 @@ struct Orders(Copyable, Movable):
         self.first_day = first_day
         self.days = days
         self.device = gpu_device()
+        self.by_day = by_day
+        self.scratch = GpuScratch()
         self.read_ms = 0
         self.cents_ms = 0
+        self.sort_ms = 0
         self.upload_ms = 0
 
     def rows(self) -> Int:
@@ -91,18 +100,6 @@ def ms_since(t0: Int) -> Float64:
     return Float64(now_ns() - t0) / 1e6
 
 
-def to_cents(mut t: Table, c: Int) raises:
-    """A FLOAT money column → INT cents, in place; raises if a value isn't a whole number of cents."""
-    ref values = t.cols[c].values
-    for i in range(len(values)):
-        var x = Float64(from_bits=UInt64(values[i]))
-        var k = Int64(round(x * 100.0))
-        if Float64(k) / 100.0 != x:
-            raise Error("column " + t.name(c) + " row " + String(i) + " holds " + String(x) + ", not whole cents")
-        values[i] = k
-    t.cols[c].kind = INT
-
-
 def open_orders(path: String, ctl: JobCtl = JobCtl()) raises -> Orders:
     var t0 = now_ns()
     var r = read_parquet(path, ctl)
@@ -111,23 +108,28 @@ def open_orders(path: String, ctl: JobCtl = JobCtl()) raises -> Orders:
     for name in ["id", "day", "region", "product", "amount", "cost", "paid"]:
         _ = t.column(name)  # (each one there, or say which is missing)
     t0 = now_ns()
-    to_cents(t, t.column("amount"))
-    to_cents(t, t.column("cost"))
-    var lo = Int64.MAX
-    var hi = Int64.MIN
-    for v in t.values(t.column("day")):
-        lo = min(lo, v)
-        hi = max(hi, v)
+    to_fixed(t, t.column("amount"), 2)  # (cents, on every core)
+    to_fixed(t, t.column("cost"), 2)
+    var extent = column_extent(t, t.column("day"))
     var cents_ms = ms_since(t0)
+    ctl.check()
+    t0 = now_ns()
+    var by_day = sort_rows(t, t.column("day"), t.column("id"))
+    var sort_ms = ms_since(t0)
     ctl.check()
     t0 = now_ns()
     var shared = t^.share()
     var dt = DeviceTable(shared)
     var ctx = DeviceContext()
-    var o = Orders(shared, dt^, ctx^, Int(lo), max(Int(hi - lo) + 1, 1))
+    var o = Orders(shared, dt^, ctx^, Int(extent[0]), max(Int(extent[1] - extent[0]) + 1, 1), by_day)
+    var longest = 0  # the most rows one day holds: the most the table's query ever fetches is that plus TABLE_ROWS
+    for d in range(o.days):
+        longest = max(longest, by_day.slice(o.table, Int64(o.first_day + d), Int64(o.first_day + d)).rows())
+    o.scratch.reserve_rows(o.ctx, longest + TABLE_ROWS)
     o.upload_ms = ms_since(t0)
     o.read_ms = read_ms
     o.cents_ms = cents_ms
+    o.sort_ms = sort_ms
     return o^
 
 
@@ -148,7 +150,7 @@ struct Answer(Copyable, Movable):
     var row_ids: List[Int]  # the table's rows (row numbers), in order
     var ids: List[Int]  # their id column
     var cells: List[String]  # the table: TABLE_ROWS × 7 texts
-    var query_ms: Float64  # MX frame's GPU group-by
+    var query_ms: Float64  # the GPU group-by (mojoui.devgroup, over the days' rows)
     var rows_ms: Float64  # mojoui.devrows: the table's rows on the GPU, and their cells
     var compute_ms: Float64  # the whole answer, in its job
 
@@ -195,31 +197,37 @@ def answer(o: Orders, f: Filters) raises -> Answer:
     if f.region != ALL:
         region = o.table.code_of(o.c_region, f.region)  # (-1, an unknown region: nothing matches)
     var nprod = len(o.products)
-    var q = Query(o.table).on_device(o.dt).where((col("day") >= lit(f.from_day)) & (col("day") <= lit(f.to_day)))
-    q = q^.where(col("amount") >= lit(lo_cents))
+    # the days asked for that hold data, and their rows: a slice (the rows are in day order)
+    var lo_day = max(f.from_day, o.first_day)
+    var hi_day = min(f.to_day, o.first_day + o.days - 1)
+    var span = o.by_day.slice(o.table, Int64(f.from_day), Int64(f.to_day))
+    var ndays = max(hi_day - lo_day + 1, 1)
+    var ranges = List[ColumnRange]()
     if f.region != ALL:
-        q = q^.where(col("region") == lit(region))
-    var profit = (col("amount") - col("cost")) * lit(PROFIT_SCALE) // col("amount")
-    var r = q^.group_by(col("product") * lit(o.days) + (col("day") - lit(o.first_day)), nprod * o.days) \
-        .agg(sum(col("amount")), count(), sum(profit)).compute(GPU)
-    a.query_ms = r.milliseconds
-    var sums = r.values(0)
-    var profits = r.values(2)
+        ranges.append(ColumnRange(o.c_region, Int64(region), Int64(region)))  # (-1: nothing matches)
+    ranges.append(ColumnRange(o.c_amount, Int64(lo_cents), Int64.MAX))
+    var profit = (dcol(o.c_amount) - dcol(o.c_cost)) * dlit(PROFIT_SCALE) // dcol(o.c_amount)
     var by_product = List[Int](length=nprod, fill=0)
     var seen = List[Int](length=nprod, fill=0)
-    var by_day = List[Int](length=o.days, fill=0)
+    var by_day = List[Int](length=ndays, fill=0)
+    # one pass over the days' rows: product × day groups (sum, count, profit). It gives the bars, the KPIs and the rows
+    # per day (the table's cut-off) at once; measured faster than 40 product groups plus a per-day count, in two passes
+    # or as two grouping sets in one (D-768).
+    var g = group_rows(o.ctx, o.dt, ranges, dcol(o.c_product) * dlit(ndays) + (dcol(o.c_day) - dlit(lo_day)), nprod * ndays,
+                       [dcol(o.c_amount), profit.copy()], rows=span, scratch=o.scratch)
+    a.query_ms = g.milliseconds
     for p in range(nprod):
-        for d in range(o.days):
-            var g = p * o.days + d
-            var n = r.counts[g]
+        for d in range(ndays):
+            var k = p * ndays + d
+            var n = g.counts[k]
             if n == 0:
                 continue
-            by_product[p] += sums[g]
+            by_product[p] += g.sums[0][k]
             seen[p] += n
             by_day[d] += n
             a.rows += n
-            a.sum_cents += sums[g]
-            a.profit_sum += profits[g]
+            a.sum_cents += g.sums[0][k]
+            a.profit_sum += g.sums[1][k]
     # the bars: products by sum, largest first, ties by name
     var order = List[Int]()
     for p in range(nprod):
@@ -236,12 +244,8 @@ def answer(o: Orders, f: Filters) raises -> Answer:
         a.top_cents.append(by_product[order[i]])
     # the table: the first 50 matching rows by day (newest first), then id
     var t1 = now_ns()
-    var ranges = List[ColumnRange]()
-    ranges.append(ColumnRange(o.c_day, Int64(f.from_day), Int64(f.to_day)))
-    ranges.append(ColumnRange(o.c_amount, Int64(lo_cents), Int64.MAX))
-    if f.region != ALL:
-        ranges.append(ColumnRange(o.c_region, Int64(region), Int64(region)))
-    a.row_ids = first_rows(o.ctx, o.table, o.dt, ranges, o.c_day, o.first_day, by_day, TABLE_ROWS, o.c_id)
+    a.row_ids = first_rows(o.ctx, o.table, o.dt, ranges, o.c_day, lo_day, by_day, TABLE_ROWS, o.c_id, rows=span, sorted=o.by_day,
+                           scratch=o.scratch)
     for row in a.row_ids:
         a.ids.append(Int(o.table.get(o.c_id, row)))
         a.cells.append(day_text(Int(o.table.get(o.c_day, row))))

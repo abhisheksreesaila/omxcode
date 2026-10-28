@@ -115,7 +115,7 @@ def check(steps=None):
         lat, g, _ = summary(timings)
         print(f"  {rows}: {timings['device']}: {len(got['steps'])} answers; per step input-to-pixels median "
               f"{statistics.median(lat):.1f} ms, worst {max(lat):.1f} ms; GPU compute median {statistics.median(g):.1f} ms; "
-              f"cold start {cold:.0f} ms (read {timings['read_ms'] / 1000:.1f} s, upload {timings['upload_ms'] / 1000:.1f} s); "
+              f"cold start {cold:.0f} ms (read {timings['read_ms'] / 1000:.1f} s, cents {timings['cents_ms'] / 1000:.2f} s, sort {timings.get('sort_ms', 0) / 1000:.2f} s, upload {timings['upload_ms'] / 1000:.1f} s); "
               f"peak PSS {pss:.0f} MiB, GPU {gpu} MiB")
         if problems:
             sys.exit(f"D: FAIL ({rows}): {len(problems)} problems\n  " + "\n  ".join(problems[:20]))
@@ -134,7 +134,7 @@ def bench(rows, steps=None):
         "gpu_compute_ms": {"median": r(statistics.median(g)), "p95": r(pct(g, 0.95)), "worst": r(max(g))},
         "job_compute_ms": {"median": r(statistics.median(comp)), "p95": r(pct(comp, 0.95)), "worst": r(max(comp))},
         "cold_start_ms": round(cold, 1), "first_dashboard_ms_in_app": timings["first_dashboard_ms"],
-        "data_load_ms": {"read": timings["read_ms"], "cents": timings["cents_ms"], "upload": timings["upload_ms"]},
+        "data_load_ms": {"read": timings["read_ms"], "cents": timings["cents_ms"], "sort": timings.get("sort_ms", 0), "upload": timings["upload_ms"]},
         "peak_pss_mib": round(pss, 1), "peak_gpu_mib": gpu, "gpu_table_bytes": timings["gpu_table_bytes"],
     }))
 

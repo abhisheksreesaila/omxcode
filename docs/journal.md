@@ -771,3 +771,11 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - make_data.py: 100M rows in 27.5 s (1.30 GB), 10M in 2.9 s (130 MB), peak RSS 280 MB; two 10M runs byte-equal; hashes in showcase-data/data.lock.
 - steps.json: opening + 32 steps; at 10M rows matched run 10M → 0 (step 19, one day in Japan ≥ 4,900) → 10M (step 27).
 - reference.py: DuckDB 2.0 (24 threads, table in memory) per step median 33 ms at 10M, 254 ms at 100M (worst 334 ms); load 0.2 s / 1.2 s. NumPy agrees at 10M.
+
+## Goal 38 fair play, build D (2026-10-28): what the fairness reviewer found
+- Before (engine Query full scan each change, CPU cents, no sort): 100M median input-to-pixels 37.4 ms, p95 74.6; GPU compute median 24.7 ms; load read 1.66 s + cents 0.38 s + upload 1.38 s; cold start 3.7 s.
+- Engine checked first: `Query` has no row range (the executor slices rows internally for jobs, `_table_addresses(row0, rows)`, not public); `range_aggregate` is CPU, ungrouped, unfiltered; DeviceTable is int64 throughout. So: mojoui.tableprep (sort at load, cents on every core), mojoui.devgroup (GPU group-by over a row slice), devrows over slices with reused buffers (requests #24, #25; #22 unchanged).
+- Sort at load: first 2.4 s at 100M; zero-filled 800 MB buffers were 0.9 s of it (`List(length=n, fill=0)` single-threaded) → `unsafe_uninit_length`: 1.3 s. 24 logical vs 12 physical cores: no change. GPU sort not done (host copy must match, D-766).
+- Group-by over the slice, first kernel: filtered all-rows 25.9 ms, worse than unfiltered (13 ms). Staging the program in shared memory: 25.9 → ~18. Rows sorted by day put a warp's 32 lanes on one day slot: warp-uniform add (vote + shuffles, lane 0 adds once) → 12.1. Per-warp copies of the shared accumulators: no change (reverted).
+- Three groupings measured in the app (D-768): product × day one pass won every step; kept.
+- After (one run, GPU shared with 8 mxframe test processes, provisional): 100M median input-to-pixels 19.7 ms, worst 64.0; GPU compute median 3.0 ms; load read 1.4 + cents 0.16 + sort 1.26 + upload 1.5 s; cold start 4.5 s (the sort costs ~0.8 s of cold start net). check_d: D ok at 10M and 100M. The median change-to-frame is now mostly the job being polled once a display frame, not compute.
