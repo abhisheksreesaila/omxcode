@@ -353,6 +353,8 @@ def m1_patch():
     k = keyed(out)
     if k.get("ATOMIC", [""])[0] != "ok":
         problems.append("the test didn't prove a failing patch leaves the document unchanged (ATOMIC: ok)")
+    if k.get("BOUNDS", [""])[0] != "ok":  # (reviewer, D-717: copy bombs, deep adds, 1e999, binds on arrays)
+        problems.append("the test didn't prove the document's bounds (BOUNDS: ok)")
     return problems, len(cases)
 
 
@@ -447,6 +449,8 @@ def m1():
             if not isinstance(second.state, dict) or second.state.get("count") != 3:
                 problems.append(f"the second run's state isn't the state the client kept (snapshot + deltas): {second.state!r}")
     k = keyed(out)
+    if k.get("BOUNDS", [""])[0] != "ok":  # (reviewer, D-718: snapshots, forged roles, caps)
+        problems.append("tests/test_agui.mojo didn't prove the client's bounds (BOUNDS: ok)")
     if k.get("LIVE", [""])[0] != "answered ask_user; agent said 'You picked blue.'":
         problems.append(f"LIVE: {k.get('LIVE')} (the live round trip)")
     if problems:

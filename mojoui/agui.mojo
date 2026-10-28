@@ -40,6 +40,9 @@ comptime EV_BAD = 17  # not an AG-UI event (not JSON, no type)
 comptime EV_STREAM_END = 18  # the HTTP stream ended (ended says how the run went)
 
 comptime MAX_MESSAGES = 2000
+comptime MAX_TEXT = 1024 * 1024  # one message's words (D-718): deltas past it are refused
+comptime MAX_ARGS = 32_768  # one tool call's arguments: past it the call is marked too_big and its arguments dropped
+comptime MAX_TYPES = 64  # event types counted by name (the rest under "OTHER")
 
 
 @fieldwise_init
@@ -57,6 +60,7 @@ struct ToolCall(Copyable, Movable):
     var name: String
     var arguments: String  # JSON text, as streamed (whole once done)
     var done: Bool
+    var too_big: Bool  # its arguments ran past MAX_ARGS: dropped (answer it with an error)
 
 
 @fieldwise_init
@@ -103,6 +107,7 @@ struct Agent(Movable):
     var reader: SseReader
     var last_type: String
     var last_message: String  # the id of the message the last event touched
+    var problem: String  # why the last event was refused (EV_BAD)
 
     def __init__(out self, url: String, piece_msg: Int, end_msg: Int, thread_id: String = "thread-1", tag: Int = 3500):
         self.url = url
@@ -126,6 +131,7 @@ struct Agent(Movable):
         self.reader = SseReader()
         self.last_type = ""
         self.last_message = ""
+        self.problem = ""
 
     # ---- the app's side ----
 
@@ -242,8 +248,37 @@ struct Agent(Movable):
             if self.type_names[i] == t:
                 self.type_counts[i] += 1
                 return
+        if len(self.type_names) >= MAX_TYPES:
+            self.count_other()
+            return
         self.type_names.append(t)
         self.type_counts.append(1)
+
+    def count_other(mut self):
+        for i in range(len(self.type_names)):
+            if self.type_names[i] == "OTHER":
+                self.type_counts[i] += 1
+                return
+        self.type_names.append("OTHER")
+        self.type_counts.append(1)
+
+    def add_text(mut self, at: Int, delta: String) -> Int:
+        if self.messages[at].content.byte_length() + delta.byte_length() > MAX_TEXT:
+            self.problem = "a message longer than " + String(MAX_TEXT) + " bytes"
+            return EV_BAD
+        self.messages[at].content += delta
+        return EV_TEXT
+
+    def add_args(mut self, at: Int, k: Int, delta: String) -> Int:
+        if self.messages[at].calls[k].too_big:
+            return EV_BAD
+        if self.messages[at].calls[k].arguments.byte_length() + delta.byte_length() > MAX_ARGS:
+            self.messages[at].calls[k].arguments = ""
+            self.messages[at].calls[k].too_big = True
+            self.problem = "tool call arguments longer than " + String(MAX_ARGS) + " bytes"
+            return EV_BAD
+        self.messages[at].calls[k].arguments += delta
+        return EV_TOOL_ARGS
 
     def find_message(self, id: String) -> Int:
         for i in range(len(self.messages) - 1, -1, -1):
@@ -263,13 +298,23 @@ struct Agent(Movable):
         while len(self.messages) > MAX_MESSAGES:
             _ = self.messages.pop(0)
 
-    def start_call(mut self, id: String, name: String, parent: String):
+    def start_call(mut self, id: String, name: String, parent: String) -> Int:
+        if id.byte_length() == 0 or self.find_call(id)[0] >= 0:
+            self.problem = "a tool call id that is empty or already used"
+            return EV_BAD
         var at = self.find_message(parent) if parent.byte_length() > 0 else -1
+        if at >= 0 and self.messages[at].role != "assistant":
+            self.problem = "a tool call on a message that isn't the assistant's"
+            return EV_BAD
+        if at < 0 and self.find_message(id) >= 0:
+            self.problem = "a tool call id that is a message's id"
+            return EV_BAD
         if at < 0:
             self.add_message(Message(parent if parent.byte_length() > 0 else id, "assistant", "", List[ToolCall](), ""))
             at = len(self.messages) - 1
-        self.messages[at].calls.append(ToolCall(id, name, "", False))
+        self.messages[at].calls.append(ToolCall(id, name, "", False, False))
         self.last_message = self.messages[at].id
+        return EV_TOOL_START
 
     def on_json(mut self, text: String) -> Int:
         """One AG-UI event (the JSON of an SSE event's data)."""
@@ -293,56 +338,67 @@ struct Agent(Movable):
         if t == "RUN_ERROR":
             self.ended = "error: " + j.text(j.get(0, "message"), "(no message)")
             return EV_RUN_ERROR
-        if t == "TEXT_MESSAGE_START" or t == "TEXT_MESSAGE_CHUNK":
+        if t == "TEXT_MESSAGE_START" or t == "TEXT_MESSAGE_CHUNK" or t == "TEXT_MESSAGE_CONTENT":
             var id = j.text(j.get(0, "messageId"))
-            if self.find_message(id) < 0:
-                self.add_message(Message(id, j.text(j.get(0, "role"), "assistant"), "", List[ToolCall](), ""))
-            self.last_message = id
-            if t == "TEXT_MESSAGE_START":
-                return EV_TEXT_START
+            var role = j.text(j.get(0, "role"), "assistant")
+            if role != "assistant":  # (the agent speaks as itself: no forged "You" bubbles)
+                self.problem = "a text message with the role " + json_string(role)
+                return EV_BAD
             var at = self.find_message(id)
-            self.messages[at].content += j.text(j.get(0, "delta"))
-            return EV_TEXT
-        if t == "TEXT_MESSAGE_CONTENT":
-            var id = j.text(j.get(0, "messageId"))
-            var at = self.find_message(id)
+            if at >= 0 and self.messages[at].role != "assistant":
+                self.problem = "a text message id that is another role's message"
+                return EV_BAD
+            if id.byte_length() == 0:
+                self.problem = "a text message without its id"
+                return EV_BAD
             if at < 0:
                 self.add_message(Message(id, "assistant", "", List[ToolCall](), ""))
                 at = len(self.messages) - 1
-            self.messages[at].content += j.text(j.get(0, "delta"))
             self.last_message = id
-            return EV_TEXT
+            if t == "TEXT_MESSAGE_START":
+                return EV_TEXT_START
+            return self.add_text(at, j.text(j.get(0, "delta")))
         if t == "TEXT_MESSAGE_END":
             return EV_TEXT_END
         if t == "TOOL_CALL_START":
-            self.start_call(j.text(j.get(0, "toolCallId")), j.text(j.get(0, "toolCallName")), j.text(j.get(0, "parentMessageId")))
-            return EV_TOOL_START
+            return self.start_call(j.text(j.get(0, "toolCallId")), j.text(j.get(0, "toolCallName")), j.text(j.get(0, "parentMessageId")))
         if t == "TOOL_CALL_CHUNK":
             var id = j.text(j.get(0, "toolCallId"))
             var where = self.find_call(id)
             if where[0] < 0:
-                self.start_call(id, j.text(j.get(0, "toolCallName")), j.text(j.get(0, "parentMessageId")))
+                if self.start_call(id, j.text(j.get(0, "toolCallName")), j.text(j.get(0, "parentMessageId"))) == EV_BAD:
+                    return EV_BAD
                 where = self.find_call(id)
-            self.messages[where[0]].calls[where[1]].arguments += j.text(j.get(0, "delta"))
-            return EV_TOOL_ARGS
+            return self.add_args(where[0], where[1], j.text(j.get(0, "delta")))
         if t == "TOOL_CALL_ARGS" or t == "TOOL_CALL_END":
             var where = self.find_call(j.text(j.get(0, "toolCallId")))
             if where[0] < 0:
                 return EV_OTHER
             if t == "TOOL_CALL_ARGS":
-                self.messages[where[0]].calls[where[1]].arguments += j.text(j.get(0, "delta"))
-                return EV_TOOL_ARGS
+                return self.add_args(where[0], where[1], j.text(j.get(0, "delta")))
             self.messages[where[0]].calls[where[1]].done = True
             return EV_TOOL_END
         if t == "TOOL_CALL_RESULT":
             var mid = j.text(j.get(0, "messageId"))
-            self.add_message(Message(mid, "tool", j.text(j.get(0, "content")), List[ToolCall](), j.text(j.get(0, "toolCallId"))))
+            if mid.byte_length() == 0 or self.find_message(mid) >= 0:
+                self.problem = "a tool result whose id is empty or already used"
+                return EV_BAD
+            var content = j.text(j.get(0, "content"))
+            if content.byte_length() > MAX_TEXT:
+                self.problem = "a tool result longer than " + String(MAX_TEXT) + " bytes"
+                return EV_BAD
+            self.add_message(Message(mid, "tool", content, List[ToolCall](), j.text(j.get(0, "toolCallId"))))
             self.last_message = mid
             return EV_TOOL_RESULT
         if t == "STATE_SNAPSHOT":
-            var d = JDoc()
-            d.root = d.take(j, j.get(0, "snapshot"))
-            self.state = d^
+            if j.get(0, "snapshot") < 0:
+                self.state_error = "a snapshot without its snapshot"
+                return EV_STATE_REFUSED
+            try:
+                self.state = JDoc.of(j, j.get(0, "snapshot"))
+            except err:
+                self.state_error = String(err)
+                return EV_STATE_REFUSED
             self.state_error = ""
             return EV_STATE
         if t == "STATE_DELTA":
@@ -356,15 +412,20 @@ struct Agent(Movable):
         if t == "MESSAGES_SNAPSHOT":
             var list = j.get(0, "messages")
             var fresh = List[Message]()
-            for i in range(j.size(list)):
+            for i in range(max(j.size(list) - MAX_MESSAGES, 0), j.size(list)):  # (the newest MAX_MESSAGES)
                 var m = j.at(list, i)
                 var calls = List[ToolCall]()
                 var tc = j.get(m, "toolCalls")
                 for k in range(j.size(tc)):
                     var c = j.at(tc, k)
                     var f = j.get(c, "function")
-                    calls.append(ToolCall(j.text(j.get(c, "id")), j.text(j.get(f, "name")), j.text(j.get(f, "arguments")), True))
-                fresh.append(Message(j.text(j.get(m, "id")), j.text(j.get(m, "role")), content_text(j, j.get(m, "content")), calls^, j.text(j.get(m, "toolCallId"))))
+                    var args = j.text(j.get(f, "arguments"))
+                    var big = args.byte_length() > MAX_ARGS
+                    calls.append(ToolCall(j.text(j.get(c, "id")), j.text(j.get(f, "name")), String("") if big else args, True, big))
+                var content = content_text(j, j.get(m, "content"))
+                if content.byte_length() > MAX_TEXT:
+                    content = "(too long to keep)"
+                fresh.append(Message(j.text(j.get(m, "id")), j.text(j.get(m, "role")), content, calls^, j.text(j.get(m, "toolCallId"))))
             self.messages = fresh^
             return EV_MESSAGES
         if t == "STEP_STARTED":
@@ -375,9 +436,10 @@ struct Agent(Movable):
             return EV_STEP
         if t == "CUSTOM":
             self.custom_name = j.text(j.get(0, "name"))
-            var v = JDoc()
-            v.root = v.take(j, j.get(0, "value")) if j.get(0, "value") >= 0 else v.root
-            self.custom_value = v.dump()
+            try:
+                self.custom_value = JDoc.of(j, j.get(0, "value")).dump()
+            except:
+                self.custom_value = "null"
             return EV_CUSTOM
         return EV_OTHER
 

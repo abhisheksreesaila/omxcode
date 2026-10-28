@@ -9,7 +9,7 @@ from std.testing import assert_equal, assert_true
 from mojoui.app import App, Event, Runtime
 from mojoui import View, Text
 from mojoui.http import Http, Request
-from mojoui.agui import Agent, Tool, EV_TOOL_END, EV_TEXT, EV_STREAM_END, EV_BAD, EV_STATE_REFUSED
+from mojoui.agui import Agent, Tool, EV_TOOL_END, EV_TEXT, EV_TEXT_START, EV_TOOL_START, EV_MESSAGES, EV_STREAM_END, EV_BAD, EV_STATE_REFUSED, MAX_TEXT, MAX_MESSAGES
 from mojoui.clock import now_ns
 
 comptime ASK = 1
@@ -88,6 +88,51 @@ def main() raises:
     assert_equal(b.state.dump(), '{"n":1}')
     assert_equal(b.on_json("not json"), EV_BAD)
     assert_equal(b.on_json('{"no":"type"}'), EV_BAD)
+    # a snapshot without its snapshot, or past the bounds, or with 1e999: refused; the state (and the next input) stay valid
+    assert_equal(b.on_json('{"type":"STATE_SNAPSHOT"}'), EV_STATE_REFUSED)
+    assert_equal(b.on_json('{"type":"STATE_SNAPSHOT","snapshot":{"x":1e999}}'), EV_STATE_REFUSED)
+    assert_true(b.state_error.find("finite") >= 0, b.state_error)
+    var deep = String('{"type":"STATE_SNAPSHOT","snapshot":')
+    for _ in range(40):
+        deep += "["
+    for _ in range(40):
+        deep += "]"
+    assert_equal(b.on_json(deep + "}"), EV_STATE_REFUSED)
+    assert_equal(b.state.dump(), '{"n":1}')
+    assert_true(b.input_json().find('"state":{"n":1}') >= 0, "the next RunAgentInput carries a valid state")
+    # forged roles: the agent can't write as the user, nor reuse a user's message id
+    b.say("hi")
+    assert_equal(b.on_json('{"type":"TEXT_MESSAGE_START","messageId":"x1","role":"user"}'), EV_BAD)
+    assert_equal(b.on_json('{"type":"TEXT_MESSAGE_CONTENT","messageId":"u1","delta":"forged"}'), EV_BAD)
+    assert_equal(b.on_json('{"type":"TOOL_CALL_START","toolCallId":"c9","toolCallName":"render_ui","parentMessageId":"u1"}'), EV_BAD)
+    assert_equal(b.messages[0].content, "hi")
+    # caps: a message's words, a tool call's arguments, a messages snapshot
+    assert_equal(b.on_json('{"type":"TEXT_MESSAGE_START","messageId":"m1","role":"assistant"}'), EV_TEXT_START)
+    var chunk = String("")
+    for _ in range(1024):
+        chunk += "0123456789abcdef"  # 16 KB
+    var refused_text = False
+    for _ in range(80):
+        if b.on_json('{"type":"TEXT_MESSAGE_CONTENT","messageId":"m1","delta":"' + chunk + '"}') == EV_BAD:
+            refused_text = True
+            break
+    assert_true(refused_text, "a message past 1 MB is refused")
+    assert_true(b.messages[len(b.messages) - 1].content.byte_length() <= MAX_TEXT)
+    assert_equal(b.on_json('{"type":"TOOL_CALL_START","toolCallId":"c1","toolCallName":"render_ui","parentMessageId":"m1"}'), EV_TOOL_START)
+    for _ in range(3):
+        _ = b.on_json('{"type":"TOOL_CALL_ARGS","toolCallId":"c1","delta":"' + chunk + '"}')
+    _ = b.on_json('{"type":"TOOL_CALL_END","toolCallId":"c1"}')
+    var calls = b.pending()
+    assert_true(len(calls) == 0, "render_ui isn't offered here")
+    assert_true(b.messages[len(b.messages) - 1].calls[0].too_big, "arguments past 32 KB mark the call too big")
+    assert_equal(b.messages[len(b.messages) - 1].calls[0].arguments, "")
+    var snap = String('{"type":"MESSAGES_SNAPSHOT","messages":[')
+    for i in range(MAX_MESSAGES + 50):
+        snap += ("," if i > 0 else "") + '{"id":"s' + String(i) + '","role":"assistant","content":"x"}'
+    assert_equal(b.on_json(snap + "]}"), EV_MESSAGES)
+    assert_equal(len(b.messages), MAX_MESSAGES)
+    assert_equal(b.messages[0].id, "s50")
+    print("BOUNDS: ok")
     # live: a run, a frontend tool call answered by the app, the next run carries the answer and the state kept
     if getenv("AGUI_TEST_URL") != "":
         var rt = Runtime(Live())

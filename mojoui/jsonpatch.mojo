@@ -6,11 +6,17 @@
 #   state.dump()                                                       # '{"count":3}'
 #   state.set("/form/name", json_string("Ada"))                        # add or replace one value (parents made as objects)
 #
-# A patch is atomic: it runs on a copy, which replaces the document only when every op succeeded.
+# A patch is atomic: it runs on a copy, which replaces the document only when every op succeeded. A document stays
+# within MAX_DOC_NODES values, MAX_DOC_DEPTH levels and MAX_DOC_BYTES of JSON (reading one, patching, set): anything
+# past them is refused ("too big", "too deep"), as is a number that isn't finite (1e999: JSON has no inf).
 
 from mojoui.json import Json, json_string, J_NULL, J_BOOL, J_NUMBER, J_STRING, J_ARRAY, J_OBJECT
 
 comptime MAX_PATCH_OPS = 10_000
+comptime MAX_DOC_NODES = 100_000  # a document's bounds (D-717): values in it, nesting, and its JSON's size
+comptime MAX_DOC_DEPTH = 32
+comptime MAX_DOC_BYTES = 4 * 1024 * 1024
+comptime WHOLE_LIMIT = 9_007_199_254_740_992.0  # 2^53: whole numbers past it are written as decimals
 
 
 struct JDoc(Copyable, Movable):
@@ -34,8 +40,14 @@ struct JDoc(Copyable, Movable):
     @staticmethod
     def parse(text: String) raises -> JDoc:
         var j = Json.parse(text)
+        return JDoc.of(j, 0)
+
+    @staticmethod
+    def of(j: Json, n: Int) raises -> JDoc:
+        """Node `n` of a parsed Json as a document (an AG-UI snapshot); refused past the bounds or when absent."""
         var d = JDoc()
-        d.root = d.take(j, 0)
+        d.root = d.take(j, n)
+        d.check()
         return d^
 
     def add(mut self, kind: Int, text: String) -> Int:
@@ -45,29 +57,37 @@ struct JDoc(Copyable, Movable):
         self.keys.append(List[String]())
         return len(self.kinds) - 1
 
-    def take(mut self, j: Json, n: Int) -> Int:
+    def take(mut self, j: Json, n: Int, depth: Int = 1) raises -> Int:
         """Node `n` of a parsed Json (and everything under it) as new nodes here."""
         var k = j.kind(n)
+        if k < 0:
+            raise Error("no value")
+        if depth > MAX_DOC_DEPTH:
+            raise Error("too deep: more than " + String(MAX_DOC_DEPTH) + " levels")
+        if len(self.kinds) > 4 * MAX_DOC_NODES:
+            raise Error("too big: more than " + String(MAX_DOC_NODES) + " values")
         if k == J_STRING:
             return self.add(J_STRING, j.text(n))
         if k == J_NUMBER:
-            return self.add(J_NUMBER, String(j.number(n)) if j.is_whole(n) else String(j.real(n)))
+            return self.add(J_NUMBER, number_text(j, n))
         if k == J_BOOL:
             return self.add(J_BOOL, "true" if j.flag(n) else "false")
         if k == J_NULL:
             return self.add(J_NULL, "null")
         var me = self.add(k, "")
         for i in range(j.size(n)):
-            var c = self.take(j, j.at(n, i))
+            var c = self.take(j, j.at(n, i), depth + 1)
             self.kids[me].append(c)
             if k == J_OBJECT:
                 self.keys[me].append(j.keys[n][i])
         return me
 
-    def clone(mut self, n: Int) -> Int:
+    def clone(mut self, n: Int) raises -> Int:
         """A deep copy of node `n` (copy: later changes to one don't show in the other)."""
         var kind = self.kinds[n]
         var text = self.texts[n]
+        if len(self.kinds) > 4 * MAX_DOC_NODES:
+            raise Error("too big: more than " + String(MAX_DOC_NODES) + " values")
         var me = self.add(kind, text)
         for i in range(len(self.kids[n])):
             var c = self.clone(self.kids[n][i])
@@ -86,6 +106,40 @@ struct JDoc(Copyable, Movable):
             if other.kinds[n] == J_OBJECT:
                 self.keys[me].append(other.keys[n][i])
         return me
+
+    # ---- bounds ----
+
+    def depth_of(self, n: Int) -> Int:
+        """Levels from node `n` down (a scalar: 1). Bounded: a document within the bounds is at most MAX_DOC_DEPTH."""
+        var most = 0
+        for c in self.kids[n]:
+            most = max(most, self.depth_of(c))
+        return most + 1
+
+    def measure(self, n: Int, depth: Int, mut nodes: Int, mut bytes: Int) raises:
+        if depth > MAX_DOC_DEPTH:
+            raise Error("too deep: more than " + String(MAX_DOC_DEPTH) + " levels")
+        nodes += 1
+        bytes += self.texts[n].byte_length() + 2 + len(self.kids[n])
+        for i in range(len(self.kids[n])):
+            if self.kinds[n] == J_OBJECT:
+                bytes += self.keys[n][i].byte_length() + 3
+            self.measure(self.kids[n][i], depth + 1, nodes, bytes)
+        if nodes > MAX_DOC_NODES:
+            raise Error("too big: more than " + String(MAX_DOC_NODES) + " values")
+        if bytes > MAX_DOC_BYTES:
+            raise Error("too big: more than " + String(MAX_DOC_BYTES) + " bytes of JSON")
+
+    def check(self) raises:
+        """Raises when the document is past its bounds (values, levels, bytes)."""
+        var nodes = 0
+        var bytes = 0
+        self.measure(self.root, 1, nodes, bytes)
+
+    def room(self, toks: List[String], node: Int) raises:
+        """Refuses putting `node` at the pointer's tokens when it would nest past MAX_DOC_DEPTH."""
+        if len(toks) + self.depth_of(node) > MAX_DOC_DEPTH:
+            raise Error("too deep: more than " + String(MAX_DOC_DEPTH) + " levels")
 
     # ---- reading ----
 
@@ -203,7 +257,17 @@ struct JDoc(Copyable, Movable):
                 self.keys[n].append(toks[i])
             n = c
         var node = self.graft(v, v.root)
-        self.put(n, toks[len(toks) - 1], node, True)
+        self.room(toks, node)
+        var last = toks[len(toks) - 1]
+        if self.kinds[n] == J_ARRAY:  # (a bound input edits an item in place: never inserts, never appends)
+            var i = index_of(last, len(self.kids[n]) - 1)
+            if i < 0:
+                raise Error("no item " + last + " in " + pointer)
+            self.kids[n][i] = node
+        else:
+            self.put(n, last, node, True)
+        self.compact()
+        self.check()
 
     def put(mut self, parent: Int, token: String, node: Int, replace_member: Bool) raises:
         """RFC 6902 add into `parent`: an object's member (set), an array's index (insert) or "-" (append)."""
@@ -268,11 +332,15 @@ struct JDoc(Copyable, Movable):
         var name = ops.text(name_at)
         var path = ops.text(path_at)
         var toks = tokens(path)
+        if len(toks) > MAX_DOC_DEPTH:
+            raise Error("too deep: a path of more than " + String(MAX_DOC_DEPTH) + " levels")
         if name == "add" or name == "replace" or name == "test":
             var v_at = ops.get(op, "value")
             if v_at < 0:
                 raise Error(name + " without a value")
             var node = self.take(ops, v_at)
+            if name != "test":
+                self.room(toks, node)
             if name == "test":
                 var at = self.find(path)
                 if at < 0:
@@ -316,6 +384,7 @@ struct JDoc(Copyable, Movable):
                 if path.startswith(src + "/"):
                     raise Error("move: a value can't move into itself")
                 var node = at
+                self.room(toks, node)
                 if len(ftoks) == 0:
                     raise Error("move: can't move the whole document")
                 _ = self.detach(ftoks)
@@ -324,6 +393,7 @@ struct JDoc(Copyable, Movable):
                 else:
                     self.put(self.parent_of(toks), toks[len(toks) - 1], node, True)
             else:
+                self.room(toks, at)
                 var node = self.clone(at)
                 if len(toks) == 0:
                     self.root = node
@@ -347,8 +417,13 @@ struct JDoc(Copyable, Movable):
         for i in range(ops.size(at)):
             try:
                 work.apply_op(ops, ops.at(at, i))
+                if len(work.kinds) > MAX_DOC_NODES:  # (live values and garbage: drop the garbage, then count)
+                    work.compact()
+                    if len(work.kinds) > MAX_DOC_NODES:
+                        raise Error("too big: more than " + String(MAX_DOC_NODES) + " values")
             except e:
                 raise Error("operation " + String(i) + ": " + String(e))
+        work.check()
         work.compact()
         self = work^
 
@@ -395,3 +470,13 @@ def index_of(token: String, last: Int) -> Int:
             return -1
         v = v * 10 + Int(c) - 48
     return v if v <= last else -1
+
+
+def number_text(j: Json, n: Int) raises -> String:
+    """A number's JSON text: whole numbers up to 2^53 as integers, others as decimals; never inf or nan."""
+    var r = j.real(n)
+    if r != r or r > 1.7976931348623157e308 or r < -1.7976931348623157e308:
+        raise Error("a number that isn't finite")
+    if j.is_whole(n) and r <= WHOLE_LIMIT and r >= -WHOLE_LIMIT:
+        return String(j.number(n))
+    return String(r)

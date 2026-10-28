@@ -726,3 +726,7 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 ## 2026-10-27 · goal 35: origin/main merged
 - origin/main (7b61640: goal 33, the cover page, goal 34b with its reviewer follow-ups) merged into goal-35-agui. GOAL.md and scripts/check.py stay goal 35's; docs/goals/34b-GOAL.md and 34b-check.py re-archived from 34b's final GOAL.md/check.py (ROOT line fixed); decisions and journal keep both; goal 33's httpcheck shots keep goal 35's (with the Stream button); the matrix regenerated.
 - Decision numbers collided (34b's follow-ups D-677–D-682, goal 35's D-680–D-695): goal 35's renumbered to D-700–D-715 everywhere (D-716).
+
+## 2026-10-27 · goal 35 reviewer round 1 (NEEDS WORK): bounds
+- Tests first: BOUNDS lines in tests/test_jsonpatch.mojo (copy bomb refused in under 20 doublings, atomic; deep adds; a 40-level snapshot; 1e999; set on arrays) and tests/test_agui.mojo (snapshot without snapshot / 1e999 / too deep leaves a valid `"state"`; forged user role and ids; 1 MB text; 32 KB args; 2,050-message snapshot trimmed). Both failed to build against the old code, then passed (D-717, D-718).
+- Mojo's own JSON parser already refuses whole numbers past Int ("a whole number is too big"), so that case asserts the refusal; 2^60 dumps as a decimal.
