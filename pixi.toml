@@ -19,6 +19,11 @@ pyarrow = ">=25.0.0,<26"
 python-xlib = ">=0.33,<0.34"
 nodejs = ">=26.12.1,<26.13"
 esbuild = ">=0.28.1,<0.29"
+rust = "==1.99.1"
+rust-std-wasm32-unknown-unknown = "==1.99.1"
+rust-src = "==1.99.1"
+wasm-bindgen-cli = "==0.2.129"
+binaryen = ">=121"
 
 [pypi-dependencies]
 mojo = ">=1.1, <1.2"
