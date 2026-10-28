@@ -1,24 +1,28 @@
-# GOAL 34b: JS widgets everywhere, and agents see them
+# GOAL 35: AG-UI, agents that build the screen
 
-**End goal (owner, 2026-10-27):** "yup, please continue as 34b"; "we want first-class integration… first-class support to JS; AG-UI comes later": the rest of first-class JS cut from goal 34 (D-590).
-Agent visibility first: the cover page now says every app is agent-usable, so a JS widget must not be a black box.
+**End goal (owner, 2026-10-27):** "let's plan to wrap up 34b and AG-UI tonight; I want to submit to a tech fund."
+Earlier: "we provide an agent-native framework… we give agents metadata for rendering UI… by supporting AG-UI, by
+spitting out metadata, not the actual interface, and having the runtime do it… people can put their own harness."
+AG-UI (docs.ag-ui.com) is an open event protocol between an agent backend and a UI: a run streams text, tool calls
+and shared state as events over HTTP (SSE).
 
 ## Milestones
 | # | Milestone | Proof (`scripts/check`) |
 |---|---|---|
-| M0 | Agents see JS widgets | a widget may declare `describe(el) -> {text, value, …}` and settable fields in `defineWidget`; the agent (MCP) host lists every WebComponent as tools like any component: reading it returns what it describes (CodeMirror's text, the counter's count), setting it (a tool with a typed argument) changes the widget and the change reaches `update()` as the widget's own event; a widget without `describe` is listed by its tag with "no description"; proven through the agent client against the widgets app on the web and GTK |
-| M1 | A second library, no host changes | Apache ECharts from npm (pinned, lockfile) as a chart widget in examples/widgets, fed from Mojo (the word-count series as data), its click on a point reaching `update()`; added without changing any file in mojoui/hosts (the check diffs them against goal 34's), under the same CSP with zero violations, on the web and GTK |
-| M1b | First-class citizens | widgets wear the theme: the host hands every widget the Look's tokens (palette, fonts, corners, light or dark) as CSS variables and a `theme(el, tokens)` call, and CodeMirror and ECharts follow omxqua and switch light/dark live with the rest of the app (pictures on the web and GTK in both); keyboard focus moves between native controls and widgets with Tab and Shift+Tab in order, both ways; widgets appear in docs/components.md and in the gallery beside the native components |
-| M1c | The developer loop | `scripts/dev.sh <app>` watches an app's web/ sources: saving a .ts/.js/.css file rebuilds the bundle and the open page reloads its widgets while the Mojo app keeps its state (a typed note survives the reload); a widget's thrown JS error reaches the app's log with its original file and line (source maps), on the web and GTK; debug builds can open WebKit's inspector on GTK and the Mac's widget views (release builds can't); docs/js.md walks the loop |
-| M2 | The Mac, the same widgets | on the Mac each WebComponent runs in a WKWebView with the same bundle, runtime and CSP, no network or navigation; typing in the editor reaches `update()`, Mojo sets its text, the counter's command gets its reply, the chart draws; boxes within goal 32's parity of the web's; proven on GitHub's Mac runner (scripts/mac-ci, fresh against these sources) |
-| M3 | Nothing regressed (minimal) | goal 34's M0–M3 and goal 33's M1, M4 pass |
+| M0 | Streaming HTTP | `mojoui.http` streams: a request may ask for a stream; each SSE event (or chunk) arrives as its own `Event` in `update()` while frames keep drawing, then an end Event; through the Transport seam (sockets today); tests against a Python SSE server: 200 events in order, a slow trickle, a dropped connection mid-stream, a timeout, cancel by the app |
+| M1 | The AG-UI client | `mojoui/agui.mojo`: runs an agent (POST RunAgentInput: thread, run, messages, state, tools), reads the AG-UI event stream (RUN_STARTED/FINISHED/ERROR, TEXT_MESSAGE_START/CONTENT/END, TOOL_CALL_START/ARGS/END/RESULT, STATE_SNAPSHOT, STATE_DELTA as JSON Patch, MESSAGES_SNAPSHOT, STEP_*, CUSTOM), keeps the conversation and the shared state, applies JSON Patch exactly (RFC 6902 tests), and lets the app answer frontend tool calls; its own tests against recorded streams from the official AG-UI Python SDK |
+| M2 | Generative UI | the agent sends UI as data, never code: a frontend tool (e.g. `render_ui`) whose arguments are a view description built only from catalogued omxcode components (a JSON schema generated from the component catalog: Text, Card, Table, Chart/Sparkline, Button, TextField, Toggle, Segmented, Meter, Paragraph…); the app validates it against the schema (unknown component, bad prop, too deep or too big → refused with a message to the agent) and renders it natively; a button in agent-built UI reports back to the agent as a tool result; shared state edited in the UI reaches the agent as state |
+| M3 | A chat app on the web and Linux | `examples/agentchat`: a chat panel; the agent streams its words, builds a chart or a form in the conversation, the user edits it and the agent sees the change; a scripted AG-UI agent (Python, official SDK, deterministic) makes the checks repeatable; a live agent backed by Claude runs when an API key is set by env var name (never stored or logged); on GTK and the web; screenshots |
+| M4 | Nothing regressed (minimal) | goal 34b's M0 and goal 34's M2 and goal 33's M1 pass |
 
 ## Out of bounds
-React/Vue inside omxcode; run-time downloads; phones; pushing anything but mac-test and the mac-ci assets (D-400).
+Running untrusted code from the agent; storing keys; the Mac (later, through the same seam); AG-UI server hosting
+beyond localhost; pushing.
 
 ## Assumptions
-- ECharts over Leaflet: it works offline with no tile server and makes a better showcase chart.
+- Streaming goes through our own HTTP/1.1 socket transport (plain HTTP to a local agent); flare stays goal 37.
+- The scripted agent drives every check; the live Claude agent is a demo path (`claude-api` model ids, latest).
 - Each milestone's proof is written before its work, from this table's words, never weaker.
 
 ## Done means
-`scripts/check` PASS for M0–M3; the reviewer passes it; a short report with the editor and chart on web, GTK and Mac.
+`scripts/check` PASS for M0–M4; the reviewer passes it; a short report with the agent building UI in the chat app.
