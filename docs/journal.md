@@ -687,3 +687,7 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 ## 2026-10-27 · goal 34b: drawn views follow a live theme switch
 - m1b's proof made stricter first: the sparkline under the note (a mojoui Canvas) must be dark in the dark pictures and light in the light ones (median tone of its box). Red on the old pictures: web and GTK dark both 241 of 255 (the light card, never redrawn: a canvas redraws only on a new version).
 - Fix D-673 (hosts, not the app): GTK's apply_design forgets the drawn versions on a new theme key; the web's canvas adapter redraws when the skin it drew in changes. M1b's sparkline parts pass; pictures m1b-{web,gtk}-{light,dark}.png show it dark in dark.
+
+## 2026-10-27 · goal 34b: the Mac gets M0's and M1b's features
+- m2 first: two new Mac screens (ci/mac/side.txt = MAC_STEPS): `light` (the light picture) and `theme` (tokens in light, an agent's set of the counter and the editor, a live switch to dark, tokens again); m2 requires the chart now (no skip), the tokens to match in both modes, one mount each, the sparkline dark in dark, the sets in update() (Last count: 42, Words: 4), describe()'s facts back (WIDGETFACTS:), release views not inspectable.
+- Shared take_text (D-672): GTK's M0 passes on it (77 s). The Mac: facts, mojoui.set's sent_to, system appearance (it never told apps light/dark before), scheme:/set: steps, isInspectable and maps under DEVTOOLS (D-674). Builds for mac first time.

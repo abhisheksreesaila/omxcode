@@ -270,6 +270,7 @@ struct AppKitHost[A: App](Movable):
     var shots_taken: Bool  # the web views' pictures for the next snapshot have arrived
     var step_wait_from: Int  # (test steps) when the next step started waiting for the pages (ns; 0: not waiting)
     var probe_pending: Bool  # (test steps) a webjs: step's answer is still to be written in the log
+    var dark_told: Int  # the system's light (0) or dark (1) mode as the app last heard it (App.appearance); -1: not yet
 
     def __init__(out self):
         Self.A.init_shared()
@@ -320,6 +321,7 @@ struct AppKitHost[A: App](Movable):
         self.shots_taken = False
         self.step_wait_from = 0
         self.probe_pending = False
+        self.dark_told = -1
         self.size_w = List[Int]()
         self.size_h = List[Int]()
         self.wraps = List[Int]()
@@ -2089,6 +2091,13 @@ struct AppKitHost[A: App](Movable):
         self.copy_if_asked()
         self.open_if_asked()
         self.follow_ends()
+        if self.window != 0 and self.rt.app.theme().key() != self.theme_key:
+            # the theme switched (light/dark, a skin) with or without new views: native views and drawn canvases carry
+            # its colours, so the screen is built again (the widgets' views are kept and get the new tokens, D-673)
+            self.queue_snapshot(self_addr)
+            self.rebuilds += 1
+            self.show(self_addr)
+            return
         if d.rebuild or len(d.patches) > 0:
             self.queue_snapshot(self_addr)
         if d.rebuild and self.resize_in_place(d):
@@ -2883,6 +2892,26 @@ struct AppKitHost[A: App](Movable):
             if v != view:
                 _ = msg(v, "setHidden:", 1)
 
+    def system_dark(self) -> Bool:
+        """Whether the system (or the app's NSApp appearance, which a test step sets) is in dark mode."""
+        var app = msg(cls("NSApplication"), "sharedApplication")
+        var look = msg(app, "effectiveAppearance")
+        return look != 0 and "Dark" in from_ns(msg(look, "name"))
+
+    def follow_appearance(mut self, self_addr: Int):
+        """The system's light/dark mode, told to the app (App.appearance) when the window opens and whenever it changes
+        (a run-loop turn after the system says so, never inside its notification); the screen follows (apply)."""
+        var dark = self.system_dark()
+        if (1 if dark else 0) == self.dark_told:
+            return
+        var first = self.dark_told < 0
+        self.dark_told = 1 if dark else 0
+        var d = self.rt.appearance(dark)
+        if not first:
+            if self.report.on:
+                self.report.cause = "appearance " + ("dark" if dark else "light")
+            self.apply(d, self_addr)
+
     def sync_webviews(mut self, self_addr: Int):
         """After a build or patches: each shown WebComponent's page gets the theme and its props when they changed (JSON,
         through mojoui.native.receive: the widget's update(), never a remount); views whose key left go; commands go out."""
@@ -2934,7 +2963,7 @@ struct AppKitHost[A: App](Movable):
         for c in commands:
             var k = mw[].core.slot_of(c.tag, c.widget) if mw[].core.state == 1 else -1
             if k >= 0:
-                if c.reply != NO_MSG:
+                if c.reply != NO_MSG or c.name == "mojoui.set":  # (an agent's set: its answer is taken, then dropped by the runtime, D-636)
                     mw[].core.sent_to(c.seq, c.tag, c.widget)  # (only this widget's page may answer it, D-620)
                 webview_send(self.webviews, k, '{"commands":[' + c.json() + "]}")
             elif c.reply != NO_MSG:
@@ -3539,6 +3568,16 @@ def run_step[A: App](host_addr: Int, step: String):
             webview_type(host[].webviews, k, kv[1])
         else:
             webview_click(host[].webviews, k, kv[1])
+    elif verb == "scheme":  # scheme:dark / scheme:light: the app's appearance switches, as the system's would (GTK's word)
+        var app = msg(cls("NSApplication"), "sharedApplication")
+        _ = msg(app, "setAppearance:", msg(cls("NSAppearance"), "appearanceNamed:", ns_string("NSAppearanceNameDarkAqua" if rest == "dark" else "NSAppearanceNameAqua")))
+        host[].follow_appearance(host_addr)
+    elif verb == "set":  # set:<tag>#<id>.<field>=<JSON>: what an agent's set does (Runtime.set_widget → "mojoui.set" to the page)
+        var key = split_at(kv[0], "#")
+        var at = split_at(key[1], ".")
+        if not host[].rt.set_widget(key[0], to_int(at[0]), at[1], kv[1]):
+            host[].report.note("TEST: no widget " + kv[0] + " on the screen, or a value that isn't JSON")
+        host[].send_commands(host_addr)
     elif verb == "resize":  # resize:900x700: the window's content size, as a drag of its edge ends
         var wh = split_at(rest, "x")
         _ = msg(host[].window, "setContentSize:", Float64(to_int(wh[0])), Float64(to_int(wh[1])))
@@ -3593,6 +3632,24 @@ def on_web_inbox[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     """The pages' events and replies, on a run-loop turn of their own (never inside WebKit's callback)."""
     var addr = msg(number, "longLongValue")
     host_at[A](addr)[].webview_inbox(addr)
+
+
+def on_system_appearance[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
+    """The system switched light/dark: only queued (NSApp's appearance settles a moment later; never rebuild inside a
+    notification, docs/lessons.md)."""
+    var addr = 0
+    var wins = msg(msg(cls("NSApplication"), "sharedApplication"), "windows")
+    for i in range(msg(wins, "count")):  # (the host's window: its delegate is this target, its identifier the host's address)
+        var w = msg(wins, "objectAtIndex:", i)
+        if msg(w, "delegate") == target and msg(w, "identifier") != 0:
+            addr = msg(msg(w, "identifier"), "longLongValue")
+    if addr != 0:
+        _ = msg(target, "performSelector:withObject:afterDelay:", sel("appearanceLater:"), ns_number(addr), Float64(0.1))
+
+
+def on_appearance_later[A: App](target: Int, cmd: Int, number: Int) abi("C"):
+    var addr = msg(number, "longLongValue")
+    host_at[A](addr)[].follow_appearance(addr)
 
 
 def on_window_resized[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
@@ -3900,6 +3957,8 @@ def run[A: App]() -> c_int:
     add_method(c, "effectsDue:", on_effects_due[A], "v@:@")
     add_method(c, "testStep:", on_test_step[A], "v@:@")
     add_method(c, "webInbox:", on_web_inbox[A], "v@:@")
+    add_method(c, "systemAppearance:", on_system_appearance[A], "v@:@")
+    add_method(c, "appearanceLater:", on_appearance_later[A], "v@:@")
     add_method(c, "windowDidResize:", on_window_resized[A], "v@:@")
     add_method(c, "windowResizeLater:", on_window_resize_later[A], "v@:@")
     add_method(c, "showPopover:", on_show_popover[A], "v@:@")
@@ -3957,6 +4016,9 @@ def run[A: App]() -> c_int:
     _ = msg(host[].window, "setReleasedWhenClosed:", 0)
     _ = msg(host[].window, "setIdentifier:", ns_string(String(addr)))  # (windowDidResize: finds the host by it)
     _ = host[].rt.resize(size[0], size[1])  # the app lays out to its window from the first screen (App.resize)
+    host[].follow_appearance(addr)  # (light or dark, before the first screen: App.appearance, D-673)
+    _ = msg(msg(cls("NSDistributedNotificationCenter"), "defaultCenter"), "addObserver:selector:name:object:", host[].target,
+            sel("systemAppearance:"), ns_string("AppleInterfaceThemeChangedNotification"), 0)
     host[].show(addr)
     host[].schedule_effects(addr)  # (what the starting state asked for)
     _ = msg(host[].window, "center")

@@ -8,9 +8,9 @@
 # view's context menu then has "Inspect Element"; the test step inspect:<tag>#<id> opens it), and the views may load the
 # bundles' source maps only when DEVTOOLS.
 #
-# >>> Mac hook (goal 34b M2, the AppKit host's WKWebView, mojoui/hosts/appkit_webview.mojo on the goal-34b-mac branch):
-# >>> set each widget's WKWebView `isInspectable = DEVTOOLS` (macOS 13.3+, Safari's Develop menu) and serve `.map`
-# >>> files from its scheme handler only when DEVTOOLS, as GTK does; release builds leave both off. Import from here.
+# Mac (mojoui/hosts/appkit_webview.mojo, goal 34b M2): each widget's WKWebView gets `inspectable = DEVTOOLS` (macOS
+# 13.3+: Safari's Develop menu can inspect it) and its scheme handler serves the bundles' `.map` files only when
+# DEVTOOLS, as GTK does; release builds leave both off (the Mac run's report says WEBINSPECT: <tag>#<id> 0, D-674).
 
 from std.sys import is_defined
 

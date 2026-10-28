@@ -373,7 +373,15 @@ def m1():
     examples/widgets, fed from Mojo (the word-count series as data), its click on a point reaching update(); no file in
     mojoui/hosts changed (diffed against the commit where M0 passed); the same CSP with zero violations; web and GTK."""
     problems = []
-    web = ROOT / "examples" / "widgets" / "web"
+    # (since D-675 the chart is a shared widget: mojoui/widgets/ with its own package.json and lockfile, which the
+    # widgets app picks in web/shared.json; the same pins and code are required there)
+    web = ROOT / "mojoui" / "widgets"
+    try:
+        picks = json.loads((ROOT / "examples/widgets/web/shared.json").read_text()).get("widgets", [])
+    except (OSError, ValueError):
+        picks = []
+    if "chart" not in picks:
+        problems.append("examples/widgets/web/shared.json doesn't pick the shared chart widget")
     pkg = json.loads((web / "package.json").read_text())
     ver = pkg.get("dependencies", {}).get("echarts", "")
     import re as _re
@@ -385,9 +393,9 @@ def m1():
         problems.append("package-lock.json doesn't pin echarts (version and integrity)")
     if not pk.get("node_modules/zrender", {}).get("integrity"):
         problems.append("package-lock.json doesn't pin zrender (ECharts' renderer)")
-    src = next((f for f in (web / "widgets" / "chart.ts", web / "widgets" / "chart.js") if f.exists()), None)
+    src = next((f for f in (web / "chart.ts", web / "chart.js") if f.exists()), None)
     if src is None:
-        return False, "; ".join(problems + ["no examples/widgets/web/widgets/chart.ts or chart.js"])
+        return False, "; ".join(problems + ["no mojoui/widgets/chart.ts or chart.js"])
     code = src.read_text()
     if "from 'echarts/core'" not in code or not ("SVGRenderer" in code or "CanvasRenderer" in code) or _re.search(r"from 'echarts'", code):
         problems.append("the chart widget doesn't import ECharts tree-shaken (echarts/core + a renderer)")
@@ -688,7 +696,7 @@ def m1b():
     if "theme?(" not in (ROOT / "mojoui/hosts/static/mojoui-widgets.d.ts").read_text():
         problems.append("mojoui-widgets.d.ts doesn't type theme(el, tokens)")
     for f, lib in (("editor.ts", "CodeMirror"), ("chart.ts", "ECharts")):
-        if "theme(el" not in (ROOT / "examples/widgets/web/widgets" / f).read_text():
+        if "theme(el" not in (ROOT / "mojoui/widgets" / f).read_text():
             problems.append(f"{lib}'s widget ({f}) has no theme(el, tokens)")
     err = g34.mojo_test("theme_tokens", "theme_tokens: ok")
     if err:
@@ -740,6 +748,15 @@ def dev_copy():
     shutil.rmtree(d, ignore_errors=True)
     shutil.rmtree(BUILD / DEV_APP, ignore_errors=True)
     shutil.copytree(ROOT / "examples" / "widgets", d, ignore=shutil.ignore_patterns("node_modules"))
+    # the shared editor as the copy's own (its .ts the proof edits, with the shared packages beside it): the scratch
+    # app edits its own files, never mojoui/widgets/ (D-675)
+    for f in ("editor.ts", "editor.css"):
+        (d / "web/widgets" / f).write_text((ROOT / "mojoui/widgets" / f).read_text().replace("../hosts/static/", "../../../../mojoui/hosts/static/"))
+    for f in ("package.json", "package-lock.json"):
+        shutil.copy(ROOT / "mojoui/widgets" / f, d / "web" / f)
+    shared = json.loads((d / "web/shared.json").read_text())
+    shared["widgets"] = [w for w in shared["widgets"] if w != "editor"]
+    (d / "web/shared.json").write_text(json.dumps(shared) + "\n")
     return d
 
 
@@ -1000,6 +1017,13 @@ MAC_STEPS = {
     "security": "pause:3000;" + ";".join(f"webjs:mx-counter#1={js}" for _, js in MAC_PROBES) + ";pause:1000",
     "crash1": "pause:3000;webkill:mx-counter#1;pause:4000",
     "crash2": "pause:3000;webkill:mx-counter#1;pause:4000;webkill:mx-counter#1;pause:3000",
+    # M0's and M1b's features on the Mac (D-674): the theme's tokens and a live light → dark switch (CodeMirror, ECharts and
+    # mojoui's drawn sparkline follow, nothing remounts); an agent's set through the runtime (Runtime.set_widget → the
+    # page's "mojoui.set") reaching update() as the widget's own event, and describe()'s facts read back
+    "light": "pause:3000;tap:Load sample;tap:Load sample;scheme:light;pause:1500",
+    "theme": (f"pause:3000;tap:Load sample;tap:Load sample;scheme:light;webjs:mx-editor#1={THEME_PROBE};webjs:mx-chart#1={THEME_PROBE};"
+              'set:mx-counter#1.count=42;pause:800;set:mx-editor#1.text="Agents can write here";pause:1500;'
+              f"scheme:dark;pause:1000;webjs:mx-editor#1={THEME_PROBE};webjs:mx-chart#1={THEME_PROBE};pause:1500"),
 }
 M2_OUT = ROOT / "docs" / "goals" / "34b"
 
@@ -1108,7 +1132,9 @@ def m2():
         if not v or v["state"] != "ready" or v.get("mounts") != 1 or v.get("csp") != 0:
             problems.append(f"{tag}#1's WKWebView: {v} (wants ready, mounts=1, csp=0)")
     others = [t for t in tags if t not in ("mx-editor", "mx-counter")]
-    notes.append(f"chart: {', '.join(others)} drawn" if others else "chart: the app has no chart widget yet (M1's ECharts not merged): skipped")
+    if "mx-chart" not in others:  # (required since the merge: M1's ECharts runs on the Mac too, D-674)
+        problems.append(f"the widgets app shows no chart widget (mx-chart) for the Mac to draw ({tags})")
+    notes.append(f"chart: {', '.join(others)} drawn")
     rects = side.OUT / "widgets-start-web-rects.txt"
     rects.parent.mkdir(parents=True, exist_ok=True)
     ok, wout = True, ""
@@ -1178,6 +1204,44 @@ def m2():
             problems.append(f"the reloaded counter didn't get Mojo's props again: {g34.widget_lines(dumps[screen]).get('mx-counter#1')}")
         elif v.get("instead") != (1 if want == "gone" else 0):
             problems.append(f"after {kills} ended web process(es) the counter's `instead` view is {'hidden' if want == 'gone' else 'shown'} ({v})")
+    # M1b on the Mac: the tokens, a live light → dark switch (CodeMirror, ECharts, the drawn sparkline), one mount each
+    tlog = (logs["theme"] or "").splitlines()
+    light_t, dark_t = gtk_probe(tlog, 0), gtk_probe(tlog, 1)
+    problems += [p.replace("gtk", "mac") for p in theme_problems("mac light", light_t, False) + theme_problems("mac dark", dark_t, True)]
+    if light_t.get("chart_ink") is None or dark_t.get("chart_ink") is None:
+        problems.append("mac: the ECharts chart drew no labels (no svg text)")
+    if light_t.get("chart_tokens") != light_t.get("tokens") or dark_t.get("chart_tokens") != dark_t.get("tokens"):
+        problems.append("mac: the editor's and the chart's views got different tokens")
+    vt = mac_webviews(dumps["theme"])
+    for key in ("mx-editor#1", "mx-chart#1", "mx-counter#1"):
+        if vt.get(key, {}).get("mounts") != 1 or vt.get(key, {}).get("csp", -1) != 0:
+            problems.append(f"mac: {key}'s view after the switch: {vt.get(key)} (one mount, no CSP violation)")
+    for screen, dark in (("light", False), ("theme", True)):
+        pic = mac / f"{g34.WIDGETS}-{screen}.png"
+        box = parity.mac_rects(dumps[screen]).get("sparkline")
+        wm_ = re.search(r"window content (\d+)", dumps[screen])
+        problems += spark_problems(f"mac {'dark' if dark else 'light'}", pic, box, dark, int(wm_.group(1)) if wm_ else 1440)
+        if pic.exists():
+            import shutil
+            M2_OUT.mkdir(parents=True, exist_ok=True)
+            shutil.copy(pic, M2_OUT / f"m2-widgets-mac-{'dark' if dark else 'light'}.png")
+    # M0 on the Mac: an agent's set (the runtime's mojoui.set) reaches the widget and update(); describe()'s facts come back
+    lt2 = mac_labels(dumps["theme"])
+    if "Last count: 42" not in lt2 or "Words: 4" not in lt2:
+        problems.append(f"mac: the sets didn't reach update() as the widgets' own events ({[l for l in lt2 if 'count' in l or 'Words' in l][:6]})")
+    fl = next((l[len("WIDGETFACTS: "):] for l in dumps["theme"].splitlines() if l.startswith("WIDGETFACTS: ")), "")
+    try:
+        facts = {f"{f['tag']}#{f['id']}": f for f in json.loads(fl or "[]")}
+    except (ValueError, KeyError, TypeError):
+        facts = {}
+    ct, ed = facts.get("mx-counter#1", {}), facts.get("mx-editor#1", {})
+    if (ct.get("said") or {}).get("count") != 42 or ct.get("fields", {}).get("count") != "integer":
+        problems.append(f"mac: the counter's facts after the set: {str(ct)[:200]} (said count 42, field count: integer)")
+    if (ed.get("said") or {}).get("value") != "Agents can write here" or "text" not in ed.get("fields", {}):
+        problems.append(f"mac: the editor's facts after the set: {str(ed)[:200]}")
+    insp = re.findall(r"^WEBINSPECT: (\S+) (\d)$", dumps["theme"], re.M)
+    if not insp or any(v != "0" for _, v in insp):
+        problems.append(f"mac: a release build's widget views must not be inspectable ({insp})")
     # a picture: the typed screen, with words in the editor's box
     shot = mac / f"{g34.WIDGETS}-typed.png"
     if not shot.exists():
@@ -1203,7 +1267,9 @@ def m2():
         "each WebComponent in a WKWebView of its own (mojoui:// scheme handler serving only the bundle, the web's files byte "
         "for byte, the web's CSP with frame-src 'none', no network): typing reaches update() (Words: 3), Load sample shows "
         "Mojo's text, 4 real clicks reach Mojo, a command's reply arrives (count 5), one mount across a rebuild; boxes "
-        "within parity of the web's; GTK's security probes pass; a crash reloads once, then `instead`; picture "
+        "within parity of the web's; GTK's security probes pass; a crash reloads once, then `instead`; the chart draws; "
+        "the theme's tokens and a live light → dark switch (CodeMirror, ECharts and the drawn sparkline follow, one mount); "
+        "an agent's set (mojoui.set) reaches update() and describe()'s facts come back; release views not inspectable; picture "
         f"{(M2_OUT / 'm2-widgets-mac.png').relative_to(ROOT)}; " + tail)
 
 

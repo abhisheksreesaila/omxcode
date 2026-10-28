@@ -24,7 +24,9 @@ from mojoui.hosts.objc import cls, sel, msg, new, protocol, ns_string, ns_number
 from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc
 from mojoui.hosts.gtk_webview import (
     WebViews, WebSlot, Inbound, IN_EVENT, IN_REPLY, CSP, PAGE_URI, SCHEME, MAX_MESSAGE, plain_file, plain_sri, clip_error, fonts,
+    take_text, facts_of, TOOK_NOTHING, TOOK_INBOX, TOOK_SIZE,
 )
+from mojoui.hosts.devtools import DEVTOOLS
 
 comptime WEBKIT = "/System/Library/Frameworks/WebKit.framework"
 # Every network or file load is blocked before it starts (defence in depth: the CSP already holds the page to
@@ -32,9 +34,6 @@ comptime WEBKIT = "/System/Library/Frameworks/WebKit.framework"
 comptime RULES = ('[{"trigger":{"url-filter":"^https?:"},"action":{"type":"block"}},{"trigger":{"url-filter":"^wss?:"},"action":{"type":"block"}},'
                   + '{"trigger":{"url-filter":"^ftp:"},"action":{"type":"block"}},{"trigger":{"url-filter":"^file:"},"action":{"type":"block"}}]')
 comptime UTF8 = 4  # NSUTF8StringEncoding
-comptime TOOK_NOTHING = 0
-comptime TOOK_INBOX = 1  # an event or a reply waits for update()
-comptime TOOK_SIZE = 2  # the widget's height changed
 
 
 struct MacWebViews(Movable):
@@ -147,6 +146,9 @@ def start(addr: Int, assets: List[String], target: Int, host_addr: Int) -> Bool:
                 print("mojoui: web_assets() lists " + name + ", which isn't bundled in " + mw[].core.dir + "/assets (scripts/build.sh)")
                 continue
             mw[].core.files.append(file)
+            var map_file = j.text(j.get(e, "map"))
+            if DEVTOOLS and map_file != "" and plain_file(map_file):  # (debug builds: its source map, as GTK serves it)
+                mw[].core.files.append(map_file)
             if name.endswith(".css"):
                 links += '<link rel="stylesheet" href="/assets/' + file + '" integrity="' + sri + '">'
             else:
@@ -203,6 +205,9 @@ def new_view(addr: Int, tag: String, id: Int) -> Int:
     _ = msg(view, "setNavigationDelegate:", mw[].delegate)
     _ = msg(view, "setUIDelegate:", mw[].delegate)
     _ = msg(view, "setTranslatesAutoresizingMaskIntoConstraints:", 0)
+    comptime if DEVTOOLS:  # (debug builds only: Safari's Develop menu can inspect the widget, macOS 13.3+; release never)
+        if (msg(view, "respondsToSelector:", sel("setInspectable:")) & 0xFF) != 0:
+            _ = msg(view, "setInspectable:", 1)
     if (msg(view, "respondsToSelector:", sel("_setDrawsBackground:")) & 0xFF) != 0:  # (transparent: the card shows through, as on the web)
         _ = msg(view, "_setDrawsBackground:", 0)
     var tall = msg(msg(view, "heightAnchor"), "constraintEqualToConstant:", Float64(1))
@@ -308,55 +313,6 @@ def arm_inbox(addr: Int):
     _ = msg(mw[].target, "performSelector:withObject:afterDelay:", sel("webInbox:"), ns_number(mw[].host_addr), Float64(0))
 
 
-def take_text(addr: Int, k: Int, text: String) -> Int:
-    """The page's message (JSON text naming this view's own widget), by GTK's rules (gtk_webview.take_message, D-611,
-    D-620): events and replies go to the inbox for update() (TOOK_INBOX); the widget's height (TOOK_SIZE), its line and
-    CSP reports are kept here. Anything else is refused (counted)."""
-    var mw = mac_at(addr)
-    ref slot = mw[].core.slots[k]
-    if text.byte_length() > MAX_MESSAGE:
-        slot.refused += 1
-        return TOOK_NOTHING
-    try:
-        var j = Json.parse(text)
-        var path = j.text(j.get(0, "path"))
-        if path == "w":
-            var tag = j.text(j.get(0, "tag"))
-            var id = j.text(j.get(0, "id"))
-            var name = j.text(j.get(0, "name"))
-            var data = j.text(j.get(0, "data"))
-            if tag != slot.tag or id != String(slot.id) or not is_event_name(name):
-                raise Error("not this view's widget, or not an event's name")
-            _ = Json.parse(data)  # (the payload is JSON, or refused)
-            mw[].core.inbox.append(Inbound(IN_EVENT, tag, slot.id, name, data, 0, ""))
-            return TOOK_INBOX
-        elif path == "reply":
-            var seq = j.get(0, "seq")
-            var t = slot.tag
-            var i = slot.id
-            if not j.is_whole(seq) or not mw[].core.answers(j.number(seq), t, i):
-                raise Error("not a command this widget was sent")
-            mw[].core.inbox.append(Inbound(IN_REPLY, t, i, "", j.text(j.get(0, "data"), "null"), j.number(seq), clip_error(j.text(j.get(0, "error")))))
-            return TOOK_INBOX
-        elif path == "size":
-            var h = j.number(j.get(0, "height"), -1)
-            if h < 0 or h > 100000:
-                raise Error("not a height")
-            if h != slot.height:
-                slot.height = h
-                return TOOK_SIZE
-        elif path == "describe":
-            slot.describe = j.text(j.get(0, "text"))
-            slot.mounts = j.number(j.get(0, "mounts"))
-        elif path == "csp":
-            slot.csp += 1
-        else:
-            raise Error("no such message")
-    except:
-        mw[].core.slots[k].refused += 1
-    return TOOK_NOTHING
-
-
 def report_lines(addr: Int) -> String:
     """Each view as the host saw it and the widget's own line (GTK's WEBVIEW:/WIDGET: lines; instead=1: its stand-in shows)."""
     var mw = mac_at(addr)
@@ -368,6 +324,9 @@ def report_lines(addr: Int) -> String:
                 + " refused=" + String(slot.refused) + " blocked=" + String(slot.blocked) + " h=" + String(slot.height)
                 + " crashes=" + String(slot.crashes) + " instead=" + ("1" if instead_shows(slot.view) else "0") + "\n")
         out += "WIDGET: " + slot.key() + ": " + slot.describe + "\n"
+        var inspectable = (msg(slot.view, "respondsToSelector:", sel("isInspectable")) & 0xFF) != 0 and (msg(slot.view, "isInspectable") & 0xFF) != 0
+        out += "WEBINSPECT: " + slot.key() + " " + ("1" if inspectable else "0") + "\n"  # (debug builds only, D-664's hook)
+    out += "WIDGETFACTS: " + facts_of(mw[].core) + "\n"  # (what an agent reads: describe()'s JSON and the fields, M0)
     return out
 
 
@@ -585,7 +544,7 @@ def on_scheme_start(obj: Int, cmd: Int, view: Int, task: Int) abi("C"):
         for f in mw[].core.files:
             if f == name:
                 file = mw[].core.dir + "/assets/" + name
-                media = "text/javascript" if name.endswith(".js") else "text/css"
+                media = "application/json" if name.endswith(".map") else ("text/javascript" if name.endswith(".js") else "text/css")
     elif path.startswith("/static/fonts/"):
         var name = String(path[byte=14:])
         for f in fonts():
@@ -621,7 +580,7 @@ def on_script_message(obj: Int, cmd: Int, ucc: Int, message: Int) abi("C"):
     if not is_kind(body, "NSString") or frame == 0 or (msg(frame, "isMainFrame") & 0xFF) == 0:
         mw[].core.slots[k].refused += 1
         return
-    var took = take_text(addr, k, from_ns(body))
+    var took = take_text(mw[].core, k, from_ns(body))  # (GTK's rules, one function: D-661's debt paid, D-672)
     if took == TOOK_SIZE:
         set_height(addr, view, mw[].core.slots[k].height)
     elif took == TOOK_INBOX:
