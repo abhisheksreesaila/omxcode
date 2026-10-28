@@ -44,6 +44,17 @@ The Scene made drawing cost ≤ 1 ms a frame (goal 26). What still freezes the w
 | 14 | **Compressed Parquet writes on every platform** | the Mac build has no zstd or snappy, so every `.omx` is written uncompressed | uncompressed everywhere (`mojoui/omxfile.mojo`) | low |
 | 15 | **Excel and JSON readers** | people's data arrives as .xlsx | not offered | medium |
 
+## 3b. Goal 38's dashboard (build D, 2026-10-28; vendored 3d2455d)
+Measured on the RTX 3090 over 100M orders (examples/dashboard, showcase-data/omxcode/check_d.py): one filtered
+group-by per change, 25 ms of the 37 ms median change-to-frame.
+
+| # | Need | Why | Meanwhile | Matters |
+|---|---|---|---|---|
+| 20 | **FLOAT64 on the GPU**: filters, sums and `/` over float columns (`compute(GPU)` raises today) | SPEC's amount and cost are float64 and its margin is a per-row division | money held as INT cents (exact for this file, checked on load); the margin as `(amount - cost) * 10^10 // amount` summed in int64 (`examples/dashboard/dashdata.mojo`) | high |
+| 21 | **A GPU row query**: `WHERE … ORDER BY k DESC, id LIMIT 50` | the CPU heaps take 190 ms over 100M rows (the group-by: 25 ms on the GPU) | `mojoui/devrows.mojo`: the day counts from the group-by pick the last days that hold 50 rows, a GPU kernel over the `DeviceTable`'s own buffers fetches only those (0.4–11 ms) | high |
+| 22 | **Narrow device columns** (a DATE in 16 bits, a code in 8, cents in 32) and a kernel nearer the memory's speed | `DeviceTable` holds every column as int64: 5.6 GB for 100M × 7, and a two-column count reads at ~235 GB/s (6.8 ms); each extra column read adds 3–6 ms (count 6.8 → sum by product 14 → + the margin's two columns and `//` 23.8 ms) | none | medium |
+| 23 | **`DeviceTable.context()` usable from any module**: outside the program's main module the package's `DeviceContext` is not the type a kernel launch there accepts ("no matching method in call to 'enqueue_function'") | an app's own kernels over the device table | mojoui.devrows takes the app's own `DeviceContext()` (the device's primary context, so the buffers are valid) | low |
+
 ## 4. Later modes (already on MX frame's own plan)
 
 | # | Need | Why | Matters |
