@@ -35,7 +35,7 @@ from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
-from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect
+from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
 from mojoui.hosts.devtools import DEVTOOLS
 from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, next_line, send_all, close_fd, link_error, MAX_LINE, LINE_NONE, LINE_BAD
 from mojoui.hosts.web import view_to_json, control_event
@@ -602,6 +602,9 @@ struct GtkHost[A: App](Movable):
     var webview_focus: Int  # a view that had the keyboard when a rebuild moved it (it gets it back), or 0
     var link_fds: List[Int]  # the agent link's connections (MOJOUI_AGENT_SOCKET, docs/agent.md), and what each has sent
     var link_bufs: List[List[UInt8]]  # raw bytes so far without a newline (decoded a whole line at a time)
+    var input_buf: List[UInt8]  # App.input_lines: stdin's bytes so far without a newline
+    var input_ended: Bool  # stdin closed: its last lines, then the end event, are delivered
+    var input_armed: Bool  # a retry is queued (lines arrived while the screen was being rebuilt)
     # GPU canvases (goal 36b, mojoui/present.mojo): the Presenter (on the heap: its address; 0 until run() probes),
     # the GDK GL context its textures live in (0: none), and what happened to each GPU-drawn picture
     var pres: Int
@@ -719,6 +722,9 @@ struct GtkHost[A: App](Movable):
         self.webview_focus = 0
         self.link_fds = List[Int]()
         self.link_bufs = List[List[UInt8]]()
+        self.input_buf = List[UInt8]()
+        self.input_ended = False
+        self.input_armed = False
 
     def schedule_effects(mut self, self_addr: Int):
         """Arms one GLib timeout for when the runtime next has something to hand over (a reply, a timer's tick):
@@ -3273,6 +3279,26 @@ struct GtkHost[A: App](Movable):
         except e:
             return link_error("not a request: " + String(e))
 
+    def input_lines_now(mut self, self_addr: Int) -> Bool:
+        """App.input_lines: every whole line read from stdin so far goes to update(), then the end once stdin closed.
+        False when the screen is being rebuilt (they wait for the next idle turn)."""
+        var message = self.rt.app.input_lines()
+        while True:
+            if busy() or self.has_pending:
+                return False
+            var line = next_line(self.input_buf)
+            if line[0] == LINE_NONE:
+                break
+            if line[0] == LINE_BAD:
+                continue
+            var d = self.rt.dispatch(Event(message, line[1], 0))
+            self.apply(d, self_addr)
+        if self.input_ended:
+            self.input_ended = False
+            var d = self.rt.dispatch(Event(message, String(""), -1))
+            self.apply(d, self_addr)
+        return True
+
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
         """A widget changed: build the event, run update(), patch the widgets."""
         ref n = self.rt.shown.nodes[node]
@@ -3418,6 +3444,32 @@ def on_link_read[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C") 
             _ = host[].link_fds.pop(k)
             _ = host[].link_bufs.pop(k)
             return 0
+
+
+def on_input_read[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C") -> c_int:
+    """App.input_lines: stdin has bytes (or closed): read what's there, hand the whole lines to update()."""
+    var host = host_at[A](host_addr)
+    var buf = List[UInt8](length=65536, fill=0)
+    var n = wk[Int]("read", fd, Int(buf.unsafe_ptr()), Int(65536))  # (looked up: the standard library declares read() its own way)
+    for k in range(max(n, 0)):
+        host[].input_buf.append(buf[k])
+    _ = len(buf)
+    var closed = n == 0 or (n < 0 and (Int(condition) & (8 | 16)) != 0)
+    if closed:
+        host[].input_buf.append(0x0A)  # (a last line without its newline still counts)
+        host[].input_ended = True
+    if not host[].input_lines_now(host_addr) and not host[].input_armed:
+        host[].input_armed = True
+        _ = external_call["g_timeout_add", c_uint](c_uint(1), on_input_retry[A], host_addr)
+    return 0 if closed else 1
+
+
+def on_input_retry[A: App](host_addr: Int) abi("C") -> c_int:
+    var host = host_at[A](host_addr)
+    if host[].input_lines_now(host_addr):
+        host[].input_armed = False
+        return 0
+    return 1  # (still rebuilding: again in a millisecond)
 
 
 def host_at[A: App](addr: Int) -> Pointer[GtkHost[A], MutUntrackedOrigin]:
@@ -5381,6 +5433,8 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         else:
             _ = external_call["g_unix_fd_add", c_uint](c_int(lfd), c_uint(1), on_link_accept[A], host_addr)
             print("mojoui: agent link at " + link_path, flush=True)
+    if host[].rt.app.input_lines() != 0:  # (a driver steps the app through stdin: App.input_lines)
+        _ = external_call["g_unix_fd_add", c_uint](c_int(0), c_uint(1 | 8 | 16), on_input_read[A], host_addr)  # G_IO_IN | ERR | HUP
     if getenv("MOJOUI_LIVE_REPORT") != "":  # (scripts/live.py: SIGUSR1 prints the widgets' state, as a test run's end does)
         _ = external_call["g_unix_signal_add", c_uint](c_int(10), on_live_report[A], host_addr)
     host[].show(host_addr)

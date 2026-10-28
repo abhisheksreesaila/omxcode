@@ -11,6 +11,12 @@
 # writes DIR/answers.json (SPEC's format) and DIR/timings.json (per step: input_to_pixels_ms = the change → the frame
 # that draws its numbers; compute_ms = the job; query_ms = MX frame's GPU group-by; rows_ms = the table's rows on the
 # GPU), then exits. It prints "dashboard: first dashboard" when the opening state is first drawn.
+#
+# Driven from outside (a shared harness that watches the screen): dashboard --scripted-external --rows 10M|100M [--out
+# DIR] (or DASH_EXTERNAL=1): opens the file, shows the opening state (step 0), then waits; each line "step N" on stdin
+# applies steps.json's state N (read on the main loop as it arrives: App.input_lines), "quit" or the end of stdin
+# writes DIR/answers.json and DIR/timings.json for the steps shown, in the order asked (once the last one asked for is
+# on screen), and exits.
 
 from std.sys import argv, exit
 from std.os import getenv
@@ -42,6 +48,7 @@ comptime REGION = 5
 comptime OPEN_FROM = 6
 comptime OPEN_TO = 7
 comptime CLOSE_DATE = 8
+comptime STEP_LINE = 20  # --scripted-external: a line from stdin ("step N", "quit"; number -1: stdin closed)
 comptime CHART = 1  # the bar chart's canvas
 
 comptime W = 1280
@@ -144,6 +151,9 @@ struct Main(App):
     var started_ns: Int
     # scripted
     var scripted: Bool
+    var external: Bool  # --scripted-external: steps come from stdin
+    var want_record: Bool  # (scripted or external) the next answer drawn for the current step is recorded
+    var quitting: Bool  # (external) "quit" came while a step was on its way: finish once it's drawn
     var out: String
     var states: List[Filters]  # the opening state, then each step's full state
     var changes: List[String]
@@ -159,6 +169,11 @@ struct Main(App):
         self.pal = omxqua_palette(False)
         self.glyphs = Font()
         self.scripted = flag("--scripted", "DASH_SCRIPTED", "") != ""
+        self.external = flag("--scripted-external", "DASH_EXTERNAL", "") != ""
+        if self.external:
+            self.scripted = False
+        self.want_record = True
+        self.quitting = False
         self.rows_name = flag("--rows", "DASH_ROWS", "100M")
         self.path = flag("--data", "DASH_DATA", "data/orders-" + self.rows_name + ".parquet")
         self.out = flag("--out", "DASH_OUT", ".")
@@ -199,6 +214,9 @@ struct Main(App):
     def theme(self) -> Theme:
         return omxqua(False)
 
+    def input_lines(self) -> Int:
+        return STEP_LINE if self.external else 0
+
     # ---------- work ----------
 
     def busy(self) -> Bool:
@@ -217,6 +235,7 @@ struct Main(App):
 
     def changed(mut self):
         self.change_ns = now_ns()
+        self.want_record = True
         self.run()
 
     def poll(mut self):
@@ -255,7 +274,10 @@ struct Main(App):
         if event.message == FRAME:
             self.poll()
             return
-        if self.scripted:
+        if event.message == STEP_LINE:
+            self.external_step(event)
+            return
+        if self.scripted or self.external:
             return
         if event.message == OPEN_FROM or event.message == OPEN_TO:
             self.picking = 0 if self.picking == event.message else event.message
@@ -283,6 +305,24 @@ struct Main(App):
             if r != self.filters.region:
                 self.filters.region = r
                 self.changed()
+
+    def external_step(mut self, event: Event):
+        """--scripted-external: "step N" shows steps.json's state N; "quit" (or stdin closing) writes the results."""
+        var line = event.text.strip()
+        if event.number == -1 or line == "quit":
+            if self.want_record and self.orders and self.problem == "":
+                self.quitting = True  # (the step asked for last is still on its way)
+            else:
+                self.finish()
+            return
+        if line.startswith("step "):
+            var n = number(String(line[byte=5:]), -1)
+            if n >= 0 and n < len(self.states):
+                self.step = n
+                self.filters = self.states[n].copy()
+                self.changed()
+                return
+        print("dashboard: not a step: '" + String(line) + "' (send 'step N', N from 0 to " + String(len(self.states) - 1) + ", or 'quit')", flush=True)
 
     def region_names(self) -> List[String]:
         """The regions, A to Z."""
@@ -316,9 +356,10 @@ struct Main(App):
         if self.answer_step == 0 and self.first_ms == 0:
             self.first_ms = ms_since(self.started_ns)
             print("dashboard: first dashboard " + fixed(self.first_ms, 1) + " ms", flush=True)
-        if self.scripted and self.answer_step == self.step and len(self.answers) == self.step:
+        if (self.scripted or self.external) and self.want_record and self.answer_step == self.step:
+            self.want_record = False
             self.record(shown_ms)
-            if self.step == self.steps:
+            if (self.scripted and self.step == self.steps) or self.quitting:
                 self.finish()
 
     def record(mut self, shown_ms: Float64):
@@ -338,6 +379,9 @@ struct Main(App):
                             + ', "rows_ms": ' + fixed(a.rows_ms, 3) + "}")
 
     def finish(mut self):
+        if not self.orders:
+            print("dashboard: the data never loaded: " + self.problem, flush=True)
+            exit(1)
         ref o = self.orders.value()
         try:
             with open(self.out + "/answers.json", "w") as f:

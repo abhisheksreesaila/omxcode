@@ -138,6 +138,13 @@ trait App(Movable, Deinitable):
         """The app's mark as SVG ("": none): hosts install it as the icon "app-logo" (Icon("app-logo", 18))."""
         return ""
 
+    def input_lines(self) -> Int:
+        """A message for the lines another program writes to this one's standard input (0: stdin isn't read). Desktop
+        hosts (GTK) watch stdin on their main loop: each whole line reaches update() as Event(message, text=line),
+        between the toolkit's own events, with no polling delay; the end of the input comes once as number = -1. For a
+        driver (a benchmark harness, a test) that steps the app from outside. The default: 0."""
+        return 0
+
     def requests(mut self) -> List[Request]:
         """The HTTP requests asked for since the runtime last looked (it looks after every update() and once at the
         start): keep a mojoui.http.Http outbox and return its take(). Each reply comes back to update() as an Event."""
