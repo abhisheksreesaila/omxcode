@@ -42,6 +42,7 @@ from mojoui.theme import Theme, Palette
 from themes.omxqua import omxqua, omxqua_palette
 from mxframe import Job, JOB_RUNNING
 from mojoui.jobs import start_ui_job
+from mojoui.geometry import rect_of
 from dashdata import (Orders, Answer, Filters, LoadJob, StepJob, ALL, TOP, money, day_number, day_text, ms_since)
 
 comptime FRAME = 1
@@ -389,7 +390,8 @@ struct Main(App):
                 ref o = self.orders.value()
                 print('ready {"data_load_ms": ' + fixed(o.read_ms + o.cents_ms + o.sort_ms + o.upload_ms, 1) + ', "read_ms": '
                       + fixed(o.read_ms, 1) + ', "cents_ms": ' + fixed(o.cents_ms, 1) + ', "sort_ms": ' + fixed(o.sort_ms, 1)
-                      + ', "upload_ms": ' + fixed(o.upload_ms, 1) + ', "first_dashboard_ms": ' + fixed(self.first_ms, 1) + "}", flush=True)
+                      + ', "upload_ms": ' + fixed(o.upload_ms, 1) + ', "first_dashboard_ms": ' + fixed(self.first_ms, 1)
+                      + rect_json("kpi_rect", rect_of("kpis")) + rect_json("results_rect", rect_of("results")) + "}", flush=True)
             else:
                 print("shown " + String(self.step) + " " + fixed(shown_ms, 3) + ' {"gpu_ms": ' + fixed(a.query_ms + a.rows_ms, 3)
                       + ', "compute_ms": ' + fixed(a.compute_ms, 3) + "}", flush=True)
@@ -444,7 +446,7 @@ struct Main(App):
             KpiView("Sum of amount", sales, "all matching orders", [], False, 0).view(0, 0, fact="exact, in cents").grow(),
             KpiView("Average margin", profit, "(amount − cost) / amount", [], False, TONE_GOOD).view(0, 0, fact="mean over rows").grow(),
             spacing=SPACE_M,
-        ).fill()
+        ).fill().tag("kpis")
 
     def controls(self) -> View:
         var regions: List[String] = ["All regions"]
@@ -491,13 +493,20 @@ struct Main(App):
         ]
         var chart = Card(Canvas(CHART, self.version, on_frame=FRAME if self.busy() else NO_MSG).grow().fill(), spacing=0).grow().fill()
         var rows = Card(Scroll(self.table(), height=0).grow(), spacing=0).grow().fill()
-        var page = VStack(self.controls(), self.kpis(), HStack(chart^, rows^, spacing=SPACE_M).fill().grow(), spacing=SPACE_M).grow().fill()
+        var page = VStack(self.controls(), self.kpis(), HStack(chart^, rows^, spacing=SPACE_M).fill().grow().tag("results"), spacing=SPACE_M).grow().fill()
         var screen: List[View] = [Shell(AppBar(bar^), page^)]
         if self.picking == OPEN_FROM:
             screen.append(DatePopover("from-date", "From", day_text(self.filters.from_day), FROM, CLOSE_DATE))
         elif self.picking == OPEN_TO:
             screen.append(DatePopover("to-date", "To", day_text(self.filters.to_day), TO, CLOSE_DATE))
         return VStack(screen^, spacing=0).grow().fill()
+
+
+def rect_json(key: String, r: List[Float64]) -> String:
+    """', "key": [x, y, w, h]' in whole window points ("" when the host can't say)."""
+    if len(r) != 4:
+        return ""
+    return ', "' + key + '": [' + String(Int(r[0] + 0.5)) + ", " + String(Int(r[1] + 0.5)) + ", " + String(Int(r[2] + 0.5)) + ", " + String(Int(r[3] + 0.5)) + "]"
 
 
 def day_number_or(iso: String) -> Int:

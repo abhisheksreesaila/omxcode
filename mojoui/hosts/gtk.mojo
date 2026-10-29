@@ -37,6 +37,7 @@ from mojoui.hosts.gtk_webview import (
 )
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
 from mojoui.jobs import wake_pipe, drain_wakes
+from mojoui.geometry import register_rects
 from mojoui.hosts.devtools import DEVTOOLS
 from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, next_line, send_all, close_fd, link_error, MAX_LINE, LINE_NONE, LINE_BAD
 from mojoui.hosts.web import view_to_json, control_event
@@ -3483,6 +3484,27 @@ def on_jobs_woken[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C")
     return 1
 
 
+def host_rect_of[A: App](host_addr: Int, tag_addr: Int, tag_len: Int, out_addr: Int) abi("C") -> Int:
+    """mojoui.geometry.rect_of: the view tagged `tag` on screen now, in the window's coordinates (4 float64s out)."""
+    var host = host_at[A](host_addr)
+    var bytes = List[UInt8](capacity=tag_len)
+    var tp = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=tag_addr)
+    for k in range(tag_len):
+        bytes.append(tp[k])
+    var tag = String(unsafe_from_utf8=bytes^)
+    ref nodes = host[].rt.shown.nodes
+    for i in range(len(nodes)):
+        if nodes[i].name == tag and i < len(host[].widgets) and host[].widgets[i] != 0:
+            var rect = List[Float32](length=4, fill=0)
+            var ok = external_call["gtk_widget_compute_bounds", c_int](host[].widgets[i], host[].window, Int(rect.unsafe_ptr())) != 0
+            var out = Pointer[Float64, MutUntrackedOrigin](unsafe_from_address=out_addr)
+            for k in range(4):
+                out[k] = Float64(rect[k])
+            _ = len(rect)
+            return 1 if ok else 0
+    return 0
+
+
 def on_jobs_retry[A: App](host_addr: Int) abi("C") -> c_int:
     return 0 if host_at[A](host_addr)[].jobs_now(host_addr) else 1
 
@@ -5456,6 +5478,8 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         else:
             _ = external_call["g_unix_fd_add", c_uint](c_int(lfd), c_uint(1), on_link_accept[A], host_addr)
             print("mojoui: agent link at " + link_path, flush=True)
+    var rect_fn = host_rect_of[A]  # (mojoui.geometry.rect_of: the app may ask where a tagged view is)
+    register_rects(Pointer(to=rect_fn).unsafe_bitcast[Int]()[], host_addr)
     var wake = wake_pipe()
     var wake_on = getenv("MOJOUI_JOB_WAKE") != "0"  # (0: frames alone pick finished jobs up, to compare)
     if host[].rt.app.jobs_message() != 0 and wake >= 0 and wake_on:  # (a background job ended: update() at once, App.jobs_message)
