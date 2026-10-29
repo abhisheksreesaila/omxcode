@@ -272,8 +272,12 @@ def m6():
             "-    var args = argv()", "+    var args = arguments()",
             "-    var v = getenv(env)", "+    var v = environment(env)",
             "-            exit(1)", "+            exit_with(1)", "-        exit(0)", "+        exit_with(0)"}
-    added = [l for l in run(["git", "diff", "-U0", "216c2b5", "--", "examples/particles/app.mojo"]).stdout.splitlines()
-             if l[:1] in "+-" and not l.startswith(("+++", "---")) and l not in d767]
+    changed = [l for l in run(["git", "diff", "-U0", "216c2b5", "--", "examples/particles/app.mojo"]).stdout.splitlines()
+               if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+    swapped = [l for l in changed if l in d767]
+    added = [l for l in changed if l not in d767]
+    if sorted(swapped) != sorted(d767):  # (each of D-767's lines exactly once: none missing, none repeated)
+        added += [f"D-767's lines not exactly once: {sorted(set(swapped) ^ d767) or 'a line repeated'}"]
     if added and (len(added) != 1 or "comptime GPU_CANVAS = True" not in added[0]):
         problems.append("examples/particles/app.mojo changed beyond declaring its GPU canvas: " + "; ".join(added)[:300])
     ok_t, msg_t, _ = mojo_test("tests/test_gpu_canvas_gate.mojo", "gpu canvas gate: ok")

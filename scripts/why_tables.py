@@ -56,7 +56,8 @@ def row(res, r, n):
 def capped(d, r):
     """On the real desktop, a windowed row whose fastest frame is one refresh (within 1 %): the compositor paces it, so
     its speed under a refresh can't be read there. Native Rust in a window always (goal 36b); JS + Rust/wasm's headed
-    Chromium on the 2026-10-29 re-measure (D-769). The offscreen row never is."""
+    Chromium on the 2026-10-29 re-measure (D-769). The offscreen row never is. (A row whose own work truly took one
+    refresh at its smallest size would be labelled too; the rows' step ms say which.)"""
     if not d.get("desktop") or r == "B-native-off":
         return False
     hz = (d.get("setup") or {}).get("monitor", {}).get("refreshRate")
