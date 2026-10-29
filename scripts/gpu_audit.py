@@ -6,9 +6,10 @@ kernel. Exit 1 if any is over, or can't be sized. It also lists what else stops 
 Float64 and no general 64-bit atomics; PTX is NVIDIA's): printed, not judged here.
 (2026-10-24: the first version read only MX frame's mojo/ and missed kernels_aot/, where its GPU kernels are.)
 
-  pixi run python scripts/gpu_audit.py [--mxframe PATH]   (default: ../../mxframe, the owner's checkout)
+  pixi run python scripts/gpu_audit.py [--mxframe PATH]   (default: $MXFRAME_REPO, else ../../mxframe, the owner's checkout)
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -103,7 +104,7 @@ def mxframe_files(path):
 
 
 if __name__ == "__main__":
-    mx = Path(sys.argv[sys.argv.index("--mxframe") + 1]) if "--mxframe" in sys.argv else ROOT.parent.parent / "mxframe"
+    mx = Path(sys.argv[sys.argv.index("--mxframe") + 1]) if "--mxframe" in sys.argv else Path(os.environ.get("MXFRAME_REPO", ROOT.parent.parent / "mxframe"))
     files = list((ROOT / "mojoui").rglob("*.mojo"))
     extra, commit = mxframe_files(mx)
     problems = []

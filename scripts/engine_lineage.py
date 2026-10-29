@@ -5,6 +5,7 @@ byte in size and ~400K bytes inside), so "vendor is the archive's build" means:
   - build/mxframe-src holds exactly that commit's `git archive` (diffed file by file) and a package built from it;
   - vendor/mxframe.mojoc is that build's size within 0.1 % (builds of one commit differ by bytes; the stable
     commits' packages by megabytes: 2.2 MB at 1889b7f, 4.0 MB at 321870f)."""
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -12,7 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
 LINEAGE = ["7cbcc04", "1889b7f", "321870f", "23edc59", "3d2455d"]
-REPO = ROOT.parent.parent / "mxframe"  # (~/Projects/mxframe, next to the mxapp folder)
+REPO = Path(os.environ.get("MXFRAME_REPO", ROOT.parent.parent / "mxframe"))  # (~/Projects/mxframe, next to the mxapp folder;
+#   $MXFRAME_REPO for a checkout elsewhere, e.g. a worktree outside ~/Projects/mxapp)
 
 
 def vendored_at_least(pin):
