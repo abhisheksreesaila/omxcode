@@ -58,9 +58,10 @@ def wake_pipe() -> Int:
     # The write end never blocks: a full pipe already means "a wake is pending", and nothing may drain it (no host
     # watching, MOJOUI_JOB_WAKE=0, an app whose jobs_message is 0), so a job's thread must not wait on write().
     # The read end stays blocking: the web host's thread waits on it. Neither end leaks into child processes.
-    _ = external_call["fcntl", c_int](c_int(w), c_int(4), c_int(2048))  # F_SETFL, O_NONBLOCK (Linux: 0o4000)
-    _ = external_call["fcntl", c_int](c_int(w), c_int(2), c_int(1))  # F_SETFD, FD_CLOEXEC
-    _ = external_call["fcntl", c_int](c_int(r), c_int(2), c_int(1))
+    # (fcntl declared as mojoui.http_socket declares it, variadic: one C function, one signature per program)
+    _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(4), c_int(2048))  # F_SETFL, O_NONBLOCK (Linux: 0o4000)
+    _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(2), c_int(1))  # F_SETFD, FD_CLOEXEC
+    _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(r), c_int(2), c_int(1))
     put_shared(SLOT_WAKE_WRITE, w + 1)
     put_shared(SLOT_WAKE_READ, r + 1)
     return r
