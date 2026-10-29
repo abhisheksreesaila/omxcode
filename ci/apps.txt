@@ -1,4 +1,0 @@
-omxplorer
-maccheck
-console
-widgets
