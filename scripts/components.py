@@ -169,6 +169,24 @@ def example_text(example):
     return "".join(f.read_text() for f in sorted(d.glob("*.mojo")))
 
 
+def composes(example, ctor, module):
+    """The example builds `ctor`: in its own code, or through a mojoui module it imports whose code (not its comments)
+    calls it, other than the composite's own `module` (agentchat's GenUi comes from mojoui.agentui's Screens since goal
+    35's review)."""
+    text = example_text(example)
+    if ctor in text:
+        return True
+    call = re.compile(rf"\b{re.escape(ctor.rstrip('('))}\(")
+    for mod in dict.fromkeys(re.findall(r"^from (mojoui(?:\.\w+)+) import", text, re.M)):
+        f = ROOT / (mod.replace(".", "/") + ".mojo")
+        if not f.exists() or f.relative_to(ROOT).as_posix() == module:
+            continue
+        code = "\n".join(l.split("#", 1)[0] for l in f.read_text().splitlines() if not l.lstrip().startswith(('"""', "#")))
+        if call.search(code):
+            return True
+    return False
+
+
 # Kinds a host builds whose checks drive them through a stand-in, not real input: 🔨 until one does.
 KIND_UNPROVEN = {("Linux (GTK)", "DRAG"): "the dragto: step reads the GtkDragSource's content and calls the GtkDropTarget's drop handler; a pointer drag isn't driven headless",
                  ("Linux (GTK)", "DROP"): "the same"}
@@ -289,7 +307,7 @@ def render():
             "|---|---|---|" + "---|" * len(names) + "---|"]
     comp_cells = {}
     for name, module, parts, ctor in COMPOSITES:
-        users = [e.name for e in sorted((ROOT / "examples").iterdir()) if (e / "app.mojo").exists() and ctor in example_text(e.name)]
+        users = [e.name for e in sorted((ROOT / "examples").iterdir()) if (e / "app.mojo").exists() and composes(e.name, ctor, module)]
         row = []
         for h in names:
             states = [known[(h, part)] for part in parts]
