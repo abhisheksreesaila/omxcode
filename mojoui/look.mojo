@@ -226,7 +226,8 @@ def look_gtk_css(look: Look, scope: String) -> String:
         out += scope + "label.mui-tool-label { font-size: " + fpx(c.tool_font) + "; }\n"
         out += scope + "button.mui-tool.mui-tool-inline { min-width: 0; min-height: " + px(c.inline_h) + "; padding: 0 " + px(c.inline_pad) + "; border-radius: " + px(c.inline_radius) + "; }\n"
         out += scope + "button.mui-tool-inline label.mui-tool-label { font-size: " + fpx(c.inline_font) + "; }\n"
-        out += scope + ".mui-tag-toolbar button.image-button { min-width: " + px(c.icon) + "; min-height: " + px(c.icon) + "; padding: 0; border-radius: " + px(c.icon_radius) + "; }\n"
+        # (an icon button as wide as the theme's sheet draws it, icon_w, as the web and the Mac: 32 for the skins; D-579)
+        out += scope + ".mui-tag-toolbar button.image-button { min-width: " + px(c.icon_w if c.icon_w > 0 else c.icon) + "; min-height: " + px(c.icon) + "; padding: 0; border-radius: " + px(c.icon_radius) + "; }\n"
     if c.divider_gap > 0:  # a Divider's room (GTK's own is none; the host marks a Divider mui-divider, a row's mui-divider-up)
         out += scope + "separator.mui-divider { margin: " + px(c.divider_gap) + " 0; }\n"
     if c.divider_side > 0:

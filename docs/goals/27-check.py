@@ -127,16 +127,21 @@ def m3():
     shots.shoot(head, others_only=True)
     meant = {"fluent-gtk.png": "P9: bars lost their track", "fluent-web.png": "P9: bars lost their track",  # (the polish's own changes)
              "omarchy-gtk.png": "MX Studio follows the desktop's live Omarchy theme (it changed on 2026-10-19 21:34, after M0)",
-             "omarchy-web.png": "the same: the move itself is proven by after-move, shot before the change (D-267)",
-             "kit-web.png": "goal 32's D-307: segments fill their row equally and a toggle row is a control high on the web; the footer says omxcode (D-289)",
-             "kit-graphite-web.png": "the same (D-307, D-289; D-560)"}
-    drift = [(n, s) for n, s in shots.compare(a, head) if s is not None and n not in meant and s > noise.get(n, 0) + 0.002]
+             "omarchy-web.png": "the same: the move itself is proven by after-move, shot before the change (D-267)"}
+    # the kit's web shots changed on purpose after M0 (goal 32's D-307: equal segments, toggle rows a control high; the
+    # omxcode footer, D-289): they were re-taken from the intended look, twice for their noise, into docs/goals/27/golden
+    # and golden2 (D-579), and drift at HEAD is measured against those, not exempted
+    gold, gold2 = ROOT / "docs" / "goals" / "27" / "golden", ROOT / "docs" / "goals" / "27" / "golden2"
+    retaken = {n: (s, noise_r) for (n, s), (_, noise_r) in zip(shots.compare(gold, head), shots.compare(gold, gold2))}
+    rows_head = [(n, retaken[n][0] if n in retaken else s) for n, s in shots.compare(a, head)]
+    noise = dict(noise, **{n: r[1] or 0 for n, r in retaken.items()})
+    drift = [(n, s) for n, s in rows_head if s is not None and n not in meant and s > noise.get(n, 0) + 0.002]
     missing = [n for n, s in shots.compare(a, head) if s is None and not n.startswith("omx-")]
     if drift or missing:
         problems.append("at HEAD: " + ", ".join(f"{n} {s * 100:.2f}%" for n, s in drift) + (f" missing {missing}" if missing else ""))
     commit = (moved / "commit.txt").read_text().strip()[:7]
     return not problems, "; ".join(problems) or (f"{len(rows)} screens from a build of the move ({commit}): at most {max(s for _, s in rows) * 100:.2f}% of pixels differ "
-                                                  f"(per channel, each within its own noise); at HEAD, kit, Fluent (but its bars' tracks, P9), Omarchy and native unchanged")
+                                                  f"(per channel, each within its own noise); at HEAD, kit (its web shots against D-579's re-taken goldens), Fluent (but its bars' tracks, P9), Omarchy and native unchanged")
 
 
 def m4():
