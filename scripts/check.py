@@ -266,8 +266,14 @@ def m6():
             notes.append(f"desktop: {d['gpu_presented']} of {d['frames']} frames shown from the GPU, 0 readbacks "
                          f"({d['gsk_renderer']} renderer, {d['frame_ms_mean']:.2f} ms/frame at 1M)")
     # (review item 1, D-752: the app's only change is declaring its GPU canvas)
+    # and, exactly, D-767's swap of std.sys/std.os for mojoui.shared (goal 3's framework-only imports, D-768)
+    d767 = {"-from std.sys import argv, exit", "-from std.os import getenv",
+            "+from mojoui.shared import arguments, environment, exit_with",
+            "-    var args = argv()", "+    var args = arguments()",
+            "-    var v = getenv(env)", "+    var v = environment(env)",
+            "-            exit(1)", "+            exit_with(1)", "-        exit(0)", "+        exit_with(0)"}
     added = [l for l in run(["git", "diff", "-U0", "216c2b5", "--", "examples/particles/app.mojo"]).stdout.splitlines()
-             if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+             if l[:1] in "+-" and not l.startswith(("+++", "---")) and l not in d767]
     if added and (len(added) != 1 or "comptime GPU_CANVAS = True" not in added[0]):
         problems.append("examples/particles/app.mojo changed beyond declaring its GPU canvas: " + "; ".join(added)[:300])
     ok_t, msg_t, _ = mojo_test("tests/test_gpu_canvas_gate.mojo", "gpu canvas gate: ok")
