@@ -11,6 +11,7 @@
 
 from std.math import floor
 from std.os import getenv, setenv, makedirs
+from std.sys import argv, exit
 from std.ffi import external_call, c_int
 from std.memory.alloc import alloc, Layout
 
@@ -42,6 +43,19 @@ def floored(x: Float64) -> Float64:
 def environment(name: String, default: String = "") -> String:
     """An environment variable (apps import this rather than std.os, so they stay platform-free)."""
     return getenv(name, default)
+
+
+def arguments() -> List[String]:
+    """The command line's words, the program's own name first (apps import this rather than std.sys, D-767)."""
+    var out = List[String]()
+    for a in argv():
+        out.append(String(a))
+    return out^
+
+
+def exit_with(code: Int):
+    """Ends the process with `code` (a scripted run's result; apps import this rather than std.sys, D-767)."""
+    exit(code)
 
 
 def shared_loads() -> Int:

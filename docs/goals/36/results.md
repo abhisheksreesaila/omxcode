@@ -1,8 +1,8 @@
 # Goal 36 M4 · the particle field, measured
 
-Every run passed the quiet gate: 1-minute load < 2.0 and no other process on the GPU (compute apps over 16 MiB; idle desktop clients hold 6 MiB); waited 5644 s in all.
+Every run passed the quiet gate: 1-minute load < 2.0 and no other process on the GPU (compute apps over 16 MiB; idle desktop clients hold 6 MiB); waited 10268 s in all.
 
-Commit `b983b8f`, sources sha256 `8bd35549e625`, 2026-10-28 12:25; 24 cores, NVIDIA GeForce RTX 3090, 610.57.04, NVIDIA GeForce RTX 3090, 610.57.04.
+Commit `06bc74a`, sources sha256 `ea4c9d7044aa`, 2026-10-29 11:49; 24 cores, NVIDIA GeForce RTX 3090, 610.57.04, NVIDIA GeForce RTX 3090, 610.57.04.
 Protocol: scripts/particles_bench.py (docstring): 60 warm-up + 600 measured frames, 3 runs, each run's frame ms is the mean frame interval (throughput); the table shows the median of the runs (± spread = max - min).
 
 ## Headline: frame ms (throughput, vsync off) and the largest N at 60 fps
@@ -11,13 +11,13 @@ Holds 60 fps = frame ms ≤ 16.7 and the 95th-percentile frame interval ≤ 20 m
 
 | Row | largest N at 60 fps | 1M | 2M | 5M | 10M | 20M |
 |---|---|---|---|---|---|---|
-| A · JS + WebGPU | 20M | 1.34 ±0.13 | 1.33 ±0.08 | 1.36 ±0.02 | 1.69 ±0.01 | 3.27 ±0.01 |
-| A-cpu · plain JS (CPU) | 100k | 14.37 ±0.21 ✗ | 25.36 ±0.12 ✗ | 57.58 ±0.81 ✗ | 111.83 ±0.36 ✗ | 220.35 ±16.79 ✗ |
-| B-wasm · JS + Rust/wasm | 5M | 2.07 ±0.09 | 4.24 ±0.49 | 13.98 ±0.46 | 29.23 ±2.96 ✗ | 58.88 ±3.77 ✗ |
-| B-native · Rust + wgpu | 20M | 0.37 ±0.03 | 0.64 ±0.00 | 1.51 ±0.01 | 2.97 ±0.00 | 5.94 ±0.01 |
-| C · omxcode (Mojo) | 20M | 4.57 ±0.92 | 5.56 ±0.44 | 5.95 ±1.19 | 6.14 ±0.36 | 6.32 ±1.36 |
+| A · JS + WebGPU | 20M | 1.30 ±0.02 | 1.31 ±0.04 | 1.40 ±0.02 | 1.70 ±0.01 | 3.26 ±0.04 |
+| A-cpu · plain JS (CPU) | 100k | 14.38 ±0.20 ✗ | 25.13 ±0.57 ✗ | 58.05 ±0.89 ✗ | 113.33 ±6.75 ✗ | 233.21 ±15.42 ✗ |
+| B-wasm · JS + Rust/wasm | 5M | 2.10 ±0.18 | 3.83 ±0.09 | 13.69 ±0.53 | 29.01 ±0.55 ✗ | 55.92 ±0.31 ✗ |
+| B-native · Rust + wgpu | 20M | 0.34 ±0.03 | 0.64 ±0.00 | 1.51 ±0.00 | 2.99 ±0.00 | 5.97 ±0.01 |
+| C · omxcode (Mojo) | 20M | 4.23 ±0.90 | 5.54 ±1.21 | 5.47 ±1.15 | 6.08 ±0.20 | 7.21 ±1.17 |
 
-A-cpu at 100k: 3.52 ms ±0.48 (holds 60 fps; p95 6.00 ms).
+A-cpu at 100k: 3.76 ms ±0.31 (holds 60 fps; p95 6.70 ms).
 
 How each row's frame ms is measured:
 
@@ -31,36 +31,36 @@ How each row's frame ms is measured:
 
 | Row | N | p95 interval | step ms | step is | GPU frame ms | CPU encode ms | readback ms | cold start ms | peak PSS MB | peak RSS MB |
 |---|---|---|---|---|---|---|---|---|---|---|
-| A | 1M | 1.30 | 0.040 | GPU timestamp-query around the step pass | 0.164 | 0.100 | – | 1163 | 590 | 1311 |
-| A | 2M | 1.30 | 0.078 | GPU timestamp-query around the step pass | 0.298 | 0.100 | – | 1215 | 612 | 1334 |
-| A | 5M | 1.30 | 0.191 | GPU timestamp-query around the step pass | 0.707 | 0.100 | – | 1265 | 662 | 1439 |
-| A | 10M | 1.80 | 0.378 | GPU timestamp-query around the step pass | 1.379 | 0.100 | – | 1378 | 844 | 1683 |
-| A | 20M | 2.20 | 0.770 | GPU timestamp-query around the step pass | 2.766 | 0.100 | – | 1610 | 1153 | 2167 |
-| A-cpu | 100k | 6.00 | 0.400 | CPU (plain JS, main thread) | – | – | – | 964 | 627 | 1339 |
-| A-cpu | 1M | 23.20 | 3.500 | CPU (plain JS, main thread) | – | – | – | 1034 | 621 | 1312 |
-| A-cpu | 2M | 36.90 | 7.100 | CPU (plain JS, main thread) | – | – | – | 1077 | 635 | 1324 |
-| A-cpu | 5M | 73.50 | 17.900 | CPU (plain JS, main thread) | – | – | – | 1096 | 681 | 1383 |
-| A-cpu | 10M | 133.80 | 35.800 | CPU (plain JS, main thread) | – | – | – | 1185 | 752 | 1457 |
-| A-cpu | 20M | 251.50 | 71.800 | CPU (plain JS, main thread) | – | – | – | 1335 | 909 | 1606 |
-| B-wasm | 1M | 2.44 | 1.155 | CPU: wasm step + pack, 22 threads (wall) | – | 1.650 | – | 983 | 824 | 1791 |
-| B-wasm | 2M | 5.56 | 2.350 | CPU: wasm step + pack, 24 threads (wall) | – | 3.598 | – | 1060 | 944 | 2022 |
-| B-wasm | 5M | 16.64 | 7.780 | CPU: wasm step + pack, 22 threads (wall) | – | 12.877 | – | 1159 | 1117 | 2239 |
-| B-wasm | 10M | 33.06 | 16.613 | CPU: wasm step + pack, 22 threads (wall) | – | 27.765 | – | 1276 | 1250 | 2366 |
-| B-wasm | 20M | 71.47 | 34.370 | CPU: wasm step + pack, 24 threads (wall) | – | 55.907 | – | 1494 | 1511 | 2620 |
-| B-native | 1M | 0.71 | 0.037 | GPU timestamp queries around the compute pass | – | – | – | 294 | 168 | 191 |
-| B-native | 2M | 1.27 | 0.073 | GPU timestamp queries around the compute pass | – | – | – | 258 | 170 | 192 |
-| B-native | 5M | 3.06 | 0.184 | GPU timestamp queries around the compute pass | – | – | – | 310 | 170 | 225 |
-| B-native | 10M | 6.10 | 0.369 | GPU timestamp queries around the compute pass | – | – | – | 323 | 170 | 263 |
-| B-native | 20M | 12.27 | 0.770 | GPU timestamp queries around the compute pass | – | – | – | 373 | 170 | 340 |
-| C | 1M | 5.88 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.198 | – | 0.426 | 358 | 232 | 264 |
-| C | 2M | 7.71 | 0.080 | GPU step, timed on a separate pass (each part waited for on its own) | 0.306 | – | 0.436 | 346 | 250 | 280 |
-| C | 5M | 8.82 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.635 | – | 0.439 | 389 | 294 | 326 |
-| C | 10M | 8.65 | 0.383 | GPU step, timed on a separate pass (each part waited for on its own) | 1.165 | – | 0.419 | 392 | 372 | 402 |
-| C | 20M | 8.39 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.239 | – | 0.421 | 459 | 525 | 554 |
+| A | 1M | 1.30 | 0.040 | GPU timestamp-query around the step pass | 0.163 | 0.100 | – | 1196 | 549 | 1321 |
+| A | 2M | 1.30 | 0.078 | GPU timestamp-query around the step pass | 0.299 | 0.100 | – | 1226 | 567 | 1351 |
+| A | 5M | 1.30 | 0.191 | GPU timestamp-query around the step pass | 0.712 | 0.100 | – | 1248 | 613 | 1433 |
+| A | 10M | 1.80 | 0.378 | GPU timestamp-query around the step pass | 1.402 | 0.100 | – | 1373 | 722 | 1686 |
+| A | 20M | 2.30 | 0.770 | GPU timestamp-query around the step pass | 2.754 | 0.100 | – | 1614 | 969 | 2183 |
+| A-cpu | 100k | 6.70 | 0.400 | CPU (plain JS, main thread) | – | – | – | 997 | 582 | 1333 |
+| A-cpu | 1M | 23.70 | 3.500 | CPU (plain JS, main thread) | – | – | – | 994 | 579 | 1318 |
+| A-cpu | 2M | 37.20 | 7.000 | CPU (plain JS, main thread) | – | – | – | 1066 | 593 | 1345 |
+| A-cpu | 5M | 72.30 | 17.800 | CPU (plain JS, main thread) | – | – | – | 1164 | 638 | 1380 |
+| A-cpu | 10M | 134.80 | 36.100 | CPU (plain JS, main thread) | – | – | – | 1317 | 709 | 1456 |
+| A-cpu | 20M | 282.60 | 73.100 | CPU (plain JS, main thread) | – | – | – | 1494 | 919 | 1606 |
+| B-wasm | 1M | 2.48 | 1.180 | CPU: wasm step + pack, 22 threads (wall) | – | 1.680 | – | 1030 | 846 | 1814 |
+| B-wasm | 2M | 4.92 | 2.155 | CPU: wasm step + pack, 22 threads (wall) | – | 3.245 | – | 1024 | 912 | 1978 |
+| B-wasm | 5M | 16.50 | 7.580 | CPU: wasm step + pack, 22 threads (wall) | – | 12.540 | – | 1128 | 1141 | 2256 |
+| B-wasm | 10M | 32.97 | 16.865 | CPU: wasm step + pack, 24 threads (wall) | – | 27.405 | – | 1267 | 1278 | 2376 |
+| B-wasm | 20M | 65.59 | 34.092 | CPU: wasm step + pack, 24 threads (wall) | – | 53.070 | – | 1481 | 1533 | 2637 |
+| B-native | 1M | 0.65 | 0.037 | GPU timestamp queries around the compute pass | – | – | – | 266 | 179 | 192 |
+| B-native | 2M | 1.26 | 0.073 | GPU timestamp queries around the compute pass | – | – | – | 259 | 181 | 192 |
+| B-native | 5M | 3.09 | 0.184 | GPU timestamp queries around the compute pass | – | – | – | 294 | 181 | 225 |
+| B-native | 10M | 6.18 | 0.369 | GPU timestamp queries around the compute pass | – | – | – | 314 | 181 | 251 |
+| B-native | 20M | 12.32 | 0.771 | GPU timestamp queries around the compute pass | – | – | – | 373 | 329 | 340 |
+| C | 1M | 5.55 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.198 | – | 0.419 | 329 | 244 | 264 |
+| C | 2M | 7.80 | 0.080 | GPU step, timed on a separate pass (each part waited for on its own) | 0.304 | – | 0.418 | 338 | 260 | 280 |
+| C | 5M | 7.60 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.633 | – | 0.418 | 354 | 307 | 327 |
+| C | 10M | 8.54 | 0.383 | GPU step, timed on a separate pass (each part waited for on its own) | 1.156 | – | 0.418 | 389 | 383 | 402 |
+| C | 20M | 9.79 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.235 | – | 0.418 | 461 | 535 | 554 |
 
 GPU frame ms: A = GPU timestamps from the step's start to the tone pass's end; C = its timed step + splat (the separate pass). CPU encode: A = JS encode + submit; B-wasm = step + pack + upload + draw call on the CPU. C's work per frame (step + splat + readback, one wait) is in results.json (work_ms).
 
-B-wasm thread probe (one run each, frame ms; the better count was used): 1M: {'24': 2.386, '22': 2.074}; 2M: {'24': 3.808, '22': 3.817}; 5M: {'24': 14.272, '22': 14.239}; 10M: {'24': 29.955, '22': 29.856}; 20M: {'24': 59.239, '22': 59.423}
+B-wasm thread probe (one run each, frame ms; the better count was used): 1M: {'24': 2.312, '22': 2.129}; 2M: {'24': 4.026, '22': 3.87}; 5M: {'24': 13.856, '22': 13.829}; 10M: {'24': 28.702, '22': 28.943}; 20M: {'24': 55.568, '22': 58.708}
 
 ## Code and effort (counted by scripts/particles_bench.py, not by hand)
 
@@ -71,9 +71,9 @@ B-wasm thread probe (one run each, frame ms; the better count was used): 1M: {'2
 | B (both apps: wasm and native) | 1051 | 13 | Bash, CSS, GLSL, HTML, JavaScript, Python, Rust, TOML, WGSL | 10 | pixi (installs the rest); Rust (rustc + cargo), the wasm32 target and rust-src (build-std for wasm threads); wasm-bindgen-cli; binaryen (wasm-opt); Python (a static server); Chromium |
 | B-wasm | 374 | 10 | Bash, CSS, GLSL, HTML, JavaScript, Python, Rust, TOML | 8 | pixi (installs the rest); Rust (rustc + cargo), the wasm32 target and rust-src (build-std for wasm threads); wasm-bindgen-cli; binaryen (wasm-opt); Python (a static server); Chromium |
 | B-native | 771 | 6 | Rust, TOML, WGSL | 3 | pixi (installs the rest); Rust (rustc + cargo) |
-| C | 258 | 1 | Mojo | 3 | pixi (installs the rest); Mojo 1.1 + MAX 26.6 (through pixi) |
+| C | 257 | 1 | Mojo | 3 | pixi (installs the rest); Mojo 1.1 + MAX 26.6 (through pixi) |
 
-Lines exclude blank and comment-only lines (and docstrings). B-wasm and B-native share the sim crate and the workspace Cargo.toml (counted in both); B is the two apps together. C counts the app (examples/particles) only: mojoui (the framework) is a library, as WebGPU, wgpu, wasm-bindgen and rayon are. But this goal also added 1744 lines to the framework and its tests for C (mojoui/app.mojo +3, mojoui/canvas.mojo +12, mojoui/gpu.mojo +460, mojoui/hosts/gtk.mojo +206, mojoui/present.mojo +626, tests/test_canvas_blend.mojo +152, tests/test_canvas_present.mojo +153, tests/test_pointcloud_step.mojo +132; added lines that aren't blank or a comment, git diff from 858eff5): PointCloud's step, splat and readback, reusable by any app. Build steps, clean checkout to running:
+Lines exclude blank and comment-only lines (and docstrings). B-wasm and B-native share the sim crate and the workspace Cargo.toml (counted in both); B is the two apps together. C counts the app (examples/particles) only: mojoui (the framework) is a library, as WebGPU, wgpu, wasm-bindgen and rayon are. But this goal also added 1761 lines to the framework and its tests for C (mojoui/app.mojo +5, mojoui/canvas.mojo +12, mojoui/gpu.mojo +460, mojoui/hosts/gtk.mojo +206, mojoui/hosts/web.py +6, mojoui/look.mojo +1, mojoui/present.mojo +626, mojoui/shared.mojo +8, tests/test_canvas_blend.mojo +152, tests/test_canvas_present.mojo +153, tests/test_pointcloud_step.mojo +132; added lines that aren't blank or a comment, git diff from 858eff5): PointCloud's step, splat and readback, reusable by any app. Build steps, clean checkout to running:
 
 - A: `python showcase/js-webgpu/serve.py  (any static server)` → `open http://127.0.0.1:<port>/index.html in Chromium (WebGPU)`
 - A-cpu: `python showcase/js-webgpu/serve.py  (any static server)` → `open http://127.0.0.1:<port>/index.html?mode=cpu`

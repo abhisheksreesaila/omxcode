@@ -36,7 +36,14 @@ GOAL32_APPS = ("omxplorer", "maccheck")  # goal 32's screens; side.txt's console
 def shoot():
     """GTK and the web shot once per check run (every milestone reads the same pictures)."""
     if "problems" not in _shot:
-        _shot["problems"] = side.shoot_all(only=GOAL32_APPS)
+        missing = []  # (no other check builds maccheck for Linux and the web: a fresh checkout had none, D-762)
+        for app in GOAL32_APPS:
+            for host, exe in (("linux", ROOT / "build" / app / "linux" / app), ("web", ROOT / "build" / app / "web")):
+                if not exe.exists():
+                    b = run(["scripts/build.sh", app, host], timeout=1800)
+                    if b.returncode != 0:
+                        missing.append(f"{app} doesn't build for {host}: " + (b.stdout + b.stderr)[-300:])
+        _shot["problems"] = missing + side.shoot_all(only=GOAL32_APPS)
     return _shot["problems"]
 
 

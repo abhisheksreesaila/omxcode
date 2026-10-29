@@ -1,10 +1,10 @@
 # Goal 36b M7 · the particle field on the real desktop
 
-Every run passed the quiet gate: 1-minute load < 2.0 and no other process on the GPU (compute apps over 16 MiB); waited 1620 s in all.
+Every run passed the quiet gate: 1-minute load < 2.0 and no other process on the GPU (compute apps over 16 MiB); waited 1860 s in all.
 
 Setup: Hyprland 0.56.2 on Wayland (wayland-1), monitor HDMI-A-2 3440×1440 @ 59.973 Hz, scale 1.6, VRR False, DPMS on True; GTK 4.22.4; Chromium 152.0.7977.82. Vsync: off for every row: C GDK_DEBUG=no-vsync (GTK's frame clock uncapped); A, A-cpu, B-wasm Chromium --disable-gpu-vsync --disable-frame-rate-limit; B-native wgpu present mode Immediate (in a window the compositor still paces it) or offscreen. Pixels: 1280×720 for every row (C: MOJOUI_CANVAS_SCALE=1; the browsers' and wgpu's canvases are 1280×720 pixels and the compositor or browser scales them to the 1.6× monitor); C-hidpi: 2048×1152.
 
-Commit `844ab64`, sources sha256 `8bd35549e625`, 2026-10-28 10:25; 24 cores, NVIDIA GeForce RTX 3090, 610.57.04, NVIDIA GeForce RTX 3090, 610.57.04.
+Commit `c6fe557`, sources sha256 `ea4c9d7044aa`, 2026-10-29 12:59; 24 cores, NVIDIA GeForce RTX 3090, 610.57.04, NVIDIA GeForce RTX 3090, 610.57.04.
 Protocol: scripts/particles_bench.py (docstring): 60 warm-up + 600 measured frames, 3 runs, each run's frame ms is the mean frame interval (throughput); the table shows the median of the runs (± spread = max - min).
 
 ## Headline: frame ms (throughput, vsync off) and the largest N at 60 fps
@@ -13,28 +13,28 @@ Holds 60 fps = frame ms ≤ 16.7 and the 95th-percentile frame interval ≤ 20 m
 
 | Row | largest N at 60 fps | 1M | 2M | 5M | 10M | 20M |
 |---|---|---|---|---|---|---|
-| A · JS + WebGPU | 20M | 1.21 ±0.05 | 1.24 ±0.17 | 1.35 ±0.04 | 1.53 ±0.02 | 3.01 ±0.00 |
-| A-cpu · plain JS (CPU) | 100k | 13.88 ±0.55 ✗ | 25.06 ±0.18 ✗ | 57.27 ±0.38 ✗ | 110.65 ±0.45 ✗ | 217.70 ±1.37 ✗ |
-| B-wasm · JS + Rust/wasm | 2M | 1.86 ±0.01 | 3.51 ±0.13 | 16.67 ±3.78 ✗ | 28.12 ±0.29 ✗ | 53.45 ±2.93 ✗ |
-| B-native · Rust + wgpu (in a window) | 10M | 16.65 ±0.00 | 16.66 ±0.08 | 16.66 ±0.08 | 16.66 ±0.00 | 16.89 ±0.08 ✗ |
-| B-native · Rust + wgpu (offscreen) | 20M | 0.34 ±0.00 | 0.64 ±0.00 | 1.52 ±0.00 | 3.00 ±0.00 | 5.99 ±0.00 |
-| C · omxcode (Mojo) | 20M | 1.23 ±0.02 | 1.31 ±0.03 | 1.57 ±0.02 | 2.07 ±0.09 | 3.13 ±0.02 |
+| A · JS + WebGPU | 20M | 1.29 ±0.02 | 1.34 ±0.04 | 1.33 ±0.04 | 1.53 ±0.06 | 3.01 ±0.01 |
+| A-cpu · plain JS (CPU) | 100k | 13.99 ±0.12 ✗ | 25.23 ±0.55 ✗ | 57.93 ±0.33 ✗ | 111.69 ±0.46 ✗ | 218.28 ±0.62 ✗ |
+| B-wasm · JS + Rust/wasm | none | 16.67 ±0.00 ✗ | 16.67 ±0.00 ✗ | 16.67 ±0.00 ✗ | 27.96 ±0.67 ✗ | 54.88 ±2.62 ✗ |
+| B-native · Rust + wgpu (in a window) | 10M | 16.65 ±0.00 | 16.66 ±0.00 | 16.66 ±0.00 | 16.66 ±0.00 | 16.67 ±0.00 ✗ |
+| B-native · Rust + wgpu (offscreen) | 20M | 0.34 ±0.00 | 0.64 ±0.00 | 1.53 ±0.00 | 3.02 ±0.00 | 6.01 ±0.00 |
+| C · omxcode (Mojo) | 20M | 1.28 ±0.05 | 1.35 ±0.02 | 1.63 ±0.01 | 2.10 ±0.01 | 3.13 ±0.01 |
 
 ## Each 36b feature's effect on C (frame ms, the same protocol)
 
 | C with (GTK renderer used) | 1M | 5M | 20M |
 |---|---|---|---|
-| C · goal 36's path (readback, 3 atomics) (GskVulkanRenderer) | 5.54 ±0.41 | 6.18 ±0.16 | 8.48 ±0.29 |
-| C · goal 36's path on GTK's GL renderer (GskGLRenderer) | 4.45 ±0.07 | 4.40 ±0.69 | 6.74 ±0.72 |
-| C · + M6 zero-copy (GskGLRenderer) | 1.24 ±0.01 | 1.76 ±0.05 | 3.81 ±0.02 |
-| C · + M6c packed splat (GskGLRenderer) | 1.21 ±0.04 | 1.56 ±0.01 | 3.07 ±0.01 |
-| C · + M6b (all of 36b: blending measured at run time) (GskGLRenderer) | 1.23 ±0.02 | 1.57 ±0.02 | 3.13 ±0.02 |
-| C · M6b blending always (GskGLRenderer) | 1.21 ±0.02 | 6.13 ±0.04 | 11.22 ±0.00 |
-| C · at the screen's 1.6× (2048×1152) (GskGLRenderer) | 1.36 ±0.04 | 1.77 ±0.02 | 3.66 ±0.01 |
+| C · goal 36's path (readback, 3 atomics) (GskVulkanRenderer) | 5.54 ±0.04 | 6.14 ±0.07 | 8.73 ±0.38 |
+| C · goal 36's path on GTK's GL renderer (GskGLRenderer) | 4.50 ±0.79 | 5.01 ±0.59 | 6.68 ±0.76 |
+| C · + M6 zero-copy (GskGLRenderer) | 1.30 ±0.02 | 1.79 ±0.02 | 3.82 ±0.01 |
+| C · + M6c packed splat (GskGLRenderer) | 1.25 ±0.02 | 1.60 ±0.02 | 3.07 ±0.00 |
+| C · + M6b (all of 36b: blending measured at run time) (GskGLRenderer) | 1.28 ±0.05 | 1.63 ±0.01 | 3.13 ±0.01 |
+| C · M6b blending always (GskGLRenderer) | 1.25 ±0.01 | 6.19 ±0.03 | 11.25 ±0.01 |
+| C · at the screen's 1.6× (2048×1152) (GskGLRenderer) | 1.39 ±0.01 | 1.81 ±0.03 | 3.70 ±0.00 |
 
-Effect of each (frame ms saved, before → after): GTK's GL renderer instead of its Vulkan one (goal 36's path both): 1M 1.09, 5M 1.78, 20M 1.74; M6 the picture kept on the GPU (no readback, no CPU hand-over; GL renderer both): 1M 3.21, 5M 2.64, 20M 2.92; M6c packed splat: 1M 0.03, 5M 0.20, 20M 0.75; M6b blending, measured: 1M -0.02, 5M -0.01, 20M -0.06.
+Effect of each (frame ms saved, before → after): GTK's GL renderer instead of its Vulkan one (goal 36's path both): 1M 1.04, 5M 1.13, 20M 2.05; M6 the picture kept on the GPU (no readback, no CPU hand-over; GL renderer both): 1M 3.20, 5M 3.23, 20M 2.86; M6c packed splat: 1M 0.05, 5M 0.19, 20M 0.75; M6b blending, measured: 1M -0.02, 5M -0.03, 20M -0.07.
 
-A-cpu at 100k: 3.03 ms ±0.15 (holds 60 fps; p95 4.90 ms).
+A-cpu at 100k: 2.96 ms ±0.09 (holds 60 fps; p95 4.70 ms).
 
 How each row's frame ms is measured:
 
@@ -55,59 +55,59 @@ How each row's frame ms is measured:
 
 | Row | N | p95 interval | step ms | step is | GPU frame ms | CPU encode ms | readback ms | cold start ms | peak PSS MB | peak RSS MB |
 |---|---|---|---|---|---|---|---|---|---|---|
-| A | 1M | 1.20 | 0.041 | GPU timestamp-query around the step pass | 0.179 | 0.100 | – | 974 | 588 | 1253 |
-| A | 2M | 1.20 | 0.078 | GPU timestamp-query around the step pass | 0.324 | 0.100 | – | 882 | 609 | 1289 |
-| A | 5M | 1.30 | 0.191 | GPU timestamp-query around the step pass | 0.727 | 0.100 | – | 926 | 657 | 1409 |
-| A | 10M | 1.80 | 0.378 | GPU timestamp-query around the step pass | 1.419 | 0.100 | – | 1047 | 777 | 1579 |
-| A | 20M | 2.30 | 0.774 | GPU timestamp-query around the step pass | 2.852 | 0.100 | – | 1278 | 1130 | 1978 |
-| A-cpu | 100k | 4.90 | 0.400 | CPU (plain JS, main thread) | – | – | – | 666 | 600 | 1248 |
-| A-cpu | 1M | 23.00 | 3.500 | CPU (plain JS, main thread) | – | – | – | 792 | 612 | 1256 |
-| A-cpu | 2M | 35.00 | 7.000 | CPU (plain JS, main thread) | – | – | – | 818 | 631 | 1277 |
-| A-cpu | 5M | 71.80 | 17.700 | CPU (plain JS, main thread) | – | – | – | 878 | 679 | 1333 |
-| A-cpu | 10M | 132.30 | 35.500 | CPU (plain JS, main thread) | – | – | – | 953 | 754 | 1406 |
-| A-cpu | 20M | 251.30 | 71.200 | CPU (plain JS, main thread) | – | – | – | 1115 | 898 | 1545 |
-| B-wasm | 1M | 2.15 | 1.130 | CPU: wasm step + pack, 22 threads (wall) | – | 1.485 | – | 1129 | 870 | 1685 |
-| B-wasm | 2M | 4.20 | 2.160 | CPU: wasm step + pack, 22 threads (wall) | – | 3.085 | – | 1168 | 892 | 1712 |
-| B-wasm | 5M | 16.73 | 7.135 | CPU: wasm step + pack, 22 threads (wall) | – | 12.140 | – | 1375 | 978 | 1782 |
-| B-wasm | 10M | 30.68 | 16.595 | CPU: wasm step + pack, 22 threads (wall) | – | 27.095 | – | 1484 | 1101 | 1909 |
-| B-wasm | 20M | 60.09 | 34.288 | CPU: wasm step + pack, 24 threads (wall) | – | 52.058 | – | 1769 | 1408 | 2210 |
-| B-native | 1M | 16.77 | 1.905 | GPU timestamp queries around the compute pass | – | – | – | 300 | 164 | 167 |
-| B-native | 2M | 16.91 | 1.585 | GPU timestamp queries around the compute pass | – | – | – | 302 | 164 | 167 |
-| B-native | 5M | 16.74 | 0.363 | GPU timestamp queries around the compute pass | – | – | – | 313 | 164 | 200 |
-| B-native | 10M | 16.90 | 0.718 | GPU timestamp queries around the compute pass | – | – | – | 328 | 164 | 238 |
-| B-native | 20M | 16.74 | 0.776 | GPU timestamp queries around the compute pass | – | – | – | 374 | 311 | 314 |
-| B-native-off | 1M | 0.65 | 0.037 | GPU timestamp queries around the compute pass | – | – | – | 211 | 146 | 150 |
-| B-native-off | 2M | 1.26 | 0.073 | GPU timestamp queries around the compute pass | – | – | – | 214 | 146 | 149 |
-| B-native-off | 5M | 3.09 | 0.184 | GPU timestamp queries around the compute pass | – | – | – | 250 | 146 | 184 |
-| B-native-off | 10M | 6.16 | 0.369 | GPU timestamp queries around the compute pass | – | – | – | 279 | 146 | 222 |
-| B-native-off | 20M | 12.33 | 0.771 | GPU timestamp queries around the compute pass | – | – | – | 326 | 146 | 298 |
-| C | 1M | 1.40 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.193 | – | – | 461 | 294 | 314 |
-| C | 2M | 1.59 | 0.080 | GPU step, timed on a separate pass (each part waited for on its own) | 0.301 | – | – | 473 | 310 | 329 |
-| C | 5M | 2.13 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.632 | – | – | 505 | 358 | 376 |
-| C | 10M | 3.12 | 0.383 | GPU step, timed on a separate pass (each part waited for on its own) | 1.169 | – | – | 529 | 431 | 449 |
-| C | 20M | 5.19 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.297 | – | – | 601 | 584 | 604 |
-| C-36 | 1M | 6.43 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.213 | – | 0.419 | 616 | 342 | 356 |
-| C-36 | 5M | 7.17 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.749 | – | 0.418 | 658 | 406 | 423 |
-| C-36 | 20M | 10.69 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.818 | – | 0.416 | 751 | 631 | 645 |
-| C-36gl | 1M | 4.91 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.222 | – | 0.419 | 456 | 315 | 334 |
-| C-36gl | 5M | 5.11 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.764 | – | 0.417 | 493 | 374 | 395 |
-| C-36gl | 20M | 8.76 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.830 | – | 0.417 | 636 | 606 | 625 |
-| C+M6 | 1M | 1.35 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.217 | – | – | 447 | 290 | 309 |
-| C+M6 | 5M | 2.16 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.787 | – | – | 500 | 352 | 371 |
-| C+M6 | 20M | 5.37 | 0.763 | GPU step, timed on a separate pass (each part waited for on its own) | 2.900 | – | – | 609 | 582 | 600 |
-| C+M6c | 1M | 1.36 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.193 | – | – | 468 | 291 | 310 |
-| C+M6c | 5M | 2.02 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.636 | – | – | 506 | 354 | 372 |
-| C+M6c | 20M | 4.79 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.299 | – | – | 600 | 582 | 600 |
-| C-blend | 1M | 1.66 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.193 | – | – | 475 | 297 | 316 |
-| C-blend | 5M | 7.87 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.635 | – | – | 503 | 358 | 377 |
-| C-blend | 20M | 17.25 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.309 | – | – | 606 | 585 | 604 |
-| C-hidpi | 1M | 1.61 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.194 | – | – | 476 | 300 | 319 |
-| C-hidpi | 5M | 3.10 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.640 | – | – | 507 | 362 | 381 |
-| C-hidpi | 20M | 8.33 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.309 | – | – | 616 | 588 | 607 |
+| A | 1M | 1.20 | 0.041 | GPU timestamp-query around the step pass | 0.178 | 0.100 | – | 924 | 577 | 1260 |
+| A | 2M | 1.30 | 0.078 | GPU timestamp-query around the step pass | 0.326 | 0.100 | – | 894 | 586 | 1294 |
+| A | 5M | 1.30 | 0.191 | GPU timestamp-query around the step pass | 0.729 | 0.100 | – | 979 | 616 | 1376 |
+| A | 10M | 1.90 | 0.378 | GPU timestamp-query around the step pass | 1.416 | 0.100 | – | 1091 | 738 | 1563 |
+| A | 20M | 2.30 | 0.774 | GPU timestamp-query around the step pass | 2.857 | 0.100 | – | 1372 | 1035 | 2058 |
+| A-cpu | 100k | 4.70 | 0.400 | CPU (plain JS, main thread) | – | – | – | 675 | 529 | 1248 |
+| A-cpu | 1M | 22.50 | 3.500 | CPU (plain JS, main thread) | – | – | – | 795 | 539 | 1258 |
+| A-cpu | 2M | 35.50 | 7.100 | CPU (plain JS, main thread) | – | – | – | 813 | 557 | 1278 |
+| A-cpu | 5M | 72.50 | 17.800 | CPU (plain JS, main thread) | – | – | – | 885 | 600 | 1316 |
+| A-cpu | 10M | 133.70 | 35.700 | CPU (plain JS, main thread) | – | – | – | 963 | 676 | 1403 |
+| A-cpu | 20M | 251.10 | 71.400 | CPU (plain JS, main thread) | – | – | – | 1102 | 830 | 1547 |
+| B-wasm | 1M | 16.82 | 1.120 | CPU: wasm step + pack, 22 threads (wall) | – | 1.490 | – | 1267 | 815 | 1688 |
+| B-wasm | 2M | 16.84 | 1.940 | CPU: wasm step + pack, 24 threads (wall) | – | 2.825 | – | 1258 | 854 | 1732 |
+| B-wasm | 5M | 16.78 | 7.178 | CPU: wasm step + pack, 24 threads (wall) | – | 12.300 | – | 1422 | 910 | 1790 |
+| B-wasm | 10M | 30.99 | 16.840 | CPU: wasm step + pack, 24 threads (wall) | – | 26.895 | – | 1462 | 1035 | 1916 |
+| B-wasm | 20M | 60.20 | 33.778 | CPU: wasm step + pack, 22 threads (wall) | – | 52.420 | – | 1681 | 1313 | 2191 |
+| B-native | 1M | 16.99 | 1.214 | GPU timestamp queries around the compute pass | – | – | – | 317 | 161 | 167 |
+| B-native | 2M | 16.95 | 1.573 | GPU timestamp queries around the compute pass | – | – | – | 324 | 161 | 168 |
+| B-native | 5M | 16.98 | 0.362 | GPU timestamp queries around the compute pass | – | – | – | 333 | 161 | 197 |
+| B-native | 10M | 17.02 | 0.718 | GPU timestamp queries around the compute pass | – | – | – | 334 | 161 | 238 |
+| B-native | 20M | 16.88 | 0.776 | GPU timestamp queries around the compute pass | – | – | – | 383 | 309 | 315 |
+| B-native-off | 1M | 0.66 | 0.037 | GPU timestamp queries around the compute pass | – | – | – | 208 | 143 | 149 |
+| B-native-off | 2M | 1.27 | 0.073 | GPU timestamp queries around the compute pass | – | – | – | 205 | 143 | 149 |
+| B-native-off | 5M | 3.10 | 0.184 | GPU timestamp queries around the compute pass | – | – | – | 234 | 143 | 184 |
+| B-native-off | 10M | 6.21 | 0.369 | GPU timestamp queries around the compute pass | – | – | – | 267 | 143 | 222 |
+| B-native-off | 20M | 12.41 | 0.771 | GPU timestamp queries around the compute pass | – | – | – | 324 | 143 | 298 |
+| C | 1M | 1.46 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.190 | – | – | 458 | 287 | 311 |
+| C | 2M | 1.60 | 0.080 | GPU step, timed on a separate pass (each part waited for on its own) | 0.302 | – | – | 486 | 304 | 328 |
+| C | 5M | 2.22 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.635 | – | – | 514 | 351 | 376 |
+| C | 10M | 3.17 | 0.383 | GPU step, timed on a separate pass (each part waited for on its own) | 1.181 | – | – | 544 | 425 | 450 |
+| C | 20M | 4.96 | 0.763 | GPU step, timed on a separate pass (each part waited for on its own) | 2.272 | – | – | 617 | 577 | 603 |
+| C-36 | 1M | 6.41 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.213 | – | 0.418 | 600 | 345 | 364 |
+| C-36 | 5M | 7.13 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.753 | – | 0.419 | 660 | 409 | 429 |
+| C-36 | 20M | 11.03 | 0.763 | GPU step, timed on a separate pass (each part waited for on its own) | 2.838 | – | 0.420 | 761 | 626 | 646 |
+| C-36gl | 1M | 4.89 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.221 | – | 0.420 | 478 | 307 | 332 |
+| C-36gl | 5M | 5.63 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.765 | – | 0.419 | 503 | 370 | 396 |
+| C-36gl | 20M | 8.63 | 0.763 | GPU step, timed on a separate pass (each part waited for on its own) | 2.838 | – | 0.419 | 646 | 603 | 628 |
+| C+M6 | 1M | 1.44 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.220 | – | – | 466 | 285 | 310 |
+| C+M6 | 5M | 2.14 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.777 | – | – | 512 | 348 | 373 |
+| C+M6 | 20M | 5.47 | 0.763 | GPU step, timed on a separate pass (each part waited for on its own) | 2.858 | – | – | 618 | 576 | 600 |
+| C+M6c | 1M | 1.40 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.192 | – | – | 480 | 287 | 311 |
+| C+M6c | 5M | 2.11 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.634 | – | – | 505 | 349 | 373 |
+| C+M6c | 20M | 4.54 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.280 | – | – | 615 | 577 | 601 |
+| C-blend | 1M | 1.29 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.192 | – | – | 487 | 292 | 316 |
+| C-blend | 5M | 7.88 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.637 | – | – | 508 | 353 | 378 |
+| C-blend | 20M | 17.19 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.282 | – | – | 640 | 582 | 605 |
+| C-hidpi | 1M | 1.65 | 0.042 | GPU step, timed on a separate pass (each part waited for on its own) | 0.192 | – | – | 485 | 293 | 317 |
+| C-hidpi | 5M | 3.12 | 0.194 | GPU step, timed on a separate pass (each part waited for on its own) | 0.639 | – | – | 516 | 357 | 381 |
+| C-hidpi | 20M | 8.56 | 0.762 | GPU step, timed on a separate pass (each part waited for on its own) | 2.294 | – | – | 625 | 585 | 609 |
 
 GPU frame ms: A = GPU timestamps from the step's start to the tone pass's end; C = its timed step + splat (the separate pass). CPU encode: A = JS encode + submit; B-wasm = step + pack + upload + draw call on the CPU. C's work per frame (step + splat + readback, one wait) is in results.json (work_ms).
 
-B-wasm thread probe (one run each, frame ms; the better count was used): 1M: {'24': 1.881, '22': 1.845}; 2M: {'24': 3.588, '22': 3.358}; 5M: {'24': 16.7, '22': 12.684}; 10M: {'24': 28.519, '22': 28.154}; 20M: {'24': 53.481, '22': 53.487}
+B-wasm thread probe (one run each, frame ms; the better count was used): 1M: {'24': 16.675, '22': 16.674}; 2M: {'24': 16.674, '22': 16.675}; 5M: {'24': 16.674, '22': 16.675}; 10M: {'24': 27.866, '22': 28.066}; 20M: {'24': 55.62, '22': 53.469}
 
 ## Code and effort (counted by scripts/particles_bench.py, not by hand)
 
@@ -118,9 +118,9 @@ B-wasm thread probe (one run each, frame ms; the better count was used): 1M: {'2
 | B (both apps: wasm and native) | 1051 | 13 | Bash, CSS, GLSL, HTML, JavaScript, Python, Rust, TOML, WGSL | 10 | pixi (installs the rest); Rust (rustc + cargo), the wasm32 target and rust-src (build-std for wasm threads); wasm-bindgen-cli; binaryen (wasm-opt); Python (a static server); Chromium |
 | B-wasm | 374 | 10 | Bash, CSS, GLSL, HTML, JavaScript, Python, Rust, TOML | 8 | pixi (installs the rest); Rust (rustc + cargo), the wasm32 target and rust-src (build-std for wasm threads); wasm-bindgen-cli; binaryen (wasm-opt); Python (a static server); Chromium |
 | B-native | 771 | 6 | Rust, TOML, WGSL | 3 | pixi (installs the rest); Rust (rustc + cargo) |
-| C | 258 | 1 | Mojo | 3 | pixi (installs the rest); Mojo 1.1 + MAX 26.6 (through pixi) |
+| C | 257 | 1 | Mojo | 3 | pixi (installs the rest); Mojo 1.1 + MAX 26.6 (through pixi) |
 
-Lines exclude blank and comment-only lines (and docstrings). B-wasm and B-native share the sim crate and the workspace Cargo.toml (counted in both); B is the two apps together. C counts the app (examples/particles) only: mojoui (the framework) is a library, as WebGPU, wgpu, wasm-bindgen and rayon are. But this goal also added 1744 lines to the framework and its tests for C (mojoui/app.mojo +3, mojoui/canvas.mojo +12, mojoui/gpu.mojo +460, mojoui/hosts/gtk.mojo +206, mojoui/present.mojo +626, tests/test_canvas_blend.mojo +152, tests/test_canvas_present.mojo +153, tests/test_pointcloud_step.mojo +132; added lines that aren't blank or a comment, git diff from 858eff5): PointCloud's step, splat and readback, reusable by any app. Build steps, clean checkout to running:
+Lines exclude blank and comment-only lines (and docstrings). B-wasm and B-native share the sim crate and the workspace Cargo.toml (counted in both); B is the two apps together. C counts the app (examples/particles) only: mojoui (the framework) is a library, as WebGPU, wgpu, wasm-bindgen and rayon are. But this goal also added 1761 lines to the framework and its tests for C (mojoui/app.mojo +5, mojoui/canvas.mojo +12, mojoui/gpu.mojo +460, mojoui/hosts/gtk.mojo +206, mojoui/hosts/web.py +6, mojoui/look.mojo +1, mojoui/present.mojo +626, mojoui/shared.mojo +8, tests/test_canvas_blend.mojo +152, tests/test_canvas_present.mojo +153, tests/test_pointcloud_step.mojo +132; added lines that aren't blank or a comment, git diff from 858eff5): PointCloud's step, splat and readback, reusable by any app. Build steps, clean checkout to running:
 
 - A: `python showcase/js-webgpu/serve.py  (any static server)` → `open http://127.0.0.1:<port>/index.html in Chromium (WebGPU)`
 - A-cpu: `python showcase/js-webgpu/serve.py  (any static server)` → `open http://127.0.0.1:<port>/index.html?mode=cpu`
