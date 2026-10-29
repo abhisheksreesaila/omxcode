@@ -49,7 +49,12 @@ def consts(texts):
 def on_apple(expr):
     """A per-target choice whose condition names Apple, as an Apple GPU build reads it ("(32 if APPLE_GPU else 48)" ->
     "32"); any other condition stays, so the expression can't be worked out."""
-    return APPLE_IF.sub(lambda m: m.group(1) if "apple" in m.group(2).lower() else m.group(0), expr)
+    def side(m):
+        cond = m.group(2).lower()
+        if "apple" not in cond or re.search(r"\bnot\b|!", cond):  # (a negated condition isn't read: unsized)
+            return m.group(0)
+        return m.group(1)
+    return APPLE_IF.sub(side, expr)
 
 
 def evaluate(expr, known, depth=0):
@@ -86,8 +91,11 @@ def scan(files):
             line = text[:m.start()].count("\n") + 1
             rows.append((f, line, name, None if n is None or size is None else n * size, m.group(0)[:90]))
         budgets = [int(b) * 1024 for b in BUDGET.findall(text)]
-        for name in BOUND.findall(text):  # (a named bound: None, and so unsized, unless it works out for Apple)
-            v = evaluate(known[name], known) if name in known else None
+        for name in BOUND.findall(text):  # (a named bound: None, and so unsized, unless it works out for Apple and
+            #   the file enforces it: a launch compared against it, `smem > SMEM_LIMIT`, `ng <= SHARED_MAX_GROUPS`, …)
+            guards = [name] + [k for k, e in known.items() if re.search(rf"\b{name}\b", e)]
+            enforced = any(re.search(rf"(?:[<>]=?)\s*{g}\b", text) for g in guards)
+            v = evaluate(known[name], known) if name in known and enforced else None
             budgets += [v] if v is not None else []
         for m in EXTERNAL.finditer(text):  # (sized at launch: the most the file lets it have)
             fn = [d for d in DEF.finditer(text, 0, m.start())]
