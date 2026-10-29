@@ -73,14 +73,14 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Editor that echoes the grid's typing | `TextField(…).echo()` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Board: drag, resize, snap | `Board(on_move, on_resize)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Board: scrolls, reveals a child | `Board(reveal=, reveal_count=)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Board: phone-width list | `(automatic under 720 pt)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Board: phone-width list | `(automatic under 720 pt)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Overlay islands | `Overlay(base, *islands) + .pin(h, v)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Inspector pages | `NavRow(…) · InspectorPage(…) (made of buttons and stacks)` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ |
 | Light and dark from the system | `def appearance(mut self, dark)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Shared data per process | `App.init_shared()` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 |
-| Toolbar button (icon over label) | `Button(style=TOOL / TOOL_ON)` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
+| Toolbar button (icon over label) | `Button(style=TOOL / TOOL_ON)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | File picker | `FilePicker(title, on_pick)` | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Keyboard shortcuts (menu items) | `Item(shortcut="Ctrl+S")` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Canvas: right-click | `on_gesture: SECONDARY (event.x, y)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
@@ -103,7 +103,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, omxplorer |
 | `FindingCard` | `mojoui/finding.mojo` | Card tones, Text tones, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
-| `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
+| `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
 | `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
 | `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | maccheck, omxplorer |
 | `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
@@ -154,7 +154,7 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
 | Linux (GTK) | 113 | 3 | 0 |
-| Web | 113 | 0 | 3 |
+| Web | 116 | 0 | 0 |
 | Android | 19 | 19 | 78 |
 | Mac (AppKit) | 0 | 105 | 11 |
 | iPhone (UIKit) | 0 | 83 | 33 |
