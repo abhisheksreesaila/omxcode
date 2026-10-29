@@ -107,11 +107,15 @@ MENU_JS = r"""
   }, true);
   // A canvas drag outlives its canvas: the press's reply can rebuild the page, and a drag's moves and its release then
   // land on the new canvas, which never saw the press. They go to whichever canvas now shows the dragged node (st.drag),
-  // so a drag-select isn't lost on a slow reply (omxplorer's drag flaked: a 2×2 selection one run, one cell the next).
+  // so a drag-select isn't lost on a slow reply (omxplorer's drag flaked: one cell one run, 2×2 the next, 3×3 as on GTK
+  // only when no move was lost; scripts/web_drag_reliable.py repeats it).
   for (const kind of ['pointermove', 'pointerup', 'pointercancel']) document.addEventListener(kind, e => {
     const d = window.mojouiDrag;
     if (!d || e.mojouiHandled || e.pointerId !== d.id) return;
     const div = document.querySelector(`[data-kind=canvas][data-node="${d.n}"]`);
+    // (the new canvas may not be wired up yet, a screen still settling: wire it now, or the drag's moves were dropped
+    // and a drag-select lost its last moves: 3 runs in 12 on 2026-10-28, and goal 32's web golden had kept one such run)
+    if (div && !div.mojoui && window.mojouiAttach) window.mojouiAttach(div);
     if (div && div.mojoui && div.mojoui.drag) div.mojoui.drag(e, kind === 'pointermove' ? 'move' : 'up');
     else if (kind !== 'pointermove') window.mojouiDrag = null;
   });
@@ -467,6 +471,7 @@ CANVAS_JS = r"""
     const cv = div.querySelector('canvas');
     e.preventDefault(); e.stopPropagation(); cv.focus({ preventScroll: true }); cv.dispatchEvent(new KeyboardEvent('keydown', e));
   }, true);
+  window.mojouiAttach = attach;  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
   function attach(div) {
     if (div.mojoui) return;
     const cv = div.querySelector('canvas'), g = cv.getContext('2d');
