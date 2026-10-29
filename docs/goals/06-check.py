@@ -240,26 +240,61 @@ def m6():
         f"web canvas {c['wpx']}x{c['hpx']} px, real drag + wheel reach the app, state identical to GTK; playing {f['fps']} fps")
 
 
+def mac_canvas_ticks():
+    """None when the Mac's canvas frame clock is proven by behaviour, else why not (goal 33 reviewer round 2, D-579's
+    night): in the newest Mac run built from these sources (scripts/mac-ci), maccheck's "Run tests" walks its pages on
+    a canvas's on_frame ticks alone, so its report captures a run of screen changes with no input between them; the
+    progress canvas's drawn version rises through them and the screen changes page several times."""
+    import hashlib
+    import side
+    fresh, why = side.mac_fresh()
+    if not fresh:
+        return f"the Mac's canvas clock: {why}"
+    reports = sorted((side.newest_mac_run() / "report-macos-26" / "omxcode-report-maccheck").glob("*/"))
+    best = (0, 0, "no run of changes with a rising version" if reports else "no maccheck report in the Mac run")
+    for rep in reports:
+        run, versions, screens = [], [], set()
+        for f in sorted(rep.glob("*.txt")) + [None]:
+            if f is not None and f.stem.endswith("-change"):
+                text = f.read_text(errors="replace")
+                v = re.search(r"#progress .* drawn v(\d+)", text)
+                if v:
+                    versions.append(int(v.group(1)))
+                run.append(f)
+                screens.add(hashlib.sha1("\n".join(l for l in text.splitlines() if "#progress" not in l).encode()).hexdigest())
+                continue
+            rising = len(versions) >= 2 and all(a < b for a, b in zip(versions, versions[1:]))
+            if rising and (len(run), len(screens)) > best[:2]:
+                best = (len(run), len(screens), f"{rep.name}: {len(run)} changes in a row, v{versions[0]}→v{versions[-1]}")
+            run, versions, screens = [], [], set()
+    if best[0] < 10 or best[1] < 4:
+        return f"the Mac's canvas clock: no run of 10+ input-free screen changes over 4+ screens with a rising canvas version (best: {best[2]}, {best[1]} screens)"
+    return None
+
+
 def m7():
     problems = []
     for plat in ("mac", "ios"):
         ok, msg = apple_ok("lens", plat)
         if not ok:
             problems.append(msg)
-    for host, words in {"mojoui/hosts/appkit.mojo": ["CANVAS", "NSImageView", "displayLinkWithTarget", "NSPanGestureRecognizer",
+    # the Mac's frame clock by behaviour (its canvases tick from a 60 Hz NSTimer since 6ce216a, D-560: the words were
+    # either clock's; now the clock must be seen ticking on GitHub's Mac); the iPhone, which no runner has, by its words
+    why = mac_canvas_ticks()
+    if why:
+        problems.append(why)
+    for host, words in {"mojoui/hosts/appkit.mojo": ["CANVAS", "NSImageView", "NSPanGestureRecognizer",
                                                       "NSMagnificationGestureRecognizer", "draw_canvas"],
                         "mojoui/hosts/uikit.mojo": ["CANVAS", "UIImageView", "CADisplayLink", "UIPanGestureRecognizer",
                                                      "UIPinchGestureRecognizer", "draw_canvas"]}.items():
         text = (ROOT / host).read_text()
-        # (the Mac's canvases tick from a 60 Hz NSTimer since 6ce216a: the view's display link never fired on macOS 26;
-        # either clock counts as the frame clock, D-560)
-        missing = [w for w in words if w not in text and not (w == "displayLinkWithTarget" and "timerWithTimeInterval:target:selector:userInfo:repeats:" in text)]
+        missing = [w for w in words if w not in text]
         if missing:
             problems.append(f"{host} lacks {missing}")
     bad = g5.same_source("lens", ["linux", "web", "mac", "ios"])
     if bad:
         problems.append(f"not built from the same app.mojo: {bad}")
-    return not problems, "; ".join(problems) or "lens builds, links and signs for Mac + iPhone (CPU path, Apple system functions only); Canvas mapped to image view + display link + pan/pinch"
+    return not problems, "; ".join(problems) or "lens builds, links and signs for Mac + iPhone (CPU path, Apple system functions only); Canvas mapped to image view + pan/pinch, the Mac's frame clock seen ticking on GitHub's Mac (maccheck), the iPhone's display link"
 
 
 def m8():
