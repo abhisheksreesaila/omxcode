@@ -1,0 +1,328 @@
+== Linux (omxplorer): GTK4 + libadwaita
+Imported from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+./mojoui/hosts/gtk.mojo:3986:62: warning: 'Int32' value is unused; assign to '_' to discard the result
+                external_call["gtk_gesture_set_state", c_int](drag, c_int(2))
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+                _ = 
+Imported from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+./mojoui/hosts/gtk.mojo:3991:62: warning: 'Int32' value is unused; assign to '_' to discard the result
+                external_call["gtk_gesture_set_state", c_int](drag, c_int(2))  # GTK_EVENT_SEQUENCE_DENIED
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+                _ = 
+Imported from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+./mojoui/hosts/gtk.mojo:3994:50: warning: 'Int32' value is unused; assign to '_' to discard the result
+    external_call["gtk_gesture_set_state", c_int](drag, c_int(2))  # nothing under it
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+    _ = 
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+./mojoui/hosts/gtk.mojo:150:27: warning: self recursive call will cause an infinite loop
+        mark_button_labels(c)
+                          ^
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/gpu.mojo:45:20: warning: 'except' logic is unreachable, try doesn't raise an exception
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/parquet.mojo:595:21: warning: 'except' logic is unreachable, try doesn't raise an exception
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:2:
+examples/omxplorer/app.mojo:2220:37: warning: assignment to 'texts' was never used; assign to '_' instead?
+            var texts = text_columns(f)
+                                    ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:2:
+examples/omxplorer/app.mojo:2394:36: warning: assignment to 'cv' was never used; assign to '_' instead?
+                var cv = chart_view(t.chart, self.frame)
+                                   ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:2:
+Included from examples/omxplorer/app.mojo:86:
+./mojoui/chartask.mojo:328:24: warning: assignment to 'top_said' was never used; assign to '_' instead?
+            top_said = True
+                       ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:2:
+Included from examples/omxplorer/app.mojo:86:
+./mojoui/chartask.mojo:256:20: warning: assignment to 'top_said' was never used; assign to '_' instead?
+    var top_said = False
+                   ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:2:
+Included from examples/omxplorer/app.mojo:67:
+Included from ./mojoui/sheet.mojo:23:
+./mojoui/datagrid.mojo:736:21: warning: ref 'ch' was never used, remove it?
+                for ch in self.typed.codepoint_slices():
+                    ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+./mojoui/hosts/gtk.mojo:1260:53: warning: assignment to 'role' was never used; assign to '_' instead?
+            var role = self.look.surface(node.name) if node.name != "" else -1
+                                                    ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+./mojoui/hosts/gtk.mojo:3156:24: warning: assignment to 'node' was never used; assign to '_' instead?
+            var node = 0
+                       ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+./mojoui/hosts/gtk.mojo:4137:17: warning: assignment to 'index' was never used; assign to '_' instead?
+    var index = 0
+                ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+./mojoui/hosts/gtk.mojo:5317:16: warning: assignment to 'node' was never used; assign to '_' instead?
+    var node = 0
+               ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:2:
+Included from examples/omxplorer/app.mojo:71:
+./mojoui/omxfile.mojo:172:34: warning: assignment to 'sheet' was never used; assign to '_' instead?
+    var sheet = placeholder_sheet()
+                                 ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:3:
+Included from ./mojoui/hosts/gtk.mojo:43:
+./mojoui/paragraph.mojo:137:25: warning: assignment to 'rep' was never used; assign to '_' instead?
+        var rep = String("")
+                        ^
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/codec.mojo:206:23: warning: assignment to 'len' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/codec.mojo:417:21: warning: assignment to 'count' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/codec.mojo:857:23: warning: assignment to 'off' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/codec.mojo:1009:25: warning: assignment to 'fcs_bytes' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/codec.mojo:1359:17: warning: assignment to 'b' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/codec.mojo:1352:17: warning: assignment to 'a' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/exec.mojo:274:29: warning: assignment to 'seen' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/exec.mojo:276:30: warning: assignment to 'index' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/frame.mojo:1653:28: warning: assignment to 'v' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/gpu.mojo:294:32: warning: assignment to 'e' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/job.mojo:245:22: warning: assignment to 'final' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/kernels/pipeline_cpu.mojo:1535:26: warning: assignment to 'ok' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/parquet.mojo:2535:17: warning: ref 'col' was never used, remove it?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/parquet.mojo:2510:25: warning: ref 'col' was never used, remove it?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/query.mojo:2412:34: warning: assignment to 'plan' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/query.mojo:1993:39: warning: assignment to 'made' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/query.mojo:2792:44: warning: assignment to 'gm_addr' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/sortspill.mojo:196:13: warning: ref 'k' was never used, remove it?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/sortspill.mojo:255:26: warning: assignment to 'kc' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/thrift.mojo:256:21: warning: assignment to 'extra' was never used; assign to '_' instead?
+/home/abhisheksreesaila/.cache/omxcore-834ef9a-src/build/pkg.XtWinM/omxcore/utf8.mojo:10:16: warning: assignment to 'need' was never used; assign to '_' instead?
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:2:
+Included from examples/omxplorer/app.mojo:17:
+./themes/liquid.mojo:58:23: warning: assignment to 'glass' was never used; assign to '_' instead?
+    var glass = String("background-color: rgba(255,255,255,0.62); box-shadow: inset 0 1px rgba(255,255,255,0.9), 0 0 0 1px rgba(255,255,255,0.75), 0 8px 32px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.06);")
+                      ^
+Included from /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/hosts/linux_main.mojo:2:
+Included from examples/omxplorer/app.mojo:18:
+./themes/skins.mojo:50:29: warning: assignment to 'chrome_line' was never used; assign to '_' instead?
+    var chrome_line = hex_of(p.chrome_line)
+                            ^
+   build/omxplorer/linux/omxplorer
+NATIVE: GTK 4.22
+WINDOW-ICON: mojoui-app-logo
+DESIGN: liquid
+THEME: liquid sheet=14998 bytes
+FONT: Inter, JetBrains Mono (the app's own)
+BOX: menubar 10.0 8.0 1722.0 44.0
+BOX: app-mark 20.0 20.0 97.0 19.0
+BOX: island 1262.0 10.0 460.0 40.0
+BOX: toolbar 10.0 58.0 1722.0 46.0
+BOX: toolbar/Save 16.0 64.0 71.0 34.0
+BOX: toolbar/Undo 89.0 64.0 73.0 34.0
+BOX: toolbar/Add row 390.0 64.0 90.0 34.0
+BOX: toolbar/Formula 482.0 64.0 89.0 34.0
+BOX: toolbar/Sort 573.0 64.0 66.0 34.0
+BOX: toolbar/Pivot 641.0 64.0 71.0 34.0
+BOX: toolbar/Chart 714.0 64.0 74.0 34.0
+BOX: toolbar/Bold 809.0 64.0 32.0 34.0
+BOX: toolbar/Italic 843.0 64.0 32.0 34.0
+BOX: toolbar/Underline 877.0 64.0 32.0 34.0
+BOX: toolbar/Strikethrough 911.0 64.0 32.0 34.0
+BOX: toolbar/Text colour 964.0 64.0 32.0 34.0
+BOX: toolbar/Fill colour 998.0 64.0 32.0 34.0
+BOX: toolbar/Align left 1051.0 64.0 32.0 34.0
+BOX: toolbar/Align centre 1085.0 64.0 32.0 34.0
+BOX: toolbar/Align right 1119.0 64.0 32.0 34.0
+BOX: toolbar/Currency 1172.0 64.0 32.0 34.0
+BOX: toolbar/Percent 1206.0 64.0 32.0 34.0
+BOX: toolbar/Fewer decimals 1240.0 64.0 32.0 34.0
+BOX: toolbar/More decimals 1274.0 64.0 32.0 34.0
+BOX: toolbar/Clear formatting 1308.0 64.0 32.0 34.0
+BOX: toolbar/Format 1568.0 64.0 83.0 34.0
+BOX: toolbar/Open 1653.0 64.0 73.0 34.0
+BOX: bold 809.0 64.0 32.0 34.0
+BOX: italic 843.0 64.0 32.0 34.0
+BOX: underline 877.0 64.0 32.0 34.0
+BOX: strikethrough 911.0 64.0 32.0 34.0
+BOX: text-colour 964.0 64.0 32.0 34.0
+BOX: fill 998.0 64.0 32.0 34.0
+BOX: align-left 1051.0 64.0 32.0 34.0
+BOX: align-center 1085.0 64.0 32.0 34.0
+BOX: align-right 1119.0 64.0 32.0 34.0
+BOX: currency 1172.0 64.0 32.0 34.0
+BOX: percent 1206.0 64.0 32.0 34.0
+BOX: decimals-less 1240.0 64.0 32.0 34.0
+BOX: decimals-more 1274.0 64.0 32.0 34.0
+BOX: clear-format 1308.0 64.0 32.0 34.0
+BOX: formula-bar 30.0 110.0 1366.0 42.0
+BOX: formula-bar/ƒx 42.0 114.0 44.0 34.0
+BOX: table 20.0 9.0 1386.0 422.0
+BOX: grid 32.0 63.0 1362.0 356.0
+BOX: chart0 20.0 425.0 520.0 340.0
+BOX: chart0/Remove 484.0 437.0 42.0 34.0
+BOX: sentence-0 34.0 437.0 300.0 40.0
+BOX: sentence-line 34.0 437.0 300.0 19.0
+BOX: sentence-line/Sum 34.0 437.0 35.0 19.0
+BOX: sentence-line/amount 91.0 437.0 57.0 19.0
+BOX: sentence-line/region 173.0 437.0 49.0 19.0
+BOX: sentence-line/in data order 231.0 437.0 94.0 19.0
+BOX: word-0-0 34.0 437.0 35.0 19.0
+BOX: word-0-1 91.0 437.0 57.0 19.0
+BOX: word-0-2 173.0 437.0 49.0 19.0
+BOX: word-0-3 231.0 437.0 94.0 19.0
+BOX: sentence-line 34.0 458.0 240.0 19.0
+BOX: sentence-line/every region 34.0 458.0 93.0 19.0
+BOX: sentence-line/every row 136.0 458.0 74.0 19.0
+BOX: sentence-line/bars 239.0 458.0 35.0 19.0
+BOX: word-0-4 34.0 458.0 93.0 19.0
+BOX: word-0-5 136.0 458.0 74.0 19.0
+BOX: word-0-6 239.0 458.0 35.0 19.0
+BOX: ask 34.0 493.0 492.0 30.0
+BOX: ask-said 207.0 527.0 145.0 17.0
+BOX: chart-1 34.0 548.0 492.0 174.0
+BOX: readout 226.0 726.0 107.0 17.0
+BOX: inspector 1422.0 110.0 300.0 679.0
+BOX: section-title 1432.0 164.0 45.0 17.0
+BOX: chart-sentence 1432.0 189.0 280.0 37.0
+BOX: section-title 1432.0 301.0 42.0 17.0
+BOX: nav-row 1432.0 326.0 280.0 51.0
+BOX: nav-row/Data 1432.0 326.0 234.0 34.0
+BOX: nav-row/Open Data 1670.0 334.0 42.0 34.0
+BOX: nav-title 1432.0 326.0 234.0 34.0
+BOX: nav-summary 1432.0 360.0 174.0 17.0
+BOX: nav-row 1432.0 385.0 280.0 51.0
+BOX: nav-row/Order 1432.0 385.0 234.0 34.0
+BOX: nav-row/Open Order 1670.0 393.0 42.0 34.0
+BOX: nav-title 1432.0 385.0 234.0 34.0
+BOX: nav-summary 1432.0 419.0 178.0 17.0
+BOX: nav-row 1432.0 444.0 280.0 51.0
+BOX: nav-row/Rows 1432.0 444.0 234.0 34.0
+BOX: nav-row/Open Rows 1670.0 452.0 42.0 34.0
+BOX: nav-title 1432.0 444.0 234.0 34.0
+BOX: nav-summary 1432.0 478.0 81.0 17.0
+BOX: nav-row 1432.0 503.0 280.0 51.0
+BOX: nav-row/Style 1432.0 503.0 234.0 34.0
+BOX: nav-row/Open Style 1670.0 511.0 42.0 34.0
+BOX: nav-title 1432.0 503.0 234.0 34.0
+BOX: nav-summary 1432.0 537.0 50.0 17.0
+BOX: sheet-tabs 10.0 795.0 1722.0 34.0
+BOX: sheet-tabs/big 24.0 795.0 72.0 34.0
+BOX: sheet-tabs/Report 100.0 795.0 95.0 34.0
+BOX: tab-0 24.0 795.0 72.0 34.0
+BOX: tab-1 100.0 795.0 95.0 34.0
+BOX: status-bar 10.0 835.0 1722.0 25.0
+LAYOUT: board
+BOARD: table at 0,0 1386x400
+BOARD: chart0 at 0,416 520x340
+INVIEW: chart0
+ICON: app-logo
+LABEL: omxplorer
+MENU: File: New blank sheet (Ctrl+N), Open… (Ctrl+O), —, Save (Ctrl+S), —, Settings… (Ctrl+,)
+MENU: Edit: Undo (Ctrl+Z), —, Copy (Ctrl+C), —, Add row (Ctrl+Shift+R)
+MENU: View: Inspector (Ctrl+Shift+I) ✓, —, Sheet ✓, Report, —, Rename tab…
+MENU: Insert: Chart (Ctrl+Shift+C), Pivot table (Ctrl+Shift+P), —, Formula column, Row
+MENU: Data: Sort smallest first (Ctrl+Shift+↑), Sort largest first (Ctrl+Shift+↓), —, Format as ▸ (Number, Currency, Percent)
+MENU: Format: Bold (Ctrl+B), Italic (Ctrl+I), Underline (Ctrl+U), Strikethrough (Ctrl+5), —, Text colour ▸ (Automatic ✓, Red, Orange, Amber, Green, Teal, Blue, Purple, Grey), Fill colour ▸ (None ✓, Red, Orange, Amber, Green, Teal, Blue, Purple, Grey), Align ▸ (Automatic ✓, Left, Centre, Right), —, Format as ▸ (Number, Currency, Percent), Clear formatting, —, Format inspector ✓
+MENU: Help: About omxplorer
+CANVAS: 460x40 pt 460x40 px scale 1.0 colours 538 draws 326 painted 12
+TIP: island = big · 100,000,000 rows · NVIDIA GeForce RTX 3090 · ready
+BUTTON: Save
+TIP: Save = Save the document (Ctrl+S)
+BUTTON: Undo
+TIP: Undo = Undo the last change (Ctrl+Z)
+BUTTON: Add row
+TIP: Add row = A new row at the end (Ctrl+Shift+R)
+BUTTON: Formula
+TIP: Formula = A new column computed from others
+BUTTON: Sort
+TIP: Sort = Sort by the selected column; again to flip
+BUTTON: Pivot
+TIP: Pivot = A pivot table of the selected column (Ctrl+Shift+P)
+BUTTON: Chart
+TIP: Chart = A chart of the selected column (Ctrl+Shift+C)
+BUTTON: Bold
+TIP: Bold = Bold: the selected cell (Ctrl+B)
+BUTTON: Italic
+TIP: Italic = Italic (Ctrl+I)
+BUTTON: Underline
+TIP: Underline = Underline (Ctrl+U)
+BUTTON: Strikethrough
+TIP: Strikethrough = Strikethrough (Ctrl+5)
+BUTTON: Text colour
+TIP: Text colour = Text colour: Automatic
+BUTTON: Fill colour
+TIP: Fill colour = Fill: none
+BUTTON: Align left
+TIP: Align left = Align left
+BUTTON: Align centre
+TIP: Align centre = Centre
+BUTTON: Align right
+TIP: Align right = Align right
+BUTTON: Currency
+TIP: Currency = Currency: the whole column (again: automatic)
+BUTTON: Percent
+TIP: Percent = Percent: the whole column (again: automatic)
+BUTTON: Fewer decimals
+TIP: Fewer decimals = One decimal place fewer: the whole column
+BUTTON: More decimals
+TIP: More decimals = One decimal place more: the whole column
+BUTTON: Clear formatting
+TIP: Clear formatting = Back to plain: the selected cell
+BUTTON: Format
+TIP: Format = Show or hide the inspector (Ctrl+Shift+I)
+BUTTON: Open
+TIP: Open = Open a CSV, Parquet or .omx file
+BUTTON: ƒx
+TIP: ƒx = What formulas can do
+LABEL: amount 1
+FIELD: 8922.63
+LABEL: big
+LABEL: 100,000,000 rows
+TONE: 100,000,000 rows = accent
+LABEL: 
+CANVAS: 1362x356 pt 1362x356 px scale 1.0 colours 0 draws 6 painted 0
+BUTTON: Sum
+LABEL:  of 
+BUTTON: amount
+LABEL:  by 
+BUTTON: region
+LABEL: , 
+BUTTON: in data order
+LABEL: , 
+BUTTON: every region
+LABEL: , 
+BUTTON: every row
+LABEL: , as 
+BUTTON: bars
+LABEL: 50.8 ms
+BUTTON: Remove
+FIELD: 
+LABEL: Or tap any coloured word
+CANVAS: 492x174 pt 492x174 px scale 1.0 colours 332 draws 23 painted 47
+LABEL: Tap a bar to read it
+SEGMENTED: Chart
+LABEL: CHART
+LABEL: Sum of amount by region, in data order, every region, every row, as bars
+LABEL: Tap a coloured word in the chart's title, ask in its field, or open a part below. Follows edits to big.
+LABEL: PARTS
+BUTTON: Data
+LABEL: Sum of amount · by region
+BUTTON: Open Data
+BUTTON: Order
+LABEL: in data order · every region
+BUTTON: Open Order
+BUTTON: Rows
+LABEL: every row
+BUTTON: Open Rows
+BUTTON: Style
+LABEL: bars
+BUTTON: Open Style
+BUTTON: big
+TIP: big = Tap again to rename it
+BUTTON: Report
+LABEL: Selection amount · row 1 · 8922.63
+LABEL: Rows 100,000,000
+LABEL: Columns 5
+LABEL: Sum 475,055,797,946.39
+LABEL: Average 5,000.48
+LABEL: Already so: by region
+LABEL: 
+LABEL: 
+LABEL: 2,005.5 ms on NVIDIA GeForce RTX 3090
+FOCUS: kind:24
+DEVTOOLS: off
+SHOT: /home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-d40d21ad/docs/goals/engine-834ef9a/100m-gtk.png
