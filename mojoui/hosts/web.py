@@ -20,6 +20,7 @@ import io
 import json
 import re
 import time
+import traceback
 import struct
 import sys
 from urllib.parse import urlsplit
@@ -1370,11 +1371,15 @@ def make_app(module_dir):
                 with s.lock:
                     if s.closed:
                         continue
-                    d = json.loads(mod.jobs(s.handle))
-                    if d.get("rebuild") or d.get("patches"):
-                        s.pending = merge(s.pending, d)
-                        s.nodes = json.loads(mod.view(s.handle))
-                    note(sid, s)
+                    try:
+                        d = json.loads(mod.jobs(s.handle))
+                        if d.get("rebuild") or d.get("patches"):
+                            s.pending = merge(s.pending, d)
+                            s.nodes = json.loads(mod.view(s.handle))
+                        note(sid, s)
+                    except Exception:  # (one tab's failure is printed, and the next wake still reaches every tab)
+                        traceback.print_exc()
+                        continue
                     if has_changes(s) or s.busy != s.busy_sent:
                         s.wake()
 

@@ -607,6 +607,7 @@ struct GtkHost[A: App](Movable):
     var input_buf: List[UInt8]  # App.input_lines: stdin's bytes so far without a newline
     var input_ended: Bool  # stdin closed: its last lines, then the end event, are delivered
     var input_armed: Bool  # a retry is queued (lines arrived while the screen was being rebuilt)
+    var jobs_armed: Bool  # a jobs retry is queued (a job ended while the screen was being rebuilt)
     # GPU canvases (goal 36b, mojoui/present.mojo): the Presenter (on the heap: its address; 0 until run() probes),
     # the GDK GL context its textures live in (0: none), and what happened to each GPU-drawn picture
     var pres: Int
@@ -727,6 +728,7 @@ struct GtkHost[A: App](Movable):
         self.input_buf = List[UInt8]()
         self.input_ended = False
         self.input_armed = False
+        self.jobs_armed = False
 
     def schedule_effects(mut self, self_addr: Int):
         """Arms one GLib timeout for when the runtime next has something to hand over (a reply, a timer's tick):
@@ -3466,7 +3468,9 @@ def on_input_read[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C")
     _ = len(buf)
     var closed = n == 0 or (n < 0 and (Int(condition) & (8 | 16)) != 0)
     if closed:
-        host[].input_buf.append(0x0A)  # (a last line without its newline still counts)
+        var tail = len(host[].input_buf)
+        if tail > 0 and host[].input_buf[tail - 1] != 0x0A:
+            host[].input_buf.append(0x0A)  # (a last line without its newline still counts)
         host[].input_ended = True
     if not host[].input_lines_now(host_addr) and not host[].input_armed:
         host[].input_armed = True
@@ -3479,7 +3483,8 @@ def on_jobs_woken[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C")
     under way (then in a millisecond)."""
     _ = drain_wakes(Int(fd))
     var host = host_at[A](host_addr)
-    if not host[].jobs_now(host_addr):
+    if not host[].jobs_now(host_addr) and not host[].jobs_armed:
+        host[].jobs_armed = True
         _ = external_call["g_timeout_add", c_uint](c_uint(1), on_jobs_retry[A], host_addr)
     return 1
 
@@ -3506,7 +3511,11 @@ def host_rect_of[A: App](host_addr: Int, tag_addr: Int, tag_len: Int, out_addr: 
 
 
 def on_jobs_retry[A: App](host_addr: Int) abi("C") -> c_int:
-    return 0 if host_at[A](host_addr)[].jobs_now(host_addr) else 1
+    var host = host_at[A](host_addr)
+    if host[].jobs_now(host_addr):
+        host[].jobs_armed = False
+        return 0
+    return 1  # (still rebuilding: again in a millisecond)
 
 
 def on_input_retry[A: App](host_addr: Int) abi("C") -> c_int:

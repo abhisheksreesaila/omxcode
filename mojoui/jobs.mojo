@@ -55,6 +55,12 @@ def wake_pipe() -> Int:
     _ = len(fds)
     if Int(ok) != 0 or r < 0 or w < 0:
         return -1
+    # The write end never blocks: a full pipe already means "a wake is pending", and nothing may drain it (no host
+    # watching, MOJOUI_JOB_WAKE=0, an app whose jobs_message is 0), so a job's thread must not wait on write().
+    # The read end stays blocking: the web host's thread waits on it. Neither end leaks into child processes.
+    _ = external_call["fcntl", c_int](c_int(w), c_int(4), c_int(2048))  # F_SETFL, O_NONBLOCK (Linux: 0o4000)
+    _ = external_call["fcntl", c_int](c_int(w), c_int(2), c_int(1))  # F_SETFD, FD_CLOEXEC
+    _ = external_call["fcntl", c_int](c_int(r), c_int(2), c_int(1))
     put_shared(SLOT_WAKE_WRITE, w + 1)
     put_shared(SLOT_WAKE_READ, r + 1)
     return r
@@ -70,7 +76,8 @@ def drain_wakes(fd: Int) -> Int:
 
 def wake_ui():
     """Wakes the host's main loop from any thread (one byte down the pipe; nothing when no host made one)."""
-    WakeUI().done(0)
+    var w = WakeUI()
+    w.done(0)
 
 
 struct WakeUI(JobDone):
@@ -91,7 +98,7 @@ struct WakeUI(JobDone):
             return
         if self.fd >= 0:
             var b = List[UInt8](length=1, fill=1)
-            _ = _io("write", self.fd, Int(b.unsafe_ptr()), 1)
+            _ = _io("write", self.fd, Int(b.unsafe_ptr()), 1)  # (-1 when the pipe is full: a wake is pending already)
             _ = len(b)
 
 
