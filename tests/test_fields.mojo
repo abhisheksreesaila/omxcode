@@ -45,7 +45,8 @@ def covered(views: List[View], skip: List[String] = []) raises:
             if t in skip:
                 continue
             assert_true(look.surface(t) >= 0, "no role for tag " + t)
-from mojoui.fields import SearchField, OutlinedField, FieldHelp, FieldWithHelp, FilterChips, ShortField
+from mojoui.fields import SearchField, OutlinedField, FieldHelp, FieldWithHelp, FilterChips, ShortField, DateField, DatePopover
+from mojoui.view import DATE, POPOVER
 
 
 def main() raises:
@@ -64,4 +65,18 @@ def main() raises:
     resolve_layout(short, look)
     assert_equal(short.nodes[0].w, 260)
     covered([f.copy(), FieldHelp("help"), FieldWithHelp(f.copy(), "help"), chips.copy(), s.copy(), short.copy(), ShortField("", "x", 1, compact=True)])
+    var df = DateField("2025-03-15", 9, "from-date")
+    assert_equal(df.nodes[0].kind, BUTTON)
+    assert_equal(df.nodes[0].text, "2025-03-15")
+    assert_equal(df.nodes[0].msg, 9)
+    assert_equal(df.nodes[0].hint, "calendar")
+    assert_equal(df.nodes[0].name, "from-date")
+    var dp = DatePopover("from-date", "From", "2025-03-15", 10, 11)
+    assert_equal(dp.nodes[0].kind, POPOVER)
+    assert_equal(dp.nodes[0].text, "from-date")
+    assert_equal(dp.nodes[0].msg2, 11)
+    var cal = first(dp, DATE)
+    assert_true(cal > 0, "the popover holds a calendar")
+    assert_equal(dp.nodes[cal].text, "2025-03-15")
+    assert_equal(dp.nodes[cal].msg, 10)
     print("fields: ok")

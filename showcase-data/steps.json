@@ -1,0 +1,300 @@
+{
+ "about": "Goal 38 dashboard: the opening state (step 0) and the fixed filter changes, each with the full state after it (showcase-data/SPEC.md).",
+ "opening": {
+  "step": 0,
+  "from": "2024-01-01",
+  "to": "2025-12-31",
+  "min_amount": 1.0,
+  "region": "all"
+ },
+ "steps": [
+  {
+   "step": 1,
+   "change": "region",
+   "note": "pick a region",
+   "from": "2024-01-01",
+   "to": "2025-12-31",
+   "min_amount": 1.0,
+   "region": "US East"
+  },
+  {
+   "step": 2,
+   "change": "from",
+   "note": "narrow to this year",
+   "from": "2025-01-01",
+   "to": "2025-12-31",
+   "min_amount": 1.0,
+   "region": "US East"
+  },
+  {
+   "step": 3,
+   "change": "to",
+   "note": "first half only",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 1.0,
+   "region": "US East"
+  },
+  {
+   "step": 4,
+   "change": "min_amount",
+   "note": "drag the amount slider",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 50.0,
+   "region": "US East"
+  },
+  {
+   "step": 5,
+   "change": "min_amount",
+   "note": "drag",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 60.0,
+   "region": "US East"
+  },
+  {
+   "step": 6,
+   "change": "min_amount",
+   "note": "drag",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 75.0,
+   "region": "US East"
+  },
+  {
+   "step": 7,
+   "change": "min_amount",
+   "note": "drag",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 100.0,
+   "region": "US East"
+  },
+  {
+   "step": 8,
+   "change": "min_amount",
+   "note": "drag",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 150.0,
+   "region": "US East"
+  },
+  {
+   "step": 9,
+   "change": "min_amount",
+   "note": "drag, let go",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 250.0,
+   "region": "US East"
+  },
+  {
+   "step": 10,
+   "change": "region",
+   "note": "switch region",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 250.0,
+   "region": "Germany"
+  },
+  {
+   "step": 11,
+   "change": "region",
+   "note": "switch region",
+   "from": "2025-01-01",
+   "to": "2025-06-30",
+   "min_amount": 250.0,
+   "region": "Japan"
+  },
+  {
+   "step": 12,
+   "change": "from",
+   "note": "narrow the start",
+   "from": "2025-03-01",
+   "to": "2025-06-30",
+   "min_amount": 250.0,
+   "region": "Japan"
+  },
+  {
+   "step": 13,
+   "change": "to",
+   "note": "one month",
+   "from": "2025-03-01",
+   "to": "2025-03-31",
+   "min_amount": 250.0,
+   "region": "Japan"
+  },
+  {
+   "step": 14,
+   "change": "min_amount",
+   "note": "big orders",
+   "from": "2025-03-01",
+   "to": "2025-03-31",
+   "min_amount": 1000.0,
+   "region": "Japan"
+  },
+  {
+   "step": 15,
+   "change": "min_amount",
+   "note": "drag",
+   "from": "2025-03-01",
+   "to": "2025-03-31",
+   "min_amount": 2500.0,
+   "region": "Japan"
+  },
+  {
+   "step": 16,
+   "change": "min_amount",
+   "note": "drag",
+   "from": "2025-03-01",
+   "to": "2025-03-31",
+   "min_amount": 4000.0,
+   "region": "Japan"
+  },
+  {
+   "step": 17,
+   "change": "min_amount",
+   "note": "too far: few rows",
+   "from": "2025-03-01",
+   "to": "2025-03-31",
+   "min_amount": 4900.0,
+   "region": "Japan"
+  },
+  {
+   "step": 18,
+   "change": "from",
+   "note": "narrow the start",
+   "from": "2025-03-15",
+   "to": "2025-03-31",
+   "min_amount": 4900.0,
+   "region": "Japan"
+  },
+  {
+   "step": 19,
+   "change": "to",
+   "note": "one day: almost nothing matches",
+   "from": "2025-03-15",
+   "to": "2025-03-15",
+   "min_amount": 4900.0,
+   "region": "Japan"
+  },
+  {
+   "step": 20,
+   "change": "min_amount",
+   "note": "drag back",
+   "from": "2025-03-15",
+   "to": "2025-03-15",
+   "min_amount": 500.0,
+   "region": "Japan"
+  },
+  {
+   "step": 21,
+   "change": "region",
+   "note": "every region",
+   "from": "2025-03-15",
+   "to": "2025-03-15",
+   "min_amount": 500.0,
+   "region": "all"
+  },
+  {
+   "step": 22,
+   "change": "to",
+   "note": "widen the end",
+   "from": "2025-03-15",
+   "to": "2025-12-31",
+   "min_amount": 500.0,
+   "region": "all"
+  },
+  {
+   "step": 23,
+   "change": "from",
+   "note": "widen the start: both years",
+   "from": "2024-01-01",
+   "to": "2025-12-31",
+   "min_amount": 500.0,
+   "region": "all"
+  },
+  {
+   "step": 24,
+   "change": "min_amount",
+   "note": "drag down",
+   "from": "2024-01-01",
+   "to": "2025-12-31",
+   "min_amount": 200.0,
+   "region": "all"
+  },
+  {
+   "step": 25,
+   "change": "min_amount",
+   "note": "drag",
+   "from": "2024-01-01",
+   "to": "2025-12-31",
+   "min_amount": 120.0,
+   "region": "all"
+  },
+  {
+   "step": 26,
+   "change": "min_amount",
+   "note": "drag",
+   "from": "2024-01-01",
+   "to": "2025-12-31",
+   "min_amount": 80.0,
+   "region": "all"
+  },
+  {
+   "step": 27,
+   "change": "min_amount",
+   "note": "slider to the start: every row",
+   "from": "2024-01-01",
+   "to": "2025-12-31",
+   "min_amount": 1.0,
+   "region": "all"
+  },
+  {
+   "step": 28,
+   "change": "region",
+   "note": "small region",
+   "from": "2024-01-01",
+   "to": "2025-12-31",
+   "min_amount": 1.0,
+   "region": "Canada"
+  },
+  {
+   "step": 29,
+   "change": "from",
+   "note": "holiday season 2024",
+   "from": "2024-11-24",
+   "to": "2025-12-31",
+   "min_amount": 1.0,
+   "region": "Canada"
+  },
+  {
+   "step": 30,
+   "change": "to",
+   "note": "holiday season 2024",
+   "from": "2024-11-24",
+   "to": "2024-12-31",
+   "min_amount": 1.0,
+   "region": "Canada"
+  },
+  {
+   "step": 31,
+   "change": "min_amount",
+   "note": "nudge the slider",
+   "from": "2024-11-24",
+   "to": "2024-12-31",
+   "min_amount": 30.0,
+   "region": "Canada"
+  },
+  {
+   "step": 32,
+   "change": "region",
+   "note": "switch region",
+   "from": "2024-11-24",
+   "to": "2024-12-31",
+   "min_amount": 30.0,
+   "region": "India"
+  }
+ ]
+}

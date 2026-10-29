@@ -1,0 +1,48 @@
+# Build B: plain JS page + FastAPI/uvicorn + Polars
+
+The goal 38 dashboard (../SPEC.md) as the common web stack. How the server works and why: `server.py`'s docstring
+(data in memory once, sorted by day descending so a date range is a slice and the table is the first 50 matching
+rows; the group-by on Polars' streaming engine; orjson (ORJSONResponse); uvicorn with httptools and uvloop; /api/meta
+says which). The page: `web/app.js` (one GET per change; timings split server compute, serialise + transfer =
+fetch − compute, draw and paint).
+
+The table's "first 50 matching rows" is a **hand-written optimisation**, not plain Polars (`server.py` newest()):
+the frame is in table order, so the answer sits at the date slice's start; B filters a growing window there (64K
+rows, then x8) until it holds 50 matches, instead of filtering the whole slice. Build C does the same at its slice's
+end and build D has an equivalent (a per-day histogram that finds the cutoff day): fair-play round 2, 2026-10-28.
+Measured at 100M (one bench each, load ~2): server compute median 26 -> 19 ms, p95 134 -> 121 ms; input-to-pixels
+median 44 -> 42 ms, p95 149 -> 139 ms. The p95 is the full-range group-by, not the table. Running both queries at
+once (pl.collect_all) wasn't kept: the window's head is ~1 ms beside a group-by that already uses every core.
+
+- Check: `pixi run python showcase-data/py-polars/check_b.py` (10M and 100M on the repo's Xvfb; prints `B: ok (…)`).
+  Chromium: build A's binary and flags (check_b.py FLAGS), through Playwright.
+- Bench: `check_b.py --bench 100M` (JSON).
+- Libraries: orjson 3.13 (ORJSONResponse), httptools 0.9, uvloop 0.22; timings.json and `ready` name them.
+
+## Driven from outside (the shared harness)
+
+```
+DATA_BENCH_CHROMIUM=/usr/lib/chromium/chromium \
+DATA_BENCH_CHROMIUM_FLAGS="--ozone-platform=wayland --enable-features=Vulkan --use-angle=vulkan --ignore-gpu-blocklist" \
+WAYLAND_DISPLAY=wayland-2 \
+pixi run python showcase-data/py-polars/external.py --rows 100M --out DIR [--control-port 0] [--warm-browser]
+```
+
+The same driver as build A's (`external.py`, the same Chromium handling and protocol), except the app is server.py,
+started as its own process (a child of the driver, so the process tree's PSS includes it). With `--warm-browser` the
+server starts on `open`, so that cold start covers the data load but not the browser's launch.
+
+- Chromium: binary and flags from `$DATA_BENCH_CHROMIUM` / `$DATA_BENCH_CHROMIUM_FLAGS` (shell words; a bare `--app` is
+  dropped, the driver adds `--app=<url>`); unset: `/usr/lib/chromium/chromium` with the four Wayland flags above when
+  `$WAYLAND_DISPLAY` is set. Always added: a private profile under `--out`, `--remote-debugging-port`,
+  `--window-size=1280,800`, no first-run UI, no extensions, no throttling. Nothing reads `$DISPLAY`.
+- Tested 2026-10-28 on a private headless Hyprland (RTX 3090): native Wayland (`xwayland: false`), answers match.
+- stdout: `browser <json>` (`--warm-browser` only), `ready <json>` (file, load_ms, json/http/loop libraries,
+  polars threads, `kpi_rect`, `control_port`), `shown N <ms> <json>` (`server_compute_ms`, `fetch_ms`,
+  `serialise_transfer_ms`, `draw_ms`, `paint_wait_ms`), `kpi <json>`, `error <text>`, `bye`.
+- Commands (stdin lines, or `POST http://127.0.0.1:P/step/N`, `/kpi`, `/open`, `/quit` with `--control-port P`):
+  `open`; `step N` for N = 0 … 32 (0 = the opening state; the full state is set, any order works); `kpi`; `quit`
+  (answers.json + timings.json to `--out`, step 0 first, then close Chromium and the server). EOF = `quit` unless
+  `--control-port` was given.
+- KPI region (`kpi_rect`, window logical pixels, `[x, y, w, h]`): the three KPI tiles, not the "Server · round trip"
+  tile (it is written a frame after the numbers). It depends on the window's width: send `kpi` after resizing.

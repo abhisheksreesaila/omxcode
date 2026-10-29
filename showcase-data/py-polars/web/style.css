@@ -1,0 +1,38 @@
+:root {
+  --bg: #f3f1ee; --surface: #fffdfa; --ink: #1d1b19; --muted: #6d6862; --line: #e6e1da;
+  --accent: #2f6fdf; --accent-soft: #dfe8fb;
+  --shadow: 0 1px 2px rgba(30, 25, 20, .06), 0 4px 14px rgba(30, 25, 20, .06);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.bar { display: flex; align-items: baseline; gap: 12px; padding: 14px 20px 6px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; color: var(--muted); }
+.muted { color: var(--muted); }
+main { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 8px 20px 18px; }
+.card { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 12px 14px; }
+.controls { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.controls label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.controls .grow { flex: 1; min-width: 240px; }
+.controls input[type=range] { flex: 1; accent-color: var(--accent); }
+.controls output { min-width: 3.5em; text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+input[type=date], select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 8px; }
+.kpis { display: grid; grid-template-columns: 1fr 1fr 1fr .8fr; gap: 12px; }
+.kpi { display: flex; flex-direction: column; gap: 2px; }
+.kpi .label { color: var(--muted); font-size: 12px; }
+.kpi .value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.kpi.small .value { font-size: 16px; padding-top: 6px; color: var(--muted); }
+.split { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.15fr; gap: 12px; }
+.chart, .table { display: flex; flex-direction: column; min-height: 0; }
+#chart { flex: 1; width: 100%; min-height: 0; }
+#chart text { font-size: 11px; fill: var(--ink); }
+#chart .v { fill: var(--muted); font-variant-numeric: tabular-nums; }
+#chart rect { fill: var(--accent); }
+.scroll { flex: 1; min-height: 0; overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+th { position: sticky; top: 0; background: var(--surface); text-align: left; color: var(--muted); font-weight: 600; }
+th, td { padding: 3px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.n { text-align: right; }
+.empty { color: var(--muted); padding: 20px; text-align: center; }
