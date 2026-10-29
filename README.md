@@ -154,6 +154,8 @@ flowchart TB
 
 All on one Linux machine with an RTX 3090, and all from the checks or their benchmarks.
 
+**Benchmarks:** omxcode against plain JS, JS + WebGPU and Rust (wasm and native) on one particle field, every table, caveat and line of code: [docs/benchmarks.md](docs/benchmarks.md).
+
 | What | Time |
 |---|---|
 | A chart over 1M rows (sum by group) | **0.5–0.7 ms** |

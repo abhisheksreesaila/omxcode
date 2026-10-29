@@ -10,188 +10,154 @@
 <meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/why/omxcode-1m.jpg">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="img/logo.svg" type="image/svg+xml">
-<!-- omxqua (docs/omxqua/VERSION): fonts, tokens, parts; site.css is the landing layer the pages share (the scoreboard lives there).
-     The full measurement (every table, the code side by side, every caveat) is why-details.html, written by scripts/why_tables.py. -->
+<!-- omxqua (docs/omxqua/VERSION): fonts, tokens, parts; site.css is the landing layer the pages share.
+     Three screens: the scoreboard, the code, an agent. Every table, caveat and the method: docs/benchmarks.md on GitHub
+     (and why-details.html, written by scripts/why_tables.py). -->
 <link rel="stylesheet" href="omxqua/src/fonts.css">
 <link rel="stylesheet" href="omxqua/src/tokens.css">
 <link rel="stylesheet" href="omxqua/src/components.css">
 <link rel="stylesheet" href="site.css">
 <style>
-.hero.why { padding-bottom: 60px; }
-.hero.why .wrap { display: block; }
-.hero.why h1 { font-size: clamp(52px, 7.4vw, 104px); max-width: 1000px; }
-.whynums { margin-top: 52px; }
-.whynums > div > span { font-size: 16px; display: block; margin-top: 8px; }
-section.ch { padding-top: 100px; padding-bottom: 100px; border-top: 1px solid var(--oq-line-2); }
-/* the why: three lines */
-.whys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 44px; }
-.why1 { border-radius: 24px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px 24px; }
-.why1 i { font: 600 12px var(--mono); font-style: normal; letter-spacing: .1em; color: var(--word); }
-.why1 p { margin: 8px 0 0; font: 650 21px/1.25 var(--sans); letter-spacing: -.015em; }
-.why1 p span { color: var(--ink2); font-weight: 500; }
-/* the tally */
-.tally2 { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
-.tally2 span { font: 500 13.5px var(--sans); padding: 7px 13px; border-radius: 999px; background: var(--oq-surface-2); color: var(--ink2); }
-.tally2 span b { color: var(--ink); font: 700 15px var(--mono); margin-right: 6px; }
-.tally2 span.us { background: var(--word); color: #000; } .tally2 span.us b { color: #000; }
-.bottom { margin: 22px 0 0; font: 600 20px/1.4 var(--sans); max-width: 860px; } .bottom span { color: var(--ink2); font-weight: 500; }
-/* the code: bars */
-.bars { display: grid; gap: 12px; margin-top: 44px; max-width: 900px; }
-.bar2 { display: grid; grid-template-columns: 150px 1fr 150px; gap: 14px; align-items: center; font: 14px var(--mono); color: var(--ink2); }
-.bar2 b { font: 600 15px var(--sans); color: var(--ink); }
-.bar2 i { display: block; height: 14px; border-radius: 7px; background: var(--oq-surface-3); width: 0; transition: width 1s var(--oq-island-spring); }
-.bar2.me i { background: var(--word); }
-.bars.in .bar2 i { width: var(--w); }
-.shots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 44px; }
-.bframe { margin: 0; border-radius: 16px; overflow: hidden; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); }
-.bframe .bar { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-bottom: 1px solid var(--oq-line-2); font: 600 12.5px var(--sans); color: var(--ink); }
-.bframe .bar i { width: 8px; height: 8px; border-radius: 50%; background: var(--oq-surface-3); flex: none; }
-.bframe .bar b { margin-left: 4px; }
-.bframe img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #000; }
-.bframe.me { box-shadow: var(--oq-shadow-2), 0 0 0 1.5px var(--word); }
-/* agents */
-.likes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 44px; }
-.like { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
-.like h3 { font-size: 18px; } .like p { margin: 8px 0 0; font-size: 15px; color: var(--ink2); line-height: 1.45; }
-.call { margin-top: 18px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; max-width: 980px; }
-.call > div { border-radius: 18px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 14px 16px; }
-.call .who { font: 600 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
-.call pre { margin: 8px 0 0; font: 13px/1.6 var(--mono); color: var(--ink); white-space: pre-wrap; word-break: break-word; }
-.call > div.res { box-shadow: 0 0 0 1.5px var(--word); }
-/* how we measured */
-.measured { display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; border-radius: 24px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 24px 28px; }
-.measured p { margin: 6px 0 0; color: var(--ink2); font-size: 16px; }
-.pagelinks { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 28px; }
-@media (max-width: 860px) {
-  .whys, .likes, .call { grid-template-columns: 1fr; }
-  .shots { grid-template-columns: 1fr 1fr; }
-  .bar2 { grid-template-columns: 96px 1fr; } .bar2 em { grid-column: 2; font-style: normal; margin-top: -6px; font-size: 12.5px; }
-  section.ch { padding-top: 76px; padding-bottom: 76px; }
+html { scroll-padding-top: 0; }
+.lnav { position: fixed; left: 0; right: 0; grid-template-columns: 1fr auto; }
+.scr { min-height: 100vh; min-height: 100svh; box-sizing: border-box; padding: 80px 24px 32px; display: grid; align-content: center; text-align: center; }
+.scr .wrap { width: 100%; }
+.scr h1, .scr h2 { font-size: clamp(38px, 4.6vw, 68px); margin: 0; text-wrap: balance; }
+.sup { font: 500 clamp(17px, 1.5vw, 22px)/1.35 var(--sans); color: var(--ink2); margin: 12px auto 0; max-width: 720px; }
+@keyframes lift { from { opacity: 0; transform: translateY(40px) scale(.96); } to { opacity: 1; transform: none; } }
+.sdt .sv { animation: lift both var(--oq-spring); animation-timeline: view(); animation-range: entry 0% entry 80%; }
+.sdt .sv.d1 { animation-range: entry 8% entry 88%; } .sdt .sv.d2 { animation-range: entry 14% entry 94%; }
+
+/* ---- 1 · the scoreboard: every test, a winner each, ties as = ---- */
+.score { margin: 24px auto 0; max-width: 1180px; text-align: left; }
+.score .srow { opacity: 1; transform: none; }
+@media (min-width: 861px) {
+  .score .srow { padding-top: 6px; padding-bottom: 6px; grid-template-columns: minmax(150px, 1.35fr) repeat(5, minmax(0, 1fr)) minmax(110px, .95fr); }
+  .score .srow.sh { padding-top: 9px; padding-bottom: 9px; }
+  .srow > b { font-size: 15px; } .srow > b small { display: inline; margin: 0 0 0 6px; }
+  .srow > span { font-size: 15px; padding: 4px; }
 }
-@media (prefers-reduced-motion: reduce) { .bar2 i { transition: none; } }
+.sdt .score .srow:not(.sh) { animation: lift both var(--oq-spring); animation-timeline: view(); animation-range: entry 0% entry 100%; }
+.tally { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.tally span { font: 500 13.5px var(--sans); padding: 6px 12px; border-radius: 999px; background: var(--oq-surface-2); color: var(--ink2); }
+.tally b { color: var(--ink); font: 700 15px var(--mono); margin-right: 6px; }
+.tally .us { background: var(--word); color: #000; } .tally .us b { color: #000; }
+
+/* ---- 2 · the code: three cards, the counts as big numbers ---- */
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; max-width: 1180px; margin: 40px auto 0; text-align: left; }
+.card { border-radius: 26px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 24px 24px 22px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.card.me { box-shadow: 0 0 0 1.5px var(--word), var(--oq-shadow-2); }
+.card h3 { font: 650 19px var(--sans); } .card.me h3 { color: var(--word); }
+.counts { display: grid; grid-template-columns: 1.7fr 1fr 1.2fr; gap: 14px; }
+.counts div { font: 800 clamp(30px, 3vw, 46px)/1 var(--display); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.counts div span { display: block; font: 500 12px var(--mono); letter-spacing: .04em; color: var(--ink2); margin-top: 8px; text-transform: uppercase; }
+.card.me .counts div:not(:first-child) { color: var(--word); }
+.card pre { margin: auto 0 0; padding: 12px 14px; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); font: 11.5px/1.7 var(--mono); color: var(--ink2); overflow: hidden; white-space: pre;
+  -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+.card pre .k { color: var(--oq-data-2); } .card pre .f { color: var(--ink); font-weight: 600; }
+
+/* ---- 3 · an agent: one real tool call, one answer ---- */
+.chat { display: grid; gap: 14px; max-width: 760px; margin: 40px auto 0; text-align: left; }
+.chat pre { margin: 0; padding: 16px 20px; font: 16px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat .ask { justify-self: end; max-width: 92%; border-radius: 22px 22px 6px 22px; background: var(--oq-surface-2); color: var(--ink); }
+.chat .ans { justify-self: start; max-width: 92%; border-radius: 22px 22px 22px 6px; background: color-mix(in srgb, var(--word) 14%, var(--oq-surface-1)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--word) 55%, transparent); color: var(--ink); }
+.chat .ans b { color: var(--word); font-weight: 650; }
+.go { margin-top: 44px; }
+.go .cta { height: 54px; padding: 0 28px; font-size: 17px; }
+
+footer { padding: 30px 24px 36px; }
+footer .wrap { display: flex; gap: 8px 22px; flex-wrap: wrap; justify-content: center; align-items: center; font: 13px var(--mono); }
+footer .wrap a { min-height: 34px; display: inline-flex; align-items: center; }
+
+@media (max-width: 860px) {
+  .scr { min-height: 0; padding: 92px 16px 56px; }
+  .score .srow { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .srow > b small { display: block; margin: 2px 0 0; }
+  .cards { grid-template-columns: 1fr; }
+  .chat pre { font-size: 13.5px; padding: 14px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .sdt .sv, .sdt .score .srow:not(.sh) { animation: none; } }
 </style>
-<noscript><style>.rv, .srow { opacity: 1; transform: none; } .bar2 i { width: var(--w); }</style></noscript>
+<noscript><style>.rv { opacity: 1; transform: none; }</style></noscript>
+<script>if (CSS.supports("animation-timeline: view()")) document.documentElement.classList.add("sdt");</script>
 </head>
 <body>
 
 <nav class="lnav">
-  <a class="brand" href="index.html"><span class="mark">ox</span>omxcode</a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#score">Scoreboard</a><a href="#code">Code</a><a href="#agents">Agents</a></div>
-  <div class="right"><a class="cta" href="index.html#get">Get the alpha</a></div>
+  <a class="brand" href="index.html"><span class="mark" aria-hidden="true">ox</span>omxcode</a>
+  <div class="right"><a class="cta" href="index.html#get">Get it</a></div>
 </nav>
 
 <main id="top">
 
-<section class="hero why">
+<!-- 1 · Every test, every winner -->
+<section class="scr" id="score">
   <div class="wrap">
-    <div class="eyebrow rise"><span>Why omxcode · measured on one machine</span></div>
-    <h1 class="rise" data-words data-step="45" data-d0="120">One app, four ways. Who wins?</h1>
-    <p class="lede rise"><span data-words data-step="22" data-d0="420">A particle field, up to 20 million particles, built in plain JS, JS + WebGPU, JS + Rust and omxcode.</span> <span class="two" data-words data-step="22" data-d0="800">We don't win every row. Here are all of them.</span></p>
-    <div class="nums whynums">
-      <div><b>~2×</b><span>faster than native Rust at 20 million particles.</span></div>
-      <div><b>Tie</b><span>with JS + WebGPU at 1 and 2 million.</span></div>
-      <div><b>1<small>file</small></b><span>one language. The others need 3 to 13 files.</span></div>
-    </div>
-    <div class="whys">
-      <div class="why1 rv"><i>01</i><p>One language. <span>From the button to the GPU kernel.</span></p></div>
-      <div class="why1 rv"><i>02</i><p>Native on every screen. <span>Not a web page in a wrapper.</span></p></div>
-      <div class="why1 rv"><i>03</i><p>Agents build it. <span>And agents use it.</span></p></div>
-    </div>
-  </div>
-</section>
-
-<section id="score" class="ch">
-  <div class="wrap">
-    <div class="head">
-      <div class="eyebrow rv">The scoreboard</div>
-      <h2 class="rv">Every test. <span class="two">Every winner.</span></h2>
-      <p class="lede rv">Lower is better. A ✓ marks the winner; = marks a tie.</p>
-    </div>
-<div class="score rv" role="table" aria-label="Scoreboard: one row per test, the winner marked"><div class="srow sh" aria-hidden="true"><span>Test</span><span>Plain JS</span><span>JS + WebGPU</span><span>JS + Rust/wasm</span><span>Rust native</span><span class="me">omxcode</span><span>Winner</span></div>
-<div class="srow"><b>Frame · 1M particles<small>ms; omxcode ties JS + WebGPU</small></b><span data-l="Plain JS">13.88</span><span data-l="WebGPU" class="tie">1.21</span><span data-l="Rust wasm">1.86</span><span data-l="Rust" class="win">0.34</span><span data-l="omxcode" class="tie c">1.23</span><em>Native Rust</em></div>
-<div class="srow"><b>Frame · 2M<small>omxcode ties JS + WebGPU</small></b><span data-l="Plain JS">25.06</span><span data-l="WebGPU" class="tie">1.24</span><span data-l="Rust wasm">3.51</span><span data-l="Rust" class="win">0.64</span><span data-l="omxcode" class="tie c">1.31</span><em>Native Rust</em></div>
-<div class="srow"><b>Frame · 5M<small>ms</small></b><span data-l="Plain JS">57.27</span><span data-l="WebGPU" class="win">1.35</span><span data-l="Rust wasm">16.67</span><span data-l="Rust">1.52</span><span data-l="omxcode" class="c">1.57</span><em>JS + WebGPU</em></div>
-<div class="srow"><b>Frame · 20M<small>omxcode ~2× faster than native Rust</small></b><span data-l="Plain JS">217.70</span><span data-l="WebGPU" class="win">3.01</span><span data-l="Rust wasm">53.45</span><span data-l="Rust">5.99</span><span data-l="omxcode" class="c">3.13</span><em>JS + WebGPU</em></div>
-<div class="srow"><b>Holds 60 fps up to<small>the largest size tested is 20M</small></b><span data-l="Plain JS">100k</span><span data-l="WebGPU" class="tie">20M</span><span data-l="Rust wasm">2M</span><span data-l="Rust" class="tie">20M</span><span data-l="omxcode" class="tie c">20M</span><em class="eq">Three-way tie</em></div>
-<div class="srow"><b>GPU step · 20M<small>ms; the JS and wasm steps run on the CPU</small></b><span data-l="Plain JS">71.2</span><span data-l="WebGPU" class="tie">0.774</span><span data-l="Rust wasm">34.3</span><span data-l="Rust" class="tie">0.771</span><span data-l="omxcode" class="tie c">0.762</span><em class="eq">Tie</em></div>
-<div class="srow"><b>Cold start · 1M<small>ms to the first frame</small></b><span data-l="Plain JS">792</span><span data-l="WebGPU">974</span><span data-l="Rust wasm">1,129</span><span data-l="Rust" class="win">211</span><span data-l="omxcode" class="c">461</span><em>Native Rust</em></div>
-<div class="srow"><b>Peak memory · 1M<small>MB</small></b><span data-l="Plain JS">612</span><span data-l="WebGPU">588</span><span data-l="Rust wasm">870</span><span data-l="Rust" class="win">146</span><span data-l="omxcode" class="c">294</span><em>Native Rust</em></div>
-<div class="srow"><b>App code<small>lines</small></b><span data-l="Plain JS" class="win">243</span><span data-l="WebGPU">522</span><span data-l="Rust wasm">374</span><span data-l="Rust">771</span><span data-l="omxcode" class="c">258</span><em>Plain JS, by 15</em></div>
+    <h1 class="sv">Who wins? <span class="two">Every test.</span></h1>
+    <p class="sup sv">One particle field. Four builds. One machine.</p>
+<div class="score" role="table" aria-label="Scoreboard: one row per test, the winner marked; lower is better unless the row says otherwise"><div class="srow sh" aria-hidden="true"><span>Test</span><span>Plain JS</span><span>JS + WebGPU</span><span>Rust wasm</span><span>Rust native</span><span class="me">omxcode</span><span>Winner</span></div>
+<div class="srow"><b>Frame, 1M<small>ms</small></b><span data-l="Plain JS">13.88</span><span data-l="WebGPU" class="tie">1.21</span><span data-l="Rust wasm">1.86</span><span data-l="Rust" class="win">0.34</span><span data-l="omxcode" class="tie c">1.23</span><em>Rust</em></div>
+<div class="srow"><b>Frame, 2M<small>ms</small></b><span data-l="Plain JS">25.06</span><span data-l="WebGPU" class="tie">1.24</span><span data-l="Rust wasm">3.51</span><span data-l="Rust" class="win">0.64</span><span data-l="omxcode" class="tie c">1.31</span><em>Rust</em></div>
+<div class="srow"><b>Frame, 5M<small>ms</small></b><span data-l="Plain JS">57.27</span><span data-l="WebGPU" class="win">1.35</span><span data-l="Rust wasm">16.67</span><span data-l="Rust">1.52</span><span data-l="omxcode" class="c">1.57</span><em>WebGPU</em></div>
+<div class="srow"><b>Frame, 20M<small>ms</small></b><span data-l="Plain JS">217.70</span><span data-l="WebGPU" class="win">3.01</span><span data-l="Rust wasm">53.45</span><span data-l="Rust">5.99</span><span data-l="omxcode" class="c">3.13</span><em>WebGPU</em></div>
+<div class="srow"><b>60 fps up to</b><span data-l="Plain JS">100k</span><span data-l="WebGPU" class="tie">20M</span><span data-l="Rust wasm">2M</span><span data-l="Rust" class="tie">20M</span><span data-l="omxcode" class="tie c">20M</span><em class="eq">=</em></div>
+<div class="srow"><b>GPU step, 20M<small>ms</small></b><span data-l="Plain JS">71.2</span><span data-l="WebGPU" class="tie">0.774</span><span data-l="Rust wasm">34.3</span><span data-l="Rust" class="tie">0.771</span><span data-l="omxcode" class="tie c">0.762</span><em class="eq">=</em></div>
+<div class="srow"><b>Cold start<small>ms</small></b><span data-l="Plain JS">792</span><span data-l="WebGPU">974</span><span data-l="Rust wasm">1,129</span><span data-l="Rust" class="win">211</span><span data-l="omxcode" class="c">461</span><em>Rust</em></div>
+<div class="srow"><b>Memory<small>MB</small></b><span data-l="Plain JS">612</span><span data-l="WebGPU">588</span><span data-l="Rust wasm">870</span><span data-l="Rust" class="win">146</span><span data-l="omxcode" class="c">294</span><em>Rust</em></div>
+<div class="srow"><b>App lines</b><span data-l="Plain JS" class="win">243</span><span data-l="WebGPU">522</span><span data-l="Rust wasm">374</span><span data-l="Rust">771</span><span data-l="omxcode" class="c">258</span><em>Plain JS</em></div>
 <div class="srow"><b>Files · languages</b><span data-l="Plain JS">3 · 4</span><span data-l="WebGPU">8 · 5</span><span data-l="Rust wasm">10 · 8</span><span data-l="Rust">6 · 3</span><span data-l="omxcode" class="win c">1 · 1</span><em class="us">omxcode</em></div>
-<div class="srow"><b>Agent tools, built in<small>every button and slider</small></b><span data-l="Plain JS">no</span><span data-l="WebGPU">no</span><span data-l="Rust wasm">no</span><span data-l="Rust">no</span><span data-l="omxcode" class="win c">yes</span><em class="us">omxcode</em></div>
+<div class="srow"><b>Agent tools</b><span data-l="Plain JS">no</span><span data-l="WebGPU">no</span><span data-l="Rust wasm">no</span><span data-l="Rust">no</span><span data-l="omxcode" class="win c">yes</span><em class="us">omxcode</em></div>
 </div>
-
-    <div class="tally2 rv" aria-label="Rows won">
-      <span><b>4</b>Native Rust</span><span><b>2</b>JS + WebGPU</span><span class="us"><b>2</b>omxcode</span><span><b>1</b>Plain JS</span><span><b>2</b>ties</span>
-    </div>
-    <p class="bottom rv">Everyone wins something. <span>Only omxcode holds 60 fps at 20M from one file in one language.</span></p>
-    <p class="scorefoot rv"><span>Native Rust is timed offscreen; in a window the compositor caps it at 60 fps.</span><a class="more" href="why-details.html">How we measured ›</a></p>
+    <div class="tally sv" aria-label="Rows won"><span><b>4</b>Rust</span><span><b>2</b>WebGPU</span><span class="us"><b>2</b>omxcode</span><span><b>1</b>Plain JS</span><span><b>2</b>ties</span></div>
   </div>
 </section>
 
-<section id="code" class="ch">
+<!-- 2 · The code -->
+<section class="scr" id="code">
   <div class="wrap">
-    <div class="head">
-      <div class="eyebrow rv">The code</div>
-      <h2 class="rv">Less to write. <span class="two">Nothing to glue.</span></h2>
-      <p class="lede rv">Same spec, same result. <b>One file instead of eight, or thirteen.</b></p>
-    </div>
-    <div class="bars rv" aria-label="Lines of app code per build">
-      <div class="bar2"><b>Plain JS</b><i style="--w:20.3%"></i><em>243 · 4 languages</em></div>
-      <div class="bar2"><b>JS + WebGPU</b><i style="--w:43.5%"></i><em>522 · 5 languages</em></div>
-      <div class="bar2"><b>JS + Rust</b><i style="--w:95.4%"></i><em>374 + 771 · 9 languages</em></div>
-      <div class="bar2 me"><b>omxcode</b><i style="--w:21.5%"></i><em>258 · 1 language</em></div>
-    </div>
-    <div class="shots rv">
-      <figure class="bframe"><div class="bar"><i></i><i></i><i></i><b>Plain JS</b></div><img src="img/why/plain-js-1m.jpg" alt="The plain JavaScript build at one million particles" loading="lazy"></figure>
-      <figure class="bframe"><div class="bar"><i></i><i></i><i></i><b>JS + WebGPU</b></div><img src="img/why/webgpu-1m.jpg" alt="The JavaScript + WebGPU build at one million particles" loading="lazy"></figure>
-      <figure class="bframe"><div class="bar"><i></i><i></i><i></i><b>JS + Rust</b></div><img src="img/why/rust-wasm-1m.jpg" alt="The JavaScript + Rust/wasm build at one million particles" loading="lazy"></figure>
-      <figure class="bframe me"><div class="bar"><i></i><i></i><i></i><b>omxcode</b></div><img src="img/why/omxcode-1m.jpg" alt="The omxcode build at one million particles, in a native window" loading="lazy"></figure>
+    <h2 class="sv">Same app. <span class="two">One file.</span></h2>
+    <div class="cards">
+      <div class="card sv"><h3>JS + WebGPU</h3>
+        <div class="counts"><div>522<span>lines</span></div><div>8<span>files</span></div><div>5<span>languages</span></div></div>
+        <pre aria-label="step.wgsl, lines 15 to 17"><span class="k">@compute</span> @workgroup_size(WG)
+<span class="k">fn</span> <span class="f">main</span>(@builtin(global_invocation_id) g: vec3u) {
+  <span class="k">let</span> i = g.x + g.y * P.rowStride;</pre></div>
+      <div class="card sv d1"><h3>JS + Rust</h3>
+        <div class="counts"><div>1,051<span>lines</span></div><div>13<span>files</span></div><div>9<span>languages</span></div></div>
+        <pre aria-label="sim/src/lib.rs, lines 28 to 30"><span class="k">pub fn</span> <span class="f">step_scalar</span>(p: &amp;<span class="k">mut</span> [f32], v: &amp;<span class="k">mut</span> [f32], cx: f32, cy: f32) {
+    <span class="k">for</span> (p, v) <span class="k">in</span> p.chunks_exact_mut(2).zip(v.chunks_exact_mut(2)) {
+        <span class="k">let</span> dx = cx - p[0];</pre></div>
+      <div class="card me sv d2"><h3>omxcode</h3>
+        <div class="counts"><div>258<span>lines</span></div><div>1<span>file</span></div><div>1<span>language</span></div></div>
+        <pre aria-label="examples/particles/app.mojo, lines 40 to 42"><span class="k">def</span> <span class="f">advance</span>(p: Point, k: Knobs) -&gt; Point:
+    <span class="k">var</span> dx = k[0] - p[0]
+    <span class="k">var</span> dy = k[1] - p[1]</pre></div>
     </div>
   </div>
 </section>
 
-<section id="agents" class="ch">
+<!-- 3 · An agent uses it -->
+<section class="scr" id="agents">
   <div class="wrap">
-    <div class="head">
-      <div class="eyebrow rv">What agents like</div>
-      <h2 class="rv">Less to get wrong. <span class="two">More they can do.</span></h2>
+    <h2 class="sv">Agents call it. <span class="two">No glue.</span></h2>
+    <p class="sup sv">A real tool call to the particle app.</p>
+    <div class="chat">
+      <pre class="ask sv">{"name": "slider", "arguments": {"value": 50}}</pre>
+      <pre class="ans sv d1">Did slider.
+Now: <b>5M particles · 195 fps</b></pre>
     </div>
-    <div class="likes rv">
-      <div class="like"><h3>One file, one language</h3><p>Nothing to keep in sync.</p></div>
-      <div class="like"><h3>Every app is MCP tools</h3><p>The slider is a tool. No server to write.</p></div>
-      <div class="like"><h3>UI as data</h3><p>Over <a href="https://docs.ag-ui.com">AG-UI</a>, agents answer with native screens, checked first.</p></div>
-      <div class="like"><h3>Small by design</h3><p>Every component tested. A lint keeps apps small.</p></div>
-    </div>
-    <div class="call rv">
-      <div><div class="who">The agent moves the slider</div><pre>{"name": "slider", "arguments": {"value": 50}}</pre></div>
-      <div class="res"><div class="who">The app answers in words</div><pre>Did slider.
-Now: 5M particles · 195 fps</pre></div>
-    </div>
-    <p class="scorefoot rv"><span>A real call to the particle app. Nothing in it was written for agents.</span></p>
-  </div>
-</section>
-
-<section class="ch">
-  <div class="wrap">
-    <div class="measured rv">
-      <div><h3>How we measured</h3><p>Every table, the code side by side, and every caveat.</p></div>
-      <a class="cta" href="why-details.html">Read the details</a>
-    </div>
-    <div class="pagelinks rv"><a class="more" href="index.html">The omxcode home page</a><a class="more" href="how.html">How it works</a><a class="more" href="components.html">Components</a><a class="more" href="https://github.com/abhisheksreesaila/omxcode">The code on GitHub</a></div>
+    <div class="go sv"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/benchmarks.md">Every number, how we measured</a></div>
   </div>
 </section>
 
 </main>
 
 <footer>
-  <div class="wrap">
-    <p class="note">Measured by a script on one Linux desktop with an NVIDIA RTX 3090, vsync off, median of three runs. <a href="why-details.html">The details</a>.</p>
-    <div class="fine"><span>omxcode · public alpha · MIT licence · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
-  </div>
+  <div class="wrap"><a href="index.html">omxcode</a><a href="https://github.com/abhisheksreesaila/omxcode">GitHub</a></div>
 </footer>
 
 <script>document.documentElement.classList.remove("no-js")</script>
+<script>if (!document.documentElement.classList.contains("sdt")) document.querySelectorAll(".sv").forEach(e => e.classList.add("rv"));</script>
 <script src="site.js"></script>
 <script src="omxqua/src/omxqua.js" defer></script>
 </body>
