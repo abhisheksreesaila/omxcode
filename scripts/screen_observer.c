@@ -125,6 +125,7 @@ static int frame_damage, frame_state; /* 0 pending, 1 ready, 2 failed */
 static uint64_t t_present, t_recv;
 static uint64_t seq;
 static char dump_path[1024];
+static int have_frame;
 
 static void fr_buffer(void *d, struct zwlr_screencopy_frame_v1 *f, uint32_t format, uint32_t w, uint32_t h, uint32_t stride) {
     binfo.format = format, binfo.width = w, binfo.height = h, binfo.stride = stride, binfo.have_shm = 1;
@@ -210,7 +211,17 @@ static void read_stdin_commands(int *quit) {
     char *line, *rest = buf;
     while ((line = strchr(rest, '\n'))) {
         *line = 0;
-        if (!strncmp(rest, "dump ", 5)) snprintf(dump_path, sizeof dump_path, "%s", rest + 5);
+        if (!strncmp(rest, "dump ", 5)) {
+            /* the last captured frame, now (an idle screen sends no next frame; the buffer holds the last copy until
+               the next damage arrives) */
+            if (have_frame) {
+                write_ppm(rest + 5);
+                printf("D %s\n", rest + 5);
+                fflush(stdout);
+            } else {
+                snprintf(dump_path, sizeof dump_path, "%s", rest + 5);
+            }
+        }
         else if (!strcmp(rest, "quit")) *quit = 1;
         rest = line + 1;
     }
@@ -268,6 +279,7 @@ static int observe(const char *want_output) {
         }
         if (frame_state == 1) {
             uint64_t h = hash_region();
+            have_frame = 1;
             printf("F %llu %llu %llu %016llx %d\n", (unsigned long long)seq++, (unsigned long long)t_present,
                    (unsigned long long)t_recv, (unsigned long long)h, frame_damage);
             fflush(stdout);

@@ -63,7 +63,7 @@ def build():
 # Which compositor everything here talks to: the owner's live desktop (D-765: wayland-1, its own Hyprland instance) or
 # a separate headless Hyprland this module started (HeadlessHyprland.start sets it). hyprctl always names the instance.
 OWNER_WAYLAND = "wayland-1"
-TARGET = {"wayland": OWNER_WAYLAND, "instance": None, "headless": False}
+TARGET = {"wayland": OWNER_WAYLAND, "instance": None, "headless": False, "window_rect": None}
 
 
 def desktop_env():
@@ -90,7 +90,11 @@ hl.config({
     -- a headless output has no cursor plane: the compositor would draw its cursor into every frame (it sat at the
     -- centre, over the measured region); there is no pointer here anyway
     cursor = { invisible = true },
+    animations = { enabled = false },
 })
+-- every window opens floating, at exactly the measured size and place (no resize after it maps, so a cold start's
+-- first frames are already the final layout)
+hl.window_rule({ name = "bench-window", match = { class = ".*" }, float = true, size = "%d %d", move = "%d %d" })
 """
 
 
@@ -103,14 +107,15 @@ class HeadlessHyprland:
     sees no keyboard. Aquamarine's DRM backend on card1 finds no connected connector and so never modesets; the
     renderer is EGL/GBM on renderD128. Stopped by its own PID."""
 
-    def __init__(self, card="/dev/dri/card1", width=1920, height=1080, hz=60):
+    def __init__(self, card="/dev/dri/card1", width=1920, height=1080, hz=60, window=(1280, 800)):
         self.card, self.mode = card, (width, height, hz)
+        self.window = (window[0], window[1], (width - window[0]) // 2, (height - window[1]) // 2)
         self.p = self.instance = self.wayland = None
 
     def start(self, timeout=20):
         HEADLESS_DIR.mkdir(parents=True, exist_ok=True)
         cfg = HEADLESS_DIR / "hyprland.lua"
-        cfg.write_text(HEADLESS_CONFIG % self.mode)
+        cfg.write_text(HEADLESS_CONFIG % (*self.mode, *self.window))
         before = {i["instance"] for i in _instances()}
         env = {"HOME": os.environ["HOME"], "USER": os.environ.get("USER", ""), "PATH": "/usr/bin:/bin",
                "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"),
@@ -134,7 +139,7 @@ class HeadlessHyprland:
         if self.wayland == OWNER_WAYLAND:
             self.stop()
             raise RuntimeError("headless Hyprland took the owner's socket name")
-        TARGET.update({"wayland": self.wayland, "instance": self.instance, "headless": True})
+        TARGET.update({"wayland": self.wayland, "instance": self.instance, "headless": True, "window_rect": list(self.window[2:]) + list(self.window[:2])})
         out = hyprctl("output", "create", "headless", "HEADLESS-1").strip()
         t0 = time.time()
         while time.time() - t0 < 10:
@@ -163,11 +168,12 @@ class HeadlessHyprland:
                 "instance": self.instance, "wayland_display": self.wayland, "drm_device": self.card,
                 "seat": "libseat noop (no logind session)", "xwayland": False,
                 "output": {k: m.get(k) for k in ("name", "width", "height", "refreshRate", "scale")},
+                "window_rule": f"every window floating at {self.window[0]}x{self.window[1]}+{self.window[2]}+{self.window[3]} from the moment it maps; animations off",
                 "compositor": hyprctl("version").splitlines()[0], **(self.renderer() or {})}
 
     def stop(self):
         """Stop only the Hyprland this object started; point everything back at the owner's desktop."""
-        TARGET.update({"wayland": OWNER_WAYLAND, "instance": None, "headless": False})
+        TARGET.update({"wayland": OWNER_WAYLAND, "instance": None, "headless": False, "window_rect": None})
         if self.p and self.p.poll() is None:
             self.p.terminate()
             try:

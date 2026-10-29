@@ -20,42 +20,42 @@
  },
  "probe_commit_to_present_ms_observer_off": {
   "n": 60,
-  "median": 8.155,
-  "p95": 16.461,
-  "min": 0.899,
-  "max": 19.687
+  "median": 10.104,
+  "p95": 16.486,
+  "min": 1.436,
+  "max": 17.017
  },
  "probe_commit_to_present_ms_observer_on": {
   "n": 120,
-  "median": 4.241,
-  "p95": 16.675,
-  "min": 1.21,
-  "max": 27.289
+  "median": 2.571,
+  "p95": 16.066,
+  "min": 1.755,
+  "max": 18.072
  },
  "observer_timestamp_minus_presented_ms": {
   "n": 120,
-  "median": -0.496,
-  "p95": -0.364,
-  "min": -6.838,
-  "max": -0.332
+  "median": -1.561,
+  "p95": -1.329,
+  "min": -2.432,
+  "max": -1.226
  },
  "observer_receipt_minus_presented_ms": {
   "n": 120,
-  "median": 0.072,
-  "p95": 0.211,
-  "min": 0.049,
-  "max": 2.059
+  "median": 0.045,
+  "p95": 0.297,
+  "min": 0.03,
+  "max": 0.382
  },
  "observer_frame_interval_ms_under_continuous_change": {
-  "n": 58,
-  "median": 16.662,
-  "p95": 17.241,
-  "min": 16.053,
-  "max": 35.036
+  "n": 60,
+  "median": 16.665,
+  "p95": 16.752,
+  "min": 12.446,
+  "max": 20.913
  },
  "refresh_ms": 16.667,
- "when": "2026-10-28 16:20:12",
- "load1": 13.74,
- "observer_timestamp_equals_presented": "63 of 120 within 0.5 ms",
+ "when": "2026-10-28 17:15:23",
+ "load1": 3.49,
+ "observer_timestamp_equals_presented": "0 of 120 within 0.5 ms",
  "matching": "each flip's frame found by the expected pixel hash of the probe's new colour"
 }

@@ -70,6 +70,8 @@ OUT = ROOT / "docs/goals/38"
 WORK = ROOT / "build/data_bench"  # per-run output (answers.json, browser profiles): not /tmp (RAM-backed here)
 W, H = 1280, 800
 GAP_MS = 300
+SAME_FRAME_MS = 1000 / 60 / 2
+CHANGE_TIMEOUT_S = 2.0  # after the build's "shown", the KPI region must change within this
 SETTLE_MS = 100  # the KPI region unchanged this long = settled (6 frames at 60 Hz)
 WARM, PASSES, RUNS, COLD = 2, 20, 3, 3
 PSS_MS = 50
@@ -84,7 +86,11 @@ GATE_IDLE_MIB = 16
 STEP_TIMEOUT_S = 120
 READY_TIMEOUT_S = 15 * 60  # A's wasm load of 100M took ~56 s; allow for a slow cold cache
 CHROMIUM = "/usr/lib/chromium/chromium"
-CHROMIUM_FLAGS = ["--ozone-platform=wayland", "--enable-features=Vulkan", "--use-angle=vulkan", "--ignore-gpu-blocklist"]
+# On Wayland, Chromium refuses Vulkan compositing ("'--ozone-platform=wayland' is not compatible with Vulkan") and its
+# window then never updates on screen (tested 2026-10-28 on the headless Hyprland: 1 distinct frame in 1 s with
+# --enable-features=Vulkan, 21 without; WebGL is ANGLE on Vulkan on the RTX 3090 either way): the protocol drops that
+# one flag, for A and B alike.
+CHROMIUM_FLAGS = ["--ozone-platform=wayland", "--use-angle=vulkan", "--ignore-gpu-blocklist"]
 PER_RUN_FLAGS = ("--user-data-dir", "--remote-debugging-port", "--app", "--window-size", "--window-position")
 PY = sys.executable
 
@@ -94,23 +100,27 @@ BUILDS = {
     # ready JSON doesn't give kpi_rect; compute_keys / load_keys: the build's own figures in its shown / ready JSON.
     "A": {"label": "A · JS + DuckDB-WASM", "web": True, "dir": "showcase-data/js-duckdb",
           "cmd": ["{python}", "showcase-data/js-duckdb/external.py", "--rows", "{rows}", "--out", "{out}"],
-          "driver_is_app": False, "kpi": None, "compute_keys": ["query_ms", "compute_ms"],
+          "driver_is_app": False, "kpi": None, "kpi_command": True, "compute_keys": ["query_ms", "compute_ms"],
           "load_keys": ["data_load_ms", "load_ms"],
           "skip": ["check_a.py", "external.py", "package-lock.json"],
           "build_steps": ["pixi install  (Node, esbuild through pixi)", "npm ci --ignore-scripts", "showcase-data/js-duckdb/build.sh",
                           "python showcase-data/js-duckdb/serve.py  (a static server)", "open the page in Chromium"]},
     "B": {"label": "B · JS + FastAPI + Polars", "web": True, "dir": "showcase-data/py-polars",
-          "cmd": None, "driver_is_app": False, "kpi": None, "compute_keys": ["server_compute_ms", "compute_ms"],
+          "cmd": ["{python}", "showcase-data/py-polars/external.py", "--rows", "{rows}", "--out", "{out}"],
+          "driver_is_app": False, "kpi": None, "kpi_command": True, "compute_keys": ["server_compute_ms", "compute_ms"],
           "load_keys": ["data_load_ms", "load_ms"],
-          "skip": ["check_b.py"],
+          "skip": ["check_b.py", "external.py"],
           "build_steps": ["pixi install  (Python, FastAPI, uvicorn, Polars)", "python showcase-data/py-polars/server.py",
                           "open the page in Chromium"]},
     "C": {"label": "C · Rust + Polars + egui", "web": False, "dir": "showcase-data/rust-polars",
-          "cmd": None, "driver_is_app": True, "kpi": None, "compute_keys": ["compute_ms"], "load_keys": ["load_ms", "data_load_ms"],
+          "cmd": ["showcase-data/rust-polars/target/release/dash", "--scripted-external", "--rows", "{rows}", "--out", "{out}"],
+          "driver_is_app": True, "kpi": None, "kpi_command": True, "compute_keys": ["compute_ms"], "load_keys": ["load_ms", "data_load_ms"],
           "skip": ["check_c.py", "Cargo.lock"],
           "build_steps": ["pixi install  (Rust 1.99)", "cargo build --release", "target/release/dash"]},
     "D": {"label": "D · omxcode + omxcore", "web": False, "dir": "examples/dashboard",
-          "cmd": None, "driver_is_app": True, "kpi": None, "compute_keys": ["gpu_ms", "compute_ms"], "load_keys": ["load_ms", "data_load_ms"],
+          "cmd": ["build/dashboard/linux/dashboard", "--scripted-external", "--rows", "{rows}", "--out", "{out}"],
+          "driver_is_app": True, "kpi": None, "kpi_command": False, "compute_keys": ["compute_ms", "gpu_ms"],
+          "load_keys": ["data_load_ms", "load_ms"],
           "skip": [],
           "build_steps": ["pixi install  (Mojo 1.1, MAX)", "scripts/build.sh dashboard linux", "build/dashboard/linux/dashboard"]},
 }
@@ -130,8 +140,23 @@ CAVEATS = [
     "so it is cheaper than any deployed server.",
     "C and D are native desktop programs (native only); A and B are web pages that run in any browser.",
     "D needs an NVIDIA GPU today (CUDA through MAX); Apple through Metal is later work.",
-    "D computes on cents (amounts as integer cents on the GPU) and converts at the edge; its sums match the reference "
-    "within the SPEC's 1e-6 relative tolerance.",
+    "D computes on cents: a deliberate data-model choice (amount and cost become integer cents at load, on every core, "
+    "counted in its load time; sums are exact integers, converted at the edge); A, B and C keep float64. Every build's "
+    "answers match the reference within the SPEC's 1e-6 relative tolerance.",
+    "Every build sorts the rows by day at load (SPEC allows reordering at load; the time is in each load figure), so a "
+    "date range is a contiguous slice or prunable by zone maps.",
+    "Shortcuts each build takes for the newest 50 rows: A stores the table day descending / id ascending so DuckDB's "
+    "zone maps prune the date range and its top-N stops after the first row groups, KPIs and chart in one statement; "
+    "B takes the date range's slice of its day-descending frame and finds the newest 50 with a hand-written "
+    "growing-window search at the slice's start (round 2, as C), the group-by on Polars' streaming engine, orjson; C searches a growing window at the slice's end for the "
+    "last 50 matching rows (hand-written, not plain Polars; its README records the plain forms' slower numbers); D "
+    "finds the cut-off day from a per-day histogram its GPU group-by already makes (product × day), then the rows on "
+    "the GPU. B's and C's searches and D's histogram are equivalent hand-made shortcuts (coordinator, 2026-10-28).",
+    "D wakes its UI the moment a background job ends (mojoui.jobs, a framework feature for every app, D-771); the "
+    "others redraw when their own event loops see the result.",
+    "Chromium's flags for A and B are --ozone-platform=wayland --use-angle=vulkan --ignore-gpu-blocklist: the "
+    "protocol's --enable-features=Vulkan was dropped because Chromium can't composite with Vulkan on Wayland (its "
+    "window never updated on screen with it); WebGL is ANGLE on Vulkan on the RTX 3090 either way.",
     "Input-to-pixels starts when the harness writes the step to the build's driver: for A and B that adds the driver's "
     "hop into the page (a Chrome DevTools Protocol call, about a millisecond), for C and D a pipe into the app.",
     "The observer sees the compositor's frames (60 Hz here): every latency includes waiting for the next composited "
@@ -553,46 +578,85 @@ class Session:
             raise BuildError(f"{self.b}: no KPI region (ready JSON kpi_rect, or BUILDS['{self.b}']['kpi'] from `calibrate`)")
         return [int(v) for v in r]
 
+    def window_rect(self):
+        """Where the window will be: the headless compositor's window rule puts every window at a known rectangle
+        (floating, W × H, centred), so the observer can watch it from before the launch."""
+        return so.TARGET.get("window_rect")
+
+    def kpi_from_build(self, ready):
+        """The KPI row's rect: ask the build (`kpi`, after the window has its final size) when it answers, else the
+        ready line's kpi_rect, else BUILDS[b]['kpi'] (from `calibrate`)."""
+        if self.spec.get("kpi_command"):
+            start = len(self.lines)
+            self.send("kpi")
+            i, _t, _w = self.expect("kpi", 30, start=start)
+            j = json.loads(self.lines[i][1][len("kpi"):].strip() or "null")
+            r = j.get("kpi_rect") if isinstance(j, dict) else j
+            if r:
+                return [round(float(v)) for v in r]
+        return self.kpi_rect(ready)
+
     def open(self, warm_browser=False):
-        """Launch, place the window, observe the KPI region, wait for the first dashboard. Returns the cold-start record."""
-        self.start()
-        rec = {}
-        if warm_browser:
-            self.expect("browser", 120)
-        if self.place:
-            win = self.find_window()
-            rec["window_mapped_ms"] = round((mono_ns() - self.t_exec) / 1e6, 1)
-            self.win = so.place(win, W, H)
-            if self.win["size"] != [W, H]:
-                raise BuildError(f"{self.b}: the window is {self.win['size']}, not {W}×{H}")
-        if warm_browser:
-            self.t_exec = mono_ns()  # without the browser launch: from "open" to the dashboard
-            self.send("open")
-        i, t_ready, w = self.expect("ready", READY_TIMEOUT_S)
-        self.ready = ready_json(self.lines[i][1])
-        kx, ky, kw, kh = self.kpi_rect(self.ready)
+        """Launch with the whole window watched from before exec; first dashboard = the first frame (compositor
+        timestamp) whose whole window equals the settled dashboard. Then watch the KPI row and, below it, the chart
+        and table. Returns the cold-start record."""
+        rect = self.window_rect()
+        full = self.observer_factory(*rect) if rect else None
+        try:
+            self.start()
+            rec = {"window_rect": rect}
+            if warm_browser:
+                self.expect("browser", 120)
+            if self.place:
+                win = self.find_window()
+                rec["window_mapped_ms"] = round((mono_ns() - self.t_exec) / 1e6, 1)
+                self.win = so.place(win, W, H)
+                if self.win["size"] != [W, H]:
+                    raise BuildError(f"{self.b}: the window is {self.win['size']}, not {W}×{H}")
+                if rect and self.win["at"] != rect[:2]:
+                    raise BuildError(f"{self.b}: the window is at {self.win['at']}, not {rect[:2]}")
+            if full is None:  # the owner's desktop: no window rule, watch from the moment it is placed
+                ox, oy = self.win["at"] if self.win else (0, 0)
+                full = self.observer_factory(ox, oy, W, H)
+                rec["cold_note"] = "whole-window observer started after the window was placed (no window rule)"
+            if warm_browser:
+                self.t_exec = mono_ns()  # without the browser launch: from "open" to the dashboard
+                self.send("open")
+            i, t_ready, w = self.expect("ready", READY_TIMEOUT_S)
+            self.ready = ready_json(self.lines[i][1])
+            hf = full.wait_stable(SETTLE_MS * 3, 30)
+            first = so.first_match(full.since(self.t_exec), self.t_exec, hf) if hf else None
+            rec.update({"first_dashboard_ms": round((first[0] - self.t_exec) / 1e6, 1) if first else None,
+                        "first_dashboard_by": "screen: first frame whose whole window equals the settled dashboard",
+                        "observer_saw_it_appear": bool(first) and first[0] != full.frames[0][1],
+                        "ready_line_ms": round((t_ready - self.t_exec) / 1e6, 1), "ready": self.ready})
+            if hf is None:
+                rec["first_dashboard_by"] = "none: the window never settled for 300 ms within 30 s"
+        finally:
+            if full:
+                full.close()
+        kx, ky, kw, kh = self.kpi = self.kpi_from_build(self.ready)
+        ox, oy = self.win["at"] if self.win else (rect[:2] if rect else (0, 0))
+        rest_y = ky + kh
+        self.rest_rect = [0, rest_y, W, H - rest_y]
         if self.obs is None:
-            ox, oy = (self.win["at"] if self.win else (0, 0))
             self.obs = self.observer_factory(ox + kx, oy + ky, kw, kh)
-        h0 = self.obs.wait_stable(SETTLE_MS, 30)
-        if h0 is None:
+            self.rest = self.observer_factory(ox, oy + rest_y, W, H - rest_y)
+        rec["kpi_rect"], rec["rest_rect"] = self.kpi, self.rest_rect
+        if self.obs.wait_stable(SETTLE_MS, 30) is None:
             raise BuildError(f"{self.b}: the KPI region never settled after ready")
-        first = so.first_match(self.obs.since(self.t_exec), self.t_exec, h0)
-        early = first is not None and self.obs.frames and first[0] == self.obs.frames[0][1]
-        rec.update({"first_dashboard_ms": round((first[0] - self.t_exec) / 1e6, 1) if first else None,
-                    "observer_saw_it_appear": bool(first) and not early,
-                    "ready_line_ms": round((t_ready - self.t_exec) / 1e6, 1), "ready": self.ready})
-        self.prev = h0
         self.mem.phase = "warm"
         self.applied = [0]
         return rec
 
     # -- steps --
     def step(self, n, timed=True):
-        """Settle, the 300 ms idle gap, inject step n, wait for its frame. Returns the step's record."""
+        """Settle, the 300 ms idle gap, inject step n, wait for its frame. Two regions: the KPI row (the headline)
+        and everything below it (chart and table): when both show their settled pictures."""
         if self.obs.wait_stable(SETTLE_MS, 30) is None:
             raise BuildError(f"{self.b}: the KPI region didn't settle before step {n}")
-        prev = self.obs.last()[3]
+        rest_ok = self.rest.wait_stable(SETTLE_MS, 5) is not None
+        prev, prev_rest = self.obs.last()[3], self.rest.last()[3]
         time.sleep(GAP_MS / 1000)
         start = len(self.lines)
         if timed:
@@ -601,21 +665,35 @@ class Session:
         self.send(f"step {n}")
         try:
             i, t_shown, w = self.expect("shown", STEP_TIMEOUT_S, arg=n, start=start)
-            final = self.obs.wait_stable(SETTLE_MS, 30, after_ns=t0)
+            # the build's "shown" can come before the compositor presents that frame: wait for the region to change
+            # after the injection first (CHANGE_TIMEOUT_S), then for it to settle
+            changed = self.obs.wait(lambda fr: any(f[1] >= t0 and f[3] != prev for f in fr[-240:]), CHANGE_TIMEOUT_S)
+            final = self.obs.wait_stable(SETTLE_MS, 30, after_ns=t0) if changed else prev
+            rest_changed = rest_ok and self.rest.wait(lambda fr: any(f[1] >= t0 and f[3] != prev_rest for f in fr[-240:]), 1.0)
+            final_rest = self.rest.wait_stable(SETTLE_MS, 5, after_ns=t0) if rest_changed else None
         finally:
             self.mem.gpu_ok = True
         self.applied.append(n)
         if final is None:
             raise BuildError(f"{self.b}: the KPI region never settled after step {n}")
+        if final == prev and n != 0:
+            raise BuildError(f"{self.b}: step {n}'s KPI region didn't change within {CHANGE_TIMEOUT_S} s of '{' '.join(w[:3])}'")
         fr = self.obs.since(t0)
         hit = so.first_match(fr, t0, final)
         change = next((f for f in fr if f[3] != prev), None)
+        rest_hit = so.first_match(self.rest.since(t0), t0, final_rest) if final_rest and final_rest != prev_rest else None
         in_app = float(w[2]) if len(w) > 2 else None
         extra = json.loads(w[3]) if len(w) > 3 and w[3].startswith("{") else {}
-        return {"step": n, "visible_change": final != prev,
-                "latency_ms": round((hit[0] - t0) / 1e6, 3) if hit and final != prev else None,
+        lat = round((hit[0] - t0) / 1e6, 3) if hit and final != prev else None
+        rest_ms = round((rest_hit[0] - t0) / 1e6, 3) if rest_hit else None
+        return {"step": n, "visible_change": final != prev, "latency_ms": lat,
                 "receipt_ms": round((hit[1] - t0) / 1e6, 3) if hit else None,
                 "first_change_ms": round((change[1] - t0) / 1e6, 3) if change else None,
+                "chart_table_ms": rest_ms, "all_ms": max(lat, rest_ms) if lat is not None and rest_ms is not None else None,
+                # two observers copy one compositor frame at slightly different moments (~1–2 ms apart): within half a
+                # frame (8.3 ms at 60 Hz) is the same composited frame
+                "same_frame": (abs(lat - rest_ms) < SAME_FRAME_MS) if lat is not None and rest_ms is not None else None,
+                "rest_settled": final_rest is not None,
                 "shown_line_ms": round((t_shown - t0) / 1e6, 3), "in_app_ms": in_app, "build": extra}
 
     def visible(self):
@@ -641,8 +719,9 @@ class Session:
                 answers = json.loads(p.read_text())
         finally:
             mem = self.mem.stop() if self.mem else None
-            if self.obs:
-                self.obs.close()
+            for o in (self.obs, getattr(self, "rest", None)):
+                if o:
+                    o.close()
             try:
                 self.p.wait(15)
             except subprocess.TimeoutExpired:
@@ -704,7 +783,7 @@ def one_run(b, rows, run, log, gate, passes=PASSES, warm=WARM, observer=None, pl
     data = ROOT / "data" / f"orders-{rows}.parquet"
     rec["page_cache"] = f"warm: {cached(data)} of {data.stat().st_size} bytes of the data file cached at launch" if data.exists() else None
     s = Session(b, rows, out, log, observer=observer, place=place, env=env)
-    lat, inapp, first_change, receipt, build = {}, {}, {}, {}, {}
+    lat, inapp, first_change, receipt, build, rest, allv, same = {}, {}, {}, {}, {}, {}, {}, {}
     answers = mem = None
     try:
         rec["cold_warm_cache"] = s.open()
@@ -730,6 +809,9 @@ def one_run(b, rows, run, log, gate, passes=PASSES, warm=WARM, observer=None, pl
                 first_change.setdefault(k, []).append(r["first_change_ms"])
                 receipt.setdefault(k, []).append(r["receipt_ms"])
                 build.setdefault(k, []).append(r["build"])
+                rest.setdefault(k, []).append(r["chart_table_ms"])
+                allv.setdefault(k, []).append(r["all_ms"])
+                same.setdefault(k, []).append(r["same_frame"])
             log(f"    {b} run {run} pass {p + 1}/{warm + passes}{'' if measured else ' (warm-up)'}: "
                 f"median {statistics.median([v[-1] for v in lat.values()]) if measured else 0:.1f} ms")
         s.mem.phase = "done"
@@ -745,6 +827,7 @@ def one_run(b, rows, run, log, gate, passes=PASSES, warm=WARM, observer=None, pl
         if problems or checked != warm + passes:
             rec["void"] = f"correctness: {problems[:3] or 'not every pass checked'}"
     rec.update({"latency_ms": lat, "in_app_ms": inapp, "first_change_ms": first_change, "receipt_ms": receipt,
+                "chart_table_ms": rest, "all_ms": allv, "same_frame": same,
                 "build_figures": build, "applied": len(s.applied)})
     return rec
 
@@ -802,10 +885,14 @@ def summarise(b, runs, colds, colds_warm_browser):
         xs = [x for r in ok for x in r["latency_ms"].get(k, [])]
         ys = [y for r in ok for y in r["in_app_ms"].get(k, [])]
         fc = [y for r in ok for y in r["first_change_ms"].get(k, [])]
+        al = [y for r in ok for y in r.get("all_ms", {}).get(k, [])]
+        sf = [y for r in ok for y in r.get("same_frame", {}).get(k, []) if y is not None]
         pooled += xs
         pooled_app += ys
         per_step[k] = {"median_ms": r3(med(xs)), "p95_ms": r3(pct(xs, 0.95)), "worst_ms": r3(max(xs) if xs else None),
                        "in_app_median_ms": r3(med(ys)), "first_change_median_ms": r3(med(fc)),
+                       "all_median_ms": r3(med(al)), "all_p95_ms": r3(pct(al, 0.95)),
+                       "same_frame_share": round(sum(sf) / len(sf), 3) if sf else None,
                        "run_medians_ms": [r3(med(r["latency_ms"].get(k, []))) for r in ok]}
     out = {"label": BUILDS[b]["label"], "runs": runs, "per_step": per_step}
     if ok:
@@ -817,7 +904,10 @@ def summarise(b, runs, colds, colds_warm_browser):
             "in_app_pooled_p95_ms": r3(pct(pooled_app, 0.95)),
             "gap_observed_minus_in_app_ms": r3(med([a - b_ for r in ok for k in r["latency_ms"]
                                                     for a, b_ in zip(r["latency_ms"][k], r["in_app_ms"][k]) if a is not None and b_ is not None])),
-            "run_medians_of_medians_ms": [r3(x) for x in run_mom], "samples": len(pooled)}
+            "run_medians_of_medians_ms": [r3(x) for x in run_mom], "samples": len(pooled),
+            "all_median_of_medians_ms": r3(med([v["all_median_ms"] for v in per_step.values()])),
+            "all_pooled_p95_ms": r3(pct([y for r in ok for v in r.get("all_ms", {}).values() for y in v], 0.95)),
+            "same_frame_share": r3(med([v["same_frame_share"] for v in per_step.values()]))}
         comp = {}
         for key in BUILDS[b]["compute_keys"]:
             vals = {k: [f.get(key) for r in ok for f in r["build_figures"].get(k, []) if isinstance(f.get(key), (int, float))]
@@ -965,7 +1055,31 @@ def plan(builds=ORDER, runs=RUNS, passes=PASSES, cold=COLD):
     return lines, total
 
 
+def hold_until(a, log):
+    """--start-after HH:MM: don't start before then, and then wait until the machine has been busy (a scheduled job
+    started: 1-minute load ≥ 4) and quiet again, or --busy-wait-s passed without it getting busy."""
+    if not a.start_after:
+        return
+    hh, mm = (int(x) for x in a.start_after.split(":"))
+    now = time.localtime()
+    target = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, hh, mm, 0, 0, 0, -1))
+    if target < time.time() - 12 * 3600:
+        target += 86400
+    if time.time() < target:
+        log(f"holding until {a.start_after} (the scheduled regression)")
+        while time.time() < target:
+            time.sleep(30)
+    t0, busy = time.time(), False
+    while time.time() - t0 < a.busy_wait_s:
+        if os.getloadavg()[0] >= 4:
+            busy = True
+            break
+        time.sleep(30)
+    log(f"  the machine {'got busy' if busy else 'stayed quiet'} after {a.start_after}; the quiet gate takes it from here")
+
+
 def run_all(a, log):
+    hold_until(a, log)
     comp = None
     if a.display == "headless":
         comp = so.HeadlessHyprland()
@@ -1029,6 +1143,13 @@ def _run_all(a, log, headless):
 def data_caveats(res):
     out = []
     for b, r in res["builds"].items():
+        c = r.get("cold") or {}
+        for v in ("process", "with_browser", "without_browser"):
+            if v in c and c[v].get("page_cache"):
+                out.append(f"{b} cold start ({v.replace('_', ' ')}): {c[v]['page_cache']}")
+        warm = {x.get("page_cache") for x in r["runs"] if x.get("page_cache")}
+        if warm:
+            out.append(f"{b} measured runs launched with the page cache warm: {'; '.join(sorted(warm))}")
         void = [x["void"] for x in r["runs"] if x.get("void")]
         if void:
             out.append(f"{b}: {len(void)} run(s) voided and not counted: {void[:2]}")
@@ -1052,17 +1173,21 @@ def report(res):
          f"Generated by scripts/data_bench.py from results.json ({res['measured_at']}, {res['rows']} rows, "
          f"commit {res['environment']['commit'][:12]}). Do not edit by hand.", "",
          "## Input-to-pixels per change (ms, the external observer)", "",
-         "| Build | median of medians | pooled p95 | worst | in-app median | observed − in-app | first visible change | runs (median each) |",
-         "|---|---|---|---|---|---|---|---|"]
+         "| Build | median of medians | pooled p95 | worst | in-app median | observed − in-app | first visible change | "
+         "KPIs + chart + table: median / p95 | same frame | runs (median each) |",
+         "|---|---|---|---|---|---|---|---|---|---|"]
     for b in bs:
         r = B[b]
         if r.get("does_not_load"):
-            L.append(f"| {r['label']} | does not load: {r['does_not_load'].get('error')} | | | | | | |")
+            L.append(f"| {r['label']} | does not load: {r['does_not_load'].get('error')} | | | | | | | | |")
             continue
         s = r.get("summary") or {}
         fc = med([v.get("first_change_median_ms") for v in r["per_step"].values()])
+        same = "–" if s.get("same_frame_share") is None else f"{100 * s['same_frame_share']:.0f} %"
         L.append(f"| {r['label']} | {f1(s.get('median_of_medians_ms'))} | {f1(s.get('pooled_p95_ms'))} | {f1(s.get('worst_ms'))} | "
                  f"{f1(s.get('in_app_median_of_medians_ms'))} | {f1(s.get('gap_observed_minus_in_app_ms'))} | {f1(fc)} | "
+                 f"{f1(s.get('all_median_of_medians_ms'))} / {f1(s.get('all_pooled_p95_ms'))} | "
+                 f"{same} | "
                  f"{', '.join(f1(x) for x in s.get('run_medians_of_medians_ms', []))} |")
     L += ["", "## Per step (median / p95 / worst, ms)", "", "| Step | change | " + " | ".join(bs) + " |", "|---|---|" + "---|" * len(bs)]
     states = reference.states()
@@ -1108,6 +1233,9 @@ def report(res):
     env, d, o = res["environment"], res["desktop"], res["observer"]
     st = o["selftest"]
     L += ["", "## Setup", "",
+          f"- Display: {d.get('kind')}" + (f" ({d['headless_compositor'].get('renderer')}, {d['headless_compositor'].get('render_node')}, "
+                                             f"output {d['monitor'].get('name')} {d['monitor'].get('width')}×{d['monitor'].get('height')} @ {d['monitor'].get('refreshRate')} Hz)"
+                                             if d.get("headless") else ""),
           f"- CPU {env['cpu']}, {env.get('memory_gb')} GB; GPU {env['gpu'].replace(chr(10), '; ')}; driver {env['driver']}; kernel {env['kernel']}",
           f"- {d['compositor']}; monitor {d['monitor'].get('name')} {d['monitor'].get('width')}×{d['monitor'].get('height')} @ "
           f"{d['monitor'].get('refreshRate')} Hz, scale {d['monitor'].get('scale')}; window {W}×{H} logical",
@@ -1130,7 +1258,7 @@ def report(res):
 
 def write(res):
     OUT.mkdir(parents=True, exist_ok=True)
-    name = "results-provisional" if res.get("provisional") else "results"
+    name = ("results" if res["rows"] == "100M" else f"results-{res['rows']}") + ("-provisional" if res.get("provisional") else "")
     (OUT / f"{name}.json").write_text(json.dumps(res, indent=1) + "\n")
     (OUT / f"{name}.md").write_text(report(res))
     return OUT / f"{name}.json"
@@ -1152,31 +1280,53 @@ def calibrate(b, rows, log, display="headless"):
 
 
 def _calibrate(b, rows, log):
-    """Launch b on the desktop, place its window, save the whole window before and after step 1 (PPM) and the KPI
-    region it uses, so a person can check (or set) BUILDS[b]['kpi']. Closes everything."""
-    out = WORK / f"calibrate-{b}"
+    """Launch b, watch its whole window from before exec, and save it (PNG) at the opening state, after step 1 and
+    after step 0 again, with the KPI rect the build reports drawn as a list; record whether the KPI row, chart and
+    table change in the same frame (calibrate.json). Closes everything."""
+    out = WORK / f"calibrate-{b}-{rows}"
+    out.mkdir(parents=True, exist_ok=True)
+    rect = so.TARGET.get("window_rect") or [0, 0, W, H]
+    full = so.Observer(*rect)
     s = Session(b, rows, out, log)
+    rec = {"build": b, "rows": rows, "window_rect": rect}
     try:
         s.start()
         s.win = so.place(s.find_window(), W, H)
-        i, t, w = s.expect("ready", READY_TIMEOUT_S)
-        ready = ready_json(s.lines[i][1])
-        x, y = s.win["at"]
-        full = so.Observer(x, y, W, H)
+        i, _t, _w = s.expect("ready", READY_TIMEOUT_S)
+        rec["ready"] = ready = ready_json(s.lines[i][1])
         try:
-            full.wait_stable(SETTLE_MS, 30)
-            s.send("step 1")
-            s.expect("shown", STEP_TIMEOUT_S, arg=1)
-            full.wait_stable(SETTLE_MS, 30)
-            s.send("step 0")
-            full.dump(str(out / "window-step0.ppm"))
-            s.expect("shown", STEP_TIMEOUT_S, arg=0)
-        finally:
-            full.close()
-        log(f"{b}: window at {s.win['at']} {s.win['size']}; ready {json.dumps(ready)[:300]}; kpi {ready.get('kpi_rect') or BUILDS[b]['kpi']}")
-        log(f"  pictures in {out}")
+            rec["kpi_rect"] = s.kpi_from_build(ready)
+        except BuildError as e:
+            rec["kpi_rect"] = None
+            rec["kpi_error"] = str(e)
+
+        def shot(name, after_ns=0):
+            full.wait_stable(SETTLE_MS * 3, 30, after_ns=after_ns)  # settled after the change, not before it
+            ppm = out / f"{name}.ppm"
+            full.dump(str(ppm))
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(ppm), str(out / f"{name}.png")], check=False)
+            ppm.unlink(missing_ok=True)
+            return full.last()[3]
+
+        h0 = shot("step0")
+        for n, name in ((1, "step1"), (0, "step0-again")):
+            k0 = len(full.frames)
+            start = len(s.lines)
+            t_send = mono_ns()
+            s.send(f"step {n}")
+            s.expect("shown", STEP_TIMEOUT_S, arg=n, start=start)
+            rec[f"{name}_hash"] = shot(name, t_send)
+            rec[f"{name}_frames_changed"] = len({f[3] for f in full.frames[k0:]})
+        rec["step0_hash"] = h0
+        rec["step0_repeatable"] = rec["step0-again_hash"] == h0
+        log(f"{b}: window {s.win['at']} {s.win['size']}; kpi {rec['kpi_rect']}; ready {json.dumps(ready)[:240]}")
+        log(f"  distinct window pictures during step 1: {rec['step1_frames_changed']} (1 = numbers, chart and table in one frame); "
+            f"step 0 repeats pixel-exactly: {rec['step0_repeatable']}; pictures in {out}")
     finally:
+        full.close()
         s.close()
+        (out / "calibrate.json").write_text(json.dumps(rec, indent=1) + "\n")
+    return rec
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -1283,7 +1433,7 @@ def selftest(log, full=False):
     drv.write_text(FAKE_DRIVER)
     state = WORK / "fake_state"
     state.write_text("boot")
-    BUILDS["F"] = dict(BUILDS["C"], label="F · fake", web=False, driver_is_app=True,
+    BUILDS["F"] = dict(BUILDS["C"], label="F · fake", web=False, driver_is_app=True, kpi_command=False,
                        cmd=["{python}", str(drv), str(ROOT / "showcase-data"), "10M", "{out}", str(state), "0.03"])
     fake_obs = lambda x, y, w, h: FakeObserver(state)  # noqa: E731
     env = dict(os.environ)
@@ -1349,6 +1499,8 @@ def main():
     ap.add_argument("--display", choices=["headless", "desktop"], default="headless",
                     help="headless: a separate headless Hyprland on the GPU (default; the owner's session is locked); "
                          "desktop: the owner's live desktop (D-765)")
+    ap.add_argument("--start-after", help="HH:MM: hold the run until then and until a job that starts then has finished")
+    ap.add_argument("--busy-wait-s", type=int, default=1800)
     ap.add_argument("--full", action="store_true", help="selftest: the fake build at the protocol's full shape (~9 min)")
     ap.add_argument("--provisional", action="store_true", help="no quiet gate (a busy machine): results-provisional.*")
     a = ap.parse_args()

@@ -70,29 +70,45 @@ Resolution: one composited frame (16.7 ms at this monitor's 59.97 Hz). Every bui
 frame; a latency is the time to the compositor's presentation of the first frame that shows the step's settled KPI
 row, so differences below a frame are noise.
 
-## Driver contract (what the harness needs from each build)
+## Driver contract (what the harness needs from each build): all four meet it (2026-10-28)
 
-The four builds expose an external-drive mode; the harness launches it with a command and speaks lines:
-
-| | needed | A (2026-10-28) | B | C | D |
+| | needed | A | B | C | D |
 |---|---|---|---|---|---|
-| launch | a command with `--rows`, `--out` | `external.py` ✓ | – | – | – |
-| `ready <json>` | after step 0's dashboard is on screen | ✓ | | | |
-| `shown N <ms> <json>` | after the frame that shows step N; ms = the build's own change → frame; json may carry its compute figure | ✓ (`query_ms`) | | | |
-| `step N` | **N = 0 too** (the opening state: the harness re-applies it, untimed, between passes so every pass makes the same 32 changes) | ✗ steps 1–32 only | | | |
-| `quit` | answers.json for every step applied, in order, step 0 first; then `bye` and close everything it started | ✓ | | | |
-| Chromium (A, B) | the protocol's binary and flags from `DATA_BENCH_CHROMIUM` and `DATA_BENCH_CHROMIUM_FLAGS` (`--ozone-platform=wayland --enable-features=Vulkan --use-angle=vulkan --ignore-gpu-blocklist`, headed, `--app`) | ✗ check_a's X11 flags (`--disable-vulkan-surface`) | | | |
-| `--warm-browser` (A, B) | start Chromium on about:blank, print `browser <json>`, open the page on stdin `open` (cold start without the browser launch) | ✗ | | | |
-| `kpi_rect` | in `ready`'s json, `[x, y, w, h]` of the KPI row in window logical pixels at 1280 × 800 (else `calibrate` and BUILDS[…]["kpi"]) | ✗ | | | |
+| launch (direct, no `pixi run`) | `--rows`, `--out` | `python external.py` | `python external.py` (server.py its child) | `target/release/dash --scripted-external` | `build/dashboard/linux/dashboard --scripted-external` |
+| `ready <json>` | after step 0's dashboard is drawn | ✓ | ✓ | ✓ | ✓ |
+| `shown N <ms> <json>` | the build's change → frame; its compute figure | ✓ `query_ms` | ✓ `server_compute_ms` | ✓ `compute_ms` | ✓ `compute_ms`, `gpu_ms` |
+| `step N`, N = 0 … 32 | step 0 re-applied (untimed) between passes | ✓ | ✓ | ✓ | ✓ |
+| `quit` → answers.json, `bye` | every step applied, in order | ✓ | ✓ | ✓ | ✓ |
+| KPI row | `kpi_rect` in `ready` or a `kpi` command after the resize | ✓ both | ✓ both | ✓ both | ✓ `kpi_rect` (+ `results_rect`) |
+| Chromium (A, B) | `DATA_BENCH_CHROMIUM(_FLAGS)` | ✓ | ✓ | – | – |
+| `--warm-browser` (A, B) | `browser` line, page on `open` | ✓ | ✓ (server starts on `open`) | – | – |
 
-The harness passes `MOJOUI_HEADLESS=0`, `WAYLAND_DISPLAY=wayland-1`, `DISPLAY=:0`, floats each window to exactly
-1280 × 800 logical pixels (Hyprland 0.56's Lua dispatchers, always naming the window), observes its KPI row, and reads
-the browser's real command line back from /proc to prove A and B ran the same one.
+Calibrated 2026-10-28 on the headless Hyprland at 10M (`data_bench.py calibrate X`, pictures in
+build/data_bench/calibrate-X-10M/): every window at 1280 × 800, the KPI rects frame the three KPI tiles (A, B leave
+out their timing tile), the region below them holds the chart and the table.
+
+## Shortcuts each build takes (stated in results' caveats too)
+- All four sort the rows by day at load (SPEC allows it; the time counts in each load).
+- A: the table stored day desc / id asc, so DuckDB's zone maps prune the date range and its top-N stops early; KPIs
+  and chart in one statement.
+- B: the date range is a slice of the day-descending frame; the newest 50 by a hand-written growing-window search at
+  the slice's start (round 2); group-by on Polars' streaming engine; orjson.
+- C: the newest 50 by a hand-written tail-window search (not plain Polars; its README has the plain forms' numbers).
+- D: the cut-off day for the newest 50 from the per-day histogram its GPU group-by makes; amounts as integer cents
+  (a deliberate data-model choice; the others keep float64); a finished job wakes the UI at once (mojoui.jobs, a
+  framework feature).
+
+## Measuring changes after the first runs
+- Chromium's flags: `--enable-features=Vulkan` dropped (Chromium can't composite with Vulkan on Wayland: the window
+  never updated on screen); A and B both run `--ozone-platform=wayland --use-angle=vulkan --ignore-gpu-blocklist`.
+- Windows open at their final place and size (a window rule in the headless compositor's config), so the cold start
+  is stamped by the screen: the whole window watched from before exec.
+- A step counts only after its KPI row changes on screen (a build's `shown` line can come before the compositor
+  presents that frame).
 
 ## Before the full run
-1. Every build's driver meets the contract above (B, C, D: their READMEs; A: step 0, the flags, `--warm-browser`,
-   `kpi_rect`), then `BUILDS[…]["cmd"]` filled in from each README.
-2. The fairness review in `docs/goals/38/fairness.md` (m5 requires it, and that it didn't change after the run).
+1. Done: every build's driver meets the contract; `BUILDS[…]["cmd"]` filled in from each README.
+2. Done: `docs/goals/38/fairness.md`, frozen (m5 requires it unchanged after the run).
 3. `screen_observer.py selftest --headless` passes with no missed flips (it does now); one `calibrate` per build on
    the headless display, looking at its pictures. Browser builds must run Chromium on Wayland (there is no DISPLAY).
 4. The scheduled full regression (22:00) finished: the quiet gate (load < 0.5, else < 2 after 15 minutes, recorded;
