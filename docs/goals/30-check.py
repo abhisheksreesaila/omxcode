@@ -193,6 +193,7 @@ def m2():
             diff = ImageStat.Stat(ImageChops.difference(shots[0], shots[1])).mean
             if max(diff) > 4.0:
                 problems.append(f"GTK and the web draw the island differently (mean difference {[round(v, 1) for v in diff]})")
+            OUT.mkdir(parents=True, exist_ok=True)  # (M3 made it first; a fresh checkout ran M2 before it, D-763)
             shots[0].save(OUT / "island-gtk.png")
             shots[1].save(OUT / "island-web.png")
     return not problems, "; ".join(problems[:6]) or ("tests/test_island.mojo (faces, the 320 ms morph on the calm curve, less motion, expiry, hit areas, every "
