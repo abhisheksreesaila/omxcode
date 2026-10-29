@@ -11,8 +11,6 @@
 # one GPU wait a frame; then a separate measurement pass of as many frames, each part waited for on its own:
 # step, splat = the GPU's draw, readback = the picture's copy to the CPU).
 
-from std.sys import argv, exit
-from std.os import getenv
 
 from mojoui.maths import sqrt, cos, sin
 from mojoui import (
@@ -21,6 +19,7 @@ from mojoui import (
 )
 from mojoui.gpu import PointCloud, Point, Knobs, OUTSIDE
 from mojoui.clock import now_ns
+from mojoui.shared import arguments, environment, exit_with
 from mojoui.theme import Theme
 from themes.omxqua import omxqua
 
@@ -105,11 +104,11 @@ def json_list(xs: List[Float64]) -> String:
 # ---------- scripted mode ----------
 
 def flag(name: String, env: String, fallback: String) -> String:
-    var args = argv()
+    var args = arguments()
     for i in range(len(args)):
         if String(args[i]) == name:
             return String(args[i + 1]) if i + 1 < len(args) and not String(args[i + 1]).startswith("--") else "1"
-    var v = getenv(env)
+    var v = environment(env)
     return v if v != "" else fallback
 
 
@@ -280,10 +279,10 @@ struct Main(App):
                 )
         except e:
             print("particles: couldn't write the results: " + String(e))
-            exit(1)
+            exit_with(1)
         _ = len(xy)
         print("particles: wrote " + self.out + "/positions.bin and timings.json", flush=True)
-        exit(0)
+        exit_with(0)
 
     def measure(mut self) -> Tuple[List[Float64], List[Float64]]:
         """Scripted, after the positions are saved: `frames` more frames into a scratch picture, each part waited for on

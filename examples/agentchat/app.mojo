@@ -7,7 +7,6 @@
 #   scripts/agentchat.sh             the scripted agent (deterministic) and the app on GTK
 #   docs/agui.md                     the live agent: the OMX Console's local models, or Claude
 
-from std.os import getenv
 from mojoui.view import (
     View, Text, Button, TextField, VStack, HStack, Card, Spacer, Scroll, Divider,
     CAPTION, HEADLINE, TITLE, PROMINENT, START, END, CENTER, SPACE_XS, SPACE_S, SPACE_M, SPACE_L, CARD_WARN,
@@ -16,6 +15,7 @@ from mojoui.app import App, Event
 from mojoui.canvas import Surface
 from mojoui.theme import Theme
 from mojoui.http import Http, Request
+from mojoui.shared import environment
 from mojoui.agui import Agent, Tool, EV_TEXT, EV_TOOL_END, EV_STATE, EV_STREAM_END
 from mojoui.genui import schema, MAX_CONTROLS
 from mojoui.agentui import Screens, MAX_RETRIES
@@ -48,7 +48,7 @@ struct Main(App):
 
     def __init__(out self):
         self.http = Http()
-        var url = getenv("AGUI_URL")
+        var url = environment("AGUI_URL")
         self.url = url if url != "" else String("http://127.0.0.1:8765/")
         self.agent = Agent(self.url, PIECE, ENDED, "agentchat")
         self.agent.offer(Tool("render_ui", "Show UI in the chat, built only from the app's catalogued components (data, never code). "
