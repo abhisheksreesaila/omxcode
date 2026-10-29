@@ -1,2 +1,4 @@
-widgets
+omxplorer
+maccheck
 console
+widgets
