@@ -3,7 +3,7 @@
 #   HTTP_TEST_URL=http://127.0.0.1:PORT/ HTTP_TEST_DEAD=http://127.0.0.1:PORT2/ HTTP_TEST_SECRET=… build/test_http
 # Prints one line per case (scripts/check.py compares them with what the server sent and saw).
 from std.testing import assert_equal, assert_true
-from std.os import getenv
+from std.os import getenv, setenv
 from mojoui.app import App, Event, Runtime
 from mojoui import View, Text
 from mojoui.http import Http, Request, Response, Url, TLS_NEEDED
@@ -145,6 +145,18 @@ def main() raises:
     for value in ["a\x01b", "a\x7fb", "a\rb", "a\nb", "a\x00b"]:
         var r = SocketTransport.send(Request.get(0, base + "evil").header("X-Evil", value))
         assert_true(r.status == 0 and r.error.find("control character") >= 0, "a header value with a control character: " + r.error)
+    # an env header's value is read when the request goes out: one holding a control character is refused there, naming
+    # the variable and never its value (it may be a secret), and nothing reaches the server (goal 33 reviewer round 2)
+    for value in ["a\r\nX-Evil: 1", "a\nX-Evil: 1", "a\x01b", "a\x7fb"]:  # (no NUL: an environment string ends at one)
+        _ = setenv("HTTP_TEST_BAD", value)
+        var r = SocketTransport.send(Request.get(0, base + "evil").header_from_env("X-Bad", "HTTP_TEST_BAD"))
+        assert_true(r.status == 0 and r.error.find("control character") >= 0, "an env header's value with a control character: " + r.error)
+        assert_true(r.error.find("HTTP_TEST_BAD") >= 0, "the error names the variable: " + r.error)
+        assert_true(r.error.find("X-Evil") < 0 and r.error.find("a\x01") < 0 and r.error.find("a\x7f") < 0, "the error never shows the value: " + r.error)
+    _ = setenv("HTTP_TEST_BAD", "a\tb c")  # (a tab inside an env value is allowed too)
+    var env_tab = SocketTransport.send(Request.get(0, base + "header?name=X-Tab").header_from_env("X-Tab", "HTTP_TEST_BAD"))
+    assert_equal(env_tab.status, 200)
+    assert_equal(env_tab.text(), "a\tb c")
     var tabbed = SocketTransport.send(Request.get(0, base + "header?name=X-Tab").header("X-Tab", "a\tb c"))  # (a tab inside a value is allowed)
     assert_equal(tabbed.status, 200)
     assert_equal(tabbed.text(), "a\tb c")
