@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 36 re-measured on the final regression sources (2026-10-29)
+- **Setup:** branch particles-remeasure from regression-2026-10-28 with D-767's particles change (imports only mojoui), its own pixi env; RTX 3090, Mojo 1.1, Hyprland 0.56.2 (owner's desktop, D-735, the monitor turned on for the desktop runs and off after, owner's call), Chromium 152.
+- **Worked:** results.json (Xvfb, 11779 s, gated), results-desktop.json (3800 s, gated), present-desktop.json (659 of 660 frames from the GPU, 0 readbacks), the page regenerated; goal 36 M0–M8 PASS; goal 5 M9 and goal 3 M6 PASS (no app imports outside mojoui/themes).
+- **Broke and fixed:** goal 36 M6 allows exactly D-767's lines beside the GPU-canvas line (D-768). On the desktop JS + Rust/wasm's headed Chromium was capped at one refresh (16.674 ms at 1M–5M, every run; published 1.86/3.51 ms at 1M/2M), on an empty workspace too after one uncapped probe; not chased further (owner): the page labels it "capped (compositor)" and reads its speed from the virtual display (D-769).
+- **Result (desktop frame ms 1M/5M/20M):** omxcode 1.28/1.63/3.13 (published 1.23/1.57/3.13), JS + WebGPU 1.29/1.33/3.01, Rust + wgpu offscreen 0.34/1.53/6.01. Scoreboard winners and ties unchanged except JS + Rust/wasm's "60 fps up to" cell (2M → capped).
+- **Next small step:** the owner updates the site's scoreboard (list in the session report) and decides whether B-wasm's desktop cap is worth a hunt.
+
 ## Night regression (2026-10-28 → 29)
 - **Setup:** a fresh worktree on origin/main b233357, its own pixi env; goal 36's check and every archived check back through goal 3 (via 35 → 34b → 34 → 33 → 32 → 30), three passes; GitHub Mac runs 40829521876, 40836799290, 40872704059.
 - **Worked:** after fixes, goals 33 (M0–M8, the whole chain to goal 3), 34, 34b, 35 and goal 36's M0–M3, M5, M6b, M6c, M8 PASS.

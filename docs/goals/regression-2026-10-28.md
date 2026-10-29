@@ -54,6 +54,9 @@ code from the file. So the particles change waits on branch `regression-particle
 re-measure, and this branch keeps the measured source. Until then goal 5 M9 / goal 3 M6 fail on particles alone,
 and so does goal 33 M8.
 
+**2026-10-29:** landed on branch `particles-remeasure` with the owner's re-measure (D-768): goal 36 M0–M8 PASS on
+fresh results, goal 5 M9 and goal 3 M6 PASS. JS + Rust/wasm's desktop row came back capped at one refresh (D-769).
+
 ## Reviewer
 Round 1 NEEDS WORK (a stale Mac run after look.mojo; the matrix counted definitions) → fixed; round 2 PASS (three
 small should-fixes, done); round 3 PASS (two wording nits, done).
