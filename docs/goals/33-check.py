@@ -3,7 +3,8 @@ M0–M5 run as M8, every earlier goal's inside them). Rebuilds from scratch, pri
 
 Run: scripts/check   (a subset without rebuilding: scripts/check M0 M1; earlier goals: through docs/goals/NN-check.py)
 Each milestone's proof is written before its work starts (todo() until then: it fails), from GOAL.md's words.
-The original console is read from MXCONSOLE_DIR (default ~/Projects/mxstudio/mxconsole/console), never written.
+The original console is read from MXCONSOLE_DIR (default: mxstudio's console at 798ef8c, the one this goal measured,
+archived into build/; D-760), never written.
 """
 
 import importlib.util
@@ -25,11 +26,15 @@ ORIGINAL = "798ef8c"
 def _pinned_original():
     out = ROOT / "build" / f"mxconsole-{ORIGINAL}"
     if not (out / "index.html").exists():
+        import shlex
         import subprocess
         out.mkdir(parents=True, exist_ok=True)
-        a = subprocess.run(f"git -C {Path.home() / 'Projects/mxstudio'} archive {ORIGINAL} mxconsole/console | tar -x --strip-components=2 -C {out}",
+        repo = Path.home() / "Projects/mxstudio"
+        a = subprocess.run(f"git -C {shlex.quote(str(repo))} archive {ORIGINAL} mxconsole/console | tar -x --strip-components=2 -C {shlex.quote(str(out))}",
                            shell=True, capture_output=True, text=True)
         if a.returncode != 0 or not (out / "index.html").exists():
+            print(f"goal 33: can't archive the original console at {ORIGINAL} from {repo} ({(a.stderr or 'no index.html').strip()[:200]}): "
+                  "reading MXCONSOLE_DIR or the live console instead", file=sys.stderr)
             return None
     return out
 
