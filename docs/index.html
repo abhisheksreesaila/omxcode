@@ -232,7 +232,7 @@
 
 <nav class="lnav">
   <a class="brand" href="#top"><span class="mark" aria-hidden="true">ox</span>omxcode</a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#agents">Agents</a><a href="#speed">Speed</a><a href="#model">One program</a><a href="#apps">Apps</a><a href="#dev">Developers</a></div>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#agents">Agents</a><a href="#speed">Speed</a><a href="#data">Data</a><a href="#model">One program</a><a href="#apps">Apps</a><a href="#dev">Developers</a></div>
   <div class="right"><a class="cta" href="#get">Download</a></div>
 </nav>
 
@@ -392,8 +392,43 @@
     <div class="scorefoot rv">
       <span>Rust native only renders offscreen on this NVIDIA + Wayland desktop; in a window the compositor caps it at 16.7 ms.</span>
       <span>Effort, if you still count it: omxcode 1 file, 1 language; JS + WebGPU 8 and 5; JS + Rust 13 and 9.</span>
-      <span class="slot">100M-row data benchmark · results coming</span>
       <a class="more" href="why.html">The full scoreboard</a>
+    </div>
+  </div>
+</section>
+
+<!-- 3b · Data: the 100M-row dashboard, four builds, input to pixels measured by a screen observer (goal 38) -->
+<section id="data">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Measured <span class="badge ok big"><i></i>100M rows</span></div>
+      <h2 class="rv">100M rows. <span class="two">Fastest to the screen.</span></h2>
+      <p class="lede rv">One dashboard, 32 filter changes, four builds. <b>Timed from input to pixels on screen.</b></p>
+    </div>
+    <div class="wins rv" aria-label="Where omxcode wins"><i class="wl">omxcode wins</i>
+      <span><b>30 ms</b> a change, on screen</span>
+      <span><b>2.7×</b> steadier than Rust (p95)</span>
+      <span><b>4.0 s</b> cold start</span>
+      <span><b>4.5×</b> less compute than Rust</span>
+    </div>
+    <div class="score four rv" role="table" aria-label="Data scoreboard at 100M rows, lower is better">
+      <div class="srow sh" aria-hidden="true"><span>Test</span><span>JS + DuckDB-WASM</span><span>JS + Python Polars</span><span>Rust + Polars</span><span class="me">omxcode</span><span>Winner</span></div>
+      <div class="srow"><b>A change, on screen<small>median ms</small></b><span data-l="DuckDB">104.9</span><span data-l="Py Polars">44.2</span><span data-l="Rust">37.0</span><span data-l="omxcode" class="win c">30.3</span><em class="us">omxcode</em></div>
+      <div class="srow"><b>Slowest 5 %<small>p95 ms</small></b><span data-l="DuckDB">285.5</span><span data-l="Py Polars">138.3</span><span data-l="Rust">130.7</span><span data-l="omxcode" class="win c">49.1</span><em class="us">omxcode</em></div>
+      <div class="srow"><b>Worst change<small>ms</small></b><span data-l="DuckDB">383.0</span><span data-l="Py Polars">181.4</span><span data-l="Rust">256.5</span><span data-l="omxcode" class="win c">63.3</span><em class="us">omxcode</em></div>
+      <div class="srow"><b>Compute only<small>median ms</small></b><span data-l="DuckDB">89.8</span><span data-l="Py Polars">18.2</span><span data-l="Rust">16.6</span><span data-l="omxcode" class="win c">3.7</span><em class="us">omxcode</em></div>
+      <div class="srow"><b>Cold start<small>s · file not cached</small></b><span data-l="DuckDB">51.3</span><span data-l="Py Polars">6.0</span><span data-l="Rust">6.7</span><span data-l="omxcode" class="win c">4.0</span><em class="us">omxcode</em></div>
+      <div class="srow"><b>Memory<small>GB, steady</small></b><span data-l="DuckDB">3.7</span><span data-l="Py Polars">3.8</span><span data-l="Rust" class="win">3.6</span><span data-l="omxcode" class="c">5.6<sup>+ 5.7 GPU</sup></span><em>Rust</em></div>
+    </div>
+    <div class="wins rust rv" aria-label="Where others win"><i class="wl">Rust wins</i>
+      <span><b>3.6 GB</b> memory, no GPU</span>
+      <span><b>~20 ms</b> narrow-range changes</span>
+      <span class="wg"><b>Python + Polars</b> fewest lines: 370</span>
+    </div>
+    <div class="scorefoot rv">
+      <span>Every build matched DuckDB's answers on every pass. One RTX 3090, a 60 Hz compositor, 3 runs × 20 passes.</span>
+      <span>omxcode needs an NVIDIA GPU today and sums in integer cents; the others use float64.</span>
+      <a class="more" href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/data-benchmark.md">The full results</a>
     </div>
   </div>
 </section>
