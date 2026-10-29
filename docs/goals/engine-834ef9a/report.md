@@ -24,5 +24,21 @@ Branch `engine-834ef9a` from `release-2026-10-29`. The engine is vendored as `ve
 | Goal 20 M1, M2 (100M streamed vs pyarrow, peak 0.37 GB) | PASS |
 | Goal 29 M0–M4 (1M: 0.5 / 6.4 / 5.8 ms; 100M in memory 45.9 / 680.8 / 485.2 ms, as on 3d2455d) | PASS |
 | Goal 30 M0–M4 (100M on GTK, the window keeps drawing) | PASS |
-| Goal 32 M6 | see EXPERIMENTS.md (needs the Mac run's GPU probe) |
+| Goal 32 M6 (gpu_audit: every kernel fits Apple's 32 KB; the Mac GPU probe) | PASS |
+| Goal 36 M0–M3, M5, M6b, M6c, M8 | PASS; M4, M6, M7 say only "stale" (their source hashes cover mojoui/, which this branch touches) |
+| Mac (GitHub run 40959478762): the native GPU build (D-774), omxplorer on the runner's Apple GPU, Sum 114,007,922.00 (`mac-gpu-report.png`); the cross-built CPU app on macOS 15 and 26 (`mac-cross-report.png`, run 40957099769) | PASS |
 | Fresh clone (~/.cache/fresh-clone): README's pixi install, scripts/omxplorer.sh (headless), scripts/omxplorer.sh web | opens, computes (`fresh-clone-*.png`) |
+
+## The Mac download
+Run 40959478762's `report-macos-26` artifact holds `omxplorer-mac-gpu.zip` (3.5 MB, built on the runner from these
+sources with engine 834ef9a; the release's asset is 3.1 MB from 2026-10-25, the older engine). To replace it, the owner:
+
+```sh
+gh run download 40959478762 -R abhisheksreesaila/omxcode -n report-macos-26 -D /tmp/mac-gpu
+gh release upload mac-app /tmp/mac-gpu/omxplorer-mac-gpu.zip --clobber -R abhisheksreesaila/omxcode
+```
+(GitHub keeps the artifact 90 days; a copy is in ~/.cache/e834/omxplorer-mac-gpu.zip.) Not done here: the release is public.
+
+## Left for later (reviewer, round 1)
+- Sorting a streamed file still refuses past a quarter of memory; 5e4cdb1 can spill instead (`permutation(..., budget=, spill_dir=)`).
+- A formula replaced by the identical text undoes as "an edit" in the message (cosmetic).
