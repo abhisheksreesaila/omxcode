@@ -119,7 +119,7 @@
       <div class="srow"><b>GPU step, 20M<small>ms · JS and wasm on the CPU</small></b><span data-l="Plain JS">71.2</span><span data-l="WebGPU" class="tie">0.774</span><span data-l="Rust wasm">34.3</span><span data-l="omxcode" class="tie c">0.762</span><span data-l="Rust off" class="off">0.771</span><em class="eq">Tie</em></div>
       <div class="srow"><b>Agent tools<small>MCP · AG-UI</small></b><span data-l="Plain JS">no</span><span data-l="WebGPU">no</span><span data-l="Rust wasm">no</span><span data-l="omxcode" class="win c">yes</span><span data-l="Rust off" class="off">no</span><em class="us">omxcode</em></div>
     </div>
-    <p class="rustwin rv"><b>Where Rust wins.</b> Offscreen frames up to 5M, cold start (211 ms vs 461) and memory (146 MB vs 294). JS + WebGPU is a little faster from 5M to 20M.</p>
+    <p class="rustwin rv">Where Rust wins: Offscreen frames up to 5M, cold start (211 ms vs 461) and memory (146 MB vs 294). JS + WebGPU is a little faster from 5M to 20M.</p>
     <div class="scorefoot rv">
       <span>Why offscreen: on this NVIDIA + Wayland desktop, Rust's window is capped at 16.7 ms a frame.</span>
       <span class="slot">100M-row data benchmark · results coming</span>

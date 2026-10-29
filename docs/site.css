@@ -192,8 +192,8 @@ footer .fine { margin-top: 48px; padding-top: 22px; border-top: 1px solid var(--
 .srow.sh > span.off { color: var(--ink2); text-transform: none; letter-spacing: 0; font: 500 11.5px/1.25 var(--mono); }
 .srow.sh > span.off small { display: block; font-size: 10px; opacity: .8; }
 .srow > span sup { display: block; vertical-align: 0; font: 650 10.5px/1.2 var(--sans); color: var(--oq-ok); margin-top: 2px; }
-.rustwin { margin: 18px 0 0; padding: 14px 18px; border-radius: 18px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); font: 15px/1.5 var(--sans); color: var(--ink2); max-width: 900px; }
-.rustwin b { color: var(--ink); font-weight: 600; }
+.rustwin { margin: 14px 0 0; padding: 0; background: none; box-shadow: none; font: 12.5px/1.6 var(--mono); color: var(--ink2); max-width: 900px; }
+.rustwin b { color: inherit; font-weight: inherit; }
 .scorefoot { font-size: 12.5px; }
 .scorefoot .slot { padding: 6px 12px; border-radius: 999px; border: 1.5px dashed color-mix(in srgb, var(--soon) 70%, transparent); color: var(--soon); }
 @media (max-width: 860px) {
