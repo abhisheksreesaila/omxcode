@@ -12,7 +12,7 @@
 
 The protocol (docs/goals/38/README.md; the fairness reviewer's, 2026-10-28):
 1. Environment recorded (CPU, GPU, driver, kernel, compositor, Chromium/Rust/Mojo/Polars/DuckDB versions, commit,
-   data.lock). Quiet gate before every run: 1-minute load < 0.5 (after GATE_STRICT_S of waiting, < 2 with the value
+   data.lock). Quiet gate before every run (and no scripts/check.py running in any worktree): 1-minute load < 0.5 (after GATE_STRICT_S of waiting, < 2 with the value
    recorded), GPU utilisation < 5 %, no other GPU process above 16 MiB except the desktop session's graphics clients
    (processes running before the harness started with only graphics contexts); the screen must be live (unlocked).
 2. A separate headless Hyprland on the GPU (default since 2026-10-28: the owner's session is locked; recorded as such
@@ -304,6 +304,24 @@ def gpu_util():
         return 100
 
 
+def checks_running():
+    """Any scripts/check.py (or scripts/check) running in any worktree, not ours: [(pid, command)]. Read from /proc
+    argv elements (the same thing `pgrep -af scripts/check.py` lists, without matching a shell line that merely
+    mentions it); this harness never stops them."""
+    mine = set(descendants(os.getpid())) | ancestry_pids()
+    out = []
+    for p in Path("/proc").iterdir():
+        if not p.name.isdigit() or int(p.name) in mine:
+            continue
+        try:
+            argv = (p / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if any(a.endswith((b"scripts/check.py", b"scripts/check")) for a in argv):
+            out.append((int(p.name), b" ".join(argv).decode(errors="replace")[:160]))
+    return out
+
+
 class NotQuiet(Exception):
     pass
 
@@ -328,16 +346,18 @@ class Gate:
             procs = gpu_processes()
             busy = self.busy_apps(procs, mine)
             limit = GATE_STRICT if waited < GATE_STRICT_S else GATE_LOOSE
-            if load < limit and util < GATE_GPU_UTIL and not busy:
+            checks = checks_running()
+            if load < limit and util < GATE_GPU_UTIL and not busy and not checks:
                 live = so.screen_live()
                 if live is None:
                     self.waited += waited
                     return {"gated": True, "load1": round(load, 2), "load_limit": limit, "gpu_util": util,
-                            "waited_s": round(waited), "busy_gpu_apps": [],
+                            "waited_s": round(waited), "busy_gpu_apps": [], "checks_running": [],
                             "gpu_processes": [f"{p[1]} {p[2]} {Path(p[3]).name} {p[4]} MiB" for p in procs]}
                 why = f"screen not live ({live})"
             else:
-                why = f"load {load:.2f} (< {limit}), GPU {util} %, {len(busy)} other GPU apps"
+                why = (f"load {load:.2f} (< {limit}), GPU {util} %, {len(busy)} other GPU apps, "
+                       f"{len(checks)} scripts/check.py running")
             if self.waited + waited > GATE_BUDGET_S:
                 raise NotQuiet(f"never quiet before {what}: {why}")
             if time.time() - said > 600 or not said:
@@ -1069,6 +1089,9 @@ def hold_until(a, log):
         log(f"holding until {a.start_after} (the scheduled regression)")
         while time.time() < target:
             time.sleep(30)
+    if a.busy_wait_s <= 0:
+        log(f"  {a.start_after} reached; the quiet gate takes it from here")
+        return
     t0, busy = time.time(), False
     while time.time() - t0 < a.busy_wait_s:
         if os.getloadavg()[0] >= 4:
