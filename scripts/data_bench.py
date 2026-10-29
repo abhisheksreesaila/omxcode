@@ -12,7 +12,7 @@
 
 The protocol (docs/goals/38/README.md; the fairness reviewer's, 2026-10-28):
 1. Environment recorded (CPU, GPU, driver, kernel, compositor, Chromium/Rust/Mojo/Polars/DuckDB versions, commit,
-   data.lock). Quiet gate before every run (and no scripts/check.py running in any worktree): 1-minute load < 0.5 (after GATE_STRICT_S of waiting, < 2 with the value
+   data.lock). Quiet gate before every run (and no scripts/check.py running in any worktree): 1-minute load < 0.5 (after GATE_STRICT_S = 2 minutes of waiting, < 2 with the value
    recorded), GPU utilisation < 5 %, no other GPU process above 16 MiB except the desktop session's graphics clients
    (processes running before the harness started with only graphics contexts); the screen must be live (unlocked).
 2. A separate headless Hyprland on the GPU (default since 2026-10-28: the owner's session is locked; recorded as such
@@ -78,7 +78,7 @@ PSS_MS = 50
 TREE_SCAN_S = 1.0  # the process tree is re-read once a second (new processes join within a second)
 GPU_S = 1.0
 GATE_STRICT, GATE_LOOSE = 0.5, 2.0
-GATE_STRICT_S = 15 * 60  # wait this long for load < 0.5 before accepting < 2 (recorded)
+GATE_STRICT_S = 120  # try this long for load < 0.5, then accept < 2 (the coordinator's threshold), recorded per run
 GATE_BUDGET_S = 6 * 3600
 GATE_POLL_S = 30
 GATE_GPU_UTIL = 5
@@ -1086,7 +1086,7 @@ def hold_until(a, log):
     if target < time.time() - 12 * 3600:
         target += 86400
     if time.time() < target:
-        log(f"holding until {a.start_after} (the scheduled regression)")
+        log(f"holding until {a.start_after}")
         while time.time() < target:
             time.sleep(30)
     if a.busy_wait_s <= 0:

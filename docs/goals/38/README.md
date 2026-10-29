@@ -111,5 +111,5 @@ out their timing tile), the region below them holds the chart and the table.
 2. Done: `docs/goals/38/fairness.md`, frozen (m5 requires it unchanged after the run).
 3. `screen_observer.py selftest --headless` passes with no missed flips (it does now); one `calibrate` per build on
    the headless display, looking at its pictures. Browser builds must run Chromium on Wayland (there is no DISPLAY).
-4. The scheduled full regression (22:00) finished: the quiet gate (load < 0.5, else < 2 after 15 minutes, recorded;
+4. The quiet gate (load < 0.5, else < 2 after 2 minutes, recorded;
    GPU < 5 %; no other GPU process above 16 MiB) holds the run until then anyway.

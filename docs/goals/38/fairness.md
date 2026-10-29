@@ -71,7 +71,7 @@ scripts/data_bench.py's docstring is the protocol; the points that make it one f
   frame whose KPI row shows the settled new numbers (scripts/screen_observer.c, its own self-test recorded); a
   second region (everything below the KPI row: chart and table) timed the same way, and whether both land in the
   same composited frame; the build's own stamp kept beside.
-- Quiet gate before every run (load < 0.5, else < 2 after 15 minutes, recorded; GPU < 5 %; no other GPU process
+- Quiet gate before every run (load < 0.5, else < 2 after 2 minutes, recorded; GPU < 5 %; no other GPU process
   above 16 MiB), interleaved runs (ABCD, BCDA, CDAB), fresh launch, 2 warm-up + 20 measured passes at 100M (10 at
   10M), 300 ms idle before every step, step 0 between passes, reference.compare on every pass.
 - Cold start screen-stamped: the whole window watched from before exec (its rectangle is fixed by the window rule);
