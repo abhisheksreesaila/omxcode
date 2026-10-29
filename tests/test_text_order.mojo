@@ -3,7 +3,7 @@
 # first is the reverse.
 #   scripts/mxbuild.sh tests/test_text_order.mojo -o build/test_text_order && build/test_text_order
 from std.testing import assert_equal
-from mxframe import Table, write_parquet, scan_parquet, UNCOMPRESSED, TEXT as MX_TEXT
+from omxcore import Table, write_parquet, scan_parquet, UNCOMPRESSED, TEXT as MX_TEXT
 from mojoui.sheet import Sheet
 
 comptime PATH = "build/test_text_order.parquet"

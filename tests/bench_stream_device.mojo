@@ -3,7 +3,7 @@
 #   scripts/mxbuild.sh tests/bench_stream_device.mojo -o build/bench_stream_device && build/bench_stream_device build/g20/big.parquet
 from std.sys import argv
 from std.testing import assert_equal
-from mxframe import Frame, Query, col, sum, count, scan_parquet, gpu_available, CPU, GPU, AUTO
+from omxcore import Frame, Query, col, sum, count, scan_parquet, gpu_available, CPU, GPU, AUTO
 
 
 def run(f: Frame, device: Int, grouped: Bool, groups: Int) raises -> Tuple[Float64, List[Int], Int, String]:

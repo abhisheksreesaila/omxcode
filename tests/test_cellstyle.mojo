@@ -5,7 +5,7 @@
 # removed row before the styled cells and an added row after them) and the tabs' names.
 #   scripts/mxbuild.sh tests/test_cellstyle.mojo -o build/test_cellstyle && build/test_cellstyle
 from std.testing import assert_equal, assert_true, assert_false
-from mxframe import Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
+from omxcore import Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette

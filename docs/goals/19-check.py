@@ -223,8 +223,8 @@ def m5():
         for f in ("mojoui/csvio.mojo", "mojoui/omxfile.mojo", "mojoui/sample.mojo", "mojoui/json.mojo", "mojoui/sheet.mojo", "mojoui/sheetpage.mojo", "mojoui/reportpage.mojo", "examples/omxplorer/app.mojo"):
             if needle in (ROOT / f).read_text():
                 problems.append(f"{f} uses {needle}")
-    if not (ROOT / "vendor/mxframe.mojoc").exists() or not (ROOT / "vendor/MXFRAME_COMMIT").read_text().strip():
-        problems.append("vendor/mxframe.mojoc or its recorded source commit is missing")
+    if not (ROOT / "vendor/omxcore.mojoc").exists() or not (ROOT / "vendor/OMXCORE_COMMIT").read_text().strip():
+        problems.append("vendor/omxcore.mojoc or its recorded source commit is missing")
     return not problems, "; ".join(problems) or "the omxplorer Linux binary has no libpython (ldd), no KGEN_CompilerRT_Python (nm -D) and no Py_Initialize (strings); its engine modules import only the MX frame package; the package is vendored with its source commit"
 
 

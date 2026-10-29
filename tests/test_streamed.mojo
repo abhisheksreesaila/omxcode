@@ -7,7 +7,7 @@
 from std.testing import assert_equal, assert_true, assert_false
 from std.os import remove
 from std.python import Python
-from mxframe import read_parquet, write_parquet, scan_parquet, UNCOMPRESSED, gpu_available, GPU as MX_GPU, AUTO as MX_AUTO
+from omxcore import read_parquet, write_parquet, scan_parquet, UNCOMPRESSED, gpu_available, GPU as MX_GPU, AUTO as MX_AUTO
 from mojoui.sheet import Sheet, TEXT
 from mojoui.omxfile import save_omx, open_omx
 from mojoui.sheetpage import SheetObject, compute
@@ -130,10 +130,12 @@ def main() raises:
     for row in [0, 17, 4000, back.rows() - 1]:
         for c in range(back.columns()):
             assert_equal(back.display(c, row), whole.display(c, row), "saved " + back.name(c) + " row " + String(row))
-    # Undo takes the formula column back first (the sheet logs formulas: the package doesn't), then the edits
+    # Undo takes the formula column back first (one step of the package's log since omxcore 2585dc9), then the edits
     assert_equal(s.columns(), 6)
     assert_equal(s.undo_drops(), 5)  # (an app moves what reads it first)
+    var depth = s.undo_depth()
     assert_true(s.undo())
+    assert_equal(s.undo_depth(), depth - 1)  # (one change, one step: not logged twice)
     assert_equal(s.undo_drops(), -1)
     assert_equal(s.columns(), 5)
     assert_true(s.last_undone.startswith("the formula column double"), s.last_undone)
@@ -146,9 +148,40 @@ def main() raises:
     while whole.undo():
         pass
     assert_true(undone >= 5, "undid " + String(undone))
+    assert_equal(s.columns(), 5)  # (undoing the edits never brings the undone formula back)
+    assert_equal(s.undo_depth(), 0)
     assert_equal(s.rows(), 5000)
     assert_equal(s.display(1, 0), whole.display(1, 0))
     assert_equal(s.totals(1).sums[0], whole.totals(1).sums[0])
+    # formulas added, replaced and a format change between them: each Undo takes back one change, newest first,
+    # and nothing comes back (since omxcore 2585dc9 the package logs formula steps: the sheet must not log them too)
+    var fr = read_parquet(SMALL)
+    var f = Sheet(fr.take_table().share(), False)
+    var n = f.columns()
+    _ = f.formula("double = amount * 2")
+    f.change_format(0, f.format_of(0))
+    _ = f.formula("triple = amount * 3")
+    _ = f.formula("double = amount * 4")  # (replaced)
+    assert_equal(f.columns(), n + 2)
+    assert_equal(f.undo_depth(), 4)
+    assert_equal(f.undo_drops(), -1)  # (the replacement's undo keeps both columns)
+    assert_true(f.undo())
+    assert_true(f.last_undone.startswith("the formula column double"), f.last_undone)
+    assert_equal(f.frame.formula_text(n), "double = amount * 2")
+    assert_equal(f.columns(), n + 2)
+    assert_equal(f.undo_drops(), n + 1)
+    assert_true(f.undo())
+    assert_true(f.last_undone.startswith("the formula column triple"), f.last_undone)
+    assert_equal(f.columns(), n + 1)
+    assert_true(f.undo())
+    assert_equal(f.last_undone, "a format change")
+    assert_equal(f.undo_drops(), n)
+    assert_true(f.undo())
+    assert_true(f.last_undone.startswith("the formula column double"), f.last_undone)
+    assert_equal(f.columns(), n)
+    assert_equal(f.undo_depth(), 0)
+    assert_false(f.undo())
+    assert_equal(f.columns(), n)
     # the package holds the file open (since MX frame 581250b): one deleted after it was opened still reads right
     var gone = "build/test_streamed_gone.parquet"
     var again = read_parquet(SMALL)

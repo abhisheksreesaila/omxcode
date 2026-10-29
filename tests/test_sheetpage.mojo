@@ -2,7 +2,7 @@
 # edit), the readout in the column's format, free-space placement, and a Report tile through a filter.
 #   scripts/mxbuild.sh tests/test_sheetpage.mojo -o build/test_sheetpage && build/test_sheetpage
 from std.testing import assert_equal, assert_true
-from mxframe import gpu_available, GPU as MX_GPU, Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
+from omxcore import gpu_available, GPU as MX_GPU, Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
 from mojoui.sheet import Sheet, TEXT, DECIMAL
 from mojoui.sample import sample_table
 from mojoui.orders import REGION, PRODUCT, REVENUE, CARRIER, QTY, CUSTOMER

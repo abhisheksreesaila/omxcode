@@ -1,4 +1,4 @@
-# mojoui.sheet: omxplorer's table, on the MX frame package (`from mxframe import …`): a package `Frame` (the shared
+# mojoui.sheet: omxplorer's table, on the MX frame package (`from omxcore import …`): a package `Frame` (the shared
 # columns, this session's edits, formula columns), what the package leaves to the app (each column's display format),
 # and the GPU copy of the table when there is a GPU. It is a DataGrid's source (nulls show blank, edited cells get the
 # corner mark) and it formats values for cells, totals, charts and pivots. Every aggregate goes through
@@ -15,8 +15,9 @@
 
 from std.memory import ArcPointer
 from std.collections import Dict
-from mxframe import float_text
-from mxframe import (Frame as MxFrame, Table, SharedTable, DeviceTable, Query, Expr, col, sum, count, min_of, max_of, count_distinct, median, percentile,
+from omxcore import float_text
+from omxcore.frame import FORMULA  # (a formula step in the package's undo log)
+from omxcore import (Frame as MxFrame, Table, SharedTable, DeviceTable, Query, Expr, col, sum, count, min_of, max_of, count_distinct, median, percentile,
                      AUTO as MX_AUTO, GPU as MX_GPU, CPU as MX_CPU, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL, DATE as MX_DATE,
                      gpu_available, ParquetScan, frame_snapshot, JobCtl)
 from mojoui.datagrid import GridSource
@@ -43,8 +44,8 @@ def float_cell(v: Int64) -> String:
 @fieldwise_init
 struct StyleStep(Copyable, Movable):
     """One part of a change the sheet logs itself, as it was before (Undo puts it back): a column's style (row -1), a
-    cell's override (`had`: there was one), a column's number format (row -2), or the formula columns (row -3: the
-    change's `texts` are the formulas there were)."""
+    cell's override (`had`: there was one) or a column's number format (row -2). Formula columns are steps of the
+    package's own log (omxcore 2585dc9), like the edits."""
 
     var col: Int
     var row: Int
@@ -60,7 +61,6 @@ struct StyleChange(Copyable, Movable):
 
     var steps: List[StyleStep]
     var edits: Int
-    var texts: List[String]  # (a formula step) the formula columns' texts before it, in order
 
 
 @fieldwise_init
@@ -136,7 +136,7 @@ struct Sheet(Movable, GridSource):
     var notes: ArcPointer[Notes]
     var styles: List[Int]  # per column: its CellStyle's bits (mojoui.cellstyle); missing = plain
     var cell_styles: Dict[Int, Int]  # row * STYLE_COLS + column → the cell's own style, over its column's (sparse)
-    var style_log: List[StyleChange]  # format changes and new formula columns Undo can take back, newest last (the package logs the rest)
+    var style_log: List[StyleChange]  # format changes Undo can take back, newest last (the package logs the rest: edits, merges, formulas)
     var last_undone: String  # what the last undo took back ("a format change", "the formula column x", "an edit")
     var job: JobCtl  # the background job this sheet's queries run for (a snapshot's: progress in rows, cancel); JobCtl() for plain calls
 
@@ -410,13 +410,36 @@ struct Sheet(Movable, GridSource):
     def undo_drops(self) -> Int:
         """The column the next Undo would take away (a new formula column), -1 if none: an app moves or refuses what
         reads it first (a chart, a tile, a sort)."""
+        var name = self._next_formula_step()
+        if name.byte_length() == 0 or self.frame.index(name) < 0:
+            return -1
+        for f in self.frame.swaps[self.frame.log[len(self.frame.log) - 1].row]:
+            if f.name == name:
+                return -1  # (a replaced formula's old one comes back: no column goes)
+        return self.frame.index(name)
+
+    def _next_formula_step(self) -> String:
+        """The formula column the next Undo changes (added, replaced or removed: one step of the package's log), ""
+        when it changes something else."""
         var edits = len(self.frame.log)
-        if len(self.style_log) > 0 and self.style_log[len(self.style_log) - 1].edits >= edits:
-            ref last = self.style_log[len(self.style_log) - 1]
-            for st in last.steps:
-                if st.row == -3 and len(last.texts) < self.columns() - self.stored():
-                    return self.columns() - 1
-        return -1
+        if edits == 0 or (len(self.style_log) > 0 and self.style_log[len(self.style_log) - 1].edits >= edits):
+            return ""
+        ref e = self.frame.log[edits - 1]
+        if e.kind != FORMULA:
+            return ""
+        ref before = self.frame.swaps[e.row]  # (the formulas the step's undo puts back)
+        for m in range(self.stored(), self.columns()):  # added or replaced: a formula now that wasn't, or read otherwise
+            var t = self.frame.formula_text(m)
+            var same = False
+            for f in before:
+                if f.text == t:
+                    same = True
+            if not same:
+                return self.name(m)
+        for f in before:  # removed: one there was that isn't
+            if self.frame.index(f.name) < 0:
+                return f.name
+        return ""
 
     def undo(mut self) -> Bool:
         """Takes back the last change: a format change (styles, number formats) or an edit to the table, whichever
@@ -428,15 +451,7 @@ struct Sheet(Movable, GridSource):
             var k = len(change.steps) - 1
             while k >= 0:
                 ref s = change.steps[k]
-                if s.row == -3:  # the formula columns as they were (the new one goes; a replaced one comes back)
-                    self.last_undone = "the formula column " + self.name(s.col)
-                    self.frame.formulas.clear()
-                    for t in change.texts:
-                        try:
-                            _ = self.frame.formula(t)
-                        except e:  # (it was accepted before and reads the same columns: say so if it ever doesn't come back)
-                            self.last_undone += "; couldn't bring back " + t + ": " + String(e)
-                elif s.row == -2:
+                if s.row == -2:
                     self.set_format(s.col, s.number)
                 elif s.row < 0:
                     self.set_column_style(s.col, s.bits)
@@ -446,7 +461,8 @@ struct Sheet(Movable, GridSource):
                     _ = self.cell_styles.pop(s.row * STYLE_COLS + s.col, 0)
                 k -= 1
             return True
-        self.last_undone = "an edit"
+        var formula = self._next_formula_step()
+        self.last_undone = "the formula column " + formula if formula.byte_length() > 0 else "an edit"
         return self.frame.undo()
 
     # ---------- cell styles (mojoui.cellstyle: a column's, and sparse cell overrides) ----------
@@ -515,7 +531,7 @@ struct Sheet(Movable, GridSource):
                     _ = self.cell_styles.pop(key, 0)
                 else:
                     self.cell_styles[key] = bits
-        self.style_log.append(StyleChange(steps^, len(self.frame.log), List[String]()))
+        self.style_log.append(StyleChange(steps^, len(self.frame.log)))
 
     def restyle_cells(mut self, cells: List[Tuple[Int, Int]], mask: Int, value: Int):
         """restyle() on each (column, row) of a block: one Undo step for all of them."""
@@ -530,7 +546,7 @@ struct Sheet(Movable, GridSource):
                     steps.append(st.copy())
             while len(self.style_log) > before:
                 _ = self.style_log.pop()
-            self.style_log.append(StyleChange(steps^, edits, List[String]()))
+            self.style_log.append(StyleChange(steps^, edits))
 
     def clear_style(mut self, c: Int, row: Int):
         """Clear formatting: the cell (or with row -1 the column and every cell in it) back to plain, its number
@@ -548,18 +564,11 @@ struct Sheet(Movable, GridSource):
         var steps = List[StyleStep]()
         steps.append(StyleStep(c, -2, 0, False, self.format_of(c)))
         self.set_format(c, f)
-        self.style_log.append(StyleChange(steps^, len(self.frame.log), List[String]()))
+        self.style_log.append(StyleChange(steps^, len(self.frame.log)))
 
     def formula(mut self, text: String) raises -> Int:
-        """A new (or replaced) formula column; Undo takes it back (the package doesn't log formulas: the sheet does)."""
-        var texts = List[String]()
-        for m in range(self.stored(), self.columns()):
-            texts.append(self.frame.formula_text(m))
-        var c = self.frame.formula(text)
-        var steps = List[StyleStep]()
-        steps.append(StyleStep(c, -3, 0, False, ColumnFormat.auto()))
-        self.style_log.append(StyleChange(steps^, len(self.frame.log), texts^))
-        return c
+        """A new (or replaced) formula column; Undo takes it back (one step of the package's log, omxcore 2585dc9)."""
+        return self.frame.formula(text)
 
     def fits(self, bytes: Int, what: String) raises:
         """Refuses work on a streamed file that would hold more than a quarter of memory, saying how much."""

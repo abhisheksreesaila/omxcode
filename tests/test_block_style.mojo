@@ -2,7 +2,7 @@
 # outside it, Undo takes the whole block back in one step, a second format is its own step.
 #   scripts/mxbuild.sh tests/test_block_style.mojo -o build/test_block_style && build/test_block_style
 from std.testing import assert_true, assert_false
-from mxframe import Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
+from omxcore import Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
 from mojoui.sheet import Sheet
 from mojoui.cellstyle import BOLD, ITALIC
 
