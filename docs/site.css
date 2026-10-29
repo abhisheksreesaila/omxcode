@@ -182,3 +182,51 @@ footer .fine { margin-top: 48px; padding-top: 22px; border-top: 1px solid var(--
   .srow > span.win::after, .srow > span.tie::after { content: none; }
 }
 @media (prefers-reduced-motion: reduce) { .srow { opacity: 1; transform: none; transition: none; } }
+
+/* ---- the scoreboard's companions (cover and why.html): omxcode's wins as chips, the short scoreboard (site.css .score), Rust's wins as a quiet line ---- */
+.wins { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 40px; }
+.wins span { display: inline-flex; align-items: baseline; gap: 8px; padding: 10px 16px; border-radius: 999px; background: color-mix(in srgb, var(--word) 12%, var(--oq-surface-1)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--word) 40%, transparent); font: 600 15.5px var(--sans); color: var(--ink); }
+.wins b { font: 800 18px var(--display); letter-spacing: -.02em; color: var(--word); }
+.score { margin-top: 22px; }
+.srow > span.off { color: var(--ink2); opacity: .8; border-radius: 0; box-shadow: none; border-left: 1px dashed var(--line); }
+.srow.sh > span.off { color: var(--ink2); text-transform: none; letter-spacing: 0; font: 500 11.5px/1.25 var(--mono); }
+.srow.sh > span.off small { display: block; font-size: 10px; opacity: .8; }
+.srow > span sup { display: block; vertical-align: 0; font: 650 10.5px/1.2 var(--sans); color: var(--oq-ok); margin-top: 2px; }
+.rustwin { margin: 18px 0 0; padding: 14px 18px; border-radius: 18px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); font: 15px/1.5 var(--sans); color: var(--ink2); max-width: 900px; }
+.rustwin b { color: var(--ink); font-weight: 600; }
+.scorefoot { font-size: 12.5px; }
+.scorefoot .slot { padding: 6px 12px; border-radius: 999px; border: 1.5px dashed color-mix(in srgb, var(--soon) 70%, transparent); color: var(--soon); }
+@media (max-width: 860px) {
+  .wins span { font-size: 14px; padding: 8px 13px; } .wins b { font-size: 16px; }
+  .srow > span.off { border-left: 0; outline: 1px dashed var(--line); outline-offset: -1px; border-radius: 10px; }
+  .srow > span sup { font-size: 9.5px; }
+}
+
+/* ---- bento tiles and code cards (the cover and why.html) ---- */
+/* ---- 2 · the agent chapter: a bento, each tile its own small motion. Tiles rise on the island spring as they enter;
+   their scenes play only while on screen; reduced motion shows each tile's last frame, faded in ---- */
+.bento { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; margin-top: 52px; }
+.bt { grid-column: span 6; min-width: 0; position: relative; overflow: hidden; border-radius: 28px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line);
+  padding: 24px 26px 26px; display: flex; flex-direction: column; gap: 12px;
+  opacity: 0; transform: translateY(26px) scale(.985); transition: opacity .6s var(--ease), transform var(--oq-spring-slow-dur) var(--oq-island-spring); }
+.bt.in { opacity: 1; transform: none; }
+.bt.w7 { grid-column: span 7; } .bt.w5 { grid-column: span 5; } .bt.w12 { grid-column: span 12; }
+.bento .bt:nth-child(2) { transition-delay: .08s; } .bento .bt:nth-child(3) { transition-delay: .04s; } .bento .bt:nth-child(4) { transition-delay: .12s; }
+.bt .kick { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.bt h3 { font: 700 27px/1.1 var(--display); letter-spacing: -.035em; }
+.bt h3 .two { color: var(--ink2); }
+.bt > p, .bt .txt > p { margin: 0; font: 15.5px/1.5 var(--sans); color: var(--ink2); max-width: 560px; }
+.bt p b { color: var(--ink); font-weight: 600; } .bt p code { font: 600 13.5px var(--mono); color: var(--word); }
+.bt .fine3, .bt .txt > p.fine3 { font: 12px/1.5 var(--mono); color: var(--ink2); margin-top: auto; }
+/* code cards: Mojo, quietly coloured */
+.code { position: relative; margin: 0; border-radius: 16px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); padding: 14px 16px; font: 12.5px/1.75 var(--mono); color: var(--ink2); overflow-x: auto; white-space: pre; }
+.code .k { color: var(--oq-data-2); } .code .s { color: var(--oq-data-3); } .code .f { color: var(--ink); font-weight: 600; } .code .c { color: color-mix(in srgb, var(--ink2) 70%, transparent); font-style: italic; }
+.code .ln { display: inline-block; border-radius: 6px; margin: 0 -6px; padding: 0 6px; transition: background .35s var(--ease), color .35s var(--ease); }
+.code .ln.lit { background: color-mix(in srgb, var(--word) 18%, transparent); color: var(--ink); }
+.code .btn { display: inline-block; transition: transform var(--oq-spring-fast-dur) var(--oq-island-spring); }
+.code .btn.press { transform: scale(.94); }
+@media (max-width: 860px) {
+  .bento { grid-template-columns: 1fr; margin-top: 36px; } .bt, .bt.w7, .bt.w5, .bt.w12 { grid-column: auto; }
+  .bt { padding: 20px 18px 22px; border-radius: 24px; } .bt h3 { font-size: 24px; } .code { font-size: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .bt { transform: none !important; transition: opacity .5s linear; } }
