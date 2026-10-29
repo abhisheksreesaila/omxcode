@@ -234,7 +234,8 @@ def m4():
     lines = []
     problems = []
     big = ROOT.parent / "mojo-ui" / "build" / "g20" / "big.parquet"
-    for path in [ROOT.parent / "mojo-ui" / "build" / "data" / "orders_1m.csv", big if big.exists() else BUILD / "g20" / "big.parquet"]:
+    csv = ROOT.parent / "mojo-ui" / "build" / "data" / "orders_1m.csv"  # (the main checkout's; else this one's, as big's, D-766)
+    for path in [csv if csv.exists() else BUILD / "data" / "orders_1m.csv", big if big.exists() else BUILD / "g20" / "big.parquet"]:
         if not path.exists():
             continue
         out = run([str(BUILD / "chartbench"), str(path)], timeout=1800).stdout
