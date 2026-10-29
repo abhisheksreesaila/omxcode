@@ -76,7 +76,16 @@ def m1():
     sheets = re.findall(r'^([A-Z_]+) = """', web, re.M)
     if [s for s in sheets if s.endswith("CSS") and s != "CSS"]:
         problems.append(f"the web host holds style sheets besides its base: {sheets}")
-    base_css = web.split('CSS = """', 1)[1].split('"""', 1)[0]
+    # the base sheet: inline in web.py until goal 34 M3 (5b28808) moved it to mojoui/hosts/static/mojoui.css, served by
+    # content hash (D-764); either way it is the host's only sheet
+    if 'CSS = """' in web:
+        base_css = web.split('CSS = """', 1)[1].split('"""', 1)[0]
+    else:
+        static = ROOT / "mojoui/hosts/static"
+        base_css = (static / "mojoui.css").read_text()
+        others = sorted(f.name for f in static.rglob("*.css") if f.name != "mojoui.css")
+        if others or 'CSS = (STATIC / "mojoui.css").read_text()' not in web:
+            problems.append(f"the web host's base sheet isn't mojoui/hosts/static/mojoui.css alone: {others}")
     scoped = re.findall(r"body\.[a-z][\w-]*", base_css)
     if scoped:
         problems.append(f"the web host styles a body class: {sorted(set(scoped))[:5]}")
