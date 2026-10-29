@@ -16,6 +16,26 @@ ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pixi.toml").exi
 sys.path.insert(0, str(ROOT / "scripts"))
 OUT = ROOT / "docs" / "goals" / "33"
 FIXTURES = OUT / "fixtures"
+# The original this goal measured: mxstudio at 798ef8c (2026-10-25). The console there moves on (F-063, 2026-10-28, removed
+# LiteLLM and asks for /admin/caddy/log, which the recorded replies don't hold), so unless MXCONSOLE_DIR names one, the
+# check reads that commit's console from a `git archive` of ~/Projects/mxstudio (read, never written) in build/ (D-760)
+ORIGINAL = "798ef8c"
+
+
+def _pinned_original():
+    out = ROOT / "build" / f"mxconsole-{ORIGINAL}"
+    if not (out / "index.html").exists():
+        import subprocess
+        out.mkdir(parents=True, exist_ok=True)
+        a = subprocess.run(f"git -C {Path.home() / 'Projects/mxstudio'} archive {ORIGINAL} mxconsole/console | tar -x --strip-components=2 -C {out}",
+                           shell=True, capture_output=True, text=True)
+        if a.returncode != 0 or not (out / "index.html").exists():
+            return None
+    return out
+
+
+if "MXCONSOLE_DIR" not in os.environ and _pinned_original():
+    os.environ["MXCONSOLE_DIR"] = str(_pinned_original())  # (console_fixture.py and the processes it starts read it too)
 MXCONSOLE_DIR = Path(os.environ.get("MXCONSOLE_DIR", Path.home() / "Projects/mxstudio/mxconsole/console"))
 SIZES = [(1440, 900), (390, 844)]
 SCREENS = ["models", "overview", "bench", "logs", "notebook", "add", "keys", "gateway", "security", "settings"]

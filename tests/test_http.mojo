@@ -146,7 +146,8 @@ def main() raises:
         var r = SocketTransport.send(Request.get(0, base + "evil").header("X-Evil", value))
         assert_true(r.status == 0 and r.error.find("control character") >= 0, "a header value with a control character: " + r.error)
     # an env header's value is read when the request goes out: one holding a control character is refused there, naming
-    # the variable and never its value (it may be a secret), and nothing reaches the server (goal 33 reviewer round 2)
+    # the variable and never its value (it may be a secret); the server may see the connection but never a request
+    # (these ask for base + "evil": goal 33's M1 reads the server's log and fails on any "evil" path; reviewer round 2)
     for value in ["a\r\nX-Evil: 1", "a\nX-Evil: 1", "a\x01b", "a\x7fb"]:  # (no NUL: an environment string ends at one)
         _ = setenv("HTTP_TEST_BAD", value)
         var r = SocketTransport.send(Request.get(0, base + "evil").header_from_env("X-Bad", "HTTP_TEST_BAD"))

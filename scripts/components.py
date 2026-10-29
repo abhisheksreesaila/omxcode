@@ -170,18 +170,20 @@ def example_text(example):
 
 
 def composes(example, ctor, module):
-    """The example builds `ctor`: in its own code, or through a mojoui module it imports whose code (not its comments)
-    calls it, other than the composite's own `module` (agentchat's GenUi comes from mojoui.agentui's Screens since goal
-    35's review)."""
+    """The example builds `ctor`: in its own code, or through a mojoui module it imports (`from mojoui.x import`, one
+    level) whose code calls it (not a docstring, comment or definition), other than the composite's own `module`
+    (agentchat's GenUi comes from mojoui.agentui's Screens since goal 35's review). Import level, not proof the app
+    reaches the call: an app checked to run the composite another way is what turns a cell ✅."""
     text = example_text(example)
     if ctor in text:
         return True
-    call = re.compile(rf"\b{re.escape(ctor.rstrip('('))}\(")
+    call = re.compile(rf"(?<!def )\b{re.escape(ctor.rstrip('('))}\(")
     for mod in dict.fromkeys(re.findall(r"^from (mojoui(?:\.\w+)+) import", text, re.M)):
         f = ROOT / (mod.replace(".", "/") + ".mojo")
         if not f.exists() or f.relative_to(ROOT).as_posix() == module:
             continue
-        code = "\n".join(l.split("#", 1)[0] for l in f.read_text().splitlines() if not l.lstrip().startswith(('"""', "#")))
+        code = re.sub(r'"""[\s\S]*?"""', "", f.read_text())  # (docstrings, then comments, then definitions: calls only)
+        code = "\n".join(l.split("#", 1)[0] for l in code.splitlines() if not re.match(r"\s*(def|fn|struct|trait|comptime|alias) ", l))
         if call.search(code):
             return True
     return False
