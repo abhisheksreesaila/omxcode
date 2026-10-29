@@ -53,6 +53,17 @@ def row(res, r, n):
     return res["rows"].get(r, {}).get(str(n))
 
 
+def capped(d, r):
+    """On the real desktop, a windowed row whose fastest frame is one refresh (within 1 %): the compositor paces it, so
+    its speed under a refresh can't be read there. Native Rust in a window always (goal 36b); JS + Rust/wasm's headed
+    Chromium on the 2026-10-29 re-measure (D-769). The offscreen row never is."""
+    if not d.get("desktop") or r == "B-native-off":
+        return False
+    hz = (d.get("setup") or {}).get("monitor", {}).get("refreshRate")
+    ms = [v["frame_ms"] for v in d["rows"].get(r, {}).values()]
+    return bool(hz and ms) and abs(min(ms) - 1000 / hz) <= 0.01 * 1000 / hz
+
+
 # ---------- the measured parts ----------
 
 def headline(res, d=None):
@@ -155,12 +166,25 @@ def verdict(res):
     return "\n".join(out)
 
 
+def bwasm_desktop(d, x):
+    """JS + Rust/wasm's line in chapter 1: compared on the desktop, or, when the compositor capped its window there,
+    said plainly with its own step and its speed from the virtual display."""
+    if not capped(d, "B-wasm"):
+        return f"<li>{compare(d, 'B-wasm', names=DNAMES)}</li>"
+    refresh = 1000 / d["setup"]["monitor"]["refreshRate"]
+    at = [n for n in d["protocol"]["sizes"] if abs(row(d, "B-wasm", n)["frame_ms"] - refresh) <= 0.01 * refresh]
+    return (f"<li><b>JS + Rust/wasm was capped by the compositor on this desktop run:</b> its headed Chromium window drew one frame "
+            f"a refresh ({f2(row(d, 'B-wasm', at[0])['frame_ms'])} ms) at {', '.join(mn(n) for n in at)}, in every run, while its own step "
+            f"took {f2(row(d, 'B-wasm', 1_000_000)['step_ms'])} ms at 1M (plain JS in the same Chromium binary was not capped), so its desktop frames "
+            f"say nothing about its speed under a refresh. On the virtual display: {compare(x, 'B-wasm')}</li>")
+
+
 def verdict_desktop(d, x):
     """Chapter 1's findings from the real desktop (goal 36b), with goal 36's virtual display for what changed."""
     big, top = d["largest_n_at_60"], max(d["protocol"]["sizes"])
     held = {}
     for r in DORDER:
-        if r != "B-native":  # (in a window it is capped by the compositor: see below)
+        if not capped(d, r):  # (a row the compositor caps at one frame a refresh: see below)
             held.setdefault(big[r], []).append(DNAMES[r])
     lines = []
     for n in sorted(held, key=lambda v: v or 0, reverse=True):
@@ -168,7 +192,7 @@ def verdict_desktop(d, x):
         verb = "hold" if len(who) > 1 else "holds"
         lines.append(f"{' and '.join([', '.join(who[:-1]), who[-1]] if len(who) > 1 else who)} "
                      + (f"{verb} 60 fps up to {mn(n)}{' (the largest size tested)' if n == top else ''}" if n else f"{'do' if len(who) > 1 else 'does'} not hold 60 fps at any size"))
-    order = [r for r in DORDER if r != "B-native"]
+    order = [r for r in DORDER if not capped(d, r)]
     fastest = {n: min((row(d, r, n)["frame_ms"], r) for r in order if row(d, r, n)) for n in SIZES}
     s20 = {r: row(d, r, top)["step_ms"] for r in ("A", "B-native-off", "C")}
     lo, hi = min(s20.values()), max(s20.values())
@@ -188,7 +212,7 @@ def verdict_desktop(d, x):
         f"binary takes {f2(win['frame_ms'])} ms a frame at 1M (and {f2(row(d, 'B-native', top)['frame_ms'])} at {mn(top)}), paced by the compositor "
         "whatever present mode it asks for, so its speed can only be read offscreen.</li>",
         f"<li>{compare(d, 'A', names=DNAMES)}</li>",
-        f"<li>{compare(d, 'B-wasm', names=DNAMES)}</li>",
+        bwasm_desktop(d, x),
         f"<li>{compare(d, 'A-cpu', names=DNAMES)}</li>",
         f"<li><b>The GPU step itself is a tie.</b> At {mn(top)} it takes {f2(s20['A'], 3)} ms in JS + WebGPU, {f2(s20['B-native-off'], 3)} ms in Rust + wgpu and "
         f"{f2(s20['C'], 3)} ms in omxcode: the same arithmetic on the same GPU, within {round((hi / lo - 1) * 100)} % of each other. "
@@ -253,7 +277,7 @@ def setup(d):
     return (f"<p class='tnote'><b>Where:</b> the owner's desktop, measured while they were away: {E(st['compositor'].split(' built')[0])} "
             f"(Wayland, GPU-composited), {E(str(m.get('description') or m.get('name')))} at {m.get('refreshRate'):.2f} Hz, scale {m.get('scale')}, "
             f"VRR {'on' if m.get('vrr') else 'off'}; GTK {E(st['gtk'])}; {E(st['chromium'])}. <b>Vsync:</b> {E(st['vsync'])}. "
-            f"<b>Pixels:</b> {E(st['canvas_pixels'])}. Each row's window opened beside one other window and closed after its run; "
+            f"<b>Pixels:</b> {E(st['canvas_pixels'])}. Each row's window opened tiled beside the windows already on the workspace and closed after its run; "
             f"the quiet gate held every run (1-minute load under {d['protocol']['gate']['load1_below']}, no other GPU compute).</p>")
 
 
@@ -287,8 +311,8 @@ def perf(res, names=None, order=None):
     # (a ✗ in a capped row is the compositor's pacing, said in its largest-N cell)
     body = []
     for r in order:
-        capped = res.get("desktop") and r == "B-native"
-        big = f"capped (compositor, {f2(row(res, r, 1_000_000)['frame_ms'], 1)} ms)" if capped else mn(res['largest_n_at_60'][r])
+        big = (f"capped (compositor, {f2(row(res, r, 1_000_000)['frame_ms'], 1)} ms)" if capped(res, r)
+               else mn(res['largest_n_at_60'][r]) if res['largest_n_at_60'][r] else "none")
         cells = [f"<th scope='row'>{names[r]}</th>", f"<td>{big}</td>"]
         for n in SIZES:
             d = row(res, r, n)
