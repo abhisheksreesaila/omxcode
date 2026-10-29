@@ -146,7 +146,7 @@ APP_LOCAL = [
 
 
 # A host's other source files: the web host's base style sheet moved out of web.py into the file it serves (goal 34 M3,
-# 5b28808), and the features it styles (the toolbar button's mui-tool) went ❌ on the web with it (D-765)
+# 5b28808), and the features it styles (the toolbar button's button.tool) went ❌ on the web with it (D-765)
 HOST_EXTRA = {"mojoui/hosts/web.py": ["mojoui/hosts/static/mojoui.css"]}
 
 
