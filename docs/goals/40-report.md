@@ -1,6 +1,6 @@
 # Goal 40 report: Sketch, omxcode draws
 
-**Result:** M0–M5 pass (`pixi run python docs/goals/40-check.py`; the final run's output is at the end of this branch's last commit message and below). Not yet reviewed by the reviewer subagent.
+**Result:** M0–M5 pass (`pixi run python docs/goals/40-check.py`; the final run's output is below). Not yet reviewed by the reviewer subagent.
 
 ## 30-second demo
 ```bash
@@ -32,3 +32,13 @@ Also: the Liquid PROMINENT buttons (active tool, active ink) show dark text on t
 
 ## Next step
 Run `build/sketch/mac/SketchMojo.app` on the owner's Mac; then a Metal path for the layer transform (the audit's "native viewport").
+
+## Final checker run
+```
+M0 PASS: tests/test_ink.mojo: ink outline: ok, ink pressure: ok, ink smooth: ok, ink hit: ok
+M1 PASS: tests/test_scene_polygon.mojo: polygon cpu: ok, polygon scene: ok, layer transform: ok; GTK replays both
+M2 PASS: GTK: pressures [0.2, 0.5, 0.9, 1.0] reached the app
+M3 PASS: 7 steps as expected (SKETCH: tool=pan strokes=2 points=7 zoom=2.00 pan=-540,-357); GTK vs CPU 0.0 levels; web and mac built
+M4 PASS: 1000 strokes, 101000 points on GskCairoRenderer: p95 pan 2.0, zoom 2.6, draw 1.8 ms; ink layer kept
+M5 PASS: gallery Drawing section, matrix, llms.txt and EXPERIMENTS updated
+```
