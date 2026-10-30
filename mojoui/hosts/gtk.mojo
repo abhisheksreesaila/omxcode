@@ -32,7 +32,7 @@ from mojoui.theme import Palette, Theme, Look, hex_of, mix
 from mojoui.embed import is_web_url
 from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
-from mojoui.view import NO_MSG
+from mojoui.view import NO_MSG, is_file_saver
 from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
@@ -57,6 +57,7 @@ comptime VERTICAL = 1
 comptime ALIGN_CENTER = 3
 comptime RTLD_DEFAULT = 0  # glibc
 comptime NODE_KEY = "mojoui-node"
+comptime DROP_FILES_KEY = "mojoui-drop-files"  # a DropTarget's box → its GtkDropTarget for files (on_file)
 comptime DRAG_KEY = "mojoui-drag-source"  # a Draggable's box → its GtkDragSource
 comptime DROP_KEY = "mojoui-drop-target"  # a DropTarget's box → its GtkDropTarget
 comptime G_TYPE_STRING = 64  # G_TYPE_MAKE_FUNDAMENTAL(16)
@@ -1989,6 +1990,13 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_widget_add_controller", NoneType](w, target)
                 var key = String(DROP_KEY)
                 external_call["g_object_set_data", NoneType](w, key.as_c_string_span(), target)
+                if node.msg2 != 0:  # on_file: a second target for files from outside (the file manager's GdkFileList)
+                    var files = external_call["gtk_drop_target_new", Int](external_call["gdk_file_list_get_type", Int](), c_int(GDK_ACTION_COPY))
+                    set_node(files, i)
+                    connect_any(files, "drop", on_drop_files[Self.A], self_addr)
+                    external_call["gtk_widget_add_controller", NoneType](w, files)
+                    var fkey = String(DROP_FILES_KEY)
+                    external_call["g_object_set_data", NoneType](w, fkey.as_c_string_span(), files)
             elif node.kind == WEBCOMP:  # its widget in a WebKitGTK view of its own (kept across rebuilds), else `instead`
                 self.place_webview(i, w, self_addr)
             elif node.size > 0 and not node.sized_height():
@@ -3679,6 +3687,32 @@ def on_drop[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: 
     return 1
 
 
+def on_drop_files[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: Int) abi("C") -> c_int:
+    """Files let go over a DropTarget with on_file (a GdkFileList): its on_file once per file, event.text = its path."""
+    var node = get_node(target)
+    if node < 0 or busy():
+        return 0
+    var files = external_call["g_value_get_boxed", Int](value)
+    if files == 0:
+        return 0
+    var list = external_call["gdk_file_list_get_files", Int](files)  # (a GSList of GFile: the list is ours, the files aren't)
+    var paths = List[String]()
+    var at = list
+    while at != 0:
+        var file = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[]
+        var raw = external_call["g_file_get_path", Int](file)
+        if raw != 0:  # (a file with no local path, e.g. on a phone over MTP: skipped)
+            paths.append(c_str(raw))
+            external_call["g_free", NoneType](raw)
+        at = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at + 8)[]
+    external_call["g_slist_free", NoneType](list)
+    for p in paths:
+        var host = host_at[A](host_addr)
+        if node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].kind == DROP and host[].rt.shown.nodes[node].msg2 != 0:
+            host[].send(node, True, p, 0, host_addr)
+    return 1 if len(paths) > 0 else 0
+
+
 def open_url(url: String):
     """A page in the browser: xdg-open, or the command in $MOJOUI_OPENER (checks read what it was given)."""
     if not is_web_url(url):  # (http and https only, D-576)
@@ -4733,6 +4767,16 @@ def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
         return
     var host = host_at[A](host_addr)
     var node = get_node(button)
+    if 0 <= node < len(host[].rt.shown.nodes) and is_file_saver(host[].rt.shown.nodes[node]):  # a FileSaver: the platform's save dialog
+        host[].picker_node = node
+        var sd = external_call["gtk_file_dialog_new", Int]()
+        var stitle = host[].rt.shown.nodes[node].text
+        external_call["gtk_file_dialog_set_title", NoneType](sd, stitle.as_c_string_span())
+        var suggested = host[].rt.shown.nodes[node].options[2]
+        if suggested != "":
+            external_call["gtk_file_dialog_set_initial_name", NoneType](sd, suggested.as_c_string_span())
+        external_call["gtk_file_dialog_save", NoneType](sd, host[].window, 0, on_file_saved[A], host_addr)
+        return
     if 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:  # a FilePicker: the platform's file dialog
         host[].picker_node = node
         var dialog = external_call["gtk_file_dialog_new", Int]()
@@ -4770,6 +4814,25 @@ def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
     external_call["g_object_unref", NoneType](file)
     var node = host[].picker_node
     if path != "" and 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:
+        host[].send(node, True, path, 0, host_addr)
+
+
+def on_file_saved[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
+    """The save dialog closed: the path chosen goes to the FileSaver's on_save (nothing if cancelled); the app writes it."""
+    var host = host_at[A](host_addr)
+    var err = List[Int](length=1, fill=0)
+    var file = external_call["gtk_file_dialog_save_finish", Int](dialog, result, Int(err.unsafe_ptr()))
+    if err[0] != 0:
+        external_call["g_error_free", NoneType](err[0])  # (cancelled, or the dialog failed)
+    external_call["g_object_unref", NoneType](dialog)
+    if file == 0:
+        return
+    var raw = external_call["g_file_get_path", Int](file)
+    var path = c_str(raw)
+    external_call["g_free", NoneType](raw)
+    external_call["g_object_unref", NoneType](file)
+    var node = host[].picker_node
+    if path != "" and 0 <= node < len(host[].rt.shown.nodes) and is_file_saver(host[].rt.shown.nodes[node]):
         host[].send(node, True, path, 0, host_addr)
 
 
@@ -5115,6 +5178,43 @@ def run_step[A: App](host_addr: Int, step: String):
             print("TEST: no file picker", kv[0])
             return
         host[].send(i, True, kv[1], 0, host_addr)
+    elif verb == "save":  # save:Title=/path: a FileSaver's dialog answering that path (a native dialog can't be driven)
+        var kv = split_at(rest, "=")
+        var i = find(host[], BUTTON, kv[0], 0)
+        if i < 0 or not is_file_saver(host[].rt.shown.nodes[i]):
+            print("TEST: no file saver", kv[0])
+            return
+        host[].send(i, True, kv[1], 0, host_addr)
+    elif verb == "dropfile":  # dropfile:Tag=/path[,/path…]: those files dropped on the DropTarget tagged Tag, through its GtkDropTarget's own drop signal
+        var kv = split_at(rest, "=")
+        var i = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].kind == DROP and host[].rt.shown.nodes[k].name == kv[0]:
+                i = k
+        var fkey = String(DROP_FILES_KEY)
+        var target = external_call["g_object_get_data", Int](host[].widgets[i], fkey.as_c_string_span()) if i >= 0 else 0
+        if target == 0:
+            print("TEST: no file drop target", kv[0])
+            return
+        var list = 0
+        var made = List[Int]()
+        for p in kv[1].split(","):
+            var path = String(p)
+            made.append(external_call["g_file_new_for_path", Int](path.as_c_string_span()))
+            list = external_call["g_slist_append", Int](list, made[len(made) - 1])
+        var flist = external_call["gdk_file_list_new_from_list", Int](list)  # (copies the list and refs the files)
+        external_call["g_slist_free", NoneType](list)
+        for f in made:
+            external_call["g_object_unref", NoneType](f)
+        var gv = List[Int](length=3, fill=0)  # (a GValue holding the GdkFileList, as GTK hands a real drop)
+        _ = external_call["g_value_init", Int](Int(gv.unsafe_ptr()), external_call["gdk_file_list_get_type", Int]())
+        external_call["g_value_take_boxed", NoneType](Int(gv.unsafe_ptr()), flist)
+        var ret = List[Int](length=1, fill=0)
+        var sig = String("drop")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](target, sig.as_c_string_span(), Int(gv.unsafe_ptr()), Float64(10), Float64(10), Int(ret.unsafe_ptr()))
+        external_call["g_value_unset", NoneType](Int(gv.unsafe_ptr()))
+        _ = gv[0]
+        _ = ret[0]
     elif verb == "type" or verb == "submit" or verb == "enter":
         var kv = split_at(rest, "=")
         var i = find(host[], FIELD, kv[0], 0, by_hint=True)

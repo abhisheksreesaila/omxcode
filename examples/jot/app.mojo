@@ -9,10 +9,11 @@
 # keeps drawing; it prints `JOT SEED: done <n> notes in <ms> ms` when it ends.
 
 from mojoui import (
-    App, Event, View, VStack, HStack, Text, Button, TextField, TextArea, LazyList, ProgressBar, Spacer, Divider,
-    CAPTION, HEADLINE, PROMINENT, SUBTLE, PLAIN, DESTRUCTIVE, CENTER,
+    App, Event, View, VStack, HStack, Text, Button, FilePicker, FileSaver, TextField, TextArea, LazyList, ProgressBar, Spacer, Divider,
+    CAPTION, HEADLINE, PROMINENT, SUBTLE, PLAIN, DESTRUCTIVE, CENTER, NO_MSG,
 )
 from mojoui.effects import Every
+from mojoui.dragdrop import DropTarget
 from mojoui.jobs import start_ui_job
 from mojoui.clock import now_ns
 from mojoui.shared import environment, make_dir
@@ -32,6 +33,9 @@ comptime OPEN = 5
 comptime SAVE_TICK = 6
 comptime SEED_TICK = 7
 comptime LANDED = 8
+comptime IMPORT = 9
+comptime EXPORT = 10
+comptime DROPPED = 11
 comptime NOTES = 1  # the LazyList's id
 comptime SAVE_AFTER_MS = 400
 comptime SEED_DELAY_MS = 600  # the window opens with what the file holds; the seed starts a moment later (D-1310)
@@ -339,6 +343,21 @@ struct Main(App):
             if event.number >= 0 and event.number < len(self.ids):
                 self.save()
                 self.show(self.ids[event.number])
+        elif m == IMPORT or m == DROPPED:  # a .md or .txt file becomes a note, byte for byte
+            self.save()
+            var text: String
+            with open(event.text, "r") as f:
+                text = f.read()
+            self.query = ""
+            var id = self.add(text)
+            self.search()
+            self.show(id)
+        elif m == EXPORT:  # the open note into the file the save dialog chose
+            self.save()
+            if self.open_id != 0:
+                with open(event.text, "w") as f:
+                    f.write(self.body)
+                print("JOT EXPORT: " + String(self.body.byte_length()) + " bytes to " + event.text, flush=True)
         elif m == SEED_TICK:
             self.seeding()
         elif m == LANDED:
@@ -373,6 +392,18 @@ struct Main(App):
 
     # ---- the screen
 
+    def file_name(self) -> String:
+        """The open note's title as a file name (letters, digits, spaces and dashes), .md."""
+        var out = String("")
+        for c in first_line(self.body).codepoint_slices():
+            var ch = String(c)
+            var b = ch.as_bytes()[0]
+            var word = ch.byte_length() > 1 or (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+            if word or ch == " " or ch == "-" or ch == "_":
+                out += ch
+        var name = String(out.strip())
+        return (name if name != "" else String("note")) + ".md"
+
     def row(self, list_id: Int, index: Int) -> String:
         if index < 0 or index >= len(self.ids):
             return ""
@@ -390,12 +421,15 @@ struct Main(App):
             var share = (self.seed_done * 100) // max(self.seed_total, 1)
             side.append(Text("Adding " + String(self.seed_want) + " notes… " + String(share) + "%", CAPTION))
             side.append(ProgressBar(share))
-        side.append(LazyList(len(self.ids), NOTES, on_tap=OPEN, height=440, row_height=44).grow().fill().tag("notes"))
+        side.append(DropTarget(LazyList(len(self.ids), NOTES, on_tap=OPEN, height=440, row_height=44).grow().fill().tag("list"),
+                               on_drop=NO_MSG, on_file=DROPPED).grow().fill().tag("notes"))
         var bar = List[View]()
         bar.append(Text("Jot", HEADLINE))
         bar.append(Spacer())
         bar.append(Button("New", NEW, PROMINENT, icon="plus"))
         bar.append(Button("Delete", DELETE, SUBTLE))
+        bar.append(FilePicker("Import", IMPORT, SUBTLE, accept=".md,.txt"))
+        bar.append(FileSaver("Export", EXPORT, suggested=self.file_name(), style=SUBTLE, accept=".md,.txt"))
         var editor = List[View]()
         if self.problem != "":
             editor.append(Text(self.problem, CAPTION).tag("problem"))

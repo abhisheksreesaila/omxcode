@@ -232,6 +232,20 @@ def step(page, s):
     elif verb == "pick":  # pick:Title=/path: choose that file in the FilePicker (a real file input; it uploads)
         title, _, path = rest.partition("=")
         page.locator(f"input.picker-input[data-title={title!r}]").first.set_input_files(path)
+    elif verb == "save":  # save:Title=/path: tap the FileSaver; the browser's download is saved at that path
+        title, _, path = rest.partition("=")
+        with page.expect_download(timeout=10000) as dl:
+            page.locator("[data-kind=button]").filter(has_text=exact(title)).first.click()
+        dl.value.save_as(path)
+    elif verb == "dropfile":  # dropfile:Tag=/path: that file dropped from outside on the DropTarget tagged Tag (a drop event carrying a File)
+        tag, _, path = rest.partition("=")
+        import base64
+        data = base64.b64encode(Path(path).read_bytes()).decode()
+        page.evaluate("""([tag, name, data]) => { const t = document.querySelector(`[data-tag="${tag}"]`);
+          const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0)); const dt = new DataTransfer();
+          dt.items.add(new File([bytes], name, { type: 'text/plain' }));
+          t.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }""", [tag, Path(path).name, data])
+        page.wait_for_timeout(500)
     elif verb == "key":  # key:K=shift+ctrl+Name: a real key press, to whatever has the keyboard (a tapped canvas, an open editor)
         _, _, name = rest.partition("=")
         *mods, key = name.split("+")

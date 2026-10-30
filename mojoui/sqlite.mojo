@@ -11,7 +11,7 @@
 #   db.begin(); …; db.commit()                                # or db.rollback()
 #
 # Errors raise with SQLite's message ("near \"SELEC\": syntax error"); the connection stays usable after one.
-# How: the C library is loaded when the first Database opens (dlopen: libsqlite3.so.0 on Linux, the system's
+# How: the C library is loaded when the first Database opens (dlopen, looked up by address: libsqlite3.so.0 on Linux, the system's
 # /usr/lib/libsqlite3.dylib on the Mac), and its functions are called through their addresses, as mojoui.jobs calls
 # libc's read(): no link flag on any host, and `mojo run` (whose JIT can't resolve a library it wasn't given) works
 # too (D-1304). A Database and its statements belong to one thread: a job opens its own Database on the same file
@@ -20,6 +20,7 @@
 from std.ffi import external_call, c_int, c_char
 from std.sys import CompilationTarget
 from std.memory import Pointer, ArcPointer
+from mojoui.shared import get_shared, put_shared
 
 comptime SQLITE_OK = 0
 comptime SQLITE_ROW = 100
@@ -31,6 +32,7 @@ comptime SQLITE_BLOB = 4
 comptime SQLITE_NULL = 5
 comptime _OPEN_READWRITE = 0x2
 comptime _OPEN_CREATE = 0x4
+comptime SLOT_SQLITE_LIB = 94  # mojoui.shared slot: the loaded library (90–93 are mojoui.jobs and geometry's)
 comptime _TRANSIENT = -1  # (SQLite copies a bound value at once)
 
 
@@ -40,7 +42,17 @@ def _dlsym(handle: Int, name: String) -> Int:
 
 
 def _library() raises -> Int:
-    """The C library's handle (dlopen keeps one per process; a second open is a lookup)."""
+    """The C library's handle, loaded once per process and kept (every statement holds raw function addresses).
+    dlopen is itself looked up and called by address: GTK's host declares it (pointer, int) → int and the standard
+    library's OwnedDLHandle another way (the web's Python module uses that), and a program may declare a C function
+    only once, so this declares neither (D-1311)."""
+    var have = get_shared(SLOT_SQLITE_LIB)
+    if have != 0:
+        return have
+    var anywhere = -2 if CompilationTarget.is_macos() else 0  # RTLD_DEFAULT
+    var dlopen = _dlsym(anywhere, "dlopen")
+    if dlopen == 0:
+        raise Error("sqlite: no dlopen in this process")
     var names = List[String]()
     comptime if CompilationTarget.is_macos():
         names.append("/usr/lib/libsqlite3.dylib")
@@ -49,8 +61,9 @@ def _library() raises -> Int:
         names.append("libsqlite3.so")
     for name in names:
         var n = name
-        var h = external_call["dlopen", Int](n.as_c_string_span(), c_int(2))  # RTLD_NOW
+        var h = _fn[def(Int, c_int) thin abi("C") -> Int](dlopen)(Int(n.as_c_string_span().unsafe_ptr()), c_int(2))  # RTLD_NOW
         if h != 0:
+            put_shared(SLOT_SQLITE_LIB, h)
             return h
     raise Error("sqlite: the SQLite library isn't installed (libsqlite3)")
 
