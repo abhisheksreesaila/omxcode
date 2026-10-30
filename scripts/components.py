@@ -133,6 +133,8 @@ COMPOSITES = [
     # agents (goal 35)
     ("GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)", "mojoui/genui.mojo", ["Card", "Text", "Paragraph", "Table", "Canvas", "Button", "TextField", "Toggle", "Segmented", "ProgressBar", "VStack", "HStack", "Divider"], "GenUi("),
     ("LogPane (a live log with its head, Hide log, coloured lines)", "mojoui/logview.mojo", ["Scroll pinned to its end", "Text", "Button", "Icon", "Themes on top (themes/, or yours)"], "LogPane("),
+    # media (goal 39)
+    ("ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)", "mojoui/imageops.mojo", ["Canvas"], "ImageOps("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
