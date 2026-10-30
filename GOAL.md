@@ -1,41 +1,47 @@
-# GOAL 39: omxplorer goes multimodal
+# GOAL 41: the claim, answered in two minutes (and nothing freezes)
 
-**End goal (owner, 2026-10-30 night):** "I should be able to use the application multimodal: edit video, edit image, talk to the
-product and edit Excel at the same time." Two scenarios from Draft F: the **warehouse** ("a 60-second reel of every damaged
-pallet, faces blurred, shipment ID burned in"; "delivered shipments whose label never appears on camera") and the **drone**
-("hours of inspection footage become a database of every asset and defect, located on the map; ask which got worse since
-last time, and the answer becomes the next flight plan", with the telemetry playing beside the video). Framework first: every
-piece another app would need goes into omxcode (`mojoui/`) with its own test; omxplorer only composes. Look: omxqua Liquid,
-"as an Apple designer would: intuitive, minimal controls, very powerful".
+**End goal (owner, 2026-10-30):** warehouse safety as the first wedge, with documents: "pick a digital PDF, run it through
+an actual OCR, a good OCR, hook it up to a video, highlight and show". "The functionality has to be real, the data can be
+fake", reproducible by anyone. Multimodal cards connect only through **explicit links** ("you cannot auto join and hope it
+works"); OCR is "just a machine learning model where you plug in". Before that (owner, same day): "take the latest [UI-thread
+work], see what extra components you need, and contribute back to the app framework… don't overfit the app, the app is just
+a showcase." Look: graphite (mid-dark omxqua, every region bordered), dim-not-blur peek, link UI = drag (A) + Links panel (C)
++ hold-to-peek (approved prototypes /tmp/g40mock/links.html, hold.html).
+
+Base: `goal-41-claims` = main b79fc66 (UI-thread rules, docs/ui-threads.md) + goal 39 merged (a48edcb), goal 39's checks
+re-run green on it. Framework first: every piece goes in `mojoui/` (or `themes/`) with its own test; omxplorer only composes.
 
 ## Milestones
 | # | Milestone | Proof (`scripts/check`) |
 |---|---|---|
-| M0 | Generated media + truth | `scripts/media_data.py OUT` writes warehouse.mp4, drone_a.mp4, drone_b.mp4 (1280×720, 30 fps, ≥ 20 s), shipments.csv, telemetry_a.csv, telemetry_b.csv and truth.json from its own scene model; two runs: CSVs and truth.json byte-equal |
-| M1 | `VideoSource` (mojoui/video.mojo) | `tests/test_video.mojo` prints `video open: ok`, `video frame: ok` (frame N equals ffmpeg's own decode), `video seek: ok`, `video speed: ok` |
-| M2 | `Player` + chart time cursor (mojoui) | `tests/test_player.mojo` prints `player: ok`, `cursor: ok`; `examples/media` (Player + a telemetry line chart) builds for linux and web; a headless GTK run (play, wait, pause) prints `PLAYER: t=` and `CURSOR: t=` lines that agree within one frame and t advanced ≥ 1 s; its screenshot is written |
-| M3 | GPU image ops (mojoui) | `tests/test_imageops.mojo` prints `blur: ok`, `crop: ok`, `text: ok`, `gpu equals cpu: ok`, and `blur 720p ms: X` with X < 2 |
-| M4 | Frames become rows (mojoui) | `tests/test_videotable.mojo` writes `build/g39/warehouse_regions.csv`; against truth.json: ≥ 95 % of pallets found with first/last frame within ±2, ≥ 95 % of visible codes decoded, no damaged flag on a sound pallet; prints `frames per s: X` with X ≥ 240 |
-| M5 | Export a cut (mojoui) | `tests/test_export.mojo` writes `build/g39/reel.mp4`: its length equals truth's damaged intervals ±0.2 s; on truth's face boxes the reel's sharpness (Laplacian variance) is < 20 % of the source's; the burned-in ID band differs from the source |
-| M6 | Video and image cards in omxplorer | a headless omxplorer run opens warehouse.mp4 as a card on the sheet, plays and pauses it (`PLAYER: t=` advances), shot written; the agent's tool list (scripts/agent_client.py) includes play, pause and seek for the card |
-| M7 | The warehouse, end to end | `scripts/scenario.py warehouse` drives the real omxplorer only through its agent tools; outputs: reel.mp4 passes M5's tests; `missing.csv` (shipments whose label never appears) equals truth's set |
-| M8 | The drone, end to end | `scripts/scenario.py drone` (agent tools only): at three seeks the cursor matches the video within one frame; `defects_a.csv`/`defects_b.csv` find ≥ 90 % of truth's defects within 5 m; `worse.csv` equals truth's worsened set; `waypoints.csv` lists exactly those, lat/lon within 1e-4 of truth |
-| M9 | The covers | in ~/Projects/omxlabs: clip-warehouse.mp4 and clip-drone.mp4 recorded from the real app (≥ 8 s each) on the omxplorer cover and in its deck; the omxlabs page leads with omxplorer and "four breakthrough technologies"; every cover: no overflow at 1440 and 390, no console errors |
-| M11 | An iMovie-grade editor (owner, 2026-10-30: "modelled on iMovie: timelines at the bottom, similar controls, really polished") | `tests/test_mediatimeline.mojo` prints `timeline: ok` (filmstrip thumbnails, zoom, playhead, trim, split, a marker lane from rows), `edit: ok` (trimmed/split clips export to the right length); `examples/media` shows the viewer above a filmstrip timeline with a detections lane and a telemetry lane; a headless GTK run that trims and splits prints `TIMELINE:` lines and writes its screenshot; omxplorer's video card opens the editor |
-| M12 | Real models in the slot (VisionModel, in process) | `tests/test_visionmodel.mojo` prints `visionmodel: ok` (OWLv2 boxes and SAM 2.1 masks as VideoTable rows; the hand-off ≤ 1 ms); `tests/test_findlike.mojo` runs warehouse.mp4 through `ModelAnalyzer` from ONE example crop (no ColourRange) and writes `build/g39/findlike_damaged.csv` (frame per row with a hit) and drone_a's burn marks from one example to `build/g39/findlike_drone_a.csv` (lat, lon); against truth: damaged frames recall ≥ 0.95, precision ≥ 0.85; ≥ 4 of 5 drone marks within 5 m; prints `scan s: X` with X ≤ 15 for the 1140-frame warehouse |
-| M10 | The morning note | `docs/research/inprocess-ai.md`: how omxconsole could serve non-LLM models (e.g. Segment Anything) to omxplorer in process, no HTTP; ≥ 3 options with costs and one recommendation |
+| M0 | Claim data + truth | `scripts/claims_data.py OUT` writes dock.mp4 (goal 39's warehouse scene), shipments.csv (+ status, claim_usd), forklift_log.csv (t, speed, brake), bol/BOL-*.pdf (one digital PDF per delivered shipment: shipment no., carrier, pallets, exceptions, signature), truth.json (each BOL's field values and their boxes in page points; `disputed`: shipments damaged on camera whose BOL says no exceptions; the damage frame per shipment; the log's clock offset); two runs: CSVs, truth.json and every PDF's text byte-equal |
+| M1 | Slow-frame watchdog (mojoui) | with `MOJOUI_BUDGET_MS=N` every host prints `SLOW: <update\|view\|draw> <name> <ms> ms` for any update, view or canvas draw over N ms after the first second; `examples/slowcheck` (a button whose update sleeps 80 ms, one that doesn't): a headless GTK run at 50 prints a `SLOW: update` line after tapping slow and none after tapping fast; the web build prints the same line through its host; `examples/jobwake` still prints PASS |
+| M2 | Media never blocks the UI thread | opening a video or picture (ffprobe), seeking, decoding, filmstrip thumbnails and the editor's preview (GPU context, redaction plan) run off the UI thread; `tests/test_player.mojo` prints `player async: ok` (open returns before the probe ends; a seek returns at once and the frame lands later); a headless omxplorer session at `MOJOUI_BUDGET_MS=50` (open dock.mp4, 20 scrubs across the bar, play 2 s, Edit, blur chip on, insert a picture) prints 0 `SLOW:` lines and `GAPS:` longest < 120 ms over the scrubs; goal 39's M6, M7, M11 (docs/goals/39-check.py) still PASS |
+| M3 | Data work as jobs, one analysis path | SQL query, Export CSV, Insert > Table, compare and model scans run through `start_ui_job` (wakes the UI, no per-frame polling); `mojoui/videojobs.mojo` and `mediatimeline_jobs.mojo` share one analysis job; `examples/omxplorer/app.mojo` calls no `start_job(`; a headless session at 50 ms (a 1,000,000-row CSV inserted, a GROUP BY query, Export CSV, Analyze) prints 0 `SLOW:` lines and the query's `JOB:` line; goal 39's M7 still PASS |
+| M4 | Extracted and named | `MediaTimeline.open_with(...)` used by both examples/media and omxplorer (no duplicated editor setup), the video card's Analyze / Make a reel / Edit flow lives in mojoui (`mojoui/videocard*.mojo`), `video_for_log` in trackcard; `a11y` on omxplorer's video card, editor and table card prints `A11Y: 0 unnamed`; `scripts/components.py` matrix fresh |
+| M5 | Graphite skin | `themes/` graphite: mid-dark tonal surfaces, the omxqua green accent, a 1 px hairline around the sidebar, toolbar, sheet, inspector, status bar and every card (GTK and web); omxplorer opens in it; on the GTK and web shots (1742×876) the page's mean luminance is 0.10–0.30 and every region boundary of `build/g41/m5-regions.json` (written by the run's `regions:` step) has a luminance step ≥ 0.04 along ≥ 80 % of its length; `examples/gallery` shot in graphite written |
+| M6 | Links and selection (omxcode) | `mojoui/links.mojo`: `Link` (key, time with offset, place), a sheet's `Links`, `match_count`, the SQL `JOIN … ON` a link implies, `Selection` + per-card `react`; agent tools `link`, `unlink`, `links`; `tests/test_links.mojo` prints `link: ok`, `match: ok` (12-of-14 style counts against a hand table), `join: ok` (the join's rows equal DuckDB's on the same CSVs), `follow: ok` (a row selection seeks a linked video and highlights a linked page box), `time: ok` (offset maps t both ways), `tools: ok` |
+| M7 | Documents become rows (plugin) | `mojoui/pdfsource.mojo` (pages → pictures), a document card (page, zoom, pan, `highlight(box)`), an OCR model behind the model slot (docTR in the `models` env, run as a job), rows with a `text` column (word, box, page, confidence) and fields by geometry (label → value); `tests/test_documents.mojo` (models env) prints `documents: ok`; on M0's BOLs ≥ 98 % of truth's fields read exactly, field boxes IoU ≥ 0.5 with truth's; on 20 FUNSD test forms word recall ≥ 0.70 (printed `funsd recall: X`) |
+| M8 | The link UI | drag a column header onto another card → a confirm popover with the match count → Link; the Links panel in the inspector (list, unlink, time offset); hold a card ≥ 350 ms → the peek: unlinked cards dim, linked ones lift with a spring, ghost lines labelled with their columns; release settles back. A headless GTK run prints `LINK: shipments.shipment_id = dock.mp4 · code (12 of 14)` style lines, `PEEK: lit=[…] dim=[…] lines=N` matching the links, shots for the drag, the panel and the peek; same steps on the web build; 0 `SLOW:` at 50 ms |
+| M9 | Time links paint | forklift_log linked by time to dock.mp4 with truth's offset: its lane draws under the video and the shared cursor agrees with the video within one frame at 3 seeks (`PLAYER:`/`CURSOR:` lines) |
+| M10 | The claim, end to end (agent tools only) | `scripts/scenario.py claims` drives omxplorer only through its agent tools: open the video, the sheet and the BOL folder, Analyze, read the documents, make the two key links, ask "damaged pallets whose BOL says no exceptions"; the answer table's shipments equal truth's `disputed`; selecting each answer row seeks the video to within ±15 frames of truth's damage frame and highlights the page's Exceptions box (IoU ≥ 0.5); Export claim pack writes per shipment a PDF (≥ 2 pages, contains the shipment ID, the BOL page and a frame) and a reel that passes goal 39's reel check |
+| M11 | Cover + reproducible bundle | `clip-claims.mp4` (≥ 8 s, recorded from omxplorer in graphite through agent tools) on the omxplorer cover and deck in ~/Projects/omxlabs; `examples/claims-data/README.md` says how to regenerate and replay; regenerating gives truth byte-equal; every cover: no overflow at 1440 and 390, no console errors |
 
 ## Done means
-`scripts/check` PASS for M0–M12, the reviewer passes it, and the two clips play on the cover.
+`scripts/check` PASS for M0–M11, the reviewer passes it, and the claim clip plays on the cover.
 
 ## Out of bounds
-Pushing, deploying, paid services, sign-ups, secrets; the frozen `../mojo-ui-apple-test`; patching Mojo; lowering a proof.
+Pushing, merging into main, deploying, paid services, sign-ups, secrets; the frozen `../mojo-ui-apple-test`; other threads'
+branches (goal-40-sketch: read or copy with a decision line, never commit to it); patching Mojo; lowering a proof.
 
 ## Assumptions (instead of asking)
-- Footage is generated (owned, exact truth); "detection" is GPU colour, motion and stripe-code analysis, a slot a model plugs into later (M10), and every page says so.
-- Video decode/encode through the installed ffmpeg as a pipe (no new library); GTK and web first, Android/Apple later.
-- Shipment IDs are a printed stripe code (an OCR stand-in), with the digits drawn beside it.
-- T0 (stable state): main = release a818aa8, already checked and reviewed twice; not re-run.
+- Data is generated (owned, exact truth); FUNSD is downloaded for evaluation only, never committed (research licence).
+- OCR = docTR (Apache-2.0, word boxes, same PyTorch as goal 39's models env); Unlimited-OCR is a later swap of the plugin.
+- PDFs are written and rendered with PyMuPDF (pixi, conda-forge); the claim pack is HTML printed to PDF by the Playwright
+  already in the default env.
+- Time links only paint (cursor and lane); a real as-of join waits for a question that needs it.
+- Headless Xvfb draws on the CPU, so the budget in checks is 50 ms (the guide's 16 ms is for real displays).
+- Near-miss safety, audio, a model shop and robotics formats are out of this goal.
 
 ## Budget
-One night (≈ 6 h), cut order if short: M8's two-flight comparison, then M9's drone clip.
+One night (≈ 8 h). Cut order if short: M11's clip, M9, the web half of M8.
