@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 40: Sketch, omxcode draws (2026-10-30)
+- **Setup:** branch `goal-40-sketch` from main b79fc66, worktree ../mojo-ui-g40; contract docs/goals/40-GOAL.md, checker docs/goals/40-check.py (written first). The yardstick: Personal Note's canvas (ink with pressure, pan/zoom).
+- **Worked:** `mojoui/ink.mojo` (a stroke as one outline polygon through every point, width from pressure or speed, an eraser hit test); `Painter.polygon` and `Painter.layer_transform` (the CPU painter fills polygons with 4 sub-scanlines, non-zero; GTK fills a GskPath and moves the kept layer); `Event.pressure` from GDK_AXIS_PRESSURE, the web's pen, the Mac's tablet; generic GTK test steps `stroke:`, `render:` and `framebench:`; examples/sketch (pen, eraser, three inks, undo, clear, pan, zoom around the pointer). GTK's canvas equals the CPU render (0.0 levels). Linux, web and Mac build.
+- **Broke and fixed:** the Mac link wanted `_atan2` (the round ends turn by rotation now). The first honest bench was 32 ms a frame: cairo re-fills every path of a kept render node each frame, and GTK's paint phase hid it (~0 ms; it draws only damage). A kept, moved layer is now drawn once into a texture and moved: p95 2.0 ms pan, 2.6 ms zoom, 1.8 ms draw with 1,000 strokes / 101,000 points.
+- **Means:** drawing is a framework feature now, shown in the gallery's Drawing section. Unmeasured: a real pen on GTK (only injected pressures), the web and the Mac with a pen, GTK's GPU renderers.
+- **Next small step:** run Sketch on the owner's Mac (build in build/sketch/mac); a Metal host for the layer transform.
+
 ## The Mac stops freezing on long jobs: job threads on Apple (2026-10-30)
 - **Setup:** branch `mac-job-threads` from main 0d09024, worktree ../mojo-ui-macjobs. The owner: "at least the Mac has to be fixed".
 - **Worked:** the engine already had a switch (`-D MXFRAME_JOB_THREADS`) that gives Apple builds job threads; it reaches into the prebuilt omxcore package (with it the Mac objects call pthread_create/join; without, none). scripts/build.sh passes it to every Mac build; the Mac stub gained five libSystem symbols. examples/jobwake now measures a freeze (one 1.5 s job, the longest gap between frames) and runs on the Mac runner. GitHub's Macs, before → after: 1 frame and 1516–1527 ms without one → 28–38 frames, at most 71–83 ms (jobwake now fails past 500 ms). omxplorer (imports and column stats are jobs) and maccheck exit 0 on both macOS versions. Reviewer round 1: checking a cancelled job's thread still blocked on the Mac (no pthread_tryjoin_np): now read from the engine's reference count, no wait. Linux: 90 frames, 17 ms.

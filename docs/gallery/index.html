@@ -144,6 +144,21 @@
     </div>
   </article>
 
+  <article class="card" data-kind="both" id="drawing">
+    <div class="head"><h2>Drawing · Sketch, pressure ink with pan and zoom</h2><span class="tag both">Both shine</span>
+      <span class="src"><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/sketch">examples/sketch/</a></span></div>
+    <div class="body">
+      <div class="shots two">
+        <figure><img src="img/sketch-gtk.png" alt="Sketch in a native Linux window: a Liquid toolbar with pen, eraser, pan, three inks, undo and clear over a page of 162 ink strokes, two drawn with changing pressure" loading="lazy"><figcaption>Linux (GTK): each stroke is one filled outline that GTK's renderer fills; the bottom two were drawn with pressure rising and falling.</figcaption></figure>
+        <figure><img src="img/sketch-web.png" alt="The same app in a browser: the same toolbar and the same page of strokes" loading="lazy"><figcaption>Web: the same file in a browser; the canvas is painted by the CPU painter and streamed.</figcaption></figure>
+      </div>
+      <div class="why">
+        <p>Drawing comes from the library, not the app: <code>mojoui.ink</code> turns a pen's points and pressures into one outline polygon (a mouse gets a width from its speed); the Scene gained a polygon fill and a layer transform, so panning and zooming moves the kept ink layer instead of redrawing it; <code>Event.pressure</code> reaches apps from GTK, a browser's pen and a Mac's tablet. <code>examples/sketch</code> is one file that puts them together.</p>
+        <p>Measured headless (Xvfb, cairo): 1,000 strokes (101,000 points), p95 frame 2.0 ms panning, 2.6 ms zooming, 1.8 ms drawing; the ink layer is never rebuilt during pan or zoom. Checked by <code>docs/goals/40-check.py</code>; the Mac build is built, not yet run.</p>
+      </div>
+    </div>
+  </article>
+
   <article class="card" data-kind="both" id="widgets">
     <div class="head"><h2>JavaScript widgets · CodeMirror and ECharts beside native components</h2><span class="tag both">Both shine</span>
       <span class="src"><a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/widgets">examples/widgets/</a></span></div>

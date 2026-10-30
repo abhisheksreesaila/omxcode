@@ -19,6 +19,7 @@ The README, reference, architecture, agent host and components in one file: [llm
 - [Reference](https://abhisheksreesaila.github.io/omxcode/reference.md): the app model, every component, layout, the GPU canvas, the examples
 - [How it works](https://abhisheksreesaila.github.io/omxcode/architecture.md): the view tree, the update loop, how each platform is reached
 - [The agent host](https://abhisheksreesaila.github.io/omxcode/agent.md): the MCP tools (screen, act, read, render), what an agent gets back, what it can't do yet
+- Drawing: `mojoui.ink` (Stroke: points + pressures → one outline polygon; width from speed without pressure; `hits()` for an eraser), `Painter.polygon` and `Painter.layer_transform` (pan/zoom moves a kept layer), `Event.pressure`; example `examples/sketch`
 - [Components × platforms](https://abhisheksreesaila.github.io/omxcode/components.md): what exists where, generated from the code
 - [The UI thread](https://abhisheksreesaila.github.io/omxcode/ui-threads.md): why apps don't hang, and the five rules an app (or an agent writing one) follows: slow work is a request, a timer or a job
 
