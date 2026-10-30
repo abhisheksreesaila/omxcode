@@ -6,9 +6,9 @@ Audited 2026-10-30 against `main` (a818aa8), plus the accessibility work on bran
 
 ## On one slide
 
-> **Native widgets, one UI thread, data flowing one way, slow work on worker threads, names for every screen reader:
-> the same rules SwiftUI, Jetpack Compose and React follow, applied to five platforms from one Mojo file, and checked by
-> running them.**
+> **Native widgets, one UI thread, data flowing one way, slow work on worker threads, one naming rule for screen
+> readers: the same rules SwiftUI, Jetpack Compose and React follow, applied to five platforms from one Mojo file, and
+> checked by running them.**
 
 | Practice | Status |
 |---|---|
@@ -21,7 +21,7 @@ Audited 2026-10-30 against `main` (a818aa8), plus the accessibility work on bran
 | Lists and grids draw only what's on screen | ✅ 1M rows, 0.8 ms p95 a scroll frame |
 | Idle apps don't wake the CPU; slow networks get fewer frames, not lag | ✅ D-64, D-57 |
 | Native controls: typing, spell-check, keyboard and screen readers from the platform | ✅ |
-| Every control has a name a screen reader can say, from one rule | ✅ GTK and web proven; Apple builds |
+| Screen-reader names from one rule, and an audit that lists unnamed controls | ✅ GTK and web proven on a check app; Apple builds; shipped apps not audited yet |
 | Respects "reduce motion" and dark mode | ✅ GTK, web (motion); every host (dark) |
 | Behaviour separate from looks (themes) | ✅ D-260 |
 | Proven by running on each platform, with a public matrix | ✅ [components.md](components.md) |
@@ -124,10 +124,13 @@ a drawn chart without one is invisible to a blind user (WCAG 4.1.2).
 - **Each host hands the name to its platform:** GTK's `GtkAccessible` label, the web's `aria-label` on the control
   itself, `accessibilityLabel` on AppKit and UIKit. A drawn chart is an *image* named by its words, and the name
   follows when the words change in place.
-- **Proven against the platform, not our own tree** (`scripts/check_a11y.py`): GTK's own test accessibility backend
-  reads back each label (and confirms an unnamed control has none); Chromium's accessibility tree names
-  `button "Delete"`, `combobox "Region"`, `textbox "Search"`, `img "Sum of amount by region, as bars"`, and after a
-  change `img "Average of amount by region, as bars"`.
+- **Proven against the platform, not our own tree** (`scripts/check_a11y.py`, on `examples/a11ycheck`): GTK's own
+  test accessibility backend reads back the labels we set (Region, Period, Upload, a chart's words before and after
+  they change) and reports none once a chart's words are cleared. Chromium's accessibility tree checks every name:
+  `button "Delete"`, `combobox "Region"`, `textbox "Search"`, `radiogroup "Period"`, `progressbar "Upload"`,
+  `img "Sum of amount by region, as bars"`, then `img "Average of …"` after a change, and no name after Clear.
+- **What it doesn't prove yet:** the shipped apps haven't been audited (only the check app uses `.label()`; many build
+  sliders and dropdowns with no label), and names that come from a control's own words (a button's title, a field's placeholder, an option) are checked on the web only: GTK reads back the labels we set. A labelled JS widget gets `role="group"` on the web, not yet checked.
 - **Motion and appearance.** "Reduce motion" turns animations off on GTK (`gtk-enable-animations`) and the web
   (`prefers-reduced-motion`); every host tells the app about dark mode (`App.appearance`). The iPhone follows the
   person's text size (Dynamic Type).
@@ -157,7 +160,12 @@ code and the checks: ✅ run by a check, 🔨 built but never run, ❌ missing. 
 | Mac/iPhone: data jobs run on the main thread | a long query freezes the window there | job threads in the engine's Apple build (omxcore) |
 | Screen readers can name a chart, but not read its numbers | a summary isn't the data | expose `App.describe()` (already written for agents) as an accessible table |
 | Android: no accessible names from `.label()` yet | its content description doubles as a test tag | separate the test tag from the description |
-| Apple hosts don't apply a canvas's changing words (SET_TIP) | VoiceOver hears the first words only | apply SET_TIP on AppKit and UIKit |
+| Shipped apps not audited | sliders, dropdowns and charts without a label are silent to screen readers | run `audit()` on every example's screens and add labels |
+| Apple hosts don't apply a canvas's changing words (SET_TIP) | VoiceOver hears the first words only, even after they're cleared | apply SET_TIP on AppKit and UIKit |
+| Mac: a drawn canvas may not report itself to VoiceOver | a label on a plain view can be ignored | builds only; check on the MacBook |
+| Interactive canvases are marked as images on the web | a focusable image is an odd thing for a screen reader | a role per canvas (image vs. application) |
+| Images: named, but not checked on any host | the web's `alt=""` may still hide them | add an image to the check app |
+| The accessibility check is standalone | a regression won't fail `scripts/check` | wire it into the next goal's check |
 | No right-to-left layout or localisation | Arabic and Hebrew users | `dir="auto"` on the web, `semanticContentAttribute` on Apple |
 | The whole screen is rebuilt and compared on each event | fine today; may cost at 10k+ nodes | measure first; fine-grained tracking (SwiftUI `@Observable`, Compose scopes) if it shows |
 

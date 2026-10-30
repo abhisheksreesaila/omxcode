@@ -472,7 +472,7 @@ CANVAS_JS = r"""
     const cv = div.querySelector('canvas');
     e.preventDefault(); e.stopPropagation(); cv.focus({ preventScroll: true }); cv.dispatchEvent(new KeyboardEvent('keydown', e));
   }, true);
-  window.mojouiAttach = attach;
+  window.mojouiAttach = attach;  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
   // A drawn view's words (SET_TIP, in its meta): its tooltip, and its accessible name unless a label names it. After every
   // swap, not only when a frame arrives: words can change while the picture doesn't.
   window.mojouiWords = div => {
@@ -480,7 +480,7 @@ CANVAS_JS = r"""
     if (!m) return;
     if ((m.dataset.tip || '') !== (div.dataset.tip || '')) { div.dataset.tip = m.dataset.tip || ''; div.title = div.dataset.tip; }
     if (cv && (cv.getAttribute('aria-label') || '') !== (m.dataset.name || '')) cv.setAttribute('aria-label', m.dataset.name || '');
-  };  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
+  };
   function attach(div) {
     if (div.mojoui) return;
     const cv = div.querySelector('canvas'), g = cv.getContext('2d');
@@ -860,6 +860,8 @@ def render(s, i, sid):
     elif n.get("a11y_name"):
         if n["kind"] in NAMED_AS_A_WHOLE:
             el.attrs["aria-label"] = n["a11y_name"]
+            if n["kind"] == WEBCOMP and not el.attrs.get("role"):
+                el.attrs["role"] = "group"  # (a plain div's aria-label is ignored: a named group holds the JS widget)
         else:
             name_control(el, n["a11y_name"])
     return el
