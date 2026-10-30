@@ -46,11 +46,13 @@ A_BIN = ROOT / "build" / "race" / "race_a"
 MODEL_A = "openai/whisper-large-v3-turbo"
 MODEL_B = "onnx-community/whisper-large-v3-turbo"
 B_FILES = ["onnx/encoder_model_fp16.onnx", "onnx/decoder_model_merged_fp16.onnx", "onnx/encoder_model.onnx",
-           "onnx/encoder_model.onnx_data", "onnx/decoder_model_merged.onnx", "onnx/decoder_model_merged_q4.onnx"]
+           "onnx/encoder_model.onnx_data", "onnx/decoder_model_merged.onnx", "onnx/decoder_model_merged_q4.onnx",
+           "onnx/encoder_model_q4.onnx"]
 # B's precisions, tried in order: fp16 first (the goal's "fp16 where it loads"); when the adapter has no shader-f16 the
 # same model's fp32 export, and fp32 encoder + 4-bit decoder (what transformers.js's own WebGPU Whisper demos use for the
-# decoder). Every variant that loads is run; B is the one with the lowest p50 (its best chance), all recorded.
-B_VARIANTS = [("fp16", "fp16"), ("fp32", "fp32"), ("fp32", "q4")]
+# decoder); the fp32 encoder is 2.5 GB of external data, which the page fails to fetch, so then the 4-bit encoder with an
+# fp32 or 4-bit decoder. Every variant that loads is run; B is the one with the lowest p50 (its best chance), all recorded.
+B_VARIANTS = [("fp16", "fp16"), ("fp32", "fp32"), ("fp32", "q4"), ("q4", "fp32"), ("q4", "q4")]
 B_DIR = Path.home() / ".cache" / "mojoui" / "models" / MODEL_B
 CHROME = os.environ.get("CHROME", "/usr/lib/chromium/chromium")
 SPEECH_ENV = ROOT / ".pixi" / "envs" / "speech"
