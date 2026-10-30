@@ -1,0 +1,135 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+:root{--g0:#181b20;--g1:#1f2329;--g2:#272c33;--g3:#30363e;--ln:#3b424c;--tx:#e6e8eb;--mu:#98a1ac;--ac:#3ccf6e;--acs:rgba(60,207,110,.14);--warn:#e0a84a;--bad:#e5645a}
+body{margin:0;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--foreground)}
+h2{font-size:16px;margin:28px 0 4px}h2 small{font-weight:500;color:var(--muted-foreground);font-size:12px;margin-left:6px}
+p.sub{margin:0 0 10px;color:var(--muted-foreground)}
+.app{background:var(--g0);border:1px solid var(--ln);border-radius:12px;overflow:hidden;color:var(--tx);position:relative}
+.bar{display:flex;align-items:center;gap:10px;height:34px;padding:0 12px;background:var(--g1);border-bottom:1px solid var(--ln);font-size:12px;color:var(--mu)}
+.bar b{color:var(--tx);font-weight:600}.bar .sp{flex:1}
+.pill{border:1px solid var(--ln);border-radius:7px;padding:3px 9px;background:var(--g2);color:var(--tx)}
+.pill.on{border-color:var(--ac);color:var(--ac);background:var(--acs)}
+.body{display:flex;height:300px}
+.side{width:44px;background:var(--g1);border-right:1px solid var(--ln);display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:12px}
+.side i{width:18px;height:18px;border-radius:5px;background:var(--g3);display:block}.side i.on{background:var(--ac)}
+.sheet{flex:1;position:relative;background:var(--g0);background-image:radial-gradient(var(--g2) 1px,transparent 1px);background-size:18px 18px}
+.status{height:24px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--g1);border-top:1px solid var(--ln);font-size:11px;color:var(--mu)}
+.card{position:absolute;background:var(--g1);border:1px solid var(--ln);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);overflow:hidden}
+.card .hd{height:26px;display:flex;align-items:center;gap:6px;padding:0 9px;border-bottom:1px solid var(--ln);background:var(--g2);font-size:11.5px;font-weight:600}
+.card .hd .k{color:var(--mu);font-weight:500}.card .hd .sp{flex:1}
+.chain{font-size:10.5px;font-weight:600;color:var(--ac);background:var(--acs);border-radius:6px;padding:1px 6px}
+table{border-collapse:collapse;width:100%;font-size:11px}
+th{text-align:left;font-weight:600;color:var(--mu);padding:4px 7px;border-bottom:1px solid var(--ln);background:var(--g1)}
+td{padding:3.5px 7px;border-bottom:1px solid var(--g3)}
+tr.sel td{background:var(--acs)}
+th.hot{color:var(--ac);box-shadow:inset 0 -2px var(--ac)}
+.vid{height:96px;background:linear-gradient(160deg,#2a3038,#1a1d22);position:relative}
+.pal{position:absolute;width:34px;height:24px;background:#8a6a43;border-radius:2px}
+.box{position:absolute;border:1.5px solid var(--ac);border-radius:3px}
+.box.bad{border-color:var(--bad)}
+.strip{height:22px;display:flex;gap:2px;padding:3px;background:var(--g2);border-top:1px solid var(--ln);position:relative}
+.strip i{flex:1;background:var(--g3);border-radius:2px}
+.lane{height:10px;margin:0 3px 3px;position:relative;background:var(--g2)}
+.lane b{position:absolute;top:2px;height:6px;border-radius:3px;background:var(--bad)}
+.ph{position:absolute;top:0;bottom:0;width:2px;background:var(--tx)}
+.page{background:#eceae4;margin:8px;border-radius:3px;height:150px;position:relative;color:#333;font-size:8.5px;padding:8px}
+.page .f{position:absolute;left:8px;right:8px;display:flex;justify-content:space-between;border-bottom:1px solid #cfccc4;padding-bottom:1px}
+.page .hl{background:rgba(60,207,110,.35);outline:1.5px solid #2aa858;border-radius:2px}
+.ghost{position:absolute;padding:4px 9px;border-radius:7px;background:var(--g3);border:1px solid var(--ac);color:var(--ac);font-weight:600;font-size:11px;box-shadow:0 8px 20px rgba(0,0,0,.5)}
+.drop{outline:2px solid var(--ac);outline-offset:2px}
+.pop{position:absolute;background:var(--g2);border:1px solid var(--ln);border-radius:11px;box-shadow:0 12px 30px rgba(0,0,0,.5);padding:11px 12px;font-size:11.5px}
+.pop h4{margin:0 0 7px;font-size:12px}
+.row{display:flex;align-items:center;gap:6px;margin:4px 0}
+.sel2{border:1px solid var(--ln);border-radius:6px;padding:2px 7px;background:var(--g1)}
+.btn{border-radius:7px;padding:4px 11px;font-weight:600;font-size:11.5px;border:1px solid var(--ln);background:var(--g3);color:var(--tx)}
+.btn.p{background:var(--ac);border-color:var(--ac);color:#0d2416}
+.mu{color:var(--mu)}.ok{color:var(--ac)}
+.meter{height:5px;border-radius:3px;background:var(--g3);overflow:hidden;width:120px}.meter b{display:block;height:100%;width:86%;background:var(--ac)}
+.insp{position:absolute;right:0;top:0;bottom:0;width:230px;background:var(--g1);border-left:1px solid var(--ln);padding:10px 11px;font-size:11.5px}
+.insp h4{margin:0 0 8px;font-size:12px}
+.lk{border:1px solid var(--ln);background:var(--g2);border-radius:8px;padding:7px 8px;margin-bottom:7px}
+.lk .t{font-weight:600}.lk .m{color:var(--mu);font-size:10.5px;margin-top:2px}
+.lk.sug{border-style:dashed}
+.tag{font-size:10px;border-radius:5px;padding:0 5px;border:1px solid var(--ln);color:var(--mu);margin-left:4px}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;font-size:12px}
+.pc div{border-radius:var(--radius);padding:9px 11px;background:var(--card);border:1px solid var(--border)}
+.pc b{display:block;margin-bottom:3px}
+.rec{color:var(--success)}
+svg.w{position:absolute;inset:0;pointer-events:none}
+.hand{position:absolute;width:11px;height:11px;border-radius:50%;background:var(--g0);border:2px solid var(--ac)}
+</style></head><body>
+
+<h2>A · Drag a column onto a card <small>recommended for making a link</small></h2>
+<p class="sub">Pick up the <b>shipment_id</b> header and drop it on the video. The video's columns that could match light up with a count, and a small sheet confirms the link.</p>
+<div class="app">
+ <div class="bar"><b>omxplorer</b><span>claims.omx</span><span class="sp"></span><span class="pill">Ask</span><span class="pill">Insert</span></div>
+ <div class="body"><div class="side"><i class="on"></i><i></i><i></i></div>
+  <div class="sheet">
+   <div class="card" style="left:14px;top:14px;width:250px">
+    <div class="hd"><span class="k">▦</span>shipments<span class="sp"></span><span class="mu">14 rows</span></div>
+    <table><tr><th class="hot">shipment_id</th><th>carrier</th><th>status</th></tr>
+    <tr><td>S-5010</td><td>Ridge</td><td>delivered</td></tr><tr><td>S-5011</td><td>Ridge</td><td>delivered</td></tr>
+    <tr><td>S-5012</td><td>Polar</td><td>claim</td></tr><tr><td>S-5013</td><td>Polar</td><td>delivered</td></tr><tr><td>S-5014</td><td>Ridge</td><td>delivered</td></tr></table>
+   </div>
+   <div class="card drop" style="left:282px;top:14px;width:222px">
+    <div class="hd"><span class="k">▶</span>dock_cam.mp4<span class="sp"></span><span class="mu">0:38</span></div>
+    <div class="vid"><div class="pal" style="left:40px;top:50px"></div><div class="box" style="left:37px;top:47px;width:40px;height:30px"></div><div class="pal" style="left:140px;top:42px"></div><div class="box bad" style="left:137px;top:39px;width:40px;height:30px"></div></div>
+    <div style="padding:7px 9px;font-size:11px;border-top:1px solid var(--ln)"><div class="mu" style="margin-bottom:4px">Drop on a column</div>
+     <div class="row"><span class="pill on">code</span><span class="ok">12 of 14 match</span></div>
+     <div class="row"><span class="pill">track</span><span class="mu">0 match</span></div></div>
+   </div>
+   <div class="ghost" style="left:400px;top:96px">shipment_id</div>
+   <div class="pop" style="left:518px;top:14px;width:136px"><h4>Link these?</h4>
+    <div class="row"><span class="sel2">shipment_id</span></div><div class="row mu">same as</div><div class="row"><span class="sel2">video · code</span></div>
+    <div class="row" style="margin-top:6px"><div class="meter"><b></b></div></div><div class="mu" style="font-size:10.5px">12 of 14 match · 2 never on camera</div>
+    <div class="row" style="margin-top:8px"><span class="btn p">Link</span><span class="btn">Cancel</span></div></div>
+  </div></div>
+ <div class="status"><span>Sheet 1</span><span>2 links</span></div>
+</div>
+<div class="pc"><div><b>Good</b>One gesture you already know from the sheet. You see the match count before you commit. Nothing new on screen when you aren't linking.</div><div><b>Watch out</b>Hard to discover the first time, so the empty state needs a hint. A video's columns only exist after Analyze.</div></div>
+
+<h2>B · Draw a wire between cards <small>node editor</small></h2>
+<p class="sub">Each card shows link handles. Drag a wire from one card to another, then pick the columns. The wires stay drawn on the sheet.</p>
+<div class="app">
+ <div class="bar"><b>omxplorer</b><span>claims.omx</span><span class="sp"></span><span class="pill on">Connect</span><span class="pill">Ask</span></div>
+ <div class="body"><div class="side"><i></i><i class="on"></i><i></i></div>
+  <div class="sheet">
+   <svg class="w" viewBox="0 0 690 300" preserveAspectRatio="none"><path d="M234 70 C 300 70, 290 60, 350 60" stroke="#3ccf6e" stroke-width="2" fill="none"/><path d="M234 110 C 330 140, 420 200, 470 200" stroke="#3ccf6e" stroke-width="2" stroke-dasharray="5 4" fill="none"/></svg>
+   <div class="card" style="left:14px;top:30px;width:220px"><div class="hd"><span class="k">▦</span>shipments</div>
+    <table><tr><th>shipment_id</th><th>status</th></tr><tr><td>S-5010</td><td>delivered</td></tr><tr><td>S-5011</td><td>delivered</td></tr><tr><td>S-5012</td><td>claim</td></tr></table></div>
+   <div class="hand" style="left:228px;top:64px"></div><div class="hand" style="left:228px;top:104px"></div>
+   <div class="card" style="left:350px;top:20px;width:200px"><div class="hd"><span class="k">▶</span>dock_cam.mp4</div><div class="vid" style="height:70px"></div></div>
+   <div class="hand" style="left:344px;top:54px"></div>
+   <div class="ghost" style="left:240px;top:30px;font-size:10px;padding:2px 7px">shipment_id = code</div>
+   <div class="card" style="left:470px;top:160px;width:190px"><div class="hd"><span class="k">▤</span>BOL-5012.pdf</div><div class="page" style="height:60px"></div></div>
+   <div class="hand" style="left:464px;top:194px"></div>
+  </div></div>
+ <div class="status"><span>Connect mode</span><span>2 links</span></div>
+</div>
+<div class="pc"><div><b>Good</b>The relationships are visible at a glance. People who use Power BI or node editors know it.</div><div><b>Watch out</b>This is the "ugly" risk: with 6+ cards it becomes spaghetti, wires cross cards, and it needs a mode. On a phone it barely works.</div></div>
+
+<h2>C · A Links panel in the inspector <small>recommended for seeing and editing links</small></h2>
+<p class="sub">One quiet list of every link on the sheet. Suggestions arrive dashed and wait for a tap. Time links get their offset slider here.</p>
+<div class="app">
+ <div class="bar"><b>omxplorer</b><span>claims.omx</span><span class="sp"></span><span class="pill">Ask</span><span class="pill on">Links 2</span></div>
+ <div class="body"><div class="side"><i class="on"></i><i></i><i></i></div>
+  <div class="sheet">
+   <div class="card" style="left:14px;top:14px;width:200px"><div class="hd"><span class="k">▦</span>shipments<span class="sp"></span><span class="chain">⛓ 2</span></div>
+    <table><tr><th>shipment_id</th><th>status</th></tr><tr><td>S-5011</td><td>delivered</td></tr><tr class="sel"><td>S-5012</td><td>claim</td></tr><tr><td>S-5013</td><td>delivered</td></tr></table></div>
+   <div class="card" style="left:228px;top:14px;width:210px"><div class="hd"><span class="k">▶</span>dock_cam.mp4<span class="sp"></span><span class="chain">⛓ 1</span></div>
+    <div class="vid" style="height:80px"><div class="pal" style="left:90px;top:30px"></div><div class="box bad" style="left:87px;top:27px;width:40px;height:30px"></div></div>
+    <div class="strip"><i></i><i></i><i></i><i></i><i></i><i></i><div class="ph" style="left:58%"></div></div><div class="lane"><b style="left:52%;width:14%"></b></div></div>
+   <div class="card" style="left:14px;top:148px;width:200px"><div class="hd"><span class="k">▤</span>BOL-5012.pdf<span class="sp"></span><span class="chain">⛓ 1</span></div>
+    <div class="page" style="height:96px"><div class="f" style="top:8px"><span>Shipment no.</span><span class="hl">S-5012</span></div><div class="f" style="top:24px"><span>Pallets</span><span>3</span></div><div class="f" style="top:40px"><span>Exceptions</span><span class="hl">None ✓</span></div><div class="f" style="top:56px"><span>Signed</span><span>J. Ortiz</span></div></div></div>
+   <div class="insp"><h4>Links on this sheet</h4>
+    <div class="lk"><div class="t">shipment_id = code <span class="tag">key</span></div><div class="m">shipments ↔ dock_cam · 12 of 14 match</div></div>
+    <div class="lk"><div class="t">shipment_id = Shipment no. <span class="tag">key</span></div><div class="m">shipments ↔ BOL pages · 14 of 14</div></div>
+    <div class="lk sug"><div class="t">Suggested: t ≈ timestamp <span class="tag">time</span></div><div class="m">dock_cam ↔ forklift_log · offset +1.2 s</div><div class="row" style="margin-top:6px"><span class="btn p">Link</span><span class="btn">Dismiss</span></div></div>
+    <div class="mu" style="font-size:10.5px">Tip: drag a column onto a card to add one.</div></div>
+  </div></div>
+ <div class="status"><span>S-5012 selected · video 0:22 · BOL p.1</span></div>
+</div>
+<div class="pc"><div><b>Good</b>Calm, scales to any number of links, works on a phone as a sheet, and gives suggestions a home that isn't a nag. The tapped row (S-5012) shows what a link buys you: the video jumps to the damage and the BOL highlights "None".</div><div><b>Watch out</b>Making a link here is a form, slower than dragging, so it's best combined with A.</div></div>
+
+<h2 class="rec">My pick: A to make a link, C to see it, and B never</h2>
+<p class="sub">Drag to link, ⛓ chips on the cards, the Links panel for the list, suggestions and time offsets. Every action is also an agent tool: <code>link</code>, <code>unlink</code>, <code>links</code>.</p>
+</body></html>
