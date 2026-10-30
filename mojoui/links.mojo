@@ -1,0 +1,524 @@
+# mojoui.links: explicit links between cards, a selection, and what each linked card does when a row is picked (goal 41 M6).
+#
+# The rule (owner, 2026-10-30): cards from the same table are linked implicitly; across tables or modalities nothing
+# connects until a Link exists, made by a person or an agent. An app may suggest one; it never joins on its own.
+#
+#   var links = Links(msg_base=7600)
+#   links.add(Link.key(End("shipments", "shipment_id"), End("dock.mp4", "code", "dock.mp4 · detections"), BY_PERSON))
+#   links.add(Link.time(End("forklift_log", "t"), End("dock.mp4", "t"), offset=1.2))       # b.t = a.t · scale + offset
+#   var m = match_count(shipment_ids, codes)                                              # m.matched of m.total ("12 of 14")
+#   var q = links.join_sql(0, "shipments.shipment_id, detections.frame")                  # SELECT … JOIN … ON a.col = b.col
+#   var follows = links.follow(Selection("shipments", "shipments", 11, "shipment_id", "S-5012"))  # per linked card: what to match
+#   var r = rows.react(follows[k])                                                        # a card's hook → SEEK / HIGHLIGHT / SELECT
+#   view(): links.view()   update(): if links.update(event): …   (agent tools: links, link, unlink; docs in Links.view)
+#
+# No omxcore here (tests run it without the engine linked); the SQL text is run by the caller (tablecard.query_table).
+# PLACE links are minimal: an affine map per axis from a picture's pixels to coordinates (geo.NadirCamera does the
+# pose-aware version for a moving camera; a place link is for a still picture or a fixed camera).
+
+from std.collections import Dict
+from mojoui.app import Event
+from mojoui.sqlname import sql_name
+from mojoui.view import View, Text, Button, TextField, Dropdown, VStack, HStack, Spacer, CAPTION, SUBTLE, ICON_ONLY
+
+comptime LINK_KEY = 1  # a.col = b.col (rows with the same value)
+comptime LINK_TIME = 2  # a.t ↔ b.t: b = a · scale + offset (seconds)
+comptime LINK_PLACE = 3  # a picture's (x, y) pixels ↔ b's (lon, lat): per axis b = a · scale + offset
+
+comptime BY_PERSON = 0
+comptime BY_AGENT = 1
+
+comptime REACT_NONE = 0
+comptime REACT_SELECT = 1  # a table: select these rows
+comptime REACT_SEEK = 2  # a video: go to this time (and frame)
+comptime REACT_HIGHLIGHT = 3  # a page or picture: draw this box
+
+comptime LINKS_OPEN = 0  # (a Links block of messages: the "links" button, the "link" field's change and Return, "unlink")
+comptime LINKS_DRAFT = 1
+comptime LINKS_ADD = 2
+comptime LINKS_REMOVE = 3
+comptime LINKS_MESSAGES = 4
+
+
+@fieldwise_init
+struct End(Copyable, Movable, ImplicitlyCopyable):
+    """One end of a link: the card a person sees ("dock.mp4"), the table holding the column (a video's analysis rows:
+    "dock.mp4 · detections"; "" = the card's own), and the column."""
+
+    var card: String
+    var column: String
+    var table: String
+
+    def __init__(out self, card: String, column: String):
+        self.card = card
+        self.column = column
+        self.table = String("")
+
+    def table_name(self) -> String:
+        return self.table if self.table != "" else self.card
+
+    def sql(self) -> String:
+        """The table's SQL name (mojoui.sqlname, as table cards register it)."""
+        return sql_name(self.table_name())
+
+    def label(self) -> String:
+        return self.card + "." + self.column
+
+
+@fieldwise_init
+struct Link(Copyable, Movable, ImplicitlyCopyable):
+    var kind: Int
+    var a: End
+    var b: End
+    var by: Int  # BY_PERSON or BY_AGENT (who made it; an app's suggestion becomes a Link only when one of them confirms it)
+    var scale: Float64  # TIME: b = a · scale + offset; PLACE: x → lon
+    var offset: Float64
+    var scale_y: Float64  # PLACE: y → lat
+    var offset_y: Float64
+
+    @staticmethod
+    def key(a: End, b: End, by: Int = BY_PERSON) -> Link:
+        return Link(LINK_KEY, a, b, by, 1.0, 0.0, 1.0, 0.0)
+
+    @staticmethod
+    def time(a: End, b: End, offset: Float64, scale: Float64 = 1.0, by: Int = BY_PERSON) -> Link:
+        return Link(LINK_TIME, a, b, by, scale, offset, 1.0, 0.0)
+
+    @staticmethod
+    def place(a: End, b: End, scale_x: Float64, offset_x: Float64, scale_y: Float64, offset_y: Float64, by: Int = BY_PERSON) -> Link:
+        """a: the picture (column = its x column; y beside it), b: the map (column = lon; lat beside it)."""
+        return Link(LINK_PLACE, a, b, by, scale_x, offset_x, scale_y, offset_y)
+
+    def kind_name(self) -> String:
+        return "time" if self.kind == LINK_TIME else ("place" if self.kind == LINK_PLACE else "key")
+
+    def label(self) -> String:
+        """How the Links panel and an agent read it: "shipments.shipment_id = dock.mp4.code",
+        "forklift_log.t ~ dock.mp4.t +1.2 s", "photo.x ~ site.lon (place)"."""
+        if self.kind == LINK_TIME:
+            var s = self.a.label() + " ~ " + self.b.label() + " " + ("+" if self.offset >= 0 else "") + _num(self.offset) + " s"
+            if self.scale != 1.0:
+                s += " ×" + _num(self.scale)
+            return s
+        if self.kind == LINK_PLACE:
+            return self.a.label() + " ~ " + self.b.label() + " (place)"
+        return self.a.label() + " = " + self.b.label()
+
+    def touches(self, card: String) -> Bool:
+        return self.a.card == card or self.b.card == card or self.a.table_name() == card or self.b.table_name() == card
+
+    def same(self, other: Link) -> Bool:
+        """The same link either way round (a = b is b = a)."""
+        if self.kind != other.kind:
+            return False
+        var fwd = self.a.label() == other.a.label() and self.b.label() == other.b.label()
+        var back = self.a.label() == other.b.label() and self.b.label() == other.a.label()
+        return fwd or (back and self.kind == LINK_KEY)
+
+    # time, both ways
+    def to_b(self, t: Float64) -> Float64:
+        return t * self.scale + self.offset
+
+    def to_a(self, t: Float64) -> Float64:
+        return (t - self.offset) / self.scale if self.scale != 0 else t - self.offset
+
+    # place, both ways (pixels → coordinates and back)
+    def place_to_b(self, x: Float64, y: Float64) -> Tuple[Float64, Float64]:
+        return (x * self.scale + self.offset, y * self.scale_y + self.offset_y)
+
+    def place_to_a(self, lon: Float64, lat: Float64) -> Tuple[Float64, Float64]:
+        return ((lon - self.offset) / self.scale, (lat - self.offset_y) / self.scale_y)
+
+
+def _num(v: Float64) -> String:
+    """A short number: 1.2, -3, 0.25 (three places at most)."""
+    var r = Float64(Int(abs(v) * 1000.0 + 0.5)) / 1000.0
+    var whole = Int(r)
+    var s = String(whole)
+    var frac = Int((r - Float64(whole)) * 1000.0 + 0.5)
+    if frac > 0:
+        var f = String(frac)
+        while f.byte_length() < 3:
+            f = "0" + f
+        while f.endswith("0"):
+            var cut = String(f[byte = 0 : f.byte_length() - 1])
+            f = cut
+        s += "." + f
+    return ("-" + s) if v < 0 and (whole > 0 or frac > 0) else s
+
+
+@fieldwise_init
+struct MatchCount(Copyable, Movable, ImplicitlyCopyable):
+    var matched: Int  # a's distinct values found in b
+    var total: Int  # a's distinct values (empty cells left out)
+
+    def text(self) -> String:
+        return String(self.matched) + " of " + String(self.total)
+
+
+def match_count(a_values: List[String], b_values: List[String]) -> MatchCount:
+    """How many of a's distinct values appear in b: what a person sees before confirming a key link ("12 of 14")."""
+    var have = Dict[String, Bool]()
+    for v in b_values:
+        if v != "":
+            have[v] = True
+    var seen = Dict[String, Bool]()
+    var matched = 0
+    for v in a_values:
+        if v == "" or v in seen:
+            continue
+        seen[v] = True
+        if v in have:
+            matched += 1
+    return MatchCount(matched, len(seen))
+
+
+@fieldwise_init
+struct Selection(Copyable, Movable, ImplicitlyCopyable):
+    """What a person (or an agent) picked: a row of a card's table, its key value in the column picked, and a time when
+    the source has one (-1: none)."""
+
+    var card: String
+    var table: String
+    var row: Int
+    var column: String
+    var value: String
+    var time: Float64
+
+    def __init__(out self, card: String, table: String, row: Int, column: String, value: String):
+        self.card = card
+        self.table = table
+        self.row = row
+        self.column = column
+        self.value = value
+        self.time = -1.0
+
+
+@fieldwise_init
+struct Follow(Copyable, Movable, ImplicitlyCopyable):
+    """What one linked card should match: rows whose `column` holds `value` (a key link), the row at `row` (the same
+    table: implicit), or the time `time` in its own clock (a time link). `via` names the link ("" for the same table)."""
+
+    var card: String
+    var table: String
+    var kind: Int  # LINK_KEY, LINK_TIME, or 0 (the same table)
+    var column: String
+    var value: String
+    var row: Int
+    var time: Float64
+    var via: String
+
+
+@fieldwise_init
+struct Reaction(Copyable, Movable):
+    """What a card does: its hook's answer (REACT_SELECT rows, REACT_SEEK to t / frame, REACT_HIGHLIGHT a box on a page)."""
+
+    var card: String
+    var action: Int
+    var rows: List[Int]
+    var time: Float64
+    var frame: Int
+    var page: Int
+    var x: Float64
+    var y: Float64
+    var w: Float64
+    var h: Float64
+
+    @staticmethod
+    def none(card: String) -> Reaction:
+        return Reaction(card, REACT_NONE, List[Int](), -1.0, -1, -1, 0, 0, 0, 0)
+
+    def line(self) -> String:
+        """A log line: "FOLLOW: dock.mp4 seek t=22.4 frame=560", "FOLLOW: BOL-5012 highlight p1 120,340 80x14"."""
+        var s = "FOLLOW: " + self.card + " "
+        if self.action == REACT_SEEK:
+            return s + "seek t=" + _num(self.time) + " frame=" + String(self.frame)
+        if self.action == REACT_HIGHLIGHT:
+            return s + "highlight p" + String(self.page) + " " + _num(self.x) + "," + _num(self.y) + " " + _num(self.w) + "x" + _num(self.h)
+        if self.action == REACT_SELECT:
+            return s + "select " + String(len(self.rows)) + " rows"
+        return s + "nothing"
+
+
+struct CardRows(Copyable, Movable):
+    """A card's rows as its react hook reads them: any card that has a table (a table card's sheet, a video's analysis
+    rows, a document's OCR words) hands its columns as text and names its roles, and `react` turns a Follow into what
+    it should do. Roles: a time column (and a frame column) make a video seek; page + box columns make a page highlight;
+    neither: the rows are selected."""
+
+    var card: String
+    var table: String
+    var columns: List[String]
+    var cells: List[String]  # row-major
+    var time_column: String
+    var frame_column: String
+    var box_columns: List[String]  # page, x, y, w, h ("" none)
+
+    def __init__(out self, card: String, table: String, columns: List[String]):
+        self.card = card
+        self.table = table
+        self.columns = columns.copy()
+        self.cells = List[String]()
+        self.time_column = String("")
+        self.frame_column = String("")
+        self.box_columns = List[String]()
+
+    def seeks(mut self, time_column: String, frame_column: String = ""):
+        self.time_column = time_column
+        self.frame_column = frame_column
+
+    def highlights(mut self, page: String, x: String, y: String, w: String, h: String):
+        self.box_columns = [page, x, y, w, h]
+
+    def add_row(mut self, values: List[String]):
+        for c in range(len(self.columns)):
+            self.cells.append(values[c] if c < len(values) else String(""))
+
+    def rows(self) -> Int:
+        return len(self.cells) // max(len(self.columns), 1)
+
+    def index(self, name: String) -> Int:
+        for c in range(len(self.columns)):
+            if self.columns[c] == name:
+                return c
+        return -1
+
+    def cell(self, row: Int, c: Int) -> String:
+        return self.cells[row * len(self.columns) + c]
+
+    def column(self, name: String) -> List[String]:
+        var out = List[String]()
+        var c = self.index(name)
+        if c >= 0:
+            for r in range(self.rows()):
+                out.append(self.cell(r, c))
+        return out^
+
+    def _number(self, row: Int, name: String) -> Float64:
+        var c = self.index(name)
+        if c < 0:
+            return 0.0
+        try:
+            return atof(self.cell(row, c))
+        except:
+            return 0.0
+
+    def matching(self, f: Follow) -> List[Int]:
+        """The rows a Follow names: the same row (implicit), rows holding the key, or the row nearest the time."""
+        var out = List[Int]()
+        if f.kind == 0:
+            if 0 <= f.row < self.rows():
+                out.append(f.row)
+            return out^
+        if f.kind == LINK_KEY:
+            var c = self.index(f.column)
+            if c >= 0:
+                for r in range(self.rows()):
+                    if self.cell(r, c) == f.value:
+                        out.append(r)
+            return out^
+        if f.kind == LINK_TIME and self.index(f.column) >= 0 and self.rows() > 0:
+            var best = 0
+            var gap = abs(self._number(0, f.column) - f.time)
+            for r in range(1, self.rows()):
+                var d = abs(self._number(r, f.column) - f.time)
+                if d < gap:
+                    gap = d
+                    best = r
+            out.append(best)
+        return out^
+
+    def react(self, f: Follow) -> Reaction:
+        """The hook: what this card does for a Follow."""
+        var rows = self.matching(f)
+        if len(rows) == 0 and not (f.kind == LINK_TIME and self.time_column != ""):
+            return Reaction.none(self.card)
+        if self.time_column != "" and self.index(self.time_column) >= 0:  # a video: the earliest matching row's time
+            var t = f.time if f.kind == LINK_TIME else 1e300
+            var frame = -1
+            if f.kind != LINK_TIME:
+                for r in rows:
+                    var rt = self._number(r, self.time_column)
+                    if rt < t:
+                        t = rt
+                        frame = Int(self._number(r, self.frame_column)) if self.frame_column != "" else -1
+            return Reaction(self.card, REACT_SEEK, rows^, t, frame, -1, 0, 0, 0, 0)
+        if len(self.box_columns) == 5 and self.index(self.box_columns[1]) >= 0:  # a page: the first matching row's box
+            var r = rows[0]
+            var b = self.box_columns.copy()
+            return Reaction(self.card, REACT_HIGHLIGHT, rows^, -1.0, -1, Int(self._number(r, b[0])), self._number(r, b[1]),
+                            self._number(r, b[2]), self._number(r, b[3]), self._number(r, b[4]))
+        return Reaction(self.card, REACT_SELECT, rows^, -1.0, -1, -1, 0, 0, 0, 0)
+
+
+def parse_link(text: String, by: Int = BY_AGENT) raises -> Link:
+    """A link from how it reads: "shipments.shipment_id = dock.mp4.code" (key), "forklift_log.t ~ dock.mp4.t +1.2"
+    (time: offset in seconds, optional "×scale"). A card's name may hold dots; the column is after the last one."""
+    var t = String(text.strip())
+    if t.find(" = ") >= 0:
+        var parts = t.split(" = ")
+        return Link.key(_end(String(parts[0])), _end(String(parts[1])), by)
+    if t.find(" ~ ") >= 0:
+        var parts = t.split(" ~ ")
+        var rest = String(parts[1].strip()).split(" ")
+        var offset = 0.0
+        var scale = 1.0
+        for k in range(1, len(rest)):
+            var w = String(rest[k])
+            if w.startswith("×") or w.startswith("x"):
+                scale = atof(String(w[byte = 2 if w.startswith("×") else 1 :]))
+            elif w != "s" and w != "":
+                offset = atof(String(w[byte = 1:]) if w.startswith("+") else w)
+        return Link.time(_end(String(parts[0])), _end(String(rest[0])), offset, scale, by)
+    raise Error('a link reads "card.column = card.column" (key) or "card.column ~ card.column +seconds" (time), not "' + t + '"')
+
+
+def _end(text: String) raises -> End:
+    var s = String(text.strip())
+    var dot = s.rfind(".")
+    if dot <= 0 or dot == s.byte_length() - 1:
+        raise Error('"' + s + '" isn\'t card.column')
+    return End(String(s[byte = 0:dot]), String(s[byte = dot + 1 :]))
+
+
+struct Links(Movable, Sized):
+    """A sheet's links. Each is made by a person or an agent; this never adds one by itself."""
+
+    var items: List[Link]
+    var msg_base: Int
+    var draft: String  # the "link" field's text
+    var open: Bool  # the list shown (the "links" button)
+    var problem: String  # why the last add failed ("" none)
+    var changed: Int  # bumps on every add / remove
+
+    def __init__(out self, msg_base: Int = 0):
+        self.items = List[Link]()
+        self.msg_base = msg_base
+        self.draft = String("")
+        self.open = False
+        self.problem = String("")
+        self.changed = 0
+
+    def __len__(self) -> Int:
+        return len(self.items)
+
+    def add(mut self, link: Link) raises -> Int:
+        """Adds it (its index); raises for a link that's already there, or a key link inside one table (that's implicit)."""
+        for i in range(len(self.items)):
+            if self.items[i].same(link):
+                raise Error(link.label() + " is already linked")
+        if link.kind == LINK_KEY and link.a.table_name() == link.b.table_name():
+            raise Error("cards from the same table are already linked")
+        self.items.append(link)
+        self.changed += 1
+        return len(self.items) - 1
+
+    def remove(mut self, i: Int) -> Bool:
+        if i < 0 or i >= len(self.items):
+            return False
+        _ = self.items.pop(i)
+        self.changed += 1
+        return True
+
+    def remove_label(mut self, label: String) -> Bool:
+        for i in range(len(self.items)):
+            if self.items[i].label() == label:
+                return self.remove(i)
+        return False
+
+    def list(self) -> List[String]:
+        var out = List[String]()
+        for l in self.items:
+            out.append(l.label())
+        return out^
+
+    def for_card(self, card: String) -> List[Int]:
+        var out = List[Int]()
+        for i in range(len(self.items)):
+            if self.items[i].touches(card):
+                out.append(i)
+        return out^
+
+    def join_sql(self, i: Int, select: String = "*") raises -> String:
+        """The query a key link implies, over the tables' SQL names: SELECT <select> FROM a JOIN b ON a.col = b.col."""
+        if i < 0 or i >= len(self.items) or self.items[i].kind != LINK_KEY:
+            raise Error("link " + String(i) + " is no key link")
+        var l = self.items[i]
+        var a = l.a.sql()
+        var b = l.b.sql()
+        return "SELECT " + select + " FROM " + a + " JOIN " + b + " ON " + a + "." + l.a.column + " = " + b + "." + l.b.column
+
+    def follow(self, sel: Selection, same_table: List[String] = []) -> List[Follow]:
+        """Per linked card, what it should match for this selection: through each key link touching the selection's card
+        (the selection's value, read in the other end's column), each time link (its time in the other clock), and the
+        cards in `same_table` (other cards showing the selection's table: the same row, implicitly)."""
+        var out = List[Follow]()
+        for c in same_table:
+            if c != sel.card:
+                out.append(Follow(c, sel.table, 0, sel.column, sel.value, sel.row, -1.0, ""))
+        for l in self.items:
+            var mine_a = l.a.card == sel.card or l.a.table_name() == sel.table
+            var mine_b = l.b.card == sel.card or l.b.table_name() == sel.table
+            if not (mine_a or mine_b):
+                continue
+            var there = l.b if mine_a else l.a
+            if l.kind == LINK_KEY:
+                var here = l.a if mine_a else l.b
+                if sel.column != "" and sel.column != here.column:
+                    continue  # (a key link is about one column; another column's value means nothing there)
+                out.append(Follow(there.card, there.table_name(), LINK_KEY, there.column, sel.value, -1, -1.0, l.label()))
+            elif l.kind == LINK_TIME and sel.time >= 0:
+                var t = l.to_b(sel.time) if mine_a else l.to_a(sel.time)
+                out.append(Follow(there.card, there.table_name(), LINK_TIME, there.column, "", -1, t, l.label()))
+        return out^
+
+    # ---------- a person's and an agent's way in ----------
+
+    def view(self) -> View:
+        """The links as controls, which an agent sees as three tools: `links` (shows the list; its description lists
+        them), `link` (type "a.col = b.col" or "a.t ~ b.t +seconds", Return adds it) and `unlink` (pick one to remove)."""
+        var b = self.msg_base
+        var summary = String("No links yet") if len(self.items) == 0 else "; ".join(self.list())
+        var head = Button("Links · " + String(len(self.items)), b + LINKS_OPEN, SUBTLE, icon="share").tag("links").tooltip(
+            "Show the links on this sheet (" + summary + ")")
+        var items = List[View]()
+        items.append(head^)
+        if self.open:
+            for l in self.items:
+                items.append(Text(l.label() + " · " + l.kind_name() + (" · by an agent" if l.by == BY_AGENT else ""), CAPTION))
+        items.append(TextField(self.draft, "shipments.shipment_id = dock.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
+            'Link two cards: "card.column = card.column" (rows with the same value) or "card.column ~ card.column +seconds" '
+            + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
+        if self.problem != "":
+            items.append(Text(self.problem, CAPTION))
+        if len(self.items) > 0:
+            var opts: List[String] = ["Unlink…"]
+            for l in self.items:
+                opts.append(l.label())
+            items.append(Dropdown(opts^, 0, b + LINKS_REMOVE).fill().tag("unlink").tooltip("Remove a link"))
+        return VStack(items^, spacing=6).tag("links-panel")
+
+    def owns(self, message: Int) -> Bool:
+        return self.msg_base <= message < self.msg_base + LINKS_MESSAGES
+
+    def update(mut self, event: Event) -> Bool:
+        """True when the event was the panel's (a link may have been added or removed: watch `changed`)."""
+        if not self.owns(event.message):
+            return False
+        var m = event.message - self.msg_base
+        if m == LINKS_OPEN:
+            self.open = not self.open
+        elif m == LINKS_DRAFT:
+            self.draft = event.text
+        elif m == LINKS_ADD:
+            var text = event.text if event.text != "" else self.draft
+            try:
+                _ = self.add(parse_link(text, BY_PERSON))  # (a host can't tell a person's typing from an agent's)
+                self.draft = String("")
+                self.problem = String("")
+            except e:
+                self.problem = String(e)
+        elif m == LINKS_REMOVE:
+            if event.number >= 1:
+                _ = self.remove(event.number - 1)
+        return True

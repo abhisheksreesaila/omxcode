@@ -1,8 +1,11 @@
 # The skins as mojoui themes (D-149, docs/design/universal/): the same tokens on every platform, Inter for words and
 # JetBrains Mono for figures, flat controls, a chrome band for the toolbar and bars. Ledger (light, teal), Graphite
-# (dark, amber), Blueprint (light with a navy band). Liquid (themes/liquid.mojo) builds on these rules.
+# (mid-dark omxqua: tonal surfaces, the green accent, every region in a 1 px hairline: goal 41, D-1174), Blueprint
+# (light with a navy band). Liquid (themes/liquid.mojo) builds on these rules.
 #
 #   def theme(self) -> Theme: return ledger()                     (or ledger(ledger_palette().with_accent(green)))
+#   bordered(id, pal): any skin with a hairline around every region (mojoui.regions: sidebar, toolbar, sheet, inspector,
+#   status bar, each card), as graphite has it
 
 from mojoui.canvas import rgba
 from mojoui.text import REGULAR, MEDIUM
@@ -18,10 +21,17 @@ def ledger_palette() -> Palette:
 
 
 def graphite_palette() -> Palette:
-    """Dark and neutral (no blue tint), crisp white figures, a warm amber accent."""
-    return Palette(True, hx("#161618"), hx("#1d1e21"), hx("#26272b"), hx("#ececee"), hx("#c2c4ca"), hx("#858892"),
-                   hx("#2e3034"), hx("#44464c"), hx("#f5a524"), hx("#1d1e21"), mix(hx("#1d1e21"), hx("#f5a524"), 0.45), hx("#3a2f17"),
-                   hx("#b48cff"), hx("#3ddc97"), hx("#ff6b6b"), hx("#f5a524"), REGULAR, MEDIUM, [hx("#4cc2ff"), hx("#f5a524"), hx("#b48cff"), hx("#3ddc97"), hx("#ff6b6b"), hx("#e8833a"), hx("#9aa3b2"), hx("#d86fc9")], hx("#121214"), hx("#ececee"), hx("#2e3034"))
+    """Mid-dark omxqua (owner, goal 41: "has to follow omxqua"): opaque tonal surfaces a step apart (page #23262b, panels
+    and cards #2a2e34, raised #33383f, the sheet a step below at SHEET), a #464d57 hairline, omxqua's green #3ccf6e as
+    the one accent, its semantic tones (ok #3ccf6e, warn #f5a524, bad #f2555a, info #52a9ff) and its data palette."""
+    var card = hx("#2a2e34")
+    var accent = hx("#3ccf6e")
+    return Palette(True, hx("#23262b"), card, hx("#33383f"), hx("#e6e8eb"), hx("#c3c8cf"), hx("#98a1ac"),
+                   hx("#464d57"), hx("#59616c"), accent, hx("#0d2416"), mix(card, accent, 0.45), mix(card, accent, 0.16),
+                   hx("#52a9ff"), hx("#3ccf6e"), hx("#f2555a"), hx("#f5a524"), REGULAR, MEDIUM, [hx("#3aa0ff"), hx("#8b7bff"), hx("#2bc3ad"), hx("#ff8a3d"), hx("#f2555a"), hx("#e0b400"), hx("#98a1ac"), hx("#d86fc9")], hx("#2a2e34"), hx("#e6e8eb"), hx("#464d57"))
+
+
+comptime SHEET = "#1e2125"  # graphite's sheet (the Board behind the cards): a step below the page, as omxqua's surface-0
 
 
 def blueprint_palette() -> Palette:
@@ -218,6 +228,50 @@ body.skin .hstack > hr { border-left-color: var(--o-line); }
 """
 
 
+def bordered_css(p: Palette, cls: String, sheet: UInt32) -> String:
+    """GTK: a 1 px hairline around the sheet (a Board's scroller) and every card on it (its objects), one soft shadow
+    under a card, the sheet a tone of its own. The shells' roles (toolbar, status bar, sidebar, inspector) get theirs from
+    the look (bordered_look)."""
+    var w = "window." + cls + " "
+    var line = hex_of(p.line)
+    return (w + ".mui-board-scroll { border: 1px solid " + line + "; border-radius: 8px; background-color: " + hex_of(sheet) + "; }\n"
+            + w + ".mui-board { background-color: transparent; }\n"
+            + w + ".mui-board > * { border: 1px solid " + line + "; border-radius: 6px; }\n"
+            + w + ".mui-board > .mui-card { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n"
+            + w + ".mui-tag-inspector { box-shadow: none; border: 1px solid " + line + "; }\n")
+
+
+def bordered_web(p: Palette, cls: String, sheet: UInt32) -> String:
+    """The web's same rules (bordered_css), under body.<cls>."""
+    var b = "body." + cls + " "
+    var line = hex_of(p.line)
+    return (b + ".board-scroll { border: 1px solid " + line + "; border-radius: 8px; background-color: " + hex_of(sheet) + "; box-sizing: border-box; }\n"
+            + b + ".board { background-color: transparent; }\n"
+            + b + ".board > .object:not([data-tag=cell-editor]) { border: 1px solid " + line + "; border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n"
+            + b + ".board > .object > .vstack.card { box-shadow: none; border-radius: 5px; }\n"
+            + b + "[data-tag=inspector] { box-shadow: none; border: 1px solid " + line + "; }\n")
+
+
+def outlined(var s: Surface, line: UInt32) -> Surface:
+    """A surface ringed by a 1 px hairline on every side (over its top or bottom line)."""
+    s.outline = line
+    s.outline_w = 1
+    s.line_top = 0
+    s.line_bottom = 0
+    return s^
+
+
+def bordered_look(p: Palette) -> Look:
+    """skin_look with the shells' regions ringed: the toolbar, the status bar and the sidebar (a rail) in the chrome's
+    fill with a hairline all round."""
+    var look = skin_look(p)
+    for k in range(len(look.surfaces)):
+        if look.surfaces[k].role == "toolbar" or look.surfaces[k].role == "status-bar":
+            look.surfaces[k] = outlined(look.surfaces[k].copy(), p.line)
+    look.surfaces.append(outlined(band("sidebar", p.chrome, 0, 0), p.line))
+    return look^
+
+
 def skin_look(p: Palette) -> Look:
     """The skins' shapes as values: the chrome is a band (a fill and a hairline) across the window, figures in JetBrains
     Mono, square-ish 6 pt corners."""
@@ -230,7 +284,10 @@ def skin_look(p: Palette) -> Look:
 
 
 def skin(id: String, pal: Palette) -> Theme:
-    """A skin over its palette: `id` names its CSS class (window.<id> on GTK; body.skin.<id> on the web)."""
+    """A skin over its palette: `id` names its CSS class (window.<id> on GTK; body.skin.<id> on the web). Graphite is
+    bordered (every region in a hairline)."""
+    if id == "graphite":
+        return bordered(id, pal, hx(SHEET))
     return Theme(id, "skin " + id, pal.copy(), skin_css(pal, id), String(SKIN_WEB), pal.ink2, pal.accent_ink, True, skin_look(pal))
 
 
@@ -242,12 +299,18 @@ def ledger(pal: Palette) -> Theme:
     return skin("ledger", pal)
 
 
+def bordered(id: String, pal: Palette, sheet: UInt32) -> Theme:
+    """A skin with every region in a hairline (bordered_css, bordered_web, bordered_look) and the sheet in `sheet`."""
+    return Theme(id, "skin " + id, pal.copy(), skin_css(pal, id) + bordered_css(pal, id, sheet), String(SKIN_WEB) + bordered_web(pal, id, sheet),
+                 pal.ink2, pal.accent_ink, True, bordered_look(pal))
+
+
 def graphite() -> Theme:
-    return skin("graphite", graphite_palette())
+    return bordered("graphite", graphite_palette(), hx(SHEET))
 
 
 def graphite(pal: Palette) -> Theme:
-    return skin("graphite", pal)
+    return bordered("graphite", pal, hx(SHEET))
 
 
 def blueprint() -> Theme:

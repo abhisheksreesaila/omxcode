@@ -106,6 +106,8 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
 | `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
 | `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | maccheck, omxplorer |
+| `Rail (a slim column of icon tools beside the sheet: role sidebar)` | `mojoui/sheetchrome.mojo` | Button with an icon, Tooltips, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
+| `Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)` | `mojoui/regions.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Swatch picker` | `mojoui/swatches.mojo` | Canvas, Canvas: pan, zoom, tap, Popover | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
@@ -161,6 +163,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `TextTable (words as rows: page, text, box, confidence; CSV in and out)` | `mojoui/texttable.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Form fields (a label's value by geometry: right on its line or under it; the labels are data)` | `mojoui/formfields.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)` | `mojoui/documentjobs.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 
 ## JavaScript widgets (WebComponent)
 
@@ -176,12 +179,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 130 | 9 | 0 |
-| Web | 133 | 6 | 0 |
-| Android | 19 | 36 | 84 |
-| Mac (AppKit) | 0 | 125 | 14 |
-| iPhone (UIKit) | 0 | 103 | 36 |
-| Agent (MCP) | 44 | 40 | 55 |
+| Linux (GTK) | 132 | 10 | 0 |
+| Web | 135 | 7 | 0 |
+| Android | 19 | 38 | 85 |
+| Mac (AppKit) | 0 | 128 | 14 |
+| iPhone (UIKit) | 0 | 106 | 36 |
+| Agent (MCP) | 45 | 42 | 55 |
 
 ## Inside one app, not components yet (the debt)
 

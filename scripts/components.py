@@ -96,6 +96,8 @@ COMPOSITES = [
     ("Toolbar · FormulaBar · StatusBar", "mojoui/sheetchrome.mojo", ["Toolbar button (icon over label)", "TextField", "Text"], "Toolbar("),
     ("Format toggles (Bold, Italic, Align…)", "mojoui/sheetchrome.mojo", ["Icon toggle shown pressed", "Lucide icon set", "Tooltips", "Divider"], "toggles="),
     ("Bottom tabs, renamed in place", "mojoui/sheetchrome.mojo", ["Button", "In-place editor", "Quiet buttons"], "BottomTabs("),
+    ("Rail (a slim column of icon tools beside the sheet: role sidebar)", "mojoui/sheetchrome.mojo", ["Button with an icon", "Tooltips", "VStack"], "Rail("),
+    ("Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)", "mojoui/regions.mojo", [], "regions("),
     ("Cell styles (bold, italic, underline, strikethrough, colours, alignment)", "mojoui/cellstyle.mojo", ["Canvas"], "restyle("),
     ("Island (the window's living status: work, results, undo, errors)", "mojoui/island.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas frames (animation)"], "IslandView("),
     ("Swatch picker", "mojoui/swatches.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Popover"], "SwatchPicker("),
@@ -157,6 +159,8 @@ COMPOSITES = [
     ("TextTable (words as rows: page, text, box, confidence; CSV in and out)", "mojoui/texttable.mojo", [], "TextTable("),
     ("Form fields (a label's value by geometry: right on its line or under it; the labels are data)", "mojoui/formfields.mojo", [], "find_fields("),
     ("Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)", "mojoui/documentjobs.mojo", [], "DocumentFeed("),
+    # links (goal 41)
+    ("Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools)", "mojoui/links.mojo", ["Button", "TextField", "Dropdown", "Text", "VStack"], "Links("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
