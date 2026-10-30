@@ -39,7 +39,7 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "sketch"],  # (sketch: goal 40; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "sketch", "dictate"],  # (dictate: goal 43; sketch: goal 40; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
     "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat"],  # (kit: goal 18 runs it on GTK and the web)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
@@ -240,6 +240,27 @@ def feature_cell(host, src, pattern, example, name=""):
     return "✅" if example in RUN_ON[host] else "🔨"
 
 
+# Native services (goal 43): what an app reaches on the machine itself, not a widget. (name, module and API, the
+# example whose checks run it, per host: (state, why) for the hosts where it isn't simply "run by that example's check").
+SERVICES = [
+    ("Microphone", "mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread", "dictate",
+     {"Linux (GTK)": None, "Web": ("❌", "the web host doesn't stream the browser's microphone to the app"),
+      "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "builds; start() reports \"no microphone on this host yet\" (AVAudioEngine planned)"),
+      "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
+    ("Speech model in process", "mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)", "dictate",
+     {"Linux (GTK)": None, "Web": ("❌", "the model needs CPython + torch in the app's process"),
+      "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "builds; needs CPython with torch beside the app (MPS), never run"),
+      "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
+]
+
+
+def service_cell(host, example, special):
+    got = special.get(host)
+    if got is None:
+        return ("✅" if example in RUN_ON[host] else "🔨"), ""
+    return got
+
+
 LIBRARIES = [("@codemirror/", "CodeMirror 6"), ("echarts", "Apache ECharts")]
 
 
@@ -324,6 +345,15 @@ def render():
             known[(h, ctor)] = cell(h, srcs[h], ctor, kind)
         for name, api, pattern, example in FEATURES:
             known[(h, name)] = feature_cell(h, srcs[h], pattern, example, name)
+    out += ["", "## Native services (the machine, not a widget)", "",
+            "| Service | API | " + " | ".join(names) + " |",
+            "|---|---|" + "---|" * len(names)]
+    why = []
+    for name, api, example, special in SERVICES:
+        cells = [service_cell(h, example, special) for h in names]
+        out.append(f"| {name} | `{api}` | " + " | ".join(c for c, _ in cells) + " |")
+        why += [f"- {name} ({h}): {w}." for h, (c, w) in zip(names, cells) if w]
+    out += [""] + why
     out += ["", "## Composite components (Mojo, built from the ones above)", "",
             "A composite is only as far along on a platform as the least-proven piece it's made of.", "",
             "| Component | Module | Made of | " + " | ".join(names) + " | Used by |",

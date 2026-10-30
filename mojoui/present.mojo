@@ -17,7 +17,8 @@
 # Everything here is looked up at run time (dlopen/dlsym): a machine without libcuda or GL just reports why and the
 # canvas falls back to the copy (the picture read back into the surface's CPU memory), as before.
 
-from std.ffi import external_call, c_int, c_uint, c_char
+from std.ffi import external_call, c_int, c_uint, c_char, OwnedDLHandle
+from std.memory.alloc import unsafe_alloc
 from std.memory import Pointer
 from std.time import perf_counter_ns
 from std.os import getenv
@@ -71,8 +72,16 @@ def fcall[T: RegisterPassable = Int, *A: AnyType](addr: Int, *args: *A) -> T:
 
 
 def dl_open(name: String) -> Int:
-    var n = name
-    return external_call["dlopen", Int](n.as_c_string_span(), c_int(2))  # RTLD_NOW
+    """dlopen(name, RTLD_NOW) through the standard library's OwnedDLHandle (kept loaded for good), so an app that also
+    uses Mojo's Python interop links (two dlopen declarations don't, D-1413); 0 when it doesn't load."""
+    try:
+        var h = OwnedDLHandle(name, 2)
+        var p = h.borrow().handle
+        var raw = Int(p.value()) if p else 0
+        unsafe_alloc[OwnedDLHandle](1).unsafe_write(h^)
+        return raw
+    except:
+        return 0
 
 
 def dl_sym(lib: Int, name: String) -> Int:

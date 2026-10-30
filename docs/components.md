@@ -10,15 +10,15 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch |
-| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, dictate |
+| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, dictate |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch, dictate |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, dictate |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch, dictate |
 | `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat |
 | `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console, agentchat |
 | `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
-| `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console, sketch |
+| `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console, sketch, dictate |
 | `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, agentchat |
 | `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, workbook, mxstudio |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
@@ -98,6 +98,22 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
 - Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
 - Scene: layer transform: GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a big page at a big zoom it's softer than the strokes until the zoom comes back within the cap.
+
+## Native services (the machine, not a widget)
+
+| Service | API | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) |
+|---|---|---|---|---|---|---|---|
+| Microphone | `mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Speech model in process | `mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+
+- Microphone (Web): the web host doesn't stream the browser's microphone to the app.
+- Microphone (Android): not built.
+- Microphone (Mac (AppKit)): builds; start() reports "no microphone on this host yet" (AVAudioEngine planned).
+- Microphone (iPhone (UIKit)): not built.
+- Speech model in process (Web): the model needs CPython + torch in the app's process.
+- Speech model in process (Android): not built.
+- Speech model in process (Mac (AppKit)): builds; needs CPython with torch beside the app (MPS), never run.
+- Speech model in process (iPhone (UIKit)): no CPython on the phone.
 
 ## Composite components (Mojo, built from the ones above)
 

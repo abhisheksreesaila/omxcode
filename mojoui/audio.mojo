@@ -17,6 +17,7 @@ from std.memory.alloc import unsafe_alloc
 from std.os import getenv
 from std.sys import CompilationTarget
 from std.math import sqrt
+from mojoui.clock import now_ns
 
 comptime RATE = 16000  # samples per second, mono
 comptime CHUNK = 320  # samples per read from the sound server: 20 ms
@@ -32,7 +33,8 @@ comptime W_ERR = 4  # the sound server's error code when it failed
 comptime W_REFS = 5  # owners: the handle and the worker; the last one frees
 comptime W_RING = 6  # the ring's address (Float32 × RING)
 comptime W_SOURCE = 7  # a NUL-terminated copy of the source name, or 0 (default)
-comptime W_WORDS = 8
+comptime W_TIME = 8  # now_ns() when the newest chunk landed
+comptime W_WORDS = 9
 
 
 def _word(words: Int, k: Int) -> _P:
@@ -55,6 +57,17 @@ def _free_bytes(addr: Int):
         Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr).unsafe_free()
 
 
+def dl_call[T: RegisterPassable = Int, *A: AnyType](lib: Int, name: String, *args: *A) raises -> T:
+    """Calls a C function found at run time in `lib` (0: anywhere in the process)."""
+    var n = name
+    var addr = external_call["dlsym", Int](lib, n.as_c_string_span())
+    if addr == 0:
+        raise Error("no symbol " + name)
+    var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=addr)
+    var f = Pointer(to=raw).unsafe_bitcast[def(*a: *A) thin abi("C") -> T]()[]
+    return f(*args)
+
+
 def _release(words: Int):
     if _A.fetch_add(_word(words, W_REFS), -1) == 1:
         Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=Int(_A.load(_word(words, W_RING)))).unsafe_free()
@@ -64,7 +77,8 @@ def _release(words: Int):
 
 def _capture(words: Int) raises:
     """The worker: open a record stream, then read 20 ms at a time into the ring until asked to stop."""
-    var lib = OwnedDLHandle("libpulse-simple.so.0")
+    var handle = OwnedDLHandle("libpulse-simple.so.0")  # (the standard library's dlopen: see gtk_webview, D-1413)
+    var lib = 0  # (RTLD_GLOBAL: its symbols are found anywhere while `handle` holds it)
     var spec = unsafe_alloc[Int32](4)  # pa_sample_spec { int32 format; uint32 rate; uint8 channels }
     spec[0] = 5  # PA_SAMPLE_FLOAT32LE
     spec[1] = RATE
@@ -78,7 +92,7 @@ def _capture(words: Int) raises:
     err[0] = 0
     var name = _cstr("mojoui")
     var stream = _cstr("microphone")
-    var s = lib.get_function[Int]("pa_simple_new")(
+    var s = dl_call[Int](lib, "pa_simple_new",
         Int(0), name, c_int(2), Int(_A.load(_word(words, W_SOURCE))), stream, Int(spec), Int(0), Int(attr), Int(err))
     _free_bytes(name)
     _free_bytes(stream)
@@ -91,9 +105,8 @@ def _capture(words: Int) raises:
     _A.store(_word(words, W_STATE), 1)
     var ring = Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=Int(_A.load(_word(words, W_RING))))
     var buf = unsafe_alloc[Float32](CHUNK)
-    var read = lib.get_function[c_int]("pa_simple_read")
     while _A.load(_word(words, W_STOP)) == 0:
-        if read(s, Int(buf), CHUNK * 4, Int(err)) < 0:
+        if dl_call[c_int](lib, "pa_simple_read", s, Int(buf), CHUNK * 4, Int(err)) < 0:
             _A.store(_word(words, W_ERR), Int64(err[0]))
             break
         var total = Int(_A.load(_word(words, W_TOTAL)))
@@ -103,8 +116,10 @@ def _capture(words: Int) raises:
             ring.unsafe_offset((total + i) % RING)[] = v
             sq += Float64(v) * Float64(v)
         _A.store(_word(words, W_LEVEL), Int64(sqrt(sq / CHUNK) * 1e6))
+        _A.store(_word(words, W_TIME), Int64(now_ns()))
         _A.store(_word(words, W_TOTAL), Int64(total + CHUNK))  # (after the samples: a reader sees all of them)
-    lib.get_function[NoneType]("pa_simple_free")(s)
+    dl_call[NoneType](lib, "pa_simple_free", s)
+    _ = handle.check_symbol("pa_simple_free")  # (keeps the library loaded until here)
     buf.unsafe_free()
     err.unsafe_free()
 
@@ -140,24 +155,24 @@ struct Microphone(Movable):
         self.started = True
         comptime if not CompilationTarget.is_linux():
             self.reason = "no microphone on this host yet (Mac: AVAudioEngine, planned)"
-            return
-        var words = unsafe_alloc[Int64](W_WORDS)
-        for k in range(W_WORDS):
-            _A.store(_word(Int(words), k), 0)
-        _A.store(_word(Int(words), W_REFS), 2)
-        var ring = unsafe_alloc[Float32](RING)
-        _A.store(_word(Int(words), W_RING), Int64(Int(ring)))
-        if self.source.byte_length() > 0:
-            _A.store(_word(Int(words), W_SOURCE), Int64(_cstr(self.source)))
-        self.words = Int(words)
-        var tid = List[Int](length=1, fill=0)
-        var rc = external_call["pthread_create", c_int](Int(tid.unsafe_ptr()), Int(0), _entry, Int(words))
-        if rc != 0:
-            _A.store(_word(Int(words), W_STATE), -1)
-            _release(Int(words))
-            self.reason = "no thread for the microphone"
         else:
-            _ = external_call["pthread_detach", c_int](tid[0])
+            var words = unsafe_alloc[Int64](W_WORDS)
+            for k in range(W_WORDS):
+                _A.store(_word(Int(words), k), 0)
+            _A.store(_word(Int(words), W_REFS), 2)
+            var ring = unsafe_alloc[Float32](RING)
+            _A.store(_word(Int(words), W_RING), Int64(Int(ring)))
+            if self.source.byte_length() > 0:
+                _A.store(_word(Int(words), W_SOURCE), Int64(_cstr(self.source)))
+            self.words = Int(words)
+            var tid = List[Int](length=1, fill=0)
+            var rc = external_call["pthread_create", c_int](Int(tid.unsafe_ptr()), Int(0), _entry, Int(words))
+            if rc != 0:
+                _A.store(_word(Int(words), W_STATE), -1)
+                _release(Int(words))
+                self.reason = "no thread for the microphone"
+            else:
+                _ = external_call["pthread_detach", c_int](tid[0])
 
     def _state(self) -> Int:
         return Int(_A.load(_word(self.words, W_STATE))) if self.words != 0 else (-1 if self.reason else 0)
@@ -180,6 +195,14 @@ struct Microphone(Movable):
     def total(self) -> Int:
         """Samples captured since start()."""
         return Int(_A.load(_word(self.words, W_TOTAL))) if self.words != 0 else 0
+
+    def captured_ns(self, index: Int) -> Int:
+        """When sample `index` (absolute) was captured, on now_ns()'s clock (from when its 20 ms chunk landed)."""
+        if self.words == 0:
+            return 0
+        var t = Int(_A.load(_word(self.words, W_TIME)))
+        var total = Int(_A.load(_word(self.words, W_TOTAL)))
+        return t - ((total - 1 - index) * 1_000_000_000) // RATE
 
     def level(self) -> Float64:
         """The last 20 ms's loudness (RMS, 0..1)."""
