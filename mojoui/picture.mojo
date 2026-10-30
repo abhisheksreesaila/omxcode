@@ -22,6 +22,17 @@ def _pack(c: SIMD[DType.float32, 4]) -> UInt32:
             | (UInt32(min(max(c[2], 0.0), 255.0) + 0.5) << 16) | (UInt32(255) << 24))
 
 
+def fitted_box(s: Surface, vw: Int, vh: Int) -> Tuple[Float64, Float64, Float64]:
+    """Where draw_fitted puts a vw × vh picture in `s`: its left and top in pixels and its scale (surface pixels a
+    picture pixel), so marks drawn over it line up."""
+    if vw <= 0 or vh <= 0:
+        return (0.0, 0.0, 1.0)
+    var scale = min(Float64(s.width) / Float64(vw), Float64(s.height) / Float64(vh))
+    var dw = max(Int(Float64(vw) * scale), 1)
+    var dh = max(Int(Float64(vh) * scale), 1)
+    return (Float64((s.width - dw) // 2), Float64((s.height - dh) // 2), scale)
+
+
 def draw_fitted(mut s: Surface, pixels: List[UInt32], vw: Int, vh: Int, backdrop: UInt32, corner: Float64 = 14.0):
     """Paints the vw × vh RGBA `pixels` as large as fits in `s`, centred, bilinear, with rounded corners (`corner` points)
     blended into `backdrop`, which also fills the rest. Nothing but the backdrop when the buffer isn't vw × vh."""

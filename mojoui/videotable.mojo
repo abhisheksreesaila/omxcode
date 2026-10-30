@@ -525,6 +525,32 @@ struct VideoTable(Movable):
     def rows(self) -> Int:
         return len(self.frame)
 
+    def copy(self) -> VideoTable:
+        """A table of its own with the same rows (a background job's input)."""
+        var out = VideoTable()
+        out.frame = self.frame.copy()
+        out.t = self.t.copy()
+        out.kind = self.kind.copy()
+        out.x = self.x.copy()
+        out.y = self.y.copy()
+        out.w = self.w.copy()
+        out.h = self.h.copy()
+        out.code = self.code.copy()
+        out.damaged = self.damaged.copy()
+        out.track = self.track.copy()
+        out.cx = self.cx.copy()
+        out.cy = self.cy.copy()
+        out.value = self.value.copy()
+        out.lat = self.lat.copy()
+        out.lon = self.lon.copy()
+        out.gsd = self.gsd.copy()
+        out.frame_brightness = self.frame_brightness.copy()
+        out.frame_motion = self.frame_motion.copy()
+        out.fps = self.fps
+        out.frames = self.frames
+        out.seconds = self.seconds
+        return out^
+
     def add(mut self, frame: Int, kind: String, x: Int, y: Int, w: Int, h: Int, code: Int = NO_CODE, damaged: Bool = False, track: Int = -1,
             cx: Float64 = -1, cy: Float64 = -1, value: Float64 = 0):
         self.frame.append(frame)
@@ -1036,10 +1062,33 @@ def measure_cpu(pixels: UnsafePointer[UInt32, MutAnyOrigin], prev: UnsafePointer
             cells.means[i] = t[2]
 
 
+trait Progress(Movable):
+    """Told after every frame a long loop finishes (scan, videoexport.cut): a background job counts it and may stop the
+    loop by raising (a cancel). NoProgress: a plain call."""
+
+    def frame_done(mut self, frame: Int) raises:
+        ...
+
+
+struct NoProgress(Progress):
+    def __init__(out self):
+        pass
+
+    def frame_done(mut self, frame: Int) raises:
+        pass
+
+
 def scan[A: Analyzer](mut video: VideoSource, mut analyzer: A, ranges: List[ColourRange], cell: Int = 4, use_gpu: Bool = True,
                       limit: Int = 0) raises -> VideoTable:
     """Every frame of `video` (from where it is; `limit` > 0: at most that many) through the GPU measurement and the
     analyzer. On the GPU, frame n+1 is read from the decoder while frame n is measured."""
+    var quiet = NoProgress()
+    return scan_with(video, analyzer, ranges, quiet, cell, use_gpu, limit)
+
+
+def scan_with[A: Analyzer, P: Progress](mut video: VideoSource, mut analyzer: A, ranges: List[ColourRange], mut progress: P, cell: Int = 4,
+                                        use_gpu: Bool = True, limit: Int = 0) raises -> VideoTable:
+    """scan(), telling `progress` after each frame (a background job's count and cancel: mojoui.videojobs)."""
     var table = VideoTable()
     table.fps = video.fps
     var w = video.width
@@ -1063,6 +1112,7 @@ def scan[A: Analyzer](mut video: VideoSource, mut analyzer: A, ranges: List[Colo
             table.frame_motion.append(cells.motion())
             analyzer.step(start + n, g.frame_ptr(slot), w, h, cells, table)
             n += 1
+            progress.frame_done(start + n - 1)
             slot = 1 - slot
             have = more
     else:
@@ -1078,6 +1128,7 @@ def scan[A: Analyzer](mut video: VideoSource, mut analyzer: A, ranges: List[Colo
             table.frame_motion.append(cells.motion())
             analyzer.step(start + n, pc, w, h, cells, table)
             n += 1
+            progress.frame_done(start + n - 1)
             swap(cur, prev)
     analyzer.finish(table)
     table.frames = n

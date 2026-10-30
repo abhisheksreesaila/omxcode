@@ -16,7 +16,7 @@
 from std.ffi import external_call
 from mojoui.video import VideoSource, _quote
 from mojoui.imageops import ImageOps, Frame, Edits
-from mojoui.videotable import VideoTable, NO_CODE
+from mojoui.videotable import VideoTable, NO_CODE, Progress, NoProgress
 from mojoui.canvas import rgba
 from mojoui.text import MEDIUM
 
@@ -117,6 +117,21 @@ def cut[P: EditPlan](mut video: VideoSource, segments: List[Tuple[Float64, Float
                      mut ops: ImageOps, crf: Int = 18) raises -> Int:
     """The segments of `video`, in the order given, each frame edited by `plan`, written to `path` at the source's size
     and rate. Returns the frames written."""
+    var quiet = NoProgress()
+    return cut_with(video, segments, plan, path, ops, quiet, crf)
+
+
+def cut_frames(segments: List[Tuple[Float64, Float64]], fps: Float64, frames: Int) -> Int:
+    """How many frames cut() writes for these segments (a job's total)."""
+    var n = 0
+    for r in frame_ranges(segments, fps, frames):
+        n += r[1] - r[0]
+    return n
+
+
+def cut_with[P: EditPlan, R: Progress](mut video: VideoSource, segments: List[Tuple[Float64, Float64]], mut plan: P, path: String,
+                                       mut ops: ImageOps, mut progress: R, crf: Int = 18) raises -> Int:
+    """cut(), telling `progress` after each frame written (a background job's count and cancel: mojoui.videojobs)."""
     var w = VideoWriter(path, video.width, video.height, video.fps, crf)
     var frame = Frame(video.width, video.height)
     var reel = 0
@@ -132,6 +147,7 @@ def cut[P: EditPlan](mut video: VideoSource, segments: List[Tuple[Float64, Float
                 ops.apply(frame, edits)
             w.write(frame.pixels)
             reel += 1
+            progress.frame_done(n)
     w.close()
     return reel
 
