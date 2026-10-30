@@ -830,3 +830,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Bench after the fixes, five runs on a machine shared with other sessions' builds: p95 pan 1.8–12.6, zoom 3.1–7.9, deepzoom 8.9–26.4 (an A/B of the whole-pixel corner showed the same spread both ways: noise), draw 1.6–3.7, finish 2.6–5.8, erase 14.1–22.6 ms. bench.json keeps the last run.
 - Final checker: M0–M5 PASS.
 - Contrast (D-1224): GTK's `.mui-tag-toolbar label` (0,2,2) beat `button label { color: inherit }`; the web's `[data-tag=toolbar] button` came after `button.prominent`.
+
+## 2026-10-30 · goal 43 (Dictate) set up
+- Third probe; reframed by the owner: performance and native reach the web can't match, proven by a race. Branch goal-43-dictate from main 49cbd8d, worktree ../mojo-ui-g43. Jot (goal 42) runs in parallel.
+- Found: PulseAudio on PipeWire 1.6.8, libpulse-simple in /usr/lib; a null sink loads and unloads cleanly (its .monitor is a capture source); two RTX 3090s; goal 39's VisionModel (branch g39-e) runs torch in process through Mojo's Python interop with frames handed over by address: the pattern for mojoui.speech. WebGPU Chromium flags: showcase/js-webgpu/check_a.py.
+- Baseline: the checker FAILs every milestone.
