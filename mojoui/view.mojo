@@ -183,6 +183,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
     var x: Int  # position inside a Board
     var y: Int
     var tip: String  # a tooltip (.tooltip())
+    var label: String  # what a screen reader calls it when nothing on screen says so (.label()); never shown
 
     def __init__(
         out self,
@@ -227,6 +228,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
         self.x = 0
         self.y = 0
         self.tip = ""
+        self.label = ""
 
     def __eq__(self, other: Self) -> Bool:
         return (
@@ -259,6 +261,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
             and self.width_from_parent == other.width_from_parent
             and self.height_from_parent == other.height_from_parent
             and (place or (self.x == other.x and self.y == other.y)) and (self.tip == other.tip or (self.kind == CANVAS and other.kind == CANVAS))  # (a canvas's tooltip, its words, is a patch: SET_TIP)
+            and self.label == other.label  # (a label rarely changes: a new one is a new layout; a drawn view's changing words are its tooltip)
         )
 
     def sized_width(self) -> Bool:
@@ -345,6 +348,12 @@ struct View(Copyable, Movable):
     def tooltip(var self, text: String) -> View:
         """A short explanation shown when the pointer rests on the view (hosts print it as TIP: in tests)."""
         self.nodes[0].tip = text
+        return self^
+
+    def label(var self, text: String) -> View:
+        """The name a screen reader says for this view when what's on screen doesn't say it: an icon, a drawn chart,
+        a dropdown with no words beside it. Never shown (a tooltip is shown and is also a name: mojoui.a11y)."""
+        self.nodes[0].label = text
         return self^
 
     def tone(var self, t: Int) -> View:

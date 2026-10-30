@@ -52,7 +52,7 @@ def view_to_json(v: View) -> String:
         out += ',"pad_v":' + String(n.pad_v) + ',"pad_h":' + String(n.pad_h) + ',"w":' + String(n.w) + ',"h":' + String(n.h)
         out += ',"min_w":' + String(n.min_w) + ',"max_w":' + String(n.max_w) + ',"grows":' + ("true" if n.grows else "false")
         out += ',"fills":' + ("true" if n.fills else "false") + ',"align_items":' + String(n.align_items)
-        out += ',"justify_items":' + String(n.justify_items) + ',"name":' + json_str(n.name) + ',"tip":' + json_str(n.tip)
+        out += ',"justify_items":' + String(n.justify_items) + ',"name":' + json_str(n.name) + ',"tip":' + json_str(n.tip) + ',"label":' + json_str(n.label)
         out += ',"width_from_parent":' + ("true" if n.width_from_parent else "false") + ',"height_from_parent":' + ("true" if n.height_from_parent else "false")
         out += ',"x":' + String(n.x) + ',"y":' + String(n.y)
         out += ',"options":['
