@@ -62,7 +62,10 @@ build_linux() {
     fi
   fi
   # An app whose needs file says speech (mojoui.speech: torch in the app's process, goal 43) runs on the `speech` pixi
-  # environment's CPython: $out/$EX becomes a launcher that points Mojo's Python interop at it (D-1412)
+  # environment's CPython: $out/$EX becomes a launcher that points Mojo's Python interop at it (D-1412).
+  # Machine-local, not relocatable: the launcher hard-codes this checkout's absolute .pixi/envs/speech paths, and the
+  # build runs `pixi install -e speech` (torch + CUDA wheels, several GB) first. Moving the checkout or copying the
+  # build elsewhere needs a rebuild there.
   if grep -qx speech "examples/$EX/needs" 2>/dev/null; then
     pixi install -e speech >/dev/null
     local env; env="$(pwd)/.pixi/envs/speech"

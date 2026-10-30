@@ -5,7 +5,9 @@
 #
 # The readout under each transcript: "N ms after you stopped · on <GPU> · on this machine", N = from when the last
 # voiced 20 ms of the utterance was captured to when its final text was on screen (the text that stood once the pause
-# was long enough; it's shown the moment it is ready). Each utterance also prints
+# was long enough; it's shown the moment it is ready). It is a floor (review round 1): it starts when that chunk reached
+# Mojo (mojoui.audio stamps a chunk when pa_simple_read returns it, so the sound server's buffering before is uncounted)
+# and ends when the event is polled; "stopped" = the stream's frames quieter than RMS 0.006. Each utterance also prints
 #   DICTATE FINAL: ms=<N> text=<the words>
 # Run it in the speech environment (scripts/build.sh makes build/dictate/linux/dictate a launcher that finds it).
 
@@ -166,4 +168,8 @@ struct Main(App):
             col.append(Text(s.text))
             col.append(Text(String(Int(s.ms + 0.5)) + " ms after you stopped · on " + self.gpu + " · on this machine", CAPTION))
             k -= 1
+        if len(self.said) > 0:
+            col.append(Text("ms after you stopped is a floor: from your last voiced 20 ms reaching the app (quieter than "
+                            + "RMS 0.006 counts as stopped) to the text being taken; the sound server's own buffering "
+                            + "before that isn't counted", CAPTION))
         return VStack(col^, spacing=10).padding(20, 24).grow().fill()
