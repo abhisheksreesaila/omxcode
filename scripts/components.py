@@ -96,6 +96,8 @@ COMPOSITES = [
     ("Toolbar · FormulaBar · StatusBar", "mojoui/sheetchrome.mojo", ["Toolbar button (icon over label)", "TextField", "Text"], "Toolbar("),
     ("Format toggles (Bold, Italic, Align…)", "mojoui/sheetchrome.mojo", ["Icon toggle shown pressed", "Lucide icon set", "Tooltips", "Divider"], "toggles="),
     ("Bottom tabs, renamed in place", "mojoui/sheetchrome.mojo", ["Button", "In-place editor", "Quiet buttons"], "BottomTabs("),
+    ("Rail (a slim column of icon tools beside the sheet: role sidebar)", "mojoui/sheetchrome.mojo", ["Button with an icon", "Tooltips", "VStack"], "Rail("),
+    ("Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)", "mojoui/regions.mojo", [], "regions("),
     ("Cell styles (bold, italic, underline, strikethrough, colours, alignment)", "mojoui/cellstyle.mojo", ["Canvas"], "restyle("),
     ("Island (the window's living status: work, results, undo, errors)", "mojoui/island.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas frames (animation)"], "IslandView("),
     ("Swatch picker", "mojoui/swatches.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Popover"], "SwatchPicker("),

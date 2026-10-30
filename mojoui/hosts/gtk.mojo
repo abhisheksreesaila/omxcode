@@ -40,6 +40,7 @@ from mojoui.hosts.gtk_webview import (
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
 from mojoui.jobs import wake_pipe, drain_wakes
 from mojoui.geometry import register_rects
+from mojoui.regions import regions
 from mojoui.hosts.devtools import DEVTOOLS
 from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, next_line, send_all, close_fd, link_error, MAX_LINE, LINE_NONE, LINE_BAD
 from mojoui.hosts.web import view_to_json, control_event
@@ -1931,6 +1932,7 @@ struct GtkHost[A: App](Movable):
             external_call["gtk_scrolled_window_set_policy", NoneType](w, c_int(1), c_int(1))  # automatic, automatic
             external_call["gtk_scrolled_window_set_child", NoneType](w, inner)
             add_class(inner, "mui-board")
+            add_class(w, "mui-board-scroll")  # (the sheet's frame: a theme can ring it, as the web's .board-scroll)
             self.widgets[i] = inner  # patches move and size the board's own widget
             self.board_scrollers.append((i, w))
             if node.value != 0 and node.value != self.revealed:
@@ -4464,6 +4466,50 @@ def report_menu_rows(host: GtkHost, menu: Int):
             report_menu_rows(host, c)
 
 
+def widget_rect(host: GtkHost, widget: Int) -> List[Float64]:
+    """A widget's bounds in the window's coordinates (x, y, w, h; w = 0 when it has none)."""
+    var rect = List[Float32](length=4, fill=0)
+    var ok = external_call["gtk_widget_compute_bounds", c_int](widget, host.window, Int(rect.unsafe_ptr())) != 0
+    var out: List[Float64] = [Float64(rect[0]), Float64(rect[1]), Float64(rect[2]), Float64(rect[3])] if ok else [0.0, 0.0, 0.0, 0.0]
+    _ = len(rect)
+    return out^
+
+
+def write_regions(host: GtkHost, path: String):
+    """The regions step: each region's widget bounds (a Board: its scroller, the part on screen; a card: clipped to its
+    board's scroller, left out when scrolled away), rounded to whole pixels, written as JSON."""
+    var out = String("[")
+    var n = 0
+    for r in regions(host.rt.shown):
+        var widget = host.widgets[r.node] if r.node < len(host.widgets) else 0
+        var clip: List[Float64] = []
+        for s in host.board_scrollers:
+            if r.name == "sheet" and s[0] == r.node:
+                widget = s[1]
+            if r.board >= 0 and s[0] == r.board:
+                clip = widget_rect(host, s[1])
+        if widget == 0:
+            continue
+        var b = widget_rect(host, widget)
+        if len(clip) == 4:
+            var x0 = max(b[0], clip[0])
+            var y0 = max(b[1], clip[1])
+            var x1 = min(b[0] + b[2], clip[0] + clip[2])
+            var y1 = min(b[1] + b[3], clip[1] + clip[3])
+            b = [x0, y0, x1 - x0, y1 - y0]
+        if b[2] < 1 or b[3] < 1:
+            continue
+        out += ("," if n > 0 else "") + "{\"name\": " + json_string(r.name) + ", \"x\": " + String(Int(b[0] + 0.5)) + ", \"y\": " + String(Int(b[1] + 0.5)) + ", \"w\": " + String(Int(b[2] + 0.5)) + ", \"h\": " + String(Int(b[3] + 0.5)) + "}"
+        print("REGION: " + r.name + " " + String(Int(b[0] + 0.5)) + "," + String(Int(b[1] + 0.5)) + " " + String(Int(b[2] + 0.5)) + "x" + String(Int(b[3] + 0.5)))
+        n += 1
+    out += "]\n"
+    try:
+        with open(path, "w") as f:
+            f.write(out)
+    except e:
+        print("TEST: can't write regions to", path, e)
+
+
 def report_buttons(host: GtkHost, node: Int, tag: String):
     """BOX: tag/Title for each button inside tagged container `node` (not inside a tagged container within it): the
     checks measure tools and remove buttons without tagging them (a tag renames a button's agent tool, D-228)."""
@@ -5162,6 +5208,8 @@ def run_step[A: App](host_addr: Int, step: String):
                 continue
             var got = accessible_label_is(host[].widgets[k], want)
             print("A11Y LABEL: #" + String(k) + " " + host[].rt.shown.nodes[k].name + " = " + want + (" (ok)" if got == "" else " (GTK: " + got + ")"))
+    elif verb == "regions":  # regions:/path.json: the window's regions (mojoui.regions) in the window's pixels, as [{"name", "x", "y", "w", "h"}]
+        write_regions(host[], rest)
     elif verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip, a drawn view's words), mid-run
         var said = False
         for ref n in host[].rt.shown.nodes:

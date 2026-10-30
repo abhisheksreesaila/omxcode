@@ -966,6 +966,8 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
 | `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
 | `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | maccheck, omxplorer |
+| `Rail (a slim column of icon tools beside the sheet: role sidebar)` | `mojoui/sheetchrome.mojo` | Button with an icon, Tooltips, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
+| `Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)` | `mojoui/regions.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Swatch picker` | `mojoui/swatches.mojo` | Canvas, Canvas: pan, zoom, tap, Popover | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
@@ -1031,12 +1033,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 130 | 4 | 0 |
-| Web | 133 | 1 | 0 |
-| Android | 19 | 32 | 83 |
-| Mac (AppKit) | 0 | 121 | 13 |
-| iPhone (UIKit) | 0 | 99 | 35 |
-| Agent (MCP) | 44 | 36 | 54 |
+| Linux (GTK) | 132 | 4 | 0 |
+| Web | 135 | 1 | 0 |
+| Android | 19 | 33 | 84 |
+| Mac (AppKit) | 0 | 123 | 13 |
+| iPhone (UIKit) | 0 | 101 | 35 |
+| Agent (MCP) | 45 | 37 | 54 |
 
 ## Inside one app, not components yet (the debt)
 

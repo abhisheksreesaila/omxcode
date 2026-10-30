@@ -67,6 +67,12 @@ def Toolbar(left: List[Tool], middle: List[Tool], right: List[Tool], extra: List
     return HStack(items^, spacing=2).fill().align(CENTER).padding(4, 10).tag("toolbar")
 
 
+def Rail(var items: List[View], width: Int = 48) -> View:
+    """A slim column of icon tools beside the sheet (role sidebar, as mojoui.sidebar's column: a theme rings and fills
+    it; mojoui.regions calls it the sidebar). Its items are icon-only buttons or file pickers (titles as tooltips)."""
+    return VStack(items^, spacing=6).width(width).align(CENTER).padding(10, 0).tag("sidebar")
+
+
 def AppBar(name: String, var menubar: View, var trailing: List[View]) -> View:
     """The window's header row: the app's mark (its logo and name), its menus, and what sits at the far end (a status
     island). Tagged "menubar" (themes float it: a glass strip); on a Mac the menus live in the system menu bar

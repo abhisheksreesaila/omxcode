@@ -72,7 +72,7 @@ from mojoui.omxfile import save_omx, open_document
 from mojoui.numformat import (ColumnFormat, format_number, AUTO, NUMBER, CURRENCY, PERCENT, COMPACT, DATE_LONG, DATE_MONTH, DATE_ISO,
                               NUMBER_STYLES, DATE_STYLES)
 from mojoui.inspector import Inspector, Section, Row, Stepper, StatCards, NavRow, InspectorPage
-from mojoui.sheetchrome import Tool, Toolbar, FormulaBar, StatusBar, Tab, BottomTabs, AppBar
+from mojoui.sheetchrome import Tool, Toolbar, FormulaBar, StatusBar, Tab, BottomTabs, AppBar, Rail
 from mojoui.cellstyle import (CellStyle, BOLD, ITALIC, UNDERLINE, STRIKE, INK_MASK, FILL_MASK, ALIGN_MASK, ink_bits, fill_bits, align_bits,
                               AUTO_ALIGN, ALIGN_LEFT, ALIGN_CENTRE, ALIGN_RIGHT, SWATCH_NAMES, swatch_name)
 from mojoui.swatches import SwatchPicker, draw_swatches, swatch_at
@@ -268,6 +268,7 @@ comptime OMX_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 10
 comptime APP = "omxcode"  # (settings live in ~/.config/omxcode; ~/.config/omxapp's are adopted, D-285)
 comptime W = 1440  # the window (Stitch's artboards; the web check's viewport)
 comptime INSPECTOR_W = 300
+comptime RAIL_W = 48  # the sheet's side rail (goal 41)
 comptime CHROME_H = 252  # the menu bar, toolbar, formula bar, bottom tabs, status bar and the gaps between them (goal 25: measured)
 comptime COMPACT_W = 1440  # narrower windows: the toolbar's tools show only their icons (their titles are tooltips)
 comptime FX_H = 42  # the formula bar and its gap (the report has none: its page is that much taller)
@@ -406,7 +407,8 @@ struct Main(App):
         self.font = Font()
         self.looks = List[Theme]()
         adopt_config(APP, "omxapp")
-        self.skin = skin_of(read_setting(APP, "skin", "liquid"))
+        # graphite by default (goal 41, D-1175); a skin saved before it (no skin_version=2 line, D-1176) counts as unset
+        self.skin = skin_of(read_setting(APP, "skin", "graphite")) if read_setting(APP, "skin_version", "") == "2" else GRAPHITE
         self.win_w = W
         self.win_h = 900
         self.pal = skin_palette(self.skin)
@@ -1994,6 +1996,7 @@ struct Main(App):
                 self.pal = skin_palette(self.skin)
                 self.make_looks()
                 write_setting(APP, "skin", skin_name(self.skin))
+                write_setting(APP, "skin_version", "2")  # (a choice made since graphite became the default: kept)
                 self.grid.redraw()
                 self.preview.redraw()
             self.version += 1
@@ -3358,7 +3361,15 @@ struct Main(App):
         return StatusBar(items, (fixed(shown_ms(self.milliseconds), 1) + " ms on " + (self.frame.device_name if self.ran_gpu else "CPU")) if self.show_timings else "")
 
     def sheet_width(self) -> Int:
-        return self.win_w - 40 - (INSPECTOR_W + 16 if self.inspector_open else 0)
+        return self.win_w - 40 - RAIL_W - 16 - (INSPECTOR_W + 16 if self.inspector_open else 0)
+
+    def rail(self) -> View:
+        """The sheet's side rail (mojoui.sheetchrome.Rail): what goes on the page from a file (a table, a video, a picture)."""
+        var items = List[View]()
+        items.append(FilePicker("Table", PICK_TABLE, style=ICON_ONLY, icon="table", accept=TABLE_TYPES).tooltip("Insert a table from a CSV or Parquet file"))
+        items.append(Button("Video", INSERT_VIDEO, ICON_ONLY, icon="video").tooltip("Insert a video"))
+        items.append(Button("Picture", INSERT_IMAGE, ICON_ONLY, icon="image").tooltip("Insert a picture"))
+        return Rail(items^, RAIL_W)
 
     def report_view(self) -> View:
         """The Report tab (Stitch 06): KPI and chart tiles over the filtered rows, and the row that adds them."""
@@ -3439,7 +3450,7 @@ struct Main(App):
         # The sheet's column takes the room the inspector leaves, the row takes the height the bars leave: sizes
         # come from the window (App.resize), never asked of it, so the window never grows to fit them (goal 25 M2).
         var main = (VStack(fx, area^, spacing=6) if self.sheet_tab == 0 else VStack(area^, spacing=6)).grow().align(STRETCH)
-        var row = (HStack(main, self.inspector(), spacing=16) if self.inspector_open else HStack(main, spacing=0)).align(STRETCH)
+        var row = (HStack(self.rail(), main, self.inspector(), spacing=16) if self.inspector_open else HStack(self.rail(), main, spacing=16)).align(STRETCH)
         var tabs: List[Tab] = [Tab(self.sheet_name, "sheet"), Tab(self.report_name, "chart-bar")]
         var chip = List[View]()  # (the GPU's state shows once, in the menu bar)
         var parts = List[View]()

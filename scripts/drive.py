@@ -309,8 +309,29 @@ def step(page, s):
         sel, name = rest.rsplit("=", 1)
         value = page.evaluate("([s, a]) => { const e = document.querySelector(s); return e && e.getAttribute(a) !== null ? e.getAttribute(a) : 'none'; }", [sel, name])
         return f"ATTR: {sel} {name} {value[:80]}"
+    elif verb == "wait" and rest.isdigit():  # wait:1500: as GTK's wait (= pause), so one step list drives both hosts
+        page.wait_for_timeout(int(rest))
     elif verb == "wait":  # until a button with this title appears (e.g. after frames change the screen)
         page.locator("[data-kind=button]").filter(has_text=exact(rest)).first.wait_for(timeout=15000)
+    elif verb == "open" and "." in rest and not page.locator(".menu-title").filter(has_text=exact(rest)).count():
+        # open:clip.mp4: a file, as GTK's step opens it: the first file picker on screen whose accept list takes its
+        # extension (or any file) gets it; a relative name is looked up in $MOJOUI_DOCUMENTS, then $OMX_DOCUMENTS
+        path = Path(rest)
+        if not path.is_absolute():
+            for d in (os.environ.get("MOJOUI_DOCUMENTS"), os.environ.get("OMX_DOCUMENTS"), str(ROOT)):
+                if d and (Path(d) / rest).exists():
+                    path = Path(d) / rest
+                    break
+        ext = path.suffix.lower()
+        for el in page.locator("input.picker-input").all():
+            accept = [a.strip().lower() for a in (el.get_attribute("accept") or "").split(",") if a.strip()]
+            if not accept or ext in accept:
+                el.set_input_files(str(path))
+                break
+        else:
+            raise ValueError(f"no file picker takes {rest}")
+    elif verb == "regions":  # regions:/path.json: the page's regions (mojoui/regions.mojo's roles, read from data-tag) in its pixels
+        Path(rest).write_text(json.dumps(page.evaluate(REGIONS)) + "\n")
     elif verb == "pause":  # pause:1000: let animations run that long (as the GTK step does)
         page.wait_for_timeout(int(rest))
     elif verb == "slide":
@@ -333,6 +354,23 @@ RECTS = """() => { const out = []; const r = e => { let b = e.getBoundingClientR
     for (const b of e.querySelectorAll(':scope [data-kind=button]'))
       if (b.closest('[data-tag]') === e) out.push('  button ' + JSON.stringify((b.textContent || b.title || '').trim()) + r(b)); }
   return out.join(String.fromCharCode(10)); }"""
+
+
+# The window's regions, by mojoui/regions.mojo's rule (keep the two in step): the shells' role tags (sidebar, toolbar,
+# status-bar → status, inspector), a Board's scroller (the sheet) and each Board object with a headline title (card:<title>,
+# clipped to its board; left out when scrolled away). Page pixels (the full-page shot's).
+REGIONS = """() => { const out = [], roles = { sidebar: 'sidebar', toolbar: 'toolbar', 'status-bar': 'status', inspector: 'inspector' };
+  const box = e => { const b = e.getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; };
+  const push = (name, b) => { if (b.w >= 1 && b.h >= 1) out.push({ name, x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) }); };
+  for (const e of document.querySelectorAll('#mojoui-root [data-tag]'))
+    if (roles[e.dataset.tag] && !e.classList.contains('object')) push(roles[e.dataset.tag], box(e));
+  for (const sc of document.querySelectorAll('#mojoui-root .board-scroll')) {
+    const c = box(sc); push('sheet', c);
+    for (const o of sc.querySelectorAll(':scope > .board > .object')) {
+      const t = o.querySelector('.text.headline'); if (!t || !t.textContent.trim()) continue;
+      const b = box(o), x0 = Math.max(b.x, c.x), y0 = Math.max(b.y, c.y), x1 = Math.min(b.x + b.w, c.x + c.w), y1 = Math.min(b.y + b.h, c.y + c.h);
+      push('card:' + t.textContent.trim(), { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }); } }
+  return out; }"""
 
 
 CSP_PROBE = """window.mojouiCsp = [];

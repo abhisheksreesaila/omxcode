@@ -4,6 +4,9 @@ from mojoui import (
     App, Event, View, VStack, HStack, Text, Button, TextField, Toggle, Dropdown, Slider, ProgressBar, Divider, Image,
     TITLE, HEADLINE, CAPTION, PROMINENT,
 )
+from mojoui.theme import Theme
+from mojoui.shared import environment
+from themes.skins import skin, ledger_palette, graphite_palette, blueprint_palette
 
 comptime NAME = 1
 comptime RESET = 2
@@ -31,8 +34,12 @@ struct Main(App):
     var notify: Bool
     var size: Int
     var volume: Int
+    var look: Theme  # GALLERY_SKIN=ledger|graphite|blueprint: the components in a skin (unset: each platform's own look)
 
     def __init__(out self):
+        var name = environment("GALLERY_SKIN")
+        self.look = (skin(name, graphite_palette() if name == "graphite" else (blueprint_palette() if name == "blueprint" else ledger_palette()))
+                     if name == "graphite" or name == "ledger" or name == "blueprint" else Theme.native())
         self.name = ""
         self.greeted = 0
         self.notify = False
@@ -41,6 +48,9 @@ struct Main(App):
 
     def title(self) -> String:
         return "Gallery"
+
+    def theme(self) -> Theme:
+        return self.look.copy()
 
     def update(mut self, event: Event):
         if event.message == NAME:
