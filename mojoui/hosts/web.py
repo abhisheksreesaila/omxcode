@@ -472,7 +472,16 @@ CANVAS_JS = r"""
     const cv = div.querySelector('canvas');
     e.preventDefault(); e.stopPropagation(); cv.focus({ preventScroll: true }); cv.dispatchEvent(new KeyboardEvent('keydown', e));
   }, true);
-  window.mojouiAttach = attach;  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
+  window.mojouiAttach = attach;
+  // A drawn view's words (SET_TIP, in its meta): its tooltip, and its accessible name unless a label names it. After every
+  // swap, not only when a frame arrives: words can change while the picture doesn't.
+  window.mojouiWords = div => {
+    const m = document.getElementById('n' + div.dataset.node + '-meta'), cv = div.querySelector('canvas');
+    if (!m || (m.dataset.tip || '') === (div.dataset.tip || '')) return;
+    const was = div.dataset.tip || '';
+    div.dataset.tip = m.dataset.tip || ''; div.title = div.dataset.tip;
+    if (cv && (cv.getAttribute('aria-label') || '') === was) cv.setAttribute('aria-label', div.dataset.tip);
+  };  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
   function attach(div) {
     if (div.mojoui) return;
     const cv = div.querySelector('canvas'), g = cv.getContext('2d');
@@ -508,7 +517,7 @@ CANVAS_JS = r"""
           div.dataset.frame = `${st.count} ${cv.width}x${cv.height} ${r.width.toFixed(0)}x${r.height.toFixed(0)} ${dpr}`;
           if (res.headers.get('X-Mojoui-Pending') === '1') update();
           if ((meta() && meta().dataset.version !== String(st.drawn)) || st.skin !== skinNow()) st.want = true;
-          if (meta() && (meta().dataset.tip || '') !== (div.dataset.tip || '')) { div.dataset.tip = meta().dataset.tip || ''; div.title = div.dataset.tip; }  // (SET_TIP: a drawn view's words)
+          window.mojouiWords(div);  // (SET_TIP: a drawn view's words)
           if (res.headers.get('X-Mojoui-Again') === '1') { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); }  // mid-animation (a gliding ring): the next frame
         }
       } finally { st.busy = false; }
@@ -625,6 +634,7 @@ CANVAS_JS = r"""
     if (back && kdiv.dataset.keys === '1' && (!document.activeElement || document.activeElement === document.body)) back.focus({ preventScroll: true });
     document.querySelectorAll('[data-kind=canvas]').forEach(div => {
       const st = div.mojoui, m = document.getElementById('n' + div.dataset.node + '-meta');
+      if (window.mojouiWords) window.mojouiWords(div);
       if (st && m && (m.dataset.version !== String(st.drawn) || m.dataset.frames !== '0' || st.skin !== skinNow())) { st.want = true; st.pump(); }
     });
   });
@@ -846,7 +856,29 @@ def render(s, i, sid):
     if n.get("tip"):
         el.attrs["title"] = n["tip"]
         el.attrs["data-tip"] = n["tip"]
+    if n["kind"] == CANVAS:  # a drawn view is a picture to a screen reader; its words (tooltip or label) are its name
+        name_control(el, n.get("a11y_name", ""), role="img")
+    elif n.get("a11y_name"):
+        name_control(el, n["a11y_name"])
     return el
+
+
+NAMEABLE = ("button", "select", "input", "textarea", "canvas", "img", "iframe")
+
+
+def name_control(el, name, role=None):
+    """The accessible name (mojoui.a11y.explicit_name) on the control itself, not the box around it: aria-label on
+    the first <button>/<select>/<input>/<textarea>/<canvas>/<img>/<iframe> in `el` (el itself first)."""
+    todo = [el]
+    while todo:
+        e = todo.pop(0)
+        if getattr(e, "tag", None) in NAMEABLE:
+            if name:
+                e.attrs["aria-label"] = name
+            if role:
+                e.attrs["role"] = role
+            return
+        todo.extend(c for c in getattr(e, "children", ()) if hasattr(c, "tag"))
 
 
 def web_url(url):

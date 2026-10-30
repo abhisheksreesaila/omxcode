@@ -26,6 +26,7 @@ from mojoui.linebreak import css_breaks, label_words, WJ
 from mojoui.paragraph import Run, runs_of, link_href
 from mojoui.embed import is_web_url
 from mojoui.icons_data import lucide_svg
+from mojoui.a11y import explicit_name
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
 from mojoui.app import App, Event, Runtime
@@ -1868,6 +1869,9 @@ struct AppKitHost[A: App](Movable):
         var outer = w
         if node.tip != "":
             _ = msg(w, "setToolTip:", ns_string(node.tip))
+        var spoken = explicit_name(node)  # (mojoui.a11y: what VoiceOver says when the control's own words don't)
+        if spoken != "":
+            _ = msg(self.widgets[i] if self.widgets[i] != 0 else w, "setAccessibilityLabel:", ns_string(spoken))
         var is_stack = node.kind == VSTACK or node.kind == HSTACK
         if (node.pad_v != 0 or node.pad_h != 0) and not is_stack:  # wrap a leaf in a padded stack
             outer = new("NSStackView")

@@ -9,6 +9,7 @@ from std.memory.alloc import alloc, Layout
 
 from mojoui.view import View, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LAZYLIST, CANVAS, PARAGRAPH
 from mojoui.paragraph import link_href
+from mojoui.a11y import explicit_name
 from mojoui.diff import Diff
 from mojoui.app import App, Event, Runtime
 from mojoui.webcomponent import commands_json, assets_json
@@ -52,7 +53,7 @@ def view_to_json(v: View) -> String:
         out += ',"pad_v":' + String(n.pad_v) + ',"pad_h":' + String(n.pad_h) + ',"w":' + String(n.w) + ',"h":' + String(n.h)
         out += ',"min_w":' + String(n.min_w) + ',"max_w":' + String(n.max_w) + ',"grows":' + ("true" if n.grows else "false")
         out += ',"fills":' + ("true" if n.fills else "false") + ',"align_items":' + String(n.align_items)
-        out += ',"justify_items":' + String(n.justify_items) + ',"name":' + json_str(n.name) + ',"tip":' + json_str(n.tip) + ',"label":' + json_str(n.label)
+        out += ',"justify_items":' + String(n.justify_items) + ',"name":' + json_str(n.name) + ',"tip":' + json_str(n.tip) + ',"a11y_name":' + json_str(explicit_name(n))
         out += ',"width_from_parent":' + ("true" if n.width_from_parent else "false") + ',"height_from_parent":' + ("true" if n.height_from_parent else "false")
         out += ',"x":' + String(n.x) + ',"y":' + String(n.y)
         out += ',"options":['

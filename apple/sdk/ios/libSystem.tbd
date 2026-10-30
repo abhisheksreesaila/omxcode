@@ -4,5 +4,5 @@ targets:         [ arm64-ios ]
 install-name:    '/usr/lib/libSystem.B.dylib'
 exports:
   - targets:         [ arm64-ios ]
-    symbols:         [ _dlsym, _dup, _fclose, _fdopen, _fflush, _memcpy, _memmove, _memset, _bzero, _strlen, _write, _posix_memalign, _free, _sin, _cos, ___sincos_stret, _clock_gettime_nsec_np ]
+    symbols:         [ _dlsym, _dup, _fclose, _fdopen, _fflush, _memcpy, _memmove, _memset, _bzero, _strlen, _write, _posix_memalign, _free, _sin, _cos, ___sincos_stret, _clock_gettime_nsec_np, _memset_pattern16 ]
 ...

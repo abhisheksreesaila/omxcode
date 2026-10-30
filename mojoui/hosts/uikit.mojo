@@ -21,6 +21,7 @@ from mojoui.view import (
 )
 from mojoui.menus import CHECKED, DISABLED, DANGER
 from mojoui.theme import Palette, Theme, mix
+from mojoui.a11y import explicit_name
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE
 from mojoui.png import encode_png
 from mojoui.app import App, Event, Runtime
@@ -764,6 +765,12 @@ struct UIKitHost[A: App](Movable):
         if node.tip != "" and self.widgets[i] != 0:  # a tooltip for the pointer (iPad with a trackpad or mouse)
             var tip = msg(msg(cls("UIToolTipInteraction"), "alloc"), "initWithDefaultToolTip:", ns_string(node.tip))
             _ = msg(self.widgets[i], "addInteraction:", tip)
+        var spoken = explicit_name(node)  # (mojoui.a11y: what VoiceOver says when the control's own words don't)
+        if spoken != "" and self.widgets[i] != 0:
+            if node.kind == CANVAS:  # (an image view isn't an accessibility element until asked: a drawn view is a picture)
+                _ = msg(self.widgets[i], "setIsAccessibilityElement:", 1)
+                _ = msg(self.widgets[i], "setAccessibilityTraits:", 4)  # UIAccessibilityTraitImage
+            _ = msg(self.widgets[i], "setAccessibilityLabel:", ns_string(spoken))
         var is_stack = node.kind == VSTACK or node.kind == HSTACK
         if (node.pad_v != 0 or node.pad_h != 0) and not is_stack:  # wrap a leaf in a padded stack
             outer = new("UIStackView")
