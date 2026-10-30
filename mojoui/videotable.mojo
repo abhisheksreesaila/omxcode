@@ -472,8 +472,10 @@ def read_stripe_code(pixels: UnsafePointer[UInt32, MutAnyOrigin], width: Int, he
 
 
 struct VideoTable(Movable):
-    """Rows, as columns: frame, t (s), kind, x, y, w, h, code (NO_CODE: none), damaged, track (-1: none); and per frame
-    brightness and motion (frame_brightness[i], frame_motion[i])."""
+    """Rows, as columns: frame, t (s), kind, x, y, w, h, code (NO_CODE: none), damaged, track (-1: none), cx, cy (the
+    thing's centre in pixels, sub-pixel when the analyzer measured it, else the box's centre) and value (a measurement
+    the analyzer attaches, e.g. an area in pixels; 0: none); and per frame brightness and motion (frame_brightness[i],
+    frame_motion[i]). lat, lon and gsd (metres per pixel) are empty until mojoui.geo.georeference fills them."""
 
     var frame: List[Int]
     var t: List[Float64]
@@ -485,6 +487,12 @@ struct VideoTable(Movable):
     var code: List[Int]
     var damaged: List[Bool]
     var track: List[Int]
+    var cx: List[Float64]
+    var cy: List[Float64]
+    var value: List[Float64]
+    var lat: List[Float64]
+    var lon: List[Float64]
+    var gsd: List[Float64]
     var frame_brightness: List[Float64]
     var frame_motion: List[Float64]
     var fps: Float64
@@ -502,6 +510,12 @@ struct VideoTable(Movable):
         self.code = List[Int]()
         self.damaged = List[Bool]()
         self.track = List[Int]()
+        self.cx = List[Float64]()
+        self.cy = List[Float64]()
+        self.value = List[Float64]()
+        self.lat = List[Float64]()
+        self.lon = List[Float64]()
+        self.gsd = List[Float64]()
         self.frame_brightness = List[Float64]()
         self.frame_motion = List[Float64]()
         self.fps = 30
@@ -511,7 +525,8 @@ struct VideoTable(Movable):
     def rows(self) -> Int:
         return len(self.frame)
 
-    def add(mut self, frame: Int, kind: String, x: Int, y: Int, w: Int, h: Int, code: Int = NO_CODE, damaged: Bool = False, track: Int = -1):
+    def add(mut self, frame: Int, kind: String, x: Int, y: Int, w: Int, h: Int, code: Int = NO_CODE, damaged: Bool = False, track: Int = -1,
+            cx: Float64 = -1, cy: Float64 = -1, value: Float64 = 0):
         self.frame.append(frame)
         self.t.append(Float64(frame) / self.fps)
         self.kind.append(kind)
@@ -522,17 +537,28 @@ struct VideoTable(Movable):
         self.code.append(code)
         self.damaged.append(damaged)
         self.track.append(track)
+        self.cx.append(cx if cx >= 0 else Float64(x) + Float64(w) / 2)
+        self.cy.append(cy if cy >= 0 else Float64(y) + Float64(h) / 2)
+        self.value.append(value)
+
+    def georeferenced(self) -> Bool:
+        return self.rows() > 0 and len(self.lat) == self.rows()
 
     def frames_per_second(self) -> Float64:
         return Float64(self.frames) / self.seconds if self.seconds > 0 else 0
 
     def csv(self) -> String:
-        var out = String("frame,t,kind,x,y,w,h,code,damaged,track\n")
+        var geo = self.georeferenced()
+        var out = String("frame,t,kind,x,y,w,h,code,damaged,track")
+        out += ",value,lat,lon\n" if geo else "\n"
         for i in range(self.rows()):
             out += String(self.frame[i]) + "," + _fixed3(self.t[i]) + "," + self.kind[i] + "," + String(self.x[i]) + ","
             out += String(self.y[i]) + "," + String(self.w[i]) + "," + String(self.h[i]) + ","
             out += (String(self.code[i]) if self.code[i] != NO_CODE else String("")) + ","
-            out += ("1" if self.damaged[i] else "0") + "," + String(self.track[i]) + "\n"
+            out += ("1" if self.damaged[i] else "0") + "," + String(self.track[i])
+            if geo:
+                out += "," + String(self.value[i]) + "," + String(self.lat[i]) + "," + String(self.lon[i])
+            out += "\n"
         return out
 
     def write_csv(self, path: String) raises:
@@ -619,6 +645,89 @@ struct RegionsAnalyzer(Analyzer):
         for r in regions(cells, self.cls):
             if r.w >= self.min_w and r.w <= self.max_w and r.h >= self.min_h and r.h <= self.max_h:
                 table.add(frame, self.kind, r.x, r.y, r.w, r.h)
+
+    def finish(mut self, mut table: VideoTable) raises:
+        pass
+
+
+@fieldwise_init
+struct Fill(Copyable, Movable, ImplicitlyCopyable):
+    """A shape measured at full resolution: its pixels with the inside filled (area), and the centre of that area."""
+
+    var area: Int
+    var cx: Float64
+    var cy: Float64
+
+
+def filled(pixels: UnsafePointer[UInt32, MutAnyOrigin], width: Int, height: Int, box: Region, r: ColourRange, pad: Int = 3) -> Fill:
+    """The pixels of colour `r` inside `box` (grown by `pad`), each row filled from its leftmost to its rightmost such
+    pixel: a ring or an outlined mark counts with its inside (a scorch's dark core, a hole), a solid blob as itself.
+    Exact to the pixel, so a size read from it is not rounded to the cell grid."""
+    var x0 = max(box.x - pad, 0)
+    var x1 = min(box.x + box.w + pad, width)
+    var y0 = max(box.y - pad, 0)
+    var y1 = min(box.y + box.h + pad, height)
+    var area = 0
+    var sx = 0.0
+    var sy = 0.0
+    for y in range(y0, y1):
+        var row = pixels.unsafe_offset(y * width)
+        var a = -1
+        var b = -1
+        for x in range(x0, x1):
+            if in_range(row.unsafe_offset(x)[], r):
+                if a < 0:
+                    a = x
+                b = x
+        if a >= 0:
+            var n = b - a + 1
+            area += n
+            sx += Float64(n) * (Float64(a + b + 1) / 2)  # pixel x spans [x, x + 1): the run's centre
+            sy += Float64(n) * (Float64(y) + 0.5)
+    if area == 0:
+        return Fill(0, Float64(box.x) + Float64(box.w) / 2, Float64(box.y) + Float64(box.h) / 2)
+    return Fill(area, sx / Float64(area), sy / Float64(area))
+
+
+struct MeasuredRegionsAnalyzer(Analyzer):
+    """Regions of one colour class, wholly in view (none of their colour on the picture's border beside them) and within
+    the size limits, each measured at full resolution with `filled`: the row's value is the filled area in pixels and
+    its centre (cx, cy) is the filled area's, to the sub-pixel. For small marks whose size matters (a defect's extent)
+    and things whose position must be exact (to georeference them). `min_count`: a cell joins a region with at least
+    that many pixels of the class (thin rings and strings need fewer than half a cell)."""
+
+    var kind: String
+    var colour: ColourRange
+    var cls: Int
+    var min_w: Int
+    var max_w: Int
+    var min_h: Int
+    var max_h: Int
+    var min_count: Int
+    var min_area: Int
+
+    def __init__(out self, kind: String, colour: ColourRange, cls: Int, min_w: Int = 4, max_w: Int = 100000, min_h: Int = 4,
+                 max_h: Int = 100000, min_count: Int = 0, min_area: Int = 0):
+        self.kind = kind
+        self.colour = colour
+        self.cls = cls
+        self.min_w = min_w
+        self.max_w = max_w
+        self.min_h = min_h
+        self.max_h = max_h
+        self.min_count = min_count
+        self.min_area = min_area
+
+    def step(mut self, frame: Int, pixels: UnsafePointer[UInt32, MutAnyOrigin], width: Int, height: Int, cells: Cells, mut table: VideoTable) raises:
+        for r in regions(cells, self.cls, self.min_count, self.min_area):
+            if r.w < self.min_w or r.w > self.max_w or r.h < self.min_h or r.h > self.max_h:
+                continue
+            if r.x <= 0 or r.y <= 0 or r.x + r.w >= width or r.y + r.h >= height:
+                continue  # its cells reach the border: part of it may be outside the picture
+            if touches_edge(pixels, width, height, r, self.colour):
+                continue
+            var f = filled(pixels, width, height, r, self.colour)
+            table.add(frame, self.kind, r.x, r.y, r.w, r.h, cx=f.cx, cy=f.cy, value=Float64(f.area))
 
     def finish(mut self, mut table: VideoTable) raises:
         pass

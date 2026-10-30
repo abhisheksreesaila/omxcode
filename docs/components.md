@@ -147,6 +147,8 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)` | `mojoui/videotable.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)` | `mojoui/videoexport.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)` | `mojoui/vision_presets.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)` | `mojoui/geo.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)` | `mojoui/inspection.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 
 ## JavaScript widgets (WebComponent)
 
@@ -162,12 +164,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 116 | 9 | 0 |
-| Web | 119 | 6 | 0 |
-| Android | 19 | 26 | 80 |
-| Mac (AppKit) | 0 | 113 | 12 |
-| iPhone (UIKit) | 0 | 91 | 34 |
-| Agent (MCP) | 32 | 42 | 51 |
+| Linux (GTK) | 116 | 11 | 0 |
+| Web | 119 | 8 | 0 |
+| Android | 19 | 28 | 80 |
+| Mac (AppKit) | 0 | 115 | 12 |
+| iPhone (UIKit) | 0 | 93 | 34 |
+| Agent (MCP) | 32 | 44 | 51 |
 
 ## Inside one app, not components yet (the debt)
 

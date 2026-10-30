@@ -142,6 +142,8 @@ COMPOSITES = [
     ("VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)", "mojoui/videotable.mojo", [], "scan("),
     ("VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)", "mojoui/videoexport.mojo", [], "cut("),
     ("Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)", "mojoui/vision_presets.mojo", [], "warehouse_analyzer("),
+    ("Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)", "mojoui/geo.mojo", [], "georeference("),
+    ("Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)", "mojoui/inspection.mojo", [], "compare("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.

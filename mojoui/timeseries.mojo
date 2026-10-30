@@ -5,6 +5,7 @@
 #   ts.add("alt_m", altitudes)                  # a column per name, one value per time
 #   var row = ts.row_at(12.46)                  # the row nearest in time (clamped to the first and last)
 #   ts.value("alt_m", row)  ts.column("alt_m")  # one number; a whole column (a chart's points)
+#   ts.at("alt_m", 12.46)                       # linearly interpolated between the rows either side (clamped)
 #
 # It holds no file format: examples/media reads a CSV with mojoui.csvio and fills one.
 
@@ -65,3 +66,32 @@ struct TimeSeries(Copyable, Movable):
         if i < 0 or row < 0 or row >= len(self.times):
             return 0.0
         return self.columns[i][row]
+
+    def bracket(self, t: Float64) -> Tuple[Int, Int, Float64]:
+        """The rows either side of `t` and how far t lies from the first to the second (0–1), clamped to the ends."""
+        var n = len(self.times)
+        if n == 0:
+            return (-1, -1, 0.0)
+        if n == 1 or t <= self.times[0]:
+            return (0, 0, 0.0)
+        if t >= self.times[n - 1]:
+            return (n - 1, n - 1, 0.0)
+        var lo = 0
+        var hi = n - 1
+        while hi - lo > 1:  # times[lo] <= t < times[hi]
+            var mid = (lo + hi) // 2
+            if self.times[mid] <= t:
+                lo = mid
+            else:
+                hi = mid
+        var span = self.times[hi] - self.times[lo]
+        return (lo, hi, (t - self.times[lo]) / span if span > 0 else 0.0)
+
+    def at(self, name: String, t: Float64) -> Float64:
+        """Column `name` at time `t`, linearly interpolated between the rows either side (0 when the column is missing)."""
+        var i = self.index(name)
+        var b = self.bracket(t)
+        if i < 0 or b[0] < 0:
+            return 0.0
+        ref c = self.columns[i]
+        return c[b[0]] + (c[b[1]] - c[b[0]]) * b[2]
