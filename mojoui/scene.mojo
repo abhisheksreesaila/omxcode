@@ -11,7 +11,7 @@
 #       ...
 
 from mojoui.canvas import Surface
-from mojoui.draw import rect, line, circle, hline
+from mojoui.draw import rect, line, circle, hline, polygon
 from mojoui.text import Font, REGULAR, LEFT
 
 comptime OP_RECT = 1  # x, y, w, h, radius
@@ -22,6 +22,7 @@ comptime OP_FILL = 5  # the whole canvas, one colour (set, not blended)
 comptime OP_CLIP = 6  # x, y, w, h: what follows (until OP_UNCLIP) is cut to this rect
 comptime OP_UNCLIP = 7
 comptime OP_IMAGE = 8  # x, y, w, h, image (pixels made elsewhere: a lens, a video frame), scaled to the rect
+comptime OP_POLY = 9  # first point, points (the points in Scene.path, x, y interleaved): a filled polygon, non-zero (goal 40)
 comptime STRIDE = 6  # floats per op
 
 
@@ -54,6 +55,12 @@ trait Painter:
         (a host reuses it without comparing its items). Unset (or -1): the host compares the items."""
         ...
 
+    def layer_transform(mut self, dx: Float64, dy: Float64, k: Float64):
+        """The current layer is shown scaled by k and moved by (dx, dy): a point (x, y) it draws lands at
+        (x·k + dx, y·k + dy) (goal 40, D-1202). It isn't part of the layer's picture: a host keeps a layer that came
+        again unchanged and only moves it (a pan or a zoom redraws nothing). A new layer starts at no transform."""
+        ...
+
     def push_clip(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
         """Cuts what follows (until pop_clip) to this rect."""
         ...
@@ -81,6 +88,11 @@ trait Painter:
     def circle(mut self, x: Float64, y: Float64, radius: Float64, color: UInt32):
         ...
 
+    def polygon(mut self, pts: List[Float64], color: UInt32):
+        """A filled polygon (x, y interleaved, closed implicitly), non-zero winding, anti-aliased: an ink stroke's
+        outline (mojoui.ink), a shape."""
+        ...
+
     def text(mut self, font: Font, text: String, x: Float64, baseline: Float64, size: Float64, color: UInt32, weight: Int, align: Int,
              slant: Float64):
         """`text` with its baseline at `baseline`, starting at x (or centred on it, or ending at it: `align`)."""
@@ -104,9 +116,15 @@ struct SurfacePainter(Painter, Movable):
     """Paints into pixels, exactly as before the Scene (the reference and the fallback)."""
 
     var s: Surface
+    var tx: Float64  # the current layer's transform (layer_transform)
+    var ty: Float64
+    var tk: Float64
 
     def __init__(out self, var s: Surface):
         self.s = s^
+        self.tx = 0
+        self.ty = 0
+        self.tk = 1
 
     def width(self) -> Int:
         return self.s.width
@@ -124,10 +142,17 @@ struct SurfacePainter(Painter, Movable):
         self.s.again = True
 
     def begin_layer(mut self, key: String):
-        pass
+        self.tx = 0
+        self.ty = 0
+        self.tk = 1
 
     def layer_version(mut self, version: Int):
         pass
+
+    def layer_transform(mut self, dx: Float64, dy: Float64, k: Float64):
+        self.tx = dx
+        self.ty = dy
+        self.tk = k
 
     def push_clip(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
         pass  # (pixels are measured with the same metrics they're drawn with: nothing spills)
@@ -136,7 +161,7 @@ struct SurfacePainter(Painter, Movable):
         pass
 
     def image(mut self, pixels: List[UInt32], pw: Int, ph: Int, x: Float64, y: Float64, w: Float64, h: Float64):
-        blit(self.s, pixels, pw, ph, x, y, w, h)
+        blit(self.s, pixels, pw, ph, x * self.tk + self.tx, y * self.tk + self.ty, w * self.tk, h * self.tk)
 
     def note(mut self, meaning: String):
         pass
@@ -145,17 +170,23 @@ struct SurfacePainter(Painter, Movable):
         self.s.fill(color)
 
     def rect(mut self, x: Float64, y: Float64, w: Float64, h: Float64, color: UInt32, radius: Float64):
-        rect(self.s, x, y, w, h, color, radius)
+        var k = self.tk
+        rect(self.s, x * k + self.tx, y * k + self.ty, w * k, h * k, color, radius * k)
 
     def line(mut self, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32):
-        line(self.s, x0, y0, x1, y1, width, color)
+        var k = self.tk
+        line(self.s, x0 * k + self.tx, y0 * k + self.ty, x1 * k + self.tx, y1 * k + self.ty, width * k, color)
 
     def circle(mut self, x: Float64, y: Float64, radius: Float64, color: UInt32):
-        circle(self.s, x, y, radius, color)
+        circle(self.s, x * self.tk + self.tx, y * self.tk + self.ty, radius * self.tk, color)
+
+    def polygon(mut self, pts: List[Float64], color: UInt32):
+        polygon(self.s, pts, color, self.tx, self.ty, self.tk)
 
     def text(mut self, font: Font, text: String, x: Float64, baseline: Float64, size: Float64, color: UInt32, weight: Int, align: Int,
              slant: Float64):
-        font.draw(self.s, text, x, baseline, size, color, weight, align, slant)
+        var k = self.tk
+        font.draw(self.s, text, x * k + self.tx, baseline * k + self.ty, size * k, color, weight, align, slant)
 
 
 struct Scene(Painter, Movable, Copyable):
@@ -175,6 +206,10 @@ struct Scene(Painter, Movable, Copyable):
     var layer_starts: List[Int]  # the first op of each layer
     var layer_versions: List[Int]  # each layer's version (-1: compare its items)
     var images: List[List[UInt32]]  # OP_IMAGE's pixels (num 4 = which, num 5 = its width; height = len / width)
+    var path: List[Float32]  # OP_POLY's points, x, y interleaved (num 0 = the first point's index, num 1 = how many)
+    var layer_tx: List[Float64]  # each layer's transform (layer_transform; not part of its picture: same_layer ignores it)
+    var layer_ty: List[Float64]
+    var layer_tk: List[Float64]
     var note_ops: List[Int]  # the ops that carry a meaning, and the meanings
     var notes: List[String]
 
@@ -193,6 +228,10 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_starts = List[Int]()
         self.layer_versions = List[Int]()
         self.images = List[List[UInt32]]()
+        self.path = List[Float32](capacity=4096)
+        self.layer_tx = List[Float64]()
+        self.layer_ty = List[Float64]()
+        self.layer_tk = List[Float64]()
         self.note_ops = List[Int]()
         self.notes = List[String]()
 
@@ -212,6 +251,10 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_starts.clear()
         self.layer_versions.clear()
         self.images.clear()
+        self.path.clear()
+        self.layer_tx.clear()
+        self.layer_ty.clear()
+        self.layer_tk.clear()
         self.note_ops.clear()
         self.notes.clear()
 
@@ -237,10 +280,25 @@ struct Scene(Painter, Movable, Copyable):
         self.layer_keys.append(key)
         self.layer_starts.append(len(self.kinds))
         self.layer_versions.append(-1)
+        self.layer_tx.append(0)
+        self.layer_ty.append(0)
+        self.layer_tk.append(1)
 
     def layer_version(mut self, version: Int):
         if len(self.layer_versions) > 0:
             self.layer_versions[len(self.layer_versions) - 1] = version
+
+    def layer_transform(mut self, dx: Float64, dy: Float64, k: Float64):
+        if len(self.layer_keys) == 0:
+            self.begin_layer("")
+        var i = len(self.layer_keys) - 1
+        self.layer_tx[i] = dx
+        self.layer_ty[i] = dy
+        self.layer_tk[i] = k
+
+    def moved(self, i: Int) -> Bool:
+        """Whether layer i is shown with a transform (not as drawn)."""
+        return self.layer_tx[i] != 0 or self.layer_ty[i] != 0 or self.layer_tk[i] != 1
 
     def push_clip(mut self, x: Float64, y: Float64, w: Float64, h: Float64):
         self._op(OP_CLIP, x, y, w, h, 0, 0, 0, -1)
@@ -305,6 +363,22 @@ struct Scene(Painter, Movable, Copyable):
     def circle(mut self, x: Float64, y: Float64, radius: Float64, color: UInt32):
         self._op(OP_CIRCLE, x, y, radius, 0, 0, 0, color, -1)
 
+    def polygon(mut self, pts: List[Float64], color: UInt32):
+        var n = len(pts) // 2
+        if n < 3:
+            return
+        var first = len(self.path) // 2
+        for v in pts:
+            self.path.append(Float32(v))
+        self._op(OP_POLY, Float64(first), Float64(n), 0, 0, 0, 0, color, -1)
+
+    def poly_x(self, op: Int, i: Int) -> Float64:
+        """Point i of polygon op."""
+        return Float64(self.path[(Int(self.nums[op * STRIDE]) + i) * 2])
+
+    def poly_y(self, op: Int, i: Int) -> Float64:
+        return Float64(self.path[(Int(self.nums[op * STRIDE]) + i) * 2 + 1])
+
     def text(mut self, font: Font, text: String, x: Float64, baseline: Float64, size: Float64, color: UInt32, weight: Int, align: Int,
              slant: Float64):
         if text == "":
@@ -334,6 +408,16 @@ struct Scene(Painter, Movable, Copyable):
             var q = b[0] + n
             if self.kinds[p] != other.kinds[q] or self.colors[p] != other.colors[q]:
                 return False
+            if Int(self.kinds[p]) == OP_POLY:  # (its points, not where they sit in the path list)
+                var m = Int(self.num(p, 1))
+                if Int(other.num(q, 1)) != m:
+                    return False
+                var a0 = Int(self.num(p, 0)) * 2
+                var b0 = Int(other.num(q, 0)) * 2
+                for z in range(2 * m):
+                    if self.path[a0 + z] != other.path[b0 + z]:
+                        return False
+                continue
             for x in range(STRIDE):
                 if self.nums[p * STRIDE + x] != other.nums[q * STRIDE + x]:
                     return False
@@ -344,18 +428,30 @@ struct Scene(Painter, Movable, Copyable):
         return True
 
     def raster(self, mut s: Surface, font: Font):
-        """Plays the list into pixels (the CPU reference: tests, screenshots, hosts without a GPU path)."""
+        """Plays the list into pixels (the CPU reference: tests, screenshots, hosts without a GPU path), each layer
+        through its transform."""
         var clips = List[Tuple[Float64, Float64, Float64, Float64]]()  # (x0, y0, x1, y1): rects are cut to the innermost
+        var layer = -1
+        var end = 0
+        var tx = 0.0
+        var ty = 0.0
+        var tk = 1.0
         for op in range(len(self.kinds)):
+            while op >= end and layer + 1 < self.layers():
+                layer += 1
+                end = self.layer_range(layer)[1]
+                tx = self.layer_tx[layer]
+                ty = self.layer_ty[layer]
+                tk = self.layer_tk[layer]
             var kind = Int(self.kinds[op])
             var c = self.colors[op]
             if kind == OP_FILL:
                 s.fill(c)
             elif kind == OP_CLIP:
-                var x0 = self.num(op, 0)
-                var y0 = self.num(op, 1)
-                var x1 = x0 + self.num(op, 2)
-                var y1 = y0 + self.num(op, 3)
+                var x0 = self.num(op, 0) * tk + tx
+                var y0 = self.num(op, 1) * tk + ty
+                var x1 = x0 + self.num(op, 2) * tk
+                var y1 = y0 + self.num(op, 3) * tk
                 if len(clips) > 0:
                     ref o = clips[len(clips) - 1]
                     x0 = max(x0, o[0])
@@ -367,10 +463,10 @@ struct Scene(Painter, Movable, Copyable):
                 if len(clips) > 0:
                     _ = clips.pop()
             elif kind == OP_RECT:
-                var x = self.num(op, 0)
-                var y = self.num(op, 1)
-                var w = self.num(op, 2)
-                var h = self.num(op, 3)
+                var x = self.num(op, 0) * tk + tx
+                var y = self.num(op, 1) * tk + ty
+                var w = self.num(op, 2) * tk
+                var h = self.num(op, 3) * tk
                 if len(clips) > 0:  # (text isn't cut: pixels are measured with the metrics they're drawn with)
                     ref k = clips[len(clips) - 1]
                     var x1 = min(x + w, k[2])
@@ -380,15 +476,22 @@ struct Scene(Painter, Movable, Copyable):
                     w = x1 - x
                     h = y1 - y
                 if w > 0 and h > 0:
-                    rect(s, x, y, w, h, c, self.num(op, 4))
+                    rect(s, x, y, w, h, c, self.num(op, 4) * tk)
             elif kind == OP_CIRCLE:
-                circle(s, self.num(op, 0), self.num(op, 1), self.num(op, 2), c)
+                circle(s, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, c)
             elif kind == OP_LINE:
-                line(s, self.num(op, 0), self.num(op, 1), self.num(op, 2), self.num(op, 3), self.num(op, 4), c)
+                line(s, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk + tx, self.num(op, 3) * tk + ty, self.num(op, 4) * tk, c)
+            elif kind == OP_POLY:
+                var m = Int(self.num(op, 1))
+                var a0 = Int(self.num(op, 0)) * 2
+                var pts = List[Float64](capacity=2 * m)
+                for z in range(2 * m):
+                    pts.append(Float64(self.path[a0 + z]))
+                polygon(s, pts, c, tx, ty, tk)
             elif kind == OP_IMAGE:
                 var pw = Int(self.num(op, 5))
                 ref px = self.images[Int(self.num(op, 4))]
-                blit(s, px, pw, len(px) // pw, self.num(op, 0), self.num(op, 1), self.num(op, 2), self.num(op, 3))
+                blit(s, px, pw, len(px) // pw, self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, self.num(op, 3) * tk)
             elif kind == OP_TEXT:
-                font.draw(s, self.text_at(op), self.num(op, 0), self.num(op, 1), self.num(op, 2), c, Int(self.num(op, 4)), Int(self.num(op, 5)),
+                font.draw(s, self.text_at(op), self.num(op, 0) * tk + tx, self.num(op, 1) * tk + ty, self.num(op, 2) * tk, c, Int(self.num(op, 4)), Int(self.num(op, 5)),
                           self.num(op, 3))

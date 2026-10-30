@@ -808,3 +808,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Why: the Personal Note audit (personalnotev2/docs/research/omxcode-gap-audit.md) found drawing is the biggest untested family: Scene has no paths, events no pressure, the Mac canvas is CPU pixels.
 - Found in the code: GTK already strokes diagonal lines with GskPath (gtk.mojo ~3155); canvas drags arrive as PRESS, PAN (x, y, dx, dy), RELEASE; test steps `drag`, `key:K=ctrl+z`, `zoom:K=f`, `tap:Label` exist; the web streams canvas frames as JPEG from a SurfacePainter, the Mac shows CPU pixels: so the CPU polygon fill is what the web and Mac draw with.
 - Branch goal-40-sketch from main b79fc66 in ../mojo-ui-g40. Baseline: the checker FAILs M0–M5 (nothing built).
+
+## 2026-10-30 · goal 40 M0–M1 (ink model, polygons, layer transforms)
+- mojoui/ink.mojo: Stroke (points, pressures, outline, seal/draw, hits), ink_width, speed_pressure. First hit test failed: the Catmull-Rom curve bulges ~1.9 px before a bend (expected of the curve, D-1205); the test's straight part now ends at the bend.
+- First layer-transform test failed (72 levels): its reference re-made the stroke at the other scale, so it was sampled differently (steps per length). The reference now moves the same outline; the transform itself was right. Within 0 levels for polygons and rects.
+- Mojo: `List[Float64](0.1, …)` doesn't construct; `var l: List[Float64] = [0.1, …]` does.
