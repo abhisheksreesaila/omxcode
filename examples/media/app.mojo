@@ -4,17 +4,29 @@
 #
 # The footage and telemetry are generated (scripts/media_data.py): $G39_MEDIA names the folder (default build/g39/media),
 # which holds drone_a.mp4 and telemetry_a.csv. Space plays and pauses, ←/→ step a frame (click the picture first).
+#
+# Edit (goal 39 M11) opens the framework's MediaTimeline on the same footage: the filmstrip, the telemetry as line lanes
+# (altitude, speed) and the defects the GPU analysis finds (a background job) as a lane the sentence cuts by.
+# G39_CLIP=warehouse opens the dock camera in the editor instead: pallets, faces and shipment IDs from its analysis.
 
 from std.os import getenv
 
 from mojoui import (
-    App, Event, View, Surface, VStack, HStack, Text, Canvas, Segmented, Card, Grid, Spacer, TITLE, HEADLINE, CAPTION, NO_MSG, START, CENTER,
+    App, Event, View, Surface, VStack, HStack, Text, Canvas, Segmented, Card, Grid, Spacer, Button, TITLE, HEADLINE, CAPTION, NO_MSG, START, CENTER,
 )
 from mojoui.view import PAN, TAP, PRESS, SPACE_M, SPACE_L
 from mojoui.chartview import ChartView
 from mojoui.charts import fixed, fitted_floor
 from mojoui.csvio import read_csv
 from mojoui.player import Player, clock_text
+from mojoui.mediatimeline import MediaTimeline, value_lane, markers_from_table, LANE_MARKERS
+from mojoui.mediatimeline_jobs import TimelineFeed, AnalyseJob
+from mojoui.jobs import start_ui_job
+from mojoui.videotable import VideoTable
+from mojoui.videoexport import flagged_captions, read_csv_map
+from mojoui.vision_presets import drone_analyzer, drone_ranges, DRONE_CELL, warehouse_analyzer, warehouse_ranges, WAREHOUSE_CELL
+from mojoui.view import PROMINENT
+from omxcore import Job, JOB_RUNNING
 from mojoui.sheet import Sheet
 from mojoui.text import Font
 from mojoui.theme import Theme, Palette
@@ -23,6 +35,10 @@ from themes.liquid import liquid, liquid_palette
 
 comptime METRIC = 1
 comptime CHART_GESTURE = 2
+comptime EDIT = 3  # opens the editor
+comptime JOBS = 4  # a background job ended (App.jobs_message)
+comptime EDITOR_MSG = 300  # the editor owns messages 300 … 363 and canvases 300 … 302
+comptime EDITOR_CANVAS = 300
 comptime CHART = 1
 comptime PLAYER_MSG = 100  # the Player owns messages 100 … 104 and canvases 100, 101
 comptime PLAYER_CANVAS = 100
@@ -59,27 +75,42 @@ struct Main(App):
     var problem: String
     var metric: Int
     var width: Int  # the window's width in points
+    var height: Int
     var theme_: Theme
     var pal: Palette
     var font: Font
     var file: String
+    var folder: String
+    var warehouse: Bool  # G39_CLIP=warehouse: the dock camera, straight into the editor
+    var editor: Optional[MediaTimeline]
+    var feed: TimelineFeed
+    var analysis: Optional[Job[VideoTable]]
 
     def __init__(out self):
         var folder = getenv("G39_MEDIA", "build/g39/media")
-        self.file = "drone_a.mp4"
+        self.folder = folder
+        self.warehouse = getenv("G39_CLIP") == "warehouse"
+        self.file = "warehouse.mp4" if self.warehouse else "drone_a.mp4"
+        self.editor = None
+        self.feed = TimelineFeed()
+        self.analysis = None
         self.series = TimeSeries(List[Float64]())
         self.problem = ""
         self.player = None
         self.metric = 0
         self.width = 1280
+        self.height = 800
         self.pal = liquid_palette()
         self.theme_ = liquid(self.pal)
         self.font = Font()
         try:
             self.player = Player(folder + "/" + self.file, PLAYER_MSG, PLAYER_CANVAS)
-            self.series = telemetry(folder + "/telemetry_a.csv")
+            if not self.warehouse:
+                self.series = telemetry(folder + "/telemetry_a.csv")
         except e:
             self.problem = String(e)
+        if self.warehouse and self.player:
+            self.open_editor()
 
     def title(self) -> String:
         return "Media"
@@ -92,8 +123,16 @@ struct Main(App):
 
     def resize(mut self, width: Int, height: Int):
         self.width = width
+        self.height = height
+        if self.editor:
+            self.editor.value().resize(width - 40, height - 32)  # (less the editor's margins)
+
+    def jobs_message(self) -> Int:
+        return JOBS
 
     def describe(self, canvas: Int, first: Int, count: Int) -> String:
+        if self.editor and self.editor.value().draws(canvas):
+            return self.editor.value().describe()
         if canvas == PLAYER_CANVAS + 1 and self.player:
             return self.player.value().describe()
         return ""
@@ -118,7 +157,70 @@ struct Main(App):
 
     # ---------- events ----------
 
+    def open_editor(mut self):
+        """The editor on the same footage, where the player was (a recording not yet watched opens mid-way, so a split
+        can start straight away); its lanes: the telemetry, then what the analysis finds."""
+        try:
+            var ed = MediaTimeline(self.folder + "/" + self.file, EDITOR_MSG, EDITOR_CANVAS)
+            var t = self.t()
+            ed.seek(t if t > 0 else ed.project.duration() / 2)
+            if self.warehouse:
+                ed.facts = "Dock 3 · " + ed.facts + " · analysing…"
+                self.analysis = start_ui_job(AnalyseJob(ed.path(), warehouse_analyzer(), warehouse_ranges(), WAREHOUSE_CELL))
+            else:
+                ed.facts = "Inspection flight · " + ed.facts + " · analysing…"
+                ed.add_lane(value_lane("Altitude", self.series, "alt_m", "m"))
+                ed.add_lane(value_lane("Speed", self.series, "speed_ms", "m/s"))
+                self.analysis = start_ui_job(AnalyseJob(ed.path(), drone_analyzer(), drone_ranges(), DRONE_CELL))
+            ed.resize(self.width - 40, self.height - 32)
+            self.editor = ed^
+            if self.player:
+                self.player.value().state.pause()
+            self.feed.poll(self.editor.value())
+        except e:
+            self.problem = String(e)
+
+    def analysed(mut self):
+        """The analysis job ended: its rows become the editor's lanes and the sentence's choices."""
+        if not self.analysis or self.analysis.value().poll() == JOB_RUNNING or not self.editor:
+            return
+        var job = self.analysis.take()
+        try:
+            var table = job.result()
+            ref ed = self.editor.value()
+            var base = ed.facts.replace(" · analysing…", "")
+            if self.warehouse:
+                var names = read_csv_map(self.folder + "/shipments.csv", "pallet_code", "shipment")
+                var captions = flagged_captions(table, "pallet", names)
+                ed.use_rows(table^, blur_kind="face", blur_noun="faces", object_kind="pallet", object_label="Pallets", flag_word="damaged")
+                ed.use_captions(captions^, "shipment ID")
+                var lane = ed.lanes[0].copy()
+                ed.facts = base + " · analysed: " + String(lane.markers()) + " pallets, " + String(lane.flagged()) + " damaged"
+            else:
+                var defects = markers_from_table(table, "defect", "Defects", gap=15)
+                for i in range(len(defects.flags)):
+                    defects.flags[i] = True  # (a scorch mark is what the inspection is for: the warning tone)
+                var n = defects.markers()
+                ed.add_lane(defects^)
+                ed.facts = base + " · analysed: " + String(n) + " defect sightings"
+            ed.version += 1
+        except e:
+            self.editor.value().status = "Analysis failed: " + String(e)
+
     def update(mut self, event: Event):
+        if self.editor:
+            if event.message == JOBS:
+                self.analysed()
+                self.feed.poll(self.editor.value())
+                return
+            if self.editor.value().update(event):
+                self.feed.poll(self.editor.value())
+                if self.editor.value().closed and not self.warehouse:
+                    self.editor = None
+                return
+        if event.message == EDIT and self.player:
+            self.open_editor()
+            return
         if self.player and self.player.value().update(event):
             return
         if event.message == METRIC:
@@ -131,6 +233,9 @@ struct Main(App):
     # ---------- drawing ----------
 
     def draw(mut self, canvas: Int, mut s: Surface):
+        if self.editor and self.editor.value().draws(canvas):
+            self.editor.value().draw(canvas, s, self.pal, self.font)
+            return
         if canvas == CHART:
             var cv = self.chart()
             cv.draw(s, self.font, self.pal)
@@ -161,7 +266,11 @@ struct Main(App):
     def view(self) -> View:
         if not self.player:
             return VStack(Text("Media", style=TITLE), Text(self.problem, style=CAPTION), spacing=SPACE_M).padding(24)
-        var header = VStack(Text("Inspection flight", style=TITLE), Text(self.file + " · telemetry at 10 Hz, in step with the picture", style=CAPTION), spacing=2).align(START).fill()
+        if self.editor:
+            return self.editor.value().view(self.pal).padding(16, 20)
+        var title = VStack(Text("Inspection flight", style=TITLE), Text(self.file + " · telemetry at 10 Hz, in step with the picture", style=CAPTION), spacing=2).align(START)
+        var header = HStack(title^, Spacer(), Button("Edit", EDIT, PROMINENT, icon="video").tag("edit").tooltip("Open the editor: a filmstrip timeline with the telemetry and the defects found"),
+                            spacing=12).align(CENTER).fill()
         if self.width < NARROW:
             var picture = self.player.value().view(self.width - 32)
             return VStack(header^, picture^, self.telemetry_card().height(210), self.readout(), spacing=SPACE_M).padding(16).grow().fill()

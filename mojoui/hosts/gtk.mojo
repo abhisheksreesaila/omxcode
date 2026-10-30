@@ -5,6 +5,7 @@
 # real widgets through their normal APIs (so their real signals fire), then
 # prints each widget's state as GTK reports it and quits. The window isn't
 # shown unless MOJOUI_SHOT=<file.png> asks GTK to render it to a PNG.
+# (tap:X finds the button titled X, else the one tagged X: the name an agent calls it by.)
 
 from mojoui.look import look_gtk_css
 from std.ffi import external_call, c_int, c_char, c_uint
@@ -4511,6 +4512,10 @@ def run_step[A: App](host_addr: Int, step: String):
     if verb == "tap":
         var t = split_at(rest, "@")
         var i = find(host[], BUTTON, t[0], to_int(t[1]))
+        if i < 0:  # (no button with that title: the one tagged so, as an agent names it)
+            for k in range(len(host[].rt.shown.nodes)):
+                if i < 0 and host[].rt.shown.nodes[k].kind == BUTTON and host[].rt.shown.nodes[k].name == t[0]:
+                    i = k
         if i < 0:
             print("TEST: no button", rest)
             return
