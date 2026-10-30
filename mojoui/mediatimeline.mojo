@@ -8,7 +8,9 @@
 # playhead with its time bubble, and data lanes under the strip (objects as pills, flagged ones in the warning tone, the
 # rest muted; faces as dots; a TimeSeries column as a line: a drone's altitude); a footer (the edit's length and clips).
 #
-#   var ed = MediaTimeline(path, msg_base=300, canvas_base=300)  # raises when the file isn't a video; owns messages 300 … 363, canvases 300 … 302
+#   var ed = MediaTimeline(path, msg_base=300, canvas_base=300)  # probes first (waits: tests, start-up); raises when the file isn't a video
+#   var ed = MediaTimeline(info, msg_base=300, canvas_base=300)  # a video already probed (a card's player.info): nothing waits
+#                                                                # owns messages 300 … 363, canvases 300 … 302
 #   ed.use_rows(table, blur_kind="face", object_kind="pallet", object_label="Pallets", flag_word="damaged")   # analysis rows → lanes, sentence, preview
 #   ed.use_captions(flagged_captions(table, "pallet", names), "shipment ID")                                  # captions to burn in
 #   ed.add_lane(value_lane("Altitude", series, "alt_m", "m"))                                                # any lane
@@ -44,7 +46,7 @@ from mojoui.sentence import Sentence, Word
 from mojoui.text import Font, MEDIUM, REGULAR, LEFT, CENTRE, RIGHT
 from mojoui.theme import Palette
 from mojoui.timeseries import TimeSeries
-from mojoui.video import VideoSource
+from mojoui.video import VideoSource, VideoInfo
 from mojoui.videotable import VideoTable, NO_CODE
 from mojoui.videoexport import cut, NoEdits, RedactPlan, Caption
 from mojoui.view import (View, Button, Canvas, Text, HStack, VStack, Card, Spacer, Overlay, CAPTION, HEADLINE, BODY, ICON_ONLY,
@@ -707,6 +709,17 @@ struct Thumbnails(Movable):
 # ---------- the reel: what an export (and the preview) does to each frame ----------
 
 
+def render_preview(mut frame: Frame, mut plan: Optional[RedactPlan], mut ops: ImageOps, source_frame: Int) raises:
+    """The reel's edits for `source_frame` applied to `frame` (its pixels): what the viewer's preview shows. Runs in a
+    job (mediatimeline_jobs.PreviewJob) or a test, never in a draw: ImageOps holds a GPU context."""
+    if not plan:
+        return
+    var edits = Edits()
+    plan.value().plan(source_frame, 0, ops, edits)
+    if len(edits.list) > 0:
+        ops.apply(frame, edits)
+
+
 def copy_table(t: VideoTable) -> VideoTable:
     """A VideoTable's rows, copied (a background export owns its own)."""
     var out = VideoTable()
@@ -906,22 +919,29 @@ struct MediaTimeline(Movable):
     var ops: Optional[ImageOps]  # the preview's GPU (made on first use)
     var plan: Optional[RedactPlan]  # the preview's plan, rebuilt when the chips change
     var plan_key: Int
+    var expecting: Bool  # rows are on their way (expect_rows): the chips show and can be set before they land
+    var preview_busy: Bool  # a preview is being made off the UI thread (mediatimeline_jobs.TimelineFeed): ops and plan are with it
 
     def __init__(out self, path: String, msg_base: Int = 300, canvas_base: Int = 300) raises:
-        self.player = Player(path, msg_base + M_PLAYER, canvas_base + C_PICTURE)
-        var fps = self.player.src.fps
-        self.project = Project(fps, self.player.src.frames)
+        """Probes `path` here (ffprobe: it waits), then as MediaTimeline(info): for tests and an app's start-up; an app's
+        update() opens one from a video it already knows (a card's player.info), which waits for nothing."""
+        self = MediaTimeline(VideoSource(path).info(), msg_base, canvas_base)
+
+    def __init__(out self, info: VideoInfo, msg_base: Int = 300, canvas_base: Int = 300):
+        self.player = Player(info, msg_base + M_PLAYER, canvas_base + C_PICTURE)
+        var fps = self.player.info.fps
+        self.project = Project(fps, self.player.info.frames)
         self.seq = PlayerState(fps, self.project.length(), self.project.duration())
         self.scale = TimelineScale()
-        self.thumbs = Thumbnails(self.player.src.duration, 128)
+        self.thumbs = Thumbnails(self.player.info.duration, 128)
         self.lanes = List[Lane]()
         self.style = TimelineStyle(Palette.plain())
         self.base = msg_base
         self.canvas = canvas_base
-        var slash = path.rfind("/")
-        self.title = String(path[byte=slash + 1:]) if slash >= 0 else path
-        self.facts = (String(self.player.src.width) + "×" + String(self.player.src.height) + " · " + fixed(fps, 0) + " fps · "
-                      + clock_tenths(self.player.src.duration))
+        var slash = info.path.rfind("/")
+        self.title = String(info.path[byte=slash + 1:]) if slash >= 0 else info.path
+        self.facts = (String(self.player.info.width) + "×" + String(self.player.info.height) + " · " + fixed(fps, 0) + " fps · "
+                      + clock_tenths(self.player.info.duration))
         self.width = 1000.0
         self.room_w = 0
         self.room_h = 0
@@ -949,9 +969,11 @@ struct MediaTimeline(Movable):
         self.ops = None
         self.plan = None
         self.plan_key = -1
+        self.expecting = False
+        self.preview_busy = False
 
     def path(self) -> String:
-        return self.player.src.path
+        return self.player.info.path
 
     def add_lane(mut self, var lane: Lane):
         self.lanes.append(lane^)
@@ -969,11 +991,22 @@ struct MediaTimeline(Movable):
         self.blur_kind = blur_kind
         self.blur_noun = blur_noun
         self.mark_kind = object_kind
-        self.blur_on = blur_kind != ""
+        self.blur_on = blur_kind != "" and (self.blur_on or not self.expecting)  # (a chip already set while the rows ran stays as set)
+        self.expecting = False
         self.table = table^
         var opts = self.what_options()
         self.what = 0
         _ = opts
+        self.version += 1
+
+    def expect_rows(mut self, blur_kind: String = "", blur_noun: String = "faces", object_kind: String = ""):
+        """An analysis is running for this video (its rows land with use_rows): the preview chips show now, as use_rows
+        will set them, so a person can choose before the rows arrive."""
+        self.blur_kind = blur_kind
+        self.blur_noun = blur_noun
+        self.mark_kind = object_kind
+        self.blur_on = blur_kind != ""
+        self.expecting = True
         self.version += 1
 
     def use_captions(mut self, var captions: List[Caption], word: String):
@@ -1267,7 +1300,14 @@ struct MediaTimeline(Movable):
         self.version += 1
         _ = before
         _ = was
+        self.sync_player()
         return True
+
+    def sync_player(mut self):
+        """The viewer's player asks for the source frame under the playhead and takes what landed (returns at once)."""
+        self.player.state.frame = self.project.source_frame(self.seq.frame)
+        if self.player.poll():
+            self.version += 1
 
     def _zoom(mut self, factor: Float64):
         self.scale.zoom(factor, self.scale.x_of(self.t()), self.width, self.project.duration(), self.project.fps)
@@ -1425,8 +1465,10 @@ struct MediaTimeline(Movable):
         return clock_tenths(self.t()) + " / " + clock_tenths(self.project.duration())
 
     def needs_frames(self) -> Bool:
-        """Display frames wanted: playing, thumbnails still arriving, or an export running."""
-        return self.seq.playing or not self.thumbs.complete() or self.export_path != ""
+        """Display frames wanted: playing, thumbnails still arriving, an export running, or a frame (or its preview)
+        still on its way from its thread."""
+        return (self.seq.playing or not self.thumbs.complete() or self.export_path != "" or self.player.pending()
+                or (self.preview_wanted() >= 0 and self.preview_key != self.preview_wanted()))
 
     def _menu(self) -> View:
         var b = self.base
@@ -1481,7 +1523,7 @@ struct MediaTimeline(Movable):
         # the viewer, with the reel's preview chips in its corner
         var picture = Canvas(self.canvas + C_PICTURE, self.version, on_gesture=b + M_PICTURE, keys=True).fill().grow().tag("video")
         var viewer: View
-        if self.table:
+        if self.table or self.expecting:
             var chips = List[View]()
             if self.blur_kind != "":
                 chips.append(Button("Blur " + self.blur_noun, b + M_CHIP_BLUR, TOOL_INLINE_ON if self.blur_on else TOOL_INLINE).tag("chip-blur"))
@@ -1494,9 +1536,9 @@ struct MediaTimeline(Movable):
         else:
             viewer = picture^
         if self.room_h > 0:  # the viewer at the video's shape, centred, as tall as the rest leaves room for
-            var chrome = 214 + (60 if self.table or len(self.lanes) > 0 else 0)  # (header, transport, tools, footer, gaps: measured on GTK)
+            var chrome = 214 + (60 if self.table or self.expecting or len(self.lanes) > 0 else 0)  # (header, transport, tools, footer, gaps: measured on GTK)
             var vh = max(self.room_h - chrome - Int(self.timeline_height()), 120)
-            var aspect = Float64(self.player.src.width) / Float64(max(self.player.src.height, 1))
+            var aspect = Float64(self.player.info.width) / Float64(max(self.player.info.height, 1))
             var vw = min(self.room_w, Int(Float64(vh) * aspect))
             vh = Int(Float64(vw) / aspect)
             viewer = HStack(Spacer(), viewer^.width(vw).height(vh), Spacer(), spacing=0).fill()
@@ -1530,7 +1572,7 @@ struct MediaTimeline(Movable):
         var foot = HStack(
             Text("Edit " + fixed(self.project.duration(), 1) + " s", CAPTION).tag("edit-length"),
             Text("Clips " + String(len(self.project.clips)), CAPTION).tag("edit-clips"),
-            Text("Export: H.264 · " + String(self.player.src.width) + "×" + String(self.player.src.height)
+            Text("Export: H.264 · " + String(self.player.info.width) + "×" + String(self.player.info.height)
                  + (" · " + self.blur_noun + " blurred on the GPU" if self.blur_kind != "" and self.blur_on else ""), CAPTION),
             Spacer(),
             Text(self.status, CAPTION).tag("timeline-status"),
@@ -1574,43 +1616,53 @@ struct MediaTimeline(Movable):
     def _effects_key(self) -> Int:
         return (1 if self.blur_on else 0) + (2 if self.caption_on else 0) + (4 if self.boxes_on else 0)
 
-    def _draw_picture(mut self, mut s: Surface, pal: Palette):
-        """The frame on show; with the reel's edits (blur, caption, boxes) applied on the GPU when a chip asks for them."""
-        var src_f = self.project.source_frame(self.seq.frame)
+    def preview_wanted(self) -> Int:
+        """The preview the viewer should show (source frame × 8 + the chips), or -1 when it shows the plain frame (no
+        rows yet, or every chip off)."""
         var fx = self._effects_key()
         if not self.table or fx == 0:
-            self.player.state.frame = src_f
-            self.player.draw(self.canvas + C_PICTURE, s, pal.page, pal)
+            return -1
+        return self.project.source_frame(self.seq.frame) * 8 + fx
+
+    def preview_spec(self) -> ReelSpec:
+        """What the preview's plan is built from (the rows copied: the job that builds it owns them)."""
+        var spec = ReelSpec(List[Tuple[Float64, Float64]]())
+        if self.table:
+            spec.table = copy_table(self.table.value())
+        spec.blur_kind = self.blur_kind if self.blur_on else ""
+        spec.mark_kind = self.mark_kind if self.boxes_on else ""
+        if self.caption_on:
+            spec.captions = self.captions.copy()
+        return spec^
+
+    def preview_now(mut self) raises:
+        """Makes the wanted preview here, waiting for its frame (tests; the app's is made by a job, TimelineFeed)."""
+        var key = self.preview_wanted()
+        if key < 0:
             return
-        var key = src_f * 8 + fx
-        if key != self.preview_key:
-            self.player._show(src_f)
-            if self.player.have != src_f:
-                s.fill(pal.page)
-                return
-            try:
-                if not self.ops:
-                    self.ops = ImageOps()
-                if not self.plan or self.plan_key != fx:
-                    var spec = ReelSpec(List[Tuple[Float64, Float64]]())
-                    spec.table = copy_table(self.table.value())
-                    spec.blur_kind = self.blur_kind if self.blur_on else ""
-                    spec.mark_kind = self.mark_kind if self.boxes_on else ""
-                    if self.caption_on:
-                        spec.captions = self.captions.copy()
-                    self.plan = spec.plan()
-                    self.plan_key = fx
-                self.preview = Frame(self.player.src.width, self.player.src.height, self.player.buf.copy())
-                if self.plan:
-                    var edits = Edits()
-                    self.plan.value().plan(src_f, 0, self.ops.value(), edits)
-                    if len(edits.list) > 0:
-                        self.ops.value().apply(self.preview, edits)
-                self.preview_key = key
-            except:
-                self.preview = Frame(self.player.src.width, self.player.src.height, self.player.buf.copy())
-                self.preview_key = key
-        draw_fitted(s, self.preview.pixels, self.preview.width, self.preview.height, pal.page)
+        self.sync_player()
+        _ = self.player.settle()
+        var frame = Frame(self.player.info.width, self.player.info.height, self.player.buf.copy())
+        if not self.ops:
+            self.ops = ImageOps()
+        if not self.plan or self.plan_key != self._effects_key():
+            self.plan = self.preview_spec().plan()
+            self.plan_key = self._effects_key()
+        render_preview(frame, self.plan, self.ops.value(), key // 8)
+        self.preview = frame^
+        self.preview_key = key
+        self.version += 1
+
+    def _draw_picture(mut self, mut s: Surface, pal: Palette):
+        """The frame on show, or its preview with the reel's edits when a chip asks for them. Never waits: the frame comes
+        from the player's thread, the preview from a job (mediatimeline_jobs.TimelineFeed); until it lands the last
+        preview (or the plain frame) stays."""
+        var want = self.preview_wanted()
+        if want >= 0 and self.preview_key >= 0 and self.preview.width > 0:  # (the newest preview, maybe a frame behind)
+            draw_fitted(s, self.preview.pixels, self.preview.width, self.preview.height, pal.page)
+            return
+        self.player.state.frame = self.project.source_frame(self.seq.frame)
+        self.player.draw(self.canvas + C_PICTURE, s, pal.page, pal)
 
     def draw_timeline(mut self, mut s: Surface, font: Font):
         var was = self.width
@@ -1648,7 +1700,7 @@ struct MediaTimeline(Movable):
         ref st = self.style
         var k = s.scale
         var top = self.strip_top()
-        var aspect = Float64(self.player.src.width) / Float64(max(self.player.src.height, 1))
+        var aspect = Float64(self.player.info.width) / Float64(max(self.player.info.height, 1))
         var tile_w = st.strip_h * aspect
         for tile in tiles(self.project, self.scale, self.width, tile_w):
             var cx = self._clip_x(tile.clip)

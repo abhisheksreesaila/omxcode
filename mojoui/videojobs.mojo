@@ -243,6 +243,12 @@ def use_analysis(mut ed: MediaTimeline, found: VideoTable, which: Int):
         ed.add_lane(defects^)
 
 
+def expect_analysis(mut ed: MediaTimeline, which: Int):
+    """Analyzer `which` is running for the editor's video: its chips show now, as use_analysis will set them."""
+    if which == 0:
+        ed.expect_rows(blur_kind="face", blur_noun="faces", object_kind="pallet")
+
+
 # ---------- reels ----------
 
 

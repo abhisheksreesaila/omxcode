@@ -2,7 +2,9 @@
 # are built on it. The picture is a canvas (aspect-fit, rounded); under it one play/pause button, a thin scrubber and the
 # time, "0:12 / 0:29". Click the picture or press Space to play and pause; ←/→ step a frame; click or drag the scrubber to seek.
 #
-#   var player = Player(path, msg_base=100, canvas_base=100)     # raises when the file isn't a video; owns messages 100…104, canvases 100, 101
+#   var player = Player(path, msg_base=100, canvas_base=100)     # returns at once (raises only when the file is missing); owns messages 100…104, canvases 100, 101
+#   Player(info, …)                                               # a video already probed (another player's .info): ready at once
+#   player.ready(), player.problem()                              # the probe landed / why it can't play ("not a video")
 #   update():  if player.update(event): …                         # True when the event was the player's; player.state.t() is the time then
 #   view():    player.view(width)                                 # the picture and its controls on a card; width (points): the picture is exactly the video's shape
 #   draw():    if player.draws(canvas): player.draw(canvas, surface, backdrop, palette)    # backdrop: the colour behind the picture (the theme's page)
@@ -14,13 +16,20 @@
 # tools: "play" and "pause" (one button, whichever applies, with the other as its .alternate(): both are tools), "seek" (set to a time in seconds: the scrubber is .settable(),
 # so an agent's {"value": 12.5} arrives as a SET_TO gesture; or a tap at x points) and "video"
 # (a tap plays or pauses; keys step). Tracing (MOJOUI_TRACE / MOJOUI_TEST) prints `PLAYER: t=12.480 frame=374` on each change.
+#
+# Nothing here waits (goal 41 M2): the file is probed and decoded on its own thread (mojoui.framefeed). A seek or a tick
+# only says which frame is wanted; the newest wins. The picture shows the newest frame decoded and asks for display
+# frames until the one wanted lands (or the app's jobs_message, woken by the feed, calls poll()). settle() waits for it:
+# for tests and an agent's render, never in update() or draw().
 
 from mojoui.app import Event
 from mojoui.canvas import Surface
 from mojoui.clock import trace_on
 from mojoui.draw import rect, circle
 from mojoui.theme import Palette
-from mojoui.video import VideoSource
+from mojoui.video import VideoInfo
+from mojoui.framefeed import FrameFeed
+from std.time import sleep
 from mojoui.picture import draw_fitted, fitted_box
 from mojoui.draw import with_alpha
 from mojoui.view import View, Button, Canvas, Text, HStack, VStack, Card, CAPTION, ICON_ONLY, NO_MSG, CENTER, PAN, TAP, PRESS, KEY, SET_TO
@@ -35,7 +44,6 @@ comptime FRAME = 4  # display frames, while playing
 comptime MESSAGES = 5
 
 comptime SCRUB_PAD = 10.0  # points of room at each end of the scrubber's track
-comptime FAR_AHEAD = 12  # a frame this far ahead is reached by reading on; further, by seeking
 comptime LONGEST_GAP = 250_000  # microseconds: a stalled display catches the clock up by at most this much per frame
 
 
@@ -141,27 +149,92 @@ def outline(mut s: Surface, x: Float64, y: Float64, w: Float64, h: Float64, widt
 
 struct Player(Movable):
     var state: PlayerState
-    var src: VideoSource
-    var buf: List[UInt32]  # the frame `have`, decoded
+    var info: VideoInfo  # the video's size, rate and length (zeros until the probe lands: ready())
+    var feed: FrameFeed  # the decoder, on its own thread
+    var buf: List[UInt32]  # the frame `have`, decoded (taken from the feed: the newest that landed)
     var have: Int  # which frame buf holds (-1: none yet)
+    var version: Int  # the picture's version: moves when a frame or the probe lands, or the marks change
     var base: Int  # message numbers base … base + MESSAGES - 1
     var canvas: Int  # the picture's canvas id; the scrubber's is canvas + 1
     var scrub_w: Float64  # the scrubber's width in points, from its last draw
-    var stuck: Bool  # the last read failed (the picture stays on the frame before)
     var marks: List[List[Mark]]  # per frame: the boxes drawn over it (set_marks), empty: none
-    var marked: Int  # how many times the marks were set (part of the picture's version)
+    var marked: Int  # how many times the marks were set
 
     def __init__(out self, path: String, msg_base: Int = 100, canvas_base: Int = 100) raises:
-        self.src = VideoSource(path)
-        self.state = PlayerState(self.src.fps, self.src.frames, self.src.duration)
+        """Opens `path` without waiting: the probe runs on the feed's thread. Raises only when the file is missing."""
+        self.feed = FrameFeed(path)
+        self.info = VideoInfo.unknown(path)
+        self.state = PlayerState(30.0, 1, 0.0)
         self.buf = List[UInt32]()
         self.have = -1
+        self.version = 0
         self.base = msg_base
         self.canvas = canvas_base
         self.scrub_w = 0.0
-        self.stuck = False
         self.marks = List[List[Mark]]()
         self.marked = 0
+
+    def __init__(out self, info: VideoInfo, msg_base: Int = 100, canvas_base: Int = 100):
+        """A video already probed (another player's or a feed's info): ready at once, its first frame on its way."""
+        self.feed = FrameFeed(info)
+        self.info = info
+        self.state = PlayerState(info.fps, info.frames, info.duration)
+        self.buf = List[UInt32]()
+        self.have = -1
+        self.version = 0
+        self.base = msg_base
+        self.canvas = canvas_base
+        self.scrub_w = 0.0
+        self.marks = List[List[Mark]]()
+        self.marked = 0
+        self.feed.want(0)
+
+    def ready(self) -> Bool:
+        """The probe has landed: info, state.frames and state.duration are the video's."""
+        return self.info.known()
+
+    def problem(self) -> String:
+        """Why it can't play ("": opening or fine): the feed's reason, e.g. "not a video"."""
+        return self.feed.problem()
+
+    def path(self) -> String:
+        return self.info.path
+
+    def pending(self) -> Bool:
+        """Still opening, or the frame on show hasn't landed: the picture keeps asking for display frames."""
+        return self.feed.pending()
+
+    def poll(mut self) -> Bool:
+        """Takes what landed on the feed's thread (the probe, the newest frame) and asks for the frame on show. True when
+        the picture changed (its version moved). Cheap: call it on any event (update() does)."""
+        var changed = False
+        if not self.info.known() and self.feed.ready():
+            self.info = self.feed.info()
+            var playing = self.state.playing
+            self.state = PlayerState(self.info.fps, self.info.frames, self.info.duration)
+            self.state.playing = playing
+            changed = True
+        if self.info.known():
+            self.feed.want(self.state.frame)
+        if self.feed.take(self.buf):
+            self.have = self.feed.frame_of_take
+            changed = True
+        if changed:
+            self.version += 1
+        return changed
+
+    def settle(mut self, seconds: Float64 = 10.0) -> Bool:
+        """Waits until the frame on show is in buf (tests, an agent's render, a still for the editor: never update() or
+        draw()). False when it timed out or the file can't be read."""
+        var waited = 0.0
+        _ = self.poll()
+        while waited < seconds and self.problem() == "":
+            if self.info.known() and self.have == self.state.frame and not self.feed.decoding():
+                return True
+            sleep(0.001)
+            waited += 0.001
+            _ = self.poll()
+        return self.info.known() and self.have == self.state.frame
 
     def owns(self, message: Int) -> Bool:
         return self.base <= message < self.base + MESSAGES
@@ -170,17 +243,23 @@ struct Player(Movable):
         """Boxes to draw over the picture, each on its own frame (an empty list: none). Kept by frame, so drawing reads
         only the frame on show."""
         self.marks = List[List[Mark]]()
-        for _ in range(self.state.frames + 1):
+        var last = self.state.frames
+        for m in marks:
+            last = max(last, m.frame)
+        for _ in range(last + 1):
             self.marks.append(List[Mark]())
         for m in marks:
             if 0 <= m.frame < len(self.marks):
                 self.marks[m.frame].append(m)
-        self.marked += 1  # (the picture's version moves: it is drawn again with them)
+        self.marked += 1
+        self.version += 1  # (the picture is drawn again with them)
 
     def seek(mut self, seconds: Float64):
         """Shows the frame at `seconds` (paused or playing on from there): what a row of an analysis seeks to."""
         var before = self.state.frame
         self.state.seek(seconds)
+        if self.info.known():
+            self.feed.want(self.state.frame)  # (returns at once: the frame lands later)
         if self.state.frame != before:
             self._trace()
 
@@ -232,6 +311,7 @@ struct Player(Movable):
                 self._key(event.text)
         if self.state.frame != before or self.state.playing != was_playing:
             self._trace()
+        _ = self.poll()  # (asks for the frame now on show; takes what landed)
         return True
 
     def _key(mut self, key: String):
@@ -246,7 +326,9 @@ struct Player(Movable):
 
     def height_for(self, width: Int) -> Int:
         """How tall the picture is when it is `width` points wide (the video's own proportions)."""
-        return max(width * self.src.height // max(self.src.width, 1), 1)
+        var w = self.info.width if self.info.known() else 16  # (until the probe lands: 16:9)
+        var h = self.info.height if self.info.known() else 9
+        return max(width * h // max(w, 1), 1)
 
     def view(self, width: Int = 0) -> View:
         """The picture and its controls. `width`: the points the player is wide, when the app knows them: the picture is then
@@ -254,8 +336,9 @@ struct Player(Movable):
         var playing = self.state.playing
         var button = (Button("pause", on_tap=self.base + PAUSE, style=ICON_ONLY, icon="pause").alternate("play", self.base + PLAY) if playing
                       else Button("play", on_tap=self.base + PLAY, style=ICON_ONLY, icon="play").alternate("pause", self.base + PAUSE))  # (an agent gets both: D-855)
-        var picture = Canvas(self.canvas, self.state.frame + self.marked * (self.state.frames + 1), on_gesture=self.base + VIDEO, on_frame=self.base + FRAME if playing else NO_MSG, keys=True)
-        picture = picture^.fill().tag("video")
+        var ticks = playing or self.pending()  # (display frames while it plays, and until the frame wanted lands)
+        var picture = Canvas(self.canvas, self.version, on_gesture=self.base + VIDEO, on_frame=self.base + FRAME if ticks else NO_MSG, keys=True)
+        picture = picture^.fill().tag("video").label(self._words())
         if width > 0:
             picture = picture^.height(self.height_for(width))
         else:
@@ -282,22 +365,15 @@ struct Player(Movable):
 
     # ---------- drawing ----------
 
-    def _show(mut self, frame: Int):
-        """Makes buf hold `frame`: reading on when it is just ahead, a seek otherwise."""
-        if self.have == frame:
-            return
-        try:
-            var at = self.src.position()
-            if not (at <= frame <= at + FAR_AHEAD):
-                self.src.seek_frame(frame)
-            while self.src.position() < frame:
-                if not self.src.next_into(self.buf):
-                    break
-            self.stuck = not self.src.next_into(self.buf)
-            if not self.stuck:
-                self.have = frame
-        except:
-            self.stuck = True
+    def _words(self) -> String:
+        """The picture's name for a screen reader: the file and where it is."""
+        var slash = self.info.path.rfind("/")
+        var name = String(self.info.path[byte=slash + 1:]) if slash >= 0 else self.info.path
+        if self.problem() != "":
+            return "Video " + name + ": can't be played"
+        if not self.ready():
+            return "Video " + name + ", opening"
+        return "Video " + name + ", " + self.state.time_text() + (", playing" if self.state.playing else ", paused")
 
     def draw(mut self, canvas: Int, mut s: Surface, backdrop: UInt32, pal: Palette):
         if canvas == self.canvas + 1:
@@ -322,19 +398,23 @@ struct Player(Movable):
         circle(s, done, mid, 7 * k, pal.card)
 
     def _draw_picture(mut self, mut s: Surface, backdrop: UInt32):
-        self._show(self.state.frame)
-        if self.have < 0:
+        # never waits: asks for the frame on show and paints the newest one that landed (its version is moved by poll())
+        if self.info.known():
+            self.feed.want(self.state.frame)
+        if self.feed.take(self.buf):
+            self.have = self.feed.frame_of_take
+        if self.have < 0 or len(self.buf) != self.info.width * self.info.height:
             s.fill(backdrop)
             return
-        draw_fitted(s, self.buf, self.src.width, self.src.height, backdrop)
+        draw_fitted(s, self.buf, self.info.width, self.info.height, backdrop)
 
     def _draw_marks(self, mut s: Surface, pal: Palette):
         """The frame's boxes, light: a thin rounded outline (the accent; flagged ones in the warning tone, a little
         heavier), so the picture stays the subject."""
-        var f = self.state.frame
+        var f = self.have  # (the boxes of the frame painted, which may trail the one wanted)
         if self.have < 0 or self.marks_on(f) == 0:
             return
-        var fit = fitted_box(s, self.src.width, self.src.height)
+        var fit = fitted_box(s, self.info.width, self.info.height)
         var k = s.scale
         for m in self.marks[f]:
             var x = fit[0] + Float64(m.x) * fit[2]

@@ -90,12 +90,12 @@ from mojoui.chartview import ChartView
 from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE
 from mojoui.sample import sample_table
 from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, IDLE as ISLAND_IDLE, RUNNING as ISLAND_RUNNING, UNDO as ISLAND_UNDO, ERROR as ISLAND_ERROR
-from mojoui.sheetjobs import ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
+from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
 from mojoui.draw import rect as draw_rect, with_alpha
 from mojoui.mediacard import MediaCards, CardAction, OBJ_VIDEO, OBJ_IMAGE, VIDEO_TYPES, IMAGE_TYPES, is_media_file, is_video_file
 from mojoui.tablecard import TableCards, sql_name
-from mojoui.videojobs import Analyzed, Reel, analyze_job, reel_job, analyzer_names, analyzer_note, analyzer_rows, marks_of, flag_frames, segments_of, flag_columns, matching_column, lookup, codes_of
+from mojoui.videojobs import expect_analysis, Analyzed, Reel, analyze_job, reel_job, analyzer_names, analyzer_note, analyzer_rows, marks_of, flag_frames, segments_of, flag_columns, matching_column, lookup, codes_of
 from mojoui.videojobs import analyzer_needs_log, use_analysis, INSPECTION
 from mojoui.mediatimeline import MediaTimeline, value_lane
 from mojoui.mediatimeline_jobs import TimelineFeed
@@ -213,6 +213,7 @@ comptime ISLAND_CANVAS = 7  # the island's canvas id (the menu bar's living stat
 comptime ISLAND_TAP = 3100  # the island tapped (its action, or its panel)
 comptime ISLAND_FRAME = 3101  # a display frame while the island moves or work runs: poll the jobs
 comptime PANEL_CLOSE = 3102  # the island's panel closed
+comptime JOBS_WAKE = 3109  # a background job or a media decoder finished (App.jobs_message: the wake pipe, no frame poll)
 comptime BIG_FILE = 256 * 1024 * 1024  # from this many bytes a file opens in a background job (the island shows its progress)
 comptime BIG_ROWS = 10_000_000  # from this many rows a chart's numbers and a column's figures come from background jobs
 comptime SKINS: List[String] = ["Liquid", "Ledger", "Graphite", "Blueprint"]
@@ -320,6 +321,7 @@ struct Main(App):
     var tracks: TrackCards  # logs in step with a video: a chart with its cursor and a map (Board children after the tables)
     var editor: Optional[MediaTimeline]  # a video card's Edit: the editor over the whole window, until Done
     var feed: TimelineFeed
+    var warming: Optional[Job[Int]]  # the GPU started off the UI thread at launch (sheetjobs.warm_gpu): kept until it ends
     var found_which: Int  # which analyzer found self.found
     var compare_open: Bool  # Insert > Compare inspections…: its choices (indices into place_tables())
     var compare_a: Int
@@ -431,6 +433,7 @@ struct Main(App):
         self.tracks = TrackCards(TRACK_MSG, TRACK_CANVAS, MAX_TRACKS)
         self.editor = None
         self.feed = TimelineFeed()
+        self.warming = warm_gpu()  # (the driver's ~0.2 s start-up on a job's thread: the first sheet made on the UI thread doesn't pay it)
         self.found_which = 0
         self.compare_open = False
         self.compare_a = 0
@@ -914,13 +917,24 @@ struct Main(App):
         if k < 0 or k >= len(self.media) or not self.media.cards[k].player:
             return
         var path = self.media.cards[k].path
+        if not self.media.cards[k].player.value().ready():
+            self.message = file_name(path) + " is still opening"
+            self.version += 1
+            return
         try:
-            var ed = MediaTimeline(path, EDITOR_MSG, EDITOR_CANVAS)
+            var ed = MediaTimeline(self.media.cards[k].player.value().info, EDITOR_MSG, EDITOR_CANVAS)  # (the card's probe: nothing waits)
             var t = self.media.cards[k].player.value().state.t()
             self.media.cards[k].player.value().state.pause()
             ed.seek(t if t > 0 else ed.project.duration() / 2)  # (a video not yet watched opens mid-way: a split can start at once)
             if self.found_path == path and self.found.rows() > 0:
                 use_analysis(ed, self.found, self.found_which)
+            elif not self.analyzing or self.analyzing_path == path:  # (its lanes come from an analysis: run it now, the chips meanwhile)
+                var which = INSPECTION if self.tracks.for_video(path) >= 0 else 0
+                if not self.analyzing:
+                    self.start_analysis(k, which)
+                else:
+                    which = self.analyzing_which
+                expect_analysis(ed, which)
             var tk = self.tracks.for_video(path)
             if tk >= 0:
                 ref c = self.tracks.cards[tk]
@@ -1011,6 +1025,9 @@ struct Main(App):
             return
         self.found = found^
         self.found_path = path
+        if self.editor and self.editor.value().path() == path:  # (the editor waiting on these rows: its lanes and chips)
+            use_analysis(self.editor.value(), self.found, self.found_which)
+            self.feed.poll(self.editor.value())
         self.timed(a.milliseconds)
         if self.trace:
             print("JOB: landed analyze " + file_name(path) + " " + String(rows) + " rows " + fixed(a.milliseconds, 1) + " ms")
@@ -2014,6 +2031,12 @@ struct Main(App):
             self.message = "Sort undone"
             self.say(Activity.done("Sort undone", ""))
             self.version += 1
+        elif m == JOBS_WAKE:  # (a job ended or a decoder landed a frame: take it now, not at the next display frame)
+            self.poll_jobs()
+            if self.media.poll():
+                self.version += 1
+            if self.editor:
+                self.feed.poll(self.editor.value())
         elif m == ISLAND_FRAME:
             self.poll_jobs()
             if self.island.tick(self.font, now_ns()):
@@ -2641,6 +2664,9 @@ struct Main(App):
             self.version += 1
 
     # ---------- drawing ----------
+
+    def jobs_message(self) -> Int:
+        return JOBS_WAKE
 
     def describe(self, canvas: Int, first: Int, count: Int) -> String:
         """A chart's numbers, or the grid's shown rows, as tab-separated text for an agent (D-163). The grid: the header, then `count` rows from

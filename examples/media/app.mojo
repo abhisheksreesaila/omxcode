@@ -161,7 +161,9 @@ struct Main(App):
         """The editor on the same footage, where the player was (a recording not yet watched opens mid-way, so a split
         can start straight away); its lanes: the telemetry, then what the analysis finds."""
         try:
-            var ed = MediaTimeline(self.folder + "/" + self.file, EDITOR_MSG, EDITOR_CANVAS)
+            var ready = self.player and self.player.value().ready()
+            var ed = (MediaTimeline(self.player.value().info, EDITOR_MSG, EDITOR_CANVAS) if ready  # (the player's probe: nothing waits)
+                      else MediaTimeline(self.folder + "/" + self.file, EDITOR_MSG, EDITOR_CANVAS))  # (at start-up: probes here)
             var t = self.t()
             ed.seek(t if t > 0 else ed.project.duration() / 2)
             if self.warehouse:
@@ -220,6 +222,9 @@ struct Main(App):
                 return
         if event.message == EDIT and self.player:
             self.open_editor()
+            return
+        if event.message == JOBS and self.player:  # (the player's decoder landed a frame or its probe)
+            _ = self.player.value().poll()
             return
         if self.player and self.player.value().update(event):
             return

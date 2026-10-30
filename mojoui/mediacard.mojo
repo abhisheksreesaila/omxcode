@@ -5,7 +5,9 @@
 # own block of messages and canvases, allocated when it is added and kept while it lives.
 #
 #   var media = MediaCards(msg_base=4000, canvas_base=200, most=8)   # messages 4000 … 4000 + 8·CARD_MESSAGES (9), canvases 200 … 215
-#   var k = media.add(path, x, y, width)                            # raises when the file isn't a video or picture; its height follows its shape
+#   var k = media.add(path, x, y, width)                            # returns at once (raises only when the file is missing): the card
+#                                                                   # opens in place (16:9 until the probe lands, then its own shape)
+#   jobs / frames: if media.poll(): …                               # takes what the cards' decoder threads finished (sizes, frames)
 #   update():   if media.update(event): …                           # True when the event was a card's (a close removes it: media.closed)
 #   view():     media.view(k).at(c.x, c.y).width(c.w).height(c.h)   # for k in range(len(media)): c = media.cards[k]
 #   draw():     if media.draws(canvas): media.draw(canvas, surface, palette)
@@ -16,12 +18,13 @@
 #
 # For an agent a video card's controls are the Player's tools: play / pause, seek (set it to a time in seconds), video.
 
+from std.time import sleep
 from mojoui.app import Event
 from mojoui.canvas import Surface
 from mojoui.charts import fixed
 from mojoui.files import file_name
 from mojoui.picture import Picture
-from mojoui.player import Player, clock_text, MESSAGES as PLAYER_MESSAGES
+from mojoui.player import Player, clock_text, MESSAGES as PLAYER_MESSAGES, FRAME as PLAYER_FRAME
 from mojoui.theme import Palette
 from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card, ProgressBar, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER
 
@@ -108,7 +111,7 @@ struct MediaCard(Movable):
         self.picture = None
         if is_image_file(path):
             self.kind = OBJ_IMAGE
-            self.picture = Picture(path)
+            self.picture = Picture.opening(path)  # (decoded on a thread: the card shows its frame until it lands)
         else:
             self.kind = OBJ_VIDEO
             self.player = Player(path, msg, canvas)
@@ -116,11 +119,39 @@ struct MediaCard(Movable):
         self.h = self.height_for(w)
 
     def media_size(self) -> Tuple[Int, Int]:
-        if self.player:
-            return (self.player.value().src.width, self.player.value().src.height)
-        if self.picture:
+        """The media's pixels; 16 × 9 until its decoder has said (the card's shape meanwhile)."""
+        if self.player and self.player.value().ready():
+            return (self.player.value().info.width, self.player.value().info.height)
+        if self.picture and self.picture.value().ready():
             return (self.picture.value().width, self.picture.value().height)
         return (16, 9)
+
+    def ready(self) -> Bool:
+        """Its decoder has said what the media is (size, length)."""
+        if self.player:
+            return self.player.value().ready()
+        return Bool(self.picture) and self.picture.value().ready()
+
+    def problem(self) -> String:
+        """Why it can't be shown ("": opening or fine)."""
+        if self.player:
+            return self.player.value().problem()
+        if self.picture:
+            return self.picture.value().problem
+        return String("")
+
+    def poll(mut self) -> Bool:
+        """Takes what its decoder finished; True when the card changed (its height follows the media's shape)."""
+        var changed = False
+        if self.player:
+            changed = self.player.value().poll()
+        elif self.picture:
+            changed = self.picture.value().poll()
+        if changed:
+            var h = self.height_for(self.w)
+            if h != self.h:
+                self.h = h
+        return changed
 
     def height_for(self, width: Int) -> Int:
         """The card's height at `width` points: the media at its own proportions, with the card's chrome."""
@@ -133,6 +164,10 @@ struct MediaCard(Movable):
 
     def facts(self) -> String:
         """What it is, in a few words: "0:29 · 1280×720", or "1280×720 PNG"."""
+        if self.problem() != "":
+            return "can't be opened"
+        if not self.ready():
+            return "opening…"
         var size = self.media_size()
         var dims = String(size[0]) + "×" + String(size[1])
         if self.player:
@@ -198,6 +233,44 @@ struct MediaCards(Movable, Sized):
     def owns(self, message: Int) -> Bool:
         return self.msg_base <= message < self.msg_base + self.most * CARD_MESSAGES
 
+    def poll(mut self) -> Bool:
+        """Takes what every card's decoder thread finished (a probe, a frame, a picture): call it on the app's
+        jobs_message (the decoders wake it) or any event. True when a card changed."""
+        var changed = False
+        for k in range(len(self.cards)):
+            if self.cards[k].poll():
+                changed = True
+        return changed
+
+    def settle(mut self, seconds: Float64 = 10.0) -> Bool:
+        """Waits until every card has opened and shows the frame it wants (tests, an agent's render: never update() or
+        draw()). False when it timed out."""
+        var waited = 0.0
+        while waited < seconds:
+            _ = self.poll()
+            var done = True
+            for k in range(len(self.cards)):
+                if self.cards[k].player:
+                    ref pl = self.cards[k].player.value()
+                    if pl.problem() == "" and not (pl.ready() and pl.have == pl.state.frame and not pl.feed.decoding()):
+                        done = False
+                elif self.cards[k].picture and self.cards[k].picture.value().pending():
+                    done = False
+            if done:
+                return True
+            sleep(0.001)
+            waited += 0.001
+        return False
+
+    def pending(self) -> Bool:
+        """A card is still opening or a frame it wants hasn't landed."""
+        for k in range(len(self.cards)):
+            if self.cards[k].player and self.cards[k].player.value().pending():
+                return True
+            if self.cards[k].picture and self.cards[k].picture.value().pending():
+                return True
+        return False
+
     def _card_of_canvas(self, canvas: Int) -> Int:
         for k in range(len(self.cards)):
             var c0 = self.canvas(k)
@@ -224,6 +297,9 @@ struct MediaCards(Movable, Sized):
                         self.acted = event.message - m0 - CARD_ACTION
                 elif self.cards[k].player:
                     _ = self.cards[k].player.value().update(event)
+                    _ = self.cards[k].poll()  # (the probe may have landed: the card takes the video's shape)
+                elif self.cards[k].picture and event.message - m0 == PLAYER_FRAME:  # (a still's display frames while it opens)
+                    _ = self.cards[k].poll()
                 return True
         return True  # (a card closed since: its late frames are dropped)
 
@@ -238,7 +314,8 @@ struct MediaCards(Movable, Sized):
         if self.cards[k].player:
             self.cards[k].player.value().draw(canvas, s, pal.card, pal)
         elif self.cards[k].picture:
-            self.cards[k].picture.value().draw(s, pal.card)
+            _ = self.cards[k].picture.value().poll()
+            self.cards[k].picture.value().draw(s, pal.card)  # (the card's colour until it lands: draw_fitted paints only the backdrop)
 
     def describe(self, canvas: Int) -> String:
         var k = self._card_of_canvas(canvas)
@@ -269,8 +346,12 @@ struct MediaCards(Movable, Sized):
         parts.append(Button("Remove", self.msg(k) + CARD_CLOSE, ICON_ONLY, icon="close").tooltip("Close " + c.title()))
         var head = HStack(parts^, spacing=8).fill().align(CENTER).height(HEAD_H)
         var body: View
-        if c.player:
+        if c.problem() != "":
+            body = VStack(Text("Couldn't open " + c.title(), HEADLINE), Text(c.problem(), CAPTION), spacing=4).grow().fill().tag("media-problem")
+        elif c.player:
             body = c.player.value().view(0)
         else:
-            body = Canvas(self.canvas(k), 1).fill().grow().tag("image")
+            var opening = c.picture.value().pending()
+            body = Canvas(self.canvas(k), 2 if c.ready() else 1, on_frame=self.msg(k) + PLAYER_FRAME if opening else 0).fill().grow().tag("image")
+            body = body^.label("Picture " + c.title() + ("" if c.ready() else ", opening"))
         return Card(head^, body^, spacing=4)
