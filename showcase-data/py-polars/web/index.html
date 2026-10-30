@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orders · FastAPI + Polars</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <h1>Orders</h1>
+  <span id="source" class="muted"></span>
+</header>
+<main>
+  <section class="card controls">
+    <label>From <input id="from" type="date"></label>
+    <label>To <input id="to" type="date"></label>
+    <label class="grow">Min amount <input id="min" type="range" min="1" max="5000" step="1" value="1"><output id="min-out">1</output></label>
+    <label>Region <select id="region"><option value="all">All regions</option></select></label>
+  </section>
+  <section class="kpis">
+    <div class="card kpi"><span class="label">Rows matched</span><span id="k-rows" class="value">–</span></div>
+    <div class="card kpi"><span class="label">Sum of amount</span><span id="k-sum" class="value">–</span></div>
+    <div class="card kpi"><span class="label">Average margin</span><span id="k-margin" class="value">–</span></div>
+    <div class="card kpi small"><span class="label">Server · round trip</span><span id="k-time" class="value">–</span></div>
+  </section>
+  <section class="split">
+    <div class="card chart"><h2>Top 20 products by amount</h2><svg id="chart" role="img" aria-label="Top 20 products by amount"></svg></div>
+    <div class="card table"><h2>First 50 orders, newest first</h2>
+      <div class="scroll"><table><thead><tr><th>id</th><th>day</th><th>region</th><th>product</th><th class="n">amount</th><th class="n">cost</th><th>paid</th></tr></thead><tbody id="rows"></tbody></table></div>
+    </div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "showcase-data-js-duckdb",
+  "private": true,
+  "description": "Goal 38 build A: the dashboard in plain JS over DuckDB-WASM",
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev57.0",
+    "parquet-wasm": "0.9.0"
+  }
+}

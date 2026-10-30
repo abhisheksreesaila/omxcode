@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orders · DuckDB-WASM</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Orders</h1>
+  <label>From <input id="from" type="date" min="2024-01-01" max="2025-12-31" value="2024-01-01"></label>
+  <label>To <input id="to" type="date" min="2024-01-01" max="2025-12-31" value="2025-12-31"></label>
+  <label class="slider">Min amount <input id="min" type="range" min="1" max="5000" step="1" value="1"><output id="minv">1</output></label>
+  <label>Region <select id="region"><option value="all">All regions</option></select></label>
+  <span id="status">Loading…</span>
+</header>
+<section class="kpis">
+  <div class="kpi"><span>Rows matched</span><b id="k-rows">–</b></div>
+  <div class="kpi"><span>Sum of amount</span><b id="k-sum">–</b></div>
+  <div class="kpi"><span>Average margin</span><b id="k-margin">–</b></div>
+  <div class="kpi small"><span>Query</span><b id="k-ms">–</b></div>
+</section>
+<main>
+  <section class="card chart"><h2>Top 20 products by amount</h2><canvas id="chart"></canvas></section>
+  <section class="card table"><h2>First 50 rows, newest first</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>id</th><th>day</th><th>region</th><th>product</th><th class="n">amount</th><th class="n">cost</th><th>paid</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+</main>
+<script type="module" src="/dist/app.js"></script>
+</body>
+</html>
