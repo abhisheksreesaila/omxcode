@@ -457,7 +457,8 @@ struct Scene(Painter, Movable, Copyable):
 
     def op_bounds(self, op: Int) -> List[Float64]:
         """Where op draws, in its layer's units: [x0, y0, x1, y1] (polygons, rects, circles, lines, images); empty for
-        the others (text, fills, clips: no box the Scene knows)."""
+        the others (text, fills, clips: no box the Scene knows). Rect and circle boxes leave out a stroke's width: a host
+        that repaints by box (GTK's mend) pads them by 3 px, enough for ink polygons, not for thick-stroked shapes."""
         var kind = Int(self.kinds[op])
         var out = List[Float64]()
         if kind == OP_POLY:

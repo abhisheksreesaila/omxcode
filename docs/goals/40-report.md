@@ -1,6 +1,6 @@
 # Goal 40 report: Sketch, omxcode draws
 
-**Result:** M0–M5 pass (`pixi run python docs/goals/40-check.py`; the final run's output is below). Review round 1: NEEDS WORK, fixed in a74ebbe and the commits after it (below); awaiting re-review.
+**Result:** M0–M5 pass (`pixi run python docs/goals/40-check.py`; the final run's output is below). Review round 1: NEEDS WORK, fixed in a74ebbe and the commits after it (below). Review round 2: PASS (no must-fix); its small should-fixes done after it (the far-off pixel bound tightened 10 → 2, the gallery's pressure sentence softened, op_bounds documents its stroke-width limit). Erase (14–23 ms p95 on cairo) stays a stated gap.
 
 ## 30-second demo
 ```bash

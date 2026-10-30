@@ -47,7 +47,7 @@ SESSION2 = [
     ("stroke:0=230,105,0.5;230,120,0.5;230,135,0.5", "strokes=2"),
     ("wheel:0=0,2", "pan=30,-60"),
 ]
-MAX_OFF_PIXELS = 10  # canvas pixels more than 40 levels off the CPU render (runs give 0; a stroke missing where an
+MAX_OFF_PIXELS = 2  # canvas pixels more than 40 levels off the CPU render (runs give 0; a stroke missing where an
 # erase was mended is ~40, a missing short stroke hundreds)
 
 
