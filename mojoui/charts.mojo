@@ -112,6 +112,19 @@ def nice_step(x: Float64) -> Float64:
     return 10 * p
 
 
+def fitted_floor(values: List[Float64]) -> Float64:
+    """A round number just under the lowest value, for a y axis that starts there (a series of 58.6 to 61.4: 58)."""
+    if len(values) == 0:
+        return 0.0
+    var lo = values[0]
+    var hi = values[0]
+    for v in values:
+        lo = min(lo, v)
+        hi = max(hi, v)
+    var step = nice_step(max(hi - lo, 1e-9))
+    return floor(lo / step) * step
+
+
 def nice_max(x: Float64) -> Float64:
     """A round number ≥ x for an axis top (1, 2, 2.5, 5 × 10^k)."""
     if x <= 0:
@@ -383,15 +396,7 @@ struct LineChart(Movable):
 
     def fitted(var self) -> Self:
         """The y axis starts at a round number just under the lowest value."""
-        if len(self.values) == 0:
-            return self^
-        var lo = self.values[0]
-        var hi = self.values[0]
-        for v in self.values:
-            lo = min(lo, v)
-            hi = max(hi, v)
-        var step = nice_step(max(hi - lo, 1e-9))
-        self.floor = floor(lo / step) * step
+        self.floor = fitted_floor(self.values)
         return self^
 
     def with_cursor(var self, x: Float64) -> Self:

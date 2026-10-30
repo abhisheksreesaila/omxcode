@@ -4,8 +4,8 @@
 #
 #   var player = Player(path, msg_base=100, canvas_base=100)     # raises when the file isn't a video; owns messages 100…104, canvases 100, 101
 #   update():  if player.update(event): …                         # True when the event was the player's; player.state.t() is the time then
-#   view():    player.view()                                      # the picture and its controls (give it room: .grow().fill())
-#   draw():    if player.draws(canvas): player.draw(canvas, surface, backdrop)    # backdrop: the colour behind it (the theme's page)
+#   view():    player.view(width)                                 # the picture and its controls on a card; width (points): the picture is exactly the video's shape
+#   draw():    if player.draws(canvas): player.draw(canvas, surface, backdrop, palette)    # backdrop: the colour behind the picture (the theme's page)
 #   describe(): player.describe()                                 # for an agent: the time, and where on the scrubber a tap seeks to
 #
 # Time is PlayerState (plain numbers, tested without a video): play(), pause(), seek(t), step(±1) and tick(microseconds), which
@@ -19,7 +19,7 @@ from mojoui.clock import trace_on
 from mojoui.draw import rect, circle
 from mojoui.theme import Palette
 from mojoui.video import VideoSource
-from mojoui.view import View, Button, Canvas, Text, HStack, VStack, CAPTION, ICON_ONLY, NO_MSG, CENTER, PAN, TAP, PRESS, KEY
+from mojoui.view import View, Button, Canvas, Text, HStack, VStack, Card, CAPTION, ICON_ONLY, NO_MSG, CENTER, PAN, TAP, PRESS, KEY
 from mojoui.charts import fixed
 
 # Messages a Player owns, from msg_base
@@ -198,16 +198,30 @@ struct Player(Movable):
 
     # ---------- the screen ----------
 
-    def view(self) -> View:
+    def height_for(self, width: Int) -> Int:
+        """How tall the picture is when it is `width` points wide (the video's own proportions)."""
+        return max(width * self.src.height // max(self.src.width, 1), 1)
+
+    def view(self, width: Int = 0) -> View:
+        """The picture and its controls. `width`: the points the player is wide, when the app knows them: the picture is then
+        exactly the video's shape (no bands above and below); 0: it takes the room it is given and fits the video inside."""
         var playing = self.state.playing
         var button = (Button("pause", on_tap=self.base + PAUSE, style=ICON_ONLY, icon="pause") if playing
                       else Button("play", on_tap=self.base + PLAY, style=ICON_ONLY, icon="play"))
-        var picture = (Canvas(self.canvas, self.state.frame, on_gesture=self.base + VIDEO, on_frame=self.base + FRAME if playing else NO_MSG, keys=True)
-                       .grow().fill().tag("video"))
+        var picture = Canvas(self.canvas, self.state.frame, on_gesture=self.base + VIDEO, on_frame=self.base + FRAME if playing else NO_MSG, keys=True)
+        picture = picture^.fill().tag("video")
+        if width > 0:
+            picture = picture^.height(self.height_for(width))
+        else:
+            picture = picture^.grow()
         var scrubber = Canvas(self.canvas + 1, self.state.frame, on_gesture=self.base + SCRUB, keys=True).height(28).grow().fill().tag("seek")
-        var controls = HStack(button.tag("pause" if playing else "play"), scrubber^, Text(self.state.time_text(), style=CAPTION).tag("time").min_width(92),
-                              spacing=10).align(CENTER)
-        return VStack(picture^, controls^, spacing=10).grow().fill()
+        var controls = HStack(button^.tag("pause" if playing else "play"), scrubber^, Text(self.state.time_text(), style=CAPTION).tag("time").min_width(92),
+                              spacing=10).align(CENTER).fill()
+        # the controls sit on a card (a quiet bar under the picture): the scrubber paints its track on the card's colour
+        var bar = Card(controls^, spacing=0).padding(6, 12).fill()
+        if width > 0:
+            return VStack(picture^, bar^, spacing=10).width(width)
+        return VStack(picture^, bar^, spacing=10).grow().fill()
 
     def describe(self) -> String:
         """For an agent: where the video is, and how to seek (tap the "seek" canvas at x points from its left)."""
@@ -237,13 +251,13 @@ struct Player(Movable):
 
     def draw(mut self, canvas: Int, mut s: Surface, backdrop: UInt32, pal: Palette):
         if canvas == self.canvas + 1:
-            self._draw_scrubber(s, backdrop, pal)
+            self._draw_scrubber(s, pal)
         elif canvas == self.canvas:
             self._draw_picture(s, backdrop)
 
-    def _draw_scrubber(mut self, mut s: Surface, backdrop: UInt32, pal: Palette):
+    def _draw_scrubber(mut self, mut s: Surface, pal: Palette):
         var k = s.scale
-        s.fill(backdrop)
+        s.fill(pal.card)
         self.scrub_w = s.points_width()
         var left = SCRUB_PAD * k
         var right = Float64(s.width) - SCRUB_PAD * k

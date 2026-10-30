@@ -4771,7 +4771,7 @@ def run_step[A: App](host_addr: Int, step: String):
         var until = perf_counter_ns() + 400_000_000  # (the widgets' pages restyle from their new tokens)
         while Int(perf_counter_ns()) < until:
             pump()
-    elif verb == "pause":  # pause:3000: keep the main loop running that long (a screen grab of the display can catch popovers)
+    elif verb == "pause" or verb == "wait":  # pause:3000 (or wait:3000): keep the main loop running that long (a screen grab of the display can catch popovers; a video plays)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until:
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
