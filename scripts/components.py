@@ -112,6 +112,8 @@ COMPOSITES = [
     ("Skeleton", "mojoui/skeleton.mojo", ["VStack", "Themes on top (themes/, or yours)"], "Skeleton("),
     ("Markdown", "mojoui/markdown.mojo", ["Paragraph", "Text", "VStack", "HStack", "Card", "Themes on top (themes/, or yours)"], "Markdown("),
     ("Sparkline", "mojoui/sparkline.mojo", ["Canvas"], "SparklineView("),
+    # goal 39: media (a file component: no view of its own; Player, GPU image ops and the frame table build on it)
+    ("VideoSource (a video file as RGBA frames: open, next, seek, read)", "mojoui/video.mojo", [], "VideoSource("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
     ("Page header (icon square, pill tabs, segments, tab header)", "mojoui/header.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
