@@ -1,0 +1,3 @@
+# limit 90
+# the job-wake check (D-792): 40 short jobs, then one 1.5 s job; its JOBWAKE lines are the report
+wait:12000
