@@ -10,6 +10,8 @@
 # For checks it prints `SKETCH: tool=… strokes=… points=… zoom=… pan=…` on every change, `SKETCH PRESSURE: p` for
 # each pen point, and `SKETCH CANVAS: x,y,w,h` (the canvas in the window, pixels) once it knows.
 #
+# SKETCH_STROKES=N starts with N seeded strokes of 101 points each (scripts/sketch_bench.py: 1,000 → 101,000 points).
+#
 #   scripts/build.sh sketch linux && build/sketch/linux/sketch
 
 from mojoui import (
@@ -17,9 +19,11 @@ from mojoui import (
     CAPTION, CENTER, PAN, ZOOM, TAP, PRESS, RELEASE, KEY, CTRL, PLAIN, PROMINENT, SUBTLE,
 )
 from mojoui.canvas import rgba
+from mojoui.maths import cos, sin
 from mojoui.scene import Scene, SurfacePainter, Painter
 from mojoui.ink import Stroke
 from mojoui.geometry import rect_of
+from mojoui.shared import environment
 from mojoui.theme import Theme
 from themes.liquid import liquid
 
@@ -52,6 +56,33 @@ def two(x: Float64) -> String:
     var v = Int(abs(x) * 100 + 0.5)
     var f = String(v % 100)
     return ("-" if x < 0 and v > 0 else "") + String(v // 100) + "." + ("0" + f if f.byte_length() < 2 else f)
+
+
+def seeded(n: Int) -> List[Stroke]:
+    """n strokes of 101 points each, a wandering line from a seeded start (xorshift32 from 40) in the first 900 × 560
+    points of the page (all on screen in the starting window), the pressure rising and falling along it (the bench's page)."""
+    var out = List[Stroke](capacity=n)
+    var s = UInt32(40)
+    var colours = inks()
+    for k in range(n):
+        var r = List[Float64]()
+        for _ in range(4):
+            s ^= s << 13
+            s ^= s >> 17
+            s ^= s << 5
+            r.append(Float64(s >> 8) / 16777216.0)
+        var st = Stroke(WIDTH, colours[k % 3])
+        var x = 60.0 + r[0] * 780.0
+        var y = 60.0 + r[1] * 440.0
+        var a = r[2] * 6.283
+        for i in range(101):
+            st.add(x, y, 0.25 + 0.7 * Float64(i if i < 50 else 100 - i) / 50.0)
+            a += (r[3] - 0.5) * 0.04 + 0.05 * sin(Float64(i) * 0.15)  # (a gentle wave, not a circle)
+            x += 1.2 * cos(a)
+            y += 1.2 * sin(a)
+        st.seal()
+        out.append(st^)
+    return out^
 
 
 struct Action(Copyable, Movable):
@@ -100,6 +131,14 @@ struct Main(App):
         self.ink_version = 0
         self.said = ""
         self.box = ""
+        var n = 0
+        try:
+            n = Int(environment("SKETCH_STROKES", "0"))
+        except:
+            n = 0
+        if n > 0:
+            self.strokes = seeded(n)
+            self.changed_ink()
 
     def title(self) -> String:
         return "Sketch"

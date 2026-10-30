@@ -479,6 +479,10 @@ struct GtkCanvas(Copyable, Movable):
     var spare: Scene  # the list before that, recycled for the next frame (its memory, not its content)
     var prev: Scene  # the display list last drawn (MOJOUI_SCENE): a layer that comes again unchanged keeps its nodes
     var layer_nodes: List[Int]  # the GskRenderNode built for each of prev's layers
+    var layer_tex: List[Int]  # a moved layer's node rendered once into a texture (0: none), at layer_tex_k, its bounds'
+    var layer_tex_k: List[Float64]  # top-left at (layer_tex_x, layer_tex_y): a pan or zoom then moves pixels (goal 40)
+    var layer_tex_x: List[Float64]
+    var layer_tex_y: List[Float64]
     var pending: Int  # a GPU picture queued last frame, shown once this frame's GPU work is queued (-1: none, D-746)
     var pending_w: Int
     var pending_h: Int
@@ -514,6 +518,10 @@ struct GtkCanvas(Copyable, Movable):
         self.ptr_y = -1
         self.pinch = 1
         self.moved = False
+        self.layer_tex = List[Int]()
+        self.layer_tex_k = List[Float64]()
+        self.layer_tex_x = List[Float64]()
+        self.layer_tex_y = List[Float64]()
         self.pressure = 0
         self.test_pressure = -1
         self.armed = False
@@ -561,6 +569,7 @@ struct GtkHost[A: App](Movable):
     var revealed: Int  # the last Board reveal token scrolled to (Board's value)
     var clip_version: Int  # the Clipboard view's version last copied
     var embed_version: Int  # the WebFrame's version last opened in the browser
+    var paint_timed: Bool  # before-/after-paint are connected (MOJOUI_TRACE, or a framebench step asked)
     var paint_t0: Int  # the frame clock's before-paint time (ns), and every frame's paint phase since bench started (ms)
     var frame_paints: List[Float64]
     var frame_times: List[Int]  # when each frame was painted (ns): the intervals between them say whether frames were on time
@@ -598,6 +607,7 @@ struct GtkHost[A: App](Movable):
     var scratch: List[Float32]  # GdkRGBA, graphene rects and points, GskRoundedRect handed to GTK by address
     var nodes_built: Int  # layers built into render nodes, and layers reused untouched (bench reports them)
     var nodes_reused: Int
+    var layer_textures: Int  # moved layers rendered into textures (layer_texture)
     var ink_built: Int  # the "ink" layer built into nodes (not reused): goal 40's bench counts them
     var cells_built: Int  # the "cells" layer built into nodes (not reused), and pixel textures handed to GTK: bench reports them
     var uploads: Int
@@ -691,6 +701,7 @@ struct GtkHost[A: App](Movable):
         self.new_layout_ns = 0
         self.cells_built = 0
         self.ink_built = 0
+        self.layer_textures = 0
         self.uploads = 0  # (MOJOUI_NO_PARTIAL=1: every shape change rebuilds the window, to compare)
         self.canvases = List[GtkCanvas]()
         self.boards = List[BoardChild]()
@@ -704,6 +715,7 @@ struct GtkHost[A: App](Movable):
         self.embed_version = 0
         self.key_draws = 0
         self.paint_t0 = 0
+        self.paint_timed = False
         self.frame_paints = List[Float64]()
         self.frame_times = List[Int]()
         self.key_draw_ms = 0
@@ -3196,6 +3208,36 @@ struct GtkHost[A: App](Movable):
                 self.snap_text(snap, sc.text_at(op), sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), c, Int(sc.num(op, 4)), Int(sc.num(op, 5)), sc.num(op, 3))
         return external_call["gtk_snapshot_free_to_node", Int](snap)
 
+    def layer_texture(mut self, node: Int, k: Float64) -> Tuple[Int, Float64, Float64, Float64]:
+        """A moved layer's node rendered once, at scale k (smaller if it would pass 4096 px), by the window's renderer:
+        (texture, its scale, the node's bounds' left and top). A pan then moves these pixels instead of filling every
+        path again (cairo re-fills a kept node on every frame: 1,000 strokes cost ~32 ms, D-1216). (0, …) if it can't."""
+        var renderer = external_call["gtk_native_get_renderer", Int](self.window)
+        if renderer == 0:
+            return (0, 0.0, 0.0, 0.0)
+        external_call["gsk_render_node_get_bounds", NoneType](node, self.at(28))
+        var bx = Float64(self.scratch[28])
+        var by = Float64(self.scratch[29])
+        var bw = Float64(self.scratch[30])
+        var bh = Float64(self.scratch[31])
+        if bw <= 0 or bh <= 0:
+            return (0, 0.0, 0.0, 0.0)
+        var tk = min(k, 4096.0 / bw, 4096.0 / bh)
+        var snap = external_call["gtk_snapshot_new", Int]()
+        external_call["gtk_snapshot_scale", NoneType](snap, Float32(tk), Float32(tk))
+        self.scratch[26] = Float32(-bx)
+        self.scratch[27] = Float32(-by)
+        external_call["gtk_snapshot_translate", NoneType](snap, self.at(26))
+        external_call["gtk_snapshot_append_node", NoneType](snap, node)
+        var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+        if root == 0:
+            return (0, 0.0, 0.0, 0.0)
+        self.put_rect(0, 0, Float64(Int(bw * tk + 0.999)), Float64(Int(bh * tk + 0.999)))
+        var t = external_call["gsk_renderer_render_texture", Int](renderer, root, self.at(4))
+        external_call["gsk_render_node_unref", NoneType](root)
+        self.layer_textures += 1
+        return (t, tk, bx, by)
+
     def release_canvases(mut self, staying: List[Bool]):
         """The render nodes of the canvases that go (all of them when `staying` is empty)."""
         for k in range(len(self.canvases)):
@@ -3205,6 +3247,10 @@ struct GtkHost[A: App](Movable):
                 if n != 0:
                     external_call["gsk_render_node_unref", NoneType](n)
             self.canvases[k].layer_nodes = List[Int]()
+            for t in self.canvases[k].layer_tex:
+                if t != 0:
+                    external_call["g_object_unref", NoneType](t)
+            self.canvases[k].layer_tex = List[Int]()
 
     def replay(mut self, ci: Int, var sc: Scene, wpx: Int, hpx: Int):
         """The display list onto canvas ci's picture: each layer becomes a render node, and a layer that came again
@@ -3213,9 +3259,12 @@ struct GtkHost[A: App](Movable):
         self.new_layouts = 0
         self.new_layout_ns = 0
         var nodes = List[Int]()
+        var kept = List[Bool]()
         for i in range(sc.layers()):
             var node = 0
+            kept.append(False)
             if i < len(self.canvases[ci].layer_nodes) and i < self.canvases[ci].prev.layers() and sc.same_layer(i, self.canvases[ci].prev, i):
+                kept[i] = True
                 node = self.canvases[ci].layer_nodes[i]
                 if node != 0:
                     _ = external_call["gsk_render_node_ref", Int](node)
@@ -3228,12 +3277,52 @@ struct GtkHost[A: App](Movable):
                 if sc.layer_keys[i] == "ink":
                     self.ink_built += 1
             nodes.append(node)
+        var tex = List[Int]()
+        var tex_k = List[Float64]()
+        var tex_x = List[Float64]()
+        var tex_y = List[Float64]()
+        for i in range(len(nodes)):  # a moved layer's texture: kept with its node unless the zoom drifted (D-1216)
+            var t = 0
+            var tk = 0.0
+            var bx = 0.0
+            var by = 0.0
+            if kept[i] and i < len(self.canvases[ci].layer_tex) and self.canvases[ci].layer_tex[i] != 0:
+                var ratio = sc.layer_tk[i] / self.canvases[ci].layer_tex_k[i]
+                if ratio >= 0.75 and ratio <= 1.34:
+                    t = self.canvases[ci].layer_tex[i]
+                    tk = self.canvases[ci].layer_tex_k[i]
+                    bx = self.canvases[ci].layer_tex_x[i]
+                    by = self.canvases[ci].layer_tex_y[i]
+                    self.canvases[ci].layer_tex[i] = 0  # (handed over)
+            if t == 0 and sc.moved(i) and nodes[i] != 0 and kept[i]:  # (a layer that changes every frame, the wet stroke, stays nodes)
+                var made = self.layer_texture(nodes[i], sc.layer_tk[i])
+                t = made[0]
+                tk = made[1]
+                bx = made[2]
+                by = made[3]
+            tex.append(t)
+            tex_k.append(tk)
+            tex_x.append(bx)
+            tex_y.append(by)
+        for t in self.canvases[ci].layer_tex:
+            if t != 0:
+                external_call["g_object_unref", NoneType](t)
         var snap = external_call["gtk_snapshot_new", Int]()
         for i in range(len(nodes)):
             var n = nodes[i]
             if n == 0:
                 continue
-            if sc.moved(i):  # (a pan or a zoom: the kept node, moved and scaled by the renderer; nothing rebuilt)
+            if sc.moved(i) and tex[i] != 0:  # (a pan or a zoom: the layer's pixels, moved and scaled; nothing rebuilt or re-filled)
+                var k = sc.layer_tk[i]
+                external_call["gtk_snapshot_save", NoneType](snap)
+                self.scratch[26] = Float32(sc.layer_tx[i] + tex_x[i] * k)
+                self.scratch[27] = Float32(sc.layer_ty[i] + tex_y[i] * k)
+                external_call["gtk_snapshot_translate", NoneType](snap, self.at(26))
+                external_call["gtk_snapshot_scale", NoneType](snap, Float32(k / tex_k[i]), Float32(k / tex_k[i]))
+                self.put_rect(0, 0, Float64(Int(external_call["gdk_texture_get_width", c_int](tex[i]))), Float64(Int(external_call["gdk_texture_get_height", c_int](tex[i]))))
+                external_call["gtk_snapshot_append_texture", NoneType](snap, tex[i], self.at(4))
+                external_call["gtk_snapshot_restore", NoneType](snap)
+            elif sc.moved(i):  # (no texture: the kept node, moved and scaled by the renderer)
                 external_call["gtk_snapshot_save", NoneType](snap)
                 self.scratch[26] = Float32(sc.layer_tx[i])
                 self.scratch[27] = Float32(sc.layer_ty[i])
@@ -3243,6 +3332,10 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_snapshot_restore", NoneType](snap)
             else:
                 external_call["gtk_snapshot_append_node", NoneType](snap, n)
+        self.canvases[ci].layer_tex = tex^
+        self.canvases[ci].layer_tex_k = tex_k^
+        self.canvases[ci].layer_tex_x = tex_x^
+        self.canvases[ci].layer_tex_y = tex_y^
         self.scratch[24] = Float32(wpx)
         self.scratch[25] = Float32(hpx)
         var paintable = external_call["gtk_snapshot_free_to_paintable", Int](snap, self.at(24))
@@ -3651,6 +3744,134 @@ def share_within(xs: List[Float64], limit: Float64) -> Float64:
     return 100.0 * Float64(n) / Float64(len(xs))
 
 
+def frame_bench[A: App](host_addr: Int, rest: String):
+    """framebench:K=pan|zoom|draw,N (goal 40): N gestures on canvas K, one at a time (PAN by 7,4 points, to and fro every 20; ZOOM by 1.01×
+    around the middle, in then out; or one pen stroke of N moves), each followed by the frame that shows it. A frame's
+    work = handling the gesture (the app's update and the diff) + the canvas's redraw (draw_scene and the replay into
+    render nodes, or draw() and the upload) + GTK's paint of that frame (before-paint to after-paint) + a round trip to
+    the display after it (gdk_display_sync: the X server's own drawing, which cairo's paint only queues) + the canvas's
+    whole picture rendered to a texture by the same renderer (raster: GTK paints only damage; this is the full cost, so
+    the sum is an upper bound). Pan and draw
+    are drags (PRESS, the moves, RELEASE): the app's current tool says what they do. Prints FRAMEBENCH
+    with p50/p95/max of the work and of each part, the layers built and reused, the "ink" layer's rebuilds, and the
+    renderer GTK used."""
+    var host = host_at[A](host_addr)
+    var kv = split_at(rest, "=")
+    var spec = split_at(kv[1], ",")
+    var what = spec[0]
+    var count = max(to_int(spec[1]), 1)
+    var node = canvas_node(host[], kv[0])
+    var ci = -1
+    for k in range(len(host[].canvases)):
+        if host[].canvases[k].node == node:
+            ci = k
+    if ci < 0:
+        print("TEST: no canvas", kv[0])
+        return
+    if not host[].paint_timed:
+        var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
+        if clock != 0:
+            connect(clock, "before-paint", on_before_paint[A], host_addr)
+            connect(clock, "after-paint", on_after_paint[A], host_addr)
+            host[].paint_timed = True
+    var renderer = external_call["gtk_native_get_renderer", Int](host[].window)
+    var rname = String("unknown")
+    if renderer != 0:
+        var cname = external_call["g_type_name_from_instance", Int](renderer)
+        rname = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=cname))
+    var wait_by = perf_counter_ns() + 3_000_000_000  # (from a drawn, quiet canvas)
+    while (not host[].canvases_drawn() or busy() or host[].has_pending) and perf_counter_ns() < wait_by:
+        pump()
+    var w = Float64(Int(external_call["gtk_widget_get_width", c_int](host[].canvases[ci].widget)))
+    var h = Float64(Int(external_call["gtk_widget_get_height", c_int](host[].canvases[ci].widget)))
+    var works = List[Float64]()
+    var events = List[Float64]()
+    var draws = List[Float64]()
+    var paints = List[Float64]()
+    host[].nodes_built = 0
+    host[].nodes_reused = 0
+    host[].ink_built = 0
+    host[].layer_textures = 0
+    var x = w * 0.3
+    var y = h * 0.3
+    if what == "draw" or what == "pan":  # (a drag: press, the moves, release; the app's tool decides what it does)
+        host[].canvases[ci].pressure = 0.6 if what == "draw" else 0.0
+        host[].canvas_send(ci, PRESS, x, y, 0, 0, 1, host_addr)
+        settle()
+    var syncs = List[Float64]()
+    var rasters = List[Float64]()
+    var display = external_call["gdk_display_get_default", Int]()
+    var missed = 0
+    for i in range(count):
+        var draws0 = host[].canvases[ci].draws
+        var t0 = perf_counter_ns()
+        if what == "pan":
+            var back = -1.0 if (i // 20) % 2 == 1 else 1.0  # (to and fro: what was on screen stays there)
+            host[].canvas_send(ci, PAN, x, y, 7 * back, 4 * back, 1, host_addr)
+        elif what == "zoom":
+            host[].canvas_send(ci, ZOOM, w / 2, h / 2, 0, 0, 1.01 if i < count // 2 else 1.0 / 1.01, host_addr)
+        else:
+            x += 3.0 + Float64(i % 5) * 0.4  # (a wandering line across the page)
+            y += 2.0 * (1.0 if (i // 40) % 2 == 0 else -1.0)
+            host[].canvases[ci].pressure = 0.3 + 0.6 * Float64(i % 50) / 50.0
+            host[].canvas_send(ci, PAN, x, y, 3, 2, 1, host_addr)
+        var ev_ms = Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6
+        var paints0 = len(host[].frame_paints)
+        var drew = False
+        var painted = False
+        var by = perf_counter_ns() + 2_000_000_000
+        while perf_counter_ns() < by:  # (the redraw, then the frame painted after it)
+            _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+            if not drew and host[].canvases[ci].draws != draws0:
+                drew = True
+                paints0 = len(host[].frame_paints)
+            if drew and len(host[].frame_paints) > paints0:
+                painted = True
+                break
+        if not painted:
+            missed += 1
+            continue
+        var dm = host[].canvases[ci].draw_ms
+        var pm = host[].frame_paints[len(host[].frame_paints) - 1]
+        var ts = perf_counter_ns()  # (a round trip to the display: with cairo on X11 the X server draws after the paint returns)
+        external_call["gdk_display_sync", NoneType](display)
+        var sm = Float64(Int(perf_counter_ns()) - Int(ts)) / 1e6
+        # and the canvas's picture rendered whole by the same renderer, synchronously (on Xvfb the paint phase measured
+        # ~0 ms with 1,000 strokes on screen: GTK redraws only damage, and cairo on X11 queues; this is the full cost)
+        var tr = perf_counter_ns()
+        var paintable = external_call["gtk_picture_get_paintable", Int](host[].canvases[ci].widget)
+        if paintable != 0 and renderer != 0:
+            var snap = external_call["gtk_snapshot_new", Int]()
+            external_call["gdk_paintable_snapshot", NoneType](paintable, snap, w, h)
+            var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+            if root != 0:
+                var tex = external_call["gsk_renderer_render_texture", Int](renderer, root, 0)
+                if tex != 0:
+                    external_call["g_object_unref", NoneType](tex)
+                external_call["gsk_render_node_unref", NoneType](root)
+        var rm = Float64(Int(perf_counter_ns()) - Int(tr)) / 1e6
+        rasters.append(rm)
+        sm += rm
+        events.append(ev_ms)
+        draws.append(dm)
+        paints.append(pm)
+        syncs.append(sm)
+        works.append(ev_ms + dm + pm + sm)
+    if what == "pan":
+        host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
+        settle()
+    if what == "draw":
+        host[].canvases[ci].pressure = 0.6
+        host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
+        host[].canvases[ci].pressure = 0
+        settle()
+    print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " renderer=" + rname
+          + " p50=" + one_decimal(Float32(pct(works, 0.5))) + " p95=" + one_decimal(Float32(pct(works, 0.95))) + " max=" + one_decimal(Float32(pct(works, 1.0)))
+          + " event_p95=" + one_decimal(Float32(pct(events, 0.95))) + " draw_p95=" + one_decimal(Float32(pct(draws, 0.95)))
+          + " paint_p95=" + one_decimal(Float32(pct(paints, 0.95))) + " sync_p95=" + one_decimal(Float32(pct(syncs, 0.95))) + " raster_p95=" + one_decimal(Float32(pct(rasters, 0.95)))
+          + " layers_built=" + String(host[].nodes_built) + " reused=" + String(host[].nodes_reused) + " ink_built=" + String(host[].ink_built) + " textures=" + String(host[].layer_textures), flush=True)
+
+
 def pct(xs: List[Float64], q: Float64) -> Float64:
     """The q-th quantile of xs (0 when empty)."""
     if len(xs) == 0:
@@ -3787,6 +4008,7 @@ def on_window_realize[A: App](window: Int, host_addr: Int) abi("C"):
     if clock != 0 and host_at[A](host_addr)[].rt.trace:  # (MOJOUI_TRACE: the paint phase of every frame, for bench steps)
         connect(clock, "before-paint", on_before_paint[A], host_addr)
         connect(clock, "after-paint", on_after_paint[A], host_addr)
+        host_at[A](host_addr)[].paint_timed = True
     if clock != 0:  # (after each layout: tables share their width as the web's do)
         connect(clock, "layout", on_clock_layout[A], host_addr)
     var surface = external_call["gtk_native_get_surface", Int](window)
@@ -4830,6 +5052,8 @@ def run_step[A: App](host_addr: Int, step: String):
               + " within-9.5ms " + one_decimal(Float32(share_within(intervals(host[].frame_times), 9.5))) + "%"
               + " cells built " + String(host[].cells_built) + " uploads " + String(host[].uploads)
               + " layers built " + String(host[].nodes_built) + " reused " + String(host[].nodes_reused) + " seconds " + one_decimal(Float32(secs)))
+    elif verb == "framebench":  # framebench:K=pan|zoom|draw,N: N gestures on canvas K, one frame each; percentiles of the frame's work
+        frame_bench[A](host_addr, rest)
     elif verb == "webjs":  # webjs:<tag>#<id>=<expression>: its value (awaited) in that widget's page, printed as JS: <json>
         var kv = split_at(rest, "=")
         var key = split_at(kv[0], "#")
