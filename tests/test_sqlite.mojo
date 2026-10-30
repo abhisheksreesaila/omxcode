@@ -6,7 +6,7 @@ from std.testing import assert_true, assert_equal
 from std.os import remove
 from std.os.path import exists
 
-from mojoui.sqlite import Database
+from mojoui.sqlite import Database, fts_prefix_query
 from mojoui.shared import environment
 
 
@@ -148,4 +148,15 @@ def main() raises:
     find.bind(1, "lemon*")
     assert_true(find.step())
     assert_equal(find.text(0), "Groceries")
+    assert_equal(fts_prefix_query("  lisb  tr "), '"lisb"* "tr"*')
+    assert_equal(fts_prefix_query("   "), "")
+    for typed in ['say "hi', "NEAR(a b)", "-x", "title:lisb", "AND OR"]:  # (FTS5 syntax is text to find, never an error)
+        find.reset()
+        find.bind(1, fts_prefix_query(typed))
+        while find.step():
+            pass
+    find.reset()
+    find.bind(1, fts_prefix_query("lisb fli"))
+    assert_true(find.step())
+    assert_equal(find.text(0), "Trip plan")
     print("sqlite fts5: ok")

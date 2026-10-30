@@ -281,3 +281,19 @@ struct Database(Movable):
         if not q.step():
             return 0
         return q.int(0)
+
+
+def fts_prefix_query(typed: String) -> String:
+    """What a person typed in a search box as an FTS5 query that finds every word as a prefix ("lisb tr" →
+    `"lisb"* "tr"*`: notes with a word starting lisb and one starting tr). Each word is quoted, so FTS5's own syntax
+    (AND, NEAR, -, :, ^, quotes) is searched for as text, never run; "" when nothing searchable was typed."""
+    var out = String("")
+    for part in typed.split(" "):
+        var word = String(part).strip()
+        if word == "":
+            continue
+        var w = String(word).replace('"', '""')
+        if out != "":
+            out += " "
+        out += '"' + w + '"*'
+    return out^
