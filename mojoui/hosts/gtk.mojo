@@ -5966,16 +5966,22 @@ def run_step[A: App](host_addr: Int, step: String):
     elif verb == "gaps":  # gaps:start forgets the frames painted so far; gaps:N runs the main loop N ms, then prints the longest gap between painted frames
         # (a freeze detector, D-1309: gaps:start shows the window if a test hasn't, listens to its paints as MOJOUI_TRACE
         # does, and asks for a redraw on every frame until gaps:N ends, so a window with nothing moving still paints at the
-        # display's rate and only a busy UI thread makes a gap)
+        # display's rate and only a busy UI thread makes a gap). Under MOJOUI_TRACE (paints already timed: goal 30's runs)
+        # it only forgets the frames so far, as before D-1309: the gaps are between the app's own paints (D-1324)
         if rest == "start":
             show_test_window(host[].window)
+            var force = False
             if not host[].paint_timed:
                 var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
                 if clock != 0:
                     connect(clock, "before-paint", on_before_paint[A], host_addr)
                     connect(clock, "after-paint", on_after_paint[A], host_addr)
                     host[].paint_timed = True
-            if app_data("mojoui-gaps-ticking") == 0:
+                    force = True
+            elif app_data("mojoui-gaps-forced") != 0:
+                force = True
+            set_app_data("mojoui-gaps-forced", 1 if force else 0)
+            if force and app_data("mojoui-gaps-ticking") == 0:
                 set_app_data("mojoui-gaps-ticking", 1)
                 _ = external_call["gtk_widget_add_tick_callback", c_uint](host[].window, on_gaps_tick, 0, 0)
             host[].frame_times = List[Int]()

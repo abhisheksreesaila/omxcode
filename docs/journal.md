@@ -850,3 +850,4 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 
 ## Goal 42: review round 1 fixes (2026-10-30)
 - Field change during a rebuild (D-1321): the first fix only held changes and drained them after the rebuild: still red. A debug run showed the held "hi" overwritten by "" from the pending partial rebuild's SET_TEXT patch (the app's older value written over the field). Held fields now win over stale patches and the echo; tests/test_field_queue.py red on the old host (5/6 lost), green after.
+- Goal 30 after D-1309: `30-check.py M1` FAILED, "frame gaps around the cancel: [33.3, 66.7] ms" (≤ 50). Forced frames only when gaps: starts the paint timing itself (D-1324): M1 PASS, 17/17/17 ms. Deliberate stall (fieldcheck, 300 ms in update): 316.7 ms traced and untraced.

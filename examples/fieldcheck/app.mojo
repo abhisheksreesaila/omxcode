@@ -4,8 +4,12 @@
 # that rebuild was pending, so the app's text and the field's differed. Prints on every change
 #   FIELDCHECK: app=<the app's text> rows=<n>
 # and the test (tests/test_field_queue.py) types several values and wants the app's last text to be the last typed.
+# FIELDCHECK_STALL_MS=N: update() holds the UI thread N ms on every change (a deliberate freeze: tests/test_gaps_stall.py
+# proves the host's gaps: step sees it, traced or not, D-1324).
 
 from mojoui import App, Event, View, VStack, Text, TextField
+from mojoui.clock import now_ns
+from mojoui.shared import environment
 
 comptime CHANGE = 1
 
@@ -22,6 +26,14 @@ struct Main(App):
     def update(mut self, event: Event):
         if event.message == CHANGE:
             self.text = event.text
+            var stall = environment("FIELDCHECK_STALL_MS")
+            if stall != "":
+                try:
+                    var until = now_ns() + Int(stall) * 1_000_000
+                    while now_ns() < until:
+                        pass
+                except:
+                    pass
             print("FIELDCHECK: app=" + self.text + " rows=" + String(self.text.byte_length()), flush=True)
 
     def view(self) -> View:
