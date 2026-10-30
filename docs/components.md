@@ -68,7 +68,8 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Canvas: pan, zoom, tap | `on_gesture: PAN, ZOOM, TAP` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: press, release, double | `PRESS, RELEASE, DOUBLE` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Canvas frames (animation) | `on_frame` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
-| Canvas: pen pressure | `event.pressure on PRESS, PAN, RELEASE (0: none)` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
+| Canvas: pen pressure | `event.pressure on PRESS, PAN, RELEASE (0: none)` | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ |
+| Canvas: scroll pans | `Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
 | Scene: polygon fill | `Painter.polygon (non-zero, antialiased)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 |
 | Scene: layer transform | `Painter.layer_transform (pan/zoom moves a kept layer)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 |
 | Canvas: keys (focus on press) | `on_gesture: KEY (event.text, modifiers)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -94,13 +95,17 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Timers | `App.every() -> [Every(ms, msg)]` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Scroll pinned to its end | `Scroll(…, pinned=True)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 
+- File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
+- Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
+- Scene: layer transform: GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a big page at a big zoom it's softer than the strokes until the zoom comes back within the cap.
+
 ## Composite components (Mojo, built from the ones above)
 
 A composite is only as far along on a platform as the least-proven piece it's made of.
 
 | Component | Module | Made of | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Used by |
 |---|---|---|---|---|---|---|---|---|---|
-| `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ | sketch |
+| `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | sketch |
 | `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | maccheck, mxstudio, omxplorer, workbook |
 | `PivotTable` | `mojoui/pivot.mojo` | Grid, Scroll, Text tones | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, omxplorer, workbook |
 | `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | dashboard, maccheck, mxstudio, omxplorer, workbook |
@@ -157,12 +162,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 117 | 3 | 0 |
-| Web | 116 | 4 | 0 |
-| Android | 19 | 21 | 80 |
-| Mac (AppKit) | 0 | 109 | 11 |
-| iPhone (UIKit) | 0 | 85 | 35 |
-| Agent (MCP) | 31 | 38 | 51 |
+| Linux (GTK) | 116 | 5 | 0 |
+| Web | 116 | 5 | 0 |
+| Android | 19 | 21 | 81 |
+| Mac (AppKit) | 0 | 110 | 11 |
+| iPhone (UIKit) | 0 | 85 | 36 |
+| Agent (MCP) | 31 | 38 | 52 |
 
 ## Inside one app, not components yet (the debt)
 

@@ -61,6 +61,7 @@ FEATURES = [
     ("Canvas: press, release, double", "PRESS, RELEASE, DOUBLE", r"\bDOUBLE\b|DOUBLE =", "workbook"),
     ("Canvas frames (animation)", "on_frame", r"tick|SET_FRAMES|on_frame", "lens"),
     ("Canvas: pen pressure", "event.pressure on PRESS, PAN, RELEASE (0: none)", r"pressure", "sketch"),
+    ("Canvas: scroll pans", "Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM", r"\bWHEEL\b", "sketch"),
     ("Scene: polygon fill", "Painter.polygon (non-zero, antialiased)", r"OP_POLY|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
     ("Scene: layer transform", "Painter.layer_transform (pan/zoom moves a kept layer)", r"layer_tx|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
     ("Canvas: keys (focus on press)", "on_gesture: KEY (event.text, modifiers)", r"\"key-pressed\"|addEventListener\('keydown'", "mxstudio"),
@@ -221,7 +222,14 @@ def cell(host, src, ctor, kind):
 
 
 # Features a host implements but no check runs there (a stand-in drives it instead): 🔨 until one does.
-UNPROVEN = {("Linux (GTK)", "File picker"): "the checks hand the path in with the pick: step; GTK's own dialog isn't driven"}
+UNPROVEN = {("Linux (GTK)", "File picker"): "the checks hand the path in with the pick: step; GTK's own dialog isn't driven",
+            ("Linux (GTK)", "Canvas: pen pressure"): "only injected pressure ran (the stroke: test step sets it where GDK's "
+                                                     "pressure axis is read); no real pen yet"}
+
+
+# What a reader should know about a feature row beyond its cells (limits, not states).
+NOTES = {"Scene: layer transform": "GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a "
+                                   "big page at a big zoom it's softer than the strokes until the zoom comes back within the cap"}
 
 
 def feature_cell(host, src, pattern, example, name=""):
@@ -306,6 +314,10 @@ def render():
     for name, api, pattern, example in FEATURES:
         row = [feature_cell(h, srcs[h], pattern, example, name) for h in names]
         out.append(f"| {name} | `{api}` | " + " | ".join(row) + " |")
+    notes = [f"- {name} ({host}): 🔨 though a check runs it: {why}." for (host, name), why in UNPROVEN.items()]
+    notes += [f"- {name}: {why}." for name, why in NOTES.items()]
+    if notes:
+        out += [""] + notes
     known = {}
     for h in names:
         for ctor, kind in COMPONENTS:
