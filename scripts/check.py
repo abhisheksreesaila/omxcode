@@ -139,7 +139,7 @@ def m0():
         for f in need[1:]:
             if (Path(a) / f).read_bytes() != (Path(b) / f).read_bytes():
                 return False, f"{f} differs between two runs"
-        import fitz  # PyMuPDF
+        import pymupdf as fitz
         for p in pdfs:
             q = Path(b) / "bol" / p.name
             ta = "".join(pg.get_text() for pg in fitz.open(p))
@@ -429,7 +429,7 @@ def m10():
             bad.append((s, g and g["frame"], t["damage_frame"][s]))
     if bad:
         return False, f"selections off: {bad[:4]}"
-    import fitz
+    import pymupdf as fitz
     for s in want:
         pdf, reel = d / "pack" / f"{s}.pdf", d / "pack" / f"{s}.mp4"
         if not pdf.exists() or not reel.exists():
