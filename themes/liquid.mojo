@@ -99,6 +99,7 @@ def liquid_css(p: Palette) -> String:
         + w + ".mui-tag-tile button, " + w + ".mui-tag-chart-tile button.image-button, " + w + ".mui-board .mui-card button.image-button { opacity: 0; transition: opacity 150ms " + spring + "; }\n"
         + w + ".mui-tag-tile:hover button, " + w + ".mui-tag-chart-tile:hover button.image-button, " + w + ".mui-board .mui-card:hover button.image-button, "
         + w + ".mui-tag-tile:focus-within button, " + w + ".mui-tag-chart-tile:focus-within button.image-button, " + w + ".mui-tag-tile button:focus-visible, " + w + ".mui-tag-chart-tile button:focus-visible, " + w + ".mui-board .mui-card button:focus-visible { opacity: 1; }\n"
+        + w + ".mui-board .mui-card .mui-tag-player-controls button.image-button { opacity: 1; }\n"  # (a video card's play button is its main control: always shown, goal 39 M6)
         + w + "label.title-1.mui-tone-accent, " + w + "label.title-4.mui-tone-accent { color: " + accent + "; }\n"
         # the bottom strip: tabs as pills, live figures
         + w + ".mui-tag-sheet-tabs button { border-radius: 999px; padding: 2px 14px; font-weight: 500; }\n"
@@ -169,6 +170,7 @@ body.liquid [data-tag=tile]:hover { box-shadow: 0 0 0 1px rgba(15,23,42,.07), 0 
 body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.icon-only, body.liquid .board > .object button.icon-only { opacity: 0; transition: opacity 150ms var(--sp-snappy); }
 body.liquid [data-tag=tile]:hover button, body.liquid [data-tag=chart-tile]:hover button.icon-only, body.liquid .board > .object:hover button.icon-only,
 body.liquid [data-tag=tile] button:focus-visible, body.liquid [data-tag=chart-tile] button:focus-visible, body.liquid .board > .object button:focus-visible { opacity: 1; }
+body.liquid .board > .object [data-tag=player-controls] button.icon-only { opacity: 1; }
 @media (pointer: coarse) { body.liquid [data-tag=tile] button, body.liquid [data-tag=chart-tile] button.icon-only, body.liquid .board > .object button.icon-only { opacity: .6; } }
 body.liquid [data-tag=sheet-tabs] button { border-radius: 999px; padding: 2px 14px; }
 body.liquid .segmented, body.liquid .tabs { background: rgba(15,23,42,.06); border: 0; border-radius: 999px; padding: 3px; overflow: visible; }
