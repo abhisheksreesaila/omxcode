@@ -155,6 +155,12 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)` | `mojoui/trackcard.mojo` | Board: drag, resize, snap, Canvas, Card, Segmented, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `PdfSource (a PDF's pages as RGBA pictures at any dpi, page sizes in points, points ↔ pixels; its text layer for checks)` | `mojoui/pdfsource.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Document card (a PDF page on a card: page through, zoom, pan, highlight a box in page points; Board chrome, quiet actions)` | `mojoui/documentcard.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: press, release, double, Canvas: keys (focus on press), Card, Quiet buttons, ProgressBar | 🔨 | 🔨 | ❌ | ❌ | ❌ | ❌ | — |
+| `OcrModel (the reader slot: docTR in process, words with boxes and confidence; a page's picture read into rows)` | `mojoui/ocrmodel.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `TextTable (words as rows: page, text, box, confidence; CSV in and out)` | `mojoui/texttable.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Form fields (a label's value by geometry: right on its line or under it; the labels are data)` | `mojoui/formfields.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)` | `mojoui/documentjobs.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 
 ## JavaScript widgets (WebComponent)
 
@@ -170,12 +176,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 130 | 3 | 0 |
-| Web | 133 | 0 | 0 |
-| Android | 19 | 31 | 83 |
-| Mac (AppKit) | 0 | 120 | 13 |
-| iPhone (UIKit) | 0 | 98 | 35 |
-| Agent (MCP) | 44 | 35 | 54 |
+| Linux (GTK) | 130 | 9 | 0 |
+| Web | 133 | 6 | 0 |
+| Android | 19 | 36 | 84 |
+| Mac (AppKit) | 0 | 125 | 14 |
+| iPhone (UIKit) | 0 | 103 | 36 |
+| Agent (MCP) | 44 | 40 | 55 |
 
 ## Inside one app, not components yet (the debt)
 
