@@ -844,3 +844,9 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - M2 on the first build attempt: "existing function with conflicting signature" for dlopen: std.python's OwnedDLHandle vs gtk_webview's and present's own external_call → both go through OwnedDLHandle (D-1413). Checker: WER 0.016, 316 / 323 ms (then 292 / 330 ms) median / p95 after speech ends.
 - Mac link: the Mojo runtime's Python symbols and dlopen aren't in the Mac stubs → Linux-only branches (D-1414); `scripts/build.sh dictate mac` builds.
 - B (transformers.js 4.3.2): "The device (webgpu) does not support fp16": the 3090's Dawn adapter lists no shader-f16 under every flag tried (D-1411) → fp32 variants.
+
+## Goal 43 review round 1 (2026-10-30)
+- shader-f16 probe: the first pass ran most flag sets without `--use-angle=vulkan --disable-vulkan-surface` and the GPU process exited on Xvfb ("errors during initialization"), so they got no adapter at all → variations rebuilt on goal 36's working set, ANGLE-free ones under --headless=new. 18 sets: shader-f16 nowhere (D-1415).
+- fp32 B: streaming + Range serving didn't fix it (the 2.55 GB file was sent whole; then Chromium reset the decoder's fetch). The page's fetch log showed every fetch 200; a fetchtest mode reading each file into one Uint8Array, as transformers.js's readResponse does, got "RangeError: Array buffer allocation failed" at 2,547,875,840 bytes and read 1.27 GB fine → re-split the external data (D-1416); fp32/fp32 then loads.
+- transformers.js keeps its own `fetch` reference from import time: the page's fetch wrapper logged nothing until `env.fetch` pointed at it.
+- GIL: tests/test_speech_errors.mojo against HEAD's speech.mojo fails (no FINAL in 30 s after a bad model id), passes with D-1417.

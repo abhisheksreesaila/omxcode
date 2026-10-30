@@ -48,6 +48,14 @@ def _leave(state: Int) raises:
         raise Error(_NOT_HERE)
 
 
+def _fail(state: Int, e: Error) raises:
+    """The way out of a call that took the lock and failed: the lock goes back (_leave), then the error is raised as it
+    was. Every _enter() pairs with _leave() on success and _fail() on error, and the Python work runs in a function of
+    its own (the _py_* below) so its Python objects are gone before the lock is released (D-1417)."""
+    _leave(state)
+    raise e.copy()
+
+
 def _give_up_lock() raises:
     """Once, on the thread that started the interpreter: let other threads run Python while it does other things."""
     comptime if CompilationTarget.is_linux():
@@ -93,6 +101,43 @@ def _keep(mod: PythonObject, obj: PythonObject) raises -> Int:
         raise Error(_NOT_HERE)
 
 
+# The Python side of each call, run with the lock held; their Python objects die when they return or raise.
+
+def _py_model(name: String, device: String, flag: Int, wait: Bool) raises -> Int:
+    var mod = _backend()
+    return _keep(mod, mod.Model(name, device, True, flag, not wait))
+
+
+def _py_stream(model_id: Int) raises -> Int:
+    var mod = _backend()
+    return _keep(mod, mod.Stream(mod.OBJECTS[model_id]))
+
+
+def _py_attr(id: Int, name: String) raises -> String:
+    return String(py=Python.import_module("builtins").getattr(_backend().OBJECTS[id], name))
+
+
+def _py_call(id: Int, method: String) raises -> String:
+    """obj.method() as a string (for the calls that take no arguments)."""
+    return String(py=Python.import_module("builtins").getattr(_backend().OBJECTS[id], method)())
+
+
+def _py_transcribe(id: Int, addr: Int, n: Int) raises -> String:
+    return String(py=_backend().OBJECTS[id].transcribe_address(addr, n))
+
+
+def _py_feed(id: Int, addr: Int, n: Int, captured_ns: Int) raises:
+    _ = _backend().OBJECTS[id].feed_address(addr, n, captured_ns)
+
+
+def _py_poll(id: Int) raises -> List[SpeechEvent]:
+    var out = List[SpeechEvent]()
+    for e in _backend().OBJECTS[id].poll():
+        var kind = FINAL if String(py=e[0]) == "final" else PARTIAL
+        out.append(SpeechEvent(kind, String(py=e[1]), Float64(py=e[2]), Int(py=e[3]), Int(py=e[4])))
+    return out^
+
+
 @fieldwise_init
 struct SpeechEvent(Copyable, Movable, ImplicitlyCopyable):
     """PARTIAL: the words so far. FINAL: the utterance's text; ms = end_ns → shown_ns (its last voiced 20 ms arrived →
@@ -119,9 +164,13 @@ struct SpeechModel(Movable):
             var flag = unsafe_alloc[Int64](1)
             flag[] = 0
             self._flag = Int(flag)
+            self._id = -1
             var g = _enter()
-            var mod = _backend()
-            self._id = _keep(mod, mod.Model(name, device, True, self._flag, not wait))
+            try:
+                self._id = _py_model(name, device, self._flag, wait)
+            except e:
+                flag.unsafe_free()
+                _fail(g, e)
             _leave(g)
             _give_up_lock()
         else:
@@ -140,7 +189,11 @@ struct SpeechModel(Movable):
     def _attr(self, name: String) raises -> String:
         comptime if CompilationTarget.is_linux():
             var g = _enter()
-            var v = String(py=Python.import_module("builtins").getattr(_backend().OBJECTS[self._id], name))
+            var v = String()
+            try:
+                v = _py_attr(self._id, name)
+            except e:
+                _fail(g, e)
             _leave(g)
             return v
         else:
@@ -163,7 +216,11 @@ struct SpeechModel(Movable):
         """The text of n float32 samples (16 kHz mono) at addr; the memory is read in place, not copied by the caller."""
         comptime if CompilationTarget.is_linux():
             var g = _enter()
-            var text = String(py=_backend().OBJECTS[self._id].transcribe_address(addr, n))
+            var text = String()
+            try:
+                text = _py_transcribe(self._id, addr, n)
+            except e:
+                _fail(g, e)
             _leave(g)
             return text
         else:
@@ -180,7 +237,11 @@ struct SpeechModel(Movable):
     def peak_gpu_mb(self) raises -> Float64:
         comptime if CompilationTarget.is_linux():
             var g = _enter()
-            var v = Float64(py=_backend().OBJECTS[self._id].peak_gpu_mb())
+            var v = Float64(0)
+            try:
+                v = atof(_py_call(self._id, "peak_gpu_mb"))
+            except e:
+                _fail(g, e)
             _leave(g)
             return v
         else:
@@ -195,9 +256,12 @@ struct SpeechStream(Movable):
 
     def __init__(out self, model: SpeechModel) raises:
         comptime if CompilationTarget.is_linux():
+            self._id = -1
             var g = _enter()
-            var mod = _backend()
-            self._id = _keep(mod, mod.Stream(mod.OBJECTS[model._id]))
+            try:
+                self._id = _py_stream(model._id)
+            except e:
+                _fail(g, e)
             _leave(g)
         else:
             raise Error(_NOT_HERE)
@@ -210,7 +274,10 @@ struct SpeechStream(Movable):
             if n <= 0:
                 return
             var g = _enter()
-            _ = _backend().OBJECTS[self._id].feed_address(addr, n, captured_ns)
+            try:
+                _py_feed(self._id, addr, n, captured_ns)
+            except e:
+                _fail(g, e)
             _leave(g)
         else:
             raise Error(_NOT_HERE)
@@ -223,7 +290,10 @@ struct SpeechStream(Movable):
         """Ends the utterance in progress now (Stop pressed): its FINAL follows without waiting for a pause."""
         comptime if CompilationTarget.is_linux():
             var g = _enter()
-            _ = _backend().OBJECTS[self._id].flush()
+            try:
+                _ = _py_call(self._id, "flush")
+            except e:
+                _fail(g, e)
             _leave(g)
         else:
             raise Error(_NOT_HERE)
@@ -233,10 +303,10 @@ struct SpeechStream(Movable):
         comptime if CompilationTarget.is_linux():
             var out = List[SpeechEvent]()
             var g = _enter()
-            var got = _backend().OBJECTS[self._id].poll()
-            for e in got:
-                var kind = FINAL if String(py=e[0]) == "final" else PARTIAL
-                out.append(SpeechEvent(kind, String(py=e[1]), Float64(py=e[2]), Int(py=e[3]), Int(py=e[4])))
+            try:
+                out = _py_poll(self._id)
+            except e:
+                _fail(g, e)
             _leave(g)
             return out^
         else:
@@ -246,7 +316,10 @@ struct SpeechStream(Movable):
     def close(self) raises:
         comptime if CompilationTarget.is_linux():
             var g = _enter()
-            _ = _backend().OBJECTS[self._id].close()
+            try:
+                _ = _py_call(self._id, "close")
+            except e:
+                _fail(g, e)
             _leave(g)
         else:
             raise Error(_NOT_HERE)
