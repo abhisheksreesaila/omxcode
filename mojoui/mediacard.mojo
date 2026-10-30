@@ -10,6 +10,9 @@
 #   view():     media.view(k).at(c.x, c.y).width(c.w).height(c.h)   # for k in range(len(media)): c = media.cards[k]
 #   draw():     if media.draws(canvas): media.draw(canvas, surface, palette)
 #   describe(): media.describe(canvas)                              # a player's time and how to seek, for an agent
+#   media.cards[k].actions.append(CardAction("Analyze", "zap", "analyze", "…"))   # up to 2 quiet actions in the title bar
+#   update():   if media.acted >= 0: …                              # card media.acted_card's action media.acted was tapped
+#   media.cards[k].status = "Analyzing"; .progress = 42             # work running for the card: its title bar says so (-1: none)
 #
 # For an agent a video card's controls are the Player's tools: play / pause, seek (set it to a time in seconds), video.
 
@@ -20,12 +23,14 @@ from mojoui.files import file_name
 from mojoui.picture import Picture
 from mojoui.player import Player, clock_text, MESSAGES as PLAYER_MESSAGES
 from mojoui.theme import Palette
-from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card, HEADLINE, CAPTION, ICON_ONLY, CENTER
+from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card, ProgressBar, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER
 
 comptime OBJ_VIDEO = 3  # (after sheetpage's OBJ_CHART = 1, OBJ_PIVOT = 2: one numbering for what sits on a sheet)
 comptime OBJ_IMAGE = 4
-comptime CARD_MESSAGES = 8  # a card's block: its Player's messages (0 … 4), then close (5)
+comptime CARD_MESSAGES = 8  # a card's block: its Player's messages (0 … 4), then close (5), then its actions (6, 7)
 comptime CARD_CLOSE = 5
+comptime CARD_ACTION = 6
+comptime MAX_ACTIONS = 2
 comptime CARD_CANVASES = 2  # a video's picture and scrubber; a still's picture
 comptime HEAD_H = 36  # the title bar (the drag handle), as sheet objects have it
 comptime CHROME_W = 28  # a card's padding, left and right together
@@ -65,6 +70,16 @@ def is_media_file(path: String) -> Bool:
     return is_video_file(path) or is_image_file(path)
 
 
+@fieldwise_init
+struct CardAction(Copyable, Movable):
+    """A quiet action in a card's title bar: its label and icon, its tag (an agent's tool name) and its tooltip."""
+
+    var label: String
+    var icon: String
+    var tag: String
+    var tip: String
+
+
 struct MediaCard(Movable):
     """One card: where it sits, what it shows, and its slot (which block of messages and canvases it owns)."""
     var kind: Int  # OBJ_VIDEO, OBJ_IMAGE
@@ -76,9 +91,15 @@ struct MediaCard(Movable):
     var slot: Int
     var player: Optional[Player]
     var picture: Optional[Picture]
+    var actions: List[CardAction]  # up to MAX_ACTIONS, shown in the title bar while nothing runs
+    var status: String  # work running for the card ("Analyzing"), shown instead of its actions ("": none)
+    var progress: Int  # that work's percent (-1: not known)
 
     def __init__(out self, path: String, slot: Int, msg: Int, canvas: Int, x: Int, y: Int, w: Int) raises:
         self.path = path
+        self.actions = List[CardAction]()
+        self.status = ""
+        self.progress = -1
         self.slot = slot
         self.x = x
         self.y = y
@@ -126,6 +147,8 @@ struct MediaCards(Movable, Sized):
     var canvas_base: Int
     var most: Int  # how many cards at once (the blocks reserved)
     var closed: Int  # the card the last update() removed (its index then), else -1
+    var acted_card: Int  # the card whose action the last update() was (its index), else -1
+    var acted: Int  # which of its actions, else -1
 
     def __init__(out self, msg_base: Int, canvas_base: Int, most: Int = 8):
         self.cards = List[MediaCard]()
@@ -133,6 +156,8 @@ struct MediaCards(Movable, Sized):
         self.canvas_base = canvas_base
         self.most = most
         self.closed = -1
+        self.acted_card = -1
+        self.acted = -1
 
     def __len__(self) -> Int:
         return len(self.cards)
@@ -183,6 +208,8 @@ struct MediaCards(Movable, Sized):
     def update(mut self, event: Event) -> Bool:
         """True when `event` was a card's: its player moved, or its close button removed it (closed = its index)."""
         self.closed = -1
+        self.acted_card = -1
+        self.acted = -1
         if not self.owns(event.message):
             return False
         for k in range(len(self.cards)):
@@ -191,6 +218,10 @@ struct MediaCards(Movable, Sized):
                 if event.message - m0 == CARD_CLOSE:
                     self.remove(k)
                     self.closed = k
+                elif event.message - m0 >= CARD_ACTION:
+                    if event.message - m0 - CARD_ACTION < len(self.cards[k].actions):
+                        self.acted_card = k
+                        self.acted = event.message - m0 - CARD_ACTION
                 elif self.cards[k].player:
                     _ = self.cards[k].player.value().update(event)
                 return True
@@ -221,9 +252,22 @@ struct MediaCards(Movable, Sized):
     def view(self, k: Int) -> View:
         """Card k: its title bar (the file's name, what it is, close) over its player or picture, filling the card."""
         ref c = self.cards[k]
-        var head = HStack(Text(c.title(), HEADLINE).tag("media-title"), Spacer(), Text(c.facts(), CAPTION),
-                          Button("Remove", self.msg(k) + CARD_CLOSE, ICON_ONLY, icon="close").tooltip("Close " + c.title()),
-                          spacing=8).fill().align(CENTER).height(HEAD_H)
+        var parts = List[View]()
+        var roomy = c.w >= 640 or len(c.actions) == 0  # (a narrow card with actions keeps its facts in the title's tooltip)
+        parts.append(Text(c.title(), HEADLINE).tag("media-title").tooltip(c.facts()))
+        parts.append(Spacer())
+        if c.status != "":  # (work running for it: what and how far, in place of its actions)
+            parts.append(Text(c.status + (" · " + String(c.progress) + "%" if c.progress >= 0 else String("")), CAPTION).tag("media-status"))
+            if c.progress >= 0:
+                parts.append(ProgressBar(c.progress).width(96))
+        else:
+            for i in range(min(len(c.actions), MAX_ACTIONS)):
+                ref a = c.actions[i]
+                parts.append(Button(a.label, self.msg(k) + CARD_ACTION + i, SUBTLE, icon=a.icon).tag(a.tag).tooltip(a.tip))
+            if roomy:
+                parts.append(Text(c.facts(), CAPTION))
+        parts.append(Button("Remove", self.msg(k) + CARD_CLOSE, ICON_ONLY, icon="close").tooltip("Close " + c.title()))
+        var head = HStack(parts^, spacing=8).fill().align(CENTER).height(HEAD_H)
         var body: View
         if c.player:
             body = c.player.value().view(0)

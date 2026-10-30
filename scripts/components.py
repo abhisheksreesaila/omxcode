@@ -117,7 +117,8 @@ COMPOSITES = [
     ("Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)", "mojoui/player.mojo", ["Canvas", "Canvas frames (animation)", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)", "Quiet buttons", "Card"], "Player("),
     ("TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor", "mojoui/timeseries.mojo", ["Canvas"], "TimeSeries("),
     ("Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)", "mojoui/picture.mojo", ["Canvas"], "Picture("),
-    ("Media cards (videos and pictures on a page, each with its own messages; Board chrome)", "mojoui/mediacard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "MediaCards("),
+    ("Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)", "mojoui/mediacard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons", "ProgressBar"], "MediaCards("),
+    ("Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)", "mojoui/tablecard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "TableCards("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
     ("Page header (icon square, pill tabs, segments, tab header)", "mojoui/header.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
@@ -142,6 +143,7 @@ COMPOSITES = [
     ("VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)", "mojoui/videotable.mojo", [], "scan("),
     ("VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)", "mojoui/videoexport.mojo", [], "cut("),
     ("Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)", "mojoui/vision_presets.mojo", [], "warehouse_analyzer("),
+    ("Video jobs (analyze with a registered analyzer, make a reel from a table's flag, as background jobs with progress; rows as a table, lookups that find their key)", "mojoui/videojobs.mojo", [], "analyze_job("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.

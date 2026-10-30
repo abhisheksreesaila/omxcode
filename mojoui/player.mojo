@@ -7,6 +7,7 @@
 #   view():    player.view(width)                                 # the picture and its controls on a card; width (points): the picture is exactly the video's shape
 #   draw():    if player.draws(canvas): player.draw(canvas, surface, backdrop, palette)    # backdrop: the colour behind the picture (the theme's page)
 #   describe(): player.describe()                                 # for an agent: the time, and how to seek
+#   player.set_marks(marks)                                       # boxes over the picture, per frame (what an analysis found), drawn lightly
 #
 # Time is PlayerState (plain numbers, tested without a video): play(), pause(), seek(t), step(±1) and tick(microseconds), which
 # the display frames feed, so playback follows the clock and drops frames rather than drifting. For an agent the controls are
@@ -20,7 +21,8 @@ from mojoui.clock import trace_on
 from mojoui.draw import rect, circle
 from mojoui.theme import Palette
 from mojoui.video import VideoSource
-from mojoui.picture import draw_fitted
+from mojoui.picture import draw_fitted, fitted_box
+from mojoui.draw import with_alpha
 from mojoui.view import View, Button, Canvas, Text, HStack, VStack, Card, CAPTION, ICON_ONLY, NO_MSG, CENTER, PAN, TAP, PRESS, KEY, SET_TO
 from mojoui.charts import fixed
 
@@ -117,6 +119,26 @@ struct PlayerState(Copyable, Movable):
         return clock_text(self.t()) + " / " + clock_text(self.duration)
 
 
+@fieldwise_init
+struct Mark(Copyable, Movable, ImplicitlyCopyable):
+    """A box over one frame of a video, in the video's pixels; `flagged` draws it in the warning tone (a damaged pallet)."""
+
+    var frame: Int
+    var x: Int
+    var y: Int
+    var w: Int
+    var h: Int
+    var flagged: Bool
+
+
+def outline(mut s: Surface, x: Float64, y: Float64, w: Float64, h: Float64, width: Float64, color: UInt32, radius: Float64):
+    """A rounded rectangle's outline (`width` pixels), anti-aliased: four rounded strips."""
+    rect(s, x, y, w, width, color, min(radius, width / 2))
+    rect(s, x, y + h - width, w, width, color, min(radius, width / 2))
+    rect(s, x, y + width, width, h - 2 * width, color)
+    rect(s, x + w - width, y + width, width, h - 2 * width, color)
+
+
 struct Player(Movable):
     var state: PlayerState
     var src: VideoSource
@@ -126,6 +148,8 @@ struct Player(Movable):
     var canvas: Int  # the picture's canvas id; the scrubber's is canvas + 1
     var scrub_w: Float64  # the scrubber's width in points, from its last draw
     var stuck: Bool  # the last read failed (the picture stays on the frame before)
+    var marks: List[List[Mark]]  # per frame: the boxes drawn over it (set_marks), empty: none
+    var marked: Int  # how many times the marks were set (part of the picture's version)
 
     def __init__(out self, path: String, msg_base: Int = 100, canvas_base: Int = 100) raises:
         self.src = VideoSource(path)
@@ -136,9 +160,33 @@ struct Player(Movable):
         self.canvas = canvas_base
         self.scrub_w = 0.0
         self.stuck = False
+        self.marks = List[List[Mark]]()
+        self.marked = 0
 
     def owns(self, message: Int) -> Bool:
         return self.base <= message < self.base + MESSAGES
+
+    def set_marks(mut self, marks: List[Mark]):
+        """Boxes to draw over the picture, each on its own frame (an empty list: none). Kept by frame, so drawing reads
+        only the frame on show."""
+        self.marks = List[List[Mark]]()
+        for _ in range(self.state.frames + 1):
+            self.marks.append(List[Mark]())
+        for m in marks:
+            if 0 <= m.frame < len(self.marks):
+                self.marks[m.frame].append(m)
+        self.marked += 1  # (the picture's version moves: it is drawn again with them)
+
+    def seek(mut self, seconds: Float64):
+        """Shows the frame at `seconds` (paused or playing on from there): what a row of an analysis seeks to."""
+        var before = self.state.frame
+        self.state.seek(seconds)
+        if self.state.frame != before:
+            self._trace()
+
+    def marks_on(self, frame: Int) -> Int:
+        """How many boxes frame `frame` has."""
+        return len(self.marks[frame]) if 0 <= frame < len(self.marks) else 0
 
     def draws(self, canvas: Int) -> Bool:
         return canvas == self.canvas or canvas == self.canvas + 1
@@ -206,7 +254,7 @@ struct Player(Movable):
         var playing = self.state.playing
         var button = (Button("pause", on_tap=self.base + PAUSE, style=ICON_ONLY, icon="pause").alternate("play", self.base + PLAY) if playing
                       else Button("play", on_tap=self.base + PLAY, style=ICON_ONLY, icon="play").alternate("pause", self.base + PAUSE))  # (an agent gets both: D-855)
-        var picture = Canvas(self.canvas, self.state.frame, on_gesture=self.base + VIDEO, on_frame=self.base + FRAME if playing else NO_MSG, keys=True)
+        var picture = Canvas(self.canvas, self.state.frame + self.marked * (self.state.frames + 1), on_gesture=self.base + VIDEO, on_frame=self.base + FRAME if playing else NO_MSG, keys=True)
         picture = picture^.fill().tag("video")
         if width > 0:
             picture = picture^.height(self.height_for(width))
@@ -256,6 +304,7 @@ struct Player(Movable):
             self._draw_scrubber(s, pal)
         elif canvas == self.canvas:
             self._draw_picture(s, backdrop)
+            self._draw_marks(s, pal)
 
     def _draw_scrubber(mut self, mut s: Surface, pal: Palette):
         var k = s.scale
@@ -278,3 +327,21 @@ struct Player(Movable):
             s.fill(backdrop)
             return
         draw_fitted(s, self.buf, self.src.width, self.src.height, backdrop)
+
+    def _draw_marks(self, mut s: Surface, pal: Palette):
+        """The frame's boxes, light: a thin rounded outline (the accent; flagged ones in the warning tone, a little
+        heavier), so the picture stays the subject."""
+        var f = self.state.frame
+        if self.have < 0 or self.marks_on(f) == 0:
+            return
+        var fit = fitted_box(s, self.src.width, self.src.height)
+        var k = s.scale
+        for m in self.marks[f]:
+            var x = fit[0] + Float64(m.x) * fit[2]
+            var y = fit[1] + Float64(m.y) * fit[2]
+            var w = Float64(m.w) * fit[2]
+            var h = Float64(m.h) * fit[2]
+            if w < 4 or h < 4:
+                continue
+            var colour = with_alpha(pal.warn, 0.95) if m.flagged else with_alpha(pal.accent, 0.8)
+            outline(s, x - 2 * k, y - 2 * k, w + 4 * k, h + 4 * k, (2.5 if m.flagged else 1.5) * k, colour, 6 * k)
