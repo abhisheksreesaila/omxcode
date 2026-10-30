@@ -83,7 +83,9 @@ def accessible_name(n: Node) -> String:
 
 def explicit_name(n: Node) -> String:
     """The name a host must set itself: the platform can't find it in the widget's own words (a label, a drawn view's
-    or a picture's tooltip, an icon-only button's title). "" when the widget's own words already name it."""
+    or a picture's tooltip). "" when the widget's own words already name it, or the view isn't one that takes a name."""
+    if not needs_name(n):
+        return ""
     if n.label != "":
         return n.label
     if (n.kind == CANVAS or n.kind == IMAGE or n.kind == EMBED or n.kind == WEBCOMP) and n.tip != "":

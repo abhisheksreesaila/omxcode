@@ -199,20 +199,22 @@ comptime GTK_ACCESSIBLE_PROPERTY_LABEL = 4  # (gtkenums.h, GtkAccessibleProperty
 
 
 def set_accessible_label(w: Int, name: String):
-    """The name a screen reader says for widget w (mojoui.a11y.explicit_name; "": the widget's own words name it)."""
-    if w == 0 or name == "":
+    """The name a screen reader says for widget w (mojoui.a11y.explicit_name; "": none of ours, the widget's own words
+    name it, so a label set before (a canvas whose words went) is taken off)."""
+    if w == 0:
+        return
+    if name == "":
+        external_call["gtk_accessible_reset_property", NoneType](w, c_int(GTK_ACCESSIBLE_PROPERTY_LABEL))
         return
     var n = name
-    # gtk_accessible_update_property(accessible, property, value, -1) is variadic: the integer and pointer arguments
-    # travel in the same registers as a plain call's on x86-64 and arm64 Linux (no floating-point ones).
-    external_call["gtk_accessible_update_property", NoneType](w, c_int(GTK_ACCESSIBLE_PROPERTY_LABEL), n.as_c_string_span(), c_int(-1))
+    external_call["gtk_accessible_update_property", NoneType, num_fixed_args=2](w, c_int(GTK_ACCESSIBLE_PROPERTY_LABEL), n.as_c_string_span(), c_int(-1))
 
 
 def accessible_label_is(w: Int, name: String) -> String:
     """Under GTK_A11Y=test (GTK's own test accessibility backend): "" when w's accessible label is `name`, else what
     GTK says differs (tests: the a11y step)."""
     var n = name
-    var err = external_call["gtk_test_accessible_check_property", Int](w, c_int(GTK_ACCESSIBLE_PROPERTY_LABEL), n.as_c_string_span(), c_int(-1))
+    var err = external_call["gtk_test_accessible_check_property", Int, num_fixed_args=2](w, c_int(GTK_ACCESSIBLE_PROPERTY_LABEL), n.as_c_string_span(), c_int(-1))
     if err == 0:
         return ""
     var out = c_str(err)
@@ -811,7 +813,9 @@ struct GtkHost[A: App](Movable):
         if node.tip != "":
             var tip = node.tip
             external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
-        set_accessible_label(self.widgets[i] if self.widgets[i] != 0 else w, explicit_name(node))  # (on the control itself, not its clamp)
+        var spoken = explicit_name(node)
+        if spoken != "":
+            set_accessible_label(self.widgets[i] if self.widgets[i] != 0 else w, spoken)  # (on the control itself, not its clamp)
         var want_w = max(node.w, node.min_w)
         if want_w != 0 or node.h != 0:
             external_call["gtk_widget_set_size_request", NoneType](w, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
@@ -5116,7 +5120,7 @@ def run_step[A: App](host_addr: Int, step: String):
         for k in range(len(host[].rt.shown.nodes)):  # (GTK agrees those have no label of their own: the check can fail)
             if needs_name(host[].rt.shown.nodes[k]) and accessible_name(host[].rt.shown.nodes[k]) == "" and k < len(host[].widgets) and host[].widgets[k] != 0:
                 var has = external_call["gtk_test_accessible_has_property", c_int](host[].widgets[k], c_int(GTK_ACCESSIBLE_PROPERTY_LABEL))
-                print("A11Y GTK LABEL: #" + String(k) + " " + ("set" if has != 0 else "none"))
+                print("A11Y GTK LABEL: #" + String(k) + " " + ("set" if has != 0 else "none"), flush=True)
         for k in range(len(host[].rt.shown.nodes)):
             var want = explicit_name(host[].rt.shown.nodes[k])
             if want == "" or k >= len(host[].widgets) or host[].widgets[k] == 0:

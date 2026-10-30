@@ -767,7 +767,7 @@ struct UIKitHost[A: App](Movable):
             _ = msg(self.widgets[i], "addInteraction:", tip)
         var spoken = explicit_name(node)  # (mojoui.a11y: what VoiceOver says when the control's own words don't)
         if spoken != "" and self.widgets[i] != 0:
-            if node.kind == CANVAS:  # (an image view isn't an accessibility element until asked: a drawn view is a picture)
+            if node.kind == CANVAS or node.kind == IMAGE:  # (an image view isn't an accessibility element until asked)
                 _ = msg(self.widgets[i], "setIsAccessibilityElement:", 1)
                 _ = msg(self.widgets[i], "setAccessibilityTraits:", 4)  # UIAccessibilityTraitImage
             _ = msg(self.widgets[i], "setAccessibilityLabel:", ns_string(spoken))

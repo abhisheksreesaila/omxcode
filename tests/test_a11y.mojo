@@ -66,4 +66,10 @@ def main() raises:
     assert_true(not d2.rebuild)
     assert_equal(len(d2.patches), 1)
 
+    # A canvas's label is a patch too (its picture stays); a labelled container names nothing (not a control).
+    var d3 = diff(Canvas(1, 0).label("Sales"), Canvas(1, 0).label("Sales by region"))
+    assert_true(not d3.rebuild)
+    assert_equal(len(d3.patches), 1)
+    assert_equal(explicit_name(VStack(Text("a")).label("Group").nodes[0]), "")
+
     print("a11y: OK")

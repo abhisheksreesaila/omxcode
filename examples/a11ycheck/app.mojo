@@ -2,9 +2,10 @@
 # and one control left unnamed on purpose. Each host hands the names to its platform's accessibility API:
 #   GTK:  MOJOUI_TEST="a11y" GTK_A11Y=test build/a11ycheck/linux/a11ycheck   (A11Y: lines, as GTK reports them)
 #   web:  scripts/check_a11y.py reads Chromium's accessibility tree
-# Tap "Rename" and the chart's words change in place (a tooltip is a patch): its accessible name follows.
+# Tap "Rename" and the chart's words change in place (a tooltip is a patch): its accessible name follows. Tap "Clear"
+# and it has no words: the name goes too (the audit then lists the chart).
 
-from mojoui import App, Event, View, Surface, VStack, HStack, Text, Button, Dropdown, Slider, Canvas, TextField
+from mojoui import App, Event, View, Surface, VStack, HStack, Text, Button, Dropdown, Slider, Canvas, TextField, Segmented, ProgressBar
 from mojoui.view import ICON_ONLY
 
 comptime DELETE = 1
@@ -12,6 +13,8 @@ comptime REGION = 2
 comptime ZOOM = 3
 comptime RENAME = 4
 comptime SEARCH = 5
+comptime CLEAR = 6
+comptime PERIOD = 7
 
 
 struct Main(App):
@@ -19,12 +22,16 @@ struct Main(App):
     var zoom: Int
     var average: Bool
     var query: String
+    var cleared: Bool
+    var period: Int
 
     def __init__(out self):
         self.region = 0
         self.zoom = 40
         self.average = False
         self.query = ""
+        self.cleared = False
+        self.period = 0
 
     def title(self) -> String:
         return "Accessibility check"
@@ -36,6 +43,11 @@ struct Main(App):
             self.zoom = event.number
         elif event.message == RENAME:
             self.average = not self.average
+            self.cleared = False
+        elif event.message == CLEAR:
+            self.cleared = True
+        elif event.message == PERIOD:
+            self.period = event.number
         elif event.message == SEARCH:
             self.query = event.text
 
@@ -43,17 +55,20 @@ struct Main(App):
         s.fill(UInt32(0xFFE0D0C0))
 
     def view(self) -> View:
-        var words = ("Average" if self.average else "Sum") + " of amount by region, as bars"
+        var words = "" if self.cleared else ("Average" if self.average else "Sum") + " of amount by region, as bars"
         return VStack(
             Text("Sales"),
             HStack(
                 Button("Delete", DELETE, ICON_ONLY, icon="trash").tag("delete"),  # an icon: its title is its name
                 Button("Rename", RENAME).tag("rename"),  # its own words
+                Button("Clear", CLEAR).tag("clear"),
                 spacing=8,
             ),
             Dropdown(["East", "West"], self.region, REGION).label("Region").tag("region"),  # .label(): never shown
             TextField(self.query, placeholder="Search", on_change=SEARCH).tag("search"),  # its placeholder
             Slider(self.zoom, ZOOM).tag("zoom"),  # unnamed on purpose: the audit lists it
+            Segmented(["Day", "Week"], self.period, PERIOD).label("Period").tag("period"),  # the group, not its first option
+            ProgressBar(60).label("Upload").tag("upload"),
             Canvas(1, 0).tooltip(words).tag("chart").width(240).height(120),  # a drawn view: its words
             spacing=10,
         ).padding(16)

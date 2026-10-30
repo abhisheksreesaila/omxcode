@@ -477,10 +477,9 @@ CANVAS_JS = r"""
   // swap, not only when a frame arrives: words can change while the picture doesn't.
   window.mojouiWords = div => {
     const m = document.getElementById('n' + div.dataset.node + '-meta'), cv = div.querySelector('canvas');
-    if (!m || (m.dataset.tip || '') === (div.dataset.tip || '')) return;
-    const was = div.dataset.tip || '';
-    div.dataset.tip = m.dataset.tip || ''; div.title = div.dataset.tip;
-    if (cv && (cv.getAttribute('aria-label') || '') === was) cv.setAttribute('aria-label', div.dataset.tip);
+    if (!m) return;
+    if ((m.dataset.tip || '') !== (div.dataset.tip || '')) { div.dataset.tip = m.dataset.tip || ''; div.title = div.dataset.tip; }
+    if (cv && (cv.getAttribute('aria-label') || '') !== (m.dataset.name || '')) cv.setAttribute('aria-label', m.dataset.name || '');
   };  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
   function attach(div) {
     if (div.mojoui) return;
@@ -856,19 +855,23 @@ def render(s, i, sid):
     if n.get("tip"):
         el.attrs["title"] = n["tip"]
         el.attrs["data-tip"] = n["tip"]
-    if n["kind"] == CANVAS:  # a drawn view is a picture to a screen reader; its words (tooltip or label) are its name
+    if n["kind"] == CANVAS:  # a drawn view is a picture to a screen reader; its words (label or tooltip) are its name
         name_control(el, n.get("a11y_name", ""), role="img")
     elif n.get("a11y_name"):
-        name_control(el, n["a11y_name"])
+        if n["kind"] in NAMED_AS_A_WHOLE:
+            el.attrs["aria-label"] = n["a11y_name"]
+        else:
+            name_control(el, n["a11y_name"])
     return el
 
 
 NAMEABLE = ("button", "select", "input", "textarea", "canvas", "img", "iframe")
+NAMED_AS_A_WHOLE = (SEGMENTED, RADIO, TABS, PROGRESS, WEBCOMP)  # (the group or the element is the control, not its first option)
 
 
 def name_control(el, name, role=None):
-    """The accessible name (mojoui.a11y.explicit_name) on the control itself, not the box around it: aria-label on
-    the first <button>/<select>/<input>/<textarea>/<canvas>/<img>/<iframe> in `el` (el itself first)."""
+    """The accessible name (mojoui.a11y.explicit_name) on the control itself, not the box around it (a field's form, a
+    toggle's label): aria-label on the first <button>/<select>/<input>/<textarea>/<canvas>/<img>/<iframe> in `el`."""
     todo = [el]
     while todo:
         e = todo.pop(0)
@@ -1262,7 +1265,7 @@ def render_node(s, i, sid):
 def canvas_meta(n, i):
     """What the canvas adapter needs to know (version, whether it wants frames), kept beside
     the <canvas> so a patch can replace it without clearing the picture."""
-    return I(id=f"n{i}-meta", hidden=True, data_version=str(n["value"]), data_frames=str(n["msg2"]), data_tip=n.get("tip", ""))
+    return I(id=f"n{i}-meta", hidden=True, data_version=str(n["value"]), data_frames=str(n["msg2"]), data_tip=n.get("tip", ""), data_name=n.get("a11y_name", ""))
 
 
 def render_alert(s, i, sid):

@@ -9,7 +9,7 @@ comptime SET_IMAGE = 4  # new pixels (same size); hosts read them from the shown
 comptime SET_FRAMES = 5  # a canvas's on_frame message changed (number = new message, 0 = stop)
 comptime SET_PLACE = 6  # an object moved on its Board (new x, y in the shown view), or the Board's own size changed
 comptime SET_SIZE = 7  # a view's width, height, min or max width changed (new values in the shown view); only in partial diffs
-comptime SET_TIP = 8  # a canvas's tooltip (a drawn view's words, its accessible name) changed: text = the new one
+comptime SET_TIP = 8  # a canvas's tooltip or label (a drawn view's words, its accessible name) changed: text = the new tooltip; hosts read the name from the shown view (mojoui.a11y.explicit_name)
 
 
 @fieldwise_init
@@ -108,7 +108,7 @@ def node_patches(a: Node, b: Node, i: Int, on_board: Bool, mut patches: List[Pat
         patches.append(Patch(SET_VALUE, i, "", b.value))
     if b.kind == CANVAS and a.msg2 != b.msg2:
         patches.append(Patch(SET_FRAMES, i, "", b.msg2))
-    if b.kind == CANVAS and a.tip != b.tip:
+    if b.kind == CANVAS and (a.tip != b.tip or a.label != b.label):
         patches.append(Patch(SET_TIP, i, b.tip, 0))
     if a.pixels != b.pixels:
         patches.append(Patch(SET_IMAGE, i, "", 0))

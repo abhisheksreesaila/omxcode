@@ -37,21 +37,28 @@ def core():
 
 def gtk():
     headless.ensure()
-    env = dict(os.environ, MOJOUI_TEST="a11y;tap:Rename;a11y", GTK_A11Y="test")
+    env = dict(os.environ, MOJOUI_TEST="a11y;tap:Rename;a11y;tap:Clear;a11y", GTK_A11Y="test")
     code, out = run([str(APP / "linux/a11ycheck")], env=env, timeout=120)
-    lines = [l for l in out.splitlines() if l.startswith("A11Y")]
+    lines = [re.sub(r"#\d+ ?", "", l) for l in out.splitlines() if l.startswith("A11Y")]  # (by tag, not node number)
     want = [
         "A11Y: 1 unnamed",
-        "A11Y UNNAMED: SLIDER #7 (zoom): no name",
-        "A11Y GTK LABEL: #7 none",
-        "A11Y LABEL: #5 region = Region (ok)",
-        f"A11Y LABEL: #8 chart = {SUM} (ok)",
-        f"A11Y LABEL: #8 chart = {AVG} (ok)",
+        "A11Y UNNAMED: SLIDER (zoom): no name",
+        "A11Y LABEL: region = Region (ok)",
+        "A11Y LABEL: period = Period (ok)",
+        "A11Y LABEL: upload = Upload (ok)",
+        f"A11Y LABEL: chart = {SUM} (ok)",
+        f"A11Y LABEL: chart = {AVG} (ok)",
+        "A11Y: 2 unnamed",  # (after Clear: the chart has no words)
+        "A11Y UNNAMED: CANVAS (chart): no name",
     ]
     missing = [w for w in want if w not in lines]
     bad = [l for l in lines if "(GTK:" in l]
-    ok = code == 0 and not missing and not bad
-    return ok, "GTK: " + ("labels as GTK reports them: " + "; ".join(l.split(": ", 1)[1] for l in lines[:5]) if ok else f"exit {code}; missing {missing}; differs {bad}")
+    nones = [l for l in lines if l.startswith("A11Y GTK LABEL:")]
+    # GTK agrees: the unnamed slider (every pass) and the cleared chart (the last) carry no label of their own
+    cleared_ok = len(nones) == 4 and all(l.endswith(" none") for l in nones)
+    ok = code == 0 and not missing and not bad and cleared_ok
+    return ok, "GTK: " + ("labels read back from GTK's test backend: Region, Period, Upload, the chart's words before and after Rename; after Clear, GTK reports no label" if ok
+                          else f"exit {code}; missing {missing}; differs {bad}; GTK none lines {nones}\n" + "\n".join(lines))
 
 
 def web():
@@ -62,20 +69,25 @@ def web():
         page.get_by_role("button", name="Rename").click()
         page.wait_for_function(f"() => document.querySelector('canvas[aria-label=\"{AVG}\"]') !== null", timeout=10000)
         snaps.append(page.locator("body").aria_snapshot())
+        page.get_by_role("button", name="Clear").click()
+        page.wait_for_function("() => document.querySelector('canvas').getAttribute('aria-label') === ''", timeout=10000)
+        snaps.append(page.locator("body").aria_snapshot())
         return ""
 
     r, out = drive.web_run(APP / "web", "", during=during)
-    if len(snaps) < 2:
+    if len(snaps) < 3:
         return False, "web: no accessibility tree: " + out[-400:]
-    before, after = snaps
-    want = ['button "Delete"', 'button "Rename"', 'combobox "Region"', 'textbox "Search"', f'img "{SUM}"']
+    before, after, cleared = snaps
+    want = ['button "Delete"', 'button "Rename"', 'combobox "Region"', 'textbox "Search"', 'radiogroup "Period"',
+            'radio "Day"', 'progressbar "Upload"', f'img "{SUM}"']
     missing = [w for w in want if w not in before]
     slider = re.search(r"^\s*- slider(.*)$", before, re.M)
     unnamed_slider = slider is not None and '"' not in slider.group(1).split(":")[0]
     followed = f'img "{AVG}"' in after and f'img "{SUM}"' not in after
-    ok = not missing and unnamed_slider and followed
-    return ok, "web: " + ("Chromium names " + ", ".join(want[:4]) + f", the chart as img; after Rename: img \"{AVG}\"; the slider stays unnamed"
-                          if ok else f"missing {missing}; slider unnamed {unnamed_slider}; followed {followed}\n{before}\n---\n{after}")
+    gone = "img \"" not in cleared
+    ok = not missing and unnamed_slider and followed and gone
+    return ok, "web: " + ("Chromium names " + ", ".join(want[:7]) + f"; the chart is img \"{SUM}\", then \"{AVG}\", then unnamed after Clear; the slider stays unnamed"
+                          if ok else f"missing {missing}; slider unnamed {unnamed_slider}; followed {followed}; gone {gone}\n{before}\n---\n{after}\n---\n{cleared}")
 
 
 def main():
