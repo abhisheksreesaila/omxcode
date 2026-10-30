@@ -21,10 +21,11 @@ piece another app would need goes into omxcode (`mojoui/`) with its own test; om
 | M7 | The warehouse, end to end | `scripts/scenario.py warehouse` drives the real omxplorer only through its agent tools; outputs: reel.mp4 passes M5's tests; `missing.csv` (shipments whose label never appears) equals truth's set |
 | M8 | The drone, end to end | `scripts/scenario.py drone` (agent tools only): at three seeks the cursor matches the video within one frame; `defects_a.csv`/`defects_b.csv` find ≥ 90 % of truth's defects within 5 m; `worse.csv` equals truth's worsened set; `waypoints.csv` lists exactly those, lat/lon within 1e-4 of truth |
 | M9 | The covers | in ~/Projects/omxlabs: clip-warehouse.mp4 and clip-drone.mp4 recorded from the real app (≥ 8 s each) on the omxplorer cover and in its deck; the omxlabs page leads with omxplorer and "four breakthrough technologies"; every cover: no overflow at 1440 and 390, no console errors |
+| M11 | An iMovie-grade editor (owner, 2026-10-30: "modelled on iMovie: timelines at the bottom, similar controls, really polished") | `tests/test_mediatimeline.mojo` prints `timeline: ok` (filmstrip thumbnails, zoom, playhead, trim, split, a marker lane from rows), `edit: ok` (trimmed/split clips export to the right length); `examples/media` shows the viewer above a filmstrip timeline with a detections lane and a telemetry lane; a headless GTK run that trims and splits prints `TIMELINE:` lines and writes its screenshot; omxplorer's video card opens the editor |
 | M10 | The morning note | `docs/research/inprocess-ai.md`: how omxconsole could serve non-LLM models (e.g. Segment Anything) to omxplorer in process, no HTTP; ≥ 3 options with costs and one recommendation |
 
 ## Done means
-`scripts/check` PASS for M0–M10, the reviewer passes it, and the two clips play on the cover.
+`scripts/check` PASS for M0–M11, the reviewer passes it, and the two clips play on the cover.
 
 ## Out of bounds
 Pushing, deploying, paid services, sign-ups, secrets; the frozen `../mojo-ui-apple-test`; patching Mojo; lowering a proof.

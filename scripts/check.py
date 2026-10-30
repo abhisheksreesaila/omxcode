@@ -324,7 +324,32 @@ def m10():
     return True, f"{opts} options and a recommendation"
 
 
-MILESTONES = {f"M{i}": globals()[f"m{i}"] for i in range(11)}
+def m11():
+    media()
+    ok, msg, _ = oks("tests/test_mediatimeline.mojo", ["timeline", "edit"])
+    if not ok:
+        return False, msg
+    r = run(["scripts/build.sh", "media", "linux"])
+    if r.returncode:
+        return False, f"build media: {(r.stdout + r.stderr)[-400:]}"
+    import headless
+    headless.ensure()
+    shot = OUT / "m11-editor-gtk.png"
+    env = dict(os.environ, G39_MEDIA=str(MEDIA), MOJOUI_TRACE="1", MOJOUI_SHOT=str(shot), MOJOUI_WINDOW="1440x900",
+               MOJOUI_TEST=os.environ.get("G39_M11_STEPS", "wait:600;tap:edit;wait:400;tap:split;wait:300;tap:trim-end;wait:300;tap:play;wait:1000;tap:pause;wait:300"))
+    r = run([str(ROOT / "build/media/linux/media")], 600, env=env)
+    out = r.stdout + r.stderr
+    (OUT / "m11.txt").write_text(out)
+    lines = re.findall(r"TIMELINE: .*", out)
+    if r.returncode or "TEST: " in out or not lines or not shot.exists() or not any("split" in l for l in lines) or not any("trim" in l for l in lines):
+        return False, f"exit {r.returncode}, {len(lines)} TIMELINE lines, shot {shot.exists()}: {out[-400:]}"
+    src = (ROOT / "examples/omxplorer/app.mojo").read_text() + (ROOT / "mojoui/mediacard.mojo").read_text()
+    if "MediaTimeline" not in src:
+        return False, "omxplorer's video card doesn't open the editor (no MediaTimeline in mediacard/app)"
+    return True, f"{msg}; {len(lines)} TIMELINE lines; editor in omxplorer"
+
+
+MILESTONES = {f"M{i}": globals()[f"m{i}"] for i in range(12)}
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
