@@ -349,7 +349,35 @@ def m11():
     return True, f"{msg}; {len(lines)} TIMELINE lines; editor in omxplorer"
 
 
-MILESTONES = {f"M{i}": globals()[f"m{i}"] for i in range(12)}
+def m12():
+    import math
+    t = media()
+    env = dict(os.environ, G39_MEDIA=str(MEDIA), G39_OUT=str(OUT))
+    out = ""
+    for test, label in (("tests/test_visionmodel.mojo", "visionmodel"), ("tests/test_findlike.mojo", "findlike")):
+        r = run(["pixi", "run", "-e", "models", "mojo", "run", "-I", ".", test], 3600, env=env)
+        o = r.stdout + r.stderr
+        out += o
+        if r.returncode or not re.search(rf"^{label}: ok", o, re.M):
+            return False, f"{test}: exit {r.returncode}: {o[-500:]}"
+    want = set()
+    for a, b in t["warehouse"]["damaged_frames"]:
+        want.update(range(a, b + 1))
+    got = {int(r["frame"]) for r in csv_rows(OUT / "findlike_damaged.csv")}
+    rec, prec = len(got & want) / max(len(want), 1), len(got & want) / max(len(got), 1)
+    marks = [(float(r["lat"]), float(r["lon"])) for r in csv_rows(OUT / "findlike_drone_a.csv")]
+
+    def metres(a, b):
+        return math.hypot((a[0] - b[0]) * 111320, (a[1] - b[1]) * 111320 * math.cos(math.radians(a[0])))
+
+    hit = sum(1 for d in t["drone"]["defects_a"] if any(metres((d["lat"], d["lon"]), m) <= 5 for m in marks))
+    secs = number(out, "scan s")
+    if rec < 0.95 or prec < 0.85 or hit < 4 or secs is None or secs > 15:
+        return False, f"recall {rec:.3f}, precision {prec:.3f}, drone {hit}/5, scan {secs} s"
+    return True, f"damaged frames recall {rec:.3f} precision {prec:.3f}; drone {hit}/5 marks; scan {secs:.1f} s"
+
+
+MILESTONES = {f"M{i}": globals()[f"m{i}"] for i in range(13)}
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)

@@ -22,10 +22,11 @@ piece another app would need goes into omxcode (`mojoui/`) with its own test; om
 | M8 | The drone, end to end | `scripts/scenario.py drone` (agent tools only): at three seeks the cursor matches the video within one frame; `defects_a.csv`/`defects_b.csv` find ≥ 90 % of truth's defects within 5 m; `worse.csv` equals truth's worsened set; `waypoints.csv` lists exactly those, lat/lon within 1e-4 of truth |
 | M9 | The covers | in ~/Projects/omxlabs: clip-warehouse.mp4 and clip-drone.mp4 recorded from the real app (≥ 8 s each) on the omxplorer cover and in its deck; the omxlabs page leads with omxplorer and "four breakthrough technologies"; every cover: no overflow at 1440 and 390, no console errors |
 | M11 | An iMovie-grade editor (owner, 2026-10-30: "modelled on iMovie: timelines at the bottom, similar controls, really polished") | `tests/test_mediatimeline.mojo` prints `timeline: ok` (filmstrip thumbnails, zoom, playhead, trim, split, a marker lane from rows), `edit: ok` (trimmed/split clips export to the right length); `examples/media` shows the viewer above a filmstrip timeline with a detections lane and a telemetry lane; a headless GTK run that trims and splits prints `TIMELINE:` lines and writes its screenshot; omxplorer's video card opens the editor |
+| M12 | Real models in the slot (VisionModel, in process) | `tests/test_visionmodel.mojo` prints `visionmodel: ok` (OWLv2 boxes and SAM 2.1 masks as VideoTable rows; the hand-off ≤ 1 ms); `tests/test_findlike.mojo` runs warehouse.mp4 through `ModelAnalyzer` from ONE example crop (no ColourRange) and writes `build/g39/findlike_damaged.csv` (frame per row with a hit) and drone_a's burn marks from one example to `build/g39/findlike_drone_a.csv` (lat, lon); against truth: damaged frames recall ≥ 0.95, precision ≥ 0.85; ≥ 4 of 5 drone marks within 5 m; prints `scan s: X` with X ≤ 15 for the 1140-frame warehouse |
 | M10 | The morning note | `docs/research/inprocess-ai.md`: how omxconsole could serve non-LLM models (e.g. Segment Anything) to omxplorer in process, no HTTP; ≥ 3 options with costs and one recommendation |
 
 ## Done means
-`scripts/check` PASS for M0–M11, the reviewer passes it, and the two clips play on the cover.
+`scripts/check` PASS for M0–M12, the reviewer passes it, and the two clips play on the cover.
 
 ## Out of bounds
 Pushing, deploying, paid services, sign-ups, secrets; the frozen `../mojo-ui-apple-test`; patching Mojo; lowering a proof.
