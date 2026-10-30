@@ -2,7 +2,7 @@
 memory per threadgroup, 1024 threads.) Scans mojoui/ and the vendored MX frame's source at its commit for shared
 allocations (stack_allocation[..., address_space=AddressSpace.SHARED]; external_memory[...], sized at launch, is judged by
 the budget its file checks against: a literal "<= 48 * 1024", or a constant its file names as the bound ("bound:
-SMEM_LIMIT"), worked out for an Apple GPU: `(32 if APPLE_GPU else 48) * 1024` reads 32 KB, D-772), sums each function's shared bytes and prints one line per
+SMEM_LIMIT"), worked out for an Apple GPU: `(32 if APPLE_GPU else 48) * 1024` reads 32 KB, D-785), sums each function's shared bytes and prints one line per
 kernel. Exit 1 if any is over, or can't be sized. It also lists what else stops a kernel on Apple's GPU (Metal has no
 Float64 and no general 64-bit atomics; PTX is NVIDIA's): printed, not judged here.
 (2026-10-24: the first version read only MX frame's mojo/ and missed kernels_aot/, where its GPU kernels are.)

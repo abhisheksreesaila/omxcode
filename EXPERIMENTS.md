@@ -6,8 +6,8 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ## omxcore 834ef9a in omxcode (2026-10-29)
 - **Setup:** branch engine-834ef9a from release-2026-10-29, its own pixi env; the package built from a clean `git archive 834ef9a` with Mojo 1.1; RTX 3090; GitHub Mac runs 40957099769 and 40959478762.
-- **Worked:** the engine under its own name (vendor/omxcore.mojoc, `from omxcore`, D-770); the engine tests; omxplorer on GTK and the web at 1M (sample) and 100M rows, equal to pyarrow; goals 20 M1–M2, 29 M0–M4, 30 M0–M4, 32 M6 and goal 36's non-measured milestones PASS; the Mac GPU build runs omxplorer on the runner's Apple GPU; a fresh clone follows the README to a working app.
-- **Broke and fixed:** an undone formula could come back (the engine logs formula steps since 2585dc9: D-771); gpu_audit couldn't size kernels bounded by the engine's new named limits (D-772); a fresh clone's `pixi install` failed on a committed `.pixi` symlink (D-773); mac-ci's GPU build had failed since goal 34b on a file its tarball lacked (D-774).
+- **Worked:** the engine under its own name (vendor/omxcore.mojoc, `from omxcore`, D-783); the engine tests; omxplorer on GTK and the web at 1M (sample) and 100M rows, equal to pyarrow; goals 20 M1–M2, 29 M0–M4, 30 M0–M4, 32 M6 and goal 36's non-measured milestones PASS; the Mac GPU build runs omxplorer on the runner's Apple GPU; a fresh clone follows the README to a working app.
+- **Broke and fixed:** an undone formula could come back (the engine logs formula steps since 2585dc9: D-784); gpu_audit couldn't size kernels bounded by the engine's new named limits (D-785); a fresh clone's `pixi install` failed on a committed `.pixi` symlink (D-786); mac-ci's GPU build had failed since goal 34b on a file its tarball lacked (D-787).
 - **Result:** chart times equal 3d2455d's (1M: sum 0.5 ms, median 6.4 ms, month 5.8 ms). Report: docs/goals/engine-834ef9a/report.md.
 - **Next small step:** the owner replaces the Mac release asset (report) and re-measures goal 36 when it suits.
 
