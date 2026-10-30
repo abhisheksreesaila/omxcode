@@ -825,5 +825,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Scroll pans (D-1218): the first `scroll:` step hit the list step of the same name ("TEST: no list 0"); renamed `wheel:`.
 - Append (D-1219) and mend (D-1220): finish max 2.9 ms, erase p95 14 ms. The first mend mutation passed the checker: nothing else sat in the erased stroke's box, so a blank box was right. Session 2's second stroke now crosses it; the mutation then fails (40 pixels).
 - Clamp (D-1221): deepzoom 8 ms p95, 0 texture renders.
-- Lens, omxplorer, workbook, particles build; goal 6's checker (lens: drag and `zoom:` on a canvas that doesn't opt in) run after the change.
+- Lens, omxplorer, workbook, particles build. Goal 6's checker after the change: M2 (lens drag + `zoom:` reach update), M3–M6 (web wheel included), M9 pass; M7 (needs a Mac run with side pictures) and M8 (dashboard/jobwake import `omxcore`) fail, neither touching these files.
+- Web scroll-pan driven by hand in headless Chromium: a plain wheel posted WHEEL (dx -30, dy -100); ctrl+wheel zoomed to 119%.
+- Bench after the fixes, five runs on a machine shared with other sessions' builds: p95 pan 1.8–12.6, zoom 3.1–7.9, deepzoom 8.9–26.4 (an A/B of the whole-pixel corner showed the same spread both ways: noise), draw 1.6–3.7, finish 2.6–5.8, erase 14.1–22.6 ms. bench.json keeps the last run.
+- Final checker: M0–M5 PASS.
 - Contrast (D-1224): GTK's `.mui-tag-toolbar label` (0,2,2) beat `button label { color: inherit }`; the web's `[data-tag=toolbar] button` came after `button.prominent`.
