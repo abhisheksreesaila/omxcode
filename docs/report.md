@@ -35,7 +35,7 @@ pixi run python scripts/scenario.py warehouse --media build/g39/media --out buil
 pixi run python scripts/scenario.py drone --media build/g39/media --out build/g39/drone
 OMX_DOCUMENTS=build/g39/media scripts/omxplorer.sh               # by hand: open warehouse.mp4 → Analyze → Make a reel / Edit
 ```
-The clips are on the omxplorer cover (`~/Projects/omxlabs/omxplorer/`, served at http://127.0.0.1:8732/omxplorer/).
+Both clips are recorded from omxplorer itself, driven by its agent tools (one mouse-wheel scroll aside, D in covers.py), and are on the omxplorer cover (`~/Projects/omxlabs/omxplorer/`, served at http://127.0.0.1:8732/omxplorer/).
 Screenshots: `build/g39/m7-omxplorer-gtk.png`, `m8-omxplorer-gtk.png`, `m11-omxplorer-edit-drone-gtk.png`.
 
 ## Worth a second look
