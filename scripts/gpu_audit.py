@@ -1,12 +1,13 @@
 """Does every GPU kernel fit an Apple GPU's threadgroup memory? (goal 32 M6; MAX's AppleMetalFamily: 32 KB of shared
 memory per threadgroup, 1024 threads.) Scans mojoui/ and the vendored MX frame's source at its commit for shared
 allocations (stack_allocation[..., address_space=AddressSpace.SHARED]; external_memory[...], sized at launch, is judged by
-the budget its file checks against, e.g. "<= 48 * 1024"), sums each function's shared bytes and prints one line per
+the budget its file checks against: a literal "<= 48 * 1024", or a constant its file names as the bound ("bound:
+SMEM_LIMIT"), worked out for an Apple GPU: `(32 if APPLE_GPU else 48) * 1024` reads 32 KB, D-785), sums each function's shared bytes and prints one line per
 kernel. Exit 1 if any is over, or can't be sized. It also lists what else stops a kernel on Apple's GPU (Metal has no
 Float64 and no general 64-bit atomics; PTX is NVIDIA's): printed, not judged here.
 (2026-10-24: the first version read only MX frame's mojo/ and missed kernels_aot/, where its GPU kernels are.)
 
-  pixi run python scripts/gpu_audit.py [--mxframe PATH]   (default: $MXFRAME_REPO, else ../../mxframe, the owner's checkout)
+  pixi run python scripts/gpu_audit.py [--mxframe PATH]   (default: $OMXCORE_REPO, else ../../mxframe or ~/Projects/mxframe, the owner's checkout)
 """
 
 import os
@@ -15,6 +16,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from engine_lineage import engine_repo  # (the omxcore checkout: $OMXCORE_REPO, ../../mxframe or ~/Projects/mxframe)
 
 ROOT = Path(__file__).resolve().parent.parent
 LIMIT = 32 * 1024
@@ -26,6 +30,8 @@ COMPTIME = re.compile(r"^\s*(?:comptime|alias)\s+(\w+)\s*(?::\s*\w+)?\s*=\s*([^#
 DEF = re.compile(r"^\s*(?:def|fn)\s+(\w+)", re.M)
 EXTERNAL = re.compile(r"external_memory\[")
 BUDGET = re.compile(r"<=?\s*(\d+)\s*\*\s*1024")
+BOUND = re.compile(r"\bbound:\s*([A-Z_][A-Z0-9_]*)")  # (omxcore 834ef9a: "sized at launch by _smem_bytes; bound: SMEM_LIMIT")
+APPLE_IF = re.compile(r"\(\s*(\d+)\s+if\s+(.+?)\s+else\s+(\d+)\s*\)")
 APPLE = [("Float64 on the GPU", re.compile(r"DType\.float64|Scalar\[F64\]|__mlir_type\.f64")),
          ("64-bit atomics", re.compile(r"atomicrmw[^\n]*(?:i64|f64)|_type\s*=\s*__mlir_type\.i64|Atomic\[DType\.(?:u?int64)|_atomic_\w+_(?:f64|i64|bits)\(")),
          ("PTX (NVIDIA only)", re.compile(r"inlined_assembly\[\s*\"[^\"]*(?:red\.|match\.|cvta|\.sync)")),
@@ -40,10 +46,22 @@ def consts(texts):
     return out
 
 
+def on_apple(expr):
+    """A per-target choice whose condition names Apple, as an Apple GPU build reads it ("(32 if APPLE_GPU else 48)" ->
+    "32"); any other condition stays, so the expression can't be worked out."""
+    def side(m):
+        cond = m.group(2).lower()
+        if "apple" not in cond or re.search(r"\bnot\b|!", cond):  # (a negated condition isn't read: unsized)
+            return m.group(0)
+        return m.group(1)
+    return APPLE_IF.sub(side, expr)
+
+
 def evaluate(expr, known, depth=0):
-    """A comptime size expression with known names substituted; None if it can't be worked out here."""
+    """A comptime size expression with known names substituted, for an Apple GPU; None if it can't be worked out here."""
     if depth > 8:
         return None
+    expr = on_apple(expr)
     names = set(re.findall(r"[A-Za-z_]\w*", expr))
     for n in names:
         if n not in known:
@@ -73,6 +91,12 @@ def scan(files):
             line = text[:m.start()].count("\n") + 1
             rows.append((f, line, name, None if n is None or size is None else n * size, m.group(0)[:90]))
         budgets = [int(b) * 1024 for b in BUDGET.findall(text)]
+        for name in BOUND.findall(text):  # (a named bound: None, and so unsized, unless it works out for Apple and
+            #   the file enforces it: a launch compared against it, `smem > SMEM_LIMIT`, `ng <= SHARED_MAX_GROUPS`, …)
+            guards = [name] + [k for k, e in known.items() if re.search(rf"\b{name}\b", e)]
+            enforced = any(re.search(rf"(?:[<>]=?)\s*{g}\b", text) for g in guards)
+            v = evaluate(known[name], known) if name in known and enforced else None
+            budgets += [v] if v is not None else []
         for m in EXTERNAL.finditer(text):  # (sized at launch: the most the file lets it have)
             fn = [d for d in DEF.finditer(text, 0, m.start())]
             line = text[:m.start()].count("\n") + 1
@@ -95,7 +119,7 @@ def apple_blockers(files):
 
 
 def mxframe_files(path):
-    commit = (ROOT / "vendor" / "MXFRAME_COMMIT").read_text().split(" main ")[1].split()[0]
+    commit = (ROOT / "vendor" / "OMXCORE_COMMIT").read_text().split(" main ")[1].split()[0]
     out = Path(tempfile.mkdtemp(prefix="mxframe-src-"))
     a = subprocess.run(f"git -C {path} archive {commit} mojo kernels_aot | tar -x -C {out}", shell=True, capture_output=True, text=True)
     if a.returncode != 0:
@@ -104,7 +128,7 @@ def mxframe_files(path):
 
 
 if __name__ == "__main__":
-    mx = Path(sys.argv[sys.argv.index("--mxframe") + 1]) if "--mxframe" in sys.argv else Path(os.environ.get("MXFRAME_REPO", ROOT.parent.parent / "mxframe"))
+    mx = Path(sys.argv[sys.argv.index("--mxframe") + 1]) if "--mxframe" in sys.argv else engine_repo()
     files = list((ROOT / "mojoui").rglob("*.mojo"))
     extra, commit = mxframe_files(mx)
     problems = []

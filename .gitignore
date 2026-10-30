@@ -1,4 +1,5 @@
-.pixi/
+# the pixi env: a folder, or a worktree's symlink to a shared env (never committed: a clone's pixi install failed on one, D-786)
+.pixi
 build/
 *.o
 __pycache__/

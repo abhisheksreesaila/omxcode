@@ -1,5 +1,7 @@
 # MX frame: the Mojo API omxcode needs
 
+> 2026-10-29: MX frame is **omxcore** now (F-165); omxcode vendors it as `vendor/omxcore.mojoc` and writes `from omxcore import …` (D-783). This page is the goal-15 request as it was.
+
 **For:** the MX frame project. **From:** omxcode (the framework) and omxplorer (the Numbers-style data app), as of goal 15 (2026-10-17).
 **Replaces:** the goal 8–9 wish list that was here (items 1–22, kept in git history). Everything in it is folded in below.
 
@@ -25,7 +27,7 @@ change, and they're shaped like the API below on purpose.
 ## 1. Tables and columns
 
 ```mojo
-from mxframe import Table, ColumnKind, INT, DECIMAL, TEXT, DATE, BOOL
+from omxcore import Table, ColumnKind, INT, DECIMAL, TEXT, DATE, BOOL
 
 var t = Table.empty()                              # "New blank sheet"
 t.add_column("revenue", DECIMAL, scale=2)          # values stored as int64 hundredths

@@ -3,7 +3,7 @@
 # GPU; a cancelled job ends cancelled, and the sheet can be edited while a job holds its snapshot.
 #   scripts/mxbuild.sh tests/test_chart_job.mojo -o build/test_chart_job && build/test_chart_job
 from std.testing import assert_equal, assert_true, assert_false
-from mxframe import gpu_available, GPU as MX_GPU, CPU as MX_CPU, JOB_DONE, JOB_CANCELLED, JobBody, JobCtl, start_job
+from omxcore import gpu_available, GPU as MX_GPU, CPU as MX_CPU, JOB_DONE, JOB_CANCELLED, JobBody, JobCtl, start_job
 from std.memory import Pointer
 from mojoui.clock import now_ns
 from mojoui.csvio import read_csv

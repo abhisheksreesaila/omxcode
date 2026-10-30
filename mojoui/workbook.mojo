@@ -6,7 +6,7 @@
 # plain enough for an agent to write.
 
 from std.os import makedirs
-from mxframe import Table as MxTable, read_parquet, write_parquet, UNCOMPRESSED, INT as MX_INT
+from omxcore import Table as MxTable, read_parquet, write_parquet, UNCOMPRESSED, INT as MX_INT
 from mojoui.json import json_string, Json
 from mojoui.frame import Column, Columns, Frame, Row, Edit, share, base_at, INT, DECIMAL, TEXT, DATE, MAX_COLS
 

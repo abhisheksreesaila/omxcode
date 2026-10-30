@@ -4,7 +4,7 @@
 
 from mojoui.view import (View, Text, Button, Canvas, VStack, HStack, Grid, Spacer, Card, Icon, TITLE, HEADLINE, CAPTION, SUBTLE,
                          ICON_ONLY, CENTER, START, NO_MSG, TONE_GOOD)
-from mxframe import Expr
+from omxcore import Expr
 from mojoui.sheet import Sheet, TEXT, DECIMAL, INT
 from mojoui.kpi import KpiView
 from mojoui.sheetpage import SheetObject, compute, chart_view, readout, groups_of

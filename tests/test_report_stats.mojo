@@ -4,7 +4,7 @@
 # and shows in the column's places.
 #   scripts/mxbuild.sh tests/test_report_stats.mojo -o build/test_report_stats && build/test_report_stats
 from std.testing import assert_equal, assert_true
-from mxframe import read_parquet, write_parquet, scan_parquet, UNCOMPRESSED
+from omxcore import read_parquet, write_parquet, scan_parquet, UNCOMPRESSED
 from mojoui.sheet import Sheet
 from mojoui.reportpage import (ReportFilter, ReportTile, new_tile, compute_tile, tile_value, tile_label, TILE_SUM, TILE_AVERAGE, TILE_COUNT,
                                TILE_CHART, TILE_DISTINCT, TILE_MEDIAN)

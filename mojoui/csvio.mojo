@@ -7,7 +7,7 @@
 # read: it's opened for streaming (`scan_parquet`: the footer and the dictionaries), and the sheet reads its rows a row
 # group at a time (mojoui.sheet).
 
-from mxframe import (read_csv as mx_read_csv, CsvOptions, CsvResult, Table, SharedTable, ColumnKind, read_parquet,
+from omxcore import (read_csv as mx_read_csv, CsvOptions, CsvResult, Table, SharedTable, ColumnKind, read_parquet,
                      scan_parquet, ParquetScan, JobCtl)
 from mojoui.sheet import INT, DECIMAL, TEXT, DATE, BOOL, FLOAT, float_cell
 from mojoui.numformat import date_text, decimal_text

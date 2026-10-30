@@ -5,13 +5,13 @@
 # work inside the start call: the job comes back done and the app reads it on the next frame, as before.
 
 # (Job and its states are also what apps take from here: an app imports mojoui, never the engine, goal 5's rule)
-from mxframe import Job, JobCtl, JobBody, JobProgress, start_job, JOB_RUNNING, JOB_DONE, JOB_FAILED, JOB_CANCELLED
+from omxcore import Job, JobCtl, JobBody, JobProgress, start_job, JOB_RUNNING, JOB_DONE, JOB_FAILED, JOB_CANCELLED
 from mojoui.sheet import Sheet
 from mojoui.sheetpage import SheetObject, compute, shape_of
 from mojoui.csvio import CsvImport, read_table, empty_import
 from mojoui.sheet import placeholder_sheet
 from mojoui.clock import now_ns
-from mxframe.job import THREADS
+from omxcore.job import THREADS
 from std.ffi import external_call, c_int
 from std.sys import CompilationTarget, is_defined
 

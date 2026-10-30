@@ -1,7 +1,7 @@
 # mojoui.sample: the sample orders (mojoui.orders) generated straight into an MX frame table, row by row: no
 # stand-in columns, no second copy.
 
-from mxframe import Table, ColumnKind, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT, DATE as MX_DATE
+from omxcore import Table, ColumnKind, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT, DATE as MX_DATE
 from mojoui.orders import (order_row, DUPLICATES, DUP_ZIP, ZIP, CUSTOMER, REGION, PRODUCT, CARRIER, CUSTOMERS, REGIONS, PRODUCTS, CARRIERS)
 
 

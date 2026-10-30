@@ -8,7 +8,7 @@
 #   var mx = MxFrame(table, ["day", "category", …], [("bin", "cents", 5000, 23)])
 #   var totals = mx.group_sum("region", "cents", 5, ranges=[("day", 0, 364)], equals=[("channel", 1)])
 
-from mxframe import Table as MxTable, SharedTable, Query, Expr, col, lit, sum, count, CPU, INT
+from omxcore import Table as MxTable, SharedTable, Query, Expr, col, lit, sum, count, CPU, INT
 from mojoui.gpu import Table, GroupSums
 from mojoui.clock import now_ns
 

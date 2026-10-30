@@ -4,7 +4,7 @@
 # value column's format. Apps keep a List[SheetObject], call compute() after changes, and place object_card()s.
 
 from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER, START, NO_MSG
-from mxframe import Expr, col, lit, least, greatest
+from omxcore import Expr, col, lit, least, greatest
 from mojoui.clock import shown_ms
 from mojoui.sheet import Sheet, TEXT, DECIMAL, INT, DATE, BOOL
 from mojoui.sentence import Word, Sentence, sentence_text

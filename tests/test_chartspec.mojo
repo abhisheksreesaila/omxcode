@@ -2,7 +2,7 @@
 # document keeps the spec (a sheet chart and a Report chart tile), and an older document's charts open as they were.
 #   scripts/mxbuild.sh -I tests tests/test_chartspec.mojo -o build/test_chartspec && build/test_chartspec
 from std.testing import assert_equal, assert_true
-from mxframe import Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
+from omxcore import Table, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
 from mojoui.sheet import Sheet
 from mojoui.omxfile import save_omx, open_document, read_spec
 from mojoui.json import Json

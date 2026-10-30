@@ -16,9 +16,9 @@ test -f "$SRC" || { echo "no $SRC" >&2; exit 2; }
 NAME="$(tr '[:lower:]' '[:upper:]' <<< "${EX:0:1}")${EX:1}Mojo"   # hello → HelloMojo
 BUNDLE_ID="${BUNDLE_PREFIX:-com.mojoui}.$EX"
 MOJO=(pixi run mojo build -I "examples/$EX" -I . -I vendor)
-# An example that uses the MX frame package (vendor/mxframe.mojoc, vendor/MXFRAME_COMMIT) links its Parquet codecs.
+# An example that uses the omxcore engine package (vendor/omxcore.mojoc, vendor/OMXCORE_COMMIT; its needs file says omxcore) links its Parquet codecs.
 LINK=()
-if grep -qx mxframe "examples/$EX/needs" 2>/dev/null && [ "$(uname)" != Darwin ]; then source scripts/mxlink.sh; fi  # (Linux's codecs)
+if grep -qx omxcore "examples/$EX/needs" 2>/dev/null && [ "$(uname)" != Darwin ]; then source scripts/mxlink.sh; fi  # (Linux's codecs)
 
 mojo_build() {  # mojo_build <args...>: fails if Mojo fails, hides the telemetry warning
   local log; log=$(mktemp)

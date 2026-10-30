@@ -7,7 +7,7 @@
 #
 # Format 1 (the pyarrow shim's files) is refused with a message that says so.
 
-from mxframe import write_parquet, read_parquet, scan_parquet, ParquetScan, Table, UNCOMPRESSED
+from omxcore import write_parquet, read_parquet, scan_parquet, ParquetScan, Table, UNCOMPRESSED
 from mojoui.sheet import Sheet, placeholder_sheet, INT, DECIMAL, TEXT, BOOL, DATE
 from mojoui.csvio import streams
 from mojoui.json import Json, json_string

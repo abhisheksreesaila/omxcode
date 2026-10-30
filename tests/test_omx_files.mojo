@@ -4,7 +4,7 @@
 #   scripts/mxbuild.sh tests/test_omx_files.mojo -o build/test_omx_files && build/test_omx_files build/omx-files
 from std.testing import assert_equal, assert_true
 from std.sys import argv
-from mxframe import Table, write_parquet, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL, DATE as MX_DATE
+from omxcore import Table, write_parquet, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL, DATE as MX_DATE
 from mojoui.sheet import Sheet
 from mojoui.numformat import ColumnFormat, CURRENCY
 from mojoui.omxfile import save_omx, open_omx, open_document
