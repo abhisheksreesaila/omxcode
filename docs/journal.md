@@ -830,3 +830,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Bench after the fixes, five runs on a machine shared with other sessions' builds: p95 pan 1.8–12.6, zoom 3.1–7.9, deepzoom 8.9–26.4 (an A/B of the whole-pixel corner showed the same spread both ways: noise), draw 1.6–3.7, finish 2.6–5.8, erase 14.1–22.6 ms. bench.json keeps the last run.
 - Final checker: M0–M5 PASS.
 - Contrast (D-1224): GTK's `.mui-tag-toolbar label` (0,2,2) beat `button label { color: inherit }`; the web's `[data-tag=toolbar] button` came after `button.prominent`.
+
+## 2026-10-30 · goal 42 (Jot) set up
+- Second probe from the Personal Note audit (families 3-5: database, background work, OS integration). Branch goal-42-jot from main 49cbd8d (Sketch merged), worktree ../mojo-ui-g42.
+- Found: FilePicker + `pick:` step exist (open only); no save dialog, no external file drop, no quit step or quit hook; `start_ui_job` + `gaps:` (docs/ui-threads.md) for work off the UI thread; libsqlite3 in /usr/lib and in the pixi env.
+- Baseline: the checker FAILs every milestone (nothing built).
