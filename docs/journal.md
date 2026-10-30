@@ -847,3 +847,6 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - M4 first run PASSED for the wrong reason: `quit` (gtk_window_close) did nothing on the unshown test window (GTK returns early when it isn't realized); the step after it ran, and App.closing came from the shutdown at the end of the run. Fixed (show the window first) and the checker now requires `QUIT: window closed` (D-1315).
 - Web quit hook: a page typed into, then the server stopped with SIGINT: `JOT QUIT:` printed from atexit, the note in the file.
 - M5: M2 fell from 50 to 25 searches once the highlight changed as you type: `type:` (gtk_editable_set_text) emits "" then the text; the "" search rebuilt the Paragraph's stack and the host swallowed the second change. Shape-stable views didn't help (it's the runs, not the shape); the highlight now changes only when a result is opened (D-1317). The host bug stays open (report).
+
+## Goal 42: review round 1 fixes (2026-10-30)
+- Field change during a rebuild (D-1321): the first fix only held changes and drained them after the rebuild: still red. A debug run showed the held "hi" overwritten by "" from the pending partial rebuild's SET_TEXT patch (the app's older value written over the field). Held fields now win over stale patches and the echo; tests/test_field_queue.py red on the old host (5/6 lost), green after.

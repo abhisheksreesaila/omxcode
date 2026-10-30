@@ -268,9 +268,8 @@ struct Main(App):
         self.ids = ids^
 
     def mark(mut self) raises:
-        """The open note's passage that matches the search, its found words in bold (FTS5's snippet()). Made when a
-        result is opened, not as you type: a Paragraph whose runs change rebuilds its stack, and a rebuild while the
-        search field is changing swallows the next change (D-1317)."""
+        """The open note's passage that matches the search, its found words in bold (FTS5's snippet()), as you type
+        and when a result is opened (D-1321: the host no longer drops a field change during a rebuild, D-1317's cause)."""
         self.snippet = List[Run]()
         var wanted = fts_prefix_query(self.query)
         if wanted == "" or self.open_id == 0:
@@ -397,6 +396,7 @@ struct Main(App):
             var t0 = now_ns()
             self.search()
             var ms = Float64(now_ns() - t0) / 1e6
+            self.mark()
             if self.query != "":
                 print("JOT SEARCH: q=" + self.query + " results=" + String(len(self.ids)) + " ms=" + String(ms), flush=True)
         elif m == OPEN:

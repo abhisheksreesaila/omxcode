@@ -2586,7 +2586,7 @@ struct GtkHost[A: App](Movable):
                         external_call["adw_button_content_set_label", NoneType](external_call["gtk_button_get_child", Int](w), t.as_c_string_span())
                 elif kind == BUTTON or kind == TOGGLE:
                     external_call["gtk_button_set_label", NoneType](w, t.as_c_string_span()) if kind == BUTTON else external_call["gtk_check_button_set_label", NoneType](w, t.as_c_string_span())
-                elif kind == FIELD:
+                elif kind == FIELD and not is_held(w):  # (a change held while busy is newer than this patch: D-1321)
                     if c_str(external_call["gtk_editable_get_text", Int](w)) != p.text:  # don't fight the typist
                         external_call["gtk_editable_set_text", NoneType](w, t.as_c_string_span())
             if p.op == SET_TEXT and kind == TABLE:  # which rows are selected
@@ -2677,7 +2677,7 @@ struct GtkHost[A: App](Movable):
             ref en = self.rt.shown.nodes[self.echo_node]
             var ew = self.widgets[self.echo_node]
             var want = en.text
-            if en.kind == FIELD and want != self.echo_text and c_str(external_call["gtk_editable_get_text", Int](ew)) != want:
+            if en.kind == FIELD and want != self.echo_text and not is_held(ew) and c_str(external_call["gtk_editable_get_text", Int](ew)) != want:
                 external_call["gtk_editable_set_text", NoneType](ew, want.as_c_string_span())
             elif en.kind == TEXTAREA and want != self.echo_text:
                 var buffer = external_call["gtk_text_view_get_buffer", Int](ew)
@@ -3662,6 +3662,32 @@ struct GtkHost[A: App](Movable):
             self.apply(d, self_addr)
         return True
 
+    def drain_fields(mut self, self_addr: Int):
+        """The field changes held while the host was busy (D-1321): each field whose held text isn't the app's value
+        gets it (shown, if a rebuild put the app's back) and its on_change, one at a time until the host is busy again."""
+        var held = held_fields()
+        while len(held[]) > 0 and not busy() and not self.has_pending:
+            var id = held[][0][0]
+            var text = held[][0][1]
+            _ = held[].pop(0)
+            if id >= len(self.id_node):
+                continue
+            var node = self.id_node[id]
+            if node < 0 or node >= len(self.rt.shown.nodes) or self.rt.shown.nodes[node].kind != FIELD:
+                continue
+            if self.rt.shown.nodes[node].text == text or self.widgets[node] == 0:
+                continue
+            if c_str(external_call["gtk_editable_get_text", Int](self.widgets[node])) != text:
+                set_busy(True)
+                external_call["gtk_editable_set_text", NoneType](self.widgets[node], text.as_c_string_span())
+                set_busy(False)
+                var rest = List[Tuple[Int, String]]()  # (that set held its own "" and text: dropped)
+                for h in held[]:
+                    if h[0] != id:
+                        rest.append(h)
+                held[] = rest^
+            self.send(node, False, text, 0, self_addr)
+
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
         """A widget changed: build the event, run update(), patch the widgets."""
         ref n = self.rt.shown.nodes[node]
@@ -3935,11 +3961,13 @@ def on_idle_partial[A: App](host_addr: Int) abi("C") -> c_int:
     var host = host_at[A](host_addr)
     if host[].has_pending:  # (a full rebuild may have come first)
         host[].update_part(host_addr)  # update_part() clears the busy flag (apply_patches)
+    host[].drain_fields(host_addr)
     return 0
 
 
 def on_idle_rebuild[A: App](host_addr: Int) abi("C") -> c_int:
     host_at[A](host_addr)[].show(host_addr)  # show() clears the busy flag
+    host_at[A](host_addr)[].drain_fields(host_addr)
     return 0  # G_SOURCE_REMOVE: run once
 
 
@@ -4839,10 +4867,49 @@ def on_file_saved[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
 
 
 def on_field_changed[A: App](entry: Int, host_addr: Int) abi("C"):
-    if busy():
-        return
     var text = c_str(external_call["gtk_editable_get_text", Int](entry))
+    if busy():
+        # (D-1321: gtk_editable_set_text and a paste over a selection change the text twice, "" then the new text; if
+        # the first change's screen needs a rebuild, the second arrives while it's pending. Held, by the field's node
+        # id, and sent after the rebuild (drain_fields) unless it's what the app already has: the host's own sets.)
+        hold_field(entry, text)
+        return
     host_at[A](host_addr)[].send(get_node(entry), False, text, 0, host_addr)
+
+
+def held_fields() -> Pointer[List[Tuple[Int, String]], MutUntrackedOrigin]:
+    """The field changes that came while the host was busy: (node id, text), the last per field. On the GApplication
+    (a heap list), not a host field: they arrive re-entrantly while a `mut self` method runs (see set_busy)."""
+    var addr = app_data("mojoui-held-fields")
+    if addr == 0:
+        var p = alloc(Layout[List[Tuple[Int, String]]].single()).unsafe_leak()
+        p.unsafe_write(List[Tuple[Int, String]]())
+        addr = Int(p)
+        set_app_data("mojoui-held-fields", addr)
+    return Pointer[List[Tuple[Int, String]], MutUntrackedOrigin](unsafe_from_address=addr)
+
+
+def is_held(entry: Int) -> Bool:
+    """A change of this field waits in held_fields (the host mustn't write the app's older value over it)."""
+    var key = String(NODE_KEY)
+    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
+    for h in held_fields()[]:
+        if h[0] == id:
+            return True
+    return False
+
+
+def hold_field(entry: Int, text: String):
+    var key = String(NODE_KEY)
+    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
+    if id < 0:
+        return
+    var held = held_fields()
+    for i in range(len(held[])):
+        if held[][i][0] == id:
+            held[][i] = (id, text)
+            return
+    held[].append((id, text))
 
 
 def on_field_submit[A: App](entry: Int, host_addr: Int) abi("C"):
