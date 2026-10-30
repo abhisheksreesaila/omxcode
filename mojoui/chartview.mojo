@@ -32,6 +32,10 @@ struct ChartView(Copyable, Movable):
     var was_values: List[Float64]
     var missing: List[Bool]  # bars: a group with no figure at all (a median of no values): no bar, "—"
     var t: Float64
+    var xs: List[Float64]  # lines: each point's x value (seconds), or empty: evenly spaced
+    var floor: Float64  # lines: the y axis starts here
+    var cursor: Float64  # lines: a cursor at this x value (has_cursor)
+    var has_cursor: Bool
 
     def __init__(out self, title: String, var labels: List[String], var values: List[Float64], value_name: String = "value",
                  money: Bool = True, selected: Int = -1):
@@ -51,6 +55,10 @@ struct ChartView(Copyable, Movable):
         self.was_values = List[Float64]()
         self.missing = List[Bool]()
         self.t = 1.0
+        self.xs = List[Float64]()
+        self.floor = 0.0
+        self.cursor = 0.0
+        self.has_cursor = False
 
     @staticmethod
     def line(title: String, var labels: List[String], var values: List[Float64], var second: List[Float64] = [],
@@ -70,6 +78,26 @@ struct ChartView(Copyable, Movable):
         cv.kind = "Heatmap"
         cv.rows = rows^
         return cv^
+
+    def with_cursor(var self, x: Float64) -> Self:
+        """A line chart's cursor at x (see LineChart.with_cursor): the playhead of a video, drawn on every redraw."""
+        self.cursor = x
+        self.has_cursor = True
+        return self^
+
+    def line_chart(self, var values: List[Float64], pal: Palette) -> LineChart:
+        """The LineChart this view draws (and answers taps with), for `values`."""
+        var c = (LineChart(self.labels.copy(), values^, self.selected).with_second(self.second.copy()).with_marker(
+            self.marker, self.marker_text).numbers(self.money).from_value(self.floor).themed(pal))
+        if len(self.xs) == len(self.labels):
+            c = c^.with_x(self.xs.copy())
+        if self.has_cursor:
+            c = c^.with_cursor(self.cursor)
+        return c^
+
+    def seek_at(self, x: Float64, font: Font, pal: Palette) -> Float64:
+        """For a line chart: the x value (seconds) under a tap at x points from the chart's left, clamped to the plot."""
+        return self.line_chart(self.values.copy(), pal).value_at(self.size[0] * 2, self.size[1] * 2, 2.0, font, x)
 
     def flint(self, pal: Palette) -> FlintChart:
         """Bars and lines as a Flint spec (the same JSON Flint's own renderers take)."""
@@ -116,16 +144,14 @@ struct ChartView(Copyable, Movable):
                 now.append(old_v + (self.values[i] - old_v) * self.t)
                 places.append(old_i + (Float64(i) - old_i) * self.t)
             if self.kind == "Line Chart":
-                LineChart(self.labels.copy(), now^, self.selected).with_second(self.second.copy()).with_marker(
-                    self.marker, self.marker_text).numbers(self.money).themed(pal).draw(s, font)
+                self.line_chart(now^, pal).draw(s, font)
                 return
             BarChart(self.labels.copy(), now^, self.bar_texts(pal), self.selected).themed(pal).moving(places^).draw(s, font)
             return
         if self.kind == "Heatmap":
             Heatmap(self.rows.copy(), self.labels.copy(), self.values.copy(), True, self.selected).themed(pal).draw(s, font)
         elif self.kind == "Line Chart":
-            LineChart(self.labels.copy(), self.values.copy(), self.selected).with_second(self.second.copy()).with_marker(
-                self.marker, self.marker_text).numbers(self.money).themed(pal).draw(s, font)
+            self.line_chart(self.values.copy(), pal).draw(s, font)
         elif True in self.missing:  # (a group with no figure: "—" and no bar, which Flint's spec can't say)
             BarChart(self.labels.copy(), self.values.copy(), self.bar_texts(pal), self.selected).themed(pal).draw(s, font)
         else:
@@ -137,8 +163,7 @@ struct ChartView(Copyable, Movable):
         if self.kind == "Heatmap":
             hit = Heatmap(self.rows.copy(), self.labels.copy(), self.values.copy()).themed(pal).hit(self.size[0], self.size[1], font, x, y)
         elif self.kind == "Line Chart":
-            hit = LineChart(self.labels.copy(), self.values.copy()).with_second(self.second.copy()).with_marker(
-                self.marker, self.marker_text).numbers(self.money).themed(pal).hit(self.size[0] * 2, self.size[1] * 2, 2.0, font, x)
+            hit = self.line_chart(self.values.copy(), pal).hit(self.size[0] * 2, self.size[1] * 2, 2.0, font, x)
         else:
             hit = self.flint(pal).hit(self.size[0], self.size[1], font, x, y)
         if hit < 0:

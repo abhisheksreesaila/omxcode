@@ -11,6 +11,7 @@ from mojoui.canvas import Surface, rgba
 from mojoui.text import Font, REGULAR, MEDIUM, LEFT, CENTRE, RIGHT
 from mojoui.draw import rect, line, circle, hline, area, with_alpha
 from mojoui.theme import Palette
+from mojoui.clock import trace_on
 
 # the plain palette's tokens (light)
 comptime PAGE = rgba(245, 245, 245)  # neutral background 3
@@ -316,6 +317,10 @@ struct LineChart(Movable):
     var marker: Int  # an event to mark (index into values), or -1
     var marker_text: String
     var money: Bool  # the values are cents (the axis reads $5K); else plain numbers (5K)
+    var xs: List[Float64]  # where each point sits along x, rising (a time in seconds); empty: 0, 1, 2…, evenly spaced
+    var floor: Float64  # the y axis starts here (0 unless from_value says otherwise)
+    var cursor: Float64  # a vertical cursor at this x value (with_cursor), in the units of xs (or point numbers)
+    var has_cursor: Bool
 
     var pal: Palette  # the colours and canvas font it draws with
 
@@ -327,6 +332,10 @@ struct LineChart(Movable):
         self.second = List[Float64]()
         self.marker = -1
         self.marker_text = ""
+        self.xs = List[Float64]()
+        self.floor = 0.0
+        self.cursor = 0.0
+        self.has_cursor = False
         self.pal = Palette.plain()
 
     def with_second(var self, var values: List[Float64]) -> Self:
@@ -362,18 +371,75 @@ struct LineChart(Movable):
         self.marker_text = text
         return self^
 
+    def with_x(var self, var xs: List[Float64]) -> Self:
+        """Places the points by these x values (rising, one per point: seconds into a recording) instead of evenly."""
+        self.xs = xs^
+        return self^
+
+    def from_value(var self, floor: Float64) -> Self:
+        """Starts the y axis at `floor` instead of 0 (a flight's altitude of 58–62 m fills the chart, not its top edge)."""
+        self.floor = floor
+        return self^
+
+    def fitted(var self) -> Self:
+        """The y axis starts at a round number just under the lowest value."""
+        if len(self.values) == 0:
+            return self^
+        var lo = self.values[0]
+        var hi = self.values[0]
+        for v in self.values:
+            lo = min(lo, v)
+            hi = max(hi, v)
+        var step = nice_step(max(hi - lo, 1e-9))
+        self.floor = floor(lo / step) * step
+        return self^
+
+    def with_cursor(var self, x: Float64) -> Self:
+        """A vertical cursor with a dot on the line at x (in the units of the points' x values): the playhead of a recording.
+        The chart prints `CURSOR: t=…` (3 decimals) each time it draws it, when tracing (MOJOUI_TRACE or MOJOUI_TEST)."""
+        self.cursor = x
+        self.has_cursor = True
+        return self^
+
     def themed(var self, pal: Palette) -> Self:
         """The same chart in another palette (a theme's palette)."""
         self.pal = pal.copy()
         return self^
 
+    def x_first(self) -> Float64:
+        if len(self.xs) > 0:
+            return self.xs[0]
+        return 0.0
+
+    def x_last(self) -> Float64:
+        if len(self.xs) > 0:
+            return self.xs[len(self.xs) - 1]
+        return Float64(max(len(self.values) - 1, 1))
+
+    def x_pixel(self, x: Float64, left: Float64, right: Float64) -> Float64:
+        """The pixel column of the x value `x` (clamped to the plot)."""
+        var span = max(self.x_last() - self.x_first(), 1e-12)
+        return left + (right - left) * min(max((x - self.x_first()) / span, 0.0), 1.0)
+
+    def x_value(self, pixel: Float64, left: Float64, right: Float64) -> Float64:
+        """The x value under pixel column `pixel` (clamped to the plot): x_pixel's inverse."""
+        var f = min(max((pixel - left) / max(right - left, 1e-9), 0.0), 1.0)
+        return self.x_first() + f * (self.x_last() - self.x_first())
+
+    def axis_steps(self) -> Tuple[Float64, Int]:
+        """The gridline step and how many steps the y axis climbs from its floor."""
+        var span = max(self.max_value() - self.floor, 0.0)
+        var step = nice_step(span)
+        return (step, max(Int(span / step + 0.999), 1))
+
     def plot_box(self, w: Float64, h: Float64, k: Float64, font: Font) -> SIMD[DType.float64, 4]:
         """(left, top, right, bottom) of the plotting area, in pixels."""
-        var step = nice_step(self.max_value())
+        var axis = self.axis_steps()
+        var step = axis[0]
         var widest = 0.0  # (every step's label: "1.5M" is wider than the top's "2M")
-        var steps = max(Int(self.max_value() / step + 0.999), 1)
+        var steps = axis[1]
         for g in range(steps + 1):
-            widest = max(widest, font.measure(self.axis_label(step * Float64(g)), 12 * k, self.pal.regular))
+            widest = max(widest, font.measure(self.axis_label(self.floor + step * Float64(g)), 12 * k, self.pal.regular))
         var axis_w = widest + 10 * k
         var right_w = (font.measure("100%", 12 * k, self.pal.regular) + 12 * k) if len(self.second) > 1 else 8 * k
         return SIMD[DType.float64, 4](axis_w, 10 * k + (16 * k if self.marker >= 0 else 0.0), w - right_w, h - 26 * k)
@@ -395,18 +461,22 @@ struct LineChart(Movable):
         var top = box[1]
         var right = box[2]
         var bottom = box[3]
-        var step = nice_step(self.max_value())
-        var lines = max(Int(self.max_value() / step + 0.999), 1)
+        var axis = self.axis_steps()
+        var step = axis[0]
+        var lines = axis[1]
         var axis_top = step * Float64(lines)
         for g in range(lines + 1):  # gridlines and y labels at round steps
             var y = bottom - (bottom - top) * Float64(g) / Float64(lines)
             hline(s, left, right, y, self.pal.line if g > 0 else self.pal.line_strong)
-            font.draw(s, self.axis_label(step * Float64(g)), left - 8 * k, y + 4 * k, 12 * k, self.pal.ink2, self.pal.regular, RIGHT)
+            font.draw(s, self.axis_label(self.floor + step * Float64(g)), left - 8 * k, y + 4 * k, 12 * k, self.pal.ink2, self.pal.regular, RIGHT)
         var xs = List[Float64]()
         var ys = List[Float64]()
         for i in range(n):
-            xs.append(left + (right - left) * Float64(i) / Float64(n - 1))
-            ys.append(bottom - (bottom - top) * self.values[i] / axis_top)
+            var at = Float64(i)
+            if len(self.xs) == n:
+                at = self.xs[i]
+            xs.append(self.x_pixel(at, left, right))
+            ys.append(bottom - (bottom - top) * (self.values[i] - self.floor) / axis_top)
         var widths = List[Float64]()  # x labels: every k-th one, so none touch (24 months: Jan, Apr, Jul… on a small chart)
         for i in range(n):
             widths.append(font.measure(self.labels[i], 12 * k, self.pal.regular) if self.labels[i] != "" else 0.0)
@@ -443,6 +513,18 @@ struct LineChart(Movable):
             var tw = font.measure(self.marker_text, 11.5 * k, self.pal.medium)
             var tx = min(max(mx - tw / 2, left), right - tw)
             font.draw(s, self.marker_text, tx, top - 5 * k, 11.5 * k, self.pal.warn, self.pal.medium)
+        if self.has_cursor:  # the playhead: a line across the plot and a dot where the series is at that x
+            var cx = self.x_pixel(self.cursor, left, right)
+            var j = 0
+            while j < n - 2 and xs[j + 1] <= cx:
+                j += 1
+            var along = min(max((cx - xs[j]) / max(xs[j + 1] - xs[j], 1e-9), 0.0), 1.0)
+            var cy = ys[j] + (ys[j + 1] - ys[j]) * along
+            line(s, cx, top, cx, bottom, 1.5 * k, with_alpha(self.pal.ink, 0.7))
+            circle(s, cx, cy, 6 * k, self.pal.card)
+            circle(s, cx, cy, 4.5 * k, self.pal.accent)
+            if trace_on():
+                print("CURSOR: t=" + fixed(self.cursor, 3), flush=True)
         if 0 <= self.selected < n:
             var x = xs[self.selected]
             var y = ys[self.selected]
@@ -467,6 +549,11 @@ struct LineChart(Movable):
             return -1
         var i = Int((x - box[0]) / (box[2] - box[0]) * Float64(n - 1) + 0.5)
         return min(max(i, 0), n - 1)
+
+    def value_at(self, width_px: Float64, height_px: Float64, scale: Float64, font: Font, x_pt: Float64) -> Float64:
+        """The x value under a pointer at x (points), clamped to the plot: where a tap on the chart seeks a recording to."""
+        var box = self.plot_box(width_px, height_px, scale, font)
+        return self.x_value(x_pt * scale, box[0], box[2])
 
 
 # ---------- columns and histograms ----------
