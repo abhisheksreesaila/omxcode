@@ -34,7 +34,8 @@ comptime W_REFS = 5  # owners: the handle and the worker; the last one frees
 comptime W_RING = 6  # the ring's address (Float32 × RING)
 comptime W_SOURCE = 7  # a NUL-terminated copy of the source name, or 0 (default)
 comptime W_TIME = 8  # now_ns() when the newest chunk landed
-comptime W_WORDS = 9
+comptime W_SEQ = 9  # odd while the worker updates W_TIME and W_TOTAL together (a reader retries: captured_ns)
+comptime W_WORDS = 10
 
 
 def _word(words: Int, k: Int) -> _P:
@@ -105,9 +106,11 @@ def _capture(words: Int) raises:
     _A.store(_word(words, W_STATE), 1)
     var ring = Pointer[Float32, MutUntrackedOrigin](unsafe_from_address=Int(_A.load(_word(words, W_RING))))
     var buf = unsafe_alloc[Float32](CHUNK)
+    var lost = False
     while _A.load(_word(words, W_STOP)) == 0:
         if dl_call[c_int](lib, "pa_simple_read", s, Int(buf), CHUNK * 4, Int(err)) < 0:
-            _A.store(_word(words, W_ERR), Int64(err[0]))
+            _A.store(_word(words, W_ERR), Int64(err[0]))  # (the server died, the source went away, we were killed)
+            lost = True
             break
         var total = Int(_A.load(_word(words, W_TOTAL)))
         var sq = Float64(0)
@@ -116,12 +119,16 @@ def _capture(words: Int) raises:
             ring.unsafe_offset((total + i) % RING)[] = v
             sq += Float64(v) * Float64(v)
         _A.store(_word(words, W_LEVEL), Int64(sqrt(sq / CHUNK) * 1e6))
+        _ = _A.fetch_add(_word(words, W_SEQ), 1)  # (odd: time and total are changing)
         _A.store(_word(words, W_TIME), Int64(now_ns()))
         _A.store(_word(words, W_TOTAL), Int64(total + CHUNK))  # (after the samples: a reader sees all of them)
+        _ = _A.fetch_add(_word(words, W_SEQ), 1)
     dl_call[NoneType](lib, "pa_simple_free", s)
     _ = handle.check_symbol("pa_simple_free")  # (keeps the library loaded until here)
     buf.unsafe_free()
     err.unsafe_free()
+    if lost:
+        raise Error("pa_simple_read failed")  # (_entry marks the microphone failed: failed() and why() say so)
 
 
 def _entry(arg: Int) abi("C") -> Int:
@@ -189,6 +196,9 @@ struct Microphone(Movable):
             return self.reason
         if self.words != 0 and self._state() == -1:
             var e = Int(_A.load(_word(self.words, W_ERR)))
+            if self.total() > 0:
+                return ("capture stopped: the sound server ended the stream (error " + String(e) + "; source '" + self.source
+                        + "'; the server stopped, the source went away or the stream was killed)")
             return "the sound server refused the stream (error " + String(e) + "; source '" + self.source + "')"
         return ""
 
@@ -200,8 +210,16 @@ struct Microphone(Movable):
         """When sample `index` (absolute) was captured, on now_ns()'s clock (from when its 20 ms chunk landed)."""
         if self.words == 0:
             return 0
-        var t = Int(_A.load(_word(self.words, W_TIME)))
-        var total = Int(_A.load(_word(self.words, W_TOTAL)))
+        var t = 0
+        var total = 0
+        while True:  # the newest chunk's time and the total it brought, read as one pair (W_SEQ even and unchanged)
+            var seq = Int(_A.load(_word(self.words, W_SEQ)))
+            if seq % 2 == 1:
+                continue
+            t = Int(_A.load(_word(self.words, W_TIME)))
+            total = Int(_A.load(_word(self.words, W_TOTAL)))
+            if Int(_A.load(_word(self.words, W_SEQ))) == seq:
+                break
         return t - ((total - 1 - index) * 1_000_000_000) // RATE
 
     def level(self) -> Float64:

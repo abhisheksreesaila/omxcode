@@ -107,6 +107,11 @@ def m0():
     tone = DATA / "tone.wav"
     if not (ROOT / "tests/test_audio.mojo").exists() or not tone.exists():
         return False, "tests/test_audio.mojo or docs/goals/43/tone.wav missing"
+    # (addition, review round 1, D-1419) warm-up: one untimed run through a null sink first, so the timed run below
+    # isn't a cold compile that starts listening after the tone has played (D-1407); its result is ignored
+    with null_sink() as (_, source):
+        run(["pixi", "run", "mojo", "run", "-I", ".", "tests/test_audio.mojo"], 600,
+            env=dict(os.environ, MOJOUI_AUDIO_SOURCE=source, MOJOUI_AUDIO_SECONDS="1", MOJOUI_AUDIO_REF=str(tone)))
     code, out = with_audio(["pixi", "run", "mojo", "run", "-I", ".", "tests/test_audio.mojo"], [tone],
                            {"MOJOUI_AUDIO_SECONDS": str(round(seconds(tone) + 4)), "MOJOUI_AUDIO_REF": str(tone)})
     m = re.search(r"audio match: ([\d.]+)", out)
@@ -200,6 +205,15 @@ def m3():
         won = a["p50_ms"] < b["p50_ms"] and out["a"] < out["b"]
     if not won:
         return False, "omxcode didn't win: " + verdict
+    # (addition, review round 1, D-1420) "same model" is the same weights, not the same precision: both sides' precision
+    # must be recorded, a difference must be explained (precision_note), and the verdict names both
+    pa, pb = a.get("precision"), b.get("precision")
+    if not pa or not pb:
+        return False, "race.json doesn't record both sides' precision (a.precision, b.precision)"
+    if pa != pb and not race.get("precision_note"):
+        return False, f"precisions differ (A {pa}, B {pb}) and race.json has no precision_note"
+    verdict += (f"; same weights{' and precision' if pa == pb else ''}: A {pa} vs B {pb}, "
+                f"{b['p50_ms'] / a['p50_ms']:.1f}x at the median")
     return True, verdict
 
 

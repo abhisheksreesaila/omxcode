@@ -850,3 +850,5 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - fp32 B: streaming + Range serving didn't fix it (the 2.55 GB file was sent whole; then Chromium reset the decoder's fetch). The page's fetch log showed every fetch 200; a fetchtest mode reading each file into one Uint8Array, as transformers.js's readResponse does, got "RangeError: Array buffer allocation failed" at 2,547,875,840 bytes and read 1.27 GB fine → re-split the external data (D-1416); fp32/fp32 then loads.
 - transformers.js keeps its own `fetch` reference from import time: the page's fetch wrapper logged nothing until `env.fetch` pointed at it.
 - GIL: tests/test_speech_errors.mojo against HEAD's speech.mojo fails (no FINAL in 30 s after a bad model id), passes with D-1417.
+- audio: `pactl kill-client` doesn't exist in this pactl ("No valid command specified") → pw-cli destroy of the client's PipeWire object (object.id from `pactl -f json list clients`, matched by application.process.id); the microphone reports failed within the 3 s wait, error 11.
+- M0 warm-up (D-1419): first checker run after editing audio.mojo: PASS, match 0.99999.
