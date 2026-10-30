@@ -108,7 +108,7 @@ struct VideoSource(Movable):
         if not _file_exists(path):
             raise Error("VideoSource: no such file: " + path)
         var probe = _run_text(
-            "ffprobe -v error -select_streams v:0 -of flat -show_entries "
+            "ffprobe -v error -protocol_whitelist file -select_streams v:0 -of flat -show_entries "
             + "stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,duration:format=duration -i "
             + _quote(path) + " < /dev/null 2>/dev/null"
         )
@@ -166,7 +166,7 @@ struct VideoSource(Movable):
         if frame > 0:
             seek = "-ss " + String(t) + " "
         var cmd = (
-            "ffmpeg -v error -nostdin " + seek + "-i " + _quote(self.path)
+            "ffmpeg -v error -nostdin -protocol_whitelist file " + seek + "-i " + _quote(self.path)
             + " -an -sn -fps_mode passthrough -f rawvideo -pix_fmt rgba - 2>/dev/null"
         )
         self._fp = _popen(cmd)

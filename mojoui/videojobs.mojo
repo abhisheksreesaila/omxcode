@@ -5,10 +5,12 @@
 #   Analyze: a registry of analyzers (ANALYZERS: their names, what each finds) run over every frame by mojoui.videotable
 #            (GPU colour cells → regions → the analyzer's rows). The answer is the VideoTable and the same rows as an omxcore
 #            table (detections_table: frame, t, kind, code, damaged, x, y, w, h, track), which a sheet shows like any table.
+#            The inspection analyzer (goal 39 M8) takes the recording's log too (analyze_job(path, 2, log)): its rows are
+#            georeferenced (mojoui.geo) and its answer is the places table (mojoui.inspection_tables: assets, defects).
 #   Reel:    the frames where a table's flag is true (flag_frames over any table with a frame column), cut from the video by
 #            mojoui.videoexport with faces blurred and captions burned in (RedactPlan), written as an mp4.
 #
-#   var job = analyze_job(path, 0)            # 0: "Objects & codes (warehouse preset)", 1: "Regions"
+#   var job = analyze_job(path, 0)            # 0: "Objects & codes (warehouse preset)", 1: "Regions", 2: "Assets & defects" (+ a log)
 #   on each frame: job.poll() == JOB_DONE → var a = job.result(); a.found (VideoTable), a.table (omxcore Table)
 #   var segs = segments_of(flag_frames(sheet, damaged_col, frame_col), fps)
 #   var reel = reel_job(path, out_path, a.found, segs, blur="face", mark="pallet", captions)
@@ -25,13 +27,23 @@ from mojoui.imageops import ImageOps
 from mojoui.player import Mark
 from mojoui.sheet import Sheet, BOOL, INT
 from mojoui.clock import now_ns
+from mojoui.timeseries import TimeSeries
+from mojoui.geo import NadirCamera, georeference, places, name_along_route
+from mojoui.inspection import findings
+from mojoui.inspection_tables import places_table
+from mojoui.vision_presets import (drone_analyzer, drone_ranges, drone_severity, drone_camera_gsd_per_m_alt, DRONE_CELL, DRONE_ASSET_RADIUS_M,
+                                   DRONE_ASSET_MIN_ROWS, DRONE_DEFECT_RADIUS_M, DRONE_DEFECT_MIN_ROWS, DRONE_DEFECT_TO_ASSET_M)
+from mojoui.mediatimeline import MediaTimeline, markers_from_table, copy_table
 
-comptime ANALYZERS: List[String] = ["Objects & codes (warehouse preset)", "Regions"]
+comptime ANALYZERS: List[String] = ["Objects & codes (warehouse preset)", "Regions", "Assets & defects (inspection preset)"]
 comptime ANALYZER_NOTES: List[String] = [
     "Tracked objects with their printed codes and damage, and faces to blur (GPU colour, motion and stripe codes)",
     "Every warm-coloured region on every frame, with its box (GPU colour cells)",
+    "Assets and the defects on them, put on the map from the flight's log (lat, lon, altitude, heading), each defect with a severity (GPU colour)",
 ]
-comptime ANALYZER_ROWS: List[String] = ["detections", "regions"]  # what the answer's table is called
+comptime ANALYZER_ROWS: List[String] = ["detections", "regions", "{video} places"]  # what the answer's table is called ({video}: the video's name)
+comptime ANALYZER_LOG: List[Bool] = [False, False, True]  # needs the recording's log (a TimeSeries with lat, lon): georeferenced
+comptime INSPECTION = 2  # the inspection analyzer's index
 
 
 def analyzer_names() -> List[String]:
@@ -43,10 +55,26 @@ def analyzer_note(k: Int) -> String:
     return notes[k] if 0 <= k < len(notes) else String("")
 
 
-def analyzer_rows(k: Int) -> String:
-    """The answer's table name for analyzer k ("detections")."""
+def analyzer_rows(k: Int, video: String = "") -> String:
+    """The answer's table name for analyzer k ("detections"; the inspection's "drone_a places" for drone_a.mp4)."""
     var rows = materialize[ANALYZER_ROWS]()
-    return rows[k] if 0 <= k < len(rows) else String("rows")
+    var name = rows[k] if 0 <= k < len(rows) else String("rows")
+    var stem = video
+    var slash = stem.rfind("/")
+    if slash >= 0:
+        var tail = String(stem[byte=slash + 1:])
+        stem = tail
+    var dot = stem.rfind(".")
+    if dot > 0:
+        var head = String(stem[byte=:dot])
+        stem = head
+    return name.replace("{video}", stem if stem != "" else String("video"))
+
+
+def analyzer_needs_log(k: Int) -> Bool:
+    """Analyzer k georeferences its rows: it needs the recording's log (lat, lon; altitude and heading if there)."""
+    var needs = materialize[ANALYZER_LOG]()
+    return needs[k] if 0 <= k < len(needs) else False
 
 
 struct JobFrames(Progress):
@@ -138,8 +166,10 @@ struct Analyzed(Movable):
         return out^
 
 
-def analyze(path: String, which: Int, ctl: JobCtl = JobCtl()) raises -> Analyzed:
-    """Analyzer `which` over every frame of the video at `path` (the job's body; a plain call with JobCtl())."""
+def analyze(path: String, which: Int, ctl: JobCtl = JobCtl(), log: Optional[TimeSeries] = None) raises -> Analyzed:
+    """Analyzer `which` over every frame of the video at `path` (the job's body; a plain call with JobCtl()). The
+    inspection analyzer (INSPECTION) georeferences its rows with `log` (mojoui.geo) and answers with the places table
+    (mojoui.inspection_tables): assets named along the route, defects on them with a severity."""
     var t0 = now_ns()
     var video = VideoSource(path)
     ctl.add_total(video.frames)
@@ -153,6 +183,22 @@ def analyze(path: String, which: Int, ctl: JobCtl = JobCtl()) raises -> Analyzed
         var ranges = List[ColourRange]()
         ranges.append(warm_range())
         found = scan_with(video, a, ranges, count, WAREHOUSE_CELL)
+    elif which == INSPECTION:
+        if not log:
+            raise Error("Assets & defects needs the flight's log: insert a CSV with t, lat and lon (and alt_m, heading_deg) beside the video")
+        ref ts = log.value()
+        if ts.rows() < 2 or ts.index("lat") < 0 or ts.index("lon") < 0:
+            raise Error("the log needs t, lat and lon columns")
+        var a = drone_analyzer()
+        found = scan_with(video, a, drone_ranges(), count, DRONE_CELL)
+        var cam = NadirCamera(video.width, video.height, drone_camera_gsd_per_m_alt(), ts.value("lat", 0))
+        georeference(found, ts, cam)
+        var assets = places(found, "insulator", DRONE_ASSET_RADIUS_M, DRONE_ASSET_MIN_ROWS)
+        name_along_route(assets, ts, "P", 2)
+        var marks = places(found, "defect", DRONE_DEFECT_RADIUS_M, DRONE_DEFECT_MIN_ROWS)
+        var defects = findings(assets, marks, drone_severity(), DRONE_DEFECT_TO_ASSET_M)
+        var table = places_table(assets, defects)
+        return Analyzed(found^, table^, which, Float64(now_ns() - t0) / 1e6)
     else:
         raise Error("No analyzer " + String(which) + ": there are " + String(len(analyzer_names())))
     var table = detections_table(found)
@@ -163,18 +209,38 @@ struct AnalyzeJob(JobBody):
     comptime Out = Analyzed
     var path: String
     var which: Int
+    var log: Optional[TimeSeries]
 
-    def __init__(out self, path: String, which: Int):
+    def __init__(out self, path: String, which: Int, var log: Optional[TimeSeries] = None):
         self.path = path
         self.which = which
+        self.log = log^
 
     def run(mut self, ctl: JobCtl) raises -> Analyzed:
-        return analyze(self.path, self.which, ctl)
+        return analyze(self.path, self.which, ctl, self.log.copy())
 
 
-def analyze_job(path: String, which: Int) -> Job[Analyzed]:
-    """Analyzer `which` (ANALYZERS) over the video at `path`, off the caller's thread; progress counts frames."""
-    return start_job(AnalyzeJob(path, which))
+def analyze_job(path: String, which: Int, var log: Optional[TimeSeries] = None) -> Job[Analyzed]:
+    """Analyzer `which` (ANALYZERS) over the video at `path`, off the caller's thread; progress counts frames. `log`:
+    the recording's log, for an analyzer that georeferences (analyzer_needs_log)."""
+    return start_job(AnalyzeJob(path, which, log^))
+
+
+# ---------- the editor ----------
+
+
+def use_analysis(mut ed: MediaTimeline, found: VideoTable, which: Int):
+    """An analysis' rows as the editor's lanes and the sentence's choices (mojoui.mediatimeline): the warehouse's
+    pallets (damaged ones flagged) and faces to blur; regions as markers; the inspection's defects, flagged."""
+    if which == 0:
+        ed.use_rows(copy_table(found), blur_kind="face", blur_noun="faces", object_kind="pallet", object_label="Pallets", flag_word="damaged")
+    elif which == 1:
+        ed.add_lane(markers_from_table(found, "region", "Regions", gap=15))
+    elif which == INSPECTION:
+        var defects = markers_from_table(found, "defect", "Defects", gap=6)  # (one pill per defect in view; the assets are always in view, so no lane of theirs)
+        for i in range(len(defects.flags)):
+            defects.flags[i] = True  # (a defect is what the inspection is for: the warning tone)
+        ed.add_lane(defects^)
 
 
 # ---------- reels ----------

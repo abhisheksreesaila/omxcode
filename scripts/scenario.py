@@ -8,6 +8,12 @@ warehouse: open warehouse.mp4 → Analyze (Objects & codes, the warehouse preset
 Insert > Table… shipments.csv → Query: the delivered shipments whose pallet code never shows → Export CSV → Make a reel
 (damaged frames, faces blurred, the shipment burned in). Leaves <out>/reel.mp4 and <out>/missing.csv (and the documents the
 app wrote in <out>/documents). Exit 1 when a tool fails.
+
+drone: for each flight, open drone_<k>.mp4 → Insert > Table… telemetry_<k>.csv (a log: it lands as a table card and a
+chart + map card in step with the video) → Analyze (Assets & defects, the inspection preset: georeferenced with the log)
+→ Query the defects → Export CSV; then Insert > Compare inspections… (earlier: flight a, later: flight b) → Export the
+worse table → Flight plan (waypoints.csv); then seek flight a's video three times, drawing its telemetry chart each time
+(its cursor prints CURSOR: t=, the video PLAYER: t=). Leaves <out>/defects_a.csv, defects_b.csv, worse.csv, waypoints.csv.
 """
 
 import argparse
@@ -113,15 +119,85 @@ def warehouse(media, out):
     print(f"\nreel.mp4: {reel.stat().st_size // 1024} KB; missing.csv: {missing.read_text().strip().splitlines()[1:]}")
 
 
+def defects_sql(table):
+    return f"SELECT asset, lat, lon, severity FROM {table} WHERE kind = 'defect' ORDER BY asset, lat"
+
+
+def drone(media, out):
+    docs = out / "documents"
+    for d in (docs, out / "config"):
+        d.mkdir(parents=True, exist_ok=True)
+    outputs = ("defects_a.csv", "defects_b.csv", "worse.csv", "waypoints.csv")
+    for f in outputs:
+        (out / f).unlink(missing_ok=True)
+        (docs / f).unlink(missing_ok=True)
+    env = {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(out / "config"), "MOJOUI_TRACE": "1",
+           "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES", "0")}
+    s = Session(env)
+    seeks = []
+    try:
+        print("# The drone: two inspection flights along a power line become a table of every asset and defect, on the map;")
+        print("# which assets got worse since last time, and the next flight plan. The telemetry plays beside the video.")
+        for k, n in (("a", ""), ("b", "-2")):  # (the second video joins the first one's sheet: the toolbar's Open)
+            s.call("open-file" if k == "a" else "open", path=str((media / f"drone_{k}.mp4").resolve()))
+            s.call("insert-table")
+            s.call("choose-table", path=str((media / f"telemetry_{k}.csv").resolve()))
+            s.call("analyze" + n)
+            s.call("analyze-assets-defects-inspection-preset")
+            s.call("query")
+            s.call("sql", text=defects_sql(f"drone_{k}_places"))
+            s.call("query-name", text=f"defects_{k}")
+            s.call("run-query")
+            s.call("read", name=f"table-defects-{k}", count=12)
+            s.call(f"export-defects-{k}")
+        s.call("insert-compare-inspections")
+        s.call("compare-earlier", option="drone_a_places")
+        s.call("compare-later", option="drone_b_places")
+        s.call("compare-go")
+        s.call("read", name="table-worse", count=12)
+        s.call("export-worse")
+        s.call("flight-plan")
+        s.call("read", name="table-waypoints", count=12)
+        for t in (5.0, 12.5, 20.0):  # flight a's video, and its telemetry chart's cursor with it
+            mark = len(s.log)
+            s.call("seek", value=t)
+            s.call("render", quiet=True, name="telemetry-a-chart")
+            deadline = time.time() + 5
+            while time.time() < deadline and not any(l.startswith("CURSOR: t=") for l in s.log[mark:]):
+                time.sleep(0.05)
+            got = s.log[mark:]
+            p = [l for l in got if l.startswith("PLAYER: t=")]
+            c = [l for l in got if l.startswith("CURSOR: t=")]
+            seeks.append((t, p[-1] if p else "(no PLAYER line)", c[-1] if c else "(no CURSOR line)"))
+        s.call("read", name="telemetry-a-chart")
+        s.call("read", name="telemetry-a-map")
+        screen = s.call("screen", quiet=True)
+        print("      " + "\n      ".join(l for l in screen.splitlines() if l.lstrip().startswith(("Object [", '"drone', '"telemetry', '"worse', '"waypoints', '"defects'))))
+    finally:
+        s.close()
+    for line in s.log:
+        if line.startswith(("JOB: ", "QUERY: ", "TRACK: ")):
+            print(line)
+    print("\n# at each seek: the video's time and the telemetry chart's cursor")
+    for t, p, c in seeks:
+        print(f"seek {t:>5.1f} s:  {p}   {c}")
+    for f in outputs:
+        if not (docs / f).exists():
+            raise SystemExit(f"the app didn't write {f} in {docs}")
+        shutil.copyfile(docs / f, out / f)
+        rows = (docs / f).read_text().strip().splitlines()
+        print(f"{f}: {len(rows) - 1} rows ({rows[0]})")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("name", choices=["warehouse"])
+    ap.add_argument("name", choices=["warehouse", "drone"])
     ap.add_argument("--media", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    {"warehouse": warehouse}[a.name](Path(a.media).resolve(), out)
+    {"warehouse": warehouse, "drone": drone}[a.name](Path(a.media).resolve(), out)
 
 
 if __name__ == "__main__":

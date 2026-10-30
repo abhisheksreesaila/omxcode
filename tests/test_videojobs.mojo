@@ -35,7 +35,8 @@ def main() raises:
     assert_equal(csv_cell("a,b"), "\"a,b\"")
     assert_equal(csv_cell("say \"hi\""), "\"say \"\"hi\"\"\"")
     assert_equal(csv_cell("plain"), "plain")
-    assert_equal(len(analyzer_names()), 2)
+    assert_equal(len(analyzer_names()), 3)
+    assert_equal(analyzer_rows(2, "/m/drone_a.mp4"), "drone_a places")
     assert_equal(analyzer_rows(0), "detections")
 
     # analyze as a job: it runs off this thread, its progress counts frames, its answer lands
