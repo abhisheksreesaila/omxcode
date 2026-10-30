@@ -835,3 +835,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Second probe from the Personal Note audit (families 3-5: database, background work, OS integration). Branch goal-42-jot from main 49cbd8d (Sketch merged), worktree ../mojo-ui-g42.
 - Found: FilePicker + `pick:` step exist (open only); no save dialog, no external file drop, no quit step or quit hook; `start_ui_job` + `gaps:` (docs/ui-threads.md) for work off the UI thread; libsqlite3 in /usr/lib and in the pixi env.
 - Baseline: the checker FAILs every milestone (nothing built).
+
+## Goal 42: Jot (2026-10-30)
+- M0: `external_call["sqlite3_libversion_number"]` under `mojo run`: "JIT session error: Symbols not found" → dlopen + dlsym + bitcast to a `def(...) thin abi("C")` type (D-1304). Float64 arguments (bind_double) and returns (column_double) pass through those types correctly (3.25 round-trips).
+- M0 dead end: the FTS5 part failed with "bad parameter or other API misuse": `db` was destroyed after its last use (prepare), closing the connection while `find` still stepped. Fixed with a shared connection (D-1305).
+- `AnyTrivialRegType` doesn't exist in Mojo 1.1; `ImplicitlyCopyable` works as the bound for a function-pointer type parameter. `String.as_c_string_span().ptr` won't convert with `Int(...)`; `unsafe_ptr()` (deprecated warning) does.
