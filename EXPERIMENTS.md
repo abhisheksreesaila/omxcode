@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 38: the 100M-row dashboard benchmark, merged into release 2026-10-29 with engine omxcore 834ef9a (2026-10-28/29)
+- **Setup:** RTX 3090, 100M rows (a 4 GB table), four builds of one dashboard: A JS + DuckDB-WASM, B JS + FastAPI + Polars, C Rust + Polars + egui, D omxcode + omxcore; an external observer times input to pixels (scripts/data_bench.py; fairness rules docs/goals/38/fairness.md).
+- **Worked:** D fastest to the screen: 30.3 ms median of medians, 49.1 ms pooled p95 (A 104.9, B 44.2, C 37.0); every pass equal to DuckDB's answer. New in mojoui for any app: job wake (D-771: a finished job reaches update() in 0.05 ms median instead of the next frame poll) and App.input_lines (D-770: an app driven over stdin). Full table: docs/data-benchmark.md.
+- **Broke and fixed:** the job-wake pipe could block a job after 64 KB undrained (now non-blocking; tests/test_jobs.mojo hangs without the fix); a second fcntl signature broke httpcheck, agentchat and console (now http_socket's variadic form; lessons); after the engine merge the dashboard still said `from mxframe` (renamed, D-788); devgroup asked for 36,864 B of shared memory, over Apple's 32 KiB (now 3584 slots, D-789, tested at the edge).
+- **Means:** omxcode wins the time to the screen at 100M rows; Rust wins memory and narrow-range changes (docs/benchmarks.md). The 100M numbers were measured on engine 3d2455d with 4096 shared slots, before the release's engine and devgroup changes; on the release only a provisional 10M run exists. Goal 30's M1 (open 100M in 3.5 s) failed twice under heavy machine load and needs a quiet rerun.
+- **Next small step:** re-measure the 100M dashboard on the release build on a quiet machine.
+
+---
+
 ## omxcore 834ef9a in omxcode (2026-10-29)
 - **Setup:** branch engine-834ef9a from release-2026-10-29, its own pixi env; the package built from a clean `git archive 834ef9a` with Mojo 1.1; RTX 3090; GitHub Mac runs 40957099769 and 40959478762.
 - **Worked:** the engine under its own name (vendor/omxcore.mojoc, `from omxcore`, D-783); the engine tests; omxplorer on GTK and the web at 1M (sample) and 100M rows, equal to pyarrow; goals 20 M1–M2, 29 M0–M4, 30 M0–M4, 32 M6 and goal 36's non-measured milestones PASS; the Mac GPU build runs omxplorer on the runner's Apple GPU; a fresh clone follows the README to a working app.
