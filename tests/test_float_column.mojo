@@ -18,6 +18,8 @@ def main() raises:
     var s = Sheet(imp.table, False)
     assert_equal(s.format_value(2, s.value(2, 0)), "0.123456")
     assert_equal(s.plain_text(2, 1), "1.5")
+    assert_equal(s.display(2, 0), "0.123456")  # (the cell itself, as the grid draws it)
+    assert_equal(s.grid_text(2, 1), "1.5")
     assert_equal(s.plain_text(2, 2), "")
     assert_equal(s.format_value(1, s.value(1, 1)), "2.25")
     print("FLOAT COLUMN TESTS PASSED")

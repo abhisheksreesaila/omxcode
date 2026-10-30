@@ -4,13 +4,13 @@
 # Player (mojoui.player) for a video and a Picture (mojoui.picture) for a still. Many cards play at once: each owns its
 # own block of messages and canvases, allocated when it is added and kept while it lives.
 #
-#   var media = MediaCards(msg_base=4000, canvas_base=200, most=8)   # messages 4000 … 4000 + 8·CARD_MESSAGES, canvases 200 … 215
+#   var media = MediaCards(msg_base=4000, canvas_base=200, most=8)   # messages 4000 … 4000 + 8·CARD_MESSAGES (9), canvases 200 … 215
 #   var k = media.add(path, x, y, width)                            # raises when the file isn't a video or picture; its height follows its shape
 #   update():   if media.update(event): …                           # True when the event was a card's (a close removes it: media.closed)
 #   view():     media.view(k).at(c.x, c.y).width(c.w).height(c.h)   # for k in range(len(media)): c = media.cards[k]
 #   draw():     if media.draws(canvas): media.draw(canvas, surface, palette)
 #   describe(): media.describe(canvas)                              # a player's time and how to seek, for an agent
-#   media.cards[k].actions.append(CardAction("Analyze", "zap", "analyze", "…"))   # up to 2 quiet actions in the title bar
+#   media.cards[k].actions.append(CardAction("Analyze", "zap", "analyze", "…"))   # up to 3 quiet actions in the title bar (Analyze, Make a reel, Edit)
 #   update():   if media.acted >= 0: …                              # card media.acted_card's action media.acted was tapped
 #   media.cards[k].status = "Analyzing"; .progress = 42             # work running for the card: its title bar says so (-1: none)
 #
@@ -27,10 +27,10 @@ from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card
 
 comptime OBJ_VIDEO = 3  # (after sheetpage's OBJ_CHART = 1, OBJ_PIVOT = 2: one numbering for what sits on a sheet)
 comptime OBJ_IMAGE = 4
-comptime CARD_MESSAGES = 8  # a card's block: its Player's messages (0 … 4), then close (5), then its actions (6, 7)
+comptime CARD_MESSAGES = 9  # a card's block: its Player's messages (0 … 4), then close (5), then its actions (6, 7, 8)
 comptime CARD_CLOSE = 5
 comptime CARD_ACTION = 6
-comptime MAX_ACTIONS = 2
+comptime MAX_ACTIONS = 3
 comptime CARD_CANVASES = 2  # a video's picture and scrubber; a still's picture
 comptime HEAD_H = 36  # the title bar (the drag handle), as sheet objects have it
 comptime CHROME_W = 28  # a card's padding, left and right together
@@ -253,7 +253,7 @@ struct MediaCards(Movable, Sized):
         """Card k: its title bar (the file's name, what it is, close) over its player or picture, filling the card."""
         ref c = self.cards[k]
         var parts = List[View]()
-        var roomy = c.w >= 640 or len(c.actions) == 0  # (a narrow card with actions keeps its facts in the title's tooltip)
+        var roomy = c.w >= (640 if len(c.actions) <= 2 else 820) or len(c.actions) == 0  # (a narrow card with actions keeps its facts in the title's tooltip)
         parts.append(Text(c.title(), HEADLINE).tag("media-title").tooltip(c.facts()))
         parts.append(Spacer())
         if c.status != "":  # (work running for it: what and how far, in place of its actions)

@@ -936,7 +936,7 @@ struct DataGrid(Copyable, Movable):
                 s.line(x + cw - 1, 0, x + cw - 1, h, 2, p.accent)  # the edge being dragged
         s.rect(0, 0, gut, head, p.raised, 0)  # (the gutter stays put when the grid scrolls sideways)
         s.rect(Float64(Int(0)), Float64(Int(head)), Float64(Int(w) - Int(0)), 1, p.line_strong, 0)
-        var yes_no = List[Bool](capacity=ncols)  # columns of true/false: drawn as small green and red pills
+        var yes_no = List[Bool](capacity=ncols)  # columns of true/false: drawn as small pills, true green, false a quiet grey
         for c in range(ncols):
             yes_no.append(src.grid_badge(c) == "bool")
         # rows: the data only (the selection's wash, the gutter and the ring are layers of their own, so moving the
@@ -1002,10 +1002,10 @@ struct DataGrid(Copyable, Movable):
                     tx = x + cw - 8 * k - tw - (3 * k if st.italic() else 0)
                 if yes_no[c] and (text == "true" or text == "false") and st.ink() == 0:  # a yes/no pill
                     var good = text == "true"
-                    var tone = p.good if good else p.bad
+                    var tone = p.good if good else p.ink3  # (false is quiet: a grey pill, not an alarm; D-996)
                     var pw = font.measure(text, 11.5 * k, p.medium) + 14 * k
                     var px = x + 8 * k if align == ALIGN_LEFT else (tx - 7 * k)
-                    s.rect(px, y + 5 * k, pw, GRID_ROW_H * k - 10 * k, mix(p.card, tone, 0.12), (GRID_ROW_H * k - 10 * k) / 2)
+                    s.rect(px, y + 5 * k, pw, GRID_ROW_H * k - 10 * k, mix(p.card, tone, 0.12 if good else 0.08), (GRID_ROW_H * k - 10 * k) / 2)
                     s.text(font, text, px + 7 * k, base - 0.5 * k, 11.5 * k, tone, p.medium, LEFT, 0)
                     continue
                 if text == "" and src.grid_numeric(c):  # an empty number: a faint dash where the figure would be

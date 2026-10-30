@@ -6,7 +6,8 @@
 #
 #   var tables = TableCards(msg_base=4100, canvas_base=230, most=8)  # messages 4100 … 4100 + 8·TABLE_MESSAGES, canvases 230 … 237
 #   var k = tables.add("shipments", sheet^, x, y, w, h, font, pal)   # raises when the page is full
-#   update():   if tables.update(event, font, pal, folder): …        # True when the event was a card's: tables.exported / .closed / .selected say what
+#   update():   if tables.update(event, font, pal, folder): …        # True when the event was a card's: tables.exported / .closed / .selected / .acted say what
+#   tables.cards[k].act_with("Flight plan", "route", "flight-plan", "…")  # one quiet action in its title bar (tables.acted = k when tapped)
 #   view():     tables.view(k, version).at(c.x, c.y).width(c.w).height(c.h)
 #   draw():     if tables.draws(canvas): tables.draw(canvas, surface, font, palette)
 #   describe(): tables.describe(canvas, first, count)                # its rows as tab-separated text, for an agent
@@ -25,10 +26,11 @@ from mojoui.theme import Palette
 from mojoui.view import View, Text, Button, Canvas, HStack, Spacer, Card, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER, TONE_ACCENT
 from omxcore import Catalog, Table, sql
 
-comptime TABLE_MESSAGES = 4  # a card's block: its grid's gestures (0), Export CSV (1), close (2)
+comptime TABLE_MESSAGES = 4  # a card's block: its grid's gestures (0), Export CSV (1), close (2), its action (3)
 comptime TC_GRID = 0
 comptime TC_EXPORT = 1
 comptime TC_CLOSE = 2
+comptime TC_ACTION = 3
 comptime TABLE_HEAD_H = 36  # the title bar (the drag handle), as sheet objects have it
 
 
@@ -77,14 +79,19 @@ struct TableCard(Movable):
     var h: Int
     var slot: Int
     var note: String  # where it came from ("from shipments.csv", "a query"), shown under the title ("": none)
+    var action: String  # one quiet action in its title bar ("": none): its label, icon, tag (an agent's tool) and tooltip
+    var action_icon: String
+    var action_tag: String
+    var action_tip: String
 
     def __init__(out self, name: String, var sheet: Sheet, slot: Int, x: Int, y: Int, w: Int, h: Int, font: Font, pal: Palette):
         self.name = name
         self.sheet = sheet^
         self.grid = DataGrid()
         self.grid.prepare(self.sheet, font, pal)
+        var small = self.sheet.rows() <= 5000  # (a small table's numbers read whole too: 52.0101265, not 52.010…)
         for c in range(self.sheet.stored()):  # (words read whole: a text column is as wide as its longest)
-            if self.sheet.kind(c) == TEXT:
+            if self.sheet.kind(c) == TEXT or small:
                 self.grid.fit(c, self.sheet, font, pal)
         self.slot = slot
         self.x = x
@@ -92,6 +99,17 @@ struct TableCard(Movable):
         self.w = w
         self.h = h
         self.note = ""
+        self.action = ""
+        self.action_icon = ""
+        self.action_tag = ""
+        self.action_tip = ""
+
+    def act_with(mut self, label: String, icon: String, tag: String, tip: String):
+        """Its one quiet action (beside Export CSV): tables.acted says when it was tapped."""
+        self.action = label
+        self.action_icon = icon
+        self.action_tag = tag
+        self.action_tip = tip
 
     def facts(self) -> String:
         """Its size, in a few words: "23 rows · 5 columns"."""
@@ -111,6 +129,7 @@ struct TableCards(Movable, Sized):
     var exported: String  # the file the last update() wrote (Export CSV), else ""
     var selected: Int  # the card whose grid selected a cell in the last update() (its grid's cur_row, cur_col), else -1
     var problem: String  # why the last export failed, else ""
+    var acted: Int  # the card whose action the last update() was, else -1
 
     def __init__(out self, msg_base: Int, canvas_base: Int, most: Int = 8):
         self.cards = List[TableCard]()
@@ -121,6 +140,7 @@ struct TableCards(Movable, Sized):
         self.exported = ""
         self.selected = -1
         self.problem = ""
+        self.acted = -1
 
     def __len__(self) -> Int:
         return len(self.cards)
@@ -197,6 +217,7 @@ struct TableCards(Movable, Sized):
         self.exported = ""
         self.selected = -1
         self.problem = ""
+        self.acted = -1
         if not self.owns(event.message):
             return False
         for k in range(len(self.cards)):
@@ -217,6 +238,8 @@ struct TableCards(Movable, Sized):
                 elif which == TC_CLOSE:
                     self.remove(k)
                     self.closed = k
+                elif which == TC_ACTION and self.cards[k].action != "":
+                    self.acted = k
                 return True
         return True  # (a card closed since: its late gestures are dropped)
 
@@ -272,6 +295,8 @@ struct TableCards(Movable, Sized):
         parts.append(Spacer())
         if c.note != "" and c.w >= 560:  # (where it came from, when there's room: else in the title's tooltip)
             parts.append(Text(c.note, CAPTION))
+        if c.action != "":
+            parts.append(Button(c.action, self.msg(k) + TC_ACTION, SUBTLE, icon=c.action_icon).tag(c.action_tag).tooltip(c.action_tip))
         parts.append(Button("Export CSV", self.msg(k) + TC_EXPORT, SUBTLE, icon="download").tag("export-" + name.replace("_", "-"))
                      .tooltip("Save " + c.name + " as " + name + ".csv in your documents"))
         parts.append(Button("Remove", self.msg(k) + TC_CLOSE, ICON_ONLY, icon="close").tag("close-" + name.replace("_", "-")).tooltip("Close " + c.name))

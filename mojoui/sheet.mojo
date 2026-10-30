@@ -409,6 +409,8 @@ struct Sheet(Movable, GridSource):
             return date_text(v)
         if kind == DECIMAL:
             return decimal_text(v, self.scale(c))
+        if kind == FLOAT:  # (its value is the float's bits: the cell shows the number, D-995)
+            return float_cell(v)
         return String(v)
 
     # ---------- edits ----------
