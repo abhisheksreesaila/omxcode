@@ -14,6 +14,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if not (ROOT / "scripts" / "check.py").exists():  # (archived in docs/goals/ by goal 41: the repo is two folders up, D-1115)
+    ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 OUT = ROOT / "build" / "g39"
 MEDIA = OUT / "media"

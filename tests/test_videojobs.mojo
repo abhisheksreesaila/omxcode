@@ -11,6 +11,7 @@ from mojoui.videojobs import (analyze_job, analyzer_names, analyzer_rows, detect
 from mojoui.videotable import VideoTable
 from mojoui.videoexport import flagged_captions
 from mojoui.tablecard import TableCards, sql_name, query_table
+from mojoui.tablejobs import TableWork
 from mojoui.sheet import Sheet, csv_cell
 from mojoui.csvio import read_table
 from mojoui.player import Player
@@ -99,9 +100,17 @@ def main() raises:
     tables.cards[m].note = "a query"
     var view = tables.view(m, 1)
     _ = view
-    # Export CSV through the card's own button (message base + slot·4 + 1)
+    # Export CSV through the card's own button (message base + slot·4 + 1): it asks; the app's job writes it (goal 41 M3)
     _ = tables.update(Event(tables.msg(m) + 1, "", 0), font, pal, out)
-    assert_equal(tables.exported, out + "/missing.csv")
+    assert_equal(tables.export_asked, m)
+    assert_equal(tables.export_path, out + "/missing.csv")
+    var work = TableWork()
+    assert_true(work.export(tables.cards[m].sheet, tables.export_path))
+    var wrote = work.take_export()
+    while not wrote:
+        sleep(0.01)
+        wrote = work.take_export()
+    assert_equal(wrote.value().path, out + "/missing.csv")
     var text = open(out + "/missing.csv", "r").read()
     assert_true(text.startswith("shipment\n"), "the header: " + text[byte=:40])
     print("missing.csv:", text.replace("\n", " "))

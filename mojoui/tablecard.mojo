@@ -6,7 +6,9 @@
 #
 #   var tables = TableCards(msg_base=4100, canvas_base=230, most=8)  # messages 4100 … 4100 + 8·TABLE_MESSAGES, canvases 230 … 237
 #   var k = tables.add("shipments", sheet^, x, y, w, h, font, pal)   # raises when the page is full
-#   update():   if tables.update(event, font, pal, folder): …        # True when the event was a card's: tables.exported / .closed / .selected / .acted say what
+#   update():   if tables.update(event, font, pal, folder): …        # True when the event was a card's: tables.export_asked / .closed / .selected / .acted say what
+#   tables.adopt(card^, x, y, w, h)                                  # a card made off the UI thread (mojoui.tablejobs: a file, a query's answer)
+#   Export CSV asks (tables.export_asked = k, tables.export_path): the app writes it with mojoui.tablejobs.TableWork.export
 #   tables.cards[k].act_with("Flight plan", "route", "flight-plan", "…")  # one quiet action in its title bar (tables.acted = k when tapped)
 #   view():     tables.view(k, version).at(c.x, c.y).width(c.w).height(c.h)
 #   draw():     if tables.draws(canvas): tables.draw(canvas, surface, font, palette)
@@ -105,6 +107,8 @@ struct TableCards(Movable, Sized):
     var selected: Int  # the card whose grid selected a cell in the last update() (its grid's cur_row, cur_col), else -1
     var problem: String  # why the last export failed, else ""
     var acted: Int  # the card whose action the last update() was, else -1
+    var export_asked: Int  # the card whose Export CSV the last update() was (export_path: where it goes), else -1
+    var export_path: String
 
     def __init__(out self, msg_base: Int, canvas_base: Int, most: Int = 8):
         self.cards = List[TableCard]()
@@ -116,6 +120,8 @@ struct TableCards(Movable, Sized):
         self.selected = -1
         self.problem = ""
         self.acted = -1
+        self.export_asked = -1
+        self.export_path = ""
 
     def __len__(self) -> Int:
         return len(self.cards)
@@ -146,6 +152,29 @@ struct TableCards(Movable, Sized):
         if slot < 0:
             raise Error("A page holds up to " + String(self.most) + " extra tables: close one first")
         self.cards.append(TableCard(name, sheet^, slot, x, y, w, h, font, pal))
+        return len(self.cards) - 1
+
+    def adopt(mut self, var card: TableCard, x: Int, y: Int, w: Int, h: Int) raises -> Int:
+        """A card made elsewhere (a job: mojoui.tablejobs) put on the page at (x, y), w × h points; its index. A name
+        already on the page is replaced where it was, as add() does."""
+        var at = self.find(card.name)
+        if at >= 0:
+            card.slot = self.cards[at].slot
+            card.x = self.cards[at].x
+            card.y = self.cards[at].y
+            card.w = self.cards[at].w
+            card.h = self.cards[at].h
+            self.cards[at] = card^
+            return at
+        var slot = self._free_slot()
+        if slot < 0:
+            raise Error("A page holds up to " + String(self.most) + " extra tables: close one first")
+        card.slot = slot
+        card.x = x
+        card.y = y
+        card.w = w
+        card.h = h
+        self.cards.append(card^)
         return len(self.cards) - 1
 
     def find(self, name: String) -> Int:
@@ -208,6 +237,7 @@ struct TableCards(Movable, Sized):
         self.selected = -1
         self.problem = ""
         self.acted = -1
+        self.export_asked = -1
         if not self.owns(event.message):
             return False
         for k in range(len(self.cards)):
@@ -218,13 +248,9 @@ struct TableCards(Movable, Sized):
                     ref c = self.cards[k]
                     if c.grid.handle(event, c.sheet, font, pal) == GRID_SELECTED:
                         self.selected = k
-                elif which == TC_EXPORT:
-                    var path = folder + "/" + self.sql_name_of(k) + ".csv"
-                    try:
-                        self.cards[k].sheet.write_csv(path)
-                        self.exported = path
-                    except e:
-                        self.problem = String(e)
+                elif which == TC_EXPORT:  # (asked here, written by the app's job: a million rows take a second)
+                    self.export_asked = k
+                    self.export_path = folder + "/" + self.sql_name_of(k) + ".csv"
                 elif which == TC_CLOSE:
                     self.remove(k)
                     self.closed = k
@@ -292,4 +318,5 @@ struct TableCards(Movable, Sized):
         parts.append(Button("Remove", self.msg(k) + TC_CLOSE, ICON_ONLY, icon="close").tag("close-" + name.replace("_", "-")).tooltip("Close " + c.name))
         var head = HStack(parts^, spacing=8).fill().align(CENTER).height(TABLE_HEAD_H)
         var grid = Canvas(self.canvas(k), version + c.grid.version, on_gesture=self.msg(k) + TC_GRID, keys=True).fill().grow().tag("table-" + name.replace("_", "-"))
+        grid = grid^.label("Table " + c.name + ", " + c.facts())  # (a drawn grid: its name for a screen reader)
         return Card(head^, grid^, spacing=4)

@@ -55,6 +55,14 @@ def main() raises:
     var tracks = TrackCards(4200, 250, 4)
     var k = tracks.add("telemetry_a", ts.copy(), "/v/drone_a.mp4", 0, 0, 720, 300)
     assert_equal(tracks.for_video("/v/drone_a.mp4"), k)
+    # which video a log belongs to (goal 41 M4: moved here from omxplorer): the name that ends the same way and has no
+    # log yet; else the newest video with none; else ""
+    var videos: List[String] = ["/v/drone_a.mp4", "/v/drone_b.mp4", "/v/dock.mp4"]
+    assert_equal(tracks.video_for_log("telemetry_b", videos), "/v/drone_b.mp4")
+    assert_equal(tracks.video_for_log("telemetry_a", videos), "/v/dock.mp4")  # (drone_a has its log already: the newest free one)
+    assert_equal(tracks.video_for_log("log", List[String]()), "")
+    var only_a: List[String] = ["/v/drone_a.mp4"]
+    assert_equal(tracks.video_for_log("telemetry_x", only_a), "")
     assert_true(tracks.cards[k].has_map(), "it has positions")
     var e = Event(tracks.msg(k) + TK_CHART, "12.5", SET_TO)
     assert_true(tracks.update(e, font, pal), "the chart's event")

@@ -6,6 +6,7 @@
 # then runs one long job (LONG_MS) and prints how long the window went without a frame while it ran (D-792):
 #   JOBWAKE FREEZE: a 1500 ms job; <n> frames while it ran, longest gap between frames <ms> ms: PASS|FAIL
 # (a job on the main thread: about 1500 ms; on a thread of its own: a frame or two; FAIL from FROZEN_MS). With JOBWAKE_EXIT=1 it then exits
+# (and on the checks' headless display, MOJOUI_PRIVATE_DISPLAY=1 from scripts/headless.py, where no one sees the window)
 # (JOBWAKE_ALL=1 lists every delay). JOBWAKE_POLL=1 turns the wake off (jobs_message 0): the frame poll alone, to compare.
 
 from std.sys import exit, CompilationTarget
@@ -85,7 +86,7 @@ struct Main(App):
             print(line, flush=True)
             self.line += " · " + line
             comptime if CompilationTarget.is_linux():  # (the Apple stubs have no exit(): the test steps close the window there)
-                if environment("JOBWAKE_EXIT") == "1":
+                if environment("JOBWAKE_EXIT") == "1" or environment("MOJOUI_PRIVATE_DISPLAY") == "1":  # (or on a check's headless display: no one sees it)
                     exit(0 if gap_ms < FROZEN_MS else 1)
             return
         try:

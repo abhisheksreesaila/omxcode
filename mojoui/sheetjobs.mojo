@@ -9,7 +9,7 @@ from omxcore import Job, JobCtl, JobBody, JobProgress, start_job, JOB_RUNNING, J
 from mojoui.sheet import Sheet
 from mojoui.sheetpage import SheetObject, compute, shape_of
 from mojoui.csvio import CsvImport, read_table, empty_import
-from mojoui.sheet import placeholder_sheet
+from mojoui.sheet import placeholder_sheet, empty_table
 from mojoui.clock import now_ns
 from omxcore.job import THREADS, W_REFS
 from std.atomic import Atomic
@@ -365,3 +365,26 @@ def pace(rows: Int, seconds: Float64) -> String:
     if r >= 1e6:
         return String(Int(r / 1e6)) + "M rows/s"
     return String(Int(r / 1e3)) + "K rows/s"
+
+
+# ---------- the GPU, woken off the UI thread ----------
+
+
+struct WarmJob(JobBody):
+    """Starts the GPU's driver and context on a job's thread (a one-row table put on the GPU and given back): the first
+    one in a process takes ~0.2 s, every later one ~0.02 ms, so a sheet made on the UI thread afterwards doesn't wait."""
+    comptime Out = Int
+
+    def __init__(out self):
+        pass
+
+    def run(mut self, ctl: JobCtl) raises -> Int:
+        var t0 = now_ns()
+        _ = Sheet(empty_table().share())  # (its DeviceTable: the driver's start-up; dropped at once)
+        return (now_ns() - t0) // 1000
+
+
+def warm_gpu() -> Job[Int]:
+    """The GPU started off the UI thread (WarmJob): call it when the app starts (its __init__) and keep the handle until
+    it ends; a sheet the app makes later (a blank one, an analysis' rows) then waits for no driver."""
+    return start_job(WarmJob())

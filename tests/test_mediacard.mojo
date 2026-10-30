@@ -66,6 +66,8 @@ def card_tests(media: String) raises:
     var a = cards.add(media + "/warehouse.mp4", 0, 0, 640)
     var b = cards.add(media + "/drone_a.mp4", 660, 0, 480)
     var c = cards.add("build/g39/m6-still.png", 0, 600, 200)
+    assert_true(cards.cards[a].facts() == "opening…", "a card opens without waiting for its probe")
+    assert_true(cards.settle(), "the cards opened (decoded on their threads)")
     assert_equal(cards.cards[a].kind, OBJ_VIDEO)
     assert_equal(cards.cards[c].kind, OBJ_IMAGE)
     assert_equal(cards.msg(a), 4000)
@@ -92,7 +94,8 @@ def card_tests(media: String) raises:
     assert_true(cards.draws(200) and cards.draws(203) and cards.draws(204) and not cards.draws(206))
     var px = List[UInt32](length=64 * 36, fill=0)
     var s = Surface(Int(px.unsafe_ptr()), 64, 36, 1.0)
-    cards.draw(202, s, Palette.plain())  # (drone_a's first frame)
+    assert_true(cards.settle())
+    cards.draw(202, s, Palette.plain())  # (drone_a's frame at 1 s)
     var lit = 0
     for p in px:
         if p != px[0]:
@@ -126,6 +129,7 @@ def seek_tests(media: String) raises:
     # an agent sets the scrubber to a time in seconds (.settable): the player shows that frame
     var cards = MediaCards(4000, 200)
     var k = cards.add(media + "/warehouse.mp4", 0, 0, 640)
+    assert_true(cards.settle())
     var v = cards.view(k)
     var found = False
     for ref n in v.nodes:

@@ -11,7 +11,7 @@ from mojoui.view import View, BUTTON, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, A
 from mojoui.paragraph import link_href
 from mojoui.a11y import explicit_name
 from mojoui.diff import Diff
-from mojoui.app import App, Event, Runtime
+from mojoui.app import App, Event, Runtime, budget_from_env
 from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
 from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
@@ -90,6 +90,7 @@ struct WebSession[A: App](Movable):
 
     def __init__(out self):
         self.rt = Runtime(Self.A())
+        self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines in the server's log)
         self.pixels = List[UInt32]()
 
 

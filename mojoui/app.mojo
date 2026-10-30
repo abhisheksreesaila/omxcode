@@ -10,6 +10,8 @@ from mojoui.http import Request
 from mojoui.effects import Every, Timer, InFlight, start, Backend, POLL_US
 from mojoui.webcomponent import Command, is_event_name, is_widget_tag
 from mojoui.json import Json, json_string
+from mojoui.clock import now_ns
+from std.os import getenv
 
 
 struct Event(Copyable, Movable):
@@ -180,6 +182,17 @@ trait App(Movable, Deinitable):
         return Theme.native()
 
 
+def budget_from_env() -> Int:
+    """$MOJOUI_BUDGET_MS as a number (0 when unset or not a number): hosts hand it to Runtime.watch()."""
+    var v = getenv("MOJOUI_BUDGET_MS")
+    if v == "":
+        return 0
+    try:
+        return Int(atol(v))
+    except:
+        return 0
+
+
 def ms(ns: Int) -> String:
     """Nanoseconds as milliseconds with two decimals (for TRACE lines)."""
     var hundredths = Int(ns) // 10_000
@@ -199,6 +212,8 @@ struct Runtime[A: App](Movable):
     var commands_out: List[Command]  # widget commands for the host to take (take_commands)
     var awaiting: List[Command]  # sent, waiting for their answer (reply)
     var command_seq: Int
+    var budget_ns: Int  # the slow-frame watchdog (watch()): 0 off; else any update, view or canvas draw over it prints SLOW:
+    var armed_at: Int  # (now_ns) the watchdog stays quiet before this: start-up's first second builds caches and fonts
 
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
@@ -211,7 +226,35 @@ struct Runtime[A: App](Movable):
         self.commands_out = List[Command]()
         self.awaiting = List[Command]()
         self.command_seq = 0
+        self.budget_ns = 0
+        self.armed_at = 0
         self.take_effects()  # (what the starting state asks for)
+
+    def watch(mut self, budget_ms: Int):
+        """The slow-frame watchdog (docs/ui-threads.md, rule 1): from one second after this call, any update(), view()
+        or canvas draw that takes longer than `budget_ms` prints `SLOW: <update|view|draw> <name> <ms> ms` (update: the
+        event's message, `msg=N`; view: the message that caused it, or `refresh`; draw: the canvas's tag, `canvas=N`).
+        Hosts call it with $MOJOUI_BUDGET_MS where they can read the environment; 0 turns it off."""
+        self.budget_ns = max(budget_ms, 0) * 1_000_000
+        self.armed_at = now_ns() + 1_000_000_000
+
+    def _t0(self) -> Int:
+        """The clock when the watchdog is on (0 when off: no clock read at all)."""
+        return now_ns() if self.budget_ns > 0 else 0
+
+    def _slow(self, what: String, name: String, t0: Int):
+        """Prints a SLOW: line when the work that started at t0 (from _t0) took longer than the budget."""
+        if self.budget_ns <= 0 or t0 < self.armed_at:
+            return
+        var took = now_ns() - t0
+        if took > self.budget_ns:
+            print("SLOW: " + what + " " + name + " " + ms(took) + " ms", flush=True)
+
+    def _update(mut self, event: Event):
+        """update(), timed by the watchdog."""
+        var t0 = self._t0()
+        self.app.update(event)
+        self._slow("update", "msg=" + String(event.message) + ("" if event.name == "" else "/" + event.name), t0)
 
     def take_effects(mut self):
         """The requests the last update asked for go out; the timers follow what the app lists now."""
@@ -371,7 +414,7 @@ struct Runtime[A: App](Movable):
                 t.start_us = now_us
         while len(self.undeliverable) > 0:
             var e = self.undeliverable.pop(0)
-            self.app.update(e)
+            self._update(e)
             self.take_effects()
             changed = True
         var i = 0
@@ -379,7 +422,7 @@ struct Runtime[A: App](Movable):
             if self.inflight[i].cancelled:  # its end now, nothing of it after (the worker stops and frees on its own)
                 var f = self.inflight.pop(i)
                 var end = f.stream_end if f.stream_end >= 0 else f.msg
-                self.app.update(Event(end, "", 0, id=f.id, error="cancelled"))
+                self._update(Event(end, "", 0, id=f.id, error="cancelled"))
                 self.take_effects()
                 changed = True
                 continue
@@ -391,7 +434,7 @@ struct Runtime[A: App](Movable):
                     if self.inflight[i].cancelled:
                         break
                     seq += 1
-                    self.app.update(Event(self.inflight[i].msg, p.data, seq, id=self.inflight[i].id, name=p.name))
+                    self._update(Event(self.inflight[i].msg, p.data, seq, id=self.inflight[i].id, name=p.name))
                     self.take_effects()
                     changed = True
                 if self.inflight[i].cancelled:
@@ -401,7 +444,7 @@ struct Runtime[A: App](Movable):
                 continue
             var f = self.inflight.pop(i)
             var r = f.response()
-            self.app.update(Event(f.stream_end if f.stream_end >= 0 else f.msg, r.text(), r.status, id=f.id, error=r.error))
+            self._update(Event(f.stream_end if f.stream_end >= 0 else f.msg, r.text(), r.status, id=f.id, error=r.error))
             self.take_effects()
             changed = True
         var due = List[Tuple[Int, Int]]()  # (msg, count): ticks to deliver, decided before any update changes the list
@@ -410,7 +453,7 @@ struct Runtime[A: App](Movable):
                 t.count = (now_us - t.start_us) // (t.ms * 1000)  # (a host that slept past several ticks: one event, the count jumps)
                 due.append((t.msg, t.count))
         for d in due:
-            self.app.update(Event(d[0], "", d[1]))
+            self._update(Event(d[0], "", d[1]))
             self.take_effects()
             changed = True
         if not changed:
@@ -424,12 +467,9 @@ struct Runtime[A: App](Movable):
         return v^
 
     def dispatch(mut self, event: Event) -> Diff:
-        self.app.update(event)
+        self._update(event)
         self.take_effects()
-        var next = self.view()
-        var d = diff(self.shown, next)
-        self.shown = next^
-        return d^
+        return self._refresh("msg=" + String(event.message))
 
     def dispatch(mut self, message: Int) -> Diff:
         """A plain message with no value (a button tap)."""
@@ -437,9 +477,15 @@ struct Runtime[A: App](Movable):
 
     def refresh(mut self) -> Diff:
         """The screen again after state changed outside update() (e.g. in draw())."""
+        return self._refresh("refresh")
+
+    def _refresh(mut self, cause: String) -> Diff:
+        """view() and its diff against the screen shown, timed by the watchdog (named by its cause)."""
+        var t0 = self._t0()
         var next = self.view()
         var d = diff(self.shown, next)
         self.shown = next^
+        self._slow("view", cause, t0)
         return d^
 
     def resize(mut self, width: Int, height: Int) -> Diff:
@@ -456,7 +502,10 @@ struct Runtime[A: App](Movable):
         """Canvas node `node` as a display list, if the app records one; then what else changed on screen."""
         if node < 0 or node >= len(self.shown.nodes) or self.shown.nodes[node].kind != CANVAS:
             return (False, Diff(False, []))
-        if not self.app.draw_scene(self.shown.nodes[node].style, scene):
+        var t0 = self._t0()
+        var drew = self.app.draw_scene(self.shown.nodes[node].style, scene)
+        self._slow("draw", "canvas=" + String(self.shown.nodes[node].style), t0)
+        if not drew:
             return (False, Diff(False, []))
         return (True, self.refresh())
 
@@ -464,7 +513,9 @@ struct Runtime[A: App](Movable):
         """Paints canvas node `node`, then returns what else changed on screen."""
         if node < 0 or node >= len(self.shown.nodes) or self.shown.nodes[node].kind != CANVAS:
             return Diff(False, [])
+        var t0 = self._t0()
         self.app.draw(self.shown.nodes[node].style, surface)
+        self._slow("draw", "canvas=" + String(self.shown.nodes[node].style), t0)
         return self.refresh()
 
     def gesture(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64) -> Diff:

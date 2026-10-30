@@ -1,10 +1,13 @@
 # mojoui.player's Player and the line chart's time cursor (goal 39 M2), on the generated drone footage and its telemetry:
 #   G39_MEDIA=build/g39/media pixi run mojo run -I . tests/test_player.mojo
-# Prints "player: ok" and "cursor: ok" (scripts/check.py m2 reads them). Frames are compared with VideoSource's own reads
+# Prints "player: ok", "cursor: ok" and "player async: ok" (scripts/check.py m2 reads them). The Player decodes on its own
+# thread (goal 41 M2): the pixel checks settle() first, as an agent's render does; "player async" checks nothing waits. Frames are compared with VideoSource's own reads
 # (itself checked against ffmpeg in test_video); the telemetry against Python's csv module, used only here.
 from std.testing import assert_equal, assert_true
 from std.os import getenv
 from std.python import Python
+from std.time import sleep
+from mojoui.clock import now_ns
 from mojoui.player import Player, PlayerState, clock_text, PLAY, PAUSE, SCRUB, VIDEO, FRAME
 from mojoui.app import Event
 from mojoui.view import PRESS, PAN, KEY
@@ -94,6 +97,7 @@ def pixel_of(frame: List[UInt32], w: Int, x: Int, y: Int) -> UInt32:
 
 def player_tests(media: String) raises:
     var player = Player(media + "/drone_a.mp4", msg_base=100, canvas_base=100)
+    assert_true(player.settle(), "the video opened")
     assert_equal(player.state.frames, 870)
     assert_equal(player.state.fps, 30.0)
     near(player.state.duration, 29.0, 1e-6)
@@ -140,6 +144,7 @@ def player_tests(media: String) raises:
     var px = blank(w, h)
     var surface = Surface(Int(px.unsafe_ptr()), w, h, 1.0)
     player.state.seek(7.0)
+    assert_true(player.settle(), "the frame landed")
     player.draw(100, surface, backdrop, pal)
     var want = oracle.read(210)
     assert_equal(pixel_of(px, w, 640, 360), pixel_of(want, w, 640, 360))
@@ -147,11 +152,13 @@ def player_tests(media: String) raises:
     assert_equal(pixel_of(px, w, 1000, 200), pixel_of(want, w, 1000, 200))
     # one frame back, one frame on
     player.state.step(-1)
+    assert_true(player.settle(), "the frame landed")
     player.draw(100, surface, backdrop, pal)
     want = oracle.read(209)
     assert_equal(pixel_of(px, w, 640, 360), pixel_of(want, w, 640, 360))
     assert_equal(pixel_of(px, w, 300, 100), pixel_of(want, w, 300, 100))
     player.state.step(2)
+    assert_true(player.settle(), "the frame landed")
     player.draw(100, surface, backdrop, pal)
     want = oracle.read(211)
     assert_equal(pixel_of(px, w, 640, 360), pixel_of(want, w, 640, 360))
@@ -161,6 +168,7 @@ def player_tests(media: String) raises:
     player.state.play()
     for _ in range(3):
         _ = player.state.tick(33_334)
+        assert_true(player.settle(), "the frame landed")
         player.draw(100, surface, backdrop, pal)
     want = oracle.read(228)
     assert_equal(player.state.frame, 228)
@@ -275,8 +283,86 @@ def cursor_tests(media: String) raises:
     print("cursor: ok")
 
 
+def async_tests(media: String) raises:
+    """Nothing the UI thread calls waits for ffprobe or ffmpeg: opening returns before the probe ends, a seek returns at
+    once and its frame lands later, a burst of seeks decodes only the last, a file that isn't a video says so later."""
+    var t0 = now_ns()
+    var player = Player(media + "/drone_a.mp4", msg_base=100, canvas_base=100)
+    var opened_ms = Float64(now_ns() - t0) / 1e6
+    assert_true(not player.ready(), "the probe hadn't landed when the constructor returned")
+    assert_true(opened_ms < 20, "open took " + String(opened_ms) + " ms")
+    assert_true(player.pending(), "the picture asks for display frames while it opens")
+    var px = blank(640, 360)
+    var surface = Surface(Int(px.unsafe_ptr()), 640, 360, 1.0)
+    var backdrop = UInt32(0xFFE9EEF4)
+    var pal = Palette.plain()
+    player.draw(100, surface, backdrop, pal)  # (before anything landed: the backdrop, no wait)
+    assert_equal(px[180 * 640 + 320], backdrop)
+    assert_true(player.settle(), "opened")
+    assert_equal(player.state.frames, 870)
+    var oracle = VideoSource(media + "/drone_a.mp4")
+    # a seek returns at once (no decode on the caller's thread); its frame lands later
+    var t1 = now_ns()
+    player.seek(20.0)
+    var seek_ms = Float64(now_ns() - t1) / 1e6
+    assert_true(seek_ms < 5, "seek took " + String(seek_ms) + " ms")
+    assert_equal(player.state.frame, 600)
+    assert_true(player.have != 600, "the frame was decoded on the caller's thread")
+    var t2 = now_ns()
+    player.draw(100, surface, backdrop, pal)
+    var draw_ms = Float64(now_ns() - t2) / 1e6
+    assert_true(draw_ms < 30, "draw waited " + String(draw_ms) + " ms")
+    assert_true(player.settle(), "the seek's frame landed")
+    assert_equal(player.have, 600)
+    var want = oracle.read(600)
+    assert_equal(player.buf[360 * 1280 + 640], want[360 * 1280 + 640])
+    assert_equal(player.buf[100 * 1280 + 300], want[100 * 1280 + 300])
+    # a burst of 20 scrubs (PRESS then PANs, as a hand drags) collapses to the last target
+    var scrub = blank(520, 28)
+    var ss = Surface(Int(scrub.unsafe_ptr()), 520, 28, 1.0)
+    player.draw(101, ss, backdrop, pal)
+    var before = player.feed.decoded()
+    var t3 = now_ns()
+    _ = player.update(Event(100 + SCRUB, "", PRESS, x=20.0))
+    for k in range(19):
+        _ = player.update(Event(100 + SCRUB, "", PAN, x=40.0 + Float64(k) * 24.0))
+    var burst_ms = Float64(now_ns() - t3) / 1e6
+    assert_true(burst_ms < 20, "20 scrub events took " + String(burst_ms) + " ms")
+    var last = player.state.frame
+    assert_true(player.settle(), "the last scrub's frame landed")
+    assert_equal(player.have, last)
+    var decodes = player.feed.decoded() - before
+    assert_true(decodes < 20, String(decodes) + " decodes for 20 scrubs: the latest didn't win")
+    want = oracle.read(last)
+    assert_equal(player.buf[360 * 1280 + 640], want[360 * 1280 + 640])
+    # a player made from a probed video's info is ready at once (the editor's second decoder of a card's video)
+    var t4 = now_ns()
+    var twin = Player(player.info, msg_base=200, canvas_base=200)
+    assert_true(twin.ready() and Float64(now_ns() - t4) / 1e6 < 20, "a player from known info is ready at once")
+    assert_true(twin.settle(), "its first frame landed")
+    # not a video: the constructor still returns at once; the reason arrives
+    var bad = Player("README.md", msg_base=300, canvas_base=300)
+    var waited = 0
+    while bad.problem() == "" and waited < 5000:
+        sleep(0.001)
+        waited += 1
+    assert_true("not a video" in bad.problem(), "problem: " + bad.problem())
+    assert_true(not bad.pending(), "a failed open stops asking for frames")
+    var missing = False
+    try:
+        _ = Player(media + "/no-such-video.mp4")
+    except:
+        missing = True
+    assert_true(missing, "a missing file raises at once")
+    _ = px[0]
+    _ = scrub[0]
+    print("player async: ok (open " + String(Int(opened_ms * 1000)) + " µs, seek " + String(Int(seek_ms * 1000)) + " µs, "
+          + String(decodes) + " decodes for 20 scrubs)")
+
+
 def main() raises:
     var media = getenv("G39_MEDIA", "build/g39/media")
     state_tests()
     player_tests(media)
     cursor_tests(media)
+    async_tests(media)

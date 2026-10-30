@@ -85,6 +85,30 @@ def _num(s: String) -> Float64:
         return -1.0
 
 
+@fieldwise_init
+struct VideoInfo(Copyable, Movable, ImplicitlyCopyable):
+    """What ffprobe tells about a video: its file, size, rate, frame count and length. All zeros until known (an
+    opening mojoui.framefeed.FrameFeed); a known one lets a second decoder of the same file start without probing."""
+    var path: String
+    var width: Int
+    var height: Int
+    var fps: Float64
+    var frames: Int
+    var duration: Float64
+
+    @staticmethod
+    def unknown(path: String) -> VideoInfo:
+        return VideoInfo(path, 0, 0, 0.0, 0, 0.0)
+
+    def known(self) -> Bool:
+        return self.width > 0 and self.height > 0 and self.fps > 0
+
+
+def file_exists(path: String) -> Bool:
+    """The file is there and readable (one fopen: cheap enough for the UI thread)."""
+    return _file_exists(path)
+
+
 struct VideoSource(Movable):
     """A video file as RGBA frames. Sequential next() is the fast path; seek() restarts the decoder at a time."""
     var path: String
@@ -148,6 +172,22 @@ struct VideoSource(Movable):
         self.frames = Int(nb) if nb > 0 else Int(self.duration * self.fps + 0.5)
         if self.duration <= 0:
             self.duration = Float64(self.frames) / self.fps
+
+    def __init__(out self, info: VideoInfo) raises:
+        """A decoder for a video already probed (`info` from another VideoSource or a FrameFeed): no ffprobe."""
+        if not info.known():
+            raise Error("VideoSource: the video's size and rate aren't known yet: " + info.path)
+        self.path = info.path
+        self.width = info.width
+        self.height = info.height
+        self.fps = info.fps
+        self.frames = info.frames
+        self.duration = info.duration
+        self._fp = 0
+        self._at = 0
+
+    def info(self) -> VideoInfo:
+        return VideoInfo(self.path, self.width, self.height, self.fps, self.frames, self.duration)
 
     def __deinit__(deinit self):
         if self._fp != 0:

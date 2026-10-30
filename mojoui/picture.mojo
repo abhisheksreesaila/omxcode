@@ -1,7 +1,8 @@
 # mojoui.picture: a still picture from a file (PNG, JPEG, WebP, GIF's first frame, any format ffmpeg reads), and the
 # aspect-fit, rounded drawing the Player shares (goal 39 M6). A generic component: omxplorer's image card is built on it.
 #
-#   var p = Picture("photo.jpg")                   # raises (a clear message) when the file is missing or isn't a picture
+#   var p = Picture("photo.jpg")                   # raises (a clear message) when the file is missing or isn't a picture (waits: tests, jobs)
+#   var p = Picture.opening("photo.jpg")           # returns at once (the UI thread): decoded on a thread; p.poll() takes it, p.ready()
 #   p.width, p.height, p.pixels                    # RGBA, row by row, R in the low byte (as VideoSource's frames)
 #   p.draw(surface, backdrop)                      # aspect-fit in the surface, rounded corners, `backdrop` around it
 #   draw_fitted(surface, pixels, w, h, backdrop)   # the same for any RGBA buffer (the Player's frames)
@@ -11,6 +12,7 @@
 
 from mojoui.canvas import Surface
 from mojoui.video import VideoSource
+from mojoui.framefeed import FrameFeed
 
 
 def _channels(p: UInt32) -> SIMD[DType.float32, 4]:
@@ -74,11 +76,13 @@ def draw_fitted(mut s: Surface, pixels: List[UInt32], vw: Int, vh: Int, backdrop
 
 
 struct Picture(Movable):
-    """A still picture decoded once into RGBA."""
+    """A still picture decoded once into RGBA: at once (Picture(path)), or on a thread of its own (Picture.opening)."""
     var path: String
     var width: Int
     var height: Int
     var pixels: List[UInt32]
+    var feed: Optional[FrameFeed]  # decoding still (opening): poll() takes it
+    var problem: String  # why it can't be shown ("" when it can, or while it opens)
 
     def __init__(out self, path: String) raises:
         var src = VideoSource(path)
@@ -86,9 +90,51 @@ struct Picture(Movable):
         self.width = src.width
         self.height = src.height
         self.pixels = List[UInt32]()
+        self.feed = None
+        self.problem = ""
         if not src.next_into(self.pixels):
             raise Error("Picture: cannot decode " + path)
         src.close()
+
+    def __init__(out self, path: String, var feed: FrameFeed):
+        self.path = path
+        self.width = 0
+        self.height = 0
+        self.pixels = List[UInt32]()
+        self.feed = feed^
+        self.problem = ""
+        self.feed.value().want(0)
+
+    @staticmethod
+    def opening(path: String) raises -> Picture:
+        """The picture at `path`, probed and decoded on a thread (mojoui.framefeed): returns at once, empty; poll() takes
+        it when it lands. Raises only when the file is missing."""
+        return Picture(path, FrameFeed(path, once=True))
+
+    def ready(self) -> Bool:
+        return self.width > 0 and len(self.pixels) == self.width * self.height
+
+    def pending(self) -> Bool:
+        return not self.ready() and self.problem == "" and Bool(self.feed)
+
+    def poll(mut self) -> Bool:
+        """Takes the decoded picture when it has landed (True then, or when it failed: problem says why)."""
+        if not self.feed:
+            return False
+        ref f = self.feed.value()
+        if self.problem == "" and f.problem() != "":
+            self.problem = f.problem()
+            self.feed = None
+            return True
+        if not f.ready():
+            return False
+        var info = f.info()
+        if f.take(self.pixels):
+            self.width = info.width
+            self.height = info.height
+            self.feed = None  # (its thread has ended: once)
+            return True
+        return False
 
     def draw(self, mut s: Surface, backdrop: UInt32, corner: Float64 = 14.0):
         draw_fitted(s, self.pixels, self.width, self.height, backdrop, corner)

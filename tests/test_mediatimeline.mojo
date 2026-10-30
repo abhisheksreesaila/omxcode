@@ -319,8 +319,10 @@ def editor(path: String) raises:
     var vh = 360
     var vpx = List[UInt32](length=vw * vh, fill=0)
     var vs = Surface(Int(vpx.unsafe_ptr()), vw, vh, 1.0)
+    ed.draw(300 + C_PICTURE, vs, pal, font)  # (never waits: the plain frame, or nothing yet; the app's job makes the preview)
+    ed.preview_now()  # (what the app's PreviewJob runs, here in the test)
+    assert_true(ed.preview.width == ed.player.info.width and ed.preview_key == ed.preview_wanted(), "preview made")
     ed.draw(300 + C_PICTURE, vs, pal, font)
-    assert_true(ed.preview.width == ed.player.src.width, "preview made")
     _ = len(px)  # (the surfaces' pixels live until here)
     _ = len(vpx)
     print("editor: tools through update(), cut it, handle drag, playback across a cut, timeline draw at 2880 px " + fixed(draw_ms, 2) + " ms")

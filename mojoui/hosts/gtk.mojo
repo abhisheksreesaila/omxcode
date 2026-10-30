@@ -21,7 +21,7 @@ from mojoui.view import (
 )
 from mojoui.a11y import audit, explicit_name, needs_name, accessible_name
 from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP
-from mojoui.app import App, Event, Runtime, ms
+from mojoui.app import App, Event, Runtime, ms, budget_from_env
 from mojoui.canvas import Surface, rgba
 from mojoui.present import Presenter, gpu_canvas_gate
 from mojoui.gpu import GPU_BUILD
@@ -653,6 +653,7 @@ struct GtkHost[A: App](Movable):
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
         self.rt.trace = getenv("MOJOUI_TRACE") != ""
+        self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines)
         self.pres = 0
         self.gl_ctx = 0
         self.canvas_scale = 0

@@ -26,7 +26,8 @@ from mojoui.player import clock_text
 from mojoui.sheet import Sheet, TEXT, BOOL, DATE
 from mojoui.text import Font
 from mojoui.theme import Palette
-from mojoui.timeseries import TimeSeries
+from mojoui.files import file_stem
+from mojoui.timeseries import TimeSeries, metric_label, metric_unit  # (they live with TimeSeries: the editor names its lanes with them too)
 from mojoui.view import (View, Text, Button, Canvas, HStack, Spacer, Card, Segmented, HEADLINE, CAPTION, ICON_ONLY, CENTER,
                          PAN, TAP, PRESS, SET_TO, TONE_ACCENT)
 
@@ -103,34 +104,6 @@ def series_from_sheet(sheet: Sheet) raises -> TimeSeries:
             values.append(Float64(s) if s.byte_length() > 0 else (values[len(values) - 1] if len(values) > 0 else 0.0))
         ts.add(_normal(sheet.name(c)), values^)
     return ts^
-
-
-def metric_label(name: String) -> String:
-    """A column's name as a person says it: alt_m → Altitude, speed_ms → Speed, battery_pct → Battery, else its words."""
-    if name == "alt_m":
-        return String("Altitude")
-    if name.startswith("speed"):
-        return String("Speed")
-    if name.startswith("battery"):
-        return String("Battery")
-    if name == "heading_deg":
-        return String("Heading")
-    var words = name.replace("_", " ")
-    if words.byte_length() == 0:
-        return words^
-    return String(words[byte=0:1]).upper() + String(words[byte=1:])
-
-
-def metric_unit(name: String) -> String:
-    if name.endswith("_m"):
-        return String("m")
-    if name.endswith("_ms"):
-        return String("m/s")
-    if name.endswith("_pct"):
-        return String("%")
-    if name.endswith("_deg"):
-        return String("°")
-    return String("")
 
 
 struct TrackCard(Movable):
@@ -260,6 +233,28 @@ struct TrackCards(Movable, Sized):
             if self.cards[k].name == name:
                 return k
         return -1
+
+    def video_for_log(self, name: String, videos: List[String]) -> String:
+        """The video a log called `name` belongs to, among `videos` (oldest first: MediaCards.video_paths): the one whose
+        file name ends the same way (telemetry_a ↔ drone_a) and has no log yet, else the newest with no log, else ""."""
+        var best = String("")
+        var most = 0
+        for v in videos:
+            var a = name.as_bytes()
+            var b_text = file_stem(v)
+            var b = b_text.as_bytes()
+            var n = 0
+            while n < len(a) and n < len(b) and a[len(a) - 1 - n] == b[len(b) - 1 - n]:
+                n += 1
+            if n > most and self.for_video(v) < 0:
+                most = n
+                best = v
+        if best != "":
+            return best^
+        for i in range(len(videos) - 1, -1, -1):
+            if self.for_video(videos[i]) < 0:
+                return videos[i]
+        return String("")
 
     def for_video(self, path: String) -> Int:
         """The card bound to the video at `path`, else -1."""

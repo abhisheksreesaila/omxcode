@@ -1,6 +1,8 @@
 # mojoui.videojobs: a video's slow work as background jobs (goal 39 M7), on the same jobs as a sheet's (mojoui.sheetjobs,
-# omxcore's F-175): the app starts one, polls it once a display frame for its progress (frames done of frames) and its
-# result, and can cancel it; the window stays live. Two kinds:
+# omxcore's F-175), started with mojoui.jobs.start_ui_job: a job's end wakes the UI (App.jobs_message), so the app takes
+# its result at once; it can read its progress (frames done of frames) to show, and cancel it. The one analysis path:
+# omxplorer's Analyze, its editor and examples/media's editor all run analyze_job and apply its rows with use_analysis
+# (goal 41 M3; mediatimeline_jobs keeps the editor's thumbnails, preview and export). Two kinds:
 #
 #   Analyze: a registry of analyzers (ANALYZERS: their names, what each finds) run over every frame by mojoui.videotable
 #            (GPU colour cells → regions → the analyzer's rows). The answer is the VideoTable and the same rows as an omxcore
@@ -18,8 +20,9 @@
 # Presets (mojoui.vision_presets) hold every footage-specific number; the analyzers are generic. Honest: classic GPU vision
 # (colour, motion, a printed stripe code), not a learned model; a model is one more entry here (the Analyzer slot).
 
-from omxcore import Job, JobCtl, JobBody, start_job, Table, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT, BOOL as MX_BOOL
+from omxcore import Job, JobCtl, JobBody, Table, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT, BOOL as MX_BOOL
 from mojoui.video import VideoSource
+from mojoui.jobs import start_ui_job
 from mojoui.videotable import VideoTable, Progress, scan_with, RegionsAnalyzer, ColourRange, NO_CODE
 from mojoui.vision_presets import warehouse_analyzer, warehouse_ranges, warm_range, WAREHOUSE_CELL, WARM
 from mojoui.videoexport import RedactPlan, Caption, cut_with, cut_frames
@@ -223,7 +226,7 @@ struct AnalyzeJob(JobBody):
 def analyze_job(path: String, which: Int, var log: Optional[TimeSeries] = None) -> Job[Analyzed]:
     """Analyzer `which` (ANALYZERS) over the video at `path`, off the caller's thread; progress counts frames. `log`:
     the recording's log, for an analyzer that georeferences (analyzer_needs_log)."""
-    return start_job(AnalyzeJob(path, which, log^))
+    return start_ui_job(AnalyzeJob(path, which, log^))
 
 
 # ---------- the editor ----------
@@ -241,6 +244,12 @@ def use_analysis(mut ed: MediaTimeline, found: VideoTable, which: Int):
         for i in range(len(defects.flags)):
             defects.flags[i] = True  # (a defect is what the inspection is for: the warning tone)
         ed.add_lane(defects^)
+
+
+def expect_analysis(mut ed: MediaTimeline, which: Int):
+    """Analyzer `which` is running for the editor's video: its chips show now, as use_analysis will set them."""
+    if which == 0:
+        ed.expect_rows(blur_kind="face", blur_noun="faces", object_kind="pallet")
 
 
 # ---------- reels ----------
@@ -398,4 +407,4 @@ struct ReelJob(JobBody):
 def reel_job(source: String, path: String, found: VideoTable, segments: List[Tuple[Float64, Float64]], blur: String, mark: String,
              captions: List[Caption]) -> Job[Reel]:
     """make_reel off the caller's thread; progress counts the frames written."""
-    return start_job(ReelJob(source, path, found.copy(), segments.copy(), blur, mark, captions.copy()))
+    return start_ui_job(ReelJob(source, path, found.copy(), segments.copy(), blur, mark, captions.copy()))
