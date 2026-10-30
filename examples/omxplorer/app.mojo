@@ -18,7 +18,7 @@ from themes.liquid import liquid, liquid_palette
 from themes.skins import skin, ledger_palette, graphite_palette, blueprint_palette
 from mojoui.menus import MenuBar, Menu, Item, Separator, Submenu, ContextMenu
 from mojoui.overlays import Dialog, Toast, Popover, Checkbox, Clipboard
-from mojoui.view import Radio
+from mojoui.view import Radio, TextArea
 
 # omxplorer's skins (themes/: the framework knows none of them, D-260) and its brand (owner, D-254): indigo for the app
 # itself, a tint per mode
@@ -66,7 +66,7 @@ from mojoui.datagrid import (DataGrid, GRID_SELECTED, GRID_COLUMN, GRID_EDIT, GR
                              GRID_TYPED, GRID_CLEAR, GRID_CANCEL, GRID_COMMIT)
 from mojoui.sheet import Sheet, placeholder_sheet, blank_table, INT, DECIMAL, TEXT, DATE, BOOL
 from mojoui.shared import environment, make_dir
-from mojoui.files import file_name, file_stem, file_size, read_recent, remember, read_setting, write_setting, adopt_config
+from mojoui.files import file_name, file_stem, file_size, file_exists, read_recent, remember, read_setting, write_setting, adopt_config
 from mojoui.csvio import read_table, empty_import, CsvImport, CsvColumn, kind_name
 from mojoui.omxfile import save_omx, open_document
 from mojoui.numformat import (ColumnFormat, format_number, AUTO, NUMBER, CURRENCY, PERCENT, COMPACT, DATE_LONG, DATE_MONTH, DATE_ISO,
@@ -93,6 +93,21 @@ from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, ID
 from mojoui.sheetjobs import ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
 from mojoui.draw import rect as draw_rect, with_alpha
+from mojoui.mediacard import MediaCards, CardAction, OBJ_VIDEO, OBJ_IMAGE, VIDEO_TYPES, IMAGE_TYPES, is_media_file, is_video_file
+from mojoui.tablecard import TableCards, sql_name
+from mojoui.videojobs import Analyzed, Reel, analyze_job, reel_job, analyzer_names, analyzer_note, analyzer_rows, marks_of, flag_frames, segments_of, flag_columns, matching_column, lookup, codes_of
+from mojoui.videojobs import analyzer_needs_log, use_analysis, INSPECTION
+from mojoui.mediatimeline import MediaTimeline, value_lane
+from mojoui.mediatimeline_jobs import TimelineFeed
+from mojoui.trackcard import TrackCards, is_track, series_from_sheet, metric_label, metric_unit
+from mojoui.mapview import MapMark, MARK_PLACE, MARK_FINDING
+from mojoui.inspection_tables import is_places, read_places, compare_tables, flight_plan, place_marks
+from mojoui.vision_presets import DRONE_MATCH_M
+from mojoui.player import SCRUB as PLAYER_SCRUB
+from mojoui.view import SET_TO
+from mojoui.timeseries import TimeSeries
+from mojoui.videotable import VideoTable
+from mojoui.videoexport import flagged_captions, Caption
 
 # screens
 comptime START_SCREEN = 0
@@ -201,6 +216,51 @@ comptime PANEL_CLOSE = 3102  # the island's panel closed
 comptime BIG_FILE = 256 * 1024 * 1024  # from this many bytes a file opens in a background job (the island shows its progress)
 comptime BIG_ROWS = 10_000_000  # from this many rows a chart's numbers and a column's figures come from background jobs
 comptime SKINS: List[String] = ["Liquid", "Ledger", "Graphite", "Blueprint"]
+comptime INSERT_VIDEO = 3200  # Insert > Video… / Image…: a dialog with a file picker of that kind
+comptime INSERT_IMAGE = 3201
+comptime INSERT_CLOSE = 3202
+comptime INSERT_TABLE = 3203  # Insert > Table…: a dialog with a table file picker (the table lands as a card beside the sheet's own)
+comptime PICK_TABLE = 3204  # its picker returned a path
+comptime ANALYZE_WITH = 3300  # + analyzer (ANALYZERS): the video card's Analyze popover chose one
+comptime ANALYZE_CLOSE = 3310
+comptime REEL_FLAG = 3320  # the Make a reel dialog: which flag keeps a frame (event.number), faces, the caption, go, close
+comptime REEL_BLUR = 3321
+comptime REEL_CAPTION = 3322
+comptime REEL_GO = 3323
+comptime REEL_CLOSE = 3324
+comptime QUERY_OPEN = 3330  # the Query dialog (Insert > SQL query…, the toolbar's Query): its SQL, its answer's name, Run, close
+comptime QUERY_TEXT = 3331
+comptime QUERY_NAME = 3332
+comptime QUERY_RUN = 3333
+comptime QUERY_CLOSE = 3334
+comptime EXPORT_CSV = 3340  # File > Export CSV: the sheet's own table as <documents>/<its name>.csv
+comptime OBJ_TABLE = 5  # (Insert > Table…'s dialog: inserting = OBJ_TABLE)
+comptime ACT_ANALYZE = 0  # a video card's actions (mojoui.mediacard CardAction)
+comptime ACT_REEL = 1
+comptime ACT_EDIT = 2
+comptime ANALYZE_LOG = 3311  # the Analyze popover: which log (a track card) georeferences the video (event.number)
+comptime COMPARE_OPEN = 3350  # Insert > Compare inspections…: two places tables (earlier, later), Compare, close
+comptime COMPARE_A = 3351
+comptime COMPARE_B = 3352
+comptime COMPARE_GO = 3353
+comptime COMPARE_CLOSE = 3354
+comptime TRACK_MSG = 4200  # the logs in step with a video (mojoui.trackcard: 4 messages and 2 canvases a card)
+comptime TRACK_CANVAS = 250
+comptime MAX_TRACKS = 4
+comptime TRACK_H = 330  # a new log card's height
+comptime EDITOR_MSG = 4300  # the video editor (mojoui.mediatimeline: 64 messages, 3 canvases), opened from a video card's Edit
+comptime EDITOR_CANVAS = 300
+comptime PLAN_ALT_M = 25.0  # the next flight plan's height over each asset
+comptime TABLE_MSG = 4100  # the table cards' messages (mojoui.tablecard: 4 a card) and canvases (1 a card)
+comptime TABLE_CANVAS = 230
+comptime MAX_TABLES = 8
+comptime MEDIA_MSG = 4000  # the video and picture cards' messages (mojoui.mediacard: 8 a card) and canvases (2 a card)
+comptime MEDIA_CANVAS = 200
+comptime MAX_MEDIA = 8
+comptime TABLE_FRAME = 22  # the table's frame adds this much to its height (the skins' table surface pads it above and below)
+comptime MEDIA_W = 720  # a new video or picture card's width (points); its height follows the media's shape
+comptime TABLE_TYPES = ".csv,.tsv,.txt,.parquet,.omx"
+comptime OPEN_TYPES = TABLE_TYPES + "," + VIDEO_TYPES + "," + IMAGE_TYPES
 comptime MAX_OBJECTS = 40  # per sheet, and tiles per report (canvas ids 10…49, 60…99, 120…159)
 comptime TABLE_H = 400  # the table's height once objects share the sheet
 
@@ -255,6 +315,35 @@ struct Main(App):
     var recent: List[String]
     var version: Int
     var objects: List[SheetObject]  # charts and pivots on the sheet
+    var media: MediaCards  # videos and pictures on the sheet (Board children after the objects)
+    var tables: TableCards  # tables besides the sheet's own: a file added (Insert > Table…), a query's answer (Board children after the media)
+    var tracks: TrackCards  # logs in step with a video: a chart with its cursor and a map (Board children after the tables)
+    var editor: Optional[MediaTimeline]  # a video card's Edit: the editor over the whole window, until Done
+    var feed: TimelineFeed
+    var found_which: Int  # which analyzer found self.found
+    var compare_open: Bool  # Insert > Compare inspections…: its choices (indices into place_tables())
+    var compare_a: Int
+    var compare_b: Int
+    var table_title: String  # the sheet's own table's title when it isn't the tab's name ("warehouse.mp4 · detections"), else ""
+    var analyzing: Optional[Job[Analyzed]]  # a video being analyzed (its card's path, the analyzer)
+    var analyzing_path: String
+    var analyzing_which: Int
+    var found: VideoTable  # the last analysis' rows (its video's path; the table showing them: "" the sheet's own, else a card's name)
+    var found_path: String
+    var found_table: String
+    var reeling: Optional[Job[Reel]]  # a reel being cut (from which card's video)
+    var reeling_path: String
+    var analyze_card: Int  # the card whose Analyze popover is open, -1 none
+    var reel_card: Int  # the card whose Make a reel dialog is open, -1 none
+    var reel_flag: Int  # the dialog's choices: which flag column (an index into reel_flags()), blur faces, which caption (0: none)
+    var reel_blur: Bool
+    var reel_caption: Int
+    var reel_captions: List[Tuple[String, Int, Int, Int]]  # caption choices: (label, table card (-1: the sheet's own), key column, value column)
+    var query_open: Bool
+    var query_text: String
+    var query_name: String
+    var query_said: String
+    var inserting: Int  # Insert > Video… or Image… open: OBJ_VIDEO or OBJ_IMAGE (0: closed)
     var active: Int  # the object the inspector shows (-1: none)
     var chart_sizes: List[Tuple[Float64, Float64]]  # per canvas id: points from the last draw (taps)
     var sheet_tab: Int  # 0: the table's sheet, 1: the Report
@@ -337,6 +426,35 @@ struct Main(App):
         self.milliseconds = 0
         self.recent = read_recent(APP)
         self.objects = List[SheetObject]()
+        self.media = MediaCards(MEDIA_MSG, MEDIA_CANVAS, MAX_MEDIA)
+        self.tables = TableCards(TABLE_MSG, TABLE_CANVAS, MAX_TABLES)
+        self.tracks = TrackCards(TRACK_MSG, TRACK_CANVAS, MAX_TRACKS)
+        self.editor = None
+        self.feed = TimelineFeed()
+        self.found_which = 0
+        self.compare_open = False
+        self.compare_a = 0
+        self.compare_b = 1
+        self.table_title = ""
+        self.analyzing = None
+        self.analyzing_path = ""
+        self.analyzing_which = 0
+        self.found = VideoTable()
+        self.found_path = ""
+        self.found_table = ""
+        self.reeling = None
+        self.reeling_path = ""
+        self.analyze_card = -1
+        self.reel_card = -1
+        self.reel_flag = 0
+        self.reel_blur = True
+        self.reel_caption = 0
+        self.reel_captions = List[Tuple[String, Int, Int, Int]]()
+        self.query_open = False
+        self.query_text = ""
+        self.query_name = "Query 1"
+        self.query_said = ""
+        self.inserting = 0
         self.active = -1
         self.chart_sizes = List[Tuple[Float64, Float64]](length=1000, fill=(400.0, 240.0))
         self.sheet_tab = 0
@@ -405,6 +523,8 @@ struct Main(App):
         """The window's content area: the sheet, the report and the inspector fill it (goal 25 M2)."""
         self.win_w = max(width, 640)
         self.win_h = max(height, 480)
+        if self.editor:
+            self.editor.value().resize(self.win_w - 40, self.win_h - 32)  # (less the editor's margins)
 
     def grid_h(self) -> Int:
         """The sheet's height: the window less the menu bar, toolbar, formula bar, tabs and status bar."""
@@ -463,7 +583,16 @@ struct Main(App):
 
     def open_path(mut self, path: String):
         """A CSV or Parquet file → the Import step (its columns as read; a Parquet file too big for memory is streamed,
-        D-184); an .omx document → straight to its sheet."""
+        D-184); an .omx document → straight to its sheet; a video or picture → a card on the sheet (a new one when none is
+        open). A bare file name is looked up in the documents folder (OMX_DOCUMENTS), where Save puts documents."""
+        if not path.startswith("/") and path.find("/") < 0 and not file_exists(path):
+            var docs = environment("OMX_DOCUMENTS", environment("HOME", ".") + "/Documents/omxplorer") + "/" + path
+            if file_exists(docs):
+                self.open_path(docs)
+                return
+        if is_media_file(path):
+            self.open_media(path)
+            return
         if path.endswith(".omx"):
             try:
                 var objects = List[SheetObject]()
@@ -519,6 +648,540 @@ struct Main(App):
             self.message = String(e)
             self.say(Activity.error("Couldn't open " + file_name(path), "it isn't a table"))  # (stays until it's seen: the reason is in the status bar)
         self.version += 1
+
+    def open_media(mut self, path: String, card_w: Int = 0):
+        """A video or picture as a card on the sheet: beside the table on a sheet of its own (a blank one, made now), below
+        what is there on a sheet already open (as a new chart goes); `card_w` > 0: at most that wide there."""
+        var fresh = self.screen != SHEET or not self.has_table
+        if fresh:
+            self.open_blank()
+            if self.screen != SHEET:
+                return
+        var width = self.sheet_width()
+        var w = min(MEDIA_W, max(width - 360, 320))
+        if card_w > 0 and not fresh:
+            w = min(card_w, w)
+        var spot = (0, 0)
+        if not fresh:  # (cards are placed like charts: where nothing is, tables and videos included)
+            spot = self.free_place(w, w * 9 // 16 + 132)
+        try:
+            var k = self.media.add(path, spot[0], spot[1], w)
+            if self.media.cards[k].kind == OBJ_VIDEO:  # (two quiet actions: the rows it holds, and a reel of some of them)
+                var n = self.video_number(k)
+                var tail = "" if n == 0 else "-" + String(n + 1)
+                self.media.cards[k].actions.append(CardAction("Analyze", "zap", "analyze" + tail, "Find what's in the video, frame by frame: the rows land on the sheet as a table"))
+                self.media.cards[k].actions.append(CardAction("Make a reel", "video", "make-reel" + tail, "Cut the frames where a column of the analysis is true into a new video: faces blurred, a caption burned in"))
+                self.media.cards[k].actions.append(CardAction("Edit", "sliders-horizontal", "edit" + tail, "Open the editor: a filmstrip timeline with the analysis and the log as lanes; split, trim, cut by a sentence, export"))
+            if fresh:  # (the blank table sits beside the card, as tall as it: the video and its numbers side by side)
+                self.table_x = w + 16
+                self.table_w = max(width - w - 16, 320)
+                self.table_h_set = self.media.cards[k].h - TABLE_FRAME
+                self.sheet_name = file_stem(path)
+                self.name = file_stem(path)
+            self.reveal = 1 + len(self.objects) + k  # (child 0 is the table, then the objects, then the cards)
+            self.reveal_count += 1
+            self.message = "Opened " + file_name(path) + " · " + self.media.cards[k].facts()
+            remember(APP, path, self.recent)
+        except e:
+            self.message = String(e)
+            self.say(Activity.error("Couldn't open " + file_name(path), "it isn't a video or picture"))
+        self.version += 1
+
+    def video_number(self, k: Int) -> Int:
+        """Card k is the how-manyth video card (0: the first), which names its actions for an agent (analyze, analyze-2)."""
+        var n = 0
+        for j in range(k):
+            if self.media.cards[j].kind == OBJ_VIDEO:
+                n += 1
+        return n
+
+    def card_of(self, path: String) -> Int:
+        """The video card showing `path`, else -1."""
+        for k in range(len(self.media)):
+            if self.media.cards[k].path == path:
+                return k
+        return -1
+
+    def documents(self) -> String:
+        """Where Save, Export CSV and reels put files (OMX_DOCUMENTS), made when missing."""
+        var d = environment("OMX_DOCUMENTS", environment("HOME", ".") + "/Documents/omxplorer")
+        try:
+            make_dir(d)
+        except:
+            pass
+        return d
+
+    def add_table_file(mut self, path: String):
+        """Insert > Table…: a CSV or Parquet file as a table card beside what's on the sheet (the sheet's own table stays)."""
+        try:
+            var imp = read_table(path)
+            if imp.streamed():
+                raise Error("it's bigger than memory: open it as the sheet's own table instead")
+            var sheet = Sheet(imp.table, False)
+            var log = Optional[TimeSeries](None)
+            if is_track(sheet):
+                log = series_from_sheet(sheet)
+            var w = self.card_width(sheet.columns())
+            var h = 240 if log else 320  # (a log's rows matter less than its chart: a shorter card)
+            var is_log = Bool(log)
+            if log:  # (its chart and map first, right under its video; the rows go where there's room)
+                self.add_track(file_stem(path), log.take())
+            var spot = self.free_place(w, h)
+            var k = self.tables.add(file_stem(path), sheet^, spot[0], spot[1], w, h, self.font, self.pal)
+            self.tables.cards[k].note = "from " + file_name(path)
+            if not is_log:
+                self.reveal_table(k)
+            self.message = "Added " + file_name(path) + " · " + self.tables.cards[k].facts()
+            self.say(Activity.done(file_stem(path), self.tables.cards[k].facts()))
+        except e:
+            self.message = "Couldn't add " + file_name(path) + ": " + String(e)
+            self.say(Activity.error("Couldn't add " + file_name(path), String(e)))
+        self.version += 1
+
+    def free_place(self, w: Int, h: Int) -> Tuple[Int, Int]:
+        """Where a new w × h card goes: the first spot nothing on the sheet covers, below the table."""
+        var taken = self.objects.copy()
+        for k in range(len(self.media)):
+            ref c = self.media.cards[k]
+            taken.append(SheetObject.chart(0, 0, c.x, c.y, c.w, c.h))
+        for k in range(len(self.tables)):
+            ref t = self.tables.cards[k]
+            taken.append(SheetObject.chart(0, 0, t.x, t.y, t.w, t.h))
+        for k in range(len(self.tracks)):
+            ref r = self.tracks.cards[k]
+            taken.append(SheetObject.chart(0, 0, r.x, r.y, r.w, r.h))
+        taken.append(SheetObject.chart(0, 0, self.table_x, self.table_y, self.table_w if self.table_w > 0 else self.sheet_width(), self.table_h() + TABLE_FRAME))  # (its frame: as tall as a card beside it)
+        return free_spot(taken, -16, self.sheet_width(), w, h)
+
+    def card_width(self, columns: Int) -> Int:
+        """A new table card's width: room for its columns, between 360 and 640 points."""
+        return min(max(columns * 120 + 100, 360), 640)
+
+    def reveal_table(mut self, k: Int):
+        self.reveal = 1 + len(self.objects) + len(self.media) + k  # (child 0 is the table, then the objects, the cards, the tables)
+        self.reveal_count += 1
+
+    def video_for_log(self, name: String) -> String:
+        """The video a log belongs to: the one whose name ends the same way (telemetry_a ↔ drone_a), else the newest
+        video with no log yet, else ""."""
+        var best = String("")
+        var most = 0
+        for k in range(len(self.media)):
+            ref c = self.media.cards[k]
+            if c.kind != OBJ_VIDEO:
+                continue
+            var a = name.as_bytes()
+            var b = file_stem(c.path).as_bytes()
+            var n = 0
+            while n < len(a) and n < len(b) and a[len(a) - 1 - n] == b[len(b) - 1 - n]:
+                n += 1
+            if n > most and self.tracks.for_video(c.path) < 0:
+                most = n
+                best = c.path
+        if best != "":
+            return best^
+        for k in range(len(self.media) - 1, -1, -1):
+            if self.media.cards[k].kind == OBJ_VIDEO and self.tracks.for_video(self.media.cards[k].path) < 0:
+                return self.media.cards[k].path
+        return String("")
+
+    def add_track(mut self, name: String, var log: TimeSeries):
+        """A log beside its video: a card with a chart whose cursor follows the video, and the route's map (under the
+        video, as wide as it)."""
+        var video = self.video_for_log(name)
+        var w = 720
+        var at = self.card_of(video)
+        if at >= 0:
+            w = self.media.cards[at].w
+        var spot = self.free_place(w, TRACK_H)
+        if at >= 0:  # (right under its video when that's free: the picture and its numbers in one column)
+            ref c = self.media.cards[at]
+            var under = self.free_place(w, TRACK_H)
+            under = (c.x, c.y + c.h + 16)
+            var clear = True
+            for k in range(len(self.tables)):
+                ref t = self.tables.cards[k]
+                if t.x < under[0] + w and under[0] < t.x + t.w and t.y < under[1] + TRACK_H and under[1] < t.y + t.h:
+                    clear = False
+            for k in range(len(self.media)):
+                ref m = self.media.cards[k]
+                if k != at and m.x < under[0] + w and under[0] < m.x + m.w and m.y < under[1] + TRACK_H and under[1] < m.y + m.h:
+                    clear = False
+            if clear:
+                spot = under
+        try:
+            var k = self.tracks.add(name, log^, video, spot[0], spot[1], w, TRACK_H)
+            self.tracks.cards[k].note = "In step with " + (file_name(video) if video != "" else String("no video yet"))
+            self.reveal = 1 + len(self.objects) + len(self.media) + len(self.tables) + k
+            self.reveal_count += 1
+            if self.trace:
+                print("TRACK: " + name + " in step with " + file_name(video))
+        except e:
+            self.say(Activity.error("Couldn't show the log", String(e)))
+
+    def track_time(self, k: Int) -> Float64:
+        """The time of track k's video (its playhead), 0 when it has none."""
+        var v = self.card_of(self.tracks.cards[k].video)
+        if v >= 0 and self.media.cards[v].player:
+            return self.media.cards[v].player.value().state.t()
+        return 0.0
+
+    def track_frame(self, k: Int) -> Int:
+        var v = self.card_of(self.tracks.cards[k].video)
+        if v >= 0 and self.media.cards[v].player:
+            return self.media.cards[v].player.value().state.frame
+        return 0
+
+    def seek_video(mut self, path: String, t: Float64):
+        """The video card showing `path` to time t, as its own scrubber would (its trace says so)."""
+        var v = self.card_of(path)
+        if v >= 0 and self.media.cards[v].player:
+            _ = self.media.update(Event(self.media.msg(v) + PLAYER_SCRUB, String(t), SET_TO))
+
+    def mark_track(mut self, video: String, var marks: List[MapMark]):
+        """An inspection's places on its log's map (place_marks)."""
+        var k = self.tracks.for_video(video)
+        if k >= 0:
+            self.tracks.cards[k].marks = marks^
+
+    def place_tables(self) -> List[Tuple[String, Int]]:
+        """The inspections on the sheet (places tables): their SQL names and where they are (-1: the sheet's own table,
+        else a table card's index)."""
+        var out = List[Tuple[String, Int]]()
+        if self.has_table and is_places(self.frame):
+            out.append((sql_name(self.name), -1))
+        for k in range(len(self.tables)):
+            if is_places(self.tables.cards[k].sheet):
+                out.append((self.tables.sql_name_of(k), k))
+        return out^
+
+    def run_compare(mut self):
+        """Insert > Compare inspections: the later flight against the earlier one; the assets that got worse land as
+        the "worse" table card, with Flight plan as its action."""
+        var pl = self.place_tables()
+        self.compare_open = False
+        if len(pl) < 2:
+            self.say(Activity.error("Nothing to compare", "analyze two flights with Assets & defects first"))
+            self.version += 1
+            return
+        var a = pl[min(self.compare_a, len(pl) - 1)]
+        var b = pl[min(self.compare_b, len(pl) - 1)]
+        try:
+            var t0 = now_ns()
+            var sheet: Sheet
+            if a[1] == -1 and b[1] == -1:
+                sheet = Sheet(compare_tables(self.frame, self.frame, DRONE_MATCH_M).share(), False)
+            elif a[1] == -1:
+                sheet = Sheet(compare_tables(self.frame, self.tables.cards[b[1]].sheet, DRONE_MATCH_M).share(), False)
+            elif b[1] == -1:
+                sheet = Sheet(compare_tables(self.tables.cards[a[1]].sheet, self.frame, DRONE_MATCH_M).share(), False)
+            else:
+                sheet = Sheet(compare_tables(self.tables.cards[a[1]].sheet, self.tables.cards[b[1]].sheet, DRONE_MATCH_M).share(), False)
+            var n = sheet.rows()
+            var w = 560
+            var spot = self.free_place(w, 260)
+            var k = self.tables.add("worse", sheet^, spot[0], spot[1], w, 260, self.font, self.pal)
+            self.tables.cards[k].note = a[0].replace("_places", "") + " → " + b[0].replace("_places", "")  # (one line: the flights)
+            self.tables.cards[k].act_with("Flight plan", "route", "flight-plan", "Write the next flight plan: a waypoint over each asset that got worse (waypoints.csv in your documents)")
+            self.reveal_table(k)
+            if self.trace:
+                print("JOB: compare " + a[0] + " " + b[0] + " " + String(n) + " worse")
+            self.message = String(n) + " assets got worse from " + a[0] + " to " + b[0] + " (a new defect, or a bigger one)"
+            self.say(Activity.done("worse", String(n) + " assets · " + fixed(Float64(now_ns() - t0) / 1e6, 1) + " ms"))
+        except e:
+            self.say(Activity.error("Couldn't compare", String(e)))
+        self.version += 1
+
+    def write_plan(mut self, k: Int):
+        """A worse card's Flight plan: <documents>/waypoints.csv, shown as a card of its own."""
+        var path = self.documents() + "/waypoints.csv"
+        try:
+            var n = flight_plan(path, self.tables.cards[k].sheet, PLAN_ALT_M, "inspect")
+            if self.trace:
+                print("JOB: flight plan " + String(n) + " waypoints")
+            self.add_table_file(path)
+            var at = self.tables.find("waypoints")
+            if at >= 0:
+                self.tables.cards[at].note = "the next flight · " + String(n) + " waypoints at " + fixed(Float64(PLAN_ALT_M), 0) + " m"
+            self.message = "Wrote waypoints.csv: " + String(n) + " waypoints, one over each asset that got worse (in your documents)"
+        except e:
+            self.say(Activity.error("Couldn't write the flight plan", String(e)))
+        self.version += 1
+
+    def open_editor(mut self, k: Int):
+        """Card k's video in the editor (mojoui.mediatimeline), over the whole window: the analysis' rows as lanes (when
+        this video was analyzed), its log's columns as lines, the sentence bar. Done comes back to the sheet."""
+        if k < 0 or k >= len(self.media) or not self.media.cards[k].player:
+            return
+        var path = self.media.cards[k].path
+        try:
+            var ed = MediaTimeline(path, EDITOR_MSG, EDITOR_CANVAS)
+            var t = self.media.cards[k].player.value().state.t()
+            self.media.cards[k].player.value().state.pause()
+            ed.seek(t if t > 0 else ed.project.duration() / 2)  # (a video not yet watched opens mid-way: a split can start at once)
+            if self.found_path == path and self.found.rows() > 0:
+                use_analysis(ed, self.found, self.found_which)
+            var tk = self.tracks.for_video(path)
+            if tk >= 0:
+                ref c = self.tracks.cards[tk]
+                var shown = 0
+                for i in range(len(c.metrics)):  # (two lines, the heading left out: it reads as noise on a strip)
+                    if shown < 2 and c.metrics[i] != "heading_deg":
+                        ed.add_lane(value_lane(metric_label(c.metrics[i]), c.series, c.metrics[i], metric_unit(c.metrics[i])))
+                        shown += 1
+            ed.resize(self.win_w - 40, self.win_h - 32)
+            self.editor = ed^
+            self.feed.poll(self.editor.value())
+            if self.trace:
+                print("EDITOR: open " + file_name(path), flush=True)
+        except e:
+            self.say(Activity.error("Couldn't open the editor", String(e)))
+        self.version += 1
+
+    def start_analysis(mut self, k: Int, which: Int):
+        """Analyzer `which` over card k's video, as a background job: the card shows how far it is, the island too."""
+        if self.analyzing:
+            self.message = "Already analyzing " + file_name(self.analyzing_path) + ": one video at a time"
+            return
+        ref c = self.media.cards[k]
+        var log = Optional[TimeSeries](None)
+        if analyzer_needs_log(which):
+            var tk = self.tracks.for_video(c.path)
+            if tk < 0:
+                self.message = analyzer_names()[which] + " needs the flight's log: Insert > Table… a CSV with t, lat and lon beside " + file_name(c.path)
+                self.say(Activity.error("No log for " + file_name(c.path), "insert its CSV (t, lat, lon) first"))
+                return
+            log = self.tracks.cards[tk].series.copy()
+        self.analyzing = analyze_job(c.path, which, log^)
+        self.analyzing_path = c.path
+        self.analyzing_which = which
+        c.status = "Analyzing"
+        c.progress = 0
+        if self.trace:
+            print("JOB: start analyze " + file_name(c.path) + " with " + analyzer_names()[which])
+        self.say(Activity.running("Analyzing " + file_name(c.path), 0.0, analyzer_names()[which]))
+
+    def analysis_landed(mut self, var a: Analyzed):
+        """The rows land as a table: the sheet's own when it's still the blank one the video opened with (beside the
+        card, as tall as it), else a table card beside the video. The video's player marks what was found."""
+        var path = self.analyzing_path
+        var rows_name = analyzer_rows(a.analyzer, path)
+        var name = rows_name if rows_name != analyzer_rows(a.analyzer) else file_name(path) + " · " + rows_name  # (a name with the video's in it stands alone)
+        self.found_which = a.analyzer
+        var found = a.take_found()
+        var rows = found.rows()
+        var secs = a.milliseconds / 1000.0
+        var k = self.card_of(path)
+        if k >= 0:
+            self.media.cards[k].status = ""
+            if self.media.cards[k].player:
+                self.media.cards[k].player.value().set_marks(marks_of(found, "face"))
+        var blank = self.source == "blank" and self.frame.edits() == 0 and len(self.objects) == 0 and len(self.tiles) == 0
+        try:
+            if blank:
+                self.adopt_table(a.take_sheet())
+                self.source = path
+                self.name = rows_name
+                if a.analyzer == INSPECTION:
+                    self.mark_track(path, place_marks(self.frame))
+                self.table_title = name
+                self.found_table = ""
+            else:
+                var x = 0
+                var y = 0
+                var w = 640
+                var h = 400
+                if k >= 0:
+                    ref c = self.media.cards[k]
+                    x = c.x + c.w + 16
+                    y = c.y
+                    w = max(self.sheet_width() - x, 480)
+                    h = c.h
+                var t = self.tables.add(name, a.take_sheet(), x, y, w, h, self.font, self.pal)
+                var said = analyzer_names()[a.analyzer]
+                var paren = said.find(" (")
+                self.tables.cards[t].note = String(said[byte=:paren]) if paren > 0 else said  # (the analyzer, short: one line in the title bar)
+                if a.analyzer == INSPECTION:
+                    self.mark_track(path, place_marks(self.tables.cards[t].sheet))
+                self.found_table = name
+                self.reveal_table(t)
+        except e:
+            self.say(Activity.error("Couldn't show the rows", String(e)))
+            self.version += 1
+            return
+        self.found = found^
+        self.found_path = path
+        self.timed(a.milliseconds)
+        if self.trace:
+            print("JOB: landed analyze " + file_name(path) + " " + String(rows) + " rows " + fixed(a.milliseconds, 1) + " ms")
+        self.message = name + ": " + grouped(rows) + " rows from " + grouped(self.found.frames) + " frames in " + fixed(secs, 1) + " s (classic GPU vision; a model plugs in later)"
+        self.say(Activity.done(name, grouped(rows) + " rows · " + fixed(secs, 1) + " s"))
+        self.version += 1
+
+    def adopt_table(mut self, var sheet: Sheet):
+        """A new table for the sheet's own, keeping what's on the sheet around it (the video card it came from)."""
+        self.use_table(sheet^)
+        self.seen_edits = self.frame.edits()
+        self.grid = DataGrid()
+        self.grid.prepare(self.frame, self.font, self.pal)
+        for c in range(self.frame.stored()):
+            if self.frame.kind(c) == TEXT:
+                self.grid.fit(c, self.frame, self.font, self.pal)
+        var nums = self.numbers()
+        self.report_col = nums[0] if len(nums) > 0 else 0
+        self.grid.select(0, 0)
+        self.select_cell(0, 0)
+        self.refresh()
+
+    def found_sheet_index(self) -> Int:
+        """Where the analysis' rows are: -1 the sheet's own table, a table card's index, or -2 nowhere (closed)."""
+        if self.found_path == "":
+            return -2
+        if self.found_table == "":
+            return -1 if self.source == self.found_path else -2
+        var k = self.tables.find(self.found_table)
+        return k if k >= 0 else -2
+
+    def reel_flags(self) -> List[Int]:
+        """The analysis table's columns a reel can keep frames by (its true/false columns)."""
+        var at = self.found_sheet_index()
+        if at == -1:
+            return flag_columns(self.frame)
+        if at >= 0:
+            return flag_columns(self.tables.cards[at].sheet)
+        return List[Int]()
+
+    def open_reel(mut self, k: Int):
+        """The Make a reel dialog for card k: its choices worked out once (captions: a text column of another table that
+        names the codes the video read, found by its values)."""
+        self.reel_card = k
+        self.reel_flag = 0
+        self.reel_caption = 0
+        self.reel_captions = List[Tuple[String, Int, Int, Int]]()
+        self.reel_captions.append(("None", -2, -1, -1))
+        if self.found_path == self.media.cards[k].path:
+            var codes = codes_of(self.found)
+            var found_at = self.found_sheet_index()
+            for t in range(len(self.tables)):
+                if t == found_at:
+                    continue
+                ref sh = self.tables.cards[t].sheet
+                for v in range(sh.columns()):
+                    if sh.kind(v) != TEXT:
+                        continue
+                    var key = matching_column(sh, codes, v)
+                    if key[0] >= 0 and key[1] > 0:
+                        self.reel_captions.append((self.tables.sql_name_of(t) + " · " + sh.name(v), t, key[0], v))
+            if found_at != -1 and self.has_table:  # (the sheet's own table can name them too)
+                for v in range(self.frame.stored()):
+                    if self.frame.kind(v) == TEXT:
+                        var key = matching_column(self.frame, codes, v)
+                        if key[0] >= 0 and key[1] > 0:
+                            self.reel_captions.append((sql_name(self.name) + " · " + self.frame.name(v), -1, key[0], v))
+            if len(self.reel_captions) > 1:
+                self.reel_caption = 1  # (a caption when there's one to burn: the reel says whose pallet it is)
+
+    def start_reel(mut self):
+        """The reel as a background job: the frames where the chosen flag is true, cut from the card's video, faces
+        blurred (when asked), the chosen column burned in; <documents>/<video>-reel.mp4, shown as a new card when done."""
+        var k = self.reel_card
+        if k < 0 or k >= len(self.media) or self.reeling:
+            return
+        var path = self.media.cards[k].path
+        var flags = self.reel_flags()
+        if self.found_path != path or len(flags) == 0:
+            self.message = "Analyze " + file_name(path) + " first: a reel keeps the frames where a column of its rows is true"
+            self.version += 1
+            return
+        var flag = flags[min(self.reel_flag, len(flags) - 1)]
+        var at = self.found_sheet_index()
+        var runs: List[Tuple[Int, Int]]
+        var flag_name: String
+        if at == -1:
+            runs = flag_frames(self.frame, flag, self.frame.index("frame"))
+            flag_name = self.frame.name(flag)
+        else:
+            ref sh = self.tables.cards[at].sheet
+            runs = flag_frames(sh, flag, sh.index("frame"))
+            flag_name = sh.name(flag)
+        if len(runs) == 0:
+            self.message = "No frame has " + flag_name + ": nothing to cut"
+            self.version += 1
+            return
+        var segments = segments_of(runs, self.found.fps)
+        var captions = List[Caption]()
+        if 0 < self.reel_caption < len(self.reel_captions):
+            var ch = self.reel_captions[self.reel_caption]
+            var names = lookup(self.frame, ch[2], ch[3]) if ch[1] == -1 else lookup(self.tables.cards[ch[1]].sheet, ch[2], ch[3])
+            var kind = self.found.kind[0] if self.found.rows() > 0 else String("object")
+            for i in range(self.found.rows()):  # (the kind the flag marks: the first flagged row's)
+                if self.found.damaged[i]:
+                    kind = self.found.kind[i]
+                    break
+            captions = flagged_captions(self.found, kind, names, flag_name)
+        var mark = String("")
+        for i in range(self.found.rows()):
+            if self.found.damaged[i]:
+                mark = self.found.kind[i]
+                break
+        var out = self.documents() + "/" + file_stem(path) + "-reel.mp4"
+        self.reeling = reel_job(path, out, self.found, segments, "face" if self.reel_blur else "", mark, captions)
+        self.reeling_path = path
+        self.media.cards[k].status = "Making a reel"
+        self.media.cards[k].progress = 0
+        self.reel_card = -1
+        if self.trace:
+            print("JOB: start reel " + file_name(out) + " " + String(len(segments)) + " segments")
+        self.say(Activity.running("Making " + file_name(out), 0.0, String(len(segments)) + " clips"))
+        self.version += 1
+
+    def reel_landed(mut self, var r: Reel):
+        var k = self.card_of(self.reeling_path)
+        if k >= 0:
+            self.media.cards[k].status = ""
+        self.timed(r.milliseconds)
+        if self.trace:
+            print("JOB: landed reel " + file_name(r.path) + " " + String(r.frames) + " frames " + fixed(r.milliseconds, 1) + " ms")
+        self.open_media(r.path, 560)  # (a reel sits beside what it came from, a little smaller than its source)
+        self.message = "Made " + file_name(r.path) + " · " + fixed(r.seconds, 1) + " s from " + file_name(self.reeling_path) + " (in your documents)"
+        self.say(Activity.done(file_name(r.path), fixed(r.seconds, 1) + " s reel · " + fixed(r.milliseconds / 1000.0, 1) + " s"))
+        self.version += 1
+
+    def run_query(mut self):
+        """The Query dialog's SQL over the sheet's tables (its own and every card's): the answer lands as a table card
+        named as asked (run again under the same name: the same card)."""
+        var called = String(self.query_name.strip())
+        if called == "":
+            called = "Query 1"
+        try:
+            var t0 = now_ns()
+            var answer = self.tables.query(self.query_text, self.name if self.has_table else String(""), self.frame)
+            var ms = Float64(now_ns() - t0) / 1e6
+            var w = self.card_width(answer.columns())
+            var spot = self.free_place(w, 320)
+            var k = self.tables.add(called, answer^, spot[0], spot[1], w, 320, self.font, self.pal)
+            self.tables.cards[k].note = "a query"
+            self.reveal_table(k)
+            self.timed(ms)
+            self.query_said = grouped(self.tables.cards[k].sheet.rows()) + " rows in " + fixed(shown_ms(ms), 1) + " ms"
+            self.query_open = False
+            self.message = called + ": " + self.query_said
+            if self.trace:
+                print("QUERY: " + called + " " + String(self.tables.cards[k].sheet.rows()) + " rows")
+            self.say(Activity.done(called, self.query_said))
+        except e:
+            self.query_said = String(e)
+        self.version += 1
+
+    def seek_to_row(mut self, row: Int):
+        """A row of an analysis selected: its video shows that moment (the row's t)."""
+        if self.found_path == "" or self.source != self.found_path or row < 0:
+            return
+        var t = self.frame.index("t")
+        var k = self.card_of(self.found_path)
+        if t < 0 or k < 0 or not self.media.cards[k].player or self.frame.is_null(t, row):
+            return
+        self.media.cards[k].player.value().seek(Float64(self.frame.value(t, row)) / 1000.0)
 
     def imported(mut self, path: String, var imp: CsvImport, var sheet: Sheet, var shapes: List[List[Float64]]):
         """A file read (here or by a job): its Import step."""
@@ -576,6 +1239,13 @@ struct Main(App):
         self.charts.forget()  # (the objects go: their jobs would land on the new ones)
         self.held = List[Tuple[Int, SheetObject]]()
         self.objects = List[SheetObject]()
+        self.media.clear()  # (a new sheet starts without the old one's videos and pictures)
+        self.tables.clear()  # (and its extra tables)
+        self.tracks.clear()  # (and its logs)
+        self.editor = None
+        self.table_title = ""
+        self.found_path = ""
+        self.found_table = ""
         self.active = -1
         self.tiles = List[ReportTile]()
         self.filter = ReportFilter(-1, 0)
@@ -726,7 +1396,7 @@ struct Main(App):
     def table_h(self) -> Int:
         if self.table_h_set > 0:
             return self.table_h_set
-        return TABLE_H if len(self.objects) > 0 else self.grid_h() - 30  # (the Board keeps 30 pt under it)
+        return TABLE_H if len(self.objects) + len(self.media) > 0 else self.grid_h() - 30  # (the Board keeps 30 pt under it)
 
     def first_number(self) -> Int:
         for c in range(self.frame.columns()):
@@ -737,6 +1407,7 @@ struct Main(App):
     # ---------- the selection and its totals ----------
 
     def select_cell(mut self, row: Int, col: Int):
+        self.seek_to_row(row)
         self.edit_text = self.frame.plain_text(col, row) if row >= 0 and col >= 0 else ""
         if self.grid.has_block():  # a block: its own figures (a drag sends one per cell crossed: no column totals)
             self.block_lines = self.block_status()
@@ -1121,6 +1792,44 @@ struct Main(App):
                 except e:
                     self.say(Activity.error("Couldn't open " + file_name(path), String(e)))
                 self.version += 1
+        if self.analyzing:
+            var state = self.analyzing.value().poll()
+            var k = self.card_of(self.analyzing_path)
+            if state == JOB_RUNNING:
+                var p = self.analyzing.value().progress()
+                var share = min(Float64(p.done) / Float64(p.total), 1.0) if p.total > 0 else 0.0
+                if k >= 0 and self.media.cards[k].progress != Int(share * 100):
+                    self.media.cards[k].progress = Int(share * 100)
+                    self.version += 1
+                self.island.progress(share, String(Int(share * 100)) + "% · " + grouped(p.done) + " of " + grouped(p.total) + " frames", self.font, now_ns())
+            else:
+                var job = self.analyzing.take()
+                try:
+                    self.analysis_landed(job.result())
+                except e:
+                    if k >= 0:
+                        self.media.cards[k].status = ""
+                    self.say(Activity.error("Couldn't analyze " + file_name(self.analyzing_path), String(e)))
+                    self.version += 1
+        if self.reeling:
+            var state = self.reeling.value().poll()
+            var k = self.card_of(self.reeling_path)
+            if state == JOB_RUNNING:
+                var p = self.reeling.value().progress()
+                var share = min(Float64(p.done) / Float64(p.total), 1.0) if p.total > 0 else 0.0
+                if k >= 0 and self.media.cards[k].progress != Int(share * 100):
+                    self.media.cards[k].progress = Int(share * 100)
+                    self.version += 1
+                self.island.progress(share, String(Int(share * 100)) + "% · " + grouped(p.done) + " of " + grouped(p.total) + " frames", self.font, now_ns())
+            else:
+                var job = self.reeling.take()
+                try:
+                    self.reel_landed(job.result())
+                except e:
+                    if k >= 0:
+                        self.media.cards[k].status = ""
+                    self.say(Activity.error("Couldn't make the reel", String(e)))
+                    self.version += 1
         if len(self.col_orphans) > 0:
             var kept = List[Job[ColumnFigures]]()
             while len(self.col_orphans) > 0:
@@ -1194,10 +1903,51 @@ struct Main(App):
 
     def handle(mut self, event: Event):
         var m = event.message
+        if self.editor and self.editor.value().owns(m):  # (the editor over the window: its own messages)
+            _ = self.editor.value().update(event)
+            self.feed.poll(self.editor.value())
+            if self.editor.value().closed:
+                self.editor = None
+                if self.trace:
+                    print("EDITOR: done", flush=True)
+                self.version += 1
+            return
+        if self.tracks.update(event, self.font, self.pal):  # (a log's chart tapped or set: its video seeks; a column picked; close)
+            if self.tracks.seek_card >= 0:
+                var video = self.tracks.cards[self.tracks.seek_card].video
+                self.seek_video(video, self.tracks.seek_to)
+            self.version += 1
+            return
+        if self.media.update(event):  # (a video card's play, pause, seek and frames; a card's close; its actions)
+            if self.media.closed >= 0:
+                self.message = ""
+                self.analyze_card = -1
+                self.reel_card = -1
+                self.version += 1
+            elif self.media.acted == ACT_ANALYZE:
+                self.analyze_card = self.media.acted_card
+                self.version += 1
+            elif self.media.acted == ACT_REEL:
+                self.open_reel(self.media.acted_card)
+                self.version += 1
+            elif self.media.acted == ACT_EDIT:
+                self.open_editor(self.media.acted_card)
+            return
+        if self.tables.update(event, self.font, self.pal, self.documents()):  # (a table card's grid, Export CSV, close)
+            if self.tables.exported != "":
+                self.message = "Exported " + file_name(self.tables.exported) + " to your documents"
+                self.say(Activity.done(file_name(self.tables.exported), "exported"))
+            elif self.tables.problem != "":
+                self.say(Activity.error("Couldn't export", self.tables.problem))
+            elif self.tables.acted >= 0:
+                self.write_plan(self.tables.acted)
+            self.version += 1
+            return
         if m != CELL_COMMIT and m != CELL_CANCEL and m != GRID and self.grid.editing:
             self.grid.cancel_edit()
             self.version += 1
         if m == PICK or (m >= RECENT and m < RECENT + 10):
+            self.inserting = 0  # (Insert > Video…'s dialog picked its file)
             var path = event.text if m == PICK else (self.recent[m - RECENT] if m - RECENT < len(self.recent) else String(""))
             if path != "":
                 self.open_path(path)
@@ -1483,6 +2233,89 @@ struct Main(App):
                 else:
                     self.message = ("Chart: " if m == INSERT_CHART else "Pivot: ") + object_title(self.objects[self.active], self.frame) + " (" + fixed(shown_ms(self.objects[self.active].milliseconds), 1) + " ms on " + self.frame.last_device() + (", streamed from disk" if self.frame.streamed() else "") + ")"  # (once, when it lands: where it ran)
             self.version += 1
+        elif m == INSERT_VIDEO or m == INSERT_IMAGE or m == INSERT_TABLE:
+            self.inserting = OBJ_VIDEO if m == INSERT_VIDEO else (OBJ_IMAGE if m == INSERT_IMAGE else OBJ_TABLE)
+            self.version += 1
+        elif m == PICK_TABLE:
+            self.inserting = 0
+            if event.text != "":
+                self.add_table_file(event.text)
+        elif m >= ANALYZE_WITH and m < ANALYZE_WITH + 10:
+            var k = self.analyze_card
+            self.analyze_card = -1
+            if 0 <= k < len(self.media) and m - ANALYZE_WITH < len(analyzer_names()):
+                self.start_analysis(k, m - ANALYZE_WITH)
+            self.version += 1
+        elif m == ANALYZE_CLOSE:
+            self.analyze_card = -1
+            self.version += 1
+        elif m == ANALYZE_LOG:  # (the log this video is in step with, picked in the Analyze popover)
+            if 0 <= self.analyze_card < len(self.media) and 0 <= event.number < len(self.tracks):
+                var path = self.media.cards[self.analyze_card].path
+                for j in range(len(self.tracks)):
+                    if self.tracks.cards[j].video == path:
+                        self.tracks.cards[j].video = ""
+                self.tracks.cards[event.number].video = path
+                self.tracks.cards[event.number].note = "In step with " + file_name(path)
+            self.version += 1
+        elif m == COMPARE_OPEN:
+            var pl = self.place_tables()
+            self.compare_open = True
+            self.compare_a = 0
+            self.compare_b = max(len(pl) - 1, 0)
+            self.version += 1
+        elif m == COMPARE_A:
+            self.compare_a = max(event.number, 0)
+            self.version += 1
+        elif m == COMPARE_B:
+            self.compare_b = max(event.number, 0)
+            self.version += 1
+        elif m == COMPARE_GO:
+            self.run_compare()
+        elif m == COMPARE_CLOSE:
+            self.compare_open = False
+            self.version += 1
+        elif m == REEL_FLAG:
+            self.reel_flag = max(event.number, 0)
+            self.version += 1
+        elif m == REEL_BLUR:
+            self.reel_blur = event.number == 1
+            self.version += 1
+        elif m == REEL_CAPTION:
+            self.reel_caption = max(event.number, 0)
+            self.version += 1
+        elif m == REEL_GO:
+            self.start_reel()
+        elif m == REEL_CLOSE:
+            self.reel_card = -1
+            self.version += 1
+        elif m == QUERY_OPEN:
+            self.query_open = not self.query_open
+            if self.query_open and self.query_text == "":  # (a start: the tables it can read, by name)
+                self.query_text = "SELECT * FROM " + sql_name(self.name) + " LIMIT 100"
+            self.query_said = ""
+            self.version += 1
+        elif m == QUERY_TEXT:
+            self.query_text = event.text
+        elif m == QUERY_NAME:
+            self.query_name = event.text
+        elif m == QUERY_RUN:
+            self.run_query()
+        elif m == QUERY_CLOSE:
+            self.query_open = False
+            self.version += 1
+        elif m == EXPORT_CSV:
+            var path = self.documents() + "/" + sql_name(self.name) + ".csv"
+            try:
+                self.frame.write_csv(path)
+                self.message = "Exported " + file_name(path) + " to your documents"
+                self.say(Activity.done(file_name(path), grouped(self.frame.rows()) + " rows exported"))
+            except e:
+                self.say(Activity.error("Couldn't export", String(e)))
+            self.version += 1
+        elif m == INSERT_CLOSE:
+            self.inserting = 0
+            self.version += 1
         elif m == MOVE or m == RESIZE:  # a sheet object (child 0: the table) dragged by its title bar, or by its corner
             var k = event.number - 1
             if k == -1:
@@ -1499,6 +2332,30 @@ struct Main(App):
                 else:
                     self.objects[k].w = max(320, self.objects[k].w + Int(event.dx))
                     self.objects[k].h = max(220, self.objects[k].h + Int(event.dy))
+            elif 0 <= k - len(self.objects) < len(self.media):  # (a video or picture card, after the objects)
+                ref c = self.media.cards[k - len(self.objects)]
+                if m == MOVE:
+                    c.x = max(0, c.x + Int(event.dx))
+                    c.y = max(0, c.y + Int(event.dy))
+                else:
+                    c.w = max(280, c.w + Int(event.dx))
+                    c.h = max(200, c.h + Int(event.dy))
+            elif 0 <= k - len(self.objects) - len(self.media) < len(self.tables):  # (a table card, after the media)
+                ref t = self.tables.cards[k - len(self.objects) - len(self.media)]
+                if m == MOVE:
+                    t.x = max(0, t.x + Int(event.dx))
+                    t.y = max(0, t.y + Int(event.dy))
+                else:
+                    t.w = max(320, t.w + Int(event.dx))
+                    t.h = max(180, t.h + Int(event.dy))
+            elif 0 <= k - len(self.objects) - len(self.media) - len(self.tables) < len(self.tracks):  # (a log card, after the tables)
+                ref r = self.tracks.cards[k - len(self.objects) - len(self.media) - len(self.tables)]
+                if m == MOVE:
+                    r.x = max(0, r.x + Int(event.dx))
+                    r.y = max(0, r.y + Int(event.dy))
+                else:
+                    r.w = max(360, r.w + Int(event.dx))
+                    r.h = max(200, r.h + Int(event.dy))
             self.version += 1
         elif m >= OBJ_TAP and m < OBJ_TAP + 100:
             var k = m - OBJ_TAP
@@ -1790,6 +2647,16 @@ struct Main(App):
         shown row `first` (count 0: what fits on screen, or 25 before the grid has been drawn)."""
         if self.screen != SHEET:
             return ""
+        if self.editor and self.editor.value().draws(canvas):
+            return self.editor.value().describe()
+        if self.media.draws(canvas):
+            return self.media.describe(canvas)  # (a video: its time and how to seek; a picture: what it is)
+        if self.tracks.draws(canvas):
+            for k in range(len(self.tracks)):
+                if self.tracks.canvas(k) <= canvas < self.tracks.canvas(k) + 2:
+                    return self.tracks.describe(canvas, self.track_time(k))
+        if self.tables.draws(canvas):
+            return self.tables.describe(canvas, first, count)  # (a table card: its rows)
         if 10 <= canvas < 10 + len(self.objects) and self.objects[canvas - 10].kind == OBJ_CHART:
             return chart_text(self.objects[canvas - 10], self.frame)  # (a chart: its bars' numbers)
         if canvas != 0:
@@ -1831,6 +2698,14 @@ struct Main(App):
         self.pal = skin_palette(self.skin, self.accent())  # (the mode's tint, as the chrome has it)
         if 0 <= canvas < len(self.chart_sizes):
             self.chart_sizes[canvas] = (surface.points_width(), surface.points_height())
+        if self.editor and self.editor.value().draws(canvas):
+            self.editor.value().draw(canvas, surface, self.pal, self.font)
+            return
+        if self.tracks.draws(canvas):
+            for k in range(len(self.tracks)):
+                if self.tracks.canvas(k) <= canvas < self.tracks.canvas(k) + 2:
+                    self.tracks.draw(canvas, surface, self.font, self.pal, self.track_time(k))
+            return
         if canvas == 0:
             self.grid.draw(surface, self.frame, self.font, self.pal)
         elif canvas == 1:
@@ -1851,6 +2726,10 @@ struct Main(App):
             if self.objects[canvas - 10].moved < MOVE_FRAMES:  # (mid-move: the next frame draws it further along)
                 self.objects[canvas - 10].moved += 1
                 surface.again = True
+        elif self.media.draws(canvas):
+            self.media.draw(canvas, surface, self.pal)
+        elif self.tables.draws(canvas):
+            self.tables.draw(canvas, surface, self.font, self.pal)
         elif 60 <= canvas < 60 + len(self.tiles):
             var cv = chart_view(self.tiles[canvas - 60].chart, self.frame)
             cv.draw(surface, self.font, self.chart_palette())
@@ -1865,6 +2744,8 @@ struct Main(App):
     def view(self) -> View:
         if self.screen == IMPORT:
             return self.import_screen()
+        if self.screen == SHEET and self.editor:
+            return self.editor.value().view(self.pal).padding(16, 20)
         if self.screen == SHEET:
             return self.sheet_screen()
         return self.start_screen()
@@ -1879,7 +2760,7 @@ struct Main(App):
         var side = List[View]()
         side.append(Button("Start", NO_MSG, SUBTLE, icon="file").fill().align(START))  # (rows read from their leading edge, one icon set)
         side.append(Button("New blank sheet", BLANK, SUBTLE, icon="grid").fill().align(START))
-        side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=".csv,.tsv,.txt,.parquet,.omx").fill().align(START))
+        side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=OPEN_TYPES).fill().align(START))
         side.append(HStack(Icon("database", 16), Text("Connect a database", CAPTION), Spacer(), Text("soon", CAPTION).tone(TONE_ACCENT), spacing=10).fill().align(CENTER).padding(6, 12).tag("soon").tooltip("With MX frame, next"))
         side.append(Divider().fill())
         side.append(Button("Settings…", SETTINGS, SUBTLE, icon="settings").fill().align(START))
@@ -1890,7 +2771,7 @@ struct Main(App):
             HStack(Icon("upload", 28),
                    VStack(Text("Drop a CSV, Parquet or .omx file here", HEADLINE),
                           Text("or choose a file. A million rows is fine: you see a preview first, and the rest loads while you work.", CAPTION), spacing=4).align(START),
-                   Spacer(), FilePicker("Choose a file", PICK, style=PROMINENT, icon="import", accept=".csv,.tsv,.txt,.parquet,.omx"), spacing=16).fill().align(CENTER),
+                   Spacer(), FilePicker("Choose a file", PICK, style=PROMINENT, icon="import", accept=OPEN_TYPES), spacing=16).fill().align(CENTER),
             spacing=0,
         ).fill()
         var recent = List[View]()
@@ -1982,7 +2863,8 @@ struct Main(App):
             fills.append(Item("None" if k == 0 else swatch_name(k), SET_FILL + k, checked=st.fill() == k, disabled=not cells))
         var bar = MenuBar([
             Menu("File", [Item("New blank sheet", BLANK, icon="grid", shortcut="Ctrl+N"), Item("Open…", BACK, icon="open", shortcut="Ctrl+O", disabled=not on_sheet),
-                          Separator(), Item("Save", SAVE, icon="save", shortcut="Ctrl+S", disabled=not edits), Separator(),
+                          Separator(), Item("Save", SAVE, icon="save", shortcut="Ctrl+S", disabled=not edits),
+                          Item("Export CSV", EXPORT_CSV, icon="download", disabled=not on_sheet), Separator(),
                           Item("Settings…", SETTINGS, icon="gear", shortcut="Ctrl+,")]),
             Menu("Edit", [Item("Undo", UNDO, icon="undo", shortcut="Ctrl+Z", disabled=not on_sheet), Separator(),
                           Item("Copy", COPY, icon="copy", shortcut="Ctrl+C", disabled=not on_sheet or self.sheet_tab != 0), Separator(),  # (a streamed file's formats can be undone)
@@ -1992,7 +2874,10 @@ struct Main(App):
                           Item("Report", SHOW_REPORT, icon="chart-bar", checked=on_sheet and self.sheet_tab == 1, disabled=not on_sheet), Separator(),
                           Item("Rename tab…", RENAME_TAB, icon="rename", disabled=not on_sheet)]),
             Menu("Insert", [Item("Chart", INSERT_CHART, icon="chart-bar", shortcut="Ctrl+Shift+C", disabled=not on_sheet),
-                            Item("Pivot table", INSERT_PIVOT, icon="pivot", shortcut="Ctrl+Shift+P", disabled=not on_sheet), Separator(),
+                            Item("Pivot table", INSERT_PIVOT, icon="pivot", shortcut="Ctrl+Shift+P", disabled=not on_sheet),
+                            Item("Video…", INSERT_VIDEO, icon="video", disabled=not on_sheet), Item("Image…", INSERT_IMAGE, icon="image", disabled=not on_sheet),
+                            Item("Table…", INSERT_TABLE, icon="table", disabled=not on_sheet), Item("SQL query…", QUERY_OPEN, icon="database", disabled=not on_sheet),
+                            Item("Compare inspections…", COMPARE_OPEN, icon="chart", disabled=not on_sheet or len(self.place_tables()) < 2), Separator(),
                             Item("Formula column", NEW_FORMULA, icon="formula", checked=self.formula_open, disabled=not edits),
                             Item("Row", ADD_ROW, icon="row-plus", disabled=not edits)]),
             Menu("Data", [Item("Sort smallest first", SORT_ASC, icon="sort", shortcut="Ctrl+Shift+↑", disabled=not edits),
@@ -2013,10 +2898,84 @@ struct Main(App):
         var doc = (self.sheet_name + " · " + grouped(self.frame.rows()) + " rows") if on_sheet else String("")
         _ = doc
         var t = now_ns()
-        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0
+        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.analyzing) or Bool(self.reeling)
         var says = self.island.now.lead + (" · " + self.island.now.text if self.island.now.text != "" else String(""))
         var island: List[View] = [IslandView(ISLAND_CANVAS, self.island_v, ISLAND_TAP, ISLAND_FRAME if moving else NO_MSG).tooltip(says)]  # (the document, the GPU and what's happening, in one place: D-255)
         return AppBar("omxplorer", bar^, island^)
+
+    def video_overlays(self) -> List[View]:
+        """The video card's Analyze popover, Make a reel dialog and the Query dialog (each only while open)."""
+        var out = List[View]()
+        if self.screen != SHEET:
+            return out^
+        if 0 <= self.analyze_card < len(self.media):
+            var items = List[View]()
+            var names = analyzer_names()
+            for i in range(len(names)):
+                items.append(VStack(Button(names[i], ANALYZE_WITH + i, SUBTLE, icon="zap" if i == 0 else ("route" if analyzer_needs_log(i) else "layout-grid")).fill().align(START),
+                                    Text(analyzer_note(i), CAPTION).max_width(340), spacing=2).align(START))
+            var vpath = self.media.cards[self.analyze_card].path
+            if len(self.tracks) > 0:  # (the log that puts the rows on the map: the one in step with this video, or pick one)
+                var logs = List[String]()
+                var at = 0
+                for j in range(len(self.tracks)):
+                    logs.append(self.tracks.cards[j].name)
+                    if self.tracks.cards[j].video == vpath:
+                        at = j
+                items.append(HStack(Text("Log", CAPTION).width(40), Dropdown(logs, at, ANALYZE_LOG).tag("analyze-log"), spacing=8).align(CENTER))
+            else:
+                items.append(Text("Assets & defects needs the flight's log: Insert > Table… a CSV with t, lat and lon.", CAPTION).max_width(340))
+            items.append(Text("Runs on your GPU, frame by frame, in the background. Classic vision (colour, motion, printed codes) for now: a model plugs into the same slot.", CAPTION).max_width(340))
+            var n = self.video_number(self.analyze_card)
+            out.append(Popover("analyze" + ("" if n == 0 else "-" + String(n + 1)), "Analyze", VStack(items^, spacing=10).align(START), on_close=ANALYZE_CLOSE))
+        if 0 <= self.reel_card < len(self.media):
+            ref c = self.media.cards[self.reel_card]
+            var parts = List[View]()
+            var flags = self.reel_flags()
+            if self.found_path != c.path or len(flags) == 0:
+                parts.append(Text("Analyze " + c.title() + " first: a reel keeps the frames where a column of its rows is true.", CAPTION))
+                parts.append(HStack(Spacer(), Button("Cancel", REEL_CLOSE), spacing=10).fill())
+            else:
+                var at = self.found_sheet_index()
+                var names = List[String]()
+                for f in flags:
+                    names.append(self.frame.name(f) if at == -1 else self.tables.cards[at].sheet.name(f))
+                var labels = List[String]()
+                for ch in self.reel_captions:
+                    labels.append(ch[0])
+                parts.append(Text("The frames where a column of " + (self.table_title if at == -1 else self.found_table) + " is true, cut into one video.", CAPTION))
+                parts.append(HStack(Text("Keep frames where", CAPTION).width(150), Dropdown(names, min(self.reel_flag, len(names) - 1), REEL_FLAG).tag("reel-where"), spacing=10).align(CENTER))
+                parts.append(HStack(Text("Caption", CAPTION).width(150), Dropdown(labels, min(self.reel_caption, len(labels) - 1), REEL_CAPTION).tag("reel-caption"), spacing=10).align(CENTER))
+                parts.append(Toggle("Blur faces", self.reel_blur, REEL_BLUR).tag("reel-blur-faces"))
+                parts.append(HStack(Text("Saved as " + file_stem(c.path) + "-reel.mp4 in your documents", CAPTION), Spacer(), Button("Cancel", REEL_CLOSE),
+                                    Button("Make reel", REEL_GO, PROMINENT, icon="video").tag("reel-make"), spacing=10).fill().align(CENTER))
+            out.append(Dialog("Make a reel", VStack(parts^, spacing=14).align(START), on_close=REEL_CLOSE, width=520))
+        if self.query_open:
+            var names = String(sql_name(self.name)) if self.has_table else String("")
+            for k in range(len(self.tables)):
+                names += (", " if names != "" else "") + sql_name(self.tables.cards[k].name)
+            out.append(Dialog("Query", VStack(
+                Text("SQL over this sheet's tables: " + names + ". Joins, IN and NOT IN, subqueries, WITH.", CAPTION),
+                TextArea(self.query_text, "SELECT … FROM …", QUERY_TEXT, height=110).fill().tag("sql"),
+                HStack(Text("Answer as", CAPTION), TextField(self.query_name, "Query 1", on_change=QUERY_NAME, on_submit=QUERY_RUN).width(200).tag("query-name"),
+                       Spacer(), Button("Cancel", QUERY_CLOSE), Button("Run", QUERY_RUN, PROMINENT, icon="play").tag("run-query"), spacing=10).fill().align(CENTER),
+                Text(self.query_said, CAPTION).tone(TONE_WARN).tag("query-said") if self.query_said != "" else Spacer(),
+                spacing=12).align(START).fill(), on_close=QUERY_CLOSE, width=640))
+        if self.compare_open:
+            var pl = self.place_tables()
+            var names = List[String]()
+            for ref x in pl:
+                names.append(x[0])
+            var parts = List[View]()
+            if len(names) < 2:
+                parts.append(Text("Analyze two flights with Assets & defects (inspection preset) first: each gives a places table.", CAPTION).max_width(440))
+            else:
+                parts.append(Text("Each asset of the later flight, matched to the earlier one's within " + fixed(Float64(DRONE_MATCH_M), 0) + " m: the ones with a new defect, or a bigger one, become the worse table.", CAPTION).max_width(480))
+                parts.append(HStack(Text("Earlier flight", CAPTION).width(120), Dropdown(names, min(self.compare_a, len(names) - 1), COMPARE_A).tag("compare-earlier"), spacing=10).align(CENTER))
+                parts.append(HStack(Text("Later flight", CAPTION).width(120), Dropdown(names, min(self.compare_b, len(names) - 1), COMPARE_B).tag("compare-later"), spacing=10).align(CENTER))
+            parts.append(HStack(Spacer(), Button("Cancel", COMPARE_CLOSE), Button("Compare", COMPARE_GO, PROMINENT, icon="chart").tag("compare-go"), spacing=10).fill().align(CENTER))
+            out.append(Dialog("Compare inspections", VStack(parts^, spacing=14).align(START), on_close=COMPARE_CLOSE, width=540))
+        return out^
 
     def context_menu(self) -> View:
         """The column's menu, open over the grid where the right click was."""
@@ -2043,6 +3002,23 @@ struct Main(App):
                 Checkbox("Open the inspector with a sheet", self.inspector_open, KEEP_INSPECTOR),
                 HStack(Text("Kept in settings.txt in your config folder, so every launch looks the same.", CAPTION), Spacer(), Button("Done", SETTINGS_CLOSE, PROMINENT), spacing=10).fill().align(CENTER),
                 spacing=12).align(START), on_close=SETTINGS_CLOSE))
+        if self.inserting == OBJ_TABLE and self.screen == SHEET:
+            out.append(Dialog("Add a table", VStack(
+                Text("A CSV or Parquet file beside your table: join it, query it, export it. Your table stays as it is.", CAPTION),
+                HStack(Spacer(), Button("Cancel", INSERT_CLOSE),
+                       FilePicker("Choose a table…", PICK_TABLE, style=PROMINENT, icon="table", accept=".csv,.tsv,.txt,.parquet").tag("choose-table"), spacing=10).fill().align(CENTER),
+                spacing=14).align(START), on_close=INSERT_CLOSE, width=440))
+        for v in self.video_overlays():
+            out.append(v.copy())
+        if (self.inserting == OBJ_VIDEO or self.inserting == OBJ_IMAGE) and self.screen == SHEET:
+            var video = self.inserting == OBJ_VIDEO
+            out.append(Dialog("Insert a video" if video else "Insert a picture", VStack(
+                Text(("A video plays on the sheet beside your data: play, pause and scrub it, or let an agent do it." if video
+                      else "A picture sits on the sheet like a chart: move it by its title, resize it by its corner."), CAPTION),
+                HStack(Spacer(), Button("Cancel", INSERT_CLOSE),
+                       FilePicker("Choose a video…" if video else "Choose a picture…", PICK, style=PROMINENT, icon="video" if video else "image",
+                                  accept=VIDEO_TYPES if video else IMAGE_TYPES), spacing=10).fill().align(CENTER),
+                spacing=14).align(START), on_close=INSERT_CLOSE, width=440))
         if self.about_open:
             out.append(Dialog("About omxplorer", VStack(
                 Text("omxplorer", TITLE).tone(TONE_ACCENT), Text("open data, shape it, report on it, on your GPU", CAPTION),
@@ -2125,7 +3101,7 @@ struct Main(App):
         var extra = List[View]()
         if streamed:
             extra.append(Text("Streamed from disk", CAPTION).tone(TONE_ACCENT).tooltip("This file is bigger than memory: its rows are read from disk as they're shown, and your edits are kept beside it until you save").tag("streamed"))
-        extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=".csv,.tsv,.txt,.parquet,.omx").tooltip("Open a CSV, Parquet or .omx file"))
+        extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=OPEN_TYPES).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
         if self.sheet_tab == 1:
             return Toolbar(left, self.report_tools(), right, extra, before=self.report_controls(), after=self.filter_controls(), inline=True)  # (its tile tools share one icon: their titles stay)
         var middle = List[Tool]()
@@ -2134,6 +3110,7 @@ struct Main(App):
         middle.append(Tool("Sort", "sort", SORT, self.grid.sort_col >= 0, "Sort by the selected column; again to flip"))
         middle.append(Tool("Pivot", "pivot", INSERT_PIVOT, False, "A pivot table of the selected column (Ctrl+Shift+P)"))
         middle.append(Tool("Chart", "chart-bar", INSERT_CHART, False, "A chart of the selected column (Ctrl+Shift+C)"))
+        middle.append(Tool("Query", "database", QUERY_OPEN, self.query_open, "Ask the sheet's tables in SQL: joins, IN, subqueries; the answer is a table"))
         return Toolbar(left, middle, right, extra, toggles=self.format_tools(), inline=True, compact=self.win_w < COMPACT_W)
 
     def format_tools(self) -> List[List[Tool]]:
@@ -2428,7 +3405,7 @@ struct Main(App):
         var cell = (self.frame.name(self.grid.cur_col) if self.grid.cur_col >= 0 else "") + (" " + String(self.grid.cur_row + 1) if self.grid.cur_row >= 0 else "")
         var fx = FormulaBar("New column", "", FORMULA_SUBMIT, placeholder="A new column: its name, then its formula", on_help=FX_HELP) if self.formula_open else FormulaBar(cell, self.edit_text, FX_COMMIT, CELL_CANCEL, on_help=FX_HELP)
         var sorted = ("sorted by " + self.frame.name(self.grid.sort_col) + (" ↓" if self.grid.sort_desc else " ↑")) if self.grid.sort_col >= 0 else String("")
-        var head = HStack(Text(self.sheet_name, HEADLINE), Text(grouped(self.frame.rows()) + " rows", CAPTION).tone(TONE_ACCENT), Spacer(),
+        var head = HStack(Text(self.table_title if self.table_title != "" else self.sheet_name, HEADLINE), Text(grouped(self.frame.rows()) + " rows", CAPTION).tone(TONE_ACCENT), Spacer(),
                           Text(sorted, CAPTION), spacing=12).fill().align(CENTER).height(HEADER_H - 8)
         var th = self.table_h()
         var items = List[View]()  # child 0: the table (its title bar is the drag handle; it stays put); then the objects; then the editor
@@ -2442,6 +3419,18 @@ struct Main(App):
                                      self.lit.copy() if asked else List[Int](), self.ask_views() if asked else List[View](), ASK_H if asked else 0)
                          .at(o.x, o.y).width(o.w).height(o.h).tag("chart" + String(k) if o.kind == OBJ_CHART else "pivot" + String(k)))
             bottom = max(bottom, o.y + o.h)
+        for k in range(len(self.media)):
+            ref c = self.media.cards[k]
+            items.append(self.media.view(k).at(c.x, c.y).width(c.w).height(c.h).tag(("video" if c.kind == OBJ_VIDEO else "image") + String(k)))
+            bottom = max(bottom, c.y + c.h)
+        for k in range(len(self.tables)):
+            ref t = self.tables.cards[k]
+            items.append(self.tables.view(k, self.version).at(t.x, t.y).width(t.w).height(t.h).tag("tablecard" + String(k)))
+            bottom = max(bottom, t.y + t.h)
+        for k in range(len(self.tracks)):
+            ref r = self.tracks.cards[k]
+            items.append(self.tracks.view(k, self.version * 100003 + self.track_frame(k)).at(r.x, r.y).width(r.w).height(r.h).tag("track" + String(k)))
+            bottom = max(bottom, r.y + r.h)
         var ed = self.grid.editor_place(self.frame)
         if ed[2] > 0:
             items.append(self.grid.editor(self.edit_text, CELL_COMMIT, CELL_CANCEL).at(self.table_x + ed[0], self.table_y + HEADER_H + ed[1]).width(ed[2]).height(30))

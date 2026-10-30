@@ -39,7 +39,7 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat"],  # (widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media"],  # (widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35; media: goal 39 M2/M11 run it headless)
     "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat"],  # (kit: goal 18 runs it on GTK and the web)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
@@ -112,6 +112,14 @@ COMPOSITES = [
     ("Skeleton", "mojoui/skeleton.mojo", ["VStack", "Themes on top (themes/, or yours)"], "Skeleton("),
     ("Markdown", "mojoui/markdown.mojo", ["Paragraph", "Text", "VStack", "HStack", "Card", "Themes on top (themes/, or yours)"], "Markdown("),
     ("Sparkline", "mojoui/sparkline.mojo", ["Canvas"], "SparklineView("),
+    # goal 39: media (a file component: no view of its own; Player, GPU image ops and the frame table build on it)
+    ("VideoSource (a video file as RGBA frames: open, next, seek, read)", "mojoui/video.mojo", [], "VideoSource("),
+    ("Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)", "mojoui/player.mojo", ["Canvas", "Canvas frames (animation)", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)", "Quiet buttons", "Card"], "Player("),
+    ("TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor", "mojoui/timeseries.mojo", ["Canvas"], "TimeSeries("),
+    ("Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)", "mojoui/picture.mojo", ["Canvas"], "Picture("),
+    ("Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)", "mojoui/mediacard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons", "ProgressBar"], "MediaCards("),
+    ("MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)", "mojoui/mediatimeline.mojo", ["Canvas", "Canvas frames (animation)", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)", "Overlay", "ContextMenu", "Card", "Quiet buttons"], "MediaTimeline("),
+    ("Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)", "mojoui/tablecard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "TableCards("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
     ("Page header (icon square, pill tabs, segments, tab header)", "mojoui/header.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
@@ -131,6 +139,17 @@ COMPOSITES = [
     # agents (goal 35)
     ("GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)", "mojoui/genui.mojo", ["Card", "Text", "Paragraph", "Table", "Canvas", "Button", "TextField", "Toggle", "Segmented", "ProgressBar", "VStack", "HStack", "Divider"], "GenUi("),
     ("LogPane (a live log with its head, Hide log, coloured lines)", "mojoui/logview.mojo", ["Scroll pinned to its end", "Text", "Button", "Icon", "Themes on top (themes/, or yours)"], "LogPane("),
+    # media (goal 39)
+    ("ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)", "mojoui/imageops.mojo", ["Canvas"], "ImageOps("),
+    ("VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)", "mojoui/videotable.mojo", [], "scan("),
+    ("VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)", "mojoui/videoexport.mojo", [], "cut("),
+    ("Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)", "mojoui/vision_presets.mojo", [], "warehouse_analyzer("),
+    ("Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)", "mojoui/geo.mojo", [], "georeference("),
+    ("Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)", "mojoui/inspection.mojo", [], "compare("),
+    ("Video jobs (analyze with a registered analyzer, make a reel from a table's flag, as background jobs with progress; rows as a table, lookups that find their key)", "mojoui/videojobs.mojo", [], "analyze_job("),
+    ("MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)", "mojoui/mapview.mojo", ["Canvas"], "MapView("),
+    ("Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)", "mojoui/trackcard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Segmented", "Quiet buttons"], "TrackCards("),
+    ("Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)", "mojoui/inspection_tables.mojo", [], "compare_tables("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
@@ -180,9 +199,9 @@ def composes(example, ctor, module):
     (agentchat's GenUi comes from mojoui.agentui's Screens since goal 35's review). Import level, not proof the app
     reaches the call: an app checked to run the composite another way is what turns a cell ✅."""
     text = example_text(example)
-    if ctor in text:
-        return True
     call = re.compile(rf"(?<!def )\b{re.escape(ctor.rstrip('('))}\(")
+    if re.search(rf"\b{re.escape(ctor)}", text):  # (a whole name: Timeline( isn't MediaTimeline()
+        return True
     for mod in dict.fromkeys(re.findall(r"^from (mojoui(?:\.\w+)+) import", text, re.M)):
         f = ROOT / (mod.replace(".", "/") + ".mojo")
         if not f.exists() or f.relative_to(ROOT).as_posix() == module:

@@ -5,6 +5,7 @@
 # real widgets through their normal APIs (so their real signals fire), then
 # prints each widget's state as GTK reports it and quits. The window isn't
 # shown unless MOJOUI_SHOT=<file.png> asks GTK to render it to a PNG.
+# (tap:X finds the button titled X, else the one tagged X: the name an agent calls it by.)
 
 from mojoui.look import look_gtk_css
 from std.ffi import external_call, c_int, c_char, c_uint
@@ -4376,6 +4377,33 @@ def on_slid[A: App](scale: Int, host_addr: Int) abi("C"):
 
 # ---------- test mode ----------
 
+def open_file[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], name: String, host_addr: Int):
+    """The open:<file> step: the first FilePicker on screen whose accept list takes the file's extension (or takes any file)
+    sends on_pick with the path, as its dialog would. A relative name is looked up in $MOJOUI_DOCUMENTS when that is set,
+    else passed as typed (the app resolves it as it resolves any path it is given)."""
+    var dot = name.rfind(".")
+    var ext = String(name[byte=dot:]).lower()
+    var path = name
+    var docs = getenv("MOJOUI_DOCUMENTS")
+    if not name.startswith("/") and docs != "":
+        path = docs + "/" + name
+    var picker = -1
+    for i in range(len(host[].rt.shown.nodes)):
+        ref n = host[].rt.shown.nodes[i]
+        if n.kind != BUTTON or n.msg2 == 0 or picker >= 0:
+            continue
+        var accept = n.options[0].lower() if len(n.options) > 0 else String("")
+        if accept == "":
+            picker = i
+        for a in accept.split(","):
+            if String(a).strip() == ext:
+                picker = i
+    if picker < 0:
+        print("TEST: no file picker takes", name)
+        return
+    host[].send(picker, True, path, 0, host_addr)
+
+
 def find(host: GtkHost, kind: Int, label: String, nth: Int, by_hint: Bool = False) -> Int:
     """The nth node of `kind` whose text (or hint) is `label` ("" = any). Canvases count the content's: the island
     (window chrome, mojoui.island) is left out of the numbers and found by its tag (canvas_node)."""
@@ -4516,6 +4544,10 @@ def run_step[A: App](host_addr: Int, step: String):
     if verb == "tap":
         var t = split_at(rest, "@")
         var i = find(host[], BUTTON, t[0], to_int(t[1]))
+        if i < 0:  # (no button with that title: the one tagged so, as an agent names it)
+            for k in range(len(host[].rt.shown.nodes)):
+                if i < 0 and host[].rt.shown.nodes[k].kind == BUTTON and host[].rt.shown.nodes[k].name == t[0]:
+                    i = k
         if i < 0:
             print("TEST: no button", rest)
             return
@@ -4803,7 +4835,7 @@ def run_step[A: App](host_addr: Int, step: String):
         var until = perf_counter_ns() + 400_000_000  # (the widgets' pages restyle from their new tokens)
         while Int(perf_counter_ns()) < until:
             pump()
-    elif verb == "pause":  # pause:3000: keep the main loop running that long (a screen grab of the display can catch popovers)
+    elif verb == "pause" or verb == "wait":  # pause:3000 (or wait:3000): keep the main loop running that long (a screen grab of the display can catch popovers; a video plays)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until:
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
@@ -4815,6 +4847,9 @@ def run_step[A: App](host_addr: Int, step: String):
             ref n = host[].rt.shown.nodes[k]
             if n.kind == MENU and n.style == 0 and n.text == t[0]:
                 menu = k
+        if menu < 0 and rest.find(".") > 0:  # open:clip.mp4: a file, opened the way a person would: a file picker on screen that
+            open_file(host, rest, host_addr)  # accepts it returns it (a relative name: from $MOJOUI_DOCUMENTS when set)
+            return
         if menu < 0:
             print("TEST: no menu", t[0])
             return

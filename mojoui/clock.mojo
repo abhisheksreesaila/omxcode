@@ -60,3 +60,8 @@ def wall_seconds() -> Float64:
         var s = Float64(ts[0]) + Float64(ts[1]) / 1e9
         _ = len(ts)
         return s
+
+
+def trace_on() -> Bool:
+    """Tracing for tests and shots: MOJOUI_TRACE or MOJOUI_TEST is set (components print `PLAYER: …`, `CURSOR: …` lines)."""
+    return getenv("MOJOUI_TRACE") != "" or getenv("MOJOUI_TEST") != ""

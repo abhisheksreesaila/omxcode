@@ -37,6 +37,13 @@ comptime STYLE_COLS = 1 << 16  # a cell override's key: row * STYLE_COLS + colum
 
 
 
+def csv_cell(text: String) -> String:
+    """One CSV value: as it is, or in double quotes (its quotes doubled) when it holds a comma, a quote or a line break."""
+    if text.find(",") < 0 and text.find("\"") < 0 and text.find("\n") < 0 and text.find("\r") < 0:
+        return text
+    return "\"" + text.replace("\"", "\"\"") + "\""
+
+
 def float_cell(v: Int64) -> String:
     """A FLOAT value (its float64's bits) as the shortest text that reads back to it."""
     return float_text(Float64(from_bits=UInt64(v)))
@@ -352,6 +359,27 @@ struct Sheet(Movable, GridSource):
             return float_cell(v)
         return String(v)
 
+    def csv(self) -> String:
+        """Every live row as CSV (RFC 4180: a header of the column names, values as typed, without formats; a value with a
+        comma, a quote or a line break in quotes, its quotes doubled). Formula columns included, edits applied."""
+        var out = String()
+        var cols = self.columns()
+        for c in range(cols):
+            out += ("," if c > 0 else "") + csv_cell(self.name(c))
+        out += "\n"
+        for r in range(self.rows()):
+            if not self.alive(r):
+                continue
+            for c in range(cols):
+                out += ("," if c > 0 else "") + csv_cell(self.plain_text(c, r))
+            out += "\n"
+        return out^
+
+    def write_csv(self, path: String) raises:
+        """The table as a CSV file at `path` (csv())."""
+        with open(path, "w") as f:
+            f.write(self.csv())
+
     def format_average(self, c: Int, total: Int, count: Int) -> String:
         """total ÷ count of column c in its format, rounded once (half away from zero), with two more places
         than a whole-number column has (qty's 4.8 reads 4.80) and two more for a percent (36.42%)."""
@@ -381,6 +409,8 @@ struct Sheet(Movable, GridSource):
             return date_text(v)
         if kind == DECIMAL:
             return decimal_text(v, self.scale(c))
+        if kind == FLOAT:  # (its value is the float's bits: the cell shows the number, D-995)
+            return float_cell(v)
         return String(v)
 
     # ---------- edits ----------
