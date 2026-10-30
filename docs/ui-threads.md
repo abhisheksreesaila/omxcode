@@ -66,6 +66,9 @@ The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), wi
 
 ## How it's checked
 
+- The watchdog (`MOJOUI_BUDGET_MS=N`, see "What's next" 1) names any update, view or draw over N ms; goal 41's checks
+  run omxplorer's sessions at 50 ms on the headless display (CPU drawing) and want no `SLOW:` line.
+
 - `examples/jobwake` measures it: 40 short jobs (how fast a finished job reaches `update()`), then one 1.5 s job and
   the longest time the window went without a frame. It prints **PASS** under 500 ms and **FAIL (the window froze)**
   above, and exits 1 on Linux when it fails. On the Mac it runs on GitHub's runners (`scripts/mac-ci jobwake`).
@@ -83,7 +86,12 @@ The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), wi
 
 ## What's next, so it's "drop in a component and it just works"
 
-1. **Catch a slow `update()`**: a debug build that names any `update()` or `view()` over one frame (16 ms) with the
-   event that caused it, so an app author or an agent sees the freeze before a user does.
+1. **Catch a slow `update()`: done (goal 41 M1).** Run any app with `MOJOUI_BUDGET_MS=16` and, from its first second
+   on, every `update()`, `view()` or canvas draw over the budget prints `SLOW: update msg=7 80.06 ms` (the message),
+   `SLOW: view msg=7 …` or `SLOW: draw canvas=3 …` (the canvas's tag), so an app author or an agent sees the freeze
+   before a user does. The runtime times it (`Runtime.watch`, `mojoui/app.mojo`), so every host gets it: GTK and the
+   web (the server's log; `scripts/drive.py` forwards it) are checked by `examples/slowcheck`; AppKit and Android turn
+   it on too (unrun; Android's stdout goes nowhere, so read it with `adb logcat` only once stdout is redirected);
+   UIKit doesn't read the environment. The next step is a frame budget that names what inside the update was slow.
 2. **The iPhone**: the Mac's job threads plus a UIKit wake, checked on the owner's iPhone.
 3. **The Mac's GPU build** run with job threads (a job's Metal queries from its own thread), on the owner's MacBook.

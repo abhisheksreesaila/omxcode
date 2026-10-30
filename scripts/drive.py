@@ -13,6 +13,7 @@ import socket
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -98,6 +99,12 @@ DUMP = """() => { const mojouiRect = e => {  // (a view whose parts join its row
   document.body.classList.contains('skin') && document.fonts.check('13px Inter') && document.fonts.check('13px "JetBrains Mono"') ? ["FONT: Inter, JetBrains Mono (the app's own)"] : []
 ).concat(['PAGE: ' + document.documentElement.scrollWidth + 'x' + document.documentElement.scrollHeight
   + ' in ' + innerWidth + 'x' + innerHeight]).join(String.fromCharCode(10)); }"""
+
+
+# The host's own log lines the checks read, forwarded from the server's output to the run's (goal 41 M1): the watchdog's
+# SLOW:, shared data, links and peeks, lanes, jobs, the player's and cursor's clocks, frame gaps. (Not every ^[A-Z]+:
+# line: uvicorn's INFO: and TRACE: would drown them.)
+HOST_LINE = re.compile(r"^(SHARED|SLOW|LINK|PEEK|LANE|JOB|PLAYER|CURSOR|GAPS|A11Y|A11Y UNNAMED): ")
 
 
 def free_port():
@@ -309,6 +316,8 @@ def step(page, s):
         sel, name = rest.rsplit("=", 1)
         value = page.evaluate("([s, a]) => { const e = document.querySelector(s); return e && e.getAttribute(a) !== null ? e.getAttribute(a) : 'none'; }", [sel, name])
         return f"ATTR: {sel} {name} {value[:80]}"
+    elif verb == "wait" and rest.isdigit():  # wait:1500: that many ms, as the GTK host's step (the same steps run on both)
+        page.wait_for_timeout(int(rest))
     elif verb == "wait":  # until a button with this title appears (e.g. after frames change the screen)
         page.locator("[data-kind=button]").filter(has_text=exact(rest)).first.wait_for(timeout=15000)
     elif verb == "pause":  # pause:1000: let animations run that long (as the GTK step does)
@@ -351,6 +360,10 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
     port = free_port()
     server = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/web.py"), str(module_dir), str(port)],
                               cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=dict(os.environ, **(env or {})))
+    # The server's log, read as it's written (a full pipe would stall the server mid-run: a long session's SLOW: lines)
+    log_lines = []
+    reader = threading.Thread(target=lambda: log_lines.extend(iter(server.stdout.readline, "")), daemon=True)
+    reader.start()
     url = f"http://127.0.0.1:{port}/"
     try:
         up = False
@@ -361,7 +374,8 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
                 break
             except OSError:
                 if server.poll() is not None:
-                    return SimpleNamespace(returncode=1), "server died:\n" + server.stdout.read()
+                    reader.join(timeout=5)
+                    return SimpleNamespace(returncode=1), "server died:\n" + "".join(log_lines)
                 time.sleep(0.1)
         if not up:
             return SimpleNamespace(returncode=1), "server didn't come up in 3 minutes"
@@ -409,8 +423,8 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
                 out += "PAGE ERRORS: " + "; ".join(errors) + "\n"
             browser.close()
         server.terminate()
-        log = server.stdout.read()
-        out += "".join(l + "\n" for l in log.splitlines() if l.startswith("SHARED: "))
+        reader.join(timeout=10)
+        out += "".join(l for l in log_lines if HOST_LINE.match(l))
         return SimpleNamespace(returncode=1 if errors else 0), out
     finally:
         server.terminate()

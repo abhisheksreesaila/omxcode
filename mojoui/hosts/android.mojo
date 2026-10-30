@@ -17,7 +17,7 @@ from mojoui.view import (
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE,
 )
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_FRAMES
-from mojoui.app import App, Event, Runtime
+from mojoui.app import App, Event, Runtime, budget_from_env
 from mojoui.canvas import Surface
 from mojoui.hosts.jni import Jni, fbits, log, utf16_length
 
@@ -83,6 +83,7 @@ struct AndroidHost[A: App](Movable):
     def __init__(out self, env: Int, activity: Int):
         Self.A.init_shared()
         self.rt = Runtime(Self.A())
+        self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines on stdout)
         self.jni = Jni(env)
         self.activity = self.jni.keep(activity)
         self.widgets = List[Int]()
