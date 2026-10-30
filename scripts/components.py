@@ -39,7 +39,7 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat"],  # (widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media"],  # (widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35; media: goal 39 M2/M11 run it headless)
     "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat"],  # (kit: goal 18 runs it on GTK and the web)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
@@ -118,6 +118,7 @@ COMPOSITES = [
     ("TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor", "mojoui/timeseries.mojo", ["Canvas"], "TimeSeries("),
     ("Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)", "mojoui/picture.mojo", ["Canvas"], "Picture("),
     ("Media cards (videos and pictures on a page, each with its own messages; Board chrome)", "mojoui/mediacard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "MediaCards("),
+    ("MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)", "mojoui/mediatimeline.mojo", ["Canvas", "Canvas frames (animation)", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)", "Overlay", "ContextMenu", "Card", "Quiet buttons"], "MediaTimeline("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
     ("Page header (icon square, pill tabs, segments, tab header)", "mojoui/header.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
@@ -193,9 +194,9 @@ def composes(example, ctor, module):
     (agentchat's GenUi comes from mojoui.agentui's Screens since goal 35's review). Import level, not proof the app
     reaches the call: an app checked to run the composite another way is what turns a cell ✅."""
     text = example_text(example)
-    if ctor in text:
-        return True
     call = re.compile(rf"(?<!def )\b{re.escape(ctor.rstrip('('))}\(")
+    if re.search(rf"\b{re.escape(ctor)}", text):  # (a whole name: Timeline( isn't MediaTimeline()
+        return True
     for mod in dict.fromkeys(re.findall(r"^from (mojoui(?:\.\w+)+) import", text, re.M)):
         f = ROOT / (mod.replace(".", "/") + ".mojo")
         if not f.exists() or f.relative_to(ROOT).as_posix() == module:

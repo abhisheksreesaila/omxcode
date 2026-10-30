@@ -10,21 +10,21 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat |
-| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat |
-| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
+| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media |
+| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
 | `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console, agentchat |
-| `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
+| `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, media |
 | `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console |
 | `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, agentchat |
 | `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, workbook, mxstudio |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
 | `Dropdown` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, analytics, workbook, mxstudio, omxplorer, themes, kit |
 | `Slider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, gpu, lens |
-| `Segmented` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | kitchen, expenses, lens, analytics, mxstudio, omxplorer, themes, kit |
+| `Segmented` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | kitchen, expenses, lens, analytics, mxstudio, omxplorer, themes, kit, media |
 | `Radio` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, omxplorer, kit |
 | `DatePicker` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes |
@@ -34,7 +34,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout |
-| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit |
+| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, media |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
 | `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
@@ -121,11 +121,12 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
 | `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, console, consolekit, widgets |
-| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | media |
+| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | media |
 | `Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)` | `mojoui/player.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Quiet buttons, Card | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
-| `TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor` | `mojoui/timeseries.mojo` | Canvas | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | media |
+| `TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor` | `mojoui/timeseries.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | media |
 | `Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)` | `mojoui/picture.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Media cards (videos and pictures on a page, each with its own messages; Board chrome)` | `mojoui/mediacard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
+| `MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)` | `mojoui/mediatimeline.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Overlay, ContextMenu, Card, Quiet buttons | ✅ | 🔨 | ❌ | ❌ | ❌ | ❌ | media |
 | `App shell (bar, brand, nav links, page card)` | `mojoui/shell.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, dashboard |
 | `Page header (icon square, pill tabs, segments, tab header)` | `mojoui/header.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Sidebar (heads, rows to pick, chips when compact)` | `mojoui/sidebar.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
@@ -143,10 +144,10 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, Toggle, Segmented, ProgressBar, VStack, HStack, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat |
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
-| `ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)` | `mojoui/imageops.mojo` | Canvas | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)` | `mojoui/videotable.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)` | `mojoui/videoexport.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)` | `mojoui/vision_presets.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)` | `mojoui/imageops.mojo` | Canvas | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | media |
+| `VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)` | `mojoui/videotable.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | media |
+| `VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)` | `mojoui/videoexport.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | media |
+| `Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)` | `mojoui/vision_presets.mojo` |  | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | media |
 | `Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)` | `mojoui/geo.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)` | `mojoui/inspection.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 
@@ -164,12 +165,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 116 | 11 | 0 |
-| Web | 119 | 8 | 0 |
-| Android | 19 | 28 | 80 |
-| Mac (AppKit) | 0 | 115 | 12 |
-| iPhone (UIKit) | 0 | 93 | 34 |
-| Agent (MCP) | 32 | 44 | 51 |
+| Linux (GTK) | 123 | 5 | 0 |
+| Web | 119 | 9 | 0 |
+| Android | 19 | 28 | 81 |
+| Mac (AppKit) | 0 | 115 | 13 |
+| iPhone (UIKit) | 0 | 93 | 35 |
+| Agent (MCP) | 32 | 44 | 52 |
 
 ## Inside one app, not components yet (the debt)
 
