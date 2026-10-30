@@ -6,7 +6,7 @@ fake", reproducible by anyone. Multimodal cards connect only through **explicit 
 works"); OCR is "just a machine learning model where you plug in". Before that (owner, same day): "take the latest [UI-thread
 work], see what extra components you need, and contribute back to the app framework… don't overfit the app, the app is just
 a showcase." Look: graphite (mid-dark omxqua, every region bordered), dim-not-blur peek, link UI = drag (A) + Links panel (C)
-+ hold-to-peek (approved prototypes /tmp/g40mock/links.html, hold.html).
++ hold-to-peek (approved prototypes docs/goals/41-prototypes/links.html, hold.html).
 
 Base: `goal-41-claims` = main b79fc66 (UI-thread rules, docs/ui-threads.md) + goal 39 merged (a48edcb), goal 39's checks
 re-run green on it. Framework first: every piece goes in `mojoui/` (or `themes/`) with its own test; omxplorer only composes.
