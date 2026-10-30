@@ -273,13 +273,15 @@ MEASURED = "793e54a1483bd9e5e0456da7bdee5d154ec8cd3c"  # goal-38-data's tip: its
 
 
 def rename_only(path):
-    """True when path differs from MEASURED only by mxframe → omxcore (engine 834ef9a, D-788) and comment lines."""
+    """True when path differs from MEASURED only by mxframe → omxcore (engine 834ef9a, D-788) and, in a shell or Mojo
+    file, `# ` comment lines (not C's #define, a #! line or a Python file, where a `#` line can be data)."""
     old = run(["git", "show", f"{MEASURED}:{path}"]).stdout.splitlines()
     new = (ROOT / path).read_text().splitlines() if (ROOT / path).exists() else None
     if new is None or len(old) != len(new):
         return False
+    comments = path.endswith((".sh", ".mojo"))
     for a, b in zip(old, new):
-        if a == b or (a.lstrip().startswith("#") and b.lstrip().startswith("#")):
+        if a == b or (comments and a.lstrip().startswith("# ") and b.lstrip().startswith("# ")):
             continue
         if a.replace("mxframe", "omxcore").replace("MXFRAME", "OMXCORE") != b:
             return False

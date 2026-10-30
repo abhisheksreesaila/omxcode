@@ -92,6 +92,11 @@ def main() raises:
         check(ctx, t, dt, scratch, region_like, by_product, 40, [dcol(2)], sl, "product, nullable filter")
         check(ctx, t, dt, scratch, amount_min, by_product_day, 40 * 731, [dcol(2), profit.copy()], sl, "product x day (global)")
         check(ctx, t, dt, scratch, amount_min, dcol(0) - dlit(100), 600, List[DevExpr](), sl, "day count, keys out of range skipped")
+        # the shared-memory edge (SHARED_SLOTS = 3584 = groups × (sums + 1)): at it, one past it, and the old 4096
+        check(ctx, t, dt, scratch, none, dcol(0), 3584, List[DevExpr](), sl, "day count, 3584 slots (shared)")
+        check(ctx, t, dt, scratch, none, dcol(0), 1792, [dcol(2)], sl, "day sum, 3584 slots (shared)")
+        check(ctx, t, dt, scratch, none, dcol(0), 3585, List[DevExpr](), sl, "day count, 3585 slots (global)")
+        check(ctx, t, dt, scratch, amount_min, dcol(0), 2048, [dcol(2)], sl, "day sum, 4096 slots (global)")
         # grouping sets: each set equals its own group_rows call (shared memory; and global when one set is large)
         for big in [False, True]:
             var sets = List[GroupSet]()

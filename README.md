@@ -198,6 +198,9 @@ scripts/omxplorer.sh web                       # the same app at http://127.0.0.
 scripts/check                                  # rebuild everything and re-prove every goal
 ```
 
+> [!NOTE]
+> If `pixi install` stops at `failed to link 'share/X11/xkb'`, two conda-forge packages (Xvfb and xkeyboard-config) raced for one path. Remove the half-made env and run it again: `rm -rf .pixi && pixi install`.
+
 > [!TIP]
 > Insert → Chart, then type into its ask field: *median*, *by month, as a line*, or *only paid and over 5,000*. Or tap any coloured word in the chart's title.
 
