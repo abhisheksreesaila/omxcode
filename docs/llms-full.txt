@@ -907,6 +907,8 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, Toggle, Segmented, ProgressBar, VStack, HStack, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat |
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)` | `mojoui/imageops.mojo` | Canvas | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)` | `mojoui/videotable.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)` | `mojoui/vision_presets.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 
 ## JavaScript widgets (WebComponent)
 
@@ -922,12 +924,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 113 | 7 | 0 |
-| Web | 116 | 4 | 0 |
-| Android | 19 | 22 | 79 |
-| Mac (AppKit) | 0 | 108 | 12 |
-| iPhone (UIKit) | 0 | 86 | 34 |
-| Agent (MCP) | 31 | 39 | 50 |
+| Linux (GTK) | 113 | 9 | 0 |
+| Web | 116 | 6 | 0 |
+| Android | 19 | 24 | 79 |
+| Mac (AppKit) | 0 | 110 | 12 |
+| iPhone (UIKit) | 0 | 88 | 34 |
+| Agent (MCP) | 31 | 41 | 50 |
 
 ## Inside one app, not components yet (the debt)
 

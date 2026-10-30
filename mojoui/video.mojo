@@ -193,6 +193,19 @@ struct VideoSource(Movable):
         self._at += 1
         return True
 
+    def next_into_address(mut self, addr: Int) raises -> Bool:
+        """Reads the next frame into memory the caller owns (frame_len() UInt32s at `addr`: e.g. pinned memory a GPU
+        copies from); False at the end of the video."""
+        if self._fp == 0:
+            self._start(self._at)
+        var want = self.frame_len() * 4
+        var got = _fread(self._fp, addr, want)
+        if got < want:
+            self._stop()
+            return False
+        self._at += 1
+        return True
+
     def next(mut self) raises -> List[UInt32]:
         """The next frame: width x height RGBA pixels, row by row, R in the low byte. Raises at the end of the video."""
         var pixels = List[UInt32](length=self.frame_len(), fill=0)
