@@ -4266,6 +4266,14 @@ def on_idle_resize[A: App](host_addr: Int) abi("C") -> c_int:
     return 0
 
 
+def on_gaps_tick(widget: Int, clock: Int, data: Int) abi("C") -> c_int:
+    """While a gaps: measure runs, every frame asks the window for the next (GDK_FRAME_CLOCK: a redraw each frame)."""
+    if app_data("mojoui-gaps-ticking") == 0:
+        return 0  # G_SOURCE_REMOVE
+    external_call["gtk_widget_queue_draw", NoneType](widget)
+    return 1
+
+
 def on_before_paint[A: App](clock: Int, host_addr: Int) abi("C"):
     host_at[A](host_addr)[].paint_t0 = Int(perf_counter_ns())
 
@@ -5770,13 +5778,32 @@ def run_step[A: App](host_addr: Int, step: String):
                 break
         if not said:
             print("TEST: nothing tagged", rest)
-    elif verb == "gaps":  # gaps:start forgets the frames painted so far; gaps:N runs the main loop N ms, then prints the longest gap between painted frames (MOJOUI_TRACE)
+    elif verb == "gaps":  # gaps:start forgets the frames painted so far; gaps:N runs the main loop N ms, then prints the longest gap between painted frames
+        # (a freeze detector, D-1309: gaps:start shows the window if a test hasn't, listens to its paints as MOJOUI_TRACE
+        # does, and asks for a redraw on every frame until gaps:N ends, so a window with nothing moving still paints at the
+        # display's rate and only a busy UI thread makes a gap)
         if rest == "start":
+            if external_call["gtk_widget_get_mapped", c_int](host[].window) == 0:
+                external_call["gtk_window_present", NoneType](host[].window)
+                var up_by = perf_counter_ns() + 3_000_000_000
+                while external_call["gtk_widget_get_width", c_int](host[].window) == 0 and perf_counter_ns() < up_by:
+                    pump()
+            if not host[].paint_timed:
+                var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
+                if clock != 0:
+                    connect(clock, "before-paint", on_before_paint[A], host_addr)
+                    connect(clock, "after-paint", on_after_paint[A], host_addr)
+                    host[].paint_timed = True
+            if app_data("mojoui-gaps-ticking") == 0:
+                set_app_data("mojoui-gaps-ticking", 1)
+                _ = external_call["gtk_widget_add_tick_callback", c_uint](host[].window, on_gaps_tick, 0, 0)
             host[].frame_times = List[Int]()
+            print("GAPS: start", flush=True)
             return
         var until = Int(perf_counter_ns()) + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until:
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+        set_app_data("mojoui-gaps-ticking", 0)
         var worst = 0.0  # (every gap, the long ones too: intervals() leaves out a bench's pauses, which is what this looks for)
         for k in range(1, len(host[].frame_times)):
             worst = max(worst, Float64(host[].frame_times[k] - host[].frame_times[k - 1]) / 1e6)

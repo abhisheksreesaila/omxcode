@@ -34,6 +34,7 @@ comptime SEED_TICK = 7
 comptime LANDED = 8
 comptime NOTES = 1  # the LazyList's id
 comptime SAVE_AFTER_MS = 400
+comptime SEED_DELAY_MS = 600  # the window opens with what the file holds; the seed starts a moment later (D-1310)
 
 
 def first_line(body: String) -> String:
@@ -156,8 +157,10 @@ struct Main(App):
     var seed_t0: Int
     var seed_done: Int
     var seed_total: Int
+    var made_at: Int
 
     def __init__(out self):
+        self.made_at = now_ns()
         self.db = None
         self.path = environment("JOT_DB", "")
         if self.path == "":
@@ -344,9 +347,10 @@ struct Main(App):
     def seeding(mut self) raises:
         """Starts the seed on the first tick, shows how far it is, and reads the file again when it ends."""
         if not self.seed:
-            if self.seed_t0 == 0:
+            if self.seed_t0 == 0 and now_ns() - self.made_at >= SEED_DELAY_MS * 1_000_000:
                 self.seed_t0 = now_ns()
                 self.seed = start_ui_job(Seed(self.path, self.seed_want))
+                print("JOT SEED: start " + String(self.seed_want) + " notes", flush=True)
             return
         var p = self.seed.value().progress()
         self.seed_done = p.done
