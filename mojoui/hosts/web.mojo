@@ -7,7 +7,7 @@ from mojoui.look import look_web_css
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
-from mojoui.view import View, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LAZYLIST, CANVAS, PARAGRAPH
+from mojoui.view import View, BUTTON, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LAZYLIST, CANVAS, PARAGRAPH
 from mojoui.paragraph import link_href
 from mojoui.diff import Diff
 from mojoui.app import App, Event, Runtime
@@ -212,6 +212,8 @@ def control_event(shown: View, node: Int, second: Bool, text: String, number: In
         return Event(0, "", 0)
     ref n = shown.nodes[node]
     var message = n.msg2 if second else n.msg
+    if second and n.kind == BUTTON and n.msg2 == 0 and n.size != 0 and len(n.options) > 0:  # a button's other face (View.alternate)
+        message = n.size
     if message == 0:
         return Event(0, "", 0)
     var event_text = text

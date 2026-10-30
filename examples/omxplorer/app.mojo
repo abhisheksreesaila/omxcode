@@ -66,7 +66,7 @@ from mojoui.datagrid import (DataGrid, GRID_SELECTED, GRID_COLUMN, GRID_EDIT, GR
                              GRID_TYPED, GRID_CLEAR, GRID_CANCEL, GRID_COMMIT)
 from mojoui.sheet import Sheet, placeholder_sheet, blank_table, INT, DECIMAL, TEXT, DATE, BOOL
 from mojoui.shared import environment, make_dir
-from mojoui.files import file_name, file_stem, file_size, read_recent, remember, read_setting, write_setting, adopt_config
+from mojoui.files import file_name, file_stem, file_size, file_exists, read_recent, remember, read_setting, write_setting, adopt_config
 from mojoui.csvio import read_table, empty_import, CsvImport, CsvColumn, kind_name
 from mojoui.omxfile import save_omx, open_document
 from mojoui.numformat import (ColumnFormat, format_number, AUTO, NUMBER, CURRENCY, PERCENT, COMPACT, DATE_LONG, DATE_MONTH, DATE_ISO,
@@ -93,6 +93,7 @@ from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, ID
 from mojoui.sheetjobs import ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
 from mojoui.draw import rect as draw_rect, with_alpha
+from mojoui.mediacard import MediaCards, OBJ_VIDEO, OBJ_IMAGE, VIDEO_TYPES, IMAGE_TYPES, is_media_file, is_video_file
 
 # screens
 comptime START_SCREEN = 0
@@ -201,6 +202,16 @@ comptime PANEL_CLOSE = 3102  # the island's panel closed
 comptime BIG_FILE = 256 * 1024 * 1024  # from this many bytes a file opens in a background job (the island shows its progress)
 comptime BIG_ROWS = 10_000_000  # from this many rows a chart's numbers and a column's figures come from background jobs
 comptime SKINS: List[String] = ["Liquid", "Ledger", "Graphite", "Blueprint"]
+comptime INSERT_VIDEO = 3200  # Insert > Video… / Image…: a dialog with a file picker of that kind
+comptime INSERT_IMAGE = 3201
+comptime INSERT_CLOSE = 3202
+comptime MEDIA_MSG = 4000  # the video and picture cards' messages (mojoui.mediacard: 8 a card) and canvases (2 a card)
+comptime MEDIA_CANVAS = 200
+comptime MAX_MEDIA = 8
+comptime TABLE_FRAME = 22  # the table's frame adds this much to its height (the skins' table surface pads it above and below)
+comptime MEDIA_W = 720  # a new video or picture card's width (points); its height follows the media's shape
+comptime TABLE_TYPES = ".csv,.tsv,.txt,.parquet,.omx"
+comptime OPEN_TYPES = TABLE_TYPES + "," + VIDEO_TYPES + "," + IMAGE_TYPES
 comptime MAX_OBJECTS = 40  # per sheet, and tiles per report (canvas ids 10…49, 60…99, 120…159)
 comptime TABLE_H = 400  # the table's height once objects share the sheet
 
@@ -255,6 +266,8 @@ struct Main(App):
     var recent: List[String]
     var version: Int
     var objects: List[SheetObject]  # charts and pivots on the sheet
+    var media: MediaCards  # videos and pictures on the sheet (Board children after the objects)
+    var inserting: Int  # Insert > Video… or Image… open: OBJ_VIDEO or OBJ_IMAGE (0: closed)
     var active: Int  # the object the inspector shows (-1: none)
     var chart_sizes: List[Tuple[Float64, Float64]]  # per canvas id: points from the last draw (taps)
     var sheet_tab: Int  # 0: the table's sheet, 1: the Report
@@ -337,6 +350,8 @@ struct Main(App):
         self.milliseconds = 0
         self.recent = read_recent(APP)
         self.objects = List[SheetObject]()
+        self.media = MediaCards(MEDIA_MSG, MEDIA_CANVAS, MAX_MEDIA)
+        self.inserting = 0
         self.active = -1
         self.chart_sizes = List[Tuple[Float64, Float64]](length=1000, fill=(400.0, 240.0))
         self.sheet_tab = 0
@@ -463,7 +478,16 @@ struct Main(App):
 
     def open_path(mut self, path: String):
         """A CSV or Parquet file → the Import step (its columns as read; a Parquet file too big for memory is streamed,
-        D-184); an .omx document → straight to its sheet."""
+        D-184); an .omx document → straight to its sheet; a video or picture → a card on the sheet (a new one when none is
+        open). A bare file name is looked up in the documents folder (OMX_DOCUMENTS), where Save puts documents."""
+        if not path.startswith("/") and path.find("/") < 0 and not file_exists(path):
+            var docs = environment("OMX_DOCUMENTS", environment("HOME", ".") + "/Documents/omxplorer") + "/" + path
+            if file_exists(docs):
+                self.open_path(docs)
+                return
+        if is_media_file(path):
+            self.open_media(path)
+            return
         if path.endswith(".omx"):
             try:
                 var objects = List[SheetObject]()
@@ -518,6 +542,40 @@ struct Main(App):
         except e:
             self.message = String(e)
             self.say(Activity.error("Couldn't open " + file_name(path), "it isn't a table"))  # (stays until it's seen: the reason is in the status bar)
+        self.version += 1
+
+    def open_media(mut self, path: String):
+        """A video or picture as a card on the sheet: beside the table on a sheet of its own (a blank one, made now), below
+        what is there on a sheet already open (as a new chart goes)."""
+        var fresh = self.screen != SHEET or not self.has_table
+        if fresh:
+            self.open_blank()
+            if self.screen != SHEET:
+                return
+        var width = self.sheet_width()
+        var w = min(MEDIA_W, max(width - 360, 320))
+        var spot = (0, 0)
+        if not fresh:
+            var taken = self.objects.copy()  # (cards are placed like charts: where nothing is)
+            for k in range(len(self.media)):
+                ref c = self.media.cards[k]
+                taken.append(SheetObject.chart(0, 0, c.x, c.y, c.w, c.h))
+            spot = free_spot(taken, self.table_y + (self.table_h_set if self.table_h_set > 0 else TABLE_H), width, w, 400)
+        try:
+            var k = self.media.add(path, spot[0], spot[1], w)
+            if fresh:  # (the blank table sits beside the card, as tall as it: the video and its numbers side by side)
+                self.table_x = w + 16
+                self.table_w = max(width - w - 16, 320)
+                self.table_h_set = self.media.cards[k].h - TABLE_FRAME
+                self.sheet_name = file_stem(path)
+                self.name = file_stem(path)
+            self.reveal = 1 + len(self.objects) + k  # (child 0 is the table, then the objects, then the cards)
+            self.reveal_count += 1
+            self.message = "Opened " + file_name(path) + " · " + self.media.cards[k].facts()
+            remember(APP, path, self.recent)
+        except e:
+            self.message = String(e)
+            self.say(Activity.error("Couldn't open " + file_name(path), "it isn't a video or picture"))
         self.version += 1
 
     def imported(mut self, path: String, var imp: CsvImport, var sheet: Sheet, var shapes: List[List[Float64]]):
@@ -576,6 +634,7 @@ struct Main(App):
         self.charts.forget()  # (the objects go: their jobs would land on the new ones)
         self.held = List[Tuple[Int, SheetObject]]()
         self.objects = List[SheetObject]()
+        self.media.clear()  # (a new sheet starts without the old one's videos and pictures)
         self.active = -1
         self.tiles = List[ReportTile]()
         self.filter = ReportFilter(-1, 0)
@@ -726,7 +785,7 @@ struct Main(App):
     def table_h(self) -> Int:
         if self.table_h_set > 0:
             return self.table_h_set
-        return TABLE_H if len(self.objects) > 0 else self.grid_h() - 30  # (the Board keeps 30 pt under it)
+        return TABLE_H if len(self.objects) + len(self.media) > 0 else self.grid_h() - 30  # (the Board keeps 30 pt under it)
 
     def first_number(self) -> Int:
         for c in range(self.frame.columns()):
@@ -1194,10 +1253,16 @@ struct Main(App):
 
     def handle(mut self, event: Event):
         var m = event.message
+        if self.media.update(event):  # (a video card's play, pause, seek and frames; a card's close)
+            if self.media.closed >= 0:
+                self.message = ""
+                self.version += 1
+            return
         if m != CELL_COMMIT and m != CELL_CANCEL and m != GRID and self.grid.editing:
             self.grid.cancel_edit()
             self.version += 1
         if m == PICK or (m >= RECENT and m < RECENT + 10):
+            self.inserting = 0  # (Insert > Video…'s dialog picked its file)
             var path = event.text if m == PICK else (self.recent[m - RECENT] if m - RECENT < len(self.recent) else String(""))
             if path != "":
                 self.open_path(path)
@@ -1483,6 +1548,12 @@ struct Main(App):
                 else:
                     self.message = ("Chart: " if m == INSERT_CHART else "Pivot: ") + object_title(self.objects[self.active], self.frame) + " (" + fixed(shown_ms(self.objects[self.active].milliseconds), 1) + " ms on " + self.frame.last_device() + (", streamed from disk" if self.frame.streamed() else "") + ")"  # (once, when it lands: where it ran)
             self.version += 1
+        elif m == INSERT_VIDEO or m == INSERT_IMAGE:
+            self.inserting = OBJ_VIDEO if m == INSERT_VIDEO else OBJ_IMAGE
+            self.version += 1
+        elif m == INSERT_CLOSE:
+            self.inserting = 0
+            self.version += 1
         elif m == MOVE or m == RESIZE:  # a sheet object (child 0: the table) dragged by its title bar, or by its corner
             var k = event.number - 1
             if k == -1:
@@ -1499,6 +1570,14 @@ struct Main(App):
                 else:
                     self.objects[k].w = max(320, self.objects[k].w + Int(event.dx))
                     self.objects[k].h = max(220, self.objects[k].h + Int(event.dy))
+            elif 0 <= k - len(self.objects) < len(self.media):  # (a video or picture card, after the objects)
+                ref c = self.media.cards[k - len(self.objects)]
+                if m == MOVE:
+                    c.x = max(0, c.x + Int(event.dx))
+                    c.y = max(0, c.y + Int(event.dy))
+                else:
+                    c.w = max(280, c.w + Int(event.dx))
+                    c.h = max(200, c.h + Int(event.dy))
             self.version += 1
         elif m >= OBJ_TAP and m < OBJ_TAP + 100:
             var k = m - OBJ_TAP
@@ -1790,6 +1869,8 @@ struct Main(App):
         shown row `first` (count 0: what fits on screen, or 25 before the grid has been drawn)."""
         if self.screen != SHEET:
             return ""
+        if self.media.draws(canvas):
+            return self.media.describe(canvas)  # (a video: its time and how to seek; a picture: what it is)
         if 10 <= canvas < 10 + len(self.objects) and self.objects[canvas - 10].kind == OBJ_CHART:
             return chart_text(self.objects[canvas - 10], self.frame)  # (a chart: its bars' numbers)
         if canvas != 0:
@@ -1851,6 +1932,8 @@ struct Main(App):
             if self.objects[canvas - 10].moved < MOVE_FRAMES:  # (mid-move: the next frame draws it further along)
                 self.objects[canvas - 10].moved += 1
                 surface.again = True
+        elif self.media.draws(canvas):
+            self.media.draw(canvas, surface, self.pal)
         elif 60 <= canvas < 60 + len(self.tiles):
             var cv = chart_view(self.tiles[canvas - 60].chart, self.frame)
             cv.draw(surface, self.font, self.chart_palette())
@@ -1879,7 +1962,7 @@ struct Main(App):
         var side = List[View]()
         side.append(Button("Start", NO_MSG, SUBTLE, icon="file").fill().align(START))  # (rows read from their leading edge, one icon set)
         side.append(Button("New blank sheet", BLANK, SUBTLE, icon="grid").fill().align(START))
-        side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=".csv,.tsv,.txt,.parquet,.omx").fill().align(START))
+        side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=OPEN_TYPES).fill().align(START))
         side.append(HStack(Icon("database", 16), Text("Connect a database", CAPTION), Spacer(), Text("soon", CAPTION).tone(TONE_ACCENT), spacing=10).fill().align(CENTER).padding(6, 12).tag("soon").tooltip("With MX frame, next"))
         side.append(Divider().fill())
         side.append(Button("Settings…", SETTINGS, SUBTLE, icon="settings").fill().align(START))
@@ -1890,7 +1973,7 @@ struct Main(App):
             HStack(Icon("upload", 28),
                    VStack(Text("Drop a CSV, Parquet or .omx file here", HEADLINE),
                           Text("or choose a file. A million rows is fine: you see a preview first, and the rest loads while you work.", CAPTION), spacing=4).align(START),
-                   Spacer(), FilePicker("Choose a file", PICK, style=PROMINENT, icon="import", accept=".csv,.tsv,.txt,.parquet,.omx"), spacing=16).fill().align(CENTER),
+                   Spacer(), FilePicker("Choose a file", PICK, style=PROMINENT, icon="import", accept=OPEN_TYPES), spacing=16).fill().align(CENTER),
             spacing=0,
         ).fill()
         var recent = List[View]()
@@ -1992,7 +2075,8 @@ struct Main(App):
                           Item("Report", SHOW_REPORT, icon="chart-bar", checked=on_sheet and self.sheet_tab == 1, disabled=not on_sheet), Separator(),
                           Item("Rename tab…", RENAME_TAB, icon="rename", disabled=not on_sheet)]),
             Menu("Insert", [Item("Chart", INSERT_CHART, icon="chart-bar", shortcut="Ctrl+Shift+C", disabled=not on_sheet),
-                            Item("Pivot table", INSERT_PIVOT, icon="pivot", shortcut="Ctrl+Shift+P", disabled=not on_sheet), Separator(),
+                            Item("Pivot table", INSERT_PIVOT, icon="pivot", shortcut="Ctrl+Shift+P", disabled=not on_sheet),
+                            Item("Video…", INSERT_VIDEO, icon="video", disabled=not on_sheet), Item("Image…", INSERT_IMAGE, icon="image", disabled=not on_sheet), Separator(),
                             Item("Formula column", NEW_FORMULA, icon="formula", checked=self.formula_open, disabled=not edits),
                             Item("Row", ADD_ROW, icon="row-plus", disabled=not edits)]),
             Menu("Data", [Item("Sort smallest first", SORT_ASC, icon="sort", shortcut="Ctrl+Shift+↑", disabled=not edits),
@@ -2043,6 +2127,15 @@ struct Main(App):
                 Checkbox("Open the inspector with a sheet", self.inspector_open, KEEP_INSPECTOR),
                 HStack(Text("Kept in settings.txt in your config folder, so every launch looks the same.", CAPTION), Spacer(), Button("Done", SETTINGS_CLOSE, PROMINENT), spacing=10).fill().align(CENTER),
                 spacing=12).align(START), on_close=SETTINGS_CLOSE))
+        if self.inserting != 0 and self.screen == SHEET:
+            var video = self.inserting == OBJ_VIDEO
+            out.append(Dialog("Insert a video" if video else "Insert a picture", VStack(
+                Text(("A video plays on the sheet beside your data: play, pause and scrub it, or let an agent do it." if video
+                      else "A picture sits on the sheet like a chart: move it by its title, resize it by its corner."), CAPTION),
+                HStack(Spacer(), Button("Cancel", INSERT_CLOSE),
+                       FilePicker("Choose a video…" if video else "Choose a picture…", PICK, style=PROMINENT, icon="video" if video else "image",
+                                  accept=VIDEO_TYPES if video else IMAGE_TYPES), spacing=10).fill().align(CENTER),
+                spacing=14).align(START), on_close=INSERT_CLOSE, width=440))
         if self.about_open:
             out.append(Dialog("About omxplorer", VStack(
                 Text("omxplorer", TITLE).tone(TONE_ACCENT), Text("open data, shape it, report on it, on your GPU", CAPTION),
@@ -2125,7 +2218,7 @@ struct Main(App):
         var extra = List[View]()
         if streamed:
             extra.append(Text("Streamed from disk", CAPTION).tone(TONE_ACCENT).tooltip("This file is bigger than memory: its rows are read from disk as they're shown, and your edits are kept beside it until you save").tag("streamed"))
-        extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=".csv,.tsv,.txt,.parquet,.omx").tooltip("Open a CSV, Parquet or .omx file"))
+        extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=OPEN_TYPES).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
         if self.sheet_tab == 1:
             return Toolbar(left, self.report_tools(), right, extra, before=self.report_controls(), after=self.filter_controls(), inline=True)  # (its tile tools share one icon: their titles stay)
         var middle = List[Tool]()
@@ -2442,6 +2535,10 @@ struct Main(App):
                                      self.lit.copy() if asked else List[Int](), self.ask_views() if asked else List[View](), ASK_H if asked else 0)
                          .at(o.x, o.y).width(o.w).height(o.h).tag("chart" + String(k) if o.kind == OBJ_CHART else "pivot" + String(k)))
             bottom = max(bottom, o.y + o.h)
+        for k in range(len(self.media)):
+            ref c = self.media.cards[k]
+            items.append(self.media.view(k).at(c.x, c.y).width(c.w).height(c.h).tag(("video" if c.kind == OBJ_VIDEO else "image") + String(k)))
+            bottom = max(bottom, c.y + c.h)
         var ed = self.grid.editor_place(self.frame)
         if ed[2] > 0:
             items.append(self.grid.editor(self.edit_text, CELL_COMMIT, CELL_CANCEL).at(self.table_x + ed[0], self.table_y + HEADER_H + ed[1]).width(ed[2]).height(30))

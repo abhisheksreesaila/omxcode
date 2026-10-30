@@ -302,6 +302,8 @@ def sf_symbol(name: String) -> String:
     if name == "terminal": return "terminal"
     if name == "play": return "play"
     if name == "pause": return "pause"
+    if name == "video": return "video"
+    if name == "image": return "photo"
     if name == "x": return "xmark"
     if name == "laptop": return "laptopcomputer"
     if name == "external-link": return "arrow.up.right.square"

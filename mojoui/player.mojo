@@ -6,11 +6,12 @@
 #   update():  if player.update(event): …                         # True when the event was the player's; player.state.t() is the time then
 #   view():    player.view(width)                                 # the picture and its controls on a card; width (points): the picture is exactly the video's shape
 #   draw():    if player.draws(canvas): player.draw(canvas, surface, backdrop, palette)    # backdrop: the colour behind the picture (the theme's page)
-#   describe(): player.describe()                                 # for an agent: the time, and where on the scrubber a tap seeks to
+#   describe(): player.describe()                                 # for an agent: the time, and how to seek
 #
 # Time is PlayerState (plain numbers, tested without a video): play(), pause(), seek(t), step(±1) and tick(microseconds), which
 # the display frames feed, so playback follows the clock and drops frames rather than drifting. For an agent the controls are
-# tools: "play" or "pause" (a button that is whichever applies), "seek" (a tap on the scrubber at x points) and "video"
+# tools: "play" and "pause" (one button, whichever applies, with the other as its .alternate(): both are tools), "seek" (set to a time in seconds: the scrubber is .settable(),
+# so an agent's {"value": 12.5} arrives as a SET_TO gesture; or a tap at x points) and "video"
 # (a tap plays or pauses; keys step). Tracing (MOJOUI_TRACE / MOJOUI_TEST) prints `PLAYER: t=12.480 frame=374` on each change.
 
 from mojoui.app import Event
@@ -19,7 +20,8 @@ from mojoui.clock import trace_on
 from mojoui.draw import rect, circle
 from mojoui.theme import Palette
 from mojoui.video import VideoSource
-from mojoui.view import View, Button, Canvas, Text, HStack, VStack, Card, CAPTION, ICON_ONLY, NO_MSG, CENTER, PAN, TAP, PRESS, KEY
+from mojoui.picture import draw_fitted
+from mojoui.view import View, Button, Canvas, Text, HStack, VStack, Card, CAPTION, ICON_ONLY, NO_MSG, CENTER, PAN, TAP, PRESS, KEY, SET_TO
 from mojoui.charts import fixed
 
 # Messages a Player owns, from msg_base
@@ -115,15 +117,6 @@ struct PlayerState(Copyable, Movable):
         return clock_text(self.t()) + " / " + clock_text(self.duration)
 
 
-def _channels(p: UInt32) -> SIMD[DType.float32, 4]:
-    return SIMD[DType.float32, 4](Float32(p & 255), Float32((p >> 8) & 255), Float32((p >> 16) & 255), Float32((p >> 24) & 255))
-
-
-def _pack(c: SIMD[DType.float32, 4]) -> UInt32:
-    return (UInt32(min(max(c[0], 0.0), 255.0) + 0.5) | (UInt32(min(max(c[1], 0.0), 255.0) + 0.5) << 8)
-            | (UInt32(min(max(c[2], 0.0), 255.0) + 0.5) << 16) | (UInt32(255) << 24))
-
-
 struct Player(Movable):
     var state: PlayerState
     var src: VideoSource
@@ -179,6 +172,11 @@ struct Player(Movable):
                 self._seek_x(event.x)
             elif event.number == KEY:
                 self._key(event.text)
+            elif event.number == SET_TO:  # an agent set the time straight (event.text: seconds), the scrubber's .settable()
+                try:
+                    self.state.seek(Float64(event.text))
+                except:
+                    pass
         elif which == VIDEO:
             if event.number == TAP:
                 self.state.toggle()
@@ -206,8 +204,8 @@ struct Player(Movable):
         """The picture and its controls. `width`: the points the player is wide, when the app knows them: the picture is then
         exactly the video's shape (no bands above and below); 0: it takes the room it is given and fits the video inside."""
         var playing = self.state.playing
-        var button = (Button("pause", on_tap=self.base + PAUSE, style=ICON_ONLY, icon="pause") if playing
-                      else Button("play", on_tap=self.base + PLAY, style=ICON_ONLY, icon="play"))
+        var button = (Button("pause", on_tap=self.base + PAUSE, style=ICON_ONLY, icon="pause").alternate("play", self.base + PLAY) if playing
+                      else Button("play", on_tap=self.base + PLAY, style=ICON_ONLY, icon="play").alternate("pause", self.base + PAUSE))  # (an agent gets both: D-855)
         var picture = Canvas(self.canvas, self.state.frame, on_gesture=self.base + VIDEO, on_frame=self.base + FRAME if playing else NO_MSG, keys=True)
         picture = picture^.fill().tag("video")
         if width > 0:
@@ -215,10 +213,11 @@ struct Player(Movable):
         else:
             picture = picture^.grow()
         var scrubber = Canvas(self.canvas + 1, self.state.frame, on_gesture=self.base + SCRUB, keys=True).height(28).grow().fill().tag("seek")
+        scrubber = scrubber^.settable("seconds", 0.0, self.state.duration).tooltip("Seek: drag, or set a time in seconds")
         var controls = HStack(button^.tag("pause" if playing else "play"), scrubber^, Text(self.state.time_text(), style=CAPTION).tag("time").min_width(92),
                               spacing=10).align(CENTER).fill()
         # the controls sit on a card (a quiet bar under the picture): the scrubber paints its track on the card's colour
-        var bar = Card(controls^, spacing=0).padding(6, 12).fill()
+        var bar = Card(controls^, spacing=0).padding(6, 12).fill().tag("player-controls")  # (themes keep these always shown, D-856)
         if width > 0:
             return VStack(picture^, bar^, spacing=10).width(width)
         return VStack(picture^, bar^, spacing=10).grow().fill()
@@ -226,9 +225,12 @@ struct Player(Movable):
     def describe(self) -> String:
         """For an agent: where the video is, and how to seek (tap the "seek" canvas at x points from its left)."""
         ref s = self.state
-        return ("t=" + fixed(s.t(), 3) + " s of " + fixed(s.duration, 3) + " s, frame " + String(s.frame) + " of " + String(s.frames)
-                + (", playing" if s.playing else ", paused") + ". Seek: tap the seek view at x points from its left; its track runs from x="
-                + fixed(SCRUB_PAD, 0) + " (0 s) to x=" + fixed(max(self.scrub_w - SCRUB_PAD, SCRUB_PAD), 0) + " (the end).")
+        var head = ("t=" + fixed(s.t(), 3) + " s of " + fixed(s.duration, 3) + " s, frame " + String(s.frame) + " of " + String(s.frames)
+                    + (", playing" if s.playing else ", paused") + ". Seek: set the seek view to a time in seconds (its value)")
+        if self.scrub_w <= 2 * SCRUB_PAD:  # (not drawn yet: no track to tap on)
+            return head + "."
+        return (head + ", or tap it at x points from its left; its track runs from x=" + fixed(SCRUB_PAD, 0) + " (0 s) to x="
+                + fixed(self.scrub_w - SCRUB_PAD, 0) + " (the end).")
 
     # ---------- drawing ----------
 
@@ -271,41 +273,8 @@ struct Player(Movable):
         circle(s, done, mid, 7 * k, pal.card)
 
     def _draw_picture(mut self, mut s: Surface, backdrop: UInt32):
-        s.fill(backdrop)
         self._show(self.state.frame)
-        var vw = self.src.width
-        var vh = self.src.height
-        if self.have < 0 or vw <= 0 or vh <= 0 or len(self.buf) != vw * vh:
+        if self.have < 0:
+            s.fill(backdrop)
             return
-        var scale = min(Float64(s.width) / Float64(vw), Float64(s.height) / Float64(vh))
-        var dw = max(Int(Float64(vw) * scale), 1)
-        var dh = max(Int(Float64(vh) * scale), 1)
-        var x0 = (s.width - dw) // 2
-        var y0 = (s.height - dh) // 2
-        var radius = min(14.0 * s.scale, Float64(min(dw, dh)) / 2)
-        var back = _channels(backdrop)
-        var out = s.pixels()
-        var src = self.buf.unsafe_ptr()
-        var sx_step = Float64(vw) / Float64(dw)
-        var sy_step = Float64(vh) / Float64(dh)
-        for y in range(dh):
-            var fy = min(max((Float64(y) + 0.5) * sy_step - 0.5, 0.0), Float64(vh - 1))
-            var iy = Int(fy)
-            var iy2 = min(iy + 1, vh - 1)
-            var wy = Float32(fy - Float64(iy))
-            var dy = min(Float64(y) + 0.5, Float64(dh) - Float64(y) - 0.5)  # distance to the nearest top or bottom edge
-            for x in range(dw):
-                var fx = min(max((Float64(x) + 0.5) * sx_step - 0.5, 0.0), Float64(vw - 1))
-                var ix = Int(fx)
-                var ix2 = min(ix + 1, vw - 1)
-                var wx = Float32(fx - Float64(ix))
-                var top = _channels(src.unsafe_offset(iy * vw + ix)[]) * (1 - wx) + _channels(src.unsafe_offset(iy * vw + ix2)[]) * wx
-                var bottom = _channels(src.unsafe_offset(iy2 * vw + ix)[]) * (1 - wx) + _channels(src.unsafe_offset(iy2 * vw + ix2)[]) * wx
-                var c = top * (1 - wy) + bottom * wy
-                var dx = min(Float64(x) + 0.5, Float64(dw) - Float64(x) - 0.5)
-                if dx < radius and dy < radius:  # inside a corner's square: how much of the pixel the rounded corner covers
-                    var ex = radius - dx
-                    var ey = radius - dy
-                    var cover = min(max(radius - (ex * ex + ey * ey) ** 0.5 + 0.5, 0.0), 1.0)
-                    c = back + (c - back) * Float32(cover)
-                out.unsafe_offset((y0 + y) * s.width + x0 + x)[] = _pack(c)
+        draw_fitted(s, self.buf, self.src.width, self.src.height, backdrop)

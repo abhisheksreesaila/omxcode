@@ -63,6 +63,7 @@ comptime RELEASE = 5  # a drag (PANs) ended at event.x, y (not sent after a plai
 comptime DOUBLE = 6  # a double click / double tap at event.x, y (after the TAP of its first click)
 comptime SECONDARY = 8  # a right click (or a long press) at event.x, y: the place to open a context menu
 comptime KEY = 7  # a key pressed while the canvas has focus (a click gives it focus): event.text = the key's name
+comptime SET_TO = 9  # a drawn control set straight to a value (an agent, an accessibility tool): event.text = the number, in the unit .settable() names
 #   ("ArrowDown", "Enter", "Escape", "Tab", "Backspace", "Delete", "PageDown", "Home", "F2", …, the web's names)
 #   or the character it typed ("7", "a", " "); event.dx = the modifiers held: SHIFT + CTRL + ALT
 comptime SHIFT = 1
@@ -79,6 +80,7 @@ comptime ICON_NAMES: List[String] = [
     "bold", "italic", "underline", "strikethrough", "text-colour", "fill", "align-left", "align-center", "align-right", "currency", "percent", "decimals-less", "decimals-more", "clear-format", "rename", "settings", "chevron-right", "back", "copy",
     "box", "gauge", "scroll-text", "book-open", "key-round", "route", "lock", "sliders-horizontal", "layout-grid", "list", "square", "rotate-cw", "trash-2", "terminal", "play", "pause", "x", "laptop", "external-link", "loader-circle", "download", "ellipsis", "zap", "cpu",
     "unlock", "sun", "moon",  # (the console's Security and Settings, goal 33 M6)
+    "video", "image",  # (omxplorer's video and picture cards, goal 39 M6)
 ]
 
 # Text styles (each platform maps them to its own type scale)
@@ -340,6 +342,21 @@ struct View(Copyable, Movable):
         """Where an Overlay island floats: h = START, CENTER or END; v = START or END."""
         self.nodes[0].x = h
         self.nodes[0].y = v
+        return self^
+
+    def alternate(var self, title: String, msg: Int) -> View:
+        """On a Button that is one face of a pair (play / pause, mute / unmute): its other face is `title`, sending `msg`.
+        People see one button; an agent gets both faces as tools, each meaning one thing whatever the state (a pause while
+        paused changes nothing), so it never has to read the state before acting. Hosts draw nothing new."""
+        self.nodes[0].options = [title]
+        self.nodes[0].size = msg
+        return self^
+
+    def settable(var self, unit: String, low: Float64, high: Float64) -> View:
+        """On a Canvas that draws a control with a value (a scrubber, a dial): it can be set straight to a number from `low`
+        to `high` in `unit` ("seconds"). An agent sees a `value` argument on the canvas's tool; setting it sends the canvas's
+        on_gesture with event.number = SET_TO and event.text = the number. The app clamps and applies it as it would a drag."""
+        self.nodes[0].options = [unit, String(low), String(high)]
         return self^
 
     def tooltip(var self, text: String) -> View:
