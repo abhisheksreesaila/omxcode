@@ -143,6 +143,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)` | `mojoui/imageops.mojo` | Canvas | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)` | `mojoui/videotable.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)` | `mojoui/videoexport.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)` | `mojoui/vision_presets.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 
 ## JavaScript widgets (WebComponent)
@@ -159,12 +160,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 113 | 9 | 0 |
-| Web | 116 | 6 | 0 |
-| Android | 19 | 24 | 79 |
-| Mac (AppKit) | 0 | 110 | 12 |
-| iPhone (UIKit) | 0 | 88 | 34 |
-| Agent (MCP) | 31 | 41 | 50 |
+| Linux (GTK) | 113 | 10 | 0 |
+| Web | 116 | 7 | 0 |
+| Android | 19 | 25 | 79 |
+| Mac (AppKit) | 0 | 111 | 12 |
+| iPhone (UIKit) | 0 | 89 | 34 |
+| Agent (MCP) | 31 | 42 | 50 |
 
 ## Inside one app, not components yet (the debt)
 

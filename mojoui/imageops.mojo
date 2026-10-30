@@ -96,6 +96,31 @@ def _scale_px(src: UnsafePointer[UInt32, MutAnyOrigin], sw: Int, sh: Int, ow: In
     return out
 
 
+def _oval_weight(col: Int, row: Int, w: Int, h: Int) -> Int:
+    """0–256: how much of the blur shows at (col, row) of a w×h rectangle: all of it inside 3/4 of the inscribed
+    ellipse's radius, none outside the ellipse, a linear fade (in squared distance) between."""
+    var nx = ((2 * col + 1 - w) * 1024) // max(w, 1)
+    var ny = ((2 * row + 1 - h) * 1024) // max(h, 1)
+    var d2 = nx * nx + ny * ny
+    var inner = 768 * 768
+    var outer = 1024 * 1024
+    if d2 <= inner:
+        return 256
+    if d2 >= outer:
+        return 0
+    return (256 * (outer - d2)) // (outer - inner)
+
+
+def _mix(a: UInt32, b: UInt32, wt: Int) -> UInt32:
+    """a × (256 − wt) + b × wt, per channel, over 256."""
+    var out = UInt32(0)
+    for ch in range(4):
+        var s = UInt32(ch * 8)
+        var v = (Int((a >> s) & 0xFF) * (256 - wt) + Int((b >> s) & 0xFF) * wt + 128) >> 8
+        out |= UInt32(v) << s
+    return out
+
+
 def _raw(p: Pointer[UInt32, _]) -> UnsafePointer[UInt32, MutAnyOrigin]:
     return UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=Int(p))
 
@@ -157,6 +182,7 @@ struct Edit(Copyable, Movable):
     var c1: UInt32  # PATCH: the colour for the coverage's low byte (text, a rectangle)
     var c2: UInt32  # PATCH: the colour for its second byte (the pill behind text)
     var offset: Int  # PATCH: where its w×h coverage starts in Edits.cov
+    var oval: Bool  # BLUR: only inside the ellipse that fits the rectangle, its edge feathered (a face, not a box)
 
 
 struct Edits(Movable):
@@ -171,10 +197,15 @@ struct Edits(Movable):
 
     def blur(mut self, x: Int, y: Int, w: Int, h: Int, radius: Int):
         """A strong blur inside the rectangle (radius ≈ 1/10 of its size is unrecognisable); it never reads or writes outside."""
-        self.list.append(Edit(BLUR, x, y, w, h, max(radius, 1), 0, 0, 0))
+        self.list.append(Edit(BLUR, x, y, w, h, max(radius, 1), 0, 0, 0, False))
+
+    def blur_oval(mut self, x: Int, y: Int, w: Int, h: Int, radius: Int):
+        """The same blur, kept to the ellipse inside the rectangle, fading out over its outer quarter (redacting a face
+        without a hard square around it)."""
+        self.list.append(Edit(BLUR, x, y, w, h, max(radius, 1), 0, 0, 0, True))
 
     def _patch(mut self, x: Int, y: Int, w: Int, h: Int, var cov: List[UInt32], c1: UInt32, c2: UInt32):
-        self.list.append(Edit(PATCH, x, y, w, h, 0, c1, c2, len(self.cov)))
+        self.list.append(Edit(PATCH, x, y, w, h, 0, c1, c2, len(self.cov), False))
         self.cov.extend(cov^)
 
     def fill_rect(mut self, x: Float64, y: Float64, w: Float64, h: Float64, colour: UInt32, radius: Float64 = 0):
@@ -334,6 +365,10 @@ struct ImageOps(Movable):
             return
         self.stage.resize(total, 0)
         self.cov.resize(total, 0)
+        var any_oval = False
+        for m in range(last - first):
+            if edits.list[first + m].oval:
+                any_oval = True
         for m in range(last - first):
             ref e = edits.list[first + m]
             for row in range(hs[m]):
@@ -341,6 +376,9 @@ struct ImageOps(Movable):
                     self.stage[offs[m] + row * ws[m] + col] = frame.pixels[(ys[m] + row) * frame.width + xs[m] + col]
                     if e.kind == PATCH:
                         self.cov[offs[m] + row * ws[m] + col] = edits.cov[e.offset + (ys[m] - e.y + row) * e.w + xs[m] - e.x + col]
+        var orig = List[UInt32]()
+        if any_oval:
+            orig = self.stage.copy()
         var done = False
         comptime if GPU_BUILD:
             if self.gpu.ctx:
@@ -391,6 +429,16 @@ struct ImageOps(Movable):
                 else:
                     for k in range(w * h):
                         ps.unsafe_offset(o + k)[] = _compose_px(ps.unsafe_offset(o + k)[], pc.unsafe_offset(o + k)[], e.c1, e.c2)
+        if any_oval:  # blend the blur back into the original outside the ellipse (CPU, integers: both paths agree)
+            for m in range(last - first):
+                ref e = edits.list[first + m]
+                if not e.oval:
+                    continue
+                for row in range(hs[m]):
+                    for col in range(ws[m]):
+                        var k = offs[m] + row * ws[m] + col
+                        var wt = _oval_weight(xs[m] - e.x + col, ys[m] - e.y + row, e.w, e.h)
+                        self.stage[k] = _mix(orig[k], self.stage[k], wt)
         for m in range(last - first):
             for row in range(hs[m]):
                 for col in range(ws[m]):
