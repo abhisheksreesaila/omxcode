@@ -43,3 +43,20 @@ jsonschema = ">=4.26.0, <5"
 [target.linux-glibc-234.dependencies]
 xorg-xvfb-server = ">=21.1.25,<22"
 xkeyboard-config = ">=2.48,<3"
+
+# Goal 39 M12 spike (D-940): in-process vision models (OWLv2, SAM 2.1) through PyTorch + transformers.
+# A separate feature + environment so the default environment and its lock stay unchanged.
+# Torch comes from PyPI's default CUDA wheels (cu132, with their own CUDA libraries), so no `__cuda` platform
+# is needed and the workspace platforms stay as they are. Run with `pixi run -e models ...`. Linux only.
+[feature.models]
+platforms = ["linux-glibc-234"]
+
+[feature.models.pypi-dependencies]
+torch = ">=2.9"
+torchvision = "*"
+transformers = ">=4.56"
+accelerate = "*"
+safetensors = "*"
+
+[environments]
+models = { features = ["models"], solve-group = "models" }

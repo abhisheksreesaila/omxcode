@@ -842,3 +842,14 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Snags: `out` is a keyword (a parameter can't be called that); `String(Int / Float)` needs the Int made a Float64 first.
 - Scratch verifier (build/g39/scratch/verify_m8.py, check.py m8's file half): defects_a 5/5, defects_b 7/7 within 5 m (errors 0.00–0.04 m); worse = truth; waypoints within 0.5–1.9e-5° → PASS. tests/test_videotable still passes (VideoTable changes are additive).
 - Not done: the scenario half of M8 (omxplorer, agent tools, cursor sync) is the app's; Apple/Android hosts not run.
+
+## 2026-10-30 goal 39 · M12 spike
+- Worktree mojo-ui-g39e (branch g39-e), GPU 1. Report: docs/research/visionmodel-spike.md.
+- pixi: `[system-requirements] cuda` refused with per-platform virtual packages; a second platform `{cuda = "12"}` re-solved the default env for it (rejected). PyPI torch wheels on linux-glibc-234: default lock section identical. torch 2.15.0+cu132, transformers 5.22.1; env 11 GB (torch part ≈ 5 GB); install 25 s from pixi's cache.
+- First snapshot_download with allow_patterns looked empty (`du` said 52K), but the blobs were there (`du -L`): OWLv2 620 MB, SAM 2.1 tiny 156 MB.
+- A conda ffmpeg in the feature broke `-vsync`; removed it (system ffmpeg, like the default env).
+- OWLv2 fp16: 28–30 ms a frame, 20–21 ms batched (8–16). Brief's prompts at 0.2: only barcode labels and one box. "a box on a conveyor belt" 0.25–0.37 on pallets; "a red splat" 0.23 on the tear; faces almost nothing (cartoon style). Whole video, 228 keyframes: "a red splat" > 0.15 recall 0.98 precision 0.90; "a torn package" ≤ 0.02 (alone: fires on every box).
+- OWLv2 image-guided (one crop of a tear / of a burn mark) puts the real ones at 1.00 (normalised scores), including 19 px burn marks text could not find.
+- SAM 2.1 tiny streaming: several objects added one at a time -> "maskmem_features ... cannot be empty"; one call with all boxes works. 1 object ≈ 30 ms a frame, 3 objects 64 ms (per-object loop). Tracked pallet 2872 for 60 frames to the frame edge.
+- Mojo: tests/test_visionmodel.mojo ran first time: hand-off 0.74 ms (host) / 0.06 ms (MAX DeviceBuffer -> torch, no copy, same boxes), model 30.5 ms, call 31.7 ms; SAM mask fills the OWLv2 box; ModelAnalyzer in scan(): 120 frames, stride 5, batch 8, 77 frames/s, splat on 116 frame-rows.
+- VideoTable.intervals() returns nothing when scan() starts past frame 0 (frames is a count); not fixed, noted.
