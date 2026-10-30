@@ -150,6 +150,13 @@ COMPOSITES = [
     ("MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)", "mojoui/mapview.mojo", ["Canvas"], "MapView("),
     ("Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)", "mojoui/trackcard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Segmented", "Quiet buttons"], "TrackCards("),
     ("Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)", "mojoui/inspection_tables.mojo", [], "compare_tables("),
+    # documents (goal 41 M7)
+    ("PdfSource (a PDF's pages as RGBA pictures at any dpi, page sizes in points, points ↔ pixels; its text layer for checks)", "mojoui/pdfsource.mojo", [], "PdfSource("),
+    ("Document card (a PDF page on a card: page through, zoom, pan, highlight a box in page points; Board chrome, quiet actions)", "mojoui/documentcard.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas: press, release, double", "Canvas: keys (focus on press)", "Card", "Quiet buttons", "ProgressBar"], "DocumentCard("),
+    ("OcrModel (the reader slot: docTR in process, words with boxes and confidence; a page's picture read into rows)", "mojoui/ocrmodel.mojo", [], "OcrModel("),
+    ("TextTable (words as rows: page, text, box, confidence; CSV in and out)", "mojoui/texttable.mojo", [], "TextTable("),
+    ("Form fields (a label's value by geometry: right on its line or under it; the labels are data)", "mojoui/formfields.mojo", [], "find_fields("),
+    ("Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)", "mojoui/documentjobs.mojo", [], "DocumentFeed("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.

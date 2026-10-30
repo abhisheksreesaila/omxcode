@@ -81,6 +81,11 @@ The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), wi
   ([mxframe-needs.md](mxframe-needs.md)); until then an engine change to that order would break it quietly.
 - **The Mac's wake is ~35 ms** on GitHub's Macs against 0.05 ms on Linux; unmeasured on real hardware.
 
+- **Python in a job** (goal 41, D-1146): CPython's lock stays with the UI thread, which never lets go on its own. A job
+  that calls Python takes the lock with `mojoui.pygil.python_enter()`/`python_exit()`, and whoever starts it lends the
+  lock (`python_lend()`, then `python_reclaim()` when the result is taken; mojoui.documentjobs does both). While it is
+  lent, Python on the UI thread must go through `python_enter()` too (pdfsource and ocrmodel do; visionmodel doesn't yet).
+
 ## What's next, so it's "drop in a component and it just works"
 
 1. **Catch a slow `update()`**: a debug build that names any `update()` or `view()` over one frame (16 ms) with the
