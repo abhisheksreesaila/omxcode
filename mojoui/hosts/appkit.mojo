@@ -2770,11 +2770,12 @@ struct AppKitHost[A: App](Movable):
                 return k
         return -1
 
-    def canvas_send(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, self_addr: Int):
+    def canvas_send(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, self_addr: Int,
+                    pressure: Float64 = 0):
         if self.report.on and kind != PAN and kind != ZOOM:
             self.report.cause = "canvas " + gesture_name(kind)
             self.report.note("event: canvas node " + String(node) + " " + gesture_name(kind) + " at " + pts(x) + ", " + pts(y))
-        var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom)
+        var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
         self.apply(d, self_addr)
 
     def tick(mut self, seconds: Float64, self_addr: Int):
@@ -3156,6 +3157,14 @@ def event_point(view: Int, event: Int) -> CGPoint:
     return in_view(view, msg[CGPoint](view, "convertPoint:fromView:", w.x, w.y, 0))
 
 
+def pen_pressure(event: Int) -> Float64:
+    """A tablet pen's pressure (0–1) on a mouse event; 0 for a mouse or trackpad (their pressure is 0 or 1, not a
+    pressure): only NSEventSubtypeTabletPoint (1) events carry one. Goal 40; built, not run on a Mac yet."""
+    if msg(event, "subtype") != 1:
+        return 0
+    return min(max(Float64(msg[Float32](event, "pressure")), 0.0), 1.0)
+
+
 def on_canvas_mouse_down[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     """The button goes down: PRESS there at once (GTK's drag-begin), or DOUBLE on a second click."""
     var t = from_tag(view)
@@ -3170,7 +3179,7 @@ def on_canvas_mouse_down[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     if msg(event, "clickCount") >= 2:
         host[].canvas_send(t[1], DOUBLE, at.x, at.y, 0, 0, 1, t[0])
         return
-    host[].canvas_send(t[1], PRESS, at.x, at.y, 0, 0, 1, t[0])
+    host[].canvas_send(t[1], PRESS, at.x, at.y, 0, 0, 1, t[0], pen_pressure(event))
 
 
 def on_canvas_mouse_dragged[A: App](view: Int, cmd: Int, event: Int) abi("C"):
@@ -3188,7 +3197,7 @@ def on_canvas_mouse_dragged[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     host[].canvases[k].moved = True
     host[].canvases[k].last_x = at.x
     host[].canvases[k].last_y = at.y
-    host[].canvas_send(t[1], PAN, at.x, at.y, dx, dy, 1, t[0])
+    host[].canvas_send(t[1], PAN, at.x, at.y, dx, dy, 1, t[0], pen_pressure(event))
 
 
 def on_canvas_mouse_up[A: App](view: Int, cmd: Int, event: Int) abi("C"):
@@ -3198,7 +3207,7 @@ def on_canvas_mouse_up[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     var at = event_point(view, event)
     var k = host[].canvas_at(t[1])
     if k >= 0 and host[].canvases[k].moved:
-        host[].canvas_send(t[1], RELEASE, at.x, at.y, 0, 0, 1, t[0])
+        host[].canvas_send(t[1], RELEASE, at.x, at.y, 0, 0, 1, t[0], pen_pressure(event))
     elif msg(event, "clickCount") < 2:
         host[].canvas_send(t[1], TAP, at.x, at.y, 0, 0, 1, t[0])
 

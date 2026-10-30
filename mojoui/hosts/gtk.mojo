@@ -22,9 +22,10 @@ from mojoui.a11y import audit, explicit_name, needs_name, accessible_name
 from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP
 from mojoui.app import App, Event, Runtime, ms
 from mojoui.canvas import Surface, rgba
+from mojoui.png import encode_png
 from mojoui.present import Presenter, gpu_canvas_gate
 from mojoui.gpu import GPU_BUILD
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY
 from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
@@ -471,6 +472,8 @@ struct GtkCanvas(Copyable, Movable):
     var ptr_y: Float64
     var pinch: Float64  # the pinch's scale so far
     var moved: Bool  # the current press became a drag (so it's not a tap)
+    var pressure: Float64  # the pen's pressure at the last press or move (0: the device has none), goal 40
+    var test_pressure: Float64  # the `stroke:` test step's pressure for the next press or move (-1: read the device)
     var armed: Bool  # a tick callback is running (only while frames, a redraw or a resize may be due)
     var quiet: Int  # idle ticks in a row (layout can change after ticks, so wait before stopping)
     var spare: Scene  # the list before that, recycled for the next frame (its memory, not its content)
@@ -511,6 +514,8 @@ struct GtkCanvas(Copyable, Movable):
         self.ptr_y = -1
         self.pinch = 1
         self.moved = False
+        self.pressure = 0
+        self.test_pressure = -1
         self.armed = False
         self.quiet = 0
         self.prev = Scene(0, 0, 1)
@@ -593,6 +598,7 @@ struct GtkHost[A: App](Movable):
     var scratch: List[Float32]  # GdkRGBA, graphene rects and points, GskRoundedRect handed to GTK by address
     var nodes_built: Int  # layers built into render nodes, and layers reused untouched (bench reports them)
     var nodes_reused: Int
+    var ink_built: Int  # the "ink" layer built into nodes (not reused): goal 40's bench counts them
     var cells_built: Int  # the "cells" layer built into nodes (not reused), and pixel textures handed to GTK: bench reports them
     var uploads: Int
     var new_layouts: Int  # text laid out for the first time, and how long that took (ns): the replay's own trace
@@ -684,6 +690,7 @@ struct GtkHost[A: App](Movable):
         self.new_layouts = 0
         self.new_layout_ns = 0
         self.cells_built = 0
+        self.ink_built = 0
         self.uploads = 0  # (MOJOUI_NO_PARTIAL=1: every shape change rebuilds the window, to compare)
         self.canvases = List[GtkCanvas]()
         self.boards = List[BoardChild]()
@@ -2815,7 +2822,8 @@ struct GtkHost[A: App](Movable):
         if ci < 0 or ci >= len(self.canvases):
             return
         var t0 = perf_counter_ns()
-        var d = self.rt.gesture(self.canvases[ci].node, kind, x, y, dx, dy, zoom)
+        var p = self.canvases[ci].pressure if kind == PRESS or kind == PAN or kind == RELEASE else 0.0
+        var d = self.rt.gesture(self.canvases[ci].node, kind, x, y, dx, dy, zoom, p)
         self.trace_diff("event gesture", t0, d)
         self.apply(d, self_addr)
 
@@ -3161,6 +3169,17 @@ struct GtkHost[A: App](Movable):
                     external_call["gtk_snapshot_append_stroke", NoneType](snap, path, stroke, self.at(0))
                     external_call["gsk_stroke_free", NoneType](stroke)
                     external_call["gsk_path_unref", NoneType](path)
+            elif kind == OP_POLY:  # (a filled path, non-zero: an ink stroke's outline; GTK's renderer fills it antialiased)
+                var m = Int(sc.num(op, 1))
+                var b = external_call["gsk_path_builder_new", Int]()
+                external_call["gsk_path_builder_move_to", NoneType](b, Float32(sc.poly_x(op, 0)), Float32(sc.poly_y(op, 0)))
+                for z in range(1, m):
+                    external_call["gsk_path_builder_line_to", NoneType](b, Float32(sc.poly_x(op, z)), Float32(sc.poly_y(op, z)))
+                external_call["gsk_path_builder_close", NoneType](b)
+                var path = external_call["gsk_path_builder_free_to_path", Int](b)
+                self.put_rgba(c)
+                external_call["gtk_snapshot_append_fill", NoneType](snap, path, c_int(0), self.at(0))  # GSK_FILL_RULE_WINDING
+                external_call["gsk_path_unref", NoneType](path)
             elif kind == OP_CLIP:
                 self.put_rect(sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3))
                 external_call["gtk_snapshot_push_clip", NoneType](snap, self.at(4))
@@ -3206,10 +3225,23 @@ struct GtkHost[A: App](Movable):
                 self.nodes_built += 1
                 if sc.layer_keys[i] == "cells":
                     self.cells_built += 1
+                if sc.layer_keys[i] == "ink":
+                    self.ink_built += 1
             nodes.append(node)
         var snap = external_call["gtk_snapshot_new", Int]()
-        for n in nodes:
-            if n != 0:
+        for i in range(len(nodes)):
+            var n = nodes[i]
+            if n == 0:
+                continue
+            if sc.moved(i):  # (a pan or a zoom: the kept node, moved and scaled by the renderer; nothing rebuilt)
+                external_call["gtk_snapshot_save", NoneType](snap)
+                self.scratch[26] = Float32(sc.layer_tx[i])
+                self.scratch[27] = Float32(sc.layer_ty[i])
+                external_call["gtk_snapshot_translate", NoneType](snap, self.at(26))
+                external_call["gtk_snapshot_scale", NoneType](snap, Float32(sc.layer_tk[i]), Float32(sc.layer_tk[i]))
+                external_call["gtk_snapshot_append_node", NoneType](snap, n)
+                external_call["gtk_snapshot_restore", NoneType](snap)
+            else:
                 external_call["gtk_snapshot_append_node", NoneType](snap, n)
         self.scratch[24] = Float32(wpx)
         self.scratch[25] = Float32(hpx)
@@ -3763,11 +3795,26 @@ def on_window_realize[A: App](window: Int, host_addr: Int) abi("C"):
         connect3(surface, "notify::scale", on_window_resized[A], host_addr)  # moved to a screen with another scale
 
 
+def pen_pressure(controller: Int, test_pressure: Float64) -> Float64:
+    """The pressure (0–1) of the event a gesture is handling, from GDK_AXIS_PRESSURE; 0 when the device has none (a
+    mouse, a touchpad). A `stroke:` test step sets test_pressure (≥ 0), as a pen would have reported it."""
+    if test_pressure >= 0:
+        return test_pressure
+    var ev = external_call["gtk_event_controller_get_current_event", Int](controller)
+    if ev == 0:
+        return 0
+    var v = List[Float64](length=1, fill=0)
+    if external_call["gdk_event_get_axis", c_int](ev, c_int(5), Int(v.unsafe_ptr())) == 0:  # GDK_AXIS_PRESSURE
+        return 0
+    return min(max(v[0], 0.0), 1.0)
+
+
 def on_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var ci = get_index(drag)
     if ci < 0 or ci >= len(host[].canvases):
         return
+    host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
     host[].canvases[ci].drag_x = 0
     host[].canvases[ci].drag_y = 0
     host[].canvases[ci].start_x = x
@@ -3791,6 +3838,7 @@ def on_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr: In
         return
     if ci < 0 or ci >= len(host[].canvases) or not host[].canvases[ci].moved:
         return  # (a plain tap: the click gesture sends TAP)
+    host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
     host[].canvas_send(ci, RELEASE, host[].canvases[ci].start_x + off_x, host[].canvases[ci].start_y + off_y, 0, 0, 1, host_addr)
 
 
@@ -3803,6 +3851,7 @@ def on_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr:
         return
     var dx = off_x - host[].canvases[ci].drag_x
     var dy = off_y - host[].canvases[ci].drag_y
+    host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
     host[].canvases[ci].drag_x = off_x
     host[].canvases[ci].drag_y = off_y
     if abs(off_x) + abs(off_y) > 3:
@@ -4477,6 +4526,25 @@ def to_int(s: String) -> Int:
         return 0
 
 
+def test_steps(steps: String) -> List[String]:
+    """MOJOUI_TEST split at ";", except that a `stroke:` step keeps its points (x,y,p;x,y,p;…: parts with no ":")."""
+    var out = List[String]()
+    for part in steps.split(";"):
+        var p = String(part)
+        if len(out) > 0 and out[len(out) - 1].startswith("stroke:") and ":" not in p and p != "":
+            out[len(out) - 1] += ";" + p
+        else:
+            out.append(p)
+    return out^
+
+
+def to_float(s: String) -> Float64:
+    try:
+        return atof(s)
+    except:
+        return 0
+
+
 def pump():
     """One turn of the main loop for a test's wait, never sleeping past its caller's deadline: a blocking turn waits
     for the next event, and with nothing scheduled (no timer, no frame asked for, as when the island has settled) that
@@ -5026,7 +5094,7 @@ def run_step[A: App](host_addr: Int, step: String):
                         c_uint(gdk_keyval(p)), c_uint(0), c_uint(state), Int(handled.unsafe_ptr()))
             _ = len(handled)
             settle()
-    elif verb == "drag" or verb == "dragat" or verb == "doubletap" or verb == "zoom" or verb == "frames" or verb == "tapat":
+    elif verb == "drag" or verb == "dragat" or verb == "doubletap" or verb == "zoom" or verb == "frames" or verb == "tapat" or verb == "stroke" or verb == "render":
         var kv = split_at(rest, "=")
         var node = canvas_node(host[], kv[0])
         var ci = -1
@@ -5086,6 +5154,51 @@ def run_step[A: App](host_addr: Int, step: String):
                 while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
                     pump()
                 external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(), dx * Float64(half + 1) / 2, dy * Float64(half + 1) / 2)
+        elif verb == "render":  # render:K=path: canvas K painted by the app's draw() (pixels: the SurfacePainter reference) into a PNG
+            ref cv = host[].canvases[ci]
+            var wpx = cv.wpx if cv.wpx > 0 else Int(external_call["gtk_widget_get_width", c_int](cv.widget))
+            var hpx = cv.hpx if cv.hpx > 0 else Int(external_call["gtk_widget_get_height", c_int](cv.widget))
+            var px = List[UInt32](length=wpx * hpx, fill=0)
+            var surface = Surface(Int(px.unsafe_ptr()), wpx, hpx, cv.scale if cv.scale > 0 else 1.0)
+            surface.still = True
+            var d = host[].rt.draw(node, surface)
+            host[].apply(d, host_addr)
+            var png = encode_png(px, wpx, hpx)
+            try:
+                with open(kv[1], "w") as f:
+                    f.write_bytes(Span(png))
+                print("RENDER: " + kv[0] + " " + String(wpx) + "x" + String(hpx) + " " + kv[1])
+            except:
+                print("TEST: can't write " + kv[1])
+        elif verb == "stroke":  # stroke:K=x,y,p;x,y,p;…: a pen's press, moves and release (canvas points), each carrying its pressure
+            var pts = List[Tuple[Float64, Float64, Float64]]()
+            for part in kv[1].split(";"):
+                var a = split_at(String(part), ",")
+                var b = split_at(a[1], ",")
+                pts.append((to_float(a[0]), to_float(b[0]), to_float(b[1])))
+            if len(pts) == 0:
+                print("TEST: an empty stroke")
+                return
+            var begin = String("drag-begin")
+            var update = String("drag-update")
+            var end = String("drag-end")
+            ref cv = host[].canvases[ci]
+            cv.test_pressure = pts[0][2]
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](cv.drag, begin.as_c_string_span(), pts[0][0], pts[0][1])
+            for k in range(1, len(pts)):
+                var free_by = perf_counter_ns() + 3_000_000_000  # (as drag: a move sent mid-rebuild is dropped, D-304)
+                while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
+                    pump()
+                host[].canvases[ci].test_pressure = pts[k][2]
+                external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(),
+                    pts[k][0] - pts[0][0], pts[k][1] - pts[0][1])
+            var free_by = perf_counter_ns() + 3_000_000_000
+            while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
+                pump()
+            var last = pts[len(pts) - 1]
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, end.as_c_string_span(),
+                last[0] - pts[0][0], last[1] - pts[0][1])
+            host[].canvases[ci].test_pressure = -1
         elif verb == "zoom":  # the scroll controller's signal: 4 notches up = 2×
             var factor = Float64(to_int(kv[1]))
             var handled = List[c_int](length=1, fill=0)
@@ -5572,9 +5685,9 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         settle()
     if testing:
         wait_webviews[A](host_addr)
-        for step in steps.split(";"):
-            if String(step) != "":
-                run_step[A](host_addr, String(step))
+        for step in test_steps(steps):
+            if step != "":
+                run_step[A](host_addr, step)
             settle()
             if shot != "":
                 wait_frame(host[].window)

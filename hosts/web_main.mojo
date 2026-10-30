@@ -25,7 +25,7 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[theme_key]("theme_key", docstring="The app's theme's key: the page restyles when it changes.")
         m.def_function[logo]("logo", docstring="The app's mark as SVG ('': none).")
         m.def_function[draw]("draw", docstring="Paint a canvas (node, width, height, scale, still: no motion); JSON with the pixels' address and what changed.")
-        m.def_function[gesture]("gesture", docstring="A canvas gesture (node, kind, x, y, dx, dy, zoom); returns what changed as JSON.")
+        m.def_function[gesture]("gesture", docstring="A canvas gesture (node, kind, x, y, dx, dy, zoom, pressure); returns what changed as JSON.")
         m.def_function[key]("key", docstring="A key on a focused canvas (node, name, modifiers); returns what changed as JSON.")
         m.def_function[cancel]("cancel", docstring="Escape in a field (node, text); returns what changed as JSON.")
         m.def_function[describe]("describe", docstring="A canvas's content as text for an agent (node, first, count); '' when it offers none.")
@@ -92,8 +92,10 @@ def resize(handle: PythonObject, width: PythonObject, height: PythonObject) rais
     return PythonObject(web_resize[Main](Int(py=handle), Int(py=width), Int(py=height)))
 
 
-def gesture(handle: PythonObject, node: PythonObject, kind: PythonObject, x: PythonObject, y: PythonObject, dx: PythonObject, dy: PythonObject, zoom: PythonObject) raises -> PythonObject:
-    return PythonObject(web_gesture[Main](Int(py=handle), Int(py=node), Int(py=kind), Float64(py=x), Float64(py=y), Float64(py=dx), Float64(py=dy), Float64(py=zoom)))
+def gesture(handle: PythonObject, node: PythonObject, kind: PythonObject, x: PythonObject, y: PythonObject, dx: PythonObject, dy: PythonObject, zoom: PythonObject,
+            pressure: PythonObject) raises -> PythonObject:
+    return PythonObject(web_gesture[Main](Int(py=handle), Int(py=node), Int(py=kind), Float64(py=x), Float64(py=y), Float64(py=dx), Float64(py=dy), Float64(py=zoom),
+                                          Float64(py=pressure)))
 
 
 def key(handle: PythonObject, node: PythonObject, name: PythonObject, modifiers: PythonObject) raises -> PythonObject:

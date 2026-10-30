@@ -19,7 +19,8 @@ struct Event(Copyable, Movable):
     Toggle: `number` = 1 or 0. Dropdown: `number` = index, `text` = option.
     Slider: `number` = 0–100.
     Canvas gestures: `number` = PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE or KEY (`text` = the key); `x`, `y` = pointer position in the canvas
-    (points from its top-left); PAN: `dx`, `dy` = movement in points; ZOOM: `zoom` = scale factor.
+    (points from its top-left); PAN: `dx`, `dy` = movement in points; ZOOM: `zoom` = scale factor; PRESS, PAN, RELEASE:
+    `pressure` = the pen's pressure, 0–1 (0: the device has none: a mouse, a finger; mojoui.ink then takes one from speed).
     Canvas frames: `number` = microseconds since the previous frame.
     HTTP replies (mojoui.http): `message` = the request's msg, `id` = its id, `number` = the status (0: no reply),
     `text` = the body, `error` = why there's no reply ("" when there is one, a 500 too).
@@ -43,11 +44,12 @@ struct Event(Copyable, Movable):
     var id: Int
     var error: String
     var name: String
+    var pressure: Float64
 
     def __init__(
         out self, message: Int, text: String, number: Int,
         x: Float64 = 0, y: Float64 = 0, dx: Float64 = 0, dy: Float64 = 0, zoom: Float64 = 1,
-        id: Int = 0, error: String = "", name: String = "",
+        id: Int = 0, error: String = "", name: String = "", pressure: Float64 = 0,
     ):
         self.message = message
         self.text = text
@@ -60,6 +62,7 @@ struct Event(Copyable, Movable):
         self.id = id
         self.error = error
         self.name = name
+        self.pressure = pressure
 
 
 trait App(Movable, Deinitable):
@@ -467,9 +470,9 @@ struct Runtime[A: App](Movable):
         self.app.draw(self.shown.nodes[node].style, surface)
         return self.refresh()
 
-    def gesture(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64) -> Diff:
-        """A gesture on canvas node `node` (PAN, ZOOM or TAP); on a Board node, a child moved
-        (PAN: x = the child's index, dx/dy = how far) or resized (ZOOM: the same fields)."""
+    def gesture(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, pressure: Float64 = 0) -> Diff:
+        """A gesture on canvas node `node` (PAN, ZOOM or TAP; PRESS, PAN and RELEASE carry the pen's pressure, 0: none);
+        on a Board node, a child moved (PAN: x = the child's index, dx/dy = how far) or resized (ZOOM: the same fields)."""
         if node < 0 or node >= len(self.shown.nodes):
             return Diff(False, [])
         ref n = self.shown.nodes[node]
@@ -480,7 +483,7 @@ struct Runtime[A: App](Movable):
             return self.dispatch(Event(msg, "", Int(x), x, y, dx, dy, zoom))
         if n.kind != CANVAS or n.msg == 0:
             return Diff(False, [])
-        return self.dispatch(Event(n.msg, "", kind, x, y, dx, dy, zoom))
+        return self.dispatch(Event(n.msg, "", kind, x, y, dx, dy, zoom, pressure=pressure))
 
     def key(mut self, node: Int, name: String, modifiers: Int) -> Diff:
         """A key pressed while canvas node `node` had focus: its gesture message with number = KEY,

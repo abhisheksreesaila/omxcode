@@ -10,7 +10,7 @@
 #
 # Coordinates are whatever the caller draws in (an app's world space); widths are in the same units.
 
-from std.math import sqrt, cos, sin, atan2, ceil
+from std.math import sqrt, cos, sin, ceil
 
 from mojoui.scene import Painter
 
@@ -168,19 +168,23 @@ struct Stroke(Copyable, Movable):
         for k in range(m):
             out.append(cx[k] + nx[k] * r[k])
             out.append(cy[k] + ny[k] * r[k])
-        var ae = atan2(ny[m - 1], nx[m - 1])  # the round end: from the left edge, through the travel direction, to the right
+        # the round end: the normal turned from the left edge, through the travel direction, to the right edge (the
+        # travel direction is (ny, -nx); turning by rotation, not atan2, which the Mac's libSystem stub doesn't list)
         for s in range(1, CAP_STEPS):
-            var a = ae - PI * Float64(s) / Float64(CAP_STEPS)
-            out.append(cx[m - 1] + r[m - 1] * cos(a))
-            out.append(cy[m - 1] + r[m - 1] * sin(a))
+            var a = PI * Float64(s) / Float64(CAP_STEPS)
+            var ex = nx[m - 1] * cos(a) + ny[m - 1] * sin(a)
+            var ey = ny[m - 1] * cos(a) - nx[m - 1] * sin(a)
+            out.append(cx[m - 1] + r[m - 1] * ex)
+            out.append(cy[m - 1] + r[m - 1] * ey)
         for k in range(m - 1, -1, -1):
             out.append(cx[k] - nx[k] * r[k])
             out.append(cy[k] - ny[k] * r[k])
-        var a0 = atan2(ny[0], nx[0]) + PI  # the round start: from the right edge, through behind, to the left
-        for s in range(1, CAP_STEPS):
-            var a = a0 - PI * Float64(s) / Float64(CAP_STEPS)
-            out.append(cx[0] + r[0] * cos(a))
-            out.append(cy[0] + r[0] * sin(a))
+        for s in range(1, CAP_STEPS):  # the round start: from the right edge, through behind, to the left
+            var a = PI * Float64(s) / Float64(CAP_STEPS)
+            var ex = -nx[0] * cos(a) - ny[0] * sin(a)
+            var ey = -ny[0] * cos(a) + nx[0] * sin(a)
+            out.append(cx[0] + r[0] * ex)
+            out.append(cy[0] + r[0] * ey)
         return out^
 
     def seal(mut self):

@@ -438,7 +438,7 @@ class Host:
     def send_gesture(self, i, kind, x, y, dx, dy, zoom):
         if self.link is not None:
             return self.link.ok({"op": "gesture", "node": i, "kind": kind, "x": x, "y": y, "dx": dx, "dy": dy, "zoom": zoom})
-        return self.mod.gesture(self.handle, i, kind, x, y, dx, dy, zoom)
+        return self.mod.gesture(self.handle, i, kind, x, y, dx, dy, zoom, 0)
 
     def send_key(self, i, name, mods):
         if self.link is not None:

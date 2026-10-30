@@ -533,11 +533,13 @@ CANVAS_JS = r"""
     }
     st.pump = pump;
     st.sendKey = (k, m) => send(KEY, 0, 0, m, 0, 1, k);
-    function send(kind, x, y, dx, dy, zoom, text = '') {
+    // pressure: PointerEvent.pressure on PRESS, PAN and RELEASE, from a pen only (0: the device has none; a mouse
+    // reports 0.5 while pressed, which isn't a pressure; goal 40)
+    function send(kind, x, y, dx, dy, zoom, text = '', pressure = 0) {
       const q = events.queue, last = q[q.length - 1], same = last && last.n === n && last.number === kind;
-      if (same && kind === PAN) { last.dx += dx; last.dy += dy; last.x = x; last.y = y; }
+      if (same && kind === PAN) { last.dx += dx; last.dy += dy; last.x = x; last.y = y; last.pressure = pressure; }
       else if (same && kind === ZOOM) { last.zoom *= zoom; }
-      else q.push({ n, sid, number: kind, x, y, dx, dy, zoom, text });
+      else q.push({ n, sid, number: kind, x, y, dx, dy, zoom, text, pressure });
       flushEvents();
     }
     const pointers = new Map();
@@ -560,11 +562,12 @@ CANVAS_JS = r"""
     }
     cv.addEventListener('contextmenu', e => { e.preventDefault(); const [x, y] = at(e); send(SECONDARY, x, y, 0, 0, 1); });
     const mods = e => (e.shiftKey ? 1 : 0) + (e.ctrlKey || e.metaKey ? 2 : 0) + (e.altKey ? 4 : 0);  // SHIFT, CTRL, ALT (mojoui.view)
+    const pen = e => e.pointerType === 'pen' ? (e.pressure || 0) : 0;
     cv.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;  // a right click opens a context menu (contextmenu), it doesn't press
       if (keys) cv.focus({ preventScroll: true });
       cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId, at(e));
-      if (pointers.size === 1) { moved = false; const [x, y] = at(e); send(PRESS, x, y, mods(e), 0, 1); window.mojouiDrag = { n, id: e.pointerId, x, y, moved: false }; }  // where a drag (or tap) starts (dx: Shift, Ctrl, Alt held)
+      if (pointers.size === 1) { moved = false; const [x, y] = at(e); send(PRESS, x, y, mods(e), 0, 1, '', pen(e)); window.mojouiDrag = { n, id: e.pointerId, x, y, moved: false }; }  // where a drag (or tap) starts (dx: Shift, Ctrl, Alt held)
       if (pointers.size === 2) spread = distance();
     });
     cv.addEventListener('pointermove', e => {
@@ -573,7 +576,7 @@ CANVAS_JS = r"""
       pointers.set(e.pointerId, [x, y]);
       if (pointers.size === 1) {
         e.mojouiHandled = true;
-        if (Math.abs(x - px) + Math.abs(y - py) > 0) { if (Math.abs(x - px) + Math.abs(y - py) > 3) moved = true; send(PAN, x, y, x - px, y - py, 1); }
+        if (Math.abs(x - px) + Math.abs(y - py) > 0) { if (Math.abs(x - px) + Math.abs(y - py) > 3) moved = true; send(PAN, x, y, x - px, y - py, 1, '', pen(e)); }
         const d = window.mojouiDrag; if (d && d.id === e.pointerId) { d.x = x; d.y = y; d.moved = moved; }
       } else if (pointers.size === 2) {
         const d = distance(), [a, b] = [...pointers.values()];
@@ -590,7 +593,7 @@ CANVAS_JS = r"""
       // a second click within the double-click time is the DOUBLE that 'dblclick' sends, not another TAP (as on GTK)
       const now = performance.now(), second = st.lastTap && now - st.lastTap.t < 500 && Math.abs(x - st.lastTap.x) + Math.abs(y - st.lastTap.y) < 6;
       if (pointers.size === 0 && !moved && e.type === 'pointerup') { if (second) st.lastTap = null; else { st.lastTap = { t: now, x, y }; send(TAP, x, y, mods(e), 0, 1); } }
-      else if (pointers.size === 0 && moved) send(RELEASE, x, y, 0, 0, 1);  // a drag ended
+      else if (pointers.size === 0 && moved) send(RELEASE, x, y, 0, 0, 1, '', pen(e));  // a drag ended
     };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
     st.drag = (e, what) => {  // the rest of a drag that began on the canvas this one replaced (window.mojouiDrag)
@@ -1640,7 +1643,7 @@ def make_app(module_dir):
 
     @app.post("/e/{sid}")
     def event(sid: str, n: int, v: int = -1, second: int = 0, text: str = "", number: int = 0, on: str = "",
-              x: float = 0, y: float = 0, dx: float = 0, dy: float = 0, zoom: float = 1, route: int = 0):
+              x: float = 0, y: float = 0, dx: float = 0, dy: float = 0, zoom: float = 1, route: int = 0, pressure: float = 0):
         if EVENT_DELAY:  # (checks only: a slow network, so keys typed meanwhile really wait for the answer)
             time.sleep(EVENT_DELAY)
         s = sessions.get(sid)
@@ -1670,7 +1673,7 @@ def make_app(module_dir):
             elif source["kind"] == FIELD and second == 2:  # Escape (on_cancel)
                 d = json.loads(mod.cancel(s.handle, n, text))
             elif source["kind"] in (CANVAS, BOARD):
-                d = json.loads(mod.gesture(s.handle, n, number, x, y, dx, dy, zoom))
+                d = json.loads(mod.gesture(s.handle, n, number, x, y, dx, dy, zoom, pressure))
             else:
                 d = json.loads(mod.event(s.handle, n, second, text, number))
             if d.get("ignored"):
@@ -1857,7 +1860,7 @@ def make_app(module_dir):
                 d = json.loads(mod.event(h, n, int(op.get("second", 0)), str(op.get("text", "")), int(op.get("number", 0))))
             elif what == "gesture":
                 d = json.loads(mod.gesture(h, n, int(op.get("kind", 3)), float(op.get("x", 0)), float(op.get("y", 0)), float(op.get("dx", 0)),
-                                           float(op.get("dy", 0)), float(op.get("zoom", 1))))
+                                           float(op.get("dy", 0)), float(op.get("zoom", 1)), float(op.get("pressure", 0))))
             elif what == "key":
                 d = json.loads(mod.key(h, n, str(op.get("name", "")), int(op.get("modifiers", 0))))
             else:
