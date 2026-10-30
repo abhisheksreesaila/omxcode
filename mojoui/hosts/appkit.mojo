@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
-    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
+    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY, WHEEL,
     START, CENTER, END, STRETCH, BETWEEN, Node, NO_MSG,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
@@ -2772,7 +2772,7 @@ struct AppKitHost[A: App](Movable):
 
     def canvas_send(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, self_addr: Int,
                     pressure: Float64 = 0):
-        if self.report.on and kind != PAN and kind != ZOOM:
+        if self.report.on and kind != PAN and kind != ZOOM and kind != WHEEL:
             self.report.cause = "canvas " + gesture_name(kind)
             self.report.note("event: canvas node " + String(node) + " " + gesture_name(kind) + " at " + pts(x) + ", " + pts(y))
         var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
@@ -3018,6 +3018,7 @@ def gesture_name(kind: Int) -> String:
     if kind == RELEASE: return "release"
     if kind == SECONDARY: return "right-click"
     if kind == KEY: return "key"
+    if kind == WHEEL: return "wheel"
     return "gesture" + String(kind)
 
 
@@ -3293,12 +3294,20 @@ def on_canvas_tap[A: App](view: Int, cmd: Int, recognizer: Int) abi("C"):
 
 
 def on_canvas_scroll[A: App](view: Int, cmd: Int, event: Int) abi("C"):
-    """Mouse wheel (4 notches = 2×) or trackpad scroll (pixels): zoom around the pointer."""
+    """Mouse wheel (4 notches = 2×) or trackpad scroll (pixels): zoom around the pointer. On a Canvas(scroll_pans=True)
+    a plain scroll pans (WHEEL: AppKit's scrolling deltas already say how the content moves; a line = 40 points) and
+    Command/Control+scroll zooms (built, not run: goal 40)."""
     var t = from_tag(view)
     var dy = msg[Float64](event, "scrollingDeltaY")
     var precise = (msg(event, "hasPreciseScrollingDeltas") & 0xFF) != 0
     var window_point = msg[CGPoint](event, "locationInWindow")
     var at = in_view(view, msg[CGPoint](view, "convertPoint:fromView:", window_point.x, window_point.y, 0))
+    var host = host_at[A](t[0])
+    var flags = msg(event, "modifierFlags")
+    if t[1] < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[t[1]].spacing == 1 and flags & (MASK_COMMAND | (1 << 18)) == 0:
+        var step = 1.0 if precise else 40.0
+        host[].canvas_send(t[1], WHEEL, at.x, at.y, msg[Float64](event, "scrollingDeltaX") * step, dy * step, 1, t[0])
+        return
     var notches = dy / 100.0 * 4.0 if precise else dy
     host_at[A](t[0])[].canvas_send(t[1], ZOOM, at.x, at.y, 0, 0, 2.0 ** (notches / 4.0), t[0])
 

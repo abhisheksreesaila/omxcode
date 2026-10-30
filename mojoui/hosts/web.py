@@ -396,7 +396,7 @@ CANVAS_JS = r"""
 // its version or size changes. Gestures: drag = PAN, wheel/pinch = ZOOM, click = TAP,
 // sent through htmx like any other event, so the rest of the page updates as usual.
 (() => {
-  const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8;
+  const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8, WHEEL = 9;
   const shape = () => document.getElementById('mojoui-v').value;
   // the theme a canvas was drawn in (skin()'s classes and tokens): a drawn view paints from the theme, so a switch
   // (light/dark, a skin) redraws it even when its version didn't move (D-673)
@@ -537,7 +537,7 @@ CANVAS_JS = r"""
     // reports 0.5 while pressed, which isn't a pressure; goal 40)
     function send(kind, x, y, dx, dy, zoom, text = '', pressure = 0) {
       const q = events.queue, last = q[q.length - 1], same = last && last.n === n && last.number === kind;
-      if (same && kind === PAN) { last.dx += dx; last.dy += dy; last.x = x; last.y = y; last.pressure = pressure; }
+      if (same && (kind === PAN || kind === WHEEL)) { last.dx += dx; last.dy += dy; last.x = x; last.y = y; last.pressure = pressure; }
       else if (same && kind === ZOOM) { last.zoom *= zoom; }
       else q.push({ n, sid, number: kind, x, y, dx, dy, zoom, text, pressure });
       flushEvents();
@@ -610,7 +610,10 @@ CANVAS_JS = r"""
     cv.addEventListener('dblclick', e => { const [x, y] = at(e); send(DOUBLE, x, y, 0, 0, 1); });
     cv.addEventListener('wheel', e => {
       e.preventDefault();
-      const [x, y] = at(e), dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
+      const [x, y] = at(e), line = e.deltaMode === 1 ? 40 : 1, dy = e.deltaY * line;
+      // Canvas(scroll_pans=True): a plain scroll pans (WHEEL, how far the content moves); ctrl+scroll, and a
+      // trackpad pinch (the browser sends it as a wheel with ctrlKey), zoom
+      if (div.dataset.scroll === 'pan' && !e.ctrlKey) { send(WHEEL, x, y, -e.deltaX * line, -dy, 1); return; }
       send(ZOOM, x, y, 0, 0, Math.pow(2, -dy / 400));  // 4 notches of 100 = 2×
     }, { passive: false });
     new ResizeObserver(() => { st.want = true; pump(); }).observe(div);
@@ -1255,7 +1258,7 @@ def render_node(s, i, sid):
         sized_h = n["h"] or (n["height_from_parent"] if "height_from_parent" in n else n["grows"] or n["fills"])
         own = ";".join(([] if sized_w else ["width:320px"]) + ([] if sized_h else ["height:240px"]))
         return Div(Canvas(), canvas_meta(n, i), id=nid, cls="canvas", data_kind="canvas", data_node=str(i), data_sid=sid,
-                   data_keys="1" if n["size"] == 1 else None, style=own or None)
+                   data_keys="1" if n["size"] == 1 else None, data_scroll="pan" if n["spacing"] == 1 else None, style=own or None)
     if kind == DIVIDER:
         return Hr(id=nid)
     if kind == SPACER:

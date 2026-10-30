@@ -3,20 +3,23 @@
 # mojoui.ink.Stroke, the picture is a mojoui.scene Painter, and pan/zoom is the ink layer's transform (D-1202), so a
 # pan redraws nothing: the host moves the kept layer.
 #
-# Drawing: drag with the pen (a pen's pressure, or speed with a mouse). Eraser: drag over strokes. Pan: the Pan tool,
-# or press space then drag. Zoom: pinch, or the wheel (ctrl-scroll), around the pointer. Keys: p pen, e eraser,
+# Drawing: drag with the pen (a pen's pressure, or speed with a mouse). Eraser: drag over strokes. Pan: scroll (the
+# wheel, two fingers on a touchpad), the Pan tool, or press space then drag. Zoom: pinch, or ctrl+scroll, around the
+# pointer (the canvas asks for scroll_pans: the host sends WHEEL for a plain scroll and ZOOM for the others). Keys: p pen, e eraser,
 # h pan, ctrl+z undo, Delete clears.
 #
 # For checks it prints `SKETCH: tool=… strokes=… points=… zoom=… pan=…` on every change, `SKETCH PRESSURE: p` for
 # each pen point, and `SKETCH CANVAS: x,y,w,h` (the canvas in the window, pixels) once it knows.
 #
 # SKETCH_STROKES=N starts with N seeded strokes of 101 points each (scripts/sketch_bench.py: 1,000 → 101,000 points).
+# SKETCH_SCENE=gallery starts with the gallery's page: "omxcode" lettered in pressure strokes, tapered waves in each
+# ink, a pressure ramp and a doodle, every stroke made of points and pressures as a pen would send them.
 #
 #   scripts/build.sh sketch linux && build/sketch/linux/sketch
 
 from mojoui import (
     App, Event, View, Surface, VStack, HStack, Text, Button, Canvas, Spacer, Divider,
-    CAPTION, CENTER, PAN, ZOOM, TAP, PRESS, RELEASE, KEY, CTRL, PLAIN, PROMINENT, SUBTLE,
+    CAPTION, CENTER, PAN, ZOOM, TAP, WHEEL, PRESS, RELEASE, KEY, CTRL, PLAIN, PROMINENT, SUBTLE,
 )
 from mojoui.canvas import rgba
 from mojoui.maths import cos, sin
@@ -85,6 +88,122 @@ def seeded(n: Int) -> List[Stroke]:
     return out^
 
 
+def taper(t: Float64) -> Float64:
+    """A pen's pressure along a stroke, t from 0 to 1: light at both ends, full in the middle (thin → thick → thin)."""
+    var a = sin(t * 3.14159265)
+    return 0.05 + 0.95 * a * a
+
+
+def curve(mut out: List[Stroke], pts: List[Float64], width: Float64, color: UInt32, steps: Int = 6):
+    """One stroke through the corners in pts (x, y interleaved), each leg cut into `steps` points, tapered along all of it."""
+    var n = len(pts) // 2
+    var total = (n - 1) * steps
+    var st = Stroke(width, color)
+    for k in range(total + 1):
+        var leg = min(k // steps, n - 2)
+        var f = Float64(k - leg * steps) / Float64(steps)
+        var x = pts[2 * leg] + (pts[2 * leg + 2] - pts[2 * leg]) * f
+        var y = pts[2 * leg + 1] + (pts[2 * leg + 3] - pts[2 * leg + 1]) * f
+        st.add(x, y, taper(Float64(k) / Float64(total)))
+    st.seal()
+    out.append(st^)
+
+
+def arc(mut out: List[Stroke], cx: Float64, cy: Float64, rx: Float64, ry: Float64, a0: Float64, a1: Float64, width: Float64,
+        color: UInt32, lead: List[Float64] = [], tail: List[Float64] = []):
+    """One stroke: the points in lead, an elliptic arc from angle a0 to a1 (radians, y down), the points in tail."""
+    var pts = lead.copy()
+    var n = max(Int(abs(a1 - a0) * 8), 8)
+    for k in range(n + 1):
+        var a = a0 + (a1 - a0) * Float64(k) / Float64(n)
+        pts.append(cx + rx * cos(a))
+        pts.append(cy + ry * sin(a))
+    for v in tail:
+        pts.append(v)
+    curve(out, pts, width, color, 3)
+
+
+def gallery() -> List[Stroke]:
+    """The gallery's page: what the framework draws, on purpose."""
+    var out = List[Stroke]()
+    var c = inks()
+    var ink = c[0]
+    var blue = c[1]
+    var red = c[2]
+    var w = 13.0
+    var top = 70.0  # the word's x-height runs from top to base
+    var base = 170.0
+    var mid = (top + base) / 2
+    var r = (base - top) / 2
+    var pi = 3.14159265
+    # o
+    arc(out, 115, mid, 38, r, -pi * 0.6, pi * 1.45, w, ink)
+    # m: a stem, two arches
+    var m0 = 175.0
+    var lead: List[Float64] = [m0, base, m0, top + 40]
+    var mid_leg: List[Float64] = [m0 + 44, base]
+    arc(out, m0 + 22, top + 26, 22, 26, pi, 2 * pi, w, ink, lead, mid_leg)
+    var lead2: List[Float64] = [m0 + 44, top + 40]
+    var end_leg: List[Float64] = [m0 + 88, base]
+    arc(out, m0 + 66, top + 26, 22, 26, pi, 2 * pi, w, ink, lead2, end_leg)
+    # x
+    var x0 = 290.0
+    var d1: List[Float64] = [x0, top, x0 + 36, mid, x0 + 72, base]
+    curve(out, d1, w, ink)
+    var d2: List[Float64] = [x0 + 72, top, x0 + 36, mid, x0, base]
+    curve(out, d2, w, ink)
+    # c, o, d, e in blue
+    arc(out, 425, mid, 36, r, -pi * 0.25, -pi * 1.75, w, blue)
+    arc(out, 515, mid, 38, r, -pi * 0.6, pi * 1.45, w, blue)
+    arc(out, 605, mid, 36, r, -pi * 0.5, pi * 1.5, w, blue)
+    var stem: List[Float64] = [645, top - 32, 645, base]
+    curve(out, stem, w, blue)
+    var bar: List[Float64] = [662, mid + 4, 735, mid + 4]
+    arc(out, 698, mid, 37, r, 0, -pi * 1.75, w, blue, bar)
+    # an underline swash in red
+    var swash = List[Float64]()
+    for k in range(25):
+        var t = Float64(k) / 24
+        swash.append(70 + 700 * t)
+        swash.append(base + 42 - 18 * sin(t * pi) + 6 * sin(t * 2 * pi))
+    curve(out, swash, 18, red, 2)
+    # three waves, one per ink: each thin → thick → thin
+    for k in range(3):
+        var wave = List[Float64]()
+        for z in range(31):
+            var t = Float64(z) / 30
+            wave.append(70 + 520 * t)
+            wave.append(320 + 70 * Float64(k) + 22 * sin(t * 2.4 * pi))
+        curve(out, wave, 16, c[k], 2)
+    # the pressure ramp: ten dashes, each at one pressure (0.1 to 1.0)
+    for k in range(10):
+        var st = Stroke(16, ink)
+        var p = 0.1 * Float64(k + 1)
+        for z in range(6):
+            st.add(70 + 52 * Float64(k) + 6 * Float64(z), 560, p)
+        st.seal()
+        out.append(st^)
+    # a doodle: a spiral and a flower
+    var spiral = List[Float64]()
+    for z in range(60):
+        var a = Float64(z) * 0.3
+        spiral.append(760 + (4 + 3.2 * a) * cos(a))
+        spiral.append(380 + (4 + 3.2 * a) * sin(a))
+    curve(out, spiral, 9, blue, 2)
+    for k in range(6):  # (each petal a loop out from the middle and back)
+        var a = Float64(k) * pi / 3
+        var petal = List[Float64]()
+        for z in range(17):
+            var t = Float64(z) / 16 * 2 * pi
+            var along = 38 - 24 * cos(t)  # (14 to 62 from the middle)
+            var across = 13 * sin(t)
+            petal.append(760 + along * cos(a) - across * sin(a))
+            petal.append(540 + along * sin(a) + across * cos(a))
+        curve(out, petal, 7, red, 2)
+    arc(out, 760, 540, 9, 9, 0, 2 * pi, 8, ink)
+    return out^
+
+
 struct Action(Copyable, Movable):
     var kind: Int
     var strokes: List[Stroke]  # what an erase or a clear took away
@@ -138,6 +257,9 @@ struct Main(App):
             n = 0
         if n > 0:
             self.strokes = seeded(n)
+            self.changed_ink()
+        if environment("SKETCH_SCENE", "") == "gallery":
+            self.strokes = gallery()
             self.changed_ink()
 
     def title(self) -> String:
@@ -251,6 +373,11 @@ struct Main(App):
         if kind == ZOOM:
             self.zoom_at(e.x, e.y, e.zoom)
             return
+        if kind == WHEEL:  # (a scroll: the page moves with the fingers, whatever the tool)
+            self.pan_x += e.dx
+            self.pan_y += e.dy
+            self.version += 1
+            return
         if kind == PRESS:
             self.panning = self.tool == HAND or self.space
             self.space = False
@@ -316,7 +443,7 @@ struct Main(App):
         bar.append(Button("Clear", CLEAR, PLAIN))
         return VStack(
             HStack(bar^, spacing=6).fill().align(CENTER).padding(6, 12).tag("toolbar"),
-            Canvas(0, self.version, on_gesture=GESTURE, keys=True).grow().fill().tag("sketch"),
+            Canvas(0, self.version, on_gesture=GESTURE, keys=True, scroll_pans=True).grow().fill().tag("sketch"),
             spacing=0,
         ).grow().fill()
 

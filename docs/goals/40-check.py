@@ -2,6 +2,7 @@
 
 Run: pixi run python docs/goals/40-check.py        (a subset: … 40-check.py M0 M3)
 Written before the work (2026-10-30), from the goal's words; never edited to make a milestone pass (add, don't weaken).
+Review round 1 added proofs to M3 (D-1222): a far-off pixel count and a second session; the original proofs stand.
 GTK runs are headless (scripts/headless.py, as scripts/check does).
 """
 
@@ -28,6 +29,53 @@ SESSION = [
     ("drag:0=-60,-40", "pan="),  # (checked below: not pan=0,0)
 ]
 PRESSURES = [0.2, 0.5, 0.9, 1.0]
+
+# Added after review round 1 (D-1222; the proofs above are unchanged): a second session where the strokes' layer is a
+# texture before strokes are added to it and erased from it (the host's append and mend paths, D-1219, D-1220), and a
+# plain scroll pans (the goal's "two-finger scroll"; GTK's `wheel:` step sends wheel notches, no modifier) while the
+# zoom stays. Stroke A runs along page y = 100; after the drag the page sits at (30, 20), so the eraser crosses A at
+# screen x = 230; the second stroke crosses A's box near page x = 282, where the mended pixels must still show it.
+# Two notches down move the page up 80 points.
+SESSION2 = [
+    ("stroke:0=100,100,0.5;200,100,0.7;300,100,0.5", "strokes=1"),
+    ("tap:Pan", "tool=pan"),
+    ("drag:0=30,20", "pan=30,20"),
+    ("tap:Pen", "tool=pen"),
+    ("stroke:0=310,60,0.2;315,120,1.0;310,180,0.2", "strokes=2"),  # (crosses A's box: erasing A mends around it)
+    ("stroke:0=420,150,0.9;440,250,0.5;460,350,0.1", "strokes=3"),
+    ("tap:Eraser", "tool=eraser"),
+    ("stroke:0=230,105,0.5;230,120,0.5;230,135,0.5", "strokes=2"),
+    ("wheel:0=0,2", "pan=30,-60"),
+]
+MAX_OFF_PIXELS = 10  # canvas pixels more than 40 levels off the CPU render (runs give 0; a stroke missing where an
+# erase was mended is ~40, a missing short stroke hundreds)
+
+
+def compare(out, shot, ref_path):
+    """(mean difference, pixels > 40 levels off, why not) of the window's canvas against the CPU render."""
+    import numpy as np
+    from PIL import Image
+    box = next((l for l in out.splitlines() if l.startswith("SKETCH CANVAS:")), None)
+    if not box or not shot.exists() or not ref_path.exists():
+        return None, None, "no SKETCH CANVAS: line, screenshot or reference"
+    x, y, w, h = (int(v) for v in box.split(":", 1)[1].split(","))
+    ref = np.asarray(Image.open(ref_path).convert("L"), dtype=float)
+    win = np.asarray(Image.open(shot).convert("L"), dtype=float)
+    if ref.shape != (h, w) or ref.std() < 2:
+        return None, None, f"reference {ref.shape[::-1]} vs canvas {w}×{h}, or blank"
+    d = abs(win[y:y + h, x:x + w] - ref)
+    return d.mean(), int((d > 40).sum()), ""
+
+
+def in_order(out, session):
+    reports = [l for l in out.splitlines() if l.startswith("SKETCH:")]
+    at = 0
+    for step, want in session:
+        while at < len(reports) and want not in reports[at]:
+            at += 1
+        if at == len(reports):
+            return reports, f"after {step}: no SKETCH: line with {want!r} (lines: {reports[-4:]})"
+    return reports, ""
 
 
 def run(cmd, timeout=3600, env=None):
@@ -128,7 +176,23 @@ def m3():
     diff = abs(win[y:y + h, x:x + w] - ref).mean()
     if diff > 8:
         return False, f"GTK's canvas differs from the CPU render by {diff:.1f} levels (≤ 8)"
-    return True, f"{len(SESSION)} steps as expected ({reports[-1]}); GTK vs CPU {diff:.1f} levels; web and mac built"
+    # Added proofs (D-1222): one missing stroke barely moves a mean, so count the pixels far off too; then SESSION2.
+    _, off, why = compare(out, shot, OUT / "sketch-ref.png")
+    if why or off > MAX_OFF_PIXELS:
+        return False, why or f"{off} canvas pixels differ by > 40 levels (≤ {MAX_OFF_PIXELS})"
+    shot2 = OUT / "sketch-gtk-2.png"
+    ref2 = OUT / "sketch-ref-2.png"
+    code2, out2 = gtk_session(["pause:500"] + [s for s, _ in SESSION2] + ["render:0=" + str(ref2)], shot2)
+    reports2, why = in_order(out2, SESSION2)
+    if code2 != 0 or why:
+        return False, f"session 2: exit {code2}; {why}"
+    if "zoom=1.00" not in reports2[-1] or "strokes=2" not in reports2[-1]:
+        return False, f"session 2's final state is wrong: {reports2[-1]!r} (a scroll must pan, not zoom)"
+    diff2, off2, why = compare(out2, shot2, ref2)
+    if why or diff2 > 8 or off2 > MAX_OFF_PIXELS:
+        return False, why or f"session 2: GTK vs CPU {diff2:.1f} levels (≤ 8), {off2} pixels > 40 off (≤ {MAX_OFF_PIXELS})"
+    return True, (f"{len(SESSION)} steps as expected ({reports[-1]}); GTK vs CPU {diff:.1f} levels, {off} pixels > 40 off; "
+                  f"session 2 (texture, append, erase, scroll pans): {reports2[-1]}, {diff2:.1f} levels, {off2} pixels; web and mac built")
 
 
 def m4():

@@ -1,6 +1,7 @@
 # Filled paths and layer transforms in the Scene (goal 40 M1): the CPU painter fills a polygon antialiased; a Scene
 # records it as its own op and replays it into the same pixels as painting directly; a layer drawn once and shown
-# moved and scaled (layer_transform) equals drawing it there.
+# moved and scaled (layer_transform) equals drawing it there; a layer that only gained ops at its end says so (appends:
+# a host adds the new ops to what it kept, D-1219).
 #   pixi run mojo run -I . tests/test_scene_polygon.mojo
 from std.testing import assert_true, assert_equal
 
@@ -158,7 +159,54 @@ def test_layer_transform() raises:
     print("layer transform: ok")
 
 
+def strokes(mut sc: Scene, n: Int, version: Int):
+    """Paper, then n strokes in the "ink" layer (its version given), then a "wet" one."""
+    sc.begin_layer("paper")
+    sc.fill(0xFFFFFFFF)
+    sc.begin_layer("ink")
+    sc.layer_version(version)
+    sc.layer_transform(10, 20, 2)
+    for k in range(n):
+        var s = Stroke(4.0, 0xFF000000 + UInt32(k))
+        for i in range(6):
+            s.add(10.0 + 8.0 * Float64(i), 10.0 + 9.0 * Float64(k), 0.5)
+        s.seal()
+        s.draw(sc)
+    sc.begin_layer("wet")
+
+
+def test_appends() raises:
+    var a = Scene(W, H, 1.0)
+    strokes(a, 3, 1)
+    var b = Scene(W, H, 1.0)
+    strokes(b, 5, 2)
+    assert_true(not b.same_layer(1, a, 1), "a new version is a new picture")
+    assert_equal(b.appends(1, a, 1), a.layer_range(1)[1] - a.layer_range(1)[0], "two strokes more: the first three are shared")
+    assert_equal(a.appends(1, b, 1), -1, "fewer strokes (an undo, an erase) aren't an append")
+    assert_equal(a.appends(1, a, 1), -1, "the same strokes aren't an append")
+    assert_equal(b.appends(0, a, 1), -1, "another layer isn't an append")
+    var c = Scene(W, H, 1.0)  # (stroke 0 gone: the rest shifts, nothing is shared at the start)
+    c.begin_layer("paper")
+    c.fill(0xFFFFFFFF)
+    c.begin_layer("ink")
+    for k in range(1, 5):
+        var s = Stroke(4.0, 0xFF000000 + UInt32(k))
+        for i in range(6):
+            s.add(10.0 + 8.0 * Float64(i), 10.0 + 9.0 * Float64(k), 0.5)
+        s.seal()
+        s.draw(c)
+    assert_equal(c.appends(1, a, 1), -1, "a changed first stroke isn't an append")
+    var box = c.removes(1, b, 1)  # (c is b without its first stroke: y 10 ± the width)
+    assert_equal(len(box), 4, "a stroke taken out is a removal")
+    assert_true(box[1] < 10 and box[3] > 10 and box[3] < 19, "the box is around the first stroke only: " + String(box[1]) + ".." + String(box[3]))
+    assert_equal(len(a.removes(1, b, 1)), 4, "the last two strokes taken out is a removal too")
+    assert_equal(len(b.removes(1, a, 1)), 0, "strokes added aren't a removal")
+    assert_equal(len(c.removes(1, a, 1)), 0, "a stroke taken out and another added isn't a removal")
+    print("layer append: ok")
+
+
 def main() raises:
     test_cpu()
     test_scene()
     test_layer_transform()
+    test_appends()

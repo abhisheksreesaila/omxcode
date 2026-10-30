@@ -818,3 +818,12 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Mac build failed once: `undefined symbol: _atan2` (ink's caps). Rotation instead (D-1214); `scripts/build.sh sketch mac` then succeeds. Mac pressure: NSEvent subtype 1 → `pressure` (built, unrun).
 - M3 PASS first time (GTK vs CPU 0.0 levels; strokes 1 and 3 are off-screen after the checker's 2× zoom around the centre, stroke 2 shows).
 - M4 attempt 1: pans missed (PANs without PRESS: the pen ignores them; framebench pan is now a drag, the app's Pan tool). Attempt 2: ~1 ms, too good; the screenshot showed the page panned off screen (D-1217). Attempt 3: all strokes on screen, paint still ~0 ms (D-1215). With the full render: pan 32.8, zoom 33.9, draw 32.6 ms p95: FAIL. Two failures on "a kept node is cheap to show": checked, cairo re-fills it each frame. Pivot D-1216 (layer textures): pan 2.0, zoom 2.9, draw 1.9 ms p95, ink layer rebuilt 0 times.
+
+## 2026-10-30 · goal 40 review round 1 (NEEDS WORK → fixes)
+- Findings: scroll only zoomed (the goal says two-finger scroll pans); "ink" named in the host; texture reuse ignored its own 4096 px cap; the frame after a stroke ends or an erase hitched (~36 ms); docs over-claimed pen pressure; a mean can't catch a missing stroke; random squiggles and dark-on-teal buttons in the gallery.
+- Baseline first (the three host changes switched off in a scratch build, then restored): deepzoom p95 107.8 ms (120 texture renders in 120 frames), finish p95 35.8 / max 36.8, erase p95 35.4.
+- Scroll pans (D-1218): the first `scroll:` step hit the list step of the same name ("TEST: no list 0"); renamed `wheel:`.
+- Append (D-1219) and mend (D-1220): finish max 2.9 ms, erase p95 14 ms. The first mend mutation passed the checker: nothing else sat in the erased stroke's box, so a blank box was right. Session 2's second stroke now crosses it; the mutation then fails (40 pixels).
+- Clamp (D-1221): deepzoom 8 ms p95, 0 texture renders.
+- Lens, omxplorer, workbook, particles build; goal 6's checker (lens: drag and `zoom:` on a canvas that doesn't opt in) run after the change.
+- Contrast (D-1224): GTK's `.mui-tag-toolbar label` (0,2,2) beat `button label { color: inherit }`; the web's `[data-tag=toolbar] button` came after `button.prominent`.

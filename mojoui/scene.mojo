@@ -393,6 +393,29 @@ struct Scene(Painter, Movable, Copyable):
         var t = Int(self.text_of[op])
         return self.texts[t] if t >= 0 else String("")
 
+    def same_op(self, p: Int, other: Scene, q: Int) -> Bool:
+        """Whether op p here draws exactly what op q of `other` does (kind, numbers, colour, text, points, pixels)."""
+        if self.kinds[p] != other.kinds[q] or self.colors[p] != other.colors[q]:
+            return False
+        if Int(self.kinds[p]) == OP_POLY:  # (its points, not where they sit in the path list)
+            var m = Int(self.num(p, 1))
+            if Int(other.num(q, 1)) != m:
+                return False
+            var a0 = Int(self.num(p, 0)) * 2
+            var b0 = Int(other.num(q, 0)) * 2
+            for z in range(2 * m):
+                if self.path[a0 + z] != other.path[b0 + z]:
+                    return False
+            return True
+        for x in range(STRIDE):
+            if self.nums[p * STRIDE + x] != other.nums[q * STRIDE + x]:
+                return False
+        if self.text_of[p] >= 0 and self.text_at(p) != other.text_at(q):
+            return False
+        if Int(self.kinds[p]) == OP_IMAGE and self.images[Int(self.num(p, 4))] != other.images[Int(other.num(q, 4))]:
+            return False
+        return True
+
     def same_layer(self, i: Int, other: Scene, j: Int) -> Bool:
         """Whether layer i of this scene draws exactly what layer j of `other` does (same ops, numbers, colours, texts)."""
         var a = self.layer_range(i)
@@ -404,28 +427,102 @@ struct Scene(Painter, Movable, Copyable):
         if a[1] - a[0] != b[1] - b[0]:
             return False
         for n in range(a[1] - a[0]):
-            var p = a[0] + n
-            var q = b[0] + n
-            if self.kinds[p] != other.kinds[q] or self.colors[p] != other.colors[q]:
-                return False
-            if Int(self.kinds[p]) == OP_POLY:  # (its points, not where they sit in the path list)
-                var m = Int(self.num(p, 1))
-                if Int(other.num(q, 1)) != m:
-                    return False
-                var a0 = Int(self.num(p, 0)) * 2
-                var b0 = Int(other.num(q, 0)) * 2
-                for z in range(2 * m):
-                    if self.path[a0 + z] != other.path[b0 + z]:
-                        return False
-                continue
-            for x in range(STRIDE):
-                if self.nums[p * STRIDE + x] != other.nums[q * STRIDE + x]:
-                    return False
-            if self.text_of[p] >= 0 and self.text_at(p) != other.text_at(q):
-                return False
-            if Int(self.kinds[p]) == OP_IMAGE and self.images[Int(self.num(p, 4))] != other.images[Int(other.num(q, 4))]:
+            if not self.same_op(a[0] + n, other, b[0] + n):
                 return False
         return True
+
+    def appends(self, i: Int, other: Scene, j: Int) -> Int:
+        """When layer i is layer j of `other` with more ops drawn after it (a finished ink stroke joining the page): how
+        many ops they share (the new ones follow), so a host adds only those to what it kept. -1 otherwise: another key,
+        fewer or as many ops, any op different, a clip among the new ones or one the shared ops leave open (D-1219).
+        Compares the items, whatever the layers' versions say."""
+        if self.layer_keys[i] != other.layer_keys[j]:
+            return -1
+        var a = self.layer_range(i)
+        var b = other.layer_range(j)
+        var n = b[1] - b[0]
+        if a[1] - a[0] <= n:
+            return -1
+        for op in range(a[0] + n, a[1]):
+            var kind = Int(self.kinds[op])
+            if kind == OP_CLIP or kind == OP_UNCLIP or kind == OP_FILL:  # (what's added must stand on its own)
+                return -1
+        var open = 0  # (a clip left open by the shared ops would cut the new ones: not an append)
+        for m in range(n):
+            if not self.same_op(a[0] + m, other, b[0] + m):
+                return -1
+            var kind = Int(self.kinds[a[0] + m])
+            open += 1 if kind == OP_CLIP else (-1 if kind == OP_UNCLIP else 0)
+        return n if open == 0 else -1
+
+    def op_bounds(self, op: Int) -> List[Float64]:
+        """Where op draws, in its layer's units: [x0, y0, x1, y1] (polygons, rects, circles, lines, images); empty for
+        the others (text, fills, clips: no box the Scene knows)."""
+        var kind = Int(self.kinds[op])
+        var out = List[Float64]()
+        if kind == OP_POLY:
+            var x0 = self.poly_x(op, 0)
+            var y0 = self.poly_y(op, 0)
+            var x1 = x0
+            var y1 = y0
+            for z in range(1, Int(self.num(op, 1))):
+                var x = self.poly_x(op, z)
+                var y = self.poly_y(op, z)
+                x0 = min(x0, x)
+                x1 = max(x1, x)
+                y0 = min(y0, y)
+                y1 = max(y1, y)
+            out = [x0, y0, x1, y1]
+        elif kind == OP_RECT or kind == OP_IMAGE:
+            out = [self.num(op, 0), self.num(op, 1), self.num(op, 0) + self.num(op, 2), self.num(op, 1) + self.num(op, 3)]
+        elif kind == OP_CIRCLE:
+            var r = self.num(op, 2)
+            out = [self.num(op, 0) - r, self.num(op, 1) - r, self.num(op, 0) + r, self.num(op, 1) + r]
+        elif kind == OP_LINE:
+            var hw = self.num(op, 4) / 2 + 1
+            out = [min(self.num(op, 0), self.num(op, 2)) - hw, min(self.num(op, 1), self.num(op, 3)) - hw,
+                   max(self.num(op, 0), self.num(op, 2)) + hw, max(self.num(op, 1), self.num(op, 3)) + hw]
+        return out^
+
+    def removes(self, i: Int, other: Scene, j: Int) -> List[Float64]:
+        """When layer i is layer j of `other` with some ops taken out and nothing else changed (strokes erased): the box
+        around what was taken out ([x0, y0, x1, y1], the layer's units), so a host redraws only there (D-1220). Empty
+        otherwise: another key, nothing taken out, anything new or different, or a taken-out op with no box (text)."""
+        var out = List[Float64]()
+        if self.layer_keys[i] != other.layer_keys[j]:
+            return out^
+        var a = self.layer_range(i)
+        var b = other.layer_range(j)
+        if a[1] - a[0] >= b[1] - b[0]:
+            return out^
+        var p = a[0]
+        var gone = 0
+        var x0 = 0.0
+        var y0 = 0.0
+        var x1 = 0.0
+        var y1 = 0.0
+        for q in range(b[0], b[1]):  # (greedy: this layer must be a subsequence of the other's)
+            if p < a[1] and self.same_op(p, other, q):
+                p += 1
+                continue
+            var box = other.op_bounds(q)
+            if len(box) == 0:
+                return out^
+            if gone == 0:
+                x0 = box[0]
+                y0 = box[1]
+                x1 = box[2]
+                y1 = box[3]
+            else:
+                x0 = min(x0, box[0])
+                y0 = min(y0, box[1])
+                x1 = max(x1, box[2])
+                y1 = max(y1, box[3])
+            gone += 1
+        if p != a[1] or gone == 0:
+            return out^
+        out = [x0, y0, x1, y1]
+        return out^
 
     def raster(self, mut s: Surface, font: Font):
         """Plays the list into pixels (the CPU reference: tests, screenshots, hosts without a GPU path), each layer
