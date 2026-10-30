@@ -237,15 +237,14 @@ def step(page, s):
         with page.expect_download(timeout=10000) as dl:
             page.locator("[data-kind=button]").filter(has_text=exact(title)).first.click()
         dl.value.save_as(path)
-    elif verb == "dropfile":  # dropfile:Tag=/path: that file dropped from outside on the DropTarget tagged Tag (a drop event carrying a File)
-        tag, _, path = rest.partition("=")
+    elif verb == "dropfile":  # dropfile:Tag=/path[,/path…]: those files dropped together from outside on the DropTarget tagged Tag (one drop event carrying Files)
+        tag, _, paths = rest.partition("=")
         import base64
-        data = base64.b64encode(Path(path).read_bytes()).decode()
-        page.evaluate("""([tag, name, data]) => { const t = document.querySelector(`[data-tag="${tag}"]`);
-          const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0)); const dt = new DataTransfer();
-          dt.items.add(new File([bytes], name, { type: 'text/plain' }));
-          t.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }""", [tag, Path(path).name, data])
-        page.wait_for_timeout(500)
+        files = [[Path(p).name, base64.b64encode(Path(p).read_bytes()).decode()] for p in paths.split(",")]
+        page.evaluate("""([tag, files]) => { const t = document.querySelector(`[data-tag="${tag}"]`); const dt = new DataTransfer();
+          for (const [name, data] of files) dt.items.add(new File([Uint8Array.from(atob(data), c => c.charCodeAt(0))], name, { type: 'text/plain' }));
+          t.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }""", [tag, files])
+        page.wait_for_timeout(500 + 250 * len(files))
     elif verb == "key":  # key:K=shift+ctrl+Name: a real key press, to whatever has the keyboard (a tapped canvas, an open editor)
         _, _, name = rest.partition("=")
         *mods, key = name.split("+")

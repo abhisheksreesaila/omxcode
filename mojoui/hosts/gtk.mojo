@@ -651,6 +651,7 @@ struct GtkHost[A: App](Movable):
     var editor_keys: Int  # the in-place editor's key controller (test steps press Escape through it)
     var editor_open: Bool  # the last build showed an in-place editor
     var picker_node: Int  # the FilePicker whose dialog is open
+    var picker_msg: Int  # its on_pick / on_save message (the answer goes by message: a rebuild meanwhile may renumber nodes)
     var editor_node: Int  # (its node there)
     var fx_source: Int  # the GLib timeout that next polls the runtime's effects (HTTP replies, timers; 0: none)
     var fx_due: Int  # when it fires (µs, g_get_monotonic_time)
@@ -776,6 +777,7 @@ struct GtkHost[A: App](Movable):
         self.editor_keys = 0
         self.editor_open = False
         self.picker_node = -1
+        self.picker_msg = 0
         self.editor_node = -1
         self.fx_source = 0
         self.fx_due = 0
@@ -3662,9 +3664,25 @@ struct GtkHost[A: App](Movable):
             self.apply(d, self_addr)
         return True
 
+    def answer(mut self, msg: Int, text: String, self_addr: Int):
+        """A message with a path from outside the widgets (a file dialog's answer, a dropped file): to update() now, or,
+        while a rebuild is pending, held and sent once it's up (drain_fields), in order."""
+        if msg == 0:
+            return
+        if busy() or self.has_pending or len(held_events()[]) > 0:
+            held_events()[].append((msg, text))
+            return
+        var d = self.rt.dispatch(Event(msg, text, 0))
+        self.apply(d, self_addr)
+
     def drain_fields(mut self, self_addr: Int):
         """The field changes held while the host was busy (D-1321): each field whose held text isn't the app's value
         gets it (shown, if a rebuild put the app's back) and its on_change, one at a time until the host is busy again."""
+        var events = held_events()
+        while len(events[]) > 0 and not busy() and not self.has_pending:
+            var e = events[].pop(0)
+            var d = self.rt.dispatch(Event(e[0], e[1], 0))
+            self.apply(d, self_addr)
         var held = held_fields()
         while len(held[]) > 0 and not busy() and not self.has_pending:
             var id = held[][0][0]
@@ -3734,10 +3752,12 @@ def on_drop_files[A: App](target: Int, value: Int, x: Float64, y: Float64, host_
             external_call["g_free", NoneType](raw)
         at = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at + 8)[]
     external_call["g_slist_free", NoneType](list)
+    var host = host_at[A](host_addr)
+    if node >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[node].kind != DROP or host[].rt.shown.nodes[node].msg2 == 0:
+        return 0
+    var msg = host[].rt.shown.nodes[node].msg2  # (by message, not node: the first file's screen may renumber the nodes)
     for p in paths:
-        var host = host_at[A](host_addr)
-        if node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].kind == DROP and host[].rt.shown.nodes[node].msg2 != 0:
-            host[].send(node, True, p, 0, host_addr)
+        host[].answer(msg, p, host_addr)
     return 1 if len(paths) > 0 else 0
 
 
@@ -4799,33 +4819,41 @@ def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
     var node = get_node(button)
     if 0 <= node < len(host[].rt.shown.nodes) and is_file_saver(host[].rt.shown.nodes[node]):  # a FileSaver: the platform's save dialog
         host[].picker_node = node
+        host[].picker_msg = host[].rt.shown.nodes[node].msg2
         var sd = external_call["gtk_file_dialog_new", Int]()
         var stitle = host[].rt.shown.nodes[node].text
         external_call["gtk_file_dialog_set_title", NoneType](sd, stitle.as_c_string_span())
         var suggested = host[].rt.shown.nodes[node].options[2]
         if suggested != "":
             external_call["gtk_file_dialog_set_initial_name", NoneType](sd, suggested.as_c_string_span())
+        accept_filter(sd, host[].rt.shown.nodes[node].options[0], "Files it saves")
         external_call["gtk_file_dialog_save", NoneType](sd, host[].window, 0, on_file_saved[A], host_addr)
         return
     if 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:  # a FilePicker: the platform's file dialog
         host[].picker_node = node
+        host[].picker_msg = host[].rt.shown.nodes[node].msg2
         var dialog = external_call["gtk_file_dialog_new", Int]()
         var title = host[].rt.shown.nodes[node].text
         external_call["gtk_file_dialog_set_title", NoneType](dialog, title.as_c_string_span())
-        var accept = host[].rt.shown.nodes[node].options[0] if len(host[].rt.shown.nodes[node].options) > 0 else String("")
-        if accept != "":  # the picker's file types (".csv,.omx") as the dialog's filter
-            var filter = external_call["gtk_file_filter_new", Int]()
-            var name = String("Files it opens (") + accept + ")"
-            external_call["gtk_file_filter_set_name", NoneType](filter, name.as_c_string_span())
-            for ext in accept.split(","):
-                var suffix = String(String(ext).strip().lstrip("."))
-                if suffix != "":
-                    external_call["gtk_file_filter_add_suffix", NoneType](filter, suffix.as_c_string_span())
-            external_call["gtk_file_dialog_set_default_filter", NoneType](dialog, filter)
-            external_call["g_object_unref", NoneType](filter)
+        accept_filter(dialog, host[].rt.shown.nodes[node].options[0] if len(host[].rt.shown.nodes[node].options) > 0 else String(""), "Files it opens")
         external_call["gtk_file_dialog_open", NoneType](dialog, host[].window, 0, on_file_picked[A], host_addr)
         return
     host[].send(node, False, "", 0, host_addr)
+
+
+def accept_filter(dialog: Int, accept: String, label: String):
+    """A FilePicker's or FileSaver's file types (".csv,.omx") as its dialog's default filter ("": none)."""
+    if accept == "":
+        return
+    var filter = external_call["gtk_file_filter_new", Int]()
+    var name = label + " (" + accept + ")"
+    external_call["gtk_file_filter_set_name", NoneType](filter, name.as_c_string_span())
+    for ext in accept.split(","):
+        var suffix = String(String(ext).strip().lstrip("."))
+        if suffix != "":
+            external_call["gtk_file_filter_add_suffix", NoneType](filter, suffix.as_c_string_span())
+    external_call["gtk_file_dialog_set_default_filter", NoneType](dialog, filter)
+    external_call["g_object_unref", NoneType](filter)
 
 
 def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
@@ -4842,9 +4870,8 @@ def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
     var path = c_str(raw)
     external_call["g_free", NoneType](raw)
     external_call["g_object_unref", NoneType](file)
-    var node = host[].picker_node
-    if path != "" and 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:
-        host[].send(node, True, path, 0, host_addr)
+    if path != "":
+        host[].answer(host[].picker_msg, path, host_addr)
 
 
 def on_file_saved[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
@@ -4861,9 +4888,8 @@ def on_file_saved[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
     var path = c_str(raw)
     external_call["g_free", NoneType](raw)
     external_call["g_object_unref", NoneType](file)
-    var node = host[].picker_node
-    if path != "" and 0 <= node < len(host[].rt.shown.nodes) and is_file_saver(host[].rt.shown.nodes[node]):
-        host[].send(node, True, path, 0, host_addr)
+    if path != "":
+        host[].answer(host[].picker_msg, path, host_addr)
 
 
 def on_field_changed[A: App](entry: Int, host_addr: Int) abi("C"):
@@ -4897,6 +4923,17 @@ def is_held(entry: Int) -> Bool:
         if h[0] == id:
             return True
     return False
+
+
+def held_events() -> Pointer[List[Tuple[Int, String]], MutUntrackedOrigin]:
+    """Messages with a path (dialog answers, dropped files) that came while a rebuild was pending: (message, text)."""
+    var addr = app_data("mojoui-held-events")
+    if addr == 0:
+        var p = alloc(Layout[List[Tuple[Int, String]]].single()).unsafe_leak()
+        p.unsafe_write(List[Tuple[Int, String]]())
+        addr = Int(p)
+        set_app_data("mojoui-held-events", addr)
+    return Pointer[List[Tuple[Int, String]], MutUntrackedOrigin](unsafe_from_address=addr)
 
 
 def hold_field(entry: Int, text: String):

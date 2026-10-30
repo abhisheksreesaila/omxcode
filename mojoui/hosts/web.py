@@ -181,11 +181,12 @@ MENU_JS = r"""
     const v = document.getElementById('mojoui-v');
     if (e.dataTransfer.files && e.dataTransfer.files.length) {  // files from outside (DropTarget's on_file): each uploads, then its path
       if (t.dataset.files !== '1') return;
-      for (const f of e.dataTransfer.files) {
-        const form = new FormData(); form.append('file', f); form.append('n', t.dataset.node); form.append('v', v ? v.value : -1);
-        fetch(`/dropfile/${t.dataset.sid}`, { method: 'POST', body: form }).then(r => r.text()).then(html => {
-          if (html) htmx.swap(document.body, html, { swapStyle: 'none' }); });
-      }
+      // (all of them in one upload: the server hands them to on_file one after another, so the first one's new screen
+      // can't make the rest arrive for a version that's gone)
+      const form = new FormData(); for (const f of e.dataTransfer.files) form.append('file', f);
+      form.append('n', t.dataset.node); form.append('v', v ? v.value : -1);
+      fetch(`/dropfile/${t.dataset.sid}`, { method: 'POST', body: form }).then(r => r.text()).then(html => {
+        if (html) htmx.swap(document.body, html, { swapStyle: 'none' }); });
       return;
     }
     htmx.ajax('POST', `/e/${t.dataset.sid}`, { values: { n: Number(t.dataset.node), text: e.dataTransfer.getData('text/plain'), v: v ? v.value : -1 }, swap: 'none', source: lane('drop') });
@@ -1519,11 +1520,12 @@ def make_app(module_dir):
         """The server is stopping: every live session's App.closing (a pending save), then its handle goes."""
         with sessions_lock:
             while sessions:
-                _, old = sessions.popitem(last=False)
+                old_sid, old = sessions.popitem(last=False)
                 with old.lock:
                     if not old.closed:
                         old.closed = True
                         mod.close(old.handle)
+                forget_files(old_sid)
     import atexit
     atexit.register(close_all)
 
@@ -1539,8 +1541,7 @@ def make_app(module_dir):
                 with old.lock:
                     old.closed = True
                     mod.close(old.handle)
-                import shutil  # (its uploads go with it)
-                shutil.rmtree(Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads"))) / old_sid, ignore_errors=True)
+                forget_files(old_sid)  # (its uploads and downloads go with it)
         # The whole first page under the session's lock: once note() hands the tab to the clock thread, its effects'
         # replies can change the screen at any moment, and a page rendered meanwhile was torn (a deep link's Route
         # missing from the first page under load, so the route was never asked for; D-545).
@@ -1963,6 +1964,13 @@ def make_app(module_dir):
         folder.mkdir(parents=True, exist_ok=True)
         return folder
 
+    def forget_files(sid):
+        """A session ended: its uploads and downloads go."""
+        import shutil
+        base = Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads")))
+        for folder in (base / sid, base.parent / "downloads" / sid):
+            shutil.rmtree(folder, ignore_errors=True)
+
     @app.post("/save/{sid}")
     def save(sid: str, n: int, v: int = -1):
         """A FileSaver tapped: on_save gets a path in this page's downloads folder (its suggested name, a plain file name);
@@ -2005,39 +2013,58 @@ def make_app(module_dir):
         return FileResponse(path, filename=Path(path).name)
 
     @app.post("/dropfile/{sid}")
-    async def dropfile(sid: str, n: int, file: UploadFile, v: int = -1):
-        """A file dropped from outside on a DropTarget with on_file: saved as an upload, then on_file gets its path."""
+    async def dropfile(sid: str, req):
+        """Files dropped from outside on a DropTarget with on_file, in one upload: each saved in a folder of its own (two
+        files of one name don't overwrite), then on_file gets their paths one after another; the target is found again
+        after each (its on_file message), since the first one's new screen may have renumbered it."""
         s = sessions.get(sid)
         if s is None:
             return ""
-        def takes(s):
-            return not s.closed and v == s.shape and 0 <= n < len(s.nodes) and s.nodes[n]["kind"] == DROP and s.nodes[n]["msg2"]
+        form = await req.form()
+        try:
+            n, v = int(form.get("n", -1)), int(form.get("v", -1))
+        except ValueError:
+            return ""
+        files = [f for f in form.getlist("file") if hasattr(f, "read")]
         with s.lock:
-            if not takes(s):
+            if s.closed or v != s.shape or not 0 <= n < len(s.nodes) or s.nodes[n]["kind"] != DROP or not s.nodes[n]["msg2"]:
                 return ""
-        name = Path(file.filename or "").name
-        if name in ("", ".", ".."):
-            name = "dropped"
-        path = file_folder(sid) / name
+            msg = s.nodes[n]["msg2"]
         limit = int(os.environ.get("OMXCODE_UPLOAD_MAX", os.environ.get("OMXAPP_UPLOAD_MAX", str(32 << 30))))
-        size = 0
-        with open(path, "wb") as out:
-            while chunk := await file.read(1 << 20):
-                size += len(chunk)
-                if size > limit:
-                    out.close()
-                    path.unlink(missing_ok=True)
-                    return ""
-                out.write(chunk)
-        with s.lock:
-            if not takes(s):
+        paths = []
+        for file in files:
+            name = Path(file.filename or "").name
+            if name in ("", ".", ".."):
+                name = "dropped"
+            folder = file_folder(sid) / uuid.uuid4().hex[:12]
+            folder.mkdir()
+            path, size = folder / name, 0
+            with open(path, "wb") as out:
+                while chunk := await file.read(1 << 20):
+                    size += len(chunk)
+                    if size > limit:
+                        break
+                    out.write(chunk)
+            if size > limit:
                 path.unlink(missing_ok=True)
-                return ""
-            d = json.loads(mod.event(s.handle, n, 1, str(path), 0))
-            if d.get("ignored"):
-                return ""
-            s.nodes = json.loads(mod.view(s.handle))
-            return changes(s, sid, d, n, str(path), 0)
+                continue
+            paths.append(path)
+        outs = []
+        with s.lock:
+            for path in paths:
+                if s.closed:
+                    break
+                if not (0 <= n < len(s.nodes) and s.nodes[n]["kind"] == DROP and s.nodes[n]["msg2"] == msg):
+                    n = next((k for k, node in enumerate(s.nodes) if node["kind"] == DROP and node["msg2"] == msg), -1)
+                    if n < 0:
+                        break
+                d = json.loads(mod.event(s.handle, n, 1, str(path), 0))
+                if d.get("ignored"):
+                    continue
+                s.nodes = json.loads(mod.view(s.handle))
+                out = changes(s, sid, d, n, str(path), 0)
+                outs.extend(out if isinstance(out, tuple) else ((out,) if out != "" else ()))
+        return tuple(outs) if outs else ""
 
     @app.post("/upload/{sid}")
     async def upload(sid: str, n: int, file: UploadFile, v: int = -1):

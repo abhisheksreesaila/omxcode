@@ -25,6 +25,7 @@ from themes.liquid import liquid
 from omxcore import Job, JobBody, JobCtl, JOB_RUNNING
 from std.collections import Dict
 from std.ffi import external_call
+from std.os.path import getsize
 
 comptime NEW = 1
 comptime DELETE = 2
@@ -39,6 +40,7 @@ comptime EXPORT = 10
 comptime DROPPED = 11
 comptime NOTES = 1  # the LazyList's id
 comptime SAVE_AFTER_MS = 400
+comptime MAX_IMPORT = 4 * 1024 * 1024  # bytes: a bigger file isn't a note (a message says so, nothing is read)
 comptime SEED_DELAY_MS = 600  # the window opens with what the file holds; the seed starts a moment later (D-1310)
 
 
@@ -111,6 +113,21 @@ struct Words(Movable):
         for k in range(8):
             body += self.endings[(i * 31 + 5 + k * 17) % len(self.endings)] + " "
         return (title, body + "Note " + String(i + 1) + ".")
+
+
+def read_note_file(path: String) raises -> String:
+    """A dropped or imported file's text: refused with a message when it's over MAX_IMPORT or isn't UTF-8 text."""
+    var name = path[byte = path.rfind("/") + 1 :]
+    var size = getsize(path)
+    if size > MAX_IMPORT:
+        raise Error(String(name) + " is " + String((size + 1024 * 1024 - 1) // (1024 * 1024)) + " MB: notes come from text files up to 4 MB")
+    var data: List[UInt8]
+    with open(path, "r") as f:
+        data = f.read_bytes()
+    try:
+        return String(from_utf8=Span(data))
+    except:
+        raise Error(String(name) + " isn't UTF-8 text, so it wasn't imported")
 
 
 def gallery_notes() -> List[String]:
@@ -353,6 +370,9 @@ struct Main(App):
             return
         try:
             self.handle(event)
+            var m = event.message
+            if m != SAVE_TICK and m != SEED_TICK and m != LANDED:  # (a person's action went well: the last problem goes)
+                self.problem = ""
         except e:
             self.problem = String(e)
             print("JOT ERROR: " + self.problem, flush=True)
@@ -409,9 +429,7 @@ struct Main(App):
                 self.mark()
         elif m == IMPORT or m == DROPPED:  # a .md or .txt file becomes a note, byte for byte
             self.save()
-            var text: String
-            with open(event.text, "r") as f:
-                text = f.read()
+            var text = read_note_file(event.text)
             self.query = ""
             var id = self.add(text)
             self.search()

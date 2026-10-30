@@ -217,7 +217,28 @@ def m3():
     con.close()
     if wbodies != sorted([imp.read_text(), drop.read_text()]):
         return False, f"web: bodies in the file: {wbodies}"
-    return True, "imported, exported byte for byte, and a dropped file became a note (GTK and the web)"
+    # (added in review round 1, D-1326: two files dropped together, both with one name, each become a note: on the web
+    # they arrived for a screen the first one had changed and were dropped, and the second overwrote the first's upload)
+    one, two = TMP / "a" / "same.txt", TMP / "b" / "same.txt"
+    for f, text in ((one, "First of two\ndropped together\n"), (two, "Second of two\nsame file name\n")):
+        f.parent.mkdir(exist_ok=True)
+        f.write_text(text)
+    want = sorted([one.read_text(), two.read_text()])
+    gdb = TMP / "m3-two.db"
+    code, out = jot(gdb, ["pause:500", f"dropfile:notes={one},{two}", "pause:500"])
+    con = sqlite3.connect(gdb)
+    got = sorted(r[0] for r in con.execute("SELECT body FROM notes"))
+    con.close()
+    if code != 0 or got != want:
+        return False, f"GTK: two files dropped together left {got}"
+    wdb2 = TMP / "m3-web-two.db"
+    res, out = drive.web_run(str(APP / "web"), f"dropfile:notes={one},{two}", env={"JOT_DB": str(wdb2)})
+    con = sqlite3.connect(wdb2)
+    got = sorted(r[0] for r in con.execute("SELECT body FROM notes"))
+    con.close()
+    if got != want:
+        return False, f"web: two files dropped together left {got} ({out[-200:]})"
+    return True, "imported, exported byte for byte, and a dropped file became a note (GTK and the web); two dropped together (one name) became two"
 
 
 def m4():
