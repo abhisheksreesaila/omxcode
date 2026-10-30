@@ -176,9 +176,22 @@ struct TableCards(Movable, Sized):
     def find(self, name: String) -> Int:
         """The card called `name` (or whose SQL name it is), else -1."""
         for k in range(len(self.cards)):
-            if self.cards[k].name == name or sql_name(self.cards[k].name) == name:
+            if self.cards[k].name == name or self.sql_name_of(k) == name:
                 return k
         return -1
+
+    def sql_name_of(self, k: Int, page_name: String = "") -> String:
+        """Card k's SQL name, unique on the page: the first card with a name keeps it, a later one (or one that shares
+        the page's own table's name, `page_name`) gets _2, _3… so a query never reads the wrong table and Export CSV
+        never writes over another card's file."""
+        var base = sql_name(self.cards[k].name)
+        var n = 1
+        if page_name != "" and sql_name(page_name) == base:
+            n += 1
+        for j in range(k):
+            if sql_name(self.cards[j].name) == base:
+                n += 1
+        return base if n == 1 else base + "_" + String(n)
 
     def remove(mut self, k: Int):
         if 0 <= k < len(self.cards):
@@ -196,18 +209,20 @@ struct TableCards(Movable, Sized):
     def owns(self, message: Int) -> Bool:
         return self.msg_base <= message < self.msg_base + self.most * TABLE_MESSAGES
 
-    def add_to(self, mut catalog: Catalog) raises:
-        """Every card's table as a SQL source, by its sql_name (edits included)."""
+    def add_to(self, mut catalog: Catalog, page_name: String = "") raises:
+        """Every card's table as a SQL source, by its unique SQL name (sql_name_of; edits included)."""
         for k in range(len(self.cards)):
-            catalog.add_frame(sql_name(self.cards[k].name), self.cards[k].sheet.frame)
+            catalog.add_frame(self.sql_name_of(k, page_name), self.cards[k].sheet.frame)
 
     def query(self, text: String, page_name: String, page: Sheet) raises -> Sheet:
         """A SQL query over every card's table and the page's own table (`page`, as `page_name`; "": left out): its
         answer as a sheet."""
         var catalog = Catalog()
+        var page_sql = String("")
         if page_name != "" and self.find(page_name) < 0:
+            page_sql = page_name
             catalog.add_frame(sql_name(page_name), page.frame)
-        self.add_to(catalog)
+        self.add_to(catalog, page_sql)
         return Sheet(query_table(catalog, text).share(), False)
 
     def update(mut self, event: Event, font: Font, pal: Palette, folder: String) -> Bool:
@@ -229,7 +244,7 @@ struct TableCards(Movable, Sized):
                     if c.grid.handle(event, c.sheet, font, pal) == GRID_SELECTED:
                         self.selected = k
                 elif which == TC_EXPORT:
-                    var path = folder + "/" + sql_name(self.cards[k].name) + ".csv"
+                    var path = folder + "/" + self.sql_name_of(k) + ".csv"
                     try:
                         self.cards[k].sheet.write_csv(path)
                         self.exported = path
@@ -287,7 +302,7 @@ struct TableCards(Movable, Sized):
     def view(self, k: Int, version: Int) -> View:
         """Card k: its title bar (name, where it came from, its size, Export CSV, close) over its grid, filling the card."""
         ref c = self.cards[k]
-        var name = sql_name(c.name)
+        var name = self.sql_name_of(k)
         var rows = c.sheet.rows()
         var parts = List[View]()
         parts.append(Text(c.name, HEADLINE).tag("table-title").tooltip(c.facts() + (" · " + c.note if c.note != "" else String(""))))

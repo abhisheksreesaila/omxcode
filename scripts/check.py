@@ -317,7 +317,7 @@ def m9():
     shot = Path("/tmp/oxshot/shot.py")
     bad = []
     for page in ("index.html", "omxplorer/index.html", "omxcore/index.html", "omxcode/index.html", "omxconsole/index.html", "omxqua/index.html"):
-        r = run([sys.executable, str(shot), str(SITE / page), "g39-" + page.replace("/", "-")], 600)
+        r = run([sys.executable, str(shot), str(SITE / page), str(OUT / ("m9-" + page.replace("/", "-")))], 600)
         o = r.stdout + r.stderr
         if r.returncode or re.search(r"overflow[^\n]*[1-9]", o, re.I) or re.search(r"console error(?!s?: 0)", o, re.I):
             bad.append(f"{page}: {o.strip()[-200:]}")

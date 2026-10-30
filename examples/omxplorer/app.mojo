@@ -852,7 +852,7 @@ struct Main(App):
             out.append((sql_name(self.name), -1))
         for k in range(len(self.tables)):
             if is_places(self.tables.cards[k].sheet):
-                out.append((sql_name(self.tables.cards[k].name), k))
+                out.append((self.tables.sql_name_of(k), k))
         return out^
 
     def run_compare(mut self):
@@ -1071,7 +1071,7 @@ struct Main(App):
                         continue
                     var key = matching_column(sh, codes, v)
                     if key[0] >= 0 and key[1] > 0:
-                        self.reel_captions.append((sql_name(self.tables.cards[t].name) + " · " + sh.name(v), t, key[0], v))
+                        self.reel_captions.append((self.tables.sql_name_of(t) + " · " + sh.name(v), t, key[0], v))
             if found_at != -1 and self.has_table:  # (the sheet's own table can name them too)
                 for v in range(self.frame.stored()):
                     if self.frame.kind(v) == TEXT:
