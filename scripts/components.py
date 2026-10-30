@@ -39,8 +39,8 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "sketch"],  # (sketch: goal 40; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
-    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat"],  # (kit: goal 18 runs it on GTK and the web)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "sketch", "jot"],  # (jot: goal 42; sketch: goal 40; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot"],  # (kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
     "iPhone (UIKit)": [],
@@ -86,7 +86,16 @@ FEATURES = [
     ("HTTP requests (effects; replies as Events)", "mojoui.http: Request.get/post_json · App.requests() · comptime HTTP", r"schedule_effects|mod\.poll", "httpcheck"),
     ("Timers", "App.every() -> [Every(ms, msg)]", r"schedule_effects|mod\.poll", "httpcheck"),
     ("Scroll pinned to its end", "Scroll(…, pinned=True)", r"on_pin_changed|data-pin|follow_ends", "consolekit"),
+    ("SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)", "Database(path) · prepare(sql).bind/step · begin/commit", r"(?!)", "jot"),
+    ("Save dialog", "FileSaver(title, on_save, suggested=)", r"gtk_file_dialog_save|/save/\{sid\}", "jot"),
+    ("File drop from outside the app", "DropTarget(view, on_drop, on_file=)", r"gdk_file_list_get_type|/dropfile/", "jot"),
+    ("Quit hook", "def closing(mut self)", r"rt\[?\]?\.closing\(|close_all|on_will_terminate", "jot"),
 ]
+
+# Library features no host draws (pure Mojo over a C library): their state per host, set by hand from what ran
+# (reasons in NOTES). Hosts not listed: ❌.
+BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
+           {"Linux (GTK)": "✅", "Web": "✅", "Mac (AppKit)": "🔨"}}
 
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)
@@ -224,15 +233,28 @@ def cell(host, src, ctor, kind):
 # Features a host implements but no check runs there (a stand-in drives it instead): 🔨 until one does.
 UNPROVEN = {("Linux (GTK)", "File picker"): "the checks hand the path in with the pick: step; GTK's own dialog isn't driven",
             ("Linux (GTK)", "Canvas: pen pressure"): "only injected pressure ran (the stroke: test step sets it where GDK's "
-                                                     "pressure axis is read); no real pen yet"}
+                                                     "pressure axis is read); no real pen yet",
+            ("Linux (GTK)", "Save dialog"): "the checks hand the path in with the save: step; GTK's own save dialog isn't driven",
+            ("Linux (GTK)", "File drop from outside the app"): "the dropfile: step builds a real GdkFileList and emits the GtkDropTarget's "
+                                                                "drop signal; a drag from a real file manager isn't driven headless",
+            ("Web", "File drop from outside the app"): "drive.py's dropfile: dispatches a drop event carrying a File (no OS drag)",
+            ("Web", "Quit hook"): "the session's App.closing runs when it's evicted or the server stops (tried by hand: a SIGINT); "
+                                  "no check runs it, and closing a tab doesn't end its session"}
 
 
 # What a reader should know about a feature row beyond its cells (limits, not states).
-NOTES = {"Scene: layer transform": "GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a "
+NOTES = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
+         "the system's libsqlite3 loaded at run time (dlopen, D-1304/D-1311); Android and iPhone don't build it yet; the Mac links "
+         "against nothing new and loads /usr/lib/libsqlite3.dylib (built, not run)",
+         "Save dialog": "the app writes the file at the path it's given; on the web that path is the page's downloads folder and the "
+                        "page downloads it; the Mac has no NSSavePanel yet (nor an NSOpenPanel for the file picker)",
+         "Scene: layer transform": "GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a "
                                    "big page at a big zoom it's softer than the strokes until the zoom comes back within the cap"}
 
 
 def feature_cell(host, src, pattern, example, name=""):
+    if name in BY_HAND:
+        return BY_HAND[name].get(host, "❌")
     if not re.search(pattern, src):
         return "❌"
     if (host, name) in UNPROVEN:

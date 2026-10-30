@@ -194,7 +194,22 @@ def m3():
     con.close()
     if bodies != sorted([imp.read_text(), drop.read_text()]):
         return False, f"bodies in the file: {bodies}"
-    return True, "imported, exported byte for byte, and a dropped file became a note"
+    # (added with M5's matrix, D-1316: the same three on the web through scripts/drive.py: the file input's upload, the
+    # FileSaver's real browser download, a drop event carrying a File)
+    ok, why = build("web")
+    if not ok:
+        return False, "web build failed: " + why
+    import drive
+    wdb, wout = TMP / "m3-web.db", TMP / "export-web.md"
+    res, out = drive.web_run(str(APP / "web"), f"pick:Import={imp};save:Export={wout};dropfile:notes={drop}", env={"JOT_DB": str(wdb)})
+    if not wout.exists() or wout.read_text() != imp.read_text():
+        return False, f"web: the downloaded export doesn't equal the imported note ({out[-300:]})"
+    con = sqlite3.connect(wdb)
+    wbodies = sorted(r[0] for r in con.execute("SELECT body FROM notes"))
+    con.close()
+    if wbodies != sorted([imp.read_text(), drop.read_text()]):
+        return False, f"web: bodies in the file: {wbodies}"
+    return True, "imported, exported byte for byte, and a dropped file became a note (GTK and the web)"
 
 
 def m4():

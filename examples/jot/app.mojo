@@ -14,6 +14,7 @@ from mojoui import (
 )
 from mojoui.effects import Every
 from mojoui.dragdrop import DropTarget
+from mojoui.paragraph import Paragraph, Run, Plain, Bold
 from mojoui.jobs import start_ui_job
 from mojoui.clock import now_ns
 from mojoui.shared import environment, make_dir
@@ -109,6 +110,24 @@ struct Words(Movable):
         return (title, title + "\n" + self.endings[(i * 31 + 5) % len(self.endings)] + " Note " + String(i + 1) + ".")
 
 
+def gallery_notes() -> List[String]:
+    """JOT_SCENE=gallery: a dozen notes a person might keep (the gallery's screenshots)."""
+    return [
+        "Trip plan: Lisbon in May\nFlights booked for the 14th. Tram 28 up to Alfama on the first morning, pastéis in Belém, a day trip to Sintra.",
+        "Groceries\nMilk, eggs, sourdough, lemons, smoked paprika, two tins of chickpeas.",
+        "Book club: Piranesi\nMeet at Ana's on Thursday. Bring the question about the statues.",
+        "Lisbon restaurants\nTaberna da Rua das Flores (no bookings, go early). Cervejaria Ramiro for seafood.",
+        "Garden\nStake the tomatoes; the basil wants more sun. Order bulbs before October.",
+        "Quarterly review notes\nRevenue up eleven percent. Hire a second designer. Ship the import tool.",
+        "Recipe: lentil soup\nOnion, carrot, red lentils, cumin, smoked paprika, lemon at the end.",
+        "Gift ideas\nA fountain pen for Sam, the Kyoto mystery for Priya, plants for the new flat.",
+        "Portuguese phrases\nObrigado / obrigada. Uma bica, por favor. Onde fica o elétrico 28?",
+        "Bike repair\nNew chain and brake pads; the rear wheel is slightly out of true.",
+        "Podcast notes: tidal energy\nThe Orkney turbines; why the Bay of Fundy is the record.",
+        "Packing list for Lisbon\nComfortable shoes for the hills, a light jacket, adapters, the guidebook.",
+    ]
+
+
 struct Seed(JobBody):
     """Fills the file up to `want` notes, 500 to a transaction (the window's connection reads between them)."""
     comptime Out = Int
@@ -162,8 +181,10 @@ struct Main(App):
     var seed_done: Int
     var seed_total: Int
     var made_at: Int
+    var snippet: List[Run]  # while searching: the open note's best passage, the words found in bold
 
     def __init__(out self):
+        self.snippet = List[Run]()
         self.made_at = now_ns()
         self.db = None
         self.path = environment("JOT_DB", "")
@@ -190,6 +211,9 @@ struct Main(App):
             self.seed_want = 0
         try:
             self.db = open_notes(self.path)
+            if environment("JOT_SCENE") == "gallery" and self.db.value().count("SELECT count(*) FROM notes") == 0:
+                for body in gallery_notes():
+                    _ = self.add(body)
             self.load()
             if len(self.ids) > 0:
                 self.show(self.ids[0])
@@ -242,6 +266,31 @@ struct Main(App):
         sort(ids)
         ids.reverse()
         self.ids = ids^
+
+    def mark(mut self) raises:
+        """The open note's passage that matches the search, its found words in bold (FTS5's snippet()). Made when a
+        result is opened, not as you type: a Paragraph whose runs change rebuilds its stack, and a rebuild while the
+        search field is changing swallows the next change (D-1317)."""
+        self.snippet = List[Run]()
+        var wanted = fts_prefix_query(self.query)
+        if wanted == "" or self.open_id == 0:
+            return
+        var q = self.db.value().prepare("SELECT snippet(notes_fts, -1, char(1), char(2), '…', 14) FROM notes_fts WHERE notes_fts MATCH ? AND rowid = ?")
+        q.bind(1, wanted)
+        q.bind(2, self.open_id)
+        if not q.step():
+            return
+        var text = q.text(0).replace("\n", " ")
+        for part in text.split("\x01"):
+            var p = String(part)
+            var end = p.find("\x02")
+            if end >= 0:
+                self.snippet.append(Bold(String(p[byte=:end])))
+                var rest = String(p[byte = end + 1 :])
+                if rest != "":
+                    self.snippet.append(Plain(rest))
+            elif p != "":
+                self.snippet.append(Plain(p))
 
     def show(mut self, id: Int) raises:
         var q = self.db.value().prepare("SELECT body FROM notes WHERE id = ?")
@@ -321,6 +370,7 @@ struct Main(App):
                 self.save()
         elif m == NEW:
             self.save()
+            self.snippet = List[Run]()
             self.query = ""
             var id = self.add("")
             self.search()
@@ -329,6 +379,7 @@ struct Main(App):
             if self.open_id == 0:
                 return
             self.dirty = False
+            self.snippet = List[Run]()
             var at = 0
             for k in range(len(self.ids)):
                 if self.ids[k] == self.open_id:
@@ -352,6 +403,7 @@ struct Main(App):
             if event.number >= 0 and event.number < len(self.ids):
                 self.save()
                 self.show(self.ids[event.number])
+                self.mark()
         elif m == IMPORT or m == DROPPED:  # a .md or .txt file becomes a note, byte for byte
             self.save()
             var text: String
@@ -435,13 +487,16 @@ struct Main(App):
         var bar = List[View]()
         bar.append(Text("Jot", HEADLINE))
         bar.append(Spacer())
-        bar.append(Button("New", NEW, PROMINENT, icon="plus"))
+        bar.append(Button("New", NEW, PROMINENT))
         bar.append(Button("Delete", DELETE, SUBTLE))
         bar.append(FilePicker("Import", IMPORT, SUBTLE, accept=".md,.txt"))
         bar.append(FileSaver("Export", EXPORT, suggested=self.file_name(), style=SUBTLE, accept=".md,.txt"))
         var editor = List[View]()
         if self.problem != "":
             editor.append(Text(self.problem, CAPTION).tag("problem"))
+        # (always there, " " when nothing was found: one view whose runs change, opened from a result)
+        var found = self.snippet.copy() if len(self.snippet) > 0 else [Plain(" ")]
+        editor.append(Paragraph(found^, style=CAPTION).tag("found"))
         if self.open_id != 0:
             editor.append(TextArea(self.body, "Start typing: the first line is the title", on_change=EDIT, height=480).grow().fill().tag("editor"))
         else:
