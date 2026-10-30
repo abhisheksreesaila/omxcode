@@ -8,7 +8,7 @@ from std.testing import assert_equal, assert_true
 from max.gpu.host import DeviceContext
 from mojoui.devrows import ColumnRange, GpuScratch, device_rows, first_rows
 from mojoui.tableprep import sort_rows, RowSlice, SortedKey
-from mxframe import Table, SharedTable, DeviceTable, INT, gpu_available
+from omxcore import Table, SharedTable, DeviceTable, INT, gpu_available
 
 
 def make(n: Int) raises -> SharedTable:

@@ -10,7 +10,7 @@ from mojoui import App, Event, View, Surface, VStack, Text, Canvas
 from mojoui.jobs import start_ui_job
 from mojoui.clock import now_ns
 from mojoui.shared import environment
-from mxframe import Job, JobBody, JobCtl, JOB_RUNNING
+from omxcore import Job, JobBody, JobCtl, JOB_RUNNING
 
 comptime LANDED = 1
 comptime FRAME = 2

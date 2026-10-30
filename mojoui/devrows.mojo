@@ -25,7 +25,7 @@ from std.math import ceildiv
 from std.memory import ArcPointer
 from max.gpu import global_idx, grid_dim, block_dim
 from max.gpu.host import DeviceContext, DeviceBuffer, DeviceAttribute  # (also what makes pointers passable to a kernel)
-from mxframe import SharedTable, DeviceTable
+from omxcore import SharedTable, DeviceTable
 from mojoui.gpu import GPU_BUILD
 from mojoui.tableprep import RowSlice, SortedKey
 

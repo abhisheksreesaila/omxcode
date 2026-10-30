@@ -272,6 +272,20 @@ def m5_build(b, r, steps):
 MEASURED = "793e54a1483bd9e5e0456da7bdee5d154ec8cd3c"  # goal-38-data's tip: its sources give results.json's hash
 
 
+def rename_only(path):
+    """True when path differs from MEASURED only by mxframe → omxcore (engine 834ef9a, D-788) and comment lines."""
+    old = run(["git", "show", f"{MEASURED}:{path}"]).stdout.splitlines()
+    new = (ROOT / path).read_text().splitlines() if (ROOT / path).exists() else None
+    if new is None or len(old) != len(new):
+        return False
+    for a, b in zip(old, new):
+        if a == b or (a.lstrip().startswith("#") and b.lstrip().startswith("#")):
+            continue
+        if a.replace("mxframe", "omxcore").replace("MXFRAME", "OMXCORE") != b:
+            return False
+    return True
+
+
 def sources_sha_at(sources, rev):
     """data_bench.py's sources_sha() over commit `rev`'s tree rather than the working tree (same files, same order)."""
     h = __import__("hashlib").sha256()
@@ -312,8 +326,11 @@ def m5():
     if res.get("sources_sha256") != sources_sha_at(bench.SOURCES, MEASURED):
         return False, f"results.json wasn't measured from {MEASURED[:7]}'s sources"
     moved = run(["git", "diff", "--name-only", MEASURED, "--", *bench.SOURCES]).stdout.split()
-    if any(not f.startswith("mojoui/") for f in moved):
-        return False, f"measured sources changed since {MEASURED[:7]}: {[f for f in moved if not f.startswith('mojoui/')]}"
+    # (D-788) outside mojoui/, a file may differ only by the engine's rename (mxframe → omxcore, engine 834ef9a) and
+    # comment lines; any other change fails.
+    changed = [f for f in moved if not f.startswith("mojoui/") and not rename_only(f)]
+    if changed:
+        return False, f"measured sources changed since {MEASURED[:7]}: {changed}"
     env = res.get("environment") or {}
     missing = [k for k in M5_ENV if not env.get(k)]
     if missing:

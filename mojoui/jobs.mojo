@@ -16,7 +16,7 @@
 from std.ffi import external_call, c_int
 from std.sys import CompilationTarget
 from std.memory import Pointer
-from mxframe import Job, JobBody, JobDone, start_job_then
+from omxcore import Job, JobBody, JobDone, start_job_then
 from mojoui.shared import put_shared, get_shared
 from mojoui.hosts.objc import msg, cls, sel, ns_string
 

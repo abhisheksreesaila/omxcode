@@ -7,7 +7,7 @@ from max.gpu.host import DeviceContext
 from mojoui.devrows import ColumnRange, GpuScratch
 from mojoui.devgroup import DevExpr, GroupSet, dcol, dlit, group_rows, group_sets
 from mojoui.tableprep import RowSlice
-from mxframe import Table, SharedTable, DeviceTable, INT, gpu_available
+from omxcore import Table, SharedTable, DeviceTable, INT, gpu_available
 
 
 def make(n: Int, sorted_days: Bool = False) raises -> SharedTable:

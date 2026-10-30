@@ -40,7 +40,7 @@ from mojoui.text import Font
 from mojoui.clock import now_ns
 from mojoui.theme import Theme, Palette
 from themes.omxqua import omxqua, omxqua_palette
-from mxframe import Job, JOB_RUNNING
+from omxcore import Job, JOB_RUNNING
 from mojoui.jobs import start_ui_job
 from mojoui.geometry import rect_of
 from dashdata import (Orders, Answer, Filters, LoadJob, StepJob, ALL, TOP, money, day_number, day_text, ms_since)

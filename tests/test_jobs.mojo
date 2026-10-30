@@ -5,7 +5,7 @@
 #   scripts/mxbuild.sh tests/test_jobs.mojo -o build/test_jobs && build/test_jobs
 from std.ffi import external_call, c_int
 from std.testing import assert_equal, assert_true
-from mxframe import JobBody, JobCtl, JOB_RUNNING
+from omxcore import JobBody, JobCtl, JOB_RUNNING
 from mojoui.jobs import wake_pipe, drain_wakes, wake_ui, start_ui_job
 from mojoui.geometry import rect_of
 

@@ -13,7 +13,7 @@
 
 from max.algorithm import parallelize
 from std.sys.info import num_physical_cores
-from mxframe import Table, SharedTable, INT
+from omxcore import Table, SharedTable, INT
 
 comptime LP = UnsafePointer[Int64, MutAnyOrigin]
 comptime BP = UnsafePointer[UInt8, MutAnyOrigin]

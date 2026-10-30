@@ -201,6 +201,7 @@ The GPU path is NVIDIA today. Apple and phone GPUs use the CPU path, which runs 
 You need x86-64 Linux with GTK 4 and libadwaita 1.7+, [pixi](https://pixi.sh), and an NVIDIA GPU for the GPU path (without one, the CPU path runs the same code).
 
 ```bash
+git clone https://github.com/abhisheksreesaila/omxcode && cd omxcode
 pixi install                                   # Mojo 1.1, MAX, FastHTML
 scripts/omxplorer.sh                           # omxplorer, native window
 scripts/omxplorer.sh web                       # the same app at http://127.0.0.1:5001

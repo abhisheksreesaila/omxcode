@@ -3,7 +3,7 @@
 # column and its nulls moved with its row, and SortedKey.slice equal to a scan for ranges inside, across and outside.
 #   scripts/mxbuild.sh tests/test_tableprep.mojo -o build/test_tableprep && build/test_tableprep
 from std.testing import assert_equal, assert_true
-from mxframe import Table, SharedTable, INT, FLOAT
+from omxcore import Table, SharedTable, INT, FLOAT
 from mojoui.tableprep import to_fixed, column_extent, sort_rows, SortedKey, RowSlice
 
 

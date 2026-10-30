@@ -18,7 +18,7 @@
 # doesn't read as a layout margin.)
 
 from max.gpu.host import DeviceContext
-from mxframe import Table, SharedTable, DeviceTable, read_parquet, gpu_device, JobBody, JobCtl
+from omxcore import Table, SharedTable, DeviceTable, read_parquet, gpu_device, JobBody, JobCtl
 from mojoui.devrows import ColumnRange, GpuScratch, first_rows
 from mojoui.devgroup import dcol, dlit, group_rows
 from mojoui.tableprep import to_fixed, column_extent, sort_rows, SortedKey, RowSlice

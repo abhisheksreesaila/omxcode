@@ -24,7 +24,7 @@ from max.gpu.primitives.warp import vote, shuffle_idx, shuffle_down
 from max.gpu.primitives.id import lane_id
 from max.gpu.host import DeviceContext
 from max.gpu.memory import AddressSpace
-from mxframe import DeviceTable
+from omxcore import DeviceTable
 from mojoui.gpu import GPU_BUILD
 from mojoui.devrows import ColumnRange, GpuScratch, MAX_RANGES
 from mojoui.tableprep import RowSlice
@@ -37,7 +37,7 @@ comptime OP_SUB = 3
 comptime OP_MUL = 4
 comptime OP_FLOORDIV = 5
 comptime MAX_DEPTH = 4
-comptime SHARED_SLOTS = 4096  # int64 accumulators per block in shared memory (32 KiB)
+comptime SHARED_SLOTS = 3584  # int64 accumulators per block in shared memory (28 KiB: with MAX_SPEC, 32 KiB, every GPU's floor, D-789)
 comptime MAX_SUMS = 6
 comptime MAX_SPEC = 512  # int64s of a call's spec (ranges and programs), staged in shared memory per block
 comptime SLOT_GSPEC = 3  # GpuScratch slots (mojoui.devrows uses 0–2)
