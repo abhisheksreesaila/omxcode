@@ -11,7 +11,8 @@ from mojoui.sheetpage import SheetObject, compute, shape_of
 from mojoui.csvio import CsvImport, read_table, empty_import
 from mojoui.sheet import placeholder_sheet
 from mojoui.clock import now_ns
-from omxcore.job import THREADS
+from omxcore.job import THREADS, W_REFS
+from std.atomic import Atomic
 from std.ffi import external_call, c_int
 from std.sys import CompilationTarget, is_defined
 
@@ -20,14 +21,21 @@ comptime TRYJOIN = CompilationTarget.is_linux() and not is_defined["MOJOUI_ANDRO
 
 def stopped[T: Movable & Deinitable](mut job: Job[T]) -> Bool:
     """Whether the job's thread has ended, not only been asked to: a cancelled job reads JOB_CANCELLED at once, while its
-    thread runs on to its next check, reading what it holds (D-284). Never blocks on Linux; elsewhere a threaded build
-    waits for it (a cancel lands within a block of rows)."""
+    thread runs on to its next check, reading what it holds (D-284). Never blocks on Linux or the Mac; Android's threaded
+    build waits for it (a cancel lands within a block of rows)."""
     comptime if THREADS:
         if job.threaded and not job.joined:
             comptime if TRYJOIN:
                 if external_call["pthread_tryjoin_np", c_int](job.tid, Int(0)) != 0:
                     return False  # (EBUSY: still running)
                 job.joined = True
+            elif CompilationTarget.is_macos():
+                # (no pthread_tryjoin_np on Apple: the work lets go of the job's control block (W_REFS) only once it has
+                # done everything but return, so the join then doesn't wait, D-792)
+                var refs = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=job.words) + W_REFS
+                if Atomic[Scalar[DType.int64]].load(refs) > 1:
+                    return False
+                _ = job.wait()
             else:
                 _ = job.wait()
     return True

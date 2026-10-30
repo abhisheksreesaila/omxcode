@@ -4,8 +4,8 @@
 # App.jobs_message reached it. After RUNS jobs it prints
 #   JOBWAKE: <runs> jobs, end → update() median <ms>, p95 <ms>, worst <ms>; frame ticks <n>
 # then runs one long job (LONG_MS) and prints how long the window went without a frame while it ran (D-792):
-#   JOBWAKE FREEZE: a 1500 ms job; <n> frames while it ran, longest gap between frames <ms> ms
-# (a job on the main thread: about 1500 ms; on a thread of its own: a frame or two). With JOBWAKE_EXIT=1 it then exits
+#   JOBWAKE FREEZE: a 1500 ms job; <n> frames while it ran, longest gap between frames <ms> ms: PASS|FAIL
+# (a job on the main thread: about 1500 ms; on a thread of its own: a frame or two; FAIL from FROZEN_MS). With JOBWAKE_EXIT=1 it then exits
 # (JOBWAKE_ALL=1 lists every delay). JOBWAKE_POLL=1 turns the wake off (jobs_message 0): the frame poll alone, to compare.
 
 from std.sys import exit, CompilationTarget
@@ -19,6 +19,7 @@ comptime LANDED = 1
 comptime FRAME = 2
 comptime RUNS = 40
 comptime LONG_MS = 1500
+comptime FROZEN_MS = 500  # a longer gap between frames during the long job: FAIL (a job on the UI thread reads ~1500)
 
 
 struct Work(JobBody):
@@ -78,13 +79,14 @@ struct Main(App):
         var job = self.job.take()
         if self.long:
             self.gap = max(self.gap, now_ns() - self.last_tick)
+            var gap_ms = Int(Float64(self.gap) / 1e6)
             var line = ("JOBWAKE FREEZE: a " + String(LONG_MS) + " ms job; " + String(self.long_ticks) + " frames while it ran, longest gap between frames "
-                        + String(Int(Float64(self.gap) / 1e6)) + " ms")
+                        + String(gap_ms) + " ms: " + ("PASS" if gap_ms < FROZEN_MS else "FAIL (the window froze)"))
             print(line, flush=True)
             self.line += " · " + line
             comptime if CompilationTarget.is_linux():  # (the Apple stubs have no exit(): the test steps close the window there)
                 if environment("JOBWAKE_EXIT") == "1":
-                    exit(0)
+                    exit(0 if gap_ms < FROZEN_MS else 1)
             return
         try:
             var ended = job.result()

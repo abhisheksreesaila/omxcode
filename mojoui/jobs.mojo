@@ -98,21 +98,25 @@ struct WakeUI(JobDone):
             var target = msg(msg(cls("NSApplication"), "sharedApplication"), "delegate")
             if target != 0 and msg(target, "respondsToSelector:", sel("jobsEnded:")) != 0:
                 self.target = target
-                # (retained until done(): the job's thread uses it after this run-loop turn's pool has drained; the
-                # string is autoreleased, and the array keeps it)
+                # (retained until the callback goes, __del__: the job's thread uses it after this run-loop turn's pool
+                # has drained; the string is autoreleased, and the array keeps it). The delegate isn't retained: it's
+                # the host's target, which lives as long as the process
                 self.modes = msg(msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes")), "retain")
 
     def done(mut self, state: Int):
         comptime if not CompilationTarget.is_linux():  # (on the job's thread on the Mac: one message, made for any thread)
             if self.target != 0:
                 _ = msg(self.target, "performSelectorOnMainThread:withObject:waitUntilDone:modes:", sel("jobsEnded:"), 0, 0, self.modes)
-                _ = msg(self.modes, "release")
-                self.target = 0
             return
         if self.fd >= 0:
             var b = List[UInt8](length=1, fill=1)
             _ = _io("write", self.fd, Int(b.unsafe_ptr()), 1)  # (-1 when the pipe is full: a wake is pending already)
             _ = len(b)
+
+    def __del__(deinit self):  # (once: after done(), or instead of it when the job's handle was dropped first)
+        comptime if not CompilationTarget.is_linux():
+            if self.modes != 0:
+                _ = msg(self.modes, "release")
 
 
 def start_ui_job[B: JobBody](var body: B) -> Job[B.Out]:

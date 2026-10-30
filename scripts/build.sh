@@ -151,6 +151,7 @@ build_mac() {
   local debug="${MOJOUI_DEBUG:-}"; [ "$debug" = 1 ] && echo "   (debug build: WebKit's inspector for widget views, source maps)"
   # Background jobs get threads of their own, as on Linux (D-792): the engine's Apple build otherwise runs a job inside
   # its start call, on the main thread, and a long one freezes the window. MOJOUI_SERIAL_JOBS=1 builds the old way, to compare
+  # (serial: a define nothing reads, so the engine's switch is simply absent; one flag either way keeps bash 3.2's set -u happy)
   local jobs=MXFRAME_JOB_THREADS; [ "${MOJOUI_SERIAL_JOBS:-}" = 1 ] && jobs=MOJOUI_SERIAL_JOBS && echo "   (jobs on the main thread)"
   if [ "$(uname)" = Darwin ] && [ -n "${MAC_GPU:-}" ]; then
     # On a Mac, with its GPU (omxcode#3): a native build, Metal kernels compiled by Apple's toolchain, Mojo's runtime

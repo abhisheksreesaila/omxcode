@@ -13,7 +13,7 @@ Audited 2026-10-30 against `main` (a818aa8), plus the accessibility work (D-791)
 | Practice | Status |
 |---|---|
 | Only the UI thread touches widgets; the platform owns the loop | ✅ by construction |
-| Slow work runs on worker threads and comes back as an event | ✅ Linux, web, Mac (a 1.5 s job: longest frame gap 1527 → 77 ms on GitHub's Macs) · ⚠️ iPhone: jobs on the main thread |
+| Slow work runs on worker threads and comes back as an event | ✅ Linux, web, Mac (a 1.5 s job: longest frame gap 1527 → ≤83 ms on GitHub's Macs) · ⚠️ iPhone: jobs on the main thread |
 | Data flows one way: state → `view()` → diff → patches | ✅ |
 | No closures on widgets (no leaks, no stale captures) | ✅ D-19 |
 | A widget is never destroyed inside its own event | ✅ |
@@ -49,10 +49,15 @@ a file import or a big query, must run elsewhere, and its result must come back 
 - **Data jobs** ([mojoui/jobs.mojo](../mojoui/jobs.mojo), D-771): a background job's end wakes the UI at once through
   a self-pipe the main loop watches (GTK: `g_unix_fd_add`; the web: a thread blocking on it). Measured
   ([examples/jobwake](../examples/jobwake/app.mojo)): job end → `update()` median 0.05 ms, p95 1.0–2.2 ms on GTK.
-- **The Mac too** (D-792): jobs get threads of their own there as on Linux, and a job's end wakes the window through
-  `performSelectorOnMainThread` (made for any thread). Measured on GitHub's Macs (macOS 15 and 26, `examples/jobwake`):
-  during a 1.5 s job the window drew 1 frame and went 1516–1527 ms without one when jobs ran on the main thread; with
-  threads, 28–36 frames and at most 71–77 ms between two (those virtual Macs draw ~20 frames a second without a GPU).
+- **The Mac too** (D-792): jobs get threads of their own there, and a job's end wakes the window through
+  `performSelectorOnMainThread` (made for any thread; a job started before the window exists is found by the frame
+  poll). Checking whether a cancelled job's thread has stopped doesn't wait on the Mac either. Measured on GitHub's
+  Macs (macOS 15 and 26, `examples/jobwake`, which fails past 500 ms): during a 1.5 s job the window drew 1 frame and
+  went 1516–1527 ms without one when jobs ran on the main thread; with threads, 28–38 frames and at most 71–83 ms
+  between two (those virtual Macs draw ~20 frames a second without a GPU). That's the CPU build; the GPU build, where
+  a job's queries use Metal from its thread, gets the same switch but has only run on Linux's GPU so far.
+- **Waits left on purpose, on every platform:** replacing a document waits for its cancelled jobs to stop (they may
+  still be reading its data); a cancel lands within a block of rows.
 - Nothing else crosses threads: the job's result is read on the UI thread, so the app's state is never shared.
 
 **Gap.** On the iPhone the engine still runs jobs on the main thread, so a long job freezes the screen there, and UIKit
