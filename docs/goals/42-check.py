@@ -271,7 +271,42 @@ def m5():
     return True, "gallery Database section, matrix, llms.txt, EXPERIMENTS; web and mac built"
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5}
+def m6():
+    """The race (added 2026-10-30): native mojoui.sqlite vs SQLite-wasm + OPFS in Chromium, 1M notes."""
+    import json
+    path = ROOT / "docs" / "goals" / "42" / "race.json"
+    if not path.exists():
+        return False, "docs/goals/42/race.json missing (scripts/jot_race.py)"
+    r = json.loads(path.read_text())
+    srcs = ["mojoui/sqlite.mojo", "scripts/jot_race.py"]
+    stale = run(["git", "diff", "--quiet", r.get("commit", "none"), "HEAD", "--", *srcs]).returncode != 0
+    dirty = run(["git", "diff", "--quiet", "HEAD", "--", *srcs]).returncode != 0
+    if stale or dirty:
+        return False, f"race.json is stale for {srcs}"
+    a, b = r.get("a", {}), r.get("b", {})
+    for side, s in (("a", a), ("b", b)):
+        missing = [k for k in ("notes", "build_s", "cold_open_ms", "search_p50_ms", "search_p95_ms", "disk_mb", "counts") if k not in s]
+        if missing and not (side == "b" and s.get("error")):
+            return False, f"side {side} lacks {missing}"
+    if a.get("notes") != 1_000_000 or len(a.get("counts", [])) != 200:
+        return False, f"A: {a.get('notes')} notes, {len(a.get('counts', []))} queries (want 1,000,000 and 200)"
+    if b.get("error"):
+        if b.get("notes", 0) >= 1_000_000:
+            return False, "B reports an error but also 1M notes"
+        return True, f"B couldn't hold 1M notes ({b['error'][:120]}; largest {b.get('notes')}); A: search p95 {a['search_p95_ms']} ms, cold open {a['cold_open_ms']} ms"
+    if b.get("notes") != 1_000_000 or a["counts"] != b["counts"]:
+        return False, f"B: {b.get('notes')} notes; counts equal on every query: {a['counts'] == b.get('counts')}"
+    if "vfs" not in b or "vfs_tried" not in b:
+        return False, "race.json doesn't say which OPFS VFS B used and which were tried"
+    verdict = (f"1M notes: search p95 A {a['search_p95_ms']} vs B {b['search_p95_ms']} ms ({b['vfs']}); "
+               f"cold open A {a['cold_open_ms']} vs B {b['cold_open_ms']} ms; build A {a['build_s']} vs B {b['build_s']} s; "
+               f"disk A {a['disk_mb']} vs B {b['disk_mb']} MB")
+    if a["search_p95_ms"] > b["search_p95_ms"] / 2 or a["cold_open_ms"] > b["cold_open_ms"] / 2:
+        return False, "omxcode didn't win: " + verdict
+    return True, verdict
+
+
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6}
 
 if __name__ == "__main__":
     pick = [a for a in sys.argv[1:] if a in MILESTONES] or list(MILESTONES)
