@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Components hold to best practice: an audit, and accessible names on every host (2026-10-30)
+- **Setup:** branch `components-practices` from main a818aa8, worktree ../mojo-ui-components. The owner asked for a component-level best-practice audit (threads, state, lifecycle) to show the world, then the gaps fixed.
+- **Worked:** the audit (docs/component-practices.md): one UI thread by construction, effects and job wake off it (goal 33, D-771), one-way data, no closures on widgets, deferred rebuilds, keyed diffing, virtualised lists, frame pacing, native widgets, themes apart from behaviour. New: `View.label()` and mojoui.a11y (one naming rule, `audit()`), applied on GTK (GtkAccessible label), the web (aria-label, a canvas is an img named by its words), AppKit and UIKit (accessibilityLabel). scripts/check_a11y.py reads the names back from GTK's test backend and Chromium's accessibility tree: PASS.
+- **Broke and fixed:** on the web a canvas's words (tooltip) only reached the page when a new frame arrived: a chart whose picture didn't change kept its old words (now after every swap, window.mojouiWords). The iPhone stub lacked _memset_pattern16 (Surface.fill on Apple; the Mac stub had it since c3c15eb).
+- **Means:** the gaps left are listed in docs/component-practices.md: real hardware for iPhone and the Android tablet, jobs on Apple's main thread, a chart's numbers for screen readers, Android names, RTL.
+- **Next small step:** CI/CD on the owner's MacBook, iPhone and Android tablet, so the 🔨 cells become ✅.
+
+---
+
 ## Goal 38: the 100M-row dashboard benchmark, merged into release 2026-10-29 with engine omxcore 834ef9a (2026-10-28/29)
 - **Setup:** RTX 3090, 100M rows (a 4 GB table), four builds of one dashboard: A JS + DuckDB-WASM, B JS + FastAPI + Polars, C Rust + Polars + egui, D omxcode + omxcore; an external observer times input to pixels (scripts/data_bench.py; fairness rules docs/goals/38/fairness.md).
 - **Worked:** D fastest to the screen: 30.3 ms median of medians, 49.1 ms pooled p95 (A 104.9, B 44.2, C 37.0); every pass equal to DuckDB's answer. New in mojoui for any app: job wake (D-771: a finished job reaches update() in 0.05 ms median instead of the next frame poll) and App.input_lines (D-770: an app driven over stdin). Full table: docs/data-benchmark.md.
