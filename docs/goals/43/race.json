@@ -1,0 +1,210 @@
+{
+ "commit": "cca81b551011ffb21525a77a6e4413f831b84d0b",
+ "gpu_index": 0,
+ "gpu_asked": 0,
+ "b_gpu_seen": 0,
+ "gpu": "NVIDIA GeForce RTX 3090",
+ "gpu_pinning": "A: CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=<index>; B: Chromium's Dawn/Vulkan adapter (not selectable by flag on two identical cards): the GPU whose memory rose during B's run",
+ "quiet": {
+  "before_util_mean_max": [
+   0.0,
+   0.0
+  ],
+  "after_util_mean_max": [
+   13.4,
+   67.0
+  ],
+  "note": "nvidia-smi utilization.gpu (%) over 3 s, on the race's GPU, before B and after A"
+ },
+ "clips": 20,
+ "audio_s": 188.6,
+ "a": {
+  "model": "openai/whisper-large-v3-turbo",
+  "cold_start_s": 4.6,
+  "p50_ms": 134.6,
+  "p95_ms": 174.0,
+  "rtf": 0.0144,
+  "wer": 0.0339,
+  "peak_gpu_mb": 2076,
+  "ms": {
+   "1089-134686-0000": 164.1,
+   "1188-133604-0000": 135.3,
+   "121-121726-0000": 109.7,
+   "1221-135766-0000": 155.7,
+   "1284-1180-0000": 139.0,
+   "1320-122612-0000": 174.0,
+   "1580-141083-0000": 133.8,
+   "1995-1826-0000": 135.4,
+   "2094-142345-0001": 131.7,
+   "2300-131720-0000": 97.1,
+   "237-126133-0000": 185.8,
+   "260-123286-0000": 102.0,
+   "2830-3979-0000": 118.8,
+   "2961-960-0001": 104.3,
+   "3570-5694-0000": 172.5,
+   "3575-170457-0000": 131.8,
+   "3729-6852-0000": 147.4,
+   "4077-13751-0000": 138.8,
+   "4446-2271-0001": 112.1,
+   "4507-16021-0001": 117.6
+  },
+  "hyps": {
+   "1089-134686-0000": "He hoped there would be stew for dinner, turnips and carrots and bruised potatoes, and fat mutton pieces to be ladled out in thick, peppered, flour-fattened sauce.",
+   "1188-133604-0000": "You will find me continually speaking of four men, Titian, Holbein, Turner, and Tintoret, in almost the same terms.",
+   "121-121726-0000": "Also, a popular contrivance whereby lovemaking may be suspended but not stopped during the picnic season.",
+   "1221-135766-0000": "how strange it seemed to the sad woman as she watched the growth and the beauty that became every day more brilliant and the intelligence that threw its quivering sunshine over the tiny features of this child",
+   "1284-1180-0000": "He wore blue silk stockings, blue knee pants with gold buckles, a blue ruffled waist, and a jacket of bright blue braided with gold.",
+   "1320-122612-0000": "Since the period of our tale, the active spirit of the country has surrounded it with a belt of rich and thriving settlements, though none but the hunter or the savage is ever known even now to penetrate its wild recesses.",
+   "1580-141083-0000": "i will endeavor in my statement to avoid such terms as would serve to limit the events to any particular place or give a clue as to the people concerned",
+   "1995-1826-0000": "In the debate between the senior societies, her defense of the 15th Amendment had been not only a notable bit of reasoning, but delivered with real enthusiasm.",
+   "2094-142345-0001": "But the windows are patched with wooden panes, and the door, I think, is like the gate. It is never opened.",
+   "2300-131720-0000": "The Paris plant, like that at the Crystal Palace, was a temporary exhibit.",
+   "237-126133-0000": "here she would stay comforted and soothed among the lovely plants and rich exotics rejoicing the heart of old turner the gardener who since polly's first rapturous entrance had taken her into his good graces for all time",
+   "260-123286-0000": "Saturday, August 15th. The sea unbroken all round. No land in sight.",
+   "2830-3979-0000": "We want you to help us publish some leading work of Luther's for the general American market. Will you do it?",
+   "2961-960-0001": "the influence which the timaeus has exercised upon posterity is due partly to a misunderstanding",
+   "3570-5694-0000": "But already at a point in economic evolution far ante-dating the emergence of the lady, specialized consumption of goods as an evidence of pecuniary strength had begun to work out in a more or less elaborate system.",
+   "3575-170457-0000": "And often has my mother said, while on her lap I laid my head, she feared for time I was not made, but for eternity.",
+   "3729-6852-0000": "to celebrate the arrival of her son sylvia gave a splendid supper to which she had invited all her relatives and it was a good opportunity for me to make their acquaintance",
+   "4077-13751-0000": "On the 6th of April, 1830, the Church of Jesus Christ of Latter-day Saints was formally organized and thus took on a legal existence.",
+   "4446-2271-0001": "he had preconceived ideas about everything and his idea about americans was that they should be engineers or mechanics",
+   "4507-16021-0001": "it engenders a whole world la pegre for which red theft and a hell la pegrine for which red hunger"
+  },
+  "how": "omxcode: mojoui.speech in process (torch fp16, sdpa, greedy), samples by address"
+ },
+ "b": {
+  "model": "onnx-community/whisper-large-v3-turbo",
+  "cold_start_s": 7.85,
+  "p50_ms": 933.3,
+  "p95_ms": 1476.0,
+  "rtf": 0.1036,
+  "wer": 0.0299,
+  "peak_gpu_mb": 2270,
+  "ms": {
+   "1089-134686-0000": 1514.9,
+   "1188-133604-0000": 1476.0,
+   "121-121726-0000": 764.0,
+   "1221-135766-0000": 1035.2,
+   "1284-1180-0000": 968.6,
+   "1320-122612-0000": 1195.6,
+   "1580-141083-0000": 907.1,
+   "1995-1826-0000": 941.7,
+   "2094-142345-0001": 870.0,
+   "2300-131720-0000": 679.9,
+   "237-126133-0000": 1240.7,
+   "260-123286-0000": 728.4,
+   "2830-3979-0000": 803.9,
+   "2961-960-0001": 739.8,
+   "3570-5694-0000": 1124.6,
+   "3575-170457-0000": 925.0,
+   "3729-6852-0000": 1043.2,
+   "4077-13751-0000": 954.8,
+   "4446-2271-0001": 790.6,
+   "4507-16021-0001": 830.8
+  },
+  "hyps": {
+   "1089-134686-0000": "He hoped there would be stew for dinner, turnips and carrots and bruised potatoes, and fat mutton pieces to be ladled out in thick, peppered, flour-fattened sauce.",
+   "1188-133604-0000": "You will find me continually speaking of four men, Titian, Holbein, Turner, and Tintoret, in almost the same terms.",
+   "121-121726-0000": "Also, a popular contrivance whereby lovemaking may be suspended but not stopped during the picnic season.",
+   "1221-135766-0000": "how strange it seemed to the sad woman as she watched the growth and the beauty that became every day more brilliant and the intelligence that threw its quivering sunshine over the tiny features of this child",
+   "1284-1180-0000": "He wore blue silk stockings, blue knee pants with gold buckles, a blue ruffled waist, and a jacket of bright blue braided with gold.",
+   "1320-122612-0000": "Since the period of our tale, the active spirit of the country has surrounded it with a belt of rich and thriving settlements, though none but the hunter or the savage is ever known even now to penetrate its wild recesses.",
+   "1580-141083-0000": "i will endeavor in my statement to avoid such terms as would serve to limit the events to any particular place or give a clue as to the people concerned",
+   "1995-1826-0000": "In the debate between the senior societies, her defense of the 15th Amendment had been not only a notable bit of reasoning, but delivered with real enthusiasm.",
+   "2094-142345-0001": "But the windows are patched with wooden panes, and the door, I think, is like the gate. It is never opened.",
+   "2300-131720-0000": "The Paris plant, like that at the Crystal Palace, was a temporary exhibit.",
+   "237-126133-0000": "here she would stay comforted and soothed among the lovely plants and rich exotics rejoicing the heart of old turner the gardener who since polly's first rapturous entrance had taken her into his good graces for all time",
+   "260-123286-0000": "Saturday, August 15th. The sea unbroken all round. No land in sight.",
+   "2830-3979-0000": "We want you to help us publish some leading work of Luther's for the general American market. Will you do it?",
+   "2961-960-0001": "the influence which the timaeus has exercised upon posterity is due partly to a misunderstanding",
+   "3570-5694-0000": "But already at a point in economic evolution far antedating the emergence of the lady, specialized consumption of goods as an evidence of pecuniary strength had begun to work out in a more or less elaborate system.",
+   "3575-170457-0000": "And often has my mother said, while on her lap I laid my head, she feared for time I was not made, but for eternity.",
+   "3729-6852-0000": "to celebrate the arrival of her son sylvia gave a splendid supper to which she had invited all her relatives and it was a good opportunity for me to make their acquaintance",
+   "4077-13751-0000": "On the 6th of April, 1830, the Church of Jesus Christ of Latter-day Saints was formally organized and thus took on a legal existence.",
+   "4446-2271-0001": "He had preconceived ideas about everything, and his idea about Americans was that they should be engineers or mechanics.",
+   "4507-16021-0001": "it engenders a whole world la pegre for which red theft and a hell la pegrine for which red hunger"
+  },
+  "how": "transformers.js 4.3.2 on WebGPU (onnxruntime-web), greedy; the best variant of b_variants",
+  "variants": [
+   {
+    "encoder": "fp16",
+    "decoder": "fp16",
+    "loaded": false,
+    "error": "Error: The device (webgpu) does not support fp16."
+   },
+   {
+    "encoder": "fp32",
+    "decoder": "fp32",
+    "loaded": false,
+    "error": "TypeError: Failed to fetch | adapter {\"vendor\":\"nvidia\",\"architecture\":\"ampere\",\"description\":\"NVIDIA GeForce RTX 3090\",\"features\":[\"bgra8unorm-storage\",\"chromium-experimental-multi-draw-indirect\",\"chromium-experimental-sampling-resource-table\",\"chromium-experimental-subgroup-matrix\",\"chromium-exper"
+   },
+   {
+    "encoder": "fp32",
+    "decoder": "q4",
+    "loaded": false,
+    "error": "TypeError: Failed to fetch | adapter {\"vendor\":\"nvidia\",\"architecture\":\"ampere\",\"description\":\"NVIDIA GeForce RTX 3090\",\"features\":[\"bgra8unorm-storage\",\"chromium-experimental-multi-draw-indirect\",\"chromium-experimental-sampling-resource-table\",\"chromium-experimental-subgroup-matrix\",\"chromium-exper"
+   },
+   {
+    "encoder": "q4",
+    "decoder": "fp32",
+    "loaded": true,
+    "p50_ms": 1164.1,
+    "p95_ms": 1696.9,
+    "wer": 0.0299,
+    "cold_start_s": 10.05,
+    "download_mb": 1116.0
+   },
+   {
+    "encoder": "q4",
+    "decoder": "q4",
+    "loaded": true,
+    "p50_ms": 933.3,
+    "p95_ms": 1476.0,
+    "wer": 0.0299,
+    "cold_start_s": 7.85,
+    "download_mb": 762.1
+   }
+  ],
+  "download_mb": 762.1,
+  "adapter": {
+   "vendor": "nvidia",
+   "architecture": "ampere",
+   "description": "NVIDIA GeForce RTX 3090",
+   "features": [
+    "bgra8unorm-storage",
+    "chromium-experimental-multi-draw-indirect",
+    "chromium-experimental-sampling-resource-table",
+    "chromium-experimental-subgroup-matrix",
+    "chromium-experimental-timestamp-query-inside-passes",
+    "clip-distances",
+    "core-features-and-limits",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "primitive-index",
+    "rg11b10ufloat-renderable",
+    "subgroup-size-control",
+    "subgroups",
+    "texture-component-swizzle",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "texture-compression-unaligned",
+    "texture-formats-tier1",
+    "texture-formats-tier2",
+    "timestamp-query"
+   ]
+  },
+  "dtype": {
+   "encoder_model": "q4",
+   "decoder_model_merged": "q4"
+  },
+  "gpu_rise_mb_by_index": {
+   "0": 2270,
+   "1": 0
+  }
+ },
+ "same_way": "latency = audio handed in -> final text, after warm-up (two 1 s silences at load, then the first clip); cold start = process start -> model ready; peak GPU = nvidia-smi memory.used rise on the GPU"
+}

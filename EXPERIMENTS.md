@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 43: Dictate, what the web can't do (2026-10-30)
+- **Setup:** branch `goal-43-dictate` from main 49cbd8d, worktree ../mojo-ui-g43; contract docs/goals/43-GOAL.md + 43-check.py (written first). A race with a verdict: whisper-large-v3-turbo on the same RTX 3090, omxcode in process vs transformers.js 4.3.2 on WebGPU in headless Chromium. 20 LibriSpeech test-clean clips (scripts/dictate_data.py), audio through a virtual null sink only.
+- **Worked:** `mojoui/audio.mojo` (Microphone: libpulse-simple on its own thread, 20 ms fragments into a ring; match 0.990 with the played tone); `mojoui/speech.mojo` + `speech_torch.py` (SpeechModel/SpeechStream: torch fp16 in the app's process, samples by address, partial words while speaking, a final at a pause; WER 0.030 streaming in real time); `examples/dictate` (WER 0.016, final text 290-330 ms after the speaker stops).
+- **The race (docs/goals/43/race.json):** A 135 ms median / 174 ms p95 per clip, WER 0.034, cold start 4.6 s, 2.1 GB GPU; B 933 ms / 1476 ms, WER 0.030, cold start 7.9 s, 2.3 GB GPU, 762 MB downloaded. omxcode 6.9× faster at the median, within 0.01 WER. B's fp16 didn't load (Chromium's Dawn exposes no shader-f16 on this NVIDIA/Vulkan stack) and its fp32 encoder (2.5 GB) failed to fetch, so B ran the same model's 4-bit encoder + decoder, its fastest variant.
+- **Broke and fixed:** Mojo's main thread holds the GIL forever (handed over, D-1409); std.python and the GTK host declared dlopen two ways and didn't link (OwnedDLHandle, D-1413); the Mac link lacks the Mojo runtime's Python symbols (Linux-only paths, D-1414); `match`/`ref` are reserved words.
+- **Means:** the first probe that beats the web on its own ground: native microphone + a GPU model in the app's own process. Unverified: the Mac (built, not run), a real microphone (only the null sink), B with fp16 on a stack that exposes shader-f16.
+
+---
+
 ## Goal 40: Sketch, omxcode draws (2026-10-30)
 - **Setup:** branch `goal-40-sketch` from main b79fc66, worktree ../mojo-ui-g40; contract docs/goals/40-GOAL.md, checker docs/goals/40-check.py (written first). The yardstick: Personal Note's canvas (ink with pressure, pan/zoom).
 - **Worked:** `mojoui/ink.mojo` (a stroke as one outline polygon through every point, width from pressure or speed, an eraser hit test); `Painter.polygon` and `Painter.layer_transform` (the CPU painter fills polygons with 4 sub-scanlines, non-zero; GTK fills a GskPath and moves the kept layer); `Event.pressure` from GDK_AXIS_PRESSURE, the web's pen, the Mac's tablet; generic GTK test steps `stroke:`, `render:` and `framebench:`; examples/sketch (pen, eraser, three inks, undo, clear, pan, zoom around the pointer). GTK's canvas equals the CPU render (0.0 levels). Linux, web and Mac build. Pressure: only injected on GTK, not tried with a real pen on GTK or the web; the Mac is built, not run.
