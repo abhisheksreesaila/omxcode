@@ -138,6 +138,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, Toggle, Segmented, ProgressBar, VStack, HStack, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat |
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)` | `mojoui/imageops.mojo` | Canvas | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 
 ## JavaScript widgets (WebComponent)
 
@@ -153,12 +154,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 113 | 3 | 0 |
-| Web | 116 | 0 | 0 |
-| Android | 19 | 19 | 78 |
-| Mac (AppKit) | 0 | 105 | 11 |
-| iPhone (UIKit) | 0 | 83 | 33 |
-| Agent (MCP) | 31 | 36 | 49 |
+| Linux (GTK) | 113 | 4 | 0 |
+| Web | 116 | 1 | 0 |
+| Android | 19 | 20 | 78 |
+| Mac (AppKit) | 0 | 106 | 11 |
+| iPhone (UIKit) | 0 | 84 | 33 |
+| Agent (MCP) | 31 | 37 | 49 |
 
 ## Inside one app, not components yet (the debt)
 
