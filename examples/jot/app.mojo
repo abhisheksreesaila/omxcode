@@ -107,7 +107,10 @@ struct Words(Movable):
     def note(self, i: Int) -> Tuple[String, String]:
         """Note i's title and body (the same for the same i)."""
         var title = self.subjects[(i * 7919) % len(self.subjects)] + ": " + self.details[(i * 104729 + 13) % len(self.details)]
-        return (title, title + "\n" + self.endings[(i * 31 + 5) % len(self.endings)] + " Note " + String(i + 1) + ".")
+        var body = title + "\n"  # (a few sentences, as a kept note has: D-1322)
+        for k in range(8):
+            body += self.endings[(i * 31 + 5 + k * 17) % len(self.endings)] + " "
+        return (title, body + "Note " + String(i + 1) + ".")
 
 
 def gallery_notes() -> List[String]:

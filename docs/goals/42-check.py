@@ -140,6 +140,14 @@ def m2():
         return False, f"exit {code}; GAPS line {bool(gap)}; seed done {seeded >= 0}: {out[-400:]}"
     if seeded > gap.start():
         return False, "the seed finished after the measured window (the gap measure didn't cover it)"
+    # (added in review round 1, D-1322: the measure started before the seed did, and the seed's work is at least twice
+    # the 100 ms gap threshold, so a seed on the UI thread would show as a gap; a slow start can't pass measuring nothing)
+    started, seed_start = out.find("GAPS: start"), out.find("JOT SEED: start")
+    if started < 0 or seed_start < 0 or started > seed_start:
+        return False, f"GAPS: start at {started}, JOT SEED: start at {seed_start}: the measure didn't start before the seed"
+    took = re.search(r"JOT SEED: done \d+ notes in (\d+) ms", out)
+    if not took or int(took.group(1)) < 200:
+        return False, f"the seed took {took.group(1) if took else '?'} ms (< 200 ms, twice the gap threshold: no margin to see a freeze)"
     frames, longest = int(gap.group(1)), float(gap.group(2))
     if frames < 20 or longest > 100:
         return False, f"while seeding: {frames} frames painted, longest gap {longest} ms (≥ 20 frames, ≤ 100 ms)"
