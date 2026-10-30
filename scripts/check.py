@@ -190,6 +190,17 @@ def reel_ok(reel, t):
     if not checks or worse:
         return False, f"faces not blurred: {worse or 'no face checks in truth'}"
     import numpy as np
+    # the reel is the right footage, not blurred all over: outside the edits it matches its source frame
+    bx, by, bw2, bh2 = t["warehouse"]["id_band"]["box"]
+    off = []
+    for c in checks[:: max(1, len(checks) // 6)]:
+        a, b = frame(src, c["src_frame"]).astype(int), frame(reel, c["reel_frame"]).astype(int)
+        d = np.abs(a - b).max(axis=2)
+        d[by:by + bh2, bx:bx + bw2] = 0
+        if np.median(d) > 6 or (d > 40).mean() > 0.08:
+            off.append((c["reel_frame"], float(np.median(d)), round(float((d > 40).mean()), 3)))
+    if off:
+        return False, f"reel frames don't match their source outside the edits: {off}"
     band = t["warehouse"]["id_band"]  # {"src_frame", "reel_frame", "box"}
     x, y, bw, bh = band["box"]
     d = np.abs(frame(src, band["src_frame"])[y:y + bh, x:x + bw].astype(int) - frame(reel, band["reel_frame"])[y:y + bh, x:x + bw].astype(int)).mean()
@@ -336,17 +347,25 @@ def m11():
     headless.ensure()
     shot = OUT / "m11-editor-gtk.png"
     env = dict(os.environ, G39_MEDIA=str(MEDIA), MOJOUI_TRACE="1", MOJOUI_SHOT=str(shot), MOJOUI_WINDOW="1440x900",
-               MOJOUI_TEST=os.environ.get("G39_M11_STEPS", "wait:600;tap:edit;wait:400;tap:split;wait:300;tap:trim-end;wait:300;tap:play;wait:1000;tap:pause;wait:300"))
+               MOJOUI_TEST=os.environ.get("G39_M11_STEPS", "wait:600;tap:edit;wait:400;tap:split;wait:300;tap:step-forward;tap:step-forward;tap:step-forward;tap:step-forward;tap:step-forward;wait:200;tap:trim-end;wait:300;tap:play;wait:1000;tap:pause;wait:300"))
     r = run([str(ROOT / "build/media/linux/media")], 600, env=env)
     out = r.stdout + r.stderr
     (OUT / "m11.txt").write_text(out)
     lines = re.findall(r"TIMELINE: .*", out)
-    if r.returncode or "TEST: " in out or not lines or not shot.exists() or not any("split" in l for l in lines) or not any("trim" in l for l in lines):
+    if r.returncode or "TEST: " in out or not lines or not shot.exists() or not any("split at" in l for l in lines) or not any("trim" in l and " to " in l and "refused" not in l for l in lines):
         return False, f"exit {r.returncode}, {len(lines)} TIMELINE lines, shot {shot.exists()}: {out[-400:]}"
-    src = (ROOT / "examples/omxplorer/app.mojo").read_text() + (ROOT / "mojoui/mediacard.mojo").read_text()
-    if "MediaTimeline" not in src:
-        return False, "omxplorer's video card doesn't open the editor (no MediaTimeline in mediacard/app)"
-    return True, f"{msg}; {len(lines)} TIMELINE lines; editor in omxplorer"
+    omx_build()
+    home = OUT / "m11-omx"
+    (home / "config").mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, OMX_DOCUMENTS=str(MEDIA), OMX_CONFIG=str(home / "config"), MOJOUI_TRACE="1",
+               MOJOUI_TEST="wait:800;open:warehouse.mp4;wait:1500;tap:edit;wait:800;tap:split;wait:300",
+               MOJOUI_SHOT=str(OUT / "m11-omxplorer-edit-gtk.png"), MOJOUI_WINDOW="1742x876")
+    r = run([str(ROOT / "build/omxplorer/linux/omxplorer")], 900, env=env)
+    o = r.stdout + r.stderr
+    (OUT / "m11-omx.txt").write_text(o)
+    if r.returncode or "TEST: " in o or not re.search(r"TIMELINE: split at", o):
+        return False, f"omxplorer's video card doesn't open the editor (exit {r.returncode}): {o[-300:]}"
+    return True, f"{msg}; {len(lines)} TIMELINE lines; the editor opens from omxplorer's card and splits"
 
 
 def m12():
