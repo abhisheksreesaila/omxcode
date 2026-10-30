@@ -93,6 +93,7 @@ struct _Lib(ImplicitlyCopyable, Movable):
     var column_int64: Int
     var column_double: Int
     var column_text: Int
+    var column_bytes: Int
     var errmsg: Int
     var exec: Int
     var last_insert_rowid: Int
@@ -108,10 +109,10 @@ struct _Lib(ImplicitlyCopyable, Movable):
             _dlsym(h, "sqlite3_clear_bindings"), _dlsym(h, "sqlite3_bind_text"), _dlsym(h, "sqlite3_bind_int64"),
             _dlsym(h, "sqlite3_bind_double"), _dlsym(h, "sqlite3_bind_null"), _dlsym(h, "sqlite3_column_count"),
             _dlsym(h, "sqlite3_column_type"), _dlsym(h, "sqlite3_column_int64"), _dlsym(h, "sqlite3_column_double"),
-            _dlsym(h, "sqlite3_column_text"), _dlsym(h, "sqlite3_errmsg"), _dlsym(h, "sqlite3_exec"),
+            _dlsym(h, "sqlite3_column_text"), _dlsym(h, "sqlite3_column_bytes"), _dlsym(h, "sqlite3_errmsg"), _dlsym(h, "sqlite3_exec"),
             _dlsym(h, "sqlite3_last_insert_rowid"), _dlsym(h, "sqlite3_changes"), _dlsym(h, "sqlite3_busy_timeout"),
         )
-        if lib.open_v2 == 0 or lib.prepare_v2 == 0 or lib.bind_double == 0 or lib.busy_timeout == 0:
+        if lib.open_v2 == 0 or lib.column_bytes == 0 or lib.prepare_v2 == 0 or lib.bind_double == 0 or lib.busy_timeout == 0:
             raise Error("sqlite: the SQLite library is missing functions")
         return lib
 
@@ -221,8 +222,20 @@ struct Statement(Movable):
         return _fn[_F_PI_D](self.lib.column_double)(self.st, c_int(col))
 
     def text(self, col: Int) -> String:
-        """The column as UTF-8 text ("" for NULL)."""
-        return _c_text(_fn[_F_PI_P](self.lib.column_text)(self.st, c_int(col)))
+        """The column as UTF-8 text ("" for NULL), all of its bytes (an embedded NUL included: sqlite3_column_bytes,
+        not the C string's end); bytes that aren't UTF-8 (a file another program wrote) read as U+FFFD."""
+        var addr = _fn[_F_PI_P](self.lib.column_text)(self.st, c_int(col))  # (text first, then its length: SQLite's order)
+        var n = Int(_fn[_F_PI](self.lib.column_bytes)(self.st, c_int(col)))
+        if addr == 0 or n <= 0:
+            return String("")
+        var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
+        var out = List[UInt8](capacity=n)
+        for i in range(n):
+            out.append(p.unsafe_offset(i)[])
+        try:
+            return String(from_utf8=Span(out))
+        except:
+            return String(from_utf8_lossy=Span(out))
 
 
 struct Database(Movable):
@@ -305,7 +318,9 @@ def fts_prefix_query(typed: String) -> String:
         var word = String(part).strip()
         if word == "":
             continue
-        var w = String(word).replace('"', '""')
+        var w = String(word).replace("\x00", "").replace('"', '""')  # (a pasted NUL would end FTS5's query text early)
+        if w == "":
+            continue
         if out != "":
             out += " "
         out += '"' + w + '"*'
