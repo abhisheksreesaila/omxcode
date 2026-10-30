@@ -78,6 +78,8 @@ def skin_css(p: Palette, cls: String) -> String:
         + w + "button label, " + w + "button image { color: inherit; }\n"
         + w + "button.suggested-action { background: " + accent + "; color: " + on_accent + "; box-shadow: none; font-weight: 600; }\n"
         + w + "button.suggested-action:hover { background: " + hex_of(mix(p.accent, rgba(0, 0, 0), 0.14)) + "; }\n"
+        # (a primary button in the chrome band keeps its text on the accent: the band's ink above out-ranks "inherit")
+        + w + ".mui-tag-toolbar button.suggested-action, " + w + ".mui-tag-toolbar button.suggested-action label { color: " + on_accent + "; }\n"
         # a sentence's words (mojoui.sentence): inline, in the accent, a dotted underline, a wash on hover; the glue between them in the ink
         + w + "button.mui-token { padding: 0 1px; min-height: 0; min-width: 0; margin: 0; border-radius: 5px; background: transparent; box-shadow: none; }\n"
         + w + "button.mui-token:hover { background: " + hex_of(mix(p.card, p.data(0), 0.12)) + "; }\n"  # (the words wear the chart's colour, not the mode's tint: a red word reads as an error)
@@ -197,6 +199,7 @@ body.skin .segmented, body.skin .tabs { background: transparent; padding: 0; gap
 body.skin .segmented span, body.skin .tabs span { min-height: 26px; padding: 0 10px; border-radius: 0; font-weight: 400; color: var(--o-ink2); font-size: 12px; }
 body.skin .segmented input:checked + span, body.skin .tabs input:checked + span { background: var(--o-accent); color: var(--o-on-accent); font-weight: 600; box-shadow: none; }
 body.skin [data-tag=toolbar] .text, body.skin [data-tag=toolbar] button { color: var(--o-chrome-ink); }
+body.skin [data-tag=toolbar] button.prominent, body.skin [data-tag=toolbar] button.prominent .text { color: var(--o-on-accent); }
 body.skin [data-tag=sheet-tabs] .tabs { border: 0; border-radius: 0; }
 body.skin [data-tag=sheet-tabs] .tabs input:checked + span { background: var(--o-card); color: var(--o-ink); box-shadow: inset 0 2px var(--o-accent); }
 body.skin [data-tag=formula-bar] input[type=text] { font-family: "JetBrains Mono", monospace; font-size: 12.5px; }
