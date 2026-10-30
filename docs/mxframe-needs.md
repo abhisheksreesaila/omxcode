@@ -22,6 +22,7 @@ The Scene made drawing cost ≤ 1 ms a frame (goal 26). What still freezes the w
 | 2 | **Incremental results after an edit**: a total or group-by updated by the edited rows' delta (or cached per plan and invalidated by what changed) | one typed cell recomputes every chart, pivot and tile from scratch (`refresh()`) | `refresh()` recomputes all; streamed totals are cached by edit count (`mojoui/sheet.mojo` `Notes.plain`) | high |
 | 3 | **Range aggregates in a given order**: sum / count / mean / min / max over rows a..b of a permutation (the sorted view) × a set of columns, exact in each column's own decimal scale | the status bar's figures for a selected block, and Copy, read one cell at a time | a cell-by-cell loop capped at 100,000 cells ("Too many cells to total here"; `app.mojo` `BLOCK_CAP`) | high |
 | 4 | **A window of rows in one call**: rows a..b (in a permutation) of n columns, typed, with null flags | the grid reads each visible cell separately every frame it rebuilds (≈ 1,000 calls a scroll frame at 2.8k × 1.4k) | per-cell `is_null` / `value` (`mojoui/datagrid.mojo`) | medium |
+| 26 | **`Job.ended()`: has the job's thread returned, without waiting** (the Mac and iPhone have no `pthread_tryjoin_np`) | on the Mac, checking a cancelled job would block the UI thread | `mojoui/sheetjobs.mojo` `stopped()` reads the job's `W_REFS` (the work lets go before its thread returns, D-792): an engine internal that breaks quietly if that order changes | medium |
 
 ## 2. Charts and the Report (goal 28: "the title is the query")
 

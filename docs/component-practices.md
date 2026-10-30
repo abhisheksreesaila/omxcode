@@ -38,6 +38,8 @@ wrong thread. ([architecture.md](architecture.md), "The bridge")
 
 ## 2. Slow work off the UI thread, results back as events
 
+(The plain-language guide, with the rules an app follows: [ui-threads.md](ui-threads.md).)
+
 **The rule.** The UI thread has about 16 ms per frame at 60 Hz (8 ms at 120 Hz). Anything slower, like a network call,
 a file import or a big query, must run elsewhere, and its result must come back to the UI thread. Elm calls these
 "commands", Compose uses coroutines, SwiftUI uses `async` tasks.

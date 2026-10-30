@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "llms-full.txt"
 # The order an agent should read them in: the story, the API, the design, the agent host, the matrix.
-SOURCES = ["README.md", "docs/reference.md", "docs/architecture.md", "docs/agent.md", "docs/components.md"]
+SOURCES = ["README.md", "docs/reference.md", "docs/architecture.md", "docs/agent.md", "docs/ui-threads.md", "docs/components.md"]
 
 
 def build() -> str:
