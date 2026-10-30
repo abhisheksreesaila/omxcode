@@ -1,1 +1,3 @@
 jobwake
+omxplorer
+maccheck
