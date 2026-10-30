@@ -85,3 +85,11 @@ M4 PASS: typing then quit: saved by the quit hook, there after a relaunch
 M5 PASS: gallery Database section, matrix, llms.txt, EXPERIMENTS; web and mac built
 M6 PASS: 1M notes: search p95 A 64.58 vs B 165.82 ms (opfs-sahpool); cold open A 65.79 vs B 435.28 ms; build A 35.94 vs B 56.64 s; disk A 528.3 vs B 519.2 MB
 ```
+
+## Review round 2 (PASS) and what's left open
+Round 2 passed at 095f24a with no must-fix. Done after it: M6's staleness now covers both harnesses (tests/bench_jot_race.mojo, scripts/jot_race_web), an addition. A's SQLite is the system libsqlite3 3.53.4 (the same version as B's wasm build); A's cold-open span includes the process spawn, B's excludes the browser launch (favours B).
+Declined: making M6 pass on a loss (the owner's rule: a probe beats the web or it fails; a loss stays a FAIL).
+Open, for a later round:
+- goal 30 M1 failed once ("no button Create table") and passed on rerun after the gaps: change: run it 5+ times cold and find the cause.
+- gtk.mojo field queue: a held change isn't dropped when a newer change to the same field goes through normally; a stale write is possible in a narrow window (not reproduced). Drop held entries for that id on send/normal change; add a fieldcheck case typing during a pending rebuild.
+- web.py dropfile: files written after a mid-upload session eviction leak; no sweep of stale upload/download folders at startup; an oversize file is skipped silently.

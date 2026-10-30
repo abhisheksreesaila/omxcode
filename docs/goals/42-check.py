@@ -307,7 +307,7 @@ def m6():
     if not path.exists():
         return False, "docs/goals/42/race.json missing (scripts/jot_race.py)"
     r = json.loads(path.read_text())
-    srcs = ["mojoui/sqlite.mojo", "scripts/jot_race.py"]
+    srcs = ["mojoui/sqlite.mojo", "scripts/jot_race.py", "tests/bench_jot_race.mojo", "scripts/jot_race_web"]  # (both harnesses: review round 2)
     stale = run(["git", "diff", "--quiet", r.get("commit", "none"), "HEAD", "--", *srcs]).returncode != 0
     dirty = run(["git", "diff", "--quiet", "HEAD", "--", *srcs]).returncode != 0
     if stale or dirty:
