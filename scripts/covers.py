@@ -8,9 +8,10 @@ same tools an agent gets, scripts/agent_client.py --attach). Paced for a viewer:
 
 warehouse: omxplorer opens warehouse.mp4 → Analyze (the warehouse preset) → the detections table → shipments.csv as a table
 (the caption's source) → Make a reel (damaged pallets, faces blurred, the shipment burned in) → the reel card plays → the
-video card's Edit → Cut it (the clips from the rows) → Back.
-drone: examples/media (drone_a.mp4 beside its telemetry, in step) plays, the metric changes, then its editor with the
-altitude lane. (Until the drone scenario lands in omxplorer, D-1010.)
+video card's Edit → Cut it (the clips from the rows) → play.
+drone: omxplorer opens drone_a.mp4 and telemetry_a.csv (the chart and the map) → play (the cursor and the dot follow) →
+Analyze (inspection) → flight b the same way (a jump cut) → Compare inspections → "worse" → Flight plan → the waypoints.
+Jump cuts only, nothing sped up: Xvfb draws a popover's shadow black, and setup steps a viewer needn't watch.
 Builds are copied to <out>/apps first, so a check rebuilding build/ never swaps the binary mid-recording.
 """
 
@@ -35,7 +36,8 @@ SIZE = (1440, 900)
 class Rec:
     """One app on the headless display with its agent link, and an x11grab recording of its window."""
 
-    def __init__(self, app, env, out):
+    def __init__(self, app, env, out, size=SIZE):
+        self.size = size
         headless.ensure()
         from Xlib import X, display
         from Xlib.ext import xtest
@@ -45,7 +47,7 @@ class Rec:
         d.close()
         self.dir = tempfile.TemporaryDirectory()
         self.sock = Path(self.dir.name) / "app.sock"
-        env = dict(os.environ, MOJOUI_AGENT_SOCKET=str(self.sock), MOJOUI_WINDOW=f"{SIZE[0]}x{SIZE[1]}", MOJOUI_TRACE="1",
+        env = dict(os.environ, MOJOUI_AGENT_SOCKET=str(self.sock), MOJOUI_WINDOW=f"{size[0]}x{size[1]}", MOJOUI_TRACE="1",
                    CUDA_VISIBLE_DEVICES=os.environ.get("CUDA_VISIBLE_DEVICES", "0"), **env)
         env.pop("MOJOUI_TEST", None)
         self.log = open(out.with_suffix(".log"), "w")
@@ -65,7 +67,7 @@ class Rec:
         self.t0, self.marks = None, {}  # when the recording started; when each tool was called (seconds into it)
 
     def record(self):
-        self.ffmpeg = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab", "-draw_mouse", "0", "-video_size", f"{SIZE[0]}x{SIZE[1]}",
+        self.ffmpeg = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab", "-draw_mouse", "0", "-video_size", f"{self.size[0]}x{self.size[1]}",
                                         "-framerate", "30", "-i", os.environ["DISPLAY"] + "+0,0", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                                         "-crf", "14", "-preset", "veryfast", str(self.raw)], stdin=subprocess.PIPE)
         time.sleep(0.6)
@@ -103,6 +105,36 @@ class Rec:
         self.close()
         raise SystemExit(f"{tool} never appeared; on screen: {sorted(self.tools())}")
 
+    def wheel(self, x, y, notches, pause=0.6):
+        """Scroll the wheel there (real X input, as a person would; negative: up), then the pointer leaves the window.
+        The sheet scrolls to reveal what lands; this brings the video card back into view."""
+        from Xlib import X, display
+        from Xlib.ext import xtest
+        d = display.Display(os.environ["DISPLAY"])
+        xtest.fake_input(d, X.MotionNotify, x=x, y=y)
+        d.sync()
+        time.sleep(0.05)
+        b = 5 if notches > 0 else 4
+        for _ in range(abs(notches)):
+            xtest.fake_input(d, X.ButtonPress, b)
+            xtest.fake_input(d, X.ButtonRelease, b)
+            d.sync()
+            time.sleep(0.03)
+        xtest.fake_input(d, X.MotionNotify, x=self.size[0] + 400, y=self.size[1] + 400)
+        d.sync()
+        d.close()
+        time.sleep(pause)
+
+    def until_text(self, text, timeout=60.0, poll=0.4):
+        """Wait until `text` is on screen (a table card named so landed)."""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if text in self.c.call("screen")[0]:
+                return
+            time.sleep(poll)
+        self.close()
+        raise SystemExit(f"{text!r} never appeared on screen")
+
     def close(self):
         self.stop()
         try:
@@ -132,10 +164,17 @@ def finish(raw, out, poster_at, drop=()):
 
 
 def copy_app(name, out):
-    dst = out / "apps" / name
-    shutil.rmtree(dst, ignore_errors=True)
-    shutil.copytree(ROOT / f"build/{name}/linux", dst)
-    return dst / name
+    """The app's build, copied once it is whole (a check may be rebuilding build/ meanwhile: then the last copy stays)."""
+    src, dst = ROOT / f"build/{name}/linux", out / "apps" / name
+    for _ in range(600):
+        if (src / name).exists() and not subprocess.run(["pgrep", "-f", f"mojo build .*examples/{name} .*linux_main"], capture_output=True).stdout:
+            shutil.rmtree(dst, ignore_errors=True)
+            shutil.copytree(src, dst)
+            return dst / name
+        if (dst / name).exists():
+            return dst / name
+        time.sleep(2)
+    raise SystemExit(f"no whole build of {name}")
 
 
 def warehouse(media, out, record=True):
@@ -164,61 +203,87 @@ def warehouse(media, out, record=True):
         r.until("play-2", 120)  # the reel lands as a new card
         time.sleep(0.6)
         r.call("play-2", 2.0)  # (the call answers once the app settles: a playing video holds it a few seconds)
+        t_reel_end = time.time() - r.t0
+        r.call("edit", 0.5)  # the source card's Edit: the editor, with the analysis as lanes
+        r.until("cut-it", 90)
+        time.sleep(1.0)
+        r.call("cut-it", 2.0)
+        r.call("play", 4.0)
+        r.call("pause", 0.8)
         seg = time.time() - r.t0
         r.stop()
     finally:
         r.close()
-    raw = [r.raw]
-    # the editor: omxplorer's video card has no Edit yet on this branch, so examples/media's editor on the same footage
-    e = drone(media, out, False, "warehouse")
-    try:
-        e.until("cut-it", 90)  # its analysis job lands: the sentence and "Cut it"
-        time.sleep(0.5)
-        e.record()
-        time.sleep(1.0)
-        e.call("cut-it", 2.0)
-        e.call("play", 4.0)
-        e.call("pause", 0.6)
-        e.stop()
-    finally:
-        e.close()
-    raw.append(e.raw)
-    both = out / "clip-warehouse.both.mp4"
-    lst = out / "concat.txt"
-    lst.write_text("".join(f"file '{f}'\n" for f in raw))
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(both)], check=True)
-    for f in raw:
-        if f != both:
-            f.unlink()
-    lst.unlink()
     m = r.marks
     print("marks: " + ", ".join(f"{k} {v:.1f}" for k, v in m.items()) + f"; segment {seg:.1f}")
     drop = [(m["analyze"], after_popover),  # the popover Xvfb draws black
             (m["insert-table"], m["make-reel"] + 0.1),  # adding shipments.csv (the caption's source): a jump cut
             (m["make-reel"] + 1.4, m["reel-make"] - 0.3),  # the dialog's choices, set one by one
-            (m["play-2"] + 6.5, seg - 0.05)]  # the reel plays 6.5 s
+            (min(m["play-2"] + 6.5, t_reel_end), m["edit"] - 0.1),  # the reel plays 6.5 s
+            (m["play"] + 5.0, seg - 0.05)]  # the edit plays 5 s (the play call holds while the video runs)
     gone = sum(b - a for a, b in drop[:3])
-    finish(both, out / "clip-warehouse.mp4", m["play-2"] + 3.0 - gone, drop)
+    finish(r.raw, out / "clip-warehouse.mp4", m["play-2"] + 3.0 - gone, drop)
 
 
-def drone(media, out, record=True, clip=""):
-    r = Rec(copy_app("media", out), {"G39_MEDIA": str(media), "G39_CLIP": clip}, out / ("clip-editor.mp4" if clip else "clip-drone.mp4"))
+def drone(media, out, record=True):
+    """The drone in omxplorer (scripts/scenario.py drone's tools): flight a with its telemetry (chart and map), playing, the
+    cursor and the map's dot following; Analyze (inspection); flight b set up the same way (cut from the copy); Compare
+    inspections → the "worse" table; Flight plan → the waypoints."""
+    docs = out / "drone-docs"
+    shutil.rmtree(docs, ignore_errors=True)
+    (docs / "config").mkdir(parents=True)
+    r = Rec(copy_app("omxplorer", out), {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(docs / "config")}, out / "clip-drone.mp4",
+            size=(1440, 1080))  # (taller: the telemetry chart and map sit under the video card)
     if not record:
         return r
+    cut = []
     try:
         r.record()
-        time.sleep(1.0)
-        r.call("play", 6.0)
-        r.call("pause", 1.0)
-        r.call("edit")
-        r.until("cut-it", 90)  # the editor's defects lane: the analysis job lands
-        time.sleep(1.5)
-        r.call("play", 5.0)
-        r.call("pause", 1.2)
+        time.sleep(0.6)
+        r.call("open-file", 1.2, path=str(media / "drone_a.mp4"))
+        r.call("insert-table", 0.3)  # the flight's log first: the inspection preset places what it finds by it
+        r.call("choose-table", 1.5, path=str(media / "telemetry_a.csv"))
+        r.wheel(900, 600, -15)  # back up to the video card (GTK opens no popover on a button scrolled out of view)
+        t = time.time() - r.t0
+        if t - r.marks["choose-table"] > 3.0:  # the chart and the map landed: keep 2.5 s of them, then on to Analyze
+            cut.append((r.marks["choose-table"] + 2.5, t))
+        r.call("analyze", 0.3)
+        r.call("analyze-assets-defects-inspection-preset")
+        cut.append((t, time.time() - r.t0 + 0.2))  # (the popover: Xvfb draws its shadow black)
+        r.until_text("drone_a places", 90)
+        landed = time.time() - r.t0
+        if landed - cut[-1][1] > 3.0:  # the analysis runs in the background: keep 1.5 s of its progress
+            cut.append((cut[-1][1] + 1.5, landed - 0.3))
+        time.sleep(1.5)  # the assets and defects, as rows
+        r.wheel(900, 600, -15)
+        r.call("play", 1.5)  # the chart's cursor and the map's dot follow the picture (the call itself holds ~5 s)
+        r.call("pause", 0.6)
+        t = time.time() - r.t0
+        r.call("open", 0.3, path=str(media / "drone_b.mp4"))
+        r.call("insert-table", 0.3)
+        r.call("choose-table", 0.3, path=str(media / "telemetry_b.csv"))
+        r.call("seek-2", 0.2, value=0.0)  # (flight b's card into view: its Analyze opens a popover only when shown)
+        r.call("analyze-2", 0.3)
+        r.call("analyze-assets-defects-inspection-preset")
+        r.until_text("drone_b places", 90)
+        time.sleep(0.3)
+        r.call("insert-compare-inspections", 0.3)
+        r.call("compare-earlier", 0.2, option="drone_a_places")
+        r.call("compare-later", 0.2, option="drone_b_places")
+        cut.append((t, time.time() - r.t0 - 0.9))  # flight b, set up the same way: a jump cut to the Compare dialog
+        r.call("compare-go")
+        r.until_text("worse", 60)
+        time.sleep(2.0)
+        r.call("flight-plan")
+        r.until_text("waypoints", 60)
+        time.sleep(2.5)
+        seg = time.time() - r.t0
         r.stop()
     finally:
         r.close()
-    finish(r.raw, out / "clip-drone.mp4", 4.0)
+    print("marks: " + ", ".join(f"{k} {v:.1f}" for k, v in r.marks.items()) + f"; cut {[(round(a, 1), round(b, 1)) for a, b in cut]}; segment {seg:.1f}")
+    play = r.marks["play"]  # the poster: playing, the cursor and the dot partway along
+    finish(r.raw, out / "clip-drone.mp4", play + 4.0 - sum(b - a for a, b in cut if b <= play), cut)
 
 
 def main():
@@ -231,7 +296,7 @@ def main():
     media, out = (ROOT / a.media).resolve(), (ROOT / a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     if a.what == "tools":
-        r = (drone(media, out, False, "warehouse") if a.app == "editor" else {"warehouse": warehouse, "drone": drone}[a.app](media, out, record=False))
+        r = {"warehouse": warehouse, "drone": drone}[a.app](media, out, record=False)
         try:
             for k, v in sorted(r.tools().items()):
                 print(f"{k} — {v[:100]}")
