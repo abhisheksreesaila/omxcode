@@ -3937,6 +3937,26 @@ def quit_when_closed(target: Int, cmd: Int, app: Int) abi("C") -> Int8:
     return 1  # YES to applicationShouldTerminateAfterLastWindowClosed:
 
 
+def on_will_terminate[A: App](target: Int, cmd: Int, note: Int) abi("C"):
+    """The app is quitting (Quit, the last window closed, a log out): App.closing, once, before the process ends."""
+    var addr = 0
+    var wins = msg(msg(cls("NSApplication"), "sharedApplication"), "windows")
+    for i in range(msg(wins, "count")):  # (the host's window: its delegate is this target, its identifier the host's address)
+        var w = msg(wins, "objectAtIndex:", i)
+        if msg(w, "delegate") == target and msg(w, "identifier") != 0:
+            addr = msg(msg(w, "identifier"), "longLongValue")
+    if addr != 0:
+        host_at[A](addr)[].rt.closing()
+
+
+def on_window_will_close[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
+    """The window is closing (its close button, Cmd+W): App.closing, once, while the window still knows its host."""
+    var window = msg(notification, "object")
+    var id = msg(window, "identifier")
+    if id != 0:
+        host_at[A](msg(id, "longLongValue"))[].rt.closing()
+
+
 def make_menu(app: Int, title: String):
     var bar = new("NSMenu")
     var app_item = new("NSMenuItem")
@@ -4012,6 +4032,8 @@ def run[A: App]() -> c_int:
     add_method(c, "tableView:objectValueForTableColumn:row:", on_row_value[A], "@@:@@q")
     add_protocol(c, "NSTableViewDataSource")
     add_method(c, "applicationShouldTerminateAfterLastWindowClosed:", quit_when_closed, "B@:@")
+    add_method(c, "applicationWillTerminate:", on_will_terminate[A], "v@:@")  # (App.closing)
+    add_method(c, "windowWillClose:", on_window_will_close[A], "v@:@")
     register_class(c)
     var canvas = new_class("MojoCanvas", "NSImageView")
     add_method(canvas, "canvasFrame:", on_canvas_frame[A], "v@:@")

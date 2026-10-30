@@ -206,6 +206,10 @@ def m4():
     code, out = jot(db, ["pause:500", "tap:New", "textarea:0=" + last_words, "quit"], timeout=120)
     if code != 0 or "JOT QUIT:" not in out:
         return False, f"exit {code}; quit hook line {'JOT QUIT:' in out}: {out[-300:]}"
+    # (added with M4, D-1315: the window really closed through close-request, not only the app's shutdown at the
+    # end of a test run, which tells App.closing too)
+    if "QUIT: window closed" not in out:
+        return False, "the quit step didn't close the window (no 'QUIT: window closed')"
     con = sqlite3.connect(db)
     bodies = [r[0] for r in con.execute("SELECT body FROM notes")]
     con.close()

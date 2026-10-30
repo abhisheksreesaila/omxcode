@@ -1515,6 +1515,18 @@ def make_app(module_dir):
         data, media = assets[name]
         return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
 
+    def close_all():
+        """The server is stopping: every live session's App.closing (a pending save), then its handle goes."""
+        with sessions_lock:
+            while sessions:
+                _, old = sessions.popitem(last=False)
+                with old.lock:
+                    if not old.closed:
+                        old.closed = True
+                        mod.close(old.handle)
+    import atexit
+    atexit.register(close_all)
+
     @app.get("/")
     def index(req):
         sid = uuid.uuid4().hex  # one app session per page load (tab)

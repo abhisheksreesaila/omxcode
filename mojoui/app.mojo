@@ -141,6 +141,13 @@ trait App(Movable, Deinitable):
         """The app's mark as SVG ("": none): hosts install it as the icon "app-logo" (Icon("app-logo", 18))."""
         return ""
 
+    def closing(mut self):
+        """The app is about to close: the person closed its window (or chose Quit), the system is quitting it, a web page's
+        session ended, or a test's `quit` step closed the window as a window manager does. Finish what must not be lost
+        (a pending save) before returning: it runs on the UI thread, once, and the process may end right after. The
+        default does nothing."""
+        pass
+
     def jobs_message(self) -> Int:
         """A message update() gets on the UI thread as soon as a background job started with mojoui.jobs.start_ui_job
         ends (0: none; the app polls its jobs on its own, e.g. at display frames). Every host watches the jobs' wake
@@ -202,6 +209,7 @@ struct Runtime[A: App](Movable):
     var commands_out: List[Command]  # widget commands for the host to take (take_commands)
     var awaiting: List[Command]  # sent, waiting for their answer (reply)
     var command_seq: Int
+    var closed: Bool  # App.closing was told
 
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
@@ -214,6 +222,7 @@ struct Runtime[A: App](Movable):
         self.commands_out = List[Command]()
         self.awaiting = List[Command]()
         self.command_seq = 0
+        self.closed = False
         self.take_effects()  # (what the starting state asks for)
 
     def take_effects(mut self):
@@ -337,6 +346,13 @@ struct Runtime[A: App](Movable):
         var msg = self.shown.nodes[node].msg
         var id = self.shown.nodes[node].value
         return self.dispatch(Event(msg, payload, 0, id=id, name=name))
+
+    def closing(mut self):
+        """The app is closing (App.closing): told once, whichever way it closes."""
+        if self.closed:
+            return
+        self.closed = True
+        self.app.closing()
 
     def busy(self) -> Bool:
         """Requests are out or timers run: the host should keep polling (wake_in)."""

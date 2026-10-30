@@ -634,6 +634,7 @@ struct GtkHost[A: App](Movable):
     var skin_provider: Int  # the theme's CSS provider (replaced when App.theme() changes: Settings → Appearance, a mode's tint)
     var skin_key: String  # the theme that provider is for (Theme.key)
     var skin_classes: String  # the CSS classes it put on the window
+    var closed: Bool  # the window closed (close-request answered): test steps stop, no report
     var dark_told: Int  # what App.appearance last said (1 dark, 0 light, -1 not yet): only a change is told again
     var forcing_scheme: Bool  # set while the host itself changes light/dark (a theme forcing one): not the person's change
     var icons_key: String  # the ink the icons were written in
@@ -760,6 +761,7 @@ struct GtkHost[A: App](Movable):
         self.skin_classes = ""
         self.forcing_scheme = False
         self.dark_told = -1
+        self.closed = False
         self.icons_key = ""
         self.fonts = False
         self.css = 0
@@ -5158,6 +5160,17 @@ def wait_allocated(widget: Int):
             return  # nothing pending: nothing will change
 
 
+def show_test_window(window: Int):
+    """A test window that isn't shown (no MOJOUI_SHOT) is shown, on the checks' private display, and laid out (up to
+    3 s): steps that need a real window (painting, closing) then have one."""
+    if external_call["gtk_widget_get_mapped", c_int](window) != 0:
+        return
+    external_call["gtk_window_present", NoneType](window)
+    var up_by = perf_counter_ns() + 3_000_000_000
+    while external_call["gtk_widget_get_width", c_int](window) == 0 and perf_counter_ns() < up_by:
+        pump()
+
+
 def run_step[A: App](host_addr: Int, step: String):
     var host = host_at[A](host_addr)
     var verb_rest = split_at(step, ":")
@@ -5178,6 +5191,11 @@ def run_step[A: App](host_addr: Int, step: String):
             print("TEST: no file picker", kv[0])
             return
         host[].send(i, True, kv[1], 0, host_addr)
+    elif verb == "quit":  # quit: close the window as the window manager's close button does (close-request, then App.closing)
+        show_test_window(host[].window)  # (GTK ignores a close of a window that was never realized)
+        external_call["gtk_window_close", NoneType](host[].window)
+        if host[].closed:
+            print("QUIT: window closed", flush=True)
     elif verb == "save":  # save:Title=/path: a FileSaver's dialog answering that path (a native dialog can't be driven)
         var kv = split_at(rest, "=")
         var i = find(host[], BUTTON, kv[0], 0)
@@ -5883,11 +5901,7 @@ def run_step[A: App](host_addr: Int, step: String):
         # does, and asks for a redraw on every frame until gaps:N ends, so a window with nothing moving still paints at the
         # display's rate and only a busy UI thread makes a gap)
         if rest == "start":
-            if external_call["gtk_widget_get_mapped", c_int](host[].window) == 0:
-                external_call["gtk_window_present", NoneType](host[].window)
-                var up_by = perf_counter_ns() + 3_000_000_000
-                while external_call["gtk_widget_get_width", c_int](host[].window) == 0 and perf_counter_ns() < up_by:
-                    pump()
+            show_test_window(host[].window)
             if not host[].paint_timed:
                 var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
                 if clock != 0:
@@ -6287,6 +6301,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     for prop in ["notify::default-width", "notify::default-height", "notify::maximized", "notify::fullscreened"]:
         connect3(host[].window, prop, on_window_resized[A], host_addr)
     connect(host[].window, "realize", on_window_realize[A], host_addr)
+    connect_any(host[].window, "close-request", on_close_request[A], host_addr)  # (App.closing before the window goes)
     var link_path = getenv("MOJOUI_AGENT_SOCKET")  # an agent host may attach here (docs/agent.md: the agent link)
     if link_path != "":
         var lfd = listen_unix(link_path)
@@ -6334,8 +6349,12 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     if testing:
         wait_webviews[A](host_addr)
         for step in test_steps(steps):
+            if host[].closed:
+                break
             if step != "":
                 run_step[A](host_addr, step)
+            if host[].closed:  # (the `quit` step: the window is gone, as after a person closed it)
+                break
             settle()
             if shot != "":
                 wait_frame(host[].window)
@@ -6347,8 +6366,9 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
             while not host[].canvases_drawn() and perf_counter_ns() < deadline:
                 pump()
             settle()
-        report[A](host_addr)
-    if shot != "":
+        if not host[].closed:
+            report[A](host_addr)
+    if shot != "" and not host[].closed:
         host[].full_page()
         save_png(host[].window, shot)
     if testing or shot != "":
@@ -6400,10 +6420,21 @@ def probe_gpu_canvases[A: App](pres: Int) -> Int:
     return ctx
 
 
+def on_close_request[A: App](window: Int, host_addr: Int) abi("C") -> c_int:
+    """The window is asked to close (its close button, Ctrl+W, the window manager, the `quit` step): App.closing finishes
+    what must be kept, then the window closes (FALSE: nothing stops it)."""
+    var host = host_at[A](host_addr)
+    host[].rt.closing()
+    host[].closed = True
+    return 0
+
+
 def on_app_shutdown[A: App](gapp: Int, host_addr: Int) abi("C"):
-    """The app is closing: release the GPU canvases' CUDA and GL objects in their GL context, then the context
+    """The app is closing: App.closing if the window didn't already tell it (a quit with the window open: Ctrl+Q, the end
+    of a test run); then release the GPU canvases' CUDA and GL objects in their GL context, then the context
     (review item 4)."""
     var host = host_at[A](host_addr)
+    host[].rt.closing()
     if host[].pres == 0 or host[].gl_ctx == 0:
         return
     external_call["gdk_gl_context_make_current", NoneType](host[].gl_ctx)

@@ -286,6 +286,15 @@ struct Main(App):
         _ = self.titles.pop(id)
         self.all = len(self.titles)
 
+    def closing(mut self):
+        """Quitting: what was typed but not yet saved goes into the file first."""
+        var pending = self.dirty
+        try:
+            self.save()
+        except e:
+            print("JOT ERROR: " + String(e), flush=True)
+        print("JOT QUIT: " + ("saved the open note" if pending else "nothing pending") + "; " + String(self.all) + " notes", flush=True)
+
     # ---- what happened
 
     def update(mut self, event: Event):
