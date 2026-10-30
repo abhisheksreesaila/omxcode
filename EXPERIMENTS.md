@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## The Mac stops freezing on long jobs: job threads on Apple (2026-10-30)
+- **Setup:** branch `mac-job-threads` from main 0d09024, worktree ../mojo-ui-macjobs. The owner: "at least the Mac has to be fixed".
+- **Worked:** the engine already had a switch (`-D MXFRAME_JOB_THREADS`) that gives Apple builds job threads; it reaches into the prebuilt omxcore package (with it the Mac objects call pthread_create/join; without, none). scripts/build.sh passes it to every Mac build; the Mac stub gained five libSystem symbols. examples/jobwake now measures a freeze (one 1.5 s job, the longest gap between frames) and runs on the Mac runner. GitHub's Macs, before → after: 1 frame and 1516–1527 ms without one → 28–36 frames, at most 71–77 ms. omxplorer (imports and column stats are jobs) and maccheck pass on both macOS versions. Linux: 90 frames, 17 ms.
+- **Broke and fixed:** the first threaded run crashed in performSelectorOnMainThread on the job's thread: I released the autoreleased string `ns_string` returns, so the modes array held a freed string (D-792's comment says so now). The link also wanted `_sched_yield` (omxplorer).
+- **Means:** slow data work no longer freezes the Mac window. A job's end reaches update() in ~35 ms median on those virtual Macs, against 0.05 ms on Linux: unmeasured on a real Mac.
+- **Next small step:** the iPhone (jobs still serial, UIKit has no wake) once it runs on hardware; measure the Mac wake on the owner's MacBook.
+
+---
+
 ## Components hold to best practice: an audit, and accessible names on every host (2026-10-30)
 - **Setup:** branch `components-practices` from main a818aa8, worktree ../mojo-ui-components. The owner asked for a component-level best-practice audit (threads, state, lifecycle) to show the world, then the gaps fixed.
 - **Worked:** the audit (docs/component-practices.md): one UI thread by construction, effects and job wake off it (goal 33, D-771), one-way data, no closures on widgets, deferred rebuilds, keyed diffing, virtualised lists, frame pacing, native widgets, themes apart from behaviour. New: `View.label()` and mojoui.a11y (one naming rule, `audit()`), applied on GTK (GtkAccessible label), the web (aria-label, a canvas is an img named by its words), AppKit and UIKit (accessibilityLabel). scripts/check_a11y.py reads the names back from GTK's test backend and Chromium's accessibility tree: PASS.

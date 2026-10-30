@@ -3,7 +3,10 @@
 # each job busy-works 2–9 ms (so it ends at any point of a frame), records when it ended, and update() records when
 # App.jobs_message reached it. After RUNS jobs it prints
 #   JOBWAKE: <runs> jobs, end → update() median <ms>, p95 <ms>, worst <ms>; frame ticks <n>
-# and, with JOBWAKE_EXIT=1, exits (JOBWAKE_ALL=1 lists every delay). JOBWAKE_POLL=1 turns the wake off (jobs_message 0): the frame poll alone, to compare.
+# then runs one long job (LONG_MS) and prints how long the window went without a frame while it ran (D-792):
+#   JOBWAKE FREEZE: a 1500 ms job; <n> frames while it ran, longest gap between frames <ms> ms
+# (a job on the main thread: about 1500 ms; on a thread of its own: a frame or two). With JOBWAKE_EXIT=1 it then exits
+# (JOBWAKE_ALL=1 lists every delay). JOBWAKE_POLL=1 turns the wake off (jobs_message 0): the frame poll alone, to compare.
 
 from std.sys import exit, CompilationTarget
 from mojoui import App, Event, View, Surface, VStack, Text, Canvas
@@ -15,6 +18,7 @@ from omxcore import Job, JobBody, JobCtl, JOB_RUNNING
 comptime LANDED = 1
 comptime FRAME = 2
 comptime RUNS = 40
+comptime LONG_MS = 1500
 
 
 struct Work(JobBody):
@@ -39,6 +43,10 @@ struct Main(App):
     var wake: Bool
     var line: String
     var started: Bool
+    var long: Bool  # the long job is running (or ran)
+    var last_tick: Int  # while it runs: the last frame's time, the longest gap between frames, the frames
+    var gap: Int
+    var long_ticks: Int
 
     def __init__(out self):
         self.job = None
@@ -48,6 +56,10 @@ struct Main(App):
         self.wake = environment("JOBWAKE_POLL") != "1"
         self.line = "running"
         self.started = False
+        self.long = False
+        self.last_tick = 0
+        self.gap = 0
+        self.long_ticks = 0
         self.next()
 
     def title(self) -> String:
@@ -64,6 +76,16 @@ struct Main(App):
         if not self.job or self.job.value().poll() == JOB_RUNNING:
             return
         var job = self.job.take()
+        if self.long:
+            self.gap = max(self.gap, now_ns() - self.last_tick)
+            var line = ("JOBWAKE FREEZE: a " + String(LONG_MS) + " ms job; " + String(self.long_ticks) + " frames while it ran, longest gap between frames "
+                        + String(Int(Float64(self.gap) / 1e6)) + " ms")
+            print(line, flush=True)
+            self.line += " · " + line
+            comptime if CompilationTarget.is_linux():  # (the Apple stubs have no exit(): the test steps close the window there)
+                if environment("JOBWAKE_EXIT") == "1":
+                    exit(0)
+            return
         try:
             var ended = job.result()
             if self.started:  # (the first job starts in __init__, before the host's main loop runs: not counted)
@@ -85,13 +107,17 @@ struct Main(App):
             for x in d:
                 all += " " + String(Int(x * 1000)) + "us"
             print(all, flush=True)
-        comptime if CompilationTarget.is_linux():  # (the Apple stubs have no exit(): close the window there)
-            if environment("JOBWAKE_EXIT") == "1":
-                exit(0)
+        self.long = True
+        self.last_tick = now_ns()
+        self.job = start_ui_job(Work(LONG_MS * 1_000_000))
 
     def update(mut self, event: Event):
         if event.message == FRAME:
             self.ticks += 1
+            if self.long and self.job:
+                self.gap = max(self.gap, now_ns() - self.last_tick)
+                self.last_tick = now_ns()
+                self.long_ticks += 1
             self.landed()  # (the fallback: what an app does on its frames anyway)
         elif event.message == LANDED:
             self.landed()

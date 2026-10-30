@@ -2,7 +2,7 @@
 
 This page shows that the component layer (`mojoui/`) was designed on purpose. Every claim links to its code, the
 decision behind it (D-nn in [decisions.md](decisions.md)), and the check that proves it. The gaps are listed too.
-Audited 2026-10-30 against `main` (a818aa8), plus the accessibility work on branch `components-practices`.
+Audited 2026-10-30 against `main` (a818aa8), plus the accessibility work (D-791) and the Mac's job threads (D-792) since.
 
 ## On one slide
 
@@ -13,7 +13,7 @@ Audited 2026-10-30 against `main` (a818aa8), plus the accessibility work on bran
 | Practice | Status |
 |---|---|
 | Only the UI thread touches widgets; the platform owns the loop | ✅ by construction |
-| Slow work runs on worker threads and comes back as an event | ✅ HTTP, timers, data jobs (Apple: jobs still on the main thread) |
+| Slow work runs on worker threads and comes back as an event | ✅ Linux, web, Mac (a 1.5 s job: longest frame gap 1527 → 77 ms on GitHub's Macs) · ⚠️ iPhone: jobs on the main thread |
 | Data flows one way: state → `view()` → diff → patches | ✅ |
 | No closures on widgets (no leaks, no stale captures) | ✅ D-19 |
 | A widget is never destroyed inside its own event | ✅ |
@@ -49,10 +49,15 @@ a file import or a big query, must run elsewhere, and its result must come back 
 - **Data jobs** ([mojoui/jobs.mojo](../mojoui/jobs.mojo), D-771): a background job's end wakes the UI at once through
   a self-pipe the main loop watches (GTK: `g_unix_fd_add`; the web: a thread blocking on it). Measured
   ([examples/jobwake](../examples/jobwake/app.mojo)): job end → `update()` median 0.05 ms, p95 1.0–2.2 ms on GTK.
+- **The Mac too** (D-792): jobs get threads of their own there as on Linux, and a job's end wakes the window through
+  `performSelectorOnMainThread` (made for any thread). Measured on GitHub's Macs (macOS 15 and 26, `examples/jobwake`):
+  during a 1.5 s job the window drew 1 frame and went 1516–1527 ms without one when jobs ran on the main thread; with
+  threads, 28–36 frames and at most 71–77 ms between two (those virtual Macs draw ~20 frames a second without a GPU).
 - Nothing else crosses threads: the job's result is read on the UI thread, so the app's state is never shared.
 
-**Gap.** On the Mac and iPhone the engine runs jobs serially on the main thread (D-771), so a long job freezes the
-window there. UIKit isn't wired to the wake yet; it falls back to polling at frames.
+**Gap.** On the iPhone the engine still runs jobs on the main thread, so a long job freezes the screen there, and UIKit
+isn't wired to the wake (it falls back to polling at frames). On the Mac a job's end reaches `update()` in ~33–38 ms
+median on GitHub's Macs (0.05 ms on Linux); whether that's those virtual Macs' slow drawing is unmeasured on real hardware.
 
 ## 3. Data flows one way
 
@@ -157,7 +162,8 @@ code and the checks: ✅ run by a check, 🔨 built but never run, ❌ missing. 
 | Gap | Why it matters | Next step |
 |---|---|---|
 | iPhone and Android tablet never run on real hardware | the iPhone column is 🔨; a build isn't proof | CI/CD on the owner's MacBook, iPhone and Android tablet |
-| Mac/iPhone: data jobs run on the main thread | a long query freezes the window there | job threads in the engine's Apple build (omxcore) |
+| iPhone: data jobs run on the main thread | a long query freezes the screen there | the Mac's fix (D-792) plus UIKit's wake, checked on the iPhone |
+| Mac: a job's end reaches `update()` in ~35 ms on GitHub's Macs (0.05 ms on Linux) | a finished query shows a frame or two late | measure on the owner's MacBook first |
 | Screen readers can name a chart, but not read its numbers | a summary isn't the data | expose `App.describe()` (already written for agents) as an accessible table |
 | Android: no accessible names from `.label()` yet | its content description doubles as a test tag | separate the test tag from the description |
 | Shipped apps not audited | sliders, dropdowns and charts without a label are silent to screen readers | run `audit()` on every example's screens and add labels |

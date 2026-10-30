@@ -149,6 +149,9 @@ build_mac() {
   # MOJOUI_DEBUG=1: a debug build, as on Linux (D-679): each widget's WKWebView inspectable from Safari's Develop menu,
   # bundles with source maps; release builds (the default) have neither
   local debug="${MOJOUI_DEBUG:-}"; [ "$debug" = 1 ] && echo "   (debug build: WebKit's inspector for widget views, source maps)"
+  # Background jobs get threads of their own, as on Linux (D-792): the engine's Apple build otherwise runs a job inside
+  # its start call, on the main thread, and a long one freezes the window. MOJOUI_SERIAL_JOBS=1 builds the old way, to compare
+  local jobs=MXFRAME_JOB_THREADS; [ "${MOJOUI_SERIAL_JOBS:-}" = 1 ] && jobs=MOJOUI_SERIAL_JOBS && echo "   (jobs on the main thread)"
   if [ "$(uname)" = Darwin ] && [ -n "${MAC_GPU:-}" ]; then
     # On a Mac, with its GPU (omxcode#3): a native build, Metal kernels compiled by Apple's toolchain, Mojo's runtime
     # libraries bundled in the app (bundle_runtime, D-309). MAC_GPU: an accelerator
@@ -157,18 +160,18 @@ build_mac() {
     rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
     local frameworks=(-Xlinker -framework -Xlinker AppKit -Xlinker -lobjc)
     if [ "$MAC_GPU" = native ]; then  # (two calls: an empty array is "unbound" under set -u in macOS's bash 3.2)
-      if [ "$debug" = 1 ]; then mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_DEBUG -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
-      else mojo_build hosts/mac_gpu_main.mojo -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"; fi
+      if [ "$debug" = 1 ]; then mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_DEBUG -D "$jobs" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
+      else mojo_build hosts/mac_gpu_main.mojo -D "$jobs" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"; fi
     elif [ "$debug" = 1 ]; then
-      mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_DEBUG --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
+      mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_DEBUG -D "$jobs" --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
     else
-      mojo_build hosts/mac_gpu_main.mojo --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
+      mojo_build hosts/mac_gpu_main.mojo -D "$jobs" --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
     fi
     bundle_runtime "$app"
   else
     echo "== Mac ($EX): AppKit, arm64 macOS 14+"
-    if [ "$debug" = 1 ]; then apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo -D MOJOUI_DEBUG
-    else apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo; fi
+    if [ "$debug" = 1 ]; then apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo -D MOJOUI_DEBUG -D "$jobs"
+    else apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo -D "$jobs"; fi
     rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
     pixi run ld64.lld -arch arm64 -e _mojo_entry -dead_strip -no_adhoc_codesign \
       -platform_version macos 14.0 26.0 -o "$app/Contents/MacOS/$NAME" "$out"/*.o apple/sdk/macos/*.tbd

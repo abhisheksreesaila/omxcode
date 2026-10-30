@@ -6,9 +6,11 @@
 #
 # How: the job's completion callback (mxframe.start_job_then, on the job's own thread) writes one byte to a pipe the
 # host made (wake_pipe); the host watches the pipe's read end on its main loop (GTK: g_unix_fd_add; the web host: a
-# thread blocking on it) and sends App.jobs_message() to update() at once. On Apple there are no job threads (the
-# engine's serial build runs a job inside start_ui_job, on the main thread) and no pipe: the callback asks the app's
-# delegate (the AppKit host's target) for `jobsEnded:` on the next main run-loop turn, in every run-loop mode.
+# thread blocking on it) and sends App.jobs_message() to update() at once. On Apple there is no pipe: the callback asks
+# the app's delegate (the AppKit host's target) for `jobsEnded:` on the main run loop's next turn, in every run-loop
+# mode (performSelectorOnMainThread, which any thread may call). The Mac build gives jobs threads of their own
+# (scripts/build.sh: -D MXFRAME_JOB_THREADS, D-792); the iPhone's still runs a job inside start_ui_job, on the main
+# thread, and UIKit has no `jobsEnded:` (the frame poll finds it).
 # Nothing else crosses threads: update() reads the job's state with poll() as it always did, so an app that also polls
 # on its frames (the fallback) sees the same thing either way. With no host pipe (a test, a command-line tool) the
 # callback does nothing.
@@ -85,17 +87,27 @@ struct WakeUI(JobDone):
     """A completion callback that wakes the UI. The pipe is looked up when the job starts (on the UI thread), so the
     job's thread only writes a byte."""
     var fd: Int
+    var target: Int  # Apple: the delegate that answers jobsEnded: (0: none), and the modes, looked up on the UI thread
+    var modes: Int
 
     def __init__(out self):
         self.fd = get_shared(SLOT_WAKE_WRITE) - 1
+        self.target = 0
+        self.modes = 0
+        comptime if not CompilationTarget.is_linux():
+            var target = msg(msg(cls("NSApplication"), "sharedApplication"), "delegate")
+            if target != 0 and msg(target, "respondsToSelector:", sel("jobsEnded:")) != 0:
+                self.target = target
+                # (retained until done(): the job's thread uses it after this run-loop turn's pool has drained; the
+                # string is autoreleased, and the array keeps it)
+                self.modes = msg(msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes")), "retain")
 
     def done(mut self, state: Int):
-        comptime if not CompilationTarget.is_linux():  # (Apple: on the main thread already; the host's turn comes next)
-            var target = msg(msg(cls("NSApplication"), "sharedApplication"), "delegate")
-            var ended = sel("jobsEnded:")
-            if target != 0 and msg(target, "respondsToSelector:", ended) != 0:
-                var modes = msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes"))
-                _ = msg(target, "performSelectorOnMainThread:withObject:waitUntilDone:modes:", ended, 0, 0, modes)
+        comptime if not CompilationTarget.is_linux():  # (on the job's thread on the Mac: one message, made for any thread)
+            if self.target != 0:
+                _ = msg(self.target, "performSelectorOnMainThread:withObject:waitUntilDone:modes:", sel("jobsEnded:"), 0, 0, self.modes)
+                _ = msg(self.modes, "release")
+                self.target = 0
             return
         if self.fd >= 0:
             var b = List[UInt8](length=1, fill=1)
