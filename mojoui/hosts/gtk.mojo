@@ -18,6 +18,7 @@ from mojoui.view import (
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
 )
+from mojoui.a11y import audit, explicit_name, needs_name, accessible_name
 from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP
 from mojoui.app import App, Event, Runtime, ms
 from mojoui.canvas import Surface, rgba
@@ -192,6 +193,31 @@ def set_busy(on: Bool):
     var key = String("mojoui-busy")
     var app = external_call["g_application_get_default", Int]()
     external_call["g_object_set_data", NoneType](app, key.as_c_string_span(), 1 if on else 0)
+
+
+comptime GTK_ACCESSIBLE_PROPERTY_LABEL = 4  # (gtkenums.h, GtkAccessibleProperty)
+
+
+def set_accessible_label(w: Int, name: String):
+    """The name a screen reader says for widget w (mojoui.a11y.explicit_name; "": the widget's own words name it)."""
+    if w == 0 or name == "":
+        return
+    var n = name
+    # gtk_accessible_update_property(accessible, property, value, -1) is variadic: the integer and pointer arguments
+    # travel in the same registers as a plain call's on x86-64 and arm64 Linux (no floating-point ones).
+    external_call["gtk_accessible_update_property", NoneType](w, c_int(GTK_ACCESSIBLE_PROPERTY_LABEL), n.as_c_string_span(), c_int(-1))
+
+
+def accessible_label_is(w: Int, name: String) -> String:
+    """Under GTK_A11Y=test (GTK's own test accessibility backend): "" when w's accessible label is `name`, else what
+    GTK says differs (tests: the a11y step)."""
+    var n = name
+    var err = external_call["gtk_test_accessible_check_property", Int](w, c_int(GTK_ACCESSIBLE_PROPERTY_LABEL), n.as_c_string_span(), c_int(-1))
+    if err == 0:
+        return ""
+    var out = c_str(err)
+    external_call["g_free", NoneType](err)
+    return out if out != "" else "differs"
 
 
 def busy() -> Bool:
@@ -785,6 +811,7 @@ struct GtkHost[A: App](Movable):
         if node.tip != "":
             var tip = node.tip
             external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
+        set_accessible_label(self.widgets[i] if self.widgets[i] != 0 else w, explicit_name(node))  # (on the control itself, not its clamp)
         var want_w = max(node.w, node.min_w)
         if want_w != 0 or node.h != 0:
             external_call["gtk_widget_set_size_request", NoneType](w, c_int(want_w if want_w != 0 else -1), c_int(node.h if node.h != 0 else -1))
@@ -2585,6 +2612,7 @@ struct GtkHost[A: App](Movable):
             elif p.op == SET_TIP:  # a canvas's words (its tooltip and accessible name), in place: the picture stays
                 var tip = p.text
                 external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
+                set_accessible_label(w, explicit_name(self.rt.shown.nodes[p.node]))
             elif p.op == SET_PLACE and not self.board_list:  # (a list ignores positions)
                 ref n = self.rt.shown.nodes[p.node]
                 if kind == BOARD:
@@ -5080,6 +5108,21 @@ def run_step[A: App](host_addr: Int, step: String):
             var got = host[].canvases[ci].frames - start - 1
             var fps = Float64(got) / (ms / 1000.0) if ms > 0 else 0.0
             print("FRAMES: " + String(got) + " in " + one_decimal(Float32(ms)) + " ms = " + one_decimal(Float32(fps)) + " fps, draws " + String(host[].canvases[ci].draws - draws))
+    elif verb == "a11y":  # a11y: what a screen reader can't name on this screen (mojoui.a11y.audit), and every label the host set, as GTK reports it (GTK_A11Y=test)
+        var unnamed = audit(host[].rt.shown)
+        print("A11Y: " + String(len(unnamed)) + " unnamed")
+        for line in unnamed:
+            print("A11Y UNNAMED: " + line)
+        for k in range(len(host[].rt.shown.nodes)):  # (GTK agrees those have no label of their own: the check can fail)
+            if needs_name(host[].rt.shown.nodes[k]) and accessible_name(host[].rt.shown.nodes[k]) == "" and k < len(host[].widgets) and host[].widgets[k] != 0:
+                var has = external_call["gtk_test_accessible_has_property", c_int](host[].widgets[k], c_int(GTK_ACCESSIBLE_PROPERTY_LABEL))
+                print("A11Y GTK LABEL: #" + String(k) + " " + ("set" if has != 0 else "none"))
+        for k in range(len(host[].rt.shown.nodes)):
+            var want = explicit_name(host[].rt.shown.nodes[k])
+            if want == "" or k >= len(host[].widgets) or host[].widgets[k] == 0:
+                continue
+            var got = accessible_label_is(host[].widgets[k], want)
+            print("A11Y LABEL: #" + String(k) + " " + host[].rt.shown.nodes[k].name + " = " + want + (" (ok)" if got == "" else " (GTK: " + got + ")"))
     elif verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip, a drawn view's words), mid-run
         var said = False
         for ref n in host[].rt.shown.nodes:
