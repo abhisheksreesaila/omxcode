@@ -68,7 +68,7 @@ scripts/build.sh jot web && JOT_DB=/tmp/demo.db pixi run python mojoui/hosts/web
 - The web's quit hook runs at session eviction and server exit (tried by hand once with SIGINT); closing a tab doesn't end its session, so it isn't told then.
 - The Mac: built, not run; no save dialog or file drop there (no NSOpenPanel for FilePicker either). Android and iPhone: mojoui.sqlite not built.
 - Search timing (p95 0.27 ms) is the FTS5 query only, not the list's repaint. Seed timing (~150 ms) and the frame gaps are from a shared, loaded machine.
-- One checker run (M1 M3 M4 together) found build/jot/linux/jot missing at M4; M4 passed on its own and in the full run. Not reproduced, cause unknown.
+- (Explained, not a defect) Two checker runs found build/jot/linux/jot missing, or an empty web database at M3: two agents ran the checker in this worktree at the same time and each rebuilt Jot under the other. Run alone: M3 three times PASS, the full checker M0–M6 PASS.
 - A real file dialog left open while the screen rebuilds (D-1327): the steps hand in the path, no dialog stays open.
 - The race: cold caches (no root to drop them), other machines, a phone browser. The web side's search time is the Worker's own; the page's repaint isn't in either side's number.
 
