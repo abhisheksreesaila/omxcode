@@ -22,6 +22,8 @@ UI thread, so there are no locks, no races and no "which thread am I on?" in app
 | Network requests never block the screen | `Http.get(...)` queues a request; it runs on a worker thread; the reply arrives as an `Event` | `mojoui/effects.mojo`, goal 33 |
 | Timers never block | `App.every()` lists `Every(ms, msg)`; ticks arrive as events | `mojoui/effects.mojo` |
 | Data work never blocks | `start_ui_job(...)` runs a query, import or sort on its own thread; when it ends, `App.jobs_message()` reaches `update()` | `mojoui/jobs.mojo`, D-771, D-792 |
+| Video and pictures never block | a decoder thread per video (`mojoui/framefeed.mojo`): opening, seeking and decoding run there; the newest seek wins; a frame that lands wakes the UI | goal 41 M2, D-1116 |
+| Tables, queries and exports never block | `mojoui/tablejobs.mojo` (Insert > Table, SQL, Export CSV) and `mojoui/videocard.mojo` (Analyze, reels) run as jobs that wake the UI | goal 41 M3–M4, D-1124, D-1131 |
 | A finished job shows at once, not a frame later | the job's end wakes the main loop (a pipe on Linux and the web, `performSelectorOnMainThread` on the Mac) | D-771 |
 | Cancelling never blocks | cancelling marks the job; checking whether its thread stopped doesn't wait (Linux, Mac) | `mojoui/sheetjobs.mojo` |
 | Clicking a button that changes the screen never crashes | rebuilds wait until the click has finished; re-entrant signals are swallowed | every host |

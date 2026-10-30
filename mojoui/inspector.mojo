@@ -47,8 +47,12 @@ def InspectorPage(title: String, on_back: Int, sections: List[View]) -> List[Vie
 
 
 def Row(label: String, control: View) -> View:
-    """A label on the left, its control on the right."""
-    return HStack(Text(label), Spacer(), control.copy(), spacing=8).fill().align(CENTER).tag("inspector-row")  # (a look sets its height)
+    """A label on the left, its control on the right; the label also names the control for a screen reader when
+    nothing else does (a toggle or a dropdown has no words of its own: mojoui.a11y)."""
+    var c = control.copy()
+    if c.nodes[0].label == "" and c.nodes[0].tip == "":
+        c = c^.label(label)
+    return HStack(Text(label), Spacer(), c^, spacing=8).fill().align(CENTER).tag("inspector-row")  # (a look sets its height)
 
 
 def Stepper(value: String, on_less: Int, on_more: Int) -> View:

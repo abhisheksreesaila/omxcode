@@ -787,6 +787,8 @@ UI thread, so there are no locks, no races and no "which thread am I on?" in app
 | Network requests never block the screen | `Http.get(...)` queues a request; it runs on a worker thread; the reply arrives as an `Event` | `mojoui/effects.mojo`, goal 33 |
 | Timers never block | `App.every()` lists `Every(ms, msg)`; ticks arrive as events | `mojoui/effects.mojo` |
 | Data work never blocks | `start_ui_job(...)` runs a query, import or sort on its own thread; when it ends, `App.jobs_message()` reaches `update()` | `mojoui/jobs.mojo`, D-771, D-792 |
+| Video and pictures never block | a decoder thread per video (`mojoui/framefeed.mojo`): opening, seeking and decoding run there; the newest seek wins; a frame that lands wakes the UI | goal 41 M2, D-1116 |
+| Tables, queries and exports never block | `mojoui/tablejobs.mojo` (Insert > Table, SQL, Export CSV) and `mojoui/videocard.mojo` (Analyze, reels) run as jobs that wake the UI | goal 41 M3–M4, D-1124, D-1131 |
 | A finished job shows at once, not a frame later | the job's end wakes the main loop (a pipe on Linux and the web, `performSelectorOnMainThread` on the Mac) | D-771 |
 | Cancelling never blocks | cancelling marks the job; checking whether its thread stopped doesn't wait (Linux, Mac) | `mojoui/sheetjobs.mojo` |
 | Clicking a button that changes the screen never crashes | rebuilds wait until the click has finished; re-entrant signals are swallowed | every host |
@@ -831,6 +833,9 @@ The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), wi
 
 ## How it's checked
 
+- The watchdog (`MOJOUI_BUDGET_MS=N`, see "What's next" 1) names any update, view or draw over N ms; goal 41's checks
+  run omxplorer's sessions at 50 ms on the headless display (CPU drawing) and want no `SLOW:` line.
+
 - `examples/jobwake` measures it: 40 short jobs (how fast a finished job reaches `update()`), then one 1.5 s job and
   the longest time the window went without a frame. It prints **PASS** under 500 ms and **FAIL (the window froze)**
   above, and exits 1 on Linux when it fails. On the Mac it runs on GitHub's runners (`scripts/mac-ci jobwake`).
@@ -848,8 +853,13 @@ The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), wi
 
 ## What's next, so it's "drop in a component and it just works"
 
-1. **Catch a slow `update()`**: a debug build that names any `update()` or `view()` over one frame (16 ms) with the
-   event that caused it, so an app author or an agent sees the freeze before a user does.
+1. **Catch a slow `update()`: done (goal 41 M1).** Run any app with `MOJOUI_BUDGET_MS=16` and, from its first second
+   on, every `update()`, `view()` or canvas draw over the budget prints `SLOW: update msg=7 80.06 ms` (the message),
+   `SLOW: view msg=7 …` or `SLOW: draw canvas=3 …` (the canvas's tag), so an app author or an agent sees the freeze
+   before a user does. The runtime times it (`Runtime.watch`, `mojoui/app.mojo`), so every host gets it: GTK and the
+   web (the server's log; `scripts/drive.py` forwards it) are checked by `examples/slowcheck`; AppKit and Android turn
+   it on too (unrun; Android's stdout goes nowhere, so read it with `adb logcat` only once stdout is redirected);
+   UIKit doesn't read the environment. The next step is a frame budget that names what inside the update was slow.
 2. **The iPhone**: the Mac's job threads plus a UIKit wake, checked on the owner's iPhone.
 3. **The Mac's GPU build** run with job threads (a job's Metal queries from its own thread), on the owner's MacBook.
 
@@ -1009,12 +1019,15 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)` | `mojoui/videotable.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)` | `mojoui/videoexport.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)` | `mojoui/vision_presets.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
-| `Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)` | `mojoui/geo.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)` | `mojoui/geo.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)` | `mojoui/inspection.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
-| `Video jobs (analyze with a registered analyzer, make a reel from a table's flag, as background jobs with progress; rows as a table, lookups that find their key)` | `mojoui/videojobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Video jobs (analyze with a registered analyzer, make a reel from a table's flag, as background jobs with progress; rows as a table, lookups that find their key)` | `mojoui/videojobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)` | `mojoui/trackcard.mojo` | Board: drag, resize, snap, Canvas, Card, Segmented, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `Table jobs (Insert > Table, a SQL query, Export CSV as jobs that wake the UI; the answer placed as a card)` | `mojoui/tablejobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)` | `mojoui/videocard.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 
 ## JavaScript widgets (WebComponent)
 
@@ -1030,12 +1043,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 130 | 3 | 0 |
-| Web | 133 | 0 | 0 |
-| Android | 19 | 31 | 83 |
-| Mac (AppKit) | 0 | 120 | 13 |
-| iPhone (UIKit) | 0 | 98 | 35 |
-| Agent (MCP) | 44 | 35 | 54 |
+| Linux (GTK) | 133 | 3 | 0 |
+| Web | 136 | 0 | 0 |
+| Android | 19 | 34 | 83 |
+| Mac (AppKit) | 0 | 123 | 13 |
+| iPhone (UIKit) | 0 | 101 | 35 |
+| Agent (MCP) | 47 | 35 | 54 |
 
 ## Inside one app, not components yet (the debt)
 

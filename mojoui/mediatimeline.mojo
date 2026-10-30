@@ -10,6 +10,7 @@
 #
 #   var ed = MediaTimeline(path, msg_base=300, canvas_base=300)  # probes first (waits: tests, start-up); raises when the file isn't a video
 #   var ed = MediaTimeline(info, msg_base=300, canvas_base=300)  # a video already probed (a card's player.info): nothing waits
+#   var ed = MediaTimeline.open_with(info, 300, 300, at=t, log=series, room_w=w, room_h=h)  # how an app opens it (both demos)
 #                                                                # owns messages 300 … 363, canvases 300 … 302
 #   ed.use_rows(table, blur_kind="face", object_kind="pallet", object_label="Pallets", flag_word="damaged")   # analysis rows → lanes, sentence, preview
 #   ed.use_captions(flagged_captions(table, "pallet", names), "shipment ID")                                  # captions to burn in
@@ -45,7 +46,7 @@ from mojoui.player import Player, PlayerState
 from mojoui.sentence import Sentence, Word
 from mojoui.text import Font, MEDIUM, REGULAR, LEFT, CENTRE, RIGHT
 from mojoui.theme import Palette
-from mojoui.timeseries import TimeSeries
+from mojoui.timeseries import TimeSeries, metric_label, metric_unit
 from mojoui.video import VideoSource, VideoInfo
 from mojoui.videotable import VideoTable, NO_CODE
 from mojoui.videoexport import cut, NoEdits, RedactPlan, Caption
@@ -972,6 +973,27 @@ struct MediaTimeline(Movable):
         self.expecting = False
         self.preview_busy = False
 
+    @staticmethod
+    def open_with(info: VideoInfo, msg_base: Int, canvas_base: Int, at: Float64 = 0.0, log: Optional[TimeSeries] = None,
+                  room_w: Int = 0, room_h: Int = 0) -> MediaTimeline:
+        """The editor as an app opens it from a video it already shows (its player's info: nothing waits): the playhead
+        at `at` seconds (0: mid-way, so a split can start at once), the log's first two measures as lines under the
+        filmstrip (not its heading or position), sized to the room the app gives it. Rows come later (use_rows, or
+        mojoui.videojobs.use_analysis when the analysis lands)."""
+        var ed = MediaTimeline(info, msg_base, canvas_base)
+        ed.seek(at if at > 0 else ed.project.duration() / 2)
+        if log:
+            ref ts = log.value()
+            var shown = 0
+            for i in range(len(ts.names)):
+                var m = ts.names[i]
+                if shown < 2 and m != "heading_deg" and m != "lat" and m != "lon" and m != "t":
+                    ed.add_lane(value_lane(metric_label(m), ts, m, metric_unit(m)))
+                    shown += 1
+        if room_w > 0 and room_h > 0:
+            ed.resize(room_w, room_h)
+        return ed^
+
     def path(self) -> String:
         return self.player.info.path
 
@@ -1522,6 +1544,7 @@ struct MediaTimeline(Movable):
             spacing=10).align(CENTER).fill().tag("editor-header")
         # the viewer, with the reel's preview chips in its corner
         var picture = Canvas(self.canvas + C_PICTURE, self.version, on_gesture=b + M_PICTURE, keys=True).fill().grow().tag("video")
+        picture = picture^.label("Video " + self.title + ", " + clock_tenths(self.t()) + " of " + clock_tenths(self.project.duration()) + (", playing" if playing else ", paused"))
         var viewer: View
         if self.table or self.expecting:
             var chips = List[View]()

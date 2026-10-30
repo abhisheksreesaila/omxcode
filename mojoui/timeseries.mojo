@@ -95,3 +95,31 @@ struct TimeSeries(Copyable, Movable):
             return 0.0
         ref c = self.columns[i]
         return c[b[0]] + (c[b[1]] - c[b[0]]) * b[2]
+
+
+def metric_label(name: String) -> String:
+    """A column's name as a person says it: alt_m → Altitude, speed_ms → Speed, battery_pct → Battery, else its words."""
+    if name == "alt_m":
+        return String("Altitude")
+    if name.startswith("speed"):
+        return String("Speed")
+    if name.startswith("battery"):
+        return String("Battery")
+    if name == "heading_deg":
+        return String("Heading")
+    var words = name.replace("_", " ")
+    if words.byte_length() == 0:
+        return words^
+    return String(words[byte=0:1]).upper() + String(words[byte=1:])
+
+
+def metric_unit(name: String) -> String:
+    if name.endswith("_m"):
+        return String("m")
+    if name.endswith("_ms"):
+        return String("m/s")
+    if name.endswith("_pct"):
+        return String("%")
+    if name.endswith("_deg"):
+        return String("°")
+    return String("")

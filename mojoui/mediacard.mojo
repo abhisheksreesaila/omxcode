@@ -233,6 +233,21 @@ struct MediaCards(Movable, Sized):
     def owns(self, message: Int) -> Bool:
         return self.msg_base <= message < self.msg_base + self.most * CARD_MESSAGES
 
+    def card_of(self, path: String) -> Int:
+        """The card showing `path`, else -1."""
+        for k in range(len(self.cards)):
+            if self.cards[k].path == path:
+                return k
+        return -1
+
+    def video_paths(self) -> List[String]:
+        """The videos on the page, oldest first (a log looks for its video among them: trackcard.video_for_log)."""
+        var out = List[String]()
+        for k in range(len(self.cards)):
+            if self.cards[k].kind == OBJ_VIDEO:
+                out.append(self.cards[k].path)
+        return out^
+
     def poll(mut self) -> Bool:
         """Takes what every card's decoder thread finished (a probe, a frame, a picture): call it on the app's
         jobs_message (the decoders wake it) or any event. True when a card changed."""
@@ -336,7 +351,7 @@ struct MediaCards(Movable, Sized):
         if c.status != "":  # (work running for it: what and how far, in place of its actions)
             parts.append(Text(c.status + (" · " + String(c.progress) + "%" if c.progress >= 0 else String("")), CAPTION).tag("media-status"))
             if c.progress >= 0:
-                parts.append(ProgressBar(c.progress).width(96))
+                parts.append(ProgressBar(c.progress).width(96).label(c.status + " " + c.title()))
         else:
             for i in range(min(len(c.actions), MAX_ACTIONS)):
                 ref a = c.actions[i]

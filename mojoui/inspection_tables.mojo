@@ -11,7 +11,8 @@
 #
 # Positions are kept to seven decimals (a centimetre), severities as levels 1…5 (0: none), sizes in metres.
 
-from omxcore import Table, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT
+from omxcore import Table, Job, JobBody, JobCtl, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT
+from mojoui.jobs import start_ui_job
 from mojoui.geo import Place
 from mojoui.inspection import Finding, Change, compare, worst, write_waypoints
 from mojoui.sheet import Sheet
@@ -180,3 +181,28 @@ def place_marks(sheet: Sheet) -> List[MapMark]:
     except:
         pass
     return marks^
+
+
+# ---------- compare as a job (goal 41 M3) ----------
+
+
+struct CompareJob(JobBody):
+    """compare_tables off the UI thread: it owns snapshots of the two places tables; its answer is the "worse" sheet."""
+    comptime Out = Sheet
+    var a: Sheet
+    var b: Sheet
+    var match_m: Float64
+
+    def __init__(out self, var a: Sheet, var b: Sheet, match_m: Float64):
+        self.a = a^
+        self.b = b^
+        self.match_m = match_m
+
+    def run(mut self, ctl: JobCtl) raises -> Sheet:
+        return Sheet(compare_tables(self.a, self.b, self.match_m).share(), False)
+
+
+def compare_job(a: Sheet, b: Sheet, match_m: Float64) -> Job[Sheet]:
+    """The later flight's places (b) against the earlier one's (a), as a job (snapshots of both): its answer is the
+    "worse" table compare_tables makes; the end wakes the UI (mojoui.jobs.start_ui_job)."""
+    return start_ui_job(CompareJob(a.snapshot(), b.snapshot(), match_m))

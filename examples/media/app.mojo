@@ -19,12 +19,12 @@ from mojoui.chartview import ChartView
 from mojoui.charts import fixed, fitted_floor
 from mojoui.csvio import read_csv
 from mojoui.player import Player, clock_text
+from mojoui.video import VideoSource
 from mojoui.mediatimeline import MediaTimeline, value_lane, markers_from_table, LANE_MARKERS
-from mojoui.mediatimeline_jobs import TimelineFeed, AnalyseJob
-from mojoui.jobs import start_ui_job
+from mojoui.mediatimeline_jobs import TimelineFeed
+from mojoui.videojobs import analyze_job, use_analysis, expect_analysis, Analyzed, INSPECTION
 from mojoui.videotable import VideoTable
 from mojoui.videoexport import flagged_captions, read_csv_map
-from mojoui.vision_presets import drone_analyzer, drone_ranges, DRONE_CELL, warehouse_analyzer, warehouse_ranges, WAREHOUSE_CELL
 from mojoui.view import PROMINENT
 from omxcore import Job, JOB_RUNNING
 from mojoui.sheet import Sheet
@@ -84,7 +84,7 @@ struct Main(App):
     var warehouse: Bool  # G39_CLIP=warehouse: the dock camera, straight into the editor
     var editor: Optional[MediaTimeline]
     var feed: TimelineFeed
-    var analysis: Optional[Job[VideoTable]]
+    var analysis: Optional[Job[Analyzed]]
 
     def __init__(out self):
         var folder = getenv("G39_MEDIA", "build/g39/media")
@@ -158,23 +158,17 @@ struct Main(App):
     # ---------- events ----------
 
     def open_editor(mut self):
-        """The editor on the same footage, where the player was (a recording not yet watched opens mid-way, so a split
-        can start straight away); its lanes: the telemetry, then what the analysis finds."""
+        """The editor on the same footage, where the player was (MediaTimeline.open_with: mid-way when not yet watched,
+        the telemetry as lines for the flight); its analysis runs on the one path (videojobs.analyze_job) and its rows
+        land as lanes (use_analysis)."""
         try:
-            var ready = self.player and self.player.value().ready()
-            var ed = (MediaTimeline(self.player.value().info, EDITOR_MSG, EDITOR_CANVAS) if ready  # (the player's probe: nothing waits)
-                      else MediaTimeline(self.folder + "/" + self.file, EDITOR_MSG, EDITOR_CANVAS))  # (at start-up: probes here)
-            var t = self.t()
-            ed.seek(t if t > 0 else ed.project.duration() / 2)
-            if self.warehouse:
-                ed.facts = "Dock 3 · " + ed.facts + " · analysing…"
-                self.analysis = start_ui_job(AnalyseJob(ed.path(), warehouse_analyzer(), warehouse_ranges(), WAREHOUSE_CELL))
-            else:
-                ed.facts = "Inspection flight · " + ed.facts + " · analysing…"
-                ed.add_lane(value_lane("Altitude", self.series, "alt_m", "m"))
-                ed.add_lane(value_lane("Speed", self.series, "speed_ms", "m/s"))
-                self.analysis = start_ui_job(AnalyseJob(ed.path(), drone_analyzer(), drone_ranges(), DRONE_CELL))
-            ed.resize(self.width - 40, self.height - 32)
+            var info = self.player.value().info if self.player and self.player.value().ready() else VideoSource(self.folder + "/" + self.file).info()  # (at start-up the player is still opening: probe here, once)
+            var log = Optional[TimeSeries](None) if self.warehouse else Optional[TimeSeries](self.series.copy())
+            var ed = MediaTimeline.open_with(info, EDITOR_MSG, EDITOR_CANVAS, at=self.t(), log=log^, room_w=self.width - 40, room_h=self.height - 32)
+            var which = 0 if self.warehouse else INSPECTION
+            ed.facts = ("Dock 3 · " if self.warehouse else "Inspection flight · ") + ed.facts + " · analysing…"
+            expect_analysis(ed, which)
+            self.analysis = analyze_job(ed.path(), which, None if self.warehouse else Optional[TimeSeries](self.series.copy()))
             self.editor = ed^
             if self.player:
                 self.player.value().state.pause()
@@ -183,28 +177,24 @@ struct Main(App):
             self.problem = String(e)
 
     def analysed(mut self):
-        """The analysis job ended: its rows become the editor's lanes and the sentence's choices."""
+        """The analysis job ended: its rows become the editor's lanes and the sentence's choices (use_analysis)."""
         if not self.analysis or self.analysis.value().poll() == JOB_RUNNING or not self.editor:
             return
         var job = self.analysis.take()
         try:
-            var table = job.result()
+            var a = job.result()
+            var found = a.take_found()
             ref ed = self.editor.value()
             var base = ed.facts.replace(" · analysing…", "")
+            var lanes_before = len(ed.lanes)
+            use_analysis(ed, found, a.analyzer)
             if self.warehouse:
                 var names = read_csv_map(self.folder + "/shipments.csv", "pallet_code", "shipment")
-                var captions = flagged_captions(table, "pallet", names)
-                ed.use_rows(table^, blur_kind="face", blur_noun="faces", object_kind="pallet", object_label="Pallets", flag_word="damaged")
-                ed.use_captions(captions^, "shipment ID")
-                var lane = ed.lanes[0].copy()
+                ed.use_captions(flagged_captions(found, "pallet", names), "shipment ID")
+                var lane = ed.lanes[lanes_before].copy()
                 ed.facts = base + " · analysed: " + String(lane.markers()) + " pallets, " + String(lane.flagged()) + " damaged"
             else:
-                var defects = markers_from_table(table, "defect", "Defects", gap=15)
-                for i in range(len(defects.flags)):
-                    defects.flags[i] = True  # (a scorch mark is what the inspection is for: the warning tone)
-                var n = defects.markers()
-                ed.add_lane(defects^)
-                ed.facts = base + " · analysed: " + String(n) + " defect sightings"
+                ed.facts = base + " · analysed: " + String(ed.lanes[len(ed.lanes) - 1].markers()) + " defect sightings"
             ed.version += 1
         except e:
             self.editor.value().status = "Analysis failed: " + String(e)

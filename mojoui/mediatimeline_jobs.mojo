@@ -16,7 +16,6 @@ from mojoui.imageops import ImageOps, Frame
 from mojoui.mediatimeline import MediaTimeline, ReelSpec, decode_thumbnails, write_reel, render_preview
 from mojoui.videoexport import RedactPlan
 from mojoui.video import VideoSource
-from mojoui.videotable import VideoTable, Analyzer, ColourRange, scan
 
 comptime CHUNK = 12  # thumbnails per job
 
@@ -53,26 +52,6 @@ struct ExportJob(JobBody):
 
     def run(mut self, ctl: JobCtl) raises -> Int:
         return write_reel(self.path, self.out, self.spec)
-
-
-struct AnalyseJob[A: Analyzer](JobBody):
-    """A video's analysis rows (mojoui.videotable.scan, on the GPU) off the UI thread: what the editor's lanes and its
-    sentence are made from when the app has no rows yet."""
-    comptime Out = VideoTable
-    var path: String
-    var analyzer: Self.A
-    var ranges: List[ColourRange]
-    var cell: Int
-
-    def __init__(out self, path: String, var analyzer: Self.A, var ranges: List[ColourRange], cell: Int):
-        self.path = path
-        self.analyzer = analyzer^
-        self.ranges = ranges^
-        self.cell = cell
-
-    def run(mut self, ctl: JobCtl) raises -> VideoTable:
-        var video = VideoSource(self.path)
-        return scan(video, self.analyzer, self.ranges, self.cell)
 
 
 def _take_ops(mut o: Optional[ImageOps]) -> Optional[ImageOps]:
