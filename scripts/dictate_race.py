@@ -60,6 +60,13 @@ B_VARIANTS = [("fp16", "fp16"), ("fp32-1file", "fp32"), ("fp32", "fp32"), ("fp32
 B_DIR = Path.home() / ".cache" / "mojoui" / "models" / MODEL_B
 B_CHUNKED = Path.home() / ".cache" / "mojoui" / "models" / "whisper-large-v3-turbo-encoder-chunked"
 CHUNKS = 2
+ATTEMPTS = 6  # runs per side/variant until one has no other process on the GPU (each waits for 20 s of quiet first)
+B_WHY = {
+    ("fp16", "fp16"): "the adapter has no shader-f16 under any of 18 Chromium flag sets (docs/goals/43/webgpu-f16-probe.json)",
+    ("fp32-1file", "fp32"): "Chromium can't allocate one 2,547,875,840-byte ArrayBuffer for the single external-data file "
+                            "(page fetchtest: 'RangeError: Array buffer allocation failed'; files up to 1.27 GB read whole); "
+                            "transformers.js reports it as 'Failed to fetch'. Same tensors split under 2 GB = variant fp32 (D-1416)",
+}
 CHROME = os.environ.get("CHROME", "/usr/lib/chromium/chromium")
 SPEECH_ENV = ROOT / ".pixi" / "envs" / "speech"
 BUILD_LOGS = ROOT / "build" / "race"
@@ -162,6 +169,26 @@ class Peak:
         return {"samples": self.samples, "interval_s": round(seconds / max(self.samples, 1), 3),
                 "util_mean": round(statistics.mean(u), 1), "util_max": max(u), "other_processes": others,
                 "other_material": material, "quiet": not material}
+
+
+def wait_quiet(index, hold=20.0, limit=1800.0):
+    """Waits (up to `limit` s) until no compute app on GPU `index` other than this machine's always-there desktop ones
+    holds >= 100 MiB, for `hold` seconds in a row; returns the seconds waited (another session's tests share the GPU)."""
+    uuid = {v: k for k, v in gpu_uuids().items()}[index]
+    t0 = time.time()
+    calm = None
+    while time.time() - t0 < limit:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=gpu_uuid,used_memory", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True).stdout
+        busy = any(u.strip() == uuid and float(m) >= 100 for u, m in (ln.rsplit(",", 1) for ln in out.strip().splitlines() if "," in ln))
+        if busy:
+            calm = None
+        elif calm is None:
+            calm = time.time()
+        elif time.time() - calm >= hold:
+            break
+        time.sleep(1)
+    return round(time.time() - t0, 1)
 
 
 def pgrp(pid):
@@ -379,22 +406,22 @@ def main():
     build_b()
     variants, runs = [], {}
     for enc, dec in B_VARIANTS:
-        for attempt in range(3):  # re-run when another process used the race's GPU materially during it
+        for attempt in range(ATTEMPTS):  # re-run when another process used the race's GPU materially during it
+            waited = wait_quiet(args.gpu)
             got = run_b(enc, dec)
             if got[0] is None or got[5]["quiet"]:
                 break
             print(f"B {enc}/{dec}: another process used the GPU ({got[5]['other_material']}); again")
-            time.sleep(10)
         if got[0] is None:
             variants.append({"encoder": enc, "decoder": dec, "loaded": False, "error": got[1].split(" | adapter")[0][:400],
-                             "evidence": got[2]})
+                             "evidence": got[2], **({"root_cause": B_WHY[(enc, dec)]} if (enc, dec) in B_WHY else {})})
             print(f"B {enc}/{dec}: didn't load: {variants[-1]['error'][:200]}")
             continue
         cold, res, rise, info, mb, gq = got
         v = summarise(MODEL_B, cold, res, rise[max(rise, key=rise.get)], refs, chk.wer)
         variants.append({"encoder": enc, "decoder": dec, "loaded": True, "p50_ms": v["p50_ms"], "p95_ms": v["p95_ms"],
                          "wer": v["wer"], "cold_start_s": v["cold_start_s"], "download_mb": round(mb, 1), "gpu_during": gq,
-                         "attempts": attempt + 1})
+                         "attempts": attempt + 1, "waited_for_quiet_s": waited})
         runs[(enc, dec)] = got
         print(f"B {enc}/{dec}: p50 {v['p50_ms']} ms, p95 {v['p95_ms']}, WER {v['wer']}; GPU quiet {gq['quiet']}")
         time.sleep(3)
@@ -404,12 +431,12 @@ def main():
     seen = max(rise_any, key=rise_any.get)
     index = seen  # A follows the GPU B landed on (it can't be told), so both use one card
     time.sleep(3)
-    for attempt in range(3):
+    for attempt in range(ATTEMPTS):
+        wait_quiet(index)
         cold_a, res_a, peak_a, gpu_a, gq_a = run_a(index)
         if gq_a["quiet"]:
             break
         print(f"A: another process used the GPU ({gq_a['other_material']}); again")
-        time.sleep(10)
     after = utilisation(index)
     a = summarise(MODEL_A, cold_a, res_a, peak_a, refs, chk.wer)
     # B is its fastest variant whose WER is within 0.01 of A's (a fast variant that transcribes worse isn't a fair
