@@ -1015,6 +1015,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)` | `mojoui/trackcard.mojo` | Board: drag, resize, snap, Canvas, Card, Segmented, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 
 ## JavaScript widgets (WebComponent)
 
@@ -1030,12 +1031,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 130 | 3 | 0 |
-| Web | 133 | 0 | 0 |
-| Android | 19 | 31 | 83 |
-| Mac (AppKit) | 0 | 120 | 13 |
-| iPhone (UIKit) | 0 | 98 | 35 |
-| Agent (MCP) | 44 | 35 | 54 |
+| Linux (GTK) | 130 | 4 | 0 |
+| Web | 133 | 1 | 0 |
+| Android | 19 | 32 | 83 |
+| Mac (AppKit) | 0 | 121 | 13 |
+| iPhone (UIKit) | 0 | 99 | 35 |
+| Agent (MCP) | 44 | 36 | 54 |
 
 ## Inside one app, not components yet (the debt)
 

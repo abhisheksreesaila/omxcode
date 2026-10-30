@@ -150,6 +150,8 @@ COMPOSITES = [
     ("MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)", "mojoui/mapview.mojo", ["Canvas"], "MapView("),
     ("Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)", "mojoui/trackcard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Segmented", "Quiet buttons"], "TrackCards("),
     ("Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)", "mojoui/inspection_tables.mojo", [], "compare_tables("),
+    # links (goal 41)
+    ("Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools)", "mojoui/links.mojo", ["Button", "TextField", "Dropdown", "Text", "VStack"], "Links("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
