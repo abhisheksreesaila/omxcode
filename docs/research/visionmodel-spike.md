@@ -26,7 +26,7 @@ Everything below was measured on this machine (RTX 3090, GPU 1) unless marked **
 Run:
 ```
 CUDA_VISIBLE_DEVICES=1 pixi run -e models python scripts/vision_spike.py owl   # or: sam
-G39_MEDIA=../mojo-ui-g39/build/g39/media CUDA_VISIBLE_DEVICES=1 pixi run -e models mojo run -I . tests/test_visionmodel.mojo
+G39_MEDIA=build/g39/media CUDA_VISIBLE_DEVICES=1 pixi run -e models mojo run -I . tests/test_visionmodel.mojo
 ```
 
 ## Numbers
@@ -104,7 +104,7 @@ Annotated frames are in `build/g39e/out/` (not committed; `scripts/vision_spike.
 - SAM 2 video in transformers: adding several objects one call at a time before the first frame fails with
   "maskmem_features in conditioning outputs cannot be empty". Adding them all in one call works (`add_boxes`, D-946).
 - `VideoTable.intervals()` assumes the scan started at frame 0 (`frames` is a count, not an end frame): a scan that
-  starts at frame 400 gets no intervals. Not fixed (outside the spike); the test counts rows instead. Worth a fix.
+  starts at frame 400 gets no intervals. Fixed in M12 (VideoTable.first, D-972).
 
 ## How it maps onto omxconsole (later)
 

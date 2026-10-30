@@ -1,6 +1,6 @@
 # mojoui.visionmodel in process (goal 39 M12 spike): a VideoSource frame handed to PyTorch without files or HTTP, OWLv2's
 # boxes back as VideoTable rows, SAM 2.1 following one of them, and a ModelAnalyzer scan with keyframes.
-#   G39_MEDIA=../mojo-ui-g39/build/g39/media CUDA_VISIBLE_DEVICES=1 pixi run -e models mojo run -I . tests/test_visionmodel.mojo
+#   G39_MEDIA=build/g39/media CUDA_VISIBLE_DEVICES=1 pixi run -e models mojo run -I . tests/test_visionmodel.mojo
 # Prints "visionmodel: ok" plus the timings (hand-off ms, model ms). Needs the `models` pixi environment and a CUDA GPU.
 from std.testing import assert_equal, assert_true
 from std.os import getenv
@@ -97,10 +97,13 @@ def main() raises:
     var x0 = -1
     var x_last = -1
     var track_ms = List[Float64]()
+    var masks = VideoTable()  # SAM's masks as rows: the mask's box, value = its area in pixels
     v.seek_frame(420)
     for k in range(30):
         _ = v.next_into(px)
         var r = sam.track_step(addr, w, h)
+        if r[0].area > 0:
+            masks.add(420 + k, "mask", r[0].x, r[0].y, r[0].w, r[0].h, track=r[0].id, value=Float64(r[0].area))
         if k > 0:
             track_ms.append(sam.model_ms())
         if k == 0:
@@ -110,6 +113,8 @@ def main() raises:
     sort(track_ms)
     print("sam track: 30 frames, x", x0, "->", x_last, "; median", track_ms[len(track_ms) // 2], "ms per frame")
     assert_true(x_last > x0 + 100, "the tracked box moves with the belt")
+    assert_true(masks.rows() >= 20, "SAM's masks are rows")
+    assert_equal(masks.track[0], 7)
 
     # a whole stretch through scan(): keyframes every 5 frames, 8 per batch, interpolated between
     var v2 = VideoSource(path)
@@ -131,4 +136,7 @@ def main() raises:
         tracks = max(tracks, rows.track[i] + 1)
     print("scan rows: splat on", splat_frames, "frame-rows;", tracks, "tracks")
     assert_true(splat_frames > 20, "the tear is found across the stretch")
+    var stretches = rows.intervals("splat")  # the scan started at 400: intervals are in the video's frame numbers
+    assert_true(len(stretches) >= 1 and stretches[0][0] >= 400, "intervals from a scan that starts at frame 400")
+    assert_true(handoff <= 1.0, "the hand-off from host memory takes at most 1 ms")
     print("visionmodel: ok  hand-off", handoff, "ms  model", model, "ms  call", calls[5], "ms")

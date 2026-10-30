@@ -3,7 +3,7 @@
     CUDA_VISIBLE_DEVICES=1 pixi run -e models python scripts/vision_spike.py owl    # annotated PNGs + ms per frame
     CUDA_VISIBLE_DEVICES=1 pixi run -e models python scripts/vision_spike.py sam    # track a box over 60 frames
 
-Writes build/g39e/out/*.png and prints timings. Media: $G39_MEDIA (default ../mojo-ui-g39/build/g39/media).
+Writes build/g39e/out/*.png and prints timings. Media: $G39_MEDIA (default build/g39/media in this checkout).
 """
 
 import os
@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "mojoui"))
 import visionmodel_torch as vm  # noqa: E402
 
-MEDIA = os.environ.get("G39_MEDIA", os.path.expanduser("~/Projects/mxapp/mojo-ui-g39/build/g39/media"))
+MEDIA = os.environ.get("G39_MEDIA", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build", "g39", "media"))
 OUT = os.path.join(os.path.dirname(__file__), "..", "build", "g39e", "out")
 COLOURS = [(230, 25, 75), (60, 180, 75), (0, 130, 200), (245, 130, 48), (145, 30, 180), (70, 240, 240)]
 

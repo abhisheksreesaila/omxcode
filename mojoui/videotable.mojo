@@ -497,6 +497,7 @@ struct VideoTable(Movable):
     var frame_motion: List[Float64]
     var fps: Float64
     var frames: Int
+    var first: Int  # scan(): the first frame scanned (frames counts from it)
     var seconds: Float64  # scan(): wall time, decode included
 
     def __init__(out self):
@@ -520,6 +521,7 @@ struct VideoTable(Movable):
         self.frame_motion = List[Float64]()
         self.fps = 30
         self.frames = 0
+        self.first = 0
         self.seconds = 0
 
     def rows(self) -> Int:
@@ -548,6 +550,7 @@ struct VideoTable(Movable):
         out.frame_motion = self.frame_motion.copy()
         out.fps = self.fps
         out.frames = self.frames
+        out.first = self.first
         out.seconds = self.seconds
         return out^
 
@@ -592,8 +595,12 @@ struct VideoTable(Movable):
             f.write(self.csv())
 
     def intervals(self, kind: String, damaged_only: Bool = False) -> List[Tuple[Int, Int]]:
-        """Frame ranges [start, end) during which a row of this kind (damaged ones only, if asked) is on screen, merged."""
-        var on = List[Bool](length=self.frames + 1, fill=False)
+        """Frame ranges [start, end) during which a row of this kind (damaged ones only, if asked) is on screen, merged.
+        Frame numbers are the video's: a scan that started at frame 400 gives ranges from 400 on."""
+        var top = self.first + self.frames
+        for i in range(self.rows()):
+            top = max(top, self.frame[i] + 1)
+        var on = List[Bool](length=top + 1, fill=False)
         for i in range(self.rows()):
             if self.kind[i] == kind and (self.damaged[i] or not damaged_only) and self.frame[i] < len(on):
                 on[self.frame[i]] = True
@@ -1131,6 +1138,7 @@ def scan_with[A: Analyzer, P: Progress](mut video: VideoSource, mut analyzer: A,
             progress.frame_done(start + n - 1)
             swap(cur, prev)
     analyzer.finish(table)
+    table.first = start
     table.frames = n
     table.seconds = Float64(Int(now_ns()) - t0) / 1e9
     return table^

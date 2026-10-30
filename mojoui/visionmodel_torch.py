@@ -157,6 +157,194 @@ class Detector:
         return rows.flatten().tolist()
 
 
+    # ---------- find more like this: image-guided detection from example boxes ----------
+
+    def _squares(self, h, w, tiles):
+        """The square windows (x0, y0, side) the model sees. tiles = 0: the whole frame, padded to a square. tiles = n:
+        squares of side min(h, w) / n on a grid that covers the frame (evenly spaced, overlapping where they must), so
+        a small thing is seen n * max(h, w) / min(h, w) times bigger (16:9, n = 1: 2 windows, 1.8x; n = 2: 8, 3.6x)."""
+        if tiles <= 0:
+            return [(0, 0, max(h, w))]
+        s = min(h, w) // tiles
+
+        def starts(length):
+            n = -(-length // s)
+            return [round(i * (length - s) / max(n - 1, 1)) for i in range(n)]
+
+        return [(x0, y0, s) for y0 in starts(h) for x0 in starts(w)]
+
+    def _windows(self, frames, tiles):
+        """(B, H, W, 4) uint8 -> (B * T, 3, side, side) model input and the T windows."""
+        h, w = frames.shape[1], frames.shape[2]
+        sq = self._squares(h, w, tiles)
+        if tiles <= 0:
+            return self._pixels(frames), sq
+        pv = torch.stack([self._pixels(frames[:, y0:y0 + s, x0:x0 + s]) for x0, y0, s in sq], dim=1)  # (B, T, 3, side, side)
+        return pv.flatten(0, 1), sq
+
+    def _embed(self, pv, sq, b):
+        """Model features for windows -> per frame: features (P, D) and boxes (P, 4: x, y, w, h in frame pixels)."""
+        fmap = self.model.image_embedder(pixel_values=pv)[0]
+        n, gh, gw, d = fmap.shape
+        feats = fmap.reshape(n, gh * gw, d)
+        boxes = self.model.box_predictor(feats, fmap).float()  # cx, cy, w, h in [0, 1] of the window
+        t = len(sq)
+        off = torch.tensor([[x0, y0] for x0, y0, _ in sq], device=pv.device, dtype=torch.float32)  # (T, 2)
+        side = torch.tensor([s for _, _, s in sq], device=pv.device, dtype=torch.float32)  # (T,)
+        boxes = boxes.view(b, t, gh * gw, 4) * side.view(1, t, 1, 1)
+        xy = boxes[..., :2] - boxes[..., 2:] / 2 + off.view(1, t, 1, 2)
+        boxes = torch.cat([xy, boxes[..., 2:]], dim=-1).view(b, t * gh * gw, 4)
+        return feats.view(b, t * gh * gw, d), boxes
+
+    @torch.inference_mode()
+    def auto_tiles(self, width, height, w, h, patches=2, most=4):
+        """The least zoom (tiles, see _squares) at which the example's short side spans `patches` of the model's patches:
+        OWL's boxes come from patches, so a thing smaller than two of them is seen as part of its neighbourhood."""
+        patch = self.model.config.vision_config.patch_size
+        for n in range(most + 1):
+            side = max(width, height) if n == 0 else min(width, height) // n
+            if min(w, h) * self.side / side >= patches * patch:
+                return n
+        return most
+
+    def add_example(self, addr, width, height, x, y, w, h, positive=True, tiles=-1):
+        """An example of what to find: the box (x, y, w, h) on this frame. Its query is the class embedding of the
+        model's own box that overlaps it best (the example seen at the scale and context it will be searched in).
+        Several examples: positives and negatives; the first one sets `tiles` (see _squares; -1: auto_tiles). Returns that box's overlap (IoU)."""
+        if not getattr(self, "_examples", None):
+            self._examples = []
+            self.tiles = int(tiles) if tiles >= 0 else self.auto_tiles(width, height, w, h)
+        frame = self.upload(addr, width, height)[None]
+        pv, sq = self._windows(frame, self.tiles)
+        feats, boxes = self._embed(pv, sq, 1)
+        embeds = self.model.class_predictor(feats)[1][0]  # (P, D)
+        ious = _box_iou(boxes[0], torch.tensor([[x, y, w, h]], device=boxes.device, dtype=torch.float32))[:, 0]
+        best = int(ious.argmax())
+        self._examples.append(dict(embed=embeds[best].clone(), positive=bool(positive), feats=feats, boxes=boxes[0],
+                                   box=(float(x), float(y), float(w), float(h)), iou=float(ious[best])))
+        self._query = None
+        return float(ious[best])
+
+    def clear_examples(self):
+        self._examples, self._query = [], None
+
+    def _queries(self):
+        if self._query is None:
+            q = torch.stack([e["embed"] for e in self._examples])[None]  # (1, Q, D)
+            self._query = (q, torch.ones(q.shape[:2], device=q.device),
+                           torch.tensor([e["positive"] for e in self._examples], device=q.device))
+        return self._query
+
+    def _like_scores(self, feats):
+        """(B, P, D) features -> (B, P) best positive score, (B, P) best negative score (0: none), (B, P) which example."""
+        q, mask, pos = self._queries()
+        logits = self.model.class_predictor(feats, q.expand(feats.shape[0], -1, -1), mask.expand(feats.shape[0], -1))[0]
+        s = logits.float()  # logits: image-guided queries saturate the sigmoid
+        sp, which = s.masked_fill(~pos, -1e9).max(dim=-1)
+        sn = s.masked_fill(pos, -1e9).max(dim=-1).values if bool((~pos).any()) else torch.full_like(sp, -1e9)
+        return sp, sn, which
+
+    @torch.inference_mode()
+    def add_background_negatives(self, k=64):
+        """Hard negatives from the examples' own frames: the `k` model boxes that look most like the positives but touch
+        no positive example's box (by tapping one thing, the user said the rest of that frame is not it). A box then
+        counts only when it is closer to a positive than to all of these. Beyond a few dozen the result stops changing
+        (measured: 32, 256 and 1024 give the same rows), so k is a cost bound, not a tuning knob."""
+        positives = [e for e in self._examples if e["positive"] and e["feats"] is not None]
+        taps = torch.tensor([e["box"] for e in positives], device=self.device, dtype=torch.float32)
+        for e in positives:
+            sp, _, _ = self._like_scores(e["feats"])
+            touches = _box_iou(e["boxes"], taps).max(dim=1).values > 0
+            s = sp[0].masked_fill(touches, -1e9)
+            embeds = self.model.class_predictor(e["feats"])[1][0]
+            for j in s.topk(min(k, int((~touches).sum()))).indices.tolist():
+                self._examples.append(dict(embed=embeds[j].clone(), positive=False, feats=None, boxes=None, box=None, iou=0.0))
+        self._query = None
+        return len(self._examples)
+
+    @torch.inference_mode()
+    def like_stats(self):
+        """The examples' own score distribution, for an automatic threshold: per positive example, its self-match (the
+        best score of its own query on its own frame, among the model's boxes overlapping the example by IoU >= 0.5)
+        and the background (the best score among boxes on that frame that do not touch the example at all). Returns
+        [min self-match, max background]."""
+        selfs, bgs = [], []
+        for e in self._examples:
+            if not e["positive"] or e["feats"] is None:
+                continue
+            sp, _, _ = self._like_scores(e["feats"])
+            iou = _box_iou(e["boxes"], torch.tensor([e["box"]], device=sp.device))[:, 0]
+            selfs.append(float(sp[0][iou >= 0.5].max()) if bool((iou >= 0.5).any()) else float(sp[0].max()))
+            bg = sp[0][iou <= 0]
+            bgs.append(float(bg.max()) if bg.numel() else 0.0)
+        return [min(selfs), max(bgs)]
+
+    @torch.inference_mode()
+    def like_frames(self, frames, threshold):
+        """(B, H, W, 4) -> per frame (N, 6) rows on the CPU: x, y, w, h, score, example index; a box counts when its best
+        positive score is >= threshold and beats every negative example."""
+        b = frames.shape[0]
+        t0 = time.perf_counter()
+        pv, sq = self._windows(frames, self.tiles)
+        feats, boxes = self._embed(pv, sq, b)
+        sp, sn, which = self._like_scores(feats)
+        result = []
+        for i in range(b):
+            keep = (sp[i] >= threshold) & (sp[i] > sn[i])
+            rows = torch.cat([boxes[i][keep], sp[i][keep, None], which[i][keep, None].float()], dim=1)
+            if rows.shape[0]:  # NMS across examples (one thing, several examples of it)
+                from torchvision.ops import nms  # noqa: PLC0415
+
+                rows = _inside(rows[nms(torch.cat([rows[:, :2], rows[:, :2] + rows[:, 2:4]], dim=1), rows[:, 4], 0.3)])
+            result.append(rows.cpu())
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+        self.model_ms = (time.perf_counter() - t0) * 1000
+        return result
+
+    def flush_like(self, threshold):
+        """Every staged frame through like_frames in one batch; a flat list, 7 per box (slot first), as flush()."""
+        staged = getattr(self, "_staged", [])
+        self._staged = []
+        if not staged:
+            return []
+        out = []
+        for slot, rows in enumerate(self.like_frames(torch.stack(staged), threshold)):
+            for r in rows.tolist():
+                out += [float(slot)] + r
+        return out
+
+    def like_address(self, addr, width, height, threshold):
+        frame = self.upload(addr, width, height)
+        return self.like_frames(frame[None], threshold)[0].flatten().tolist()
+
+
+def _inside(rows, cover=0.6):
+    """Drops a box when at least `cover` of it lies inside a better-scoring box (rows sorted best first, as nms returns
+    them): one thing, one box. IoU-based NMS keeps a small box nested in a big one (their IoU is low)."""
+    keep = []
+    for i in range(rows.shape[0]):
+        x, y, w, h = rows[i, :4].tolist()
+        ok = True
+        for j in keep:
+            X, Y, W, H = rows[j, :4].tolist()
+            iw, ih = min(x + w, X + W) - max(x, X), min(y + h, Y + H) - max(y, Y)
+            if iw > 0 and ih > 0 and iw * ih >= cover * min(w * h, W * H):
+                ok = False
+                break
+        if ok:
+            keep.append(i)
+    return rows[keep]
+
+
+def _box_iou(a, b):
+    """IoU of (N, 4) and (M, 4) x, y, w, h boxes -> (N, M)."""
+    from torchvision.ops import box_iou  # noqa: PLC0415
+
+    xyxy = lambda t: torch.cat([t[:, :2], t[:, :2] + t[:, 2:4]], dim=1)
+    return box_iou(xyxy(a.float()), xyxy(b.float()))
+
+
 class _CudaFrame:
     """A raw CUDA pointer as an (H, W, 4) uint8 array torch can wrap (CUDA Array Interface v3)."""
 
