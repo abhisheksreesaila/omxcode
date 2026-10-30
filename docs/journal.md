@@ -835,3 +835,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Third probe; reframed by the owner: performance and native reach the web can't match, proven by a race. Branch goal-43-dictate from main 49cbd8d, worktree ../mojo-ui-g43. Jot (goal 42) runs in parallel.
 - Found: PulseAudio on PipeWire 1.6.8, libpulse-simple in /usr/lib; a null sink loads and unloads cleanly (its .monitor is a capture source); two RTX 3090s; goal 39's VisionModel (branch g39-e) runs torch in process through Mojo's Python interop with frames handed over by address: the pattern for mojoui.speech. WebGPU Chromium flags: showcase/js-webgpu/check_a.py.
 - Baseline: the checker FAILs every milestone.
+
+## Goal 43: Dictate (2026-10-30)
+- Data: scripts/dictate_data.py takes the first 5-15 s utterance of each of the first 20 speakers (sorted) from LibriSpeech test-clean (openslr, cached in ~/.cache/mojoui/librispeech), 189 s in all, 6 MB committed; tone.wav = chirp, three bursts, chirp (3 s).
+- Model probe (transformers 5.22, torch 2.15+cu132, fp16, sdpa, RTX 3090 #0): whisper-large-v3-turbo loads in 1.6 s (cached), whole-clip generate 112-172 ms per 5-15 s clip after the first (955 ms, warm-up), peak 1.67 GB. Fast enough that faster-whisper wasn't needed (D-1408).
+- M0: `match` and `ref` are reserved words in Mojo 1.1 (`'match' cannot be used as a function name`, `ref` as a variable) → best_match, want. Pointer `+` is deprecated → unsafe_offset. First checker run after an edit: match 0.11 then 0.01 (the cold compile outlasts the checker's 1.5 s lead, the tone plays before capture starts); warm: 0.990 every time, slowest read 0.14 ms.
