@@ -78,6 +78,9 @@ def jot_flake():
 
 def jot_queue():
     """A held field change never overwrites a newer one that reached the app directly (tests/test_field_queue.py)."""
+    v = subprocess.run([sys.executable, "tests/test_step_verbs.py"], cwd=ROOT, capture_output=True, text=True, timeout=60)
+    if v.returncode != 0:  # (the queue's holdtext: step once shadowed goal 41's hold: after a merge)
+        return False, (v.stdout + v.stderr)[-300:], {}
     r = subprocess.run([sys.executable, "tests/test_field_queue.py"], cwd=ROOT, capture_output=True, text=True, timeout=900)
     out = r.stdout + r.stderr
     if r.returncode != 0 or "field queue stale: ok" not in out or "field queue: ok" not in out:

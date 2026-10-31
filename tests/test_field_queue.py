@@ -37,7 +37,7 @@ def main():
         print(f"field queue: FAIL (exit {r.returncode}; never reached the app: {missing}; app's last text {apps[-1:]!r}, typed {TYPED[-1]!r})")
         return 1
     print(f"field queue: ok ({len(TYPED)} values typed into a field that rebuilds the screen on every change; the app's text followed each)")
-    steps = ["pause:300", "hold:Query=old", "type:Query=newer", "tap:Rebuild", "pause:300", "tap:Rebuild", "pause:300"]
+    steps = ["pause:300", "holdtext:Query=old", "type:Query=newer", "tap:Rebuild", "pause:300", "tap:Rebuild", "pause:300"]
     env = dict(os.environ, MOJOUI_TEST=";".join(steps), FIELDCHECK_FLAT="1")
     r = subprocess.run([str(ROOT / "build/fieldcheck/linux/fieldcheck")], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
     after = r.stdout.split("FIELDCHECK: rebuilt", 1)[-1] if "FIELDCHECK: rebuilt" in r.stdout else ""

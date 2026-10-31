@@ -5683,7 +5683,7 @@ def run_step[A: App](host_addr: Int, step: String):
         if verb == "submit" or verb == "enter":  # "enter": Return straight after typing
             var s = String("activate")
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].widgets[i], s.as_c_string_span())
-    elif verb == "hold":  # hold:Field=text: a change of that field held as if it came during a rebuild (D-1703: the queue's own test)
+    elif verb == "holdtext":  # holdtext:Field=text: a change of that field held as if it came during a rebuild (D-1703: the queue's own test)
         var kv = split_at(rest, "=")
         var i = find(host[], FIELD, kv[0], 0, by_hint=True)
         if i < 0:
