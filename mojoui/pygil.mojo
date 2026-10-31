@@ -21,6 +21,7 @@ from mojoui.shared import get_shared, put_shared
 
 comptime SLOT_LENT = 94  # mojoui.shared slots: how many lenders (count + 1, 0: never set)
 comptime SLOT_SAVED = 95  # the UI thread's saved thread state (address + 1)
+comptime SLOT_HOSTED = 96  # 0: not asked yet, 1: Mojo started CPython, 2: a Python program hosts this app (D-1260)
 
 
 def _sym(name: String) -> Int:
@@ -59,9 +60,27 @@ def python_exit(state: Int):
         _ = _call1(f, state)
 
 
+def python_hosted() -> Bool:
+    """A Python program hosts this app (it set sys.mojoui_python_host before importing it): Python manages its lock."""
+    var known = get_shared(SLOT_HOSTED)
+    if known == 0:
+        known = 1
+        try:
+            var sys = Python.import_module("sys")
+            if Bool(py=Python.import_module("builtins").hasattr(sys, "mojoui_python_host")):
+                known = 2
+        except:
+            pass
+        put_shared(SLOT_HOSTED, known)
+    return known == 2
+
+
 def python_lend() raises:
-    """UI thread: lets other threads take the Python lock until the matching python_reclaim()."""
+    """UI thread: lets other threads take the Python lock until the matching python_reclaim() (nothing to do when a
+    Python program hosts the app)."""
     python_start()
+    if python_hosted():
+        return
     var n = max(get_shared(SLOT_LENT) - 1, 0)
     if n == 0:
         put_shared(SLOT_SAVED, _call0(_sym("PyEval_SaveThread")) + 1)
@@ -70,6 +89,8 @@ def python_lend() raises:
 
 def python_reclaim():
     """UI thread: the end of one python_lend(); the last one takes the lock back."""
+    if get_shared(SLOT_HOSTED) == 2:
+        return
     var n = max(get_shared(SLOT_LENT) - 1, 0)
     if n == 0:
         return

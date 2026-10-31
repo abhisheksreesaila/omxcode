@@ -19,12 +19,13 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class Client:
-    def __init__(self, module_dir=None, env=None, attach=None):
+    def __init__(self, module_dir=None, env=None, attach=None, python=None):
         """module_dir: the agent host runs its own session of that web build; attach: it attaches to a running host's
-        agent link instead (MOJOUI_AGENT_SOCKET; the widgets run there)."""
+        agent link instead (MOJOUI_AGENT_SOCKET; the widgets run there); python: the interpreter it runs in (default this
+        one; the models environment's when the app runs a model in process, e.g. OCR)."""
         import os
         target = ["--attach", str(attach)] if attach else [str(module_dir)]
-        self.p = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/agent.py"), *target], cwd=ROOT, env=dict(os.environ, **(env or {})),
+        self.p = subprocess.Popen([str(python or sys.executable), str(ROOT / "mojoui/hosts/agent.py"), *target], cwd=ROOT, env=dict(os.environ, **(env or {})),
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
         self.next_id = 1
         self.notifications = []

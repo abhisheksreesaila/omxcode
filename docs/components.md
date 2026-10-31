@@ -160,11 +160,11 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)` | `mojoui/trackcard.mojo` | Board: drag, resize, snap, Canvas, Card, Segmented, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `PdfSource (a PDF's pages as RGBA pictures at any dpi, page sizes in points, points ↔ pixels; its text layer for checks)` | `mojoui/pdfsource.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `Document card (a PDF page on a card: page through, zoom, pan, highlight a box in page points; Board chrome, quiet actions)` | `mojoui/documentcard.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: press, release, double, Canvas: keys (focus on press), Card, Quiet buttons, ProgressBar | 🔨 | 🔨 | ❌ | ❌ | ❌ | ❌ | — |
-| `OcrModel (the reader slot: docTR in process, words with boxes and confidence; a page's picture read into rows)` | `mojoui/ocrmodel.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `TextTable (words as rows: page, text, box, confidence; CSV in and out)` | `mojoui/texttable.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `Form fields (a label's value by geometry: right on its line or under it; the labels are data)` | `mojoui/formfields.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `PdfSource (a PDF's pages as RGBA pictures at any dpi, page sizes in points, points ↔ pixels; its text layer for checks)` | `mojoui/pdfsource.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Document card (a PDF page on a card: page through, zoom, pan, highlight a box in page points; Board chrome, quiet actions)` | `mojoui/documentcard.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: press, release, double, Canvas: keys (focus on press), Card, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
+| `OcrModel (the reader slot: docTR in process, words with boxes and confidence; a page's picture read into rows)` | `mojoui/ocrmodel.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `TextTable (words as rows: page, text, box, confidence; CSV in and out)` | `mojoui/texttable.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Form fields (a label's value by geometry: right on its line or under it; the labels are data)` | `mojoui/formfields.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)` | `mojoui/documentjobs.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
@@ -175,6 +175,11 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)` | `mojoui/timelane.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)` | `mojoui/videocard.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Document set (a folder of PDFs as one card: page through files, the fields to read as labels (data), Read → a table of fields per file; a linked row shows its file with the chosen field marked)` | `mojoui/documentset.mojo` | Canvas, Canvas: pan, zoom, tap, Card, TextField, Dropdown, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
+| `Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)` | `mojoui/documentjobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Ask → SQL (JOIN LINKED: the joins the sheet's key links imply; an answer's lineage, so its rows follow like its source's; questions taught with their SQL)` | `mojoui/asksql.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Pack PDF (a title and pages of blocks: facts, words, a table, a PDF page or a video frame with boxes marked; HTML printed to PDF by Chromium)` | `mojoui/packpdf.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)` | `mojoui/pack.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 
 ## JavaScript widgets (WebComponent)
 
@@ -190,12 +195,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 143 | 10 | 0 |
-| Web | 143 | 7 | 3 |
-| Android | 19 | 44 | 90 |
-| Mac (AppKit) | 0 | 134 | 19 |
-| iPhone (UIKit) | 0 | 112 | 41 |
-| Agent (MCP) | 49 | 42 | 62 |
+| Linux (GTK) | 153 | 5 | 0 |
+| Web | 153 | 2 | 3 |
+| Android | 19 | 48 | 91 |
+| Mac (AppKit) | 0 | 139 | 19 |
+| iPhone (UIKit) | 0 | 117 | 41 |
+| Agent (MCP) | 57 | 38 | 63 |
 
 ## Inside one app, not components yet (the debt)
 

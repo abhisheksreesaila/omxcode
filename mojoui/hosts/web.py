@@ -1355,6 +1355,7 @@ def make_app(module_dir):
         raise SystemExit(f"mojoui web: MOJOUI_DEV=1 needs a debug build ({module_dir} is a release build: "
                          "MOJOUI_DEBUG=1 scripts/build.sh <app> web, or scripts/dev.sh <app>); never set it on a deployed host")
     sys.path.insert(0, str(Path(module_dir).resolve()))
+    sys.mojoui_python_host = True  # (mojoui.pygil: Python, not the app, manages its lock here, D-1260)
     mod = importlib.import_module("mojoui_app")
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
     if loads:

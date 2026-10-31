@@ -21,6 +21,7 @@ from mojoui.webcomponent import is_widget_tag, is_event_name
 from mojoui.theme import Theme, palette_css, tokens_css, theme_tokens
 from mojoui.look import look_web_css
 from mojoui.hosts.devtools import DEVTOOLS
+from mojoui.present import dl_open
 
 comptime RTLD_NOW = 2
 comptime RTLD_GLOBAL = 256
@@ -326,7 +327,7 @@ def start(addr: Int, assets: List[String]) -> Bool:
     var gc_sig = String("30")
     _ = external_call["setenv", c_int](gc_name.as_c_string_span(), gc_sig.as_c_string_span(), c_int(0))
     var lib = String("libwebkitgtk-6.0.so.4")
-    if external_call["dlopen", Int](lib.as_c_string_span(), c_int(RTLD_NOW | RTLD_GLOBAL)) == 0:
+    if dl_open(lib, RTLD_NOW | RTLD_GLOBAL) == 0:  # (through its address: D-1265)
         print("mojoui: WebKitGTK 6.0 didn't load (" + cstr(external_call["dlerror", Int]()) + "): WebComponents show their stand-ins (scripts/webkitgtk.sh)")
         return False
     var exe_link = String("/proc/self/exe")

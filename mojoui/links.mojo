@@ -181,7 +181,7 @@ def match_count(a_values: List[String], b_values: List[String]) -> MatchCount:
 
 
 @fieldwise_init
-struct Selection(Copyable, Movable, ImplicitlyCopyable):
+struct Selection(Copyable, Movable):
     """What a person (or an agent) picked: a row of a card's table, its key value in the column picked, and a time when
     the source has one (-1: none)."""
 
@@ -191,6 +191,8 @@ struct Selection(Copyable, Movable, ImplicitlyCopyable):
     var column: String
     var value: String
     var time: Float64
+    var names: List[String]  # the whole row, when the picker knows it (a table card's row): its columns' names …
+    var cells: List[String]  # … and their values as text (a key link on another column of the row follows too)
 
     def __init__(out self, card: String, table: String, row: Int, column: String, value: String):
         self.card = card
@@ -199,6 +201,25 @@ struct Selection(Copyable, Movable, ImplicitlyCopyable):
         self.column = column
         self.value = value
         self.time = -1.0
+        self.names = List[String]()
+        self.cells = List[String]()
+
+    def with_row(var self, names: List[String], cells: List[String]) -> Selection:
+        """The selection carrying its whole row: a key link on any of the row's columns follows (D-1261)."""
+        self.names = names.copy()
+        self.cells = cells.copy()
+        return self^
+
+    def value_of(self, column: String) -> String:
+        """The selection's value in `column`: its own value for its column (or when it names none), else the row's cell
+        ("" when the row isn't known or has no such column)."""
+        if column == self.column or self.column == "":
+            if self.value != "" or len(self.names) == 0:
+                return self.value
+        for i in range(min(len(self.names), len(self.cells))):
+            if self.names[i] == column:
+                return self.cells[i]
+        return String("")
 
 
 @fieldwise_init
@@ -398,9 +419,12 @@ struct Links(Movable, Sized):
     var problem: String  # why the last add failed ("" none)
     var changed: Int  # bumps on every add / remove
     var notes: List[String]  # per link, what the panel says under it ("shipments ↔ dock.mp4 · 12 of 14 match"; "": its cards)
+    var derived: List[Link]  # where a query's answer came from (answer.shipment = shipments.shipment_id): provenance, not a
+    # guess, so a row of the answer follows like a row of its source; never listed, never joined (D-1262)
 
     def __init__(out self, msg_base: Int = 0):
         self.notes = List[String]()
+        self.derived = List[Link]()
         self.items = List[Link]()
         self.msg_base = msg_base
         self.draft = String("")
@@ -422,6 +446,39 @@ struct Links(Movable, Sized):
         self.notes.append(String(""))
         self.changed += 1
         return len(self.items) - 1
+
+    def derive(mut self, link: Link):
+        """Records that `link.a` (an answer's column) holds values read from `link.b` (its source's column): a selection
+        on the answer follows through it. Replaces what was known about that answer column."""
+        var kept = List[Link]()
+        for l in self.derived:
+            if l.a.label() != link.a.label():
+                kept.append(l)
+        kept.append(link)
+        self.derived = kept^
+
+    def forget_derived(mut self, card: String):
+        """The answer card `card` is gone (or answered again): what it derived from is forgotten."""
+        var kept = List[Link]()
+        for l in self.derived:
+            if l.a.card != card:
+                kept.append(l)
+        self.derived = kept^
+
+    def resolve(mut self, card: String, table: String) -> Int:
+        """A card's columns live in another table (a video's analysis rows: "dock.mp4" → "dock.mp4 · detections"): every
+        end naming the card and no table gets it, so a typed link on a video joins its rows. How many ends changed."""
+        var n = 0
+        for i in range(len(self.items)):
+            if self.items[i].a.card == card and self.items[i].a.table == "" and table != card:
+                self.items[i].a.table = table
+                n += 1
+            if self.items[i].b.card == card and self.items[i].b.table == "" and table != card:
+                self.items[i].b.table = table
+                n += 1
+        if n > 0:
+            self.changed += 1
+        return n
 
     def remove(mut self, i: Int) -> Bool:
         if i < 0 or i >= len(self.items):
@@ -462,26 +519,67 @@ struct Links(Movable, Sized):
 
     def follow(self, sel: Selection, same_table: List[String] = []) -> List[Follow]:
         """Per linked card, what it should match for this selection: through each key link touching the selection's card
-        (the selection's value, read in the other end's column), each time link (its time in the other clock), and the
-        cards in `same_table` (other cards showing the selection's table: the same row, implicitly)."""
+        (the selection's value in that link's column: its own column's, or the row's cell when it carries its row), each
+        time link (its time in the other clock), and the cards in `same_table` (other cards showing the selection's table:
+        the same row, implicitly). Key links chain: a value reached through one is followed on through the next link on the
+        same column (equal to equal is equal), never back to a card already reached (D-1261). A query's answer follows
+        through what it was derived from (`derive`: its source's rows are selected), then on as its source would."""
         var out = List[Follow]()
         for c in same_table:
             if c != sel.card:
                 out.append(Follow(c, sel.table, 0, sel.column, sel.value, sel.row, -1.0, ""))
-        for l in self.items:
-            var mine_a = l.a.card == sel.card or l.a.table_name() == sel.table
-            var mine_b = l.b.card == sel.card or l.b.table_name() == sel.table
-            if not (mine_a or mine_b):
-                continue
-            var there = l.b if mine_a else l.a
-            if l.kind == LINK_KEY:
-                var here = l.a if mine_a else l.b
-                if sel.column != "" and sel.column != here.column:
-                    continue  # (a key link is about one column; another column's value means nothing there)
-                out.append(Follow(there.card, there.table_name(), LINK_KEY, there.column, sel.value, -1, -1.0, l.label()))
-            elif l.kind == LINK_TIME and sel.time >= 0:
-                var t = l.to_b(sel.time) if mine_a else l.to_a(sel.time)
-                out.append(Follow(there.card, there.table_name(), LINK_TIME, there.column, "", -1, t, l.label()))
+        var seen = List[String]()  # cards (and tables) reached
+        seen.append(sel.card)
+        seen.append(sel.table)
+        # the frontier: (card, table, column it holds the value in ("" = any of the row's), value) to follow on from
+        var q_card = List[String]()
+        var q_table = List[String]()
+        var q_col = List[String]()
+        var q_val = List[String]()
+        var head = 0
+        var all = self.items.copy()
+        for l in self.derived:
+            all.append(l)
+        var first = True
+        while first or head < len(q_card):
+            var card = sel.card
+            var table = sel.table
+            var column = sel.column
+            var value = sel.value
+            if not first:
+                card = q_card[head]
+                table = q_table[head]
+                column = q_col[head]
+                value = q_val[head]
+                head += 1
+            for l in all:
+                var mine_a = l.a.card == card or l.a.table_name() == table
+                var mine_b = l.b.card == card or l.b.table_name() == table
+                if not (mine_a or mine_b):
+                    continue
+                var there = l.b if mine_a else l.a
+                if there.card in seen or there.table_name() in seen:
+                    continue
+                if l.kind == LINK_KEY:
+                    var here = l.a if mine_a else l.b
+                    var v = String("")
+                    if first:
+                        v = sel.value_of(here.column)
+                    elif here.column == column:
+                        v = value
+                    if v == "":
+                        continue  # (a key link is about one column; another column's value means nothing there)
+                    out.append(Follow(there.card, there.table_name(), LINK_KEY, there.column, v, -1, -1.0, l.label()))
+                    seen.append(there.card)
+                    seen.append(there.table_name())
+                    q_card.append(there.card)
+                    q_table.append(there.table_name())
+                    q_col.append(there.column)
+                    q_val.append(v)
+                elif l.kind == LINK_TIME and first and sel.time >= 0:
+                    var t = l.to_b(sel.time) if mine_a else l.to_a(sel.time)
+                    out.append(Follow(there.card, there.table_name(), LINK_TIME, there.column, "", -1, t, l.label()))
+            first = False
         return out^
 
     # ---------- a person's and an agent's way in ----------

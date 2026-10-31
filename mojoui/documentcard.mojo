@@ -109,6 +109,22 @@ struct DocumentCard(Movable):
         self.last_scale = 1
         self.h = self.height_for(w)
 
+    def open(mut self, path: String) raises:
+        """Shows another document in the same card (a folder's next file): page 1, fitted, nothing marked; its picture is
+        asked for again (wants())."""
+        var pdf = PdfSource(path)
+        if pdf.pages == 0:
+            raise Error("DocumentCard: " + path + " has no pages")
+        self.path = path
+        self.pdf = pdf^
+        self.page = 0
+        self.zoom = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        self.shown = PdfPage()
+        self.marks = List[Highlight]()
+        self.version += 1
+
     # ---------- what it is ----------
 
     def title(self) -> String:
@@ -334,6 +350,15 @@ struct DocumentCard(Movable):
             for i in range(min(len(self.actions), MAX_ACTIONS)):
                 ref a = self.actions[i]
                 parts.append(Button(a.label, self.msg_base + DOC_ACTION + i, SUBTLE, icon=a.icon).tag(a.tag).tooltip(a.tip))
+        for v in self.controls():
+            parts.append(v.copy())
+        parts.append(Button("Remove", self.msg_base + DOC_CLOSE, ICON_ONLY, icon="close").tooltip("Close " + self.title()))
+        var head = HStack(parts^, spacing=8).fill().align(CENTER).height(HEAD_H)
+        return Card(head^, self.body(), spacing=4)
+
+    def controls(self) -> List[View]:
+        """Its page and zoom buttons (a card that wraps this one, like mojoui.documentset's, puts them in its own bar)."""
+        var parts = List[View]()
         if self.pdf.pages > 1:
             parts.append(Button("Previous page", self.msg_base + DOC_PREV, ICON_ONLY, icon="back").tag("doc-prev").tooltip("Previous page"))
             parts.append(Text(String(self.page + 1) + " / " + String(self.pdf.pages), CAPTION).tag("doc-page"))
@@ -341,11 +366,12 @@ struct DocumentCard(Movable):
         parts.append(Button("−", self.msg_base + DOC_ZOOM_OUT, SUBTLE).tag("doc-zoom-out").tooltip("Zoom out"))
         parts.append(Button("+", self.msg_base + DOC_ZOOM_IN, SUBTLE).tag("doc-zoom-in").tooltip("Zoom in"))
         parts.append(Button("Fit", self.msg_base + DOC_FIT, SUBTLE).tag("doc-fit").tooltip("Fit the page"))
-        parts.append(Button("Remove", self.msg_base + DOC_CLOSE, ICON_ONLY, icon="close").tooltip("Close " + self.title()))
-        var head = HStack(parts^, spacing=8).fill().align(CENTER).height(HEAD_H)
+        return parts^
+
+    def body(self) -> View:
+        """The page itself: a canvas that pans, zooms and pages."""
         var body = Canvas(self.canvas, self.version, on_gesture=self.msg_base + DOC_GESTURE, keys=True).fill().grow().tag("document")
-        body = body^.label(self.describe())
-        return Card(head^, body^, spacing=4)
+        return body^.label(self.describe())
 
 
 def _blit(mut s: Surface, page: PdfPage, dst: Box):
