@@ -47,6 +47,14 @@ It opens as a real app on Linux, in the browser, on Android, on a Mac and on an 
 
 That's **omxcode**. Its showcase, **omxplorer**, is a data app in the spirit of Numbers and Power BI, and the app itself is about 2,100 lines of Mojo, built from the framework's components.
 
+## Why omxcode exists
+1. **No boundary tax.** No JSON, no HTTP, no second process to start, keep alive and debug. Apps that move a lot of data between the screen and the computing are faster and simpler.
+2. **One language from pixels to GPU kernels.** Mojo writes the interface and the CUDA-class kernels. In omxplorer, the group-by kernel sits in the same codebase as the sheet that shows its totals.
+3. **Every app can be driven by an agent.** omxcode has an [agent host](docs/agent.md), so each app can be operated by an agent through the same code that draws its screens. JS apps need that built in separately.
+4. **Native on every device from one codebase**, phone included. This is the least proven part: Mac and iPhone build but haven't run on hardware yet ([where it stands](#where-it-stands)).
+
+**Where it shouldn't exist:** forms, CRUD screens, dashboards over an API, marketing sites, ordinary SaaS. JS wins those on ecosystem alone, so we don't compete there. When a JS library is the better tool, embed it as a widget inside omxcode.
+
 ## What it feels like
 
 ### The sentence is the interface
