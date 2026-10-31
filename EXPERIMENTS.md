@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 41: the claim, answered in two minutes, and nothing freezes (2026-10-30/31)
+- **Setup:** branch `goal-41-claims` = main b79fc66 + goal 39, lanes A–H in worktrees ../mojo-ui-g41a–h, main (goals 42–45) merged in at f2dcb42; contract docs/goals/41-GOAL.md + 41-check.py; report docs/goals/41-report.md.
+- **Worked:** M0–M11 PASS. A slow-frame watchdog (`SLOW:` lines); video and stills decoded on their own thread (`framefeed.mojo`: scrub gaps 17 ms, was a freeze per drag event); queries/CSV/inserts/model scans as UI jobs; explicit links (`links.mojo`, drag-to-link, Links panel, hold-to-peek); documents become rows (docTR in process: 119/119 BOL fields, FUNSD word recall 0.81, 0.15 s/page); the claim story through agent tools only (answer = truth, video seeks to the damage, the BOL highlights Exceptions, claim pack PDF + reel); Liquid dark (owner's direction: Liquid always).
+- **Broke and fixed:** a 0.1–0.7 s UI stall from the analysis job pinning host memory (D-1200); Python on job threads crashed until the lock was lent per job (D-1260, D-1344); link SQL unquoted (review round 1, D-1340/D-1341).
+- **Means:** the framework now carries multimodal work (video, tables, documents, links) without freezing; omxplorer composes it.
+- **Next:** real footage and scanned documents; the web's folder upload; Mac runs of framefeed.
+
+---
+
 ## Goal 45: Keeper, still working when the window is closed (2026-10-30)
 - **Setup:** branch `goal-45-keeper` from main 7d747de, worktree ../mojo-ui-g45; contract docs/goals/45-GOAL.md + 45-check.py (written first, baseline FAIL on every milestone). Headless Xvfb, a private D-Bus per run (`dbus-run-session` with a config that has no services, D-1606), temp folders only. No GPU.
 - **Worked:** `mojoui/watch.mojo` (FolderWatcher: inotify on its own pthread, events through a pipe, a file reported once at its close, new folders watched then listed; 1,000 changes each reported once, p95 lag 0.01 ms); background mode (`App.background()`, `App.window_shown()`; GTK hides the window and holds the app); `mojoui/tray.mojo` (StatusNotifierItem over GDBus, Activate opens the window); `mojoui/notify.mojo` (org.freedesktop.Notifications); `mojoui/dbus.mojo` (GDBus by address, GVariant text); a `waitopen:N` step and a `WINDOW: open` line; `examples/traycheck`; `examples/keeper` (100,000 files scanned in 1.9–3.1 s as a job, longest frame gap 16.7 ms; with the window closed 200 files searchable p95 1.9–4.4 ms, alerts on the bus; Activate reopens it and a search shows them).
