@@ -49,19 +49,20 @@
   "unverified": "run on aarch64 Linux (no machine here: compiled only); the Mac's branch is unchanged (built, not run)"
  },
  "sketch_erase": {
-  "after_draw_p95_ms": 6.0,
-  "after_p95_ms": 8.0,
+  "after_draw_p95_ms": 5.9,
+  "after_p95_ms": 8.5,
   "before_note": "21.4 ms on this machine at the start (draw 20.2: node build 6.1, mend 11.1, finding the removal 1.2); 13.7 in goal 40's run",
   "before_p95_ms": 21.4,
   "checked": "2026-10-31",
   "item": "erasing took 14-23 ms p95",
-  "runs_note": "five runs on a shared machine (load average 4-16); the 15.4 run was slower in every part of the frame",
+  "runs_note": "six runs on a shared machine (load average 4-16); the 15.4 run was slower in every part of the frame",
   "runs_p95_ms": [
    5.8,
    6.7,
    15.4,
    8.2,
-   8.0
+   8.0,
+   8.5
   ]
  }
 }

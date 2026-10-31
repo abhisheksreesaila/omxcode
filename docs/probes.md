@@ -24,7 +24,7 @@ JS) is the yardstick: its gap audit is `personalnotev2/docs/research/omxcode-gap
 ## Results
 | Goal | Probe | Question | Result vs the web | Library parts | State |
 |---|---|---|---|---|---|
-| 40 | **Sketch** | Can it draw? | Not raced. Pan, zoom and draw each p95 ≤ 3.5 ms with 1,000 strokes (101k points) | `mojoui.ink` (pressure strokes, eraser), `Painter.polygon`, layer transforms, GTK texture cache; erase p95 8.0 ms after the probe fix (was 14–23) | merged |
+| 40 | **Sketch** | Can it draw? | Not raced. Pan, zoom and draw each p95 ≤ 3.5 ms with 1,000 strokes (101k points) | `mojoui.ink` (pressure strokes, eraser), `Painter.polygon`, layer transforms, GTK texture cache; erase p95 8.5 ms after the probe fix (was 14–23) | merged |
 | 42 | **Jot** | Can it keep data? | SQLite at 1M notes vs SQLite-wasm on OPFS: search p95 64.6 vs 165.8 ms (**2.6×**); cold open 65.8 vs 435.3 ms (**6.6×**) | `mojoui.sqlite` (FTS5), FileSaver, file drop, `App.closing()` quit hook | merged |
 | 43 | **Dictate** | Speech to text on the GPU | whisper-large-v3-turbo in process vs transformers.js on WebGPU: **134 vs 884 ms** per clip (6.6×; re-run 2026-10-31 after the probe fix, first run 140 vs 912), same WER 0.034. A runs fp16, B's fastest was fp32 throughout (no shader-f16 here) | `mojoui.audio` (microphone), `mojoui.speech` (+ `speech_torch.py`), `speech` pixi env | merged |
 | 45 | **Keeper** | Works with the window closed? | Read 100k files 2.2 s vs the web's best 18.3 s (it reads; native also indexes). Noticing a change: both sub-ms (noisy, no ratio claimed). With the tab closed the web runs no code for a file change, and has no notification and no tray | `mojoui.watch` (inotify), App background mode, tray item (SNI), notifications | merged |
@@ -49,7 +49,7 @@ in each probe's gallery section (`scripts/probe_fixes_gallery.py`).
 
 - **Mac:** every probe builds, none has run (it needs the owner's Mac).
 - **Sketch:** a real pen or touchpad and GTK's GPU renderer are unverified; the web host's erase is unmeasured. Fixed
-  2026-10-31: erasing was 14–23 ms p95, now 8.0 (5.8–15.4 over five runs on a shared machine; D-1707).
+  2026-10-31: erasing was 14–23 ms p95, now 8.5 (5.8–15.4 over six runs on a shared machine; D-1707).
 - **Jot:** nothing open. Fixed 2026-10-30: the goal 30 flake (two causes in the GTK test host: a fixed pause raced the
   100M-row open, D-1701; `pause:` slept 10 ms per main-loop turn and skipped frames, D-1702), the field queue's stale
   write (D-1703), web drop leaks (D-1704; an evicted upload also crashed the server).
