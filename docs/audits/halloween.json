@@ -1,0 +1,685 @@
+{
+ "app": "Pumpkin Greeter",
+ "slug": "halloween",
+ "path": "/home/abhisheksreesaila/Projects/halloween",
+ "one_line": "A kiosk browser app on a Pixel Tablet: the camera watches the front path, an approach state machine builds suspense, a snapshot goes to Claude for a costume greeting, and a Piper neural voice with ffmpeg effects speaks it.",
+ "verdict": "Not on the tablet: omxcode can draw every screen and run the visit logic on Linux and the web today, but it has no camera, no audio output, no text-to-speech, no kiosk controls and no https, and its Android host lacks timers and HTTP.",
+ "buildable_today": "partly",
+ "counts": {
+  "have": 12,
+  "partial": 9,
+  "missing": 6
+ },
+ "features": [
+  {
+   "area": "Screens",
+   "feature": "Start screen: one big 'Wake Jack' button over everything (unlocks sound, camera, keep-awake)",
+   "app_file": "app/static/index.html:101",
+   "omx_piece": "Overlay + Card + Button(style=PROMINENT)",
+   "evidence": "docs/components.md rows Overlay, Card, Button (kit, workbook checks)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Eyes",
+   "feature": "Live camera view, rear or front, 'Switch camera'",
+   "app_file": "app/static/main.js:399",
+   "omx_piece": null,
+   "evidence": "no camera code in mojoui/ (grep getUserMedia/v4l2/camera: only video files via mojoui.video, mojoui.framefeed)",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "mojoui.camera: live frames (V4L2/PipeWire on Linux, getUserMedia bridged by the web host, CameraX on Android, AVCaptureSession on Apple) into FrameFeed, so Canvas/Player show it and analyzers read it",
+   "size": "L",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Eyes",
+   "feature": "Tracking boxes drawn over the live picture",
+   "app_file": "app/static/main.js:332",
+   "omx_piece": "Canvas + mojoui.imageops (outline a rectangle) over mojoui.framefeed frames",
+   "evidence": "docs/components.md rows ImageOps, FrameFeed (media, omxplorer checks); proven on video files only",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "the drawing exists; it needs live frames from mojoui.camera",
+   "size": "S",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Eyes",
+   "feature": "Person detection on the device, ~10 times a second, box height as distance",
+   "app_file": "app/static/main.js:421",
+   "omx_piece": "mojoui.visionmodel (VisionModel DETECT, OWLv2 in process; SAM 2 tracking)",
+   "evidence": "tests/test_visionmodel.mojo (docs/goals/39-check.py); CUDA + torch in process, stills and video files, not a live real-time loop",
+   "hosts": {
+    "linux": "✅",
+    "web": "❌",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "a small real-time detector (EfficientDet/YOLO-nano class) compiled by MAX, running on the device's own GPU or NPU; today's model is a heavyweight desktop-CUDA one",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Visit logic",
+   "feature": "Approach state machine: idle → far → closer → door (held 600 ms) → linger ×2 → leave → re-arm",
+   "app_file": "app/static/greeter.js:20",
+   "omx_piece": "plain Mojo struct in update() + App.every() timers",
+   "evidence": "docs/components.md row Timers; docs/ui-threads.md rule 5; a pure struct is testable with mojo test like tests/test_meter.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Visit logic",
+   "feature": "Rehearsal mode: a timer steps far → closer → door when there's no real door",
+   "app_file": "app/static/greeter.js:16",
+   "omx_piece": "App.every() + Toggle",
+   "evidence": "docs/components.md rows Timers, Toggle",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Screens",
+   "feature": "Proximity meter with 'closer' and 'door' ticks, and the stage words",
+   "app_file": "app/static/index.html:43",
+   "omx_piece": "mojoui.meter (Meter) / ProgressBar",
+   "evidence": "tests/test_meter.mojo; docs/components.md rows Meter, ProgressBar",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Look",
+   "feature": "Jack the pumpkin (vector art) whose mouth moves while he talks",
+   "app_file": "app/static/main.js:543",
+   "omx_piece": "Canvas + Painter.polygon + on_frame + mojoui.spring",
+   "evidence": "docs/components.md rows Scene: polygon fill, Canvas frames, Spring (sketch, omxplorer checks)",
+   "hosts": {
+    "linux": "✅",
+    "web": "🔨",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "no SVG paths or radial gradients in Painter: the art must be hand-ported to polygons; add Painter.path(svg d-string) + gradient fills",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Look",
+   "feature": "Show mode: the whole screen is a big glowing Jack face, eyes blink, hold the face 1.5 s or tap Exit to leave",
+   "app_file": "app/static/main.js:526",
+   "omx_piece": "Overlay + Canvas (PRESS/RELEASE) + App.every() + Spring",
+   "evidence": "docs/components.md rows Overlay, Canvas: press, release, double, Timers",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "works as a window-filling overlay; true fullscreen needs App.fullscreen() (see kiosk); glow art needs gradients",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Device",
+   "feature": "Kiosk: fullscreen, screen kept awake, wake lock re-taken when the page comes back, camera restarts if it freezes",
+   "app_file": "app/static/main.js:436",
+   "omx_piece": null,
+   "evidence": "grep fullscreen/inhibit/wakelock in mojoui/: only a WebFrame permission string (mojoui/embed.mojo:22) and GTK reading 'fullscreened'",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "App.fullscreen() and App.keep_awake(): gtk_window_fullscreen + idle inhibit (xdg portal), the web host's requestFullscreen + navigator.wakeLock, Android FLAG_KEEP_SCREEN_ON + immersive mode, NSWindow/UIApplication idleTimerDisabled",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Screens",
+   "feature": "'Jack said' card with the last line and a source badge (claude / fallback)",
+   "app_file": "app/static/index.html:47",
+   "omx_piece": "Card + Text + mojoui.chip (Badge)",
+   "evidence": "tests/test_chip.mojo; docs/components.md rows Card, Text",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Controls",
+   "feature": "Door-distance slider (20–85%), with 'right now' size and greeted-tonight count",
+   "app_file": "app/static/index.html:56",
+   "omx_piece": "Slider + Text",
+   "evidence": "docs/components.md row Slider (gallery, gpu, lens)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "✅",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Controls",
+   "feature": "Voice (Ryan/Alan/Joe/Northern) and strength (Spooky/Monster) pickers",
+   "app_file": "app/static/index.html:58",
+   "omx_piece": "Segmented",
+   "evidence": "docs/components.md row Segmented",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "✅",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Controls",
+   "feature": "'Jack listens' and 'Rehearsal' switches",
+   "app_file": "app/static/index.html:61",
+   "omx_piece": "Toggle",
+   "evidence": "docs/components.md row Toggle",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "✅",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Controls",
+   "feature": "'Greet now' test button",
+   "app_file": "app/static/main.js:467",
+   "omx_piece": "Button",
+   "evidence": "docs/components.md row Button",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "✅",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Storage",
+   "feature": "Settings remembered per device (door, voice, effect, listen, rehearsal)",
+   "app_file": "app/static/main.js:33",
+   "omx_piece": "mojoui.files (config_dir: ~/.config/<app>/settings.txt)",
+   "evidence": "tests/test_omx_files.mojo; a settings file, not a typed key-value store; the web host keeps it per server, not per device",
+   "hosts": {
+    "linux": "✅",
+    "web": "🔨",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "mojoui.prefs: typed get/set per device (a file on desktop, localStorage on the web, SharedPreferences on Android, NSUserDefaults on Apple)",
+   "size": "S",
+   "eta": "this week",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "AI",
+   "feature": "Snapshot as JPEG → Claude vision → tease, greeting, answer, goodbye in one call; up to two banter calls; key kept off the screen",
+   "app_file": "app/server.py:95",
+   "omx_piece": "mojoui.http (Request.post_json, header_from_env, SSE streams) / mojoui.agui (Anthropic SDK via Python)",
+   "evidence": "tests/test_http.mojo; mojoui/http.mojo:TLS_NEEDED (http:// only); docs/agui.md (Claude path, not run: no key)",
+   "hosts": {
+    "linux": "🔨",
+    "web": "🔨",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "https to api.anthropic.com (a TLS transport: flare at Mojo 1.2, or a mojoui.llm client over Python interop like speech_torch), plus a JPEG encoder and base64 (only encode_png today)",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "AI",
+   "feature": "Canned fallbacks when the model fails or is slow, so kids always hear something",
+   "app_file": "app/greeting.py:42",
+   "omx_piece": "mojoui.http Response.failed → Event + App.every() timeout",
+   "evidence": "tests/test_http.mojo (failed replies arrive as events)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Voice",
+   "feature": "Jack's voice: Piper neural voice, pitched down with a haunted echo (ffmpeg), rendered and cached per line",
+   "app_file": "app/voice.py:31",
+   "omx_piece": null,
+   "evidence": "no TTS in mojoui/ (grep piper/tts/speechSynthesis: none)",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "mojoui.voice: a TTS model in process (Piper ONNX via Python interop, like mojoui.speech; MAX later) + pitch/echo/low-pass as Mojo DSP kernels instead of an ffmpeg subprocess",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Voice",
+   "feature": "Playing audio out of the speaker, and the mouth following its loudness",
+   "app_file": "app/static/main.js:89",
+   "omx_piece": null,
+   "evidence": "mojoui/audio.mojo is capture only (pa_simple_read); no playback anywhere",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "a Speaker beside Microphone in mojoui.audio: play(samples), level(), stop(); PulseAudio/PipeWire, Web Audio via the web host, AudioTrack, AVAudioEngine",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Voice",
+   "feature": "Haunted tune before the greeting (oscillators with vibrato)",
+   "app_file": "app/static/main.js:46",
+   "omx_piece": null,
+   "evidence": "no synthesis or playback in mojoui/",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "a tiny tone/envelope generator in Mojo feeding the Speaker",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Voice",
+   "feature": "Fallback to the device's own voice when the laptop voice is down",
+   "app_file": "app/static/main.js:159",
+   "omx_piece": null,
+   "evidence": "no platform TTS binding",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "platform TTS: speech-dispatcher, the browser's speechSynthesis, Android TextToSpeech, AVSpeechSynthesizer",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Ears",
+   "feature": "Kids talk back: listen after the greeting, a tiny vocabulary (hi, trick or treat, boo, thanks, bye, joke, who are you), ignore Jack's own echo, canned instant replies",
+   "app_file": "app/static/ears.js:72",
+   "omx_piece": "mojoui.audio Microphone + mojoui.speech SpeechStream (whisper-large-v3-turbo on the GPU) + audio.best_match",
+   "evidence": "tests/test_audio.mojo, tests/test_speech.mojo; Dictate probe (goal 43): 140 ms per clip",
+   "hosts": {
+    "linux": "✅",
+    "web": "❌",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "Linux only today: the web host doesn't stream the browser's mic, Android has no mic and no Python; needs a mic on every host plus a small on-device speech model (whisper tiny/base via MAX)",
+   "size": "L",
+   "eta": "2027",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Screens",
+   "feature": "Status badges: camera, detector, ears (ok / warn / bad)",
+   "app_file": "app/static/main.js:404",
+   "omx_piece": "mojoui.chip (Badge with tone and dot)",
+   "evidence": "tests/test_chip.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Look",
+   "feature": "omxqua night look: deep purple, pumpkin accent, kids' rounded type, roomy",
+   "app_file": "app/static/index.html:2",
+   "omx_piece": "themes/omxqua.mojo via App.theme()",
+   "evidence": "themes/omxqua.mojo; docs/components.md row Themes on top",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Device",
+   "feature": "Runs on the Pixel Tablet itself (Android)",
+   "app_file": "CLAUDE.md:1",
+   "omx_piece": "mojoui/hosts/android.mojo (views over JNI)",
+   "evidence": "docs/components.md Totals: Android 19 ✅ / 50 🔨 / 102 ❌; Timers, HTTP, Overlay, Meter, Chip are ❌ there; runs on the emulator only",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "🔨",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "Android parity for what this app uses: Timers, HTTP, Overlay, Card, Canvas press/release, the chip and meter composites, then camera, mic and speaker",
+   "size": "L",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Reliability",
+   "feature": "Runs ~3 hours unattended without freezing (camera retry, model timeouts, no nagging)",
+   "app_file": "app/static/main.js:447",
+   "omx_piece": "mojoui.jobs + App.every() + MOJOUI_BUDGET_MS watchdog",
+   "evidence": "docs/ui-threads.md (examples/jobwake, examples/slowcheck); no long soak with a live camera and models",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "a 3-hour soak check once camera, detector and speaker exist",
+   "size": "S",
+   "eta": "Dec 2026",
+   "blocks": false,
+   "demo": false
+  }
+ ],
+ "wins": [
+  {
+   "what": "Ears run whisper-large-v3-turbo in the app's own process on the GPU, offline: no audio sent to Google as Android's Web Speech API does, and Jack's echo can be rejected by matching his own samples (audio.best_match)",
+   "evidence": "docs/probes.md Dictate (goal 43): 140 ms vs 912 ms per clip against transformers.js; tests/test_speech.mojo, tests/test_audio.mojo. Linux only"
+  },
+  {
+   "what": "Open-vocabulary detection and tracking in process (OWLv2 + SAM 2): 'a child in a costume', boxes that follow each kid, not just the generic 'person' class",
+   "evidence": "tests/test_visionmodel.mojo (goal 39); unproven live, and too heavy for a tablet today"
+  },
+  {
+   "what": "One program, no laptop server: UI, state machine, detector, voice and the Claude call in one process; the key read from the environment by the HTTP worker, never in the app's state",
+   "evidence": "mojoui/http.mojo header_from_env; the one-process claim is unproven for this app (no camera, speaker or TTS yet)"
+  },
+  {
+   "what": "Agent-drivable for free: an agent could press Greet now, switch the voice, flip Rehearsal and read what Jack said, through MCP, with no extra code",
+   "evidence": "docs/agent.md (Slider, Segmented, Toggle, Button become tools; read returns texts)"
+  },
+  {
+   "what": "Voice effects as Mojo DSP instead of an ffmpeg subprocess per line",
+   "evidence": "unproven"
+  },
+  {
+   "what": "A freeze watchdog for the 3-hour run: any update, view or draw over budget is named",
+   "evidence": "docs/ui-threads.md, MOJOUI_BUDGET_MS, examples/slowcheck"
+  }
+ ],
+ "top_gaps": [
+  {
+   "gap": "No camera",
+   "piece": "mojoui.camera into FrameFeed (V4L2/PipeWire, web getUserMedia bridge, CameraX, AVCaptureSession)",
+   "size": "L",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Live camera view",
+    "Tracking boxes",
+    "Person detection",
+    "Snapshot to Claude",
+    "Show mode watching underneath"
+   ]
+  },
+  {
+   "gap": "No audio out",
+   "piece": "mojoui.audio Speaker: play(samples), level() (PulseAudio, Web Audio, AudioTrack, AVAudioEngine)",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Jack's voice",
+    "Mouth following loudness",
+    "Haunted tune"
+   ]
+  },
+  {
+   "gap": "No text-to-speech",
+   "piece": "mojoui.voice: Piper in process + Mojo DSP effects; platform TTS as fallback",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Jack's voice",
+    "Device-voice fallback"
+   ]
+  },
+  {
+   "gap": "No https and no image payloads for model calls",
+   "piece": "TLS transport (flare, Mojo 1.2) or mojoui.llm over Python interop; JPEG + base64 encoders",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Snapshot to Claude",
+    "Banter"
+   ]
+  },
+  {
+   "gap": "Android host can't run this app",
+   "piece": "Android Timers, HTTP, Overlay, composites, then camera/mic/speaker",
+   "size": "L",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Runs on the Pixel Tablet",
+    "Visit logic on the tablet",
+    "Show mode on the tablet"
+   ]
+  },
+  {
+   "gap": "No kiosk controls",
+   "piece": "App.fullscreen() + App.keep_awake() on every host",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Kiosk",
+    "Show mode fullscreen"
+   ]
+  },
+  {
+   "gap": "No real-time on-device detector",
+   "piece": "a small detector compiled by MAX on the device GPU/NPU behind VisionModel",
+   "size": "M",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Person detection on the tablet"
+   ]
+  },
+  {
+   "gap": "Mic and speech only on Linux",
+   "piece": "mic on web/Android/Apple + a small on-device speech model via MAX",
+   "size": "L",
+   "eta": "2027",
+   "unblocks": [
+    "Kids talk back on the tablet"
+   ]
+  },
+  {
+   "gap": "No SVG paths or gradients",
+   "piece": "Painter.path(svg d) + radial gradient fills",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Jack face",
+    "Show mode glow"
+   ]
+  },
+  {
+   "gap": "No per-device preferences",
+   "piece": "mojoui.prefs (file, localStorage, SharedPreferences, NSUserDefaults)",
+   "size": "S",
+   "eta": "this week",
+   "unblocks": [
+    "Settings remembered"
+   ]
+  }
+ ]
+}
