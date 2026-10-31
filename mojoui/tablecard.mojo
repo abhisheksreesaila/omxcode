@@ -29,6 +29,7 @@ from mojoui.view import View, Text, Button, Canvas, HStack, Spacer, Card, HEADLI
 from omxcore import Catalog, Table, sql
 from mojoui.sqlname import sql_name  # (kept importable from here; links.mojo needs it without omxcore)
 
+comptime ACTION_MIN_W = 460  # a card with its own action (act_with): its name, size, the action, Export CSV and Remove in one title bar
 comptime TABLE_MESSAGES = 4  # a card's block: its grid's gestures (0), Export CSV (1), close (2), its action (3)
 comptime TC_GRID = 0
 comptime TC_EXPORT = 1
@@ -85,7 +86,8 @@ struct TableCard(Movable):
         self.action_tip = ""
 
     def act_with(mut self, label: String, icon: String, tag: String, tip: String):
-        """Its one quiet action (beside Export CSV): tables.acted says when it was tapped."""
+        """Its one quiet action (beside Export CSV): tables.acted says when it was tapped. Its card wants at least
+        ACTION_MIN_W points (else the title bar squeezes its size and pushes Remove off the card)."""
         self.action = label
         self.action_icon = icon
         self.action_tag = tag

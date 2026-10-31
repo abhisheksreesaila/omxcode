@@ -105,7 +105,7 @@ from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, ta
 from mojoui.clock import now_ns, shown_ms
 from mojoui.draw import rect as draw_rect, with_alpha
 from mojoui.mediacard import MediaCards, CardAction, OBJ_VIDEO, OBJ_IMAGE, VIDEO_TYPES, IMAGE_TYPES, is_media_file, is_video_file
-from mojoui.tablecard import TableCards, sql_name
+from mojoui.tablecard import TableCards, sql_name, ACTION_MIN_W
 from mojoui.videocard import VideoWork
 from mojoui.videojobs import expect_analysis, Analyzed, Reel, analyze_job, reel_job, analyzer_names, analyzer_note, analyzer_rows, marks_of, flag_frames, segments_of, flag_columns, matching_column, lookup, codes_of
 from mojoui.videojobs import analyzer_needs_log, use_analysis, INSPECTION
@@ -1790,6 +1790,8 @@ struct Main(App):
         var called = a.card.name
         try:
             var w = self.card_width(a.card.sheet.columns())
+            if len(self.links) > 0:  # (it gets Export pack below: room for its title bar)
+                w = max(w, ACTION_MIN_W)
             var spot = self.free_place(w, 320)
             var k = self.tables.adopt(a^.take_card(), spot[0], spot[1], w, 320)
             self.reveal_table(k)

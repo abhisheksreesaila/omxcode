@@ -27,6 +27,7 @@ struct PeekLine(Copyable, Movable, ImplicitlyCopyable):
     var to: Int  # the card (an index into the peek's cards)
     var label: String  # "shipment_id = code"
     var kind: String  # "key", "time +3.4 s", or "" (the same table: dotted)
+    var named: Bool  # the card the link names (not a card that only shows its table): its line carries the label
 
 
 struct Peek(Movable):
@@ -72,7 +73,7 @@ struct Peek(Movable):
             ref c = cards[k]
             var theirs = c.table if c.table != "" else c.name
             if k != self.held and theirs == mine:
-                self._join(k, "same table", "")
+                self._join(k, "same table", "", True)
         for l in links.items:
             var a_mine = l.a.card == me.name or l.a.table_name() == mine
             var b_mine = l.b.card == me.name or l.b.table_name() == mine
@@ -86,19 +87,30 @@ struct Peek(Movable):
                 ref c = cards[k]
                 var theirs = c.table if c.table != "" else c.name
                 if k != self.held and (c.name == there.card or theirs == there.table_name()):
-                    self._join(k, said, kind)
+                    self._join(k, said, kind, c.name == there.card)
         self.open = True
         self.shown = True
         self.settled = False
         self.spring.to(1.0)
         self.version += 1
 
-    def _join(mut self, k: Int, label: String, kind: String):
+    def _join(mut self, k: Int, label: String, kind: String, named: Bool):
         for ln in self.lines:
             if ln.to == k and ln.label == label:
                 return
         self.lit[k] = True
-        self.lines.append(PeekLine(k, label, kind))
+        self.lines.append(PeekLine(k, label, kind, named))
+
+    def pilled(self, i: Int) -> Bool:
+        """Line i carries a label pill: one pill per link, on the line to the card the link names; a line to a card that
+        only shows that table (a video's rows card, a folder's documents) is drawn but not labelled again."""
+        ref ln = self.lines[i]
+        if ln.named or ln.kind == "":
+            return True
+        for j in range(len(self.lines)):
+            if j != i and self.lines[j].label == ln.label and self.lines[j].kind == ln.kind and (self.lines[j].named or j < i):
+                return False
+        return True
 
     def close(mut self):
         """Let go: the lines fade and the cards settle back (step() says when it's done)."""
@@ -193,7 +205,7 @@ struct Peek(Movable):
 
     def views(self) -> List[View]:
         """Board items while it shows (last, above the cards): the curves' canvas (presses go through it) and a label pill
-        at each curve's middle."""
+        at the middle of each link's curve (pilled: once per link)."""
         var out = List[View]()
         if not self.shown or self.held < 0 or len(self.lines) == 0:
             return out^
@@ -202,7 +214,10 @@ struct Peek(Movable):
                    .tag("peek-lines").label("Lines from " + self.cards[self.held].name + " to what it's linked to")
                    .at(box[0], box[1]).width(box[2]).height(box[3]))
         if self.open:
-            for ln in self.lines:
+            for i in range(len(self.lines)):
+                if not self.pilled(i):
+                    continue
+                ref ln = self.lines[i]
                 var e = self._ends(ln)
                 var text = ln.label + ("  " + ln.kind if ln.kind != "" else String(""))
                 var w = 26 + 7 * len(text.codepoints())

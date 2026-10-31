@@ -94,7 +94,7 @@ def main() raises:
     assert_equal(peek.tone(3), BOARD_DIM)
     assert_equal(peek.tone(9), BOARD_PLAIN)  # (not a card: the page's floating pieces)
     assert_equal(peek.say(), "a: 1 link")
-    assert_true(len(peek.views()) == 3)  # (the curves' canvas and a label per line)
+    assert_true(len(peek.views()) == 2)  # (the curves' canvas and one label per link: the video showing b's table gets a line, not the label again)
     var frames = 0
     while peek.step(16667) and frames < 600:
         frames += 1

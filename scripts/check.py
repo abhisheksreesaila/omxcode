@@ -459,10 +459,16 @@ def m11():
         r = run([sys.executable, "scripts/claims_data.py", a], 1800)
         if r.returncode or (Path(a) / "truth.json").read_bytes() != (data() and (DATA / "truth.json").read_bytes()):
             return False, "regenerating doesn't give truth byte-equal"
-    srv = subprocess.Popen([sys.executable, "-m", "http.server", "8741", "-d", str(SITE)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    srv = subprocess.Popen([sys.executable, "-m", "http.server", "8741", "-b", "127.0.0.1", "-d", str(SITE)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         import time
-        time.sleep(1.0)
+        import urllib.request
+        for _ in range(150):  # (until it answers: binding 0.0.0.0 asked DNS for the host's name, 5 s here; D-1306)
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8741/index.html", timeout=1).close()
+                break
+            except Exception:
+                time.sleep(0.1)
         bad = []
         for page in ("index.html", "omxplorer/index.html", "omxcore/index.html", "omxcode/index.html", "omxconsole/index.html", "omxqua/index.html"):
             r = run([sys.executable, "scripts/covershot.py", page, str(OUT / ("m11-" + page.replace("/", "-")))], 600,
