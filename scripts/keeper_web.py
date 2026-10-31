@@ -7,14 +7,19 @@ line), never a guess:
   read_folder    File System Access showDirectoryPicker(): without a user gesture; with one made through the DevTools
                  protocol (a real input event): the picker itself (intercepted), the folder dropped onto the page
                  (Input.dispatchDragEvent → getAsFileSystemHandle), and <input webkitdirectory> filled through
-                 DOM.setFileInputFiles. Where one reads the folder, it reads Keeper's 100,000-file corpus and is timed.
+                 DOM.setFileInputFiles. Where one reads the folder, it reads Keeper's 100,000-file corpus and is timed,
+                 the web's best way: the folder listed with every subfolder at once, then the files read 16, 64 and
+                 256 at a time on the page and split over 4 and 8 Web Workers (each try kept; the fastest races).
   notice_change  FileSystemObserver (behind --enable-features=FileSystemObserver if it isn't on), else polling the
                  folder's handle; each tried; lag from the file's close (this process's wall clock) to the page seeing
                  it (performance.timeOrigin + now(), offset measured by round trips).
   run_closed     a service worker with Background Sync and Periodic Background Sync registered (permissions granted
                  through the DevTools protocol), then the tab closed: does any of its code run when a file changes or a
-                 minute passes? (the worker logs every event it gets to this script's server)
-  notify_closed  showNotification from that worker with the tab closed
+                 minute passes? (the worker logs every event it gets to this script's server). Web Push, the one thing
+                 that wakes a worker on demand, is tried too: pushManager.subscribe, which needs the browser vendor's push
+                 service (Chromium: Firebase Cloud Messaging); this run lets the browser resolve no host but 127.0.0.1, so
+                 the try shows what happens without it, and nothing leaves the machine.
+  notify_closed  showNotification from that worker with the tab closed (and Web Push, as above)
   tray           any API for an item in the system tray (and the Badging API, its nearest relative)
 The corpus is the checker's own (docs/goals/45-check.py make_corpus), so both sides read the same files. Temp folders only;
 the browser profile is a temp folder too. Nothing leaves the machine (the page and the worker talk to 127.0.0.1 only).
@@ -36,7 +41,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "goals" / "45" / "web.json"
 CHROMIUM = "/usr/bin/chromium"
-FLAGS = ["--enable-features=FileSystemObserver,FileSystemAccessLocal", "--enable-experimental-web-platform-features"]
+FLAGS = ["--enable-features=FileSystemObserver,FileSystemAccessLocal", "--enable-experimental-web-platform-features",
+         "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"]  # (no host but this machine: nothing leaves it, Web Push's FCM included)
 
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>Keeper on the web</title></head><body>
 <button id="pick" style="position:fixed;left:10px;top:10px;width:200px;height:60px">Choose a folder</button>
@@ -68,12 +74,14 @@ dz.ondrop = async e => {
     } catch (err) { R.dropped.push(err.name + ': ' + err.message); }
   }
 };
-document.getElementById('dir').onchange = async e => {
+document.getElementById('dir').onchange = async e => {  // the File snapshot, read 64 at a time
   const t0 = now();
-  const files = e.target.files;
-  let n = 0, bytes = 0;
-  for (const f of files) { if (/\.(md|txt|markdown)$/.test(f.name)) { bytes += (await f.text()).length; n++; } }
-  R.input_read = {files: n, chars: bytes, ms: now() - t0, listed: files.length};
+  const files = Array.from(e.target.files).filter(f => /\.(md|txt|markdown)$/.test(f.name));
+  let i = 0, chars = 0;
+  async function lane() { while (i < files.length) { chars += (await files[i++].text()).length; } }
+  await Promise.all(Array.from({length: 64}, lane));
+  const t1 = now();
+  R.input_read = {how: '<input webkitdirectory>, 64 at a time', files: files.length, chars, t0, t1, ms: t1 - t0, listed: e.target.files.length};
 };
 async function walk(dir, prefix, out) {
   for await (const [name, h] of dir.entries()) {
@@ -82,12 +90,52 @@ async function walk(dir, prefix, out) {
   }
   return out;
 }
-window.readAll = async (h) => {
+window.readAll = async (h) => {  // one file after another (the plain way)
   const t0 = now();
   const all = await walk(h, '', []);
   let n = 0, chars = 0;
   for (const [p, fh] of all) { if (/\.(md|txt|markdown)$/.test(p)) { chars += (await (await fh.getFile()).text()).length; n++; } }
-  return {files: n, chars, ms: now() - t0};
+  const t1 = now();
+  return {how: 'one at a time', files: n, chars, t0, t1, ms: t1 - t0};
+};
+async function walkPar(dir, prefix, out) {  // every subfolder listed at once
+  const subs = [];
+  for await (const [name, h] of dir.entries()) {
+    if (h.kind === 'directory') subs.push(walkPar(h, prefix + name + '/', out));
+    else out.push([prefix + name, h]);
+  }
+  await Promise.all(subs);
+  return out;
+}
+const kept = (all) => all.filter(([p]) => /\.(md|txt|markdown)$/.test(p));
+async function pool(items, inflight, read) {  // `inflight` reads at a time
+  let i = 0, chars = 0;
+  async function lane() { while (i < items.length) { const it = items[i++]; chars += (await read(it)).length; } }
+  await Promise.all(Array.from({length: inflight}, lane));
+  return chars;
+}
+window.readPar = async (h, inflight) => {
+  const t0 = now();
+  const all = kept(await walkPar(h, '', []));
+  const listed = now();
+  const chars = await pool(all, inflight, async ([p, fh]) => (await fh.getFile()).text());
+  const t1 = now();
+  return {how: inflight + ' at a time on the page', inflight, files: all.length, chars, t0, listed, t1, ms: t1 - t0};
+};
+window.readWorkers = async (h, workers, inflight) => {
+  const t0 = now();
+  const all = kept(await walkPar(h, '', [])).map(([p, fh]) => fh);
+  const listed = now();
+  const parts = Array.from({length: workers}, (_, k) => all.filter((_, j) => j % workers === k));
+  const got = await Promise.all(parts.map(part => new Promise((res, rej) => {
+    const w = new Worker('/reader.js');
+    w.onmessage = e => { res(e.data); w.terminate(); };
+    w.onerror = e => rej(e.message);
+    w.postMessage({handles: part, inflight});
+  })));
+  const t1 = now();
+  return {how: workers + ' workers, ' + inflight + ' at a time each', workers, inflight, files: got.reduce((a, g) => a + g.n, 0),
+          chars: got.reduce((a, g) => a + g.chars, 0), t0, listed, t1, ms: t1 - t0};
 };
 window.observe = async (h) => {
   window.seen = {};
@@ -127,6 +175,16 @@ window.stash = (h) => new Promise((res) => {  // the folder's handle into Indexe
 });
 </script></body></html>"""
 
+READER = r"""
+onmessage = async (e) => {  // a Web Worker's share of the files, `inflight` at a time
+  const {handles, inflight} = e.data;
+  let i = 0, chars = 0, n = 0;
+  async function lane() { while (i < handles.length) { const fh = handles[i++]; chars += (await (await fh.getFile()).text()).length; n++; } }
+  await Promise.all(Array.from({length: inflight}, lane));
+  postMessage({n, chars});
+};
+"""
+
 SW = r"""
 const log = (what) => fetch('/log?' + new URLSearchParams({what, t: Date.now()}));
 async function tryFolder() {
@@ -153,6 +211,9 @@ self.addEventListener('periodicsync', (e) => e.waitUntil((async () => {
   const c = await clients.matchAll({includeUncontrolled: true});
   await log('periodicsync ' + e.tag + ' clients=' + c.length + ' folder=[' + await tryFolder() + '] notify=[' + await tryNotify('periodicsync') + ']');
 })()));
+self.addEventListener('push', (e) => e.waitUntil((async () => {
+  await log('push clients=' + (await clients.matchAll({includeUncontrolled: true})).length + ' notify=[' + await tryNotify('push') + ']');
+})()));
 self.addEventListener('fetch', () => {});
 """
 
@@ -166,6 +227,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body, kind = b"ok", "text/plain"
         elif self.path.startswith("/sw.js"):
             body, kind = SW.encode(), "text/javascript"
+        elif self.path.startswith("/reader.js"):
+            body, kind = READER.encode(), "text/javascript"
         else:
             body, kind = PAGE.encode(), "text/html"
         self.send_response(200)
@@ -221,6 +284,8 @@ def changes(folder, n, tag, gap=0.02):
 
 
 def lags(page, closed, off, wait_s=10):
+    """The lags (ms) of the changes the page saw, how many, and the raw stamps {path: [closed (this clock), seen (the
+    page's clock) or None]} the checker recomputes them from (lag = max(0, seen + offset − closed))."""
     end = time.time() + wait_s
     seen = {}
     while time.time() < end:
@@ -229,7 +294,8 @@ def lags(page, closed, off, wait_s=10):
             break
         time.sleep(0.2)
     got = [max(0.0, seen[k] + off - closed[k]) for k in closed if k in seen]
-    return got, len(got)
+    raw = {k: [closed[k], seen.get(k)] for k in closed}
+    return got, len(got), raw
 
 
 def drop_folder(page, cdp, folder):
@@ -289,10 +355,17 @@ def main():
             dropped = drop_folder(page, cdp, corpus)
             got_handle = page.evaluate("!!window.dropHandle")
             routes["drop_folder"] = {"dropped": dropped, "can": got_handle}
-            read_drop = None
+            reads = []  # every way the folder was read, with its raw page-clock stamps (t0, t1): ms = t1 − t0
             if got_handle:
-                read_drop = page.evaluate("readAll(window.dropHandle)")
-                routes["drop_folder"]["read"] = read_drop
+                reads.append(page.evaluate("readAll(window.dropHandle)"))
+                for inflight in (16, 64, 256):
+                    reads.append(page.evaluate(f"readPar(window.dropHandle, {inflight})"))
+                for workers in (4, 8):
+                    try:
+                        reads.append(page.evaluate(f"readWorkers(window.dropHandle, {workers}, 32)"))
+                    except Exception as e:
+                        reads.append({"how": f"{workers} workers, 32 at a time each", "error": str(e)[:300]})
+                routes["drop_folder"]["reads"] = reads
             t0 = time.time()
             page.set_input_files("#dir", str(corpus))  # (DOM.setFileInputFiles: the folder chosen in <input webkitdirectory>)
             set_s = time.time() - t0
@@ -302,21 +375,24 @@ def main():
                 if read_input:
                     break
                 time.sleep(0.25)
+            if read_input:
+                reads.append(read_input)
             routes["input_webkitdirectory"] = {"read": read_input, "set_files_s": round(set_s, 2),
                                                "can": bool(read_input and read_input["files"] == 100_000),
                                                "note": "a snapshot of File objects: no handle, so nothing to watch, and gone with the tab"}
             can_read = any(r["can"] for r in routes.values())
             tries["cdp_granted"] = {"can": can_read, "evidence": routes}
-            reads = [r for r in (read_drop, read_input) if r and r.get("files") == 100_000]
-            best = min(reads, key=lambda r: r["ms"]) if reads else None
+            full = [r for r in reads if r.get("files") == 100_000 and "t1" in r]
+            best = min(full, key=lambda r: r["t1"] - r["t0"]) if full else None
             entry = {"label": "Read a folder", "can": tries["no_gesture"]["can"] or can_read, "tries": tries,
                      "evidence": f"no gesture: {no_gesture}; with a DevTools gesture: picker {routes['picker_intercepted']['promise']}, "
                                  f"drop handle {got_handle}, webkitdirectory {bool(read_input)}"}
             if best:
-                entry["race"] = {"native": "scan_ms", "web_ms": round(best["ms"], 1), "files": best["files"],
-                                 "what": "the web only reads the 100,000 files' text (no index); native's scan_ms reads and indexes them into SQLite FTS5"}
+                entry["race"] = {"native": "scan_ms", "web_ms": round(best["t1"] - best["t0"], 1), "files": best["files"], "how": best["how"],
+                                 "tries": [{"how": r.get("how"), "ms": round(r["t1"] - r["t0"], 1)} for r in full],
+                                 "what": "the fastest of every way tried; the web only reads the 100,000 files' text (no index); native's scan_ms reads and indexes them into SQLite FTS5"}
                 entry["summary"] = (f"Only after a click: without one, {no_gesture.split(':')[0]}; with one, the web read the 100,000 files in "
-                                    f"{best['ms'] / 1000:.1f} s (reading only)")
+                                    f"{(best['t1'] - best['t0']) / 1000:.1f} s at best ({best['how']}; reading only)")
             else:
                 entry["summary"] = f"Not without a click ({no_gesture.split(':')[0]}), and no DevTools gesture reached the files"
             res["entries"]["read_folder"] = entry
@@ -334,26 +410,28 @@ def main():
                 started = page.evaluate("observe(window.dropHandle)")
                 if started == "observing":
                     closed = changes(small, 200, "obs")
-                    got, n = lags(page, closed, off)
+                    got, n, raw = lags(page, closed, off)
                     seen_now = page.evaluate("Object.keys(window.seen || {})")
                     ntries["FileSystemObserver"] = {"can": n > 0, "evidence": {"started": started, "seen": n, "of": 200, "p95_ms": p95(got),
                                                      "p50_ms": round(sorted(got)[len(got) // 2], 3) if got else None, "clock_offset_rtt_ms": round(rtt, 3),
-                                                     "missed": sorted(set(closed) - set(seen_now)),
+                                                     "missed": sorted(set(closed) - set(seen_now)), "offset_ms": off, "raw": raw,
                                                      "lag_over": "the changes it reported (a miss is listed, not counted as a lag)"}}
                     page.evaluate("window.obs && window.obs.disconnect()")
                 else:
                     ntries["FileSystemObserver"] = {"can": False, "evidence": f"FileSystemObserver offered: {R['features']['FileSystemObserver']}; observe(): {started}"}
-                best_poll = None
+                best_poll, polls = None, []
                 for every in (10, 50):
                     page.evaluate(f"poll(window.dropHandle, {every})")
                     closed = changes(small, 100, f"poll{every}")
-                    got, n = lags(page, closed, off)
+                    got, n, raw = lags(page, closed, off)
                     page.evaluate("window.polling = false")
                     time.sleep(0.2)
-                    r = {"every_ms": every, "seen": n, "of": 100, "p95_ms": p95(got)}
+                    r = {"every_ms": every, "seen": n, "of": 100, "p95_ms": p95(got), "offset_ms": off, "raw": raw}
+                    polls.append(r)
                     if best_poll is None or (n == 100 and (r["p95_ms"] or 1e9) < (best_poll["p95_ms"] or 1e9)):
                         best_poll = r
-                ntries["polling"] = {"can": best_poll["seen"] == 100, "evidence": {"best": best_poll, "how": "the dropped folder's handle walked every N ms; new names timed"}}
+                ntries["polling"] = {"can": best_poll["seen"] == 100, "evidence": {"best": best_poll, "every_try": polls,
+                                                                                    "how": "the dropped folder's handle walked every N ms; new names timed"}}
             else:
                 why = f"no folder handle to watch (drop gave {dropped_small}; the picker can't be answered headless)"
                 ntries["FileSystemObserver"] = {"can": False, "evidence": f"offered: {R['features']['FileSystemObserver']}; {why}"}
@@ -389,6 +467,14 @@ def main():
                 try { out.periodic_permission = (await navigator.permissions.query({name: 'periodic-background-sync'})).state; } catch (e) { out.periodic_permission = e.name + ': ' + e.message; }
                 try { await r.periodicSync.register('keeper-minute', {minInterval: 60 * 1000}); out.periodic = 'registered'; } catch (e) { out.periodic = e.name + ': ' + e.message; }
                 try { out.periodic_tags = await r.periodicSync.getTags(); } catch (e) { out.periodic_tags = e.name; }
+                try {  // Web Push: a subscription needs the vendor's push service; a fresh P-256 key stands in for a server's VAPID key
+                    out.push_permission = (await navigator.permissions.query({name: 'push', userVisibleOnly: true})).state;
+                    const key = await crypto.subtle.generateKey({name: 'ECDSA', namedCurve: 'P-256'}, true, ['sign']);
+                    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', key.publicKey));
+                    const sub = await Promise.race([r.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: raw}),
+                        new Promise((_, rej) => setTimeout(() => rej(new Error('no answer in 20 s')), 20000))]);
+                    out.push = 'subscribed: ' + sub.endpoint;
+                } catch (e) { out.push = e.name + ': ' + e.message; }
                 return out;
             }""")
             ctx.set_offline(True)  # (the page and its worker offline: a Background Sync waits for the network)
@@ -431,28 +517,49 @@ def main():
         log_minute = closed_only(after_minute)
         log_online = closed_only(online)
         ran = bool(log_change or log_minute)
+        online_sync = [w for w in log_online if w.startswith("sync ")]
+        push = reg.get("push")
+        push_try = {"can": False, "untried": True,
+                    "evidence": {"subscribe": push, "permission": reg.get("push_permission"),
+                                 "why": ("Web Push is the one way to wake a worker on demand, and it needs two things this run doesn't use: a push server "
+                                         "holding the subscription, and the browser vendor's push service in between (Chromium delivers pushes only "
+                                         "through Firebase Cloud Messaging: a subscription's endpoint is FCM's, so no local server can stand in). The "
+                                         "browser resolved no host but 127.0.0.1, so subscribe() got as far as shown and no push was sent: untried, "
+                                         "needs a push server and Google's FCM")}}
         res["entries"]["run_closed"] = {
             "label": "Run with the tab closed", "can": ran,
             "tries": {
                 "background_sync": {"can": any("sync keeper" in w and not w.startswith("periodic") for w in log_change + log_minute),
                                     "evidence": {"registered": sync_reg, "worker": reg.get("sw"), "events_after_a_file_change": [w for w in log_change if not w.startswith("periodic")],
                                                  "events_in_the_75_s_after_close": [w for w in log_minute if not w.startswith("periodic")],
-                                                 "events_after_going_online_with_no_page_of_it_open": log_online}},
+                                                 "events_after_going_online_with_no_page_of_it_open": log_online,
+                                                 "ran_when_the_network_came_back": bool(online_sync)}},
                 "periodic_sync": {"can": any(w.startswith("periodicsync") for w in log_minute),
                                   "evidence": {"permission": reg.get("periodic_permission"), "register": reg.get("periodic"), "tags": reg.get("periodic_tags"),
-                                               "events_in_the_75_s_after_close": [w for w in log_minute if w.startswith("periodicsync")]}},
+                                               "events_in_the_75_s_after_close": [w for w in log_minute if w.startswith("periodicsync")],
+                                               "by_design": ("documented, not observed: Chromium fires periodicsync only for an installed web app, no more often "
+                                                             "than its engagement-based interval (about 12 hours); a 75 s headless window can't show it either way")}},
+                "web_push": push_try,
             },
-            "evidence": f"after closing the tab: {len(log_change)} worker events after a file change, {len(log_minute)} in 75 s; going online then gave {log_online}",
-            "summary": ("No: with the tab closed its worker got no event when a file changed or a minute passed"
+            "evidence": (f"after closing the tab: {len(log_change)} worker events after a file change, {len(log_minute)} in 75 s; going online then "
+                         f"gave {log_online}; Push untried (subscribe: {push})"),
+            "summary": (("No code ran for a local file change or within a minute of closing"
+                         + ("; a Background Sync held while offline did run when the network came back (a network event, not a file change)" if online_sync else "")
+                         + "; Push untried (needs a push server and the vendor's push service)")
                         if not ran else "Partly: its worker ran with the tab closed"),
         }
         shown = [w for w in log_change + log_minute if "notify=[shown]" in w]
+        woken = [w for w in log_online if "notify=" in w]
+        refused = woken[0].split("notify=[", 1)[1].rstrip("]") if woken else ""
         res["entries"]["notify_closed"] = {
             "label": "Notify with the tab closed", "can": bool(shown),
+            "tries": {"web_push": push_try},
             "evidence": {"notifications_from_file_changes_or_time": shown,
-                         "what_a_worker_could_do_when_woken": [w for w in log_online if "notify=" in w],
+                         "what_a_worker_could_do_when_woken": woken,
                          "why": "a worker may only show one while handling an event (push, sync, a click); a file change or a minute gave it none"},
-            "summary": "No: a worker can show one only while it handles an event, and nothing woke it" if not shown else "Yes",
+            "summary": (("No notification for a file change or within a minute of closing: nothing woke the worker"
+                         + (f"; when the network did, showNotification refused ({refused})" if refused else "")
+                         + "; Push untried (needs a push server and the vendor's push service)") if not shown else "Yes"),
         }
         badge = None
         res["entries"]["tray"] = {
