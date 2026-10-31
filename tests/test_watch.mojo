@@ -2,8 +2,8 @@
 # into it while this runs) and prints one line per change until it's stopped (or $MOJOUI_WATCH_SECONDS pass):
 #   WATCH READY                                         every folder has its watch
 #   WATCH THREAD: reader=<tid> main=<tid>               inotify is read on a thread of its own
-#   WATCH EVENT: <kind> <path> ms=<lag> at=<ns>         kind create/modify/rename/delete; at = when the watcher's thread
-#                                                       saw it (CLOCK_MONOTONIC)
+#   WATCH EVENT: <kind> <path> ms=<lag> at=<ns> got=<ns>   kind create/modify/rename/delete; at = when the watcher's thread
+#                                                       saw it, got = when this (the consumer's) thread took it (CLOCK_MONOTONIC)
 # The lag here is the test's own estimate, from the file system's timestamps (the file's ctime for a write or a
 # rename, its folder's for a delete) brought onto the monotonic clock; the checker measures the real one itself.
 #   pixi run mojo run -I . tests/test_watch.mojo
@@ -50,7 +50,9 @@ def main() raises:
     while now_ns() < end:
         if not w.wait(100):
             continue
-        for e in w.take():
+        var events = w.take()
+        var got = now_ns()  # (when this thread, the consumer, has them: after the pipe; the web's lag is stamped in its page's callback)
+        for e in events:
             if e.kind == OVERFLOW:
                 print("WATCH OVERFLOW", flush=True)
                 continue
@@ -59,7 +61,7 @@ def main() raises:
             var offset = _clock(0) - _clock(1)  # realtime − monotonic, now
             var changed = ctime_ns(String(e.path[byte=: e.path.rfind("/")]) if e.kind == DELETED else e.path)
             var lag = Float64(e.at_ns - (changed - offset)) / 1e6 if changed > 0 else 0.0
-            print("WATCH EVENT: " + e.kind_name() + " " + e.path + " ms=" + String(max(lag, 0.0)) + " at=" + String(e.at_ns), flush=True)
+            print("WATCH EVENT: " + e.kind_name() + " " + e.path + " ms=" + String(max(lag, 0.0)) + " at=" + String(e.at_ns) + " got=" + String(got), flush=True)
             n += 1
     w.stop()
     var t1 = now_ns()

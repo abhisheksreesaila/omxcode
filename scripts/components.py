@@ -254,13 +254,18 @@ NOTES = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS
          "against nothing new and loads /usr/lib/libsqlite3.dylib (built, not run)",
          "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)":
              "Linux: inotify on a pthread, new folders followed, one event per change, p95 lag 0.01 ms for 1,000 changes (goal 45 M0); "
+             "a folder renamed inside reports its files under the new name, an overflow re-watches and says rescan, a folder it can't "
+             "watch makes it partial() with the reason, names with newlines or non-UTF-8 bytes arrive whole (tests/test_watch_edges.mojo); "
              "Mac: FSEvents (file-level events, a dispatch queue), built, not run, and it doesn't pair a rename's two halves; the web "
              "has FileSystemObserver only on a folder the person picked or dropped, only while the tab is open (docs/goals/45/web.json)",
          "Background mode (keeps running with the window closed)":
-             "GTK: the window hides on close and the GApplication is held (goal 45 M1); the Mac has none yet (the AppKit host still "
+             "GTK: the window hides on close only while a panel's StatusNotifierWatcher has the tray item (otherwise closing ends the "
+             "app); one instance per app, so launching it again opens the running one (goal 45 M1); the Mac has none yet (the AppKit host still "
              "quits when its last window closes); a web page's code stops when its tab closes (docs/goals/45/web.json)",
          "Tray item (StatusNotifierItem; NSStatusItem)":
-             "Linux: a StatusNotifierItem on the session bus (Activate, SecondaryActivate, ContextMenu open the window; no menu yet); "
+             "Linux: a StatusNotifierItem on the session bus (Activate, SecondaryActivate, ContextMenu open the window), a minimal "
+             "com.canonical.dbusmenu with Open and Quit, registered again whenever a panel's watcher appears; checked on a private bus "
+             "with a pretend watcher, no real panel; "
              "Mac: NSStatusItem not built yet; the web has no tray API",
          "Notifications (mojoui.notify)":
              "Linux: org.freedesktop.Notifications.Notify, asynchronous (goal 45 M1, M2); Mac: UNUserNotificationCenter, built, not "

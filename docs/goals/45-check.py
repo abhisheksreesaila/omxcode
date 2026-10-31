@@ -125,7 +125,7 @@ def rel(path, base):
 
 # --------------------------------------------------------------------------------------------------------------- M0
 
-EVENT = re.compile(r"^WATCH EVENT: (\w+) (\S+) ms=([\d.]+) at=(\d+)\s*$")
+EVENT = re.compile(r"^WATCH EVENT: (\w+) (\S+) ms=([\d.]+) at=(\d+)(?: got=(\d+))?\s*$")  # (got=: addition, D-1625)
 
 
 def m0():
@@ -186,10 +186,10 @@ def m0():
     for line in out.splitlines():
         m = EVENT.match(line)
         if m and rel(m.group(2), d) not in dirs:
-            events.append((m.group(1), rel(m.group(2), d), float(m.group(3)), int(m.group(4))))
+            events.append((m.group(1), rel(m.group(2), d), float(m.group(3)), int(m.group(4)), int(m.group(5) or 0)))
     seen = {}
-    for kind, path, ms, at in events:
-        seen.setdefault((kind, path), []).append((ms, at))
+    for kind, path, ms, at, got in events:
+        seen.setdefault((kind, path), []).append((ms, at, got))
     missing = [k for k in done if k not in seen]
     twice = [k for k, v in seen.items() if k in done and len(v) > 1]
     extra = [k for k in seen if k not in done]
@@ -198,8 +198,12 @@ def m0():
                        f"{len(twice)} reported twice (e.g. {twice[:3]}), {len(extra)} unexpected (e.g. {extra[:3]})")
     lags, disagree, early = [], 0, 0
     during, before_call, bounds, worst = [], 0, [], 0.0  # (addition, D-1623)
+    delivered = []  # (addition, D-1625) close → the consumer's thread has the event (after the pipe), what the web race uses
     for k, (t0, closed) in done.items():
-        ms, at = seen[k][0]
+        ms, at, got = seen[k][0]
+        if got < at:
+            return False, f"{k}: got= missing or before at= (the consumer's stamp must follow the reader's)"
+        delivered.append(max(0, got - closed) / 1e6)
         if at < t0:
             early += 1
         if at < last_call[k]:
@@ -221,13 +225,13 @@ def m0():
     if p95(bounds) > 50:
         return False, f"p95 lag measured from the start of each change's last call {p95(bounds):.1f} ms (≤ 50)"
     q = p95(lags)
-    NATIVE["watch_p95_ms"] = q
+    NATIVE["watch_p95_ms"] = max(q, p95(delivered))  # (D-1625: the race takes the later of the two stamps)
     if q > 50:
         return False, f"p95 lag {q:.1f} ms (≤ 50)"
     return True, (f"1000 changes (400 creates in 10 new nested folders, 200 modifies, 200 renames, 200 deletes): each reported once, p95 lag "
                   f"{q:.2f} ms (max {max(lags):.1f}); {len(during)} stamped during their own close/rename/remove call (up to "
                   f"{max(during, default=0):.2f} ms before it returned; none before it began); from each call's start p95 {p95(bounds):.2f} ms; "
-                  f"ms= within 2 ms on {1000 - disagree}/1000 (worst {worst:.2f}); reader thread {th.group(1)} ≠ main {th.group(2)}")
+                  f"ms= within 2 ms on {1000 - disagree}/1000 (worst {worst:.2f}); delivered to the consumer's thread p95 {p95(delivered):.3f} ms; reader thread {th.group(1)} ≠ main {th.group(2)}")
 
 
 # ------------------------------------------------------------------------------------------------ private bus helpers
@@ -673,8 +677,8 @@ def m2():
 THINGS = {  # entry → the tries each must report
     "read_folder": ("no_gesture", "cdp_granted"),
     "notice_change": ("FileSystemObserver", "polling"),
-    "run_closed": ("background_sync", "periodic_sync"),
-    "notify_closed": (),
+    "run_closed": ("background_sync", "periodic_sync", "web_push"),  # (web_push: addition, D-1624)
+    "notify_closed": ("web_push",),
     "tray": (),
 }
 NATIVE_MEASURES = ("watch_p95_ms", "index_p95_ms", "scan_ms")
@@ -682,6 +686,55 @@ NATIVE_MEASURES = ("watch_p95_ms", "index_p95_ms", "scan_ms")
 
 def has_evidence(e):
     return isinstance(e, (str, dict, list)) and len(e) > 0 and str(e).strip() not in ("", "{}", "[]")
+
+
+def recomputed(ents):
+    """(addition, D-1624) The race numbers worked out again here from web.json's raw stamps, never taken as written:
+    each folder read's page-clock t0/t1, each change's [closed, seen] with the clock offset. Returns (problems, notes)."""
+    problems, notes = [], []
+    rf = ents.get("read_folder", {})
+    if rf.get("can"):
+        ev = rf.get("tries", {}).get("cdp_granted", {}).get("evidence", {})
+        reads = list(ev.get("drop_folder", {}).get("reads", []))
+        inp = ev.get("input_webkitdirectory", {}).get("read")
+        if inp:
+            reads.append(inp)
+        full = [r for r in reads if isinstance(r, dict) and r.get("files") == 100_000 and isinstance(r.get("t1"), (int, float))]
+        if not any("inflight" in r for r in full):
+            problems.append("read_folder: no parallel read among the tries (the web's best way wasn't tried)")
+        if full:
+            best = min(r["t1"] - r["t0"] for r in full)
+            if abs(best - rf.get("race", {}).get("web_ms", -1)) > 0.06:
+                problems.append(f"read_folder: race web_ms {rf.get('race', {}).get('web_ms')} isn't the fastest read in the raw stamps ({best:.1f})")
+            notes.append(f"read_folder fastest of {len(full)} reads {best:.1f} ms (recomputed)")
+        else:
+            problems.append("read_folder: the web can, but no read carries raw t0/t1 stamps")
+    nc = ents.get("notice_change", {})
+    if nc.get("can"):
+        tries = nc.get("tries", {})
+        runs = []
+        fso = tries.get("FileSystemObserver", {})
+        if fso.get("can"):
+            runs.append(("FileSystemObserver", fso["evidence"]))
+        if tries.get("polling", {}).get("can"):
+            runs += [(f"polling every {r.get('every_ms')} ms", r) for r in tries["polling"]["evidence"].get("every_try", [])]
+        best = None
+        for name, r in runs:
+            raw, off = r.get("raw"), r.get("offset_ms")
+            if not isinstance(raw, dict) or not isinstance(off, (int, float)):
+                problems.append(f"notice_change {name}: no raw stamps")
+                continue
+            lags = [max(0.0, seen + off - closed) for closed, seen in raw.values() if seen is not None]
+            q = round(p95(lags), 3) if lags else None
+            if q is None or r.get("p95_ms") is None or abs(q - r["p95_ms"]) > 0.002:
+                problems.append(f"notice_change {name}: p95 {r.get('p95_ms')} disagrees with its raw stamps ({q})")
+                continue
+            if name == "FileSystemObserver" or len(lags) == len(raw):
+                best = q if best is None else min(best, q)
+        if best is not None and abs(best - nc.get("race", {}).get("web_ms", -1)) > 0.002:
+            problems.append(f"notice_change: race web_ms {nc.get('race', {}).get('web_ms')} isn't the best recomputed p95 ({best})")
+        notes.append(f"notice_change best p95 {best} ms (recomputed)")
+    return problems, notes
 
 
 def m3():
@@ -732,9 +785,11 @@ def m3():
                 problems.append(f"{thing}: native {measure} {mine:.1f} ms isn't ≤ half the web's {web:.1f} ms (a loss)")
         else:
             verdicts.append(f"{thing}: the web can't")
+    more, notes = recomputed(ents)
+    problems += more
     if problems:
         return False, "; ".join(problems)
-    return True, "native does all five; " + "; ".join(verdicts)
+    return True, "native does all five; " + "; ".join(verdicts) + "; " + "; ".join(notes)
 
 
 # --------------------------------------------------------------------------------------------------------------- M4
