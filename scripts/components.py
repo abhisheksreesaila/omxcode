@@ -92,6 +92,7 @@ FEATURES = [
     ("Quit hook", "def closing(mut self)", r"rt\[?\]?\.closing\(|close_all|on_will_terminate", "jot"),
     ("Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)", "FolderWatcher(path, wake=True) · start() · take()", r"(?!)", "keeper"),
     ("Background mode (keeps running with the window closed)", "def background(self) -> Bool · window_shown(shown)", r"app\.background\(\)", "keeper"),
+    ("One instance (a second launch opens the running app)", "@staticmethod def one_instance() -> String", r"A\.one_instance\(\)", "keeper"),
     ("Tray item (StatusNotifierItem; NSStatusItem)", "published by the host for a background() app; Activate opens the window", r"TrayItem\(", "keeper"),
     ("Notifications (mojoui.notify)", "notify(app, title, body)", r"(?!)", "keeper"),
 ]
@@ -260,8 +261,11 @@ NOTES = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS
              "has FileSystemObserver only on a folder the person picked or dropped, only while the tab is open (docs/goals/45/web.json)",
          "Background mode (keeps running with the window closed)":
              "GTK: the window hides on close only while a panel's StatusNotifierWatcher has the tray item (otherwise closing ends the "
-             "app); one instance per app, so launching it again opens the running one (goal 45 M1); the Mac has none yet (the AppKit host still "
+             "app); an app that declares one_instance() runs once (see the row below); the Mac has none yet (the AppKit host still "
              "quits when its last window closes); a web page's code stops when its tab closes (docs/goals/45/web.json)",
+         "One instance (a second launch opens the running app)":
+             "GTK: registers dev.mojoui.bg.<name> on the session bus before building anything; a second launch sends activate and "
+             "exits without building its App (goal 45 M1, D-1706); elsewhere each launch is its own",
          "Tray item (StatusNotifierItem; NSStatusItem)":
              "Linux: a StatusNotifierItem on the session bus (Activate, SecondaryActivate, ContextMenu open the window), a minimal "
              "com.canonical.dbusmenu with Open and Quit, registered again whenever a panel's watcher appears; checked on a private bus "

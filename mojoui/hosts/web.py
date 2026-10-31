@@ -1368,9 +1368,24 @@ def alive(pid):
     return True
 
 
+def owner_host():
+    """This server's machine (and container: each has its own hostname and pids), as `.owner` names it."""
+    import socket
+    return socket.gethostname()
+
+
+def safe_name(name, fallback):
+    """A plain file name for an upload: no folders, no "..", and never `.owner` (the folder's pid file)."""
+    name = Path(name or "").name
+    return fallback if name in ("", ".", "..", ".owner") else name
+
+
 def sweep_files(day=86400):
-    """At start: upload and download folders whose server process is gone (its `.owner` pid), and unowned ones (older
-    servers wrote none) untouched for a day, go. A crash or a kill never ran forget_files; a live server's stay."""
+    """At start: upload and download folders whose server process is gone (its `.owner` pid, on this host), and
+    unowned ones (servers before D-1704 wrote none) untouched for a day, go. A crash or a kill never ran forget_files;
+    a live server's stay. Limits: a folder owned on another host or container is never swept (its pids can't be read
+    here); a reused pid keeps a gone server's folder until a later start; an older-version server's session untouched
+    for a day is swept."""
     swept = 0
     for kind in (uploads_base(), uploads_base().parent / "downloads"):
         if not kind.is_dir():
@@ -1379,9 +1394,11 @@ def sweep_files(day=86400):
             if not folder.is_dir():
                 continue
             try:
-                owner = int((folder / ".owner").read_text())
-                gone = not alive(owner)
-            except (OSError, ValueError):
+                words = (folder / ".owner").read_text().split()
+                if len(words) > 1 and words[1] != owner_host():
+                    continue  # (another machine or container's server, sharing the folder: its pids aren't ours to read)
+                gone = not alive(int(words[0]))
+            except (OSError, ValueError, IndexError):
                 try:
                     gone = time.time() - folder.stat().st_mtime > day
                 except OSError:
@@ -2027,7 +2044,7 @@ def make_app(module_dir):
         folder.mkdir(parents=True, exist_ok=True)
         owner = folder / ".owner"
         if not owner.exists():
-            owner.write_text(str(os.getpid()))
+            owner.write_text(f"{os.getpid()} {owner_host()}")
         return folder
 
     def forget_files(sid):
@@ -2105,9 +2122,7 @@ def make_app(module_dir):
         for file in files:
             if s.closed:  # (evicted mid-upload: nothing more is written; D-1704)
                 break
-            name = Path(file.filename or "").name
-            if name in ("", ".", ".."):
-                name = "dropped"
+            name = safe_name(file.filename, "dropped")
             if (file.size or 0) > limit:
                 refused.append(too_big(name, limit))
                 continue
@@ -2158,9 +2173,7 @@ def make_app(module_dir):
             if s.closed or v != s.shape or not 0 <= n < len(s.nodes) or not s.nodes[n]["msg2"]:
                 return ""
         # each page its own folder; only a plain file name (no folders, no "..")
-        name = Path(file.filename or "").name
-        if name in ("", ".", ".."):
-            name = "upload"
+        name = safe_name(file.filename, "upload")
         limit = upload_limit()
         if (file.size or 0) > limit:
             return too_big(name, limit)

@@ -5413,7 +5413,7 @@ def run_step[A: App](host_addr: Int, step: String):
         var t0 = Int(perf_counter_ns())
         var until = t0 + to_int(kv[1]) * 1_000_000
         while find(host[], BUTTON, kv[0], 0) < 0 and not host[].closed and Int(perf_counter_ns()) < until:
-            _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+            pump()  # (sleeps 1 ms when a turn did nothing: no core spun while the job it waits for needs the CPU)
         if find(host[], BUTTON, kv[0], 0) < 0:
             print("TEST: no button " + kv[0] + " after " + kv[1] + " ms")
         else:

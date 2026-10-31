@@ -1,5 +1,5 @@
 {
- "commit": "5937c383d18c85fb4b2433a38106ce7e470f70cb",
+ "commit": "5fd5b6c9826f5396c15189683f1b898178bc8355",
  "gpu_index": 0,
  "gpu_asked": 0,
  "b_gpu_seen": 0,
@@ -7,64 +7,64 @@
  "gpu_pinning": "A: CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=<index>; B: Chromium's Dawn/Vulkan adapter (not selectable by flag on two identical cards): the GPU whose memory rose during B's run",
  "quiet": {
   "before_util_mean_max": [
-   0.0,
-   0.0
+   79.7,
+   100.0
   ],
   "after_util_mean_max": [
-   0.0,
-   0.0
+   2.3,
+   14.0
   ],
   "during_a": {
-   "samples": 59,
-   "interval_s": 0.173,
-   "util_mean": 22.1,
-   "util_max": 67.0,
+   "samples": 77,
+   "interval_s": 0.175,
+   "util_mean": 16.1,
+   "util_max": 68.0,
    "other_processes": [
     {
-     "pid": 2299,
-     "name": "1password",
-     "first_mb": 6.0,
-     "max_mb": 6.0
-    },
-    {
-     "pid": 2440,
+     "pid": 2786,
      "name": "voxtype-osd-gtk4",
      "first_mb": 6.0,
      "max_mb": 6.0
     },
     {
-     "pid": 2583320,
+     "pid": 2953,
+     "name": "1password",
+     "first_mb": 6.0,
+     "max_mb": 6.0
+    },
+    {
+     "pid": 303951,
      "name": "chromium",
-     "first_mb": 8.0,
-     "max_mb": 8.0
+     "first_mb": 6.0,
+     "max_mb": 6.0
     }
    ],
    "other_material": [],
    "quiet": true
   },
   "during_b": {
-   "samples": 164,
-   "interval_s": 0.182,
-   "util_mean": 29.1,
+   "samples": 170,
+   "interval_s": 0.181,
+   "util_mean": 22.8,
    "util_max": 100.0,
    "other_processes": [
     {
-     "pid": 2299,
-     "name": "1password",
-     "first_mb": 6.0,
-     "max_mb": 6.0
-    },
-    {
-     "pid": 2440,
+     "pid": 2786,
      "name": "voxtype-osd-gtk4",
      "first_mb": 6.0,
      "max_mb": 6.0
     },
     {
-     "pid": 2583320,
+     "pid": 2953,
+     "name": "1password",
+     "first_mb": 6.0,
+     "max_mb": 6.0
+    },
+    {
+     "pid": 303951,
      "name": "chromium",
-     "first_mb": 8.0,
-     "max_mb": 8.0
+     "first_mb": 6.0,
+     "max_mb": 6.0
     }
    ],
    "other_material": [],
@@ -77,33 +77,33 @@
  "audio_s": 188.6,
  "a": {
   "model": "openai/whisper-large-v3-turbo",
-  "cold_start_s": 6.59,
-  "p50_ms": 140.2,
-  "p95_ms": 189.3,
-  "rtf": 0.0151,
+  "cold_start_s": 9.93,
+  "p50_ms": 134.4,
+  "p95_ms": 172.4,
+  "rtf": 0.0143,
   "wer": 0.0339,
   "peak_gpu_mb": 2075,
   "ms": {
-   "1089-134686-0000": 182.0,
-   "1188-133604-0000": 143.6,
-   "121-121726-0000": 111.6,
-   "1221-135766-0000": 159.3,
-   "1284-1180-0000": 141.4,
-   "1320-122612-0000": 178.6,
-   "1580-141083-0000": 138.5,
-   "1995-1826-0000": 138.9,
-   "2094-142345-0001": 130.0,
-   "2300-131720-0000": 107.3,
-   "237-126133-0000": 195.6,
-   "260-123286-0000": 106.2,
-   "2830-3979-0000": 119.1,
-   "2961-960-0001": 111.3,
-   "3570-5694-0000": 189.3,
-   "3575-170457-0000": 142.1,
-   "3729-6852-0000": 159.8,
-   "4077-13751-0000": 151.9,
-   "4446-2271-0001": 121.2,
-   "4507-16021-0001": 121.4
+   "1089-134686-0000": 162.7,
+   "1188-133604-0000": 134.8,
+   "121-121726-0000": 111.2,
+   "1221-135766-0000": 155.1,
+   "1284-1180-0000": 137.2,
+   "1320-122612-0000": 172.4,
+   "1580-141083-0000": 133.9,
+   "1995-1826-0000": 136.2,
+   "2094-142345-0001": 127.9,
+   "2300-131720-0000": 95.3,
+   "237-126133-0000": 182.0,
+   "260-123286-0000": 100.6,
+   "2830-3979-0000": 116.3,
+   "2961-960-0001": 104.0,
+   "3570-5694-0000": 170.3,
+   "3575-170457-0000": 132.8,
+   "3729-6852-0000": 151.2,
+   "4077-13751-0000": 140.4,
+   "4446-2271-0001": 110.9,
+   "4507-16021-0001": 116.7
   },
   "hyps": {
    "1089-134686-0000": "He hoped there would be stew for dinner, turnips and carrots and bruised potatoes, and fat mutton pieces to be ladled out in thick, peppered, flour-fattened sauce.",
@@ -134,33 +134,33 @@
  },
  "b": {
   "model": "onnx-community/whisper-large-v3-turbo",
-  "cold_start_s": 9.94,
-  "p50_ms": 912.2,
-  "p95_ms": 1244.2,
-  "rtf": 0.0986,
+  "cold_start_s": 11.02,
+  "p50_ms": 883.5,
+  "p95_ms": 1184.4,
+  "rtf": 0.0972,
   "wer": 0.0339,
-  "peak_gpu_mb": 3941,
+  "peak_gpu_mb": 4261,
   "ms": {
-   "1089-134686-0000": 1152.9,
-   "1188-133604-0000": 884.2,
-   "121-121726-0000": 749.3,
-   "1221-135766-0000": 1048.4,
-   "1284-1180-0000": 986.5,
-   "1320-122612-0000": 1244.2,
-   "1580-141083-0000": 935.8,
-   "1995-1826-0000": 950.7,
-   "2094-142345-0001": 860.0,
-   "2300-131720-0000": 653.6,
-   "237-126133-0000": 1255.8,
-   "260-123286-0000": 710.1,
-   "2830-3979-0000": 828.1,
-   "2961-960-0001": 716.5,
-   "3570-5694-0000": 1154.2,
-   "3575-170457-0000": 888.6,
-   "3729-6852-0000": 976.4,
-   "4077-13751-0000": 975.4,
-   "4446-2271-0001": 832.6,
-   "4507-16021-0001": 788.3
+   "1089-134686-0000": 1184.4,
+   "1188-133604-0000": 874.9,
+   "121-121726-0000": 764.1,
+   "1221-135766-0000": 1026.6,
+   "1284-1180-0000": 914.5,
+   "1320-122612-0000": 1140.3,
+   "1580-141083-0000": 892.1,
+   "1995-1826-0000": 911.7,
+   "2094-142345-0001": 872.9,
+   "2300-131720-0000": 667.2,
+   "237-126133-0000": 1214.9,
+   "260-123286-0000": 714.5,
+   "2830-3979-0000": 792.2,
+   "2961-960-0001": 718.5,
+   "3570-5694-0000": 1125.4,
+   "3575-170457-0000": 870.5,
+   "3729-6852-0000": 980.1,
+   "4077-13751-0000": 964.9,
+   "4446-2271-0001": 864.8,
+   "4507-16021-0001": 843.7
   },
   "hyps": {
    "1089-134686-0000": "He hoped there would be stew for dinner, turnips and carrots and bruised potatoes, and fat mutton pieces to be ladled out in thick, peppered, flour-fattened sauce.",
@@ -184,7 +184,7 @@
    "4446-2271-0001": "he had preconceived ideas about everything and his idea about americans was that they should be engineers or mechanics",
    "4507-16021-0001": "it engenders a whole world la pegre for which red theft and a hell la pegrine for which red hunger"
   },
-  "precision": "encoder fp32, decoder q4",
+  "precision": "encoder fp32, decoder fp32",
   "log_mel": "CPU, in JavaScript (transformers.js's WhisperFeatureExtractor)",
   "decoding": "greedy (the pipeline's default: num_beams 1, no sampling), language=en, task=transcribe, one 30 s window",
   "how": "transformers.js 4.3.2 on WebGPU (onnxruntime-web), greedy; b = the fastest of b.variants whose WER is within 0.01 of A's",
@@ -194,14 +194,14 @@
     "encoder": "fp16",
     "decoder": "fp16",
     "loaded": false,
-    "error": "Error: The device (webgpu) does not support fp16.\n    at getSession (http://127.0.0.1:33299/dist/main.js:24086:11)\n    at async http://127.0.0.1:33299/dist/main.js:24137:69\n    at async Promise.all (index 0)\n    at async constructSessions (http://127.0.0.1:33299/dist/main.js:24134:5)\n    at async Promise.all (index 0)\n    at async WhisperForConditionalGeneration.from_pretrained (http://127.0.0.1:3",
+    "error": "Error: The device (webgpu) does not support fp16.\n    at getSession (http://127.0.0.1:45737/dist/main.js:24086:11)\n    at async http://127.0.0.1:45737/dist/main.js:24137:69\n    at async Promise.all (index 0)\n    at async constructSessions (http://127.0.0.1:45737/dist/main.js:24134:5)\n    at async Promise.all (index 0)\n    at async WhisperForConditionalGeneration.from_pretrained (http://127.0.0.1:4",
     "evidence": {
      "page_and_server": [
-      "page error: Error: The device (webgpu) does not support fp16.\n    at getSession (http://127.0.0.1:33299/dist/main.js:24086:11)\n    at async http://127.0.0.1:33299/dist/main.js:24137:69\n    at async Promise.all (index 0)\n    at async constructSessions (http://127.0.0.1:33299/dist/main.js:24134:5)\n    at async Promise.all (index 0)\n    at async WhisperForConditionalGeneration.from_pretrained (http://127.0.0.1:33299/dist/main.js:26004:18)\n    at async AutoModelForSpeechSeq2Seq.from_pretrained (http://127.0.0.1:33299/dist/main.js:32823:14)\n    at async Promise.all (index 2)\n    at async pipeline2 (http://127.0.0.1:33299/dist/main.js:34568:48)\n    at async main (http://127.0.0.1:33299/dist/main.js:34663:17) | memory {\"used\":4012635,\"limit\":4395630592} | adapter {\"vendor\":\"nvidia\",\"architecture\":\"ampere\",\"description\":\"NVIDIA GeForce RTX 3090\",\"features\":[\"bgra8unorm-storage\",\"chromium-experimental-multi-draw-indirect\",\"chromium-experimental-sampling-resource-table\",\"chromium-experimental-subgroup-matrix\",\"chromium-experimental-timestamp-query-inside-passes\",\"clip-distances\",\"core-features-and-limits\",\"depth-clip-control\",\"depth32float-stencil8\",\"dual-source-blending\",\"float32-blendable\",\"float32-filterable\",\"indirect-first-instance\",\"primitive-index\",\"rg11b10ufloat-renderable\",\"subgroup-size-control\",\"subgroups\",\"texture-component-swizzle\",\"texture-compression-bc\",\"texture-compression-bc-sliced-3d\",\"texture-compression-unaligned\",\"texture-formats-tier1\",\"texture-formats-tier2\",\"timestamp-query\"]}"
+      "page error: Error: The device (webgpu) does not support fp16.\n    at getSession (http://127.0.0.1:45737/dist/main.js:24086:11)\n    at async http://127.0.0.1:45737/dist/main.js:24137:69\n    at async Promise.all (index 0)\n    at async constructSessions (http://127.0.0.1:45737/dist/main.js:24134:5)\n    at async Promise.all (index 0)\n    at async WhisperForConditionalGeneration.from_pretrained (http://127.0.0.1:45737/dist/main.js:26004:18)\n    at async AutoModelForSpeechSeq2Seq.from_pretrained (http://127.0.0.1:45737/dist/main.js:32823:14)\n    at async Promise.all (index 2)\n    at async pipeline2 (http://127.0.0.1:45737/dist/main.js:34568:48)\n    at async main (http://127.0.0.1:45737/dist/main.js:34663:17) | memory {\"used\":45959098,\"limit\":4395630592} | adapter {\"vendor\":\"nvidia\",\"architecture\":\"ampere\",\"description\":\"NVIDIA GeForce RTX 3090\",\"features\":[\"bgra8unorm-storage\",\"chromium-experimental-multi-draw-indirect\",\"chromium-experimental-sampling-resource-table\",\"chromium-experimental-subgroup-matrix\",\"chromium-experimental-timestamp-query-inside-passes\",\"clip-distances\",\"core-features-and-limits\",\"depth-clip-control\",\"depth32float-stencil8\",\"dual-source-blending\",\"float32-blendable\",\"float32-filterable\",\"indirect-first-instance\",\"primitive-index\",\"rg11b10ufloat-renderable\",\"subgroup-size-control\",\"subgroups\",\"texture-component-swizzle\",\"texture-compression-bc\",\"texture-compression-bc-sliced-3d\",\"texture-compression-unaligned\",\"texture-formats-tier1\",\"texture-formats-tier2\",\"timestamp-query\"]}"
      ],
      "chromium": [
-      "[178610:178610:1030/173624.297612:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote",
-      "[178610:178610:1030/173624.299456:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote"
+      "[612071:612071:1031/105705.748808:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote",
+      "[612071:612071:1031/105705.750597:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote"
      ],
      "log": "build/race/b-fp16-fp16.log"
     },
@@ -211,16 +211,16 @@
     "encoder": "fp32-1file",
     "decoder": "fp32",
     "loaded": false,
-    "error": "TypeError: Failed to fetch | memory {\"used\":713309791,\"limit\":4395630592}",
+    "error": "TypeError: Failed to fetch | memory {\"used\":714490801,\"limit\":4395630592}",
     "evidence": {
      "page_and_server": [
-      "page error: TypeError: Failed to fetch | memory {\"used\":713309791,\"limit\":4395630592} | adapter {\"vendor\":\"nvidia\",\"architecture\":\"ampere\",\"description\":\"NVIDIA GeForce RTX 3090\",\"features\":[\"bgra8unorm-storage\",\"chromium-experimental-multi-draw-indirect\",\"chromium-experimental-sampling-resource-table\",\"chromium-experimental-subgroup-matrix\",\"chromium-experimental-timestamp-query-inside-passes\",\"clip-distances\",\"core-features-and-limits\",\"depth-clip-control\",\"depth32float-stencil8\",\"dual-source-blending\",\"float32-blendable\",\"float32-filterable\",\"indirect-first-instance\",\"primitive-index\",\"rg11b10ufloat-renderable\",\"subgroup-size-control\",\"subgroups\",\"texture-component-swizzle\",\"texture-compression-bc\",\"texture-compression-bc-sliced-3d\",\"texture-compression-unaligned\",\"texture-formats-tier1\",\"texture-formats-tier2\",\"timestamp-query\"]}"
+      "page error: TypeError: Failed to fetch | memory {\"used\":714490801,\"limit\":4395630592} | adapter {\"vendor\":\"nvidia\",\"architecture\":\"ampere\",\"description\":\"NVIDIA GeForce RTX 3090\",\"features\":[\"bgra8unorm-storage\",\"chromium-experimental-multi-draw-indirect\",\"chromium-experimental-sampling-resource-table\",\"chromium-experimental-subgroup-matrix\",\"chromium-experimental-timestamp-query-inside-passes\",\"clip-distances\",\"core-features-and-limits\",\"depth-clip-control\",\"depth32float-stencil8\",\"dual-source-blending\",\"float32-blendable\",\"float32-filterable\",\"indirect-first-instance\",\"primitive-index\",\"rg11b10ufloat-renderable\",\"subgroup-size-control\",\"subgroups\",\"texture-component-swizzle\",\"texture-compression-bc\",\"texture-compression-bc-sliced-3d\",\"texture-compression-unaligned\",\"texture-formats-tier1\",\"texture-formats-tier2\",\"timestamp-query\"]}"
      ],
      "chromium": [
-      "[192877:192904:1030/174811.317122:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT",
-      "[192877:192877:1030/174813.182214:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote",
-      "[192877:192904:1030/174813.183436:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2",
-      "[192877:192877:1030/174813.184976:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote"
+      "[615281:615306:1031/105730.042934:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT",
+      "[615281:615306:1031/105738.536394:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2",
+      "[615281:615281:1031/105738.536463:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote",
+      "[615281:615281:1031/105738.539563:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote"
      ],
      "log": "build/race/b-fp32-1file-fp32.log"
     },
@@ -230,154 +230,154 @@
     "encoder": "fp32",
     "decoder": "fp32",
     "loaded": true,
-    "p50_ms": 923.5,
-    "p95_ms": 1213.6,
+    "p50_ms": 883.5,
+    "p95_ms": 1184.4,
     "wer": 0.0339,
-    "cold_start_s": 12.23,
+    "cold_start_s": 11.02,
     "download_mb": 3239.4,
     "gpu_during": {
-     "samples": 176,
-     "interval_s": 0.184,
-     "util_mean": 27.5,
+     "samples": 170,
+     "interval_s": 0.181,
+     "util_mean": 22.8,
      "util_max": 100.0,
      "other_processes": [
       {
-       "pid": 2299,
-       "name": "1password",
-       "first_mb": 6.0,
-       "max_mb": 6.0
-      },
-      {
-       "pid": 2440,
+       "pid": 2786,
        "name": "voxtype-osd-gtk4",
        "first_mb": 6.0,
        "max_mb": 6.0
       },
       {
-       "pid": 2583320,
+       "pid": 2953,
+       "name": "1password",
+       "first_mb": 6.0,
+       "max_mb": 6.0
+      },
+      {
+       "pid": 303951,
        "name": "chromium",
-       "first_mb": 8.0,
-       "max_mb": 8.0
+       "first_mb": 6.0,
+       "max_mb": 6.0
       }
      ],
      "other_material": [],
      "quiet": true
     },
-    "attempts": 1,
-    "waited_for_quiet_s": 20.9
+    "attempts": 2,
+    "waited_for_quiet_s": 20.7
    },
    {
     "encoder": "fp32",
     "decoder": "q4",
     "loaded": true,
-    "p50_ms": 912.2,
-    "p95_ms": 1244.2,
+    "p50_ms": 918.6,
+    "p95_ms": 1219.9,
     "wer": 0.0339,
-    "cold_start_s": 9.94,
+    "cold_start_s": 8.74,
     "download_mb": 2885.5,
     "gpu_during": {
-     "samples": 164,
-     "interval_s": 0.182,
-     "util_mean": 29.1,
+     "samples": 160,
+     "interval_s": 0.18,
+     "util_mean": 19.4,
      "util_max": 100.0,
      "other_processes": [
       {
-       "pid": 2299,
-       "name": "1password",
-       "first_mb": 6.0,
-       "max_mb": 6.0
-      },
-      {
-       "pid": 2440,
+       "pid": 2786,
        "name": "voxtype-osd-gtk4",
        "first_mb": 6.0,
        "max_mb": 6.0
       },
       {
-       "pid": 2583320,
-       "name": "chromium",
-       "first_mb": 8.0,
-       "max_mb": 8.0
-      }
-     ],
-     "other_material": [],
-     "quiet": true
-    },
-    "attempts": 3,
-    "waited_for_quiet_s": 563.9
-   },
-   {
-    "encoder": "q4",
-    "decoder": "fp32",
-    "loaded": true,
-    "p50_ms": 1018.5,
-    "p95_ms": 1360.8,
-    "wer": 0.0299,
-    "cold_start_s": 8.29,
-    "download_mb": 1116.0,
-    "gpu_during": {
-     "samples": 163,
-     "interval_s": 0.183,
-     "util_mean": 27.5,
-     "util_max": 100.0,
-     "other_processes": [
-      {
-       "pid": 2299,
+       "pid": 2953,
        "name": "1password",
        "first_mb": 6.0,
        "max_mb": 6.0
       },
       {
-       "pid": 2440,
-       "name": "voxtype-osd-gtk4",
+       "pid": 303951,
+       "name": "chromium",
        "first_mb": 6.0,
        "max_mb": 6.0
-      },
-      {
-       "pid": 2583320,
-       "name": "chromium",
-       "first_mb": 8.0,
-       "max_mb": 8.0
       }
      ],
      "other_material": [],
      "quiet": true
     },
     "attempts": 1,
-    "waited_for_quiet_s": 20.8
+    "waited_for_quiet_s": 70.5
    },
    {
     "encoder": "q4",
-    "decoder": "q4",
+    "decoder": "fp32",
     "loaded": true,
-    "p50_ms": 943.7,
-    "p95_ms": 1225.9,
+    "p50_ms": 907.7,
+    "p95_ms": 1195.7,
     "wer": 0.0299,
-    "cold_start_s": 6.8,
-    "download_mb": 762.1,
+    "cold_start_s": 6.88,
+    "download_mb": 1116.0,
     "gpu_during": {
-     "samples": 154,
+     "samples": 152,
      "interval_s": 0.178,
-     "util_mean": 22.9,
+     "util_mean": 32.0,
      "util_max": 100.0,
      "other_processes": [
       {
-       "pid": 2299,
-       "name": "1password",
-       "first_mb": 6.0,
-       "max_mb": 6.0
-      },
-      {
-       "pid": 2440,
+       "pid": 2786,
        "name": "voxtype-osd-gtk4",
        "first_mb": 6.0,
        "max_mb": 6.0
       },
       {
-       "pid": 2583320,
+       "pid": 2953,
+       "name": "1password",
+       "first_mb": 6.0,
+       "max_mb": 6.0
+      },
+      {
+       "pid": 303951,
        "name": "chromium",
-       "first_mb": 8.0,
-       "max_mb": 8.0
+       "first_mb": 6.0,
+       "max_mb": 6.0
+      }
+     ],
+     "other_material": [],
+     "quiet": true
+    },
+    "attempts": 1,
+    "waited_for_quiet_s": 84.9
+   },
+   {
+    "encoder": "q4",
+    "decoder": "q4",
+    "loaded": true,
+    "p50_ms": 925.4,
+    "p95_ms": 1180.5,
+    "wer": 0.0299,
+    "cold_start_s": 6.29,
+    "download_mb": 762.1,
+    "gpu_during": {
+     "samples": 146,
+     "interval_s": 0.178,
+     "util_mean": 33.1,
+     "util_max": 100.0,
+     "other_processes": [
+      {
+       "pid": 2786,
+       "name": "voxtype-osd-gtk4",
+       "first_mb": 6.0,
+       "max_mb": 6.0
+      },
+      {
+       "pid": 2953,
+       "name": "1password",
+       "first_mb": 6.0,
+       "max_mb": 6.0
+      },
+      {
+       "pid": 303951,
+       "name": "chromium",
+       "first_mb": 6.0,
+       "max_mb": 6.0
       }
      ],
      "other_material": [],
@@ -387,7 +387,7 @@
     "waited_for_quiet_s": 20.8
    }
   ],
-  "download_mb": 2885.5,
+  "download_mb": 3239.4,
   "adapter": {
    "vendor": "nvidia",
    "architecture": "ampere",
@@ -421,14 +421,14 @@
   },
   "dtype": {
    "encoder_model": "fp32",
-   "decoder_model_merged": "q4"
+   "decoder_model_merged": "fp32"
   },
   "gpu_rise_mb_by_index": {
-   "0": 3941,
-   "1": 0
+   "0": 4261,
+   "1": 45
   }
  },
  "same_way": "latency = audio handed in -> final text, after warm-up (two 1 s silences at load, then the first clip); cold start = process start -> model ready; peak GPU = nvidia-smi memory.used rise on the GPU",
  "same_weights": "both sides are openai/whisper-large-v3-turbo's weights (B: onnx-community's ONNX export of them)",
- "precision_note": "A runs fp16; B runs encoder fp32, decoder q4. shader-f16 isn't offered by Chromium's WebGPU on this machine under any of 18 flag sets (docs/goals/43/webgpu-f16-probe.json), so B can't run fp16; B ran every precision that loads (fp32 only after its external data was split into files under 2 GB: one 2.55 GB ArrayBuffer can't be allocated) and the fastest within 0.01 WER of A was raced."
+ "precision_note": "A runs fp16; B runs encoder fp32, decoder fp32. shader-f16 isn't offered by Chromium's WebGPU on this machine under any of 18 flag sets (docs/goals/43/webgpu-f16-probe.json), so B can't run fp16; B ran every precision that loads (fp32 only after its external data was split into files under 2 GB: one 2.55 GB ArrayBuffer can't be allocated) and the fastest within 0.01 WER of A was raced."
 }

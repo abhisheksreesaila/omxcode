@@ -2,8 +2,9 @@
  "dictate": {
   "after_ms": 2.0,
   "before": "hung forever on a word that stayed odd",
-  "checked": "2026-10-30",
+  "checked": "2026-10-31",
   "item": "captured_ns retried without a bound",
+  "note": "after_ms is how long the stuck read took to return, which is the 2 ms bound; the fallback's time being off by at most one 20 ms chunk is reasoned from the writer's code, not tested",
   "test": "tests/test_audio_stamp.mojo"
  },
  "jot_drop": {

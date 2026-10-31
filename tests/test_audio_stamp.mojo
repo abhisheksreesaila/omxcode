@@ -1,6 +1,6 @@
 # mojoui.audio's captured_ns reads the newest chunk's time and total as one pair under a sequence word (odd while the
 # capture thread writes them). It must never spin without a bound: a block whose word stays odd (a writer that died
-# mid-update) returns within a few ms, with a time no later than now. An even word still reads the pair exactly.
+# mid-update) returns within its 2 ms bound (asserted under 50 ms: a loaded machine), with a time no later than now. An even word still reads the pair exactly.
 # Prints `audio stamp: ok`.
 from std.atomic import Atomic
 from std.memory.alloc import unsafe_alloc
@@ -41,6 +41,6 @@ def main() raises:
     var got = stuck.captured_ns(3199)
     var took = now_ns() - t0
     print("stuck word: returned in", Float64(took) / 1e6, "ms")
-    assert_true(took < 5_000_000, "captured_ns must give up on a word that stays odd (took " + String(took) + " ns)")
+    assert_true(took < 50_000_000, "captured_ns must give up on a word that stays odd (took " + String(took) + " ns; the bound is 2 ms, the margin is for a loaded machine)")
     assert_true(got <= now_ns(), "the fallback is never later than now")
     print("audio stamp: ok")

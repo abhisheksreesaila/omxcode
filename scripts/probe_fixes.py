@@ -41,7 +41,8 @@ def dictate():
     ms = float(m.group(1))
     return True, f"a stuck word returns in {ms:.2f} ms (before: never); live capture still consistent", {
         "item": "captured_ns retried without a bound", "before": "hung forever on a word that stayed odd",
-        "after_ms": round(ms, 2), "test": "tests/test_audio_stamp.mojo"}
+        "after_ms": round(ms, 2), "test": "tests/test_audio_stamp.mojo",
+        "note": "after_ms is how long the stuck read took to return, which is the 2 ms bound; the fallback's time being off by at most one 20 ms chunk is reasoned from the writer's code, not tested"}
 
 
 def load_check(n):
