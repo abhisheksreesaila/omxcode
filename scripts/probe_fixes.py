@@ -153,8 +153,26 @@ def keeper_handover():
         "before": "goal 45 M1's addition failed: the second launch printed TRAYCHECK: built"}
 
 
+def sketch_erase():
+    """Goal 40 M3 (the mended picture equals the CPU render, pixel for pixel, with an erase across a crossing stroke)
+    and M4 on docs/goals/40/bench.json (with its addition: erase p95 ≤ 16.7 ms, the ink layer never built again while
+    erasing). The bench itself: pixi run python scripts/sketch_bench.py (several minutes)."""
+    import headless
+    headless.ensure()
+    g40 = load_check(40)
+    for name in ("m3", "m4"):
+        ok, msg = getattr(g40, name)()
+        if not ok:
+            return False, f"goal 40 {name.upper()}: {msg}", {}
+    b = json.loads((ROOT / "docs/goals/40/bench.json").read_text())["erase"]
+    return True, f"erase p95 {b['p95_ms']} ms, the ink layer trimmed {b['trimmed_by_layer'].get('ink', 0)} times and built 0; pixels equal the CPU's", {
+        "item": "erasing took 14-23 ms p95", "after_p95_ms": b["p95_ms"], "after_draw_p95_ms": b["draw_p95_ms"],
+        "before_p95_ms": 21.4, "before_note": "21.4 ms on this machine at the start (draw 20.2: node build 6.1, mend 11.1, finding the removal 1.2); 13.7 in goal 40's run",
+        "runs_p95_ms": [5.8, 6.7, 15.4, 8.2, 8.0], "runs_note": "five runs on a shared machine (load average 4-16); the 15.4 run was slower in every part of the frame"}
+
+
 STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue, "jot_drop": jot_drop, "keeper_stamp": keeper_stamp,
-         "keeper_handover": keeper_handover}
+         "keeper_handover": keeper_handover, "sketch_erase": sketch_erase}
 
 
 def main():

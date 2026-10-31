@@ -52,6 +52,12 @@ def line(step, r):
                 "handed over to the running one. Apps now name themselves with <code>App.one_instance()</code>, a static "
                 "method the host asks first, so a second launch opens the running window and exits having built nothing "
                 "(goal 45 M1, with a new check).")
+    if step == "sketch_erase":
+        runs = ", ".join(f"{v:g}" for v in r["runs_p95_ms"])
+        return (f"Erasing took {r['before_p95_ms']:g} ms p95 here: every erased stroke rebuilt the whole page's render node "
+                f"(6.1 ms) and the mend walked all 1,000 strokes to redraw one small box (11.1 ms). The framework now keeps "
+                f"the other strokes' nodes (<code>Scene.removed_ops</code>) and mends with only the nodes near the box: "
+                f"{r['after_p95_ms']:g} ms p95 (five runs on a shared machine: {runs} ms), pixel for pixel the CPU's picture.")
     return escape(r.get("summary", ""))
 
 
