@@ -32,7 +32,7 @@ from mojoui.theme import Palette, Theme, Look, hex_of, mix
 from mojoui.embed import is_web_url
 from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
-from mojoui.view import NO_MSG
+from mojoui.view import NO_MSG, is_file_saver
 from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
@@ -57,6 +57,7 @@ comptime VERTICAL = 1
 comptime ALIGN_CENTER = 3
 comptime RTLD_DEFAULT = 0  # glibc
 comptime NODE_KEY = "mojoui-node"
+comptime DROP_FILES_KEY = "mojoui-drop-files"  # a DropTarget's box → its GtkDropTarget for files (on_file)
 comptime DRAG_KEY = "mojoui-drag-source"  # a Draggable's box → its GtkDragSource
 comptime DROP_KEY = "mojoui-drop-target"  # a DropTarget's box → its GtkDropTarget
 comptime G_TYPE_STRING = 64  # G_TYPE_MAKE_FUNDAMENTAL(16)
@@ -633,6 +634,7 @@ struct GtkHost[A: App](Movable):
     var skin_provider: Int  # the theme's CSS provider (replaced when App.theme() changes: Settings → Appearance, a mode's tint)
     var skin_key: String  # the theme that provider is for (Theme.key)
     var skin_classes: String  # the CSS classes it put on the window
+    var closed: Bool  # the window closed (close-request answered): test steps stop, no report
     var dark_told: Int  # what App.appearance last said (1 dark, 0 light, -1 not yet): only a change is told again
     var forcing_scheme: Bool  # set while the host itself changes light/dark (a theme forcing one): not the person's change
     var icons_key: String  # the ink the icons were written in
@@ -649,6 +651,7 @@ struct GtkHost[A: App](Movable):
     var editor_keys: Int  # the in-place editor's key controller (test steps press Escape through it)
     var editor_open: Bool  # the last build showed an in-place editor
     var picker_node: Int  # the FilePicker whose dialog is open
+    var picker_msg: Int  # its on_pick / on_save message (the answer goes by message: a rebuild meanwhile may renumber nodes)
     var editor_node: Int  # (its node there)
     var fx_source: Int  # the GLib timeout that next polls the runtime's effects (HTTP replies, timers; 0: none)
     var fx_due: Int  # when it fires (µs, g_get_monotonic_time)
@@ -759,6 +762,7 @@ struct GtkHost[A: App](Movable):
         self.skin_classes = ""
         self.forcing_scheme = False
         self.dark_told = -1
+        self.closed = False
         self.icons_key = ""
         self.fonts = False
         self.css = 0
@@ -773,6 +777,7 @@ struct GtkHost[A: App](Movable):
         self.editor_keys = 0
         self.editor_open = False
         self.picker_node = -1
+        self.picker_msg = 0
         self.editor_node = -1
         self.fx_source = 0
         self.fx_due = 0
@@ -1989,6 +1994,13 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_widget_add_controller", NoneType](w, target)
                 var key = String(DROP_KEY)
                 external_call["g_object_set_data", NoneType](w, key.as_c_string_span(), target)
+                if node.msg2 != 0:  # on_file: a second target for files from outside (the file manager's GdkFileList)
+                    var files = external_call["gtk_drop_target_new", Int](external_call["gdk_file_list_get_type", Int](), c_int(GDK_ACTION_COPY))
+                    set_node(files, i)
+                    connect_any(files, "drop", on_drop_files[Self.A], self_addr)
+                    external_call["gtk_widget_add_controller", NoneType](w, files)
+                    var fkey = String(DROP_FILES_KEY)
+                    external_call["g_object_set_data", NoneType](w, fkey.as_c_string_span(), files)
             elif node.kind == WEBCOMP:  # its widget in a WebKitGTK view of its own (kept across rebuilds), else `instead`
                 self.place_webview(i, w, self_addr)
             elif node.size > 0 and not node.sized_height():
@@ -2576,7 +2588,7 @@ struct GtkHost[A: App](Movable):
                         external_call["adw_button_content_set_label", NoneType](external_call["gtk_button_get_child", Int](w), t.as_c_string_span())
                 elif kind == BUTTON or kind == TOGGLE:
                     external_call["gtk_button_set_label", NoneType](w, t.as_c_string_span()) if kind == BUTTON else external_call["gtk_check_button_set_label", NoneType](w, t.as_c_string_span())
-                elif kind == FIELD:
+                elif kind == FIELD and not is_held(w):  # (a change held while busy is newer than this patch: D-1321)
                     if c_str(external_call["gtk_editable_get_text", Int](w)) != p.text:  # don't fight the typist
                         external_call["gtk_editable_set_text", NoneType](w, t.as_c_string_span())
             if p.op == SET_TEXT and kind == TABLE:  # which rows are selected
@@ -2667,7 +2679,7 @@ struct GtkHost[A: App](Movable):
             ref en = self.rt.shown.nodes[self.echo_node]
             var ew = self.widgets[self.echo_node]
             var want = en.text
-            if en.kind == FIELD and want != self.echo_text and c_str(external_call["gtk_editable_get_text", Int](ew)) != want:
+            if en.kind == FIELD and want != self.echo_text and not is_held(ew) and c_str(external_call["gtk_editable_get_text", Int](ew)) != want:
                 external_call["gtk_editable_set_text", NoneType](ew, want.as_c_string_span())
             elif en.kind == TEXTAREA and want != self.echo_text:
                 var buffer = external_call["gtk_text_view_get_buffer", Int](ew)
@@ -3652,6 +3664,48 @@ struct GtkHost[A: App](Movable):
             self.apply(d, self_addr)
         return True
 
+    def answer(mut self, msg: Int, text: String, self_addr: Int):
+        """A message with a path from outside the widgets (a file dialog's answer, a dropped file): to update() now, or,
+        while a rebuild is pending, held and sent once it's up (drain_fields), in order."""
+        if msg == 0:
+            return
+        if busy() or self.has_pending or len(held_events()[]) > 0:
+            held_events()[].append((msg, text))
+            return
+        var d = self.rt.dispatch(Event(msg, text, 0))
+        self.apply(d, self_addr)
+
+    def drain_fields(mut self, self_addr: Int):
+        """The field changes held while the host was busy (D-1321): each field whose held text isn't the app's value
+        gets it (shown, if a rebuild put the app's back) and its on_change, one at a time until the host is busy again."""
+        var events = held_events()
+        while len(events[]) > 0 and not busy() and not self.has_pending:
+            var e = events[].pop(0)
+            var d = self.rt.dispatch(Event(e[0], e[1], 0))
+            self.apply(d, self_addr)
+        var held = held_fields()
+        while len(held[]) > 0 and not busy() and not self.has_pending:
+            var id = held[][0][0]
+            var text = held[][0][1]
+            _ = held[].pop(0)
+            if id >= len(self.id_node):
+                continue
+            var node = self.id_node[id]
+            if node < 0 or node >= len(self.rt.shown.nodes) or self.rt.shown.nodes[node].kind != FIELD:
+                continue
+            if self.rt.shown.nodes[node].text == text or self.widgets[node] == 0:
+                continue
+            if c_str(external_call["gtk_editable_get_text", Int](self.widgets[node])) != text:
+                set_busy(True)
+                external_call["gtk_editable_set_text", NoneType](self.widgets[node], text.as_c_string_span())
+                set_busy(False)
+                var rest = List[Tuple[Int, String]]()  # (that set held its own "" and text: dropped)
+                for h in held[]:
+                    if h[0] != id:
+                        rest.append(h)
+                held[] = rest^
+            self.send(node, False, text, 0, self_addr)
+
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
         """A widget changed: build the event, run update(), patch the widgets."""
         ref n = self.rt.shown.nodes[node]
@@ -3677,6 +3731,34 @@ def on_drop[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: 
     var text = c_str(external_call["g_value_get_string", Int](value))
     host_at[A](host_addr)[].send(node, False, text, 0, host_addr)
     return 1
+
+
+def on_drop_files[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: Int) abi("C") -> c_int:
+    """Files let go over a DropTarget with on_file (a GdkFileList): its on_file once per file, event.text = its path."""
+    var node = get_node(target)
+    if node < 0 or busy():
+        return 0
+    var files = external_call["g_value_get_boxed", Int](value)
+    if files == 0:
+        return 0
+    var list = external_call["gdk_file_list_get_files", Int](files)  # (a GSList of GFile: the list is ours, the files aren't)
+    var paths = List[String]()
+    var at = list
+    while at != 0:
+        var file = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[]
+        var raw = external_call["g_file_get_path", Int](file)
+        if raw != 0:  # (a file with no local path, e.g. on a phone over MTP: skipped)
+            paths.append(c_str(raw))
+            external_call["g_free", NoneType](raw)
+        at = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at + 8)[]
+    external_call["g_slist_free", NoneType](list)
+    var host = host_at[A](host_addr)
+    if node >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[node].kind != DROP or host[].rt.shown.nodes[node].msg2 == 0:
+        return 0
+    var msg = host[].rt.shown.nodes[node].msg2  # (by message, not node: the first file's screen may renumber the nodes)
+    for p in paths:
+        host[].answer(msg, p, host_addr)
+    return 1 if len(paths) > 0 else 0
 
 
 def open_url(url: String):
@@ -3899,11 +3981,13 @@ def on_idle_partial[A: App](host_addr: Int) abi("C") -> c_int:
     var host = host_at[A](host_addr)
     if host[].has_pending:  # (a full rebuild may have come first)
         host[].update_part(host_addr)  # update_part() clears the busy flag (apply_patches)
+    host[].drain_fields(host_addr)
     return 0
 
 
 def on_idle_rebuild[A: App](host_addr: Int) abi("C") -> c_int:
     host_at[A](host_addr)[].show(host_addr)  # show() clears the busy flag
+    host_at[A](host_addr)[].drain_fields(host_addr)
     return 0  # G_SOURCE_REMOVE: run once
 
 
@@ -4264,6 +4348,14 @@ def on_idle_resize[A: App](host_addr: Int) abi("C") -> c_int:
     set_app_data("mojoui-resize-queued", 0)
     host_at[A](host_addr)[].tell_size(host_addr)
     return 0
+
+
+def on_gaps_tick(widget: Int, clock: Int, data: Int) abi("C") -> c_int:
+    """While a gaps: measure runs, every frame asks the window for the next (GDK_FRAME_CLOCK: a redraw each frame)."""
+    if app_data("mojoui-gaps-ticking") == 0:
+        return 0  # G_SOURCE_REMOVE
+    external_call["gtk_widget_queue_draw", NoneType](widget)
+    return 1
 
 
 def on_before_paint[A: App](clock: Int, host_addr: Int) abi("C"):
@@ -4725,25 +4817,43 @@ def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
         return
     var host = host_at[A](host_addr)
     var node = get_node(button)
+    if 0 <= node < len(host[].rt.shown.nodes) and is_file_saver(host[].rt.shown.nodes[node]):  # a FileSaver: the platform's save dialog
+        host[].picker_node = node
+        host[].picker_msg = host[].rt.shown.nodes[node].msg2
+        var sd = external_call["gtk_file_dialog_new", Int]()
+        var stitle = host[].rt.shown.nodes[node].text
+        external_call["gtk_file_dialog_set_title", NoneType](sd, stitle.as_c_string_span())
+        var suggested = host[].rt.shown.nodes[node].options[2]
+        if suggested != "":
+            external_call["gtk_file_dialog_set_initial_name", NoneType](sd, suggested.as_c_string_span())
+        accept_filter(sd, host[].rt.shown.nodes[node].options[0], "Files it saves")
+        external_call["gtk_file_dialog_save", NoneType](sd, host[].window, 0, on_file_saved[A], host_addr)
+        return
     if 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:  # a FilePicker: the platform's file dialog
         host[].picker_node = node
+        host[].picker_msg = host[].rt.shown.nodes[node].msg2
         var dialog = external_call["gtk_file_dialog_new", Int]()
         var title = host[].rt.shown.nodes[node].text
         external_call["gtk_file_dialog_set_title", NoneType](dialog, title.as_c_string_span())
-        var accept = host[].rt.shown.nodes[node].options[0] if len(host[].rt.shown.nodes[node].options) > 0 else String("")
-        if accept != "":  # the picker's file types (".csv,.omx") as the dialog's filter
-            var filter = external_call["gtk_file_filter_new", Int]()
-            var name = String("Files it opens (") + accept + ")"
-            external_call["gtk_file_filter_set_name", NoneType](filter, name.as_c_string_span())
-            for ext in accept.split(","):
-                var suffix = String(String(ext).strip().lstrip("."))
-                if suffix != "":
-                    external_call["gtk_file_filter_add_suffix", NoneType](filter, suffix.as_c_string_span())
-            external_call["gtk_file_dialog_set_default_filter", NoneType](dialog, filter)
-            external_call["g_object_unref", NoneType](filter)
+        accept_filter(dialog, host[].rt.shown.nodes[node].options[0] if len(host[].rt.shown.nodes[node].options) > 0 else String(""), "Files it opens")
         external_call["gtk_file_dialog_open", NoneType](dialog, host[].window, 0, on_file_picked[A], host_addr)
         return
     host[].send(node, False, "", 0, host_addr)
+
+
+def accept_filter(dialog: Int, accept: String, label: String):
+    """A FilePicker's or FileSaver's file types (".csv,.omx") as its dialog's default filter ("": none)."""
+    if accept == "":
+        return
+    var filter = external_call["gtk_file_filter_new", Int]()
+    var name = label + " (" + accept + ")"
+    external_call["gtk_file_filter_set_name", NoneType](filter, name.as_c_string_span())
+    for ext in accept.split(","):
+        var suffix = String(String(ext).strip().lstrip("."))
+        if suffix != "":
+            external_call["gtk_file_filter_add_suffix", NoneType](filter, suffix.as_c_string_span())
+    external_call["gtk_file_dialog_set_default_filter", NoneType](dialog, filter)
+    external_call["g_object_unref", NoneType](filter)
 
 
 def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
@@ -4760,16 +4870,83 @@ def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
     var path = c_str(raw)
     external_call["g_free", NoneType](raw)
     external_call["g_object_unref", NoneType](file)
-    var node = host[].picker_node
-    if path != "" and 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:
-        host[].send(node, True, path, 0, host_addr)
+    if path != "":
+        host[].answer(host[].picker_msg, path, host_addr)
+
+
+def on_file_saved[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
+    """The save dialog closed: the path chosen goes to the FileSaver's on_save (nothing if cancelled); the app writes it."""
+    var host = host_at[A](host_addr)
+    var err = List[Int](length=1, fill=0)
+    var file = external_call["gtk_file_dialog_save_finish", Int](dialog, result, Int(err.unsafe_ptr()))
+    if err[0] != 0:
+        external_call["g_error_free", NoneType](err[0])  # (cancelled, or the dialog failed)
+    external_call["g_object_unref", NoneType](dialog)
+    if file == 0:
+        return
+    var raw = external_call["g_file_get_path", Int](file)
+    var path = c_str(raw)
+    external_call["g_free", NoneType](raw)
+    external_call["g_object_unref", NoneType](file)
+    if path != "":
+        host[].answer(host[].picker_msg, path, host_addr)
 
 
 def on_field_changed[A: App](entry: Int, host_addr: Int) abi("C"):
-    if busy():
-        return
     var text = c_str(external_call["gtk_editable_get_text", Int](entry))
+    if busy():
+        # (D-1321: gtk_editable_set_text and a paste over a selection change the text twice, "" then the new text; if
+        # the first change's screen needs a rebuild, the second arrives while it's pending. Held, by the field's node
+        # id, and sent after the rebuild (drain_fields) unless it's what the app already has: the host's own sets.)
+        hold_field(entry, text)
+        return
     host_at[A](host_addr)[].send(get_node(entry), False, text, 0, host_addr)
+
+
+def held_fields() -> Pointer[List[Tuple[Int, String]], MutUntrackedOrigin]:
+    """The field changes that came while the host was busy: (node id, text), the last per field. On the GApplication
+    (a heap list), not a host field: they arrive re-entrantly while a `mut self` method runs (see set_busy)."""
+    var addr = app_data("mojoui-held-fields")
+    if addr == 0:
+        var p = alloc(Layout[List[Tuple[Int, String]]].single()).unsafe_leak()
+        p.unsafe_write(List[Tuple[Int, String]]())
+        addr = Int(p)
+        set_app_data("mojoui-held-fields", addr)
+    return Pointer[List[Tuple[Int, String]], MutUntrackedOrigin](unsafe_from_address=addr)
+
+
+def is_held(entry: Int) -> Bool:
+    """A change of this field waits in held_fields (the host mustn't write the app's older value over it)."""
+    var key = String(NODE_KEY)
+    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
+    for h in held_fields()[]:
+        if h[0] == id:
+            return True
+    return False
+
+
+def held_events() -> Pointer[List[Tuple[Int, String]], MutUntrackedOrigin]:
+    """Messages with a path (dialog answers, dropped files) that came while a rebuild was pending: (message, text)."""
+    var addr = app_data("mojoui-held-events")
+    if addr == 0:
+        var p = alloc(Layout[List[Tuple[Int, String]]].single()).unsafe_leak()
+        p.unsafe_write(List[Tuple[Int, String]]())
+        addr = Int(p)
+        set_app_data("mojoui-held-events", addr)
+    return Pointer[List[Tuple[Int, String]], MutUntrackedOrigin](unsafe_from_address=addr)
+
+
+def hold_field(entry: Int, text: String):
+    var key = String(NODE_KEY)
+    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
+    if id < 0:
+        return
+    var held = held_fields()
+    for i in range(len(held[])):
+        if held[][i][0] == id:
+            held[][i] = (id, text)
+            return
+    held[].append((id, text))
 
 
 def on_field_submit[A: App](entry: Int, host_addr: Int) abi("C"):
@@ -5087,6 +5264,17 @@ def wait_allocated(widget: Int):
             return  # nothing pending: nothing will change
 
 
+def show_test_window(window: Int):
+    """A test window that isn't shown (no MOJOUI_SHOT) is shown, on the checks' private display, and laid out (up to
+    3 s): steps that need a real window (painting, closing) then have one."""
+    if external_call["gtk_widget_get_mapped", c_int](window) != 0:
+        return
+    external_call["gtk_window_present", NoneType](window)
+    var up_by = perf_counter_ns() + 3_000_000_000
+    while external_call["gtk_widget_get_width", c_int](window) == 0 and perf_counter_ns() < up_by:
+        pump()
+
+
 def run_step[A: App](host_addr: Int, step: String):
     var host = host_at[A](host_addr)
     var verb_rest = split_at(step, ":")
@@ -5107,6 +5295,48 @@ def run_step[A: App](host_addr: Int, step: String):
             print("TEST: no file picker", kv[0])
             return
         host[].send(i, True, kv[1], 0, host_addr)
+    elif verb == "quit":  # quit: close the window as the window manager's close button does (close-request, then App.closing)
+        show_test_window(host[].window)  # (GTK ignores a close of a window that was never realized)
+        external_call["gtk_window_close", NoneType](host[].window)
+        if host[].closed:
+            print("QUIT: window closed", flush=True)
+    elif verb == "save":  # save:Title=/path: a FileSaver's dialog answering that path (a native dialog can't be driven)
+        var kv = split_at(rest, "=")
+        var i = find(host[], BUTTON, kv[0], 0)
+        if i < 0 or not is_file_saver(host[].rt.shown.nodes[i]):
+            print("TEST: no file saver", kv[0])
+            return
+        host[].send(i, True, kv[1], 0, host_addr)
+    elif verb == "dropfile":  # dropfile:Tag=/path[,/path…]: those files dropped on the DropTarget tagged Tag, through its GtkDropTarget's own drop signal
+        var kv = split_at(rest, "=")
+        var i = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].kind == DROP and host[].rt.shown.nodes[k].name == kv[0]:
+                i = k
+        var fkey = String(DROP_FILES_KEY)
+        var target = external_call["g_object_get_data", Int](host[].widgets[i], fkey.as_c_string_span()) if i >= 0 else 0
+        if target == 0:
+            print("TEST: no file drop target", kv[0])
+            return
+        var list = 0
+        var made = List[Int]()
+        for p in kv[1].split(","):
+            var path = String(p)
+            made.append(external_call["g_file_new_for_path", Int](path.as_c_string_span()))
+            list = external_call["g_slist_append", Int](list, made[len(made) - 1])
+        var flist = external_call["gdk_file_list_new_from_list", Int](list)  # (copies the list and refs the files)
+        external_call["g_slist_free", NoneType](list)
+        for f in made:
+            external_call["g_object_unref", NoneType](f)
+        var gv = List[Int](length=3, fill=0)  # (a GValue holding the GdkFileList, as GTK hands a real drop)
+        _ = external_call["g_value_init", Int](Int(gv.unsafe_ptr()), external_call["gdk_file_list_get_type", Int]())
+        external_call["g_value_take_boxed", NoneType](Int(gv.unsafe_ptr()), flist)
+        var ret = List[Int](length=1, fill=0)
+        var sig = String("drop")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](target, sig.as_c_string_span(), Int(gv.unsafe_ptr()), Float64(10), Float64(10), Int(ret.unsafe_ptr()))
+        external_call["g_value_unset", NoneType](Int(gv.unsafe_ptr()))
+        _ = gv[0]
+        _ = ret[0]
     elif verb == "type" or verb == "submit" or verb == "enter":
         var kv = split_at(rest, "=")
         var i = find(host[], FIELD, kv[0], 0, by_hint=True)
@@ -5770,13 +6000,34 @@ def run_step[A: App](host_addr: Int, step: String):
                 break
         if not said:
             print("TEST: nothing tagged", rest)
-    elif verb == "gaps":  # gaps:start forgets the frames painted so far; gaps:N runs the main loop N ms, then prints the longest gap between painted frames (MOJOUI_TRACE)
+    elif verb == "gaps":  # gaps:start forgets the frames painted so far; gaps:N runs the main loop N ms, then prints the longest gap between painted frames
+        # (a freeze detector, D-1309: gaps:start shows the window if a test hasn't, listens to its paints as MOJOUI_TRACE
+        # does, and asks for a redraw on every frame until gaps:N ends, so a window with nothing moving still paints at the
+        # display's rate and only a busy UI thread makes a gap). Under MOJOUI_TRACE (paints already timed: goal 30's runs)
+        # it only forgets the frames so far, as before D-1309: the gaps are between the app's own paints (D-1324)
         if rest == "start":
+            show_test_window(host[].window)
+            var force = False
+            if not host[].paint_timed:
+                var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
+                if clock != 0:
+                    connect(clock, "before-paint", on_before_paint[A], host_addr)
+                    connect(clock, "after-paint", on_after_paint[A], host_addr)
+                    host[].paint_timed = True
+                    force = True
+            elif app_data("mojoui-gaps-forced") != 0:
+                force = True
+            set_app_data("mojoui-gaps-forced", 1 if force else 0)
+            if force and app_data("mojoui-gaps-ticking") == 0:
+                set_app_data("mojoui-gaps-ticking", 1)
+                _ = external_call["gtk_widget_add_tick_callback", c_uint](host[].window, on_gaps_tick, 0, 0)
             host[].frame_times = List[Int]()
+            print("GAPS: start", flush=True)
             return
         var until = Int(perf_counter_ns()) + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until:
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+        set_app_data("mojoui-gaps-ticking", 0)
         var worst = 0.0  # (every gap, the long ones too: intervals() leaves out a bench's pauses, which is what this looks for)
         for k in range(1, len(host[].frame_times)):
             worst = max(worst, Float64(host[].frame_times[k] - host[].frame_times[k - 1]) / 1e6)
@@ -6160,6 +6411,7 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     for prop in ["notify::default-width", "notify::default-height", "notify::maximized", "notify::fullscreened"]:
         connect3(host[].window, prop, on_window_resized[A], host_addr)
     connect(host[].window, "realize", on_window_realize[A], host_addr)
+    connect_any(host[].window, "close-request", on_close_request[A], host_addr)  # (App.closing before the window goes)
     var link_path = getenv("MOJOUI_AGENT_SOCKET")  # an agent host may attach here (docs/agent.md: the agent link)
     if link_path != "":
         var lfd = listen_unix(link_path)
@@ -6207,8 +6459,12 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     if testing:
         wait_webviews[A](host_addr)
         for step in test_steps(steps):
+            if host[].closed:
+                break
             if step != "":
                 run_step[A](host_addr, step)
+            if host[].closed:  # (the `quit` step: the window is gone, as after a person closed it)
+                break
             settle()
             if shot != "":
                 wait_frame(host[].window)
@@ -6220,8 +6476,9 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
             while not host[].canvases_drawn() and perf_counter_ns() < deadline:
                 pump()
             settle()
-        report[A](host_addr)
-    if shot != "":
+        if not host[].closed:
+            report[A](host_addr)
+    if shot != "" and not host[].closed:
         host[].full_page()
         save_png(host[].window, shot)
     if testing or shot != "":
@@ -6273,10 +6530,21 @@ def probe_gpu_canvases[A: App](pres: Int) -> Int:
     return ctx
 
 
+def on_close_request[A: App](window: Int, host_addr: Int) abi("C") -> c_int:
+    """The window is asked to close (its close button, Ctrl+W, the window manager, the `quit` step): App.closing finishes
+    what must be kept, then the window closes (FALSE: nothing stops it)."""
+    var host = host_at[A](host_addr)
+    host[].rt.closing()
+    host[].closed = True
+    return 0
+
+
 def on_app_shutdown[A: App](gapp: Int, host_addr: Int) abi("C"):
-    """The app is closing: release the GPU canvases' CUDA and GL objects in their GL context, then the context
+    """The app is closing: App.closing if the window didn't already tell it (a quit with the window open: Ctrl+Q, the end
+    of a test run); then release the GPU canvases' CUDA and GL objects in their GL context, then the context
     (review item 4)."""
     var host = host_at[A](host_addr)
+    host[].rt.closing()
     if host[].pres == 0 or host[].gl_ctx == 0:
         return
     external_call["gdk_gl_context_make_current", NoneType](host[].gl_ctx)

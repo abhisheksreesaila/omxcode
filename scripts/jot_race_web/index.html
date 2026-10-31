@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Jot race, side B</title>
+<!-- Goal 42 M6, side B: the official SQLite WebAssembly build in a Worker with OPFS. ?mode=build|query&vfs=opfs-sahpool|opfs.
+     The page notes when the Worker's first answer arrives (performance.now(): ms since navigation start) and leaves the
+     Worker's report in window.result for scripts/jot_race.py. -->
+<pre id="log">starting</pre>
+<script>
+  const params = new URLSearchParams(location.search);
+  const worker = new Worker('worker.js', { type: 'module' });
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.first) { window.firstAt = performance.now(); return; }
+    if (m.log) { document.getElementById('log').textContent = m.log; return; }
+    m.cold_open_ms = window.firstAt;
+    window.result = m;
+  };
+  worker.onerror = (e) => { window.result = { error: 'worker: ' + (e.message || e) }; };
+  worker.postMessage({ mode: params.get('mode'), vfs: params.get('vfs'), isolated: self.crossOriginIsolated });
+</script>

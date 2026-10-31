@@ -406,6 +406,19 @@ def FilePicker(title: String, on_pick: Int, style: Int = PLAIN, icon: String = "
     return _one(Node(BUTTON, title, NO_MSG, style=style, hint=icon, msg2=on_pick, options=[accept]))
 
 
+def FileSaver(title: String, on_save: Int, suggested: String = "", style: Int = PLAIN, icon: String = "", accept: String = "") -> View:
+    """A button that asks where to save a file: the platform's own save dialog (GTK), a download (web). Sends `on_save`
+    with event.text = the path chosen, on the machine the app runs on; the app writes the file there in update() (the
+    web then hands that file to the browser as a download named `suggested`). `suggested`: the name the dialog starts
+    with ("note.md"); `accept`: extensions, e.g. ".md,.txt"."""
+    return _one(Node(BUTTON, title, NO_MSG, style=style, hint=icon, msg2=on_save, options=[accept, "save", suggested]))
+
+
+def is_file_saver(n: Node) -> Bool:
+    """A FileSaver's button (a FilePicker's has one option, its accept list)."""
+    return n.kind == BUTTON and n.msg2 != NO_MSG and len(n.options) >= 3 and n.options[1] == "save"
+
+
 def TextField(value: String, placeholder: String = "", on_change: Int = NO_MSG, on_submit: Int = NO_MSG, on_cancel: Int = NO_MSG) -> View:
     """One line of text. Sends `on_change` (event.text = new text) as you type, `on_submit` when Return
     is pressed and `on_cancel` when Escape is (event.text = the text, unchanged by the app)."""

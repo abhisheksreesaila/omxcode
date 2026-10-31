@@ -322,6 +322,8 @@ def web_image[A: App](handle: Int, node: Int) -> String:
 
 
 def web_close[A: App](handle: Int):
+    """A session ends (its tab closed or expired, the server stopping): App.closing first, then it's freed."""
     var tab = tab_at[A](handle)
+    tab[].rt.closing()
     tab.unsafe_deinit_pointee()
     tab.unsafe_free()

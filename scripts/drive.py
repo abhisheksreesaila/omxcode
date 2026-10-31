@@ -232,6 +232,19 @@ def step(page, s):
     elif verb == "pick":  # pick:Title=/path: choose that file in the FilePicker (a real file input; it uploads)
         title, _, path = rest.partition("=")
         page.locator(f"input.picker-input[data-title={title!r}]").first.set_input_files(path)
+    elif verb == "save":  # save:Title=/path: tap the FileSaver; the browser's download is saved at that path
+        title, _, path = rest.partition("=")
+        with page.expect_download(timeout=10000) as dl:
+            page.locator("[data-kind=button]").filter(has_text=exact(title)).first.click()
+        dl.value.save_as(path)
+    elif verb == "dropfile":  # dropfile:Tag=/path[,/path…]: those files dropped together from outside on the DropTarget tagged Tag (one drop event carrying Files)
+        tag, _, paths = rest.partition("=")
+        import base64
+        files = [[Path(p).name, base64.b64encode(Path(p).read_bytes()).decode()] for p in paths.split(",")]
+        page.evaluate("""([tag, files]) => { const t = document.querySelector(`[data-tag="${tag}"]`); const dt = new DataTransfer();
+          for (const [name, data] of files) dt.items.add(new File([Uint8Array.from(atob(data), c => c.charCodeAt(0))], name, { type: 'text/plain' }));
+          t.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }""", [tag, files])
+        page.wait_for_timeout(500 + 250 * len(files))
     elif verb == "key":  # key:K=shift+ctrl+Name: a real key press, to whatever has the keyboard (a tapped canvas, an open editor)
         _, _, name = rest.partition("=")
         *mods, key = name.split("+")

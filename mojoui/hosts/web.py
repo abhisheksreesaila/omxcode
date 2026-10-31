@@ -179,8 +179,22 @@ MENU_JS = r"""
     document.querySelectorAll('.drop-over').forEach(x => x.classList.remove('drop-over'));
     if (!t) return; e.preventDefault();
     const v = document.getElementById('mojoui-v');
+    if (e.dataTransfer.files && e.dataTransfer.files.length) {  // files from outside (DropTarget's on_file): each uploads, then its path
+      if (t.dataset.files !== '1') return;
+      // (all of them in one upload: the server hands them to on_file one after another, so the first one's new screen
+      // can't make the rest arrive for a version that's gone)
+      const form = new FormData(); for (const f of e.dataTransfer.files) form.append('file', f);
+      form.append('n', t.dataset.node); form.append('v', v ? v.value : -1);
+      fetch(`/dropfile/${t.dataset.sid}`, { method: 'POST', body: form }).then(r => r.text()).then(html => {
+        if (html) htmx.swap(document.body, html, { swapStyle: 'none' }); });
+      return;
+    }
     htmx.ajax('POST', `/e/${t.dataset.sid}`, { values: { n: Number(t.dataset.node), text: e.dataTransfer.getData('text/plain'), v: v ? v.value : -1 }, swap: 'none', source: lane('drop') });
   });
+  // FileSaver (DOWNLOAD_JS): the answer to /save appends an i.mojoui-download with the file's URL to the body; the page downloads it and removes it
+  new MutationObserver(() => document.querySelectorAll('i.mojoui-download').forEach(d => { d.remove();
+    const a = document.createElement('a'); a.href = d.dataset.url; a.download = d.dataset.name || ''; document.body.append(a); a.click(); a.remove(); })
+  ).observe(document.documentElement, { childList: true, subtree: true });  // (this script runs in the head: no body yet)
   // Scroll(pinned): stays at its end as its content grows, unless scrolled up to read (back at the end, it follows again)
   const pin = () => document.querySelectorAll('.scroll[data-pin="1"]').forEach(e => { if (e.dataset.follow !== '0') e.scrollTop = e.scrollHeight; });
   document.addEventListener('scroll', e => { const t = e.target;
@@ -1039,6 +1053,12 @@ def render_node(s, i, sid):
         cls = {PROMINENT: "prominent", DESTRUCTIVE: "destructive", SUBTLE: "subtle", ICON_ONLY: "subtle icon-only",
                ICON_ON: "subtle icon-only on", TOOL: "subtle tool", TOOL_ON: "subtle tool on",
                TOOL_INLINE: "subtle tool inline", TOOL_INLINE_ON: "subtle tool inline on", TOKEN: "token", TOKEN_LIT: "token lit"}.get(n["style"], "")
+        if n["msg2"] and len(n["options"]) >= 3 and n["options"][1] == "save":  # a FileSaver: the app writes the file where the server
+            # says, then the page downloads it (/save, DOWNLOAD_JS)
+            svg = NotStr(ICONS.get(n["hint"], "").replace('width="24"', 'width="18"').replace('height="24"', 'height="18"')) if n["hint"] else ""
+            title = Span(n["text"], cls="sr-only") if n["style"] in (ICON_ONLY, ICON_ON) and svg else Span(n["text"])
+            return Button(*([svg, title] if svg else [title]), id=nid, cls=f"button saver {cls}" + (" with-icon" if svg else ""), data_kind="button",
+                          hx_post=f"/save/{sid}", hx_vals=json.dumps({"n": i}), hx_include="#mojoui-v", hx_swap="none")
         if n["msg2"]:  # a FilePicker: a file input styled as the button; the file uploads, then on_pick gets its path
             svg = NotStr(ICONS.get(n["hint"], "").replace('width="24"', 'width="18"').replace('height="24"', 'height="18"')) if n["hint"] else ""
             accept = n["options"][0] if n["options"] else ""
@@ -1183,7 +1203,7 @@ def render_node(s, i, sid):
                    data_payload=n["text"], style="gap:0px;align-items:stretch")  # (a wrapper: its view where it would be, full width)
     if kind == DROP:  # dragover marks it, drop posts the payload as its on_drop (DND_JS)
         return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack drop", id=nid, data_kind="drop", data_node=str(i),
-                   data_sid=sid, style="gap:0px;align-items:stretch")
+                   data_sid=sid, data_files="1" if n["msg2"] else None, style="gap:0px;align-items:stretch")
     if kind == EMBED:  # a web page in an iframe (version 0: the stand-in child)
         if n["value"] <= 0:
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", style="gap:0px")
@@ -1496,6 +1516,19 @@ def make_app(module_dir):
         data, media = assets[name]
         return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
 
+    def close_all():
+        """The server is stopping: every live session's App.closing (a pending save), then its handle goes."""
+        with sessions_lock:
+            while sessions:
+                old_sid, old = sessions.popitem(last=False)
+                with old.lock:
+                    if not old.closed:
+                        old.closed = True
+                        mod.close(old.handle)
+                forget_files(old_sid)
+    import atexit
+    atexit.register(close_all)
+
     @app.get("/")
     def index(req):
         sid = uuid.uuid4().hex  # one app session per page load (tab)
@@ -1508,8 +1541,7 @@ def make_app(module_dir):
                 with old.lock:
                     old.closed = True
                     mod.close(old.handle)
-                import shutil  # (its uploads go with it)
-                shutil.rmtree(Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads"))) / old_sid, ignore_errors=True)
+                forget_files(old_sid)  # (its uploads and downloads go with it)
         # The whole first page under the session's lock: once note() hands the tab to the clock thread, its effects'
         # replies can change the screen at any moment, and a page rendered meanwhile was torn (a deep link's Route
         # missing from the first page under load, so the route was never asked for; D-545).
@@ -1924,6 +1956,115 @@ def make_app(module_dir):
             d = json.loads(mod.appearance(s.handle, dark))
             s.nodes = json.loads(mod.view(s.handle))
             return changes(s, sid, d)
+
+    def file_folder(sid, kind="uploads"):
+        """Where a page's files live where the app runs: uploads (FilePicker, a file drop) and downloads (FileSaver)."""
+        base = Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads")))
+        folder = (base / sid) if kind == "uploads" else (base.parent / "downloads" / sid)
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def forget_files(sid):
+        """A session ended: its uploads and downloads go."""
+        import shutil
+        base = Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads")))
+        for folder in (base / sid, base.parent / "downloads" / sid):
+            shutil.rmtree(folder, ignore_errors=True)
+
+    @app.post("/save/{sid}")
+    def save(sid: str, n: int, v: int = -1):
+        """A FileSaver tapped: on_save gets a path in this page's downloads folder (its suggested name, a plain file name);
+        the app writes the file there in update(), then the answer tells the page to download it (DOWNLOAD_JS)."""
+        s = sessions.get(sid)
+        if s is None:
+            return Main(P("This page expired: reload it.", cls="text caption"), id="mojoui-root", hx_swap_oob="true")
+        with s.lock:
+            if s.closed or v != s.shape or not 0 <= n < len(s.nodes):
+                return ""
+            node = s.nodes[n]
+            if not (node["msg2"] and len(node["options"]) >= 3 and node["options"][1] == "save"):
+                return ""
+            name = Path(node["options"][2] or "").name
+            if name in ("", ".", ".."):
+                name = "download"
+            path = file_folder(sid, "downloads") / name
+            path.unlink(missing_ok=True)
+            d = json.loads(mod.event(s.handle, n, 1, str(path), 0))
+            if d.get("ignored"):
+                return ""
+            s.nodes = json.loads(mod.view(s.handle))
+            out = changes(s, sid, d, n, str(path), 0)
+            if not path.exists():  # (the app wrote nothing: no download)
+                return out
+            token = uuid.uuid4().hex
+            s.downloads = getattr(s, "downloads", {})
+            s.downloads[token] = path
+            mark = Div(I(cls="mojoui-download", hidden=True, data_url=f"/download/{sid}/{token}", data_name=name), hx_swap_oob="beforeend:body")
+            return (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (mark,)
+
+    @app.get("/download/{sid}/{token}")
+    def download(sid: str, token: str):
+        """A file a FileSaver's app wrote, as an attachment under its suggested name."""
+        from starlette.responses import FileResponse
+        s = sessions.get(sid)
+        path = getattr(s, "downloads", {}).get(token) if s is not None else None
+        if path is None or not Path(path).exists():
+            return Response(status_code=404)
+        return FileResponse(path, filename=Path(path).name)
+
+    @app.post("/dropfile/{sid}")
+    async def dropfile(sid: str, req):
+        """Files dropped from outside on a DropTarget with on_file, in one upload: each saved in a folder of its own (two
+        files of one name don't overwrite), then on_file gets their paths one after another; the target is found again
+        after each (its on_file message), since the first one's new screen may have renumbered it."""
+        s = sessions.get(sid)
+        if s is None:
+            return ""
+        form = await req.form()
+        try:
+            n, v = int(form.get("n", -1)), int(form.get("v", -1))
+        except ValueError:
+            return ""
+        files = [f for f in form.getlist("file") if hasattr(f, "read")]
+        with s.lock:
+            if s.closed or v != s.shape or not 0 <= n < len(s.nodes) or s.nodes[n]["kind"] != DROP or not s.nodes[n]["msg2"]:
+                return ""
+            msg = s.nodes[n]["msg2"]
+        limit = int(os.environ.get("OMXCODE_UPLOAD_MAX", os.environ.get("OMXAPP_UPLOAD_MAX", str(32 << 30))))
+        paths = []
+        for file in files:
+            name = Path(file.filename or "").name
+            if name in ("", ".", ".."):
+                name = "dropped"
+            folder = file_folder(sid) / uuid.uuid4().hex[:12]
+            folder.mkdir()
+            path, size = folder / name, 0
+            with open(path, "wb") as out:
+                while chunk := await file.read(1 << 20):
+                    size += len(chunk)
+                    if size > limit:
+                        break
+                    out.write(chunk)
+            if size > limit:
+                path.unlink(missing_ok=True)
+                continue
+            paths.append(path)
+        outs = []
+        with s.lock:
+            for path in paths:
+                if s.closed:
+                    break
+                if not (0 <= n < len(s.nodes) and s.nodes[n]["kind"] == DROP and s.nodes[n]["msg2"] == msg):
+                    n = next((k for k, node in enumerate(s.nodes) if node["kind"] == DROP and node["msg2"] == msg), -1)
+                    if n < 0:
+                        break
+                d = json.loads(mod.event(s.handle, n, 1, str(path), 0))
+                if d.get("ignored"):
+                    continue
+                s.nodes = json.loads(mod.view(s.handle))
+                out = changes(s, sid, d, n, str(path), 0)
+                outs.extend(out if isinstance(out, tuple) else ((out,) if out != "" else ()))
+        return tuple(outs) if outs else ""
 
     @app.post("/upload/{sid}")
     async def upload(sid: str, n: int, file: UploadFile, v: int = -1):
