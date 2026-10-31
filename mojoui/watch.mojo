@@ -9,8 +9,13 @@
 #
 # One event per change: a file written once is one CREATED (or MODIFIED) when it's closed, not one per write(); a
 # rename inside the folder is one RENAMED; a file moved in is CREATED, moved out DELETED. OVERFLOW means the system
-# dropped events (too many at once): rescan. Folders themselves aren't reported, except a folder deleted or moved out
-# (DELETED, is_dir), so a consumer can forget what was under it.
+# dropped events (too many at once): the watcher has re-added its watches, and the consumer rescans. Folders themselves
+# aren't reported, except a folder deleted or moved out (DELETED, is_dir), so a consumer can forget what was under it,
+# and a folder renamed inside the tree: DELETED (is_dir) for its old name, then CREATED for each file under its new one.
+# A folder the system wouldn't watch (no permission; fs.inotify.max_user_watches used up: ENOSPC) makes the watcher
+# partial(): it keeps watching the rest, and why() says how many folders it misses and why.
+# Names are kept as their bytes: one with a newline or a tab arrives whole, and one that isn't UTF-8 arrives with
+# e.exact False (e.path shows it with U+FFFD; e.path_bytes holds the real bytes).
 #
 # Linux: inotify, read on a pthread of its own; each new folder gets a watch the moment it appears, and what was put in
 # it before the watch was added is found by listing it (reported when its writer closes it, or within 20 ms if it
@@ -44,7 +49,11 @@ comptime W_WAKE = 5  # 1: wake the host after each batch
 comptime W_TID = 6  # the reader thread's id (gettid), once it runs
 comptime W_ERR = 7  # errno when it failed
 comptime W_STREAM = 8  # Mac: the FSEventStream
-comptime W_WORDS = 9
+comptime W_QUEUE = 9  # Mac: its dispatch queue
+comptime W_MISSED = 10  # folders the system wouldn't watch (inotify_add_watch failed: EACCES, ENOSPC, …)
+comptime W_MISSED_ERR = 11  # the errno of the last one
+comptime W_HOLD = 12  # 1: the thread doesn't read (tests: lets the kernel's queue overflow)
+comptime W_WORDS = 13
 
 comptime IN_CLOSE_WRITE = 0x8
 comptime IN_MOVED_FROM = 0x40
@@ -69,6 +78,8 @@ struct WatchEvent(Copyable, Movable):
     var old_path: String  # a rename's old name ("" otherwise)
     var at_ns: Int  # when the watcher's thread saw it (now_ns()'s clock: CLOCK_MONOTONIC on Linux)
     var is_dir: Bool
+    var exact: Bool  # False: the path (or old path) isn't UTF-8; path shows it with U+FFFD, path_bytes is the real one
+    var path_bytes: List[UInt8]  # the path's bytes, as the file system has them
 
     def kind_name(self) -> String:
         if self.kind == CREATED:
@@ -205,27 +216,41 @@ def walk_files(root: String, suffixes: List[String]) -> List[String]:
 
 # ---- the thread
 
+def _put(mut rec: List[UInt8], s: String):
+    var p = s.unsafe_ptr()
+    for i in range(s.byte_length()):
+        rec.append(p[i])
+
+
 def _emit(words: Int, kind: Int, path: String, old: String = "", is_dir: Bool = False):
-    """One record down the pipe: kind, dir flag, time, path, old path, tab-separated, one line (the pipe blocks when
-    full, so nothing is lost while the consumer catches up)."""
-    var rec = String(kind) + ("d" if is_dir else "f") + "\t" + String(now_ns()) + "\t" + path + "\t" + old + "\n"
+    """One record down the pipe: a header line `<kind><d|f> <at> <path length> <old length>`, then the two names' bytes
+    as they are (length-prefixed, not separated: a name may hold a newline or a tab, or bytes that aren't UTF-8). The
+    pipe blocks when full, so nothing is lost while the consumer catches up; a closed pipe (EPIPE: the handle is gone;
+    SIGPIPE is blocked on this thread) stops the thread."""
+    var rec = List[UInt8](capacity=path.byte_length() + old.byte_length() + 48)
+    _put(rec, String(kind) + ("d" if is_dir else "f") + " " + String(now_ns()) + " " + String(path.byte_length()) + " " + String(old.byte_length()) + "\n")
+    _put(rec, path)
+    _put(rec, old)
     var fd = Int(_A.load(_word(words, W_OUT)))
     var off = 0
-    var n = rec.byte_length()
+    var n = len(rec)
     while off < n:
         var w = _c[Int]("write", c_int(fd), Int(rec.unsafe_ptr()) + off, n - off)
         if w <= 0:
-            if _errno() == 4:  # EINTR
+            var err = _errno()
+            if err == 4:  # EINTR
                 continue
+            if err == 32:  # EPIPE: nobody reads any more
+                _A.store(_word(words, W_STOP), 1)
             return
         off += w
-    _ = rec.byte_length()
 
 
 struct _Linux(Movable):
     """What the reader thread keeps: the watches, files waiting for their close, a move waiting for its pair."""
     var fd: Int
     var words: Int
+    var root: String
     var dirs: Dict[Int, String]  # watch descriptor → folder
     var pending: Dict[String, Int]  # a new file → the time to report it anyway
     var moved_cookie: Int  # a move out waiting for its move in (0: none)
@@ -234,9 +259,10 @@ struct _Linux(Movable):
     var moved_at: Int
     var emitted: Int
 
-    def __init__(out self, fd: Int, words: Int):
+    def __init__(out self, fd: Int, words: Int, root: String):
         self.fd = fd
         self.words = words
+        self.root = root
         self.dirs = Dict[Int, String]()
         self.pending = Dict[String, Int]()
         self.moved_cookie = 0
@@ -258,6 +284,10 @@ struct _Linux(Movable):
             var dir = todo.pop()
             var wd = _c[c_int]("inotify_add_watch", c_int(self.fd), Int(dir.as_c_string_span().unsafe_ptr()), UInt32(_MASK))
             if Int(wd) < 0:
+                var err = _errno()
+                if err != 2 and err != 20 and err != 40:  # (ENOENT, ENOTDIR, ELOOP: gone again or not a folder; anything else is a folder missed)
+                    _ = _A.fetch_add(_word(self.words, W_MISSED), 1)
+                    _A.store(_word(self.words, W_MISSED_ERR), Int64(err))
                 continue
             self.dirs[Int(wd)] = dir
             for entry in list_dir(dir):
@@ -268,7 +298,9 @@ struct _Linux(Movable):
                     self.pending[full] = now_ns() + SCANNED_WAIT_NS
 
     def rename_tree(mut self, old: String, new: String):
-        """A folder moved inside the tree: the watches under it now carry its new name."""
+        """A folder renamed inside the tree: the watches under it carry its new name, files waiting for their close wait
+        under the new name, and the consumer, who knew its files by their old paths, hears DELETED (is_dir) for the old
+        name and then CREATED for each file under the new one."""
         var fixes = List[Tuple[Int, String]]()
         for item in self.dirs.items():
             var d = item.value
@@ -276,6 +308,24 @@ struct _Linux(Movable):
                 fixes.append((item.key, new + String(d[byte = old.byte_length() :])))
         for f in fixes:
             self.dirs[f[0]] = f[1]
+        var rekey = List[Tuple[String, String, Int]]()
+        for item in self.pending.items():
+            if item.key.startswith(old + "/"):
+                rekey.append((item.key, new + String(item.key[byte = old.byte_length() :]), item.value))
+        for r in rekey:
+            _ = self.pending.pop(r[0], 0)
+            self.pending[r[1]] = r[2]
+        self.emit(DELETED, old, "", True)
+        var todo = List[String]()
+        todo.append(new)
+        while len(todo) > 0:
+            var dir = todo.pop()
+            for entry in list_dir(dir):
+                var full = dir + "/" + entry[0]
+                if entry[1]:
+                    todo.append(full)
+                elif full not in self.pending:
+                    self.emit(CREATED, full)
 
     def forget_tree(mut self, old: String):
         var gone = List[Int]()
@@ -323,7 +373,17 @@ struct _Linux(Movable):
         return max(0, (soonest - now + 999_999) // 1_000_000)
 
     def handle(mut self, wd: Int, mask: Int, cookie: Int, name: String):
-        if mask & IN_Q_OVERFLOW:
+        if mask & IN_Q_OVERFLOW:  # (the kernel dropped events: what it dropped may include new folders, so every folder is
+            # watched again, what was waiting is reported as it stands, and the consumer rescans)
+            var due = List[String]()
+            for item in self.pending.items():
+                due.append(item.key)
+            self.pending = Dict[String, Int]()
+            for p in due:
+                self.emit(CREATED, p)
+            self.flush_move()
+            var root = self.root.copy()
+            self.add_tree(root, False)
             self.emit(OVERFLOW, "")
             return
         if mask & IN_IGNORED:
@@ -385,8 +445,13 @@ def _watch_linux(words: Int) raises:
         _A.store(_word(words, W_ERR), Int64(_errno()))
         raise Error("inotify_init1 failed")
     _A.store(_word(words, W_TID), Int64(Int(_c[c_int]("gettid"))))
+    var mask = unsafe_alloc[UInt64](16)  # sigset_t: SIGPIPE blocked on this thread (a write to a closed pipe is EPIPE, not death)
+    _ = _c[c_int]("sigemptyset", Int(mask))
+    _ = _c[c_int]("sigaddset", Int(mask), c_int(13))
+    _ = _c[c_int]("pthread_sigmask", c_int(0), Int(mask), Int(0))  # SIG_BLOCK
+    mask.unsafe_free()
     var root = _from_c(Int(_A.load(_word(words, W_ROOT))))
-    var st = _Linux(fd, words)
+    var st = _Linux(fd, words, root)
     st.add_tree(root, False)
     if len(st.dirs) == 0:
         _A.store(_word(words, W_ERR), Int64(_errno()))
@@ -397,6 +462,9 @@ def _watch_linux(words: Int) raises:
     var pfd = unsafe_alloc[Int32](2)  # struct pollfd { int fd; short events; short revents }
     var wake = _A.load(_word(words, W_WAKE)) != 0
     while _A.load(_word(words, W_STOP)) == 0:
+        if _A.load(_word(words, W_HOLD)) != 0:
+            _ = _c[c_int]("poll", Int(0), Int(0), c_int(5))
+            continue
         pfd[0] = Int32(fd)
         pfd[1] = Int32(1)  # POLLIN
         _ = _c[c_int]("poll", Int(pfd), Int(1), c_int(st.next_wait_ms()))
@@ -490,8 +558,32 @@ def _watch_mac(words: Int) raises:
     if _c[UInt8]("FSEventStreamStart", stream) == 0:
         raise Error("FSEventStreamStart failed")
     _A.store(_word(words, W_STREAM), Int64(stream))
+    _A.store(_word(words, W_QUEUE), Int64(queue))
     _A.store(_word(words, W_STATE), 1)
     _ = lib
+
+
+def _noop(ctx: Int) abi("C"):
+    pass
+
+
+def _end_stream(words: Int):
+    """Mac: stops the stream for good before the words it writes to can go: stop, invalidate (no new callbacks), then
+    a dispatch_sync on its queue (a callback already running there finishes first), then release both."""
+    var s = Int(_A.load(_word(words, W_STREAM)))
+    if s == 0:
+        return
+    _A.store(_word(words, W_STREAM), 0)
+    var q = Int(_A.load(_word(words, W_QUEUE)))
+    _c[NoneType]("FSEventStreamStop", s)
+    _c[NoneType]("FSEventStreamInvalidate", s)
+    if q != 0:
+        var f = _noop
+        _c[NoneType]("dispatch_sync_f", q, Int(0), Pointer(to=f).unsafe_bitcast[Int]()[])
+    _c[NoneType]("FSEventStreamRelease", s)
+    if q != 0:
+        _c[NoneType]("dispatch_release", q)
+        _A.store(_word(words, W_QUEUE), 0)
 
 
 def _release(words: Int):
@@ -520,7 +612,8 @@ struct FolderWatcher(Movable):
     var wake: Bool
     var started: Bool
     var reason: String
-    var partial: String  # a record cut by the end of a read
+    var buffered: List[UInt8]  # a record cut by the end of a read
+    var pipe_size: Int  # the pipe's capacity in bytes (F_SETPIPE_SZ asked for 1 MB; 64 KB if the system refused)
 
     def __init__(out self, root: String, wake: Bool = False):
         self.root = String(root.rstrip("/")) if root != "/" else root
@@ -529,7 +622,8 @@ struct FolderWatcher(Movable):
         self.wake = wake
         self.started = False
         self.reason = ""
-        self.partial = ""
+        self.buffered = List[UInt8]()
+        self.pipe_size = 0
 
     def start(mut self):
         """Starts watching on its own thread and returns at once (ready() once every folder has its watch)."""
@@ -546,8 +640,12 @@ struct FolderWatcher(Movable):
         _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(self.read_fd), c_int(4), c_int(nonblock))  # F_SETFL O_NONBLOCK
         _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(self.read_fd), c_int(2), c_int(1))  # FD_CLOEXEC
         _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(2), c_int(1))
-        comptime if CompilationTarget.is_linux():
-            _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(1031), c_int(1 << 20))  # F_SETPIPE_SZ: 1 MB of events
+        comptime if CompilationTarget.is_linux():  # F_SETPIPE_SZ: 1 MB of events, else 256 KB; what it got is kept (F_GETPIPE_SZ)
+            if Int(external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(1031), c_int(1 << 20))) < 0:
+                _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(1031), c_int(1 << 18))
+            self.pipe_size = Int(external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(1032), c_int(0)))
+        else:
+            self.pipe_size = 16384
         var words = unsafe_alloc[Int64](W_WORDS)
         for k in range(W_WORDS):
             _A.store(_word(Int(words), k), 0)
@@ -588,12 +686,32 @@ struct FolderWatcher(Movable):
         """The thread has ended (after stop(); a process that exits right after should see this first)."""
         return self._state() == 2 or self._state() == -1
 
+    def missed(self) -> Int:
+        """How many folders under the root the system wouldn't watch (0: every one is watched)."""
+        return Int(_A.load(_word(self.words, W_MISSED))) if self.words != 0 else 0
+
+    def partial(self) -> Bool:
+        """Watching, but some folders aren't (missed() > 0): changes in them go unseen; why() says why."""
+        return self.missed() > 0
+
     def why(self) -> String:
         if self.reason:
             return self.reason
         if self.failed():
             return "can't watch " + self.root + " (error " + String(Int(_A.load(_word(self.words, W_ERR)))) + ")"
+        var n = self.missed()
+        if n > 0:
+            var err = Int(_A.load(_word(self.words, W_MISSED_ERR)))
+            var what = String("no permission") if err == 13 else (
+                String("out of watches: raise fs.inotify.max_user_watches") if err == 28 else "error " + String(err))
+            return String(n) + (" folder" if n == 1 else " folders") + " under " + self.root + " not watched (" + what + ")"
         return ""
+
+    def hold(self, on: Bool):
+        """Tests only: the thread stops reading while on (the system's queue fills, and overflows past
+        fs.inotify.max_queued_events)."""
+        if self.words != 0:
+            _A.store(_word(self.words, W_HOLD), Int64(1 if on else 0))
 
     def reader_thread(self) -> Int:
         """The watcher thread's id (Linux: gettid; 0 elsewhere or before it runs)."""
@@ -619,49 +737,90 @@ struct FolderWatcher(Movable):
         var out = List[WatchEvent]()
         if self.read_fd < 0:
             return out^
+        var data = self.buffered^
+        self.buffered = List[UInt8]()
         var buf = List[UInt8](length=65536, fill=0)
-        var text = self.partial
         while True:
             var n = _c[Int]("read", c_int(self.read_fd), Int(buf.unsafe_ptr()), 65536)
             if n <= 0:
                 break
-            text += String(from_utf8_lossy=Span(buf)[:n])
-        var last = text.rfind("\n")
-        if last < 0:
-            self.partial = text
-            return out^
-        self.partial = String(text[byte = last + 1 :])
-        for line in text[byte=:last].split("\n"):
-            var f = line.split("\t")
-            if len(f) < 4 or f[0].byte_length() < 2:
+            for i in range(n):
+                data.append(buf[i])
+        var pos = 0
+        var total = len(data)
+        while pos < total:
+            var nl = -1
+            for i in range(pos, min(total, pos + 96)):
+                if data[i] == 10:
+                    nl = i
+                    break
+            if nl < 0:
+                break
+            var f = String(from_utf8_lossy=Span(data)[pos:nl]).split(" ")
+            if len(f) != 4 or f[0].byte_length() < 2:
+                pos = nl + 1  # (never written so; skipped rather than misread)
                 continue
             try:
                 var head = String(f[0])
                 var kind = Int(String(head[byte=: head.byte_length() - 1]))
-                out.append(WatchEvent(kind, String(f[2]), String(f[3]), Int(String(f[1])), head.endswith("d")))
+                var at = Int(String(f[1]))
+                var plen = Int(String(f[2]))
+                var olen = Int(String(f[3]))
+                if nl + 1 + plen + olen > total:
+                    break  # (the rest of this record is still in the pipe)
+                var raw = List[UInt8](capacity=plen)
+                for i in range(nl + 1, nl + 1 + plen):
+                    raw.append(data[i])
+                var exact = True
+                var path: String
+                var old: String
+                try:
+                    path = String(from_utf8=Span(raw))
+                except:
+                    path = String(from_utf8_lossy=Span(raw))
+                    exact = False
+                try:
+                    old = String(from_utf8=Span(data)[nl + 1 + plen : nl + 1 + plen + olen])
+                except:
+                    old = String(from_utf8_lossy=Span(data)[nl + 1 + plen : nl + 1 + plen + olen])
+                    exact = False
+                out.append(WatchEvent(kind, path^, old^, at, head.endswith("d"), exact, raw^))
+                pos = nl + 1 + plen + olen
             except:
-                pass
+                pos = nl + 1
+        if pos < total:
+            self.buffered = List[UInt8](capacity=total - pos)
+            for i in range(pos, total):
+                self.buffered.append(data[i])
         return out^
 
     def stop(mut self):
-        """Asks the thread to stop (within 50 ms). Never waits."""
+        """Asks the thread to stop (within 50 ms). Never waits (dropping the handle waits)."""
         if self.words != 0:
             _A.store(_word(self.words, W_STOP), 1)
             comptime if CompilationTarget.is_macos():
-                var s = Int(_A.load(_word(self.words, W_STREAM)))
-                if s != 0:
-                    _c[NoneType]("FSEventStreamStop", s)
-                    _c[NoneType]("FSEventStreamInvalidate", s)
-                    _A.store(_word(self.words, W_STREAM), 0)
+                _end_stream(self.words)
 
     def __deinit__(deinit self):
+        """Stops the thread and waits for it (up to 2 s, emptying the pipe meanwhile so a write it's blocked in
+        returns) before closing the pipe's read end; Mac: ends the stream before the words go."""
         if self.words != 0:
             _A.store(_word(self.words, W_STOP), 1)
+            _A.store(_word(self.words, W_HOLD), 0)
             comptime if CompilationTarget.is_macos():
-                var s = Int(_A.load(_word(self.words, W_STREAM)))
-                if s != 0:
-                    _c[NoneType]("FSEventStreamStop", s)
-                    _c[NoneType]("FSEventStreamInvalidate", s)
+                _end_stream(self.words)
+            else:
+                if self.read_fd >= 0:
+                    var buf = List[UInt8](length=65536, fill=0)
+                    var until = now_ns() + 2_000_000_000
+                    while now_ns() < until:
+                        var st = Int(_A.load(_word(self.words, W_STATE)))
+                        if st == 2 or st == -1:
+                            break
+                        while _c[Int]("read", c_int(self.read_fd), Int(buf.unsafe_ptr()), 65536) > 0:
+                            pass
+                        _ = _c[c_int]("poll", Int(0), Int(0), c_int(2))
+                    _ = len(buf)
             _release(self.words)
         if self.read_fd >= 0:
             _ = _c[c_int]("close", c_int(self.read_fd))
