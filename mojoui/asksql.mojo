@@ -1,18 +1,19 @@
 # mojoui.asksql: asking a sheet's linked tables (goal 41 M10). Three small pieces between a question and the engine, none
 # of them knowing any app, any table or any question:
 #
-#   var sql = book.sql_for("damaged pallets whose BOL says no exceptions")    # a question → the SQL an agent (or a person)
+#   var sql = book.sql_for("late orders whose invoice says paid")             # a question → the SQL an agent (or a person)
 #                                                                             #   taught for it (AskBook: data, no model)
-#   var q = implied_sql("SELECT … FROM shipments JOIN LINKED WHERE detections.damaged …", links)
-#        # → "SELECT … FROM shipments JOIN detections ON shipments.shipment_id = detections.code WHERE …": the joins the
+#   var q = implied_sql("SELECT … FROM orders JOIN LINKED WHERE detections.damaged …", links)
+#        # → 'SELECT … FROM orders JOIN "detections" ON "orders"."order_id" = "detections"."code" WHERE …': the joins the
 #        #   sheet's key links imply, along the shortest chain of links from the FROM table to every table the query names
-#   for l in lineage(q): links.derive(...)   # the answer's columns read straight from a table's column (shipments.shipment_id
-#                                            #   AS shipment): a row of the answer follows like a row of its source
+#   for l in lineage(q): links.derive(...)   # the answer's columns read straight from a table's column (orders.order_id
+#                                            #   AS order): a row of the answer follows like a row of its source
 #
 # The rule (owner, 2026-10-30): nothing joins until a link exists. JOIN LINKED never guesses: a table no key link reaches
 # is an error that says so. No omxcore here (the SQL text goes to the caller's engine), so it tests with a plain `mojo run`.
 
 from mojoui.links import Links, Link, End, LINK_KEY
+from mojoui.sqlname import quote_ident, column_ref
 
 
 def _norm(text: String) -> String:
@@ -142,6 +143,7 @@ def implied_sql(text: String, links: Links) raises -> String:
     var cb = List[String]()
     for l in links.items:
         if l.kind == LINK_KEY:
+            links.check(l)  # (a column its table doesn't have, or one no table could: refused, never written into SQL)
             a.append(l.a.sql())
             b.append(l.b.sql())
             ca.append(l.a.column)
@@ -203,7 +205,7 @@ def implied_sql(text: String, links: Links) raises -> String:
         if not needed[i]:
             continue
         var e = parent_edge[i]
-        joins += " JOIN " + order[i] + " ON " + a[e] + "." + ca[e] + " = " + b[e] + "." + cb[e]
+        joins += " JOIN " + quote_ident(order[i]) + " ON " + column_ref(a[e], ca[e]) + " = " + column_ref(b[e], cb[e])  # (every name quoted: D-1340)
     return String(head[byte = 0:f]) + "FROM " + root + joins + tail
 
 

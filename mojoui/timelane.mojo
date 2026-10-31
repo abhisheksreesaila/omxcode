@@ -2,7 +2,7 @@
 # cursor (goal 41 M9: a time link only paints; a real as-of join waits for a question that needs it). A video card shows
 # it (mojoui.mediacard.MediaCards.show_lane) once a log is linked to it by time (mojoui.links LINK_TIME).
 #
-#   var lane = TimeLane.of("forklift_log", series, "speed", offset=3.4)   # the log's t = the video's t + offset
+#   var lane = TimeLane.of("sensor_log", series, "speed", offset=3.4)   # the log's t = the video's t + offset
 #   draw():  lane.draw(surface, pal, t, duration)                          # t: the video's time; prints CURSOR: t=… when tracing
 #   lane.value_at(t)                                                       # the measure at the video's time t
 
@@ -15,7 +15,7 @@ from mojoui.timeseries import TimeSeries, metric_label, metric_unit
 
 
 struct TimeLane(Copyable, Movable):
-    var name: String  # the log's card ("forklift_log")
+    var name: String  # the log's card ("sensor_log")
     var column: String  # its measure ("speed")
     var times: List[Float64]  # on the video's clock
     var values: List[Float64]
@@ -57,7 +57,7 @@ struct TimeLane(Copyable, Movable):
         return self.values[lo]
 
     def line(self) -> String:
-        """The trace line when it's shown: "LANE: forklift_log speed under dock.mp4 (log t = video t + 3.4 s), 381 samples"."""
+        """The trace line when it's shown: "LANE: sensor_log speed under clip.mp4 (log t = video t + 3.4 s), 381 samples"."""
         return ("LANE: " + self.name + " " + self.column + " (log t = video t " + ("+ " if self.offset >= 0 else "- ") + fixed(abs(self.offset), 3)
                 + " s), " + String(len(self.times)) + " samples")
 

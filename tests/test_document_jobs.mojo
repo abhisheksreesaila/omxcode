@@ -14,7 +14,7 @@ from mojoui.documentcard import DocumentCard
 from mojoui.documentjobs import DocumentFeed
 from mojoui.ocrmodel import OcrModel, read_document
 from mojoui.pdfsource import PdfSource
-from mojoui.pygil import python_start, python_lent
+from mojoui.pygil import python_start, python_lent, python_guard
 
 
 def nap(ms: Int):
@@ -48,6 +48,7 @@ def main() raises:
     var longest = 0
     var last = now_ns()
     var side = 0
+    var guarded = String("")
     while feed.busy():
         nap(2)
         var t = now_ns()
@@ -56,11 +57,18 @@ def main() raises:
         turns += 1
         if turns == 3:
             side = PdfSource(path).pages  # (Python on this thread while the job holds the lock out)
+            try:  # (a bare Python call here would hang: the guard says so instead, D-1344)
+                python_guard("probe")
+            except e:
+                guarded = String(e)
         feed.poll(doc)
     assert_equal(feed.error, "")
     assert_true(feed.words_ready())
     var words = feed.take_words()
     assert_equal(side, 1)
+    assert_true(guarded.find("probe: Python called without its lock on this thread (1 job(s) hold it lent)") >= 0, "guard: " + guarded)
+    python_guard("after")  # (the lock is back: no error)
+    print("guard: ok")
     assert_equal(doc.status, "")
     var direct = read_document(PdfSource(path), ocr, 200)
     assert_equal(words.rows(), direct.rows())

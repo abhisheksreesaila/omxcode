@@ -9,7 +9,7 @@
 #   update(): if event.message == 7700 and peek.step(event.number) == done → print(peek.done_line())
 #   view():   tones[i] = peek.tone(i); Board items += peek.views()     (the curves' canvas, click-through, and the labels)
 #   draw():   if canvas == peek.canvas: peek.draw(surface, palette)
-#   peek.line(): "PEEK: lit=[dock.mp4, dock.mp4 · detections] dim=[forklift_log] lines=2"
+#   peek.line(): "PEEK: lit=[clip.mp4, clip.mp4 · detections] dim=[sensor_log] lines=2"
 
 from mojoui.canvas import Surface
 from mojoui.draw import line as stroke, with_alpha
@@ -20,13 +20,16 @@ from mojoui.theme import Palette, mix
 from mojoui.view import View, Text, Canvas, CAPTION, BOARD_PLAIN, BOARD_DIM, BOARD_LIFT, BOARD_SOURCE
 
 comptime PEEK_MARGIN = 48  # the curves' canvas reaches this far past the cards it joins (a curve bows out)
+comptime PILL_H = 26  # a label pill's height (12 px text, boardlook's peek-label)
+comptime PILL_GAP = 8  # the room a pill keeps from every card (a lifted card grows a little, and casts its shadow)
 
 
 @fieldwise_init
 struct PeekLine(Copyable, Movable, ImplicitlyCopyable):
     var to: Int  # the card (an index into the peek's cards)
-    var label: String  # "shipment_id = code"
+    var label: String  # "order_id = code"
     var kind: String  # "key", "time +3.4 s", or "" (the same table: dotted)
+    var named: Bool  # the card the link names (not a card that only shows its table): its line carries the label
 
 
 struct Peek(Movable):
@@ -72,7 +75,7 @@ struct Peek(Movable):
             ref c = cards[k]
             var theirs = c.table if c.table != "" else c.name
             if k != self.held and theirs == mine:
-                self._join(k, "same table", "")
+                self._join(k, "same table", "", True)
         for l in links.items:
             var a_mine = l.a.card == me.name or l.a.table_name() == mine
             var b_mine = l.b.card == me.name or l.b.table_name() == mine
@@ -86,19 +89,30 @@ struct Peek(Movable):
                 ref c = cards[k]
                 var theirs = c.table if c.table != "" else c.name
                 if k != self.held and (c.name == there.card or theirs == there.table_name()):
-                    self._join(k, said, kind)
+                    self._join(k, said, kind, c.name == there.card)
         self.open = True
         self.shown = True
         self.settled = False
         self.spring.to(1.0)
         self.version += 1
 
-    def _join(mut self, k: Int, label: String, kind: String):
+    def _join(mut self, k: Int, label: String, kind: String, named: Bool):
         for ln in self.lines:
             if ln.to == k and ln.label == label:
                 return
         self.lit[k] = True
-        self.lines.append(PeekLine(k, label, kind))
+        self.lines.append(PeekLine(k, label, kind, named))
+
+    def pilled(self, i: Int) -> Bool:
+        """Line i carries a label pill: one pill per link, on the line to the card the link names; a line to a card that
+        only shows that table (a video's rows card, a folder's documents) is drawn but not labelled again."""
+        ref ln = self.lines[i]
+        if ln.named or ln.kind == "":
+            return True
+        for j in range(len(self.lines)):
+            if j != i and self.lines[j].label == ln.label and self.lines[j].kind == ln.kind and (self.lines[j].named or j < i):
+                return False
+        return True
 
     def close(mut self):
         """Let go: the lines fade and the cards settle back (step() says when it's done)."""
@@ -144,11 +158,11 @@ struct Peek(Movable):
         return out^
 
     def line(self) -> String:
-        """"PEEK: lit=[dock.mp4] dim=[forklift_log] lines=1" (the check's trace)."""
+        """"PEEK: lit=[clip.mp4] dim=[sensor_log] lines=1" (the check's trace)."""
         return "PEEK: lit=[" + ", ".join(self.names(True)) + "] dim=[" + ", ".join(self.names(False)) + "] lines=" + String(len(self.lines))
 
     def say(self) -> String:
-        """What the status bar says while it's open: "shipments: 1 link + same-table cards"."""
+        """What the status bar says while it's open: "orders: 1 link + same-table cards"."""
         if self.held < 0:
             return ""
         var keys = 0  # (links, not lines: a link to a video reaches its rows' card too)
@@ -191,9 +205,10 @@ struct Peek(Movable):
         var my = (a[1] + b[1]) / 2 - 24
         return (a[0], a[1], mx, my, b[0], b[1])
 
-    def views(self) -> List[View]:
+    def views(self, width: Int = 0, height: Int = 0) -> List[View]:
         """Board items while it shows (last, above the cards): the curves' canvas (presses go through it) and a label pill
-        at each curve's middle."""
+        for each link's curve (pilled: once per link), placed clear of the cards (pill_at). `width`, `height`: the Board's
+        (0: unbounded), so a pill is never cut off at its edge."""
         var out = List[View]()
         if not self.shown or self.held < 0 or len(self.lines) == 0:
             return out^
@@ -202,14 +217,92 @@ struct Peek(Movable):
                    .tag("peek-lines").label("Lines from " + self.cards[self.held].name + " to what it's linked to")
                    .at(box[0], box[1]).width(box[2]).height(box[3]))
         if self.open:
-            for ln in self.lines:
-                var e = self._ends(ln)
+            var placed = List[Tuple[Int, Int, Int, Int]]()  # (pills already placed: the next keeps clear of them too)
+            for i in range(len(self.lines)):
+                if not self.pilled(i):
+                    continue
+                ref ln = self.lines[i]
                 var text = ln.label + ("  " + ln.kind if ln.kind != "" else String(""))
-                var w = 26 + 7 * len(text.codepoints())
-                var mx = 0.25 * e[0] + 0.5 * e[2] + 0.25 * e[4]  # (the curve's middle)
-                var my = 0.25 * e[1] + 0.5 * e[3] + 0.25 * e[5]
-                out.append(Text(text, CAPTION).tag("peek-label").at(Int(mx) - w // 2, Int(my) - 11).width(w).height(22))
+                var w = pill_width(text)
+                var at = self.pill_at(ln, w, placed, width, height)
+                placed.append((at[0], at[1], w, PILL_H))
+                out.append(Text(text, CAPTION).tag("peek-label").at(at[0], at[1]).width(w).height(PILL_H))
         return out^
+
+    def _clear(self, x: Int, y: Int, w: Int, h: Int, placed: List[Tuple[Int, Int, Int, Int]], strict: Bool, width: Int,
+               height: Int) -> Bool:
+        """A pill at (x, y) stays on the page and covers no card (strict) or no card in the peek (the held one, the lit
+        ones: a dimmed card has stepped back, a pill may rest on it), nor a pill already placed."""
+        if x < 4 or y < 4 or (width > 0 and x + w > width - 4) or (height > 0 and y + h > height - 4):
+            return False
+        for k in range(len(self.cards)):
+            if not strict and k != self.held and not self.lit[k]:
+                continue
+            ref c = self.cards[k]
+            if x < c.x + c.w + PILL_GAP and c.x - PILL_GAP < x + w and y < c.y + c.h + PILL_GAP and c.y - PILL_GAP < y + h:
+                return False
+        for r in placed:
+            if x < r[0] + r[2] + 4 and r[0] - 4 < x + w and y < r[1] + r[3] + 4 and r[1] - 4 < y + h:
+                return False
+        return True
+
+    def pill_at(self, ln: PeekLine, w: Int, placed: List[Tuple[Int, Int, Int, Int]] = [], width: Int = 0, height: Int = 0) -> Tuple[Int, Int]:
+        """Where a line's label pill goes (its top left, Board coordinates). First choice: on the curve, as near its middle
+        as the free space between the cards allows; then just outside the card it reaches, where the line meets it
+        (below, above or beside, the nearest), then outside the held card. Where cards fill the page, the same again
+        letting it rest on a dimmed card; last, the curve's middle (on top, still legible)."""
+        var e = self._ends(ln)
+        for strict in [True, False]:
+            var on = self._on_curve(e, w, placed, strict, width, height)
+            if on[0] >= 0:
+                return on
+            for which in range(2):  # (the card the line reaches, then the held one)
+                var k = ln.to if which == 0 else self.held
+                var near = self._beside(k, Int(e[4]) if which == 0 else Int(e[0]), Int(e[5]) if which == 0 else Int(e[1]), w,
+                                        placed, strict, width, height)
+                if near[0] >= 0:
+                    return near
+        var mx = 0.25 * e[0] + 0.5 * e[2] + 0.25 * e[4]
+        var my = 0.25 * e[1] + 0.5 * e[3] + 0.25 * e[5]
+        var x = max(Int(mx) - w // 2, 4)
+        if width > 0:
+            x = max(min(x, width - w - 4), 4)
+        return (x, max(Int(my) - PILL_H // 2, 4))
+
+    def _on_curve(self, e: Tuple[Float64, Float64, Float64, Float64, Float64, Float64], w: Int, placed: List[Tuple[Int, Int, Int, Int]],
+                  strict: Bool, width: Int, height: Int) -> Tuple[Int, Int]:
+        """The point of the curve nearest its middle where the pill fits ((-1, -1): none)."""
+        comptime TS: List[Float64] = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82, 0.1, 0.9]
+        for t in materialize[TS]():
+            var u = 1.0 - t
+            var px = Int(u * u * e[0] + 2 * u * t * e[2] + t * t * e[4]) - w // 2
+            var py = Int(u * u * e[1] + 2 * u * t * e[3] + t * t * e[5]) - PILL_H // 2
+            if self._clear(px, py, w, PILL_H, placed, strict, width, height):
+                return (px, py)
+        return (-1, -1)
+
+    def _beside(self, k: Int, ex: Int, ey: Int, w: Int, placed: List[Tuple[Int, Int, Int, Int]], strict: Bool, width: Int,
+                height: Int) -> Tuple[Int, Int]:
+        """Just outside card k, nearest to where the line meets it (ex, ey): below, above, right or left of it, slid
+        along that edge toward the line ((-1, -1): no room)."""
+        ref c = self.cards[k]
+        var h = PILL_H
+        var off = PILL_GAP + 2
+        var ax = min(max(ex - w // 2, c.x), c.x + c.w - w)  # (along a top or bottom edge, under the line's end)
+        var ay = min(max(ey - h // 2, c.y), c.y + c.h - h)  # (along a side)
+        var tries: List[Tuple[Int, Int]] = [(ax, c.y + c.h + off), (ax, c.y - h - off), (c.x + c.w + off, ay), (c.x - w - off, ay)]
+        var best = -1
+        var best_d = 1e18
+        for i in range(len(tries)):
+            var tx = tries[i][0]
+            var ty = tries[i][1]
+            if self._clear(tx, ty, w, h, placed, strict, width, height):
+                var dx = Float64(tx + w // 2 - ex)
+                var dy = Float64(ty + h // 2 - ey)
+                if dx * dx + dy * dy < best_d:
+                    best_d = dx * dx + dy * dy
+                    best = i
+        return tries[best] if best >= 0 else (-1, -1)
 
     def draw(mut self, mut s: Surface, pal: Palette):
         """The curves on a clear canvas (what's under it shows), drawn in as the spring opens, faded as it closes."""
@@ -239,6 +332,11 @@ struct Peek(Movable):
                     stroke(s, px, py, x, y, 1.6 * k, color, clear=True)
                 px = x
                 py = y
+
+
+def pill_width(text: String) -> Int:
+    """A label pill's width for its text (12 px semibold, 10 px padding a side)."""
+    return 24 + Int(6.5 * Float64(len(text.codepoints())) + 0.5)
 
 
 def _edge(a: DropCard, b: DropCard) -> Tuple[Float64, Float64]:

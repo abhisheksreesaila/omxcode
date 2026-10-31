@@ -12,6 +12,7 @@ from mojoui.player import Player, PlayerState, clock_text, PLAY, PAUSE, SCRUB, V
 from mojoui.app import Event
 from mojoui.view import PRESS, PAN, KEY
 from mojoui.video import VideoSource
+from mojoui.picture import Picture
 from mojoui.canvas import Surface
 from mojoui.charts import LineChart
 from mojoui.chartview import ChartView
@@ -354,6 +355,22 @@ def async_tests(media: String) raises:
     except:
         missing = True
     assert_true(missing, "a missing file raises at once")
+    # a still that probes but can't be decoded (a PNG whose pixel data is garbage): the picture says why, not waits forever
+    var bi = Python.import_module("builtins")
+    var py = Python.import_module("types").ModuleType("badpng")
+    _ = bi.exec("import zlib, struct\ndef chunk(t, d): return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d))\n"
+                + "def write(p): open(p, 'wb').write(b'\\x89PNG\\r\\n\\x1a\\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 64, 64, 8, 2, 0, 0, 0)) "
+                + "+ chunk(b'IDAT', b'garbagegarbage') + chunk(b'IEND', b''))\n", py.__dict__)
+    var bad_png = getenv("G41_OUT", "build/g41") + "/bad.png"
+    _ = Python.import_module("os").makedirs(getenv("G41_OUT", "build/g41"), exist_ok=True)
+    _ = py.write(bad_png)
+    var pic = Picture.opening(bad_png)
+    var pw = 0
+    while not pic.poll() and pw < 5000:
+        sleep(0.001)
+        pw += 1
+    assert_true(pic.problem.find("Couldn't decode") >= 0, "a still that can't be decoded says why: '" + pic.problem + "'")
+    assert_true(not pic.pending(), "and stops asking")
     _ = px[0]
     _ = scrub[0]
     print("player async: ok (open " + String(Int(opened_ms * 1000)) + " µs, seek " + String(Int(seek_ms * 1000)) + " µs, "

@@ -26,3 +26,14 @@ def sql_name(name: String) -> String:
     if first >= UInt8(48) and first <= UInt8(57):
         return "t" + out
     return out^
+
+
+def quote_ident(name: String) -> String:
+    """An identifier as SQL reads it whatever it holds: in double quotes, a quote inside doubled ("Ship ID", "Weight (kg)",
+    "a""b"). omxcore and DuckDB both read it so; every table and column a link writes into SQL goes through it (D-1340)."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def column_ref(table: String, column: String) -> String:
+    """table.column, both quoted: `"orders"."Ship ID"`."""
+    return quote_ident(table) + "." + quote_ident(column)

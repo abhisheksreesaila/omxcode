@@ -5,10 +5,10 @@
 # hit-tests the page's cards by the rectangles the app hands it. Nothing links until Link is pressed.
 #
 #   var ld = LinkDrag(msg_base=7650)                                    # messages 7650 … 7650 + LD_MESSAGES
-#   on GRID_HEADER_DRAG: if not ld.active: ld.begin("shipments", "", "shipment_id", column_values(sheet, c), x, y)
+#   on GRID_HEADER_DRAG: if not ld.active: ld.begin("orders", "", "order_id", column_values(sheet, c), x, y)
 #                        if ld.move(x, y, cards): ld.offer(match_columns(ld.values, cards[ld.target], target_sheet))
 #   on GRID_HEADER_DROP: ld.drop()                                      # over a card: the confirm panel; else it ends
-#   update(): if ld.update(event): if ld.confirmed: links.add(ld.link())  (ld.line(): "LINK: shipments.shipment_id = dock.mp4 · code (12 of 14)")
+#   update(): if ld.update(event): if ld.confirmed: links.add(ld.link())  (ld.line(): "LINK: orders.order_id = clip.mp4 · code (12 of 14)")
 #   view():  Board items += ld.views(cards); tones: ld.tone(board_index) (BOARD_TARGET on the card it would land on)
 #
 # Each DropCard is a card on the page: its name as shown, the table its columns come from ("" its own), its rectangle
@@ -237,8 +237,8 @@ struct LinkDrag(Movable):
         return Link.key(End(self.from_card, self.from_column, self.from_table), End(t.name, self.choice().column, t.table), BY_PERSON)
 
     def line(self) -> String:
-        """The trace line a check reads: "LINK: shipments.shipment_id = dock.mp4 · code (12 of 14)"; a time link:
-        "LINK: forklift_log.t ~ dock.mp4 · time +3.4 s"."""
+        """The trace line a check reads: "LINK: orders.order_id = clip.mp4 · code (12 of 14)"; a time link:
+        "LINK: sensor_log.t ~ clip.mp4 · time +3.4 s"."""
         var c = self.choice()
         if self.time:
             return "LINK: " + self.from_card + "." + self.from_column + " ~ " + self.target_card.name + " · time " + ("+" if self.offset >= 0 else "") + String(self.offset) + " s"

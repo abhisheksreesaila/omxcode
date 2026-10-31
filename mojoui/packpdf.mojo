@@ -3,9 +3,9 @@
 # frame with boxes marked, a picture); write_pack_pdf hands its JSON to mojoui/pack_pdf.py, which assembles the HTML and
 # prints it with Playwright's Chromium (PyMuPDF draws PDF pages, ffmpeg takes frames, Pillow marks the boxes).
 #
-#   var p = Pack("Shipment 2417", "answer · damaged pallets whose BOL says no exceptions")
-#   p.page("Evidence"); p.facts([("Shipment", "2417")]); p.video_frame("dock.mp4", 5.33, [Box(0, 270, 132, 74)], "frame 160")
-#   p.page("Document"); p.pdf_page("bol/BOL-2417.pdf", 0, [Box(54, 320, 26, 10)], "Exceptions reads None")
+#   var p = Pack("Order 2417", "answer · late orders whose invoice says paid")
+#   p.page("Evidence"); p.facts([("Shipment", "2417")]); p.video_frame("clip.mp4", 5.33, [Box(0, 270, 132, 74)], "frame 160")
+#   p.page("Document"); p.pdf_page("invoices/INV-2417.pdf", 0, [Box(54, 320, 26, 10)], "Status reads Paid")
 #   write_pack_pdf(p, "pack/2417.pdf")          # blocks: run it in a job (mojoui.pack.PackJob) from an app
 #
 # Its Python: $MOJOUI_PYTHON, else python3 on the PATH; pack_pdf.py's folder: $MOJOUI_PY, else this source's.
@@ -130,20 +130,25 @@ def _backend() -> String:
 def write_pack_pdf(pack: Pack, path: String) raises:
     """The pack as a PDF at `path` (blocks until it's written: a job's body, or a tool's)."""
     var spec = path + ".json"
-    with open(spec, "w") as f:
-        f.write(pack.json())
+    try:
+        with open(spec, "w") as f:
+            f.write(pack.json())
+    except e:
+        _ = external_call["unlink", c_int](spec.as_c_string_span())  # (a half-written spec isn't left beside the pack)
+        raise Error("the pack's PDF failed (" + path + "): couldn't write " + spec + ": " + String(e))
     var py = environment("MOJOUI_PYTHON", "python3")
     var cmd = _quote(py) + " " + _quote(_backend()) + " " + _quote(spec) + " " + _quote(path) + " > " + _quote(path + ".log") + " 2>&1"
     var c = cmd
     var rc = external_call["system", c_int](c.as_c_string_span())
     _ = external_call["unlink", c_int](spec.as_c_string_span())
+    var log = path + ".log"
     if rc != 0:
         var said = String("")
         try:
-            with open(path + ".log", "r") as f:
+            with open(log, "r") as f:
                 said = f.read()
         except:
             pass
+        _ = external_call["unlink", c_int](log.as_c_string_span())  # (what it said goes into the error)
         raise Error("the pack's PDF failed (" + path + "): " + String(said[byte = max(said.byte_length() - 400, 0) :]))
-    var log = path + ".log"
     _ = external_call["unlink", c_int](log.as_c_string_span())

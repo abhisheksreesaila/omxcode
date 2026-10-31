@@ -1,5 +1,5 @@
 # Operations on an RGBA frame (a video frame, a photo): blur a rectangle (faces, plates), crop and scale (thumbnails),
-# burn a caption in (a shipment ID), fill or outline a rectangle (a detection box). Pixels are UInt32s with R in the low
+# burn a caption in (an order ID), fill or outline a rectangle (a detection box). Pixels are UInt32s with R in the low
 # byte, like Surface and Image. Each operation runs on the GPU when there is one (Linux) and on the CPU otherwise; both
 # run the same integer arithmetic, so they give the same pixels.
 #

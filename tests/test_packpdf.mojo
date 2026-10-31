@@ -44,4 +44,13 @@ def main() raises:
     except e:
         raised = String(e).find("failed") >= 0
     assert_true(raised, "a pack that can't be made raises, saying why")
+    var osp = Python.import_module("os.path")
+    var bad_out = getenv("G41_OUT", "build/g41") + "/test_pack_bad.pdf"
+    assert_true(not Bool(py=osp.exists(bad_out + ".json")) and not Bool(py=osp.exists(bad_out + ".log")), "nothing left beside it")
+    var unwritable = False
+    try:
+        write_pack_pdf(p, "/nonexistent-dir/pack.pdf")  # (its spec can't even be written)
+    except e:
+        unwritable = String(e).find("couldn't write /nonexistent-dir/pack.pdf.json") >= 0
+    assert_true(unwritable, "an unwritable place says so")
     print("packpdf: ok")

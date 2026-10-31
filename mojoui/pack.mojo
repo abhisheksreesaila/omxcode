@@ -1,17 +1,17 @@
 # mojoui.pack: export a pack, a PDF per item and a video clip beside it (goal 41 M10). A generic component: an app says
 # what each item's pages hold (facts, words, a table, a PDF page with boxes marked, a video frame with boxes marked, a
 # picture) and which clip of which video goes with it (a time range; faces blurred; a caption burned in); one job writes
-# them all, off the UI thread, and wakes the UI when done. Nothing here knows what the pack is for: an insurance claim,
+# them all, off the UI thread, and wakes the UI when done. Nothing here knows what the pack is for: an audit,
 # an inspection report, an audit trail are the same blocks.
 #
-#   var p = Pack("Shipment 2417", "claim pack · dock.mp4")
+#   var p = Pack("Order 2417", "evidence pack · clip.mp4")
 #   p.page("Evidence")
 #   p.facts([("Shipment", "2417"), ("Damaged at", "0:05.3")])
-#   p.video_frame("dock.mp4", 5.33, [Box(500, 300, 132, 74)], "frame 160: the pallet, damaged")
+#   p.video_frame("clip.mp4", 5.33, [Box(500, 300, 132, 74)], "frame 160: the item, damaged")
 #   p.page("Bill of lading")
-#   p.pdf_page("bol/BOL-2417.pdf", 0, [Box(54, 320, 26, 10)], "Exceptions: None")
+#   p.pdf_page("invoices/INV-2417.pdf", 0, [Box(54, 320, 26, 10)], "Status: Paid")
 #   var job = PackJob(found)                     # found: the video's analysis rows (for the faces a clip blurs)
-#   job.add(p^, "pack/2417.pdf"); job.clip(Clip("dock.mp4", "pack/2417.mp4", 3.8, 9.8, "Shipment 2417 · {t}", True))
+#   job.add(p^, "pack/2417.pdf"); job.clip(Clip("clip.mp4", "pack/2417.mp4", 3.8, 9.8, "Order 2417 · {t}", True))
 #   var running = start_ui_job(job^)             # → Packed: the files written, how long it took
 #
 # The PDF: mojoui.packpdf (Pack, write_pack_pdf: pack_pdf.py prints it with Playwright's Chromium, as its own process). A

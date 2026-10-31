@@ -11,7 +11,8 @@
 #
 # While lent, the UI thread's own Python calls must sit in python_enter()/python_exit() too (mojoui.pdfsource and
 # mojoui.ocrmodel do; code that calls Python bare, e.g. mojoui.visionmodel, must not run on the UI thread while a lent job
-# runs). Lending is counted, so two jobs can run at once. python_enter() is safe on a thread that already holds the lock
+# runs: it calls python_guard("…") first, which raises a clear error on a thread without the lock instead of hanging or
+# crashing, D-1344). Lending is counted, so two jobs can run at once. python_enter() is safe on a thread that already holds the lock
 # (it nests). The C functions come from the loaded libpython (dlsym), so nothing new is linked.
 
 from std.ffi import external_call
@@ -105,3 +106,16 @@ def python_reclaim():
 def python_lent() -> Int:
     """How many lenders hold the lock out now."""
     return max(get_shared(SLOT_LENT) - 1, 0)
+
+
+def python_guard(what: String) raises:
+    """Raises when this thread doesn't hold the Python lock, so a bare Python call can't hang (the UI thread while a job
+    holds the lock lent) or crash (a job's thread outside python_enter()). Call it first in code that calls Python bare.
+    Nothing to check before CPython runs (the first bare call starts it, holding the lock) or when Python hosts the app."""
+    if _sym("Py_IsInitialized") == 0 or _call0(_sym("Py_IsInitialized")) == 0 or get_shared(SLOT_HOSTED) == 2:
+        return
+    var check = _sym("PyGILState_Check")
+    if check != 0 and _call0(check) & 0xFFFFFFFF == 0:
+        raise Error(what + ": Python called without its lock on this thread ("
+                    + (String(python_lent()) + " job(s) hold it lent" if python_lent() > 0 else "not taken")
+                    + "): wrap the call in python_enter()/python_exit(), or run it inside the job")

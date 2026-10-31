@@ -5,7 +5,7 @@
 # canvas, allocated when it is added.
 #
 #   var tables = TableCards(msg_base=4100, canvas_base=230, most=8)  # messages 4100 … 4100 + 8·TABLE_MESSAGES, canvases 230 … 237
-#   var k = tables.add("shipments", sheet^, x, y, w, h, font, pal)   # raises when the page is full
+#   var k = tables.add("orders", sheet^, x, y, w, h, font, pal)   # raises when the page is full
 #   update():   if tables.update(event, font, pal, folder): …        # True when the event was a card's: tables.export_asked / .closed / .selected / .acted say what
 #   tables.adopt(card^, x, y, w, h)                                  # a card made off the UI thread (mojoui.tablejobs: a file, a query's answer)
 #   Export CSV asks (tables.export_asked = k, tables.export_path): the app writes it with mojoui.tablejobs.TableWork.export
@@ -15,7 +15,7 @@
 #   describe(): tables.describe(canvas, first, count)                # its rows as tab-separated text, for an agent
 #
 # SQL over the page: every table is a source by its SQL name (sql_name: "warehouse.mp4 · detections" → detections), so
-#   var catalog = Catalog(); tables.add_to(catalog); var answer = query_table(catalog, "SELECT … FROM shipments WHERE …")
+#   var catalog = Catalog(); tables.add_to(catalog); var answer = query_table(catalog, "SELECT … FROM orders WHERE …")
 # runs on omxcore's SQL (joins, subqueries, IN / NOT IN, CTEs) and the answer can be a card of its own.
 
 from mojoui.app import Event
@@ -29,6 +29,7 @@ from mojoui.view import View, Text, Button, Canvas, HStack, Spacer, Card, HEADLI
 from omxcore import Catalog, Table, sql
 from mojoui.sqlname import sql_name  # (kept importable from here; links.mojo needs it without omxcore)
 
+comptime ACTION_MIN_W = 460  # a card with its own action (act_with): its name, size, the action, Export CSV and Remove in one title bar
 comptime TABLE_MESSAGES = 4  # a card's block: its grid's gestures (0), Export CSV (1), close (2), its action (3)
 comptime TC_GRID = 0
 comptime TC_EXPORT = 1
@@ -57,7 +58,7 @@ struct TableCard(Movable):
     var w: Int
     var h: Int
     var slot: Int
-    var note: String  # where it came from ("from shipments.csv", "a query"), shown under the title ("": none)
+    var note: String  # where it came from ("from orders.csv", "a query"), shown under the title ("": none)
     var action: String  # one quiet action in its title bar ("": none): its label, icon, tag (an agent's tool) and tooltip
     var action_icon: String
     var action_tag: String
@@ -85,7 +86,8 @@ struct TableCard(Movable):
         self.action_tip = ""
 
     def act_with(mut self, label: String, icon: String, tag: String, tip: String):
-        """Its one quiet action (beside Export CSV): tables.acted says when it was tapped."""
+        """Its one quiet action (beside Export CSV): tables.acted says when it was tapped. Its card wants at least
+        ACTION_MIN_W points (else the title bar squeezes its size and pushes Remove off the card)."""
         self.action = label
         self.action_icon = icon
         self.action_tag = tag

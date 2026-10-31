@@ -4,11 +4,11 @@
 # connects until a Link exists, made by a person or an agent. An app may suggest one; it never joins on its own.
 #
 #   var links = Links(msg_base=7600)
-#   links.add(Link.key(End("shipments", "shipment_id"), End("dock.mp4", "code", "dock.mp4 · detections"), BY_PERSON))
-#   links.add(Link.time(End("forklift_log", "t"), End("dock.mp4", "t"), offset=1.2))       # b.t = a.t · scale + offset
-#   var m = match_count(shipment_ids, codes)                                              # m.matched of m.total ("12 of 14")
-#   var q = links.join_sql(0, "shipments.shipment_id, detections.frame")                  # SELECT … JOIN … ON a.col = b.col
-#   var follows = links.follow(Selection("shipments", "shipments", 11, "shipment_id", "S-5012"))  # per linked card: what to match
+#   links.add(Link.key(End("orders", "order_id"), End("clip.mp4", "code", "clip.mp4 · detections"), BY_PERSON))
+#   links.add(Link.time(End("sensor_log", "t"), End("clip.mp4", "t"), offset=1.2))       # b.t = a.t · scale + offset
+#   var m = match_count(order_ids, codes)                                              # m.matched of m.total ("12 of 14")
+#   var q = links.join_sql(0, "orders.order_id, detections.frame")                  # SELECT … JOIN … ON a.col = b.col
+#   var follows = links.follow(Selection("orders", "orders", 11, "order_id", "S-5012"))  # per linked card: what to match
 #   var r = rows.react(follows[k])                                                        # a card's hook → SEEK / HIGHLIGHT / SELECT
 #   view(): links.view()   update(): if links.update(event): …   (agent tools: links, link, unlink; docs in Links.view)
 #
@@ -18,7 +18,7 @@
 
 from std.collections import Dict
 from mojoui.app import Event
-from mojoui.sqlname import sql_name
+from mojoui.sqlname import sql_name, quote_ident, column_ref
 from mojoui.view import View, Text, Button, TextField, Dropdown, VStack, HStack, Spacer, CAPTION, SUBTLE, ICON_ONLY, CENTER, START, TONE_STRONG
 
 comptime LINK_KEY = 1  # a.col = b.col (rows with the same value)
@@ -49,8 +49,8 @@ comptime LINKS_NUDGE = 0.1
 
 @fieldwise_init
 struct End(Copyable, Movable, ImplicitlyCopyable):
-    """One end of a link: the card a person sees ("dock.mp4"), the table holding the column (a video's analysis rows:
-    "dock.mp4 · detections"; "" = the card's own), and the column."""
+    """One end of a link: the card a person sees ("clip.mp4"), the table holding the column (a video's analysis rows:
+    "clip.mp4 · detections"; "" = the card's own), and the column."""
 
     var card: String
     var column: String
@@ -100,8 +100,8 @@ struct Link(Copyable, Movable, ImplicitlyCopyable):
         return "time" if self.kind == LINK_TIME else ("place" if self.kind == LINK_PLACE else "key")
 
     def label(self) -> String:
-        """How the Links panel and an agent read it: "shipments.shipment_id = dock.mp4.code",
-        "forklift_log.t ~ dock.mp4.t +1.2 s", "photo.x ~ site.lon (place)"."""
+        """How the Links panel and an agent read it: "orders.order_id = clip.mp4.code",
+        "sensor_log.t ~ clip.mp4.t +1.2 s", "photo.x ~ site.lon (place)"."""
         if self.kind == LINK_TIME:
             var s = self.a.label() + " ~ " + self.b.label() + " " + ("+" if self.offset >= 0 else "") + _num(self.offset) + " s"
             if self.scale != 1.0:
@@ -257,7 +257,7 @@ struct Reaction(Copyable, Movable):
         return Reaction(card, REACT_NONE, List[Int](), -1.0, -1, -1, 0, 0, 0, 0)
 
     def line(self) -> String:
-        """A log line: "FOLLOW: dock.mp4 seek t=22.4 frame=560", "FOLLOW: BOL-5012 highlight p1 120,340 80x14"."""
+        """A log line: "FOLLOW: clip.mp4 seek t=22.4 frame=560", "FOLLOW: INV-5012 highlight p1 120,340 80x14"."""
         var s = "FOLLOW: " + self.card + " "
         if self.action == REACT_SEEK:
             return s + "seek t=" + _num(self.time) + " frame=" + String(self.frame)
@@ -380,7 +380,7 @@ struct CardRows(Copyable, Movable):
 
 
 def parse_link(text: String, by: Int = BY_AGENT) raises -> Link:
-    """A link from how it reads: "shipments.shipment_id = dock.mp4.code" (key), "forklift_log.t ~ dock.mp4.t +1.2"
+    """A link from how it reads: "orders.order_id = clip.mp4.code" (key), "sensor_log.t ~ clip.mp4.t +1.2"
     (time: offset in seconds, optional "×scale"). A card's name may hold dots; the column is after the last one."""
     var t = String(text.strip())
     if t.find(" = ") >= 0:
@@ -418,11 +418,14 @@ struct Links(Movable, Sized):
     var open: Bool  # the list shown (the "links" button)
     var problem: String  # why the last add failed ("" none)
     var changed: Int  # bumps on every add / remove
-    var notes: List[String]  # per link, what the panel says under it ("shipments ↔ dock.mp4 · 12 of 14 match"; "": its cards)
-    var derived: List[Link]  # where a query's answer came from (answer.shipment = shipments.shipment_id): provenance, not a
+    var notes: List[String]  # per link, what the panel says under it ("orders ↔ clip.mp4 · 12 of 14 match"; "": its cards)
+    var derived: List[Link]  # where a query's answer came from (answer.order = orders.order_id): provenance, not a
     # guess, so a row of the answer follows like a row of its source; never listed, never joined (D-1262)
+    var schemas: Dict[String, List[String]]  # per table (its SQL name), the columns it has (`know`): a key link's column
+    # must be one of them (D-1341); a table not known yet is checked when it becomes known (`know`, `resolve`)
 
     def __init__(out self, msg_base: Int = 0):
+        self.schemas = Dict[String, List[String]]()
         self.notes = List[String]()
         self.derived = List[Link]()
         self.items = List[Link]()
@@ -435,8 +438,48 @@ struct Links(Movable, Sized):
     def __len__(self) -> Int:
         return len(self.items)
 
+    def know(mut self, table: String, columns: List[String]) -> Int:
+        """The app tells which columns a table has (a table card's name and its columns): key links are checked against
+        them from now on, and a link already made on it whose column isn't there is unlinked (`problem` says why). How
+        many links that removed."""
+        self.schemas[sql_name(table)] = columns.copy()
+        return self._drop_invalid()
+
+    def check(self, link: Link) raises:
+        """Raises when a key link's end names a column its table doesn't have (as far as `know` was told), or a column
+        no table could have (empty, or a control character in it). Time and place links only paint; they write no SQL."""
+        if link.kind != LINK_KEY:
+            return
+        for e in [link.a, link.b]:
+            if e.column == "":
+                raise Error(e.card + " has no column named")
+            for b in e.column.as_bytes():
+                if b < UInt8(32) or b == UInt8(127):
+                    raise Error('"' + e.column + '" isn\'t a column name')
+            var got = self.schemas.get(e.sql())
+            if got:
+                var cols = got.value().copy()
+                if not (e.column in cols):
+                    raise Error('"' + e.column + '" isn\'t a column of ' + e.table_name() + " (its columns: " + ", ".join(cols) + ")")
+
+    def _drop_invalid(mut self) -> Int:
+        """Unlinks every key link `check` now refuses (its table became known, or its end was resolved to another table)."""
+        var n = 0
+        var i = len(self.items) - 1
+        while i >= 0:
+            try:
+                self.check(self.items[i])
+            except e:
+                self.problem = "Unlinked " + self.items[i].label() + ": " + String(e)
+                _ = self.remove(i)
+                n += 1
+            i -= 1
+        return n
+
     def add(mut self, link: Link) raises -> Int:
-        """Adds it (its index); raises for a link that's already there, or a key link inside one table (that's implicit)."""
+        """Adds it (its index); raises for a link that's already there, a key link inside one table (that's implicit), or
+        one whose column its table doesn't have (`check`)."""
+        self.check(link)
         for i in range(len(self.items)):
             if self.items[i].same(link):
                 raise Error(link.label() + " is already linked")
@@ -466,8 +509,9 @@ struct Links(Movable, Sized):
         self.derived = kept^
 
     def resolve(mut self, card: String, table: String) -> Int:
-        """A card's columns live in another table (a video's analysis rows: "dock.mp4" → "dock.mp4 · detections"): every
-        end naming the card and no table gets it, so a typed link on a video joins its rows. How many ends changed."""
+        """A card's columns live in another table (a video's analysis rows: "clip.mp4" → "clip.mp4 · detections"): every
+        end naming the card and no table gets it, so a typed link on a video joins its rows. How many ends changed. A key
+        link whose column the new table doesn't have (when it's known) is unlinked, `problem` saying why."""
         var n = 0
         for i in range(len(self.items)):
             if self.items[i].a.card == card and self.items[i].a.table == "" and table != card:
@@ -478,6 +522,7 @@ struct Links(Movable, Sized):
                 n += 1
         if n > 0:
             self.changed += 1
+            _ = self._drop_invalid()
         return n
 
     def remove(mut self, i: Int) -> Bool:
@@ -509,13 +554,16 @@ struct Links(Movable, Sized):
         return out^
 
     def join_sql(self, i: Int, select: String = "*") raises -> String:
-        """The query a key link implies, over the tables' SQL names: SELECT <select> FROM a JOIN b ON a.col = b.col."""
+        """The query a key link implies, over the tables' SQL names, every name quoted (a header may hold spaces or anything
+        else): SELECT <select> FROM "a" JOIN "b" ON "a"."col" = "b"."col"."""
         if i < 0 or i >= len(self.items) or self.items[i].kind != LINK_KEY:
             raise Error("link " + String(i) + " is no key link")
         var l = self.items[i]
+        self.check(l)
         var a = l.a.sql()
         var b = l.b.sql()
-        return "SELECT " + select + " FROM " + a + " JOIN " + b + " ON " + a + "." + l.a.column + " = " + b + "." + l.b.column
+        return ("SELECT " + select + " FROM " + quote_ident(a) + " JOIN " + quote_ident(b) + " ON " + column_ref(a, l.a.column)
+                + " = " + column_ref(b, l.b.column))
 
     def follow(self, sel: Selection, same_table: List[String] = []) -> List[Follow]:
         """Per linked card, what it should match for this selection: through each key link touching the selection's card
@@ -596,7 +644,7 @@ struct Links(Movable, Sized):
         if self.open:
             for l in self.items:
                 items.append(Text(l.label() + " · " + l.kind_name() + (" · by an agent" if l.by == BY_AGENT else ""), CAPTION))
-        items.append(TextField(self.draft, "shipments.shipment_id = dock.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
+        items.append(TextField(self.draft, "orders.order_id = clip.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
             'Link two cards: "card.column = card.column" (rows with the same value) or "card.column ~ card.column +seconds" '
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
         if self.problem != "":
@@ -633,7 +681,7 @@ struct Links(Movable, Sized):
             rows.append(VStack(parts^, spacing=4).fill().align(START).tag("link-row"))
         var add = List[View]()
         add.append(Text("Drag a column onto a card to add one; hold a card to see what it's linked to. Or type one:", CAPTION))
-        add.append(TextField(self.draft, "shipments.shipment_id = dock.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
+        add.append(TextField(self.draft, "orders.order_id = clip.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
             'Link two cards: "card.column = card.column" (rows with the same value) or "card.column ~ card.column +seconds" '
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
         if self.problem != "":

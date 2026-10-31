@@ -94,7 +94,20 @@ def main() raises:
     assert_equal(peek.tone(3), BOARD_DIM)
     assert_equal(peek.tone(9), BOARD_PLAIN)  # (not a card: the page's floating pieces)
     assert_equal(peek.say(), "a: 1 link")
-    assert_true(len(peek.views()) == 3)  # (the curves' canvas and a label per line)
+    assert_true(len(peek.views()) == 2)  # (the curves' canvas and one label per link: the video showing b's table gets a line, not the label again)
+    # the label pill sits clear of every card (the free space between them, or just outside the card it reaches), on the
+    # page, wide enough for its 12 px text
+    var pill = peek.views()[1].nodes[0].copy()
+    assert_true(pill.x >= 4 and pill.y >= 4 and pill.w >= 24 + 6 * len(pill.text.codepoints()) and pill.h >= 24, "pill " + String(pill.x) + "," + String(pill.y))
+    for c in more:
+        var hit = pill.x < c.x + c.w and c.x < pill.x + pill.w and pill.y < c.y + c.h and c.y < pill.y + pill.h
+        assert_false(hit, "the pill covers " + c.name + " at " + String(pill.x) + "," + String(pill.y))
+    var roomy = more.copy()
+    roomy[1].x = 600  # (room between a and b now: the pill goes on the line, between them)
+    var wide = Peek(40, 300)
+    wide.show("a", roomy, links)
+    var mid = wide.views()[1].nodes[0].copy()
+    assert_true(mid.x > 300 and mid.x + mid.w < 600 and mid.y < 200, "between the cards: " + String(mid.x) + "," + String(mid.y))
     var frames = 0
     while peek.step(16667) and frames < 600:
         frames += 1

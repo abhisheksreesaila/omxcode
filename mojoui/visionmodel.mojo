@@ -37,6 +37,7 @@ from std.reflection import source_location
 from mojoui.videotable import Analyzer, Cells, VideoTable, ColourRange, scan
 from mojoui.video import VideoSource
 from mojoui.clock import now_ns
+from mojoui.pygil import python_guard
 
 comptime DETECT = 0  # open-vocabulary detection: boxes for text prompts (OWLv2 / OWL-ViT)
 comptime SEGMENT = 1  # promptable segmentation and tracking: a box or points -> a mask that follows the object (SAM 2.x)
@@ -146,6 +147,7 @@ struct VisionModel(Movable):
     var _m: PythonObject
 
     def __init__(out self, name: String, task: Int, device: String = "cuda", half: Bool = True) raises:
+        python_guard("VisionModel.__init__")  # (a bare Python call: fails loudly on a thread without the lock, D-1344)
         self.name = name
         self.task = task
         self.device = device
@@ -181,21 +183,25 @@ struct VisionModel(Movable):
     def detect(mut self, pixels: UnsafePointer[UInt32, MutAnyOrigin], width: Int, height: Int, prompts: List[String],
                threshold: Float64 = 0.2) raises -> List[Detection]:
         """Boxes for the prompts on one RGBA frame in host memory."""
+        python_guard("VisionModel.detect")
         var flat = _floats(self._m.detect_address(Int(pixels), width, height, _py_list(prompts), threshold))
         return self._detections(flat, 6)
 
     def detect_on_device(mut self, device_ptr: Int, width: Int, height: Int, prompts: List[String],
                          threshold: Float64 = 0.2) raises -> List[Detection]:
         """The same, for a frame already on the GPU (a CUDA pointer to RGBA bytes): no copy at all."""
+        python_guard("VisionModel.detect_on_device")
         var flat = _floats(self._m.detect_device(device_ptr, width, height, _py_list(prompts), threshold))
         return self._detections(flat, 6)
 
     def stage(mut self, pixels: UnsafePointer[UInt32, MutAnyOrigin], width: Int, height: Int) raises -> Int:
         """Copies a frame to the GPU for the next flush() (the buffer is free again on return); frames waiting."""
+        python_guard("VisionModel.stage")
         return Int(py=self._m.stage(Int(pixels), width, height))
 
     def flush(mut self, prompts: List[String], threshold: Float64 = 0.2) raises -> List[Detection]:
         """Every staged frame in one batch; Detection.slot says which."""
+        python_guard("VisionModel.flush")
         return self._detections(_floats(self._m.flush(_py_list(prompts), threshold)), 7)
 
     # ---------- find more like this (image-guided DETECT) ----------
@@ -204,37 +210,46 @@ struct VisionModel(Movable):
                     tiles: Int = -1) raises -> Float64:
         """An example on its frame's pixels. The first one fixes the zoom (tiles; -1: automatic, see visionmodel_torch
         auto_tiles). Returns how well the model's own best box overlaps the tap (IoU)."""
+        python_guard("VisionModel.add_example")
         return Float64(py=self._m.add_example(Int(pixels), width, height, ex.x, ex.y, ex.w, ex.h, ex.positive, tiles))
 
     def add_background_negatives(mut self, k: Int = LIKE_NEGATIVES) raises -> Int:
         """The `k` boxes of each example's frame that look most like it without touching a tap, as negatives."""
+        python_guard("VisionModel.add_background_negatives")
         return Int(py=self._m.add_background_negatives(k))
 
     def clear_examples(mut self) raises:
+        python_guard("VisionModel.clear_examples")
         self._m.clear_examples()
 
     def self_match(self) raises -> Float64:
         """The lowest self-match logit over the positive examples."""
+        python_guard("VisionModel.self_match")
         return Float64(py=self._m.like_stats()[0])
 
     def tiles(self) raises -> Int:
+        python_guard("VisionModel.tiles")
         return Int(py=self._m.tiles)
 
     def like(mut self, pixels: UnsafePointer[UInt32, MutAnyOrigin], width: Int, height: Int, threshold: Float64) raises -> List[Detection]:
         """Boxes like the examples on one frame; score = logit, label = the example that matched best."""
+        python_guard("VisionModel.like")
         return self._detections(_floats(self._m.like_address(Int(pixels), width, height, threshold)), 6)
 
     def flush_like(mut self, threshold: Float64) raises -> List[Detection]:
         """Every staged frame against the examples in one batch; Detection.slot says which."""
+        python_guard("VisionModel.flush_like")
         return self._detections(_floats(self._m.flush_like(threshold)), 7)
 
     # ---------- SEGMENT ----------
 
     def track_start(mut self, width: Int, height: Int) raises:
+        python_guard("VisionModel.track_start")
         self._m.start(width, height)
 
     def track_add(mut self, frame: Int, ids: List[Int], boxes: List[Detection]) raises:
         """Objects to follow, seeded with boxes on `frame` (counted from track_start), all in one call."""
+        python_guard("VisionModel.track_add")
         var py_ids = Python.list()
         var flat = Python.list()
         for i in range(len(ids)):
@@ -247,6 +262,7 @@ struct VisionModel(Movable):
 
     def track_step(mut self, pixels: UnsafePointer[UInt32, MutAnyOrigin], width: Int, height: Int) raises -> List[MaskBox]:
         """The next frame of the session: every object's mask box and area."""
+        python_guard("VisionModel.track_step")
         var f = _floats(self._m.step_address(Int(pixels), width, height))
         var out = List[MaskBox]()
         var i = 0
@@ -257,6 +273,7 @@ struct VisionModel(Movable):
 
     def segment(mut self, pixels: UnsafePointer[UInt32, MutAnyOrigin], width: Int, height: Int, box: Detection) raises -> MaskBox:
         """One frame, one box -> its mask (a one-frame session)."""
+        python_guard("VisionModel.segment")
         self.track_start(width, height)
         var ids = List[Int]()
         ids.append(1)
