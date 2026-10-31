@@ -697,7 +697,7 @@ def recomputed(ents):
         ev = rf.get("tries", {}).get("cdp_granted", {}).get("evidence", {})
         reads = list(ev.get("drop_folder", {}).get("reads", []))
         inp = ev.get("input_webkitdirectory", {}).get("read")
-        if inp:
+        if inp and inp not in reads:
             reads.append(inp)
         full = [r for r in reads if isinstance(r, dict) and r.get("files") == 100_000 and isinstance(r.get("t1"), (int, float))]
         if not any("inflight" in r for r in full):
