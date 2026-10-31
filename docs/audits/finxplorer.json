@@ -1,0 +1,865 @@
+{
+ "app": "finxplorer 2026",
+ "slug": "finxplorer",
+ "path": "/home/abhisheksreesaila/Projects/repo-finxplorer-2026",
+ "one_line": "Personal-finance web app: bank data via Quiltt, spending analytics, budgets and plans, reports, email, admin; FastHTML + JS, omxqua Ledger, phone and laptop",
+ "verdict": "Not today: most screens (lists, budgets, plans, analytics tables) map to tested mojoui pieces on Linux and web, but sign-in, per-tenant data, HTTPS, the Flow chart, drawers and real phone builds are missing.",
+ "buildable_today": "partly",
+ "counts": {
+  "have": 15,
+  "partial": 17,
+  "missing": 4
+ },
+ "features": [
+  {
+   "area": "Shell & look",
+   "feature": "Laptop shell: top islands, collapsible sidebar, nav",
+   "app_file": "public/finxplorer/js/nav-more.js:1",
+   "omx_piece": "mojoui.shell (AppBar, NavLink) · mojoui.sidebar · Overlay islands",
+   "evidence": "tests/test_shell.mojo, tests/test_sidebar.mojo, tests/test_overlays.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shell & look",
+   "feature": "Phone shell: floating tab bar, touch-size targets",
+   "app_file": "public/finxplorer/css/pocket.css:1",
+   "omx_piece": "Overlay(...).pin + shell.is_compact · NavBar",
+   "evidence": "tests/test_overlays.mojo (Overlay ❌ Android, 🔨 iOS)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "No bottom-tab island component for the compact shell; Overlay never run on a phone",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Shell & look",
+   "feature": "omxqua Money · Ledger skin, light and dark",
+   "app_file": "public/finxplorer/css/pocket.css:1",
+   "omx_piece": "themes/omxqua.mojo · themes/skins.mojo (Ledger) · App.appearance(dark)",
+   "evidence": "components.md: Themes on top, Light and dark from the system",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shell & look",
+   "feature": "Liquid motion: card grows into a focus view, drawers slide, press feedback",
+   "app_file": "public/finxplorer/js/focus.js:13",
+   "omx_piece": "mojoui.spring (Canvas on_frame only)",
+   "evidence": "components.md: Spring ✅ Linux/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "Springs drive canvas drawing only; native views have no slide/morph transitions (a Transition modifier the hosts animate)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Shell & look",
+   "feature": "Beacon while a bank sync runs",
+   "app_file": "public/finxplorer/js/beacon.js:6",
+   "omx_piece": "mojoui.beacon",
+   "evidence": "components.md: Beacon ✅ Linux/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Home",
+   "feature": "Bento: Safe to spend, Needs you, accounts, upcoming bills, where the month's money went",
+   "app_file": "public/finxplorer/js/home.js:111",
+   "omx_piece": "mojoui.panel (stat tiles) · KpiView · mojoui.meter · mojoui.lists",
+   "evidence": "tests/test_meter.mojo; components.md rows",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Home",
+   "feature": "Pace line chart and category donut",
+   "app_file": "public/finxplorer/js/home.js:456",
+   "omx_piece": "ChartView (line/bars) · mojoui.charts",
+   "evidence": "tests/test_charts.mojo; no donut/pie mark in mojoui.charts or flint",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "No donut/pie mark",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Home",
+   "feature": "Phone gestures: drag a sheet down to close, swipe rows and view strips",
+   "app_file": "public/finxplorer/js/pocket-gestures.js:19",
+   "omx_piece": "Canvas on_gesture PAN (canvas only)",
+   "evidence": "components.md: Canvas pan/zoom/tap",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "Swipe and drag only on a Canvas; no .on_swipe for native views, no bottom Sheet",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Transactions",
+   "feature": "Dense list (laptop) and lean rows (phone), search, category dropdown",
+   "app_file": "public/finxplorer/js/transactions.js:206",
+   "omx_piece": "DataGrid · LazyList · mojoui.fields (search box) · mojoui.sqlite FTS5 · Dropdown",
+   "evidence": "tests/test_datagrid.mojo, tests/test_sqlite.mojo, tests/test_fields.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Transactions",
+   "feature": "Detail drawer: edit, hide, deductible, returning, split, notes",
+   "app_file": "routes.py:2254",
+   "omx_piece": "TextField, Toggle, Dropdown, Dialog · mojoui.sqlite",
+   "evidence": "tests/test_overlays.mojo (Dialog/Popover only)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "No side drawer (laptop) / bottom sheet (phone) component; Dialog is the nearest",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Transactions",
+   "feature": "Drill-in: tap any chart part to open its transactions in a drawer",
+   "app_file": "public/finxplorer/js/drawer.js:26",
+   "omx_piece": "ChartView hit/select + Drawer (missing)",
+   "evidence": "tests/test_chartask.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "Needs the same Drawer component",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Transactions",
+   "feature": "Rules: auto-categorize, create, delete, apply to history",
+   "app_file": "routes.py:3566",
+   "omx_piece": "Forms + mojoui.lists + mojoui.sqlite",
+   "evidence": "tests/test_sqlite.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Spending",
+   "feature": "Live: Position, Rhythm (month calendar), Where it went",
+   "app_file": "public/finxplorer/js/rhythm.js:10",
+   "omx_piece": "ChartView bars/lines/Heatmap · Sparkline · sheetpage month/weekday group-bys",
+   "evidence": "tests/chartcal_dump.mojo, tests/test_charts.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "No calendar chart (days in a month grid, tap a day); Heatmap only approximates it",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Spending",
+   "feature": "Flow: category → merchant bands, dive in, play the months",
+   "app_file": "public/finxplorer/js/flow.js:538",
+   "omx_piece": null,
+   "evidence": "no flow/Sankey chart in mojoui.charts or flint",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "A Flow (Sankey) chart in mojoui.charts with hit-test and Spring animation",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Spending",
+   "feature": "Cross-filter: category × merchant × time linked",
+   "app_file": "public/finxplorer/js/analytics-state.js:1",
+   "omx_piece": "sheetpage compute() group-bys · ChartView selection · mojoui.links",
+   "evidence": "tests/test_chartask.mojo; mojoui/links.mojo links cards, not chart selections",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "A generic CrossFilter: a selection on any chart filters the page's other charts (on the MX frame)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Spending",
+   "feature": "Shift and Month by month: a period vs the prior one, category table",
+   "app_file": "public/finxplorer/js/months.js:2",
+   "omx_piece": "PivotTable · MX frame group-bys (month/quarter) · ChartView",
+   "evidence": "tests/chartcal_dump.mojo vs pyarrow in scripts/check",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Spending",
+   "feature": "Merchants, Subscriptions, Recurring lenses",
+   "app_file": "routes.py:3434",
+   "omx_piece": "frame group-bys + mojoui.lists + Chip",
+   "evidence": "tests/test_table.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Spending",
+   "feature": "Shared filters, pills, themed dropdowns",
+   "app_file": "public/finxplorer/js/fx-select.js:1",
+   "omx_piece": "Segmented · Dropdown · mojoui.fields filter chips · mojoui.header pill tabs",
+   "evidence": "tests/test_fields.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Plan",
+   "feature": "Budgets with progress, insights, icon picker",
+   "app_file": "routes.py:2554",
+   "omx_piece": "mojoui.meter · ProgressBar · Dropdown · Icon",
+   "evidence": "tests/test_meter.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Plan",
+   "feature": "Goals and recurring obligations",
+   "app_file": "routes.py:3202",
+   "omx_piece": "Forms + Meter + mojoui.sqlite",
+   "evidence": "tests/test_meter.mojo, tests/test_sqlite.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Plan",
+   "feature": "Planning shelf: 13 calculators (rent vs buy, runway, debt, afford, mortgage, car, bonus, home value) with charts",
+   "app_file": "public/finxplorer/js/plan.js:1",
+   "omx_piece": "TextField · Slider · Segmented · ChartView line/area/bars",
+   "evidence": "tests/test_charts.mojo (math is app code, ported to Mojo)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Plan",
+   "feature": "Vacation trip tags + emailed trip report; tax evidence pack, year report, CSV",
+   "app_file": "trip_report.py:178",
+   "omx_piece": "mojoui.csvio · FileSaver · mojoui.http (to the server that emails)",
+   "evidence": "tests/test_http.mojo; email is fh-saas's",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "Email stays server-side (fh-saas); the client needs HTTPS to reach it",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Reports",
+   "feature": "Personal (scrapbook) and Business (invoice) reports, same on screen and in print, up to 4 photos",
+   "app_file": "public/finxplorer/js/reports.js:474",
+   "omx_piece": "mojoui.packpdf (Chromium prints HTML) · Picture · FilePicker",
+   "evidence": "tests/test_packpdf.mojo; FilePicker ✅ web only",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "No print/PDF of a view tree (browser print, GTK print, NSPrintOperation); packpdf is a separate HTML path",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Accounts & bank",
+   "feature": "Connect a bank with the Quiltt Connector",
+   "app_file": "quiltt/session.py:1",
+   "omx_piece": "WebComponent (JS widget in a web view)",
+   "evidence": "components.md: WebComponent ✅ Linux/web, ❌ phones",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "Wrap a third-party JS SDK (Quiltt) with its HTTPS origin and popups; native Quiltt SDKs on phones",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Accounts & bank",
+   "feature": "Accounts, connections, refresh, status, net-worth history",
+   "app_file": "routes.py:3775",
+   "omx_piece": "mojoui.lists · ChartView line · mojoui.http + Timers",
+   "evidence": "tests/test_http.mojo; mojoui/http.mojo TLS_NEEDED: plain HTTP only",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "HTTPS in mojoui.http (TLS backend, needs Mojo ≥ 1.2 / flare)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Accounts & bank",
+   "feature": "Bank sync jobs and Quiltt webhooks, job status",
+   "app_file": "quiltt/webhooks.py:18",
+   "omx_piece": "fh-saas (server) · client: mojoui.http + Timers poll /api/fx/jobs/status",
+   "evidence": "tests/test_http.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "Server side is fh-saas's job, not omxcode's; the client side needs HTTPS",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Sign-in & tenants",
+   "feature": "Google sign-in, sessions, logout",
+   "app_file": "routes.py:1196",
+   "omx_piece": null,
+   "evidence": "mojoui/hosts/web.py: per-tab sessions, no user identity; no OAuth/keychain in mojoui",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "Auth bridge: the web host mounted inside fh-saas (session → signed-in user); native OAuth (system browser + PKCE, token in the keychain)",
+   "size": "L",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Sign-in & tenants",
+   "feature": "One SQLite per tenant, household members and invites",
+   "app_file": "routes.py:3646",
+   "omx_piece": null,
+   "evidence": "web.py runs every tab in one process (MAX_SESSIONS 200) with no tenant context; mojoui.sqlite opens one local file",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "Per-session tenant context in the web host (user → tenant DB path) and fh-saas as the data API for native clients",
+   "size": "L",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Sign-in & tenants",
+   "feature": "Stripe pricing, checkout, billing portal, trial and payment banners",
+   "app_file": "routes.py:1075",
+   "omx_piece": "fh-saas (server) · mojoui.feedback banners",
+   "evidence": "components.md: Feedback ✅ Linux/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "An open_url effect (system browser / new tab) to hand off to Stripe Checkout",
+   "size": "S",
+   "eta": "this week",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Notifications",
+   "feature": "Email: welcome, invites, budget and low-balance alerts, weekly summary",
+   "app_file": "email_service.py:88",
+   "omx_piece": "fh-saas (server) · settings form in mojoui",
+   "evidence": "tests/test_fields.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "Stays in fh-saas by design; nothing for omxcode to add",
+   "size": "S",
+   "eta": "this week",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Notifications",
+   "feature": "Install as an app (manifest, service worker), phone push",
+   "app_file": "public/finxplorer/service-worker.js:1",
+   "omx_piece": "mojoui.notify (Linux only)",
+   "evidence": "components.md: Notifications ✅ Linux, ❌ web/phones",
+   "hosts": {
+    "linux": "✅",
+    "web": "❌",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "❌"
+   },
+   "status": "missing",
+   "gap": "PWA manifest + service worker from the web host; notify() on iOS/Android",
+   "size": "M",
+   "eta": "2027",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Onboarding",
+   "feature": "Welcome flow and a sample workspace you try without signing in",
+   "app_file": "public/routes.py:260",
+   "omx_piece": "app state with sample data (mojoui.sample / contoso pattern)",
+   "evidence": "examples/omxplorer sample data",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Onboarding",
+   "feature": "Sign-in page with an animated money scene",
+   "app_file": "public/finxplorer/js/login-scenes.js:1",
+   "omx_piece": "Canvas on_frame + mojoui.draw",
+   "evidence": "components.md: Canvas frames ✅",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "🔨",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Onboarding",
+   "feature": "Landing, pricing, security, privacy, terms, about, contact pages",
+   "app_file": "public/routes.py:253",
+   "omx_piece": "mojoui.markdown could render the legal pages",
+   "evidence": "docs/probes.md: marketing sites are not where omxcode competes",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "partial",
+   "gap": "Out of scope by design: these stay plain FastHTML (SEO, first paint)",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Settings",
+   "feature": "One scrolling Settings page: notifications, household, billing link",
+   "app_file": "public/finxplorer/js/settings.js:1",
+   "omx_piece": "Scroll · Toggle · mojoui.panel · mojoui.fields",
+   "evidence": "tests/test_fields.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "🔨",
+    "ios": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Admin",
+   "feature": "Host console: tenants, logs, exports, SQLite downloads, amount diagnostics",
+   "app_file": "routes.py:1643",
+   "omx_piece": "DataGrid · LogView · FileSaver · mojoui.http",
+   "evidence": "tests/test_datagrid.mojo; FileSaver ✅ web, 🔨 GTK",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "android": "❌",
+    "mac": "❌",
+    "ios": "❌"
+   },
+   "status": "partial",
+   "gap": "Needs the auth bridge (admin role) and HTTPS; the screens themselves exist",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  }
+ ],
+ "wins": [
+  {
+   "what": "Every screen is an agent's tool set for free: 'what did I spend on dining in October', 'hide this transaction', 'make a trip report' through MCP, with no per-app work (finxplorer has no agent features)",
+   "evidence": "docs/agent.md; mojoui/hosts/agent.py; tests/test_agui.mojo, tests/test_genui.mojo"
+  },
+  {
+   "what": "Questions in words become SQL over the transactions (Ask → SQL), answered in place",
+   "evidence": "mojoui/asksql.mojo, tests/test_asksql.mojo (omxplorer's tables, not finance data yet)"
+  },
+  {
+   "what": "Local-first native app: the tenant's SQLite in process opens and searches faster than the web can",
+   "evidence": "docs/probes.md Jot: cold open 6.6×, search p95 2.6× vs SQLite-wasm on OPFS (Linux; phones unproven)"
+  },
+  {
+   "what": "GPU group-bys behind Shift, Month by month and cross-filter",
+   "evidence": "unproven at this scale: omxplorer groups 1M rows on the GPU, but a household has ~10–50k transactions, which JS handles today; a win only for multi-year business books or the admin console across tenants"
+  },
+  {
+   "what": "Charts drawn by Mojo look and animate the same on every host (no ECharts plus hand-written SVG mix)",
+   "evidence": "mojoui/chartview.mojo, tests/test_chartmove.mojo (Linux/web ✅; phones 🔨)"
+  },
+  {
+   "what": "The 13 calculators' maths and their screens in one language and one file each, instead of a pure-JS file plus a UI file",
+   "evidence": "unproven (not ported)"
+  }
+ ],
+ "top_gaps": [
+  {
+   "gap": "Sign-in and tenants: the web host inside fh-saas, session → user → tenant DB; native OAuth with keychain",
+   "piece": "mojoui/hosts/web.py auth bridge + mojoui.auth",
+   "size": "L",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Google sign-in, sessions, logout",
+    "One SQLite per tenant, household members and invites",
+    "Host console",
+    "Stripe pricing, checkout, billing portal"
+   ]
+  },
+  {
+   "gap": "HTTPS in mojoui.http, so native apps reach the finxplorer API",
+   "piece": "mojoui.http TLS transport (flare, Mojo ≥ 1.2)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Accounts, connections, refresh, status, net-worth history",
+    "Bank sync jobs and Quiltt webhooks, job status",
+    "Vacation trip tags + emailed trip report"
+   ]
+  },
+  {
+   "gap": "Drawer / bottom Sheet and swipe on native views",
+   "piece": "mojoui.overlays Drawer + .on_swipe modifier",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Detail drawer",
+    "Drill-in",
+    "Phone gestures"
+   ]
+  },
+  {
+   "gap": "Finance charts: Flow (Sankey), donut, calendar, and a CrossFilter between charts",
+   "piece": "mojoui.charts Flow/Donut/Calendar + mojoui.crossfilter",
+   "size": "M",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Flow",
+    "Cross-filter",
+    "Live",
+    "Pace line chart and category donut"
+   ]
+  },
+  {
+   "gap": "Phones for real: bottom-tab island, and DataGrid/Pivot/Overlay run on iOS and Android (today ❌ or never run)",
+   "piece": "mojoui.shell BottomTabs + uikit/android host coverage",
+   "size": "L",
+   "eta": "2027",
+   "unblocks": [
+    "Phone shell",
+    "Dense list",
+    "Shift and Month by month"
+   ]
+  },
+  {
+   "gap": "Print/PDF of a view, same on screen and paper",
+   "piece": "host print (browser print, GTK print, NSPrintOperation)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Personal and Business reports"
+   ]
+  },
+  {
+   "gap": "Third-party JS SDK inside a WebComponent (Quiltt Connector)",
+   "piece": "mojoui.webcomponent: HTTPS origin, popups",
+   "size": "M",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Connect a bank"
+   ]
+  },
+  {
+   "gap": "Transitions for native views (slide, morph from source)",
+   "piece": "Transition modifier animated by each host",
+   "size": "M",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Liquid motion"
+   ]
+  },
+  {
+   "gap": "Open a URL in the system browser",
+   "piece": "open_url effect",
+   "size": "S",
+   "eta": "this week",
+   "unblocks": [
+    "Stripe checkout hand-off"
+   ]
+  },
+  {
+   "gap": "Installable web app and phone push",
+   "piece": "web host manifest + service worker; notify on phones",
+   "size": "M",
+   "eta": "2027",
+   "unblocks": [
+    "Install as an app, phone push"
+   ]
+  }
+ ]
+}
