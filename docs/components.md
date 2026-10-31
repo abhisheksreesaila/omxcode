@@ -10,16 +10,16 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, jot, dictate |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, jot, dictate, keeper, traycheck |
 | `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, jot, dictate |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch, jot, dictate |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, jot, dictate |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch, jot, dictate |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch, jot, dictate, keeper, traycheck |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, jot, dictate, keeper |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch, jot, dictate, keeper |
 | `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat |
 | `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console, agentchat |
 | `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console, sketch, dictate |
-| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, agentchat, jot |
+| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, agentchat, jot, keeper |
 | `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, workbook, mxstudio, jot |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
 | `Dropdown` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, analytics, workbook, mxstudio, omxplorer, themes, kit |
@@ -27,13 +27,13 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Segmented` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | kitchen, expenses, lens, analytics, mxstudio, omxplorer, themes, kit |
 | `Radio` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, omxplorer, kit |
 | `DatePicker` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
-| `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes, jot |
+| `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes, jot, keeper |
 | `Image` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, gpu |
-| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer |
+| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer, keeper |
 | `Alert` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
-| `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, jot |
+| `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, jot, keeper |
 | `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, sketch |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
@@ -98,6 +98,10 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Save dialog | `FileSaver(title, on_save, suggested=)` | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ |
 | File drop from outside the app | `DropTarget(view, on_drop, on_file=)` | 🔨 | 🔨 | ❌ | ❌ | ❌ | ❌ |
 | Quit hook | `def closing(mut self)` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
+| Folder watcher (mojoui.watch: inotify / FSEvents on its own thread) | `FolderWatcher(path, wake=True) · start() · take()` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
+| Background mode (keeps running with the window closed) | `def background(self) -> Bool · window_shown(shown)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Tray item (StatusNotifierItem; NSStatusItem) | `published by the host for a background() app; Activate opens the window` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Notifications (mojoui.notify) | `notify(app, title, body)` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
 
 - File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
 - Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
@@ -106,6 +110,10 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - File drop from outside the app (Web): 🔨 though a check runs it: drive.py's dropfile: dispatches a drop event carrying a File (no OS drag).
 - Quit hook (Web): 🔨 though a check runs it: the session's App.closing runs when it's evicted or the server stops (tried by hand: a SIGINT); no check runs it, and closing a tab doesn't end its session.
 - SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5): the system's libsqlite3 loaded at run time (dlopen, D-1304/D-1311); Android and iPhone don't build it yet; the Mac links against nothing new and loads /usr/lib/libsqlite3.dylib (built, not run).
+- Folder watcher (mojoui.watch: inotify / FSEvents on its own thread): Linux: inotify on a pthread, new folders followed, one event per change, p95 lag 0.01 ms for 1,000 changes (goal 45 M0); Mac: FSEvents (file-level events, a dispatch queue), built, not run, and it doesn't pair a rename's two halves; the web has FileSystemObserver only on a folder the person picked or dropped, only while the tab is open (docs/goals/45/web.json).
+- Background mode (keeps running with the window closed): GTK: the window hides on close and the GApplication is held (goal 45 M1); the Mac has none yet (the AppKit host still quits when its last window closes); a web page's code stops when its tab closes (docs/goals/45/web.json).
+- Tray item (StatusNotifierItem; NSStatusItem): Linux: a StatusNotifierItem on the session bus (Activate, SecondaryActivate, ContextMenu open the window; no menu yet); Mac: NSStatusItem not built yet; the web has no tray API.
+- Notifications (mojoui.notify): Linux: org.freedesktop.Notifications.Notify, asynchronous (goal 45 M1, M2); Mac: UNUserNotificationCenter, built, not run, and it doesn't ask the person's permission yet (that needs a block).
 - Save dialog: the app writes the file at the path it's given; on the web that path is the page's downloads folder and the page downloads it; the Mac has no NSSavePanel yet (nor an NSOpenPanel for the file picker).
 - Scene: layer transform: GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a big page at a big zoom it's softer than the strokes until the zoom comes back within the cap.
 
@@ -188,12 +196,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 118 | 7 | 0 |
-| Web | 118 | 7 | 0 |
-| Android | 19 | 21 | 85 |
-| Mac (AppKit) | 0 | 112 | 13 |
-| iPhone (UIKit) | 0 | 85 | 40 |
-| Agent (MCP) | 31 | 38 | 56 |
+| Linux (GTK) | 122 | 7 | 0 |
+| Web | 118 | 7 | 4 |
+| Android | 19 | 21 | 89 |
+| Mac (AppKit) | 0 | 114 | 15 |
+| iPhone (UIKit) | 0 | 85 | 44 |
+| Agent (MCP) | 31 | 38 | 60 |
 
 ## Inside one app, not components yet (the debt)
 

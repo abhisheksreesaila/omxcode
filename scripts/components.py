@@ -39,7 +39,7 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "sketch", "jot", "dictate"],  # (dictate: goal 43; jot: goal 42; sketch: goal 40; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "sketch", "jot", "dictate", "keeper", "traycheck"],  # (keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
     "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot"],  # (kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
@@ -90,12 +90,18 @@ FEATURES = [
     ("Save dialog", "FileSaver(title, on_save, suggested=)", r"gtk_file_dialog_save|/save/\{sid\}", "jot"),
     ("File drop from outside the app", "DropTarget(view, on_drop, on_file=)", r"gdk_file_list_get_type|/dropfile/", "jot"),
     ("Quit hook", "def closing(mut self)", r"rt\[?\]?\.closing\(|close_all|on_will_terminate", "jot"),
+    ("Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)", "FolderWatcher(path, wake=True) · start() · take()", r"(?!)", "keeper"),
+    ("Background mode (keeps running with the window closed)", "def background(self) -> Bool · window_shown(shown)", r"app\.background\(\)", "keeper"),
+    ("Tray item (StatusNotifierItem; NSStatusItem)", "published by the host for a background() app; Activate opens the window", r"TrayItem\(", "keeper"),
+    ("Notifications (mojoui.notify)", "notify(app, title, body)", r"(?!)", "keeper"),
 ]
 
 # Library features no host draws (pure Mojo over a C library): their state per host, set by hand from what ran
 # (reasons in NOTES). Hosts not listed: ❌.
 BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
-           {"Linux (GTK)": "✅", "Web": "✅", "Mac (AppKit)": "🔨"}}
+           {"Linux (GTK)": "✅", "Web": "✅", "Mac (AppKit)": "🔨"},
+           "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
+           "Notifications (mojoui.notify)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"}}
 
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)
@@ -246,6 +252,19 @@ UNPROVEN = {("Linux (GTK)", "File picker"): "the checks hand the path in with th
 NOTES = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
          "the system's libsqlite3 loaded at run time (dlopen, D-1304/D-1311); Android and iPhone don't build it yet; the Mac links "
          "against nothing new and loads /usr/lib/libsqlite3.dylib (built, not run)",
+         "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)":
+             "Linux: inotify on a pthread, new folders followed, one event per change, p95 lag 0.01 ms for 1,000 changes (goal 45 M0); "
+             "Mac: FSEvents (file-level events, a dispatch queue), built, not run, and it doesn't pair a rename's two halves; the web "
+             "has FileSystemObserver only on a folder the person picked or dropped, only while the tab is open (docs/goals/45/web.json)",
+         "Background mode (keeps running with the window closed)":
+             "GTK: the window hides on close and the GApplication is held (goal 45 M1); the Mac has none yet (the AppKit host still "
+             "quits when its last window closes); a web page's code stops when its tab closes (docs/goals/45/web.json)",
+         "Tray item (StatusNotifierItem; NSStatusItem)":
+             "Linux: a StatusNotifierItem on the session bus (Activate, SecondaryActivate, ContextMenu open the window; no menu yet); "
+             "Mac: NSStatusItem not built yet; the web has no tray API",
+         "Notifications (mojoui.notify)":
+             "Linux: org.freedesktop.Notifications.Notify, asynchronous (goal 45 M1, M2); Mac: UNUserNotificationCenter, built, not "
+             "run, and it doesn't ask the person's permission yet (that needs a block)",
          "Save dialog": "the app writes the file at the path it's given; on the web that path is the page's downloads folder and the "
                         "page downloads it; the Mac has no NSSavePanel yet (nor an NSOpenPanel for the file picker)",
          "Scene: layer transform": "GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a "
