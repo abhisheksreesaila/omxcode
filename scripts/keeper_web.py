@@ -409,12 +409,20 @@ def main():
             if have:
                 started = page.evaluate("observe(window.dropHandle)")
                 if started == "observing":
-                    closed = changes(small, 200, "obs")
-                    got, n, raw = lags(page, closed, off)
-                    seen_now = page.evaluate("Object.keys(window.seen || {})")
-                    ntries["FileSystemObserver"] = {"can": n > 0, "evidence": {"started": started, "seen": n, "of": 200, "p95_ms": p95(got),
-                                                     "p50_ms": round(sorted(got)[len(got) // 2], 3) if got else None, "clock_offset_rtt_ms": round(rtt, 3),
-                                                     "missed": sorted(set(closed) - set(seen_now)), "offset_ms": off, "raw": raw,
+                    rounds = []  # (three rounds of 200: one round's p95 swung 6× between runs on a loaded machine; the median races)
+                    for r in range(3):
+                        page.evaluate("window.seen = {}")
+                        closed = changes(small, 200, f"obs{r}")
+                        got, n, raw = lags(page, closed, off)
+                        seen_now = page.evaluate("Object.keys(window.seen || {})")
+                        rounds.append({"seen": n, "of": 200, "p95_ms": p95(got), "p50_ms": round(sorted(got)[len(got) // 2], 3) if got else None,
+                                       "missed": sorted(set(closed) - set(seen_now)), "offset_ms": off, "raw": raw})
+                    ps = sorted(x["p95_ms"] for x in rounds if x["p95_ms"] is not None)
+                    n = sum(x["seen"] for x in rounds)
+                    ntries["FileSystemObserver"] = {"can": n > 0, "evidence": {"started": started, "seen": n, "of": 600,
+                                                     "p95_ms": ps[len(ps) // 2] if ps else None, "p95_is": "the median of the three rounds' p95s",
+                                                     "round_p95_ms": [x["p95_ms"] for x in rounds], "clock_offset_rtt_ms": round(rtt, 3),
+                                                     "missed": [m for x in rounds for m in x["missed"]], "rounds": rounds,
                                                      "lag_over": "the changes it reported (a miss is listed, not counted as a lag)"}}
                     page.evaluate("window.obs && window.obs.disconnect()")
                 else:
@@ -444,7 +452,7 @@ def main():
                 which = [k for k, t in ntries.items() if t["can"] and (t["evidence"].get("p95_ms") if k == "FileSystemObserver" else t["evidence"]["best"]["p95_ms"]) == min(ok)][0]
                 missed = len(ntries["FileSystemObserver"]["evidence"].get("missed", [])) if isinstance(ntries["FileSystemObserver"]["evidence"], dict) else 0
                 nentry["summary"] = (f"Only while the tab is open, on a dropped folder: {which} p95 {min(ok):.1f} ms"
-                                     + (f", {missed} of 200 changes missed" if which == "FileSystemObserver" and missed else ""))
+                                     + (f" (median of 3 rounds), {missed} of 600 changes missed" if which == "FileSystemObserver" and missed else ""))
             else:
                 nentry["evidence"] = {k: t["evidence"] for k, t in ntries.items()}
                 nentry["summary"] = "No: nothing to watch without a folder handle"

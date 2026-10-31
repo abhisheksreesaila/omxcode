@@ -714,8 +714,12 @@ def recomputed(ents):
         tries = nc.get("tries", {})
         runs = []
         fso = tries.get("FileSystemObserver", {})
-        if fso.get("can"):
-            runs.append(("FileSystemObserver", fso["evidence"]))
+        fso_rounds = []
+        if fso.get("can"):  # (D-1626: three rounds; the race's number is the median of their recomputed p95s)
+            for k, r in enumerate(fso["evidence"].get("rounds", [])):
+                runs.append((f"FileSystemObserver round {k + 1}", r))
+            if not fso["evidence"].get("rounds"):
+                problems.append("notice_change: FileSystemObserver has no rounds of raw stamps")
         if tries.get("polling", {}).get("can"):
             runs += [(f"polling every {r.get('every_ms')} ms", r) for r in tries["polling"]["evidence"].get("every_try", [])]
         best = None
@@ -729,8 +733,15 @@ def recomputed(ents):
             if q is None or r.get("p95_ms") is None or abs(q - r["p95_ms"]) > 0.002:
                 problems.append(f"notice_change {name}: p95 {r.get('p95_ms')} disagrees with its raw stamps ({q})")
                 continue
-            if name == "FileSystemObserver" or len(lags) == len(raw):
+            if name.startswith("FileSystemObserver"):
+                fso_rounds.append(q)
+            elif len(lags) == len(raw):
                 best = q if best is None else min(best, q)
+        if fso_rounds:
+            med = sorted(fso_rounds)[len(fso_rounds) // 2]
+            if abs(med - fso["evidence"].get("p95_ms", -1)) > 0.002:
+                problems.append(f"notice_change: FileSystemObserver p95 {fso['evidence'].get('p95_ms')} isn't the median of its rounds ({med})")
+            best = med if best is None else min(best, med)
         if best is not None and abs(best - nc.get("race", {}).get("web_ms", -1)) > 0.002:
             problems.append(f"notice_change: race web_ms {nc.get('race', {}).get('web_ms')} isn't the best recomputed p95 ({best})")
         notes.append(f"notice_change best p95 {best} ms (recomputed)")
