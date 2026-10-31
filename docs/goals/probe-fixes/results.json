@@ -21,8 +21,8 @@
   ],
   "checked": "2026-10-31",
   "gaps": [
-   "17, 33, 33 ms",
-   "17, 33, 33 ms",
+   "17, 33, 17 ms",
+   "17, 33, 17 ms",
    "17, 33, 33 ms"
   ],
   "item": "goal 30 M1 failed now and then",
@@ -49,20 +49,21 @@
   "unverified": "run on aarch64 Linux (no machine here: compiled only); the Mac's branch is unchanged (built, not run)"
  },
  "sketch_erase": {
-  "after_draw_p95_ms": 5.9,
-  "after_p95_ms": 8.5,
+  "after_draw_p95_ms": 4.6,
+  "after_p95_ms": 5.6,
   "before_note": "21.4 ms on this machine at the start (draw 20.2: node build 6.1, mend 11.1, finding the removal 1.2); 13.7 in goal 40's run",
   "before_p95_ms": 21.4,
   "checked": "2026-10-31",
   "item": "erasing took 14-23 ms p95",
-  "runs_note": "six runs on a shared machine (load average 4-16); the 15.4 run was slower in every part of the frame",
+  "runs_note": "seven runs; the first six on a shared machine (load average 4-16; the 15.4 run slower in every part of the frame), the last (the merged commit) at load 2.6",
   "runs_p95_ms": [
    5.8,
    6.7,
    15.4,
    8.2,
    8.0,
-   8.5
+   8.5,
+   5.6
   ]
  }
 }
