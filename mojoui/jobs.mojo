@@ -22,24 +22,11 @@ from omxcore import Job, JobBody, JobDone, start_job_then
 from mojoui.shared import put_shared, get_shared
 from mojoui.hosts.objc import msg, cls, sel, ns_string
 
-comptime SLOT_WAKE_WRITE = 90  # mojoui.shared slots: the pipe's ends + 1 (0: none yet)
-comptime SLOT_WAKE_READ = 91
-
-
-def _libc(name: String) -> Int:
-    """A libc function's address (looked up: the standard library declares read() and write() its own way)."""
-    var n = name
-    var anywhere = -2 if CompilationTarget.is_macos() else 0  # RTLD_DEFAULT
-    return external_call["dlsym", Int](anywhere, n.as_c_string_span())
+from mojoui.wake import SLOT_WAKE_WRITE, SLOT_WAKE_READ, libc_fn, fd_io
 
 
 def _io(name: String, fd: Int, addr: Int, n: Int) -> Int:
-    var f = _libc(name)
-    if f == 0:
-        return -1
-    var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=f)
-    var call = Pointer(to=raw).unsafe_bitcast[def(c_int, Int, Int) thin abi("C") -> Int]()[]
-    return call(c_int(fd), addr, n)
+    return fd_io(name, fd, addr, n)
 
 
 def wake_pipe() -> Int:

@@ -71,11 +71,11 @@ def fcall[T: RegisterPassable = Int, *A: AnyType](addr: Int, *args: *A) -> T:
     return f(*args)
 
 
-def dl_open(name: String) -> Int:
-    """dlopen(name, RTLD_NOW) through the standard library's OwnedDLHandle (kept loaded for good), so an app that also
+def dl_open(name: String, flags: Int = 2) -> Int:
+    """dlopen(name, flags: RTLD_NOW by default) through the standard library's OwnedDLHandle (kept loaded for good), so an app that also
     uses Mojo's Python interop links (two dlopen declarations don't, D-1413); 0 when it doesn't load."""
     try:
-        var h = OwnedDLHandle(name, 2)
+        var h = OwnedDLHandle(name, flags)
         var p = h.borrow().handle
         var raw = Int(p.value()) if p else 0
         unsafe_alloc[OwnedDLHandle](1).unsafe_write(h^)

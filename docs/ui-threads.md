@@ -22,6 +22,9 @@ UI thread, so there are no locks, no races and no "which thread am I on?" in app
 | Network requests never block the screen | `Http.get(...)` queues a request; it runs on a worker thread; the reply arrives as an `Event` | `mojoui/effects.mojo`, goal 33 |
 | Timers never block | `App.every()` lists `Every(ms, msg)`; ticks arrive as events | `mojoui/effects.mojo` |
 | Data work never blocks | `start_ui_job(...)` runs a query, import or sort on its own thread; when it ends, `App.jobs_message()` reaches `update()` | `mojoui/jobs.mojo`, D-771, D-792 |
+| Video and pictures never block | a decoder thread per video (`mojoui/framefeed.mojo`): opening, seeking and decoding run there; the newest seek wins; a frame that lands wakes the UI | goal 41 M2, D-1116 |
+| Documents never block | opening a folder, drawing its pages, reading it (OCR) and writing a pack (PDFs, clips) run as jobs (`mojoui/documentjobs.mojo`, `mojoui/pack.mojo`) | goal 41 M10, D-1271 |
+| Tables, queries and exports never block | `mojoui/tablejobs.mojo` (Insert > Table, SQL, Export CSV) and `mojoui/videocard.mojo` (Analyze, reels) run as jobs that wake the UI | goal 41 M3–M4, D-1124, D-1131 |
 | A finished job shows at once, not a frame later | the job's end wakes the main loop (a pipe on Linux and the web, `performSelectorOnMainThread` on the Mac) | D-771 |
 | Cancelling never blocks | cancelling marks the job; checking whether its thread stopped doesn't wait (Linux, Mac) | `mojoui/sheetjobs.mojo` |
 | Clicking a button that changes the screen never crashes | rebuilds wait until the click has finished; re-entrant signals are swallowed | every host |
@@ -66,6 +69,9 @@ The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), wi
 
 ## How it's checked
 
+- The watchdog (`MOJOUI_BUDGET_MS=N`, see "What's next" 1) names any update, view or draw over N ms; goal 41's checks
+  run omxplorer's sessions at 50 ms on the headless display (CPU drawing) and want no `SLOW:` line.
+
 - `examples/jobwake` measures it: 40 short jobs (how fast a finished job reaches `update()`), then one 1.5 s job and
   the longest time the window went without a frame. It prints **PASS** under 500 ms and **FAIL (the window froze)**
   above, and exits 1 on Linux when it fails. On the Mac it runs on GitHub's runners (`scripts/mac-ci jobwake`).
@@ -81,9 +87,22 @@ The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), wi
   ([mxframe-needs.md](mxframe-needs.md)); until then an engine change to that order would break it quietly.
 - **The Mac's wake is ~35 ms** on GitHub's Macs against 0.05 ms on Linux; unmeasured on real hardware.
 
+- **Python in a job** (goal 41, D-1146): CPython's lock stays with the UI thread, which never lets go on its own. A job
+  that calls Python takes the lock with `mojoui.pygil.python_enter()`/`python_exit()`, and whoever starts it lends the
+  lock (`python_lend()`, then `python_reclaim()` when the result is taken; mojoui.documentjobs does both). While it is
+  lent, Python on the UI thread must go through `python_enter()` too (pdfsource and ocrmodel do; visionmodel doesn't yet).
+  Under a Python host (the web host, the agent host: the app is a module Python imported) Python owns the lock and lets
+  go between calls; lending there would crash, so `python_lend()` does nothing and a job waits for Python's next pause
+  (D-1260). Checked: goal 41 M10's scenario reads 17 BOLs with docTR in a job under the agent host, 0 `SLOW:` at 50 ms.
+
 ## What's next, so it's "drop in a component and it just works"
 
-1. **Catch a slow `update()`**: a debug build that names any `update()` or `view()` over one frame (16 ms) with the
-   event that caused it, so an app author or an agent sees the freeze before a user does.
+1. **Catch a slow `update()`: done (goal 41 M1).** Run any app with `MOJOUI_BUDGET_MS=16` and, from its first second
+   on, every `update()`, `view()` or canvas draw over the budget prints `SLOW: update msg=7 80.06 ms` (the message),
+   `SLOW: view msg=7 …` or `SLOW: draw canvas=3 …` (the canvas's tag), so an app author or an agent sees the freeze
+   before a user does. The runtime times it (`Runtime.watch`, `mojoui/app.mojo`), so every host gets it: GTK and the
+   web (the server's log; `scripts/drive.py` forwards it) are checked by `examples/slowcheck`; AppKit and Android turn
+   it on too (unrun; Android's stdout goes nowhere, so read it with `adb logcat` only once stdout is redirected);
+   UIKit doesn't read the environment. The next step is a frame budget that names what inside the update was slow.
 2. **The iPhone**: the Mac's job threads plus a UIKit wake, checked on the owner's iPhone.
 3. **The Mac's GPU build** run with job threads (a job's Metal queries from its own thread), on the owner's MacBook.

@@ -22,6 +22,7 @@ from mojoui.webcomponent import is_widget_tag, is_event_name
 from mojoui.theme import Theme, palette_css, tokens_css, theme_tokens
 from mojoui.look import look_web_css
 from mojoui.hosts.devtools import DEVTOOLS
+from mojoui.present import dl_open
 
 comptime RTLD_NOW = 2
 comptime RTLD_GLOBAL = 256

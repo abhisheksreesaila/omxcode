@@ -29,7 +29,7 @@ from mojoui.icons_data import lucide_svg
 from mojoui.a11y import explicit_name
 from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE
 from mojoui.png import encode_png
-from mojoui.app import App, Event, Runtime
+from mojoui.app import App, Event, Runtime, budget_from_env
 from mojoui.clock import now_ns
 from mojoui.canvas import Surface
 from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, AppleCanvas
@@ -276,6 +276,7 @@ struct AppKitHost[A: App](Movable):
     def __init__(out self):
         Self.A.init_shared()
         self.rt = Runtime(Self.A())
+        self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines on stdout)
         self.window = 0
         self.target = 0
         self.widgets = List[Int]()

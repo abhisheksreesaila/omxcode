@@ -2,7 +2,7 @@
 # (one path per line in <config>/recent.txt, newest first, at most 10) and settings (key=value lines in
 # <config>/settings.txt).
 
-from std.os.path import getsize
+from std.os.path import getsize, isfile
 from mojoui.shared import environment, make_dir
 
 
@@ -20,6 +20,11 @@ def file_stem(path: String) -> String:
 def file_size(path: String) raises -> Int:
     """The file's size in bytes."""
     return getsize(path)
+
+
+def file_exists(path: String) -> Bool:
+    """Whether a regular file is at `path`."""
+    return isfile(path)
 
 
 def config_dir(app: String) -> String:

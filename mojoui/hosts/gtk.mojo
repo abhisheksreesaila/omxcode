@@ -5,6 +5,7 @@
 # real widgets through their normal APIs (so their real signals fire), then
 # prints each widget's state as GTK reports it and quits. The window isn't
 # shown unless MOJOUI_SHOT=<file.png> asks GTK to render it to a PNG.
+# (tap:X finds the button titled X, else the one tagged X: the name an agent calls it by.)
 
 from mojoui.look import look_gtk_css
 from std.ffi import external_call, c_int, c_char, c_uint
@@ -19,8 +20,9 @@ from mojoui.view import (
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
 )
 from mojoui.a11y import audit, explicit_name, needs_name, accessible_name
-from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP
-from mojoui.app import App, Event, Runtime, ms
+from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZE, SET_TIP, SET_TONES
+from mojoui.boardlook import board_gtk_css
+from mojoui.app import App, Event, Runtime, ms, budget_from_env
 from mojoui.canvas import Surface, rgba
 from mojoui.png import encode_png
 from mojoui.present import Presenter, gpu_canvas_gate
@@ -32,7 +34,7 @@ from mojoui.theme import Palette, Theme, Look, hex_of, mix
 from mojoui.embed import is_web_url
 from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
-from mojoui.view import NO_MSG, is_file_saver
+from mojoui.view import NO_MSG, HOLD_MS, is_file_saver
 from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
@@ -41,6 +43,7 @@ from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
 from mojoui.jobs import wake_pipe, drain_wakes
 from mojoui.tray import TrayItem
 from mojoui.geometry import register_rects
+from mojoui.regions import regions, headline_in
 from mojoui.hosts.devtools import DEVTOOLS
 from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, next_line, send_all, close_fd, link_error, MAX_LINE, LINE_NONE, LINE_BAD
 from mojoui.hosts.web import view_to_json, control_event
@@ -143,6 +146,29 @@ def tone_of(widget: Int) -> String:
 def add_class(widget: Int, name: String):
     var n = name
     external_call["gtk_widget_add_css_class", NoneType](widget, n.as_c_string_span())
+
+
+comptime TONE_CLASSES: List[String] = ["", "mui-tone-dim", "mui-tone-lift", "mui-tone-source", "mui-tone-target"]
+
+
+def board_tone(board: Node, k: Int) -> Int:
+    """Board child k's tone (Board(tones=…), kept in the Board's options), 0 when none was given."""
+    if k < len(board.options):
+        try:
+            return Int(board.options[k])
+        except:
+            return 0
+    return 0
+
+
+def set_board_tone(widget: Int, tone: Int):
+    """A Board child wears its tone's class (mojoui.boardlook's rules ease between them) and no other."""
+    var names = materialize[TONE_CLASSES]()
+    for t in range(1, len(names)):
+        if t == tone:
+            add_class(widget, names[t])
+        else:
+            remove_class(widget, names[t])
 
 
 def mark_button_labels(widget: Int):
@@ -574,6 +600,15 @@ struct GtkHost[A: App](Movable):
     var board_list: Bool  # the last build showed boards as lists
     var board_scrollers: List[Tuple[Int, Int]]  # (Board node, its GtkScrolledWindow)
     var board_drags: List[Tuple[Int, Int]]  # (Board node, its drag gesture): a Board whose objects all change keeps it
+    var hold_bi: Int  # a press on a Board child that may become a hold (Board(on_hold=…)): its index in boards, else -1
+    var hold_serial: Int  # counts presses: a hold timer that fires for an older press does nothing
+    var hold_x: Float64  # where the press was (the board's coordinates)
+    var hold_y: Float64
+    var held: Bool  # the hold was sent: letting go sends "release"
+    var hold_t0: Int  # when the press was (ns)
+    var release_hold: Bool  # a release that came mid-update, sent once it's done
+    var test_drag: Int  # (tests) the board gesture hold: pressed, for release:
+    var step_no: Int  # (tests) the step running, numbering MOJOUI_SHOTS_EACH's pictures
     var revealed: Int  # the last Board reveal token scrolled to (Board's value)
     var clip_version: Int  # the Clipboard view's version last copied
     var embed_version: Int  # the WebFrame's version last opened in the browser
@@ -682,6 +717,7 @@ struct GtkHost[A: App](Movable):
     def __init__(out self, var app: Self.A):
         self.rt = Runtime(app^)
         self.rt.trace = getenv("MOJOUI_TRACE") != ""
+        self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines)
         self.pres = 0
         self.gl_ctx = 0
         self.canvas_scale = 0
@@ -727,6 +763,15 @@ struct GtkHost[A: App](Movable):
         self.board_list = False
         self.board_scrollers = List[Tuple[Int, Int]]()
         self.board_drags = List[Tuple[Int, Int]]()
+        self.hold_bi = -1
+        self.hold_serial = 0
+        self.hold_x = 0
+        self.hold_y = 0
+        self.held = False
+        self.hold_t0 = 0
+        self.release_hold = False
+        self.test_drag = 0
+        self.step_no = 0
         self.revealed = 0
         self.reveal_pending = -1
         self.clip_version = 0
@@ -1504,6 +1549,8 @@ struct GtkHost[A: App](Movable):
                 set_index(keys, ci)
                 connect_any(keys, "key-pressed", on_key_pressed[Self.A], self_addr)
                 external_call["gtk_widget_add_controller", NoneType](w, keys)
+            if node.size == 2:  # .passthrough(): it only shows; presses go to what's under it
+                external_call["gtk_widget_set_can_target", NoneType](w, c_int(0))
             c.drag = drag
             c.scroll = scroll
             c.click = click
@@ -1523,6 +1570,8 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_widget_set_can_focus", NoneType](holder, c_int(0))  # window grabs itself by can-focus, not focusable)
             external_call["gtk_widget_set_size_request", NoneType](holder, c_int(-1 if sized else 320), c_int(-1 if node.sized_height() else 240))
             external_call["gtk_widget_set_size_request", NoneType](w, c_int(-1), c_int(-1))
+            if node.size == 2:
+                external_call["gtk_widget_set_can_target", NoneType](holder, c_int(0))
             w = holder
         elif node.kind == SEGMENTED or node.kind == TABS:
             w = external_call["adw_toggle_group_new", Int]()  # GNOME's own segmented control
@@ -1966,11 +2015,13 @@ struct GtkHost[A: App](Movable):
                     var child = self.build(c, self_addr)
                     external_call["gtk_fixed_put", NoneType](inner, child, Float64(self.rt.shown.nodes[c].x), Float64(self.rt.shown.nodes[c].y))
                     self.boards.append(BoardChild(i, c, k, child, inner, drag))
+                    set_board_tone(child, board_tone(node, k))
             # The page scrolls when it's bigger than the room it's given (both ways).
             w = external_call["gtk_scrolled_window_new", Int]()
             external_call["gtk_scrolled_window_set_policy", NoneType](w, c_int(1), c_int(1))  # automatic, automatic
             external_call["gtk_scrolled_window_set_child", NoneType](w, inner)
             add_class(inner, "mui-board")
+            add_class(w, "mui-board-scroll")  # (the sheet's frame: a theme can ring it, as the web's .board-scroll)
             self.widgets[i] = inner  # patches move and size the board's own widget
             self.board_scrollers.append((i, w))
             if node.value != 0 and node.value != self.revealed:
@@ -2530,6 +2581,7 @@ struct GtkHost[A: App](Movable):
                 self.gap_roles.append(sf.role)
                 self.gap_cols.append(sf.column_gap)
         var sheet = theme.gtk_css + (look_gtk_css(theme.look, "window." + theme.id + " ") if theme.id != "" else String(""))  # (the look's rules after the theme's own)
+        sheet += board_gtk_css(theme.palette, "window." + theme.id + " " if theme.id != "" else "", theme.look.motion.ease)  # (a Board's tones and the link UI's pieces, from any palette)
         if sheet != "":
             self.skin_provider = external_call["gtk_css_provider_new", Int]()
             external_call["gtk_css_provider_load_from_string", NoneType](self.skin_provider, sheet.as_c_string_span())
@@ -2665,6 +2717,10 @@ struct GtkHost[A: App](Movable):
                 var tip = p.text
                 external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
                 set_accessible_label(w, explicit_name(self.rt.shown.nodes[p.node]))
+            elif p.op == SET_TONES and kind == BOARD:  # (each child's tone: classes the theme eases between, mojoui.boardlook)
+                for b in self.boards:
+                    if b.board == p.node:
+                        set_board_tone(b.widget, board_tone(self.rt.shown.nodes[p.node], b.index))
             elif p.op == SET_PLACE and not self.board_list:  # (a list ignores positions)
                 ref n = self.rt.shown.nodes[p.node]
                 if kind == BOARD:
@@ -4830,6 +4886,17 @@ def on_click_released[A: App](click: Int, presses: c_int, x: Float64, y: Float64
     host[].canvas_send(ci, DOUBLE if presses == 2 else TAP, x, y, Float64(mods_of(click)), 0, 1, host_addr)  # (the first click of a double was a TAP; dx: modifiers)
 
 
+def on_release_retry[A: App](host_addr: Int) abi("C") -> c_int:
+    var host = host_at[A](host_addr)
+    if not host[].release_hold:
+        return 0
+    if busy():
+        return 1  # (again in 5 ms)
+    host[].release_hold = False
+    _ = end_hold[A](host, host_addr)
+    return 0
+
+
 def board_object[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], drag: Int) -> Int:
     """The object this board gesture is dragging (its index in host.boards), or -1."""
     var bi = get_index(drag)
@@ -4862,17 +4929,61 @@ def on_board_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: In
                 return
             host[].boards[bi].resizing = lx > w - 24 and ly > h - 24
             host[].boards[bi].active = host[].boards[bi].resizing or ly < 44  # the header moves it; the rest is the object's own
-            if not host[].boards[bi].active:
+            var holds = host[].rt.shown.nodes[host[].boards[bi].board].hint != ""  # (Board(on_hold=…): a press held still is a hold)
+            host[].held = False
+            host[].hold_bi = -1
+            if holds and not host[].boards[bi].resizing:
+                host[].hold_bi = bi
+                host[].hold_serial += 1
+                host[].hold_x = x
+                host[].hold_y = y
+                host[].hold_t0 = Int(perf_counter_ns())
+                _ = external_call["g_timeout_add", c_uint](c_uint(HOLD_MS), on_hold_timer[A], host_addr)
+            if not host[].boards[bi].active and not holds:
                 external_call["gtk_gesture_set_state", c_int](drag, c_int(2))  # GTK_EVENT_SEQUENCE_DENIED
             return
         bi -= 1
     external_call["gtk_gesture_set_state", c_int](drag, c_int(2))  # nothing under it
 
 
+def on_hold_timer[A: App](host_addr: Int) abi("C") -> c_int:
+    """HOLD_MS after a press on a Board child (Board(on_hold=…)): still pressed and still: the app hears "hold"."""
+    var host = host_at[A](host_addr)
+    var bi = host[].hold_bi
+    if bi < 0 or host[].held or bi >= len(host[].boards):
+        return 0
+    if Int(perf_counter_ns()) - host[].hold_t0 < (HOLD_MS - 10) * 1_000_000:  # (an earlier press's timer: this press's own comes)
+        return 0
+    if busy():  # (mid-update: a moment later)
+        _ = external_call["g_timeout_add", c_uint](c_uint(5), on_hold_timer[A], host_addr)
+        return 0
+    host[].held = True
+    var b = host[].boards[bi].copy()
+    var d = host[].rt.gesture(b.board, PRESS, Float64(b.index), 0, host[].hold_x, host[].hold_y, 1)
+    host[].apply(d, host_addr)
+    return 0
+
+
+def end_hold[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], host_addr: Int) -> Bool:
+    """The press ended (or moved away): a hold that was sent hears "release". True when one was."""
+    var bi = host[].hold_bi
+    var was = host[].held
+    host[].hold_bi = -1
+    host[].held = False
+    if not was or bi < 0 or bi >= len(host[].boards):
+        return False
+    var b = host[].boards[bi].copy()
+    var d = host[].rt.gesture(b.board, RELEASE, Float64(b.index), 0, host[].hold_x, host[].hold_y, 1)
+    host[].apply(d, host_addr)
+    return True
+
+
 def on_board_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr: Int) abi("C"):
+    var host = host_at[A](host_addr)
+    if host[].hold_bi >= 0 and not host[].held and abs(off_x) + abs(off_y) > 8:  # (it moved: a drag, not a hold)
+        host[].hold_bi = -1
     if busy():
         return
-    var host = host_at[A](host_addr)
     var bi = board_object[A](host, drag)
     if bi < 0:
         return
@@ -4885,11 +4996,19 @@ def on_board_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host
 
 
 def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr: Int) abi("C"):
+    var host = host_at[A](host_addr)
+    if host[].held and busy():  # (the release still counts: a moment later, once the widgets are up)
+        host[].release_hold = True
+        _ = external_call["g_timeout_add", c_uint](c_uint(5), on_release_retry[A], host_addr)
+        return
+    var was_held = end_hold[A](host, host_addr)
     if busy():
         return
-    var host = host_at[A](host_addr)
     var bi = board_object[A](host, drag)
     if bi < 0:
+        return
+    if was_held:  # (a hold on the header: the card stays where it was)
+        host[].boards[bi].active = False
         return
     host[].boards[bi].active = False
     var b = host[].boards[bi].copy()
@@ -4920,7 +5039,11 @@ def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
         var dialog = external_call["gtk_file_dialog_new", Int]()
         var title = host[].rt.shown.nodes[node].text
         external_call["gtk_file_dialog_set_title", NoneType](dialog, title.as_c_string_span())
-        accept_filter(dialog, host[].rt.shown.nodes[node].options[0] if len(host[].rt.shown.nodes[node].options) > 0 else String(""), "Files it opens")
+        var accept = host[].rt.shown.nodes[node].options[0] if len(host[].rt.shown.nodes[node].options) > 0 else String("")
+        if accept.find("folder") >= 0:  # (a picker of folders: mojoui.documentset's "a folder of documents", D-1263)
+            external_call["gtk_file_dialog_select_folder", NoneType](dialog, host[].window, 0, on_folder_picked[A], host_addr)
+            return
+        accept_filter(dialog, accept, "Files it opens")
         external_call["gtk_file_dialog_open", NoneType](dialog, host[].window, 0, on_file_picked[A], host_addr)
         return
     host[].send(node, False, "", 0, host_addr)
@@ -4975,6 +5098,24 @@ def on_file_saved[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
     external_call["g_object_unref", NoneType](file)
     if path != "":
         host[].answer(host[].picker_msg, path, host_addr)
+
+
+def on_folder_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
+    """The folder dialog closed: its folder's path goes to the FilePicker's on_pick (nothing if cancelled)."""
+    var host = host_at[A](host_addr)
+    var err = List[Int](length=1, fill=0)
+    var file = external_call["gtk_file_dialog_select_folder_finish", Int](dialog, result, Int(err.unsafe_ptr()))
+    if err[0] != 0:
+        external_call["g_error_free", NoneType](err[0])
+    external_call["g_object_unref", NoneType](dialog)
+    if file == 0:
+        return
+    var raw = external_call["g_file_get_path", Int](file)
+    var path = c_str(raw)
+    external_call["g_free", NoneType](raw)
+    external_call["g_object_unref", NoneType](file)
+    if path != "":
+        host[].answer(host[].picker_msg, path, host_addr)  # (by message, as on_file_picked: a rebuild may renumber nodes)
 
 
 def on_field_changed[A: App](entry: Int, host_addr: Int) abi("C"):
@@ -5213,6 +5354,33 @@ def on_slid[A: App](scale: Int, host_addr: Int) abi("C"):
 
 # ---------- test mode ----------
 
+def open_file[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], name: String, host_addr: Int):
+    """The open:<file> step: the first FilePicker on screen whose accept list takes the file's extension (or takes any file)
+    sends on_pick with the path, as its dialog would. A relative name is looked up in $MOJOUI_DOCUMENTS when that is set,
+    else passed as typed (the app resolves it as it resolves any path it is given)."""
+    var dot = name.rfind(".")
+    var ext = String(name[byte=dot:]).lower()
+    var path = name
+    var docs = getenv("MOJOUI_DOCUMENTS")
+    if not name.startswith("/") and docs != "":
+        path = docs + "/" + name
+    var picker = -1
+    for i in range(len(host[].rt.shown.nodes)):
+        ref n = host[].rt.shown.nodes[i]
+        if n.kind != BUTTON or n.msg2 == 0 or picker >= 0:
+            continue
+        var accept = n.options[0].lower() if len(n.options) > 0 else String("")
+        if accept == "":
+            picker = i
+        for a in accept.split(","):
+            if String(a).strip() == ext:
+                picker = i
+    if picker < 0:
+        print("TEST: no file picker takes", name)
+        return
+    host[].send(picker, True, path, 0, host_addr)
+
+
 def find(host: GtkHost, kind: Int, label: String, nth: Int, by_hint: Bool = False) -> Int:
     """The nth node of `kind` whose text (or hint) is `label` ("" = any). Canvases count the content's: the island
     (window chrome, mojoui.island) is left out of the numbers and found by its tag (canvas_node)."""
@@ -5271,6 +5439,50 @@ def report_menu_rows(host: GtkHost, menu: Int):
             print("MENUROW: " + n.text + " " + String(Int(external_call["gtk_widget_get_height", c_int](w))) + " " + String(size))
         if len(n.children) > 0:
             report_menu_rows(host, c)
+
+
+def widget_rect(host: GtkHost, widget: Int) -> List[Float64]:
+    """A widget's bounds in the window's coordinates (x, y, w, h; w = 0 when it has none)."""
+    var rect = List[Float32](length=4, fill=0)
+    var ok = external_call["gtk_widget_compute_bounds", c_int](widget, host.window, Int(rect.unsafe_ptr())) != 0
+    var out: List[Float64] = [Float64(rect[0]), Float64(rect[1]), Float64(rect[2]), Float64(rect[3])] if ok else [0.0, 0.0, 0.0, 0.0]
+    _ = len(rect)
+    return out^
+
+
+def write_regions(host: GtkHost, path: String):
+    """The regions step: each region's widget bounds (a Board: its scroller, the part on screen; a card: clipped to its
+    board's scroller, left out when scrolled away), rounded to whole pixels, written as JSON."""
+    var out = String("[")
+    var n = 0
+    for r in regions(host.rt.shown):
+        var widget = host.widgets[r.node] if r.node < len(host.widgets) else 0
+        var clip: List[Float64] = []
+        for s in host.board_scrollers:
+            if r.name == "sheet" and s[0] == r.node:
+                widget = s[1]
+            if r.board >= 0 and s[0] == r.board:
+                clip = widget_rect(host, s[1])
+        if widget == 0:
+            continue
+        var b = widget_rect(host, widget)
+        if len(clip) == 4:
+            var x0 = max(b[0], clip[0])
+            var y0 = max(b[1], clip[1])
+            var x1 = min(b[0] + b[2], clip[0] + clip[2])
+            var y1 = min(b[1] + b[3], clip[1] + clip[3])
+            b = [x0, y0, x1 - x0, y1 - y0]
+        if b[2] < 1 or b[3] < 1:
+            continue
+        out += ("," if n > 0 else "") + "{\"name\": " + json_string(r.name) + ", \"x\": " + String(Int(b[0] + 0.5)) + ", \"y\": " + String(Int(b[1] + 0.5)) + ", \"w\": " + String(Int(b[2] + 0.5)) + ", \"h\": " + String(Int(b[3] + 0.5)) + "}"
+        print("REGION: " + r.name + " " + String(Int(b[0] + 0.5)) + "," + String(Int(b[1] + 0.5)) + " " + String(Int(b[2] + 0.5)) + "x" + String(Int(b[3] + 0.5)))
+        n += 1
+    out += "]\n"
+    try:
+        with open(path, "w") as f:
+            f.write(out)
+    except e:
+        print("TEST: can't write regions to", path, e)
 
 
 def report_buttons(host: GtkHost, node: Int, tag: String):
@@ -5383,6 +5595,10 @@ def run_step[A: App](host_addr: Int, step: String):
     if verb == "tap":
         var t = split_at(rest, "@")
         var i = find(host[], BUTTON, t[0], to_int(t[1]))
+        if i < 0:  # (no button with that title: the one tagged so, as an agent names it)
+            for k in range(len(host[].rt.shown.nodes)):
+                if i < 0 and host[].rt.shown.nodes[k].kind == BUTTON and host[].rt.shown.nodes[k].name == t[0]:
+                    i = k
         if i < 0:
             print("TEST: no button", rest)
             return
@@ -5739,7 +5955,7 @@ def run_step[A: App](host_addr: Int, step: String):
         var until = perf_counter_ns() + 400_000_000  # (the widgets' pages restyle from their new tokens)
         while Int(perf_counter_ns()) < until:
             pump()
-    elif verb == "pause":  # pause:3000: keep the main loop running that long (a screen grab of the display can catch popovers)
+    elif verb == "pause" or verb == "wait":  # pause:3000 (or wait:3000): keep the main loop running that long (a screen grab of the display can catch popovers; a video plays)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until and not host[].closed:  # (a quit from the tray menu ends it too)
             pump()  # (D-1702: sleeps only when a turn found nothing to do; a 10 ms sleep after every turn starved frames:
@@ -5751,6 +5967,9 @@ def run_step[A: App](host_addr: Int, step: String):
             ref n = host[].rt.shown.nodes[k]
             if n.kind == MENU and n.style == 0 and n.text == t[0]:
                 menu = k
+        if menu < 0 and rest.find(".") > 0:  # open:clip.mp4: a file, opened the way a person would: a file picker on screen that
+            open_file(host, rest, host_addr)  # accepts it returns it (a relative name: from $MOJOUI_DOCUMENTS when set)
+            return
         if menu < 0:
             print("TEST: no menu", t[0])
             return
@@ -6116,6 +6335,8 @@ def run_step[A: App](host_addr: Int, step: String):
                 continue
             var got = accessible_label_is(host[].widgets[k], want)
             print("A11Y LABEL: #" + String(k) + " " + host[].rt.shown.nodes[k].name + " = " + want + (" (ok)" if got == "" else " (GTK: " + got + ")"))
+    elif verb == "regions":  # regions:/path.json: the window's regions (mojoui.regions) in the window's pixels, as [{"name", "x", "y", "w", "h"}]
+        write_regions(host[], rest)
     elif verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip, a drawn view's words), mid-run
         var said = False
         for ref n in host[].rt.shown.nodes:
@@ -6183,8 +6404,123 @@ def run_step[A: App](host_addr: Int, step: String):
         external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, update.as_c_string_span(), dx / 2, dy / 2)
         external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, update.as_c_string_span(), dx, dy)
         external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](g, end.as_c_string_span(), dx, dy)
+    elif verb == "hold":  # hold:<card>=ms: a press on the Board card titled <card>, held still that long (left pressed: release: lets go)
+        var kv = split_at(rest, "=")
+        var bi = board_card(host[], kv[0])
+        if bi < 0:
+            print("TEST: no card", kv[0])
+            return
+        wait_allocated(host[].boards[bi].widget)
+        ref n = host[].rt.shown.nodes[host[].boards[bi].node]
+        var w = Float64(Int(external_call["gtk_widget_get_width", c_int](host[].boards[bi].widget)))
+        var h = Float64(Int(external_call["gtk_widget_get_height", c_int](host[].boards[bi].widget)))
+        var begin = String("drag-begin")
+        host[].test_drag = host[].boards[bi].drag
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].test_drag, begin.as_c_string_span(), Float64(n.x) + w / 2, Float64(n.y) + h / 2)
+        var until = Int(perf_counter_ns()) + to_int(kv[1]) * 1_000_000
+        while Int(perf_counter_ns()) < until:
+            _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+    elif verb == "release":  # release: lets go of what hold: pressed
+        if host[].test_drag == 0:
+            print("TEST: nothing held")
+            return
+        var end = String("drag-end")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].test_drag, end.as_c_string_span(), Float64(0), Float64(0))
+        host[].test_drag = 0
+    elif verb == "timelink":  # timelink:<card>.<column>=<video>@<seconds>: that column dragged onto the video, the panel's offset set, Link
+        var kv = split_at(rest, "@")
+        run_step[A](host_addr, "linkdrag:" + kv[0])
+        settle()
+        run_step[A](host_addr, "enter:seconds=" + kv[1])
+        settle()
+        run_step[A](host_addr, "tap:Link")
+    elif verb == "linkdrag":  # linkdrag:<card>.<column>=<card>: the column's header (App.spot) dragged onto the other card, as a hand does
+        var kv = split_at(rest, "=")
+        var dot = kv[0].rfind(".")
+        if dot <= 0:
+            print("TEST: linkdrag wants card.column=card", rest)
+            return
+        var src = String(kv[0][byte=0:dot])
+        var column = String(kv[0][byte = dot + 1 :])
+        var bi = board_card(host[], src)
+        var ti = board_card(host[], kv[1])
+        if bi < 0 or ti < 0:
+            print("TEST: no card", src if bi < 0 else kv[1])
+            return
+        var ci = -1  # the source card's first canvas (its grid)
+        var cnode = first_canvas_in(host[].rt.shown, host[].boards[bi].node)
+        for k in range(len(host[].canvases)):
+            if host[].canvases[k].node == cnode:
+                ci = k
+        if ci < 0:
+            print("TEST: no canvas in", src)
+            return
+        wait_allocated(host[].canvases[ci].widget)
+        var at = host[].rt.app.spot(host[].rt.shown.nodes[cnode].style, column)
+        if at[0] < 0:
+            print("TEST: no column", column, "in", src)
+            return
+        var cr = widget_rect(host[], host[].canvases[ci].widget)
+        var fr = widget_rect(host[], host[].boards[ti].fixed)
+        ref tn = host[].rt.shown.nodes[host[].boards[ti].node]
+        var tw = Float64(Int(external_call["gtk_widget_get_width", c_int](host[].boards[ti].widget)))
+        var th = Float64(Int(external_call["gtk_widget_get_height", c_int](host[].boards[ti].widget)))
+        var x0 = fr[0] + Float64(tn.x)  # the target in the window, clipped to its board's scroller: a hand drops it where it shows
+        var y0 = fr[1] + Float64(tn.y)
+        var x1 = x0 + tw
+        var y1 = y0 + th
+        for sc in host[].board_scrollers:
+            if sc[0] == host[].boards[ti].board:
+                var vr = widget_rect(host[], sc[1])
+                x0 = max(x0, vr[0])
+                y0 = max(y0, vr[1])
+                x1 = min(x1, vr[0] + vr[2])
+                y1 = min(y1, vr[1] + vr[3])
+        var to_x = (x0 + x1) / 2 - cr[0]  # the target's middle in view, in the canvas's coordinates
+        var to_y = y0 + (y1 - y0) * 0.4 - cr[1]
+        var dx = to_x - at[0]
+        var dy = to_y - at[1]
+        var begin = String("drag-begin")
+        var update = String("drag-update")
+        var end = String("drag-end")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, begin.as_c_string_span(), at[0], at[1])
+        comptime STEPS = 8
+        for k in range(1, STEPS + 1):
+            var free_by = perf_counter_ns() + 3_000_000_000
+            while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
+                pump()
+            var f = Float64(k) / Float64(STEPS)
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(), dx * f, dy * f)
+            settle()
+            if k == STEPS - 1 and getenv("MOJOUI_SHOTS_EACH") != "":  # (the drag itself, before the drop)
+                wait_frame(host[].window)
+                save_png(host[].window, getenv("MOJOUI_SHOTS_EACH") + "-" + two_digits(host[].step_no) + "a.png")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, end.as_c_string_span(), dx, dy)
     else:
         print("TEST: unknown step", step)
+
+
+def two_digits(n: Int) -> String:
+    return ("0" if n < 10 else "") + String(n)
+
+
+def board_card(host: GtkHost, title: String) -> Int:
+    """The Board child (its index in host.boards) whose card is titled `title` (its first headline: mojoui.regions)."""
+    for k in range(len(host.boards)):
+        if headline_in(host.rt.shown, host.boards[k].node) == title:
+            return k
+    return -1
+
+
+def first_canvas_in(v: View, i: Int) -> Int:
+    """The first Canvas node inside node i (depth first), else -1."""
+    if v.nodes[i].kind == CANVAS:
+        return i
+    for c in v.nodes[i].children:
+        var f = first_canvas_in(v, c)
+        if f >= 0:
+            return f
+    return -1
 
 
 def wait_webviews[A: App](host_addr: Int):
@@ -6594,9 +6930,11 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         settle()
     if testing:
         wait_webviews[A](host_addr)
+        var each = getenv("MOJOUI_SHOTS_EACH")  # a picture after every step but the waits: <prefix>-NN.png
         for step in test_steps(steps):
             if host[].closed:
                 break
+            host[].step_no += 1
             if step != "":
                 run_step[A](host_addr, step)
             if host[].closed:  # (the `quit` step: the window is gone, as after a person closed it)
@@ -6607,6 +6945,10 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
                 var by = perf_counter_ns() + 1_000_000_000
                 while host[].reveal_pending >= 0 and perf_counter_ns() < by:  # a scroll into view waits for layout
                     pump()
+            var verb = split_at(String(step), ":")[0]
+            if each != "" and String(step) != "" and verb != "wait" and verb != "pause" and verb != "gaps":
+                wait_frame(host[].window)
+                save_png(host[].window, each + "-" + two_digits(host[].step_no) + ".png")
         if shot != "" and len(host[].canvases) > 0:  # on screen: let canvases draw what they show now
             var deadline = perf_counter_ns() + 5_000_000_000
             while not host[].canvases_drawn() and perf_counter_ns() < deadline:

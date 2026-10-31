@@ -1,0 +1,991 @@
+{
+ "app": "appcol",
+ "slug": "appcol",
+ "path": "/home/abhisheksreesaila/Projects/appcol",
+ "one_line": "Personal web app on the iPhone home screen: Shlokas (learn stanza by stanza from a PDF and a recording), House (sell-price calculator) and What-if (stay vs move).",
+ "verdict": "Not today on the iPhone: the two calculators could be rebuilt on Linux and the web now, but Shlokas needs sound, which omxcode can't play on any platform yet, and the iPhone host has never run on a phone.",
+ "buildable_today": "partly",
+ "counts": {
+  "have": 15,
+  "partial": 22,
+  "missing": 7
+ },
+ "features": [
+  {
+   "area": "Shell",
+   "feature": "Installs to the iPhone home screen (manifest, apple meta tags, icon, standalone)",
+   "app_file": "static/index.html:5",
+   "omx_piece": "none (web host serves no manifest); native UIKit app instead",
+   "evidence": "mojoui/hosts/web.py has no web manifest or apple-mobile-web-app tags; UIKit build signs but never ran on a phone (docs/components.md header)",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "missing",
+   "gap": "Web host emits a manifest, icons and apple meta from App metadata; or a signed UIKit build run on the owner's iPhone",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Tab bar: bottom bar on the phone, top islands on the computer, sliding thumb",
+   "app_file": "static/index.html:69",
+   "omx_piece": "Tabs + Overlay islands (mojoui/view.mojo)",
+   "evidence": "docs/components.md Tabs ✅ GTK/web/Android; uikit.mojo:451 draws TABS as a UISegmentedControl, not a UITabBar",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "partial",
+   "gap": "TabBar shell piece: bottom bar under compact width (UITabBar on iPhone), top pill on wide screens, spring thumb",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Shell",
+   "feature": "Auto / Light / Dark button, remembered, follows the phone, no white flash",
+   "app_file": "static/js/app.js:46",
+   "omx_piece": "App.appearance(dark) + Theme",
+   "evidence": "docs/components.md 'Light and dark from the system' ✅ GTK/web, ❌ iPhone/Android",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "UIKit traitCollection change → App.appearance; a per-app override setting",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Remembers small settings (last tab, repeats, speed) across launches",
+   "app_file": "static/js/app.js:92",
+   "omx_piece": "mojoui.sqlite (no key-value prefs API)",
+   "evidence": "docs/components.md SQLite ✅ GTK/web, ❌ iPhone/Android",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "mojoui.prefs: a tiny per-app key-value store (file / localStorage / NSUserDefaults / SharedPreferences)",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Deep links open a stanza (#/s/<id>/practise/<n>), back button works",
+   "app_file": "static/js/app.js:103",
+   "omx_piece": "Route (mojoui/route.mojo)",
+   "evidence": "tests/test_route.mojo; docs/components.md Route ✅ GTK/web, ❌ iPhone/Android",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Route on UIKit and Android (URL schemes / universal links into the same messages)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Toasts ('Not saved…', 'Every stanza learned')",
+   "app_file": "static/js/app.js:33",
+   "omx_piece": "Toast",
+   "evidence": "docs/components.md Toast ✅ GTK/web (kit), 🔨 iPhone",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Bottom sheets with scrim and grab handle (every value edit, add, menus)",
+   "app_file": "static/js/app.js:36",
+   "omx_piece": "Dialog / Popover (UIKit presents adaptively)",
+   "evidence": "docs/components.md Dialog, Popover ✅ GTK/web, 🔨 iPhone; uikit.mojo:1585 presentFloating; no detents, no drag-to-dismiss, no bottom-sheet look on GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Sheet component: UISheetPresentationController with detents on iPhone, a bottom sheet that drags to dismiss on web/GTK/Android, Liquid settle",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Shell",
+   "feature": "Sliders a finger can tap or drag anywhere on the band (not just the thumb)",
+   "app_file": "static/js/app.js:65",
+   "omx_piece": "Slider",
+   "evidence": "docs/components.md Slider ✅ GTK/web/Android, 🔨 iPhone (UISlider, thumb-only by default, uikit.mojo:386)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "partial",
+   "gap": "Slider(track_taps=True): a tap or drag on the track moves the thumb on every host",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Passcode gate online (one sign-in page, 400-day cookie, lockout after 10 tries)",
+   "app_file": "app/gate.py:67",
+   "omx_piece": "none",
+   "evidence": "mojoui/hosts/web.py has no sign-in or session cookie gate",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "Web host auth hook (passcode or fh-saas sign-in in front of every session)",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Saves each app's state to SQLite a moment after the last change; survives restart",
+   "app_file": "app/store.py:13",
+   "omx_piece": "mojoui.sqlite + Timers (App.every)",
+   "evidence": "docs/components.md SQLite ✅ GTK/web, ❌ iPhone/Android; Timers ✅ GTK/web, ❌ iPhone",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "mojoui.sqlite and Timers on UIKit (libsqlite3 ships with iOS; NSTimer)",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Same data on the phone and the computer (mark on the Mac, practise on the phone)",
+   "app_file": "app/main.py:41",
+   "omx_piece": "Web host sessions over one server database; mojoui.http for a native client",
+   "evidence": "web host runs the app server-side per session (web.py:1732 /e/{sid}); docs/components.md HTTP ✅ GTK/web, ❌ iPhone/Android",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "HTTP on UIKit (NSURLSession) so a native phone app syncs with the server",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Shell",
+   "feature": "Runs online away from home Wi-Fi (Railway, a /data volume)",
+   "app_file": "docs/plan.md:51",
+   "omx_piece": "Web host (FastHTML, Python)",
+   "evidence": "never deployed or checked over a real network; every tap and slider move is a server round-trip (web.py header: HTMX posts events, canvas frames streamed as JPEG)",
+   "hosts": {
+    "linux": "❌",
+    "web": "🔨",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "A deploy recipe for the web host and a latency check over a phone network",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Library: Learning / Saved / Done / Archived, progress per shloka, 'continue' card",
+   "app_file": "static/js/shlokas.js:31",
+   "omx_piece": "Segmented, Card, ProgressBar, LazyList, Lists",
+   "evidence": "docs/components.md: all ✅ GTK/web, 🔨 iPhone",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Add: paste a PDF link and an mp3 or YouTube link",
+   "app_file": "static/js/shlokas.js:98",
+   "omx_piece": "TextField + Dialog",
+   "evidence": "docs/components.md TextField ✅ GTK/web/Android",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Server downloads the PDF and audio (yt-dlp for YouTube) in the background; library polls 'preparing'",
+   "app_file": "app/shloka_routes.py:27",
+   "omx_piece": "mojoui.jobs (start_ui_job) + mojoui.http + Python interop",
+   "evidence": "docs/ui-threads.md jobs; HTTP ✅ GTK/web; no checked download-to-file API; yt-dlp would be Python interop in a job",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Http.download(url, path) with progress on a job thread",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "PDF pages as images; stanza bands found from the bold stanza numbers",
+   "app_file": "app/shloka.py:24",
+   "omx_piece": "PdfSource (mojoui/pdfsource.mojo)",
+   "evidence": "PdfSource ✅ GTK/web (render, text_words); its words carry no font name or weight, so 'bold numbers' can't be found",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "🔨"
+   },
+   "status": "partial",
+   "gap": "PdfSource words with font, size and bold",
+   "size": "S",
+   "eta": "this week",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Pause detection, waveform peaks and 'Suggest' markers from a 2-hour recording",
+   "app_file": "app/shloka.py:151",
+   "omx_piece": "mojoui.audio.load_wav only (no decoder for mp3)",
+   "evidence": "mojoui/audio.mojo: microphone + load_wav; video.mojo shows the ffmpeg-pipe pattern but there is no AudioSource",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "AudioSource: any audio file to PCM (ffmpeg pipe now, libav later), plus pauses/peaks on the GPU",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Plays one stanza on a tight loop, ×1–×10 or ∞, with a breath between repeats",
+   "app_file": "static/js/shloka/player.js:1",
+   "omx_piece": "none",
+   "evidence": "no audio output anywhere in mojoui (grep: only Microphone); Player plays video frames without sound",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "mojoui.sound: Sound(path) play/pause/seek/time/loop(segment) — PipeWire on Linux, <audio> on web, AVAudioPlayer on Mac/iPhone, MediaPlayer on Android",
+   "size": "L",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Speed 0.5×–1× without chipmunk pitch, ramping up to 1× over the repeats",
+   "app_file": "static/js/shloka/player.js:44",
+   "omx_piece": "none",
+   "evidence": "no playback, so no rate or time-stretch",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "Sound.rate with pitch kept (AVAudioUnitTimePitch, browser preservesPitch, WSOLA in Mojo on Linux)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Keeps looping with the phone locked or the app in the background",
+   "app_file": "static/js/shloka/player.js:9",
+   "omx_piece": "none",
+   "evidence": "no audio session or background mode on UIKit (background() is GTK-only, docs/components.md)",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "iOS audio session + UIBackgroundModes audio, lock-screen Now Playing controls",
+   "size": "M",
+   "eta": "2027",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Practise page: the PDF page with the stanza's band lit",
+   "app_file": "static/js/shloka/pdfview.js:12",
+   "omx_piece": "Document card (mojoui/documentcard.mojo) + Picture",
+   "evidence": "docs/components.md Document card ✅ GTK/web, ❌ Mac/iPhone/Android; it wears Board chrome",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "DocumentView: the document card without Board chrome, on the Apple canvas and Android",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Double-tap the page to zoom into the band, again to go back (spring)",
+   "app_file": "static/js/shloka/pdfview.js:59",
+   "omx_piece": "Canvas DOUBLE + Spring",
+   "evidence": "docs/components.md 'Canvas: press, release, double' ✅ GTK/web, 🔨 iPhone, ❌ Android; Spring ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "zoom_to(box) with a spring inside DocumentView",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Swipe left/right for the next or previous stanza",
+   "app_file": "static/js/shloka/pdfview.js:77",
+   "omx_piece": "Canvas PAN",
+   "evidence": "docs/components.md 'Canvas: pan, zoom, tap' ✅ GTK/web/Android, 🔨 iPhone; no swipe/pager helper",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "partial",
+   "gap": "Pager: swipe between pages with a spring, on any view",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Strip of stanza numbers, current one scrolled into view, learned ones ticked",
+   "app_file": "static/js/shlokas.js:207",
+   "omx_piece": "Scroll + Button (Board has reveal; Scroll doesn't)",
+   "evidence": "mojoui/view.mojo:583 reveal is Board-only",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "partial",
+   "gap": "Scroll(reveal=index) on every host",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Playback sheet: repeats slider (×1–×10, ∞), speed slider, 'Speed up' toggle",
+   "app_file": "static/js/shlokas.js:216",
+   "omx_piece": "Slider + Toggle + Dialog",
+   "evidence": "docs/components.md Slider, Toggle ✅ GTK/web/Android",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "✓ marks a stanza learned (tap again to undo); all learned → done",
+   "app_file": "static/js/shlokas.js:259",
+   "omx_piece": "Button(style=ICON_ON)",
+   "evidence": "docs/components.md 'Icon toggle shown pressed' ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Mark tool timeline: waveform, playhead, scrub, wheel and pinch zoom, tap a band",
+   "app_file": "static/js/shloka/timeline.js:12",
+   "omx_piece": "Canvas (PAN, ZOOM, TAP, WHEEL) + MediaTimeline / Time lane",
+   "evidence": "docs/components.md Canvas gestures ✅ GTK/web; MediaTimeline is video-only (filmstrip), no waveform lane",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Waveform lane for MediaTimeline once AudioSource exists",
+   "size": "S",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Big Start N / End N button; Space, P, Z, arrows on the keyboard; Undo",
+   "app_file": "static/js/shlokas.js:300",
+   "omx_piece": "Canvas KEY + Item(shortcut=)",
+   "evidence": "docs/components.md 'Canvas: keys' ✅ GTK/web, ❌ Apple; shortcuts need a menu item or a focused canvas",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "App-level shortcuts without a menu (App.shortcuts()), on every host",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Stanza list beside the page (click a row or ↑/↓ to fix one)",
+   "app_file": "static/js/shlokas.js:310",
+   "omx_piece": "Lists + LazyList",
+   "evidence": "docs/components.md Lists ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Mark tool only on wide screens; phone gets Practise",
+   "app_file": "static/js/shlokas.js:11",
+   "omx_piece": "App.window_size()",
+   "evidence": "mojoui/app.mojo:128 window_size; web.py:2001 /resize reaches the app",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shlokas",
+   "feature": "Markers saved on every tap, merged atomically with the server's preparation",
+   "app_file": "app/store.py:55",
+   "omx_piece": "mojoui.sqlite begin/commit",
+   "evidence": "docs/components.md SQLite ✅ GTK/web (jot, goal 42)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "House",
+   "feature": "Hero number, money as $1,234,567 / −$… / $1.6M",
+   "app_file": "static/js/house.js:10",
+   "omx_piece": "mojoui.numformat (CURRENCY, COMPACT)",
+   "evidence": "docs/components.md 'Column number formats' ✅ GTK/web, 🔨 iPhone",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "🔨"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "House",
+   "feature": "Sale price ruler: a slider over a $600k window with $ ticks",
+   "app_file": "static/js/house.js:84",
+   "omx_piece": "Slider (+ Canvas for ticks)",
+   "evidence": "Slider ✅ GTK/web/Android; no tick labels on Slider",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "partial",
+   "gap": "Slider ticks and labels",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "House",
+   "feature": "Value rows: tap → sheet with slider, presets and keypad; or scrub the value sideways",
+   "app_file": "static/js/house.js:110",
+   "omx_piece": "Button rows + Dialog + Slider + Segmented; drag only on Canvas/Draggable",
+   "evidence": "Draggable 🔨 GTK, ✅ web, ❌ iPhone; no drag-to-scrub on a plain value",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Scrubber: a value you drag sideways to change, on every host",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "House",
+   "feature": "Proceeds waterfall (a bar per cost, sized to the sale)",
+   "app_file": "static/js/house.js:100",
+   "omx_piece": "Meter (chart rows) / ChartView bars",
+   "evidence": "docs/components.md Meter ✅ GTK/web, ChartView ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "House",
+   "feature": "+ chips add extra costs; remove a row; location picks the transfer tax",
+   "app_file": "static/js/house.js:21",
+   "omx_piece": "Chip, Dropdown / Menu",
+   "evidence": "docs/components.md Chip, Dropdown ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "House",
+   "feature": "Sale maths (commission, transfer tax, escrow, exclusion, fed + NIIT + CA) and the insight line",
+   "app_file": "static/js/house-calc.js:1",
+   "omx_piece": "plain Mojo in update()",
+   "evidence": "no framework piece needed; testable like tests/js/house-calc.test.mjs with mojo test",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "What-if",
+   "feature": "Stay and Move ledgers; add my own credit/debit lines (months, growth, one-off)",
+   "app_file": "static/js/whatif.js:112",
+   "omx_piece": "Lists, TextField, Segmented, Toggle",
+   "evidence": "docs/components.md ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "What-if",
+   "feature": "Running-gap line chart, Stay vs Move, redrawn while I drag",
+   "app_file": "static/js/whatif.js:140",
+   "omx_piece": "ChartView.line",
+   "evidence": "mojoui/chartview.mojo:64: one money series plus a 0–1 share; two money series need the Flint spec; on the web each redraw is a streamed JPEG",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "🔨"
+   },
+   "status": "partial",
+   "gap": "ChartView.lines(series…): any number of series on one axis",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "What-if",
+   "feature": "Verdict, break-even rent, 24/48-month toggle",
+   "app_file": "static/js/whatif.js:87",
+   "omx_piece": "Card + Segmented",
+   "evidence": "docs/components.md ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "✅"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "What-if",
+   "feature": "Edit sheet with an amount slider; typing after a slide starts a new number",
+   "app_file": "static/js/whatif.js:243",
+   "omx_piece": "Dialog + Slider + TextField",
+   "evidence": "docs/components.md ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": null,
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Look",
+   "feature": "omxqua look: tonal surfaces, one soft shadow, violet Money and amber Shlokas accents",
+   "app_file": "static/index.html:2",
+   "omx_piece": "themes/omxqua.mojo",
+   "evidence": "themes/omxqua.mojo carries the Developer (graphite) family only; no Money/amber families",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "omxqua families (money, amber…) as theme options",
+   "size": "S",
+   "eta": "this week",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Look",
+   "feature": "Liquid motion: springs, sheets that settle, the tab thumb that slides",
+   "app_file": "static/css/app.css:1",
+   "omx_piece": "mojoui/spring.mojo (Canvas only)",
+   "evidence": "Spring ✅ GTK/web on canvases; native controls get no spring transitions",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Springs on native views (sheet settle, tab thumb, press)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Look",
+   "feature": "Every touch target ≥ 48 px, checked by a test",
+   "app_file": "tests/test_touch_targets.py:1",
+   "omx_piece": "none (mojoui/a11y.mojo has no size rule)",
+   "evidence": "no check measures target sizes",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "A check that fails a tappable view under 44–48 pt on every host",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  }
+ ],
+ "wins": [
+  {
+   "what": "Pause detection and waveform peaks for a 2-hour class in the same Mojo program, on the GPU where there is one, instead of numpy in a separate server step",
+   "evidence": "unproven (no AudioSource yet); the same pattern is proven for video: mojoui/videotable.mojo, goal 41"
+  },
+  {
+   "what": "Agent-native for free: 'mark stanza 12 learned', 'set the sale price to $1.7M' as MCP tools with no per-app code",
+   "evidence": "docs/agent.md; docs/components.md Agent column: Button, TextField, Toggle, Segmented ✅; Slider 🔨"
+  },
+  {
+   "what": "One app for the computer's mark tool and the phone's practise page, native on each, instead of one responsive web page",
+   "evidence": "unproven on the phone (UIKit never ran on hardware); GTK and web ✅"
+  },
+  {
+   "what": "A native phone app could work offline with the PDFs and audio on the device; appcol needs its server for every screen",
+   "evidence": "unproven (needs SQLite, Sound and HTTP on UIKit)"
+  },
+  {
+   "what": "Sale and stay-vs-move maths as plain typed Mojo, tested with mojo test, shared by every host",
+   "evidence": "pattern used across examples (e.g. examples/expenses); not built for this app"
+  }
+ ],
+ "top_gaps": [
+  {
+   "gap": "No sound output on any platform",
+   "piece": "mojoui.sound: Sound(path) play/pause/seek/time/loop(segment), rate with pitch kept",
+   "size": "L",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Plays one stanza on a tight loop, ×1–×10 or ∞, with a breath between repeats",
+    "Speed 0.5×–1× without chipmunk pitch, ramping up to 1× over the repeats",
+    "Mark tool timeline: waveform, playhead, scrub, wheel and pinch zoom, tap a band"
+   ]
+  },
+  {
+   "gap": "iPhone host never run on a phone; SQLite, HTTP, Timers, appearance missing on UIKit",
+   "piece": "UIKit host: run on the owner's iPhone, then mojoui.sqlite, mojoui.http, Timers, appearance on UIKit",
+   "size": "L",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Installs to the iPhone home screen (manifest, apple meta tags, icon, standalone)",
+    "Saves each app's state to SQLite a moment after the last change; survives restart",
+    "Same data on the phone and the computer (mark on the Mac, practise on the phone)",
+    "Auto / Light / Dark button, remembered, follows the phone, no white flash"
+   ]
+  },
+  {
+   "gap": "No audio decoding or analysis",
+   "piece": "AudioSource (file → PCM via ffmpeg) + GPU pauses/peaks",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Pause detection, waveform peaks and 'Suggest' markers from a 2-hour recording",
+    "Mark tool timeline: waveform, playhead, scrub, wheel and pinch zoom, tap a band"
+   ]
+  },
+  {
+   "gap": "No bottom sheet",
+   "piece": "Sheet: detents and drag-to-dismiss on every host",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Bottom sheets with scrim and grab handle (every value edit, add, menus)"
+   ]
+  },
+  {
+   "gap": "Document card only on GTK and web, and only as a Board card",
+   "piece": "DocumentView (no Board chrome) on the Apple canvas and Android, with zoom_to(box) and a Pager",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Practise page: the PDF page with the stanza's band lit",
+    "Double-tap the page to zoom into the band, again to go back (spring)",
+    "Swipe left/right for the next or previous stanza"
+   ]
+  },
+  {
+   "gap": "Web host can't be a home-screen app or sit behind a passcode",
+   "piece": "Web host manifest/icons/apple meta + an auth hook",
+   "size": "S",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Installs to the iPhone home screen (manifest, apple meta tags, icon, standalone)",
+    "Passcode gate online (one sign-in page, 400-day cookie, lockout after 10 tries)"
+   ]
+  },
+  {
+   "gap": "Background audio on the iPhone",
+   "piece": "iOS audio session, background mode, Now Playing",
+   "size": "M",
+   "eta": "2027",
+   "unblocks": [
+    "Keeps looping with the phone locked or the app in the background"
+   ]
+  }
+ ]
+}

@@ -39,7 +39,7 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "sketch", "jot", "dictate", "keeper", "traycheck"],  # (keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media", "sketch", "jot", "dictate", "keeper", "traycheck"],  # (keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; media: goal 39 M2/M11 run it headless; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
     "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot"],  # (kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
@@ -70,6 +70,9 @@ FEATURES = [
     ("Board: drag, resize, snap", "Board(on_move, on_resize)", r"\bBOARD\b", "workbook"),
     ("Board: scrolls, reveals a child", "Board(reveal=, reveal_count=)", r"reveal", "workbook"),
     ("Board: phone-width list", "(automatic under 720 pt)", r"board_list|max-width: 719px", "workbook"),
+    ("Board: tones (dimmed, lifted, held, a drop target)", "Board(tones=[BOARD_DIM, BOARD_LIFT, …])", r"SET_TONES", "omxplorer"),
+    ("Board: hold a child (350 ms, still)", "Board(on_hold=…)", r"on_hold_timer|data-hold", "omxplorer"),
+    ("Canvas: click-through (shows only)", "Canvas(…).passthrough()", r"node\.size == 2|data-passthrough", "omxplorer"),
     ("Overlay islands", "Overlay(base, *islands) + .pin(h, v)", r"\bOVERLAY\b", "workbook"),
     ("Themes on top (themes/, or yours)", "def theme(self) -> Theme", r"gtk_css|web_css|theme_key|paint_native|mod\.theme", "themes"),
     ("Sentence with tappable words", "Sentence([Word(…)]) · Button(style=TOKEN)", r"\bTOKEN\b|mui-token|button\.token", "omxplorer"),
@@ -117,6 +120,8 @@ COMPOSITES = [
     ("Toolbar · FormulaBar · StatusBar", "mojoui/sheetchrome.mojo", ["Toolbar button (icon over label)", "TextField", "Text"], "Toolbar("),
     ("Format toggles (Bold, Italic, Align…)", "mojoui/sheetchrome.mojo", ["Icon toggle shown pressed", "Lucide icon set", "Tooltips", "Divider"], "toggles="),
     ("Bottom tabs, renamed in place", "mojoui/sheetchrome.mojo", ["Button", "In-place editor", "Quiet buttons"], "BottomTabs("),
+    ("Rail (a slim column of icon tools beside the sheet: role sidebar)", "mojoui/sheetchrome.mojo", ["Button with an icon", "Tooltips", "VStack"], "Rail("),
+    ("Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)", "mojoui/regions.mojo", [], "regions("),
     ("Cell styles (bold, italic, underline, strikethrough, colours, alignment)", "mojoui/cellstyle.mojo", ["Canvas"], "restyle("),
     ("Island (the window's living status: work, results, undo, errors)", "mojoui/island.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas frames (animation)"], "IslandView("),
     ("Swatch picker", "mojoui/swatches.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Popover"], "SwatchPicker("),
@@ -133,6 +138,14 @@ COMPOSITES = [
     ("Skeleton", "mojoui/skeleton.mojo", ["VStack", "Themes on top (themes/, or yours)"], "Skeleton("),
     ("Markdown", "mojoui/markdown.mojo", ["Paragraph", "Text", "VStack", "HStack", "Card", "Themes on top (themes/, or yours)"], "Markdown("),
     ("Sparkline", "mojoui/sparkline.mojo", ["Canvas"], "SparklineView("),
+    # goal 39: media (a file component: no view of its own; Player, GPU image ops and the frame table build on it)
+    ("VideoSource (a video file as RGBA frames: open, next, seek, read)", "mojoui/video.mojo", [], "VideoSource("),
+    ("Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)", "mojoui/player.mojo", ["Canvas", "Canvas frames (animation)", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)", "Quiet buttons", "Card"], "Player("),
+    ("TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor", "mojoui/timeseries.mojo", ["Canvas"], "TimeSeries("),
+    ("Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)", "mojoui/picture.mojo", ["Canvas"], "Picture.opening("),
+    ("Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)", "mojoui/mediacard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons", "ProgressBar"], "MediaCards("),
+    ("MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)", "mojoui/mediatimeline.mojo", ["Canvas", "Canvas frames (animation)", "Canvas: pan, zoom, tap", "Canvas: keys (focus on press)", "Overlay", "ContextMenu", "Card", "Quiet buttons"], "MediaTimeline.open_with("),
+    ("Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)", "mojoui/tablecard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Quiet buttons"], "TableCards("),
     # page components (goal 33 M5–M7, made generic in M7: D-414)
     ("App shell (bar, brand, nav links, page card)", "mojoui/shell.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Shell("),
     ("Page header (icon square, pill tabs, segments, tab header)", "mojoui/header.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PageHeader("),
@@ -152,6 +165,40 @@ COMPOSITES = [
     # agents (goal 35)
     ("GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)", "mojoui/genui.mojo", ["Card", "Text", "Paragraph", "Table", "Canvas", "Button", "TextField", "Toggle", "Segmented", "ProgressBar", "VStack", "HStack", "Divider"], "GenUi("),
     ("LogPane (a live log with its head, Hide log, coloured lines)", "mojoui/logview.mojo", ["Scroll pinned to its end", "Text", "Button", "Icon", "Themes on top (themes/, or yours)"], "LogPane("),
+    # media (goal 39)
+    ("ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)", "mojoui/imageops.mojo", ["Canvas"], "ImageOps("),
+    ("VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)", "mojoui/videotable.mojo", [], "scan_with("),
+    ("VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)", "mojoui/videoexport.mojo", [], "cut("),
+    ("Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)", "mojoui/vision_presets.mojo", [], "warehouse_analyzer("),
+    ("Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)", "mojoui/geo.mojo", [], "georeference("),
+    ("Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)", "mojoui/inspection.mojo", [], "compare("),
+    ("Video jobs (analyze with a registered analyzer, make a reel from a table's flag, as background jobs with progress; rows as a table, lookups that find their key)", "mojoui/videojobs.mojo", [], "analyze_job("),
+    ("MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)", "mojoui/mapview.mojo", ["Canvas"], "MapView("),
+    ("Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)", "mojoui/trackcard.mojo", ["Board: drag, resize, snap", "Canvas", "Card", "Segmented", "Quiet buttons"], "TrackCards("),
+    ("Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)", "mojoui/inspection_tables.mojo", [], "compare_tables("),
+    # documents (goal 41 M7)
+    ("PdfSource (a PDF's pages as RGBA pictures at any dpi, page sizes in points, points ↔ pixels; its text layer for checks)", "mojoui/pdfsource.mojo", [], "PdfSource("),
+    ("Document card (a PDF page on a card: page through, zoom, pan, highlight a box in page points; Board chrome, quiet actions)", "mojoui/documentcard.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Canvas: press, release, double", "Canvas: keys (focus on press)", "Card", "Quiet buttons", "ProgressBar"], "DocumentCard("),
+    ("OcrModel (the reader slot: docTR in process, words with boxes and confidence; a page's picture read into rows)", "mojoui/ocrmodel.mojo", [], "OcrModel("),
+    ("TextTable (words as rows: page, text, box, confidence; CSV in and out)", "mojoui/texttable.mojo", [], "TextTable("),
+    ("Form fields (a label's value by geometry: right on its line or under it; the labels are data)", "mojoui/formfields.mojo", [], "find_fields("),
+    ("Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)", "mojoui/documentjobs.mojo", [], "DocumentFeed("),
+    # links (goal 41)
+    ("Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)", "mojoui/links.mojo", ["Button", "TextField", "Dropdown", "Text", "VStack"], "Links("),
+    ("Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)", "mojoui/inspection_tables.mojo", [], "compare_job("),
+    ("FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)", "mojoui/framefeed.mojo", [], "FrameFeed("),
+    ("Table jobs (Insert > Table, a SQL query, Export CSV as jobs that wake the UI; the answer placed as a card)", "mojoui/tablejobs.mojo", [], "TableWork("),
+    ("Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)", "mojoui/linkdrag.mojo", ["Board: tones (dimmed, lifted, held, a drop target)", "Button", "TextField", "ProgressBar", "Text"], "LinkDrag("),
+    ("Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)", "mojoui/peek.mojo", ["Board: hold a child (350 ms, still)", "Board: tones (dimmed, lifted, held, a drop target)", "Canvas: click-through (shows only)", "Canvas frames (animation)", "Text"], "Peek("),
+    ("Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)", "mojoui/timelane.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "TimeLane."),
+    ("Spring (a value that settles like a spring, stepped by display frames)", "mojoui/spring.mojo", ["Canvas frames (animation)"], "Spring("),
+    ("Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)", "mojoui/videocard.mojo", [], "VideoWork("),
+    # the claim, end to end (goal 41 M10)
+    ("Document set (a folder of PDFs as one card: page through files, the fields to read as labels (data), Read → a table of fields per file; a linked row shows its file with the chosen field marked)", "mojoui/documentset.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Card", "TextField", "Dropdown", "Quiet buttons", "ProgressBar"], "DocumentSet("),
+    ("Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)", "mojoui/documentjobs.mojo", [], "FolderFeed("),
+    ("Ask → SQL (JOIN LINKED: the joins the sheet's key links imply; an answer's lineage, so its rows follow like its source's; questions taught with their SQL)", "mojoui/asksql.mojo", [], "implied_sql("),
+    ("Pack PDF (a title and pages of blocks: facts, words, a table, a PDF page or a video frame with boxes marked; HTML printed to PDF by Chromium)", "mojoui/packpdf.mojo", [], "Pack("),
+    ("Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)", "mojoui/pack.mojo", [], "PackJob("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
@@ -201,9 +248,9 @@ def composes(example, ctor, module):
     (agentchat's GenUi comes from mojoui.agentui's Screens since goal 35's review). Import level, not proof the app
     reaches the call: an app checked to run the composite another way is what turns a cell ✅."""
     text = example_text(example)
-    if ctor in text:
-        return True
     call = re.compile(rf"(?<!def )\b{re.escape(ctor.rstrip('('))}\(")
+    if re.search(rf"\b{re.escape(ctor)}", text):  # (a whole name: Timeline( isn't MediaTimeline()
+        return True
     for mod in dict.fromkeys(re.findall(r"^from (mojoui(?:\.\w+)+) import", text, re.M)):
         f = ROOT / (mod.replace(".", "/") + ".mojo")
         if not f.exists() or f.relative_to(ROOT).as_posix() == module:

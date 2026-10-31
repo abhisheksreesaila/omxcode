@@ -4,14 +4,15 @@
 # The HTML is made in Python by mojoui/hosts/web.py.
 
 from mojoui.look import look_web_css
+from mojoui.boardlook import board_web_css
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
-from mojoui.view import View, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LAZYLIST, CANVAS, PARAGRAPH
+from mojoui.view import View, BUTTON, DROPDOWN, IMAGE, SEGMENTED, RADIO, TABS, ALERT, LAZYLIST, CANVAS, PARAGRAPH
 from mojoui.paragraph import link_href
 from mojoui.a11y import explicit_name
 from mojoui.diff import Diff
-from mojoui.app import App, Event, Runtime
+from mojoui.app import App, Event, Runtime, budget_from_env
 from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
 from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
@@ -90,6 +91,7 @@ struct WebSession[A: App](Movable):
 
     def __init__(out self):
         self.rt = Runtime(Self.A())
+        self.rt.watch(budget_from_env())  # MOJOUI_BUDGET_MS: the slow-frame watchdog (SLOW: lines in the server's log)
         self.pixels = List[UInt32]()
 
 
@@ -128,6 +130,7 @@ def web_theme[A: App](handle: Int) -> String:
     its style sheet (D-260), and its tokens as JSON for widgets' theme(el, tokens) (goal 34b)."""
     var t = session_at[A](handle)[].app.theme()
     var sheet = t.web_css + (look_web_css(t.look, "body." + t.id + " ") if t.id != "" else String(""))  # (the look's rules after the theme's own: hover and :focus rules stay more specific)
+    sheet += board_web_css(t.palette, "body ", t.look.motion.spring)  # (a Board's tones and the link UI's pieces, from any palette)
     var vars = (palette_css(t.palette) + tokens_css(t)) if t.id != "" else String("")
     return t.id + chr(31) + t.classes + chr(31) + vars + chr(31) + sheet + chr(31) + theme_tokens(t)
 
@@ -213,6 +216,8 @@ def control_event(shown: View, node: Int, second: Bool, text: String, number: In
         return Event(0, "", 0)
     ref n = shown.nodes[node]
     var message = n.msg2 if second else n.msg
+    if second and n.kind == BUTTON and n.msg2 == 0 and n.size != 0 and len(n.options) > 0:  # a button's other face (View.alternate)
+        message = n.size
     if message == 0:
         return Event(0, "", 0)
     var event_text = text
@@ -309,6 +314,15 @@ def web_describe[A: App](handle: Int, node: Int, first: Int, count: Int) -> Stri
     if node < 0 or node >= len(rt[].shown.nodes) or rt[].shown.nodes[node].kind != CANVAS:
         return ""
     return rt[].app.describe(rt[].shown.nodes[node].style, first, count)
+
+
+def web_spot[A: App](handle: Int, node: Int, name: String) -> String:
+    """App.spot for canvas node `node`: "x,y" in points ("-1,-1" when there's none)."""
+    var rt = session_at[A](handle)
+    if node < 0 or node >= len(rt[].shown.nodes):
+        return "-1,-1"
+    var at = rt[].app.spot(rt[].shown.nodes[node].style, name)
+    return String(at[0]) + "," + String(at[1])
 
 
 def web_image[A: App](handle: Int, node: Int) -> String:

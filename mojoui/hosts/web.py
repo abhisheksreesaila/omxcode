@@ -44,7 +44,7 @@ CHOICES = (DROPDOWN, SEGMENTED, RADIO, TABS)  # value = selected index
 BODY, TITLE, HEADLINE, CAPTION = 0, 1, 2, 3
 PLAIN, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, TOOL, TOOL_ON, ICON_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 START, CENTER, END = 1, 2, 3
-SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TIP = 1, 2, 3, 4, 5, 6, 7, 8
+SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TIP, SET_TONES = 1, 2, 3, 4, 5, 6, 7, 8, 9
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
 CHECKED, DISABLED, DANGER = 1, 2, 4  # menu item flags (mojoui/menus.mojo)
@@ -363,7 +363,31 @@ BOARD_JS = r"""
       const key = p.dataset.sid + '/' + p.dataset.node, token = Number(d.reveal || 0);
       if (token && revealed[key] !== token) { revealed[key] = token; requestAnimationFrame(() => reveal(p, token)); }
     }
-    else { p.style.left = d.x + 'px'; p.style.top = d.y + 'px'; p.dataset.x = d.x; p.dataset.y = d.y; }
+    else { p.style.left = d.x + 'px'; p.style.top = d.y + 'px'; p.dataset.x = d.x; p.dataset.y = d.y; p.dataset.tone = d.tone || '0'; }
+  }
+  // Board(on_hold=…): a press on an object held still for HOLD_MS is a hold (number PRESS, x = its index); letting go
+  // after it sends RELEASE. Any press counts (a canvas's too: its own gestures still run), but not on a control.
+  const HOLD_MS = 350, PRESS = 4, RELEASE = 5;
+  function holds(board) {
+    if (board.mojouiHolds) return;
+    board.mojouiHolds = true;
+    board.addEventListener('pointerdown', e => {
+      if (board.dataset.hold !== '1' || e.button !== 0) return;
+      const obj = e.target.closest('.object');
+      if (!obj || obj.parentElement !== board || e.target.closest('input, textarea, select, button, a, [contenteditable]')) return;
+      const x0 = e.clientX, y0 = e.clientY, index = Number(obj.dataset.index);
+      let held = false, done = false;
+      const post = number => htmx.ajax('POST', `/e/${board.dataset.sid}`, { values: { n: Number(board.dataset.node), number,
+        x: index, y: 0, dx: x0, dy: y0, zoom: 1, v: shape() }, swap: 'none', source: window.mojouiLane('board') });
+      const timer = setTimeout(() => { if (!done) { held = true; post(PRESS); } }, HOLD_MS);
+      const move = ev => { if (!held && Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) > 8) finish(null); };
+      const finish = ev => {
+        done = true; clearTimeout(timer);
+        window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', finish, true); window.removeEventListener('pointercancel', finish, true);
+        if (held && ev) post(RELEASE);
+      };
+      window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', finish, true); window.addEventListener('pointercancel', finish, true);
+    }, true);
   }
   function attach(board) {
     if (board.mojouiBoard) return;
@@ -397,7 +421,7 @@ BOARD_JS = r"""
       obj.addEventListener('pointermove', move); obj.addEventListener('pointerup', up); obj.addEventListener('pointercancel', up);
     });
   }
-  const scan = () => { document.querySelectorAll('[data-kind=board]').forEach(attach); document.querySelectorAll('[data-kind=place]').forEach(place); };
+  const scan = () => { document.querySelectorAll('[data-kind=board]').forEach(b => { attach(b); holds(b); }); document.querySelectorAll('[data-kind=place]').forEach(place); };
   scan();
   new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
 })();
@@ -524,6 +548,7 @@ CANVAS_JS = r"""
           }
           const img = await createImageBitmap(await res.blob());
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
+          if (div.dataset.passthrough === '1') g.clearRect(0, 0, cv.width, cv.height);  // (its alpha: the last frame mustn't show through)
           g.drawImage(img, 0, 0);
           st.drawn = version; st.skin = skin; st.count++; st.times.push(performance.now());
           if (st.times.length > 1200) st.times.splice(0, 600);  // (frame times, for tests; bounded)
@@ -814,7 +839,26 @@ def place_mark(s, i):
     if n["kind"] == BOARD:
         return I(hidden=True, id=f"n{i}-place", data_kind="place", data_w=str(n["spacing"]), data_h=str(n["size"]),
                  data_reveal=str(n["value"]))
-    return I(hidden=True, id=f"n{i}-place", data_kind="place", data_x=str(n["x"]), data_y=str(n["y"]))
+    return I(hidden=True, id=f"n{i}-place", data_kind="place", data_x=str(n["x"]), data_y=str(n["y"]), data_tone=str(object_tone(s, i)))
+
+
+def object_tone(s, i):
+    """Board object i's tone (Board(tones=…): its Board's options, by its place among the children), 0 when none."""
+    p = parent_of(s, i)
+    if p < 0 or s.nodes[p]["kind"] != BOARD:
+        return 0
+    opts = s.nodes[p]["options"]
+    k = s.nodes[p]["children"].index(i)
+    try:
+        return int(opts[k]) if k < len(opts) else 0
+    except ValueError:
+        return 0
+
+
+def parent_of(s, i):
+    parent_kind(s, i)  # (fills the cache)
+    parents = s._parents[1]
+    return parents[i] if 0 <= i < len(parents) else -1
 
 
 def parent_kind(s, i):
@@ -1162,9 +1206,9 @@ def render_node(s, i, sid):
         for k, c in enumerate(n["children"]):
             ch = s.nodes[c]
             kids.append(Div(render(s, c, sid), place_mark(s, c), cls="object", data_kind="object", data_index=str(k), data_tag=ch["name"],
-                            data_x=str(ch["x"]), data_y=str(ch["y"]), data_w=str(ch["w"]), data_h=str(ch["h"]),
+                            data_x=str(ch["x"]), data_y=str(ch["y"]), data_w=str(ch["w"]), data_h=str(ch["h"]), data_tone=str(object_tone(s, c)),
                             style=f"left:{ch['x']}px;top:{ch['y']}px;width:{ch['w']}px;height:{ch['h']}px"))
-        board = Div(*kids, place_mark(s, i), cls="board", id=f"{nid}-board", data_kind="board", data_node=str(i), data_sid=sid,
+        board = Div(*kids, place_mark(s, i), cls="board", id=f"{nid}-board", data_kind="board", data_node=str(i), data_sid=sid, data_hold="1" if n["hint"] else None,
                     style=f"width:{n['spacing']}px;height:{n['size']}px")
         return Div(board, cls="board-scroll", id=nid)  # the page scrolls when it's bigger than its room
     if kind == DIALOG:  # modal over a scrim; ✕ and Escape are on_close (its content's own buttons close it otherwise)
@@ -1278,7 +1322,9 @@ def render_node(s, i, sid):
         sized_h = n["h"] or (n["height_from_parent"] if "height_from_parent" in n else n["grows"] or n["fills"])
         own = ";".join(([] if sized_w else ["width:320px"]) + ([] if sized_h else ["height:240px"]))
         return Div(Canvas(), canvas_meta(n, i), id=nid, cls="canvas", data_kind="canvas", data_node=str(i), data_sid=sid,
-                   data_keys="1" if n["size"] == 1 else None, data_scroll="pan" if n["spacing"] == 1 else None, style=own or None)
+                   data_keys="1" if n["size"] == 1 else None, data_passthrough="1" if n["size"] == 2 else None,
+                   data_scroll="pan" if n["spacing"] == 1 else None,
+                   style=";".join(([own] if own else []) + (["pointer-events:none"] if n["size"] == 2 else [])) or None)
     if kind == DIVIDER:
         return Hr(id=nid)
     if kind == SPACER:
@@ -1416,6 +1462,7 @@ def make_app(module_dir):
                          "MOJOUI_DEBUG=1 scripts/build.sh <app> web, or scripts/dev.sh <app>); never set it on a deployed host")
     sweep_files()  # (what a crashed or killed server left in the uploads and downloads folders, D-1704)
     sys.path.insert(0, str(Path(module_dir).resolve()))
+    sys.mojoui_python_host = True  # (mojoui.pygil: Python, not the app, manages its lock here, D-1260)
     mod = importlib.import_module("mojoui_app")
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
     if loads:
@@ -1723,6 +1770,12 @@ def make_app(module_dir):
                 mark.attrs["hx-swap-oob"] = "true"
                 moved.append(mark)
                 continue
+            if op == SET_TONES:  # (a Board's children's tones: each object's mark carries its own, BOARD_JS applies it)
+                for c in target["children"]:
+                    mark = place_mark(s, c)
+                    mark.attrs["hx-swap-oob"] = "true"
+                    moved.append(mark)
+                continue
             # Don't re-send the control in use if it already shows this (that would steal
             # focus or interrupt a drag); other changes to it still go out.
             echo = i == n and ((op == SET_TEXT and target["kind"] in (FIELD, TEXTAREA, DATE) and target["text"] == text)
@@ -1912,6 +1965,18 @@ def make_app(module_dir):
                 with dev_state["lock"]:
                     dev_state["waiters"].discard(entry)
             return str(dev_state["version"])
+
+    @app.get("/spot/{sid}/{n}")
+    def canvas_spot(sid: str, n: int, name: str = ""):
+        """App.spot: where on canvas node n the part called `name` is drawn ("x,y" in points; "-1,-1": nowhere). Test
+        drivers reach a drawn part with it (scripts/drive.py's linkdrag)."""
+        s = sessions.get(sid)
+        if s is None:
+            return "-1,-1"
+        with s.lock:
+            if s.closed or not 0 <= n < len(s.nodes) or s.nodes[n]["kind"] != CANVAS:
+                return "-1,-1"
+            return mod.spot(s.handle, n, name)
 
     @app.post("/describe/{sid}")
     def widget_describe(sid: str, tag: str = "", id: int = 0, data: str = ""):
@@ -2241,7 +2306,12 @@ def make_app(module_dir):
             rgba = ctypes.string_at(r["address"], r["width"] * r["height"] * 4)
             pending = bool(sess.pending and (sess.pending.get("rebuild") or sess.pending.get("patches"))) or bool(sess.commands)
         out = io.BytesIO()
-        picture = Image.frombuffer("RGBA", (r["width"], r["height"]), rgba, "raw", "RGBA", 0, 1).convert("RGB")
+        picture = Image.frombuffer("RGBA", (r["width"], r["height"]), rgba, "raw", "RGBA", 0, 1)
+        clear = sess.nodes[n]["kind"] == CANVAS and sess.nodes[n]["size"] == 2 if 0 <= n < len(sess.nodes) else False
+        if clear:  # (.passthrough(): what it leaves unpainted shows the page beneath: PNG with its alpha, even animating)
+            tick = 0
+        else:
+            picture = picture.convert("RGB")
         if tick:  # animating: small, fast JPEG frames
             picture.save(out, "JPEG", quality=JPEG_QUALITY)
         else:  # a still picture (charts, text): exact PNG

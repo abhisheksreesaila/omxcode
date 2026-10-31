@@ -8,6 +8,9 @@ a list's rows) and render (a canvas as a PNG). The tool list follows the screen 
 the server sends notifications/tools/list_changed, so a dialog's or a context menu's items are tools only
 while it is open. An agent can do nothing a person couldn't.
 
+A canvas the app made settable (View.settable(unit, low, high): a video's scrubber, a dial) takes a plain number too: its
+tool's `value` argument (seconds, say) arrives as the canvas's SET_TO gesture, no coordinates needed (goal 39 M6).
+
 A JavaScript widget (WebComponent) is a tool pair (goal 34b): <name>-read returns what it describes (its describe() JSON)
 and <name>-set sets the fields it declares, typed (a command to the widget; the widget reports the change as its own
 event, so update() hears it). Widgets run only in a host with a web view, so to see them the agent attaches to a running
@@ -41,6 +44,7 @@ WEBCOMP = 40  # a JavaScript widget (mojoui.webcomponent): hint = its tag, value
 JSON_TYPES = {"string": (str,), "number": (int, float), "integer": (int,), "boolean": (bool,), "array": (list,), "object": (dict,)}
 CHECKED, DISABLED = 1, 2  # menu item flags (mojoui/menus.mojo)
 GESTURES = {"pan": 1, "zoom": 2, "tap": 3, "press": 4, "release": 5, "double": 6, "key": 7, "secondary": 8}
+SET_TO = 10  # a settable canvas (View.settable) set straight to a number: event.text = the number
 MODIFIERS = {"shift": 1, "ctrl": 2, "alt": 4}
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
 CORE = ("screen", "act", "read", "render")
@@ -50,6 +54,17 @@ NO_ARGS = {"type": "object", "properties": {}}
 def slug(text):
     s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return s[:48].rstrip("-")
+
+
+def settable_range(n):
+    """A canvas declared settable (View.settable: options = unit, low, high): (unit, low, high), else None."""
+    o = n.get("options") or []
+    if n["kind"] != CANVAS or len(o) < 3:
+        return None
+    try:
+        return o[0], float(o[1]), float(o[2])
+    except ValueError:
+        return None
 
 
 def prop(kind, description, **more):
@@ -111,6 +126,7 @@ class Host:
         self.mod = self.handle = None
         if self.link is None:
             sys.path.insert(0, str(Path(module_dir).resolve()))
+            sys.mojoui_python_host = True  # (mojoui.pygil: Python, not the app, manages its lock here, D-1260)
             self.mod = importlib.import_module("mojoui_app")
             if hasattr(self.mod, "init_shared"):
                 self.mod.init_shared()
@@ -175,6 +191,9 @@ class Host:
                          {"path": prop("string", "the file's path on this machine")}, how="pick", required=("path",), prefix=prefix)
             elif n["msg"]:
                 self.add(tag or slug(text), i, tip or f'Button "{text}"', prefix=prefix)
+                if n["options"] and n["size"]:  # a pair's other face (View.alternate): its own tool, meaning one thing whatever the state
+                    other = n["options"][0]
+                    self.add(slug(other), i, f'"{other}": the other face of the "{text}" button (does nothing when already so)', how="second", prefix=prefix)
         elif k == FIELD:
             if n["msg"] or n["msg2"]:
                 self.add(tag or slug(n["hint"] or text) or "field", i, tip or f'Text field "{n["hint"] or text}"',
@@ -206,11 +225,17 @@ class Host:
         elif k == CANVAS:
             if n["msg"]:
                 size = f"{n['w']}×{n['h']} points" if n["w"] and n["h"] else "fills its space"
-                self.add(tag or f"canvas-{n['style']}", i, (tip or "A drawn view") + f" ({size}): tap, double, secondary (a right click), press, release, or a key"
-                         + ("; takes keys" if n["size"] else ""),
-                         {"gesture": prop("string", "what happened", enum=list(GESTURES)), "x": prop("number", "points from the left"), "y": prop("number", "points from the top"),
+                settable = settable_range(n)
+                schema = {"gesture": prop("string", "what happened", enum=list(GESTURES) + (["set"] if settable else [])),
+                          "x": prop("number", "points from the left"), "y": prop("number", "points from the top"),
                           "key": prop("string", 'for "key": the key\'s name (ArrowDown, Enter, Escape, F2, a, 7…)'),
-                          "modifiers": prop("array", "for \"key\": shift, ctrl, alt", items={"type": "string"})}, how="gesture", required=("gesture",), prefix=prefix)
+                          "modifiers": prop("array", "for \"key\": shift, ctrl, alt", items={"type": "string"})}
+                what = (tip or "A drawn view") + f" ({size}): tap, double, secondary (a right click), press, release, or a key" + ("; takes keys" if n["size"] else "")
+                if settable:  # (View.settable: a value straight, no coordinates; the value alone is enough)
+                    unit, lo, hi = settable
+                    schema = {"value": prop("number", f"the {unit} to set it to, {lo:g} to {hi:g}"), **schema}
+                    what = (tip or "A drawn control") + f": set it to a time or amount in {unit} ({lo:g} to {hi:g}) with value; or a gesture ({size})"
+                self.add(tag or f"canvas-{n['style']}", i, what, schema, how="gesture", required=() if settable else ("gesture",), prefix=prefix)
         elif k == WEBCOMP:
             self.widget_tools(i, prefix)
         elif k == NAVBAR:
@@ -493,6 +518,11 @@ class Host:
                 raise ValueError(f'no option "{want}": ' + ", ".join(n["options"]))
             return self.send_event(i, 0, "", n["options"].index(want))
         if a.how == "gesture":
+            if settable_range(n) and (args.get("gesture") == "set" or ("value" in args and "gesture" not in args)):
+                v = args.get("value")
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    raise ValueError(f"value takes a number of {settable_range(n)[0]}, not {v!r}")
+                return self.send_event(i, 0, repr(float(v)), SET_TO)
             g = str(args.get("gesture", "tap"))
             if g not in GESTURES:
                 raise ValueError(f'no gesture "{g}": ' + ", ".join(GESTURES))

@@ -29,6 +29,7 @@ polars = ">=2.1.0,<3"
 fastapi = ">=0.162.0,<0.163"
 uvicorn = ">=0.54.0,<0.55"
 orjson = ">=3.13.0,<4"
+pymupdf = ">=1.28.0,<3"
 
 [pypi-dependencies]
 mojo = ">=1.1, <1.2"
@@ -44,6 +45,21 @@ jsonschema = ">=4.26.0, <5"
 xorg-xvfb-server = ">=21.1.25,<22"
 xkeyboard-config = ">=2.48,<3"
 
+# Goal 39 M12 spike (D-940): in-process vision models (OWLv2, SAM 2.1) through PyTorch + transformers.
+# A separate feature + environment so the default environment and its lock stay unchanged.
+# Torch comes from PyPI's default CUDA wheels (cu132, with their own CUDA libraries), so no `__cuda` platform
+# is needed and the workspace platforms stay as they are. Run with `pixi run -e models ...`. Linux only.
+[feature.models]
+platforms = ["linux-glibc-234"]
+
+[feature.models.pypi-dependencies]
+torch = ">=2.9"
+torchvision = "*"
+transformers = ">=4.56"
+accelerate = "*"
+safetensors = "*"
+python-doctr = ">=1.1.0, <2"
+
 # Goal 43 (Dictate): a separate feature + environment for the speech model in process (mojoui/speech.mojo), copied from
 # goal 39's `models` approach so the default environment and its packages stay unchanged. Torch from PyPI's default CUDA
 # wheels (their own CUDA libraries), so no `__cuda` platform. Run with `pixi run -e speech ...`. Linux only (D-1405).
@@ -57,4 +73,5 @@ accelerate = "*"
 soundfile = "*"
 
 [environments]
+models = { features = ["models"], solve-group = "models" }
 speech = { features = ["speech"], solve-group = "speech" }

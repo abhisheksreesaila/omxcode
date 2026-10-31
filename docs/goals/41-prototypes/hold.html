@@ -1,0 +1,115 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+:root{--g0:#181b20;--g1:#1f2329;--g2:#272c33;--g3:#30363e;--ln:#3b424c;--tx:#e6e8eb;--mu:#98a1ac;--ac:#3ccf6e;--acs:rgba(60,207,110,.14);--bad:#e5645a}
+body{margin:0;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--foreground);user-select:none;-webkit-user-select:none}
+p{margin:0 0 10px;color:var(--muted-foreground)}
+.ctl{display:flex;gap:8px;align-items:center;margin:0 0 10px;font-size:12px;color:var(--muted-foreground)}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.seg button{all:unset;padding:4px 11px;cursor:pointer;font-size:12px}
+.seg button.on{background:var(--secondary);color:var(--foreground);font-weight:600}
+.app{background:var(--g0);border:1px solid var(--ln);border-radius:12px;overflow:hidden;color:var(--tx)}
+.bar{display:flex;align-items:center;gap:10px;height:34px;padding:0 12px;background:var(--g1);border-bottom:1px solid var(--ln);font-size:12px;color:var(--mu)}
+.bar b{color:var(--tx)}.bar .sp{flex:1}
+.pill{border:1px solid var(--ln);border-radius:7px;padding:3px 9px;background:var(--g2);color:var(--tx)}
+.sheet{position:relative;height:330px;background:var(--g0);background-image:radial-gradient(var(--g2) 1px,transparent 1px);background-size:18px 18px;overflow:hidden}
+.status{height:24px;display:flex;align-items:center;padding:0 12px;background:var(--g1);border-top:1px solid var(--ln);font-size:11px;color:var(--mu)}
+.dim{position:absolute;inset:0;background:rgba(10,12,15,.55);opacity:0;transition:opacity .28s ease;z-index:5;pointer-events:none}
+.sheet.held .dim{opacity:1}
+.sheet.blur.held .card:not(.lit){filter:blur(3px) grayscale(.6)}
+.card{position:absolute;background:var(--g1);border:1px solid var(--ln);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.35);overflow:hidden;z-index:2;cursor:pointer;
+ transition:transform .42s cubic-bezier(.2,1.4,.4,1),box-shadow .3s,filter .3s,opacity .3s}
+.sheet.held .card:not(.lit){transform:scale(.97);filter:grayscale(.7)}
+.sheet.held .card.lit{z-index:10}
+.sheet.held .card.src{transform:scale(1.04);box-shadow:0 0 0 2px var(--ac),0 16px 40px rgba(0,0,0,.6)}
+.sheet.held .card.lit:not(.src){transform:scale(1.015);box-shadow:0 0 0 1px rgba(60,207,110,.55),0 12px 30px rgba(0,0,0,.5)}
+.hd{height:26px;display:flex;align-items:center;gap:6px;padding:0 9px;border-bottom:1px solid var(--ln);background:var(--g2);font-size:11.5px;font-weight:600}
+.hd .k{color:var(--mu);font-weight:500}.hd .sp{flex:1}
+.chain{font-size:10.5px;font-weight:600;color:var(--ac);background:var(--acs);border-radius:6px;padding:1px 6px}
+table{border-collapse:collapse;width:100%;font-size:11px}
+th{text-align:left;font-weight:600;color:var(--mu);padding:4px 7px;border-bottom:1px solid var(--ln)}
+td{padding:3.5px 7px;border-bottom:1px solid var(--g3)}
+.k2{color:var(--ac)}
+.vid{height:78px;background:linear-gradient(160deg,#2a3038,#1a1d22);position:relative}
+.pal{position:absolute;width:30px;height:21px;background:#8a6a43;border-radius:2px}
+.box{position:absolute;border:1.5px solid var(--bad);border-radius:3px}
+.strip{height:18px;display:flex;gap:2px;padding:3px;background:var(--g2);border-top:1px solid var(--ln)}
+.strip i{flex:1;background:var(--g3);border-radius:2px}
+.page{background:#eceae4;margin:8px;border-radius:3px;height:84px;position:relative;color:#333;font-size:8.5px}
+.page .f{position:absolute;left:8px;right:8px;display:flex;justify-content:space-between;border-bottom:1px solid #cfccc4}
+.bars{display:flex;align-items:flex-end;gap:8px;height:60px;padding:10px 14px}
+.bars i{flex:1;background:var(--ac);opacity:.75;border-radius:3px 3px 0 0}
+.spark{height:62px;padding:8px}
+svg.ln{position:absolute;inset:0;z-index:9;pointer-events:none;opacity:0;transition:opacity .25s}
+.sheet.held svg.ln{opacity:1}
+svg.ln path{stroke:var(--ac);stroke-width:1.6;fill:none;stroke-linecap:round;opacity:.75}
+svg.ln path.imp{stroke-dasharray:3 5;opacity:.5}
+svg.ln path.draw{animation:draw .45s cubic-bezier(.3,.9,.3,1) forwards}
+@keyframes draw{from{stroke-dashoffset:var(--L)}to{stroke-dashoffset:0}}
+.lab{position:absolute;z-index:11;transform:translate(-50%,-50%) scale(.85);opacity:0;transition:all .3s cubic-bezier(.2,1.4,.4,1) .12s;
+ background:var(--g2);border:1px solid rgba(60,207,110,.6);color:var(--tx);border-radius:7px;padding:2px 8px;font-size:10.5px;font-weight:600;white-space:nowrap;pointer-events:none}
+.sheet.still .lab,.sheet.still .card,.sheet.still .dim,.sheet.still svg.ln{transition:none!important}
+.sheet.held .lab{opacity:1;transform:translate(-50%,-50%) scale(1)}
+.lab small{color:var(--mu);font-weight:500;margin-left:4px}
+.ring{position:absolute;z-index:12;width:34px;height:34px;margin:-17px 0 0 -17px;pointer-events:none;opacity:0}
+.ring circle{fill:none;stroke:var(--ac);stroke-width:3;stroke-dasharray:88;stroke-dashoffset:88}
+.ring.go{opacity:1}.ring.go circle{transition:stroke-dashoffset .35s linear;stroke-dashoffset:0}
+.notes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px;font-size:12px}
+.notes div{border-radius:var(--radius);padding:9px 11px;background:var(--card);border:1px solid var(--border)}
+.notes b{display:block;margin-bottom:3px}
+</style></head><body>
+<p><b style="color:var(--foreground)">Press and hold any card</b> (or its ⛓ chip). Everything unrelated steps back, and the linked cards rise with ghost lines that say <i>how</i> they're linked. Let go and it all settles back. Try holding <b style="color:var(--foreground)">dock_cam</b> too.</p>
+<div class="ctl">Unlinked cards: <span class="seg"><button id="bDim" class="on">Dim (omxqua)</button><button id="bBlur">Blur</button></span></div>
+<div class="app">
+ <div class="bar"><b>omxplorer</b><span>claims.omx</span><span class="sp"></span><span class="pill">Ask</span><span class="pill">Links 3</span></div>
+ <div class="sheet" id="sh">
+  <div class="dim"></div>
+  <svg class="ln" id="ln"></svg>
+  <div class="card" id="ship" style="left:16px;top:16px;width:200px"><div class="hd"><span class="k">▦</span>shipments<span class="sp"></span><span class="chain">⛓ 2</span></div>
+   <table><tr><th>shipment_id</th><th>status</th></tr><tr><td>S-5011</td><td>delivered</td></tr><tr><td>S-5012</td><td>claim</td></tr><tr><td>S-5013</td><td>delivered</td></tr></table></div>
+  <div class="card" id="vid" style="left:320px;top:16px;width:200px"><div class="hd"><span class="k">▶</span>dock_cam.mp4<span class="sp"></span><span class="chain">⛓ 2</span></div>
+   <div class="vid"><div class="pal" style="left:60px;top:30px"></div><div class="pal" style="left:130px;top:26px"></div><div class="box" style="left:127px;top:23px;width:36px;height:27px"></div></div><div class="strip"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+  <div class="card" id="bol" style="left:16px;top:196px;width:200px"><div class="hd"><span class="k">▤</span>BOL pages<span class="sp"></span><span class="chain">⛓ 1</span></div>
+   <div class="page"><div class="f" style="top:10px"><span>Shipment no.</span><span>S-5012</span></div><div class="f" style="top:28px"><span>Pallets</span><span>3</span></div><div class="f" style="top:46px"><span>Exceptions</span><span>None</span></div><div class="f" style="top:64px"><span>Signed</span><span>J. Ortiz</span></div></div></div>
+  <div class="card" id="chart" style="left:320px;top:196px;width:200px"><div class="hd"><span class="k">▮</span>claims by carrier</div><div class="bars"><i style="height:40%"></i><i style="height:85%"></i><i style="height:55%"></i><i style="height:25%"></i></div></div>
+  <div class="card" id="fork" style="left:556px;top:16px;width:118px"><div class="hd"><span class="k">∿</span>forklift_log<span class="sp"></span><span class="chain">⛓ 1</span></div>
+   <svg class="spark" viewBox="0 0 200 50" width="118"><polyline points="0,40 20,38 40,30 60,35 80,12 100,28 120,33 140,20 160,36 180,30 200,34" fill="none" stroke="#98a1ac" stroke-width="1.5"/></svg></div>
+  <div class="card" id="note" style="left:556px;top:196px;width:118px"><div class="hd"><span class="k">✎</span>note</div><div style="padding:9px;font-size:11px;color:var(--mu)">Polar asked for a reply by Friday.</div></div>
+  <svg class="ring" id="ring" viewBox="0 0 34 34"><circle cx="17" cy="17" r="14"/></svg>
+ </div>
+ <div class="status" id="st">Hold a card to see what it's linked to</div>
+</div>
+<div class="notes">
+<div><b>Hold, don't tap</b>A tap still selects and follows links (the video seeks). Holding is the "show me the wiring" peek: a ring fills over 350 ms, then the view opens. It's a spring when it opens and a quick fade when you let go.</div>
+<div><b>Lines say how</b>Solid lines are Links you made (key or time). Dotted lines are the same table, an implicit link (the chart comes from shipments). Labels name the columns, so you never wonder <i>what</i> it's connected on.</div>
+<div><b>Dim, not blur</b>omxqua says no blur, so the default steps back with dim, grey and a slight shrink. The Blur toggle is here so you can feel both. The same peek is an agent tool: <code>links(card)</code>.</div>
+</div>
+<script>
+const L={ship:[["vid","shipment_id = code","key"],["bol","shipment_id = Shipment no.","key"],["chart","same table","imp"]],
+ vid:[["ship","code = shipment_id","key"],["fork","t ≈ timestamp","time +1.2 s"]],
+ bol:[["ship","Shipment no. = shipment_id","key"]],fork:[["vid","timestamp ≈ t","time +1.2 s"]],chart:[["ship","same table","imp"]],note:[]};
+const sh=document.getElementById('sh'),ln=document.getElementById('ln'),ring=document.getElementById('ring'),st=document.getElementById('st');
+let timer=null,labs=[];
+function ctr(e){const r=e.getBoundingClientRect(),s=sh.getBoundingClientRect();return[r.left-s.left+r.width/2,r.top-s.top+r.height/2]}
+function edge(a,b){const ra=a.getBoundingClientRect(),s=sh.getBoundingClientRect();const[ax,ay]=ctr(a),[bx,by]=ctr(b);const dx=bx-ax,dy=by-ay;
+ const hw=ra.width/2,hh=ra.height/2;const t=Math.min(Math.abs(dx)>0?hw/Math.abs(dx):1e9,Math.abs(dy)>0?hh/Math.abs(dy):1e9);return[ax+dx*t,ay+dy*t]}
+function open(id,still){const src=document.getElementById(id);document.querySelectorAll('.card').forEach(c=>c.classList.remove('lit','src'));
+ src.classList.add('lit','src');ln.innerHTML='';labs.forEach(l=>l.remove());labs=[];
+ const w=sh.clientWidth,h=sh.clientHeight;ln.setAttribute('viewBox',`0 0 ${w} ${h}`);
+ for(const[t,txt,kind] of L[id]){const d=document.getElementById(t);d.classList.add('lit');
+  const[x1,y1]=edge(src,d),[x2,y2]=edge(d,src);const mx=(x1+x2)/2,my=(y1+y2)/2-10;
+  const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',`M${x1} ${y1} Q${mx} ${my} ${x2} ${y2}`);
+  if(kind==='imp')p.classList.add('imp');else{ln.appendChild(p);const Lg=p.getTotalLength();p.style.strokeDasharray=Lg;p.style.setProperty('--L',Lg);if(!still)p.classList.add('draw');ln.removeChild(p)}
+  ln.appendChild(p);
+  const lb=document.createElement('div');lb.className='lab';lb.style.left=mx+'px';lb.style.top=(my+5)+'px';
+  lb.innerHTML=txt+(kind!=='imp'?`<small>${kind}</small>`:'');sh.appendChild(lb);labs.push(lb)}
+ sh.classList.add('held');const n=L[id].filter(x=>x[2]!=='imp').length;
+ st.textContent=n?`${src.querySelector('.hd').textContent.replace(/⛓.*/,'').replace(/^\W+/,'')}: ${n} link${n>1?'s':''}${L[id].some(x=>x[2]==='imp')?' + same-table cards':''}`:'Not linked to anything yet. Drag a column onto it to link'}
+function close(){sh.classList.remove('held');st.textContent='Hold a card to see what it\'s linked to'}
+document.querySelectorAll('.card').forEach(c=>{
+ c.addEventListener('pointerdown',e=>{const s=sh.getBoundingClientRect();ring.style.left=(e.clientX-s.left)+'px';ring.style.top=(e.clientY-s.top)+'px';
+  ring.classList.remove('go');void ring.offsetWidth;ring.classList.add('go');timer=setTimeout(()=>{ring.classList.remove('go');open(c.id)},350)})});
+window.addEventListener('pointerup',()=>{clearTimeout(timer);ring.classList.remove('go');close()});
+window.addEventListener('pointercancel',()=>{clearTimeout(timer);ring.classList.remove('go');close()});
+document.getElementById('bDim').onclick=e=>{sh.classList.remove('blur');e.target.classList.add('on');bBlur.classList.remove('on')};
+document.getElementById('bBlur').onclick=e=>{sh.classList.add('blur');e.target.classList.add('on');bDim.classList.remove('on')};
+sh.classList.add('still');open('ship',1);setTimeout(()=>sh.classList.remove('still'),50);
+</script></body></html>

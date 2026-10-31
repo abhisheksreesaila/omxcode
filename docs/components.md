@@ -10,21 +10,21 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, jot, dictate, keeper, traycheck |
-| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, jot, dictate |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch, jot, dictate, keeper, traycheck |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, sketch, jot, dictate, keeper |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, sketch, jot, dictate, keeper |
-| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper, traycheck |
+| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper, traycheck |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper |
+| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
 | `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console, agentchat |
-| `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
+| `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, media |
 | `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console, sketch, dictate |
 | `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, agentchat, jot, keeper |
-| `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, workbook, mxstudio, jot |
+| `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, workbook, mxstudio, omxplorer, jot |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
 | `Dropdown` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, analytics, workbook, mxstudio, omxplorer, themes, kit |
 | `Slider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, gpu, lens |
-| `Segmented` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | kitchen, expenses, lens, analytics, mxstudio, omxplorer, themes, kit |
+| `Segmented` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | kitchen, expenses, lens, analytics, mxstudio, omxplorer, themes, kit, media |
 | `Radio` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, omxplorer, kit |
 | `DatePicker` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes, jot, keeper |
@@ -34,7 +34,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, jot, keeper |
-| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, sketch |
+| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, media, sketch |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
 | `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
@@ -78,6 +78,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Board: drag, resize, snap | `Board(on_move, on_resize)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Board: scrolls, reveals a child | `Board(reveal=, reveal_count=)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Board: phone-width list | `(automatic under 720 pt)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Board: tones (dimmed, lifted, held, a drop target) | `Board(tones=[BOARD_DIM, BOARD_LIFT, …])` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Board: hold a child (350 ms, still) | `Board(on_hold=…)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Canvas: click-through (shows only) | `Canvas(…).passthrough()` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Overlay islands | `Overlay(base, *islands) + .pin(h, v)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
@@ -144,17 +147,19 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | sketch |
 | `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | maccheck, mxstudio, omxplorer, workbook |
 | `PivotTable` | `mojoui/pivot.mojo` | Grid, Scroll, Text tones | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, omxplorer, workbook |
-| `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | dashboard, maccheck, mxstudio, omxplorer, workbook |
+| `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | dashboard, maccheck, media, mxstudio, omxplorer, workbook |
 | `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | dashboard, mxstudio, omxplorer |
 | `FindingCard` | `mojoui/finding.mojo` | Card tones, Text tones, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
 | `Format toggles (Bold, Italic, Align…)` | `mojoui/sheetchrome.mojo` | Icon toggle shown pressed, Lucide icon set, Tooltips, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | maccheck, omxplorer |
 | `Bottom tabs, renamed in place` | `mojoui/sheetchrome.mojo` | Button, In-place editor, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | maccheck, omxplorer |
-| `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Rail (a slim column of icon tools beside the sheet: role sidebar)` | `mojoui/sheetchrome.mojo` | Button with an icon, Tooltips, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
+| `Regions (the window's sidebar, toolbar, sheet, inspector, status bar and cards, named from the shells' roles: GTK's and the web driver's regions: step)` | `mojoui/regions.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `Cell styles (bold, italic, underline, strikethrough, colours, alignment)` | `mojoui/cellstyle.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Island (the window's living status: work, results, undo, errors)` | `mojoui/island.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Swatch picker` | `mojoui/swatches.mojo` | Canvas, Canvas: pan, zoom, tap, Popover | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
-| `Column number formats` | `mojoui/numformat.mojo` | Canvas, Text | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Column number formats` | `mojoui/numformat.mojo` | Canvas, Text | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Sheet objects (charts, pivots)` | `mojoui/sheetpage.mojo` | Board: drag, resize, snap, Canvas, Card, Grid | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
 | `Report page (KPI and chart tiles, filters)` | `mojoui/reportpage.mojo` | Grid, Card, Dropdown, Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | omxplorer |
 | `CodeBlock` | `mojoui/codeblock.mojo` | Text, Button with an icon, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console, consolekit |
@@ -166,6 +171,13 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
 | `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, console, consolekit, widgets |
+| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)` | `mojoui/player.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Quiet buttons, Card | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
+| `TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor` | `mojoui/timeseries.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)` | `mojoui/picture.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)` | `mojoui/mediacard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
+| `MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)` | `mojoui/mediatimeline.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Overlay, ContextMenu, Card, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
+| `Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)` | `mojoui/tablecard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `App shell (bar, brand, nav links, page card)` | `mojoui/shell.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, dashboard |
 | `Page header (icon square, pill tabs, segments, tab header)` | `mojoui/header.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Sidebar (heads, rows to pick, chips when compact)` | `mojoui/sidebar.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
@@ -183,6 +195,36 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, Toggle, Segmented, ProgressBar, VStack, HStack, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat |
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)` | `mojoui/imageops.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)` | `mojoui/videotable.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `VideoWriter · cut (an mp4 from RGBA frames: H.264, yuv420p, faststart; segments of a video, each frame edited by a plan: blur, outline, captions)` | `mojoui/videoexport.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `Vision presets (colour ranges, sizes and the stripe-code layout for videotable's analyzers, per kind of footage)` | `mojoui/vision_presets.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)` | `mojoui/geo.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)` | `mojoui/inspection.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Video jobs (analyze with a registered analyzer, make a reel from a table's flag, as background jobs with progress; rows as a table, lookups that find their key)` | `mojoui/videojobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)` | `mojoui/trackcard.mojo` | Board: drag, resize, snap, Canvas, Card, Segmented, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
+| `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `PdfSource (a PDF's pages as RGBA pictures at any dpi, page sizes in points, points ↔ pixels; its text layer for checks)` | `mojoui/pdfsource.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Document card (a PDF page on a card: page through, zoom, pan, highlight a box in page points; Board chrome, quiet actions)` | `mojoui/documentcard.mojo` | Canvas, Canvas: pan, zoom, tap, Canvas: press, release, double, Canvas: keys (focus on press), Card, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
+| `OcrModel (the reader slot: docTR in process, words with boxes and confidence; a page's picture read into rows)` | `mojoui/ocrmodel.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `TextTable (words as rows: page, text, box, confidence; CSV in and out)` | `mojoui/texttable.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Form fields (a label's value by geometry: right on its line or under it; the labels are data)` | `mojoui/formfields.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)` | `mojoui/documentjobs.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `Table jobs (Insert > Table, a SQL query, Export CSV as jobs that wake the UI; the answer placed as a card)` | `mojoui/tablejobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)` | `mojoui/linkdrag.mojo` | Board: tones (dimmed, lifted, held, a drop target), Button, TextField, ProgressBar, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
+| `Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)` | `mojoui/peek.mojo` | Board: hold a child (350 ms, still), Board: tones (dimmed, lifted, held, a drop target), Canvas: click-through (shows only), Canvas frames (animation), Text | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | omxplorer |
+| `Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)` | `mojoui/timelane.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
+| `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
+| `Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)` | `mojoui/videocard.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Document set (a folder of PDFs as one card: page through files, the fields to read as labels (data), Read → a table of fields per file; a linked row shows its file with the chosen field marked)` | `mojoui/documentset.mojo` | Canvas, Canvas: pan, zoom, tap, Card, TextField, Dropdown, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
+| `Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)` | `mojoui/documentjobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Ask → SQL (JOIN LINKED: the joins the sheet's key links imply; an answer's lineage, so its rows follow like its source's; questions taught with their SQL)` | `mojoui/asksql.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Pack PDF (a title and pages of blocks: facts, words, a table, a PDF page or a video frame with boxes marked; HTML printed to PDF by Chromium)` | `mojoui/packpdf.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)` | `mojoui/pack.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 
 ## JavaScript widgets (WebComponent)
 
@@ -198,12 +240,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 123 | 7 | 0 |
-| Web | 118 | 7 | 5 |
-| Android | 19 | 21 | 90 |
-| Mac (AppKit) | 0 | 114 | 16 |
-| iPhone (UIKit) | 0 | 85 | 45 |
-| Agent (MCP) | 31 | 38 | 61 |
+| Linux (GTK) | 163 | 9 | 0 |
+| Web | 155 | 9 | 8 |
+| Android | 19 | 50 | 103 |
+| Mac (AppKit) | 0 | 148 | 24 |
+| iPhone (UIKit) | 0 | 119 | 53 |
+| Agent (MCP) | 57 | 40 | 75 |
 
 ## Inside one app, not components yet (the debt)
 

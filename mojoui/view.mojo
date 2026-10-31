@@ -65,6 +65,7 @@ comptime SECONDARY = 8  # a right click (or a long press) at event.x, y: the pla
 comptime WHEEL = 9  # a plain scroll (wheel, two-finger swipe) on a Canvas(scroll_pans=True): event.dx, dy = how far the
 #   content moves, in points (a swipe up moves it up); ctrl+scroll and pinch on that canvas still send ZOOM
 comptime KEY = 7  # a key pressed while the canvas has focus (a click gives it focus): event.text = the key's name
+comptime SET_TO = 10  # a drawn control set straight to a value (an agent, an accessibility tool): event.text = the number, in the unit .settable() names
 #   ("ArrowDown", "Enter", "Escape", "Tab", "Backspace", "Delete", "PageDown", "Home", "F2", …, the web's names)
 #   or the character it typed ("7", "a", " "); event.dx = the modifiers held: SHIFT + CTRL + ALT
 comptime SHIFT = 1
@@ -81,6 +82,7 @@ comptime ICON_NAMES: List[String] = [
     "bold", "italic", "underline", "strikethrough", "text-colour", "fill", "align-left", "align-center", "align-right", "currency", "percent", "decimals-less", "decimals-more", "clear-format", "rename", "settings", "chevron-right", "back", "copy",
     "box", "gauge", "scroll-text", "book-open", "key-round", "route", "lock", "sliders-horizontal", "layout-grid", "list", "square", "rotate-cw", "trash-2", "terminal", "play", "pause", "x", "laptop", "external-link", "loader-circle", "download", "ellipsis", "zap", "cpu",
     "unlock", "sun", "moon",  # (the console's Security and Settings, goal 33 M6)
+    "video", "image",  # (omxplorer's video and picture cards, goal 39 M6)
 ]
 
 # Text styles (each platform maps them to its own type scale)
@@ -347,6 +349,21 @@ struct View(Copyable, Movable):
         self.nodes[0].y = v
         return self^
 
+    def alternate(var self, title: String, msg: Int) -> View:
+        """On a Button that is one face of a pair (play / pause, mute / unmute): its other face is `title`, sending `msg`.
+        People see one button; an agent gets both faces as tools, each meaning one thing whatever the state (a pause while
+        paused changes nothing), so it never has to read the state before acting. Hosts draw nothing new."""
+        self.nodes[0].options = [title]
+        self.nodes[0].size = msg
+        return self^
+
+    def settable(var self, unit: String, low: Float64, high: Float64) -> View:
+        """On a Canvas that draws a control with a value (a scrubber, a dial): it can be set straight to a number from `low`
+        to `high` in `unit` ("seconds"). An agent sees a `value` argument on the canvas's tool; setting it sends the canvas's
+        on_gesture with event.number = SET_TO and event.text = the number. The app clamps and applies it as it would a drag."""
+        self.nodes[0].options = [unit, String(low), String(high)]
+        return self^
+
     def tooltip(var self, text: String) -> View:
         """A short explanation shown when the pointer rests on the view (hosts print it as TIP: in tests)."""
         self.nodes[0].tip = text
@@ -372,6 +389,12 @@ struct View(Copyable, Movable):
         """An in-place editor that shows text another view types into it (a grid that keeps the keyboard while you
         type a value): it doesn't take the keyboard until it's clicked."""
         self.nodes[0].value = 3
+        return self^
+
+    def passthrough(var self) -> View:
+        """On a Canvas: it only shows (lines over a page, a highlight): presses go to whatever is under it, and the parts
+        it leaves unpainted show what's beneath (hosts keep its alpha)."""
+        self.nodes[0].size = 2
         return self^
 
     def at(var self, x: Int, y: Int) -> View:
@@ -557,16 +580,39 @@ def Overlay(base: View, *islands: View) -> View:
 
 
 def Board(items: List[View], width: Int, height: Int, on_move: Int = NO_MSG, on_resize: Int = NO_MSG,
-          reveal: Int = -1, reveal_count: Int = 0) -> View:
+          reveal: Int = -1, reveal_count: Int = 0, tones: List[Int] = [], on_hold: Int = NO_MSG) -> View:
     """A page: children sit where their .at(x, y) says, sized by .width/.height (a Numbers-style
     free-flow layout). Dragging a child's edge area moves it (on_move: event.number = child index,
     event.dx/dy = how far); dragging its bottom-right corner resizes it (on_resize, the same fields).
     Hosts narrower than 720 points show the children as a full-width list instead.
     The Board scrolls when it's bigger than the space it's given (grow/fill it to give it the space).
-    reveal: a child to scroll into view, done once per new reveal_count (count up each time)."""
-    var v = _container(Node(BOARD, msg=on_move, msg2=on_resize, spacing=width, size=height,
-                            value=reveal_count * 64 + reveal + 1 if 0 <= reveal < 63 else 0), items)
+    reveal: a child to scroll into view, done once per new reveal_count (count up each time).
+    tones: per child, how it stands while something is shown about the page (goal 41 M8, a peek or a drop): BOARD_PLAIN,
+    BOARD_DIM (steps back: dimmed, grey, a little smaller; never blurred), BOARD_LIFT (rises, ringed in the accent),
+    BOARD_SOURCE (the one held), BOARD_TARGET (a drop would land here); hosts ease between tones, and a change is a
+    patch (nothing is built again). on_hold: pressing a child and holding still for HOLD_MS sends it with
+    event.number = the child's index and event.text = "hold"; letting go afterwards sends it again with "release"."""
+    var n = Node(BOARD, msg=on_move, msg2=on_resize, spacing=width, size=height,
+                 value=reveal_count * 64 + reveal + 1 if 0 <= reveal < 63 else 0)
+    var any = False
+    for t in tones:
+        if t != BOARD_PLAIN:
+            any = True
+    if any:  # (all plain: no options, so a page that never peeks reads as it always did)
+        for t in tones:
+            n.options.append(String(t))
+    if on_hold != NO_MSG:
+        n.hint = String(on_hold)
+    var v = _container(n^, items)
     return v^
+
+
+comptime BOARD_PLAIN = 0  # a Board child's tone (Board(tones=…)): as it is
+comptime BOARD_DIM = 1  # stepped back (a peek's unrelated cards)
+comptime BOARD_LIFT = 2  # raised and ringed (a peek's linked cards)
+comptime BOARD_SOURCE = 3  # the card held
+comptime BOARD_TARGET = 4  # under a drag: a drop lands here
+comptime HOLD_MS = 350  # how long a press on a Board child must stay still to be a hold
 
 
 def VStack(*items: View, spacing: Int = 16) -> View:

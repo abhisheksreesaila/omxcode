@@ -6,7 +6,7 @@ from std.python.bindings import PythonModuleBuilder
 
 from app import Main
 from mojoui.shared import shared_loads
-from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_jobs, web_wake_fd, web_widget_event, web_reply, web_commands, web_assets, web_set_widget
+from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_jobs, web_wake_fd, web_widget_event, web_reply, web_commands, web_assets, web_set_widget, web_spot
 
 
 @export
@@ -28,6 +28,7 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[gesture]("gesture", docstring="A canvas gesture (node, kind, x, y, dx, dy, zoom, pressure); returns what changed as JSON.")
         m.def_function[key]("key", docstring="A key on a focused canvas (node, name, modifiers); returns what changed as JSON.")
         m.def_function[cancel]("cancel", docstring="Escape in a field (node, text); returns what changed as JSON.")
+        m.def_function[spot]("spot", docstring="Where on canvas node `node` the part called `name` is drawn: 'x,y' in points.")
         m.def_function[describe]("describe", docstring="A canvas's content as text for an agent (node, first, count); '' when it offers none.")
         m.def_function[appearance]("appearance", docstring="The browser's colour scheme (1 dark, 0 light); returns what changed as JSON.")
         m.def_function[resize]("resize", docstring="The page's viewport (width, height in CSS pixels); returns what changed as JSON.")
@@ -104,6 +105,10 @@ def key(handle: PythonObject, node: PythonObject, name: PythonObject, modifiers:
 
 def cancel(handle: PythonObject, node: PythonObject, text: PythonObject) raises -> PythonObject:
     return PythonObject(web_cancel[Main](Int(py=handle), Int(py=node), String(py=text)))
+
+
+def spot(handle: PythonObject, node: PythonObject, name: PythonObject) raises -> PythonObject:
+    return PythonObject(web_spot[Main](Int(py=handle), Int(py=node), String(py=name)))
 
 
 def describe(handle: PythonObject, node: PythonObject, first: PythonObject, count: PythonObject) raises -> PythonObject:

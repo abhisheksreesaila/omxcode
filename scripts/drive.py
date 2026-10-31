@@ -13,6 +13,7 @@ import socket
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -100,6 +101,12 @@ DUMP = """() => { const mojouiRect = e => {  // (a view whose parts join its row
   + ' in ' + innerWidth + 'x' + innerHeight]).join(String.fromCharCode(10)); }"""
 
 
+# The host's own log lines the checks read, forwarded from the server's output to the run's (goal 41 M1): the watchdog's
+# SLOW:, shared data, links and peeks, lanes, jobs, the player's and cursor's clocks, frame gaps. (Not every ^[A-Z]+:
+# line: uvicorn's INFO: and TRACE: would drown them.)
+HOST_LINE = re.compile(r"^(SHARED|SLOW|LINK|PEEK|LANE|JOB|PLAYER|CURSOR|GAPS|A11Y|A11Y UNNAMED): ")
+
+
 def free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -126,6 +133,33 @@ CANVASES_DRAWN = """() => [...document.querySelectorAll('[data-kind=canvas]')].e
 })"""
 
 
+def catch_up(page, sid):
+    """The page takes the screen the server holds now (what a frame or a job changed meanwhile), then settles: a press
+    that follows names today's nodes."""
+    for _ in range(3):
+        page.evaluate("async (sid) => { await htmx.ajax('POST', `/pending/${sid}`, { values: { v: document.getElementById('mojoui-v').value }, swap: 'none', source: window.mojouiLane('drive') }); }", sid)
+        settle(page)
+
+
+def visible_middle(obj, down=0.5):
+    """The middle of the part of a Board object that shows in its board's scroller (`down`: how far down it, 0–1)."""
+    tb = obj.bounding_box()
+    sc = obj.evaluate("o => { const b = o.closest('.board-scroll').getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height }; }")
+    vx0, vy0 = max(tb["x"], sc["x"]), max(tb["y"], sc["y"])
+    vx1, vy1 = min(tb["x"] + tb["width"], sc["x"] + sc["width"]), min(tb["y"] + tb["height"], sc["y"] + sc["height"])
+    return (vx0 + vx1) / 2, vy0 + (vy1 - vy0) * down
+
+
+def card_object(page, title):
+    """The Board object whose card is titled `title` (its first headline, as mojoui/regions.mojo names cards)."""
+    objs = page.locator("[data-kind=object]")
+    for i in range(objs.count()):
+        h = objs.nth(i).locator(".text.headline").first
+        if h.count() and h.text_content().strip() == title:
+            return objs.nth(i)
+    raise ValueError(f"no card {title}")
+
+
 def settle(page):
     """Wait for HTMX's delayed triggers to fire and its requests to finish, and for every
     canvas to show its current version."""
@@ -142,6 +176,50 @@ def step(page, s):
     if verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip: a drawn view's words), mid-run
         el = page.locator(f"[data-tag={rest}]").first
         return f"SAYS: {rest} = " + (el.get_attribute("data-tip") or "")
+    if verb == "hold" and not page.locator("[data-kind=button]").filter(has_text=exact(rest.partition("=")[0])).count():
+        # hold:<card>=ms: a press on the Board card titled <card> (its headline), held still that long and left pressed
+        # (release: lets go), as GTK's step does
+        title, _, ms = rest.partition("=")
+        obj = card_object(page, title)
+        obj.evaluate("o => o.scrollIntoView({ block: 'nearest' })")  # (as a person would: the card in view)
+        catch_up(page, obj.evaluate("o => o.closest('[data-kind=board]').dataset.sid"))
+        x, y = visible_middle(card_object(page, title))
+        page.mouse.move(x, y)
+        page.mouse.down()
+        page.wait_for_timeout(int(ms or 500))
+        return ""
+    if verb == "release":  # release: lets go of what hold: pressed
+        page.mouse.up()
+        page.wait_for_timeout(50)
+        return ""
+    if verb == "timelink":  # timelink:<card>.<column>=<video>@<seconds>: that column dragged onto the video, the panel's offset set, Link
+        what, _, seconds = rest.partition("@")
+        for sub in ("linkdrag:" + what, "enter:seconds=" + seconds, "tap:Link"):
+            step(page, sub)
+            settle(page)
+        return ""
+    if verb == "linkdrag":  # linkdrag:<card>.<column>=<card>: the column's header (App.spot) dragged onto the other card with the mouse
+        src, _, target = rest.partition("=")
+        card, _, column = src.rpartition(".")
+        canvas = card_object(page, card).locator("[data-kind=canvas]").first
+        node, sid = canvas.get_attribute("data-node"), canvas.get_attribute("data-sid")
+        at = page.evaluate("async ([sid, n, name]) => (await fetch(`/spot/${sid}/${n}?name=${encodeURIComponent(name)}`)).text()", [sid, node, column])
+        sx, sy = (float(v) for v in at.strip('"').split(","))
+        if sx < 0:
+            raise ValueError(f"no column {column} in {card}")
+        canvas.evaluate("e => e.scrollIntoView({ block: 'nearest' })")  # (as a person would: the header in view first)
+        catch_up(page, sid)  # (a press sent while the server holds a newer screen is answered with that screen, not acted on)
+        cb = canvas.bounding_box()
+        x0, y0 = cb["x"] + sx, cb["y"] + sy
+        x1, y1 = visible_middle(card_object(page, target), 0.4)  # (the part of the target in view: where a hand drops it)
+        page.mouse.move(x0, y0)
+        page.mouse.down()
+        for k in range(1, 9):
+            page.mouse.move(x0 + (x1 - x0) * k / 8, y0 + (y1 - y0) * k / 8)
+            page.wait_for_timeout(80)
+        page.wait_for_timeout(300)
+        page.mouse.up()
+        return ""
     if verb == "hold":  # hold:Title=ms: the button pressed and held that long, then its transform read (HOLD: title transform)
         title, _, ms = rest.partition("=")
         box = page.locator("[data-kind=button]").filter(has_text=exact(title)).first.bounding_box()
@@ -162,7 +240,10 @@ def step(page, s):
         page.keyboard.press(rest)
     elif verb == "tap":
         title, _, nth = rest.partition("@")
-        page.locator("[data-kind=button]").filter(has_text=exact(title)).nth(int(nth or 0)).click()
+        by_title = page.locator("[data-kind=button]").filter(has_text=exact(title))
+        if not by_title.count():  # (no button with that title: the one tagged so, as GTK's step and an agent name it)
+            by_title = page.locator(f"[data-kind=button][data-tag={title!r}]")
+        by_title.nth(int(nth or 0)).click()
     elif verb in ("type", "submit", "enter"):
         hint, _, text = rest.partition("=")
         field = page.locator(f"input[data-kind=field][placeholder={hint!r}]").first
@@ -322,8 +403,29 @@ def step(page, s):
         sel, name = rest.rsplit("=", 1)
         value = page.evaluate("([s, a]) => { const e = document.querySelector(s); return e && e.getAttribute(a) !== null ? e.getAttribute(a) : 'none'; }", [sel, name])
         return f"ATTR: {sel} {name} {value[:80]}"
+    elif verb == "wait" and rest.isdigit():  # wait:1500: as GTK's wait (= pause), so one step list drives both hosts
+        page.wait_for_timeout(int(rest))
     elif verb == "wait":  # until a button with this title appears (e.g. after frames change the screen)
         page.locator("[data-kind=button]").filter(has_text=exact(rest)).first.wait_for(timeout=15000)
+    elif verb == "open" and "." in rest and not page.locator(".menu-title").filter(has_text=exact(rest)).count():
+        # open:clip.mp4: a file, as GTK's step opens it: the first file picker on screen whose accept list takes its
+        # extension (or any file) gets it; a relative name is looked up in $MOJOUI_DOCUMENTS, then $OMX_DOCUMENTS
+        path = Path(rest)
+        if not path.is_absolute():
+            for d in (os.environ.get("MOJOUI_DOCUMENTS"), os.environ.get("OMX_DOCUMENTS"), str(ROOT)):
+                if d and (Path(d) / rest).exists():
+                    path = Path(d) / rest
+                    break
+        ext = path.suffix.lower()
+        for el in page.locator("input.picker-input").all():
+            accept = [a.strip().lower() for a in (el.get_attribute("accept") or "").split(",") if a.strip()]
+            if not accept or ext in accept:
+                el.set_input_files(str(path))
+                break
+        else:
+            raise ValueError(f"no file picker takes {rest}")
+    elif verb == "regions":  # regions:/path.json: the page's regions (mojoui/regions.mojo's roles, read from data-tag) in its pixels
+        Path(rest).write_text(json.dumps(page.evaluate(REGIONS)) + "\n")
     elif verb == "pause":  # pause:1000: let animations run that long (as the GTK step does)
         page.wait_for_timeout(int(rest))
     elif verb == "slide":
@@ -348,6 +450,23 @@ RECTS = """() => { const out = []; const r = e => { let b = e.getBoundingClientR
   return out.join(String.fromCharCode(10)); }"""
 
 
+# The window's regions, by mojoui/regions.mojo's rule (keep the two in step): the shells' role tags (sidebar, toolbar,
+# status-bar → status, inspector), a Board's scroller (the sheet) and each Board object with a headline title (card:<title>,
+# clipped to its board; left out when scrolled away). Page pixels (the full-page shot's).
+REGIONS = """() => { const out = [], roles = { sidebar: 'sidebar', toolbar: 'toolbar', 'status-bar': 'status', inspector: 'inspector' };
+  const box = e => { const b = e.getBoundingClientRect(); return { x: b.left + scrollX, y: b.top + scrollY, w: b.width, h: b.height }; };
+  const push = (name, b) => { if (b.w >= 1 && b.h >= 1) out.push({ name, x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) }); };
+  for (const e of document.querySelectorAll('#mojoui-root [data-tag]'))
+    if (roles[e.dataset.tag] && !e.classList.contains('object')) push(roles[e.dataset.tag], box(e));
+  for (const sc of document.querySelectorAll('#mojoui-root .board-scroll')) {
+    const c = box(sc); push('sheet', c);
+    for (const o of sc.querySelectorAll(':scope > .board > .object')) {
+      const t = o.querySelector('.text.headline'); if (!t || !t.textContent.trim()) continue;
+      const b = box(o), x0 = Math.max(b.x, c.x), y0 = Math.max(b.y, c.y), x1 = Math.min(b.x + b.w, c.x + c.w), y1 = Math.min(b.y + b.h, c.y + c.h);
+      push('card:' + t.textContent.trim(), { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }); } }
+  return out; }"""
+
+
 CSP_PROBE = """window.mojouiCsp = [];
 document.addEventListener('securitypolicyviolation', e => window.mojouiCsp.push({ directive: e.violatedDirective, uri: String(e.blockedURI || ''), sample: String(e.sample || '').slice(0, 80) }), true);"""
 
@@ -364,6 +483,10 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
     port = free_port()
     server = subprocess.Popen([sys.executable, str(ROOT / "mojoui/hosts/web.py"), str(module_dir), str(port)],
                               cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=dict(os.environ, **(env or {})))
+    # The server's log, read as it's written (a full pipe would stall the server mid-run: a long session's SLOW: lines)
+    log_lines = []
+    reader = threading.Thread(target=lambda: log_lines.extend(iter(server.stdout.readline, "")), daemon=True)
+    reader.start()
     url = f"http://127.0.0.1:{port}/"
     try:
         up = False
@@ -374,7 +497,8 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
                 break
             except OSError:
                 if server.poll() is not None:
-                    return SimpleNamespace(returncode=1), "server died:\n" + server.stdout.read()
+                    reader.join(timeout=5)
+                    return SimpleNamespace(returncode=1), "server died:\n" + "".join(log_lines)
                 time.sleep(0.1)
         if not up:
             return SimpleNamespace(returncode=1), "server didn't come up in 3 minutes"
@@ -422,8 +546,8 @@ def web_run(module_dir, steps, shot=None, viewport=(900, 900), tabs=1, rects=Non
                 out += "PAGE ERRORS: " + "; ".join(errors) + "\n"
             browser.close()
         server.terminate()
-        log = server.stdout.read()
-        out += "".join(l + "\n" for l in log.splitlines() if l.startswith("SHARED: "))
+        reader.join(timeout=10)
+        out += "".join(l for l in log_lines if HOST_LINE.match(l))
         return SimpleNamespace(returncode=1 if errors else 0), out
     finally:
         server.terminate()
