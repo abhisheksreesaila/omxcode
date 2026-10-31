@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pixi.toml").exists())  # (archived in docs/goals/: the repo root, D-1115)
 sys.path.insert(0, str(ROOT / "scripts"))
 OUT = ROOT / "build" / "g41"
 DATA = OUT / "data"
