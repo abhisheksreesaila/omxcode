@@ -105,11 +105,11 @@ Also: D-1413 changed how the GTK host and present.mojo dlopen (OwnedDLHandle), w
 - Why the shader-f16 is missing (driver lacks a Vulkan 16-bit feature Dawn needs, or Dawn blocks it on this driver): not checked (no vulkaninfo here).
 - The reviewer hasn't re-run on round 1.
 
-## Final checker run
+## Final checker run (review round 1, HEAD after the race commit)
 ```
 M0 PASS: captured the played tone through the sound server, match 0.9902822245095156, the caller never blocked
 M1 PASS: whisper-large-v3-turbo in process, 20 clips, WER 0.030, partials before each clip ends
-M2 PASS: 5 clips through the null sink: WER 0.016, final text 291 ms median / 329 ms p95 after speech ends
-M3 PASS: A 135 ms p50, WER 0.034; B (onnx-community/whisper-large-v3-turbo) 933 ms p50, WER 0.030; cold start 4.6 s vs 7.8 s
+M2 PASS: 5 clips through the null sink: WER 0.016, final text 304 ms median / 331 ms p95 after speech ends
+M3 PASS: A 140 ms p50, WER 0.034; B (onnx-community/whisper-large-v3-turbo) 912 ms p50, WER 0.034; cold start 6.6 s vs 9.9 s; same weights: A fp16 vs B encoder fp32, decoder q4, 6.5x at the median
 M4 PASS: gallery Dictation section with the race's numbers, matrix, llms.txt, EXPERIMENTS; mac built
 ```
