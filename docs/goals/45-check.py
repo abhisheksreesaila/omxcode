@@ -213,11 +213,27 @@ def m0():
 
 # ------------------------------------------------------------------------------------------------ private bus helpers
 
+# (addition, D-1606: the system's session config lets the private bus start the desktop's services on demand: GTK asks
+# for the portal, xdg-desktop-portal started and reached the owner's Wayland display. The private bus now has no
+# service directories at all, and runs without the owner's display variables, so nothing on it can start or reach
+# anything of the owner's)
+BUS_CONFIG = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen><auth>EXTERNAL</auth>
+<policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy>
+</busconfig>"""
+
+
 def bus_run(name):
     """Runs milestone `name`'s bus part inside a fresh `dbus-run-session`, returning (ok, msg)."""
-    r = run(["dbus-run-session", "--", sys.executable, str(Path(__file__).resolve()), "--inner", name,
-             "--owner-bus", os.environ.get("DBUS_SESSION_BUS_ADDRESS", "")], 3600)
-    m = re.search(r"^INNER RESULT (.*)$", r.stdout, re.M)
+    conf = TMP / "bus.conf"
+    conf.write_text(BUS_CONFIG)
+    env = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "DISPLAY", "XDG_SESSION_TYPE")}
+    r = run(["dbus-run-session", f"--config-file={conf}", "--", sys.executable, str(Path(__file__).resolve()), "--inner", name,
+             "--owner-bus", os.environ.get("DBUS_SESSION_BUS_ADDRESS", "")], 3600, env=env)
+    if "Activating service" in r.stdout + r.stderr:
+        return False, "a service was started on the private bus (it must have none)"
+    m = re.search(r"INNER RESULT (\{.*\})$", r.stdout, re.M)
     if not m:
         return False, f"the private-bus run gave no result (exit {r.returncode}): {(r.stdout + r.stderr)[-500:]}"
     res = json.loads(m.group(1))

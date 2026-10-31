@@ -148,6 +148,18 @@ trait App(Movable, Deinitable):
         default does nothing."""
         pass
 
+    def background(self) -> Bool:
+        """True keeps the app running when its window is closed (goal 45): the window hides instead of closing, the app
+        keeps its state, timers, jobs and folder watchers, an item in the system tray (mojoui.tray) opens the window
+        again, and mojoui.notify can still tell the person things. closing() then runs only when the process really
+        ends. The default: False (closing the window ends the app)."""
+        return False
+
+    def window_shown(mut self, shown: Bool):
+        """Background mode only: the window was closed (False; the app keeps running) or opened again from the tray
+        (True). What it changes shows at the next update(). The default ignores it."""
+        pass
+
     def jobs_message(self) -> Int:
         """A message update() gets on the UI thread as soon as a background job started with mojoui.jobs.start_ui_job
         ends (0: none; the app polls its jobs on its own, e.g. at display frames). Every host watches the jobs' wake

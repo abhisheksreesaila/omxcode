@@ -39,6 +39,7 @@ from mojoui.hosts.gtk_webview import (
 )
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
 from mojoui.jobs import wake_pipe, drain_wakes
+from mojoui.tray import TrayItem
 from mojoui.geometry import register_rects
 from mojoui.hosts.devtools import DEVTOOLS
 from mojoui.hosts.agent_link import listen_unix, accept_one, read_some, next_line, send_all, close_fd, link_error, MAX_LINE, LINE_NONE, LINE_BAD
@@ -635,6 +636,7 @@ struct GtkHost[A: App](Movable):
     var skin_key: String  # the theme that provider is for (Theme.key)
     var skin_classes: String  # the CSS classes it put on the window
     var closed: Bool  # the window closed (close-request answered): test steps stop, no report
+    var hidden: Bool  # background mode (App.background): the window was closed and only hid; the tray opens it again
     var dark_told: Int  # what App.appearance last said (1 dark, 0 light, -1 not yet): only a change is told again
     var forcing_scheme: Bool  # set while the host itself changes light/dark (a theme forcing one): not the person's change
     var icons_key: String  # the ink the icons were written in
@@ -763,6 +765,7 @@ struct GtkHost[A: App](Movable):
         self.forcing_scheme = False
         self.dark_told = -1
         self.closed = False
+        self.hidden = False
         self.icons_key = ""
         self.fonts = False
         self.css = 0
@@ -5298,8 +5301,14 @@ def run_step[A: App](host_addr: Int, step: String):
     elif verb == "quit":  # quit: close the window as the window manager's close button does (close-request, then App.closing)
         show_test_window(host[].window)  # (GTK ignores a close of a window that was never realized)
         external_call["gtk_window_close", NoneType](host[].window)
-        if host[].closed:
-            print("QUIT: window closed", flush=True)
+        if host[].closed or host[].hidden:
+            print("QUIT: window closed" + (" (background mode: the app keeps running)" if host[].hidden else ""), flush=True)
+    elif verb == "waitopen":  # waitopen:N: background mode: run the main loop until the window is open again (the tray's Activate), N ms at most
+        var until = Int(perf_counter_ns()) + to_int(rest) * 1_000_000
+        while host[].hidden and Int(perf_counter_ns()) < until:
+            _ = external_call["g_main_context_iteration", c_int](0, c_int(1))
+        if host[].hidden:
+            print("TEST: the window didn't open again in " + rest + " ms")
     elif verb == "save":  # save:Title=/path: a FileSaver's dialog answering that path (a native dialog can't be driven)
         var kv = split_at(rest, "=")
         var i = find(host[], BUTTON, kv[0], 0)
@@ -6412,6 +6421,14 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         connect3(host[].window, prop, on_window_resized[A], host_addr)
     connect(host[].window, "realize", on_window_realize[A], host_addr)
     connect_any(host[].window, "close-request", on_close_request[A], host_addr)  # (App.closing before the window goes)
+    if host[].rt.app.background():  # (App.background: a tray item opens the window again; the app outlives its window)
+        external_call["g_application_hold", NoneType](gapp)
+        var item = TrayItem(host[].rt.app.title().lower().replace(" ", "-"), host[].rt.app.title(), "folder-saved-search")
+        var on_tray = on_tray_activate[A]
+        try:
+            item.publish(Pointer(to=on_tray).unsafe_bitcast[Int]()[], host_addr)
+        except e:
+            print("mojoui: no tray item (" + String(e) + "): the window stays the way back in", flush=True)
     var link_path = getenv("MOJOUI_AGENT_SOCKET")  # an agent host may attach here (docs/agent.md: the agent link)
     if link_path != "":
         var lfd = listen_unix(link_path)
@@ -6534,9 +6551,25 @@ def on_close_request[A: App](window: Int, host_addr: Int) abi("C") -> c_int:
     """The window is asked to close (its close button, Ctrl+W, the window manager, the `quit` step): App.closing finishes
     what must be kept, then the window closes (FALSE: nothing stops it)."""
     var host = host_at[A](host_addr)
+    if host[].rt.app.background():  # (the window only hides: the app keeps running, the tray opens it again)
+        external_call["gtk_widget_set_visible", NoneType](window, c_int(0))
+        host[].hidden = True
+        host[].rt.app.window_shown(False)
+        return 1  # TRUE: GTK doesn't destroy it
     host[].rt.closing()
     host[].closed = True
     return 0
+
+
+def on_tray_activate[A: App](host_addr: Int) abi("C"):
+    """The tray item was clicked (mojoui.tray's Activate): the window opens again, as it was."""
+    var host = host_at[A](host_addr)
+    var was_hidden = host[].hidden
+    host[].hidden = False
+    external_call["gtk_window_present", NoneType](host[].window)
+    if was_hidden:
+        host[].rt.app.window_shown(True)
+    print("WINDOW: open", flush=True)
 
 
 def on_app_shutdown[A: App](gapp: Int, host_addr: Int) abi("C"):
