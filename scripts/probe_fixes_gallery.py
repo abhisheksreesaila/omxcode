@@ -47,6 +47,11 @@ def line(step, r):
                 "its test found a worse bug: a short path was freed before <code>stat</code> read it, so the file looked "
                 "unreadable. It now reads <code>statx</code>, which has one layout on every Linux, keeps the path alive, "
                 "and compiles for aarch64 (not run there: no such machine here) (<code>tests/test_file_stamp.py</code>).")
+    if step == "keeper_handover":
+        return ("Launching Keeper again used to build a whole second app (open the index, start a watcher) before it "
+                "handed over to the running one. Apps now name themselves with <code>App.one_instance()</code>, a static "
+                "method the host asks first, so a second launch opens the running window and exits having built nothing "
+                "(goal 45 M1, with a new check).")
     return escape(r.get("summary", ""))
 
 

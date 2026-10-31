@@ -17,12 +17,17 @@ struct Main(App):
     def __init__(out self):
         self.shown = True
         self.opened = 0
+        print("TRAYCHECK: built", flush=True)  # (a second launch hands over before this runs: probe fixes, D-1706)
 
     def title(self) -> String:
         return "Tray check"
 
     def theme(self) -> Theme:
         return liquid()
+
+    @staticmethod
+    def one_instance() -> String:
+        return "traycheck"  # (a second launch opens this one's window and builds nothing)
 
     def background(self) -> Bool:
         return environment("TRAYCHECK_BACKGROUND", "1") != "0"

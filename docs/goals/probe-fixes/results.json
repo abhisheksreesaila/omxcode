@@ -34,6 +34,12 @@
   "item": "the field queue's stale-write window",
   "test": "tests/test_field_queue.py"
  },
+ "keeper_handover": {
+  "api": "App.one_instance()",
+  "before": "goal 45 M1's addition failed: the second launch printed TRAYCHECK: built",
+  "checked": "2026-10-31",
+  "item": "a second launch built its App before handing over"
+ },
  "keeper_stamp": {
   "before": "short paths read as unreadable (the path was freed before stat read it); offsets of x86-64's struct stat",
   "checked": "2026-10-31",

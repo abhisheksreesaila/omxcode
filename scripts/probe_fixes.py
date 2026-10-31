@@ -136,7 +136,25 @@ def keeper_stamp():
         "unverified": "run on aarch64 Linux (no machine here: compiled only); the Mac's branch is unchanged (built, not run)"}
 
 
-STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue, "jot_drop": jot_drop, "keeper_stamp": keeper_stamp}
+def keeper_handover():
+    """Goal 45 M1 on its private bus, with its addition: a second launch opens the running app and never builds its App
+    (traycheck prints TRAYCHECK: built from __init__)."""
+    g45 = load_check(45)
+    ok, why = g45.build("traycheck", "linux")
+    if not ok:
+        return False, "traycheck build: " + why, {}
+    import headless
+    headless.ensure()
+    ok, msg = g45.m1()
+    if not ok:
+        return False, f"goal 45 M1: {msg}", {}
+    return True, "a second launch hands over to the running app before building anything (goal 45 M1 PASS)", {
+        "item": "a second launch built its App before handing over", "api": "App.one_instance()",
+        "before": "goal 45 M1's addition failed: the second launch printed TRAYCHECK: built"}
+
+
+STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue, "jot_drop": jot_drop, "keeper_stamp": keeper_stamp,
+         "keeper_handover": keeper_handover}
 
 
 def main():

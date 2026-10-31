@@ -410,6 +410,9 @@ def m1_inner():
                 return False, "a second launch kept running beside the first (background apps are one instance)"
             if p.wait_for(r"^WINDOW: open", 20, mark) < 0:
                 return False, f"a second launch didn't open the running app's window: {again.text()[-300:]}"
+            # (addition, probe fixes D-1706) the second launch hands over before it builds its App
+            if "TRAYCHECK: built" in again.text():
+                return False, "a second launch built its App before handing over to the running one"
             # (addition, D-1618) the tray menu's Quit ends it, no kill needed
             r = menu_click(name, 3)
             if r.returncode != 0:

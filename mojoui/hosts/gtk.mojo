@@ -6673,6 +6673,29 @@ def on_exit_stats[A: App]() abi("C"):
 
 def run[A: App]() -> Int:
     """Opens the app in a native GTK window and runs until it's closed."""
+    # One instance (App.one_instance, D-1706): register on the session bus first; if the app is already running, hand
+    # over (activate opens its window) and exit before anything is built: no App, no shared data, no GPU probe.
+    var id = String("dev.mojoui.App")
+    var flags = G_APPLICATION_NON_UNIQUE
+    var name = A.one_instance()
+    if name != "":
+        id = "dev.mojoui.bg."
+        for c in name.lower().codepoint_slices():
+            if (c >= "a" and c <= "z") or (c >= "0" and c <= "9"):
+                id += c
+        flags = 0
+    var gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(flags))
+    if flags == 0:
+        var err = List[Int](length=1, fill=0)
+        if Int(external_call["g_application_register", c_int](gapp, 0, Int(err.unsafe_ptr()))) == 0:
+            print("mojoui: can't register as the one " + name + " (no session bus?): running on its own", flush=True)
+            external_call["g_object_unref", NoneType](gapp)
+            id = "dev.mojoui.App"
+            gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(G_APPLICATION_NON_UNIQUE))
+        elif Int(external_call["g_application_get_is_remote", c_int](gapp)) != 0:
+            print("mojoui: " + name + " is already running: opening its window", flush=True)
+            return Int(external_call["g_application_run", c_int](gapp, c_int(0), 0))  # (sends activate to the running one)
+        _ = len(err)
     var host = alloc(Layout[GtkHost[A]].single()).unsafe_leak()  # lives as long as the app
     var pres = alloc(Layout[Presenter].single()).unsafe_leak()  # (the GPU canvases' textures: a fixed address too)
     pres.unsafe_write(Presenter())
@@ -6682,25 +6705,6 @@ def run[A: App]() -> Int:
     host.unsafe_write(GtkHost[A](A()))
     host[].pres = Int(pres)
     host[].gl_ctx = gl_ctx
-    var id = String("dev.mojoui.App")
-    var flags = G_APPLICATION_NON_UNIQUE
-    if host[].rt.app.background():  # (one instance per app: launching it again opens the running one's window, on_activate)
-        id = "dev.mojoui.bg."
-        for c in host[].rt.app.title().lower().codepoint_slices():
-            if (c >= "a" and c <= "z") or (c >= "0" and c <= "9"):
-                id += c
-        flags = 0
-    var gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(flags))
-    if flags == 0:
-        var err = List[Int](length=1, fill=0)
-        if Int(external_call["g_application_register", c_int](gapp, 0, Int(err.unsafe_ptr()))) == 0:
-            print("mojoui: can't register as the one " + host[].rt.app.title() + " (no session bus?): running on its own", flush=True)
-            external_call["g_object_unref", NoneType](gapp)
-            id = "dev.mojoui.App"
-            gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(G_APPLICATION_NON_UNIQUE))
-        elif Int(external_call["g_application_get_is_remote", c_int](gapp)) != 0:
-            print("mojoui: " + host[].rt.app.title() + " is already running: opening its window", flush=True)
-        _ = len(err)
     if getenv("MOJOUI_PRESENT_STATS") == "1":
         var key = String("mojoui-host")
         external_call["g_object_set_data", NoneType](gapp, key.as_c_string_span(), Int(host))

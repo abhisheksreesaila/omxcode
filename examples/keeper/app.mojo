@@ -304,6 +304,10 @@ struct Main(App):
     def window_size(self) -> Tuple[Int, Int]:
         return (980, 640)
 
+    @staticmethod
+    def one_instance() -> String:
+        return "keeper"  # (a second launch opens this one's window and builds nothing)
+
     def background(self) -> Bool:
         return True  # (Keeper's point: it keeps the folder searchable with its window closed)
 

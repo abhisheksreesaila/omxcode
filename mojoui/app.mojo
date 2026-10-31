@@ -155,6 +155,14 @@ trait App(Movable, Deinitable):
         ends. The default: False (closing the window ends the app)."""
         return False
 
+    @staticmethod
+    def one_instance() -> String:
+        """A name for an app that runs as one instance (letters and digits; "keeper"): launching it again hands over
+        to the running one, which opens its window, and the new process exits before it builds anything (no App, no
+        index opened, no watcher). A background app usually wants this. "" (the default): every launch is its own.
+        GTK: a GApplication id on the session bus; elsewhere not yet (each launch is its own)."""
+        return ""
+
     def window_shown(mut self, shown: Bool):
         """Background mode only: the window was closed (False; the app keeps running) or opened again from the tray
         (True). What it changes shows at the next update(). The default ignores it."""
