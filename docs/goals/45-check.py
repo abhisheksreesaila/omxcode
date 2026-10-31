@@ -139,18 +139,23 @@ def m0():
             return False, f"no WATCH READY: {p.text()[-400:]}"
         time.sleep(0.3)
         done = {}  # (kind, rel path) -> (op start ns, close ns)
+        last_call = {}  # (addition, D-1623) (kind, rel path) -> when the close()/rename()/remove() that makes the event began
         rng = random.Random(45)
 
         def op(kind, path, fn):
             t0 = time.monotonic_ns()
-            fn()
+            last_call[(kind, path)] = t0
+            fn((kind, path))
             done[(kind, path)] = (t0, time.monotonic_ns())
             time.sleep(0.002)
 
         def write(path, text, mode="w"):
-            def f():
-                with open(d / path, mode) as fh:
-                    fh.write(text)
+            def f(key):
+                fh = open(d / path, mode)
+                fh.write(text)
+                fh.flush()
+                last_call[key] = time.monotonic_ns()
+                fh.close()
             return f
 
         folders = [f"d{i}/n{i}" for i in range(10)]
@@ -163,10 +168,10 @@ def m0():
                 op("modify", f"{f}/f{j}.txt", write(f"{f}/f{j}.txt", "one more line\n", "a"))
         for f in folders:  # 200 renames
             for j in range(20, 40):
-                op("rename", f"{f}/g{j}.txt", lambda f=f, j=j: os.rename(d / f"{f}/f{j}.txt", d / f"{f}/g{j}.txt"))
+                op("rename", f"{f}/g{j}.txt", lambda key, f=f, j=j: os.rename(d / f"{f}/f{j}.txt", d / f"{f}/g{j}.txt"))
         for f in folders:  # 200 deletes
             for j in range(20):
-                op("delete", f"{f}/f{j}.txt", lambda f=f, j=j: os.remove(d / f"{f}/f{j}.txt"))
+                op("delete", f"{f}/f{j}.txt", lambda key, f=f, j=j: os.remove(d / f"{f}/f{j}.txt"))
         time.sleep(3)
     finally:
         p.stop()
@@ -192,23 +197,37 @@ def m0():
         return False, (f"{len(events)} events for 1000 changes: {len(missing)} missing (e.g. {missing[:3]}), "
                        f"{len(twice)} reported twice (e.g. {twice[:3]}), {len(extra)} unexpected (e.g. {extra[:3]})")
     lags, disagree, early = [], 0, 0
+    during, before_call, bounds, worst = [], 0, [], 0.0  # (addition, D-1623)
     for k, (t0, closed) in done.items():
         ms, at = seen[k][0]
         if at < t0:
             early += 1
+        if at < last_call[k]:
+            before_call += 1
+        if at < closed:
+            during.append((closed - at) / 1e6)  # stamped inside the close()/rename()/remove() call: flagged, not hidden
+        bounds.append((at - last_call[k]) / 1e6)  # the lag measured from the call's start: never below the real one
         lag = max(0, at - closed) / 1e6
         lags.append(lag)
+        worst = max(worst, abs(ms - lag))
         if abs(ms - lag) > 2:
             disagree += 1
     if early:
         return False, f"{early} events stamped before their change began: the at= clock isn't CLOCK_MONOTONIC"
-    if disagree > 10:
-        return False, f"{disagree} events print an ms= that disagrees with the measured lag by > 2 ms"
+    if before_call:
+        return False, f"{before_call} events stamped before the close()/rename()/remove() that makes them began"
+    if disagree > 3:  # (tightened from 10, D-1623: the final runs had 0; 2 ms stays, the test's ctime clock is coarse)
+        return False, f"{disagree} events print an ms= that disagrees with the measured lag by > 2 ms (3 allowed)"
+    if p95(bounds) > 50:
+        return False, f"p95 lag measured from the start of each change's last call {p95(bounds):.1f} ms (≤ 50)"
     q = p95(lags)
     NATIVE["watch_p95_ms"] = q
     if q > 50:
         return False, f"p95 lag {q:.1f} ms (≤ 50)"
-    return True, f"1000 changes (400 creates in 10 new nested folders, 200 modifies, 200 renames, 200 deletes): each reported once, p95 lag {q:.2f} ms (max {max(lags):.1f}), reader thread {th.group(1)} ≠ main {th.group(2)}"
+    return True, (f"1000 changes (400 creates in 10 new nested folders, 200 modifies, 200 renames, 200 deletes): each reported once, p95 lag "
+                  f"{q:.2f} ms (max {max(lags):.1f}); {len(during)} stamped during their own close/rename/remove call (up to "
+                  f"{max(during, default=0):.2f} ms before it returned; none before it began); from each call's start p95 {p95(bounds):.2f} ms; "
+                  f"ms= within 2 ms on {1000 - disagree}/1000 (worst {worst:.2f}); reader thread {th.group(1)} ≠ main {th.group(2)}")
 
 
 # ------------------------------------------------------------------------------------------------ private bus helpers
