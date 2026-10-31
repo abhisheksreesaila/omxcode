@@ -9,6 +9,13 @@ Insert > Table… shipments.csv → Query: the delivered shipments whose pallet 
 (damaged frames, faces blurred, the shipment burned in). Leaves <out>/reel.mp4 and <out>/missing.csv (and the documents the
 app wrote in <out>/documents). Exit 1 when a tool fails.
 
+claims: open dock.mp4, Analyze it (Objects & codes), Insert > Table… shipments.csv, Insert > Documents… the BOL folder and
+read its fields (OCR, the labels given as data), link shipments.shipment_id to the video's codes and to the BOLs' shipment
+numbers, ask "damaged pallets whose BOL says no exceptions" (the SQL taught beside it: FROM shipments JOIN LINKED, the joins
+the links imply), Export CSV the answer, select each answer row (the video seeks, the BOL page marks its Exceptions box),
+Export pack. Leaves <out>/answer.csv, <out>/selections.csv (shipment, frame, page, x, y, w, h: read back from the app's trace
+lines), <out>/pack/<shipment>.pdf and .mp4. Runs in the models environment (the OCR model runs in the app's process).
+
 drone: for each flight, open drone_<k>.mp4 → Insert > Table… telemetry_<k>.csv (a log: it lands as a table card and a
 chart + map card in step with the video) → Analyze (Assets & defects, the inspection preset: georeferenced with the log)
 → Query the defects → Export CSV; then Insert > Compare inspections… (earlier: flight a, later: flight b) → Export the
@@ -34,8 +41,8 @@ MISSING_SQL = ("SELECT shipment FROM shipments WHERE status = 'delivered' "
 class Session:
     """A Client with a transcript: every call printed as `→ tool {args}` and what the app said back, indented."""
 
-    def __init__(self, env):
-        self.c = Client(app_build("omxplorer"), env=env)
+    def __init__(self, env, python=None):
+        self.c = Client(app_build("omxplorer"), env=env, python=python)
         self.log = []  # what the app printed (stderr): PLAYER: / JOB: / QUERY: trace lines
         self.reader = threading.Thread(target=self._drain, daemon=True)
         self.reader.start()
@@ -189,15 +196,112 @@ def drone(media, out):
         print(f"{f}: {len(rows) - 1} rows ({rows[0]})")
 
 
+CLAIM_FIELDS = "Shipment no., Date, Consignee, Carrier, Pallets, Exceptions, Signed by"  # the labels printed on the forms (data)
+CLAIM_LINKS = ("shipments.shipment_id = dock.mp4.code", "shipments.shipment_id = bol fields.shipment_no")
+CLAIM_QUESTION = "damaged pallets whose BOL says no exceptions"
+CLAIM_SQL = ("SELECT DISTINCT shipments.shipment_id AS shipment FROM shipments JOIN LINKED "
+             "WHERE detections.damaged = true AND bol_fields.exceptions = 'None' ORDER BY shipment")
+
+
+def models_python():
+    """The models environment's Python (torch + docTR), for an app that runs its OCR model in process."""
+    root = Path(__file__).resolve().parent.parent
+    p = root / ".pixi" / "envs" / "models" / "bin" / "python"
+    return p if p.exists() else None
+
+
+def claims(media, out):
+    import csv
+    import re
+    docs = out / "documents"
+    for d in (docs, out / "config", out / "pack"):
+        d.mkdir(parents=True, exist_ok=True)
+    for f in ("answer.csv", "selections.csv"):
+        (out / f).unlink(missing_ok=True)
+    for d in (docs / "pack", out / "pack"):
+        if d.exists():
+            for f in d.iterdir():
+                f.unlink()
+    env = {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(out / "config"), "MOJOUI_TRACE": "1",
+           "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES", "0")}
+    s = Session(env, python=models_python())
+    picked = []
+    try:
+        print("# The claim: which damaged pallets does the carrier owe for? The dock camera, the shipments sheet and the")
+        print("# signed bills of lading, linked by hand (two key links), asked in words, every answer shown on the video and")
+        print("# the page, then a claim pack per shipment. Only omxplorer's own tools.")
+        s.call("open-file", path=str((media / "dock.mp4").resolve()))
+        s.call("analyze")
+        s.call("analyze-objects-codes-warehouse-preset")
+        s.call("insert-table")
+        s.call("choose-table", path=str((media / "shipments.csv").resolve()))
+        s.call("insert-documents", path=str((media / "bol").resolve()))
+        s.call("fields", text=CLAIM_FIELDS)
+        s.call("read-documents")
+        s.call("read", name="table-bol-fields", count=20)
+        s.call("highlight-field", option="Exceptions")
+        s.call("links")
+        for l in CLAIM_LINKS:
+            s.call("link", text=l, submit=True)
+        s.call("query")
+        s.call("ask", text=CLAIM_QUESTION)
+        s.call("sql", text=CLAIM_SQL)
+        s.call("query-name", text="answer")
+        s.call("run-query")
+        answer = s.call("read", name="table-answer", count=50)
+        s.call("export-answer")
+        rows = [l for l in answer.splitlines()[2:] if l.strip()]
+        for i, key in enumerate(rows):
+            mark = len(s.log)
+            s.call("table-answer", value=float(i + 1))
+            deadline = time.time() + 5
+            while time.time() < deadline and not (any(l.startswith("PLAYER: t=") for l in s.log[mark:]) and any(l.startswith("DOCUMENT: ") for l in s.log[mark:])):
+                time.sleep(0.05)
+            got = s.log[mark:]
+            player = [l for l in got if l.startswith("PLAYER: t=")]
+            doc = [l for l in got if l.startswith("DOCUMENT: ")]
+            frame = re.search(r"frame=(\d+)", player[-1]).group(1) if player else ""
+            box = dict(re.findall(r"(page|x|y|w|h)=([0-9.]+)", doc[-1])) if doc else {}
+            said = s.call("read", name="video")  # (the player's own state: "t=5.333 s of 38.000 s, frame 160 of 1140, …")
+            m = re.search(r"frame (\d+) of", said)
+            if m and frame and m.group(1) != frame:
+                raise SystemExit(f"the player says frame {m.group(1)}, its trace line {frame}")
+            frame = frame or (m.group(1) if m else "")
+            picked.append((key.split("\t")[0], frame, box.get("page", ""), box.get("x", ""), box.get("y", ""), box.get("w", ""), box.get("h", "")))
+            s.call("read", name="document")
+        s.call("export-pack")
+        screen = s.call("screen", quiet=True)
+        print("      " + "\n      ".join(l for l in screen.splitlines() if l.lstrip().startswith(("Object [", '"answer', '"bol', '"shipments'))))
+    finally:
+        s.close()
+    for line in s.log:
+        if line.startswith(("JOB: ", "QUERY: ", "ASK: ", "LINK: ", "SELECT: ", "FOLLOW: ", "DOCUMENT: ", "PACK: ", "SLOW: ", "DOCUMENTS: ", "PLAYER: ")):
+            print(line)
+    ans = docs / "answer.csv"
+    if not ans.exists():
+        raise SystemExit(f"the app didn't write answer.csv in {docs}")
+    shutil.copyfile(ans, out / "answer.csv")
+    with open(out / "selections.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["shipment", "frame", "page", "x", "y", "w", "h"])
+        w.writerows(picked)
+    made = sorted((docs / "pack").glob("*")) if (docs / "pack").exists() else []
+    for f in made:
+        shutil.copyfile(f, out / "pack" / f.name)
+    print(f"\nanswer.csv: {ans.read_text().strip().splitlines()[1:]}; selections: {picked}; pack: {[f.name for f in made]}")
+    slow = [l for l in s.log if l.startswith("SLOW: ")]
+    print(f"SLOW lines: {len(slow)}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("name", choices=["warehouse", "drone"])
+    ap.add_argument("name", choices=["warehouse", "drone", "claims"])
     ap.add_argument("--media", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    {"warehouse": warehouse, "drone": drone}[a.name](Path(a.media).resolve(), out)
+    {"warehouse": warehouse, "drone": drone, "claims": claims}[a.name](Path(a.media).resolve(), out)
 
 
 if __name__ == "__main__":

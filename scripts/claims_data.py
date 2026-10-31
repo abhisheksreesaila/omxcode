@@ -18,7 +18,7 @@ Writes into OUT, deterministically (fixed seeds; no analysis of any picture or P
                   carrier, consignee, pallets, exceptions, signed_by. page is 0-based. box is in PDF points (origin top
                   left, y down) and is the value's ink box: from the cap height above the baseline (0.718 em, Helvetica)
                   to the glyph descender below it (0.207 em), across the value's advance width.
-    disputed      sorted shipment ids whose pallet is damaged on camera and whose BOL says Exceptions: None.
+    disputed      sorted shipment ids (text, as in a CSV) whose pallet is damaged on camera and whose BOL says Exceptions: None.
     damage_frame  {shipment id: frame}: the first frame (0-based, 30 fps) on which the damaged pallet is wholly in view,
                   so its tear and its code can both be read (goal 39's `first`; the same frames as its damaged intervals).
     log_offset_s  log t = video t + log_offset_s.
@@ -223,8 +223,9 @@ def main():
             continue
         name = f"BOL-{r['id']}.pdf"
         fields = bol_pdf(out / "bol" / name, r)
-        bols.append(dict(file=name, shipment=r["id"], fields=fields))
-    disputed = sorted(r["id"] for r in rows if r["damaged"] and r["exceptions"] == "None")
+        bols.append(dict(file=name, shipment=str(r["id"]), fields=fields))
+    # (shipment ids as text, as damage_frame's keys already are and as a CSV reads them back: D-1266)
+    disputed = sorted(str(r["id"]) for r in rows if r["damaged"] and r["exceptions"] == "None")
 
     visible = [r for r in recs if r["code_visible"]]
     hidden = [r for r in recs if not r["code_visible"]]

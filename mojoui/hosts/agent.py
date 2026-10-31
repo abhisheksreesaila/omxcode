@@ -126,6 +126,7 @@ class Host:
         self.mod = self.handle = None
         if self.link is None:
             sys.path.insert(0, str(Path(module_dir).resolve()))
+            sys.mojoui_python_host = True  # (mojoui.pygil: Python, not the app, manages its lock here, D-1260)
             self.mod = importlib.import_module("mojoui_app")
             if hasattr(self.mod, "init_shared"):
                 self.mod.init_shared()

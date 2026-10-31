@@ -172,6 +172,12 @@ COMPOSITES = [
     ("Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)", "mojoui/timelane.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "TimeLane."),
     ("Spring (a value that settles like a spring, stepped by display frames)", "mojoui/spring.mojo", ["Canvas frames (animation)"], "Spring("),
     ("Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)", "mojoui/videocard.mojo", [], "VideoWork("),
+    # the claim, end to end (goal 41 M10)
+    ("Document set (a folder of PDFs as one card: page through files, the fields to read as labels (data), Read → a table of fields per file; a linked row shows its file with the chosen field marked)", "mojoui/documentset.mojo", ["Canvas", "Canvas: pan, zoom, tap", "Card", "TextField", "Dropdown", "Quiet buttons", "ProgressBar"], "DocumentSet("),
+    ("Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)", "mojoui/documentjobs.mojo", [], "FolderFeed("),
+    ("Ask → SQL (JOIN LINKED: the joins the sheet's key links imply; an answer's lineage, so its rows follow like its source's; questions taught with their SQL)", "mojoui/asksql.mojo", [], "implied_sql("),
+    ("Pack PDF (a title and pages of blocks: facts, words, a table, a PDF page or a video frame with boxes marked; HTML printed to PDF by Chromium)", "mojoui/packpdf.mojo", [], "Pack("),
+    ("Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)", "mojoui/pack.mojo", [], "PackJob("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.

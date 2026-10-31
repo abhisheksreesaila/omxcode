@@ -23,6 +23,7 @@ UI thread, so there are no locks, no races and no "which thread am I on?" in app
 | Timers never block | `App.every()` lists `Every(ms, msg)`; ticks arrive as events | `mojoui/effects.mojo` |
 | Data work never blocks | `start_ui_job(...)` runs a query, import or sort on its own thread; when it ends, `App.jobs_message()` reaches `update()` | `mojoui/jobs.mojo`, D-771, D-792 |
 | Video and pictures never block | a decoder thread per video (`mojoui/framefeed.mojo`): opening, seeking and decoding run there; the newest seek wins; a frame that lands wakes the UI | goal 41 M2, D-1116 |
+| Documents never block | opening a folder, drawing its pages, reading it (OCR) and writing a pack (PDFs, clips) run as jobs (`mojoui/documentjobs.mojo`, `mojoui/pack.mojo`) | goal 41 M10, D-1271 |
 | Tables, queries and exports never block | `mojoui/tablejobs.mojo` (Insert > Table, SQL, Export CSV) and `mojoui/videocard.mojo` (Analyze, reels) run as jobs that wake the UI | goal 41 M3–M4, D-1124, D-1131 |
 | A finished job shows at once, not a frame later | the job's end wakes the main loop (a pipe on Linux and the web, `performSelectorOnMainThread` on the Mac) | D-771 |
 | Cancelling never blocks | cancelling marks the job; checking whether its thread stopped doesn't wait (Linux, Mac) | `mojoui/sheetjobs.mojo` |
@@ -90,6 +91,9 @@ The Mac numbers are from GitHub's virtual Macs (no GPU, ~20 frames a second), wi
   that calls Python takes the lock with `mojoui.pygil.python_enter()`/`python_exit()`, and whoever starts it lends the
   lock (`python_lend()`, then `python_reclaim()` when the result is taken; mojoui.documentjobs does both). While it is
   lent, Python on the UI thread must go through `python_enter()` too (pdfsource and ocrmodel do; visionmodel doesn't yet).
+  Under a Python host (the web host, the agent host: the app is a module Python imported) Python owns the lock and lets
+  go between calls; lending there would crash, so `python_lend()` does nothing and a job waits for Python's next pause
+  (D-1260). Checked: goal 41 M10's scenario reads 17 BOLs with docTR in a job under the agent host, 0 `SLOW:` at 50 ms.
 
 ## What's next, so it's "drop in a component and it just works"
 

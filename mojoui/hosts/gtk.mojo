@@ -4290,6 +4290,9 @@ def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
         var title = host[].rt.shown.nodes[node].text
         external_call["gtk_file_dialog_set_title", NoneType](dialog, title.as_c_string_span())
         var accept = host[].rt.shown.nodes[node].options[0] if len(host[].rt.shown.nodes[node].options) > 0 else String("")
+        if accept.find("folder") >= 0:  # (a picker of folders: mojoui.documentset's "a folder of documents", D-1263)
+            external_call["gtk_file_dialog_select_folder", NoneType](dialog, host[].window, 0, on_folder_picked[A], host_addr)
+            return
         if accept != "":  # the picker's file types (".csv,.omx") as the dialog's filter
             var filter = external_call["gtk_file_filter_new", Int]()
             var name = String("Files it opens (") + accept + ")"
@@ -4312,6 +4315,25 @@ def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
     var file = external_call["gtk_file_dialog_open_finish", Int](dialog, result, Int(err.unsafe_ptr()))
     if err[0] != 0:
         external_call["g_error_free", NoneType](err[0])  # (cancelled, or the dialog failed)
+    external_call["g_object_unref", NoneType](dialog)
+    if file == 0:
+        return
+    var raw = external_call["g_file_get_path", Int](file)
+    var path = c_str(raw)
+    external_call["g_free", NoneType](raw)
+    external_call["g_object_unref", NoneType](file)
+    var node = host[].picker_node
+    if path != "" and 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:
+        host[].send(node, True, path, 0, host_addr)
+
+
+def on_folder_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
+    """The folder dialog closed: its folder's path goes to the FilePicker's on_pick (nothing if cancelled)."""
+    var host = host_at[A](host_addr)
+    var err = List[Int](length=1, fill=0)
+    var file = external_call["gtk_file_dialog_select_folder_finish", Int](dialog, result, Int(err.unsafe_ptr()))
+    if err[0] != 0:
+        external_call["g_error_free", NoneType](err[0])
     external_call["g_object_unref", NoneType](dialog)
     if file == 0:
         return

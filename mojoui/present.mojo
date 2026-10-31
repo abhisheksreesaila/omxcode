@@ -70,9 +70,17 @@ def fcall[T: RegisterPassable = Int, *A: AnyType](addr: Int, *args: *A) -> T:
     return f(*args)
 
 
-def dl_open(name: String) -> Int:
+def dl_open(name: String, flags: Int = 2) -> Int:
+    """dlopen (flags: RTLD_NOW) called through its address: Mojo's own CPython loader declares dlopen with other types,
+    and a program can't declare one C function twice (an app that uses Python and a GTK host failed to build, D-1265)."""
+    var f = dl_sym(0, "dlopen")
+    if f == 0:
+        return 0
     var n = name
-    return external_call["dlopen", Int](n.as_c_string_span(), c_int(2))  # RTLD_NOW
+    var span = n.as_c_string_span()
+    var r = fcall[Int](f, span.unsafe_ptr(), c_int(flags))
+    _ = n^
+    return r
 
 
 def dl_sym(lib: Int, name: String) -> Int:

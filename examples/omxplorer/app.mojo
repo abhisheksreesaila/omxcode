@@ -13,7 +13,7 @@ from mojoui.app import App, Event
 from mojoui.scene import Scene
 from mojoui.canvas import Surface
 from mojoui.text import Font
-from mojoui.theme import Palette, Theme, hx
+from mojoui.theme import Palette, Theme, hx, hex_of
 from themes.liquid import liquid, liquid_palette, dark_tint
 from themes.skins import skin, ledger_palette, graphite_palette, blueprint_palette
 from mojoui.menus import MenuBar, Menu, Item, Separator, Submenu, ContextMenu
@@ -125,6 +125,16 @@ from mojoui.linkdrag import LinkDrag, DropCard, column_values, match_columns, is
 from mojoui.timelane import TimeLane
 from mojoui.peek import Peek
 from mojoui.datagrid import GRID_HEADER_DRAG, GRID_HEADER_DROP
+from mojoui.links import Selection, CardRows, Follow, Reaction, Link, End, BY_AGENT, LINKS_ADD, REACT_SEEK, REACT_HIGHLIGHT, REACT_SELECT
+from mojoui.asksql import AskBook, implied_sql, lineage
+from mojoui.documentset import DocumentSet, SET_MESSAGES
+from mojoui.documentjobs import FolderFeed, open_folder_job
+from mojoui.pygil import python_reclaim
+from mojoui.ocrmodel import OcrModel
+from mojoui.pdfsource import Box
+from mojoui.texttable import TextTable
+from mojoui.pack import Pack, PackJob, Clip, Packed
+from mojoui.jobs import start_ui_job
 
 # screens
 comptime START_SCREEN = 0
@@ -274,6 +284,12 @@ comptime LINKS_MSG = 7600  # the sheet's links (mojoui.links: LINKS_MESSAGES), t
 comptime LINKDRAG_MSG = 7660
 comptime PEEK_FRAME = 7680  # the peek's curves animating (its canvas's frames)
 comptime HOLD = 7681  # a card held still on the sheet (Board(on_hold=…)): the peek
+comptime DOCS_MSG = 7700  # folders of documents (mojoui.documentset): SET_MESSAGES each
+comptime DOCS_CANVAS = 270
+comptime MAX_DOCS = 2
+comptime PICK_DOCS = 7750  # Insert > Documents…: a folder of PDFs (or one PDF) as a card
+comptime PACK_DIR = "pack"  # Export pack writes <documents>/pack/<row's key>.pdf and .mp4
+comptime ASK_TEXT = 7751  # the Query dialog's "Ask in words" (taught with the SQL beside it: mojoui.asksql.AskBook)
 comptime LINKS_TOGGLE = 7682  # the toolbar's Links: the inspector shows the sheet's links
 comptime PEEK_CANVAS = 180
 comptime EDITOR_MSG = 4300  # the video editor (mojoui.mediatimeline: 64 messages, 3 canvases), opened from a video card's Edit
@@ -425,6 +441,15 @@ struct Main(App):
     var ld: LinkDrag  # a column being dragged onto a card, and the panel that confirms the link
     var peek: Peek  # a card held: what it's linked to
     var links_open: Bool  # the inspector shows the Links panel
+    var docs: List[DocumentSet]  # folders of documents on the sheet (Board children after the logs)
+    var doc_feeds: List[FolderFeed]  # their page pictures and reads (jobs), one per set
+    var query_ask: String  # the Query dialog's question in words
+    var asked_sql: String  # the SQL the last query ran (JOIN LINKED written out): its answer's lineage
+    var book: AskBook  # questions taught with their SQL
+    var packing: Optional[Job[Packed]]  # Export pack: a table's rows as PDFs and clips (mojoui.pack)
+    var pack_card: String  # the table it packs
+    var doc_opening: Optional[Job[DocumentSet]]  # Insert > Documents…: the folder being opened (mojoui.documentjobs)
+    var doc_opening_path: String
 
     def __init__(out self):
         self.screen = START_SCREEN
@@ -541,6 +566,15 @@ struct Main(App):
         self.ld = LinkDrag(LINKDRAG_MSG)
         self.peek = Peek(PEEK_CANVAS, PEEK_FRAME)
         self.links_open = False
+        self.docs = List[DocumentSet]()
+        self.doc_feeds = List[FolderFeed]()
+        self.query_ask = ""
+        self.asked_sql = ""
+        self.book = AskBook()
+        self.packing = None
+        self.pack_card = ""
+        self.doc_opening = None
+        self.doc_opening_path = ""
         self.version = 1
         var auto_open = environment("OMX_OPEN")  # a file to open straight away (the launcher's argument)
         if auto_open != "":
@@ -833,6 +867,9 @@ struct Main(App):
         for k in range(len(self.tracks)):
             ref r = self.tracks.cards[k]
             taken.append(SheetObject.chart(0, 0, r.x, r.y, r.w, r.h))
+        for k in range(len(self.docs)):
+            ref d = self.docs[k].card
+            taken.append(SheetObject.chart(0, 0, d.x, d.y, d.w, d.h))
         taken.append(SheetObject.chart(0, 0, self.table_x, self.table_y, self.table_w if self.table_w > 0 else self.sheet_width(), self.table_h() + TABLE_FRAME))  # (its frame: as tall as a card beside it)
         return free_spot(taken, -16, self.sheet_width(), w, h)
 
@@ -1016,6 +1053,10 @@ struct Main(App):
             ref r = self.tracks.cards[k]
             out.append(DropCard(r.name, r.name if self.tables.find(r.name) >= 0 else String(""), r.x, r.y, r.w, r.h, i, False))  # (its rows' card: the same table)
             i += 1
+        for k in range(len(self.docs)):
+            ref d = self.docs[k]
+            out.append(DropCard(d.name, d.fields_name() if d.is_read() else String(""), d.card.x, d.card.y, d.card.w, d.card.h, i, False))  # (its columns: its fields' table)
+            i += 1
         return out^
 
     def sheet_of(self, c: DropCard) -> Int:
@@ -1089,6 +1130,7 @@ struct Main(App):
         var l = self.ld.link()
         try:
             var i = self.links.add(l)
+            self.resolve_links()
             self.links.notes[i] = l.a.card + " ↔ " + l.b.card + " · " + self.ld.choice().count.text() + " match"
             print(self.ld.line(), flush=True)
             self.message = "Linked " + l.label() + ("" if l.kind == LINK_TIME else " (" + self.ld.choice().count.text() + " match)")
@@ -1097,6 +1139,410 @@ struct Main(App):
                 self.sync_lanes()
         except e:
             self.message = String(e)
+
+    # ---------- folders of documents (mojoui.documentset), a row followed through the links, Export pack (mojoui.pack) ----------
+
+    def open_documents(mut self, path: String):
+        """Insert > Documents…: a folder of PDFs (or one) as a card on the sheet; its first page drawn by a job."""
+        if self.screen != SHEET:
+            self.open_blank()
+            if self.screen != SHEET:
+                return
+        if len(self.docs) >= MAX_DOCS:
+            self.message = "Two folders of documents is the most a sheet holds: close one first"
+            self.version += 1
+            return
+        if self.doc_opening:
+            self.message = "Still opening " + self.doc_opening_path
+            self.version += 1
+            return
+        try:  # (listing it and opening its first PDF: a job, PyMuPDF's first import alone takes 0.1 s)
+            var k = len(self.docs)
+            self.doc_opening = open_folder_job(path, DOCS_MSG + k * SET_MESSAGES, DOCS_CANVAS + k)
+            self.doc_opening_path = path
+            self.say(Activity.running("Opening " + file_name(path), 0.0, "documents"))
+        except e:
+            self.message = "Couldn't open " + path + ": " + String(e)
+        self.version += 1
+
+    def documents_opened(mut self):
+        """A folder opened by its job: its card placed on the sheet, its first page drawn by a job."""
+        if not self.doc_opening or self.doc_opening.value().poll() == JOB_RUNNING:
+            return
+        var job = self.doc_opening.take()
+        python_reclaim()
+        var path = self.doc_opening_path
+        try:
+            var k = len(self.docs)
+            var d = job.result()
+            d.msg_base = DOCS_MSG + k * SET_MESSAGES  # (a card closed meanwhile: it takes the next place)
+            d.card.msg_base = d.msg_base
+            d.card.canvas = DOCS_CANVAS + k
+            var spot = self.free_place(d.card.w, d.card.h)
+            d.card.x = spot[0]
+            d.card.y = spot[1]
+            self.docs.append(d^)
+            self.doc_feeds.append(FolderFeed())
+            self.doc_feeds[k].poll(self.docs[k])
+            self.reveal = 1 + len(self.objects) + len(self.media) + len(self.tables) + len(self.tracks) + k
+            self.reveal_count += 1
+            self.message = "Added " + self.docs[k].name + " · " + String(len(self.docs[k].files)) + " documents: say which fields to read, then Read"
+            self.say(Activity.done(self.docs[k].name, String(len(self.docs[k].files)) + " documents"))
+            if self.trace:
+                print("DOCUMENTS: " + self.docs[k].name + " " + String(len(self.docs[k].files)) + " documents", flush=True)
+        except e:
+            self.message = "Couldn't open " + path + ": " + String(e)
+            self.say(Activity.error("Couldn't open " + file_name(path), String(e)))
+        self.version += 1
+
+    def docs_busy(self) -> Bool:
+        for k in range(len(self.doc_feeds)):
+            if self.doc_feeds[k].busy():
+                return True
+        return False
+
+    def docs_of(self, message: Int) -> Int:
+        for k in range(len(self.docs)):
+            if self.docs[k].owns(message):
+                return k
+        return -1
+
+    def docs_event(mut self, k: Int, event: Event):
+        """A folder card's event: its page, its file, its fields, Read (a job), close."""
+        _ = self.docs[k].update(event)
+        if self.docs[k].closed:
+            _ = self.docs.pop(k)
+            _ = self.doc_feeds.pop(k)
+            for j in range(len(self.docs)):  # (the cards after it take its place: their messages and canvases follow)
+                self.docs[j].msg_base = DOCS_MSG + j * SET_MESSAGES
+                self.docs[j].card.msg_base = DOCS_MSG + j * SET_MESSAGES
+                self.docs[j].card.canvas = DOCS_CANVAS + j
+            self.version += 1
+            return
+        if self.docs[k].read_asked:
+            self.doc_feeds[k].read(self.docs[k], OcrModel(), self.pal)
+            if self.doc_feeds[k].error != "":
+                self.message = self.doc_feeds[k].error
+                self.doc_feeds[k].error = ""
+            else:
+                self.say(Activity.running("Reading " + self.docs[k].name, 0.0, String(len(self.docs[k].files)) + " documents · " + self.docs[k].labels_text))
+                if self.trace:
+                    print("JOB: start read " + self.docs[k].name + " " + String(len(self.docs[k].files)) + " documents · fields " + ", ".join(self.docs[k].columns()[1:].copy()), flush=True)
+        if self.docs[k].problem != "":
+            self.message = self.docs[k].problem
+            self.docs[k].problem = ""
+        self.doc_feeds[k].poll(self.docs[k])
+        self.version += 1
+
+    def poll_documents(mut self):
+        """The folders' jobs: page pictures land, reads report their share, a finished read becomes its fields' table card."""
+        self.documents_opened()
+        for k in range(len(self.docs)):
+            self.doc_feeds[k].poll(self.docs[k])
+            if self.docs[k].reading:
+                self.island.progress(Float64(max(self.docs[k].card.progress, 0)) / 100.0, String(max(self.docs[k].card.progress, 0)) + "% · reading " + self.docs[k].name, self.font, now_ns())
+            var got = self.doc_feeds[k].take_read()
+            if got:
+                var r = got.take()
+                var secs = r.seconds
+                var card = r.card.take()
+                var words = List[TextTable]()
+                while len(r.words) > 0:
+                    words.insert(0, r.words.pop())
+                self.docs[k].take_read(words^, r.fields.copy())
+                var name = self.docs[k].fields_name()
+                var at = self.tables.find(name)
+                if at >= 0:  # (read again: the old table gives way)
+                    self.tables.remove(at)
+                try:
+                    var w = self.card_width(card.sheet.columns())
+                    var spot = self.free_place(w, 320)
+                    var t = self.tables.adopt(card^, spot[0], spot[1], w, 320)
+                    self.reveal_table(t)
+                    var found = 0
+                    var total = 0
+                    for fs in self.docs[k].fields:
+                        for f in fs:
+                            total += 1
+                            if f.found:
+                                found += 1
+                    self.message = name + ": " + String(len(self.docs[k].files)) + " documents read, " + String(found) + " of " + String(total) + " fields found"
+                    self.say(Activity.done(name, String(found) + " of " + String(total) + " fields · " + fixed(secs, 1) + " s"))
+                    if self.trace:
+                        print("JOB: landed read " + self.docs[k].name + " " + String(len(self.docs[k].files)) + " documents " + fixed(secs * 1000.0, 1) + " ms (" + String(found) + " of " + String(total) + " fields)", flush=True)
+                except e:
+                    self.message = "Couldn't show " + name + ": " + String(e)
+                self.version += 1
+            if self.doc_feeds[k].error != "":
+                self.message = self.doc_feeds[k].error
+                self.say(Activity.error("Couldn't read " + self.docs[k].name, self.doc_feeds[k].error))
+                self.doc_feeds[k].error = ""
+                self.version += 1
+
+    def resolve_links(mut self):
+        """A link typed on a video's name joins its analysis' rows (End.table); a folder's name, its fields' table."""
+        var at = self.found_sheet_index()
+        if self.video.found_path != "" and at >= 0:
+            var k = self.card_of(self.video.found_path)
+            if k >= 0:
+                _ = self.links.resolve(self.media.cards[k].title(), self.tables.cards[at].name)
+        for k in range(len(self.docs)):
+            _ = self.links.resolve(self.docs[k].name, self.docs[k].fields_name())
+
+    def row_selection(self, k: Int) -> Selection:
+        """Table card k's selected row, whole (every column's text), its selected column's value as the selection's."""
+        ref c = self.tables.cards[k]
+        var row = c.grid.cur_row
+        var names = List[String]()
+        var cells = List[String]()
+        for col in range(c.sheet.columns()):
+            names.append(c.sheet.name(col))
+            cells.append(c.sheet.display(col, row) if row >= 0 else String(""))
+        var col = c.grid.cur_col
+        var cname = c.sheet.name(col) if 0 <= col < c.sheet.columns() else String("")
+        var value = c.sheet.display(col, row) if 0 <= col < c.sheet.columns() and row >= 0 else String("")
+        return Selection(c.name, c.name, row, cname, value).with_row(names, cells)
+
+    def video_rows(self, k: Int, column: String) -> CardRows:
+        """Video card k's analysis rows as mojoui.links reads them (only `column`, t and frame: a selection reads few)."""
+        var at = self.found_sheet_index()
+        var table = self.found_table if self.found_table != "" else self.name
+        var out = CardRows(self.media.cards[k].title(), table, [column, "t", "frame"])
+        out.seeks("t", "frame")
+        if self.video.found_path != self.media.cards[k].path or at == -2:
+            return out^
+        if at == -1:
+            fill_rows(out, self.frame)
+        else:
+            fill_rows(out, self.tables.cards[at].sheet)
+        return out^
+
+    def video_table(self, k: Int) -> String:
+        """The table holding video card k's analysis rows ("" none)."""
+        if self.video.found_path != self.media.cards[k].path or self.found_sheet_index() == -2:
+            return ""
+        return self.found_table if self.found_table != "" else self.name
+
+    def follow_row(mut self, k: Int):
+        """Table card k's selected row, followed through the sheet's links (mojoui.links): linked videos seek to its first
+        sighting, folders of documents show its document with the chosen field marked, linked tables select its rows."""
+        var sel = self.row_selection(k)
+        if sel.row < 0:
+            return
+        var follows = self.links.follow(sel)
+        _ = self.media.poll()  # (a probe that landed since: the player knows its length before it seeks)
+        if self.trace:
+            var cells = String("")
+            for i in range(min(len(sel.names), 4)):
+                cells += (" " if i > 0 else "") + sel.names[i] + "=" + sel.cells[i]
+            print("SELECT: " + sel.card + " row " + String(sel.row + 1) + " " + cells + " · " + String(len(follows)) + " linked", flush=True)
+        var said = List[String]()
+        for ref f in follows:
+            var done = False
+            for v in range(len(self.media)):  # a video whose rows the link reaches: it seeks
+                if self.media.cards[v].kind != OBJ_VIDEO or not self.media.cards[v].player:
+                    continue
+                var vt = self.video_table(v)
+                if not (self.media.cards[v].title() == f.card or (vt != "" and vt == f.table)):
+                    continue
+                var r = self.video_rows(v, f.column).react(f)
+                if r.action == REACT_SEEK and r.time >= 0 and r.time < 1e299:
+                    var at = r.time
+                    var fps = self.media.cards[v].player.value().state.fps
+                    if r.frame >= 0 and fps > 0:  # (the row's own frame, not its time rounded to text: mid-frame, so it lands on it)
+                        at = (Float64(r.frame) + 0.5) / fps
+                    self.media.cards[v].player.value().seek(at)
+                    said.append(self.media.cards[v].title() + " at " + fixed(r.time, 2) + " s")
+                if self.trace:
+                    print(r.line(), flush=True)
+                done = True
+            for d in range(len(self.docs)):  # a folder whose fields the link reaches: its document, the field marked
+                if self.docs[d].fields_name() != f.table and self.docs[d].name != f.card:
+                    continue
+                var r = self.docs[d].react(f)
+                if self.trace:
+                    print(r.line().replace("FOLLOW: " + self.docs[d].name, "FOLLOW: " + self.docs[d].name + " " + self.docs[d].file()), flush=True)
+                    if r.action == REACT_HIGHLIGHT:
+                        print("DOCUMENT: " + self.docs[d].name + " " + self.docs[d].file() + " field=" + self.docs[d].focus_name() + " page=" + String(r.page)
+                              + " x=" + fixed(r.x, 3) + " y=" + fixed(r.y, 3) + " w=" + fixed(r.w, 3) + " h=" + fixed(r.h, 3), flush=True)
+                if r.action == REACT_HIGHLIGHT:
+                    said.append(self.docs[d].file() + " · " + self.docs[d].focus_name())
+                self.doc_feeds[d].poll(self.docs[d])
+                done = True
+            if done:
+                continue
+            var t = self.tables.find(f.table)  # a table card the link reaches: its rows are selected
+            if t >= 0 and t != k:
+                ref c = self.tables.cards[t]
+                var col = c.sheet.index(f.column)
+                if col >= 0:
+                    var rows = CardRows(c.name, c.name, [f.column])
+                    fill_rows(rows, c.sheet)
+                    var r = rows.react(f)
+                    if r.action == REACT_SELECT and len(r.rows) > 0:
+                        c.grid.select(r.rows[0], col)
+                        c.grid.reveal_cell(r.rows[0], col, c.sheet)
+                        said.append(c.name + " row " + String(r.rows[0] + 1))
+                    if self.trace:
+                        print(r.line(), flush=True)
+        if len(said) > 0:
+            self.message = sel.card + " row " + String(sel.row + 1) + " → " + "; ".join(said)
+        self.version += 1
+
+    def pack_rows(mut self, k: Int):
+        """Export pack: per row of table card k, a PDF (the row; what its links reach: the linked tables' rows, the video's
+        frame with the thing marked, the document's page with the field marked) and a clip of the video around it (faces
+        blurred, the row's key burned in), written by one job to <documents>/pack/<key>.pdf and .mp4."""
+        if self.packing:
+            self.message = "A pack is being written already"
+            return
+        ref c = self.tables.cards[k]
+        if c.sheet.rows() == 0 or c.sheet.columns() == 0:
+            self.message = "Nothing to pack: " + c.name + " has no rows"
+            return
+        var folder = self.documents() + "/" + PACK_DIR
+        make_dir(folder)
+        var job = PackJob(self.video.found)
+        var keep = c.grid.cur_row
+        var keep_col = c.grid.cur_col
+        var key_name = c.sheet.name(0)
+        var n = 0
+        for row in range(c.sheet.rows()):
+            if not c.sheet.alive(row):
+                continue
+            var key = c.sheet.display(0, row)
+            var title = capital(key_name.replace("_", " ")) + " " + key
+            var p = Pack(title, c.name + (" · " + self.query_ask if self.query_ask != "" else String("")), "omxplorer · " + self.sheet_name + " · " + c.name + " row " + String(row + 1))
+            p.colour(hex_of(self.pal.accent))
+            var facts = List[Tuple[String, String]]()
+            for col in range(min(c.sheet.columns(), 6)):
+                facts.append((c.sheet.name(col), c.sheet.display(col, row)))
+            c.grid.select(row, 0)
+            var sel = self.row_selection(k)
+            var follows = self.links.follow(sel)
+            var frame_t = -1.0
+            var frame_video = String("")
+            var frame_boxes = List[Box]()
+            var frame_no = -1
+            var doc_path = String("")
+            var doc_page = 0
+            var doc_boxes = List[Box]()
+            var doc_caption = String("")
+            var tables = List[Tuple[String, List[String], List[String]]]()
+            for ref f in follows:
+                for v in range(len(self.media)):
+                    var vt = self.video_table(v)
+                    if self.media.cards[v].kind != OBJ_VIDEO or not (self.media.cards[v].title() == f.card or (vt != "" and vt == f.table)):
+                        continue
+                    var r = self.video_rows(v, f.column).react(f)
+                    if r.action == REACT_SEEK and r.time < 1e299 and frame_t < 0:
+                        frame_t = r.time
+                        frame_no = r.frame
+                        frame_video = self.media.cards[v].path
+                        for b in self.boxes_at(f.column, f.value, r.frame):
+                            frame_boxes.append(b)
+                for d in range(len(self.docs)):
+                    if self.docs[d].fields_name() != f.table and self.docs[d].name != f.card:
+                        continue
+                    var rows = self.docs[d].card_rows()
+                    var r = rows.react(f)
+                    if r.action == REACT_HIGHLIGHT and len(r.rows) > 0 and doc_path == "":
+                        doc_path = self.docs[d].files[r.rows[0]]
+                        doc_page = r.page
+                        doc_boxes.append(Box(r.x, r.y, r.w, r.h))
+                        var lbl = self.docs[d].labels[self.docs[d].focus].label if 0 <= self.docs[d].focus < len(self.docs[d].labels) else String("")
+                        var val = self.docs[d].fields[r.rows[0]][self.docs[d].focus].value if r.rows[0] < len(self.docs[d].fields) and self.docs[d].focus < len(self.docs[d].fields[r.rows[0]]) else String("")
+                        doc_caption = file_name(doc_path) + ", page " + String(r.page + 1) + ": " + lbl + " reads “" + val + "”"
+                        facts.append((lbl + " (" + file_name(doc_path) + ")", val if val != "" else String("—")))
+                var t = self.tables.find(f.table)
+                if t >= 0 and t != k:
+                    ref tc = self.tables.cards[t]
+                    if tc.sheet.rows() <= 100_000 and tc.sheet.index(f.column) >= 0:
+                        var cr = CardRows(tc.name, tc.name, [f.column])
+                        fill_rows(cr, tc.sheet)
+                        var r = cr.react(f)
+                        if r.action == REACT_SELECT and len(r.rows) > 0 and tc.sheet.columns() <= 12 and self.video_table_index() != t:
+                            var cols = List[String]()
+                            var vals = List[String]()
+                            for col in range(tc.sheet.columns()):
+                                cols.append(tc.sheet.name(col))
+                                vals.append(tc.sheet.display(col, r.rows[0]))
+                            tables.append((tc.name, cols^, vals^))
+            if frame_t >= 0:
+                facts.append(("Seen on camera", clock_text(frame_t) + " · frame " + String(frame_no)))
+            p.page("Evidence")
+            p.facts(facts)
+            if frame_t >= 0:
+                p.video_frame(frame_video, frame_t, frame_boxes, file_name(frame_video) + " at " + clock_text(frame_t) + " (frame " + String(frame_no) + "): the first frame it is seen")
+            for ref tb in tables:
+                var rows = List[List[String]]()
+                rows.append(tb[2].copy())
+                p.table(tb[1], rows, tb[0])
+            if doc_path != "":
+                p.page("Document")
+                p.pdf_page(doc_path, doc_page, doc_boxes, doc_caption)
+            else:
+                p.page("Document")
+                p.text("No document is linked to this row.")
+            job.add(p^, folder + "/" + key + ".pdf")
+            if frame_t >= 0:
+                job.clip(Clip(frame_video, folder + "/" + key + ".mp4", max(frame_t - 1.5, 0.0), frame_t + 4.5, title + " · {t}", True))
+            n += 1
+        if keep >= 0:
+            c.grid.select(keep, keep_col)
+        var card_name = c.name
+        self.packing = start_ui_job(job^)
+        self.pack_card = card_name
+        self.say(Activity.running("Packing " + card_name, 0.0, String(n) + " rows · a PDF and a clip each"))
+        if self.trace:
+            print("JOB: start pack " + card_name + " " + String(n) + " rows", flush=True)
+        self.version += 1
+
+    def video_table_index(self) -> Int:
+        return self.found_sheet_index()
+
+    def boxes_at(self, column: String, value: String, frame: Int) -> List[Box]:
+        """The analysis rows' boxes on `frame` whose `column` holds `value` (the thing a pack marks on its frame)."""
+        var out = List[Box]()
+        var at = self.found_sheet_index()
+        if at == -2 or frame < 0:
+            return out^
+        var cols: List[String] = [column, "frame", "x", "y", "w", "h"]
+        var rows = CardRows("", "", cols)
+        if at == -1:
+            fill_rows(rows, self.frame)
+        else:
+            fill_rows(rows, self.tables.cards[at].sheet)
+        for r in range(rows.rows()):
+            if rows.cell(r, 0) == value and rows.cell(r, 1) == String(frame):
+                try:
+                    out.append(Box(atof(rows.cell(r, 2)), atof(rows.cell(r, 3)), atof(rows.cell(r, 4)), atof(rows.cell(r, 5))))
+                except:
+                    pass
+        return out^
+
+    def poll_pack(mut self):
+        if not self.packing or self.packing.value().poll() == JOB_RUNNING:
+            if self.packing:
+                var p = self.packing.value().progress()
+                var share = Float64(p.done) / Float64(p.total) if p.total > 0 else 0.0
+                self.island.progress(min(share, 1.0), String(Int(share * 100)) + "% · packing", self.font, now_ns())
+            return
+        var job = self.packing.take()
+        try:
+            var r = job.result()
+            self.message = "Packed " + self.pack_card + ": " + String(len(r.pdfs)) + " PDFs and " + String(len(r.clips)) + " clips in your documents (" + PACK_DIR + ")"
+            self.say(Activity.done("Packed " + self.pack_card, String(len(r.pdfs)) + " PDFs · " + String(len(r.clips)) + " clips · " + fixed(r.milliseconds / 1000.0, 1) + " s"))
+            if self.trace:
+                print("JOB: landed pack " + self.pack_card + " " + String(len(r.pdfs)) + " pdfs " + String(len(r.clips)) + " clips " + fixed(r.milliseconds, 1) + " ms", flush=True)
+                for f in r.pdfs:
+                    print("PACK: " + f, flush=True)
+                for f in r.clips:
+                    print("PACK: " + f, flush=True)
+        except e:
+            self.message = "Couldn't write the pack: " + String(e)
+            self.say(Activity.error("Couldn't write the pack", String(e)))
+        self.version += 1
 
     def open_editor(mut self, k: Int):
         """Card k's video in the editor (mojoui.mediatimeline), over the whole window: the analysis' rows as lanes (when
@@ -1310,7 +1756,28 @@ struct Main(App):
         var called = String(self.query_name.strip())
         if called == "":
             called = "Query 1"
-        if self.work.ask(self.tables, self.query_text, self.name if self.has_table else String(""), self.frame, called, self.pal):
+        var text = self.query_text
+        var asked = String(self.query_ask.strip())
+        if asked != "":  # (a question in words: taught with the SQL beside it, or answered by what was taught, mojoui.asksql)
+            if String(text.strip()) != "":
+                self.book.teach(asked, text)
+            else:
+                text = self.book.sql_for(asked)
+                if text == "":
+                    self.query_said = "No SQL for that question yet: write it once below, and the question will run it from then on"
+                    self.version += 1
+                    return
+        try:
+            text = implied_sql(text, self.links)  # (JOIN LINKED: the joins the sheet's key links imply)
+        except e:
+            self.query_said = String(e)
+            self.message = String(e)
+            self.version += 1
+            return
+        self.asked_sql = text
+        if self.trace:
+            print("ASK: " + ("\"" + asked + "\" → " if asked != "" else "") + text, flush=True)
+        if self.work.ask(self.tables, text, self.name if self.has_table else String(""), self.frame, called, self.pal):
             self.query_said = "Running…"
             self.say(Activity.running(called, 0.0, "SQL in the background"))
         else:
@@ -1327,6 +1794,13 @@ struct Main(App):
             var k = self.tables.adopt(a^.take_card(), spot[0], spot[1], w, 320)
             self.reveal_table(k)
             self.timed(ms)
+            self.links.forget_derived(called)  # (where its columns came from: a row of it follows like a row of its source)
+            for l in lineage(self.asked_sql):
+                for j in range(len(self.tables)):
+                    if j != k and self.tables.sql_name_of(j) == l.table:
+                        self.links.derive(Link.key(End(called, l.column), End(self.tables.cards[j].name, l.source), BY_AGENT))
+            if len(self.links) > 0:
+                self.tables.cards[k].act_with("Export pack", "download", "export-pack", "A PDF and a video clip for every row: what its links reach (the video's frame, the document's page, the linked rows), in your documents' pack folder")
             self.query_said = grouped(self.tables.cards[k].sheet.rows()) + " rows in " + fixed(shown_ms(ms), 1) + " ms"
             self.query_open = False
             self.message = called + ": " + self.query_said
@@ -1938,6 +2412,10 @@ struct Main(App):
         find it there): landed charts move to their numbers, the column's figures arrive, the table work lands, the
         island follows (progress, then the time it took)."""
         self.take_table_work()
+        self.poll_documents()
+        self.poll_pack()
+        if self.media.poll():  # (a video's probe or frame that landed: on frames too, for hosts without the wake, D-1264)
+            self.version += 1
         if self.opening:
             var state = self.opening.value().poll()
             if state == JOB_RUNNING:
@@ -2065,6 +2543,9 @@ struct Main(App):
         if self.links.update(event):  # (the Links panel: Unlink, an offset, a link typed)
             if self.links.problem != "":
                 self.message = self.links.problem
+            self.resolve_links()
+            if self.trace and m - LINKS_MSG == LINKS_ADD and self.links.problem == "" and len(self.links) > 0:  # (LINKS_ADD: the link typed)
+                print("LINK: " + self.links.items[len(self.links) - 1].label() + " (typed)", flush=True)
             self.sync_lanes()
             self.version += 1
             return
@@ -2123,6 +2604,10 @@ struct Main(App):
             elif self.media.acted == ACT_EDIT:
                 self.open_editor(self.media.acted_card)
             return
+        var dk = self.docs_of(m)
+        if dk >= 0:  # (a folder of documents: its pages, its files, its fields, Read)
+            self.docs_event(dk, event)
+            return
         if self.tables.update(event, self.font, self.pal, self.documents()):  # (a table card's grid, Export CSV, close)
             if self.tables.dragged >= 0:  # (a column's header carried out of its card: a link being made)
                 self.column_dragged()
@@ -2135,12 +2620,22 @@ struct Main(App):
             elif self.tables.problem != "":
                 self.say(Activity.error("Couldn't export", self.tables.problem))
             elif self.tables.acted >= 0:
-                self.write_plan(self.tables.acted)
+                if self.tables.cards[self.tables.acted].action_tag == "export-pack":
+                    self.pack_rows(self.tables.acted)
+                else:
+                    self.write_plan(self.tables.acted)
+            elif self.tables.selected >= 0:  # (a row picked, by hand or set by an agent: followed through the links)
+                self.follow_row(self.tables.selected)
             self.version += 1
             return
         if m != CELL_COMMIT and m != CELL_CANCEL and m != GRID and self.grid.editing:
             self.grid.cancel_edit()
             self.version += 1
+        if m == PICK_DOCS:
+            self.inserting = 0
+            if event.text != "":
+                self.open_documents(event.text)
+            return
         if m == PICK or (m >= RECENT and m < RECENT + 10):
             self.inserting = 0  # (Insert > Video…'s dialog picked its file)
             var path = event.text if m == PICK else (self.recent[m - RECENT] if m - RECENT < len(self.recent) else String(""))
@@ -2506,6 +3001,8 @@ struct Main(App):
             self.version += 1
         elif m == QUERY_TEXT:
             self.query_text = event.text
+        elif m == ASK_TEXT:
+            self.query_ask = event.text
         elif m == QUERY_NAME:
             self.query_name = event.text
         elif m == QUERY_RUN:
@@ -2570,6 +3067,15 @@ struct Main(App):
                 else:
                     r.w = max(360, r.w + Int(event.dx))
                     r.h = max(200, r.h + Int(event.dy))
+            elif 0 <= k - len(self.objects) - len(self.media) - len(self.tables) - len(self.tracks) < len(self.docs):  # (a folder of documents, after the logs)
+                ref d = self.docs[k - len(self.objects) - len(self.media) - len(self.tables) - len(self.tracks)].card
+                if m == MOVE:
+                    d.x = max(0, d.x + Int(event.dx))
+                    d.y = max(0, d.y + Int(event.dy))
+                else:
+                    d.w = max(360, d.w + Int(event.dx))
+                    d.h = max(300, d.h + Int(event.dy))
+                d.version += 1
             self.version += 1
         elif m >= OBJ_TAP and m < OBJ_TAP + 100:
             var k = m - OBJ_TAP
@@ -2874,6 +3380,8 @@ struct Main(App):
                     return self.tracks.describe(canvas, self.track_time(k))
         if self.tables.draws(canvas):
             return self.tables.describe(canvas, first, count)  # (a table card: its rows)
+        if DOCS_CANVAS <= canvas < DOCS_CANVAS + len(self.docs):
+            return self.docs[canvas - DOCS_CANVAS].describe()  # (a folder: the document shown, what's marked)
         if 10 <= canvas < 10 + len(self.objects) and self.objects[canvas - 10].kind == OBJ_CHART:
             return chart_text(self.objects[canvas - 10], self.frame)  # (a chart: its bars' numbers)
         if canvas != 0:
@@ -2956,6 +3464,10 @@ struct Main(App):
                 surface.again = True
         elif self.media.draws(canvas):
             self.media.draw(canvas, surface, self.pal)
+        elif DOCS_CANVAS <= canvas < DOCS_CANVAS + len(self.docs):
+            self.docs[canvas - DOCS_CANVAS].card.draw(surface, self.pal)
+            if self.docs[canvas - DOCS_CANVAS].card.wants()[0] >= 0:  # (the size it's drawn at asks for a sharper page: a job)
+                self.doc_feeds[canvas - DOCS_CANVAS].poll(self.docs[canvas - DOCS_CANVAS])
         elif self.tables.draws(canvas):
             self.tables.draw(canvas, surface, self.font, self.pal)
         elif 60 <= canvas < 60 + len(self.tiles):
@@ -3127,7 +3639,7 @@ struct Main(App):
         var doc = (self.sheet_name + " · " + grouped(self.frame.rows()) + " rows") if on_sheet else String("")
         _ = doc
         var t = now_ns()
-        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing)
+        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing) or Bool(self.packing) or Bool(self.doc_opening) or self.docs_busy()
         var says = self.island.now.lead + (" · " + self.island.now.text if self.island.now.text != "" else String(""))
         var island: List[View] = [IslandView(ISLAND_CANVAS, self.island_v, ISLAND_TAP, ISLAND_FRAME if moving else NO_MSG).tooltip(says)]  # (the document, the GPU and what's happening, in one place: D-255)
         return AppBar("omxplorer", bar^, island^)
@@ -3184,7 +3696,9 @@ struct Main(App):
             for k in range(len(self.tables)):
                 names += (", " if names != "" else "") + sql_name(self.tables.cards[k].name)
             out.append(Dialog("Query", VStack(
-                Text("SQL over this sheet's tables: " + names + ". Joins, IN and NOT IN, subqueries, WITH.", CAPTION),
+                Text("SQL over this sheet's tables: " + names + ". Joins, IN and NOT IN, subqueries, WITH; FROM a JOIN LINKED: the joins its links imply.", CAPTION),
+                TextField(self.query_ask, "Ask in words (optional): taught with the SQL below, asked again it runs it", on_change=ASK_TEXT, on_submit=QUERY_RUN).fill().tag("ask")
+                    .label("Ask in words").tooltip("A question in words: with SQL below, the app learns that the question means it; alone, it runs what it learned"),
                 TextArea(self.query_text, "SELECT … FROM …", QUERY_TEXT, height=110).fill().tag("sql"),
                 HStack(Text("Answer as", CAPTION), TextField(self.query_name, "Query 1", on_change=QUERY_NAME, on_submit=QUERY_RUN).width(200).tag("query-name"),
                        Spacer(), Button("Cancel", QUERY_CLOSE), Button("Run", QUERY_RUN, PROMINENT, icon="play").tag("run-query"), spacing=10).fill().align(CENTER),
@@ -3335,6 +3849,7 @@ struct Main(App):
             extra.append(Text("Streamed from disk", CAPTION).tone(TONE_ACCENT).tooltip("This file is bigger than memory: its rows are read from disk as they're shown, and your edits are kept beside it until you save").tag("streamed"))
         extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=OPEN_TYPES).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
         extra.append(FilePicker("Table", PICK_TABLE, style=TOOL_INLINE, icon="table", accept=".csv,.tsv,.txt,.parquet").tooltip("Insert a table: a CSV or Parquet file as a card beside the sheet's own (read in the background)").tag("insert-table"))
+        extra.append(FilePicker("Documents", PICK_DOCS, style=TOOL_INLINE, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)").tag("insert-documents"))
         extra.append(TextField(self.query_text, "query", on_change=QUERY_BAR, on_submit=QUERY_BAR_RUN).width(260).tag("query-bar").label("SQL query over the sheet's tables").tooltip("SQL over the sheet's tables (its own and every card's); Return runs it, the answer lands as a table card"))
         if self.sheet_tab == 1:
             return Toolbar(left, self.report_tools(), right, extra, before=self.report_controls(), after=self.filter_controls(), inline=True)  # (its tile tools share one icon: their titles stay)
@@ -3600,6 +4115,7 @@ struct Main(App):
         """The sheet's side rail (mojoui.sheetchrome.Rail): what goes on the page from a file (a table, a video, a picture)."""
         var items = List[View]()
         items.append(FilePicker("Table", PICK_TABLE, style=ICON_ONLY, icon="table", accept=TABLE_TYPES).tooltip("Insert a table from a CSV or Parquet file"))
+        items.append(FilePicker("Documents", PICK_DOCS, style=ICON_ONLY, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs, read into a table of their fields"))
         items.append(Button("Video", INSERT_VIDEO, ICON_ONLY, icon="video").tooltip("Insert a video"))
         items.append(Button("Picture", INSERT_IMAGE, ICON_ONLY, icon="image").tooltip("Insert a picture"))
         return Rail(items^, RAIL_W)
@@ -3675,6 +4191,10 @@ struct Main(App):
             ref r = self.tracks.cards[k]
             items.append(self.tracks.view(k, self.version * 100003 + self.track_frame(k)).at(r.x, r.y).width(r.w).height(r.h).tag("track" + String(k)))
             bottom = max(bottom, r.y + r.h)
+        for k in range(len(self.docs)):
+            ref d = self.docs[k].card
+            items.append(self.docs[k].view().at(d.x, d.y).width(d.w).height(d.h).tag("documents" + String(k)))
+            bottom = max(bottom, d.y + d.h)
         var ed = self.grid.editor_place(self.frame)
         if ed[2] > 0:
             items.append(self.grid.editor(self.edit_text, CELL_COMMIT, CELL_CANCEL).at(self.table_x + ed[0], self.table_y + HEADER_H + ed[1]).width(ed[2]).height(30))
@@ -3705,3 +4225,25 @@ struct Main(App):
         for o in self.overlays():
             parts.append(o.copy())
         return VStack(parts^, spacing=6).fill().grow()
+
+
+def fill_rows(mut rows: CardRows, sheet: Sheet):
+    """`rows`' columns read from `sheet` as text (a column the sheet lacks stays empty)."""
+    var at = List[Int]()
+    for c in rows.columns:
+        at.append(sheet.index(c))
+    for r in range(sheet.rows()):
+        if not sheet.alive(r):
+            continue
+        var vals = List[String]()
+        for i in at:
+            vals.append(sheet.display(i, r) if i >= 0 else String(""))
+        rows.add_row(vals)
+
+
+def clock_text(t: Float64) -> String:
+    """Seconds as m:ss.s ("0:05.3")."""
+    var whole = Int(t)
+    var tenth = Int((t - Float64(whole)) * 10.0)
+    var sec = whole % 60
+    return String(whole // 60) + ":" + ("0" if sec < 10 else "") + String(sec) + "." + String(tenth)

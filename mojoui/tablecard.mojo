@@ -25,7 +25,7 @@ from mojoui.datagrid import DataGrid, GRID_SELECTED, GRID_HEADER_DRAG, GRID_HEAD
 from mojoui.sheet import Sheet, TEXT
 from mojoui.text import Font
 from mojoui.theme import Palette
-from mojoui.view import View, Text, Button, Canvas, HStack, Spacer, Card, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER, TONE_ACCENT
+from mojoui.view import View, Text, Button, Canvas, HStack, Spacer, Card, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER, TONE_ACCENT, SET_TO
 from omxcore import Catalog, Table, sql
 from mojoui.sqlname import sql_name  # (kept importable from here; links.mojo needs it without omxcore)
 
@@ -258,7 +258,18 @@ struct TableCards(Movable, Sized):
             var m0 = self.msg(k)
             if m0 <= event.message < m0 + TABLE_MESSAGES:
                 var which = event.message - m0
-                if which == TC_GRID:
+                if which == TC_GRID and event.number == SET_TO:  # (an agent set the grid to a row: picked, as a tap on it would)
+                    ref c = self.cards[k]
+                    try:
+                        var shown = Int(atof(event.text) + 0.5) - 1
+                        var row = c.grid.shown_row(shown, c.sheet)
+                        if row >= 0:
+                            c.grid.select(row, max(c.grid.cur_col, 0))
+                            c.grid.reveal_cell(row, max(c.grid.cur_col, 0), c.sheet)
+                            self.selected = k
+                    except:
+                        pass
+                elif which == TC_GRID:
                     ref c = self.cards[k]
                     var r = c.grid.handle(event, c.sheet, font, pal)
                     if r == GRID_SELECTED:
@@ -347,4 +358,5 @@ struct TableCards(Movable, Sized):
         var head = HStack(parts^, spacing=8).fill().align(CENTER).height(TABLE_HEAD_H)
         var grid = Canvas(self.canvas(k), version + c.grid.version, on_gesture=self.msg(k) + TC_GRID, keys=True).fill().grow().tag("table-" + name.replace("_", "-"))
         grid = grid^.label("Table " + c.name + ", " + c.facts())  # (a drawn grid: its name for a screen reader)
+        grid = grid^.settable("row", 1, Float64(max(rows, 1)))  # (an agent picks a row by its number: SET_TO, as a tap would)
         return Card(head^, grid^, spacing=4)
