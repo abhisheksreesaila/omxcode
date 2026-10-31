@@ -42,6 +42,11 @@ def line(step, r):
                 "closed app) and a drop left its files; both now clean up after themselves. A starting server sweeps "
                 "the folders a crashed one left, and a file over the upload limit shows a notice instead of vanishing "
                 "(<code>tests/test_web_files.py</code>, and in Chromium: <code>docs/goals/probe-fixes/web-notice.png</code>).")
+    if step == "keeper_stamp":
+        return ("<code>file_stamp</code> (what a rescan compares) read x86-64's <code>struct stat</code> at fixed offsets, and "
+                "its test found a worse bug: a short path was freed before <code>stat</code> read it, so the file looked "
+                "unreadable. It now reads <code>statx</code>, which has one layout on every Linux, keeps the path alive, "
+                "and compiles for aarch64 (not run there: no such machine here) (<code>tests/test_file_stamp.py</code>).")
     return escape(r.get("summary", ""))
 
 

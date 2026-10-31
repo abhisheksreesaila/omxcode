@@ -53,7 +53,7 @@ in each probe's gallery section (`scripts/probe_fixes_gallery.py`).
   test host: a fixed pause raced the 100M-row open, D-1701; `pause:` slept 10 ms per main-loop turn and skipped frames, D-1702.)
 - **Dictate:** B at fp16 is unmeasured. (Fixed 2026-10-30: `captured_ns` gives up after 2 ms on a word that stays odd, D-1700.)
 - **Keeper:** never run against a real tray panel or notification server; a second launch builds its App before handing
-  over; Web Push untried; `file_stamp` is x86-64 only.
+  over; Web Push untried. (Fixed 2026-10-31: `file_stamp` reads statx, one layout on every Linux, compiled for aarch64, not run there, D-1705.)
 
 ## Next
 - **Recall:** finish the race, review it, then add side B2: Personal Note's design (a page plus a llama.cpp embedding

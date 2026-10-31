@@ -33,5 +33,12 @@
   "checked": "2026-10-31",
   "item": "the field queue's stale-write window",
   "test": "tests/test_field_queue.py"
+ },
+ "keeper_stamp": {
+  "before": "short paths read as unreadable (the path was freed before stat read it); offsets of x86-64's struct stat",
+  "checked": "2026-10-31",
+  "item": "file_stamp was x86-64 only",
+  "test": "tests/test_file_stamp.py",
+  "unverified": "run on aarch64 Linux (no machine here: compiled only); the Mac's branch is unchanged (built, not run)"
  }
 }

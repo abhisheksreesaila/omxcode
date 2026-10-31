@@ -124,7 +124,19 @@ def jot_drop():
                   "crash leftovers stayed forever, an oversize file vanished in silence"}
 
 
-STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue, "jot_drop": jot_drop}
+def keeper_stamp():
+    """file_stamp agrees with os.stat (ns time, 5 GiB, empty, missing), reads statx on Linux, compiles for aarch64."""
+    r = subprocess.run([sys.executable, "tests/test_file_stamp.py"], cwd=ROOT, capture_output=True, text=True, timeout=1800)
+    out = r.stdout + r.stderr
+    if r.returncode != 0 or "file stamp: ok" not in out:
+        return False, f"tests/test_file_stamp.py: {out[-500:]}", {}
+    return True, "file_stamp agrees with the system on 4 cases, reads statx (one layout on every architecture), compiles for aarch64", {
+        "item": "file_stamp was x86-64 only", "test": "tests/test_file_stamp.py",
+        "before": "short paths read as unreadable (the path was freed before stat read it); offsets of x86-64's struct stat",
+        "unverified": "run on aarch64 Linux (no machine here: compiled only); the Mac's branch is unchanged (built, not run)"}
+
+
+STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue, "jot_drop": jot_drop, "keeper_stamp": keeper_stamp}
 
 
 def main():

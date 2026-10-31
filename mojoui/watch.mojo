@@ -152,6 +152,7 @@ def list_dir(path: String) -> List[Tuple[String, Bool]]:
     var out = List[Tuple[String, Bool]]()
     var p = path
     var d = _c[Int]("opendir", Int(p.as_c_string_span().unsafe_ptr()))
+    _ = p.byte_length()  # (the path lives until C is done with it: lessons, D-1705)
     if d == 0:
         return out^
     comptime name_at = 21 if CompilationTarget.is_macos() else 19
@@ -171,6 +172,7 @@ def list_dir(path: String) -> List[Tuple[String, Bool]]:
         elif t == 0:  # DT_UNKNOWN (some file systems): ask
             var full = path + "/" + name
             var probe = _c[Int]("opendir", Int(full.as_c_string_span().unsafe_ptr()))
+            _ = full.byte_length()
             if probe != 0:
                 _ = _c[c_int]("closedir", probe)
                 out.append((name, True))
@@ -182,15 +184,23 @@ def list_dir(path: String) -> List[Tuple[String, Bool]]:
 
 def file_stamp(path: String) -> Tuple[Int, Int]:
     """A file's (modified time in ns since the epoch, size in bytes); (0, -1) if it can't be read. What a rescan
-    compares with what it kept (struct stat: x86-64 Linux st_size at byte 48, st_mtim at 88; the Mac's 64-bit-inode
-    stat st_mtimespec at 48, st_size at 96)."""
-    var st = List[Int](length=24, fill=0)
+    compares with what it kept. Linux: statx, whose struct is the same on every architecture (stx_size at byte 40,
+    stx_mtime at 112: tv_sec, then a 32-bit tv_nsec), where struct stat's layout differs by architecture and older
+    glibc exports no `stat` (D-1705). The Mac: stat with 64-bit inodes (arm64; st_mtimespec at 48, st_size at 96)."""
     var p = path
-    if Int(_c[c_int]("stat", Int(p.as_c_string_span().unsafe_ptr()), Int(st.unsafe_ptr()))) != 0:
-        return (0, -1)
     comptime if CompilationTarget.is_macos():
+        var st = List[Int](length=24, fill=0)
+        var rc = Int(_c[c_int]("stat", Int(p.as_c_string_span().unsafe_ptr()), Int(st.unsafe_ptr())))
+        _ = p.byte_length()  # (the path and the buffer live until C is done with them: lessons)
+        if rc != 0:
+            return (0, -1)
         return (st[6] * 1_000_000_000 + st[7], st[12])
-    return (st[11] * 1_000_000_000 + st[12], st[6])
+    var stx = List[Int](length=32, fill=0)  # struct statx: 256 bytes
+    var rc = Int(_c[c_int]("statx", c_int(-100), Int(p.as_c_string_span().unsafe_ptr()), c_int(0), c_int(0x7FF), Int(stx.unsafe_ptr())))
+    _ = p.byte_length()  # (AT_FDCWD, no flags, STATX_BASIC_STATS; the path lives until statx is done with it)
+    if rc != 0:
+        return (0, -1)
+    return (stx[14] * 1_000_000_000 + (stx[15] & 0xFFFFFFFF), stx[5])
 
 
 def walk_files(root: String, suffixes: List[String]) -> List[String]:
@@ -283,6 +293,7 @@ struct _Linux(Movable):
         while len(todo) > 0:
             var dir = todo.pop()
             var wd = _c[c_int]("inotify_add_watch", c_int(self.fd), Int(dir.as_c_string_span().unsafe_ptr()), UInt32(_MASK))
+            _ = dir.byte_length()
             if Int(wd) < 0:
                 var err = _errno()
                 if err != 2 and err != 20 and err != 40:  # (ENOENT, ENOTDIR, ELOOP: gone again or not a folder; anything else is a folder missed)
@@ -510,6 +521,7 @@ def _fs_callback(stream: Int, info: Int, count: Int, paths: Int, flags: Int, ids
         var f = Int(Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=flags + 4 * i)[])
         var is_dir = (f & _FS_IS_DIR) != 0
         var exists = _c[c_int]("access", Int(path.as_c_string_span().unsafe_ptr()), c_int(0)) == 0
+        _ = path.byte_length()
         if f & _FS_OVERFLOW:
             _emit(info, OVERFLOW, "")
         elif f & _FS_REMOVED and not exists:
@@ -533,6 +545,7 @@ def _watch_mac(words: Int) raises:
     """FSEventStreamCreate on the root, file-level events, no coalescing delay, on a serial dispatch queue."""
     var cs = String("/System/Library/Frameworks/CoreServices.framework/CoreServices")
     var lib = _c[Int]("dlopen", Int(cs.as_c_string_span().unsafe_ptr()), c_int(2))
+    _ = cs.byte_length()
     if lib == 0:
         raise Error("no CoreServices")
     var root = _A.load(_word(words, W_ROOT))
@@ -554,6 +567,7 @@ def _watch_mac(words: Int) raises:
         raise Error("FSEventStreamCreate failed")
     var label = String("mojoui.watch")
     var queue = _c[Int]("dispatch_queue_create", Int(label.as_c_string_span().unsafe_ptr()), Int(0))
+    _ = label.byte_length()
     _c[NoneType]("FSEventStreamSetDispatchQueue", stream, queue)
     if _c[UInt8]("FSEventStreamStart", stream) == 0:
         raise Error("FSEventStreamStart failed")
