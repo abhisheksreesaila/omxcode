@@ -49,7 +49,7 @@ in each probe's gallery section (`scripts/probe_fixes_gallery.py`).
 
 - **Mac:** every probe builds, none has run (it needs the owner's Mac).
 - **Sketch:** erase takes 14–23 ms p95. A real pen or touchpad and GTK's GPU renderer are unverified.
-- **Jot:** web drop leaks. (Fixed 2026-10-30: the field queue's stale write, D-1703; the goal 30 flake, two causes in the GTK
+- **Jot:** all three fixed 2026-10-30 (web drop leaks, D-1704; the field queue's stale write, D-1703; the goal 30 flake, two causes in the GTK
   test host: a fixed pause raced the 100M-row open, D-1701; `pause:` slept 10 ms per main-loop turn and skipped frames, D-1702.)
 - **Dictate:** B at fp16 is unmeasured. (Fixed 2026-10-30: `captured_ns` gives up after 2 ms on a word that stays odd, D-1700.)
 - **Keeper:** never run against a real tray panel or notification server; a second launch builds its App before handing

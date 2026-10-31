@@ -6,6 +6,13 @@
   "item": "captured_ns retried without a bound",
   "test": "tests/test_audio_stamp.mojo"
  },
+ "jot_drop": {
+  "before": "an evicted drop left its files (the folder recreated), an evicted upload reached its closed app, crash leftovers stayed forever, an oversize file vanished in silence",
+  "checked": "2026-10-31",
+  "item": "web drop leaks",
+  "shot": "docs/goals/probe-fixes/web-notice.png",
+  "test": "tests/test_web_files.py"
+ },
  "jot_flake": {
   "causes": [
    "a fixed 3.5 s pause raced the 100M-row open job (1.8-2.3 s idle, 4.3-6 s with half the CPU busy): the test host's waitfor: step waits for the import sheet's button instead",

@@ -86,7 +86,45 @@ def jot_queue():
         "after": "newer kept through two rebuilds", "test": "tests/test_field_queue.py"}
 
 
-STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue}
+def jot_drop():
+    """The web host's files: tests/test_web_files.py (eviction mid-write, the start's sweep, oversize), then a real page:
+    an oversize file picked in headless Chromium shows the host's notice, which leaves by itself (the notice once passed
+    the server-side test and never showed: htmx's beforeend inserts an out-of-band element's children)."""
+    import tempfile
+    if not (ROOT / "build/jot/web/mojoui_app.so").exists():
+        b = subprocess.run(["scripts/build.sh", "jot", "web"], cwd=ROOT, capture_output=True, text=True, timeout=1800)
+        if b.returncode != 0:
+            return False, "jot web build: " + (b.stdout + b.stderr)[-300:], {}
+    r = subprocess.run([sys.executable, "tests/test_web_files.py"], cwd=ROOT, capture_output=True, text=True, timeout=900)
+    out = r.stdout + r.stderr
+    want = ["sweep: ok", "oversize: ok", "evicted drop: ok", "evicted upload: ok", "web files: ok"]
+    if r.returncode != 0 or any(w not in out for w in want):
+        return False, f"tests/test_web_files.py: {out[-500:]}", {}
+    import drive
+    d = tempfile.mkdtemp()
+    (Path(d) / "big.md").write_text("x" * 1000)
+    shot = ROOT / "docs/goals/probe-fixes/web-notice.png"
+
+    def during(page):
+        page.set_input_files("input.picker-input", str(Path(d) / "big.md"))
+        page.wait_for_selector(".mojoui-notice", timeout=10000)
+        page.wait_for_timeout(400)
+        page.screenshot(path=str(shot))
+        text = page.inner_text(".mojoui-notice")
+        page.wait_for_timeout(8500)
+        return f"NOTICE: {text}\nNOTICE GONE: {page.query_selector('.mojoui-notice') is None}"
+
+    res, log = drive.web_run(ROOT / "build/jot/web", "pause:300", viewport=(1100, 700), during=during,
+                             env={"OMXCODE_UPLOAD_MAX": "64", "OMXCODE_UPLOADS": d + "/u", "JOT_DB": d + "/j.db"})
+    if res.returncode != 0 or "NOTICE GONE: True" not in log or "wasn't uploaded" not in log:
+        return False, f"the page's notice: {log[-400:]}", {}
+    return True, "evicted drops and uploads leave nothing, a start sweeps a gone server's folders, an oversize file shows a notice (Chromium)", {
+        "item": "web drop leaks", "test": "tests/test_web_files.py", "shot": "docs/goals/probe-fixes/web-notice.png",
+        "before": "an evicted drop left its files (the folder recreated), an evicted upload reached its closed app, "
+                  "crash leftovers stayed forever, an oversize file vanished in silence"}
+
+
+STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue, "jot_drop": jot_drop}
 
 
 def main():

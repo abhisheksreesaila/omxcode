@@ -37,6 +37,11 @@ def line(step, r):
                 "that reached the app directly left the older one waiting, and the next rebuild wrote it back over the "
                 "newer text. A direct change now clears the field's queue (<code>tests/test_field_queue.py</code>, red "
                 "before: the app ended with the older text).")
+    if step == "jot_drop":
+        return ("On the web: an upload that finished after its tab was evicted crashed the whole server (it reached the "
+                "closed app) and a drop left its files; both now clean up after themselves. A starting server sweeps "
+                "the folders a crashed one left, and a file over the upload limit shows a notice instead of vanishing "
+                "(<code>tests/test_web_files.py</code>, and in Chromium: <code>docs/goals/probe-fixes/web-notice.png</code>).")
     return escape(r.get("summary", ""))
 
 

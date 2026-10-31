@@ -98,7 +98,7 @@ MENU_JS = r"""
         // the timer holds may be something else by the time it fires)
         const ms = Number(t.dataset.seconds) * 1000;
         if (!(ms > 0)) return;
-        t.dataset.timer = setTimeout(() => { if (document.body.contains(t) && t.dataset.kind === 'toast') menus.dismiss(t); }, ms);
+        t.dataset.timer = setTimeout(() => { if (!document.body.contains(t)) return; if (t.dataset.kind === 'toast') menus.dismiss(t); else if (t.dataset.kind === 'notice') t.remove(); }, ms);
       });
     },
   };
@@ -1331,10 +1331,73 @@ def rows_html(s, i, sid, top):
                 hx_include="#mojoui-v") for k, t in enumerate(texts)]  # "find .rows", fail to find it, and silently send nothing
 
 
+def uploads_base():
+    """Where every page's uploads live (each in a folder named by its session); downloads are beside it."""
+    return Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads")))
+
+
+def upload_limit():
+    return int(os.environ.get("OMXCODE_UPLOAD_MAX", os.environ.get("OMXAPP_UPLOAD_MAX", str(32 << 30))))  # (32 GB by default: a 100M-row CSV is ~10 GB)
+
+
+def size_words(n):
+    for unit, size in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
+        if n >= size:
+            return f"{n / size:.3g} {unit}"
+    return f"{n} bytes"
+
+
+def notice(text, seconds=8):
+    """A message from the host itself (not the app's view), shown like a toast and gone after a few seconds."""
+    return Div(Div(Span(text, cls="toast-text"), cls="toast mojoui-notice", role="alert", data_kind="notice", data_seconds=str(seconds)),
+               hx_swap_oob="beforeend:body")  # (beforeend inserts the wrapper's children: the notice itself)
+
+
+def shutil_rmtree(folder):
+    import shutil
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def sweep_files(day=86400):
+    """At start: upload and download folders whose server process is gone (its `.owner` pid), and unowned ones (older
+    servers wrote none) untouched for a day, go. A crash or a kill never ran forget_files; a live server's stay."""
+    swept = 0
+    for kind in (uploads_base(), uploads_base().parent / "downloads"):
+        if not kind.is_dir():
+            continue
+        for folder in kind.iterdir():
+            if not folder.is_dir():
+                continue
+            try:
+                owner = int((folder / ".owner").read_text())
+                gone = not alive(owner)
+            except (OSError, ValueError):
+                try:
+                    gone = time.time() - folder.stat().st_mtime > day
+                except OSError:
+                    continue
+            if gone:
+                shutil_rmtree(folder)
+                swept += 1
+    if swept:
+        print(f"UPLOADS: swept {swept} folders a stopped server left", flush=True)
+
+
 def make_app(module_dir):
     if DEV and not debug_build(module_dir):  # (the dev server's endpoints never run on a release build, D-678)
         raise SystemExit(f"mojoui web: MOJOUI_DEV=1 needs a debug build ({module_dir} is a release build: "
                          "MOJOUI_DEBUG=1 scripts/build.sh <app> web, or scripts/dev.sh <app>); never set it on a deployed host")
+    sweep_files()  # (what a crashed or killed server left in the uploads and downloads folders, D-1704)
     sys.path.insert(0, str(Path(module_dir).resolve()))
     mod = importlib.import_module("mojoui_app")
     loads = mod.init_shared() if hasattr(mod, "init_shared") else 0  # the app's shared data, once per process
@@ -1958,18 +2021,25 @@ def make_app(module_dir):
             return changes(s, sid, d)
 
     def file_folder(sid, kind="uploads"):
-        """Where a page's files live where the app runs: uploads (FilePicker, a file drop) and downloads (FileSaver)."""
-        base = Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads")))
-        folder = (base / sid) if kind == "uploads" else (base.parent / "downloads" / sid)
+        """Where a page's files live where the app runs: uploads (FilePicker, a file drop) and downloads (FileSaver).
+        Each folder names this server's process in `.owner`, so a later start can sweep what a crash left (sweep_files)."""
+        folder = (uploads_base() / sid) if kind == "uploads" else (uploads_base().parent / "downloads" / sid)
         folder.mkdir(parents=True, exist_ok=True)
+        owner = folder / ".owner"
+        if not owner.exists():
+            owner.write_text(str(os.getpid()))
         return folder
 
     def forget_files(sid):
         """A session ended: its uploads and downloads go."""
         import shutil
-        base = Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads")))
-        for folder in (base / sid, base.parent / "downloads" / sid):
+        for folder in (uploads_base() / sid, uploads_base().parent / "downloads" / sid):
             shutil.rmtree(folder, ignore_errors=True)
+
+    def too_big(name, limit):
+        """A file over the upload limit: nothing kept, and the page says so (D-1704: it used to be skipped in silence)."""
+        print(f"UPLOAD: refused {name}: over OMXCODE_UPLOAD_MAX ({limit:,} bytes)", flush=True)
+        return notice(f"{name} wasn't uploaded: it's larger than this server's limit ({size_words(limit)}).")
 
     @app.post("/save/{sid}")
     def save(sid: str, n: int, v: int = -1):
@@ -2030,27 +2100,39 @@ def make_app(module_dir):
             if s.closed or v != s.shape or not 0 <= n < len(s.nodes) or s.nodes[n]["kind"] != DROP or not s.nodes[n]["msg2"]:
                 return ""
             msg = s.nodes[n]["msg2"]
-        limit = int(os.environ.get("OMXCODE_UPLOAD_MAX", os.environ.get("OMXAPP_UPLOAD_MAX", str(32 << 30))))
-        paths = []
+        limit = upload_limit()
+        paths, refused = [], []
         for file in files:
+            if s.closed:  # (evicted mid-upload: nothing more is written; D-1704)
+                break
             name = Path(file.filename or "").name
             if name in ("", ".", ".."):
                 name = "dropped"
-            folder = file_folder(sid) / uuid.uuid4().hex[:12]
-            folder.mkdir()
-            path, size = folder / name, 0
-            with open(path, "wb") as out:
-                while chunk := await file.read(1 << 20):
-                    size += len(chunk)
-                    if size > limit:
-                        break
-                    out.write(chunk)
+            if (file.size or 0) > limit:
+                refused.append(too_big(name, limit))
+                continue
+            try:
+                folder = file_folder(sid) / uuid.uuid4().hex[:12]
+                folder.mkdir()
+                path, size = folder / name, 0
+                with open(path, "wb") as out:
+                    while chunk := await file.read(1 << 20):
+                        size += len(chunk)
+                        if size > limit:
+                            break
+                        out.write(chunk)
+            except OSError:  # (the session's folder went while this was written: it was evicted)
+                break
             if size > limit:
-                path.unlink(missing_ok=True)
+                shutil_rmtree(folder)
+                refused.append(too_big(name, limit))
                 continue
             paths.append(path)
-        outs = []
+        outs = list(refused)
         with s.lock:
+            if s.closed:  # (evicted while the files were written: what this request wrote goes too)
+                forget_files(sid)
+                return ""
             for path in paths:
                 if s.closed:
                     break
@@ -2073,26 +2155,34 @@ def make_app(module_dir):
         if s is None:
             return Main(P("This page expired: reload it.", cls="text caption"), id="mojoui-root", hx_swap_oob="true")
         with s.lock:  # (from this screen, to a picker: checked before anything is written)
-            if v != s.shape or not 0 <= n < len(s.nodes) or not s.nodes[n]["msg2"]:
+            if s.closed or v != s.shape or not 0 <= n < len(s.nodes) or not s.nodes[n]["msg2"]:
                 return ""
         # each page its own folder; only a plain file name (no folders, no "..")
-        folder = Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads"))) / sid
-        folder.mkdir(parents=True, exist_ok=True)
         name = Path(file.filename or "").name
         if name in ("", ".", ".."):
             name = "upload"
-        path = folder / name
-        limit = int(os.environ.get("OMXCODE_UPLOAD_MAX", os.environ.get("OMXAPP_UPLOAD_MAX", str(32 << 30))))  # (32 GB by default: a 100M-row CSV is ~10 GB)
+        limit = upload_limit()
+        if (file.size or 0) > limit:
+            return too_big(name, limit)
         size = 0
-        with open(path, "wb") as out:
-            while chunk := await file.read(1 << 20):
-                size += len(chunk)
-                if size > limit:
-                    out.close()
-                    path.unlink(missing_ok=True)
-                    return ""
-                out.write(chunk)
+        try:
+            path = file_folder(sid) / name
+            with open(path, "wb") as out:
+                while chunk := await file.read(1 << 20):
+                    size += len(chunk)
+                    if size > limit:
+                        break
+                    out.write(chunk)
+        except OSError:  # (the session's folder went while this was written: it was evicted)
+            forget_files(sid)
+            return ""
+        if size > limit:
+            path.unlink(missing_ok=True)
+            return too_big(name, limit)
         with s.lock:
+            if s.closed:  # (evicted while it was written: its app is closed, D-1704; the file goes too)
+                forget_files(sid)
+                return ""
             if v != s.shape or not 0 <= n < len(s.nodes) or not s.nodes[n]["msg2"]:
                 path.unlink(missing_ok=True)
                 return ""
