@@ -172,7 +172,7 @@ def sketch_erase():
     return True, f"erase p95 {b['p95_ms']} ms, the ink layer trimmed {b['trimmed_by_layer'].get('ink', 0)} times and built 0; pixels equal the CPU's", {
         "item": "erasing took 14-23 ms p95", "after_p95_ms": b["p95_ms"], "after_draw_p95_ms": b["draw_p95_ms"],
         "before_p95_ms": 21.4, "before_note": "21.4 ms on this machine at the start (draw 20.2: node build 6.1, mend 11.1, finding the removal 1.2); 13.7 in goal 40's run",
-        "runs_p95_ms": [5.8, 6.7, 15.4, 8.2, 8.0, 8.5], "runs_note": "six runs on a shared machine (load average 4-16); the 15.4 run was slower in every part of the frame"}
+        "runs_p95_ms": [5.8, 6.7, 15.4, 8.2, 8.0, 8.5, 5.6], "runs_note": "seven runs; the first six on a shared machine (load average 4-16; the 15.4 run slower in every part of the frame), the last (the merged commit) at load 2.6"}
 
 
 STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue, "jot_drop": jot_drop, "keeper_stamp": keeper_stamp,
