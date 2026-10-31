@@ -852,3 +852,5 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - GIL: tests/test_speech_errors.mojo against HEAD's speech.mojo fails (no FINAL in 30 s after a bad model id), passes with D-1417.
 - audio: `pactl kill-client` doesn't exist in this pactl ("No valid command specified") → pw-cli destroy of the client's PipeWire object (object.id from `pactl -f json list clients`, matched by application.process.id); the microphone reports failed within the 3 s wait, error 11.
 - M0 warm-up (D-1419): first checker run after editing audio.mojo: PASS, match 0.99999.
+- Race passes: the first re-run had other sessions' omxplorer tests (512 MiB each) on GPU 0 during the fp32 runs → wait_quiet + up to 6 attempts. The second found download_mb wrong (counter read before a long concurrent send) → fixed, re-run. The third waited out a vision benchmark at 100 % on GPU 0; all kept runs quiet: A 140 ms, B fp32/q4 912 ms (fp32/fp32 924), 6.5×.
+- WebKitGTK after D-1413: widgets headless on GTK, web views mount (csp=0, crashes=0); the `click:` step into the counter's web view didn't register (count 0).
