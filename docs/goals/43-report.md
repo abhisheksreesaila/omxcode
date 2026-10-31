@@ -7,6 +7,11 @@ same RTX 3090 (index 0), same 20 LibriSpeech clips, **A fp16 vs B fp32 encoder +
 this machine (no Chromium flag set offers shader-f16: docs/goals/43/webgpu-f16-probe.json); B with fp16 is unmeasured.
 Log-mel features: A on the GPU, B on the CPU in JavaScript. No other process used GPU 0 during any timed run.
 
+## Review round 2 (reviewer: PASS)
+- The gallery's "no other process on it" now says "no other process using more than a few MB of it" (race.json shows 6–8 MB desktop processes).
+- Open: `captured_ns` (mojoui/audio.mojo) retries without a bound while the sequence word is odd; a capture thread dying mid-update would hang the reader. Unlikely (the thread only exits at its loop's end). The fix (cap the retries) waits for the next race, since touching audio.mojo makes race.json stale.
+- Open: B at fp16 is unmeasured; the 6.5× also includes A's GPU log-mel against B's CPU log-mel (disclosed, not measured apart).
+
 ## Review round 1 (reviewer: NEEDS WORK → what changed)
 1. **Race honesty.**
    - fp32 B: the old "Failed to fetch" wasn't the harness. Root cause, measured: Chromium can't allocate one ArrayBuffer of
