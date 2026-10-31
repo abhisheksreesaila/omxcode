@@ -9,6 +9,7 @@ comptime SET_IMAGE = 4  # new pixels (same size); hosts read them from the shown
 comptime SET_FRAMES = 5  # a canvas's on_frame message changed (number = new message, 0 = stop)
 comptime SET_PLACE = 6  # an object moved on its Board (new x, y in the shown view), or the Board's own size changed
 comptime SET_SIZE = 7  # a view's width, height, min or max width changed (new values in the shown view); only in partial diffs
+comptime SET_TONES = 9  # a Board's children's tones changed (Board(tones=…): the new ones in the shown view's options)
 comptime SET_TIP = 8  # a canvas's tooltip or label (a drawn view's words, its accessible name) changed: text = the new tooltip; hosts read the name from the shown view (mojoui.a11y.explicit_name)
 
 
@@ -72,7 +73,7 @@ def same_shape(a: View, b: View) -> Bool:
             or x.style != y.style
             or (x.spacing != y.spacing and x.kind != BOARD)  # a Board's width and height are a patch
             or x.children != y.children
-            or x.options != y.options
+            or (x.options != y.options and x.kind != BOARD)  # a Board's tones are a patch
             or x.hint != y.hint
             or (x.msg2 != y.msg2 and x.kind != CANVAS)  # a canvas starting or stopping frames is a patch
             or (x.size != y.size and x.kind != BOARD)
@@ -100,6 +101,8 @@ def node_patches(a: Node, b: Node, i: Int, on_board: Bool, mut patches: List[Pat
     """What changed between a kept node's old and new version (i: its new number)."""
     if (on_board and (a.x != b.x or a.y != b.y)) or (b.kind == BOARD and (a.spacing != b.spacing or a.size != b.size)):
         patches.append(Patch(SET_PLACE, i, "", 0))
+    if b.kind == BOARD and a.options != b.options:
+        patches.append(Patch(SET_TONES, i, "", 0))
     if a.text != b.text:
         patches.append(Patch(SET_TEXT, i, b.text, 0))
     if a.msg != b.msg:
@@ -122,7 +125,7 @@ def compatible(x: Node, y: Node, x_on_board: Bool, y_on_board: Bool) -> Bool:
         x.kind != y.kind
         or x.style != y.style
         or (x.spacing != y.spacing and x.kind != BOARD)  # a Board's width and height are a patch
-        or x.options != y.options
+        or (x.options != y.options and x.kind != BOARD)  # a Board's tones are a patch
         or x.hint != y.hint
         or (x.msg2 != y.msg2 and x.kind != CANVAS)  # a canvas starting or stopping frames is a patch
         or (x.size != y.size and x.kind != BOARD)

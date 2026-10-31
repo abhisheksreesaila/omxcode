@@ -389,6 +389,12 @@ struct View(Copyable, Movable):
         self.nodes[0].value = 3
         return self^
 
+    def passthrough(var self) -> View:
+        """On a Canvas: it only shows (lines over a page, a highlight): presses go to whatever is under it, and the parts
+        it leaves unpainted show what's beneath (hosts keep its alpha)."""
+        self.nodes[0].size = 2
+        return self^
+
     def at(var self, x: Int, y: Int) -> View:
         """Where the view sits inside a Board (points from its top-left)."""
         self.nodes[0].x = x
@@ -557,16 +563,39 @@ def Overlay(base: View, *islands: View) -> View:
 
 
 def Board(items: List[View], width: Int, height: Int, on_move: Int = NO_MSG, on_resize: Int = NO_MSG,
-          reveal: Int = -1, reveal_count: Int = 0) -> View:
+          reveal: Int = -1, reveal_count: Int = 0, tones: List[Int] = [], on_hold: Int = NO_MSG) -> View:
     """A page: children sit where their .at(x, y) says, sized by .width/.height (a Numbers-style
     free-flow layout). Dragging a child's edge area moves it (on_move: event.number = child index,
     event.dx/dy = how far); dragging its bottom-right corner resizes it (on_resize, the same fields).
     Hosts narrower than 720 points show the children as a full-width list instead.
     The Board scrolls when it's bigger than the space it's given (grow/fill it to give it the space).
-    reveal: a child to scroll into view, done once per new reveal_count (count up each time)."""
-    var v = _container(Node(BOARD, msg=on_move, msg2=on_resize, spacing=width, size=height,
-                            value=reveal_count * 64 + reveal + 1 if 0 <= reveal < 63 else 0), items)
+    reveal: a child to scroll into view, done once per new reveal_count (count up each time).
+    tones: per child, how it stands while something is shown about the page (goal 41 M8, a peek or a drop): BOARD_PLAIN,
+    BOARD_DIM (steps back: dimmed, grey, a little smaller; never blurred), BOARD_LIFT (rises, ringed in the accent),
+    BOARD_SOURCE (the one held), BOARD_TARGET (a drop would land here); hosts ease between tones, and a change is a
+    patch (nothing is built again). on_hold: pressing a child and holding still for HOLD_MS sends it with
+    event.number = the child's index and event.text = "hold"; letting go afterwards sends it again with "release"."""
+    var n = Node(BOARD, msg=on_move, msg2=on_resize, spacing=width, size=height,
+                 value=reveal_count * 64 + reveal + 1 if 0 <= reveal < 63 else 0)
+    var any = False
+    for t in tones:
+        if t != BOARD_PLAIN:
+            any = True
+    if any:  # (all plain: no options, so a page that never peeks reads as it always did)
+        for t in tones:
+            n.options.append(String(t))
+    if on_hold != NO_MSG:
+        n.hint = String(on_hold)
+    var v = _container(n^, items)
     return v^
+
+
+comptime BOARD_PLAIN = 0  # a Board child's tone (Board(tones=…)): as it is
+comptime BOARD_DIM = 1  # stepped back (a peek's unrelated cards)
+comptime BOARD_LIFT = 2  # raised and ringed (a peek's linked cards)
+comptime BOARD_SOURCE = 3  # the card held
+comptime BOARD_TARGET = 4  # under a drag: a drop lands here
+comptime HOLD_MS = 350  # how long a press on a Board child must stay still to be a hold
 
 
 def VStack(*items: View, spacing: Int = 16) -> View:

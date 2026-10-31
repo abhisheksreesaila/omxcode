@@ -21,7 +21,7 @@
 from mojoui.app import Event
 from mojoui.canvas import Surface
 from mojoui.charts import grouped
-from mojoui.datagrid import DataGrid, GRID_SELECTED
+from mojoui.datagrid import DataGrid, GRID_SELECTED, GRID_HEADER_DRAG, GRID_HEADER_DROP
 from mojoui.sheet import Sheet, TEXT
 from mojoui.text import Font
 from mojoui.theme import Palette
@@ -35,6 +35,8 @@ comptime TC_EXPORT = 1
 comptime TC_CLOSE = 2
 comptime TC_ACTION = 3
 comptime TABLE_HEAD_H = 36  # the title bar (the drag handle), as sheet objects have it
+comptime GRID_LEFT = 16  # where a card's grid starts inside it (the card's padding; the title bar and its gap above)
+comptime GRID_TOP = 16 + TABLE_HEAD_H + 4
 
 
 def query_table(mut catalog: Catalog, text: String) raises -> Table:
@@ -65,6 +67,7 @@ struct TableCard(Movable):
         self.name = name
         self.sheet = sheet^
         self.grid = DataGrid()
+        self.grid.drag_headers = True  # (a header dragged out is a column carried to another card: mojoui.linkdrag)
         self.grid.prepare(self.sheet, font, pal)
         var small = self.sheet.rows() <= 5000  # (a small table's numbers read whole too: 52.0101265, not 52.010…)
         for c in range(self.sheet.stored()):  # (words read whole: a text column is as wide as its longest)
@@ -109,6 +112,11 @@ struct TableCards(Movable, Sized):
     var acted: Int  # the card whose action the last update() was, else -1
     var export_asked: Int  # the card whose Export CSV the last update() was (export_path: where it goes), else -1
     var export_path: String
+    var dragged: Int  # the card whose column header the last update() dragged (GRID_HEADER_DRAG) or let go (GRID_HEADER_DROP), else -1
+    var drag_state: Int  # which of the two
+    var drag_column: String  # the column carried
+    var drag_x: Float64  # the pointer, in the page's (the Board's) coordinates
+    var drag_y: Float64
 
     def __init__(out self, msg_base: Int, canvas_base: Int, most: Int = 8):
         self.cards = List[TableCard]()
@@ -122,6 +130,11 @@ struct TableCards(Movable, Sized):
         self.acted = -1
         self.export_asked = -1
         self.export_path = ""
+        self.dragged = -1
+        self.drag_state = 0
+        self.drag_column = ""
+        self.drag_x = 0
+        self.drag_y = 0
 
     def __len__(self) -> Int:
         return len(self.cards)
@@ -238,6 +251,7 @@ struct TableCards(Movable, Sized):
         self.problem = ""
         self.acted = -1
         self.export_asked = -1
+        self.dragged = -1
         if not self.owns(event.message):
             return False
         for k in range(len(self.cards)):
@@ -246,8 +260,15 @@ struct TableCards(Movable, Sized):
                 var which = event.message - m0
                 if which == TC_GRID:
                     ref c = self.cards[k]
-                    if c.grid.handle(event, c.sheet, font, pal) == GRID_SELECTED:
+                    var r = c.grid.handle(event, c.sheet, font, pal)
+                    if r == GRID_SELECTED:
                         self.selected = k
+                    elif r == GRID_HEADER_DRAG or r == GRID_HEADER_DROP:
+                        self.dragged = k
+                        self.drag_state = r
+                        self.drag_column = c.sheet.grid_name(c.grid.drag_col)
+                        self.drag_x = Float64(c.x + GRID_LEFT) + event.x
+                        self.drag_y = Float64(c.y + GRID_TOP) + event.y
                 elif which == TC_EXPORT:  # (asked here, written by the app's job: a million rows take a second)
                     self.export_asked = k
                     self.export_path = folder + "/" + self.sql_name_of(k) + ".csv"
@@ -273,6 +294,13 @@ struct TableCards(Movable, Sized):
         if k >= 0:
             ref c = self.cards[k]
             c.grid.draw(s, c.sheet, font, pal)
+
+    def spot(self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
+        """Where column `name`'s header is on card `canvas`'s grid (App.spot), else (-1, -1)."""
+        var k = self._card_of_canvas(canvas)
+        if k < 0:
+            return (-1.0, -1.0)
+        return self.cards[k].grid.header_spot(name, self.cards[k].sheet)
 
     def describe(self, canvas: Int, first: Int, count: Int) -> String:
         """Card `canvas`'s rows for an agent: its name, then the header and `count` rows from `first` (0: 25), tab-separated."""

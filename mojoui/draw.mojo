@@ -18,6 +18,22 @@ def blend(d: UInt32, color: UInt32, cov: Float64) -> UInt32:
     return UInt32(Int(r + 0.5)) | (UInt32(Int(g + 0.5)) << 8) | (UInt32(Int(b + 0.5)) << 16) | (d & 0xFF000000)
 
 
+def over(d: UInt32, color: UInt32, cov: Float64) -> UInt32:
+    """`color` over the pixel `d` as straight-alpha compositing (the result's alpha grows): for a clear canvas
+    (Canvas.passthrough) whose unpainted parts must stay see-through, where blend() keeps the pixel's alpha."""
+    var a = cov * Float64(Int((color >> 24) & 0xFF)) / 255.0
+    if a <= 0.0:
+        return d
+    var da = Float64(Int((d >> 24) & 0xFF)) / 255.0
+    var oa = a + da * (1 - a)
+    if oa <= 0.0:
+        return 0
+    var r = (Float64(Int(color & 0xFF)) * a + Float64(Int(d & 0xFF)) * da * (1 - a)) / oa
+    var g = (Float64(Int((color >> 8) & 0xFF)) * a + Float64(Int((d >> 8) & 0xFF)) * da * (1 - a)) / oa
+    var b = (Float64(Int((color >> 16) & 0xFF)) * a + Float64(Int((d >> 16) & 0xFF)) * da * (1 - a)) / oa
+    return UInt32(Int(r + 0.5)) | (UInt32(Int(g + 0.5)) << 8) | (UInt32(Int(b + 0.5)) << 16) | (UInt32(Int(oa * 255.0 + 0.5)) << 24)
+
+
 def with_alpha(color: UInt32, alpha: Float64) -> UInt32:
     return (color & 0x00FFFFFF) | (UInt32(Int(min(max(alpha, 0.0), 1.0) * 255.0 + 0.5)) << 24)
 
@@ -52,8 +68,8 @@ def rect(mut s: Surface, x: Float64, y: Float64, w: Float64, h: Float64, color: 
                 plot(s, px, py, color, min(cov, 1.0))
 
 
-def line(mut s: Surface, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32):
-    """An anti-aliased line with round ends."""
+def line(mut s: Surface, x0: Float64, y0: Float64, x1: Float64, y1: Float64, width: Float64, color: UInt32, clear: Bool = False):
+    """An anti-aliased line with round ends. `clear`: composited with over() (a see-through canvas keeps its alpha right)."""
     var hw = width / 2
     var minx = max(Int(min(x0, x1) - hw - 1), 0)
     var maxx = min(Int(max(x0, x1) + hw + 2), s.width)
@@ -71,7 +87,12 @@ def line(mut s: Surface, x0: Float64, y0: Float64, x1: Float64, y1: Float64, wid
             var ey = cy - (y0 + t * dy)
             var cov = hw + 0.5 - sqrt(ex * ex + ey * ey)
             if cov > 0:
-                plot(s, px, py, color, min(cov, 1.0))
+                if clear:
+                    if 0 <= px < s.width and 0 <= py < s.height:
+                        var p = s.pixels().unsafe_offset(py * s.width + px)
+                        p[] = over(p[], color, min(cov, 1.0))
+                else:
+                    plot(s, px, py, color, min(cov, 1.0))
 
 
 def circle(mut s: Surface, x: Float64, y: Float64, radius: Float64, color: UInt32):

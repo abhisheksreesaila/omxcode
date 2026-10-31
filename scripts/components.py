@@ -66,6 +66,9 @@ FEATURES = [
     ("Board: drag, resize, snap", "Board(on_move, on_resize)", r"\bBOARD\b", "workbook"),
     ("Board: scrolls, reveals a child", "Board(reveal=, reveal_count=)", r"reveal", "workbook"),
     ("Board: phone-width list", "(automatic under 720 pt)", r"board_list|max-width: 719px", "workbook"),
+    ("Board: tones (dimmed, lifted, held, a drop target)", "Board(tones=[BOARD_DIM, BOARD_LIFT, …])", r"SET_TONES", "omxplorer"),
+    ("Board: hold a child (350 ms, still)", "Board(on_hold=…)", r"on_hold_timer|data-hold", "omxplorer"),
+    ("Canvas: click-through (shows only)", "Canvas(…).passthrough()", r"node\.size == 2|data-passthrough", "omxplorer"),
     ("Overlay islands", "Overlay(base, *islands) + .pin(h, v)", r"\bOVERLAY\b", "workbook"),
     ("Themes on top (themes/, or yours)", "def theme(self) -> Theme", r"gtk_css|web_css|theme_key|paint_native|mod\.theme", "themes"),
     ("Sentence with tappable words", "Sentence([Word(…)]) · Button(style=TOKEN)", r"\bTOKEN\b|mui-token|button\.token", "omxplorer"),
@@ -160,10 +163,14 @@ COMPOSITES = [
     ("Form fields (a label's value by geometry: right on its line or under it; the labels are data)", "mojoui/formfields.mojo", [], "find_fields("),
     ("Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)", "mojoui/documentjobs.mojo", [], "DocumentFeed("),
     # links (goal 41)
-    ("Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools)", "mojoui/links.mojo", ["Button", "TextField", "Dropdown", "Text", "VStack"], "Links("),
+    ("Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)", "mojoui/links.mojo", ["Button", "TextField", "Dropdown", "Text", "VStack"], "Links("),
     ("Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)", "mojoui/inspection_tables.mojo", [], "compare_job("),
     ("FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)", "mojoui/framefeed.mojo", [], "FrameFeed("),
     ("Table jobs (Insert > Table, a SQL query, Export CSV as jobs that wake the UI; the answer placed as a card)", "mojoui/tablejobs.mojo", [], "TableWork("),
+    ("Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)", "mojoui/linkdrag.mojo", ["Board: tones (dimmed, lifted, held, a drop target)", "Button", "TextField", "ProgressBar", "Text"], "LinkDrag("),
+    ("Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)", "mojoui/peek.mojo", ["Board: hold a child (350 ms, still)", "Board: tones (dimmed, lifted, held, a drop target)", "Canvas: click-through (shows only)", "Canvas frames (animation)", "Text"], "Peek("),
+    ("Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)", "mojoui/timelane.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "TimeLane."),
+    ("Spring (a value that settles like a spring, stepped by display frames)", "mojoui/spring.mojo", ["Canvas frames (animation)"], "Spring("),
     ("Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)", "mojoui/videocard.mojo", [], "VideoWork("),
 ]
 

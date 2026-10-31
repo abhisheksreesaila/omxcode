@@ -74,6 +74,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Board: drag, resize, snap | `Board(on_move, on_resize)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Board: scrolls, reveals a child | `Board(reveal=, reveal_count=)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Board: phone-width list | `(automatic under 720 pt)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Board: tones (dimmed, lifted, held, a drop target) | `Board(tones=[BOARD_DIM, BOARD_LIFT, …])` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Board: hold a child (350 ms, still) | `Board(on_hold=…)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Canvas: click-through (shows only) | `Canvas(…).passthrough()` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Overlay islands | `Overlay(base, *islands) + .pin(h, v)` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Themes on top (themes/, or yours) | `def theme(self) -> Theme` | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 |
 | Sentence with tappable words | `Sentence([Word(…)]) · Button(style=TOKEN)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
@@ -163,10 +166,14 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `TextTable (words as rows: page, text, box, confidence; CSV in and out)` | `mojoui/texttable.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Form fields (a label's value by geometry: right on its line or under it; the labels are data)` | `mojoui/formfields.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)` | `mojoui/documentjobs.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
-| `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
+| `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Table jobs (Insert > Table, a SQL query, Export CSV as jobs that wake the UI; the answer placed as a card)` | `mojoui/tablejobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)` | `mojoui/linkdrag.mojo` | Board: tones (dimmed, lifted, held, a drop target), Button, TextField, ProgressBar, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
+| `Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)` | `mojoui/peek.mojo` | Board: hold a child (350 ms, still), Board: tones (dimmed, lifted, held, a drop target), Canvas: click-through (shows only), Canvas frames (animation), Text | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | omxplorer |
+| `Time lane (a log linked by time drawn under its video on the video's clock; the playhead its cursor; tap to seek)` | `mojoui/timelane.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
+| `Spring (a value that settles like a spring, stepped by display frames)` | `mojoui/spring.mojo` | Canvas frames (animation) | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
 | `Video card work (Analyze / Make a reel / Edit for media cards: one analysis path, progress on the card, the editor given its rows)` | `mojoui/videocard.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 
 ## JavaScript widgets (WebComponent)
@@ -183,12 +190,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 135 | 11 | 0 |
-| Web | 138 | 8 | 0 |
-| Android | 19 | 42 | 85 |
-| Mac (AppKit) | 0 | 132 | 14 |
-| iPhone (UIKit) | 0 | 110 | 36 |
-| Agent (MCP) | 48 | 43 | 55 |
+| Linux (GTK) | 143 | 10 | 0 |
+| Web | 143 | 7 | 3 |
+| Android | 19 | 44 | 90 |
+| Mac (AppKit) | 0 | 134 | 19 |
+| iPhone (UIKit) | 0 | 112 | 41 |
+| Agent (MCP) | 49 | 42 | 62 |
 
 ## Inside one app, not components yet (the debt)
 

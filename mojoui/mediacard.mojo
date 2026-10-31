@@ -4,7 +4,7 @@
 # Player (mojoui.player) for a video and a Picture (mojoui.picture) for a still. Many cards play at once: each owns its
 # own block of messages and canvases, allocated when it is added and kept while it lives.
 #
-#   var media = MediaCards(msg_base=4000, canvas_base=200, most=8)   # messages 4000 … 4000 + 8·CARD_MESSAGES (9), canvases 200 … 215
+#   var media = MediaCards(msg_base=4000, canvas_base=200, most=8)   # messages 4000 … 4000 + 8·CARD_MESSAGES (10), canvases 200 … 223
 #   var k = media.add(path, x, y, width)                            # returns at once (raises only when the file is missing): the card
 #                                                                   # opens in place (16:9 until the probe lands, then its own shape)
 #   jobs / frames: if media.poll(): …                               # takes what the cards' decoder threads finished (sizes, frames)
@@ -15,6 +15,7 @@
 #   media.cards[k].actions.append(CardAction("Analyze", "zap", "analyze", "…"))   # up to 3 quiet actions in the title bar (Analyze, Make a reel, Edit)
 #   update():   if media.acted >= 0: …                              # card media.acted_card's action media.acted was tapped
 #   media.cards[k].status = "Analyzing"; .progress = 42             # work running for the card: its title bar says so (-1: none)
+#   media.show_lane(k, TimeLane.of("forklift_log", series, "speed", 3.4))   # a log linked by time: its measure under the video (mojoui.timelane)
 #
 # For an agent a video card's controls are the Player's tools: play / pause, seek (set it to a time in seconds), video.
 
@@ -24,17 +25,21 @@ from mojoui.canvas import Surface
 from mojoui.charts import fixed
 from mojoui.files import file_name
 from mojoui.picture import Picture
-from mojoui.player import Player, clock_text, MESSAGES as PLAYER_MESSAGES, FRAME as PLAYER_FRAME
+from mojoui.player import Player, clock_text, MESSAGES as PLAYER_MESSAGES, FRAME as PLAYER_FRAME, SCRUB as PLAYER_SCRUB
+from mojoui.timelane import TimeLane
+from mojoui.clock import trace_on
 from mojoui.theme import Palette
-from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card, ProgressBar, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER
+from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card, ProgressBar, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER, PRESS, PAN, TAP, SET_TO
 
 comptime OBJ_VIDEO = 3  # (after sheetpage's OBJ_CHART = 1, OBJ_PIVOT = 2: one numbering for what sits on a sheet)
 comptime OBJ_IMAGE = 4
-comptime CARD_MESSAGES = 9  # a card's block: its Player's messages (0 … 4), then close (5), then its actions (6, 7, 8)
+comptime CARD_MESSAGES = 10  # a card's block: its Player's messages (0 … 4), then close (5), its actions (6, 7, 8), its lane's gestures (9)
 comptime CARD_CLOSE = 5
 comptime CARD_ACTION = 6
 comptime MAX_ACTIONS = 3
-comptime CARD_CANVASES = 2  # a video's picture and scrubber; a still's picture
+comptime CARD_LANE = 9
+comptime CARD_CANVASES = 3  # a video's picture, scrubber and lane (a log linked by time); a still's picture
+comptime LANE_H = 30
 comptime HEAD_H = 36  # the title bar (the drag handle), as sheet objects have it
 comptime CHROME_W = 28  # a card's padding, left and right together
 comptime CHROME_H = 132  # what a video card adds to its picture's height: the title bar, the controls, the gaps, the padding
@@ -97,12 +102,16 @@ struct MediaCard(Movable):
     var actions: List[CardAction]  # up to MAX_ACTIONS, shown in the title bar while nothing runs
     var status: String  # work running for the card ("Analyzing"), shown instead of its actions ("": none)
     var progress: Int  # that work's percent (-1: not known)
+    var lane: Optional[TimeLane]  # a log linked to the video by time: its measure under the picture
+    var lane_w: Float64  # the lane's width in points (its last draw: a tap on it seeks)
 
     def __init__(out self, path: String, slot: Int, msg: Int, canvas: Int, x: Int, y: Int, w: Int) raises:
         self.path = path
         self.actions = List[CardAction]()
         self.status = ""
         self.progress = -1
+        self.lane = None
+        self.lane_w = 0
         self.slot = slot
         self.x = x
         self.y = y
@@ -233,6 +242,19 @@ struct MediaCards(Movable, Sized):
     def owns(self, message: Int) -> Bool:
         return self.msg_base <= message < self.msg_base + self.most * CARD_MESSAGES
 
+    def show_lane(mut self, k: Int, var lane: TimeLane):
+        """A log linked to card k's video by time: its measure under the picture, on the video's clock (the trace says
+        LANE: …)."""
+        if k < 0 or k >= len(self.cards) or not self.cards[k].player:
+            return
+        if trace_on():
+            print(lane.line() + " under " + self.cards[k].title(), flush=True)
+        self.cards[k].lane = lane^
+
+    def clear_lane(mut self, k: Int):
+        if 0 <= k < len(self.cards):
+            self.cards[k].lane = None
+
     def card_of(self, path: String) -> Int:
         """The card showing `path`, else -1."""
         for k in range(len(self.cards)):
@@ -306,6 +328,11 @@ struct MediaCards(Movable, Sized):
                 if event.message - m0 == CARD_CLOSE:
                     self.remove(k)
                     self.closed = k
+                elif event.message - m0 == CARD_LANE:  # (the lane tapped or dragged: the video goes to that time)
+                    ref c = self.cards[k]
+                    if c.player and c.lane_w > 0 and (event.number == PRESS or event.number == PAN or event.number == TAP):
+                        var t = min(max(event.x / c.lane_w, 0.0), 1.0) * c.player.value().state.duration
+                        _ = c.player.value().update(Event(m0 + PLAYER_SCRUB, String(t), SET_TO))
                 elif event.message - m0 >= CARD_ACTION:
                     if event.message - m0 - CARD_ACTION < len(self.cards[k].actions):
                         self.acted_card = k
@@ -326,7 +353,14 @@ struct MediaCards(Movable, Sized):
         var k = self._card_of_canvas(canvas)
         if k < 0:
             return
-        if self.cards[k].player:
+        if self.cards[k].player and canvas == self.canvas(k) + 2:  # (its lane: a log linked by time)
+            ref c = self.cards[k]
+            c.lane_w = s.points_width()
+            if c.lane:
+                c.lane.value().draw(s, pal, c.player.value().state.t(), c.player.value().state.duration)
+            else:
+                s.fill(pal.card)
+        elif self.cards[k].player:
             self.cards[k].player.value().draw(canvas, s, pal.card, pal)
         elif self.cards[k].picture:
             _ = self.cards[k].picture.value().poll()
@@ -365,6 +399,11 @@ struct MediaCards(Movable, Sized):
             body = VStack(Text("Couldn't open " + c.title(), HEADLINE), Text(c.problem(), CAPTION), spacing=4).grow().fill().tag("media-problem")
         elif c.player:
             body = c.player.value().view(0)
+            if c.lane:  # (a log linked by time: its measure under the video, the playhead its cursor)
+                ref lane = c.lane.value()
+                var strip = Canvas(self.canvas(k) + 2, c.player.value().state.frame, on_gesture=self.msg(k) + CARD_LANE).height(LANE_H).fill().grow()
+                strip = strip^.tag("lane-" + lane.name.replace("_", "-").lower()).label(lane.label() + " under the video; tap to go to that time")
+                body = VStack(body^, HStack(Text(lane.label(), CAPTION).width(150), strip^, spacing=8).fill().align(CENTER), spacing=8).grow().fill()
         else:
             var opening = c.picture.value().pending()
             body = Canvas(self.canvas(k), 2 if c.ready() else 1, on_frame=self.msg(k) + PLAYER_FRAME if opening else 0).fill().grow().tag("image")
