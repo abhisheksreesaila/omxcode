@@ -215,12 +215,19 @@ def m4():
     for phase in ("pan", "zoom"):
         if b.get(phase, {}).get("ink_layer_rebuilds", 1) != 0:
             problems.append(f"the ink layer was rebuilt during {phase}")
+    # (addition, probe fixes D-1707: erasing was 14-23 ms p95, the whole ink layer built again per erased stroke; now
+    # the kept strokes' nodes are reused and only the erased box is drawn again)
+    erase = b.get("erase", {})
+    if erase.get("p95_ms") is None or erase["p95_ms"] > 16.7:
+        problems.append(f"erase p95 {erase.get('p95_ms')} ms (≤ 16.7)")
+    if erase.get("ink_layer_rebuilds", 1) != 0 or erase.get("trimmed_by_layer", {}).get("ink", 0) == 0:
+        problems.append(f"erasing built the ink layer again {erase.get('ink_layer_rebuilds')} times (trimmed {erase.get('trimmed_by_layer')})")
     if not b.get("renderer"):
         problems.append("renderer not recorded")
     if problems:
         return False, "; ".join(problems)
     return True, (f"{b['strokes']} strokes, {b['points']} points on {b['renderer']}: p95 pan {b['pan']['p95_ms']}, "
-                  f"zoom {b['zoom']['p95_ms']}, draw {b['draw']['p95_ms']} ms; ink layer kept")
+                  f"zoom {b['zoom']['p95_ms']}, draw {b['draw']['p95_ms']}, erase {b['erase']['p95_ms']} ms; ink layer kept")
 
 
 def m5():

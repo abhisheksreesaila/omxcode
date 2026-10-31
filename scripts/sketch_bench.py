@@ -4,7 +4,7 @@ Runs examples/sketch headless (scripts/headless.py: Xvfb, GTK's renderer recorde
 seeded strokes, 101,000 points) and the GTK host's generic `framebench:` step, one frame per gesture: 120 pans, 120 zoom
 steps, a 120-move pen stroke, 120 frames of short strokes (finish: press, three moves, release; the releases, where a
 stroke joins the page, and the frame after each also on their own), a 120-move eraser drag (erase: moves that hit
-nothing don't redraw), and 120 zoom steps at 8× (deepzoom: past the page texture's 4096 px cap). A frame's work = the
+nothing don't redraw; a stroke erased keeps the other strokes' nodes: trimmed_by_layer, D-1707), and 120 zoom steps at 8× (deepzoom: past the page texture's 4096 px cap). A frame's work = the
 gesture's handling + the canvas's redraw (draw_scene, replay) + GTK's paint + a display round trip + a full render of
 the canvas (an upper bound). The host counts each layer key's builds (built_by_layer); the "ink" layer must be built
 0 times while panning and zooming (only moved). p95 and max for every phase.
@@ -72,7 +72,7 @@ def main():
             "sync_p95_ms": float(kv["sync_p95"]), "raster_p95_ms": float(kv["raster_p95"]),
             "draw_max_ms": float(kv["draw_max"]), "raster_max_ms": float(kv["raster_max"]),
             "layers_built": int(kv["layers_built"]), "layers_reused": int(kv["reused"]),
-            "built_by_layer": built, "appended_by_layer": appended,
+            "built_by_layer": built, "appended_by_layer": appended, "trimmed_by_layer": per_layer(kv.get("trimmed_by_layer", "-")),
             "ink_layer_rebuilds": built.get("ink", 0), "ink_layer_appends": appended.get("ink", 0),
             "layer_textures": int(kv["textures"]),
         }

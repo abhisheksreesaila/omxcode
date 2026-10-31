@@ -202,6 +202,11 @@ def test_appends() raises:
     assert_equal(len(a.removes(1, b, 1)), 4, "the last two strokes taken out is a removal too")
     assert_equal(len(b.removes(1, a, 1)), 0, "strokes added aren't a removal")
     assert_equal(len(c.removes(1, a, 1)), 0, "a stroke taken out and another added isn't a removal")
+    var gone = c.removed_ops(1, b, 1)  # (D-1707: which ops went, so a host keeps what it built for the rest)
+    assert_equal(len(gone), 1, "one stroke taken out")
+    assert_equal(gone[0], 0, "the first one")
+    assert_equal(len(a.removed_ops(1, b, 1)), 2, "the last two taken out")
+    assert_equal(len(b.removed_ops(1, a, 1)), 0, "strokes added aren't a removal")
     print("layer append: ok")
 
 

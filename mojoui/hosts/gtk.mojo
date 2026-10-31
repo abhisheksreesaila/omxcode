@@ -619,6 +619,7 @@ struct GtkHost[A: App](Movable):
     var built_keys: List[String]  # per layer key: how often it was built into nodes whole, and how often new ops were
     var built_counts: List[Int]  # only added to what was kept (Scene.appends); framebench reports them (goal 40)
     var appended_counts: List[Int]
+    var trimmed_counts: List[Int]  # (layers made from their kept nodes after a removal, D-1707)
     var cells_built: Int  # the "cells" layer built into nodes (not reused), and pixel textures handed to GTK: bench reports them
     var uploads: Int
     var new_layouts: Int  # text laid out for the first time, and how long that took (ns): the replay's own trace
@@ -717,6 +718,7 @@ struct GtkHost[A: App](Movable):
         self.built_keys = List[String]()
         self.built_counts = List[Int]()
         self.appended_counts = List[Int]()
+        self.trimmed_counts = List[Int]()
         self.layer_textures = 0
         self.uploads = 0  # (MOJOUI_NO_PARTIAL=1: every shape change rebuilds the window, to compare)
         self.canvases = List[GtkCanvas]()
@@ -3176,6 +3178,17 @@ struct GtkHost[A: App](Movable):
         external_call["gtk_snapshot_append_node", NoneType](snap, node)
         external_call["gtk_snapshot_translate", NoneType](snap, self.at(22))
 
+    def count_trimmed(mut self, key: String):
+        """One more layer made from its kept nodes after ops were taken out (framebench's trimmed_by_layer, D-1707)."""
+        for k in range(len(self.built_keys)):
+            if self.built_keys[k] == key:
+                self.trimmed_counts[k] += 1
+                return
+        self.built_keys.append(key)
+        self.built_counts.append(0)
+        self.appended_counts.append(0)
+        self.trimmed_counts.append(1)
+
     def build_layer(mut self, sc: Scene, i: Int) -> Int:
         """Layer i of the scene as one render node (0 when it draws nothing)."""
         var r = sc.layer_range(i)
@@ -3374,12 +3387,14 @@ struct GtkHost[A: App](Movable):
         self.built_keys.append(key)
         self.built_counts.append(0 if appended else 1)
         self.appended_counts.append(1 if appended else 0)
+        self.trimmed_counts.append(0)
 
-    def built_report(self, appended: Bool) -> String:
+    def built_report(self, appended: Bool, trimmed: Bool = False) -> String:
         """key:count,key:count (- when no layer was built)."""
         var out = String("")
         for k in range(len(self.built_keys)):
-            out += ("," if out != "" else "") + (self.built_keys[k] if self.built_keys[k] != "" else String("_")) + ":" + String(self.appended_counts[k] if appended else self.built_counts[k])
+            var n = self.trimmed_counts[k] if trimmed else (self.appended_counts[k] if appended else self.built_counts[k])
+            out += ("," if out != "" else "") + (self.built_keys[k] if self.built_keys[k] != "" else String("_")) + ":" + String(n)
         return out if out != "" else String("-")
 
     def release_canvases(mut self, staying: List[Bool]):
@@ -3435,10 +3450,16 @@ struct GtkHost[A: App](Movable):
                         _ = external_call["gsk_render_node_ref", Int](node)
                     self.count_built(sc.layer_keys[i], True)
                 else:
-                    node = self.build_layer(sc, i)
-                    self.count_built(sc.layer_keys[i], False)
-                    if had and i < len(self.canvases[ci].layer_tex) and self.canvases[ci].layer_tex[i] != 0:  # (worth asking only with pixels to mend)
-                        cuts[i] = sc.removes(i, self.canvases[ci].prev, i)
+                    var gone = sc.removed_ops(i, self.canvases[ci].prev, i) if had and self.canvases[ci].layer_nodes[i] != 0 else List[Int]()
+                    var trimmed = trimmed_node(self.canvases[ci].layer_nodes[i], self.canvases[ci].prev, i, gone) if len(gone) > 0 else -1
+                    if trimmed >= 0:  # (ops only taken out: the kept nodes, none built again, D-1707)
+                        node = trimmed
+                        self.count_trimmed(sc.layer_keys[i])
+                    else:
+                        node = self.build_layer(sc, i)
+                        self.count_built(sc.layer_keys[i], False)
+                    if len(gone) > 0 and i < len(self.canvases[ci].layer_tex) and self.canvases[ci].layer_tex[i] != 0:  # (worth asking only with pixels to mend)
+                        cuts[i] = sc.removed_box(self.canvases[ci].prev, i, gone)
                 self.nodes_built += 1
                 if sc.layer_keys[i] == "cells":
                     self.cells_built += 1
@@ -3483,7 +3504,10 @@ struct GtkHost[A: App](Movable):
                     bw = nb[2]
                     bh = nb[3]
             if t != 0 and cut:  # (it lost ops: only the box they were in drawn again, D-1220)
-                var mended = self.mend_texture(t, tk, bx, by, nodes[i], cuts[i])
+                var near = nodes_near(nodes[i], cuts[i], 4.0 / tk)  # (D-1707: only what can touch the box is drawn there)
+                var mended = self.mend_texture(t, tk, bx, by, near if near != 0 else nodes[i], cuts[i])
+                if near != 0:
+                    external_call["gsk_render_node_unref", NoneType](near)
                 external_call["g_object_unref", NoneType](t)
                 t = mended
             if t == 0 and sc.moved(i) and nodes[i] != 0 and (kept[i] or added[i] != 0 or cut):  # (a layer that changes every frame, the wet stroke, stays nodes)
@@ -4071,6 +4095,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
     host[].built_keys = List[String]()
     host[].built_counts = List[Int]()
     host[].appended_counts = List[Int]()
+    host[].trimmed_counts = List[Int]()
     host[].layer_textures = 0
     var x = w * 0.3
     var y = h * 0.3
@@ -4186,6 +4211,7 @@ def frame_bench[A: App](host_addr: Int, rest: String):
         settle()
     host[].canvases[ci].pressure = 0
     var counts = (" built_by_layer=" + host[].built_report(False) + " appended_by_layer=" + host[].built_report(True)
+                  + " trimmed_by_layer=" + host[].built_report(False, True)
                   + " layers_built=" + String(host[].nodes_built) + " reused=" + String(host[].nodes_reused) + " textures=" + String(host[].layer_textures))
     if what == "deepzoom":  # (back out, untimed)
         host[].canvas_send(ci, ZOOM, w / 2, h / 2, 0, 0, 1.0 / 8.0, host_addr)
@@ -4226,6 +4252,56 @@ def node_children(node: Int, mut out: List[Int]):
             out.append(external_call["gsk_container_node_get_child", Int](node, c_uint(k)))
     else:
         out.append(node)
+
+
+def trimmed_node(old: Int, prev: Scene, i: Int, gone: List[Int]) -> Int:
+    """Layer i's node after ops `gone` (of prev's layer i) were taken out, made of old's children for the rest: none
+    built again (D-1707). 0 when nothing is left; -1 when old's children aren't one per op (a clip, a text run, an
+    op that drew nothing), so the caller builds the layer as before."""
+    var r = prev.layer_range(i)
+    for op in range(r[0], r[1]):
+        var kind = Int(prev.kinds[op])
+        if kind != OP_POLY and kind != OP_RECT and kind != OP_CIRCLE and kind != OP_LINE and kind != OP_IMAGE and kind != OP_FILL:
+            return -1
+    var kids = List[Int]()
+    node_children(old, kids)
+    if len(kids) != r[1] - r[0]:
+        return -1
+    var keep = List[Int]()
+    var g = 0
+    for k in range(len(kids)):
+        if g < len(gone) and gone[g] == k:
+            g += 1
+            continue
+        keep.append(kids[k])
+    if len(keep) == 0:
+        return 0
+    if len(keep) == 1:
+        return external_call["gsk_render_node_ref", Int](keep[0])
+    var node = external_call["gsk_container_node_new", Int](Int(keep.unsafe_ptr()), c_uint(len(keep)))
+    _ = len(keep)
+    return node
+
+
+def nodes_near(node: Int, box: List[Float64], pad: Float64) -> Int:
+    """A container of node's children whose bounds come within pad of box ([x0, y0, x1, y1], the node's units): what a
+    mend of that box must draw (D-1707: the renderer otherwise walks every child of a thousand-stroke layer). 0 when
+    node isn't a container. A new reference."""
+    if node == 0 or len(box) != 4 or external_call["gsk_render_node_get_node_type", c_int](node) != 1:  # GSK_CONTAINER_NODE
+        return 0
+    var b = List[Float32](length=4, fill=0)
+    var near = List[Int]()
+    for k in range(Int(external_call["gsk_container_node_get_n_children", c_uint](node))):
+        var kid = external_call["gsk_container_node_get_child", Int](node, c_uint(k))
+        external_call["gsk_render_node_get_bounds", NoneType](kid, Int(b.unsafe_ptr()))
+        var x0 = Float64(b[0])
+        var y0 = Float64(b[1])
+        if x0 <= box[2] + pad and x0 + Float64(b[2]) >= box[0] - pad and y0 <= box[3] + pad and y0 + Float64(b[3]) >= box[1] - pad:
+            near.append(kid)
+    _ = len(b)
+    var out = external_call["gsk_container_node_new", Int](Int(near.unsafe_ptr()), c_uint(len(near)))
+    _ = len(near)
+    return out
 
 
 def joined(kept: Int, add: Int) -> Int:

@@ -485,11 +485,12 @@ struct Scene(Painter, Movable, Copyable):
                    max(self.num(op, 0), self.num(op, 2)) + hw, max(self.num(op, 1), self.num(op, 3)) + hw]
         return out^
 
-    def removes(self, i: Int, other: Scene, j: Int) -> List[Float64]:
-        """When layer i is layer j of `other` with some ops taken out and nothing else changed (strokes erased): the box
-        around what was taken out ([x0, y0, x1, y1], the layer's units), so a host redraws only there (D-1220). Empty
-        otherwise: another key, nothing taken out, anything new or different, or a taken-out op with no box (text)."""
-        var out = List[Float64]()
+    def removed_ops(self, i: Int, other: Scene, j: Int) -> List[Int]:
+        """When layer i is layer j of `other` with some ops taken out and nothing else changed (strokes erased): which
+        of the other layer's ops went, counted from its first op, in order. Empty otherwise: another key, nothing taken
+        out, anything new or different. A host keeps what it built for the rest (GTK: the layer node's children,
+        D-1707) instead of building the layer again."""
+        var out = List[Int]()
         if self.layer_keys[i] != other.layer_keys[j]:
             return out^
         var a = self.layer_range(i)
@@ -497,33 +498,38 @@ struct Scene(Painter, Movable, Copyable):
         if a[1] - a[0] >= b[1] - b[0]:
             return out^
         var p = a[0]
-        var gone = 0
-        var x0 = 0.0
-        var y0 = 0.0
-        var x1 = 0.0
-        var y1 = 0.0
         for q in range(b[0], b[1]):  # (greedy: this layer must be a subsequence of the other's)
             if p < a[1] and self.same_op(p, other, q):
                 p += 1
                 continue
-            var box = other.op_bounds(q)
-            if len(box) == 0:
-                return out^
-            if gone == 0:
-                x0 = box[0]
-                y0 = box[1]
-                x1 = box[2]
-                y1 = box[3]
-            else:
-                x0 = min(x0, box[0])
-                y0 = min(y0, box[1])
-                x1 = max(x1, box[2])
-                y1 = max(y1, box[3])
-            gone += 1
-        if p != a[1] or gone == 0:
-            return out^
-        out = [x0, y0, x1, y1]
+            out.append(q - b[0])
+        if p != a[1]:
+            return List[Int]()
         return out^
+
+    def removed_box(self, other: Scene, j: Int, gone: List[Int]) -> List[Float64]:
+        """The box around ops `gone` of layer j of `other` ([x0, y0, x1, y1], the layer's units); empty when one of them
+        has no box (text)."""
+        var out = List[Float64]()
+        var first = other.layer_range(j)[0]
+        for n in range(len(gone)):
+            var box = other.op_bounds(first + gone[n])
+            if len(box) == 0:
+                return List[Float64]()
+            if n == 0:
+                out = box^
+            else:
+                out = [min(out[0], box[0]), min(out[1], box[1]), max(out[2], box[2]), max(out[3], box[3])]
+        return out^
+
+    def removes(self, i: Int, other: Scene, j: Int) -> List[Float64]:
+        """When layer i is layer j of `other` with some ops taken out and nothing else changed (strokes erased): the box
+        around what was taken out ([x0, y0, x1, y1], the layer's units), so a host redraws only there (D-1220). Empty
+        otherwise: another key, nothing taken out, anything new or different, or a taken-out op with no box (text)."""
+        var gone = self.removed_ops(i, other, j)
+        if len(gone) == 0:
+            return List[Float64]()
+        return self.removed_box(other, j, gone)
 
     def raster(self, mut s: Surface, font: Font):
         """Plays the list into pixels (the CPU reference: tests, screenshots, hosts without a GPU path), each layer
