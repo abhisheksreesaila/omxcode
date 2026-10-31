@@ -494,6 +494,7 @@ def m2_inner():
     if shot.exists():
         shot.unlink()
     mon = Monitor()
+    panel = FakeWatcher()  # (addition, D-1618: a panel to come back from, or closing the window ends Keeper)
     p = Proc([str(exe)], dict(os.environ, KEEPER_DIR=str(kdir), KEEPER_DB=str(db), KEEPER_ALERT=alert, MOJOUI_SHOT=str(shot),
                               MOJOUI_TEST="pause:500;quit;waitopen:120000;type:Search=nightjar;pause:800"))
     try:
@@ -505,6 +506,21 @@ def m2_inner():
         if not p.alive():
             return False, f"(b) the process ended with its window closed: {p.text()[-300:]}", native
         (kdir / "fresh").mkdir()  # a new subfolder, made while closed
+        # (addition, D-1621) searchable, seen from outside: Python's sqlite3 polls the index while the files are written
+        # and stamps when each first matches; that lag is judged too, not only the at= Keeper prints
+        outside, polling = {}, [True]
+
+        def poll_index():
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+            try:
+                while polling[0]:
+                    for (path,) in con.execute("SELECT path FROM files_fts WHERE files_fts MATCH 'nightjar'"):
+                        outside.setdefault(rel(path, kdir), time.monotonic_ns())
+                    time.sleep(0.002)
+            finally:
+                con.close()
+        poller = threading.Thread(target=poll_index, daemon=True)
+        poller.start()
         new, closed_at = {}, {}
         for i in range(200):
             path = f"fresh/new{i}.md" if i % 2 else f"s0000/new{i}.txt"
@@ -524,8 +540,26 @@ def m2_inner():
                 if m and rel(m.group(1), kdir) in mark_paths:
                     got.setdefault(rel(m.group(1), kdir), []).append((float(m.group(2)), int(m.group(3))))
             time.sleep(0.2)
+        time.sleep(0.5)
+        polling[0] = False
+        poller.join(5)
         if len(got) < 200:
             return False, f"(b) {len(got)}/200 files printed KEEPER INDEXED (missing e.g. {sorted(mark_paths - set(got))[:3]})", native
+        # (addition, D-1621) each file indexed exactly once (the loop above re-reads every line on each pass: count afresh)
+        once = {}
+        for line in list(p.lines):
+            m = re.match(r"^KEEPER INDEXED: (\S+) ms=", line)
+            if m and rel(m.group(1), kdir) in mark_paths:
+                once[rel(m.group(1), kdir)] = once.get(rel(m.group(1), kdir), 0) + 1
+        twice = [k for k, c in once.items() if c != 1]
+        if twice:
+            return False, f"(b) {len(twice)} files printed KEEPER INDEXED more than once (e.g. {twice[:3]})", native
+        if len(outside) < 200:
+            return False, f"(b) Python's sqlite3, polling, saw {len(outside)}/200 new files become searchable", native
+        out_lags = [max(0, outside[k] - closed_at[k]) / 1e6 for k in new]
+        out_q = p95(out_lags)
+        if out_q > 100:
+            return False, f"(b) file closed → searchable as Python's sqlite3 sees it, p95 {out_q:.1f} ms (≤ 100)", native
         if not p.alive():
             return False, "(b) the process ended while indexing in the background", native
         lags = [max(0, got[k][0][1] - closed_at[k]) / 1e6 for k in new]
@@ -542,6 +576,28 @@ def m2_inner():
         false = [k for k, i in new.items() if i % 10 and any(re.search(re.escape(Path(k).name) + r"\b", c) for c in calls)]
         if unalerted or false:
             return False, f"(b) notifications: {len(unalerted)} alert files not named (e.g. {unalerted[:2]}), {len(false)} quiet files named; calls {calls[:2]}", native
+        # (addition, D-1621) each alert file named in exactly one notification (a burst may share one)
+        named = {k: sum(1 for c in calls if re.search(r"(?<![\w])" + re.escape(Path(k).name) + r"\b", c)) for k in alerts}
+        repeated = [k for k, c in named.items() if c != 1]
+        if repeated:
+            return False, f"(b) alert files named in more than one notification: {[(k, named[k]) for k in repeated[:3]]}", native
+        # (addition, D-1621) a reindex that fails keeps its changes: the index is locked past Keeper's 5 s busy wait while a
+        # file is written; Keeper must say it's retrying, then index the file once the lock goes
+        (kdir / "held").mkdir()
+        mark = len(p.lines)
+        lock = sqlite3.connect(db, timeout=10, isolation_level=None)
+        lock.execute("BEGIN EXCLUSIVE")
+        try:
+            with open(kdir / "held" / "held0.md", "w") as fh:
+                fh.write("written while the index was locked heldword\n")
+            retried = p.wait_for(r"^KEEPER RETRY: \d+ changes", 15, mark) >= 0
+        finally:
+            lock.execute("ROLLBACK")
+            lock.close()
+        if not retried:
+            return False, f"(b) with the index locked, Keeper didn't report a failed reindex (KEEPER RETRY): {p.text()[-300:]}", native
+        if p.wait_for(r"^KEEPER INDEXED: \S*held/held0\.md ", 30, mark) < 0 or fts_paths(db, "heldword", kdir) != {"held/held0.md"}:
+            return False, f"(b) after the lock went, the file written meanwhile wasn't indexed (its change was lost): {p.text()[-300:]}", native
         # (c) Activate reopens the window; the typed search shows the new files
         name = sni_name(p.p.pid)
         if not name:
@@ -554,9 +610,17 @@ def m2_inner():
         if i < 0:
             return False, f"(c) no KEEPER SEARCH line for the typed query: {p.text()[-300:]}", native
         n = int(re.search(r"results=(\d+)", p.lines[i]).group(1))
-        want = len(fts_paths(db, "nightjar", kdir))
+        found = fts_paths(db, "nightjar", kdir)
+        want = len(found)
         if n != want or want != 200:
             return False, f"(c) the search shows {n} results; Python's FTS5 finds {want} (want 200)", native
+        # (addition, D-1621) the results list itself drew them: its first row asked for, and as many rows as sqlite finds
+        j = p.wait_for(r"^KEEPER RESULTS: q=nightjar shown=\d+ first=\S+", 30, i)
+        if j < 0:
+            return False, f"(c) the results list never drew a row for the typed search: {p.text()[-300:]}", native
+        rm = re.search(r"shown=(\d+) first=(\S+)", p.lines[j])
+        if int(rm.group(1)) != want or rel(rm.group(2), kdir) not in found:
+            return False, f"(c) the list shows {rm.group(1)} rows starting {rm.group(2)}; sqlite finds {want}", native
         end = time.monotonic() + 60
         while time.monotonic() < end and p.alive() and not shot.exists():
             time.sleep(0.2)
@@ -564,13 +628,15 @@ def m2_inner():
     finally:
         p.stop()
         mon.stop()
+        panel.stop()
     from PIL import Image
     import numpy as np
     if not shot.exists() or np.asarray(Image.open(shot).convert("L"), dtype=float).std() < 2:
         return False, "(c) docs/goals/45/keeper-gtk.png missing or blank", native
     return True, (f"(a) {scanned:,} files scanned in {scan_ms} ms as a job: {frames} frames, longest gap {longest} ms (corpus made in "
-                  f"{made_s:.0f} s); (b) window closed: 200 files indexed, p95 {q:.1f} ms, all found by sqlite3, "
-                  f"{len(alerts)} alerts on the bus naming their files; (c) Activate reopened it, the search shows {n}"), native
+                  f"{made_s:.0f} s); (b) window closed: 200 files indexed once each, p95 {q:.1f} ms (Python's sqlite3 polling: p95 {out_q:.1f} ms), "
+                  f"all found by sqlite3, {len(alerts)} alert files each named in exactly one notification ({len(calls)} sent); a reindex "
+                  f"failed on a locked index, retried and indexed the file; (c) Activate reopened it, the search and its list show {n}"), native
 
 
 def m2():

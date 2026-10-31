@@ -3,14 +3,20 @@
 # in SQLite ($KEEPER_DB, default <config>/keeper/keeper.db: files(path, mtime, size) and the FTS5 table
 # files_fts(path, body)), and has a search field and a list of what changed lately. Closing the window leaves it running
 # (App.background): the tray item opens it again, and a file mentioning $KEEPER_ALERT's word raises a notification
-# (mojoui.notify). Slow work runs as jobs (mojoui.jobs): the first scan, and indexing what changed.
+# (mojoui.notify): one per burst (it waits until alerts stop coming for half a second, two seconds at most), naming how
+# many files and which, and none for a file saved again with the same text. Slow work runs as jobs (mojoui.jobs): the
+# first scan, and indexing what changed; a reindex that fails (the database busy, say) keeps its changes and tries
+# again a second later, saying so.
 #
 # What it prints (docs/goals/45-check.py reads these):
 #   KEEPER SCAN: start / KEEPER SCAN: done <n> files in <ms> ms          the scan (new, changed and gone files)
 #   KEEPER INDEXED: <path> ms=<lag> at=<ns>                               a changed file is searchable (lag from the
 #                                                                         watcher's event, at on the monotonic clock)
 #   KEEPER SEARCH: q=<typed> results=<n>                                  each search
-#   KEEPER ALERT: <path>                                                  a notification was sent
+#   KEEPER RESULTS: q=<q> shown=<rows> first=<path>                       the results list drew its first row
+#   KEEPER ALERT: <path>                                                  a file named in a notification
+#   KEEPER NOTIFY: <n> files                                              a notification was sent
+#   KEEPER RETRY: <n> changes after: <error>                              a reindex failed; its changes wait for the next
 
 from mojoui import (
     App, Event, View, VStack, HStack, Text, TextField, LazyList, ProgressBar, Spacer, Icon,
@@ -38,6 +44,10 @@ comptime RECENT = 2
 comptime SCAN_DELAY_MS = 600  # the window opens with what the index holds; the scan starts a moment later
 comptime MAX_BYTES = 2 * 1024 * 1024  # a bigger file is indexed by its first 2 MB
 comptime BATCH = 2000  # files per transaction in the scan (the window's connection reads between them)
+comptime ALERT_QUIET_NS = 500_000_000  # a burst of alerts ends when none came for this long…
+comptime ALERT_MAX_NS = 2_000_000_000  # …or this long after its first: then one notification for all of it
+comptime ALERT_NAMES = 50  # a notification names this many files, then "and N more"
+comptime RETRY_NS = 1_000_000_000  # a failed reindex tries again after this
 
 
 def kept(name: String) -> Bool:
@@ -174,7 +184,8 @@ struct Change(Copyable, Movable):
 
 struct Reindex(JobBody):
     """What the watcher saw, into the index, one transaction; then each changed file's KEEPER INDEXED line (it's
-    searchable once committed). Returns the files that mention the alert word, one per line."""
+    searchable once committed). Returns the files that mention the alert word, one `<path>\t<text hash>` per line. If it
+    fails nothing is committed, and the app queues the same changes again."""
     comptime Out = String
     var db: String
     var changes: List[Change]
@@ -206,7 +217,7 @@ struct Reindex(JobBody):
             ix.put(c.path, stamp[0], stamp[1], body)
             done.append(c.copy())
             if self.alert != "" and body.lower().find(self.alert) >= 0:
-                alerts += c.path + "\n"
+                alerts += c.path + "\t" + String(hash(body)) + "\n"
         ix.db.commit()
         for c in done:
             var at = now_ns()
@@ -230,6 +241,12 @@ struct Main(App):
     var files: Int  # how many files the index holds
     var waiting: List[Change]  # what the watcher saw, not yet indexed
     var reindex: Optional[Job[String]]
+    var in_flight: List[Change]  # what the running reindex has (back to waiting if it fails)
+    var retry_at: Int  # a failed reindex: the next one waits until then
+    var alert_wait: List[String]  # files to name in the next notification (a burst)
+    var alert_first: Int
+    var alert_last: Int
+    var alerted: Dict[String, String]  # path → the hash of the text it was last named for (a save of the same text: none)
     var query: String
     var found: List[String]
     var found_count: Int
@@ -257,6 +274,12 @@ struct Main(App):
         self.files = 0
         self.waiting = List[Change]()
         self.reindex = None
+        self.in_flight = List[Change]()
+        self.retry_at = 0
+        self.alert_wait = List[String]()
+        self.alert_first = 0
+        self.alert_last = 0
+        self.alerted = Dict[String, String]()
         self.query = ""
         self.found = List[String]()
         self.found_count = 0
@@ -295,6 +318,8 @@ struct Main(App):
         var out = List[Every]()
         if not self.scanned:
             out.append(Every(100, TICK))  # (the scan's start, then its progress bar)
+        elif len(self.alert_wait) > 0 or self.retry_at != 0:
+            out.append(Every(100, TICK))  # (a burst of alerts to send when it ends; a reindex to try again)
         return out^
 
     def closing(mut self):
@@ -339,28 +364,72 @@ struct Main(App):
                 self.search()
         if self.reindex and self.reindex.value().poll() != JOB_RUNNING:
             var job = self.reindex.take()
-            var alerts = job.result()
-            for line in alerts.split("\n"):
-                var path = String(line)
-                if path == "":
-                    continue
-                var name = String(path[byte = path.rfind("/") + 1 :])
-                notify("Keeper", name + " mentions " + self.alert, path)
-                print("KEEPER ALERT: " + path, flush=True)
-            self.files = self.db.value().count("SELECT count(*) FROM files")
-            self.search()
-        if not self.reindex and len(self.waiting) > 0 and self.scanned:
+            var batch = self.in_flight^
+            self.in_flight = List[Change]()
+            try:
+                var alerts = job.result()  # (raises the job's error when it failed)
+                var now = now_ns()
+                for c in batch:
+                    if c.kind != DELETED and not c.is_dir:
+                        self.recent.insert(0, c.path)
+                        self.recent_at.insert(0, now)
+                while len(self.recent) > 50:
+                    _ = self.recent.pop()
+                    _ = self.recent_at.pop()
+                for line in alerts.split("\n"):
+                    var f = String(line).split("\t")
+                    if len(f) != 2:
+                        continue
+                    var path = String(f[0])
+                    var h = String(f[1])
+                    if self.alerted.get(path, String("")) == h:
+                        continue  # (saved again with the same text: told already)
+                    self.alerted[path] = h
+                    if len(self.alert_wait) == 0:
+                        self.alert_first = now
+                    self.alert_last = now
+                    self.alert_wait.append(path)
+                if self.retry_at != 0:
+                    self.retry_at = 0
+                    self.problem = ""
+                self.files = self.db.value().count("SELECT count(*) FROM files")
+                self.search()
+            except e:  # (nothing was committed: the same changes go first in the queue and are tried again)
+                var n = len(batch)
+                for c in self.waiting:
+                    batch.append(c.copy())
+                self.waiting = batch^
+                self.retry_at = now_ns() + RETRY_NS
+                self.problem = "Couldn't index " + String(n) + " changes (" + String(e) + "): trying again"
+                print("KEEPER RETRY: " + String(n) + " changes after: " + String(e), flush=True)
+        if len(self.alert_wait) > 0 and (now_ns() - self.alert_last >= ALERT_QUIET_NS or now_ns() - self.alert_first >= ALERT_MAX_NS):
+            self.send_alerts()
+        if self.watcher.failed() or self.watcher.partial():
+            if self.problem == "":
+                self.problem = self.watcher.why()
+        if not self.reindex and len(self.waiting) > 0 and self.scanned and now_ns() >= self.retry_at:
             var batch = self.waiting^
             self.waiting = List[Change]()
-            var now = now_ns()
-            for c in batch:
-                if c.kind != DELETED and not c.is_dir:
-                    self.recent.insert(0, c.path)
-                    self.recent_at.insert(0, now)
-            while len(self.recent) > 50:
-                _ = self.recent.pop()
-                _ = self.recent_at.pop()
+            self.in_flight = batch.copy()
             self.reindex = start_ui_job(Reindex(self.path, batch^, self.alert))
+
+    def send_alerts(mut self) raises:
+        """One notification for the burst: the file's name, or how many files and the first ALERT_NAMES of them."""
+        var n = len(self.alert_wait)
+        var names = String("")
+        for k in range(min(n, ALERT_NAMES)):
+            var path = self.alert_wait[k]
+            names += (", " if k > 0 else "") + self.short(path)
+            print("KEEPER ALERT: " + path, flush=True)
+        if n > ALERT_NAMES:
+            names += " and " + String(n - ALERT_NAMES) + " more"
+        if n == 1:
+            var path = self.alert_wait[0]
+            notify("Keeper", String(path[byte = path.rfind("/") + 1 :]) + " mentions " + self.alert, names)
+        else:
+            notify("Keeper", String(n) + " files mention " + self.alert, names)
+        print("KEEPER NOTIFY: " + String(n) + " files", flush=True)
+        self.alert_wait = List[String]()
 
     def search(mut self) raises:
         self.found = List[String]()
@@ -382,6 +451,8 @@ struct Main(App):
 
     def row(self, list_id: Int, index: Int) -> String:
         if list_id == RESULTS and index >= 0 and index < len(self.found):
+            if index == 0:  # (the list is drawing what the search found)
+                print("KEEPER RESULTS: q=" + self.query + " shown=" + String(len(self.found)) + " first=" + self.found[0], flush=True)
             return self.short(self.found[index])
         if list_id == RECENT and index >= 0 and index < len(self.recent):
             var s = Int(Float64(now_ns() - self.recent_at[index]) / 1e9)
