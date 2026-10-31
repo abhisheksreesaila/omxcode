@@ -259,6 +259,7 @@ def rechunk():
 def run_b(enc, dec, timeout=1800, extra=""):
     headless.ensure()
     ids = sorted(w.stem for w in CLIPS.glob("*.wav"))
+    lock = threading.Lock()
     state = {"ready": None, "results": {}, "done": threading.Event(), "error": None, "served": 0, "info": None, "log": []}
 
     class H(BaseHTTPRequestHandler):
@@ -329,7 +330,9 @@ def run_b(enc, dec, timeout=1800, extra=""):
                 base = B_CHUNKED if enc == "fp32" and rel.startswith("onnx/encoder_model.onnx") else B_DIR
                 f = base / (rel[len("onnx/"):] if base is B_CHUNKED else rel)
                 if f.is_file() and base in f.resolve().parents:
-                    state["served"] += self._file(f, "application/json" if f.suffix == ".json" else "application/octet-stream") or 0
+                    sent = self._file(f, "application/json" if f.suffix == ".json" else "application/octet-stream") or 0
+                    with lock:  # (after the stream: reading the counter before a long send lost concurrent downloads)
+                        state["served"] += sent
                     return
             state["log"].append(f"server: {self.path} 404")
             self.send_error(404)
