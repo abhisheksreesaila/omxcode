@@ -49,12 +49,14 @@ in each probe's gallery section (`scripts/probe_fixes_gallery.py`).
 
 - **Mac:** every probe builds, none has run (it needs the owner's Mac).
 - **Sketch:** erase takes 14–23 ms p95. A real pen or touchpad and GTK's GPU renderer are unverified.
-- **Jot:** all three fixed 2026-10-30 (web drop leaks, D-1704; the field queue's stale write, D-1703; the goal 30 flake, two causes in the GTK
-  test host: a fixed pause raced the 100M-row open, D-1701; `pause:` slept 10 ms per main-loop turn and skipped frames, D-1702.)
-- **Dictate:** B at fp16 is unmeasured. (Fixed 2026-10-30: `captured_ns` gives up after 2 ms on a word that stays odd, D-1700.)
-- **Keeper:** never run against a real tray panel or notification server, and Web Push untried: both need the owner's
-  desktop (a panel, a notification daemon, a push service and its keys). (Fixed 2026-10-31: a second launch hands over
-  before it builds its App, `App.one_instance()`, D-1706; (Fixed 2026-10-31: `file_stamp` reads statx, one layout on every Linux, compiled for aarch64, not run there, D-1705.)
+- **Jot:** nothing open. Fixed 2026-10-30: the goal 30 flake (two causes in the GTK test host: a fixed pause raced the
+  100M-row open, D-1701; `pause:` slept 10 ms per main-loop turn and skipped frames, D-1702), the field queue's stale
+  write (D-1703), web drop leaks (D-1704; an evicted upload also crashed the server).
+- **Dictate:** B at fp16 is unmeasured. Fixed 2026-10-30: `captured_ns` gives up after 2 ms on a word that stays odd (D-1700).
+- **Keeper:** never run against a real tray panel or notification server, and Web Push untried: these need the owner's
+  desktop (a panel, a notification daemon, a push service and its keys). Fixed 2026-10-31: a second launch hands over
+  before it builds its App (`App.one_instance()`, D-1706); `file_stamp` reads statx, one layout on every Linux
+  (compiled for aarch64, not run there; D-1705).
 
 ## Next
 - **Recall:** finish the race, review it, then add side B2: Personal Note's design (a page plus a llama.cpp embedding
