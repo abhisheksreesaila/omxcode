@@ -1,13 +1,13 @@
-# mojoui.spring: a value that moves toward its target like a spring (omxqua's Liquid motion: things arrive with a little
-# overshoot and settle), stepped by a canvas's display frames (Canvas(on_frame=…): event.number = microseconds).
+# mojoui.spring: a value that moves toward its target like a spring (Liquid's motion: it arrives quickly and settles,
+# no bounce; lower the damping for one), stepped by a canvas's display frames (Canvas(on_frame=…): event.number = µs).
 #
 #   var s = Spring(0.0)              # at rest at 0
 #   s.to(1.0)                        # aim at 1
 #   on each frame: if s.step(event.number): keep asking for frames   (False once it has settled)
-#   draw with s.value                # 0 … ~1.08 … 1
+#   draw with s.value                # 0 … 1
 
-comptime SPRING_STIFFNESS = 220.0  # (a quick, gentle arrival: ~300 ms, one small overshoot)
-comptime SPRING_DAMPING = 22.0
+comptime SPRING_STIFFNESS = 220.0  # (Liquid's feel: a quick arrival, ~300 ms, that settles without a bounce)
+comptime SPRING_DAMPING = 30.0  # (critical: 2·√stiffness; less than that overshoots)
 
 
 struct Spring(Copyable, Movable):

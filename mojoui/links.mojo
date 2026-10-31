@@ -517,7 +517,7 @@ struct Links(Movable, Sized):
         var b = self.msg_base
         var rows = List[View]()
         if len(self.items) == 0:
-            rows.append(Text("No links yet. Drag a column's header onto another card to link them: nothing joins until you do.", CAPTION).max_width(260))
+            rows.append(Text("No links yet. Drag a column's header onto another card to link them: nothing joins until you do.", CAPTION))
         for i in range(len(self.items)):
             ref l = self.items[i]
             var said = l.a.column + (" = " if l.kind == LINK_KEY else " ≈ ") + l.b.column
@@ -534,15 +534,17 @@ struct Links(Movable, Sized):
                                     Button("+", b + LINKS_MORE + i, SUBTLE).tooltip("0.1 s later"), Text("s", CAPTION), spacing=4).align(CENTER))
             rows.append(VStack(parts^, spacing=4).fill().align(START).tag("link-row"))
         var add = List[View]()
-        add.append(Text("Drag a column onto a card to add one; hold a card to see what it's linked to. Or type one:", CAPTION).max_width(260))
+        add.append(Text("Drag a column onto a card to add one; hold a card to see what it's linked to. Or type one:", CAPTION))
         add.append(TextField(self.draft, "shipments.shipment_id = dock.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
             'Link two cards: "card.column = card.column" (rows with the same value) or "card.column ~ card.column +seconds" '
             + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
         if self.problem != "":
             add.append(Text(self.problem, CAPTION))
         var out = List[View]()
-        out.append(VStack(Text("LINKS ON THIS SHEET", CAPTION).tag("section-title"), VStack(rows^, spacing=8).fill().align(START), spacing=8).fill().align(START))
-        out.append(VStack(Text("ADD A LINK", CAPTION).tag("section-title"), VStack(add^, spacing=8).fill().align(START), spacing=8).fill().align(START))
+        rows.insert(0, Text("On this sheet", CAPTION).tone(TONE_STRONG))  # (a plain heading: Liquid's section-title role wrapped a long one)
+        add.insert(0, Text("Add a link", CAPTION).tone(TONE_STRONG))
+        out.append(VStack(rows^, spacing=8).fill().align(START))
+        out.append(VStack(add^, spacing=8).fill().align(START))
         return out^
 
     def owns(self, message: Int) -> Bool:

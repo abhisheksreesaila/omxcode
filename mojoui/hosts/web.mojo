@@ -130,7 +130,7 @@ def web_theme[A: App](handle: Int) -> String:
     its style sheet (D-260), and its tokens as JSON for widgets' theme(el, tokens) (goal 34b)."""
     var t = session_at[A](handle)[].app.theme()
     var sheet = t.web_css + (look_web_css(t.look, "body." + t.id + " ") if t.id != "" else String(""))  # (the look's rules after the theme's own: hover and :focus rules stay more specific)
-    sheet += board_web_css(t.palette, "body ")  # (a Board's tones and the link UI's pieces, from any palette)
+    sheet += board_web_css(t.palette, "body ", t.look.motion.spring)  # (a Board's tones and the link UI's pieces, from any palette)
     var vars = (palette_css(t.palette) + tokens_css(t)) if t.id != "" else String("")
     return t.id + chr(31) + t.classes + chr(31) + vars + chr(31) + sheet + chr(31) + theme_tokens(t)
 

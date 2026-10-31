@@ -106,7 +106,7 @@ def main() raises:
     assert_true(peek.settled)
     assert_equal(peek.tone(0), BOARD_PLAIN)
 
-    # the spring settles where it's aimed, overshooting a little on the way
+    # the spring settles where it's aimed without a bounce (Liquid's motion)
     var s = Spring(0.0)
     s.to(1.0)
     var top = 0.0
@@ -115,7 +115,7 @@ def main() raises:
         top = max(top, s.value)
         n += 1
     assert_equal(s.value, 1.0)
-    assert_true(top > 1.0 and top < 1.15)
+    assert_true(top <= 1.01)
     assert_true(n < 60)
 
     # a time lane: the log on the video's clock

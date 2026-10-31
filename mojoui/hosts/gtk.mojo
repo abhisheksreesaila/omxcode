@@ -2533,7 +2533,7 @@ struct GtkHost[A: App](Movable):
                 self.gap_roles.append(sf.role)
                 self.gap_cols.append(sf.column_gap)
         var sheet = theme.gtk_css + (look_gtk_css(theme.look, "window." + theme.id + " ") if theme.id != "" else String(""))  # (the look's rules after the theme's own)
-        sheet += board_gtk_css(theme.palette, "window." + theme.id + " " if theme.id != "" else "")  # (a Board's tones and the link UI's pieces, from any palette)
+        sheet += board_gtk_css(theme.palette, "window." + theme.id + " " if theme.id != "" else "", theme.look.motion.ease)  # (a Board's tones and the link UI's pieces, from any palette)
         if sheet != "":
             self.skin_provider = external_call["gtk_css_provider_new", Int]()
             external_call["gtk_css_provider_load_from_string", NoneType](self.skin_provider, sheet.as_c_string_span())
@@ -5433,8 +5433,19 @@ def run_step[A: App](host_addr: Int, step: String):
         ref tn = host[].rt.shown.nodes[host[].boards[ti].node]
         var tw = Float64(Int(external_call["gtk_widget_get_width", c_int](host[].boards[ti].widget)))
         var th = Float64(Int(external_call["gtk_widget_get_height", c_int](host[].boards[ti].widget)))
-        var to_x = fr[0] + Float64(tn.x) + tw / 2 - cr[0]  # the target's middle, in the canvas's coordinates
-        var to_y = fr[1] + Float64(tn.y) + th * 0.4 - cr[1]
+        var x0 = fr[0] + Float64(tn.x)  # the target in the window, clipped to its board's scroller: a hand drops it where it shows
+        var y0 = fr[1] + Float64(tn.y)
+        var x1 = x0 + tw
+        var y1 = y0 + th
+        for sc in host[].board_scrollers:
+            if sc[0] == host[].boards[ti].board:
+                var vr = widget_rect(host[], sc[1])
+                x0 = max(x0, vr[0])
+                y0 = max(y0, vr[1])
+                x1 = min(x1, vr[0] + vr[2])
+                y1 = min(y1, vr[1] + vr[3])
+        var to_x = (x0 + x1) / 2 - cr[0]  # the target's middle in view, in the canvas's coordinates
+        var to_y = y0 + (y1 - y0) * 0.4 - cr[1]
         var dx = to_x - at[0]
         var dy = to_y - at[1]
         var begin = String("drag-begin")

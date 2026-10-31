@@ -16,14 +16,23 @@
 from mojoui.look import css_color
 from mojoui.theme import Palette
 
-comptime SPRING = "cubic-bezier(0.2, 1.4, 0.4, 1)"  # (an overshoot: the peek's lift and the label pills arrive on it)
+comptime SPRING_DEFAULT = "cubic-bezier(0.22, 1, 0.36, 1)"  # (Liquid's spring: a calm ease-out that settles, no bounce; a theme's Look.motion.ease wins)
+
+
+def _shade(p: Palette, alpha: Float64) -> String:
+    """A shadow's colour from the palette's mode: as asked on a dark page, about a third of it on a light one (one soft
+    shadow, omxqua; Liquid's light mode stays airy)."""
+    var a = alpha if p.dark else alpha * 0.35
+    return "rgba(0,0,0," + String(Float64(Int(a * 100.0 + 0.5)) / 100.0) + ")"
 
 
 def _a(c: UInt32, alpha: Float64) -> UInt32:
     return (c & 0x00FFFFFF) | (UInt32(Int(alpha * 255.0 + 0.5)) << 24)
 
 
-def board_gtk_css(p: Palette, scope: String) -> String:
+def board_gtk_css(p: Palette, scope: String, ease: String = "") -> String:
+    """GTK's rules; `ease`: the theme's own curve (Look.motion.ease), else SPRING."""
+    var SPRING = ease if ease != "" else String(SPRING_DEFAULT)
     var ac = css_color(p.accent)
     var line = css_color(p.line)
     var raised = css_color(p.raised)
@@ -33,16 +42,16 @@ def board_gtk_css(p: Palette, scope: String) -> String:
     out += scope + ".mui-board > * { transition: opacity 200ms ease, filter 200ms ease, transform 220ms ease, box-shadow 220ms ease; }\n"
     out += (scope + ".mui-board > .mui-tone-dim { opacity: 0.42; filter: grayscale(0.75); transform: scale(0.97); "
             + "transition: opacity 280ms ease, filter 280ms ease, transform 420ms " + SPRING + "; }\n")
-    out += (scope + ".mui-board > .mui-tone-lift { box-shadow: 0 0 0 1px " + css_color(_a(p.accent, 0.55)) + ", 0 12px 30px rgba(0,0,0,0.5); "
+    out += (scope + ".mui-board > .mui-tone-lift { box-shadow: 0 0 0 1px " + css_color(_a(p.accent, 0.55)) + ", 0 12px 30px " + _shade(p, 0.5) + "; "
             + "transform: scale(1.015); transition: transform 420ms " + SPRING + ", box-shadow 300ms ease; }\n")
-    out += (scope + ".mui-board > .mui-tone-source { box-shadow: 0 0 0 2px " + ac + ", 0 16px 40px rgba(0,0,0,0.6); "
+    out += (scope + ".mui-board > .mui-tone-source { box-shadow: 0 0 0 2px " + ac + ", 0 16px 40px " + _shade(p, 0.6) + "; "
             + "transform: scale(1.03); transition: transform 420ms " + SPRING + ", box-shadow 300ms ease; }\n")
-    out += scope + ".mui-board > .mui-tone-target { box-shadow: 0 0 0 2px " + ac + ", 0 6px 18px rgba(0,0,0,0.35); }\n"
+    out += scope + ".mui-board > .mui-tone-target { box-shadow: 0 0 0 2px " + ac + ", 0 6px 18px " + _shade(p, 0.35) + "; }\n"
     # the link UI's floating pieces
     out += (scope + ".mui-tag-link-ghost { background: " + raised + "; color: " + ac + "; font-weight: 600; font-size: 11px; "
-            + "padding: 4px 9px; border-radius: 7px; box-shadow: inset 0 0 0 1px " + ac + ", 0 8px 20px rgba(0,0,0,0.5); }\n")
+            + "padding: 4px 9px; border-radius: 7px; box-shadow: inset 0 0 0 1px " + ac + ", 0 8px 20px " + _shade(p, 0.5) + "; }\n")
     out += (scope + ".mui-tag-link-confirm, " + scope + ".mui-tag-link-columns { background: " + raised + "; border-radius: 11px; padding: 11px 12px; "
-            + "box-shadow: inset 0 0 0 1px " + line + ", 0 12px 30px rgba(0,0,0,0.5); }\n")
+            + "box-shadow: inset 0 0 0 1px " + line + ", 0 12px 30px " + _shade(p, 0.5) + "; }\n")
     out += scope + ".mui-tag-link-columns { border-radius: 9px; padding: 7px 9px; }\n"
     out += (scope + ".mui-tag-link-end { background: " + css_color(p.card) + "; color: " + ink + "; border-radius: 6px; padding: 2px 7px; "
             + "box-shadow: inset 0 0 0 1px " + line + "; font-size: 11.5px; }\n")
@@ -59,7 +68,9 @@ def board_gtk_css(p: Palette, scope: String) -> String:
     return out^
 
 
-def board_web_css(p: Palette, scope: String) -> String:
+def board_web_css(p: Palette, scope: String, ease: String = "") -> String:
+    """The web's rules; `ease`: the theme's own curve (Look.motion.spring), else SPRING."""
+    var SPRING = ease if ease != "" else String(SPRING_DEFAULT)
     var ac = css_color(p.accent)
     var line = css_color(p.line)
     var raised = css_color(p.raised)
@@ -70,17 +81,17 @@ def board_web_css(p: Palette, scope: String) -> String:
     out += (scope + ".board > .object[data-tone='1'] { opacity: .42; filter: grayscale(.75); transform: scale(.97); "
             + "transition: opacity .28s ease, filter .28s ease, transform .42s " + SPRING + "; }\n")
     out += (scope + ".board > .object[data-tone='2'] { z-index: 6; box-shadow: 0 0 0 1px " + css_color(_a(p.accent, 0.55))
-            + ", 0 12px 30px rgba(0,0,0,.5); transform: scale(1.015); transition: transform .42s " + SPRING + ", box-shadow .3s; }\n")
-    out += (scope + ".board > .object[data-tone='3'] { z-index: 7; box-shadow: 0 0 0 2px " + ac + ", 0 16px 40px rgba(0,0,0,.6); "
+            + ", 0 12px 30px " + _shade(p, .5) + "; transform: scale(1.015); transition: transform .42s " + SPRING + ", box-shadow .3s; }\n")
+    out += (scope + ".board > .object[data-tone='3'] { z-index: 7; box-shadow: 0 0 0 2px " + ac + ", 0 16px 40px " + _shade(p, .6) + "; "
             + "transform: scale(1.03); transition: transform .42s " + SPRING + ", box-shadow .3s; }\n")
-    out += scope + ".board > .object[data-tone='4'] { box-shadow: 0 0 0 2px " + ac + ", 0 6px 18px rgba(0,0,0,.35); }\n"
+    out += scope + ".board > .object[data-tone='4'] { box-shadow: 0 0 0 2px " + ac + ", 0 6px 18px " + _shade(p, .35) + "; }\n"
     out += scope + ".board > .object[data-tag^=link-], " + scope + ".board > .object[data-tag^=peek-] { z-index: 8; overflow: visible; }\n"
     out += scope + ".board > .object[data-tag^=link-]::after, " + scope + ".board > .object[data-tag^=peek-]::after { display: none; }\n"
     out += scope + ".board > .object[data-tag=peek-lines] { z-index: 5; pointer-events: none; }\n"
     out += (scope + ":not(.object)[data-tag=link-ghost] { background: " + raised + "; color: " + ac + "; font-weight: 600; font-size: 11px; padding: 4px 9px; "
-            + "border-radius: 7px; box-shadow: inset 0 0 0 1px " + ac + ", 0 8px 20px rgba(0,0,0,.5); pointer-events: none; }\n")
+            + "border-radius: 7px; box-shadow: inset 0 0 0 1px " + ac + ", 0 8px 20px " + _shade(p, .5) + "; pointer-events: none; }\n")
     out += (scope + ":not(.object)[data-tag=link-confirm], " + scope + ":not(.object)[data-tag=link-columns] { background: " + raised + "; border-radius: 11px; padding: 11px 12px; "
-            + "box-shadow: inset 0 0 0 1px " + line + ", 0 12px 30px rgba(0,0,0,.5); box-sizing: border-box; }\n")
+            + "box-shadow: inset 0 0 0 1px " + line + ", 0 12px 30px " + _shade(p, .5) + "; box-sizing: border-box; }\n")
     out += scope + ":not(.object)[data-tag=link-columns] { border-radius: 9px; padding: 7px 9px; }\n"
     out += (scope + ":not(.object)[data-tag=link-end] { background: " + css_color(p.card) + "; color: " + ink + "; border-radius: 6px; padding: 2px 7px; "
             + "box-shadow: inset 0 0 0 1px " + line + "; font-size: 11.5px; }\n")

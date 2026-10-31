@@ -323,7 +323,7 @@ struct LinkDrag(Movable):
             parts.append(HStack(Button("Link", b + LD_LINK, PROMINENT).tooltip("Link " + self.from_card + " to " + t.name + " by time"),
                                 Button("Cancel", b + LD_CANCEL, SUBTLE), spacing=8))
             var pw = 228
-            var ph = 248
+            var ph = 220
             var px = t.x + t.w + 14
             if px + pw > page_w:
                 px = max(t.x - pw - 14, 0)
@@ -344,7 +344,7 @@ struct LinkDrag(Movable):
             parts.append(HStack(Button("Link", b + LD_LINK, PROMINENT).tooltip("Link " + self.from_card + "." + self.from_column + " to " + t.name + "." + c.column),
                                 Button("Cancel", b + LD_CANCEL, SUBTLE), spacing=8))
             var pw = 216
-            var ph = 232
+            var ph = 204
             var px = t.x + t.w + 14
             if px + pw > page_w:
                 px = max(t.x - pw - 14, 0)
