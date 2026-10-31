@@ -19,5 +19,12 @@
   ],
   "item": "goal 30 M1 failed now and then",
   "runs": 3
+ },
+ "jot_queue": {
+  "after": "newer kept through two rebuilds",
+  "before": "the app's texts newer, newer, old, old",
+  "checked": "2026-10-31",
+  "item": "the field queue's stale-write window",
+  "test": "tests/test_field_queue.py"
  }
 }

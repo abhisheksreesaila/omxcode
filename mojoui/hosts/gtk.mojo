@@ -4909,6 +4909,7 @@ def on_field_changed[A: App](entry: Int, host_addr: Int) abi("C"):
         # id, and sent after the rebuild (drain_fields) unless it's what the app already has: the host's own sets.)
         hold_field(entry, text)
         return
+    drop_held(entry)  # (D-1703: this change is newer than any held for the field; a drain mustn't write the older back)
     host_at[A](host_addr)[].send(get_node(entry), False, text, 0, host_addr)
 
 
@@ -4956,6 +4957,20 @@ def hold_field(entry: Int, text: String):
             held[][i] = (id, text)
             return
     held[].append((id, text))
+
+
+def drop_held(entry: Int):
+    """Forgets the held changes of this field (a newer one is going through)."""
+    var key = String(NODE_KEY)
+    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
+    var held = held_fields()
+    if id < 0 or len(held[]) == 0:
+        return
+    var rest = List[Tuple[Int, String]]()
+    for h in held[]:
+        if h[0] != id:
+            rest.append(h)
+    held[] = rest^
 
 
 def on_field_submit[A: App](entry: Int, host_addr: Int) abi("C"):
@@ -5376,6 +5391,13 @@ def run_step[A: App](host_addr: Int, step: String):
         if verb == "submit" or verb == "enter":  # "enter": Return straight after typing
             var s = String("activate")
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].widgets[i], s.as_c_string_span())
+    elif verb == "hold":  # hold:Field=text: a change of that field held as if it came during a rebuild (D-1703: the queue's own test)
+        var kv = split_at(rest, "=")
+        var i = find(host[], FIELD, kv[0], 0, by_hint=True)
+        if i < 0:
+            print("TEST: no field", kv[0])
+            return
+        hold_field(host[].widgets[i], kv[1])
     elif verb == "link":  # link:Text: a Paragraph's link of that text, through the label's own activate-link signal (as a click sends it)
         var found = False
         for i in range(len(host[].rt.shown.nodes)):

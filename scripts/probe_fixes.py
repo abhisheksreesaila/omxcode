@@ -75,7 +75,18 @@ def jot_flake():
                    "gaps were 50-67 ms in 6 of 6 runs, 16.7-50 ms after"]}
 
 
-STEPS = {"dictate": dictate, "jot_flake": jot_flake}
+def jot_queue():
+    """A held field change never overwrites a newer one that reached the app directly (tests/test_field_queue.py)."""
+    r = subprocess.run([sys.executable, "tests/test_field_queue.py"], cwd=ROOT, capture_output=True, text=True, timeout=900)
+    out = r.stdout + r.stderr
+    if r.returncode != 0 or "field queue stale: ok" not in out or "field queue: ok" not in out:
+        return False, f"tests/test_field_queue.py: {out[-400:]}", {}
+    return True, "a held change, then a newer one reaching the app, then a rebuild: the app keeps the newer (before: the held one came back)", {
+        "item": "the field queue's stale-write window", "before": "the app's texts newer, newer, old, old",
+        "after": "newer kept through two rebuilds", "test": "tests/test_field_queue.py"}
+
+
+STEPS = {"dictate": dictate, "jot_flake": jot_flake, "jot_queue": jot_queue}
 
 
 def main():

@@ -32,6 +32,11 @@ def line(step, r):
                 f"sheet, <code>waitfor:</code>), and its <code>pause:</code> slept 10 ms after every main-loop turn, which "
                 f"skipped frames (the cancel's gap was 50–67 ms in 6 of 6 runs, 16.7–50 ms after). {r['runs']} of {r['runs']} "
                 f"runs pass now.")
+    if step == "jot_queue":
+        return ("A field change that arrives during a rebuild waits in a queue (D-1321); a newer change of the same field "
+                "that reached the app directly left the older one waiting, and the next rebuild wrote it back over the "
+                "newer text. A direct change now clears the field's queue (<code>tests/test_field_queue.py</code>, red "
+                "before: the app ended with the older text).")
     return escape(r.get("summary", ""))
 
 
