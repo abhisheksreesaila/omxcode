@@ -1,0 +1,1207 @@
+{
+ "app": "Personal Note",
+ "slug": "personalnote",
+ "path": "/home/abhisheksreesaila/Projects/personalnotev2",
+ "one_line": "A local notebook: canvas, page and mind-map notes with ink, voice, keyword and meaning search, secure notes and agent edits (FastHTML + JS).",
+ "verdict": "Not the same way today: storage, search, voice, background work and the shell are there and often faster, but the editing heart (objects on a canvas, Markdown on a canvas, mind maps, ink tied to text) is missing.",
+ "buildable_today": "partly",
+ "counts": {
+  "have": 18,
+  "partial": 22,
+  "missing": 13
+ },
+ "features": [
+  {
+   "area": "Canvas notes",
+   "feature": "Endless canvas of pages: pan, zoom, wheel, pages added as you write",
+   "app_file": "src/modules/canvas-leafer/scene.js:100",
+   "omx_piece": "Canvas(scroll_pans=True), Painter.layer_transform",
+   "evidence": "examples/sketch; goal 40 check: pan and zoom p95 ≤ 3.5 ms with 101k points",
+   "hosts": {
+    "linux": "✅",
+    "web": "🔨",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "Pages that grow and shrink are app logic on top",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Pen, highlighter and stroke eraser with pressure",
+   "app_file": "src/page/ink.js:16",
+   "omx_piece": "mojoui.ink (Stroke, hits() eraser), Event.pressure",
+   "evidence": "tests/test_ink.mojo (run in this audit: ok); goal 40",
+   "hosts": {
+    "linux": "🔨",
+    "web": "🔨",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "Pressure only injected by checks; a real pen is unverified",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Objects on the canvas: text boxes, stickies, shapes, pictures; select, move, resize, rotate, lock, z-order, nudge, select all",
+   "app_file": "src/modules/canvas-leafer/scene.js:22",
+   "omx_piece": "none (Board moves and resizes whole cards; Painter draws shapes)",
+   "evidence": "grep: no selection handles, rotation or z-order in mojoui",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "ObjectLayer: a canvas of objects with hit tests, selection handles, rotate, z-order, lock, marquee",
+   "size": "L",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Arrows between objects that re-route when an end moves",
+   "app_file": "src/modules/canvas-leafer/connectors.js:9",
+   "omx_piece": "Painter lines; Peek's ghost lines",
+   "evidence": "mojoui/peek.mojo draws lines between cards, not editable connectors",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "Connectors inside ObjectLayer (anchor to objects, re-route on move)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Undo and redo with edits merged",
+   "app_file": "src/core/document/history.js:10",
+   "omx_piece": "none generic; each app keeps its own (sketch, mediatimeline, the island's Undo face)",
+   "evidence": "grep: no History/Undo type in mojoui",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "🔨"
+   },
+   "status": "partial",
+   "gap": "History: a generic undo stack of before/after values with coalescing",
+   "size": "S",
+   "eta": "this week",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Markdown text drawn on the canvas (headings, lists, task boxes, code, quotes)",
+   "app_file": "src/modules/canvas-leafer/markdown-editor.js:142",
+   "omx_piece": "mojoui.markdown parse_markdown + Paragraph; mojoui.linebreak",
+   "evidence": "tests/test_markdown.mojo; renders as views, not into a Painter",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Draw parsed Markdown into a Painter at any zoom (wrap with linebreak)",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Edit canvas text in place, Markdown symbols hidden except on the caret's line",
+   "app_file": "src/modules/canvas-leafer/markdown-editor.js:142",
+   "omx_piece": "TextField(…).focused() in-place editor (single line, used by DataGrid); mx-editor (CodeMirror 6) widget",
+   "evidence": "docs/components.md: In-place editor ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Multi-line in-place editor laid exactly over canvas text; live-preview Markdown",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Ink marks anchored to words that follow the text when it reflows",
+   "app_file": "src/modules/canvas-leafer/text-marks.js:10",
+   "omx_piece": "none",
+   "evidence": "",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "Text anchors: a range of words → its boxes after layout (shared with page ink)",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Insert pictures (picker, drop, paste), shrink to 1,400 px off the UI thread, stored by SHA-256",
+   "app_file": "src/modules/canvas-leafer/media.js:4",
+   "omx_piece": "FilePicker, DropTarget, Picture (decoded on a thread), ImageOps scale",
+   "evidence": "docs/components.md: Picture ✅ GTK/web; DropTarget 🔨 GTK",
+   "hosts": {
+    "linux": "🔨",
+    "web": "🔨",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Paste a picture from the clipboard (Clipboard is text only); a SHA-256 helper",
+   "size": "S",
+   "eta": "this week",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Fast drawing (one bitmap per page while moving, partial redraws)",
+   "app_file": "src/modules/canvas-leafer/tiles.js:41",
+   "omx_piece": "Kept layers + GTK texture cache (D-1216); idle apps use no CPU (D-64)",
+   "evidence": "goal 40 report",
+   "hosts": {
+    "linux": "✅",
+    "web": "🔨",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Print preview and print, Letter or A4",
+   "app_file": "src/main.js:141",
+   "omx_piece": "mojoui.packpdf (HTML → PDF through Chromium)",
+   "evidence": "tests/test_packpdf.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Print: the system's print dialog (GtkPrintOperation / NSPrintOperation) with page setup",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Canvas notes",
+   "feature": "Export the note as PNG",
+   "app_file": "src/main.js:141",
+   "omx_piece": "mojoui.png encode_png",
+   "evidence": "mojoui/png.mojo:42",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "🔨"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Page notes",
+   "feature": "Markdown page editor (GFM tables, task lists, styled source, spellcheck)",
+   "app_file": "src/page/page-editor.js:4",
+   "omx_piece": "mx-editor WebComponent (the same CodeMirror 6)",
+   "evidence": "docs/components.md: mx-editor ✅ GTK/web, 🔨 Mac; docs/js.md §6",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Markdown + GFM language in the mx-editor bundle, spellcheck on; native rich text would be L",
+   "size": "S",
+   "eta": "this week",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Page notes",
+   "feature": "Ink over the page: pen draws, finger scrolls, drawings folded behind a word",
+   "app_file": "src/page/drawings.js:89",
+   "omx_piece": "Canvas.passthrough() (GTK only); Overlay",
+   "evidence": "a native canvas over a WebKit view is unproven",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "Ink layer over a text view, using the text anchors above",
+   "size": "L",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Page notes",
+   "feature": "Focus mode: words only, full screen, word count",
+   "app_file": "src/editor/focus-mode.js:1",
+   "omx_piece": "Overlay, themes; GTK only watches 'fullscreened'",
+   "evidence": "grep: no fullscreen call in mojoui",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "App.fullscreen(on) on every host",
+   "size": "S",
+   "eta": "this week",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Mind maps",
+   "feature": "Mind map editor: tree layout, curved tapered branches, Tab/Enter/F2 keys, collapse, focus, clean up",
+   "app_file": "src/mindmap/editor.js:62",
+   "omx_piece": "Canvas, Painter.polygon, Canvas KEY, Spring",
+   "evidence": "pieces exist; no tree layout or map component",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "MindMap: tree layout + ribbon branches + node editing keys, on a Canvas",
+   "size": "L",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Mind maps",
+   "feature": "To-dos: done badge, a pencil strike and a scratch sound",
+   "app_file": "src/mindmap/scratch.js:5",
+   "omx_piece": "ink strokes can draw the strike; no sound output",
+   "evidence": "grep: no audio playback in mojoui",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Sound: play a short clip (output side of mojoui.audio)",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Mind maps",
+   "feature": "Due dates and reminders: a notification, missed ones on launch, click jumps to the node",
+   "app_file": "reminders.py:7",
+   "omx_piece": "DatePicker, App.every, mojoui.notify, App.background",
+   "evidence": "tests/test_tray.mojo 'notify: ok' (run in this audit on a private bus); goal 45",
+   "hosts": {
+    "linux": "✅",
+    "web": "❌",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Notification actions: a click comes back to update() as an Event",
+   "size": "S",
+   "eta": "this week",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Organise",
+   "feature": "Sidebar: Inbox, Projects/Areas/Resources/Archive, folding notebooks",
+   "app_file": "src/modules/library/outline.js:3",
+   "omx_piece": "mojoui.sidebar (heads, rows, chips when compact)",
+   "evidence": "docs/components.md: Sidebar ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Organise",
+   "feature": "Drag a note onto a notebook; drag notebooks between sections; drop targets light up",
+   "app_file": "src/modules/library/shelves.js:12",
+   "omx_piece": "Draggable, DropTarget; Board tones (a drop target)",
+   "evidence": "docs/components.md: Draggable 🔨 GTK, ✅ web",
+   "hosts": {
+    "linux": "🔨",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "In-app drag between list rows run by a GTK check; a drop-target tone for rows",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Organise",
+   "feature": "Note and notebook icons: emoji, Lucide, guessed from the title",
+   "app_file": "note_icon.py:41",
+   "omx_piece": "Icon (Lucide set), Text for emoji",
+   "evidence": "docs/components.md: Lucide icon set ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "An icon picker (search, recent) as a composite",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Organise",
+   "feature": "Hold the new-note button for a menu; note popover (notebook, type, delete)",
+   "app_file": "src/modules/library/outline.js:3",
+   "omx_piece": "Popover, ContextMenu, Board on_hold",
+   "evidence": "docs/components.md: Popover ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Search",
+   "feature": "Omnibar (Ctrl+K): grouped results, filters, preview, arrow keys, actions",
+   "app_file": "src/modules/omnibar/omnibar.js:4",
+   "omx_piece": "Overlay + Fields (search box, filter chips) + Search results (rows, badges) + Item(shortcut)",
+   "evidence": "docs/components.md: Fields, Search results ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "CommandPalette composite: groups, arrow selection, Enter, preview slot",
+   "size": "S",
+   "eta": "this week",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Search",
+   "feature": "Keyword search: FTS5, all words, bm25, snippets",
+   "app_file": "services.py:2278",
+   "omx_piece": "mojoui.sqlite (FTS5, fts_prefix_query)",
+   "evidence": "tests/test_sqlite.mojo (run in this audit: fts5 ok); goal 42 Jot",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Search",
+   "feature": "Search by meaning: local embeddings, background indexer, score cut-off",
+   "app_file": "meaning_rank.py:28",
+   "omx_piece": "mojoui.vectors (GPU top-k) + mojoui.meaning (bge-small in process)",
+   "evidence": "branch goal-44-recall, checker 5/5; NOT merged into main",
+   "hosts": {
+    "linux": "✅",
+    "web": "❌",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Merge goal 44; port the cut-off rule; a model download step",
+   "size": "S",
+   "eta": "this week",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "Search",
+   "feature": "Download models in the app with SHA-256 checks and resume",
+   "app_file": "search_runtime.py:3",
+   "omx_piece": "mojoui.http (http:// only, no TLS, no redirects)",
+   "evidence": "docs/http.md:69,96",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "HTTPS client (load the system's libcurl at run time, as sqlite does)",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "AI",
+   "feature": "AI settings: Claude Code CLI, Azure or OpenAI-compatible; a Test button",
+   "app_file": "ai_settings.py:47",
+   "omx_piece": "InspectorPage/NavRow forms; mojoui.http; mojoui.agui",
+   "evidence": "no HTTPS; no API to start a process",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "HTTPS client + Process (start a program, read its output on a thread)",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "AI",
+   "feature": "Jam: talk over a mind map, an LLM adds branches, reacts and suggests",
+   "app_file": "jam_brain.py:82",
+   "omx_piece": "mojoui.speech + mojoui.agui",
+   "evidence": "needs MindMap, HTTPS, Process",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "Composes MindMap + HTTPS + Process; nothing new beyond them",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": true
+  },
+  {
+   "area": "AI",
+   "feature": "Agent edits: Show what changed, Undo by three-way merge",
+   "app_file": "agent_edit.py:13",
+   "omx_piece": "Agent host (every app is MCP tools: screen, act, read)",
+   "evidence": "docs/agent.md; Agent column in components.md",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "A three-way merge helper for text and object lists",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "AI",
+   "feature": "Agent presence chip and live merge of outside writes",
+   "app_file": "src/modules/sync/controller.js:1",
+   "omx_piece": "FolderWatcher can see the database change; Chip",
+   "evidence": "tests/test_watch.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "❌",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "A 'changed outside' feed (data_version poll in a job) wired to update()",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "AI",
+   "feature": "personal-note CLI for agents (search, read, append) with the app closed",
+   "app_file": "personal_note_cli.py:468",
+   "omx_piece": "Agent host runs the app without a window over MCP",
+   "evidence": "docs/agent.md",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "App commands from argv, without a window (same update())",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Voice",
+   "feature": "Dictation: hold or tap the mic, live words, final text into the note, no audio kept",
+   "app_file": "voice_runtime.py:8",
+   "omx_piece": "mojoui.audio (Microphone) + mojoui.speech (whisper-large-v3-turbo on the GPU)",
+   "evidence": "tests/test_audio.mojo, test_speech.mojo; goal 43: 140 ms vs 912 ms",
+   "hosts": {
+    "linux": "✅",
+    "web": "❌",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "Mac microphone is a stub (AVAudioEngine planned); no web microphone",
+   "size": "M",
+   "eta": "2027",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Portability",
+   "feature": "Workspace backup JSON: export, validated merge import",
+   "app_file": "portability.py:53",
+   "omx_piece": "mojoui.json, FileSaver, FilePicker, sqlite transactions",
+   "evidence": "docs/components.md: Save dialog ✅ web, 🔨 GTK",
+   "hosts": {
+    "linux": "🔨",
+    "web": "✅",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Portability",
+   "feature": "JSON Canvas file format",
+   "app_file": "json_canvas.py:47",
+   "omx_piece": "mojoui.json",
+   "evidence": "mojoui/json.mojo",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "🔨"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Portability",
+   "feature": "Markdown + assets ZIP; Obsidian vault export and import",
+   "app_file": "vault.py:41",
+   "omx_piece": "none",
+   "evidence": "grep: no zip in mojoui",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "Zip read/write (zlib/libzip loaded at run time)",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Portability",
+   "feature": "X bookmarks: OAuth PKCE sign-in, hourly sync into notes",
+   "app_file": "x_bookmarks.py:3",
+   "omx_piece": "mojoui.http, App.every",
+   "evidence": "no TLS, no OAuth, no keychain",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "HTTPS + an OAuth PKCE helper with a loopback callback + SecretStore",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Security",
+   "feature": "Secure notes: AES-256-GCM, scrypt passphrase, recovery key, lock after 5 idle minutes",
+   "app_file": "secure_crypto.py:20",
+   "omx_piece": "none",
+   "evidence": "grep: no crypto in mojoui",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "mojoui.crypto: AES-GCM, scrypt, HKDF from the system's libcrypto at run time",
+   "size": "M",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Security",
+   "feature": "Keys and API tokens in the keychain",
+   "app_file": "secret_store.py:27",
+   "omx_piece": "none",
+   "evidence": "grep: no keychain/libsecret",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "SecretStore: libsecret on Linux, Keychain on Mac",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": true,
+   "demo": false
+  },
+  {
+   "area": "Security",
+   "feature": "Mac: Touch ID, hide from screen capture, lock on sleep",
+   "app_file": "secure_platform.py:4",
+   "omx_piece": "none",
+   "evidence": "",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "missing",
+   "gap": "Mac platform calls (needs the owner's Mac to run)",
+   "size": "M",
+   "eta": "2027",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Desktop shell",
+   "feature": "One instance; a second launch brings the window forward",
+   "app_file": "desktop.py:58",
+   "omx_piece": "Background apps hand over to the running one",
+   "evidence": "goal 45 M1 (second launch opened the running one)",
+   "hosts": {
+    "linux": "✅",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "One instance for every app, not only background apps",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Desktop shell",
+   "feature": "Nothing lost on close",
+   "app_file": "desktop.py:58",
+   "omx_piece": "App.closing() quit hook",
+   "evidence": "docs/components.md: Quit hook ✅ GTK",
+   "hosts": {
+    "linux": "✅",
+    "web": "🔨",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Desktop shell",
+   "feature": "Menu bar with shortcuts (New ⌘N, Print ⌘P, Zoom, Skins…)",
+   "app_file": "desktop_menu.py:109",
+   "omx_piece": "MenuBar, Menu, Item(shortcut=), Submenu",
+   "evidence": "docs/components.md: ✅ GTK/web, 🔨 Mac",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Desktop shell",
+   "feature": "Plugins switched on and off, data kept",
+   "app_file": "src/core/plugins.js:12",
+   "omx_piece": "Toggle + app state (compiled in; nothing to lazy-load)",
+   "evidence": "",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "🔨"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Desktop shell",
+   "feature": "Settings: 9 sections, a search box, drill-down on phones",
+   "app_file": "src/modules/settings/settings-window.js:1",
+   "omx_piece": "NavRow + InspectorPage, Dialog, Fields search box",
+   "evidence": "docs/components.md: Inspector pages ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "🔨"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Desktop shell",
+   "feature": "Speed test and speed meter",
+   "app_file": "scripts/verify-speedtest.mjs:1",
+   "omx_piece": "MOJOUI_BUDGET_MS watchdog (SLOW: lines), bench scripts",
+   "evidence": "examples/slowcheck; docs/ui-threads.md",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Look and feel",
+   "feature": "Skins (Crayon, Paper, Night) with a 400 ms crossfade; custom fonts (Geist, Caveat)",
+   "app_file": "src/skins.css:1",
+   "omx_piece": "themes/ (App.theme), appearance(dark)",
+   "evidence": "docs/components.md: Themes on top ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "A crossfade when the theme changes; loading the app's own fonts on every host unverified",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": true
+  },
+  {
+   "area": "Look and feel",
+   "feature": "Springs and small landing animations, reduced motion honoured",
+   "app_file": "src/skins.css:1",
+   "omx_piece": "mojoui.spring; the island honours less motion",
+   "evidence": "docs/components.md: Spring ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Look and feel",
+   "feature": "Title island with moment faces (saving, recording level, agent busy)",
+   "app_file": "src/modules/island/island-model.js:3",
+   "omx_piece": "mojoui.island",
+   "evidence": "docs/components.md: Island ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Look and feel",
+   "feature": "Toasts with Undo",
+   "app_file": "src/main.js:141",
+   "omx_piece": "Toast, Confirm, the island's Undo face",
+   "evidence": "docs/components.md: Toast ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "🔨",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "have",
+   "gap": "",
+   "size": null,
+   "eta": null,
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Keyboard and touch",
+   "feature": "Shortcuts: Ctrl+K, Alt+N, one-letter tools, arrows nudge, Space for hand, double-tap Ctrl, middle-drag pan",
+   "app_file": "src/main.js:2920",
+   "omx_piece": "Canvas KEY with modifiers; Item(shortcut=)",
+   "evidence": "examples/sketch (p/e/h, Space, Ctrl+Z)",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Window-wide shortcuts outside menus; a modifier tapped alone; middle button",
+   "size": "S",
+   "eta": "this week",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Keyboard and touch",
+   "feature": "Touch: pinch, pen draws and finger pans, palm rejection, haptics, on-screen keyboard",
+   "app_file": "src/main.js:4277",
+   "omx_piece": "Canvas gestures; Android on the emulator; iPhone never run",
+   "evidence": "Event has no pointer type",
+   "hosts": {
+    "linux": "❌",
+    "web": "❌",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "🔨"
+   },
+   "status": "missing",
+   "gap": "Pointer type on events, palm rejection, haptics; run on a real phone",
+   "size": "M",
+   "eta": "2027",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Keyboard and touch",
+   "feature": "Narrow screens: bottom bar, sheets under 800 px",
+   "app_file": "src/main.js:4277",
+   "omx_piece": "Board phone-width list; Sidebar chips when compact",
+   "evidence": "docs/components.md: Board: phone-width list ✅ GTK/web",
+   "hosts": {
+    "linux": "✅",
+    "web": "✅",
+    "mac": "❌",
+    "ios": "❌",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "A bottom sheet and bottom bar component",
+   "size": "S",
+   "eta": "Nov 2026",
+   "blocks": false,
+   "demo": false
+  },
+  {
+   "area": "Shipping",
+   "feature": "Linux bundle and signed Mac app built by CI",
+   "app_file": "scripts/build-mac-app.sh:1",
+   "omx_piece": "scripts/build.sh (binary, ad-hoc signed .app)",
+   "evidence": "docs/probes.md: Ship probe not started",
+   "hosts": {
+    "linux": "✅",
+    "web": "🔨",
+    "mac": "🔨",
+    "ios": "🔨",
+    "android": "❌"
+   },
+   "status": "partial",
+   "gap": "Installers, notarization, release CI",
+   "size": "M",
+   "eta": "Dec 2026",
+   "blocks": false,
+   "demo": false
+  }
+ ],
+ "wins": [
+  {
+   "what": "Keyword search and opening a big notebook",
+   "evidence": "Jot vs SQLite-wasm on OPFS at 1M notes: search p95 64.6 vs 165.8 ms (2.6×), cold open 65.8 vs 435.3 ms (6.6×), goal 42. Personal Note itself uses server-side SQLite, so against it: unproven."
+  },
+  {
+   "what": "Search by meaning in one process on the GPU",
+   "evidence": "Recall: top-10 over 1M in 2.2 ms, 7.7 ms p95 as you type (goal 44, unmerged branch). Personal Note scores in a Python loop; at 1M its per-row loop takes seconds per query (D-1519, 3 queries). The side C race against its llama.cpp helper has no recorded result yet: unproven."
+  },
+  {
+   "what": "Dictation latency",
+   "evidence": "whisper-large-v3-turbo in process: 140 ms vs transformers.js 912 ms, same WER (goal 43). Against Personal Note's nemo-speech server over a WebSocket: unmeasured."
+  },
+  {
+   "what": "Pan and zoom with lots of ink",
+   "evidence": "Sketch: pan, zoom and draw p95 ≤ 3.5 ms with 101k points (goal 40). The older audit quotes Personal Note's zoom p95 as 97 ms, on another machine: not a fair race yet."
+  },
+  {
+   "what": "Saving on close and running with the window closed",
+   "evidence": "App.closing() runs in the same process (no 64 KiB keepalive request, no server lingering after close); background mode, tray and notifications checked (goal 45). Personal Note stops voice when the window closes."
+  },
+  {
+   "what": "Agent access without writing a CLI",
+   "evidence": "Every omxcode app is MCP tools through the agent host (docs/agent.md); Personal Note hand-wrote a 470-line CLI and 60 routes."
+  },
+  {
+   "what": "One program instead of three",
+   "evidence": "Personal Note is Python server + JS page + llama.cpp + nemo-speech processes over loopback; omxcode runs UI, search, embeddings and speech in one process (docs/probes.md). Fewer moving parts is measured in lines only in goal 44 M5, not yet recorded."
+  }
+ ],
+ "top_gaps": [
+  {
+   "gap": "Search by meaning not on main; no command palette",
+   "piece": "merge goal 44 + CommandPalette composite + the cut-off rule",
+   "size": "S",
+   "eta": "this week",
+   "unblocks": [
+    "Search by meaning: local embeddings, background indexer, score cut-off",
+    "Omnibar (Ctrl+K): grouped results, filters, preview, arrow keys, actions"
+   ]
+  },
+  {
+   "gap": "No generic undo",
+   "piece": "mojoui.history",
+   "size": "S",
+   "eta": "this week",
+   "unblocks": [
+    "Undo and redo with edits merged"
+   ]
+  },
+  {
+   "gap": "No objects on a canvas (select, move, resize, rotate, z-order, connectors)",
+   "piece": "mojoui.objectlayer (with connectors)",
+   "size": "L",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Objects on the canvas: text boxes, stickies, shapes, pictures; select, move, resize, rotate, lock, z-order, nudge, select all",
+    "Arrows between objects that re-route when an end moves"
+   ]
+  },
+  {
+   "gap": "No Markdown text drawn and edited on a canvas",
+   "piece": "Markdown into a Painter + a multi-line in-place editor",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Markdown text drawn on the canvas (headings, lists, task boxes, code, quotes)",
+    "Edit canvas text in place, Markdown symbols hidden except on the caret's line"
+   ]
+  },
+  {
+   "gap": "No mind map",
+   "piece": "mojoui.mindmap (tree layout, ribbon branches, node keys)",
+   "size": "L",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Mind map editor: tree layout, curved tapered branches, Tab/Enter/F2 keys, collapse, focus, clean up",
+    "Jam: talk over a mind map, an LLM adds branches, reacts and suggests"
+   ]
+  },
+  {
+   "gap": "No ink anchored to text",
+   "piece": "text anchors + an ink layer over a text view",
+   "size": "L",
+   "eta": "Dec 2026",
+   "unblocks": [
+    "Ink over the page: pen draws, finger scrolls, drawings folded behind a word",
+    "Ink marks anchored to words that follow the text when it reflows"
+   ]
+  },
+  {
+   "gap": "Small platform hooks",
+   "piece": "notification actions, App.fullscreen, clipboard pictures, window-wide shortcuts, a short sound",
+   "size": "S",
+   "eta": "this week",
+   "unblocks": [
+    "Due dates and reminders: a notification, missed ones on launch, click jumps to the node",
+    "Focus mode: words only, full screen, word count",
+    "Insert pictures (picker, drop, paste), shrink to 1,400 px off the UI thread, stored by SHA-256"
+   ]
+  },
+  {
+   "gap": "No HTTPS and no way to start a program",
+   "piece": "HTTPS via the system's libcurl at run time + mojoui.process",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Download models in the app with SHA-256 checks and resume",
+    "AI settings: Claude Code CLI, Azure or OpenAI-compatible; a Test button",
+    "X bookmarks: OAuth PKCE sign-in, hourly sync into notes"
+   ]
+  },
+  {
+   "gap": "No encryption and no keychain",
+   "piece": "mojoui.crypto (libcrypto at run time) + SecretStore (libsecret / Keychain)",
+   "size": "M",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Secure notes: AES-256-GCM, scrypt passphrase, recovery key, lock after 5 idle minutes",
+    "Keys and API tokens in the keychain"
+   ]
+  },
+  {
+   "gap": "No zip",
+   "piece": "mojoui.zip",
+   "size": "S",
+   "eta": "Nov 2026",
+   "unblocks": [
+    "Markdown + assets ZIP; Obsidian vault export and import"
+   ]
+  }
+ ]
+}
