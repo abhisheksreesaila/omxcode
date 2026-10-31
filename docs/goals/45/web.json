@@ -1,0 +1,198 @@
+{
+ "commit": "bd8f1de197f5f000ab9b0c8a04783e5f9eb14aad",
+ "date": "2026-10-30 20:24",
+ "flags": [
+  "--enable-features=FileSystemObserver,FileSystemAccessLocal",
+  "--enable-experimental-web-platform-features"
+ ],
+ "corpus_files": 100000,
+ "entries": {
+  "read_folder": {
+   "label": "Read a folder",
+   "can": true,
+   "tries": {
+    "no_gesture": {
+     "can": false,
+     "evidence": "showDirectoryPicker() on load, no click: SecurityError: Failed to execute 'showDirectoryPicker' on 'Window': Must be handling a user gesture to show a file picker."
+    },
+    "cdp_granted": {
+     "can": true,
+     "evidence": {
+      "picker_intercepted": {
+       "chooser_events": [
+        {
+         "frameId": "3A15B37EBAAB01AD5BE8D2600CA19898",
+         "mode": "selectSingle"
+        }
+       ],
+       "promise": "AbortError: Failed to execute 'showDirectoryPicker' on 'Window': Intercepted by Page.setInterceptFileChooserDialog().",
+       "can": false
+      },
+      "drop_folder": {
+       "dropped": [
+        "directory corpus"
+       ],
+       "can": true,
+       "read": {
+        "files": 100000,
+        "chars": 10418938,
+        "ms": 47354.7001953125
+       }
+      },
+      "input_webkitdirectory": {
+       "read": {
+        "files": 100000,
+        "chars": 10418938,
+        "ms": 114338.7001953125,
+        "listed": 101000
+       },
+       "set_files_s": 8.26,
+       "can": true,
+       "note": "a snapshot of File objects: no handle, so nothing to watch, and gone with the tab"
+      }
+     }
+    }
+   },
+   "evidence": "no gesture: SecurityError: Failed to execute 'showDirectoryPicker' on 'Window': Must be handling a user gesture to show a file picker.; with a DevTools gesture: picker AbortError: Failed to execute 'showDirectoryPicker' on 'Window': Intercepted by Page.setInterceptFileChooserDialog()., drop handle True, webkitdirectory True",
+   "race": {
+    "native": "scan_ms",
+    "web_ms": 47354.7,
+    "files": 100000,
+    "what": "the web only reads the 100,000 files' text (no index); native's scan_ms reads and indexes them into SQLite FTS5"
+   },
+   "summary": "Only after a click: without one, SecurityError; with one, the web read the 100,000 files in 47.4 s (reading only)"
+  },
+  "notice_change": {
+   "label": "Notice a change",
+   "tries": {
+    "FileSystemObserver": {
+     "can": true,
+     "evidence": {
+      "started": "observing",
+      "seen": 199,
+      "of": 200,
+      "p95_ms": 1.839,
+      "p50_ms": 0.204,
+      "clock_offset_rtt_ms": 0.38,
+      "missed": [
+       "obs/c0.md"
+      ],
+      "lag_over": "the changes it reported (a miss is listed, not counted as a lag)"
+     }
+    },
+    "polling": {
+     "can": true,
+     "evidence": {
+      "best": {
+       "every_ms": 10,
+       "seen": 100,
+       "of": 100,
+       "p95_ms": 95.914
+      },
+      "how": "the dropped folder's handle walked every N ms; new names timed"
+     }
+    }
+   },
+   "can": true,
+   "race": {
+    "native": "watch_p95_ms",
+    "web_ms": 1.839,
+    "what": "file closed \u2192 the page sees it, p95 (native: M0's inotify lag)"
+   },
+   "evidence": {
+    "FileSystemObserver": {
+     "started": "observing",
+     "seen": 199,
+     "of": 200,
+     "p95_ms": 1.839,
+     "p50_ms": 0.204,
+     "clock_offset_rtt_ms": 0.38,
+     "missed": [
+      "obs/c0.md"
+     ],
+     "lag_over": "the changes it reported (a miss is listed, not counted as a lag)"
+    },
+    "polling": {
+     "best": {
+      "every_ms": 10,
+      "seen": 100,
+      "of": 100,
+      "p95_ms": 95.914
+     },
+     "how": "the dropped folder's handle walked every N ms; new names timed"
+    }
+   },
+   "summary": "Only while the tab is open, on a dropped folder: FileSystemObserver p95 1.8 ms, 1 of 200 changes missed"
+  },
+  "run_closed": {
+   "label": "Run with the tab closed",
+   "can": false,
+   "tries": {
+    "background_sync": {
+     "can": false,
+     "evidence": {
+      "registered": "registered while offline (waits for the network)",
+      "worker": "active",
+      "events_after_a_file_change": [],
+      "events_in_the_75_s_after_close": [],
+      "events_after_going_online_with_no_page_of_it_open": [
+       "sync keeper-change clients=0 folder=[NotAllowedError: The request is not allowed by the user agent or the platform in the current context.] notify=[TypeError: Failed to execute 'showNotification' on 'ServiceWorkerRegistration': No notification permission has been granted for this origin.]"
+      ]
+     }
+    },
+    "periodic_sync": {
+     "can": false,
+     "evidence": {
+      "permission": "granted",
+      "register": "registered",
+      "tags": [
+       "keeper-minute"
+      ],
+      "events_in_the_75_s_after_close": []
+     }
+    }
+   },
+   "evidence": "after closing the tab: 0 worker events after a file change, 0 in 75 s; going online then gave [\"sync keeper-change clients=0 folder=[NotAllowedError: The request is not allowed by the user agent or the platform in the current context.] notify=[TypeError: Failed to execute 'showNotification' on 'ServiceWorkerRegistration': No notification permission has been granted for this origin.]\"]",
+   "summary": "No: with the tab closed its worker got no event when a file changed or a minute passed"
+  },
+  "notify_closed": {
+   "label": "Notify with the tab closed",
+   "can": false,
+   "evidence": {
+    "notifications_from_file_changes_or_time": [],
+    "what_a_worker_could_do_when_woken": [
+     "sync keeper-change clients=0 folder=[NotAllowedError: The request is not allowed by the user agent or the platform in the current context.] notify=[TypeError: Failed to execute 'showNotification' on 'ServiceWorkerRegistration': No notification permission has been granted for this origin.]"
+    ],
+    "why": "a worker may only show one while handling an event (push, sync, a click); a file change or a minute gave it none"
+   },
+   "summary": "No: a worker can show one only while it handles an event, and nothing woke it"
+  },
+  "tray": {
+   "label": "An item in the tray",
+   "can": false,
+   "evidence": {
+    "tray_like_names_in_window_and_navigator": [
+     "statusbar"
+    ],
+    "setAppBadge_offered": true,
+    "note": "no web API puts an item in the system tray ('statusbar' is the browser window's own status bar, a BarProp); the Badging API marks an installed app's own icon"
+   },
+   "summary": "No: there is no web API for one"
+  }
+ },
+ "chromium": "152.0.7977.82",
+ "features": {
+  "showDirectoryPicker": true,
+  "FileSystemObserver": true,
+  "serviceWorker": true,
+  "setAppBadge": true,
+  "SyncManager": true,
+  "PeriodicSyncManager": true,
+  "tray_like": [
+   "statusbar"
+  ]
+ },
+ "periodic_grant": "granted through Browser.setPermission",
+ "worker_events_while_the_tab_was_open": [],
+ "corpus_made_s": 3.5
+}
