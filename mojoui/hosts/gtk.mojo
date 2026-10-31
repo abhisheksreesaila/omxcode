@@ -5311,6 +5311,18 @@ def run_step[A: App](host_addr: Int, step: String):
             _ = external_call["g_main_context_iteration", c_int](0, c_int(1))
         if host[].hidden:
             print("TEST: the window didn't open again in " + rest + " ms")
+    elif verb == "waitfor":  # waitfor:Title=N: run the main loop until a button titled Title exists (a job's result landed), N ms at most
+        # (probe fixes, D-1701: a fixed pause before a tap races the job's run time, which follows the machine's load; goal
+        # 30 M1's "no button Create table". Never blocks inside the loop: the deadline is read every turn)
+        var kv = split_at(rest, "=")
+        var t0 = Int(perf_counter_ns())
+        var until = t0 + to_int(kv[1]) * 1_000_000
+        while find(host[], BUTTON, kv[0], 0) < 0 and not host[].closed and Int(perf_counter_ns()) < until:
+            _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+        if find(host[], BUTTON, kv[0], 0) < 0:
+            print("TEST: no button " + kv[0] + " after " + kv[1] + " ms")
+        else:
+            print("WAITED: " + kv[0] + " after " + String((Int(perf_counter_ns()) - t0) // 1_000_000) + " ms", flush=True)
     elif verb == "save":  # save:Title=/path: a FileSaver's dialog answering that path (a native dialog can't be driven)
         var kv = split_at(rest, "=")
         var i = find(host[], BUTTON, kv[0], 0)

@@ -107,7 +107,9 @@ def m1():
     blocks = re.findall(r"^CHART (\w+)\n(.*?)(?=^CHART |^SUM )", want, re.M | re.S)
     want_chart = {k: "\n".join(l for l in v.strip().splitlines() if " | " in l) for k, v in blocks}  # (rows only: the tool also prints timings)
     want_sum = re.search(r"^SUM (.*)$", want, re.M).group(1)
-    opened = "gaps:start;pick:Choose a file={f};gaps:3500;tap:Create table;pause:300;tap:Chart;pause:1500".format(f=big())
+    # (probe fixes, D-1701: the import sheet's button is waited for, at most 60 s, instead of a fixed 3.5 s that raced the
+    # open job's run time on a loaded machine; the frame gaps now cover the whole open, not its first 3.5 s)
+    opened = "gaps:start;pick:Choose a file={f};waitfor:Create table=60000;gaps:500;tap:Create table;pause:300;tap:Chart;pause:1500".format(f=big())
     a = gtk(opened + ";tap:Data;gaps:start;segment:1=Median;gaps:2000;tap:Back;gaps:start;" + g29.g28.ASK + "by month;gaps:5500", "g30-m1")
     g = gaps(a)
     if len(g) != 3 or max(g) > 50.0:
@@ -237,7 +239,7 @@ def m3():
             problems.append(f"{host}: the error face {w} (want it still there after 6 s, gone once its Show is tapped)")
     if not big().exists():
         return False, f"no 100M-row file at {big()}"
-    a = gtk("pick:Choose a file={f};pause:3500;tap:Create table;pause:300;tap:Chart;pause:1500;tap:Data;segment:1=Median;pause:250;say:island;"
+    a = gtk("pick:Choose a file={f};waitfor:Create table=60000;tap:Create table;pause:300;tap:Chart;pause:1500;tap:Data;segment:1=Median;pause:250;say:island;"
             "pause:1500;say:island;pause:4500;say:island;tapat:island=995,500;pause:400".format(f=big()), "g30-m3-big")
     w = said(a)
     gpu = re.search(r"on (NVIDIA[^·]*)", "\n".join(w))
