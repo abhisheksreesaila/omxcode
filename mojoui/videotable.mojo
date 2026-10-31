@@ -22,7 +22,7 @@
 
 from std.ffi import external_call
 from max.gpu import global_idx
-from max.gpu.host import DeviceBuffer, HostBuffer
+from max.gpu.host import DeviceBuffer
 from std.math import ceildiv
 from mojoui.gpu import Gpu, GPU_BUILD
 from mojoui.video import VideoSource
@@ -964,8 +964,10 @@ struct ObjectAnalyzer(Analyzer):
 
 
 struct CellGpu(Movable):
-    """The GPU side of scan(): device buffers for this frame and the last (motion), the cell grids, pinned host memory
-    for the frames so a copy can run while the next frame is read."""
+    """The GPU side of scan(): device buffers for this frame and the last (motion), the cell grids, and ordinary
+    (pageable) host memory for the frames and grids. Not pinned memory (D-1200): cuMemAllocHost holds a lock the Mojo
+    runtime's own allocator waits on, so a scan starting on a job's thread froze the UI thread's next allocation for
+    0.1–0.7 s; a pageable 3.7 MB copy costs well under a millisecond a frame against the decoder's read."""
 
     var gpu: Gpu
     var width: Int
@@ -974,9 +976,9 @@ struct CellGpu(Movable):
     var gw: Int
     var gh: Int
     var dev: List[DeviceBuffer[DType.uint32]]  # two frames (current, previous)
-    var host: List[HostBuffer[DType.uint32]]  # two frames, pinned
+    var host: List[List[UInt32]]  # two frames (pageable: D-1200)
     var out: List[DeviceBuffer[DType.uint32]]  # counts, stats, means
-    var out_host: List[HostBuffer[DType.uint32]]
+    var out_host: List[List[UInt32]]
     var ranges: List[Int32]  # MAX_CLASSES ranges, 8 words each (ColourRange.packed)
     var rng_dev: List[DeviceBuffer[DType.int32]]
 
@@ -988,9 +990,9 @@ struct CellGpu(Movable):
         self.gw = ceildiv(width, cell)
         self.gh = ceildiv(height, cell)
         self.dev = List[DeviceBuffer[DType.uint32]]()
-        self.host = List[HostBuffer[DType.uint32]]()
+        self.host = List[List[UInt32]]()
         self.out = List[DeviceBuffer[DType.uint32]]()
-        self.out_host = List[HostBuffer[DType.uint32]]()
+        self.out_host = List[List[UInt32]]()
         self.ranges = _range_words(ranges)
         self.rng_dev = List[DeviceBuffer[DType.int32]]()
         comptime if GPU_BUILD:
@@ -998,10 +1000,10 @@ struct CellGpu(Movable):
                 ref ctx = self.gpu.ctx.value()
                 for _ in range(2):
                     self.dev.append(ctx.enqueue_create_buffer[DType.uint32](width * height))
-                    self.host.append(ctx.enqueue_create_host_buffer[DType.uint32](width * height))
+                    self.host.append(List[UInt32](length=width * height, fill=0))
                 for _ in range(3):
                     self.out.append(ctx.enqueue_create_buffer[DType.uint32](self.gw * self.gh))
-                    self.out_host.append(ctx.enqueue_create_host_buffer[DType.uint32](self.gw * self.gh))
+                    self.out_host.append(List[UInt32](length=self.gw * self.gh, fill=0))
                 self.rng_dev.append(ctx.enqueue_create_buffer[DType.int32](8 * MAX_CLASSES))
                 ctx.enqueue_copy(dst_buf=self.rng_dev[0], src_ptr=self.ranges.unsafe_ptr())
                 ctx.synchronize()
@@ -1016,7 +1018,7 @@ struct CellGpu(Movable):
         """Starts measuring host frame `slot` (the other slot holds the previous frame); returns before it is done."""
         comptime if GPU_BUILD:
             ref ctx = self.gpu.ctx.value()
-            ctx.enqueue_copy(dst_buf=self.dev[slot], src_buf=self.host[slot])
+            ctx.enqueue_copy(dst_buf=self.dev[slot], src_ptr=_addr(Int(self.host[slot].unsafe_ptr())))
             var prev = _addr(Int(self.dev[slot if first else 1 - slot].unsafe_ptr()))
             ctx.enqueue_function[_cells_kernel](
                 _addr(Int(self.dev[slot].unsafe_ptr())), prev, _addr(Int(self.out[0].unsafe_ptr())),
@@ -1026,7 +1028,7 @@ struct CellGpu(Movable):
                 grid_dim=(ceildiv(self.gw, 16), ceildiv(self.gh, 16)), block_dim=(16, 16),
             )
             for k in range(3):
-                ctx.enqueue_copy(dst_buf=self.out_host[k], src_buf=self.out[k])
+                ctx.enqueue_copy(dst_ptr=_addr(Int(self.out_host[k].unsafe_ptr())), src_buf=self.out[k])
 
     def collect(mut self, mut cells: Cells) raises:
         """Waits for launch() and copies its grids into `cells`."""

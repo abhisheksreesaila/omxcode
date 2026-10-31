@@ -43,6 +43,8 @@ comptime GRID_TYPED = 8  # a character typed on a cell: the editor opened, start
 comptime GRID_CLEAR = 9  # Delete or Backspace on an editable cell: the app clears it
 comptime GRID_CANCEL = 10  # Escape: the editor closed without writing
 comptime GRID_COMMIT = 11  # Enter on a value being typed: write grid.typed into the cell (then call committed())
+comptime GRID_HEADER_DRAG = 12  # (drag_headers) a column's header is being dragged: grid.drag_col, the pointer at event.x, y
+comptime GRID_HEADER_DROP = 13  # (drag_headers) it was let go at event.x, y (where it lands is the app's: mojoui.linkdrag)
 
 
 trait GridSource:
@@ -127,6 +129,11 @@ struct DataGrid(Copyable, Movable):
     var last_col: Int
     var pan: Float64
     var size: Tuple[Float64, Float64]  # the canvas in points (from the last draw)
+    var drag_headers: Bool  # a header pressed and dragged carries its column out (GRID_HEADER_DRAG / _DROP), not a scroll
+    var press_col: Int  # the header pressed (drag_headers), -1 none
+    var press_x: Float64
+    var press_y: Float64
+    var drag_col: Int  # the header being dragged out, -1 none
     var version: Int  # bumped whenever the grid needs redrawing (add it into the Canvas version)
 
     def __init__(out self):
@@ -164,6 +171,11 @@ struct DataGrid(Copyable, Movable):
         self.pan = 0
         self.size = (1200.0, 256.0)
         self.version = 1
+        self.drag_headers = False
+        self.press_col = -1
+        self.press_x = 0
+        self.press_y = 0
+        self.drag_col = -1
 
     # ---------- geometry ----------
 
@@ -278,6 +290,17 @@ struct DataGrid(Copyable, Movable):
                 return c
             left += w
         return -1
+
+    def header_spot[S: GridSource](self, name: String, src: S) -> Tuple[Float64, Float64]:
+        """The middle of column `name`'s header, in the canvas's points; (-1, -1) when there's no such column or it's
+        scrolled out of sight (App.spot: a driver or an agent starts a header drag there)."""
+        for c in range(src.grid_columns()):
+            if src.grid_name(c) == name:
+                var x = self.col_left(c, src) + min(self.col_width(c, src), 120.0) / 2
+                if x < GRID_GUTTER or x > self.size[0] - GRID_BAR_W:
+                    return (-1.0, -1.0)
+                return (x, self.header_h() / 2)
+        return (-1.0, -1.0)
 
     def edge_hit[S: GridSource](self, x: Float64, y: Float64, src: S) -> Int:
         """The column whose header's right edge is under (x, y) (5 pt either side), or -1."""
@@ -550,6 +573,13 @@ struct DataGrid(Copyable, Movable):
                 return GRID_REDRAW
             if self.browse:  # (a preview: the press only scrolls, by the bar above or a drag below)
                 return GRID_NONE
+            self.press_col = -1
+            self.drag_col = -1
+            if self.drag_headers and event.y < head:  # a header: a drag from here carries the column out
+                self.press_col = self.header_hit(event.x, event.y, src)
+                self.press_x = event.x
+                self.press_y = event.y
+                return GRID_NONE
             if event.y >= head and self.in_columns(event.x):  # a press on a cell: a drag from here selects a block
                 var at = self.cell_hit(event.x, event.y, src)
                 if at[0] >= 0 and at[1] >= 0:
@@ -559,6 +589,10 @@ struct DataGrid(Copyable, Movable):
                     return GRID_SELECTED
             return GRID_NONE
         if event.number == RELEASE:  # a drag ended: the thumb (or a column edge) lets go, a block stays
+            self.press_col = -1
+            if self.drag_col >= 0:  # a header carried out: dropped here
+                self.dragging = False
+                return GRID_HEADER_DROP
             var result = GRID_NONE
             self.dragging = False
             if self.resize_col >= 0:
@@ -592,6 +626,8 @@ struct DataGrid(Copyable, Movable):
             self.editing = True
             return GRID_EDIT
         if event.number == TAP:
+            self.press_col = -1
+            self.drag_col = -1
             if self.resize_col >= 0:  # a click on an edge without a drag: nothing to resize
                 self.resize_col = -1
                 self.redraw()
@@ -614,6 +650,12 @@ struct DataGrid(Copyable, Movable):
                 return GRID_SELECTED
             return GRID_NONE
         if event.number == PAN:
+            if self.press_col >= 0 and self.drag_col < 0 and abs(event.x - self.press_x) + abs(event.y - self.press_y) > 6:
+                self.drag_col = self.press_col  # (moved off the header: it's a drag, not a tap)
+            if self.drag_col >= 0:
+                return GRID_HEADER_DRAG
+            if self.press_col >= 0:
+                return GRID_NONE
             if self.dragging and self.resize_col < 0 and not self.bar_drag:  # a drag over cells: the block follows the pointer
                 var at = self.cell_hit(min(max(event.x, GRID_GUTTER + 1), self.size[0] - GRID_BAR_W - 1), max(event.y, head + 1), src)
                 if at[0] >= 0 and at[1] >= 0 and (at[0] != self.cur_row or at[1] != self.cur_col):

@@ -133,6 +133,33 @@ CANVASES_DRAWN = """() => [...document.querySelectorAll('[data-kind=canvas]')].e
 })"""
 
 
+def catch_up(page, sid):
+    """The page takes the screen the server holds now (what a frame or a job changed meanwhile), then settles: a press
+    that follows names today's nodes."""
+    for _ in range(3):
+        page.evaluate("async (sid) => { await htmx.ajax('POST', `/pending/${sid}`, { values: { v: document.getElementById('mojoui-v').value }, swap: 'none', source: window.mojouiLane('drive') }); }", sid)
+        settle(page)
+
+
+def visible_middle(obj, down=0.5):
+    """The middle of the part of a Board object that shows in its board's scroller (`down`: how far down it, 0–1)."""
+    tb = obj.bounding_box()
+    sc = obj.evaluate("o => { const b = o.closest('.board-scroll').getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height }; }")
+    vx0, vy0 = max(tb["x"], sc["x"]), max(tb["y"], sc["y"])
+    vx1, vy1 = min(tb["x"] + tb["width"], sc["x"] + sc["width"]), min(tb["y"] + tb["height"], sc["y"] + sc["height"])
+    return (vx0 + vx1) / 2, vy0 + (vy1 - vy0) * down
+
+
+def card_object(page, title):
+    """The Board object whose card is titled `title` (its first headline, as mojoui/regions.mojo names cards)."""
+    objs = page.locator("[data-kind=object]")
+    for i in range(objs.count()):
+        h = objs.nth(i).locator(".text.headline").first
+        if h.count() and h.text_content().strip() == title:
+            return objs.nth(i)
+    raise ValueError(f"no card {title}")
+
+
 def settle(page):
     """Wait for HTMX's delayed triggers to fire and its requests to finish, and for every
     canvas to show its current version."""
@@ -149,6 +176,50 @@ def step(page, s):
     if verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip: a drawn view's words), mid-run
         el = page.locator(f"[data-tag={rest}]").first
         return f"SAYS: {rest} = " + (el.get_attribute("data-tip") or "")
+    if verb == "hold" and not page.locator("[data-kind=button]").filter(has_text=exact(rest.partition("=")[0])).count():
+        # hold:<card>=ms: a press on the Board card titled <card> (its headline), held still that long and left pressed
+        # (release: lets go), as GTK's step does
+        title, _, ms = rest.partition("=")
+        obj = card_object(page, title)
+        obj.evaluate("o => o.scrollIntoView({ block: 'nearest' })")  # (as a person would: the card in view)
+        catch_up(page, obj.evaluate("o => o.closest('[data-kind=board]').dataset.sid"))
+        x, y = visible_middle(card_object(page, title))
+        page.mouse.move(x, y)
+        page.mouse.down()
+        page.wait_for_timeout(int(ms or 500))
+        return ""
+    if verb == "release":  # release: lets go of what hold: pressed
+        page.mouse.up()
+        page.wait_for_timeout(50)
+        return ""
+    if verb == "timelink":  # timelink:<card>.<column>=<video>@<seconds>: that column dragged onto the video, the panel's offset set, Link
+        what, _, seconds = rest.partition("@")
+        for sub in ("linkdrag:" + what, "enter:seconds=" + seconds, "tap:Link"):
+            step(page, sub)
+            settle(page)
+        return ""
+    if verb == "linkdrag":  # linkdrag:<card>.<column>=<card>: the column's header (App.spot) dragged onto the other card with the mouse
+        src, _, target = rest.partition("=")
+        card, _, column = src.rpartition(".")
+        canvas = card_object(page, card).locator("[data-kind=canvas]").first
+        node, sid = canvas.get_attribute("data-node"), canvas.get_attribute("data-sid")
+        at = page.evaluate("async ([sid, n, name]) => (await fetch(`/spot/${sid}/${n}?name=${encodeURIComponent(name)}`)).text()", [sid, node, column])
+        sx, sy = (float(v) for v in at.strip('"').split(","))
+        if sx < 0:
+            raise ValueError(f"no column {column} in {card}")
+        canvas.evaluate("e => e.scrollIntoView({ block: 'nearest' })")  # (as a person would: the header in view first)
+        catch_up(page, sid)  # (a press sent while the server holds a newer screen is answered with that screen, not acted on)
+        cb = canvas.bounding_box()
+        x0, y0 = cb["x"] + sx, cb["y"] + sy
+        x1, y1 = visible_middle(card_object(page, target), 0.4)  # (the part of the target in view: where a hand drops it)
+        page.mouse.move(x0, y0)
+        page.mouse.down()
+        for k in range(1, 9):
+            page.mouse.move(x0 + (x1 - x0) * k / 8, y0 + (y1 - y0) * k / 8)
+            page.wait_for_timeout(80)
+        page.wait_for_timeout(300)
+        page.mouse.up()
+        return ""
     if verb == "hold":  # hold:Title=ms: the button pressed and held that long, then its transform read (HOLD: title transform)
         title, _, ms = rest.partition("=")
         box = page.locator("[data-kind=button]").filter(has_text=exact(title)).first.bounding_box()
@@ -169,7 +240,10 @@ def step(page, s):
         page.keyboard.press(rest)
     elif verb == "tap":
         title, _, nth = rest.partition("@")
-        page.locator("[data-kind=button]").filter(has_text=exact(title)).nth(int(nth or 0)).click()
+        by_title = page.locator("[data-kind=button]").filter(has_text=exact(title))
+        if not by_title.count():  # (no button with that title: the one tagged so, as GTK's step and an agent name it)
+            by_title = page.locator(f"[data-kind=button][data-tag={title!r}]")
+        by_title.nth(int(nth or 0)).click()
     elif verb in ("type", "submit", "enter"):
         hint, _, text = rest.partition("=")
         field = page.locator(f"input[data-kind=field][placeholder={hint!r}]").first

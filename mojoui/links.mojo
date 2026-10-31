@@ -19,12 +19,13 @@
 from std.collections import Dict
 from mojoui.app import Event
 from mojoui.sqlname import sql_name
-from mojoui.view import View, Text, Button, TextField, Dropdown, VStack, HStack, Spacer, CAPTION, SUBTLE, ICON_ONLY
+from mojoui.view import View, Text, Button, TextField, Dropdown, VStack, HStack, Spacer, CAPTION, SUBTLE, ICON_ONLY, CENTER, START, TONE_STRONG
 
 comptime LINK_KEY = 1  # a.col = b.col (rows with the same value)
 comptime LINK_TIME = 2  # a.t ↔ b.t: b = a · scale + offset (seconds)
 comptime LINK_PLACE = 3  # a picture's (x, y) pixels ↔ b's (lon, lat): per axis b = a · scale + offset
 
+comptime NO_CHANGE = 0  # (a field whose typing the panel doesn't follow: its Return sets it)
 comptime BY_PERSON = 0
 comptime BY_AGENT = 1
 
@@ -37,7 +38,13 @@ comptime LINKS_OPEN = 0  # (a Links block of messages: the "links" button, the "
 comptime LINKS_DRAFT = 1
 comptime LINKS_ADD = 2
 comptime LINKS_REMOVE = 3
-comptime LINKS_MESSAGES = 4
+comptime LINKS_MAX = 8  # links the panel's rows address one by one (more still work, listed without their controls)
+comptime LINKS_UNLINK = 4  # + i: the panel's row i's Unlink
+comptime LINKS_OFFSET = LINKS_UNLINK + LINKS_MAX  # + i: row i's offset field's Return (event.text = seconds)
+comptime LINKS_LESS = LINKS_OFFSET + LINKS_MAX  # + i: row i's offset nudged down (LINKS_NUDGE seconds)
+comptime LINKS_MORE = LINKS_LESS + LINKS_MAX
+comptime LINKS_MESSAGES = LINKS_MORE + LINKS_MAX
+comptime LINKS_NUDGE = 0.1
 
 
 @fieldwise_init
@@ -390,8 +397,10 @@ struct Links(Movable, Sized):
     var open: Bool  # the list shown (the "links" button)
     var problem: String  # why the last add failed ("" none)
     var changed: Int  # bumps on every add / remove
+    var notes: List[String]  # per link, what the panel says under it ("shipments ↔ dock.mp4 · 12 of 14 match"; "": its cards)
 
     def __init__(out self, msg_base: Int = 0):
+        self.notes = List[String]()
         self.items = List[Link]()
         self.msg_base = msg_base
         self.draft = String("")
@@ -410,6 +419,7 @@ struct Links(Movable, Sized):
         if link.kind == LINK_KEY and link.a.table_name() == link.b.table_name():
             raise Error("cards from the same table are already linked")
         self.items.append(link)
+        self.notes.append(String(""))
         self.changed += 1
         return len(self.items) - 1
 
@@ -417,6 +427,8 @@ struct Links(Movable, Sized):
         if i < 0 or i >= len(self.items):
             return False
         _ = self.items.pop(i)
+        if i < len(self.notes):
+            _ = self.notes.pop(i)
         self.changed += 1
         return True
 
@@ -498,6 +510,43 @@ struct Links(Movable, Sized):
             items.append(Dropdown(opts^, 0, b + LINKS_REMOVE).fill().tag("unlink").tooltip("Remove a link"))
         return VStack(items^, spacing=6).tag("links-panel")
 
+    def panel(self) -> List[View]:
+        """The inspector's Links panel (the approved prototype "C"): one quiet row per link (its columns, its kind, its
+        cards and match, Unlink; a time link's offset as a settable field with − and +), the empty state's hint, and the
+        `link` field an agent (or a person) types a link into. Hand it to Inspector as its sections."""
+        var b = self.msg_base
+        var rows = List[View]()
+        if len(self.items) == 0:
+            rows.append(Text("No links yet. Drag a column's header onto another card to link them: nothing joins until you do.", CAPTION))
+        for i in range(len(self.items)):
+            ref l = self.items[i]
+            var said = l.a.column + (" = " if l.kind == LINK_KEY else " ≈ ") + l.b.column
+            var note = self.notes[i] if i < len(self.notes) and self.notes[i] != "" else l.a.card + " ↔ " + l.b.card
+            var parts = List[View]()
+            parts.append(HStack(Text(said).tone(TONE_STRONG), Text(l.kind_name(), CAPTION).tag("link-kind"), Spacer(),
+                                Button("Unlink", b + LINKS_UNLINK + i, SUBTLE).tag("unlink-" + String(i)).tooltip("Remove the link " + l.label())
+                                if i < LINKS_MAX else Spacer(), spacing=6).fill().align(CENTER))
+            parts.append(Text(note + (" · by an agent" if l.by == BY_AGENT else ""), CAPTION))
+            if l.kind == LINK_TIME and i < LINKS_MAX:
+                parts.append(HStack(Text("Offset", CAPTION), Button("−", b + LINKS_LESS + i, SUBTLE).tooltip("0.1 s earlier"),
+                                    TextField(_num(l.offset), "seconds", NO_CHANGE, b + LINKS_OFFSET + i).width(72).tag("offset-" + String(i))
+                                    .label("Offset of " + l.b.card + "'s clock, in seconds"),
+                                    Button("+", b + LINKS_MORE + i, SUBTLE).tooltip("0.1 s later"), Text("s", CAPTION), spacing=4).align(CENTER))
+            rows.append(VStack(parts^, spacing=4).fill().align(START).tag("link-row"))
+        var add = List[View]()
+        add.append(Text("Drag a column onto a card to add one; hold a card to see what it's linked to. Or type one:", CAPTION))
+        add.append(TextField(self.draft, "shipments.shipment_id = dock.mp4.code", b + LINKS_DRAFT, b + LINKS_ADD).fill().tag("link").tooltip(
+            'Link two cards: "card.column = card.column" (rows with the same value) or "card.column ~ card.column +seconds" '
+            + "(two clocks); press Return (submit) to add it. Nothing links until you do."))
+        if self.problem != "":
+            add.append(Text(self.problem, CAPTION))
+        var out = List[View]()
+        rows.insert(0, Text("On this sheet", CAPTION).tone(TONE_STRONG))  # (a plain heading: Liquid's section-title role wrapped a long one)
+        add.insert(0, Text("Add a link", CAPTION).tone(TONE_STRONG))
+        out.append(VStack(rows^, spacing=8).fill().align(START))
+        out.append(VStack(add^, spacing=8).fill().align(START))
+        return out^
+
     def owns(self, message: Int) -> Bool:
         return self.msg_base <= message < self.msg_base + LINKS_MESSAGES
 
@@ -521,4 +570,19 @@ struct Links(Movable, Sized):
         elif m == LINKS_REMOVE:
             if event.number >= 1:
                 _ = self.remove(event.number - 1)
+        elif LINKS_UNLINK <= m < LINKS_OFFSET:
+            _ = self.remove(m - LINKS_UNLINK)
+        elif LINKS_OFFSET <= m < LINKS_MORE + LINKS_MAX:
+            var i = (m - LINKS_UNLINK) % LINKS_MAX
+            if i < len(self.items) and self.items[i].kind == LINK_TIME:
+                if m < LINKS_LESS:
+                    try:
+                        self.items[i].offset = atof(String(event.text.strip()))
+                        self.problem = String("")
+                    except:
+                        self.problem = '"' + event.text + '" isn\'t a number of seconds'
+                else:
+                    self.items[i].offset += -LINKS_NUDGE if m < LINKS_MORE else LINKS_NUDGE
+                    self.items[i].offset = Float64(Int(self.items[i].offset * 1000.0 + (0.5 if self.items[i].offset >= 0 else -0.5))) / 1000.0
+                self.changed += 1
         return True

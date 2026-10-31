@@ -4,6 +4,7 @@
 # The HTML is made in Python by mojoui/hosts/web.py.
 
 from mojoui.look import look_web_css
+from mojoui.boardlook import board_web_css
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
@@ -129,6 +130,7 @@ def web_theme[A: App](handle: Int) -> String:
     its style sheet (D-260), and its tokens as JSON for widgets' theme(el, tokens) (goal 34b)."""
     var t = session_at[A](handle)[].app.theme()
     var sheet = t.web_css + (look_web_css(t.look, "body." + t.id + " ") if t.id != "" else String(""))  # (the look's rules after the theme's own: hover and :focus rules stay more specific)
+    sheet += board_web_css(t.palette, "body ", t.look.motion.spring)  # (a Board's tones and the link UI's pieces, from any palette)
     var vars = (palette_css(t.palette) + tokens_css(t)) if t.id != "" else String("")
     return t.id + chr(31) + t.classes + chr(31) + vars + chr(31) + sheet + chr(31) + theme_tokens(t)
 
@@ -312,6 +314,15 @@ def web_describe[A: App](handle: Int, node: Int, first: Int, count: Int) -> Stri
     if node < 0 or node >= len(rt[].shown.nodes) or rt[].shown.nodes[node].kind != CANVAS:
         return ""
     return rt[].app.describe(rt[].shown.nodes[node].style, first, count)
+
+
+def web_spot[A: App](handle: Int, node: Int, name: String) -> String:
+    """App.spot for canvas node `node`: "x,y" in points ("-1,-1" when there's none)."""
+    var rt = session_at[A](handle)
+    if node < 0 or node >= len(rt[].shown.nodes):
+        return "-1,-1"
+    var at = rt[].app.spot(rt[].shown.nodes[node].style, name)
+    return String(at[0]) + "," + String(at[1])
 
 
 def web_image[A: App](handle: Int, node: Int) -> String:

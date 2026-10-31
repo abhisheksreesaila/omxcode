@@ -1,6 +1,6 @@
 # What an app provides, and the platform-independent loop every host runs.
 
-from mojoui.view import View, CANVAS, BOARD, FIELD, WEBCOMP, NO_MSG, PAN, ZOOM, KEY
+from mojoui.view import View, CANVAS, BOARD, FIELD, WEBCOMP, NO_MSG, PAN, ZOOM, KEY, PRESS, RELEASE
 from mojoui.look import resolve_layout
 from mojoui.diff import Diff, diff
 from mojoui.canvas import Surface
@@ -105,6 +105,12 @@ trait App(Movable, Deinitable):
         """Canvas `canvas`'s content as text, for an agent (D-163): `count` rows from shown row `first`
         (count 0: what's on screen), tab-separated; "" when the canvas has no text to offer."""
         return ""
+
+    def spot(self, canvas: Int, name: String) -> Tuple[Float64, Float64]:
+        """Where on Canvas `canvas` the part called `name` is drawn (a grid's column header), in points from the canvas's
+        top-left; (-1, -1) when there's none. Test drivers and agents reach drawn parts with it (a drag that starts on a
+        header: goal 41 M8's linkdrag step)."""
+        return (-1.0, -1.0)
 
     def draw(mut self, canvas: Int, mut surface: Surface):
         """Paints Canvas `canvas` into `surface` (its real pixel size). May update state
@@ -525,6 +531,13 @@ struct Runtime[A: App](Movable):
             return Diff(False, [])
         ref n = self.shown.nodes[node]
         if n.kind == BOARD:
+            if kind == PRESS or kind == RELEASE:  # a child held still (Board(on_hold=…)), and let go
+                if n.hint == "":
+                    return Diff(False, [])
+                try:
+                    return self.dispatch(Event(Int(n.hint), "hold" if kind == PRESS else "release", Int(x), x, y, dx, dy, zoom))
+                except:
+                    return Diff(False, [])
             var msg = n.msg if kind == PAN else (n.msg2 if kind == ZOOM else 0)
             if msg == 0:
                 return Diff(False, [])
