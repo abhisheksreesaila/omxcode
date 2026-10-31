@@ -13,7 +13,8 @@
 # it shows the WebComponent's `instead` view (and says so once). scripts/webkitgtk.sh and scripts/build.sh provide it
 # where the distribution's package isn't installed (D-608).
 
-from std.ffi import external_call, c_int, c_char, c_uint
+from std.ffi import external_call, c_int, c_char, c_uint, OwnedDLHandle
+from std.memory.alloc import unsafe_alloc
 from std.memory import Pointer
 
 from mojoui.json import Json, json_string
@@ -326,9 +327,13 @@ def start(addr: Int, assets: List[String]) -> Bool:
     var gc_name = String("JSC_SIGNAL_FOR_GC")
     var gc_sig = String("30")
     _ = external_call["setenv", c_int](gc_name.as_c_string_span(), gc_sig.as_c_string_span(), c_int(0))
-    var lib = String("libwebkitgtk-6.0.so.4")
-    if dl_open(lib, RTLD_NOW | RTLD_GLOBAL) == 0:  # (through its address: D-1265)
-        print("mojoui: WebKitGTK 6.0 didn't load (" + cstr(external_call["dlerror", Int]()) + "): WebComponents show their stand-ins (scripts/webkitgtk.sh)")
+    # (through the standard library's OwnedDLHandle, not a dlopen of our own: an app that also uses Mojo's Python
+    # interop declares dlopen the library's way, and two declarations don't link, D-1413; kept loaded for good)
+    try:
+        var handle = OwnedDLHandle("libwebkitgtk-6.0.so.4", RTLD_NOW | RTLD_GLOBAL)
+        unsafe_alloc[OwnedDLHandle](1).unsafe_write(handle^)
+    except e:
+        print("mojoui: WebKitGTK 6.0 didn't load (" + String(e) + "): WebComponents show their stand-ins (scripts/webkitgtk.sh)")
         return False
     var exe_link = String("/proc/self/exe")
     var exe = cstr(external_call["g_file_read_link", Int](exe_link.as_c_string_span(), 0))

@@ -61,6 +61,20 @@ build_linux() {
       scripts/webkit_launcher.sh "$out" "$EX" "$wk"
     fi
   fi
+  # An app whose needs file says speech (mojoui.speech: torch in the app's process, goal 43) runs on the `speech` pixi
+  # environment's CPython: $out/$EX becomes a launcher that points Mojo's Python interop at it (D-1412).
+  # Machine-local, not relocatable: the launcher hard-codes this checkout's absolute .pixi/envs/speech paths, and the
+  # build runs `pixi install -e speech` (torch + CUDA wheels, several GB) first. Moving the checkout or copying the
+  # build elsewhere needs a rebuild there.
+  if grep -qx speech "examples/$EX/needs" 2>/dev/null; then
+    pixi install -e speech >/dev/null
+    local env; env="$(pwd)/.pixi/envs/speech"
+    local lib; lib="$(ls "$env"/lib/libpython3*.so.1.0 | head -1)"
+    mv "$out/$EX" "$out/$EX.bin"
+    printf '#!/bin/sh\n# the app on the speech environment'"'"'s Python (scripts/build.sh, D-1412)\nexport MOJO_PYTHON_LIBRARY="%s" CONDA_PREFIX="%s" PATH="%s/bin:$PATH"\nexec "$(dirname "$0")/%s.bin" "$@"\n' \
+      "$lib" "$env" "$env" "$EX" > "$out/$EX"
+    chmod +x "$out/$EX"
+  fi
   stamp "$out"; echo "   $out/$EX"
 }
 

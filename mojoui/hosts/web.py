@@ -179,8 +179,22 @@ MENU_JS = r"""
     document.querySelectorAll('.drop-over').forEach(x => x.classList.remove('drop-over'));
     if (!t) return; e.preventDefault();
     const v = document.getElementById('mojoui-v');
+    if (e.dataTransfer.files && e.dataTransfer.files.length) {  // files from outside (DropTarget's on_file): each uploads, then its path
+      if (t.dataset.files !== '1') return;
+      // (all of them in one upload: the server hands them to on_file one after another, so the first one's new screen
+      // can't make the rest arrive for a version that's gone)
+      const form = new FormData(); for (const f of e.dataTransfer.files) form.append('file', f);
+      form.append('n', t.dataset.node); form.append('v', v ? v.value : -1);
+      fetch(`/dropfile/${t.dataset.sid}`, { method: 'POST', body: form }).then(r => r.text()).then(html => {
+        if (html) htmx.swap(document.body, html, { swapStyle: 'none' }); });
+      return;
+    }
     htmx.ajax('POST', `/e/${t.dataset.sid}`, { values: { n: Number(t.dataset.node), text: e.dataTransfer.getData('text/plain'), v: v ? v.value : -1 }, swap: 'none', source: lane('drop') });
   });
+  // FileSaver (DOWNLOAD_JS): the answer to /save appends an i.mojoui-download with the file's URL to the body; the page downloads it and removes it
+  new MutationObserver(() => document.querySelectorAll('i.mojoui-download').forEach(d => { d.remove();
+    const a = document.createElement('a'); a.href = d.dataset.url; a.download = d.dataset.name || ''; document.body.append(a); a.click(); a.remove(); })
+  ).observe(document.documentElement, { childList: true, subtree: true });  // (this script runs in the head: no body yet)
   // Scroll(pinned): stays at its end as its content grows, unless scrolled up to read (back at the end, it follows again)
   const pin = () => document.querySelectorAll('.scroll[data-pin="1"]').forEach(e => { if (e.dataset.follow !== '0') e.scrollTop = e.scrollHeight; });
   document.addEventListener('scroll', e => { const t = e.target;
@@ -420,7 +434,7 @@ CANVAS_JS = r"""
 // its version or size changes. Gestures: drag = PAN, wheel/pinch = ZOOM, click = TAP,
 // sent through htmx like any other event, so the rest of the page updates as usual.
 (() => {
-  const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8;
+  const PAN = 1, ZOOM = 2, TAP = 3, PRESS = 4, RELEASE = 5, DOUBLE = 6, KEY = 7, SECONDARY = 8, WHEEL = 9;
   const shape = () => document.getElementById('mojoui-v').value;
   // the theme a canvas was drawn in (skin()'s classes and tokens): a drawn view paints from the theme, so a switch
   // (light/dark, a skin) redraws it even when its version didn't move (D-673)
@@ -558,11 +572,13 @@ CANVAS_JS = r"""
     }
     st.pump = pump;
     st.sendKey = (k, m) => send(KEY, 0, 0, m, 0, 1, k);
-    function send(kind, x, y, dx, dy, zoom, text = '') {
+    // pressure: PointerEvent.pressure on PRESS, PAN and RELEASE, from a pen only (0: the device has none; a mouse
+    // reports 0.5 while pressed, which isn't a pressure; goal 40)
+    function send(kind, x, y, dx, dy, zoom, text = '', pressure = 0) {
       const q = events.queue, last = q[q.length - 1], same = last && last.n === n && last.number === kind;
-      if (same && kind === PAN) { last.dx += dx; last.dy += dy; last.x = x; last.y = y; }
+      if (same && (kind === PAN || kind === WHEEL)) { last.dx += dx; last.dy += dy; last.x = x; last.y = y; last.pressure = pressure; }
       else if (same && kind === ZOOM) { last.zoom *= zoom; }
-      else q.push({ n, sid, number: kind, x, y, dx, dy, zoom, text });
+      else q.push({ n, sid, number: kind, x, y, dx, dy, zoom, text, pressure });
       flushEvents();
     }
     const pointers = new Map();
@@ -585,11 +601,12 @@ CANVAS_JS = r"""
     }
     cv.addEventListener('contextmenu', e => { e.preventDefault(); const [x, y] = at(e); send(SECONDARY, x, y, 0, 0, 1); });
     const mods = e => (e.shiftKey ? 1 : 0) + (e.ctrlKey || e.metaKey ? 2 : 0) + (e.altKey ? 4 : 0);  // SHIFT, CTRL, ALT (mojoui.view)
+    const pen = e => e.pointerType === 'pen' ? (e.pressure || 0) : 0;
     cv.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;  // a right click opens a context menu (contextmenu), it doesn't press
       if (keys) cv.focus({ preventScroll: true });
       cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId, at(e));
-      if (pointers.size === 1) { moved = false; const [x, y] = at(e); send(PRESS, x, y, mods(e), 0, 1); window.mojouiDrag = { n, id: e.pointerId, x, y, moved: false }; }  // where a drag (or tap) starts (dx: Shift, Ctrl, Alt held)
+      if (pointers.size === 1) { moved = false; const [x, y] = at(e); send(PRESS, x, y, mods(e), 0, 1, '', pen(e)); window.mojouiDrag = { n, id: e.pointerId, x, y, moved: false }; }  // where a drag (or tap) starts (dx: Shift, Ctrl, Alt held)
       if (pointers.size === 2) spread = distance();
     });
     cv.addEventListener('pointermove', e => {
@@ -598,7 +615,7 @@ CANVAS_JS = r"""
       pointers.set(e.pointerId, [x, y]);
       if (pointers.size === 1) {
         e.mojouiHandled = true;
-        if (Math.abs(x - px) + Math.abs(y - py) > 0) { if (Math.abs(x - px) + Math.abs(y - py) > 3) moved = true; send(PAN, x, y, x - px, y - py, 1); }
+        if (Math.abs(x - px) + Math.abs(y - py) > 0) { if (Math.abs(x - px) + Math.abs(y - py) > 3) moved = true; send(PAN, x, y, x - px, y - py, 1, '', pen(e)); }
         const d = window.mojouiDrag; if (d && d.id === e.pointerId) { d.x = x; d.y = y; d.moved = moved; }
       } else if (pointers.size === 2) {
         const d = distance(), [a, b] = [...pointers.values()];
@@ -615,7 +632,7 @@ CANVAS_JS = r"""
       // a second click within the double-click time is the DOUBLE that 'dblclick' sends, not another TAP (as on GTK)
       const now = performance.now(), second = st.lastTap && now - st.lastTap.t < 500 && Math.abs(x - st.lastTap.x) + Math.abs(y - st.lastTap.y) < 6;
       if (pointers.size === 0 && !moved && e.type === 'pointerup') { if (second) st.lastTap = null; else { st.lastTap = { t: now, x, y }; send(TAP, x, y, mods(e), 0, 1); } }
-      else if (pointers.size === 0 && moved) send(RELEASE, x, y, 0, 0, 1);  // a drag ended
+      else if (pointers.size === 0 && moved) send(RELEASE, x, y, 0, 0, 1, '', pen(e));  // a drag ended
     };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
     st.drag = (e, what) => {  // the rest of a drag that began on the canvas this one replaced (window.mojouiDrag)
@@ -632,7 +649,10 @@ CANVAS_JS = r"""
     cv.addEventListener('dblclick', e => { const [x, y] = at(e); send(DOUBLE, x, y, 0, 0, 1); });
     cv.addEventListener('wheel', e => {
       e.preventDefault();
-      const [x, y] = at(e), dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
+      const [x, y] = at(e), line = e.deltaMode === 1 ? 40 : 1, dy = e.deltaY * line;
+      // Canvas(scroll_pans=True): a plain scroll pans (WHEEL, how far the content moves); ctrl+scroll, and a
+      // trackpad pinch (the browser sends it as a wheel with ctrlKey), zoom
+      if (div.dataset.scroll === 'pan' && !e.ctrlKey) { send(WHEEL, x, y, -e.deltaX * line, -dy, 1); return; }
       send(ZOOM, x, y, 0, 0, Math.pow(2, -dy / 400));  // 4 notches of 100 = 2×
     }, { passive: false });
     new ResizeObserver(() => { st.want = true; pump(); }).observe(div);
@@ -1077,6 +1097,12 @@ def render_node(s, i, sid):
         cls = {PROMINENT: "prominent", DESTRUCTIVE: "destructive", SUBTLE: "subtle", ICON_ONLY: "subtle icon-only",
                ICON_ON: "subtle icon-only on", TOOL: "subtle tool", TOOL_ON: "subtle tool on",
                TOOL_INLINE: "subtle tool inline", TOOL_INLINE_ON: "subtle tool inline on", TOKEN: "token", TOKEN_LIT: "token lit"}.get(n["style"], "")
+        if n["msg2"] and len(n["options"]) >= 3 and n["options"][1] == "save":  # a FileSaver: the app writes the file where the server
+            # says, then the page downloads it (/save, DOWNLOAD_JS)
+            svg = NotStr(ICONS.get(n["hint"], "").replace('width="24"', 'width="18"').replace('height="24"', 'height="18"')) if n["hint"] else ""
+            title = Span(n["text"], cls="sr-only") if n["style"] in (ICON_ONLY, ICON_ON) and svg else Span(n["text"])
+            return Button(*([svg, title] if svg else [title]), id=nid, cls=f"button saver {cls}" + (" with-icon" if svg else ""), data_kind="button",
+                          hx_post=f"/save/{sid}", hx_vals=json.dumps({"n": i}), hx_include="#mojoui-v", hx_swap="none")
         if n["msg2"]:  # a FilePicker: a file input styled as the button; the file uploads, then on_pick gets its path
             svg = NotStr(ICONS.get(n["hint"], "").replace('width="24"', 'width="18"').replace('height="24"', 'height="18"')) if n["hint"] else ""
             accept = n["options"][0] if n["options"] else ""
@@ -1221,7 +1247,7 @@ def render_node(s, i, sid):
                    data_payload=n["text"], style="gap:0px;align-items:stretch")  # (a wrapper: its view where it would be, full width)
     if kind == DROP:  # dragover marks it, drop posts the payload as its on_drop (DND_JS)
         return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack drop", id=nid, data_kind="drop", data_node=str(i),
-                   data_sid=sid, style="gap:0px;align-items:stretch")
+                   data_sid=sid, data_files="1" if n["msg2"] else None, style="gap:0px;align-items:stretch")
     if kind == EMBED:  # a web page in an iframe (version 0: the stand-in child)
         if n["value"] <= 0:
             return Div(*[render(s, c, sid) for c in n["children"]], cls="vstack embed", id=nid, data_kind="embed", style="gap:0px")
@@ -1297,6 +1323,7 @@ def render_node(s, i, sid):
         own = ";".join(([] if sized_w else ["width:320px"]) + ([] if sized_h else ["height:240px"]))
         return Div(Canvas(), canvas_meta(n, i), id=nid, cls="canvas", data_kind="canvas", data_node=str(i), data_sid=sid,
                    data_keys="1" if n["size"] == 1 else None, data_passthrough="1" if n["size"] == 2 else None,
+                   data_scroll="pan" if n["spacing"] == 1 else None,
                    style=";".join(([own] if own else []) + (["pointer-events:none"] if n["size"] == 2 else [])) or None)
     if kind == DIVIDER:
         return Hr(id=nid)
@@ -1536,6 +1563,19 @@ def make_app(module_dir):
         data, media = assets[name]
         return Response(data, media_type=media, headers={"Cache-Control": IMMUTABLE})
 
+    def close_all():
+        """The server is stopping: every live session's App.closing (a pending save), then its handle goes."""
+        with sessions_lock:
+            while sessions:
+                old_sid, old = sessions.popitem(last=False)
+                with old.lock:
+                    if not old.closed:
+                        old.closed = True
+                        mod.close(old.handle)
+                forget_files(old_sid)
+    import atexit
+    atexit.register(close_all)
+
     @app.get("/")
     def index(req):
         sid = uuid.uuid4().hex  # one app session per page load (tab)
@@ -1548,8 +1588,7 @@ def make_app(module_dir):
                 with old.lock:
                     old.closed = True
                     mod.close(old.handle)
-                import shutil  # (its uploads go with it)
-                shutil.rmtree(Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads"))) / old_sid, ignore_errors=True)
+                forget_files(old_sid)  # (its uploads and downloads go with it)
         # The whole first page under the session's lock: once note() hands the tab to the clock thread, its effects'
         # replies can change the screen at any moment, and a page rendered meanwhile was torn (a deep link's Route
         # missing from the first page under load, so the route was never asked for; D-545).
@@ -1692,7 +1731,7 @@ def make_app(module_dir):
 
     @app.post("/e/{sid}")
     def event(sid: str, n: int, v: int = -1, second: int = 0, text: str = "", number: int = 0, on: str = "",
-              x: float = 0, y: float = 0, dx: float = 0, dy: float = 0, zoom: float = 1, route: int = 0):
+              x: float = 0, y: float = 0, dx: float = 0, dy: float = 0, zoom: float = 1, route: int = 0, pressure: float = 0):
         if EVENT_DELAY:  # (checks only: a slow network, so keys typed meanwhile really wait for the answer)
             time.sleep(EVENT_DELAY)
         s = sessions.get(sid)
@@ -1722,7 +1761,7 @@ def make_app(module_dir):
             elif source["kind"] == FIELD and second == 2:  # Escape (on_cancel)
                 d = json.loads(mod.cancel(s.handle, n, text))
             elif source["kind"] in (CANVAS, BOARD):
-                d = json.loads(mod.gesture(s.handle, n, number, x, y, dx, dy, zoom))
+                d = json.loads(mod.gesture(s.handle, n, number, x, y, dx, dy, zoom, pressure))
             else:
                 d = json.loads(mod.event(s.handle, n, second, text, number))
             if d.get("ignored"):
@@ -1921,7 +1960,7 @@ def make_app(module_dir):
                 d = json.loads(mod.event(h, n, int(op.get("second", 0)), str(op.get("text", "")), int(op.get("number", 0))))
             elif what == "gesture":
                 d = json.loads(mod.gesture(h, n, int(op.get("kind", 3)), float(op.get("x", 0)), float(op.get("y", 0)), float(op.get("dx", 0)),
-                                           float(op.get("dy", 0)), float(op.get("zoom", 1))))
+                                           float(op.get("dy", 0)), float(op.get("zoom", 1)), float(op.get("pressure", 0))))
             elif what == "key":
                 d = json.loads(mod.key(h, n, str(op.get("name", "")), int(op.get("modifiers", 0))))
             else:
@@ -1982,6 +2021,115 @@ def make_app(module_dir):
             d = json.loads(mod.appearance(s.handle, dark))
             s.nodes = json.loads(mod.view(s.handle))
             return changes(s, sid, d)
+
+    def file_folder(sid, kind="uploads"):
+        """Where a page's files live where the app runs: uploads (FilePicker, a file drop) and downloads (FileSaver)."""
+        base = Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads")))
+        folder = (base / sid) if kind == "uploads" else (base.parent / "downloads" / sid)
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def forget_files(sid):
+        """A session ended: its uploads and downloads go."""
+        import shutil
+        base = Path(os.environ.get("OMXCODE_UPLOADS", os.environ.get("OMXAPP_UPLOADS", Path.home() / ".cache" / "omxcode" / "uploads")))
+        for folder in (base / sid, base.parent / "downloads" / sid):
+            shutil.rmtree(folder, ignore_errors=True)
+
+    @app.post("/save/{sid}")
+    def save(sid: str, n: int, v: int = -1):
+        """A FileSaver tapped: on_save gets a path in this page's downloads folder (its suggested name, a plain file name);
+        the app writes the file there in update(), then the answer tells the page to download it (DOWNLOAD_JS)."""
+        s = sessions.get(sid)
+        if s is None:
+            return Main(P("This page expired: reload it.", cls="text caption"), id="mojoui-root", hx_swap_oob="true")
+        with s.lock:
+            if s.closed or v != s.shape or not 0 <= n < len(s.nodes):
+                return ""
+            node = s.nodes[n]
+            if not (node["msg2"] and len(node["options"]) >= 3 and node["options"][1] == "save"):
+                return ""
+            name = Path(node["options"][2] or "").name
+            if name in ("", ".", ".."):
+                name = "download"
+            path = file_folder(sid, "downloads") / name
+            path.unlink(missing_ok=True)
+            d = json.loads(mod.event(s.handle, n, 1, str(path), 0))
+            if d.get("ignored"):
+                return ""
+            s.nodes = json.loads(mod.view(s.handle))
+            out = changes(s, sid, d, n, str(path), 0)
+            if not path.exists():  # (the app wrote nothing: no download)
+                return out
+            token = uuid.uuid4().hex
+            s.downloads = getattr(s, "downloads", {})
+            s.downloads[token] = path
+            mark = Div(I(cls="mojoui-download", hidden=True, data_url=f"/download/{sid}/{token}", data_name=name), hx_swap_oob="beforeend:body")
+            return (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (mark,)
+
+    @app.get("/download/{sid}/{token}")
+    def download(sid: str, token: str):
+        """A file a FileSaver's app wrote, as an attachment under its suggested name."""
+        from starlette.responses import FileResponse
+        s = sessions.get(sid)
+        path = getattr(s, "downloads", {}).get(token) if s is not None else None
+        if path is None or not Path(path).exists():
+            return Response(status_code=404)
+        return FileResponse(path, filename=Path(path).name)
+
+    @app.post("/dropfile/{sid}")
+    async def dropfile(sid: str, req):
+        """Files dropped from outside on a DropTarget with on_file, in one upload: each saved in a folder of its own (two
+        files of one name don't overwrite), then on_file gets their paths one after another; the target is found again
+        after each (its on_file message), since the first one's new screen may have renumbered it."""
+        s = sessions.get(sid)
+        if s is None:
+            return ""
+        form = await req.form()
+        try:
+            n, v = int(form.get("n", -1)), int(form.get("v", -1))
+        except ValueError:
+            return ""
+        files = [f for f in form.getlist("file") if hasattr(f, "read")]
+        with s.lock:
+            if s.closed or v != s.shape or not 0 <= n < len(s.nodes) or s.nodes[n]["kind"] != DROP or not s.nodes[n]["msg2"]:
+                return ""
+            msg = s.nodes[n]["msg2"]
+        limit = int(os.environ.get("OMXCODE_UPLOAD_MAX", os.environ.get("OMXAPP_UPLOAD_MAX", str(32 << 30))))
+        paths = []
+        for file in files:
+            name = Path(file.filename or "").name
+            if name in ("", ".", ".."):
+                name = "dropped"
+            folder = file_folder(sid) / uuid.uuid4().hex[:12]
+            folder.mkdir()
+            path, size = folder / name, 0
+            with open(path, "wb") as out:
+                while chunk := await file.read(1 << 20):
+                    size += len(chunk)
+                    if size > limit:
+                        break
+                    out.write(chunk)
+            if size > limit:
+                path.unlink(missing_ok=True)
+                continue
+            paths.append(path)
+        outs = []
+        with s.lock:
+            for path in paths:
+                if s.closed:
+                    break
+                if not (0 <= n < len(s.nodes) and s.nodes[n]["kind"] == DROP and s.nodes[n]["msg2"] == msg):
+                    n = next((k for k, node in enumerate(s.nodes) if node["kind"] == DROP and node["msg2"] == msg), -1)
+                    if n < 0:
+                        break
+                d = json.loads(mod.event(s.handle, n, 1, str(path), 0))
+                if d.get("ignored"):
+                    continue
+                s.nodes = json.loads(mod.view(s.handle))
+                out = changes(s, sid, d, n, str(path), 0)
+                outs.extend(out if isinstance(out, tuple) else ((out,) if out != "" else ()))
+        return tuple(outs) if outs else ""
 
     @app.post("/upload/{sid}")
     async def upload(sid: str, n: int, file: UploadFile, v: int = -1):

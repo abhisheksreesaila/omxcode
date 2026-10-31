@@ -463,7 +463,7 @@ def m11():
     try:
         import time
         import urllib.request
-        for _ in range(150):  # (until it answers: binding 0.0.0.0 asked DNS for the host's name, 5 s here; D-1306)
+        for _ in range(150):  # (until it answers: binding 0.0.0.0 asked DNS for the host's name, 5 s here; D-1736)
             try:
                 urllib.request.urlopen("http://127.0.0.1:8741/index.html", timeout=1).close()
                 break

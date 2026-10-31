@@ -965,7 +965,7 @@ struct ObjectAnalyzer(Analyzer):
 
 struct CellGpu(Movable):
     """The GPU side of scan(): device buffers for this frame and the last (motion), the cell grids, and ordinary
-    (pageable) host memory for the frames and grids. Not pinned memory (D-1200): cuMemAllocHost holds a lock the Mojo
+    (pageable) host memory for the frames and grids. Not pinned memory (D-1700): cuMemAllocHost holds a lock the Mojo
     runtime's own allocator waits on, so a scan starting on a job's thread froze the UI thread's next allocation for
     0.1–0.7 s; a pageable 3.7 MB copy costs well under a millisecond a frame against the decoder's read."""
 
@@ -976,7 +976,7 @@ struct CellGpu(Movable):
     var gw: Int
     var gh: Int
     var dev: List[DeviceBuffer[DType.uint32]]  # two frames (current, previous)
-    var host: List[List[UInt32]]  # two frames (pageable: D-1200)
+    var host: List[List[UInt32]]  # two frames (pageable: D-1700)
     var out: List[DeviceBuffer[DType.uint32]]  # counts, stats, means
     var out_host: List[List[UInt32]]
     var ranges: List[Int32]  # MAX_CLASSES ranges, 8 words each (ColourRange.packed)

@@ -13,7 +13,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
-    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY,
+    MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE, SECONDARY, KEY, WHEEL,
     START, CENTER, END, STRETCH, BETWEEN, Node, NO_MSG,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT,
     TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT, CARD, CARD_WARN, CARD_GOOD,
@@ -2771,11 +2771,12 @@ struct AppKitHost[A: App](Movable):
                 return k
         return -1
 
-    def canvas_send(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, self_addr: Int):
-        if self.report.on and kind != PAN and kind != ZOOM:
+    def canvas_send(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, self_addr: Int,
+                    pressure: Float64 = 0):
+        if self.report.on and kind != PAN and kind != ZOOM and kind != WHEEL:
             self.report.cause = "canvas " + gesture_name(kind)
             self.report.note("event: canvas node " + String(node) + " " + gesture_name(kind) + " at " + pts(x) + ", " + pts(y))
-        var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom)
+        var d = self.rt.gesture(node, kind, x, y, dx, dy, zoom, pressure)
         self.apply(d, self_addr)
 
     def tick(mut self, seconds: Float64, self_addr: Int):
@@ -3018,6 +3019,7 @@ def gesture_name(kind: Int) -> String:
     if kind == RELEASE: return "release"
     if kind == SECONDARY: return "right-click"
     if kind == KEY: return "key"
+    if kind == WHEEL: return "wheel"
     return "gesture" + String(kind)
 
 
@@ -3157,6 +3159,14 @@ def event_point(view: Int, event: Int) -> CGPoint:
     return in_view(view, msg[CGPoint](view, "convertPoint:fromView:", w.x, w.y, 0))
 
 
+def pen_pressure(event: Int) -> Float64:
+    """A tablet pen's pressure (0–1) on a mouse event; 0 for a mouse or trackpad (their pressure is 0 or 1, not a
+    pressure): only NSEventSubtypeTabletPoint (1) events carry one. Goal 40; built, not run on a Mac yet."""
+    if msg(event, "subtype") != 1:
+        return 0
+    return min(max(Float64(msg[Float32](event, "pressure")), 0.0), 1.0)
+
+
 def on_canvas_mouse_down[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     """The button goes down: PRESS there at once (GTK's drag-begin), or DOUBLE on a second click."""
     var t = from_tag(view)
@@ -3171,7 +3181,7 @@ def on_canvas_mouse_down[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     if msg(event, "clickCount") >= 2:
         host[].canvas_send(t[1], DOUBLE, at.x, at.y, 0, 0, 1, t[0])
         return
-    host[].canvas_send(t[1], PRESS, at.x, at.y, 0, 0, 1, t[0])
+    host[].canvas_send(t[1], PRESS, at.x, at.y, 0, 0, 1, t[0], pen_pressure(event))
 
 
 def on_canvas_mouse_dragged[A: App](view: Int, cmd: Int, event: Int) abi("C"):
@@ -3189,7 +3199,7 @@ def on_canvas_mouse_dragged[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     host[].canvases[k].moved = True
     host[].canvases[k].last_x = at.x
     host[].canvases[k].last_y = at.y
-    host[].canvas_send(t[1], PAN, at.x, at.y, dx, dy, 1, t[0])
+    host[].canvas_send(t[1], PAN, at.x, at.y, dx, dy, 1, t[0], pen_pressure(event))
 
 
 def on_canvas_mouse_up[A: App](view: Int, cmd: Int, event: Int) abi("C"):
@@ -3199,7 +3209,7 @@ def on_canvas_mouse_up[A: App](view: Int, cmd: Int, event: Int) abi("C"):
     var at = event_point(view, event)
     var k = host[].canvas_at(t[1])
     if k >= 0 and host[].canvases[k].moved:
-        host[].canvas_send(t[1], RELEASE, at.x, at.y, 0, 0, 1, t[0])
+        host[].canvas_send(t[1], RELEASE, at.x, at.y, 0, 0, 1, t[0], pen_pressure(event))
     elif msg(event, "clickCount") < 2:
         host[].canvas_send(t[1], TAP, at.x, at.y, 0, 0, 1, t[0])
 
@@ -3285,12 +3295,20 @@ def on_canvas_tap[A: App](view: Int, cmd: Int, recognizer: Int) abi("C"):
 
 
 def on_canvas_scroll[A: App](view: Int, cmd: Int, event: Int) abi("C"):
-    """Mouse wheel (4 notches = 2×) or trackpad scroll (pixels): zoom around the pointer."""
+    """Mouse wheel (4 notches = 2×) or trackpad scroll (pixels): zoom around the pointer. On a Canvas(scroll_pans=True)
+    a plain scroll pans (WHEEL: AppKit's scrolling deltas already say how the content moves; a line = 40 points) and
+    Command/Control+scroll zooms (built, not run: goal 40)."""
     var t = from_tag(view)
     var dy = msg[Float64](event, "scrollingDeltaY")
     var precise = (msg(event, "hasPreciseScrollingDeltas") & 0xFF) != 0
     var window_point = msg[CGPoint](event, "locationInWindow")
     var at = in_view(view, msg[CGPoint](view, "convertPoint:fromView:", window_point.x, window_point.y, 0))
+    var host = host_at[A](t[0])
+    var flags = msg(event, "modifierFlags")
+    if t[1] < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[t[1]].spacing == 1 and flags & (MASK_COMMAND | (1 << 18)) == 0:
+        var step = 1.0 if precise else 40.0
+        host[].canvas_send(t[1], WHEEL, at.x, at.y, msg[Float64](event, "scrollingDeltaX") * step, dy * step, 1, t[0])
+        return
     var notches = dy / 100.0 * 4.0 if precise else dy
     host_at[A](t[0])[].canvas_send(t[1], ZOOM, at.x, at.y, 0, 0, 2.0 ** (notches / 4.0), t[0])
 
@@ -3920,6 +3938,26 @@ def quit_when_closed(target: Int, cmd: Int, app: Int) abi("C") -> Int8:
     return 1  # YES to applicationShouldTerminateAfterLastWindowClosed:
 
 
+def on_will_terminate[A: App](target: Int, cmd: Int, note: Int) abi("C"):
+    """The app is quitting (Quit, the last window closed, a log out): App.closing, once, before the process ends."""
+    var addr = 0
+    var wins = msg(msg(cls("NSApplication"), "sharedApplication"), "windows")
+    for i in range(msg(wins, "count")):  # (the host's window: its delegate is this target, its identifier the host's address)
+        var w = msg(wins, "objectAtIndex:", i)
+        if msg(w, "delegate") == target and msg(w, "identifier") != 0:
+            addr = msg(msg(w, "identifier"), "longLongValue")
+    if addr != 0:
+        host_at[A](addr)[].rt.closing()
+
+
+def on_window_will_close[A: App](target: Int, cmd: Int, notification: Int) abi("C"):
+    """The window is closing (its close button, Cmd+W): App.closing, once, while the window still knows its host."""
+    var window = msg(notification, "object")
+    var id = msg(window, "identifier")
+    if id != 0:
+        host_at[A](msg(id, "longLongValue"))[].rt.closing()
+
+
 def make_menu(app: Int, title: String):
     var bar = new("NSMenu")
     var app_item = new("NSMenuItem")
@@ -3995,6 +4033,8 @@ def run[A: App]() -> c_int:
     add_method(c, "tableView:objectValueForTableColumn:row:", on_row_value[A], "@@:@@q")
     add_protocol(c, "NSTableViewDataSource")
     add_method(c, "applicationShouldTerminateAfterLastWindowClosed:", quit_when_closed, "B@:@")
+    add_method(c, "applicationWillTerminate:", on_will_terminate[A], "v@:@")  # (App.closing)
+    add_method(c, "windowWillClose:", on_window_will_close[A], "v@:@")
     register_class(c)
     var canvas = new_class("MojoCanvas", "NSImageView")
     add_method(canvas, "canvasFrame:", on_canvas_frame[A], "v@:@")

@@ -21,7 +21,8 @@ struct Event(Copyable, Movable):
     Toggle: `number` = 1 or 0. Dropdown: `number` = index, `text` = option.
     Slider: `number` = 0–100.
     Canvas gestures: `number` = PAN, ZOOM, TAP, PRESS, RELEASE, DOUBLE or KEY (`text` = the key); `x`, `y` = pointer position in the canvas
-    (points from its top-left); PAN: `dx`, `dy` = movement in points; ZOOM: `zoom` = scale factor.
+    (points from its top-left); PAN: `dx`, `dy` = movement in points; ZOOM: `zoom` = scale factor; PRESS, PAN, RELEASE:
+    `pressure` = the pen's pressure, 0–1 (0: the device has none: a mouse, a finger; mojoui.ink then takes one from speed).
     Canvas frames: `number` = microseconds since the previous frame.
     HTTP replies (mojoui.http): `message` = the request's msg, `id` = its id, `number` = the status (0: no reply),
     `text` = the body, `error` = why there's no reply ("" when there is one, a 500 too).
@@ -45,11 +46,12 @@ struct Event(Copyable, Movable):
     var id: Int
     var error: String
     var name: String
+    var pressure: Float64
 
     def __init__(
         out self, message: Int, text: String, number: Int,
         x: Float64 = 0, y: Float64 = 0, dx: Float64 = 0, dy: Float64 = 0, zoom: Float64 = 1,
-        id: Int = 0, error: String = "", name: String = "",
+        id: Int = 0, error: String = "", name: String = "", pressure: Float64 = 0,
     ):
         self.message = message
         self.text = text
@@ -62,6 +64,7 @@ struct Event(Copyable, Movable):
         self.id = id
         self.error = error
         self.name = name
+        self.pressure = pressure
 
 
 trait App(Movable, Deinitable):
@@ -146,6 +149,25 @@ trait App(Movable, Deinitable):
         """The app's mark as SVG ("": none): hosts install it as the icon "app-logo" (Icon("app-logo", 18))."""
         return ""
 
+    def closing(mut self):
+        """The app is about to close: the person closed its window (or chose Quit), the system is quitting it, a web page's
+        session ended, or a test's `quit` step closed the window as a window manager does. Finish what must not be lost
+        (a pending save) before returning: it runs on the UI thread, once, and the process may end right after. The
+        default does nothing."""
+        pass
+
+    def background(self) -> Bool:
+        """True keeps the app running when its window is closed (goal 45): the window hides instead of closing, the app
+        keeps its state, timers, jobs and folder watchers, an item in the system tray (mojoui.tray) opens the window
+        again, and mojoui.notify can still tell the person things. closing() then runs only when the process really
+        ends. The default: False (closing the window ends the app)."""
+        return False
+
+    def window_shown(mut self, shown: Bool):
+        """Background mode only: the window was closed (False; the app keeps running) or opened again from the tray
+        (True). What it changes shows at the next update(). The default ignores it."""
+        pass
+
     def jobs_message(self) -> Int:
         """A message update() gets on the UI thread as soon as a background job started with mojoui.jobs.start_ui_job
         ends (0: none; the app polls its jobs on its own, e.g. at display frames). Every host watches the jobs' wake
@@ -220,6 +242,7 @@ struct Runtime[A: App](Movable):
     var command_seq: Int
     var budget_ns: Int  # the slow-frame watchdog (watch()): 0 off; else any update, view or canvas draw over it prints SLOW:
     var armed_at: Int  # (now_ns) the watchdog stays quiet before this: start-up's first second builds caches and fonts
+    var closed: Bool  # App.closing was told
 
     def __init__(out self, var app: Self.A):
         self.shown = app.view()
@@ -234,6 +257,7 @@ struct Runtime[A: App](Movable):
         self.command_seq = 0
         self.budget_ns = 0
         self.armed_at = 0
+        self.closed = False
         self.take_effects()  # (what the starting state asks for)
 
     def watch(mut self, budget_ms: Int):
@@ -384,6 +408,13 @@ struct Runtime[A: App](Movable):
         var id = self.shown.nodes[node].value
         return self.dispatch(Event(msg, payload, 0, id=id, name=name))
 
+    def closing(mut self):
+        """The app is closing (App.closing): told once, whichever way it closes."""
+        if self.closed:
+            return
+        self.closed = True
+        self.app.closing()
+
     def busy(self) -> Bool:
         """Requests are out or timers run: the host should keep polling (wake_in)."""
         return len(self.inflight) > 0 or len(self.undeliverable) > 0 or len(self.timers) > 0
@@ -524,9 +555,9 @@ struct Runtime[A: App](Movable):
         self._slow("draw", "canvas=" + String(self.shown.nodes[node].style), t0)
         return self.refresh()
 
-    def gesture(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64) -> Diff:
-        """A gesture on canvas node `node` (PAN, ZOOM or TAP); on a Board node, a child moved
-        (PAN: x = the child's index, dx/dy = how far) or resized (ZOOM: the same fields)."""
+    def gesture(mut self, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, pressure: Float64 = 0) -> Diff:
+        """A gesture on canvas node `node` (PAN, ZOOM or TAP; PRESS, PAN and RELEASE carry the pen's pressure, 0: none);
+        on a Board node, a child moved (PAN: x = the child's index, dx/dy = how far) or resized (ZOOM: the same fields)."""
         if node < 0 or node >= len(self.shown.nodes):
             return Diff(False, [])
         ref n = self.shown.nodes[node]
@@ -544,7 +575,7 @@ struct Runtime[A: App](Movable):
             return self.dispatch(Event(msg, "", Int(x), x, y, dx, dy, zoom))
         if n.kind != CANVAS or n.msg == 0:
             return Diff(False, [])
-        return self.dispatch(Event(n.msg, "", kind, x, y, dx, dy, zoom))
+        return self.dispatch(Event(n.msg, "", kind, x, y, dx, dy, zoom, pressure=pressure))
 
     def key(mut self, node: Int, name: String, modifiers: Int) -> Diff:
         """A key pressed while canvas node `node` had focus: its gesture message with number = KEY,

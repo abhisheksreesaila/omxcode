@@ -44,7 +44,7 @@ WEBCOMP = 40  # a JavaScript widget (mojoui.webcomponent): hint = its tag, value
 JSON_TYPES = {"string": (str,), "number": (int, float), "integer": (int,), "boolean": (bool,), "array": (list,), "object": (dict,)}
 CHECKED, DISABLED = 1, 2  # menu item flags (mojoui/menus.mojo)
 GESTURES = {"pan": 1, "zoom": 2, "tap": 3, "press": 4, "release": 5, "double": 6, "key": 7, "secondary": 8}
-SET_TO = 9  # a settable canvas (View.settable) set straight to a number: event.text = the number
+SET_TO = 10  # a settable canvas (View.settable) set straight to a number: event.text = the number
 MODIFIERS = {"shift": 1, "ctrl": 2, "alt": 4}
 PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
 CORE = ("screen", "act", "read", "render")
@@ -463,7 +463,7 @@ class Host:
     def send_gesture(self, i, kind, x, y, dx, dy, zoom):
         if self.link is not None:
             return self.link.ok({"op": "gesture", "node": i, "kind": kind, "x": x, "y": y, "dx": dx, "dy": dy, "zoom": zoom})
-        return self.mod.gesture(self.handle, i, kind, x, y, dx, dy, zoom)
+        return self.mod.gesture(self.handle, i, kind, x, y, dx, dy, zoom, 0)
 
     def send_key(self, i, name, mods):
         if self.link is not None:

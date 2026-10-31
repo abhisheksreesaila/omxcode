@@ -889,31 +889,31 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
-| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper, traycheck |
+| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper, traycheck |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper |
 | `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
 | `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console, agentchat |
 | `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, media |
-| `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console |
-| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, agentchat |
-| `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, workbook, mxstudio, omxplorer |
+| `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console, sketch, dictate |
+| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, agentchat, jot, keeper |
+| `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, workbook, mxstudio, omxplorer, jot |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
 | `Dropdown` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, analytics, workbook, mxstudio, omxplorer, themes, kit |
 | `Slider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, gpu, lens |
 | `Segmented` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | kitchen, expenses, lens, analytics, mxstudio, omxplorer, themes, kit, media |
 | `Radio` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, omxplorer, kit |
 | `DatePicker` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
-| `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes |
+| `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes, jot, keeper |
 | `Image` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, gpu |
-| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer |
+| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer, keeper |
 | `Alert` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
-| `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout |
-| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, media |
+| `LazyList` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, jot, keeper |
+| `Canvas` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | lens, analytics, workbook, mxstudio, omxplorer, themes, kit, media, sketch |
 | `Board` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, omxplorer, kit |
 | `Overlay` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | workbook, mxstudio, kit |
 | `MenuBar` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ✅ | omxplorer, kit |
@@ -928,9 +928,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `Table` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
 | `Route` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit, console |
 | `Draggable` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
-| `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
+| `DropTarget` | 🔨 | ✅ | ❌ | 🔨 | ❌ | ❌ | console, jot |
 | `WebFrame` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
-| `Paragraph` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | consolekit |
+| `Paragraph` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | consolekit, jot |
 | `WebComponent` | ✅ | ✅ | ❌ | 🔨 | ❌ | ✅ | widgets |
 
 ## Variants, gestures, layout, design languages
@@ -947,6 +947,10 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Canvas: pan, zoom, tap | `on_gesture: PAN, ZOOM, TAP` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: press, release, double | `PRESS, RELEASE, DOUBLE` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Canvas frames (animation) | `on_frame` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
+| Canvas: pen pressure | `event.pressure on PRESS, PAN, RELEASE (0: none)` | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ |
+| Canvas: scroll pans | `Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
+| Scene: polygon fill | `Painter.polygon (non-zero, antialiased)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 |
+| Scene: layer transform | `Painter.layer_transform (pan/zoom moves a kept layer)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 |
 | Canvas: keys (focus on press) | `on_gesture: KEY (event.text, modifiers)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | TextField: Escape cancels | `TextField(on_cancel=)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Editor that echoes the grid's typing | `TextField(…).echo()` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -972,6 +976,44 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | HTTP requests (effects; replies as Events) | `mojoui.http: Request.get/post_json · App.requests() · comptime HTTP` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Timers | `App.every() -> [Every(ms, msg)]` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | Scroll pinned to its end | `Scroll(…, pinned=True)` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
+| SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5) | `Database(path) · prepare(sql).bind/step · begin/commit` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
+| Save dialog | `FileSaver(title, on_save, suggested=)` | 🔨 | ✅ | ❌ | ❌ | ❌ | ❌ |
+| File drop from outside the app | `DropTarget(view, on_drop, on_file=)` | 🔨 | 🔨 | ❌ | ❌ | ❌ | ❌ |
+| Quit hook | `def closing(mut self)` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
+| Folder watcher (mojoui.watch: inotify / FSEvents on its own thread) | `FolderWatcher(path, wake=True) · start() · take()` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
+| Background mode (keeps running with the window closed) | `def background(self) -> Bool · window_shown(shown)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Tray item (StatusNotifierItem; NSStatusItem) | `published by the host for a background() app; Activate opens the window` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Notifications (mojoui.notify) | `notify(app, title, body)` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
+
+- File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
+- Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
+- Save dialog (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the save: step; GTK's own save dialog isn't driven.
+- File drop from outside the app (Linux (GTK)): 🔨 though a check runs it: the dropfile: step builds a real GdkFileList and emits the GtkDropTarget's drop signal; a drag from a real file manager isn't driven headless.
+- File drop from outside the app (Web): 🔨 though a check runs it: drive.py's dropfile: dispatches a drop event carrying a File (no OS drag).
+- Quit hook (Web): 🔨 though a check runs it: the session's App.closing runs when it's evicted or the server stops (tried by hand: a SIGINT); no check runs it, and closing a tab doesn't end its session.
+- SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5): the system's libsqlite3 loaded at run time (dlopen, D-1304/D-1311); Android and iPhone don't build it yet; the Mac links against nothing new and loads /usr/lib/libsqlite3.dylib (built, not run).
+- Folder watcher (mojoui.watch: inotify / FSEvents on its own thread): Linux: inotify on a pthread, new folders followed, one event per change, p95 lag 0.01 ms for 1,000 changes (goal 45 M0); a folder renamed inside reports its files under the new name, an overflow re-watches and says rescan, a folder it can't watch makes it partial() with the reason, names with newlines or non-UTF-8 bytes arrive whole (tests/test_watch_edges.mojo); Mac: FSEvents (file-level events, a dispatch queue), built, not run, and it doesn't pair a rename's two halves; the web has FileSystemObserver only on a folder the person picked or dropped, only while the tab is open (docs/goals/45/web.json).
+- Background mode (keeps running with the window closed): GTK: the window hides on close only while a panel's StatusNotifierWatcher has the tray item (otherwise closing ends the app); one instance per app, so launching it again opens the running one (goal 45 M1); the Mac has none yet (the AppKit host still quits when its last window closes); a web page's code stops when its tab closes (docs/goals/45/web.json).
+- Tray item (StatusNotifierItem; NSStatusItem): Linux: a StatusNotifierItem on the session bus (Activate, SecondaryActivate, ContextMenu open the window), a minimal com.canonical.dbusmenu with Open and Quit, registered again whenever a panel's watcher appears; checked on a private bus with a pretend watcher, no real panel; Mac: NSStatusItem not built yet; the web has no tray API.
+- Notifications (mojoui.notify): Linux: org.freedesktop.Notifications.Notify, asynchronous (goal 45 M1, M2); Mac: UNUserNotificationCenter, built, not run, and it doesn't ask the person's permission yet (that needs a block).
+- Save dialog: the app writes the file at the path it's given; on the web that path is the page's downloads folder and the page downloads it; the Mac has no NSSavePanel yet (nor an NSOpenPanel for the file picker).
+- Scene: layer transform: GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a big page at a big zoom it's softer than the strokes until the zoom comes back within the cap.
+
+## Native services (the machine, not a widget)
+
+| Service | API | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) |
+|---|---|---|---|---|---|---|---|
+| Microphone | `mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+| Speech model in process | `mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)` | ✅ | ❌ | ❌ | 🔨 | ❌ | — |
+
+- Microphone (Web): the web host doesn't stream the browser's microphone to the app.
+- Microphone (Android): not built.
+- Microphone (Mac (AppKit)): builds; start() reports "no microphone on this host yet" (AVAudioEngine planned).
+- Microphone (iPhone (UIKit)): not built.
+- Speech model in process (Web): the model needs CPython + torch in the app's process.
+- Speech model in process (Android): not built.
+- Speech model in process (Mac (AppKit)): builds; needs CPython with torch beside the app (MPS), never run.
+- Speech model in process (iPhone (UIKit)): no CPython on the phone.
 
 ## Composite components (Mojo, built from the ones above)
 
@@ -979,6 +1021,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 
 | Component | Module | Made of | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Used by |
 |---|---|---|---|---|---|---|---|---|---|
+| `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | sketch |
 | `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | maccheck, mxstudio, omxplorer, workbook |
 | `PivotTable` | `mojoui/pivot.mojo` | Grid, Scroll, Text tones | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, omxplorer, workbook |
 | `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | dashboard, maccheck, media, mxstudio, omxplorer, workbook |
@@ -1074,12 +1117,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 153 | 5 | 0 |
-| Web | 153 | 2 | 3 |
-| Android | 19 | 48 | 91 |
-| Mac (AppKit) | 0 | 139 | 19 |
-| iPhone (UIKit) | 0 | 117 | 41 |
-| Agent (MCP) | 57 | 38 | 63 |
+| Linux (GTK) | 162 | 9 | 0 |
+| Web | 155 | 9 | 7 |
+| Android | 19 | 50 | 102 |
+| Mac (AppKit) | 0 | 148 | 23 |
+| iPhone (UIKit) | 0 | 119 | 52 |
+| Agent (MCP) | 57 | 40 | 74 |
 
 ## Inside one app, not components yet (the debt)
 

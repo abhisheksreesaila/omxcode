@@ -159,9 +159,9 @@ def web_draw[A: App](handle: Int, node: Int, width: Int, height: Int, scale: Flo
             + ',"again":' + ("true" if surface.again else "false") + ',"diff":' + diff_to_json(d, tab[].rt.shown) + "}")
 
 
-def web_gesture[A: App](handle: Int, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64) -> String:
+def web_gesture[A: App](handle: Int, node: Int, kind: Int, x: Float64, y: Float64, dx: Float64, dy: Float64, zoom: Float64, pressure: Float64 = 0) -> String:
     var rt = session_at[A](handle)
-    var d = rt[].gesture(node, kind, x, y, dx, dy, zoom)
+    var d = rt[].gesture(node, kind, x, y, dx, dy, zoom, pressure)
     return diff_to_json(d, rt[].shown)
 
 
@@ -336,6 +336,8 @@ def web_image[A: App](handle: Int, node: Int) -> String:
 
 
 def web_close[A: App](handle: Int):
+    """A session ends (its tab closed or expired, the server stopping): App.closing first, then it's freed."""
     var tab = tab_at[A](handle)
+    tab[].rt.closing()
     tab.unsafe_deinit_pointee()
     tab.unsafe_free()

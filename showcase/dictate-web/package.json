@@ -1,0 +1,8 @@
+{
+  "name": "dictate-web",
+  "private": true,
+  "description": "Goal 43's side B: whisper-large-v3-turbo through transformers.js on WebGPU (scripts/dictate_race.py)",
+  "dependencies": {
+    "@huggingface/transformers": "4.3.2"
+  }
+}

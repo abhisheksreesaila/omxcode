@@ -2616,7 +2616,7 @@ struct Main(App):
                 self.analyze_card = -1
                 self.reel_card = -1
                 self.version += 1
-            elif self.media.acted == ACT_ANALYZE:  # (the analyzer that fits starts at once; the popover offers the others, D-1201)
+            elif self.media.acted == ACT_ANALYZE:  # (the analyzer that fits starts at once; the popover offers the others, D-1701)
                 var k = self.media.acted_card
                 self.analyze_card = k
                 if not self.video.busy() and self.video.found_path != self.media.cards[k].path:

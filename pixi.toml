@@ -60,5 +60,18 @@ accelerate = "*"
 safetensors = "*"
 python-doctr = ">=1.1.0, <2"
 
+# Goal 43 (Dictate): a separate feature + environment for the speech model in process (mojoui/speech.mojo), copied from
+# goal 39's `models` approach so the default environment and its packages stay unchanged. Torch from PyPI's default CUDA
+# wheels (their own CUDA libraries), so no `__cuda` platform. Run with `pixi run -e speech ...`. Linux only (D-1405).
+[feature.speech]
+platforms = ["linux-glibc-234"]
+
+[feature.speech.pypi-dependencies]
+torch = ">=2.9"
+transformers = ">=4.56"
+accelerate = "*"
+soundfile = "*"
+
 [environments]
 models = { features = ["models"], solve-group = "models" }
+speech = { features = ["speech"], solve-group = "speech" }

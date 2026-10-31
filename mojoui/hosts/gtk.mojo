@@ -15,7 +15,7 @@ from std.memory.alloc import alloc, Layout
 from mojoui.menus import items_text, CHECKED, DISABLED, DANGER
 from mojoui.view import (
     CLIPBOARD, TABLE, ROUTE, DRAG, DROP, EMBED, WEBCOMP, PARAGRAPH, View, TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
-    SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP,
+    SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, MENUBAR, MENU, ITEM, DIALOG, TOAST, POPOVER, SECONDARY, PAN, ZOOM, TAP, WHEEL,
     START, CENTER, END, STRETCH, BETWEEN, AUTO, Node, CARD, CARD_WARN, CARD_GOOD,
     TITLE, HEADLINE, CAPTION, PROMINENT, DESTRUCTIVE, OVERLAY, PRESS, RELEASE, DOUBLE, SUBTLE, ICON_ONLY, ICON_ON, TOOL, TOOL_ON, TOOL_INLINE, TOOL_INLINE_ON, TOKEN, TOKEN_LIT, KEY, SHIFT, CTRL, ALT,
 )
@@ -24,22 +24,24 @@ from mojoui.diff import Diff, Patch, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, 
 from mojoui.boardlook import board_gtk_css
 from mojoui.app import App, Event, Runtime, ms, budget_from_env
 from mojoui.canvas import Surface, rgba
+from mojoui.png import encode_png
 from mojoui.present import Presenter, gpu_canvas_gate
 from mojoui.gpu import GPU_BUILD
-from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE
+from mojoui.scene import Scene, OP_RECT, OP_CIRCLE, OP_LINE, OP_TEXT, OP_FILL, OP_CLIP, OP_UNCLIP, OP_IMAGE, OP_POLY
 from std.collections import Dict
 from mojoui.icons_data import LUCIDE_NAMES, lucide_svg
 from mojoui.theme import Palette, Theme, Look, hex_of, mix
 from mojoui.embed import is_web_url
 from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
-from mojoui.view import NO_MSG, HOLD_MS
+from mojoui.view import NO_MSG, HOLD_MS, is_file_saver
 from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
 from mojoui.jobs import wake_pipe, drain_wakes
+from mojoui.tray import TrayItem
 from mojoui.geometry import register_rects
 from mojoui.regions import regions, headline_in
 from mojoui.hosts.devtools import DEVTOOLS
@@ -48,7 +50,7 @@ from mojoui.hosts.web import view_to_json, control_event
 from mojoui.json import Json
 from mojoui.paragraph import pango_markup, link_href, runs_of
 from mojoui.linebreak import css_breaks, plain_words, label_words
-from std.math import log2
+from std.math import log2, floor
 from std.time import perf_counter_ns, sleep
 
 comptime G_APPLICATION_NON_UNIQUE = 32
@@ -59,6 +61,7 @@ comptime VERTICAL = 1
 comptime ALIGN_CENTER = 3
 comptime RTLD_DEFAULT = 0  # glibc
 comptime NODE_KEY = "mojoui-node"
+comptime DROP_FILES_KEY = "mojoui-drop-files"  # a DropTarget's box → its GtkDropTarget for files (on_file)
 comptime DRAG_KEY = "mojoui-drag-source"  # a Draggable's box → its GtkDragSource
 comptime DROP_KEY = "mojoui-drop-target"  # a DropTarget's box → its GtkDropTarget
 comptime G_TYPE_STRING = 64  # G_TYPE_MAKE_FUNDAMENTAL(16)
@@ -497,11 +500,20 @@ struct GtkCanvas(Copyable, Movable):
     var ptr_y: Float64
     var pinch: Float64  # the pinch's scale so far
     var moved: Bool  # the current press became a drag (so it's not a tap)
+    var pressure: Float64  # the pen's pressure at the last press or move (0: the device has none), goal 40
+    var test_pressure: Float64  # the `stroke:` test step's pressure for the next press or move (-1: read the device)
+    var test_zoom: Bool  # the `zoom:` test step's scroll is a ctrl+scroll (a zoom on a canvas whose scroll pans)
     var armed: Bool  # a tick callback is running (only while frames, a redraw or a resize may be due)
     var quiet: Int  # idle ticks in a row (layout can change after ticks, so wait before stopping)
     var spare: Scene  # the list before that, recycled for the next frame (its memory, not its content)
     var prev: Scene  # the display list last drawn (MOJOUI_SCENE): a layer that comes again unchanged keeps its nodes
     var layer_nodes: List[Int]  # the GskRenderNode built for each of prev's layers
+    var layer_tex: List[Int]  # a moved layer's node rendered once into a texture (0: none), at layer_tex_k, its bounds'
+    var layer_tex_k: List[Float64]  # top-left at (layer_tex_x, layer_tex_y): a pan or zoom then moves pixels (goal 40)
+    var layer_tex_x: List[Float64]
+    var layer_tex_y: List[Float64]
+    var layer_tex_w: List[Float64]  # the texture's node's bounds' size (the layer's own units): its scale's 4096 px cap
+    var layer_tex_h: List[Float64]
     var pending: Int  # a GPU picture queued last frame, shown once this frame's GPU work is queued (-1: none, D-746)
     var pending_w: Int
     var pending_h: Int
@@ -537,6 +549,15 @@ struct GtkCanvas(Copyable, Movable):
         self.ptr_y = -1
         self.pinch = 1
         self.moved = False
+        self.layer_tex = List[Int]()
+        self.layer_tex_k = List[Float64]()
+        self.layer_tex_x = List[Float64]()
+        self.layer_tex_y = List[Float64]()
+        self.layer_tex_w = List[Float64]()
+        self.layer_tex_h = List[Float64]()
+        self.pressure = 0
+        self.test_pressure = -1
+        self.test_zoom = False
         self.armed = False
         self.quiet = 0
         self.prev = Scene(0, 0, 1)
@@ -591,6 +612,7 @@ struct GtkHost[A: App](Movable):
     var revealed: Int  # the last Board reveal token scrolled to (Board's value)
     var clip_version: Int  # the Clipboard view's version last copied
     var embed_version: Int  # the WebFrame's version last opened in the browser
+    var paint_timed: Bool  # before-/after-paint are connected (MOJOUI_TRACE, or a framebench step asked)
     var paint_t0: Int  # the frame clock's before-paint time (ns), and every frame's paint phase since bench started (ms)
     var frame_paints: List[Float64]
     var frame_times: List[Int]  # when each frame was painted (ns): the intervals between them say whether frames were on time
@@ -628,6 +650,10 @@ struct GtkHost[A: App](Movable):
     var scratch: List[Float32]  # GdkRGBA, graphene rects and points, GskRoundedRect handed to GTK by address
     var nodes_built: Int  # layers built into render nodes, and layers reused untouched (bench reports them)
     var nodes_reused: Int
+    var layer_textures: Int  # moved layers rendered into textures (layer_texture)
+    var built_keys: List[String]  # per layer key: how often it was built into nodes whole, and how often new ops were
+    var built_counts: List[Int]  # only added to what was kept (Scene.appends); framebench reports them (goal 40)
+    var appended_counts: List[Int]
     var cells_built: Int  # the "cells" layer built into nodes (not reused), and pixel textures handed to GTK: bench reports them
     var uploads: Int
     var new_layouts: Int  # text laid out for the first time, and how long that took (ns): the replay's own trace
@@ -644,6 +670,9 @@ struct GtkHost[A: App](Movable):
     var skin_provider: Int  # the theme's CSS provider (replaced when App.theme() changes: Settings → Appearance, a mode's tint)
     var skin_key: String  # the theme that provider is for (Theme.key)
     var skin_classes: String  # the CSS classes it put on the window
+    var closed: Bool  # the window closed (close-request answered): test steps stop, no report
+    var hidden: Bool  # background mode (App.background): the window was closed and only hid; the tray opens it again
+    var tray: TrayItem  # background mode: the tray item (published at start; registered() while a panel shows it)
     var dark_told: Int  # what App.appearance last said (1 dark, 0 light, -1 not yet): only a change is told again
     var forcing_scheme: Bool  # set while the host itself changes light/dark (a theme forcing one): not the person's change
     var icons_key: String  # the ink the icons were written in
@@ -660,6 +689,7 @@ struct GtkHost[A: App](Movable):
     var editor_keys: Int  # the in-place editor's key controller (test steps press Escape through it)
     var editor_open: Bool  # the last build showed an in-place editor
     var picker_node: Int  # the FilePicker whose dialog is open
+    var picker_msg: Int  # its on_pick / on_save message (the answer goes by message: a rebuild meanwhile may renumber nodes)
     var editor_node: Int  # (its node there)
     var fx_source: Int  # the GLib timeout that next polls the runtime's effects (HTTP replies, timers; 0: none)
     var fx_due: Int  # when it fires (µs, g_get_monotonic_time)
@@ -720,6 +750,10 @@ struct GtkHost[A: App](Movable):
         self.new_layouts = 0
         self.new_layout_ns = 0
         self.cells_built = 0
+        self.built_keys = List[String]()
+        self.built_counts = List[Int]()
+        self.appended_counts = List[Int]()
+        self.layer_textures = 0
         self.uploads = 0  # (MOJOUI_NO_PARTIAL=1: every shape change rebuilds the window, to compare)
         self.canvases = List[GtkCanvas]()
         self.boards = List[BoardChild]()
@@ -742,6 +776,7 @@ struct GtkHost[A: App](Movable):
         self.embed_version = 0
         self.key_draws = 0
         self.paint_t0 = 0
+        self.paint_timed = False
         self.frame_paints = List[Float64]()
         self.frame_times = List[Int]()
         self.key_draw_ms = 0
@@ -775,6 +810,9 @@ struct GtkHost[A: App](Movable):
         self.skin_classes = ""
         self.forcing_scheme = False
         self.dark_told = -1
+        self.closed = False
+        self.hidden = False
+        self.tray = TrayItem("", "")
         self.icons_key = ""
         self.fonts = False
         self.css = 0
@@ -789,6 +827,7 @@ struct GtkHost[A: App](Movable):
         self.editor_keys = 0
         self.editor_open = False
         self.picker_node = -1
+        self.picker_msg = 0
         self.editor_node = -1
         self.fx_source = 0
         self.fx_due = 0
@@ -1479,7 +1518,7 @@ struct GtkHost[A: App](Movable):
             connect_any(drag, "drag-update", on_drag_update[Self.A], self_addr)
             connect_any(drag, "drag-end", on_drag_end[Self.A], self_addr)
             external_call["gtk_widget_add_controller", NoneType](w, drag)
-            var scroll = external_call["gtk_event_controller_scroll_new", Int](c_int(1))  # vertical
+            var scroll = external_call["gtk_event_controller_scroll_new", Int](c_int(3 if node.spacing == 1 else 1))  # both axes when it pans, else vertical
             set_index(scroll, ci)
             connect_any(scroll, "scroll", on_scroll[Self.A], self_addr)
             external_call["gtk_widget_add_controller", NoneType](w, scroll)
@@ -2011,6 +2050,13 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_widget_add_controller", NoneType](w, target)
                 var key = String(DROP_KEY)
                 external_call["g_object_set_data", NoneType](w, key.as_c_string_span(), target)
+                if node.msg2 != 0:  # on_file: a second target for files from outside (the file manager's GdkFileList)
+                    var files = external_call["gtk_drop_target_new", Int](external_call["gdk_file_list_get_type", Int](), c_int(GDK_ACTION_COPY))
+                    set_node(files, i)
+                    connect_any(files, "drop", on_drop_files[Self.A], self_addr)
+                    external_call["gtk_widget_add_controller", NoneType](w, files)
+                    var fkey = String(DROP_FILES_KEY)
+                    external_call["g_object_set_data", NoneType](w, fkey.as_c_string_span(), files)
             elif node.kind == WEBCOMP:  # its widget in a WebKitGTK view of its own (kept across rebuilds), else `instead`
                 self.place_webview(i, w, self_addr)
             elif node.size > 0 and not node.sized_height():
@@ -2599,7 +2645,7 @@ struct GtkHost[A: App](Movable):
                         external_call["adw_button_content_set_label", NoneType](external_call["gtk_button_get_child", Int](w), t.as_c_string_span())
                 elif kind == BUTTON or kind == TOGGLE:
                     external_call["gtk_button_set_label", NoneType](w, t.as_c_string_span()) if kind == BUTTON else external_call["gtk_check_button_set_label", NoneType](w, t.as_c_string_span())
-                elif kind == FIELD:
+                elif kind == FIELD and not is_held(w):  # (a change held while busy is newer than this patch: D-1321)
                     if c_str(external_call["gtk_editable_get_text", Int](w)) != p.text:  # don't fight the typist
                         external_call["gtk_editable_set_text", NoneType](w, t.as_c_string_span())
             if p.op == SET_TEXT and kind == TABLE:  # which rows are selected
@@ -2694,7 +2740,7 @@ struct GtkHost[A: App](Movable):
             ref en = self.rt.shown.nodes[self.echo_node]
             var ew = self.widgets[self.echo_node]
             var want = en.text
-            if en.kind == FIELD and want != self.echo_text and c_str(external_call["gtk_editable_get_text", Int](ew)) != want:
+            if en.kind == FIELD and want != self.echo_text and not is_held(ew) and c_str(external_call["gtk_editable_get_text", Int](ew)) != want:
                 external_call["gtk_editable_set_text", NoneType](ew, want.as_c_string_span())
             elif en.kind == TEXTAREA and want != self.echo_text:
                 var buffer = external_call["gtk_text_view_get_buffer", Int](ew)
@@ -2871,7 +2917,8 @@ struct GtkHost[A: App](Movable):
         if ci < 0 or ci >= len(self.canvases):
             return
         var t0 = perf_counter_ns()
-        var d = self.rt.gesture(self.canvases[ci].node, kind, x, y, dx, dy, zoom)
+        var p = self.canvases[ci].pressure if kind == PRESS or kind == PAN or kind == RELEASE else 0.0
+        var d = self.rt.gesture(self.canvases[ci].node, kind, x, y, dx, dy, zoom, p)
         self.trace_diff("event gesture", t0, d)
         self.apply(d, self_addr)
 
@@ -3187,9 +3234,13 @@ struct GtkHost[A: App](Movable):
 
     def build_layer(mut self, sc: Scene, i: Int) -> Int:
         """Layer i of the scene as one render node (0 when it draws nothing)."""
-        var snap = external_call["gtk_snapshot_new", Int]()
         var r = sc.layer_range(i)
-        for op in range(r[0], r[1]):
+        return self.build_ops(sc, r[0], r[1])
+
+    def build_ops(mut self, sc: Scene, first: Int, end: Int) -> Int:
+        """The scene's ops [first, end) as one render node (0 when they draw nothing)."""
+        var snap = external_call["gtk_snapshot_new", Int]()
+        for op in range(first, end):
             var kind = Int(sc.kinds[op])
             var c = sc.colors[op]
             if kind == OP_FILL or kind == OP_RECT:
@@ -3217,6 +3268,17 @@ struct GtkHost[A: App](Movable):
                     external_call["gtk_snapshot_append_stroke", NoneType](snap, path, stroke, self.at(0))
                     external_call["gsk_stroke_free", NoneType](stroke)
                     external_call["gsk_path_unref", NoneType](path)
+            elif kind == OP_POLY:  # (a filled path, non-zero: an ink stroke's outline; GTK's renderer fills it antialiased)
+                var m = Int(sc.num(op, 1))
+                var b = external_call["gsk_path_builder_new", Int]()
+                external_call["gsk_path_builder_move_to", NoneType](b, Float32(sc.poly_x(op, 0)), Float32(sc.poly_y(op, 0)))
+                for z in range(1, m):
+                    external_call["gsk_path_builder_line_to", NoneType](b, Float32(sc.poly_x(op, z)), Float32(sc.poly_y(op, z)))
+                external_call["gsk_path_builder_close", NoneType](b)
+                var path = external_call["gsk_path_builder_free_to_path", Int](b)
+                self.put_rgba(c)
+                external_call["gtk_snapshot_append_fill", NoneType](snap, path, c_int(0), self.at(0))  # GSK_FILL_RULE_WINDING
+                external_call["gsk_path_unref", NoneType](path)
             elif kind == OP_CLIP:
                 self.put_rect(sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), sc.num(op, 3))
                 external_call["gtk_snapshot_push_clip", NoneType](snap, self.at(4))
@@ -3233,6 +3295,149 @@ struct GtkHost[A: App](Movable):
                 self.snap_text(snap, sc.text_at(op), sc.num(op, 0), sc.num(op, 1), sc.num(op, 2), c, Int(sc.num(op, 4)), Int(sc.num(op, 5)), sc.num(op, 3))
         return external_call["gtk_snapshot_free_to_node", Int](snap)
 
+    def bounds(mut self, node: Int) -> Tuple[Float64, Float64, Float64, Float64]:
+        """A render node's bounds: left, top, width, height."""
+        external_call["gsk_render_node_get_bounds", NoneType](node, self.at(28))
+        return (Float64(self.scratch[28]), Float64(self.scratch[29]), Float64(self.scratch[30]), Float64(self.scratch[31]))
+
+    def layer_texture(mut self, node: Int, k: Float64) -> Tuple[Int, Float64, Float64, Float64]:
+        """A moved layer's node rendered once, at scale k (smaller if it would pass 4096 px: tex_scale), by the window's
+        renderer: (texture, its scale, the node's bounds' left and top). A pan then moves these pixels instead of filling
+        every path again (cairo re-fills a kept node on every frame: 1,000 strokes cost ~32 ms, D-1216). (0, …) if it can't."""
+        var renderer = external_call["gtk_native_get_renderer", Int](self.window)
+        if renderer == 0:
+            return (0, 0.0, 0.0, 0.0)
+        var b = self.bounds(node)
+        var bx = b[0]
+        var by = b[1]
+        var bw = b[2]
+        var bh = b[3]
+        if bw <= 0 or bh <= 0:
+            return (0, 0.0, 0.0, 0.0)
+        var tk = tex_scale(k, bw, bh)
+        var fx = floor(bx * tk)  # (the texture's corner on a whole pixel: a pan by whole pixels then shows it unresampled)
+        var fy = floor(by * tk)
+        bw += bx - fx / tk
+        bh += by - fy / tk
+        bx = fx / tk
+        by = fy / tk
+        var snap = external_call["gtk_snapshot_new", Int]()
+        external_call["gtk_snapshot_scale", NoneType](snap, Float32(tk), Float32(tk))
+        self.scratch[26] = Float32(-bx)
+        self.scratch[27] = Float32(-by)
+        external_call["gtk_snapshot_translate", NoneType](snap, self.at(26))
+        external_call["gtk_snapshot_append_node", NoneType](snap, node)
+        var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+        if root == 0:
+            return (0, 0.0, 0.0, 0.0)
+        self.put_rect(0, 0, Float64(Int(bw * tk + 0.999)), Float64(Int(bh * tk + 0.999)))
+        var t = external_call["gsk_renderer_render_texture", Int](renderer, root, self.at(4))
+        external_call["gsk_render_node_unref", NoneType](root)
+        self.layer_textures += 1
+        return (t, tk, bx, by)
+
+    def append_texture(mut self, old: Int, tk: Float64, ox: Float64, oy: Float64, add: Int) -> Tuple[Int, Float64, Float64, Float64]:
+        """A layer's texture (at scale tk, its top-left at ox, oy in the layer's units) with the node `add` (the ops the
+        layer gained) drawn on top: the old pixels are copied 1:1 (at whole-pixel offsets, so they never soften) and only
+        the new ops are filled (D-1219). (0, …) when the grown texture would pass 4096 px (the caller renders it whole)."""
+        var renderer = external_call["gtk_native_get_renderer", Int](self.window)
+        if renderer == 0 or old == 0 or add == 0:
+            return (0, 0.0, 0.0, 0.0)
+        var tw = Float64(Int(external_call["gdk_texture_get_width", c_int](old)))
+        var th = Float64(Int(external_call["gdk_texture_get_height", c_int](old)))
+        var a = self.bounds(add)
+        var px = Float64(Int(max(ox - a[0], 0.0) * tk + 0.999))  # (whole pixels the texture grows by, left and up)
+        var py = Float64(Int(max(oy - a[1], 0.0) * tk + 0.999))
+        var nx = ox - px / tk
+        var ny = oy - py / tk
+        var w = Float64(Int(max(px + tw, (a[0] + a[2] - nx) * tk) + 0.999))
+        var h = Float64(Int(max(py + th, (a[1] + a[3] - ny) * tk) + 0.999))
+        if w > 4096 or h > 4096:
+            return (0, 0.0, 0.0, 0.0)
+        var snap = external_call["gtk_snapshot_new", Int]()
+        self.put_rect(px, py, tw, th)
+        external_call["gtk_snapshot_append_texture", NoneType](snap, old, self.at(4))
+        external_call["gtk_snapshot_scale", NoneType](snap, Float32(tk), Float32(tk))
+        self.scratch[26] = Float32(-nx)
+        self.scratch[27] = Float32(-ny)
+        external_call["gtk_snapshot_translate", NoneType](snap, self.at(26))
+        external_call["gtk_snapshot_append_node", NoneType](snap, add)
+        var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+        if root == 0:
+            return (0, 0.0, 0.0, 0.0)
+        self.put_rect(0, 0, w, h)
+        var t = external_call["gsk_renderer_render_texture", Int](renderer, root, self.at(4))
+        external_call["gsk_render_node_unref", NoneType](root)
+        self.layer_textures += 1
+        return (t, tk, nx, ny)
+
+    def mend_texture(mut self, old: Int, tk: Float64, ox: Float64, oy: Float64, node: Int, box: List[Float64]) -> Int:
+        """A layer's texture (scale tk, top-left ox, oy) after ops inside `box` (the layer's units) were taken out: the old
+        pixels outside the box (whole pixels, copied 1:1) and the layer's new node drawn inside it, clipped there, so
+        the rest isn't filled again (D-1220). Same size and place. 0 when the box covers most of it (render it whole)."""
+        var renderer = external_call["gtk_native_get_renderer", Int](self.window)
+        if renderer == 0 or old == 0 or node == 0:
+            return 0
+        var tw = Float64(Int(external_call["gdk_texture_get_width", c_int](old)))
+        var th = Float64(Int(external_call["gdk_texture_get_height", c_int](old)))
+        var x0 = max(Float64(Int((box[0] - ox) * tk)) - 3, 0.0)  # (whole pixels, a little wider for the edge's AA)
+        var y0 = max(Float64(Int((box[1] - oy) * tk)) - 3, 0.0)
+        var x1 = min(Float64(Int((box[2] - ox) * tk + 0.999)) + 3, tw)
+        var y1 = min(Float64(Int((box[3] - oy) * tk + 0.999)) + 3, th)
+        if x1 <= x0 or y1 <= y0:  # (it drew outside the texture: nothing to mend)
+            _ = external_call["g_object_ref", Int](old)
+            return old
+        if (x1 - x0) * (y1 - y0) > 0.5 * tw * th:
+            return 0
+        var snap = external_call["gtk_snapshot_new", Int]()
+        var keep: List[Float64] = [0, 0, tw, y0, 0, y1, tw, th - y1, 0, y0, x0, y1 - y0, x1, y0, tw - x1, y1 - y0]  # (around the box)
+        for k in range(4):
+            if keep[4 * k + 2] <= 0 or keep[4 * k + 3] <= 0:
+                continue
+            self.put_rect(keep[4 * k], keep[4 * k + 1], keep[4 * k + 2], keep[4 * k + 3])
+            external_call["gtk_snapshot_push_clip", NoneType](snap, self.at(4))
+            self.put_rect(0, 0, tw, th)
+            external_call["gtk_snapshot_append_texture", NoneType](snap, old, self.at(4))
+            external_call["gtk_snapshot_pop", NoneType](snap)
+        self.put_rect(x0, y0, x1 - x0, y1 - y0)
+        external_call["gtk_snapshot_push_clip", NoneType](snap, self.at(4))
+        external_call["gtk_snapshot_save", NoneType](snap)
+        external_call["gtk_snapshot_scale", NoneType](snap, Float32(tk), Float32(tk))
+        self.scratch[26] = Float32(-ox)
+        self.scratch[27] = Float32(-oy)
+        external_call["gtk_snapshot_translate", NoneType](snap, self.at(26))
+        external_call["gtk_snapshot_append_node", NoneType](snap, node)
+        external_call["gtk_snapshot_restore", NoneType](snap)
+        external_call["gtk_snapshot_pop", NoneType](snap)
+        var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+        if root == 0:
+            return 0
+        self.put_rect(0, 0, tw, th)
+        var t = external_call["gsk_renderer_render_texture", Int](renderer, root, self.at(4))
+        external_call["gsk_render_node_unref", NoneType](root)
+        self.layer_textures += 1
+        return t
+
+    def count_built(mut self, key: String, appended: Bool):
+        """One more build (or append, D-1219) of a layer with this key (framebench's per-layer counts)."""
+        for k in range(len(self.built_keys)):
+            if self.built_keys[k] == key:
+                if appended:
+                    self.appended_counts[k] += 1
+                else:
+                    self.built_counts[k] += 1
+                return
+        self.built_keys.append(key)
+        self.built_counts.append(0 if appended else 1)
+        self.appended_counts.append(1 if appended else 0)
+
+    def built_report(self, appended: Bool) -> String:
+        """key:count,key:count (- when no layer was built)."""
+        var out = String("")
+        for k in range(len(self.built_keys)):
+            out += ("," if out != "" else "") + (self.built_keys[k] if self.built_keys[k] != "" else String("_")) + ":" + String(self.appended_counts[k] if appended else self.built_counts[k])
+        return out if out != "" else String("-")
+
     def release_canvases(mut self, staying: List[Bool]):
         """The render nodes of the canvases that go (all of them when `staying` is empty)."""
         for k in range(len(self.canvases)):
@@ -3242,6 +3447,15 @@ struct GtkHost[A: App](Movable):
                 if n != 0:
                     external_call["gsk_render_node_unref", NoneType](n)
             self.canvases[k].layer_nodes = List[Int]()
+            for t in self.canvases[k].layer_tex:
+                if t != 0:
+                    external_call["g_object_unref", NoneType](t)
+            self.canvases[k].layer_tex = List[Int]()
+            self.canvases[k].layer_tex_k = List[Float64]()
+            self.canvases[k].layer_tex_x = List[Float64]()
+            self.canvases[k].layer_tex_y = List[Float64]()
+            self.canvases[k].layer_tex_w = List[Float64]()
+            self.canvases[k].layer_tex_h = List[Float64]()
 
     def replay(mut self, ci: Int, var sc: Scene, wpx: Int, hpx: Int):
         """The display list onto canvas ci's picture: each layer becomes a render node, and a layer that came again
@@ -3250,23 +3464,135 @@ struct GtkHost[A: App](Movable):
         self.new_layouts = 0
         self.new_layout_ns = 0
         var nodes = List[Int]()
+        var kept = List[Bool]()
+        var added = List[Int]()  # a layer that only gained ops (Scene.appends): those ops' node, else 0 (D-1219)
+        var cuts = List[List[Float64]]()  # a layer that only lost ops (Scene.removes): the box they were in, else empty (D-1220)
         for i in range(sc.layers()):
             var node = 0
-            if i < len(self.canvases[ci].layer_nodes) and i < self.canvases[ci].prev.layers() and sc.same_layer(i, self.canvases[ci].prev, i):
+            kept.append(False)
+            added.append(0)
+            cuts.append(List[Float64]())
+            var had = i < len(self.canvases[ci].layer_nodes) and i < self.canvases[ci].prev.layers()
+            if had and sc.same_layer(i, self.canvases[ci].prev, i):
+                kept[i] = True
                 node = self.canvases[ci].layer_nodes[i]
                 if node != 0:
                     _ = external_call["gsk_render_node_ref", Int](node)
                 self.nodes_reused += 1
             else:
-                node = self.build_layer(sc, i)
+                var shared = sc.appends(i, self.canvases[ci].prev, i) if had and self.canvases[ci].layer_nodes[i] != 0 else -1
+                if shared >= 0:  # (the kept node and the new ops' node side by side: nothing drawn before is built again)
+                    var r = sc.layer_range(i)
+                    added[i] = self.build_ops(sc, r[0] + shared, r[1])
+                    node = self.canvases[ci].layer_nodes[i]
+                    if added[i] != 0:
+                        node = joined(node, added[i])
+                    else:  # (the new ops draw nothing: the same picture)
+                        _ = external_call["gsk_render_node_ref", Int](node)
+                    self.count_built(sc.layer_keys[i], True)
+                else:
+                    node = self.build_layer(sc, i)
+                    self.count_built(sc.layer_keys[i], False)
+                    if had and i < len(self.canvases[ci].layer_tex) and self.canvases[ci].layer_tex[i] != 0:  # (worth asking only with pixels to mend)
+                        cuts[i] = sc.removes(i, self.canvases[ci].prev, i)
                 self.nodes_built += 1
                 if sc.layer_keys[i] == "cells":
                     self.cells_built += 1
             nodes.append(node)
+        var tex = List[Int]()
+        var tex_k = List[Float64]()
+        var tex_x = List[Float64]()
+        var tex_y = List[Float64]()
+        var tex_w = List[Float64]()
+        var tex_h = List[Float64]()
+        for i in range(len(nodes)):  # a moved layer's texture: kept with its node unless the zoom drifted (D-1216)
+            var t = 0
+            var tk = 0.0
+            var bx = 0.0
+            var by = 0.0
+            var bw = 0.0
+            var bh = 0.0
+            ref cv = self.canvases[ci]
+            var cut = len(cuts[i]) == 4
+            if (kept[i] or added[i] != 0 or cut) and i < len(cv.layer_tex) and cv.layer_tex[i] != 0:
+                # (against the scale a texture made now would have: past the 4096 px cap that stays put however far
+                # the zoom goes, so the texture is kept rather than made again, the same size, every frame)
+                var want = tex_scale(sc.layer_tk[i], cv.layer_tex_w[i], cv.layer_tex_h[i])
+                var ratio = want / cv.layer_tex_k[i]
+                if ratio >= 0.75 and ratio <= 1.34:
+                    t = cv.layer_tex[i]
+                    tk = cv.layer_tex_k[i]
+                    bx = cv.layer_tex_x[i]
+                    by = cv.layer_tex_y[i]
+                    bw = cv.layer_tex_w[i]
+                    bh = cv.layer_tex_h[i]
+                    cv.layer_tex[i] = 0  # (handed over)
+            if t != 0 and added[i] != 0:  # (it grew: the new ops drawn onto a copy of the pixels, D-1219)
+                var grown = self.append_texture(t, tk, bx, by, added[i])
+                external_call["g_object_unref", NoneType](t)
+                t = grown[0]
+                if t != 0:
+                    tk = grown[1]
+                    bx = grown[2]
+                    by = grown[3]
+                    var nb = self.bounds(nodes[i])
+                    bw = nb[2]
+                    bh = nb[3]
+            if t != 0 and cut:  # (it lost ops: only the box they were in drawn again, D-1220)
+                var mended = self.mend_texture(t, tk, bx, by, nodes[i], cuts[i])
+                external_call["g_object_unref", NoneType](t)
+                t = mended
+            if t == 0 and sc.moved(i) and nodes[i] != 0 and (kept[i] or added[i] != 0 or cut):  # (a layer that changes every frame, the wet stroke, stays nodes)
+                var made = self.layer_texture(nodes[i], sc.layer_tk[i])
+                t = made[0]
+                tk = made[1]
+                bx = made[2]
+                by = made[3]
+                var nb = self.bounds(nodes[i])
+                bw = nb[2]
+                bh = nb[3]
+            if added[i] != 0:
+                external_call["gsk_render_node_unref", NoneType](added[i])
+            tex.append(t)
+            tex_k.append(tk)
+            tex_x.append(bx)
+            tex_y.append(by)
+            tex_w.append(bw)
+            tex_h.append(bh)
+        for t in self.canvases[ci].layer_tex:
+            if t != 0:
+                external_call["g_object_unref", NoneType](t)
         var snap = external_call["gtk_snapshot_new", Int]()
-        for n in nodes:
-            if n != 0:
+        for i in range(len(nodes)):
+            var n = nodes[i]
+            if n == 0:
+                continue
+            if sc.moved(i) and tex[i] != 0:  # (a pan or a zoom: the layer's pixels, moved and scaled; nothing rebuilt or re-filled)
+                var k = sc.layer_tk[i]
+                external_call["gtk_snapshot_save", NoneType](snap)
+                self.scratch[26] = Float32(sc.layer_tx[i] + tex_x[i] * k)
+                self.scratch[27] = Float32(sc.layer_ty[i] + tex_y[i] * k)
+                external_call["gtk_snapshot_translate", NoneType](snap, self.at(26))
+                external_call["gtk_snapshot_scale", NoneType](snap, Float32(k / tex_k[i]), Float32(k / tex_k[i]))
+                self.put_rect(0, 0, Float64(Int(external_call["gdk_texture_get_width", c_int](tex[i]))), Float64(Int(external_call["gdk_texture_get_height", c_int](tex[i]))))
+                external_call["gtk_snapshot_append_texture", NoneType](snap, tex[i], self.at(4))
+                external_call["gtk_snapshot_restore", NoneType](snap)
+            elif sc.moved(i):  # (no texture: the kept node, moved and scaled by the renderer)
+                external_call["gtk_snapshot_save", NoneType](snap)
+                self.scratch[26] = Float32(sc.layer_tx[i])
+                self.scratch[27] = Float32(sc.layer_ty[i])
+                external_call["gtk_snapshot_translate", NoneType](snap, self.at(26))
+                external_call["gtk_snapshot_scale", NoneType](snap, Float32(sc.layer_tk[i]), Float32(sc.layer_tk[i]))
                 external_call["gtk_snapshot_append_node", NoneType](snap, n)
+                external_call["gtk_snapshot_restore", NoneType](snap)
+            else:
+                external_call["gtk_snapshot_append_node", NoneType](snap, n)
+        self.canvases[ci].layer_tex = tex^
+        self.canvases[ci].layer_tex_k = tex_k^
+        self.canvases[ci].layer_tex_x = tex_x^
+        self.canvases[ci].layer_tex_y = tex_y^
+        self.canvases[ci].layer_tex_w = tex_w^
+        self.canvases[ci].layer_tex_h = tex_h^
         self.scratch[24] = Float32(wpx)
         self.scratch[25] = Float32(hpx)
         var paintable = external_call["gtk_snapshot_free_to_paintable", Int](snap, self.at(24))
@@ -3399,6 +3725,48 @@ struct GtkHost[A: App](Movable):
             self.apply(d, self_addr)
         return True
 
+    def answer(mut self, msg: Int, text: String, self_addr: Int):
+        """A message with a path from outside the widgets (a file dialog's answer, a dropped file): to update() now, or,
+        while a rebuild is pending, held and sent once it's up (drain_fields), in order."""
+        if msg == 0:
+            return
+        if busy() or self.has_pending or len(held_events()[]) > 0:
+            held_events()[].append((msg, text))
+            return
+        var d = self.rt.dispatch(Event(msg, text, 0))
+        self.apply(d, self_addr)
+
+    def drain_fields(mut self, self_addr: Int):
+        """The field changes held while the host was busy (D-1321): each field whose held text isn't the app's value
+        gets it (shown, if a rebuild put the app's back) and its on_change, one at a time until the host is busy again."""
+        var events = held_events()
+        while len(events[]) > 0 and not busy() and not self.has_pending:
+            var e = events[].pop(0)
+            var d = self.rt.dispatch(Event(e[0], e[1], 0))
+            self.apply(d, self_addr)
+        var held = held_fields()
+        while len(held[]) > 0 and not busy() and not self.has_pending:
+            var id = held[][0][0]
+            var text = held[][0][1]
+            _ = held[].pop(0)
+            if id >= len(self.id_node):
+                continue
+            var node = self.id_node[id]
+            if node < 0 or node >= len(self.rt.shown.nodes) or self.rt.shown.nodes[node].kind != FIELD:
+                continue
+            if self.rt.shown.nodes[node].text == text or self.widgets[node] == 0:
+                continue
+            if c_str(external_call["gtk_editable_get_text", Int](self.widgets[node])) != text:
+                set_busy(True)
+                external_call["gtk_editable_set_text", NoneType](self.widgets[node], text.as_c_string_span())
+                set_busy(False)
+                var rest = List[Tuple[Int, String]]()  # (that set held its own "" and text: dropped)
+                for h in held[]:
+                    if h[0] != id:
+                        rest.append(h)
+                held[] = rest^
+            self.send(node, False, text, 0, self_addr)
+
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
         """A widget changed: build the event, run update(), patch the widgets."""
         ref n = self.rt.shown.nodes[node]
@@ -3424,6 +3792,34 @@ def on_drop[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: 
     var text = c_str(external_call["g_value_get_string", Int](value))
     host_at[A](host_addr)[].send(node, False, text, 0, host_addr)
     return 1
+
+
+def on_drop_files[A: App](target: Int, value: Int, x: Float64, y: Float64, host_addr: Int) abi("C") -> c_int:
+    """Files let go over a DropTarget with on_file (a GdkFileList): its on_file once per file, event.text = its path."""
+    var node = get_node(target)
+    if node < 0 or busy():
+        return 0
+    var files = external_call["g_value_get_boxed", Int](value)
+    if files == 0:
+        return 0
+    var list = external_call["gdk_file_list_get_files", Int](files)  # (a GSList of GFile: the list is ours, the files aren't)
+    var paths = List[String]()
+    var at = list
+    while at != 0:
+        var file = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[]
+        var raw = external_call["g_file_get_path", Int](file)
+        if raw != 0:  # (a file with no local path, e.g. on a phone over MTP: skipped)
+            paths.append(c_str(raw))
+            external_call["g_free", NoneType](raw)
+        at = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at + 8)[]
+    external_call["g_slist_free", NoneType](list)
+    var host = host_at[A](host_addr)
+    if node >= len(host[].rt.shown.nodes) or host[].rt.shown.nodes[node].kind != DROP or host[].rt.shown.nodes[node].msg2 == 0:
+        return 0
+    var msg = host[].rt.shown.nodes[node].msg2  # (by message, not node: the first file's screen may renumber the nodes)
+    for p in paths:
+        host[].answer(msg, p, host_addr)
+    return 1 if len(paths) > 0 else 0
 
 
 def open_url(url: String):
@@ -3646,11 +4042,13 @@ def on_idle_partial[A: App](host_addr: Int) abi("C") -> c_int:
     var host = host_at[A](host_addr)
     if host[].has_pending:  # (a full rebuild may have come first)
         host[].update_part(host_addr)  # update_part() clears the busy flag (apply_patches)
+    host[].drain_fields(host_addr)
     return 0
 
 
 def on_idle_rebuild[A: App](host_addr: Int) abi("C") -> c_int:
     host_at[A](host_addr)[].show(host_addr)  # show() clears the busy flag
+    host_at[A](host_addr)[].drain_fields(host_addr)
     return 0  # G_SOURCE_REMOVE: run once
 
 
@@ -3673,6 +4071,228 @@ def share_within(xs: List[Float64], limit: Float64) -> Float64:
         if x <= limit:
             n += 1
     return 100.0 * Float64(n) / Float64(len(xs))
+
+
+def frame_bench[A: App](host_addr: Int, rest: String):
+    """framebench:K=pan|zoom|draw|finish|erase|deepzoom,N (goal 40): N gestures on canvas K, one at a time (PAN by 7,4 points, to and
+    fro every 20; ZOOM by 1.01× around the middle, in then out; one pen stroke of N moves; finish: short strokes, press,
+    three moves, release, every frame timed, the releases and the frame after each also on their own; erase: one drag
+    of N moves to and fro, where moves that hit nothing don't redraw and count as unchanged; deepzoom: zoom's steps
+    after an untimed 8× zoom, past a page texture's 4096 px cap), each followed by the frame that shows it. A frame's
+    work = handling the gesture (the app's update and the diff) + the canvas's redraw (draw_scene and the replay into
+    render nodes, or draw() and the upload) + GTK's paint of that frame (before-paint to after-paint) + a round trip to
+    the display after it (gdk_display_sync: the X server's own drawing, which cairo's paint only queues) + the canvas's
+    whole picture rendered to a texture by the same renderer (raster: GTK paints only damage; this is the full cost, so
+    the sum is an upper bound). Pan and draw
+    are drags (PRESS, the moves, RELEASE): the app's current tool says what they do. Prints FRAMEBENCH
+    with p50/p95/max of the work and of its parts, the layers built and reused, each layer key's whole builds and
+    appends (built_by_layer, appended_by_layer: key:count), the textures rendered, and the renderer GTK used."""
+    var host = host_at[A](host_addr)
+    var kv = split_at(rest, "=")
+    var spec = split_at(kv[1], ",")
+    var what = spec[0]
+    var count = max(to_int(spec[1]), 1)
+    var node = canvas_node(host[], kv[0])
+    var ci = -1
+    for k in range(len(host[].canvases)):
+        if host[].canvases[k].node == node:
+            ci = k
+    if ci < 0:
+        print("TEST: no canvas", kv[0])
+        return
+    if not host[].paint_timed:
+        var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
+        if clock != 0:
+            connect(clock, "before-paint", on_before_paint[A], host_addr)
+            connect(clock, "after-paint", on_after_paint[A], host_addr)
+            host[].paint_timed = True
+    var renderer = external_call["gtk_native_get_renderer", Int](host[].window)
+    var rname = String("unknown")
+    if renderer != 0:
+        var cname = external_call["g_type_name_from_instance", Int](renderer)
+        rname = String(unsafe_from_utf8_ptr=Pointer[c_char, MutUntrackedOrigin](unsafe_from_address=cname))
+    var wait_by = perf_counter_ns() + 3_000_000_000  # (from a drawn, quiet canvas)
+    while (not host[].canvases_drawn() or busy() or host[].has_pending) and perf_counter_ns() < wait_by:
+        pump()
+    var w = Float64(Int(external_call["gtk_widget_get_width", c_int](host[].canvases[ci].widget)))
+    var h = Float64(Int(external_call["gtk_widget_get_height", c_int](host[].canvases[ci].widget)))
+    var works = List[Float64]()
+    var events = List[Float64]()
+    var draws = List[Float64]()
+    var paints = List[Float64]()
+    var releases = List[Float64]()  # finish: the frames of each RELEASE, and of the gesture right after it
+    var afters = List[Float64]()
+    host[].nodes_built = 0
+    host[].nodes_reused = 0
+    host[].built_keys = List[String]()
+    host[].built_counts = List[Int]()
+    host[].appended_counts = List[Int]()
+    host[].layer_textures = 0
+    var x = w * 0.3
+    var y = h * 0.3
+    if what == "deepzoom":  # (untimed: in to 8× around the middle, past a page-sized texture's 4096 px cap)
+        host[].canvas_send(ci, ZOOM, w / 2, h / 2, 0, 0, 8.0, host_addr)
+        bench_wait[A](host_addr, ci, 3_000_000_000)
+        host[].nodes_built = 0
+        host[].layer_textures = 0
+    if what == "draw" or what == "pan" or what == "erase":  # (a drag: press, the moves, release; the app's tool decides what it does)
+        host[].canvases[ci].pressure = 0.6 if what == "draw" else 0.0
+        host[].canvas_send(ci, PRESS, x, y, 0, 0, 1, host_addr)
+        settle()
+        bench_wait[A](host_addr, ci, 200_000_000)
+    var syncs = List[Float64]()
+    var rasters = List[Float64]()
+    var display = external_call["gdk_display_get_default", Int]()
+    var missed = 0
+    var unchanged = 0
+    var last_kind = 0
+    for i in range(count):
+        var draws0 = host[].canvases[ci].draws
+        var t0 = perf_counter_ns()
+        var kind = PAN
+        if what == "pan":
+            var back = -1.0 if (i // 20) % 2 == 1 else 1.0  # (to and fro: what was on screen stays there)
+            host[].canvas_send(ci, PAN, x, y, 7 * back, 4 * back, 1, host_addr)
+        elif what == "zoom" or what == "deepzoom":
+            kind = ZOOM
+            host[].canvas_send(ci, ZOOM, w / 2, h / 2, 0, 0, 1.01 if i < count // 2 else 1.0 / 1.01, host_addr)
+        elif what == "finish":  # (short strokes: press, three moves, release; each release adds a stroke to the page)
+            var step = i % 5
+            if step == 0:
+                kind = PRESS
+                x = w * (0.15 + 0.6 * Float64((i // 5) % 10) / 10.0)
+                y = h * (0.2 + 0.6 * Float64((i // 50) % 4) / 4.0)
+                host[].canvases[ci].pressure = 0.3
+                host[].canvas_send(ci, PRESS, x, y, 0, 0, 1, host_addr)
+            elif step < 4:
+                x += 9.0
+                y += 3.0 * Float64(step)
+                host[].canvases[ci].pressure = 0.3 + 0.2 * Float64(step)
+                host[].canvas_send(ci, PAN, x, y, 9, 3, 1, host_addr)
+            else:
+                kind = RELEASE
+                host[].canvases[ci].pressure = 0.5
+                host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
+        elif what == "erase":  # (an eraser dragged to and fro across the page: only moves that hit a stroke redraw)
+            x += 4.0 if (i // 60) % 2 == 0 else -4.0
+            y += 1.5 if (i // 30) % 2 == 0 else -1.5
+            host[].canvas_send(ci, PAN, x, y, 4, 1.5, 1, host_addr)
+        else:
+            x += 3.0 + Float64(i % 5) * 0.4  # (a wandering line across the page)
+            y += 2.0 * (1.0 if (i // 40) % 2 == 0 else -1.0)
+            host[].canvases[ci].pressure = 0.3 + 0.6 * Float64(i % 50) / 50.0
+            host[].canvas_send(ci, PAN, x, y, 3, 2, 1, host_addr)
+        var ev_ms = Float64(Int(perf_counter_ns()) - Int(t0)) / 1e6
+        var paints0 = len(host[].frame_paints)
+        var drew = False
+        var painted = False
+        var by = perf_counter_ns() + (150_000_000 if what == "erase" else 2_000_000_000)  # (a miss doesn't redraw)
+        while perf_counter_ns() < by:  # (the redraw, then the frame painted after it)
+            _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+            if not drew and host[].canvases[ci].draws != draws0:
+                drew = True
+                paints0 = len(host[].frame_paints)
+            if drew and len(host[].frame_paints) > paints0:
+                painted = True
+                break
+        var prev_kind = last_kind
+        last_kind = kind
+        if not painted:
+            if what == "erase" and not drew:
+                unchanged += 1
+            else:
+                missed += 1
+            continue
+        var dm = host[].canvases[ci].draw_ms
+        var pm = host[].frame_paints[len(host[].frame_paints) - 1]
+        var ts = perf_counter_ns()  # (a round trip to the display: with cairo on X11 the X server draws after the paint returns)
+        external_call["gdk_display_sync", NoneType](display)
+        var sm = Float64(Int(perf_counter_ns()) - Int(ts)) / 1e6
+        # and the canvas's picture rendered whole by the same renderer, synchronously (on Xvfb the paint phase measured
+        # ~0 ms with 1,000 strokes on screen: GTK redraws only damage, and cairo on X11 queues; this is the full cost)
+        var tr = perf_counter_ns()
+        var paintable = external_call["gtk_picture_get_paintable", Int](host[].canvases[ci].widget)
+        if paintable != 0 and renderer != 0:
+            var snap = external_call["gtk_snapshot_new", Int]()
+            external_call["gdk_paintable_snapshot", NoneType](paintable, snap, w, h)
+            var root = external_call["gtk_snapshot_free_to_node", Int](snap)
+            if root != 0:
+                var tex = external_call["gsk_renderer_render_texture", Int](renderer, root, 0)
+                if tex != 0:
+                    external_call["g_object_unref", NoneType](tex)
+                external_call["gsk_render_node_unref", NoneType](root)
+        var rm = Float64(Int(perf_counter_ns()) - Int(tr)) / 1e6
+        rasters.append(rm)
+        sm += rm
+        events.append(ev_ms)
+        draws.append(dm)
+        paints.append(pm)
+        syncs.append(sm)
+        works.append(ev_ms + dm + pm + sm)
+        if kind == RELEASE:
+            releases.append(works[len(works) - 1])
+        elif prev_kind == RELEASE:
+            afters.append(works[len(works) - 1])
+    if what == "pan" or what == "erase":
+        host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
+        settle()
+    if what == "draw":
+        host[].canvases[ci].pressure = 0.6
+        host[].canvas_send(ci, RELEASE, x, y, 0, 0, 1, host_addr)
+        settle()
+    host[].canvases[ci].pressure = 0
+    var counts = (" built_by_layer=" + host[].built_report(False) + " appended_by_layer=" + host[].built_report(True)
+                  + " layers_built=" + String(host[].nodes_built) + " reused=" + String(host[].nodes_reused) + " textures=" + String(host[].layer_textures))
+    if what == "deepzoom":  # (back out, untimed)
+        host[].canvas_send(ci, ZOOM, w / 2, h / 2, 0, 0, 1.0 / 8.0, host_addr)
+        bench_wait[A](host_addr, ci, 3_000_000_000)
+    print("FRAMEBENCH: " + what + " n=" + String(len(works)) + " missed=" + String(missed) + " unchanged=" + String(unchanged) + " renderer=" + rname
+          + " p50=" + one_decimal(Float32(pct(works, 0.5))) + " p95=" + one_decimal(Float32(pct(works, 0.95))) + " max=" + one_decimal(Float32(pct(works, 1.0)))
+          + " event_p95=" + one_decimal(Float32(pct(events, 0.95))) + " draw_p95=" + one_decimal(Float32(pct(draws, 0.95)))
+          + " paint_p95=" + one_decimal(Float32(pct(paints, 0.95))) + " sync_p95=" + one_decimal(Float32(pct(syncs, 0.95))) + " raster_p95=" + one_decimal(Float32(pct(rasters, 0.95)))
+          + " draw_max=" + one_decimal(Float32(pct(draws, 1.0))) + " raster_max=" + one_decimal(Float32(pct(rasters, 1.0)))
+          + " release_p95=" + one_decimal(Float32(pct(releases, 0.95))) + " release_max=" + one_decimal(Float32(pct(releases, 1.0)))
+          + " after_max=" + one_decimal(Float32(pct(afters, 1.0))) + counts, flush=True)
+
+
+def bench_wait[A: App](host_addr: Int, ci: Int, ns: Int):
+    """Lets the canvas redraw and GTK paint (framebench's untimed steps), at most ns."""
+    var host = host_at[A](host_addr)
+    var by = perf_counter_ns() + ns
+    var draws0 = host[].canvases[ci].draws
+    while perf_counter_ns() < by:
+        _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+        if host[].canvases[ci].draws != draws0 and not busy() and not host[].has_pending:
+            settle()
+            break
+
+
+def tex_scale(k: Float64, bw: Float64, bh: Float64) -> Float64:
+    """The scale a layer's texture is rendered at for a layer scale k: k, unless its bounds (bw × bh, the layer's
+    units) would pass 4096 px; then the largest that fits (a big page at a big zoom is softer: GTK textures' cap)."""
+    if bw <= 0 or bh <= 0:
+        return k
+    return min(k, 4096.0 / bw, 4096.0 / bh)
+
+
+def node_children(node: Int, mut out: List[Int]):
+    """A container node's children (else the node itself) onto out, unreferenced."""
+    if external_call["gsk_render_node_get_node_type", c_int](node) == 1:  # GSK_CONTAINER_NODE
+        for k in range(Int(external_call["gsk_container_node_get_n_children", c_uint](node))):
+            out.append(external_call["gsk_container_node_get_child", Int](node, c_uint(k)))
+    else:
+        out.append(node)
+
+
+def joined(kept: Int, add: Int) -> Int:
+    """One flat container node: what `kept` draws, then what `add` draws (a layer that only gained ops, D-1219). Flat,
+    so a page that grows by a thousand strokes isn't a thousand containers deep. A new reference."""
+    var kids = List[Int]()
+    node_children(kept, kids)
+    node_children(add, kids)
+    var node = external_call["gsk_container_node_new", Int](Int(kids.unsafe_ptr()), c_uint(len(kids)))
+    _ = len(kids)
+    return node
 
 
 def pct(xs: List[Float64], q: Float64) -> Float64:
@@ -3791,6 +4411,14 @@ def on_idle_resize[A: App](host_addr: Int) abi("C") -> c_int:
     return 0
 
 
+def on_gaps_tick(widget: Int, clock: Int, data: Int) abi("C") -> c_int:
+    """While a gaps: measure runs, every frame asks the window for the next (GDK_FRAME_CLOCK: a redraw each frame)."""
+    if app_data("mojoui-gaps-ticking") == 0:
+        return 0  # G_SOURCE_REMOVE
+    external_call["gtk_widget_queue_draw", NoneType](widget)
+    return 1
+
+
 def on_before_paint[A: App](clock: Int, host_addr: Int) abi("C"):
     host_at[A](host_addr)[].paint_t0 = Int(perf_counter_ns())
 
@@ -3811,6 +4439,7 @@ def on_window_realize[A: App](window: Int, host_addr: Int) abi("C"):
     if clock != 0 and host_at[A](host_addr)[].rt.trace:  # (MOJOUI_TRACE: the paint phase of every frame, for bench steps)
         connect(clock, "before-paint", on_before_paint[A], host_addr)
         connect(clock, "after-paint", on_after_paint[A], host_addr)
+        host_at[A](host_addr)[].paint_timed = True
     if clock != 0:  # (after each layout: tables share their width as the web's do)
         connect(clock, "layout", on_clock_layout[A], host_addr)
     var surface = external_call["gtk_native_get_surface", Int](window)
@@ -3819,11 +4448,26 @@ def on_window_realize[A: App](window: Int, host_addr: Int) abi("C"):
         connect3(surface, "notify::scale", on_window_resized[A], host_addr)  # moved to a screen with another scale
 
 
+def pen_pressure(controller: Int, test_pressure: Float64) -> Float64:
+    """The pressure (0–1) of the event a gesture is handling, from GDK_AXIS_PRESSURE; 0 when the device has none (a
+    mouse, a touchpad). A `stroke:` test step sets test_pressure (≥ 0), as a pen would have reported it."""
+    if test_pressure >= 0:
+        return test_pressure
+    var ev = external_call["gtk_event_controller_get_current_event", Int](controller)
+    if ev == 0:
+        return 0
+    var v = List[Float64](length=1, fill=0)
+    if external_call["gdk_event_get_axis", c_int](ev, c_int(5), Int(v.unsafe_ptr())) == 0:  # GDK_AXIS_PRESSURE
+        return 0
+    return min(max(v[0], 0.0), 1.0)
+
+
 def on_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var ci = get_index(drag)
     if ci < 0 or ci >= len(host[].canvases):
         return
+    host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
     host[].canvases[ci].drag_x = 0
     host[].canvases[ci].drag_y = 0
     host[].canvases[ci].start_x = x
@@ -3847,6 +4491,7 @@ def on_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr: In
         return
     if ci < 0 or ci >= len(host[].canvases) or not host[].canvases[ci].moved:
         return  # (a plain tap: the click gesture sends TAP)
+    host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
     host[].canvas_send(ci, RELEASE, host[].canvases[ci].start_x + off_x, host[].canvases[ci].start_y + off_y, 0, 0, 1, host_addr)
 
 
@@ -3859,6 +4504,7 @@ def on_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr:
         return
     var dx = off_x - host[].canvases[ci].drag_x
     var dy = off_y - host[].canvases[ci].drag_y
+    host[].canvases[ci].pressure = pen_pressure(drag, host[].canvases[ci].test_pressure)
     host[].canvases[ci].drag_x = off_x
     host[].canvases[ci].drag_y = off_y
     if abs(off_x) + abs(off_y) > 3:
@@ -3868,16 +4514,27 @@ def on_drag_update[A: App](drag: Int, off_x: Float64, off_y: Float64, host_addr:
 
 
 def on_scroll[A: App](scroll: Int, dx: Float64, dy: Float64, host_addr: Int) abi("C") -> c_int:
-    """Mouse wheel / touchpad scroll: zoom around the pointer (4 notches = 2×)."""
+    """Mouse wheel / touchpad scroll: zoom around the pointer (4 notches = 2×). On a Canvas(scroll_pans=True) a plain
+    scroll pans instead (WHEEL: dx, dy = how far the content moves, points; a notch = 40 points) and ctrl+scroll zooms
+    (a touchpad pinch arrives through the zoom gesture, on_pinch)."""
     if busy():
         return 1
     var host = host_at[A](host_addr)
     var ci = get_index(scroll)
-    if ci < 0 or ci >= len(host[].canvases) or dy == 0:
+    if ci < 0 or ci >= len(host[].canvases) or (dy == 0 and dx == 0):
         return 1
     var at = host[].pointer(ci)
+    var touchpad = external_call["gtk_event_controller_scroll_get_unit", c_int](scroll) == 1  # (surface pixels, not notches)
+    var node = host[].canvases[ci].node
+    var pans = 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].spacing == 1
+    if pans and not host[].canvases[ci].test_zoom and (mods_of(scroll) & CTRL) == 0:
+        var step = 1.0 if touchpad else 40.0
+        host[].canvas_send(ci, WHEEL, at[0], at[1], -dx * step, -dy * step, 1, host_addr)
+        return 1
+    if dy == 0:
+        return 1
     # A mouse wheel scrolls in notches; touchpads in surface pixels (100 px = 4 notches = 2×).
-    var notches = dy / 25.0 if external_call["gtk_event_controller_scroll_get_unit", c_int](scroll) == 1 else dy
+    var notches = dy / 25.0 if touchpad else dy
     host[].canvas_send(ci, ZOOM, at[0], at[1], 0, 0, 2.0 ** (-notches / 4.0), host_addr)
     return 1
 
@@ -4284,8 +4941,21 @@ def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
         return
     var host = host_at[A](host_addr)
     var node = get_node(button)
+    if 0 <= node < len(host[].rt.shown.nodes) and is_file_saver(host[].rt.shown.nodes[node]):  # a FileSaver: the platform's save dialog
+        host[].picker_node = node
+        host[].picker_msg = host[].rt.shown.nodes[node].msg2
+        var sd = external_call["gtk_file_dialog_new", Int]()
+        var stitle = host[].rt.shown.nodes[node].text
+        external_call["gtk_file_dialog_set_title", NoneType](sd, stitle.as_c_string_span())
+        var suggested = host[].rt.shown.nodes[node].options[2]
+        if suggested != "":
+            external_call["gtk_file_dialog_set_initial_name", NoneType](sd, suggested.as_c_string_span())
+        accept_filter(sd, host[].rt.shown.nodes[node].options[0], "Files it saves")
+        external_call["gtk_file_dialog_save", NoneType](sd, host[].window, 0, on_file_saved[A], host_addr)
+        return
     if 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:  # a FilePicker: the platform's file dialog
         host[].picker_node = node
+        host[].picker_msg = host[].rt.shown.nodes[node].msg2
         var dialog = external_call["gtk_file_dialog_new", Int]()
         var title = host[].rt.shown.nodes[node].text
         external_call["gtk_file_dialog_set_title", NoneType](dialog, title.as_c_string_span())
@@ -4293,19 +4963,25 @@ def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
         if accept.find("folder") >= 0:  # (a picker of folders: mojoui.documentset's "a folder of documents", D-1263)
             external_call["gtk_file_dialog_select_folder", NoneType](dialog, host[].window, 0, on_folder_picked[A], host_addr)
             return
-        if accept != "":  # the picker's file types (".csv,.omx") as the dialog's filter
-            var filter = external_call["gtk_file_filter_new", Int]()
-            var name = String("Files it opens (") + accept + ")"
-            external_call["gtk_file_filter_set_name", NoneType](filter, name.as_c_string_span())
-            for ext in accept.split(","):
-                var suffix = String(String(ext).strip().lstrip("."))
-                if suffix != "":
-                    external_call["gtk_file_filter_add_suffix", NoneType](filter, suffix.as_c_string_span())
-            external_call["gtk_file_dialog_set_default_filter", NoneType](dialog, filter)
-            external_call["g_object_unref", NoneType](filter)
+        accept_filter(dialog, accept, "Files it opens")
         external_call["gtk_file_dialog_open", NoneType](dialog, host[].window, 0, on_file_picked[A], host_addr)
         return
     host[].send(node, False, "", 0, host_addr)
+
+
+def accept_filter(dialog: Int, accept: String, label: String):
+    """A FilePicker's or FileSaver's file types (".csv,.omx") as its dialog's default filter ("": none)."""
+    if accept == "":
+        return
+    var filter = external_call["gtk_file_filter_new", Int]()
+    var name = label + " (" + accept + ")"
+    external_call["gtk_file_filter_set_name", NoneType](filter, name.as_c_string_span())
+    for ext in accept.split(","):
+        var suffix = String(String(ext).strip().lstrip("."))
+        if suffix != "":
+            external_call["gtk_file_filter_add_suffix", NoneType](filter, suffix.as_c_string_span())
+    external_call["gtk_file_dialog_set_default_filter", NoneType](dialog, filter)
+    external_call["g_object_unref", NoneType](filter)
 
 
 def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
@@ -4322,9 +4998,26 @@ def on_file_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
     var path = c_str(raw)
     external_call["g_free", NoneType](raw)
     external_call["g_object_unref", NoneType](file)
-    var node = host[].picker_node
-    if path != "" and 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:
-        host[].send(node, True, path, 0, host_addr)
+    if path != "":
+        host[].answer(host[].picker_msg, path, host_addr)
+
+
+def on_file_saved[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
+    """The save dialog closed: the path chosen goes to the FileSaver's on_save (nothing if cancelled); the app writes it."""
+    var host = host_at[A](host_addr)
+    var err = List[Int](length=1, fill=0)
+    var file = external_call["gtk_file_dialog_save_finish", Int](dialog, result, Int(err.unsafe_ptr()))
+    if err[0] != 0:
+        external_call["g_error_free", NoneType](err[0])  # (cancelled, or the dialog failed)
+    external_call["g_object_unref", NoneType](dialog)
+    if file == 0:
+        return
+    var raw = external_call["g_file_get_path", Int](file)
+    var path = c_str(raw)
+    external_call["g_free", NoneType](raw)
+    external_call["g_object_unref", NoneType](file)
+    if path != "":
+        host[].answer(host[].picker_msg, path, host_addr)
 
 
 def on_folder_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
@@ -4341,16 +5034,65 @@ def on_folder_picked[A: App](dialog: Int, result: Int, host_addr: Int) abi("C"):
     var path = c_str(raw)
     external_call["g_free", NoneType](raw)
     external_call["g_object_unref", NoneType](file)
-    var node = host[].picker_node
-    if path != "" and 0 <= node < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[node].msg2 != 0:
-        host[].send(node, True, path, 0, host_addr)
+    if path != "":
+        host[].answer(host[].picker_msg, path, host_addr)  # (by message, as on_file_picked: a rebuild may renumber nodes)
 
 
 def on_field_changed[A: App](entry: Int, host_addr: Int) abi("C"):
-    if busy():
-        return
     var text = c_str(external_call["gtk_editable_get_text", Int](entry))
+    if busy():
+        # (D-1321: gtk_editable_set_text and a paste over a selection change the text twice, "" then the new text; if
+        # the first change's screen needs a rebuild, the second arrives while it's pending. Held, by the field's node
+        # id, and sent after the rebuild (drain_fields) unless it's what the app already has: the host's own sets.)
+        hold_field(entry, text)
+        return
     host_at[A](host_addr)[].send(get_node(entry), False, text, 0, host_addr)
+
+
+def held_fields() -> Pointer[List[Tuple[Int, String]], MutUntrackedOrigin]:
+    """The field changes that came while the host was busy: (node id, text), the last per field. On the GApplication
+    (a heap list), not a host field: they arrive re-entrantly while a `mut self` method runs (see set_busy)."""
+    var addr = app_data("mojoui-held-fields")
+    if addr == 0:
+        var p = alloc(Layout[List[Tuple[Int, String]]].single()).unsafe_leak()
+        p.unsafe_write(List[Tuple[Int, String]]())
+        addr = Int(p)
+        set_app_data("mojoui-held-fields", addr)
+    return Pointer[List[Tuple[Int, String]], MutUntrackedOrigin](unsafe_from_address=addr)
+
+
+def is_held(entry: Int) -> Bool:
+    """A change of this field waits in held_fields (the host mustn't write the app's older value over it)."""
+    var key = String(NODE_KEY)
+    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
+    for h in held_fields()[]:
+        if h[0] == id:
+            return True
+    return False
+
+
+def held_events() -> Pointer[List[Tuple[Int, String]], MutUntrackedOrigin]:
+    """Messages with a path (dialog answers, dropped files) that came while a rebuild was pending: (message, text)."""
+    var addr = app_data("mojoui-held-events")
+    if addr == 0:
+        var p = alloc(Layout[List[Tuple[Int, String]]].single()).unsafe_leak()
+        p.unsafe_write(List[Tuple[Int, String]]())
+        addr = Int(p)
+        set_app_data("mojoui-held-events", addr)
+    return Pointer[List[Tuple[Int, String]], MutUntrackedOrigin](unsafe_from_address=addr)
+
+
+def hold_field(entry: Int, text: String):
+    var key = String(NODE_KEY)
+    var id = external_call["g_object_get_data", Int](entry, key.as_c_string_span()) - 1
+    if id < 0:
+        return
+    var held = held_fields()
+    for i in range(len(held[])):
+        if held[][i][0] == id:
+            held[][i] = (id, text)
+            return
+    held[].append((id, text))
 
 
 def on_field_submit[A: App](entry: Int, host_addr: Int) abi("C"):
@@ -4689,6 +5431,25 @@ def to_int(s: String) -> Int:
         return 0
 
 
+def test_steps(steps: String) -> List[String]:
+    """MOJOUI_TEST split at ";", except that a `stroke:` step keeps its points (x,y,p;x,y,p;…: parts with no ":")."""
+    var out = List[String]()
+    for part in steps.split(";"):
+        var p = String(part)
+        if len(out) > 0 and out[len(out) - 1].startswith("stroke:") and ":" not in p and p != "":
+            out[len(out) - 1] += ";" + p
+        else:
+            out.append(p)
+    return out^
+
+
+def to_float(s: String) -> Float64:
+    try:
+        return atof(s)
+    except:
+        return 0
+
+
 def pump():
     """One turn of the main loop for a test's wait, never sleeping past its caller's deadline: a blocking turn waits
     for the next event, and with nothing scheduled (no timer, no frame asked for, as when the island has settled) that
@@ -4720,6 +5481,17 @@ def wait_allocated(widget: Int):
             return  # nothing pending: nothing will change
 
 
+def show_test_window(window: Int):
+    """A test window that isn't shown (no MOJOUI_SHOT) is shown, on the checks' private display, and laid out (up to
+    3 s): steps that need a real window (painting, closing) then have one."""
+    if external_call["gtk_widget_get_mapped", c_int](window) != 0:
+        return
+    external_call["gtk_window_present", NoneType](window)
+    var up_by = perf_counter_ns() + 3_000_000_000
+    while external_call["gtk_widget_get_width", c_int](window) == 0 and perf_counter_ns() < up_by:
+        pump()
+
+
 def run_step[A: App](host_addr: Int, step: String):
     var host = host_at[A](host_addr)
     var verb_rest = split_at(step, ":")
@@ -4744,6 +5516,54 @@ def run_step[A: App](host_addr: Int, step: String):
             print("TEST: no file picker", kv[0])
             return
         host[].send(i, True, kv[1], 0, host_addr)
+    elif verb == "quit":  # quit: close the window as the window manager's close button does (close-request, then App.closing)
+        show_test_window(host[].window)  # (GTK ignores a close of a window that was never realized)
+        external_call["gtk_window_close", NoneType](host[].window)
+        if host[].closed or host[].hidden:
+            print("QUIT: window closed" + (" (background mode: the app keeps running)" if host[].hidden else ""), flush=True)
+    elif verb == "waitopen":  # waitopen:N: background mode: run the main loop until the window is open again (the tray's Activate), N ms at most
+        var until = Int(perf_counter_ns()) + to_int(rest) * 1_000_000
+        while host[].hidden and not host[].closed and Int(perf_counter_ns()) < until:
+            _ = external_call["g_main_context_iteration", c_int](0, c_int(1))
+        if host[].hidden:
+            print("TEST: the window didn't open again in " + rest + " ms")
+    elif verb == "save":  # save:Title=/path: a FileSaver's dialog answering that path (a native dialog can't be driven)
+        var kv = split_at(rest, "=")
+        var i = find(host[], BUTTON, kv[0], 0)
+        if i < 0 or not is_file_saver(host[].rt.shown.nodes[i]):
+            print("TEST: no file saver", kv[0])
+            return
+        host[].send(i, True, kv[1], 0, host_addr)
+    elif verb == "dropfile":  # dropfile:Tag=/path[,/path…]: those files dropped on the DropTarget tagged Tag, through its GtkDropTarget's own drop signal
+        var kv = split_at(rest, "=")
+        var i = -1
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].kind == DROP and host[].rt.shown.nodes[k].name == kv[0]:
+                i = k
+        var fkey = String(DROP_FILES_KEY)
+        var target = external_call["g_object_get_data", Int](host[].widgets[i], fkey.as_c_string_span()) if i >= 0 else 0
+        if target == 0:
+            print("TEST: no file drop target", kv[0])
+            return
+        var list = 0
+        var made = List[Int]()
+        for p in kv[1].split(","):
+            var path = String(p)
+            made.append(external_call["g_file_new_for_path", Int](path.as_c_string_span()))
+            list = external_call["g_slist_append", Int](list, made[len(made) - 1])
+        var flist = external_call["gdk_file_list_new_from_list", Int](list)  # (copies the list and refs the files)
+        external_call["g_slist_free", NoneType](list)
+        for f in made:
+            external_call["g_object_unref", NoneType](f)
+        var gv = List[Int](length=3, fill=0)  # (a GValue holding the GdkFileList, as GTK hands a real drop)
+        _ = external_call["g_value_init", Int](Int(gv.unsafe_ptr()), external_call["gdk_file_list_get_type", Int]())
+        external_call["g_value_take_boxed", NoneType](Int(gv.unsafe_ptr()), flist)
+        var ret = List[Int](length=1, fill=0)
+        var sig = String("drop")
+        external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](target, sig.as_c_string_span(), Int(gv.unsafe_ptr()), Float64(10), Float64(10), Int(ret.unsafe_ptr()))
+        external_call["g_value_unset", NoneType](Int(gv.unsafe_ptr()))
+        _ = gv[0]
+        _ = ret[0]
     elif verb == "type" or verb == "submit" or verb == "enter":
         var kv = split_at(rest, "=")
         var i = find(host[], FIELD, kv[0], 0, by_hint=True)
@@ -4978,6 +5798,8 @@ def run_step[A: App](host_addr: Int, step: String):
               + " within-9.5ms " + one_decimal(Float32(share_within(intervals(host[].frame_times), 9.5))) + "%"
               + " cells built " + String(host[].cells_built) + " uploads " + String(host[].uploads)
               + " layers built " + String(host[].nodes_built) + " reused " + String(host[].nodes_reused) + " seconds " + one_decimal(Float32(secs)))
+    elif verb == "framebench":  # framebench:K=pan|zoom|draw,N: N gestures on canvas K, one frame each; percentiles of the frame's work
+        frame_bench[A](host_addr, rest)
     elif verb == "webjs":  # webjs:<tag>#<id>=<expression>: its value (awaited) in that widget's page, printed as JS: <json>
         var kv = split_at(rest, "=")
         var key = split_at(kv[0], "#")
@@ -5021,7 +5843,7 @@ def run_step[A: App](host_addr: Int, step: String):
             pump()
     elif verb == "pause" or verb == "wait":  # pause:3000 (or wait:3000): keep the main loop running that long (a screen grab of the display can catch popovers; a video plays)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
-        while Int(perf_counter_ns()) < until:
+        while Int(perf_counter_ns()) < until and not host[].closed:  # (a quit from the tray menu ends it too)
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
             sleep(0.01)
     elif verb == "open":  # open:Format, open:Format>Text colour: pops the bar's menu (or its submenu) up and leaves it open, for screenshots
@@ -5245,7 +6067,7 @@ def run_step[A: App](host_addr: Int, step: String):
                         c_uint(gdk_keyval(p)), c_uint(0), c_uint(state), Int(handled.unsafe_ptr()))
             _ = len(handled)
             settle()
-    elif verb == "drag" or verb == "dragat" or verb == "doubletap" or verb == "zoom" or verb == "frames" or verb == "tapat":
+    elif verb == "drag" or verb == "dragat" or verb == "doubletap" or verb == "zoom" or verb == "wheel" or verb == "frames" or verb == "tapat" or verb == "stroke" or verb == "render":
         var kv = split_at(rest, "=")
         var node = canvas_node(host[], kv[0])
         var ci = -1
@@ -5305,11 +6127,64 @@ def run_step[A: App](host_addr: Int, step: String):
                 while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
                     pump()
                 external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(), dx * Float64(half + 1) / 2, dy * Float64(half + 1) / 2)
+        elif verb == "render":  # render:K=path: canvas K painted by the app's draw() (pixels: the SurfacePainter reference) into a PNG
+            ref cv = host[].canvases[ci]
+            var wpx = cv.wpx if cv.wpx > 0 else Int(external_call["gtk_widget_get_width", c_int](cv.widget))
+            var hpx = cv.hpx if cv.hpx > 0 else Int(external_call["gtk_widget_get_height", c_int](cv.widget))
+            var px = List[UInt32](length=wpx * hpx, fill=0)
+            var surface = Surface(Int(px.unsafe_ptr()), wpx, hpx, cv.scale if cv.scale > 0 else 1.0)
+            surface.still = True
+            var d = host[].rt.draw(node, surface)
+            host[].apply(d, host_addr)
+            var png = encode_png(px, wpx, hpx)
+            try:
+                with open(kv[1], "w") as f:
+                    f.write_bytes(Span(png))
+                print("RENDER: " + kv[0] + " " + String(wpx) + "x" + String(hpx) + " " + kv[1])
+            except:
+                print("TEST: can't write " + kv[1])
+        elif verb == "stroke":  # stroke:K=x,y,p;x,y,p;…: a pen's press, moves and release (canvas points), each carrying its pressure
+            var pts = List[Tuple[Float64, Float64, Float64]]()
+            for part in kv[1].split(";"):
+                var a = split_at(String(part), ",")
+                var b = split_at(a[1], ",")
+                pts.append((to_float(a[0]), to_float(b[0]), to_float(b[1])))
+            if len(pts) == 0:
+                print("TEST: an empty stroke")
+                return
+            var begin = String("drag-begin")
+            var update = String("drag-update")
+            var end = String("drag-end")
+            ref cv = host[].canvases[ci]
+            cv.test_pressure = pts[0][2]
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](cv.drag, begin.as_c_string_span(), pts[0][0], pts[0][1])
+            for k in range(1, len(pts)):
+                var free_by = perf_counter_ns() + 3_000_000_000  # (as drag: a move sent mid-rebuild is dropped, D-304)
+                while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
+                    pump()
+                host[].canvases[ci].test_pressure = pts[k][2]
+                external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, update.as_c_string_span(),
+                    pts[k][0] - pts[0][0], pts[k][1] - pts[0][1])
+            var free_by = perf_counter_ns() + 3_000_000_000
+            while (busy() or host[].has_pending) and perf_counter_ns() < free_by:
+                pump()
+            var last = pts[len(pts) - 1]
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].drag, end.as_c_string_span(),
+                last[0] - pts[0][0], last[1] - pts[0][1])
+            host[].canvases[ci].test_pressure = -1
         elif verb == "zoom":  # the scroll controller's signal: 4 notches up = 2×
             var factor = Float64(to_int(kv[1]))
             var handled = List[c_int](length=1, fill=0)
             var signal = String("scroll")
+            host[].canvases[ci].test_zoom = True  # (a zoom: ctrl held, on a canvas whose plain scroll pans)
             external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].scroll, signal.as_c_string_span(), Float64(0), -4.0 * log2(factor), Int(handled.unsafe_ptr()))
+            host[].canvases[ci].test_zoom = False
+            _ = len(handled)
+        elif verb == "wheel":  # wheel:K=dx,dy: the canvas's scroll controller's signal, in wheel notches, no modifier (D-1218)
+            var d = split_at(kv[1], ",")
+            var handled = List[c_int](length=1, fill=0)
+            var signal = String("scroll")
+            external_call["g_signal_emit_by_name", NoneType, num_fixed_args=2](host[].canvases[ci].scroll, signal.as_c_string_span(), to_float(d[0]), to_float(d[1]), Int(handled.unsafe_ptr()))
             _ = len(handled)
         else:  # frames: let the display run n frames, then report the rate
             var n = to_int(kv[1])
@@ -5357,13 +6232,34 @@ def run_step[A: App](host_addr: Int, step: String):
                 break
         if not said:
             print("TEST: nothing tagged", rest)
-    elif verb == "gaps":  # gaps:start forgets the frames painted so far; gaps:N runs the main loop N ms, then prints the longest gap between painted frames (MOJOUI_TRACE)
+    elif verb == "gaps":  # gaps:start forgets the frames painted so far; gaps:N runs the main loop N ms, then prints the longest gap between painted frames
+        # (a freeze detector, D-1309: gaps:start shows the window if a test hasn't, listens to its paints as MOJOUI_TRACE
+        # does, and asks for a redraw on every frame until gaps:N ends, so a window with nothing moving still paints at the
+        # display's rate and only a busy UI thread makes a gap). Under MOJOUI_TRACE (paints already timed: goal 30's runs)
+        # it only forgets the frames so far, as before D-1309: the gaps are between the app's own paints (D-1324)
         if rest == "start":
+            show_test_window(host[].window)
+            var force = False
+            if not host[].paint_timed:
+                var clock = external_call["gtk_widget_get_frame_clock", Int](host[].window)
+                if clock != 0:
+                    connect(clock, "before-paint", on_before_paint[A], host_addr)
+                    connect(clock, "after-paint", on_after_paint[A], host_addr)
+                    host[].paint_timed = True
+                    force = True
+            elif app_data("mojoui-gaps-forced") != 0:
+                force = True
+            set_app_data("mojoui-gaps-forced", 1 if force else 0)
+            if force and app_data("mojoui-gaps-ticking") == 0:
+                set_app_data("mojoui-gaps-ticking", 1)
+                _ = external_call["gtk_widget_add_tick_callback", c_uint](host[].window, on_gaps_tick, 0, 0)
             host[].frame_times = List[Int]()
+            print("GAPS: start", flush=True)
             return
         var until = Int(perf_counter_ns()) + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until:
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
+        set_app_data("mojoui-gaps-ticking", 0)
         var worst = 0.0  # (every gap, the long ones too: intervals() leaves out a bench's pauses, which is what this looks for)
         for k in range(1, len(host[].frame_times)):
             worst = max(worst, Float64(host[].frame_times[k] - host[].frame_times[k - 1]) / 1e6)
@@ -5837,6 +6733,9 @@ def save_png(window: Int, path: String):
 
 def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
+    if host[].window != 0:  # (activated again: a background app launched a second time hands over here; its window opens)
+        on_tray_activate[A](host_addr)
+        return
     host[].window = external_call["gtk_application_window_new", Int](gapp)
     var title = host[].rt.app.title()
     external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
@@ -5862,6 +6761,15 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     for prop in ["notify::default-width", "notify::default-height", "notify::maximized", "notify::fullscreened"]:
         connect3(host[].window, prop, on_window_resized[A], host_addr)
     connect(host[].window, "realize", on_window_realize[A], host_addr)
+    connect_any(host[].window, "close-request", on_close_request[A], host_addr)  # (App.closing before the window goes)
+    if host[].rt.app.background():  # (App.background: a tray item opens the window again; the app outlives its window)
+        host[].tray = TrayItem(host[].rt.app.title().lower().replace(" ", "-"), host[].rt.app.title(), "folder-saved-search")
+        var on_tray = on_tray_activate[A]
+        var on_quit = on_tray_quit[A]
+        try:
+            host[].tray.publish(Pointer(to=on_tray).unsafe_bitcast[Int]()[], Pointer(to=on_quit).unsafe_bitcast[Int]()[], host_addr)
+        except e:
+            print("mojoui: no tray item (" + String(e) + "): closing the window will end the app", flush=True)
     var link_path = getenv("MOJOUI_AGENT_SOCKET")  # an agent host may attach here (docs/agent.md: the agent link)
     if link_path != "":
         var lfd = listen_unix(link_path)
@@ -5909,10 +6817,14 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     if testing:
         wait_webviews[A](host_addr)
         var each = getenv("MOJOUI_SHOTS_EACH")  # a picture after every step but the waits: <prefix>-NN.png
-        for step in steps.split(";"):
+        for step in test_steps(steps):
+            if host[].closed:
+                break
             host[].step_no += 1
-            if String(step) != "":
-                run_step[A](host_addr, String(step))
+            if step != "":
+                run_step[A](host_addr, step)
+            if host[].closed:  # (the `quit` step: the window is gone, as after a person closed it)
+                break
             settle()
             if shot != "":
                 wait_frame(host[].window)
@@ -5928,8 +6840,9 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
             while not host[].canvases_drawn() and perf_counter_ns() < deadline:
                 pump()
             settle()
-        report[A](host_addr)
-    if shot != "":
+        if not host[].closed:
+            report[A](host_addr)
+    if shot != "" and not host[].closed:
         host[].full_page()
         save_png(host[].window, shot)
     if testing or shot != "":
@@ -5981,10 +6894,55 @@ def probe_gpu_canvases[A: App](pres: Int) -> Int:
     return ctx
 
 
+def on_close_request[A: App](window: Int, host_addr: Int) abi("C") -> c_int:
+    """The window is asked to close (its close button, Ctrl+W, the window manager, the `quit` step): App.closing finishes
+    what must be kept, then the window closes (FALSE: nothing stops it)."""
+    var host = host_at[A](host_addr)
+    if host[].rt.app.background():
+        if host[].tray.registered():  # (the window only hides: the app keeps running, a panel's tray item opens it again)
+            external_call["gtk_widget_set_visible", NoneType](window, c_int(0))
+            if not host[].hidden:
+                external_call["g_application_hold", NoneType](external_call["g_application_get_default", Int]())
+            host[].hidden = True
+            host[].rt.app.window_shown(False)
+            return 1  # TRUE: GTK doesn't destroy it
+        print("mojoui: no tray to come back from (no StatusNotifierWatcher took the item): closing ends the app", flush=True)
+    host[].rt.closing()
+    host[].closed = True
+    return 0
+
+
+def on_tray_activate[A: App](host_addr: Int) abi("C"):
+    """The tray item was clicked (mojoui.tray's Activate): the window opens again, as it was."""
+    var host = host_at[A](host_addr)
+    if host[].closed:
+        return
+    var was_hidden = host[].hidden
+    host[].hidden = False
+    external_call["gtk_window_present", NoneType](host[].window)
+    if was_hidden:
+        external_call["g_application_release", NoneType](external_call["g_application_get_default", Int]())
+        host[].rt.app.window_shown(True)
+    print("WINDOW: open", flush=True)
+
+
+def on_tray_quit[A: App](host_addr: Int) abi("C"):
+    """The tray menu's Quit: the app ends as if its last window closed (App.closing, then the process exits), with the
+    window open or hidden."""
+    var host = host_at[A](host_addr)
+    print("WINDOW: quit from the tray", flush=True)
+    if not host[].closed:
+        host[].rt.closing()
+        host[].closed = True
+    external_call["g_application_quit", NoneType](external_call["g_application_get_default", Int]())
+
+
 def on_app_shutdown[A: App](gapp: Int, host_addr: Int) abi("C"):
-    """The app is closing: release the GPU canvases' CUDA and GL objects in their GL context, then the context
+    """The app is closing: App.closing if the window didn't already tell it (a quit with the window open: Ctrl+Q, the end
+    of a test run); then release the GPU canvases' CUDA and GL objects in their GL context, then the context
     (review item 4)."""
     var host = host_at[A](host_addr)
+    host[].rt.closing()
     if host[].pres == 0 or host[].gl_ctx == 0:
         return
     external_call["gdk_gl_context_make_current", NoneType](host[].gl_ctx)
@@ -6029,7 +6987,24 @@ def run[A: App]() -> Int:
     host[].pres = Int(pres)
     host[].gl_ctx = gl_ctx
     var id = String("dev.mojoui.App")
-    var gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(G_APPLICATION_NON_UNIQUE))
+    var flags = G_APPLICATION_NON_UNIQUE
+    if host[].rt.app.background():  # (one instance per app: launching it again opens the running one's window, on_activate)
+        id = "dev.mojoui.bg."
+        for c in host[].rt.app.title().lower().codepoint_slices():
+            if (c >= "a" and c <= "z") or (c >= "0" and c <= "9"):
+                id += c
+        flags = 0
+    var gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(flags))
+    if flags == 0:
+        var err = List[Int](length=1, fill=0)
+        if Int(external_call["g_application_register", c_int](gapp, 0, Int(err.unsafe_ptr()))) == 0:
+            print("mojoui: can't register as the one " + host[].rt.app.title() + " (no session bus?): running on its own", flush=True)
+            external_call["g_object_unref", NoneType](gapp)
+            id = "dev.mojoui.App"
+            gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(G_APPLICATION_NON_UNIQUE))
+        elif Int(external_call["g_application_get_is_remote", c_int](gapp)) != 0:
+            print("mojoui: " + host[].rt.app.title() + " is already running: opening its window", flush=True)
+        _ = len(err)
     if getenv("MOJOUI_PRESENT_STATS") == "1":
         var key = String("mojoui-host")
         external_call["g_object_set_data", NoneType](gapp, key.as_c_string_span(), Int(host))

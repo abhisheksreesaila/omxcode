@@ -30,7 +30,7 @@ comptime DATE = 20  # text = "YYYY-MM-DD"
 comptime ICON = 21  # text = icon name (see ICON_NAMES); size = points
 comptime GRID = 22  # children in rows of `value` columns; spacing = gap
 comptime LAZYLIST = 23  # value = row count, msg2 = list id, size = height, spacing = row height
-comptime CANVAS = 24  # drawn by the app's draw(): style = canvas id, value = version, msg = on_gesture, msg2 = on_frame
+comptime CANVAS = 24  # drawn by the app's draw(): style = canvas id, value = version, msg = on_gesture, msg2 = on_frame, spacing 1 = scroll pans
 comptime BOARD = 25  # children at absolute positions (.at(x, y), sized with .width/.height): msg = on_move, msg2 = on_resize; spacing = width, size = height; value = reveal (see Board)
 comptime OVERLAY = 26  # first child fills it; the others float over it, pinned to an edge or corner (.pin(h, v): x = h, y = v)
 comptime MENUBAR = 27  # a row of menus (mojoui.menus): children = MENU nodes
@@ -62,8 +62,10 @@ comptime PRESS = 4  # the pointer went down at event.x, y; a TAP or PANs follow 
 comptime RELEASE = 5  # a drag (PANs) ended at event.x, y (not sent after a plain TAP)
 comptime DOUBLE = 6  # a double click / double tap at event.x, y (after the TAP of its first click)
 comptime SECONDARY = 8  # a right click (or a long press) at event.x, y: the place to open a context menu
+comptime WHEEL = 9  # a plain scroll (wheel, two-finger swipe) on a Canvas(scroll_pans=True): event.dx, dy = how far the
+#   content moves, in points (a swipe up moves it up); ctrl+scroll and pinch on that canvas still send ZOOM
 comptime KEY = 7  # a key pressed while the canvas has focus (a click gives it focus): event.text = the key's name
-comptime SET_TO = 9  # a drawn control set straight to a value (an agent, an accessibility tool): event.text = the number, in the unit .settable() names
+comptime SET_TO = 10  # a drawn control set straight to a value (an agent, an accessibility tool): event.text = the number, in the unit .settable() names
 #   ("ArrowDown", "Enter", "Escape", "Tab", "Backspace", "Delete", "PageDown", "Home", "F2", …, the web's names)
 #   or the character it typed ("7", "a", " "); event.dx = the modifiers held: SHIFT + CTRL + ALT
 comptime SHIFT = 1
@@ -427,6 +429,19 @@ def FilePicker(title: String, on_pick: Int, style: Int = PLAIN, icon: String = "
     return _one(Node(BUTTON, title, NO_MSG, style=style, hint=icon, msg2=on_pick, options=[accept]))
 
 
+def FileSaver(title: String, on_save: Int, suggested: String = "", style: Int = PLAIN, icon: String = "", accept: String = "") -> View:
+    """A button that asks where to save a file: the platform's own save dialog (GTK), a download (web). Sends `on_save`
+    with event.text = the path chosen, on the machine the app runs on; the app writes the file there in update() (the
+    web then hands that file to the browser as a download named `suggested`). `suggested`: the name the dialog starts
+    with ("note.md"); `accept`: extensions, e.g. ".md,.txt"."""
+    return _one(Node(BUTTON, title, NO_MSG, style=style, hint=icon, msg2=on_save, options=[accept, "save", suggested]))
+
+
+def is_file_saver(n: Node) -> Bool:
+    """A FileSaver's button (a FilePicker's has one option, its accept list)."""
+    return n.kind == BUTTON and n.msg2 != NO_MSG and len(n.options) >= 3 and n.options[1] == "save"
+
+
 def TextField(value: String, placeholder: String = "", on_change: Int = NO_MSG, on_submit: Int = NO_MSG, on_cancel: Int = NO_MSG) -> View:
     """One line of text. Sends `on_change` (event.text = new text) as you type, `on_submit` when Return
     is pressed and `on_cancel` when Escape is (event.text = the text, unchanged by the app)."""
@@ -511,15 +526,17 @@ def LazyList(count: Int, list_id: Int, on_tap: Int = NO_MSG, height: Int = 320, 
     return _one(Node(LAZYLIST, "", on_tap, value=count, msg2=list_id, size=height, spacing=row_height))
 
 
-def Canvas(id: Int, version: Int, on_gesture: Int = NO_MSG, on_frame: Int = NO_MSG, keys: Bool = False) -> View:
+def Canvas(id: Int, version: Int, on_gesture: Int = NO_MSG, on_frame: Int = NO_MSG, keys: Bool = False, scroll_pans: Bool = False) -> View:
     """A surface the app paints itself: hosts call the app's `draw(id, surface)` at the canvas's
     real pixel size, and again whenever `version` changes or the canvas is resized.
     Drags, pinches, wheel zooms and taps send `on_gesture` (event.number = PAN, ZOOM or TAP).
     With `on_frame`, it sends one event per display frame (event.number = microseconds since the last).
     With `keys=True` it takes the keyboard when pressed and sends `on_gesture` with event.number = KEY for each
     key (a canvas without it never holds the keyboard: Tab moves on past it).
+    A scroll zooms around the pointer (ZOOM); with `scroll_pans=True` a plain scroll pans instead (WHEEL: a drawing
+    page, a map) and ctrl+scroll or a pinch zooms.
     Size it with layout settings, e.g. `Canvas(0, v).grow().fill()`."""
-    return _one(Node(CANVAS, "", on_gesture, style=id, value=version, msg2=on_frame, size=1 if keys else 0))
+    return _one(Node(CANVAS, "", on_gesture, style=id, value=version, msg2=on_frame, size=1 if keys else 0, spacing=1 if scroll_pans else 0))
 
 
 def Divider() -> View:

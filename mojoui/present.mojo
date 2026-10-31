@@ -17,7 +17,8 @@
 # Everything here is looked up at run time (dlopen/dlsym): a machine without libcuda or GL just reports why and the
 # canvas falls back to the copy (the picture read back into the surface's CPU memory), as before.
 
-from std.ffi import external_call, c_int, c_uint, c_char
+from std.ffi import external_call, c_int, c_uint, c_char, OwnedDLHandle
+from std.memory.alloc import unsafe_alloc
 from std.memory import Pointer
 from std.time import perf_counter_ns
 from std.os import getenv
@@ -71,16 +72,16 @@ def fcall[T: RegisterPassable = Int, *A: AnyType](addr: Int, *args: *A) -> T:
 
 
 def dl_open(name: String, flags: Int = 2) -> Int:
-    """dlopen (flags: RTLD_NOW) called through its address: Mojo's own CPython loader declares dlopen with other types,
-    and a program can't declare one C function twice (an app that uses Python and a GTK host failed to build, D-1265)."""
-    var f = dl_sym(0, "dlopen")
-    if f == 0:
+    """dlopen(name, flags: RTLD_NOW by default) through the standard library's OwnedDLHandle (kept loaded for good), so an app that also
+    uses Mojo's Python interop links (two dlopen declarations don't, D-1413); 0 when it doesn't load."""
+    try:
+        var h = OwnedDLHandle(name, flags)
+        var p = h.borrow().handle
+        var raw = Int(p.value()) if p else 0
+        unsafe_alloc[OwnedDLHandle](1).unsafe_write(h^)
+        return raw
+    except:
         return 0
-    var n = name
-    var span = n.as_c_string_span()
-    var r = fcall[Int](f, span.unsafe_ptr(), c_int(flags))
-    _ = n^
-    return r
 
 
 def dl_sym(lib: Int, name: String) -> Int:

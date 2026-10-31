@@ -39,8 +39,8 @@ COMPONENTS = [
 # Which examples each platform's checks actually run (docs/goals/*-check.py): GTK and the web run every
 # example; the Android checks (goal 7) drive these on the emulator; Mac and iPhone only build and sign.
 RUN_ON = {
-    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media"],  # (widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35; media: goal 39 M2/M11 run it headless)
-    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat"],  # (kit: goal 18 runs it on GTK and the web)
+    "Linux (GTK)": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "media", "sketch", "jot", "dictate", "keeper", "traycheck"],  # (keeper, traycheck: goal 45; dictate: goal 43; jot: goal 42; sketch: goal 40; media: goal 39 M2/M11 run it headless; widgets: goal 34 M3, WebKitGTK views; agentchat: goal 35)
+    "Web": ["hello", "gallery", "todo", "gpu", "kitchen", "expenses", "layout", "lens", "analytics", "workbook", "mxstudio", "omxplorer", "themes", "kit", "httpcheck", "consolekit", "console", "widgets", "agentchat", "jot"],  # (kit: goal 18 runs it on GTK and the web; jot: goal 42 M3's web proof)
     "Android": ["hello", "gallery", "layout", "lens", "todo"],
     "Mac (AppKit)": [],
     "iPhone (UIKit)": [],
@@ -60,6 +60,10 @@ FEATURES = [
     ("Canvas: pan, zoom, tap", "on_gesture: PAN, ZOOM, TAP", r"\bPAN\b|PAN =", "lens"),
     ("Canvas: press, release, double", "PRESS, RELEASE, DOUBLE", r"\bDOUBLE\b|DOUBLE =", "workbook"),
     ("Canvas frames (animation)", "on_frame", r"tick|SET_FRAMES|on_frame", "lens"),
+    ("Canvas: pen pressure", "event.pressure on PRESS, PAN, RELEASE (0: none)", r"pressure", "sketch"),
+    ("Canvas: scroll pans", "Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM", r"\bWHEEL\b", "sketch"),
+    ("Scene: polygon fill", "Painter.polygon (non-zero, antialiased)", r"OP_POLY|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
+    ("Scene: layer transform", "Painter.layer_transform (pan/zoom moves a kept layer)", r"layer_tx|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
     ("Canvas: keys (focus on press)", "on_gesture: KEY (event.text, modifiers)", r"\"key-pressed\"|addEventListener\('keydown'", "mxstudio"),
     ("TextField: Escape cancels", "TextField(on_cancel=)", r"on_field_key|second: 2", "mxstudio"),
     ("Editor that echoes the grid's typing", "TextField(…).echo()", r"\.echo\(\): the canvas typing|value\"\] == 3", "mxstudio"),
@@ -85,11 +89,27 @@ FEATURES = [
     ("HTTP requests (effects; replies as Events)", "mojoui.http: Request.get/post_json · App.requests() · comptime HTTP", r"schedule_effects|mod\.poll", "httpcheck"),
     ("Timers", "App.every() -> [Every(ms, msg)]", r"schedule_effects|mod\.poll", "httpcheck"),
     ("Scroll pinned to its end", "Scroll(…, pinned=True)", r"on_pin_changed|data-pin|follow_ends", "consolekit"),
+    ("SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)", "Database(path) · prepare(sql).bind/step · begin/commit", r"(?!)", "jot"),
+    ("Save dialog", "FileSaver(title, on_save, suggested=)", r"gtk_file_dialog_save|/save/\{sid\}", "jot"),
+    ("File drop from outside the app", "DropTarget(view, on_drop, on_file=)", r"gdk_file_list_get_type|/dropfile/", "jot"),
+    ("Quit hook", "def closing(mut self)", r"rt\[?\]?\.closing\(|close_all|on_will_terminate", "jot"),
+    ("Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)", "FolderWatcher(path, wake=True) · start() · take()", r"(?!)", "keeper"),
+    ("Background mode (keeps running with the window closed)", "def background(self) -> Bool · window_shown(shown)", r"app\.background\(\)", "keeper"),
+    ("Tray item (StatusNotifierItem; NSStatusItem)", "published by the host for a background() app; Activate opens the window", r"TrayItem\(", "keeper"),
+    ("Notifications (mojoui.notify)", "notify(app, title, body)", r"(?!)", "keeper"),
 ]
+
+# Library features no host draws (pure Mojo over a C library): their state per host, set by hand from what ran
+# (reasons in NOTES). Hosts not listed: ❌.
+BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
+           {"Linux (GTK)": "✅", "Web": "✅", "Mac (AppKit)": "🔨"},
+           "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
+           "Notifications (mojoui.notify)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"}}
 
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)
 COMPOSITES = [
+    ("Ink stroke (pressure ink, round ends, the eraser's hit test)", "mojoui/ink.mojo", ["Canvas", "Canvas: pen pressure", "Scene: polygon fill"], "Stroke("),
     ("DataGrid", "mojoui/datagrid.mojo", ["Canvas", "Canvas: press, release, double", "Canvas: keys (focus on press)", "In-place editor", "TextField: Escape cancels", "Editor that echoes the grid's typing", "Board: drag, resize, snap"], "DataGrid("),
     ("PivotTable", "mojoui/pivot.mojo", ["Grid", "Scroll", "Text tones"], "PivotTable("),
     ("ChartView", "mojoui/chartview.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "ChartView"),
@@ -264,15 +284,74 @@ def cell(host, src, ctor, kind):
 
 
 # Features a host implements but no check runs there (a stand-in drives it instead): 🔨 until one does.
-UNPROVEN = {("Linux (GTK)", "File picker"): "the checks hand the path in with the pick: step; GTK's own dialog isn't driven"}
+UNPROVEN = {("Linux (GTK)", "File picker"): "the checks hand the path in with the pick: step; GTK's own dialog isn't driven",
+            ("Linux (GTK)", "Canvas: pen pressure"): "only injected pressure ran (the stroke: test step sets it where GDK's "
+                                                     "pressure axis is read); no real pen yet",
+            ("Linux (GTK)", "Save dialog"): "the checks hand the path in with the save: step; GTK's own save dialog isn't driven",
+            ("Linux (GTK)", "File drop from outside the app"): "the dropfile: step builds a real GdkFileList and emits the GtkDropTarget's "
+                                                                "drop signal; a drag from a real file manager isn't driven headless",
+            ("Web", "File drop from outside the app"): "drive.py's dropfile: dispatches a drop event carrying a File (no OS drag)",
+            ("Web", "Quit hook"): "the session's App.closing runs when it's evicted or the server stops (tried by hand: a SIGINT); "
+                                  "no check runs it, and closing a tab doesn't end its session"}
+
+
+# What a reader should know about a feature row beyond its cells (limits, not states).
+NOTES = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
+         "the system's libsqlite3 loaded at run time (dlopen, D-1304/D-1311); Android and iPhone don't build it yet; the Mac links "
+         "against nothing new and loads /usr/lib/libsqlite3.dylib (built, not run)",
+         "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)":
+             "Linux: inotify on a pthread, new folders followed, one event per change, p95 lag 0.01 ms for 1,000 changes (goal 45 M0); "
+             "a folder renamed inside reports its files under the new name, an overflow re-watches and says rescan, a folder it can't "
+             "watch makes it partial() with the reason, names with newlines or non-UTF-8 bytes arrive whole (tests/test_watch_edges.mojo); "
+             "Mac: FSEvents (file-level events, a dispatch queue), built, not run, and it doesn't pair a rename's two halves; the web "
+             "has FileSystemObserver only on a folder the person picked or dropped, only while the tab is open (docs/goals/45/web.json)",
+         "Background mode (keeps running with the window closed)":
+             "GTK: the window hides on close only while a panel's StatusNotifierWatcher has the tray item (otherwise closing ends the "
+             "app); one instance per app, so launching it again opens the running one (goal 45 M1); the Mac has none yet (the AppKit host still "
+             "quits when its last window closes); a web page's code stops when its tab closes (docs/goals/45/web.json)",
+         "Tray item (StatusNotifierItem; NSStatusItem)":
+             "Linux: a StatusNotifierItem on the session bus (Activate, SecondaryActivate, ContextMenu open the window), a minimal "
+             "com.canonical.dbusmenu with Open and Quit, registered again whenever a panel's watcher appears; checked on a private bus "
+             "with a pretend watcher, no real panel; "
+             "Mac: NSStatusItem not built yet; the web has no tray API",
+         "Notifications (mojoui.notify)":
+             "Linux: org.freedesktop.Notifications.Notify, asynchronous (goal 45 M1, M2); Mac: UNUserNotificationCenter, built, not "
+             "run, and it doesn't ask the person's permission yet (that needs a block)",
+         "Save dialog": "the app writes the file at the path it's given; on the web that path is the page's downloads folder and the "
+                        "page downloads it; the Mac has no NSSavePanel yet (nor an NSOpenPanel for the file picker)",
+         "Scene: layer transform": "GTK shows a moved, kept layer through a texture of at most 4096 px a side (D-1216): on a "
+                                   "big page at a big zoom it's softer than the strokes until the zoom comes back within the cap"}
 
 
 def feature_cell(host, src, pattern, example, name=""):
+    if name in BY_HAND:
+        return BY_HAND[name].get(host, "❌")
     if not re.search(pattern, src):
         return "❌"
     if (host, name) in UNPROVEN:
         return "🔨"
     return "✅" if example in RUN_ON[host] else "🔨"
+
+
+# Native services (goal 43): what an app reaches on the machine itself, not a widget. (name, module and API, the
+# example whose checks run it, per host: (state, why) for the hosts where it isn't simply "run by that example's check").
+SERVICES = [
+    ("Microphone", "mojoui.audio: Microphone().start(), read(since), level(); 16 kHz mono on its own thread", "dictate",
+     {"Linux (GTK)": None, "Web": ("❌", "the web host doesn't stream the browser's microphone to the app"),
+      "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "builds; start() reports \"no microphone on this host yet\" (AVAudioEngine planned)"),
+      "iPhone (UIKit)": ("❌", "not built"), "Agent (MCP)": ("—", "")}),
+    ("Speech model in process", "mojoui.speech: SpeechModel().transcribe(samples), SpeechStream feed/poll (whisper-large-v3-turbo, GPU)", "dictate",
+     {"Linux (GTK)": None, "Web": ("❌", "the model needs CPython + torch in the app's process"),
+      "Android": ("❌", "not built"), "Mac (AppKit)": ("🔨", "builds; needs CPython with torch beside the app (MPS), never run"),
+      "iPhone (UIKit)": ("❌", "no CPython on the phone"), "Agent (MCP)": ("—", "")}),
+]
+
+
+def service_cell(host, example, special):
+    got = special.get(host)
+    if got is None:
+        return ("✅" if example in RUN_ON[host] else "🔨"), ""
+    return got
 
 
 LIBRARIES = [("@codemirror/", "CodeMirror 6"), ("echarts", "Apache ECharts")]
@@ -349,12 +428,25 @@ def render():
     for name, api, pattern, example in FEATURES:
         row = [feature_cell(h, srcs[h], pattern, example, name) for h in names]
         out.append(f"| {name} | `{api}` | " + " | ".join(row) + " |")
+    notes = [f"- {name} ({host}): 🔨 though a check runs it: {why}." for (host, name), why in UNPROVEN.items()]
+    notes += [f"- {name}: {why}." for name, why in NOTES.items()]
+    if notes:
+        out += [""] + notes
     known = {}
     for h in names:
         for ctor, kind in COMPONENTS:
             known[(h, ctor)] = cell(h, srcs[h], ctor, kind)
         for name, api, pattern, example in FEATURES:
             known[(h, name)] = feature_cell(h, srcs[h], pattern, example, name)
+    out += ["", "## Native services (the machine, not a widget)", "",
+            "| Service | API | " + " | ".join(names) + " |",
+            "|---|---|" + "---|" * len(names)]
+    why = []
+    for name, api, example, special in SERVICES:
+        cells = [service_cell(h, example, special) for h in names]
+        out.append(f"| {name} | `{api}` | " + " | ".join(c for c, _ in cells) + " |")
+        why += [f"- {name} ({h}): {w}." for h, (c, w) in zip(names, cells) if w]
+    out += [""] + why
     out += ["", "## Composite components (Mojo, built from the ones above)", "",
             "A composite is only as far along on a platform as the least-proven piece it's made of.", "",
             "| Component | Module | Made of | " + " | ".join(names) + " | Used by |",
