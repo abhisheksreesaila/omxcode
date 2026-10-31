@@ -14,7 +14,7 @@ from mojoui.scene import Scene
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette, Theme, hx
-from themes.liquid import liquid, liquid_palette
+from themes.liquid import liquid, liquid_palette, dark_tint
 from themes.skins import skin, ledger_palette, graphite_palette, blueprint_palette
 from mojoui.menus import MenuBar, Menu, Item, Separator, Submenu, ContextMenu
 from mojoui.overlays import Dialog, Toast, Popover, Checkbox, Clipboard
@@ -29,6 +29,9 @@ comptime LIQUID = 6  # the default (D-225)
 comptime BRAND_INDIGO: UInt32 = 0xFFE5464F  # #4f46e5 (R in the low byte)
 comptime SHEET_GREEN: UInt32 = 0xFF437A0E  # #0e7a43
 comptime REPORT_RED: UInt32 = 0xFF3F24C8  # #c8243f
+comptime LIGHT = 0  # the appearance (Settings → Appearance, settings.txt appearance=light|dark|system): Liquid light,
+comptime DARK = 1  # Liquid dark (the default, owner 2026-10-30: "we can do Liquid dark mode", D-1241), or the system's
+comptime SYSTEM = 2
 
 
 def skin_name(design: Int) -> String:
@@ -41,18 +44,25 @@ def skin_of(name: String) -> Int:
     return LEDGER if name == "ledger" else (GRAPHITE if name == "graphite" else (BLUEPRINT if name == "blueprint" else LIQUID))
 
 
-def skin_palette(design: Int, accent: UInt32 = 0) -> Palette:
+def skin_palette(design: Int, accent: UInt32 = 0, dark: Bool = False) -> Palette:
     """The skin's colours with a mode's tint over them (in a report, red only means "a report": false and errors take
-    other tones, D-254)."""
-    var p = (ledger_palette() if design == LEDGER else (graphite_palette() if design == GRAPHITE else (blueprint_palette() if design == BLUEPRINT else liquid_palette()))).with_accent(accent)
+    other tones, D-254). `dark`: Liquid dark, the tint lifted to read on its surfaces (the other skins have one look)."""
+    var liq = liquid_palette(dark)
+    var p = (ledger_palette() if design == LEDGER else (graphite_palette() if design == GRAPHITE else (blueprint_palette() if design == BLUEPRINT else liq^))).with_accent(
+        dark_tint(accent) if dark and design == LIQUID and accent != 0 else accent)
     if accent == REPORT_RED:
-        p.bad = hx("#9f6b75")
+        p.bad = hx("#9f6b75") if not p.dark else hx("#c99aa3")
     return p^
 
 
-def skin_theme(design: Int, accent: UInt32) -> Theme:
-    var pal = skin_palette(design, accent)
+def skin_theme(design: Int, accent: UInt32, dark: Bool = False) -> Theme:
+    var pal = skin_palette(design, accent, dark)
     return liquid(pal) if design == LIQUID else skin(skin_name(design), pal)
+
+
+def appearance_of(name: String) -> Int:
+    """settings.txt's appearance back to LIGHT, DARK or SYSTEM (dark when unset: omxplorer's default, D-1241)."""
+    return LIGHT if name == "light" else (SYSTEM if name == "system" else DARK)
 from mojoui.view import SECONDARY
 from mojoui.charts import grouped, fixed
 from mojoui.numformat import fixed as numfixed, pow10
@@ -224,6 +234,8 @@ comptime JOBS_WAKE = 3109  # a background job or a media decoder finished (App.j
 comptime BIG_FILE = 256 * 1024 * 1024  # from this many bytes a file opens in a background job (the island shows its progress)
 comptime BIG_ROWS = 10_000_000  # from this many rows a chart's numbers and a column's figures come from background jobs
 comptime SKINS: List[String] = ["Liquid", "Ledger", "Graphite", "Blueprint"]
+comptime APPEARANCES: List[String] = ["Light", "Dark", "System"]
+comptime APPEARANCE = 3290  # Settings: Light, Dark or System (event.number)
 comptime INSERT_VIDEO = 3200  # Insert > Video… / Image…: a dialog with a file picker of that kind
 comptime INSERT_IMAGE = 3201
 comptime INSERT_CLOSE = 3202
@@ -314,7 +326,9 @@ struct Main(App):
     var win_w: Int  # the window's content area in points (App.resize; W × 900 until the host says)
     var win_h: Int
     var looks: List[Theme]  # the skin's themes, one per tint (make_looks)
-    var skin: Int  # the design (LIQUID by default, D-225; Settings → Appearance writes settings.txt, D-156)
+    var skin: Int  # the design (LIQUID by default, D-225, D-1241; Settings → Appearance writes settings.txt, D-156)
+    var appearance_mode: Int  # LIGHT, DARK (the default) or SYSTEM: Liquid's light or dark (D-1241)
+    var system_dark: Bool  # what the system said last (App.appearance)
     var import_col: Int
     var insp_tab: Int  # 0 Table, 1 Cell
     var inspector_open: Bool
@@ -425,11 +439,13 @@ struct Main(App):
         self.font = Font()
         self.looks = List[Theme]()
         adopt_config(APP, "omxapp")
-        # graphite by default (goal 41, D-1175); a skin saved before it (no skin_version=2 line, D-1176) counts as unset
-        self.skin = skin_of(read_setting(APP, "skin", "graphite")) if read_setting(APP, "skin_version", "") == "2" else GRAPHITE
+        # Liquid by default, a saved skin honoured (D-1241: D-1176's skin_version rule is gone), in Liquid dark unless light is saved
+        self.skin = skin_of(read_setting(APP, "skin", "liquid"))
+        self.appearance_mode = appearance_of(read_setting(APP, "appearance", "dark"))
+        self.system_dark = False
         self.win_w = W
         self.win_h = 900
-        self.pal = skin_palette(self.skin)
+        self.pal = skin_palette(self.skin, 0, self.appearance_mode == DARK)
         self.import_col = 0
         self.insp_tab = 1
         self.inspector_open = read_setting(APP, "inspector", "yes") != "no"
@@ -541,6 +557,25 @@ struct Main(App):
     def window_size(self) -> Tuple[Int, Int]:
         return (W, 900)
 
+    def dark(self) -> Bool:
+        """Liquid dark now: the appearance picked, or the system's."""
+        return self.appearance_mode == DARK or (self.appearance_mode == SYSTEM and self.system_dark)
+
+    def appearance(mut self, dark: Bool):
+        """The system's light or dark: followed when the appearance is System."""
+        var was = self.dark()
+        self.system_dark = dark
+        if self.dark() != was:
+            self.restyle()
+
+    def restyle(mut self):
+        """The looks and the canvases' palette again (a skin or an appearance picked, the system switched)."""
+        self.pal = skin_palette(self.skin, self.accent(), self.dark())
+        self.make_looks()
+        self.grid.redraw()
+        self.preview.redraw()
+        self.version += 1
+
     def resize(mut self, width: Int, height: Int):
         """The window's content area: the sheet, the report and the inspector fill it (goal 25 M2)."""
         self.win_w = max(width, 640)
@@ -557,7 +592,7 @@ struct Main(App):
         var at = self.tint()
         if at < len(self.looks):
             return self.looks[at].copy()
-        return skin_theme(self.skin, self.accent())  # (not reached: make_looks keeps one per tint)
+        return skin_theme(self.skin, self.accent(), self.dark())  # (not reached: make_looks keeps one per tint)
 
     def tint(self) -> Int:
         """Which of make_looks' themes shows now: Liquid's indigo (0), the sheet's green (1), the report's red (2); other skins: 0."""
@@ -570,7 +605,7 @@ struct Main(App):
         self.looks = List[Theme]()
         if self.skin == LIQUID:
             for a in [BRAND_INDIGO, SHEET_GREEN, REPORT_RED]:
-                self.looks.append(skin_theme(self.skin, a))
+                self.looks.append(skin_theme(self.skin, a, self.dark()))
         else:
             self.looks.append(skin_theme(self.skin, 0))
 
@@ -2151,12 +2186,14 @@ struct Main(App):
             if 0 <= event.number < 4:
                 var all: List[Int] = [LIQUID, LEDGER, GRAPHITE, BLUEPRINT]
                 self.skin = all[event.number]
-                self.pal = skin_palette(self.skin)
-                self.make_looks()
                 write_setting(APP, "skin", skin_name(self.skin))
-                write_setting(APP, "skin_version", "2")  # (a choice made since graphite became the default: kept)
-                self.grid.redraw()
-                self.preview.redraw()
+                self.restyle()
+            self.version += 1
+        elif m == APPEARANCE:
+            if 0 <= event.number < 3:
+                self.appearance_mode = event.number
+                write_setting(APP, "appearance", "light" if event.number == LIGHT else ("dark" if event.number == DARK else "system"))
+                self.restyle()
             self.version += 1
         elif m == TIMINGS:
             self.show_timings = event.number == 1
@@ -2873,17 +2910,17 @@ struct Main(App):
         """The grid as a display list (goal 26; hosts that can draw one: GTK with MOJOUI_SCENE=1)."""
         if canvas != 0:
             return False
-        self.pal = skin_palette(self.skin, self.accent())
+        self.pal = skin_palette(self.skin, self.accent(), self.dark())
         self.grid.draw_scene(scene, self.frame, self.font, self.pal)
         return True
 
     def chart_palette(self) -> Palette:
         """Charts draw in the skin's first series colour, not the mode's tint: the report's red would read as a loss (D-254)."""
-        var base = skin_palette(self.skin)
+        var base = skin_palette(self.skin, 0, self.dark())
         return self.pal.with_accent(base.data(0))
 
     def draw(mut self, canvas: Int, mut surface: Surface):
-        self.pal = skin_palette(self.skin, self.accent())  # (the mode's tint, as the chrome has it)
+        self.pal = skin_palette(self.skin, self.accent(), self.dark())  # (the mode's tint, as the chrome has it)
         if 0 <= canvas < len(self.chart_sizes):
             self.chart_sizes[canvas] = (surface.points_width(), surface.points_height())
         if self.editor and self.editor.value().draws(canvas):
@@ -3189,6 +3226,8 @@ struct Main(App):
             out.append(Dialog("Settings", VStack(
                 Text("Appearance", HEADLINE), Text("The same on every computer, whatever the system theme.", CAPTION),
                 Radio(materialize[SKINS](), at, SKIN),
+                Text("Liquid's light or dark (the other skins have one look each).", CAPTION),
+                Segmented(materialize[APPEARANCES](), self.appearance_mode, APPEARANCE).tag("appearance"),
                 Divider().fill(),
                 Checkbox("Show GPU timings in the status bar", self.show_timings, TIMINGS),
                 Checkbox("Open the inspector with a sheet", self.inspector_open, KEEP_INSPECTOR),

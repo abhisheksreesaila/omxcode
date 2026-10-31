@@ -317,7 +317,7 @@ def m5():
             return False, f"{host}: weak borders {weak[:6]}"
         res.append(f"{host} mean {mean:.2f}")
     build("gallery")
-    return True, "graphite; " + ", ".join(res) + "; every region bordered"
+    return True, "Liquid dark; " + ", ".join(res) + "; every region bordered"
 
 
 def m6():
