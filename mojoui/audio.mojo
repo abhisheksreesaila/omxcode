@@ -34,8 +34,9 @@ comptime W_REFS = 5  # owners: the handle and the worker; the last one frees
 comptime W_RING = 6  # the ring's address (Float32 × RING)
 comptime W_SOURCE = 7  # a NUL-terminated copy of the source name, or 0 (default)
 comptime W_TIME = 8  # now_ns() when the newest chunk landed
-comptime W_SEQ = 9  # odd while the worker updates W_TIME and W_TOTAL together (a reader retries: captured_ns)
+comptime W_SEQ = 9  # odd while the worker updates W_TIME and W_TOTAL together (a reader retries, for at most STAMP_WAIT_NS: captured_ns)
 comptime W_WORDS = 10
+comptime STAMP_WAIT_NS = 2_000_000  # captured_ns stops retrying an odd W_SEQ after 2 ms (the writer's update is 3 stores)
 
 
 def _word(words: Int, k: Int) -> _P:
@@ -212,15 +213,21 @@ struct Microphone(Movable):
             return 0
         var t = 0
         var total = 0
-        while True:  # the newest chunk's time and the total it brought, read as one pair (W_SEQ even and unchanged)
+        var paired = False
+        var give_up = 0
+        while not paired:  # the newest chunk's time and the total it brought, read as one pair (W_SEQ even and unchanged)
             var seq = Int(_A.load(_word(self.words, W_SEQ)))
-            if seq % 2 == 1:
-                continue
             t = Int(_A.load(_word(self.words, W_TIME)))
             total = Int(_A.load(_word(self.words, W_TOTAL)))
-            if Int(_A.load(_word(self.words, W_SEQ))) == seq:
-                break
-        return t - ((total - 1 - index) * 1_000_000_000) // RATE
+            paired = seq % 2 == 0 and Int(_A.load(_word(self.words, W_SEQ))) == seq
+            if not paired:  # bounded: a writer stuck mid-update (it died, or it was descheduled) can't hang the caller
+                var now = now_ns()
+                if give_up == 0:
+                    give_up = now + STAMP_WAIT_NS
+                elif now >= give_up:
+                    break  # (the unpaired values are off by one 20 ms chunk at most; clamped to now below)
+        var at = t - ((total - 1 - index) * 1_000_000_000) // RATE
+        return at if paired else min(at, now_ns())
 
     def level(self) -> Float64:
         """The last 20 ms's loudness (RMS, 0..1)."""

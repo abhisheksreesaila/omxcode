@@ -44,10 +44,13 @@ JS) is the yardstick: its gap audit is `personalnotev2/docs/research/omxcode-gap
   embeds JS widgets when they're the better tool.
 
 ## Open items
+Fixes are run by `scripts/probe_fixes.py` (one step per item, results in `docs/goals/probe-fixes/results.json`) and noted
+in each probe's gallery section (`scripts/probe_fixes_gallery.py`).
+
 - **Mac:** every probe builds, none has run (it needs the owner's Mac).
 - **Sketch:** erase takes 14–23 ms p95. A real pen or touchpad and GTK's GPU renderer are unverified.
 - **Jot:** the goal 30 flake, the field-queue stale-write window, web drop leaks.
-- **Dictate:** B at fp16 is unmeasured. `captured_ns` retries without a bound (fix it at the next race).
+- **Dictate:** B at fp16 is unmeasured. (Fixed 2026-10-30: `captured_ns` gives up after 2 ms on a word that stays odd, D-1700.)
 - **Keeper:** never run against a real tray panel or notification server; a second launch builds its App before handing
   over; Web Push untried; `file_stamp` is x86-64 only.
 

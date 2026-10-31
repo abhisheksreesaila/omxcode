@@ -881,3 +881,6 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Checker first (8823c08), every milestone FAIL. M0 watcher passed on its first full run (p95 0.01 ms). M1's first private-bus run started the desktop portal through bus activation and it reached the owner's Wayland display; caught from its log lines, the checker's bus now has no services (D-1606) and no stray processes were left (checked with ps).
 - Keeper failed to link at first: the engine's pthread_create declaration clashed with the watcher's (D-1609).
 - The web script's first run counted a Background Sync event that fired while the tab was still open; events are now classified by their own timestamps against the close. Periodic Sync was refused until its permission was granted through Browser.setPermission (grantPermissions replaced the notification grant). FileSystemObserver missed 1 of 200 (the first file in a new folder); it still counts as the web's best, with the miss listed.
+
+## Probe fixes (2026-10-30)
+- Dictate: tests/test_audio_stamp.mojo hung (timeout 60 s killed it) on a block whose W_SEQ stays odd; after the bound it returns in 2.0 ms. test_audio_fail and goal 43 M0 (match 0.990) still pass. Goal 43 M3 checks race.json against audio.mojo's history, so the race is re-run (GPU 1, its harness waits for quiet).

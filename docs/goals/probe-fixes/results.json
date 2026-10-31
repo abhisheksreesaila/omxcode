@@ -1,0 +1,9 @@
+{
+ "dictate": {
+  "after_ms": 2.0,
+  "before": "hung forever on a word that stayed odd",
+  "checked": "2026-10-30",
+  "item": "captured_ns retried without a bound",
+  "test": "tests/test_audio_stamp.mojo"
+ }
+}
