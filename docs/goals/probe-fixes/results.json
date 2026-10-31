@@ -5,5 +5,19 @@
   "checked": "2026-10-30",
   "item": "captured_ns retried without a bound",
   "test": "tests/test_audio_stamp.mojo"
+ },
+ "jot_flake": {
+  "causes": [
+   "a fixed 3.5 s pause raced the 100M-row open job (1.8-2.3 s idle, 4.3-6 s with half the CPU busy): the test host's waitfor: step waits for the import sheet's button instead",
+   "the test host's pause: step slept 10 ms after every main-loop turn and skipped frames: the cancel's gaps were 50-67 ms in 6 of 6 runs, 16.7-50 ms after"
+  ],
+  "checked": "2026-10-31",
+  "gaps": [
+   "17, 33, 33 ms",
+   "17, 33, 33 ms",
+   "17, 33, 33 ms"
+  ],
+  "item": "goal 30 M1 failed now and then",
+  "runs": 3
  }
 }

@@ -44,7 +44,38 @@ def dictate():
         "after_ms": round(ms, 2), "test": "tests/test_audio_stamp.mojo"}
 
 
-STEPS = {"dictate": dictate}
+def load_check(n):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(f"goal{n}", ROOT / "docs" / "goals" / f"{n}-check.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def jot_flake():
+    """Goal 30 M1 (100M rows, frame gaps ≤ 50 ms, the cancel) passes RUNS times in a row (before: 1 of 5 failed, and its
+    steps failed every time with half the CPU busy). Causes: a fixed 3.5 s pause raced the open job (now waitfor:,
+    D-1701) and the pause: step slept 10 ms after every main-loop turn, skipping frames (now pump(), D-1702)."""
+    import headless
+    headless.ensure()  # (archived checkers don't start the display: lessons)
+    g30 = load_check(30)
+    if not g30.big().exists():
+        return False, f"no 100M-row file at {g30.big()} (goal 20's big.parquet)", {}
+    runs, gaps = 3, []
+    for i in range(runs):
+        ok, msg = g30.m1()
+        if not ok:
+            return False, f"goal 30 M1 run {i + 1} of {runs}: {msg}", {}
+        gaps.append(msg.split("longest frame gaps ", 1)[1].split(")", 1)[0])
+    return True, f"goal 30 M1 passed {runs} of {runs} (longest frame gaps per run: {'; '.join(gaps)})", {
+        "item": "goal 30 M1 failed now and then", "runs": runs, "gaps": gaps,
+        "causes": ["a fixed 3.5 s pause raced the 100M-row open job (1.8-2.3 s idle, 4.3-6 s with half the CPU busy): "
+                   "the test host's waitfor: step waits for the import sheet's button instead",
+                   "the test host's pause: step slept 10 ms after every main-loop turn and skipped frames: the cancel's "
+                   "gaps were 50-67 ms in 6 of 6 runs, 16.7-50 ms after"]}
+
+
+STEPS = {"dictate": dictate, "jot_flake": jot_flake}
 
 
 def main():

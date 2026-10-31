@@ -26,6 +26,12 @@ def line(step, r):
         return (f"<code>Microphone.captured_ns</code> no longer retries without a bound: a capture thread stuck mid-update "
                 f"made it spin forever; it now gives up after {r['after_ms']:.1f} ms with a time never later than now "
                 f"(<code>{escape(r['test'])}</code>).")
+    if step == "jot_flake":
+        return (f"Goal 30's 100M-row check failed now and then, and every time with half the CPU busy. Two causes, both in "
+                f"the test host, neither in the app: a fixed 3.5 s pause raced the open job (the host now waits for the import "
+                f"sheet, <code>waitfor:</code>), and its <code>pause:</code> slept 10 ms after every main-loop turn, which "
+                f"skipped frames (the cancel's gap was 50–67 ms in 6 of 6 runs, 16.7–50 ms after). {r['runs']} of {r['runs']} "
+                f"runs pass now.")
     return escape(r.get("summary", ""))
 
 
@@ -37,6 +43,8 @@ def main():
         start = page.index(f'id="{section}"')
         end = page.index("</article>", start)
         art = page[start:end]
+        if "<article" in art:  # (the Database section once lacked its closing tags: a note landed in the next section)
+            raise SystemExit(f"gallery: section {section} doesn't close before the next one starts")
         art = re.sub(r'\n *<p class="hardened">.*?</p>', "", art, flags=re.S)
         if items:
             note = ('\n        <p class="hardened"><b>Hardened since</b> (<code>scripts/probe_fixes.py</code>): '

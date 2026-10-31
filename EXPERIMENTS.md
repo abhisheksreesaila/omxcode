@@ -7,6 +7,7 @@ A dated record of what was tried, what happened, and what it means. Newest first
 ## Probe fixes: the probes' open items, one at a time (2026-10-30)
 - **Setup:** worktree t3-1376de19 from main 7f03a7d; one checker for every fix (`scripts/probe_fixes.py`, results in `docs/goals/probe-fixes/results.json`), each fix's test written failing first; gallery notes from `scripts/probe_fixes_gallery.py`.
 - **Dictate (D-1700):** `captured_ns` spun forever on a sequence word that stayed odd (the test hung); now it gives up after 2.0 ms with a time never later than now.
+- **Jot, the goal 30 flake (D-1701, D-1702):** two causes, both in the GTK test host. A fixed 3.5 s pause raced the 100M-row open (1.8–2.3 s idle, 4.3–6 s with half the CPU busy: the old steps failed every time at that load); `waitfor:` waits for the sheet. And `pause:` slept 10 ms per main-loop turn, skipping frames (the cancel's gap 50–67 ms in 6 of 6 runs → 16.7–50). Goal 30 M1: 1 of 5 failed before, 5 of 5 and 3 of 3 pass after; M3 passes. Tried and dropped: nice 10 on job threads (no gain; the engine's pool doesn't inherit it, mxframe-needs #27).
 
 ## Goal 45: Keeper, still working when the window is closed (2026-10-30)
 - **Setup:** branch `goal-45-keeper` from main 7d747de, worktree ../mojo-ui-g45; contract docs/goals/45-GOAL.md + 45-check.py (written first, baseline FAIL on every milestone). Headless Xvfb, a private D-Bus per run (`dbus-run-session` with a config that has no services, D-1606), temp folders only. No GPU.

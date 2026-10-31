@@ -4372,6 +4372,10 @@ def on_after_paint[A: App](clock: Int, host_addr: Int) abi("C"):
     if host[].paint_t0 > 0:
         host[].frame_paints.append(Float64(Int(perf_counter_ns()) - host[].paint_t0) / 1e6)
         host[].frame_times.append(Int(external_call["gdk_frame_clock_get_frame_time", Int64](clock)) * 1000)
+        var nf = len(host[].frame_times)  # (MOJOUI_TRACE, D-1702: a skipped frame says when, and how long GTK's paint took)
+        if host[].rt.trace and nf > 1 and host[].frame_times[nf - 1] - host[].frame_times[nf - 2] > 34_000_000:
+            print("TRACE: frame gap " + String((host[].frame_times[nf - 1] - host[].frame_times[nf - 2]) // 1_000_000)
+                  + " ms at " + String(Int(perf_counter_ns()) // 1_000_000) + " ms, paint " + one_decimal(Float32(host[].frame_paints[len(host[].frame_paints) - 1])) + " ms", flush=True)
         if len(host[].frame_times) > 4096:
             host[].frame_times = List[Int]()
         if len(host[].frame_paints) > 4096:
@@ -5640,8 +5644,8 @@ def run_step[A: App](host_addr: Int, step: String):
     elif verb == "pause":  # pause:3000: keep the main loop running that long (a screen grab of the display can catch popovers)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until and not host[].closed:  # (a quit from the tray menu ends it too)
-            _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
-            sleep(0.01)
+            pump()  # (D-1702: sleeps only when a turn found nothing to do; a 10 ms sleep after every turn starved frames:
+            # several sources are due each frame, so a busy window skipped frames, goal 30 M1's 50-83 ms cancel gaps)
     elif verb == "open":  # open:Format, open:Format>Text colour: pops the bar's menu (or its submenu) up and leaves it open, for screenshots
         var t = split_at(rest, ">")
         var menu = -1
