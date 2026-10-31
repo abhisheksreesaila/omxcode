@@ -273,6 +273,42 @@ class Monitor:
         self.p.stop()
 
 
+# (addition, D-1618: background mode now hides the window only while a panel's StatusNotifierWatcher has taken the tray
+# item, so a closed window can't strand the app. The private bus has no panel; this plays one: it owns
+# org.kde.StatusNotifierWatcher and prints each RegisterStatusNotifierItem. System Python's GObject bindings, run as a
+# separate process on the private bus only)
+FAKE_WATCHER = r"""
+import sys
+from gi.repository import Gio, GLib
+XML = '<node><interface name="org.kde.StatusNotifierWatcher"><method name="RegisterStatusNotifierItem"><arg name="service" type="s" direction="in"/></method></interface></node>'
+def call(conn, sender, path, iface, method, params, inv):
+    print('REGISTERED ' + params.unpack()[0], flush=True)
+    inv.return_value(None)
+bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+bus.register_object('/StatusNotifierWatcher', Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0], call, None, None)
+Gio.bus_own_name_on_connection(bus, 'org.kde.StatusNotifierWatcher', 0, lambda *a: print('WATCHER UP', flush=True), lambda *a: print('WATCHER LOST', flush=True))
+GLib.MainLoop().run()
+"""
+
+
+class FakeWatcher:
+    def __init__(self):
+        self.p = Proc(["/usr/bin/python3", "-I", "-c", FAKE_WATCHER], dict(os.environ))
+        if self.p.wait_for(r"^WATCHER UP", 20) < 0:
+            raise RuntimeError(f"the pretend panel didn't start: {self.p.text()[-300:]}")
+
+    def registered(self, name, timeout=10):
+        return self.p.wait_for(r"^REGISTERED " + re.escape(name) + r"$", timeout) >= 0
+
+    def stop(self):
+        self.p.stop()
+
+
+def menu_click(name, item):
+    """(addition, D-1618) the tray menu's item clicked as a panel does (com.canonical.dbusmenu Event)."""
+    return gdbus("--dest", name, "--object-path", "/MenuBar", "--method", "com.canonical.dbusmenu.Event", str(item), "clicked", "<0>", "0")
+
+
 def gdbus(*args):
     return run(["gdbus", "call", "--session", *args], 30)
 
@@ -303,8 +339,20 @@ def m1_inner():
         except subprocess.TimeoutExpired:
             p.stop()
             return False, "with TRAYCHECK_BACKGROUND=0 the app didn't exit after its window closed"
-        p = Proc([str(exe)], dict(os.environ, MOJOUI_TEST="pause:300;quit;waitopen:30000;pause:300", TRAYCHECK_TEXT=token))
+        # (addition, D-1618) background mode with no panel on the bus: closing must end the app, not strand it hidden
+        p = Proc([str(exe)], dict(os.environ, MOJOUI_TEST="pause:300;quit;waitopen:5000", TRAYCHECK_TEXT=token))
         try:
+            p.p.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            p.stop()
+            return False, "background mode with no panel (no StatusNotifierWatcher): closing the window left the app running hidden"
+        if "no tray to come back from" not in p.text():
+            return False, f"background mode with no panel: the app ended without saying why: {p.text()[-300:]}"
+        panel = FakeWatcher()
+        p = Proc([str(exe)], dict(os.environ, MOJOUI_TEST="pause:300;quit;waitopen:30000;pause:300;quit;waitopen:30000;pause:30000", TRAYCHECK_TEXT=token))
+        try:
+            if not panel.registered(f"org.kde.StatusNotifierItem-{p.p.pid}-1", 60):
+                return False, f"the tray item never registered with the panel's watcher: {panel.p.text()[-300:]}"
             if p.wait_for(r"^QUIT: window closed", 60) < 0:
                 return False, f"the quit step didn't close the window: {p.text()[-300:]}"
             time.sleep(1.5)
@@ -326,11 +374,37 @@ def m1_inner():
             calls = [c for c in mon.notify_calls() if token in c]
             if not calls:
                 return False, f"no Notify call with the app's text ({token}) on the bus; calls seen: {mon.notify_calls()[:3]}"
+            # (addition, D-1618) closed again, then launched a second time: the running one opens, no second instance
+            if p.wait_for(r"^QUIT: window closed", 30, mark) < 0:
+                return False, f"the second quit step didn't hide the window: {p.text()[-300:]}"
+            time.sleep(0.5)
+            mark = len(p.lines)
+            again = Proc([str(exe)], dict(os.environ, TRAYCHECK_TEXT=token))
+            try:
+                again.p.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                again.stop()
+                return False, "a second launch kept running beside the first (background apps are one instance)"
+            if p.wait_for(r"^WINDOW: open", 20, mark) < 0:
+                return False, f"a second launch didn't open the running app's window: {again.text()[-300:]}"
+            # (addition, D-1618) the tray menu's Quit ends it, no kill needed
+            r = menu_click(name, 3)
+            if r.returncode != 0:
+                return False, f"the tray menu's Quit failed: {r.stderr.strip()}"
+            try:
+                p.p.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                return False, "the tray menu's Quit didn't end the app"
+            if p.wait_for(r"^WINDOW: quit from the tray", 5) < 0:
+                return False, f"the app ended, but not through the menu's Quit: {p.text()[-300:]}"
         finally:
             p.stop()
+            panel.stop()
     finally:
         mon.stop()
-    return True, f"window closed, process kept running; {name} on a private bus; Activate reopened the window; Notify carried {calls[0][:80]!r}; without background mode it still exits"
+    return True, (f"window closed, process kept running; {name} on a private bus, registered with a pretend panel; Activate reopened the "
+                  f"window; Notify carried {calls[0][:80]!r}; a second launch opened the running one; the tray menu's Quit ended it; "
+                  f"with no panel, or without background mode, closing ends the app")
 
 
 def m1():

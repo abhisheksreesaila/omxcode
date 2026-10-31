@@ -637,6 +637,7 @@ struct GtkHost[A: App](Movable):
     var skin_classes: String  # the CSS classes it put on the window
     var closed: Bool  # the window closed (close-request answered): test steps stop, no report
     var hidden: Bool  # background mode (App.background): the window was closed and only hid; the tray opens it again
+    var tray: TrayItem  # background mode: the tray item (published at start; registered() while a panel shows it)
     var dark_told: Int  # what App.appearance last said (1 dark, 0 light, -1 not yet): only a change is told again
     var forcing_scheme: Bool  # set while the host itself changes light/dark (a theme forcing one): not the person's change
     var icons_key: String  # the ink the icons were written in
@@ -766,6 +767,7 @@ struct GtkHost[A: App](Movable):
         self.dark_told = -1
         self.closed = False
         self.hidden = False
+        self.tray = TrayItem("", "")
         self.icons_key = ""
         self.fonts = False
         self.css = 0
@@ -5305,7 +5307,7 @@ def run_step[A: App](host_addr: Int, step: String):
             print("QUIT: window closed" + (" (background mode: the app keeps running)" if host[].hidden else ""), flush=True)
     elif verb == "waitopen":  # waitopen:N: background mode: run the main loop until the window is open again (the tray's Activate), N ms at most
         var until = Int(perf_counter_ns()) + to_int(rest) * 1_000_000
-        while host[].hidden and Int(perf_counter_ns()) < until:
+        while host[].hidden and not host[].closed and Int(perf_counter_ns()) < until:
             _ = external_call["g_main_context_iteration", c_int](0, c_int(1))
         if host[].hidden:
             print("TEST: the window didn't open again in " + rest + " ms")
@@ -5625,7 +5627,7 @@ def run_step[A: App](host_addr: Int, step: String):
             pump()
     elif verb == "pause":  # pause:3000: keep the main loop running that long (a screen grab of the display can catch popovers)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
-        while Int(perf_counter_ns()) < until:
+        while Int(perf_counter_ns()) < until and not host[].closed:  # (a quit from the tray menu ends it too)
             _ = external_call["g_main_context_iteration", c_int](0, c_int(0))
             sleep(0.01)
     elif verb == "open":  # open:Format, open:Format>Text colour: pops the bar's menu (or its submenu) up and leaves it open, for screenshots
@@ -6395,6 +6397,9 @@ def save_png(window: Int, path: String):
 
 def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
+    if host[].window != 0:  # (activated again: a background app launched a second time hands over here; its window opens)
+        on_tray_activate[A](host_addr)
+        return
     host[].window = external_call["gtk_application_window_new", Int](gapp)
     var title = host[].rt.app.title()
     external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
@@ -6422,13 +6427,13 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
     connect(host[].window, "realize", on_window_realize[A], host_addr)
     connect_any(host[].window, "close-request", on_close_request[A], host_addr)  # (App.closing before the window goes)
     if host[].rt.app.background():  # (App.background: a tray item opens the window again; the app outlives its window)
-        external_call["g_application_hold", NoneType](gapp)
-        var item = TrayItem(host[].rt.app.title().lower().replace(" ", "-"), host[].rt.app.title(), "folder-saved-search")
+        host[].tray = TrayItem(host[].rt.app.title().lower().replace(" ", "-"), host[].rt.app.title(), "folder-saved-search")
         var on_tray = on_tray_activate[A]
+        var on_quit = on_tray_quit[A]
         try:
-            item.publish(Pointer(to=on_tray).unsafe_bitcast[Int]()[], host_addr)
+            host[].tray.publish(Pointer(to=on_tray).unsafe_bitcast[Int]()[], Pointer(to=on_quit).unsafe_bitcast[Int]()[], host_addr)
         except e:
-            print("mojoui: no tray item (" + String(e) + "): the window stays the way back in", flush=True)
+            print("mojoui: no tray item (" + String(e) + "): closing the window will end the app", flush=True)
     var link_path = getenv("MOJOUI_AGENT_SOCKET")  # an agent host may attach here (docs/agent.md: the agent link)
     if link_path != "":
         var lfd = listen_unix(link_path)
@@ -6551,11 +6556,15 @@ def on_close_request[A: App](window: Int, host_addr: Int) abi("C") -> c_int:
     """The window is asked to close (its close button, Ctrl+W, the window manager, the `quit` step): App.closing finishes
     what must be kept, then the window closes (FALSE: nothing stops it)."""
     var host = host_at[A](host_addr)
-    if host[].rt.app.background():  # (the window only hides: the app keeps running, the tray opens it again)
-        external_call["gtk_widget_set_visible", NoneType](window, c_int(0))
-        host[].hidden = True
-        host[].rt.app.window_shown(False)
-        return 1  # TRUE: GTK doesn't destroy it
+    if host[].rt.app.background():
+        if host[].tray.registered():  # (the window only hides: the app keeps running, a panel's tray item opens it again)
+            external_call["gtk_widget_set_visible", NoneType](window, c_int(0))
+            if not host[].hidden:
+                external_call["g_application_hold", NoneType](external_call["g_application_get_default", Int]())
+            host[].hidden = True
+            host[].rt.app.window_shown(False)
+            return 1  # TRUE: GTK doesn't destroy it
+        print("mojoui: no tray to come back from (no StatusNotifierWatcher took the item): closing ends the app", flush=True)
     host[].rt.closing()
     host[].closed = True
     return 0
@@ -6564,12 +6573,26 @@ def on_close_request[A: App](window: Int, host_addr: Int) abi("C") -> c_int:
 def on_tray_activate[A: App](host_addr: Int) abi("C"):
     """The tray item was clicked (mojoui.tray's Activate): the window opens again, as it was."""
     var host = host_at[A](host_addr)
+    if host[].closed:
+        return
     var was_hidden = host[].hidden
     host[].hidden = False
     external_call["gtk_window_present", NoneType](host[].window)
     if was_hidden:
+        external_call["g_application_release", NoneType](external_call["g_application_get_default", Int]())
         host[].rt.app.window_shown(True)
     print("WINDOW: open", flush=True)
+
+
+def on_tray_quit[A: App](host_addr: Int) abi("C"):
+    """The tray menu's Quit: the app ends as if its last window closed (App.closing, then the process exits), with the
+    window open or hidden."""
+    var host = host_at[A](host_addr)
+    print("WINDOW: quit from the tray", flush=True)
+    if not host[].closed:
+        host[].rt.closing()
+        host[].closed = True
+    external_call["g_application_quit", NoneType](external_call["g_application_get_default", Int]())
 
 
 def on_app_shutdown[A: App](gapp: Int, host_addr: Int) abi("C"):
@@ -6622,7 +6645,24 @@ def run[A: App]() -> Int:
     host[].pres = Int(pres)
     host[].gl_ctx = gl_ctx
     var id = String("dev.mojoui.App")
-    var gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(G_APPLICATION_NON_UNIQUE))
+    var flags = G_APPLICATION_NON_UNIQUE
+    if host[].rt.app.background():  # (one instance per app: launching it again opens the running one's window, on_activate)
+        id = "dev.mojoui.bg."
+        for c in host[].rt.app.title().lower().codepoint_slices():
+            if (c >= "a" and c <= "z") or (c >= "0" and c <= "9"):
+                id += c
+        flags = 0
+    var gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(flags))
+    if flags == 0:
+        var err = List[Int](length=1, fill=0)
+        if Int(external_call["g_application_register", c_int](gapp, 0, Int(err.unsafe_ptr()))) == 0:
+            print("mojoui: can't register as the one " + host[].rt.app.title() + " (no session bus?): running on its own", flush=True)
+            external_call["g_object_unref", NoneType](gapp)
+            id = "dev.mojoui.App"
+            gapp = external_call["adw_application_new", Int](id.as_c_string_span(), c_int(G_APPLICATION_NON_UNIQUE))
+        elif Int(external_call["g_application_get_is_remote", c_int](gapp)) != 0:
+            print("mojoui: " + host[].rt.app.title() + " is already running: opening its window", flush=True)
+        _ = len(err)
     if getenv("MOJOUI_PRESENT_STATS") == "1":
         var key = String("mojoui-host")
         external_call["g_object_set_data", NoneType](gapp, key.as_c_string_span(), Int(host))

@@ -100,16 +100,57 @@ def session_bus() raises -> Int:
     return c
 
 
-def call_async(dest: String, path: String, iface: String, method: String, args: String) raises:
-    """Calls a method without waiting (the reply is dropped; GDBus logs nothing for it)."""
+def _on_reply(source: Int, res: Int, slot: Int) abi("C"):
+    """A call's reply into its slot: the reply GVariant (> 0), or -1 when the call failed (no such name, an error)."""
+    var err = List[Int](length=1, fill=0)
+    var v = gio[Int]("g_dbus_connection_call_finish", source, res, Int(err.unsafe_ptr()))
+    _ = len(err)
+    Pointer[Int, MutUntrackedOrigin](unsafe_from_address=slot)[] = v if v != 0 else -1
+
+
+def call_async(dest: String, path: String, iface: String, method: String, args: String, reply_slot: Int = 0) raises:
+    """Calls a method without waiting. reply_slot (the address of an Int, 0: none): set on the main loop when the
+    reply comes, to the reply's GVariant (> 0; g_variant_print shows it) or -1 if the call failed; 0 until then.
+    Without one the reply is dropped."""
     var bus = session_bus()
     var params = variant(args) if args != "" else 0
     var d = dest
     var p = path
     var i = iface
     var m = method
+    var cb = 0
+    if reply_slot != 0:
+        var f = _on_reply
+        cb = Pointer(to=f).unsafe_bitcast[Int]()[]
     gio[NoneType]("g_dbus_connection_call", bus, Int(d.as_c_string_span().unsafe_ptr()), Int(p.as_c_string_span().unsafe_ptr()),
-        Int(i.as_c_string_span().unsafe_ptr()), Int(m.as_c_string_span().unsafe_ptr()), params, Int(0), c_int(0), c_int(-1), Int(0), Int(0), Int(0))
+        Int(i.as_c_string_span().unsafe_ptr()), Int(m.as_c_string_span().unsafe_ptr()), params, Int(0), c_int(0), c_int(-1), Int(0), cb, reply_slot)
+    _ = d.byte_length() + p.byte_length() + i.byte_length() + m.byte_length()
+
+
+def printed(v: Int) -> String:
+    """A GVariant's text form ("" for none)."""
+    if v <= 0:
+        return ""
+    var t = gio[Int]("g_variant_print", v, c_int(1))
+    var s = c_text(t)
+    gio[NoneType]("g_free", t)
+    return s
+
+
+def child_text(params: Int, k: Int) -> String:
+    """A string argument of a method call (params' k-th child)."""
+    var v = gio[Int]("g_variant_get_child_value", params, Int(k))
+    var s = c_text(gio[Int]("g_variant_get_string", v, Int(0)))
+    gio[NoneType]("g_variant_unref", v)
+    return s
+
+
+def child_int(params: Int, k: Int) -> Int:
+    """An int32 argument of a method call (params' k-th child)."""
+    var v = gio[Int]("g_variant_get_child_value", params, Int(k))
+    var n = Int(gio[Int32]("g_variant_get_int32", v))
+    gio[NoneType]("g_variant_unref", v)
+    return n
 
 
 def iterate(ms: Int):
