@@ -169,6 +169,19 @@ def list_dir(path: String) -> List[Tuple[String, Bool]]:
     return out^
 
 
+def file_stamp(path: String) -> Tuple[Int, Int]:
+    """A file's (modified time in ns since the epoch, size in bytes); (0, -1) if it can't be read. What a rescan
+    compares with what it kept (struct stat: x86-64 Linux st_size at byte 48, st_mtim at 88; the Mac's 64-bit-inode
+    stat st_mtimespec at 48, st_size at 96)."""
+    var st = List[Int](length=24, fill=0)
+    var p = path
+    if Int(_c[c_int]("stat", Int(p.as_c_string_span().unsafe_ptr()), Int(st.unsafe_ptr()))) != 0:
+        return (0, -1)
+    comptime if CompilationTarget.is_macos():
+        return (st[6] * 1_000_000_000 + st[7], st[12])
+    return (st[11] * 1_000_000_000 + st[12], st[6])
+
+
 def walk_files(root: String, suffixes: List[String]) -> List[String]:
     """Every file under root (absolute paths) whose name ends with one of suffixes (all files if none), depth first."""
     var out = List[String]()
@@ -552,13 +565,14 @@ struct FolderWatcher(Movable):
                 self.reason = String(e)
         else:
             var tid = List[Int](length=1, fill=0)
-            var rc = external_call["pthread_create", c_int](Int(tid.unsafe_ptr()), Int(0), _entry, self.words)
+            var entry = _entry  # (pthread_create by address: the engine declares it with its own types, D-1609)
+            var rc = _c[c_int]("pthread_create", Int(tid.unsafe_ptr()), Int(0), Pointer(to=entry).unsafe_bitcast[Int]()[], self.words)
             if rc != 0:
                 _A.store(_word(self.words, W_STATE), -1)
                 _release(self.words)
                 self.reason = "no thread for the watcher"
             else:
-                _ = external_call["pthread_detach", c_int](tid[0])
+                _ = _c[c_int]("pthread_detach", tid[0])
 
     def _state(self) -> Int:
         return Int(_A.load(_word(self.words, W_STATE))) if self.words != 0 else (-1 if self.reason else 0)

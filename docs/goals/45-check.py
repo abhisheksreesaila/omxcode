@@ -412,6 +412,7 @@ def m2_inner():
         return False, f"(a) FTS5 doesn't find files by their word (e.g. tok{wrong[:3]}) or indexed a .bin file", native
     native["scan_ms"] = scan_ms
     native["scan_files"] = n
+    scanned = n  # (n is reused for the search below: the summary names the scan's count, D-1610)
     # (b) window closed, background mode: 200 new files, indexed and searchable; alerts on the bus
     alert = "zebra%04d" % random.Random().randrange(10**4)
     shot = DATA / "keeper-gtk.png"
@@ -493,7 +494,7 @@ def m2_inner():
     import numpy as np
     if not shot.exists() or np.asarray(Image.open(shot).convert("L"), dtype=float).std() < 2:
         return False, "(c) docs/goals/45/keeper-gtk.png missing or blank", native
-    return True, (f"(a) {n:,} files scanned in {scan_ms} ms as a job: {frames} frames, longest gap {longest} ms (corpus made in "
+    return True, (f"(a) {scanned:,} files scanned in {scan_ms} ms as a job: {frames} frames, longest gap {longest} ms (corpus made in "
                   f"{made_s:.0f} s); (b) window closed: 200 files indexed, p95 {q:.1f} ms, all found by sqlite3, "
                   f"{len(alerts)} alerts on the bus naming their files; (c) Activate reopened it, the search shows {n}"), native
 
