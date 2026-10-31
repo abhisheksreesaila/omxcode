@@ -1,7 +1,7 @@
 # mojoui.pdfsource: a PDF's pages as pictures (goal 41 M7). A generic component: a document card shows them, an OCR model
 # reads them, and any box on a page converts between the page's points and the picture's pixels.
 #
-#   var pdf = PdfSource("BOL-2417.pdf")            # raises (a clear message) when the file is missing or isn't a PDF
+#   var pdf = PdfSource("INV-2417.pdf")            # raises (a clear message) when the file is missing or isn't a PDF
 #   pdf.pages, pdf.size(0)                          # page count; a page's width and height in points (1/72 inch)
 #   var page = pdf.render(0, 200)                   # PdfPage: RGBA pixels (as Picture and VideoSource give them) at 200 dpi
 #   page.to_pixels(Box(x, y, w, h))                 # a box in page points → the picture's pixels; page.to_points(...) back

@@ -1,13 +1,13 @@
 # mojoui.documentset: a folder of documents as one card (goal 41 M10). A generic component over mojoui.documentcard: open a
 # folder (or one PDF) and page through its files; say which fields to read, as data (the labels printed on the forms,
-# "Shipment no., Exceptions, Signed by"), and Read runs the OCR model over every page of every file (a job:
+# "Order no., Exceptions, Signed by"), and Read runs the OCR model over every page of every file (a job:
 # mojoui.documentjobs.FolderFeed) and finds each label's value by geometry (mojoui.formfields). The answer is a table, one
-# row per file (file + a column per field, named by the label: "Shipment no." → shipment_no), which the app shows as a
+# row per file (file + a column per field, named by the label: "Order no." → order_no), which the app shows as a
 # table card (`fields_name()`: "<folder> fields") and links like any table; each field's page and box stay here, so a row
 # followed to this card (mojoui.links) shows its file with the chosen field (`Highlight`) marked.
 #
 #   var docs = DocumentSet("data/bol", msg_base=7700, canvas=270)     # a folder of PDFs, or one PDF
-#   docs.set_labels("Shipment no., Carrier, Exceptions")              # the fields to find (data, never code)
+#   docs.set_labels("Order no., Carrier, Exceptions")              # the fields to find (data, never code)
 #   update():  if docs.update(event): if docs.read_asked: feed.read(docs, OcrModel())   (documentjobs)
 #   docs.take_read(words, fields)                                    # what the job read, per file
 #   var r = docs.react(follow)                                       # a linked row: its file shown, its field highlighted
@@ -61,7 +61,7 @@ def documents_in(path: String) raises -> List[String]:
 
 
 def parse_labels(text: String) -> List[FieldLabel]:
-    """ "Shipment no., Carrier, Signed by" → labels, each named by its SQL name (shipment_no, carrier, signed_by)."""
+    """ "Order no., Customer, Signed by" → labels, each named by its SQL name (order_no, customer, signed_by)."""
     var out = List[FieldLabel]()
     for part in text.split(","):
         var label = String(String(part).strip())

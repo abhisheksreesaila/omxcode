@@ -16,13 +16,13 @@ def main() raises:
     # JOIN LINKED: both joins (the query names both tables), only one when it names one, an error for a stranger
     var q = implied_sql("SELECT DISTINCT shipments.shipment_id AS shipment FROM shipments JOIN LINKED WHERE detections.damaged = true "
                         + "AND bol_fields.exceptions = 'None' ORDER BY shipment", links)
-    assert_equal(q, "SELECT DISTINCT shipments.shipment_id AS shipment FROM shipments JOIN detections ON shipments.shipment_id = detections.code "
-                 + "JOIN bol_fields ON shipments.shipment_id = bol_fields.shipment_no WHERE detections.damaged = true AND bol_fields.exceptions = 'None' ORDER BY shipment")
+    assert_equal(q, "SELECT DISTINCT shipments.shipment_id AS shipment FROM shipments JOIN \"detections\" ON \"shipments\".\"shipment_id\" = \"detections\".\"code\" "
+                 + "JOIN \"bol_fields\" ON \"shipments\".\"shipment_id\" = \"bol_fields\".\"shipment_no\" WHERE detections.damaged = true AND bol_fields.exceptions = 'None' ORDER BY shipment")
     var one = implied_sql("SELECT bol_fields.file FROM shipments JOIN LINKED WHERE shipments.status = 'x.y'", links)
-    assert_equal(one, "SELECT bol_fields.file FROM shipments JOIN bol_fields ON shipments.shipment_id = bol_fields.shipment_no WHERE shipments.status = 'x.y'")
+    assert_equal(one, "SELECT bol_fields.file FROM shipments JOIN \"bol_fields\" ON \"shipments\".\"shipment_id\" = \"bol_fields\".\"shipment_no\" WHERE shipments.status = 'x.y'")
     var chain = implied_sql("SELECT detections.frame FROM bol_fields JOIN LINKED", links)  # (two hops: through shipments)
-    assert_equal(chain, "SELECT detections.frame FROM bol_fields JOIN shipments ON shipments.shipment_id = bol_fields.shipment_no "
-                 + "JOIN detections ON shipments.shipment_id = detections.code")
+    assert_equal(chain, "SELECT detections.frame FROM bol_fields JOIN \"shipments\" ON \"shipments\".\"shipment_id\" = \"bol_fields\".\"shipment_no\" "
+                 + "JOIN \"detections\" ON \"shipments\".\"shipment_id\" = \"detections\".\"code\"")
     assert_equal(implied_sql("SELECT 1 FROM t", links), "SELECT 1 FROM t")
     var lonely = Links()
     _ = lonely.add(Link.key(End("a", "x"), End("b", "x")))
@@ -84,4 +84,15 @@ def main() raises:
     _ = typed.add(Link.key(End("shipments", "shipment_id"), End("dock.mp4", "code")))
     assert_equal(typed.resolve("dock.mp4", "dock.mp4 · detections"), 1)
     assert_equal(typed.items[0].b.sql(), "detections")
+    # a header with a space joins quoted; a column its table doesn't have never reaches SQL (D-1340, D-1341)
+    var spaced = Links()
+    _ = spaced.add(Link.key(End("ships", "Ship ID"), End("weights", "Weight (kg) id")))
+    assert_equal(implied_sql("SELECT weights.kg FROM ships JOIN LINKED", spaced),
+                 'SELECT weights.kg FROM ships JOIN "weights" ON "ships"."Ship ID" = "weights"."Weight (kg) id"')
+    var hostile = Links()
+    _ = hostile.add(Link.key(End("a", "x = y OR 1=1 --"), End("b", "y")))
+    assert_equal(hostile.know("a", ["x", "y"]), 1)  # (the table becomes known: the link is unlinked, saying why)
+    assert_true(hostile.problem.find("isn't a column of a") >= 0, "a hostile column never joins: " + hostile.problem)
+    assert_equal(implied_sql("SELECT b.y FROM a JOIN LINKED", hostile), "SELECT b.y FROM a")  # (no link: no join; the engine
+    # says b isn't there)
     print("chain: ok")

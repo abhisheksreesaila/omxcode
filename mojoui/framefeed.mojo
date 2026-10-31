@@ -136,7 +136,8 @@ def _feed_main(addr: Int) abi("C") -> Int:
     var info = s[].info  # (written before the thread started)
     var known = s[].known
     var once = s[].once
-    var fd = s[].wake_fd
+    var fd = s[].wake_fd  # (the process's one wake pipe, mojoui.jobs.wake_pipe: made once, never closed, so the fd read
+    # at the start stays valid for the thread's whole life: no generation check needed, D-1343)
     var src: VideoSource
     try:
         src = VideoSource(info) if known else VideoSource(info.path)
@@ -171,12 +172,14 @@ def _feed_main(addr: Int) abi("C") -> Int:
             swap(s[].front, back)
             s[].front_frame = target
             s[].published += 1
+        elif once:  # (a still that can't be decoded: the feed fails, saying why, and its card shows it: problem())
+            s[].state = _FAILED
+            s[].error = "Couldn't decode " + info.path + (" (frame " + String(target) + ")" if target > 0 else "")
         s[].done = target
         _unlock(addr)
-        if got == 1:
-            wake_write(fd)
-            if once:
-                break
+        wake_write(fd)  # (landed or not: the host looks again, so nothing waits on a frame that won't come)
+        if once:
+            break
     src.close()
     _release(addr)
     return 0

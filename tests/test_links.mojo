@@ -116,6 +116,31 @@ def main() raises:
     var px = place.place_to_a(ll[0], ll[1])
     assert_true(abs(px[0] - 100.0) < 1e-6 and abs(px[1] - 200.0) < 1e-6, "place both ways")
     assert_equal(place.kind, LINK_PLACE)
+    # a column its table doesn't have is refused, with a message naming the table's columns (D-1341): a hostile name
+    # never reaches SQL; a typed link on a card whose table becomes known later is unlinked then, the panel saying why
+    var checked = Links(msg_base=7600)
+    _ = checked.know("Orders", ["Ship ID", "Weight (kg)"])
+    _ = checked.know("clip.mp4 · detections", ["frame", "code"])
+    var hostile = False
+    try:
+        _ = checked.add(Link.key(End("Orders", "x = y OR 1=1 --"), End("clip.mp4", "code", "clip.mp4 · detections")))
+    except e:
+        hostile = String(e).find("isn't a column of Orders (its columns: Ship ID, Weight (kg))") >= 0
+    assert_true(hostile, "a hostile column name is refused")
+    var ctrl = False
+    try:
+        _ = checked.add(Link.key(End("nobody", "a\nb"), End("clip.mp4", "code", "clip.mp4 · detections")))
+    except:
+        ctrl = True
+    assert_true(ctrl, "a control character is no column name")
+    _ = checked.update(Event(7600 + LINKS_ADD, "Orders.Ship ID = clip.mp4.code OR 1=1 --", 0))
+    assert_equal(len(checked), 1)  # (clip.mp4's own table isn't known yet: added, then checked when it resolves)
+    assert_equal(checked.resolve("clip.mp4", "clip.mp4 · detections"), 1)
+    assert_equal(len(checked), 0)
+    assert_true(checked.problem.find("Unlinked Orders.Ship ID = clip.mp4.code OR 1=1 --") >= 0, "resolve unlinks it: " + checked.problem)
+    _ = checked.add(Link.key(End("Orders", "Ship ID"), End("clip.mp4", "code", "clip.mp4 · detections")))
+    assert_equal(checked.know("Orders", ["order_id"]), 1)  # (the table changed under it: unlinked, said why)
+    assert_equal(len(checked), 0)
     print("link: ok")
 
     # match: 12 of the 14 shipments are on camera (S-5012 twice and a stranger don't change it); the other way 13 codes, 12 known
@@ -133,7 +158,7 @@ def main() raises:
 
     # join: the implied SQL on omxcore and on DuckDB, the same rows
     var q = links.join_sql(key, "shipments.shipment_id, shipments.carrier, detections.frame")
-    assert_equal(q, "SELECT shipments.shipment_id, shipments.carrier, detections.frame FROM shipments JOIN detections ON shipments.shipment_id = detections.code")
+    assert_equal(q, 'SELECT shipments.shipment_id, shipments.carrier, detections.frame FROM "shipments" JOIN "detections" ON "shipments"."shipment_id" = "detections"."code"')
     var builtins = Python.import_module("builtins")
     var mod = Python.import_module("types").ModuleType("oracle")
     _ = builtins.exec(ORACLE, mod.__dict__)
@@ -149,6 +174,25 @@ def main() raises:
     var duck = mod.duck(q, tables)
     assert_equal(Int(py=builtins.len(mine[0])), 13)  # 12 shipments, S-5012 twice
     assert_true(Bool(py=mine[0] == duck), "omxcore " + String(mine[0]) + " vs DuckDB " + String(duck))
+    # headers with a space and brackets join too: every name the link writes is quoted (D-1340)
+    with open(out + "/ships.csv", "w") as f:
+        f.write("Ship ID,Weight (kg)\nS-5001,410\nS-5002,380\nS-5012,120\nS-5014,95\n")
+    var spaced = Links()
+    _ = spaced.know("ships", ["Ship ID", "Weight (kg)"])
+    _ = spaced.know("dock.mp4 · detections", ["frame", "t", "code"])
+    var sk = spaced.add(Link.key(End("ships", "Ship ID"), End("dock.mp4", "code", "dock.mp4 · detections")))
+    var sq = spaced.join_sql(sk, 'ships."Ship ID", ships."Weight (kg)", detections.frame')
+    assert_equal(sq, 'SELECT ships."Ship ID", ships."Weight (kg)", detections.frame FROM "ships" JOIN "detections" ON "ships"."Ship ID" = "detections"."code"')
+    var stables = Python.list()
+    stables.append("ships")
+    stables.append(out + "/ships.csv")
+    stables.append("detections")
+    stables.append(out + "/detections.csv")
+    var smine = mod.engine(root, sq, stables)
+    assert_true(String(smine[1]) == "", "omxcore: " + String(smine[1]))
+    var sduck = mod.duck(sq, stables)
+    assert_equal(Int(py=builtins.len(smine[0])), 4)  # S-5001, S-5002, S-5012 twice
+    assert_true(Bool(py=smine[0] == sduck), "omxcore " + String(smine[0]) + " vs DuckDB " + String(sduck))
     print("join: ok")
 
     # follow: picking S-5012's row seeks the video to its first sighting and highlights its box on the BOL page; another

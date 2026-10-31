@@ -1129,8 +1129,13 @@ struct Main(App):
         """The panel's Link: the link is made (by a person), the trace says so, the panel lists it."""
         var l = self.ld.link()
         try:
+            self.know_tables()
             var i = self.links.add(l)
             self.resolve_links()
+            if i >= len(self.links) or not self.links.items[i].same(l):
+                self.message = self.links.problem  # (its column isn't in the table it resolved to: unlinked, saying why)
+                return
+            self.links.problem = String("")
             self.links.notes[i] = l.a.card + " ↔ " + l.b.card + " · " + self.ld.choice().count.text() + " match"
             print(self.ld.line(), flush=True)
             self.message = "Linked " + l.label() + ("" if l.kind == LINK_TIME else " (" + self.ld.choice().count.text() + " match)")
@@ -1279,8 +1284,23 @@ struct Main(App):
                 self.doc_feeds[k].error = ""
                 self.version += 1
 
+    def know_tables(mut self):
+        """Tells the links which columns each table has (the page's own and every table card's): a key link on a column
+        its table doesn't have is refused or unlinked, the panel saying why (D-1341)."""
+        if self.has_table:
+            var cols = List[String]()
+            for c in range(self.frame.columns()):
+                cols.append(self.frame.name(c))
+            _ = self.links.know(self.name, cols)
+        for k in range(len(self.tables)):
+            var cols = List[String]()
+            for c in range(self.tables.cards[k].sheet.columns()):
+                cols.append(self.tables.cards[k].sheet.name(c))
+            _ = self.links.know(self.tables.cards[k].name, cols)
+
     def resolve_links(mut self):
         """A link typed on a video's name joins its analysis' rows (End.table); a folder's name, its fields' table."""
+        self.know_tables()
         var at = self.found_sheet_index()
         if self.video.found_path != "" and at >= 0:
             var k = self.card_of(self.video.found_path)
@@ -2542,10 +2562,12 @@ struct Main(App):
                     print("EDITOR: done", flush=True)
                 self.version += 1
             return
+        if self.links.owns(event.message):
+            self.know_tables()  # (a typed link is checked against its tables' columns)
         if self.links.update(event):  # (the Links panel: Unlink, an offset, a link typed)
+            self.resolve_links()
             if self.links.problem != "":
                 self.message = self.links.problem
-            self.resolve_links()
             if self.trace and m - LINKS_MSG == LINKS_ADD and self.links.problem == "" and len(self.links) > 0:  # (LINKS_ADD: the link typed)
                 print("LINK: " + self.links.items[len(self.links) - 1].label() + " (typed)", flush=True)
             self.sync_lanes()
@@ -4205,7 +4227,7 @@ struct Main(App):
             tones.append(max(self.peek.tone(i), self.ld.tone(i)))
         for v in self.ld.views(width):  # (what floats over the cards: the column dragged, the panel; the peek's lines and labels)
             items.append(v.copy())
-        for v in self.peek.views():
+        for v in self.peek.views(width, bottom + 24):
             items.append(v.copy())
         var area = (Board(items^, width, bottom + 24, on_move=MOVE, on_resize=RESIZE, reveal=self.reveal, reveal_count=self.reveal_count,
                           tones=tones, on_hold=HOLD).fill().grow()) if self.sheet_tab == 0 else self.report_view()

@@ -5,7 +5,7 @@
 # canvas, allocated when it is added.
 #
 #   var tables = TableCards(msg_base=4100, canvas_base=230, most=8)  # messages 4100 … 4100 + 8·TABLE_MESSAGES, canvases 230 … 237
-#   var k = tables.add("shipments", sheet^, x, y, w, h, font, pal)   # raises when the page is full
+#   var k = tables.add("orders", sheet^, x, y, w, h, font, pal)   # raises when the page is full
 #   update():   if tables.update(event, font, pal, folder): …        # True when the event was a card's: tables.export_asked / .closed / .selected / .acted say what
 #   tables.adopt(card^, x, y, w, h)                                  # a card made off the UI thread (mojoui.tablejobs: a file, a query's answer)
 #   Export CSV asks (tables.export_asked = k, tables.export_path): the app writes it with mojoui.tablejobs.TableWork.export
@@ -15,7 +15,7 @@
 #   describe(): tables.describe(canvas, first, count)                # its rows as tab-separated text, for an agent
 #
 # SQL over the page: every table is a source by its SQL name (sql_name: "warehouse.mp4 · detections" → detections), so
-#   var catalog = Catalog(); tables.add_to(catalog); var answer = query_table(catalog, "SELECT … FROM shipments WHERE …")
+#   var catalog = Catalog(); tables.add_to(catalog); var answer = query_table(catalog, "SELECT … FROM orders WHERE …")
 # runs on omxcore's SQL (joins, subqueries, IN / NOT IN, CTEs) and the answer can be a card of its own.
 
 from mojoui.app import Event
@@ -58,7 +58,7 @@ struct TableCard(Movable):
     var w: Int
     var h: Int
     var slot: Int
-    var note: String  # where it came from ("from shipments.csv", "a query"), shown under the title ("": none)
+    var note: String  # where it came from ("from orders.csv", "a query"), shown under the title ("": none)
     var action: String  # one quiet action in its title bar ("": none): its label, icon, tag (an agent's tool) and tooltip
     var action_icon: String
     var action_tag: String

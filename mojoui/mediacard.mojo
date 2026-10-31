@@ -15,7 +15,7 @@
 #   media.cards[k].actions.append(CardAction("Analyze", "zap", "analyze", "…"))   # up to 3 quiet actions in the title bar (Analyze, Make a reel, Edit)
 #   update():   if media.acted >= 0: …                              # card media.acted_card's action media.acted was tapped
 #   media.cards[k].status = "Analyzing"; .progress = 42             # work running for the card: its title bar says so (-1: none)
-#   media.show_lane(k, TimeLane.of("forklift_log", series, "speed", 3.4))   # a log linked by time: its measure under the video (mojoui.timelane)
+#   media.show_lane(k, TimeLane.of("sensor_log", series, "speed", 3.4))   # a log linked by time: its measure under the video (mojoui.timelane)
 #
 # For an agent a video card's controls are the Player's tools: play / pause, seek (set it to a time in seconds), video.
 

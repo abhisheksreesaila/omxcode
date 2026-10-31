@@ -3,7 +3,7 @@
 # page through it, zoom (buttons, pinch, wheel) and pan (drag), and `highlight(page, box)` a box given in page points
 # (an OCR field, a search hit, a linked row's place), drawn as an accent outline over a light accent wash.
 #
-#   var doc = DocumentCard("BOL-2417.pdf", msg_base=6000, canvas=300, x=40, y=40, w=420)   # raises when it isn't a PDF
+#   var doc = DocumentCard("INV-2417.pdf", msg_base=6000, canvas=300, x=40, y=40, w=420)   # raises when it isn't a PDF
 #   doc.render_now()                                 # or, off the UI thread: mojoui.documentjobs.DocumentFeed (doc.wants())
 #   update():  if doc.update(event): …               # True when the event was the card's (doc.closed: its close button)
 #   view():    doc.view().at(doc.x, doc.y).width(doc.w).height(doc.h)

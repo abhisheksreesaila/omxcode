@@ -1,9 +1,9 @@
 # mojoui.formfields: a form's fields from where its words sit (goal 41 M7). Generic: the caller says which labels to look
-# for (data, never code: a bill of lading's "Shipment no." and "Exceptions", an invoice's "Total"), and each label's value
+# for (data, never code: a bill of lading's "Order no." and "Exceptions", an invoice's "Total"), and each label's value
 # is the words beside it (to its right on its line) or under it (the next line, aligned with it), whichever is nearer.
 #
 #   var labels = List[FieldLabel]()
-#   labels.append(FieldLabel("shipment_no", "Shipment no."))
+#   labels.append(FieldLabel("order_no", "Order no."))
 #   labels.append(FieldLabel("exceptions", "Exceptions"))
 #   var found = find_fields(words, labels)        # words: a TextTable (OCR rows); List[Field]: name, value, page, box, found
 #
@@ -30,7 +30,7 @@ comptime RIGHT_BIAS = 3.0
 
 @fieldwise_init
 struct FieldLabel(Copyable, Movable, ImplicitlyCopyable):
-    """A field to find: its name (a column name, e.g. "shipment_no") and the label printed beside its value."""
+    """A field to find: its name (a column name, e.g. "order_no") and the label printed beside its value."""
 
     var name: String
     var label: String
