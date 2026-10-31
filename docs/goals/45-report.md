@@ -24,8 +24,11 @@ reviewer re-check pending. The reviewer said NEEDS WORK; every item is fixed, ea
 - **M0** 1,000 changes, each reported once; p95 0.01 ms from the close (0.03 ms from the call's start; 7 stamped inside their own close call, none before it began); delivered to the consumer's thread p95 0.026 ms; ms= within 2 ms on 1000/1000.
 - **M1** no panel → closing ends it; with a pretend panel: registered, window closed and the app kept running, Activate reopened it, Notify on the bus, a second launch opened the running one, the menu's Quit ended it; without background mode it exits.
 - **M2** (a) 100,000 files in 2,227 ms as a job, 2,400 frames, longest gap 16.7 ms; (b) closed: 200 files indexed once each, p95 2.5 ms (Python's sqlite3 polling: 5.0 ms), 20 alert files in 2 notifications, each named once, locked-index retry recovered; (c) Activate, search and the list show 200.
-- **M3** read: native 2,227 ms vs the web's best 18,314 ms (8.2×); notice: native 0.026 ms (delivered) vs 1.546 ms (59×); run, notify and tray: the web can't (with evidence; Push untried).
+- **M3** read: native 2,227 ms vs the web's best 18,314 ms (8.2×); notice: both sub-millisecond and noisy on a loaded machine (native delivered p95 0.026–0.064 ms in M0 runs, 0.4 ms in a reviewer's standalone M3 run; the web's per-round p95 0.18–2.0 ms, median of three 1.546 ms), so no ratio is claimed: the difference that holds is that the web notices only while its tab is open; run, notify and tray: the web can't (with evidence; Push untried).
 - **M4** gallery, matrix, llms.txt, EXPERIMENTS; `keeper mac` builds.
+
+### Review round 2 (reviewer: PASS)
+- The notice result no longer headlines a ratio (it swung with load); shown as ranges next to each other.
 
 ### Open items after round 1
 - Reviewer re-check of this round.
