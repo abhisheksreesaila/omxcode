@@ -49,7 +49,22 @@ h1, h2, .lede, .body { text-wrap: balance; }
 /* top islands: brand left · a pill of section links centre · one filled CTA right. Solid, no blur. */
 .lnav { position: sticky; top: 0; z-index: 50; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 12px 20px; background: var(--bg); box-shadow: 0 1px 0 var(--line); }
 .brand { font: 700 17px var(--display); letter-spacing: -.02em; display: flex; align-items: center; gap: 9px; text-decoration: none; }
-.mark { width: 26px; height: 26px; border-radius: 8px; background: var(--oq-accent); color: var(--oq-on-accent); display: grid; place-items: center; font: 700 12px var(--mono); }
+/* the omxcode mark, the same as on omxlabs: </> in omxcode's coral on a faint coral tile. Point at the brand and it snaps
+   together: the < flies in, then the /, then the >, each on a spring, and the joins spark. At rest it holds still. */
+.mark { --px: #ff5d6c; flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--px);
+  background: color-mix(in srgb, var(--px) 12%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--px) 55%, transparent); }
+.snap { width: 62%; height: 62%; overflow: visible; }
+.snap path { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transform-box: fill-box; transform-origin: center; }
+.snap .k { fill: currentColor; opacity: 0; transform-box: fill-box; transform-origin: center; }
+:is(:hover, :focus-visible) > .mark .p1 { animation: snapL .9s cubic-bezier(.34, 1.56, .64, 1); }
+:is(:hover, :focus-visible) > .mark .p2 { animation: snapS .9s .1s cubic-bezier(.34, 1.56, .64, 1) backwards; }
+:is(:hover, :focus-visible) > .mark .p3 { animation: snapR .9s .2s cubic-bezier(.34, 1.56, .64, 1) backwards; }
+:is(:hover, :focus-visible) > .mark .k { animation: snapK .55s .6s ease-out; }
+@keyframes snapL { from { transform: translate(-9px, -6px) rotate(-35deg); opacity: 0; } }
+@keyframes snapS { from { transform: translate(0, -12px) rotate(25deg); opacity: 0; } }
+@keyframes snapR { from { transform: translate(9px, 7px) rotate(35deg); opacity: 0; } }
+@keyframes snapK { from { opacity: 1; transform: scale(.3); } to { opacity: 0; transform: scale(2.4); } }
+@media (prefers-reduced-motion: reduce) { .snap path, .snap .k { animation: none !important; } }
 .brand .sub { color: var(--ink2); font-weight: 500; }
 .lnav .pill { position: relative; display: flex; gap: 2px; padding: 4px; border-radius: 999px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
 .lnav .pill a { position: relative; z-index: 1; color: var(--ink2); text-decoration: none; font: 500 13.5px var(--sans); padding: 8px 13px; min-height: 34px; box-sizing: border-box; display: inline-flex; align-items: center; border-radius: 999px; transition: background .15s, color .15s; }
