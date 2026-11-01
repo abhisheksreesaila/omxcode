@@ -5,17 +5,19 @@ Record everything in **omxplorer, Liquid dark**, on the Linux machine (RTX 3090)
 
 ## Before you record (10 minutes)
 
-1. **Pick the failure episode.** Open the failure repo's episodes and find one where the video shows the object
-   actually slipping or falling, and the gripper trace shows why (closes, then opens early or closes on nothing).
-   Write its row number on a sticky note. If none of the 203 shows a drop, say "Why did it fail?" in every script
-   instead of "drop" (the kit marks those lines with *(drop line)*).
-2. **Labs.** The 994 sample has 2 labs and all its failures come from one (sources.md S2). Either:
-   - **best:** run the grow script to 10k first (≈ 45–50 min, ≈ 70 GB, REPORT.md "Grow to 10k") so the pivot shows
-     13 labs; or
-   - show the pivot on 994 and say the line in the scripts: "This is a 994-episode sample, so the split by lab
-     reflects the sample, not the labs."
+1. **The failure is picked: F00118** (AUTOLab, 2023-11-21, 16 s). The gripper opens at 12.7 s and the peach shirt falls
+   outside the box. It's a real drop, so keep the *(drop line)* wording.
+2. **Labs are done.** The fleet has all 63,344 episodes from 13 labs. The click path and what to say at each beat are in
+   `docs/goals/47-report.md`, "Record it yourself". To re-record the clip and shots: `pixi run python scripts/clips.py robots`.
 3. Turn on the watchdog for the freeze shots: `MOJOUI_BUDGET_MS=50` (what the checks prove), terminal visible at the side. Try 16 off camera first; only show 16 if it prints nothing.
 4. Have the linked document ready (DROID paper PDF, arxiv.org/abs/2403.12945, or the Franka Panda datasheet).
+
+## Already recorded (use these until you record your own)
+
+- `[clip: robots-45s]` → `docs/img/clip-robots.mp4` (42 s, no narration) · poster `docs/img/clip-robots.jpg` (the drop)
+- `[shot: fleet-sheet]` → `build/g47/shots/01-fleet.png` · `[shot: fleet-pivot]` → `03-pivot-lab-outcome.png` (and `02-success-by-lab.png`)
+- `[shot: failure-cursor]` → `06-drop-falling.png` (and `07-drop-fallen.png`) · `[shot: linked-doc]` → `08-paper-15hz.png`
+- `[shot: ask-sql]` → `09-ask-regrasped.png` · `[shot: pack-folder]` → `11-pack.png` · telemetry at scale → `04-telemetry-17m.png`
 
 ## Clips (moving)
 
@@ -38,7 +40,7 @@ Record everything in **omxplorer, Liquid dark**, on the Linux machine (RTX 3090)
 | Name | What's on screen | Used in |
 |---|---|---|
 | `[shot: fleet-sheet]` | The fleet sheet, many rows, status bar showing the row count | X, PH gallery 2 |
-| `[shot: fleet-pivot]` | Success by lab, as a pivot and a bar chart (on the 994 sample, put "994-episode sample" in the frame or caption) | X, PH gallery 3, deck |
+| `[shot: fleet-pivot]` | Success by lab, as a pivot and a bar chart | X, PH gallery 3, deck |
 | `[shot: failure-cursor]` | Failure open: video left, joint-velocity and gripper charts right, one cursor across all | X, PH gallery 1 (hero), deck |
 | `[shot: ask-sql]` | The question in words and its SQL with `JOIN LINKED` | X, PH gallery 4 |
 | `[shot: linked-doc]` | The document card linked to the episode (hold-to-peek: the rest dims, the link lifts) | X, PH gallery 5 |

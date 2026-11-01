@@ -7,7 +7,7 @@ One story everywhere: **why did the robot drop it?** Real robot data (DROID), op
 the week, once `[clip: robots-45s]` is recorded and omxlabs.tech is live with a way to try omxplorer.
 
 **Shot list:** [shot-list.md](shot-list.md): every `[clip: …]` and `[shot: …]` named in the kit, what's on screen,
-and the 10-minute check before recording (pick a failure that really is a drop; the 994 sample has only 2 labs).
+and the 10-minute check before recording (the featured drop is F00118; the clip and shots already exist).
 
 **Claims:** [sources.md](sources.md): every number and where it comes from, the claims that depend on tonight's build,
 and what we must not say. Lines marked *(drop line)* change to "why did it fail?" if your episode isn't a drop.

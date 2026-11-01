@@ -7,7 +7,7 @@ Every number and claim in this kit, and where it comes from. If a line isn't her
 |---|---|---|
 | S1 | DROID's public 720p port: **67,029 real robot episodes** (53,282 success + 13,747 failure), **326 hours**, from **13 labs**, **CC-BY-4.0** | `~/data/robot-scout/REPORT.md` (counted from the repos' file lists, 2026-10-31); HF `jnogga/droid_success`, `jnogga/droid_failure` |
 | S1b | The full DROID dataset: "76k demonstration trajectories or 350h", "564 scenes and 86 tasks", "13 institutions". Paper: Khazatsky, Pertsch et al., 2024 | droid-dataset.github.io (read 2026-10-31); arxiv.org/abs/2403.12945 |
-| S2 | The prototype: **994 episodes**, 3.0 h, 3.6 GB, one camera. **Only 2 labs** (AUTOLab 626 + RAIL 165 successes; all 203 failures are AUTOLab) | REPORT.md, "The 1k sample on disk" |
+| S2 | The fleet in omxplorer: **63,344 episodes from 13 labs** (13,746 failures), **16.8M telemetry rows**; success by lab ranges PennPAL 95 % … RAD 61 %; video fetched for 3,546 episodes. Featured failure **F00118** (AUTOLab, 2023-11-21): the gripper opens at 12.7 s and the peach shirt falls outside the box. Ask in words "failures where the gripper closed, let go and closed again" → **2,997 episodes in ~40 ms** over all telemetry rows. The DROID paper opens by key, "recorded at 15Hz" marked. Export pack: a PDF + clip per picked failure, framed at the release | docs/goals/47-report.md (M0–M8 PASS, reviewer PASS) |
 | S3 | Per episode: 720p H.264 video at 15 fps (3 cameras), **52 telemetry channels at 15 Hz** incl. 7 joint velocities and the gripper position. **No force, torque or effort** | REPORT.md, comparison table and caveats |
 | S4 | A chart over 1M rows: **0.5–0.7 ms** (we say 0.6 ms); status-bar sum: 0.3 ms; 1M-row grid scroll: 0.8 ms p95 a frame; 20M points: 1.5 ms (130 ms on the CPU); a 100M-row file opens in 0.2 s. One Linux machine, RTX 3090 | README.md, "Measured" |
 | S5 | The window keeps up: a watchdog (`MOJOUI_BUDGET_MS`) prints a `SLOW:` line for any update, view or draw over budget; goal 41's sessions (video, 1M-row insert, query, export) ran with **0 `SLOW:` lines at 50 ms**, headless with CPU drawing. Open edge: a median over 100M rows in memory still makes the window wait ~0.7 s (README "The honest edge") | docs/goals/41-report.md M1–M3; docs/ui-threads.md "How it's checked" |
@@ -28,18 +28,16 @@ Every number and claim in this kit, and where it comes from. If a line isn't her
 | S21 | A speech model already runs in the app's process (`examples/dictate`, PyTorch fp16 on the GPU) | EXPERIMENTS.md, goal 43 |
 | S20 | The docs ship as `llms.txt` / `llms-full.txt` so an agent can read them | README.md "Read more" |
 
-## Claims that depend on tonight's build
+## Claims proven by goal 47 (were "tonight's build")
 
-These are in the story but **not proven by anything in the repo yet**. Only post them if the recorded clip shows them:
+All shown in `docs/img/clip-robots.mp4` (42 s) and `build/g47/shots/` (S2): the fleet sheet, success by lab, the lab × outcome pivot, F00118's video beside joint-velocity, gripper, position and rotation lanes on one cursor, `JOIN LINKED` on robot data, the linked DROID paper, the exported pack.
 
-- the fleet sheet of DROID episodes, the pivot by lab, the failure's video beside joint-velocity and gripper charts on one cursor;
-- the robot ask that uses `JOIN LINKED` (the feature is proven in goal 41 on the claims data, S10, not yet on robot data);
-- the linked document (DROID paper or the Franka datasheet) and the exported pack for a robot episode;
-- **the Mac running the robot story on its GPU.** S9 is the only Mac GPU proof (a virtual Mac). If you record on your MacBook, that clip becomes the proof; if you don't, say "the same queries run on Apple's GPU through Metal" and nothing about speed.
+Still not proven: **the Mac running the robot story on its GPU.** S9 is the only Mac GPU proof (a virtual Mac). If you record on your MacBook, that clip becomes the proof; if you don't, say "the same queries run on Apple's GPU through Metal" and nothing about speed. The web build of the robot story wasn't driven in a browser.
 
 ## Things we must not say
 
-- Any per-lab success rate from the 994 sample. Its failures all come from one lab's files (S2), so "AUTOLab fails more" would be a sampling artefact, not a finding. Show the pivot as the action; don't read its numbers as a result. (Fix: grow to 10k across 13 labs first, see shot-list.md.)
+- That one lab is "worse". Labs ran different tasks in different rooms, so success by lab shows the data's spread, not a ranking. Say "success ranges from 95 % to 61 % across labs", not "RAD is bad".
+- That the gripper features predict failure. They don't across labs (a slip shows in 18 % of successes too); they're filters (47-report).
 - "Force spike" or "grip force" for DROID. There's no force data (S3).
 - That agents already know Mojo. They use the **app** through MCP; to **write** apps they read our docs (S20).
 - "Production ready". It's a public alpha (README badge).

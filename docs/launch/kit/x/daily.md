@@ -7,7 +7,7 @@ One idea each. Post in the morning, reply to comments in the evening. Media name
 
 The robot demo isn't a mockup. DROID is real: 67,029 robot episodes from 13 labs, 326 hours, CC-BY-4.0.
 
-I'm prototyping on 994 of them. The sheet, the video and the telemetry all come from the same files.
+63,344 of them are in the app, with 16.8M telemetry rows. The sheet, the video and the telemetry all come from the same files.
 
 ---
 **Tue Nov 3 · never freezes** · attach `[shot: slow-terminal]`

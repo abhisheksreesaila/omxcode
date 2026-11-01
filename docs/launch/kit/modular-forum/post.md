@@ -17,13 +17,13 @@ and `[shot: mac-linux]` at the end.
 
 Hi all. I've been building a UI framework in Mojo, called **omxcode**, and I'd like to show you what it can do now and hear what you think.
 
-The demo is a question: **why did the robot drop it?** *(drop line)* The data is DROID, real robot episodes from 13 labs (CC-BY-4.0). The public 720p port has 67,029 episodes; my prototype uses 994 of them.
+The demo is a question: **why did the robot drop it?** *(drop line)* The data is DROID, real robot episodes from 13 labs (CC-BY-4.0). The public 720p port has 67,029 episodes; 63,344 of them are in the app, with 16.8M telemetry rows.
 
 [clip: robots-45s]
 
 What you're watching is **omxplorer**, a data app built on omxcode, in one Mojo codebase:
 
-- a fleet sheet of episodes, pivoted by lab (a 994-episode sample, so the split reflects the sample, not the labs);
+- a fleet sheet of all 63,344 episodes, success by lab (95 % down to 61 %), a lab × outcome pivot;
 - click a failure: its video plays next to the joint-velocity and gripper telemetry, on one time cursor;
 - ask in words; it writes the SQL, and `JOIN LINKED` follows the links I made between the sheet, the video and a document;
 - export a pack of the episode.

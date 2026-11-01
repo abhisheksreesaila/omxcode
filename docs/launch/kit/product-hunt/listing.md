@@ -29,7 +29,7 @@ omxplorer opens a sheet, its video and its documents side by side, joined only b
 
 1. `[shot: failure-cursor]`: caption "A failure's video beside its joint and gripper telemetry, one cursor"
 2. `[shot: fleet-sheet]`: "A fleet of real robot episodes as a sheet (DROID, 13 labs)"
-3. `[shot: fleet-pivot]`: "Pivot by lab, one click (a 994-episode sample)"
+3. `[shot: fleet-pivot]`: "63,344 robot episodes, pivoted by lab in one click"
 4. `[shot: ask-sql]`: "Ask in words; read the SQL it wrote"
 5. `[shot: linked-doc]`: "Documents linked by key, time or place: never by guessing"
 6. `[shot: pack-folder]`: "Export the answer as a pack"

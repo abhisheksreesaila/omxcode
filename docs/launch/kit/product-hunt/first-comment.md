@@ -9,7 +9,7 @@ The question that started it: why did the robot drop it? To answer that today yo
 
 So omxplorer puts them on one page. The demo uses DROID, real robot episodes from 13 labs (CC-BY-4.0):
 
-• open the fleet as a sheet and pivot by lab (a 994-episode sample for now)
+• open the fleet as a sheet and pivot by lab (63,344 real episodes)
 • click a failure: its video plays beside the joint and gripper telemetry, on one time cursor
 • ask in words; it writes the SQL, and you can read exactly what it joined
 • link the robot's datasheet to the episodes by key, so it's one click away

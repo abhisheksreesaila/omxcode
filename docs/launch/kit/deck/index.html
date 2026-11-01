@@ -172,14 +172,14 @@ pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(-
   <div class="grid g3">
     <div class="card"><div class="num">67,029</div><p>episodes in DROID's public 720p release: 53,282 successes, 13,747 failures</p></div>
     <div class="card"><div class="num">13<small>labs</small></div><p>one robot setup (Franka Panda + Robotiq gripper), many scenes, CC-BY-4.0</p></div>
-    <div class="card"><div class="num">994</div><p>episodes in tonight's prototype: 3 hours, 3.6 GB, one camera</p></div>
+    <div class="card"><div class="num">16.8M</div><p>telemetry rows under 63,344 episodes in the app; a question in words scans them in ~40 ms</p></div>
   </div>
   <p class="lede">Each episode: 720p video at 15 fps and 52 telemetry channels at 15 Hz, including 7 joint velocities and the gripper. No force sensing, so we don't show force.</p>
   <div class="src">DROID, Khazatsky et al. 2024 · CC-BY-4.0 · droid-dataset.github.io</div>
   <aside class="notes">
     The data is DROID, a well-known robot dataset from 2024, released under CC-BY. The public 720-pixel release has 67,029 episodes from 13 labs, successes and failures in separate sets.
-    Tonight's prototype uses 994 of them. Each episode has video and 52 channels of telemetry at 15 hertz: joint positions, joint velocities, the gripper.
-    One honest note: DROID has no force sensing, so I never show "grip force". And the 994-episode sample comes from two labs, so I won't read per-lab success rates off it.
+    63,344 of them are in the app. Each episode has video and 52 channels of telemetry at 15 hertz: joint positions, joint velocities, the gripper.
+    One honest note: DROID has no force sensing, so I never show "grip force". And labs ran different tasks, so success by lab shows the spread, not a ranking.
   </aside>
 </section>
 

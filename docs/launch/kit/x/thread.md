@@ -15,7 +15,7 @@ One app, written in Mojo, on the GPU. It's called omxplorer. 🧵
 ---
 **2/** · attach `[shot: fleet-pivot]`
 
-Open the fleet sheet. Pivot by lab (a 994-episode sample for now). Click a failure.
+Open the fleet sheet: 63,344 episodes. Pivot by lab. Click a failure.
 
 The video plays beside joint velocity and the gripper's position. Drag the cursor and all three move together.
 

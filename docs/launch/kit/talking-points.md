@@ -8,8 +8,8 @@ Roughly 1 minute per block. Every number is in sources.md.
 ## Sun Nov 1 · The launch: why did the robot drop it?
 **Open:** "A robot drops a block. Here's how long it takes to find out why." *(drop line)*
 - The usual way: a spreadsheet of episodes, a video player, a Python notebook for the joints, a PDF for the manual. Four apps, exports between them.
-- The data: DROID. Real robot episodes from 13 labs, open (CC-BY-4.0). 67,029 episodes in the public 720p port; tonight's prototype uses 994.
-- The demo, out loud (sample of 994 from two labs, so the pivot shows the sample): fleet sheet → pivot by lab → click a failure → video beside joint velocity and gripper → one cursor → ask in words → the linked datasheet → export a pack.
+- The data: DROID. Real robot episodes from 13 labs, open (CC-BY-4.0). 67,029 episodes in the public 720p port; 63,344 of them are in the app, 16.8M telemetry rows underneath.
+- The demo, out loud (F00118, the peach shirt that falls outside the box): fleet sheet → pivot by lab → click a failure → video beside joint velocity and gripper → one cursor → ask in words → the linked datasheet → export a pack.
 - Why one app matters: the question stays in your head instead of in a copy-paste.
 - **Close:** "It's called omxplorer. It's open source. Link's in the post. Tell me what you'd ask this data."
 
@@ -19,7 +19,7 @@ Roughly 1 minute per block. Every number is in sources.md.
 - What it doesn't have: force sensing. So I don't show force. Saying what the data can't tell you is part of the job.
 - The fleet is real: 13 labs, each with its own robots and scenes.
 - Why public data: anyone can check my work. Same files, same answers.
-- The sample's limit: 994 episodes from 2 labs. Growing it to 10k across all 13 labs takes under an hour of downloading.
+- Scale: the sheet holds all 63,344 episodes; asking a question in words scans 16.8M telemetry rows in about 40 ms. Video is fetched only for the episodes you open.
 - **Close:** "If you have robot data of your own, I want to see it in here."
 
 ## Tue Nov 3 · The UI thread never freezes

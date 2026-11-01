@@ -10,7 +10,7 @@ The fund wants the product **live and working** on the .tech domain, not a landi
 - [ ] Open https://omxlabs.tech on a phone and a laptop. Every page loads, no console errors.
 
 ## Before the Product Hunt launch
-- [ ] **The robot story on the homepage:** `[clip: robots-45s]` (mp4 + poster jpg in `assets/img/`), with its source line (DROID, 13 labs, CC-BY-4.0, the 994-episode sample).
+- [ ] **The robot story on the homepage:** `[clip: robots-45s]` (mp4 + poster jpg in `assets/img/`), with its source line (DROID, 13 labs, CC-BY-4.0, 63,344 episodes in the app).
 - [ ] **A way to try it, one click from the homepage** ("Meet omxplorer" becomes "Try omxplorer", per the omxlabs README):
   - [ ] Linux: the install lines (`git clone … && pixi install && scripts/omxplorer.sh`), and what you need (x86-64, GTK 4, NVIDIA for the GPU path).
   - [ ] Mac: the download link (github.com/abhisheksreesaila/omxcode/releases/tag/mac-app), with "CPU build" stated until the GPU build ships.

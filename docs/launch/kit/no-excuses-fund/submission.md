@@ -23,7 +23,7 @@ A workspace where a spreadsheet, its video and its documents sit side by side, j
 ### The product
 **Short:** omxplorer opens a sheet, its video and its documents on one page. You link them by key, time or place; it shows how many rows match before you confirm. Click a row and its video plays beside its telemetry on one time cursor. Ask in words and read the SQL it wrote. Export the answer as a pack.
 
-**Longer:** The demo uses DROID, 67,029 real robot episodes from 13 labs (public, CC-BY-4.0; the prototype uses 994). Open the fleet as a sheet, pivot success by lab, click a failure: the episode's video plays beside its joint-velocity and gripper telemetry, one cursor across all of them. Ask "how many failures per lab?" and it writes the SQL, following the links you made (`JOIN LINKED`), so nothing is joined by guessing. Link the robot's datasheet to the episodes by model and it's one click away. Export a pack with the clip, the charts and the document.
+**Longer:** The demo uses DROID, 67,029 real robot episodes from 13 labs (public, CC-BY-4.0; 63,344 of them in the app, 16.8M telemetry rows). Open the fleet as a sheet, pivot success by lab, click a failure: the episode's video plays beside its joint-velocity and gripper telemetry, one cursor across all of them. Ask "how many failures per lab?" and it writes the SQL, following the links you made (`JOIN LINKED`), so nothing is joined by guessing. Link the robot's datasheet to the episodes by model and it's one click away. Export a pack with the clip, the charts and the document.
 
 Under it are three technologies we built:
 - **omxcode**, a UI framework in Mojo (open source, MIT): one language from the button to the GPU kernel, native on Linux and Mac;
@@ -47,7 +47,7 @@ First: robotics and physical-AI teams who debug failures across video, telemetry
 ### Traction and plan (Nov 1 → Dec 15)
 - **Week 1 (Nov 1–8):** launch to Mojo developers (Modular forum), then X and YouTube: a 7-post thread, a daily post and 5 videos on the robot story.
 - **Week 2:** Product Hunt launch of omxplorer, linking to omxlabs.tech.
-- **Weeks 3–6:** the web on WebGPU so anyone can try it in a browser; grow the robot demo from 994 to 10k episodes across all 13 labs; talk to 10 robotics teams about their failure-review workflow.
+- **Weeks 3–6:** the web on WebGPU so anyone can try it in a browser; fetch video for every episode (today 3,546) and add the second and wrist cameras; talk to 10 robotics teams about their failure-review workflow.
 - **Measure:** GitHub stars and clones, downloads, demo sessions, forum and PH comments, and teams who try it on their own data. *(Fill in real numbers before submitting.)*
 
 ### Why it can become a startup

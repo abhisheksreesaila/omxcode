@@ -24,7 +24,7 @@ Every omxcode app is an MCP server with no per-app work. The view tree becomes t
 Not out of the box. Mojo is new and models haven't seen much of it. The docs ship as `llms.txt` and `llms-full.txt` so an agent can read them, and the API is small (`view()`, `update()`, components). An agent writing an app should read those docs first and run `scripts/check` to prove what it wrote.
 
 ### Is the robot data real?
-Yes. DROID, Khazatsky et al. 2024, CC-BY-4.0. The public 720p port has 67,029 episodes from 13 labs; the demo uses a 994-episode sample. DROID has joint velocities and the gripper position at 15 Hz, but no force sensing, so I don't show force.
+Yes. DROID, Khazatsky et al. 2024, CC-BY-4.0. The public 720p port has 67,029 episodes from 13 labs; 63,344 of them are in the demo, with 16.8M telemetry rows. DROID has joint velocities and the gripper position at 15 Hz, but no force sensing, so I don't show force.
 
 ### How fast is it really?
 On one Linux machine with an RTX 3090: a chart over 1M rows in 0.5–0.7 ms, the 1M-row grid scrolls at 0.8 ms a frame (p95), a 100M-row file opens in 0.2 s. All from the checks or their benchmarks, listed in the README.

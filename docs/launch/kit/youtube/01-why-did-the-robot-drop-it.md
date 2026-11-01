@@ -14,9 +14,9 @@
 | Time | On screen | Say (riff on it, don't read it) |
 |---|---|---|
 | 0:00 | `[clip: robots-15s]`, no voice for 3 s | "A robot reaches for a block and drops it. *(drop line)* Why? Let's find out with real data, in one app." |
-| 0:20 | Your face or the desktop; DROID's site | "The data is DROID. Real robot episodes from 13 labs, released under CC-BY. The public 720p version has 67,029 episodes. I'm using a 994-episode sample tonight." |
+| 0:20 | Your face or the desktop; DROID's site | "The data is DROID. Real robot episodes from 13 labs, released under CC-BY. The public 720p version has 67,029 episodes. 63,344 of them are in this sheet." |
 | 0:45 | omxplorer opens, Liquid dark, the fleet sheet `[shot: fleet-sheet]` | "This is omxplorer. Each row is one episode: the lab, the robot, the task, success or failure, the length." |
-| 1:10 | Pivot: success by lab `[shot: fleet-pivot]` | "Pivot success by lab. One click." *On the 994 sample, always add:* "This is a sample from two labs, so the split reflects the sample, not the labs." |
+| 1:10 | Pivot: success by lab `[shot: fleet-pivot]` | "Pivot success by lab. One click." *Add:* "Labs ran different tasks, so this is the spread, not a ranking." |
 | 1:35 | Filter to failures, click one | "Let's open a failure." |
 | 1:45 | Video left, joint-velocity and gripper charts right, one cursor | "Here's what the camera saw. Here's what the seven joints did. Here's the gripper. They share one time cursor." |
 | 2:10 | Drag the cursor slowly through the grasp `[clip: scrub-cursor]` | "Watch the gripper line and the video together." *(Then say what your episode actually shows: when the gripper closes, when it opens, what the camera sees at that moment. Don't claim a cause the footage doesn't show.)* |
