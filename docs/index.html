@@ -44,7 +44,7 @@ section { padding: 96px 24px; }
 .bframe .bar { display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 14px; border-bottom: 1px solid var(--oq-line-2); }
 .bframe .bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--oq-surface-3); flex: none; }
 .bframe .bar span { flex: 1; margin: 0 28px 0 12px; height: 20px; border-radius: 999px; background: var(--oq-surface-2); font: 11px/20px var(--mono); color: var(--ink2); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; }
-.bframe video, .bframe img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; object-position: top left; background: #111; }
+.bframe video, .bframe img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; object-position: top left; background: var(--oq-surface-2); }
 .hcap { font: 12.5px/1.5 var(--mono); color: var(--ink2); margin-top: 12px; }
 .hcap b { color: var(--ink); font: 600 14px var(--sans); margin-right: 4px; }
 /* proof strip: four numbers, each with the line it came from */
@@ -64,7 +64,7 @@ section { padding: 96px 24px; }
 #t-two .code.lit { box-shadow: inset 0 0 0 1.5px var(--word); }
 #t-two .code em { position: absolute; top: 8px; right: 10px; font: 600 10.5px var(--mono); font-style: normal; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
 #t-two .run { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
-#t-two .tap { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 18px; border-radius: 999px; background: var(--oq-accent); color: var(--oq-on-accent); font: 600 14px var(--sans); box-shadow: var(--oq-shadow-1);
+#t-two .tap { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 20px; border-radius: 999px; background: var(--oq-accent); color: var(--oq-on-accent); font: 600 14px var(--sans); box-shadow: var(--oq-shadow-1);
   transition: transform var(--oq-spring-fast-dur) var(--oq-island-spring), box-shadow .2s; }
 #t-two .tap:hover { box-shadow: var(--oq-shadow-2); transform: translateY(-1px); }
 #t-two .tap.press, #t-two .tap:active { transform: scale(.96); }
@@ -155,7 +155,7 @@ section { padding: 96px 24px; }
 .gal { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; margin-top: 40px; }
 .gi { grid-column: span 4; margin: 0; border-radius: 18px; overflow: hidden; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); display: flex; flex-direction: column; min-width: 0; }
 .gi.w6 { grid-column: span 6; } .gi.w8 { grid-column: span 8; }
-.gi .m { aspect-ratio: 16 / 10; } .gi.w6 .m, .gi.w8 .m { aspect-ratio: 16 / 9; background: #0b0b0c; overflow: hidden; }
+.gi .m { aspect-ratio: 16 / 10; background: var(--oq-surface-2); overflow: hidden; } .gi.w6 .m, .gi.w8 .m { aspect-ratio: 16 / 9; }
 .gi .m img, .gi .m video { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .gi figcaption { padding: 12px 14px 14px; display: grid; gap: 4px; font-size: 14px; line-height: 1.4; color: var(--ink2); }
 .gi figcaption b { color: var(--ink); font-weight: 600; font-size: 15px; }
@@ -215,7 +215,7 @@ section { padding: 96px 24px; }
 .dl .cta { align-self: flex-start; height: 40px; font-size: 14.5px; padding: 0 18px; }
 .dl pre { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); font: 12.5px/1.7 var(--mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .dl .fine2 { font: 12px/1.6 var(--mono); color: var(--ink2); margin-top: auto; } .dl .fine2 code { color: var(--ink); overflow-wrap: anywhere; }
-.dl .cp2 { align-self: flex-start; border: 0; cursor: pointer; background: rgb(var(--oq-state) / .08); color: var(--ink2); font: 500 12px var(--mono); height: 32px; padding: 0 14px; border-radius: 999px; }
+.dl .cp2 { align-self: flex-start; border: 0; cursor: pointer; background: rgb(var(--oq-state) / .08); color: var(--ink2); font: 500 12px var(--mono); height: 44px; padding: 0 14px; border-radius: 999px; }
 .dl .cp2:hover { color: var(--ink); } .dl .cp2:active { transform: scale(.96); }
 #get h2 { font-size: var(--h2); }
 
@@ -278,10 +278,10 @@ section { padding: 96px 24px; }
   </div>
   <div class="wrap">
     <div class="proofs rv">
-      <div class="pf"><b>30<small>ms</small></b><span>a filter change over 100M rows, from input to pixels on screen</span><em>median of 32 · p95 49 ms vs Rust + Polars 131 ms · docs/data-benchmark.md</em></div>
+      <div class="pf"><b>30<small>ms</small></b><span>a filter change over 100M rows, from input to pixels on screen</span><em>median · p95 49 ms vs Rust + Polars 131 ms · measured at 856a7e9, before the release build · docs/data-benchmark.md</em></div>
       <div class="pf"><b>17<small>ms</small></b><span>the longest gap between frames while a 1.5 s job ran</span><em>examples/jobwake on Linux · 90 frames during the job · docs/ui-threads.md</em></div>
-      <div class="pf"><b>60–650</b><span>tokens for an agent to see what changed, against ~1,600 for one screenshot</span><em>MCP calls in omxplorer · docs/agent.md</em></div>
-      <div class="pf"><b>4.0<small>s</small></b><span>cold start over 100M rows, the fastest of four builds</span><em>file not cached · Rust + Polars 6.7 s · docs/data-benchmark.md</em></div>
+      <div class="pf"><b>2–25×</b><span>cheaper for an agent to see what changed: a call answers in words, 60–650 tokens, against ~1,600 for a screenshot</span><em>MCP calls in omxplorer · a full screen read costs 2,800 · docs/agent.md</em></div>
+      <div class="pf"><b>4.0<small>s</small></b><span>cold start over 100M rows, the fastest of four builds</span><em>file not cached · Rust + Polars 6.7 s · at 856a7e9 · docs/data-benchmark.md</em></div>
     </div>
   </div>
 </section>
@@ -321,7 +321,7 @@ section { padding: 96px 24px; }
         <div class="cost" aria-label="Tokens to see what changed: a call answers in 60 to 650 tokens; a screenshot costs about 1,600">
           <span class="a"><em>a call</em><i></i><em>60–650</em></span><span class="b"><em>a screenshot</em><i></i><em>~1,600</em></span>
         </div>
-        <p class="fine3">tokens to see what changed · docs/agent.md</p>
+        <p class="fine3">tokens for a call that answers in words; a full screen read is 2,800 · docs/agent.md</p>
       </div>
       <div class="bt w6" id="t-build">
         <div class="kick">AG-UI, built in</div>
@@ -486,7 +486,7 @@ SLOW: update msg=7 80.06 ms</pre>
 <!-- components:begin -->
 <div class="compsum rv">
   <div class="cs-left"><div class="big">119<small>components</small></div><p><b>115 run on Linux and the web</b> under a script on every check. The bars: tested, then builds.</p><div class="pbars"><div class="pbar"><b>Linux</b><span class="track" role="img" aria-label="Linux: 116 tested, 3 build, 0 not yet"><i class="t" style="width:97.5%"></i><i class="b" style="width:2.5%"></i></span><em>116<small> / 119</small></em></div><div class="pbar"><b>Web</b><span class="track" role="img" aria-label="Web: 115 tested, 3 build, 1 not yet"><i class="t" style="width:96.6%"></i><i class="b" style="width:2.5%"></i></span><em>115<small> / 119</small></em></div><div class="pbar"><b>Mac</b><span class="track" role="img" aria-label="Mac: 0 tested, 110 build, 9 not yet"><i class="t" style="width:0.0%"></i><i class="b" style="width:92.4%"></i></span><em>0<small> / 119</small></em></div><div class="pbar"><b>Android</b><span class="track" role="img" aria-label="Android: 16 tested, 44 build, 59 not yet"><i class="t" style="width:13.4%"></i><i class="b" style="width:37.0%"></i></span><em>16<small> / 119</small></em></div><div class="pbar"><b>iPhone</b><span class="track" role="img" aria-label="iPhone: 0 tested, 97 build, 22 not yet"><i class="t" style="width:0.0%"></i><i class="b" style="width:81.5%"></i></span><em>0<small> / 119</small></em></div><div class="pbar"><b>Agents</b><span class="track" role="img" aria-label="Agents: 54 tested, 33 build, 32 not yet"><i class="t" style="width:45.4%"></i><i class="b" style="width:27.7%"></i></span><em>54<small> / 119</small></em></div></div><p class="fine">Mac apps run on GitHub's macOS runners (scripts/mac-ci); checking each component there is next.</p><a class="more" href="components.html">Browse all 119</a></div>
-  <div class="fams"><a class="fam" href="components.html#data"><span class="fn">21</span><h3>Data and sheets</h3><p>Spreadsheets and analytics over millions of rows: grids, pivots, charts, KPIs, SQL.</p><small>DataGrid, PivotTable, ChartView…</small><span class="ft">21 tested on Linux and the web</span></a><a class="fam" href="components.html#video"><span class="fn">14</span><h3>Video and vision</h3><p>Videos as data: play, scrub, analyze into rows, cut reels, decoded off the UI thread.</p><small>VideoSource, Player, TimeSeries (numbers over time, the row nearest a time) and the line chart&#x27;s time cursor…</small><span class="ft">14 tested on Linux and the web</span></a><a class="fam" href="components.html#robotics"><span class="fn">5</span><h3>Maps and robotics</h3><p>Telemetry beside its video, routes and findings on a map, inspections compared.</p><small>Geo, Inspection, MapView…</small><span class="ft">4 tested on Linux and the web</span></a><a class="fam" href="components.html#docs"><span class="fn">10</span><h3>Documents</h3><p>PDFs as pages and tables: read them (OCR), find fields, pack the evidence.</p><small>PdfSource, Document card, OcrModel…</small><span class="ft">9 tested on Linux and the web</span></a><a class="fam" href="components.html#links"><span class="fn">3</span><h3>Links</h3><p>Tables, videos and documents connected by key, time or place, confirmed by you.</p><small>Links, Link drag, Peek…</small><span class="ft">2 tested on Linux and the web</span></a><a class="fam" href="components.html#agents"><span class="fn">1</span><h3>Agents</h3><p>Screens an agent builds as data, checked against the catalog, drawn natively.</p><small>GenUi…</small><span class="ft">1 tested on Linux and the web</span></a><a class="fam" href="components.html#parts"><span class="fn">26</span><h3>App parts</h3><p>The pieces every app needs: shells, lists, fields, logs, code, feedback.</p><small>Ink stroke, CodeBlock, LogView…</small><span class="ft">25 tested on Linux and the web</span></a><a class="fam" href="components.html#basics"><span class="fn">36</span><h3>Controls and layout</h3><p>The native controls: text, buttons, fields, menus, dialogs, stacks, canvases.</p><small>Text, Button, Icon…</small><span class="ft">36 tested on Linux and the web</span></a><a class="fam" href="components.html#js"><span class="fn">3</span><h3>JavaScript widgets</h3><p>Libraries from npm inside a native app: an editor, charts, your own.</p><small>mx-counter, mx-chart, mx-editor…</small><span class="ft">3 tested on Linux and the web</span></a></div>
+  <div class="fams"><a class="fam" href="components.html#data"><span class="fn">21</span><h3>Data and sheets</h3><p>Spreadsheets and analytics over millions of rows: grids, pivots, charts, KPIs, SQL.</p><small>DataGrid, PivotTable, ChartView…</small><span class="ft">21 tested on Linux and the web</span></a><a class="fam" href="components.html#video"><span class="fn">14</span><h3>Video and vision</h3><p>Videos as data: play, scrub, analyze into rows, cut reels, decoded off the UI thread.</p><small>VideoSource, Player, TimeSeries…</small><span class="ft">14 tested on Linux and the web</span></a><a class="fam" href="components.html#robotics"><span class="fn">5</span><h3>Maps and robotics</h3><p>Telemetry beside its video, routes and findings on a map, inspections compared.</p><small>Geo, Inspection, MapView…</small><span class="ft">4 tested on Linux and the web</span></a><a class="fam" href="components.html#docs"><span class="fn">10</span><h3>Documents</h3><p>PDFs as pages and tables: read them (OCR), find fields, pack the evidence.</p><small>PdfSource, Document card, OcrModel…</small><span class="ft">9 tested on Linux and the web</span></a><a class="fam" href="components.html#links"><span class="fn">3</span><h3>Links</h3><p>Tables, videos and documents connected by key, time or place, confirmed by you.</p><small>Links, Link drag, Peek…</small><span class="ft">2 tested on Linux and the web</span></a><a class="fam" href="components.html#agents"><span class="fn">1</span><h3>Agents</h3><p>Screens an agent builds as data, checked against the catalog, drawn natively.</p><small>GenUi…</small><span class="ft">1 tested on Linux and the web</span></a><a class="fam" href="components.html#parts"><span class="fn">26</span><h3>App parts</h3><p>The pieces every app needs: shells, lists, fields, logs, code, feedback.</p><small>Ink stroke, CodeBlock, LogView…</small><span class="ft">25 tested on Linux and the web</span></a><a class="fam" href="components.html#basics"><span class="fn">36</span><h3>Controls and layout</h3><p>The native controls: text, buttons, fields, menus, dialogs, stacks, canvases.</p><small>Text, Button, Icon…</small><span class="ft">36 tested on Linux and the web</span></a><a class="fam" href="components.html#js"><span class="fn">3</span><h3>JavaScript widgets</h3><p>Libraries from npm inside a native app: an editor, charts, your own.</p><small>mx-counter, mx-chart, mx-editor…</small><span class="ft">3 tested on Linux and the web</span></a></div>
 </div>
 <p class="srcline">generated by scripts/site_components.py from docs/components.json and docs/components.md</p>
 <!-- components:end -->
@@ -508,7 +508,7 @@ SLOW: update msg=7 80.06 ms</pre>
           <div class="r"><span>JS + Python Polars</span><s><i style="width:42.1%"></i></s><em>44.2</em></div>
           <div class="r"><span>Rust + Polars</span><s><i style="width:35.3%"></i></s><em>37.0</em></div>
           <div class="r me best"><span>omxcode</span><s><i style="width:28.9%"></i></s><em>30.3</em></div>
-        </div><p class="src">32 filter changes × 3 runs · docs/data-benchmark.md</p></div>
+        </div><p class="src">32 filter changes × 3 runs, at commit 856a7e9; the release build re-checked only at 10M · docs/data-benchmark.md</p></div>
       <div class="cm rv"><h3>The slowest 5 % of changes<small>input to pixels · p95 ms</small></h3>
         <div class="rows">
           <div class="r"><span>JS + DuckDB-WASM</span><s><i style="width:100%"></i></s><em>285.5</em></div>

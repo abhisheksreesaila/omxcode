@@ -89,7 +89,10 @@ def esc(s):
 def split_name(full):
     """'Player (a video with play/pause…)' → ('Player', 'a video with play/pause…')."""
     m = re.match(r"^(.*?) \((.*)\)$", full)
-    return (m.group(1), m.group(2)) if m else (full, "")
+    if m:
+        return m.group(1), m.group(2)
+    m = re.match(r"^(.*?) \(([^)]*)\)(.*)$", full)  # 'TimeSeries (numbers over time…) and the line chart's time cursor'
+    return (m.group(1), m.group(2) + m.group(3)) if m else (full, "")
 
 
 def md_rows(section):
