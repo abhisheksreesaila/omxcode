@@ -51,9 +51,9 @@ That's **omxcode**. Its showcase, **omxplorer**, is a data app in the spirit of 
 1. **No boundary tax.** No JSON, no HTTP, no second process to start, keep alive and debug. Apps that move a lot of data between the screen and the computing are faster and simpler.
 2. **One language from pixels to GPU kernels.** Mojo writes the interface and the CUDA-class kernels. In omxplorer, the group-by kernel sits in the same codebase as the sheet that shows its totals.
 3. **Every app can be driven by an agent.** omxcode has an [agent host](docs/agent.md), so each app can be operated by an agent through the same code that draws its screens. JS apps need that built in separately.
-4. **Native on every device from one codebase**, phone included. This is the least proven part: Mac and iPhone build but haven't run on hardware yet ([where it stands](#where-it-stands)).
+4. **Native on every device from one codebase.** Linux and the Mac run today (Mac checks run on GitHub's macOS runners); the web, Android and iPhone are next ([where it stands](#where-it-stands)).
 
-**Where it shouldn't exist:** forms, CRUD screens, dashboards over an API, marketing sites, ordinary SaaS. JS wins those on ecosystem alone, so we don't compete there. When a JS library is the better tool, embed it as a widget inside omxcode.
+**Where to start, and where not yet:** start with apps that move a lot of data: analytics, spreadsheets, video, documents, robotics. For forms, CRUD screens and marketing sites, JS wins today on ecosystem alone; when a JS library is the better tool, embed it as a widget inside omxcode. SaaS building blocks (sign-in, accounts, payments) are on the roadmap.
 
 ## What it feels like
 
