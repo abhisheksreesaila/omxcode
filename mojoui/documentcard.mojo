@@ -218,7 +218,8 @@ struct DocumentCard(Movable):
         self.version += 1
 
     def _clamp(mut self):
-        """Keeps at least half the canvas on the page: the page can't be dragged away."""
+        """A page smaller than the canvas (on an axis) stays centred on it; a bigger one pans, but never so far that blank
+        canvas shows beside it (goal 47: a highlight near a corner had pushed the page half out of the card)."""
         if self.last_fit <= 0:
             return
         var s = self.pdf.size(self.page)
@@ -226,8 +227,8 @@ struct DocumentCard(Movable):
         var ph = s[1] * self.last_fit * self.zoom / self.last_scale
         var cw = Float64(self.last_size[0]) / self.last_scale
         var ch = Float64(self.last_size[1]) / self.last_scale
-        var mx = max((pw - cw) / 2 + cw / 2, 0.0)
-        var my = max((ph - ch) / 2 + ch / 2, 0.0)
+        var mx = max((pw - cw) / 2, 0.0)
+        var my = max((ph - ch) / 2, 0.0)
         self.pan_x = min(max(self.pan_x, -mx), mx)
         self.pan_y = min(max(self.pan_y, -my), my)
 

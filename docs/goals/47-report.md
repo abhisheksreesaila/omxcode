@@ -8,8 +8,9 @@ docs/goals/47-check.py. Branch `t3/robot-story-droid-data` (from main e670647).
 See "Milestones" at the end (the check's own lines). In short: the DROID fleet (63,344 real episodes, 13 labs, 16.8M
 telemetry rows) is the sheet; a chart and a pivot by lab; the featured failure's video plays beside four lanes of its
 telemetry on one cursor, opened by links alone; two questions in words answered by `JOIN LINKED` over 16.8M rows in
-15–45 ms; the DROID paper linked by key with its "recorded at 15Hz" marked; a pack per picked failure. 0 `SLOW:` lines at a
-50 ms budget, through agent tools and on GTK.
+tens of milliseconds (16–42 ms in the check's runs); the DROID paper, which every row names as its source, with its
+"recorded at 15Hz" marked; a pack per picked failure. 0 `SLOW:` lines at a 50 ms budget, through agent tools and on GTK,
+both on the headless display (Xvfb, CPU drawing: the guide's 16 ms budget is for real displays).
 
 ## The story, beat by beat (what the data supports)
 1. **The fleet.** 63,344 episodes from 13 labs (DROID's success and failure sets, CC-BY-4.0), one row each: lab, robot, date,
@@ -23,17 +24,21 @@ telemetry on one cursor, opened by links alone; two questions in words answered 
    starts to open while still over the box's edge, and the shirt falls and lands hanging on the box's outside wall (13.0 s).
    (D-4718: an earlier pick, F00119, was wrong: frame by frame its shirt goes into the box.)
 3. **Asked in words.** "failures where the gripper closed, let go and closed again" → 2,997 episodes (`JOIN LINKED`:
-   fleet ⨝ telemetry on the episode key the person linked; 16.8M rows; 38–45 ms on the GPU). "episodes within 30% of the
+   fleet ⨝ telemetry on the episode key the person linked; 16.8M rows; 37–42 ms in the check's runs; the engine picks CPU or GPU, the log doesn't say which). "episodes within 30% of the
    arm's joint speed limit" → 4 episodes: **no episode in 63k exceeds the Panda's 2.175 rad/s**; the fastest reaches
-   1.89 rad/s (87 %). The limit line is drawn on the lanes from limits.csv (libfranka's published control parameters).
-4. **The paper.** The DROID paper (arXiv 2403.12945v2, CC-BY-4.0) is a document card; each fleet row's `source` names it,
-   so `fleet.source = paper.file` marks the chosen passage (page 15: "All DROID data is recorded at 15Hz") for any row. It
+   1.89 rad/s (87 %). The limit is in limits.csv (libfranka's published control parameters); inserted as a table, its
+   rows draw the limit as dashed lines on the lanes (tests/test_robot_follow.mojo "card"); the recorded story doesn't
+   insert it.
+4. **The paper.** The DROID paper (arXiv 2403.12945v2, CC-BY-4.0) is a document card. Every fleet row's `source` names the
+   same paper (the dataset has one), so the key link `fleet.source = paper.file` marks the same chosen passage (page 15:
+   "All DROID data is recorded at 15Hz") for any row: provenance, not a per-row join. It
    is read from the PDF's own text ("PDF text" reader), not OCR.
 5. **A pack.** "the failures I picked" (F00118 and two failures beside it on the same bench, F00119 and F00124) → Export pack: per episode a
    PDF (its facts, the frame at the gripper's release, the lanes' readout there, the paper's page with its passage marked)
    and a 6 s clip.
 6. **Scale.** The same view over every episode on disk: 63,344 rows in the sheet, 16,847,616 telemetry rows in a card
-   (landed in ~0.6 s as a job), one episode sliced out in ~2 ms (binary search on the grouped log), joins in tens of ms.
+   (landed in ~0.6 s as a job). The first slice waits for the log's key index (one pass over 16.8M codes in a job,
+   mojoui/logindex.mojo); after that an episode is sliced exactly in ~2 ms. Joins in tens of ms.
 
 **What the data doesn't support (said plainly):** DROID has no force or torque, so "dropped" is read from the gripper and the
 video. The gripper features computed per episode (missed grasp, slip, regrasp) were tuned on one AUTOLab robot and **don't
@@ -56,7 +61,7 @@ To record by hand (your screen recorder; a 1920×1200 window reads best): `pixi 
 | Beat | Click path | Say |
 |---|---|---|
 | 1 Fleet | Open (toolbar) → build/g47/full/fleet.csv → Create table | "63,000 real robot episodes from 13 labs, DROID, public. One row per episode." |
-| 1 Chart | Chart (toolbar) → type in its field `average success_pct by lab, largest first` ↵ | "Success by lab, from 95 % down to 61 %, computed on the GPU in under a millisecond." |
+| 1 Chart | Chart (toolbar) → type in its field `average success_pct by lab, largest first` ↵ | "Success by lab, from 95 % down to 61 %, in under a millisecond." |
 | 1 Pivot | Pivot (toolbar) → Value `n`, Rows `lab`, Columns `outcome` | "How many episodes each lab ran, and how many failed." |
 | 2 Telemetry | Table (toolbar) → telemetry.parquet | "Every frame of every episode: 16.8 million rows of joint velocities, gripper and pose." |
 | 2 Links | Links (toolbar) → type each, ↵: `fleet.episode = telemetry.episode`, `fleet.clip = episode.file`, `telemetry.t ~ episode.t +0`, `fleet.source = paper.file` | "Nothing joins until I link it: the episode key, its video file, the clock, its paper." |
@@ -98,15 +103,15 @@ To record by hand (your screen recorder; a 1920×1200 window reads best): `pixi 
 - Only the left external camera; wrist and right views were not fetched (3× the bytes).
 
 ## Milestones
-docs/goals/47-check.py, full run on the final data (build/g47/check-full.txt):
+docs/goals/47-check.py, full run on the final data, after review round 1 (build/g47/check-full.txt):
 ```
 M0: PASS  63,344 episodes, 13 labs, 13,746 failures; hero F00118 (244 frames, clip ok); two runs byte-equal; lerobot + droid ok
-M1: PASS  signal; lanes; draw; seek
-M2: PASS  telemetry episode=F00118 244 rows, 16 channels, 1.5 ms; cursor = player at 3 seeks; 0 SLOW at 50 ms
-M3: PASS  chart: success by 13 labs = truth (PennPAL 95.11 … RAD 61.35); pivot totals for 13 labs
+M1: PASS  signal; lanes; draw; seek; follow; index; slice; moment; card; named; page
+M2: PASS  telemetry episode=F00118 244 rows, 16 channels, 1.8 ms; cursor = player at 3 seeks; 0 SLOW at 50 ms
+M3: PASS  chart: success by 13 labs = truth (PennPAL 95.11 … RAD 61.35); by verb, 16 verbs = truth; pivot: failure/success/total for all 13 labs = fleet.csv
 M4: PASS  regrasped 2,997 = truth; within 30% of the limit ['F04415', 'F11745', 'S05574', 'S20210'] = parquet; both asked in words, JOIN LINKED written out
 M5: PASS  page 15: the marked box reads '15Hz. Each DROID trajectory'
-M6: PASS  3 picked failures: a PDF each (id, the frame at the release, the lanes' readout, the paper's page) and a clip
-M7: PASS  63,344 episodes, table landed telemetry.parquet in 629.3 ms (16,847,616 rows); queries ['42.4 ms (2,997 rows)', '18.1 ms (4 rows)', '0.4 ms (3 rows)']; 0 SLOW
-M8: PASS  clip 42.0 s; 11 shots at 1440×900, luminance 0.13–0.22; 0 SLOW on GTK
+M6: PASS  3 picked failures: a PDF each (its id; the frame at its last gripper release, its time = the parquet's; the paper's field and page) and a clip
+M7: PASS  63,344 episodes, table landed telemetry.parquet in 582.5 ms (16,847,616 rows); queries ['40.7 ms (2,997 rows)', '15.6 ms (4 rows)', '0.5 ms (3 rows)']; 0 SLOW
+M8: PASS  clip 41.7 s; 11 shots at 1440×900, luminance 0.13–0.26; 0 SLOW on GTK
 ```

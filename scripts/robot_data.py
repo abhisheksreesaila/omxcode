@@ -6,7 +6,7 @@
 Reads each dataset with mojoui/lerobot.py (the generic LeRobot source) and writes into OUT, deterministically:
   fleet.csv          one row per episode whose telemetry is on disk (video only where it was fetched: clip blank else):
                      episode (S/F + the dataset's episode index), lab, robot, date, outcome, success (1/0), success_pct (100/0: an average reads as a percent), n (1: a pivot's
-                     sum of it counts episodes), task, verb,
+                     sum of it counts episodes), task, verb (its first word; one used by fewer than 1,000 episodes: "other"),
                      duration_s, frames, grasps (gripper closes), missed_grasp (1: the fingers closed on nothing, held
                      above 0.85), regrasps (closes after the first), slipped (1: a hold that closed further by > 0.2
                      without opening), peak_speed (the fastest joint, rad/s), clip (clips/<episode>.mp4, blank without video), video (1/0),
@@ -45,6 +45,7 @@ import lerobot as lr  # noqa: E402
 DATA = Path.home() / "data" / "robot-scout"
 CAMERA = "observation.images.left_external"
 PAPER = DATA / "docs" / "droid-2403.12945v2.pdf"
+VERB_MOST = 1000  # verbs used by fewer episodes are grouped as "other" (D-4727)
 PAPER_NAME = "droid-paper.pdf"  # where each row comes from: the dataset's paper, in paper/ (a key link marks it, D-4712)
 # libfranka "Robot and interface specifications" (frankaemika.github.io/docs/control_parameters.html): joint velocity limits
 LIMITS = [(1, 2.1750), (2, 2.1750), (3, 2.1750), (4, 2.1750), (5, 2.6100), (6, 2.6100), (7, 2.6100)]
@@ -163,6 +164,12 @@ def main():
             if k not in ("episode",):
                 tele[k].extend(np.round(v, 5).tolist())
         tele.setdefault("gripper_event", []).extend(evcol)
+    counts = {}
+    for r in rows:
+        counts[r["verb"]] = counts.get(r["verb"], 0) + 1
+    for r in rows:  # (a verb fewer than VERB_MOST episodes use reads as "other": a chart by verb then compares real groups)
+        if counts[r["verb"]] < VERB_MOST:
+            r["verb"] = "other"
     rows.sort(key=lambda r: (r["outcome"] != "failure", r["lab"], r["date"], r["uuid"]))
     cols = list(rows[0].keys())
     with open(out / "fleet.csv", "w", newline="") as f:

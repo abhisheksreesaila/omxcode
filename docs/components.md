@@ -253,6 +253,7 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Should become | Lives in | What it is |
 |---|---|---|
+| `Row follow reactions (a key link onto a video card's file plays the row's file; onto a time-linked log, its slice in lanes; a log's key index job; a spec table's limits)` | examples/omxplorer | follow_file, follow_log, near_file, time_linked_video, take_index and the spec-table read in follow_log (goal 47, review round 1): the pieces they call are components (MediaCards.named, series_where_indexed, KeyIndexJob, TrackCard.limits); the glue that picks which card reacts belongs in mojoui.links' react hooks with tests |
 | `FormulaBar` | examples/workbook | what's selected, its value, a formula field; migrate to mojoui.sheetchrome.FormulaBar |
 | `Inspector` | examples/mxstudio | the side panel: Comes from, Feeds, Your edits, Undo all (lineage and the edit log); migrate to mojoui.inspector |
 | `Toolbar / StatusBar islands` | examples/workbook | the island contents (title, Insert buttons, status) are assembled by the app; migrate to mojoui.sheetchrome |

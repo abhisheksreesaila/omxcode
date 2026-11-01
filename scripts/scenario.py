@@ -301,7 +301,7 @@ def claims(media, out):
 
 ROBOT_LINKS = ("fleet.episode = telemetry.episode", "fleet.clip = episode.file", "telemetry.t ~ episode.t +0", "fleet.source = paper.file")
 ROBOT_CHART = "average success_pct by lab, largest first"
-ROBOT_VERBS = "average success by verb, largest first, top 8"
+ROBOT_VERBS = "average success_pct by verb, largest first"
 ROBOT_Q1 = "failures where the gripper closed, let go and closed again"
 ROBOT_SQL1 = ("SELECT fleet.episode AS episode, fleet.lab AS lab, fleet.task AS task, fleet.clip AS clip, fleet.source AS source, "
               "COUNT(*) AS closes FROM fleet JOIN LINKED WHERE fleet.success = 0 AND telemetry.gripper_event = 'close' "
@@ -376,6 +376,14 @@ def robots(media, out):
             time.sleep(0.5)
         piv = [n for n in s.c.names() if n.startswith("pivot-") or n == "pivot-2"]
         said["pivot"] = s.call("read", name="pivot-2") if "pivot-2" in s.c.names() else s.call("screen", quiet=True)
+        before = set(s.c.names())  # a second chart: success by the task's verb
+        s.call("chart")
+        time.sleep(0.6)
+        ask2 = [t["name"] for t in s.c.tools() if t["name"].startswith("ask")][-1:]  # (the new chart's field: the last one on screen)
+        chart2 = [n for n in s.c.names() if n.startswith("chart-") and n not in before]
+        if ask2 and chart2:
+            s.call(ask2[0], text=ROBOT_VERBS, submit=True)
+            said["verbs"] = s.call("read", name=chart2[0])
         # 2. a failure opens: its video and its telemetry, one cursor
         s.call("insert-table")
         s.call("choose-table", path=str((media / "telemetry.parquet").resolve()))

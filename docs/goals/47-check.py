@@ -113,7 +113,14 @@ def m0():
 
 def m1():
     ok, out, missing = oks(["pixi", "run", "mojo", "run", "-I", ".", "tests/test_telemetry.mojo"], ["signal", "lanes", "draw", "seek"])
-    return ok, "signal; lanes; draw; seek" if ok else f"no ok for {missing}: {out[-400:]}"
+    if not ok:
+        return False, f"test_telemetry: no ok for {missing}: {out[-400:]}"
+    r = run(["scripts/mxbuild.sh", "tests/test_robot_follow.mojo", "-o", "build/test_robot_follow"], 1800)
+    if r.returncode:
+        return False, "build test_robot_follow: " + (r.stdout + r.stderr)[-400:]
+    labels = ["follow", "index", "slice", "moment", "card", "named", "page"]
+    ok, out, missing = oks(["pixi", "run", "build/test_robot_follow", str(FULL / "clips/F00118.mp4"), str(FULL / "clips/F00119.mp4"), str(FULL / "paper/droid-paper.pdf")], labels)
+    return ok, "signal; lanes; draw; seek; " + "; ".join(labels) if ok else f"test_robot_follow: no ok for {missing}: {out[-400:]}"
 
 
 def m2():
@@ -124,8 +131,13 @@ def m2():
     if not any(l.startswith(f"OPEN: episode {t['hero']}.mp4") for l in log):
         bad.append("no OPEN line for the featured failure")
     sl = [l for l in log if l.startswith(f"SLICE: telemetry episode={t['hero']}")]
+    frames = next(r["frames"] for r in csv.DictReader(open(FULL / "fleet.csv")) if r["episode"] == t["hero"])
     if not sl:
         bad.append("no SLICE line")
+    elif f" {frames} rows" not in sl[0]:
+        bad.append(f"the slice isn't the whole episode: {sl[0]} vs {frames} frames in fleet.csv")
+    if not any(l.startswith("JOB: index landed telemetry.episode") and "(grouped)" in l for l in log):
+        bad.append("no grouped index landed for the telemetry")
     for want, p, c in s["seeks"]:
         mp = re.search(r"t=([0-9.]+)", p)
         mc = re.search(r"t=([0-9.]+)", c)
@@ -139,18 +151,31 @@ def m2():
 def m3():
     s = robots()
     t = data()
+    bad = []
     chart = dict(re.findall(r"^(\w+)\t([0-9.]+)$", s["said"]["chart"], re.M))
-    bad = [lab for lab, v in t["success_rate_by_lab"].items() if lab not in chart or abs(float(chart[lab]) - 100 * v) > 0.6]
+    bad += [f"lab {lab}" for lab, v in t["success_rate_by_lab"].items() if lab not in chart or abs(float(chart[lab]) - 100 * v) > 0.6]
+    verbs = dict(re.findall(r"^(\S+)\t([0-9.]+)$", s["said"].get("verbs", ""), re.M))
+    if len(verbs) < 5:
+        bad.append(f"verb chart: {s['said'].get('verbs', '')[:200]!r}")
+    bad += [f"verb {v}" for v, x in verbs.items() if v not in t["success_rate_by_verb"] or abs(float(x) - 100 * t["success_rate_by_verb"][v]) > 0.6]
     rows = list(csv.DictReader(open(FULL / "fleet.csv")))
-    pivot = s["said"].get("pivot", "")
-    counts = {}
+    want = {}
     for r in rows:
-        counts[r["lab"]] = counts.get(r["lab"], 0) + 1
-    shown = [lab for lab, n in counts.items() if f"{n:,}" in pivot]
-    if len(shown) < 8:  # (the card shows the first labs; the rest scroll)
-        bad.append(f"pivot shows totals for only {shown}")
-    return not bad, (f"chart: success by {len(chart)} labs = truth (PennPAL {chart.get('PennPAL')} … RAD {chart.get('RAD')}); pivot totals for {len(shown)} labs"
-                     if not bad else f"differs: {bad}")
+        f, ok, n = want.get(r["lab"], (0, 0, 0))
+        want[r["lab"]] = (f + (r["outcome"] == "failure"), ok + (r["outcome"] == "success"), n + 1)
+    block = s["said"].get("pivot", "")
+    block = block[block.find("[pivot]"):] if "[pivot]" in block else ""
+    cells = re.findall(r'^\s*"([^"]*)"$', block, re.M)
+    got = {}
+    for i, c in enumerate(cells):
+        if c in want and i + 3 < len(cells):
+            try:
+                got[c] = tuple(int(x.replace(",", "")) for x in cells[i + 1:i + 4])
+            except ValueError:
+                pass
+    bad += [f"pivot {lab}: {got.get(lab)} vs {w}" for lab, w in want.items() if got.get(lab) != w]
+    return not bad, ("; ".join(bad) if bad else f"chart: success by {len(chart)} labs = truth (PennPAL {chart.get('PennPAL')} … RAD {chart.get('RAD')}); "
+                     f"by verb, {len(verbs)} verbs = truth; pivot: failure/success/total for all {len(got)} labs = fleet.csv")
 
 
 def m4():
@@ -190,21 +215,28 @@ def m5():
 
 def m6():
     import pymupdf
-    s = robots()
+    import pyarrow.parquet as pq
+    robots()
     pack = ROBOTS / "pack"
+    picked = ("F00118", "F00119", "F00124")
+    tele = pq.read_table(FULL / "telemetry.parquet", columns=["episode", "t", "gripper_event"], filters=[("episode", "in", list(picked))]).to_pylist()
     bad = []
-    for ep in ("F00118", "F00119", "F00124"):
+    for ep in picked:
         f = pack / f"{ep}.pdf"
-        if not f.exists():
-            bad.append(f"{ep}.pdf missing")
+        if not f.exists() or not (pack / f"{ep}.mp4").exists():
+            bad.append(f"{ep}: pdf {f.exists()}, mp4 {(pack / f'{ep}.mp4').exists()}")
             continue
         d = pymupdf.open(f)
         txt = "".join(p.get_text() for p in d)
-        if d.page_count < 2 or ep not in txt or not d[0].get_images() or "15Hz" not in txt and not d[-1].get_images():
-            bad.append(f"{ep}.pdf: {d.page_count} pages, frame {bool(d[0].get_images())}")
-        if not (pack / f"{ep}.mp4").exists():
-            bad.append(f"{ep}.mp4 missing")
-    return not bad, "; ".join(bad) or "3 picked failures: a PDF each (id, the frame at the release, the lanes' readout, the paper's page) and a clip"
+        offs = [r["t"] for r in tele if r["episode"] == ep and r["gripper_event"] == "open"]
+        at = f"at {int(offs[-1]) // 60}:{int(offs[-1]) % 60:02d}" if offs else None
+        if d.page_count < 2 or ep not in txt or not d[0].get_images():
+            bad.append(f"{ep}.pdf: {d.page_count} pages, id {ep in txt}, frame {bool(d[0].get_images())}")
+        if at and at not in txt:
+            bad.append(f"{ep}.pdf doesn't show the release ({at}, the parquet's last open)")
+        if "15Hz" not in txt:
+            bad.append(f"{ep}.pdf lacks the paper's field")
+    return not bad, "; ".join(bad) or "3 picked failures: a PDF each (its id; the frame at its last gripper release, its time = the parquet's; the paper's field and page) and a clip"
 
 
 def m7():

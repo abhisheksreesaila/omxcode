@@ -111,7 +111,8 @@ from mojoui.videojobs import expect_analysis, Analyzed, Reel, analyze_job, reel_
 from mojoui.videojobs import analyzer_needs_log, use_analysis, INSPECTION
 from mojoui.mediatimeline import MediaTimeline, value_lane
 from mojoui.mediatimeline_jobs import TimelineFeed
-from mojoui.trackcard import TrackCards, is_track, series_from_sheet, series_where, time_column, metric_label, metric_unit
+from mojoui.trackcard import TrackCards, is_track, series_from_sheet, series_where, series_where_indexed, time_column, metric_label, metric_unit, last_off_mark, row_words, SCAN_MOST
+from mojoui.logindex import KeyIndex, KeyIndexJob
 from mojoui.telemetrychart import TelemetryChart
 from mojoui.mapview import MapMark, MARK_PLACE, MARK_FINDING
 from mojoui.inspection_tables import is_places, read_places, compare_job, flight_plan, place_marks
@@ -338,6 +339,11 @@ struct Main(App):
     var imp: CsvImport
     var source: String  # what the table came from (a path, "sample", "blank")
     var followed_row: Int  # the sheet's row last followed through the links (-1 none)
+    var followed_links: Int  # links.changed when it was followed (a link made or removed: the row is followed again)
+    var log_index: Optional[KeyIndex]  # a long log's key index (mojoui.logindex), built in a job the first time it's sliced
+    var log_index_table: String  # the log it indexes
+    var log_index_job: Optional[Job[KeyIndex]]
+    var pending_slice: Optional[Follow]  # the slice asked for while its log's index was being built
     var name: String  # the table's name (the file's name without .csv)
     var grid: DataGrid
     var preview: DataGrid  # Import: the first rows, read-only
@@ -463,6 +469,11 @@ struct Main(App):
         self.imp = empty_import()
         self.source = ""
         self.followed_row = -1
+        self.followed_links = 0
+        self.log_index = None
+        self.log_index_table = ""
+        self.log_index_job = None
+        self.pending_slice = None
         self.name = ""
         self.grid = DataGrid()
         self.preview = DataGrid()
@@ -665,6 +676,7 @@ struct Main(App):
         """The new table takes over; only then is the old one's memory given back (CPU and GPU: ~26 GB at 100M
         rows). A file that fails to open never gets here, so the sheet on screen stays intact."""
         self.drop_jobs()  # (they read the old table and its GPU copy: stopped before those are given back)
+        self.followed_row = -1  # (a new sheet: its rows are followed afresh)
         swap(self.frame, sheet)  # (sheet is the old one now)
         sheet.release()
         self.has_table = True
@@ -839,8 +851,30 @@ struct Main(App):
             self.say(Activity.error("Couldn't add " + file_name(path), String(e)))
         self.version += 1
 
+    def take_index(mut self):
+        """A log's key index that finished building: kept; the slice asked for meanwhile runs now."""
+        if not self.log_index_job or self.log_index_job.value().poll() == JOB_RUNNING:
+            return
+        var job = self.log_index_job.take()
+        try:
+            var ix = job.result()
+            if self.trace:
+                print("JOB: index landed " + self.log_index_table + "." + ix.column + " " + grouped(len(ix.count)) + " keys, " + grouped(ix.rows) + " rows in "
+                      + fixed(ix.milliseconds, 1) + " ms" + (" (grouped)" if ix.grouped else " (not grouped)") + (" " + ix.problem if ix.problem != "" else String("")), flush=True)
+            self.log_index = ix^
+        except e:
+            self.message = "Couldn't index " + self.log_index_table + ": " + String(e)
+            return
+        if self.pending_slice:
+            var f = self.pending_slice.take()
+            var said = self.follow_log(f)
+            if said != "":
+                self.message = said
+            self.version += 1
+
     def take_table_work(mut self):
         """What the table jobs finished (a file's card, a query's answer, an export): placed now, on the UI thread."""
+        self.take_index()
         var f = self.work.take_file()
         if f:
             self.table_landed(f.take())
@@ -1127,7 +1161,7 @@ struct Main(App):
             for ref kl in self.links.items:
                 if kl.kind == LINK_KEY and kl.touches(log):
                     keyed = True
-            if keyed or self.tables.cards[t].sheet.rows() > 100_000:
+            if keyed:
                 continue
             try:
                 var ts = series_from_sheet(self.tables.cards[t].sheet)
@@ -1429,9 +1463,22 @@ struct Main(App):
         var t = self.tables.find(f.table)
         if t < 0 or time_column(self.tables.cards[t].sheet) < 0 or self.tables.cards[t].sheet.index(f.column) < 0:
             return ""
+        if self.time_linked_video(f.table) < 0:  # (only a log that runs with a video card's clock is sliced: an explicit time link)
+            return ""
         var t0 = now_ns()
+        ref sheet = self.tables.cards[t].sheet
+        var ready = Bool(self.log_index) and self.log_index_table == f.table and self.log_index.value().column == f.column and self.log_index.value().rows == sheet.rows()
+        if not ready and sheet.rows() > SCAN_MOST:  # (a long log: its key index is built off the UI thread first; the slice follows)
+            self.pending_slice = f
+            if not self.log_index_job:
+                self.log_index_job = start_ui_job(KeyIndexJob(sheet.snapshot(), f.column))
+                self.log_index_table = f.table
+                self.log_index = None
+                if self.trace:
+                    print("JOB: start index " + f.table + "." + f.column + " (" + grouped(sheet.rows()) + " rows)", flush=True)
+            return "indexing " + f.table + " by " + f.column + "…"
         try:
-            var got = series_where(self.tables.cards[t].sheet, f.column, f.value)
+            var got = series_where_indexed(sheet, f.column, f.value, self.log_index.value()) if ready else series_where(sheet, f.column, f.value)
             var ts = got[0].copy()
             if ts.rows() == 0:
                 return ""
@@ -1618,25 +1665,23 @@ struct Main(App):
             var tables = List[Tuple[String, List[String], List[String]]]()
             var log_said = String("")
             for ref f in follows:
-                if f.column == "file" and frame_t < 0 and c.sheet.rows() <= 50:  # (a row's own clip: the frame at its log's last release)
+                if f.column == "file" and frame_t < 0:  # (a row's own clip: the frame at its log's last release)
                     var path = self.near_file(f.value, sel.table)
                     if is_video_file(path) and file_exists(path):
                         var at_t = -1.0
                         var dur = 0.0
                         for ref g in follows:
                             var t = self.tables.find(g.table)
-                            if t < 0 or g.column == "file" or time_column(self.tables.cards[t].sheet) < 0:
+                            if t < 0 or g.column == "file" or time_column(self.tables.cards[t].sheet) < 0 or self.time_linked_video(g.table) < 0:
                                 continue
-                            try:
-                                var got = series_where(self.tables.cards[t].sheet, g.column, g.value)
-                                if got[0].rows() > 0:
-                                    dur = got[0].times[got[0].rows() - 1]
-                                    for m in got[1]:
-                                        if not m.on:
-                                            at_t = m.t
-                                    var tc = TelemetryChart(got[0].copy())
-                                    tc.marks = got[1].copy()
-                                    log_said = g.table + " at " + clock_text(at_t if at_t >= 0 else dur / 2) + ": " + tc.describe(at_t if at_t >= 0 else dur / 2)
+                            if not self.log_index or self.log_index_table != g.table:
+                                continue  # (the log's index is built by its first slice: without it no row is read here)
+                            try:  # (cheap per row: the time and event cells of its rows, then one row's numbers)
+                                var m = last_off_mark(self.tables.cards[t].sheet, g.column, g.value, self.log_index.value())
+                                at_t = m[0]
+                                dur = m[2]
+                                if m[1] >= 0:
+                                    log_said = g.table + " at " + clock_text(at_t) + ": " + row_words(self.tables.cards[t].sheet, m[1])
                             except:
                                 pass
                         frame_video = path
@@ -2963,8 +3008,9 @@ struct Main(App):
                     self.grid.select(row, max(self.grid.cur_col, 0))
                     self.grid.reveal_cell(row, max(self.grid.cur_col, 0), self.frame)
                     self.select_cell(row, self.grid.cur_col)
-                    if row != self.followed_row and len(self.links.for_card(self.name)) > 0:
+                    if (row != self.followed_row or self.links.changed != self.followed_links) and len(self.links.for_card(self.name)) > 0:
                         self.followed_row = row
+                        self.followed_links = self.links.changed
                         self.follow_selection(self.sheet_selection(), -1)
             except:
                 pass
@@ -2974,8 +3020,9 @@ struct Main(App):
             if action == GRID_SELECTED or action == GRID_EDIT or action == GRID_READ_ONLY or action == GRID_COLUMN:
                 var moved = self.grid.cur_row != self.followed_row
                 self.select_cell(self.grid.cur_row, self.grid.cur_col)
-                if moved and action == GRID_SELECTED and len(self.links.for_card(self.name)) > 0:  # (the sheet's row, followed through its links)
+                if (moved or self.links.changed != self.followed_links) and action == GRID_SELECTED and len(self.links.for_card(self.name)) > 0:  # (the sheet's row, followed through its links)
                     self.followed_row = self.grid.cur_row
+                    self.followed_links = self.links.changed
                     self.follow_selection(self.sheet_selection(), -1)
                 if action == GRID_EDIT:
                     self.message = "Editing " + self.frame.name(self.grid.cur_col) + " on row " + grouped(self.grid.cur_row + 1) + ": Enter writes it, Escape cancels"
@@ -3876,7 +3923,7 @@ struct Main(App):
         var doc = (self.sheet_name + " · " + grouped(self.frame.rows()) + " rows") if on_sheet else String("")
         _ = doc
         var t = now_ns()
-        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing) or Bool(self.packing) or Bool(self.doc_opening) or self.docs_busy()
+        var moving = self.island.wants_frames(t) or self.charts.busy() or Bool(self.col_job) or Bool(self.opening) or len(self.col_orphans) > 0 or Bool(self.video.analyzing) or Bool(self.video.reeling) or self.work.busy() or Bool(self.comparing) or Bool(self.packing) or Bool(self.doc_opening) or self.docs_busy() or Bool(self.log_index_job)
         var says = self.island.now.lead + (" · " + self.island.now.text if self.island.now.text != "" else String(""))
         var island: List[View] = [IslandView(ISLAND_CANVAS, self.island_v, ISLAND_TAP, ISLAND_FRAME if moving else NO_MSG).tooltip(says)]  # (the document, the GPU and what's happening, in one place: D-255)
         return AppBar("omxplorer", bar^, island^)
