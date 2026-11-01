@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-style="ink">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -102,6 +102,26 @@ footer[hidden]{display:none}
   #legend{display:none}
 }
 </style>
+<!-- omx-chrome --><link rel="stylesheet" href="../../omxqua/src/fonts.css">
+<style>
+:root, :root[data-theme="dark"] { --bg:#151518; --ink:#ededef; --muted:#a9a9b1; --panel:#1d1d21; --line:#2a2a30; --chip:#1d1d21; --accent:#ededef;
+  --shadow:0 8px 30px #00000066; --r:999px; --font:"Geist", system-ui, -apple-system, "Segoe UI", sans-serif; }
+header, #legend, #styleSel, #bLive, #bTheme, #bFit, #bFold, #bSvg, #bPng { display:none !important; }
+body { grid-template-rows:1fr auto; background:var(--bg); }
+footer { border-top:1px solid #202025; padding:10px 14px; gap:8px; }
+footer button, footer select { height:36px; padding:0 14px; border:0; border-radius:999px; background:var(--chip); color:var(--ink);
+  box-shadow:inset 0 0 0 1px var(--line); font:500 13px var(--font); transition:background .15s, transform .15s; }
+footer button:hover, footer select:hover { background:#25252a; }
+footer button:active { transform:scale(.96); }
+footer button:focus-visible, footer select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+#bPlay { background:var(--accent); color:#0b0b0d; box-shadow:none; font-weight:600; padding:0 18px; }
+#bPlay:hover { background:var(--accent); filter:brightness(1.08); }
+#caption { font:14px/1.45 var(--font); color:var(--ink); }
+#caption b { color:var(--accent); }
+#dots i.on { background:var(--accent); }
+#info { background:var(--panel); border:1px solid var(--line); border-radius:18px; font-family:var(--font); }
+.edge.on .line { stroke:var(--accent); } .edge.on .head { fill:var(--accent); } .edge.on .chev { stroke:var(--accent); }
+</style><!-- /omx-chrome -->
 </head>
 <body>
 <header>
@@ -167,7 +187,7 @@ const FLOOR_HUES = [120, 38, 205, 280, 12, 170];
 
 /* ---------- state ---------- */
 const S = {hover:null, sel:null, floorHot:null, flow:0, step:-1, playing:false, live:!reduceMotion && spec.live !== false,
-           style:STYLES.includes(spec.style) ? spec.style : 'fieldnotes', fold:!!spec.folded, vb:null, anim:null, timer:null};
+           style:'ink', fold:!!spec.folded, vb:null, anim:null, timer:null};
 const FN = () => S.style === 'fieldnotes';
 
 function isDark(){
@@ -182,8 +202,7 @@ function theme(){
     : {bg:'#ece3d0', ink:'#201d19', muted:'#6b6152', edge:'#5e5243', grid:'#e2d7c0', halo:'#ece3d0', accent:'#b35f5a', bug:'#c8323a', pill:'#fbf8ed', pillLine:'#201d19',
        nodeInk:'#201d19', shadow:'#767e9a', shadowOp:.55, zone:.55, plinthTop:'#f3e6c9', plinthSide:'#dcc9a3', thread:'#b35f5a', ticketInk:'#201d19'};
   return d
-    ? {bg:'#14161b', ink:'#e8e9ee', muted:'#9aa0ac', edge:'#868c9c', grid:'#1f2229', halo:'#14161b', accent:'#8fa3ff', bug:'#ff6b6b', pill:'#1d2027', pillLine:'#30343f',
-       nodeInk:'#0b0c0f', shadow:'#000000', shadowOp:.09, zone:0.10, thread:'#8fa3ff', ticketInk:'#e8e9ee'}
+    ? {bg:'#151518', ink:'#ededef', muted:'#a9a9b1', edge:'#8a8a94', grid:'#1d1d21', halo:'#151518', accent:'#ededef', bug:'#ff6b6b', pill:'#1d1d21', pillLine:'#2a2a30', nodeInk:'#0b0b0d', shadow:'#000000', shadowOp:.09, zone:0.10, thread:'#ededef', ticketInk:'#ededef'/*omx-palette*/}
     : {bg:'#f5f3ee', ink:'#1d1f25', muted:'#6a6e78', edge:'#7c818e', grid:'#e6e2d8', halo:'#f5f3ee', accent:'#3d5bd9', bug:'#e5484d', pill:'#ffffff', pillLine:'#dcd8ce',
        nodeInk:'#24262c', shadow:'#1d1f25', shadowOp:.09, zone:0.16, thread:'#3d5bd9', ticketInk:'#1d1f25'};
 }
