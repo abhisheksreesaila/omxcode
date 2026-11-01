@@ -48,8 +48,9 @@ PAPER = DATA / "docs" / "droid-2403.12945v2.pdf"
 PAPER_NAME = "droid-paper.pdf"  # where each row comes from: the dataset's paper, in paper/ (a key link marks it, D-4712)
 # libfranka "Robot and interface specifications" (frankaemika.github.io/docs/control_parameters.html): joint velocity limits
 LIMITS = [(1, 2.1750), (2, 2.1750), (3, 2.1750), (4, 2.1750), (5, 2.6100), (6, 2.6100), (7, 2.6100)]
-HERO = "F00119"  # the story's featured failure: AUTOLab, 2023-11-21, the cloth lifted toward the box falls back on the desk
-# (looked at frame by frame, D-4706); the rule below picks one only when it isn't in the data
+HERO = "F00118"  # the story's featured failure: AUTOLab 44bb9c36, 2023-11-21: the peach shirt, held over the box, falls at
+# ~12.7 s and lands hanging on the box's outside wall (looked at frame by frame, D-4718); the rule below picks one only when
+# it isn't in the data
 LIMITS_SOURCE = "Franka Emika Panda, libfranka control parameters (frankaemika.github.io/docs/control_parameters.html)"
 
 

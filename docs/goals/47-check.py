@@ -193,7 +193,7 @@ def m6():
     s = robots()
     pack = ROBOTS / "pack"
     bad = []
-    for ep in ("F00119", "F00118", "F00124"):
+    for ep in ("F00118", "F00119", "F00124"):
         f = pack / f"{ep}.pdf"
         if not f.exists():
             bad.append(f"{ep}.pdf missing")
@@ -232,7 +232,7 @@ def m8():
     bad = []
     if "SLOW:" in log:
         bad.append("SLOW lines in the GTK run")
-    if "SLICE: telemetry episode=F00119" not in log:
+    if f"SLICE: telemetry episode={data()['hero']}" not in log:
         bad.append("no SLICE in the GTK run")
     c = ROOT / "docs/img/clip-robots.mp4"
     dur = float(run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(c)]).stdout.strip() or 0)

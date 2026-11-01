@@ -309,10 +309,10 @@ ROBOT_SQL1 = ("SELECT fleet.episode AS episode, fleet.lab AS lab, fleet.task AS 
 ROBOT_Q2 = "episodes within 30% of the arm's joint speed limit"
 ROBOT_SQL2 = ("SELECT fleet.episode AS episode, fleet.lab AS lab, fleet.outcome AS outcome, MAX(telemetry.speed) AS peak "
               "FROM fleet JOIN LINKED WHERE telemetry.speed > 1.5225 GROUP BY fleet.episode, fleet.lab, fleet.outcome ORDER BY peak DESC")
-ROBOT_PICKED = ("F00119", "F00118", "F00124")  # the featured drop and two failures beside it on the same bench (same robot, same day)
+ROBOT_PICKED = ("F00118", "F00119", "F00124")  # the featured drop and two failures beside it on the same bench (same robot, same day)
 ROBOT_SQL3 = ("SELECT fleet.episode AS episode, fleet.lab AS lab, fleet.date AS date, fleet.task AS task, fleet.duration_s AS duration_s, "
               "fleet.grasps AS grasps, fleet.peak_speed AS peak_speed, fleet.clip AS clip, fleet.source AS source FROM fleet WHERE fleet.episode IN ("
-              + ", ".join(f"'{e}'" for e in ROBOT_PICKED) + ") ORDER BY episode DESC")
+              + ", ".join(f"'{e}'" for e in ROBOT_PICKED) + ") ORDER BY episode")
 ROBOT_FIELDS = "recorded at, frequency of, Franka"
 
 
@@ -390,7 +390,7 @@ def robots(media, out):
         until("telemetry-chart")
         s.call("read", name="video")
         seeks = []
-        for t in (4.0, 9.5, 12.0):
+        for t in (4.0, 12.4, 13.3):  # (before; the shirt over the box; the shirt fallen on the box's wall)
             mark = len(s.log)
             s.call("seek", value=t)
             s.call("render", quiet=True, name="telemetry-chart")
@@ -432,7 +432,7 @@ def robots(media, out):
         s.call("run-query")
         until("table-picked", 120)
         said["picked"] = s.call("read", name="table-picked", count=5)
-        s.call("table-picked", value=2.0)  # (the featured drop: its video, lanes and the paper follow from the answer's row)
+        s.call("table-picked", value=1.0)  # (the featured drop, F00118: its video, lanes and the paper follow from the answer's row)
         s.call("export-picked")
         pack = [t["name"] for t in s.c.tools() if t["name"].startswith("export-pack") and "picked" in t.get("description", "")]
         s.call(pack[0] if pack else "export-pack")

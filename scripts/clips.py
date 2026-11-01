@@ -272,11 +272,17 @@ def robots(media=None, keep_raw=False):
         until("telemetry-chart")
         time.sleep(0.8)
         show("episode")
-        r.call("seek", 0.0, value=6.0)
+        if "pause" in r.tools():  # (it starts playing when it opens)
+            r.call("pause", 0.0)
+        r.call("seek", 0.2, value=8.0)
         r.call("play", 0.0)
-        hold(3.9, "06-drop-holding.png")  # the featured failure plays: the cloth rises toward the box; the cursor runs through the lanes
-        hold(2.6, "07-drop-fallen.png")  # the gripper opens early: the cloth falls back on the desk
-        r.call("pause", 0.0)
+        hold(6.4)  # the featured failure plays: the shirt carried over the box, then it falls onto the box's outside wall
+        if "pause" in r.tools():
+            r.call("pause", 0.0)
+        r.call("seek", 0.0, value=12.7)
+        hold(1.4, "06-drop-falling.png")  # the shirt in the air, just let go (the lanes' cursor at 0:12.7)
+        r.call("seek", 0.0, value=13.4)
+        hold(1.4, "07-drop-fallen.png")  # the gripper open, the shirt hanging on the outside of the box
         r.call("insert-documents", 0.0, path=str(media / "paper"))
         until("fields")
         r.call("reader", 0.0, option="PDF text")
@@ -313,7 +319,7 @@ def robots(media=None, keep_raw=False):
         until("table-picked", 120)
         time.sleep(0.4)
         show("picked")
-        r.call("table-picked", 0.3, value=2.0)
+        r.call("table-picked", 0.3, value=1.0)
         pack = [t["name"] for t in r.c.tools() if t["name"].startswith("export-pack") and "picked" in t.get("description", "")]
         r.call(pack[0] if pack else "export-pack", 0.0)
         hold(2.8, "11-pack.png")  # Export pack: a PDF per picked failure (its frame, its telemetry, the paper's page)
