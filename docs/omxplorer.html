@@ -109,6 +109,58 @@ h3.close span { font: 600 13px var(--mono); color: var(--word); }
 @media (max-width: 860px) {
   .split, .split.flip, .twin, .stack3, .reads { grid-template-columns: 1fr; } .split.flip > :first-child { order: 0; }
 }
+
+/* ---- not a replay, an investigation: five cards, each with a tiny visual; the links card leads, a link drawn and confirmed ---- */
+.inv { --iv: #3ccf6e; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-top: 40px; text-align: left; }
+.ivc { grid-column: span 2; min-width: 0; border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 18px 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.ivc.half { grid-column: span 3; }
+.ivc.wide { grid-column: span 4; grid-row: span 2; box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--iv) 55%, transparent); }
+.ivc .k { font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--iv); }
+.ivc h3 { margin: 0; font: 650 18px/1.25 var(--sans); letter-spacing: -.02em; color: var(--ink); }
+.ivc.wide h3 { font-size: 24px; }
+.ivc p { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--ink2); } .ivc p b { color: var(--ink); font-weight: 600; }
+.ivv { height: 92px; border-radius: 14px; background: var(--oq-surface-2); box-shadow: inset 0 0 0 1px var(--oq-line-2); position: relative; overflow: hidden; display: grid; place-items: center; font: 600 11.5px var(--mono); color: var(--ink2); }
+/* 1 · a tiny pivot */
+.ivv.piv { grid-template-columns: 64px 1fr 48px; grid-auto-rows: 1fr; place-items: stretch; gap: 3px; padding: 12px; }
+.ivv.piv i { border-radius: 4px; background: var(--oq-surface-3); font-style: normal; display: grid; place-items: center; font-size: 10.5px; color: var(--ink2); }
+.ivv.piv i.h { background: none; color: var(--ink); justify-content: start; } .ivv.piv i.h:first-child { grid-column: 1 / -1; color: var(--ink2); }
+.ivv.piv i.bar { background: var(--oq-surface-3); display: flex; justify-content: flex-start; align-items: stretch; overflow: hidden; } .ivv.piv i.bar s { display: block; flex: none; margin: 0; height: auto; background: color-mix(in srgb, var(--iv) 55%, transparent); } .ivv.piv i.on { background: color-mix(in srgb, var(--iv) 30%, var(--oq-surface-3)); color: var(--ink); }
+/* 2 · question → answer → moment */
+.ivv.qm { display: flex; gap: 8px; padding: 0 12px; justify-content: center; }
+.ivv.qm span { padding: 6px 10px; border-radius: 999px; background: var(--oq-surface-3); color: var(--ink); white-space: nowrap; }
+.ivv.qm span.a { background: color-mix(in srgb, var(--iv) 22%, var(--oq-surface-3)); } .ivv.qm b { color: var(--iv); font-weight: 600; }
+/* 3 · a page, its passage marked */
+.ivv.doc { place-items: center; }
+.ivv.doc .pg { width: 120px; height: 72px; border-radius: 6px; background: var(--oq-surface-3); padding: 9px 10px; display: grid; gap: 5px; align-content: start; }
+.ivv.doc .pg i { display: block; height: 4px; border-radius: 2px; background: var(--line); } .ivv.doc .pg i.m { height: 7px; background: color-mix(in srgb, var(--iv) 70%, transparent); }
+/* 5 · one process */
+.ivv.proc { display: flex; gap: 6px; padding: 0 14px; }
+.ivv.proc span { padding: 6px 9px; border-radius: 8px; background: var(--oq-surface-3); color: var(--ink); } .ivv.proc em { font-style: normal; color: var(--iv); }
+.ivv.proc::before { content: "one process"; position: absolute; top: 8px; left: 12px; font: 600 9.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
+/* 4 · the links card: the real screen, a link drawn and confirmed over it */
+.ivlink { position: relative; border-radius: 14px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--oq-line-2); background: var(--oq-surface-2); aspect-ratio: 16 / 9; }
+.ivlink img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 60% 0; opacity: .55; }
+.ivlink .ov { position: absolute; inset: 0; display: grid; place-items: center; }
+.ivlink .row { display: flex; align-items: center; gap: 0; }
+.ivlink .col { padding: 8px 12px; border-radius: 10px; background: #1d1d21; box-shadow: 0 0 0 1px var(--line), var(--oq-shadow-2); font: 600 13px var(--mono); color: var(--ink); white-space: nowrap; }
+.ivlink svg { width: 90px; height: 20px; overflow: visible; }
+.ivlink svg path { fill: none; stroke: var(--iv); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 90; stroke-dashoffset: 90; animation: ivdraw 4.2s var(--oq-ease-in, ease) infinite; }
+.ivlink .ok { position: absolute; left: 50%; top: calc(50% + 34px); translate: -50% 0; padding: 7px 14px; border-radius: 999px; background: var(--iv); color: #0b0b0d; font: 650 13px var(--sans); white-space: nowrap; opacity: 0; transform: scale(.8); animation: ivok 4.2s infinite; }
+.ivlink .ask { position: absolute; left: 50%; top: calc(50% - 52px); translate: -50% 0; font: 600 12px var(--sans); color: var(--ink); padding: 5px 11px; border-radius: 999px; background: #25252a; opacity: 0; animation: ivask 4.2s infinite; }
+@keyframes ivdraw { 0%, 12% { stroke-dashoffset: 90; } 40%, 100% { stroke-dashoffset: 0; } }
+@keyframes ivask { 0%, 38% { opacity: 0; } 46%, 62% { opacity: 1; } 70%, 100% { opacity: 0; } }
+@keyframes ivok { 0%, 62% { opacity: 0; transform: scale(.8); } 72%, 94% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.ivlink .kinds { position: absolute; left: 12px; bottom: 10px; display: flex; gap: 6px; }
+.ivlink .kinds span { font: 600 11px var(--mono); padding: 4px 9px; border-radius: 999px; background: #1d1d21; color: var(--ink2); box-shadow: 0 0 0 1px var(--line); }
+@media (prefers-reduced-motion: reduce) { .ivlink svg path { animation: none; stroke-dashoffset: 0; } .ivlink .ok { animation: none; opacity: 1; transform: none; } .ivlink .ask { display: none; } }
+@media (max-width: 900px) { .inv { grid-template-columns: minmax(0, 1fr); } .ivc, .ivc.wide, .ivc.half { grid-column: auto; grid-row: auto; } .ivc.wide { order: -1; } .ivc.wide h3 { font-size: 21px; } .ivlink svg { width: 44px; } .ivlink .col { font-size: 11px; padding: 6px 8px; } }
+
+/* ---- the robot story: the clip in a frame, its facts beside it ---- */
+.robo { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: 32px; align-items: center; margin-top: 44px; text-align: left; }
+.robo .film { margin: 0; width: auto; border-radius: 22px; }
+.robo ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.robo li { color: var(--ink2); font-size: 16px; line-height: 1.45; } .robo li b { display: block; color: var(--ink); font: 700 26px/1.1 var(--display); letter-spacing: -.03em; }
+@media (max-width: 860px) { .robo { grid-template-columns: minmax(0, 1fr); } }
 </style>
 <noscript><style>.rv { opacity: 1; transform: none; }</style></noscript>
 </head>
@@ -116,7 +168,7 @@ h3.close span { font: 600 13px var(--mono); color: var(--word); }
 
 <nav class="lnav">
   <a class="brand" href="index.html"><span class="mark">ox</span>omxcode <span class="sub">/ omxplorer</span></a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#speed">Speed</a><a href="#ask">Ask</a><a href="#island">Island</a><a href="#look">Look</a><a href="#inside">Inside</a></div>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#robots">Robots</a><a href="#speed">Speed</a><a href="#ask">Ask</a><a href="#island">Island</a><a href="#look">Look</a><a href="#inside">Inside</a></div>
   <div class="right"><a class="cta" href="#run">Run it</a></div>
 </nav>
 
@@ -133,6 +185,47 @@ h3.close span { font: 600 13px var(--mono); color: var(--word); }
 
 <section style="padding-top:70px;padding-bottom:70px">
   <p class="dog rv">We eat our own dog food. <span class="two">omxplorer pushes the framework: if the app can't do something smoothly, the framework isn't done.</span></p>
+</section>
+
+<!-- the robot story (goal 47): real public data; then where omxplorer is different -->
+<section id="robots" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv"><span class="badge ok big"><i></i>real data · DROID, CC-BY-4.0</span></div>
+    <h2 class="rv">Why did the robot drop it?</h2>
+    <p class="lede rv">The whole fleet is a sheet: 63,344 real episodes from 13 labs, their video and 16.8M telemetry rows, <b>linked by key and time</b>. A failure opens with its video and telemetry on one cursor.</p>
+    <div class="robo rv">
+      <div class="film"><video src="img/clip-robots.mp4" poster="img/clip-robots.jpg" muted loop playsinline preload="metadata" autoplay aria-label="omxplorer opens 63,344 real DROID robot episodes as a sheet, charts success by lab, plays a failed episode's video beside its telemetry on one cursor as the shirt falls, asks in words over 16.8 million telemetry rows, opens the DROID paper by key and exports a pack"></video></div>
+      <ul><li><b>63,344</b>episodes from 13 labs, one row each</li><li><b>16.8M</b>telemetry rows, joined by a link you confirm</li><li><b>~40 ms</b>a question in words over every telemetry row</li></ul>
+    </div>
+    <p class="srcline rv">the real app, recorded on Linux · DROID (CC-BY-4.0) · docs/goals/47-report.md</p>
+  </div>
+</section>
+
+<!-- not a replay, an investigation: where omxplorer is different, five cards (the links card leads) -->
+<section id="unique" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Where omxplorer is different</div>
+    <h2 class="rv">Not a replay. <span class="two">An investigation.</span></h2>
+    <p class="lede rv">Robotics viewers replay a recording. <b>omxplorer starts from a question across the whole fleet, then shows you the moment.</b></p>
+    <div class="inv rv">
+      <div class="ivc wide"><div class="ivlink" aria-hidden="true"><img src="img/robots-links.jpg" alt="" loading="lazy">
+          <div class="ov"><div class="row"><span class="col">fleet.episode</span><svg viewBox="0 0 90 20"><path d="M2 10 C 30 -4, 60 24, 88 10"/></svg><span class="col">telemetry.episode</span></div></div>
+          <span class="ask">Link these?</span><span class="ok">✓ Linked by key</span>
+          <div class="kinds"><span>key</span><span>time</span><span>place</span></div></div>
+        <div class="k">4 · Links you confirm by hand</div>
+        <h3>Key, time, place: drag, confirm, done.</h3>
+        <p><b>No schema written in code.</b> Drag a column onto a card and say yes. Nothing joins until you link it, and a question uses only the links you made, so every answer can show where it came from.</p></div>
+      <div class="ivc"><div class="ivv piv" aria-hidden="true"><i class="h">success by lab</i><i class="h">PennPAL</i><i class="bar"><s style="width:95%"></s></i><i class="on">95 %</i><i class="h">RAD</i><i class="bar"><s style="width:61%"></s></i><i class="on">61 %</i></div>
+        <div class="k">1</div><h3>The fleet is a spreadsheet you touch.</h3><p>Pivots, charts from a sentence, formulas and edits, <b>over every run</b>.</p></div>
+      <div class="ivc"><div class="ivv qm" aria-hidden="true"><span>ask</span>→<span class="a"><b>2,997</b> · 40 ms</span>→<span>▶ 0:12</span></div>
+        <div class="k">2</div><h3>Question → moment, in one motion.</h3><p>Ask in words over <b>16.8M rows (~40 ms)</b>, tap an answer row, and its video and telemetry open on the same cursor.</p></div>
+      <div class="ivc half"><div class="ivv doc" aria-hidden="true"><div class="pg"><i></i><i style="width:80%"></i><i class="m"></i><i style="width:60%"></i><i></i></div></div>
+        <div class="k">3</div><h3>Documents in the same join.</h3><p>A manual or paper <b>linked by key</b>, with the passage marked.</p></div>
+      <div class="ivc half"><div class="ivv proc" aria-hidden="true"><span>sheet</span><span>query</span><span><em>GPU</em></span></div>
+        <div class="k">5</div><h3>No server for the analytics.</h3><p>The query runs <b>in the app's process</b>, on your GPU.</p></div>
+    </div>
+    <p class="srcline rv">16.8M telemetry rows · 37–42 ms in the check's runs · docs/goals/47-report.md</p>
+  </div>
 </section>
 
 <section id="speed" class="center">
