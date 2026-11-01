@@ -16,7 +16,7 @@
 | 0:00 | An agent clicking pixels (any computer-use demo) vs the tool list | "Most agents use an app like a tourist with a menu they can't read: a screenshot, a guess, a click. Here's the other way." |
 | 0:20 | `scripts/agent.sh omxplorer`, then `claude mcp add …` | "One command prints one line. Run it, and Claude Code sees omxplorer as a set of tools." |
 | 0:45 | `[shot: mcp-tools]` | "Where do the tools come from? The screen. The same view tree that becomes GTK widgets becomes MCP tools. A button's tag names the tool, its tooltip describes it, calling it is tapping it. I wrote nothing per app." |
-| 1:20 | `[clip: agent-drives]` | "Watch. I ask it which failures look like a bad grasp. It opens the fleet sheet, filters, asks the question, opens the episode. The window moves on its own." |
+| 1:20 | `[clip: agent-drives]` | "Watch. I ask it how many failures each lab has." *(use the question you actually asked)* "It opens the fleet sheet, asks the question, opens an episode. The window moves on its own." |
 | 2:10 | The call log: `Did ask. Now: …` | "Each call answers in words: what changed, what opened, which tools appeared. No comparing screenshots." |
 | 2:35 | A dialog open, then closed; the tool list changes | "And it's safe by construction. A disabled button isn't a tool. A dialog's buttons exist only while it's open. The agent can do nothing you couldn't." |
 | 3:05 | `[clip: agui-chat]` | "The other direction is AG-UI: the agent sends data, the app builds the interface. Here it streams words, then builds a chart and a form, drawn natively, no web view." |

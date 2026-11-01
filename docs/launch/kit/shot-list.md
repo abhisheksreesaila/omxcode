@@ -14,7 +14,7 @@ Record everything in **omxplorer, Liquid dark**, on the Linux machine (RTX 3090)
      13 labs; or
    - show the pivot on 994 and say the line in the scripts: "This is a 994-episode sample, so the split by lab
      reflects the sample, not the labs."
-3. Turn on the watchdog for the freeze shots: `MOJOUI_BUDGET_MS=16`, terminal visible at the side.
+3. Turn on the watchdog for the freeze shots: `MOJOUI_BUDGET_MS=50` (what the checks prove), terminal visible at the side. Try 16 off camera first; only show 16 if it prints nothing.
 4. Have the linked document ready (DROID paper PDF, arxiv.org/abs/2403.12945, or the Franka Panda datasheet).
 
 ## Clips (moving)
@@ -38,7 +38,7 @@ Record everything in **omxplorer, Liquid dark**, on the Linux machine (RTX 3090)
 | Name | What's on screen | Used in |
 |---|---|---|
 | `[shot: fleet-sheet]` | The fleet sheet, many rows, status bar showing the row count | X, PH gallery 2 |
-| `[shot: fleet-pivot]` | Success by lab, as a pivot and a bar chart | X, PH gallery 3, deck |
+| `[shot: fleet-pivot]` | Success by lab, as a pivot and a bar chart (on the 994 sample, put "994-episode sample" in the frame or caption) | X, PH gallery 3, deck |
 | `[shot: failure-cursor]` | Failure open: video left, joint-velocity and gripper charts right, one cursor across all | X, PH gallery 1 (hero), deck |
 | `[shot: ask-sql]` | The question in words and its SQL with `JOIN LINKED` | X, PH gallery 4 |
 | `[shot: linked-doc]` | The document card linked to the episode (hold-to-peek: the rest dims, the link lifts) | X, PH gallery 5 |
@@ -53,7 +53,7 @@ Record everything in **omxplorer, Liquid dark**, on the Linux machine (RTX 3090)
 | Video | Background | Big text |
 |---|---|---|
 | 1 | `[shot: failure-cursor]` | WHY DID IT DROP? |
-| 2 | `[shot: slow-terminal]` + grid | 0 FREEZES |
-| 3 | `[shot: mac-linux]` | ONE FILE. TWO GPUS. |
+| 2 | `[shot: slow-terminal]` + grid | 0 SLOW FRAMES |
+| 3 | `[shot: mac-linux]` | ONE CODEBASE. LINUX + MAC. |
 | 4 | `[shot: linked-doc]` | VIDEO + DATA + DOCS |
 | 5 | `[shot: mcp-tools]` | THE AGENT CLICKS NOTHING |

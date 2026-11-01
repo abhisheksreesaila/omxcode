@@ -16,7 +16,7 @@ Alternatives:
 **Description** (≤ 260):
 
 ```
-omxplorer opens a sheet, its video and its documents side by side, joined only by links you make. Pivot, click a row, watch what happened on one time cursor, ask in words. It runs on your own GPU, never freezes, and every button is an agent tool.
+omxplorer opens a sheet, its video and its documents side by side, joined only by links you make. Click a row and its video plays beside its data on one cursor; ask in words. It runs on your own GPU, off the UI thread, and every button is an agent tool.
 ```
 
 **Topics:** Developer Tools, Data & Analytics, Robots, Artificial Intelligence, Open Source
@@ -29,14 +29,15 @@ omxplorer opens a sheet, its video and its documents side by side, joined only b
 
 1. `[shot: failure-cursor]`: caption "A failure's video beside its joint and gripper telemetry, one cursor"
 2. `[shot: fleet-sheet]`: "A fleet of real robot episodes as a sheet (DROID, 13 labs)"
-3. `[shot: fleet-pivot]`: "Success by lab, one click"
+3. `[shot: fleet-pivot]`: "Pivot by lab, one click (a 994-episode sample)"
 4. `[shot: ask-sql]`: "Ask in words; read the SQL it wrote"
 5. `[shot: linked-doc]`: "Documents linked by key, time or place: never by guessing"
 6. `[shot: pack-folder]`: "Export the answer as a pack"
-7. `[shot: slow-terminal]`: "Never freezes: slow work runs on its own threads"
-8. `[shot: mac-linux]`: "Native on Linux and Mac"
+7. `[shot: slow-terminal]`: "Slow work runs on its own threads; a watchdog checks"
+8. `[shot: mac-linux]`: "Native controls on Linux and Mac"
 9. `[shot: mcp-tools]`: "Every button is an MCP tool for your agent"
 
 Export each at 1270×760 (crop the 1920×1080 shots to 16:9.6, keep the content centred).
 
-*Sources: S1, S5, S10, S11, S9/S16; the gallery shots come from tonight's build.*
+*Sources: S1, S5, S10, S11, S9/S16; the gallery shots come from tonight's build. Post the description only if the
+recorded clip shows the cursor and the ask (sources.md, "claims that depend on tonight's build").*

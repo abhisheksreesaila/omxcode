@@ -40,9 +40,9 @@ Every button is an MCP tool: its tag names it, its tooltip describes it, calling
 ---
 **Sat Nov 7 · one file, two GPUs** · attach `[shot: mac-linux]`
 
-The same Mojo code runs the data engine on an NVIDIA GPU on Linux and on Apple's GPU through Metal on a Mac.
+The same Mojo engine code runs on an NVIDIA GPU on Linux and on Apple's GPU through Metal (checked on GitHub's virtual Macs; real Macs next).
 
-The app uses each platform's own controls: GTK on Linux, AppKit on the Mac. No web view in either.
+The app uses each platform's own controls: GTK and AppKit. No web view.
 
 ---
 **Sun Nov 8 · where it's going** · attach `[shot: code-file]`
@@ -60,5 +60,5 @@ github.com/abhisheksreesaila/omxcode
 
 ---
 
-*Sources: S1/S2, S5, S10, S11, S9, S16/S17. Sat Nov 7: if the Mac clip is the CPU build, post "the same Mojo code runs
-on Apple's GPU through Metal" only with the shot from the GPU build, otherwise swap the shot for `[shot: code-file]`.*
+*Sources: S1/S2, S5, S10, S11, S9, S16/S17. Sat Nov 7: if you recorded the Metal build on your MacBook, replace the
+bracket with what its GPU line shows.*

@@ -7,7 +7,7 @@ Post once the submission is in and omxlabs.tech is live. If the fund's page name
 ```
 I've entered omxplorer in the .tech No Excuses Fund.
 
-It's live at omxlabs.tech: a sheet, its video and its documents on one page, on your own GPU. Click a robot's failure and watch what happened beside its telemetry, on one cursor.
+It's live at omxlabs.tech: a sheet, its video and its documents on one page, on your own GPU. Click a robot's failure and its video plays beside its telemetry, on one cursor.
 
 Built in the open, in Mojo.
 ```
@@ -24,4 +24,4 @@ It's built on omxcode, my open-source framework in Mojo: one language from the b
 No excuses: it's live, it's open, and every number on the site has a script behind it.
 ```
 
-*Sources: S1, S10, S9/S16/S17, S18.*
+*Sources: S1, S10, S9/S16/S17, S18. Post only once the robot clip on omxlabs.tech shows the cursor.*

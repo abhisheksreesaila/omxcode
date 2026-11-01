@@ -23,19 +23,20 @@ A workspace where a spreadsheet, its video and its documents sit side by side, j
 ### The product
 **Short:** omxplorer opens a sheet, its video and its documents on one page. You link them by key, time or place; it shows how many rows match before you confirm. Click a row and its video plays beside its telemetry on one time cursor. Ask in words and read the SQL it wrote. Export the answer as a pack.
 
-**Longer:** The demo uses DROID, 67,029 real robot episodes from 13 labs (public, CC-BY-4.0; the prototype uses 994). Open the fleet as a sheet, pivot success by lab, click a failure: the episode's video plays beside its joint-velocity and gripper telemetry, one cursor across all of them. Ask "which failures look like a bad grasp?" and it writes the SQL, following the links you made (`JOIN LINKED`), so nothing is joined by guessing. The robot's datasheet is linked by model. Export a pack with the clip, the charts and the document.
+**Longer:** The demo uses DROID, 67,029 real robot episodes from 13 labs (public, CC-BY-4.0; the prototype uses 994). Open the fleet as a sheet, pivot success by lab, click a failure: the episode's video plays beside its joint-velocity and gripper telemetry, one cursor across all of them. Ask "how many failures per lab?" and it writes the SQL, following the links you made (`JOIN LINKED`), so nothing is joined by guessing. Link the robot's datasheet to the episodes by model and it's one click away. Export a pack with the clip, the charts and the document.
 
-Under it are three technologies we built, all open source:
-- **omxcode**, a UI framework in Mojo: one language from the button to the GPU kernel, native on Linux and Mac;
+Under it are three technologies we built:
+- **omxcode**, a UI framework in Mojo (open source, MIT): one language from the button to the GPU kernel, native on Linux and Mac;
 - **omxcore**, the engine: SQL on the CPU and GPU, in the app's own process (a chart over 1M rows in 0.5–0.7 ms on an RTX 3090);
 - **omxqua**, the design language (Liquid, here in dark mode).
 
 Every button is also an MCP tool, so Claude or any MCP agent can drive omxplorer with no screenshots and no extra API, and it can do nothing a person couldn't.
 
 ### What's built and working today
-- omxplorer on Linux (GTK 4, NVIDIA GPU) and Mac (AppKit; the engine runs on Apple's GPU through Metal, checked on GitHub's virtual Macs).
-- Sheets, pivots, charts edited by their sentence, SQL asked in words, video with a decoder thread, telemetry charts, documents read in process, explicit links, packs.
-- Never freezes: slow work runs as background jobs; a watchdog checks every session (0 slow frames at a 50 ms budget across video, query and export sessions).
+- omxplorer on Linux (GTK 4, NVIDIA GPU) and Mac (AppKit; the published download is the CPU build; the GPU build runs on Apple's GPU through Metal, checked on GitHub's virtual Macs).
+- In the repo and checked by scripts: sheets, pivots, charts edited by their sentence, SQL asked in words, video on its own decoder thread, documents read in process, explicit links by key, time and place with `JOIN LINKED`, and exported packs (proven on a shipping-claim example).
+- The robot demo on DROID: *(list what the recorded build shows: the fleet sheet, the failure's video beside its telemetry on one cursor, the linked datasheet, the pack)*.
+- Slow work runs as background jobs, and a watchdog checks for slow frames: 0 at a 50 ms budget across the checked video, query and export sessions.
 - An agent host: every app is an MCP server. AG-UI support: agents can stream words and build native UI.
 - Public alpha on GitHub, MIT, with every claim re-proved by a script in the repo.
 - Live on omxlabs.tech: *(fill in what's live on the day: download, hosted demo, video)*.

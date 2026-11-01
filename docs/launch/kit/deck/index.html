@@ -175,7 +175,7 @@ pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(-
     <div class="card"><div class="num">994</div><p>episodes in tonight's prototype: 3 hours, 3.6 GB, one camera</p></div>
   </div>
   <p class="lede">Each episode: 720p video at 15 fps and 52 telemetry channels at 15 Hz, including 7 joint velocities and the gripper. No force sensing, so we don't show force.</p>
-  <div class="src">DROID, Khazatsky et al. 2024 · ~/data/robot-scout/REPORT.md</div>
+  <div class="src">DROID, Khazatsky et al. 2024 · CC-BY-4.0 · droid-dataset.github.io</div>
   <aside class="notes">
     The data is DROID, a well-known robot dataset from 2024, released under CC-BY. The public 720-pixel release has 67,029 episodes from 13 labs, successes and failures in separate sets.
     Tonight's prototype uses 994 of them. Each episode has video and 52 channels of telemetry at 15 hertz: joint positions, joint velocities, the gripper.
@@ -224,8 +224,7 @@ pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(-
   <div class="src">illustration · the real screen is [shot: failure-cursor]</div>
   <aside class="notes">
     Open the fleet sheet, pivot success by lab, filter to failures, and click one. Its video plays in the middle. On the right: the seven joint velocities and the gripper position.
-    They share one time cursor. Drag it and all three move together. Here the gripper closes, holds, and opens early, and the video shows the block falling at the same moment. That's the answer.
-    This slide is a drawing; play the real clip here. Describe what your recorded episode actually shows.
+    They share one time cursor. Drag it and all three move together. This slide is a drawing; play the real clip here, and describe what your recorded episode actually shows: when the gripper closes and opens, and what the camera sees at that moment. Don't name a cause the footage doesn't show.
   </aside>
 </section>
 
@@ -264,19 +263,19 @@ pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(-
 
 <!-- 7 · never freezes -->
 <section>
-  <span class="k">Never freezes</span>
+  <span class="k">The UI thread</span>
   <h2>The UI thread only decides.</h2>
   <p class="lede">At 60 fps the UI thread has 16 ms a frame. Queries, imports, video and exports run as jobs on their own threads; the answer comes back as an event.</p>
   <div class="grid g3">
-    <div class="card"><div class="num">0</div><p><code>SLOW:</code> lines at a 50 ms budget across the video, query and export sessions in the checks</p></div>
+    <div class="card"><div class="num">0</div><p><code>SLOW:</code> lines at a 50 ms budget across the checked video, query and export sessions (headless, CPU drawing)</p></div>
     <div class="card"><div class="num">6<small>µs</small></div><p>a video seek on its own decoder thread (open ≈ 40 µs); the newest seek wins</p></div>
     <div class="card"><div class="num">83<small>ms</small></div><p>worst frame gap on a Mac during a 1.5 s job, down from 1,527 ms (GitHub's virtual Macs)</p></div>
   </div>
-  <div class="src">docs/goals/41-report.md · docs/ui-threads.md · D-792</div>
+  <div class="src">docs/goals/41-report.md · docs/ui-threads.md · D-792 · open edge: a 100M-row in-memory median still waits ~0.7 s (README)</div>
   <aside class="notes">
     Every platform draws on one thread, and at 60 frames a second it has 16 milliseconds. Anything longer freezes the window.
     The rule in omxcode: update and view only decide. Anything slow is a job with its own copy of the data, and its answer comes back as an ordinary event. No locks in app code.
-    A watchdog prints a SLOW line for anything over budget. The checks run the video, query and export sessions at a 50 millisecond budget and print none.
+    A watchdog prints a SLOW line for anything over budget. The checks run the video, query and export sessions at a 50 millisecond budget, headless with CPU drawing, and print none. One edge is still open: a median over 100 million rows in memory still makes the window wait about 0.7 seconds; that's next.
     Video has its own decoder thread. And on the Mac, giving jobs their own threads took the worst frame gap from a second and a half down to 71 to 83 milliseconds, measured on GitHub's virtual Macs. Real hardware is next.
   </aside>
 </section>
@@ -290,14 +289,14 @@ pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(-
     <div class="card"><h3 class="w">Time</h3><p>the video and the telemetry share one clock and one cursor</p></div>
     <div class="card"><h3 class="w">Place</h3><p>a box in the frame → a row in the sheet</p></div>
   </div>
-  <pre class="code" style="margin-top:22px"><i>-- "which failures closed the gripper early?"  (asked in words)</i>
-<b>SELECT</b> lab, episode, gripper_close_s <b>FROM</b> fleet
-  <em>JOIN LINKED</em> telemetry <b>WHERE</b> outcome = 'failure' …</pre>
+  <pre class="code" style="margin-top:22px"><i>-- "how many failures per lab?"  (asked in words)</i>
+<b>SELECT</b> lab, <b>COUNT</b>(*) <b>FROM</b> fleet
+  <em>JOIN LINKED</em> … <b>WHERE</b> outcome = 'failure' <b>GROUP BY</b> lab</pre>
   <div class="src">docs/goals/41-report.md (links.mojo, asksql.mojo) · illustrative query; the app writes its own</div>
   <aside class="notes">
     Putting a video, a table and a PDF on one screen is easy. Knowing why they belong together is the hard part. So in omxplorer, cards connect only through links you make:
     by key, like the robot model; by time, so the video and telemetry share a clock; or by place, a box in the frame tied to a row. Each link shows how many rows match before you confirm it.
-    Ask in words, and the SQL it writes says JOIN LINKED: the links you made, as a join you can read. This query is an illustration; read out the one your app wrote.
+    Ask in words, and the SQL it writes says JOIN LINKED: the links you made, as a join you can read. This query is a sketch; before presenting, paste the SQL your recorded session actually wrote.
   </aside>
 </section>
 
@@ -336,7 +335,7 @@ pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(-
   <h2>Linux and Mac today.</h2>
   <div class="grid g3">
     <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Linux</h3><p>GTK 4, NVIDIA GPU. omxplorer's home.</p></div>
-    <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Mac</h3><p>AppKit. The engine runs on Apple's GPU through Metal.</p></div>
+    <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Mac</h3><p>AppKit. The GPU build runs on Apple's GPU through Metal (checked on GitHub's virtual Macs).</p></div>
     <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Agents</h3><p>Every app is an MCP server.</p></div>
     <div class="card"><span class="pill next">next</span><h3 style="margin-top:12px">Web</h3><p>WebGPU, on the visitor's own GPU. A server-backed version runs today.</p></div>
     <div class="card"><span class="pill next">next</span><h3 style="margin-top:12px">Android</h3><p>The classic controls already run on the emulator.</p></div>
@@ -354,17 +353,17 @@ pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(-
   <span class="k">Roadmap</span>
   <h2>Data apps first. Then everything.</h2>
   <div class="road">
-    <div class="now"><span class="when">now</span><h3>Linux + Mac</h3><p>omxplorer, GPU on both, agent tools</p></div>
+    <div class="now"><span class="when">now</span><h3>Linux + Mac</h3><p>omxplorer, the GPU engine, agent tools</p></div>
     <div><span class="when">next</span><h3>The web</h3><p>WebGPU in the browser</p></div>
     <div><span class="when">then</span><h3>Phones</h3><p>Android and iPhone</p></div>
     <div><span class="when">then</span><h3>SaaS apps</h3><p>on the same components</p></div>
     <div><span class="when">by year end</span><h3>Components</h3><p>a full collection</p></div>
   </div>
-  <p class="lede" style="margin-top:44px">Further out: the model in the same program as the interface and the data, on the same GPU.</p>
-  <div class="src">owner's roadmap, 2026-11-01 · docs/launch/copy.md §2 ("next", not in the alpha)</div>
+  <p class="lede" style="margin-top:44px">Further out: models in the same program as the interface and the data, on the same GPU. A speech model already runs in the app's process.</p>
+  <div class="src">owner's roadmap, 2026-11-01 · examples/dictate (EXPERIMENTS.md, goal 43)</div>
   <aside class="notes">
     The order: Linux and Mac now. The web on WebGPU next. Then Android and iPhone. Then SaaS apps built on the same components, and a full component collection by the end of the year.
-    Further out, the bigger idea: the AI model living in the same program as the interface and the data, on the same GPU. That isn't built yet. It's the direction.
+    Further out, the bigger idea: AI models living in the same program as the interface and the data, on the same GPU. A speech model already runs in the app's process through PyTorch; models in Mojo beside the data are the direction.
   </aside>
 </section>
 

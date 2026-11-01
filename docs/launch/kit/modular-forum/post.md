@@ -23,18 +23,18 @@ The demo is a question: **why did the robot drop it?** *(drop line)* The data is
 
 What you're watching is **omxplorer**, a data app built on omxcode, in one Mojo codebase:
 
-- a fleet sheet of episodes, pivoted by lab;
+- a fleet sheet of episodes, pivoted by lab (a 994-episode sample, so the split reflects the sample, not the labs);
 - click a failure: its video plays next to the joint-velocity and gripper telemetry, on one time cursor;
 - ask in words; it writes the SQL, and `JOIN LINKED` follows the links I made between the sheet, the video and a document;
 - export a pack of the episode.
 
-**What Mojo made possible.** One language from the button to the kernel. The group-by behind a chart runs on the GPU, in the app's own process: 0.5–0.7 ms over 1M rows on an RTX 3090. There's no server and no JSON between the data and the window. On a Mac, the engine's queries run on Apple's GPU through Metal.
+**What Mojo made possible.** One language from the button to the kernel. The group-by behind a chart runs on the GPU, in the app's own process: 0.5–0.7 ms over 1M rows on an RTX 3090. There's no server and no JSON between the data and the window. On a Mac, the engine's GPU build runs its queries on Apple's GPU through Metal (checked on GitHub's virtual Macs, with answers equal to the CPU's and NVIDIA's; real Mac hardware and the GPU download are next).
 
-**It doesn't freeze.** `update()` and `view()` run on the UI thread and only decide. Queries, imports, video decoding and exports run as jobs on their own threads and come back as ordinary events. A watchdog (`MOJOUI_BUDGET_MS=16`) prints a `SLOW:` line for anything over budget. My checks run the video, 1M-row insert, query and export sessions with a 50 ms budget, and they print zero `SLOW:` lines.
+**The window doesn't freeze.** `update()` and `view()` run on the UI thread and only decide. Queries, imports, video decoding and exports run as jobs on their own threads and come back as ordinary events. A watchdog (`MOJOUI_BUDGET_MS=N`) prints a `SLOW:` line for anything over budget. My checks run the video, 1M-row insert, query and export sessions with a 50 ms budget (headless, CPU drawing), and they print zero `SLOW:` lines.
 
 **Agents use it without an API.** The same view tree that becomes GTK widgets becomes MCP tools. A button is a tool; a disabled button isn't.
 
-**Where it runs today:** Linux (GTK 4, NVIDIA GPU) and Mac (AppKit, Metal). Next: the web on WebGPU, then Android and iPhone, then SaaS apps. A full component collection by the end of the year.
+**Where it runs today:** Linux (GTK 4, NVIDIA GPU) and Mac (AppKit; the published download is the CPU build, the GPU build is checked on GitHub's virtual Macs). Next: the web on WebGPU, then Android and iPhone, then SaaS apps. A full component collection by the end of the year.
 
 **Where Mojo pushed back, in case it helps anyone:** FFI is scalars and `(pointer, length)` strings only. A run-time-indexed `SIMD` used as scratch space crashed the compiler (`stack_allocation` works). Phone targets need two runtime functions I stand in for with a small, labelled C shim; I'd love an official answer there.
 
@@ -53,5 +53,4 @@ Questions, and especially "you should have done X in Mojo", are very welcome.
 ---
 
 *Sources (not for posting): DROID S1/S2, chart time S4, watchdog S5, Mac S8/S9, agent S11, Mojo limits S15, in ../sources.md.
-"Mac (AppKit, Metal)" is true for the build on GitHub's virtual Macs (S9). If tonight's Mac recording is the CPU build,
-change that line to "Mac (AppKit; the GPU build runs on Apple's GPU through Metal)".*
+If you record the Mac GPU build on your MacBook, you may drop "checked on GitHub's virtual Macs" and say what the GPU line shows.*

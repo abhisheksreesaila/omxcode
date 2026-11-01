@@ -56,7 +56,7 @@ when presenting. Screenshots: `build/kit/shots/` (not committed).
 
 - The clip shows what the text says (sources.md, "claims that depend on tonight's build").
 - Links: until omxlabs.tech is live, use `abhisheksreesaila.github.io/omxcode`; afterwards, swap to `omxlabs.tech`.
-- If the Mac recording is the CPU build, use the alternate Mac lines noted under each file.
+- Mac lines say "checked on GitHub's virtual Macs". If you record the Metal build on your MacBook, you may replace that with what its GPU line shows.
 
 ## After the week
 

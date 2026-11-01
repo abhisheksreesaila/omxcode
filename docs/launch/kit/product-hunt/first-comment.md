@@ -9,15 +9,15 @@ The question that started it: why did the robot drop it? To answer that today yo
 
 So omxplorer puts them on one page. The demo uses DROID, real robot episodes from 13 labs (CC-BY-4.0):
 
-• open the fleet as a sheet and pivot success by lab
+• open the fleet as a sheet and pivot by lab (a 994-episode sample for now)
 • click a failure: its video plays beside the joint and gripper telemetry, on one time cursor
 • ask in words; it writes the SQL, and you can read exactly what it joined
-• the robot's datasheet is linked by key, so it's one click away
+• link the robot's datasheet to the episodes by key, so it's one click away
 • export the answer as a pack
 
 Three things I care about:
 1. It runs on your own GPU. The data work runs in the same process as the window: a chart over a million rows takes about 0.6 ms on an RTX 3090.
-2. It never freezes. Queries, imports, video and exports run on their own threads.
+2. The window keeps up. Queries, imports, video and exports run on their own threads, and a watchdog checks for slow frames.
 3. Agents can use it. Every button is an MCP tool, so Claude or any MCP agent can drive it without screenshots, and it can't do anything you couldn't.
 
 It's built on omxcode, my open-source framework in Mojo (MIT). Linux and Mac today; the web on WebGPU, Android and iPhone next.

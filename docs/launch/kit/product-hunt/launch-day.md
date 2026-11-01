@@ -17,7 +17,7 @@
 ```
 omxplorer is live on Product Hunt today.
 
-A spreadsheet, its video and its documents on one page, on your own GPU. Click a robot's failure and watch what happened next to its telemetry, on one cursor.
+A spreadsheet, its video and its documents on one page, on your own GPU. Click a robot's failure and its video plays next to its telemetry, on one cursor.
 
 Open source, built in Mojo. Feedback welcome: [PH link]
 ```

@@ -15,7 +15,7 @@ One app, written in Mojo, on the GPU. It's called omxplorer. 🧵
 ---
 **2/** · attach `[shot: fleet-pivot]`
 
-Open the fleet sheet. Pivot success by lab. Click a failure.
+Open the fleet sheet. Pivot by lab (a 994-episode sample for now). Click a failure.
 
 The video plays beside joint velocity and the gripper's position. Drag the cursor and all three move together.
 
@@ -38,7 +38,7 @@ The sheet, the video and the paper are joined by links I made on purpose, by key
 ---
 **5/** · attach `[clip: never-freeze]`
 
-It never freezes. Queries, imports, video decoding and exports run on their own threads; the answer comes back as an event.
+The window doesn't freeze. Queries, imports, video decoding and exports run on their own threads; the answer comes back as an event.
 
 A watchdog prints a line for anything over budget. My checks run video, query and export sessions at 50 ms: zero lines.
 

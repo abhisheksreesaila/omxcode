@@ -3,11 +3,11 @@
 **Length:** about 4 min · **Record:** the editor, the Linux machine, the MacBook · **Post:** Wed Nov 4
 
 ## Titles (≤ 60 characters)
-1. One Mojo codebase, two GPUs: Linux and Mac, native
+1. One Mojo codebase, native on Linux and Mac
 2. From button to GPU kernel in one language
 3. Native Linux and Mac apps in Mojo, no web view
 
-**Thumbnail:** `[shot: mac-linux]`; big text **ONE FILE. TWO GPUS.**; small: `NVIDIA · Apple`.
+**Thumbnail:** `[shot: mac-linux]`; big text **ONE CODEBASE. LINUX + MAC.**; small: `GTK · AppKit · GPU`.
 
 ## Script
 
@@ -19,14 +19,14 @@
 | 1:15 | The same app on the Mac | "On the Mac it becomes AppKit. Not a web view, not an imitation. Mojo calls C and Objective-C directly." |
 | 1:45 | omxplorer's group-by kernel next to the sheet code | "Now the part I care about. The code that sums a million rows is Mojo too, in the same codebase, running on the GPU in the same process as the window." |
 | 2:15 | `[clip: linux-run]`, GPU line reading RTX 3090 | "On Linux: a chart over a million rows in about 0.6 milliseconds on an RTX 3090." |
-| 2:40 | `[clip: mac-run]` | "On the Mac the same engine code runs on Apple's GPU through Metal. I've checked the answers match the CPU and NVIDIA. Speed on real Mac hardware is what I'm measuring next." *(If you recorded on your MacBook with the Metal build, say what the GPU line shows.)* |
+| 2:40 | `[clip: mac-run]` | "On the Mac, the GPU build runs the same engine code on Apple's GPU through Metal. I've checked it on GitHub's virtual Macs, and the answers match the CPU and NVIDIA. Speed on real Mac hardware is what I'm measuring next, and the download is the CPU build until then." *(If you recorded on your MacBook with the Metal build, say what the GPU line shows.)* |
 | 3:10 | README "Where it stands" table | "Where it runs today: Linux and Mac. The browser through a server today, on WebGPU next. Android's classic controls run on the emulator; iPhone builds. Those are next." |
 | 3:40 | Repo | "It's a public alpha, MIT. Clone it, run scripts/omxplorer.sh, and tell me where it breaks." |
 
 ## Description
 
 ```
-One Mojo codebase, native on Linux (GTK 4) and Mac (AppKit), with the data engine on the GPU: NVIDIA on Linux, Apple's GPU through Metal on the Mac. omxcode is a UI framework where the button and the GPU kernel are written in the same language and run in the same process.
+One Mojo codebase, native on Linux (GTK 4) and Mac (AppKit), with the data engine on the GPU: NVIDIA on Linux; on the Mac, the GPU build runs on Apple's GPU through Metal (checked on GitHub's virtual Macs; real hardware next). omxcode is a UI framework where the button and the GPU kernel are written in the same language and run in the same process.
 
 Code: https://github.com/abhisheksreesaila/omxcode
 Where it stands (generated from the code): https://github.com/abhisheksreesaila/omxcode/blob/main/docs/components.md
@@ -39,7 +39,7 @@ Chapters
 1:15 Mac: AppKit
 1:45 The GPU code, same codebase
 2:15 1M rows on NVIDIA
-2:40 Apple's GPU through Metal
+2:40 The Mac's GPU build
 3:10 Where it runs
 3:40 Try it
 ```
