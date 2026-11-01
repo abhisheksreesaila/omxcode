@@ -3,120 +3,68 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>omxcode · the agent-native app framework for Mojo</title>
-<meta name="description" content="Write an app once, in Mojo. It runs natively on Linux, the web, the Mac and Android, builds for iPhone, computes on an NVIDIA GPU, and AI agents can use it. Public alpha, MIT.">
-<meta property="og:title" content="omxcode: one Mojo file. Every screen. The GPU underneath. Agents built in.">
-<meta property="og:description" content="Native apps on Linux, the web and Android from one Mojo file, the GPU in the same language, and agent tools built in. Public alpha, MIT.">
-<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/readme-report.jpg">
+<title>omxcode · one framework for every app, starting with data apps</title>
+<meta name="description" content="omxcode is one Mojo framework for every app, starting with data apps: GPU tables, charts, video and documents, native on Linux and the Mac, the window never waits, and every app is an MCP tool server. Public alpha, MIT.">
+<meta property="og:title" content="omxcode: one framework for every app. Starting with data apps.">
+<meta property="og:description" content="Write it once in Mojo as view() and update(). Native screens, the GPU underneath, the window never waits, agent tools built in. Public alpha, MIT.">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/clip-claims.jpg">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="img/logo.svg" type="image/svg+xml">
-<!-- omxqua v0.1.2 (docs/omxqua/VERSION): fonts, tokens, parts. site.css is the landing layer the three pages share. -->
+<!-- omxqua v0.1.2 (docs/omxqua/VERSION): fonts, tokens, parts. site.css is the landing layer the site's pages share; the cover's own sizes are below. -->
 <link rel="stylesheet" href="omxqua/src/fonts.css">
 <link rel="stylesheet" href="omxqua/src/tokens.css">
 <link rel="stylesheet" href="omxqua/src/components.css">
 <link rel="stylesheet" href="site.css">
 <style>
-/* ---- hero: app.mojo pushes to every platform; a pulse rides each wire, the tile lights as it lands ---- */
-.iso .flow { fill: none; stroke: var(--word); stroke-width: 4; stroke-linecap: round; stroke-dasharray: .1 2; stroke-dashoffset: .1; filter: drop-shadow(0 0 4px var(--word)); }
-.iso .plate.send .pl.tp { animation: send .7s var(--ease); }
-.iso .tile.hit .tp { animation: hit 1.1s var(--ease); }
-@keyframes send { 40% { fill: color-mix(in srgb, var(--word) 40%, var(--oq-surface-2)); } }
-@keyframes hit { 25% { fill: color-mix(in srgb, var(--word) 45%, var(--oq-surface-3)); } }
-/* ---- why omxcode exists: four reasons as tiles, the one it shouldn't take on below them, quieter ---- */
-.why4 .bt h3 { font-size: 25px; }
-.why4 .kick .badge { margin: -4px 0 -4px 6px; vertical-align: 1px; letter-spacing: .04em; }
-.why4 .bt p a { color: var(--word); text-decoration: none; box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--word) 45%, transparent); }
-.why4 .bt.not { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
-.why4 .bt.not .kick { color: var(--ink2); }
-.why4 .bt.not > p { max-width: 900px; }
-/* ---- browser-style frames around real screenshots ---- */
+/* ---- the cover's scale: calmer than the other pages (owner 2026-10-31: "smaller title and CTA") ---- */
+:root { --h2: clamp(30px, 3.6vw, 46px); --lede: clamp(17px, 1.6vw, 20px); }
+section { padding: 96px 24px; }
+.head { max-width: 780px; }
+.lede { max-width: 680px; }
+.cta { height: 44px; padding: 0 22px; font-size: 15.5px; }
+.more { font-size: 15.5px; }
+.badge.big { font-size: 11.5px; padding: 5px 9px; }
+
+/* ---- hero: the words left, the live product right; a strip of measured numbers under both ---- */
+.hero { padding: 64px 24px 40px; }
+.hero .wrap:not(.hrow) { display: block; text-align: left; }
+.hero .hrow { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 44px; align-items: center; }
+.hero .hrow > * { min-width: 0; }
+.hero h1 { font-size: clamp(32px, 3.5vw, 48px); line-height: 1.02; letter-spacing: -.045em; margin-top: 16px; }
+.hero h1 .two { display: block; }
+.hero .lede { margin-top: 18px; max-width: 520px; color: var(--ink2); }
+.hero .lede b { color: var(--ink); }
+.hero .ctas { justify-content: flex-start; margin-top: 26px; gap: 18px; }
+.plats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 24px; }
+.plats span { display: inline-flex; align-items: center; gap: 6px; font: 500 12px var(--mono); color: var(--ink2); padding: 5px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); }
+.plats i { width: 7px; height: 7px; border-radius: 50%; background: var(--oq-ok); } .plats .bl i { background: var(--oq-info); } .plats .am i { background: var(--soon); }
+.plats b { color: var(--ink); font-weight: 600; font-family: var(--sans); }
+/* a browser-style frame around a real clip or screenshot */
 .bframe { margin: 0; border-radius: 18px; overflow: hidden; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-3), 0 0 0 1px var(--line); }
-.bframe .bar { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-bottom: 1px solid var(--oq-line-2); }
+.bframe .bar { display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 14px; border-bottom: 1px solid var(--oq-line-2); }
 .bframe .bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--oq-surface-3); flex: none; }
-.bframe .bar span { flex: 1; margin: 0 28px 0 12px; height: 20px; border-radius: 999px; background: var(--oq-surface-2); font: 11.5px/20px var(--mono); color: var(--ink2); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; }
-.bframe img { display: block; width: 100%; height: auto; }
-.bcap { font: 13px var(--mono); color: var(--ink2); margin-top: 12px; } .bcap b { color: var(--ink); font: 600 15px var(--sans); margin-right: 6px; }
-.local { margin: 28px 0 0; max-width: 820px; font: 16px/1.55 var(--sans); color: var(--ink2); } .local b { color: var(--ink); font-weight: 600; }
-/* ---- 2 · everything in the same program: two lanes, the slow trip and the short one ---- */
-.lanes { display: grid; gap: 16px; margin-top: 56px; }
-.lane { border-radius: 24px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px 24px 18px; display: grid; grid-template-columns: 150px 1fr; gap: 24px; align-items: center; }
-.lane .tag { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
-.lane .tag small { display: block; font: 500 15px/1.35 var(--sans); letter-spacing: -.01em; text-transform: none; color: var(--ink); margin-top: 6px; }
-.lane.pain .tag { color: var(--oq-bad); } .lane.fix .tag { color: var(--oq-ok); }
-.track { position: relative; height: 96px; }
-.node { position: absolute; top: 18px; height: 60px; border-radius: 14px; background: var(--oq-surface-2); box-shadow: 0 0 0 1px var(--line); display: grid; place-content: center; text-align: center; font: 600 14px var(--sans); }
-.node small { display: block; font: 500 11.5px var(--mono); color: var(--ink2); margin-top: 2px; }
-.pain .n1 { left: 0; width: 23%; } .pain .n2 { left: 38.5%; width: 23%; background: none; box-shadow: none; border: 1.5px dashed var(--line); color: var(--ink2); } .pain .n3 { right: 0; width: 23%; }
-.pain .wire { position: absolute; top: 47px; height: 2px; background: var(--line); } .pain .w1 { left: 23%; width: 15.5%; } .pain .w2 { left: 61.5%; width: 15.5%; }
-.pkt { position: absolute; top: 40px; width: 16px; height: 16px; border-radius: 50%; background: var(--oq-bad); box-shadow: 0 0 14px var(--oq-bad); left: 11%; opacity: 0; }
-.pkt span { position: absolute; top: -38px; left: 50%; transform: translateX(-50%); font: 500 11px var(--mono); color: var(--ink2); white-space: nowrap; }
-.wait { position: absolute; left: 0; width: 23%; bottom: -4px; text-align: center; font: 11.5px var(--mono); color: var(--oq-bad); opacity: 0; transition: opacity .3s; }
-.wait.on { opacity: 1; }
-.box { position: absolute; inset: 6px 0; border-radius: 18px; border: 1.5px solid color-mix(in srgb, var(--oq-ok) 55%, transparent); background: color-mix(in srgb, var(--oq-ok) 6%, transparent); }
-.box > em { position: absolute; top: -10px; left: 16px; padding: 0 8px; background: var(--oq-surface-1); font: 500 11.5px var(--mono); color: var(--oq-ok); font-style: normal; }
-.fix .node { top: 20px; height: 52px; width: 29%; }
-.fix .n1 { left: 2.5%; } .fix .n2 { left: 35.5%; } .fix .n3 { left: 68.5%; }
-.fix .node { transition: box-shadow .5s, background .5s; }
-.fix.lit .node { background: color-mix(in srgb, var(--oq-ok) 14%, var(--oq-surface-2)); box-shadow: 0 0 0 1.5px var(--oq-ok), 0 0 22px color-mix(in srgb, var(--oq-ok) 30%, transparent); }
-.fix .node.later { background: transparent; box-shadow: none; outline: 1.5px dashed color-mix(in srgb, var(--soon) 70%, transparent); outline-offset: -1.5px; } .fix .node.later small { color: var(--soon); }
-.fix.lit .node.later { background: color-mix(in srgb, var(--soon) 10%, transparent); box-shadow: 0 0 22px color-mix(in srgb, var(--soon) 25%, transparent); }
-.fix .done { position: absolute; right: 2.5%; bottom: -4px; font: 11.5px var(--mono); color: var(--oq-ok); opacity: 0; transition: opacity .4s; }
-.fix.lit .done { opacity: 1; }
-.tally { grid-column: 2; font: 13px var(--mono); color: var(--ink2); margin-top: -6px; }
-.tally b { color: var(--ink); font-weight: 500; }
-/* ---- 4 · apps ---- */
-.apps { margin-top: 56px; }
-.appcard { display: grid; grid-template-columns: 1.5fr 1fr; align-items: center; text-decoration: none; border-radius: 28px; overflow: hidden; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); transition: box-shadow .25s, transform .25s; }
-.appcard:hover { box-shadow: 0 0 0 1px var(--line), var(--oq-shadow-3); transform: translateY(-2px); }
-.appcard img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: top left; border-right: 1px solid var(--oq-line-2); height: 100%; }
-.appcard .txt { padding: 28px 30px; }
-.appcard h3 { font: 700 30px/1.1 var(--display); letter-spacing: -.03em; display: flex; gap: 12px; align-items: center; }
-.appcard p { color: var(--ink2); margin: 10px 0 0; font-size: 17px; }
-.tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-.tags span { font: 500 12px var(--mono); color: var(--ink2); padding: 5px 9px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line); }
-.appcard .go { display: inline-block; margin-top: 18px; font: 600 16px var(--sans); }
-.appcard .go::after { content: " ›"; }
-.apps.minor { margin-top: 16px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.apps.minor .appcard { grid-template-columns: 1fr; align-items: stretch; align-content: start; }
-.apps.minor .appcard img { aspect-ratio: 16 / 10; height: auto; border-right: 0; border-bottom: 1px solid var(--oq-line-2); }
-.apps.minor .appcard .txt { padding: 20px 22px 22px; } .apps.minor .appcard h3 { font-size: 22px; flex-wrap: wrap; gap: 8px 10px; }
-.apps.minor .appcard p { font-size: 15px; } .apps.minor .tags { margin-top: 12px; } .apps.minor .appcard .go { margin-top: 14px; font-size: 15px; }
-/* ---- downloads ---- */
-.dls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 48px; text-align: left; }
-.dl { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
-.dl h3 { display: flex; align-items: center; gap: 10px; }
-.dl p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
-.dl .cta { align-self: flex-start; height: 44px; font-size: 15px; padding: 0 20px; }
-.dl pre { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); font: 12.5px/1.7 var(--mono); color: var(--ink); overflow-x: auto; }
-.dl .fine2 { font: 12px/1.6 var(--mono); color: var(--ink2); margin-top: auto; } .dl .fine2 code { color: var(--ink); }
-.dl { min-width: 0; } .dl .fine2 code { overflow-wrap: anywhere; } .dl pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.dl .cp2 { align-self: flex-start; border: 0; cursor: pointer; background: rgb(var(--oq-state) / .08); color: var(--ink2); font: 500 12px var(--mono); height: 32px; padding: 0 14px; border-radius: 999px; }
-.dl .cp2:hover { color: var(--ink); }
-@media (max-width: 860px) { .dls { grid-template-columns: 1fr; } }
+.bframe .bar span { flex: 1; margin: 0 28px 0 12px; height: 20px; border-radius: 999px; background: var(--oq-surface-2); font: 11px/20px var(--mono); color: var(--ink2); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; }
+.bframe video, .bframe img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; object-position: top left; background: var(--oq-surface-2); }
+.hcap { font: 12.5px/1.5 var(--mono); color: var(--ink2); margin-top: 12px; }
+.hcap b { color: var(--ink); font: 600 14px var(--sans); margin-right: 4px; }
+/* proof strip: four numbers, each with the line it came from */
+.proofs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 48px; }
+.pf { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 6px; }
+.pf b { font: 800 34px/1 var(--display); letter-spacing: -.04em; color: var(--word); font-variant-numeric: tabular-nums; }
+.pf b small { font: 600 14px var(--sans); letter-spacing: 0; color: var(--ink2); margin-left: 4px; }
+.pf span { font-size: 14.5px; line-height: 1.4; color: var(--ink); }
+.pf em { font: 11.5px/1.45 var(--mono); font-style: normal; color: var(--ink2); margin-top: auto; padding-top: 6px; }
 
-/* ---- 2 · the agent chapter: the bento and code cards live in site.css (why.html shares them); the tiles' own scenes are below ---- */
-
-/* tile · button to GPU kernel: a rail in the gutter carries the tap from the button to the kernel; the real result lands */
-#t-gpu .code { padding-left: 38px; } #t-gpu .nar { display: none; }
-#t-gpu .rail { position: absolute; left: 17px; width: 2px; border-radius: 2px; background: var(--oq-line); }
-#t-gpu .rail i { position: absolute; left: 0; top: 0; width: 100%; height: 0; border-radius: 2px; background: var(--word); box-shadow: 0 0 8px var(--word); transition: height .55s cubic-bezier(.45,0,.3,1); }
-#t-gpu .stop { position: absolute; left: 13px; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--bg); box-shadow: 0 0 0 2px var(--oq-line); transition: box-shadow .3s, background .3s, transform var(--oq-spring-fast-dur) var(--oq-island-spring); }
-#t-gpu .stop.lit { background: var(--word); box-shadow: 0 0 0 2px var(--word), 0 0 12px var(--word); transform: scale(1.15); }
-#t-gpu .out { position: absolute; right: 40px; bottom: 70px; width: 136px; margin: 0; border-radius: 12px; overflow: hidden; background: var(--oq-surface-2); box-shadow: var(--oq-shadow-3), 0 0 0 1px var(--line);
-  opacity: 0; transform: translateY(14px) scale(.92); transform-origin: 100% 100%; transition: opacity .35s var(--ease), transform var(--oq-spring-dur) var(--oq-island-spring); }
-#t-gpu .out.on { opacity: 1; transform: none; }
-#t-gpu .out .crop { position: relative; aspect-ratio: 3 / 2; overflow: hidden; }
-#t-gpu .out img { position: absolute; display: block; width: 217%; max-width: none; left: -58.75%; top: -70%; }
-#t-gpu .out figcaption { font: 500 10.5px/1.4 var(--mono); color: var(--ink2); padding: 6px 8px; white-space: normal; }
-#t-gpu .out figcaption b { color: var(--oq-ok); font-weight: 600; }
-
-/* tile · little design space: tap → update() → view(), the count rolls */
+/* ---- vision: what's true today, four tiles (the bento and code cards are site.css's) ---- */
+.bento { margin-top: 40px; }
+.bt h3 { font-size: 23px; }
+.bt.w6 { grid-column: span 6; }
 #t-two .pair { display: grid; gap: 8px; }
 #t-two .code { font-size: 12px; padding: 10px 14px; transition: box-shadow .35s var(--ease); }
 #t-two .code.lit { box-shadow: inset 0 0 0 1.5px var(--word); }
 #t-two .code em { position: absolute; top: 8px; right: 10px; font: 600 10.5px var(--mono); font-style: normal; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
 #t-two .run { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
-#t-two .tap { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 18px; border-radius: 999px; background: var(--oq-accent); color: var(--oq-on-accent); font: 600 14px var(--sans); box-shadow: var(--oq-shadow-1);
+#t-two .tap { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 20px; border-radius: 999px; background: var(--oq-accent); color: var(--oq-on-accent); font: 600 14px var(--sans); box-shadow: var(--oq-shadow-1);
   transition: transform var(--oq-spring-fast-dur) var(--oq-island-spring), box-shadow .2s; }
 #t-two .tap:hover { box-shadow: var(--oq-shadow-2); transform: translateY(-1px); }
 #t-two .tap.press, #t-two .tap:active { transform: scale(.96); }
@@ -126,10 +74,8 @@
 @keyframes roll { from { transform: translateY(.7em); opacity: 0; } }
 #t-two .steps { font: 12px var(--mono); color: var(--ink2); display: flex; gap: 6px; flex-wrap: wrap; }
 #t-two .steps span { transition: color .3s; } #t-two .steps span.lit { color: var(--word); }
-
-/* tile · agents use apps: each control becomes a named tool; a call answers in words, cheaper than a screenshot */
-#t-use .tools { display: grid; gap: 8px; }
-#t-use .tools > span { display: grid; grid-template-columns: 104px 22px 1fr; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 14px; background: var(--oq-surface-2);
+#t-use .tools { display: grid; gap: 7px; }
+#t-use .tools > span { display: grid; grid-template-columns: 104px 22px 1fr; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 14px; background: var(--oq-surface-2);
   opacity: 0; transform: translateX(-16px); transition: opacity .35s var(--ease), transform var(--oq-spring-dur) var(--oq-island-spring); }
 #t-use .tools > span.on { opacity: 1; transform: none; }
 #t-use .ui { font: 600 13.5px var(--sans); font-style: normal; padding: 5px 12px; border-radius: 999px; background: var(--oq-accent); color: var(--oq-on-accent); justify-self: start; white-space: nowrap; }
@@ -140,130 +86,287 @@
 #t-use .tools .no code { color: var(--ink2); text-decoration: line-through; }
 #t-use .cost { display: grid; gap: 6px; font: 12px var(--mono); color: var(--ink2); margin-top: 4px; }
 #t-use .cost i { height: 8px; border-radius: 4px; width: 0; transition: width .9s var(--oq-island-spring); }
-#t-use .cost .a i { background: var(--oq-ok); } #t-use .cost .b i { background: var(--oq-bad); }
+#t-use .cost .a i { background: var(--oq-ok); } #t-use .cost .b i { background: var(--ink2); }
 #t-use .cost.on .a i { width: 40%; } #t-use .cost.on .b i { width: 100%; }
 #t-use .cost > span { display: grid; grid-template-columns: 92px 1fr 54px; gap: 10px; align-items: center; } #t-use .cost em { font-style: normal; } #t-use .cost em + i + em { text-align: right; color: var(--ink); }
-
-/* tile · agents build screens: you ask; the agent's reply is UI as data, checked, then it becomes the native card */
-#t-build { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 22px; align-items: stretch; }
-#t-build .txt { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-#t-build .stage2 { position: relative; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
-#t-build .ask { align-self: flex-end; max-width: 92%; padding: 9px 14px; border-radius: 18px 18px 6px 18px; background: var(--oq-accent); color: var(--oq-on-accent); font: 600 14px var(--sans);
+#t-build .stage2 { position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 250px; justify-content: center; }
+#t-build .ask { align-self: flex-end; max-width: 92%; padding: 8px 14px; border-radius: 18px 18px 6px 18px; background: var(--oq-accent); color: var(--oq-on-accent); font: 600 14px var(--sans);
   opacity: 0; transform: translateY(8px) scale(.96); transform-origin: 100% 100%; transition: opacity .3s, transform var(--oq-spring-dur) var(--oq-island-spring); }
 #t-build .ask.on { opacity: 1; transform: none; }
-#t-build .json { position: absolute; left: 0; right: 0; top: 50%; margin-top: -60px; font-size: 11.5px; line-height: 1.65; padding: 12px 14px;
-  opacity: 0; transform: translateY(10px); transition: opacity .3s var(--ease), transform var(--oq-spring-dur) var(--oq-island-spring); transform-origin: 50% 30%; }
-#t-build .json.on { opacity: 1; transform: none; }
-#t-build .json.gone { opacity: 0; transform: scale(.9); }
-#t-build .json .ln { opacity: .25; transition: opacity .25s, background .35s, color .35s; } #t-build .json .ln.on { opacity: 1; }
-#t-build .ok { position: static; align-self: flex-start; font: 600 11.5px var(--mono); color: var(--oq-ok); padding: 5px 10px; border-radius: 999px; background: color-mix(in srgb, var(--oq-ok) 14%, var(--oq-surface-1));
+#t-build .json { position: absolute; left: 0; right: 0; top: 50%; margin-top: -54px; font-size: 11.5px; line-height: 1.65; padding: 12px 14px;
+  opacity: 0; transform: translateY(10px); transition: opacity .3s var(--ease), transform var(--oq-spring-dur) var(--oq-island-spring); }
+#t-build .json.on { opacity: 1; transform: none; } #t-build .json.gone { opacity: 0; transform: scale(.94); }
+#t-build .json .ln { opacity: .25; transition: opacity .25s; } #t-build .json .ln.on { opacity: 1; }
+#t-build .ok { align-self: flex-start; font: 600 11.5px var(--mono); color: var(--oq-ok); padding: 5px 10px; border-radius: 999px; background: color-mix(in srgb, var(--oq-ok) 14%, var(--oq-surface-1));
   transform: translateY(8px) scale(.8); opacity: 0; transition: opacity .3s, transform var(--oq-spring-dur) var(--oq-island-spring); z-index: 2; }
 #t-build .ok.on { opacity: 1; transform: none; }
-#t-build .shot { position: relative; margin: 0; opacity: 0; transform: translateY(16px) scale(.94); transform-origin: 50% 0;
-  transition: opacity .4s var(--ease), transform var(--oq-spring-slow-dur) var(--oq-island-spring); }
+#t-build .shot { opacity: 0; transform: translateY(14px); transition: opacity .4s var(--ease), transform var(--oq-spring-slow-dur) var(--oq-island-spring); }
 #t-build .shot.on { opacity: 1; transform: none; }
-#t-build .shot .bar span { margin-right: 12px; }
-#t-build .crop { position: relative; aspect-ratio: 588 / 510; overflow: hidden; background: #eeeef1; }
-#t-build .crop img { position: absolute; width: 153.06%; max-width: none; left: -2.38%; top: -26.47%; }
+#t-build .crop { position: relative; aspect-ratio: 588 / 300; overflow: hidden; background: #eeeef1; }
+#t-build .crop img { position: absolute; width: 153.06%; max-width: none; left: -2.38%; top: -26.47%; aspect-ratio: auto; height: auto; }
+/* tile · never blocks: frames keep ticking while a job's bar fills */
+#t-ui .frames { display: grid; grid-template-columns: repeat(30, 1fr); gap: 3px; height: 34px; align-items: end; }
+#t-ui .frames i { display: block; height: 100%; border-radius: 3px; background: color-mix(in srgb, var(--oq-ok) 30%, var(--oq-surface-2)); transition: background .2s; }
+#t-ui .frames i.on { background: var(--oq-ok); }
+#t-ui .lane2 { display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: center; font: 12px var(--mono); color: var(--ink2); }
+#t-ui .job { height: 12px; border-radius: 6px; background: var(--oq-surface-2); overflow: hidden; }
+#t-ui .job i { display: block; height: 100%; width: 0; background: var(--soon); border-radius: 6px; }
+#t-ui .lanes2 { display: grid; gap: 10px; margin-top: 4px; }
 
-/* tile · every screen, natively: the same app pops onto four platforms */
-#t-plat { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 28px; align-items: center; }
-#t-plat .txt { display: flex; flex-direction: column; gap: 12px; }
-#t-plat .devs { display: grid; grid-template-columns: 1fr 1fr 1fr .42fr; gap: 12px; align-items: end; }
-#t-plat figure { margin: 0; opacity: 0; transform: translateY(18px) scale(.94); transition: opacity .35s var(--ease), transform var(--oq-spring-dur) var(--oq-island-spring); }
-#t-plat figure.on { opacity: 1; transform: none; }
-#t-plat .scr { border-radius: 10px; overflow: hidden; background: var(--oq-surface-2); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); }
-#t-plat .scr img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; }
-#t-plat .phone .scr { border-radius: 14px; } #t-plat .phone .scr img { aspect-ratio: 9 / 14; object-position: 50% 0; }
-#t-plat figcaption { font: 12px var(--mono); color: var(--ink2); margin-top: 8px; } #t-plat figcaption b { color: var(--ink); font: 600 13.5px var(--sans); margin-right: 5px; display: block; }
+/* ---- why: four reasons as tiles, where to start below them, quieter ---- */
+.why4 .bt h3 { font-size: 21px; }
+.why4 .bt p a { color: var(--word); text-decoration: none; box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--word) 45%, transparent); }
+.why4 .bt.not { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+.why4 .bt.not .kick { color: var(--ink2); }
+.why4 .bt.not > p { max-width: 900px; }
 
-.bento-after { display: grid; grid-template-columns: 1fr; gap: 6px; margin-top: 26px; }
-.bento-after .local { margin: 0; }
+/* ---- roadmap: five stops on one line; on a phone they swipe, the next one peeking ---- */
+.road { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 44px; }
+.road::before { content: ""; position: absolute; left: 10px; right: 10px; top: 9px; height: 2px; background: linear-gradient(90deg, var(--oq-ok) 0 20%, var(--line) 20%); }
+.stop { position: relative; padding-top: 30px; display: flex; flex-direction: column; min-width: 0; }
+.stop::before { content: ""; position: absolute; top: 3px; left: 4px; width: 14px; height: 14px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 2px var(--line); }
+.stop.now::before { background: var(--oq-ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--oq-ok) 25%, transparent); }
+.stop .when { font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink2); }
+.stop.now .when { color: var(--oq-ok); }
+.scard { text-decoration: none; color: inherit; margin-top: 10px; flex: 1; border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); overflow: hidden; display: flex; flex-direction: column;
+  transition: transform var(--oq-spring-fast-dur) var(--oq-island-spring), box-shadow .2s; }
+.scard:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px var(--line), var(--oq-shadow-2); }
+.now .scard { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--oq-ok) 55%, transparent); }
+.scard .shot { aspect-ratio: 16 / 10; background: var(--oq-surface-2); overflow: hidden; border-bottom: 1px solid var(--oq-line-2); }
+.scard .shot img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.scard .shot.phone img { object-position: 50% 30%; }
+.scard .shot.chips { display: grid; place-content: center; gap: 8px; padding: 16px; }
+.scard .shot.chips.row { grid-template-columns: 1fr 1fr; }
+.scard .shot.chips span { font: 600 13px var(--sans); padding: 7px 14px; border-radius: 999px; background: var(--oq-surface-1); box-shadow: inset 0 0 0 1px var(--line); text-align: center; color: var(--ink); }
+.scard .shot.meter { display: grid; align-content: center; gap: 8px; padding: 16px 18px; }
+.scard .shot.meter div { display: grid; grid-template-columns: 58px 1fr; gap: 8px; align-items: center; font: 11px var(--mono); color: var(--ink2); }
+.scard .shot.meter s { display: block; height: 6px; border-radius: 3px; background: var(--oq-surface-3); overflow: hidden; text-decoration: none; }
+.scard .shot.meter s i { display: block; height: 100%; background: var(--oq-ok); }
+.scard .tx { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.scard h3 { font-size: 17.5px; } .scard p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink2); }
+.scard .badge { align-self: flex-start; margin-top: auto; }
+.teasers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+.teaser { color: inherit; display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: center; border-radius: 20px; padding: 12px 18px 12px 12px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); text-decoration: none; }
+.teaser img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: top left; border-radius: 12px; display: block; }
+.teaser .q { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.teaser h3 { font-size: 17px; margin-top: 4px; } .teaser p { margin: 6px 0 0; font-size: 14px; line-height: 1.45; color: var(--ink2); }
 
-/* ---- 5 · for developers: a strip of small tiles, each linking out ---- */
-.devstrip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 44px; }
-.dt { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 10px; text-decoration: none; min-width: 0;
-  transition: box-shadow .25s var(--ease), transform var(--oq-spring-fast-dur) var(--oq-island-spring); }
-.dt:hover { box-shadow: 0 0 0 1px var(--line), var(--oq-shadow-2); transform: translateY(-2px); }
-.dt:active { transform: scale(.98); }
-.dt .vis { height: 92px; border-radius: 12px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); overflow: hidden; position: relative; display: grid; place-items: center; }
-.dt .vis img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
-.dt .vis .big { font: 800 52px/1 var(--display); letter-spacing: -.05em; }
-.dt .vis .big small { font: 500 12px var(--mono); letter-spacing: 0; color: var(--ink2); margin-left: 6px; }
-.dt .vis .fan { position: absolute; inset: 0; }
-.dt .vis .fan img { position: absolute; width: 58%; height: auto; top: 16px; border-radius: 8px; box-shadow: var(--oq-shadow-2); transition: transform var(--oq-spring-dur) var(--oq-island-spring); }
-.dt .vis .fan img:nth-child(1) { left: 4%; transform: rotate(-6deg); } .dt .vis .fan img:nth-child(2) { left: 21%; top: 10px; z-index: 1; } .dt .vis .fan img:nth-child(3) { left: 38%; transform: rotate(6deg); }
-.dt:hover .vis .fan img:nth-child(1) { transform: rotate(-9deg) translateX(-6px); } .dt:hover .vis .fan img:nth-child(3) { transform: rotate(9deg) translateX(6px); }
-.dt .vis .flow { font: 600 12px var(--mono); color: var(--ink2); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; padding: 0 10px; }
-.dt .vis .flow span { padding: 4px 8px; border-radius: 8px; background: var(--oq-surface-2); color: var(--ink); }
-.dt h3 { font-size: 17px; } .dt p { margin: 0; font: 14px/1.5 var(--sans); color: var(--ink2); }
-.dt .go { margin-top: auto; font: 600 14px var(--sans); color: var(--ink); } .dt .go::after { content: " ›"; }
-#dev h2 { font-size: clamp(36px, 4.6vw, 60px); }
-.devnote { margin: 22px 0 0; font: 15px/1.55 var(--sans); color: var(--ink2); } .devnote b { color: var(--ink); font-weight: 600; }
+/* ---- gallery: one lead slot, then real clips and screens ---- */
+.gal { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; margin-top: 40px; }
+.gi { grid-column: span 4; margin: 0; border-radius: 18px; overflow: hidden; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); display: flex; flex-direction: column; min-width: 0; }
+.gi.w6 { grid-column: span 6; } .gi.w8 { grid-column: span 8; }
+.gi .m { aspect-ratio: 16 / 10; background: var(--oq-surface-2); overflow: hidden; } .gi.w6 .m, .gi.w8 .m { aspect-ratio: 16 / 9; }
+.gi .m img, .gi .m video { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.gi figcaption { padding: 12px 14px 14px; display: grid; gap: 4px; font-size: 14px; line-height: 1.4; color: var(--ink2); }
+.gi figcaption b { color: var(--ink); font-weight: 600; font-size: 15px; }
+.gi figcaption small { font: 11.5px var(--mono); color: var(--ink2); }
+.slot { grid-column: span 4; border-radius: 18px; border: 1.5px dashed color-mix(in srgb, var(--soon) 60%, transparent); background: color-mix(in srgb, var(--soon) 5%, transparent);
+  display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 24px; }
+.slot .badge { align-self: flex-start; }
+.slot h3 { font-size: 21px; line-height: 1.2; } .slot p { margin: 0; font-size: 14.5px; color: var(--ink2); line-height: 1.5; }
 
-@media (max-width: 860px) {
-  .bento { grid-template-columns: 1fr; margin-top: 36px; } .bt, .bt.w7, .bt.w5, .bt.w12 { grid-column: auto; }
-  .bt { padding: 20px 18px 22px; border-radius: 24px; } .bt h3 { font-size: 24px; }
-  .code { font-size: 10px; } #t-two .code, #t-build .json { font-size: 10px; } #t-gpu .code { padding-left: 25px; padding-right: 6px; margin: 0 -10px; } #t-gpu .nar { display: inline; } #t-gpu .rail { left: 11px; } #t-gpu .stop { left: 7px; }
-  #t-gpu .out { position: relative; right: auto; bottom: auto; width: 100%; margin-top: 4px; transform-origin: 50% 0; } #t-gpu .out .crop { aspect-ratio: 16 / 7; } #t-gpu .out img { top: -133%; }
-  #t-build, #t-plat { grid-template-columns: 1fr; } 
-  #t-plat .devs { grid-template-columns: 1fr 1fr; } #t-plat .phone .scr img { aspect-ratio: 16 / 10; object-position: 50% 28%; }
-  #t-use .tools > span { grid-template-columns: 92px 18px 1fr; }
-  .devstrip { grid-template-columns: 1fr 1fr; }
+/* ---- how it works: the isometric diagrams, one at a time, switched by a segmented control ---- */
+.isoframe { margin-top: 36px; border-radius: 24px; overflow: hidden; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); }
+.isoframe .bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--oq-line-2); flex-wrap: wrap; }
+.isoframe .bar .sp { flex: 1; } .isoframe .bar a { font: 500 13px var(--mono); color: var(--ink2); text-decoration: none; } .isoframe .bar a:hover { color: var(--ink); }
+.isoframe iframe { display: block; width: 100%; height: 620px; border: 0; background: #14161b; }
+.isocap { font: 12.5px/1.5 var(--mono); color: var(--ink2); padding: 12px 16px; border-top: 1px solid var(--oq-line-2); }
+
+/* ---- components: the generated summary (scripts/site_components.py writes the markup) ---- */
+.compsum { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 16px; margin-top: 40px; }
+.cs-left { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
+.cs-left .big { font: 800 56px/1 var(--display); letter-spacing: -.05em; } .cs-left .big small { font: 500 13px var(--mono); letter-spacing: 0; color: var(--ink2); margin-left: 8px; }
+.cs-left p { margin: 0; font-size: 14px; color: var(--ink2); line-height: 1.45; } .cs-left p b { color: var(--ink); font-weight: 600; }
+.pbars { display: grid; gap: 8px; }
+.pbar { display: grid; grid-template-columns: 62px 1fr 74px; gap: 10px; align-items: center; font-size: 13.5px; }
+.pbar b { font-weight: 600; } .pbar em { font: 600 13px var(--mono); font-style: normal; text-align: right; } .pbar em small { color: var(--ink2); font-weight: 400; }
+.track { display: flex; height: 7px; border-radius: 4px; background: var(--oq-surface-3); overflow: hidden; }
+.track .t { background: var(--oq-ok); } .track .b { background: color-mix(in srgb, var(--oq-info) 70%, transparent); }
+.cs-left .more { margin-top: auto; } .cs-left .fine { font: 11.5px/1.5 var(--mono); }
+.fams { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.fam { position: relative; border-radius: 18px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 14px 16px; text-decoration: none; display: flex; flex-direction: column; gap: 4px;
+  transition: transform var(--oq-spring-fast-dur) var(--oq-island-spring), box-shadow .2s; }
+.fam:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px var(--line), var(--oq-shadow-2); } .fam:active { transform: scale(.98); }
+.fam .fn { position: absolute; top: 12px; right: 14px; font: 700 20px var(--display); color: var(--word); }
+.fam h3 { font-size: 15.5px; padding-right: 34px; } .fam p { margin: 0; font-size: 13px; line-height: 1.4; color: var(--ink2); }
+.fam small { font: 11px var(--mono); color: var(--ink2); opacity: .8; } .fam .ft { font: 11px var(--mono); color: var(--oq-ok); margin-top: auto; padding-top: 4px; }
+
+/* ---- numbers: three comparisons as bars, every loss stated ---- */
+.cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 40px; }
+.cm { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.cm h3 { font-size: 16.5px; } .cm h3 small { display: block; font: 12px var(--mono); color: var(--ink2); font-weight: 400; margin-top: 3px; }
+.cm .rows { display: grid; gap: 7px; }
+.cm .r { display: grid; grid-template-columns: 128px 1fr 52px; gap: 8px; align-items: center; font-size: 13px; color: var(--ink2); }
+.cm .r s { display: block; height: 10px; border-radius: 5px; background: var(--oq-surface-3); text-decoration: none; overflow: hidden; }
+.cm .r s i { display: block; height: 100%; border-radius: 5px; background: var(--ink2); transform-origin: 0 50%; transform: scaleX(0); transition: transform .9s var(--oq-island-spring); }
+.cm.in .r s i, .no-js .cm .r s i { transform: none; }
+.cm .r em { font: 600 13px var(--mono); font-style: normal; text-align: right; color: var(--ink); }
+.cm .r.me { color: var(--ink); font-weight: 600; } .cm .r.me s i { background: var(--word); }
+.cm .r.best s i { background: var(--oq-ok); }
+.cm .src { font: 11.5px/1.5 var(--mono); color: var(--ink2); margin-top: auto; }
+.losses { margin: 16px 0 0; font: 13px/1.6 var(--mono); color: var(--ink2); }
+.losses b { color: var(--ink); font-weight: 500; }
+
+/* ---- downloads ---- */
+.dls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 40px; text-align: left; }
+.dl { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.dl h3 { display: flex; align-items: center; gap: 10px; font-size: 18px; }
+.dl p { margin: 0; color: var(--ink2); font-size: 14.5px; line-height: 1.5; }
+.dl .cta { align-self: flex-start; height: 40px; font-size: 14.5px; padding: 0 18px; }
+.dl pre { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--oq-line-2); font: 12.5px/1.7 var(--mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.dl .fine2 { font: 12px/1.6 var(--mono); color: var(--ink2); margin-top: auto; } .dl .fine2 code { color: var(--ink); overflow-wrap: anywhere; }
+.dl .cp2 { align-self: flex-start; border: 0; cursor: pointer; background: rgb(var(--oq-state) / .08); color: var(--ink2); font: 500 12px var(--mono); height: 44px; padding: 0 14px; border-radius: 999px; }
+.dl .cp2:hover { color: var(--ink); } .dl .cp2:active { transform: scale(.96); }
+#get h2 { font-size: var(--h2); }
+
+@media (max-width: 1000px) {
+  .road { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(250px, 72%); overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 10px; margin-right: -24px; padding-right: 24px; }
+  .road::before { right: 0; }
+  .stop { scroll-snap-align: start; }
+  .fams { grid-template-columns: 1fr 1fr; }
 }
-@media (max-width: 480px) { .devstrip { grid-template-columns: 1fr; } }
+@media (max-width: 860px) {
+  section { padding: 72px 20px; }
+  .hero { padding: 36px 20px 24px; }
+  .hero .hrow { grid-template-columns: minmax(0, 1fr); gap: 28px; text-align: left; } .hero .lede { margin: 16px 0 0; } .hero .ctas { justify-content: flex-start; }
+  .proofs { grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 28px; } .pf { padding: 14px; } .pf b { font-size: 27px; } .pf span { font-size: 13.5px; }
+  .bt.w6 { grid-column: auto; }
+  #t-use .tools > span { grid-template-columns: 92px 18px 1fr; } #t-two .code, #t-build .json { font-size: 10.5px; }
+  .teasers, .compsum, .cmp, .dls { grid-template-columns: 1fr; }
+  .teaser { grid-template-columns: 96px 1fr; gap: 12px; }
+  .gal { display: grid; grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 82%; overflow-x: auto; scroll-snap-type: x mandatory; margin-right: -20px; padding-right: 20px; padding-bottom: 10px; }
+  .gi, .gi.w6, .gi.w8, .slot { grid-column: auto; scroll-snap-align: start; }
+  .road { margin-right: -20px; padding-right: 20px; }
+  .isoframe iframe { height: 520px; }
+  .fams { grid-template-columns: 1fr; }
+  .cm .r { grid-template-columns: 100px 1fr 48px; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .bt { transform: none !important; transition: opacity .5s linear; }
-  .bt *, .dt, .dt * { transition-property: opacity, background, color, box-shadow !important; animation: none !important; }
-}
-
-@media (max-width: 860px) {
-  .lane { grid-template-columns: 1fr; gap: 12px; } .tally { grid-column: 1; }
-  .node { font-size: 12px; } .node small { font-size: 10px; }
-  .appcard, .apps.minor { grid-template-columns: 1fr; } .apps.minor { gap: 20px; } .appcard img { border-right: 0; border-bottom: 1px solid var(--oq-line-2); height: auto; }
-}
-/* ---- 4 · one program: the 100M-row proof under the lanes ---- */
-.proof { margin: 20px 0 0; display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: 24px; align-items: center; border-radius: 24px; overflow: hidden; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); }
-.proof img { display: block; width: 100%; aspect-ratio: 16 / 8; object-fit: cover; object-position: top left; }
-.proof figcaption { padding: 20px 24px 20px 0; font: 16px/1.5 var(--sans); color: var(--ink2); }
-.proof figcaption b { display: block; font: 700 26px/1.15 var(--display); letter-spacing: -.03em; color: var(--ink); margin-bottom: 8px; }
-.dt p b, .body b { color: var(--ink); font-weight: 600; }
-@media (max-width: 860px) {
-  .proof { grid-template-columns: 1fr; gap: 0; } .proof figcaption { padding: 16px 18px 20px; }
+  .bt *, .fam, .scard { transition-property: opacity, background, color, box-shadow !important; animation: none !important; }
+  .cm .r s i { transform: none; transition: none; }
 }
 </style>
-<noscript><style>.rv, .bt { opacity: 1; transform: none; } .iso .slab, .iso .tile { opacity: 1; transform: none; } .iso .wire path { stroke-dashoffset: 0; }
-  #t-gpu .out, #t-use .tools > span, #t-build .ask, #t-build .shot, #t-plat figure { opacity: 1; transform: none; } #t-use .cost .a i { width: 40%; } #t-use .cost .b i { width: 100%; }</style></noscript>
+<noscript><style>.rv, .bt { opacity: 1; transform: none; } #t-use .tools > span, #t-build .ask, #t-build .shot, #t-build .ok { opacity: 1; transform: none; } #t-use .cost .a i { width: 40%; } #t-use .cost .b i { width: 100%; } #t-build .json { display: none; }</style></noscript>
 </head>
 <body>
 
 <nav class="lnav">
   <a class="brand" href="#top"><span class="mark" aria-hidden="true">ox</span>omxcode</a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#why">Why</a><a href="#agents">Agents</a><a href="#speed">Speed</a><a href="#data">Data</a><a href="#model">One program</a><a href="#apps">Apps</a><a href="#dev">Developers</a></div>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#vision">Vision</a><a href="#roadmap">Roadmap</a><a href="#gallery">Gallery</a><a href="#how">How it works</a><a href="#components">Components</a><a href="#numbers">Numbers</a></div>
   <div class="right"><a class="cta" href="#get">Download</a></div>
 </nav>
 
 <main id="top">
 
-<!-- Hero -->
+<!-- Hero: the vision in one line; the live product beside it -->
 <section class="hero">
-  <div class="wrap">
+  <div class="wrap hrow">
     <div class="intro">
-    <div class="eyebrow rise"><span>Public alpha · agent-native apps in Mojo</span></div>
-    <h1 class="rise" data-words data-step="0" data-d0="120">omxcode</h1>
-    <p class="lede rise"><span data-words data-step="55" data-d0="380">Describe an app to an agent. Get it native on every screen, the GPU underneath.</span> <span class="two" data-words data-step="40" data-d0="760">One Mojo file, button to GPU kernel. Every app speaks MCP; over AG-UI, agents build its screens live.</span></p>
-    <div class="ctas rise"><span style="animation-delay:1100ms"><a class="cta" href="#get">Get the alpha</a></span><span style="animation-delay:1180ms"><a class="more" href="#speed">See the scoreboard</a></span></div>
+      <div class="eyebrow rise"><span>Public alpha · MIT · built in Mojo</span></div>
+      <h1 class="rise"><span>One framework for every app.</span> <span class="two">Starting with data apps.</span></h1>
+      <p class="lede rise"><span>Write an app once in Mojo, as two functions. <b>It runs natively, keeps the window live while the GPU does the heavy work, and every app is a set of tools agents can use.</b></span></p>
+      <div class="ctas rise"><span style="animation-delay:500ms"><a class="cta" href="#get">Get the alpha</a></span><span style="animation-delay:580ms"><a class="more" href="#roadmap">See the roadmap</a></span></div>
+      <div class="plats rise" aria-label="Where it runs today"><span style="animation-delay:660ms"><i></i><b>Linux</b> runs</span><span style="animation-delay:700ms"><i></i><b>Mac</b> runs</span><span style="animation-delay:740ms"><i></i><b>Web</b> runs</span><span class="am" style="animation-delay:780ms"><i></i><b>Android</b> emulator</span><span class="bl" style="animation-delay:820ms"><i></i><b>iPhone</b> builds</span></div>
     </div>
-    <svg class="iso" viewBox="-328 -227 818 515" role="img" aria-label="One app.mojo file holds three layers, the controls, the data engine and the GPU code. Wires run from it to Linux, Web, Android and Mac, which run, iPhone, which builds, and to agent tools."><g class="wire" data-o="4"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L295.1,-12.0 L372.0,32.4"/></g><g class="wire" data-o="5"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L216.2,33.6 L293.1,78.0"/></g><g class="wire" data-o="6"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L137.2,79.2 L214.1,123.6"/></g><g class="wire" data-o="7"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L58.2,124.8 L135.1,169.2"/></g><g class="wire" data-o="8"><path pathLength="1" d="M87.3,50.4 L137.2,79.2 L-20.8,170.4 L56.1,214.8"/></g><g class="wire" data-o="9"><path pathLength="1" d="M-87.3,50.4 L-199.5,115.2"/></g><g class="plate" data-o="0"><polygon class="fy pl" points="-174.6,-8.4 0.0,92.4 0.0,100.8 -174.6,0.0"/><polygon class="fx pl" points="174.6,-8.4 0.0,92.4 0.0,100.8 174.6,0.0"/><polygon class="tp pl" points="0.0,-109.2 174.6,-8.4 0.0,92.4 -174.6,-8.4"/><text class="t-file" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-77.9,36.6)">app.mojo</text></g><g class="slab" data-o="1"><polygon class="fy sl" points="-137.2,-38.4 0.0,40.8 0.0,61.2 -137.2,-18.0"/><polygon class="fx sl" points="137.2,-38.4 0.0,40.8 0.0,61.2 137.2,-18.0"/><polygon class="tp sl" points="0.0,-117.6 137.2,-38.4 0.0,40.8 -137.2,-38.4"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,13.9)">GPU CODE</text></g><g class="slab" data-o="2"><polygon class="fy sl" points="-137.2,-67.2 0.0,12.0 0.0,32.4 -137.2,-46.8"/><polygon class="fx sl" points="137.2,-67.2 0.0,12.0 0.0,32.4 137.2,-46.8"/><polygon class="tp sl" points="0.0,-146.4 137.2,-67.2 0.0,12.0 -137.2,-67.2"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,-14.9)">DATA ENGINE</text></g><g class="slab" data-o="3"><polygon class="fy sl" points="-137.2,-96.0 0.0,-16.8 0.0,3.6 -137.2,-75.6"/><polygon class="fx sl" points="137.2,-96.0 0.0,-16.8 0.0,3.6 137.2,-75.6"/><polygon class="tp sl" points="0.0,-175.2 137.2,-96.0 0.0,-16.8 -137.2,-96.0"/><text class="t-side" text-anchor="middle" transform="matrix(0.8660,-0.5000,0,1,68.6,-43.7)">CONTROLS</text></g><g class="tile" data-o="4"><polygon class="fy tl" points="336.7,43.2 407.4,84.0 407.4,93.6 336.7,52.8"/><polygon class="fx tl" points="478.0,43.2 407.4,84.0 407.4,93.6 478.0,52.8"/><polygon class="tp tl" points="407.4,2.4 478.0,43.2 407.4,84.0 336.7,43.2"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,409.5,44.4)">Linux</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,428.2,55.2)">runs</text></g><g class="tile" data-o="5"><polygon class="fy tl" points="257.7,88.8 328.4,129.6 328.4,139.2 257.7,98.4"/><polygon class="fx tl" points="399.1,88.8 328.4,129.6 328.4,139.2 399.1,98.4"/><polygon class="tp tl" points="328.4,48.0 399.1,88.8 328.4,129.6 257.7,88.8"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,330.5,90.0)">Web</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,349.2,100.8)">runs</text></g><g class="tile" data-o="6"><polygon class="fy tl" points="178.7,134.4 249.4,175.2 249.4,184.8 178.7,144.0"/><polygon class="fx tl" points="320.1,134.4 249.4,175.2 249.4,184.8 320.1,144.0"/><polygon class="tp tl" points="249.4,93.6 320.1,134.4 249.4,175.2 178.7,134.4"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,251.5,135.6)">Android</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,270.2,146.4)">runs</text></g><g class="tile" data-o="7"><polygon class="fy tl" points="99.8,180.0 170.4,220.8 170.4,230.4 99.8,189.6"/><polygon class="fx tl" points="241.1,180.0 170.4,220.8 170.4,230.4 241.1,189.6"/><polygon class="tp tl" points="170.4,139.2 241.1,180.0 170.4,220.8 99.8,180.0"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,172.5,181.2)">Mac</text><text class="t-st ok" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,191.2,192.0)">runs</text></g><g class="tile" data-o="8"><polygon class="fy tl" points="20.8,225.6 91.5,266.4 91.5,276.0 20.8,235.2"/><polygon class="fx tl" points="162.1,225.6 91.5,266.4 91.5,276.0 162.1,235.2"/><polygon class="tp tl" points="91.5,184.8 162.1,225.6 91.5,266.4 20.8,225.6"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,93.5,226.8)">iPhone</text><text class="t-st info" text-anchor="middle" transform="matrix(0.8660,-0.5000,0.8660,0.5000,112.2,237.6)">builds</text></g><g class="tile agent" data-o="9"><polygon class="fy tl ag" points="-315.9,110.4 -207.8,172.8 -207.8,182.4 -315.9,120.0"/><polygon class="fx tl ag" points="-145.5,136.8 -207.8,172.8 -207.8,182.4 -145.5,146.4"/><polygon class="tp tl ag" points="-253.6,74.4 -145.5,136.8 -207.8,172.8 -315.9,110.4"/><text class="t-tile" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-228.6,122.4)">agent tools</text><text class="t-st" text-anchor="middle" transform="matrix(0.8660,0.5000,-0.8660,0.5000,-247.3,133.2)">buttons · fields</text></g></svg>
+    <!-- SLOT: robot-fleet. The lead story ("spreadsheets + analytics + robotics on real public data (DROID)") replaces this clip,
+         its poster and its caption when it lands. Until then: the claim clip from goal 41. -->
+    <div class="rv" data-slot="robot-fleet">
+      <figure class="bframe"><div class="bar"><i></i><i></i><i></i><span>omxplorer · Linux · a disputed shipping claim</span></div>
+        <video src="img/clip-claims.mp4" poster="img/clip-claims.jpg" muted loop playsinline preload="metadata" data-play aria-label="omxplorer opens a dock video, a shipments spreadsheet and a folder of bills of lading, reads the documents, links them by shipment id and time, and answers which damaged pallets were disputed"></video></figure>
+      <p class="hcap"><b>A claim answered in two minutes.</b> A dock video, a spreadsheet and 17 PDFs, linked by key and time, read on the GPU. Generated data; real functionality.<br>↳ docs/goals/41-report.md · M10: the answer matches the truth file</p>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="proofs rv">
+      <div class="pf"><b>30<small>ms</small></b><span>a filter change over 100M rows, from input to pixels on screen</span><em>median · p95 49 ms vs Rust + Polars 131 ms · measured at 856a7e9, before the release build · docs/data-benchmark.md</em></div>
+      <div class="pf"><b>17<small>ms</small></b><span>the longest gap between frames while a 1.5 s job ran</span><em>examples/jobwake on Linux · 90 frames during the job · docs/ui-threads.md</em></div>
+      <div class="pf"><b>2–25×</b><span>cheaper for an agent to see what changed: a call answers in words, 60–650 tokens, against ~1,600 for a screenshot</span><em>MCP calls in omxplorer · a full screen read costs 2,800 · docs/agent.md</em></div>
+      <div class="pf"><b>4.0<small>s</small></b><span>cold start over 100M rows, the fastest of four builds</span><em>file not cached · Rust + Polars 6.7 s · at 856a7e9 · docs/data-benchmark.md</em></div>
+    </div>
   </div>
 </section>
 
-<!-- Why omxcode exists: the owner's four reasons and where it shouldn't exist (the README says the same) -->
+<!-- Vision: one framework; what is true about it today -->
+<section id="vision">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">The vision</div>
+      <h2 class="rv">One framework for everything. <span class="two">Data apps first.</span></h2>
+      <p class="lede rv">A serious app today is four programs: an interface per platform, data work on a server, graphics in a shader language, and an API for agents. <b>omxcode makes them one Mojo program.</b> We start where that pays most: apps that move a lot of data between the screen and the GPU.</p>
+    </div>
+    <div class="bento">
+      <div class="bt w6" id="t-two">
+        <div class="kick">One way to do each thing</div>
+        <h3>Every app is two functions.</h3>
+        <p><code>view()</code> describes the screen. <code>update()</code> reacts to a tap, a key or an agent's call. <b>Less to learn, and less for an agent to get wrong.</b></p>
+        <div class="pair">
+          <pre class="code" data-c="view"><em>view</em><span class="k">def</span> <span class="f">view</span>(self) -&gt; View:
+    <span class="k">return</span> Button(<span class="s">"Tapped "</span> + String(self.n),
+                  on_tap=TAP)</pre>
+          <pre class="code" data-c="update"><em>update</em><span class="k">def</span> <span class="f">update</span>(<span class="k">mut</span> self, e: Event):
+    <span class="k">if</span> e.message == TAP:
+        <span class="ln">self.n += 1</span></pre>
+        </div>
+        <div class="run"><button class="tap" type="button">Tapped <span class="n">3</span></button><div class="steps" aria-hidden="true"><span>tap</span>→<span>update()</span>→<span>view()</span></div></div>
+      </div>
+      <div class="bt w6" id="t-use">
+        <div class="kick">MCP, built in</div>
+        <h3>Every app is an MCP tool server.</h3>
+        <p>Buttons, fields and JS widgets become tools, with no per-app work. <b>A disabled button isn't a tool</b>, so an agent can't do what a person couldn't.</p>
+        <div class="tools" aria-label="Controls and the tools they become">
+          <span><em class="ui">Save</em><b>→</b><code>file-save</code></span>
+          <span><em class="ui fld">Search…</em><b>→</b><code>search {text}</code></span>
+          <span class="no"><em class="ui off">Delete</em><b>→</b><code>no tool</code></span>
+        </div>
+        <div class="cost" aria-label="Tokens to see what changed: a call answers in 60 to 650 tokens; a screenshot costs about 1,600">
+          <span class="a"><em>a call</em><i></i><em>60–650</em></span><span class="b"><em>a screenshot</em><i></i><em>~1,600</em></span>
+        </div>
+        <p class="fine3">tokens for a call that answers in words; a full screen read is 2,800 · docs/agent.md</p>
+      </div>
+      <div class="bt w6" id="t-build">
+        <div class="kick">AG-UI, built in</div>
+        <h3>Ask an agent. It answers with a screen.</h3>
+        <p>Over <a href="https://docs.ag-ui.com/">AG-UI</a> the reply is <b>UI as data</b>: native components, checked against the catalog before anything draws.</p>
+        <div class="stage2" aria-hidden="true">
+          <div class="ask">Show me sales as a chart</div>
+          <span class="ok">✓ in the component catalog</span>
+          <pre class="code json"><span class="f">render_ui</span>({<span class="s">"ui"</span>: {
+  <span class="ln"><span class="s">"component"</span>: <span class="s">"Card"</span>, <span class="s">"title"</span>: <span class="s">"Sales"</span>,</span>
+  <span class="s">"children"</span>: [
+    <span class="ln">{<span class="s">"component"</span>: <span class="s">"Sparkline"</span>, …},</span>
+    <span class="ln">{<span class="s">"component"</span>: <span class="s">"Table"</span>, …}]}})</span></pre>
+          <figure class="bframe shot"><div class="bar"><i></i><i></i><i></i><span>Agent chat · web</span></div>
+            <div class="crop"><img src="img/agentchat-web.png" alt="Agent chat: the agent answers with a card it built, a switch, a sparkline and a table" loading="lazy"></div></figure>
+        </div>
+        <p class="fine3">web and Linux · tested with the official AG-UI SDK</p>
+      </div>
+      <div class="bt w6" id="t-ui">
+        <div class="kick">The window never waits</div>
+        <h3>Slow work runs beside the screen.</h3>
+        <p><code>update()</code> only decides. Queries, video decoding and OCR run as jobs on their own threads and come back as events. <b>A watchdog names any frame over budget.</b></p>
+        <div class="lanes2" aria-label="While a 1.5 second job runs on its own thread, the UI thread keeps drawing frames">
+          <div class="lane2"><span>UI thread</span><div class="frames"></div></div>
+          <div class="lane2"><span>job thread</span><div class="job"><i></i></div></div>
+        </div>
+        <pre class="code"><span class="c"># slow work is a job; update() hears LANDED when it ends</span>
+self.running = start_ui_job(
+    StepJob(self.orders.value(), self.filters))
+<span class="k">def</span> <span class="f">jobs_message</span>(self) -&gt; Int: <span class="k">return</span> LANDED
+
+<span class="c"># MOJOUI_BUDGET_MS=16: anything over budget is named</span>
+SLOW: update msg=7 80.06 ms</pre>
+        <p class="fine3">a 1.5 s job: 90 frames drawn meanwhile, longest gap 17 ms · examples/jobwake, Linux</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Why omxcode exists: the owner's four reasons (the README says the same) -->
 <section id="why">
   <div class="wrap">
     <div class="head">
       <div class="eyebrow rv">Why omxcode exists</div>
-      <h2 class="rv">Four reasons. <span class="two">And where it shouldn't exist.</span></h2>
+      <h2 class="rv">Four reasons.</h2>
     </div>
     <div class="bento why4">
       <div class="bt" id="t-w1">
@@ -282,295 +385,147 @@
         <p>omxcode has an <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agent.md">agent host</a>, so each app can be operated by an agent <b>through the same code that draws its screens.</b> JS apps need that built in separately.</p>
       </div>
       <div class="bt" id="t-w4">
-        <div class="kick">4 · Every device <span class="badge info"><i></i>least proven</span></div>
+        <div class="kick">4 · Every device</div>
         <h3>Native on every device <span class="two">from one codebase.</span></h3>
-        <p>Phone included. <b>This is the least proven part:</b> Mac and iPhone build but haven't run on hardware yet.</p>
+        <p>Phone included. <b>Linux and the Mac run today; Android runs on the emulator and iPhone builds</b>, with phones next on the <a href="#roadmap">roadmap</a>.</p>
       </div>
       <div class="bt w12 not" id="t-w5">
-        <div class="kick">Where it shouldn't exist</div>
-        <p>Forms, CRUD screens, dashboards over an API, marketing sites, ordinary SaaS. <b>JS wins those on ecosystem alone, so we don't compete there.</b> When a JS library is the better tool, embed it as a widget inside omxcode.</p>
+        <div class="kick">Where to start, and where not yet</div>
+        <p>Start with apps that move a lot of data: analytics, spreadsheets, video, documents, robotics. <b>For forms, CRUD screens and marketing sites, JS wins today on ecosystem alone;</b> when a JS library is the better tool, embed it as a widget inside omxcode. SaaS building blocks (sign-in, accounts, payments) are on the roadmap.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- 2 · Agents: one bento, five ideas, each tile its own small motion -->
-<section id="agents">
+<!-- Roadmap: direction, one platform at a time -->
+<section id="roadmap">
   <div class="wrap">
     <div class="head">
-      <div class="eyebrow rv">Agent-native <span class="badge ok big"><i></i>works today</span></div>
-      <h2 class="rv">Mojo is the language agents are fluent in. <span class="two">omxcode is how they ship.</span></h2>
-      <p class="lede rv">Fast as Rust, strict, small, and it reaches the GPU. <b>omxcode turns it into whole apps, and every app back into tools.</b></p>
+      <div class="eyebrow rv">Roadmap</div>
+      <h2 class="rv">Where it's going. <span class="two">One step at a time.</span></h2>
+      <p class="lede rv">Data apps first, then every screen, then every kind of app. <b>Each step ships when its checks pass.</b></p>
     </div>
-
-    <div class="bento">
-      <!-- tile 1 · button to GPU kernel -->
-      <div class="bt w7" id="t-gpu">
-        <div class="kick">One file</div>
-        <h3>Button to GPU kernel. <span class="two">Nothing to glue.</span></h3>
-        <pre class="code" aria-label="A Mojo excerpt: a Run on GPU button sends RUN; update() renders with the mandelbrot function on the GPU; mandelbrot computes one pixel per GPU thread"><span class="rail" aria-hidden="true"><i></i></span><span class="k">struct</span> <span class="f">Main</span>(App):
-    <span class="k">def</span> <span class="f">view</span>(self) -&gt; View:
-        <span class="k">return</span> VStack(Image(self.pixels, W, H),
-            <span class="ln" data-n="0"><span class="btn">Button(<span class="s">"Run on GPU"</span>, on_tap=RUN)</span></span>)
-    <span class="k">def</span> <span class="f">update</span>(<span class="k">mut</span> self, event: Event):
-        <span class="ln" data-n="1"><span class="k">if</span> event.message == RUN:</span>
-            <span class="ln" data-n="2"><span class="k">var</span> o = self.gpu.render[mandelbrot](<span class="nar">
-                </span>W, H, p)</span>
-            self.pixels = o.pixels.copy()
-
-<span class="ln" data-n="3"><span class="k">def</span> <span class="f">mandelbrot</span>(x: Int, y: Int, w: Int, h: Int,
-               p: Params) -&gt; UInt32:</span>
-    <span class="c"># runs on the GPU: one thread per pixel</span>
-    …</pre>
-        <figure class="out"><div class="crop"><img src="img/gpu-linux.png" alt="The fractal the kernel drew, in the GPU example on Linux" loading="lazy"></div><figcaption>153,600 pixels<br><b>0.14 ms</b> on the GPU</figcaption></figure>
-        <p class="fine3">RTX 3090 · the same loop on the CPU: 43.7 ms</p>
-      </div>
-
-      <!-- tile 2 · little design space -->
-      <div class="bt w5" id="t-two">
-        <div class="kick">Little design space</div>
-        <h3>Every app is two functions.</h3>
-        <p><code>view()</code> draws it. <code>update()</code> reacts. <b>One way to do each thing, so less for an agent to get wrong.</b></p>
-        <div class="pair">
-          <pre class="code" data-c="view"><em>view</em><span class="k">def</span> <span class="f">view</span>(self) -&gt; View:
-    <span class="k">return</span> Button(<span class="s">"Tapped "</span> + String(self.n),
-                  on_tap=TAP)</pre>
-          <pre class="code" data-c="update"><em>update</em><span class="k">def</span> <span class="f">update</span>(<span class="k">mut</span> self, e: Event):
-    <span class="k">if</span> e.message == TAP:
-        <span class="ln">self.n += 1</span></pre>
-        </div>
-        <div class="run"><button class="tap" type="button">Tapped <span class="n">3</span></button><div class="steps" aria-hidden="true"><span>tap</span>→<span>update()</span>→<span>view()</span></div></div>
-      </div>
-
-      <!-- tile 3 · MCP: agents use apps -->
-      <div class="bt w5" id="t-use">
-        <div class="kick">MCP, built in</div>
-        <h3>Agents don't click pixels. <span class="two">They call buttons.</span></h3>
-        <p><b>Every app is an MCP tool server.</b> Buttons, fields and JS widgets become tools, with no per-app work. A disabled button isn't one.</p>
-        <div class="tools" aria-label="Controls and the tools they become">
-          <span><em class="ui">Save</em><b>→</b><code>file-save</code></span>
-          <span><em class="ui fld">Search…</em><b>→</b><code>search {text}</code></span>
-          <span><em class="ui fld">▦ a grid</em><b>→</b><code>read</code></span>
-          <span class="no"><em class="ui off">Delete</em><b>→</b><code>no tool</code></span>
-        </div>
-        <div class="cost" aria-label="Tokens per step: a call answers in 60 to 650 tokens; a fresh screenshot costs about 1,600">
-          <span class="a"><em>a call</em><i></i><em>60–650</em></span><span class="b"><em>a screenshot</em><i></i><em>~1,600</em></span>
-        </div>
-        <p class="fine3">tokens to see what changed, in omxplorer</p>
-      </div>
-
-      <!-- tile 4 · AG-UI: agents build screens -->
-      <div class="bt w7" id="t-build">
-        <div class="txt">
-          <div class="kick">AG-UI, built in</div>
-          <h3>Ask an agent. <span class="two">It answers with a screen.</span></h3>
-          <p>Over <a href="https://docs.ag-ui.com/">AG-UI</a>, the reply is <b>UI as data</b>: native components, <b>checked against the catalog</b> before anything draws.</p>
-          <p>Run it on your own model, served locally by omxconsole.</p>
-          <p class="fine3">web and Linux · tested with the official AG-UI SDK</p>
-        </div>
-        <div class="stage2" aria-hidden="true">
-          <div class="ask">Show me sales as a chart</div>
-          <span class="ok">✓ in the component catalog</span>
-          <pre class="code json"><span class="f">render_ui</span>({<span class="s">"ui"</span>: {
-  <span class="ln"><span class="s">"component"</span>: <span class="s">"Card"</span>, <span class="s">"title"</span>: <span class="s">"Sales"</span>,</span>
-  <span class="s">"children"</span>: [
-    <span class="ln">{<span class="s">"component"</span>: <span class="s">"Segmented"</span>, …},</span>
-    <span class="ln">{<span class="s">"component"</span>: <span class="s">"Sparkline"</span>, …},</span>
-    <span class="ln">{<span class="s">"component"</span>: <span class="s">"Table"</span>, …}]}})</span></pre>
-          <figure class="bframe shot"><div class="bar"><i></i><i></i><i></i><span>Agent chat · web</span></div>
-            <div class="crop"><img src="img/agentchat-web.png" alt="Agent chat: the agent answers with a card it built, a Quarter/Year switch, a sparkline and a table; you pick Year and it says sales were 2207k over the year" loading="lazy"></div></figure>
-        </div>
-      </div>
-
-      <!-- tile 5 · every screen, natively -->
-      <div class="bt w12" id="t-plat">
-        <div class="txt">
-          <div class="kick">Every screen, natively</div>
-          <h3>One app. <span class="two">Each platform's own widgets.</span></h3>
-          <p>AppKit, GTK, HTML and Android views. iPhone builds. <b>Not a web page in a wrapper.</b></p>
-        </div>
-        <div class="devs">
-          <figure><div class="scr"><img src="gallery/img/console-models-mac.png" alt="omxconsole's My models screen on the Mac" loading="lazy"></div><figcaption><b>Mac</b>AppKit</figcaption></figure>
-          <figure><div class="scr"><img src="gallery/img/console-models-gtk.png" alt="The same screen on Linux" loading="lazy"></div><figcaption><b>Linux</b>GTK 4</figcaption></figure>
-          <figure><div class="scr"><img src="gallery/img/console-models-web.png" alt="The same screen on the web" loading="lazy"></div><figcaption><b>Web</b>HTML</figcaption></figure>
-          <figure class="phone"><div class="scr"><img src="img/android-gallery.png" alt="The gallery example on the Android emulator" loading="lazy"></div><figcaption><b>Android</b>views</figcaption></figure>
-        </div>
-      </div>
+    <div class="road rv">
+      <div class="stop now"><span class="when">Now</span>
+        <a class="scard" href="omxplorer.html"><div class="shot"><img src="gallery/img/omxplorer-sheet-gtk.png" alt="omxplorer's sheet on Linux" loading="lazy"></div>
+          <div class="tx"><h3>Data apps</h3><p>GPU tables, charts, video and documents, linked by key, time and place. Linux and Mac. The UI thread never blocks.</p><span class="badge ok"><i></i>runs today</span></div></a></div>
+      <div class="stop"><span class="when">Next</span>
+        <a class="scard" href="gallery/#omxplorer"><div class="shot"><img src="gallery/img/omxplorer-sheet-web.png" alt="omxplorer's sheet in the browser, through today's web host" loading="lazy"></div>
+          <div class="tx"><h3>The web, on WebGPU</h3><p>Today the web host draws the app as real HTML. Next, its GPU work moves into the browser with WebGPU.</p><span class="badge info"><i></i>coming to the web</span></div></a></div>
+      <div class="stop"><span class="when">Then</span>
+        <a class="scard" href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/android.md"><div class="shot phone"><img src="img/android-gallery.png" alt="The gallery example on the Android emulator, drawn with Android's own views" loading="lazy"></div>
+          <div class="tx"><h3>Android and iPhone</h3><p>The same app.mojo with each phone's own widgets. Runs on the Android emulator today; iPhone builds.</p><span class="badge info"><i></i>coming to phones</span></div></a></div>
+      <div class="stop"><span class="when">Then</span>
+        <div class="scard"><div class="shot chips" aria-hidden="true"><span>Sign in</span><span>Accounts</span><span>Payments</span></div>
+          <div class="tx"><h3>SaaS apps</h3><p>Sign-in, accounts and payments as components, so a whole product is one Mojo program.</p><span class="badge soon"><i></i>planned</span></div></div></div>
+      <div class="stop"><span class="when">By year end</span>
+        <a class="scard" href="components.html"><div class="shot chips row" aria-hidden="true"><span>Linux</span><span>Web</span><span>Mac</span><span>Android</span><span>iPhone</span><span>Agents</span></div>
+          <div class="tx"><h3>The full collection</h3><p>Every component on every platform above, each one tested by a script.</p><span class="badge soon"><i></i>2026</span></div></a></div>
     </div>
-
-    <div class="bento-after">
-      <p class="local rv"><b>The recipes are in the box.</b> <a href="llms.txt">llms.txt</a> and <a href="components.html">the component matrix</a> tell an agent what exists and where it runs.</p>
+    <div class="teasers">
+      <a class="teaser rv" href="gallery/#drawing"><img src="gallery/img/sketch-gtk.png" alt="Sketch: pressure ink drawn on omxcode's Canvas on Linux" loading="lazy">
+        <div><div class="q">Can it do a canvas app?</div><h3>The Canvas draws today. JS canvases are next.</h3><p>Sketch draws pressure ink on Linux and the web. Next, a JS component path, so a canvas library from npm drops in the way CodeMirror and ECharts already do.</p></div></a>
+      <a class="teaser rv" href="gallery/#widgets"><img src="img/widgets-web-dark.png" alt="The widgets app: a CodeMirror note, a counter and an ECharts chart inside a native app" loading="lazy">
+        <div><div class="q">Can I use my JS libraries?</div><h3>Yes, as widgets inside native apps.</h3><p>CodeMirror and ECharts from npm run on Linux and the web, under a strict content policy, and agents can read and set them.</p></div></a>
     </div>
   </div>
 </section>
 
-<!-- 3 · Speed: the short scoreboard. Ranked among the builds that draw on screen; native Rust only ran offscreen here -->
-<section id="speed">
+<!-- Gallery: real screens and clips; the lead slot waits for the robot-fleet story -->
+<section id="gallery">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Gallery</div>
+      <h2 class="rv">Real screens. <span class="two">Nothing mocked up.</span></h2>
+      <p class="lede rv">Every picture here is the framework running. Clips are recorded by scripts in the repo.</p>
+    </div>
+    <div class="gal">
+      <!-- SLOT: robot-fleet (gallery lead). Swap this card for the robot-fleet clip when it lands. -->
+      <div class="slot rv" data-slot="robot-fleet"><span class="badge soon"><i></i>next story</span><h3>A robot fleet, on real public data.</h3><p>Spreadsheets, analytics and robotics together, over DROID's public robot recordings: the logs, the camera video and the sheet, linked by time.</p></div>
+      <figure class="gi w8 rv"><div class="m"><video src="img/clip-island-100m.mp4" poster="img/clip-island-100m.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer computing medians over 100 million rows, the progress in its top island, the window live"></video></div>
+        <figcaption><b>100 million rows, the window live.</b>A median by region in 0.77 s; the longest gap between frames meanwhile, 33 ms.<small>Linux · RTX 3090 · docs/goals/30-report.md</small></figcaption></figure>
+      <figure class="gi w6 rv"><div class="m"><video src="img/clip-warehouse.mp4" poster="img/clip-warehouse.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer turns a warehouse video into rows, joins it with shipments and makes a reel of damaged pallets with faces blurred"></video></div>
+        <figcaption><b>A warehouse video becomes rows.</b>Detections joined with shipments, a reel of damaged pallets with faces blurred.<small>Linux · generated footage · goal 39</small></figcaption></figure>
+      <figure class="gi w6 rv"><div class="m"><video src="img/clip-drone.mp4" poster="img/clip-drone.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer opens a drone inspection video with its telemetry chart and map, finds defects, compares two flights and plans the next one"></video></div>
+        <figcaption><b>A drone inspection, end to end.</b>Video beside its telemetry and map; defects found, two flights compared, the next flight planned.<small>Linux · generated footage · goal 39</small></figcaption></figure>
+      <figure class="gi rv"><div class="m"><img src="gallery/img/omxplorer-sheet-mac.png" alt="omxplorer's sheet on the Mac, in AppKit" loading="lazy"></div>
+        <figcaption><b>omxplorer on the Mac.</b>The same app in AppKit.<small>Mac · GitHub macOS runner</small></figcaption></figure>
+      <figure class="gi rv"><div class="m"><img src="gallery/img/console-models-web.png" alt="omxconsole's My models screen in the browser" loading="lazy"></div>
+        <figcaption><b>omxconsole.</b>Serves your local AI models; built from components only.<small>web · Linux · Mac</small></figcaption></figure>
+      <figure class="gi rv"><div class="m"><img src="img/agentchat-web.png" alt="Agent chat: an AG-UI agent answers with a card it built" loading="lazy"></div>
+        <figcaption><b>Agent chat.</b>An AG-UI agent answers with cards and forms you can use.<small>web · Linux</small></figcaption></figure>
+    </div>
+    <div class="ctas rv" style="justify-content:flex-start"><a class="cta" href="gallery/">Open the full gallery</a><a class="more" href="omxplorer.html">Meet omxplorer</a></div>
+  </div>
+</section>
+
+<!-- How it works: two interactive isometric diagrams (docs/launch/iso/*.json, built by docs/launch/iso/build.sh) -->
+<section id="how">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">How it works</div>
+      <h2 class="rv">One program. <span class="two">The window never waits.</span></h2>
+      <p class="lede rv">Press Play to follow a tap, or click any block to read what it does.</p>
+    </div>
+    <div class="isoframe rv">
+      <div class="bar"><div class="seg2" id="isoseg"><span class="knob"></span><button type="button" class="on">One app, every screen</button><button type="button">How a tap stays smooth</button></div><span class="sp"></span><a id="isoopen" href="launch/iso/one-app.html">Open full screen ›</a></div>
+      <iframe id="isof" src="launch/iso/one-app.html" title="Interactive isometric diagram: one app.mojo becomes native screens and agent tools" loading="lazy"></iframe>
+      <p class="isocap" id="isocap">One app.mojo, one process: native screens on each platform, MCP tools and AG-UI screens for agents, jobs and the GPU underneath.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Components: generated from docs/components.json and docs/components.md by scripts/site_components.py -->
+<section id="components">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Components</div>
+      <h2 class="rv">Building blocks, <span class="two">each one tested.</span></h2>
+      <p class="lede rv">What each family solves, and where a script runs it today. <b>Generated from the code and the checks.</b></p>
+    </div>
+<!-- components:begin -->
+<div class="compsum rv">
+  <div class="cs-left"><div class="big">119<small>components</small></div><p><b>115 run on Linux and the web</b> under a script on every check. The bars: tested, then builds.</p><div class="pbars"><div class="pbar"><b>Linux</b><span class="track" role="img" aria-label="Linux: 116 tested, 3 build, 0 not yet"><i class="t" style="width:97.5%"></i><i class="b" style="width:2.5%"></i></span><em>116<small> / 119</small></em></div><div class="pbar"><b>Web</b><span class="track" role="img" aria-label="Web: 115 tested, 3 build, 1 not yet"><i class="t" style="width:96.6%"></i><i class="b" style="width:2.5%"></i></span><em>115<small> / 119</small></em></div><div class="pbar"><b>Mac</b><span class="track" role="img" aria-label="Mac: 0 tested, 110 build, 9 not yet"><i class="t" style="width:0.0%"></i><i class="b" style="width:92.4%"></i></span><em>0<small> / 119</small></em></div><div class="pbar"><b>Android</b><span class="track" role="img" aria-label="Android: 16 tested, 44 build, 59 not yet"><i class="t" style="width:13.4%"></i><i class="b" style="width:37.0%"></i></span><em>16<small> / 119</small></em></div><div class="pbar"><b>iPhone</b><span class="track" role="img" aria-label="iPhone: 0 tested, 97 build, 22 not yet"><i class="t" style="width:0.0%"></i><i class="b" style="width:81.5%"></i></span><em>0<small> / 119</small></em></div><div class="pbar"><b>Agents</b><span class="track" role="img" aria-label="Agents: 54 tested, 33 build, 32 not yet"><i class="t" style="width:45.4%"></i><i class="b" style="width:27.7%"></i></span><em>54<small> / 119</small></em></div></div><p class="fine">Mac apps run on GitHub's macOS runners (scripts/mac-ci); checking each component there is next.</p><a class="more" href="components.html">Browse all 119</a></div>
+  <div class="fams"><a class="fam" href="components.html#data"><span class="fn">21</span><h3>Data and sheets</h3><p>Spreadsheets and analytics over millions of rows: grids, pivots, charts, KPIs, SQL.</p><small>DataGrid, PivotTable, ChartView…</small><span class="ft">21 tested on Linux and the web</span></a><a class="fam" href="components.html#video"><span class="fn">14</span><h3>Video and vision</h3><p>Videos as data: play, scrub, analyze into rows, cut reels, decoded off the UI thread.</p><small>VideoSource, Player, TimeSeries…</small><span class="ft">14 tested on Linux and the web</span></a><a class="fam" href="components.html#robotics"><span class="fn">5</span><h3>Maps and robotics</h3><p>Telemetry beside its video, routes and findings on a map, inspections compared.</p><small>Geo, Inspection, MapView…</small><span class="ft">4 tested on Linux and the web</span></a><a class="fam" href="components.html#docs"><span class="fn">10</span><h3>Documents</h3><p>PDFs as pages and tables: read them (OCR), find fields, pack the evidence.</p><small>PdfSource, Document card, OcrModel…</small><span class="ft">9 tested on Linux and the web</span></a><a class="fam" href="components.html#links"><span class="fn">3</span><h3>Links</h3><p>Tables, videos and documents connected by key, time or place, confirmed by you.</p><small>Links, Link drag, Peek…</small><span class="ft">2 tested on Linux and the web</span></a><a class="fam" href="components.html#agents"><span class="fn">1</span><h3>Agents</h3><p>Screens an agent builds as data, checked against the catalog, drawn natively.</p><small>GenUi…</small><span class="ft">1 tested on Linux and the web</span></a><a class="fam" href="components.html#parts"><span class="fn">26</span><h3>App parts</h3><p>The pieces every app needs: shells, lists, fields, logs, code, feedback.</p><small>Ink stroke, CodeBlock, LogView…</small><span class="ft">25 tested on Linux and the web</span></a><a class="fam" href="components.html#basics"><span class="fn">36</span><h3>Controls and layout</h3><p>The native controls: text, buttons, fields, menus, dialogs, stacks, canvases.</p><small>Text, Button, Icon…</small><span class="ft">36 tested on Linux and the web</span></a><a class="fam" href="components.html#js"><span class="fn">3</span><h3>JavaScript widgets</h3><p>Libraries from npm inside a native app: an editor, charts, your own.</p><small>mx-counter, mx-chart, mx-editor…</small><span class="ft">3 tested on Linux and the web</span></a></div>
+</div>
+<p class="srcline">generated by scripts/site_components.py from docs/components.json and docs/components.md</p>
+<!-- components:end -->
+  </div>
+</section>
+
+<!-- Numbers: three comparisons, every loss stated -->
+<section id="numbers">
   <div class="wrap">
     <div class="head">
       <div class="eyebrow rv">Measured <span class="badge ok big"><i></i>one RTX 3090</span></div>
-      <h2 class="rv">WebGPU speed. <span class="two">2× native Rust.</span></h2>
-      <p class="lede rv">One particle field, four builds, up to 20M particles. <b>Ranked on screen, where you see it.</b></p>
+      <h2 class="rv">Numbers, <span class="two">with where they came from.</span></h2>
+      <p class="lede rv">Each build written from its own stack's docs, run by the same script on the same machine. Lower is better.</p>
     </div>
-    <div class="wins rv" aria-label="Where omxcode wins"><i class="wl">omxcode wins</i>
-      <span><b>=</b> JS + WebGPU at 1M and 2M</span>
-      <span><b>1.9×</b> faster than native Rust at 20M</span>
-      <span><b>60 fps</b> to 20M particles</span>
-      <span><b>MCP + AG-UI</b> built in</span>
+    <div class="cmp">
+      <div class="cm rv"><h3>A change over 100M rows<small>input to pixels · median ms</small></h3>
+        <div class="rows">
+          <div class="r"><span>JS + DuckDB-WASM</span><s><i style="width:100%"></i></s><em>104.9</em></div>
+          <div class="r"><span>JS + Python Polars</span><s><i style="width:42.1%"></i></s><em>44.2</em></div>
+          <div class="r"><span>Rust + Polars</span><s><i style="width:35.3%"></i></s><em>37.0</em></div>
+          <div class="r me best"><span>omxcode</span><s><i style="width:28.9%"></i></s><em>30.3</em></div>
+        </div><p class="src">32 filter changes × 3 runs, at commit 856a7e9; the release build re-checked only at 10M · docs/data-benchmark.md</p></div>
+      <div class="cm rv"><h3>The slowest 5 % of changes<small>input to pixels · p95 ms</small></h3>
+        <div class="rows">
+          <div class="r"><span>JS + DuckDB-WASM</span><s><i style="width:100%"></i></s><em>285.5</em></div>
+          <div class="r"><span>JS + Python Polars</span><s><i style="width:48.4%"></i></s><em>138.3</em></div>
+          <div class="r"><span>Rust + Polars</span><s><i style="width:45.8%"></i></s><em>130.7</em></div>
+          <div class="r me best"><span>omxcode</span><s><i style="width:17.2%"></i></s><em>49.1</em></div>
+        </div><p class="src">every build matched DuckDB's answers · docs/data-benchmark.md</p></div>
+      <div class="cm rv"><h3>A frame at 20M particles<small>on screen · mean ms</small></h3>
+        <div class="rows">
+          <div class="r"><span>Plain JS</span><s><i style="width:100%"></i></s><em>217.7</em></div>
+          <div class="r"><span>JS + Rust/wasm</span><s><i style="width:24.6%"></i></s><em>53.45</em></div>
+          <div class="r best"><span>JS + WebGPU</span><s><i style="width:1.4%"></i></s><em>3.01</em></div>
+          <div class="r me"><span>omxcode</span><s><i style="width:1.4%"></i></s><em>3.13</em></div>
+        </div><p class="src">WebGPU wins by 4 % · native Rust, offscreen only here: 5.99 · why.html</p></div>
     </div>
-    <div class="score rv" role="table" aria-label="Scoreboard: frame time and more, lower is better; the winner is picked among the four builds that draw on screen; native Rust, measured offscreen, is shown for reference">
-      <div class="srow sh" aria-hidden="true"><span>Test</span><span>Plain JS</span><span>JS + WebGPU</span><span>JS + Rust/wasm</span><span class="me">omxcode</span><span class="off">Rust native<small>offscreen · not ranked</small></span><span>Winner</span></div>
-      <div class="srow"><b>Frame, 1M<small>ms</small></b><span data-l="Plain JS">13.88</span><span data-l="WebGPU" class="tie">1.21</span><span data-l="Rust wasm">1.86</span><span data-l="omxcode" class="tie c">1.23</span><span data-l="Rust off" class="off">0.34</span><em class="eq">omxcode ties</em></div>
-      <div class="srow"><b>Frame, 20M<small>ms</small></b><span data-l="Plain JS">217.70</span><span data-l="WebGPU" class="win">3.01</span><span data-l="Rust wasm">53.45</span><span data-l="omxcode" class="c">3.13<sup>1.9× Rust</sup></span><span data-l="Rust off" class="off">5.99</span><em>WebGPU, by 4 %</em></div>
-      <div class="srow"><b>60 fps up to<small>particles</small></b><span data-l="Plain JS">100k</span><span data-l="WebGPU" class="tie">20M</span><span data-l="Rust wasm">2M</span><span data-l="omxcode" class="tie c">20M</span><span data-l="Rust off" class="off">20M</span><em class="eq">omxcode ties</em></div>
-      <div class="srow"><b>GPU step, 20M<small>ms · JS and wasm on the CPU</small></b><span data-l="Plain JS">71.2</span><span data-l="WebGPU" class="tie">0.774</span><span data-l="Rust wasm">34.3</span><span data-l="omxcode" class="tie c">0.762</span><span data-l="Rust off" class="off">0.771</span><em class="eq">Tie</em></div>
-      <div class="srow"><b>Agent tools<small>MCP · AG-UI</small></b><span data-l="Plain JS">no</span><span data-l="WebGPU">no</span><span data-l="Rust wasm">no</span><span data-l="omxcode" class="win c">yes</span><span data-l="Rust off" class="off">no</span><em class="us">omxcode</em></div>
-    </div>
-    <div class="wins rust rv" aria-label="Where Rust wins"><i class="wl">Rust wins</i>
-      <span><b>211 ms</b> cold start</span>
-      <span><b>146 MB</b> memory</span>
-      <span><b>0.34 ms</b> frame at 1M, offscreen</span>
-      <span class="wg"><b>WebGPU</b> a little faster at 5M–20M</span>
-    </div>
-    <div class="scorefoot rv">
-      <span>Rust native only renders offscreen on this NVIDIA + Wayland desktop; in a window the compositor caps it at 16.7 ms.</span>
-      <span>Effort, if you still count it: omxcode 1 file, 1 language; JS + WebGPU 8 and 5; JS + Rust 13 and 9.</span>
-      <a class="more" href="why.html">The full scoreboard</a>
-    </div>
-  </div>
-</section>
-
-<!-- 3b · Data: the 100M-row dashboard, four builds, input to pixels measured by a screen observer (goal 38) -->
-<section id="data">
-  <div class="wrap">
-    <div class="head">
-      <div class="eyebrow rv">Measured <span class="badge ok big"><i></i>100M rows</span></div>
-      <h2 class="rv">100M rows. <span class="two">Fastest to the screen.</span></h2>
-      <p class="lede rv">One dashboard, 32 filter changes, four builds. <b>Timed from input to pixels on screen.</b></p>
-    </div>
-    <div class="wins rv" aria-label="Where omxcode wins"><i class="wl">omxcode wins</i>
-      <span><b>30 ms</b> a change, on screen</span>
-      <span><b>2.7×</b> steadier than Rust (p95)</span>
-      <span><b>4.0 s</b> cold start</span>
-      <span><b>4.5×</b> less compute than Rust</span>
-    </div>
-    <div class="score four rv" role="table" aria-label="Data scoreboard at 100M rows, lower is better">
-      <div class="srow sh" aria-hidden="true"><span>Test</span><span>JS + DuckDB-WASM</span><span>JS + Python Polars</span><span>Rust + Polars</span><span class="me">omxcode</span><span>Winner</span></div>
-      <div class="srow"><b>A change, on screen<small>median ms</small></b><span data-l="DuckDB">104.9</span><span data-l="Py Polars">44.2</span><span data-l="Rust">37.0</span><span data-l="omxcode" class="win c">30.3</span><em class="us">omxcode</em></div>
-      <div class="srow"><b>Slowest 5 %<small>p95 ms</small></b><span data-l="DuckDB">285.5</span><span data-l="Py Polars">138.3</span><span data-l="Rust">130.7</span><span data-l="omxcode" class="win c">49.1</span><em class="us">omxcode</em></div>
-      <div class="srow"><b>Worst change<small>ms</small></b><span data-l="DuckDB">383.0</span><span data-l="Py Polars">181.4</span><span data-l="Rust">256.5</span><span data-l="omxcode" class="win c">63.3</span><em class="us">omxcode</em></div>
-      <div class="srow"><b>Compute only<small>median ms</small></b><span data-l="DuckDB">89.8</span><span data-l="Py Polars">18.2</span><span data-l="Rust">16.6</span><span data-l="omxcode" class="win c">3.7</span><em class="us">omxcode</em></div>
-      <div class="srow"><b>Cold start<small>s · file not cached</small></b><span data-l="DuckDB">51.3</span><span data-l="Py Polars">6.0</span><span data-l="Rust">6.7</span><span data-l="omxcode" class="win c">4.0</span><em class="us">omxcode</em></div>
-      <div class="srow"><b>Memory<small>GB, steady</small></b><span data-l="DuckDB">3.7</span><span data-l="Py Polars">3.8</span><span data-l="Rust" class="win">3.6</span><span data-l="omxcode" class="c">5.6<sup>+ 5.7 GPU</sup></span><em>Rust</em></div>
-    </div>
-    <div class="wins rust rv" aria-label="Where others win"><i class="wl">Rust wins</i>
-      <span><b>3.6 GB</b> memory, no GPU</span>
-      <span><b>~20 ms</b> narrow-range changes</span>
-      <span class="wg"><b>Python + Polars</b> fewest lines: 370</span>
-    </div>
-    <div class="scorefoot rv">
-      <span>Every build matched DuckDB's answers on every pass. One RTX 3090, a 60 Hz compositor, 3 runs × 20 passes.</span>
-      <span>omxcode needs an NVIDIA GPU today and sums in integer cents; the others use float64.</span>
-      <a class="more" href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/data-benchmark.md">The full results</a>
-    </div>
-  </div>
-</section>
-
-<!-- 4 · Everything in the same program -->
-<section id="model">
-  <div class="wrap">
-    <div class="head">
-      <div class="eyebrow rv">One program <span class="badge ok big"><i></i>works today</span></div>
-      <h2 class="rv">Everything <span class="two">in the same program.</span></h2>
-      <p class="lede rv">Interface, data and GPU code in one Mojo process. <b>No server, no API, no round trip.</b></p>
-    </div>
-    <div class="lanes" id="lanes">
-      <div class="lane pain rv"><div class="tag">Other apps<small>Every query is a round trip.</small></div>
-        <div class="track"><div class="node n1">Interface<small>JS · Swift</small></div><div class="wire w1"></div><div class="node n2">network<small>HTTP · JSON</small></div><div class="wire w2"></div><div class="node n3">Server<small>Python · C++</small></div>
-          <div class="pkt" id="pk1"><span>request</span></div><div class="wait" id="wait">waiting…</div></div>
-        <div class="tally"><b>3+</b> languages · <b>2</b> processes · <b>a network hop</b> per query</div></div>
-      <div class="lane fix rv"><div class="tag">omxcode<small>One program, one GPU.</small></div>
-        <div class="track"><div class="box"><em>one Mojo process · one GPU</em></div><div class="node n1">Interface<small>drawn on the GPU</small></div><div class="node n2">Data<small>in GPU memory</small></div><div class="node n3">GPU compute<small>same GPU</small></div>
-          <div class="done" id="done">✓ one program · no network</div></div>
-        <div class="tally"><b>1</b> language · <b>1</b> program · <b>no API</b> in between</div></div>
-    </div>
-    <figure class="proof rv"><img src="img/clip-island-100m.jpg" alt="omxplorer computing a median over 100 million rows at 203M rows a second, the progress in its top island, the sheet still live" loading="lazy">
-      <figcaption><b>100 million rows, on the GPU.</b> omxplorer runs a median over every row. The window stays live while it works.</figcaption></figure>
-  </div>
-</section>
-
-<!-- 5 · Real apps -->
-<section id="apps">
-  <div class="wrap">
-    <div class="head">
-      <div class="eyebrow rv">Showcase <span class="badge ok big"><i></i>four apps run today</span></div>
-      <h2 class="rv">Real apps, <span class="two">built on omxcode.</span></h2>
-    </div>
-    <div class="apps">
-      <a class="appcard rv" href="omxplorer.html">
-        <img src="goals/30/big-median-gtk.jpg" alt="omxplorer over 100 million rows: a median by region, the window live throughout" loading="lazy">
-        <div class="txt"><h3>omxplorer <span class="badge ok"><i></i>runs today</span></h3>
-          <p>A data explorer for big files. Edit a chart by its sentence; the window never waits.</p>
-          <div class="tags"><span>100M rows</span><span>agent tools</span><span>Linux · web · Mac</span></div>
-          <span class="go">See omxplorer</span></div>
-      </a>
-    </div>
-    <div class="apps minor">
-      <a class="appcard rv" href="gallery/#console">
-        <img src="gallery/img/console-models-web.png" alt="omxconsole's My models screen: three local models with their state, labels, size and speed" loading="lazy">
-        <div class="txt"><h3>omxconsole <span class="badge ok"><i></i>runs</span></h3>
-          <p>Serves your local AI models. Built from components only.</p>
-          <div class="tags"><span>web · Linux · Mac</span></div>
-          <span class="go">See it in the gallery</span></div>
-      </a>
-      <a class="appcard rv" href="gallery/#widgets">
-        <img src="img/widgets-web-dark.png" alt="The widgets app: a CodeMirror note, a counter and an ECharts chart" loading="lazy">
-        <div class="txt"><h3>Widgets <span class="badge ok"><i></i>runs</span></h3>
-          <p>CodeMirror and ECharts from npm, inside a native app.</p>
-          <div class="tags"><span>web · Linux · Mac</span><span>strict CSP</span></div>
-          <span class="go">See it in the gallery</span></div>
-      </a>
-      <a class="appcard rv" href="#t-build">
-        <img src="img/agentchat-web.png" alt="Agent chat: the agent answers with a card it built" loading="lazy">
-        <div class="txt"><h3>Agent chat <span class="badge ok"><i></i>runs</span></h3>
-          <p>An AG-UI agent answers with cards and forms you can use.</p>
-          <div class="tags"><span>web · Linux</span><span>AG-UI</span></div>
-          <span class="go">How it answers</span></div>
-      </a>
-    </div>
-    <div class="ctas rv"><a class="cta" href="gallery/">Open the gallery</a><a class="more" href="omxplorer.html">Meet omxplorer</a></div>
-  </div>
-</section>
-
-<!-- 6 · For developers: a strip of small tiles, each linking out -->
-<section id="dev">
-  <div class="wrap">
-    <div class="head">
-      <div class="eyebrow rv">For developers</div>
-      <h2 class="rv">Under the hood.</h2>
-    </div>
-    <div class="devstrip rv">
-      <a class="dt" href="js.md">
-        <div class="vis"><img src="img/widgets-gtk-dark.png" alt="" loading="lazy"></div>
-        <h3>First-class JavaScript</h3>
-        <p>npm and TypeScript widgets in native apps. <b>Secure by default; agents read and set them.</b></p>
-        <span class="go">JavaScript widgets</span></a>
-      <a class="dt" href="how.html">
-        <div class="vis"><div class="fan"><img src="img/how/tile-gtk.png" alt="" loading="lazy"><img src="img/how/tile-web.png" alt="" loading="lazy"><img src="img/how/tile-mac.png" alt="" loading="lazy"></div></div>
-        <h3>One line, three toolkits</h3>
-        <p><code class="mono">KpiTile(card)</code> becomes GTK, HTML and AppKit. <b>No CSS, no Swift.</b></p>
-        <span class="go">See the three</span></a>
-      <a class="dt" href="components.html">
-        <div class="vis"><span class="big"><span id="ncomp">36</span><small>components</small></span></div>
-        <h3>Components, each tested</h3>
-        <p><b><span id="ntested">Each one</span> run by a script.</b> Every platform, square by square.</p>
-        <span class="go">Browse the components</span></a>
-      <a class="dt" href="why.html">
-        <div class="vis"><img src="img/why/omxcode-1m.jpg" alt="" loading="lazy"></div>
-        <h3>Measured, every loss stated</h3>
-        <p>Four builds, one machine. <b>Where we win, and where Rust does.</b></p>
-        <span class="go">See the scoreboard</span></a>
-    </div>
+    <p class="losses rv"><b>Where others win:</b> Rust + Polars uses less memory at 100M rows (3.6 GB, no GPU; omxcode 5.6 GB plus 5.7 GB on the GPU) · native Rust starts the particle field in 211 ms · these numbers need an NVIDIA GPU (omxplorer also runs its queries on Apple's Metal).</p>
+    <div class="ctas rv" style="justify-content:flex-start;margin-top:20px"><a class="more" href="why.html">The full scoreboard</a><a class="more" href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/data-benchmark.md">The 100M-row results</a></div>
   </div>
 </section>
 
@@ -603,11 +558,11 @@ scripts/omxplorer.sh</pre>
 
 <footer>
   <div class="wrap">
-    <p class="note">Every number here comes from a script, on one Linux machine with an NVIDIA RTX 3090; Mac results from GitHub's macOS runners. <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/benchmarks.md">How we measured</a>.</p>
+    <p class="note">Every number here comes from a script, on one Linux machine with an NVIDIA RTX 3090; Mac results from GitHub's macOS runners. "Runs" means a script drives the app on that platform today. <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/benchmarks.md">How we measured</a>.</p>
     <div class="cols">
       <div><h4>Start</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode">GitHub</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode#readme">README</a></li><li><a href="#get">Download</a></li></ul></div>
       <div><h4>See it</h4><ul><li><a href="omxplorer.html">omxplorer</a></li><li><a href="components.html">Components</a></li><li><a href="gallery/">Gallery</a></li><li><a href="why.html">Scoreboard</a></li></ul></div>
-      <div><h4>Build</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/reference.md">Reference</a></li><li><a href="how.html">How it works</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/architecture.md">Architecture</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agent.md">Agent host</a></li><li><a href="llms.txt">For agents: llms.txt</a></li></ul></div>
+      <div><h4>Build</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/reference.md">Reference</a></li><li><a href="how.html">How it works</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/ui-threads.md">The UI thread</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agent.md">Agent host</a></li><li><a href="llms.txt">For agents: llms.txt</a></li></ul></div>
       <div><h4>Follow along</h4><ul><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/benchmarks.md">Benchmarks</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/next.md">What's next</a></li><li><a href="https://github.com/abhisheksreesaila/omxcode/issues">Issues</a></li></ul></div>
     </div>
     <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
@@ -617,46 +572,20 @@ scripts/omxplorer.sh</pre>
 <script src="site.js"></script>
 <script>
 (() => {
-  const { $, $$, reduce, scene } = window.omx;
+  const { $, $$, reduce, scene, seg } = window.omx;
 
-  // hero: once the diagram has built (and every 9 s while it's on screen) app.mojo sends a pulse down each wire
-  const iso = $(".iso"), plate = $(".iso .plate");
-  if (iso && !reduce) {
-    const NS = "http://www.w3.org/2000/svg";
-    const flows = $$(".iso .wire").map(g => { const f = document.createElementNS(NS, "path"); f.setAttribute("d", $("path", g).getAttribute("d")); f.setAttribute("pathLength", "1");
-      f.setAttribute("class", "flow"); f.style.opacity = 0; g.after(f); return [f, $(`.iso .tile[data-o="${g.dataset.o}"]`)]; });
-    const push = () => { plate.classList.remove("send"); void plate.getBBox(); plate.classList.add("send");
-      flows.forEach(([f, tile], i) => setTimeout(() => {
-        f.animate([{ strokeDashoffset: .1, opacity: 1 }, { strokeDashoffset: -1, opacity: 1 }], { duration: 950, easing: "cubic-bezier(.45,0,.3,1)" }).onfinish = () => {
-          tile.classList.remove("hit"); void tile.getBBox(); tile.classList.add("hit"); };
-      }, 250 + i * 110)); };
-    let first = true;
-    scene(iso, async step => { await step(first ? 2700 : 9000); first = false; push(); });
-  }
+  // clips play only while on screen (and never on their own when motion is reduced)
+  const vio = new IntersectionObserver(es => es.forEach(e => { const v = e.target; if (e.isIntersecting && !reduce) { v.preload = "auto"; v.play().catch(() => {}); } else v.pause(); }), { threshold: .4 });
+  $$("video[data-play]").forEach(v => { vio.observe(v); if (reduce) v.controls = true; });
 
-  // 2 · the bento: each tile rises on the spring as it enters, then its own scene plays while it's on screen.
-  // Every selector is scoped to its tile's id (an earlier page lost a section's cards to a global .gain selector).
+  // bento tiles rise as they enter, then each plays its own scene while on screen.
+  // Every selector is scoped to its tile's id (an earlier page lost a section's cards to a global selector).
   const tileIO = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); tileIO.unobserve(e.target); } }), { threshold: .15 });
   $$(".bento .bt").forEach(t => tileIO.observe(t));
   const kick2 = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); };
   const tile = (id, play, still) => { const t = $(id); if (!t) return; if (reduce) still(t); else scene(t, step => play(t, step)); };
 
-  // tile 1 · the tap travels down the gutter rail: Button → update() → render[mandelbrot] → the kernel; the real result lands
-  tile("#t-gpu", async (t, step) => {
-    const code = $(".code", t), rail = $(".rail", t), fill = $(".rail i", t), out = $(".out", t), btn = $(".btn", t);
-    const lines = $$(".ln", t).sort((a, b) => a.dataset.n - b.dataset.n);
-    const ys = lines.map(l => l.offsetTop + l.offsetHeight / 2);
-    rail.style.top = ys[0] + "px"; rail.style.height = (ys[3] - ys[0]) + "px";
-    let stops = $$(".stop", t);
-    if (!stops.length) stops = ys.map(y => { const s = document.createElement("span"); s.className = "stop"; s.style.top = y + "px"; code.append(s); return s; });
-    lines.forEach(l => l.classList.remove("lit")); stops.forEach(s => s.classList.remove("lit")); out.classList.remove("on"); fill.style.height = "0px";
-    await step(700);
-    kick2(btn, "press"); lines[0].classList.add("lit"); stops[0].classList.add("lit"); await step(200); btn.classList.remove("press"); await step(350);
-    for (let i = 1; i < 4; i++) { fill.style.height = (ys[i] - ys[0]) + "px"; await step(560); lines[i].classList.add("lit"); stops[i].classList.add("lit"); await step(260); }
-    out.classList.add("on"); await new Promise(() => {});   // once: the result stays
-  }, t => { $$(".ln", t).forEach(l => l.classList.add("lit")); $(".out", t).classList.add("on"); });
-
-  // tile 2 · tap → update() → view(): the count rolls. The button is real: tap it yourself.
+  // tap → update() → view(): the count rolls. The button is real: tap it yourself.
   tile("#t-two", async (t, step) => {
     const tap = $(".tap", t); if (!tap.dataset.wired) { tap.dataset.wired = 1; tap.addEventListener("click", () => tapOnce(t)); }
     await step(1600); tapOnce(t); await step(1800);
@@ -670,7 +599,7 @@ scripts/omxplorer.sh</pre>
     setTimeout(() => { cv.classList.remove("lit"); st.forEach(s => s.classList.remove("lit")); }, 1300);
   }
 
-  // tile 3 · each control slides in and names its tool; then the cost of seeing what changed: a call vs a screenshot
+  // each control slides in and names its tool; then the cost of seeing what changed
   tile("#t-use", async (t, step) => {
     const rows = $$(".tools > span", t), cost = $(".cost", t);
     rows.forEach(r => r.classList.remove("on")); cost.classList.remove("on"); await step(500);
@@ -678,46 +607,35 @@ scripts/omxplorer.sh</pre>
     await step(300); cost.classList.add("on"); await new Promise(() => {});   // once
   }, t => { $$(".tools > span", t).forEach(r => r.classList.add("on")); $(".cost", t).classList.add("on"); });
 
-  // tile 4 · you ask; the reply arrives as data, line by line; it's checked; then it becomes the native card
+  // you ask; the reply arrives as data, line by line; it's checked; then it becomes the native card
   tile("#t-build", async (t, step) => {
     const ask = $(".ask", t), json = $(".json", t), lns = $$(".json .ln", t), ok = $(".ok", t), shot = $(".shot", t);
-    [ask, json, ok, shot].forEach(e => e.classList.remove("on")); json.classList.remove("gone"); lns.forEach(l => l.classList.remove("on", "lit"));
+    [ask, json, ok, shot].forEach(e => e.classList.remove("on")); json.classList.remove("gone"); lns.forEach(l => l.classList.remove("on"));
     await step(500); ask.classList.add("on"); await step(700); json.classList.add("on");
     for (const l of lns) { await step(320); l.classList.add("on"); }
-    await step(300); ok.classList.add("on"); lns.forEach(l => l.classList.add("lit")); await step(900);
+    await step(300); ok.classList.add("on"); await step(900);
     json.classList.add("gone"); shot.classList.add("on"); await new Promise(() => {});   // once: the card stays
-  }, t => { ["ask", "shot", "ok"].forEach(c => $("." + c, t).classList.add("on")); });
+  }, t => { ["ask", "shot", "ok"].forEach(c => $("." + c, t).classList.add("on")); $(".json", t).style.display = "none"; });
 
-  // tile 5 · the same app pops onto each platform, one after another
-  tile("#t-plat", async (t, step) => {
-    const fs = $$("figure", t); fs.forEach(f => f.classList.remove("on")); await step(400);
-    for (const f of fs) { f.classList.add("on"); await step(180); }
-    await new Promise(() => {});   // once
-  }, t => $$("figure", t).forEach(f => f.classList.add("on")));
+  // the window never waits: frames keep lighting one by one while the job's bar fills
+  const fr = $("#t-ui .frames"); fr.innerHTML = "<i></i>".repeat(30);
+  tile("#t-ui", async (t, step) => {
+    const fs = $$(".frames i", t), bar = $(".job i", t);
+    fs.forEach(f => f.classList.remove("on")); bar.style.transition = "none"; bar.style.width = "0"; await step(500);
+    void bar.offsetWidth; bar.style.transition = "width 3s linear"; bar.style.width = "100%";
+    for (const f of fs) { f.classList.add("on"); await step(100); }
+    await step(1600);
+  }, t => { $$(".frames i", t).forEach(f => f.classList.add("on")); $(".job i", t).style.width = "100%"; });
 
+  // number bars grow once as they enter
+  const cio = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); cio.unobserve(e.target); } }), { threshold: .3 });
+  $$(".cm").forEach(c => reduce ? c.classList.add("in") : cio.observe(c));
 
-  // 4 · two lanes: other apps send one slow round trip; in omxcode the three parts light up together and it's answered
-  const pk1 = $("#pk1"), wait = $("#wait"), fix = $(".lane.fix");
-  if (!reduce) {
-    scene($("#lanes"), async step => {
-      const trip = (from, to, ms, label) => new Promise(res => { pk1.firstElementChild.textContent = label;
-        pk1.animate([{ left: from, opacity: 1 }, { left: to, opacity: 1 }], { duration: ms, easing: "cubic-bezier(.45,0,.55,1)", fill: "forwards" }).onfinish = res; });
-      fix.classList.remove("lit"); await step(600);
-      wait.classList.add("on"); setTimeout(() => fix.classList.add("lit"), 250);
-      await trip("11%", "48%", 900, "request · JSON"); await trip("48%", "86%", 900, "request · JSON");
-      pk1.firstElementChild.textContent = "the server computes"; await step(900);
-      await trip("86%", "48%", 900, "response · JSON"); await trip("48%", "11%", 900, "response · JSON");
-      wait.classList.remove("on"); pk1.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: "forwards" }); await step(1800);
-    });
-  } else { pk1.style.opacity = 1; pk1.style.left = "48%"; fix.classList.add("lit"); }
-
-
-  // 6 · the component count, from docs/components.json (written from the code by scripts/catalog.py)
-  fetch("components.json").then(r => r.json()).then(list => {
-    $("#ncomp").textContent = list.length;
-    const n = list.filter(c => c.status.linux === "tested").length;
-    $("#ntested").textContent = n === list.length ? "Every one" : n + " of them";
-  }).catch(() => {});
+  // the isometric diagrams: a segmented switch swaps the frame
+  const ISO = [["launch/iso/one-app.html", "One app.mojo, one process: native screens on each platform, MCP tools and AG-UI screens for agents, jobs and the GPU underneath."],
+               ["launch/iso/smooth-tap.html", "update() and view() decide on the UI thread; queries, video and documents run on job threads and come back as events. Measured: a 1.5 s job, longest frame gap 17 ms."]];
+  const pick = seg($("#isoseg"), (i, user) => { if (!user) return; $("#isof").src = ISO[i][0]; $("#isoopen").href = ISO[i][0]; $("#isocap").textContent = ISO[i][1]; });
+  requestAnimationFrame(() => pick(0, false));
 })();
 </script>
 <script src="omxqua/src/omxqua.js" defer></script>

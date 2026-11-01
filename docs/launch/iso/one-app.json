@@ -1,0 +1,269 @@
+{
+ "title": "One app.mojo, every screen, agent tools built in",
+ "subtitle": "The same view() and update() become native screens and an MCP tool server",
+ "style": "ink",
+ "live": true,
+ "nodes": [
+  {
+   "id": "linux",
+   "label": "Linux",
+   "kind": "client",
+   "at": [
+    0,
+    -10
+   ],
+   "hue": 145,
+   "tech": "GTK 4 \u00b7 runs",
+   "desc": "Runs today. Every check in the repo drives the app here on a headless display."
+  },
+  {
+   "id": "mac",
+   "label": "Mac",
+   "kind": "client",
+   "at": [
+    0,
+    -5
+   ],
+   "hue": 145,
+   "tech": "AppKit \u00b7 runs",
+   "desc": "Runs on GitHub's macOS runners (scripts/mac-ci); omxplorer ships as a Mac app with its queries on Metal."
+  },
+  {
+   "id": "web",
+   "label": "Web",
+   "kind": "client",
+   "at": [
+    0,
+    0
+   ],
+   "hue": 205,
+   "tech": "HTML \u00b7 runs",
+   "desc": "Runs today: the web host draws real HTML from the app. Next: the GPU work in the browser through WebGPU."
+  },
+  {
+   "id": "android",
+   "label": "Android",
+   "kind": "client",
+   "at": [
+    0,
+    5
+   ],
+   "hue": 38,
+   "tech": "views \u00b7 emulator",
+   "desc": "Runs on the Android emulator with Android's own views. Phones are on the roadmap."
+  },
+  {
+   "id": "iphone",
+   "label": "iPhone",
+   "kind": "client",
+   "at": [
+    0,
+    10
+   ],
+   "hue": 38,
+   "tech": "UIKit \u00b7 builds",
+   "desc": "Builds and signs. Running it on a phone is on the roadmap."
+  },
+  {
+   "id": "mcp",
+   "label": "Agent tools",
+   "kind": "ai",
+   "at": [
+    15,
+    -9
+   ],
+   "hue": 280,
+   "tech": "MCP",
+   "desc": "Every app is an MCP tool server: a button becomes a tool, a field a tool with text. A disabled button is not a tool."
+  },
+  {
+   "id": "agui",
+   "label": "Agent screens",
+   "kind": "ai",
+   "at": [
+    21,
+    -9
+   ],
+   "hue": 280,
+   "tech": "AG-UI",
+   "desc": "An agent answers with UI as data; it is checked against the component catalog, then drawn natively."
+  },
+  {
+   "id": "app",
+   "label": "app.mojo",
+   "kind": "service",
+   "at": [
+    8,
+    0
+   ],
+   "size": [
+    3,
+    3
+   ],
+   "hue": 255,
+   "tech": "view() \u00b7 update()",
+   "desc": "Two functions. view() describes the screen; update() reacts to a tap, a key or an agent's call. One way to do each thing."
+  },
+  {
+   "id": "jobs",
+   "label": "Jobs",
+   "kind": "worker",
+   "at": [
+    15,
+    6
+   ],
+   "hue": 18,
+   "tech": "own threads",
+   "desc": "Slow work (a query, a video decode, OCR) runs on its own thread; its answer comes back to update() as an event."
+  },
+  {
+   "id": "engine",
+   "label": "Data engine",
+   "kind": "db",
+   "at": [
+    15,
+    0
+   ],
+   "hue": 175,
+   "tech": "omxcore \u00b7 tables, video, PDFs",
+   "desc": "Tables, SQL and group-bys over millions of rows, in the app's own process; videos and documents become tables too, linked by key, time or place."
+  },
+  {
+   "id": "gpu",
+   "label": "GPU",
+   "kind": "service",
+   "shape": "chip",
+   "at": [
+    22,
+    3
+   ],
+   "hue": 95,
+   "tech": "Mojo kernels",
+   "desc": "The same language as the buttons: Mojo kernels on NVIDIA (CUDA-class) and Apple (Metal)."
+  }
+ ],
+ "edges": [
+  {
+   "from": "app",
+   "to": "linux",
+   "label": "native"
+  },
+  {
+   "from": "app",
+   "to": "mac"
+  },
+  {
+   "from": "app",
+   "to": "web"
+  },
+  {
+   "from": "app",
+   "to": "android"
+  },
+  {
+   "from": "app",
+   "to": "iphone"
+  },
+  {
+   "from": "app",
+   "to": "mcp",
+   "label": "tools"
+  },
+  {
+   "from": "app",
+   "to": "agui",
+   "label": "UI as data"
+  },
+  {
+   "from": "app",
+   "to": "jobs",
+   "style": "async",
+   "label": "start a job"
+  },
+  {
+   "from": "app",
+   "to": "engine",
+   "label": "query"
+  },
+  {
+   "from": "jobs",
+   "to": "gpu",
+   "label": "kernels"
+  },
+  {
+   "from": "engine",
+   "to": "gpu"
+  }
+ ],
+ "flows": [
+  {
+   "name": "A tap",
+   "desc": "A person taps a button on any screen.",
+   "steps": [
+    {
+     "from": "linux",
+     "to": "app",
+     "note": "The tap reaches update() as an event, the same on every platform."
+    },
+    {
+     "from": "app",
+     "to": "engine",
+     "note": "update() asks the data engine for the new numbers, in the same process: no HTTP, no JSON."
+    },
+    {
+     "from": "engine",
+     "to": "gpu",
+     "note": "The group-by runs as a Mojo kernel on the GPU."
+    },
+    {
+     "from": "gpu",
+     "to": "engine",
+     "note": "The answer stays in the app's memory."
+    },
+    {
+     "from": "engine",
+     "to": "app",
+     "note": "view() describes the new screen."
+    },
+    {
+     "from": "app",
+     "to": "linux",
+     "note": "The host updates only what changed, with its own native widgets."
+    }
+   ]
+  },
+  {
+   "name": "An agent calls a button",
+   "desc": "An agent uses the same app through MCP.",
+   "steps": [
+    {
+     "from": "mcp",
+     "to": "app",
+     "note": "The agent calls a tool; to the app it is the same event as a tap."
+    },
+    {
+     "at": "app",
+     "note": "update() runs exactly as it would for a person."
+    },
+    {
+     "from": "app",
+     "to": "mcp",
+     "note": "The reply says what changed in words: new texts, what opened, which tools appeared."
+    }
+   ]
+  }
+ ],
+ "zones": [
+  {
+   "id": "proc",
+   "label": "one Mojo process",
+   "nodes": [
+    "app",
+    "jobs",
+    "engine",
+    "gpu"
+   ],
+   "hue": 255
+  }
+ ]
+}

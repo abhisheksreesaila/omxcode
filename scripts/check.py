@@ -454,6 +454,11 @@ def main():
     headless.ensure()
     only = sys.argv[1:]
     results = []
+    # always: the public component page and the cover's component block are generated (scripts/site_components.py)
+    if not only or "SITE" in only:
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "site_components.py"), "--check"], capture_output=True, text=True)
+        results.append(r.returncode == 0)
+        print(f"{'PASS' if r.returncode == 0 else 'FAIL'}  SITE  {(r.stdout + r.stderr).strip()}", flush=True)
     for name, fn in MILESTONES:
         if only and name not in only:
             continue
