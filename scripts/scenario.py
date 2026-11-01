@@ -16,6 +16,12 @@ the links imply), Export CSV the answer, select each answer row (the video seeks
 Export pack. Leaves <out>/answer.csv, <out>/selections.csv (shipment, frame, page, x, y, w, h: read back from the app's trace
 lines), <out>/pack/<shipment>.pdf and .mp4. Runs in the models environment (the OCR model runs in the app's process).
 
+robots (goal 47): the DROID fleet (scripts/robot_data.py's folder): fleet.csv as the sheet, a chart and a pivot by lab;
+telemetry.parquet as a card; the paper folder; four links (episode keys, the clip file, the time link, the paper by its
+source); the featured failure picked (its video plays beside its telemetry lanes, three seeks with the cursor); the paper's
+fields read from its text; two questions in words (JOIN LINKED); the picked failures packed. Leaves <out>/robots.json,
+<out>/pack/*.pdf.
+
 drone: for each flight, open drone_<k>.mp4 → Insert > Table… telemetry_<k>.csv (a log: it lands as a table card and a
 chart + map card in step with the video) → Analyze (Assets & defects, the inspection preset: georeferenced with the log)
 → Query the defects → Export CSV; then Insert > Compare inspections… (earlier: flight a, later: flight b) → Export the
@@ -293,15 +299,184 @@ def claims(media, out):
     print(f"SLOW lines: {len(slow)}")
 
 
+ROBOT_LINKS = ("fleet.episode = telemetry.episode", "fleet.clip = episode.file", "telemetry.t ~ episode.t +0", "fleet.source = paper.file")
+ROBOT_CHART = "average success_pct by lab, largest first"
+ROBOT_VERBS = "average success_pct by verb, largest first"
+ROBOT_Q1 = "failures where the gripper closed, let go and closed again"
+ROBOT_SQL1 = ("SELECT fleet.episode AS episode, fleet.lab AS lab, fleet.task AS task, fleet.clip AS clip, fleet.source AS source, "
+              "COUNT(*) AS closes FROM fleet JOIN LINKED WHERE fleet.success = 0 AND telemetry.gripper_event = 'close' "
+              "GROUP BY fleet.episode, fleet.lab, fleet.task, fleet.clip, fleet.source HAVING COUNT(*) >= 2 ORDER BY closes DESC, episode")
+ROBOT_Q2 = "episodes within 30% of the arm's joint speed limit"
+ROBOT_SQL2 = ("SELECT fleet.episode AS episode, fleet.lab AS lab, fleet.outcome AS outcome, MAX(telemetry.speed) AS peak "
+              "FROM fleet JOIN LINKED WHERE telemetry.speed > 1.5225 GROUP BY fleet.episode, fleet.lab, fleet.outcome ORDER BY peak DESC")
+ROBOT_PICKED = ("F00118", "F00119", "F00124")  # the featured drop and two failures beside it on the same bench (same robot, same day)
+ROBOT_SQL3 = ("SELECT fleet.episode AS episode, fleet.lab AS lab, fleet.date AS date, fleet.task AS task, fleet.duration_s AS duration_s, "
+              "fleet.grasps AS grasps, fleet.peak_speed AS peak_speed, fleet.clip AS clip, fleet.source AS source FROM fleet WHERE fleet.episode IN ("
+              + ", ".join(f"'{e}'" for e in ROBOT_PICKED) + ") ORDER BY episode")
+ROBOT_FIELDS = "recorded at, frequency of, Franka"
+
+
+def robots(media, out):
+    """Why did the robot drop it? (goal 47) The DROID fleet: the sheet, a pivot and a chart by lab; the featured failure's
+    video beside its telemetry lanes (one cursor, through links); two questions in words (JOIN LINKED over 17M telemetry
+    rows); the paper, linked by key; a pack of the picked failures. Only omxplorer's own tools."""
+    import csv
+    import json
+    import re
+    docs = out / "documents"
+    for d in (docs, out / "config"):
+        d.mkdir(parents=True, exist_ok=True)
+    if (docs / "pack").exists():
+        for f in (docs / "pack").iterdir():
+            f.unlink()
+    truth = json.loads((media / "truth.json").read_text())
+    rows = list(csv.DictReader(open(media / "fleet.csv")))
+    hero_row = [r["episode"] for r in rows].index(truth["hero"]) + 1
+    env = {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(out / "config"), "MOJOUI_TRACE": "1", "MOJOUI_BUDGET_MS": os.environ.get("MOJOUI_BUDGET_MS", "50"),
+           "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES", "0")}
+    s = Session(env)
+    said = {}
+
+    def until(tool, timeout=300):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if tool in s.c.names():
+                return
+            time.sleep(0.2)
+        raise SystemExit(f"{tool} never appeared")
+
+    def traced(prefix, mark, timeout=8):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            got = [l for l in s.log[mark:] if l.startswith(prefix)]
+            if got:
+                return got[-1]
+            time.sleep(0.05)
+        return ""
+
+    try:
+        print("# Why did the robot drop it? 63,000 real robot episodes from 13 labs (DROID), their telemetry, video and paper,")
+        print("# joined only by links a person (or an agent) makes. Only omxplorer's own tools.")
+        # 1. the fleet
+        s.call("open-file", path=str((media / "fleet.csv").resolve()))
+        until("create-table")
+        s.call("create-table")
+        until("chart")
+        s.call("chart")
+        s.call("ask", text=ROBOT_CHART, submit=True)
+        said["chart"] = s.call("read", name="chart-1")
+        before = set(s.c.names())
+        s.call("pivot")
+        time.sleep(1.0)
+        drops = [t["name"] for t in s.c.tools() if t["name"] not in before and t.get("description", "").startswith("Dropdown")]
+        if len(drops) < 3:
+            raise SystemExit(f"the pivot's three dropdowns aren't on screen: {drops}")
+        for name, option in zip(drops[:3], ("n", "lab", "outcome")):  # (value, rows, columns: named by their options)
+            s.call(name, option=option)
+            time.sleep(0.5)
+        piv = [n for n in s.c.names() if n.startswith("pivot-") or n == "pivot-2"]
+        said["pivot"] = s.call("read", name="pivot-2") if "pivot-2" in s.c.names() else s.call("screen", quiet=True)
+        before = set(s.c.names())  # a second chart: success by the task's verb
+        s.call("chart")
+        time.sleep(0.6)
+        ask2 = [t["name"] for t in s.c.tools() if t["name"].startswith("ask")][-1:]  # (the new chart's field: the last one on screen)
+        chart2 = [n for n in s.c.names() if n.startswith("chart-") and n not in before]
+        if ask2 and chart2:
+            s.call(ask2[0], text=ROBOT_VERBS, submit=True)
+            said["verbs"] = s.call("read", name=chart2[0])
+        # 2. a failure opens: its video and its telemetry, one cursor
+        s.call("insert-table")
+        s.call("choose-table", path=str((media / "telemetry.parquet").resolve()))
+        until("table-telemetry")
+        s.call("links")
+        for l in ROBOT_LINKS:
+            s.call("link", text=l, submit=True)
+        mark = len(s.log)
+        s.call("grid", value=float(hero_row))
+        said["open"] = traced("OPEN: ", mark)
+        said["slice"] = traced("SLICE: ", mark)
+        until("telemetry-chart")
+        s.call("read", name="video")
+        seeks = []
+        for t in (4.0, 12.4, 13.3):  # (before; the shirt over the box; the shirt fallen on the box's wall)
+            mark = len(s.log)
+            s.call("seek", value=t)
+            s.call("render", quiet=True, name="telemetry-chart")
+            p, c = traced("PLAYER: t=", mark), traced("CURSOR: t=", mark)
+            seeks.append((t, p, c))
+        said["lanes"] = s.call("read", name="telemetry-chart")
+        # 4. the paper, linked by key (read before the questions: its fields are a table the links reach)
+        s.call("insert-documents", path=str((media / "paper").resolve()))
+        until("fields")
+        s.call("reader", option="PDF text")
+        s.call("fields", text=ROBOT_FIELDS)
+        s.call("read-documents")
+        until("table-paper-fields", 120)
+        s.call("read", name="table-paper-fields", count=3)
+        s.call("highlight-field", option="recorded at")
+        mark = len(s.log)
+        s.call("grid", value=float(hero_row + 1))
+        s.call("grid", value=float(hero_row))
+        said["document"] = traced("DOCUMENT: ", mark)
+        # 3. asked in words: JOIN LINKED over fleet ⨝ telemetry
+        def ask_field():  # (the query dialog's "Ask in words": "ask-2" while a chart's own ask field is on screen)
+            return [n for n in s.c.names() if n.startswith("ask") and n not in before_query][0]
+
+        for q, sql, name in ((ROBOT_Q1, ROBOT_SQL1, "regrasped"), (ROBOT_Q2, ROBOT_SQL2, "fastest")):
+            before_query = set(s.c.names())
+            s.call("query")
+            s.call(ask_field(), text=q)
+            s.call("sql", text=sql)
+            s.call("query-name", text=name)
+            s.call("run-query")
+            until(f"table-{name}", 600)
+            said[name] = s.call("read", name=f"table-{name}", count=12)
+        # 5. a pack of the picked failures
+        before_query = set(s.c.names())
+        s.call("query")
+        s.call(ask_field(), text="the failures I picked")
+        s.call("sql", text=ROBOT_SQL3)
+        s.call("query-name", text="picked")
+        s.call("run-query")
+        until("table-picked", 120)
+        said["picked"] = s.call("read", name="table-picked", count=5)
+        s.call("table-picked", value=1.0)  # (the featured drop, F00118: its video, lanes and the paper follow from the answer's row)
+        s.call("export-picked")
+        pack = [t["name"] for t in s.c.tools() if t["name"].startswith("export-pack") and "picked" in t.get("description", "")]
+        s.call(pack[0] if pack else "export-pack")
+        t0 = time.time()
+        while time.time() - t0 < 120 and len(list((docs / "pack").glob("*.pdf")) if (docs / "pack").exists() else []) < len(ROBOT_PICKED):
+            time.sleep(0.5)
+        time.sleep(2)
+    finally:
+        s.close()
+    for line in s.log:
+        if line.startswith(("JOB: ", "QUERY: ", "ASK: ", "LINK: ", "SELECT: ", "OPEN: ", "SLICE: ", "FOLLOW: ", "DOCUMENT: ", "PACK: ", "SLOW: ", "DOCUMENTS: ")):
+            print(line[:400])
+    print("\n# at each seek: the video's time and the telemetry lanes' cursor")
+    for t, p, c in seeks:
+        print(f"seek {t:>5.1f} s:  {p}   {c}")
+    made = sorted((docs / "pack").glob("*")) if (docs / "pack").exists() else []
+    (out / "pack").mkdir(exist_ok=True)
+    for f in made:
+        shutil.copyfile(f, out / "pack" / f.name)
+    slow = [l for l in s.log if l.startswith("SLOW: ")]
+    keep = ("JOB: ", "QUERY: ", "ASK: ", "LINK: ", "SELECT: ", "OPEN: ", "SLICE: ", "DOCUMENT: ", "PACK: ", "SLOW: ")
+    summary = {"seeks": seeks, "said": said, "pack": [f.name for f in made], "slow": slow, "hero": truth["hero"], "hero_row": hero_row,
+               "log": [l for l in s.log if l.startswith(keep)]}
+    (out / "robots.json").write_text(json.dumps(summary, indent=1))
+    print(f"pack: {[f.name for f in made]}; SLOW lines: {len(slow)}; summary {out / 'robots.json'}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("name", choices=["warehouse", "drone", "claims"])
+    ap.add_argument("name", choices=["warehouse", "drone", "claims", "robots"])
     ap.add_argument("--media", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    {"warehouse": warehouse, "drone": drone, "claims": claims}[a.name](Path(a.media).resolve(), out)
+    {"warehouse": warehouse, "drone": drone, "claims": claims, "robots": robots}[a.name](Path(a.media).resolve(), out)
 
 
 if __name__ == "__main__":

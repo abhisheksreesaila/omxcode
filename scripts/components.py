@@ -198,11 +198,16 @@ COMPOSITES = [
     ("Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)", "mojoui/documentjobs.mojo", [], "FolderFeed("),
     ("Ask → SQL (JOIN LINKED: the joins the sheet's key links imply; an answer's lineage, so its rows follow like its source's; questions taught with their SQL)", "mojoui/asksql.mojo", [], "implied_sql("),
     ("Pack PDF (a title and pages of blocks: facts, words, a table, a PDF page or a video frame with boxes marked; HTML printed to PDF by Chromium)", "mojoui/packpdf.mojo", [], "Pack("),
+    # the robot fleet (goal 47)
+    ("Telemetry lanes (many channels of a recording as stacked lanes on one clock: families from column names, one cursor with a dot and value per channel, event marks, spec lines; Raw/Smoothed on a track card)", "mojoui/telemetrychart.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "TelemetryChart("),
+    ("Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)", "mojoui/signal.mojo", [], "smooth("),
     ("Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)", "mojoui/pack.mojo", [], "PackJob("),
 ]
 
 # Built inside one app, not in mojoui yet: each should become a component before another app needs it.
 APP_LOCAL = [
+    ("Row follow reactions (a key link onto a video card's file plays the row's file; onto a time-linked log, its slice in lanes; a log's key index job; a spec table's limits)", "examples/omxplorer",
+     "follow_file, follow_log, near_file, time_linked_video, take_index and the spec-table read in follow_log (goal 47, review round 1): the pieces they call are components (MediaCards.named, series_where_indexed, KeyIndexJob, TrackCard.limits); the glue that picks which card reacts belongs in mojoui.links' react hooks with tests"),
     ("FormulaBar", "examples/workbook", "what's selected, its value, a formula field; migrate to mojoui.sheetchrome.FormulaBar"),
     ("Inspector", "examples/mxstudio", "the side panel: Comes from, Feeds, Your edits, Undo all (lineage and the edit log); migrate to mojoui.inspector"),
     ("Toolbar / StatusBar islands", "examples/workbook", "the island contents (title, Insert buttons, status) are assembled by the app; migrate to mojoui.sheetchrome"),

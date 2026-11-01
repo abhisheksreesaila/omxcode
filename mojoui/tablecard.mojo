@@ -58,6 +58,7 @@ struct TableCard(Movable):
     var w: Int
     var h: Int
     var slot: Int
+    var source: String  # the file it was read from ("" none): a relative path in a cell is read beside it
     var note: String  # where it came from ("from orders.csv", "a query"), shown under the title ("": none)
     var action: String  # one quiet action in its title bar ("": none): its label, icon, tag (an agent's tool) and tooltip
     var action_icon: String
@@ -80,6 +81,7 @@ struct TableCard(Movable):
         self.w = w
         self.h = h
         self.note = ""
+        self.source = ""
         self.action = ""
         self.action_icon = ""
         self.action_tag = ""

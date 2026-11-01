@@ -570,7 +570,9 @@ struct Links(Movable, Sized):
         (the selection's value in that link's column: its own column's, or the row's cell when it carries its row), each
         time link (its time in the other clock), and the cards in `same_table` (other cards showing the selection's table:
         the same row, implicitly). Key links chain: a value reached through one is followed on through the next link on the
-        same column (equal to equal is equal), never back to a card already reached (D-1261). A query's answer follows
+        same column (equal to equal is equal), never back to the selection's own card; a card reacts once (the first path that reaches it gives its follow) but is
+        followed on through every column it is reached by (D-1261, D-4714: the answer reaches the fleet by its episode, and
+        through its clip on to the video's file). A query's answer follows
         through what it was derived from (`derive`: its source's rows are selected), then on as its source would."""
         var out = List[Follow]()
         for c in same_table:
@@ -606,8 +608,12 @@ struct Links(Movable, Sized):
                 if not (mine_a or mine_b):
                     continue
                 var there = l.b if mine_a else l.a
-                if there.card in seen or there.table_name() in seen:
+                if there.card == sel.card or there.table_name() == sel.table:
+                    continue  # (never back to where the selection is)
+                if l.kind != LINK_KEY and (there.card in seen or there.table_name() in seen):
                     continue
+                if l.kind == LINK_KEY and (there.card + "\x1f" + there.column) in seen:
+                    continue  # (a card is followed on once per column: through another column, again; D-4714)
                 if l.kind == LINK_KEY:
                     var here = l.a if mine_a else l.b
                     var v = String("")
@@ -617,9 +623,11 @@ struct Links(Movable, Sized):
                         v = value
                     if v == "":
                         continue  # (a key link is about one column; another column's value means nothing there)
-                    out.append(Follow(there.card, there.table_name(), LINK_KEY, there.column, v, -1, -1.0, l.label()))
+                    if not (there.card in seen or there.table_name() in seen):  # (a card reacts once: to the first path that reaches it)
+                        out.append(Follow(there.card, there.table_name(), LINK_KEY, there.column, v, -1, -1.0, l.label()))
                     seen.append(there.card)
                     seen.append(there.table_name())
+                    seen.append(there.card + "\x1f" + there.column)
                     q_card.append(there.card)
                     q_table.append(there.table_name())
                     q_col.append(there.column)

@@ -28,8 +28,12 @@ from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.files import file_stem
 from mojoui.timeseries import TimeSeries, metric_label, metric_unit  # (they live with TimeSeries: the editor names its lanes with them too)
+from mojoui.telemetrychart import TelemetryChart, Mark, family_of
+from mojoui.logindex import KeyIndex
 from mojoui.view import (View, Text, Button, Canvas, HStack, Spacer, Card, Segmented, HEADLINE, CAPTION, ICON_ONLY, CENTER,
                          PAN, TAP, PRESS, SET_TO, TONE_ACCENT)
+
+comptime SCAN_MOST = 200_000  # a log this long (or shorter) may be scanned on the UI thread for a slice (a few ms)
 
 comptime TRACK_MESSAGES = 4  # a card's block: its chart's gestures (0), the column picked (1), close (2), its map's gestures (3)
 comptime TK_CHART = 0
@@ -106,6 +110,128 @@ def series_from_sheet(sheet: Sheet) raises -> TimeSeries:
     return ts^
 
 
+def is_multichannel(series: TimeSeries) -> Bool:
+    """A log whose channels come in families (joint_vel_1…7, pos_x/y/z): drawn as stacked lanes (mojoui.telemetrychart)
+    rather than one column at a time."""
+    for i in range(len(series.names)):
+        for j in range(i + 1, len(series.names)):
+            var f = family_of(series.names[i])
+            if f != series.names[i] and f == family_of(series.names[j]):
+                return True
+    return False
+
+
+def series_where(sheet: Sheet, key: String, value: String) raises -> Tuple[TimeSeries, List[Mark]]:
+    """The rows of a log table whose `key` column reads `value` (one episode of a fleet's telemetry), as a TimeSeries in
+    the log's order; every other text column's non-empty cells become marks (an event column: "close", "open"). Scans the
+    log, so only a log of up to SCAN_MOST rows: a longer one raises (index it, mojoui.logindex, and use
+    series_where_indexed)."""
+    var kc = sheet.index(key)
+    var tc = time_column(sheet)
+    if kc < 0 or tc < 0:
+        raise Error(("no column " + key) if kc < 0 else "no time column (t, time or seconds)")
+    var n = sheet.rows()
+    if n > SCAN_MOST:
+        raise Error("the log has " + String(n) + " rows: slice it through its index of " + key)
+    var keep = List[Int]()
+    if sheet.kind(kc) == TEXT:
+        var code = sheet.code_of(kc, value)
+        if code >= 0:
+            for r in range(n):
+                if sheet.value(kc, r) == Int64(code) and sheet.alive(r) and not sheet.is_null(tc, r):
+                    keep.append(r)
+    else:
+        for r in range(n):
+            if sheet.alive(r) and sheet.plain_text(kc, r) == value and not sheet.is_null(tc, r):
+                keep.append(r)
+    return _series_of(sheet, kc, tc, keep)
+
+
+def series_where_indexed(sheet: Sheet, key: String, value: String, index: KeyIndex) raises -> Tuple[TimeSeries, List[Mark]]:
+    """series_where through a KeyIndex of `key` (built off the UI thread): the rows found in O(1), exactly that key's;
+    raises when the index isn't of this log and key, or the log isn't grouped by it (never a guess)."""
+    var span = _key_rows(sheet, key, value, index)
+    var tc = time_column(sheet)
+    if tc < 0:
+        raise Error("no time column (t, time or seconds)")
+    var keep = List[Int]()
+    for r in range(span[0], span[0] + span[1]):
+        if sheet.alive(r) and not sheet.is_null(tc, r):
+            keep.append(r)
+    return _series_of(sheet, sheet.index(key), tc, keep)
+
+
+def _series_of(sheet: Sheet, kc: Int, tc: Int, keep: List[Int]) raises -> Tuple[TimeSeries, List[Mark]]:
+    var times = List[Float64]()
+    for r in keep:
+        times.append(Float64(sheet.plain_text(tc, r).replace(",", "")))
+    var ts = TimeSeries(times^)
+    var marks = List[Mark]()
+    for c in range(sheet.columns()):
+        var k = sheet.kind(c)
+        if c == tc or c == kc or k == BOOL or k == DATE:
+            continue
+        if k == TEXT:
+            for i in range(len(keep)):
+                var t = sheet.plain_text(c, keep[i])
+                if t.byte_length() > 0:
+                    marks.append(Mark(ts.times[i], t == "close" or t == "on" or t == "start", t))
+            continue
+        var values = List[Float64]()
+        for r in keep:
+            var s = sheet.plain_text(c, r).replace(",", "")
+            values.append(Float64(s) if s.byte_length() > 0 else (values[len(values) - 1] if len(values) > 0 else 0.0))
+        ts.add(_normal(sheet.name(c)), values^)
+    return (ts^, marks^)
+
+
+def _key_rows(sheet: Sheet, key: String, value: String, index: KeyIndex) raises -> Tuple[Int, Int]:
+    """(first row, count) of `value` in a grouped, indexed log; raises when the index can't say."""
+    var kc = sheet.index(key)
+    if kc < 0 or index.column != key or index.rows != sheet.rows() or index.edits != sheet.edits() or index.problem != "" or sheet.kind(kc) != TEXT:
+        raise Error("no index of " + key + " for this log")
+    if not index.grouped:
+        raise Error(key + "'s rows come in several runs: sort the log by " + key + " to slice it")
+    var code = sheet.code_of(kc, value)
+    return index.span_of(code) if code >= 0 else (-1, 0)
+
+
+def last_off_mark(sheet: Sheet, key: String, value: String, index: KeyIndex) raises -> Tuple[Float64, Int, Float64]:
+    """For one recording of an indexed log: the time and row of its last "off" event (a text cell that isn't close, on or
+    start: a gripper opening), else (-1, -1); and the recording's last time. Reads only the time and text columns of its
+    rows (a pack asks this per row: cheap, no TimeSeries)."""
+    var span = _key_rows(sheet, key, value, index)
+    var tc = time_column(sheet)
+    var kc = sheet.index(key)
+    var at = -1.0
+    var row = -1
+    var last = 0.0
+    for r in range(span[0], span[0] + span[1]):
+        if not sheet.alive(r) or sheet.is_null(tc, r):
+            continue
+        var t = Float64(sheet.plain_text(tc, r).replace(",", ""))
+        last = t
+        for c in range(sheet.columns()):
+            if c == kc or sheet.kind(c) != TEXT:
+                continue
+            var w = sheet.plain_text(c, r)
+            if w.byte_length() > 0 and not (w == "close" or w == "on" or w == "start"):
+                at = t
+                row = r
+    return (at, row, last)
+
+
+def row_words(sheet: Sheet, row: Int, most: Int = 16) -> String:
+    """One row's numbers in words ("joint_vel_1 0.12, gripper 0.97, …"), the first `most` number columns."""
+    var out = List[String]()
+    for c in range(sheet.columns()):
+        var k = sheet.kind(c)
+        if k == TEXT or k == BOOL or k == DATE or len(out) >= most:
+            continue
+        out.append(sheet.name(c) + " " + sheet.plain_text(c, row))
+    return ", ".join(out)
+
+
 struct TrackCard(Movable):
     var name: String
     var series: TimeSeries
@@ -120,6 +246,7 @@ struct TrackCard(Movable):
     var slot: Int
     var chart_size: Tuple[Float64, Float64]  # points, from the chart's last draw (taps)
     var note: String
+    var lanes: Optional[TelemetryChart]  # a multichannel log: stacked lanes instead of one column (is_multichannel)
 
     def __init__(out self, name: String, var series: TimeSeries, video: String, slot: Int, x: Int, y: Int, w: Int, h: Int):
         self.name = name
@@ -138,6 +265,33 @@ struct TrackCard(Movable):
         self.h = h
         self.chart_size = (400.0, 200.0)
         self.note = ""
+        self.lanes = None
+        if is_multichannel(self.series):
+            self.lanes = TelemetryChart(self.series.copy())
+            self.metric = 1  # (Smoothed)
+
+    def mark(mut self, var marks: List[Mark]):
+        """Events on a multichannel card's lanes (series_where's marks)."""
+        if self.lanes:
+            self.lanes.value().marks = marks^
+
+    def limits(mut self, names: List[String], values: List[Float64]) -> Int:
+        """Spec lines from a table of (channel, limit) rows: each named channel's lane gets ±its largest limit. How many
+        names matched a channel."""
+        if not self.lanes:
+            return 0
+        var n = 0
+        for i in range(min(len(names), len(values))):
+            if self.series.index(names[i]) >= 0:
+                var f = family_of(names[i])
+                var have = 0.0
+                for ref lane in self.lanes.value().lanes:
+                    if lane.family == f:
+                        have = lane.limit
+                if values[i] > have:
+                    self.lanes.value().limit(f, values[i])
+                n += 1
+        return n
 
     def has_map(self) -> Bool:
         return self.series.index("lat") >= 0 and self.series.index("lon") >= 0
@@ -170,6 +324,8 @@ struct TrackCard(Movable):
 
     def readout(self, t: Float64) -> String:
         """The row at t, in words: "0:12.5 · Altitude 60.2 m · Speed 8.0 m/s · 52.01035, 5.12041"."""
+        if self.lanes:
+            return self.lanes.value().describe(t)
         var out = clock_text(t)
         for ref n in self.metrics:
             var unit = metric_unit(n)
@@ -298,11 +454,16 @@ struct TrackCards(Movable, Sized):
                         except:
                             pass
                     elif event.number == PRESS or event.number == PAN or event.number == TAP:
-                        var cv = self.cards[k].chart(0.0)
-                        self.seek_to = cv.seek_at(event.x, font, pal)
+                        if self.cards[k].lanes:
+                            self.seek_to = self.cards[k].lanes.value().seek_at(event.x, self.cards[k].chart_size[0])
+                        else:
+                            var cv = self.cards[k].chart(0.0)
+                            self.seek_to = cv.seek_at(event.x, font, pal)
                         self.seek_card = k
                 elif which == TK_METRIC:
                     self.cards[k].metric = max(event.number, 0)
+                    if self.cards[k].lanes:  # (a multichannel card's switch: Raw or Smoothed)
+                        self.cards[k].lanes.value().set_smoothing(1 if event.number == 0 else 3)
                 elif which == TK_CLOSE:
                     self.remove(k)
                     self.closed = k
@@ -326,6 +487,9 @@ struct TrackCards(Movable, Sized):
         ref c = self.cards[k]
         if canvas == self.canvas(k):
             c.chart_size = (s.points_width(), s.points_height())
+            if c.lanes:
+                c.lanes.value().draw(s, font, pal, t)
+                return
             var cv = c.chart(t)
             cv.draw(s, font, pal)
         else:
@@ -336,6 +500,9 @@ struct TrackCards(Movable, Sized):
         if k < 0:
             return ""
         ref c = self.cards[k]
+        if canvas == self.canvas(k) and c.lanes:
+            return (c.name + ": " + String(len(c.lanes.value().lanes)) + " lanes over " + clock_text(c.lanes.value().duration()[1]) + ", in step with "
+                    + c.video + "; at the playhead " + c.readout(t) + ". Set it to a time in seconds to move the video there.")
         if canvas == self.canvas(k):
             return (c.name + ": " + metric_label(c.column()) + " over " + clock_text(c.series.times[len(c.series.times) - 1] if c.series.rows() > 0 else 0.0)
                     + ", in step with " + c.video + "; at the playhead " + c.readout(t) + ". Set it to a time in seconds to move the video there.")
@@ -346,11 +513,14 @@ struct TrackCards(Movable, Sized):
         ref c = self.cards[k]
         var tag = c.name.replace("_", "-").replace(" ", "-").lower()
         var labels = List[String]()
-        for ref n in c.metrics:
-            labels.append(metric_label(n))
+        if c.lanes:
+            labels = ["Raw", "Smoothed"]
+        else:
+            for ref n in c.metrics:
+                labels.append(metric_label(n))
         var parts = List[View]()
         parts.append(Text(c.name, HEADLINE).tag("track-title").tooltip(c.note if c.note != "" else "A log in step with " + c.video))
-        parts.append(Text(String(c.series.rows()) + " rows", CAPTION).tone(TONE_ACCENT))
+        parts.append(Text(String(c.series.rows()) + " rows" + (" · " + String(len(c.series.names)) + " channels" if c.lanes else String("")), CAPTION).tone(TONE_ACCENT))
         parts.append(Spacer())
         if len(labels) > 1:
             parts.append(Segmented(labels, min(c.metric, len(labels) - 1), self.msg(k) + TK_METRIC).tag(tag + "-column"))

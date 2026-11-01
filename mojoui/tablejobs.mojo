@@ -95,6 +95,7 @@ struct TableFileJob(JobBody):
         var font = Font()  # (the job's own: the grid's widths are measured here, not on the UI thread)
         var card = TableCard(file_stem(self.path), sheet^, -1, 0, 0, 0, 0, font, self.pal)
         card.note = "from " + file_name(self.path)
+        card.source = self.path
         return TableFile(self.path, card^, log^, Float64(now_ns() - t0) / 1e6)
 
 

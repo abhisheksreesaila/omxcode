@@ -39,7 +39,10 @@ comptime SET_LABELS_GO = DOC_MESSAGES + 4  # … Return: kept, and read
 comptime SET_READ = DOC_MESSAGES + 5
 comptime SET_FOCUS = DOC_MESSAGES + 6  # the Highlight dropdown (event.number)
 comptime SET_CLOSE = DOC_MESSAGES + 7
-comptime SET_MESSAGES = DOC_MESSAGES + 8
+comptime SET_READER = DOC_MESSAGES + 8  # the Reader dropdown (event.number: READ_OCR, READ_TEXT)
+comptime SET_MESSAGES = DOC_MESSAGES + 9
+comptime READ_OCR = 0  # Read runs the OCR model over each page's picture (scans, photos, anything)
+comptime READ_TEXT = 1  # Read takes a born-digital PDF's own text layer (exact, no model; nothing for a scan)
 comptime SET_BAR_H = 40  # the second bar (fields, Read, Highlight)
 
 
@@ -81,6 +84,7 @@ struct DocumentSet(Movable):
     var words: List[TextTable]  # per file, once read ([] before)
     var fields: List[List[Field]]  # per file, one per label
     var focus: Int  # the label a followed row highlights
+    var reader: Int  # READ_OCR or READ_TEXT
     var msg_base: Int
     var read_asked: Bool  # the last update() asked to read (Read, or Return in the labels field)
     var closed: Bool  # the last update() was its close button
@@ -100,6 +104,7 @@ struct DocumentSet(Movable):
         self.words = List[TextTable]()
         self.fields = List[List[Field]]()
         self.focus = 0
+        self.reader = READ_OCR
         self.msg_base = msg_base
         self.read_asked = False
         self.closed = False
@@ -264,6 +269,8 @@ struct DocumentSet(Movable):
                     self.focus = event.number
             elif m == SET_CLOSE:
                 self.closed = True
+            elif m == SET_READER:
+                self.reader = READ_TEXT if event.number == READ_TEXT else READ_OCR
         except e:
             self.problem = String(e)
         self.card.version += 1
@@ -297,6 +304,9 @@ struct DocumentSet(Movable):
         else:
             bar.append(TextField(self.labels_text, "Fields: the labels on the page, e.g. Invoice no., Total", b + SET_LABELS, b + SET_LABELS_GO).fill().grow()
                        .tag("fields").label("Fields to read").tooltip("The fields to read, as the labels printed beside their values, comma-separated; Return reads every document"))
+            var readers: List[String] = ["OCR model", "PDF text"]
+            bar.append(Dropdown(readers^, self.reader, b + SET_READER).tag("reader").tooltip(
+                "How Read reads the pages: the OCR model (any page, a scan or a photo) or a born-digital PDF's own text (exact; nothing for a scan)"))
             bar.append(Button("Read" if not self.is_read() else "Read again", b + SET_READ, SUBTLE, icon="search").tag("read-documents")
                        .tooltip("Read every page of every document (OCR, in the background) and find the fields: a table, one row per document"))
             if len(self.labels) > 0:
