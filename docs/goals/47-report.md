@@ -5,6 +5,8 @@ in omxplorer in Liquid dark, with video, charts and documents joined by explicit
 docs/goals/47-check.py. Branch `t3/robot-story-droid-data` (from main e670647).
 
 ## Result
+M0–M8 PASS (M9, the web host, not done). Featured failure: **F00118**. Clip: docs/img/clip-robots.mp4 (42 s). Shots: build/g47/shots/01–11.
+
 See "Milestones" at the end (the check's own lines). In short: the DROID fleet (63,344 real episodes, 13 labs, 16.8M
 telemetry rows) is the sheet; a chart and a pivot by lab; the featured failure's video plays beside four lanes of its
 telemetry on one cursor, opened by links alone; two questions in words answered by `JOIN LINKED` over 16.8M rows in
@@ -103,15 +105,15 @@ To record by hand (your screen recorder; a 1920×1200 window reads best): `pixi 
 - Only the left external camera; wrist and right views were not fetched (3× the bytes).
 
 ## Milestones
-docs/goals/47-check.py, full run on the final data, after review round 1 (build/g47/check-full.txt):
+docs/goals/47-check.py, full run on the final code (build/g47/check-full.txt). Reviewer: round 1 NEEDS WORK (fixed, D-4719…D-4727), round 2 PASS (its four small items fixed, D-4728). Goal 41 M8 and M9 re-run on this code: PASS.
 ```
 M0: PASS  63,344 episodes, 13 labs, 13,746 failures; hero F00118 (244 frames, clip ok); two runs byte-equal; lerobot + droid ok
 M1: PASS  signal; lanes; draw; seek; follow; index; slice; moment; card; named; page
-M2: PASS  telemetry episode=F00118 244 rows, 16 channels, 1.8 ms; cursor = player at 3 seeks; 0 SLOW at 50 ms
+M2: PASS  telemetry episode=F00118 244 rows, 16 channels, 1.7 ms; cursor = player at 3 seeks; 0 SLOW at 50 ms
 M3: PASS  chart: success by 13 labs = truth (PennPAL 95.11 … RAD 61.35); by verb, 16 verbs = truth; pivot: failure/success/total for all 13 labs = fleet.csv
 M4: PASS  regrasped 2,997 = truth; within 30% of the limit ['F04415', 'F11745', 'S05574', 'S20210'] = parquet; both asked in words, JOIN LINKED written out
 M5: PASS  page 15: the marked box reads '15Hz. Each DROID trajectory'
 M6: PASS  3 picked failures: a PDF each (its id; the frame at its last gripper release, its time = the parquet's; the paper's field and page) and a clip
-M7: PASS  63,344 episodes, table landed telemetry.parquet in 582.5 ms (16,847,616 rows); queries ['40.7 ms (2,997 rows)', '15.6 ms (4 rows)', '0.5 ms (3 rows)']; 0 SLOW
-M8: PASS  clip 41.7 s; 11 shots at 1440×900, luminance 0.13–0.26; 0 SLOW on GTK
+M7: PASS  63,344 episodes, table landed telemetry.parquet in 583.9 ms (16,847,616 rows); queries ['40.3 ms (2,997 rows)', '15.4 ms (4 rows)', '0.5 ms (3 rows)']; 0 SLOW
+M8: PASS  clip 41.8 s; 11 shots at 1440×900, luminance 0.13–0.26; 0 SLOW on GTK
 ```

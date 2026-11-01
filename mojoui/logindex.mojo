@@ -21,6 +21,7 @@ from mojoui.clock import now_ns
 struct KeyIndex(Copyable, Movable):
     var column: String
     var rows: Int  # the log's rows when it was built (a changed log needs a new index)
+    var edits: Int  # the log's edits then (an edited key cell makes the index stale: compare with Sheet.edits())
     var first: Dict[Int, Int]  # key code → its first row
     var count: Dict[Int, Int]  # key code → how many rows carry it
     var grouped: Bool  # every key's rows are one run
@@ -30,6 +31,7 @@ struct KeyIndex(Copyable, Movable):
     def __init__(out self, column: String):
         self.column = column
         self.rows = 0
+        self.edits = 0
         self.first = Dict[Int, Int]()
         self.count = Dict[Int, Int]()
         self.grouped = False
@@ -58,6 +60,7 @@ def build_key_index(sheet: Sheet, column: String) -> KeyIndex:
         return ix^
     var n = sheet.rows()
     ix.rows = n
+    ix.edits = sheet.edits()
     var grouped = True
     var prev = Int64(-1)
     var start = 0

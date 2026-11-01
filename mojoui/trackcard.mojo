@@ -27,13 +27,13 @@ from mojoui.sheet import Sheet, TEXT, BOOL, DATE
 from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.files import file_stem
-from mojoui.timeseries import TimeSeries, metric_label, metric_unit
+from mojoui.timeseries import TimeSeries, metric_label, metric_unit  # (they live with TimeSeries: the editor names its lanes with them too)
 from mojoui.telemetrychart import TelemetryChart, Mark, family_of
 from mojoui.logindex import KeyIndex
-
-comptime SCAN_MOST = 200_000  # a log this long (or shorter) may be scanned on the UI thread for a slice (a few ms)  # (they live with TimeSeries: the editor names its lanes with them too)
 from mojoui.view import (View, Text, Button, Canvas, HStack, Spacer, Card, Segmented, HEADLINE, CAPTION, ICON_ONLY, CENTER,
                          PAN, TAP, PRESS, SET_TO, TONE_ACCENT)
+
+comptime SCAN_MOST = 200_000  # a log this long (or shorter) may be scanned on the UI thread for a slice (a few ms)
 
 comptime TRACK_MESSAGES = 4  # a card's block: its chart's gestures (0), the column picked (1), close (2), its map's gestures (3)
 comptime TK_CHART = 0
@@ -188,7 +188,7 @@ def _series_of(sheet: Sheet, kc: Int, tc: Int, keep: List[Int]) raises -> Tuple[
 def _key_rows(sheet: Sheet, key: String, value: String, index: KeyIndex) raises -> Tuple[Int, Int]:
     """(first row, count) of `value` in a grouped, indexed log; raises when the index can't say."""
     var kc = sheet.index(key)
-    if kc < 0 or index.column != key or index.rows != sheet.rows() or index.problem != "" or sheet.kind(kc) != TEXT:
+    if kc < 0 or index.column != key or index.rows != sheet.rows() or index.edits != sheet.edits() or index.problem != "" or sheet.kind(kc) != TEXT:
         raise Error("no index of " + key + " for this log")
     if not index.grouped:
         raise Error(key + "'s rows come in several runs: sort the log by " + key + " to slice it")

@@ -864,6 +864,7 @@ struct Main(App):
             self.log_index = ix^
         except e:
             self.message = "Couldn't index " + self.log_index_table + ": " + String(e)
+            self.pending_slice = None
             return
         if self.pending_slice:
             var f = self.pending_slice.take()
@@ -1467,7 +1468,8 @@ struct Main(App):
             return ""
         var t0 = now_ns()
         ref sheet = self.tables.cards[t].sheet
-        var ready = Bool(self.log_index) and self.log_index_table == f.table and self.log_index.value().column == f.column and self.log_index.value().rows == sheet.rows()
+        var ready = (Bool(self.log_index) and self.log_index_table == f.table and self.log_index.value().column == f.column and self.log_index.value().rows == sheet.rows()
+                     and self.log_index.value().edits == sheet.edits())
         if not ready and sheet.rows() > SCAN_MOST:  # (a long log: its key index is built off the UI thread first; the slice follows)
             self.pending_slice = f
             if not self.log_index_job:
@@ -2628,6 +2630,11 @@ struct Main(App):
         """Every background job on the current table stopped and forgotten, waiting until each has really stopped (the
         table and its GPU copy are about to be given back; a cancel is seen between blocks of rows)."""
         self.charts.forget(wait=True)
+        if self.log_index_job:  # (a log's key index reads a snapshot of its table: stopped before any table goes)
+            var ij = self.log_index_job.take()
+            ij.cancel()
+            _ = ij.wait()
+        self.pending_slice = None
         self.held = List[Tuple[Int, SheetObject]]()
         if self.col_job:
             self.col_job.value().cancel()
