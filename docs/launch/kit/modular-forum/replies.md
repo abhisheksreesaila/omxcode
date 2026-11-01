@@ -42,4 +42,6 @@ Not MAX yet. Today the GPU work is the data engine and the drawing, and a speech
 Try `scripts/omxplorer.sh` and tell me where it broke. Issues on GitHub. Mojo people: the FFI and phone-runtime notes in the post are where I'd most like advice.
 
 ### How is this different from Foxglove or Rerun?
-They're great for replaying a recording: 3D, ROS bags, teams. omxplorer starts one level up. The whole fleet is a spreadsheet, you ask a question in words across every telemetry row (16.8M in about 40 ms here, no Python, no server), and tapping an answer opens that run's video and telemetry on one cursor, with its documents linked. I'd like it to sit alongside them, not replace them. (Comparison from their docs, 2026-10-31: https://claude.ai/artifact/EEDSaAsr9UFF24m65E1utw; don't claim "faster" until the head-to-head is measured.)
+They're great for replaying a recording: 3D, ROS bags, teams. omxplorer starts one level up. The whole fleet is a spreadsheet, you ask a question in words across every telemetry row (16.8M in about 40 ms here, no Python, no server), and tapping an answer opens that run's video and telemetry on one cursor, with its documents linked. I'd like it to sit alongside them, not replace them.
+
+*(Not for posting: based on their docs as of 2026-10-31, in the comparison doc https://claude.ai/artifact/EEDSaAsr9UFF24m65E1utw. Don't claim "faster" until the head-to-head is measured.)*
