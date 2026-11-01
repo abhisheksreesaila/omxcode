@@ -1,0 +1,297 @@
+<!-- title: omxcode · Never freezes, and agents drive it (part 2 of 2); accent: --code -->
+
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxcode · part 2 of 2</span>
+  <h1>It never freezes.<br><span class="w">Agents drive it.</span></h1>
+  <p class="lede">Slow work runs off the UI thread and comes back as an event. The same view tree that becomes GTK widgets becomes MCP tools, so every app is an agent's toolbox from its first line.</p>
+  <div class="grid g2" style="margin-top:34px">
+    <div class="card"><div class="num">1,527 → 83<small>ms</small></div><p>the longest frame gap on a Mac during a 1.5 s job, before and after jobs got their own threads (GitHub's virtual Macs)</p></div>
+    <div class="card"><div class="num">0<small>per-app work</small></div><p>to make an app an MCP server: a button's tag is the tool's name</p></div>
+  </div>
+  <div class="src">docs/ui-threads.md · docs/decisions.md D-792 · docs/agent.md</div>
+  <div class="mark"><b>●</b> omxlabs.tech</div>
+  <aside class="notes">
+    Part two of omxcode, and two promises: the window never freezes, and an AI agent can drive any app without screenshots. On a Mac, giving jobs their own threads took the worst frame gap from a second and a half to under a tenth of a second. And making an app an MCP server takes no code.
+  </aside>
+</section>
+
+<!-- 2 · the rule -->
+<section>
+  <span class="k">The UI thread</span>
+  <h2><code>update()</code> and <code>view()</code> only decide.</h2>
+  <div class="split" style="margin-top:24px">
+    <div class="side">
+      <ul>
+        <li>Every platform draws on <b>one thread</b>. At 60 fps it has about <b>16 ms</b> a frame.</li>
+        <li>Slow work is a <b>request</b>, a <b>timer</b> or a <b>job</b>, on a worker thread.</li>
+        <li>Its answer comes back to <code>update()</code> as an <b>ordinary event</b>.</li>
+        <li>App state is only touched on the UI thread: <b>no locks, no races</b>, no "which thread am I on?"</li>
+      </ul>
+    </div>
+    <pre class="code sm"><i># a network call: queue it; the reply comes back
+# to update() as Event(FETCHED, ...)</i>
+self.http.get(FETCHED, <em>"http://localhost:8000/api/orders"</em>)
+
+<i># data work (a query, an import, a sort): a job;
+# update() hears LANDED when it ends</i>
+self.running = start_ui_job(StepJob(self.orders.value(), self.filters))
+<b>def</b> jobs_message(self) -> Int: <b>return</b> LANDED</pre>
+  </div>
+  <div class="src">docs/ui-threads.md "The idea in one paragraph" and "The rules for an app"</div>
+  <aside class="notes">
+    Every platform draws on one thread, with about sixteen milliseconds a frame at sixty hertz. The rule: update and view only decide. Anything slow is a request, a timer or a job, and its answer comes back as an ordinary event. State is only touched on the UI thread, so app code has no locks.
+  </aside>
+</section>
+
+<!-- 3 · what runs off the thread -->
+<section>
+  <span class="k">You get these for free</span>
+  <h2>Everything slow already lives elsewhere.</h2>
+  <table class="t">
+    <tr><th>Work</th><th>How</th><th>Where</th></tr>
+    <tr><td><b>Network</b></td><td><code>Http.get(...)</code> queues it; the reply is an <code>Event</code></td><td>mojoui/effects.mojo</td></tr>
+    <tr><td><b>Timers</b></td><td><code>App.every()</code> lists <code>Every(ms, msg)</code></td><td>mojoui/effects.mojo</td></tr>
+    <tr><td><b>Data</b></td><td><code>start_ui_job(...)</code>: a query, import or sort on its own thread</td><td>mojoui/jobs.mojo</td></tr>
+    <tr><td><b>Video</b></td><td>a decoder thread per video; open ≈ 40 µs, seek ≈ 6 µs, newest seek wins</td><td>mojoui/framefeed.mojo</td></tr>
+    <tr><td><b>Documents</b></td><td>opening, OCR and packs run as jobs</td><td>mojoui/documentjobs.mojo</td></tr>
+    <tr><td><b>Big lists</b></td><td>only what's on screen is built</td><td>LazyList, the data grid</td></tr>
+  </table>
+  <div class="src">docs/ui-threads.md "What the framework guarantees" · docs/goals/41-report.md (framefeed)</div>
+  <aside class="notes">
+    The framework already moves the usual slow things off the thread. Network and timers are effects; queries, imports and sorts are jobs. Each video gets its own decoder thread: open in about forty microseconds, seek in about six, newest seek wins. Documents and exports are jobs too.
+  </aside>
+</section>
+
+<!-- 4 · how a job wakes the UI -->
+<section>
+  <span class="k">Inside a job</span>
+  <h2>A job ends. The UI hears it at once.</h2>
+  <div class="split" style="margin-top:22px;grid-template-columns:1.7fr 1fr">
+    <pre class="code xs" style="white-space:pre-wrap"><i># mojoui.jobs: background jobs (MX frame's `Job`) that wake the UI the moment they end, instead of waiting for the
+# app's next poll at a display frame.
+# …
+# How: the job's completion callback (mxframe.start_job_then, on the job's own thread) writes one byte to a pipe the
+# host made (wake_pipe); the host watches the pipe's read end on its main loop (GTK: g_unix_fd_add; the web host: a
+# thread blocking on it) and sends App.jobs_message() to update() at once. On Apple there is no pipe: the callback asks
+# the app's delegate (the AppKit host's target) for `jobsEnded:` on the main run loop's next turn, …</i>
+
+<b>def</b> start_ui_job[B: JobBody](<b>var</b> body: B) -> Job[B.Out]:
+    <i>"""mxframe.start_job, plus a wake of the UI when the job ends (done, failed or cancelled)."""</i>
+    <b>return</b> start_job_then(body^, WakeUI())</pre>
+    <div class="side">
+      <ul>
+        <li><b>A job owns its inputs:</b> a snapshot or a copy, never a reference to app state.</li>
+        <li><b>Linux:</b> a finished job reaches <code>update()</code> in <b>0.02–0.05 ms</b> (median).</li>
+        <li>Nothing else crosses threads: <code>update()</code> reads the result with <code>poll()</code>.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">mojoui/jobs.mojo · real comment and code, trimmed · docs/ui-threads.md (platform table)</div>
+  <aside class="notes">
+    When a job finishes, its own thread writes one byte to a pipe that GTK's main loop is watching, so update hears about it in a few hundredths of a millisecond. On Apple there's no pipe, so the job asks the main run loop to call us. A job owns a copy of its inputs, so nothing else crosses threads.
+  </aside>
+</section>
+
+<!-- 5 · before and after -->
+<section>
+  <span class="k">Measured</span>
+  <h2>A 1.5 s job, before and after.</h2>
+  <div class="bars">
+    <div class="bar"><span class="name">Mac, before</span><div class="track"><div class="fill" style="--w:100%"></div></div><span class="val">1,527 ms</span></div>
+    <div class="bar"><span class="name">Mac, after</span><div class="track"><div class="fill me" style="--w:5.5%"></div></div><span class="val">71–83 ms</span></div>
+    <div class="bar"><span class="name">Linux</span><div class="track"><div class="fill me" style="--w:1.2%"></div></div><span class="val">17 ms</span></div>
+  </div>
+  <p class="lede" style="margin-top:30px">The longest gap between frames while the job ran. The Mac went from <b>1 frame</b> in 1.5 s to <b>28–38</b>; Linux drew <b>90</b>.</p>
+  <div class="src">examples/jobwake · D-792 (GitHub's macOS 15 and 26 runners, no GPU, CPU build; before: 1516–1527 ms) · docs/ui-threads.md</div>
+  <aside class="notes">
+    examples jobwake runs a one-and-a-half-second job and measures the longest gap between frames. On a Mac before the fix: one frame, frozen. After: 71 to 83 milliseconds. Linux drew ninety frames, worst gap seventeen. The Mac numbers are GitHub's virtual Macs; real hardware is next.
+  </aside>
+</section>
+
+<!-- 6 · the watchdog -->
+<section>
+  <span class="k">Proof, not promises</span>
+  <h2>A watchdog names every slow frame.</h2>
+  <div class="split" style="margin-top:22px">
+    <pre class="code xs"><b>def</b> _slow(self, what: String, name: String, t0: Int):
+    <i>"""Prints a SLOW: line when the work that started
+    at t0 took longer than the budget."""</i>
+    <b>if</b> self.budget_ns &lt;= 0 <b>or</b> t0 &lt; self.armed_at:
+        <b>return</b>
+    <b>var</b> took = now_ns() - t0
+    <b>if</b> took > self.budget_ns:
+        print(<em>"SLOW: "</em> + what + <em>" "</em> + name + <em>" "</em> + ms(took) + <em>" ms"</em>, flush=True)</pre>
+    <div>
+      <pre class="code sm"><i># examples/slowcheck: a deliberately slow update()</i>
+SLOW: update msg=1 80.07 ms</pre>
+      <div class="card" style="margin-top:16px"><div class="num">0<small>SLOW: lines</small></div><p>at a 50 ms budget across omxplorer's checked sessions: video, a 1M-row insert, query, export (headless, CPU drawing)</p></div>
+    </div>
+  </div>
+  <div class="src">mojoui/app.mojo Runtime.watch · docs/goals/41-report.md M1–M3 · docs/goals/47-report.md M2, M7, M8</div>
+  <aside class="notes">
+    Set MOJOUI BUDGET MS and the runtime times every update, view and canvas draw; anything over budget prints a SLOW line. Every host gets it for free. The checks run omxplorer's sessions at fifty milliseconds and want zero lines, and a deliberately slow toy app proves the watchdog fires.
+  </aside>
+</section>
+
+<!-- 7 · MCP -->
+<section>
+  <span class="k">Agent native</span>
+  <h2>Every app is an MCP server.</h2>
+  <pre class="code sm" style="margin-top:22px"><b>$</b> scripts/agent.sh omxplorer
+claude mcp add omxplorer -- pixi run python …/mojoui/hosts/agent.py …/build/omxplorer/web</pre>
+  <table class="t">
+    <tr><th>On screen</th><th>Tool</th><th>Value</th></tr>
+    <tr><td>A button with a tag</td><td>its tag: <code>popover-button</code></td><td>—</td></tr>
+    <tr><td>A menu item</td><td><code>file-save</code>, <code>view-skin-graphite</code></td><td>—</td></tr>
+    <tr><td>A text field</td><td>its tag or placeholder</td><td><code>text</code>, <code>submit</code></td></tr>
+    <tr><td>A canvas</td><td>its tag: <code>grid</code></td><td><code>gesture</code>, <code>x</code>, <code>y</code></td></tr>
+    <tr><td>A dialog's content</td><td>its title first: <code>settings-done</code></td><td>as above</td></tr>
+  </table>
+  <div class="src">docs/agent.md "Give an app to Claude Code" and "The tools" (D-160, D-162)</div>
+  <aside class="notes">
+    The agent is just another host. Where GTK turns the view tree into widgets, the agent host turns it into MCP tools. One script prints the line for Claude Code. A button's tag is the tool's name, a menu item is file-save, a text field takes text, a canvas takes gestures.
+  </aside>
+</section>
+
+<!-- 8 · a real session -->
+<section>
+  <span class="k">A real session</span>
+  <h2>No screenshots. No coordinates.</h2>
+  <div class="split" style="margin-top:22px">
+    <pre class="code sm"><b>→</b> screen
+<b>←</b> HelloMojo · design: Native · 1 tools on this screen
+  "Tap Greet"
+  Button "Greet" → greet
+<b>→</b> greet
+<b>←</b> Did greet.
+  Now: Hello, Ada! (click 1)</pre>
+    <pre class="code sm"><b>→</b> choose-a-file {"path": "orders_1m.csv"}
+<b>→</b> create-table
+<b>→</b> insert-chart
+<b>→</b> ask {"text": "revenue by product,
+        largest first, top 5",
+        "submit": true}
+<b>←</b> Did ask.
+  Now: chart0: 0.6 ms</pre>
+  </div>
+  <p class="lede">Each call answers in words: the new texts, what opened or closed, which tools appeared or went.</p>
+  <div class="src">left: scripts/agent_client.py build/hello/web, run 2026-11-01 · right: README.md "Agent native" (omxplorer, 1M rows)</div>
+  <aside class="notes">
+    Two real sessions. Left, hello: the agent reads the screen, sees one tool, greet, calls it, and gets back what changed, in words. Right, omxplorer on a million rows: open, table, chart, ask, and the answer says the chart took 0.6 milliseconds.
+  </aside>
+</section>
+
+<!-- 9 · permission model -->
+<section>
+  <span class="k">Safe by construction</span>
+  <h2>The screen is the permission model.</h2>
+  <div class="grid g3">
+    <div class="card"><h3>A disabled button is no tool</h3><p>If a person can't press it, an agent can't call it.</p></div>
+    <div class="card"><h3>Dialogs are temporary</h3><p>A dialog's or a context menu's items are tools only while it's open.</p></div>
+    <div class="card"><h3>Mistakes teach</h3><p>A wrong name or value comes back as an error listing the tools, so the agent corrects itself.</p></div>
+  </div>
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card"><div class="num">58<small>of 174</small></div><p>components and widgets run through the agent by a check so far</p></div>
+    <div class="card"><h3>Also</h3><p><code>read</code> gives the screen's text or a grid's rows; <code>render</code> gives a drawn view as a PNG.</p></div>
+  </div>
+  <div class="src">docs/agent.md · docs/components.md "Totals" (Agent ✅ 58)</div>
+  <aside class="notes">
+    The screen is the permission model. A disabled button isn't a tool; a dialog's buttons exist only while it's open. A wrong call comes back with the list of tools, so the agent corrects itself. Fifty-eight components are proven through the agent so far.
+  </aside>
+</section>
+
+<!-- 10 · AG-UI -->
+<section>
+  <span class="k">The other direction · AG-UI</span>
+  <h2>Agents build UI as data.</h2>
+  <div class="split" style="margin-top:22px">
+    <div>
+      <pre class="code xs">{<em>"ui"</em>: {<em>"component"</em>: <em>"Card"</em>, <em>"title"</em>: <em>"Signup"</em>, <em>"children"</em>: [
+  {<em>"component"</em>: <em>"TextField"</em>, <em>"placeholder"</em>: <em>"Your name"</em>,
+   <em>"bind"</em>: <em>"/form/name"</em>},
+  {<em>"component"</em>: <em>"Toggle"</em>, <em>"label"</em>: <em>"Subscribe"</em>,
+   <em>"bind"</em>: <em>"/form/subscribe"</em>},
+  {<em>"component"</em>: <em>"Button"</em>, <em>"label"</em>: <em>"Submit"</em>,
+   <em>"action"</em>: <em>"submit"</em>, <em>"style"</em>: <em>"prominent"</em>}]}}</pre>
+      <div class="side" style="margin-top:16px"><p><b>Refused, with a reason the agent can read:</b> an unknown component (<code>Script</code>, <code>WebFrame</code>), a bad prop, a bind that isn't a state path, over 8 levels, 200 components or 32 KB.</p></div>
+    </div>
+    <div class="shot contain" style="height:400px"><img src="img/agentchat-web.png" alt="agentchat on the web"></div>
+  </div>
+  <div class="src">docs/agui.md "UI from data" (render_ui, 13 catalogued components) · examples/agentchat</div>
+  <aside class="notes">
+    AG-UI goes the other way: the agent sends a UI as JSON through render UI. omxcode checks it against a catalogue of thirteen components and draws it natively. A script or a web frame is refused with a reason the agent can read.
+  </aside>
+</section>
+
+<!-- 11 · five stacks -->
+<section>
+  <span class="k">One app, five stacks</span>
+  <h2>20M particles: one file, WebGPU speed.</h2>
+  <div class="bars">
+    <div class="bar"><span class="name">JS + WebGPU</span><div class="track"><div class="fill" style="--w:5%"></div></div><span class="val">3.01 ms</span></div>
+    <div class="bar"><span class="name">omxcode</span><div class="track"><div class="fill me" style="--w:5.2%"></div></div><span class="val">3.13 ms</span></div>
+    <div class="bar"><span class="name">Rust + wgpu</span><div class="track"><div class="fill" style="--w:10%"></div></div><span class="val">5.99 ms</span></div>
+    <div class="bar"><span class="name">JS + Rust/wasm</span><div class="track"><div class="fill" style="--w:89%"></div></div><span class="val">53.45 ms</span></div>
+    <div class="bar"><span class="name">Plain JS</span><div class="track"><div class="fill" style="--w:100%"></div></div><span class="val">217.70 ms</span></div>
+  </div>
+  <p class="lede" style="margin-top:24px">A frame at 20M, lower is better (bars capped at 60 ms). Files · languages: omxcode <b>1 · 1</b>, JS + WebGPU 8 · 5. <b>Where we lose:</b> native Rust at 1M (0.34 vs 1.23 ms), cold start (211 vs 461 ms) and memory (146 vs 294 MB).</p>
+  <div class="src">docs/benchmarks.md · Rust + wgpu native, offscreen · each stack written by its own agent from its official docs</div>
+  <aside class="notes">
+    One twenty-million-particle app, five stacks, each written by its own agent. JS plus WebGPU is fastest at 3.01 milliseconds; omxcode is 3.13 in one Mojo file; native Rust 5.99. Native Rust wins at a million particles, cold start and memory. Every loss is on the benchmarks page.
+  </aside>
+</section>
+
+<!-- 12 · where Mojo pushed back -->
+<section>
+  <span class="k">Where Mojo pushed back</span>
+  <h2>What I'd tell the next person.</h2>
+  <div class="grid g2">
+    <div class="card"><h3>FFI is narrow</h3><p>Scalars and <code>(pointer, length)</code> strings only, never structs by value. Exports can't raise.</p></div>
+    <div class="card"><h3>A SIMD scratch crash</h3><p>A <code>SIMD</code> vector indexed at run time as scratch (<code>stack[sp] = v</code>) segfaults the compiler, no message. <code>stack_allocation[n, T]()</code> works.</p></div>
+    <div class="card"><h3>No official phone target</h3><p>The iPhone build needs two runtime functions; a small, labelled C shim stands in (<code>KGEN_CompilerRT_AlignedAlloc</code> / <code>AlignedFree</code>).</p></div>
+    <div class="card"><h3>The language moves</h3><p><code>fn</code> is deprecated, <code>@value</code> is replaced by <code>@fieldwise_init</code>, <code>UnsafePointer</code> is deprecated for <code>Pointer</code>. Fetch the docs, don't guess.</p></div>
+  </div>
+  <div class="src">CLAUDE.md "Mojo rules that bite" (Mojo 1.1.0) · spike/kgen_shim.c (unofficial) · README.md "Why Mojo, honestly"</div>
+  <aside class="notes">
+    Where Mojo pushed back: FFI is scalars and pointer-length strings. A run-time-indexed SIMD scratch vector crashes the compiler silently; stack allocation works. No official phone target, so a small labelled C shim stands in for two runtime functions. And the language moves fast, so I fetch the docs.
+  </aside>
+</section>
+
+<!-- 13 · honest edges -->
+<section>
+  <span class="k">The honest edges</span>
+  <h2>What it can't do yet.</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Mojo is young</h3><p>Version 1.1, a small ecosystem, no Windows release. Flutter and React Native are far ahead on maturity.</p></div>
+    <div class="card"><h3>iPhone only builds</h3><p>It compiles and signs. It hasn't run on a phone, and its jobs still run on the main thread.</p></div>
+    <div class="card"><h3>Android is partial</h3><p>19 of 174 components run on the emulator by a check.</p></div>
+    <div class="card"><h3>The Mac is on loan</h3><p>Checked on GitHub's virtual Macs; the matrix counts Mac components as "builds".</p></div>
+    <div class="card"><h3>NVIDIA first</h3><p>Apple's GPU through Metal is checked on CI Macs only; real MacBook numbers aren't measured.</p></div>
+    <div class="card"><h3>One wait left</h3><p>A median over 100M rows in memory still makes the window wait about 0.7 s.</p></div>
+  </div>
+  <div class="src">README.md "Why Mojo, honestly", "The honest edge" · docs/components.md "Totals" · docs/ui-threads.md · docs/launch/kit/sources.md S9</div>
+  <aside class="notes">
+    What it can't do yet: Mojo is young, no Windows. The iPhone only builds. Android runs nineteen components. The Mac is checked on virtual Macs. The GPU path is NVIDIA first. And a median over a hundred million rows still makes the window wait about 0.7 seconds; that's next.
+  </aside>
+</section>
+
+<!-- 14 · outro -->
+<section>
+  <span class="k">Try it · part 2 of 2</span>
+  <h2>Hand your app to an agent today.</h2>
+  <pre class="code" style="margin-top:26px">git clone https://github.com/abhisheksreesaila/omxcode && cd omxcode && pixi install
+scripts/build.sh hello all
+scripts/agent.sh hello        <i># then: claude mcp add hello -- …</i></pre>
+  <div class="road" style="grid-template-columns:repeat(3,1fr)">
+    <div class="now"><span class="when">now</span><h3>Four hosts + agents</h3><p>Linux, web, Mac on CI, Android emulator + the agent host (MCP, AG-UI)</p></div>
+    <div><span class="when">next</span><h3>Real devices</h3><p>iPhone on a phone, Android's newer components, Apple GPUs, the web on WebGPU</p></div>
+    <div><span class="when">later</span><h3>From a sentence</h3><p>an agent writes an app from one sentence; Windows once Mojo ships it</p></div>
+  </div>
+  <p class="cta" style="margin-top:20px">omxlabs.tech</p>
+  <div class="src">MIT · github.com/abhisheksreesaila/omxcode · direction: omxlabs omxcode/deck.html, talking-points.md</div>
+  <div class="mark"><b>●</b> omxcode</div>
+  <aside class="notes">
+    That's omxcode: it never freezes, and every app is an agent's toolbox. Clone it, build hello, hand it to Claude Code with one line. Next: real devices, Apple's GPU and the web on WebGPU. It's MIT; Mojo people, tell me what I should have done differently.
+  </aside>
+</section>

@@ -1,0 +1,232 @@
+<!-- title: omxplorer · part 3 · Beyond robots, and what's next; accent: --plorer -->
+
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxplorer · part 3 of 3</span>
+  <div class="hero">
+    <div>
+      <h1>Beyond robots,<br><span class="w">and what's next.</span></h1>
+      <p class="lede">The same workspace for sheets, video and paperwork: a chart you edit by its sentence, 100M-row dashboards, video that becomes rows. Then, honestly, where we're behind.</p>
+      <div class="card" style="margin-top:26px; display:inline-block"><div class="num">30.3<small>ms a click</small></div><p>a dashboard over 100M rows</p></div>
+    </div>
+    <div class="shot contain" style="height:360px"><img src="img/readme-report.jpg" alt="a report over 1M rows, its chart edited by its sentence"></div>
+  </div>
+  <div class="src">docs/data-benchmark.md (goal 38, measured at 856a7e9, before the release build)</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    Parts one and two were about robots. omxplorer is a general data workspace, and this part shows the rest: charts you edit by their sentence, 100-million-row dashboards, and video that turns into rows.
+    Then I'll be honest about where we're behind, and what's next.
+  </aside>
+</section>
+
+<!-- 2 · the sentence -->
+<section>
+  <span class="k">The title is the chart</span>
+  <h2>Tap a word. <span class="w">The bars move.</span></h2>
+  <div class="shot" style="height:300px; margin-top:24px"><img style="object-view-box: inset(53% 9% 6% 1%)" src="img/readme-report.jpg" alt="Sum of revenue by carrier, as bars"></div>
+  <div class="grid g3" style="margin-top:16px">
+    <div class="card"><h3>Every coloured word is a button</h3><p>Sum, revenue, carrier, as bars: tap one to see its choices</p></div>
+    <div class="card"><h3>Or type it</h3><p>"top 3, unpaid, as a line" in the field under the sentence</p></div>
+    <div class="card"><div class="num" style="font-size:44px">6.4<small>ms</small></div><p>a median per group over 1M rows, on the GPU</p></div>
+  </div>
+  <div class="src">README.md "Measured" (RTX 3090) · mojoui/sentence.mojo · shot: docs/img/readme-report.jpg</div>
+  <aside class="notes">
+    A chart's title is the chart. This one reads sum of revenue by carrier, every carrier, as bars. Tap the word sum, pick median, and the bars recompute; or type what you want in the field under it.
+    A median per group over a million rows takes 6.4 milliseconds on the GPU, so it feels instant.
+  </aside>
+</section>
+
+<!-- 3 · sentence code -->
+<section>
+  <span class="k">How the sentence works</span>
+  <h2>Words are buttons. <span class="w">Buttons are tools.</span></h2>
+  <pre class="code sm" style="margin-top:28px"><i># mojoui/sentence.mojo</i>
+Sentence([Word("Sum", ASK_COMBINE, "word-combine"), Word(" of "),
+          Word("amount", ASK_VALUE, "word-value")], width=46)
+
+<b>if</b> w.msg != NO_MSG:
+    line.append(Button(w.text, w.msg, TOKEN_LIT <b>if</b> w.lit <b>else</b> TOKEN).tag(w.tag))
+<b>else</b>:
+    line.append(Text(w.text, style))</pre>
+  <p class="lede" style="font-size:24px">A tag names the button, and the agent host turns every tagged button into an MCP tool. The word you tap is the word an agent calls.</p>
+  <div class="src">mojoui/sentence.mojo (trimmed) · docs/agent.md</div>
+  <aside class="notes">
+    In code, a sentence is a list of words. Words with choices become buttons with a tag; plain words are text.
+    Because the agent host turns every tagged button into a tool, word-combine is something you tap and something an agent can call.
+  </aside>
+</section>
+
+<!-- 4 · 100M rows -->
+<section>
+  <span class="k">100 million rows</span>
+  <h2>A dashboard, <span class="w">30 ms a click.</span></h2>
+  <div class="bars">
+    <div class="bar" style="grid-template-columns:300px 1fr 130px"><span class="name">omxcode + omxcore</span><div class="track"><div class="fill me" style="--w:29%"></div></div><span class="val">30.3 ms</span></div>
+    <div class="bar" style="grid-template-columns:300px 1fr 130px"><span class="name">Rust + Polars + egui</span><div class="track"><div class="fill" style="--w:35%"></div></div><span class="val">37.0 ms</span></div>
+    <div class="bar" style="grid-template-columns:300px 1fr 130px"><span class="name">JS + FastAPI + Polars</span><div class="track"><div class="fill" style="--w:42%"></div></div><span class="val">44.2 ms</span></div>
+    <div class="bar" style="grid-template-columns:300px 1fr 130px"><span class="name">JS + DuckDB-WASM</span><div class="track"><div class="fill" style="--w:100%"></div></div><span class="val">104.9 ms</span></div>
+  </div>
+  <p class="caption" style="margin-top:24px">median of medians, a click · omxcode + omxcore pooled p95: 49.1 ms</p>
+  <div class="src">docs/data-benchmark.md · goal 38, 100M rows, measured at 856a7e9 before the release build; not re-measured on it</div>
+  <aside class="notes">
+    A dashboard over 100 million rows, every click re-aggregating everything. Our dashboard on omxcode and omxcore has a median of about 30 milliseconds; a Rust, Polars and egui build is 37, JavaScript with DuckDB in the browser about 105.
+    The caveat: this was measured before the release build, and the 100-million-row run hasn't been repeated on it yet.
+  </aside>
+</section>
+
+<!-- 5 · video becomes rows -->
+<section>
+  <span class="k">Every kind of data</span>
+  <h2>A video becomes rows.</h2>
+  <div class="split wide">
+    <div class="shot contain" style="height:420px"><video src="img/clip-warehouse.mp4" poster="img/clip-warehouse.jpg" controls muted playsinline preload="metadata"></video></div>
+    <div class="side">
+      <ul>
+        <li>frames decoded, analysed on the GPU: <b>463 frames/s</b></li>
+        <li>pallets 14/14, printed codes 14/14</li>
+        <li>rows: frame, t, kind, box, code, damaged, track</li>
+        <li>a reel: faces blurred, ID burned in</li>
+      </ul>
+      <p style="margin-top:14px"><b>Generated footage</b>, so every frame's truth is known. Real warehouse footage hasn't been tried.</p>
+    </div>
+  </div>
+  <div class="src">docs/goals/39-report.md M4, M5 · recorded from omxplorer, driven by its agent tools</div>
+  <aside class="notes">
+    Video is just another source of rows. The warehouse clip is analysed on the GPU at about 460 frames a second: every pallet and printed code found, faces blurred in the reel.
+    To be clear, this footage is generated, so we know the truth for every frame. Real-world footage is next.
+  </aside>
+</section>
+
+<!-- 5b · the drone -->
+<section>
+  <span class="k">Every kind of data · the drone</span>
+  <h2>What got worse → <span class="w">the next flight plan.</span></h2>
+  <div class="split wide">
+    <div class="shot" style="height:420px"><img src="img/clip-drone.jpg" alt="the drone inspection in omxplorer"></div>
+    <div class="side">
+      <ul>
+        <li>the flight's video beside its telemetry, one cursor (synced at 3 seeks)</li>
+        <li>defects placed on a map: ≥ 90 % within 5 m</li>
+        <li>the 4 defects that got worse since last time</li>
+        <li>waypoints for the next flight, exact</li>
+      </ul>
+      <p style="margin-top:14px"><b>Caveat:</b> generated footage, and the severity scale is calibrated to how it was drawn.</p>
+    </div>
+  </div>
+  <div class="src">docs/goals/39-report.md M8 and its caveats</div>
+  <aside class="notes">
+    A second scenario: a drone inspection. The flight's video sits beside its telemetry on one cursor, defects land on a map within five metres, and it lists the four that got worse, then writes the next flight's waypoints.
+    The caveat: the footage is generated, and the severity scale is calibrated to how it was drawn, so treat this as the workflow, not a measurement.
+  </aside>
+</section>
+
+<!-- 6 · linked evidence -->
+<section>
+  <span class="k">Linked evidence</span>
+  <h2>A video, a sheet and the paperwork, <span class="w">one answer.</span></h2>
+  <div class="split wide">
+    <div class="shot contain" style="height:420px"><video src="img/clip-claims.mp4" poster="img/clip-claims.jpg" controls muted playsinline preload="metadata"></video></div>
+    <div class="side">
+      <p><i>"which damaged pallets does the carrier owe for?"</i></p>
+      <ul style="margin-top:14px">
+        <li>17 bills of lading, read in process (docTR OCR, 0.15 s a page)</li>
+        <li>fields exact: 119 of 119</li>
+        <li>answer = truth: 3 disputed</li>
+        <li>a claim pack: PDF + video reel</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/goals/41-report.md M0, M7, M10 · generated data, rebuilt byte for byte</div>
+  <aside class="notes">
+    The same links idea, on paperwork. Which damaged pallets does the carrier owe for? The video finds damage, the sheet has shipments, and the bills of lading are read by OCR inside the app.
+    The answer matches the truth, three disputed shipments, and it exports a claim pack. Again, the data is generated, so the answers can be checked.
+  </aside>
+</section>
+
+<!-- 7 · find more like this -->
+<section>
+  <span class="k">Find more like this</span>
+  <h2>Tap one example. <span class="w">It finds the rest.</span></h2>
+  <div class="grid g3">
+    <div class="card"><div class="num">1.000</div><p>recall on the damaged frames</p></div>
+    <div class="card"><div class="num">0.886</div><p>precision</p></div>
+    <div class="card"><div class="num">7.8<small>s</small></div><p>to scan the warehouse clip</p></div>
+  </div>
+  <p class="lede">OWLv2, image-guided, running in the app's own process through PyTorch: no colour rules, no labels, no HTTP.</p>
+  <div class="src">docs/goals/39-report.md M12 · visionmodel.mojo · generated footage, scored against its truth · Linux + NVIDIA</div>
+  <aside class="notes">
+    Tap one damaged pallet, and a vision model finds every frame like it. It found all the damaged frames, with 89 percent precision, scanning the clip in under eight seconds.
+    The model runs inside the app's process, not behind a web service. Again: generated footage, scored against its known truth.
+  </aside>
+</section>
+
+<!-- 8 · where it runs -->
+<section>
+  <span class="k">Where it runs</span>
+  <h2>Where it runs today, <span class="w">and what's next.</span></h2>
+  <div class="grid g3">
+    <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Linux</h3><p>GTK 4, NVIDIA GPU. omxplorer's home.</p></div>
+    <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Web, via a server</h3><p>FastHTML, checked in Chromium. WebGPU is next.</p></div>
+    <div class="card"><span class="pill ok">today (CI Macs)</span><h3 style="margin-top:12px">Mac</h3><p>AppKit, checked on GitHub's virtual Macs; queries on Apple's GPU through Metal there.</p></div>
+    <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Agents</h3><p>every app is an MCP server</p></div>
+    <div class="card"><span class="pill next">next</span><h3 style="margin-top:12px">Android</h3><p>classic controls run on the emulator</p></div>
+    <div class="card"><span class="pill next">next</span><h3 style="margin-top:12px">iPhone</h3><p>builds and signs; not run on a phone</p></div>
+  </div>
+  <div class="src">README.md "Where it stands" · sources.md S9, S16, S17 · D-308 · the robot story wasn't run on the Mac or driven on the web (47-report)</div>
+  <aside class="notes">
+    Linux with an NVIDIA GPU is the home. The web runs today through a server; running on the visitor's own GPU with WebGPU is next. The Mac is checked on GitHub's virtual Macs, not yet on my own hardware.
+    To be exact: the robot story itself was recorded on Linux. Android and iPhone come after the web.
+  </aside>
+</section>
+
+<!-- 9 · where we're behind -->
+<section>
+  <span class="k">Honestly</span>
+  <h2>Where we're behind.</h2>
+  <div class="grid g4">
+    <div class="card"><h3>3D scenes</h3><p>No 3D view yet: the robot is seen through video and telemetry lanes, not a scene.</p></div>
+    <div class="card"><h3>MCAP · ROS bags</h3><p>Not read yet. DROID comes in as a LeRobot dataset (mojoui/lerobot.py).</p></div>
+    <div class="card"><h3>Teams</h3><p>One person, one machine. Shared workspaces are a direction, not built.</p></div>
+    <div class="card"><h3>More cameras</h3><p>One of DROID's three cameras, video for 3,546 episodes. Wrist and right views are next.</p></div>
+  </div>
+  <p class="lede">Replay tools like Foxglove and Rerun are great for replaying a recording, and between them offer 3D, ROS bags and teams. We start one level up, from a question across the fleet, and want to sit alongside them.</p>
+  <div class="src">docs/goals/47-report.md "Growing it", "Not done" · docs/launch/kit/modular-forum/replies.md · repo has no MCAP/ROS reader (grep, 2026-11-01)</div>
+  <aside class="notes">
+    Here's where we're behind. Tools like Foxglove and Rerun are great for replaying a recording, and between them they offer 3D, ROS bags and teams. omxplorer has none of those yet, no MCAP reader either, and it shows one camera of DROID's three.
+    We start one level up, from a question across the whole fleet, and I'd like it to sit alongside those tools, not replace them. All four of these are on the list of what's next.
+  </aside>
+</section>
+
+<!-- 10 · roadmap -->
+<section>
+  <span class="k">What's next · direction</span>
+  <h2>From tables to every kind of data.</h2>
+  <div class="road">
+    <div class="now"><span class="when">now</span><h3>Linux</h3><p>sheets, sentences, links, video as rows, the robot fleet</p></div>
+    <div><span class="when">next</span><h3>The web</h3><p>WebGPU: try it in a browser</p></div>
+    <div><span class="when">next</span><h3>The fleet</h3><p>more cameras, more episodes with video</p></div>
+    <div><span class="when">then</span><h3>Phones</h3><p>Android and iPhone</p></div>
+    <div><span class="when">direction</span><h3>Formats, teams</h3><p>MCAP, ROS bags, 3D; shared workspaces</p></div>
+  </div>
+  <div class="src">talking-points.md (Sat: web, then Android, iPhone) · 47-report.md "Growing it" · formats, teams: "where we're behind" slide (owner, 2026-11-01)</div>
+  <aside class="notes">
+    The direction: the web on WebGPU first, so anyone can try it in a browser. Then the rest of the robot fleet with every camera, Android and iPhone, and further out robotics formats like MCAP and 3D, and teams.
+    These are directions, not promises with dates. I build one small, checked step at a time.
+  </aside>
+</section>
+
+<!-- 11 · outro -->
+<section>
+  <span class="k">Try it</span>
+  <h2>Open source. Public alpha.<br>Every number has a script.</h2>
+  <p class="cta">omxlabs.tech</p>
+  <pre class="code" style="margin-top:24px">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode && pixi install && scripts/omxplorer.sh</pre>
+  <p class="lede">Robotics teams: tell me what you'd need before this sits next to your replay tool.</p>
+  <div class="src">MIT · github.com/abhisheksreesaila/omxcode</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    That's omxplorer: a question across the whole fleet, then the moment. It's open source under MIT, a public alpha, and every number in these talks has a script in the repo behind it.
+    If you work with robot data, tell me what you'd need before this earns a place next to your replay tool.
+  </aside>
+</section>

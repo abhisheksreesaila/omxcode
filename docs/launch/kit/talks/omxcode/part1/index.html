@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxcode · One Mojo app, every screen (part 1 of 2)</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<style>
+/* Liquid dark (themes/liquid.mojo, liquid_dark_palette): backdrop, cards, hairlines, ink, teal accent, tones */
+:root {
+  --page: #12151b; --card: #1b1f27; --raised: #252a34; --line: #323946; --line2: #424a5a;
+  --ink: #f1f4f9; --ink2: #c4cad6; --ink3: #8f98a8;
+  --accent: #3cc4cf; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --info: #7aa7ff;
+  --d2: #fbbf24; --d3: #818cf8; --d4: #f472b6;
+  --plorer: #3ccf6e; --core: #4aa8ff; --code: #ff5d6c; --qua: #c084fc; --console: #ff9f40;
+  --sans: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --spring: cubic-bezier(.34, 1.36, .64, 1);
+  --shadow: 0 18px 40px -18px rgb(0 0 0 / .6);
+}
+html, body, .reveal-viewport { background: var(--page) !important; }
+.reveal { font-family: var(--sans); color: var(--ink); font-size: 30px; }
+.reveal .slides { text-align: left; }
+.reveal .slides section { height: 100%; padding: 0 !important; }
+.reveal h1, .reveal h2, .reveal h3 { font-family: var(--sans); color: var(--ink); text-transform: none; letter-spacing: -.035em; margin: 0; }
+.reveal h1 { font-size: 84px; font-weight: 800; line-height: 1.02; }
+.reveal h2 { font-size: 54px; font-weight: 750; line-height: 1.06; }
+.reveal h3 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+.reveal p { margin: 0; line-height: 1.4; }
+.reveal code { font-family: var(--mono); }
+.reveal a { color: var(--accent); }
+.k { font: 600 15px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; display: block; }
+.lede { color: var(--ink2); font-size: 28px; margin-top: 20px !important; max-width: 980px; }
+.src { position: absolute; left: 0; bottom: 0; font: 14px var(--mono); color: var(--ink3); }
+.mark { position: absolute; right: 70px; bottom: 0; font: 600 14px var(--mono); color: var(--ink3); }
+.mark b { color: var(--plorer); }
+.w { color: var(--accent); }
+.card { background: var(--card); border-radius: 22px; box-shadow: 0 0 0 1px var(--line), var(--shadow); padding: 24px 26px; }
+.grid { display: grid; gap: 16px; margin-top: 34px; }
+.g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); }
+.card p { color: var(--ink2); font-size: 20px; margin-top: 8px; }
+.num { font: 800 60px/1 var(--sans); letter-spacing: -.05em; color: var(--accent); }
+.num small { font-size: 22px; color: var(--ink3); margin-left: 6px; letter-spacing: -.01em; }
+.pill { display: inline-block; font: 600 13px var(--mono); padding: 5px 11px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line2); color: var(--ink2); }
+.pill.ok { color: var(--ok); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.next { color: var(--warn); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+pre.code { margin: 0; font: 18px/1.55 var(--mono); color: var(--ink2); background: var(--card); border-radius: 18px; padding: 22px 24px; box-shadow: 0 0 0 1px var(--line); white-space: pre; width: auto; }
+pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(--ink3); font-style: normal; } pre.code em { color: var(--ok); font-style: normal; }
+/* Liquid motion: fragments spring in */
+.reveal .slides section .fragment { transition: opacity .32s ease, transform .5s var(--spring); transform: translateY(14px) scale(.98); }
+.reveal .slides section .fragment.visible { transform: none; }
+/* the app mock: a sheet, a video, two telemetry lanes, one cursor */
+.app { display: grid; grid-template-columns: 300px 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; margin-top: 30px; height: 410px; }
+.app .pane { background: var(--card); border-radius: 18px; box-shadow: 0 0 0 1px var(--line); position: relative; overflow: hidden; }
+.app .sheet { grid-row: span 2; padding: 12px 0; font: 14px var(--mono); }
+.app .sheet div { display: grid; grid-template-columns: 1fr 64px 44px; padding: 6px 14px; color: var(--ink2); border-bottom: 1px solid var(--line); }
+.app .sheet div.h { color: var(--ink3); font-size: 12px; letter-spacing: .08em; }
+.app .sheet div.sel { background: color-mix(in srgb, var(--accent) 16%, var(--card)); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
+.app .sheet .f { color: var(--bad); } .app .sheet .s { color: var(--ok); }
+.app .video { grid-row: span 2; display: grid; place-items: center; background: linear-gradient(160deg, #20252f, #151920); }
+.app .video .ph { font: 600 16px var(--mono); color: var(--ink3); text-align: center; line-height: 1.6; }
+.app .video .bar { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 6px; border-radius: 3px; background: var(--raised); }
+.app .video .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 58%; border-radius: 3px; background: var(--accent); }
+.app .lane { padding: 12px 14px; }
+.app .lane .t { font: 600 12px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; }
+.app svg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 78%; }
+.cursor { position: absolute; top: 0; bottom: 0; left: 58%; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+/* the flow: one app → hosts */
+.flow { display: grid; grid-template-columns: 420px 50px 1fr; align-items: center; margin-top: 40px; gap: 0; }
+.flow .src-file { text-align: center; }
+.flow .arrow { height: 2px; background: var(--line2); position: relative; }
+.flow .arrow::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: var(--line2); }
+.hosts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.hosts .card { padding: 16px 18px; }
+.hosts .card h3 { font-size: 22px; }
+/* the timeline */
+.road { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 46px; position: relative; }
+.road::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: var(--line); }
+.road > div { position: relative; padding-top: 42px; }
+.road > div::before { content: ""; position: absolute; top: 4px; left: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--page); box-shadow: 0 0 0 2px var(--line2); }
+.road > div.now::before { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+.road h3 { font-size: 24px; } .road p { color: var(--ink2); font-size: 19px; margin-top: 8px !important; }
+.road .when { font: 600 13px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 8px; }
+.four { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 40px; align-items: stretch; }
+.four .card ul { margin: 12px 0 0; padding-left: 22px; color: var(--ink2); font-size: 22px; line-height: 1.6; }
+.four .us { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow); }
+.suite { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 30px; }
+.suite span { font: 600 16px var(--mono); padding: 8px 14px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+.cta { font: 700 44px var(--sans); letter-spacing: -.03em; color: var(--accent); margin-top: 30px !important; }
+.reveal .progress { color: var(--accent); height: 3px; }
+.reveal .controls { color: var(--accent); }
+.reveal .slide-number { background: transparent; color: var(--ink3); font: 13px var(--mono); }
+
+/* talks additions: product accent, pictures, clips, two-column layouts */
+.k { color: var(--pa, var(--accent)); }
+.w { color: var(--pa, var(--accent)); }
+.num, .cta { color: var(--pa, var(--accent)); }
+.mark b { color: var(--pa, var(--plorer)); }
+.shot { border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 1px var(--line), var(--shadow); background: var(--card); }
+.shot img, .shot video { display: block; width: 100%; height: 100%; object-fit: cover; margin: 0; }
+.shot.contain img, .shot.contain video { object-fit: contain; background: #0c0e12; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 30px; align-items: start; }
+.split.wide { grid-template-columns: 1.35fr 1fr; }
+.split.narrow { grid-template-columns: 1fr 1.35fr; }
+.side p, .side li { color: var(--ink2); font-size: 22px; line-height: 1.5; }
+.side ul { margin: 0; padding-left: 22px; } .side li { margin-bottom: 10px; }
+.side b { color: var(--ink); }
+.hero { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; align-items: center; height: 560px; margin-top: 10px; }
+.hero .shot { height: 460px; }
+.big { font: 800 120px/1 var(--sans); letter-spacing: -.05em; color: var(--pa, var(--accent)); }
+.big small { font-size: 34px; color: var(--ink3); margin-left: 8px; letter-spacing: -.01em; }
+.caption { font: 14px var(--mono); color: var(--ink3); margin-top: 10px !important; }
+pre.code.sm { font-size: 15px; line-height: 1.5; padding: 18px 20px; }
+pre.code.xs { font-size: 13px; line-height: 1.45; padding: 16px 18px; }
+.bars { display: flex; flex-direction: column; gap: 18px; margin-top: 34px; }
+.bar { display: grid; grid-template-columns: 220px 1fr 130px; align-items: center; gap: 18px; font-size: 24px; }
+.bar .name { color: var(--ink); font-weight: 650; }
+.bar .track { display: block; height: 30px; background: var(--card); border-radius: 9px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
+.bar .fill { display: block; height: 100%; width: 0; border-radius: 9px; background: var(--ink3); transition: width 1.2s var(--spring); }
+.bar .fill.me { background: var(--pa, var(--accent)); }
+.present .bar .fill { width: var(--w); }
+.bar .val { font: 650 24px var(--mono); color: var(--ink); text-align: right; }
+.stack { display: flex; flex-direction: column; gap: 10px; margin-top: 30px; }
+.stack .layer { background: var(--card); border-radius: 16px; box-shadow: 0 0 0 1px var(--line); padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; font-size: 24px; font-weight: 650; }
+.stack .layer small { font: 500 16px var(--mono); color: var(--ink3); }
+.stack .layer.hot { box-shadow: 0 0 0 2px var(--pa, var(--accent)); }
+.steps { display: flex; align-items: stretch; gap: 10px; margin-top: 34px; }
+.steps .card { flex: 1; padding: 18px; } .steps .card h3 { font-size: 21px; } .steps .card p { font-size: 17px; }
+.steps .to { align-self: center; color: var(--pa, var(--accent)); font: 700 26px var(--sans); }
+table.t { border-collapse: collapse; margin-top: 26px; font-size: 21px; width: 100%; }
+table.t th { text-align: left; font: 600 13px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); padding: 8px 12px; border-bottom: 1px solid var(--line2); }
+table.t td { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); }
+table.t td b { color: var(--ink); }
+.part { font: 600 14px var(--mono); color: var(--ink3); letter-spacing: .1em; text-transform: uppercase; margin-top: 26px !important; }
+</style>
+</head>
+<body style="--pa: var(--code)">
+<div class="reveal"><div class="slides">
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxcode · part 1 of 2</span>
+  <div class="split" style="margin-top:6px">
+    <div>
+      <h1>One Mojo app.<br><span class="w">Every screen.</span></h1>
+      <p class="lede">A UI framework in Mojo. Two functions, <code>view()</code> and <code>update()</code>, open as a native app on Linux, the web and the Mac (checked on GitHub's virtual Macs), with the GPU kernel in the same file.</p>
+      <div class="grid g2" style="margin-top:26px">
+        <div class="card"><div class="num">1<small>file</small></div><p>one language for the 20M-particle app; JS + WebGPU took 8 files, 5 languages</p></div>
+        <div class="card"><div class="num">1.5<small>ms</small></div><p>20M points counted and coloured, one 1080p frame, on the GPU</p></div>
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:0;gap:12px">
+      <div class="shot" style="height:200px"><img src="img/widgets-gtk-dark.png" alt="GTK"></div>
+      <div class="shot" style="height:200px"><img src="img/widgets-mac-dark.png" alt="Mac"></div>
+      <div class="shot" style="height:200px"><img src="img/widgets-web-dark.png" alt="web"></div>
+      <div class="shot" style="height:200px"><img src="img/lens-linux.jpg" alt="Data Lens"></div>
+    </div>
+  </div>
+  <div class="src">docs/benchmarks.md (files · languages) · README.md "Measured" (RTX 3090)</div>
+  <div class="mark"><b>●</b> omxlabs.tech</div>
+  <aside class="notes">
+    This is omxcode, a UI framework written in Mojo. You write two functions, view and update, and the same app opens with native controls on Linux, in the browser and on the Mac, which I check on GitHub's virtual Macs. The GPU code sits in the same file: twenty million points draw in one and a half milliseconds a frame. Part one is how an app is written; part two is threads and agents.
+  </aside>
+</section>
+
+<!-- 2 · why -->
+<section>
+  <span class="k">Why</span>
+  <h2>One app today is three languages<br>and an agent that guesses.</h2>
+  <div class="grid g3">
+    <div class="card"><h3>A codebase per screen</h3><p>Swift for the Mac, Kotlin for Android, JavaScript for the web. Or one toolkit that imitates them all.</p></div>
+    <div class="card"><h3>Speed means a second language</h3><p>The UI in one language, the GPU work in CUDA or shaders, joined by hand-packed buffers.</p></div>
+    <div class="card"><h3>Agents squint</h3><p>AI agents drive apps through screenshots and pixel coordinates. Slow, and it breaks.</p></div>
+  </div>
+  <p class="lede">omxcode: one readable language from the button to the GPU kernel, and every app is already a tool server.</p>
+  <div class="src">~/Projects/omxlabs/readmes/omxcode.md "Why"</div>
+  <aside class="notes">
+    A serious app today means a codebase per platform, then a second language the moment you need speed, glued on with buffers you pack by hand. And agents mostly use apps by reading screenshots. Mojo reads like Python and compiles to GPU kernels, so one language can cover all of it. That's the bet.
+  </aside>
+</section>
+
+<!-- 3 · the whole app -->
+<section>
+  <span class="k">How you'd write one</span>
+  <h2>An app is a struct: state, update, view.</h2>
+  <div class="split wide" style="margin-top:22px">
+    <pre class="code sm"><b>from</b> mojoui <b>import</b> App, Event, View, VStack, Text, Button, TITLE, CAPTION, PROMINENT
+
+<b>comptime</b> GREET = 1   <i># a message is just a number</i>
+
+<b>struct</b> Main(App):
+    <b>var</b> name: String
+    <b>var</b> clicks: Int
+
+    <b>def</b> __init__(<b>out</b> self):
+        self.name = <em>"Ada"</em>
+        self.clicks = 0
+
+    <b>def</b> update(<b>mut</b> self, event: Event):
+        <b>if</b> event.message == GREET:
+            self.clicks += 1
+
+    <b>def</b> view(self) -> View:
+        <b>var</b> greeting = <em>"Tap Greet"</em> <b>if</b> self.clicks == 0 <b>else</b> <em>"Hello, "</em> + self.name + …
+        <b>return</b> VStack(
+            Text(greeting, style=TITLE),
+            Button(<em>"Greet"</em>, on_tap=GREET, style=PROMINENT),
+            spacing=20,
+        )</pre>
+    <div class="side">
+      <ul>
+        <li><b>update()</b> changes state when an event arrives.</li>
+        <li><b>view()</b> describes the screen from state: a tree of plain values.</li>
+        <li>The shape of Elm, SwiftUI and React.</li>
+        <li><code>def</code> only, <code>comptime</code> constants, no <code>@value</code>: Mojo 1.1 as it is today.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">examples/hello/app.mojo · real code, title() and two captions left out</div>
+  <aside class="notes">
+    This is the whole hello app. A struct holds the state; update changes it when an event comes in; view returns a tree of plain values. It's the Elm, SwiftUI and React shape. A message is just a comptime number, and the button says which number to send.
+  </aside>
+</section>
+
+<!-- 4 · stack -->
+<section>
+  <span class="k">How it's built</span>
+  <h2>One language, from the button to the GPU kernel.</h2>
+  <div class="stack">
+    <div class="layer hot">app.mojo <small>struct Main(App) · update() · view()</small></div>
+    <div class="layer">mojoui <small>components · diff · themes as plugins · jobs · the watchdog</small></div>
+    <div class="layer">hosts <small>GTK 4 · FastHTML + HTMX · Android views over JNI · AppKit · UIKit · MCP</small></div>
+    <div class="layer">GPU kernels <small>plain Mojo functions · MAX · NVIDIA today</small></div>
+    <div class="layer">the data engine <small>omxcore, linked into the same process</small></div>
+  </div>
+  <p class="lede">Mojo calls C and Objective-C directly, and C calls Mojo, with no binding generator in between.</p>
+  <div class="src">docs/architecture.md · README.md (the stack table)</div>
+  <aside class="notes">
+    Your app sits on mojoui: components, the diff, themes, background jobs. Under that, one host per platform. It all rests on one fact: Mojo calls C, and C calls Mojo, with no binding generator. GTK, AppKit through the Objective-C runtime, and JNI are all just C calls.
+  </aside>
+</section>
+
+<!-- 5 · hosts -->
+<section>
+  <span class="k">One view tree, six hosts</span>
+  <h2>Each platform draws it with its own controls.</h2>
+  <table class="t">
+    <tr><th>Host</th><th>Drawn with</th><th>A button is</th><th>Status</th></tr>
+    <tr><td><b>Linux</b></td><td>GTK 4 + libadwaita</td><td><code>GtkButton</code></td><td><span class="pill ok">runs</span></td></tr>
+    <tr><td><b>Web</b></td><td>FastHTML server, HTMX patches</td><td><code>&lt;button&gt;</code></td><td><span class="pill ok">runs</span></td></tr>
+    <tr><td><b>Mac</b></td><td>AppKit, arm64</td><td><code>NSButton</code></td><td><span class="pill ok">GitHub's Macs</span></td></tr>
+    <tr><td><b>Android</b></td><td>Android views over JNI</td><td><code>android.widget.Button</code></td><td><span class="pill next">emulator</span></td></tr>
+    <tr><td><b>iPhone</b></td><td>UIKit, arm64</td><td><code>UIButton</code></td><td><span class="pill next">builds, signs</span></td></tr>
+    <tr><td><b>Agent</b></td><td>MCP over stdio</td><td>a tool</td><td><span class="pill ok">runs</span></td></tr>
+  </table>
+  <p class="lede" style="margin-top:22px">No web view on the desktop. On the web, HTML is the native control.</p>
+  <div class="src">README.md "Where it stands" · docs/components.md · docs/agent.md · the iPhone hasn't run on a phone</div>
+  <aside class="notes">
+    The same view tree goes to six hosts. A button is a real GtkButton, a button element, an NSButton, an Android widget. Linux and the web are checked on every change; the Mac runs on GitHub's virtual Macs, Android on the emulator, and the iPhone builds and signs but hasn't run on a phone. The sixth host is an agent: part two.
+  </aside>
+</section>
+
+<!-- 6 · same widgets -->
+<section>
+  <span class="k">Native, not imitated</span>
+  <h2>The same widgets app, three platforms.</h2>
+  <div class="grid g3" style="margin-top:26px">
+    <div><div class="shot" style="height:330px"><img src="img/widgets-gtk-dark.png" alt="GTK"></div><p class="caption">Linux · GTK 4</p></div>
+    <div><div class="shot" style="height:330px"><img src="img/widgets-mac-dark.png" alt="AppKit"></div><p class="caption">Mac · AppKit (GitHub's macOS runner)</p></div>
+    <div><div class="shot" style="height:330px"><img src="img/widgets-web-dark.png" alt="web"></div><p class="caption">Web · Chromium</p></div>
+  </div>
+  <p class="lede">Real typing, spell-check and screen readers come from the platform, not from us.</p>
+  <div class="src">docs/img/widgets-*-dark.png · examples/widgets</div>
+  <aside class="notes">
+    One app, the widgets demo, drawn three times: GTK, AppKit, the browser. Because they're the platform's own controls, text input, spell-check and the screen reader come for free.
+  </aside>
+</section>
+
+<!-- 7 · a tap -->
+<section>
+  <span class="k">A tap, as it runs</span>
+  <h2>One event in, one patch out.</h2>
+  <div class="steps">
+    <div class="card"><h3>Native widget</h3><p>GtkButton · NSButton</p></div><div class="to">→</div>
+    <div class="card"><h3>Host</h3><p>C callback into Mojo</p></div><div class="to">→</div>
+    <div class="card"><h3>update()</h3><p>clicks += 1</p></div><div class="to">→</div>
+    <div class="card"><h3>view()</h3><p>the new tree</p></div><div class="to">→</div>
+    <div class="card"><h3>diff</h3><p>old vs new</p></div><div class="to">→</div>
+    <div class="card"><h3>patch</h3><p>set one label's text</p></div>
+  </div>
+  <div class="grid g2" style="margin-top:30px">
+    <div class="card"><h3>Messages are numbers</h3><p>A widget never holds a closure. The host looks the message up in the current screen when the event arrives, so nothing leaks and nothing needs rewiring.</p></div>
+    <div class="card"><h3>Same path everywhere</h3><p>GTK, the web, Android and AppKit all call the same <code>update()</code>.</p></div>
+  </div>
+  <div class="src">docs/architecture.md (D-19: messages are numbers)</div>
+  <aside class="notes">
+    A tap end to end: the native button fires, the host calls into Mojo, update runs, view builds the new tree, the diff compares. Out comes one patch: set this label's text. Widgets hold a message number, never a closure, so nothing leaks across the C boundary.
+  </aside>
+</section>
+
+<!-- 8 · patch, don't rebuild -->
+<section>
+  <span class="k">Patch, don't rebuild</span>
+  <h2>Small edits stay small.</h2>
+  <div class="grid g2">
+    <div class="card"><div class="num">15<small>widgets</small></div><p>at most, built by any edit after omxplorer's sheet opens (10 updates measured, every one partial)</p></div>
+    <div class="card"><div class="num">0.8<small>ms p95</small></div><p>a frame, scrolling a 1M-row grid at 2180×1074: a keyed display list replayed as GPU render nodes, against 14.2 ms for painted pixels</p></div>
+  </div>
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card"><h3>Same shape → patches</h3><p>New label text, new slider value.</p></div>
+    <div class="card"><h3>New shape → rebuild, later</h3><p>At the next idle moment, never inside the widget's own click.</p></div>
+  </div>
+  <div class="src">docs/goals/25-report.md M1 · README.md "Drawn views" · docs/architecture.md</div>
+  <aside class="notes">
+    Same shape, the host patches. New shape, it rebuilds, but at the next idle moment, never inside the button's own click. In omxplorer's sheet any edit builds at most fifteen widgets. And the million-row grid isn't widgets at all: it's a display list on the GPU, 0.8 milliseconds a frame.
+  </aside>
+</section>
+
+<!-- 9 · FFI -->
+<section>
+  <span class="k">Under the hosts</span>
+  <h2>Mojo ↔ C, with nothing in between.</h2>
+  <div class="split" style="margin-top:22px">
+    <pre class="code sm"><i># Mojo exports a C symbol: scalars only, never raises</i>
+@export(<em>"KGEN_CompilerRT_AlignedFree"</em>)
+<b>def</b> aligned_free(ptr: Int) abi(<em>"C"</em>):
+    external_call[<em>"free"</em>, NoneType](ptr)</pre>
+    <div class="side">
+      <ul>
+        <li><b>Across the line:</b> scalars and <code>(pointer, length)</code> strings. Never a struct by value.</li>
+        <li><b>Exports</b> are <code>@export</code> + <code>abi("C")</code>, and can't raise.</li>
+        <li><b>State C keeps:</b> <code>alloc(Layout[T].single())</code>, leaked to C as an address, read back as a <code>Pointer</code>.</li>
+        <li><b>Linking</b> a Mojo shared library needs <code>-rpath '$ORIGIN'</code>.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">mojoui/hosts/mojo_rt.mojo · CLAUDE.md "Mojo rules that bite" (Mojo 1.1.0)</div>
+  <aside class="notes">
+    For the Mojo people: exports use at-export and abi C, can't raise, and only scalars and pointer-plus-length strings cross the line. State C keeps is allocated in Mojo, handed over as an address, and read back as a Pointer. These rules took a while to find; they're written down in the repo.
+  </aside>
+</section>
+
+<!-- 10 · build it -->
+<section>
+  <span class="k">Build it</span>
+  <h2>One command, every platform.</h2>
+  <pre class="code sm" style="margin-top:26px"><b>$</b> scripts/build.sh hello all
+<em>== Linux (hello): GTK4 + libadwaita</em>          build/hello/linux/hello
+<em>== Web (hello): Mojo Python module for FastHTML</em>  build/hello/web/mojoui_app.so
+<em>== Mac (hello): AppKit, arm64 macOS 14+</em>       build/hello/mac/HelloMojo.app
+<em>== iPhone (hello): UIKit, arm64 iOS 17+</em>       build/hello/ios/HelloMojo.ipa
+<b>$</b> scripts/build.sh hello android              build/hello/android/HelloMojo.apk</pre>
+  <div class="grid g3" style="margin-top:22px">
+    <div class="card"><h3>Cross-built on Linux</h3><p>The Mac and iPhone apps are linked and signed here.</p></div>
+    <div class="card"><h3>Each one native</h3><p>A GTK binary, a module FastHTML loads, an .app, an .ipa, an APK.</p></div>
+    <div class="card"><h3>Picky apps say so</h3><p>A <code>platforms</code> file: the GPU example builds for <code>linux web</code>.</p></div>
+  </div>
+  <div class="src">scripts/build.sh (its echo lines, output trimmed) · examples/gpu/platforms</div>
+  <aside class="notes">
+    One script builds them all: a GTK binary, a module FastHTML loads, a Mac app and an iPhone app, linked and signed on this Linux machine, plus an Android APK. An app that can't run somewhere says so in a platforms file.
+  </aside>
+</section>
+
+<!-- 11 · GPU in the same file -->
+<section>
+  <span class="k">The GPU, in the same file</span>
+  <h2>A plain Mojo function becomes a kernel.</h2>
+  <div class="split wide" style="margin-top:22px">
+    <pre class="code xs"><b>def</b> mandelbrot(x: Int, y: Int, w: Int, h: Int, p: Params) -> UInt32:
+    <i>"""Colour of one pixel. p = (scale, centre x, centre y, max iterations)."""</i>
+    <b>var</b> cx = p[1] + (Float32(x) - Float32(w) / 2) * p[0] / Float32(h)
+    <b>var</b> cy = p[2] + (Float32(y) - Float32(h) / 2) * p[0] / Float32(h)
+    <b>var</b> zx = Float32(0)
+    <b>var</b> zy = Float32(0)
+    <b>var</b> i = 0
+    <b>var</b> limit = Int(p[3])
+    <b>while</b> i &lt; limit <b>and</b> zx * zx + zy * zy &lt; 4.0:
+        <b>var</b> t = zx * zx - zy * zy + cx
+        zy = 2.0 * zx * zy + cy
+        zx = t
+        i += 1
+    …
+
+<i># in the same struct, on a tap:</i>
+<b>var</b> gpu = self.gpu.render[<em>mandelbrot</em>](WIDTH, HEIGHT, self.params())
+self.pixels = gpu.pixels.copy()
+
+<i># mojoui/gpu.mojo launches it, one GPU thread per pixel:</i>
+ctx.enqueue_function[_pixels_kernel[f]](…,
+    grid_dim=(ceildiv(width, 16), ceildiv(height, 16)), block_dim=(16, 16))</pre>
+    <div class="side">
+      <ul>
+        <li>No CUDA, no shader language, no buffer packing.</li>
+        <li>The same function runs on the CPU (<code>render_on_cpu</code>), and the app checks the GPU's pixels match.</li>
+        <li>The picture goes to the platform's own image view.</li>
+      </ul>
+      <div class="shot" style="height:170px;margin-top:16px"><img src="img/gpu-linux.png" alt="GPU fractal on GTK"></div>
+    </div>
+  </div>
+  <div class="src">examples/gpu/app.mojo · mojoui/gpu.mojo · real code, trimmed</div>
+  <aside class="notes">
+    Mandelbrot is an ordinary Mojo function: the colour of one pixel. Render takes it as a compile-time parameter, and mojoui launches it in sixteen-by-sixteen blocks, one thread per pixel. No CUDA, no shader language. The same function runs on the CPU and the app compares the pictures.
+  </aside>
+</section>
+
+<!-- 12 · numbers -->
+<section>
+  <span class="k">The numbers</span>
+  <h2>Native speed, measured.</h2>
+  <div class="hero" style="height:auto;margin-top:22px">
+    <div class="grid g2" style="margin-top:0">
+      <div class="card"><div class="num">1.5<small>ms</small></div><p>20M points counted and coloured, one 1080p frame (130 ms on the CPU, same pixels)</p></div>
+      <div class="card"><div class="num">0.6<small>ms</small></div><p>a chart over 1M rows, sum by group (0.5–0.7)</p></div>
+      <div class="card"><div class="num">6.4<small>ms</small></div><p>a median per group over 1M rows</p></div>
+      <div class="card"><div class="num">6–9<small>ms</small></div><p>a dashboard re-aggregating 20M rows per click</p></div>
+    </div>
+    <div class="shot" style="height:400px"><img src="img/lens-linux.jpg" alt="The Data Lens, 20M points"></div>
+  </div>
+  <div class="src">README.md "Measured" · one Linux machine, RTX 3090</div>
+  <aside class="notes">
+    All from the README, one machine, an RTX 3090. The Data Lens draws twenty million points in one and a half milliseconds; the CPU takes 130. A chart over a million rows, 0.6 milliseconds; a median per group, 6.4; a twenty-million-row dashboard, six to nine a click.
+  </aside>
+</section>
+
+<!-- 13 · outro -->
+<section>
+  <span class="k">Try it · part 1 of 2</span>
+  <h2>Write it once. Open it everywhere.</h2>
+  <pre class="code" style="margin-top:26px">git clone https://github.com/abhisheksreesaila/omxcode && cd omxcode && pixi install
+scripts/build.sh hello all     <i># one app.mojo → GTK, web, Mac and iPhone builds</i>
+scripts/agent.sh hello         <i># the one command that gives it to Claude Code</i></pre>
+  <p class="lede">Next: the iPhone on a real phone, Android's newer components, Apple's GPU on real Macs. <b>Part 2:</b> why the window never freezes, and how agents drive every app.</p>
+  <p class="cta">omxlabs.tech</p>
+  <div class="src">MIT · github.com/abhisheksreesaila/omxcode · x86-64 Linux with GTK 4; the GPU path needs an NVIDIA card</div>
+  <div class="mark"><b>●</b> omxcode</div>
+  <aside class="notes">
+    Clone it, pixi install, build hello for every platform with one script; agent.sh prints the line that hands it to Claude Code. Next: the iPhone on real hardware, more of Android, Apple's GPU on real Macs. Part two is the threading rule and agents. It's MIT; tell me what you'd build.
+  </aside>
+</section>
+
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script>
+Reveal.initialize({
+  hash: true, width: 1280, height: 720, margin: 0.06, center: false,
+  transition: 'fade', transitionSpeed: 'default', backgroundTransition: 'fade',
+  controls: true, progress: true, slideNumber: false,
+  plugins: [RevealNotes]
+});
+</script>
+</body>
+</html>

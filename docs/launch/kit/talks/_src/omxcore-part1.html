@@ -1,0 +1,264 @@
+<!-- title: omxcore · part 1 · SQL on your CPU and your GPU; accent: --core -->
+
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxcore · the engine · part 1 of 2</span>
+  <div class="hero">
+    <div>
+      <h1 style="font-size:72px">SQL on your CPU <span class="w">and</span> your GPU.</h1>
+      <p class="lede">One native library, written top to bottom in Mojo, with no Python inside. Point it at the CSV and Parquet files you already have and ask.</p>
+      <div class="grid g2" style="margin-top:26px">
+        <div class="card"><div class="num">3.15<small>s</small></div><p>22 simplified TPC-H, SF10 (DuckDB 5.08)<br><span class="caption">Python package 0.6.0, CPU; Python only plans</span></p></div>
+        <div class="card"><div class="num">0<small>Python</small></div><p>parser, planner and kernels, all Mojo</p></div>
+      </div>
+    </div>
+    <div class="shot contain"><img src="img/cover-omxcore.png" alt="the omxcore cover page"></div>
+  </div>
+  <div class="src">mxframe README.md · docs/bench/m2s-engine.md: not TPC-certified; shared machine, indicative</div>
+  <div class="mark"><b>●</b> omxlabs.tech/omxcore</div>
+  <aside class="notes">
+    This is omxcore, the data engine under everything I build. It runs SQL on your CPU and your GPU, over plain CSV and Parquet files, written entirely in Mojo. Headline: 22 simplified TPC-H queries at scale factor 10 in 3.15 seconds, against DuckDB's 5.08, through the Python package on the CPU. Not a certified TPC-H run. Part 2 shows where that lead comes from, and where DuckDB still wins.
+  </aside>
+</section>
+
+<!-- 2 · why -->
+<section>
+  <span class="k">Why</span>
+  <h2>Data tools were built for a person at a keyboard.</h2>
+  <div class="grid g3">
+    <div class="card fragment"><h3>Your GPU naps</h3><p>Most workstations have one. Analytics engines run on the CPU and leave it idle.</p></div>
+    <div class="card fragment"><h3>Your data is in files</h3><p>CSV and Parquet. Most tools want you to import them first, into their own format.</p></div>
+    <div class="card fragment"><h3>Agents can't squint</h3><p>An agent needs exact answers, and errors it can fix in one round, not a stack trace.</p></div>
+  </div>
+  <div class="src">mxframe README.md · docs/briefs/positioning.md (approved 2026-10-19)</div>
+  <aside class="notes">
+    Three things bothered me. Most of us have a GPU on the desk, and our analytics engines leave it asleep. Our data already lives in files, and tools want an import first. And more queries are written by agents now, which need exact answers and errors that say what to fix.
+  </aside>
+</section>
+
+<!-- 3 · what it is -->
+<section>
+  <span class="k">What it is</span>
+  <h2>A library, like SQLite.</h2>
+  <p class="lede">Not a server, not a database. It links into your app, or runs as one small program.</p>
+  <div class="grid g3">
+    <div class="card"><h3 class="w">mx</h3><p>a native command line: SQL in, JSON out. A cold run on a small file takes about 11 ms, process start included.</p></div>
+    <div class="card"><h3 class="w">Python</h3><p>a lazy dataframe API and SQL, one native call per <code>.compute()</code>. On PyPI as <code>mxframe</code> 0.6.0.</p></div>
+    <div class="card"><h3 class="w">Mojo</h3><p>a package, <code>omxcore.mojoc</code>, that an app vendors and links. That's how omxplorer uses it.</p></div>
+  </div>
+  <div class="src">docs/omxcore-mojo-api.md "The mx command line" · docs/reference.md · STABLE.md · omxcode vendor/omxcore.mojoc</div>
+  <aside class="notes">
+    It's a library in the SQLite sense: no server, no database to load. Three ways in: mx on the command line, which answers and exits in about 11 milliseconds; a Python package; or a Mojo package your app links. That last one is how omxplorer embeds it.
+  </aside>
+</section>
+
+<!-- 4 · how it's built -->
+<section>
+  <span class="k">How it's built</span>
+  <h2>One language, top to bottom.</h2>
+  <div class="split wide">
+    <div class="stack" style="margin-top:0">
+      <div class="layer">mx · Python · your Mojo app <small>three ways in</small></div>
+      <div class="layer">Parser and binder <small>sql.mojo · bind.mojo</small></div>
+      <div class="layer hot">Planner <small>planner.mojo · reads statistics only</small></div>
+      <div class="layer hot">Kernels <small>CPU, every core · GPU</small></div>
+      <div class="layer">Your files <small>parquet.mojo · csv.mojo · read in place</small></div>
+    </div>
+    <div class="side">
+      <div class="card"><h3 style="color:var(--ink3)">A typical GPU data stack</h3><p>Python on top, a C++ or Rust planner, CUDA kernels. Three languages, and glue between them.</p></div>
+      <div class="card" style="margin-top:16px; box-shadow: 0 0 0 1.5px var(--core)"><h3 class="w">omxcore</h3><p>All Mojo, compiled ahead of time: about 51,000 lines across <code>mojo/omxcore/</code> and <code>kernels_aot/</code>.</p></div>
+    </div>
+  </div>
+  <div class="src">mxframe mojo/omxcore/ and kernels_aot/ (wc -l, 2026-11-01: 35,774 + 15,094 lines) · docs/mojo-engine.md "SQL in Mojo"</div>
+  <aside class="notes">
+    Every layer is Mojo: the front doors, the parser and binder, the planner, the kernels, the file readers. About 51 thousand lines, engine and kernels. Compare the usual GPU stack: Python on top, a C++ or Rust planner, CUDA at the bottom, and glue between them.
+  </aside>
+</section>
+
+<!-- 5 · a query as it runs -->
+<section>
+  <span class="k">A query, as it runs</span>
+  <h2>One statement, one kernel program.</h2>
+  <div class="steps">
+    <div class="card"><h3>File</h3><p>only the columns it needs</p></div><span class="to">→</span>
+    <div class="card"><h3>Parse, bind</h3><p>types and decimal scales</p></div><span class="to">→</span>
+    <div class="card"><h3>Plan</h3><p>dense or hashed groups, top-k or sort</p></div><span class="to">→</span>
+    <div class="card"><h3>Kernel</h3><p>a small instruction program, run per row over chunks</p></div><span class="to">→</span>
+    <div class="card"><h3>Answer</h3><p>rows, plus notes</p></div>
+  </div>
+  <div class="grid g3" style="margin-top:28px">
+    <div class="card"><h3>Reads less</h3><p>"columns read: 3 of 16" is in the notes.</p></div>
+    <div class="card"><h3>Streams</h3><p>A big Parquet file goes one row group at a time, so it never has to fit.</p></div>
+    <div class="card"><h3>Shows its work</h3><p>Every answer carries what the planner decided, and why.</p></div>
+  </div>
+  <div class="src">docs/mojo-engine.md · docs/omxcore-mojo-api.md "The mx command line" (Files, notes)</div>
+  <aside class="notes">
+    The life of one query: read only the columns it touches, parse and bind types and decimal scales, let the planner pick a strategy. Then the statement becomes a small instruction program that one kernel runs over the rows, chunk by chunk. The answer comes back with notes on what ran.
+  </aside>
+</section>
+
+<!-- 6 · mx sql, a real run -->
+<section>
+  <span class="k">In a terminal</span>
+  <h2>mx sql: JSON out, notes included.</h2>
+  <pre class="code sm" style="margin-top:22px"><i># 6M rows of TPC-H lineitem, asked directly. No Python, no server.</i>
+<b>$</b> mx sql "SELECT l_returnflag, sum(l_extendedprice) AS revenue, count(*) AS n
+         FROM 'lineitem.parquet' WHERE l_quantity &lt; 24
+         GROUP BY l_returnflag ORDER BY l_returnflag"
+{"rows":[["A",12224287050.07…,678980],["N",25204209793.87…,1400122],["R",12231597083.82…,679720]],
+ "row_count":3, "ms":6.60, "device":"cpu", "notes":[
+  "group: dense, 1 key l_returnflag 3 = 3 slots: the domain of 3 slots is small",
+  "columns read: l_quantity, l_extendedprice, l_returnflag <em>(3 of 16)</em>",
+  "kernel: <em>9 instructions a row</em> (1 slot)",
+  "device: CPU (SQL runs on the CPU)",
+  "ran: table lineitem.parquet: 1 chunk of 6,001,215 rows",
+  "order: sorted 3 groups by 1 key (stable radix passes)",
+  "time: kernel 6.35 ms, holistic states 0.0 ms, finish 0.15 ms"]}</pre>
+  <div class="src">a real run of mxframe build/mx on data/tpch_sf1/lineitem.parquet, 2026-11-01 · long numbers and two notes shortened · the 2 s file read is outside "ms"</div>
+  <aside class="notes">
+    A real run I did for this talk: six million rows of TPC-H lineitem, filter, group, sum and count, in 6.6 milliseconds of query time. Read the notes: dense grouping because there are three keys, three of sixteen columns read, nine instructions a row, on the CPU. That's the planner showing its work, in a form an agent can read.
+  </aside>
+</section>
+
+<!-- 7 · errors an agent can fix -->
+<section>
+  <span class="k">Built for agents</span>
+  <h2>A typo comes back as something to fix.</h2>
+  <pre class="code sm" style="margin-top:28px"><b>$</b> mx sql "SELECT l_retrunflag FROM 'lineitem.parquet'"
+{"error":{"message":"column `l_retrunflag` not found in table `lineitem.parquet`",
+          "line":1, "column":8,
+          "hint":"<em>did you mean `l_returnflag`?</em>"}}
+<i># exit 1: a query error · exit 2: a usage error · exit 0: success</i></pre>
+  <div class="grid g3" style="margin-top:26px">
+    <div class="card"><h3>Exact decimals</h3><p>A DECIMAL is a JSON number whose text is exact. Parse it with a decimal parser, never a float.</p></div>
+    <div class="card"><h3>Positions</h3><p>Line and column, 1-based, into the SQL text.</p></div>
+    <div class="card"><h3>Refused by name</h3><p>An unsupported form raises with its line and column. Malformed SQL never crashes (fuzzed).</p></div>
+  </div>
+  <div class="src">a real run of build/mx, 2026-11-01 · docs/omxcore-mojo-api.md "The mx command line" (Errors, Result) · docs/mojo-engine.md</div>
+  <aside class="notes">
+    Same file, with a typo. No stack trace: one JSON object with the message, the line and column, and "did you mean l_returnflag?". One round to fix it. Decimals come out as exact text, and anything unsupported is refused by name.
+  </aside>
+</section>
+
+<!-- 8 · the kernel, for real -->
+<section>
+  <span class="k">Under the hood · the GPU kernel</span>
+  <h2>The kernel reads the plan as instructions.</h2>
+  <div class="split narrow">
+    <div class="side">
+      <ul>
+        <li>The planner compiles a statement into a few instructions a row; one kernel steps through them.</li>
+        <li>Group sums accumulate with <b>monotonic</b> atomics. Mojo's stdlib <code>Atomic</code> is sequentially consistent, which put fences around every add: about 100× slower.</li>
+        <li>Integer sums note overflow instead of wrapping.</li>
+      </ul>
+    </div>
+    <pre class="code xs">@always_inline
+<b>def</b> _atomic_add_f64[space: AddressSpace](
+        ptr: Pointer[Float64, MutUntrackedOrigin, address_space=space],
+        val: Float64):
+    <b>var</b> v = __mlir_op.`builtin.unrealized_conversion_cast`[...](val)
+    _ = __mlir_op.`<em>llvm.atomicrmw</em>`[bin_op = ..., <em>ordering = `2 : i64`</em>, ...](...)
+
+<i># inside the grouped kernel: one instruction per aggregate</i>
+<b>for</b> a <b>in</b> range(A):
+    <b>var</b> ins = code + (HDR + (agg_base + a) * 5)
+    <b>var</b> kind = Int(ins[0])
+    <b>var</b> v = rebind[Float64](regs[Int(ins[2]) * TILE + tid + k * B])
+    <b>if</b> kind == OP_AGG_SUM:
+        <b>var</b> p = faccs + (a * G + g)
+        _atomic_add_f64(p, v)
+    <b>elif</b> kind == OP_AGG_ISUM:
+        _note_ovf(_atomic_add_bits(p, yv), yv, ovf)</pre>
+  </div>
+  <div class="src">mxframe kernels_aot/pipeline_gpu.mojo (lines 156–158, 975–985), trimmed · docs/lessons.md 2026-09-29</div>
+  <aside class="notes">
+    For the GPU people, real kernel code: the plan arrives as instructions, and the grouped kernel steps through them per row. One lesson: Mojo's standard Atomic is sequentially consistent, so every add got fenced, about a hundred times slower. We use an LLVM atomicrmw with monotonic ordering instead.
+  </aside>
+</section>
+
+<!-- 9 · exact -->
+<section>
+  <span class="k">Exactness</span>
+  <h2>Money is a scaled integer.</h2>
+  <div class="grid g2">
+    <div class="card"><h3 class="w">INT and DECIMAL</h3><p>Exact scaled int64. Sums are exact 64-bit, and the checks compare to the cent. A sum past int64 raises rather than wrapping.</p></div>
+    <div class="card"><h3 class="w">FLOAT64</h3><p>Follows DuckDB: NaN equals itself and sorts last, −0.0 equals 0.0. Float sums run in a fixed order, so the bits are the same on any core count.</p></div>
+  </div>
+  <p class="lede">Correctness is judged against DuckDB, never against our own CPU path.</p>
+  <div class="src">docs/omxcore-mojo-api.md (Exact integer arithmetic) · docs/mojo-engine.md "Types and exactness (F-157)" · docs/lessons.md 2026-09-30</div>
+  <aside class="notes">
+    Money and quantities are scaled 64-bit integers, so sums match to the cent, and an overflow raises instead of wrapping. Float sums run in a fixed order, so the bits are the same on any core count. And we check answers against DuckDB, never against our own CPU path.
+  </aside>
+</section>
+
+<!-- 10 · streaming -->
+<section>
+  <span class="k">Bigger than memory</span>
+  <h2>Files that don't fit, streamed.</h2>
+  <div class="grid g2">
+    <div class="card"><div class="num">72<small>MB</small></div><p>of memory to query a 1.6 GB Parquet file, one row group at a time (F-140)</p></div>
+    <div class="card"><div class="num">0.14<small>s</small></div><p>a streamed 20M-row query over 4 row groups, with morsels across cores (DuckDB 0.18 s)</p></div>
+  </div>
+  <p class="lede">Sorts past their budget spill sorted runs to disk and merge. A Parquet footer whose statistics lie can't give a wrong answer: the query re-runs without them.</p>
+  <div class="src">docs/site/bench/engine-informal.json (memory, streaming) · informal: shared 12-core Ryzen + RTX 3090 · STABLE.md (F-167) · docs/mojo-engine.md</div>
+  <aside class="notes">
+    Your file doesn't have to fit in memory. The first streaming version queried a 1.6 gigabyte file in 72 megabytes. Today a 20-million-row streamed query takes 0.14 seconds against DuckDB's 0.18. These are informal numbers from a shared machine.
+  </aside>
+</section>
+
+<!-- 11 · AUTO -->
+<section>
+  <span class="k">CPU or GPU</span>
+  <h2>AUTO picks the device, and says why.</h2>
+  <table class="t">
+    <tr><th>20M-row streamed query</th><th>CPU</th><th>GPU</th><th>AUTO picks</th></tr>
+    <tr><td><b>12 cores</b>, light plan</td><td>0.109 s</td><td>0.132 s</td><td><span class="pill">CPU</span></td></tr>
+    <tr><td><b>4 cores</b>, heavy plan</td><td>0.366 s</td><td>0.178 s</td><td><span class="pill ok">GPU</span></td></tr>
+    <tr><td><b>2 cores</b>, heavy plan</td><td>0.597 s</td><td>0.220 s</td><td><span class="pill ok">GPU · 2.7×</span></td></tr>
+  </table>
+  <p class="lede">AUTO prices the CPU against the GPU plus the copy. When it stays on the CPU, <code>fallback_reason</code> names why.</p>
+  <div class="src">docs/site/bench/engine-informal.json (gpu) · informal: RTX 3090, a shared Ryzen · docs/auto-mode.md</div>
+  <aside class="notes">
+    AUTO decides per query: it prices the CPU against the GPU plus the copy. Light plan, twelve cores: CPU. Heavy plan, fewer cores: GPU, up to 2.7 times faster. When it stays on the CPU, it says why in words.
+  </aside>
+</section>
+
+<!-- 12 · inside omxplorer -->
+<section>
+  <span class="k">Inside an app</span>
+  <h2>Linked into omxplorer, like SQLite.</h2>
+  <div class="split wide">
+    <div class="shot" style="height:400px"><img src="img/robots-04-telemetry-17m.jpg" alt="omxplorer with 16.8M rows of robot telemetry in a card"></div>
+    <div class="side">
+      <div class="num">~40<small>ms</small></div>
+      <p>a question in words over <b>16.8M</b> robot telemetry rows, joined to the fleet sheet (37–42 ms in the check's runs)</p>
+      <ul style="margin-top:16px">
+        <li>the engine is compiled into the app: no server, no JSON hop</li>
+        <li>the app vendors one stable commit of <code>omxcore.mojoc</code></li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">omxcode docs/goals/47-report.md (beat 3, M7) · omxcode vendor/OMXCORE_COMMIT · mxframe STABLE.md</div>
+  <aside class="notes">
+    This is where it earns its keep. omxplorer links omxcore straight in. On the DROID robot data, a question in words becomes a join over 16.8 million telemetry rows, back in about 40 milliseconds, in the same process as the window.
+  </aside>
+</section>
+
+<!-- 13 · outro -->
+<section>
+  <span class="k">Try it · part 1 of 2</span>
+  <h2>Point it at a file. Ask.</h2>
+  <pre class="code sm" style="margin-top:26px"><b>mx sql</b> "SELECT region, sum(revenue) AS revenue FROM 'orders.csv' GROUP BY region"
+
+<b>pip install</b> "mxframe[runtime,sql]"        <i># 0.6.0 imports as mxframe</i>
+
+git clone https://github.com/abhisheksreesaila/omxcore && cd omxcore
+<b>pixi install</b> && pixi run bash scripts/build_mx.sh   <i># → build/mx</i></pre>
+  <p class="lede">Next: SQL on the GPU through AUTO, 22 of 22 TPC-H, and an MCP server so agents reach for it first. <b>Part 2:</b> the numbers, and where it's still behind.</p>
+  <p class="cta">omxlabs.tech</p>
+  <div class="src">Apache-2.0 · github.com/abhisheksreesaila/omxcore · README.md · docs/plan.md F-191, F-192, F-169</div>
+  <div class="mark"><b>●</b> omxcore</div>
+  <aside class="notes">
+    Try it with one mx command, pip install mxframe, which is the 0.6.0 name, or build from source with pixi. Next up: SQL on the GPU through AUTO, the last TPC-H query, and an MCP server. Part 2 has the numbers and the honest edges.
+  </aside>
+</section>

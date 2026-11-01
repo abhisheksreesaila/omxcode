@@ -1,0 +1,299 @@
+<!-- title: omxplorer · part 2 · Not a replay. An investigation.; accent: --plorer -->
+
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxplorer · part 2 of 3</span>
+  <h1>Not a replay.<br><span class="w">An investigation.</span></h1>
+  <p class="lede">Five ideas that let you start from a question across a whole robot fleet and land on the moment that answers it.</p>
+  <div class="grid g4" style="grid-template-columns:repeat(5,1fr); gap:12px">
+    <div class="card"><h3>1</h3><p>the fleet is a spreadsheet you touch</p></div>
+    <div class="card"><h3>2</h3><p>question → moment in one motion</p></div>
+    <div class="card"><h3>3</h3><p>documents in the same join</p></div>
+    <div class="card" style="box-shadow:0 0 0 2px var(--plorer), var(--shadow)"><h3>4</h3><p>links you confirm by hand</p></div>
+    <div class="card"><h3>5</h3><p>no server for the analytics</p></div>
+  </div>
+  <div class="src">the robot story: docs/goals/47-report.md · links: docs/goals/41-report.md</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    In part one you saw the story: why a robot dropped a shirt. This part is how it works, in five ideas.
+    The fleet as a spreadsheet, a question that lands on a moment, documents in the same join, links a person confirms, and no server. Number four is my favourite.
+  </aside>
+</section>
+
+<!-- 2 · point 1 -->
+<section>
+  <span class="k">1 · the fleet is a spreadsheet you touch</span>
+  <h2>63,344 episodes you can sort, pivot and chart.</h2>
+  <div class="grid g2">
+    <div class="shot" style="height:330px"><img style="object-view-box: inset(8% 45% 40% 2%)" src="img/robots-01-fleet.jpg" alt="the fleet sheet"></div>
+    <div class="shot" style="height:330px"><img style="object-view-box: inset(47% 17% 22% 2%)" src="img/robots-03-pivot-lab-outcome.jpg" alt="pivot lab by outcome"></div>
+  </div>
+  <p class="lede" style="font-size:24px">Not a file browser of recordings: the fleet itself is the table. A chart is a sentence you type; a pivot is three picks.</p>
+  <div class="src">docs/goals/47-report.md beat 1, M0 (63,344 episodes, 13 labs), M3</div>
+  <aside class="notes">
+    Most robotics tools open one recording at a time. Here, the starting point is the whole fleet, as a spreadsheet: 63,344 rows, one per episode.
+    You touch it like Excel: sort, filter, pivot by lab and outcome, type a chart as a sentence. That's how you find which episodes to look at.
+  </aside>
+</section>
+
+<!-- 3 · point 2 -->
+<section>
+  <span class="k">2 · question → moment in one motion</span>
+  <h2>Words, then a tap, then the video.</h2>
+  <div class="steps">
+    <div class="card"><h3>Ask</h3><p>"failures where the gripper closed, let go and closed again"</p></div>
+    <div class="to">→</div>
+    <div class="card"><h3>Join</h3><p>fleet joined to 16.8M telemetry rows: <b>40.3 ms</b></p></div>
+    <div class="to">→</div>
+    <div class="card"><h3>Answer</h3><p>2,997 episodes</p></div>
+    <div class="to">→</div>
+    <div class="card"><h3>Tap</h3><p>tap any answer: its video and telemetry lanes, one cursor</p></div>
+  </div>
+  <div class="grid g2" style="margin-top:20px">
+    <div class="shot" style="height:250px"><img style="object-view-box: inset(23% 32% 48% 20%)" src="img/robots-09-ask-regrasped.jpg" alt="the answer"></div>
+    <div class="shot" style="height:250px"><img style="object-view-box: inset(47% 30% 9% 4%)" src="img/robots-06-drop-falling.jpg" alt="the moment"></div>
+  </div>
+  <div class="src">docs/goals/47-report.md M4, M7 (40.3 ms; 37–42 ms across the check's runs) · beat 3</div>
+  <aside class="notes">
+    This is the core motion. Ask in words, and it joins the fleet to every telemetry row, almost seventeen million, in about forty milliseconds.
+    Almost three thousand episodes come back. Tap one, and its video plays next to its joints and gripper on one cursor. No export, no second app, no waiting.
+  </aside>
+</section>
+
+<!-- 4 · the SQL -->
+<section>
+  <span class="k">2 · what it wrote</span>
+  <h2>The SQL says <span class="w">JOIN LINKED.</span></h2>
+  <pre class="code" style="margin-top:28px"><b>SELECT</b> fleet.episode, fleet.lab, fleet.task, fleet.clip, fleet.source,
+       <b>COUNT</b>(*) <b>AS</b> closes
+<b>FROM</b> fleet <em>JOIN LINKED</em>
+<b>WHERE</b> fleet.success = 0 <b>AND</b> telemetry.gripper_event = 'close'
+<b>GROUP BY</b> fleet.episode, fleet.lab, fleet.task, fleet.clip, fleet.source
+<b>HAVING</b> <b>COUNT</b>(*) >= 2 <b>ORDER BY</b> closes <b>DESC</b>, episode</pre>
+  <pre class="code sm" style="margin-top:16px"><i># mojoui/asksql.mojo · implied_sql()</i>
+<b>if not</b> join.lower().endswith("join"):
+    <b>raise</b> Error('write "FROM &lt;table&gt; JOIN LINKED": the links decide the joins')</pre>
+  <div class="src">scripts/scenario.py ROBOT_SQL1 (aliases trimmed) · mojoui/asksql.mojo</div>
+  <aside class="notes">
+    Here's the SQL behind that question. Notice there's no ON clause: it says JOIN LINKED, which means follow the links a person made.
+    The engine writes the joins out along the shortest chain of key links. If no link reaches a table, it refuses instead of guessing.
+  </aside>
+</section>
+
+<!-- 5 · point 3 -->
+<section>
+  <span class="k">3 · documents in the same join</span>
+  <h2>The paper is a card, <span class="w">linked like a table.</span></h2>
+  <div class="split" style="grid-template-columns:460px 1fr">
+    <div class="shot" style="height:420px"><img style="object-view-box: inset(30% 64% 25% 4%)" src="img/robots-08-paper-15hz.jpg" alt="the DROID paper with recorded at 15Hz marked"></div>
+    <div class="side">
+      <pre class="code sm">fleet.source = paper.file</pre>
+      <ul style="margin-top:16px">
+        <li>every row names the DROID paper as its source</li>
+        <li>page 15 marked: "All DROID data is recorded at 15Hz"</li>
+        <li>read from the PDF's own text, not OCR</li>
+        <li><b>provenance</b>, not a per-row join: the dataset has one paper</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/goals/47-report.md beat 4, M5 (page 15)</div>
+  <aside class="notes">
+    Documents aren't attachments here; they're cards you link like any table. Every fleet row names the DROID paper as its source, so one key link marks the passage that says the data is recorded at 15 hertz.
+    To be precise: the dataset has one paper, so this is provenance, the same page for every row. With per-row paperwork, like bills of lading, it's a real join.
+  </aside>
+</section>
+
+<!-- 6 · point 4a -->
+<section>
+  <span class="k">4 · links you confirm by hand</span>
+  <h2>Drag a column onto a card. <span class="w">Then say yes.</span></h2>
+  <div class="split wide">
+    <div class="shot" style="height:420px"><img style="object-view-box: inset(12% 40% 42% 20%)" src="img/links-confirm.jpg" alt="Link these? 14 of 18 match"></div>
+    <div class="side">
+      <p><b>"Link these?"</b> shipments.shipment_id = dock.mp4 code</p>
+      <p style="margin-top:12px"><b>14 of 18 match</b>, before you confirm.</p>
+      <div class="grid g3" style="margin-top:22px; gap:10px">
+        <div class="card" style="padding:14px"><h3 class="w">Key</h3><p>same value</p></div>
+        <div class="card" style="padding:14px"><h3 class="w">Time</h3><p>a clock + offset</p></div>
+        <div class="card" style="padding:14px"><h3 class="w">Place</h3><p>pixels → map</p></div>
+      </div>
+    </div>
+  </div>
+  <div class="src">docs/goals/41-report.md M6, M8 (1 link, shipments.shipment_id, 14 of 18) · mojoui/linkdrag.mojo · shot: build/g41/m8-step-08.png</div>
+  <aside class="notes">
+    This is my favourite idea. Cards from different tables or media don't connect until a person, or an agent, makes a link. You drag a column onto a card, and it asks: link these?
+    Before you say yes, it shows how many values match: here 14 of 18 shipments appear in the video. Links come in three kinds: by key, by time, and by place.
+  </aside>
+</section>
+
+<!-- 7 · point 4b: peek -->
+<section>
+  <span class="k">4 · hold a card</span>
+  <h2>See what it's linked to.</h2>
+  <div class="split" style="grid-template-columns:1.8fr 1fr">
+    <div class="shot" style="height:440px"><img style="object-view-box: inset(8% 40% 8% 3%)" src="img/links-peek.jpg" alt="hold a card: linked cards lift, a labelled line shows the link"></div>
+    <div class="side">
+      <ul>
+        <li>hold a card: the rest dims</li>
+        <li>linked cards lift</li>
+        <li>a labelled ghost line: <code>shipment_id = code key</code></li>
+        <li>let go, and it settles back</li>
+      </ul>
+      <p style="margin-top:14px">The joins are visible on the sheet, not hidden in a schema.</p>
+    </div>
+  </div>
+  <div class="src">docs/goals/41-report.md M8 ("peek lit […]; web too; 0 SLOW") · mojoui/peek.mojo · shot: build/g41/m8-step-14.png</div>
+  <aside class="notes">
+    Hold any card, and everything it isn't linked to dims. The linked cards lift, and a labelled line shows how they're connected: shipment id equals code, a key link.
+    Let go and it settles back. You can always see why two things belong together.
+  </aside>
+</section>
+
+<!-- 8 · point 4c: robot links -->
+<section>
+  <span class="k">4 · no schema in code</span>
+  <h2>The robot story is four typed lines.</h2>
+  <div class="split">
+    <div>
+      <pre class="code sm">fleet.episode = telemetry.episode
+fleet.clip    = episode.file
+telemetry.t   ~ episode.t +0
+fleet.source  = paper.file</pre>
+      <p class="caption">typed into the Links panel; an agent can add the same lines as tool calls</p>
+    </div>
+    <div class="shot" style="height:380px"><img style="object-view-box: inset(8% 0% 38% 52%)" src="img/robots-05-links.jpg" alt="the Links panel on the robot data"></div>
+  </div>
+  <p class="lede" style="font-size:24px">A key link onto a video card plays the row's file. One onto a log slices it into lanes. A time link puts both on one clock.</p>
+  <div class="src">docs/goals/47-report.md "Record it yourself" and "What the framework gained" (Links)</div>
+  <aside class="notes">
+    For the robot data, the whole model is four lines a person typed. The episode key, its video file, the shared clock, and its paper.
+    Each link tells cards how to react: onto a video it plays the row's file, onto a log it slices out that episode's lanes. No schema in code.
+  </aside>
+</section>
+
+<!-- 9 · point 4d: links.mojo -->
+<section>
+  <span class="k">4 · in the framework</span>
+  <h2>A link is a value. <span class="w">Who made it is part of it.</span></h2>
+  <pre class="code sm" style="margin-top:24px; font-size:14px"><i># mojoui/links.mojo</i>
+<i># The rule (owner, 2026-10-30): cards from the same table are linked implicitly; across tables or modalities nothing</i>
+<i># connects until a Link exists, made by a person or an agent. An app may suggest one; it never joins on its own.</i>
+
+<b>struct</b> Link(Copyable, Movable, ImplicitlyCopyable):
+    <b>var</b> kind: Int
+    <b>var</b> a: End
+    <b>var</b> b: End
+    <b>var</b> by: Int  <i># BY_PERSON or BY_AGENT (an app's suggestion becomes a Link only when one of them confirms it)</i>
+    <b>var</b> scale: Float64  <i># TIME: b = a · scale + offset; PLACE: x → lon</i>
+    <b>var</b> offset: Float64
+    <i># …</i>
+
+<b>def</b> match_count(a_values: List[String], b_values: List[String]) -> MatchCount:
+    <i>"""How many of a's distinct values appear in b: what a person sees before confirming a key link ("12 of 14")."""</i></pre>
+  <div class="src">mojoui/links.mojo (trimmed) · a framework component: any omxcode app can use it</div>
+  <aside class="notes">
+    In code, a link is a small value: two ends, a kind, and who made it, a person or an agent. Time links carry a scale and an offset, so two clocks can line up.
+    The match count is a plain function: it's what you see before you confirm. And it lives in the framework, not the app, so any omxcode app gets explicit links.
+  </aside>
+</section>
+
+<!-- 10 · point 5 -->
+<section>
+  <span class="k">5 · no server for the analytics</span>
+  <h2>The query runs in-process, <span class="w">on your machine.</span></h2>
+  <div class="split narrow">
+    <div class="stack">
+      <div class="layer">omxplorer <small>view() · update()</small></div>
+      <div class="layer">omxcode <small>sheet, cards, links</small></div>
+      <div class="layer hot">omxcore <small>SQL, CPU + GPU, linked like SQLite</small></div>
+      <div class="layer">your GPU or CPU <small>whichever the engine picks</small></div>
+    </div>
+    <div class="grid g2" style="margin-top:30px">
+      <div class="card"><div class="num">0.6<small>ms</small></div><p>a chart over 1M rows on the GPU (0.5–0.7)</p></div>
+      <div class="card"><div class="num">0.6<small>s</small></div><p>16.8M telemetry rows landed, as a job</p></div>
+      <div class="card"><div class="num">~2<small>ms</small></div><p>one episode sliced from the log</p></div>
+      <div class="card"><div class="num">0<small>servers</small></div><p>no JSON, no Python between data and window</p></div>
+    </div>
+  </div>
+  <div class="src">README.md "Measured" (RTX 3090) · docs/goals/47-report.md beat 6, M7 (583.9 ms)</div>
+  <aside class="notes">
+    There's no analytics server. The engine, omxcore, is linked into the app like SQLite and runs in the same process that draws the window, on your GPU or CPU, whichever it picks for the query.
+    On the GPU, a chart over a million rows takes about 0.6 milliseconds on an RTX 3090. The 16.8 million telemetry rows load in about 0.6 seconds as a background job, and after that one episode slices out in about two milliseconds.
+  </aside>
+</section>
+
+<!-- 11 · never freezes -->
+<section>
+  <span class="k">And the window keeps up</span>
+  <h2>The UI thread only decides.</h2>
+  <div class="grid g3">
+    <div class="card"><div class="num">0</div><p><code>SLOW:</code> lines at a 50 ms budget through the robot story, agent tools and GTK (headless, CPU drawing)</p></div>
+    <div class="card"><div class="num">6<small>µs</small></div><p>a video seek on its own decoder thread; the newest seek wins</p></div>
+    <div class="card"><div class="num">90<small>frames</small></div><p>drawn on Linux during a 1.5 s job; longest gap 17 ms</p></div>
+  </div>
+  <div class="src">docs/goals/47-report.md (Result, M8) · docs/goals/41-report.md (framefeed) · docs/ui-threads.md (examples/jobwake) · open edge: a 100M-row median still waits ~0.7 s (README)</div>
+  <aside class="notes">
+    Queries, imports, video and exports run as jobs on their own threads; the answer comes back as an ordinary event. A watchdog prints a SLOW line for any frame over budget.
+    Through the whole robot story it printed none at 50 milliseconds. One edge is still open: a median over 100 million rows in memory still makes the window wait.
+  </aside>
+</section>
+
+<!-- 12 · agents -->
+<section>
+  <span class="k">An agent can investigate too</span>
+  <h2>Every button is a tool.</h2>
+  <div class="split">
+    <pre class="code">$ scripts/agent.sh omxplorer
+claude mcp add omxplorer -- pixi run python \
+  …/mojoui/hosts/agent.py …/build/omxplorer/web</pre>
+    <div class="side">
+      <ul>
+        <li>the whole robot story runs through agent tools: <code>scripts/scenario.py robots</code></li>
+        <li>links have tools too: links, link, unlink</li>
+        <li>a disabled button isn't a tool</li>
+        <li>each call answers in words: what changed</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/agent.md · docs/goals/47-report.md "Record it yourself" · mojoui/links.mojo (agent tools)</div>
+  <aside class="notes">
+    Everything I just did by hand, an agent can do through MCP, with no per-app API. One script prints the command that hands omxplorer to Claude Code.
+    The whole robot story replays through agent tools, including making the links, and a disabled button simply isn't a tool.
+  </aside>
+</section>
+
+<!-- 13 · recap -->
+<section>
+  <span class="k">Recap</span>
+  <h2>Start from the question.<br><span class="w">End on the moment.</span></h2>
+  <table class="t">
+    <tr><th>idea</th><th>what you do</th></tr>
+    <tr><td><b>1 · fleet as a sheet</b></td><td>sort, pivot, chart 63,344 episodes</td></tr>
+    <tr><td><b>2 · question → moment</b></td><td>ask in words, ~40 ms, tap, one cursor</td></tr>
+    <tr><td><b>3 · documents in the join</b></td><td>the paper's passage one click from any row</td></tr>
+    <tr><td><b>4 · links by hand</b></td><td>key, time, place; match count first; hold to peek</td></tr>
+    <tr><td><b>5 · no server</b></td><td>the engine in-process: GPU or CPU, its pick</td></tr>
+  </table>
+  <div class="src">sources on the slides above</div>
+  <aside class="notes">
+    So that's the investigation, in five ideas. The fleet as a sheet, a question that lands on a moment, documents in the same join, links you confirm yourself, and no server in between.
+    Together they mean you start from a question, not from a file.
+  </aside>
+</section>
+
+<!-- 14 · outro -->
+<section>
+  <span class="k">Try it</span>
+  <h2>Make your own links.</h2>
+  <p class="cta">omxlabs.tech</p>
+  <pre class="code" style="margin-top:24px">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode && pixi install && scripts/omxplorer.sh</pre>
+  <p class="lede">Part 3: beyond robots (sentences, 100M rows, video as rows) and where we're behind.</p>
+  <p class="part">What would you link first in your own data?</p>
+  <div class="src">MIT · public alpha · github.com/abhisheksreesaila/omxcode</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    It's open source, MIT, and a public alpha. Clone it, run one script, and link your own data.
+    In part three: what it does beyond robots, and honestly, where we're behind. Tell me what you'd link first.
+  </aside>
+</section>

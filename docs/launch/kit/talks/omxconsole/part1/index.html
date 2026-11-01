@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxconsole · Your GPU as a private model server</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<style>
+/* Liquid dark (themes/liquid.mojo, liquid_dark_palette): backdrop, cards, hairlines, ink, teal accent, tones */
+:root {
+  --page: #12151b; --card: #1b1f27; --raised: #252a34; --line: #323946; --line2: #424a5a;
+  --ink: #f1f4f9; --ink2: #c4cad6; --ink3: #8f98a8;
+  --accent: #3cc4cf; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --info: #7aa7ff;
+  --d2: #fbbf24; --d3: #818cf8; --d4: #f472b6;
+  --plorer: #3ccf6e; --core: #4aa8ff; --code: #ff5d6c; --qua: #c084fc; --console: #ff9f40;
+  --sans: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --spring: cubic-bezier(.34, 1.36, .64, 1);
+  --shadow: 0 18px 40px -18px rgb(0 0 0 / .6);
+}
+html, body, .reveal-viewport { background: var(--page) !important; }
+.reveal { font-family: var(--sans); color: var(--ink); font-size: 30px; }
+.reveal .slides { text-align: left; }
+.reveal .slides section { height: 100%; padding: 0 !important; }
+.reveal h1, .reveal h2, .reveal h3 { font-family: var(--sans); color: var(--ink); text-transform: none; letter-spacing: -.035em; margin: 0; }
+.reveal h1 { font-size: 84px; font-weight: 800; line-height: 1.02; }
+.reveal h2 { font-size: 54px; font-weight: 750; line-height: 1.06; }
+.reveal h3 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+.reveal p { margin: 0; line-height: 1.4; }
+.reveal code { font-family: var(--mono); }
+.reveal a { color: var(--accent); }
+.k { font: 600 15px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; display: block; }
+.lede { color: var(--ink2); font-size: 28px; margin-top: 20px !important; max-width: 980px; }
+.src { position: absolute; left: 0; bottom: 0; font: 14px var(--mono); color: var(--ink3); }
+.mark { position: absolute; right: 70px; bottom: 0; font: 600 14px var(--mono); color: var(--ink3); }
+.mark b { color: var(--plorer); }
+.w { color: var(--accent); }
+.card { background: var(--card); border-radius: 22px; box-shadow: 0 0 0 1px var(--line), var(--shadow); padding: 24px 26px; }
+.grid { display: grid; gap: 16px; margin-top: 34px; }
+.g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); }
+.card p { color: var(--ink2); font-size: 20px; margin-top: 8px; }
+.num { font: 800 60px/1 var(--sans); letter-spacing: -.05em; color: var(--accent); }
+.num small { font-size: 22px; color: var(--ink3); margin-left: 6px; letter-spacing: -.01em; }
+.pill { display: inline-block; font: 600 13px var(--mono); padding: 5px 11px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line2); color: var(--ink2); }
+.pill.ok { color: var(--ok); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.next { color: var(--warn); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+pre.code { margin: 0; font: 18px/1.55 var(--mono); color: var(--ink2); background: var(--card); border-radius: 18px; padding: 22px 24px; box-shadow: 0 0 0 1px var(--line); white-space: pre; width: auto; }
+pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(--ink3); font-style: normal; } pre.code em { color: var(--ok); font-style: normal; }
+/* Liquid motion: fragments spring in */
+.reveal .slides section .fragment { transition: opacity .32s ease, transform .5s var(--spring); transform: translateY(14px) scale(.98); }
+.reveal .slides section .fragment.visible { transform: none; }
+/* the app mock: a sheet, a video, two telemetry lanes, one cursor */
+.app { display: grid; grid-template-columns: 300px 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; margin-top: 30px; height: 410px; }
+.app .pane { background: var(--card); border-radius: 18px; box-shadow: 0 0 0 1px var(--line); position: relative; overflow: hidden; }
+.app .sheet { grid-row: span 2; padding: 12px 0; font: 14px var(--mono); }
+.app .sheet div { display: grid; grid-template-columns: 1fr 64px 44px; padding: 6px 14px; color: var(--ink2); border-bottom: 1px solid var(--line); }
+.app .sheet div.h { color: var(--ink3); font-size: 12px; letter-spacing: .08em; }
+.app .sheet div.sel { background: color-mix(in srgb, var(--accent) 16%, var(--card)); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
+.app .sheet .f { color: var(--bad); } .app .sheet .s { color: var(--ok); }
+.app .video { grid-row: span 2; display: grid; place-items: center; background: linear-gradient(160deg, #20252f, #151920); }
+.app .video .ph { font: 600 16px var(--mono); color: var(--ink3); text-align: center; line-height: 1.6; }
+.app .video .bar { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 6px; border-radius: 3px; background: var(--raised); }
+.app .video .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 58%; border-radius: 3px; background: var(--accent); }
+.app .lane { padding: 12px 14px; }
+.app .lane .t { font: 600 12px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; }
+.app svg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 78%; }
+.cursor { position: absolute; top: 0; bottom: 0; left: 58%; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+/* the flow: one app → hosts */
+.flow { display: grid; grid-template-columns: 420px 50px 1fr; align-items: center; margin-top: 40px; gap: 0; }
+.flow .src-file { text-align: center; }
+.flow .arrow { height: 2px; background: var(--line2); position: relative; }
+.flow .arrow::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: var(--line2); }
+.hosts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.hosts .card { padding: 16px 18px; }
+.hosts .card h3 { font-size: 22px; }
+/* the timeline */
+.road { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 46px; position: relative; }
+.road::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: var(--line); }
+.road > div { position: relative; padding-top: 42px; }
+.road > div::before { content: ""; position: absolute; top: 4px; left: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--page); box-shadow: 0 0 0 2px var(--line2); }
+.road > div.now::before { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+.road h3 { font-size: 24px; } .road p { color: var(--ink2); font-size: 19px; margin-top: 8px !important; }
+.road .when { font: 600 13px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 8px; }
+.four { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 40px; align-items: stretch; }
+.four .card ul { margin: 12px 0 0; padding-left: 22px; color: var(--ink2); font-size: 22px; line-height: 1.6; }
+.four .us { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow); }
+.suite { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 30px; }
+.suite span { font: 600 16px var(--mono); padding: 8px 14px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+.cta { font: 700 44px var(--sans); letter-spacing: -.03em; color: var(--accent); margin-top: 30px !important; }
+.reveal .progress { color: var(--accent); height: 3px; }
+.reveal .controls { color: var(--accent); }
+.reveal .slide-number { background: transparent; color: var(--ink3); font: 13px var(--mono); }
+
+/* talks additions: product accent, pictures, clips, two-column layouts */
+.k { color: var(--pa, var(--accent)); }
+.w { color: var(--pa, var(--accent)); }
+.num, .cta { color: var(--pa, var(--accent)); }
+.mark b { color: var(--pa, var(--plorer)); }
+.shot { border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 1px var(--line), var(--shadow); background: var(--card); }
+.shot img, .shot video { display: block; width: 100%; height: 100%; object-fit: cover; margin: 0; }
+.shot.contain img, .shot.contain video { object-fit: contain; background: #0c0e12; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 30px; align-items: start; }
+.split.wide { grid-template-columns: 1.35fr 1fr; }
+.split.narrow { grid-template-columns: 1fr 1.35fr; }
+.side p, .side li { color: var(--ink2); font-size: 22px; line-height: 1.5; }
+.side ul { margin: 0; padding-left: 22px; } .side li { margin-bottom: 10px; }
+.side b { color: var(--ink); }
+.hero { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; align-items: center; height: 560px; margin-top: 10px; }
+.hero .shot { height: 460px; }
+.big { font: 800 120px/1 var(--sans); letter-spacing: -.05em; color: var(--pa, var(--accent)); }
+.big small { font-size: 34px; color: var(--ink3); margin-left: 8px; letter-spacing: -.01em; }
+.caption { font: 14px var(--mono); color: var(--ink3); margin-top: 10px !important; }
+pre.code.sm { font-size: 15px; line-height: 1.5; padding: 18px 20px; }
+pre.code.xs { font-size: 13px; line-height: 1.45; padding: 16px 18px; }
+.bars { display: flex; flex-direction: column; gap: 18px; margin-top: 34px; }
+.bar { display: grid; grid-template-columns: 220px 1fr 130px; align-items: center; gap: 18px; font-size: 24px; }
+.bar .name { color: var(--ink); font-weight: 650; }
+.bar .track { display: block; height: 30px; background: var(--card); border-radius: 9px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
+.bar .fill { display: block; height: 100%; width: 0; border-radius: 9px; background: var(--ink3); transition: width 1.2s var(--spring); }
+.bar .fill.me { background: var(--pa, var(--accent)); }
+.present .bar .fill { width: var(--w); }
+.bar .val { font: 650 24px var(--mono); color: var(--ink); text-align: right; }
+.stack { display: flex; flex-direction: column; gap: 10px; margin-top: 30px; }
+.stack .layer { background: var(--card); border-radius: 16px; box-shadow: 0 0 0 1px var(--line); padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; font-size: 24px; font-weight: 650; }
+.stack .layer small { font: 500 16px var(--mono); color: var(--ink3); }
+.stack .layer.hot { box-shadow: 0 0 0 2px var(--pa, var(--accent)); }
+.steps { display: flex; align-items: stretch; gap: 10px; margin-top: 34px; }
+.steps .card { flex: 1; padding: 18px; } .steps .card h3 { font-size: 21px; } .steps .card p { font-size: 17px; }
+.steps .to { align-self: center; color: var(--pa, var(--accent)); font: 700 26px var(--sans); }
+table.t { border-collapse: collapse; margin-top: 26px; font-size: 21px; width: 100%; }
+table.t th { text-align: left; font: 600 13px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); padding: 8px 12px; border-bottom: 1px solid var(--line2); }
+table.t td { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); }
+table.t td b { color: var(--ink); }
+.part { font: 600 14px var(--mono); color: var(--ink3); letter-spacing: .1em; text-transform: uppercase; margin-top: 26px !important; }
+</style>
+</head>
+<body style="--pa: var(--console)">
+<div class="reveal"><div class="slides">
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxconsole · part 1 of 2</span>
+  <div class="hero">
+    <div>
+      <h1>Your GPU,<br>as a private <span class="w">model server.</span></h1>
+      <p class="lede">One command gives you an OpenAI-compatible endpoint on your own NVIDIA GPU, on Modular MAX. Models load on their first call and sleep when idle.</p>
+      <p class="part">mxc serve qwen2.5-0.5b → http://127.0.0.1:11435/v1</p>
+    </div>
+    <div class="shot contain" style="height:auto"><img src="img/omxconsole-home-dark.png" alt="the omxconsole console: My models"></div>
+  </div>
+  <div class="src">mxstudio README.md · docs/USER_GUIDE.md · public alpha, Linux + NVIDIA, MAX 26.7 nightly</div>
+  <div class="mark"><b>●</b> omxlabs.tech</div>
+  <aside class="notes">
+    This is omxconsole. It turns the NVIDIA GPU you already own into a private model server: one command, and you get an OpenAI-compatible endpoint on your own machine, running on Modular MAX. Models load on their first call and sleep when nobody's using them. Part one is the server; part two is porting models MAX can't run yet, and the console written in Mojo.
+  </aside>
+</section>
+
+<!-- 2 · why -->
+<section>
+  <span class="k">Why</span>
+  <h2>Cloud AI sends a bill.<br>Local AI hogs the GPU.</h2>
+  <div class="grid g3">
+    <div class="card fragment"><h3>A meter on every word</h3><p>Cloud APIs bill per token, and every prompt, with your data in it, leaves the building.</p></div>
+    <div class="card fragment"><h3>One server per model</h3><p>The usual local setup: a port per model, each holding GPU memory all day, used or not.</p></div>
+    <div class="card fragment"><h3>"Not supported"</h3><p>MAX runs many architectures, not all. The model you want may not be one of them.</p></div>
+  </div>
+  <div class="src">mxstudio README.md "Why" · docs/PORTING.md</div>
+  <aside class="notes">
+    Three problems. Cloud AI puts a meter on every word, and your prompts, with your data in them, leave the building. Running models locally usually means one server per model, each sitting on GPU memory all day. And MAX supports a lot of architectures, but not every one.
+  </aside>
+</section>
+
+<!-- 3 · who -->
+<section>
+  <span class="k">Who it's for</span>
+  <h2>When the model should live<br>next to your data.</h2>
+  <div class="grid g4">
+    <div class="card"><h3>Private</h3><p>Prompts and answers stay on this machine.</p></div>
+    <div class="card"><h3>Offline</h3><p>Weights come from Hugging Face once; they stay in its normal cache.</p></div>
+    <div class="card"><h3>No meter</h3><p>The GPU you own does the work. No per-token bill.</p></div>
+    <div class="card"><h3>An agent's brain</h3><p>Anything that speaks the OpenAI API can call it.</p></div>
+  </div>
+  <p class="lede">You keep your code: change one base URL.</p>
+  <div class="src">mxstudio README.md · docs/USER_GUIDE.md "Where things are" (weights stay in the Hugging Face cache)</div>
+  <aside class="notes">
+    It's for anyone who wants the model next to their data. Prompts never leave the machine, weights download once, and there's no per-token bill. And since it speaks the OpenAI API, any agent or script you already have can use it by changing one URL.
+  </aside>
+</section>
+
+<!-- 4 · what it is -->
+<section>
+  <span class="k">What it is</span>
+  <h2>A small server, and a console.</h2>
+  <div class="split narrow">
+    <div class="side">
+      <ul>
+        <li><b><code>mxc</code></b>, a command line, runs a daemon in front of MAX.</li>
+        <li>The daemon starts one <b><code>max serve</code></b> per loaded model, on loopback ports.</li>
+        <li><b>The console</b> shows every model: state, memory, speed, logs, a benchmark and a notebook.</li>
+        <li>State lives in <code>~/.mxc/</code>: models, key hashes, the request log.</li>
+      </ul>
+    </div>
+    <div class="shot" style="height:400px"><img src="img/omxconsole-home.png" alt="the console, light"></div>
+  </div>
+  <div class="src">docs/ARCHITECTURE.md · docs/USER_GUIDE.md "The console", "Where things are" (mst.db)</div>
+  <aside class="notes">
+    Two pieces. mxc is the command line; it runs a daemon in front of MAX, and the daemon starts one max serve process per model that's actually loaded. The console shows every model with its state, memory, speed and logs, plus a benchmark and a notebook.
+  </aside>
+</section>
+
+<!-- 5 · the command -->
+<section>
+  <span class="k">One command</span>
+  <h2>It prints how to call it.</h2>
+  <pre class="code sm" style="margin-top:28px"><b>$</b> pixi run mxc serve qwen2.5-0.5b
+pulled qwen2.5-0.5b (Qwen/Qwen2.5-0.5B-Instruct@…)
+started the omxconsole daemon
+loading qwen2.5-0.5b (the first load compiles the model and can take a minute)…
+qwen2.5-0.5b is ready (…s)
+
+endpoint  <em>http://127.0.0.1:11435/v1</em>   (API reference: http://127.0.0.1:11435/docs)
+key       mst-…   (app 'default'; shown once, keep it)
+
+curl http://127.0.0.1:11435/v1/chat/completions -H 'Authorization: Bearer mst-…' \
+  -H 'Content-Type: application/json' -d '{"model": "qwen2.5-0.5b", …}'
+<i>… then a Python snippet, and: manage it in the console …</i></pre>
+  <div class="src">the lines mxconsole/cli.py (serve) and mxconsole/serve.py usage() print · trimmed · options: --pin, --keep-alive, docs/CLI.md</div>
+  <aside class="notes">
+    Here's the whole experience: mxc serve and a model name. It pulls the weights, starts the daemon and loads the model; the first load compiles it, so that can take a minute. Then it prints the endpoint, a key shown exactly once, and a curl line to paste. These are the real lines the code prints.
+  </aside>
+</section>
+
+<!-- 6 · curl -->
+<section>
+  <span class="k">Call it · curl</span>
+  <h2>Plain JSON, OpenAI's shape.</h2>
+  <div class="split wide">
+    <pre class="code sm">curl http://127.0.0.1:11435/v1/chat/completions \
+  -H "Authorization: Bearer $MXC_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen2.5-0.5b",
+       "messages": [{"role": "user",
+                     "content": "Hello"}]}'</pre>
+    <div class="side">
+      <ul>
+        <li><b>Your port</b>, on loopback: 11435.</li>
+        <li><b>One key per app</b>, revocable.</li>
+        <li><b>The model is picked by name</b>; the daemon routes on it.</li>
+        <li>No key: <b>401</b>. A model that isn't registered: <b>404</b>, telling you to run <code>mxc pull</code>.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/USER_GUIDE.md "Call it" · lines rewrapped</div>
+  <aside class="notes">
+    The curl call is OpenAI's chat completions, unchanged. It goes to your own port, carries a key that belongs to one app, and the model field picks who answers. A bad key gets a 401; a model you haven't pulled gets a 404 that names the command to run.
+  </aside>
+</section>
+
+<!-- 7 · any client -->
+<section>
+  <span class="k">Call it · any OpenAI client</span>
+  <h2>Change one URL. Keep your code.</h2>
+  <pre class="code" style="margin-top:28px"><b>import</b> os
+<b>from</b> openai <b>import</b> OpenAI
+
+client = OpenAI(base_url=<em>"http://127.0.0.1:11435/v1"</em>, api_key=os.environ[<em>"MXC_API_KEY"</em>])
+reply = client.chat.completions.create(
+    model=<em>"qwen2.5-0.5b"</em>,
+    messages=[{<em>"role"</em>: <em>"user"</em>, <em>"content"</em>: <em>"Hello"</em>}],
+)
+print(reply.choices[0].message.content)</pre>
+  <p class="lede">Four routes: <code>/v1/models</code>, <code>/v1/chat/completions</code>, <code>/v1/completions</code>, <code>/v1/embeddings</code>. Anything else is a 404.</p>
+  <div class="src">docs/USER_GUIDE.md "Call it" (Python, with the openai package; routes)</div>
+  <aside class="notes">
+    From Python it's the official openai package with a different base URL, so whatever you wrote against the cloud keeps working. The API is four routes; anything else is a 404, which keeps the surface small.
+  </aside>
+</section>
+
+<!-- 8 · four layers -->
+<section>
+  <span class="k">How it's built</span>
+  <h2>Four layers, one URL on top.</h2>
+  <div class="stack">
+    <div class="layer">Your apps and agents <small>scripts · notebooks · the console · any OpenAI client</small></div>
+    <div class="layer hot">OpenAI-compatible API <small>/v1 on 127.0.0.1:11435</small></div>
+    <div class="layer hot">omxconsole daemon <small>gateway.py · supervisor.py: keys, route by model, start on demand, unload when idle</small></div>
+    <div class="layer">max serve <small>Modular MAX · one per loaded model, on loopback ports</small></div>
+    <div class="layer">Your GPU <small>NVIDIA · Linux</small></div>
+  </div>
+  <div class="src">docs/ARCHITECTURE.md "How a request travels" · mxconsole/gateway.py, supervisor.py</div>
+  <aside class="notes">
+    The stack. Your apps see one URL. Under it, the daemon: the gateway checks keys and routes by model name, and the supervisor starts and stops one max serve child per model. MAX does the serving on the GPU; the daemon just decides who runs and streams the answer through.
+  </aside>
+</section>
+
+<!-- 9 · a request as it runs -->
+<section>
+  <span class="k">A request, as it runs</span>
+  <h2>A call for a sleeping model wakes it.</h2>
+  <div class="steps">
+    <div class="card"><h3>Your app</h3><p>POST /v1/chat/completions</p></div><span class="to">→</span>
+    <div class="card"><h3>Daemon</h3><p>checks the key, reads "model"</p></div><span class="to">→</span>
+    <div class="card"><h3>max serve</h3><p>cold → starts it</p></div><span class="to">→</span>
+    <div class="card"><h3>GPU</h3><p>tokens stream back</p></div>
+  </div>
+  <div class="grid g3">
+    <div class="card"><h3 class="w">One start</h3><p>Callers that arrive while it loads share the same start.</p></div>
+    <div class="card"><h3 class="w">Never mid-answer</h3><p>A model unloads only with nothing in flight.</p></div>
+    <div class="card"><h3 class="w">Honest errors</h3><p>Fields MAX would refuse are dropped and named in <code>X-Mxc-Dropped-Params</code>; fields that change the answer never are.</p></div>
+  </div>
+  <div class="src">docs/ARCHITECTURE.md (daemon; params.py reads MAX's own request schema) · mxconsole/supervisor.py</div>
+  <aside class="notes">
+    A request for a sleeping model: the daemon checks the key, sees the model is cold, starts max serve, and streams tokens back. Callers arriving together share one start, and nothing unloads mid-answer. Fields MAX would reject are dropped and named in a reply header, but anything that changes the answer, like tools or a seed, never is.
+  </aside>
+</section>
+
+<!-- 10 · idle and pin -->
+<section>
+  <span class="k">Idle unload, and pin</span>
+  <h2>Register many. Load what's called.</h2>
+  <div class="split">
+    <div>
+      <div class="big">5<small>idle minutes</small></div>
+      <p class="lede">The default keep-alive. Then the model unloads and its GPU memory is free; the next call loads it again.</p>
+    </div>
+    <pre class="code sm">mxc serve smollm2-1.7b --pin
+  <i># never unloads</i>
+mxc serve qwen2.5-1.5b --keep-alive 10m
+  <i># unloads after 10 idle minutes</i>
+mxc set qwen2.5-0.5b --pin
+  <i># change it later (or --unpin, --keep-alive 1h)</i></pre>
+  </div>
+  <div class="src">docs/USER_GUIDE.md "Idle unload and pin" · docs/CLI.md (--keep-alive, default 5m) · supervisor.py</div>
+  <aside class="notes">
+    This fixes one server per model. Register as many as you like; each loads when called and unloads after five idle minutes, giving the memory back. Pin the one you use all day. The honest cost: the first call after an unload waits for the load.
+  </aside>
+</section>
+
+<!-- 11 · keys -->
+<section>
+  <span class="k">Keys</span>
+  <h2>One key per app. Stored as a hash.</h2>
+  <div class="split">
+    <pre class="code sm">mxc keys new my-app       <i># printed once</i>
+mxc keys ls               <i># lists keys, never the secret</i>
+mxc keys rotate my-app    <i># new key, old one stops working</i>
+mxc keys revoke my-app</pre>
+    <div class="side">
+      <ul>
+        <li>Keys look like <code>mst-…</code> and are stored <b>only as SHA-256 hashes</b>, so each one is shown once.</li>
+        <li>One key per app means you can cut off one script without touching the others.</li>
+        <li>The console's own <code>/admin</code> routes answer only on this machine.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/ARCHITECTURE.md (keys.py) · docs/USER_GUIDE.md "Keys", "Where things are" · docs/CLI.md</div>
+  <aside class="notes">
+    Every app gets its own key, stored only as a SHA-256 hash, which is why you see it once. You can rotate or revoke one script's access without breaking the others, and the console's admin routes never leave this machine.
+  </aside>
+</section>
+
+<!-- 12 · sharing -->
+<section>
+  <span class="k">Sharing it on your LAN</span>
+  <h2><code style="font-size:46px">mxc expose</code>: four routes, over HTTPS.</h2>
+  <div class="steps">
+    <div class="card"><h3>Phone, laptop</h3><p>on your network</p></div><span class="to">→</span>
+    <div class="card"><h3>Caddy :8443</h3><p>HTTPS, its own CA, checks the app key</p></div><span class="to">→</span>
+    <div class="card"><h3>Daemon</h3><p>routes by model name</p></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h3 class="w">Reachable from the LAN</h3><p>only the four <code>/v1</code> routes, with the same keys and model names</p></div>
+    <div class="card"><h3 class="w">This machine only</h3><p>the console and the admin pages; localhost keeps working over HTTP</p></div>
+  </div>
+  <div class="src">docs/USER_GUIDE.md "Securing it on your LAN" · docs/ARCHITECTURE.md (expose.py; LiteLLM removed in F-063)</div>
+  <aside class="notes">
+    For your phone or laptop, mxc expose runs Caddy on port 8443 with its own certificate authority. Caddy checks the key and passes the request straight to the daemon; only the four v1 routes are reachable. A LiteLLM proxy used to sit in between; it was removed after its supply-chain incidents.
+  </aside>
+</section>
+
+<!-- 13 · outro -->
+<section>
+  <span class="k">Try it</span>
+  <h2>Your GPU, one endpoint,<br>in one command.</h2>
+  <pre class="code" style="margin-top:28px">git clone https://github.com/abhisheksreesaila/mxstudio.git && cd mxstudio
+pixi install && pixi run mxc serve qwen2.5-0.5b
+<i># then point any OpenAI client at</i> <em>http://127.0.0.1:11435/v1</em></pre>
+  <div class="grid g2">
+    <div class="card"><h3>Next, in part 2</h3><p>MAX can't run it? <code>mxc port</code> has Claude Code write the port, in a sandbox. And the console, rebuilt in Mojo.</p></div>
+    <div class="card"><h3>Tell me</h3><p>Which model would you run first on your own GPU?</p></div>
+  </div>
+  <p class="cta">omxlabs.tech</p>
+  <div class="src">MIT (omxlabs/readmes/omxconsole.md) · Linux + NVIDIA · public alpha on MAX 26.7 nightly · mxstudio README.md</div>
+  <div class="mark"><b>●</b> omxconsole</div>
+  <aside class="notes">
+    Clone it, pixi install, mxc serve, and point any OpenAI client at localhost port 11435. It needs Linux and an NVIDIA GPU; it's a public alpha on a MAX nightly, MIT licensed. Part two: what happens when MAX can't run your model. Tell me which model you'd run first.
+  </aside>
+</section>
+
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script>
+Reveal.initialize({
+  hash: true, width: 1280, height: 720, margin: 0.06, center: false,
+  transition: 'fade', transitionSpeed: 'default', backgroundTransition: 'fade',
+  controls: true, progress: true, slideNumber: false,
+  plugins: [RevealNotes]
+});
+</script>
+</body>
+</html>

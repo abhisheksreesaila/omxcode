@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxplorer · part 1 · Why did the robot drop it?</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<style>
+/* Liquid dark (themes/liquid.mojo, liquid_dark_palette): backdrop, cards, hairlines, ink, teal accent, tones */
+:root {
+  --page: #12151b; --card: #1b1f27; --raised: #252a34; --line: #323946; --line2: #424a5a;
+  --ink: #f1f4f9; --ink2: #c4cad6; --ink3: #8f98a8;
+  --accent: #3cc4cf; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --info: #7aa7ff;
+  --d2: #fbbf24; --d3: #818cf8; --d4: #f472b6;
+  --plorer: #3ccf6e; --core: #4aa8ff; --code: #ff5d6c; --qua: #c084fc; --console: #ff9f40;
+  --sans: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --spring: cubic-bezier(.34, 1.36, .64, 1);
+  --shadow: 0 18px 40px -18px rgb(0 0 0 / .6);
+}
+html, body, .reveal-viewport { background: var(--page) !important; }
+.reveal { font-family: var(--sans); color: var(--ink); font-size: 30px; }
+.reveal .slides { text-align: left; }
+.reveal .slides section { height: 100%; padding: 0 !important; }
+.reveal h1, .reveal h2, .reveal h3 { font-family: var(--sans); color: var(--ink); text-transform: none; letter-spacing: -.035em; margin: 0; }
+.reveal h1 { font-size: 84px; font-weight: 800; line-height: 1.02; }
+.reveal h2 { font-size: 54px; font-weight: 750; line-height: 1.06; }
+.reveal h3 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+.reveal p { margin: 0; line-height: 1.4; }
+.reveal code { font-family: var(--mono); }
+.reveal a { color: var(--accent); }
+.k { font: 600 15px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; display: block; }
+.lede { color: var(--ink2); font-size: 28px; margin-top: 20px !important; max-width: 980px; }
+.src { position: absolute; left: 0; bottom: 0; font: 14px var(--mono); color: var(--ink3); }
+.mark { position: absolute; right: 70px; bottom: 0; font: 600 14px var(--mono); color: var(--ink3); }
+.mark b { color: var(--plorer); }
+.w { color: var(--accent); }
+.card { background: var(--card); border-radius: 22px; box-shadow: 0 0 0 1px var(--line), var(--shadow); padding: 24px 26px; }
+.grid { display: grid; gap: 16px; margin-top: 34px; }
+.g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); }
+.card p { color: var(--ink2); font-size: 20px; margin-top: 8px; }
+.num { font: 800 60px/1 var(--sans); letter-spacing: -.05em; color: var(--accent); }
+.num small { font-size: 22px; color: var(--ink3); margin-left: 6px; letter-spacing: -.01em; }
+.pill { display: inline-block; font: 600 13px var(--mono); padding: 5px 11px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line2); color: var(--ink2); }
+.pill.ok { color: var(--ok); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.next { color: var(--warn); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+pre.code { margin: 0; font: 18px/1.55 var(--mono); color: var(--ink2); background: var(--card); border-radius: 18px; padding: 22px 24px; box-shadow: 0 0 0 1px var(--line); white-space: pre; width: auto; }
+pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(--ink3); font-style: normal; } pre.code em { color: var(--ok); font-style: normal; }
+/* Liquid motion: fragments spring in */
+.reveal .slides section .fragment { transition: opacity .32s ease, transform .5s var(--spring); transform: translateY(14px) scale(.98); }
+.reveal .slides section .fragment.visible { transform: none; }
+/* the app mock: a sheet, a video, two telemetry lanes, one cursor */
+.app { display: grid; grid-template-columns: 300px 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; margin-top: 30px; height: 410px; }
+.app .pane { background: var(--card); border-radius: 18px; box-shadow: 0 0 0 1px var(--line); position: relative; overflow: hidden; }
+.app .sheet { grid-row: span 2; padding: 12px 0; font: 14px var(--mono); }
+.app .sheet div { display: grid; grid-template-columns: 1fr 64px 44px; padding: 6px 14px; color: var(--ink2); border-bottom: 1px solid var(--line); }
+.app .sheet div.h { color: var(--ink3); font-size: 12px; letter-spacing: .08em; }
+.app .sheet div.sel { background: color-mix(in srgb, var(--accent) 16%, var(--card)); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
+.app .sheet .f { color: var(--bad); } .app .sheet .s { color: var(--ok); }
+.app .video { grid-row: span 2; display: grid; place-items: center; background: linear-gradient(160deg, #20252f, #151920); }
+.app .video .ph { font: 600 16px var(--mono); color: var(--ink3); text-align: center; line-height: 1.6; }
+.app .video .bar { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 6px; border-radius: 3px; background: var(--raised); }
+.app .video .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 58%; border-radius: 3px; background: var(--accent); }
+.app .lane { padding: 12px 14px; }
+.app .lane .t { font: 600 12px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; }
+.app svg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 78%; }
+.cursor { position: absolute; top: 0; bottom: 0; left: 58%; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+/* the flow: one app → hosts */
+.flow { display: grid; grid-template-columns: 420px 50px 1fr; align-items: center; margin-top: 40px; gap: 0; }
+.flow .src-file { text-align: center; }
+.flow .arrow { height: 2px; background: var(--line2); position: relative; }
+.flow .arrow::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: var(--line2); }
+.hosts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.hosts .card { padding: 16px 18px; }
+.hosts .card h3 { font-size: 22px; }
+/* the timeline */
+.road { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 46px; position: relative; }
+.road::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: var(--line); }
+.road > div { position: relative; padding-top: 42px; }
+.road > div::before { content: ""; position: absolute; top: 4px; left: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--page); box-shadow: 0 0 0 2px var(--line2); }
+.road > div.now::before { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+.road h3 { font-size: 24px; } .road p { color: var(--ink2); font-size: 19px; margin-top: 8px !important; }
+.road .when { font: 600 13px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 8px; }
+.four { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 40px; align-items: stretch; }
+.four .card ul { margin: 12px 0 0; padding-left: 22px; color: var(--ink2); font-size: 22px; line-height: 1.6; }
+.four .us { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow); }
+.suite { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 30px; }
+.suite span { font: 600 16px var(--mono); padding: 8px 14px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+.cta { font: 700 44px var(--sans); letter-spacing: -.03em; color: var(--accent); margin-top: 30px !important; }
+.reveal .progress { color: var(--accent); height: 3px; }
+.reveal .controls { color: var(--accent); }
+.reveal .slide-number { background: transparent; color: var(--ink3); font: 13px var(--mono); }
+
+/* talks additions: product accent, pictures, clips, two-column layouts */
+.k { color: var(--pa, var(--accent)); }
+.w { color: var(--pa, var(--accent)); }
+.num, .cta { color: var(--pa, var(--accent)); }
+.mark b { color: var(--pa, var(--plorer)); }
+.shot { border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 1px var(--line), var(--shadow); background: var(--card); }
+.shot img, .shot video { display: block; width: 100%; height: 100%; object-fit: cover; margin: 0; }
+.shot.contain img, .shot.contain video { object-fit: contain; background: #0c0e12; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 30px; align-items: start; }
+.split.wide { grid-template-columns: 1.35fr 1fr; }
+.split.narrow { grid-template-columns: 1fr 1.35fr; }
+.side p, .side li { color: var(--ink2); font-size: 22px; line-height: 1.5; }
+.side ul { margin: 0; padding-left: 22px; } .side li { margin-bottom: 10px; }
+.side b { color: var(--ink); }
+.hero { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; align-items: center; height: 560px; margin-top: 10px; }
+.hero .shot { height: 460px; }
+.big { font: 800 120px/1 var(--sans); letter-spacing: -.05em; color: var(--pa, var(--accent)); }
+.big small { font-size: 34px; color: var(--ink3); margin-left: 8px; letter-spacing: -.01em; }
+.caption { font: 14px var(--mono); color: var(--ink3); margin-top: 10px !important; }
+pre.code.sm { font-size: 15px; line-height: 1.5; padding: 18px 20px; }
+pre.code.xs { font-size: 13px; line-height: 1.45; padding: 16px 18px; }
+.bars { display: flex; flex-direction: column; gap: 18px; margin-top: 34px; }
+.bar { display: grid; grid-template-columns: 220px 1fr 130px; align-items: center; gap: 18px; font-size: 24px; }
+.bar .name { color: var(--ink); font-weight: 650; }
+.bar .track { display: block; height: 30px; background: var(--card); border-radius: 9px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
+.bar .fill { display: block; height: 100%; width: 0; border-radius: 9px; background: var(--ink3); transition: width 1.2s var(--spring); }
+.bar .fill.me { background: var(--pa, var(--accent)); }
+.present .bar .fill { width: var(--w); }
+.bar .val { font: 650 24px var(--mono); color: var(--ink); text-align: right; }
+.stack { display: flex; flex-direction: column; gap: 10px; margin-top: 30px; }
+.stack .layer { background: var(--card); border-radius: 16px; box-shadow: 0 0 0 1px var(--line); padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; font-size: 24px; font-weight: 650; }
+.stack .layer small { font: 500 16px var(--mono); color: var(--ink3); }
+.stack .layer.hot { box-shadow: 0 0 0 2px var(--pa, var(--accent)); }
+.steps { display: flex; align-items: stretch; gap: 10px; margin-top: 34px; }
+.steps .card { flex: 1; padding: 18px; } .steps .card h3 { font-size: 21px; } .steps .card p { font-size: 17px; }
+.steps .to { align-self: center; color: var(--pa, var(--accent)); font: 700 26px var(--sans); }
+table.t { border-collapse: collapse; margin-top: 26px; font-size: 21px; width: 100%; }
+table.t th { text-align: left; font: 600 13px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); padding: 8px 12px; border-bottom: 1px solid var(--line2); }
+table.t td { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); }
+table.t td b { color: var(--ink); }
+.part { font: 600 14px var(--mono); color: var(--ink3); letter-spacing: .1em; text-transform: uppercase; margin-top: 26px !important; }
+</style>
+</head>
+<body style="--pa: var(--plorer)">
+<div class="reveal"><div class="slides">
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxplorer · part 1 of 3</span>
+  <div class="hero">
+    <div>
+      <h1>Why did the<br>robot <span class="w">drop it?</span></h1>
+      <p class="lede">A fleet of real robot episodes as a spreadsheet. Ask a question in words, tap an answer, and its video and telemetry open on one cursor. On your own GPU.</p>
+      <div class="grid g2" style="margin-top:26px">
+        <div class="card"><div class="num">63,344</div><p>real episodes, 13 labs</p></div>
+        <div class="card"><div class="num">~40<small>ms</small></div><p>a question over 16.8M rows</p></div>
+      </div>
+    </div>
+    <div class="shot" style="height:330px"><img style="object-view-box: inset(50% 58% 15% 4%)" src="img/robots-06-drop-falling.jpg" alt="F00118: the shirt falls outside the box"></div>
+  </div>
+  <div class="src">docs/goals/47-report.md (M0, M7) · DROID, CC-BY-4.0</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    A robot is putting a shirt in a box, and the shirt ends up outside it. Why? In this talk I answer that on real public robot data, in one app called omxplorer.
+    Sixty-three thousand episodes from thirteen labs, a question in words over almost seventeen million telemetry rows in about forty milliseconds, and then the moment itself on video. This is part one of three: the story.
+  </aside>
+</section>
+
+<!-- 2 · the problem -->
+<section>
+  <span class="k">The usual way</span>
+  <h2>One question.<br>Four apps.</h2>
+  <div class="grid g4">
+    <div class="card fragment"><h3>A spreadsheet</h3><p>which episodes failed</p></div>
+    <div class="card fragment"><h3>A video player</h3><p>what the camera saw</p></div>
+    <div class="card fragment"><h3>A notebook</h3><p>what the joints and gripper did</p></div>
+    <div class="card fragment"><h3>A PDF</h3><p>how the data was recorded</p></div>
+  </div>
+  <p class="lede fragment">Every step is an export or a copy. By the time they line up, the question is gone.</p>
+  <aside class="notes">
+    Here's how you'd do it today. A spreadsheet of episodes tells you which ones failed. A video player shows you one. A Python notebook plots the joints and the gripper, and a PDF tells you how the data was recorded.
+    Four apps, with exports between them. I wanted the question to stay in one place.
+  </aside>
+</section>
+
+<!-- 3 · the data -->
+<section>
+  <span class="k">The data is real</span>
+  <h2>DROID: robots in 13 labs.</h2>
+  <div class="grid g3">
+    <div class="card"><div class="num">67,029</div><p>episodes in the public 720p port: 53,282 successes, 13,747 failures, 326 hours</p></div>
+    <div class="card"><div class="num">52<small>channels</small></div><p>at 15 Hz per episode: joint positions, 7 joint velocities, the gripper</p></div>
+    <div class="card"><div class="num">0<small>force</small></div><p>no force or torque sensing, so I never show "grip force"</p></div>
+  </div>
+  <p class="lede">63,344 of the episodes are in the app, with all 16.8M telemetry rows underneath. Video is fetched for 3,546 of them, one camera.</p>
+  <div class="src">sources.md S1–S3 · ~/data/robot-scout/REPORT.md · docs/goals/47-report.md · Khazatsky, Pertsch et al. 2024, arXiv 2403.12945</div>
+  <aside class="notes">
+    The data is DROID, a public robot dataset from 2024, released under CC-BY. The public 720p port has 67,029 episodes, about 326 hours, from 13 labs.
+    Each episode has 720p video and 52 telemetry channels at 15 hertz. There's no force sensing in DROID, so I won't show force; I read a drop from the gripper and the video.
+  </aside>
+</section>
+
+<!-- 4 · the fleet sheet -->
+<section>
+  <span class="k">Beat 1 · the fleet</span>
+  <h2>One row per episode.</h2>
+  <div class="split wide">
+    <div class="shot" style="height:440px"><img style="object-view-box: inset(8% 45% 40% 2%)" src="img/robots-01-fleet.jpg" alt="the fleet sheet"></div>
+    <div class="side">
+      <ul>
+        <li><b>63,344 rows</b>, one per episode</li>
+        <li>lab, robot, date, task, outcome, duration, grasp counts, peak joint speed, clip</li>
+        <li>a real sheet: sort, filter, edit, formulas</li>
+        <li>opened straight from fleet.csv</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/goals/47-report.md, "The story" beat 1 · shot: build/g47/shots/01-fleet.png</div>
+  <aside class="notes">
+    Open the fleet. Every row is one real episode: which lab, which robot, the task, whether it worked, how long it took, how many times the gripper closed.
+    It's a real spreadsheet, not a list view. You can sort it, filter it, and type formulas into it.
+  </aside>
+</section>
+
+<!-- 5 · success by lab -->
+<section>
+  <span class="k">Beat 1 · a chart in words</span>
+  <h2>Success by lab: <span class="w">95 % to 61 %.</span></h2>
+  <div class="split wide">
+    <div class="shot" style="height:440px"><img style="object-view-box: inset(47% 62% 23% 2%)" src="img/robots-02-success-by-lab.jpg" alt="average success by lab"></div>
+    <div class="side">
+      <p>Typed into the chart's field:</p>
+      <pre class="code sm" style="margin-top:10px">average success_pct by lab,
+largest first</pre>
+      <p style="margin-top:18px">PennPAL 95.11 % … RAD 61.35 %.</p>
+      <p style="margin-top:12px"><b>The spread, not a ranking:</b> labs ran different tasks in different rooms.</p>
+    </div>
+  </div>
+  <div class="src">docs/goals/47-report.md M3 and "Record it yourself" · sources.md "Things we must not say"</div>
+  <aside class="notes">
+    A chart, typed as a sentence: average success by lab, largest first. It goes from 95 percent at PennPAL down to 61 at RAD.
+    One honest note: labs ran different tasks in different rooms, so this shows the spread of the data, not which lab is worse.
+  </aside>
+</section>
+
+<!-- 6 · pivot -->
+<section>
+  <span class="k">Beat 1 · pivot</span>
+  <h2>Lab × outcome, one click.</h2>
+  <div class="shot" style="height:300px; margin-top:26px"><img style="object-view-box: inset(47% 17% 22% 2%)" src="img/robots-03-pivot-lab-outcome.jpg" alt="pivot lab by outcome"></div>
+  <p class="lede" style="font-size:24px">Value <code>n</code>, rows <code>lab</code>, columns <code>outcome</code>: failures, successes and totals for all 13 labs, checked against fleet.csv by the goal's own script.</p>
+  <div class="src">docs/goals/47-report.md M3 (pivot = fleet.csv for all 13 labs)</div>
+  <aside class="notes">
+    A pivot: how many episodes each lab ran, and how many failed. The check script compares every cell with the source file.
+    So far this is a fast spreadsheet. The next step is where it stops being one.
+  </aside>
+</section>
+
+<!-- 7 · links -->
+<section>
+  <span class="k">Beat 2 · nothing joins until I link it</span>
+  <h2>Four links, typed by a person.</h2>
+  <div class="split">
+    <pre class="code sm">fleet.episode = telemetry.episode   <i>-- key</i>
+fleet.clip    = episode.file        <i>-- key → video</i>
+telemetry.t   ~ episode.t +0        <i>-- time</i>
+fleet.source  = paper.file          <i>-- key → document</i></pre>
+    <div class="shot" style="height:380px"><img style="object-view-box: inset(8% 0% 38% 52%)" src="img/robots-05-links.jpg" alt="the Links panel"></div>
+  </div>
+  <p class="lede">The episode key, its video file, the clock, its paper. That's the whole "schema", and it lives on the sheet, not in code.</p>
+  <div class="src">docs/goals/47-report.md, "Record it yourself", beat 2 Links</div>
+  <aside class="notes">
+    Now I connect things, by hand. Four lines: the fleet to its telemetry by episode, the fleet to its video file, the telemetry to the video by time, and the fleet to its paper.
+    Nothing in omxplorer joins by guessing. Part two goes deep on this, because it's the part I like most.
+  </aside>
+</section>
+
+<!-- 8 · F00118 -->
+<section>
+  <span class="k">Beat 2 · the drop · F00118</span>
+  <h2>The gripper lets go <span class="w">over the edge.</span></h2>
+  <div class="shot" style="height:330px; margin-top:24px"><img style="object-view-box: inset(47% 1% 9% 4%)" src="img/robots-07-drop-fallen.jpg" alt="the shirt hangs on the box's outside wall, beside the telemetry lanes"></div>
+  <div class="grid g3" style="margin-top:16px">
+    <div class="card"><div class="num" style="font-size:44px">5.3<small>s</small></div><p>the gripper closes and reads 0.97: almost shut, a pinch on thin cloth</p></div>
+    <div class="card"><div class="num" style="font-size:44px">12.7<small>s</small></div><p>it starts to open, still over the box's edge</p></div>
+    <div class="card"><div class="num" style="font-size:44px">13.0<small>s</small></div><p>the shirt lands hanging on the outside wall</p></div>
+  </div>
+  <div class="src">docs/goals/47-report.md, "The story" beat 2 (AUTOLab, 2023-11-21, 244 telemetry rows)</div>
+  <aside class="notes">
+    Here's the failure: episode F00118, from AUTOLab. The gripper closes at 5.3 seconds and reads 0.97, so it's barely pinching the cloth.
+    At 12.7 seconds it opens while it's still over the edge of the box, and the shirt falls and hangs on the outside wall. Video and telemetry share one cursor, so you see both at the same instant.
+  </aside>
+</section>
+
+<!-- 9 · the clip -->
+<section>
+  <span class="k">The whole story · 42 s</span>
+  <h2>Sheet → pivot → failure → <span class="w">the moment.</span></h2>
+  <div class="shot contain" style="height:520px; margin-top:24px"><video src="img/clip-robots.mp4" poster="img/clip-robots.jpg" controls muted playsinline preload="metadata"></video></div>
+  <div class="src">docs/img/clip-robots.mp4 · recorded from omxplorer by scripts/clips.py robots (47-report M8)</div>
+  <aside class="notes">
+    Here's the whole story in one take, recorded straight from the app. Press play and talk over it.
+    Fleet sheet, chart by lab, the pivot, the failure's video beside its telemetry, the question in words, the paper, and the pack.
+  </aside>
+</section>
+
+<!-- 10 · ask -->
+<section>
+  <span class="k">Beat 3 · ask in words</span>
+  <h2>2,997 failures re-grasped, <span class="w">in ~40 ms.</span></h2>
+  <div class="split wide">
+    <div class="shot" style="height:300px"><img style="object-view-box: inset(23% 32% 48% 20%)" src="img/robots-09-ask-regrasped.jpg" alt="the question asked in words"></div>
+    <div class="side">
+      <p><i>"failures where the gripper closed, let go and closed again"</i></p>
+      <ul style="margin-top:14px">
+        <li>fleet joined to telemetry by the link I made</li>
+        <li>16.8M rows scanned</li>
+        <li>37–42 ms in the check's runs</li>
+        <li>no Python, no server</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/goals/47-report.md beat 3, M4 (2,997 = truth), M7 (40.3 ms)</div>
+  <aside class="notes">
+    Now a question in words: failures where the gripper closed, let go and closed again. It joins the fleet to every telemetry row through the link I made.
+    Almost 3,000 episodes, in about 40 milliseconds over 16.8 million rows. Tap any of them and its video and telemetry open.
+  </aside>
+</section>
+
+<!-- 11 · paper + pack -->
+<section>
+  <span class="k">Beats 4 and 5 · the paper, the pack</span>
+  <h2>The source, and a pack to send.</h2>
+  <div class="grid g2">
+    <div><div class="shot" style="height:330px"><img src="img/robots-08-paper-15hz.jpg" alt="the DROID paper, recorded at 15Hz marked"></div>
+      <p class="caption">the DROID paper, page 15: "recorded at 15Hz", read from the PDF's text</p></div>
+    <div><div class="shot" style="height:330px"><img src="img/robots-11-pack.jpg" alt="the exported pack"></div>
+      <p class="caption">per failure: a PDF (the frame at the release, the lanes there, the paper's page) and a 6 s clip</p></div>
+  </div>
+  <div class="src">docs/goals/47-report.md beats 4–5, M5, M6</div>
+  <aside class="notes">
+    The dataset's paper is linked too, so the line that says the data is recorded at 15 hertz is one click away from any row.
+    And when I've found what I wanted, I export a pack per failure: a PDF with the frame where it let go, the telemetry at that moment, the paper's page, and a short clip.
+  </aside>
+</section>
+
+<!-- 12 · what the data doesn't say -->
+<section>
+  <span class="k">Said plainly</span>
+  <h2>What the data can't tell you.</h2>
+  <div class="grid g3">
+    <div class="card"><h3>No force</h3><p>DROID has no force or torque. "Dropped" is read from the gripper and the video.</p></div>
+    <div class="card"><h3>Filters, not a detector</h3><p>Slip and regrasp features don't predict failure across labs: a slip shows in 18 % of successes too.</p></div>
+    <div class="card"><h3>Inferred tasks</h3><p>Failures carry no instruction; their task is the nearest success on the same robot, same day.</p></div>
+  </div>
+  <div class="src">docs/goals/47-report.md, "What the data doesn't support"</div>
+  <aside class="notes">
+    Three honest notes. There's no force data, so I never talk about grip force. The gripper features I compute are good filters, but they don't predict failure across labs.
+    And failure episodes don't come with an instruction, so their task is taken from the nearest success on the same robot that day. The app says so in a column.
+  </aside>
+</section>
+
+<!-- 13 · the line -->
+<section>
+  <span class="k">The difference</span>
+  <h2 style="font-size:64px; margin-top:60px">They replay a recording.<br><span class="w">omxplorer starts from a question across the whole fleet,</span><br>then shows you the moment.</h2>
+  <div class="src">positioning, 2026-10-31 · docs/launch/kit/modular-forum/replies.md</div>
+  <aside class="notes">
+    Good robotics tools already sync video and plots for one recording, and they're great at it.
+    omxplorer starts one level up: from a question across the whole fleet. Then it takes you to the moment that answers it.
+  </aside>
+</section>
+
+<!-- 14 · outro -->
+<section>
+  <span class="k">Try it</span>
+  <h2>Open source. Public alpha.</h2>
+  <p class="cta">omxlabs.tech</p>
+  <pre class="code" style="margin-top:24px">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode && pixi install && scripts/omxplorer.sh</pre>
+  <p class="lede">Next: part 2, the five ideas that make it an investigation, not a replay. Then: the full fleet with every camera.</p>
+  <p class="part">Tell me what you'd ask this data.</p>
+  <div class="src">MIT · github.com/abhisheksreesaila/omxcode</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    That's the story: a question, an answer across the fleet, and the moment on video, in one app. It's open source, MIT, a public alpha, and the robot data is public, so you can check every number.
+    Part two is how it works. Tell me in the comments what you'd ask this data.
+  </aside>
+</section>
+
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script>
+Reveal.initialize({
+  hash: true, width: 1280, height: 720, margin: 0.06, center: false,
+  transition: 'fade', transitionSpeed: 'default', backgroundTransition: 'fade',
+  controls: true, progress: true, slideNumber: false,
+  plugins: [RevealNotes]
+});
+</script>
+</body>
+</html>
