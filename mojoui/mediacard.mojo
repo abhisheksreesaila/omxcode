@@ -104,9 +104,11 @@ struct MediaCard(Movable):
     var progress: Int  # that work's percent (-1: not known)
     var lane: Optional[TimeLane]  # a log linked to the video by time: its measure under the picture
     var lane_w: Float64  # the lane's width in points (its last draw: a tap on it seeks)
+    var name: String  # what the card is called when it isn't its file's name ("episode": a card whose file follows a row)
 
     def __init__(out self, path: String, slot: Int, msg: Int, canvas: Int, x: Int, y: Int, w: Int) raises:
         self.path = path
+        self.name = ""
         self.actions = List[CardAction]()
         self.status = ""
         self.progress = -1
@@ -169,12 +171,14 @@ struct MediaCard(Movable):
         return inner + (CHROME_H if self.kind == OBJ_VIDEO else STILL_CHROME_H)
 
     def title(self) -> String:
-        return file_name(self.path)
+        return self.name if self.name != "" else file_name(self.path)
 
     def facts(self) -> String:
         """What it is, in a few words: "0:29 · 1280×720", or "1280×720 PNG"."""
         if self.problem() != "":
             return "can't be opened"
+        if self.name != "" and self.ready():
+            return file_name(self.path) + " · " + clock_text(self.player.value().state.duration if self.player else 0.0)
         if not self.ready():
             return "opening…"
         var size = self.media_size()
@@ -223,6 +227,22 @@ struct MediaCards(Movable, Sized):
             raise Error("A page holds up to " + String(self.most) + " videos and pictures: close one first")
         self.cards.append(MediaCard(path, slot, self.msg_base + slot * CARD_MESSAGES, self.canvas_base + slot * CARD_CANVASES, x, y, width))
         return len(self.cards) - 1
+
+    def named(mut self, name: String, path: String, x: Int, y: Int, width: Int) raises -> Int:
+        """The card called `name` showing `path`: an existing one plays the new file in place (same slot, place and name:
+        a video that follows a selected row), else a new card at (x, y). Its index."""
+        for k in range(len(self.cards)):
+            if self.cards[k].name == name:
+                if self.cards[k].path != path:
+                    ref c = self.cards[k]
+                    var fresh = MediaCard(path, c.slot, self.msg_base + c.slot * CARD_MESSAGES, self.canvas_base + c.slot * CARD_CANVASES, c.x, c.y, c.w)
+                    fresh.name = name
+                    fresh.actions = c.actions.copy()
+                    self.cards[k] = fresh^
+                return k
+        var k = self.add(path, x, y, width)
+        self.cards[k].name = name
+        return k
 
     def remove(mut self, k: Int):
         if 0 <= k < len(self.cards):

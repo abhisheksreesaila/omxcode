@@ -111,7 +111,7 @@ from mojoui.videojobs import expect_analysis, Analyzed, Reel, analyze_job, reel_
 from mojoui.videojobs import analyzer_needs_log, use_analysis, INSPECTION
 from mojoui.mediatimeline import MediaTimeline, value_lane
 from mojoui.mediatimeline_jobs import TimelineFeed
-from mojoui.trackcard import TrackCards, is_track, series_from_sheet, metric_label, metric_unit
+from mojoui.trackcard import TrackCards, is_track, series_from_sheet, series_where, time_column, metric_label, metric_unit
 from mojoui.mapview import MapMark, MARK_PLACE, MARK_FINDING
 from mojoui.inspection_tables import is_places, read_places, compare_job, flight_plan, place_marks
 from mojoui.vision_presets import DRONE_MATCH_M
@@ -241,7 +241,7 @@ comptime ISLAND_TAP = 3100  # the island tapped (its action, or its panel)
 comptime ISLAND_FRAME = 3101  # a display frame while the island moves or work runs: poll the jobs
 comptime PANEL_CLOSE = 3102  # the island's panel closed
 comptime JOBS_WAKE = 3109  # a background job or a media decoder finished (App.jobs_message: the wake pipe, no frame poll)
-comptime BIG_FILE = 256 * 1024 * 1024  # from this many bytes a file opens in a background job (the island shows its progress)
+comptime BIG_FILE = 4 * 1024 * 1024  # from this many bytes a file opens in a background job (the island shows its progress); 4 MB: an 11 MB CSV of 63k rows took 161 ms on the UI thread (goal 47, D-4711)
 comptime BIG_ROWS = 10_000_000  # from this many rows a chart's numbers and a column's figures come from background jobs
 comptime SKINS: List[String] = ["Liquid", "Ledger", "Graphite", "Blueprint"]
 comptime APPEARANCES: List[String] = ["Light", "Dark", "System"]
@@ -334,6 +334,7 @@ struct Main(App):
     var ran_gpu: Bool  # the last totals ran on the GPU
     var imp: CsvImport
     var source: String  # what the table came from (a path, "sample", "blank")
+    var followed_row: Int  # the sheet's row last followed through the links (-1 none)
     var name: String  # the table's name (the file's name without .csv)
     var grid: DataGrid
     var preview: DataGrid  # Import: the first rows, read-only
@@ -458,6 +459,7 @@ struct Main(App):
         self.ran_gpu = False
         self.imp = empty_import()
         self.source = ""
+        self.followed_row = -1
         self.name = ""
         self.grid = DataGrid()
         self.preview = DataGrid()
@@ -1118,6 +1120,12 @@ struct Main(App):
             var t = self.tables.find(log)
             if v < 0 or t < 0:
                 continue
+            var keyed = False  # (a log of many recordings, sliced by a key link: its slice shows on its own card instead)
+            for ref kl in self.links.items:
+                if kl.kind == LINK_KEY and kl.touches(log):
+                    keyed = True
+            if keyed or self.tables.cards[t].sheet.rows() > 100_000:
+                continue
             try:
                 var ts = series_from_sheet(self.tables.cards[t].sheet)
                 if len(ts.names) > 0:
@@ -1343,10 +1351,134 @@ struct Main(App):
             return ""
         return self.found_table if self.found_table != "" else self.name
 
+    def sheet_selection(self) -> Selection:
+        """The sheet's own table's selected row, whole, as row_selection reads a card's."""
+        var row = self.grid.cur_row
+        var names = List[String]()
+        var cells = List[String]()
+        for col in range(self.frame.columns()):
+            names.append(self.frame.name(col))
+            cells.append(self.frame.display(col, row) if row >= 0 else String(""))
+        var col = self.grid.cur_col
+        var cname = self.frame.name(col) if 0 <= col < self.frame.columns() else String("")
+        var value = self.frame.display(col, row) if 0 <= col < self.frame.columns() and row >= 0 else String("")
+        return Selection(self.name, self.name, row, cname, value).with_row(names, cells)
+
+    def near_file(self, path: String, table: String) -> String:
+        """A path read from a cell: as it is when absolute, else beside the file `table` came from (the sheet's own
+        source, or a table card's)."""
+        if path.startswith("/") or path == "":
+            return path
+        var src = self.source
+        var t = self.tables.find(table)
+        if t >= 0 and self.tables.cards[t].source != "":
+            src = self.tables.cards[t].source
+        var cut = src.rfind("/")
+        return (String(src[byte=0:cut + 1]) if cut >= 0 else String("")) + path
+
+    def time_linked_video(self, table: String) -> Int:
+        """The video card a log table runs with (a time link between them), else -1."""
+        for l in self.links.items:
+            if l.kind != LINK_TIME:
+                continue
+            var other = l.b.card if l.a.card == table else (l.a.card if l.b.card == table else String(""))
+            if other == "":
+                continue
+            for v in range(len(self.media)):
+                if self.media.cards[v].kind == OBJ_VIDEO and self.media.cards[v].title() == other:
+                    return v
+        return -1
+
+    def follow_file(mut self, f: Follow, sel: Selection) -> String:
+        """A key link onto a video card's `file`: the card (named by the link; made when missing) plays the row's file.
+        What it says ("" nothing)."""
+        var path = self.near_file(f.value, sel.table)
+        if not is_video_file(path) or not file_exists(path):
+            return ""
+        var at = -1
+        for v in range(len(self.media)):
+            if self.media.cards[v].title() == f.card:
+                at = v
+        var old = self.media.cards[at].path if at >= 0 else String("")
+        try:
+            var vw = min(MEDIA_W, self.sheet_width() * 2 // 5)  # (a new card: a row of its own, the log's lanes beside it)
+            var spot = self.free_place(self.sheet_width(), vw * 9 // 16 + 80)
+            var v = self.media.named(f.card, path, spot[0], spot[1], vw)
+            if at < 0:
+                self.reveal = 1 + len(self.objects) + v
+                self.reveal_count += 1
+            for j in range(len(self.tracks)):  # (a log in step with the old file: in step with the new one)
+                if self.tracks.cards[j].video == old and old != "":
+                    self.tracks.cards[j].video = path
+            if self.media.cards[v].player and old != path:
+                self.media.cards[v].player.value().state.play()
+            if self.trace:
+                print("OPEN: " + f.card + " " + file_name(path), flush=True)
+            return f.card + " plays " + file_name(path)
+        except e:
+            self.message = "Couldn't open " + file_name(path) + ": " + String(e)
+            return ""
+
+    def follow_log(mut self, f: Follow) -> String:
+        """A key link onto a log table (a time column; many recordings, one key each): the rows with the selection's key
+        become its card's lanes (mojoui.trackcard.series_where), in step with the video the log is time-linked to; a
+        table of (channel, limit) rows adds its spec lines. What it says ("" not a log)."""
+        var t = self.tables.find(f.table)
+        if t < 0 or time_column(self.tables.cards[t].sheet) < 0 or self.tables.cards[t].sheet.index(f.column) < 0:
+            return ""
+        var t0 = now_ns()
+        try:
+            var got = series_where(self.tables.cards[t].sheet, f.column, f.value)
+            var ts = got[0].copy()
+            if ts.rows() == 0:
+                return ""
+            var v = self.time_linked_video(f.table)
+            var video = self.media.cards[v].path if v >= 0 else String("")
+            var name = f.table
+            var k = self.tracks.find(name)
+            if k < 0:
+                var w = self.media.cards[v].w if v >= 0 else 720
+                var h = TRACK_H * 2
+                var spot = self.free_place(w, h)
+                if v >= 0:
+                    spot = (self.media.cards[v].x + self.media.cards[v].w + 16, self.media.cards[v].y)
+                    w = max(self.sheet_width() - spot[0], 480)
+                    h = max(self.media.cards[v].h, TRACK_H)
+                k = self.tracks.add(name, ts^, video, spot[0], spot[1], w, h)
+            else:
+                k = self.tracks.add(name, ts^, video, 0, 0, 0, 0)
+            ref card = self.tracks.cards[k]
+            card.mark(got[1].copy())
+            for j in range(len(self.tables)):  # (a spec table: its first column names channels, its second holds limits)
+                ref sp = self.tables.cards[j].sheet
+                if j == t or sp.columns() < 2 or sp.rows() > 200 or sp.kind(0) != TEXT:
+                    continue
+                var names = List[String]()
+                var values = List[Float64]()
+                for r in range(sp.rows()):
+                    try:
+                        values.append(Float64(sp.plain_text(1, r).replace(",", "")))
+                        names.append(sp.plain_text(0, r))
+                    except:
+                        pass
+                _ = card.limits(names, values)
+            card.note = f.value + " · in step with " + (self.media.cards[v].title() if v >= 0 else String("no video"))
+            if self.trace:
+                print("SLICE: " + f.table + " " + f.column + "=" + f.value + " " + String(card.series.rows()) + " rows, "
+                      + String(len(card.series.names)) + " channels, " + fixed(Float64(now_ns() - t0) / 1e6, 1) + " ms", flush=True)
+            return f.table + " · " + f.value + " (" + String(card.series.rows()) + " rows)"
+        except e:
+            self.message = "Couldn't slice " + f.table + ": " + String(e)
+            return ""
+
     def follow_row(mut self, k: Int):
-        """Table card k's selected row, followed through the sheet's links (mojoui.links): linked videos seek to its first
-        sighting, folders of documents show its document with the chosen field marked, linked tables select its rows."""
-        var sel = self.row_selection(k)
+        """Table card k's selected row, followed through the sheet's links."""
+        self.follow_selection(self.row_selection(k), k)
+
+    def follow_selection(mut self, sel: Selection, k: Int):
+        """A selected row (table card k's; -1: the sheet's own), followed through the sheet's links (mojoui.links): linked
+        videos seek to its first sighting or play its file, logs show its slice, folders of documents show its document
+        with the chosen field marked, linked tables select its rows."""
         if sel.row < 0:
             return
         var follows = self.links.follow(sel)
@@ -1357,7 +1489,39 @@ struct Main(App):
                 cells += (" " if i > 0 else "") + sel.names[i] + "=" + sel.cells[i]
             print("SELECT: " + sel.card + " row " + String(sel.row + 1) + " " + cells + " · " + String(len(follows)) + " linked", flush=True)
         var said = List[String]()
+        for ref l in self.links.items:  # (a row with no file for a linked video card: the card goes, rather than show another row's)
+            if l.kind != LINK_KEY or not (l.a.column == "file" or l.b.column == "file"):
+                continue
+            var mine = l.a if l.b.column == "file" else l.b
+            var card = l.b.card if l.b.column == "file" else l.a.card
+            if (mine.card == sel.card or mine.table_name() == sel.table) and sel.value_of(mine.column) == "":
+                for v in range(len(self.media)):
+                    if self.media.cards[v].title() == card:
+                        var gone = self.media.cards[v].path
+                        self.media.remove(v)
+                        for j in range(len(self.tracks)):
+                            if self.tracks.cards[j].video == gone:
+                                self.tracks.cards[j].video = ""
+                        said.append("no video for this row")
+                        break
+        var handled = List[Bool]()
+        for ref f in follows:  # (files first: a log's slice then runs with the video it opened)
+            var h = False
+            if f.column == "file":
+                var w = self.follow_file(f, sel)
+                if w != "":
+                    said.append(w)
+                    h = True
+            handled.append(h)
+        var fi = 0
         for ref f in follows:
+            fi += 1
+            if handled[fi - 1]:
+                continue
+            var lw = self.follow_log(f)
+            if lw != "":
+                said.append(lw)
+                continue
             var done = False
             for v in range(len(self.media)):  # a video whose rows the link reaches: it seeks
                 if self.media.cards[v].kind != OBJ_VIDEO or not self.media.cards[v].player:
@@ -1395,7 +1559,7 @@ struct Main(App):
             if t >= 0 and t != k:
                 ref c = self.tables.cards[t]
                 var col = c.sheet.index(f.column)
-                if col >= 0:
+                if col >= 0 and c.sheet.rows() <= 100_000:  # (a bigger table isn't copied into text on the UI thread)
                     var rows = CardRows(c.name, c.name, [f.column])
                     fill_rows(rows, c.sheet)
                     var r = rows.react(f)
@@ -2760,10 +2924,27 @@ struct Main(App):
         elif m == PREVIEW:  # (only scrolling: the preview selects and edits nothing)
             if event.number == PAN or event.number == ZOOM or event.number == PRESS or event.number == RELEASE:  # (browse: no selecting)
                 _ = self.preview.handle(event, self.frame, self.font, self.pal)
+        elif m == GRID and event.number == SET_TO:  # (an agent set the sheet's grid to a row: picked, as a tap on it would)
+            try:
+                var row = self.grid.shown_row(Int(atof(event.text) + 0.5) - 1, self.frame)
+                if row >= 0:
+                    self.grid.select(row, max(self.grid.cur_col, 0))
+                    self.grid.reveal_cell(row, max(self.grid.cur_col, 0), self.frame)
+                    self.select_cell(row, self.grid.cur_col)
+                    if row != self.followed_row and len(self.links.for_card(self.name)) > 0:
+                        self.followed_row = row
+                        self.follow_selection(self.sheet_selection(), -1)
+            except:
+                pass
+            self.version += 1
         elif m == GRID:
             var action = self.grid.handle(event, self.frame, self.font, self.pal)
             if action == GRID_SELECTED or action == GRID_EDIT or action == GRID_READ_ONLY or action == GRID_COLUMN:
+                var moved = self.grid.cur_row != self.followed_row
                 self.select_cell(self.grid.cur_row, self.grid.cur_col)
+                if moved and action == GRID_SELECTED and len(self.links.for_card(self.name)) > 0:  # (the sheet's row, followed through its links)
+                    self.followed_row = self.grid.cur_row
+                    self.follow_selection(self.sheet_selection(), -1)
                 if action == GRID_EDIT:
                     self.message = "Editing " + self.frame.name(self.grid.cur_col) + " on row " + grouped(self.grid.cur_row + 1) + ": Enter writes it, Escape cancels"
                 elif action == GRID_READ_ONLY:
@@ -4193,7 +4374,7 @@ struct Main(App):
                           Text(sorted, CAPTION), spacing=12).fill().align(CENTER).height(HEADER_H - 8)
         var th = self.table_h()
         var items = List[View]()  # child 0: the table (its title bar is the drag handle; it stays put); then the objects; then the editor
-        items.append(VStack(head, Canvas(0, self.version + self.grid.version, on_gesture=GRID, keys=True).fill().height(th - HEADER_H).tag("grid").label("Table " + self.sheet_name + ", " + grouped(self.frame.rows()) + " rows"), spacing=8)
+        items.append(VStack(head, Canvas(0, self.version + self.grid.version, on_gesture=GRID, keys=True).fill().height(th - HEADER_H).tag("grid").settable("row", 1, Float64(max(self.frame.rows(), 1))).label("Table " + self.sheet_name + ", " + grouped(self.frame.rows()) + " rows"), spacing=8)
                      .at(self.table_x, self.table_y).width(self.table_w if self.table_w > 0 else width).height(th).tag("table"))
         var bottom = self.table_y + th
         for k in range(len(self.objects)):
