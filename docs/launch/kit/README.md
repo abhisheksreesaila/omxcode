@@ -9,6 +9,12 @@ the week, once `[clip: robots-45s]` is recorded and omxlabs.tech is live with a 
 **Shot list:** [shot-list.md](shot-list.md): every `[clip: …]` and `[shot: …]` named in the kit, what's on screen,
 and the 10-minute check before recording (the featured drop is F00118; the clip and shots already exist).
 
+**Per product:** [products.md](products.md): the posting plan per channel (Modular forum, X, YouTube, Product Hunt,
+No Excuses Fund) with one row per product: omxcode, omxcore, omxconsole, omxplorer, omxlabs. The talks to record are in
+[talks/](talks/): a Reveal.js deck per product (omxplorer in 3 parts, omxcode, omxcore and omxconsole in 2, omxqua in 1),
+speaker notes on every slide (press `S`), and a README per product with YouTube titles, thumbnail text and chapters.
+Edit `talks/_src/*.html`, then `pixi run python docs/launch/kit/talks/build.py`; check with `talks/shoot.py`.
+
 **Claims:** [sources.md](sources.md): every number and where it comes from, the claims that depend on tonight's build,
 and what we must not say. Lines marked *(drop line)* change to "why did it fail?" if your episode isn't a drop.
 

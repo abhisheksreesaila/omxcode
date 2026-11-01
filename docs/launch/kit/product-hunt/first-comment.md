@@ -20,9 +20,9 @@ Three things I care about:
 2. The window keeps up. Queries, imports, video and exports run on their own threads, and a watchdog checks for slow frames.
 3. Agents can use it. Every button is an MCP tool, so Claude or any MCP agent can drive it without screenshots, and it can't do anything you couldn't.
 
-It's built on omxcode, my open-source framework in Mojo (MIT). Linux and Mac today; the web on WebGPU, Android and iPhone next.
+Under it are the other omxlabs pieces, all mine and all open source: omxcode, the Mojo framework it's written in (MIT; Linux and Mac today, the web on WebGPU, Android and iPhone next); omxcore, the SQL engine that runs on your CPU or GPU; and omxconsole, which turns the same GPU into a private, OpenAI-compatible model server on Modular MAX. omxqua is the design language on the site.
 
 What it isn't yet: production software. It's a public alpha, and the roadmap is on the site. I'd love to hear what data you'd open in it first.
 ```
 
-*Sources: S1, S4, S5, S10, S11, S9/S16/S17, S18.*
+*Sources: S1, S4, S5, S10, S11, S9/S16/S17, S18, S19; omxcore and omxconsole lines: ~/Projects/omxlabs/readmes/omxcore.md, omxconsole.md.*

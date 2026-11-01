@@ -9,6 +9,9 @@ and trim to its limit. Short version first, longer version under it.
 
 ---
 
+**What we're entering:** omxlabs is the entrant (the umbrella); the product submitted is **omxplorer**, told through the
+robot story, "why did the robot drop it?". omxcode, omxcore, omxconsole and omxqua appear only as what it's built with.
+
 ### Product name and URL
 omxplorer, by omxlabs · https://omxlabs.tech
 
@@ -29,6 +32,10 @@ Under it are three technologies we built:
 - **omxcode**, a UI framework in Mojo (open source, MIT): one language from the button to the GPU kernel, native on Linux and Mac;
 - **omxcore**, the engine: SQL on the CPU and GPU, in the app's own process (a chart over 1M rows in 0.5–0.7 ms on an RTX 3090);
 - **omxqua**, the design language (Liquid, here in dark mode).
+
+Beside it, **omxconsole** turns the same GPU into a private, OpenAI-compatible model server on Modular MAX, so a model can live next to the data.
+
+Tools like Foxglove and Rerun already sync video and plots for one recording. omxplorer starts one level up: they replay a recording; omxplorer starts from a question across the whole fleet (asked in words over 16.8M telemetry rows in about 40 ms, no Python, no server), then shows you the moment, with the documents linked.
 
 Every button is also an MCP tool, so Claude or any MCP agent can drive omxplorer with no screenshots and no extra API, and it can do nothing a person couldn't.
 

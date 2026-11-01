@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxqua · The best of Apple and Google, and the taste to choose</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<style>
+/* Liquid dark (themes/liquid.mojo, liquid_dark_palette): backdrop, cards, hairlines, ink, teal accent, tones */
+:root {
+  --page: #12151b; --card: #1b1f27; --raised: #252a34; --line: #323946; --line2: #424a5a;
+  --ink: #f1f4f9; --ink2: #c4cad6; --ink3: #8f98a8;
+  --accent: #3cc4cf; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --info: #7aa7ff;
+  --d2: #fbbf24; --d3: #818cf8; --d4: #f472b6;
+  --plorer: #3ccf6e; --core: #4aa8ff; --code: #ff5d6c; --qua: #c084fc; --console: #ff9f40;
+  --sans: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --spring: cubic-bezier(.34, 1.36, .64, 1);
+  --shadow: 0 18px 40px -18px rgb(0 0 0 / .6);
+}
+html, body, .reveal-viewport { background: var(--page) !important; }
+.reveal { font-family: var(--sans); color: var(--ink); font-size: 30px; }
+.reveal .slides { text-align: left; }
+.reveal .slides section { height: 100%; padding: 0 !important; }
+.reveal h1, .reveal h2, .reveal h3 { font-family: var(--sans); color: var(--ink); text-transform: none; letter-spacing: -.035em; margin: 0; }
+.reveal h1 { font-size: 84px; font-weight: 800; line-height: 1.02; }
+.reveal h2 { font-size: 54px; font-weight: 750; line-height: 1.06; }
+.reveal h3 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+.reveal p { margin: 0; line-height: 1.4; }
+.reveal code { font-family: var(--mono); }
+.reveal a { color: var(--accent); }
+.k { font: 600 15px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; display: block; }
+.lede { color: var(--ink2); font-size: 28px; margin-top: 20px !important; max-width: 980px; }
+.src { position: absolute; left: 0; bottom: 0; font: 14px var(--mono); color: var(--ink3); }
+.mark { position: absolute; right: 70px; bottom: 0; font: 600 14px var(--mono); color: var(--ink3); }
+.mark b { color: var(--plorer); }
+.w { color: var(--accent); }
+.card { background: var(--card); border-radius: 22px; box-shadow: 0 0 0 1px var(--line), var(--shadow); padding: 24px 26px; }
+.grid { display: grid; gap: 16px; margin-top: 34px; }
+.g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); }
+.card p { color: var(--ink2); font-size: 20px; margin-top: 8px; }
+.num { font: 800 60px/1 var(--sans); letter-spacing: -.05em; color: var(--accent); }
+.num small { font-size: 22px; color: var(--ink3); margin-left: 6px; letter-spacing: -.01em; }
+.pill { display: inline-block; font: 600 13px var(--mono); padding: 5px 11px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line2); color: var(--ink2); }
+.pill.ok { color: var(--ok); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.next { color: var(--warn); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+pre.code { margin: 0; font: 18px/1.55 var(--mono); color: var(--ink2); background: var(--card); border-radius: 18px; padding: 22px 24px; box-shadow: 0 0 0 1px var(--line); white-space: pre; width: auto; }
+pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(--ink3); font-style: normal; } pre.code em { color: var(--ok); font-style: normal; }
+/* Liquid motion: fragments spring in */
+.reveal .slides section .fragment { transition: opacity .32s ease, transform .5s var(--spring); transform: translateY(14px) scale(.98); }
+.reveal .slides section .fragment.visible { transform: none; }
+/* the app mock: a sheet, a video, two telemetry lanes, one cursor */
+.app { display: grid; grid-template-columns: 300px 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; margin-top: 30px; height: 410px; }
+.app .pane { background: var(--card); border-radius: 18px; box-shadow: 0 0 0 1px var(--line); position: relative; overflow: hidden; }
+.app .sheet { grid-row: span 2; padding: 12px 0; font: 14px var(--mono); }
+.app .sheet div { display: grid; grid-template-columns: 1fr 64px 44px; padding: 6px 14px; color: var(--ink2); border-bottom: 1px solid var(--line); }
+.app .sheet div.h { color: var(--ink3); font-size: 12px; letter-spacing: .08em; }
+.app .sheet div.sel { background: color-mix(in srgb, var(--accent) 16%, var(--card)); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
+.app .sheet .f { color: var(--bad); } .app .sheet .s { color: var(--ok); }
+.app .video { grid-row: span 2; display: grid; place-items: center; background: linear-gradient(160deg, #20252f, #151920); }
+.app .video .ph { font: 600 16px var(--mono); color: var(--ink3); text-align: center; line-height: 1.6; }
+.app .video .bar { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 6px; border-radius: 3px; background: var(--raised); }
+.app .video .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 58%; border-radius: 3px; background: var(--accent); }
+.app .lane { padding: 12px 14px; }
+.app .lane .t { font: 600 12px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; }
+.app svg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 78%; }
+.cursor { position: absolute; top: 0; bottom: 0; left: 58%; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+/* the flow: one app → hosts */
+.flow { display: grid; grid-template-columns: 420px 50px 1fr; align-items: center; margin-top: 40px; gap: 0; }
+.flow .src-file { text-align: center; }
+.flow .arrow { height: 2px; background: var(--line2); position: relative; }
+.flow .arrow::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: var(--line2); }
+.hosts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.hosts .card { padding: 16px 18px; }
+.hosts .card h3 { font-size: 22px; }
+/* the timeline */
+.road { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 46px; position: relative; }
+.road::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: var(--line); }
+.road > div { position: relative; padding-top: 42px; }
+.road > div::before { content: ""; position: absolute; top: 4px; left: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--page); box-shadow: 0 0 0 2px var(--line2); }
+.road > div.now::before { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+.road h3 { font-size: 24px; } .road p { color: var(--ink2); font-size: 19px; margin-top: 8px !important; }
+.road .when { font: 600 13px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 8px; }
+.four { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 40px; align-items: stretch; }
+.four .card ul { margin: 12px 0 0; padding-left: 22px; color: var(--ink2); font-size: 22px; line-height: 1.6; }
+.four .us { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow); }
+.suite { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 30px; }
+.suite span { font: 600 16px var(--mono); padding: 8px 14px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+.cta { font: 700 44px var(--sans); letter-spacing: -.03em; color: var(--accent); margin-top: 30px !important; }
+.reveal .progress { color: var(--accent); height: 3px; }
+.reveal .controls { color: var(--accent); }
+.reveal .slide-number { background: transparent; color: var(--ink3); font: 13px var(--mono); }
+
+/* talks additions: product accent, pictures, clips, two-column layouts */
+.k { color: var(--pa, var(--accent)); }
+.w { color: var(--pa, var(--accent)); }
+.num, .cta { color: var(--pa, var(--accent)); }
+.mark b { color: var(--pa, var(--plorer)); }
+.shot { border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 1px var(--line), var(--shadow); background: var(--card); }
+.shot img, .shot video { display: block; width: 100%; height: 100%; object-fit: cover; margin: 0; }
+.shot.contain img, .shot.contain video { object-fit: contain; background: #0c0e12; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 30px; align-items: start; }
+.split.wide { grid-template-columns: 1.35fr 1fr; }
+.split.narrow { grid-template-columns: 1fr 1.35fr; }
+.side p, .side li { color: var(--ink2); font-size: 22px; line-height: 1.5; }
+.side ul { margin: 0; padding-left: 22px; } .side li { margin-bottom: 10px; }
+.side b { color: var(--ink); }
+.hero { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; align-items: center; height: 560px; margin-top: 10px; }
+.hero .shot { height: 460px; }
+.big { font: 800 120px/1 var(--sans); letter-spacing: -.05em; color: var(--pa, var(--accent)); }
+.big small { font-size: 34px; color: var(--ink3); margin-left: 8px; letter-spacing: -.01em; }
+.caption { font: 14px var(--mono); color: var(--ink3); margin-top: 10px !important; }
+pre.code.sm { font-size: 15px; line-height: 1.5; padding: 18px 20px; }
+pre.code.xs { font-size: 13px; line-height: 1.45; padding: 16px 18px; }
+.bars { display: flex; flex-direction: column; gap: 18px; margin-top: 34px; }
+.bar { display: grid; grid-template-columns: 220px 1fr 130px; align-items: center; gap: 18px; font-size: 24px; }
+.bar .name { color: var(--ink); font-weight: 650; }
+.bar .track { display: block; height: 30px; background: var(--card); border-radius: 9px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
+.bar .fill { display: block; height: 100%; width: 0; border-radius: 9px; background: var(--ink3); transition: width 1.2s var(--spring); }
+.bar .fill.me { background: var(--pa, var(--accent)); }
+.present .bar .fill { width: var(--w); }
+.bar .val { font: 650 24px var(--mono); color: var(--ink); text-align: right; }
+.stack { display: flex; flex-direction: column; gap: 10px; margin-top: 30px; }
+.stack .layer { background: var(--card); border-radius: 16px; box-shadow: 0 0 0 1px var(--line); padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; font-size: 24px; font-weight: 650; }
+.stack .layer small { font: 500 16px var(--mono); color: var(--ink3); }
+.stack .layer.hot { box-shadow: 0 0 0 2px var(--pa, var(--accent)); }
+.steps { display: flex; align-items: stretch; gap: 10px; margin-top: 34px; }
+.steps .card { flex: 1; padding: 18px; } .steps .card h3 { font-size: 21px; } .steps .card p { font-size: 17px; }
+.steps .to { align-self: center; color: var(--pa, var(--accent)); font: 700 26px var(--sans); }
+table.t { border-collapse: collapse; margin-top: 26px; font-size: 21px; width: 100%; }
+table.t th { text-align: left; font: 600 13px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); padding: 8px 12px; border-bottom: 1px solid var(--line2); }
+table.t td { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); }
+table.t td b { color: var(--ink); }
+.part { font: 600 14px var(--mono); color: var(--ink3); letter-spacing: .1em; text-transform: uppercase; margin-top: 26px !important; }
+</style>
+</head>
+<body style="--pa: var(--qua)">
+<div class="reveal"><div class="slides">
+<!-- 1 · summary -->
+<section>
+  <div class="hero">
+    <div>
+      <span class="k">omxqua · the design language of omxlabs</span>
+      <h1>Solid surfaces.<br><span class="w">Springs</span> with weight.</h1>
+      <p class="lede">Google's opaque surfaces and one soft shadow, Apple's spring motion, rebuilt from scratch in three files with no build step. Phone and web from the same markup.</p>
+      <div class="grid g2" style="margin-top:26px">
+        <div class="card"><div class="num">3<small>files</small></div><p>tokens, components, one script</p></div>
+        <div class="card"><div class="num">51<small>checks</small></div><p>on main: contrast for every family, no injected styles</p></div>
+      </div>
+    </div>
+    <div class="shot contain"><img src="img/cover-omxqua.png" alt="the omxqua cover"></div>
+  </div>
+  <div class="src">~/Projects/omxqua README.md · `node --test tests/` on main → 51 pass (2026-11-01; 11 at the v0.1.5 tag)</div>
+  <div class="mark"><b>●</b> omxlabs.tech</div>
+  <aside class="notes">
+    This is omxqua, the design language every omxlabs product wears: Google's solid surfaces and one soft shadow, with Apple's spring motion, rebuilt from scratch. It's three files, no build step, and, on main, 51 tests that keep every text and state colour readable.
+  </aside>
+</section>
+
+<!-- 2 · why -->
+<section>
+  <span class="k">Why</span>
+  <h2>Most apps feel like forms.</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Forms are dull</h3><p>A button that doesn't answer your finger feels broken, even when it works.</p></div>
+    <div class="card"><h3>Glass is hard to read</h3><p>Blur behind every card costs contrast. Solid tones and one shadow stay clear.</p></div>
+    <div class="card"><h3>Every app starts over</h3><p>One language for every app, phone and web, so they feel like one family.</p></div>
+  </div>
+  <p class="lede">The goal: apps that feel like toys that do serious work.</p>
+  <div class="src">~/Projects/omxqua README.md "Why" · LANGUAGE.md</div>
+  <aside class="notes">
+    Three problems. Most apps feel like forms: you tap, nothing answers your finger, and it feels broken even when it works.
+    The fashionable fix, glass everywhere, makes text harder to read. And every new app re-decides all of this from zero.
+    So I wrote it down once: apps that feel like toys but do serious work.
+  </aside>
+</section>
+
+<!-- 3 · borrowed honestly -->
+<section>
+  <span class="k">Borrowed honestly, rebuilt from scratch</span>
+  <h2>Take the best. Leave the rest.</h2>
+  <table class="t" style="font-size:25px">
+    <tr><th>From</th><th>We took</th><th>We left</th></tr>
+    <tr><td><b>Apple</b></td><td>springs, motion with weight, one live pill up top</td><td>glass everywhere (only the nav pill and tab bar are frosted), the fonts, the names</td></tr>
+    <tr><td><b>Google</b></td><td>opaque tonal surfaces, one soft shadow scale</td><td>the ripples</td></tr>
+    <tr><td><b>The terminal</b></td><td>mono numbers, a source line under each card (developer apps)</td><td>the green-on-black</td></tr>
+  </table>
+  <p class="lede">Our own names: <b>Beacon</b>, <b>Nav island</b>, <b>Settle</b>. No SF Pro, no SF Symbols, no "Dynamic Island".</p>
+  <div class="src">LANGUAGE.md · AGENTS.md "Never" (Apple or Microsoft fonts, icons or names) · fonts: Geist, Geist Mono, Fraunces, Nunito (SIL OFL)</div>
+  <aside class="notes">
+    Here's exactly what was borrowed. From Apple: springs and motion with weight, and one live status pill at the top. From Google: solid tonal surfaces and a single soft shadow scale. From the terminal: numbers in mono, and a source line under developer cards.
+    What we left behind matters as much: no Apple fonts, icons or names, no ripples. The pill is called the Beacon, not anything trademarked.
+  </aside>
+</section>
+
+<!-- 4 · four layers -->
+<section>
+  <span class="k">How it's built</span>
+  <h2>Four layers. Each only adds.</h2>
+  <div class="split narrow">
+    <div class="stack" style="margin-top:0;gap:16px">
+      <div class="layer" style="padding:24px 22px">tokens.css <small>every --oq-* value</small></div>
+      <div class="layer" style="padding:24px 22px">components.css <small>parts, scoped under .oq-root</small></div>
+      <div class="layer" style="padding:24px 22px">families + skins <small>dev · travel · kids · money</small></div>
+      <div class="layer hot" style="padding:24px 22px">your app <small>one root class line + omxqua.js</small></div>
+    </div>
+    <div class="side">
+      <ul>
+        <li>Plain HTML, CSS and JS. <b>No framework, no build step.</b></li>
+        <li><b>~19 KB gzipped</b> for tokens, components and the script, plus fonts.</li>
+        <li>Components read <code>var(--oq-*)</code> only, so a family can repaint all of them.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">README.md "Three files, no build" · gzip -c src/{tokens,components}.css src/omxqua.js → 5,561 + 9,390 + 4,947 bytes (19.4 KiB)</div>
+  <aside class="notes">
+    Four layers, each only adding to the one above. Tokens hold every value; components only ever read tokens; families and skins swap token values; your app adds one line of classes. The three files come to about 19 kilobytes gzipped; I measured it tonight.
+  </aside>
+</section>
+
+<!-- 5 · one class -->
+<section>
+  <span class="k">One class, all the way down</span>
+  <h2>Write <span class="w">oq-family-money</span>. Everything changes.</h2>
+  <div class="steps">
+    <div class="card"><h3>family</h3><p>picks surfaces, accent, targets</p></div><div class="to">→</div>
+    <div class="card"><h3>tokens</h3><p><code>--oq-accent: #b8aaff</code></p></div><div class="to">→</div>
+    <div class="card"><h3>components</h3><p>read <code>var(--oq-*)</code> only</p></div><div class="to">→</div>
+    <div class="card"><h3>your app</h3><p>violet, 40 px targets, cards 16</p></div>
+  </div>
+  <pre class="code sm" style="margin-top:26px"><i>/* components.css: scoping adds no specificity */</i>
+<b>:where(.oq-root)</b> .ph h1, <b>:where(.oq-root)</b> .card-h h3 { font-family: var(--oq-font-display); }</pre>
+  <div class="grid g3" style="margin-top:22px">
+    <div class="card"><h3>No raw values</h3><p>Components never hard-code a colour, so a family can repaint them all.</p></div>
+    <div class="card"><h3>No extra specificity</h3><p><code>:where()</code> scores zero: one class of yours overrides one part.</p></div>
+    <div class="card"><h3>Checked</h3><p>A test reads tokens.css and holds every text and state colour, in every family and skin, to 4.5:1.</p></div>
+  </div>
+  <div class="src">AGENTS.md §2 (money: violet #b8aaff, 40 px, cards 16) · src/components.css line 3 and 13</div>
+  <aside class="notes">
+    One class on the root changes everything: the money family switches the accent to violet, targets to 40 pixels, corners to 16, and every component follows. Every part is scoped with colon-where, which adds zero specificity, so one class of yours still overrides a part.
+  </aside>
+</section>
+
+<!-- 6 · real markup -->
+<section>
+  <span class="k">How you'd use it</span>
+  <h2>Four links, one line of classes.</h2>
+  <div class="split">
+    <pre class="code" style="font-size:16px">&lt;link rel="stylesheet" href="…/src/fonts.css"&gt;
+&lt;link rel="stylesheet" href="…/src/tokens.css"&gt;
+&lt;link rel="stylesheet" href="…/src/components.css"&gt;
+&lt;script src="…/src/omxqua.js" defer&gt;&lt;/script&gt;
+
+&lt;html class="<b>oq-root oq-night</b>
+             <b>oq-family-dev oq-top</b>"&gt;</pre>
+    <pre class="code" style="font-size:16px">&lt;section class="card"&gt;
+  &lt;div class="card-h"&gt;&lt;h3&gt;Downloads&lt;/h3&gt;
+    &lt;span class="badge"&gt;main&lt;/span&gt;&lt;/div&gt;
+  &lt;div class="card-b"&gt;
+    &lt;button class="btn <em>fill</em>"&gt;Publish 0.3.0&lt;/button&gt;
+    &lt;button class="btn tonal"&gt;Preview&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/section&gt;</pre>
+  </div>
+  <p class="lede">One filled button per card, with a verb. The rest is tonal.</p>
+  <div class="src">README.md "Try it" · AGENTS.md §1, §3 (card, buttons) · paths shortened</div>
+  <aside class="notes">
+    Using it is four links and one line of classes on the html tag: root to scope it, night or light, a family, and a shell, here the top islands.
+    On the right, a real card: a header, a badge, and two buttons. The rule is one filled button per card, and it says what it does. Everything else is tonal.
+  </aside>
+</section>
+
+<!-- 7 · springs in CSS -->
+<section>
+  <span class="k">Real springs, in plain CSS</span>
+  <h2>A spring is a <span class="w">linear()</span> curve.</h2>
+  <pre class="code sm" style="margin-top:28px">.oq-root {
+  --oq-radius-card: 14px;  <i>/* families set 12 / 16 / 22 */</i>
+  --oq-target: 36px;       <i>/* families set 34 / 40 / 48 */</i>
+  --oq-spring-fast: <b>linear(</b>0, 0.02, 0.071, 0.142, … 1.019, 1.021, <em>1.023</em>, 1.023, … 1.001, 1<b>)</b>; <i>/* k380 c30 */</i>
+  --oq-spring:      <b>linear(</b>0, 0.023, 0.079, 0.154, … 0.998, 0.999, 1<b>)</b>;                   <i>/* k170 c26 */</i>
+  --oq-spring-slow: <b>linear(</b>0, 0.045, 0.161, … 1.148, <em>1.165</em>, 1.163, … 1.002, 1<b>)</b>;      <i>/* k260 c16 */</i>
+  --oq-spring-fast-dur: 300ms; --oq-spring-dur: 710ms; --oq-spring-slow-dur: 790ms; <i>/* phone */</i>
+}
+<i>/* yours: a new part, built only from tokens */</i>
+.receipt { border-radius: var(--oq-radius-card); min-height: var(--oq-target);
+  transition: transform var(--oq-spring-fast-dur) var(--oq-spring-fast); }</pre>
+  <p class="lede">Stiffness and damping in the comment; the curve sampled into CSS. Reduced motion turns springs into fades.</p>
+  <div class="src">src/tokens.css lines 18, 25, 28–31 (trimmed) · src/omxqua.js line 10 (prefers-reduced-motion)</div>
+  <aside class="notes">
+    The springs are real damped springs, stiffness and damping in the comment, sampled into CSS's linear function. No JavaScript animation loop: the browser runs it. Your own parts use the same tokens, and reduced motion turns springs into fades.
+  </aside>
+</section>
+
+<!-- 8 · motion budget -->
+<section>
+  <span class="k">The motion budget</span>
+  <h2>The more often it happens,<br>the less it moves.</h2>
+  <div class="grid g3">
+    <div class="card"><div class="num">280<small>ms</small></div><p><b>Settle.</b> Panels, sheets: fade and a 12 px rise. No bounce.</p></div>
+    <div class="card"><div class="num">220<small>ms</small></div><p><b>Gentle.</b> Menus, popovers, toasts. Out in 150 ms.</p></div>
+    <div class="card"><div class="num">0<small>ms</small></div><p><b>None.</b> Anything repeated many times a minute.</p></div>
+  </div>
+  <p class="lede">Springs only for small things under your finger. A press squashes to <b>0.90</b> small, <b>0.96</b> medium, <b>0.985</b> large, so it feels the same at every size.</p>
+  <div class="src">LANGUAGE.md "Motion budget" · AGENTS.md lines 204–212 · src/omxqua.js lines 3, 13, 136–138</div>
+  <aside class="notes">
+    Springs are easy to overdo, so there's a budget: the more often something happens, the less it moves. Panels settle in 280 milliseconds, menus ease in over 220, and anything frequent doesn't animate. The press squash scales with size, so small and wide buttons feel the same.
+  </aside>
+</section>
+
+<!-- 9 · families and skins -->
+<section>
+  <span class="k">Families and skins</span>
+  <h2>One feel. Four personalities.</h2>
+  <div style="display:grid;grid-template-columns:760px 1fr;gap:22px;margin-top:26px">
+    <div class="shot" style="height:388px"><img src="img/omxqua-families.png" alt="one trip app in four themes"></div>
+    <div class="stack" style="margin-top:0">
+      <div class="layer">Developer <small>Graphite · 34 px · cards 12</small></div>
+      <div class="layer">Travel <small>Coast · 40 px · cards 16</small></div>
+      <div class="layer">Kids <small>Playground · 48 px · cards 22</small></div>
+      <div class="layer">Money <small>Ledger · 40 px · mono</small></div>
+    </div>
+  </div>
+  <div class="src">AGENTS.md §2 · skins: Azulejo, Golden (travel), Sticker, Crayon (kids) · src/tokens.css</div>
+  <aside class="notes">
+    Four families, each a personality for a kind of app: developer tools, travel, kids and money. They differ in surfaces, accent, touch target size and corner radius; kids get 48-pixel targets, developers 34.
+    On top, four skins: Azulejo and Golden hour for travel, Sticker and Crayon for kids. Same components, same markup, one class apart.
+  </aside>
+</section>
+
+<!-- 10 · contrast test -->
+<section>
+  <span class="k">Checked, not eyeballed</span>
+  <h2>Every text and state colour holds <span class="w">4.5:1</span>.</h2>
+  <div class="split wide">
+    <pre class="code sm"><i>// tests/contrast.test.cjs: read straight from src/tokens.css</i>
+test(`${fam} · ${theme}: text and states 4.5:1
+      on every surface, data marks 3:1 on cards`, () =&gt; {
+  …
+  assert.ok(<b>ratio</b>(t[k], t[s]) &gt;= <em>4.5</em>,
+    `${k} on ${s}: ${ratio(t[k], t[s]).toFixed(2)}`);</pre>
+    <div class="side">
+      <div class="big">51<small>/ 51</small></div>
+      <p>tests pass on main (11 at the v0.1.5 tag): text and states 4.5:1, icons and data marks 3:1, every family and skin; and no injected styles, so it works under a strict CSP.</p>
+      <p>It caught one: Travel night <code>bad</code> was 4.26:1, now 4.62:1.</p>
+    </div>
+  </div>
+  <div class="src">tests/contrast.test.cjs lines 1, 9, 12 · `node --test tests/` on main: 51 pass · tests/csp.test.cjs · CHANGELOG.md v0.1.5, Unreleased</div>
+  <aside class="notes">
+    Colours aren't checked by eye. A test reads tokens.css and asserts every text and state colour clears 4.5 to 1 on every surface, in every family, skin and theme. Icons and data marks get 3 to 1. It already caught Travel's night red at 4.26 to 1. 51 tests pass on main today.
+  </aside>
+</section>
+
+<!-- 11 · built for agents -->
+<section>
+  <span class="k">Built for agents</span>
+  <h2>You describe the screen.<br>Your agent builds it.</h2>
+  <pre class="code" style="margin-top:28px">› <b>/plugin install omxqua --marketplace abhisheksreesaila/omxqua</b>
+› a trip planner home screen in omxqua
+  <i>→ read AGENTS.md first, never guess a class</i>
+  <i>→ pick a family: oq-family-travel + oq-skin-azulejo</i>
+  <i>→ link fonts · tokens · components · omxqua.js</i>
+  <em>✓ check at 390 px and desktop, night and light</em></pre>
+  <p class="lede">Any other agent: copy <code>skills/omxqua/</code>. Shipping: <code>bin/omxqua-sync static/ --ref v0.1.5</code> vendors it.</p>
+  <div class="src">README.md "Try it" · skills/omxqua/SKILL.md · AGENTS.md §2 (Travel picks Azulejo), §10 (verify at 390 px)</div>
+  <aside class="notes">
+    Most screens now get written by agents, so the language ships as a skill. In Claude Code it's one plugin line; then you just ask for a trip planner in omxqua.
+    The skill tells the agent to read AGENTS.md, never guess a class, pick a family, and check the result at phone width in both themes. For shipping, one command vendors the files so nothing loads from a third party.
+  </aside>
+</section>
+
+<!-- 12 · where it's used -->
+<section>
+  <span class="k">Where it's used</span>
+  <h2>Web today. Mojo apps, in part.</h2>
+  <div class="split wide">
+    <div class="shot contain" style="height:390px"><img src="img/omxqua-showcase.png" alt="Contoso, the showcase app"></div>
+    <div class="side">
+      <ul>
+        <li><b>omxlabs.tech</b>: every cover page and deck.</li>
+        <li><b>Contoso</b>: the showcase trip planner, every theme, web and phone side by side.</li>
+        <li><b>omxcode</b>: the Developer family as a Mojo theme (<code>themes/omxqua.mojo</code>), worn by the rebuilt omxconsole console and the widget gallery.</li>
+        <li><b>omxplorer</b> wears its own <b>Liquid</b> theme, written in Mojo.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">CHANGELOG.md "Unreleased" (Contoso) · omxcode themes/omxqua.mojo header, D-330, examples/console and examples/widgets · themes/liquid.mojo · docs/design/liquid.md</div>
+  <aside class="notes">
+    Where it lives today: the omxlabs site, and Contoso, a made-up trip planner that shows every theme on web and phone side by side.
+    In omxcode, the Mojo framework, the Developer family exists as a Mojo theme, and the rebuilt omxconsole console and the widget gallery wear it. omxplorer has its own Liquid theme, also in Mojo.
+  </aside>
+</section>
+
+<!-- 13 · honest edges -->
+<section>
+  <span class="k">The honest edges</span>
+  <h2>What it isn't, yet.</h2>
+  <div class="grid g2">
+    <div class="card"><h3>One bit of glass</h3><p>The nav pill and tab bar are frosted (58 %, 20 px blur). Every card, menu and dialog stays solid.</p></div>
+    <div class="card"><h3>Mostly web</h3><p>It's CSS and JS. The Mojo apps carry their own themes; only the Developer family is ported.</p></div>
+    <div class="card"><h3>Some glue is inline</h3><p>Dialog and sheet open/close and menu placement live in the showcase, not in omxqua.js.</p></div>
+    <div class="card"><h3>One contrast gap</h3><p>The field outline is 1.3:1 against its card, below WCAG's 3:1 for a control's edge. Noted, not fixed.</p></div>
+  </div>
+  <div class="src">LANGUAGE.md line 19 (glass), line 157 (1.3:1) · AGENTS.md §9 · pre-1.0: v0.1.5, pin a tag</div>
+  <aside class="notes">
+    The honest edges. One bit of glass: the nav pill and tab bar are frosted; everything you read stays solid. It's mostly web; the Mojo apps carry their own themes. Some glue still lives in the showcase, and field outlines are 1.3 to 1, below the 3 to 1 a control's edge should have. It's 0.1.5, so pin a tag.
+  </aside>
+</section>
+
+<!-- 14 · outro -->
+<section>
+  <span class="k">Try it</span>
+  <h2>One line in Claude Code.</h2>
+  <pre class="code" style="margin-top:26px">/plugin install omxqua --marketplace abhisheksreesaila/omxqua</pre>
+  <div class="road" style="grid-template-columns:repeat(3,1fr)">
+    <div class="now"><span class="when">now</span><h3>v0.1.5</h3><p>4 families, 4 skins, the skill; 51 checks on main</p></div>
+    <div><span class="when">next</span><h3>The next tag</h3><p>the new cover, chips, coloured icons (unreleased today); dialog and sheet glue packaged</p></div>
+    <div><span class="when">later</span><h3>More families</h3><p>Notes and Health, each with its contrast check</p></div>
+  </div>
+  <p class="cta">omxlabs.tech</p>
+  <div class="src">github.com/abhisheksreesaila/omxqua · code MIT, fonts SIL OFL 1.1 · CHANGELOG.md "Unreleased" · AGENTS.md §9 · LANGUAGE.md line 55</div>
+  <div class="mark"><b>●</b> omxqua</div>
+  <aside class="notes">
+    Try it with one line in Claude Code, or link the four files by hand. Next is tagging what's already done, the new cover, chips and coloured icons, and packaging the dialog and sheet glue; further out, Notes and Health families, each with its own contrast check.
+    It's MIT. Build something with it and show me; if a spring feels wrong, tell me which one.
+  </aside>
+</section>
+
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script>
+Reveal.initialize({
+  hash: true, width: 1280, height: 720, margin: 0.06, center: false,
+  transition: 'fade', transitionSpeed: 'default', backgroundTransition: 'fade',
+  controls: true, progress: true, slideNumber: false,
+  plugins: [RevealNotes]
+});
+</script>
+</body>
+</html>

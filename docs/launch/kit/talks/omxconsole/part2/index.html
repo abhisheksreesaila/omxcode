@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxconsole · Porting with Claude Code, and a console in Mojo</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<style>
+/* Liquid dark (themes/liquid.mojo, liquid_dark_palette): backdrop, cards, hairlines, ink, teal accent, tones */
+:root {
+  --page: #12151b; --card: #1b1f27; --raised: #252a34; --line: #323946; --line2: #424a5a;
+  --ink: #f1f4f9; --ink2: #c4cad6; --ink3: #8f98a8;
+  --accent: #3cc4cf; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --info: #7aa7ff;
+  --d2: #fbbf24; --d3: #818cf8; --d4: #f472b6;
+  --plorer: #3ccf6e; --core: #4aa8ff; --code: #ff5d6c; --qua: #c084fc; --console: #ff9f40;
+  --sans: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --spring: cubic-bezier(.34, 1.36, .64, 1);
+  --shadow: 0 18px 40px -18px rgb(0 0 0 / .6);
+}
+html, body, .reveal-viewport { background: var(--page) !important; }
+.reveal { font-family: var(--sans); color: var(--ink); font-size: 30px; }
+.reveal .slides { text-align: left; }
+.reveal .slides section { height: 100%; padding: 0 !important; }
+.reveal h1, .reveal h2, .reveal h3 { font-family: var(--sans); color: var(--ink); text-transform: none; letter-spacing: -.035em; margin: 0; }
+.reveal h1 { font-size: 84px; font-weight: 800; line-height: 1.02; }
+.reveal h2 { font-size: 54px; font-weight: 750; line-height: 1.06; }
+.reveal h3 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+.reveal p { margin: 0; line-height: 1.4; }
+.reveal code { font-family: var(--mono); }
+.reveal a { color: var(--accent); }
+.k { font: 600 15px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; display: block; }
+.lede { color: var(--ink2); font-size: 28px; margin-top: 20px !important; max-width: 980px; }
+.src { position: absolute; left: 0; bottom: 0; font: 14px var(--mono); color: var(--ink3); }
+.mark { position: absolute; right: 70px; bottom: 0; font: 600 14px var(--mono); color: var(--ink3); }
+.mark b { color: var(--plorer); }
+.w { color: var(--accent); }
+.card { background: var(--card); border-radius: 22px; box-shadow: 0 0 0 1px var(--line), var(--shadow); padding: 24px 26px; }
+.grid { display: grid; gap: 16px; margin-top: 34px; }
+.g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); }
+.card p { color: var(--ink2); font-size: 20px; margin-top: 8px; }
+.num { font: 800 60px/1 var(--sans); letter-spacing: -.05em; color: var(--accent); }
+.num small { font-size: 22px; color: var(--ink3); margin-left: 6px; letter-spacing: -.01em; }
+.pill { display: inline-block; font: 600 13px var(--mono); padding: 5px 11px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line2); color: var(--ink2); }
+.pill.ok { color: var(--ok); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.next { color: var(--warn); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+pre.code { margin: 0; font: 18px/1.55 var(--mono); color: var(--ink2); background: var(--card); border-radius: 18px; padding: 22px 24px; box-shadow: 0 0 0 1px var(--line); white-space: pre; width: auto; }
+pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(--ink3); font-style: normal; } pre.code em { color: var(--ok); font-style: normal; }
+/* Liquid motion: fragments spring in */
+.reveal .slides section .fragment { transition: opacity .32s ease, transform .5s var(--spring); transform: translateY(14px) scale(.98); }
+.reveal .slides section .fragment.visible { transform: none; }
+/* the app mock: a sheet, a video, two telemetry lanes, one cursor */
+.app { display: grid; grid-template-columns: 300px 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; margin-top: 30px; height: 410px; }
+.app .pane { background: var(--card); border-radius: 18px; box-shadow: 0 0 0 1px var(--line); position: relative; overflow: hidden; }
+.app .sheet { grid-row: span 2; padding: 12px 0; font: 14px var(--mono); }
+.app .sheet div { display: grid; grid-template-columns: 1fr 64px 44px; padding: 6px 14px; color: var(--ink2); border-bottom: 1px solid var(--line); }
+.app .sheet div.h { color: var(--ink3); font-size: 12px; letter-spacing: .08em; }
+.app .sheet div.sel { background: color-mix(in srgb, var(--accent) 16%, var(--card)); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
+.app .sheet .f { color: var(--bad); } .app .sheet .s { color: var(--ok); }
+.app .video { grid-row: span 2; display: grid; place-items: center; background: linear-gradient(160deg, #20252f, #151920); }
+.app .video .ph { font: 600 16px var(--mono); color: var(--ink3); text-align: center; line-height: 1.6; }
+.app .video .bar { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 6px; border-radius: 3px; background: var(--raised); }
+.app .video .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 58%; border-radius: 3px; background: var(--accent); }
+.app .lane { padding: 12px 14px; }
+.app .lane .t { font: 600 12px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; }
+.app svg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 78%; }
+.cursor { position: absolute; top: 0; bottom: 0; left: 58%; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+/* the flow: one app → hosts */
+.flow { display: grid; grid-template-columns: 420px 50px 1fr; align-items: center; margin-top: 40px; gap: 0; }
+.flow .src-file { text-align: center; }
+.flow .arrow { height: 2px; background: var(--line2); position: relative; }
+.flow .arrow::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: var(--line2); }
+.hosts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.hosts .card { padding: 16px 18px; }
+.hosts .card h3 { font-size: 22px; }
+/* the timeline */
+.road { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 46px; position: relative; }
+.road::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: var(--line); }
+.road > div { position: relative; padding-top: 42px; }
+.road > div::before { content: ""; position: absolute; top: 4px; left: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--page); box-shadow: 0 0 0 2px var(--line2); }
+.road > div.now::before { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+.road h3 { font-size: 24px; } .road p { color: var(--ink2); font-size: 19px; margin-top: 8px !important; }
+.road .when { font: 600 13px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 8px; }
+.four { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 40px; align-items: stretch; }
+.four .card ul { margin: 12px 0 0; padding-left: 22px; color: var(--ink2); font-size: 22px; line-height: 1.6; }
+.four .us { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow); }
+.suite { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 30px; }
+.suite span { font: 600 16px var(--mono); padding: 8px 14px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+.cta { font: 700 44px var(--sans); letter-spacing: -.03em; color: var(--accent); margin-top: 30px !important; }
+.reveal .progress { color: var(--accent); height: 3px; }
+.reveal .controls { color: var(--accent); }
+.reveal .slide-number { background: transparent; color: var(--ink3); font: 13px var(--mono); }
+
+/* talks additions: product accent, pictures, clips, two-column layouts */
+.k { color: var(--pa, var(--accent)); }
+.w { color: var(--pa, var(--accent)); }
+.num, .cta { color: var(--pa, var(--accent)); }
+.mark b { color: var(--pa, var(--plorer)); }
+.shot { border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 1px var(--line), var(--shadow); background: var(--card); }
+.shot img, .shot video { display: block; width: 100%; height: 100%; object-fit: cover; margin: 0; }
+.shot.contain img, .shot.contain video { object-fit: contain; background: #0c0e12; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 30px; align-items: start; }
+.split.wide { grid-template-columns: 1.35fr 1fr; }
+.split.narrow { grid-template-columns: 1fr 1.35fr; }
+.side p, .side li { color: var(--ink2); font-size: 22px; line-height: 1.5; }
+.side ul { margin: 0; padding-left: 22px; } .side li { margin-bottom: 10px; }
+.side b { color: var(--ink); }
+.hero { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; align-items: center; height: 560px; margin-top: 10px; }
+.hero .shot { height: 460px; }
+.big { font: 800 120px/1 var(--sans); letter-spacing: -.05em; color: var(--pa, var(--accent)); }
+.big small { font-size: 34px; color: var(--ink3); margin-left: 8px; letter-spacing: -.01em; }
+.caption { font: 14px var(--mono); color: var(--ink3); margin-top: 10px !important; }
+pre.code.sm { font-size: 15px; line-height: 1.5; padding: 18px 20px; }
+pre.code.xs { font-size: 13px; line-height: 1.45; padding: 16px 18px; }
+.bars { display: flex; flex-direction: column; gap: 18px; margin-top: 34px; }
+.bar { display: grid; grid-template-columns: 220px 1fr 130px; align-items: center; gap: 18px; font-size: 24px; }
+.bar .name { color: var(--ink); font-weight: 650; }
+.bar .track { display: block; height: 30px; background: var(--card); border-radius: 9px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
+.bar .fill { display: block; height: 100%; width: 0; border-radius: 9px; background: var(--ink3); transition: width 1.2s var(--spring); }
+.bar .fill.me { background: var(--pa, var(--accent)); }
+.present .bar .fill { width: var(--w); }
+.bar .val { font: 650 24px var(--mono); color: var(--ink); text-align: right; }
+.stack { display: flex; flex-direction: column; gap: 10px; margin-top: 30px; }
+.stack .layer { background: var(--card); border-radius: 16px; box-shadow: 0 0 0 1px var(--line); padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; font-size: 24px; font-weight: 650; }
+.stack .layer small { font: 500 16px var(--mono); color: var(--ink3); }
+.stack .layer.hot { box-shadow: 0 0 0 2px var(--pa, var(--accent)); }
+.steps { display: flex; align-items: stretch; gap: 10px; margin-top: 34px; }
+.steps .card { flex: 1; padding: 18px; } .steps .card h3 { font-size: 21px; } .steps .card p { font-size: 17px; }
+.steps .to { align-self: center; color: var(--pa, var(--accent)); font: 700 26px var(--sans); }
+table.t { border-collapse: collapse; margin-top: 26px; font-size: 21px; width: 100%; }
+table.t th { text-align: left; font: 600 13px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); padding: 8px 12px; border-bottom: 1px solid var(--line2); }
+table.t td { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); }
+table.t td b { color: var(--ink); }
+.part { font: 600 14px var(--mono); color: var(--ink3); letter-spacing: .1em; text-transform: uppercase; margin-top: 26px !important; }
+</style>
+</head>
+<body style="--pa: var(--console)">
+<div class="reveal"><div class="slides">
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxconsole · part 2 of 2</span>
+  <h1>MAX can't run it?<br><span class="w">Port it.</span></h1>
+  <p class="lede">When MAX doesn't support a model's architecture, <code>mxc port --auto</code> has Claude Code write a MAX version in a sandbox, and omxconsole checks it against Hugging Face before serving it.</p>
+  <div class="grid g3">
+    <div class="card"><div class="num">8</div><p>architectures ported and serving, text models</p></div>
+    <div class="card"><div class="num">7–40<small>min</small></div><p>per port, mostly weights and compiling</p></div>
+    <div class="card"><div class="num">99.2<small>%</small></div><p>of pixels: the console rebuilt in Mojo vs the original, lowest of 20 web screens</p></div>
+  </div>
+  <div class="src">mxstudio docs/PORTING.md "What's proven" · omxcode docs/goals/33-report.md</div>
+  <div class="mark"><b>●</b> omxlabs.tech</div>
+  <aside class="notes">
+    Part two of omxconsole. Part one was the server: one endpoint, models that sleep when idle. First: when MAX can't run the model you want, omxconsole has Claude Code write the port in a sandbox and checks it against Hugging Face. Eight architectures so far. Second: the console itself, rebuilt in Mojo with my framework omxcode.
+  </aside>
+</section>
+
+<!-- 2 · three kinds -->
+<section>
+  <span class="k">Three kinds of model</span>
+  <h2><code style="font-size:46px">mxc search</code> tells you which.</h2>
+  <table class="t">
+    <tr><th>search says</th><th>what it means</th><th>what you do</th></tr>
+    <tr><td><b>ok / tight / no</b></td><td>MAX supports the architecture; it fits, barely fits, or is too big</td><td><code>mxc serve &lt;model&gt;</code></td></tr>
+    <tr><td><b>port</b></td><td>MAX doesn't support it yet</td><td><code>mxc port &lt;model&gt; --auto</code></td></tr>
+    <tr><td><b>parked</b></td><td>it needs remote code from the Hub; nothing is spent</td><td>nothing</td></tr>
+  </table>
+  <p class="lede"><code>mxc pull</code> reads <code>config.json</code> before downloading weights, so it spots a port early.</p>
+  <div class="src">docs/PORTING.md "Three kinds of model", "Why it's a separate step"</div>
+  <aside class="notes">
+    Search sorts every model into three kinds. If MAX supports it, you're told whether it fits your GPU, and you serve it. If not, it says port. And if the model needs Python code from the Hub, it's parked before anything is spent.
+  </aside>
+</section>
+
+<!-- 3 · why separate -->
+<section>
+  <span class="k">Why porting is its own step</span>
+  <h2>A pull is free. A port spends.</h2>
+  <div class="grid g3">
+    <div class="card"><div class="num">$2–5</div><p>of your Claude usage per model, in our tests</p></div>
+    <div class="card"><div class="num">7–40<small>min</small></div><p>per model, mostly downloading weights and compiling</p></div>
+    <div class="card"><div class="num">3</div><p>attempts by default; stops early on the same failure twice in a row</p></div>
+  </div>
+  <p class="lede">So omxconsole never starts a port on its own. In the console, the model says "needs porting" with a <b>Port it</b> button.</p>
+  <div class="src">docs/PORTING.md "Why it's a separate step", "Porting" (--max-attempts)</div>
+  <aside class="notes">
+    Pulling is free and predictable. Porting uses your Claude account, about two to five dollars a model in our tests, takes seven to forty minutes, and can fail after spending. So it never happens behind your back: you ask for it. It tries three times and stops early on the same failure twice.
+  </aside>
+</section>
+
+<!-- 4 · the five steps -->
+<section>
+  <span class="k"><code>mxc port &lt;repo&gt; --auto</code></span>
+  <h2>Five steps, one checked answer.</h2>
+  <div class="steps">
+    <div class="card"><h3>01 Workspace</h3><p>read the config; pick the closest architecture MAX has; fetch weights once</p></div><span class="to">→</span>
+    <div class="card"><h3>02 Generate</h3><p>Claude Code writes the port in a sandbox, following Modular's porting skill</p></div><span class="to">→</span>
+    <div class="card"><h3>03 Try</h3><p>compile, serve, compare with Hugging Face; up to 4 tries</p></div><span class="to">→</span>
+    <div class="card"><h3>04 Check</h3><p>omxconsole re-runs the comparison on its own</p></div><span class="to">→</span>
+    <div class="card"><h3>05 Serve</h3><p>registered at a pinned revision, and started</p></div>
+  </div>
+  <p class="lede">The check compares the first-token score and the top token at several prefix lengths with the original model.</p>
+  <div class="src">docs/PORTING.md "Porting", "Limits" · mxconsole/port.py, port_auto.py, port_try.py</div>
+  <aside class="notes">
+    omxconsole picks the closest architecture MAX already has as a starting point. Claude Code writes the port in a sandbox, following Modular's porting skill, then compiles, serves and compares it with Hugging Face. Then omxconsole runs the comparison again itself; the agent doesn't grade its own work.
+  </aside>
+</section>
+
+<!-- 5 · proven -->
+<section>
+  <span class="k">What's proven</span>
+  <h2>Eight ported. Two parked, by name.</h2>
+  <div class="split">
+    <div class="card">
+      <h3 class="w">Ported and serving</h3>
+      <div class="suite" style="margin-top:14px">
+        <span>GPT-2</span><span>Pythia</span><span>Phi-2</span><span>StarCoder2</span><span>StableLM 2</span><span>SmolLM3</span><span>Granite MoE</span><span>OLMoE</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="color:var(--warn)">Parked</h3>
+      <p><b>BLOOM</b>: ALiBi positional bias, a MAX limitation; fails, parked by us.</p>
+      <p><b>EXAONE</b>: remote code; parked automatically. One run cost 18 min and $3.75 before we learned that.</p>
+    </div>
+  </div>
+  <div class="src">docs/PORTING.md "What's proven": Linux, 2× RTX 3090, MAX 26.7, text LLMs only · docs/port-study.md (EXAONE, run 19)</div>
+  <aside class="notes">
+    Eight architectures work, from GPT-2 to two mixture-of-experts models, on two RTX 3090s with MAX 26.7, text only. BLOOM's ALiBi hits a MAX limitation, so it's parked. EXAONE loads code from the Hub; one run spent eighteen minutes and about four dollars before we understood why, and now those are parked up front.
+  </aside>
+</section>
+
+<!-- 6 · safety -->
+<section>
+  <span class="k">The agent reads untrusted files</span>
+  <h2>So it runs in a sandbox.</h2>
+  <div class="grid g2">
+    <div class="card"><h3 class="w">Sandboxed while written</h3><p>A model's config and card are untrusted input. Claude Code runs under bubblewrap; without it you must pass <code>--unsandboxed</code>, and <code>try-port</code> can't run.</p></div>
+    <div class="card"><h3 class="w">Pinned to one MAX</h3><p>A port is built against the MAX version omxconsole serves with; the skill's environment is pinned to the same one. After a MAX upgrade, a port may need redoing.</p></div>
+    <div class="card"><h3 style="color:var(--warn)">Ported code is code</h3><p>The agent writes Python that MAX loads. At serving time it runs like any other model code: review it if that matters to you.</p></div>
+    <div class="card"><h3 style="color:var(--warn)">Equal, not "good"</h3><p>The checks prove it matches the original model. They don't evaluate quality on your workload.</p></div>
+  </div>
+  <div class="src">docs/PORTING.md "What you need", "Limits" · docs/plan.md (skill env pinned since 2026-10-13)</div>
+  <aside class="notes">
+    An agent reading files from the internet needs a sandbox, so Claude Code runs under bubblewrap. The port is pinned to the MAX version omxconsole serves with. Two caveats: the ported Python runs at serving time like any model code, and matching the original isn't the same as being good at your task.
+  </aside>
+</section>
+
+<!-- 7 · the console in Mojo -->
+<section>
+  <span class="k">The console</span>
+  <h2>Rebuilt in omxcode, from one Mojo app.</h2>
+  <div class="grid g2" style="margin-top:26px">
+    <div><div class="shot contain" style="height:300px"><img src="img/console-models-gtk.png" alt="the console on Linux, GTK"></div><p class="caption">Linux · GTK 4, native widgets</p></div>
+    <div><div class="shot contain" style="height:300px"><img src="img/console-models-mac.png" alt="the console on the Mac, AppKit"></div><p class="caption">Mac · AppKit (GitHub's virtual Macs)</p></div>
+  </div>
+  <div class="src">omxcode examples/console · docs/goals/33-report.md · docs/gallery/img</div>
+  <aside class="notes">
+    The console was a JavaScript web app. I rebuilt it in Mojo with omxcode, as a test of whether the framework can build a real app. The same Mojo app opens as GTK on Linux, AppKit on the Mac, checked on GitHub's virtual Macs, and a page on the web.
+  </aside>
+</section>
+
+<!-- 8 · how close -->
+<section>
+  <span class="k">How close is it?</span>
+  <h2>Measured against the original.</h2>
+  <div class="grid g3">
+    <div class="card"><div class="num">99.2<small>%</small></div><p>of pixels equal to the JavaScript console, the lowest of 20 web shots (10 screens × desktop and phone)</p></div>
+    <div class="card"><div class="num">0<small>/ 1,425</small></div><p>tagged GTK views more than 4 pt or 3 % from the web's (Mac: 0 of 1,268)</p></div>
+    <div class="card"><div class="num">31</div><p>framework modules it added to omxcode, each with a test; the app only composes them</p></div>
+  </div>
+  <div class="src">docs/goals/33-report.md "Result", "What the framework gained" · both fed the same recorded daemon replies</div>
+  <aside class="notes">
+    Both consoles got the same recorded daemon replies. Every one of twenty web screenshots matches the original on at least 99 percent of pixels; the lowest is 99.2. No app hacks were allowed: the thirty-one components it needed went into the framework, each with a test.
+  </aside>
+</section>
+
+<!-- 9 · live check -->
+<section>
+  <span class="k">Checked live</span>
+  <h2>A real daemon, driven through GTK.</h2>
+  <div class="steps">
+    <div class="card"><h3>Load</h3><p>a model; its numbers update</p></div><span class="to">→</span>
+    <div class="card"><h3>Key</h3><p>create one in the console</p></div><span class="to">→</span>
+    <div class="card"><h3>/v1</h3><p>answers <b style="color:var(--ok)">200</b></p></div><span class="to">→</span>
+    <div class="card"><h3>Revoke</h3><p>the key</p></div><span class="to">→</span>
+    <div class="card"><h3>/v1</h3><p>answers <b style="color:var(--bad)">401</b></p></div>
+  </div>
+  <p class="lede">Honest note: the live run used a real mxconsole daemon with a fake <code>max</code>. The server still ships its JavaScript console; the Mojo one lives in the omxcode repo.</p>
+  <div class="src">docs/goals/33-report.md "Live" · mxstudio mxconsole/console/ (the shipped JS console)</div>
+  <aside class="notes">
+    A real omxconsole daemon was driven through the GTK console: load a model, create a key, get a 200, revoke it, get a 401. To be clear, that run used a fake max, and the server still ships the JavaScript console for now.
+  </aside>
+</section>
+
+<!-- 10 · code: Api -->
+<section>
+  <span class="k">How the console talks to it</span>
+  <h2>Just HTTP. Replies come back as events.</h2>
+  <pre class="code sm" style="margin-top:24px"><b>struct</b> Api(Movable):
+    <b>var</b> http: Http
+    <b>var</b> base: String
+
+    <b>def</b> __init__(<b>out</b> self):
+        self.http = Http()
+        <b>var</b> url = environment(<em>"MXC_URL"</em>, DEFAULT_URL)
+        self.base = String(url.rstrip(<em>"/"</em>))
+
+    <b>def</b> admin(self, <b>var</b> r: Request) -> Request:
+        <b>if</b> environment(<em>"MXC_ADMIN_KEY"</em>) != <em>""</em>:
+            <b>return</b> r^.header_from_env(<em>"X-Mst-Admin"</em>, <em>"MXC_ADMIN_KEY"</em>).timeout(15000)
+        <b>return</b> r^.header(<em>"X-Mst-Admin"</em>, <em>"1"</em>).timeout(15000)
+
+    <b>def</b> get(<b>mut</b> self, message: Int, path: String, id: Int = 0):
+        self.http.send(self.admin(Request.get(message, self.base + path).tagged(id)))</pre>
+  <div class="src">omxcode examples/console/api.mojo · real code, trimmed</div>
+  <aside class="notes">
+    Real code from the Mojo console. An Api struct wraps the framework's Http effect; the admin header is read from the environment, not pasted into a string. And get doesn't wait: it sends a tagged request, and the reply comes back later as an ordinary event.
+  </aside>
+</section>
+
+<!-- 11 · code: poll -->
+<section>
+  <span class="k">The poll</span>
+  <h2>Timers are data, too.</h2>
+  <pre class="code sm" style="margin-top:24px"><b>def</b> poll_core(<b>mut</b> self, info: Bool = False):
+    self.api.get(GOT_MODELS, <em>"/admin/models"</em>)
+    self.api.get(GOT_METRICS, <em>"/admin/metrics"</em>)
+    self.api.get(GOT_SERIES, <em>"/admin/series?range=5m"</em>)
+    self.api.get(GOT_REQUESTS, <em>"/admin/requests?limit=40"</em>)
+
+<b>def</b> every(self) -> List[Every]:
+    <b>var</b> out: List[Every] = [Every(3000, POLL_CORE), Every(5000, POLL_SYSTEM), Every(3000, POLL_JOBS)]
+    <b>var</b> p = self.place()
+    <b>if</b> p.page == <em>"model"</em> <b>and</b> p.tab == <em>"benchmark"</em>:
+        out.append(Every(1000 <b>if</b> self.bench.running <b>else</b> 5000, POLL_BENCH))
+    <i># … logs, the add flow, keys add their own</i>
+    <b>return</b> out</pre>
+  <p class="lede">The UI thread only decides; the requests and their waiting happen elsewhere.</p>
+  <div class="src">omxcode examples/console/app.mojo · real code, trimmed · docs/ui-threads.md</div>
+  <aside class="notes">
+    Polling works the same way. The app doesn't start timers; it returns the list of timers it wants right now, from its state, and the framework diffs that list like it diffs the view. The window never blocks on the network, with no locks or callbacks.
+  </aside>
+</section>
+
+<!-- 12 · honest edges -->
+<section>
+  <span class="k">The honest edges</span>
+  <h2>What it doesn't do yet.</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Linux + NVIDIA only</h3><p>Whether MAX serves these models on Apple silicon is still to be checked on a Mac.</p></div>
+    <div class="card"><h3>A MAX nightly</h3><p>Public alpha on MAX 26.7 nightly. A port is tied to its MAX version.</p></div>
+    <div class="card"><h3>Text-only porting</h3><p>Vision and embedding architectures haven't been tried. Safetensors only; one GPU.</p></div>
+    <div class="card"><h3>Porting can fail</h3><p>It needs Claude Code and bubblewrap, and can fail after spending.</p></div>
+    <div class="card"><h3>Parked models</h3><p>Remote code (EXAONE) and ALiBi (BLOOM) don't port.</p></div>
+    <div class="card"><h3>Two consoles</h3><p>The server still ships the JavaScript console; the Mojo one isn't it yet.</p></div>
+  </div>
+  <div class="src">mxstudio README.md badges · docs/PORTING.md "Limits" · docs/plan.md F-049 · omxcode docs/goals/33-report.md</div>
+  <aside class="notes">
+    The honest list. Linux and NVIDIA only; Apple silicon is a check I still have to run on a real Mac. A MAX nightly. Porting is text-only, needs Claude Code and a sandbox, and can fail after spending. Some models don't port. And the shipped console is still JavaScript.
+  </aside>
+</section>
+
+<!-- 13 · where it's going -->
+<section>
+  <span class="k">Where it's going</span>
+  <h2>From one GPU to every app on it.</h2>
+  <div class="road">
+    <div class="now"><span class="when">now</span><h3>One endpoint</h3><p>idle unload, pin, keys, HTTPS on your LAN, porting text models</p></div>
+    <div><span class="when">next</span><h3>The Mac</h3><p>a packaged Mac app, in review; the Apple-silicon check first</p></div>
+    <div><span class="when">next</span><h3>Ask</h3><p>omxplorer's questions in words, answered on your GPU</p></div>
+    <div><span class="when">later</span><h3>More ports</h3><p>vision and embedding models</p></div>
+    <div><span class="when">if needed</span><h3>Our router</h3><p>for several backends (F-064)</p></div>
+  </div>
+  <div class="src">docs/plan.md F-049, F-051 (review), F-064 · docs/PORTING.md "Limits" · omxlabs omxplorer deck "Next" · direction, not dates</div>
+  <aside class="notes">
+    Direction, not dates. A packaged Mac app is in review, waiting on the Apple-silicon check. The one I'm most excited about: omxplorer asking its questions in words through omxconsole, model and data on the same GPU. Later, vision and embedding ports.
+  </aside>
+</section>
+
+<!-- 14 · outro -->
+<section>
+  <span class="k">Try it</span>
+  <h2>Serve it. Port what's missing.</h2>
+  <pre class="code" style="margin-top:28px">git clone https://github.com/abhisheksreesaila/mxstudio.git && cd mxstudio
+pixi install && pixi run mxc serve qwen2.5-0.5b
+pixi run mxc port &lt;hf-repo&gt; --auto     <i># when MAX can't run it (Claude Code + bubblewrap)</i></pre>
+  <p class="lede">Then point any OpenAI client at <code>http://127.0.0.1:11435/v1</code>.</p>
+  <p class="cta">omxlabs.tech</p>
+  <p class="lede">MAX people: which architecture should I port next? And tell me where the porting broke for you.</p>
+  <div class="src">MIT (omxlabs/readmes/omxconsole.md) · built on Modular MAX · github.com/abhisheksreesaila/mxstudio · console: github.com/abhisheksreesaila/omxcode</div>
+  <div class="mark"><b>●</b> omxconsole</div>
+  <aside class="notes">
+    That's omxconsole: one command to serve, one to port what MAX can't run yet, and a console in Mojo. MIT, built on Modular MAX, at omxlabs.tech. MAX people: tell me which architecture to try next, and where porting broke for you.
+  </aside>
+</section>
+
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script>
+Reveal.initialize({
+  hash: true, width: 1280, height: 720, margin: 0.06, center: false,
+  transition: 'fade', transitionSpeed: 'default', backgroundTransition: 'fade',
+  controls: true, progress: true, slideNumber: false,
+  plugins: [RevealNotes]
+});
+</script>
+</body>
+</html>

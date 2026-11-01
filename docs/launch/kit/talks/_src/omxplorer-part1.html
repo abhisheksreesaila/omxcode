@@ -1,0 +1,245 @@
+<!-- title: omxplorer · part 1 · Why did the robot drop it?; accent: --plorer -->
+
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxplorer · part 1 of 3</span>
+  <div class="hero">
+    <div>
+      <h1>Why did the<br>robot <span class="w">drop it?</span></h1>
+      <p class="lede">A fleet of real robot episodes as a spreadsheet. Ask a question in words, tap an answer, and its video and telemetry open on one cursor. On your own GPU.</p>
+      <div class="grid g2" style="margin-top:26px">
+        <div class="card"><div class="num">63,344</div><p>real episodes, 13 labs</p></div>
+        <div class="card"><div class="num">~40<small>ms</small></div><p>a question over 16.8M rows</p></div>
+      </div>
+    </div>
+    <div class="shot" style="height:330px"><img style="object-view-box: inset(50% 58% 15% 4%)" src="img/robots-06-drop-falling.jpg" alt="F00118: the shirt falls outside the box"></div>
+  </div>
+  <div class="src">docs/goals/47-report.md (M0, M7) · DROID, CC-BY-4.0</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    A robot is putting a shirt in a box, and the shirt ends up outside it. Why? In this talk I answer that on real public robot data, in one app called omxplorer.
+    Sixty-three thousand episodes from thirteen labs, a question in words over almost seventeen million telemetry rows in about forty milliseconds, and then the moment itself on video. This is part one of three: the story.
+  </aside>
+</section>
+
+<!-- 2 · the problem -->
+<section>
+  <span class="k">The usual way</span>
+  <h2>One question.<br>Four apps.</h2>
+  <div class="grid g4">
+    <div class="card fragment"><h3>A spreadsheet</h3><p>which episodes failed</p></div>
+    <div class="card fragment"><h3>A video player</h3><p>what the camera saw</p></div>
+    <div class="card fragment"><h3>A notebook</h3><p>what the joints and gripper did</p></div>
+    <div class="card fragment"><h3>A PDF</h3><p>how the data was recorded</p></div>
+  </div>
+  <p class="lede fragment">Every step is an export or a copy. By the time they line up, the question is gone.</p>
+  <aside class="notes">
+    Here's how you'd do it today. A spreadsheet of episodes tells you which ones failed. A video player shows you one. A Python notebook plots the joints and the gripper, and a PDF tells you how the data was recorded.
+    Four apps, with exports between them. I wanted the question to stay in one place.
+  </aside>
+</section>
+
+<!-- 3 · the data -->
+<section>
+  <span class="k">The data is real</span>
+  <h2>DROID: robots in 13 labs.</h2>
+  <div class="grid g3">
+    <div class="card"><div class="num">67,029</div><p>episodes in the public 720p port: 53,282 successes, 13,747 failures, 326 hours</p></div>
+    <div class="card"><div class="num">52<small>channels</small></div><p>at 15 Hz per episode: joint positions, 7 joint velocities, the gripper</p></div>
+    <div class="card"><div class="num">0<small>force</small></div><p>no force or torque sensing, so I never show "grip force"</p></div>
+  </div>
+  <p class="lede">63,344 of the episodes are in the app, with all 16.8M telemetry rows underneath. Video is fetched for 3,546 of them, one camera.</p>
+  <div class="src">sources.md S1–S3 · ~/data/robot-scout/REPORT.md · docs/goals/47-report.md · Khazatsky, Pertsch et al. 2024, arXiv 2403.12945</div>
+  <aside class="notes">
+    The data is DROID, a public robot dataset from 2024, released under CC-BY. The public 720p port has 67,029 episodes, about 326 hours, from 13 labs.
+    Each episode has 720p video and 52 telemetry channels at 15 hertz. There's no force sensing in DROID, so I won't show force; I read a drop from the gripper and the video.
+  </aside>
+</section>
+
+<!-- 4 · the fleet sheet -->
+<section>
+  <span class="k">Beat 1 · the fleet</span>
+  <h2>One row per episode.</h2>
+  <div class="split wide">
+    <div class="shot" style="height:440px"><img style="object-view-box: inset(8% 45% 40% 2%)" src="img/robots-01-fleet.jpg" alt="the fleet sheet"></div>
+    <div class="side">
+      <ul>
+        <li><b>63,344 rows</b>, one per episode</li>
+        <li>lab, robot, date, task, outcome, duration, grasp counts, peak joint speed, clip</li>
+        <li>a real sheet: sort, filter, edit, formulas</li>
+        <li>opened straight from fleet.csv</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/goals/47-report.md, "The story" beat 1 · shot: build/g47/shots/01-fleet.png</div>
+  <aside class="notes">
+    Open the fleet. Every row is one real episode: which lab, which robot, the task, whether it worked, how long it took, how many times the gripper closed.
+    It's a real spreadsheet, not a list view. You can sort it, filter it, and type formulas into it.
+  </aside>
+</section>
+
+<!-- 5 · success by lab -->
+<section>
+  <span class="k">Beat 1 · a chart in words</span>
+  <h2>Success by lab: <span class="w">95 % to 61 %.</span></h2>
+  <div class="split wide">
+    <div class="shot" style="height:440px"><img style="object-view-box: inset(47% 62% 23% 2%)" src="img/robots-02-success-by-lab.jpg" alt="average success by lab"></div>
+    <div class="side">
+      <p>Typed into the chart's field:</p>
+      <pre class="code sm" style="margin-top:10px">average success_pct by lab,
+largest first</pre>
+      <p style="margin-top:18px">PennPAL 95.11 % … RAD 61.35 %.</p>
+      <p style="margin-top:12px"><b>The spread, not a ranking:</b> labs ran different tasks in different rooms.</p>
+    </div>
+  </div>
+  <div class="src">docs/goals/47-report.md M3 and "Record it yourself" · sources.md "Things we must not say"</div>
+  <aside class="notes">
+    A chart, typed as a sentence: average success by lab, largest first. It goes from 95 percent at PennPAL down to 61 at RAD.
+    One honest note: labs ran different tasks in different rooms, so this shows the spread of the data, not which lab is worse.
+  </aside>
+</section>
+
+<!-- 6 · pivot -->
+<section>
+  <span class="k">Beat 1 · pivot</span>
+  <h2>Lab × outcome, one click.</h2>
+  <div class="shot" style="height:300px; margin-top:26px"><img style="object-view-box: inset(47% 17% 22% 2%)" src="img/robots-03-pivot-lab-outcome.jpg" alt="pivot lab by outcome"></div>
+  <p class="lede" style="font-size:24px">Value <code>n</code>, rows <code>lab</code>, columns <code>outcome</code>: failures, successes and totals for all 13 labs, checked against fleet.csv by the goal's own script.</p>
+  <div class="src">docs/goals/47-report.md M3 (pivot = fleet.csv for all 13 labs)</div>
+  <aside class="notes">
+    A pivot: how many episodes each lab ran, and how many failed. The check script compares every cell with the source file.
+    So far this is a fast spreadsheet. The next step is where it stops being one.
+  </aside>
+</section>
+
+<!-- 7 · links -->
+<section>
+  <span class="k">Beat 2 · nothing joins until I link it</span>
+  <h2>Four links, typed by a person.</h2>
+  <div class="split">
+    <pre class="code sm">fleet.episode = telemetry.episode   <i>-- key</i>
+fleet.clip    = episode.file        <i>-- key → video</i>
+telemetry.t   ~ episode.t +0        <i>-- time</i>
+fleet.source  = paper.file          <i>-- key → document</i></pre>
+    <div class="shot" style="height:380px"><img style="object-view-box: inset(8% 0% 38% 52%)" src="img/robots-05-links.jpg" alt="the Links panel"></div>
+  </div>
+  <p class="lede">The episode key, its video file, the clock, its paper. That's the whole "schema", and it lives on the sheet, not in code.</p>
+  <div class="src">docs/goals/47-report.md, "Record it yourself", beat 2 Links</div>
+  <aside class="notes">
+    Now I connect things, by hand. Four lines: the fleet to its telemetry by episode, the fleet to its video file, the telemetry to the video by time, and the fleet to its paper.
+    Nothing in omxplorer joins by guessing. Part two goes deep on this, because it's the part I like most.
+  </aside>
+</section>
+
+<!-- 8 · F00118 -->
+<section>
+  <span class="k">Beat 2 · the drop · F00118</span>
+  <h2>The gripper lets go <span class="w">over the edge.</span></h2>
+  <div class="shot" style="height:330px; margin-top:24px"><img style="object-view-box: inset(47% 1% 9% 4%)" src="img/robots-07-drop-fallen.jpg" alt="the shirt hangs on the box's outside wall, beside the telemetry lanes"></div>
+  <div class="grid g3" style="margin-top:16px">
+    <div class="card"><div class="num" style="font-size:44px">5.3<small>s</small></div><p>the gripper closes and reads 0.97: almost shut, a pinch on thin cloth</p></div>
+    <div class="card"><div class="num" style="font-size:44px">12.7<small>s</small></div><p>it starts to open, still over the box's edge</p></div>
+    <div class="card"><div class="num" style="font-size:44px">13.0<small>s</small></div><p>the shirt lands hanging on the outside wall</p></div>
+  </div>
+  <div class="src">docs/goals/47-report.md, "The story" beat 2 (AUTOLab, 2023-11-21, 244 telemetry rows)</div>
+  <aside class="notes">
+    Here's the failure: episode F00118, from AUTOLab. The gripper closes at 5.3 seconds and reads 0.97, so it's barely pinching the cloth.
+    At 12.7 seconds it opens while it's still over the edge of the box, and the shirt falls and hangs on the outside wall. Video and telemetry share one cursor, so you see both at the same instant.
+  </aside>
+</section>
+
+<!-- 9 · the clip -->
+<section>
+  <span class="k">The whole story · 42 s</span>
+  <h2>Sheet → pivot → failure → <span class="w">the moment.</span></h2>
+  <div class="shot contain" style="height:520px; margin-top:24px"><video src="img/clip-robots.mp4" poster="img/clip-robots.jpg" controls muted playsinline preload="metadata"></video></div>
+  <div class="src">docs/img/clip-robots.mp4 · recorded from omxplorer by scripts/clips.py robots (47-report M8)</div>
+  <aside class="notes">
+    Here's the whole story in one take, recorded straight from the app. Press play and talk over it.
+    Fleet sheet, chart by lab, the pivot, the failure's video beside its telemetry, the question in words, the paper, and the pack.
+  </aside>
+</section>
+
+<!-- 10 · ask -->
+<section>
+  <span class="k">Beat 3 · ask in words</span>
+  <h2>2,997 failures re-grasped, <span class="w">in ~40 ms.</span></h2>
+  <div class="split wide">
+    <div class="shot" style="height:300px"><img style="object-view-box: inset(23% 32% 48% 20%)" src="img/robots-09-ask-regrasped.jpg" alt="the question asked in words"></div>
+    <div class="side">
+      <p><i>"failures where the gripper closed, let go and closed again"</i></p>
+      <ul style="margin-top:14px">
+        <li>fleet joined to telemetry by the link I made</li>
+        <li>16.8M rows scanned</li>
+        <li>37–42 ms in the check's runs</li>
+        <li>no Python, no server</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">docs/goals/47-report.md beat 3, M4 (2,997 = truth), M7 (40.3 ms)</div>
+  <aside class="notes">
+    Now a question in words: failures where the gripper closed, let go and closed again. It joins the fleet to every telemetry row through the link I made.
+    Almost 3,000 episodes, in about 40 milliseconds over 16.8 million rows. Tap any of them and its video and telemetry open.
+  </aside>
+</section>
+
+<!-- 11 · paper + pack -->
+<section>
+  <span class="k">Beats 4 and 5 · the paper, the pack</span>
+  <h2>The source, and a pack to send.</h2>
+  <div class="grid g2">
+    <div><div class="shot" style="height:330px"><img src="img/robots-08-paper-15hz.jpg" alt="the DROID paper, recorded at 15Hz marked"></div>
+      <p class="caption">the DROID paper, page 15: "recorded at 15Hz", read from the PDF's text</p></div>
+    <div><div class="shot" style="height:330px"><img src="img/robots-11-pack.jpg" alt="the exported pack"></div>
+      <p class="caption">per failure: a PDF (the frame at the release, the lanes there, the paper's page) and a 6 s clip</p></div>
+  </div>
+  <div class="src">docs/goals/47-report.md beats 4–5, M5, M6</div>
+  <aside class="notes">
+    The dataset's paper is linked too, so the line that says the data is recorded at 15 hertz is one click away from any row.
+    And when I've found what I wanted, I export a pack per failure: a PDF with the frame where it let go, the telemetry at that moment, the paper's page, and a short clip.
+  </aside>
+</section>
+
+<!-- 12 · what the data doesn't say -->
+<section>
+  <span class="k">Said plainly</span>
+  <h2>What the data can't tell you.</h2>
+  <div class="grid g3">
+    <div class="card"><h3>No force</h3><p>DROID has no force or torque. "Dropped" is read from the gripper and the video.</p></div>
+    <div class="card"><h3>Filters, not a detector</h3><p>Slip and regrasp features don't predict failure across labs: a slip shows in 18 % of successes too.</p></div>
+    <div class="card"><h3>Inferred tasks</h3><p>Failures carry no instruction; their task is the nearest success on the same robot, same day.</p></div>
+  </div>
+  <div class="src">docs/goals/47-report.md, "What the data doesn't support"</div>
+  <aside class="notes">
+    Three honest notes. There's no force data, so I never talk about grip force. The gripper features I compute are good filters, but they don't predict failure across labs.
+    And failure episodes don't come with an instruction, so their task is taken from the nearest success on the same robot that day. The app says so in a column.
+  </aside>
+</section>
+
+<!-- 13 · the line -->
+<section>
+  <span class="k">The difference</span>
+  <h2 style="font-size:64px; margin-top:60px">They replay a recording.<br><span class="w">omxplorer starts from a question across the whole fleet,</span><br>then shows you the moment.</h2>
+  <div class="src">positioning, 2026-10-31 · docs/launch/kit/modular-forum/replies.md</div>
+  <aside class="notes">
+    Good robotics tools already sync video and plots for one recording, and they're great at it.
+    omxplorer starts one level up: from a question across the whole fleet. Then it takes you to the moment that answers it.
+  </aside>
+</section>
+
+<!-- 14 · outro -->
+<section>
+  <span class="k">Try it</span>
+  <h2>Open source. Public alpha.</h2>
+  <p class="cta">omxlabs.tech</p>
+  <pre class="code" style="margin-top:24px">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode && pixi install && scripts/omxplorer.sh</pre>
+  <p class="lede">Next: part 2, the five ideas that make it an investigation, not a replay. Then: the full fleet with every camera.</p>
+  <p class="part">Tell me what you'd ask this data.</p>
+  <div class="src">MIT · github.com/abhisheksreesaila/omxcode</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    That's the story: a question, an answer across the fleet, and the moment on video, in one app. It's open source, MIT, a public alpha, and the robot data is public, so you can check every number.
+    Part two is how it works. Tell me in the comments what you'd ask this data.
+  </aside>
+</section>

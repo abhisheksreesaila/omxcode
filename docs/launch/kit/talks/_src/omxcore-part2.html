@@ -1,0 +1,230 @@
+<!-- title: omxcore · part 2 · The numbers, and the honest edges; accent: --core -->
+
+<!-- 1 · summary -->
+<section>
+  <span class="k">omxcore · the engine · part 2 of 2</span>
+  <h1>The numbers,<br>and the <span class="w">honest edges.</span></h1>
+  <p class="lede">A SQL engine written top to bottom in Mojo: how you call it, how fast it is on TPC-H, and where DuckDB still wins.</p>
+  <div class="grid g3" style="margin-top:34px">
+    <div class="card"><div class="num">3.15<small>s</small></div><p>22 simplified TPC-H queries, SF10, on the CPU; answers equal DuckDB's on the same queries</p></div>
+    <div class="card"><div class="num">12<small>of 22</small></div><p>queries where DuckDB is still faster</p></div>
+    <div class="card"><div class="num">21<small>of 22</small></div><p>TPC-H queries through <code>mx sql</code> equal to DuckDB</p></div>
+  </div>
+  <div class="src">mxframe README.md · docs/bench/m2s-engine.csv (SF10, first_ms) · STABLE.md (834ef9a)</div>
+  <div class="mark"><b>●</b> omxlabs.tech/omxcore</div>
+  <aside class="notes">
+    Part 2 of omxcore: the code you'd write, the benchmark, and what it doesn't do yet. Three numbers: 3.15 seconds for 22 simplified TPC-H queries at scale factor 10, on the CPU; DuckDB still faster on 12 of those 22; and 21 of 22 already equal DuckDB through the native mx command.
+  </aside>
+</section>
+
+<!-- 2 · python -->
+<section>
+  <span class="k">How you'd write a query · 1 of 3</span>
+  <h2>In Python: lazy, then compute.</h2>
+  <pre class="code sm" style="margin-top:28px"><b>import</b> omxcore <b>as</b> mx          <i># 0.6.0 on PyPI: import mxframe as mx</i>
+
+lf = mx.scan_parquet("lineitem.parquet")
+out = (lf.filter(mx.col("l_quantity") &lt; 24).groupby("l_returnflag")
+         .agg(mx.col("l_extendedprice").sum().alias("revenue"))
+         .sort("l_returnflag").compute(device="cpu"))   <i># a pyarrow Table</i>
+print(out.to_pandas())</pre>
+  <div class="grid g3" style="margin-top:24px">
+    <div class="card"><h3>One native call</h3><p>Nothing runs until <code>.compute()</code>; then the plan is optimized and executed at once.</p></div>
+    <div class="card"><h3>device=</h3><p><code>"auto"</code> (the default), <code>"cpu"</code> or <code>"gpu"</code>.</p></div>
+    <div class="card"><h3>Says why</h3><p><code>explain(device="auto", costs=True)</code> prints the plan and the device choice.</p></div>
+  </div>
+  <div class="src">mxframe docs/reference.md (Quick start; examples run by tests/test_readme_api.py)</div>
+  <aside class="notes">
+    From Python it looks like Polars: lazy scan, filter, group by, aggregate. Nothing runs until compute; then the whole plan goes down in one native call. Pick a device or leave it on auto, and explain tells you why.
+  </aside>
+</section>
+
+<!-- 3 · mojo builder -->
+<section>
+  <span class="k">How you'd write a query · 2 of 3</span>
+  <h2>In Mojo: no Python at all.</h2>
+  <pre class="code sm" style="margin-top:24px"><b>from</b> omxcore <b>import</b> read_csv, CsvOptions, Query, Frame, col, lit, sum, count, AUTO
+
+<b>var</b> csv = read_csv(String(argv()[1]), CsvOptions())  <i># parallel, typed, with an import report</i>
+<b>var</b> orders = csv.take_table().share()
+<b>var</b> region = orders.column("region")
+<b>var</b> groups = len(orders.dictionary(region))
+
+<b>var</b> out = (Query(orders)
+           .where(col("qty") &gt; 2)
+           .group_by(col("region"), groups=groups)
+           .agg(sum(col("revenue")), count())
+           .compute(<em>AUTO</em>))                          <i># CPU or GPU; out.device says which</i>
+
+<b>var</b> f = Frame(orders)                              <i># edits on top of shared data, no copy</i>
+f.set_text(f.column("revenue"), 0, "99.00")
+f.formula("net = revenue - qty")
+<b>var</b> total = Query(f).agg(sum(col("net"))).compute()</pre>
+  <div class="src">mxframe mojo/tools/readme_example.mojo (kept compiling by scripts/mojo_test.sh), trimmed</div>
+  <aside class="notes">
+    From Mojo there's no Python anywhere: read a CSV in parallel, build a query, compute on AUTO, and the result says which device ran it. Below that, a Frame: an editable layer over shared data, with formulas. That's what a spreadsheet app needs.
+  </aside>
+</section>
+
+<!-- 4 · sql from mojo -->
+<section>
+  <span class="k">How you'd write a query · 3 of 3</span>
+  <h2>Or SQL, from Mojo.</h2>
+  <pre class="code sm" style="margin-top:28px"><b>var</b> cat = Catalog()
+cat.add_table("orders", orders)              <i># a SharedTable</i>
+cat.add_frame("edited", frame)               <i># a Frame, snapshotted now</i>
+cat.add_scan("big", scan_parquet(path))      <i># a Parquet file, a row group at a time</i>
+<b>var</b> r = sql(cat, "SELECT region, sum(revenue) AS total FROM orders WHERE qty > 2 "
+                 "GROUP BY region HAVING count(*) > 5 ORDER BY total DESC LIMIT 10")
+r.table          <i># an owned Table: INT, DECIMAL, TEXT, DATE, BOOL and FLOAT</i>
+r.notes          <i># what the planner decided and what ran, one line each</i>
+<b>var</b> o = PlannerOptions(); o.group = GROUP_HASHED   <i># or GROUP_AUTO, GROUP_DENSE</i></pre>
+  <div class="src">mxframe docs/omxcore-mojo-api.md §8 (SQL), trimmed</div>
+  <aside class="notes">
+    Or hand it SQL. A catalog holds tables, edited frames and streamed file scans, and one sql call answers over any of them, with the same notes as the command line.
+  </aside>
+</section>
+
+<!-- 5 · TPC-H -->
+<section>
+  <span class="k">The numbers</span>
+  <h2>22 simplified TPC-H queries, SF10.</h2>
+  <div class="bars">
+    <div class="bar"><span class="name">omxcore</span><span class="track"><span class="fill me" style="--w:22%"></span></span><span class="val">3.15 s</span></div>
+    <div class="bar"><span class="name">DuckDB</span><span class="track"><span class="fill" style="--w:35%"></span></span><span class="val">5.08 s</span></div>
+    <div class="bar"><span class="name">Polars</span><span class="track"><span class="fill" style="--w:100%"></span></span><span class="val">14.40 s</span></div>
+  </div>
+  <p class="lede" style="margin-top:34px">On the CPU. Query time only: each engine loads its columns first, outside the clock; one fresh process per query, no warm-up. Answers equal DuckDB's on the same simplified queries; Polars' Q1 is wrong. Not TPC-certified; a shared machine, so indicative.</p>
+  <div class="src">mxframe README.md (0.6.0) · docs/bench/m2s-engine.csv: SF10 first_ms summed, engine mx-cpu · docs/bench/m2s-engine.md (method, Query semantics, Hardware) · Python package, CPU · Q13's total includes a PyArrow step (F-016)</div>
+  <aside class="notes">
+    22 TPC-H queries at scale factor 10: omxcore 3.15 seconds, DuckDB 5.08, Polars 14.4. Precisely: the Python package 0.6.0 on the CPU, query time only, one fresh process per query, on a shared machine. The queries are simplified, the same for every engine, so it's not a certified TPC-H result.
+  </aside>
+</section>
+
+<!-- 6 · honest -->
+<section>
+  <span class="k">Read it honestly</span>
+  <h2>Faster in total. Not on every query.</h2>
+  <div class="grid g2">
+    <div class="card"><h3 class="w">Q21 carries the lead</h3><p>Without it, DuckDB's total is lower: <b>2.27 s</b> against omxcore's <b>2.41 s</b>.</p></div>
+    <div class="card"><h3 class="w">DuckDB wins 12 of 22</h3><p>Mostly the join-heavy ones. A star-aware join planner is the next speed work.</p></div>
+  </div>
+  <div class="grid g3">
+    <div class="card"><div class="num">0.74<small>s</small></div><p>Q21 (DuckDB 2.81 s)</p></div>
+    <div class="card"><div class="num">18<small>ms</small></div><p>Q2 (DuckDB 30 ms)</p></div>
+    <div class="card"><div class="num">65<small>ms</small></div><p>Q1 (DuckDB 138 ms)</p></div>
+  </div>
+  <div class="src">docs/bench/m2s-engine.csv (SF10, first_ms, simplified queries) · Q13 (94 vs 235 ms) left out: part of it runs in PyArrow (F-016) · docs/plan.md F-161</div>
+  <aside class="notes">
+    The honest reading: Q21 carries the lead. Take it out and DuckDB's total is lower, 2.27 against 2.41. DuckDB wins 12 of 22, mostly join-heavy. Fair claim: competitive on the CPU, ahead in total, joins to fix.
+  </aside>
+</section>
+
+<!-- 7 · per query picture -->
+<section>
+  <span class="k">Query by query</span>
+  <h2>Every query, on the page.</h2>
+  <div class="shot contain" style="height:470px; margin-top:24px"><img src="img/omxcore-per-query.png" alt="the benchmarks page, query by query"></div>
+  <div class="src">abhisheksreesaila.github.io/omxcore/benchmarks.html · computed in the browser from docs/bench/</div>
+  <aside class="notes">
+    Don't trust my summary. The benchmarks page shows every query, and computes each number in your browser from the CSV files in the repo. The losses sit next to the wins.
+  </aside>
+</section>
+
+<!-- 8 · stable -->
+<section>
+  <span class="k">What's in the stable build · 834ef9a</span>
+  <h2>Real SQL, equal to DuckDB.</h2>
+  <div class="grid g4">
+    <div class="card"><h3>CTEs, subqueries</h3><p>WITH, IN / EXISTS, correlated ones made into joins, UNION / INTERSECT / EXCEPT</p></div>
+    <div class="card"><h3>Windows</h3><p>QUALIFY, row_number, rank, lag, lead, running totals, moving averages</p></div>
+    <div class="card"><h3>Joins</h3><p>inner, left, semi, anti; 3 to 9 tables with a planner</p></div>
+    <div class="card"><h3>Edits and undo</h3><p>a Frame over a file: change cells, undo, redo, save back to Parquet</p></div>
+  </div>
+  <p class="lede">Refused by name, never guessed: <code>WITH RECURSIVE</code>, <code>LATERAL</code>, correlated <code>NOT IN</code>. Each step of a compound query is held in memory.</p>
+  <div class="src">mxframe STABLE.md (834ef9a, F-159; 5e4cdb1, F-168; 2585dc9 "Undo for formulas", F-179) · docs/site/bench/engine-informal.json (roadmap: 3–9-table joins)</div>
+  <aside class="notes">
+    The stable build is real SQL: CTEs, correlated subqueries, set operations, windows with QUALIFY, multi-way joins, and a Frame with undo that saves back to Parquet. What it can't do, it refuses by name.
+  </aside>
+</section>
+
+<!-- 9 · where Mojo pushed back -->
+<section>
+  <span class="k">Where Mojo pushed back</span>
+  <h2>Four lessons, now in the code.</h2>
+  <div class="grid g2">
+    <div class="card"><h3>Threads flush denormals</h3><p><code>parallelize</code> runs tasks with flush-to-zero set, so threaded kernels read 5e-324 as 0. Workers launch only through one helper.</p></div>
+    <div class="card"><h3>A list freed early</h3><p>A <code>List</code> whose address goes into a kernel call is freed at its last use. After the third time, a check script fails the build.</p></div>
+    <div class="card"><h3>Metal's private pointers</h3><p>A pointer made from an integer is thread-private on Apple's GPU: writes vanish with no error. Kernels name the global address space.</p></div>
+    <div class="card"><h3>Ordered compares</h3><p><code>SIMD.ne</code> is ordered, so <code>NaN.ne(NaN)</code> is False. NaN is tested with <code>~x.eq(x)</code>.</p></div>
+  </div>
+  <div class="src">mxframe docs/lessons.md (2026-10-16 ×2, 2026-10-19, 2026-10-25) · scripts/check_list_lifetimes.py · kernels_aot/_fpenv.mojo</div>
+  <aside class="notes">
+    Four things Mojo taught us, each now enforced in code: threads flush denormals to zero; a list handed to a kernel is freed at its last use, so a script now fails the build; on Metal, integer-made pointers are thread-private; and SIMD not-equal is an ordered compare.
+  </aside>
+</section>
+
+<!-- 10 · honest edges -->
+<section>
+  <span class="k">The honest edges</span>
+  <h2>What it doesn't do yet.</h2>
+  <div class="grid g3">
+    <div class="card"><h3>mx sql runs on the CPU</h3><p><code>--device gpu</code> is accepted and the notes say it ran on the CPU. The GPU is there from Python and the Mojo builder. (F-191)</p></div>
+    <div class="card"><h3>TPC-H Q11</h3><p>A DECIMAL sum passes int64. 128-bit totals come next, then 22 of 22. (F-192)</p></div>
+    <div class="card"><h3>Some joins are slower</h3><p>SF1, informal: Q7 72 ms vs DuckDB 16, Q5 41 vs 13. A star-aware planner is next. (F-161)</p></div>
+    <div class="card"><h3>NVIDIA first</h3><p>The GPU path is validated on NVIDIA. Apple's GPU through Metal is checked on GitHub's virtual Macs, not real ones.</p></div>
+    <div class="card"><h3>Informal numbers</h3><p>Most engine timings come from a shared machine. The quiet-machine scoreboard hasn't run yet.</p></div>
+    <div class="card"><h3>Refused, by name</h3><p>WITH RECURSIVE, LATERAL, correlated NOT IN. Every step of a compound query is materialized.</p></div>
+  </div>
+  <div class="src">docs/plan.md F-191, F-192, F-161, F-162 · docs/site/bench/engine-informal.json (multiway, caveat) · omxcode D-308</div>
+  <aside class="notes">
+    The list I'd want to see. mx runs SQL on the CPU today. Q11 needs 128-bit sums. Some joins are three to five times slower than DuckDB. The GPU is validated on NVIDIA; Apple's only on GitHub's virtual Macs. And most engine numbers are informal.
+  </aside>
+</section>
+
+<!-- 11 · roadmap -->
+<section>
+  <span class="k">Where it's going</span>
+  <h2>From a fast engine to the agent's data tool.</h2>
+  <div class="grid g3">
+    <div class="card"><span class="pill ok">now</span><h3 style="margin-top:12px">Stable 834ef9a</h3><p>CTEs, subqueries, windows, joins, streamed files; mx, Python 0.6.0, a Mojo package; linked into omxplorer</p></div>
+    <div class="card"><span class="pill next">next</span><h3 style="margin-top:12px">The gate</h3><p>128-bit sums and 22 of 22; SQL on the GPU through AUTO; the quiet-machine scoreboard; 0.7.0 with an MCP server for mx</p></div>
+    <div class="card"><span class="pill">later</span><h3 style="margin-top:12px">Agent plugins</h3><p>vector search on the GPU beside the data; agent search mixing keywords, vectors and SQL</p></div>
+  </div>
+  <div class="src">docs/plan.md (F-192, F-191, F-162, F-169) · docs/briefs/positioning.md (M10 plugins)</div>
+  <aside class="notes">
+    Next: close the TPC-H gate, SQL on the GPU, a quiet-machine scoreboard, and 0.7.0 with an MCP server so agents reach for it first. Later, the direction is vectors beside the data and one search mixing keywords, vectors and SQL.
+  </aside>
+</section>
+
+<!-- 12 · the suite -->
+<section>
+  <span class="k">omxlabs</span>
+  <h2>The engine under the suite.</h2>
+  <div class="grid g2">
+    <div class="card"><h3 style="color:var(--plorer)">omxplorer</h3><p>the flagship app it powers: a question across a whole robot fleet in about 40 ms</p></div>
+    <div class="card"><h3 style="color:var(--code)">omxcode</h3><p>the Mojo app framework: the engine compiles into the app binary</p></div>
+    <div class="card"><h3 style="color:var(--console)">omxconsole</h3><p>local AI, on the same GPU</p></div>
+    <div class="card"><h3 style="color:var(--qua)">omxqua</h3><p>the design language</p></div>
+  </div>
+  <div class="src">~/Projects/omxlabs/README.md · omxcode docs/goals/47-report.md</div>
+  <aside class="notes">
+    omxcore powers omxplorer, where a question over a whole robot fleet takes about 40 milliseconds. omxcode is the framework it compiles into; omxconsole serves local models on the same GPU.
+  </aside>
+</section>
+
+<!-- 13 · outro -->
+<section>
+  <span class="k">Try it · part 2 of 2</span>
+  <h2>Check my numbers. Then break it.</h2>
+  <pre class="code sm" style="margin-top:26px"><b>mx sql</b> "SELECT region, sum(revenue) AS revenue FROM 'orders.csv' GROUP BY region"
+<b>pip install</b> "mxframe[runtime,sql]"
+git clone https://github.com/abhisheksreesaila/omxcore && cd omxcore && <b>pixi install</b> && pixi run test</pre>
+  <p class="lede">Every benchmark number is computed from <code>docs/bench/</code> in the repo. Send me a query where DuckDB wins: that's the next ticket.</p>
+  <p class="cta">omxlabs.tech</p>
+  <div class="src">Apache-2.0 · github.com/abhisheksreesaila/omxcore · README.md · benchmarks: abhisheksreesaila.github.io/omxcore/benchmarks.html</div>
+  <div class="mark"><b>●</b> omxcore</div>
+  <aside class="notes">
+    Try it with mx, pip, or from source. Every number here comes from files in the repo. Send me a query where DuckDB wins: that's how the next ticket gets written.
+  </aside>
+</section>
