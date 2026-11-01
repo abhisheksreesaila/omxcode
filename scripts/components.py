@@ -198,6 +198,9 @@ COMPOSITES = [
     ("Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)", "mojoui/documentjobs.mojo", [], "FolderFeed("),
     ("Ask → SQL (JOIN LINKED: the joins the sheet's key links imply; an answer's lineage, so its rows follow like its source's; questions taught with their SQL)", "mojoui/asksql.mojo", [], "implied_sql("),
     ("Pack PDF (a title and pages of blocks: facts, words, a table, a PDF page or a video frame with boxes marked; HTML printed to PDF by Chromium)", "mojoui/packpdf.mojo", [], "Pack("),
+    # the robot fleet (goal 47)
+    ("Telemetry lanes (many channels of a recording as stacked lanes on one clock: families from column names, one cursor with a dot and value per channel, event marks, spec lines; Raw/Smoothed on a track card)", "mojoui/telemetrychart.mojo", ["Canvas", "Canvas: pan, zoom, tap"], "TelemetryChart("),
+    ("Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)", "mojoui/signal.mojo", [], "smooth("),
     ("Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)", "mojoui/pack.mojo", [], "PackJob("),
 ]
 

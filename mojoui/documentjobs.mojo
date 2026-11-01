@@ -15,7 +15,7 @@ from mojoui.jobs import start_ui_job
 from mojoui.pygil import python_lend, python_reclaim
 from mojoui.pdfsource import PdfSource, PdfPage
 from mojoui.documentcard import DocumentCard
-from mojoui.ocrmodel import OcrModel, read_page
+from mojoui.ocrmodel import OcrModel, read_page, TEXT_LAYER
 from mojoui.texttable import TextTable, csv_field
 from mojoui.clock import now_ns
 from mojoui.formfields import FieldLabel, Field, find_fields
@@ -179,6 +179,10 @@ struct ReadFolderJob(JobBody):
             var pdf = PdfSource(path)
             var words = TextTable()
             for p in range(pdf.pages):
+                if self.model.name == TEXT_LAYER:  # (a born-digital PDF: its own words, exact, no picture drawn)
+                    for w in pdf.text_words(p):
+                        words.add(p, w.text, w.box, 1.0)
+                    continue
                 var page = pdf.render(p, self.dpi)
                 _ = read_page(page, self.model, words)
             out.fields.append(find_fields(words, self.labels))

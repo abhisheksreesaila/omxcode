@@ -1111,6 +1111,8 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Folder jobs (a folder opened and read off the UI thread: OCR every page, fields by geometry, the fields' table card)` | `mojoui/documentjobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Ask → SQL (JOIN LINKED: the joins the sheet's key links imply; an answer's lineage, so its rows follow like its source's; questions taught with their SQL)` | `mojoui/asksql.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Pack PDF (a title and pages of blocks: facts, words, a table, a PDF page or a video frame with boxes marked; HTML printed to PDF by Chromium)` | `mojoui/packpdf.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Telemetry lanes (many channels of a recording as stacked lanes on one clock: families from column names, one cursor with a dot and value per channel, event marks, spec lines; Raw/Smoothed on a track card)` | `mojoui/telemetrychart.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | omxplorer |
+| `Signal steps (unwrap angles, centred smoothing, on/off steps with hysteresis, peaks, a chart's span)` | `mojoui/signal.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Export pack (per item a PDF and a video clip, faces blurred, a caption burned in: one job)` | `mojoui/pack.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 
 ## JavaScript widgets (WebComponent)
@@ -1127,12 +1129,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 163 | 9 | 0 |
-| Web | 155 | 9 | 8 |
-| Android | 19 | 50 | 103 |
-| Mac (AppKit) | 0 | 148 | 24 |
-| iPhone (UIKit) | 0 | 119 | 53 |
-| Agent (MCP) | 57 | 40 | 75 |
+| Linux (GTK) | 165 | 9 | 0 |
+| Web | 157 | 9 | 8 |
+| Android | 19 | 52 | 103 |
+| Mac (AppKit) | 0 | 150 | 24 |
+| iPhone (UIKit) | 0 | 121 | 53 |
+| Agent (MCP) | 58 | 40 | 76 |
 
 ## Inside one app, not components yet (the debt)
 

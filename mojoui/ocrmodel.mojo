@@ -20,6 +20,7 @@ from mojoui.texttable import TextTable
 from mojoui.clock import now_ns
 
 comptime DOCTR = "db_resnet50+crnn_vgg16_bn"
+comptime TEXT_LAYER = "text-layer"  # not a model: a born-digital PDF's own words (mojoui.documentjobs reads them instead)
 
 
 @fieldwise_init

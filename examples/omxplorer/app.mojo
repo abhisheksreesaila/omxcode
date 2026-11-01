@@ -112,6 +112,7 @@ from mojoui.videojobs import analyzer_needs_log, use_analysis, INSPECTION
 from mojoui.mediatimeline import MediaTimeline, value_lane
 from mojoui.mediatimeline_jobs import TimelineFeed
 from mojoui.trackcard import TrackCards, is_track, series_from_sheet, series_where, time_column, metric_label, metric_unit
+from mojoui.telemetrychart import TelemetryChart
 from mojoui.mapview import MapMark, MARK_PLACE, MARK_FINDING
 from mojoui.inspection_tables import is_places, read_places, compare_job, flight_plan, place_marks
 from mojoui.vision_presets import DRONE_MATCH_M
@@ -127,10 +128,12 @@ from mojoui.peek import Peek
 from mojoui.datagrid import GRID_HEADER_DRAG, GRID_HEADER_DROP
 from mojoui.links import Selection, CardRows, Follow, Reaction, Link, End, BY_AGENT, LINKS_ADD, REACT_SEEK, REACT_HIGHLIGHT, REACT_SELECT
 from mojoui.asksql import AskBook, implied_sql, lineage
+from mojoui.sqlname import sql_name
 from mojoui.documentset import DocumentSet, SET_MESSAGES
 from mojoui.documentjobs import FolderFeed, open_folder_job
 from mojoui.pygil import python_reclaim
-from mojoui.ocrmodel import OcrModel
+from mojoui.ocrmodel import OcrModel, TEXT_LAYER
+from mojoui.documentset import READ_TEXT
 from mojoui.pdfsource import Box
 from mojoui.texttable import TextTable
 from mojoui.pack import Pack, PackJob, Clip, Packed
@@ -1233,7 +1236,7 @@ struct Main(App):
             self.version += 1
             return
         if self.docs[k].read_asked:
-            self.doc_feeds[k].read(self.docs[k], OcrModel(), self.pal)
+            self.doc_feeds[k].read(self.docs[k], OcrModel(TEXT_LAYER) if self.docs[k].reader == READ_TEXT else OcrModel(), self.pal)
             if self.doc_feeds[k].error != "":
                 self.message = self.doc_feeds[k].error
                 self.doc_feeds[k].error = ""
@@ -1613,7 +1616,32 @@ struct Main(App):
             var doc_boxes = List[Box]()
             var doc_caption = String("")
             var tables = List[Tuple[String, List[String], List[String]]]()
+            var log_said = String("")
             for ref f in follows:
+                if f.column == "file" and frame_t < 0 and c.sheet.rows() <= 50:  # (a row's own clip: the frame at its log's last release)
+                    var path = self.near_file(f.value, sel.table)
+                    if is_video_file(path) and file_exists(path):
+                        var at_t = -1.0
+                        var dur = 0.0
+                        for ref g in follows:
+                            var t = self.tables.find(g.table)
+                            if t < 0 or g.column == "file" or time_column(self.tables.cards[t].sheet) < 0:
+                                continue
+                            try:
+                                var got = series_where(self.tables.cards[t].sheet, g.column, g.value)
+                                if got[0].rows() > 0:
+                                    dur = got[0].times[got[0].rows() - 1]
+                                    for m in got[1]:
+                                        if not m.on:
+                                            at_t = m.t
+                                    var tc = TelemetryChart(got[0].copy())
+                                    tc.marks = got[1].copy()
+                                    log_said = g.table + " at " + clock_text(at_t if at_t >= 0 else dur / 2) + ": " + tc.describe(at_t if at_t >= 0 else dur / 2)
+                            except:
+                                pass
+                        frame_video = path
+                        frame_t = at_t if at_t >= 0 else dur / 2
+                        frame_no = -1
                 for v in range(len(self.media)):
                     var vt = self.video_table(v)
                     if self.media.cards[v].kind != OBJ_VIDEO or not (self.media.cards[v].title() == f.card or (vt != "" and vt == f.table)):
@@ -1653,11 +1681,13 @@ struct Main(App):
                                 vals.append(tc.sheet.display(col, r.rows[0]))
                             tables.append((tc.name, cols^, vals^))
             if frame_t >= 0:
-                facts.append(("Seen on camera", clock_text(frame_t) + " · frame " + String(frame_no)))
+                facts.append(("Seen on camera", clock_text(frame_t) + (" · frame " + String(frame_no) if frame_no >= 0 else String(""))))
             p.page("Evidence")
             p.facts(facts)
             if frame_t >= 0:
-                p.video_frame(frame_video, frame_t, frame_boxes, file_name(frame_video) + " at " + clock_text(frame_t) + " (frame " + String(frame_no) + "): the first frame it is seen")
+                p.video_frame(frame_video, frame_t, frame_boxes, file_name(frame_video) + " at " + clock_text(frame_t) + (" (frame " + String(frame_no) + "): the first frame it is seen" if frame_no >= 0 else String(": the moment its log marks last")))
+            if log_said != "":
+                p.text(log_said)
             for ref tb in tables:
                 var rows = List[List[String]]()
                 rows.append(tb[2].copy())
@@ -1670,7 +1700,7 @@ struct Main(App):
                 p.text("No document is linked to this row.")
             job.add(p^, folder + "/" + key + ".pdf")
             if frame_t >= 0:
-                job.clip(Clip(frame_video, folder + "/" + key + ".mp4", max(frame_t - 1.5, 0.0), frame_t + 4.5, title + " · {t}", True))
+                job.clip(Clip(frame_video, folder + "/" + key + ".mp4", max(frame_t - 1.5, 0.0), frame_t + 4.5, title + " · {t}", frame_no >= 0))  # (blur: the analysis' face rows; a row's own clip has none)
             n += 1
         if keep >= 0:
             c.grid.select(keep, keep_col)
@@ -1985,8 +2015,10 @@ struct Main(App):
                 for j in range(len(self.tables)):
                     if j != k and self.tables.sql_name_of(j) == l.table:
                         self.links.derive(Link.key(End(called, l.column), End(self.tables.cards[j].name, l.source), BY_AGENT))
+                if self.has_table and sql_name(self.name) == l.table:  # (the sheet's own table: its rows follow too)
+                    self.links.derive(Link.key(End(called, l.column), End(self.name, l.source), BY_AGENT))
             if len(self.links) > 0:
-                self.tables.cards[k].act_with("Export pack", "download", "export-pack", "A PDF and a video clip for every row: what its links reach (the video's frame, the document's page, the linked rows), in your documents' pack folder")
+                self.tables.cards[k].act_with("Export pack", "download", "export-pack", "A PDF and a video clip for every row of " + self.tables.cards[k].name + ": what its links reach (the video's frame, the document's page, the linked rows), in your documents' pack folder")
             self.query_said = grouped(self.tables.cards[k].sheet.rows()) + " rows in " + fixed(shown_ms(ms), 1) + " ms"
             self.query_open = False
             self.message = called + ": " + self.query_said

@@ -5,10 +5,12 @@
 
 Reads each dataset with mojoui/lerobot.py (the generic LeRobot source) and writes into OUT, deterministically:
   fleet.csv          one row per episode whose telemetry is on disk (video only where it was fetched: clip blank else):
-                     episode (S/F + the dataset's episode index), lab, robot, date, task, verb, success (1/0), outcome,
+                     episode (S/F + the dataset's episode index), lab, robot, date, outcome, success (1/0), success_pct (100/0: an average reads as a percent), n (1: a pivot's
+                     sum of it counts episodes), task, verb,
                      duration_s, frames, grasps (gripper closes), missed_grasp (1: the fingers closed on nothing, held
                      above 0.85), regrasps (closes after the first), slipped (1: a hold that closed further by > 0.2
-                     without opening), peak_speed (the fastest joint, rad/s), clip (clips/<episode>.mp4), task_from, uuid.
+                     without opening), peak_speed (the fastest joint, rad/s), clip (clips/<episode>.mp4, blank without video), video (1/0),
+                     source (the paper the row comes from: droid-paper.pdf), task_from, uuid.
                      Failures in DROID carry no instruction: their task is the nearest success on the same robot the same
                      day (task_from says so), else blank.
   telemetry.parquet  one row per frame of every fleet episode (15 Hz): episode, t, joint_vel_1..7, gripper, pos_x/y/z,
@@ -17,8 +19,8 @@ Reads each dataset with mojoui/lerobot.py (the generic LeRobot source) and write
                      15 frames, so a scrub lands fast), exactly `frames` frames.
   limits.csv         joint, limit_rad_s, source: the Franka Panda's joint velocity limits (libfranka's published control
                      parameters), for the peaks against the spec.
-  docs/droid-paper.pdf   the DROID paper (arXiv 2403.12945v2, CC-BY-4.0), when it is in ~/data/robot-scout/docs.
-  truth.json         per episode the numbers above (for checks), the failure counts by kind, and the story's hero failure.
+  paper/droid-paper.pdf  the DROID paper (arXiv 2403.12945v2, CC-BY-4.0), when it is in ~/data/robot-scout/docs.
+  truth.json         the fleet's totals, success rate by lab and by verb, the failure counts by kind and their episodes, the hero.
   ATTRIBUTION.txt    where the data came from and its licence.
 Two runs give byte-equal fleet.csv, limits.csv and truth.json (and telemetry.parquet's values).
 """
@@ -43,6 +45,7 @@ import lerobot as lr  # noqa: E402
 DATA = Path.home() / "data" / "robot-scout"
 CAMERA = "observation.images.left_external"
 PAPER = DATA / "docs" / "droid-2403.12945v2.pdf"
+PAPER_NAME = "droid-paper.pdf"  # where each row comes from: the dataset's paper, in paper/ (a key link marks it, D-4712)
 # libfranka "Robot and interface specifications" (frankaemika.github.io/docs/control_parameters.html): joint velocity limits
 LIMITS = [(1, 2.1750), (2, 2.1750), (3, 2.1750), (4, 2.1750), (5, 2.6100), (6, 2.6100), (7, 2.6100)]
 HERO = "F00119"  # the story's featured failure: AUTOLab, 2023-11-21, the cloth lifted toward the box falls back on the desk
@@ -116,7 +119,7 @@ def main():
     out = Path(sys.argv[1]).resolve()
     datasets = sys.argv[2:] or sorted(str(p) for p in DATA.glob("droid720*") if (p / "meta" / "info.json").exists())
     (out / "clips").mkdir(parents=True, exist_ok=True)
-    (out / "docs").mkdir(exist_ok=True)
+    (out / "paper").mkdir(exist_ok=True)
     found = episodes(datasets)
     rows, tele, cuts = [], {k: [] for k in ["episode", "t"]}, []
     successes = {}  # (robot, date) → [(time, task)]
@@ -142,11 +145,11 @@ def main():
             task, task_from = near[1], "nearest success, same robot and day"
         clip = e.clips.get(CAMERA)
         rows.append({
-            "episode": ep, "lab": lab, "robot": robot, "date": date, "task": task.strip(), "verb": lr.verb_of(task) or "(none)",
-            "success": 1 if ok else 0, "outcome": "success" if ok else "failure",
+            "episode": ep, "lab": lab, "robot": robot, "date": date, "outcome": "success" if ok else "failure", "success": 1 if ok else 0, "success_pct": 100 if ok else 0,
+            "n": 1, "task": task.strip(), "verb": lr.verb_of(task) or "(none)",
             "duration_s": lr.finite(n / ds.fps, 2), "frames": n, "grasps": closes, "missed_grasp": missed(g),
             "regrasps": max(closes - 1, 0), "slipped": slipped(g), "peak_speed": lr.finite(t["speed"].max(), 3),
-            "clip": f"clips/{ep}.mp4" if vid else "", "video": 1 if vid else 0, "task_from": task_from, "uuid": e.uuid,
+            "clip": f"clips/{ep}.mp4" if vid else "", "video": 1 if vid else 0, "source": PAPER_NAME, "task_from": task_from, "uuid": e.uuid,
         })
         if vid:
             cuts.append((clip.path, clip.start, n, ds.fps, out / "clips" / f"{ep}.mp4"))
@@ -174,10 +177,11 @@ def main():
         for j, v in LIMITS:
             w.writerow([f"joint_vel_{j}", f"{v:.4f}", LIMITS_SOURCE])
     if PAPER.exists():
-        shutil.copyfile(PAPER, out / "docs" / "droid-paper.pdf")
+        shutil.copyfile(PAPER, out / "paper" / PAPER_NAME)
     workers = max(2, min(12, (os.cpu_count() or 4) // 2))
-    with ThreadPoolExecutor(workers) as pool:
-        list(pool.map(cut, cuts))
+    if os.environ.get("ROBOT_CLIPS", "1") != "0":  # (ROBOT_CLIPS=0: the tables only, as the determinism check runs it)
+        with ThreadPoolExecutor(workers) as pool:
+            list(pool.map(cut, cuts))
     fails = [r for r in rows if r["success"] == 0]
     hero = [r for r in fails if r["episode"] == HERO and r["video"]]
     hero = hero or sorted((r for r in fails if r["video"] and r["slipped"] and r["frames"] >= 60), key=lambda r: (-r["frames"], r["episode"]))
@@ -187,6 +191,8 @@ def main():
         "labs": sorted({r["lab"] for r in rows}),
         "success_rate_by_lab": {lab: round(sum(r["success"] for r in rows if r["lab"] == lab) / max(1, sum(1 for r in rows if r["lab"] == lab)), 4)
                                 for lab in sorted({r["lab"] for r in rows})},
+        "success_rate_by_verb": {v: round(sum(r["success"] for r in rows if r["verb"] == v) / sum(1 for r in rows if r["verb"] == v), 4)
+                                 for v in sorted({r["verb"] for r in rows})},
         "failures_by_kind": {"missed_grasp": sum(r["missed_grasp"] for r in fails), "slipped": sum(r["slipped"] for r in fails),
                              "regrasped": sum(1 for r in fails if r["regrasps"] > 0), "never_closed": sum(1 for r in fails if r["grasps"] == 0)},
         "slipped_failures": sorted(r["episode"] for r in fails if r["slipped"]),
@@ -200,7 +206,7 @@ def main():
     (out / "ATTRIBUTION.txt").write_text(
         "Robot episodes: DROID (Khazatsky et al., 2024, arXiv 2403.12945), CC-BY-4.0, via the LeRobot 720p ports "
         "jnogga/droid_success and jnogga/droid_failure (CC-BY-4.0) on the Hugging Face Hub.\n"
-        "docs/droid-paper.pdf: the DROID paper, arXiv 2403.12945v2, CC-BY-4.0.\n"
+        "paper/droid-paper.pdf: the DROID paper, arXiv 2403.12945v2, CC-BY-4.0.\n"
         "limits.csv: " + LIMITS_SOURCE + ".\n"
         "Derived columns (grasps, missed_grasp, regrasps, slipped, peak_speed, unwrapped rotation) are computed by "
         "scripts/robot_data.py with mojoui/lerobot.py.\n")

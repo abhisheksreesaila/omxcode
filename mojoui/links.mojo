@@ -606,8 +606,12 @@ struct Links(Movable, Sized):
                 if not (mine_a or mine_b):
                     continue
                 var there = l.b if mine_a else l.a
-                if there.card in seen or there.table_name() in seen:
+                if there.card == sel.card or there.table_name() == sel.table:
+                    continue  # (never back to where the selection is)
+                if l.kind != LINK_KEY and (there.card in seen or there.table_name() in seen):
                     continue
+                if l.kind == LINK_KEY and (there.card + "\x1f" + there.column) in seen:
+                    continue  # (a card is reached once per column: through another column it is followed on again, D-4714)
                 if l.kind == LINK_KEY:
                     var here = l.a if mine_a else l.b
                     var v = String("")
@@ -620,6 +624,7 @@ struct Links(Movable, Sized):
                     out.append(Follow(there.card, there.table_name(), LINK_KEY, there.column, v, -1, -1.0, l.label()))
                     seen.append(there.card)
                     seen.append(there.table_name())
+                    seen.append(there.card + "\x1f" + there.column)
                     q_card.append(there.card)
                     q_table.append(there.table_name())
                     q_col.append(there.column)
