@@ -36,7 +36,7 @@ MAX can't run your model? mxc port has Claude Code write the port in a sandbox, 
 ---
 **5/** · attach `talks/omxconsole/part2/img/console-models-gtk.png`
 
-Its console is rebuilt in Mojo with omxcode: native on Linux and Mac, and on the web within 99.2% of the original's pixels.
+Its console is rebuilt in Mojo with omxcode: native on Linux and Mac, and on the web matching at least 97% of the original's pixels.
 
 Linux + NVIDIA, public alpha, MIT.
 

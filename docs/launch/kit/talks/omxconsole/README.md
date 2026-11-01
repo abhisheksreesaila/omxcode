@@ -61,7 +61,7 @@ Chapters
 ```
 When Modular MAX doesn't support a model's architecture, omxconsole's mxc port --auto has Claude Code write a MAX version in a bubblewrap sandbox, then checks it against Hugging Face itself before serving it. Eight architectures so far (GPT-2, Pythia, Phi-2, StarCoder2, StableLM 2, SmolLM3, Granite MoE, OLMoE), 7–40 minutes and about $2–5 of Claude usage each; BLOOM and EXAONE don't port, and the talk says why.
 
-Then the console, rebuilt in Mojo with omxcode: native on Linux (GTK) and the Mac (AppKit), and on the web within 99.2 % of the original's pixels on all 20 screens checked.
+Then the console, rebuilt in Mojo with omxcode: native on Linux (GTK) and the Mac (AppKit), and on the web matching at least 97 % of the original's pixels on all 20 screens checked.
 
 Code: https://github.com/abhisheksreesaila/mxstudio
 The Mojo console: https://github.com/abhisheksreesaila/omxcode (examples/console)

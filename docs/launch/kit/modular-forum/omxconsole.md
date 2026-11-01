@@ -31,7 +31,7 @@ Hi all. Last of my posts this week: **omxconsole**, a small model server on top 
 
 **What didn't port, in case it saves you time:** BLOOM (ALiBi positional bias hits a MAX limitation; it stops after "the same failure twice in a row"), and EXAONE (its config loads remote code from the Hub; one run spent 18 minutes and $3.75 before I understood that, so remote-code models are now parked before anything is spent). Also: a port is tied to a MAX version, so I pin the porting skill's environment to the MAX that omxconsole serves with; an early OLMoE port built against 26.7 wouldn't load in the 26.5 I was serving. And Modular's porting skills have two bugs I patch locally ([modular/skills#15](https://github.com/modular/skills/issues/15)).
 
-**The console is written in Mojo.** I rebuilt omxconsole's console with omxcode, my Mojo UI framework (Tuesday's post): native GTK on Linux, AppKit on the Mac (checked on GitHub's virtual Macs), and a web page that matches the original JavaScript console on at least 99 % of pixels across 20 screens (lowest 99.2 %). Its HTTP calls are effects: `update()` sends a tagged request and the reply comes back as an event, so the window never waits on the daemon. The server still ships the JS console for now.
+**The console is written in Mojo.** I rebuilt omxconsole's console with omxcode, my Mojo UI framework (Tuesday's post): native GTK on Linux, AppKit on the Mac (checked on GitHub's virtual Macs), and a web page that matches the original JavaScript console on at least 97 % of pixels across 20 screens. Its HTTP calls are effects: `update()` sends a tagged request and the reply comes back as an event, so the window never waits on the daemon. The server still ships the JS console for now.
 
 **Honest edges:** Linux + NVIDIA only (whether MAX serves these models on Apple silicon is still to be checked on a real Mac); a public alpha on a MAX 26.7 nightly; porting is text-only and can fail after spending.
 
@@ -50,6 +50,6 @@ MAX folks: which architecture should I try porting next? And if you know a bette
 *Sources (not for posting): mxstudio README.md, docs/USER_GUIDE.md (routes, idle unload, keys, expose), docs/ARCHITECTURE.md
 (daemon, dropped params, keys, Caddy, LiteLLM/F-063), docs/CLI.md (--pin, --keep-alive default 5m), docs/PORTING.md (steps,
 proven, limits, cost, time, skills#15), docs/port-study.md (EXAONE run 19), docs/plan.md (OLMoE 26.5 vs 26.7, F-049 Mac
-check); omxcode docs/goals/33-report.md (99.2 %, 20 shots, live check), examples/console/api.mojo.
+check); omxcode docs/goals/33-report.md (at least 97 % on all 20 shots, live check), examples/console/api.mojo.
 MIT: omxlabs/readmes/omxconsole.md, mxstudio docs/site/index.html. Before posting: add a LICENSE (MIT) file to mxstudio; the repo has none yet.
 Swap `[YouTube: omxconsole part 1]` for the real link before posting.*
