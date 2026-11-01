@@ -1,0 +1,47 @@
+{
+  "title": "How a tap stays smooth",
+  "subtitle": "update() and view() decide on the UI thread; slow work runs on job threads and comes back as an event",
+  "style": "ink",
+  "live": true,
+  "nodes": [
+    {"id": "screen", "label": "Screen", "kind": "client", "at": [0, 0], "hue": 205, "tech": "60 frames a second", "desc": "Every platform draws on one thread. At 60 Hz it has about 16 ms per frame."},
+    {"id": "ui", "label": "UI thread", "kind": "service", "at": [7, 0], "size": [2.6, 2.6], "hue": 145, "tech": "update() · view()", "desc": "Only decides: changes state and describes the screen. The app's state is only touched here, so no locks and no races in app code."},
+    {"id": "watch", "label": "Watchdog", "kind": "edge", "at": [7, -6], "hue": 0, "tech": "MOJOUI_BUDGET_MS", "desc": "Names any update(), view() or draw over the budget (SLOW: update msg=7 80 ms), on every host, before a user sees the freeze."},
+    {"id": "query", "label": "Query job", "kind": "worker", "at": [14, -5], "hue": 18, "tech": "start_ui_job", "desc": "A query, an import or a sort on its own thread. It owns a snapshot of its inputs."},
+    {"id": "video", "label": "Video decoder", "kind": "worker", "at": [14, 0], "hue": 18, "tech": "FrameFeed", "desc": "A decoder thread per video: opens in about 40 µs, seeks in about 6 µs, the newest seek wins."},
+    {"id": "ocr", "label": "Document job", "kind": "worker", "at": [14, 5], "hue": 18, "tech": "OCR · packs", "desc": "Reading a folder of PDFs, drawing pages and writing claim packs, off the UI thread."},
+    {"id": "gpu", "label": "GPU", "kind": "service", "shape": "chip", "at": [21, -2.5], "hue": 95, "tech": "Mojo kernels", "desc": "The heavy lifting: group-bys, medians, image ops."},
+    {"id": "data", "label": "Data", "kind": "db", "at": [21, 3.5], "hue": 175, "tech": "omxcore tables", "desc": "Tables in memory and on the GPU."}
+  ],
+  "zones": [
+    {"id": "main", "label": "UI thread: decide fast", "nodes": ["ui", "watch"], "hue": 145},
+    {"id": "workers", "label": "job threads: do the slow part", "nodes": ["query", "video", "ocr"], "hue": 18}
+  ],
+  "edges": [
+    {"from": "screen", "to": "ui", "label": "tap"},
+    {"from": "ui", "to": "query", "style": "async", "label": "start"},
+    {"from": "ui", "to": "video", "style": "async", "label": "seek"},
+    {"from": "ui", "to": "ocr", "style": "async", "label": "read"},
+    {"from": "query", "to": "gpu"},
+    {"from": "query", "to": "data"},
+    {"from": "ocr", "to": "data"},
+    {"from": "watch", "to": "ui", "style": "data", "label": "times it"}
+  ],
+  "flows": [
+    {"name": "A slow query, a live window", "desc": "A tap asks for a median over 100M rows.", "steps": [
+      {"from": "screen", "to": "ui", "note": "The tap reaches update() as an event."},
+      {"from": "ui", "to": "query", "note": "update() starts a job with a snapshot of what it needs, and returns at once."},
+      {"at": "screen", "note": "The window keeps drawing: the island shows progress every frame."},
+      {"from": "query", "to": "gpu", "note": "The job runs the median on the GPU."},
+      {"from": "query", "to": "ui", "note": "The job ends and wakes the main loop; update() hears it as an ordinary event."},
+      {"from": "ui", "to": "screen", "note": "view() draws the answer. Measured: a 1.5 s job, 90 frames while it ran, the longest gap 17 ms."}
+    ]},
+    {"name": "Scrubbing a video", "desc": "Dragging the playhead fast.", "steps": [
+      {"from": "screen", "to": "ui", "note": "Each drag step is an event."},
+      {"from": "ui", "to": "video", "note": "update() asks the decoder thread to seek; it never waits for the frame."},
+      {"at": "video", "note": "Only the newest seek is decoded; older ones are dropped."},
+      {"from": "video", "to": "ui", "note": "The frame lands and wakes the UI."},
+      {"from": "ui", "to": "screen", "note": "The new frame is drawn in the next frame."}
+    ]}
+  ]
+}
