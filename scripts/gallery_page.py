@@ -19,6 +19,18 @@ STAR = dict(
            ("img/robots-ask.jpg", "Asked in words: 2,997 regrasped failures, the DROID paper linked")],
     src="examples/omxplorer", page="../omxplorer.html")
 
+STAR2 = dict(
+    name="omxconsole", kind="The second app · local AI",
+    line="Your GPU as a private model server, with its admin console rebuilt in omxcode from framework parts only.",
+    proves=["A 4,400-line JavaScript console rebuilt with no app CSS and no pixel nudges",
+            "At least 99 % of the web's pixels equal the original, on all ten screens",
+            "The same file draws native Linux and Mac windows"],
+    runs=[("Linux", "ok"), ("Web", "ok"), ("Mac", "ci")], next="Real Mac hardware, then phones",
+    shots=[("img/console-models-web.png", "Web: my models"), ("img/console-models-gtk.png", "Linux: the same screen, native widgets"),
+           ("img/console-models-mac.png", "Mac, on GitHub's macOS runner"), ("img/console-overview-gtk.png", "A model's overview, live numbers"),
+           ("img/console-overview-web-phone.png", "Web at phone size")],
+    src="examples/console", page="https://omxlabs.tech/omxconsole/", cta="See omxconsole")
+
 APPS = [
     dict(name="Dictate", kind="Speech to text",
          line="Talk, and words appear. Whisper runs on the GPU inside the app's own process: no file, no socket, no server.",
@@ -36,26 +48,11 @@ APPS = [
          line="Keeps a folder searchable with its window shut: a tray item, notifications, and a watcher on its own thread.",
          proves="New files searchable 2.5 ms after they're written, window closed", runs=[("Linux", "ok")],
          next="The Mac's menu bar", shots=[("img/keeper-gtk.png", "Linux: found with the window closed")], src="examples/keeper"),
-    dict(name="omxconsole", kind="A real app, rebuilt",
-         line="The admin page of a local model server, 4,400 lines of JavaScript before, rebuilt from framework parts only.",
-         proves="At least 99 % of the web's pixels equal the original, all ten screens", runs=[("Linux", "ok"), ("Web", "ok"), ("Mac", "ci")],
-         next="Real Mac hardware", shots=[("img/console-models-web.png", "Web"), ("img/console-models-gtk.png", "Linux"),
-                                          ("img/console-models-mac.png", "Mac")], src="examples/console"),
     dict(name="JS widgets", kind="Bring your libraries",
          line="CodeMirror and ECharts from npm, inside a native app, restyled live by the theme. Agents can read and set them.",
          proves="0 content-policy violations; one mount per widget across rebuilds", runs=[("Linux", "ok"), ("Web", "ok")],
          next="JS canvases: Excalidraw-style editors", shots=[("img/widgets-web-dark.png", "Web, dark"), ("img/widgets-gtk-dark.png", "Linux, dark")],
          src="examples/widgets"),
-    dict(name="The Workbook", kind="Tables, pivots, charts",
-         line="A Numbers-style page: edit a cell, pivot, click a chart, drag cards. One engine under all of it.",
-         proves="A group-by over 20M rows in about 1 ms on the GPU", runs=[("Linux", "ok"), ("Web", "ok")],
-         next="Folded into omxplorer", shots=[("img/workbook-linux.png", "Linux"), ("img/workbook-web.png", "Web"),
-                                              ("img/workbook-filtered.png", "Tap Europe: the rest follows")], src="examples/workbook"),
-    dict(name="Contoso Retail", kind="Analytics dashboard",
-         line="Tap a bar and every other chart filters. Charts drawn by Mojo from Flint specs, the chart language agents write.",
-         proves="7 group-bys over 20M rows in 6–9 ms on the GPU", runs=[("Linux", "ok"), ("Web", "ok")],
-         next="Ask your data in words", shots=[("img/analytics-linux.png", "Linux"), ("img/analytics-crossfilter.png", "Crossfiltering"),
-                                               ("img/analytics-web.png", "Web")], src="examples/analytics"),
     dict(name="Data Lens", kind="20 million points",
          line="A canvas the app paints itself, around native controls: how map and photo apps are built.",
          proves="20M points per 1080p frame in 1.5 ms on the GPU", runs=[("Linux", "ok"), ("Web", "ok"), ("Android", "emu")],
@@ -91,30 +88,32 @@ def thumbs(shots):
 def card(a):
     s0, c0 = a["shots"][0]
     return f'''<article class="card">
-  <figure class="pic"><img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}" loading="lazy"><figcaption>{e(c0)}</figcaption></figure>
-  {thumbs(a["shots"])}
+  <figure class="pic"><img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}" loading="lazy"></figure>
   <div class="info">
     <div class="kind">{e(a["kind"])}</div>
     <h3>{e(a["name"])}</h3>
     <p class="line">{e(a["line"])}</p>
-    <p class="proves"><span>Proves</span>{e(a["proves"])}</p>
     <div class="plats">{chips(a["runs"])}</div>
-    <p class="next"><span>Next</span>{e(a["next"])}</p>
-    <a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a>
   </div>
 </article>'''
 
 
 def star(a):
-    shots = [("", "The story, 42 s")] + a["shots"]
-    th = '<div class="th">' + f'<button type="button" class="on" data-video aria-label="Play the story"><img src="{e(a["poster"])}" alt=""><em>▶</em></button>' + "".join(
-        f'<button type="button" aria-label="{e(c)}" data-src="{e(s)}" data-cap="{e(c)}"><img src="{e(s)}" alt="" loading="lazy"></button>'
-        for s, c in a["shots"]) + "</div>"
+    vid = "video" in a
+    first = f'<button type="button" class="on" data-video aria-label="Play the story"><img src="{e(a["poster"])}" alt=""><em>▶</em></button>' if vid else ""
+    th = '<div class="th">' + first + "".join(
+        f'<button type="button" aria-label="{e(c)}"{" class=on" if (not vid and i == 0) else ""} data-src="{e(s)}" data-cap="{e(c)}"><img src="{e(s)}" alt="" loading="lazy"></button>'
+        for i, (s, c) in enumerate(a["shots"])) + "</div>"
+    if vid:
+        pic = f'''<video src="{e(a["video"])}" poster="{e(a["poster"])}" muted loop playsinline autoplay preload="metadata" aria-label="omxplorer: why did the robot drop it?"></video>
+      <img hidden alt=""><figcaption>Why did the robot drop it? · real DROID data, Liquid dark</figcaption>'''
+    else:
+        s0, c0 = a["shots"][0]
+        pic = f'<img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}"><figcaption>{e(c0)}</figcaption>'
     proves = "".join(f"<li>{e(p)}</li>" for p in a["proves"])
     return f'''<article class="card star">
   <div class="media">
-    <figure class="pic"><video src="{e(a["video"])}" poster="{e(a["poster"])}" muted loop playsinline autoplay preload="metadata" aria-label="omxplorer: why did the robot drop it?"></video>
-      <img hidden alt=""><figcaption>Why did the robot drop it? · real DROID data, Liquid dark</figcaption></figure>
+    <figure class="pic">{pic}</figure>
     {th}
   </div>
   <div class="info">
@@ -124,7 +123,7 @@ def star(a):
     <ul class="pl">{proves}</ul>
     <div class="plats">{chips(a["runs"])}</div>
     <p class="next"><span>Next</span>{e(a["next"])}</p>
-    <div class="links"><a class="cta" href="{a["page"]}">See omxplorer</a><a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a></div>
+    <div class="links"><a class="cta" href="{a["page"]}">{e(a.get("cta", "See omxplorer"))}</a><a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a></div>
   </div>
 </article>'''
 
@@ -184,6 +183,11 @@ section { padding: 64px 24px 96px; }
 .pl li { font-size: 14.5px; line-height: 1.45; color: var(--ink2); padding-left: 18px; position: relative; }
 .pl li::before { content: ""; position: absolute; left: 0; top: .55em; width: 7px; height: 7px; border-radius: 50%; background: var(--oq-ok); }
 .links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: auto; } .links .src { margin-top: 0; }
+.more2 { margin-top: 64px; } .sub { margin: 10px 0 0; color: var(--ink2); font-size: 16px; max-width: 640px; }
+.photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+.mini .pic { aspect-ratio: 4 / 3; } .mini .info { padding: 14px 16px 16px; gap: 6px; } .mini h3 { font-size: 18px; }
+.mini .line { font-size: 14px; } .mini .kind { font-size: 10.5px; }
+.card.star + .card.star { margin-top: 0; }
 .soon { margin-top: 56px; } .soon h2 { font-size: 26px; letter-spacing: -.03em; }
 .sgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
 .sgrid div { border-radius: 18px; padding: 18px 20px; border: 1.5px dashed color-mix(in srgb, var(--soon) 55%, transparent); }
@@ -193,7 +197,7 @@ footer { padding: 32px 24px 48px; box-shadow: 0 -1px 0 var(--line); font: 13px v
 footer a { color: var(--ink2); }
 @media (max-width: 860px) {
   .lnav .links { display: none; } .lnav { grid-template-columns: 1fr auto; }
-  .grid, .sgrid { grid-template-columns: minmax(0, 1fr); }
+  .grid, .sgrid { grid-template-columns: minmax(0, 1fr); } .photos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .star { grid-template-columns: minmax(0, 1fr); } .star .info { padding: 20px; } .star h3 { font-size: 28px; }
 }
 </style>
@@ -208,12 +212,18 @@ footer a { color: var(--ink2); }
 <section><div class="wrap">
   <div class="head">
     <div class="eyebrow">Gallery</div>
-    <h1>What it builds today.</h1>
-    <p class="lede">Each app is one Mojo codebase. A picture, what it proves, where a script runs it, and what's next.</p>
+    <h1>Two apps, and what else it builds.</h1>
+    <p class="lede">omxplorer and omxconsole are the products. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
   </div>
   <div class="grid">
 STAR_CARD
+  </div>
+  <div class="more2">
+    <div class="eyebrow">More, built from the same parts</div>
+    <p class="sub">Smaller apps that show it can be done: speech, ink, a database, a background app, JavaScript libraries, a GPU canvas, phone controls.</p>
+    <div class="photos">
 CARDS
+    </div>
   </div>
   <div class="soon">
     <div class="eyebrow">Coming next</div>
@@ -225,6 +235,7 @@ CARDS
 <script>
 document.querySelectorAll(".card").forEach(card => {
   const pic = card.querySelector(".pic"), img = pic.querySelector("img"), vid = pic.querySelector("video"), cap = pic.querySelector("figcaption");
+  if (!cap) return;
   const first = cap.textContent;
   card.querySelectorAll(".th button").forEach(b => b.addEventListener("click", () => {
     card.querySelectorAll(".th button").forEach(x => x.classList.toggle("on", x === b));
@@ -239,7 +250,7 @@ if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.querySelect
 </html>
 '''
 
-out = (PAGE.replace("STAR_CARD", star(STAR)).replace("CARDS", "\n".join(card(a) for a in APPS))
+out = (PAGE.replace("STAR_CARD", star(STAR) + "\n" + star(STAR2)).replace("CARDS", "\n".join(card(a) for a in APPS))
        .replace("SOON", "".join(f"<div><i>soon</i><b>{e(t)}</b><p>{e(p)}</p></div>" for t, p in SOON)))
 p = pathlib.Path(__file__).resolve().parent.parent / "docs/gallery/index.html"
 p.write_text(out)

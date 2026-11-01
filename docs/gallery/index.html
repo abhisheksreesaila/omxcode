@@ -53,6 +53,11 @@ section { padding: 64px 24px 96px; }
 .pl li { font-size: 14.5px; line-height: 1.45; color: var(--ink2); padding-left: 18px; position: relative; }
 .pl li::before { content: ""; position: absolute; left: 0; top: .55em; width: 7px; height: 7px; border-radius: 50%; background: var(--oq-ok); }
 .links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: auto; } .links .src { margin-top: 0; }
+.more2 { margin-top: 64px; } .sub { margin: 10px 0 0; color: var(--ink2); font-size: 16px; max-width: 640px; }
+.photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+.mini .pic { aspect-ratio: 4 / 3; } .mini .info { padding: 14px 16px 16px; gap: 6px; } .mini h3 { font-size: 18px; }
+.mini .line { font-size: 14px; } .mini .kind { font-size: 10.5px; }
+.card.star + .card.star { margin-top: 0; }
 .soon { margin-top: 56px; } .soon h2 { font-size: 26px; letter-spacing: -.03em; }
 .sgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
 .sgrid div { border-radius: 18px; padding: 18px 20px; border: 1.5px dashed color-mix(in srgb, var(--soon) 55%, transparent); }
@@ -62,7 +67,7 @@ footer { padding: 32px 24px 48px; box-shadow: 0 -1px 0 var(--line); font: 13px v
 footer a { color: var(--ink2); }
 @media (max-width: 860px) {
   .lnav .links { display: none; } .lnav { grid-template-columns: 1fr auto; }
-  .grid, .sgrid { grid-template-columns: minmax(0, 1fr); }
+  .grid, .sgrid { grid-template-columns: minmax(0, 1fr); } .photos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .star { grid-template-columns: minmax(0, 1fr); } .star .info { padding: 20px; } .star h3 { font-size: 28px; }
 }
 </style>
@@ -77,8 +82,8 @@ footer a { color: var(--ink2); }
 <section><div class="wrap">
   <div class="head">
     <div class="eyebrow">Gallery</div>
-    <h1>What it builds today.</h1>
-    <p class="lede">Each app is one Mojo codebase. A picture, what it proves, where a script runs it, and what's next.</p>
+    <h1>Two apps, and what else it builds.</h1>
+    <p class="lede">omxplorer and omxconsole are the products. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
   </div>
   <div class="grid">
 <article class="card star">
@@ -97,136 +102,90 @@ footer a { color: var(--ink2); }
     <div class="links"><a class="cta" href="../omxplorer.html">See omxplorer</a><a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omxplorer">examples/omxplorer</a></div>
   </div>
 </article>
+<article class="card star">
+  <div class="media">
+    <figure class="pic"><img src="img/console-models-web.png" alt="omxconsole: Web: my models"><figcaption>Web: my models</figcaption></figure>
+    <div class="th"><button type="button" aria-label="Web: my models" class=on data-src="img/console-models-web.png" data-cap="Web: my models"><img src="img/console-models-web.png" alt="" loading="lazy"></button><button type="button" aria-label="Linux: the same screen, native widgets" data-src="img/console-models-gtk.png" data-cap="Linux: the same screen, native widgets"><img src="img/console-models-gtk.png" alt="" loading="lazy"></button><button type="button" aria-label="Mac, on GitHub&#x27;s macOS runner" data-src="img/console-models-mac.png" data-cap="Mac, on GitHub&#x27;s macOS runner"><img src="img/console-models-mac.png" alt="" loading="lazy"></button><button type="button" aria-label="A model&#x27;s overview, live numbers" data-src="img/console-overview-gtk.png" data-cap="A model&#x27;s overview, live numbers"><img src="img/console-overview-gtk.png" alt="" loading="lazy"></button><button type="button" aria-label="Web at phone size" data-src="img/console-overview-web-phone.png" data-cap="Web at phone size"><img src="img/console-overview-web-phone.png" alt="" loading="lazy"></button></div>
+  </div>
+  <div class="info">
+    <div class="kind">The second app · local AI</div>
+    <h3>omxconsole</h3>
+    <p class="line">Your GPU as a private model server, with its admin console rebuilt in omxcode from framework parts only.</p>
+    <ul class="pl"><li>A 4,400-line JavaScript console rebuilt with no app CSS and no pixel nudges</li><li>At least 99 % of the web&#x27;s pixels equal the original, on all ten screens</li><li>The same file draws native Linux and Mac windows</li></ul>
+    <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Web</b> runs</span><span class="ok"><i></i><b>Mac</b> runs on CI Macs</span></div>
+    <p class="next"><span>Next</span>Real Mac hardware, then phones</p>
+    <div class="links"><a class="cta" href="https://omxlabs.tech/omxconsole/">See omxconsole</a><a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/console">examples/console</a></div>
+  </div>
+</article>
+  </div>
+  <div class="more2">
+    <div class="eyebrow">More, built from the same parts</div>
+    <p class="sub">Smaller apps that show it can be done: speech, ink, a database, a background app, JavaScript libraries, a GPU canvas, phone controls.</p>
+    <div class="photos">
 <article class="card">
-  <figure class="pic"><img src="img/dictate-gtk.png" alt="Dictate: Linux: five sentences, each timed" loading="lazy"><figcaption>Linux: five sentences, each timed</figcaption></figure>
-  
+  <figure class="pic"><img src="img/dictate-gtk.png" alt="Dictate: Linux: five sentences, each timed" loading="lazy"></figure>
   <div class="info">
     <div class="kind">Speech to text</div>
     <h3>Dictate</h3>
     <p class="line">Talk, and words appear. Whisper runs on the GPU inside the app&#x27;s own process: no file, no socket, no server.</p>
-    <p class="proves"><span>Proves</span>Final text 134 ms after the audio went in (median)</p>
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span></div>
-    <p class="next"><span>Next</span>The Mac, then phones</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/dictate">examples/dictate</a>
   </div>
 </article>
 <article class="card">
-  <figure class="pic"><img src="img/sketch-gtk.png" alt="Sketch: Linux" loading="lazy"><figcaption>Linux</figcaption></figure>
-  <div class="th"><button type="button" aria-label="Linux" class=on data-src="img/sketch-gtk.png" data-cap="Linux"><img src="img/sketch-gtk.png" alt="" loading="lazy"></button><button type="button" aria-label="Web" data-src="img/sketch-web.png" data-cap="Web"><img src="img/sketch-web.png" alt="" loading="lazy"></button></div>
+  <figure class="pic"><img src="img/sketch-gtk.png" alt="Sketch: Linux" loading="lazy"></figure>
   <div class="info">
     <div class="kind">Drawing</div>
     <h3>Sketch</h3>
     <p class="line">Pressure ink with pan and zoom. Strokes taper with the pen; panning moves the kept ink, never redraws it.</p>
-    <p class="proves"><span>Proves</span>1,000 strokes, 3 ms per frame while panning (p95)</p>
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Web</b> runs</span></div>
-    <p class="next"><span>Next</span>Tried with a real pen; the Mac</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/sketch">examples/sketch</a>
   </div>
 </article>
 <article class="card">
-  <figure class="pic"><img src="img/jot-gtk.png" alt="Jot: Linux" loading="lazy"><figcaption>Linux</figcaption></figure>
-  <div class="th"><button type="button" aria-label="Linux" class=on data-src="img/jot-gtk.png" data-cap="Linux"><img src="img/jot-gtk.png" alt="" loading="lazy"></button><button type="button" aria-label="Web" data-src="img/jot-web.png" data-cap="Web"><img src="img/jot-web.png" alt="" loading="lazy"></button></div>
+  <figure class="pic"><img src="img/jot-gtk.png" alt="Jot: Linux" loading="lazy"></figure>
   <div class="info">
     <div class="kind">Notes in a database</div>
     <h3>Jot</h3>
     <p class="line">Notes in a SQLite file, searched as you type, still there tomorrow. Quit mid-sentence and the words are saved.</p>
-    <p class="proves"><span>Proves</span>Search over 1M notes 2.6× faster than SQLite in the browser</p>
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Web</b> runs</span></div>
-    <p class="next"><span>Next</span>The Mac&#x27;s save dialog and file drop</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/jot">examples/jot</a>
   </div>
 </article>
 <article class="card">
-  <figure class="pic"><img src="img/keeper-gtk.png" alt="Keeper: Linux: found with the window closed" loading="lazy"><figcaption>Linux: found with the window closed</figcaption></figure>
-  
+  <figure class="pic"><img src="img/keeper-gtk.png" alt="Keeper: Linux: found with the window closed" loading="lazy"></figure>
   <div class="info">
     <div class="kind">Works when closed</div>
     <h3>Keeper</h3>
     <p class="line">Keeps a folder searchable with its window shut: a tray item, notifications, and a watcher on its own thread.</p>
-    <p class="proves"><span>Proves</span>New files searchable 2.5 ms after they&#x27;re written, window closed</p>
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span></div>
-    <p class="next"><span>Next</span>The Mac&#x27;s menu bar</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/keeper">examples/keeper</a>
   </div>
 </article>
 <article class="card">
-  <figure class="pic"><img src="img/console-models-web.png" alt="omxconsole: Web" loading="lazy"><figcaption>Web</figcaption></figure>
-  <div class="th"><button type="button" aria-label="Web" class=on data-src="img/console-models-web.png" data-cap="Web"><img src="img/console-models-web.png" alt="" loading="lazy"></button><button type="button" aria-label="Linux" data-src="img/console-models-gtk.png" data-cap="Linux"><img src="img/console-models-gtk.png" alt="" loading="lazy"></button><button type="button" aria-label="Mac" data-src="img/console-models-mac.png" data-cap="Mac"><img src="img/console-models-mac.png" alt="" loading="lazy"></button></div>
-  <div class="info">
-    <div class="kind">A real app, rebuilt</div>
-    <h3>omxconsole</h3>
-    <p class="line">The admin page of a local model server, 4,400 lines of JavaScript before, rebuilt from framework parts only.</p>
-    <p class="proves"><span>Proves</span>At least 99 % of the web&#x27;s pixels equal the original, all ten screens</p>
-    <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Web</b> runs</span><span class="ok"><i></i><b>Mac</b> runs on CI Macs</span></div>
-    <p class="next"><span>Next</span>Real Mac hardware</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/console">examples/console</a>
-  </div>
-</article>
-<article class="card">
-  <figure class="pic"><img src="img/widgets-web-dark.png" alt="JS widgets: Web, dark" loading="lazy"><figcaption>Web, dark</figcaption></figure>
-  <div class="th"><button type="button" aria-label="Web, dark" class=on data-src="img/widgets-web-dark.png" data-cap="Web, dark"><img src="img/widgets-web-dark.png" alt="" loading="lazy"></button><button type="button" aria-label="Linux, dark" data-src="img/widgets-gtk-dark.png" data-cap="Linux, dark"><img src="img/widgets-gtk-dark.png" alt="" loading="lazy"></button></div>
+  <figure class="pic"><img src="img/widgets-web-dark.png" alt="JS widgets: Web, dark" loading="lazy"></figure>
   <div class="info">
     <div class="kind">Bring your libraries</div>
     <h3>JS widgets</h3>
     <p class="line">CodeMirror and ECharts from npm, inside a native app, restyled live by the theme. Agents can read and set them.</p>
-    <p class="proves"><span>Proves</span>0 content-policy violations; one mount per widget across rebuilds</p>
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Web</b> runs</span></div>
-    <p class="next"><span>Next</span>JS canvases: Excalidraw-style editors</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/widgets">examples/widgets</a>
   </div>
 </article>
 <article class="card">
-  <figure class="pic"><img src="img/workbook-linux.png" alt="The Workbook: Linux" loading="lazy"><figcaption>Linux</figcaption></figure>
-  <div class="th"><button type="button" aria-label="Linux" class=on data-src="img/workbook-linux.png" data-cap="Linux"><img src="img/workbook-linux.png" alt="" loading="lazy"></button><button type="button" aria-label="Web" data-src="img/workbook-web.png" data-cap="Web"><img src="img/workbook-web.png" alt="" loading="lazy"></button><button type="button" aria-label="Tap Europe: the rest follows" data-src="img/workbook-filtered.png" data-cap="Tap Europe: the rest follows"><img src="img/workbook-filtered.png" alt="" loading="lazy"></button></div>
-  <div class="info">
-    <div class="kind">Tables, pivots, charts</div>
-    <h3>The Workbook</h3>
-    <p class="line">A Numbers-style page: edit a cell, pivot, click a chart, drag cards. One engine under all of it.</p>
-    <p class="proves"><span>Proves</span>A group-by over 20M rows in about 1 ms on the GPU</p>
-    <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Web</b> runs</span></div>
-    <p class="next"><span>Next</span>Folded into omxplorer</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/workbook">examples/workbook</a>
-  </div>
-</article>
-<article class="card">
-  <figure class="pic"><img src="img/analytics-linux.png" alt="Contoso Retail: Linux" loading="lazy"><figcaption>Linux</figcaption></figure>
-  <div class="th"><button type="button" aria-label="Linux" class=on data-src="img/analytics-linux.png" data-cap="Linux"><img src="img/analytics-linux.png" alt="" loading="lazy"></button><button type="button" aria-label="Crossfiltering" data-src="img/analytics-crossfilter.png" data-cap="Crossfiltering"><img src="img/analytics-crossfilter.png" alt="" loading="lazy"></button><button type="button" aria-label="Web" data-src="img/analytics-web.png" data-cap="Web"><img src="img/analytics-web.png" alt="" loading="lazy"></button></div>
-  <div class="info">
-    <div class="kind">Analytics dashboard</div>
-    <h3>Contoso Retail</h3>
-    <p class="line">Tap a bar and every other chart filters. Charts drawn by Mojo from Flint specs, the chart language agents write.</p>
-    <p class="proves"><span>Proves</span>7 group-bys over 20M rows in 6–9 ms on the GPU</p>
-    <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Web</b> runs</span></div>
-    <p class="next"><span>Next</span>Ask your data in words</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/analytics">examples/analytics</a>
-  </div>
-</article>
-<article class="card">
-  <figure class="pic"><img src="img/lens-linux.jpg" alt="Data Lens: Linux, 59 fps" loading="lazy"><figcaption>Linux, 59 fps</figcaption></figure>
-  <div class="th"><button type="button" aria-label="Linux, 59 fps" class=on data-src="img/lens-linux.jpg" data-cap="Linux, 59 fps"><img src="img/lens-linux.jpg" alt="" loading="lazy"></button><button type="button" aria-label="Web, streamed" data-src="img/lens-web.jpg" data-cap="Web, streamed"><img src="img/lens-web.jpg" alt="" loading="lazy"></button><button type="button" aria-label="Android (CPU)" data-src="img/android-lens.jpg" data-cap="Android (CPU)"><img src="img/android-lens.jpg" alt="" loading="lazy"></button></div>
+  <figure class="pic"><img src="img/lens-linux.jpg" alt="Data Lens: Linux, 59 fps" loading="lazy"></figure>
   <div class="info">
     <div class="kind">20 million points</div>
     <h3>Data Lens</h3>
     <p class="line">A canvas the app paints itself, around native controls: how map and photo apps are built.</p>
-    <p class="proves"><span>Proves</span>20M points per 1080p frame in 1.5 ms on the GPU</p>
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Web</b> runs</span><span class="am"><i></i><b>Android</b> emulator</span></div>
-    <p class="next"><span>Next</span>Apple&#x27;s GPU</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/lens">examples/lens</a>
   </div>
 </article>
 <article class="card">
-  <figure class="pic"><img src="img/android-todo.png" alt="Native controls: Android" loading="lazy"><figcaption>Android</figcaption></figure>
-  <div class="th"><button type="button" aria-label="Android" class=on data-src="img/android-todo.png" data-cap="Android"><img src="img/android-todo.png" alt="" loading="lazy"></button><button type="button" aria-label="Android: the component gallery" data-src="img/android-gallery.png" data-cap="Android: the component gallery"><img src="img/android-gallery.png" alt="" loading="lazy"></button></div>
+  <figure class="pic"><img src="img/android-todo.png" alt="Native controls: Android" loading="lazy"></figure>
   <div class="info">
     <div class="kind">Every platform&#x27;s own widgets</div>
     <h3>Native controls</h3>
     <p class="line">Mojo drives GTK, AppKit, UIKit and Android views directly: no Swift, no Kotlin, the platform&#x27;s own keyboard and screen reader.</p>
-    <p class="proves"><span>Proves</span>The same taps on Android and Linux end in the same state</p>
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="am"><i></i><b>Android</b> emulator</span><span class="bl"><i></i><b>iPhone</b> builds</span></div>
-    <p class="next"><span>Next</span>Real phones</p>
-    <a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/todo">examples/todo</a>
   </div>
 </article>
+    </div>
   </div>
   <div class="soon">
     <div class="eyebrow">Coming next</div>
@@ -238,6 +197,7 @@ footer a { color: var(--ink2); }
 <script>
 document.querySelectorAll(".card").forEach(card => {
   const pic = card.querySelector(".pic"), img = pic.querySelector("img"), vid = pic.querySelector("video"), cap = pic.querySelector("figcaption");
+  if (!cap) return;
   const first = cap.textContent;
   card.querySelectorAll(".th button").forEach(b => b.addEventListener("click", () => {
     card.querySelectorAll(".th button").forEach(x => x.classList.toggle("on", x === b));
