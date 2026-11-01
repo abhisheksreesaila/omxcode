@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxplorer · Why did the robot drop it?</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<style>
+/* Liquid dark (themes/liquid.mojo, liquid_dark_palette): backdrop, cards, hairlines, ink, teal accent, tones */
+:root {
+  --page: #12151b; --card: #1b1f27; --raised: #252a34; --line: #323946; --line2: #424a5a;
+  --ink: #f1f4f9; --ink2: #c4cad6; --ink3: #8f98a8;
+  --accent: #3cc4cf; --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --info: #7aa7ff;
+  --d2: #fbbf24; --d3: #818cf8; --d4: #f472b6;
+  --plorer: #3ccf6e; --core: #4aa8ff; --code: #ff5d6c; --qua: #c084fc; --console: #ff9f40;
+  --sans: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --spring: cubic-bezier(.34, 1.36, .64, 1);
+  --shadow: 0 18px 40px -18px rgb(0 0 0 / .6);
+}
+html, body, .reveal-viewport { background: var(--page) !important; }
+.reveal { font-family: var(--sans); color: var(--ink); font-size: 30px; }
+.reveal .slides { text-align: left; }
+.reveal .slides section { height: 100%; padding: 0 !important; }
+.reveal h1, .reveal h2, .reveal h3 { font-family: var(--sans); color: var(--ink); text-transform: none; letter-spacing: -.035em; margin: 0; }
+.reveal h1 { font-size: 84px; font-weight: 800; line-height: 1.02; }
+.reveal h2 { font-size: 54px; font-weight: 750; line-height: 1.06; }
+.reveal h3 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+.reveal p { margin: 0; line-height: 1.4; }
+.reveal code { font-family: var(--mono); }
+.reveal a { color: var(--accent); }
+.k { font: 600 15px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; display: block; }
+.lede { color: var(--ink2); font-size: 28px; margin-top: 20px !important; max-width: 980px; }
+.src { position: absolute; left: 0; bottom: 0; font: 14px var(--mono); color: var(--ink3); }
+.mark { position: absolute; right: 70px; bottom: 0; font: 600 14px var(--mono); color: var(--ink3); }
+.mark b { color: var(--plorer); }
+.w { color: var(--accent); }
+.card { background: var(--card); border-radius: 22px; box-shadow: 0 0 0 1px var(--line), var(--shadow); padding: 24px 26px; }
+.grid { display: grid; gap: 16px; margin-top: 34px; }
+.g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); }
+.card p { color: var(--ink2); font-size: 20px; margin-top: 8px; }
+.num { font: 800 60px/1 var(--sans); letter-spacing: -.05em; color: var(--accent); }
+.num small { font-size: 22px; color: var(--ink3); margin-left: 6px; letter-spacing: -.01em; }
+.pill { display: inline-block; font: 600 13px var(--mono); padding: 5px 11px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line2); color: var(--ink2); }
+.pill.ok { color: var(--ok); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.next { color: var(--warn); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+pre.code { margin: 0; font: 18px/1.55 var(--mono); color: var(--ink2); background: var(--card); border-radius: 18px; padding: 22px 24px; box-shadow: 0 0 0 1px var(--line); white-space: pre; width: auto; }
+pre.code b { color: var(--accent); font-weight: 600; } pre.code i { color: var(--ink3); font-style: normal; } pre.code em { color: var(--ok); font-style: normal; }
+/* Liquid motion: fragments spring in */
+.reveal .slides section .fragment { transition: opacity .32s ease, transform .5s var(--spring); transform: translateY(14px) scale(.98); }
+.reveal .slides section .fragment.visible { transform: none; }
+/* the app mock: a sheet, a video, two telemetry lanes, one cursor */
+.app { display: grid; grid-template-columns: 300px 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; margin-top: 30px; height: 410px; }
+.app .pane { background: var(--card); border-radius: 18px; box-shadow: 0 0 0 1px var(--line); position: relative; overflow: hidden; }
+.app .sheet { grid-row: span 2; padding: 12px 0; font: 14px var(--mono); }
+.app .sheet div { display: grid; grid-template-columns: 1fr 64px 44px; padding: 6px 14px; color: var(--ink2); border-bottom: 1px solid var(--line); }
+.app .sheet div.h { color: var(--ink3); font-size: 12px; letter-spacing: .08em; }
+.app .sheet div.sel { background: color-mix(in srgb, var(--accent) 16%, var(--card)); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
+.app .sheet .f { color: var(--bad); } .app .sheet .s { color: var(--ok); }
+.app .video { grid-row: span 2; display: grid; place-items: center; background: linear-gradient(160deg, #20252f, #151920); }
+.app .video .ph { font: 600 16px var(--mono); color: var(--ink3); text-align: center; line-height: 1.6; }
+.app .video .bar { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 6px; border-radius: 3px; background: var(--raised); }
+.app .video .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 58%; border-radius: 3px; background: var(--accent); }
+.app .lane { padding: 12px 14px; }
+.app .lane .t { font: 600 12px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; }
+.app svg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 78%; }
+.cursor { position: absolute; top: 0; bottom: 0; left: 58%; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+/* the flow: one app → hosts */
+.flow { display: grid; grid-template-columns: 420px 50px 1fr; align-items: center; margin-top: 40px; gap: 0; }
+.flow .src-file { text-align: center; }
+.flow .arrow { height: 2px; background: var(--line2); position: relative; }
+.flow .arrow::after { content: ""; position: absolute; right: -2px; top: -5px; border: 6px solid transparent; border-left-color: var(--line2); }
+.hosts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.hosts .card { padding: 16px 18px; }
+.hosts .card h3 { font-size: 22px; }
+/* the timeline */
+.road { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 46px; position: relative; }
+.road::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: var(--line); }
+.road > div { position: relative; padding-top: 42px; }
+.road > div::before { content: ""; position: absolute; top: 4px; left: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--page); box-shadow: 0 0 0 2px var(--line2); }
+.road > div.now::before { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+.road h3 { font-size: 24px; } .road p { color: var(--ink2); font-size: 19px; margin-top: 8px !important; }
+.road .when { font: 600 13px var(--mono); color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 8px; }
+.four { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 40px; align-items: stretch; }
+.four .card ul { margin: 12px 0 0; padding-left: 22px; color: var(--ink2); font-size: 22px; line-height: 1.6; }
+.four .us { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow); }
+.suite { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 30px; }
+.suite span { font: 600 16px var(--mono); padding: 8px 14px; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+.cta { font: 700 44px var(--sans); letter-spacing: -.03em; color: var(--accent); margin-top: 30px !important; }
+.reveal .progress { color: var(--accent); height: 3px; }
+.reveal .controls { color: var(--accent); }
+.reveal .slide-number { background: transparent; color: var(--ink3); font: 13px var(--mono); }
+</style>
+</head>
+<body>
+<div class="reveal"><div class="slides">
+
+<!-- 1 · title -->
+<section>
+  <span class="k">omxlabs presents</span>
+  <h1>Why did the<br>robot <span class="w">drop it?</span></h1>
+  <p class="lede">A spreadsheet, the video behind every row, and the documents that explain it, on one page, on your own GPU. This is <b>omxplorer</b>, built on <b>omxcode</b>.</p>
+  <div class="suite">
+    <span style="color:var(--plorer)">omxplorer · the product</span>
+    <span style="color:var(--code)">omxcode · the framework</span>
+    <span style="color:var(--core)">omxcore · the engine</span>
+    <span style="color:var(--qua)">omxqua · the design</span>
+  </div>
+  <div class="src">real data: DROID · 13 labs · CC-BY-4.0</div>
+  <div class="mark"><b>●</b> omxlabs.tech</div>
+  <aside class="notes">
+    Hi, I'm the maker of omxplorer. One question drives this whole talk: a robot drops a block, and we want to know why.
+    I'll show you the app that answers it, on real public robot data, and then how it's built underneath.
+    Four names on screen: omxplorer is the product; omxcode is the framework it's built with; omxcore is the data engine; omxqua is the design language.
+    If the failure you recorded isn't a drop, say "why did the robot fail?" instead.
+  </aside>
+</section>
+
+<!-- 2 · vision -->
+<section>
+  <span class="k">The vision</span>
+  <h2>One framework for everything,<br>starting with data apps.</h2>
+  <div class="four">
+    <div class="card">
+      <h3 style="color:var(--ink3)">A serious app today is four programs</h3>
+      <ul>
+        <li>the interface, written again per platform</li>
+        <li>the data work, in Python on a server</li>
+        <li>the graphics, in a shader language</li>
+        <li>an API, so agents can use it</li>
+      </ul>
+    </div>
+    <div class="card us">
+      <h3 class="w">omxcode is one</h3>
+      <ul>
+        <li>one Mojo codebase, button to GPU kernel</li>
+        <li>native controls on each platform</li>
+        <li>the data on the GPU, in the app's process</li>
+        <li>every button is already an agent tool</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">README.md · docs/launch/copy.md §5</div>
+  <aside class="notes">
+    The big idea. Most apps that matter are really four programs glued together: the interface, rewritten for every platform; the data work, usually Python on a server;
+    the graphics, in a shader language; and now an API so AI agents can use it. Every line between them is a rewrite, a network hop, or another team.
+    omxcode is one program in one language, Mojo, which reads like Python. We start with data apps, because that's where one language from button to GPU pays off most.
+  </aside>
+</section>
+
+<!-- 3 · the problem -->
+<section>
+  <span class="k">The problem</span>
+  <h2>One question.<br>Four apps.</h2>
+  <div class="grid g4">
+    <div class="card fragment"><h3>A spreadsheet</h3><p>which episodes failed</p></div>
+    <div class="card fragment"><h3>A video player</h3><p>what the camera saw</p></div>
+    <div class="card fragment"><h3>A notebook</h3><p>what the joints and gripper did</p></div>
+    <div class="card fragment"><h3>A PDF</h3><p>what the robot is rated for</p></div>
+  </div>
+  <p class="lede fragment">Every step is an export, an upload or a copy, and you wait for each one. The question gets lost between them.</p>
+  <aside class="notes">
+    Here's how you'd answer it today. A spreadsheet tells you which episodes failed. A video player shows you what happened. A Python notebook plots the joints and the gripper.
+    And a PDF tells you what the robot and its gripper are rated for. Four apps, with exports and copies between them. By the time you've lined them up, you've forgotten what you were asking.
+  </aside>
+</section>
+
+<!-- 4 · the robot story -->
+<section>
+  <span class="k">The robot story · real data</span>
+  <h2>Every row is a real robot.</h2>
+  <div class="grid g3">
+    <div class="card"><div class="num">67,029</div><p>episodes in DROID's public 720p release: 53,282 successes, 13,747 failures</p></div>
+    <div class="card"><div class="num">13<small>labs</small></div><p>one robot setup (Franka Panda + Robotiq gripper), many scenes, CC-BY-4.0</p></div>
+    <div class="card"><div class="num">994</div><p>episodes in tonight's prototype: 3 hours, 3.6 GB, one camera</p></div>
+  </div>
+  <p class="lede">Each episode: 720p video at 15 fps and 52 telemetry channels at 15 Hz, including 7 joint velocities and the gripper. No force sensing, so we don't show force.</p>
+  <div class="src">DROID, Khazatsky et al. 2024 · ~/data/robot-scout/REPORT.md</div>
+  <aside class="notes">
+    The data is DROID, a well-known robot dataset from 2024, released under CC-BY. The public 720-pixel release has 67,029 episodes from 13 labs, successes and failures in separate sets.
+    Tonight's prototype uses 994 of them. Each episode has video and 52 channels of telemetry at 15 hertz: joint positions, joint velocities, the gripper.
+    One honest note: DROID has no force sensing, so I never show "grip force". And the 994-episode sample comes from two labs, so I won't read per-lab success rates off it.
+  </aside>
+</section>
+
+<!-- 5 · one failure, one cursor -->
+<section>
+  <span class="k">Click a failure</span>
+  <h2>Video and telemetry, <span class="w">one cursor.</span></h2>
+  <div class="app">
+    <div class="pane sheet">
+      <div class="h"><span>EPISODE</span><span>LAB</span><span></span></div>
+      <div><span>ep 0412</span><span>lab A</span><span class="s">✓</span></div>
+      <div><span>ep 0413</span><span>lab A</span><span class="s">✓</span></div>
+      <div class="sel"><span>ep 0414</span><span>lab A</span><span class="f">✕</span></div>
+      <div><span>ep 0415</span><span>lab B</span><span class="s">✓</span></div>
+      <div><span>ep 0416</span><span>lab B</span><span class="s">✓</span></div>
+      <div><span>ep 0417</span><span>lab A</span><span class="f">✕</span></div>
+      <div><span>ep 0418</span><span>lab B</span><span class="s">✓</span></div>
+      <div><span>ep 0419</span><span>lab A</span><span class="s">✓</span></div>
+    </div>
+    <div class="pane video">
+      <div class="ph">[clip: robots-15s]<br><span style="font-size:13px">the episode's camera, 720p</span></div>
+      <div class="bar"><i></i></div>
+      <div class="cursor"></div>
+    </div>
+    <div class="pane lane">
+      <span class="t">joint velocity · 7 joints</span>
+      <svg viewBox="0 0 300 100" preserveAspectRatio="none">
+        <polyline fill="none" stroke="#3cc4cf" stroke-width="2" points="0,60 30,55 60,40 90,62 120,70 150,68 175,30 200,45 230,58 260,52 300,56"/>
+        <polyline fill="none" stroke="#818cf8" stroke-width="2" points="0,70 30,68 60,58 90,72 120,80 150,78 175,48 200,60 230,66 260,64 300,66"/>
+        <polyline fill="none" stroke="#f472b6" stroke-width="2" points="0,50 30,48 60,30 90,50 120,60 150,58 175,20 200,38 230,48 260,46 300,48"/>
+      </svg>
+      <div class="cursor"></div>
+    </div>
+    <div class="pane lane">
+      <span class="t">gripper position</span>
+      <svg viewBox="0 0 300 100" preserveAspectRatio="none">
+        <polyline fill="none" stroke="#fbbf24" stroke-width="2.5" points="0,88 90,88 105,40 165,40 178,86 300,86"/>
+      </svg>
+      <div class="cursor"></div>
+    </div>
+  </div>
+  <div class="src">illustration · the real screen is [shot: failure-cursor]</div>
+  <aside class="notes">
+    Open the fleet sheet, pivot success by lab, filter to failures, and click one. Its video plays in the middle. On the right: the seven joint velocities and the gripper position.
+    They share one time cursor. Drag it and all three move together. Here the gripper closes, holds, and opens early, and the video shows the block falling at the same moment. That's the answer.
+    This slide is a drawing; play the real clip here. Describe what your recorded episode actually shows.
+  </aside>
+</section>
+
+<!-- 6 · how it works -->
+<section>
+  <span class="k">How it works</span>
+  <h2>One codebase, from button to GPU kernel.</h2>
+  <div class="flow">
+    <pre class="code"><b>struct</b> Main(App):
+    <b>def</b> update(<b>mut</b> self, e: Event):
+        <i># change state</i>
+    <b>def</b> view(self) -> View:
+        <i># describe the screen</i></pre>
+    <div class="arrow"></div>
+    <div class="hosts">
+      <div class="card"><h3>Linux</h3><p>GTK 4 widgets</p></div>
+      <div class="card"><h3>Mac</h3><p>AppKit controls</p></div>
+      <div class="card"><h3>Agents</h3><p>MCP tools</p></div>
+      <div class="card"><h3>GPU engine</h3><p>omxcore, same process</p></div>
+      <div class="card"><h3>Web</h3><p>server today, WebGPU next</p></div>
+      <div class="card"><h3>Phones</h3><p>Android, iPhone next</p></div>
+    </div>
+  </div>
+  <div class="grid g2" style="margin-top:26px">
+    <div class="card"><div class="num">0.6<small>ms</small></div><p>a chart over 1M rows, grouped and sorted on the GPU</p></div>
+    <div class="card"><div class="num">0<small>servers</small></div><p>no JSON and no network between the data and the window</p></div>
+  </div>
+  <div class="src">README.md "Measured" · one Linux machine, RTX 3090 (0.5–0.7 ms)</div>
+  <aside class="notes">
+    How it's built. An app is one Mojo struct: update changes state, view describes the screen. That's the Elm and SwiftUI shape.
+    Each host draws the view with the platform's own controls: GTK on Linux, AppKit on the Mac. The same view tree becomes MCP tools for agents.
+    The data engine, omxcore, runs on the GPU inside the same process, so a chart over a million rows takes about 0.6 milliseconds on an RTX 3090, with no server in between.
+    The web runs today through a server; running on the visitor's GPU with WebGPU is next, then phones.
+  </aside>
+</section>
+
+<!-- 7 · never freezes -->
+<section>
+  <span class="k">Never freezes</span>
+  <h2>The UI thread only decides.</h2>
+  <p class="lede">At 60 fps the UI thread has 16 ms a frame. Queries, imports, video and exports run as jobs on their own threads; the answer comes back as an event.</p>
+  <div class="grid g3">
+    <div class="card"><div class="num">0</div><p><code>SLOW:</code> lines at a 50 ms budget across the video, query and export sessions in the checks</p></div>
+    <div class="card"><div class="num">6<small>µs</small></div><p>a video seek on its own decoder thread (open ≈ 40 µs); the newest seek wins</p></div>
+    <div class="card"><div class="num">83<small>ms</small></div><p>worst frame gap on a Mac during a 1.5 s job, down from 1,527 ms (GitHub's virtual Macs)</p></div>
+  </div>
+  <div class="src">docs/goals/41-report.md · docs/ui-threads.md · D-792</div>
+  <aside class="notes">
+    Every platform draws on one thread, and at 60 frames a second it has 16 milliseconds. Anything longer freezes the window.
+    The rule in omxcode: update and view only decide. Anything slow is a job with its own copy of the data, and its answer comes back as an ordinary event. No locks in app code.
+    A watchdog prints a SLOW line for anything over budget. The checks run the video, query and export sessions at a 50 millisecond budget and print none.
+    Video has its own decoder thread. And on the Mac, giving jobs their own threads took the worst frame gap from a second and a half down to 71 to 83 milliseconds, measured on GitHub's virtual Macs. Real hardware is next.
+  </aside>
+</section>
+
+<!-- 8 · linked data -->
+<section>
+  <span class="k">Linked data</span>
+  <h2>Joined on purpose, never by guessing.</h2>
+  <div class="grid g3">
+    <div class="card"><h3 class="w">Key</h3><p>the episodes' robot model → the Franka datasheet</p></div>
+    <div class="card"><h3 class="w">Time</h3><p>the video and the telemetry share one clock and one cursor</p></div>
+    <div class="card"><h3 class="w">Place</h3><p>a box in the frame → a row in the sheet</p></div>
+  </div>
+  <pre class="code" style="margin-top:22px"><i>-- "which failures closed the gripper early?"  (asked in words)</i>
+<b>SELECT</b> lab, episode, gripper_close_s <b>FROM</b> fleet
+  <em>JOIN LINKED</em> telemetry <b>WHERE</b> outcome = 'failure' …</pre>
+  <div class="src">docs/goals/41-report.md (links.mojo, asksql.mojo) · illustrative query; the app writes its own</div>
+  <aside class="notes">
+    Putting a video, a table and a PDF on one screen is easy. Knowing why they belong together is the hard part. So in omxplorer, cards connect only through links you make:
+    by key, like the robot model; by time, so the video and telemetry share a clock; or by place, a box in the frame tied to a row. Each link shows how many rows match before you confirm it.
+    Ask in words, and the SQL it writes says JOIN LINKED: the links you made, as a join you can read. This query is an illustration; read out the one your app wrote.
+  </aside>
+</section>
+
+<!-- 9 · agents -->
+<section>
+  <span class="k">Agent native</span>
+  <h2>Agents don't click. They call.</h2>
+  <div class="four" style="margin-top:30px">
+    <pre class="code">→ open-file   {"path": "droid_fleet"}
+→ pivot       {"rows": "lab"}
+→ ask         {"text": "failures by lab"}
+← Did ask.
+  Now: chart0 updated
+  Now: tools: export-pack</pre>
+    <div class="card">
+      <ul style="margin:0">
+        <li>every button is an MCP tool, no per-app work</li>
+        <li>a disabled button isn't a tool</li>
+        <li>each call answers in words: what changed</li>
+        <li>AG-UI: the agent builds native UI</li>
+      </ul>
+    </div>
+  </div>
+  <div class="src">README.md "Agent native" · docs/agent.md · EXPERIMENTS.md exp. 35 · tool names illustrative</div>
+  <aside class="notes">
+    The same view tree that becomes GTK widgets becomes MCP tools. A button's tag names the tool, its tooltip describes it, and calling it is tapping it. I write nothing per app.
+    It's safe by construction: a disabled button isn't a tool, a dialog's buttons exist only while it's open. The agent can do nothing a person couldn't.
+    And AG-UI the other way: an agent streams words and builds a chart or a form, drawn natively. One honest note: agents don't know Mojo yet; to write apps they read our docs.
+    The tool names on the slide are illustrative; use the real ones from the recorded session.
+  </aside>
+</section>
+
+<!-- 10 · where it runs -->
+<section>
+  <span class="k">Where it runs</span>
+  <h2>Linux and Mac today.</h2>
+  <div class="grid g3">
+    <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Linux</h3><p>GTK 4, NVIDIA GPU. omxplorer's home.</p></div>
+    <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Mac</h3><p>AppKit. The engine runs on Apple's GPU through Metal.</p></div>
+    <div class="card"><span class="pill ok">today</span><h3 style="margin-top:12px">Agents</h3><p>Every app is an MCP server.</p></div>
+    <div class="card"><span class="pill next">next</span><h3 style="margin-top:12px">Web</h3><p>WebGPU, on the visitor's own GPU. A server-backed version runs today.</p></div>
+    <div class="card"><span class="pill next">next</span><h3 style="margin-top:12px">Android</h3><p>The classic controls already run on the emulator.</p></div>
+    <div class="card"><span class="pill next">next</span><h3 style="margin-top:12px">iPhone</h3><p>Builds and signs; not yet run on hardware.</p></div>
+  </div>
+  <div class="src">README.md "Where it stands" · D-308 (Metal, GitHub's virtual Macs) · docs/components.md</div>
+  <aside class="notes">
+    Where it runs. Linux with an NVIDIA GPU is the home. The Mac uses AppKit, and the engine's queries run on Apple's GPU through Metal; I've checked the answers match, on GitHub's virtual Macs; timing on real Mac hardware is next.
+    Every app is also an MCP server. Next: the web on WebGPU, so the work runs in the visitor's browser on their GPU. Then Android, whose classic controls already run on the emulator, and iPhone, which builds today.
+  </aside>
+</section>
+
+<!-- 11 · roadmap -->
+<section>
+  <span class="k">Roadmap</span>
+  <h2>Data apps first. Then everything.</h2>
+  <div class="road">
+    <div class="now"><span class="when">now</span><h3>Linux + Mac</h3><p>omxplorer, GPU on both, agent tools</p></div>
+    <div><span class="when">next</span><h3>The web</h3><p>WebGPU in the browser</p></div>
+    <div><span class="when">then</span><h3>Phones</h3><p>Android and iPhone</p></div>
+    <div><span class="when">then</span><h3>SaaS apps</h3><p>on the same components</p></div>
+    <div><span class="when">by year end</span><h3>Components</h3><p>a full collection</p></div>
+  </div>
+  <p class="lede" style="margin-top:44px">Further out: the model in the same program as the interface and the data, on the same GPU.</p>
+  <div class="src">owner's roadmap, 2026-11-01 · docs/launch/copy.md §2 ("next", not in the alpha)</div>
+  <aside class="notes">
+    The order: Linux and Mac now. The web on WebGPU next. Then Android and iPhone. Then SaaS apps built on the same components, and a full component collection by the end of the year.
+    Further out, the bigger idea: the AI model living in the same program as the interface and the data, on the same GPU. That isn't built yet. It's the direction.
+  </aside>
+</section>
+
+<!-- 12 · call to action -->
+<section>
+  <span class="k">Try it</span>
+  <h2>Open source. Public alpha.<br>Every number has a script behind it.</h2>
+  <p class="cta">omxlabs.tech</p>
+  <pre class="code" style="margin-top:24px">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode && pixi install && scripts/omxplorer.sh</pre>
+  <p class="lede">Tell me what you'd ask your data. Mojo people: tell me what I should have done differently.</p>
+  <div class="src">MIT · github.com/abhisheksreesaila/omxcode</div>
+  <div class="mark"><b>●</b> omxplorer</div>
+  <aside class="notes">
+    That's omxplorer, built on omxcode. It's open source under MIT, a public alpha, and every number you saw has a script in the repo behind it.
+    Try it at omxlabs.tech, or clone it and run one script. I'd love to hear what you'd ask your own data, and from Mojo developers, what you'd have done differently.
+  </aside>
+</section>
+
+</div></div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script>
+Reveal.initialize({
+  hash: true, width: 1280, height: 720, margin: 0.06, center: false,
+  transition: 'fade', transitionSpeed: 'default', backgroundTransition: 'fade',
+  controls: true, progress: true, slideNumber: false,
+  plugins: [RevealNotes]
+});
+</script>
+</body>
+</html>
