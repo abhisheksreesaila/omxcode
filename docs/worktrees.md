@@ -19,4 +19,6 @@ Cleaned up on 2026-10-31: 67 worktrees whose work was already on `main` and had 
 | `.abode/…/t3-828a9b57` | `engine-23edc59` | merged; 23 uncommitted files from an old engine update | remove after a glance |
 | `.abode/…/t3-b5fb6548` | `regression-2026-10-28` | merged; 25 regenerated bench files and screenshots | remove |
 
+| `.abode/…/t3-32644b84` | `t3/robot-story-droid-data` | merged (goal 47); **holds `build/g47/full`** (13 GB of prepared DROID fleet data; the main checkout's `build/g47/full` links to it) | keep until the data moves |
+
 Rule from now on: a goal's worktree is removed once its branch is merged into `main`.
