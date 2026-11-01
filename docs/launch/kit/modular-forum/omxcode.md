@@ -61,7 +61,7 @@ struct Main(App):
 - Phone targets need two runtime functions (`KGEN_CompilerRT_AlignedAlloc` / `AlignedFree`) that I stand in for with a small, labelled C shim. An official answer here would unblock a lot.
 - Linking a Mojo shared library needs `-Xlinker -rpath -Xlinker '$ORIGIN'`.
 
-**Honest edges:** Mojo 1.1 has no Windows release; Android runs 19 of the 174 components in the matrix so far; the iPhone only builds; the GPU path is NVIDIA first (Apple's GPU through Metal is checked on CI Macs only). In a five-stack benchmark, native Rust beats omxcode at 1M particles, cold start and memory; at 20M, JS + WebGPU is 3.01 ms and omxcode 3.13 ms, in one file. All of it is in `docs/benchmarks.md`.
+**Honest edges:** Mojo 1.1 has no Windows release; Android runs 16 of the 121 components so far; the iPhone only builds; the GPU path is NVIDIA first (Apple's GPU through Metal is checked on CI Macs only). In a five-stack benchmark, native Rust beats omxcode at 1M particles, cold start and memory; at 20M, JS + WebGPU is 3.01 ms and omxcode 3.13 ms, in one file. All of it is in `docs/benchmarks.md`.
 
 Public alpha, MIT:
 https://github.com/abhisheksreesaila/omxcode
@@ -79,7 +79,7 @@ I'd really like to hear how you'd have done the FFI layer or the job threads dif
 ---
 
 *Sources (not for posting): hello code examples/hello/app.mojo; hosts README.md "Where it stands", docs/components.md
-("Totals": Android ✅ 19 of 174); diff docs/architecture.md; GPU examples/gpu/app.mojo, mojoui/gpu.mojo, README.md
+(the cover's component block: Android 16 of 121, from scripts/site_components.py); diff docs/architecture.md; GPU examples/gpu/app.mojo, mojoui/gpu.mojo, README.md
 "Measured" (S4); threads docs/ui-threads.md, D-792 (S5, S8); MCP docs/agent.md (S11), transcript a real run of
 scripts/agent_client.py build/hello/web (2026-11-01); Mojo limits CLAUDE.md "Mojo rules that bite", spike/kgen_shim.c
 (S15); benchmark docs/benchmarks.md. Replace LINK-TO-SUNDAY-POST before posting.*

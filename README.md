@@ -84,7 +84,7 @@ Most apps meet AI agents through the screen: screenshots, pixel coordinates, an 
 
 The view tree that GTK turns into widgets and the web turns into HTML, the agent host turns into **tools** ([docs/agent.md](docs/agent.md)):
 
-- **No per-app work.** A button's tag names its tool, its tooltip describes it, and tapping it is calling it. A menu item becomes `file-save`. A text field becomes a tool that takes `text`. Every app built with omxcode is an MCP server already (29 components are proven through the agent so far; the matrix below has the rest).
+- **No per-app work.** A button's tag names its tool, its tooltip describes it, and tapping it is calling it. A menu item becomes `file-save`. A text field becomes a tool that takes `text`. Every app built with omxcode is an MCP server already (55 of 121 components are proven through the agent so far; the matrix below has the rest).
 - **An agent can do nothing a person couldn't.** A disabled button is no tool. A dialog's buttons are tools only while it is open. The screen is the permission model.
 - **It gets back what changed, in words.** It doesn't have to compare two screenshots. Each call returns the new texts, what opened or closed, and the tools that appeared or went.
 - **It reads, not just clicks.** `read` gives the screen's text grouped by area, or a grid's rows as tab-separated text. `render` gives a drawn view as a PNG for agents that can see.
