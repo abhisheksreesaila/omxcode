@@ -74,6 +74,19 @@ To record by hand (your screen recorder; a 1920×1200 window reads best): `pixi 
 | 5 Pack | Query → `the failures I picked`, ROBOT_SQL3 → Run → pick F00118 → Export pack | "A pack per failure: the frame where it let go, its telemetry, the paper's page." |
 | 6 Scale | (the status bar and the cards' row counts) | "All 63,000 episodes, nothing froze. Next: the full 67k with every camera." |
 
+## The directed clip (owner, 2026-11-01: "construct the scene, choreograph it")
+`pixi run python scripts/clips.py robots` records one take (GTK, 2560×1440, agent tools only) and composes it
+(scripts/robotclip.py): docs/img/clip-robots.mp4 (56 s, 1920×1080), docs/img/clip-robots-15s.mp4 (camera → the drop),
+docs/img/clip-robots-raw.mp4 (the take), docs/img/clip-robots.jpg (the drop, captioned), build/g47/clipcheck/ (a frame per scene,
+contact-sheet.png). `--compose` re-cuts without a new take. Scenes: title → setup ("16.8M telemetry rows and the robot's video, in
+one app") → the sheet (outcome column, a failure row) → pick F00118 → its camera → its telemetry (the gripper lane labelled) →
+scrub (split screen: video above, lanes below, same instant) → frozen at 12.7 s: "Wait. There." (ring on the shirt) / "Same
+instant: the gripper opened." (box on the gripper lane, same amber, one line between) / "That's why it dropped." (a glow) →
+slowed replay → the question typed → 2,997 answers in tens of ms → the paper → the pack → "Usually: a spreadsheet, a notebook
+and a video player, lined up by hand. Here: one app." → end card. Rectangles come from the app (the agent link's `regions` and
+`bounds`, D-4729); the split screen is D-4730. No joint-velocity spike at the drop (the arm is nearly still), so only the gripper
+lane is marked. The 11 beat shots are now `scripts/clips.py robots-shots`.
+
 ## Growing it
 - On disk now (28 GB of the 80 GB cap): video for 3,546 episodes (one camera, the original sample + 2,000 successes + 1,000
   failures from `~/data/robot-scout-tools/grow_droid.py`), telemetry for 63,344 (the grow script fetches whole ~730-episode
