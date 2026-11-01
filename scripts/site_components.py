@@ -36,6 +36,28 @@ NEXT = {"linux": "Every component runs here on every check.",
         "iphone": "Builds and signs; next, running on a phone.",
         "agent": "Every app is an MCP tool server; next, every control a tool."}
 
+# What a composite solves, for the ones whose matrix name has no "(…)" description of its own
+SOLVES = {"DataGrid": "A spreadsheet grid over millions of rows: select, edit in place, sort, drag, drawn on a canvas.",
+          "PivotTable": "Rows by columns with totals, from any table.",
+          "ChartView": "Bars and lines you can pan, zoom and tap, drawn on a canvas.",
+          "KpiView": "One big number with its trend, as a tile.",
+          "FindingCard": "One finding from the data, said in words, with its evidence.",
+          "Inspector": "A docked side panel of settings for whatever is selected.",
+          "Toolbar · FormulaBar · StatusBar": "The chrome around a sheet: tools, the selected cell's value, totals.",
+          "Format toggles": "Bold, italic, alignment and the rest, as pressed icon buttons.",
+          "Bottom tabs, renamed in place": "Sheet tabs along the bottom; double-click to rename.",
+          "Swatch picker": "Pick a colour from a popover of swatches.",
+          "Column number formats": "Money, percent, decimals and dates per column.",
+          "CodeBlock": "Code with a copy button, themed.",
+          "LogView": "A log that scrolls and stays pinned to its end.",
+          "Timeline": "Steps of a job with their state and progress.",
+          "Breadcrumbs": "A trail back up through where you are.",
+          "Chip · Badge": "A small label or status pill.",
+          "Confirm": "A button that asks once more before a destructive action.",
+          "Skeleton": "Grey placeholder rows while data loads.",
+          "Markdown": "Formatted text from Markdown, drawn natively.",
+          "Sparkline": "A tiny trend line inside a row or a tile."}
+
 # Families: (key, title, what it solves, module stems or json groups that belong to it)
 FAMILIES = [
     ("data", "Data and sheets", "Spreadsheets and analytics over millions of rows: grids, pivots, charts, KPIs, SQL.",
@@ -92,7 +114,7 @@ def load():
         stem = Path(module).stem
         fam = next((f for f in FAMILIES if stem in f[3]), FAMILIES[6])
         status = {k: STATE.get(v, "missing") for k, v in zip(MD_COLS, row[3:9])}
-        items.append({"name": name, "solves": solves or f"Made of {parts}.", "family": fam[0], "status": status,
+        items.append({"name": name, "solves": SOLVES.get(name) or solves or f"Made of {parts}.", "family": fam[0], "status": status,
                       "api": "", "image": "", "image_web": "", "module": module, "parts": parts})
     for row in md_rows("JavaScript widgets"):
         tag, lib = row[0].strip("`"), row[1]
@@ -147,7 +169,7 @@ def cover_block(items):
 
 def card(i):
     pic = (f'<div class="pic"><img src="{esc(i["image"])}" alt="{esc(i["name"])}, drawn by omxcode on Linux" loading="lazy"></div>'
-           if i["image"] else f'<div class="pic none f-{i["family"]}"><span>{esc(i["name"][:2])}</span></div>')
+           if i["image"] else f'<div class="pic none f-{i["family"]}"><span>{esc(i["module"].split("/")[-1])}</span></div>')
     dots = "".join(f'<span title="{n}: {WORD[i["status"].get(k, "missing")]}"><i class="dot {i["status"].get(k, "missing")}"></i>{n}</span>'
                    for k, n in PLATS)
     tested = " ".join(k for k, _ in PLATS if i["status"].get(k) == "tested")
@@ -237,7 +259,8 @@ TEMPLATE = """<!doctype html>
 .frow .lbl { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); width: 76px; }
 .search { flex: 1; min-width: 200px; height: 40px; border-radius: 999px; border: 0; padding: 0 18px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font: 500 15px var(--sans); }
 .search:focus { outline: 2px solid var(--oq-accent); outline-offset: 2px; }
-.fchip { all: unset; cursor: pointer; font: 500 13px var(--sans); color: var(--ink2); padding: 6px 12px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); display: inline-flex; gap: 6px; align-items: center;
+.fchip { all: unset; }
+.frow .fchip { cursor: pointer; font-family: var(--sans); font-size: 13px; font-weight: 500; color: var(--ink2); padding: 6px 12px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); display: inline-flex; gap: 6px; align-items: center;
   transition: background .15s, color .15s, transform var(--oq-spring-fast-dur) var(--oq-island-spring); }
 .fchip span { opacity: .6; font-family: var(--mono); font-size: 12px; }
 .fchip:hover { color: var(--ink); } .fchip:active { transform: scale(.96); }
@@ -249,7 +272,8 @@ TEMPLATE = """<!doctype html>
 .fhead h2 { font: 700 26px var(--display); letter-spacing: -.03em; margin: 0; } .fhead h2 span { color: var(--ink2); font: 500 15px var(--mono); }
 .fhead p { margin: 0; color: var(--ink2); font-size: 15px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 16px; }
-.comp { all: unset; cursor: pointer; display: flex; flex-direction: column; border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); overflow: hidden; min-width: 0;
+.comp { all: unset; }
+.comp { cursor: pointer; display: flex; flex-direction: column; border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); overflow: hidden; min-width: 0;
   transition: transform var(--oq-spring-fast-dur) var(--oq-island-spring), box-shadow .2s; }
 .comp:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px var(--line), var(--oq-shadow-2); } .comp:active { transform: scale(.98); }
 .comp:focus-visible { outline: 2px solid var(--oq-accent); outline-offset: 3px; }
@@ -257,7 +281,8 @@ TEMPLATE = """<!doctype html>
 .pic { height: 120px; background: #f3f3f5; display: grid; place-items: center; overflow: hidden; }
 .pic img { max-width: 90%; max-height: 104px; object-fit: contain; }
 .pic.none { background: color-mix(in srgb, var(--fh, var(--word)) 14%, var(--oq-surface-2)); height: 64px; }
-.pic.none span { font: 700 22px var(--mono); color: var(--fh, var(--word)); letter-spacing: -.02em; }
+.pic.none { height: 40px; place-items: center start; padding: 0 14px; }
+.pic.none span { font: 600 12px var(--mono); color: var(--fh, var(--word)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .f-data { --fh: var(--oq-data-1); } .f-video { --fh: var(--oq-data-2); } .f-robotics { --fh: var(--oq-data-3); } .f-docs { --fh: var(--oq-data-4); }
 .f-links { --fh: var(--oq-ok); } .f-agents { --fh: var(--oq-info); } .f-js { --fh: var(--oq-warn); }
 .ct { padding: 12px 14px 14px; display: grid; gap: 6px; }
@@ -279,7 +304,8 @@ dialog.sheet[open] { animation: rise2 .28s var(--ease); }
 .sh p { margin: 0; color: var(--ink2); font-size: 15px; }
 .sh pre { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--bg); font: 13px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; }
 .prow { display: grid; gap: 5px; } .prow div { display: grid; grid-template-columns: 80px 1fr; gap: 10px; font-size: 14px; } .prow div span { color: var(--ink2); display: flex; gap: 8px; align-items: center; }
-.close { all: unset; cursor: pointer; position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--oq-surface-2); font-size: 16px; z-index: 2; }
+.close { all: unset; }
+.close { cursor: pointer; position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--oq-surface-2); font-size: 16px; z-index: 2; }
 .close:focus-visible { outline: 2px solid var(--oq-accent); }
 @media (max-width: 860px) {
   .top2, .sh { grid-template-columns: 1fr; } .nexts { grid-template-columns: 1fr 1fr; } .frow .lbl { width: 100%; } .filters { top: 59px; position: static; }

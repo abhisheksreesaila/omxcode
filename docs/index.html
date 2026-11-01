@@ -349,7 +349,8 @@ section { padding: 96px 24px; }
           <div class="lane2"><span>job thread</span><div class="job"><i></i></div></div>
         </div>
         <pre class="code"><span class="c"># slow work is a job; update() hears LANDED when it ends</span>
-self.running = start_ui_job(StepJob(self.orders.value(), self.filters))
+self.running = start_ui_job(
+    StepJob(self.orders.value(), self.filters))
 <span class="k">def</span> <span class="f">jobs_message</span>(self) -&gt; Int: <span class="k">return</span> LANDED
 
 <span class="c"># MOJOUI_BUDGET_MS=16: anything over budget is named</span>
