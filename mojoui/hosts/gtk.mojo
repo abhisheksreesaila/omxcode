@@ -3676,6 +3676,16 @@ struct GtkHost[A: App](Movable):
                 return ('{"ok":true,"title":' + json_string(self.rt.app.title()) + ',"design":' + json_string(self.rt.app.theme().id)
                         + ',"nodes":' + view_to_json(self.rt.shown) + ',"widgets":' + facts_json(self.webviews)
                         + ',"busy":' + ("true" if busy_now else "false") + "}")
+            if op == "regions":  # (where each region and card is in the window, in pixels: mojoui.regions; a recorder frames them)
+                return '{"ok":true,"regions":' + regions_json(self) + "}"
+            if op == "bounds":  # (where the view tagged `tag` is in the window, in pixels: x, y, w, h; w = 0 when it isn't shown)
+                var want = j.text(j.get(0, "tag"))
+                for i in range(len(self.rt.shown.nodes)):
+                    if self.rt.shown.nodes[i].name == want and i < len(self.widgets) and self.widgets[i] != 0:
+                        var b = widget_rect(self, self.widgets[i])
+                        return ('{"ok":true,"x":' + String(Int(b[0] + 0.5)) + ',"y":' + String(Int(b[1] + 0.5)) + ',"w":' + String(Int(b[2] + 0.5))
+                                + ',"h":' + String(Int(b[3] + 0.5)) + "}")
+                return link_error("nothing tagged " + want + " on the screen")
             if op == "set":
                 var tag = j.text(j.get(0, "tag"))
                 var id = j.number(j.get(0, "id"))
@@ -5445,14 +5455,18 @@ def widget_rect(host: GtkHost, widget: Int) -> List[Float64]:
     """A widget's bounds in the window's coordinates (x, y, w, h; w = 0 when it has none)."""
     var rect = List[Float32](length=4, fill=0)
     var ok = external_call["gtk_widget_compute_bounds", c_int](widget, host.window, Int(rect.unsafe_ptr())) != 0
+    if not ok:  # (a widget in a window of its own, a dialog: its bounds in that window)
+        var root = external_call["gtk_widget_get_root", Int](widget)
+        if root != 0 and root != host.window:
+            ok = external_call["gtk_widget_compute_bounds", c_int](widget, root, Int(rect.unsafe_ptr())) != 0
     var out: List[Float64] = [Float64(rect[0]), Float64(rect[1]), Float64(rect[2]), Float64(rect[3])] if ok else [0.0, 0.0, 0.0, 0.0]
     _ = len(rect)
     return out^
 
 
-def write_regions(host: GtkHost, path: String):
-    """The regions step: each region's widget bounds (a Board: its scroller, the part on screen; a card: clipped to its
-    board's scroller, left out when scrolled away), rounded to whole pixels, written as JSON."""
+def regions_json(host: GtkHost, trace: Bool = False) -> String:
+    """Each region's widget bounds in the window's pixels (a Board: its scroller, the part on screen; a card: clipped to
+    its board's scroller, left out when scrolled away), rounded to whole pixels, as [{"name", "x", "y", "w", "h"}]."""
     var out = String("[")
     var n = 0
     for r in regions(host.rt.shown):
@@ -5475,9 +5489,15 @@ def write_regions(host: GtkHost, path: String):
         if b[2] < 1 or b[3] < 1:
             continue
         out += ("," if n > 0 else "") + "{\"name\": " + json_string(r.name) + ", \"x\": " + String(Int(b[0] + 0.5)) + ", \"y\": " + String(Int(b[1] + 0.5)) + ", \"w\": " + String(Int(b[2] + 0.5)) + ", \"h\": " + String(Int(b[3] + 0.5)) + "}"
-        print("REGION: " + r.name + " " + String(Int(b[0] + 0.5)) + "," + String(Int(b[1] + 0.5)) + " " + String(Int(b[2] + 0.5)) + "x" + String(Int(b[3] + 0.5)))
+        if trace:
+            print("REGION: " + r.name + " " + String(Int(b[0] + 0.5)) + "," + String(Int(b[1] + 0.5)) + " " + String(Int(b[2] + 0.5)) + "x" + String(Int(b[3] + 0.5)))
         n += 1
-    out += "]\n"
+    return out + "]"
+
+
+def write_regions(host: GtkHost, path: String):
+    """The regions step: regions_json written to `path` (and a REGION: line each)."""
+    var out = regions_json(host, True) + "\n"
     try:
         with open(path, "w") as f:
             f.write(out)

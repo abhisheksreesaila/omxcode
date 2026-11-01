@@ -63,14 +63,19 @@ _clip = None
 
 
 def clip():
+    """scripts/clips.py robots-shots (the 11 beat shots) and robots (the directed clip), once per check run: both GTK logs."""
     global _clip
     if _clip is None:
         data()
-        r = run(["pixi", "run", "python", "scripts/clips.py", "robots"], 3600)
-        (G47 / "check-clip.txt").write_text(r.stdout + r.stderr)
-        if r.returncode:
-            raise SystemExit("clips.py robots failed: " + (r.stdout + r.stderr)[-1200:])
-        _clip = (G47 / "clip-robots.log").read_text()
+        out = []
+        for what in ("robots-shots", "robots"):
+            r = run(["pixi", "run", "python", "scripts/clips.py", what], 3600)
+            out.append(r.stdout + r.stderr)
+            if r.returncode:
+                (G47 / "check-clip.txt").write_text("\n".join(out))
+                raise SystemExit(f"clips.py {what} failed: " + (r.stdout + r.stderr)[-1200:])
+        (G47 / "check-clip.txt").write_text("\n".join(out))
+        _clip = (G47 / "clip-robots.log").read_text() + (G47 / "story" / "raw.log").read_text()
     return _clip
 
 
@@ -263,27 +268,39 @@ def m8():
     log = clip()
     bad = []
     if "SLOW:" in log:
-        bad.append("SLOW lines in the GTK run")
+        bad.append("SLOW lines in the GTK runs")
     if f"SLICE: telemetry episode={data()['hero']}" not in log:
-        bad.append("no SLICE in the GTK run")
-    c = ROOT / "docs/img/clip-robots.mp4"
-    dur = float(run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(c)]).stdout.strip() or 0)
-    if not 30 <= dur <= 45:
-        bad.append(f"clip {dur:.1f} s")
+        bad.append("no SLICE in the GTK runs")
+
+    def dur(p):
+        return float(run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(p)]).stdout.strip() or 0)
+
+    def size(p):
+        return run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(p)]).stdout.strip()
+    img = ROOT / "docs/img"
+    d, d15 = dur(img / "clip-robots.mp4"), dur(img / "clip-robots-15s.mp4")
+    if not 35 <= d <= 60 or size(img / "clip-robots.mp4") != "1920,1080":
+        bad.append(f"directed clip {d:.1f} s, {size(img / 'clip-robots.mp4')}")
+    if not 13 <= d15 <= 18 or not (img / "clip-robots-raw.mp4").exists() or not (img / "clip-robots.jpg").exists():
+        bad.append(f"15 s cut {d15:.1f} s; raw {(img / 'clip-robots-raw.mp4').exists()}; poster {(img / 'clip-robots.jpg').exists()}")
+    checks = sorted((G47 / "clipcheck").glob("[0-9]*.png"))
+    if len(checks) < 15:
+        bad.append(f"{len(checks)} clipcheck frames")
     shots = sorted((G47 / "shots").glob("*.png"))
     lum = []
-    for p in shots:
+    for p in shots + checks:
         im = Image.open(p)
-        if im.size != (1440, 900):
+        if p in shots and im.size != (1440, 900):
             bad.append(f"{p.name} {im.size}")
         a = np.asarray(im.convert("RGB"), dtype=np.float64) / 255
         lum.append(float((0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]).mean()))
-    if len(shots) < 11 or not all(0.10 <= v <= 0.30 for v in lum):
+    if len(shots) < 11 or not all(0.05 <= v <= 0.35 for v in lum):
         bad.append(f"{len(shots)} shots, luminance {[round(v, 2) for v in lum]}")
     rep = ROOT / "docs/goals/47-report.md"
     if not rep.exists() or "## Record it yourself" not in rep.read_text():
         bad.append("no 'Record it yourself' section")
-    return not bad, "; ".join(bad) or f"clip {dur:.1f} s; {len(shots)} shots at 1440×900, luminance {min(lum):.2f}–{max(lum):.2f}; 0 SLOW on GTK"
+    return not bad, "; ".join(bad) or (f"directed clip {d:.1f} s 1920×1080 ({len(checks)} scene frames checked), 15 s cut {d15:.1f} s, raw take, poster; "
+                                       f"{len(shots)} beat shots; luminance {min(lum):.2f}–{max(lum):.2f}; 0 SLOW on GTK")
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8}

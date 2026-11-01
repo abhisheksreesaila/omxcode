@@ -3,7 +3,9 @@
   pixi run python scripts/clips.py [native|web|all]      → build/clips/sentence-gtk.mp4, sentence-web.mp4 (+ stills)
   pixi run python scripts/clips.py island                → build/clips/island-100m.mp4 (+ a still mid-query): goal 30's demo
 
-  pixi run python scripts/clips.py robots [DATA]         → docs/img/clip-robots.mp4 (+ .jpg) and build/g47/shots/*.png: goal 47
+  pixi run python scripts/clips.py robots [DATA]         → the directed clip (scripts/robotclip.py): docs/img/clip-robots.mp4 (+ .jpg),
+                                                           clip-robots-15s.mp4, clip-robots-raw.mp4, build/g47/clipcheck/ (--compose: no new take)
+  pixi run python scripts/clips.py robots-shots [DATA]   → build/g47/shots/*.png, the 11 beat shots (goal 47 M8)
 
 island: the native window over goal 20's 100M-row file, from launch: it opens in the background (the island counts),
 Create table, a chart, "median by region" (0.7 s), "by month, as a line" (3 s), the island running and landing each time.
@@ -172,7 +174,7 @@ G47 = ROOT / "build/g47"
 STEP = 103.0  # board points one wheel notch scrolls at 1920×1200 (GTK: the viewport's height to the power 2/3)
 
 
-def robots(media=None, keep_raw=False):
+def robots_shots(media=None, keep_raw=False):
     """Goal 47's clip and shots: "Why did the robot drop it?" in omxplorer (Liquid dark), the GTK window on the private
     headless display at 1920×1200 (scaled to 1440×900, as goal 41's claim clip), driven only through agent tools
     (scenario.py robots's steps and SQL). Writes build/g47/shots/NN-*.png (one per beat) and docs/img/clip-robots.mp4
@@ -341,7 +343,7 @@ def robots(media=None, keep_raw=False):
         at = b
     if at < total:
         drop.append((at, total + 1))
-    out = ROOT / "docs/img/clip-robots.mp4"
+    out = G47 / "clip-robots-take.mp4"  # (the beat-by-beat take; the directed clip is scripts/robotclip.py's)
     kept = sum(b - a for a, b in merged)
     if keep_raw:
         shutil.copyfile(raw, G47 / "clip-robots.full.mp4")
@@ -358,6 +360,12 @@ if __name__ == "__main__":
         web()
     if what == "island":
         island()
-    if what == "robots":
+    if what == "robots-shots":  # the 11 beat shots (build/g47/shots) and an undirected take
         args = [a for a in sys.argv[2:] if not a.startswith("--")]
-        robots(args[0] if args else None, keep_raw="--raw" in sys.argv)
+        robots_shots(args[0] if args else None, keep_raw="--raw" in sys.argv)
+    if what == "robots":  # the directed clip (scripts/robotclip.py): docs/img/clip-robots.mp4, -15s, -raw, build/g47/clipcheck
+        import robotclip
+        args = [a for a in sys.argv[2:] if not a.startswith("--")]
+        if "--compose" not in sys.argv:
+            robotclip.record(args[0] if args else None)
+        robotclip.compose_all()
