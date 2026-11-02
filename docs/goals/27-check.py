@@ -30,7 +30,7 @@ shots = load("theme_shots", "scripts/theme_shots.py")
 labels = g25.labels
 import drive  # noqa: E402
 
-THEME_WORDS = re.compile(r"liquid|ledger|graphite|blueprint|fluent|omarchy|paper|4f46e5|0e7a43|c8243f|E5464F|437A0E|3F24C8", re.I)
+THEME_WORDS = re.compile(r"liquid|ledger|graphite|blueprint|fluent|omarchy|paper|0e7a43|437A0E", re.I)
 
 
 def m0():
@@ -271,9 +271,9 @@ def m5():
             sx = img.size[0] / size[0]
             area = list(img.crop((int(x * sx), int(y * sx), int((x + w) * sx), int((y + h) * sx))).getdata())
             red = sum(1 for px in area if px[0] > 150 and px[1] < 90 and px[2] < 110)
-            teal = sum(1 for px in area if g26.near(px, (14, 124, 134), 20))  # (Liquid's first series colour: the bars are drawn, in it)
+            teal = sum(1 for px in area if g26.near(px, (90, 236, 162), 20))  # (Liquid's first series colour, the brand green lifted for dark, D-4733: the bars are drawn, in it)
             if red > 50 or teal < 2000:
-                problems.append(f"{tag} report: {red} red and {teal} teal pixels in the chart (P6)")
+                problems.append(f"{tag} report: {red} red and {teal} green pixels in the chart (P6)")
         else:
             problems.append(f"{tag} report: no chart tile")
     e = g25.env("polish-web")
@@ -297,8 +297,8 @@ def m5():
     if "JS: true" not in log:
         problems.append("web: the Settings dialog's layer doesn't cover the window (P1)")
     bg = re.search(r"^STYLE: label.picker.prominent background-color (.*)$", log, re.M)
-    if not bg or bg.group(1).strip() != "rgb(79, 70, 229)":
-        problems.append(f"web start: Choose a file is {bg.group(1) if bg else 'missing'}, not the indigo primary (P4)")
+    if not bg or bg.group(1).strip() != "rgb(90, 236, 162)":
+        problems.append(f"web start: Choose a file is {bg.group(1) if bg else 'missing'}, not the green primary, lifted for Liquid dark (P4, D-4733)")
     dark = run([str(BUILD / "themes" / "linux" / "themes")], env={"MOJOUI_TEST": "", "MOJOUI_WINDOW": "900x760", "ADW_DEBUG_COLOR_SCHEME": "force-dark",
                                                             "MOJOUI_SHOT": str(OUT / "polish" / "themes-dark.png")}, timeout=300)
     series = g25.boxes(dark.stdout, "series")

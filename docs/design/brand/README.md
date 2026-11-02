@@ -1,5 +1,7 @@
 # omxplorer · logo and colour (2026-10-19)
 
+> **Superseded on colour (2026-11-02, D-4733):** omxplorer now wears one green, #0e7a43 (lifted to #5aeca2 in Liquid dark; logo fills #1f9d55), in every mode. The indigo and the per-mode tints below are history. Logo 1 stays.
+
 Open `index.html` and reply with a logo number and a colour letter, for example "logo 1 + colour C".
 
 ## What's here

@@ -20,15 +20,13 @@ from mojoui.menus import MenuBar, Menu, Item, Separator, Submenu, ContextMenu
 from mojoui.overlays import Dialog, Toast, Popover, Checkbox, Clipboard
 from mojoui.view import Radio, TextArea
 
-# omxplorer's skins (themes/: the framework knows none of them, D-260) and its brand (owner, D-254): indigo for the app
-# itself, a tint per mode
+# omxplorer's skins (themes/: the framework knows none of them, D-260) and its brand: one green for the whole app, every
+# mode (owner, 2026-11-02: "it needs greenish everywhere", D-4733, replacing D-254's indigo with a tint per mode)
 comptime LEDGER = 3
 comptime GRAPHITE = 4
 comptime BLUEPRINT = 5
 comptime LIQUID = 6  # the default (D-225)
-comptime BRAND_INDIGO: UInt32 = 0xFFE5464F  # #4f46e5 (R in the low byte)
-comptime SHEET_GREEN: UInt32 = 0xFF437A0E  # #0e7a43
-comptime REPORT_RED: UInt32 = 0xFF3F24C8  # #c8243f
+comptime BRAND_GREEN: UInt32 = 0xFF437A0E  # #0e7a43 (R in the low byte); Liquid dark lifts it (dark_tint)
 comptime LIGHT = 0  # the appearance (Settings → Appearance, settings.txt appearance=light|dark|system): Liquid light,
 comptime DARK = 1  # Liquid dark (the default, owner 2026-10-30: "we can do Liquid dark mode", D-1241), or the system's
 comptime SYSTEM = 2
@@ -45,13 +43,13 @@ def skin_of(name: String) -> Int:
 
 
 def skin_palette(design: Int, accent: UInt32 = 0, dark: Bool = False) -> Palette:
-    """The skin's colours with a mode's tint over them (in a report, red only means "a report": false and errors take
-    other tones, D-254). `dark`: Liquid dark, the tint lifted to read on its surfaces (the other skins have one look)."""
+    """The skin's colours with the brand's tint over them. `dark`: Liquid dark, the tint lifted to read on its surfaces
+    (the other skins have one look)."""
     var liq = liquid_palette(dark)
     var p = (ledger_palette() if design == LEDGER else (graphite_palette() if design == GRAPHITE else (blueprint_palette() if design == BLUEPRINT else liq^))).with_accent(
         dark_tint(accent) if dark and design == LIQUID and accent != 0 else accent)
-    if accent == REPORT_RED:
-        p.bad = hx("#9f6b75") if not p.dark else hx("#c99aa3")
+    if design == LIQUID and accent != 0 and len(p.series) > 0:
+        p.series[0] = p.accent  # (a chart's first series and a sentence's words wear the brand's green too, D-4733)
     return p^
 
 
@@ -312,7 +310,7 @@ comptime OPEN_TYPES = TABLE_TYPES + "," + VIDEO_TYPES + "," + IMAGE_TYPES
 comptime MAX_OBJECTS = 40  # per sheet, and tiles per report (canvas ids 10…49, 60…99, 120…159)
 comptime TABLE_H = 400  # the table's height once objects share the sheet
 
-comptime OMX_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="24" height="24"><g transform="translate(6 6) scale(.97)"><defs><clipPath id="L1c"><circle cx="42.0" cy="42.0" r="20.5"/></clipPath></defs><circle cx="42.0" cy="42.0" r="25.0" fill="none" stroke="#4f46e5" stroke-width="9.0"/><g clip-path="url(#L1c)"><rect x="28.5" y="47" width="7.5" height="60" rx="2" fill="#4f46e5"/><rect x="38.3" y="37.5" width="7.5" height="60" rx="2" fill="#4f46e5"/><rect x="48" y="28" width="7.5" height="60" rx="2" fill="#4f46e5"/></g><line x1="59.68" y1="59.68" x2="80" y2="80" stroke="#4f46e5" stroke-width="12" stroke-linecap="round"/></g></svg>'  # logo 1, the lens over bars (docs/design/brand/, D-254)
+comptime OMX_LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="24" height="24"><g transform="translate(6 6) scale(.97)"><defs><clipPath id="L1c"><circle cx="42.0" cy="42.0" r="20.5"/></clipPath></defs><circle cx="42.0" cy="42.0" r="25.0" fill="none" stroke="#1f9d55" stroke-width="9.0"/><g clip-path="url(#L1c)"><rect x="28.5" y="47" width="7.5" height="60" rx="2" fill="#1f9d55"/><rect x="38.3" y="37.5" width="7.5" height="60" rx="2" fill="#1f9d55"/><rect x="48" y="28" width="7.5" height="60" rx="2" fill="#1f9d55"/></g><line x1="59.68" y1="59.68" x2="80" y2="80" stroke="#1f9d55" stroke-width="12" stroke-linecap="round"/></g></svg>'  # logo 1, the lens over bars (docs/design/brand/, D-254)
 comptime APP = "omxcode"  # (settings live in ~/.config/omxcode; ~/.config/omxapp's are adopted, D-285)
 comptime W = 1440  # the window (Stitch's artboards; the web check's viewport)
 comptime INSPECTOR_W = 300
@@ -638,34 +636,19 @@ struct Main(App):
         return max(240, self.win_h - CHROME_H)
 
     def theme(self) -> Theme:
-        """The skin with this mode's tint (kept: one per tint, made when the skin changes)."""
-        var at = self.tint()
-        if at < len(self.looks):
-            return self.looks[at].copy()
-        return skin_theme(self.skin, self.accent(), self.dark())  # (not reached: make_looks keeps one per tint)
-
-    def tint(self) -> Int:
-        """Which of make_looks' themes shows now: Liquid's indigo (0), the sheet's green (1), the report's red (2); other skins: 0."""
-        if self.skin != LIQUID or self.screen != SHEET:
-            return 0
-        return 1 if self.sheet_tab == 0 else 2
+        """The skin in the brand's tint (kept: made when the skin or the appearance changes)."""
+        if len(self.looks) > 0:
+            return self.looks[0].copy()
+        return skin_theme(self.skin, self.accent(), self.dark())  # (before make_looks has run)
 
     def make_looks(mut self):
-        """The skin's themes, one per tint it shows (Liquid: indigo, the sheet's green, the report's red; others: their own)."""
+        """The skin's theme (Liquid: the brand's green; others: their own)."""
         self.looks = List[Theme]()
-        if self.skin == LIQUID:
-            for a in [BRAND_INDIGO, SHEET_GREEN, REPORT_RED]:
-                self.looks.append(skin_theme(self.skin, a, self.dark()))
-        else:
-            self.looks.append(skin_theme(self.skin, 0))
+        self.looks.append(skin_theme(self.skin, self.accent(), self.dark()))
 
     def accent(self) -> UInt32:
-        """Liquid's tint per mode (D-254): the sheet green, the report red, the rest the brand's indigo; other skins keep theirs."""
-        if self.skin != LIQUID:
-            return 0
-        if self.screen == SHEET:
-            return SHEET_GREEN if self.sheet_tab == 0 else REPORT_RED
-        return BRAND_INDIGO
+        """Liquid's tint: the brand's green in every mode (D-4733); other skins keep theirs."""
+        return BRAND_GREEN if self.skin == LIQUID else 0
 
     def logo(self) -> String:
         return OMX_LOGO  # omxplorer's own skin on every platform (D-149), never the desktop's theme
@@ -3714,8 +3697,8 @@ struct Main(App):
         return True
 
     def chart_palette(self) -> Palette:
-        """Charts draw in the skin's first series colour, not the mode's tint: the report's red would read as a loss (D-254)."""
-        var base = skin_palette(self.skin, 0, self.dark())
+        """Charts draw in the skin's first series colour (Liquid's: the brand's green, D-4733)."""
+        var base = skin_palette(self.skin, self.accent(), self.dark())
         return self.pal.with_accent(base.data(0))
 
     def draw(mut self, canvas: Int, mut surface: Surface):
@@ -4415,7 +4398,7 @@ struct Main(App):
         """The Report tab (Stitch 06): KPI and chart tiles over the filtered rows, and the row that adds them."""
         var kpis = List[View]()
         var charts = List[View]()
-        var first_kpi = self.accent() != REPORT_RED  # (a red figure would read as a loss: in the report the tint is for the chrome only, D-254)
+        var first_kpi = True  # (the first figure wears the brand's green)
         for k in range(len(self.tiles)):
             ref t = self.tiles[k]
             if t.kind == TILE_CHART:

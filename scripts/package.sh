@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 EX="${1:?example}"; WHAT="${2:?linux or mac}"
 NAME="$(tr '[:lower:]' '[:upper:]' <<< "${EX:0:1}")${EX:1}Mojo"
-ICON_SVG="docs/design/brand/logo-1-icon.svg"  # (D-254: Lens · bars)
+ICON_SVG="docs/design/brand/logo-1-icon.svg"  # (D-254: Lens · bars; green, D-4733)
 mkdir -p dist
 
 icon_png() {  # icon_png <size> <out.png>

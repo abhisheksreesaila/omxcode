@@ -31,7 +31,7 @@ SHEET, REPORT, OPEN = g25.SHEET, g25.REPORT, g25.OPEN
 boxes, labels = g25.boxes, g25.labels
 HEADER = 60  # below the grid's header (a sorted or picked column's accent lives there): datagrid.header_h
 GUTTER = 64  # the grid's gutter (row numbers), points: datagrid.GRID_GUTTER
-ACCENT = (14, 122, 67)  # the sheet's Ledger green (D-254): the selection ring
+ACCENT = (14, 122, 67)  # the brand green, light (D-4733): the selection ring
 
 
 def live(commands, name, **kw):
@@ -311,16 +311,16 @@ def contrast(a, b):
 
 
 def m8():
-    """The brand (D-254): logo 1 in the menu bar; indigo for the app, green for the sheet, red for the report (chrome only)."""
+    """The brand (D-254, D-4733): logo 1 in the menu bar; one green for the app, the sheet and the report."""
     from PIL import Image
     problems = []
-    want = {"start": "#4f46e5", "sheet": "#0e7a43", "report": "#c8243f"}
-    for name, hexv in want.items():
-        rgb = [int(hexv[i:i + 2], 16) for i in (1, 3, 5)]
-        wash = "#" + "".join(f"{round(255 + (v - 255) * 0.10):02x}" for v in rgb)  # (Palette.with_accent: 10% over the white card)
-        for other in ("#ffffff", wash):
-            if contrast(hexv, other) < 4.5:
-                problems.append(f"{name} {hexv} on {other}: {contrast(hexv, other):.2f}:1 (AA wants 4.5)")
+    light, dark = "#0e7a43", "#5aeca2"  # (D-4733: one green in every mode; Liquid dark, the default since D-1241, lifts it)
+    want = {"start": dark, "sheet": dark, "report": dark}
+    rgb = [int(light[i:i + 2], 16) for i in (1, 3, 5)]
+    wash = "#" + "".join(f"{round(255 + (v - 255) * 0.10):02x}" for v in rgb)  # (Palette.with_accent: 10% over the white card)
+    for hexv, other in ((light, "#ffffff"), (light, wash), (dark, "#1b1f27")):
+        if contrast(hexv, other) < 4.5:
+            problems.append(f"{hexv} on {other}: {contrast(hexv, other):.2f}:1 (AA wants 4.5)")
     steps = {"start": "pause:200", "sheet": SHEET + ";pause:300", "report": REPORT}
     for name, st in steps.items():
         out = web(st + ";style:body=--o-accent;style:[data-tag=app-mark] svg=width;attr:link[rel=icon]=href", f"brand-{name}")
@@ -343,15 +343,40 @@ def m8():
     if "WINDOW-ICON: mojoui-app-logo" not in out:
         problems.append("GTK: the window's icon isn't the logo")
     img = Image.open(shot).convert("RGB")
-    ring = [(x, y) for x in range(100, 1400, 2) for y in range(240, 760, 2) if near(img.getpixel((x, y)), (14, 122, 67), 24)]
+    ring = [(x, y) for x in range(100, 1400, 2) for y in range(240, 760, 2) if near(img.getpixel((x, y)), (90, 236, 162), 24)]
     if len(ring) < 50:
-        problems.append(f"GTK sheet: the selection ring isn't Ledger green ({len(ring)} green pixels)")
-    out, _ = gtk(REPORT, "brand-report-gtk")
-    tones = re.findall(r"^TONE: ([\d,.]+) = (\w+)$", out, re.M)
-    if any(t == "accent" for _, t in tones):
-        problems.append(f"GTK report: a figure in the accent (red would read as a loss): {tones}")
-    return not problems, "; ".join(problems) or ("logo 1 in the menu bar (GTK, web); indigo on the start screen, Ledger green on the sheet (the ring too), "
-                                                  "Signal red on the report's chrome with neutral figures; every accent ≥ 4.5:1 on white")
+        problems.append(f"GTK sheet: the selection ring isn't the brand green ({len(ring)} green pixels)")
+    # Liquid light: the app wears the green itself, unlifted
+    import os
+    import drive
+    e = g25.env("brand-light")
+    (OUT / "brand-light" / "config" / "settings.txt").write_text("appearance=light\n")
+    saved = {k: os.environ.get(k) for k in e}
+    os.environ.update(e)
+    try:
+        r, out = drive.web_run(BUILD / "omxplorer" / "web", "pause:200;style:body=--o-accent", shot=str(OUT / "brand-light-web.png"), viewport=(1742, 876))
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    acc = re.search(r"^STYLE: body --o-accent (.+)$", out, re.M)
+    if not acc or acc.group(1).strip().lower() != light:
+        problems.append(f"web light: accent {acc.group(1) if acc else None}, want {light}")
+    # the report draws its chart in the same green (Liquid's first series is the brand's)
+    out, shot = gtk(REPORT + ";tap:Chart tile;pause:400", "brand-report-gtk")
+    tiles = boxes(out, "chart-tile")
+    img = Image.open(shot).convert("RGB")
+    sx = img.size[0] / 1742
+    green = 0
+    if tiles:
+        x, y, w, h = tiles[0]
+        green = sum(1 for px in img.crop((int(x * sx), int(y * sx), int((x + w) * sx), int((y + h) * sx))).getdata() if near(px, (90, 236, 162), 20))
+    if green < 2000:
+        problems.append(f"GTK report: the chart isn't drawn in the brand green ({green} green pixels)")
+    return not problems, "; ".join(problems) or ("logo 1 in the menu bar (GTK, web); the brand green on the start screen, the sheet (the ring too) "
+                                                  "and the report, its chart too (Liquid dark's lift; #0e7a43 in Liquid light); ≥ 4.5:1 on white and on the dark card")
 
 
 def todo(what):
