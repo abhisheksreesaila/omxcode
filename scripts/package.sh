@@ -23,8 +23,9 @@ if [[ "$WHAT" == "linux" ]]; then
   cp "$bin" "$out/"; cp -r "build/$EX/linux/fonts" "$out/"
   # every library the binary needs from outside the system (Mojo's runtime, the Parquet codecs): ldd resolves them
   ldd "$bin" | awk '/=> \// {print $3}' | grep -v -E '^/(usr/)?lib' | while read -r so; do cp -L "$so" "$out/lib/"; done
-  patchelf --set-rpath '$ORIGIN/lib' "$out/$EX"
-  for so in "$out"/lib/*.so*; do patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true; done
+  patchelf --set-rpath '$ORIGIN/lib' "$out/$EX"  # (the libraries stay byte for byte: each already finds its neighbours at $ORIGIN)
+  mkdir -p "$out/licenses"; cp apple/licenses/MODULAR-*.txt linux/licenses/*-*.txt mojoui/hosts/static/fonts/LICENSE-*.txt "$out/licenses/"; cp linux/licenses/NOTICE.txt "$out/"
+  cp LICENSE "$out/LICENSE.txt"
   icon_png 256 "$out/$EX.png"
   cat > "$out/install.sh" <<EOF
 #!/usr/bin/env bash
@@ -33,7 +34,7 @@ set -euo pipefail
 here="\$(cd "\$(dirname "\$0")" && pwd)"
 dest="\$HOME/.local/share/$EX"
 rm -rf "\$dest"; mkdir -p "\$dest" "\$HOME/.local/bin" "\$HOME/.local/share/applications" "\$HOME/.local/share/icons/hicolor/256x256/apps"
-cp -r "\$here/$EX" "\$here/fonts" "\$here/lib" "\$dest/"
+cp -r "\$here/$EX" "\$here/fonts" "\$here/lib" "\$here/licenses" "\$here/NOTICE.txt" "\$here/LICENSE.txt" "\$dest/"  # (the licences travel with the libraries)
 cp "\$here/$EX.png" "\$HOME/.local/share/icons/hicolor/256x256/apps/$EX.png"
 ln -sf "\$dest/$EX" "\$HOME/.local/bin/$EX"
 cat > "\$HOME/.local/share/applications/$EX.desktop" <<DESK
@@ -60,7 +61,9 @@ EOF
 $EX for Linux (x86_64)
 Run it here:   ./$EX            (or ./$EX path/to/file.csv)
 Install it:    ./install.sh     (launcher entry + ~/.local/bin/$EX; remove with $EX-uninstall)
-Needs GTK 4. Queries use an NVIDIA GPU when the driver is there, the CPU otherwise.
+Built for a recent Linux with GTK 4, libadwaita and WebKitGTK 6.0 (Ubuntu 24.04 or Fedora 40 should do; not yet tried on either).
+Queries use an NVIDIA GPU when the driver is there, the CPU otherwise.
+Licences: LICENSE.txt (MIT, omxplorer's own code); NOTICE.txt (the bundled libraries).
 EOF
   rm -f "$out.tar.gz"; tar -C dist -czf "$out.tar.gz" "$(basename "$out")"
   echo "$out.tar.gz ($(du -h "$out.tar.gz" | cut -f1))"

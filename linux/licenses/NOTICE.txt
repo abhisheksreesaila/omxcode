@@ -1,0 +1,27 @@
+omxplorer for Linux carries four runtime libraries from Modular's Mojo and MAX packages,
+byte for byte as Modular ships them (not modified), in lib/:
+
+  libKGENCompilerRTShared.so    from mojo-compiler 1.1.0
+  libAsyncRTRuntimeGlobals.so   from mojo-compiler 1.1.0
+  libMSupportGlobals.so         from mojo-compiler 1.1.0
+  libAsyncRTMojoBindings.so     from max-core 26.6.0
+
+MAX is licensed by Modular Inc under the Modular MAX Community License.
+Copyright Modular Inc. IN NO EVENT SHALL MODULAR INC BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH USE OF MAX OR ANY DERIVATIVE WORK THEREOF.
+
+The licence's full text is in licenses/MODULAR-MAX-COMMUNITY-LICENSE.txt, and Modular's
+third-party notices are in licenses/MODULAR-THIRD-PARTY-NOTICES.txt. (The PyPI wheels these
+libraries come from name "MAX Platform Software License" and carry no licence text; the conda
+packages of the same versions ship the Modular MAX Community License, which is the text included.)
+
+It also carries two compression libraries for Parquet files, in lib/, unmodified from
+conda-forge: libzstd.so.1 (zstd 1.5.7, BSD licence: licenses/ZSTD-LICENSE.txt) and
+libsnappy.so.1 (snappy 1.2.2, BSD 3-clause licence: licenses/SNAPPY-COPYING.txt).
+The fonts in fonts/ (Inter, Geist, JetBrains Mono) are under the SIL Open Font License:
+licenses/LICENSE-Inter.txt, LICENSE-Geist.txt, LICENSE-JetBrainsMono.txt.
+
+omxplorer's own code is under the MIT licence: https://github.com/abhisheksreesaila/omxcode
+Modular's libraries stay under Modular's terms above; the MIT licence does not cover them.
+omxplorer is not a product of Modular and is not endorsed by Modular.
