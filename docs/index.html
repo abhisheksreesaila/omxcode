@@ -269,10 +269,11 @@ section { padding: 96px 24px; }
       <div class="ctas rise"><span style="animation-delay:500ms"><a class="cta" href="#get">Get the alpha</a></span><span style="animation-delay:580ms"><a class="more" href="#roadmap">See the roadmap</a></span></div>
       <div class="plats rise" aria-label="Where it runs today"><span style="animation-delay:660ms"><i></i><b>Linux</b> runs</span><span style="animation-delay:700ms"><i></i><b>Mac</b> runs on CI Macs</span><span style="animation-delay:740ms"><i></i><b>Web</b> runs</span><span class="am" style="animation-delay:780ms"><i></i><b>Android</b> emulator</span><span class="bl" style="animation-delay:820ms"><i></i><b>iPhone</b> builds</span></div>
     </div>
-    <div class="rv" data-slot="robot-fleet">
-      <figure class="bframe"><div class="bar"><i></i><i></i><i></i><span>omxplorer · Linux · why did the robot drop it?</span></div>
-        <video src="img/clip-robots.mp4" poster="img/clip-robots.jpg" muted loop playsinline preload="metadata" data-play aria-label="omxplorer opens 63,344 real DROID robot episodes as a sheet, charts success by lab, plays a failed episode's video beside its joint and gripper telemetry on one cursor as the shirt falls, asks in words over 16.8 million telemetry rows, opens the DROID paper by key and exports a pack"></video></figure>
-      <p class="hcap"><b>Why did the robot drop it?</b> 63,344 real robot episodes from 13 labs, their video and 16.8M telemetry rows, linked by key and time. A question in words over every row in about 40 ms.<br>↳ DROID (CC-BY-4.0) · docs/goals/47-report.md · M0–M8 PASS</p>
+    <!-- the framework's own claim, shown: the GPU works and the window stays live (the robot story lives on omxlabs.tech) -->
+    <div class="rv">
+      <figure class="bframe"><div class="bar"><i></i><i></i><i></i><span>built with omxcode · Linux · 100 million rows</span></div>
+        <video src="img/clip-island-100m.mp4" poster="img/clip-island-100m.jpg" muted loop playsinline preload="metadata" data-play aria-label="An app built with omxcode computes medians over 100 million rows on the GPU, its progress in the top island, while the window stays live"></video></figure>
+      <p class="hcap"><b>100 million rows, the window live.</b> A median by region in 0.77 s on the GPU; the longest gap between frames meanwhile, 33 ms. One Mojo program, two functions.<br>↳ Linux · RTX 3090 · docs/goals/30-report.md</p>
     </div>
   </div>
   <div class="wrap">
@@ -430,7 +431,7 @@ SLOW: update msg=7 80.06 ms</pre>
   </div>
 </section>
 
-<!-- Gallery: real screens and clips; the lead slot waits for the robot-fleet story -->
+<!-- Gallery: real screens and clips of apps built with omxcode; omxplorer, the showcase, has its own page -->
 <section id="gallery">
   <div class="wrap">
     <div class="head">
@@ -439,21 +440,18 @@ SLOW: update msg=7 80.06 ms</pre>
       <p class="lede rv">Every picture here is the framework running. Clips are recorded by scripts in the repo.</p>
     </div>
     <div class="gal">
-      <!-- the robot-fleet story leads the hero; goal 41's claim story opens the gallery -->
+      <figure class="gi w8 rv"><div class="m"><video src="img/clip-drone.mp4" poster="img/clip-drone.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer opens a drone inspection video with its telemetry chart and map, finds defects, compares two flights and plans the next one"></video></div>
+        <figcaption><b>A drone inspection, end to end.</b>Video beside its telemetry and map; defects found, two flights compared, the next flight planned.<small>Linux · generated footage · goal 39</small></figcaption></figure>
       <figure class="gi w4 rv"><div class="m"><video src="img/clip-claims.mp4" poster="img/clip-claims.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer links a dock video, a shipments sheet and 17 bills of lading and answers which damaged pallets were disputed"></video></div>
         <figcaption><b>A claim answered in two minutes.</b>A dock video, a sheet and 17 PDFs, linked by key and time.<small>generated data · real functionality · goal 41</small></figcaption></figure>
-      <figure class="gi w8 rv"><div class="m"><video src="img/clip-island-100m.mp4" poster="img/clip-island-100m.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer computing medians over 100 million rows, the progress in its top island, the window live"></video></div>
-        <figcaption><b>100 million rows, the window live.</b>A median by region in 0.77 s; the longest gap between frames meanwhile, 33 ms.<small>Linux · RTX 3090 · docs/goals/30-report.md</small></figcaption></figure>
       <figure class="gi w6 rv"><div class="m"><video src="img/clip-warehouse.mp4" poster="img/clip-warehouse.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer turns a warehouse video into rows, joins it with shipments and makes a reel of damaged pallets with faces blurred"></video></div>
         <figcaption><b>A warehouse video becomes rows.</b>Detections joined with shipments, a reel of damaged pallets with faces blurred.<small>Linux · generated footage · goal 39</small></figcaption></figure>
-      <figure class="gi w6 rv"><div class="m"><video src="img/clip-drone.mp4" poster="img/clip-drone.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer opens a drone inspection video with its telemetry chart and map, finds defects, compares two flights and plans the next one"></video></div>
-        <figcaption><b>A drone inspection, end to end.</b>Video beside its telemetry and map; defects found, two flights compared, the next flight planned.<small>Linux · generated footage · goal 39</small></figcaption></figure>
-      <figure class="gi rv"><div class="m"><img src="gallery/img/omxplorer-sheet-mac.png" alt="omxplorer's sheet on the Mac, in AppKit" loading="lazy"></div>
-        <figcaption><b>omxplorer on the Mac.</b>The same app in AppKit.<small>Mac · GitHub macOS runner</small></figcaption></figure>
-      <figure class="gi rv"><div class="m"><img src="gallery/img/console-models-web.png" alt="omxconsole's My models screen in the browser" loading="lazy"></div>
-        <figcaption><b>omxconsole.</b>Serves your local AI models; built from components only.<small>web · Linux · Mac</small></figcaption></figure>
-      <figure class="gi rv"><div class="m"><img src="img/agentchat-web.png" alt="Agent chat: an AG-UI agent answers with a card it built" loading="lazy"></div>
+      <figure class="gi w6 rv"><div class="m"><img src="img/agentchat-web.png" alt="Agent chat: an AG-UI agent answers with a card it built" loading="lazy"></div>
         <figcaption><b>Agent chat.</b>An AG-UI agent answers with cards and forms you can use.<small>web · Linux</small></figcaption></figure>
+      <figure class="gi w6 rv"><div class="m"><img src="gallery/img/omxplorer-sheet-mac.png" alt="omxplorer's sheet on the Mac, in AppKit" loading="lazy"></div>
+        <figcaption><b>omxplorer on the Mac.</b>The same app in AppKit.<small>Mac · GitHub macOS runner</small></figcaption></figure>
+      <figure class="gi w6 rv"><div class="m"><img src="gallery/img/console-models-web.png" alt="omxconsole's My models screen in the browser" loading="lazy"></div>
+        <figcaption><b>omxconsole.</b>Serves your local AI models; built from components only.<small>web · Linux · Mac</small></figcaption></figure>
     </div>
     <div class="ctas rv" style="justify-content:flex-start"><a class="cta" href="gallery/">Open the full gallery</a><a class="more" href="omxplorer.html">Meet omxplorer</a></div>
   </div>
