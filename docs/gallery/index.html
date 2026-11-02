@@ -53,6 +53,7 @@ section { padding: 64px 24px 96px; }
 .pl li { font-size: 14.5px; line-height: 1.45; color: var(--ink2); padding-left: 18px; position: relative; }
 .pl li::before { content: ""; position: absolute; left: 0; top: .55em; width: 7px; height: 7px; border-radius: 50%; background: var(--oq-ok); }
 .links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: auto; } .links .src { margin-top: 0; }
+.dlnote { margin: 0; font: 12px/1.6 var(--mono); color: var(--ink2); overflow-wrap: anywhere; }
 .more2 { margin-top: 64px; } .sub { margin: 10px 0 0; color: var(--ink2); font-size: 16px; max-width: 640px; }
 .photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
 .mini .pic { aspect-ratio: 4 / 3; } .mini .info { padding: 14px 16px 16px; gap: 6px; } .mini h3 { font-size: 18px; }
@@ -76,17 +77,17 @@ footer a { color: var(--ink2); }
 <nav class="lnav">
   <a class="brand" href="../"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode</a>
   <div class="links"><a href="../#vision">Vision</a><a href="../#roadmap">Roadmap</a><a class="on" href="./">Gallery</a><a href="../components.html">Components</a><a href="../#numbers">Numbers</a></div>
-  <div class="right"><a class="cta" href="../#get">Download</a></div>
+  <div class="right"><a class="cta" href="../#get">Build your own</a></div>
 </nav>
 <main>
 <section><div class="wrap">
   <div class="head">
     <div class="eyebrow">Gallery</div>
     <h1>Two apps, and what else it builds.</h1>
-    <p class="lede">omxplorer and omxconsole are the products. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
+    <p class="lede">omxplorer and omxconsole are the products: download omxplorer below and play with it. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
   </div>
   <div class="grid">
-<article class="card star">
+<article class="card star" id="omxplorer">
   <div class="media">
     <figure class="pic"><video src="../img/clip-robots.mp4" poster="../img/clip-robots.jpg" muted loop playsinline autoplay preload="metadata" aria-label="omxplorer: why did the robot drop it?"></video>
       <img hidden alt=""><figcaption>Why did the robot drop it? · real DROID data, Liquid dark</figcaption></figure>
@@ -99,10 +100,11 @@ footer a { color: var(--ink2); }
     <ul class="pl"><li>63,344 real robot episodes (DROID, 13 labs) with 16.8M telemetry rows under them</li><li>A question in words over every telemetry row in about 40 ms (JOIN LINKED)</li><li>Video and telemetry on one time cursor; the window never waits</li></ul>
     <div class="plats"><span class="ok"><i></i><b>Linux</b> runs</span><span class="ok"><i></i><b>Mac</b> runs on CI Macs</span><span class="ok"><i></i><b>Web</b> runs</span></div>
     <p class="next"><span>Next</span>The web on WebGPU, so the work runs on the visitor&#x27;s GPU</p>
-    <div class="links"><a class="cta" href="../omxplorer.html">See omxplorer</a><a class="src" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/omxplorer">examples/omxplorer</a></div>
+    <div class="links"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/linux-app/omxplorer-linux-x86_64.tar.gz">Download for Linux</a><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/mac-app/omxplorer-mac-gpu.zip">Download for Mac</a><a class="more" href="../omxplorer.html">See omxplorer</a></div>
+    <p class="dlnote">Linux: x86_64, GTK 4, NVIDIA for the GPU path; unpack and run ./omxplorer · Mac: Apple Silicon, macOS 26, not notarised: xattr -dr com.apple.quarantine OmxplorerMojo.app</p>
   </div>
 </article>
-<article class="card star">
+<article class="card star" id="omxconsole">
   <div class="media">
     <figure class="pic"><img src="img/console-models-web.png" alt="omxconsole: Web: my models"><figcaption>Web: my models</figcaption></figure>
     <div class="th"><button type="button" aria-label="Web: my models" class=on data-src="img/console-models-web.png" data-cap="Web: my models"><img src="img/console-models-web.png" alt="" loading="lazy"></button><button type="button" aria-label="Linux: the same screen, native widgets" data-src="img/console-models-gtk.png" data-cap="Linux: the same screen, native widgets"><img src="img/console-models-gtk.png" alt="" loading="lazy"></button><button type="button" aria-label="Mac, on GitHub&#x27;s macOS runner" data-src="img/console-models-mac.png" data-cap="Mac, on GitHub&#x27;s macOS runner"><img src="img/console-models-mac.png" alt="" loading="lazy"></button><button type="button" aria-label="A model&#x27;s overview, live numbers" data-src="img/console-overview-gtk.png" data-cap="A model&#x27;s overview, live numbers"><img src="img/console-overview-gtk.png" alt="" loading="lazy"></button><button type="button" aria-label="Web at phone size" data-src="img/console-overview-web-phone.png" data-cap="Web at phone size"><img src="img/console-overview-web-phone.png" alt="" loading="lazy"></button></div>

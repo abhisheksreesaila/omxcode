@@ -17,7 +17,10 @@ STAR = dict(
            ("img/robots-fleet.jpg", "63,344 episodes as one sheet"),
            ("img/robots-by-lab.jpg", "Success by lab, from the chart's sentence"),
            ("img/robots-ask.jpg", "Asked in words: 2,997 regrasped failures, the DROID paper linked")],
-    src="examples/omxplorer", page="../omxplorer.html")
+    src="examples/omxplorer", page="../omxplorer.html",
+    downloads=[("Download for Linux", "https://github.com/abhisheksreesaila/omxcode/releases/download/linux-app/omxplorer-linux-x86_64.tar.gz"),
+               ("Download for Mac", "https://github.com/abhisheksreesaila/omxcode/releases/download/mac-app/omxplorer-mac-gpu.zip")],
+    dlnote="Linux: x86_64, GTK 4, NVIDIA for the GPU path; unpack and run ./omxplorer · Mac: Apple Silicon, macOS 26, not notarised: xattr -dr com.apple.quarantine OmxplorerMojo.app")
 
 STAR2 = dict(
     name="omxconsole", kind="The second app · local AI",
@@ -111,7 +114,13 @@ def star(a):
         s0, c0 = a["shots"][0]
         pic = f'<img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}"><figcaption>{e(c0)}</figcaption>'
     proves = "".join(f"<li>{e(p)}</li>" for p in a["proves"])
-    return f'''<article class="card star">
+    if "downloads" in a:
+        links = ('<div class="links">' + "".join(f'<a class="cta" href="{u}">{e(t)}</a>' for t, u in a["downloads"])
+                 + f'<a class="more" href="{a["page"]}">See omxplorer</a></div>'
+                 + f'\n    <p class="dlnote">{e(a["dlnote"])}</p>')
+    else:
+        links = f'<div class="links"><a class="cta" href="{a["page"]}">{e(a.get("cta", "See omxplorer"))}</a><a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a></div>'
+    return f'''<article class="card star" id="{e(a["name"])}">
   <div class="media">
     <figure class="pic">{pic}</figure>
     {th}
@@ -123,7 +132,7 @@ def star(a):
     <ul class="pl">{proves}</ul>
     <div class="plats">{chips(a["runs"])}</div>
     <p class="next"><span>Next</span>{e(a["next"])}</p>
-    <div class="links"><a class="cta" href="{a["page"]}">{e(a.get("cta", "See omxplorer"))}</a><a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a></div>
+    {links}
   </div>
 </article>'''
 
@@ -183,6 +192,7 @@ section { padding: 64px 24px 96px; }
 .pl li { font-size: 14.5px; line-height: 1.45; color: var(--ink2); padding-left: 18px; position: relative; }
 .pl li::before { content: ""; position: absolute; left: 0; top: .55em; width: 7px; height: 7px; border-radius: 50%; background: var(--oq-ok); }
 .links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: auto; } .links .src { margin-top: 0; }
+.dlnote { margin: 0; font: 12px/1.6 var(--mono); color: var(--ink2); overflow-wrap: anywhere; }
 .more2 { margin-top: 64px; } .sub { margin: 10px 0 0; color: var(--ink2); font-size: 16px; max-width: 640px; }
 .photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
 .mini .pic { aspect-ratio: 4 / 3; } .mini .info { padding: 14px 16px 16px; gap: 6px; } .mini h3 { font-size: 18px; }
@@ -206,14 +216,14 @@ footer a { color: var(--ink2); }
 <nav class="lnav">
   <a class="brand" href="../"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode</a>
   <div class="links"><a href="../#vision">Vision</a><a href="../#roadmap">Roadmap</a><a class="on" href="./">Gallery</a><a href="../components.html">Components</a><a href="../#numbers">Numbers</a></div>
-  <div class="right"><a class="cta" href="../#get">Download</a></div>
+  <div class="right"><a class="cta" href="../#get">Build your own</a></div>
 </nav>
 <main>
 <section><div class="wrap">
   <div class="head">
     <div class="eyebrow">Gallery</div>
     <h1>Two apps, and what else it builds.</h1>
-    <p class="lede">omxplorer and omxconsole are the products. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
+    <p class="lede">omxplorer and omxconsole are the products: download omxplorer below and play with it. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
   </div>
   <div class="grid">
 STAR_CARD
