@@ -8,27 +8,16 @@ GH = "https://github.com/abhisheksreesaila/omxcode/tree/main/"
 STAR = dict(
     name="omxplorer", kind="The product · data explorer",
     line="A spreadsheet, the video behind every row and the documents that explain it, on one page, on your own GPU.",
-    proves=["63,344 real robot episodes (DROID, 13 labs) with 16.8M telemetry rows under them",
-            "A question in words over every telemetry row in about 40 ms (JOIN LINKED)",
-            "Video and telemetry on one time cursor; the window never waits"],
-    runs=[("Linux", "ok"), ("Mac", "ci"), ("Web", "ok")], next="The web on WebGPU, so the work runs on the visitor's GPU",
     video="../img/clip-robots.mp4", poster="../img/clip-robots.jpg",
     shots=[("img/robots-drop.jpg", "The drop: F00118's video beside its gripper and joint telemetry"),
            ("img/robots-fleet.jpg", "63,344 episodes as one sheet"),
            ("img/robots-by-lab.jpg", "Success by lab, from the chart's sentence"),
            ("img/robots-ask.jpg", "Asked in words: 2,997 regrasped failures, the DROID paper linked")],
-    src="examples/omxplorer", page="../omxplorer.html",
-    downloads=[("Download for Linux", "https://github.com/abhisheksreesaila/omxcode/releases/download/linux-app/omxplorer-linux-x86_64.tar.gz"),
-               ("Download for Mac", "https://github.com/abhisheksreesaila/omxcode/releases/download/mac-app/omxplorer-mac-gpu.zip")],
-    dlnote="Linux: x86_64, GTK 4, NVIDIA for the GPU path; unpack and run ./omxplorer · Mac: Apple Silicon, macOS 26, not notarised: xattr -dr com.apple.quarantine OmxplorerMojo.app")
+    src="examples/omxplorer", page="../omxplorer.html", cta="See omxplorer")
 
 STAR2 = dict(
     name="omxconsole", kind="The second app · local AI",
     line="Your GPU as a private model server, with its admin console rebuilt in omxcode from framework parts only.",
-    proves=["A 4,400-line JavaScript console rebuilt with no app CSS and no pixel nudges",
-            "At least 99 % of the web's pixels equal the original, on all ten screens",
-            "The same file draws native Linux and Mac windows"],
-    runs=[("Linux", "ok"), ("Web", "ok"), ("Mac", "ci")], next="Real Mac hardware, then phones",
     shots=[("img/console-models-web.png", "Web: my models"), ("img/console-models-gtk.png", "Linux: the same screen, native widgets"),
            ("img/console-models-mac.png", "Mac, on GitHub's macOS runner"), ("img/console-overview-gtk.png", "A model's overview, live numbers"),
            ("img/console-overview-web-phone.png", "Web at phone size")],
@@ -113,13 +102,8 @@ def star(a):
     else:
         s0, c0 = a["shots"][0]
         pic = f'<img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}"><figcaption>{e(c0)}</figcaption>'
-    proves = "".join(f"<li>{e(p)}</li>" for p in a["proves"])
-    if "downloads" in a:
-        links = ('<div class="links">' + "".join(f'<a class="cta" href="{u}">{e(t)}</a>' for t, u in a["downloads"])
-                 + f'<a class="more" href="{a["page"]}">See omxplorer</a></div>'
-                 + f'\n    <p class="dlnote">{e(a["dlnote"])}</p>')
-    else:
-        links = f'<div class="links"><a class="cta" href="{a["page"]}">{e(a.get("cta", "See omxplorer"))}</a><a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a></div>'
+    # an introduction only: the app's own page carries the details and the downloads (owner, 2026-11-02)
+    links = f'<div class="links"><a class="cta" href="{a["page"]}">{e(a["cta"])}</a><a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a></div>'
     return f'''<article class="card star" id="{e(a["name"])}">
   <div class="media">
     <figure class="pic">{pic}</figure>
@@ -129,9 +113,6 @@ def star(a):
     <div class="kind">{e(a["kind"])}</div>
     <h3>{e(a["name"])}</h3>
     <p class="line">{e(a["line"])}</p>
-    <ul class="pl">{proves}</ul>
-    <div class="plats">{chips(a["runs"])}</div>
-    <p class="next"><span>Next</span>{e(a["next"])}</p>
     {links}
   </div>
 </article>'''
@@ -188,11 +169,7 @@ section { padding: 64px 24px 96px; }
 .star .info { padding: 28px 28px 26px; gap: 14px; }
 .star h3 { font-size: 34px; letter-spacing: -.035em; }
 .star .line { font-size: 17px; color: var(--ink); }
-.pl { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
-.pl li { font-size: 14.5px; line-height: 1.45; color: var(--ink2); padding-left: 18px; position: relative; }
-.pl li::before { content: ""; position: absolute; left: 0; top: .55em; width: 7px; height: 7px; border-radius: 50%; background: var(--oq-ok); }
 .links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: auto; } .links .src { margin-top: 0; }
-.dlnote { margin: 0; font: 12px/1.6 var(--mono); color: var(--ink2); overflow-wrap: anywhere; }
 .more2 { margin-top: 64px; } .sub { margin: 10px 0 0; color: var(--ink2); font-size: 16px; max-width: 640px; }
 .photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
 .mini .pic { aspect-ratio: 4 / 3; } .mini .info { padding: 14px 16px 16px; gap: 6px; } .mini h3 { font-size: 18px; }
@@ -223,7 +200,7 @@ footer a { color: var(--ink2); }
   <div class="head">
     <div class="eyebrow">Gallery</div>
     <h1>Two apps, and what else it builds.</h1>
-    <p class="lede">omxplorer and omxconsole are the products: download omxplorer below and play with it. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
+    <p class="lede">omxplorer and omxconsole are the products; each has its own page (omxplorer's has the downloads). The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
   </div>
   <div class="grid">
 STAR_CARD
