@@ -145,6 +145,17 @@ section { padding: 96px 24px; }
 .scard .tx { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .scard h3 { font-size: 17.5px; } .scard p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink2); }
 .scard .badge { align-self: flex-start; margin-top: auto; }
+/* agents build screens (AG-UI): what an agent can draw today, what's next */
+.ag { display: grid; grid-template-columns: 1.05fr 1fr; gap: 28px; align-items: center; margin-top: 36px; }
+.ag .shot { border-radius: 20px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); background: var(--oq-surface-1); }
+.ag .shot img { display: block; width: 100%; }
+.ag ul.facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.ag ul.facts li { font-size: 15px; line-height: 1.5; color: var(--ink2); } .ag ul.facts b { color: var(--ink); font-weight: 600; }
+.ag .set { margin-top: 20px; } .ag .set h4 { margin: 0 0 8px; font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); display: flex; align-items: center; gap: 10px; }
+.ag .pills { display: flex; flex-wrap: wrap; gap: 6px; } .ag .pills span { font: 500 13px var(--sans); padding: 5px 11px; border-radius: 999px; background: var(--oq-surface-1); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
+.ag .pills.next span { color: var(--ink2); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--soon) 45%, transparent); }
+.ag .fine { margin-top: 18px; font-size: 13px; color: var(--ink2); line-height: 1.5; }
+@media (max-width: 860px) { .ag { grid-template-columns: 1fr; } }
 .teasers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
 .teaser { color: inherit; display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: center; border-radius: 20px; padding: 12px 18px 12px 12px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); text-decoration: none; }
 .teaser img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: top left; border-radius: 12px; display: block; }
@@ -253,7 +264,7 @@ section { padding: 96px 24px; }
 
 <nav class="lnav">
   <a class="brand" href="#top"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode</a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#vision">Vision</a><a href="#roadmap">Roadmap</a><a href="#gallery">Gallery</a><a href="#how">How it works</a><a href="#components">Components</a><a href="#numbers">Numbers</a></div>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#vision">Vision</a><a href="#roadmap">Roadmap</a><a href="#agents">Agents</a><a href="#gallery">Gallery</a><a href="#how">How it works</a><a href="#components">Components</a><a href="#numbers">Numbers</a></div>
   <div class="right"><a class="cta" href="#get">Download</a></div>
 </nav>
 
@@ -427,6 +438,32 @@ SLOW: update msg=7 80.06 ms</pre>
         <div><div class="q">Can it do a canvas app?</div><h3>The Canvas draws today. JS canvases are next.</h3><p>Sketch draws pressure ink on Linux and the web. Next, a JS component path, so a canvas library from npm drops in the way CodeMirror and ECharts already do.</p></div></a>
       <a class="teaser rv" href="gallery/#widgets"><img src="img/widgets-web-dark.png" alt="The widgets app: a CodeMirror note, a counter and an ECharts chart inside a native app" loading="lazy">
         <div><div class="q">Can I use my JS libraries?</div><h3>Yes, as widgets inside native apps.</h3><p>CodeMirror and ECharts from npm run on Linux and the web, under a strict content policy, and agents can read and set them.</p></div></a>
+    </div>
+  </div>
+</section>
+
+<!-- Agents build screens: AG-UI today (what's proven, what isn't), and the catalog that grows -->
+<section id="agents">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Agents build screens · AG-UI</div>
+      <h2 class="rv">An agent answers with a screen. <span class="two">Drawn natively, never run as code.</span></h2>
+      <p class="lede rv">An omxcode app speaks <a href="https://docs.ag-ui.com">AG-UI</a>, the open protocol between agents and apps. The agent sends a screen as data; the app checks it against a catalog of components and draws it with its own widgets. <b>Early today; the catalog grows with every release.</b></p>
+    </div>
+    <div class="ag rv">
+      <div class="shot"><img src="img/agentchat-web.png" alt="Agent chat: asked for sales as a chart, an AG-UI agent answers with a card holding a chart, a Quarter/Year switch and a table" loading="lazy"></div>
+      <div>
+        <ul class="facts">
+          <li><b>Speaks AG-UI.</b> Reads streams recorded with the official AG-UI SDK, and every request it sends validates against the SDK's own models.</li>
+          <li><b>Safe by construction.</b> No component an agent can name runs code or loads a page. Anything outside the catalog is refused, and the agent is told why.</li>
+          <li><b>Live and two-way.</b> Fields and toggles edit state the agent shares; buttons send their answer back.</li>
+        </ul>
+        <div class="set"><h4>Agents can use today <span class="badge ok"><i></i>13 components</span></h4>
+          <div class="pills"><span>Card</span><span>VStack</span><span>HStack</span><span>Divider</span><span>Text</span><span>Paragraph</span><span>Table</span><span>Sparkline</span><span>Meter</span><span>Button</span><span>TextField</span><span>Toggle</span><span>Segmented</span></div></div>
+        <div class="set"><h4>Next <span class="badge soon"><i></i>planned</span></h4>
+          <div class="pills next"><span>Text area</span><span>Full charts</span><span>Data grid</span><span>Date picker</span><span>Image</span><span>…the rest of the 121</span></div></div>
+        <p class="fine">Proved against a scripted AG-UI agent built on the official SDK. Not yet tested against other AG-UI frameworks or recorded with a live model. docs/agui.md</p>
+      </div>
     </div>
   </div>
 </section>

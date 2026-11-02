@@ -13,9 +13,18 @@ for a in "$@"; do
     --web) host=web ;;
   esac
 done
-port=${AGUI_PORT:-8765}
 [ -e "build/agentchat/$host" ] || scripts/build.sh agentchat "$host"
 py=$(pixi run python -c 'import sys; print(sys.executable)')  # (run python itself, so $! is the agent, not pixi)
+# the agent's port: AGUI_PORT, else 8765, else the next free one (something else often holds 8765)
+port=${AGUI_PORT:-$("$py" -c '
+import socket
+for p in range(8765, 8800):
+    s = socket.socket()
+    try: s.bind(("127.0.0.1", p)); print(p); break
+    except OSError: pass
+    finally: s.close()')}
+[ -n "$port" ] || { echo "no free port in 8765-8799: set AGUI_PORT" >&2; exit 1; }
+echo "agent on http://127.0.0.1:$port/"
 "$py" scripts/agui_agent.py --serve --port "$port" "${mode[@]}" &
 agent=$!
 trap 'kill "$agent" 2>/dev/null || true' EXIT
