@@ -15,13 +15,7 @@ STAR = dict(
            ("img/robots-ask.jpg", "Asked in words: 2,997 regrasped failures, the DROID paper linked")],
     src="examples/omxplorer", page="../omxplorer.html", cta="See omxplorer")
 
-STAR2 = dict(
-    name="omxconsole", kind="The second app · local AI",
-    line="Your GPU as a private model server, with its admin console rebuilt in omxcode from framework parts only.",
-    shots=[("img/console-models-web.png", "Web: my models"), ("img/console-models-gtk.png", "Linux: the same screen, native widgets"),
-           ("img/console-models-mac.png", "Mac, on GitHub's macOS runner"), ("img/console-overview-gtk.png", "A model's overview, live numbers"),
-           ("img/console-overview-web-phone.png", "Web at phone size")],
-    src="examples/console", page=GH + "examples/console", cta="See its code")  # (no page of its own yet)
+# omxconsole comes back when it's Mojo end to end (its engine is Python today; owner, 2026-11-02)
 
 APPS = [
     dict(name="Dictate", kind="Speech to text",
@@ -200,8 +194,8 @@ footer a { color: var(--ink2); }
 <section><div class="wrap">
   <div class="head">
     <div class="eyebrow">Gallery</div>
-    <h1>Two apps, and what else it builds.</h1>
-    <p class="lede">omxplorer and omxconsole are the products; each has its own page (omxplorer's has the downloads). The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
+    <h1>omxplorer, and what else it builds.</h1>
+    <p class="lede">omxplorer is the product; its page has the downloads. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
   </div>
   <div class="grid">
 STAR_CARD
@@ -238,7 +232,7 @@ if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.querySelect
 </html>
 '''
 
-out = (PAGE.replace("STAR_CARD", star(STAR) + "\n" + star(STAR2)).replace("CARDS", "\n".join(card(a) for a in APPS))
+out = (PAGE.replace("STAR_CARD", star(STAR)).replace("CARDS", "\n".join(card(a) for a in APPS))
        .replace("SOON", "".join(f"<div><i>soon</i><b>{e(t)}</b><p>{e(p)}</p></div>" for t, p in SOON)))
 p = pathlib.Path(__file__).resolve().parent.parent / "docs/gallery/index.html"
 p.write_text(out)

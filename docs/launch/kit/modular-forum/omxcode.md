@@ -15,10 +15,7 @@
 
 ## Body (copy from here)
 
-On Sunday I showed omxplorer, a robot-data app ([Sunday's post](LINK-TO-SUNDAY-POST)). Today is the framework under it, **omxcode**, for anyone who wants to write apps in Mojo themselves. Two apps are built on it so far:
-
-- **omxplorer**: a spreadsheet with the video and documents behind every row, on your own GPU.
-- **omxconsole**: your GPU as a private, OpenAI-compatible model server on MAX, with its admin console written in omxcode (its own post on Saturday).
+On Sunday I showed omxplorer, a robot-data app ([Sunday's post](LINK-TO-SUNDAY-POST)). Today is the framework under it, **omxcode**, for anyone who wants to write apps in Mojo themselves. Its first app is **omxplorer**: a spreadsheet with the video and documents behind every row, on your own GPU.
 
 [YouTube: omxcode part 1]
 
