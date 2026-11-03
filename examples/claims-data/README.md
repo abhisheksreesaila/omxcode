@@ -46,7 +46,7 @@ and `pack/<shipment>.pdf` and `.mp4`.
 The OCR model runs inside the app's process, so the scenario runs the app in pixi's **models** environment
 (torch + docTR; it finds `.pixi/envs/models` by itself). `scripts/check M10` scores the run against `truth.json`.
 
-The cover clip on omxlabs.tech is the same story, recorded on a headless display:
+The cover clip is the same story, recorded on a headless display:
 `pixi run -e models python scripts/covers.py claims --media OUT`.
 
 ## FUNSD (evaluation only)

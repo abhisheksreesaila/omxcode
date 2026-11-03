@@ -21,7 +21,7 @@ STAR2 = dict(
     shots=[("img/console-models-web.png", "Web: my models"), ("img/console-models-gtk.png", "Linux: the same screen, native widgets"),
            ("img/console-models-mac.png", "Mac, on GitHub's macOS runner"), ("img/console-overview-gtk.png", "A model's overview, live numbers"),
            ("img/console-overview-web-phone.png", "Web at phone size")],
-    src="examples/console", page="https://omxlabs.tech/omxconsole/", cta="See omxconsole")
+    src="examples/console", page=GH + "examples/console", cta="See its code")  # (no page of its own yet)
 
 APPS = [
     dict(name="Dictate", kind="Speech to text",
@@ -103,7 +103,8 @@ def star(a):
         s0, c0 = a["shots"][0]
         pic = f'<img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}"><figcaption>{e(c0)}</figcaption>'
     # an introduction only: the app's own page carries the details and the downloads (owner, 2026-11-02)
-    links = f'<div class="links"><a class="cta" href="{a["page"]}">{e(a["cta"])}</a><a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a></div>'
+    src = "" if a["page"] == GH + a["src"] else f'<a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a>'
+    links = f'<div class="links"><a class="cta" href="{a["page"]}">{e(a["cta"])}</a>{src}</div>'
     return f'''<article class="card star" id="{e(a["name"])}">
   <div class="media">
     <figure class="pic">{pic}</figure>
