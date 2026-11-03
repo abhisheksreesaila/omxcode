@@ -15,7 +15,10 @@
 
 ## Body (copy from here)
 
-On Sunday I showed omxplorer, a robot-data app ([Sunday's post](LINK-TO-SUNDAY-POST)). Today is the framework under it, **omxcode**, for anyone who wants to write apps in Mojo themselves.
+On Sunday I showed omxplorer, a robot-data app ([Sunday's post](LINK-TO-SUNDAY-POST)). Today is the framework under it, **omxcode**, for anyone who wants to write apps in Mojo themselves. Two apps are built on it so far:
+
+- **omxplorer**: a spreadsheet with the video and documents behind every row, on your own GPU.
+- **omxconsole**: your GPU as a private, OpenAI-compatible model server on MAX, with its admin console written in omxcode (its own post on Saturday).
 
 [YouTube: omxcode part 1]
 
@@ -65,6 +68,8 @@ struct Main(App):
 
 Public alpha, MIT:
 https://github.com/abhisheksreesaila/omxcode
+
+To just try omxplorer: [Linux](https://github.com/abhisheksreesaila/omxcode/releases/download/linux-app/omxplorer-linux-x86_64.tar.gz) (x86_64, NVIDIA for the GPU path; unpack and run `./omxplorer`) or [Mac](https://github.com/abhisheksreesaila/omxcode/releases/download/mac-app/omxplorer-mac-gpu.zip) (Apple Silicon, macOS 26). To build your own:
 
 ```bash
 git clone https://github.com/abhisheksreesaila/omxcode && cd omxcode && pixi install
