@@ -48,8 +48,10 @@ comptime C_REGENERATE = 6
 comptime C_OPEN = 7  # the popup's button / the sidebar's close
 comptime C_URL = 8
 comptime C_SUGGEST = 20  # + k (k < 20)
+comptime C_INTERRUPT = 40  # + option (< 8): an interrupt's choice
 comptime C_COPY = 1000  # + message index (< 1000): copy that reply
 comptime C_CODE = 3000  # + message index × 8 + block (< 8): copy that code block
+comptime C_DECIDE = 7000  # + call × 2 (+ 1: reject), call < 1500: a confirm tool's card
 comptime C_SCREENS = 10_000
 comptime MAX_UIS = 40
 
@@ -123,6 +125,13 @@ struct AgentChat(Movable):
     var copied: Int  # the message whose Copy was pressed last (-1 none)
     var stopped: Bool  # the last run was stopped by the person
     var show_url: Bool  # an Agent URL field in the header (a developer's chat)
+    var confirm_tools: List[String]  # frontend tools that ask the person first (approve or reject)
+    var decided: List[String]  # confirm calls answered (their ids)
+    var asking: Bool  # an interrupt waits for the person's choice
+    var question: String
+    var options: List[String]
+    var asked_after: Int  # the message count when it came (the card sits there)
+    var chosen: String  # the last interrupt's answer ("" none)
 
     def __init__(out self, url: String, base: Int = 20_000, canvas_base: Int = 2000, layout: Int = CHAT_PANEL,
                  title: String = "Assistant", welcome: String = "Ask me anything.", show_url: Bool = False):
@@ -145,6 +154,13 @@ struct AgentChat(Movable):
         self.copied = -1
         self.stopped = False
         self.show_url = show_url
+        self.confirm_tools = List[String]()
+        self.decided = List[String]()
+        self.asking = False
+        self.question = ""
+        self.options = List[String]()
+        self.asked_after = 0
+        self.chosen = ""
         self.agent.offer(Tool("render_ui", "Show UI in the chat, built only from the app's catalogued components (data, never code). "
                               + "Inputs edit the shared state at their bind; the first button pressed (or choice with an action) is this tool's result.", schema()))
 
@@ -153,8 +169,58 @@ struct AgentChat(Movable):
         if len(self.suggestions) < 20:
             self.suggestions.append(text)
 
-    def offer(mut self, var tool: Tool):
+    def offer(mut self, var tool: Tool, confirm: Bool = False):
+        """A frontend tool; with `confirm` the person approves or rejects each call first: nothing runs until they do,
+        and the answer is the call's result ({"decision": "approved" | "rejected", "arguments": …})."""
+        if confirm:
+            self.confirm_tools.append(tool.name)
         self.agent.offer(tool^)
+
+    def asks_first(self, name: String) -> Bool:
+        for t in self.confirm_tools:
+            if t == name:
+                return True
+        return False
+
+    def call_at(self, k: Int) -> Tuple[Int, Int]:
+        """The k-th tool call in the conversation (message, call)."""
+        var n = 0
+        for i in range(len(self.agent.messages)):
+            for j in range(len(self.agent.messages[i].calls)):
+                if n == k:
+                    return (i, j)
+                n += 1
+        return (-1, -1)
+
+    def call_index(self, id: String) -> Int:
+        var n = 0
+        for ref m in self.agent.messages:
+            for ref c in m.calls:
+                if c.id == id:
+                    return n
+                n += 1
+        return -1
+
+    def decide(mut self, k: Int, approve: Bool):
+        """The person's answer to the k-th call (a confirm tool's): its result, then the agent runs on."""
+        var at = self.call_at(k)
+        if at[0] < 0:
+            return
+        var c = self.agent.messages[at[0]].calls[at[1]].copy()
+        if not c.done or self.agent.answered(c.id) or not self.asks_first(c.name):
+            return
+        self.agent.answer(c.id, '{"decision":"' + ("approved" if approve else "rejected") + '","arguments":' + (c.arguments if c.arguments.byte_length() > 0 else String("{}")) + "}")
+        self.decided.append(c.id)
+        self.run()
+
+    def choose(mut self, k: Int):
+        """The person picks an interrupt's option k: the run resumes with it."""
+        if not self.asking or k < 0 or k >= len(self.options) or self.agent.running:
+            return
+        self.asking = False
+        self.chosen = self.options[k]
+        self.agent.resume(json_string(self.chosen))
+        self.run()
 
     def requests(mut self) -> List[Request]:
         return self.http.take()
@@ -173,13 +239,45 @@ struct AgentChat(Movable):
         """The person says `text` and the agent runs (nothing while a run is going)."""
         if text.byte_length() == 0 or self.agent.running:
             return
-        for c in self.agent.pending():  # (UI nobody used: the agent hears it was shown, so the conversation stays whole)
-            self.agent.answer(c.id, '{"shown":true}')
+        for c in self.agent.pending():  # (UI nobody used: the agent hears it was shown; a question nobody answered, that it was dismissed)
+            self.agent.answer(c.id, '{"decision":"dismissed"}' if self.asks_first(c.name) else '{"shown":true}')
+        self.asking = False
         self.agent.say(text)
         self.screens.reset()
         self.agent_suggestions = List[String]()
         self.draft = ""
         self.run()
+
+    def ask(mut self, value_json: String):
+        """An interrupt (CUSTOM "interrupt", or LangGraph's "on_interrupt"): its question and options. The value may be
+        {"question" | "message": text, "options": [text…]} or a bare text (options: Approve, Reject)."""
+        self.question = "The agent needs your answer"
+        self.options = List[String]()
+        try:
+            var j = Json.parse(value_json)
+            if j.kind(0) == J_STRING:
+                self.question = j.text(0)
+            else:
+                var q = j.get(0, "question")
+                if q < 0:
+                    q = j.get(0, "message")
+                if q >= 0 and j.kind(q) == J_STRING:
+                    self.question = j.text(q)
+                var o = j.get(0, "options")
+                for i in range(min(j.size(o), 8)):
+                    if j.kind(j.at(o, i)) == J_STRING and j.text(j.at(o, i)).byte_length() <= 60:
+                        self.options.append(j.text(j.at(o, i)))
+        except:
+            pass
+        if self.question.byte_length() > 500:
+            var cut = String(self.question[byte = : 500])
+            self.question = cut^
+        if len(self.options) == 0:
+            self.options.append("Approve")
+            self.options.append("Reject")
+        self.asking = True
+        self.chosen = ""
+        self.asked_after = len(self.agent.messages)
 
     def last_user(self) -> Int:
         for i in range(len(self.agent.messages) - 1, -1, -1):
@@ -225,6 +323,10 @@ struct AgentChat(Movable):
             self.regenerate()
         elif k == C_OPEN:
             self.open = not self.open
+        elif k >= C_INTERRUPT and k < C_INTERRUPT + 8:
+            self.choose(k - C_INTERRUPT)
+        elif k >= C_DECIDE and k < C_DECIDE + 3000:
+            self.decide((k - C_DECIDE) // 2, (k - C_DECIDE) % 2 == 0)
         elif k >= C_SUGGEST and k < C_SUGGEST + 20:
             var list = self.agent_suggestions.copy() if len(self.agent_suggestions) > 0 else self.suggestions.copy()
             var at = k - C_SUGGEST
@@ -261,6 +363,9 @@ struct AgentChat(Movable):
                     self.again = True
             elif what == EV_STATE:
                 self.version += 1
+            elif what == EV_CUSTOM and (self.agent.custom_name == "interrupt" or self.agent.custom_name == "on_interrupt"):
+                var value = self.agent.custom_value.copy()
+                self.ask(value)
             elif what == EV_CUSTOM and self.agent.custom_name == "suggestions":
                 self.agent_suggestions = List[String]()
                 try:
@@ -306,6 +411,9 @@ struct AgentChat(Movable):
         for ref c in m.calls:
             if c.name == "render_ui" and self.screens.known(c.id):
                 continue
+            if self.asks_first(c.name):
+                tools.append(self.confirm_card(c))
+                continue
             tools.append(self.tool_card(c))
         if len(tools) > 0:
             parts.append(VStack(tools^, spacing=SPACE_S).align(START).fill())
@@ -345,6 +453,43 @@ struct AgentChat(Movable):
             rows.append(Text("→ " + (result if result.byte_length() <= 140 else String(result[byte = : 137]) + "…"), style=CAPTION))
         return Card(rows^, spacing=SPACE_XS).fill().tag("chat-tool")
 
+    def confirm_card(self, c: ToolCall) -> View:
+        """A confirm tool's call: what it will do (its name and arguments), Approve and Reject; once answered, which."""
+        var rows = List[View]()
+        var title = String("")
+        for t in self.agent.tools:
+            if t.name == c.name:
+                title = t.description
+        rows.append(HStack(Icon("circle-alert", 16), Text(title if title.byte_length() > 0 else c.name, style=HEADLINE), spacing=SPACE_S).align(CENTER))
+        try:
+            var j = Json.parse(c.arguments if c.arguments.byte_length() > 0 else String("{}"))
+            var facts = List[View]()
+            for i in range(min(len(j.keys[0]), 8)):
+                var v = j.kids[0][i]
+                var shown = j.text(v) if j.kind(v) == J_STRING else (String(j.number(v)) if j.is_whole(v) else String(j.real(v)))
+                facts.append(HStack(Text(j.keys[0][i], style=CAPTION).width(120), Text(shown).tone(TONE_STRONG), spacing=SPACE_S).align(CENTER))
+            if len(facts) > 0:
+                rows.append(VStack(facts^, spacing=SPACE_XS).align(START))
+        except:
+            pass  # (arguments still streaming)
+        var k = self.call_index(c.id)
+        var answer = self.result_of(c.id)
+        if answer.byte_length() > 0:
+            var yes = answer.find('"approved"') >= 0
+            rows.append(HStack(Spacer(), Chip("Approved" if yes else ("Rejected" if answer.find('"rejected"') >= 0 else "Dismissed"), 2 if yes else 0), spacing=0).fill())
+        elif c.done:
+            rows.append(HStack(Spacer(), Button("Reject", self.base + C_DECIDE + k * 2 + 1, style=PLAIN, icon="x"),
+                               Button("Approve", self.base + C_DECIDE + k * 2, style=PROMINENT, icon="check"), spacing=SPACE_S).fill())
+        return Card(rows^, spacing=SPACE_M).fill().tag("chat-confirm")
+
+    def interrupt_card(self) -> View:
+        var buttons = List[View]()
+        buttons.append(Spacer())
+        for k in range(len(self.options)):
+            buttons.append(Button(self.options[k], self.base + C_INTERRUPT + k, style=PROMINENT if k == 0 else PLAIN))
+        return Card(HStack(Icon("circle-alert", 16), Text(self.question, style=HEADLINE), spacing=SPACE_S).align(CENTER),
+                    HStack(buttons^, spacing=SPACE_S).fill(), spacing=SPACE_M).fill().tag("chat-interrupt")
+
     def steps_view(self) -> View:
         """The run's steps (STEP_STARTED / STEP_FINISHED) as a live progress list."""
         var stages = List[Stage]()
@@ -383,6 +528,8 @@ struct AgentChat(Movable):
                 if m.content.byte_length() == 0 and len(m.calls) == 0 and len(self.screens.of_message(m.id)) == 0:
                     continue
                 items.append(self.reply_view(i, i == last_reply).arrive())
+            if i == self.asked_after - 1 and self.chosen.byte_length() > 0:  # (an interrupt answered: what was chosen, where it was asked)
+                items.append(HStack(Spacer(), Chip("You chose " + self.chosen, 1), spacing=0).fill())
         var waiting = self.agent.running  # (until the agent has said or started something since the question)
         for i in range(self.last_user() + 1, n):
             ref m = self.agent.messages[i]
@@ -390,6 +537,8 @@ struct AgentChat(Movable):
                 waiting = False
         if waiting:
             items.append(self.thinking().arrive())
+        if self.asking:
+            items.append(self.interrupt_card().arrive())
         if self.stopped and not self.agent.running:
             items.append(Note([Text("Stopped.", style=CAPTION)]).arrive())
         if self.errored():

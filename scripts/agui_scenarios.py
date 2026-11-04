@@ -181,4 +181,31 @@ def scenario_stream(inp, r, words):
     r.add(CustomEvent(name="suggestions", value=["Break down by category", "Why are returns rising?", "Compare with Q2"]))
 
 
-SCENARIOS = {"stream": scenario_stream, "catalog": scenario_catalog, "error": scenario_error, "release": scenario_release}
+def scenario_approval(inp, r, words):
+    """Human in the loop: the agent asks to run refund_order, a tool the app asks the person about first."""
+    last = inp.messages[-1] if inp.messages else None
+    if last is not None and last.role == "tool":
+        got = json.loads(last.content) if last.content.startswith("{") else {}
+        if got.get("decision") == "approved":
+            text = "Refunded order 1042: $42.00 is on its way back to the card."
+        else:
+            text = "Okay, I won't refund order 1042."
+        r.say(text, pieces=words(text), delay=20)
+        return
+    mid = r.say("Order 1042 arrived damaged, so a refund fits. I need your approval first.", delay=10)
+    stream_call(r, "refund_order", {"order": "1042", "amount": 42.0, "reason": "Arrived damaged"}, mid, pieces=4, delay=20)
+
+
+def scenario_interrupt(inp, r, words):
+    """An interrupt: the run stops to ask; the next run resumes with the answer (forwardedProps.command.resume)."""
+    fp = inp.forwarded_props if isinstance(inp.forwarded_props, dict) else {}
+    resume = (fp.get("command") or {}).get("resume")
+    if resume:
+        text = f"Deployed to {resume}: build 2.4.0 is live there."
+        r.say(text, pieces=words(text), delay=20)
+        return
+    r.say("The build passed. Where should it go?", pieces=words("The build passed. Where should it go?"), delay=10)
+    r.add(CustomEvent(name="on_interrupt", value={"question": "Deploy build 2.4.0 to…", "options": ["Staging", "Production"]}))
+
+
+SCENARIOS = {"stream": scenario_stream, "approval": scenario_approval, "interrupt": scenario_interrupt, "catalog": scenario_catalog, "error": scenario_error, "release": scenario_release}

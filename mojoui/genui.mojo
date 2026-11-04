@@ -606,6 +606,7 @@ def validate(args: String) -> String:
 # ---------------------------------------------------------------------------------------------------------------------
 
 comptime SKELETON_NODE = '{"component":"Skeleton","lines":2}'
+comptime LOADING_UI = '{"ui":{"component":"Card","children":[{"component":"Skeleton","lines":3}]}}'  # (nothing whole yet: a card loading)
 
 
 def dump(j: Json, n: Int) -> String:
@@ -669,15 +670,16 @@ def partial_ui(args: String) -> String:
     closed (mojoui.partialjson), pruned to what's whole, a Skeleton at the end of each children list still open."""
     var whole = complete(args, "children", SKELETON_NODE)
     if whole.byte_length() == 0:
-        return '{"ui":' + SKELETON_NODE + "}"
+        return LOADING_UI
     var j: Json
     try:
         j = Json.parse(whole)
     except:
-        return '{"ui":' + SKELETON_NODE + "}"
+        return LOADING_UI
     if j.kind(0) != J_OBJECT or j.get(0, "ui") < 0:
-        return '{"ui":' + SKELETON_NODE + "}"
-    return '{"ui":' + pruned(j, j.get(0, "ui"), catalog(), 1) + "}"
+        return LOADING_UI
+    var ui = pruned(j, j.get(0, "ui"), catalog(), 1)
+    return LOADING_UI if ui == SKELETON_NODE else '{"ui":' + ui + "}"
 
 
 # ---------------------------------------------------------------------------------------------------------------------

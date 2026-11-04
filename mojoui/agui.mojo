@@ -114,6 +114,7 @@ struct Agent(Movable):
     var last_message: String  # the id of the message the last event touched
     var problem: String  # why the last event was refused (EV_BAD)
     var trimmed: Int  # the oldest messages the last RunAgentInput left out to fit MAX_INPUT_BYTES
+    var forwarded: String  # the next run's forwardedProps (JSON; "" = {}): e.g. an interrupt's resume (goal 48 M2); sent once
 
     def __init__(out self, url: String, piece_msg: Int, end_msg: Int, thread_id: String = "thread-1", tag: Int = 3500):
         self.url = url
@@ -141,11 +142,17 @@ struct Agent(Movable):
         self.last_message = ""
         self.problem = ""
         self.trimmed = 0
+        self.forwarded = ""
 
     # ---- the app's side ----
 
     def offer(mut self, var tool: Tool):
         self.tools.append(tool^)
+
+    def resume(mut self, value_json: String):
+        """The next run resumes an interrupt with `value_json` (forwardedProps {"command": {"resume": value}}, as
+        LangGraph and CopilotKit agents read it)."""
+        self.forwarded = '{"command":{"resume":' + value_json + "}}"
 
     def say(mut self, text: String):
         """A user message (sent with the next run)."""
@@ -207,7 +214,7 @@ struct Agent(Movable):
             tools += ("," if i > 0 else "") + '{"name":' + json_string(self.tools[i].name) + ',"description":' + json_string(self.tools[i].description) + ',"parameters":' + self.tools[i].parameters + "}"
         tools += "]"
         var head = ('{"threadId":' + json_string(self.thread_id) + ',"runId":' + json_string(self.run_id) + ',"state":' + self.state.dump()
-                    + ',"tools":' + tools + ',"context":[],"forwardedProps":{},"messages":[')
+                    + ',"tools":' + tools + ',"context":[],"forwardedProps":' + (self.forwarded if self.forwarded.byte_length() > 0 else String("{}")) + ',"messages":[')
         var room = MAX_INPUT_BYTES - head.byte_length() - 2
         var parts = List[String]()
         var used = 0
@@ -236,7 +243,9 @@ struct Agent(Movable):
         self.run_id = self.thread_id + "-run" + String(self.runs)
         self.running = True
         self.ended = "open"
-        http.send(Request.post_json(self.piece_msg, self.url, self.input_json()).header("Accept", "text/event-stream")
+        var body = self.input_json()
+        self.forwarded = ""  # (once: an interrupt's resume goes with the run that resumes it)
+        http.send(Request.post_json(self.piece_msg, self.url, body).header("Accept", "text/event-stream")
                   .stream(self.end_msg).tagged(self.tag).timeout(120_000))
         return True
 

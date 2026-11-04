@@ -5,6 +5,7 @@ from std.testing import assert_equal, assert_true
 from mojoui.app import Event
 from mojoui.view import View, TEXT, BUTTON, SCROLL, CLIPBOARD, OVERLAY, FIELD
 from mojoui.markdown import parse_markdown, MD_TABLE, MD_P
+from mojoui.agui import Tool
 from mojoui.agentchat import (
     AgentChat, segments, CHAT_PANEL, CHAT_SIDEBAR, CHAT_POPUP, C_SEND, C_TYPED, C_PIECE, C_ENDED, C_STOP, C_RETRY,
     C_REGENERATE, C_SUGGEST, C_COPY, C_CODE, C_OPEN,
@@ -175,4 +176,35 @@ def main() raises:
             fields += 1
     assert_true(fields >= 2, "the open popup floats a chat (its composer) over the content")
     print("layouts: ok")
+    # human in the loop: a confirm tool waits for Approve or Reject; an interrupt resumes the run with the pick
+    var hitl = AgentChat("http://unused/", base=B, canvas_base=2000)
+    hitl.offer(Tool("refund_order", "Refund an order", '{"type":"object"}'), confirm=True)
+    hitl.send("Refund order 1042")
+    ev(hitl, '{"type":"RUN_STARTED","threadId":"t","runId":"r"}')
+    ev(hitl, '{"type":"TOOL_CALL_START","toolCallId":"c1","toolCallName":"refund_order","parentMessageId":"a1"}')
+    ev(hitl, '{"type":"TOOL_CALL_ARGS","toolCallId":"c1","delta":"{\\"order\\":\\"1042\\",\\"amount\\":42}"}')
+    ev(hitl, '{"type":"TOOL_CALL_END","toolCallId":"c1"}')
+    ev(hitl, '{"type":"RUN_FINISHED","threadId":"t","runId":"r"}')
+    finish(hitl)
+    var hv = hitl.view()
+    assert_true(has(hv, "Refund an order") and has(hv, "1042") and button(hv, "Approve") > 0 and button(hv, "Reject") > 0)
+    assert_true(not hitl.agent.running and not hitl.agent.answered("c1"), "nothing runs until the person answers")
+    _ = hitl.update(Event(button(hv, "Reject"), "", 0))
+    assert_true(hitl.agent.answered("c1") and hitl.agent.running, "the answer is the call's result, and the agent runs on")
+    assert_true(hitl.agent.messages[len(hitl.agent.messages) - 1].content.find('"rejected"') >= 0)
+    finish(hitl)
+    hv = hitl.view()
+    assert_true(has(hv, "Rejected") and button(hv, "Approve") < 0)
+    ev(hitl, '{"type":"RUN_STARTED","threadId":"t","runId":"r2"}')
+    ev(hitl, '{"type":"CUSTOM","name":"on_interrupt","value":{"question":"Deploy to…","options":["Staging","Production"]}}')
+    ev(hitl, '{"type":"RUN_FINISHED","threadId":"t","runId":"r2"}')
+    finish(hitl)
+    hv = hitl.view()
+    assert_true(has(hv, "Deploy to") and button(hv, "Staging") > 0 and button(hv, "Production") > 0)
+    _ = hitl.update(Event(button(hv, "Production"), "", 0))
+    assert_true(hitl.agent.running and hitl.agent.forwarded == "", "the resume went with the run")
+    assert_true(hitl.agent.input_json().find('"forwardedProps":{}') >= 0, "only that run carried it")
+    finish(hitl)
+    assert_true(has(hitl.view(), "You chose Production"))
+    print("hitl: ok")
     print("test_agentchat: done")

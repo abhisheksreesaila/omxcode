@@ -12,6 +12,7 @@ from mojoui.theme import Theme
 from mojoui.http import Request
 from mojoui.shared import environment
 from mojoui.agentchat import AgentChat, CHAT_PANEL
+from mojoui.agui import Tool
 from themes.omxqua import omxqua
 
 
@@ -27,6 +28,7 @@ struct Main(App):
         self.chat.suggest("Hello")
         self.chat.suggest("Show me sales as a chart")
         self.chat.suggest("Make me a signup form")
+        self.chat.offer(Tool("refund_order", "Refund an order", '{"type":"object","properties":{"order":{"type":"string"},"amount":{"type":"number"},"reason":{"type":"string"}},"required":["order","amount"]}'), confirm=True)
         self.themed = omxqua(False)
 
     def title(self) -> String:
