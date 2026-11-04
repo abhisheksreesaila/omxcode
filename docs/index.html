@@ -449,7 +449,7 @@ SLOW: update msg=7 80.06 ms</pre>
     <div class="head">
       <div class="eyebrow rv">Agents build screens · AG-UI</div>
       <h2 class="rv">Ask for a map. Get a map. <span class="two">Drawn natively while it streams.</span></h2>
-      <p class="lede rv">An omxcode app speaks <a href="https://docs.ag-ui.com">AG-UI</a>, the open protocol between agents and apps. The agent answers with a screen as data; the app checks it against a catalog and draws it with its own widgets. <b>On the same stream, the finished screen 8× sooner than CopilotKit natively, 3.4× in the browser.</b></p>
+      <p class="lede rv">An omxcode app speaks <a href="https://docs.ag-ui.com">AG-UI</a>, the open protocol between agents and apps. The agent answers with a screen as data; the app checks it against a catalog and draws it with its own widgets. <b>Standard AG-UI, or the agent in the app's own process.</b></p>
     </div>
     <div class="ag rv">
       <div class="shot"><img src="img/agents/trip.png" alt="An agent plans a day in Lisbon: a map with six stops, the plan as a timeline, a weather chart, and Book tickets and Swap a stop buttons" loading="lazy"></div>
@@ -458,11 +458,11 @@ SLOW: update msg=7 80.06 ms</pre>
           <li><b>36 components.</b> Maps, charts, data grids, KPIs, timelines, Markdown, code, and every input, from the same library apps use.</li>
           <li><b>Drawn while it streams.</b> A screen appears from its first whole component; tool calls show their stage, and the agent's steps tick off.</li>
           <li><b>Ask first, then act.</b> A tool marked “ask first” waits for Approve or Reject; an agent can pause to ask a question.</li>
-          <li><b>A million rows, a few hundred bytes.</b> The agent names a dataset the app holds; the app groups it on the GPU in 0.3 ms.</li>
+          <li><b>A million rows, a few hundred bytes.</b> The agent names a dataset the app holds; the app groups it itself, on the GPU.</li>
           <li><b>Safe by construction.</b> Nothing an agent sends runs code, and a link opens only when someone clicks it; anything outside the catalog is refused, and the agent is told why.</li>
         </ul>
-        <div class="set"><h4>Measured on one stream <span class="badge ok"><i></i>2,302 events</span></h4>
-          <div class="pills"><span>Linux: 69 ms to the finished screen</span><span>Web: 164 ms</span><span>CopilotKit: 565 ms</span><span>0 dropped frames on the web</span></div></div>
+        <div class="set"><h4>Standard, and in process <span class="badge ok"><i></i>AG-UI</span></h4>
+          <div class="pills"><span>Checked against the official SDK</span><span>Any AG-UI server</span><span>Or an agent in the app's own process</span></div></div>
         <div class="ctas" style="justify-content:flex-start;margin-top:22px"><a class="cta" href="agents.html">How it works</a><a class="more" href="agents.html#gallery">See every screen</a></div>
         <p class="fine">Every screen comes from a scripted agent built on the official AG-UI SDK; no live model or other AG-UI framework tested yet. Linux and the web; not yet run with agents on the Mac.</p>
       </div>
@@ -486,7 +486,7 @@ SLOW: update msg=7 80.06 ms</pre>
       <figure class="gi w6 rv"><div class="m"><video src="img/clip-warehouse.mp4" poster="img/clip-warehouse.jpg" muted loop playsinline preload="none" data-play aria-label="omxplorer turns a warehouse video into rows, joins it with shipments and makes a reel of damaged pallets with faces blurred"></video></div>
         <figcaption><b>A warehouse video becomes rows.</b>Detections joined with shipments, a reel of damaged pallets with faces blurred.<small>Linux · generated footage · goal 39</small></figcaption></figure>
       <figure class="gi w6 rv"><div class="m"><a href="agents.html#gallery"><img src="img/agents/dashboard.png" alt="An AG-UI agent builds a Q3 sales dashboard: KPI cards, two charts, a product grid, meters and an alert" loading="lazy"></a></div>
-        <figcaption><b>An agent builds a dashboard.</b>Forty components, drawn natively as the agent streams them; on Linux, 8× sooner than CopilotKit.<small>Linux · AG-UI · goal 48</small></figcaption></figure>
+        <figcaption><b>An agent builds a dashboard.</b>Forty components, drawn natively as the agent streams them.<small>Linux · AG-UI · goal 48</small></figcaption></figure>
       <figure class="gi w6 rv"><div class="m"><img src="gallery/img/omxplorer-sheet-mac.png" alt="omxplorer's sheet on the Mac, in AppKit" loading="lazy"></div>
         <figcaption><b>omxplorer on the Mac.</b>The same app in AppKit.<small>Mac · GitHub macOS runner</small></figcaption></figure>
       <figure class="gi w6 rv"><div class="m"><img src="gallery/img/lens-linux.jpg" alt="The Data Lens: 20 million points drawn on the GPU" loading="lazy"></div>

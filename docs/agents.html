@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agents build screens · AG-UI in omxcode</title>
-<meta name="description" content="An AG-UI agent answers with a screen: maps, charts, data grids, forms and approvals, drawn with native widgets while it streams. What is supported, how it works, how to use it, and how fast it is next to CopilotKit.">
+<meta name="description" content="An AG-UI agent answers with a screen: maps, charts, data grids, forms and approvals, drawn with native widgets while it streams. What is supported, how it works, how to use it, and where it helps.">
 <meta property="og:title" content="Agents build screens: AG-UI in omxcode">
-<meta property="og:description" content="36 components an agent can use, drawn natively while the answer streams. On the same stream, the finished screen 8× sooner than CopilotKit natively, 3.4× in the browser.">
+<meta property="og:description" content="36 components an agent can use, drawn natively while the answer streams. Standard AG-UI, or the agent in the app's own process.">
 <meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/agents/trip.png">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="img/logo.svg" type="image/svg+xml">
@@ -67,19 +67,6 @@ section .head { max-width: 860px; }
 .need div { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
 .need h3 { font-size: 18px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; } .need p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
 
-/* speed */
-.nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 36px; }
-.num { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
-.num .big2 { font: 800 clamp(32px, 3.6vw, 48px)/1 var(--display); letter-spacing: -.04em; color: var(--ink); }
-.num .big2 small { font: 500 15px var(--sans); color: var(--ink2); letter-spacing: 0; margin-left: 4px; }
-.num p { margin: 10px 0 0; color: var(--ink2); font-size: 14.5px; line-height: 1.45; }
-@media (max-width: 860px) { .nums { grid-template-columns: 1fr 1fr; } }
-.tbl { width: 100%; border-collapse: collapse; margin-top: 22px; font-size: 15px; }
-.tbl th, .tbl td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--oq-line-2); }
-.tbl th { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
-.tbl td { color: var(--ink2); } .tbl td:first-child, .tbl tr.us td { color: var(--ink); } .tbl tr.us td:first-child { font-weight: 600; }
-.tblw { overflow-x: auto; border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 4px 8px 8px; margin-top: 22px; }
-.tblw .tbl { margin-top: 0; }
 .lst { margin: 22px 0 0; padding-left: 20px; color: var(--ink2); font-size: 15.5px; line-height: 1.6; max-width: 860px; }
 .lst li { margin-bottom: 6px; } .lst b { color: var(--ink); font-weight: 600; }
 .fine3 { margin-top: 14px; font-size: 13px; color: var(--ink2); line-height: 1.5; max-width: 860px; }
@@ -89,7 +76,7 @@ section .head { max-width: 860px; }
 
 <nav class="lnav">
   <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode <span class="sub">· agents</span></a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#gallery">Gallery</a><a href="#supports">What it does</a><a href="#how">How it works</a><a href="#use">Use it</a><a href="#speed">Speed</a><a href="#where">Where</a></div>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#gallery">Gallery</a><a href="#supports">What it does</a><a href="#how">How it works</a><a href="#use">Use it</a><a href="#standard">Standard</a><a href="#where">Where</a></div>
   <div class="right"><a class="cta" href="#use">Try it</a></div>
 </nav>
 
@@ -99,7 +86,7 @@ section .head { max-width: 860px; }
   <div class="wrap" style="display:block">
     <div class="eyebrow rise"><span>Agents build screens · AG-UI</span></div>
     <h1 class="rise" data-words data-step="70" data-d0="120" style="font-size:clamp(48px,7vw,100px)">Ask for a map. Get a map.</h1>
-    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">An agent answers with a screen: a route on a map, a dashboard, a form, an approval. omxcode draws it with native widgets while the answer is still streaming.</span> <span class="two" data-words data-step="26" data-d0="1150">On the same stream, the finished screen 8× sooner than CopilotKit natively, 3.4× sooner in the browser.</span></p>
+    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">An agent answers with a screen: a route on a map, a dashboard, a form, an approval. omxcode draws it with native widgets while the answer is still streaming.</span> <span class="two" data-words data-step="26" data-d0="1150">Standard AG-UI, with the agent in the app's own process when you want it.</span></p>
     <div class="ctas rise"><span style="animation-delay:1500ms"><a class="cta" href="#gallery">See the screens</a></span><span style="animation-delay:1580ms"><a class="more" href="#how">How it works</a></span></div>
   </div>
 </section>
@@ -116,7 +103,7 @@ section .head { max-width: 860px; }
       <figure class="w8 tall rv"><div class="m"><img src="img/agents/trip.png" alt="A day in Lisbon: a map with six stops from Belém Tower to Senhora do Monte, a timeline of the plan, a weather chart, and Book tickets and Swap a stop buttons" loading="lazy"></div>
         <figcaption><b>“Plan a day in Lisbon.”</b>A route on a map, the plan as a timeline, the day's weather as a chart, and buttons that answer back.<small>MapView · Timeline · ChartView · Chip · Button · web</small></figcaption></figure>
       <figure class="tall rv"><div class="m"><img src="img/agents/orders.png" alt="Revenue by region and average order by product over 1,000,000 orders, and a grid of every order" loading="lazy"></div>
-        <figcaption><b>“Chart a million orders.”</b>The agent names a dataset the app already holds. It sends a few hundred bytes; the app groups a million rows on the GPU in 0.3 ms.<small>ChartView · DataGrid · Linux · RTX 3090</small></figcaption></figure>
+        <figcaption><b>“Chart a million orders.”</b>The agent names a dataset the app already holds and sends a few hundred bytes; the app groups the million rows itself, on the GPU.<small>ChartView · DataGrid · Linux · RTX 3090</small></figcaption></figure>
       <figure class="w6 tall rv"><div class="m"><img src="img/agents/dashboard.png" alt="Q3 sales dashboard: four KPI cards with sparklines, revenue by region bars, orders by month line, a top products grid, three meters and an alert" loading="lazy"></div>
         <figcaption><b>“Show me this quarter's sales.”</b>KPIs, two charts, a sortable grid, meters and an alert: forty components, drawn as they stream.<small>KpiView · ChartView · DataGrid · Meter · Alert · Linux (GTK)</small></figcaption></figure>
       <figure class="w6 tall rv"><div class="m"><img src="img/agents/research.png" alt="Battery research: three web searches, a plan timeline, a price chart and a comparison table" loading="lazy"></div>
@@ -152,7 +139,7 @@ section .head { max-width: 860px; }
       <div class="feat rv"><div class="t">Human in the loop</div><h3>Ask first, then act</h3><p>Mark a tool <code>confirm=True</code> and it waits for Approve or Reject. An agent can also pause to ask a question and carry on with the answer.</p></div>
       <div class="feat rv"><div class="t">The chat</div><h3>One component, three layouts</h3><p><code>AgentChat</code>: a panel, a sidebar or a popup. Markdown with Copy on code, a typing indicator, Stop, Retry, Regenerate, suggestion chips, and messages that arrive on a spring.</p></div>
       <div class="feat rv"><div class="t">Datasets</div><h3>Rows stay in the app</h3><p>A chart or grid can name a dataset the app holds. The agent never sends the rows, so a million of them cost the same few hundred bytes as ten.</p></div>
-      <div class="feat rv"><div class="t">In process</div><h3>An agent inside the app</h3><p><code>LocalAgent</code> runs in the app's own process, with no HTTP. 2,004 events went through the same code path in 26 ms.</p></div>
+      <div class="feat rv"><div class="t">In process</div><h3>An agent inside the app</h3><p><code>LocalAgent</code> runs in the app's own process, with no HTTP: its events go through the same code path as a server's.</p></div>
     </div>
   </div>
 </section>
@@ -274,33 +261,22 @@ self.chat.run_local(helper)</pre></div>
   </div>
 </section>
 
-<!-- Speed: from docs/goals/48/bench.json (scripts/agui_bench.py), 2026-11-04 07:39 -->
-<section id="speed">
+<!-- Standard and in process: tests/test_agui.mojo (streams recorded with the official SDK), goal 35 M1 (requests validated by the SDK's models), tests/test_local_agent.mojo -->
+<section id="standard">
   <div class="wrap">
     <div class="head">
-      <div class="eyebrow rv">Speed</div>
-      <h2 class="rv">The same stream, three apps. <span class="two">Measured, not claimed.</span></h2>
-      <p class="lede rv">One recorded answer of 2,302 events (300 words, then a 40-component dashboard sent three bytes at a time) replayed into omxcode on Linux, omxcode on the web, and a CopilotKit 1.84.1 app, in the same browser.</p>
+      <div class="eyebrow rv">Standard, and in process</div>
+      <h2 class="rv">Plain AG-UI on the wire. <span class="two">Or no wire at all.</span></h2>
+      <p class="lede rv">omxcode speaks AG-UI as the official SDK writes it, so it works with agents built for the protocol. And when the agent can live in the app, it runs in the same process, with no server in between.</p>
     </div>
-    <div class="nums">
-      <div class="num rv"><div class="big2">69<small>ms</small></div><p>to the finished screen on Linux. CopilotKit: 565 ms.</p></div>
-      <div class="num rv"><div class="big2">164<small>ms</small></div><p>to the finished screen on the web host, in the same browser as CopilotKit.</p></div>
-      <div class="num rv"><div class="big2">0</div><p>dropped frames on the web, fast or steady. CopilotKit dropped 3 in the fast run (worst 233 ms).</p></div>
-      <div class="num rv"><div class="big2">0.3<small>ms</small></div><p>to group a million rows on the GPU for an agent's chart. The agent sent a few hundred bytes.</p></div>
+    <div class="feats" style="grid-template-columns:repeat(2,1fr)">
+      <div class="feat rv"><div class="t">AG-UI compliant</div><h3>Checked against the official SDK</h3><p>Streams recorded with the official AG-UI SDK are read event for event, and every request omxcode sends passes the SDK's own models. It reads runs, text, tool calls, state snapshots and JSON Patch deltas, message snapshots, steps and custom events, and resumes LangGraph-style interrupts.</p></div>
+      <div class="feat rv"><div class="t">In process</div><h3>The agent inside the app</h3><p>A <code>LocalAgent</code> gets the same input a server would and answers with the same events, straight into the same code path: no HTTP, no second program, nothing on the network. Datasets stay in the app too; an agent names them and never sends the rows.</p></div>
     </div>
-    <div class="tblw rv"><table class="tbl">
-      <thead><tr><th>App</th><th>First UI</th><th>Finished screen</th><th>Dropped frames, fast</th><th>Dropped frames, steady</th><th>Memory</th></tr></thead>
-      <tbody>
-        <tr class="us"><td>omxcode on Linux (GTK)</td><td>12 ms</td><td>69 ms</td><td>2 (worst 31 ms)</td><td>0</td><td>109 MB, whole process</td></tr>
-        <tr class="us"><td>omxcode on the web</td><td>125 ms</td><td>164 ms</td><td>0</td><td>0</td><td>4 MB, page heap</td></tr>
-        <tr><td>CopilotKit 1.84.1 (React)</td><td>129 ms</td><td>565 ms</td><td>3 (worst 233 ms)</td><td>0</td><td>42 MB, page heap</td></tr>
-      </tbody></table></div>
     <ul class="lst rv">
-      <li><b>Where we think the time goes</b> (the benchmark times the whole path, not each part): the screen is checked and drawn by compiled Mojo rather than reconciled by a JavaScript framework; unfinished JSON is closed in one linear pass; only the charts whose data changed are redrawn.</li>
-      <li><b>In the browser</b>, the web host is 3.4× sooner to the finished screen and level on the first component (125 ms vs 129 ms). The work happens in the server process, so the page holds little more than the HTML it shows.</li>
-      <li><b>Even closer:</b> an agent in the app's own process skips HTTP altogether. 2,004 events went through in 26 ms.</li>
+      <li><b>Any AG-UI server:</b> frameworks such as LangGraph, CrewAI, Mastra and Pydantic AI publish AG-UI adapters. omxcode has been proved against its own agent on the official SDK, not yet against each of those.</li>
+      <li><b>Same events either way:</b> an app can start with an agent in process and move it to a server later without changing its screens.</li>
     </ul>
-    <p class="fine3">Median of 3 runs, one Linux machine (x86_64, NVIDIA RTX 3090), 2026-11-04. “Fast” sends the events as quickly as the socket takes them. “Steady” paces them at about 250 a second, like a quick model. First UI is the screen's first component appearing; finished is its last. Memory figures measure different things on each row. CopilotKit was driven through its documented frontend-tool render, not its newer A2UI renderer. Method and raw numbers: <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agui.md#benchmark-goal-48-m5-the-same-stream-into-omxcode-and-copilotkit">docs/agui.md</a>, <code>scripts/agui_bench.py</code>.</p>
   </div>
 </section>
 
@@ -323,7 +299,7 @@ self.chat.run_local(helper)</pre></div>
     <ul class="lst rv">
       <li>Every screen on this page comes from a scripted agent. No live model has been recorded yet, and no other AG-UI framework tested.</li>
       <li>Not yet run with agents on the Mac or a phone.</li>
-      <li>CopilotKit's newer screen format, A2UI, isn't supported yet.</li>
+      <li>A2UI, the newer screen format some AG-UI clients read, isn't supported yet.</li>
       <li>The map is drawn offline: route, places and scale, with no streets or tiles.</li>
     </ul>
   </div>
@@ -333,7 +309,7 @@ self.chat.run_local(helper)</pre></div>
 
 <footer>
   <div class="wrap">
-    <p class="note">Every picture on this page is the framework running against the scripted agent, shot by scripts in the repository (<code>scripts/agui_gallery.py</code>, the goal 48 checks). Timings are from one Linux machine with an NVIDIA RTX 3090.</p>
+    <p class="note">Every picture on this page is the framework running against the scripted agent, shot by scripts in the repository (<code>scripts/agui_gallery.py</code>, the goal 48 checks), on one Linux machine with an NVIDIA RTX 3090.</p>
     <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="index.html">← Back to omxcode</a></div>
   </div>
 </footer>
