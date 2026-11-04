@@ -253,21 +253,31 @@ def example_text(example):
 
 def composes(example, ctor, module):
     """The example builds `ctor`: in its own code, or through a mojoui module it imports (`from mojoui.x import`, one
-    level) whose code calls it (not a docstring, comment or definition), other than the composite's own `module`
+    level or two) whose code calls it (not a docstring, comment or definition), other than the composite's own `module`
     (agentchat's GenUi comes from mojoui.agentui's Screens since goal 35's review). Import level, not proof the app
     reaches the call: an app checked to run the composite another way is what turns a cell ✅."""
     text = example_text(example)
-    call = re.compile(rf"(?<!def )\b{re.escape(ctor.rstrip('('))}\(")
+    call = re.compile(rf"(?<!def )\b{re.escape(ctor.rstrip('('))}(?:\[[^\]\n]*\])?\(")  # (a generic one too: GenUi[Self.H](…))
     if re.search(rf"\b{re.escape(ctor)}", text):  # (a whole name: Timeline( isn't MediaTimeline()
         return True
-    for mod in dict.fromkeys(re.findall(r"^from (mojoui(?:\.\w+)+) import", text, re.M)):
-        f = ROOT / (mod.replace(".", "/") + ".mojo")
-        if not f.exists() or f.relative_to(ROOT).as_posix() == module:
-            continue
-        code = re.sub(r'"""[\s\S]*?"""', "", f.read_text())  # (docstrings, then comments, then definitions: calls only)
-        code = "\n".join(l.split("#", 1)[0] for l in code.splitlines() if not re.match(r"\s*(def|fn|struct|trait|comptime|alias) ", l))
-        if call.search(code):
-            return True
+    # two levels: agentchat's chat (mojoui.agentchat) shows the agent's screens through mojoui.agentui, which builds
+    # GenUi (goal 48); one level read GenUi as unused by the app whose checks draw it on both hosts
+    seen, level = set(), [text]
+    for _ in range(2):
+        nxt = []
+        for t in level:
+            for mod in dict.fromkeys(re.findall(r"^from (mojoui(?:\.\w+)+) import", t, re.M)):
+                f = ROOT / (mod.replace(".", "/") + ".mojo")
+                if mod in seen or not f.exists() or f.relative_to(ROOT).as_posix() == module:
+                    continue
+                seen.add(mod)
+                src = f.read_text()
+                code = re.sub(r'"""[\s\S]*?"""', "", src)  # (docstrings, then comments, then definitions: calls only)
+                code = "\n".join(l.split("#", 1)[0] for l in code.splitlines() if not re.match(r"\s*(def|fn|struct|trait|comptime|alias) ", l))
+                if call.search(code):
+                    return True
+                nxt.append(src)
+        level = nxt
     return False
 
 

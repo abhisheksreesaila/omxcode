@@ -6,7 +6,7 @@
 <title>Agents build screens · AG-UI in omxcode</title>
 <meta name="description" content="An AG-UI agent answers with a screen: maps, charts, data grids, forms and approvals, drawn with native widgets while it streams. What is supported, how it works, how to use it, and how fast it is next to CopilotKit.">
 <meta property="og:title" content="Agents build screens: AG-UI in omxcode">
-<meta property="og:description" content="36 components an agent can use, drawn natively while the answer streams. The finished screen 8× sooner than CopilotKit on the same stream.">
+<meta property="og:description" content="36 components an agent can use, drawn natively while the answer streams. On the same stream, the finished screen 8× sooner than CopilotKit natively, 3.4× in the browser.">
 <meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/agents/trip.png">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="img/logo.svg" type="image/svg+xml">
@@ -99,7 +99,7 @@ section .head { max-width: 860px; }
   <div class="wrap" style="display:block">
     <div class="eyebrow rise"><span>Agents build screens · AG-UI</span></div>
     <h1 class="rise" data-words data-step="70" data-d0="120" style="font-size:clamp(48px,7vw,100px)">Ask for a map. Get a map.</h1>
-    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">An agent answers with a screen: a route on a map, a dashboard, a form, an approval. omxcode draws it with native widgets while the answer is still streaming.</span> <span class="two" data-words data-step="26" data-d0="1150">The finished screen 8× sooner than CopilotKit, on the same stream.</span></p>
+    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">An agent answers with a screen: a route on a map, a dashboard, a form, an approval. omxcode draws it with native widgets while the answer is still streaming.</span> <span class="two" data-words data-step="26" data-d0="1150">On the same stream, the finished screen 8× sooner than CopilotKit natively, 3.4× sooner in the browser.</span></p>
     <div class="ctas rise"><span style="animation-delay:1500ms"><a class="cta" href="#gallery">See the screens</a></span><span style="animation-delay:1580ms"><a class="more" href="#how">How it works</a></span></div>
   </div>
 </section>
@@ -137,7 +137,7 @@ section .head { max-width: 860px; }
     <div class="head">
       <div class="eyebrow rv">What it does</div>
       <h2 class="rv">36 components an agent can use. <span class="two">Everything a chat needs around them.</span></h2>
-      <p class="lede rv">An agent can only name components from this catalog. Anything else is refused, and the agent is told why. Nothing an agent sends runs code or loads a page.</p>
+      <p class="lede rv">An agent can only name components from this catalog. Anything else is refused, and the agent is told why. Nothing an agent sends runs code; a link opens only when the person clicks it.</p>
     </div>
     <div class="groups">
       <div class="cgrp rv"><h4>Layout</h4><div class="pills"><span>Card</span><span>VStack</span><span>HStack</span><span>Grid</span><span>Tabs</span><span>Divider</span><span>Spacer</span><span>Breadcrumbs</span></div></div>
@@ -171,7 +171,7 @@ section .head { max-width: 860px; }
         <div class="st rv"><div><h4>The agent streams back</h4><p>Words, tool calls, steps and shared state arrive as server-sent events. The words appear as Markdown, a few letters at a time.</p></div></div>
         <div class="st rv"><div><h4>A screen arrives in pieces</h4><p><code>render_ui</code>'s arguments come a few bytes at a time. omxcode closes the unfinished JSON at its last whole value, in one pass, and draws what is there. A placeholder marks where more is coming.</p></div></div>
         <div class="st rv"><div><h4>Checked against the catalog</h4><p>Every component and property is checked: known names, the right types, at most 8 levels, 200 components and 32 KB. Anything else is refused, and the refusal goes back to the agent as the tool's result, so it can try again.</p></div></div>
-        <div class="st rv"><div><h4>Drawn with native widgets</h4><p>The same screen becomes GTK widgets on Linux, HTML on the web and AppKit on the Mac. Charts and maps are drawn by omxcode itself, so they look the same everywhere.</p></div></div>
+        <div class="st rv"><div><h4>Drawn with native widgets</h4><p>The same screen becomes GTK widgets on Linux and HTML on the web (AppKit on the Mac is next; not run with agents yet). Charts and maps are drawn by omxcode itself, so they look the same on both.</p></div></div>
         <div class="st rv"><div><h4>The person answers</h4><p>Fields and toggles edit the state the agent sees. A button sends its answer back as the tool's result, and the agent carries on. A tool marked “ask first” waits for Approve or Reject.</p></div></div>
       </div>
       <div class="walkside">
@@ -217,7 +217,8 @@ section .head { max-width: 860px; }
                                         layout=CHAT_PANEL)
         <span class="c"># chips on the welcome screen</span>
         self.chat.suggest(<span class="s">"Plan a day in Lisbon"</span>)
-        <span class="c"># a tool of the app's own; waits for Approve</span>
+        <span class="c"># a tool of the app's own (schema: its JSON Schema, as text);</span>
+        <span class="c"># it waits for Approve</span>
         self.chat.offer(Tool(<span class="s">"refund_order"</span>, <span class="s">"Refund an order"</span>,
                              schema), confirm=True)
         <span class="c"># rows the agent can name but never sends</span>
@@ -295,8 +296,8 @@ self.chat.run_local(helper)</pre></div>
         <tr><td>CopilotKit 1.84.1 (React)</td><td>129 ms</td><td>565 ms</td><td>3 (worst 233 ms)</td><td>0</td><td>42 MB, page heap</td></tr>
       </tbody></table></div>
     <ul class="lst rv">
-      <li><b>Why it's faster:</b> the screen is checked and drawn by compiled Mojo, not reconciled by a JavaScript framework. Unfinished JSON is closed in one linear pass. Only the charts whose data changed are redrawn.</li>
-      <li><b>On the web</b> the work happens in the server process, so the page holds little more than the HTML it shows.</li>
+      <li><b>Where we think the time goes</b> (the benchmark times the whole path, not each part): the screen is checked and drawn by compiled Mojo rather than reconciled by a JavaScript framework; unfinished JSON is closed in one linear pass; only the charts whose data changed are redrawn.</li>
+      <li><b>In the browser</b>, the web host is 3.4× sooner to the finished screen and level on the first component (125 ms vs 129 ms). The work happens in the server process, so the page holds little more than the HTML it shows.</li>
       <li><b>Even closer:</b> an agent in the app's own process skips HTTP altogether. 2,004 events went through in 26 ms.</li>
     </ul>
     <p class="fine3">Median of 3 runs, one Linux machine (x86_64, NVIDIA RTX 3090), 2026-11-04. “Fast” sends the events as quickly as the socket takes them. “Steady” paces them at about 250 a second, like a quick model. First UI is the screen's first component appearing; finished is its last. Memory figures measure different things on each row. CopilotKit was driven through its documented frontend-tool render, not its newer A2UI renderer. Method and raw numbers: <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agui.md#benchmark-goal-48-m5-the-same-stream-into-omxcode-and-copilotkit">docs/agui.md</a>, <code>scripts/agui_bench.py</code>.</p>
@@ -316,7 +317,7 @@ self.chat.run_local(helper)</pre></div>
       <div class="feat rv"><div class="t">Field and robotics</div><h3>Low latency, offline</h3><p>A native app with the agent in its own process: no browser, no round trip, and it works without a network.</p></div>
       <div class="feat rv"><div class="t">Internal tools</div><h3>Forms on demand</h3><p>Instead of building every form up front, let the agent make the one this question needs, from components you already trust.</p></div>
       <div class="feat rv"><div class="t">Desktop and web</div><h3>One app, two places</h3><p>The same Mojo file runs as a Linux app and in the browser, with the same agent screens.</p></div>
-      <div class="feat rv"><div class="t">Safety</div><h3>No generated code</h3><p>The agent can only describe screens from the catalog. It can't run scripts, load pages or invent components.</p></div>
+      <div class="feat rv"><div class="t">Safety</div><h3>No generated code</h3><p>The agent can only describe screens from the catalog. It can't run scripts or invent components, and a link opens only when someone clicks it.</p></div>
     </div>
     <h3 class="rv" style="margin-top:56px;font-size:20px">Not yet</h3>
     <ul class="lst rv">
