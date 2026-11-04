@@ -188,6 +188,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
     var y: Int
     var tip: String  # a tooltip (.tooltip())
     var label: String  # what a screen reader calls it when nothing on screen says so (.label()); never shown
+    var arrives: Bool  # it arrives on a spring the first time it's shown (.arrive()): fades and rises into place
 
     def __init__(
         out self,
@@ -233,6 +234,7 @@ struct Node(Copyable, Movable, Equatable, Writable):
         self.y = 0
         self.tip = ""
         self.label = ""
+        self.arrives = False
 
     def __eq__(self, other: Self) -> Bool:
         return (
@@ -378,6 +380,14 @@ struct View(Copyable, Movable):
     def tone(var self, t: Int) -> View:
         """A Text's colour or weight: TONE_WARN, TONE_GOOD, TONE_STRONG, TONE_ACCENT."""
         self.nodes[0].value = t
+        return self^
+
+    def arrive(var self) -> View:
+        """It arrives on a spring the first time it's shown (Liquid motion: a new message, a card an agent built): it fades
+        in and rises a few points into place, ~400 ms, no bounce. Only when it's created: later changes don't replay it.
+        GTK: libadwaita's AdwSpringAnimation on its opacity and top margin; the web: a spring curve (CSS linear()).
+        Hosts skip it when the system asks for less motion."""
+        self.nodes[0].arrives = True
         return self^
 
     def focused(var self) -> View:

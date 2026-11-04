@@ -172,3 +172,9 @@ button.tool.inline, label.picker.tool.inline { flex-direction: row; gap: 6px; mi
 button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
 [data-tag=toolbar] button.icon-only, [data-tag=toolbar] label.picker.icon-only { min-width: 34px; min-height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 @media (pointer: coarse) { [data-tag=toolbar] button.icon-only, [data-tag=toolbar] label.picker.icon-only, button.tool.inline, label.picker.tool.inline { min-width: 48px; min-height: 48px; } }
+
+/* .arrive() (goal 48): a new view fades and rises into place on a spring (stiffness 220, critical damping: the same
+   curve as mojoui.spring and GTK's AdwSpringAnimation), once, when it's inserted */
+@keyframes mojoui-arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.mojoui-arrive { animation: mojoui-arrive 420ms linear(0, 0.18 6%, 0.45 14%, 0.7 24%, 0.86 35%, 0.94 47%, 0.98 61%, 0.995 78%, 1) both; }
+@media (prefers-reduced-motion: reduce) { .mojoui-arrive { animation: none; } }

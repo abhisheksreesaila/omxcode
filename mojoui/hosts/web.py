@@ -916,6 +916,8 @@ def render(s, i, sid):
         el.attrs["style"] = (old + ";" if old else "") + ";".join(css)
     if n["name"]:
         el.attrs["data-tag"] = n["name"]
+    if n.get("arrive"):  # (.arrive(): a spring the first time it's inserted; mojoui.css .mojoui-arrive)
+        el.attrs["class"] = (el.attrs.get("class", "") + " mojoui-arrive").strip()
     if n.get("tip"):
         el.attrs["title"] = n["tip"]
         el.attrs["data-tip"] = n["tip"]

@@ -592,6 +592,27 @@ struct BoardChild(Copyable, Movable):
         self.resizing = False
 
 
+def arrive_on_spring(w: Int):
+    """.arrive(): hidden (opacity 0) until it's mapped, then its opacity 0 → 1 and its top margin 10 → 0 on
+    AdwSpringAnimations (damping ratio 1: no bounce; stiffness 220, mojoui.spring's). libadwaita skips an animation on an
+    unmapped widget, so it starts from the widget's first "map" (and only that one: a tab shown again doesn't replay it)."""
+    external_call["gtk_widget_set_opacity", NoneType](w, Float64(0))
+    connect(w, "map", on_arrive_map, 0)
+
+
+def on_arrive_map(w: Int, data: Int) abi("C"):
+    var key = String("mui-arrived")
+    if external_call["g_object_get_data", Int](w, key.as_c_string_span()) != 0:
+        return
+    external_call["g_object_set_data", NoneType](w, key.as_c_string_span(), 1)
+    for k in range(2):
+        var name = String("opacity") if k == 0 else String("margin-top")
+        var target = external_call["adw_property_animation_target_new", Int](w, name.as_c_string_span())  # (the animation takes it)
+        var params = external_call["adw_spring_params_new", Int](Float64(1.0), Float64(1.0), Float64(220.0))  # (… and these)
+        var anim = external_call["adw_spring_animation_new", Int](w, Float64(0.0) if k == 0 else Float64(10.0), Float64(1.0) if k == 0 else Float64(0.0), params, target)
+        external_call["adw_animation_play", NoneType](anim)
+
+
 struct GtkHost[A: App](Movable):
     var rt: Runtime[Self.A]
     var canvases: List[GtkCanvas]
@@ -899,6 +920,8 @@ struct GtkHost[A: App](Movable):
         if node.tip != "":
             var tip = node.tip
             external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
+        if node.arrives:  # (.arrive(): fades and rises into place on a spring, once; libadwaita skips it when animations are off)
+            arrive_on_spring(w)
         var spoken = explicit_name(node)
         if spoken != "":
             set_accessible_label(self.widgets[i] if self.widgets[i] != 0 else w, spoken)  # (on the control itself, not its clamp)

@@ -4,6 +4,8 @@ streaming generative UI, human in the loop. Every UI here is data built only fro
 
 import json
 
+from ag_ui.core import RunErrorEvent
+
 
 def catalog_ui():
     """Every general component, grouped as docs/agui.md lists them (the catalog at a glance)."""
@@ -58,4 +60,50 @@ def scenario_catalog(inp, r, words):
     r.call("render_ui", {"ui": catalog_ui()}, parent=mid, chunks=6)
 
 
-SCENARIOS = {"catalog": scenario_catalog}
+def scenario_error(inp, r, words):
+    """The first run fails (RUN_ERROR); a retry (the next run) answers."""
+    if inp.run_id.endswith("run1"):
+        r.add(RunErrorEvent(message="the model is unavailable (scripted)"))
+        return
+    text = "Hello again: that worked."
+    r.say(text, pieces=words(text))
+
+
+RELEASE = """# Release 2.4
+
+**Faster agents, nicer charts.** Highlights:
+
+- Agent UI streams in as it's written
+- 36 components an agent can use
+- Approve or reject before anything runs
+
+## Changes
+
+| Area | Change |
+|---|---|
+| Chat | Stop, Retry, Regenerate |
+| Charts | bars and lines from data |
+
+Upgrade with:
+
+```bash
+pixi update omxcode
+pixi run scripts/agentchat.sh
+```
+"""
+
+
+def scenario_release(inp, r, words):
+    if inp.messages and inp.messages[-1].role == "tool":
+        r.say("Shipped.")
+        return
+    mid = r.say(RELEASE, pieces=words(RELEASE), delay=8)
+    r.call("render_ui", {"ui": {"component": "Card", "title": "Rollout", "children": [
+        {"component": "Timeline", "steps": [{"label": "Changes merged", "status": "done", "detail": "41 pull requests"},
+                                            {"label": "Release candidate", "status": "done"},
+                                            {"label": "Staged rollout", "status": "running", "detail": "25% of users"},
+                                            {"label": "Everyone"}]},
+        {"component": "HStack", "children": [{"component": "Chip", "text": "2.4.0", "hue": 1}, {"component": "Chip", "text": "stable", "hue": 2}]}]}}, parent=mid, chunks=3)
+
+
+SCENARIOS = {"catalog": scenario_catalog, "error": scenario_error, "release": scenario_release}

@@ -17,12 +17,14 @@ from mojoui.theme import Palette, Surface, Shadow
 from mojoui.canvas import rgba
 from mojoui.codeblock import CodeText
 from mojoui.paragraph import Run, Paragraph
+from mojoui.table import Table
 
 comptime MD_P = 0  # a paragraph: spans
 comptime MD_HEADING = 1  # level 1–6: spans
 comptime MD_UL = 2  # items
 comptime MD_OL = 3  # items
 comptime MD_CODE = 4  # a fenced code block: code, lang
+comptime MD_TABLE = 5  # a pipe table (goal 48): level = its columns; items = the header's cells, then the body's, row by row
 
 comptime MAX_MD = 200000  # a notebook cell is never this big; the rest is dropped rather than parsed
 comptime MAX_RUN = 500  # the longest `code`, **bold**, *italic* or [link text]
@@ -361,8 +363,42 @@ def _indented(line: String) -> Bool:
     return i > 0 and i < len(b)
 
 
-def parse_markdown(src: String) -> List[Block]:
-    """Block markdown to blocks: headings, paragraphs, lists, fenced code (an unclosed fence runs to the end).
+def _cells(line: String) -> List[String]:
+    """A pipe-table row's cells: `| a | b |` → [a, b] (the outer pipes optional)."""
+    var t = _trim(line)
+    if t.startswith("|"):
+        var rest = String(t[byte = 1 :])
+        t = rest^
+    if t.endswith("|"):
+        var head = String(t[byte = : t.byte_length() - 1])
+        t = head^
+    var out = List[String]()
+    for c in t.split("|"):
+        out.append(_trim(String(c)))
+    return out^
+
+
+def _rule_row(line: String) -> Bool:
+    """A pipe table's second line: |---|:--:|---:| (dashes, colons, pipes and spaces only, at least one dash)."""
+    var t = _trim(line)
+    if not t.startswith("|") and t.find("|") < 0:
+        return False
+    var dash = False
+    for b in t.as_bytes():
+        if b == 45:
+            dash = True
+        elif b != 124 and b != 58 and b != 32:
+            return False
+    return dash
+
+
+def _table_start(lines: List[String], i: Int) -> Bool:
+    return i + 1 < len(lines) and _trim(lines[i]).find("|") >= 0 and _rule_row(lines[i + 1])
+
+
+def parse_markdown(src: String, tables: Bool = False) -> List[Block]:
+    """Block markdown to blocks: headings, paragraphs, lists, fenced code (an unclosed fence runs to the end), and with
+    `tables` pipe tables (goal 48: an agent's replies; the console's notebook keeps them as text, as its original does).
     Anything else is a paragraph's text."""
     var norm = _limit(src).replace("\r\n", "\n").replace("\r", "\n")
     var lines = List[String]()
@@ -394,6 +430,22 @@ def parse_markdown(src: String) -> List[Block]:
             out.append(Block(MD_HEADING, level, parse_inline(text)))
             i += 1
             continue
+        if tables and _table_start(lines, i):
+            var head = _cells(line)
+            var cols = min(len(head), 10)
+            var cells = List[List[Run]]()
+            for c in range(cols):
+                cells.append(parse_inline(head[c]))
+            i += 2
+            var body_rows = 0
+            while i < len(lines) and not _blank(lines[i]) and _trim(lines[i]).find("|") >= 0 and body_rows < 200:
+                var row = _cells(lines[i])
+                for c in range(cols):
+                    cells.append(parse_inline(row[c] if c < len(row) else String("")))
+                body_rows += 1
+                i += 1
+            out.append(Block(MD_TABLE, cols, List[Run](), cells^, "", ""))
+            continue
         var kind = _item(line, text)
         if kind > 0:
             var items = List[String]()
@@ -414,7 +466,7 @@ def parse_markdown(src: String) -> List[Block]:
             continue
         var para = String("")
         var count = 0
-        while i < len(lines) and not _blank(lines[i]) and not _fence(lines[i], marker, lang) and _heading(lines[i], text) == 0 and not (count > 0 and _item(lines[i], text) > 0):
+        while i < len(lines) and not _blank(lines[i]) and not _fence(lines[i], marker, lang) and _heading(lines[i], text) == 0 and not (count > 0 and _item(lines[i], text) > 0) and not (tables and count > 0 and _table_start(lines, i)):
             para += (" " if count > 0 else "") + _trim(lines[i])
             count += 1
             i += 1
@@ -506,16 +558,28 @@ def markdown_view(blocks: List[Block], tag: String = "markdown", on_link: Int = 
                                    _runs_view(b.items[k], BODY, "md-li", on_link).grow(), spacing=0).align(START).tag("md-item"))
             items.append(VStack(rows^, spacing=GAP_ITEM).align(START).tag("md-ul" if b.kind == MD_UL else "md-ol"))
             items.append(_gap(GAP_BLOCK))
+        elif b.kind == MD_TABLE:
+            var cols = List[String]()
+            for c in range(b.level):
+                var words = String("")
+                for ref r in b.items[c]:
+                    words += r.text
+                cols.append(words)
+            var cells = List[View]()
+            for k in range(b.level, len(b.items)):
+                cells.append(_runs_view(b.items[k], BODY, "md-td", on_link))
+            items.append(Table(cols^, cells^).fill())
+            items.append(_gap(GAP_BLOCK))
         else:
             items.append(code_block(b.code, b.lang))
             items.append(_gap(GAP_BLOCK))
     return VStack(items^, spacing=0).align(START).tag(tag)
 
 
-def Markdown(text: String, tag: String = "markdown", on_link: Int = 0) -> View:
+def Markdown(text: String, tag: String = "markdown", on_link: Int = 0, tables: Bool = False) -> View:
     """Markdown text as views (parse_markdown, then markdown_view). Safe: never HTML, links only to http(s). A link's
     tap sends on_link (event.text = its href); with none the host opens it in the browser."""
-    return markdown_view(parse_markdown(text), tag, on_link)
+    return markdown_view(parse_markdown(text, tables), tag, on_link)
 
 
 # ---------- the look (blade-notebook.css's .nb-md), for a theme to add to its Look's surfaces ----------

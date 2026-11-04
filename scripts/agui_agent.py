@@ -240,7 +240,8 @@ def scripted(inp, scenario):
     r = Run(inp)
     r.start()
     SCENARIOS[scenario](inp, r)
-    r.finish()
+    if not (r.out and isinstance(r.out[-1][0], RunErrorEvent)):  # (a run that errored doesn't also finish)
+        r.finish()
     return r.out
 
 

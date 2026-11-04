@@ -87,7 +87,8 @@ def need_ok(lines, labels_):
 
 
 def labels(out):
-    return [l[len("LABEL: "):] for l in out.splitlines() if l.startswith("LABEL: ")]
+    """The words on screen: texts (LABEL:) and button titles (BUTTON:), as both hosts report them."""
+    return [l.split(": ", 1)[1] for l in out.splitlines() if l.startswith("LABEL: ") or l.startswith("BUTTON: ")]
 
 
 def chat(host, scenario, steps, shot=None):

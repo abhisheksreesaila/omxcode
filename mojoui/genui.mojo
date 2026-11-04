@@ -44,7 +44,7 @@ from mojoui.datagrid import DataGrid
 from mojoui.rowsource import Rows
 from mojoui.canvas import Surface
 from mojoui.text import Font
-from mojoui.theme import Palette
+from mojoui.theme import Palette, mix
 from mojoui.app import Event
 
 comptime MAX_DEPTH = 8
@@ -832,14 +832,24 @@ struct GenUi(Movable):
         """The screen as native components (inputs show the state's values; `version` redraws its canvases)."""
         if self.problem != "":
             return Text("")
-        return self.node(self.json.get(0, "ui"), state, version)
+        return self.node(self.json.get(0, "ui"), state, version, False)
 
-    def children(self, n: Int, state: JDoc, version: Int) -> List[View]:
+    def children(self, n: Int, state: JDoc, version: Int, in_card: Bool) -> List[View]:
         var out = List[View]()
         var ch = self.json.get(n, "children")
         for i in range(self.json.size(ch)):
-            out.append(self.node(self.json.at(ch, i), state, version))
+            out.append(self.node(self.json.at(ch, i), state, version, in_card))
         return out^
+
+    def framed(self, n: Int, var body: View, in_card: Bool) -> View:
+        """A drawn view (chart, map, grid) with its title: on a card of its own unless it's already on one."""
+        var parts = List[View]()
+        if self.json.get(n, "title") >= 0 and self.str(n, "title").byte_length() > 0:
+            parts.append(Text(self.str(n, "title"), style=HEADLINE))
+        parts.append(body^)
+        if in_card:
+            return VStack(parts^, spacing=SPACE_S).align(START).fill()
+        return Card(parts^, spacing=SPACE_S).fill()
 
     def msg(self, n: Int) -> Int:
         return self.base + self.control_of.get(n, 0)
@@ -869,7 +879,7 @@ struct GenUi(Movable):
             hi = lo + 1
         return (lo, hi, max(self.num(n, "step", 1), 1e-9))
 
-    def node(self, n: Int, state: JDoc, version: Int) -> View:
+    def node(self, n: Int, state: JDoc, version: Int, in_card: Bool) -> View:
         var comp = self.str(n, "component")
         var v = version + self.drawn
         # layout
@@ -879,17 +889,17 @@ struct GenUi(Movable):
                 items.append(Text(self.str(n, "title"), style=HEADLINE))
             if self.json.get(n, "subtitle") >= 0:
                 items.append(Text(self.str(n, "subtitle"), style=CAPTION))
-            for c in self.children(n, state, version):
+            for c in self.children(n, state, version, True):
                 items.append(c.copy())
             var t = self.str(n, "tone")
             var card = Card(items^, spacing=SPACE_M).fill()
             return card^.tone(CARD_WARN) if t == "warn" else (card^.tone(CARD_GOOD) if t == "good" else card^)
         if comp == "VStack":
-            return VStack(self.children(n, state, version), spacing=gap(self.str(n, "gap"))).align(START).fill()
+            return VStack(self.children(n, state, version, in_card), spacing=gap(self.str(n, "gap"))).align(START).fill()
         if comp == "HStack":
-            return HStack(self.children(n, state, version), spacing=gap(self.str(n, "gap"))).align(CENTER)
+            return HStack(self.children(n, state, version, in_card), spacing=gap(self.str(n, "gap"))).align(CENTER)
         if comp == "Grid":
-            return Grid(self.children(n, state, version), Int(self.num(n, "columns", 2))).fill()
+            return Grid(self.children(n, state, version, in_card), Int(self.num(n, "columns", 2))).fill()
         if comp == "Tabs":
             var titles = self.texts_of(n, "tabs")
             var at = min(self.picks.get(n, 0), len(titles) - 1)
@@ -897,7 +907,7 @@ struct GenUi(Movable):
             parts.append(Tabs(titles^, at, on_select=self.msg(n)))
             var ch = self.json.get(n, "children")
             if at < self.json.size(ch):
-                parts.append(self.node(self.json.at(ch, at), state, version))
+                parts.append(self.node(self.json.at(ch, at), state, version, in_card))
             return VStack(parts^, spacing=SPACE_M).align(START).fill()
         if comp == "Divider":
             return Divider()
@@ -912,7 +922,7 @@ struct GenUi(Movable):
         if comp == "Paragraph":
             return Paragraph([Plain(self.str(n, "text"))])
         if comp == "Markdown":
-            return Markdown(self.str(n, "text"))
+            return Markdown(self.str(n, "text"), tables=True)
         if comp == "CodeBlock":
             var parts = List[View]()
             if self.json.get(n, "language") >= 0:
@@ -945,9 +955,9 @@ struct GenUi(Movable):
             return Table(cols^, cells^).fill()
         if comp == "DataGrid":
             var k = self.canvas_of.get(n, 0)
-            return Canvas(self.canvas(n), v + self.grids[k].version, on_gesture=self.msg(n)).fill().height(Int(self.num(n, "height", 260)))
+            return self.framed(n, Canvas(self.canvas(n), v + self.grids[k].version, on_gesture=self.msg(n)).fill().height(Int(self.num(n, "height", 260))), in_card)
         if comp == "ChartView":
-            return Canvas(self.canvas(n), v).fill().height(Int(self.num(n, "height", 220)))
+            return self.framed(n, Canvas(self.canvas(n), v).fill().height(Int(self.num(n, "height", 220))), in_card)
         if comp == "Sparkline":
             var parts = List[View]()
             if self.json.get(n, "label") >= 0:
@@ -957,7 +967,7 @@ struct GenUi(Movable):
         if comp == "KpiView":
             return self.kpi_of(n).view(self.canvas(n), v)
         if comp == "MapView":
-            return Canvas(self.canvas(n), v).fill().height(Int(self.num(n, "height", 260)))
+            return self.framed(n, Canvas(self.canvas(n), v).fill().height(Int(self.num(n, "height", 260))), in_card)
         if comp == "Meter":
             return Meter(self.str(n, "label"), Int(self.num(n, "value", 0)), False, self.str(n, "figure"))
         if comp == "ProgressBar":
@@ -1090,9 +1100,14 @@ struct GenUi(Movable):
         var kind = self.kinds[k]
         if kind == CV_CHART:
             surface.fill(p.card)
-            self.charts[k].draw(surface, self.font, p)
+            var data = p.copy()  # (an agent's chart wears the theme's first data colour, not the accent: omxqua's is ink)
+            data.accent = p.data(0)
+            data.accent_tint = mix(p.card, p.data(0), 0.35)
+            self.charts[k].draw(surface, self.font, data)
         elif kind == CV_KPI:
-            self.kpi_of(n).draw(surface, p)
+            var data = p.copy()
+            data.accent = p.data(0)
+            self.kpi_of(n).draw(surface, data)
         elif kind == CV_MAP:
             surface.fill(p.card)
             self.map_of(n).draw(surface, self.font, p)
