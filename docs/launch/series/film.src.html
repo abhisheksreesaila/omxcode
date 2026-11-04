@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxcode in 60 seconds</title>
+<style>
+:root {
+  --bg: #09090b; --s1: #141417; --s2: #1c1c21; --line: rgba(255,255,255,.08); --ink: #f4f4f5; --ink2: #a1a1aa; --ink3: #71717a;
+  --coral: #ff5c5c; --agent: #a78bfa; --ok: #4ade80; --str: #86efac; --kw: #f4f4f5;
+  --spring: cubic-bezier(.34, 1.4, .64, 1); --ease: cubic-bezier(.2, .8, .2, 1);
+  --sans: Inter, "SF Pro Display", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+body { display: grid; grid-template-rows: auto 1fr auto; min-height: 100vh; overflow: hidden; }
+
+/* captions first */
+header { padding: 34px 48px 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.brand { font: 600 13px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink2); display: flex; align-items: center; gap: 10px; }
+.brand i { width: 22px; height: 22px; border-radius: 7px; background: var(--coral); display: grid; place-items: center; font: 700 11px var(--mono); color: #1a0606; font-style: normal; }
+.cap { position: relative; height: 104px; flex: 1; max-width: 900px; }
+.cap div { position: absolute; left: 0; bottom: 0; opacity: 0; transform: translateY(18px); transition: opacity .5s var(--ease), transform .7s var(--spring); }
+.cap div.on { opacity: 1; transform: none; }
+.cap small { display: block; font: 600 12px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--coral); margin-bottom: 8px; }
+.cap b { display: block; font: 800 clamp(30px, 3.6vw, 52px)/1 var(--sans); letter-spacing: -.035em; }
+.cap b span { color: var(--ink3); }
+
+/* the stage */
+.stage { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; padding: 28px 48px; align-items: center; min-height: 0; }
+.card { border-radius: 22px; background: var(--s1); box-shadow: 0 0 0 1px var(--line), 0 24px 60px -24px rgba(0,0,0,.7); }
+
+/* the editor */
+.editor { padding: 16px 0 18px; height: min(580px, 66vh); transition: opacity .6s var(--ease); overflow: hidden; display: flex; flex-direction: column; }
+.tabbar { display: flex; align-items: center; gap: 8px; padding: 0 18px 12px; border-bottom: 1px solid var(--line); font: 600 12px var(--mono); color: var(--ink2); }
+.tabbar .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--s2); box-shadow: inset 0 0 0 1px var(--line); }
+.tabbar b { color: var(--ink); font-weight: 600; margin-left: 8px; }
+.tabbar .lines { margin-left: auto; color: var(--ink3); }
+.code { scroll-behavior: smooth; padding: 10px 0 0; font: 13px/1.5 var(--mono); flex: 1; overflow: hidden; }
+.ln { display: grid; grid-template-columns: 44px 1fr; white-space: pre; color: var(--ink2); max-height: 0; opacity: 0; transition: max-height .45s var(--spring), opacity .3s var(--ease), background .6s; }
+.ln.on { max-height: 22px; opacity: 1; }
+.ln .n { text-align: right; padding-right: 14px; color: var(--ink3); opacity: .6; user-select: none; }
+.ln.new { background: color-mix(in srgb, var(--coral) 13%, transparent); }
+.ln.new .n { color: var(--coral); opacity: 1; }
+.ln .k { color: var(--kw); font-weight: 650; } .ln .s { color: var(--str); } .ln .c { color: var(--ink3); }
+.caret { display: inline-block; width: 8px; height: 16px; background: var(--coral); vertical-align: -3px; margin-left: 1px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* the right column: window, terminal */
+.right { position: relative; height: min(580px, 66vh); display: grid; grid-template-rows: 1fr auto; gap: 16px; }
+.win { position: relative; border-radius: 18px; overflow: hidden; box-shadow: 0 0 0 1px var(--line), 0 30px 70px -28px rgba(0,0,0,.8);
+  transition: transform .8s var(--spring), opacity .4s; min-height: 0; transform-origin: 50% 40%; }
+.win.hidden { transform: scale(.9) translateY(20px); opacity: 0; }
+.win .bg { position: absolute; inset: 0; transition: opacity .9s var(--ease); }
+.win .bg.native { background: #242428; }
+.win .bg.liquid { background: linear-gradient(180deg, #f1f4f9 0%, #e4e8f0 100%); opacity: 0; }
+.win.liquid .bg.liquid { opacity: 1; }
+.win .bar { position: relative; height: 38px; display: flex; align-items: center; justify-content: center; font: 600 13px var(--sans); color: #d4d4d8; transition: color .9s; }
+.win.liquid .bar { color: #334155; }
+.win .bar .x { position: absolute; right: 12px; width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,.08); transition: background .9s; }
+.win.liquid .bar .x { background: rgba(15,23,42,.07); }
+.app { position: relative; height: calc(100% - 38px); display: grid; place-content: center; justify-items: center; gap: 14px; }
+.app > * { opacity: 0; transform: translateY(14px) scale(.96); transition: opacity .35s var(--ease), transform .7s var(--spring), color .9s, background .9s, box-shadow .9s; }
+.app > .on { opacity: 1; transform: none; }
+.t1 { font: 750 34px var(--sans); letter-spacing: -.02em; color: #fafafa; }
+.win.liquid .t1 { color: #0f172a; font-weight: 650; }
+.t2 { font: 500 15px var(--sans); color: #a1a1aa; font-variant-numeric: tabular-nums; }
+.win.liquid .t2 { color: #64748b; }
+.btn { border: 0; cursor: pointer; font: 650 16px var(--sans); color: #fff; padding: 13px 30px; border-radius: 999px; background: #3584e4; }
+.win.liquid .btn { background: #0f7c86; box-shadow: 0 8px 22px -10px rgba(15,124,134,.7); padding: 11px 24px; font-size: 15px; }
+.btn.press { transform: scale(.92) !important; transition: transform .12s var(--ease); }
+.bump { display: inline-block; animation: bump .5s var(--spring); }
+@keyframes bump { 0% { transform: translateY(-8px) scale(1.25); color: var(--coral); } }
+.themechip { position: absolute; left: 14px; bottom: 14px; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,.35); font: 600 11.5px var(--mono); opacity: 0; transition: opacity .4s; }
+.win.liquid .themechip { background: rgba(15,23,42,.08); }
+.themechip.on { opacity: 1; }
+.themechip button { border: 0; background: none; color: #a1a1aa; font: inherit; padding: 5px 10px; border-radius: 999px; cursor: pointer; transition: background .3s, color .3s; }
+.themechip button.sel { background: #fff; color: #0f172a; }
+
+/* the map answer: the window becomes the agent's screen */
+.shot { position: absolute; inset: 38px 0 0; opacity: 0; transform: scale(1.04); transition: opacity .6s var(--ease), transform 1s var(--spring); background: #eceef2; overflow: hidden; }
+.shot img { width: 100%; display: block; transform: translateY(0); transition: transform 6s var(--ease); }
+.win.map .shot { opacity: 1; transform: none; }
+.win.map .shot.scroll img { transform: translateY(-34%); }
+.real { position: absolute; z-index: 2; left: 12px; bottom: 12px; font: 600 11px var(--mono); font-style: normal; color: #fff; background: rgba(15,23,42,.78); padding: 4px 9px; border-radius: 7px; }
+.stage.focus .editor { opacity: .28; }
+.ask { position: absolute; right: 18px; top: 52px; z-index: 3; background: var(--coral); color: #1a0606; font: 650 15px var(--sans); padding: 10px 16px; border-radius: 18px 18px 4px 18px; opacity: 0; transform: translateY(10px) scale(.9); transition: opacity .3s, transform .6s var(--spring); }
+.ask.on { opacity: 1; transform: none; }
+
+/* the agent terminal */
+.term { padding: 14px 18px; font: 13px/1.6 var(--mono); color: var(--ink2); max-height: 0; opacity: 0; overflow: hidden; transition: max-height .7s var(--spring), opacity .4s, padding .4s; padding-top: 0; padding-bottom: 0; }
+.term.on { max-height: 230px; opacity: 1; padding-top: 14px; padding-bottom: 14px; }
+.term .who { font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--agent); margin-bottom: 6px; display: flex; gap: 8px; align-items: center; }
+.term .who i { width: 7px; height: 7px; border-radius: 50%; background: var(--agent); animation: blink 1.4s steps(1) infinite; }
+.term .cmd { color: var(--ink); font-weight: 650; } .term .cmd::before { content: "› "; color: var(--agent); }
+.term .out { color: var(--ink2); } .term .good { color: var(--ok); }
+
+/* cursors: a person's and an agent's */
+.cur { position: absolute; z-index: 10; left: 0; top: 0; pointer-events: none; opacity: 0; transition: transform .9s var(--spring), opacity .3s; }
+.cur svg { width: 22px; height: 22px; display: block; filter: drop-shadow(0 2px 4px rgba(0,0,0,.4)); }
+.cur span { position: absolute; left: 18px; top: 18px; font: 650 11px var(--mono); padding: 3px 7px; border-radius: 6px; white-space: nowrap; }
+.cur.you span { background: #fff; color: #111; } .cur.bot span { background: var(--agent); color: #160b2e; }
+.cur.on { opacity: 1; }
+
+/* the end card */
+.end { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 18px; background: var(--bg); opacity: 0; pointer-events: none; transition: opacity .7s var(--ease); z-index: 20; }
+.end.on { opacity: 1; pointer-events: auto; }
+.end h2 { margin: 0; font: 850 clamp(40px, 6vw, 84px)/1 var(--sans); letter-spacing: -.045em; }
+.end h2 span { color: var(--ink3); }
+.end .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.end .row span { font: 600 14px var(--sans); padding: 9px 15px; border-radius: 999px; background: var(--s1); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); opacity: 0; transform: translateY(12px); transition: opacity .4s, transform .6s var(--spring); }
+.end.on .row span { opacity: 1; transform: none; }
+.end.on .row span:nth-child(2) { transition-delay: .1s; } .end.on .row span:nth-child(3) { transition-delay: .2s; } .end.on .row span:nth-child(4) { transition-delay: .3s; }
+.end a { color: var(--coral); font: 600 16px var(--mono); text-decoration: none; }
+
+/* controls */
+footer { padding: 0 48px 26px; display: flex; align-items: center; gap: 16px; }
+footer button.play { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); cursor: pointer; display: grid; place-items: center; transition: transform .3s var(--spring); }
+footer button.play:active { transform: scale(.9); }
+.scenes { display: flex; gap: 6px; flex: 1; }
+.scenes button { flex: 1; height: 34px; border: 0; border-radius: 10px; background: var(--s1); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink3); font: 600 11.5px var(--mono); letter-spacing: .04em; cursor: pointer; position: relative; overflow: hidden; transition: color .3s; }
+.scenes button i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: color-mix(in srgb, var(--coral) 22%, transparent); }
+.scenes button span { position: relative; }
+.scenes button.cur2 { color: var(--ink); }
+.scenes button.done i { width: 100%; }
+
+@media (max-width: 900px) {
+  body { height: 100dvh; min-height: 0; }
+  header { padding: 16px 16px 0; }
+  .brand { display: none; }
+  .cap { height: 74px; }
+  .cap small { font-size: 11px; margin-bottom: 6px; }
+  .cap b { font-size: 26px; }
+  .stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: 30% minmax(0, 1fr); gap: 12px; padding: 12px 16px; align-items: stretch; }
+  .editor { height: 100%; padding: 10px 0; }
+  .tabbar { padding: 0 12px 8px; font-size: 11px; } .tabbar .dot { display: none; } .tabbar b { margin-left: 0; }
+  .code { font-size: 10.5px; line-height: 1.45; }
+  .ln { grid-template-columns: 28px 1fr; } .ln.on { max-height: 18px; }
+  .right { height: 100%; gap: 10px; }
+  .t1 { font-size: 26px; }
+  .term { font-size: 11px; } .term.on { max-height: 170px; padding-top: 10px; padding-bottom: 10px; }
+  .end h2 { font-size: 40px; padding: 0 16px; }
+  footer { padding: 0 16px 14px; gap: 10px; }
+  footer button.play { width: 36px; height: 36px; }
+  .scenes button { height: 30px; } .scenes button span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition-duration: .01s !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="cap" id="cap">
+    <div data-s="0"><small>1 · Write</small><b>30 lines of Mojo. <span>That's the app.</span></b></div>
+    <div data-s="1"><small>2 · Run</small><b>A native window. <span>Every tap, instant.</span></b></div>
+    <div data-s="2"><small>3 · Look</small><b>Liquid comes free. <span>One method.</span></b></div>
+    <div data-s="3"><small>4 · Agents</small><b>Hand it to an agent. <span>No extra code.</span></b></div>
+    <div data-s="4"><small>5 · Screens</small><b>Ask for a map. <span>Get a map.</span></b></div>
+  </div>
+  <div class="brand"><i>&lt;/&gt;</i>omxcode</div>
+</header>
+
+<main class="stage" id="stage">
+  <section class="card editor" aria-label="The app's code">
+    <div class="tabbar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><b>examples/start/app.mojo</b><span class="lines" id="count">0 lines</span></div>
+    <div class="code" id="code"></div>
+  </section>
+  <section class="right">
+    <div class="win hidden" id="win">
+      <div class="bg native"></div><div class="bg liquid"></div>
+      <div class="bar"><span id="wt">Hello</span><span class="x"></span></div>
+      <div class="app" id="app">
+        <div class="t1" id="t1">Hello from Mojo</div>
+        <div class="t2" id="t2">Tapped <span id="n">0</span> times</div>
+        <button class="btn" id="btn" type="button">Tap me</button>
+      </div>
+      <div class="themechip" id="chip"><button type="button" data-t="native">native</button><button type="button" data-t="liquid">liquid()</button></div>
+      <div class="shot" id="shot"><em class="real">a real screen · examples/agentchat</em><img alt="An agent's answer: a day in Lisbon with a map, a timeline and a weather chart, drawn by omxcode" src="__TRIP__"></div>
+      <div class="ask" id="ask">Plan a day in Lisbon</div>
+    </div>
+    <div class="card term" id="term"><div class="who"><i></i>an agent, over MCP</div><div id="tlog"></div></div>
+  </section>
+  <div class="cur you" id="you"><svg viewBox="0 0 24 24"><path d="M4 2l16 10-7 1.5L9.5 21z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></svg><span>you</span></div>
+  <div class="cur bot" id="bot"><svg viewBox="0 0 24 24"><path d="M4 2l16 10-7 1.5L9.5 21z" fill="#a78bfa" stroke="#160b2e" stroke-width="1.4" stroke-linejoin="round"/></svg><span>agent</span></div>
+  <div class="end" id="end">
+    <h2>Write it once in Mojo. <span>Native, Liquid, agent-ready.</span></h2>
+    <div class="row"><span>Linux</span><span>The web</span><span>Mac builds</span><span>Standard AG-UI</span></div>
+    <a href="https://abhisheksreesaila.github.io/omxcode/start.html">abhisheksreesaila.github.io/omxcode</a>
+  </div>
+</main>
+
+<footer>
+  <button class="play" id="play" type="button" aria-label="Pause"><svg width="14" height="14" viewBox="0 0 14 14" id="pi"><rect x="2" y="1" width="3.5" height="12" rx="1" fill="currentColor"/><rect x="8.5" y="1" width="3.5" height="12" rx="1" fill="currentColor"/></svg></button>
+  <div class="scenes" id="scenes">
+    <button type="button" data-s="0"><i></i><span>WRITE</span></button><button type="button" data-s="1"><i></i><span>RUN</span></button><button type="button" data-s="2"><i></i><span>LIQUID</span></button><button type="button" data-s="3"><i></i><span>AGENT</span></button><button type="button" data-s="4"><i></i><span>MAP</span></button><button type="button" data-s="5"><i></i><span>END</span></button>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // the real examples/start/app.mojo; "theme" lines arrive in scene 3; "ui" names which view a line brings in
+  const SRC = [
+    ["from mojoui import App, Event, View, VStack, Text, Button"],
+    ["from mojoui.theme import Theme", "theme"],
+    ["from themes.liquid import liquid", "theme"],
+    [""],
+    ["comptime TAP = 1"],
+    [""],
+    ["struct Main(App):"],
+    ["    var taps: Int"],
+    [""],
+    ["    def title(self) -> String:"],
+    ["        return \"Hello\"", null, "win"],
+    [""],
+    ["    def theme(self) -> Theme:", "theme"],
+    ["        return liquid()", "theme"],
+    ["", "theme"],
+    ["    def update(mut self, event: Event):"],
+    ["        if event.message == TAP:"],
+    ["            self.taps += 1"],
+    [""],
+    ["    def view(self) -> View:"],
+    ["        return VStack("],
+    ["            Text(\"Hello from Mojo\", style=TITLE),", null, "t1"],
+    ["            Text(\"Tapped \" + String(self.taps) + \" times\"),", null, "t2"],
+    ["            Button(\"Tap me\", on_tap=TAP, style=PROMINENT),", null, "btn"],
+    ["        )"],
+  ];
+  const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const hl = t => esc(t).replace(/("[^"]*")/g, '<span class="s">$1</span>')
+    .replace(/\b(from|import|comptime|struct|var|def|return|if|mut|self)\b(?![^<]*<\/span>)/g, '<span class="k">$1</span>');
+  const code = $("#code");
+  const lines = SRC.map(([t, kind, ui]) => { const d = document.createElement("div"); d.className = "ln"; d.dataset.kind = kind || ""; d.dataset.ui = ui || "";
+    d.innerHTML = `<span class="n"></span><span class="t"></span>`; d._src = t; code.append(d); return d; });
+  const renumber = () => { let k = 0; lines.forEach(l => { if (l.classList.contains("on")) l.querySelector(".n").textContent = ++k; });
+    $("#count").textContent = k + " lines"; };
+
+  const win = $("#win"), btn = $("#btn"), n = $("#n"), term = $("#term"), tlog = $("#tlog"), stage = $("#stage");
+  let taps = 0, run = 0, scene = -1, paused = false, waiters = [];
+  // a pause-aware wait in real time (paused time doesn't count)
+  const sleep = ms => new Promise((ok, no) => { const my = run; let left = reduce ? Math.min(ms, 80) : ms, last = performance.now();
+    const tick = () => { if (my !== run) return no("cut"); const now = performance.now();
+      if (!paused) left -= now - last; last = now; if (left <= 0) ok(); else setTimeout(tick, Math.min(16, Math.max(1, left))); }; tick(); });
+  const tap = (who) => { taps++; n.innerHTML = `<span class="bump">${taps}</span>`; btn.classList.add("press"); setTimeout(() => btn.classList.remove("press"), 140);
+    if (who === "agent") return `Now: Tapped ${taps} times`; };
+  btn.addEventListener("click", () => tap("you"));
+  const setTheme = t => { win.classList.toggle("liquid", t === "liquid"); $$("#chip button").forEach(b => b.classList.toggle("sel", b.dataset.t === t)); };
+  $$("#chip button").forEach(b => b.addEventListener("click", () => setTheme(b.dataset.t)));
+
+  const moveTo = (cur, el, dx = 0.55, dy = 0.6) => { const s = stage.getBoundingClientRect(), r = el.getBoundingClientRect();
+    cur.style.transform = `translate(${r.left - s.left + r.width * dx}px, ${r.top - s.top + r.height * dy}px)`; };
+  const park = (cur, x, y) => { cur.style.transform = `translate(${x}px, ${y}px)`; };
+
+  async function type(line, speed = 14) {
+    line.classList.add("on"); renumber(); const t = line.querySelector(".t"); const src = line._src;
+    setTimeout(() => { const want = line.offsetTop - code.offsetTop - code.clientHeight * .6; code.scrollTop = Math.max(0, want); }, 60);  // (follow the typing)
+    if (!src) { t.innerHTML = ""; return; }
+    for (let i = 1; i <= src.length; i += 2) { t.innerHTML = hl(src.slice(0, i)) + '<span class="caret"></span>'; await sleep(speed); }
+    t.innerHTML = hl(src);
+    const ui = line.dataset.ui; if (ui === "win") win.classList.remove("hidden"); else if (ui) $("#" + ui).classList.add("on");
+  }
+  async function say(cls, text, speed = 26) {
+    const d = document.createElement("div"); d.className = cls; tlog.append(d);
+    if (cls === "cmd") { for (let i = 1; i <= text.length; i++) { d.textContent = text.slice(0, i); await sleep(speed); } } else d.innerHTML = text;
+  }
+  function reset() {
+    lines.forEach(l => { l.classList.remove("on", "new"); l.querySelector(".t").innerHTML = ""; }); renumber(); code.scrollTop = 0;
+    win.className = "win hidden"; $$(".app > *").forEach(e => e.classList.remove("on")); taps = 0; n.textContent = "0";
+    term.classList.remove("on"); tlog.innerHTML = ""; $("#chip").classList.remove("on"); setTheme("native");
+    $("#shot").classList.remove("scroll"); $("#ask").classList.remove("on"); stage.classList.remove("focus"); $("#wt").textContent = "Hello"; $("#end").classList.remove("on");
+    $("#you").classList.remove("on"); $("#bot").classList.remove("on");
+  }
+  // jump straight to the state at the start of scene s (so the dots work)
+  function stateAt(s) {
+    reset();
+    if (s >= 1) { lines.forEach(l => { if (l.dataset.kind !== "theme") { l.classList.add("on"); l.querySelector(".t").innerHTML = hl(l._src); } });
+      renumber(); win.classList.remove("hidden"); $$(".app > *").forEach(e => e.classList.add("on")); }
+    if (s >= 2) { taps = 3; n.textContent = "3"; }
+    if (s >= 3) { lines.forEach(l => { if (l.dataset.kind === "theme") { l.classList.add("on"); l.querySelector(".t").innerHTML = hl(l._src); } }); renumber();
+      setTheme("liquid"); $("#chip").classList.add("on"); }
+    if (s >= 4) { taps = 4; n.textContent = "4"; }
+    if (s >= 5) { win.classList.add("map"); stage.classList.add("focus"); $("#wt").textContent = "Agent chat"; }
+  }
+  const SCENES = [
+    async () => { for (const l of lines) if (l.dataset.kind !== "theme") await type(l); await sleep(900); },
+    async () => { const you = $("#you"); const s = stage.getBoundingClientRect(); park(you, s.width * .78, s.height * .95); you.classList.add("on"); await sleep(300);
+      moveTo(you, btn); await sleep(950);
+      for (let i = 0; i < 3; i++) { tap("you"); await sleep(520); }
+      park(you, s.width * .9, s.height * .85); await sleep(500); you.classList.remove("on"); await sleep(400); },
+    async () => { for (const l of lines) if (l.dataset.kind === "theme") { l.classList.add("new"); await type(l, 22); }
+      await sleep(450); setTheme("liquid"); await sleep(1300); $("#chip").classList.add("on");
+      lines.forEach(l => l.classList.remove("new")); await sleep(1200); },
+    async () => { term.classList.add("on"); await sleep(700);
+      await say("cmd", "screen"); await sleep(250);
+      await say("out", `Hello · design: Liquid · 1 tools on this screen<br>"Hello from Mojo" · "Tapped ${taps} times" · Button "Tap me" → <b style="color:var(--agent)">tap-me</b>`);
+      await sleep(1200); const bot = $("#bot"); const s = stage.getBoundingClientRect(); park(bot, s.width * .95, s.height * .75); bot.classList.add("on");
+      await say("cmd", "tap-me"); moveTo(bot, btn, .4, .7); await sleep(1000);
+      const msg = tap("agent"); await sleep(250); await say("good", "Did tap-me. " + msg); await sleep(900);
+      park(bot, s.width * .96, s.height * .7); await sleep(500); bot.classList.remove("on"); await sleep(600); },
+    async () => { term.classList.remove("on"); stage.classList.add("focus"); await sleep(300); $("#ask").classList.add("on"); await sleep(1100);
+      $("#wt").textContent = "Agent chat"; win.classList.add("map"); await sleep(900); $("#ask").classList.remove("on"); $("#shot").classList.add("scroll"); await sleep(5200); },
+    async () => { $("#end").classList.add("on"); await sleep(6000); },
+  ];
+  const dots = $$("#scenes button");
+  const mark = () => dots.forEach((d, i) => { d.classList.toggle("done", i < scene); d.classList.toggle("cur2", i === scene);
+    const bar = d.querySelector("i"); bar.style.transition = "none"; bar.style.width = i < scene ? "100%" : "0";
+    if (i === scene) { void bar.offsetWidth; bar.style.transition = `width ${[8, 4.5, 4.5, 8, 7.5, 6][i]}s linear`; bar.style.width = "100%"; } });
+  $$("#cap div").forEach(c => c.classList.remove("on"));
+  async function play(from) {
+    const my = ++run; stateAt(from);
+    for (scene = from; scene < SCENES.length; scene++) {
+      $$("#cap div").forEach(c => c.classList.toggle("on", c.dataset.s === String(Math.min(scene, 4)) && scene < 5)); mark();
+      try { await SCENES[scene](); } catch (e) { return; }
+      if (my !== run) return;
+    }
+    await new Promise(r => setTimeout(r, 400)); if (my === run) play(0);
+  }
+  dots.forEach(d => d.addEventListener("click", () => { paused = false; icon(); play(+d.dataset.s); }));
+  const icon = () => { $("#pi").innerHTML = paused ? '<path d="M3 1.5l9 5.5-9 5.5z" fill="currentColor"/>' : '<rect x="2" y="1" width="3.5" height="12" rx="1" fill="currentColor"/><rect x="8.5" y="1" width="3.5" height="12" rx="1" fill="currentColor"/>';
+    $("#play").setAttribute("aria-label", paused ? "Play" : "Pause"); $$("#scenes i").forEach(b => b.style.animationPlayState = paused ? "paused" : "running"); };
+  $("#play").addEventListener("click", () => { paused = !paused; icon(); });
+  addEventListener("keydown", e => { if (e.key === " ") { e.preventDefault(); paused = !paused; icon(); }
+    if (e.key === "ArrowRight") play(Math.min(5, scene + 1)); if (e.key === "ArrowLeft") play(Math.max(0, scene - 1)); });
+  play(0);
+})();
+</script>
+</body>
+</html>
