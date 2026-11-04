@@ -52,9 +52,13 @@ An agent builds UI by calling the frontend tool `render_ui` with `{"ui": node}`;
   {"component": "Button", "label": "Submit", "action": "submit", "style": "prominent"}]}}
 ```
 
-- The components: Card, VStack, HStack, Text, Paragraph, Divider, Table, Sparkline, Meter, Button, TextField, Toggle,
-  Segmented. Their props and limits are one catalog (`mojoui.genui.catalog()`), printed as a JSON Schema
-  (docs/genui.schema.json, the tool's parameters).
+- The components (goal 48 M0: 36, each the real mojoui component, one catalog: `mojoui.genui.catalog()`, printed as a
+  JSON Schema in docs/genui.schema.json, the tool's parameters; `scripts/genui_schema.py` regenerates it):
+  - layout: Card, VStack, HStack, Grid, Tabs, Divider, Spacer
+  - words: Text, Paragraph, Markdown, CodeBlock (with Copy), Chip, Alert, Skeleton
+  - data: Table, DataGrid, ChartView (bars, line), Sparkline, KpiView, Meter, ProgressBar, Timeline, MapView, Breadcrumbs, Icon
+  - inputs: Button, TextField, TextArea, Toggle, Checkbox, Dropdown, Slider, Segmented, Radio, DatePicker
+  - asking: Confirm (approve or reject)
 - Refused, with a message to the agent (a tool result `{"error": "refused: …"}`): an unknown component (WebFrame,
   Script, "card"…), a bad prop (unknown, wrong type, out of range, missing, an action that isn't one word, a bind that
   isn't a state path), more than 8 levels, more than 200 components or 32 KB.
@@ -62,6 +66,18 @@ An agent builds UI by calling the frontend tool `render_ui` with `{"ui": node}`;
   loads a page or draws pixels it brings.
 - `bind` reads and edits the shared state at a JSON pointer; `action` reports a word back: the first one is render_ui's
   tool result (`{"action": "submit"}`), and the edited state goes with the run.
+
+## Not for agents
+
+Components an agent can't name, and why (the rest of docs/components.md):
+- Code, pages or pixels it would bring: WebComponent, WebFrame, Canvas, Image, Picture, Clipboard (an agent's UI is data
+  drawn natively; nothing it sends runs, loads or paints).
+- Windows and the app's own frame: MenuBar, Menu, ContextMenu, Dialog, Popover, Toast, Overlay, NavBar, Route, the
+  shells, sidebars and toolbars (an agent's UI lives inside the conversation, not around it).
+- App-only parts, bound to an app's engine or files: the workbook (PivotTable, Board, sheet objects, FormulaBar,
+  Inspector, cell styles, the Island), video and media (VideoSource, Player, MediaTimeline, VideoTable, FrameFeed),
+  documents and OCR (PdfSource, Document card, OcrModel), links and drags (Links, Link drag, Draggable, DropTarget,
+  Peek), telemetry lanes, Ink strokes, LazyList (a DataGrid covers long lists).
 
 ## Run it
 

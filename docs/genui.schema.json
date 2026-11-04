@@ -25,22 +25,70 @@
      "$ref": "#/$defs/components/HStack"
     },
     {
+     "$ref": "#/$defs/components/Grid"
+    },
+    {
+     "$ref": "#/$defs/components/Tabs"
+    },
+    {
+     "$ref": "#/$defs/components/Divider"
+    },
+    {
+     "$ref": "#/$defs/components/Spacer"
+    },
+    {
      "$ref": "#/$defs/components/Text"
     },
     {
      "$ref": "#/$defs/components/Paragraph"
     },
     {
-     "$ref": "#/$defs/components/Divider"
+     "$ref": "#/$defs/components/Markdown"
+    },
+    {
+     "$ref": "#/$defs/components/CodeBlock"
+    },
+    {
+     "$ref": "#/$defs/components/Chip"
+    },
+    {
+     "$ref": "#/$defs/components/Alert"
+    },
+    {
+     "$ref": "#/$defs/components/Skeleton"
     },
     {
      "$ref": "#/$defs/components/Table"
     },
     {
+     "$ref": "#/$defs/components/DataGrid"
+    },
+    {
+     "$ref": "#/$defs/components/ChartView"
+    },
+    {
      "$ref": "#/$defs/components/Sparkline"
     },
     {
+     "$ref": "#/$defs/components/KpiView"
+    },
+    {
      "$ref": "#/$defs/components/Meter"
+    },
+    {
+     "$ref": "#/$defs/components/ProgressBar"
+    },
+    {
+     "$ref": "#/$defs/components/Timeline"
+    },
+    {
+     "$ref": "#/$defs/components/MapView"
+    },
+    {
+     "$ref": "#/$defs/components/Breadcrumbs"
+    },
+    {
+     "$ref": "#/$defs/components/Icon"
     },
     {
      "$ref": "#/$defs/components/Button"
@@ -49,17 +97,38 @@
      "$ref": "#/$defs/components/TextField"
     },
     {
+     "$ref": "#/$defs/components/TextArea"
+    },
+    {
      "$ref": "#/$defs/components/Toggle"
     },
     {
+     "$ref": "#/$defs/components/Checkbox"
+    },
+    {
+     "$ref": "#/$defs/components/Dropdown"
+    },
+    {
+     "$ref": "#/$defs/components/Slider"
+    },
+    {
      "$ref": "#/$defs/components/Segmented"
+    },
+    {
+     "$ref": "#/$defs/components/Radio"
+    },
+    {
+     "$ref": "#/$defs/components/DatePicker"
+    },
+    {
+     "$ref": "#/$defs/components/Confirm"
     }
    ]
   },
   "components": {
    "Card": {
     "type": "object",
-    "description": "a surface holding components, with an optional title",
+    "description": "a surface holding components, with an optional title and subtitle",
     "properties": {
      "component": {
       "const": "Card"
@@ -67,6 +136,18 @@
      "title": {
       "type": "string",
       "maxLength": 200
+     },
+     "subtitle": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "tone": {
+      "enum": [
+       "plain",
+       "good",
+       "warn"
+      ],
+      "description": "warn asks for attention, good confirms"
      },
      "children": {
       "type": "array",
@@ -89,6 +170,14 @@
      "component": {
       "const": "VStack"
      },
+     "gap": {
+      "enum": [
+       "xs",
+       "s",
+       "m",
+       "l"
+      ]
+     },
      "children": {
       "type": "array",
       "maxItems": 50,
@@ -110,6 +199,14 @@
      "component": {
       "const": "HStack"
      },
+     "gap": {
+      "enum": [
+       "xs",
+       "s",
+       "m",
+       "l"
+      ]
+     },
      "children": {
       "type": "array",
       "maxItems": 50,
@@ -117,6 +214,91 @@
        "$ref": "#/$defs/node"
       },
       "description": "the components inside, in order"
+     }
+    },
+    "required": [
+     "component"
+    ],
+    "additionalProperties": false
+   },
+   "Grid": {
+    "type": "object",
+    "description": "components in rows of equal columns (tiles, KPI rows, galleries)",
+    "properties": {
+     "component": {
+      "const": "Grid"
+     },
+     "columns": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 6
+     },
+     "children": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+       "$ref": "#/$defs/node"
+      },
+      "description": "the components inside, in order"
+     }
+    },
+    "required": [
+     "component",
+     "columns"
+    ],
+    "additionalProperties": false
+   },
+   "Tabs": {
+    "type": "object",
+    "description": "sections the user switches between: one child per tab, in order",
+    "properties": {
+     "component": {
+      "const": "Tabs"
+     },
+     "tabs": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 8,
+      "items": {
+       "type": "string",
+       "maxLength": 100
+      },
+      "description": "the tab titles"
+     },
+     "children": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+       "$ref": "#/$defs/node"
+      },
+      "description": "the components inside, in order"
+     }
+    },
+    "required": [
+     "component",
+     "tabs"
+    ],
+    "additionalProperties": false
+   },
+   "Divider": {
+    "type": "object",
+    "description": "a rule between components",
+    "properties": {
+     "component": {
+      "const": "Divider"
+     }
+    },
+    "required": [
+     "component"
+    ],
+    "additionalProperties": false
+   },
+   "Spacer": {
+    "type": "object",
+    "description": "empty room that pushes its neighbours apart in a row",
+    "properties": {
+     "component": {
+      "const": "Spacer"
      }
     },
     "required": [
@@ -141,6 +323,15 @@
        "title",
        "headline",
        "caption"
+      ]
+     },
+     "tone": {
+      "enum": [
+       "plain",
+       "accent",
+       "good",
+       "warn",
+       "strong"
       ]
      }
     },
@@ -168,12 +359,109 @@
     ],
     "additionalProperties": false
    },
-   "Divider": {
+   "Markdown": {
     "type": "object",
-    "description": "a rule between components",
+    "description": "formatted text: headings, lists, bold, italics, code, links (http/https only; never HTML)",
     "properties": {
      "component": {
-      "const": "Divider"
+      "const": "Markdown"
+     },
+     "text": {
+      "type": "string",
+      "maxLength": 8000
+     }
+    },
+    "required": [
+     "component",
+     "text"
+    ],
+    "additionalProperties": false
+   },
+   "CodeBlock": {
+    "type": "object",
+    "description": "code in a monospaced block with a Copy button",
+    "properties": {
+     "component": {
+      "const": "CodeBlock"
+     },
+     "code": {
+      "type": "string",
+      "maxLength": 8000
+     },
+     "language": {
+      "type": "string",
+      "maxLength": 30
+     }
+    },
+    "required": [
+     "component",
+     "code"
+    ],
+    "additionalProperties": false
+   },
+   "Chip": {
+    "type": "object",
+    "description": "a small pill: a tag, a status",
+    "properties": {
+     "component": {
+      "const": "Chip"
+     },
+     "text": {
+      "type": "string",
+      "maxLength": 60
+     },
+     "hue": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 6,
+      "description": "0 quiet, 1\u20136 the data colours"
+     }
+    },
+    "required": [
+     "component",
+     "text"
+    ],
+    "additionalProperties": false
+   },
+   "Alert": {
+    "type": "object",
+    "description": "an inline note or warning",
+    "properties": {
+     "component": {
+      "const": "Alert"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "text": {
+      "type": "string",
+      "maxLength": 1000
+     },
+     "tone": {
+      "enum": [
+       "info",
+       "warn"
+      ]
+     }
+    },
+    "required": [
+     "component",
+     "text"
+    ],
+    "additionalProperties": false
+   },
+   "Skeleton": {
+    "type": "object",
+    "description": "placeholder lines for something still loading",
+    "properties": {
+     "component": {
+      "const": "Skeleton"
+     },
+     "lines": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 12
      }
     },
     "required": [
@@ -224,6 +512,115 @@
     ],
     "additionalProperties": false
    },
+   "DataGrid": {
+    "type": "object",
+    "description": "a scrolling grid for many rows (up to 1,000 sent inline)",
+    "properties": {
+     "component": {
+      "const": "DataGrid"
+     },
+     "columns": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+       "type": "string",
+       "maxLength": 100
+      },
+      "description": "the column titles"
+     },
+     "rows": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+       "type": "array",
+       "maxItems": 20,
+       "items": {
+        "type": [
+         "string",
+         "number"
+        ],
+        "maxLength": 200,
+        "minimum": -1000000000000000,
+        "maximum": 1000000000000000
+       }
+      },
+      "description": "each row: a list of strings or numbers"
+     },
+     "height": {
+      "type": "number",
+      "minimum": 120,
+      "maximum": 800,
+      "description": "points"
+     }
+    },
+    "required": [
+     "component",
+     "columns",
+     "rows"
+    ],
+    "additionalProperties": false
+   },
+   "ChartView": {
+    "type": "object",
+    "description": "a chart of values by label: bars or a line",
+    "properties": {
+     "component": {
+      "const": "ChartView"
+     },
+     "kind": {
+      "enum": [
+       "bar",
+       "line"
+      ]
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "labels": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 60,
+      "items": {
+       "type": "string",
+       "maxLength": 100
+      },
+      "description": "one per value"
+     },
+     "values": {
+      "type": "array",
+      "maxItems": 60,
+      "items": {
+       "type": "number",
+       "minimum": -1000000000000000,
+       "maximum": 1000000000000000
+      },
+      "description": "the numbers, one per label"
+     },
+     "value_name": {
+      "type": "string",
+      "maxLength": 60,
+      "description": "what the numbers are"
+     },
+     "money": {
+      "type": "boolean",
+      "description": "values are amounts of money (cents)"
+     },
+     "height": {
+      "type": "number",
+      "minimum": 140,
+      "maximum": 600,
+      "description": "points"
+     }
+    },
+    "required": [
+     "component",
+     "labels",
+     "values"
+    ],
+    "additionalProperties": false
+   },
    "Sparkline": {
     "type": "object",
     "description": "a small line chart of numbers",
@@ -256,6 +653,55 @@
     ],
     "additionalProperties": false
    },
+   "KpiView": {
+    "type": "object",
+    "description": "a headline number with its label, a note and a small trend line",
+    "properties": {
+     "component": {
+      "const": "KpiView"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 80
+     },
+     "value": {
+      "type": "string",
+      "maxLength": 40
+     },
+     "note": {
+      "type": "string",
+      "maxLength": 80
+     },
+     "tone": {
+      "enum": [
+       "plain",
+       "good",
+       "warn"
+      ],
+      "description": "the note's"
+     },
+     "spark": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+       "type": "number",
+       "minimum": -1000000000000000,
+       "maximum": 1000000000000000
+      },
+      "description": "the trend"
+     },
+     "accent": {
+      "type": "boolean",
+      "description": "the focal number"
+     }
+    },
+    "required": [
+     "component",
+     "label",
+     "value"
+    ],
+    "additionalProperties": false
+   },
    "Meter": {
     "type": "object",
     "description": "how full something is",
@@ -285,6 +731,203 @@
     ],
     "additionalProperties": false
    },
+   "ProgressBar": {
+    "type": "object",
+    "description": "how far along something is",
+    "properties": {
+     "component": {
+      "const": "ProgressBar"
+     },
+     "value": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "0 to 100"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "shown above the control"
+     }
+    },
+    "required": [
+     "component",
+     "value"
+    ],
+    "additionalProperties": false
+   },
+   "Timeline": {
+    "type": "object",
+    "description": "steps top to bottom, each with its status",
+    "properties": {
+     "component": {
+      "const": "Timeline"
+     },
+     "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+       "type": "object",
+       "properties": {
+        "label": {
+         "type": "string",
+         "maxLength": 200
+        },
+        "status": {
+         "enum": [
+          "pending",
+          "running",
+          "done",
+          "failed",
+          "cancelled"
+         ]
+        },
+        "detail": {
+         "type": "string",
+         "maxLength": 300
+        }
+       },
+       "required": [
+        "label"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    "required": [
+     "component",
+     "steps"
+    ],
+    "additionalProperties": false
+   },
+   "MapView": {
+    "type": "object",
+    "description": "a small offline map: a route and named places, north up, metres to scale",
+    "properties": {
+     "component": {
+      "const": "MapView"
+     },
+     "route": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+       "type": "array",
+       "minItems": 2,
+       "maxItems": 2,
+       "prefixItems": [
+        {
+         "type": "number",
+         "minimum": -90,
+         "maximum": 90
+        },
+        {
+         "type": "number",
+         "minimum": -180,
+         "maximum": 180
+        }
+       ]
+      },
+      "description": "the route as [latitude, longitude] pairs"
+     },
+     "places": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 50,
+      "items": {
+       "type": "object",
+       "properties": {
+        "lat": {
+         "type": "number",
+         "minimum": -90,
+         "maximum": 90
+        },
+        "lon": {
+         "type": "number",
+         "minimum": -180,
+         "maximum": 180
+        },
+        "label": {
+         "type": "string",
+         "maxLength": 100
+        },
+        "kind": {
+         "enum": [
+          "place",
+          "finding"
+         ]
+        }
+       },
+       "required": [
+        "lat",
+        "lon"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "height": {
+      "type": "number",
+      "minimum": 160,
+      "maximum": 600,
+      "description": "points"
+     }
+    },
+    "required": [
+     "component"
+    ],
+    "additionalProperties": false
+   },
+   "Breadcrumbs": {
+    "type": "object",
+    "description": "where you are, as a trail",
+    "properties": {
+     "component": {
+      "const": "Breadcrumbs"
+     },
+     "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+       "type": "string",
+       "maxLength": 100
+      }
+     },
+     "action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a word reported back to the agent (the render_ui tool's result) when used"
+     }
+    },
+    "required": [
+     "component",
+     "items"
+    ],
+    "additionalProperties": false
+   },
+   "Icon": {
+    "type": "object",
+    "description": "a Lucide icon by name (\"map-pin\", \"calendar\", \"check\")",
+    "properties": {
+     "component": {
+      "const": "Icon"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 40
+     },
+     "size": {
+      "type": "number",
+      "minimum": 12,
+      "maximum": 64
+     }
+    },
+    "required": [
+     "component",
+     "name"
+    ],
+    "additionalProperties": false
+   },
    "Button": {
     "type": "object",
     "description": "a button that reports its action",
@@ -304,8 +947,13 @@
      "style": {
       "enum": [
        "plain",
-       "prominent"
+       "prominent",
+       "destructive"
       ]
+     },
+     "icon": {
+      "type": "string",
+      "maxLength": 40
      }
     },
     "required": [
@@ -326,10 +974,48 @@
       "type": "string",
       "maxLength": 200
      },
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "shown above the control"
+     },
      "bind": {
       "type": "string",
       "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
       "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     }
+    },
+    "required": [
+     "component",
+     "bind"
+    ],
+    "additionalProperties": false
+   },
+   "TextArea": {
+    "type": "object",
+    "description": "a multi-line text input that edits the state at bind",
+    "properties": {
+     "component": {
+      "const": "TextArea"
+     },
+     "placeholder": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "shown above the control"
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     },
+     "height": {
+      "type": "number",
+      "minimum": 60,
+      "maximum": 400
      }
     },
     "required": [
@@ -362,6 +1048,108 @@
     ],
     "additionalProperties": false
    },
+   "Checkbox": {
+    "type": "object",
+    "description": "a tick box that edits the state at bind",
+    "properties": {
+     "component": {
+      "const": "Checkbox"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     }
+    },
+    "required": [
+     "component",
+     "label",
+     "bind"
+    ],
+    "additionalProperties": false
+   },
+   "Dropdown": {
+    "type": "object",
+    "description": "one choice from a list, editing the state at bind",
+    "properties": {
+     "component": {
+      "const": "Dropdown"
+     },
+     "options": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 30,
+      "items": {
+       "type": "string",
+       "maxLength": 100
+      }
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "shown above the control"
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     },
+     "action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a word reported back to the agent (the render_ui tool's result) when used"
+     }
+    },
+    "required": [
+     "component",
+     "options",
+     "bind"
+    ],
+    "additionalProperties": false
+   },
+   "Slider": {
+    "type": "object",
+    "description": "a number from min to max, editing the state at bind",
+    "properties": {
+     "component": {
+      "const": "Slider"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "shown above the control"
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     },
+     "min": {
+      "type": "number",
+      "minimum": -1000000,
+      "maximum": 1000000
+     },
+     "max": {
+      "type": "number",
+      "minimum": -1000000,
+      "maximum": 1000000
+     },
+     "step": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 1000000
+     }
+    },
+    "required": [
+     "component",
+     "bind"
+    ],
+    "additionalProperties": false
+   },
    "Segmented": {
     "type": "object",
     "description": "one choice of a few, editing the state at bind",
@@ -379,6 +1167,11 @@
       },
       "description": "2 to 8 choices"
      },
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "shown above the control"
+     },
      "bind": {
       "type": "string",
       "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
@@ -394,6 +1187,105 @@
      "component",
      "options",
      "bind"
+    ],
+    "additionalProperties": false
+   },
+   "Radio": {
+    "type": "object",
+    "description": "one choice of a few, as a list, editing the state at bind",
+    "properties": {
+     "component": {
+      "const": "Radio"
+     },
+     "options": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 8,
+      "items": {
+       "type": "string",
+       "maxLength": 100
+      }
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "shown above the control"
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     },
+     "action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a word reported back to the agent (the render_ui tool's result) when used"
+     }
+    },
+    "required": [
+     "component",
+     "options",
+     "bind"
+    ],
+    "additionalProperties": false
+   },
+   "DatePicker": {
+    "type": "object",
+    "description": "a date (YYYY-MM-DD), editing the state at bind",
+    "properties": {
+     "component": {
+      "const": "DatePicker"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "shown above the control"
+     },
+     "bind": {
+      "type": "string",
+      "pattern": "^(/[A-Za-z0-9_][A-Za-z0-9_-]{0,39}){1,6}$",
+      "description": "a JSON pointer into the shared state (\"/form/name\"): the value shown, and where edits go"
+     }
+    },
+    "required": [
+     "component",
+     "bind"
+    ],
+    "additionalProperties": false
+   },
+   "Confirm": {
+    "type": "object",
+    "description": "asks the user to approve or reject something; reports approve or reject",
+    "properties": {
+     "component": {
+      "const": "Confirm"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "text": {
+      "type": "string",
+      "maxLength": 1000
+     },
+     "approve": {
+      "type": "string",
+      "maxLength": 40,
+      "description": "the approve button's label"
+     },
+     "reject": {
+      "type": "string",
+      "maxLength": 40,
+      "description": "the reject button's label"
+     },
+     "danger": {
+      "type": "boolean",
+      "description": "approving can't be undone"
+     }
+    },
+    "required": [
+     "component",
+     "title"
     ],
     "additionalProperties": false
    }

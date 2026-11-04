@@ -99,7 +99,7 @@ struct Screens(Movable):
         if k < 0 or k >= len(self.uis):
             return False
         var act = self.uis[k].handle(e, agent.state)
-        if act.kind != ACT_ACTION:
+        if act.kind != ACT_ACTION:  # (an input, or the screen's own change: a tab, a copy, a scroll)
             return False
         if not agent.answered(self.calls[k]):
             agent.answer(self.calls[k], act.report())
@@ -120,7 +120,7 @@ struct Screens(Movable):
             return Card(Text("Couldn't show the agent's UI", style=CAPTION), Text(self.uis[k].problem), spacing=SPACE_XS).tone(CARD_WARN)
         return self.uis[k].view(state, version)
 
-    def draw(self, canvas: Int, mut surface: Surface, p: Palette, state: JDoc):
+    def draw(mut self, canvas: Int, mut surface: Surface, p: Palette, state: JDoc):
         for k in range(len(self.uis)):
             if self.uis[k].draws(canvas):
                 self.uis[k].draw(canvas, surface, p, state)

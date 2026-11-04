@@ -5,7 +5,7 @@ from std.sys import argv
 from std.testing import assert_equal, assert_true
 from mojoui.json import Json, json_string
 from mojoui.jsonpatch import JDoc
-from mojoui.genui import GenUi, schema, catalog, ACT_STATE, ACT_ACTION
+from mojoui.genui import GenUi, schema, catalog, sample, ACT_STATE, ACT_ACTION, ACT_LOCAL
 from mojoui.app import Event
 from mojoui.agui import Agent, Tool
 from mojoui.agentui import Screens, MAX_RETRIES
@@ -15,6 +15,22 @@ from mojoui.view import BUTTON, FIELD, TOGGLE
 def main() raises:
     print("SCHEMA: " + schema())
     _ = Json.parse(schema())
+    # goal 48 M0: every catalogued component renders from a sample node, and a bad prop on each is refused
+    var blank = JDoc.parse('{"form": {}}')
+    var specs = catalog()
+    for ref s in specs:
+        var ui = GenUi(sample(s.name), 10_000, 100)
+        assert_equal(ui.problem, "", s.name + "'s sample is refused")
+        var v = ui.view(blank, 0)
+        assert_true(len(v.nodes) > 0, s.name + " renders nothing")
+        print("render: " + s.name)
+        var bad = sample(s.name).replace('{"component":"' + s.name + '"', '{"component":"' + s.name + '","nope":1')
+        var refused = GenUi(bad, 10_000, 100)
+        assert_true(refused.problem.find("bad prop") >= 0 and refused.problem.find("nope") >= 0, s.name + ": " + refused.problem)
+        print("refuse: " + s.name)
+    print("catalog: ok " + String(len(specs)))
+    if len(argv()) < 2:
+        return
     var text: String
     with open(String(argv()[1]), "r") as f:
         text = f.read()

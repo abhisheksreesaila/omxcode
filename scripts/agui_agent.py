@@ -225,6 +225,17 @@ def scenario_stubborn(inp, r):
 SCENARIOS = {"stubborn": scenario_stubborn, "tools": scenario_tools, "ui": scenario_ui, "bad": scenario_bad, "chat": scenario_chat}
 
 
+def _goal48():
+    """Goal 48's scenarios (scripts/agui_scenarios.py), each given this module's helpers."""
+    import agui_scenarios
+    for name, fn in agui_scenarios.SCENARIOS.items():
+        SCENARIOS[name] = (lambda f: lambda inp, r: f(inp, r, words))(fn)
+
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_goal48()
+
+
 def scripted(inp, scenario):
     r = Run(inp)
     r.start()
