@@ -1,5 +1,7 @@
 # AG-UI in mojoui (goal 35; goal 48: as good as CopilotKit, and faster)
 
+The public walkthrough, with the gallery and the numbers: [docs/agents.html](agents.html). This file is the reference.
+
 AG-UI (https://docs.ag-ui.com) is an open event protocol between an agent backend and a UI. The app POSTs a
 `RunAgentInput` (thread, run, messages, state, tools, context); the run comes back as server-sent events. mojoui speaks
 it with generic pieces any app can use; `examples/agentchat` (60 lines) only composes them.

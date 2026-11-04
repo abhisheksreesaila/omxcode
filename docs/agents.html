@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en" class="oq-root oq-night oq-family-dev no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents build screens · AG-UI in omxcode</title>
+<meta name="description" content="An AG-UI agent answers with a screen: maps, charts, data grids, forms and approvals, drawn with native widgets while it streams. What is supported, how it works, how to use it, and how fast it is next to CopilotKit.">
+<meta property="og:title" content="Agents build screens: AG-UI in omxcode">
+<meta property="og:description" content="36 components an agent can use, drawn natively while the answer streams. The finished screen 8× sooner than CopilotKit on the same stream.">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/agents/trip.png">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="omxqua/src/fonts.css">
+<link rel="stylesheet" href="omxqua/src/tokens.css">
+<link rel="stylesheet" href="omxqua/src/components.css">
+<link rel="stylesheet" href="site.css">
+<style>
+section .head { max-width: 860px; }
+.code { margin: 0; font: 12.5px/1.7 var(--mono); color: var(--ink2); white-space: pre; overflow-x: auto; }
+.code .k { color: var(--ink); font-weight: 600; } .code .c { opacity: .62; } .code .s { color: var(--oq-ok); }
+.pane { border-radius: 20px; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); padding: 18px 20px; min-width: 0; }
+.file { font: 600 11.5px var(--mono); letter-spacing: .06em; color: var(--ink2); display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.file b { color: var(--ink); letter-spacing: 0; } .file button { margin-left: auto; font: 600 11px var(--mono); color: var(--ink2); background: none; border: 0; cursor: pointer; }
+
+/* the gallery: real screens, one big, the rest in a grid */
+.agal { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; margin-top: 40px; }
+.agal figure { margin: 0; grid-column: span 4; display: flex; flex-direction: column; }
+.agal figure.w6 { grid-column: span 6; } .agal figure.w8 { grid-column: span 8; }
+.agal .m { border-radius: 18px; overflow: hidden; box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); background: var(--oq-surface-1); aspect-ratio: 1 / 1; }
+.agal .m img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.agal figure.tall .m { aspect-ratio: 11 / 12; }
+.agal figcaption { font-size: 14.5px; line-height: 1.45; color: var(--ink2); margin-top: 12px; }
+.agal figcaption b { color: var(--ink); font-weight: 600; display: block; font-size: 16px; }
+.agal figcaption small { display: block; font: 12px var(--mono); margin-top: 4px; opacity: .8; }
+@media (max-width: 860px) { .agal figure, .agal figure.w6, .agal figure.w8 { grid-column: span 12; } }
+
+/* what it supports */
+.groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-top: 36px; }
+.cgrp { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 18px 20px; }
+.cgrp h4 { margin: 0 0 10px; font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; } .pills span { font: 500 13px var(--sans); padding: 5px 11px; border-radius: 999px; background: var(--oq-surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
+.feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 18px; }
+.feat { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
+.feat .t { font: 600 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.feat h3 { font-size: 19px; margin: 8px 0 6px; } .feat p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
+@media (max-width: 860px) { .feats { grid-template-columns: 1fr; } }
+
+/* the walkthrough */
+.walk { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 36px; align-items: start; }
+.steps { display: grid; gap: 10px; counter-reset: s; }
+.st { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 14px 16px; border-radius: 16px; background: var(--oq-surface-1); box-shadow: inset 0 0 0 1px var(--line); }
+.st::before { counter-increment: s; content: counter(s); width: 34px; height: 34px; border-radius: 10px; background: var(--oq-surface-3); display: grid; place-items: center; font: 600 12px var(--mono); color: var(--ink2); }
+.st h4 { margin: 2px 0 4px; font: 600 16px var(--sans); } .st p { margin: 0; color: var(--ink2); font-size: 14.5px; line-height: 1.5; }
+.st code, .lst code, .feat code, .need code { font: 12.5px var(--mono); color: var(--ink); }
+.walkside { display: grid; gap: 16px; position: sticky; top: 90px; }
+.walkside img { width: 100%; aspect-ratio: 900 / 600; object-fit: cover; object-position: top; display: block; border-radius: 14px; box-shadow: 0 0 0 1px var(--line); }
+@media (max-width: 960px) { .walk { grid-template-columns: 1fr; } .walkside { position: static; } }
+
+/* use it */
+.use { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; margin-top: 36px; }
+.use .col { display: grid; gap: 16px; align-content: start; }
+.use p.n { margin: 12px 0 0; color: var(--ink2); font-size: 14px; line-height: 1.5; }
+@media (max-width: 960px) { .use { grid-template-columns: 1fr; } }
+
+/* what you need, where it's useful */
+.need { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-top: 36px; }
+.need div { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
+.need h3 { font-size: 18px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; } .need p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
+
+/* speed */
+.nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 36px; }
+.num { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
+.num .big2 { font: 800 clamp(32px, 3.6vw, 48px)/1 var(--display); letter-spacing: -.04em; color: var(--ink); }
+.num .big2 small { font: 500 15px var(--sans); color: var(--ink2); letter-spacing: 0; margin-left: 4px; }
+.num p { margin: 10px 0 0; color: var(--ink2); font-size: 14.5px; line-height: 1.45; }
+@media (max-width: 860px) { .nums { grid-template-columns: 1fr 1fr; } }
+.tbl { width: 100%; border-collapse: collapse; margin-top: 22px; font-size: 15px; }
+.tbl th, .tbl td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--oq-line-2); }
+.tbl th { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
+.tbl td { color: var(--ink2); } .tbl td:first-child, .tbl tr.us td { color: var(--ink); } .tbl tr.us td:first-child { font-weight: 600; }
+.tblw { overflow-x: auto; border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 4px 8px 8px; margin-top: 22px; }
+.tblw .tbl { margin-top: 0; }
+.lst { margin: 22px 0 0; padding-left: 20px; color: var(--ink2); font-size: 15.5px; line-height: 1.6; max-width: 860px; }
+.lst li { margin-bottom: 6px; } .lst b { color: var(--ink); font-weight: 600; }
+.fine3 { margin-top: 14px; font-size: 13px; color: var(--ink2); line-height: 1.5; max-width: 860px; }
+</style>
+</head>
+<body>
+
+<nav class="lnav">
+  <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode <span class="sub">· agents</span></a>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#gallery">Gallery</a><a href="#supports">What it does</a><a href="#how">How it works</a><a href="#use">Use it</a><a href="#speed">Speed</a><a href="#where">Where</a></div>
+  <div class="right"><a class="cta" href="#use">Try it</a></div>
+</nav>
+
+<main id="top">
+
+<section class="hero center" style="padding-bottom:40px">
+  <div class="wrap" style="display:block">
+    <div class="eyebrow rise"><span>Agents build screens · AG-UI</span></div>
+    <h1 class="rise" data-words data-step="70" data-d0="120" style="font-size:clamp(48px,7vw,100px)">Ask for a map. Get a map.</h1>
+    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">An agent answers with a screen: a route on a map, a dashboard, a form, an approval. omxcode draws it with native widgets while the answer is still streaming.</span> <span class="two" data-words data-step="26" data-d0="1150">The finished screen 8× sooner than CopilotKit, on the same stream.</span></p>
+    <div class="ctas rise"><span style="animation-delay:1500ms"><a class="cta" href="#gallery">See the screens</a></span><span style="animation-delay:1580ms"><a class="more" href="#how">How it works</a></span></div>
+  </div>
+</section>
+
+<!-- Gallery: every picture is the framework running against the scripted agent (scripts/agui_gallery.py) -->
+<section id="gallery">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Gallery</div>
+      <h2 class="rv">Real screens an agent built. <span class="two">Nothing mocked up.</span></h2>
+      <p class="lede rv">Each one is the same small app, <code>examples/agentchat</code>, answering a different question. The agent sends only data; every widget is omxcode's own.</p>
+    </div>
+    <div class="agal">
+      <figure class="w8 tall rv"><div class="m"><img src="img/agents/trip.png" alt="A day in Lisbon: a map with six stops from Belém Tower to Senhora do Monte, a timeline of the plan, a weather chart, and Book tickets and Swap a stop buttons" loading="lazy"></div>
+        <figcaption><b>“Plan a day in Lisbon.”</b>A route on a map, the plan as a timeline, the day's weather as a chart, and buttons that answer back.<small>MapView · Timeline · ChartView · Chip · Button · web</small></figcaption></figure>
+      <figure class="tall rv"><div class="m"><img src="img/agents/orders.png" alt="Revenue by region and average order by product over 1,000,000 orders, and a grid of every order" loading="lazy"></div>
+        <figcaption><b>“Chart a million orders.”</b>The agent names a dataset the app already holds. It sends a few hundred bytes; the app groups a million rows on the GPU in 0.3 ms.<small>ChartView · DataGrid · Linux · RTX 3090</small></figcaption></figure>
+      <figure class="w6 tall rv"><div class="m"><img src="img/agents/dashboard.png" alt="Q3 sales dashboard: four KPI cards with sparklines, revenue by region bars, orders by month line, a top products grid, three meters and an alert" loading="lazy"></div>
+        <figcaption><b>“Show me this quarter's sales.”</b>KPIs, two charts, a sortable grid, meters and an alert: forty components, drawn as they stream.<small>KpiView · ChartView · DataGrid · Meter · Alert · Linux (GTK)</small></figcaption></figure>
+      <figure class="w6 tall rv"><div class="m"><img src="img/agents/research.png" alt="Battery research: three web searches, a plan timeline, a price chart and a comparison table" loading="lazy"></div>
+        <figcaption><b>“Compare home batteries.”</b>The agent's searches fold into one card; its plan, a chart and a table follow.<small>Tool cards · Timeline · ChartView · Table · web · sample prices</small></figcaption></figure>
+      <figure class="rv"><div class="m"><img src="img/agents/approval.png" alt="A Refund an order card with order 1042, amount 42.0, reason Arrived damaged, and Reject and Approve buttons" loading="lazy"></div>
+        <figcaption><b>“Refund order 1042.”</b>A tool marked “ask first” does nothing until a person approves or rejects it.<small>Human in the loop · web</small></figcaption></figure>
+      <figure class="rv"><div class="m"><img src="img/agents/booking.png" alt="A booking form: name, date, party size slider at 4, time 19:30, seating Terrace, a birthday checkbox, notes and a Book button" loading="lazy"></div>
+        <figcaption><b>“Book a table for four.”</b>A form the agent made; what the person picks goes back to it.<small>TextField · DatePicker · Slider · Dropdown · Radio · web</small></figcaption></figure>
+      <figure class="rv"><div class="m"><img src="img/agents/streaming.png" alt="Mid-stream: the agent's steps search done and design in progress, a search_sales tool card marked complete, and a Building UI card with placeholders" loading="lazy"></div>
+        <figcaption><b>While it streams.</b>Steps tick off, tool calls show their stage, and placeholders hold the place of what's still coming.<small>Steps · tool stages · Skeleton · web</small></figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- What it supports -->
+<section id="supports">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">What it does</div>
+      <h2 class="rv">36 components an agent can use. <span class="two">Everything a chat needs around them.</span></h2>
+      <p class="lede rv">An agent can only name components from this catalog. Anything else is refused, and the agent is told why. Nothing an agent sends runs code or loads a page.</p>
+    </div>
+    <div class="groups">
+      <div class="cgrp rv"><h4>Layout</h4><div class="pills"><span>Card</span><span>VStack</span><span>HStack</span><span>Grid</span><span>Tabs</span><span>Divider</span><span>Spacer</span><span>Breadcrumbs</span></div></div>
+      <div class="cgrp rv"><h4>Words</h4><div class="pills"><span>Text</span><span>Paragraph</span><span>Markdown</span><span>CodeBlock</span><span>Chip</span><span>Icon</span></div></div>
+      <div class="cgrp rv"><h4>Data</h4><div class="pills"><span>Table</span><span>DataGrid</span><span>ChartView</span><span>Sparkline</span><span>KpiView</span><span>Meter</span><span>ProgressBar</span><span>Timeline</span><span>MapView</span></div></div>
+      <div class="cgrp rv"><h4>Input</h4><div class="pills"><span>Button</span><span>TextField</span><span>TextArea</span><span>Toggle</span><span>Checkbox</span><span>Dropdown</span><span>Slider</span><span>Segmented</span><span>Radio</span><span>DatePicker</span></div></div>
+      <div class="cgrp rv"><h4>Feedback</h4><div class="pills"><span>Alert</span><span>Skeleton</span><span>Confirm</span></div></div>
+    </div>
+    <div class="feats">
+      <div class="feat rv"><div class="t">Streaming</div><h3>Drawn while it arrives</h3><p>A screen is drawn from its first whole component. Parts still coming show as placeholders. Each chart redraws only when its own data changes.</p></div>
+      <div class="feat rv"><div class="t">Tools</div><h3>Every call, with its stage</h3><p>In progress, running, complete, with the result. Three or more calls in a row fold into one card. The agent's steps are a live checklist.</p></div>
+      <div class="feat rv"><div class="t">Human in the loop</div><h3>Ask first, then act</h3><p>Mark a tool <code>confirm=True</code> and it waits for Approve or Reject. An agent can also pause to ask a question and carry on with the answer.</p></div>
+      <div class="feat rv"><div class="t">The chat</div><h3>One component, three layouts</h3><p><code>AgentChat</code>: a panel, a sidebar or a popup. Markdown with Copy on code, a typing indicator, Stop, Retry, Regenerate, suggestion chips, and messages that arrive on a spring.</p></div>
+      <div class="feat rv"><div class="t">Datasets</div><h3>Rows stay in the app</h3><p>A chart or grid can name a dataset the app holds. The agent never sends the rows, so a million of them cost the same few hundred bytes as ten.</p></div>
+      <div class="feat rv"><div class="t">In process</div><h3>An agent inside the app</h3><p><code>LocalAgent</code> runs in the app's own process, with no HTTP. 2,004 events went through the same code path in 26 ms.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- How it works: one answer, step by step -->
+<section id="how">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">How it works</div>
+      <h2 class="rv">One answer, step by step. <span class="two">The agent sends data; the app draws.</span></h2>
+      <p class="lede rv"><a href="https://docs.ag-ui.com">AG-UI</a> is an open protocol between an agent and an app: the app sends the conversation, and the agent's answer streams back as events. A screen is one of those events: a call to a tool named <code>render_ui</code>.</p>
+    </div>
+    <div class="walk">
+      <div class="steps">
+        <div class="st rv"><div><h4>The person asks</h4><p>“Build me a dashboard.” The app posts the conversation to the agent, along with the tools it offers: <code>render_ui</code> with the catalog as a JSON Schema, any tools of its own, and the names of datasets it holds.</p></div></div>
+        <div class="st rv"><div><h4>The agent streams back</h4><p>Words, tool calls, steps and shared state arrive as server-sent events. The words appear as Markdown, a few letters at a time.</p></div></div>
+        <div class="st rv"><div><h4>A screen arrives in pieces</h4><p><code>render_ui</code>'s arguments come a few bytes at a time. omxcode closes the unfinished JSON at its last whole value, in one pass, and draws what is there. A placeholder marks where more is coming.</p></div></div>
+        <div class="st rv"><div><h4>Checked against the catalog</h4><p>Every component and property is checked: known names, the right types, at most 8 levels, 200 components and 32 KB. Anything else is refused, and the refusal goes back to the agent as the tool's result, so it can try again.</p></div></div>
+        <div class="st rv"><div><h4>Drawn with native widgets</h4><p>The same screen becomes GTK widgets on Linux, HTML on the web and AppKit on the Mac. Charts and maps are drawn by omxcode itself, so they look the same everywhere.</p></div></div>
+        <div class="st rv"><div><h4>The person answers</h4><p>Fields and toggles edit the state the agent sees. A button sends its answer back as the tool's result, and the agent carries on. A tool marked “ask first” waits for Approve or Reject.</p></div></div>
+      </div>
+      <div class="walkside">
+        <div class="pane rv"><div class="file">what the agent sends · <b>render_ui</b></div>
+<pre class="code">{<span class="k">"ui"</span>: {<span class="k">"component"</span>: <span class="s">"Card"</span>,
+  <span class="k">"title"</span>: <span class="s">"A day in Lisbon"</span>,
+  <span class="k">"children"</span>: [
+    {<span class="k">"component"</span>: <span class="s">"MapView"</span>, <span class="k">"places"</span>: [
+      {<span class="k">"label"</span>: <span class="s">"Belém Tower"</span>,
+       <span class="k">"lat"</span>: 38.6916, <span class="k">"lon"</span>: -9.2160}, …]},
+    {<span class="k">"component"</span>: <span class="s">"ChartView"</span>,
+     <span class="k">"dataset"</span>: <span class="s">"orders"</span>,
+     <span class="k">"group_by"</span>: <span class="s">"region"</span>, <span class="k">"value"</span>: <span class="s">"revenue"</span>},
+    {<span class="k">"component"</span>: <span class="s">"Button"</span>,
+     <span class="k">"label"</span>: <span class="s">"Book tickets"</span>, <span class="k">"action"</span>: <span class="s">"book"</span>}]}}</pre>
+          <p class="fine3" style="margin-top:12px">Shortened. The full schema comes from <code>mojoui.genui.schema()</code>; run <code>scripts/genui_schema.py</code> to print it.</p></div>
+        <img class="rv" src="img/agents/interrupt.png" alt="An agent paused with a question, Deploy to…, and Staging and Production buttons" loading="lazy">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Use it: the example app, the commands -->
+<section id="use">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Use it</div>
+      <h2 class="rv">A chat with an agent in about 20 lines. <span class="two">The rest is the framework.</span></h2>
+      <p class="lede rv">Drop <code>AgentChat</code> into any omxcode app and pass it four calls. The whole example, with a million-row dataset and an approval tool, is 75 lines.</p>
+    </div>
+    <div class="use">
+      <div class="pane rv"><div class="file">examples/agentchat/<b>app.mojo</b> · shortened<button type="button" data-copy="#appcode">copy</button></div>
+<pre class="code" id="appcode"><span class="k">from</span> mojoui.agentchat <span class="k">import</span> AgentChat, CHAT_PANEL
+<span class="k">from</span> mojoui.agui <span class="k">import</span> Tool
+<span class="k">from</span> mojoui.sheethub <span class="k">import</span> SheetHub
+
+<span class="k">struct</span> Main(App):
+    <span class="k">comptime</span> HTTP = True
+    <span class="k">var</span> chat: AgentChat[SheetHub]
+
+    <span class="k">def</span> __init__(out self):
+        self.chat = AgentChat[SheetHub](<span class="s">"http://127.0.0.1:8765/"</span>,
+                                        layout=CHAT_PANEL)
+        <span class="c"># chips on the welcome screen</span>
+        self.chat.suggest(<span class="s">"Plan a day in Lisbon"</span>)
+        <span class="c"># a tool of the app's own; waits for Approve</span>
+        self.chat.offer(Tool(<span class="s">"refund_order"</span>, <span class="s">"Refund an order"</span>,
+                             schema), confirm=True)
+        <span class="c"># rows the agent can name but never sends</span>
+        <span class="k">var</span> hub = SheetHub()
+        hub.add(<span class="s">"orders"</span>, orders^)
+        self.chat.set_hub(hub^)
+
+    <span class="c"># the app hands the chat its four calls</span>
+    <span class="k">def</span> requests(mut self) -&gt; List[Request]:
+        <span class="k">return</span> self.chat.requests()
+    <span class="k">def</span> update(mut self, e: Event):
+        _ = self.chat.update(e)
+    <span class="k">def</span> draw(mut self, canvas: Int, mut surface: Surface):
+        self.chat.draw(canvas, surface, self.themed.palette)
+    <span class="k">def</span> view(self) -&gt; View:
+        <span class="k">return</span> self.chat.view()</pre>
+        <p class="n">A sidebar is <code>layout=CHAT_SIDEBAR</code>. A popup over your own screen is <code>CHAT_POPUP</code> plus <code>chat.over(content)</code> in <code>view()</code>. Apps without datasets write <code>AgentChat[NoData]</code> and link nothing extra.</p></div>
+      <div class="col">
+        <div class="pane rv"><div class="file">try it · <b>a terminal</b><button type="button" data-copy="#runcode">copy</button></div>
+<pre class="code" id="runcode">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode &amp;&amp; pixi install
+scripts/agentchat.sh          <span class="c"># Linux app + scripted agent</span>
+scripts/agentchat.sh --web    <span class="c"># the same, in a browser</span>
+scripts/agentchat.sh --live   <span class="c"># a real model (docs/agui.md)</span></pre>
+          <p class="n">Tap a chip, or type “Plan a day in Lisbon”, “Chart a million orders” or “Refund order 1042”. The scripted agent needs no key and no network.</p></div>
+        <div class="pane rv"><div class="file">an agent in the app · <b>LocalAgent</b></div>
+<pre class="code"><span class="k">struct</span> Helper(LocalAgent):
+    <span class="c"># the RunAgentInput a server would get, in;</span>
+    <span class="c"># AG-UI events, out</span>
+    <span class="k">def</span> respond(mut self, input: String) -&gt; List[String]:
+        <span class="k">return</span> [<span class="s">'{"type":"RUN_STARTED",…}'</span>, …]
+
+<span class="c"># no HTTP: straight into the same handler</span>
+self.chat.run_local(helper)</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- What you need -->
+<section id="need" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">What you need</div>
+      <h2 class="rv">An omxcode app and an AG-UI agent. <span class="two">No keys for the demo.</span></h2>
+    </div>
+    <div class="need">
+      <div class="rv"><h3>omxcode <span class="badge ok"><i></i>Linux, web</span></h3><p>Mojo 1.1 through <code>pixi install</code>. Linux with GTK 4 and libadwaita, or any browser through the web host. Not yet run with agents on the Mac.</p></div>
+      <div class="rv"><h3>An agent <span class="badge"><i></i>any AG-UI server</span></h3><p>Anything that speaks AG-UI over HTTP: frameworks such as LangGraph, CrewAI, Mastra or Pydantic AI publish adapters. So far omxcode has been proved against its own scripted agent, built on the official AG-UI SDK, not yet against those frameworks.</p></div>
+      <div class="rv"><h3>Or no server <span class="badge"><i></i>LocalAgent</span></h3><p>Write the agent in Mojo, in the app itself. Nothing to deploy, nothing on the network.</p></div>
+      <div class="rv"><h3>A GPU <span class="badge info"><i></i>optional</span></h3><p>Datasets are grouped on an NVIDIA GPU when there is one, and on the CPU otherwise. Nothing else needs it.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- Speed: from docs/goals/48/bench.json (scripts/agui_bench.py), 2026-11-04 07:39 -->
+<section id="speed">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Speed</div>
+      <h2 class="rv">The same stream, three apps. <span class="two">Measured, not claimed.</span></h2>
+      <p class="lede rv">One recorded answer of 2,302 events (300 words, then a 40-component dashboard sent three bytes at a time) replayed into omxcode on Linux, omxcode on the web, and a CopilotKit 1.84.1 app, in the same browser.</p>
+    </div>
+    <div class="nums">
+      <div class="num rv"><div class="big2">69<small>ms</small></div><p>to the finished screen on Linux. CopilotKit: 565 ms.</p></div>
+      <div class="num rv"><div class="big2">164<small>ms</small></div><p>to the finished screen on the web host, in the same browser as CopilotKit.</p></div>
+      <div class="num rv"><div class="big2">0</div><p>dropped frames on the web, fast or steady. CopilotKit dropped 3 in the fast run (worst 233 ms).</p></div>
+      <div class="num rv"><div class="big2">0.3<small>ms</small></div><p>to group a million rows on the GPU for an agent's chart. The agent sent a few hundred bytes.</p></div>
+    </div>
+    <div class="tblw rv"><table class="tbl">
+      <thead><tr><th>App</th><th>First UI</th><th>Finished screen</th><th>Dropped frames, fast</th><th>Dropped frames, steady</th><th>Memory</th></tr></thead>
+      <tbody>
+        <tr class="us"><td>omxcode on Linux (GTK)</td><td>12 ms</td><td>69 ms</td><td>2 (worst 31 ms)</td><td>0</td><td>109 MB, whole process</td></tr>
+        <tr class="us"><td>omxcode on the web</td><td>125 ms</td><td>164 ms</td><td>0</td><td>0</td><td>4 MB, page heap</td></tr>
+        <tr><td>CopilotKit 1.84.1 (React)</td><td>129 ms</td><td>565 ms</td><td>3 (worst 233 ms)</td><td>0</td><td>42 MB, page heap</td></tr>
+      </tbody></table></div>
+    <ul class="lst rv">
+      <li><b>Why it's faster:</b> the screen is checked and drawn by compiled Mojo, not reconciled by a JavaScript framework. Unfinished JSON is closed in one linear pass. Only the charts whose data changed are redrawn.</li>
+      <li><b>On the web</b> the work happens in the server process, so the page holds little more than the HTML it shows.</li>
+      <li><b>Even closer:</b> an agent in the app's own process skips HTTP altogether. 2,004 events went through in 26 ms.</li>
+    </ul>
+    <p class="fine3">Median of 3 runs, one Linux machine (x86_64, NVIDIA RTX 3090), 2026-11-04. “Fast” sends the events as quickly as the socket takes them. “Steady” paces them at about 250 a second, like a quick model. First UI is the screen's first component appearing; finished is its last. Memory figures measure different things on each row. CopilotKit was driven through its documented frontend-tool render, not its newer A2UI renderer. Method and raw numbers: <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agui.md#benchmark-goal-48-m5-the-same-stream-into-omxcode-and-copilotkit">docs/agui.md</a>, <code>scripts/agui_bench.py</code>.</p>
+  </div>
+</section>
+
+<!-- Where it's useful -->
+<section id="where">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Where it's useful</div>
+      <h2 class="rv">Wherever an answer is better as a screen.</h2>
+    </div>
+    <div class="feats">
+      <div class="feat rv"><div class="t">Data apps</div><h3>A copilot over your own data</h3><p>Ask for a breakdown and get a chart and a grid over the full dataset. The rows never leave the app, and the agent's answer stays small.</p></div>
+      <div class="feat rv"><div class="t">Operations</div><h3>Approvals people can trust</h3><p>Refunds, deploys, account changes: the agent proposes, a person sees exactly what will happen, and nothing runs until they approve.</p></div>
+      <div class="feat rv"><div class="t">Field and robotics</div><h3>Low latency, offline</h3><p>A native app with the agent in its own process: no browser, no round trip, and it works without a network.</p></div>
+      <div class="feat rv"><div class="t">Internal tools</div><h3>Forms on demand</h3><p>Instead of building every form up front, let the agent make the one this question needs, from components you already trust.</p></div>
+      <div class="feat rv"><div class="t">Desktop and web</div><h3>One app, two places</h3><p>The same Mojo file runs as a Linux app and in the browser, with the same agent screens.</p></div>
+      <div class="feat rv"><div class="t">Safety</div><h3>No generated code</h3><p>The agent can only describe screens from the catalog. It can't run scripts, load pages or invent components.</p></div>
+    </div>
+    <h3 class="rv" style="margin-top:56px;font-size:20px">Not yet</h3>
+    <ul class="lst rv">
+      <li>Every screen on this page comes from a scripted agent. No live model has been recorded yet, and no other AG-UI framework tested.</li>
+      <li>Not yet run with agents on the Mac or a phone.</li>
+      <li>CopilotKit's newer screen format, A2UI, isn't supported yet.</li>
+      <li>The map is drawn offline: route, places and scale, with no streets or tiles.</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="note">Every picture on this page is the framework running against the scripted agent, shot by scripts in the repository (<code>scripts/agui_gallery.py</code>, the goal 48 checks). Timings are from one Linux machine with an NVIDIA RTX 3090.</p>
+    <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="index.html">← Back to omxcode</a></div>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+<script>document.documentElement.classList.remove("no-js");</script>
+</body>
+</html>

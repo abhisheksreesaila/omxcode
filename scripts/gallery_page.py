@@ -18,6 +18,12 @@ STAR = dict(
 # omxconsole comes back when it's Mojo end to end (its engine is Python today; owner, 2026-11-02)
 
 APPS = [
+    dict(name="Agent chat", kind="Agents build screens · AG-UI",
+         line="Ask for a map, get a map: an AG-UI agent answers with screens from 36 components, drawn natively while it streams.",
+         proves="The finished screen in 69 ms on Linux, 164 ms on the web; CopilotKit 565 ms on the same stream",
+         runs=[("Linux", "ok"), ("Web", "ok")], next="A live model, A2UI, the Mac",
+         shots=[("img/agents-trip.png", "A day in Lisbon: a map, a timeline, the weather"), ("img/agents-dashboard.png", "A dashboard of forty components"),
+                ("img/agents-approval.png", "A refund that waits for Approve")], src="examples/agentchat"),
     dict(name="Dictate", kind="Speech to text",
          line="Talk, and words appear. Whisper runs on the GPU inside the app's own process: no file, no socket, no server.",
          proves="Final text 134 ms after the audio went in (median)", runs=[("Linux", "ok")],
