@@ -28,14 +28,16 @@ pixi run python scripts/agui_bench.py     # the benchmark → docs/goals/48/benc
 Shots: docs/agui.md's Gallery (trip, dashboard, booking, approval, research, release, streaming, catalog) and
 build/g48-orders.png (a million rows, charted in 0.3 ms on the GPU, nothing sent by the agent).
 
-## The USP, measured (docs/agui.md "Benchmark", written from docs/goals/48/bench.json, 2026-11-04 02:50)
-Same 2302-event stream, median of 3, same machine; both web runners in the same Chromium:
+## The USP, measured (docs/agui.md "Benchmark", written from docs/goals/48/bench.json, 2026-11-04 03:36)
+Same 2302-event stream, median of 3; both web runners in the same Chromium. This run was taken by the
+checker while other worktrees' checks loaded the machine (load average ~16): an earlier quiet run had GTK 63 ms, web
+128 ms, CopilotKit 516 ms to the final screen.
 
 | | first UI | final screen | dropped frames, paced |
 |---|---|---|---|
-| omxcode native GTK | 30 ms | 69 ms | 0 |
-| omxcode web host | 131 ms | 131 ms | 56 (loss) |
-| CopilotKit 1.84.1 | 142 ms | 512 ms | 0 |
+| omxcode native GTK | 31 ms | 126 ms | 0 |
+| omxcode web host | 227 ms (loss) | 227 ms | 73 (loss) |
+| CopilotKit 1.84.1 | 166 ms | 562 ms | 0 |
 
 Plus what CopilotKit doesn't do here: an agent in the app's own process (2,004 events in 26 ms), a chart over a million
 rows the agent never sends (0.3 ms on the GPU), the same app native and on the web.
@@ -51,7 +53,8 @@ rows the agent never sends (0.3 ms on the GPU), the same app native and on the w
 ## Review
 Reviewer round 1: NEEDS WORK (a crash cutting non-ASCII agent text, a quadratic partial-JSON path a hostile agent could
 use to freeze the UI, docs numbers older than bench.json, a stopped stream's preview loading forever, the web replaying
-.arrive() on every swap: 86 replays for 2 views); all fixed with tests (round 2 below).
+.arrive() on every swap: 86 replays for 2 views); all fixed with tests. Round 2: PASS (deferred, non-blocking: a preview group-by cache, MAX_UIS never freed, sampledata
+living in mojoui, the M0/M1 proofs only partly strengthened).
 
 ## Honest limits
 - The web host drops frames under a steady stream (each change swaps DOM; long chats make it big). Next fix.
