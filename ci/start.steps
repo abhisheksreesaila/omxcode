@@ -1,0 +1,2 @@
+# limit 60
+tap:Tap me;wait:500;tap:Tap me;wait:500;tap:Tap me;wait:1500
