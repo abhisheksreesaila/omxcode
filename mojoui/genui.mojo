@@ -1025,7 +1025,9 @@ struct GenUi(Movable):
             if self.json.get(n, "title") >= 0:
                 parts.append(Text(self.str(n, "title"), style=HEADLINE))
             parts.append(Text(self.str(n, "text")))
-            return Warning(parts^) if self.str(n, "tone") == "warn" else Note(parts^)
+            var body = List[View]()
+            body.append(VStack(parts^, spacing=SPACE_XS).align(START).grow())
+            return Warning(body^) if self.str(n, "tone") == "warn" else Note(body^)
         if comp == "Skeleton":
             var bars = List[View]()
             var lines = Int(self.num(n, "lines", 3))

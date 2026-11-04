@@ -208,4 +208,126 @@ def scenario_interrupt(inp, r, words):
     r.add(CustomEvent(name="on_interrupt", value={"question": "Deploy build 2.4.0 to…", "options": ["Staging", "Production"]}))
 
 
-SCENARIOS = {"stream": scenario_stream, "approval": scenario_approval, "interrupt": scenario_interrupt, "catalog": scenario_catalog, "error": scenario_error, "release": scenario_release}
+LISBON = [("Belém Tower", 38.6916, -9.2160, "9:00", "The 16th-century tower on the river; go early, the queue grows by ten."),
+          ("Jerónimos Monastery", 38.6979, -9.2068, "10:15", "Manueline cloisters; Pastéis de Belém is next door."),
+          ("LX Factory", 38.7034, -9.1784, "12:30", "Lunch and the bookshop in an old textile mill."),
+          ("Praça do Comércio", 38.7075, -9.1364, "14:30", "The riverside square; tram 28 starts nearby."),
+          ("São Jorge Castle", 38.7139, -9.1335, "16:00", "Walls over Alfama, the best view of the river."),
+          ("Senhora do Monte", 38.7193, -9.1327, "18:30", "The highest viewpoint, for the sunset.")]
+
+
+def trip_ui():
+    return {"component": "VStack", "gap": "m", "children": [
+        {"component": "Card", "title": "A day in Lisbon", "subtitle": "Belém to the viewpoints, west to east, about 11 km", "children": [
+            {"component": "MapView", "route": [[lat, lon] for _, lat, lon, _, _ in LISBON],
+             "places": [{"lat": lat, "lon": lon, "label": name} for name, lat, lon, _, _ in LISBON], "height": 300},
+            {"component": "HStack", "children": [{"component": "Chip", "text": "11 km", "hue": 1}, {"component": "Chip", "text": "6 stops", "hue": 2},
+                                                 {"component": "Chip", "text": "tram 15 + 28", "hue": 3}, {"component": "Chip", "text": "€38 a person", "hue": 4}]}]},
+        {"component": "Grid", "columns": 2, "children": [
+            {"component": "Card", "title": "The plan", "children": [
+                {"component": "Timeline", "steps": [{"label": f"{t}  {name}", "status": "pending", "detail": why} for name, _, _, t, why in LISBON]}]},
+            {"component": "VStack", "gap": "m", "children": [
+                {"component": "Card", "title": "Weather", "children": [
+                    {"component": "HStack", "children": [{"component": "Icon", "name": "sun-medium", "size": 28},
+                                                         {"component": "Text", "text": "21° and clear", "style": "headline"}]},
+                    {"component": "Sparkline", "values": [15, 16, 18, 20, 21, 21, 20, 18, 17], "label": "°C, 9:00 to 21:00"}]},
+                {"component": "Alert", "title": "Book ahead", "text": "Belém Tower and the castle sell timed tickets; Mondays the monastery is closed.", "tone": "info"},
+                {"component": "HStack", "children": [{"component": "Button", "label": "Book tickets", "action": "book", "style": "prominent", "icon": "calendar-days"},
+                                                     {"component": "Button", "label": "Swap a stop", "action": "swap"}]}]}]},
+    ]}
+
+
+def scenario_trip(inp, r, words):
+    if inp.messages and inp.messages[-1].role == "tool":
+        r.say("Done: I'll hold 9:00 at the tower and 16:00 at the castle.")
+        return
+    r.add(StepStartedEvent(step_name="route"))
+    r.add(StepFinishedEvent(step_name="route"), 80)
+    text = "Here's a day in Lisbon from Belém to the viewpoints, timed so you reach Senhora do Monte for the sunset."
+    mid = r.say(text, pieces=words(text), delay=10)
+    stream_call(r, "render_ui", {"ui": trip_ui()}, mid, pieces=24, delay=15)
+    r.add(CustomEvent(name="suggestions", value=["Make it rainy-day friendly", "Add a fado dinner", "Fewer hills"]))
+
+
+def scenario_dashboard(inp, r, words):
+    if inp.messages and inp.messages[-1].role == "tool":
+        r.say("Exported to q3-sales.csv." if "export" in inp.messages[-1].content else "Here's the breakdown.")
+        return
+    text = "This quarter: revenue up 8%, orders up 2%, returns creeping up in footwear."
+    mid = r.say(text, pieces=words(text), delay=10)
+    stream_call(r, "render_ui", {"ui": dashboard_ui()}, mid, pieces=20, delay=15)
+
+
+def booking_ui():
+    return {"component": "Card", "title": "Book a table", "subtitle": "Taberna da Rua, Friday", "children": [
+        {"component": "Grid", "columns": 2, "children": [
+            {"component": "VStack", "gap": "m", "children": [
+                {"component": "TextField", "label": "Name", "placeholder": "Name", "bind": "/booking/name"},
+                {"component": "Slider", "label": "Party size", "bind": "/booking/party", "min": 1, "max": 10},
+                {"component": "Dropdown", "label": "Time", "options": ["18:30", "19:00", "19:30", "20:00", "20:30", "21:00"], "bind": "/booking/time"},
+                {"component": "Radio", "label": "Seating", "options": ["Inside", "Terrace", "Bar"], "bind": "/booking/seating"},
+                {"component": "Checkbox", "label": "It's a birthday", "bind": "/booking/birthday"}]},
+            {"component": "DatePicker", "label": "Date", "bind": "/booking/date"}]},
+        {"component": "TextArea", "label": "Notes", "placeholder": "Allergies, a high chair…", "bind": "/booking/notes", "height": 70},
+        {"component": "HStack", "children": [{"component": "Spacer"}, {"component": "Button", "label": "Book", "action": "book", "style": "prominent", "icon": "check"}]}]}
+
+
+def scenario_booking(inp, r, words):
+    last = inp.messages[-1] if inp.messages else None
+    if last is not None and last.role == "tool":
+        b = (inp.state or {}).get("booking", {}) if isinstance(inp.state, dict) else {}
+        text = (f"Booked: a table for {b.get('party')} at {b.get('time')} on {b.get('date')}, {str(b.get('seating', '')).lower()}, "
+                f"under {b.get('name') or 'your name'}.")
+        r.say(text, pieces=words(text), delay=10)
+        return
+    r.add(StateSnapshotEvent(snapshot={"booking": {"name": "", "party": 2, "time": "19:00", "seating": "Inside", "date": "2026-11-06",
+                                                   "birthday": False, "notes": ""}}))
+    mid = r.say("Taberna da Rua has tables on Friday. Fill this in and I'll book it.", delay=10)
+    stream_call(r, "render_ui", {"ui": booking_ui()}, mid, pieces=10, delay=15)
+
+
+BATTERIES = [("Tesla Powerwall 3", 13.5, 11.5, 9300), ("Franklin aPower 2", 15.0, 10.0, 10500), ("LG RESU Prime 16H", 16.0, 7.0, 11200),
+             ("Enphase IQ 5P", 5.0, 3.84, 4600)]
+
+
+def scenario_research(inp, r, words):
+    """Agentic research: a plan, backend searches whose results stream in, then a comparison."""
+    r.add(StepStartedEvent(step_name="plan"))
+    r.add(StepFinishedEvent(step_name="plan"), 60)
+    r.add(StepStartedEvent(step_name="search"))
+    mid = r.id("m")
+    for q in ("home battery capacity kWh 2026", "home battery price installed", "home battery warranty cycles"):
+        cid = r.id("call")
+        r.add(ToolCallStartEvent(tool_call_id=cid, tool_call_name="web_search", parent_message_id=mid), 30)
+        r.add(ToolCallArgsEvent(tool_call_id=cid, delta=json.dumps({"query": q})))
+        r.add(ToolCallEndEvent(tool_call_id=cid))
+        r.add(ToolCallResultEvent(message_id=r.id("t"), tool_call_id=cid, content=json.dumps({"results": 8}), role="tool"), 90)
+    r.add(StepFinishedEvent(step_name="search"))
+    r.add(StepStartedEvent(step_name="compare"))
+    text = ("I compared four popular home batteries on usable capacity, continuous power and installed price. "
+            "**Powerwall 3** is the best value per kWh; **Enphase IQ 5P** is the one to stack small. Figures are list prices, "
+            "a sample for this demo: check a local installer.")
+    r.add(TextMessageStartEvent(message_id=mid, role="assistant"))
+    for p in words(text):
+        r.add(TextMessageContentEvent(message_id=mid, delta=p), 8)
+    r.add(TextMessageEndEvent(message_id=mid))
+    ui = {"component": "VStack", "gap": "m", "children": [
+        {"component": "Grid", "columns": 2, "children": [
+            {"component": "Card", "title": "Plan", "children": [
+                {"component": "Timeline", "steps": [{"label": "Pick the questions", "status": "done", "detail": "capacity, power, price, warranty"},
+                                                    {"label": "Search", "status": "done", "detail": "3 searches, 24 sources"},
+                                                    {"label": "Compare", "status": "done"},
+                                                    {"label": "Quote from an installer", "status": "pending"}]}]},
+            {"component": "ChartView", "kind": "bar", "title": "Price per usable kWh ($)", "labels": [b[0] for b in BATTERIES],
+             "values": [round(b[3] / b[1]) for b in BATTERIES], "value_name": "$/kWh"}]},
+        {"component": "Card", "title": "Compare", "children": [
+            {"component": "Table", "columns": ["Battery", "Usable kWh", "Power kW", "Installed $"],
+             "rows": [[n, c, p, f"{price:,}"] for n, c, p, price in BATTERIES]},
+            {"component": "Text", "text": "Sample list prices for this demo, not quotes.", "style": "caption"}]},
+    ]}
+    stream_call(r, "render_ui", {"ui": ui}, mid, pieces=12, delay=15)
+    r.add(StepFinishedEvent(step_name="compare"))
+
+
+SCENARIOS = {"stream": scenario_stream, "approval": scenario_approval, "interrupt": scenario_interrupt, "trip": scenario_trip,
+             "dashboard": scenario_dashboard, "booking": scenario_booking, "research": scenario_research, "approval": scenario_approval, "interrupt": scenario_interrupt, "catalog": scenario_catalog, "error": scenario_error, "release": scenario_release}

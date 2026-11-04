@@ -372,7 +372,8 @@ def m4():
                 if b.get("name") != "Ada" or b.get("party") != 4 or b.get("seating") != "Terrace" or b.get("time") != "19:30":
                     problems.append(f"booking/{host}: the agent got {b!r}")
             done += 1
-    if "MapView" not in (ROOT / "scripts/agui_agent.py").read_text():
+    agent_src = (ROOT / "scripts/agui_agent.py").read_text() + ((ROOT / "scripts/agui_scenarios.py").read_text() if (ROOT / "scripts/agui_scenarios.py").exists() else "")
+    if "MapView" not in agent_src:
         problems.append("the trip scenario doesn't use MapView")
     agui = (ROOT / "docs/agui.md").read_text()
     for scenario, _, _ in EXAMPLES:

@@ -67,6 +67,25 @@ An agent builds UI by calling the frontend tool `render_ui` with `{"ui": node}`;
 - `bind` reads and edits the shared state at a JSON pointer; `action` reports a word back: the first one is render_ui's
   tool result (`{"action": "submit"}`), and the edited state goes with the run.
 
+## Gallery (goal 48: scripted agents, our components, drawn natively)
+
+Each is one prompt to the scripted agent (`scripts/agui_scenarios.py`); the agent answers with words and a `render_ui`
+call built only from catalogued components; examples/agentchat draws it on GTK and the web. Regenerate with
+`pixi run python scripts/agui_gallery.py` (the checks' own shots: docs/goals/48/ex-<scenario>-<host>.png).
+
+| Prompt | What the agent built | GTK | Web |
+|---|---|---|---|
+| Plan a day in Lisbon | MapView (route and six places), chips, an itinerary Timeline, a weather Sparkline, an Alert, buttons | ![](goals/48/ex-trip-tall-gtk.png) | ![](goals/48/ex-trip-tall-web.png) |
+| Show me this quarter's sales | four KpiViews, bar and line ChartViews, a DataGrid of products, Meters, an Alert | ![](goals/48/ex-dashboard-tall-gtk.png) | ![](goals/48/ex-dashboard-tall-web.png) |
+| Book a table for dinner | TextField, Slider, Dropdown, Radio, Checkbox, DatePicker, TextArea; Book reports back with the values in the shared state | ![](goals/48/ex-booking-tall-gtk.png) | ![](goals/48/ex-booking-tall-web.png) |
+| Refund order 1042 | a confirm tool: the approve/reject card, nothing runs until answered | ![](goals/48/ex-approval-tall-gtk.png) | ![](goals/48/ex-approval-tall-web.png) |
+| Research home batteries | a plan as steps, three searches folded into one tool card, a ChartView, a Table | ![](goals/48/ex-research-tall-gtk.png) | ![](goals/48/ex-research-tall-web.png) |
+| Write the release note for 2.4 | Markdown with a table and a code block (Copy), a rollout Timeline, Chips | ![](goals/48/ex-release-tall-gtk.png) | ![](goals/48/ex-release-tall-web.png) |
+| Build me a dashboard | the same dashboard streamed: steps, a backend tool card, the screen growing piece by piece | ![](goals/48/ex-stream-tall-gtk.png) | ![](goals/48/ex-stream-tall-web.png) |
+| Show every component | the catalog at a glance | ![](goals/48/ex-catalog-tall-gtk.png) | ![](goals/48/ex-catalog-tall-web.png) |
+
+Mid-stream (GTK, 0.35 s, 0.85 s, done): ![](goals/48/m1-stream-gtk-0.png) ![](goals/48/m1-stream-gtk-1.png) ![](goals/48/m1-stream-gtk-2.png)
+
 ## Not for agents
 
 Components an agent can't name, and why (the rest of docs/components.md):

@@ -9,7 +9,7 @@
 #             Stage("Compile graph")])
 
 from std.math import fma, floor
-from mojoui.view import View, Text, Icon, VStack, HStack, ProgressBar, BODY, CAPTION, TONE_WARN, START, CENTER, STRETCH
+from mojoui.view import View, Text, Icon, VStack, HStack, Spacer, ProgressBar, BODY, CAPTION, TONE_WARN, START, CENTER, STRETCH
 from mojoui.theme import Palette, Surface, Shadow
 
 comptime STAGE_PENDING = 0
@@ -119,7 +119,7 @@ def stage_row(stage: Stage, above: String, last: Bool) -> View:
     var name = status_name(st)
     var left = VStack(_bar(ROW_PAD, above if above != "" else "tl-rail-none"), ring(st), _bar(RAIL, "tl-rail-none"),
                       _bar(0, "tl-rail-none" if last else _rail_tag(st)), spacing=0).width(RING).align(CENTER).tag("tl-rails")
-    var head = HStack(Text(stage.label).tag("tl-label-pending" if st == STAGE_PENDING else "tl-label").grow(),
+    var head = HStack(HStack(Text(stage.label).tag("tl-label-pending" if st == STAGE_PENDING else "tl-label"), Spacer(), spacing=0).grow(),  # (from the leading edge on every host: GTK centres a label that fills its row)
                       Text(elapsed_text(stage.elapsed_ms)).min_width(ELAPSED_W).tag("tl-elapsed-running" if st == STAGE_RUNNING else "tl-elapsed"),
                       spacing=10).align(CENTER).tag("tl-head")
     var lines = List[View]()
@@ -128,7 +128,7 @@ def stage_row(stage: Stage, above: String, last: Bool) -> View:
         var d = Text(stage.detail, CAPTION)
         if st == STAGE_FAILED or st == STAGE_CANCELLED:
             d = d^.tone(TONE_WARN)
-        lines.append(d^.tag("tl-detail-" + name if st == STAGE_FAILED or st == STAGE_CANCELLED else "tl-detail"))
+        lines.append(HStack(d^.tag("tl-detail-" + name if st == STAGE_FAILED or st == STAGE_CANCELLED else "tl-detail"), Spacer(), spacing=0).fill())
     if st == STAGE_RUNNING and stage.percent >= 0:
         lines.append(ProgressBar(min(max(stage.percent, 0), 100)).fill().tag("tl-bar"))
     if stage.twin != "":

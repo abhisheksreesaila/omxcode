@@ -408,13 +408,19 @@ struct AgentChat(Movable):
             else:
                 parts.append(Markdown(s.text, tag="markdown", tables=True))
         var tools = List[View]()
+        var plain = List[ToolCall]()  # (the agent's own tools: three or more fold into one card)
         for ref c in m.calls:
             if c.name == "render_ui" and self.screens.known(c.id):
                 continue
             if self.asks_first(c.name):
                 tools.append(self.confirm_card(c))
                 continue
-            tools.append(self.tool_card(c))
+            plain.append(c.copy())
+        if len(plain) >= 3:
+            tools.append(self.tools_card(plain))
+        else:
+            for ref c in plain:
+                tools.append(self.tool_card(c))
         if len(tools) > 0:
             parts.append(VStack(tools^, spacing=SPACE_S).align(START).fill())
         for k in self.screens.of_message(m.id):
@@ -440,7 +446,7 @@ struct AgentChat(Movable):
     def tool_card(self, c: ToolCall) -> View:
         """A tool call (the agent's own, or one the app answers) and its stage: in progress, executing, complete."""
         var st = status_of(c, self.agent.answered(c.id))
-        var head = HStack(Icon("check" if st == "complete" else ("loader-circle" if st == "executing" else "wrench"), 14),
+        var head = HStack(Icon("wrench", 14),  # (one icon: the chip says the stage; a host may not swap an icon in place)
                           Text(c.name if c.name != "render_ui" else String("building UI"), style=CAPTION).tone(TONE_STRONG), Spacer(),
                           Chip(st, 2 if st == "complete" else (1 if st == "executing" else 0)), spacing=SPACE_XS).align(CENTER).fill()
         var rows = List[View]()
@@ -451,6 +457,36 @@ struct AgentChat(Movable):
         var result = self.result_of(c.id)
         if result.byte_length() > 0:
             rows.append(Text("→ " + (result if result.byte_length() <= 140 else String(result[byte = : 137]) + "…"), style=CAPTION))
+        return Card(rows^, spacing=SPACE_XS).fill().tag("chat-tool")
+
+    def tools_card(self, calls: List[ToolCall]) -> View:
+        """Several tool calls in a row as one card: "Used 3 tools · web_search ×3", then a line each with its stage."""
+        var names = List[String]()
+        var counts = List[Int]()
+        var running = 0
+        for ref c in calls:
+            if status_of(c, self.agent.answered(c.id)) != "complete":
+                running += 1
+            var found = False
+            for k in range(len(names)):
+                if names[k] == c.name:
+                    counts[k] += 1
+                    found = True
+            if not found:
+                names.append(c.name)
+                counts.append(1)
+        var what = String("")
+        for k in range(len(names)):
+            what += (", " if k > 0 else "") + names[k] + (" ×" + String(counts[k]) if counts[k] > 1 else String(""))
+        var rows = List[View]()
+        rows.append(HStack(Icon("wrench", 14), Text(("Using " if running > 0 else "Used ") + String(len(calls)) + " tools", style=CAPTION).tone(TONE_STRONG),
+                           Text(what, style=CAPTION), Spacer(), Chip("complete" if running == 0 else String(running) + " running", 2 if running == 0 else 1),
+                           spacing=SPACE_XS).align(CENTER).fill())
+        for ref c in calls:
+            var st = status_of(c, self.agent.answered(c.id))
+            var args = c.arguments if c.arguments.byte_length() <= 90 else String(c.arguments[byte = : 87]) + "…"
+            rows.append(HStack(Text(c.name, style=CAPTION).tone(TONE_STRONG), Text(args, style=CAPTION).tag("chat-tool-args"), Spacer(),
+                               Text(st, style=CAPTION).tone(TONE_GOOD if st == "complete" else TONE_NONE), spacing=SPACE_S).align(CENTER).fill())
         return Card(rows^, spacing=SPACE_XS).fill().tag("chat-tool")
 
     def confirm_card(self, c: ToolCall) -> View:

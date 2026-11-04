@@ -61,6 +61,19 @@ struct Glyph(Copyable, Movable):
     var advance: Float64
 
 
+def base_letter(code: Int) -> Int:
+    """The unaccented ASCII letter of a Latin-1 or Latin Extended-A letter (é → e, Ç → C, ł → l), 0 if none."""
+    if code >= 0xC0 and code <= 0xFF:
+        var map = String("AAAAAAACEEEEIIIIDNOOOOO*OUUUUYTsaaaaaaaceeeeiiiidnooooo/ouuuuyty")
+        var c = Int(map.as_bytes()[code - 0xC0])
+        return 0 if c == 42 or c == 47 else c
+    if code >= 0x100 and code <= 0x17F:
+        var ext = String("AaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIiJjJjKkkLlLlLlLlLlNnNnNnnNnOoOoOoOoRrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs")
+        var i = code - 0x100
+        return Int(ext.as_bytes()[i]) if i < ext.byte_length() else 0
+    return 0
+
+
 struct Face(Movable):
     """One baked font at one pixel size."""
 
@@ -100,7 +113,8 @@ struct Face(Movable):
         for k in range(len(self.codes)):
             if self.codes[k] == code:
                 return k
-        return -1
+        var plain = base_letter(code)  # (an accented letter the atlas lacks: its letter, so "Belém" never reads "Belm")
+        return self.ascii[plain] if plain > 0 else -1
 
     def coverage(self, x: Float64, y: Float64) -> Float64:
         """Bilinear coverage (0–1) at a point in atlas pixels."""

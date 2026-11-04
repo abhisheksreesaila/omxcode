@@ -300,7 +300,10 @@ def counter(name: String) -> Int:
 
 
 def gtk_icon(name: String) -> String:
-    """mojoui icon names → Adwaita symbolic icons."""
+    """mojoui icon names → the Lucide SVG the web shows (when the set has it: D-4741), else Adwaita symbolic icons."""
+    for n in materialize[LUCIDE_NAMES]():
+        if n == name:
+            return "mojoui-" + name  # the same Lucide SVG as the web (written by install_icons)
     if name == "star": return "starred-symbolic"
     if name == "trash": return "user-trash-symbolic"
     if name == "gear": return "emblem-system-symbolic"
