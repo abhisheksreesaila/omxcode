@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en" class="oq-root oq-night oq-family-dev no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get started · omxcode</title>
+<meta name="description" content="omxcode is an app framework written in Mojo. Install it, write a 30-line app, build it, and run it as a native Linux app and a web app, in the Liquid look. Then hand it to an AI agent.">
+<meta property="og:title" content="Get started with omxcode: your first Mojo app in ten minutes">
+<meta property="og:description" content="One Mojo file becomes a native Linux app and a web app. The Liquid look is one method. Any agent can use it.">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/start/hello-gtk.png">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="omxqua/src/fonts.css">
+<link rel="stylesheet" href="omxqua/src/tokens.css">
+<link rel="stylesheet" href="omxqua/src/components.css">
+<link rel="stylesheet" href="site.css">
+<style>
+section .head { max-width: 860px; }
+.code { margin: 0; font: 13px/1.7 var(--mono); color: var(--ink2); white-space: pre; overflow-x: auto; }
+.code .k { color: var(--ink); font-weight: 600; } .code .c { opacity: .62; } .code .s { color: var(--oq-ok); } .code .o { color: var(--ink); }
+.pane { border-radius: 20px; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); padding: 18px 20px; min-width: 0; }
+.file { font: 600 11.5px var(--mono); letter-spacing: .06em; color: var(--ink2); display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.file b { color: var(--ink); letter-spacing: 0; } .file button { margin-left: auto; font: 600 11px var(--mono); color: var(--ink2); background: none; border: 0; cursor: pointer; }
+.step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 28px; margin-top: 36px; align-items: start; }
+.step .say p { margin: 0 0 14px; color: var(--ink2); font-size: 16px; line-height: 1.6; } .step .say p b { color: var(--ink); font-weight: 600; }
+.step .say code, .facts3 code, .next code { font: 13.5px var(--mono); color: var(--ink); }
+.step .say ul { margin: 0 0 14px; padding-left: 20px; color: var(--ink2); font-size: 15.5px; line-height: 1.6; } .step .say li b { color: var(--ink); font-weight: 600; }
+.num2 { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--oq-surface-3); font: 600 13px var(--mono); color: var(--ink); margin-right: 10px; vertical-align: middle; }
+.note2 { font-size: 13.5px; color: var(--ink2); line-height: 1.5; margin-top: 12px; }
+.shots2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.shots2 figure { margin: 0; } .shots2 img { width: 100%; display: block; border-radius: 16px; box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); }
+.shots2 figcaption { font: 12.5px var(--mono); color: var(--ink2); margin-top: 8px; text-align: center; }
+.facts3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 36px; }
+.facts3 > div { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
+.facts3 .t { font: 600 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.facts3 h3 { font-size: 19px; margin: 8px 0 6px; } .facts3 p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
+.next { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 36px; }
+.next a { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; text-decoration: none; color: inherit; transition: box-shadow .2s, transform .2s; }
+.next a:hover { box-shadow: 0 0 0 1px var(--word); transform: translateY(-1px); }
+.next h3 { font-size: 18px; margin: 0 0 6px; } .next p { margin: 0; color: var(--ink2); font-size: 14.5px; line-height: 1.5; }
+@media (max-width: 960px) { .step { grid-template-columns: minmax(0, 1fr); } .facts3 { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .shots2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<nav class="lnav">
+  <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode <span class="sub">· get started</span></a>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#what">What it is</a><a href="#install">Install</a><a href="#write">Write</a><a href="#run">Run</a><a href="#look">The look</a><a href="#agent">Agents</a></div>
+  <div class="right"><a class="cta" href="#install">Start</a></div>
+</nav>
+
+<main id="top">
+
+<section class="hero center" style="padding-bottom:40px">
+  <div class="wrap" style="display:block">
+    <div class="eyebrow rise"><span>Get started</span></div>
+    <h1 class="rise" data-words data-step="70" data-d0="120" style="font-size:clamp(48px,7vw,100px)">Your first Mojo app.</h1>
+    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">omxcode is an app framework written in Mojo. You write one file; it becomes a native app on Linux, a web app, and a Mac app.</span> <span class="two" data-words data-step="26" data-d0="1100">Install, write 30 lines, build, run. About ten minutes.</span></p>
+    <div class="ctas rise"><span style="animation-delay:1500ms"><a class="cta" href="#install">Start</a></span><span style="animation-delay:1580ms"><a class="more" href="#what">What is it?</a></span></div>
+  </div>
+</section>
+
+<!-- What it is -->
+<section id="what" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">What it is</div>
+      <h2 class="rv">One file. Native everywhere. <span class="two">Mojo all the way down.</span></h2>
+      <p class="lede rv"><a href="https://www.modular.com/mojo">Mojo</a> is a new language that reads like Python and compiles like C, down to the GPU. omxcode uses it to write apps: you describe the screen, and each platform draws it with its own controls.</p>
+    </div>
+    <div class="facts3">
+      <div class="rv"><div class="t">How it works</div><h3>You describe, the platform draws</h3><p>An app is a struct with three parts: its state, an <code>update</code> that changes it, and a <code>view</code> that describes the screen. omxcode turns that description into GTK widgets on Linux, HTML on the web and AppKit views on the Mac.</p></div>
+      <div class="rv"><div class="t">Where it runs</div><h3>Linux and the web today</h3><p>Linux and the web are run by checks on every change. Mac apps build and run on GitHub's macOS machines. Android runs on the emulator; iPhone builds. Windows waits for Mojo itself.</p></div>
+      <div class="rv"><div class="t">What you get free</div><h3>A look, a GPU, an agent</h3><p>The Liquid look is one method. The same language computes on an NVIDIA GPU when there is one. And every app can be used by an AI agent without a line of extra code.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 1. Install -->
+<section id="install">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 1</div>
+      <h2 class="rv">Install. <span class="two">One tool, one command.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><b>You need:</b></p>
+        <ul>
+          <li><b>Linux</b> on x86-64 with GTK 4 and libadwaita 1.7 or newer (Ubuntu 24.04, Fedora 40 or later should do; most testing is on Arch).</li>
+          <li><a href="https://pixi.sh">pixi</a>, which installs Mojo and everything else into the project folder. Nothing goes system-wide.</li>
+          <li>Optional: an NVIDIA GPU. Without one, the same code runs on the CPU.</li>
+        </ul>
+        <p>On a Mac (Apple Silicon), the same commands install and build; so far that's been run on GitHub's macOS machines, not yet on someone's own Mac.</p>
+      </div>
+      <div class="pane rv"><div class="file">a terminal<button type="button" data-copy="#c-install">copy</button></div>
+<pre class="code" id="c-install">curl -fsSL https://pixi.sh/install.sh | sh     <span class="c"># if you don't have pixi</span>
+git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode
+pixi install                                   <span class="c"># Mojo 1.1 and the rest, in .pixi/</span></pre>
+        <p class="note2">The first <code>pixi install</code> downloads a few GB. If it stops at <code>failed to link 'share/X11/xkb'</code>, two packages raced for one path: delete the half-made <code>.pixi</code> folder and run it again.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. Write -->
+<section id="write">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 2</div>
+      <h2 class="rv">Write the app. <span class="two">State, update, view.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p>Make a folder for it, <code>examples/start/</code>, with one file, <code>app.mojo</code>. This one is already in the repository.</p>
+        <p><b>The state</b> is the struct's fields: here, how many times the button was tapped.</p>
+        <p><b>update</b> runs when something happens. The button sends the message <code>TAP</code>; update adds one.</p>
+        <p><b>view</b> describes the screen from the state: a title, a line of text and a button, in a column. After every update, omxcode works out what changed and updates only that.</p>
+        <p><b>theme</b> picks the look. Leave it out and you get each platform's own.</p>
+      </div>
+      <div class="pane rv"><div class="file">examples/start/<b>app.mojo</b><button type="button" data-copy="#c-app">copy</button></div>
+<pre class="code" id="c-app"><span class="k">from</span> mojoui <span class="k">import</span> App, Event, View, VStack, Text, Button, TITLE, CAPTION, PROMINENT
+<span class="k">from</span> mojoui.theme <span class="k">import</span> Theme
+<span class="k">from</span> themes.liquid <span class="k">import</span> liquid
+
+<span class="k">comptime</span> TAP = 1
+
+
+<span class="k">struct</span> Main(App):
+    <span class="k">var</span> taps: Int
+
+    <span class="k">def</span> __init__(out self):
+        self.taps = 0
+
+    <span class="k">def</span> title(self) -&gt; String:
+        <span class="k">return</span> <span class="s">"Hello"</span>
+
+    <span class="k">def</span> theme(self) -&gt; Theme:
+        <span class="k">return</span> liquid()
+
+    <span class="k">def</span> update(mut self, event: Event):
+        <span class="k">if</span> event.message == TAP:
+            self.taps += 1
+
+    <span class="k">def</span> view(self) -&gt; View:
+        <span class="k">return</span> VStack(
+            Text(<span class="s">"Hello from Mojo"</span>, style=TITLE),
+            Text(<span class="s">"Tapped "</span> + String(self.taps) + <span class="s">" times"</span>, style=CAPTION),
+            Button(<span class="s">"Tap me"</span>, on_tap=TAP, style=PROMINENT),
+            spacing=16,
+        )</pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Build and run -->
+<section id="run">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 3</div>
+      <h2 class="rv">Build it. Run it. <span class="two">Native window, then the browser.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><b>Linux:</b> <code>scripts/build.sh start linux</code> compiles the file into a GTK app at <code>build/start/linux/start</code>. Run it and tap the button.</p>
+        <p><b>The web:</b> <code>scripts/build.sh start web</code> builds the same file for the web host. Open <code>http://127.0.0.1:5001</code>. The app's logic stays in the server, in Mojo; the page gets HTML.</p>
+        <p><b>Mac:</b> <code>scripts/build.sh start mac</code> makes an AppKit app for Apple Silicon.</p>
+        <p class="note2">The first build takes about a minute; later ones are quicker. For now the compiler also prints deprecation warnings from the framework's own code; they're harmless, and cleaning them up is on the list.</p>
+      </div>
+      <div>
+        <div class="pane rv"><div class="file">a terminal<button type="button" data-copy="#c-run">copy</button></div>
+<pre class="code" id="c-run">scripts/build.sh start linux
+build/start/linux/start                       <span class="c"># a native window</span>
+
+scripts/build.sh start web
+pixi run python mojoui/hosts/web.py build/start/web
+                                              <span class="c"># → http://127.0.0.1:5001</span></pre></div>
+        <div class="shots2 rv" style="margin-top:16px">
+          <figure><img src="img/start/hello-gtk.png" alt="The app in a native GTK window: Hello from Mojo, Tapped 3 times, and a Tap me button" loading="lazy"><figcaption>Linux · GTK 4</figcaption></figure>
+          <figure><img src="img/start/hello-web.png" alt="The same app in a browser, looking the same" loading="lazy"><figcaption>the web · same file</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. The look -->
+<section id="look" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 4</div>
+      <h2 class="rv">Liquid comes free. <span class="two">One method.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p>Without a <code>theme</code>, the app uses each platform's own look: Adwaita on Linux, here in dark mode.</p>
+        <p>Add the three-line <code>theme</code> method returning <code>liquid()</code> and the same app wears <b>Liquid</b>: soft surfaces, springy motion, the same on Linux and the web. Nothing else in the app changes.</p>
+        <p>Other looks ship too (Fluent, Omarchy, Paper), and a theme is plain Mojo you can copy and change: <code>themes/</code>.</p>
+      </div>
+      <div class="shots2 rv">
+        <figure><img src="img/start/hello-native-gtk.png" alt="The app without a theme: Adwaita dark, a blue button" loading="lazy"><figcaption>no theme · the platform's own</figcaption></figure>
+        <figure><img src="img/start/hello-gtk.png" alt="The same app with theme() returning liquid(): a light, soft surface and a teal button" loading="lazy"><figcaption>return liquid()</figcaption></figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. Agents -->
+<section id="agent">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 5</div>
+      <h2 class="rv">Hand it to an agent. <span class="two">No extra code.</span></h2>
+      <p class="lede rv">Every omxcode app can also run as a set of tools for an AI agent, over MCP. The agent reads the screen as text and presses the same buttons a person would. It can't do anything a person couldn't: a disabled button is no tool.</p>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><code>scripts/agent.sh start</code> prints the one command that gives the app to Claude Code, or any MCP client.</p>
+        <p>The agent calls <code>screen</code> and sees the title, the count and a tool named <code>tap-me</code>, made from the button. Calling <code>tap-me</code> taps it.</p>
+        <p>Going the other way, an agent can answer with screens built from omxcode's components: <a href="agents.html">agents build screens</a>.</p>
+      </div>
+      <div class="pane rv"><div class="file">a terminal · what the agent sees</div>
+<pre class="code">scripts/agent.sh start
+<span class="c"># claude mcp add start -- pixi run python …/mojoui/hosts/agent.py …/build/start/web</span>
+
+<span class="k">screen</span>
+<span class="o">Hello · design: Liquid · 1 tools on this screen
+"Hello from Mojo"
+"Tapped 0 times"
+Button "Tap me" → tap-me</span>
+
+<span class="k">tap-me</span>
+<span class="o">Did tap-me.
+Now: Tapped 1 times</span></pre>
+        <p class="note2">Real output from <code>scripts/agent_client.py build/start/web</code>, the small MCP client the checks use.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- Next -->
+<section id="next" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Next</div>
+      <h2 class="rv">Where to go from here.</h2>
+    </div>
+    <div class="next rv">
+      <a href="components.html"><h3>Components</h3><p>124 of them, from buttons to data grids, charts and maps, with what runs where.</p></a>
+      <a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples"><h3>Examples</h3><p>Every app in <code>examples/</code> is one folder you can copy: a todo list, notes, a drawing app, a GPU canvas.</p></a>
+      <a href="agents.html"><h3>Agents build screens</h3><p>An AG-UI agent answers with maps, charts and forms, drawn natively.</p></a>
+      <a href="omxplorer.html"><h3>omxplorer</h3><p>The showcase: a data app built entirely with omxcode, with the GPU underneath.</p></a>
+      <a href="how.html"><h3>How it works</h3><p>One card followed from a line of Mojo to three native toolkits.</p></a>
+      <a href="llms.txt"><h3>For your agent</h3><p><code>llms.txt</code>: these docs in a form a coding agent can read.</p></a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="note">Every command on this page was run on one Linux machine, and the pictures are that app's real windows, shot by the framework's test mode.</p>
+    <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="index.html">← Back to omxcode</a></div>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+<script>document.documentElement.classList.remove("no-js");</script>
+</body>
+</html>
