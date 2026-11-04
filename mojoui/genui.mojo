@@ -46,6 +46,7 @@ from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette, mix
 from mojoui.app import Event
+from mojoui.partialjson import complete
 
 comptime MAX_DEPTH = 8
 comptime MAX_NODES = 200
@@ -601,6 +602,85 @@ def validate(args: String) -> String:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# streaming: render_ui's arguments while they arrive (goal 48 M1)
+# ---------------------------------------------------------------------------------------------------------------------
+
+comptime SKELETON_NODE = '{"component":"Skeleton","lines":2}'
+
+
+def dump(j: Json, n: Int) -> String:
+    """A node of a parsed Json as JSON text again."""
+    var k = j.kind(n)
+    if k == J_STRING:
+        return json_string(j.text(n))
+    if k == J_NUMBER:
+        return String(j.number(n)) if j.is_whole(n) else String(j.real(n))
+    if k == J_BOOL:
+        return "true" if j.flag(n) else "false"
+    if k == J_ARRAY:
+        var out = String("[")
+        for i in range(j.size(n)):
+            out += ("," if i > 0 else "") + dump(j, j.at(n, i))
+        return out + "]"
+    if k == J_OBJECT:
+        var out = String("{")
+        for i in range(len(j.keys[n])):
+            out += ("," if i > 0 else "") + json_string(j.keys[n][i]) + ":" + dump(j, j.kids[n][i])
+        return out + "}"
+    return "null"
+
+
+def pruned(j: Json, n: Int, specs: List[Spec], depth: Int) -> String:
+    """A component still arriving, made showable: props that aren't whole yet are left out, and a component that can't
+    be shown yet (no name, an unknown one, a required prop missing) is a Skeleton for now."""
+    if depth > MAX_DEPTH or j.kind(n) != J_OBJECT:
+        return SKELETON_NODE
+    var at = spec_index(specs, j.text(j.get(n, "component")))
+    if at < 0:
+        return SKELETON_NODE
+    ref spec = specs[at]
+    var out = String('{"component":') + json_string(spec.name)
+    for ref p in spec.props:
+        var v = j.get(n, p.name)
+        if v < 0:
+            if p.required:
+                return SKELETON_NODE
+            continue
+        if p.kind == P_CHILDREN:
+            if j.kind(v) != J_ARRAY:
+                continue
+            var kids_ = String("[")
+            for i in range(min(j.size(v), p.limit)):
+                kids_ += ("," if i > 0 else "") + pruned(j, j.at(v, i), specs, depth + 1)
+            out += ',"children":' + kids_ + "]"
+            continue
+        try:
+            check_prop(j, v, p, "", spec.name)
+        except:
+            if p.required:
+                return SKELETON_NODE
+            continue
+        out += "," + json_string(p.name) + ":" + dump(j, v)
+    return out + "}"
+
+
+def partial_ui(args: String) -> String:
+    """render_ui's arguments so far, as arguments that can be shown now ("" when nothing has arrived worth showing):
+    closed (mojoui.partialjson), pruned to what's whole, a Skeleton at the end of each children list still open."""
+    var whole = complete(args, "children", SKELETON_NODE)
+    if whole.byte_length() == 0:
+        return '{"ui":' + SKELETON_NODE + "}"
+    var j: Json
+    try:
+        j = Json.parse(whole)
+    except:
+        return '{"ui":' + SKELETON_NODE + "}"
+    if j.kind(0) != J_OBJECT or j.get(0, "ui") < 0:
+        return '{"ui":' + SKELETON_NODE + "}"
+    return '{"ui":' + pruned(j, j.get(0, "ui"), catalog(), 1) + "}"
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # rendering
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -671,6 +751,8 @@ struct GenUi(Movable):
     var canvases: List[Int]  # node of canvas k (canvas_base + k)
     var kinds: List[Int]  # CV_* of canvas k
     var canvas_of: Dict[Int, Int]  # node → its canvas
+    var stamps: List[Int]  # per canvas: a hash of its data, part of its version (a screen rebuilt while it streams
+                           # redraws only the canvases whose data changed)
     var picks: Dict[Int, Int]  # Tabs node → the open tab
     var copies: Dict[Int, Int]  # CodeBlock node → times copied (the clipboard's version)
     var charts: List[ChartView]  # per canvas (CV_CHART; a placeholder for the others)
@@ -690,6 +772,7 @@ struct GenUi(Movable):
         self.canvases = List[Int]()
         self.kinds = List[Int]()
         self.canvas_of = Dict[Int, Int]()
+        self.stamps = List[Int]()
         self.picks = Dict[Int, Int]()
         self.copies = Dict[Int, Int]()
         self.charts = List[ChartView]()
@@ -771,6 +854,7 @@ struct GenUi(Movable):
             self.canvas_of[n] = len(self.canvases)
             self.canvases.append(n)
             self.kinds.append(kind)
+            self.stamps.append(Int(hash(dump(self.json, n)) % 1_000_000_007))
             self.charts.append(self.chart_of(n) if kind == CV_CHART else ChartView("", List[String](), List[Float64]()))
             var g = DataGrid()
             g.browse = True
@@ -856,6 +940,9 @@ struct GenUi(Movable):
 
     def canvas(self, n: Int) -> Int:
         return self.canvas_base + self.canvas_of.get(n, 0)
+
+    def stamp(self, n: Int) -> Int:
+        return self.stamps[self.canvas_of.get(n, 0)]
 
     def labelled(self, n: Int, var control: View) -> View:
         """A control with its label above it (when it has one)."""
@@ -955,19 +1042,19 @@ struct GenUi(Movable):
             return Table(cols^, cells^).fill()
         if comp == "DataGrid":
             var k = self.canvas_of.get(n, 0)
-            return self.framed(n, Canvas(self.canvas(n), v + self.grids[k].version, on_gesture=self.msg(n)).fill().height(Int(self.num(n, "height", 260))), in_card)
+            return self.framed(n, Canvas(self.canvas(n), v + self.grids[k].version + self.stamp(n), on_gesture=self.msg(n)).fill().height(Int(self.num(n, "height", 260))), in_card)
         if comp == "ChartView":
-            return self.framed(n, Canvas(self.canvas(n), v).fill().height(Int(self.num(n, "height", 220))), in_card)
+            return self.framed(n, Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 220))), in_card)
         if comp == "Sparkline":
             var parts = List[View]()
             if self.json.get(n, "label") >= 0:
                 parts.append(Text(self.str(n, "label"), style=CAPTION))
-            parts.append(SparklineView(self.canvas(n), v, 64))
+            parts.append(SparklineView(self.canvas(n), v + self.stamp(n), 64))
             return VStack(parts^, spacing=SPACE_S).align(START).fill()
         if comp == "KpiView":
-            return self.kpi_of(n).view(self.canvas(n), v)
+            return self.kpi_of(n).view(self.canvas(n), v + self.stamp(n))
         if comp == "MapView":
-            return self.framed(n, Canvas(self.canvas(n), v).fill().height(Int(self.num(n, "height", 260))), in_card)
+            return self.framed(n, Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 260))), in_card)
         if comp == "Meter":
             return Meter(self.str(n, "label"), Int(self.num(n, "value", 0)), False, self.str(n, "figure"))
         if comp == "ProgressBar":

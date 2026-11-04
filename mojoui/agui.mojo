@@ -103,6 +103,8 @@ struct Agent(Movable):
     var state_error: String
     var tools: List[Tool]
     var step: String  # the step running ("" none)
+    var steps: List[String]  # this run's steps, in the order they started (goal 48: a live progress list)
+    var steps_done: List[Bool]
     var custom_name: String  # the last CUSTOM event
     var custom_value: String
     var type_names: List[String]  # every event type seen, and how often
@@ -128,6 +130,8 @@ struct Agent(Movable):
         self.state_error = ""
         self.tools = List[Tool]()
         self.step = ""
+        self.steps = List[String]()
+        self.steps_done = List[Bool]()
         self.custom_name = ""
         self.custom_value = ""
         self.type_names = List[String]()
@@ -356,6 +360,8 @@ struct Agent(Movable):
         if t == "RUN_STARTED":
             self.running = True
             self.ended = "open"
+            self.steps = List[String]()
+            self.steps_done = List[Bool]()
             return EV_RUN_STARTED
         if t == "RUN_FINISHED":
             self.ended = "finished"
@@ -455,8 +461,16 @@ struct Agent(Movable):
             return EV_MESSAGES
         if t == "STEP_STARTED":
             self.step = j.text(j.get(0, "stepName"))
+            if len(self.steps) < 50:
+                self.steps.append(self.step)
+                self.steps_done.append(False)
             return EV_STEP
         if t == "STEP_FINISHED":
+            var name = j.text(j.get(0, "stepName"))
+            for k in range(len(self.steps) - 1, -1, -1):
+                if self.steps[k] == name and not self.steps_done[k]:
+                    self.steps_done[k] = True
+                    break
             self.step = ""
             return EV_STEP
         if t == "CUSTOM":

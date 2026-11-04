@@ -13,7 +13,7 @@
 # (gave_up); a screen shown, or reset() (the user's next message), starts the count again.
 
 from mojoui.agui import Agent
-from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES
+from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES, partial_ui
 from mojoui.jsonpatch import JDoc
 from mojoui.json import json_string
 from mojoui.view import View, Text, Card, CAPTION, SPACE_XS, CARD_WARN
@@ -34,6 +34,8 @@ struct Screens(Movable):
     var max: Int
     var streak: Int  # refusals in a row
     var gave_up: Bool  # past MAX_RETRIES: no more reruns until reset()
+    var live: List[Bool]  # screen k is a preview of a call still streaming (goal 48 M1): replaced when it ends
+    var sizes: List[Int]  # the argument bytes screen k was last built from (a preview rebuilds when more arrive)
 
     def __init__(out self, base: Int, canvas_base: Int, max: Int = MAX_SCREENS):
         self.uis = List[GenUi]()
@@ -44,6 +46,8 @@ struct Screens(Movable):
         self.max = max
         self.streak = 0
         self.gave_up = False
+        self.live = List[Bool]()
+        self.sizes = List[Int]()
 
     def reset(mut self):
         """The user spoke: refusals count from zero again."""
@@ -51,37 +55,85 @@ struct Screens(Movable):
         self.gave_up = False
 
     def known(self, call_id: String) -> Bool:
+        """The call has a screen (shown, refused, or a preview while it streams)."""
         for c in self.calls:
             if c == call_id:
                 return True
         return False
+
+    def index_of(self, call_id: String) -> Int:
+        for k in range(len(self.calls)):
+            if self.calls[k] == call_id:
+                return k
+        return -1
+
+    def streaming(self, k: Int) -> Bool:
+        return self.live[k]
+
+    def preview(mut self, agent: Agent, tool: String = "render_ui") -> Bool:
+        """`tool` calls still streaming get a screen of what's arrived so far (mojoui.genui.partial_ui: closed, pruned,
+        a Skeleton where more is coming), rebuilt as their arguments grow. True when one changed (redraw)."""
+        var changed = False
+        for ref m in agent.messages:
+            for ref c in m.calls:
+                if c.name != tool or c.done or c.too_big:
+                    continue
+                var k = self.index_of(c.id)
+                if k >= 0 and (not self.live[k] or self.sizes[k] == c.arguments.byte_length()):
+                    continue
+                if k < 0:
+                    if len(self.uis) >= self.max:
+                        continue
+                    k = len(self.uis)
+                    self.uis.append(GenUi(partial_ui(c.arguments), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES))
+                    self.calls.append(c.id)
+                    self.messages.append(m.id)
+                    self.live.append(True)
+                    self.sizes.append(c.arguments.byte_length())
+                else:
+                    self.uis[k] = GenUi(partial_ui(c.arguments), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES)
+                    self.sizes[k] = c.arguments.byte_length()
+                changed = True
+        return changed
 
     def take(mut self, mut agent: Agent, tool: String = "render_ui") -> Bool:
         """Every finished `tool` call not yet seen: shown, or refused with a message to the agent. True when one was
         refused and the agent should run again to hear why (at most MAX_RETRIES times in a row: then gave_up)."""
         var refused = False
         for c in agent.pending():
-            if c.name != tool or self.known(c.id):
+            var was = self.index_of(c.id)
+            if c.name != tool or (was >= 0 and not self.live[was]):
                 continue
             var problem = String("")
             if c.too_big:
                 problem = "too big: the arguments are larger than the client keeps"
-            elif len(self.uis) >= self.max:
+            elif was < 0 and len(self.uis) >= self.max:
                 problem = "too big: the chat holds " + String(self.max) + " screens at most"
             if problem != "":
                 agent.answer(c.id, '{"error":' + json_string("refused: " + problem) + "}")
                 refused = True
+                if was >= 0:  # (its preview goes: a refusal card in its place)
+                    self.uis[was] = GenUi('{"ui":{"component":"Script"}}', self.base + was * MAX_CONTROLS, self.canvas_base + was * MAX_NODES)
+                    self.uis[was].problem = problem
+                    self.live[was] = False
                 continue
-            var k = len(self.uis)
+            var k = was if was >= 0 else len(self.uis)
             var ui = GenUi(c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES)
             if ui.problem != "":
                 agent.answer(c.id, '{"error":' + json_string("refused: " + ui.problem) + "}")
                 refused = True
             else:
                 self.streak = 0
-            self.uis.append(ui^)
-            self.calls.append(c.id)
-            self.messages.append(agent.last_message)
+            if was >= 0:  # the preview becomes the screen
+                self.uis[k] = ui^
+                self.live[k] = False
+                self.sizes[k] = c.arguments.byte_length()
+            else:
+                self.uis.append(ui^)
+                self.calls.append(c.id)
+                self.messages.append(agent.last_message)
+                self.live.append(False)
+                self.sizes.append(c.arguments.byte_length())
         if not refused:
             return False
         self.streak += 1
@@ -99,6 +151,8 @@ struct Screens(Movable):
         if k < 0 or k >= len(self.uis):
             return False
         var act = self.uis[k].handle(e, agent.state)
+        if self.live[k]:  # (a screen still arriving: inputs edit the state, but nothing answers the call before it ends)
+            return False
         if act.kind != ACT_ACTION:  # (an input, or the screen's own change: a tab, a copy, a scroll)
             return False
         if not agent.answered(self.calls[k]):

@@ -426,6 +426,8 @@ def step(page, s):
             raise ValueError(f"no file picker takes {rest}")
     elif verb == "regions":  # regions:/path.json: the page's regions (mojoui/regions.mojo's roles, read from data-tag) in its pixels
         Path(rest).write_text(json.dumps(page.evaluate(REGIONS)) + "\n")
+    elif verb == "shot":  # shot:/path.png: a picture now, mid-run (as the GTK step)
+        page.screenshot(path=rest, full_page=False)
     elif verb == "pause":  # pause:1000: let animations run that long (as the GTK step does)
         page.wait_for_timeout(int(rest))
     elif verb == "slide":

@@ -20,6 +20,7 @@ from mojoui.markdown import Markdown
 from mojoui.codeblock import CodeBlock
 from mojoui.chip import Chip
 from mojoui.feedback import Note, Warning
+from mojoui.timeline import Timeline, Stage, STAGE_RUNNING, STAGE_DONE
 from mojoui.app import Event
 from mojoui.canvas import Surface
 from mojoui.theme import Palette
@@ -252,6 +253,9 @@ struct AgentChat(Movable):
             var what = self.agent.handle(e)
             if what == EV_TEXT:
                 self.pieces += 1
+            elif what == EV_TOOL_START or what == EV_TOOL_ARGS:
+                _ = self.screens.preview(self.agent)  # (render_ui still streaming: what's arrived, drawn now; each canvas
+                # redraws only when its own data changed: genui's stamps, not the chat's version)
             elif what == EV_TOOL_END:
                 if self.screens.take(self.agent):  # (a refusal: the agent hears why with another run)
                     self.again = True
@@ -302,15 +306,14 @@ struct AgentChat(Movable):
         for ref c in m.calls:
             if c.name == "render_ui" and self.screens.known(c.id):
                 continue
-            var st = status_of(c, self.agent.answered(c.id))
-            var tone = TONE_GOOD if st == "complete" else (TONE_ACCENT if st == "executing" else TONE_NONE)
-            var name = c.name if c.name != "render_ui" else String("building UI")
-            tools.append(HStack(Icon("check" if st == "complete" else "loader-circle", 14), Text(name, style=CAPTION).tone(TONE_STRONG),
-                                Text(st, style=CAPTION).tone(tone), spacing=SPACE_XS).align(CENTER))
+            tools.append(self.tool_card(c))
         if len(tools) > 0:
-            parts.append(VStack(tools^, spacing=SPACE_XS).align(START))
+            parts.append(VStack(tools^, spacing=SPACE_S).align(START).fill())
         for k in self.screens.of_message(m.id):
-            parts.append(self.screens.view(k, self.agent.state, self.version).arrive())
+            if self.screens.streaming(k):
+                parts.append(HStack(Icon("loader-circle", 14), Text("Building UI", style=CAPTION).tone(TONE_STRONG),
+                                    Text("in progress", style=CAPTION), spacing=SPACE_XS).align(CENTER).tag("chat-building"))
+            parts.append(self.screens.view(k, self.agent.state, self.version))
         var done = not (last and self.agent.running)
         if done and m.content.byte_length() > 0:
             var acts = List[View]()
@@ -319,6 +322,35 @@ struct AgentChat(Movable):
                 acts.append(Button("Regenerate", self.base + C_REGENERATE, style=SUBTLE, icon="refresh-cw"))
             parts.append(HStack(acts^, spacing=SPACE_XS).align(CENTER))
         return VStack(parts^, spacing=SPACE_S).align(START).fill().tag("chat-reply")
+
+    def result_of(self, call_id: String) -> String:
+        for ref m in self.agent.messages:
+            if m.role == "tool" and m.tool_call_id == call_id:
+                return m.content
+        return ""
+
+    def tool_card(self, c: ToolCall) -> View:
+        """A tool call (the agent's own, or one the app answers) and its stage: in progress, executing, complete."""
+        var st = status_of(c, self.agent.answered(c.id))
+        var head = HStack(Icon("check" if st == "complete" else ("loader-circle" if st == "executing" else "wrench"), 14),
+                          Text(c.name if c.name != "render_ui" else String("building UI"), style=CAPTION).tone(TONE_STRONG), Spacer(),
+                          Chip(st, 2 if st == "complete" else (1 if st == "executing" else 0)), spacing=SPACE_XS).align(CENTER).fill()
+        var rows = List[View]()
+        rows.append(head^)
+        var args = c.arguments if c.arguments.byte_length() <= 140 else String(c.arguments[byte = : 137]) + "…"
+        if args.byte_length() > 0 and args != "{}":
+            rows.append(Text(args, style=CAPTION).tag("chat-tool-args"))
+        var result = self.result_of(c.id)
+        if result.byte_length() > 0:
+            rows.append(Text("→ " + (result if result.byte_length() <= 140 else String(result[byte = : 137]) + "…"), style=CAPTION))
+        return Card(rows^, spacing=SPACE_XS).fill().tag("chat-tool")
+
+    def steps_view(self) -> View:
+        """The run's steps (STEP_STARTED / STEP_FINISHED) as a live progress list."""
+        var stages = List[Stage]()
+        for k in range(len(self.agent.steps)):
+            stages.append(Stage(self.agent.steps[k], STAGE_DONE if self.agent.steps_done[k] else STAGE_RUNNING, -1, ""))
+        return Timeline(stages)
 
     def user_view(self, text: String) -> View:
         return HStack(Spacer(), Card(Text(text), spacing=SPACE_XS).max_width(520).tag("chat-user"), spacing=SPACE_S).fill()
@@ -345,11 +377,17 @@ struct AgentChat(Movable):
             ref m = self.agent.messages[i]
             if m.role == "user":
                 items.append(self.user_view(m.content).arrive())
+                if i == self.last_user() and len(self.agent.steps) > 0:
+                    items.append(self.steps_view().arrive())
             elif m.role == "assistant":
                 if m.content.byte_length() == 0 and len(m.calls) == 0 and len(self.screens.of_message(m.id)) == 0:
                     continue
                 items.append(self.reply_view(i, i == last_reply).arrive())
-        var waiting = self.agent.running and (n == 0 or self.agent.messages[n - 1].role != "assistant" or self.agent.messages[n - 1].content.byte_length() == 0)
+        var waiting = self.agent.running  # (until the agent has said or started something since the question)
+        for i in range(self.last_user() + 1, n):
+            ref m = self.agent.messages[i]
+            if m.role == "assistant" and (m.content.byte_length() > 0 or len(m.calls) > 0):
+                waiting = False
         if waiting:
             items.append(self.thinking().arrive())
         if self.stopped and not self.agent.running:

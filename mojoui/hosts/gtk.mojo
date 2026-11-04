@@ -5998,6 +5998,8 @@ def run_step[A: App](host_addr: Int, step: String):
         var until = perf_counter_ns() + 400_000_000  # (the widgets' pages restyle from their new tokens)
         while Int(perf_counter_ns()) < until:
             pump()
+    elif verb == "shot":  # shot:/path.png: a picture now, mid-run (goal 48: an agent's UI caught while it streams)
+        save_png(host[].window, rest)
     elif verb == "pause" or verb == "wait":  # pause:3000 (or wait:3000): keep the main loop running that long (a screen grab of the display can catch popovers; a video plays)
         var until = perf_counter_ns() + to_int(rest) * 1_000_000
         while Int(perf_counter_ns()) < until and not host[].closed:  # (a quit from the tray menu ends it too)
@@ -6962,9 +6964,10 @@ def on_activate[A: App](gapp: Int, host_addr: Int) abi("C"):
         external_call["gtk_window_set_resizable", NoneType](host[].window, c_int(0))
         var title = String("mojoui test window (closes by itself)")
         external_call["gtk_window_set_title", NoneType](host[].window, title.as_c_string_span())
-    if not testing or shot != "":
+    var shoots = shot != "" or getenv("MOJOUI_TEST").find("shot:") >= 0  # (a picture mid-run needs a shown window too)
+    if not testing or shoots:
         external_call["gtk_window_present", NoneType](host[].window)
-    if testing and shot != "":
+    if testing and shoots:
         # On X11 (the headless display) the first layout waits for the server's map event, which
         # isn't pending yet: block for it, up to 3 s, so steps and measurements see a laid-out window.
         var up_by = perf_counter_ns() + 3_000_000_000
