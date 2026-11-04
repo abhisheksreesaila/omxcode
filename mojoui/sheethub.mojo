@@ -85,20 +85,17 @@ struct SheetHub(Hub):
                 var x = Float64(sums.counts[i]) if how == "count" else (Float64(sums.sums[i]) / scale if how == "sum" else Float64(sums.sums[i]) / scale / Float64(max(sums.present[i], 1)))
                 labels.append(sh.text_of(g, Int64(i)))
                 values.append(x)
-            var order = List[Int]()  # (largest first: a handful of groups, a plain sort)
-            for i in range(len(values)):
-                order.append(i)
-            for a in range(len(order)):
-                for b in range(a + 1, len(order)):
-                    if values[order[b]] > values[order[a]]:
-                        var t = order[a]
-                        order[a] = order[b]
-                        order[b] = t
-            var ls = List[String]()
+            var ls = List[String]()  # (the largest `top` first: a selection, top × groups, never groups²)
             var vs = List[Float64]()
-            for i in range(min(top, len(order))):
-                ls.append(labels[order[i]])
-                vs.append(values[order[i]])
+            var taken = List[Bool](length=len(values), fill=False)
+            for _ in range(min(top, len(values))):
+                var best = -1
+                for i in range(len(values)):
+                    if not taken[i] and (best < 0 or values[i] > values[best]):
+                        best = i
+                taken[best] = True
+                ls.append(labels[best])
+                vs.append(values[best])
             var tenths = Int(sums.milliseconds * 10.0 + 0.5)
             var note = grouped(sh.rows()) + " rows · " + String(tenths // 10) + "." + String(tenths % 10) + " ms on the " + ("GPU" if sums.on_gpu else "CPU")
             return Grouped(ls^, vs^, note, "")

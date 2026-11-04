@@ -5,7 +5,7 @@ from std.sys import argv
 from std.testing import assert_equal, assert_true
 from mojoui.json import Json, json_string
 from mojoui.jsonpatch import JDoc
-from mojoui.genui import GenUi, schema, catalog, sample, ACT_STATE, ACT_ACTION, ACT_LOCAL
+from mojoui.genui import GenUi, schema, catalog, sample, ACT_STATE, ACT_ACTION, ACT_LOCAL, P_CHILDREN, P_TEXT, P_ENUM, P_WORD, P_POINTER
 from mojoui.app import Event
 from mojoui.agui import Agent, Tool
 from mojoui.agentui import Screens, MAX_RETRIES
@@ -28,6 +28,14 @@ def main() raises:
         var refused = GenUi(bad, 10_000, 100)
         assert_true(refused.problem.find("bad prop") >= 0 and refused.problem.find("nope") >= 0, s.name + ": " + refused.problem)
         print("refuse: " + s.name)
+        for ref p in s.props:  # (and a prop of the wrong type: the type check itself, not only unknown names)
+            if p.kind == P_CHILDREN:
+                continue
+            var wrong = "12345" if (p.kind == P_TEXT or p.kind == P_ENUM or p.kind == P_WORD or p.kind == P_POINTER) else '"x"'
+            var typed = GenUi('{"ui":{"component":"' + s.name + '","' + p.name + '":' + wrong + "}}", 10_000, 100)
+            assert_true(typed.problem.find("bad prop") >= 0 and typed.problem.find(p.name) >= 0, s.name + "." + p.name + ": " + typed.problem)
+            print("type: " + s.name + "." + p.name)
+            break
     print("catalog: ok " + String(len(specs)))
     if len(argv()) < 2:
         return

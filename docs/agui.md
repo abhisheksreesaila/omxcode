@@ -105,39 +105,42 @@ An agent builds UI by calling the frontend tool `render_ui` with `{"ui": node}`;
 
 ## Benchmark (goal 48 M5: the same stream into omxcode and CopilotKit)
 
-`pixi run python scripts/agui_bench.py` replays one recorded AG-UI stream (2302 events: 300 words, then a
-40-component dashboard as render_ui's arguments three bytes at a time, state deltas between) into omxcode on GTK, omxcode
-on the web host, and a CopilotKit 1.84.1 app (bench/copilotkit: CopilotChat, its Node runtime with an AG-UI HttpAgent,
-`useFrontendTool("render_ui")` drawing the partial arguments with plain React components) in the same Chromium
-(1100×900, headless, ablearn · x86_64 · Linux 7.2.5-3-omarchy). Median of 3 runs, 2026-11-04 01:59; raw numbers in docs/goals/48/bench.json.
+Written by `pixi run python scripts/agui_bench.py` from docs/goals/48/bench.json (2026-11-04 03:36, median of 3 runs,
+ablearn · x86_64 · Linux 7.2.5-3-omarchy). One recorded AG-UI stream (2302 events: 300 words, then a 40-component dashboard as render_ui's
+arguments three bytes at a time, state deltas between) replayed into omxcode on GTK, omxcode on the web host, and a
+CopilotKit 1.84.1 app (bench/copilotkit: CopilotChat, its Node runtime with an AG-UI HttpAgent, `useFrontendTool("render_ui")`
+drawing the partial arguments with plain React components). Both web runners in the same headless Chromium at
+1100×900; GTK in its own window, the same size.
 
-| Runner | First UI (burst) | Every event drawn (burst) | Dropped frames, burst | Dropped frames, paced (~250 events/s) | Peak memory |
+| Runner | First UI (burst) | Final screen (burst) | Dropped frames, burst | Dropped frames, paced (~250 events/s) | Peak memory |
 |---|---|---|---|---|---|
-| omxcode, native GTK | 14 ms | 63 ms | 1 (worst 44 ms) | 0 (worst 2 ms) | 109 MB |
-| omxcode, web host | 123 ms | 128 ms | 0 (worst 17 ms) | 45 (worst 50 ms) | 4 MB |
-| CopilotKit (React) | 149 ms | 516 ms | 2 (worst 217 ms) | 0 (worst 17 ms) | 36 MB |
+| omxcode, native GTK | 31 ms | 126 ms | 2 (worst 75 ms) | 0 (worst 11 ms) | 110 MB (process) |
+| omxcode, web host | 227 ms | 227 ms | 0 (worst 17 ms) | 73 (worst 67 ms) | 4 MB (JS heap) |
+| CopilotKit (React) | 166 ms | 562 ms | 3 (worst 200 ms) | 0 (worst 17 ms) | 35 MB (JS heap) |
 
-How it's measured: from the moment Send is pressed. First UI: the screen's first component ("Orders, live") on screen;
-every event drawn: its last component ("end of dashboard") on screen. Dropped frames: on the web, requestAnimationFrame
-gaps over 25 ms until the end; on GTK, main-loop turns over 16.7 ms. Memory is not the same quantity on both: the web rows
-are the tab's JS heap (omxcode's web host does its work in its server process, not counted); the GTK row is the whole
-native process (GTK, fonts, the Mojo runtime), started without the demo's million-row dataset. Paced, every runner
-finishes when the stream does (~8.7 s), so the paced column is about smoothness, not speed.
+How it's measured, from the moment Send is pressed (the web runners: a click, CopilotKit: Enter, as its chat takes it):
+first UI, the screen's first component ("Orders, live") is in the page's text (web, checked each animation frame) or the
+widget tree (GTK, checked after each main-loop turn): not a paint timestamp. Final screen: its last component ("end of
+dashboard") is there: the final state, not every intermediate one (omxcode rebuilds a streaming screen when a component
+finishes or 64 bytes arrive; CopilotKit renders as React batches). Dropped frames: web, requestAnimationFrame gaps over
+25 ms; GTK, main-loop turns over 16.7 ms. Memory is not the same quantity: web rows are the tab's JS heap (omxcode's web
+host works in its server process, not counted); the GTK row is the whole native process (GTK, fonts, the Mojo runtime),
+started without the demo's million-row dataset. Paced, every runner ends when the stream does, so that column is about
+smoothness, not speed.
 
-What it says, losses included:
-- **Native GTK is the fastest by far**: the first agent UI 11× sooner than CopilotKit and all 2,200 events drawn 8× sooner
-  (63 ms vs 516 ms), with no dropped frame while a fast model streams (worst main-loop turn 1.9 ms).
-- **The web host finishes a burst 4× sooner than CopilotKit** with a tenth of the JS heap.
-- **Loss: the web host drops frames under a steady stream** (45 gaps over 25 ms in ~8.7 s, worst 50 ms) where CopilotKit drops none:
-  each change the server sends is swapped into the page's DOM, and a long chat makes those swaps big. Next: send only the
-  changed views (the GTK host already patches), or draw the conversation on a canvas.
-- **CopilotKit's worst frame in a burst is 217 ms** (React reconciling the whole tool render at once); it
-  batches a burst into a few partial renders.
-- **Not measured here**: other machines, a phone, a real model's pacing (the paced run stands in for one), CopilotKit's
-  A2UI renderer (its v2 API; this uses its documented v1 frontend-tool render), cold start.
-- **What only omxcode does in this comparison**: the same app on native GTK and the web from one Mojo file; an agent in
-  the app's own process (2,004 events in 26 ms through the same handler, tests/test_local_agent.mojo); a chart over a
-  million rows the agent never sends (0.3 ms on the GPU).
+What it says:
+- **Native GTK**: first UI 5.3× sooner and the final screen 4.5× sooner
+  than CopilotKit (126 ms vs 562 ms); paced, 0 stalls (worst main-loop turn 10.8 ms).
+- **The web host** reaches the final screen 2.5× sooner than CopilotKit (227 ms vs 562 ms) with
+  8.8× less JS heap.
+- **Loss: CopilotKit shows the first UI sooner than the web host** (166 ms vs 227 ms): the web host's server takes the stream, then the page asks for the change.
+- **Loss: the web host drops frames under a steady stream** (73 gaps over 25 ms in ~8.8 s, worst 67 ms) where CopilotKit drops 0: each change the server sends is swapped into the page's DOM, and a long chat makes those swaps big. Next: send only the changed views (the GTK host already patches).
+- **CopilotKit's worst frame in a burst**: 200 ms (React reconciling the tool's render at once).
+- **Not measured**: other machines, a phone, a real model's pacing (the paced run stands in), CopilotKit's A2UI renderer
+  (its v2 API; this uses its documented v1 frontend-tool render), cold start.
+- **Only omxcode, in this comparison**: one Mojo file native on GTK and on the web; an agent in the app's own process
+  (tests/test_local_agent.mojo: 2,000+ events in ~26 ms through the same handler); a chart over a million rows the agent
+  never sends (0.3 ms on the GPU).
 
 ## Gallery (goal 48: scripted agents, our components, drawn natively)
 

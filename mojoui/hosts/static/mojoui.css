@@ -177,4 +177,5 @@ button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
    curve as mojoui.spring and GTK's AdwSpringAnimation), once, when it's inserted */
 @keyframes mojoui-arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .mojoui-arrive { animation: mojoui-arrive 420ms linear(0, 0.18 6%, 0.45 14%, 0.7 24%, 0.86 35%, 0.94 47%, 0.98 61%, 0.995 78%, 1) both; }
+.mojoui-arrive.mojoui-arrived { animation: none; }
 @media (prefers-reduced-motion: reduce) { .mojoui-arrive { animation: none; } }

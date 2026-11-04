@@ -123,6 +123,22 @@ struct Screens[H: Hub = NoData](Movable):
                 changed = True
         return changed
 
+    def unfinished(mut self, agent: Agent):
+        """The run ended (finished, stopped or failed): a preview whose call never finished says so instead of loading
+        forever, and answers nothing."""
+        for k in range(len(self.uis)):
+            if not self.live[k]:
+                continue
+            var done = False
+            for ref m in agent.messages:
+                for ref c in m.calls:
+                    if c.id == self.calls[k] and c.done:
+                        done = True
+            if not done:
+                self.uis[k] = GenUi[Self.H]('{"ui":{"component":"Script"}}', self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub)
+                self.uis[k].problem = "the agent stopped before this screen was finished"
+                self.live[k] = False
+
     def take(mut self, mut agent: Agent, tool: String = "render_ui") -> Bool:
         """Every finished `tool` call not yet seen: shown, or refused with a message to the agent. True when one was
         refused and the agent should run again to hear why (at most MAX_RETRIES times in a row: then gave_up)."""

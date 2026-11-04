@@ -266,6 +266,21 @@ MENU_JS = r"""
 """
 
 EFFECTS_JS = r"""
+// .arrive() (goal 48): a view arrives once. Swaps replace elements, which would replay the animation on every update;
+// a view already seen (by its node id) is marked arrived before the next paint (mutation callbacks run first).
+(() => {
+  const seen = new Set();
+  // (a swap may replace the element, or morph its class back to the server's, which drops the mark: both are caught)
+  const mark = el => { if (!el.id) return;
+    if (seen.has(el.id)) { if (!el.classList.contains('mojoui-arrived')) el.classList.add('mojoui-arrived'); } else seen.add(el.id); };
+  new MutationObserver(list => { for (const m of list) {
+    if (m.type === 'attributes') { if (m.target.classList && m.target.classList.contains('mojoui-arrive')) mark(m.target); continue; }
+    for (const n of m.addedNodes) {
+      if (n.nodeType !== 1) continue;
+      if (n.classList.contains('mojoui-arrive')) mark(n);
+      n.querySelectorAll && n.querySelectorAll('.mojoui-arrive').forEach(mark); } } })
+    .observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+})();
 // Effects (goal 33): while the app has HTTP requests out or timers running (#mojoui-busy), the page waits on /wait for
 // the server's clock thread to hand their answers to update(), then fetches what changed (/pending), as frames do.
 (() => {

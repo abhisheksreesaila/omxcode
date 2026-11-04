@@ -7,7 +7,7 @@
 #   complete('{"ui":{"component":"Card","title":"Sal')          → '{"ui":{"component":"Card","title":"Sal"}}'
 #   complete('{"a":[1,2', "children", '{"x":1}')                 → '{"a":[1,2]}'   (only "children" arrays get one)
 #
-# Linear in the text; never raises; "" when nothing whole has arrived yet (no '{' or '[').
+# Linear in the text; never raises; "" when nothing whole has arrived yet (no '{' or '['), or it nests past MAX_LEVELS.
 
 
 @fieldwise_init
@@ -15,6 +15,10 @@ struct Level(Copyable, Movable):
     var array: Bool
     var key: String  # an array: the key it's the value of; an object: the key being read or last read
     var items: Int  # values finished in it
+
+
+comptime MAX_LEVELS = 64  # deeper than any UI it is used for (genui: 8 levels): past it, nothing is shown (and the
+                          # copies of the open levels kept at each whole value stay small: linear whatever comes)
 
 
 def _closers(levels: List[Level], placeholder_key: String, placeholder: String) -> String:
@@ -71,6 +75,8 @@ def complete(text: String, placeholder_key: String = "", placeholder: String = "
             string_is_key = expect_key
             expect_key = False
         elif c == 123 or c == 91:  # { [
+            if len(levels) >= MAX_LEVELS:
+                return ""
             var akey = levels[len(levels) - 1].key if len(levels) > 0 and not levels[len(levels) - 1].array else String("")
             levels.append(Level(c == 91, akey if c == 91 else String(""), 0))
             expect_key = c == 123

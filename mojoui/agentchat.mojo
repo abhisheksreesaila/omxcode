@@ -50,8 +50,8 @@ comptime C_OPEN = 7  # the popup's button / the sidebar's close
 comptime C_URL = 8
 comptime C_SUGGEST = 20  # + k (k < 20)
 comptime C_INTERRUPT = 40  # + option (< 8): an interrupt's choice
-comptime C_COPY = 1000  # + message index (< 1000): copy that reply
-comptime C_CODE = 3000  # + message index × 8 + block (< 8): copy that code block
+comptime C_COPY = 1000  # + message index (< 1000): copy that reply (later ones have no Copy)
+comptime C_CODE = 3000  # + message index × 8 + block (< 8): copy that code block (messages < 500: later ones have no code Copy)
 comptime C_DECIDE = 7000  # + call × 2 (+ 1: reject), call < 1500: a confirm tool's card
 comptime C_SCREENS = 10_000
 comptime MAX_UIS = 40
@@ -98,6 +98,17 @@ def segments(text: String) -> List[Segment]:
     elif String(words.strip()).byte_length() > 0:
         out.append(Segment(False, "", words))
     return out^
+
+
+def cut(text: String, most: Int) -> String:
+    """`text`, at most `most` bytes, cut at a character's start (an agent's words in any language), "…" when cut."""
+    if text.byte_length() <= most:
+        return text
+    var b = text.as_bytes()
+    var end = most
+    while end > 0 and b[end] >= 128 and b[end] < 192:  # (a continuation byte: inside a character)
+        end -= 1
+    return String(text[byte = : end]) + "…"
 
 
 def status_of(call: ToolCall, answered: Bool) -> String:
@@ -292,8 +303,8 @@ struct AgentChat[H: Hub = NoData](Movable):
         except:
             pass
         if self.question.byte_length() > 500:
-            var cut = String(self.question[byte = : 500])
-            self.question = cut^
+            var short = cut(self.question, 500)
+            self.question = short^
         if len(self.options) == 0:
             self.options.append("Approve")
             self.options.append("Reject")
@@ -361,7 +372,7 @@ struct AgentChat[H: Hub = NoData](Movable):
                 self.copy_text = self.agent.messages[at].content
                 self.copies += 1
                 self.copied = at
-        elif k >= C_CODE and k < C_SCREENS:
+        elif k >= C_CODE and k < C_CODE + 4000:
             var at = (k - C_CODE) // 8
             var block = (k - C_CODE) % 8
             if at < len(self.agent.messages):
@@ -397,9 +408,11 @@ struct AgentChat[H: Hub = NoData](Movable):
                             self.agent_suggestions.append(j.text(j.at(0, i)))
                 except:
                     pass
-            elif what == EV_STREAM_END and self.again and not self.stopped:
-                self.again = False
-                self.run()
+            elif what == EV_STREAM_END:
+                self.screens.unfinished(self.agent)  # (a screen still streaming when the run stopped: never finished)
+                if self.again and not self.stopped:
+                    self.again = False
+                    self.run()
         elif self.screens.owns(e.message):
             self.version += 1
             if self.screens.handle(e, self.agent):
@@ -424,7 +437,7 @@ struct AgentChat[H: Hub = NoData](Movable):
                 var head = List[View]()
                 if s.language.byte_length() > 0:
                     head.append(Text(s.language, style=CAPTION))
-                head.append(CodeBlock(s.text, self.base + C_CODE + i * 8 + min(block, 7), 0, False))
+                head.append(CodeBlock(s.text, self.base + C_CODE + i * 8 + min(block, 7) if i < 500 else NO_MSG, 0, False))
                 parts.append(VStack(head^, spacing=SPACE_XS).align(START).fill())
                 block += 1
             else:
@@ -453,7 +466,8 @@ struct AgentChat[H: Hub = NoData](Movable):
         var done = not (last and self.agent.running)
         if done and m.content.byte_length() > 0:
             var acts = List[View]()
-            acts.append(Button("Copied" if self.copied == i else "Copy", self.base + C_COPY + i, style=SUBTLE, icon="copy"))
+            if i < 1000:
+                acts.append(Button("Copied" if self.copied == i else "Copy", self.base + C_COPY + i, style=SUBTLE, icon="copy"))
             if last:
                 acts.append(Button("Regenerate", self.base + C_REGENERATE, style=SUBTLE, icon="refresh-cw"))
             parts.append(HStack(acts^, spacing=SPACE_XS).align(CENTER))
@@ -473,12 +487,12 @@ struct AgentChat[H: Hub = NoData](Movable):
                           Chip(st, 2 if st == "complete" else (1 if st == "executing" else 0)), spacing=SPACE_XS).align(CENTER).fill()
         var rows = List[View]()
         rows.append(head^)
-        var args = c.arguments if c.arguments.byte_length() <= 140 else String(c.arguments[byte = : 137]) + "…"
+        var args = cut(c.arguments, 137)
         if args.byte_length() > 0 and args != "{}":
             rows.append(Text(args, style=CAPTION).tag("chat-tool-args"))
         var result = self.result_of(c.id)
         if result.byte_length() > 0:
-            rows.append(Text("→ " + (result if result.byte_length() <= 140 else String(result[byte = : 137]) + "…"), style=CAPTION))
+            rows.append(Text("→ " + cut(result, 137), style=CAPTION))
         return Card(rows^, spacing=SPACE_XS).fill().tag("chat-tool")
 
     def tools_card(self, calls: List[ToolCall]) -> View:
@@ -506,7 +520,7 @@ struct AgentChat[H: Hub = NoData](Movable):
                            spacing=SPACE_XS).align(CENTER).fill())
         for ref c in calls:
             var st = status_of(c, self.agent.answered(c.id))
-            var args = c.arguments if c.arguments.byte_length() <= 90 else String(c.arguments[byte = : 87]) + "…"
+            var args = cut(c.arguments, 87)
             rows.append(HStack(Text(c.name, style=CAPTION).tone(TONE_STRONG), Text(args, style=CAPTION).tag("chat-tool-args"), Spacer(),
                                Text(st, style=CAPTION).tone(TONE_GOOD if st == "complete" else TONE_NONE), spacing=SPACE_S).align(CENTER).fill())
         return Card(rows^, spacing=SPACE_XS).fill().tag("chat-tool")

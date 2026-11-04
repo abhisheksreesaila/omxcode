@@ -446,6 +446,8 @@ def m5():
     doc = (ROOT / "docs/agui.md").read_text()
     if "## Benchmark" not in doc:
         problems.append("docs/agui.md has no '## Benchmark' section")
+    elif (OUT / "bench.json").exists() and json.loads((OUT / "bench.json").read_text()).get("when", "?") not in doc:
+        problems.append("docs/agui.md's Benchmark section isn't the numbers in bench.json (scripts/agui_bench.py writes both)")
     if problems:
         return False, "; ".join(problems[:10])
     return True, "; ".join(notes)

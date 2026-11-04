@@ -7,7 +7,8 @@ from mojoui.view import View, TEXT, BUTTON, FIELD
 from mojoui.partialjson import complete
 from mojoui.genui import GenUi, partial_ui, sample, catalog
 from mojoui.jsonpatch import JDoc
-from mojoui.agentchat import AgentChat, status_of, C_PIECE, C_ENDED
+from mojoui.agentchat import AgentChat, status_of, cut, C_PIECE, C_ENDED, C_STOP
+from std.time import perf_counter_ns
 
 comptime B = 20_000
 
@@ -43,6 +44,19 @@ def main() raises:
     assert_equal(complete('{"a":"\\u00'), '{"a":""}', "half a \\u escape goes")
     assert_equal(complete('{"children":[{"x":1},', "children", "S"), '{"children":[{"x":1},S]}')
     assert_equal(complete("tr"), "")
+    # hostile prefixes: deep nesting, stray closers; bounded time, never a crash (review item 2)
+    var deep = String("[") * 16_000
+    var t0 = perf_counter_ns()
+    assert_equal(complete(deep), "", "nesting past MAX_LEVELS shows nothing")
+    _ = partial_ui('{"ui":' + String('{"component":"VStack","children":[') * 5000)
+    _ = partial_ui("}}]]" + String("]") * 1000 + '{"ui":')
+    _ = partial_ui('{"ui":{"component":"Text","text":"' + String("é") * 4000)
+    assert_true(perf_counter_ns() - t0 < 200_000_000, "hostile prefixes are handled in linear time")
+    # an agent's words cut for a card: always at a character's start (review item 1)
+    var accents = String("a") * 136 + "é" + "日本語のテキスト" * 10
+    for most in range(130, 150):
+        var c = cut(accents, most)
+        assert_true(c.byte_length() <= most + 3, "cut stays short")
     var shown = 0
     var b = DASHBOARD.as_bytes()
     var last_skeletons = 0
@@ -133,4 +147,16 @@ def main() raises:
     assert_equal(field, "Porto")
     assert_true(chat.version >= 2, "a state change moves the version on (canvases redraw)")
     print("state: ok")
+    # a run stopped while a screen streams: the preview says so instead of loading forever (review item 4)
+    var stopped = AgentChat("http://unused/", base=B, canvas_base=2000)
+    stopped.send("Build me a dashboard")
+    ev(stopped, '{"type":"RUN_STARTED","threadId":"t","runId":"r"}')
+    ev(stopped, '{"type":"TOOL_CALL_START","toolCallId":"u9","toolCallName":"render_ui","parentMessageId":"a9"}')
+    ev(stopped, '{"type":"TOOL_CALL_ARGS","toolCallId":"u9","delta":' + json_string(String(DASHBOARD[byte = : 120])) + "}")
+    assert_true(stopped.screens.streaming(0))
+    _ = stopped.update(Event(B + C_STOP, "", 0))
+    _ = stopped.update(Event(B + C_ENDED, "", 200, error="cancelled"))
+    var sv = stopped.view()
+    assert_true(not stopped.screens.streaming(0) and not has(sv, "Building UI") and has(sv, "stopped before this screen was finished"))
+    print("unfinished: ok")
     print("test_agui_stream: done")

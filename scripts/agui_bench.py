@@ -84,8 +84,11 @@ def web_run(scenario):
 
     def measure(page):
         page.evaluate(INSTRUMENT)
+        send = page.locator("[data-kind=button]").filter(has_text="Send").first
+        send.scroll_into_view_if_needed()
+        send.hover()  # (Playwright's actionability waits happen before t0, as CopilotKit's Enter has none)
         page.evaluate("window.__bench.t0 = performance.now()")
-        page.locator("[data-kind=button]").filter(has_text="Send").first.click()
+        send.click(no_wait_after=True)
         return "BENCH: " + page.evaluate(RESULT) + "\n"
 
     with agui_agent.Server(scenario=scenario) as srv:
@@ -146,7 +149,86 @@ def median(rows):
     return out
 
 
+def ratio(a, b):
+    return f"{a / b:.1f}×" if b else "—"
+
+
+def write_doc(b):
+    """docs/agui.md's Benchmark section, from bench.json's numbers (never typed by hand: they can't drift apart)."""
+    R = b["runners"]
+    if not all(k in R for k in ("omxcode-gtk", "omxcode-web", "copilotkit")):
+        return
+    g, w, c = R["omxcode-gtk"], R["omxcode-web"], R["copilotkit"]
+
+    def row(r, label, unit):
+        p = r["paced"]
+        return (f"| {label} | {r['first_ui_ms']:.0f} ms | {r['last_event_ms']:.0f} ms | {r['frames_over_16ms']:.0f} (worst {r['worst_ms']:.0f} ms) "
+                f"| {p['frames_over_16ms']:.0f} (worst {p['worst_ms']:.0f} ms) | {r['peak_mb']:.0f} MB {unit} |")
+    losses = []
+    if w["first_ui_ms"] > c["first_ui_ms"]:
+        losses.append(f"- **Loss: CopilotKit shows the first UI sooner than the web host** ({c['first_ui_ms']:.0f} ms vs "
+                      f"{w['first_ui_ms']:.0f} ms): the web host's server takes the stream, then the page asks for the change.")
+    if w["paced"]["frames_over_16ms"] > c["paced"]["frames_over_16ms"]:
+        losses.append(f"- **Loss: the web host drops frames under a steady stream** ({w['paced']['frames_over_16ms']:.0f} gaps over 25 ms in "
+                      f"~{w['paced']['last_event_ms'] / 1000:.1f} s, worst {w['paced']['worst_ms']:.0f} ms) where CopilotKit drops "
+                      f"{c['paced']['frames_over_16ms']:.0f}: each change the server sends is swapped into the page's DOM, and a long chat "
+                      "makes those swaps big. Next: send only the changed views (the GTK host already patches).")
+    if g["first_ui_ms"] > c["first_ui_ms"] or g["last_event_ms"] > c["last_event_ms"]:
+        losses.append("- **Loss: native GTK was slower than CopilotKit on " + ("first UI" if g["first_ui_ms"] > c["first_ui_ms"] else "every event drawn") + "**.")
+    sec = f"""## Benchmark (goal 48 M5: the same stream into omxcode and CopilotKit)
+
+Written by `pixi run python scripts/agui_bench.py` from docs/goals/48/bench.json ({b['when']}, median of {b['runs']} runs,
+{b['machine']}). One recorded AG-UI stream ({b['events']} events: 300 words, then a 40-component dashboard as render_ui's
+arguments three bytes at a time, state deltas between) replayed into omxcode on GTK, omxcode on the web host, and a
+CopilotKit 1.84.1 app (bench/copilotkit: CopilotChat, its Node runtime with an AG-UI HttpAgent, `useFrontendTool("render_ui")`
+drawing the partial arguments with plain React components). Both web runners in the same headless Chromium at
+{b['viewport'][0]}×{b['viewport'][1]}; GTK in its own window, the same size.
+
+| Runner | First UI (burst) | Final screen (burst) | Dropped frames, burst | Dropped frames, paced (~250 events/s) | Peak memory |
+|---|---|---|---|---|---|
+{row(g, 'omxcode, native GTK', '(process)')}
+{row(w, 'omxcode, web host', '(JS heap)')}
+{row(c, 'CopilotKit (React)', '(JS heap)')}
+
+How it's measured, from the moment Send is pressed (the web runners: a click, CopilotKit: Enter, as its chat takes it):
+first UI, the screen's first component ("Orders, live") is in the page's text (web, checked each animation frame) or the
+widget tree (GTK, checked after each main-loop turn): not a paint timestamp. Final screen: its last component ("end of
+dashboard") is there: the final state, not every intermediate one (omxcode rebuilds a streaming screen when a component
+finishes or 64 bytes arrive; CopilotKit renders as React batches). Dropped frames: web, requestAnimationFrame gaps over
+25 ms; GTK, main-loop turns over 16.7 ms. Memory is not the same quantity: web rows are the tab's JS heap (omxcode's web
+host works in its server process, not counted); the GTK row is the whole native process (GTK, fonts, the Mojo runtime),
+started without the demo's million-row dataset. Paced, every runner ends when the stream does, so that column is about
+smoothness, not speed.
+
+What it says:
+- **Native GTK**: first UI {ratio(c['first_ui_ms'], g['first_ui_ms'])} sooner and the final screen {ratio(c['last_event_ms'], g['last_event_ms'])} sooner
+  than CopilotKit ({g['last_event_ms']:.0f} ms vs {c['last_event_ms']:.0f} ms); paced, {g['paced']['frames_over_16ms']:.0f} stalls (worst main-loop turn {g['paced']['worst_ms']:.1f} ms).
+- **The web host** reaches the final screen {ratio(c['last_event_ms'], w['last_event_ms'])} sooner than CopilotKit ({w['last_event_ms']:.0f} ms vs {c['last_event_ms']:.0f} ms) with
+  {ratio(c['peak_mb'], w['peak_mb'])} less JS heap.
+{chr(10).join(losses)}
+- **CopilotKit's worst frame in a burst**: {c['worst_ms']:.0f} ms (React reconciling the tool's render at once).
+- **Not measured**: other machines, a phone, a real model's pacing (the paced run stands in), CopilotKit's A2UI renderer
+  (its v2 API; this uses its documented v1 frontend-tool render), cold start.
+- **Only omxcode, in this comparison**: one Mojo file native on GTK and on the web; an agent in the app's own process
+  (tests/test_local_agent.mojo: 2,000+ events in ~26 ms through the same handler); a chart over a million rows the agent
+  never sends (0.3 ms on the GPU).
+
+"""
+    doc = ROOT / "docs" / "agui.md"
+    s = doc.read_text()
+    if "## Benchmark" in s:
+        i = s.index("## Benchmark")
+        j = s.index("\n## ", i + 5)
+        s = s[:i] + sec + s[j + 1:]
+    else:
+        s = s.replace("## Gallery", sec + "## Gallery", 1)
+    doc.write_text(s)
+
+
 def main():
+    if "--doc" in sys.argv:  # (only rewrite the section from the kept numbers)
+        write_doc(json.loads((OUT / "bench.json").read_text()))
+        return
     import headless
     headless.ensure()
     runs = int(sys.argv[sys.argv.index("--runs") + 1]) if "--runs" in sys.argv else 3
@@ -181,7 +263,8 @@ def main():
         print(name, "burst:", {k: v for k, v in row["bench"].items() if k != "samples"}, "paced:", {k: v for k, v in row["bench_paced"].items() if k != "samples"}, flush=True)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "bench.json").write_text(json.dumps(result, indent=1) + "\n")
-    print("wrote docs/goals/48/bench.json")
+    write_doc(result)
+    print("wrote docs/goals/48/bench.json and docs/agui.md's Benchmark section")
 
 
 if __name__ == "__main__":
