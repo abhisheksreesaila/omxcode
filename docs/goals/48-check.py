@@ -350,7 +350,7 @@ def m4():
             shot = OUT / f"ex-{scenario}-{host}.png"
             steps = f"type:Message={prompt};tap:Send;pause:2500"
             if scenario == "booking":
-                steps += ";type:Name=Ada;slide:Party size=4;pick:Time=19:30;radio:Seating=Terrace;tap:Book;pause:1500"
+                steps += ";type:Name=Ada;slide:0=33;select:0=19:30;radio:0=Terrace;tap:Book;pause:1500"  # (party 1–10: 33% is 4)
             try:
                 out, inputs = chat(host, scenario, steps, shot=str(shot))
             except RuntimeError as e:
