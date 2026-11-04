@@ -56,7 +56,7 @@ section .head { max-width: 860px; }
   <div class="wrap" style="display:block">
     <div class="eyebrow rise"><span>Get started</span></div>
     <h1 class="rise" data-words data-step="70" data-d0="120" style="font-size:clamp(48px,7vw,100px)">Your first Mojo app.</h1>
-    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">omxcode is an app framework written in Mojo. You write one file; it becomes a native app on Linux, a web app, and a Mac app.</span> <span class="two" data-words data-step="26" data-d0="1100">Install, write 30 lines, build, run. About ten minutes.</span></p>
+    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">omxcode is an app framework written in Mojo. You write one file; it becomes a native app on Linux and a web app, with Mac apps on the way.</span> <span class="two" data-words data-step="26" data-d0="1100">Install, write 30 lines, build, run. About ten minutes.</span></p>
     <div class="ctas rise"><span style="animation-delay:1500ms"><a class="cta" href="#install">Start</a></span><span style="animation-delay:1580ms"><a class="more" href="#what">What is it?</a></span></div>
   </div>
 </section>
@@ -71,7 +71,7 @@ section .head { max-width: 860px; }
     </div>
     <div class="facts3">
       <div class="rv"><div class="t">How it works</div><h3>You describe, the platform draws</h3><p>An app is a struct with three parts: its state, an <code>update</code> that changes it, and a <code>view</code> that describes the screen. omxcode turns that description into GTK widgets on Linux, HTML on the web and AppKit views on the Mac.</p></div>
-      <div class="rv"><div class="t">Where it runs</div><h3>Linux and the web today</h3><p>Linux and the web are run by checks on every change. Mac apps build and run on GitHub's macOS machines. Android runs on the emulator; iPhone builds. Windows waits for Mojo itself.</p></div>
+      <div class="rv"><div class="t">Where it runs</div><h3>Linux and the web today</h3><p>Linux and the web are run by checks on every change. The Mac builds, and this page's app has run on GitHub's macOS machine, with its layout there still to fix. Android runs on the emulator; iPhone builds. Windows waits for Mojo itself.</p></div>
       <div class="rv"><div class="t">What you get free</div><h3>A look, a GPU, an agent</h3><p>The Liquid look is one method. The same language computes on an NVIDIA GPU when there is one. And every app can be used by an AI agent without a line of extra code.</p></div>
     </div>
   </div>
@@ -88,11 +88,11 @@ section .head { max-width: 860px; }
       <div class="say rv">
         <p><b>You need:</b></p>
         <ul>
-          <li><b>Linux</b> on x86-64 with GTK 4 and libadwaita 1.7 or newer (Ubuntu 24.04, Fedora 40 or later should do; most testing is on Arch).</li>
+          <li><b>Linux</b> on x86-64 with GTK 4 and libadwaita 1.7 or newer, from your distribution (recent ones such as Fedora 42 or Ubuntu 25.04 ship it; most testing is on Arch).</li>
           <li><a href="https://pixi.sh">pixi</a>, which installs Mojo and everything else into the project folder. Nothing goes system-wide.</li>
           <li>Optional: an NVIDIA GPU. Without one, the same code runs on the CPU.</li>
         </ul>
-        <p>On a Mac (Apple Silicon), the same commands install and build; so far that's been run on GitHub's macOS machines, not yet on someone's own Mac.</p>
+        <p>On a Mac (Apple Silicon), pixi installs the same tools; so far that has been run on GitHub's macOS machines, not yet on someone's own Mac.</p>
       </div>
       <div class="pane rv"><div class="file">a terminal<button type="button" data-copy="#c-install">copy</button></div>
 <pre class="code" id="c-install">curl -fsSL https://pixi.sh/install.sh | sh     <span class="c"># if you don't have pixi</span>
@@ -165,7 +165,7 @@ pixi install                                   <span class="c"># Mojo 1.1 and th
       <div class="say rv">
         <p><b>Linux:</b> <code>scripts/build.sh start linux</code> compiles the file into a GTK app at <code>build/start/linux/start</code>. Run it and tap the button.</p>
         <p><b>The web:</b> <code>scripts/build.sh start web</code> builds the same file for the web host. Open <code>http://127.0.0.1:5001</code>. The app's logic stays in the server, in Mojo; the page gets HTML.</p>
-        <p><b>Mac:</b> <code>scripts/build.sh start mac</code> makes an AppKit app for Apple Silicon.</p>
+        <p><b>Mac:</b> <code>scripts/build.sh start mac</code> makes an AppKit app for Apple Silicon (it cross-builds from Linux too). This app ran on GitHub's macOS 15 machine and its taps work, but the layout isn't right yet: the content doesn't fill the window. That's next.</p>
         <p class="note2">The first build takes about a minute; later ones are quicker. For now the compiler also prints deprecation warnings from the framework's own code; they're harmless, and cleaning them up is on the list.</p>
       </div>
       <div>
@@ -222,7 +222,8 @@ pixi run python mojoui/hosts/web.py build/start/web
       </div>
       <div class="pane rv"><div class="file">a terminal · what the agent sees</div>
 <pre class="code">scripts/agent.sh start
-<span class="c"># claude mcp add start -- pixi run python …/mojoui/hosts/agent.py …/build/start/web</span>
+<span class="c"># prints: claude mcp add start -- pixi run python \</span>
+<span class="c">#   …/mojoui/hosts/agent.py …/build/start/web</span>
 
 <span class="k">screen</span>
 <span class="o">Hello · design: Liquid · 1 tools on this screen
@@ -233,7 +234,7 @@ Button "Tap me" → tap-me</span>
 <span class="k">tap-me</span>
 <span class="o">Did tap-me.
 Now: Tapped 1 times</span></pre>
-        <p class="note2">Real output from <code>scripts/agent_client.py build/start/web</code>, the small MCP client the checks use.</p></div>
+        <p class="note2">Real output from <code>pixi run python scripts/agent_client.py build/start/web</code>, the small MCP client the checks use.</p></div>
     </div>
   </div>
 </section>

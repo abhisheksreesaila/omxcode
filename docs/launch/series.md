@@ -45,7 +45,7 @@ Picture: `3-agent-screens.png` (the Lisbon trip). 215 characters.
 
 > Built with all of it: omxplorer, a data app written in Mojo.
 >
-> A spreadsheet, the video behind each row and the documents that explain it, on one page, on your own GPU.
+> A spreadsheet, the video behind each row and the documents that explain it, on one page, on your own machine.
 >
 > https://abhisheksreesaila.github.io/omxcode/omxplorer.html
 
@@ -56,5 +56,5 @@ Picture or clip: `docs/img/clip-robots-15s.mp4` (the robot-failure story, alread
 Notes for the owner:
 - Posts 1 to 3 make no speed claims (D-4749); post 4 keeps omxplorer's page as it is.
 - Every command and screen in posts 1 and 2 was run for this: `examples/start` built on GTK and the web, driven through
-  the agent host (`scripts/agent_client.py build/start/web tap-me`).
+  the agent host (`pixi run python scripts/agent_client.py build/start/web tap-me`).
 - Post 1's "Mac" is left out on purpose: Mac builds run on GitHub's machines, not yet on someone's own Mac.
