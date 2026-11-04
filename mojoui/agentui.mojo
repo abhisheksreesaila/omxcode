@@ -13,20 +13,22 @@
 # (gave_up); a screen shown, or reset() (the user's next message), starts the count again.
 
 from mojoui.agui import Agent
-from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES, partial_ui
+from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES, partial_ui, LOADING_UI
+from mojoui.datahub import Hub, NoData
 from mojoui.jsonpatch import JDoc
 from mojoui.json import json_string
 from mojoui.view import View, Text, Card, CAPTION, SPACE_XS, CARD_WARN
 from mojoui.canvas import Surface
 from mojoui.theme import Palette
 from mojoui.app import Event
+from mojoui.text import Font
 
 comptime MAX_SCREENS = 40
 comptime MAX_RETRIES = 3  # reruns after refused UI in a row; then take() stops asking and gave_up says so (D-725)
 
 
-struct Screens(Movable):
-    var uis: List[GenUi]
+struct Screens[H: Hub = NoData](Movable):
+    var uis: List[GenUi[Self.H]]
     var calls: List[String]  # screen k answers tool call calls[k]
     var messages: List[String]  # … and belongs to the message messages[k]
     var base: Int
@@ -36,9 +38,11 @@ struct Screens(Movable):
     var gave_up: Bool  # past MAX_RETRIES: no more reruns until reset()
     var live: List[Bool]  # screen k is a preview of a call still streaming (goal 48 M1): replaced when it ends
     var sizes: List[Int]  # the argument bytes screen k was last built from (a preview rebuilds when more arrive)
+    var font: Font  # one for every screen's canvases (a Font costs ~1 ms to make)
+    var hub: Self.H  # the app's datasets, for screens that name one (goal 48 M5: mojoui.datahub)
 
     def __init__(out self, base: Int, canvas_base: Int, max: Int = MAX_SCREENS):
-        self.uis = List[GenUi]()
+        self.uis = List[GenUi[Self.H]]()
         self.calls = List[String]()
         self.messages = List[String]()
         self.base = base
@@ -48,6 +52,8 @@ struct Screens(Movable):
         self.gave_up = False
         self.live = List[Bool]()
         self.sizes = List[Int]()
+        self.hub = Self.H()
+        self.font = Font()
 
     def reset(mut self):
         """The user spoke: refusals count from zero again."""
@@ -70,6 +76,27 @@ struct Screens(Movable):
     def streaming(self, k: Int) -> Bool:
         return self.live[k]
 
+    def worth_redrawing(self, args: String, built: Int) -> Bool:
+        """A preview is rebuilt when a component (or a value) finished since it was built, or 64 more bytes came: a
+        model's two-byte deltas don't each pay for a parse (the screen looks the same between them)."""
+        var n = args.byte_length()
+        if n == built:
+            return False
+        if n - built >= 64:
+            return True
+        var b = args.as_bytes()
+        for i in range(built, n):
+            if b[i] == 125 or b[i] == 93:  # } ]
+                return True
+        return False
+
+    def preview_of(self, args: String, k: Int) -> GenUi[Self.H]:
+        """What has arrived of a screen, drawable (a dataset name still being written: the loading card)."""
+        var ui = GenUi[Self.H](partial_ui(args), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub)
+        if ui.problem != "":
+            return GenUi[Self.H](LOADING_UI, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub)
+        return ui^
+
     def preview(mut self, agent: Agent, tool: String = "render_ui") -> Bool:
         """`tool` calls still streaming get a screen of what's arrived so far (mojoui.genui.partial_ui: closed, pruned,
         a Skeleton where more is coming), rebuilt as their arguments grow. True when one changed (redraw)."""
@@ -79,19 +106,19 @@ struct Screens(Movable):
                 if c.name != tool or c.done or c.too_big:
                     continue
                 var k = self.index_of(c.id)
-                if k >= 0 and (not self.live[k] or self.sizes[k] == c.arguments.byte_length()):
+                if k >= 0 and (not self.live[k] or not self.worth_redrawing(c.arguments, self.sizes[k])):
                     continue
                 if k < 0:
                     if len(self.uis) >= self.max:
                         continue
                     k = len(self.uis)
-                    self.uis.append(GenUi(partial_ui(c.arguments), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES))
+                    self.uis.append(self.preview_of(c.arguments, k))
                     self.calls.append(c.id)
                     self.messages.append(m.id)
                     self.live.append(True)
                     self.sizes.append(c.arguments.byte_length())
                 else:
-                    self.uis[k] = GenUi(partial_ui(c.arguments), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES)
+                    self.uis[k] = self.preview_of(c.arguments, k)
                     self.sizes[k] = c.arguments.byte_length()
                 changed = True
         return changed
@@ -113,12 +140,12 @@ struct Screens(Movable):
                 agent.answer(c.id, '{"error":' + json_string("refused: " + problem) + "}")
                 refused = True
                 if was >= 0:  # (its preview goes: a refusal card in its place)
-                    self.uis[was] = GenUi('{"ui":{"component":"Script"}}', self.base + was * MAX_CONTROLS, self.canvas_base + was * MAX_NODES)
+                    self.uis[was] = GenUi[Self.H]('{"ui":{"component":"Script"}}', self.base + was * MAX_CONTROLS, self.canvas_base + was * MAX_NODES)
                     self.uis[was].problem = problem
                     self.live[was] = False
                 continue
             var k = was if was >= 0 else len(self.uis)
-            var ui = GenUi(c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES)
+            var ui = GenUi[Self.H](c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub)
             if ui.problem != "":
                 agent.answer(c.id, '{"error":' + json_string("refused: " + ui.problem) + "}")
                 refused = True
@@ -150,7 +177,7 @@ struct Screens(Movable):
         var k = (e.message - self.base) // MAX_CONTROLS
         if k < 0 or k >= len(self.uis):
             return False
-        var act = self.uis[k].handle(e, agent.state)
+        var act = self.uis[k].handle(e, agent.state, self.font)
         if self.live[k]:  # (a screen still arriving: inputs edit the state, but nothing answers the call before it ends)
             return False
         if act.kind != ACT_ACTION:  # (an input, or the screen's own change: a tab, a copy, a scroll)
@@ -177,4 +204,4 @@ struct Screens(Movable):
     def draw(mut self, canvas: Int, mut surface: Surface, p: Palette, state: JDoc):
         for k in range(len(self.uis)):
             if self.uis[k].draws(canvas):
-                self.uis[k].draw(canvas, surface, p, state)
+                self.uis[k].draw(canvas, surface, p, state, self.font)

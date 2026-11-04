@@ -60,10 +60,25 @@ def run(cmd, env=None, timeout=1800):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, env=dict(os.environ, **(env or {})), timeout=timeout)
 
 
+def codec_link():
+    """What a program using the omxcore engine links (its Parquet codecs: scripts/mxlink.sh, as scripts/build.sh does)."""
+    lib = ROOT / ".pixi/envs/default/lib"
+    codecs = BUILD / "codecs"
+    codecs.mkdir(parents=True, exist_ok=True)
+    out = []
+    for l in ("libzstd.so.1", "libsnappy.so.1"):
+        dst = codecs / l
+        if not dst.exists():
+            dst.symlink_to((lib / l).resolve())
+        out += ["-Xlinker", str(dst)]
+    return out + ["-Xlinker", f"-rpath={codecs}"]
+
+
 def build_test(name):
     BUILD.mkdir(exist_ok=True)
     exe = BUILD / name
-    b = run(["pixi", "run", "mojo", "build", "-I", ".", "-I", "vendor", f"tests/{name}.mojo", "-o", str(exe)])
+    uses_engine = "omxcore" in (ROOT / f"tests/{name}.mojo").read_text() or "sheethub" in (ROOT / f"tests/{name}.mojo").read_text()
+    b = run(["pixi", "run", "mojo", "build", "-I", ".", "-I", "vendor", f"tests/{name}.mojo", "-o", str(exe)] + (codec_link() if uses_engine else []))
     if b.returncode != 0:
         return None, f"tests/{name}.mojo doesn't build: " + (b.stdout + b.stderr)[-700:]
     return exe, None

@@ -12,7 +12,7 @@
 #   if ui.problem != "": … tell the agent (a tool result) …
 #   ui.view(state, version)                  native Views (state: the shared state, a mojoui.jsonpatch.JDoc)
 #   var act = ui.handle(event, state)        an input edited the state, or a button/choice reported an action
-#   ui.draw(canvas, surface, palette, state) its canvases: charts, grids, maps, sparklines, KPI lines
+#   ui.draw(canvas, surface, palette, state, font) its canvases: charts, grids, maps, sparklines, KPI lines
 #
 # Limits beyond the schema (a schema can't count): at most 8 levels deep, 200 components, 32 KB of JSON.
 
@@ -42,6 +42,8 @@ from mojoui.chartview import ChartView
 from mojoui.mapview import MapView, MARK_PLACE, MARK_FINDING
 from mojoui.datagrid import DataGrid
 from mojoui.rowsource import Rows
+from mojoui.numformat import grouped
+from mojoui.datahub import Hub, NoData
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette, mix
@@ -130,6 +132,10 @@ def rows(name: String, most_rows: Int, most_cells: Int, about: String) -> Prop:
     return Prop(name, P_ROWS, True, most_rows, most_cells, List[String](), about, List[Field]())
 
 
+def optional_rows(name: String, most_rows: Int, most_cells: Int, about: String) -> Prop:
+    return Prop(name, P_ROWS, False, most_rows, most_cells, List[String](), about, List[Field]())
+
+
 def items(name: String, low: Int, high: Int, var fields: List[Field], required: Bool = False, about: String = "") -> Prop:
     return Prop(name, P_ITEMS, required, high, low, List[String](), about, fields^)
 
@@ -175,13 +181,18 @@ def catalog() -> List[Spec]:
     # data
     out.append(Spec("Table", "rows of cells under column titles", [
         texts("columns", 1, 10, True, "the column titles"), rows("rows", 100, 10, "each row: a list of strings or numbers")]))
-    out.append(Spec("DataGrid", "a scrolling grid for many rows (up to 1,000 sent inline)", [
-        texts("columns", 1, 20, True, "the column titles"), rows("rows", 1000, 20, "each row: a list of strings or numbers"),
-        number("height", 120, 800, False, "points")]))
-    out.append(Spec("ChartView", "a chart of values by label: bars or a line", [
-        choice("kind", ["bar", "line"]), text("title", 200), texts("labels", 1, 60, True, "one per value"),
-        numbers("values", 60, True, "the numbers, one per label"), text("value_name", 60, False, "what the numbers are"),
-        flag("money", "values are amounts of money (cents)"), number("height", 140, 600, False, "points")]))
+    out.append(Spec("DataGrid", "a scrolling grid for many rows: up to 1,000 sent inline (columns + rows), or any number from a dataset the app holds (dataset: its name; the rows never travel)", [
+        texts("columns", 1, 20, False, "the column titles"), optional_rows("rows", 1000, 20, "each row: a list of strings or numbers"),
+        Prop("dataset", P_WORD, False, 0, 0, List[String](), "a dataset the app holds, by name (see the run's context)", List[Field]()),
+        text("title", 200), number("height", 120, 800, False, "points")]))
+    out.append(Spec("ChartView", "a chart of values by label, bars or a line: the values sent (labels + values), or computed by the app from a dataset it holds (dataset, group_by, value, combine)", [
+        choice("kind", ["bar", "line"]), text("title", 200), texts("labels", 1, 60, False, "one per value"),
+        numbers("values", 60, False, "the numbers, one per label"), text("value_name", 60, False, "what the numbers are"),
+        flag("money", "values are amounts of money (cents)"),
+        Prop("dataset", P_WORD, False, 0, 0, List[String](), "a dataset the app holds, by name", List[Field]()),
+        text("group_by", 60, False, "a text column of the dataset: one bar per value"), text("value", 60, False, "a number column of the dataset"),
+        choice("combine", ["sum", "average", "count"]), number("top", 1, 50, False, "the largest this many groups"),
+        number("height", 140, 600, False, "points")]))
     out.append(Spec("Sparkline", "a small line chart of numbers", [
         numbers("values", 500, False, "the numbers (or bind them to the state)"), bind(False), text("label", 200)]))
     out.append(Spec("KpiView", "a headline number with its label, a note and a small trend line", [
@@ -640,6 +651,12 @@ def pruned(j: Json, n: Int, specs: List[Spec], depth: Int) -> String:
     if at < 0:
         return SKELETON_NODE
     ref spec = specs[at]
+    if spec.name == "DataGrid" and j.get(n, "dataset") < 0 and (j.get(n, "columns") < 0 or j.get(n, "rows") < 0):
+        return SKELETON_NODE  # (its rows haven't come yet)
+    if spec.name == "ChartView" and j.get(n, "dataset") < 0 and (j.get(n, "labels") < 0 or j.get(n, "values") < 0):
+        return SKELETON_NODE
+    if spec.name == "ChartView" and j.get(n, "dataset") >= 0 and j.get(n, "group_by") < 0:
+        return SKELETON_NODE
     var out = String('{"component":') + json_string(spec.name)
     for ref p in spec.props:
         var v = j.get(n, p.name)
@@ -739,7 +756,7 @@ def gap(word: String) -> Int:
     return SPACE_XS if word == "xs" else (SPACE_M if word == "m" else (SPACE_L if word == "l" else SPACE_S))
 
 
-struct GenUi(Movable):
+struct GenUi[H: Hub = NoData](Movable):
     """One agent-built screen: its validated JSON, what each of its controls and canvases is, and the little state
     that is the screen's own (the open tab, a grid's scroll, a copy count)."""
 
@@ -761,10 +778,12 @@ struct GenUi(Movable):
     var grids: List[DataGrid]  # per canvas (CV_GRID)
     var tables: List[Rows]  # per canvas (CV_GRID)
     var drawn: Int  # bumps when a canvas's own state changes (a grid scrolled): add it to the canvas versions
-    var font: Font
     var palette: Optional[Palette]  # from the last draw (a grid's gestures measure with it)
+    var hub: Self.H  # the app's datasets (a DataGrid or ChartView may name one: mojoui.datahub)
+    var sources: List[Int]  # per canvas: the dataset it draws from (-1: its own rows)
+    var notes: List[String]  # per canvas: what a dataset's chart cost ("1,000,000 rows · 2.1 ms on the GPU")
 
-    def __init__(out self, args: String, base: Int, canvas_base: Int):
+    def __init__(out self, args: String, base: Int, canvas_base: Int, hub: Self.H = Self.H()):
         self.problem = validate(args)
         self.base = base
         self.canvas_base = canvas_base
@@ -781,8 +800,10 @@ struct GenUi(Movable):
         self.grids = List[DataGrid]()
         self.tables = List[Rows]()
         self.drawn = 0
-        self.font = Font()
         self.palette = None
+        self.hub = hub.copy()
+        self.sources = List[Int]()
+        self.notes = List[String]()
         if self.problem != "":
             self.json = Json()
             return
@@ -857,11 +878,23 @@ struct GenUi(Movable):
             self.canvases.append(n)
             self.kinds.append(kind)
             self.stamps.append(Int(hash(dump(self.json, n)) % 1_000_000_007))
-            self.charts.append(self.chart_of(n) if kind == CV_CHART else ChartView("", List[String](), List[Float64]()))
+            var source = self.hub.find(self.str(n, "dataset")) if self.json.get(n, "dataset") >= 0 else -1
+            if self.json.get(n, "dataset") >= 0 and source < 0:
+                self.problem = "unknown dataset " + json_string(self.str(n, "dataset")) + " (the app holds: " + self.hub.names_text() + ")"
+            elif kind == CV_GRID and source < 0 and (self.json.get(n, "columns") < 0 or self.json.get(n, "rows") < 0):
+                self.problem = "bad prop: a DataGrid needs columns and rows, or a dataset"
+            elif kind == CV_CHART and source < 0 and (self.json.get(n, "labels") < 0 or self.json.get(n, "values") < 0):
+                self.problem = "bad prop: a ChartView needs labels and values, or a dataset with group_by"
+            self.sources.append(source)
+            self.notes.append("")
+            if kind == CV_CHART and source >= 0:
+                self.charts.append(self.chart_from(n, source))
+            else:
+                self.charts.append(self.chart_of(n) if kind == CV_CHART else ChartView("", List[String](), List[Float64]()))
             var g = DataGrid()
             g.browse = True
             self.grids.append(g^)
-            self.tables.append(self.rows_of(n) if kind == CV_GRID else Rows(List[String](), List[Bool]()))
+            self.tables.append(self.rows_of(n) if kind == CV_GRID and source < 0 else Rows(List[String](), List[Bool]()))
         var ch = self.json.get(n, "children")
         for i in range(self.json.size(ch)):
             self.index(self.json.at(ch, i))
@@ -872,6 +905,22 @@ struct GenUi(Movable):
                           money=self.json.flag(self.json.get(n, "money")))
         if self.str(n, "kind") == "line":
             c.kind = "Line Chart"
+        return c^
+
+    def chart_from(mut self, n: Int, source: Int) -> ChartView:
+        """A chart the app computes from a dataset it holds (the hub's group-by: MX frame's, on the GPU when there is
+        one, for a SheetHub): one bar per value of `group_by`, largest first, the top N."""
+        var how = self.str(n, "combine") if self.json.get(n, "combine") >= 0 else String("sum")
+        var value = self.str(n, "value")
+        var g = self.hub.group(source, self.str(n, "group_by"), value, how, Int(self.num(n, "top", 12)))
+        if g.problem != "":
+            self.problem = "bad prop: " + g.problem
+            return ChartView(self.str(n, "title"), List[String](), List[Float64]())
+        var name = self.str(n, "value_name") if self.json.get(n, "value_name") >= 0 else (how + " of " + (value if value.byte_length() > 0 else String("rows")))
+        var c = ChartView(self.str(n, "title"), g.labels.copy(), g.values.copy(), name, money=False)
+        if self.str(n, "kind") == "line":
+            c.kind = "Line Chart"
+        self.notes[len(self.notes) - 1] = g.note
         return c^
 
     def rows_of(self, n: Int) -> Rows:
@@ -1046,9 +1095,16 @@ struct GenUi(Movable):
             return Table(cols^, cells^).fill()
         if comp == "DataGrid":
             var k = self.canvas_of.get(n, 0)
-            return self.framed(n, Canvas(self.canvas(n), v + self.grids[k].version + self.stamp(n), on_gesture=self.msg(n)).fill().height(Int(self.num(n, "height", 260))), in_card)
+            var grid = Canvas(self.canvas(n), v + self.grids[k].version + self.stamp(n), on_gesture=self.msg(n)).fill().height(Int(self.num(n, "height", 260)))
+            if self.sources[k] >= 0:  # (a dataset: how many rows, none of them sent)
+                return self.framed(n, VStack(grid^, Text(grouped(self.hub.rows(self.sources[k])) + " rows of " + self.hub.name(self.sources[k]) + ", held by the app", style=CAPTION), spacing=SPACE_XS).align(START).fill(), in_card)
+            return self.framed(n, grid^, in_card)
         if comp == "ChartView":
-            return self.framed(n, Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 220))), in_card)
+            var k = self.canvas_of.get(n, 0)
+            var chart = Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 220)))
+            if self.notes[k].byte_length() > 0:
+                return self.framed(n, VStack(chart^, Text(self.notes[k], style=CAPTION).tag("genui-cost"), spacing=SPACE_XS).align(START).fill(), in_card)
+            return self.framed(n, chart^, in_card)
         if comp == "Sparkline":
             var parts = List[View]()
             if self.json.get(n, "label") >= 0:
@@ -1122,8 +1178,9 @@ struct GenUi(Movable):
             return Card(items^, spacing=SPACE_M).fill()
         return Text("")
 
-    def handle(mut self, e: Event, mut state: JDoc) -> UiAction:
-        """One of its controls was used: the state edited at its bind, and its action if it has one."""
+    def handle(mut self, e: Event, mut state: JDoc, font: Font = Font()) -> UiAction:
+        """One of its controls was used: the state edited at its bind, and its action if it has one. `font`: the
+        app's (a grid's gestures measure with it; Screens passes its own, made once: a Font costs ~1 ms)."""
         var k = e.message - self.base
         if k < 0 or k >= len(self.controls):
             return UiAction(ACT_NONE, "", "", "")
@@ -1139,8 +1196,10 @@ struct GenUi(Movable):
             return UiAction(ACT_LOCAL, "", "", "")
         if comp == "DataGrid":
             var c = self.canvas_of.get(n, 0)
-            if self.palette:
-                _ = self.grids[c].handle(e, self.tables[c], self.font, self.palette.value())
+            if self.palette and self.sources[c] >= 0:
+                self.hub.handle_grid(self.sources[c], self.grids[c], e, font, self.palette.value())
+            elif self.palette:
+                _ = self.grids[c].handle(e, self.tables[c], font, self.palette.value())
             self.drawn += 1
             return UiAction(ACT_LOCAL, "", "", "")
         if comp == "Confirm":
@@ -1181,8 +1240,8 @@ struct GenUi(Movable):
     def draws(self, canvas: Int) -> Bool:
         return canvas >= self.canvas_base and canvas < self.canvas_base + len(self.canvases)
 
-    def draw(mut self, canvas: Int, mut surface: Surface, p: Palette, state: JDoc):
-        """Paints one of its canvases."""
+    def draw(mut self, canvas: Int, mut surface: Surface, p: Palette, state: JDoc, font: Font):
+        """Paints one of its canvases (`font`: the app's, made once)."""
         var k = canvas - self.canvas_base
         if k < 0 or k >= len(self.canvases):
             return
@@ -1194,16 +1253,19 @@ struct GenUi(Movable):
             var data = p.copy()  # (an agent's chart wears the theme's first data colour, not the accent: omxqua's is ink)
             data.accent = p.data(0)
             data.accent_tint = mix(p.card, p.data(0), 0.35)
-            self.charts[k].draw(surface, self.font, data)
+            self.charts[k].draw(surface, font, data)
         elif kind == CV_KPI:
             var data = p.copy()
             data.accent = p.data(0)
             self.kpi_of(n).draw(surface, data)
         elif kind == CV_MAP:
             surface.fill(p.card)
-            self.map_of(n).draw(surface, self.font, p)
+            self.map_of(n).draw(surface, font, p)
         elif kind == CV_GRID:
-            self.grids[k].draw(surface, self.tables[k], self.font, p)
+            if self.sources[k] >= 0:
+                self.hub.draw_grid(self.sources[k], self.grids[k], surface, font, p)
+            else:
+                self.grids[k].draw(surface, self.tables[k], font, p)
         else:
             var values = List[Float64]()
             if self.json.get(n, "bind") >= 0:

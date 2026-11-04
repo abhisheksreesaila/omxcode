@@ -5668,6 +5668,40 @@ def run_step[A: App](host_addr: Int, step: String):
             _ = external_call["g_main_context_iteration", c_int](0, c_int(1))
         if host[].hidden:
             print("TEST: the window didn't open again in " + rest + " ms")
+    elif verb == "watch":  # watch:First|Last=N (goal 48's benchmark): run the main loop until a button or text Last exists (N ms at most);
+        # prints WATCH: first=<ms until a text First showed> last=<ms> stalls=<main-loop turns over 16.7 ms> worst=<ms> turns=<n> peak_mb=<VmHWM>
+        var kv = split_at(rest, "=")
+        var names = split_at(kv[0], "|")
+        var t0 = Int(perf_counter_ns())
+        var until = t0 + to_int(kv[1]) * 1_000_000
+        var first = -1
+        var last = -1
+        var stalls = 0
+        var worst = 0
+        var turns = 0
+        while not host[].closed and Int(perf_counter_ns()) < until:
+            var a = Int(perf_counter_ns())
+            pump()
+            var d = Int(perf_counter_ns()) - a
+            turns += 1
+            if d > 16_700_000:
+                stalls += 1
+            worst = max(worst, d)
+            if first < 0 and find(host[], TEXT, names[0], 0) >= 0:
+                first = (Int(perf_counter_ns()) - t0) // 1000
+            if find(host[], TEXT, names[1], 0) >= 0 or find(host[], BUTTON, names[1], 0) >= 0:
+                last = (Int(perf_counter_ns()) - t0) // 1000
+                break
+        var peak = 0
+        try:
+            with open("/proc/self/status", "r") as f:
+                for line in f.read().split("\n"):
+                    if String(line).startswith("VmHWM:"):
+                        peak = to_int(String(String(line)[byte = 6 :].strip().split(" ")[0])) // 1024
+        except:
+            pass
+        print("WATCH: first=" + String(Float64(first) / 1000.0) + " last=" + String(Float64(last) / 1000.0) + " stalls=" + String(stalls)
+              + " worst=" + String(Float64(worst // 1000) / 1000.0) + " turns=" + String(turns) + " peak_mb=" + String(peak), flush=True)
     elif verb == "waitfor":  # waitfor:Title=N: run the main loop until a button titled Title exists (a job's result landed), N ms at most
         # (probe fixes, D-1701: a fixed pause before a tap races the job's run time, which follows the machine's load; goal
         # 30 M1's "no button Create table". Never blocks inside the loop: the deadline is read every turn)

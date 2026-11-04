@@ -1,0 +1,93 @@
+{
+ "stream": "bench (scripts/agui_scenarios.py)",
+ "events": 2302,
+ "paced_events": 2302,
+ "runs": 1,
+ "viewport": [
+  1100,
+  900
+ ],
+ "machine": "ablearn \u00b7 x86_64 \u00b7 Linux 7.2.5-3-omarchy",
+ "when": "2026-11-04 01:48",
+ "definitions": ", the same way for every runner, from the moment Send is pressed:\n  first_ui_ms       the agent's screen's first component (\"Orders, live\") is on screen\n  last_event_ms     its last component (\"end of dashboard\") is on screen: every event drawn\n  frames_over_16ms  web: requestAnimationFrame gaps over 25 ms (at least one 60 Hz frame dropped) until the end;\n                    GTK: main-loop turns that took over 16.7 ms (the UI thread missed a frame)\n  peak_mb           web: the tab's peak JS heap (performance.memory); GTK: the process's peak resident memory (VmHWM)",
+ "runners": {
+  "omxcode-gtk": {
+   "first_ui_ms": 12.966,
+   "last_event_ms": 65.965,
+   "frames_over_16ms": 1,
+   "worst_ms": 36.99,
+   "peak_mb": 272,
+   "burst": {
+    "first_ui_ms": 12.966,
+    "last_event_ms": 65.965,
+    "frames_over_16ms": 1,
+    "worst_ms": 36.99,
+    "peak_mb": 272,
+    "samples": [
+     {
+      "first_ui_ms": 12.966,
+      "last_event_ms": 65.965,
+      "frames_over_16ms": 1,
+      "worst_ms": 36.99,
+      "peak_mb": 272
+     }
+    ]
+   },
+   "paced": {
+    "first_ui_ms": 1399.239,
+    "last_event_ms": 8643.691,
+    "frames_over_16ms": 0,
+    "worst_ms": 2.809,
+    "peak_mb": 272,
+    "samples": [
+     {
+      "first_ui_ms": 1399.239,
+      "last_event_ms": 8643.691,
+      "frames_over_16ms": 0,
+      "worst_ms": 2.809,
+      "peak_mb": 272
+     }
+    ]
+   }
+  },
+  "omxcode-web": {
+   "first_ui_ms": 125.9,
+   "last_event_ms": 125.9,
+   "frames_over_16ms": 0,
+   "worst_ms": 16.7,
+   "peak_mb": 3.8,
+   "burst": {
+    "first_ui_ms": 125.9,
+    "last_event_ms": 125.9,
+    "frames_over_16ms": 0,
+    "worst_ms": 16.7,
+    "peak_mb": 3.8,
+    "samples": [
+     {
+      "first_ui_ms": 125.9,
+      "last_event_ms": 125.9,
+      "frames_over_16ms": 0,
+      "worst_ms": 16.7,
+      "peak_mb": 3.8
+     }
+    ]
+   },
+   "paced": {
+    "first_ui_ms": 1438.9,
+    "last_event_ms": 8755.2,
+    "frames_over_16ms": 46,
+    "worst_ms": 50.1,
+    "peak_mb": 12.4,
+    "samples": [
+     {
+      "first_ui_ms": 1438.9,
+      "last_event_ms": 8755.2,
+      "frames_over_16ms": 46,
+      "worst_ms": 50.1,
+      "peak_mb": 12.4
+     }
+    ]
+   }
+  }
+ }
+}

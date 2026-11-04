@@ -27,10 +27,11 @@ from mojoui.theme import Palette
 from mojoui.http import Http, Request
 from mojoui.json import Json, json_string, J_ARRAY, J_STRING
 from mojoui.agui import (
-    Agent, Tool, ToolCall, Message, EV_TEXT, EV_TOOL_START, EV_TOOL_ARGS, EV_TOOL_END, EV_TOOL_RESULT, EV_STATE,
+    Agent, Tool, LocalAgent, ToolCall, Message, EV_TEXT, EV_TOOL_START, EV_TOOL_ARGS, EV_TOOL_END, EV_TOOL_RESULT, EV_STATE,
     EV_STREAM_END, EV_CUSTOM, EV_RUN_ERROR,
 )
 from mojoui.genui import schema, MAX_CONTROLS, MAX_NODES
+from mojoui.datahub import Hub, NoData
 from mojoui.agentui import Screens, MAX_RETRIES
 
 comptime CHAT_PANEL = 0  # fills what it's given (a chat app, a page)
@@ -105,10 +106,10 @@ def status_of(call: ToolCall, answered: Bool) -> String:
     return "complete" if answered else "executing"
 
 
-struct AgentChat(Movable):
+struct AgentChat[H: Hub = NoData](Movable):
     var http: Http
     var agent: Agent
-    var screens: Screens
+    var screens: Screens[Self.H]
     var base: Int
     var layout: Int
     var open: Bool  # the popup or the sidebar is open
@@ -138,7 +139,7 @@ struct AgentChat(Movable):
         self.http = Http()
         self.base = base
         self.agent = Agent(url, base + C_PIECE, base + C_ENDED, "agentchat")
-        self.screens = Screens(base + C_SCREENS, canvas_base, MAX_UIS)
+        self.screens = Screens[Self.H](base + C_SCREENS, canvas_base, MAX_UIS)
         self.layout = layout
         self.open = layout == CHAT_PANEL or layout == CHAT_SIDEBAR
         self.title = title
@@ -163,6 +164,25 @@ struct AgentChat(Movable):
         self.chosen = ""
         self.agent.offer(Tool("render_ui", "Show UI in the chat, built only from the app's catalogued components (data, never code). "
                               + "Inputs edit the shared state at their bind; the first button pressed (or choice with an action) is this tool's result.", schema()))
+
+    def set_hub(mut self, var hub: Self.H):
+        """The datasets the agent's UI can name (DataGrid / ChartView "dataset": mojoui.datahub): their rows stay here,
+        never sent. The agent hears of them in each run's context (names, rows, columns)."""
+        self.screens.hub = hub^
+        self.agent.context = ('[{"description":"Datasets the app holds. Show one with render_ui: a DataGrid with \\"dataset\\", or a ChartView with \\"dataset\\", \\"group_by\\" (a text column), \\"value\\" (a number column) and \\"combine\\" (sum, average, count). Never send their rows.","value":'
+                              + json_string(self.screens.hub.describe()) + "}]")
+
+    def feed(mut self, events: List[String]):
+        """AG-UI events from an agent in this process (mojoui.agui's LocalAgent), through the same handler a stream's
+        pieces go through, then the run's end."""
+        for ref ev in events:
+            _ = self.update(Event(self.base + C_PIECE, ev, 0))
+        _ = self.update(Event(self.base + C_ENDED, "", 200))
+
+    def run_local[L: LocalAgent](mut self, mut local: L):
+        """A run with an agent in this process: no HTTP; its events go through update() as a stream's would."""
+        var events = local.respond(self.agent.local_input())
+        self.feed(events)
 
     def suggest(mut self, text: String):
         """A suggestion chip the chat offers (the first 20)."""

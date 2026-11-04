@@ -48,6 +48,15 @@ comptime MAX_INPUT_BYTES = 6 * 1024 * 1024  # the most a RunAgentInput may be (D
 # 8 MB (its MAX_BODY), so a run never meets a 413; tests/test_agui_agent.py checks the two numbers agree.
 
 
+trait LocalAgent:
+    """An agent in the app's own process (goal 48 M5): no HTTP, no other language. Given a run's input (the same
+    RunAgentInput JSON a remote agent gets) it answers with AG-UI events, as JSON, in order; the app reads them with
+    the same handler a stream's pieces go through (Agent.run_local, or mojoui.agentchat's AgentChat.feed)."""
+
+    def respond(mut self, input: String) -> List[String]:
+        ...
+
+
 @fieldwise_init
 struct Tool(Copyable, Movable):
     """A frontend tool the app offers: its name, what it does, its parameters as a JSON Schema (text)."""
@@ -114,6 +123,7 @@ struct Agent(Movable):
     var last_message: String  # the id of the message the last event touched
     var problem: String  # why the last event was refused (EV_BAD)
     var trimmed: Int  # the oldest messages the last RunAgentInput left out to fit MAX_INPUT_BYTES
+    var context: String  # the run's context: a JSON list of {description, value} (what the app tells the agent; "" = [])
     var forwarded: String  # the next run's forwardedProps (JSON; "" = {}): e.g. an interrupt's resume (goal 48 M2); sent once
 
     def __init__(out self, url: String, piece_msg: Int, end_msg: Int, thread_id: String = "thread-1", tag: Int = 3500):
@@ -143,6 +153,7 @@ struct Agent(Movable):
         self.problem = ""
         self.trimmed = 0
         self.forwarded = ""
+        self.context = ""
 
     # ---- the app's side ----
 
@@ -214,7 +225,7 @@ struct Agent(Movable):
             tools += ("," if i > 0 else "") + '{"name":' + json_string(self.tools[i].name) + ',"description":' + json_string(self.tools[i].description) + ',"parameters":' + self.tools[i].parameters + "}"
         tools += "]"
         var head = ('{"threadId":' + json_string(self.thread_id) + ',"runId":' + json_string(self.run_id) + ',"state":' + self.state.dump()
-                    + ',"tools":' + tools + ',"context":[],"forwardedProps":' + (self.forwarded if self.forwarded.byte_length() > 0 else String("{}")) + ',"messages":[')
+                    + ',"tools":' + tools + ',"context":' + (self.context if self.context.byte_length() > 0 else String("[]")) + ',"forwardedProps":' + (self.forwarded if self.forwarded.byte_length() > 0 else String("{}")) + ',"messages":[')
         var room = MAX_INPUT_BYTES - head.byte_length() - 2
         var parts = List[String]()
         var used = 0
@@ -248,6 +259,27 @@ struct Agent(Movable):
         http.send(Request.post_json(self.piece_msg, self.url, body).header("Accept", "text/event-stream")
                   .stream(self.end_msg).tagged(self.tag).timeout(120_000))
         return True
+
+    def local_input(mut self) -> String:
+        """A run's input for an agent in this process (LocalAgent): the run starts here; feed its events back."""
+        self.runs += 1
+        self.run_id = self.thread_id + "-run" + String(self.runs)
+        self.running = True
+        self.ended = "open"
+        var body = self.input_json()
+        self.forwarded = ""
+        return body^
+
+    def run_local[L: LocalAgent](mut self, mut agent: L) -> List[Int]:
+        """A whole run with an agent in this process: its events read in order (EV_* each), then the run ends."""
+        var out = List[Int]()
+        var events = agent.respond(self.local_input())
+        for ref ev in events:
+            out.append(self.on_json(ev))
+        self.running = False
+        if self.ended == "open":
+            self.ended = "error: the run ended without RUN_FINISHED"
+        return out^
 
     def stop(mut self, mut http: Http):
         """Cancels the run in progress (its stream ends with "cancelled")."""

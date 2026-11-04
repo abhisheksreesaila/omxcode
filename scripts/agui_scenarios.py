@@ -329,5 +329,73 @@ def scenario_research(inp, r, words):
     r.add(StepFinishedEvent(step_name="compare"))
 
 
-SCENARIOS = {"stream": scenario_stream, "approval": scenario_approval, "interrupt": scenario_interrupt, "trip": scenario_trip,
+def bench_ui():
+    """The benchmark's screen (~40 components; the first and last are markers the measurements wait for)."""
+    kids = [{"component": "Text", "text": "Orders, live", "style": "title"}]
+    kids.append({"component": "Grid", "columns": 4, "children": [
+        {"component": "KpiView", "label": f"Metric {k}", "value": f"{k * 1234:,}", "note": f"+{k}%", "tone": "good", "spark": [1, 2, 3 + k % 3, 4, 3, 5]}
+        for k in range(8)]})
+    kids.append({"component": "Grid", "columns": 3, "children": [
+        {"component": "Meter", "label": f"Gauge {k}", "value": 10 + k * 12, "figure": f"{10 + k * 12}%"} for k in range(6)]})
+    kids.append({"component": "ChartView", "kind": "bar", "title": "Revenue by region", "labels": REGIONS, "values": REGION_SALES})
+    kids.append({"component": "DataGrid", "columns": ["Product", "Category", "Units", "Revenue"],
+                 "rows": [[p, c, u, r] for p, c, u, r in PRODUCTS] * 4, "height": 280})
+    kids.append({"component": "Sparkline", "values": [3, 5, 4, 6, 8, 7, 9, 11, 10, 12], "label": "Trend"})
+    for k in range(15):
+        kids.append({"component": "Text", "text": f"Note {k}: orders in region {REGIONS[k % 5]} grew {k + 3}% week over week."})
+    kids.append({"component": "HStack", "children": [{"component": "Button", "label": "Export", "action": "export"},
+                                                     {"component": "Chip", "text": "live", "hue": 2}]})
+    kids.append({"component": "Text", "text": "end of dashboard", "style": "caption"})
+    return {"component": "VStack", "gap": "m", "children": kids}
+
+
+def bench_events(r, words, delay):
+    """The benchmark's stream (> 2,000 events): words, a 40-component screen as render_ui's arguments three bytes at a
+    time, and state deltas; `delay` ms before each event (0: as fast as the socket takes them)."""
+    r.add(StateSnapshotEvent(snapshot={"progress": 0}))
+    mid = r.id("m")
+    r.add(TextMessageStartEvent(message_id=mid, role="assistant"))
+    for k in range(300):
+        r.add(TextMessageContentEvent(message_id=mid, delta=f"word{k} "), delay)
+    r.add(TextMessageEndEvent(message_id=mid))
+    cid = r.id("call")
+    r.add(ToolCallStartEvent(tool_call_id=cid, tool_call_name="render_ui", parent_message_id=mid))
+    text = json.dumps({"ui": bench_ui()})
+    for i in range(0, len(text), 3):
+        r.add(ToolCallArgsEvent(tool_call_id=cid, delta=text[i:i + 3]), delay)
+        if i % 30 == 0:
+            r.add(StateDeltaEvent(delta=[{"op": "replace", "path": "/progress", "value": i}]))
+    r.add(ToolCallEndEvent(tool_call_id=cid))
+
+
+def scenario_bench(inp, r, words):
+    if inp.messages and inp.messages[-1].role == "tool":
+        r.say("Okay.")
+        return
+    bench_events(r, words, 0)
+
+
+def scenario_bench_paced(inp, r, words):
+    if inp.messages and inp.messages[-1].role == "tool":
+        r.say("Okay.")
+        return
+    bench_events(r, words, 4)
+
+
+def scenario_orders(inp, r, words):
+    """Datasets: the app holds a million orders (the run's context says so); the agent names them, never sends a row."""
+    ctx = " ".join(c.value for c in (inp.context or []))
+    if '"orders"' not in ctx:
+        r.say("I don't see an orders dataset in this app.")
+        return
+    text = "Here are all 1,000,000 orders. The app keeps the rows; I only named the dataset, so this answer is a few hundred bytes."
+    mid = r.say(text, pieces=words(text), delay=10)
+    stream_call(r, "render_ui", {"ui": {"component": "VStack", "gap": "m", "children": [
+        {"component": "Grid", "columns": 2, "children": [
+            {"component": "ChartView", "kind": "bar", "title": "Revenue by region", "dataset": "orders", "group_by": "region", "value": "revenue", "combine": "sum"},
+            {"component": "ChartView", "kind": "bar", "title": "Average order by product", "dataset": "orders", "group_by": "product", "value": "revenue", "combine": "average"}]},
+        {"component": "DataGrid", "title": "Every order", "dataset": "orders", "height": 320}]}}, mid, pieces=6, delay=15)
+
+
+SCENARIOS = {"orders": scenario_orders, "bench": scenario_bench, "bench_paced": scenario_bench_paced, "stream": scenario_stream, "approval": scenario_approval, "interrupt": scenario_interrupt, "trip": scenario_trip,
              "dashboard": scenario_dashboard, "booking": scenario_booking, "research": scenario_research, "approval": scenario_approval, "interrupt": scenario_interrupt, "catalog": scenario_catalog, "error": scenario_error, "release": scenario_release}
