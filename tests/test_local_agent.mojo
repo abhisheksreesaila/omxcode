@@ -12,7 +12,7 @@ from mojoui.sheethub import SheetHub
 from mojoui.sheet import Sheet
 from mojoui.canvas import Surface
 from themes.omxqua import omxqua
-from omxcore import Table, TEXT, DECIMAL, INT
+from mojoui.sampledata import sample_orders, REGIONS
 
 comptime ROWS = 1_000_000
 
@@ -61,35 +61,11 @@ struct Dashboard(LocalAgent):
         return ev^
 
 
-def orders(mut truth: List[Float64]) raises -> Sheet:
-    """A million orders: region (5 words), units, revenue (cents); `truth`: the revenue per region by a plain loop."""
-    var t = Table.empty()
-    var region = t.add_column("region", TEXT)
-    var units = t.add_column("units", INT)
-    var revenue = t.add_column("revenue", DECIMAL, 2)
-    var names: List[String] = ["North", "South", "East", "West", "Central"]
-    var codes = List[Int]()
-    for nm in names:
-        codes.append(t.add_word(region, nm))
-    var x: UInt64 = 88172645463325252
-    for _ in range(ROWS):
-        x ^= x << 13
-        x ^= x >> 7
-        x ^= x << 17
-        var r = Int(x % 5)
-        var cents = Int((x >> 8) % 50_000)
-        t.append(region, Int64(codes[r]))
-        t.append(units, Int64(Int((x >> 20) % 9) + 1))
-        t.append(revenue, Int64(cents))
-        truth[r] += Float64(cents) / 100.0
-    return Sheet(t^.share(), True)
-
-
 def main() raises:
     # (b) first: the dataset
     var t0 = perf_counter_ns()
     var truth = List[Float64](length=5, fill=0.0)
-    var sheet = orders(truth)
+    var sheet = sample_orders(ROWS, truth)
     var build_ms = Float64(perf_counter_ns() - t0) / 1e6
     var chat = AgentChat[SheetHub]("http://unused/", base=20_000, canvas_base=2000)
     var hub = SheetHub()
@@ -127,7 +103,7 @@ def main() raises:
     assert_equal(len(ch.labels), 5)
     for k in range(5):
         var want = 0.0
-        var names: List[String] = ["North", "South", "East", "West", "Central"]
+        var names = materialize[REGIONS]()
         for j in range(5):
             if names[j] == ch.labels[k]:
                 want = truth[j]

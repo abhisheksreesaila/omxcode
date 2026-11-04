@@ -514,7 +514,7 @@
    },
    "DataGrid": {
     "type": "object",
-    "description": "a scrolling grid for many rows (up to 1,000 sent inline)",
+    "description": "a scrolling grid for many rows: up to 1,000 sent inline (columns + rows), or any number from a dataset the app holds (dataset: its name; the rows never travel)",
     "properties": {
      "component": {
       "const": "DataGrid"
@@ -547,6 +547,15 @@
       },
       "description": "each row: a list of strings or numbers"
      },
+     "dataset": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a dataset the app holds, by name (see the run's context)"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 200
+     },
      "height": {
       "type": "number",
       "minimum": 120,
@@ -555,15 +564,13 @@
      }
     },
     "required": [
-     "component",
-     "columns",
-     "rows"
+     "component"
     ],
     "additionalProperties": false
    },
    "ChartView": {
     "type": "object",
-    "description": "a chart of values by label: bars or a line",
+    "description": "a chart of values by label, bars or a line: the values sent (labels + values), or computed by the app from a dataset it holds (dataset, group_by, value, combine)",
     "properties": {
      "component": {
       "const": "ChartView"
@@ -607,6 +614,34 @@
       "type": "boolean",
       "description": "values are amounts of money (cents)"
      },
+     "dataset": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a dataset the app holds, by name"
+     },
+     "group_by": {
+      "type": "string",
+      "maxLength": 60,
+      "description": "a text column of the dataset: one bar per value"
+     },
+     "value": {
+      "type": "string",
+      "maxLength": 60,
+      "description": "a number column of the dataset"
+     },
+     "combine": {
+      "enum": [
+       "sum",
+       "average",
+       "count"
+      ]
+     },
+     "top": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 50,
+      "description": "the largest this many groups"
+     },
      "height": {
       "type": "number",
       "minimum": 140,
@@ -615,9 +650,7 @@
      }
     },
     "required": [
-     "component",
-     "labels",
-     "values"
+     "component"
     ],
     "additionalProperties": false
    },

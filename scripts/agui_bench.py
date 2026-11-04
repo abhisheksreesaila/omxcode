@@ -119,7 +119,7 @@ def copilotkit_run(scenario):
                 import drive
                 browser = p.chromium.launch(executable_path=drive.CHROMIUM, headless=True)
                 page = browser.new_page(viewport={"width": VIEW[0], "height": VIEW[1]})
-                page.goto(f"http://127.0.0.1:{port}/")
+                page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")  # (Enter before CopilotKit has connected is ignored)
                 box = page.locator("textarea").first
                 box.wait_for(timeout=30000)
                 box.fill(PROMPT)

@@ -59,11 +59,11 @@ const C = {
   },
   ChartView: (n) => {
     const labels = arr(n.labels), values = nums(n.values);
-    const max = Math.max(1, ...values), rowH = 22, labelW = 80, w = 360;
+    const max = Math.max(1, ...values), rowH = 24, labelW = 80, w = 480;
     return (
       <div className="card">
         {n.title && <div className="card-title">{str(n.title)}</div>}
-        <svg width="100%" viewBox={`0 0 ${w} ${Math.max(1, values.length) * rowH}`} className="chart">
+        <svg width={w} height={Math.max(1, values.length) * rowH} viewBox={`0 0 ${w} ${Math.max(1, values.length) * rowH}`} className="chart">
           {values.map((v, i) => {
             const bw = ((w - labelW - 50) * v) / max;
             return (

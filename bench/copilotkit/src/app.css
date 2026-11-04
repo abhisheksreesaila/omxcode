@@ -32,3 +32,4 @@ body { font-family: system-ui, sans-serif; }
 .spacer { flex: 1; min-height: 8px; }
 .alert { border-left: 4px solid #d1242f; background: #fff5f5; padding: 8px 12px; border-radius: 6px; }
 .skeleton-line { height: 10px; background: #eceef1; border-radius: 4px; margin: 6px 0; }
+.chart { max-width: 100%; height: auto; }

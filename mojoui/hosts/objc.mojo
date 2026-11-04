@@ -315,6 +315,14 @@ def sf_symbol(name: String) -> String:
     if name == "triangle-alert": return "exclamationmark.triangle"
     if name == "hammer": return "hammer"
     if name == "refresh-cw": return "arrow.clockwise"
+    if name == "rotate-ccw": return "arrow.counterclockwise"
+    if name == "arrow-up": return "arrow.up"
+    if name == "sparkles": return "sparkles"
+    if name == "wrench": return "wrench.and.screwdriver"
+    if name == "circle-alert": return "exclamationmark.circle"
+    if name == "map-pin": return "mappin"
+    if name == "calendar-days": return "calendar"
+    if name == "sun-medium": return "sun.max"
     return "questionmark.square.dashed"
 
 

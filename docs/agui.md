@@ -1,16 +1,52 @@
-# AG-UI in mojoui (goal 35)
+# AG-UI in mojoui (goal 35; goal 48: as good as CopilotKit, and faster)
 
 AG-UI (https://docs.ag-ui.com) is an open event protocol between an agent backend and a UI. The app POSTs a
-`RunAgentInput` (thread, run, messages, state, tools); the run comes back as server-sent events. mojoui speaks it with
-generic pieces any app can use; `examples/agentchat` only composes them.
+`RunAgentInput` (thread, run, messages, state, tools, context); the run comes back as server-sent events. mojoui speaks
+it with generic pieces any app can use; `examples/agentchat` (60 lines) only composes them.
 
 | Piece | What it does |
 |---|---|
 | `mojoui.http` streams | `Request.stream(END)`: each SSE event is its own Event in `update()`, then the end (docs/http.md) |
 | `mojoui.jsonpatch` | `JDoc`, a JSON document you can change, and RFC 6902 JSON Patch on it (atomic) |
-| `mojoui.agui` | `Agent`: runs the agent, reads every event, keeps the conversation and the shared state, frontend tools |
-| `mojoui.genui` | the catalog → JSON Schema generator and the validated "UI from data" renderer (M2) |
-| `mojoui.agentui` | `Screens`: an agent's render_ui calls shown or refused (told why), capped, their actions answered |
+| `mojoui.agui` | `Agent`: runs the agent, reads every event, keeps the conversation, the shared state and the run's steps, frontend tools, `resume()` for interrupts, `context`; `LocalAgent`: an agent in the app's own process |
+| `mojoui.genui` | the catalog (36 components) → JSON Schema, the validated "UI from data" renderer, `partial_ui` (a screen still streaming, drawable) |
+| `mojoui.partialjson` | `complete()`: JSON still arriving, cut to its last whole value and closed |
+| `mojoui.agentui` | `Screens`: an agent's render_ui calls previewed while they stream, shown or refused (told why), their actions answered |
+| `mojoui.agentchat` | `AgentChat`: the chat any app drops in (panel, sidebar, popup) with everything below |
+| `mojoui.datahub`, `mojoui.sheethub` | datasets the app holds that an agent's UI names instead of sending rows (MX frame sheets, the GPU) |
+
+## Goal 48: what a person gets (AgentChat)
+
+```mojo
+var chat = AgentChat[SheetHub](url, base=20_000, canvas_base=2000, layout=CHAT_PANEL, title="Assistant")
+chat.suggest("Chart a million orders")                        # chips on the welcome screen (the agent's CUSTOM "suggestions" replace them)
+chat.offer(Tool("refund_order", "Refund an order", schema), confirm=True)   # asks the person first
+var hub = SheetHub(); hub.add("orders", sheet^); chat.set_hub(hub^)          # datasets: rows stay here
+# App: requests() → chat.requests(); update(e) → chat.update(e); view() → chat.view() (or chat.over(content): a popup)
+#      draw(c, s) → chat.draw(c, s, palette)
+```
+
+- **Streaming words** as Markdown (headings, lists, tables, inline code), code blocks cut out with their own **Copy**; a
+  **typing indicator** until the agent says or starts anything; **Send becomes Stop** (cancels the run; "Stopped."
+  stays); the list **follows the newest words and lets go** when the reader scrolls up; every message **arrives on a
+  spring** (`View.arrive()`: libadwaita's AdwSpringAnimation on GTK, a CSS spring on the web; none under reduced motion).
+- **Copy and Regenerate** on replies; an **error card with Retry**; **suggestion chips**.
+- **Generative UI while it streams**: render_ui's arguments are drawn as they arrive (`partial_ui`: props not yet whole
+  left out, a **Skeleton** where more is coming, a loading card before anything is whole); the final screen replaces the
+  preview; each chart redraws only when its own data changed.
+- **Tool calls with their stage**: in progress (arguments streaming), executing (complete, no result yet), complete (with
+  its result); three or more in a row fold into one card ("Used 3 tools · web_search ×3"). The run's **steps**
+  (STEP_STARTED / STEP_FINISHED) are a live progress list.
+- **Human in the loop**: a tool offered with `confirm=True` shows a **Confirm** card (what it will do, its arguments,
+  Reject / Approve) and runs nothing until answered; the answer is the call's result (`{"decision": "approved" |
+  "rejected", "arguments": …}`). An **interrupt** (CUSTOM `interrupt`, or LangGraph's and CopilotKit's `on_interrupt`,
+  `{question, options}`) shows a choice card; the pick resumes the run with `forwardedProps {"command": {"resume": pick}}`.
+- **Datasets**: a DataGrid or ChartView can name a dataset the app holds (`"dataset": "orders"`, with `group_by`, `value`,
+  `combine`, `top` for a chart): the agent sends a few hundred bytes, the app shows a million rows; the chart's numbers are
+  MX frame's group-by (0.3 ms on the GPU for 1M rows here), its caption says so. The agent hears of the datasets in each
+  run's `context`.
+- **An agent in the app's process** (`LocalAgent`): no HTTP, no other language; its events go through the same handler
+  (2,004 events in 26 ms here, tests/test_local_agent.mojo).
 
 ## The client
 
@@ -66,6 +102,42 @@ An agent builds UI by calling the frontend tool `render_ui` with `{"ui": node}`;
   loads a page or draws pixels it brings.
 - `bind` reads and edits the shared state at a JSON pointer; `action` reports a word back: the first one is render_ui's
   tool result (`{"action": "submit"}`), and the edited state goes with the run.
+
+## Benchmark (goal 48 M5: the same stream into omxcode and CopilotKit)
+
+`pixi run python scripts/agui_bench.py` replays one recorded AG-UI stream (2302 events: 300 words, then a
+40-component dashboard as render_ui's arguments three bytes at a time, state deltas between) into omxcode on GTK, omxcode
+on the web host, and a CopilotKit 1.84.1 app (bench/copilotkit: CopilotChat, its Node runtime with an AG-UI HttpAgent,
+`useFrontendTool("render_ui")` drawing the partial arguments with plain React components) in the same Chromium
+(1100×900, headless, ablearn · x86_64 · Linux 7.2.5-3-omarchy). Median of 3 runs, 2026-11-04 01:59; raw numbers in docs/goals/48/bench.json.
+
+| Runner | First UI (burst) | Every event drawn (burst) | Dropped frames, burst | Dropped frames, paced (~250 events/s) | Peak memory |
+|---|---|---|---|---|---|
+| omxcode, native GTK | 14 ms | 63 ms | 1 (worst 44 ms) | 0 (worst 2 ms) | 109 MB |
+| omxcode, web host | 123 ms | 128 ms | 0 (worst 17 ms) | 45 (worst 50 ms) | 4 MB |
+| CopilotKit (React) | 149 ms | 516 ms | 2 (worst 217 ms) | 0 (worst 17 ms) | 36 MB |
+
+How it's measured: from the moment Send is pressed. First UI: the screen's first component ("Orders, live") on screen;
+every event drawn: its last component ("end of dashboard") on screen. Dropped frames: on the web, requestAnimationFrame
+gaps over 25 ms until the end; on GTK, main-loop turns over 16.7 ms. Memory is not the same quantity on both: the web rows
+are the tab's JS heap (omxcode's web host does its work in its server process, not counted); the GTK row is the whole
+native process (GTK, fonts, the Mojo runtime), started without the demo's million-row dataset. Paced, every runner
+finishes when the stream does (~8.7 s), so the paced column is about smoothness, not speed.
+
+What it says, losses included:
+- **Native GTK is the fastest by far**: the first agent UI 11× sooner than CopilotKit and all 2,200 events drawn 8× sooner
+  (63 ms vs 516 ms), with no dropped frame while a fast model streams (worst main-loop turn 1.9 ms).
+- **The web host finishes a burst 4× sooner than CopilotKit** with a tenth of the JS heap.
+- **Loss: the web host drops frames under a steady stream** (45 gaps over 25 ms in ~8.7 s, worst 50 ms) where CopilotKit drops none:
+  each change the server sends is swapped into the page's DOM, and a long chat makes those swaps big. Next: send only the
+  changed views (the GTK host already patches), or draw the conversation on a canvas.
+- **CopilotKit's worst frame in a burst is 217 ms** (React reconciling the whole tool render at once); it
+  batches a burst into a few partial renders.
+- **Not measured here**: other machines, a phone, a real model's pacing (the paced run stands in for one), CopilotKit's
+  A2UI renderer (its v2 API; this uses its documented v1 frontend-tool render), cold start.
+- **What only omxcode does in this comparison**: the same app on native GTK and the web from one Mojo file; an agent in
+  the app's own process (2,004 events in 26 ms through the same handler, tests/test_local_agent.mojo); a chart over a
+  million rows the agent never sends (0.3 ms on the GPU).
 
 ## Gallery (goal 48: scripted agents, our components, drawn natively)
 

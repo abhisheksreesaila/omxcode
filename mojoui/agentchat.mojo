@@ -55,6 +55,8 @@ comptime C_CODE = 3000  # + message index × 8 + block (< 8): copy that code blo
 comptime C_DECIDE = 7000  # + call × 2 (+ 1: reject), call < 1500: a confirm tool's card
 comptime C_SCREENS = 10_000
 comptime MAX_UIS = 40
+comptime RENDER_UI_ABOUT = ("Show UI in the chat, built only from the app's catalogued components (data, never code). "
+                            + "Inputs edit the shared state at their bind; the first button pressed (or choice with an action) is this tool's result.")
 
 
 @fieldwise_init
@@ -135,7 +137,7 @@ struct AgentChat[H: Hub = NoData](Movable):
     var chosen: String  # the last interrupt's answer ("" none)
 
     def __init__(out self, url: String, base: Int = 20_000, canvas_base: Int = 2000, layout: Int = CHAT_PANEL,
-                 title: String = "Assistant", welcome: String = "Ask me anything.", show_url: Bool = False):
+                 title: String = "Assistant", welcome: String = "Ask me anything.", show_url: Bool = False, offer_ui: Bool = True):
         self.http = Http()
         self.base = base
         self.agent = Agent(url, base + C_PIECE, base + C_ENDED, "agentchat")
@@ -162,8 +164,8 @@ struct AgentChat[H: Hub = NoData](Movable):
         self.options = List[String]()
         self.asked_after = 0
         self.chosen = ""
-        self.agent.offer(Tool("render_ui", "Show UI in the chat, built only from the app's catalogued components (data, never code). "
-                              + "Inputs edit the shared state at their bind; the first button pressed (or choice with an action) is this tool's result.", schema()))
+        if offer_ui:  # (an app that describes the tool its own way offers it itself: RENDER_UI_ABOUT, mojoui.genui.schema())
+            self.agent.offer(Tool("render_ui", RENDER_UI_ABOUT, schema()))
 
     def set_hub(mut self, var hub: Self.H):
         """The datasets the agent's UI can name (DataGrid / ChartView "dataset": mojoui.datahub): their rows stay here,
@@ -634,6 +636,9 @@ struct AgentChat[H: Hub = NoData](Movable):
                 items.append(self.chips())
             parts.append(Scroll(VStack(items^, spacing=SPACE_L).align(START).fill(), height=0, pinned=True).fill().grow())
         parts.append(self.composer())
+        if self.show_url:  # (a developer's chat: how the stream is going)
+            var status = ("thinking… " + self.agent.step) if self.agent.running else ("ready" if self.agent.ended == "open" or self.agent.ended == "finished" else self.agent.ended)
+            parts.append(Text("streamed: " + String(self.pieces) + " pieces · " + status, style=CAPTION).tag("chat-status"))
         parts.append(Clipboard(self.copy_text, self.copies))
         return VStack(parts^, spacing=SPACE_M).align(STRETCH).fill().grow().tag("chat")
 

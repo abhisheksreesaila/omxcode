@@ -10,16 +10,16 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 
 | Component | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Proven by |
 |---|---|---|---|---|---|---|---|
-| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper, traycheck |
-| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate |
-| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper, traycheck |
-| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper |
-| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, agentchat, media, sketch, jot, dictate, keeper |
-| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, agentchat, media |
-| `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console, agentchat |
+| `Text` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck |
+| `Button` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate |
+| `VStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | hello, gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper, traycheck |
+| `HStack` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, kitchen, expenses, layout, lens, analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media, sketch, jot, dictate, keeper |
+| `Spacer` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | analytics, mxstudio, omxplorer, themes, kit, consolekit, console, widgets, media, sketch, jot, dictate, keeper |
+| `Card` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | analytics, workbook, mxstudio, omxplorer, themes, kit, httpcheck, consolekit, console, widgets, media |
+| `Scroll` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | todo, omxplorer, console |
 | `Grid` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses, media |
 | `Divider` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, kitchen, expenses, lens, analytics, omxplorer, themes, kit, consolekit, console, sketch, dictate |
-| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, agentchat, jot, keeper |
+| `TextField` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, expenses, workbook, mxstudio, omxplorer, themes, kit, httpcheck, jot, keeper |
 | `TextArea` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, workbook, mxstudio, omxplorer, jot |
 | `Toggle` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, lens, omxplorer, themes |
 | `Dropdown` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ✅ | gallery, todo, gpu, analytics, workbook, mxstudio, omxplorer, themes, kit |
@@ -68,6 +68,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Canvas: pan, zoom, tap | `on_gesture: PAN, ZOOM, TAP` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: press, release, double | `PRESS, RELEASE, DOUBLE` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Canvas frames (animation) | `on_frame` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
+| Arrive on a spring | `View.arrive(): fades and rises in once (AdwSpringAnimation; a CSS spring)` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Canvas: pen pressure | `event.pressure on PRESS, PAN, RELEASE (0: none)` | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ |
 | Canvas: scroll pans | `Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM` | ✅ | 🔨 | ❌ | 🔨 | ❌ | ❌ |
 | Scene: polygon fill | `Painter.polygon (non-zero, antialiased)` | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 |
@@ -145,10 +146,10 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | Component | Module | Made of | Linux (GTK) | Web | Android | Mac (AppKit) | iPhone (UIKit) | Agent (MCP) | Used by |
 |---|---|---|---|---|---|---|---|---|---|
 | `Ink stroke (pressure ink, round ends, the eraser's hit test)` | `mojoui/ink.mojo` | Canvas, Canvas: pen pressure, Scene: polygon fill | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | sketch |
-| `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | maccheck, mxstudio, omxplorer, workbook |
+| `DataGrid` | `mojoui/datagrid.mojo` | Canvas, Canvas: press, release, double, Canvas: keys (focus on press), In-place editor, TextField: Escape cancels, Editor that echoes the grid's typing, Board: drag, resize, snap | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, maccheck, mxstudio, omxplorer, workbook |
 | `PivotTable` | `mojoui/pivot.mojo` | Grid, Scroll, Text tones | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio, omxplorer, workbook |
-| `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | dashboard, maccheck, media, mxstudio, omxplorer, workbook |
-| `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | dashboard, mxstudio, omxplorer |
+| `ChartView` | `mojoui/chartview.mojo` | Canvas, Canvas: pan, zoom, tap | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ❌ | agentchat, dashboard, maccheck, media, mxstudio, omxplorer, workbook |
+| `KpiView` | `mojoui/kpi.mojo` | Card tones, Text tones, Canvas | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat, dashboard, mxstudio, omxplorer |
 | `FindingCard` | `mojoui/finding.mojo` | Card tones, Text tones, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | mxstudio |
 | `Inspector` | `mojoui/inspector.mojo` | Segmented, Dropdown, Toggle, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Toolbar · FormulaBar · StatusBar` | `mojoui/sheetchrome.mojo` | Toolbar button (icon over label), TextField, Text | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | kit, maccheck, omxplorer |
@@ -162,14 +163,14 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Column number formats` | `mojoui/numformat.mojo` | Canvas, Text | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Sheet objects (charts, pivots)` | `mojoui/sheetpage.mojo` | Board: drag, resize, snap, Canvas, Card, Grid | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | omxplorer |
 | `Report page (KPI and chart tiles, filters)` | `mojoui/reportpage.mojo` | Grid, Card, Dropdown, Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | omxplorer |
-| `CodeBlock` | `mojoui/codeblock.mojo` | Text, Button with an icon, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console, consolekit |
+| `CodeBlock` | `mojoui/codeblock.mojo` | Text, Button with an icon, Clipboard, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat, console, consolekit |
 | `LogView` | `mojoui/logview.mojo` | Scroll, Text, Scroll pinned to its end | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console, consolekit |
-| `Timeline` | `mojoui/timeline.mojo` | Text, Icon, ProgressBar, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
-| `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | console, consolekit |
-| `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `Timeline` | `mojoui/timeline.mojo` | Text, Icon, ProgressBar, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
+| `Breadcrumbs` | `mojoui/breadcrumbs.mojo` | Button, Icon, Text, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat, console, consolekit |
+| `Chip · Badge` | `mojoui/chip.mojo` | Text, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
 | `Confirm` | `mojoui/confirm.mojo` | Button, Timers | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | consolekit |
-| `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | consolekit |
-| `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console, consolekit |
+| `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, consolekit |
+| `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
 | `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, console, consolekit, widgets |
 | `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)` | `mojoui/player.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Quiet buttons, Card | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
@@ -193,7 +194,10 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Search results (result rows, source badges, suggestions)` | `mojoui/results.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Meter (meter, usage bar, chart rows)` | `mojoui/meter.mojo` | Text, ProgressBar, Canvas, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console |
 | `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
-| `GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, Toggle, Segmented, ProgressBar, VStack, HStack, Divider | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat |
+| `GenUi (UI from an agent's data: 36 catalogued components, validated, drawn natively, previewed while it streams)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, TextArea, Toggle, Checkbox, Segmented, Dropdown, Slider, Radio, DatePicker, Tabs, Grid, ProgressBar, Icon, VStack, HStack, Divider, Spacer | 🔨 | 🔨 | ❌ | 🔨 | ❌ | ❌ | — |
+| `AgentChat (a chat on an AG-UI agent: streaming Markdown, tool stages, approvals, interrupts, suggestions, Stop, Retry, Regenerate; panel, sidebar or popup)` | `mojoui/agentchat.mojo` | Scroll pinned to its end, Card, Text, Button, TextField, Icon, Overlay, Clipboard, Arrive on a spring | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat |
+| `Rows (a DataGrid's source over plain rows of text)` | `mojoui/rowsource.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat |
+| `SheetHub (datasets an agent's UI names instead of sending rows: MX frame sheets, the GPU)` | `mojoui/sheethub.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat |
 | `LogPane (a live log with its head, Hide log, coloured lines)` | `mojoui/logview.mojo` | Scroll pinned to its end, Text, Button, Icon, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | console |
 | `ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)` | `mojoui/imageops.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `VideoTable (a video becomes rows: GPU colour cells, regions, motion, brightness; Analyzer slot; tracked, coded objects; faces)` | `mojoui/videotable.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
@@ -202,7 +206,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Geo (a nadir camera's pixels on the map from a pose log, haversine, georeferenced VideoTable rows, places joined across frames, names along the route)` | `mojoui/geo.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Inspection (defects on assets with a size-class severity, two inspections compared, worse assets, the next flight's waypoints)` | `mojoui/inspection.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Video jobs (analyze with a registered analyzer, make a reel from a table's flag, as background jobs with progress; rows as a table, lookups that find their key)` | `mojoui/videojobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
-| `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `MapView (a route, places and findings on a small offline map, north up, metres to scale, the playhead as a dot)` | `mojoui/mapview.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, omxplorer |
 | `Track cards (a recording's log beside its video: a line chart whose cursor follows the playhead, tap to seek; the route's map)` | `mojoui/trackcard.mojo` | Board: drag, resize, snap, Canvas, Card, Segmented, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `PdfSource (a PDF's pages as RGBA pictures at any dpi, page sizes in points, points ↔ pixels; its text layer for checks)` | `mojoui/pdfsource.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
@@ -242,12 +246,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 165 | 9 | 0 |
-| Web | 157 | 9 | 8 |
-| Android | 19 | 52 | 103 |
-| Mac (AppKit) | 0 | 150 | 24 |
-| iPhone (UIKit) | 0 | 121 | 53 |
-| Agent (MCP) | 58 | 40 | 76 |
+| Linux (GTK) | 168 | 10 | 0 |
+| Web | 160 | 10 | 8 |
+| Android | 19 | 54 | 105 |
+| Mac (AppKit) | 0 | 152 | 26 |
+| iPhone (UIKit) | 0 | 123 | 55 |
+| Agent (MCP) | 58 | 42 | 78 |
 
 ## Inside one app, not components yet (the debt)
 

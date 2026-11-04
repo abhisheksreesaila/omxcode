@@ -60,6 +60,7 @@ FEATURES = [
     ("Canvas: pan, zoom, tap", "on_gesture: PAN, ZOOM, TAP", r"\bPAN\b|PAN =", "lens"),
     ("Canvas: press, release, double", "PRESS, RELEASE, DOUBLE", r"\bDOUBLE\b|DOUBLE =", "workbook"),
     ("Canvas frames (animation)", "on_frame", r"tick|SET_FRAMES|on_frame", "lens"),
+    ("Arrive on a spring", "View.arrive(): fades and rises in once (AdwSpringAnimation; a CSS spring)", r"\.arrives\b|mojoui-arrive", "agentchat"),
     ("Canvas: pen pressure", "event.pressure on PRESS, PAN, RELEASE (0: none)", r"pressure", "sketch"),
     ("Canvas: scroll pans", "Canvas(scroll_pans=True): WHEEL; ctrl+scroll, pinch: ZOOM", r"\bWHEEL\b", "sketch"),
     ("Scene: polygon fill", "Painter.polygon (non-zero, antialiased)", r"OP_POLY|rt\.draw\(|web_draw|mod\.draw\(", "sketch"),
@@ -163,7 +164,10 @@ COMPOSITES = [
     ("Meter (meter, usage bar, chart rows)", "mojoui/meter.mojo", ["Text", "ProgressBar", "Canvas", "HStack", "Themes on top (themes/, or yours)"], "Meter("),
     ("Feedback (note, warning, empty state)", "mojoui/feedback.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "EmptyState("),
     # agents (goal 35)
-    ("GenUi (UI from an agent's data: catalogued components only, validated, drawn natively)", "mojoui/genui.mojo", ["Card", "Text", "Paragraph", "Table", "Canvas", "Button", "TextField", "Toggle", "Segmented", "ProgressBar", "VStack", "HStack", "Divider"], "GenUi("),
+    ("GenUi (UI from an agent's data: 36 catalogued components, validated, drawn natively, previewed while it streams)", "mojoui/genui.mojo", ["Card", "Text", "Paragraph", "Table", "Canvas", "Button", "TextField", "TextArea", "Toggle", "Checkbox", "Segmented", "Dropdown", "Slider", "Radio", "DatePicker", "Tabs", "Grid", "ProgressBar", "Icon", "VStack", "HStack", "Divider", "Spacer"], "GenUi("),
+    ("AgentChat (a chat on an AG-UI agent: streaming Markdown, tool stages, approvals, interrupts, suggestions, Stop, Retry, Regenerate; panel, sidebar or popup)", "mojoui/agentchat.mojo", ["Scroll pinned to its end", "Card", "Text", "Button", "TextField", "Icon", "Overlay", "Clipboard", "Arrive on a spring"], "AgentChat"),
+    ("Rows (a DataGrid's source over plain rows of text)", "mojoui/rowsource.mojo", ["Canvas"], "Rows("),
+    ("SheetHub (datasets an agent's UI names instead of sending rows: MX frame sheets, the GPU)", "mojoui/sheethub.mojo", ["Canvas"], "SheetHub("),
     ("LogPane (a live log with its head, Hide log, coloured lines)", "mojoui/logview.mojo", ["Scroll pinned to its end", "Text", "Button", "Icon", "Themes on top (themes/, or yours)"], "LogPane("),
     # media (goal 39)
     ("ImageOps (blur a rectangle, crop and scale, burn a caption in, fill/outline a rectangle on an RGBA frame, GPU or CPU)", "mojoui/imageops.mojo", ["Canvas"], "ImageOps("),

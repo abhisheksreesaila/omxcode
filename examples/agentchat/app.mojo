@@ -11,42 +11,12 @@ from mojoui.canvas import Surface
 from mojoui.theme import Theme
 from mojoui.http import Request
 from mojoui.shared import environment
-from mojoui.agentchat import AgentChat, CHAT_PANEL
+from mojoui.agentchat import AgentChat, CHAT_PANEL, RENDER_UI_ABOUT
 from mojoui.agui import Tool
-from mojoui.sheet import Sheet
+from mojoui.genui import schema
 from mojoui.sheethub import SheetHub
+from mojoui.sampledata import sample_orders
 from themes.omxqua import omxqua
-from omxcore import Table, TEXT, DECIMAL, INT
-
-
-def orders(rows: Int) -> Sheet:
-    """`rows` made-up orders (region, product, units, revenue): the dataset the agent names and never receives."""
-    try:
-        var t = Table.empty()
-        var region = t.add_column("region", TEXT)
-        var product = t.add_column("product", TEXT)
-        var units = t.add_column("units", INT)
-        var revenue = t.add_column("revenue", DECIMAL, 2)
-        var regions: List[String] = ["North", "South", "East", "West", "Central"]
-        var products: List[String] = ["Trail shoe", "Rain shell", "Day pack", "Wool socks", "Fleece", "Water bottle", "Headlamp", "Trek poles"]
-        var rc = List[Int64]()
-        var pc = List[Int64]()
-        for r in regions:
-            rc.append(Int64(t.add_word(region, r)))
-        for p in products:
-            pc.append(Int64(t.add_word(product, p)))
-        var x: UInt64 = 88172645463325252
-        for _ in range(rows):
-            x ^= x << 13
-            x ^= x >> 7
-            x ^= x << 17
-            t.append(region, rc[Int(x % 5)])
-            t.append(product, pc[Int((x >> 5) % 8)])
-            t.append(units, Int64(Int((x >> 20) % 9) + 1))
-            t.append(revenue, Int64(Int((x >> 8) % 50_000)))
-        return Sheet(t^.share(), True)
-    except:
-        return Sheet(Table.empty().share(), False)
 
 
 struct Main(App):
@@ -57,7 +27,8 @@ struct Main(App):
     def __init__(out self):
         var url = environment("AGUI_URL")
         self.chat = AgentChat[SheetHub](url if url != "" else String("http://127.0.0.1:8765/"), base=20_000, canvas_base=2000, layout=CHAT_PANEL,
-                              title="Agent chat", welcome="Ask for a chart, a form, a trip or a dashboard.", show_url=True)
+                              title="Agent chat", welcome="Ask for a chart, a form, a trip or a dashboard.", show_url=True, offer_ui=False)
+        self.chat.offer(Tool("render_ui", RENDER_UI_ABOUT, schema()))  # (what agents may build here: genui's whole catalog)
         self.chat.suggest("Hello")
         self.chat.suggest("Show me sales as a chart")
         self.chat.suggest("Make me a signup form")
@@ -70,7 +41,11 @@ struct Main(App):
         except:
             pass
         if n > 0:
-            hub.add("orders", orders(n))  # (~0.3 s at start for a million; the agent hears of it in each run's context)
+            try:
+                var totals = List[Float64]()
+                hub.add("orders", sample_orders(n, totals))  # (~0.3 s at start for a million; the agent hears of it in each run's context)
+            except:
+                pass
         self.chat.set_hub(hub^)
         self.chat.offer(Tool("refund_order", "Refund an order", '{"type":"object","properties":{"order":{"type":"string"},"amount":{"type":"number"},"reason":{"type":"string"}},"required":["order","amount"]}'), confirm=True)
         self.themed = omxqua(False)
