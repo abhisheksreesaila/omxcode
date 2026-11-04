@@ -28,16 +28,15 @@ pixi run python scripts/agui_bench.py     # the benchmark → docs/goals/48/benc
 Shots: docs/agui.md's Gallery (trip, dashboard, booking, approval, research, release, streaming, catalog) and
 build/g48-orders.png (a million rows, charted in 0.3 ms on the GPU, nothing sent by the agent).
 
-## The USP, measured (docs/agui.md "Benchmark", written from docs/goals/48/bench.json, 2026-11-04 03:36)
-Same 2302-event stream, median of 3; both web runners in the same Chromium. This run was taken by the
-checker while other worktrees' checks loaded the machine (load average ~16): an earlier quiet run had GTK 63 ms, web
-128 ms, CopilotKit 516 ms to the final screen.
+## The USP, measured (docs/agui.md "Benchmark", written from docs/goals/48/bench.json, 2026-11-04 07:39)
+Same 2302-event stream, median of 3; both web runners in the same Chromium. Re-run after the web host's frame fix
+(D-4747); the goal's own run (03:36, a loaded machine) had the web host at 73 dropped frames paced.
 
-| | first UI | final screen | dropped frames, paced |
-|---|---|---|---|
-| omxcode native GTK | 31 ms | 126 ms | 0 |
-| omxcode web host | 227 ms (loss) | 227 ms | 73 (loss) |
-| CopilotKit 1.84.1 | 166 ms | 562 ms | 0 |
+| | first UI | final screen | dropped frames, burst | dropped frames, paced |
+|---|---|---|---|---|
+| omxcode native GTK | 12 ms | 69 ms | 2 | 0 |
+| omxcode web host | 125 ms | 164 ms | 0 | 0 |
+| CopilotKit 1.84.1 | 129 ms | 565 ms | 3 (worst 233 ms) | 0 |
 
 Plus what CopilotKit doesn't do here: an agent in the app's own process (2,004 events in 26 ms), a chart over a million
 rows the agent never sends (0.3 ms on the GPU), the same app native and on the web.
@@ -57,11 +56,13 @@ use to freeze the UI, docs numbers older than bench.json, a stopped stream's pre
 living in mojoui, the M0/M1 proofs only partly strengthened).
 
 ## Honest limits
-- The web host drops frames under a steady stream (each change swaps DOM; long chats make it big). Next fix.
+- ~~The web host drops frames under a steady stream~~ fixed after the goal (D-4747): the cause was the page script
+  running five hooks per swapped element (2,722 `whole()` calls in one reply), not the DOM swaps; now 0 dropped frames
+  in both runs (CopilotKit: 3 in the burst). Full-screen swaps on a shape change remain (two 17 ms style passes).
 - MapView is the offline map (route, places, scale): no streets, coast or tiles.
 - CopilotKit was driven through its documented v1 frontend-tool render, not its new A2UI renderer; no A2UI wire support
   on our side yet.
 - Scripted agents only; no live model was run. Not run on the Mac or phone.
 
 ## What's next
-Make the web host patch only changed views (the dropped-frame loss), then A2UI messages on the same catalog.
+A2UI messages on the same catalog; then the web host patching only changed views on a shape change (no longer a measured loss).

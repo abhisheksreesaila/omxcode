@@ -443,6 +443,12 @@ def m5():
                     if not isinstance(row.get(f), (int, float)):
                         problems.append(f"bench.json {name} lacks {f}")
             notes.append("bench: " + ", ".join(f"{k} first UI {v.get('first_ui_ms')} ms, done {v.get('last_event_ms')} ms" for k, v in runners.items()))
+    import re as _re  # (D-4747: one timer per swapped element and hook dropped a third of the web host's frames)
+    if _re.search(r"htmx:oobAfterSwap', \(\) => setTimeout\(", (ROOT / "mojoui/hosts/web.py").read_text()):
+        problems.append("mojoui/hosts/web.py runs a hook per out-of-band swap again: use afterSwaps(fn) (once per answer)")
+    for hook in ("whole", "pin", "syncRoute", "copyAsked", "menus.place"):
+        if f"afterSwaps({hook})" not in (ROOT / "mojoui/hosts/web.py").read_text():
+            problems.append(f"mojoui/hosts/web.py no longer runs {hook} after out-of-band swaps (afterSwaps)")
     doc = (ROOT / "docs/agui.md").read_text()
     if "## Benchmark" not in doc:
         problems.append("docs/agui.md has no '## Benchmark' section")

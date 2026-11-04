@@ -195,6 +195,13 @@ MENU_JS = r"""
   new MutationObserver(() => document.querySelectorAll('i.mojoui-download').forEach(d => { d.remove();
     const a = document.createElement('a'); a.href = d.dataset.url; a.download = d.dataset.name || ''; document.body.append(a); a.click(); a.remove(); })
   ).observe(document.documentElement, { childList: true, subtree: true });  // (this script runs in the head: no body yet)
+  // After an answer's out-of-band swaps, each hook runs once, however many elements the answer swapped: one timer per
+  // element and hook ran whole() 2,700 times in one streamed reply, each a style-sheet walk and a forced layout,
+  // which dropped a third of the page's frames (goal 48)
+  const swapped = new Set(); let swapTimer = 0;
+  const afterSwaps = fn => document.addEventListener('htmx:oobAfterSwap', () => { swapped.add(fn);
+    if (!swapTimer) swapTimer = setTimeout(() => { swapTimer = 0; const fns = [...swapped]; swapped.clear();
+      for (const f of fns) try { f(); } catch (e) { console.error(e); } }, 0); });  // (one failing hook doesn't skip the rest)
   // Scroll(pinned): stays at its end as its content grows, unless scrolled up to read (back at the end, it follows again)
   const pin = () => document.querySelectorAll('.scroll[data-pin="1"]').forEach(e => { if (e.dataset.follow !== '0') e.scrollTop = e.scrollHeight; });
   document.addEventListener('scroll', e => { const t = e.target;
@@ -202,14 +209,25 @@ MENU_JS = r"""
   document.addEventListener('htmx:afterSettle', pin);
   // A role whose width is its content's in whole pixels (Surface.whole_width: the look writes --mojoui-whole-width), as
   // a script that sizes a pill from scrollWidth does (omxqua's Beacon): found by the rules that carry the marker
-  const whole = () => { const sel = [];
-    for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; }
-      for (const r of rules) if (r.style && r.style.getPropertyValue('--mojoui-whole-width')) sel.push(r.selectorText); }
-    if (sel.length) document.querySelectorAll(sel.join(', ')).forEach(e => { e.style.width = ''; e.style.width = e.scrollWidth + 'px'; }); };
+  // (the rules are read again only when the page's style sheets change; every width is cleared, then all are read in
+  // one layout, then set)
+  let wholeSheets = [], wholeSel = '';
+  const whole = () => { const sheets = [...document.styleSheets];
+    if (sheets.length !== wholeSheets.length || sheets.some((sh, i) => sh !== wholeSheets[i])) {
+      const sel = [];
+      for (const sh of sheets) { let rules; try { rules = sh.cssRules; } catch (e) { continue; }
+        for (const r of rules) if (r.style && r.style.getPropertyValue('--mojoui-whole-width')) sel.push(r.selectorText); }
+      wholeSheets = sheets; wholeSel = sel.join(', ');
+    }
+    if (!wholeSel) return;
+    const els = [...document.querySelectorAll(wholeSel)];
+    els.forEach(e => { e.style.width = ''; });
+    const widths = els.map(e => e.scrollWidth);
+    els.forEach((e, i) => { e.style.width = widths[i] + 'px'; }); };
   document.addEventListener('htmx:afterSettle', whole);
-  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(whole, 0));
+  afterSwaps(whole);
   addEventListener('load', whole);
-  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(pin, 0));
+  afterSwaps(pin);
   addEventListener('load', pin);
   // Route(path): the URL's hash is the app's place. A hash the app doesn't show (the page opened at a link, Back,
   // Forward, a typed URL) goes to the app as on_change; a path the app moves to is written to the URL as a new entry.
@@ -239,9 +257,9 @@ MENU_JS = r"""
   addEventListener('hashchange', tellRoute);
   addEventListener('popstate', tellRoute);
   document.addEventListener('htmx:afterSettle', syncRoute);
-  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(syncRoute, 0));
-  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(copyAsked, 0));
-  document.addEventListener('htmx:oobAfterSwap', () => setTimeout(menus.place, 0));
+  afterSwaps(syncRoute);
+  afterSwaps(copyAsked);
+  afterSwaps(menus.place);
   addEventListener('load', menus.place); addEventListener('resize', menus.place);
   // The app lays out to the window (App.resize): its size on load, then whenever it settles after a change.
   let sizeTimer = 0, sizeSent = '';
