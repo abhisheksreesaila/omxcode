@@ -20,11 +20,12 @@
 # Limit: Reply.stream(pipe, wait_head_ms) holds a server worker while it waits for the upstream's head, so a proxy to the
 # same server can wait on itself (its upstream request may land on that worker); proxy to another process (D-4777).
 # SIGTERM / SIGINT: Service.stop() runs under the lock, then the process exits (a byte on a socket; see _on_stop_signal).
+# One Server per process handles them (the first); a Service's ticker lives as long as the process.
 
 from std.os import getenv
 from std.sys import CompilationTarget, exit
 from std.memory.alloc import unsafe_alloc
-from std.ffi import c_int
+from std.ffi import c_int, get_errno, ErrNo
 from std.atomic import Atomic
 from mojoui import libc
 from mojoui.http import Request, utf8_lossy
@@ -528,31 +529,42 @@ struct Server:
     def run[S: Service](var service: S, port: Int, host: String = "127.0.0.1", workers: Int = 8, tick_ms: Int = 0) raises:
         """Serves until the process ends. `workers` reactors (threads) share the port; the app's answer() runs under one
         lock either way. `tick_ms` > 0: tick() that often, on a thread of its own."""
-        Server._block_stop_signals()
+        var handles_signals = Server._install_stop_handler()
         var srv = Server.bind(port, host)
         var state = Server._state(service^)
         if tick_ms > 0:
             Server._ticker[S](state, tick_ms)
-        Server._watch_stop[S](state)
+        if handles_signals:
+            Server._watch_stop[S](state)
         if workers <= 1:
             srv.serve(_Bridge[S](state))
         else:
             srv.serve(_Bridge[S](state), num_workers=workers, pin_cores=False)
 
     @staticmethod
-    def _block_stop_signals():
+    def _install_stop_handler() -> Bool:
         """SIGTERM and SIGINT turned into a byte on a socket (the self-pipe trick): Mojo has no globals for a handler to
         set, and the runtime's own threads exist before main, so blocking the signals can't cover them. The handler only
-        calls send() on the fixed descriptor STOP_FD (async-signal-safe, no memory); the stop watcher reads the byte."""
+        calls send() on the fixed descriptor STOP_FD (async-signal-safe, no memory); the stop watcher reads the byte.
+        One per process: False (no handler, no watcher) when STOP_FD or STOP_FD + 1 is already open (another Server in
+        this process has them, or the program uses those numbers) or the socket can't be made."""
+        if libc.fcntl(STOP_FD, 1) >= 0 or libc.fcntl(STOP_FD + 1, 1) >= 0:  # (F_GETFD: open already)
+            return False
         var fds = List[Int32](length=2, fill=-1)
         if libc.socketpair(1, 1, 0, Int(fds.unsafe_ptr())) != 0:  # (AF_UNIX, SOCK_STREAM)
-            return
-        _ = libc.dup2(Int(fds[1]), STOP_FD)
+            return False
+        var ok = libc.dup2(Int(fds[1]), STOP_FD) == STOP_FD and libc.dup2(Int(fds[0]), STOP_FD + 1) == STOP_FD + 1
         _ = libc.close(Int(fds[1]))
-        _ = libc.dup2(Int(fds[0]), STOP_FD + 1)
         _ = libc.close(Int(fds[0]))
+        if not ok:
+            _ = libc.close(STOP_FD)
+            _ = libc.close(STOP_FD + 1)
+            return False
+        _ = libc.fcntl(STOP_FD, 2, 1)  # (F_SETFD FD_CLOEXEC: children, max serve too, don't inherit them)
+        _ = libc.fcntl(STOP_FD + 1, 2, 1)
         _ = libc.signal(15, _on_stop_signal)
         _ = libc.signal(2, _on_stop_signal)
+        return True
 
     @staticmethod
     def _watch_stop[S: Service](state: Int) raises:
@@ -570,13 +582,14 @@ struct Server:
     @staticmethod
     def start[S: Service](var service: S, port: Int = 0, host: String = "127.0.0.1", workers: Int = 4, tick_ms: Int = 0) raises -> Int:
         """Serves on a thread of its own; returns the port (port 0: one the system picks)."""
-        Server._block_stop_signals()
+        var handles_signals = Server._install_stop_handler()
         var srv = Server.bind(port, host)
         var bound = Int(srv.local_addr().port)
         var st = Server._state(service^)
         if tick_ms > 0:
             Server._ticker[S](st, tick_ms)
-        Server._watch_stop[S](st)
+        if handles_signals:
+            Server._watch_stop[S](st)
         var job = unsafe_alloc[_Run[S]](1)
         job.unsafe_write(_Run[S](srv^, st, workers))
         var tid = List[Int](length=1, fill=0)
@@ -642,8 +655,8 @@ def _stop_loop[S: Service](state: Int):
         var n = libc.recv(STOP_FD + 1, Int(buf.unsafe_ptr()), 8, 0)
         if n > 0:
             break
-        if n == 0:
-            return  # (no stop socket: signals keep their default)
+        if n == 0 or get_errno() != ErrNo.EINTR:
+            return  # (the socket closed or failed: no stop through it, never a spin)
     _ = libc.pthread_mutex_lock(lock)
     app[].stop()
     _ = libc.pthread_mutex_unlock(lock)

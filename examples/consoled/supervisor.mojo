@@ -242,6 +242,7 @@ struct Supervisor(Movable):
         var keep = self.idle_override if self.idle_override > 0 else m.keep_alive
         var p = Process.start(self.command(m, port, gpu, total), self.log_path(m.name), self.child_env())
         self.children.append(Child(m.name, p^, port, gpu, keep))
+        self.gpu_at = 0  # (the next start reads nvidia-smi again: this model's memory isn't in the cached answer)
         return len(self.children) - 1
 
     def check_ready(mut self, i: Int) -> Bool:

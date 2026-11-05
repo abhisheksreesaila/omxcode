@@ -60,6 +60,8 @@ both (it looks the three disputed functions up at run time).
 ## Not done (later goals)
 Pulls and search over the network, bench, LAN expose, tray, the `omxc` CLI, the web build of the console (its host is
 FastHTML), and packs/YOLOX/decision models (goal 49's M2 and M4). The gallery card returns only when the owner says.
+Known limits (review notes): a Service's ticker lives as long as its process; one Server per process handles SIGTERM;
+FlareTransport sends an app's custom headers along redirects to other origins (Flare strips Authorization and cookies).
 
 ## Next
 Find goal 33's M5 cause on main (port probes vs. timer drift), then pulls/search over HTTPS and the `omxc` CLI.
