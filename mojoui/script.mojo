@@ -194,6 +194,18 @@ def parse_script(text: String) raises -> List[Statement]:
     return out^
 
 
+def is_script(text: String) -> Bool:
+    """True when `text` is a script rather than one plain query: a named result, a call, or more than one statement. One
+    bare SELECT, or text that doesn't parse, is plain SQL (an app's query bar runs it as before and reports its error)."""
+    try:
+        var st = parse_script(text)
+        if len(st) > 1:
+            return True
+        return len(st) == 1 and (st[0].name != "" or st[0].kind == STMT_FN)
+    except:
+        return False
+
+
 def bind_params(text: String, params: Dict[String, String]) raises -> String:
     """`text` with every ${name} replaced by its value, as written (raises for a name `params` doesn't have). Values go
     in as text, unquoted and unescaped: the script quotes them where it wants a string ('${episode}'); a value with a

@@ -102,6 +102,7 @@ from mojoui.tablejobs import TableWork, TableFile, Answer, ScriptAnswer
 from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS
 from mojoui.models import FRAME_MODELS
 from mojoui.scriptpanel import ScriptPanel, SP_RUN, SP_EXPORT, SP_OPEN, SP_CLOSED
+from mojoui.script import is_script
 from mojoui.recipe import Recipe, RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
@@ -3481,7 +3482,17 @@ struct Main(App):
         elif m == QUERY_BAR_RUN:
             if event.text != "":
                 self.query_text = event.text
-            self.run_query()
+            if is_script(self.query_text):  # (`name = …;` statements or a call: the Script window runs them, shown there)
+                self.script.open = True
+                var had = String(self.script.text.strip())
+                if had == "" or had.startswith("rows = SELECT * FROM "):  # (empty, or only the window's own start)
+                    self.script.set_text(self.query_text)
+                elif self.script.text.find(self.query_text) < 0:  # (a person's script stays: the paste goes below it)
+                    self.script.set_text(had + "\n\n" + self.query_text)
+                self.offer_script()
+                self.run_script()
+            else:
+                self.run_query()
         elif m == QUERY_CLOSE:
             self.query_open = False
             self.version += 1
@@ -4338,7 +4349,7 @@ struct Main(App):
         extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=OPEN_TYPES).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
         extra.append(FilePicker("Table", PICK_TABLE, style=TOOL_INLINE, icon="table", accept=".csv,.tsv,.txt,.parquet").tooltip("Insert a table: a CSV or Parquet file as a card beside the sheet's own (read in the background)").tag("insert-table"))
         extra.append(FilePicker("Documents", PICK_DOCS, style=TOOL_INLINE, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)").tag("insert-documents"))
-        extra.append(TextField(self.query_text, "query", on_change=QUERY_BAR, on_submit=QUERY_BAR_RUN).width(260).tag("query-bar").label("SQL query over the sheet's tables").tooltip("SQL over the sheet's tables (its own and every card's); Return runs it, the answer lands as a table card"))
+        extra.append(TextField(self.query_text, "query", on_change=QUERY_BAR, on_submit=QUERY_BAR_RUN).width(260).tag("query-bar").label("SQL query over the sheet's tables").tooltip("SQL over the sheet's tables (its own and every card's); Return runs it, the answer lands as a table card. A script (name = …; statements) opens in the Script window and runs there"))
         if self.sheet_tab == 1:
             return Toolbar(left, self.report_tools(), right, extra, before=self.report_controls(), after=self.filter_controls(), inline=True)  # (its tile tools share one icon: their titles stay)
         var middle = List[Tool]()

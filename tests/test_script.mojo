@@ -8,7 +8,7 @@ from omxcore import Catalog, Table, Frame as MxFrame, INT as MX_INT
 from std.os import getenv, makedirs
 from omxcore import JobCtl
 from mojoui.videoscript import VideoFunctions, frame_span
-from mojoui.script import parse_script, run_script, bind_params, params_of, last_call, strip_comments, ScriptFunctions, NoFunctions, STMT_SQL, STMT_FN
+from mojoui.script import parse_script, is_script, run_script, bind_params, params_of, last_call, strip_comments, ScriptFunctions, NoFunctions, STMT_SQL, STMT_FN
 from mojoui.recipe import RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheet import Sheet
 from mojoui.scriptpanel import ScriptPanel
@@ -78,6 +78,15 @@ def main() raises:
     assert_equal(u[1].name, "m")
     assert_equal(u[1].line, 4)
     assert_true(u[1].text.endswith("'ü' AS s"), u[1].text)
+    # is_script: a named result, a call or two statements is a script; one bare query (or a broken one) is plain SQL
+    assert_true(is_script("verbs = SELECT DISTINCT verb FROM fleet;\nclassified = classify(fleet, task, verbs, verb);"))
+    assert_true(is_script("rows = SELECT * FROM t"))
+    assert_true(is_script("regions(episode, 3.0, 8.0)"))
+    assert_true(is_script("SELECT 1; SELECT 2"))
+    assert_false(is_script("SELECT a = 1 FROM t;"))
+    assert_false(is_script("-- a comment\nSELECT * FROM t WHERE x = 'a;b'"))
+    assert_false(is_script("SELECT 'never closed"))
+    assert_false(is_script("WITH a AS (SELECT 1) SELECT * FROM a"))
     var open_quote = False
     try:
         _ = parse_script("a = SELECT 'oops FROM t;\nb = SELECT 1;")
