@@ -187,30 +187,30 @@ section .head { max-width: 860px; }
         <p><b>The page:</b> a title, the field with its Add button, the rows, and a count of what's left. The field sends <code>TYPING</code> as you type and <code>ADD</code> when you press Return. The <code>^</code> in <code>rows^</code> hands the list over instead of copying it.</p>
       </div>
       <div class="pane rv"><div class="file">examples/tasks/<b>app.mojo</b></div>
-<pre class="code" data-file="examples/tasks/app.mojo">    <span class="k">def</span> view(self) -&gt; View:
-        <span class="k">var</span> rows = List[View]()
-        <span class="k">var</span> left = 0
-        <span class="k">for</span> t <span class="k">in</span> self.tasks:
-            <span class="k">if</span> <span class="k">not</span> t.done:
-                left += 1
-            rows.append(HStack(
-                Checkbox(t.title, t.done, on_toggle=TICK + t.id).grow(),
-                Button(<span class="s">"Remove"</span>, on_tap=REMOVE + t.id).tooltip(<span class="s">"Remove "</span> + t.title),
-            ).fill())
-        <span class="k">if</span> len(rows) == 0:
-            rows.append(Text(<span class="s">"Nothing to do yet"</span>, style=CAPTION))
-        <span class="k">if</span> self.problem != <span class="s">""</span>:
-            rows.append(Text(self.problem, style=CAPTION))
-        <span class="k">return</span> VStack(
-            Text(<span class="s">"Tasks"</span>, style=TITLE),
-            HStack(
-                TextField(self.draft, placeholder=<span class="s">"What needs doing?"</span>, on_change=TYPING, on_submit=ADD).grow(),
-                Button(<span class="s">"Add"</span>, on_tap=ADD, style=PROMINENT),
-            ).fill(),
-            VStack(rows^, spacing=8).fill(),
-            Text(String(left) + <span class="s">" left"</span>, style=CAPTION),
-            spacing=16,
-        ).padding(8).width(360)</pre></div>
+<pre class="code" data-file="examples/tasks/app.mojo"><span class="k">def</span> view(self) -&gt; View:
+    <span class="k">var</span> rows = List[View]()
+    <span class="k">var</span> left = 0
+    <span class="k">for</span> t <span class="k">in</span> self.tasks:
+        <span class="k">if</span> <span class="k">not</span> t.done:
+            left += 1
+        rows.append(HStack(
+            Checkbox(t.title, t.done, on_toggle=TICK + t.id).grow(),
+            Button(<span class="s">"Remove"</span>, on_tap=REMOVE + t.id).tooltip(<span class="s">"Remove "</span> + t.title),
+        ).fill())
+    <span class="k">if</span> len(rows) == 0:
+        rows.append(Text(<span class="s">"Nothing to do yet"</span>, style=CAPTION))
+    <span class="k">if</span> self.problem != <span class="s">""</span>:
+        rows.append(Text(self.problem, style=CAPTION))
+    <span class="k">return</span> VStack(
+        Text(<span class="s">"Tasks"</span>, style=TITLE),
+        HStack(
+            TextField(self.draft, placeholder=<span class="s">"What needs doing?"</span>, on_change=TYPING, on_submit=ADD).grow(),
+            Button(<span class="s">"Add"</span>, on_tap=ADD, style=PROMINENT),
+        ).fill(),
+        VStack(rows^, spacing=8).fill(),
+        Text(String(left) + <span class="s">" left"</span>, style=CAPTION),
+        spacing=16,
+    ).padding(8).width(360)</pre></div>
     </div>
   </div>
 </section>
@@ -230,33 +230,33 @@ section .head { max-width: 860px; }
         <p>Then <code>load</code> reads the table again, and the screen follows. There's one source of truth, so the screen and the file can't drift apart. Remove is checked before Tick because its numbers are bigger.</p>
       </div>
       <div class="pane rv"><div class="file">examples/tasks/<b>app.mojo</b></div>
-<pre class="code" data-file="examples/tasks/app.mojo">    <span class="k">def</span> update(mut self, event: Event):
-        <span class="k">var</span> m = event.message
-        <span class="k">if</span> m == TYPING:
-            self.draft = event.text
-            <span class="k">return</span>
-        self.problem = <span class="s">""</span>
-        <span class="k">try</span>:
-            <span class="k">var</span> db = open_db()
-            <span class="k">if</span> m == ADD:
-                <span class="k">var</span> title = String(self.draft.strip())
-                <span class="k">if</span> title != <span class="s">""</span>:
-                    <span class="k">var</span> add = db.prepare(<span class="s">"INSERT INTO tasks(title, done) VALUES (?, 0)"</span>)
-                    add.bind(1, title)
-                    add.run()
-                self.draft = <span class="s">""</span>
-            <span class="k">elif</span> m &gt;= REMOVE:
-                <span class="k">var</span> remove = db.prepare(<span class="s">"DELETE FROM tasks WHERE id = ?"</span>)
-                remove.bind(1, m - REMOVE)
-                remove.run()
-            <span class="k">elif</span> m &gt;= TICK:
-                <span class="k">var</span> tick = db.prepare(<span class="s">"UPDATE tasks SET done = ? WHERE id = ?"</span>)
-                tick.bind(1, event.number)
-                tick.bind(2, m - TICK)
-                tick.run()
-            self.tasks = load(db)
-        <span class="k">except</span> e:
-            self.problem = String(e)</pre></div>
+<pre class="code" data-file="examples/tasks/app.mojo"><span class="k">def</span> update(mut self, event: Event):
+    <span class="k">var</span> m = event.message
+    <span class="k">if</span> m == TYPING:
+        self.draft = event.text
+        <span class="k">return</span>
+    self.problem = <span class="s">""</span>
+    <span class="k">try</span>:
+        <span class="k">var</span> db = open_db()
+        <span class="k">if</span> m == ADD:
+            <span class="k">var</span> title = String(self.draft.strip())
+            <span class="k">if</span> title != <span class="s">""</span>:
+                <span class="k">var</span> add = db.prepare(<span class="s">"INSERT INTO tasks(title, done) VALUES (?, 0)"</span>)
+                add.bind(1, title)
+                add.run()
+            self.draft = <span class="s">""</span>
+        <span class="k">elif</span> m &gt;= REMOVE:
+            <span class="k">var</span> remove = db.prepare(<span class="s">"DELETE FROM tasks WHERE id = ?"</span>)
+            remove.bind(1, m - REMOVE)
+            remove.run()
+        <span class="k">elif</span> m &gt;= TICK:
+            <span class="k">var</span> tick = db.prepare(<span class="s">"UPDATE tasks SET done = ? WHERE id = ?"</span>)
+            tick.bind(1, event.number)
+            tick.bind(2, m - TICK)
+            tick.run()
+        self.tasks = load(db)
+    <span class="k">except</span> e:
+        self.problem = String(e)</pre></div>
     </div>
   </div>
 </section>

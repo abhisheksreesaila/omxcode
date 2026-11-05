@@ -5,7 +5,8 @@ tutorial's app builds and does what its page says, on GTK, the web and through t
   pixi run python scripts/tutorials.py --shots  (also retakes the pages' pictures, docs/img/tasks/)
 
 A block is checked when its <pre> has data-file="examples/<app>/app.mojo": its text (tags stripped, entities
-unescaped) must appear in that file as it is, so a page can show a part of a file but never a version of it. Every page
+unescaped) must be a run of that file's lines as they are (with their common indent removed, so a part from inside a
+method can start at the margin), so a page can show a part of a file but never a version of it. Every page
 has at least one. A <pre data-output="gtk|agent"> shows what the app printed: each of its output lines (the
 <span class="o"> parts) must be a line the check's own run printed.
 """
@@ -16,6 +17,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +39,14 @@ def blocks(page):
         yield m.group(1), html.unescape(re.sub(r"<[^>]+>", "", m.group(2)))
 
 
+def is_part_of(text, path):
+    """text is a run of whole lines of the file at path, give or take the run's common indent."""
+    want = textwrap.dedent(text).strip("\n").split("\n")
+    have = (ROOT / path).read_text().split("\n")
+    n = len(want)
+    return any(textwrap.dedent("\n".join(have[i:i + n])).split("\n") == want for i in range(len(have) - n + 1))
+
+
 def code_matches():
     bad, n = [], 0
     for page in PAGES:
@@ -44,7 +54,7 @@ def code_matches():
             bad.append(f"{page}: no <pre data-file=…> block")
         for file, text in blocks(page):
             n += 1
-            if text.strip() not in (ROOT / file).read_text():
+            if not is_part_of(text, file):
                 first = next((l for l in text.splitlines() if l.strip() and l not in (ROOT / file).read_text()), "?")
                 bad.append(f"{page}: a block isn't {file}'s text (first line that differs: {first.strip()!r})")
     return n, bad
