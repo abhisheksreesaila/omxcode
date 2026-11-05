@@ -1,33 +1,35 @@
-# GOAL 50: the framework serves, fetches and supervises; omxconsole's daemon in Mojo on it
+# GOAL 52: everything on Mojo 1.2, Flare 0.13, and the engine beside Flare
 
-**End goal (owner, 2026-11-04):** "make OMX console completely … app native … a convenient wrapper on Max Serve. We
-don't want to be writing our own thing … the star of the show is OMX code … anything else … contribute to the
-framework … don't overfit OMX console … you don't have to write your HTTP server … There is Flare … I would rather trust
-that." Plan: docs/plans/omxconsole-native.md (D-4755, D-4756). Base: main bfacc58.
-**Framework first:** every generic piece is a `mojoui/` component with its own test; `examples/consoled` only composes.
+**End goal (owner, 2026-11-05):** "you can move to Mojo 1.2 .. not a big change anyway." Goal 35's draft
+(docs/goals/35-draft.md, its number later went to AG-UI) on top of goal 50 (branch goal-50-native 4352a74), which already
+did that draft's M2 (mojoui/libc.mojo + lint) and M4 (FlareTransport behind mojoui.http). The probe:
+docs/research/mojo12-flare.md (branch probe-mojo12). Worktree `../mojo-ui-g52`, branch goal-52-mojo12.
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/50-check.py`) |
+| # | Milestone | Proof (`docs/goals/52-check.py`) |
 |---|---|---|
-| M0 | Flare in the repo | Flare v0.12.0 (MIT, Mojo 1.1) and its json dependency vendored under `vendor/` with their licences and a NOTICE line; `scripts/flare_ffi.sh` builds its C shims against OpenSSL; `tests/test_flare_link.mojo` imports mojoui (http, effects, sqlite, app) and flare in one binary and prints `link: ok` |
-| M1 | HTTPS for every app | `mojoui.http` gains a Flare transport behind its `Transport` seam (D-320); `tests/test_http.mojo` passes on both transports against `scripts/http_server.py`; `tests/test_https.mojo` fetches a Hugging Face file over HTTPS on a worker and checks its size; hosts Flare can't reach (iOS, Android) keep the socket transport (builds checked: kit for iOS, todo for Android) |
-| M2 | `mojoui.serve`: any app answers HTTP | routes with path parameters, JSON bodies, status codes, headers, SSE streaming and a streaming proxy to an upstream, on Flare's server, from a Mojo app's own state; `tests/test_serve.mojo` (prints `serve: ok`), and from outside: curl reads a route and the OpenAI Python SDK reads a streamed chat from a scripted SSE route |
-| M3 | `mojoui.process`: children an app supervises | start with args, env and a log file; health by an HTTP probe; exit code and log tail on a crash; stop (TERM, then KILL after a grace time); idle stop; `tests/test_process.mojo` prints `process: ok` |
-| M4 | omxconsole's daemon in Mojo | `examples/consoled` (no Python) on mojoui.serve answers every GET the console's screens make (the 18 recorded in docs/goals/33/fixtures) with the same JSON shape as the original (keys and value types, compared recursively), from a copy of a real `~/.mxc/mst.db` read by mojoui.sqlite; labels and keys (create, rotate, delete; stored as the original's SHA-256 hex, so a key works with either daemon) persist across a restart; the console (examples/console, GTK) runs against it and its Overview, Models and Keys pages show the store's models (shots) |
-| M5 | LLMs through `max serve` | consoled starts `max serve` for Qwen2.5-0.5B-Instruct on `mojoui.process` when a model is loaded (admin load or the first `/v1` call), proxies `/v1/chat/completions` and `/v1/models` with a per-app key check (401 without), and the OpenAI Python SDK streams a chat reply through it; the request lands in the store's request log and `/admin/metrics`; idle unload stops the child |
-| M6 | All-Mojo, nothing regressed | while M5's chat runs, the process tree of consoled and the console has no Python except `max serve` (the named exception, D-4755); goal 48's M0 and goal 33's M5 (the console against the fixture server, GTK and web) still pass; `scripts/components.py` matrix fresh with serve, process and the Flare transport |
+| M0 | Its own env | `mojo --version` is 1.2 here and 1.1 in ../mojo-ui and ../mojo-ui-g50; this .pixi is a directory, not a symlink; pixi.toml pins `mojo >=1.2,<1.3` |
+| M1 | The engine on 1.2 | vendor/omxcore.mojoc is the 1.2 build of omxcore 834ef9a's archive plus `vendor/patches/omxcore-834ef9a-mojo12.patch` (scripts/engine_lineage.py proves it: archive diffed, patch applied, size within 0.1 %); the patch touches only lines 1.2 or M5 need; a program built for Linux and one compiled for the Mac target see the engine's GPU switch as they did on 1.1 (Linux on, macOS on) |
+| M2 | Flare 0.13 | vendor/flare is a Flare v0.13.x release (FLARE_VERSION, licences); the stream-body patch is kept only if 0.13 still drops the body (proved by a test either way); test_flare_link, test_https (a public site with the system CA bundle), test_serve, test_process, test_hash pass |
+| M3 | Everything on 1.2 | the sweep (scripts/sweep.py) builds every example for each platform it lists (linux, web, mac, ios, android) and every Mojo test in tests/; nothing that built or passed in the same sweep on goal-50-native under Mojo 1.1 (docs/goals/52/baseline.json, made in ../mojo-ui-g50) fails here; iPhone objects need no new `KGEN_` symbols; scripts/libc_lint.py passes |
+| M4 | omxconsole on 1.2 | goal 50's checker: M0–M5 PASS (a real Qwen chat through `max serve` and the Mojo gateway); M6 fails on nothing but what it failed on at goal 50 (goal 33's M5) |
+| M5 | The engine beside Flare | tests/test_engine_flare.mojo runs an engine job (omxcore's thread pool, a group-by on a Frame) and answers an HTTP request through mojoui.serve (Flare) in one program; omxcore's pthread_create / pthread_detach / strtod / read declarations match Flare's (the omxcore issue drafted at goal 50) |
+| M6 | The Mac on 1.2 | a fresh run on GitHub's Mac (scripts/mac-ci, side.mac_fresh) from these sources: maccheck's tests pass, omxplorer starts and draws, and the run's native GPU build used Mojo 1.2 |
+
+**Done means:** `scripts/check` prints PASS for M0–M6.
 
 ## Out of bounds
-Pushing or merging into main; the frozen `../mojo-ui-apple-test`; the running Python daemon on :11435 and the real
-`~/.mxc` (tests use copies under build/); pip; Mojo 1.2 (Flare 0.12 runs on 1.1); paid services, sign-ups or keys;
-lowering a proof or editing a milestone to pass.
+Pushing anything but the mac-test branch and the mac-ci release (scripts/mac-ci); committing to omxcore (~/Projects/mxframe,
+another session's) or filing issues anywhere; changing engine code beyond what 1.2 and M5 need; touching
+`../mojo-ui-apple-test`, the running Python daemon on :11435 or the real `~/.mxc`; `pip`; secrets; merging into main.
 
-## Assumptions (taken instead of asking)
-- Flare v0.12.0, not 0.13: 0.13 needs Mojo 1.2, which needs a new omxcore engine build (another repo); 0.12 has the
-  server, client, TLS and SSE (D-4757). The 1.2 move and Flare 0.13 come together later.
-- Pulls, search, bench, LAN expose, tray, the CLI and packs are later goals (packs: goal 49's M2); this goal proves the
-  daemon's spine: store, admin reads and writes, keys, `max serve`, the gateway.
-- The gallery card returns only after the owner looks (D-4735 was theirs).
+## Assumptions
+- The engine goes in as 834ef9a + a patch kept here (as Flare's is), not a new omxcore stable commit: omxcore's main is
+  busy with another session today; the patch is ready for its stable-engine process when the owner wants it.
+- Flare moves to 0.13 now because it's why 1.2 was wanted; the newest 0.13.x tag, sources vendored as before (D-4759).
+- "Nothing regressed" is measured against the same sweep on 1.1, not against a hand list: tests that need a server or
+  data they don't find fail on both and are listed, not counted.
+- 1.2's new "transfer has no effect" warnings are left alone (harmless; builds use --disable-warnings).
 
 ## Budget
-150 turns. Split a milestone that is too big and log the split.
+80 turns.

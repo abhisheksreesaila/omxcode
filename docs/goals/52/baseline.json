@@ -1,0 +1,1642 @@
+{
+ "root": "/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50",
+ "commit": "4352a74",
+ "mojo": "Mojo 1.1.0 (8189361e)",
+ "examples": {
+  "a11ycheck": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 71.7,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 32.8,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 50.0,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 25.6,
+    "tail": ""
+   }
+  },
+  "agentchat": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 145.8,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 101.2,
+    "tail": ""
+   }
+  },
+  "analytics": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 108.4,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 64.1,
+    "tail": ""
+   }
+  },
+  "catalog": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 75.3,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 38.2,
+    "tail": ""
+   }
+  },
+  "console": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 94.3,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 77.1,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 79.4,
+    "tail": ""
+   }
+  },
+  "consolekit": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 89.4,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 44.3,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 59.0,
+    "tail": ""
+   }
+  },
+  "dashboard": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 106.4,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 54.0,
+    "tail": ""
+   }
+  },
+  "dictate": {
+   "linux": {
+    "ok": false,
+    "code": 1,
+    "secs": 28.7,
+    "tail": "rom ./mojoui/tray.mojo:23:\n./mojoui/dbus.mojo:126:73: warning: 'unsafe_ptr' is deprecated, use 'ptr' instead\n        Int(i.as_c_string_span().unsafe_ptr()), Int(m.as_c_string_span().unsafe_ptr()), params, Int(0), c_int(0), c_int(-1), Int(0), cb, reply_slot)\n                                                    ~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~\n                                                                         ptr\n<unknown>:0: note: 'unsafe_ptr' declared here\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+   },
+   "mac": {
+    "ok": false,
+    "code": 1,
+    "secs": 22.7,
+    "tail": "t away, we were killed)\n                                                ~~~^~~\n<unknown>:0: note: '__getitem__' declared here\nImported from /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/hosts/mac_main.mojo:5:\nImported from examples/dictate/app.mojo:15:\n./mojoui/audio.mojo:120:24: warning: positional `__getitem__` is deprecated, use `unsafe_offset=` instead\n            var v = buf[i]\n                    ~~~^~~\n<unknown>:0: note: '__getitem__' declared here\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+   }
+  },
+  "expenses": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 62.2,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 31.6,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 53.0,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 31.7,
+    "tail": ""
+   }
+  },
+  "fieldcheck": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 71.5,
+    "tail": ""
+   }
+  },
+  "gallery": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 73.5,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 34.4,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 49.4,
+    "tail": ""
+   },
+   "ios": {
+    "ok": false,
+    "code": 1,
+    "secs": 36.8,
+    "tail": " '_' instead?\n    var http11 = False\n                 ^\n WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\n WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\nld64.lld: error: undefined symbol: _getenv\n>>> referenced by build/gallery/ios/app.o:(symbol _app::Main::__init__()+0x38)\n"
+   }
+  },
+  "gpu": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 75.1,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 32.3,
+    "tail": ""
+   }
+  },
+  "hello": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 65.7,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 25.9,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 49.2,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 30.9,
+    "tail": ""
+   }
+  },
+  "httpcheck": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 65.6,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 34.6,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 47.1,
+    "tail": ""
+   }
+  },
+  "jobwake": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 64.3,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 32.1,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 46.5,
+    "tail": ""
+   }
+  },
+  "jot": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 71.9,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 30.2,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 49.1,
+    "tail": ""
+   }
+  },
+  "keeper": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 73.1,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 53.8,
+    "tail": ""
+   }
+  },
+  "kit": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 65.2,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 31.6,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 50.5,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 27.6,
+    "tail": ""
+   }
+  },
+  "kitchen": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 60.9,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 27.7,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 45.0,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 26.7,
+    "tail": ""
+   }
+  },
+  "layout": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 60.0,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 24.4,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 39.1,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 25.6,
+    "tail": ""
+   }
+  },
+  "lens": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 64.1,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 25.2,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 44.8,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 25.1,
+    "tail": ""
+   }
+  },
+  "maccheck": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 61.3,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 34.5,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 49.2,
+    "tail": ""
+   }
+  },
+  "media": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 82.4,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 57.3,
+    "tail": ""
+   }
+  },
+  "mxstudio": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 74.5,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 39.7,
+    "tail": ""
+   }
+  },
+  "omxplorer": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 222.2,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 160.1,
+    "tail": ""
+   },
+   "mac": {
+    "ok": false,
+    "code": 1,
+    "secs": 154.0,
+    "tail": "ild/omxplorer/mac/app.o:(symbol _mojoui::documentset::documents_in(::String)+0x19c)\n>>> referenced by build/omxplorer/mac/app.o:(symbol _mojoui::documentset::documents_in(::String)+0x134)\n\nld64.lld: error: undefined symbol: _opendir\n>>> referenced by build/omxplorer/mac/app.o:(symbol _mojoui::documentset::documents_in(::String)+0xf4)\n\nld64.lld: error: undefined symbol: _pthread_mutex_destroy\n>>> referenced by build/omxplorer/mac/app.o:(symbol _mojoui::framefeed::_release(::SIMD[DType.int, 1])+0x60)\n\nld64.lld: error: too many errors emitted, stopping now (use --error-limit=0 to see all errors)\n"
+   }
+  },
+  "particles": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 61.4,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 28.3,
+    "tail": ""
+   }
+  },
+  "sketch": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 53.1,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 21.9,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 34.3,
+    "tail": ""
+   }
+  },
+  "slowcheck": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 42.0,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 17.6,
+    "tail": ""
+   },
+   "mac": {
+    "ok": false,
+    "code": 1,
+    "secs": 35.5,
+    "tail": "pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\n WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\nld64.lld: error: undefined symbol: _nanosleep\n>>> referenced by build/slowcheck/mac/app.o:(symbol _mojoui::app::Runtime::_update(mojoui::app::Runtime[$0],mojoui::app::Event),A=[typevalue<#kgen.instref<app::Main>>, struct<(scalar<index>) memoryOnly>]+0x7c)\n"
+   },
+   "android": {
+    "ok": true,
+    "code": 0,
+    "secs": 40.4,
+    "tail": ""
+   }
+  },
+  "start": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 43.0,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 23.9,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 32.8,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 22.9,
+    "tail": ""
+   }
+  },
+  "themes": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 53.9,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 27.4,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 41.9,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 28.5,
+    "tail": ""
+   }
+  },
+  "todo": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 43.8,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 19.5,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 29.8,
+    "tail": ""
+   },
+   "ios": {
+    "ok": true,
+    "code": 0,
+    "secs": 18.5,
+    "tail": ""
+   },
+   "android": {
+    "ok": true,
+    "code": 0,
+    "secs": 42.9,
+    "tail": ""
+   }
+  },
+  "traycheck": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 45.2,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 32.2,
+    "tail": ""
+   }
+  },
+  "widgets": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 57.9,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 25.6,
+    "tail": ""
+   },
+   "mac": {
+    "ok": true,
+    "code": 0,
+    "secs": 38.6,
+    "tail": ""
+   }
+  },
+  "workbook": {
+   "linux": {
+    "ok": true,
+    "code": 0,
+    "secs": 60.8,
+    "tail": ""
+   },
+   "web": {
+    "ok": true,
+    "code": 0,
+    "secs": 33.7,
+    "tail": ""
+   }
+  }
+ },
+ "tests": {
+  "test_a11y": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.5,
+   "tail": ""
+  },
+  "test_activity": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.3,
+   "tail": ""
+  },
+  "test_agent_link": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.1,
+   "tail": ""
+  },
+  "test_agentchat": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 22.4,
+   "tail": ""
+  },
+  "test_agui": {
+   "built": true,
+   "passed": false,
+   "code": -4,
+   "secs": 26.1,
+   "tail": ",dtype=index,length=1>>, scalar<index>],[typevalue<#kgen.instref<std::collections::string::string::String>>, struct<(pointer<none>, scalar<index>, scalar<index>) memoryOnly>]] test_agui.mojo:0:0\n #6 0x0000590eaadebaa8 test_agui::main() test_agui.mojo:0:0\n #7 0x0000590eaadf4b68 main (/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/build/sweep/test_agui+0x18b68)\n #8 0x00007a1bab027781 (/usr/lib/libc.so.6+0x27781)\n #9 0x00007a1bab0278b9 __libc_start_main (/usr/lib/libc.so.6+0x278b9)\n#10 0x0000590eaadde4e5 _start (/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/build/sweep/test_agui+0x24e5)\n"
+  },
+  "test_agui_stream": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 21.3,
+   "tail": ""
+  },
+  "test_analytics": {
+   "built": false,
+   "passed": false,
+   "code": 1,
+   "secs": 0.6,
+   "tail": " WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_analytics.mojo:6:6: error: unable to locate module 'app'\nfrom app import Main, keep, month_of, by_month, by_category, DAYS, MONTHS\n     ^\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+  },
+  "test_asksql": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 7.1,
+   "tail": ""
+  },
+  "test_audio": {
+   "built": false,
+   "passed": false,
+   "code": 1,
+   "secs": 1.0,
+   "tail": " WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\nImported from /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_audio.mojo:7:\n./mojoui/audio.mojo:16:26: error: package 'mojoui' does not contain 'OwnedDLHandle'\nfrom mojoui import libc, OwnedDLHandle\n                         ^\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+  },
+  "test_audio_fail": {
+   "built": false,
+   "passed": false,
+   "code": 1,
+   "secs": 0.9,
+   "tail": " WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\nImported from /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_audio_fail.mojo:10:\n./mojoui/audio.mojo:16:26: error: package 'mojoui' does not contain 'OwnedDLHandle'\nfrom mojoui import libc, OwnedDLHandle\n                         ^\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+  },
+  "test_audio_stamp": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.2,
+   "tail": ""
+  },
+  "test_block_style": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 7.2,
+   "tail": ""
+  },
+  "test_breadcrumbs": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.3,
+   "tail": ""
+  },
+  "test_buttons": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 14.2,
+   "tail": ""
+  },
+  "test_calendar": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 36.1,
+   "tail": ""
+  },
+  "test_canvas": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 18.6,
+   "tail": ""
+  },
+  "test_canvas_blend": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 9.1,
+   "tail": ""
+  },
+  "test_canvas_present": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 9.5,
+   "tail": ""
+  },
+  "test_cellstyle": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 27.4,
+   "tail": ""
+  },
+  "test_chart_job": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 43.7,
+   "tail": ""
+  },
+  "test_chartask": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 24.0,
+   "tail": ""
+  },
+  "test_chartmove": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 8.5,
+   "tail": ""
+  },
+  "test_charts": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 8.7,
+   "tail": ""
+  },
+  "test_chartspec": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 43.9,
+   "tail": ""
+  },
+  "test_chip": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.3,
+   "tail": ""
+  },
+  "test_codeblock": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.6,
+   "tail": ""
+  },
+  "test_components": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 11.6,
+   "tail": ""
+  },
+  "test_confirm": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.8,
+   "tail": ""
+  },
+  "test_console_api": {
+   "built": false,
+   "passed": false,
+   "code": 1,
+   "secs": 0.5,
+   "tail": " WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_console_api.mojo:4:6: error: unable to locate module 'api'\nfrom api import chat_curl\n     ^\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+  },
+  "test_console_places": {
+   "built": false,
+   "passed": false,
+   "code": 1,
+   "secs": 0.5,
+   "tail": " WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_console_places.mojo:4:6: error: unable to locate module 'places'\nfrom places import Place, parse_route, route_for, crumbs_for\n     ^\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+  },
+  "test_copy": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 15.0,
+   "tail": ""
+  },
+  "test_csvio": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 37.6,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: couldn't read build/data/orders_1m.csv as CSV: couldn't open `build/data/orders_1m.csv`: no such file, or no permission to read it\n"
+  },
+  "test_datagrid": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 9.5,
+   "tail": ""
+  },
+  "test_devgroup": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 9.5,
+   "tail": ""
+  },
+  "test_devrows": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 17.6,
+   "tail": ""
+  },
+  "test_diff_keep": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 5.2,
+   "tail": ""
+  },
+  "test_document": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 17.6,
+   "tail": ""
+  },
+  "test_document_jobs": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 10.0,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: [Errno 2] No such file or directory: 'build/g41/data/bol'\n"
+  },
+  "test_documents": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 13.9,
+   "tail": "texttable: ok\nform fields: ok\nstack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: [Errno 2] No such file or directory: 'build/g41/data/bol'\n"
+  },
+  "test_documentset": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 11.8,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: no PDF documents in build/g41/data/bol\n"
+  },
+  "test_dragdrop": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.0,
+   "tail": ""
+  },
+  "test_drone": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 10.1,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: Failed to open file 'build/g39/media/telemetry_a.csv': No such file or directory\n"
+  },
+  "test_embed": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.8,
+   "tail": ""
+  },
+  "test_expenses": {
+   "built": false,
+   "passed": false,
+   "code": 1,
+   "secs": 0.7,
+   "tail": " WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_expenses.mojo:4:6: error: unable to locate module 'app'\nfrom app import parse_cents, money\n     ^\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+  },
+  "test_export": {
+   "built": true,
+   "passed": false,
+   "code": -13,
+   "secs": 13.4,
+   "tail": "[out#0/mp4 @ 0x606e398f6980] Error opening output build/g39/export-probe.mp4: No such file or directory\nError opening output file build/g39/export-probe.mp4.\nError opening output files: No such file or directory\n"
+  },
+  "test_feedback": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 14.7,
+   "tail": ""
+  },
+  "test_fields": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 14.0,
+   "tail": ""
+  },
+  "test_file_io_views": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.2,
+   "tail": ""
+  },
+  "test_findlike": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 13.0,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: No module named 'torch'\n"
+  },
+  "test_flare_link": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 32.3,
+   "tail": ""
+  },
+  "test_float_column": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 13.2,
+   "tail": ""
+  },
+  "test_frame": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 8.5,
+   "tail": ""
+  },
+  "test_frame_gpu": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 30.3,
+   "tail": ""
+  },
+  "test_genui": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 49.6,
+   "tail": ""
+  },
+  "test_gpu_canvas_gate": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.2,
+   "tail": ""
+  },
+  "test_grid_keys": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 10.4,
+   "tail": ""
+  },
+  "test_gtk_webview": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 5.2,
+   "tail": ""
+  },
+  "test_hash": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.3,
+   "tail": ""
+  },
+  "test_header": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 12.6,
+   "tail": ""
+  },
+  "test_http": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 18.5,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: At /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_http.mojo:104:16: AssertionError: set HTTP_TEST_URL (scripts/http_server.py)\n"
+  },
+  "test_https": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 14.5,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: https://huggingface.co/api/models/Qwen/Qwen2.5-0.5B-Instruct/tree/main: https needs a TLS backend (flare, Mojo \u2265 1.2); this build has plain HTTP only\n"
+  },
+  "test_imageops": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 7.8,
+   "tail": ""
+  },
+  "test_ink": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.2,
+   "tail": ""
+  },
+  "test_island": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 6.1,
+   "tail": ""
+  },
+  "test_jobs": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.6,
+   "tail": ""
+  },
+  "test_json": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 6.5,
+   "tail": ""
+  },
+  "test_jsonpatch": {
+   "built": true,
+   "passed": false,
+   "code": -4,
+   "secs": 9.2,
+   "tail": " scalar<index>],[typevalue<#kgen.instref<std::collections::string::string::String>>, struct<(pointer<none>, scalar<index>, scalar<index>) memoryOnly>]] test_jsonpatch.mojo:0:0\n #6 0x000059b5c33f2bbc test_jsonpatch::main() test_jsonpatch.mojo:0:0\n #7 0x000059b5c33f5288 main (/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/build/sweep/test_jsonpatch+0xb288)\n #8 0x000078698a227781 (/usr/lib/libc.so.6+0x27781)\n #9 0x000078698a2278b9 __libc_start_main (/usr/lib/libc.so.6+0x278b9)\n#10 0x000059b5c33ec3f5 _start (/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/build/sweep/test_jsonpatch+0x23f5)\n"
+  },
+  "test_linebreak": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 5.4,
+   "tail": ""
+  },
+  "test_links": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 31.0,
+   "tail": "or: Mojo precompiled file is incompatible with the current version of the Mojo compiler. Precompiled file 'vendor/omxcore.mojoc' version 1.1.0 is older than compiler version 1.2.0. To proceed, recreate the precompiled file with `mojo precompile`, or use the version of the compiler it was created with.\nfrom omxcore import (Frame as MxFrame, Table, SharedTable, DeviceTable, Query, Expr, col, sum, count, min_of, max_of, count_distinct, median, percentile,\n     ^\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n\n"
+  },
+  "test_linkui": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 18.9,
+   "tail": ""
+  },
+  "test_lists": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 13.1,
+   "tail": ""
+  },
+  "test_local_agent": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 64.0,
+   "tail": ""
+  },
+  "test_logview": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.7,
+   "tail": ""
+  },
+  "test_look": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 18.0,
+   "tail": ""
+  },
+  "test_markdown": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 8.7,
+   "tail": ""
+  },
+  "test_marks": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 14.6,
+   "tail": ""
+  },
+  "test_mediacard": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 11.1,
+   "tail": "[in#0 @ 0x5bba57dad900] Error opening input: No such file or directory\nError opening input file build/g39/media/warehouse.mp4.\nError opening input files: No such file or directory\nstack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: VideoSource: no such file: build/g39/m6-still.jpg\n"
+  },
+  "test_mediatimeline": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 18.4,
+   "tail": "clips: split, trim, handles, delete, undo, spans\ngeometry: x\u2194t at 5 zooms, 9 tiles at fit, 10 zoomed\nlanes: dots, flagged pills stacked, cut-it clips, values\nstack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: VideoSource: no such file: build/g39/media/drone_a.mp4\n"
+  },
+  "test_menus": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.6,
+   "tail": ""
+  },
+  "test_meter": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 14.7,
+   "tail": ""
+  },
+  "test_mojoui": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 19.7,
+   "tail": ""
+  },
+  "test_omx_components": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 7.2,
+   "tail": ""
+  },
+  "test_omx_files": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 21.6,
+   "tail": ""
+  },
+  "test_orders": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 9.9,
+   "tail": ""
+  },
+  "test_overlays": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.8,
+   "tail": ""
+  },
+  "test_packpdf": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 7.5,
+   "tail": " collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: the pack's PDF failed (build/g41/test_pack.pdf): ine 66, in video_frame\n    raise RuntimeError(f\"ffmpeg couldn't take the frame at {t:.3f} s of {block['path']}: {r.stderr.decode()[-300:]}\")\nRuntimeError: ffmpeg couldn't take the frame at 5.350 s of build/g41/data/dock.mp4: [in#0 @ 0x5fe694c74940] Error opening input: No such file or directory\nError opening input file build/g41/data/dock.mp4.\nError opening input files: No such file or directory\n\n\n"
+  },
+  "test_panel": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 16.3,
+   "tail": ""
+  },
+  "test_paragraph": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.7,
+   "tail": ""
+  },
+  "test_parquet_import": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 34.5,
+   "tail": ""
+  },
+  "test_player": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 12.4,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: No such file: build/g39/media/drone_a.mp4\n"
+  },
+  "test_png": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 7.0,
+   "tail": ""
+  },
+  "test_pointcloud_step": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 10.1,
+   "tail": ""
+  },
+  "test_process": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 10.0,
+   "tail": ""
+  },
+  "test_regions": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 6.8,
+   "tail": ""
+  },
+  "test_report": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 9.7,
+   "tail": ""
+  },
+  "test_report_stats": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 42.1,
+   "tail": ""
+  },
+  "test_results": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 15.6,
+   "tail": ""
+  },
+  "test_robot_follow": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 23.7,
+   "tail": "follow: ok\nindex: ok\nslice: ok\nmoment: ok\ncard: ok\nstack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: No such file: build/g47/full/clips/F00118.mp4\n"
+  },
+  "test_route": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 6.5,
+   "tail": ""
+  },
+  "test_sample": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 5.4,
+   "tail": ""
+  },
+  "test_scene": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 9.3,
+   "tail": ""
+  },
+  "test_scene_polygon": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 8.0,
+   "tail": ""
+  },
+  "test_sentence": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 5.0,
+   "tail": ""
+  },
+  "test_serve": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 53.9,
+   "tail": ""
+  },
+  "test_sheetpage": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 38.2,
+   "tail": ""
+  },
+  "test_shell": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 14.5,
+   "tail": ""
+  },
+  "test_sidebar": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 14.3,
+   "tail": ""
+  },
+  "test_skeleton": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 3.3,
+   "tail": ""
+  },
+  "test_sparkline": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 5.1,
+   "tail": ""
+  },
+  "test_speech": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 7.5,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: ModuleNotFoundError: No module named 'torch'\n"
+  },
+  "test_speech_errors": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 6.5,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: ModuleNotFoundError: No module named 'torch'\n"
+  },
+  "test_sqlite": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 5.7,
+   "tail": ""
+  },
+  "test_stream": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 20.5,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: At /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_stream.mojo:113:16: AssertionError: set STREAM_TEST_URL (scripts/http_server.py)\n"
+  },
+  "test_streamed": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 66.7,
+   "tail": ""
+  },
+  "test_table": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.0,
+   "tail": ""
+  },
+  "test_tablejobs": {
+   "built": true,
+   "passed": false,
+   "code": "timeout",
+   "secs": 379.2,
+   "tail": ""
+  },
+  "test_tableprep": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 6.8,
+   "tail": ""
+  },
+  "test_telemetry": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 8.0,
+   "tail": ""
+  },
+  "test_text": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 5.5,
+   "tail": ""
+  },
+  "test_text_order": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 17.6,
+   "tail": ""
+  },
+  "test_textformat": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.1,
+   "tail": ""
+  },
+  "test_theme": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 9.6,
+   "tail": "OMARCHY: dark=True accent=#89b4fa card=#1e1e2e ink=#cdd6f4\nstack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: At /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_theme.mojo:47:17: AssertionError: `left == right` comparison failed:\n   left: #3ccf6e\n  right: #f5a524\n"
+  },
+  "test_theme_tokens": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 15.5,
+   "tail": ""
+  },
+  "test_tiling": {
+   "built": false,
+   "passed": false,
+   "code": 1,
+   "secs": 0.4,
+   "tail": " WARN Using local manifest /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/pixi.toml rather than /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g52/pixi.toml from environment variable `PIXI_PROJECT_MANIFEST`\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_tiling.mojo:6:13: error: unable to locate module 'tiling'\nfrom mojoui.tiling import Place, per_row, tile_insert, tile_remove, snap_move, snap_resize, GAP\n            ^\n/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/.pixi/envs/default/bin/mojo: error: failed to parse the provided Mojo source module\n"
+  },
+  "test_timeline": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 4.5,
+   "tail": ""
+  },
+  "test_trackcard": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 31.1,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: couldn't read build/g39/media/telemetry_a.csv as CSV: couldn't open `build/g39/media/telemetry_a.csv`: no such file, or no permission to read it\n"
+  },
+  "test_tray": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 4.3,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: no panel on the bus, yet watcher=True registered=True\n"
+  },
+  "test_video": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 9.5,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: 'streams'\n"
+  },
+  "test_videocard": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 23.5,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: No such file: build/g39/media/warehouse.mp4\n"
+  },
+  "test_videojobs": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 79.1,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: At /home/abhisheksreesaila/Projects/mxapp/mojo-ui-g50/tests/test_videojobs.mojo:53:17: AssertionError: `left == right` comparison failed:\n   left: 2\n  right: 1\n"
+  },
+  "test_videotable": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 9.2,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: VideoSource: no such file: build/g39/media/warehouse.mp4\n"
+  },
+  "test_visionmodel": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 11.9,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: VideoSource: no such file: build/g39/media/warehouse.mp4\n"
+  },
+  "test_watch": {
+   "built": true,
+   "passed": false,
+   "code": 1,
+   "secs": 5.9,
+   "tail": "stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`\nUnhandled exception caught during execution: set MOJOUI_WATCH_DIR\n"
+  },
+  "test_watch_edges": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 9.9,
+   "tail": ""
+  },
+  "test_webcomponent": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 18.3,
+   "tail": ""
+  },
+  "test_words": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 12.9,
+   "tail": ""
+  },
+  "test_workbook": {
+   "built": true,
+   "passed": true,
+   "code": 0,
+   "secs": 13.9,
+   "tail": ""
+  }
+ }
+}
