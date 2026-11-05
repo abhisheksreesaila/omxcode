@@ -1072,3 +1072,10 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - Regression: omxplorer failed on strtod (the engine's csv.mojo declares (Int, Int)); the engine also declares pthread_create/pthread_detach its own way. Calling those three through dlsym fixes both sides (D-4764).
 - test_http had to be started with HTTP_TEST_URL/DEAD/SECRET (my check launched the server bare): fixed the check, not the proof (D-4762).
 - HTTPS: Qwen2.5-0.5B-Instruct's config.json, 659 bytes = the HF file list's size, through effects on a worker.
+- mojoui.serve, first run: the server listened but never accepted (Recv-Q 11): the binary ran outside pixi and Flare's dlopen of libflare_tls.so failed in every worker (only visible with one worker, which raises in main). RUNPATH fix (D-4767).
+- Handler calls with user agent "node" on any port I open: another program on this machine probes ports; not Flare.
+- `spawn[f: def(Int) -> None]` refuses a plain def ("a thin function cannot bind to a closure trait"): parameter type `def(Int) thin -> None`.
+- `Atomic.fetch_sub` isn't static; mojoui uses `_A.fetch_add(ptr, -1)`.
+- test_serve: 50 parallel read-modify-writes all counted (the lock); 6 SSE events over 301 ms with a request answered meanwhile in 6 ms; the proxy relays them at the same pace; a dead upstream is a 502.
+- M2: the OpenAI Python SDK streamed 12 pieces from tests/serve_demo.mojo.
+- Note: this worktree's .pixi was copied (reflink) from mojo-ui-omxcode's; the Mojo it runs still points at that env's lib paths (RUNPATH shows them). Same Mojo 1.1; new packages (openai) went into this copy only.

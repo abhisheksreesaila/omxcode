@@ -7,4 +7,7 @@ cd "$(dirname "$0")/.."
 bash scripts/flare_ffi.sh >/dev/null
 source scripts/mxlink.sh
 cmd=$1; shift
-exec pixi run mojo "$cmd" --disable-warnings -D MOJOUI_FLARE -I . -I vendor "$@" "${LINK[@]}"
+# Flare dlopens its shims by bare name: the binary's RUNPATH finds them beside it ($ORIGIN, where a shipped app puts them)
+# or in build/flare/lib, so it runs outside pixi too.
+FLARE_RPATH=(-Xlinker -rpath -Xlinker '$ORIGIN' -Xlinker -rpath -Xlinker "$PWD/build/flare/lib")
+exec pixi run mojo "$cmd" --disable-warnings -D MOJOUI_FLARE -I . -I vendor "$@" "${LINK[@]}" "${FLARE_RPATH[@]}"
