@@ -37,13 +37,16 @@ def oks(cmd, labels, timeout=1800):
     return (r.returncode == 0 and not missing), out, missing
 
 
-def mojo_test(src, labels, timeout=1800):
+def mojo_test(src, labels, timeout=1800, env=None):
     """Build a test with the vendored engine (scripts/mxbuild.sh: -I vendor) and run it; (ok, output, missing labels)."""
     exe = ROOT / "build" / Path(src).stem
     b = run(["scripts/mxbuild.sh", src, "-o", str(exe)], timeout)
     if b.returncode:
         return False, b.stdout + b.stderr, labels
-    return oks([str(exe)], labels, timeout)
+    r = subprocess.run([str(exe)], cwd=ROOT, capture_output=True, text=True, timeout=timeout, env=dict(os.environ, **(env or {})))
+    out = r.stdout + r.stderr
+    missing = [l for l in labels if not re.search(rf"^{re.escape(l)}: ok", out, re.M)]
+    return (r.returncode == 0 and not missing), out, missing
 
 
 def frames_of(path):
@@ -178,8 +181,15 @@ def m4():
 
 def m5():
     bad = []
-    for t in ("tests/test_asksql.mojo", "tests/test_tablejobs.mojo", "tests/test_videotable.mojo"):
-        ok, out, _ = mojo_test(t, [])
+    media, g39 = ROOT / "build/g39/media", ROOT / "build/g39"  # (goal 39's generated warehouse: the tests' media)
+    if not (media / "truth.json").exists():
+        r = run([sys.executable, "scripts/media_data.py", str(media)], 3600)
+        if r.returncode:
+            return False, "media_data.py: " + (r.stdout + r.stderr)[-400:]
+    env = {"G39_MEDIA": str(media), "G39_OUT": str(g39)}
+    for t, labels in (("tests/test_asksql.mojo", ["implied", "lineage", "book", "chain"]), ("tests/test_tablejobs.mojo", ["tablejobs"]),
+                      ("tests/test_videotable.mojo", ["videotable"])):
+        ok, out, _ = mojo_test(t, labels, env=env)
         if not ok:
             bad.append(f"{t}: {out[-300:]}")
     r = run(["pixi", "run", "python", "docs/goals/47-check.py", "M2", "M4"], 7200)
