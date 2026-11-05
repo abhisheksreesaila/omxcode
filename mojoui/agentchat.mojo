@@ -1,8 +1,9 @@
 # mojoui.agentchat: a chat on an AG-UI agent that any app drops in (goal 48 M3): a panel, a sidebar or a popup.
 # Streaming words as Markdown (code blocks get a Copy button), a typing indicator, Send that becomes Stop, a list that
 # follows the newest words and lets go when the reader scrolls up, suggestion chips (the app's, or the agent's CUSTOM
-# "suggestions" event), Copy and Regenerate on replies, an error with Retry, tool calls with their status, the agent's
-# UI (render_ui: mojoui.genui, validated, native), and new messages arriving on a spring (View.arrive()).
+# "suggestions" event), the model's thinking (live, then a folded "Thought"), Copy and Regenerate on replies, an error
+# with Retry, tool calls with their status, the agent's UI (render_ui: mojoui.genui, validated, native), and new messages
+# arriving on a spring (View.arrive()).
 #
 #   var chat = AgentChat("http://127.0.0.1:8765/", base=20_000, canvas_base=2000, title="Assistant")
 #   chat.suggest("Show me sales as a chart")
@@ -20,6 +21,7 @@ from mojoui.markdown import Markdown
 from mojoui.codeblock import CodeBlock
 from mojoui.chip import Chip
 from mojoui.feedback import Note, Warning
+from mojoui.disclosure import Disclosure
 from mojoui.timeline import Timeline, Stage, STAGE_RUNNING, STAGE_DONE
 from mojoui.app import Event
 from mojoui.canvas import Surface
@@ -28,7 +30,7 @@ from mojoui.http import Http, Request
 from mojoui.json import Json, json_string, J_ARRAY, J_STRING
 from mojoui.agui import (
     Agent, Tool, LocalAgent, ToolCall, Message, EV_TEXT, EV_TOOL_START, EV_TOOL_ARGS, EV_TOOL_END, EV_TOOL_RESULT, EV_STATE,
-    EV_STREAM_END, EV_CUSTOM, EV_RUN_ERROR,
+    EV_STREAM_END, EV_CUSTOM, EV_RUN_ERROR, EV_REASONING,
 )
 from mojoui.genui import schema, MAX_CONTROLS, MAX_NODES
 from mojoui.datahub import Hub, NoData
@@ -51,6 +53,7 @@ comptime C_URL = 8
 comptime C_SUGGEST = 20  # + k (k < 20)
 comptime C_INTERRUPT = 40  # + option (< 8): an interrupt's choice
 comptime C_COPY = 1000  # + message index (< 1000): copy that reply (later ones have no Copy)
+comptime C_THOUGHT = 2000  # + message index (< 1000): fold or unfold that thinking
 comptime C_CODE = 3000  # + message index × 8 + block (< 8): copy that code block (messages < 500: later ones have no code Copy)
 comptime C_DECIDE = 7000  # + call × 2 (+ 1: reject), call < 1500: a confirm tool's card
 comptime C_SCREENS = 10_000
@@ -111,6 +114,18 @@ def cut(text: String, most: Int) -> String:
     return String(text[byte = : end]) + "…"
 
 
+def tail(text: String, most: Int) -> String:
+    """The end of `text`: at most `most` bytes, from a character's start, "…" before it when cut; on one line."""
+    var flat = text.replace("\n", " ")
+    if flat.byte_length() <= most:
+        return flat^
+    var b = flat.as_bytes()
+    var start = flat.byte_length() - most
+    while start < len(b) and b[start] >= 128 and b[start] < 192:
+        start += 1
+    return "…" + String(flat[byte = start :])
+
+
 def status_of(call: ToolCall, answered: Bool) -> String:
     """A tool call's stage, as CopilotKit names them: in progress (its arguments are streaming), executing (they're
     complete; the app or the agent is working on it), complete (it has its result)."""
@@ -138,6 +153,7 @@ struct AgentChat[H: Hub = NoData](Movable):
     var copy_text: String
     var copied: Int  # the message whose Copy was pressed last (-1 none)
     var stopped: Bool  # the last run was stopped by the person
+    var unfolded: List[String]  # the reasoning messages shown whole (their ids)
     var show_url: Bool  # an Agent URL field in the header (a developer's chat)
     var confirm_tools: List[String]  # frontend tools that ask the person first (approve or reject)
     var decided: List[String]  # confirm calls answered (their ids)
@@ -167,6 +183,7 @@ struct AgentChat[H: Hub = NoData](Movable):
         self.copy_text = ""
         self.copied = -1
         self.stopped = False
+        self.unfolded = List[String]()
         self.show_url = show_url
         self.confirm_tools = List[String]()
         self.decided = List[String]()
@@ -366,6 +383,18 @@ struct AgentChat[H: Hub = NoData](Movable):
             if at < len(list):
                 var text = list[at].copy()
                 self.send(text)
+        elif k >= C_THOUGHT and k < C_THOUGHT + 1000:
+            var at = k - C_THOUGHT
+            if at < len(self.agent.messages):
+                var id = self.agent.messages[at].id.copy()
+                var was = -1
+                for j in range(len(self.unfolded)):
+                    if self.unfolded[j] == id:
+                        was = j
+                if was >= 0:
+                    _ = self.unfolded.pop(was)
+                else:
+                    self.unfolded.append(id^)
         elif k >= C_COPY and k < C_COPY + 1000:
             var at = k - C_COPY
             if at < len(self.agent.messages):
@@ -386,6 +415,8 @@ struct AgentChat[H: Hub = NoData](Movable):
                         n += 1
         elif k == C_PIECE or k == C_ENDED:
             var what = self.agent.handle(e)
+            if self.agent.closed_call and what != EV_TOOL_END and self.screens.take(self.agent):  # (a call sent as chunks ended)
+                self.again = True
             if what == EV_TEXT:
                 self.pieces += 1
             elif what == EV_TOOL_START or what == EV_TOOL_ARGS:
@@ -569,6 +600,20 @@ struct AgentChat[H: Hub = NoData](Movable):
             stages.append(Stage(self.agent.steps[k], STAGE_DONE if self.agent.steps_done[k] else STAGE_RUNNING, -1, ""))
         return Timeline(stages)
 
+    def reasoning_view(self, i: Int) -> View:
+        """The model's thinking: while it's being written, "Thinking…" over its newest words; then a folded "Thought"
+        that opens to all of it."""
+        ref m = self.agent.messages[i]
+        if self.agent.running and self.agent.reasoning_open == m.id:
+            return VStack(HStack(Icon("brain", 14), Text("Thinking…", style=CAPTION).tone(TONE_STRONG), spacing=SPACE_XS).align(CENTER),
+                          Text(tail(m.content, 160), style=CAPTION).tag("chat-reasoning-live"), spacing=SPACE_XS).align(START).fill().tag("chat-reasoning")
+        var open = False
+        for ref id in self.unfolded:
+            if id == m.id:
+                open = True
+        var body: List[View] = [Markdown(m.content, tag="markdown")]
+        return Disclosure("Thought", open, self.base + C_THOUGHT + i if i < 1000 else NO_MSG, body^)
+
     def user_view(self, text: String) -> View:
         return HStack(Spacer(), Card(Text(text), spacing=SPACE_XS).max_width(520).tag("chat-user"), spacing=SPACE_S).fill()
 
@@ -596,6 +641,9 @@ struct AgentChat[H: Hub = NoData](Movable):
                 items.append(self.user_view(m.content).arrive())
                 if i == self.last_user() and len(self.agent.steps) > 0:
                     items.append(self.steps_view().arrive())
+            elif m.role == "reasoning":
+                if m.content.byte_length() > 0:
+                    items.append(self.reasoning_view(i).arrive())
             elif m.role == "assistant":
                 if m.content.byte_length() == 0 and len(m.calls) == 0 and len(self.screens.of_message(m.id)) == 0:
                     continue
@@ -605,7 +653,7 @@ struct AgentChat[H: Hub = NoData](Movable):
         var waiting = self.agent.running  # (until the agent has said or started something since the question)
         for i in range(self.last_user() + 1, n):
             ref m = self.agent.messages[i]
-            if m.role == "assistant" and (m.content.byte_length() > 0 or len(m.calls) > 0):
+            if (m.role == "assistant" or m.role == "reasoning") and (m.content.byte_length() > 0 or len(m.calls) > 0):
                 waiting = False
         if waiting:
             items.append(self.thinking().arrive())

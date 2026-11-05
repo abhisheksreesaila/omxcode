@@ -1,5 +1,6 @@
 """An AG-UI agent we didn't write the protocol side of: Pydantic AI's own AG-UI adapter (pydantic_ai.ui.ag_ui), with its
-FunctionModel standing in for a model (no key, deterministic). It streams a sentence, then calls the app's frontend tool
+FunctionModel standing in for a model (no key, deterministic). It thinks first (Pydantic AI sends that as REASONING_*
+events), streams a sentence, then calls the app's frontend tool
 render_ui with a screen, its arguments in pieces; when the app answers the tool (a button), it says what came back.
 Every AG-UI event on the wire is Pydantic AI's; this file only plays the model. (docs/ag-ui-compatibility.md)
 
@@ -12,7 +13,7 @@ import sys
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelRequest, ToolReturnPart
-from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.models.function import AgentInfo, DeltaThinkingPart, DeltaToolCall, FunctionModel
 from pydantic_ai.ui.ag_ui import AGUIAdapter
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -25,6 +26,8 @@ SCREEN = {"ui": {"component": "Card", "title": "Hello from Pydantic AI", "subtit
     {"component": "HStack", "children": [{"component": "Button", "label": "Looks right", "action": "ok", "style": "prominent"},
                                          {"component": "Button", "label": "Something's off", "action": "off"}]}]}}
 
+THOUGHT = "The person wants a screen. I'll send it as a render_ui call, built from the app's catalog."
+
 received = []  # every RunAgentInput the app sent, as JSON (scripts/agui_interop.py checks them)
 
 
@@ -35,6 +38,8 @@ async def model(messages, info: AgentInfo):
         yield f"The app answered render_ui with {answered[-1].content}."
         return
     tools = [t.name for t in info.function_tools]
+    for word in THOUGHT.split(" "):
+        yield {0: DeltaThinkingPart(content=word + " ")}
     for word in "Here is a screen, sent as a render_ui call.".split(" "):
         yield word + " "
     if "render_ui" not in tools:
@@ -42,7 +47,7 @@ async def model(messages, info: AgentInfo):
         return
     args = json.dumps(SCREEN)
     for i in range(0, len(args), 40):
-        yield {0: DeltaToolCall(name="render_ui" if i == 0 else None, json_args=args[i:i + 40], tool_call_id="call-1" if i == 0 else None)}
+        yield {1: DeltaToolCall(name="render_ui" if i == 0 else None, json_args=args[i:i + 40], tool_call_id="call-1" if i == 0 else None)}
 
 
 agent = Agent(FunctionModel(stream_function=model))

@@ -68,8 +68,12 @@ agent.run(self.http)                                          # the answer and t
   (tests/test_agui_agent.py checks the two numbers).
 - Events read: RUN_STARTED/FINISHED/ERROR, TEXT_MESSAGE_START/CONTENT/END/CHUNK, TOOL_CALL_START/ARGS/END/CHUNK/RESULT,
   STATE_SNAPSHOT, STATE_DELTA (JSON Patch; a delta that doesn't apply leaves the state as it was: `EV_STATE_REFUSED`,
-  `state_error`), MESSAGES_SNAPSHOT, STEP_STARTED/FINISHED, CUSTOM. Others (REASONING_*, RAW, ACTIVITY_*) are counted
-  and ignored.
+  `state_error`), MESSAGES_SNAPSHOT, STEP_STARTED/FINISHED, CUSTOM, REASONING_START/MESSAGE_START/CONTENT/END/CHUNK/END
+  (the model's thinking: a `reasoning` message, sent back with the next run; AgentChat shows "Thinking…" over its newest
+  words, then a folded "Thought", mojoui.disclosure). Chunks follow @ag-ui/client 1.0: only the first names its message or
+  call; a chunk without an id goes on the open one; a new id, or the next event of another kind, ends it (a tool call
+  sent as chunks is then whole; `agent.closed_call` says the event ended one: answer `pending()` as after EV_TOOL_END).
+  Others (REASONING_ENCRYPTED_VALUE, RAW, ACTIVITY_*, SUBAGENT_*) are counted and ignored (tests/test_agui_chunks.mojo).
 - Proved by tests/test_agui.mojo against five streams recorded with the official AG-UI Python SDK (`ag-ui-protocol`
   1.0.0; `scripts/agui_agent.py --record`), compared with an independent reading in scripts/check.py, and live against
   the scripted agent, whose received RunAgentInputs validate with the SDK's own models (goal 35 M1).

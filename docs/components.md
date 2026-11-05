@@ -172,6 +172,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Skeleton` | `mojoui/skeleton.mojo` | VStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, consolekit |
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
 | `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, console, consolekit, widgets |
+| `Disclosure (a section that folds: a quiet header with a chevron, its body while open)` | `mojoui/disclosure.mojo` | Button with an icon, Quiet buttons, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat |
 | `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)` | `mojoui/player.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Quiet buttons, Card | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
 | `TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor` | `mojoui/timeseries.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
@@ -246,12 +247,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 169 | 9 | 0 |
-| Web | 161 | 9 | 8 |
-| Android | 19 | 54 | 105 |
-| Mac (AppKit) | 0 | 152 | 26 |
-| iPhone (UIKit) | 0 | 123 | 55 |
-| Agent (MCP) | 58 | 42 | 78 |
+| Linux (GTK) | 170 | 9 | 0 |
+| Web | 162 | 9 | 8 |
+| Android | 19 | 54 | 106 |
+| Mac (AppKit) | 0 | 153 | 26 |
+| iPhone (UIKit) | 0 | 124 | 55 |
+| Agent (MCP) | 58 | 42 | 79 |
 
 ## Inside one app, not components yet (the debt)
 

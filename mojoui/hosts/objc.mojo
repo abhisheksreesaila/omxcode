@@ -323,6 +323,7 @@ def sf_symbol(name: String) -> String:
     if name == "map-pin": return "mappin"
     if name == "calendar-days": return "calendar"
     if name == "sun-medium": return "sun.max"
+    if name == "brain": return "brain"
     return "questionmark.square.dashed"
 
 
