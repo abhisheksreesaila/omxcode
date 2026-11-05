@@ -2152,7 +2152,10 @@ struct Main(App):
             var text = read_recipe(String(self.script.recipe_path.strip()))
             self.script.set_text(text)
             self.offer_script()
-            self.script.said = "Opened: " + (String(len(self.script.params)) + " questions to answer, then Run" if len(self.script.params) > 0 else "Run it")
+            var n = len(self.script.params)
+            self.script.said = "Opened: " + (String(n) + (" question" if n == 1 else " questions") + " to answer, then Run" if n > 0 else "Run it")
+            self.script.log = List[String]()  # (the last run's lines belong to the script that ran, not this one)
+            self.script.results = List[String]()
             if self.trace:
                 print("RECIPE: opened " + self.script.recipe_path + " asks " + ", ".join(self.script.params), flush=True)
         except e:
