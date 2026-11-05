@@ -12,7 +12,7 @@
 #               return Reply.json('{"ok": true}', 201)
 #           return Reply.not_found()
 #
-#   Server.run(Api(), port=8080)                  # blocks; Server.start(...) runs it on a thread and returns its port
+#   Server.run(Api(), port=8080)                  # blocks; Server.start(...) runs it on a thread: see Served
 #
 # Streams: a reply can be a Pipe, a byte queue another thread fills while the client reads (SSE, a long log, a proxied
 # upstream). `proxy(request, pipe)` relays an upstream reply into one byte for byte, on its own thread: what an API
@@ -21,6 +21,8 @@
 # same server can wait on itself (its upstream request may land on that worker); proxy to another process (D-4777).
 # SIGTERM / SIGINT: Service.stop() runs under the lock, then the process exits (a byte on a socket; see _on_stop_signal).
 # One Server per process handles them (the first); a Service's ticker lives as long as the process.
+# Server.start returns a Served: keep it while you serve; dropping it stops the server. Flare 0.13 runs its workers on
+# Mojo's runtime pool, and a program can't end while a serving loop holds a pool worker (goal 52).
 
 from std.os import getenv
 from std.sys import CompilationTarget, exit
@@ -37,6 +39,7 @@ from flare.http import Response as FlareResponse
 from flare.http._server.config import ServerConfig
 from flare.net import SocketAddr, IpAddr
 from flare.tls import TlsConfig
+from flare.runtime._asyncrt import asyncrt_try_lease
 
 comptime _A = Atomic[Scalar[DType.int64]]
 comptime _P = Pointer[Int64, MutUntrackedOrigin]
@@ -453,6 +456,8 @@ struct _Bridge[S: Service](Copyable, Handler):
 
     def serve(self, req: FlareRequest) raises -> FlareResponse:
         var r = Req(req.method, _target(req.url), _text(req.body))
+        if r.path == READY_PATH:  # (Server.start's own probe, never the app's)
+            return _flare_reply(Reply.empty())
         for i in range(len(req.headers._keys)):
             r.names.append(req.headers._keys[i].lower())
             r.values.append(req.headers._values[i])
@@ -507,9 +512,20 @@ def _flare_reply(var reply: Reply) raises -> FlareResponse:
     return out^
 
 
+def _keep_the_pool_for_compute():
+    """Flare 0.13 runs serving loops as tasks on Mojo's runtime pool while it may lease pool workers, on OS threads once
+    they're all held. A loop never returns its worker, and work an app puts on the pool (`parallelize`: the omxcore
+    engine's kernels, MAX) then waits on tasks queued behind it: an engine job inside a request hung (goal 52). Holding
+    every lease first sends Flare's loops to OS threads, in every server of the process (each call after the first
+    finds none left)."""
+    while asyncrt_try_lease():
+        pass
+
+
 struct Server:
     @staticmethod
     def bind(port: Int, host: String = "127.0.0.1") raises -> HttpServer:
+        _keep_the_pool_for_compute()
         var cfg = ServerConfig(idle_timeout_ms=30_000, handler_timeout_ms=600_000, request_timeout_ms=600_000, write_timeout_ms=60_000)
         cfg.max_body_size = 64 * 1024 * 1024
         return HttpServer.bind(SocketAddr(IpAddr(host, False), UInt16(port)), cfg^)
@@ -580,8 +596,10 @@ struct Server:
             raise Error("no thread for the server's tick")
 
     @staticmethod
-    def start[S: Service](var service: S, port: Int = 0, host: String = "127.0.0.1", workers: Int = 4, tick_ms: Int = 0) raises -> Int:
-        """Serves on a thread of its own; returns the port (port 0: one the system picks)."""
+    def start[S: Service](var service: S, port: Int = 0, host: String = "127.0.0.1", workers: Int = 4, tick_ms: Int = 0) raises -> Served:
+        """Serves on a thread of its own until the returned Served is dropped (or stopped); `.port` is the port (port 0:
+        one the system picks). Returns once the workers answer (Flare's workers bind their own listeners after the first
+        one closes: connecting at once could be refused)."""
         var handles_signals = Server._install_stop_handler()
         var srv = Server.bind(port, host)
         var bound = Int(srv.local_addr().port)
@@ -596,18 +614,75 @@ struct Server:
         if libc.pthread_create[_run_entry[S]](Int(job), Int(tid.unsafe_ptr())) != 0:
             raise Error("no thread for the server")
         _ = libc.pthread_detach(tid[0])
-        return bound
+        var served = Served(bound, Int(job), _close_run[S])
+        if not _answers(host, bound, 5000):
+            raise Error("the server on port " + String(bound) + " didn't start answering")
+        return served^
+
+
+comptime READY_PATH = "/.mojoui/ready"
+
+
+def _answers(host: String, port: Int, ms: Int) -> Bool:
+    """Does something answer an HTTP request on host:port within `ms`? (A 404 counts: a worker read it.)"""
+    var until = now_ns() + ms * 1_000_000
+    while now_ns() < until:
+        try:
+            _ = HttpClient(timeout_ms=500).get("http://" + host + ":" + String(port) + READY_PATH)
+            return True
+        except:
+            _ = libc.poll(0, 0, 5)
+    return False
+
+
+struct Served(Movable):
+    """A server Server.start runs on threads of its own. Keep it while you serve: dropping it (or stop()) closes the
+    server and waits (up to 5 s) for its loop to end, so the program can end. Mojo drops a value after its last use,
+    so call `stop()` where serving should end (`var port = Server.start(api).port` would stop it at once)."""
+    var port: Int
+    var _job: Int
+    var _close: def(Int) thin -> Bool
+
+    def __init__(out self, port: Int, job: Int, close: def(Int) thin -> Bool):
+        self.port = port
+        self._job = job
+        self._close = close
+
+    def stop(mut self):
+        if self._job != 0:
+            _ = self._close(self._job)
+            self._job = 0
+
+    def __deinit__(deinit self):
+        if self._job != 0:
+            _ = self._close(self._job)
+
+
+def _close_run[S: Service](addr: Int) -> Bool:
+    """Closes a started server, waits for its thread's loop to return, frees the job (left, not freed, after 5 s)."""
+    var job = Pointer[_Run[S], MutUntrackedOrigin](unsafe_from_address=addr)
+    job[].srv.close()
+    var until = now_ns() + 5_000_000_000
+    while _A.load(_P(unsafe_from_address=Int(Pointer(to=job[].ended)))) == 0:
+        if now_ns() > until:
+            return False
+        _ = libc.poll(0, 0, 2)
+    job.unsafe_deinit_pointee()
+    job.unsafe_free()
+    return True
 
 
 struct _Run[S: Service](Movable):
     var srv: HttpServer
     var state: Int
     var workers: Int
+    var ended: Scalar[DType.int64]  # (1 once serve() returned; read and written atomically)
 
     def __init__(out self, var srv: HttpServer, state: Int, workers: Int):
         self.srv = srv^
         self.state = state
         self.workers = workers
+        self.ended = 0
 
 
 def _run_entry[S: Service](p: libc.ThreadArg) -> libc.ThreadArg:
@@ -619,6 +694,7 @@ def _run_entry[S: Service](p: libc.ThreadArg) -> libc.ThreadArg:
             job[].srv.serve(_Bridge[S](job[].state), num_workers=job[].workers, pin_cores=False)
     except e:
         print("mojoui.serve: the server stopped: " + String(e))
+    _ = _A.fetch_add(_P(unsafe_from_address=Int(Pointer(to=job[].ended))), 1)
     return libc.null_arg()
 
 

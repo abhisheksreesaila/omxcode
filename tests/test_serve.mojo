@@ -126,10 +126,12 @@ def check(ok: Bool, what: String) raises:
 
 
 def main() raises:
-    var port = Server.start(Api(), workers=4)
+    var server = Server.start(Api(), workers=4)
+    var port = server.port
     var base = "http://127.0.0.1:" + String(port)
     # the proxy's upstream is a second server: a proxy waiting on its own server's worker can wait on itself
-    var upstream = Server.start(Api(), workers=2)
+    var up = Server.start(Api(), workers=2)
+    var upstream = up.port
     _ = call(Request(0, "PUT", base + "/port", String(upstream)))
     # routes, parameters, query, headers both ways
     var r = call(Request.get(0, base + "/items/a%2Fb?x=hello%20world"))
@@ -180,4 +182,6 @@ def main() raises:
     var dead = call(Request.get(0, base + "/dead"))
     check(dead.status == 502 and dead.text().find("upstream") >= 0, "a dead upstream: " + String(dead.status) + " " + dead.text())
     print("PROXY: " + String(len(pv)) + " events relayed; dead upstream 502")
+    up.stop()  # (a Served stops when dropped: kept to here, then the program can end)
+    server.stop()
     print("serve: ok")

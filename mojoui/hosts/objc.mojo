@@ -97,7 +97,7 @@ def from_ns(ns: Int) -> String:
     var utf8 = msg(ns, "UTF8String")
     if utf8 == 0:
         return ""
-    return String(unsafe_from_utf8_ptr=Pointer[Int8, MutUntrackedOrigin](unsafe_from_address=utf8))
+    return String(unsafe_from_utf8_ptr=Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=utf8))  # (UInt8 or c_char since Mojo 1.2)
 
 
 def ns_data(bytes: List[UInt8]) -> Int:
