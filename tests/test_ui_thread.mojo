@@ -105,6 +105,7 @@ def main() raises:
         jobs.append(start[Backend](Request.get(1, base + "/proxy").stream(2).timeout(10_000)))
         jobs.append(start[Backend](Request.get(0, base + "/sums").timeout(30_000)))
         jobs.append(start[Backend](Request.get(0, base + "/x").timeout(10_000)))
+    var local = len(jobs)  # (the rest go over the network: their failures are reported as the network's, below)
     for _ in range(3):
         jobs.append(start[Backend](Request.get(0, "https://huggingface.co/api/models/Qwen/Qwen2.5-0.5B-Instruct").timeout(30_000)))
     # the frame loop: tick until everything has answered
@@ -122,16 +123,25 @@ def main() raises:
         if done:
             break
         check(now - began < 60_000_000_000, "the load didn't finish in 60 s")
-    var bad = 0
-    for i in range(len(jobs)):
-        var r = jobs[i].response()
-        if r.status != 200:
-            bad += 1
-            print("not 200: " + String(r.status) + " " + r.error)
-    check(bad == 0, String(bad) + " of " + String(len(jobs)) + " requests failed")
     var worst = 0
     for g in gaps:
         worst = max(worst, g)
+    # the timing first: a network failure must never read as Flare stalling the UI (or hide that it did)
+    check(worst <= MAX_GAP_MS, "the frame loop stalled " + String(worst) + " ms")
+    check(start_ms <= MAX_START_MS, "Server.start held the caller " + String(start_ms) + " ms")
+    var bad = 0
+    var net = 0
+    for i in range(len(jobs)):
+        var r = jobs[i].response()
+        if r.status != 200:
+            if i >= local:
+                net += 1
+                print("network (huggingface.co): " + String(r.status) + " " + r.error)
+            else:
+                bad += 1
+                print("not 200: " + String(r.status) + " " + r.error)
+    check(bad == 0, String(bad) + " of " + String(local) + " local requests failed")
+    check(net == 0, "network: " + String(net) + " of 3 HTTPS fetches to huggingface.co failed (not a stall: the frame loop held)")
     # stopping, as an app's UI thread would at quit
     var t1 = now_ns()
     up.stop()
@@ -144,7 +154,5 @@ def main() raises:
     var ended_ms = (now_ns() - t1) // 1_000_000
     print("ticks " + String(len(gaps)) + ", longest gap " + String(worst) + " ms; Server.start " + String(start_ms)
           + " ms; stop (both) " + String(stop_ms) + " ms, loops ended after " + String(ended_ms) + " ms; " + String(len(jobs)) + " requests")
-    check(worst <= MAX_GAP_MS, "the frame loop stalled " + String(worst) + " ms")
-    check(start_ms <= MAX_START_MS, "Server.start held the caller " + String(start_ms) + " ms")
     check(stop_ms <= MAX_STOP_MS, "stop held the caller " + String(stop_ms) + " ms")
     print("ui thread: ok")

@@ -612,6 +612,8 @@ struct Server:
         job.unsafe_write(_Run[S](srv^, st, workers))
         var tid = List[Int](length=1, fill=0)
         if libc.pthread_create[_run_entry[S]](Int(job), Int(tid.unsafe_ptr())) != 0:
+            job.unsafe_deinit_pointee()  # (no thread: nothing else holds the record)
+            job.unsafe_free()
             raise Error("no thread for the server")
         _ = libc.pthread_detach(tid[0])
         var served = Served(bound, Int(job), _close_run[S], _ended_run[S], _release_run[S])

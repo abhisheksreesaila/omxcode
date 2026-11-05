@@ -1140,3 +1140,8 @@ was the map.
   shared and freed by the last owner (D-5214; a reaper-thread version could read freed memory, dropped). Server.start
   once took 515 ms: its ready probe hit the listener Flare was about to close and waited out a 500 ms timeout; 50 ms
   probes: ≤ 28 ms over 15 runs. A first 502 was the test's own race (proxies before PUT /port).
+- Review round 1: NEEDS WORK (no memory-safety bug in the Served/_Run refcount). The sharpest find was mine while
+  fixing it: patch_scope matched only `+++ w/`/`b/` lines and both patches carried git's mnemonic `c/`/`i/` prefixes,
+  so its file check had passed on an empty set; fixed, regenerated with a/ b/, and negative-tested with doctored
+  patches. Fixes in D-5216. Macs: macOS 26's first job never got a runner (cancelled after 15 min queued); its rerun
+  passed (maccheck exit 0, 110 side pictures, console renders).

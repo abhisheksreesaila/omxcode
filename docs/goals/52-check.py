@@ -85,16 +85,27 @@ def patch_scope():
     """None when the engine patch touches only the files and lines 1.2 (the accelerator query) and M5 (the looked-up
     functions) need, else why not."""
     text = ENGINE_PATCH.read_text()
-    files = set(re.findall(r"^\+\+\+ [wb]/(\S+)", text, re.M))
+    files = set(re.findall(r"^\+\+\+ [^/\s]+/(\S+)", text, re.M))
+    if not files:
+        return "the engine patch names no files (its +++ lines didn't parse)"
     if files - PATCH_FILES:
         return f"the engine patch touches {sorted(files - PATCH_FILES)}"
     removed = [l[1:] for l in text.splitlines() if l.startswith("-") and not l.startswith("---")]
     stray = [l.strip() for l in removed if not REMOVED_OK.search(l)]
     if stray:
         return f"the engine patch changes other lines: {stray[:3]}"
-    added = [l[1:] for l in text.splitlines() if l.startswith("+") and not l.startswith("+++")]
+    # added lines: anything in the new _libc.mojo; elsewhere only calls of it, its import, or the accelerator query
+    added, current = [], ""
+    for l in text.splitlines():
+        if l.startswith("+++ "):
+            current = l
+        elif l.startswith("+") and "_libc.mojo" not in current:
+            added.append(l[1:])
     if any("has_apple_gpu_accelerator" in l for l in added):
         return "the patch still uses has_apple_gpu_accelerator"
+    loose = [l.strip() for l in added if l.strip() and "_libc" not in l and "default_accelerator" not in l]
+    if loose:
+        return f"the engine patch adds other lines: {loose[:3]}"
     return None
 
 
@@ -296,6 +307,8 @@ def stream_body():
     u = run([str(G52 / "stream_body_plain")], timeout=60)
     if want in u.stdout:
         return f"{FLARE_TAG} sends the body without the patch: drop {FLARE_PATCH.name}", ""
+    if "BODY got 0:" not in u.stdout:  # (only a dropped body proves the patch is needed, not a crash or a hang)
+        return f"the unpatched run didn't show a dropped body: exit {u.returncode}, {(u.stdout + u.stderr)[-200:]}", ""
     return None, f"patched: body arrives; {FLARE_TAG} alone: {(u.stdout.strip().splitlines() or ['(nothing)'])[-1][:60]!r}"
 
 
@@ -412,6 +425,11 @@ def m4():
         other = before.rstrip("; ") + (rest[cut:] if cut >= 0 else "")
     if not ok and other.strip("; "):
         return False, f"goal 50's M6 fails on more than goal 33's M5: {other[:400]}"
+    if not ok and "33-M5: " in msg:
+        # pinned to what failed at goal 50 (and on unchanged main): the console asking the fixture for `GET /`
+        misses = re.findall(r"doesn't answer: (\[[^\]]*\])", rest)
+        if not misses or any(m != "['GET /']" for m in misses):
+            return False, f"goal 33's M5 fails differently than at goal 50: {rest[:400]}"
     return True, "goal 50's M4, M5 pass on 1.2 (" + " | ".join(notes) + ")" + ("; M6 fails on goal 33's M5 only, as at goal 50" if not ok else "; M6 passes")
 
 
@@ -482,9 +500,13 @@ def m7():
         if r.returncode != 0 or "ui thread: ok" not in out:
             return False, f"run {i + 1}: exit {r.returncode}: {out[-400:]}"
         lines.append(next((l for l in out.splitlines() if l.startswith("ticks ")), "?"))
+    # the handle's lifecycle (review): drop without stop(), stop() then drop, 30 cycles leave no threads or memory
+    why = g50.mojo_test("test_served", "served: ok", timeout=300)
+    if why:
+        return False, why
     gaps = [int(m) for l in lines for m in re.findall(r"longest gap (\d+) ms", l)]
     starts = [int(m) for l in lines for m in re.findall(r"Server.start (\d+) ms", l)]
-    return True, f"5 runs: longest frame gap {max(gaps)} ms (≤ 25), Server.start ≤ {max(starts)} ms, stop() 0 ms; e.g. {lines[0]}"
+    return True, f"5 runs: longest frame gap {max(gaps)} ms (≤ 25), Server.start ≤ {max(starts)} ms, stop() 0 ms; e.g. {lines[0]}; test_served: drop/stop/30 cycles ok"
 
 
 MILESTONES = [("M0", m0), ("M1", m1), ("M2", m2), ("M3", m3), ("M4", m4), ("M5", m5), ("M6", m6), ("M7", m7)]

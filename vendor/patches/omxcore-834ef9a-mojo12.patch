@@ -1,7 +1,7 @@
-diff --git i/kernels_aot/kernels_aot_gpu.mojo w/kernels_aot/kernels_aot_gpu.mojo
+diff --git a/kernels_aot/kernels_aot_gpu.mojo b/kernels_aot/kernels_aot_gpu.mojo
 index 484e76c..ca91e23 100644
---- i/kernels_aot/kernels_aot_gpu.mojo
-+++ w/kernels_aot/kernels_aot_gpu.mojo
+--- a/kernels_aot/kernels_aot_gpu.mojo
++++ b/kernels_aot/kernels_aot_gpu.mojo
 @@ -7,7 +7,7 @@ from max.gpu.primitives.id import lane_id
  from std.bit import pop_count, count_trailing_zeros
  from std.sys._assembly import inlined_assembly
@@ -20,10 +20,10 @@ index 484e76c..ca91e23 100644
  comptime SHARED_MAX_GROUPS: Int = GROUP_SMEM_LIMIT // 4   # Float32 slots: 12288 on NVIDIA, 8192 on Apple
  comptime SM_SHARED_BYTES: Int = 96 * 1024     # usable per SM on sm_80/86
  comptime MAX_BLOCKS_PER_SM: Int = 6           # global path: 1536 threads / 256
-diff --git i/kernels_aot/pipeline_gpu.mojo w/kernels_aot/pipeline_gpu.mojo
+diff --git a/kernels_aot/pipeline_gpu.mojo b/kernels_aot/pipeline_gpu.mojo
 index fb21ea0..25dafa7 100644
---- i/kernels_aot/pipeline_gpu.mojo
-+++ w/kernels_aot/pipeline_gpu.mojo
+--- a/kernels_aot/pipeline_gpu.mojo
++++ b/kernels_aot/pipeline_gpu.mojo
 @@ -56,7 +56,7 @@ from max.gpu import thread_idx, block_idx, grid_dim, barrier
  from max.gpu.primitives.warp import shuffle_down
  from max.gpu.memory import AddressSpace, external_memory
@@ -42,12 +42,12 @@ index fb21ea0..25dafa7 100644
  comptime WORD = DType.int64 if APPLE_GPU else F64
  comptime SMEM_LIMIT: Int = (32 if APPLE_GPU else 48) * 1024     # dynamic shared memory per block: Apple 32 KB, NVIDIA 48 KB
  comptime BLOCK: Int = 256
-diff --git i/mojo/omxcore/_libc.mojo w/mojo/omxcore/_libc.mojo
+diff --git a/mojo/omxcore/_libc.mojo b/mojo/omxcore/_libc.mojo
 new file mode 100644
-index 0000000..2dd46be
+index 0000000..dd89978
 --- /dev/null
-+++ w/mojo/omxcore/_libc.mojo
-@@ -0,0 +1,73 @@
++++ b/mojo/omxcore/_libc.mojo
+@@ -0,0 +1,92 @@
 +"""The libc functions the engine calls through a pointer instead of declaring them.
 +
 +Mojo allows one signature per external symbol in a binary. Mojo 1.2's stdlib declares `read` and `write` itself, and
@@ -55,7 +55,8 @@ index 0000000..2dd46be
 +and others with their own types, so an engine declaration of any of them breaks that app's build ("existing function
 +with conflicting signature"). Looked up with dlsym and called through a typed pointer, the engine declares none of
 +them and builds beside any of those. dlsym itself is declared as the apps' mojoui declares it. A lookup costs about a
-+hash probe: none of these is on a per-row path."""
++hash probe: none of these is on a per-row path. A function libc doesn't have (dlsym gives 0) is never called: each
++wrapper returns the C function's own failure value instead (-1, or NaN for strtod)."""
 +from std.ffi import external_call, c_int
 +from std.memory import Pointer
 +from std.sys import CompilationTarget
@@ -73,58 +74,76 @@ index 0000000..2dd46be
 +def pthread_create(tid_out: Int, attr: Int, entry: ThreadEntry, arg: Int) -> c_int:
 +    """`tid_out`: the address of an Int the thread id is written to; `attr`: a pthread_attr_t's address (0: defaults)."""
 +    var f = _sym("pthread_create")
++    if f == 0:
++        return c_int(-1)
 +    return Pointer(to=f).unsafe_bitcast[def(Int, Int, ThreadEntry, Int) thin abi("C") -> c_int]()[](tid_out, attr, entry, arg)
 +
 +
 +def pthread_join(tid: Int) -> c_int:
 +    var f = _sym("pthread_join")
++    if f == 0:
++        return c_int(-1)
 +    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](tid, 0)
 +
 +
 +def pthread_detach(tid: Int) -> c_int:
 +    var f = _sym("pthread_detach")
++    if f == 0:
++        return c_int(-1)
 +    return Pointer(to=f).unsafe_bitcast[def(Int) thin abi("C") -> c_int]()[](tid)
 +
 +
 +def strtod(text: Int) -> Float64:
 +    """`text`: the address of a NUL-terminated number in the process locale."""
 +    var f = _sym("strtod")
++    if f == 0:
++        return Float64(0) / Float64(0)
 +    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> Float64]()[](text, 0)
 +
 +
 +def read(fd: Int, buf: Int, count: Int) -> Int:
 +    var f = _sym("read")
++    if f == 0:
++        return -1
 +    return Pointer(to=f).unsafe_bitcast[def(c_int, Int, Int) thin abi("C") -> Int]()[](c_int(fd), buf, count)
 +
 +
 +def write(fd: Int, buf: Int, count: Int) -> Int:
 +    var f = _sym("write")
++    if f == 0:
++        return -1
 +    return Pointer(to=f).unsafe_bitcast[def(c_int, Int, Int) thin abi("C") -> Int]()[](c_int(fd), buf, count)
 +
 +
 +def mmap(addr: Int, length: Int, prot: Int, flags: Int, fd: Int, offset: Int) -> Int:
 +    """The mapping's address, or -1 (MAP_FAILED)."""
 +    var f = _sym("mmap")
++    if f == 0:
++        return -1
 +    return Pointer(to=f).unsafe_bitcast[def(Int, Int, c_int, c_int, c_int, Int) thin abi("C") -> Int]()[](
 +        addr, length, c_int(prot), c_int(flags), c_int(fd), offset)
 +
 +
 +def munmap(addr: Int, length: Int) -> c_int:
 +    var f = _sym("munmap")
++    if f == 0:
++        return c_int(-1)
 +    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](addr, length)
 +
 +
 +def unlink(path: String) -> c_int:
 +    var p = path
 +    var f = _sym("unlink")
++    if f == 0:
++        return c_int(-1)
 +    var at = Int(p.as_c_string_span().unsafe_ptr())
 +    var rc = Pointer(to=f).unsafe_bitcast[def(Int) thin abi("C") -> c_int]()[](at)
 +    _ = p^
 +    return rc
-diff --git i/mojo/omxcore/csv.mojo w/mojo/omxcore/csv.mojo
+diff --git a/mojo/omxcore/csv.mojo b/mojo/omxcore/csv.mojo
 index 126a719..090c259 100644
---- i/mojo/omxcore/csv.mojo
-+++ w/mojo/omxcore/csv.mojo
+--- a/mojo/omxcore/csv.mojo
++++ b/mojo/omxcore/csv.mojo
 @@ -64,6 +64,7 @@ File format decisions:
      non-UTF-8 encoding. The parsed columns are held twice for a moment while the chunks are stitched together.
  """
@@ -172,10 +191,10 @@ index 126a719..090c259 100644
      else:
          file.close()
      result.seconds = Float64(perf_counter_ns() - start_ns) / 1e9
-diff --git i/mojo/omxcore/fan.mojo w/mojo/omxcore/fan.mojo
+diff --git a/mojo/omxcore/fan.mojo b/mojo/omxcore/fan.mojo
 index e7db175..4fcab32 100644
---- i/mojo/omxcore/fan.mojo
-+++ w/mojo/omxcore/fan.mojo
+--- a/mojo/omxcore/fan.mojo
++++ b/mojo/omxcore/fan.mojo
 @@ -12,6 +12,7 @@ Which threads:
  """
  from std.atomic import Atomic
@@ -202,10 +221,10 @@ index e7db175..4fcab32 100644
          tids.free()
          _ = fan.take_pointee()
          fan.free()
-diff --git i/mojo/omxcore/gpu.mojo w/mojo/omxcore/gpu.mojo
+diff --git a/mojo/omxcore/gpu.mojo b/mojo/omxcore/gpu.mojo
 index 8acded2..f4ebdc4 100644
---- i/mojo/omxcore/gpu.mojo
-+++ w/mojo/omxcore/gpu.mojo
+--- a/mojo/omxcore/gpu.mojo
++++ b/mojo/omxcore/gpu.mojo
 @@ -26,12 +26,12 @@ Why it looks like this:
  """
  from std.memory import ArcPointer
@@ -221,10 +240,10 @@ index 8acded2..f4ebdc4 100644
  comptime NO_GPU_MESSAGE = "no GPU on this build"
  
  
-diff --git i/mojo/omxcore/job.mojo w/mojo/omxcore/job.mojo
+diff --git a/mojo/omxcore/job.mojo b/mojo/omxcore/job.mojo
 index 3dafcb2..96a6327 100644
---- i/mojo/omxcore/job.mojo
-+++ w/mojo/omxcore/job.mojo
+--- a/mojo/omxcore/job.mojo
++++ b/mojo/omxcore/job.mojo
 @@ -27,6 +27,7 @@ dropped first.
  """
  from std.atomic import Atomic
@@ -260,10 +279,10 @@ index 3dafcb2..96a6327 100644
          _ = external_call["pthread_attr_destroy", c_int](attr)
          attr.free()
          if rc != 0:                                # no thread to be had: run it here
-diff --git i/mojo/omxcore/mapped.mojo w/mojo/omxcore/mapped.mojo
+diff --git a/mojo/omxcore/mapped.mojo b/mojo/omxcore/mapped.mojo
 index b64eb93..f2c9a3d 100644
---- i/mojo/omxcore/mapped.mojo
-+++ w/mojo/omxcore/mapped.mojo
+--- a/mojo/omxcore/mapped.mojo
++++ b/mojo/omxcore/mapped.mojo
 @@ -1,5 +1,6 @@
  """A read-only mapping of part of a file (Parquet column chunks, CSV row groups): in the process only while it is held."""
  from std.ffi import external_call
@@ -292,10 +311,10 @@ index b64eb93..f2c9a3d 100644
          if self.span > 0:
 -            _ = external_call["munmap", Int32](self.addr, self.span)
 +            _ = _libc_munmap(self.addr, self.span)
-diff --git i/mojo/omxcore/parquet.mojo w/mojo/omxcore/parquet.mojo
+diff --git a/mojo/omxcore/parquet.mojo b/mojo/omxcore/parquet.mojo
 index bc8f854..3ac4248 100644
---- i/mojo/omxcore/parquet.mojo
-+++ w/mojo/omxcore/parquet.mojo
+--- a/mojo/omxcore/parquet.mojo
++++ b/mojo/omxcore/parquet.mojo
 @@ -30,6 +30,7 @@ from std.atomic import Atomic
  from std.time import perf_counter_ns
  from std.memory.alloc import unsafe_alloc
@@ -331,10 +350,10 @@ index bc8f854..3ac4248 100644
      _ = one^
      if got < 0:                                                       # a directory opens, but cannot be read
          raise Error("couldn't read `" + path + "`: not a regular file")
-diff --git i/mojo/omxcore/sortspill.mojo w/mojo/omxcore/sortspill.mojo
+diff --git a/mojo/omxcore/sortspill.mojo b/mojo/omxcore/sortspill.mojo
 index 0d417cf..7104b79 100644
---- i/mojo/omxcore/sortspill.mojo
-+++ w/mojo/omxcore/sortspill.mojo
+--- a/mojo/omxcore/sortspill.mojo
++++ b/mojo/omxcore/sortspill.mojo
 @@ -16,6 +16,7 @@ Run file layout: run after run, each column by column: n values (Int64), then n
  of a run is read with one seek and read per column. The file is removed when the sorter is dropped: on success, on an error, on a cancel.
  """
