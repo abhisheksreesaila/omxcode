@@ -477,6 +477,10 @@ with_fleet = SELECT j.episode, j.frame, j.gripper, fleet.lab, fleet.task FROM jo
 """
 
 
+SECTION = (3.0, 8.0)  # the seconds of the featured episode Apply runs on
+OTHER = "F00119"  # a colleague's episode for the reopened recipe (same bench, same day as the featured drop; has a clip)
+
+
 def card_facts(text):
     """A table card's read: its rows (from "name (N rows · M columns)") and its first row's cells by column."""
     lines = text.splitlines()
@@ -503,6 +507,8 @@ def script(media, out):
     s = Session(env)
     called = []
     cards = {}
+    reopened = {}
+    export = ""
 
     def call(tool, **args):
         called.append(tool)
@@ -516,10 +522,14 @@ def script(media, out):
             time.sleep(0.2)
         raise SystemExit(f"{tool} never appeared; the app said: {[l for l in s.log if l.startswith(('SCRIPT:', 'JOB:'))][-6:]}")
 
-    def run_script(text, names, timeout=600):
+    def run_script(text, names, timeout=600, answers=None, tool="run-script", **args):
         mark = len(s.log)
-        call("script-text", text=text)
-        call("run-script")
+        if text is not None:
+            call("script-text", text=text)
+        for k, v in (answers or {}).items():  # (a recipe's ${questions}: their fields appear once the text asks them)
+            until(f"recipe-{k}", 30)
+            call(f"recipe-{k}", text=v)
+        call(tool, **args)
         t0 = time.time()
         while time.time() - t0 < timeout:
             if any(l.startswith(("SCRIPT: problem", "JOB: script")) for l in s.log[mark:]):
@@ -550,13 +560,36 @@ def script(media, out):
         call("grid", value=float(hero_row))  # (the featured episode's row: its clip opens as the video card "episode")
         until("video", 120)
         call("script")
-        cards.update(run_script(SCRIPT_M2.replace("${episode}", hero), ["frames", "joined", "with_fleet"]))
+        cards.update(run_script(SCRIPT_M2, ["frames", "joined", "with_fleet"], answers={"episode": hero}))
+        # M3: a section of the video, Apply, Export
+        call("range-from", text=str(SECTION[0]))
+        call("range-to", text=str(SECTION[1]))
+        cards.update(run_script(None, ["apply_1"], tool="apply-regions"))
+        mark = len(s.log)
+        call("export-recipe")
+        t0 = time.time()
+        while time.time() - t0 < 300 and not any(l.startswith("RECIPE: ") for l in s.log[mark:]):
+            time.sleep(0.2)
+        said = [l for l in s.log[mark:] if l.startswith("RECIPE: ")]
+        if not said or not said[0].startswith("RECIPE: exported "):
+            raise SystemExit(f"export: {said}")
+        export = said[0].split(" ")[2]
+        # M4: a colleague's episode: its row opens its clip in the same video card; the recipe reopened, asked anew
+        other_row = [r["episode"] for r in rows].index(OTHER) + 1
+        call("script-close")
+        call("grid", value=float(other_row))
+        time.sleep(2.0)
+        call("script")
+        call("script-text", text="")
+        call("recipe-path", text=export)
+        call("open-recipe")
+        reopened.update(run_script(None, ["frames", "joined"], answers={"episode": OTHER}))
         available = s.c.names()
     finally:
         s.close()
     trace = [l for l in s.log if l.startswith(("SCRIPT:", "QUERY:", "JOB:", "SLOW:"))]
     summary = {"cards": cards, "trace": trace, "tools_called": called, "tools_available": available, "hero": hero,
-               "export": "", "range": [0, 0], "other": hero, "reopened": {}}
+               "export": export, "range": list(SECTION), "other": OTHER, "reopened": reopened}
     out.mkdir(parents=True, exist_ok=True)
     (out / "script.json").write_text(json.dumps(summary, indent=1))
     for l in trace:

@@ -4,7 +4,7 @@
 # Prints "parse: ok", "run: ok", "chain: ok", "error: ok", "fn: ok", "frames: ok" (mojoui.videoscript: a video as a table).
 from std.testing import assert_equal, assert_true, assert_false
 from omxcore import Catalog, Table, Frame as MxFrame, INT as MX_INT
-from mojoui.videoscript import VideoFunctions
+from mojoui.videoscript import VideoFunctions, frame_span
 from mojoui.script import parse_script, run_script, bind_params, ScriptFunctions, NoFunctions, STMT_SQL, STMT_FN
 
 
@@ -139,4 +139,11 @@ def main() raises:
     assert_equal(r6.tables[0].rows(), 244)
     assert_equal(r6.tables[1].rows(), 1)
     assert_equal(r6.tables[2].rows(), 244)
+    var span = frame_span(15.0, 244, 3.0, 8.0)
+    assert_equal(span[0], 45)
+    assert_equal(span[1], 120)
+    assert_equal(frame_span(15.0, 244, 15.0, -1.0)[1], 244)
+    assert_true(videos.has("regions"))
+    var nofile = run_script("r = regions(nope, 1, 2);", cat6, videos)
+    assert_true(nofile.problem.find("no video nope") >= 0, nofile.problem)
     print("frames: ok")

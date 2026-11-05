@@ -7,10 +7,31 @@
 #   videos.add_to(catalog)                                   # `episode` is a table: frame 0…243, t in seconds (3 places)
 #   var run = run_script("frames = SELECT * FROM episode;", catalog, videos)
 #
-# A video's rows join anything with a time or a frame: `ON round(tl.t * 15) = f.frame` for a 15 Hz log.
+# A video's rows join anything with a time or a frame: `ON CAST(tl.t * 15 AS INT) = f.frame` for a 15 Hz log (CAST
+# rounds to the nearest).
+#
+# Functions on a video's frames (each answers with a table, a row per thing seen; frames are the video's own numbers):
+#   regions(video, from_s, to_s)   every warm-coloured region on each frame from from_s to to_s (seconds; to_s left out:
+#                                  the end), measured on the GPU (mojoui.videotable's RegionsAnalyzer): frame, t, kind,
+#                                  x, y, w, h … as mojoui.videojobs.detections_table has them
+# Models arrive the same way (goal 50: detect, segment): a name here, frames in, a table out.
 
 from omxcore import Catalog, Table, Frame as MxFrame, INT as MX_INT, DECIMAL as MX_DECIMAL
 from mojoui.script import ScriptFunctions
+from mojoui.video import VideoSource
+from mojoui.videotable import RegionsAnalyzer, ColourRange, scan
+from mojoui.vision_presets import warm_range, WAREHOUSE_CELL
+from mojoui.videojobs import detections_table
+
+comptime VIDEO_FUNCTIONS: List[String] = ["regions"]  # what a script may call on a video (the Apply buttons, in order)
+
+
+def frame_span(fps: Float64, frames: Int, from_s: Float64, to_s: Float64) -> Tuple[Int, Int]:
+    """Seconds [from_s, to_s) → frames [first, last + 1), rounded to the nearest frame and cut to the video (to_s < 0:
+    its end)."""
+    var a = max(0, min(frames, Int(from_s * fps + 0.5)))
+    var b = frames if to_s < 0 else max(a, min(frames, Int(to_s * fps + 0.5)))
+    return (a, b)
 
 
 def frames_table(fps: Float64, frames: Int) raises -> Table:
@@ -67,7 +88,28 @@ struct VideoFunctions(ScriptFunctions, Copyable, Movable, Sized):
             catalog.add_frame(self.names[k], MxFrame(frames_table(self.fps[k], self.frames[k]).share()))
 
     def has(self, name: String) -> Bool:
-        return False
+        return name in materialize[VIDEO_FUNCTIONS]()
 
     def call(mut self, name: String, args: List[String], mut catalog: Catalog) raises -> Table:
+        if name == "regions":
+            return self.regions(args)
         raise Error("no function " + name)
+
+    def regions(self, args: List[String]) raises -> Table:
+        if len(args) < 1 or len(args) > 3:
+            raise Error("regions(video, from_s, to_s): a video's name, then seconds")
+        var k = self.find(args[0])
+        if k < 0:
+            raise Error("no video " + args[0] + (": the videos are " + ", ".join(self.names) if len(self.names) > 0 else ": open one first"))
+        var from_s = Float64(args[1]) if len(args) > 1 else 0.0
+        var to_s = Float64(args[2]) if len(args) > 2 else -1.0
+        var video = VideoSource(self.paths[k])
+        var span = frame_span(video.fps, video.frames, from_s, to_s)
+        if span[1] <= span[0]:
+            raise Error("regions: no frames between " + args[1] + " and " + (args[2] if len(args) > 2 else "the end") + " s")
+        video.seek_frame(span[0])
+        var a = RegionsAnalyzer("region", 0, min_w=24, min_h=24)
+        var ranges = List[ColourRange]()
+        ranges.append(warm_range())
+        var found = scan(video, a, ranges, WAREHOUSE_CELL, limit=span[1] - span[0])
+        return detections_table(found)

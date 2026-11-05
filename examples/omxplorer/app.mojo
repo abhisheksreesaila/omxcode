@@ -99,7 +99,9 @@ from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE
 from mojoui.sample import sample_table
 from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, IDLE as ISLAND_IDLE, RUNNING as ISLAND_RUNNING, UNDO as ISLAND_UNDO, ERROR as ISLAND_ERROR
 from mojoui.tablejobs import TableWork, TableFile, Answer, ScriptAnswer
-from mojoui.videoscript import VideoFunctions
+from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS
+from mojoui.scriptpanel import ScriptPanel, SP_RUN, SP_EXPORT, SP_OPEN, SP_CLOSED
+from mojoui.recipe import Recipe, RecipeJob, read_recipe
 from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
 from mojoui.draw import rect as draw_rect, with_alpha
@@ -268,10 +270,8 @@ comptime QUERY_RUN = 3333
 comptime QUERY_CLOSE = 3334
 comptime QUERY_BAR = 3335  # the toolbar's query field: typed (its SQL), Return runs it (as the Query dialog's Run)
 comptime QUERY_BAR_RUN = 3336
-comptime SCRIPT_OPEN = 3360  # the Script window (the toolbar's Script): its text, Run, close (mojoui.script over every card and video)
-comptime SCRIPT_TEXT = 3361
-comptime SCRIPT_RUN = 3362
-comptime SCRIPT_CLOSE = 3363
+comptime SCRIPT_OPEN = 3360  # the toolbar's Script: opens the Script window (mojoui.scriptpanel over every card and video)
+comptime SCRIPT_MSG = 3370  # the Script window's own messages: 3370 … 3370 + SCRIPT_MESSAGES
 comptime EXPORT_CSV = 3340  # File > Export CSV: the sheet's own table as <documents>/<its name>.csv
 comptime OBJ_TABLE = 5  # (Insert > Table…'s dialog: inserting = OBJ_TABLE)
 comptime ACT_ANALYZE = 0  # a video card's actions (mojoui.mediacard CardAction)
@@ -401,10 +401,9 @@ struct Main(App):
     var query_text: String
     var query_name: String
     var query_said: String
-    var script_open: Bool
-    var script_text: String
-    var script_said: String
-    var script_log: List[String]
+    var script: ScriptPanel  # the Script window (its text, section, last run)
+    var recipe_job: Optional[Job[Recipe]]  # Export recipe, running
+    var recipes: Int  # recipes exported this session (recipe-1, recipe-2 …)
     var inserting: Int  # Insert > Video… or Image… open: OBJ_VIDEO or OBJ_IMAGE (0: closed)
     var active: Int  # the object the inspector shows (-1: none)
     var chart_sizes: List[Tuple[Float64, Float64]]  # per canvas id: points from the last draw (taps)
@@ -536,10 +535,9 @@ struct Main(App):
         self.query_text = ""
         self.query_name = "Query 1"
         self.query_said = ""
-        self.script_open = False
-        self.script_text = ""
-        self.script_said = ""
-        self.script_log = List[String]()
+        self.script = ScriptPanel(SCRIPT_MSG)
+        self.recipe_job = None
+        self.recipes = 0
         self.inserting = 0
         self.active = -1
         self.chart_sizes = List[Tuple[Float64, Float64]](length=1000, fill=(400.0, 240.0))
@@ -889,8 +887,8 @@ struct Main(App):
         if self.work.problem != "":
             if self.query_open:
                 self.query_said = self.work.problem
-            if self.script_open:
-                self.script_said = self.work.problem
+            if self.script.open:
+                self.script.said = self.work.problem
             self.message = self.work.problem
             self.say(Activity.error("Couldn't finish", self.work.problem))
             self.work.problem = ""
@@ -2068,27 +2066,103 @@ struct Main(App):
             names += (", " if names != "" else "") + v.names[k] + " (video)"
         return names
 
+    def offer_script(mut self):
+        """The Script window's videos (and where each is playing) and the functions Apply offers."""
+        var v = self.script_videos()
+        var heads = List[Float64]()
+        for k in range(len(self.media.cards)):
+            ref c = self.media.cards[k]
+            if c.kind == OBJ_VIDEO and c.player and v.find(sql_name(c.title())) >= 0:
+                heads.append(c.player.value().state.t())
+        self.script.offer(v.names.copy(), heads^, materialize[VIDEO_FUNCTIONS]())
+
     def run_script(mut self):
         """The Script window's statements over the sheet's tables, its cards and its videos, as a job: each named result
         lands as a table card (the same name again: the same card)."""
-        var text = self.script_text
+        var text: String
+        try:
+            text = self.script.script()
+        except e:
+            self.script.said = String(e)
+            self.version += 1
+            return
         if String(text.strip()) == "":
-            self.script_said = "Write a statement first: name = SELECT …;"
+            self.script.said = "Write a statement first: name = SELECT …;"
             self.version += 1
             return
         if self.trace:
-            print("SCRIPT: run " + String(text.count("\n") + 1) + " lines", flush=True)
+            print("SCRIPT: run " + String(text.count("\n") + 1) + " lines: " + text.replace("\n", " ⏎ "), flush=True)
         if self.work.script(self.tables, text, self.name if self.has_table else String(""), self.frame, self.script_videos(), self.pal):
-            self.script_said = "Running…"
+            self.script.said = "Running…"
             self.say(Activity.running("Script", 0.0, "in the background"))
         else:
-            self.script_said = self.work.problem
+            self.script.said = self.work.problem
             self.work.problem = ""
         self.version += 1
 
+    def export_recipe(mut self):
+        """Export: the script, the last run's results as CSV and the applied section's clip, as a folder in your
+        documents (a job)."""
+        if self.recipe_job:
+            self.script.said = "A recipe is being written already"
+            return
+        if len(self.script.results) == 0:
+            self.script.said = "Run the script first: Export keeps a run's results"
+            return
+        var names = List[String]()
+        var sheets = List[Sheet]()
+        for n in self.script.results:
+            var k = self.tables.find(n)
+            if k >= 0:
+                names.append(self.tables.sql_name_of(k))
+                sheets.append(self.tables.cards[k].sheet.snapshot())
+        var video = String("")
+        var sec = self.script.section()
+        if self.script.applied > 0 and len(self.script.videos) > 0:
+            var v = self.script_videos()
+            var at = v.find(self.script.videos[self.script.video])
+            if at >= 0:
+                video = v.paths[at]
+        self.recipes += 1
+        var folder = self.documents() + "/recipes/recipe-" + String(self.recipes)
+        self.recipe_job = start_ui_job(RecipeJob(folder, self.script.text, names^, sheets^, video, sec[0], sec[1]))
+        self.script.said = "Writing the recipe…"
+        self.say(Activity.running("Recipe", 0.0, "script, tables and clip"))
+
+    def take_recipe(mut self):
+        if not self.recipe_job or self.recipe_job.value().poll() == JOB_RUNNING:
+            return
+        var job = self.recipe_job.take()
+        try:
+            var r = job.result()
+            self.script.said = "Exported " + String(len(r.files)) + " files to " + r.folder
+            self.message = self.script.said
+            if self.trace:
+                print("RECIPE: exported " + r.folder + " " + String(len(r.files)) + " files, clip " + String(r.clip_frames) + " frames in " + fixed(r.milliseconds, 1) + " ms", flush=True)
+            self.say(Activity.done("Recipe", String(len(r.files)) + " files"))
+        except e:
+            self.script.said = "Couldn't export the recipe: " + String(e)
+            if self.trace:
+                print("RECIPE: failed " + String(e), flush=True)
+        self.version += 1
+
+    def open_recipe(mut self):
+        """Open recipe: a saved script, here; its questions (${…}) asked anew, Run runs it on this sheet."""
+        try:
+            var text = read_recipe(String(self.script.recipe_path.strip()))
+            self.script.set_text(text)
+            self.offer_script()
+            self.script.said = "Opened: " + (String(len(self.script.params)) + " questions to answer, then Run" if len(self.script.params) > 0 else "Run it")
+            if self.trace:
+                print("RECIPE: opened " + self.script.recipe_path + " asks " + ", ".join(self.script.params), flush=True)
+        except e:
+            self.script.said = String(e)
+
     def script_landed(mut self, var a: ScriptAnswer):
         """A script's results, each placed as a card (or into the card of the same name), its log kept for the window."""
-        self.script_log = a.log.copy()
+        var names = List[String]()
+        for i in range(len(a.cards)):  # (indexed: a card isn't Copyable)
+            names.append(a.cards[i].name)
         if self.trace:
             for l in a.log:
                 print("SCRIPT: " + l, flush=True)
@@ -2110,14 +2184,14 @@ struct Main(App):
             except e:
                 a.problem = String(e)
         self.timed(a.milliseconds)
+        self.script.ran(a.log.copy(), a.problem, names^)
         if a.problem != "":
-            self.script_said = a.problem
             self.message = "Script: " + a.problem
             self.say(Activity.error("Script", a.problem))
         else:
-            self.script_said = String(placed) + " results in " + fixed(shown_ms(a.milliseconds), 1) + " ms"
-            self.message = "Script: " + self.script_said
-            self.say(Activity.done("Script", self.script_said))
+            self.script.said = String(placed) + " results in " + fixed(shown_ms(a.milliseconds), 1) + " ms"
+            self.message = "Script: " + self.script.said
+            self.say(Activity.done("Script", self.script.said))
         self.version += 1
 
     def answer_landed(mut self, var a: Answer):
@@ -2756,6 +2830,7 @@ struct Main(App):
         find it there): landed charts move to their numbers, the column's figures arrive, the table work lands, the
         island follows (progress, then the time it took)."""
         self.take_table_work()
+        self.take_recipe()
         self.poll_documents()
         self.poll_pack()
         if self.media.poll():  # (a video's probe or frame that landed: on frames too, for hosts without the wake, D-1264)
@@ -3382,17 +3457,21 @@ struct Main(App):
             self.query_open = False
             self.version += 1
         elif m == SCRIPT_OPEN:
-            self.script_open = not self.script_open
-            if self.script_open and self.script_text == "":  # (a start: a statement over the sheet's own table)
-                self.script_text = "rows = SELECT * FROM " + sql_name(self.name) + " LIMIT 100;"
-            self.script_said = ""
+            self.script.open = not self.script.open
+            if self.script.open:
+                if self.script.text == "":  # (a start: a statement over the sheet's own table)
+                    self.script.set_text("rows = SELECT * FROM " + sql_name(self.name) + " LIMIT 100;")
+                self.offer_script()
+                self.script.said = ""
             self.version += 1
-        elif m == SCRIPT_TEXT:
-            self.script_text = event.text
-        elif m == SCRIPT_RUN:
-            self.run_script()
-        elif m == SCRIPT_CLOSE:
-            self.script_open = False
+        elif self.script.owns(m):
+            var did = self.script.update(event)
+            if did == SP_RUN:
+                self.run_script()
+            elif did == SP_EXPORT:
+                self.export_recipe()
+            elif did == SP_OPEN:
+                self.open_recipe()
             self.version += 1
         elif m == EXPORT_CSV:  # (written by a job: mojoui.tablejobs; the message comes when it lands)
             var path = self.documents() + "/" + sql_name(self.name) + ".csv"
@@ -4082,15 +4161,8 @@ struct Main(App):
                        Spacer(), Button("Cancel", QUERY_CLOSE), Button("Run", QUERY_RUN, PROMINENT, icon="play").tag("run-query"), spacing=10).fill().align(CENTER),
                 Text(self.query_said, CAPTION).tone(TONE_WARN).tag("query-said") if self.query_said != "" else Spacer(),
                 spacing=12).align(START).fill(), on_close=QUERY_CLOSE, width=640))
-        if self.script_open:
-            var lines = List[View]()
-            lines.append(Text("Statements, run in order: name = SELECT …; or name = function(…);. Each result is a card later statements can read. Tables: " + self.script_names() + ".", CAPTION))
-            lines.append(TextArea(self.script_text, "frames = SELECT * FROM episode;", SCRIPT_TEXT, height=200).fill().tag("script-text"))
-            lines.append(HStack(Text(self.script_said, CAPTION).tone(TONE_WARN if self.script_said.startswith("line ") else TONE_ACCENT).tag("script-said"), Spacer(),
-                                Button("Close", SCRIPT_CLOSE), Button("Run", SCRIPT_RUN, PROMINENT, icon="play").tag("run-script"), spacing=10).fill().align(CENTER))
-            for l in self.script_log:
-                lines.append(Text(l, CAPTION))
-            out.append(Dialog("Script", VStack(lines^, spacing=12).align(START).fill(), on_close=SCRIPT_CLOSE, width=720))
+        if self.script.open:
+            out.append(self.script.view(self.script_names()))
         if self.compare_open:
             var pl = self.place_tables()
             var names = List[String]()
@@ -4247,7 +4319,7 @@ struct Main(App):
         middle.append(Tool("Pivot", "pivot", INSERT_PIVOT, False, "A pivot table of the selected column (Ctrl+Shift+P)"))
         middle.append(Tool("Chart", "chart-bar", INSERT_CHART, False, "A chart of the selected column (Ctrl+Shift+C)"))
         middle.append(Tool("Query", "database", QUERY_OPEN, self.query_open, "Ask the sheet's tables in SQL: joins, IN, subqueries; the answer is a table"))
-        middle.append(Tool("Script", "terminal", SCRIPT_OPEN, self.script_open, "A script over every table and video here: statements in order, each result a card"))
+        middle.append(Tool("Script", "terminal", SCRIPT_OPEN, self.script.open, "A script over every table and video here: statements in order, each result a card"))
         return Toolbar(left, middle, right, extra, toggles=self.format_tools(), inline=True, compact=self.win_w < COMPACT_W)
 
     def format_tools(self) -> List[List[Tool]]:
