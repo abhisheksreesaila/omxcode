@@ -16,8 +16,9 @@ CALL = re.compile(r'external_call\[\s*"([A-Za-z_0-9]+)"')
 SKIP = {"mojoui/libc.mojo", "mojoui/hosts/mojo_rt.mojo"}  # (mojo_rt: the iPhone runtime stand-ins, never with Flare)
 # Declared the same way in every mojoui file (and by neither Flare nor the engine): dlsym(Int, C string) -> Int
 SAME_EVERYWHERE = {"dlsym"}
-# Declared in the omxcore engine's form on purpose (beside engine jobs; D-4761): file -> symbols
-ENGINE_FORM = {"mojoui/framefeed.mojo": {"pthread_create"}}
+# Declared in the omxcore engine's form on purpose: file -> symbols (none since goal 52: the engine's patch looks the
+# disputed functions up, and framefeed starts its thread through mojoui.libc)
+ENGINE_FORM = {}
 
 
 def names(paths):
@@ -31,7 +32,10 @@ def main():
     owned = names([ROOT / "mojoui/libc.mojo"])
     flare = names(list((ROOT / "vendor/flare").rglob("*.mojo")) + list((ROOT / "vendor/json").rglob("*.mojo")))
     engine = set()
-    for d in sorted(Path.home().joinpath(".cache").glob("omxcore-*-src")):  # (the vendored engine's sources, when built here)
+    # the vendored engine's sources as built (build/omxcore-src: its archive with vendor/patches applied), else the
+    # unpatched archives other checkouts left in ~/.cache
+    built = ROOT / "build" / "omxcore-src"
+    for d in [built] if (built / "mojo").exists() else sorted(Path.home().joinpath(".cache").glob("omxcore-*-src")):
         engine |= names(list((d / "mojo").rglob("*.mojo")))
     watch = (owned | flare | (engine & (owned | flare))) - SAME_EVERYWHERE
     bad = []

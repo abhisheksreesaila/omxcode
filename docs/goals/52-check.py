@@ -354,7 +354,12 @@ def m3():
     lost_builds = [f"{a}/{p}" for a, v in base["examples"].items() for p, r in v.items()
                    if r["ok"] and not cur["examples"].get(a, {}).get(p, {}).get("ok")]
     lost_tests = [n for n, v in base["tests"].items() if v["passed"] and not cur["tests"].get(n, {}).get("passed")]
-    # a test that passed on 1.1 and failed in the parallel sweep is built and run once more on its own (ports, CPU)
+    # a test that passed on 1.1 and failed in the parallel sweep is built and run once more on its own (ports, CPU),
+    # with what goal 50's checker leaves behind and the 1.1 checkout had (test_process starts build/serve_demo)
+    if lost_tests:
+        why = flare_build(ROOT / "tests" / "serve_demo.mojo", BUILD / "serve_demo")
+        if why:
+            return False, why
     again = []
     for n in lost_tests:
         _, r = sweep.test(ROOT, ROOT / "tests" / f"{n}.mojo")

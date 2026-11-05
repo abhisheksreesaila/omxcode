@@ -131,6 +131,11 @@ def _decode(mut src: VideoSource, target: Int, mut back: List[UInt32], addr: Int
         return 0
 
 
+def _feed_entry(arg: libc.ThreadArg) -> libc.ThreadArg:
+    _ = _feed_main(Int(arg))
+    return libc.null_arg()
+
+
 def _feed_main(addr: Int) abi("C") -> Int:
     """The feed's thread: probe, then decode whatever is wanted, newest first, until told to stop."""
     var s = _at(addr)
@@ -216,15 +221,9 @@ struct FrameFeed(Movable):
         if known:
             p[].state = _READY  # (the handle's view: ready at once; the thread opens its decoder without probing)
         self.addr = Int(p)
-        # (declared as omxcore's jobs declare it: one C function has one signature in a program)
+        # (mojoui.libc looks pthread_create up: the engine, Flare and mojoui then never declare it two ways, goal 52)
         var tid = Int(0)
-        var attr = unsafe_alloc[UInt8](256)
-        for i in range(256):
-            attr[i] = 0
-        _ = external_call["pthread_attr_init", c_int](attr)
-        var rc = external_call["pthread_create", c_int](Pointer(to=tid), attr, _feed_main, self.addr)
-        _ = external_call["pthread_attr_destroy", c_int](attr)
-        attr.free()
+        var rc = libc.pthread_create[_feed_entry](self.addr, Int(Pointer(to=tid)))
         if rc != 0:
             self.why = "no thread to decode on"
             _release(self.addr)  # (the thread's share)
