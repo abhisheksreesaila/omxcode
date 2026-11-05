@@ -24,7 +24,7 @@ import headless  # noqa: E402
 from drive import web_run  # noqa: E402
 from agent_client import Client  # noqa: E402
 
-PAGES = ["docs/start.html", "docs/tasks.html"]
+PAGES = ["docs/start.html", "docs/tasks.html", "docs/learn/index.html"]
 FIELD = "What needs doing?"
 STEPS = f"type:{FIELD}=Buy milk;tap:Add;type:{FIELD}=Call Ada;submit:{FIELD};toggle:Buy milk"
 AFTER = ["CHECK: Buy milk=on", "CHECK: Call Ada=off", "LABEL: 1 left"]
@@ -51,12 +51,12 @@ def code_matches():
 
 
 def shown_output(page, kind):
-    """The output lines a page shows in its <pre data-output=kind> block."""
+    """The output lines a page shows in its <pre data-output=kind> blocks (None: it has none)."""
     src = (ROOT / page).read_text()
-    m = re.search(rf'<pre[^>]*\bdata-output="{kind}"[^>]*>(.*?)</pre>', src, re.S)
-    if not m:
+    found = re.findall(rf'<pre[^>]*\bdata-output="{kind}"[^>]*>(.*?)</pre>', src, re.S)
+    if not found:
         return None
-    spans = re.findall(r'<span class="o">(.*?)</span>', m.group(1), re.S)
+    spans = [sp for block in found for sp in re.findall(r'<span class="o">(.*?)</span>', block, re.S)]
     return [html.unescape(l).strip() for sp in spans for l in sp.splitlines() if l.strip()]
 
 
@@ -112,7 +112,7 @@ def main():
     with tempfile.TemporaryDirectory() as cfg:
         out = gtk("tasks", STEPS, cfg)
         problems += [f"tasks on GTK: no {w}" for w in lacks(out, AFTER)]
-        problems += output_shown("docs/tasks.html", "gtk", out)
+        problems += output_shown("docs/tasks.html", "gtk", out) + output_shown("docs/learn/index.html", "gtk", out)
         again = gtk("tasks", "", cfg, shot=str(img / "tasks-gtk.png") if shots else None)
         problems += [f"tasks on GTK, reopened: no {w}" for w in lacks(again, AFTER)]
         out = gtk("tasks", "tap:Remove", cfg)
@@ -134,6 +134,7 @@ def main():
         try:
             added = c.call("what-needs-doing", text="Buy milk", submit=True)[0]
             added += "\n" + c.call("what-needs-doing", text="Call Ada", submit=True)[0]
+            before, _, _ = c.call("screen")
             refused, _, err = c.call("buy-milk")
             if not err:
                 problems.append("agent: buy-milk without \"on\" wasn't refused")
@@ -141,7 +142,8 @@ def main():
             screen, _, _ = c.call("screen")
         finally:
             c.close()
-        problems += output_shown("docs/tasks.html", "agent", "\n".join([added, refused, said, screen]))
+        printed = "\n".join([added, before, refused, said, screen])
+        problems += output_shown("docs/tasks.html", "agent", printed) + output_shown("docs/learn/index.html", "agent", printed)
         for want in ['Checkbox "Buy milk" = on → buy-milk', "remove-2 — Remove Call Ada", '"1 left"']:
             if want not in screen:
                 problems.append(f"agent: the screen lacks {want!r}")

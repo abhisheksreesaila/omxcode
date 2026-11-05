@@ -45,7 +45,7 @@ Imagine writing an app once, in a language that reads like Python.
 
 It opens as a real app on Linux, in the browser, on Android, on a Mac and on an iPhone. Each one uses that platform's own buttons, menus and text fields, not an imitation of them. The heavy lifting, a million rows summed, sorted or charted, runs on the GPU, in the same language and the same file. And when an AI agent wants to use the app, it doesn't scrape pixels or guess at buttons. The app is already a set of tools the agent can call.
 
-That's **omxcode**. Its showcase, **omxplorer**, is a data app in the spirit of Numbers and Power BI, and the app itself is about 2,100 lines of Mojo, built from the framework's components.
+That's **omxcode**. Its showcase, **omxplorer**, is a data app in the spirit of Numbers and Power BI, and the app itself is one Mojo file of about 4,500 lines, built from the framework's components.
 
 ## Why omxcode exists
 1. **No boundary tax.** No JSON, no HTTP, no second process to start, keep alive and debug. Apps that move a lot of data between the screen and the computing are faster and simpler.
@@ -235,7 +235,7 @@ struct Main(App):
 
 ## Read more
 
-- **Tutorials:** [your first app](https://abhisheksreesaila.github.io/omxcode/start.html), then [a todo app](https://abhisheksreesaila.github.io/omxcode/tasks.html) that keeps its tasks in SQLite (`examples/tasks`).
+- **Tutorials:** [your first app](https://abhisheksreesaila.github.io/omxcode/start.html), then [a todo app](https://abhisheksreesaila.github.io/omxcode/tasks.html) that keeps its tasks in SQLite (`examples/tasks`). Or all of it, from a button to agents and the GPU, [in slides](https://abhisheksreesaila.github.io/omxcode/learn/).
 - **[Reference](docs/reference.md):** the app model, every component, layout, the GPU canvas, the examples.
 - **[How it works](docs/architecture.md):** the view tree, the update loop, how each platform is reached.
 - **[The agent host](docs/agent.md):** the tools, what an agent gets back, what it can't do yet.

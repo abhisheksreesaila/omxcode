@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en" class="oq-root oq-night oq-family-dev">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learn omxcode: from one button to the GPU</title>
+<meta name="description" content="omxcode in slides, from a 30-line app to what's new: agents as a host, native AG-UI screens, an agent in the app's own process, GPU code in the same file. Every code sample is real code from the repository.">
+<meta property="og:title" content="Learn omxcode: from one button to the GPU">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/agents/trip.png">
+<link rel="icon" href="../img/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../omxqua/src/fonts.css">
+<link rel="stylesheet" href="../omxqua/src/tokens.css">
+<link rel="stylesheet" href="vendor/reveal/reset.css">
+<link rel="stylesheet" href="vendor/reveal/reveal.css">
+<style>
+:root { --d-bg: #000; --d-s1: #131316; --d-ink: #f4f4f6; --d-ink2: #a3a3ad; --d-line: rgba(255, 255, 255, .10);
+  --d-coral: #ff5d6c; --d-ok: #5ad08a; --d-sans: "Geist", system-ui, sans-serif; --d-mono: "Geist Mono", ui-monospace, monospace; }
+html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #000; color-scheme: dark; }
+.reveal { font-family: var(--d-sans); color: var(--d-ink); font-size: 30px; }
+.reveal .slides { text-align: left; }
+.reveal .slides section { height: 100%; padding: 0 8px; box-sizing: border-box; }
+.reveal h1, .reveal h2 { font-family: var(--d-sans); font-weight: 700; letter-spacing: -0.035em; line-height: 1.02; margin: 0 0 18px; color: var(--d-ink); }
+.reveal h1 { font-size: 96px; }
+.reveal h2 { font-size: 56px; }
+.reveal h2 .two { color: var(--d-ink2); }
+.reveal p, .reveal li { color: var(--d-ink2); line-height: 1.45; margin: 0 0 14px; }
+.reveal p b, .reveal li b { color: var(--d-ink); font-weight: 600; }
+.reveal ul { margin: 0 0 0 1em; padding: 0; }
+.reveal code { font-family: var(--d-mono); font-size: .86em; color: var(--d-ink); }
+.reveal a { color: var(--d-coral); text-decoration: none; }
+.lvl { font: 600 15px var(--d-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--d-coral); margin-bottom: 14px; display: flex; gap: 14px; }
+.lvl span { color: var(--d-ink2); }
+.cols { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.3fr); gap: 40px; align-items: start; }
+.cols.even { grid-template-columns: 1fr 1fr; }
+.cols.wide { grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr); }
+.pane { border-radius: 18px; background: var(--d-s1); box-shadow: 0 0 0 1px var(--d-line); padding: 16px 20px; min-width: 0; }
+.file { font: 600 13px var(--d-mono); color: var(--d-ink2); margin-bottom: 8px; } .file b { color: var(--d-ink); }
+.reveal pre.code { margin: 0; font: 16px/1.55 var(--d-mono); color: #cfcfd6; white-space: pre; overflow: hidden; box-shadow: none; width: auto; background: none; }
+.reveal pre.code.small { font-size: 14px; }
+.reveal pre.code.wrap { white-space: pre-wrap; }
+.code .k { color: var(--d-ink); font-weight: 600; } .code .c { opacity: .55; } .code .s { color: var(--d-ok); } .code .o { color: var(--d-ink); }
+.shot { border-radius: 16px; box-shadow: 0 0 0 1px var(--d-line); display: block; max-width: 100%; }
+.cap { font: 14px var(--d-mono); color: var(--d-ink2); margin-top: 8px; text-align: center; }
+.row { display: flex; gap: 16px; align-items: flex-start; }
+.row figure { margin: 0; flex: 1; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.chip { font: 600 16px var(--d-mono); padding: 6px 12px; border-radius: 999px; background: var(--d-s1); box-shadow: 0 0 0 1px var(--d-line); color: var(--d-ink); }
+.chip.no { color: var(--d-ink2); }
+.status td, .status th { font-size: 22px; padding: 8px 18px 8px 0; border-bottom: 1px solid var(--d-line); color: var(--d-ink2); text-align: left; }
+.status th { color: var(--d-ink); font-weight: 600; } .status td:first-child { color: var(--d-ink); }
+.watch { position: absolute; right: 8px; top: 0; font: 600 16px var(--d-mono); color: #000 !important; background: var(--d-coral); padding: 8px 16px; border-radius: 999px; }
+.hero { display: flex; flex-direction: column; justify-content: center; height: 100%; }
+.hero p { font-size: 32px; max-width: 900px; }
+.path { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 30px; }
+.path > div { border-radius: 18px; background: var(--d-s1); box-shadow: 0 0 0 1px var(--d-line); padding: 18px 20px; }
+.path .t { font: 600 14px var(--d-mono); letter-spacing: .12em; color: var(--d-coral); text-transform: uppercase; }
+.path p { margin: 8px 0 0; font-size: 22px; }
+.reveal .progress { color: var(--d-coral); }
+.reveal .controls { color: var(--d-coral); }
+.reveal .slide-number { background: none; font: 14px var(--d-mono); color: var(--d-ink2); }
+</style>
+</head>
+<body>
+<div class="reveal"><div class="slides">
+
+<section id="start" class="hero">
+  <div class="lvl">omxcode<span>· learn it in slides</span></div>
+  <h1>From one button<br>to the GPU.</h1>
+  <p>omxcode is an app framework written in Mojo. One file becomes a native app on Linux, a web app, and a set of tools an AI agent can use. Start with 30 lines; end with what nothing else does.</p>
+  <div class="path">
+    <div><div class="t">Start</div><p>An app, every host, a look.</p></div>
+    <div><div class="t">Build</div><p>Lists, data that stays, tests, components.</p></div>
+    <div><div class="t">What's new</div><p>Agents, native AI screens, the GPU.</p></div>
+  </div>
+  <aside class="notes">Arrow keys or space to move. S opens these notes in their own window. Every code sample in this deck is cut from a real file in the repository, and a check fails if they ever differ.</aside>
+</section>
+
+<!-- ============ START ============ -->
+
+<section id="app">
+  <div class="lvl">Start<span>· 1 of 3</span></div>
+  <h2>An app is state, update, view.</h2>
+  <div class="cols">
+    <div>
+      <p><b>State</b> is the struct's fields.</p>
+      <p><b>update</b> runs when something happens: the button sends <code>TAP</code>, and update adds one.</p>
+      <p><b>view</b> describes the screen from the state. omxcode works out what changed and touches only that.</p>
+      <p>There's no other file: no HTML, no layout XML, no build config.</p>
+    </div>
+    <div class="pane"><div class="file">examples/start/<b>app.mojo</b></div>
+<pre class="code" data-file="examples/start/app.mojo">    <span class="k">def</span> update(mut self, event: Event):
+        <span class="k">if</span> event.message == TAP:
+            self.taps += 1
+
+    <span class="k">def</span> view(self) -&gt; View:
+        <span class="k">return</span> VStack(
+            Text(<span class="s">"Hello from Mojo"</span>, style=TITLE),
+            Text(<span class="s">"Tapped "</span> + String(self.taps) + <span class="s">" times"</span>, style=CAPTION),
+            Button(<span class="s">"Tap me"</span>, on_tap=TAP, style=PROMINENT),
+            spacing=16,
+        )</pre></div>
+  </div>
+  <aside class="notes">This is the whole idea of the framework, and it's the same as Elm or SwiftUI: you never change a widget yourself; you change the state and describe the screen again. The full 33-line file is tutorial 1, docs/start.html.</aside>
+</section>
+
+<section id="hosts">
+  <div class="lvl">Start<span>· 2 of 3</span></div>
+  <h2>One file. <span class="two">Each platform's own controls.</span></h2>
+  <div class="cols wide">
+    <div>
+      <p>The same <code>view()</code> becomes GTK widgets on Linux, HTML on the web and AppKit views on the Mac. Not a drawn imitation: the platform's real buttons and fields.</p>
+      <p><code>scripts/build.sh &lt;app&gt; linux</code>, <code>web</code>, <code>mac</code>: one command each.</p>
+    </div>
+    <div class="row">
+      <figure><img class="shot" src="../img/how/tile-gtk.png" alt="A report tile in a GTK window"><div class="cap">Linux · GTK 4</div></figure>
+      <figure><img class="shot" src="../img/how/tile-web.png" alt="The same tile in a browser"><div class="cap">the web</div></figure>
+      <figure><img class="shot" src="../img/how/tile-mac.png" alt="The same tile on a Mac"><div class="cap">Mac · AppKit</div></figure>
+    </div>
+  </div>
+  <aside class="notes">One card from omxplorer, the same Mojo code, three toolkits. Linux and the web are run by scripts/check. The Mac picture comes from GitHub's macOS machines: the Mac builds and runs there, and its layout still has a known bug with wide screens.</aside>
+</section>
+
+<section id="look">
+  <div class="lvl">Start<span>· 3 of 3</span></div>
+  <h2>A look is one method.</h2>
+  <div class="cols even">
+    <div>
+      <p>Leave <code>theme()</code> out and the app looks native: Adwaita on Linux.</p>
+      <p>Return <code>liquid()</code> and the same app wears Liquid: soft surfaces and springy motion, the same on Linux and the web.</p>
+      <p>Fluent, Omarchy and Paper ship too. A theme is plain Mojo in <code>themes/</code>: copy one and change it.</p>
+    </div>
+    <div class="row">
+      <figure><img class="shot" src="../img/start/hello-native-gtk.png" alt="The hello app without a theme"><div class="cap">no theme</div></figure>
+      <figure><img class="shot" src="../img/start/hello-gtk.png" alt="The same app with Liquid"><div class="cap">return liquid()</div></figure>
+    </div>
+  </div>
+  <aside class="notes">Nothing else in the app changes between these two pictures: only the three-line theme method.</aside>
+</section>
+
+<!-- ============ BUILD ============ -->
+
+<section id="list">
+  <div class="lvl">Build<span>· 1 of 4</span></div>
+  <h2>A list is a loop. <span class="two">A message carries an id.</span></h2>
+  <div class="cols">
+    <div>
+      <p><code>view()</code> builds one row per task with a plain <code>for</code>, so the screen is always exactly the data.</p>
+      <p>Ticking task 7 sends <code>TICK + 7</code>. <code>update</code> subtracts <code>TICK</code> and knows which task it was.</p>
+      <p>The tooltip says which task a Remove button is for: to a person, a screen reader and an agent.</p>
+    </div>
+    <div class="pane"><div class="file">examples/tasks/<b>app.mojo</b></div>
+<pre class="code" data-file="examples/tasks/app.mojo">    <span class="k">def</span> view(self) -&gt; View:
+        <span class="k">var</span> rows = List[View]()
+        <span class="k">var</span> left = 0
+        <span class="k">for</span> t <span class="k">in</span> self.tasks:
+            <span class="k">if</span> <span class="k">not</span> t.done:
+                left += 1
+            rows.append(HStack(
+                Checkbox(t.title, t.done, on_toggle=TICK + t.id).grow(),
+                Button(<span class="s">"Remove"</span>, on_tap=REMOVE + t.id).tooltip(<span class="s">"Remove "</span> + t.title),
+            ).fill())</pre></div>
+  </div>
+  <aside class="notes">From tutorial 2, the todo app, docs/tasks.html. Message numbers are plain integers; a base plus an id is the whole trick, and it keeps update a simple if/elif.</aside>
+</section>
+
+<section id="sqlite">
+  <div class="lvl">Build<span>· 2 of 4</span></div>
+  <h2>Data that stays: SQLite.</h2>
+  <div class="cols">
+    <div>
+      <p><code>mojoui.sqlite</code> opens a file and runs SQL, with values bound, never pasted in.</p>
+      <p>The app changes the table, then reads it back: one source of truth, so the screen and the file can't drift.</p>
+      <p>Close the app, open it again: the tasks are there.</p>
+      <img class="shot" src="../img/tasks/tasks-gtk.png" alt="The Tasks app, reopened, its tasks loaded from SQLite" style="width:230px">
+    </div>
+    <div class="pane"><div class="file">examples/tasks/<b>app.mojo</b></div>
+<pre class="code small" data-file="examples/tasks/app.mojo"><span class="k">def</span> open_db() <span class="k">raises</span> -&gt; Database:
+    make_dir(config_dir(<span class="s">"tasks"</span>))
+    <span class="k">var</span> db = Database(config_dir(<span class="s">"tasks"</span>) + <span class="s">"/tasks.db"</span>)
+    db.exec(<span class="s">"CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY, title TEXT, done INTEGER)"</span>)
+    <span class="k">return</span> db^
+
+
+<span class="k">def</span> load(db: Database) <span class="k">raises</span> -&gt; List[Task]:
+    <span class="k">var</span> tasks = List[Task]()
+    <span class="k">var</span> q = db.prepare(<span class="s">"SELECT id, title, done FROM tasks ORDER BY id"</span>)
+    <span class="k">while</span> q.step():
+        tasks.append(Task(q.int(0), q.text(1), q.int(2) == 1))
+    <span class="k">return</span> tasks^</pre></div>
+  </div>
+  <aside class="notes">SQLite is loaded at run time from the system's library, so there's no link flag on any platform. Slow queries go in a job so the window never waits; that's the "never hangs" slide later.</aside>
+</section>
+
+<section id="test">
+  <div class="lvl">Build<span>· 3 of 4</span></div>
+  <h2>Test the real widgets. <span class="two">No window.</span></h2>
+  <div class="cols">
+    <div>
+      <p>Every app has a test mode. Give it steps; it presses the real GTK widgets, prints what each one shows, and quits.</p>
+      <p><code>scripts/drive.py</code> runs the same steps in a browser with no window and prints the same lines. Same lines, same behaviour.</p>
+    </div>
+    <div class="pane">
+<pre class="code small" data-output="gtk">MOJOUI_TEST="type:What needs doing?=Buy milk;tap:Add;\
+type:What needs doing?=Call Ada;submit:What needs doing?;\
+toggle:Buy milk" build/tasks/linux/tasks
+<span class="o">LABEL: Tasks
+FIELD:
+BUTTON: Add
+CHECK: Buy milk=on
+BUTTON: Remove
+CHECK: Call Ada=off
+BUTTON: Remove
+LABEL: 1 left</span></pre></div>
+  </div>
+  <aside class="notes">This is how every claim in the project is checked: scripts/check builds everything and runs steps like these on GTK and in Chromium. The pictures in this deck were taken by the same test mode.</aside>
+</section>
+
+<section id="components">
+  <div class="lvl">Build<span>· 4 of 4</span></div>
+  <h2>Components that drop in.</h2>
+  <div class="cols even">
+    <div>
+      <p>Buttons and fields, and also data grids, charts, maps, timelines, video and a GPU canvas: each one a function that returns a <code>View</code>.</p>
+      <p>A matrix generated from the code says which run where, on each platform and through the agent: <a href="../components.html">components</a>.</p>
+      <p>The rule: anything one app needs that another would too goes into the framework, with its own test.</p>
+    </div>
+    <figure style="margin:0"><img class="shot" src="../img/widgets-gtk-dark.png" alt="A gallery of omxcode widgets in a dark GTK window"><div class="cap">widgets, GTK, dark</div></figure>
+  </div>
+  <aside class="notes">The component page is generated by scripts/components.py and a check fails when it's out of date, so it can't claim more than the code does.</aside>
+</section>
+
+<!-- ============ WHAT'S NEW ============ -->
+
+<section id="agent-host">
+  <div class="lvl">What's new<span>· the agent is a host</span></div>
+  <h2>Every app is already an agent's tool set.</h2>
+  <div class="cols">
+    <div>
+      <p>GTK turns the view into widgets; the web, into HTML. <b>The agent host turns it into MCP tools.</b> No per-app code.</p>
+      <p>A field becomes a tool that takes <code>text</code>; a checkbox, one that takes <code>on</code>. Each reply says what changed, in words: no screenshots, no coordinates.</p>
+      <p><code>scripts/agent.sh tasks</code> prints the one command that gives it to Claude Code.</p>
+    </div>
+    <div class="pane">
+<pre class="code small" data-output="agent"><span class="k">what-needs-doing</span> text="Buy milk" submit=true
+<span class="o">Did what-needs-doing.
+Now: 1 left
+Tools now 4; new: buy-milk, remove</span>
+
+<span class="k">what-needs-doing</span> text="Call Ada" submit=true
+<span class="o">Did what-needs-doing.
+Now: 2 left
+Tools now 6; new: call-ada, remove-2</span>
+
+<span class="k">screen</span>
+<span class="o">Checkbox "Buy milk" = off → buy-milk
+Button "Remove" (Remove Buy milk) → remove
+Checkbox "Call Ada" = off → call-ada
+Button "Remove" (Remove Call Ada) → remove-2</span></pre></div>
+  </div>
+  <aside class="notes">Most apps meet agents through screenshots or an accessibility tree written for screen readers. Here the agent is a host, like GTK and the browser, reading the same view tree. Real output from the todo app, through scripts/agent_client.py.</aside>
+</section>
+
+<section id="permission">
+  <div class="lvl">What's new<span>· the agent is a host</span></div>
+  <h2>The screen is the permission model.</h2>
+  <div class="cols even">
+    <div>
+      <p><b>An agent can do nothing a person couldn't.</b> A disabled button is no tool. A dialog's buttons are tools only while it's open.</p>
+      <p>Tools appear and go as the screen changes, and the agent is told which.</p>
+      <p>A call without a value it needs is refused, never guessed.</p>
+    </div>
+    <div class="pane">
+<pre class="code small" data-output="agent"><span class="k">buy-milk</span>
+<span class="o">ValueError: buy-milk needs "on"</span>
+
+<span class="k">buy-milk</span> on=true
+<span class="o">Did buy-milk.
+Now: 1 left</span></pre></div>
+  </div>
+  <aside class="notes">There is no separate agent API that could drift away from the app or let an agent do something the screen doesn't offer. What you see is exactly what the agent may do.</aside>
+</section>
+
+<section id="agui">
+  <div class="lvl">What's new<span>· agents build screens</span></div>
+  <h2>Agents answer with native screens.</h2>
+  <div class="cols wide">
+    <div>
+      <p>The other direction: an omxcode app is an <a href="https://docs.ag-ui.com">AG-UI</a> client. An agent answers with a screen as data, built from 38 of the framework's components.</p>
+      <p>The app checks it against the catalog and draws it with real widgets. No HTML, no code from the agent; anything outside the catalog is refused, and the agent is told why.</p>
+      <p>Checked against Pydantic AI and LangGraph.</p>
+    </div>
+    <figure style="margin:0"><img class="shot" src="../img/agents/trip.png" alt="An agent's answer drawn natively: a map of a day in Lisbon, a timeline, the weather and buttons" style="max-height:480px;margin-left:auto"></figure>
+  </div>
+  <aside class="notes">A map, a timeline, a chart and buttons, all sent as JSON by the agent and drawn by the same components an app uses. Tapping Book tickets goes back to the agent as the tool's result. Details and a command for each claim: docs/ag-ui-compatibility.md.</aside>
+</section>
+
+<section id="streaming">
+  <div class="lvl">What's new<span>· agents build screens</span></div>
+  <h2>The screen builds while it streams.</h2>
+  <div class="cols even">
+    <div>
+      <p>The agent's JSON arrives in pieces. A tolerant reader parses whatever has arrived, and the screen grows piece by piece; parts not here yet show a skeleton.</p>
+      <p>Its thinking shows live, then folds away. Approvals wait for a person; the answer goes back to the agent.</p>
+    </div>
+    <div class="row">
+      <figure><img class="shot" src="../img/agents/streaming.png" alt="A screen half-streamed, with skeletons where parts haven't arrived"><div class="cap">mid-stream</div></figure>
+      <figure><img class="shot" src="../img/agents/approval.png" alt="An approval card waiting for the person"><div class="cap">human in the loop</div></figure>
+    </div>
+  </div>
+  <aside class="notes">Every cut of a streamed tool call, at every byte, either parses or waits; a test checks it never crashes.</aside>
+</section>
+
+<section id="data-by-name">
+  <div class="lvl">What's new<span>· agents build screens</span></div>
+  <h2>A million rows, <span class="two">and the agent never sends them.</span></h2>
+  <div class="cols wide">
+    <div>
+      <p>The agent names a dataset the app already holds; the app binds a grid or a chart to it.</p>
+      <p>The rows stay in the app's memory, queried by its own engine, and never travel through the agent's messages.</p>
+      <p>Pictures work the same way: the agent names one the app registered. It never sends pixels or links.</p>
+    </div>
+    <figure style="margin:0"><img class="shot" src="../img/learn/orders-grid.png" alt="A data grid in an agent's answer, bound to the million orders the app holds" style="margin-left:auto"></figure>
+  </div>
+  <aside class="notes">This is what an in-process framework makes possible: the agent describes; the app's own engine does the data work, next to the screen.</aside>
+</section>
+
+<section id="in-process">
+  <div class="lvl">What's new<span>· no boundary</span></div>
+  <h2>An agent in the app's own process.</h2>
+  <div class="cols">
+    <div>
+      <p>A <code>LocalAgent</code> is any Mojo struct that answers a run with AG-UI events. No HTTP, no other language, no server to start.</p>
+      <p>Its events go through the same handler a streamed reply does, so a local model and a remote agent build the same screens.</p>
+    </div>
+    <div class="pane"><div class="file">mojoui/<b>agui.mojo</b></div>
+<pre class="code small wrap" data-file="mojoui/agui.mojo">trait LocalAgent:
+<span class="c">    """An agent in the app's own process (goal 48 M5): no HTTP, no other language. Given a run's input (the same</span>
+<span class="c">    RunAgentInput JSON a remote agent gets) it answers with AG-UI events, as JSON, in order; the app reads them with</span>
+<span class="c">    the same handler a stream's pieces go through (Agent.run_local, or mojoui.agentchat's AgentChat.feed)."""</span>
+
+    <span class="k">def</span> respond(mut self, input: String) -&gt; List[String]:
+        ...</pre></div>
+  </div>
+  <aside class="notes">Remote agents speak the protocol over HTTP; a local one hands over the same events as a list. One code path for both.</aside>
+</section>
+
+<section id="gpu">
+  <div class="lvl">What's new<span>· one language to the GPU</span></div>
+  <h2>The GPU code is in the same file.</h2>
+  <div class="cols">
+    <div>
+      <p>This function colours one pixel. <code>self.gpu.render[mandelbrot](…)</code> runs it on the GPU, one thread per pixel, and the result goes straight into an <code>Image</code> on screen.</p>
+      <p>The same function can also run on the CPU, and the app checks that the two pictures agree, pixel for pixel.</p>
+      <img class="shot" src="../img/learn/gpu-fractal.png" alt="The GPU fractal app in a GTK window" style="width:190px">
+    </div>
+    <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b></div>
+<pre class="code small" data-file="examples/gpu/app.mojo"><span class="k">def</span> mandelbrot(x: Int, y: Int, w: Int, h: Int, p: Params) -&gt; UInt32:
+<span class="c">    """Colour of one pixel. p = (scale, centre x, centre y, max iterations)."""</span>
+    <span class="k">var</span> cx = p[1] + (Float32(x) - Float32(w) / 2) * p[0] / Float32(h)
+    <span class="k">var</span> cy = p[2] + (Float32(y) - Float32(h) / 2) * p[0] / Float32(h)
+    <span class="k">var</span> zx = Float32(0)
+    <span class="k">var</span> zy = Float32(0)
+    <span class="k">var</span> i = 0
+    <span class="k">var</span> limit = Int(p[3])
+    <span class="k">while</span> i &lt; limit <span class="k">and</span> zx * zx + zy * zy &lt; 4.0:
+        <span class="k">var</span> t = zx * zx - zy * zy + cx
+        zy = 2.0 * zx * zy + cy
+        zx = t
+        i += 1</pre></div>
+  </div>
+  <aside class="notes">Mojo writes the interface and the kernels. In omxplorer the group-by kernel lives in the same codebase as the sheet that shows its totals. GPU path: NVIDIA today. Without a supported GPU this example says so and draws nothing; the framework's GPU kernels have a CPU path that runs the same code.</aside>
+</section>
+
+<section id="sentence">
+  <div class="lvl">What's new<span>· the showcase</span></div>
+  <h2>The sentence is the interface.</h2>
+  <p>In omxplorer a chart's title is the chart: <b>Sum</b> of <b>revenue</b> by <b>month</b>, … as <b>a line</b>. Tap a word to change it, or type “by product, largest first, top 5”. A person, a keyboard and an agent edit the same sentence.</p>
+  <img class="shot" src="../img/learn/sentence.jpg" alt="omxplorer's chart: its title, Sum of revenue by month, in data order, every month, every row, as a line, with each setting a tappable word, an ask field, and the line chart" style="margin-top:12px">
+  <aside class="notes">omxplorer is built from the framework's components and works over a million rows. The picture is its native Linux window.</aside>
+</section>
+
+<section id="never-hang">
+  <div class="lvl">What's new<span>· built in</span></div>
+  <h2>It doesn't hang. <span class="two">By design.</span></h2>
+  <div class="cols even">
+    <div>
+      <p><code>update()</code> and <code>view()</code> only decide. Anything slow is a <b>request</b>, a <b>timer</b> or a <b>job</b>: it runs on another thread and comes back to <code>update()</code> as an ordinary event.</p>
+      <p>The app's state is only touched on the UI thread: no locks and no races in app code.</p>
+    </div>
+    <div>
+      <div class="chips"><span class="chip">Http.get</span><span class="chip">App.every</span><span class="chip">start_ui_job</span><span class="chip">LazyList</span><span class="chip">video decoder thread</span></div>
+      <p style="margin-top:20px">Five rules, for a person or an agent writing an app: <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/ui-threads.md">docs/ui-threads.md</a>.</p>
+    </div>
+  </div>
+  <aside class="notes">Network calls, file opens, queries, video decoding and exports all run off the UI thread, and a finished job wakes the window at once. An idle app uses no CPU.</aside>
+</section>
+
+<section id="status">
+  <div class="lvl">Where it stands<span>· public alpha</span></div>
+  <h2>What runs today.</h2>
+  <table class="status">
+    <tr><th>Linux (GTK 4)</th><td>runs, checked by <code>scripts/check</code></td></tr>
+    <tr><th>The web</th><td>runs, checked in Chromium by <code>scripts/check</code></td></tr>
+    <tr><th>Agents (MCP, AG-UI)</th><td>run, checked; AG-UI against Pydantic AI and LangGraph</td></tr>
+    <tr><th>Mac (AppKit)</th><td>builds; runs on GitHub's macOS machines; wide screens overflow (open)</td></tr>
+    <tr><th>Android</th><td>runs on the emulator</td></tr>
+    <tr><th>iPhone</th><td>builds, not run yet</td></tr>
+    <tr><th>Windows</th><td>waits for Mojo itself</td></tr>
+  </table>
+  <p style="margin-top:22px">Start here: <a href="../start.html">your first app</a>, then <a href="../tasks.html">a todo app</a>.</p>
+  <aside class="notes">Honest status, the same as the README's. Each line has a check or a run behind it.</aside>
+</section>
+
+</div></div>
+<script src="vendor/reveal/reveal.js"></script>
+<script src="vendor/reveal/plugin/notes.js"></script>
+<script src="videos.js"></script>
+<script>
+for (const [id, url] of Object.entries(window.VIDEOS || {})) {
+  const s = url && document.getElementById(id);
+  if (!s) continue;
+  const a = document.createElement("a");
+  a.className = "watch"; a.href = url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "▶ Watch";
+  s.appendChild(a);
+}
+Reveal.initialize({ width: 1280, height: 720, margin: 0.06, hash: true, slideNumber: "c/t", center: false,
+  transition: "slide", backgroundTransition: "fade", plugins: [RevealNotes] });
+</script>
+</body>
+</html>

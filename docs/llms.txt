@@ -7,7 +7,7 @@ Status, measured by the checks in `scripts/check` (see components.md for the ful
 - Runs: Linux (GTK 4), web (FastHTML), the agent host (MCP over stdio), Android (views over JNI, the classic controls).
 - Builds and signs, not yet run by a check: Mac (AppKit), iPhone (UIKit).
 - GPU path: NVIDIA today. Apple and phone GPUs use the CPU path, which runs the same functions.
-- Showcase: omxplorer, a data app over a million rows, about 2,100 lines of Mojo.
+- Showcase: omxplorer, a data app over a million rows, one Mojo file of about 4,500 lines.
 
 An app is a struct with `update(event)` and `view() -> View`; the platforms draw the view tree with their own native controls. Build with `scripts/build.sh <example> linux|web|mac|ios|android|all`.
 
@@ -16,7 +16,7 @@ The README, reference, architecture, agent host and components in one file: [llm
 ## Docs
 
 - [README](https://raw.githubusercontent.com/abhisheksreesaila/omxcode/main/README.md): what it is, what it feels like, measured numbers, how to try it
-- Tutorials: [your first app](https://abhisheksreesaila.github.io/omxcode/start.html) (a counter: install, build, run, Liquid, an agent) and [a todo app](https://abhisheksreesaila.github.io/omxcode/tasks.html) (`examples/tasks`: a list from data, messages that carry an id, SQLite, test mode, an agent); their code blocks are the files' text, checked by `scripts/tutorials.py`
+- Tutorials: [your first app](https://abhisheksreesaila.github.io/omxcode/start.html) (a counter: install, build, run, Liquid, an agent) and [a todo app](https://abhisheksreesaila.github.io/omxcode/tasks.html) (`examples/tasks`: a list from data, messages that carry an id, SQLite, test mode, an agent), and [the slides](https://abhisheksreesaila.github.io/omxcode/learn/) (reveal.js: start → build → what's new); their code blocks are the files' text, checked by `scripts/tutorials.py`
 - [Reference](https://abhisheksreesaila.github.io/omxcode/reference.md): the app model, every component, layout, the GPU canvas, the examples
 - [How it works](https://abhisheksreesaila.github.io/omxcode/architecture.md): the view tree, the update loop, how each platform is reached
 - [The agent host](https://abhisheksreesaila.github.io/omxcode/agent.md): the MCP tools (screen, act, read, render), what an agent gets back, what it can't do yet
