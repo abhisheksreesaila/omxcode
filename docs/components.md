@@ -107,6 +107,10 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | One instance (a second launch opens the running app) | `@staticmethod def one_instance() -> String` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Tray item (StatusNotifierItem; NSStatusItem) | `published by the host for a background() app; Activate opens the window` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Notifications (mojoui.notify) | `notify(app, title, body)` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
+| HTTPS requests (FlareTransport behind mojoui.http; https:// through Flare, -D MOJOUI_FLARE) | `the same Request; AutoTransport picks FlareTransport` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| HTTP server (mojoui.serve on Flare: routes, JSON, SSE Pipes, proxy) | `Service.answer(req) -> Reply · Server.run(service, port) · Pipe · proxy(request, pipe)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Child processes (mojoui.process: spawn, log, health, stop the group, idle) | `Process.start(argv, log) · wait_healthy(url) · stop() · idle_ms()` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| SHA-256 (mojoui.hash, plain Mojo) | `sha256_hex(text)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 - File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
 - Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
@@ -246,12 +250,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 169 | 9 | 0 |
-| Web | 161 | 9 | 8 |
-| Android | 19 | 54 | 105 |
-| Mac (AppKit) | 0 | 152 | 26 |
-| iPhone (UIKit) | 0 | 123 | 55 |
-| Agent (MCP) | 58 | 42 | 78 |
+| Linux (GTK) | 173 | 9 | 0 |
+| Web | 161 | 9 | 12 |
+| Android | 19 | 54 | 109 |
+| Mac (AppKit) | 0 | 152 | 30 |
+| iPhone (UIKit) | 0 | 123 | 59 |
+| Agent (MCP) | 58 | 42 | 82 |
 
 ## Inside one app, not components yet (the debt)
 

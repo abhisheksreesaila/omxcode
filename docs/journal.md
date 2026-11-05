@@ -1088,3 +1088,8 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - A parameter named `range` shadows the builtin (`'String' does not implement __call__`).
 - M4's first run: only metrics by_model / series models differed (keyed by model name; the copied store has no requests in 5 minutes): the check compares them as maps now, M5 requires the chatted model in both (D-4773).
 - M4 PASS: 18 GETs in the recorded shapes, 13 models, labels and hashed keys across a restart, console Models / Overview / Keys on GTK against consoled (docs/goals/50/console-*-consoled-gtk.png).
+- M5, try 1: `max serve` from this repo's env fails (MAX without its serving extras: no opentelemetry exporter). consoled runs mxstudio's install through MXC_MAX (D-4774).
+- Try 2: "failed to resolve built-in kernel package paths": the child inherited this env's CONDA_PREFIX; try 3 still failed until MODULAR_HOME=<env>/share/max (set by that env's activation) was passed too. consoled now gives `max serve` its own env's variables. Model up in 8.6 s.
+- Try 4: max serve 400 "Missing JSON": Flare 0.12's send_streaming writes only the request head (raw bytes captured on a socket). Patched the vendored copy (D-4775), upstream report drafted.
+- Try 5: everything but the idle unload: a child still starting at the chat was never probed again, so never "ready", so never idle. The sweep probes starting children.
+- M5 PASS: Qwen2.5-0.5B streamed 9 pieces through consoled's /v1 with the OpenAI SDK; 401 without a key; the request in /admin/requests and metrics by_model; max serve gone after the 45 s idle.

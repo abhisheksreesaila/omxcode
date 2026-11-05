@@ -272,7 +272,7 @@ class Daemon:
         self.p = None
 
     def start(self):
-        env = dict(os.environ, MXC_HOME=str(self.home), MXC_PORT=str(self.port), MXC_ADMIN_KEY=self.admin, **self.extra)
+        env = dict(os.environ, MXC_HOME=str(self.home), MXC_PORT=str(self.port), MXC_ADMIN_KEY=self.admin, MXC_MAX=max_with_serve(), **self.extra)
         self.log = open(G50 / "consoled.log", "a")
         self.p = subprocess.Popen([str(BUILD / "consoled")], cwd=ROOT, env=env, stdout=self.log, stderr=subprocess.STDOUT)
         return wait_port(self.port, 30)
@@ -291,6 +291,15 @@ class Daemon:
         if admin:
             h["X-Mst-Admin"] = self.admin
         return http(method, self.url + path, body, h)
+
+
+def max_with_serve():
+    """The `max` that has `max serve` (this repo's env has MAX without its serving extras): $MXC_MAX, else mxstudio's
+    install (the one the Python daemon runs), else `max` on PATH (D-4774)."""
+    if os.environ.get("MXC_MAX"):
+        return os.environ["MXC_MAX"]
+    p = Path.home() / "Projects/mxstudio/.pixi/envs/default/bin/max"
+    return str(p) if p.exists() else "max"
 
 
 def build_consoled():

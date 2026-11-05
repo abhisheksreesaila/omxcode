@@ -193,6 +193,24 @@ struct Supervisor(Movable):
                 cmd += ["--huggingface-model-revision", m.revision]
         return cmd^
 
+    def child_env(self) -> List[String]:
+        """MAX_SERVE_HOST, and the environment of the install `max` runs from: when MXC_MAX is <env>/bin/max, that env is
+        CONDA_PREFIX and its bin comes first on PATH; this process's own pixi/conda variables never leak into it (MAX
+        finds its kernels through them: another env's MAX fails with "failed to resolve built-in kernel package paths")."""
+        var env: List[String] = ["MAX_SERVE_HOST=127.0.0.1", "CONDA_DEFAULT_ENV=", "CONDA_SHLVL=", "PIXI_PROJECT_ROOT=", "PIXI_PROJECT_MANIFEST=",
+                                 "PIXI_ENVIRONMENT_NAME=", "PIXI_IN_SHELL=", "PIXI_PROJECT_NAME="]
+        var first = String(self.max_cmd.split(" ")[0])
+        var at = first.find("/bin/max")
+        if at > 0 and first.endswith("/bin/max"):
+            var prefix = String(first[byte = : at])
+            env.append("CONDA_PREFIX=" + prefix)
+            if exists(prefix + "/share/max"):
+                env.append("MODULAR_HOME=" + prefix + "/share/max")  # (what that env's activation sets; MAX's kernels)
+            env.append("PATH=" + prefix + "/bin:" + getenv("PATH"))
+        else:
+            env.append("CONDA_PREFIX=")
+        return env^
+
     def ensure(mut self, m: ModelRef) raises -> Int:
         """The model's child (started when it isn't running): its index. Doesn't wait for it to be ready."""
         var i = self.find(m.name)
@@ -209,7 +227,7 @@ struct Supervisor(Movable):
                 total = g.total_mb
         var port = free_port()
         var keep = self.idle_override if self.idle_override > 0 else m.keep_alive
-        var p = Process.start(self.command(m, port, gpu, total), self.log_path(m.name), ["MAX_SERVE_HOST=127.0.0.1"])
+        var p = Process.start(self.command(m, port, gpu, total), self.log_path(m.name), self.child_env())
         self.children.append(Child(m.name, p^, port, gpu, keep))
         return len(self.children) - 1
 
@@ -234,6 +252,8 @@ struct Supervisor(Movable):
         """Forget children that ended; unload ready ones idle past their keep_alive (none in flight)."""
         var i = 0
         while i < len(self.children):
+            if not self.children[i].ready and self.children[i].proc.running():
+                _ = self.check_ready(i)  # (a start finishes between requests too)
             ref c = self.children[i]
             if not c.proc.running():
                 self.last_error = c.name + " exited (" + String(c.proc.code) + "): " + file_tail(c.proc.log, LOG_TAIL_BYTES)
