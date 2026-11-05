@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 51: models as functions in the script, in-process (2026-11-05)
+- **Setup:** worktree ../mojo-ui-g51, branch `goal-51-models` from main 1a621e7 (goal 50 is a parallel session's omxconsole work); contract GOAL.md + docs/goals/51-check.py; report docs/goals/51-report.md; research docs/research/goal50-models.md.
+- **Worked:** `mojoui/maxrt.mojo` (libmax's C API from Mojo, dlopened; packs = Python-built .mef + .safetensors), `mojoui/wordpiece.mojo`, `mojoui/textembed.mojo` (40k texts/s), `mojoui/models.mojo` (classify, detect in the script), `mojoui/detect.mojo` (YOLOX-Tiny: Megvii's boxes, 11 ms/frame); Apply detect draws boxes on the player.
+- **Broke and fixed:** Mojo frees values after their last use while MAX still reads them (the compile config, paths, shapes): a model of 0, "No such file", a segfault (D-4917); I overwrote mojoui/embed.mojo (WebFrame) and restored it (D-4918); MiniLM couldn't classify (24%), e5-small could (61%, D-4919); review round 1: a runtime and model per run (GPU leak), setenv from jobs, marks on the UI thread, untested RGBA path: fixed (D-4923); round 2 PASS.
+- **Means:** the GUI, the GPU data engine and the models are one Mojo process; a script calls a model like any function. Honest limits: one thread at a time per process (D-4924), Linux + NVIDIA only so far, 61% is a best-of-three number.
+- **Next:** low-margin rows to a small LLM (after goal 50's mojoui.process), detect while scrubbing, the 15 clips.
+
 ## Goal 49: one script over everything on the board (2026-11-04)
 - **Setup:** worktree ../mojo-ui-g49, branch `goal-49-script` from main bfacc58; contract GOAL.md + docs/goals/49-check.py; report docs/goals/49-report.md; data: goal 47's DROID fleet (63k episodes, 16.8M telemetry rows).
 - **Worked:** `mojoui/script.mojo` (statements, named results, line-numbered errors, a function registry, ${questions}), `mojoui/videoscript.mojo` (a video as a table of frames; `regions()` on the GPU over a section), `mojoui/scriptpanel.mojo` (the Script window: Apply writes the statement, Export, Open recipe), `mojoui/recipe.mojo` (script.sql + CSVs + the section's clip), `tablejobs.ScriptJob`. One script joins video ⨝ telemetry ⨝ fleet = pyarrow in 30–60 ms; a recipe reruns on another episode through agent tools only.

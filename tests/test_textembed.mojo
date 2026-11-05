@@ -38,7 +38,7 @@ def main() raises:
                 print("differs:", texts[i])
     assert_equal(differ, 0)
     # UTF-8 anywhere: accents, an emoji, CJK: pieces or [UNK], never a cut character
-    for t in ["café crème brûlée", "pick the 🍎 up", "把杯子放在桌子上", "naïve ünïcödé", "x" * 0 + "ok"]:
+    for t in ["café crème brûlée", "pick the 🍎 up", "把杯子放在桌子上", "naïve ünïcödé", "ok"]:
         var got = vocab.ids(t)
         assert_true(len(got) >= 3 and got[0] == 101 and got[len(got) - 1] == 102, "ids for " + t)
     print("wordpiece: ok", len(texts), "texts, ids = Hugging Face's; UTF-8 safe")

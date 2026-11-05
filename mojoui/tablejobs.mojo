@@ -29,7 +29,7 @@ from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.timeseries import TimeSeries
 from mojoui.trackcard import is_track, series_from_sheet
-from mojoui.script import run_script
+from mojoui.script import run_script, strip_comments
 from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS, applied_marks
 from mojoui.models import ModelFunctions, FRAME_MODELS
 from mojoui.player import Mark
@@ -291,7 +291,8 @@ struct TableWork(Movable):
                 taken.append(names[len(names) - 1])
         for v in videos.names:
             taken.append(v)
-        if text.find("classify(") >= 0 or text.find("detect(") >= 0:  # (a model: MAX's environment set here, not in the job: mojoui.maxrt)
+        var plain = strip_comments(text)
+        if plain.find("classify(") >= 0 or plain.find("detect(") >= 0:  # (a model: MAX's environment set here, not in the job: mojoui.maxrt)
             try:
                 prepare_max()
             except e:
