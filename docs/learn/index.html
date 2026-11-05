@@ -32,8 +32,12 @@ html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #0
 .lvl span { color: var(--d-ink2); }
 .cols { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.3fr); gap: 40px; align-items: start; }
 .cols.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.cols.vs { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+.caption { position: relative; height: 70px; margin-top: 22px; }
+.caption p { position: absolute; left: 0; right: 0; top: 0; margin: 0; font-size: 28px; color: var(--d-ink) !important; }
 .cols.wide { grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr); }
 .pane { border-radius: 18px; background: var(--d-s1); box-shadow: 0 0 0 1px var(--d-line); padding: 16px 20px; min-width: 0; }
+.side { font: 600 14px var(--d-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--d-coral); }
 .file { font: 600 13px var(--d-mono); color: var(--d-ink2); margin-bottom: 8px; } .file b { color: var(--d-ink); }
 .reveal pre.code { margin: 0; font: 18px/1.55 var(--d-mono); color: #cfcfd6; white-space: pre; overflow: hidden; box-shadow: none; width: auto; background: none; }
 .reveal pre.code.small { font-size: 16px; }
@@ -99,9 +103,9 @@ html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #0
 <section id="start" class="hero">
   <div class="lvl">omxcode<span>· learn it in slides</span></div>
   <h1>One file. Native screens.<br>Agents built in.</h1>
-  <p>omxcode is an app framework written in Mojo. You describe the screen once; each platform's own toolkit draws it, and an AI agent uses the same description as tools.</p>
+  <p>omxcode is an app framework written in Mojo. You describe the screen once, as a spec; each platform's own toolkit draws it, and an AI agent uses the same spec as tools.</p>
   <div class="path">
-    <div class="fragment"><div class="t">The idea</div><p>How one description reaches every screen, and every agent.</p></div>
+    <div class="fragment"><div class="t">The idea</div><p>One framework, one app, three functions. How it works inside, and why agents get it too.</p></div>
     <div class="fragment"><div class="t">The GPU</div><p>How the best GPU apps are written, and how this differs.</p></div>
     <div class="fragment"><div class="t">The details</div><p>Building apps, data, tests, and everything agents can do.</p></div>
   </div>
@@ -110,37 +114,13 @@ html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #0
 
 <!-- ============ THE IDEA ============ -->
 
-<section id="claim">
-  <div class="lvl">The idea<span>· agents aren't bolted on</span></div>
-  <h2>Usually, agents come later.</h2>
-  <div class="lanes">
-    <div class="lane">
-      <div class="who">Usually</div>
-      <div class="fragment box" data-fragment-index="0">An app, built for people</div>
-      <div class="fragment arrow" data-fragment-index="1">then</div>
-      <div class="fragment box dim" data-fragment-index="1">An API for agents, written again beside it</div>
-      <div class="fragment arrow" data-fragment-index="2">or</div>
-      <div class="fragment box dim" data-fragment-index="2">A model reads screenshots and clicks</div>
-    </div>
-    <div class="lane">
-      <div class="who">omxcode</div>
-      <div class="fragment box hi" data-fragment-index="3">view(): one description</div>
-      <div class="fragment arrow" data-fragment-index="4">→</div>
-      <div class="fragment box" data-fragment-index="4">Each platform's own controls, for people</div>
-      <div class="fragment arrow" data-fragment-index="5">+</div>
-      <div class="fragment box" data-fragment-index="5">Tools, for agents</div>
-    </div>
-  </div>
-  <p class="fragment big" data-fragment-index="6">One description, read by every screen and every agent. Nothing to keep in step.</p>
-  <aside class="notes">The usual way: build the app, then retrofit agents, either with a second API that has to track the app, or with computer use, where a model looks at pixels and guesses where to click. Here the agent's tools come from the same view() the screen comes from.</aside>
-</section>
-
 <section id="three">
-  <div class="lvl">The idea<span>· one struct</span></div>
-  <h2>An app is a struct with three parts.</h2>
+  <div class="lvl">The idea<span>· one framework, one app</span></div>
+  <h2>One framework. One app. Three functions.</h2>
   <div class="cols">
     <div class="say">
-      <p class="fragment" data-pre="0" data-lines="4-8"><b>State</b>: its fields. Here, how many taps.</p>
+      <p class="fragment" data-pre="0" data-lines="4-5">An app is one struct. Its fields are its state.</p>
+      <p class="fragment" data-pre="0" data-lines="7-8"><b>__init__</b>: the state it starts with.</p>
       <p class="fragment" data-pre="1" data-lines="1-3"><b>update</b>: something happened, so change the state.</p>
       <p class="fragment" data-pre="1" data-lines="5-11"><b>view</b>: describe the screen from the state.</p>
       <p class="fragment" data-pre="1" data-lines="9">The button sends <code>TAP</code>. Back to update. That's the whole loop.</p>
@@ -169,18 +149,18 @@ html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #0
     )</pre></div>
     </div>
   </div>
-  <aside class="notes">One language, one file. Nothing here knows about GTK, AppKit, HTML or agents.</aside>
+  <aside class="notes">One language, one file. Three functions do the work: title() only names the window, and theme() is optional. Nothing here knows about GTK, AppKit, HTML or agents.</aside>
 </section>
 
 <section id="tree">
   <div class="lvl">The idea<span>· the screen as data</span></div>
-  <h2>view() returns data, not widgets.</h2>
+  <h2>view() returns the spec.</h2>
   <div class="cols even">
     <div class="say">
       <p class="fragment" data-pre="0" data-lines="1">The app asks for a button.</p>
       <p class="fragment" data-pre="1" data-lines="1">A button is one <b>Node</b>: its kind, its title, the message it sends.</p>
       <p class="fragment" data-pre="2" data-lines="2-4">A Node is plain fields. There's also a tag, a tooltip, a size…</p>
-      <p class="fragment">The whole screen is a flat list of Nodes. Everything else reads this list.</p>
+      <p class="fragment">The whole screen is a flat list of Nodes: <b>the spec</b>. Data, not widgets. Everything else reads it.</p>
     </div>
     <div class="stack">
       <div class="pane"><div class="file">examples/start/<b>app.mojo</b></div>
@@ -199,7 +179,7 @@ html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #0
 
 <section id="fits" class="iso-slide">
   <div class="lvl">The idea<span>· how it fits together</span></div>
-  <h2>Mojo on top. What's already there below.</h2>
+  <h2>Inside: Mojo on top, what's already there below.</h2>
   <iframe class="iso" src="iso/how-it-fits.html" data-flow="0" data-folded="1" title="Isometric diagram: app.mojo and omxcode above, the platforms' toolkits and the agent host below"></iframe>
   <span class="fragment step" data-iso="explode"></span>
   <span class="fragment step" data-iso="0:0"></span><span class="fragment step" data-iso="0:1"></span><span class="fragment step" data-iso="0:2"></span>
@@ -218,10 +198,35 @@ html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #0
   <aside class="notes">The host never decides anything. It reports which node was used; the runtime calls update and view; diff finds that one label changed, and the host sets that label's text.</aside>
 </section>
 
+<section id="claim">
+  <div class="lvl">The idea<span>· good for agents too</span></div>
+  <h2>Guess what: agents can use it too.</h2>
+  <div class="lanes">
+    <div class="lane">
+      <div class="who">Usually</div>
+      <div class="fragment box" data-fragment-index="0">An app, built for people</div>
+      <div class="fragment arrow" data-fragment-index="1">then</div>
+      <div class="fragment box dim" data-fragment-index="1">Agents bolted on: a second API, written beside it</div>
+      <div class="fragment arrow" data-fragment-index="2">or</div>
+      <div class="fragment box dim" data-fragment-index="2">A model reads screenshots and clicks</div>
+    </div>
+    <div class="lane">
+      <div class="who">omxcode</div>
+      <div class="fragment box hi" data-fragment-index="3">The spec, from view()</div>
+      <div class="fragment arrow" data-fragment-index="4">→</div>
+      <div class="fragment box" data-fragment-index="4">Each platform's own controls, for people</div>
+      <div class="fragment arrow" data-fragment-index="5">+</div>
+      <div class="fragment box" data-fragment-index="5">Tools, for agents</div>
+    </div>
+  </div>
+  <p class="fragment big" data-fragment-index="6">The agent reads the spec, and controls the app through it. Nobody wrote it an API.</p>
+  <aside class="notes">The usual way: build the app, then retrofit agents, either with a second API that has to track the app, or with computer use, where a model looks at pixels and guesses where to click. Here the agent's tools come from the same view() the screen comes from.</aside>
+</section>
+
 <section id="fits-agent" class="iso-slide">
   <div class="lvl">The idea<span>· an agent</span></div>
-  <h2>An agent takes the same road.</h2>
-  <iframe class="iso" src="iso/how-it-fits.html" data-flow="2" title="Isometric diagram: an agent reads the same tree as tools and calls one"></iframe>
+  <h2>The agent reads the spec, and acts through it.</h2>
+  <iframe class="iso" src="iso/how-it-fits.html" data-flow="2" title="Isometric diagram: an agent reads the same spec as tools and calls one"></iframe>
   <span class="fragment step" data-iso="2:0"></span><span class="fragment step" data-iso="2:1"></span><span class="fragment step" data-iso="2:2"></span>
   <span class="fragment step" data-iso="2:3"></span><span class="fragment step" data-iso="2:4"></span><span class="fragment step" data-iso="2:5"></span>
   <span class="fragment step" data-iso="2:6"></span>
@@ -236,7 +241,7 @@ html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #0
       <p class="fragment" data-pre="0" data-lines="1"><b>Linux</b>: Mojo calls GTK's own C function. No C bridge in between.</p>
       <p class="fragment" data-pre="1" data-lines="1-2"><b>The web</b>: a real <code>&lt;button&gt;</code>, so the browser draws its own.</p>
       <p class="fragment" data-pre="2" data-lines="1-2"><b>An agent</b>: a tool. Its name is the tag or the text; its description, the tooltip.</p>
-      <p class="fragment">None of them knows this app. They only know Nodes.</p>
+      <p class="fragment">None of them knows this app. They only read the spec.</p>
     </div>
     <div class="stack">
       <div class="pane"><div class="file">mojoui/hosts/<b>gtk.mojo</b> · Mojo</div>
@@ -385,38 +390,49 @@ glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);</pre></div>
 </section>
 
 <section id="gpu-code">
-  <div class="lvl">The GPU<span>· the code</span></div>
-  <h2>The kernel is a plain function.</h2>
-  <div class="cols wide">
-    <div class="say">
-      <p class="fragment" data-pre="0" data-lines="1">In the app's own file: the colour of one pixel.</p>
-      <p class="fragment" data-pre="0" data-lines="3-11">Ordinary Mojo. No thread indices, no shader language.</p>
-      <p class="fragment" data-pre="1" data-lines="1-4">omxcode wraps it: one GPU thread per pixel, written once for every app.</p>
-      <p class="fragment">The same function also runs on the CPU, through <code>render_on_cpu</code>: the example compares the two pictures pixel for pixel.</p>
+  <div class="lvl">The GPU<span>· yesterday, tomorrow</span></div>
+  <h2>Yesterday's code. Tomorrow's.</h2>
+  <div class="cols vs">
+    <div class="stack">
+      <div class="side">Yesterday · CUDA C++, C++, GLSL</div>
+      <div class="pane"><div class="file">fractal.<b>cu</b> + main.<b>cpp</b> · typical, shortened</div>
+<pre class="code tiny" data-sample="cuda"><span class="c">// the maths: a __device__ function</span>
+<span class="k">__device__</span> uchar4 colour(<span class="k">int</span> x, <span class="k">int</span> y, <span class="k">int</span> w, <span class="k">int</span> h, Params p);
+<span class="c">// the kernel: find your pixel, check the edges, write it</span>
+<span class="k">__global__</span> <span class="k">void</span> fractal(uchar4* <span class="k">out</span>, <span class="k">int</span> w, <span class="k">int</span> h, Params p) {
+    <span class="k">int</span> x = blockIdx.x * blockDim.x + threadIdx.x;
+    <span class="k">int</span> y = blockIdx.y * blockDim.y + threadIdx.y;
+    <span class="k">if</span> (x &gt;= w || y &gt;= h) <span class="k">return</span>;
+    <span class="k">out</span>[y * w + x] = colour(x, y, w, h, p);
+}
+<span class="c">// host code, every frame: map the shared buffer, launch, unmap</span>
+cudaGraphicsMapResources(1, &amp;res);
+cudaGraphicsResourceGetMappedPointer((<span class="k">void</span>**)&amp;pixels, &amp;bytes, res);
+fractal&lt;&lt;&lt;dim3((w + 15) / 16, (h + 15) / 16), dim3(16, 16)&gt;&gt;&gt;(pixels, w, h, p);
+cudaGraphicsUnmapResources(1, &amp;res);
+<span class="c">// then OpenGL: buffer to texture, and a rectangle drawn by a GLSL shader</span>
+glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);</pre></div>
     </div>
     <div class="stack">
-      <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b></div>
-<pre class="code tiny" data-file="examples/gpu/app.mojo"><span class="k">def</span> mandelbrot(x: Int, y: Int, w: Int, h: Int, p: Params) -&gt; UInt32:
-<span class="c">    """Colour of one pixel. p = (scale, centre x, centre y, max iterations)."""</span>
-    <span class="k">var</span> cx = p[1] + (Float32(x) - Float32(w) / 2) * p[0] / Float32(h)
-    <span class="k">var</span> cy = p[2] + (Float32(y) - Float32(h) / 2) * p[0] / Float32(h)
-    <span class="k">var</span> zx = Float32(0)
-    <span class="k">var</span> zy = Float32(0)
-    <span class="k">var</span> i = 0
-    <span class="k">var</span> limit = Int(p[3])
-    <span class="k">while</span> i &lt; limit <span class="k">and</span> zx * zx + zy * zy &lt; 4.0:
-        <span class="k">var</span> t = zx * zx - zy * zy + cx
-        zy = 2.0 * zx * zy + cy
-        zx = t
-        i += 1</pre></div>
-      <div class="pane"><div class="file">mojoui/<b>gpu.mojo</b></div>
-<pre class="code tiny" data-file="mojoui/gpu.mojo"><span class="k">var</span> x = Int(global_idx.x)
-<span class="k">var</span> y = Int(global_idx.y)
-<span class="k">if</span> x &lt; w <span class="k">and</span> y &lt; h:
-    dst.unsafe_offset(y * w + x)[] = f(x, y, w, h, p)</pre></div>
+      <div class="side">Tomorrow · Mojo</div>
+      <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b> · the maths</div>
+<pre class="code tiny" data-file="examples/gpu/app.mojo"><span class="k">def</span> mandelbrot(x: Int, y: Int, w: Int, h: Int, p: Params) -&gt; UInt32:</pre></div>
+      <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b> · run it</div>
+<pre class="code tiny" data-file="examples/gpu/app.mojo"><span class="k">var</span> gpu = self.gpu.render[mandelbrot](WIDTH, HEIGHT, self.params())</pre></div>
+      <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b> · show it</div>
+<pre class="code tiny" data-file="examples/gpu/app.mojo">Image(self.pixels, WIDTH, HEIGHT),</pre></div>
     </div>
   </div>
-  <aside class="notes">render_on_cpu runs the same function, and examples/gpu checks both pictures agree pixel for pixel; it's called, not automatic: with no GPU, examples/gpu says so. The framework's PointCloud and tables do fall back to the CPU by themselves. The kernel goes through Modular's MAX; drawing runs on NVIDIA GPUs on Linux today.</aside>
+  <div class="caption">
+    <p class="fragment current-visible" data-pairs="0:1-2 1:1">The maths: a <code>__device__</code> function becomes a plain function.</p>
+    <p class="fragment current-visible" data-pairs="0:4-6 1:1">Thread indices to find your pixel become two arguments, <code>x</code> and <code>y</code>.</p>
+    <p class="fragment current-visible" data-pairs="0:7-8">Checking the edges and writing the pixel: omxcode does both. The function returns a colour.</p>
+    <p class="fragment current-visible" data-pairs="0:11-14 2:1">Map, launch with grid and block sizes, unmap: one call. (It also copies to main memory; next slide.)</p>
+    <p class="fragment current-visible" data-pairs="0:16-17 3:1">A texture drawn by a shader: an <code>Image</code> in <code>view()</code>.</p>
+    <p class="fragment current-visible">Three languages and two compilers become one language and one compiler.</p>
+  </div>
+  <aside class="notes">Line for line, the same fractal. Yesterday: a kernel in CUDA C++, launch and interop code in C++, a GLSL shader, two compilers, NVIDIA only. Tomorrow: one Mojo file. The one thing yesterday still does better is on the next slide: its pixels never leave GPU memory.</aside>
 </section>
 
 <section id="gpu-compare">
@@ -427,13 +443,13 @@ glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);</pre></div>
     <tr class="fragment"><td>Languages you write</td><td>C++, CUDA C++, GLSL</td><td>Swift, Metal</td><td class="win">Mojo</td></tr>
     <tr class="fragment"><td>The kernel</td><td>thread indices by hand</td><td>thread position attribute</td><td class="win">a function of x and y</td></tr>
     <tr class="fragment"><td>The same maths on the CPU</td><td>shareable (<code>__host__ __device__</code>), its own launch code</td><td>rewritten in Swift or C++</td><td class="win">the same function, through render_on_cpu</td></tr>
-    <tr class="fragment"><td>Picture to screen</td><td class="win">stays on the GPU</td><td class="win">stays on the GPU</td><td>copied to the CPU today; GPU to GPU opt-in on Linux</td></tr>
+    <tr class="fragment"><td>Pixels to the screen</td><td class="win">stay in GPU memory</td><td class="win">stay in GPU memory</td><td>copied to main memory, then back to the GPU to show; GPU memory only as an opt-in, on Linux</td></tr>
     <tr class="fragment"><td>GPUs</td><td>NVIDIA</td><td>Apple</td><td>NVIDIA today, through MAX (AMD untested)</td></tr>
     <tr class="fragment"><td>Buttons around it</td><td>Qt or ImGui, more C++</td><td>SwiftUI</td><td class="win">each platform's own, same file</td></tr>
     <tr class="fragment"><td>An agent can use it</td><td>only through an API you write</td><td>only through an API you write</td><td class="win">yes: the controls around it are tools, and a Canvas takes gestures</td></tr>
   </table>
   <p class="fragment big" style="margin-top:22px">Not faster. One language and one file, from the button to the kernel, and agents included.</p>
-  <aside class="notes">Where the others win, say so: their pictures never leave the GPU, and Metal runs on every Apple GPU. omxcode's GPU drawing builds for Linux only. omxcode copies back to the CPU by default; only examples/particles uses the zero-copy path, on Linux with NVIDIA. The agent can use the example's buttons and slider; the picture itself is an Image, which an agent sees only as its size. A Canvas view is different: its tool takes a gesture (pan, zoom, tap) and a position.</aside>
+  <aside class="notes">Where the others win, say so: their pixels never leave GPU memory, and Metal runs on every Apple GPU. omxcode's GPU drawing builds for Linux only. omxcode copies back to the CPU by default; only examples/particles uses the zero-copy path, on Linux with NVIDIA. The agent can use the example's buttons and slider; the picture itself is an Image, which an agent sees only as its size. A Canvas view is different: its tool takes a gesture (pan, zoom, tap) and a position.</aside>
 </section>
 
 
@@ -803,6 +819,14 @@ function focus() {  // the newest shown step that names lines decides what's lit
   pres.forEach(p => { p.classList.remove("focus"); p.querySelectorAll(".ln.on").forEach(l => l.classList.remove("on")); });
   const steps = [...slide.querySelectorAll(".fragment.visible")];
   const newest = steps.sort((x, y) => (+x.dataset.fragmentIndex || 0) - (+y.dataset.fragmentIndex || 0)).pop();
+  if (newest && newest.dataset.pairs) {  // lines in several blocks at once; the other blocks dim
+    pres.forEach(p => p.classList.add("focus"));
+    for (const pair of newest.dataset.pairs.split(" ")) {
+      const [i, spec] = pair.split(":"), ln = pres[+i] ? pres[+i].querySelectorAll(".ln") : [];
+      for (const n of lines(spec)) if (ln[n - 1]) ln[n - 1].classList.add("on");
+    }
+    return;
+  }
   if (!newest || !newest.dataset.lines) return;  // (a step without lines: the whole block again)
   const pre = pres[+(newest.dataset.pre || 0)];
   if (!pre) return;

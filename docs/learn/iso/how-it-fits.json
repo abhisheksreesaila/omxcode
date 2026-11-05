@@ -79,19 +79,19 @@
    ],
    "hue": 205,
    "tech": "dispatch(Event)",
-   "desc": "mojoui/app.mojo. Takes an Event from any host or from the agent, calls update(), then view(), then diff(), and keeps the tree that is on screen now."
+   "desc": "mojoui/app.mojo. Takes an Event from any host or from the agent, calls update(), then view(), then diff(), and keeps the spec that is on screen now."
   },
   {
    "id": "tree",
-   "label": "View tree",
+   "label": "The spec",
    "kind": "db",
    "at": [
     5.5,
     4.5
    ],
    "hue": 205,
-   "tech": "the screen as data",
-   "desc": "view() returns data, not widgets: a flat list of Nodes (mojoui/view.mojo). Each one has a kind (BUTTON, FIELD, TOGGLE…), its text, the message number it sends, a tag and a tooltip. Every host and the agent read this one description."
+   "tech": "the view tree: the screen as data",
+   "desc": "view() returns data, not widgets: a flat list of Nodes (mojoui/view.mojo). Each one has a kind (BUTTON, FIELD, TOGGLE…), its text, the message number it sends, a tag and a tooltip. Every host and the agent read this one spec."
   },
   {
    "id": "diff",
@@ -103,7 +103,7 @@
    ],
    "hue": 205,
    "tech": "patches",
-   "desc": "mojoui/diff.mojo. Compares the new tree with the one on screen. Same shape: a few patches (set this text, this value). Otherwise only the part that changed is rebuilt."
+   "desc": "mojoui/diff.mojo. Compares the new spec with the one on screen. Same shape: a few patches (set this text, this value). Otherwise only the part that changed is rebuilt."
   },
   {
    "id": "gtk",
@@ -174,8 +174,8 @@
     4.5
    ],
    "hue": 270,
-   "tech": "MCP · tools from the tree",
-   "desc": "mojoui/hosts/agent.py, an MCP server. It reads the same tree and makes one tool per control: the tag (or the text) is the tool's name, the tooltip its description, the kind its arguments (a toggle takes on, a field takes text). It runs the app in its own session, or attaches to a running window."
+   "tech": "MCP · tools from the spec",
+   "desc": "mojoui/hosts/agent.py, an MCP server. It reads the same spec and makes one tool per control: the tag (or the text) is the tool's name, the tooltip its description, the kind its arguments (a toggle takes on, a field takes text). It runs the app in its own session, or attaches to a running window."
   },
   {
    "id": "claude",
@@ -275,7 +275,7 @@
     {
      "from": "view",
      "to": "tree",
-     "note": "It returns data, not widgets. The button is one node: BUTTON, \"Tap me\", sends TAP."
+     "note": "It returns the spec: data, not widgets. The button is one node: BUTTON, \"Tap me\", sends TAP."
     },
     {
      "from": "tree",
@@ -340,12 +340,12 @@
     {
      "from": "view",
      "to": "tree",
-     "note": "A new tree. Only one line's text is different."
+     "note": "A new spec. Only one line's text is different."
     },
     {
      "from": "tree",
      "to": "diff",
-     "note": "diff() compares it with the tree on screen and finds one change."
+     "note": "diff() compares it with the spec on screen and finds one change."
     },
     {
      "from": "diff",
@@ -360,7 +360,7 @@
     {
      "from": "tree",
      "to": "agent",
-     "note": "The agent host reads the same tree. Every control becomes a tool: this button is tap-me."
+     "note": "The agent host reads the same spec. Every control becomes a tool: this button is tap-me."
     },
     {
      "from": "agent",

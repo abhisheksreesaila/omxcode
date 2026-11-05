@@ -18,8 +18,12 @@ html, body, .reveal-viewport { background: var(--d-bg); --r-background-color: #0
 .lvl span { color: var(--d-ink2); }
 .cols { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.3fr); gap: 40px; align-items: start; }
 .cols.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.cols.vs { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+.caption { position: relative; height: 70px; margin-top: 22px; }
+.caption p { position: absolute; left: 0; right: 0; top: 0; margin: 0; font-size: 28px; color: var(--d-ink) !important; }
 .cols.wide { grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr); }
 .pane { border-radius: 18px; background: var(--d-s1); box-shadow: 0 0 0 1px var(--d-line); padding: 16px 20px; min-width: 0; }
+.side { font: 600 14px var(--d-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--d-coral); }
 .file { font: 600 13px var(--d-mono); color: var(--d-ink2); margin-bottom: 8px; } .file b { color: var(--d-ink); }
 .reveal pre.code { margin: 0; font: 18px/1.55 var(--d-mono); color: #cfcfd6; white-space: pre; overflow: hidden; box-shadow: none; width: auto; background: none; }
 .reveal pre.code.small { font-size: 16px; }

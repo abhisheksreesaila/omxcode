@@ -119,7 +119,7 @@
   },
   {
    "id": "pixels",
-   "label": "Pixels on the CPU",
+   "label": "Pixels in main memory",
    "kind": "storage",
    "at": [
     15,
@@ -127,7 +127,7 @@
    ],
    "hue": 18,
    "tech": "copied back",
-   "desc": "Today's default: the picture is copied back to the CPU, then handed to the toolkit. This is a copy the best GPU apps avoid."
+   "desc": "Today's default: the pixels are copied from GPU memory to main memory, handed to the toolkit, and the toolkit uploads them to the GPU again to show them. The best GPU apps keep them in GPU memory the whole way."
   },
   {
    "id": "gltex",
@@ -264,7 +264,7 @@
     {
      "from": "gpu",
      "to": "pixels",
-     "note": "The pixels are copied back to the CPU. The best GPU apps skip this copy."
+     "note": "The pixels are copied to main memory. The best GPU apps keep them in GPU memory."
     },
     {
      "from": "pixels",

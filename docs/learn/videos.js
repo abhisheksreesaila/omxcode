@@ -1,11 +1,11 @@
 // Your videos, one per slide (the slide's id → a link). Leave a slide out, or its link "", and it shows no button.
 // The ids are the <section id="…"> names in index.html. A slide with a link gets a "Watch" button in its corner.
 window.VIDEOS = {
-  "claim": "",
   "three": "",
   "tree": "",
   "fits": "",
   "fits-tap": "",
+  "claim": "",
   "fits-agent": "",
   "readers": "",
   "gpu-usual": "",
