@@ -741,7 +741,7 @@ comptime STOP_FD = 1001  # (the stop socket's write end; its read end is STOP_FD
 
 def _on_stop_signal(sig: c_int) abi("C"):
     var b = Int(sig)
-    _ = libc.send(STOP_FD, Int(Pointer(to=b)), 1, 0x4040 if CompilationTarget.is_linux() else 0x80)  # (MSG_DONTWAIT | MSG_NOSIGNAL)
+    _ = libc.send(STOP_FD, Int(Pointer(to=b)), 1, 0x4040 if CompilationTarget.is_linux() else 0x80)  # (MSG_DONTWAIT | MSG_NOSIGNAL) (read only)
 
 
 def _stop_loop[S: Service](state: Int):

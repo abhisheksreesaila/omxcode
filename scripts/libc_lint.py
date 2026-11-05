@@ -50,13 +50,15 @@ def main():
     # a thread id written through a local's address handed over as an Int: the compiler may keep reading the local's
     # old value (goal 52: the engine's fan joined thread 0 and crashed; framefeed had the same line). Write it into a
     # buffer (List[Int], unsafe_alloc) instead.
-    LOCAL_AS_INT = re.compile(r"pthread_create.*Int\(\s*Pointer\(\s*to\s*=")
+    # Any plain local's address handed on as an Int is caught (the class, not only pthread_create; review round 2); a
+    # buffer C only reads may say so with "(read only)" on the line.
+    LOCAL_AS_INT = re.compile(r"Int\(\s*Pointer\(\s*to\s*=\s*[A-Za-z_][A-Za-z_0-9]*\s*\)\s*\)")
     roots = [ROOT / "mojoui", ROOT / "examples", ROOT / "tests"] + ([built / "mojo"] if (built / "mojo").exists() else [])
     for r in roots:
         for p in sorted(r.rglob("*.mojo")):
             for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
-                if LOCAL_AS_INT.search(line):
-                    bad.append(f"{p}:{i}: a thread id through Int(Pointer(to=local)): use a buffer (List[Int] / unsafe_alloc)")
+                if LOCAL_AS_INT.search(line) and "(read only)" not in line:
+                    bad.append(f"{p}:{i}: a local's address as an Int (C may write it and the compiler not see it): use a buffer (List / unsafe_alloc), or mark a buffer C only reads \"(read only)\"")
     if bad:
         print("\n".join(bad))
         sys.exit(1)

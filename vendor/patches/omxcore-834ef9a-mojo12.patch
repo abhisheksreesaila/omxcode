@@ -44,10 +44,10 @@ index fb21ea0..25dafa7 100644
  comptime BLOCK: Int = 256
 diff --git a/mojo/omxcore/_libc.mojo b/mojo/omxcore/_libc.mojo
 new file mode 100644
-index 0000000..97c8997
+index 0000000..2db5901
 --- /dev/null
 +++ b/mojo/omxcore/_libc.mojo
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,101 @@
 +"""The libc functions the engine calls through a pointer instead of declaring them.
 +
 +Mojo allows one signature per external symbol in a binary. Mojo 1.2's stdlib declares `read` and `write` itself, and
@@ -75,7 +75,8 @@ index 0000000..97c8997
 +def pthread_create(attr: Int, entry: ThreadEntry, arg: Int) -> Tuple[c_int, Int]:
 +    """(pthread_create's result, the new thread's id). `attr`: a pthread_attr_t's address (0: defaults). The id is
 +    written into memory of this function's own and read back here: handed the address of a caller's local as an Int,
-+    the compiler could keep using the local's old value (the engine's fan joined thread 0 and crashed)."""
++    the compiler could keep using the local's old value (the engine's fan joined thread 0 and crashed). Guard: the
++    engine's test_switches_threads (a save's fan joins every thread it started) and mojo_test.sh's job tests."""
 +    var f = _sym("pthread_create")
 +    if f == 0:
 +        return (c_int(-1), 0)
