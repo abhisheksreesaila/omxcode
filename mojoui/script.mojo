@@ -243,7 +243,7 @@ def last_call(text: String, names: List[String]) -> Optional[Statement]:
             if st.kind == STMT_FN and st.fn_name in names:
                 found = st.copy()
     except:
-        pass
+        pass  # (a script that doesn't parse can't have run either: it applied nothing)
     return found^
 
 

@@ -403,7 +403,6 @@ struct Main(App):
     var query_said: String
     var script: ScriptPanel  # the Script window (its text, section, last run)
     var recipe_job: Optional[Job[Recipe]]  # Export recipe, running
-    var recipes: Int  # recipes exported this session (recipe-1, recipe-2 …)
     var inserting: Int  # Insert > Video… or Image… open: OBJ_VIDEO or OBJ_IMAGE (0: closed)
     var active: Int  # the object the inspector shows (-1: none)
     var chart_sizes: List[Tuple[Float64, Float64]]  # per canvas id: points from the last draw (taps)
@@ -537,7 +536,6 @@ struct Main(App):
         self.query_said = ""
         self.script = ScriptPanel(SCRIPT_MSG)
         self.recipe_job = None
-        self.recipes = 0
         self.inserting = 0
         self.active = -1
         self.chart_sizes = List[Tuple[Float64, Float64]](length=1000, fill=(400.0, 240.0))
@@ -2127,7 +2125,6 @@ struct Main(App):
                 video = v.paths[at]
                 from_s = sec.value()[1]
                 to_s = sec.value()[2] if sec.value()[2] > 0 else Float64(v.frames[at]) / v.fps[at]
-        self.recipes += 1
         var folder = next_recipe_folder(self.documents() + "/recipes")
         self.recipe_job = start_ui_job(RecipeJob(folder, self.script.text, names^, sheets^, video, from_s, to_s))
         self.script.said = "Writing the recipe…"

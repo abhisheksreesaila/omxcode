@@ -11,6 +11,7 @@ from mojoui.videoscript import VideoFunctions, frame_span
 from mojoui.script import parse_script, run_script, bind_params, params_of, last_call, strip_comments, ScriptFunctions, NoFunctions, STMT_SQL, STMT_FN
 from mojoui.recipe import RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheet import Sheet
+from mojoui.scriptpanel import ScriptPanel
 
 
 def numbers(n: Int) raises -> Table:
@@ -157,6 +158,35 @@ def main() raises:
     assert_true(Bool(lc), "the last call is found")
     assert_equal(lc.value().args[0], "ep2")
     assert_false(Bool(last_call("SELECT 1", calls)))
+    # the panel: Apply writes a statement for the section; what Export cuts is the script's own call, not the fields
+    var panel = ScriptPanel(100)
+    var vids = List[String]()
+    vids.append("episode")
+    var heads = List[Float64]()
+    heads.append(2.0)
+    var fns = List[String]()
+    fns.append("regions")
+    panel.offer(vids^, heads^, fns^)
+    assert_equal(panel.from_s, "2.0")
+    assert_equal(panel.to_s, "7.0")
+    assert_equal(panel.apply_statement("regions"), "apply_1 = regions(episode, 2.0, 7.0);")
+    panel.set_text("-- ${ignored}\nf = SELECT * FROM t WHERE e = '${episode}';\napply_1 = regions(episode, 3.0, 8.0);")
+    assert_equal(len(panel.params), 1)
+    var unanswered = False
+    try:
+        _ = panel.script()
+    except:
+        unanswered = True
+    assert_true(unanswered, "an unanswered question stops the run")
+    panel.answers[0] = "F00118"
+    assert_true(panel.script().find("'F00118'") >= 0, panel.bound)
+    panel.from_s = "10.0"  # (the fields moved after the run: the clip still follows the script)
+    panel.to_s = "12.0"
+    var sec = panel.applied_section()
+    assert_true(Bool(sec), "the script applied regions")
+    assert_equal(sec.value()[0], "episode")
+    assert_equal(sec.value()[1], 3.0)
+    assert_equal(sec.value()[2], 8.0)
     print("fn: ok")
 
     # frames: a video is a table of its frames (frame, t), joinable with a 15 Hz log by round(t * 15)
