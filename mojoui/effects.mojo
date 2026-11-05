@@ -13,7 +13,39 @@ from mojoui.http import Request, Response, Transport, Sink, Piece, new_node, S_C
 from mojoui.http_socket import SocketTransport
 from mojoui import libc
 
-comptime Backend = SocketTransport  # (the only one today: plain HTTP/1.1 over libc sockets)
+from std.sys import is_defined
+from std.os import getenv
+
+
+struct AutoTransport(Transport):
+    """With Flare built in (-D MOJOUI_FLARE): https:// goes through Flare, http:// through the socket transport (or Flare
+    too when MOJOUI_HTTP_TRANSPORT=flare; =socket keeps everything on sockets, https then refused as before)."""
+
+    @staticmethod
+    def flare(req: Request) -> Bool:
+        var choice = getenv("MOJOUI_HTTP_TRANSPORT")
+        if choice == "socket":
+            return False
+        return choice == "flare" or req.url.startswith("https://")
+
+    @staticmethod
+    def send(req: Request) -> Response:
+        comptime if is_defined["MOJOUI_FLARE"]():
+            from mojoui.http_flare import FlareTransport
+            if AutoTransport.flare(req):
+                return FlareTransport.send(req)
+        return SocketTransport.send(req)
+
+    @staticmethod
+    def stream(req: Request, mut sink: Sink) -> Response:
+        comptime if is_defined["MOJOUI_FLARE"]():
+            from mojoui.http_flare import FlareTransport
+            if AutoTransport.flare(req):
+                return FlareTransport.stream(req, sink)
+        return SocketTransport.stream(req, sink)
+
+
+comptime Backend = AutoTransport  # (sockets everywhere; Flare for https:// where it's built in, D-4763)
 comptime POLL_US = 4_000  # how often a host looks for finished requests while any are out (µs)
 
 comptime _A = Atomic[Scalar[DType.int64]]

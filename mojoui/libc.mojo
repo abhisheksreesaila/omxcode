@@ -3,11 +3,22 @@
 # (vendor/flare/net/_libc.mojo) calls it with a pointer, a program using both doesn't build ("existing function with
 # conflicting signature"). So each function here is declared with the argument types Flare uses (pointers as pointers,
 # c_int / c_uint / c_size_t / c_ssize_t, UInt64 thread ids), and takes mojoui's usual Int addresses. Every other mojoui
-# file calls these; scripts/libc_lint.py fails when one declares a listed symbol itself.
+# file calls these; scripts/libc_lint.py fails when one declares a listed symbol itself. The three the omxcore engine
+# declares differently from Flare are looked up at run time instead (_sym), so mojoui builds beside either.
 
 from std.ffi import external_call, c_int, c_uint, c_size_t, c_ssize_t, c_char
+from std.sys import CompilationTarget
 
 comptime _Ptr = Pointer[NoneType, MutUntrackedOrigin]
+
+
+def _sym(name: String) -> Int:
+    """A libc function's address, for the few that the omxcore engine and Flare declare with different types
+    (pthread_create, pthread_detach, strtod): mojoui calls them through a pointer, declares neither form, and so builds
+    beside both (D-4764). dlsym is declared as every other mojoui file declares it."""
+    var n = name
+    var anywhere = -2 if CompilationTarget.is_macos() else 0  # RTLD_DEFAULT
+    return external_call["dlsym", Int](anywhere, n.as_c_string_span())
 
 
 @always_inline
@@ -101,8 +112,9 @@ def clock_gettime(clock: Int, ts: Int) -> Int:
 
 
 def strtod(text: Int) -> Float64:
-    """`text`: the address of a NUL-terminated number."""
-    return external_call["strtod", Float64](Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=text), Int(0))
+    """`text`: the address of a NUL-terminated number. Looked up, not declared (_sym)."""
+    var f = _sym("strtod")
+    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> Float64]()[](text, 0)
 
 
 # threads ------------------------------------------------------------------------------------------------------------
@@ -110,8 +122,7 @@ def strtod(text: Int) -> Float64:
 comptime ThreadArg = Pointer[UInt8, MutUntrackedOrigin]
 comptime ThreadEntry = def(ThreadArg) thin -> ThreadArg
 """A thread's entry, as Flare's ThreadHandle.spawn_os types it (vendor/flare/runtime/_thread.mojo): `def entry(arg:
-ThreadArg) -> ThreadArg`, raising nothing; the argument is an address (Int(arg)). mojoui.framefeed keeps the omxcore
-engine's form instead (its jobs declare pthread_create too): one program can't hold both until the engine moves (D-4761)."""
+ThreadArg) -> ThreadArg`, raising nothing; the argument is an address (Int(arg))."""
 
 
 def null_arg() -> ThreadArg:
@@ -121,14 +132,16 @@ def null_arg() -> ThreadArg:
 
 
 def pthread_create[entry: ThreadEntry](arg: Int, tid_out: Int) -> Int:
-    """Starts `entry(arg)` on a new thread with default attributes; its id is written at `tid_out` (8 bytes)."""
-    return Int(external_call["pthread_create", c_int, Pointer[UInt64, MutUntrackedOrigin], ThreadArg, ThreadEntry, ThreadArg](
-        Pointer[UInt64, MutUntrackedOrigin](unsafe_from_address=tid_out), null_arg(), entry,
-        ThreadArg(unsafe_from_address=arg)))
+    """Starts `entry(arg)` on a new thread with default attributes; its id is written at `tid_out` (8 bytes). Looked up,
+    not declared (_sym)."""
+    var f = _sym("pthread_create")
+    var call = Pointer(to=f).unsafe_bitcast[def(Int, Int, ThreadEntry, Int) thin abi("C") -> c_int]()[]
+    return Int(call(tid_out, 0, entry, arg))
 
 
 def pthread_detach(tid: Int) -> Int:
-    return Int(external_call["pthread_detach", c_int, UInt64](UInt64(tid)))
+    var f = _sym("pthread_detach")
+    return Int(Pointer(to=f).unsafe_bitcast[def(Int) thin abi("C") -> c_int]()[](tid))
 
 
 def pthread_mutex_init(mu: Int) -> Int:

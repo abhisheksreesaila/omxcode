@@ -7,4 +7,4 @@ cd "$(dirname "$0")/.."
 bash scripts/flare_ffi.sh >/dev/null
 source scripts/mxlink.sh
 cmd=$1; shift
-exec pixi run mojo "$cmd" --disable-warnings -I . -I vendor "$@" "${LINK[@]}"
+exec pixi run mojo "$cmd" --disable-warnings -D MOJOUI_FLARE -I . -I vendor "$@" "${LINK[@]}"
