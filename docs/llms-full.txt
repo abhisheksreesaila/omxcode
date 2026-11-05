@@ -125,8 +125,10 @@ scripts/agent.sh omxplorer     # prints: claude mcp add omxplorer -- pixi run py
 
 The charts speak an agent's language too. They are [Flint](https://microsoft.github.io/flint-chart/) specs, the chart format Microsoft designed for AI agents. omxcode draws them natively, and the same specs run through Flint's own renderer as a cross-check.
 
+Agents can also answer with screens. An omxcode app is an [AG-UI](https://docs.ag-ui.com) client: an agent streams a screen as data built from 36 components, and the app checks it and draws it natively while it arrives (`AgentChat`, [the walkthrough](https://abhisheksreesaila.github.io/omxcode/agents.html)). How compatibility is checked, with a command for each claim: [docs/ag-ui-compatibility.md](docs/ag-ui-compatibility.md).
+
 > [!NOTE]
-> **What the agent can't do yet:** read a chart's figures as text (it reads the sentence and can `render` the picture), read a drawn grid's cells in apps other than omxplorer, drag objects on a page, or generate new UI. Generated UI over AG-UI is next, built on the same operations log.
+> **What the agent can't do yet:** read a chart's figures as text (it reads the sentence and can `render` the picture), read a drawn grid's cells in apps other than omxplorer, or drag objects on a page.
 
 ## Under the hood
 

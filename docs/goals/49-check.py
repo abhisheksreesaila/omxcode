@@ -37,6 +37,15 @@ def oks(cmd, labels, timeout=1800):
     return (r.returncode == 0 and not missing), out, missing
 
 
+def mojo_test(src, labels, timeout=1800):
+    """Build a test with the vendored engine (scripts/mxbuild.sh: -I vendor) and run it; (ok, output, missing labels)."""
+    exe = ROOT / "build" / Path(src).stem
+    b = run(["scripts/mxbuild.sh", src, "-o", str(exe)], timeout)
+    if b.returncode:
+        return False, b.stdout + b.stderr, labels
+    return oks([str(exe)], labels, timeout)
+
+
 def frames_of(path):
     r = run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames",
              "-of", "csv=p=0", str(path)], 600)
@@ -93,7 +102,7 @@ def m0():
 
 
 def m1():
-    ok, out, missing = oks(["pixi", "run", "mojo", "run", "-I", ".", "tests/test_script.mojo"], ["parse", "run", "chain", "error", "fn"])
+    ok, out, missing = mojo_test("tests/test_script.mojo", ["parse", "run", "chain", "error", "fn"])
     return ok, "parse; run; chain; error; fn" if ok else f"test_script: no ok for {missing}: {out[-500:]}"
 
 
@@ -170,9 +179,9 @@ def m4():
 def m5():
     bad = []
     for t in ("tests/test_asksql.mojo", "tests/test_tablejobs.mojo", "tests/test_videotable.mojo"):
-        r = run(["pixi", "run", "mojo", "run", "-I", ".", t], 1800)
-        if r.returncode:
-            bad.append(f"{t}: {(r.stdout + r.stderr)[-300:]}")
+        ok, out, _ = mojo_test(t, [])
+        if not ok:
+            bad.append(f"{t}: {out[-300:]}")
     r = run(["pixi", "run", "python", "docs/goals/47-check.py", "M2", "M4"], 7200)
     if r.returncode or "FAIL" in r.stdout:
         bad.append("goal 47: " + r.stdout[-600:])
