@@ -329,7 +329,8 @@ def m4():
         names = sorted(r[0] for r in con.execute("select name from models"))
         con.close()
         st, body, _ = d.call("GET", "/admin/models")
-        listed = sorted(m.get("name") for m in json.loads(body).get("models", [])) if st == 200 else []
+        got_models = json.loads(body) if st == 200 else []  # (a list, as the original answers)
+        listed = sorted(m.get("name") for m in got_models) if isinstance(got_models, list) else []
         if names and listed != names:
             problems.append(f"/admin/models lists {listed[:5]}, the store has {names[:5]}")
         # writes
