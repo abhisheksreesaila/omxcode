@@ -31,6 +31,7 @@ worse table → Flight plan (waypoints.csv); then seek flight a's video three ti
 
 import argparse
 import os
+import re
 import shutil
 import sys
 import threading
@@ -468,15 +469,110 @@ def robots(media, out):
     print(f"pack: {[f.name for f in made]}; SLOW lines: {len(slow)}; summary {out / 'robots.json'}")
 
 
+SCRIPT_M2 = """-- goal 49: the featured episode's video, its telemetry and the fleet, in one script
+frames = SELECT * FROM episode;
+tele = SELECT CAST(t * 15 AS INT) AS frame, gripper, speed, gripper_event FROM telemetry WHERE episode = '${episode}';
+joined = SELECT '${episode}' AS episode, f.frame, f.t, tele.gripper, tele.speed FROM frames f JOIN tele ON tele.frame = f.frame;
+with_fleet = SELECT j.episode, j.frame, j.gripper, fleet.lab, fleet.task FROM joined j JOIN fleet ON fleet.episode = j.episode;
+"""
+
+
+def card_facts(text):
+    """A table card's read: its rows (from "name (N rows · M columns)") and its first row's cells by column."""
+    lines = text.splitlines()
+    m = re.search(r"\(([0-9,]+) rows?", lines[0]) if lines else None
+    rows = int(m.group(1).replace(",", "")) if m else -1
+    cells = dict(zip(lines[1].split("\t"), lines[2].split("\t"))) if len(lines) > 2 else {}
+    return {"rows": rows, "cells": cells}
+
+
+def script(media, out):
+    """One script over everything on the board (goal 49): the fleet sheet, its telemetry, the featured episode's video;
+    a script joins them, each result a card. Only omxplorer's own tools."""
+    import csv
+    import json
+    docs = out / "documents"
+    for d in (docs, out / "config"):
+        d.mkdir(parents=True, exist_ok=True)
+    truth = json.loads((media / "truth.json").read_text())
+    hero = truth["hero"]
+    rows = list(csv.DictReader(open(media / "fleet.csv")))
+    hero_row = [r["episode"] for r in rows].index(hero) + 1
+    env = {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(out / "config"), "MOJOUI_TRACE": "1", "MOJOUI_BUDGET_MS": os.environ.get("MOJOUI_BUDGET_MS", "50"),
+           "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES", "0")}
+    s = Session(env)
+    called = []
+    cards = {}
+
+    def call(tool, **args):
+        called.append(tool)
+        return s.call(tool, **args)
+
+    def until(tool, timeout=300):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if tool in s.c.names():
+                return
+            time.sleep(0.2)
+        raise SystemExit(f"{tool} never appeared; the app said: {[l for l in s.log if l.startswith(('SCRIPT:', 'JOB:'))][-6:]}")
+
+    def run_script(text, names, timeout=600):
+        mark = len(s.log)
+        call("script-text", text=text)
+        call("run-script")
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if any(l.startswith(("SCRIPT: problem", "JOB: script")) for l in s.log[mark:]):
+                break
+            time.sleep(0.2)
+        problem = [l for l in s.log[mark:] if l.startswith("SCRIPT: problem")]
+        if problem:
+            raise SystemExit(problem[0])
+        got = {}
+        for n in names:  # (a card's tool is table-<its name>, "_" read as "-")
+            tool = "table-" + n.replace("_", "-")
+            until(tool, 60)
+            got[f"table-{n}"] = card_facts(call("read", name=tool, count=1))
+        return got
+
+    available = []
+    try:
+        print("# One script over everything on the board: video, telemetry and the fleet. Only omxplorer's own tools.")
+        call("open-file", path=str((media / "fleet.csv").resolve()))
+        until("create-table")
+        call("create-table")
+        call("insert-table")
+        call("choose-table", path=str((media / "telemetry.parquet").resolve()))
+        until("table-telemetry")
+        call("links")
+        for l in ROBOT_LINKS[:3]:
+            call("link", text=l, submit=True)
+        call("grid", value=float(hero_row))  # (the featured episode's row: its clip opens as the video card "episode")
+        until("video", 120)
+        call("script")
+        cards.update(run_script(SCRIPT_M2.replace("${episode}", hero), ["frames", "joined", "with_fleet"]))
+        available = s.c.names()
+    finally:
+        s.close()
+    trace = [l for l in s.log if l.startswith(("SCRIPT:", "QUERY:", "JOB:", "SLOW:"))]
+    summary = {"cards": cards, "trace": trace, "tools_called": called, "tools_available": available, "hero": hero,
+               "export": "", "range": [0, 0], "other": hero, "reopened": {}}
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "script.json").write_text(json.dumps(summary, indent=1))
+    for l in trace:
+        print(l[:300])
+    print(f"summary {out / 'script.json'}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("name", choices=["warehouse", "drone", "claims", "robots"])
+    ap.add_argument("name", choices=["warehouse", "drone", "claims", "robots", "script"])
     ap.add_argument("--media", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    {"warehouse": warehouse, "drone": drone, "claims": claims, "robots": robots}[a.name](Path(a.media).resolve(), out)
+    {"warehouse": warehouse, "drone": drone, "claims": claims, "robots": robots, "script": script}[a.name](Path(a.media).resolve(), out)
 
 
 if __name__ == "__main__":

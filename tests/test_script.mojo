@@ -1,9 +1,10 @@
 # mojoui.script (goal 49 M1): a script's statements, run in order over a catalog; named results later statements read;
 # errors that name their line; functions from a registry (where models plug in); ${params}.
 #   pixi run mojo run -I . tests/test_script.mojo
-# Prints "parse: ok", "run: ok", "chain: ok", "error: ok", "fn: ok".
+# Prints "parse: ok", "run: ok", "chain: ok", "error: ok", "fn: ok", "frames: ok" (mojoui.videoscript: a video as a table).
 from std.testing import assert_equal, assert_true, assert_false
 from omxcore import Catalog, Table, Frame as MxFrame, INT as MX_INT
+from mojoui.videoscript import VideoFunctions
 from mojoui.script import parse_script, run_script, bind_params, ScriptFunctions, NoFunctions, STMT_SQL, STMT_FN
 
 
@@ -121,3 +122,21 @@ def main() raises:
     assert_true(unbound, "an unbound ${name} is an error")
     assert_false(ones.has("regions"))
     print("fn: ok")
+
+    # frames: a video is a table of its frames (frame, t), joinable with a 15 Hz log by round(t * 15)
+    var videos = VideoFunctions()
+    videos.add("episode", "clip.mp4", 15.0, 244)
+    var cat6 = Catalog()
+    var log = Table.empty()
+    var lt = log.add_column("k", MX_INT)
+    for i in range(300):
+        log.append(lt, Int64(i))
+    log.check()
+    cat6.add_frame("log", MxFrame(log^.share()))
+    videos.add_to(cat6)
+    var r6 = run_script("f = SELECT * FROM episode;\nlast = SELECT frame, t FROM episode WHERE frame = 243;\nj = SELECT f.frame FROM f JOIN log ON log.k = f.frame;", cat6, videos)
+    assert_equal(r6.problem, "")
+    assert_equal(r6.tables[0].rows(), 244)
+    assert_equal(r6.tables[1].rows(), 1)
+    assert_equal(r6.tables[2].rows(), 244)
+    print("frames: ok")

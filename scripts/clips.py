@@ -351,6 +351,77 @@ def robots_shots(media=None, keep_raw=False):
     print(f"clip: {out} ({kept:.1f} s kept of {total:.1f} s)")
 
 
+G49 = ROOT / "build/g49"
+
+
+def script_shots(media=None):
+    """Goal 49's shots: one script over everything on the board (scenario.py script's steps), the GTK window on the
+    private display, Liquid dark. Writes build/g49/shots/NN-*.png and build/g49/clip-script.raw.mp4 (an undirected take)."""
+    import csv
+    import json
+    import covers
+    import scenario
+    media = Path(media or G47 / "full").resolve()
+    shots = G49 / "shots"
+    shots.mkdir(parents=True, exist_ok=True)
+    docs = G49 / "clip-docs"
+    shutil.rmtree(docs, ignore_errors=True)
+    (docs / "config").mkdir(parents=True)
+    (docs / "config" / "settings.txt").write_text("inspector=no\n")
+    truth = json.loads((media / "truth.json").read_text())
+    rows = list(csv.DictReader(open(media / "fleet.csv")))
+    hero = truth["hero"]
+    hero_row = [r["episode"] for r in rows].index(hero) + 1
+    r = covers.Rec(covers.copy_app("omxplorer", G49), {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(docs / "config"), "MOJOUI_BUDGET_MS": "50"},
+                   G49 / "clip-script.mp4", size=(1920, 1200))
+
+    def shot(name):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab", "-draw_mouse", "0", "-video_size", "1920x1200", "-i",
+                        os.environ["DISPLAY"] + "+0,0", "-frames:v", "1", "-vf", "scale=1440:900:flags=lanczos", str(shots / name)], check=True)
+        print("shot", shots / name, flush=True)
+
+    def until(tool, timeout=300):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if tool in r.tools():
+                return
+            time.sleep(0.2)
+        r.close()
+        raise SystemExit(f"{tool} never appeared")
+
+    try:
+        r.record()
+        r.call("open-file", 0.0, path=str(media / "fleet.csv"))
+        until("create-table")
+        r.call("create-table", 0.4)
+        r.call("insert-table", 0.2)
+        r.call("choose-table", 0.0, path=str(media / "telemetry.parquet"))
+        until("table-telemetry")
+        r.call("links", 0.3)
+        for l in scenario.ROBOT_LINKS[:3]:
+            r.call("link", 0.2, text=l, submit=True)
+        for _ in range(3):
+            if "Inspector (Ctrl+Shift+I) ✓" not in r.c.call("screen")[0]:
+                break
+            r.call("view-inspector", 0.3)
+        r.call("grid", 0.0, value=float(hero_row))
+        until("video", 120)
+        if "pause" in r.tools():
+            r.call("pause", 0.0)
+        r.call("script", 0.6)
+        r.call("script-text", 1.0, text=scenario.SCRIPT_M2.replace("${episode}", hero))
+        shot("01-script-written.png")
+        r.call("run-script", 0.0)
+        until("table-with-fleet", 120)
+        time.sleep(1.0)
+        shot("02-script-ran.png")
+        r.call("script-close", 0.6)
+        shot("03-results-on-board.png")
+    finally:
+        r.close()
+    print("raw take", r.raw)
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -363,6 +434,9 @@ if __name__ == "__main__":
     if what == "robots-shots":  # the 11 beat shots (build/g47/shots) and an undirected take
         args = [a for a in sys.argv[2:] if not a.startswith("--")]
         robots_shots(args[0] if args else None, keep_raw="--raw" in sys.argv)
+    if what == "script-shots":  # goal 49's shots (build/g49/shots) and an undirected take
+        args = [a for a in sys.argv[2:] if not a.startswith("--")]
+        script_shots(args[0] if args else None)
     if what == "robots":  # the directed clip (scripts/robotclip.py): docs/img/clip-robots.mp4, -15s, -raw, build/g47/clipcheck
         import robotclip
         args = [a for a in sys.argv[2:] if not a.startswith("--")]

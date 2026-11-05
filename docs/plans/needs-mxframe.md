@@ -62,3 +62,4 @@ When MX frame's Mojo API is ready, the switch is one layer: `GridSource`, the op
 **Wanted from goal 24 (2026-10-19):** a standard deviation (and variance) aggregate, CPU and GPU, streamed too: the
 Report's Average tile would show "σ = …" in its footer as Stitch drew it (D-240); until then it reads "of N values".
 Not filed as an issue yet (goal 24 stays inside this repo).
+- (goal 49, 2026-11-04) Scalar `ROUND`, `FLOOR`, `CEIL` (and `ABS`): a script joining a 15 Hz log to a video's frames wants `ROUND(t * 15)`; today `CAST(x AS INT)` rounds to the nearest (as Postgres/DuckDB do), which is the workaround. Model functions (UDFs) callable from SQL would let `detect(frame)` sit inside a SELECT instead of its own statement.

@@ -7,9 +7,11 @@
 #   work.insert(path)                                   # Insert > Table…: read, parse, the card's grid prepared, in the job
 #   work.ask(tables, text, page_name, page, "Query 1")  # SQL over every card's table and the page's own
 #   work.export(sheet, path)                            # Export CSV of any sheet (a card's, the page's)
+#   work.script(tables, text, page_name, page, videos)  # a script (mojoui.script) over the cards, the page and the videos
 #   on App.jobs_message:  var f = work.take_file()      # Optional[TableFile]: tables.adopt(f.take().take_card(), x, y, w, h)
 #                         var a = work.take_answer()    # Optional[Answer]: a.card (named as asked), a.milliseconds
 #                         var e = work.take_export()    # Optional[Exported]: e.path, e.rows
+#                         var r = work.take_script()    # Optional[ScriptAnswer]: r.cards (one per named result), r.log, r.problem
 #                         work.problem                  # why the last one failed ("": none)
 #
 # Tracing (MOJOUI_TRACE / MOJOUI_TEST) prints one line as each lands: `JOB: query landed in 12.3 ms (4 rows)`,
@@ -27,6 +29,8 @@ from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.timeseries import TimeSeries
 from mojoui.trackcard import is_track, series_from_sheet
+from mojoui.script import run_script
+from mojoui.videoscript import VideoFunctions
 
 
 struct TableFile(Movable):
@@ -71,6 +75,24 @@ struct Exported(Movable):
     def __init__(out self, path: String, rows: Int, milliseconds: Float64):
         self.path = path
         self.rows = rows
+        self.milliseconds = milliseconds
+
+
+struct ScriptAnswer(Movable):
+    """A script's results, a card each (named as the script named them), its log (a line per statement run) and its
+    first problem ("line N: …"; the results before it are kept)."""
+
+    var cards: List[TableCard]
+    var log: List[String]
+    var problem: String
+    var line: Int
+    var milliseconds: Float64
+
+    def __init__(out self, var cards: List[TableCard], var log: List[String], problem: String, line: Int, milliseconds: Float64):
+        self.cards = cards^
+        self.log = log^
+        self.problem = problem
+        self.line = line
         self.milliseconds = milliseconds
 
 
@@ -127,6 +149,37 @@ struct QueryJob(JobBody):
         return Answer(card^, ms)
 
 
+struct ScriptJob(JobBody):
+    comptime Out = ScriptAnswer
+    var names: List[String]
+    var sheets: List[Sheet]
+    var videos: VideoFunctions
+    var text: String
+    var pal: Palette
+
+    def __init__(out self, var names: List[String], var sheets: List[Sheet], var videos: VideoFunctions, text: String, pal: Palette):
+        self.names = names^
+        self.sheets = sheets^
+        self.videos = videos^
+        self.text = text
+        self.pal = pal.copy()
+
+    def run(mut self, ctl: JobCtl) raises -> ScriptAnswer:
+        var t0 = now_ns()
+        var catalog = Catalog()
+        for i in range(len(self.sheets)):
+            catalog.add_frame(self.names[i], self.sheets[i].frame)
+        self.videos.add_to(catalog)
+        var run = run_script(self.text, catalog, self.videos)
+        var font = Font()
+        var cards = List[TableCard]()
+        for i in range(len(run.names)):
+            var card = TableCard(run.names[i], Sheet(run.tables[i], False), -1, 0, 0, 0, 0, font, self.pal)
+            card.note = "a script"
+            cards.append(card^)
+        return ScriptAnswer(cards^, run.log.copy(), run.problem, run.line, Float64(now_ns() - t0) / 1e6)
+
+
 struct ExportJob(JobBody):
     comptime Out = Exported
     var sheet: Sheet
@@ -151,9 +204,11 @@ struct TableWork(Movable):
     var query: Optional[Job[Answer]]
     var export_: Optional[Job[Exported]]
     var export_path: String
+    var script_: Optional[Job[ScriptAnswer]]
     var problem: String
 
     def __init__(out self):
+        self.script_ = None
         self.file = None
         self.file_path = ""
         self.query = None
@@ -162,7 +217,7 @@ struct TableWork(Movable):
         self.problem = ""
 
     def busy(self) -> Bool:
-        return Bool(self.file) or Bool(self.query) or Bool(self.export_)
+        return Bool(self.file) or Bool(self.query) or Bool(self.export_) or Bool(self.script_)
 
     def inserting(self) -> String:
         """The file being read ("": none)."""
@@ -195,6 +250,41 @@ struct TableWork(Movable):
             sheets.append(tables.cards[k].sheet.snapshot())
         self.query = start_ui_job(QueryJob(names^, sheets^, text, called, pal))
         return True
+
+    def script(mut self, tables: TableCards, text: String, page_name: String, page: Sheet, var videos: VideoFunctions, pal: Palette) -> Bool:
+        """Starts a script (mojoui.script) over every card's table, the page's own (`page` as `page_name`; "": left out)
+        and the videos (each a table of its frames; their functions callable). False: a script runs already."""
+        if self.script_:
+            self.problem = "A script is running already"
+            return False
+        var names = List[String]()
+        var sheets = List[Sheet]()
+        var page_sql = String("")
+        if page_name != "" and tables.find(page_name) < 0:
+            page_sql = page_name
+            names.append(sql_name(page_name))
+            sheets.append(page.snapshot())
+        for k in range(len(tables)):
+            names.append(tables.sql_name_of(k, page_sql))
+            sheets.append(tables.cards[k].sheet.snapshot())
+        self.script_ = start_ui_job(ScriptJob(names^, sheets^, videos^, text, pal))
+        return True
+
+    def take_script(mut self) -> Optional[ScriptAnswer]:
+        """The script's answer once its job has ended (None while it runs; None and `problem` set when the job failed)."""
+        if not self.script_ or self.script_.value().poll() == JOB_RUNNING:
+            return None
+        var job = self.script_.take()
+        try:
+            var a = job.result()
+            if trace_on():
+                print("JOB: script landed in " + fixed(a.milliseconds, 1) + " ms (" + String(len(a.cards)) + " results)", flush=True)
+            return a^
+        except e:
+            self.problem = String(e)
+            if trace_on():
+                print("JOB: script failed: " + String(e), flush=True)
+            return None
 
     def export(mut self, sheet: Sheet, path: String) -> Bool:
         """Starts writing `sheet` (a snapshot of it) as CSV to `path` (False: an export runs already)."""
