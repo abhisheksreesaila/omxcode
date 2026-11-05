@@ -1,36 +1,33 @@
-# GOAL 48: AG-UI as good as CopilotKit, and faster
+# GOAL 50: the framework serves, fetches and supervises; omxconsole's daemon in Mojo on it
 
-**End goal (owner, 2026-11-04):** "make sure AG-UI protocol support in MX app is as good, if not better than CopilotKit…
-when I pick up a component, it's just so lovely, very nicely done. That is the level of polish… if I ask for a map I
-should have a map… the existing components we have built we should be able to render… really, really good examples
-using our components… a good USP compared to CopilotKit: our streaming is faster, ours is in process, we use GPUs."
-Base: main 9ae87cb (goal 35's AG-UI: client, render_ui, 13 components). Research: docs/research/copilotkit.md.
-Framework first: every generic piece goes in `mojoui/` with its own test; examples only compose.
+**End goal (owner, 2026-11-04):** "make OMX console completely … app native … a convenient wrapper on Max Serve. We
+don't want to be writing our own thing … the star of the show is OMX code … anything else … contribute to the
+framework … don't overfit OMX console … you don't have to write your HTTP server … There is Flare … I would rather trust
+that." Plan: docs/plans/omxconsole-native.md (D-4755, D-4756). Base: main bfacc58.
+**Framework first:** every generic piece is a `mojoui/` component with its own test; `examples/consoled` only composes.
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/48-check.py`) |
+| # | Milestone | Proof (`docs/goals/50-check.py`) |
 |---|---|---|
-| M0 | Every general component, by data | the genui catalog grows from 13 to ≥ 36 components, each the real mojoui component: layout (Card, VStack, HStack, Grid, Tabs, Divider, Spacer), words (Text, Paragraph, Markdown, CodeBlock, Chip, Alert, Skeleton), data (Table, DataGrid, ChartView bars/line/area, Sparkline, KpiView, Meter, ProgressBar, Timeline, MapView, Breadcrumbs, Icon), inputs (Button, TextField, TextArea, Toggle, Checkbox, Dropdown, Slider, Segmented, Radio, DatePicker), Confirm; docs/genui.schema.json regenerated; `tests/test_genui.mojo` renders every catalogued component from a sample node and refuses a bad prop for each (prints `catalog: ok N`); the app-only ones (workbook, video, OCR) stay out, listed in docs/agui.md |
-| M1 | Streaming generative UI | while render_ui's args stream in, the UI builds piece by piece (a tolerant partial-JSON reader; parts not yet arrived show a Skeleton); every tool call (frontend or backend) has a status: in progress, executing, complete, with a tool card for backend calls; STEP events show as a live progress list; STATE_SNAPSHOT/DELTA re-render bound UI in place; `tests/test_agui_stream.mojo` (partial args at every byte cut parse or wait, never crash) and a GTK + web run of the `stream` scenario with ≥ 3 shots taken mid-stream that differ |
-| M2 | Human in the loop | a frontend tool marked `confirm` shows an approve/reject card (what, why, the args) and runs nothing until answered; the answer goes back as the tool result; an interrupt (CUSTOM `interrupt`) shows a choice card and resumes the run with the pick; GTK + web, the agent receives each answer (SDK-validated RunAgentInput) |
-| M3 | The chat, polished (mojoui.agentchat) | a framework `AgentChat` composite any app drops in (panel, sidebar, popup): streaming words as Markdown with code blocks and a copy action, a typing indicator, Stop (cancels the run), auto-scroll that yields when the reader scrolls up, suggestion chips (from the app or the agent's CUSTOM `suggestions`), message actions (copy, regenerate), an error state with Retry, new cards arrive on a spring (Liquid); `examples/agentchat` becomes a thin app over it; GTK + web shots in Liquid light and dark |
-| M4 | Examples worth showing | ≥ 6 scripted scenarios, each built only from catalogued components, each run on GTK and the web with shots: a trip with a map (MapView: route, places), a sales dashboard (KPIs, a chart, a data grid), a booking form (date picker, dropdown, slider, radio; its values reach the agent), an approval (Confirm), a research plan (steps with live progress), a release note (Markdown, code, timeline); `docs/agui.md`'s gallery shows them; a person reading a shot can tell what it is |
-| M5 | Faster, in process, GPU | (a) an in-process agent: `mojoui.agui` takes events from a Mojo `LocalAgent` (no HTTP, no Python) through the same handler; (b) a data reference: render_ui can bind a DataGrid/ChartView to a dataset the app holds (an MX frame query by name), so an agent shows 1M rows without sending them; (c) `scripts/agui_bench.py` replays one recorded stream (≥ 2,000 events: words, a 40-component dashboard streamed as args, state deltas) into omxcode GTK, omxcode web and a CopilotKit React app in the same Chromium, and writes docs/goals/48/bench.json: time to first paint of agent UI, time to the last event drawn, frames over 16 ms, peak memory; every loss stated in docs/agui.md |
-| M6 | Nothing regressed | goal 35's checks (M0–M3) pass; `scripts/components.py` matrix fresh with the Agent column updated; docs/agui.md rewritten for the new pieces |
+| M0 | Flare in the repo | Flare v0.12.0 (MIT, Mojo 1.1) and its json dependency vendored under `vendor/` with their licences and a NOTICE line; `scripts/flare_ffi.sh` builds its C shims against OpenSSL; `tests/test_flare_link.mojo` imports mojoui (http, effects, sqlite, app) and flare in one binary and prints `link: ok` |
+| M1 | HTTPS for every app | `mojoui.http` gains a Flare transport behind its `Transport` seam (D-320); `tests/test_http.mojo` passes on both transports against `scripts/http_server.py`; `tests/test_https.mojo` fetches a Hugging Face file over HTTPS on a worker and checks its size; hosts Flare can't reach (iOS, Android) keep the socket transport (builds checked: kit for iOS, todo for Android) |
+| M2 | `mojoui.serve`: any app answers HTTP | routes with path parameters, JSON bodies, status codes, headers, SSE streaming and a streaming proxy to an upstream, on Flare's server, from a Mojo app's own state; `tests/test_serve.mojo` (prints `serve: ok`), and from outside: curl reads a route and the OpenAI Python SDK reads a streamed chat from a scripted SSE route |
+| M3 | `mojoui.process`: children an app supervises | start with args, env and a log file; health by an HTTP probe; exit code and log tail on a crash; stop (TERM, then KILL after a grace time); idle stop; `tests/test_process.mojo` prints `process: ok` |
+| M4 | omxconsole's daemon in Mojo | `examples/consoled` (no Python) on mojoui.serve answers every GET the console's screens make (the 18 recorded in docs/goals/33/fixtures) with the same JSON shape as the original (keys and value types, compared recursively), from a copy of a real `~/.mxc/mst.db` read by mojoui.sqlite; labels and keys (create, rotate, delete; stored as the original's SHA-256 hex, so a key works with either daemon) persist across a restart; the console (examples/console, GTK) runs against it and its Overview, Models and Keys pages show the store's models (shots) |
+| M5 | LLMs through `max serve` | consoled starts `max serve` for Qwen2.5-0.5B-Instruct on `mojoui.process` when a model is loaded (admin load or the first `/v1` call), proxies `/v1/chat/completions` and `/v1/models` with a per-app key check (401 without), and the OpenAI Python SDK streams a chat reply through it; the request lands in the store's request log and `/admin/metrics`; idle unload stops the child |
+| M6 | All-Mojo, nothing regressed | while M5's chat runs, the process tree of consoled and the console has no Python except `max serve` (the named exception, D-4755); goal 48's M0 and goal 33's M5 (the console against the fixture server, GTK and web) still pass; `scripts/components.py` matrix fresh with serve, process and the Flare transport |
 
 ## Out of bounds
-Pushing or merging into main; the frozen `../mojo-ui-apple-test`; pip; deleting .pixi; paid services, sign-ups or
-keys (the live model path stays by hand); running agent-supplied code or pixels (UI stays data, catalog-only);
+Pushing or merging into main; the frozen `../mojo-ui-apple-test`; the running Python daemon on :11435 and the real
+`~/.mxc` (tests use copies under build/); pip; Mojo 1.2 (Flare 0.12 runs on 1.1); paid services, sign-ups or keys;
 lowering a proof or editing a milestone to pass.
 
-## Assumptions (taken instead of asking; the owner is asleep)
-- "Map" = the existing offline MapView (route, places), not a tile server; no network tiles.
-- "GPUs" = the data reference path (MX frame on the GPU when present) and GPU-drawn charts/grids; an in-process LLM is
-  out of scope (omxconsole's engine is Python, D-4735); the in-process agent is a Mojo agent function, scripted.
-- The CopilotKit comparison uses its open-source React packages from npm, no Copilot Cloud, no key; the same stream is
-  replayed to both through a local AG-UI endpoint. If CopilotKit can't be made to consume it, M5(c) reports why with
-  evidence and benchmarks against a minimal React renderer instead (stated as such).
-- Scripted agents drive every check; the live-model path is unchanged and unverified here.
+## Assumptions (taken instead of asking)
+- Flare v0.12.0, not 0.13: 0.13 needs Mojo 1.2, which needs a new omxcore engine build (another repo); 0.12 has the
+  server, client, TLS and SSE (D-4757). The 1.2 move and Flare 0.13 come together later.
+- Pulls, search, bench, LAN expose, tray, the CLI and packs are later goals (packs: goal 49's M2); this goal proves the
+  daemon's spine: store, admin reads and writes, keys, `max serve`, the gateway.
+- The gallery card returns only after the owner looks (D-4735 was theirs).
 
 ## Budget
-150 turns. Done means: 48-check PASS for M0–M6; the reviewer passes it; docs/report.md short with shots.
+150 turns. Split a milestone that is too big and log the split.
