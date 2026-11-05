@@ -101,7 +101,7 @@ from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, ID
 from mojoui.tablejobs import TableWork, TableFile, Answer, ScriptAnswer
 from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS
 from mojoui.scriptpanel import ScriptPanel, SP_RUN, SP_EXPORT, SP_OPEN, SP_CLOSED
-from mojoui.recipe import Recipe, RecipeJob, read_recipe
+from mojoui.recipe import Recipe, RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
 from mojoui.draw import rect as draw_rect, with_alpha
@@ -2117,15 +2117,19 @@ struct Main(App):
                 names.append(self.tables.sql_name_of(k))
                 sheets.append(self.tables.cards[k].sheet.snapshot())
         var video = String("")
-        var sec = self.script.section()
-        if self.script.applied > 0 and len(self.script.videos) > 0:
+        var from_s = 0.0
+        var to_s = 0.0
+        var sec = self.script.applied_section()  # (what the script applied a function to: its clip)
+        if sec:
             var v = self.script_videos()
-            var at = v.find(self.script.videos[self.script.video])
+            var at = v.find(sec.value()[0])
             if at >= 0:
                 video = v.paths[at]
+                from_s = sec.value()[1]
+                to_s = sec.value()[2] if sec.value()[2] > 0 else Float64(v.frames[at]) / v.fps[at]
         self.recipes += 1
-        var folder = self.documents() + "/recipes/recipe-" + String(self.recipes)
-        self.recipe_job = start_ui_job(RecipeJob(folder, self.script.text, names^, sheets^, video, sec[0], sec[1]))
+        var folder = next_recipe_folder(self.documents() + "/recipes")
+        self.recipe_job = start_ui_job(RecipeJob(folder, self.script.text, names^, sheets^, video, from_s, to_s))
         self.script.said = "Writing the recipe…"
         self.say(Activity.running("Recipe", 0.0, "script, tables and clip"))
 
@@ -2176,6 +2180,9 @@ struct Main(App):
             var card = a.cards.pop(0)
             var called = card.name
             try:
+                var mine = self.tables.find(called)
+                if mine >= 0 and self.tables.cards[mine].note != "a script":
+                    raise Error(called + " is a table on this sheet already: give the result another name")
                 var w = self.card_width(card.sheet.columns())
                 var at = self.tables.find(called)
                 var spot = self.free_place(w, 320) if at < 0 else (self.tables.cards[at].x, self.tables.cards[at].y)

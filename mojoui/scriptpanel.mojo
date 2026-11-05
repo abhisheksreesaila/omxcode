@@ -14,7 +14,7 @@
 
 from mojoui.app import Event
 from mojoui.overlays import Dialog
-from mojoui.script import params_of, bind_params
+from mojoui.script import params_of, bind_params, strip_comments, last_call
 from mojoui.view import (View, Text, Button, TextField, TextArea, Dropdown, VStack, HStack, Spacer, CAPTION, PROMINENT, CENTER, START,
                          TONE_ACCENT, TONE_WARN)
 
@@ -121,12 +121,15 @@ struct ScriptPanel(Movable):
         self.answers = answers^
 
     def script(mut self) raises -> String:
-        """The script to run: its text with each ${question} answered (raises when one has no answer yet)."""
+        """The script to run: its text with each ${question} answered, comments left out (raises when one has no answer
+        yet, or it asks more than this window has fields for)."""
+        if len(self.params) > MAX_PARAMS:
+            raise Error("This script asks " + String(len(self.params)) + " questions (${…}); the window answers up to " + String(MAX_PARAMS) + ": write the rest in")
         var values = Dict[String, String]()
         for i in range(len(self.params)):
             if String(self.answers[i].strip()) != "":
                 values[self.params[i]] = String(self.answers[i].strip())
-        self.bound = bind_params(self.text, values)
+        self.bound = bind_params(strip_comments(self.text), values)
         return self.bound
 
     def apply_statement(mut self, function: String) raises -> String:
@@ -142,6 +145,17 @@ struct ScriptPanel(Movable):
 
     def section(self) -> Tuple[Float64, Float64]:
         return (_seconds(self.from_s), _seconds(self.to_s))
+
+    def applied_section(self) -> Optional[Tuple[String, Float64, Float64]]:
+        """The video and seconds the last run's script applied a function to (its last call to one of the offered
+        functions: what Export cuts), whatever the section fields say now. None: it applied nothing."""
+        var st = last_call(self.bound, self.functions)
+        if not st or len(st.value().args) < 1:
+            return None
+        ref a = st.value().args
+        var from_s = _seconds(a[1]) if len(a) > 1 else 0.0
+        var to_s = _seconds(a[2]) if len(a) > 2 else -1.0
+        return (a[0], max(from_s, 0.0), to_s)
 
     def ran(mut self, var log: List[String], problem: String, var names: List[String]):
         """A run landed: its log, its result names, what to say."""

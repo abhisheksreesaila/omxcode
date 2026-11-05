@@ -106,7 +106,7 @@ struct VideoFunctions(ScriptFunctions, Copyable, Movable, Sized):
         var video = VideoSource(self.paths[k])
         var span = frame_span(video.fps, video.frames, from_s, to_s)
         if span[1] <= span[0]:
-            raise Error("regions: no frames between " + args[1] + " and " + (args[2] if len(args) > 2 else "the end") + " s")
+            raise Error("regions: no frames between " + String(from_s) + " s and " + ("the end" if to_s < 0 else String(to_s) + " s"))
         video.seek_frame(span[0])
         var a = RegionsAnalyzer("region", 0, min_w=24, min_h=24)
         var ranges = List[ColourRange]()

@@ -583,7 +583,7 @@ def script(media, out):
         call("script-text", text="")
         call("recipe-path", text=export)
         call("open-recipe")
-        reopened.update(run_script(None, ["frames", "joined"], answers={"episode": OTHER}))
+        reopened.update(run_script(None, ["frames", "joined", "apply_1"], answers={"episode": OTHER}))
         available = s.c.names()
     finally:
         s.close()

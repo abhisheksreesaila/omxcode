@@ -139,46 +139,64 @@ def _arg(raw: String) -> String:
     return a
 
 
-def parse_script(text: String) raises -> List[Statement]:
-    """The script's statements in order (raises "line N: …" for a bad one)."""
-    var out = List[Statement]()
+def strip_comments(text: String) -> String:
+    """`text` without its `--` comments (outside single quotes); each comment's newline stays, so lines keep their
+    numbers. Byte ranges are copied whole, so any UTF-8 text comes through intact."""
     var bytes = text.as_bytes()
     var n = text.byte_length()
-    var cur = String("")
-    var first = 0  # the line the current statement starts on (0: nothing in it yet)
-    var line = 1
+    var out = String("")
+    var seg = 0
     var quoted = False
     var i = 0
     while i < n:
         var b = bytes[i]
-        if not quoted and b == UInt8(45) and i + 1 < n and bytes[i + 1] == UInt8(45):
+        if b == UInt8(39):
+            quoted = not quoted
+        elif not quoted and b == UInt8(45) and i + 1 < n and bytes[i + 1] == UInt8(45):
+            out += String(text[byte=seg:i])
             while i < n and bytes[i] != UInt8(10):
                 i += 1
+            seg = i
             continue
-        if b == UInt8(10):
-            line += 1
+        i += 1
+    return out + String(text[byte=seg:n])
+
+
+def parse_script(text: String) raises -> List[Statement]:
+    """The script's statements in order (raises "line N: …" for a bad one). `;` inside single quotes doesn't end a
+    statement; `--` (outside quotes) comments to the line's end; empty statements (`;;`) are skipped."""
+    var out = List[Statement]()
+    var plain = strip_comments(text)
+    var bytes = plain.as_bytes()
+    var n = plain.byte_length()
+    var seg = 0  # where the current statement's text starts
+    var first = 0  # the line the current statement starts on (0: nothing in it yet)
+    var line = 1
+    var quoted = False
+    for i in range(n):
+        var b = bytes[i]
         if b == UInt8(39):
             quoted = not quoted
         if not quoted and b == UInt8(59):
             if first > 0:
-                out.append(_statement(cur, first))
-            cur = String("")
+                out.append(_statement(String(plain[byte=seg:i]), first))
+            seg = i + 1
             first = 0
-            i += 1
-            continue
-        if first == 0 and not _is_space(b):
+        elif first == 0 and not _is_space(b):
             first = line
-        cur += String(text[byte = i : i + 1])
-        i += 1
+        if b == UInt8(10):
+            line += 1
     if quoted:
         raise Error("line " + String(line) + ": a quote is never closed")
     if first > 0:
-        out.append(_statement(cur, first))
+        out.append(_statement(String(plain[byte=seg:n]), first))
     return out^
 
 
 def bind_params(text: String, params: Dict[String, String]) raises -> String:
-    """`text` with every ${name} replaced by its value (raises for a name `params` doesn't have)."""
+    """`text` with every ${name} replaced by its value, as written (raises for a name `params` doesn't have). Values go
+    in as text, unquoted and unescaped: the script quotes them where it wants a string ('${episode}'); a value with a
+    quote or a semicolon changes the statement, which is fine for a person's own data and nothing else."""
     var out = String("")
     var rest = text
     while True:
@@ -198,9 +216,10 @@ def bind_params(text: String, params: Dict[String, String]) raises -> String:
 
 
 def params_of(text: String) -> List[String]:
-    """The ${names} a script asks for, once each, in order (a recipe's questions when it's reopened)."""
+    """The ${names} a script asks for, once each, in order (a recipe's questions when it's reopened); a ${name} in a
+    comment isn't asked."""
     var out = List[String]()
-    var rest = text
+    var rest = strip_comments(text)
     while True:
         var at = rest.find("${")
         if at < 0:
@@ -216,6 +235,18 @@ def params_of(text: String) -> List[String]:
     return out^
 
 
+def last_call(text: String, names: List[String]) -> Optional[Statement]:
+    """The script's last call to one of `names` (e.g. the video functions: what an export cuts), or None."""
+    var found: Optional[Statement] = None
+    try:
+        for st in parse_script(text):
+            if st.kind == STMT_FN and st.fn_name in names:
+                found = st.copy()
+    except:
+        pass
+    return found^
+
+
 def _short(s: String, most: Int = 72) -> String:
     var one = s.replace("\n", " ")
     if one.byte_length() <= most:
@@ -223,9 +254,10 @@ def _short(s: String, most: Int = 72) -> String:
     return String(one[byte=0:most]) + "…"
 
 
-def run_script[F: ScriptFunctions](text: String, mut catalog: Catalog, mut functions: F) -> ScriptRun:
+def run_script[F: ScriptFunctions](text: String, mut catalog: Catalog, mut functions: F, taken: List[String] = List[String]()) -> ScriptRun:
     """Every statement in order over `catalog`; each result joins the catalog under its name, so later statements read
-    it. Stops at the first problem ("line N: …"), keeping the results before it."""
+    it. Stops at the first problem ("line N: …"), keeping the results before it. `taken`: names the catalog's own
+    tables hold (a result may not hide one: "line N: x is a table here already")."""
     var run = ScriptRun()
     var statements: List[Statement]
     try:
@@ -243,6 +275,8 @@ def run_script[F: ScriptFunctions](text: String, mut catalog: Catalog, mut funct
         ref st = statements[k]
         var name = st.name if st.name != "" else "result_" + String(k + 1)
         try:
+            if name in taken:
+                raise Error(name + " is a table here already: give the result another name")
             var t: Table
             if st.kind == STMT_FN:
                 if not functions.has(st.fn_name):

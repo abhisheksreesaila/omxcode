@@ -1,11 +1,16 @@
 # mojoui.script (goal 49 M1): a script's statements, run in order over a catalog; named results later statements read;
 # errors that name their line; functions from a registry (where models plug in); ${params}.
 #   pixi run mojo run -I . tests/test_script.mojo
-# Prints "parse: ok", "run: ok", "chain: ok", "error: ok", "fn: ok", "frames: ok" (mojoui.videoscript: a video as a table).
+# Prints "parse: ok", "run: ok", "chain: ok", "error: ok", "fn: ok", "frames: ok" (mojoui.videoscript: a video as a table),
+# "recipe: ok" (mojoui.recipe: a run kept as a folder, never over an earlier one; read back).
 from std.testing import assert_equal, assert_true, assert_false
 from omxcore import Catalog, Table, Frame as MxFrame, INT as MX_INT
+from std.os import getenv, makedirs
+from omxcore import JobCtl
 from mojoui.videoscript import VideoFunctions, frame_span
-from mojoui.script import parse_script, run_script, bind_params, ScriptFunctions, NoFunctions, STMT_SQL, STMT_FN
+from mojoui.script import parse_script, run_script, bind_params, params_of, last_call, strip_comments, ScriptFunctions, NoFunctions, STMT_SQL, STMT_FN
+from mojoui.recipe import RecipeJob, read_recipe, next_recipe_folder
+from mojoui.sheet import Sheet
 
 
 def numbers(n: Int) raises -> Table:
@@ -64,6 +69,21 @@ def main() raises:
     except e:
         bad = String(e).find("line 2") >= 0
     assert_true(bad, "a bad name names its line")
+    # UTF-8 anywhere (a quoted string, a comment), '--' inside quotes, empty statements, an unclosed quote
+    var u = parse_script("-- café ☕ comment\nn = SELECT 'é;x -- not a comment' AS s FROM t;;\n;\nm = SELECT 'ü' AS s")
+    assert_equal(len(u), 2)
+    assert_equal(u[0].line, 2)
+    assert_true(u[0].text.find("'é;x -- not a comment'") >= 0, u[0].text)
+    assert_equal(u[1].name, "m")
+    assert_equal(u[1].line, 4)
+    assert_true(u[1].text.endswith("'ü' AS s"), u[1].text)
+    var open_quote = False
+    try:
+        _ = parse_script("a = SELECT 'oops FROM t;\nb = SELECT 1;")
+    except e:
+        open_quote = String(e).find("never closed") >= 0
+    assert_true(open_quote, "an unclosed quote is an error")
+    assert_equal(strip_comments("a -- x ☕\nb '--' c"), "a \nb '--' c")
     print("parse: ok")
 
     # run: a named result over the catalog's table
@@ -121,6 +141,22 @@ def main() raises:
         unbound = String(e).find("missing") >= 0
     assert_true(unbound, "an unbound ${name} is an error")
     assert_false(ones.has("regions"))
+    var asked = params_of("-- ${commented}\nSELECT * FROM t WHERE e = '${episode}' AND f = ${episode}")
+    assert_equal(len(asked), 1)
+    assert_equal(asked[0], "episode")
+    # a result may not hide one of the catalog's own tables; it may redo a name it made
+    var cat5 = Catalog()
+    cat5.add_frame("t", MxFrame(numbers(5).share()))
+    var taken = List[String]()
+    taken.append("t")
+    var hid = run_script("t = SELECT 1 AS x;", cat5, none, taken)
+    assert_true(hid.problem.find("is a table here already") >= 0, hid.problem)
+    var calls = List[String]()
+    calls.append("regions")
+    var lc = last_call("a = regions(ep, 1.0, 2.0);\nb = SELECT 1;\nc = regions(ep2, 3.5);", calls)
+    assert_true(Bool(lc), "the last call is found")
+    assert_equal(lc.value().args[0], "ep2")
+    assert_false(Bool(last_call("SELECT 1", calls)))
     print("fn: ok")
 
     # frames: a video is a table of its frames (frame, t), joinable with a 15 Hz log by round(t * 15)
@@ -147,3 +183,27 @@ def main() raises:
     var nofile = run_script("r = regions(nope, 1, 2);", cat6, videos)
     assert_true(nofile.problem.find("no video nope") >= 0, nofile.problem)
     print("frames: ok")
+
+    # recipe: a folder with the script and each result's CSV; the next export takes the next folder; read back
+    var base = getenv("G49_OUT", "build/g49") + "/test-recipes"
+    makedirs(base, exist_ok=True)
+    var first_folder = next_recipe_folder(base)
+    var sheets = List[Sheet]()
+    sheets.append(Sheet(numbers(3).share(), False))
+    var rnames = List[String]()
+    rnames.append("three")
+    var job = RecipeJob(first_folder, "x = SELECT * FROM t WHERE e = '${episode}';", rnames^, sheets^, "", 0.0, 0.0)
+    var rec = job.run(JobCtl())
+    assert_equal(len(rec.files), 2)
+    assert_equal(rec.clip_frames, 0)
+    assert_true(read_recipe(first_folder).find("${episode}") >= 0, "the script keeps its question")
+    var csv = open(first_folder + "/three.csv", "r").read()
+    assert_equal(csv, "x\n1\n2\n3\n")
+    assert_true(next_recipe_folder(base) != first_folder, "a second export never writes over the first")
+    var missing = False
+    try:
+        _ = read_recipe(base + "/nowhere")
+    except:
+        missing = True
+    assert_true(missing, "no recipe there is an error")
+    print("recipe: ok")

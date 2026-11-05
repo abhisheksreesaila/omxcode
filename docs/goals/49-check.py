@@ -105,8 +105,9 @@ def m0():
 
 
 def m1():
-    ok, out, missing = mojo_test("tests/test_script.mojo", ["parse", "run", "chain", "error", "fn"])
-    return ok, "parse; run; chain; error; fn" if ok else f"test_script: no ok for {missing}: {out[-500:]}"
+    labels = ["parse", "run", "chain", "error", "fn", "frames", "recipe"]  # (frames, recipe added after review round 1: stronger)
+    ok, out, missing = mojo_test("tests/test_script.mojo", labels, env={"G49_OUT": str(OUT)})
+    return ok, "; ".join(labels) if ok else f"test_script: no ok for {missing}: {out[-500:]}"
 
 
 def m2():
@@ -154,6 +155,21 @@ def m3():
         bad.append("script.sql missing or without regions(")
     if len(list(exp.glob("*.csv"))) < 2:
         bad.append("fewer than 2 CSVs")
+    # every exported CSV the scenario also read as a card has the card's rows; every applied row is inside the section
+    for k, v in s["cards"].items():
+        f = exp / (k[len("table-"):] + ".csv")
+        if f.exists():
+            n = sum(1 for _ in open(f)) - 1
+            if n != v["rows"]:
+                bad.append(f"{f.name} {n} rows != card {v['rows']}")
+    applied = exp / "apply_1.csv"
+    if applied.exists():
+        frames = [int(r["frame"]) for r in csv.DictReader(open(applied))]
+        out_of = [x for x in frames if not lo <= x < hi]
+        if not frames or out_of:
+            bad.append(f"apply_1.csv: {len(frames)} rows, {len(out_of)} outside [{lo}, {hi})")
+    else:
+        bad.append("no apply_1.csv")
     slow = [l for l in s["trace"] if l.startswith("SLOW:")]
     if slow:
         bad.append(f"{len(slow)} SLOW: {slow[:2]}")
@@ -173,6 +189,10 @@ def m4():
         bad.append(f"reopened frames {r.get('table-frames')} != {n}")
     if r.get("table-joined", {}).get("rows") != want:
         bad.append(f"reopened joined {r.get('table-joined')} != pyarrow {want}")
+    a, b = s["range"]
+    ap = r.get("table-apply_1", {})
+    if ap.get("rows", 0) <= 0 or not (round(a * FPS) <= int(ap.get("cells", {}).get("frame", -1)) < round(b * FPS)):
+        bad.append(f"the reopened recipe's regions {ap} not in its section")
     for t in ("open-recipe", "run-script", "export-recipe"):
         if t not in s["tools_called"]:
             bad.append(f"never called {t}")

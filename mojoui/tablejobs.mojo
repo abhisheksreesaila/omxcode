@@ -154,13 +154,15 @@ struct ScriptJob(JobBody):
     var names: List[String]
     var sheets: List[Sheet]
     var videos: VideoFunctions
+    var taken: List[String]  # the names a result may not take (the page's tables and videos; a script's own may be redone)
     var text: String
     var pal: Palette
 
-    def __init__(out self, var names: List[String], var sheets: List[Sheet], var videos: VideoFunctions, text: String, pal: Palette):
+    def __init__(out self, var names: List[String], var sheets: List[Sheet], var videos: VideoFunctions, var taken: List[String], text: String, pal: Palette):
         self.names = names^
         self.sheets = sheets^
         self.videos = videos^
+        self.taken = taken^
         self.text = text
         self.pal = pal.copy()
 
@@ -170,7 +172,7 @@ struct ScriptJob(JobBody):
         for i in range(len(self.sheets)):
             catalog.add_frame(self.names[i], self.sheets[i].frame)
         self.videos.add_to(catalog)
-        var run = run_script(self.text, catalog, self.videos)
+        var run = run_script(self.text, catalog, self.videos, self.taken)
         var font = Font()
         var cards = List[TableCard]()
         for i in range(len(run.names)):
@@ -264,10 +266,17 @@ struct TableWork(Movable):
             page_sql = page_name
             names.append(sql_name(page_name))
             sheets.append(page.snapshot())
+        var taken = List[String]()
+        if page_sql != "":
+            taken.append(names[0])
         for k in range(len(tables)):
             names.append(tables.sql_name_of(k, page_sql))
             sheets.append(tables.cards[k].sheet.snapshot())
-        self.script_ = start_ui_job(ScriptJob(names^, sheets^, videos^, text, pal))
+            if tables.cards[k].note != "a script":  # (a script's earlier results are its to redo; anything else is the person's)
+                taken.append(names[len(names) - 1])
+        for v in videos.names:
+            taken.append(v)
+        self.script_ = start_ui_job(ScriptJob(names^, sheets^, videos^, taken^, text, pal))
         return True
 
     def take_script(mut self) -> Optional[ScriptAnswer]:

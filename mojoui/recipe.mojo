@@ -79,6 +79,14 @@ struct RecipeJob(JobBody):
         return Recipe(self.folder, files^, frames, Float64(now_ns() - t0) / 1e6)
 
 
+def next_recipe_folder(base: String) -> String:
+    """<base>/recipe-N for the first N whose folder holds no recipe yet: an export never writes over an earlier one."""
+    var n = 1
+    while file_exists(base + "/recipe-" + String(n) + "/script.sql"):
+        n += 1
+    return base + "/recipe-" + String(n)
+
+
 def read_recipe(path: String) raises -> String:
     """A recipe's script: <path>/script.sql, or `path` itself when it is the file."""
     var p = path if path.endswith(".sql") else path + "/script.sql"
