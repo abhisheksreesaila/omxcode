@@ -15,6 +15,7 @@
 from mojoui.agui import Agent
 from mojoui.genui import GenUi, ACT_ACTION, MAX_CONTROLS, MAX_NODES, partial_ui, LOADING_UI
 from mojoui.datahub import Hub, NoData
+from mojoui.album import Album
 from mojoui.jsonpatch import JDoc
 from mojoui.json import json_string
 from mojoui.view import View, Text, Card, CAPTION, SPACE_XS, CARD_WARN
@@ -40,6 +41,7 @@ struct Screens[H: Hub = NoData](Movable):
     var sizes: List[Int]  # the argument bytes screen k was last built from (a preview rebuilds when more arrive)
     var font: Font  # one for every screen's canvases (a Font costs ~1 ms to make)
     var hub: Self.H  # the app's datasets, for screens that name one (goal 48 M5: mojoui.datahub)
+    var album: Album  # the app's pictures, for screens that name one (mojoui.album)
 
     def __init__(out self, base: Int, canvas_base: Int, max: Int = MAX_SCREENS):
         self.uis = List[GenUi[Self.H]]()
@@ -53,6 +55,7 @@ struct Screens[H: Hub = NoData](Movable):
         self.live = List[Bool]()
         self.sizes = List[Int]()
         self.hub = Self.H()
+        self.album = Album()
         self.font = Font()
 
     def reset(mut self):
@@ -92,9 +95,9 @@ struct Screens[H: Hub = NoData](Movable):
 
     def preview_of(self, args: String, k: Int) -> GenUi[Self.H]:
         """What has arrived of a screen, drawable (a dataset name still being written: the loading card)."""
-        var ui = GenUi[Self.H](partial_ui(args), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub)
+        var ui = GenUi[Self.H](partial_ui(args), self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
         if ui.problem != "":
-            return GenUi[Self.H](LOADING_UI, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub)
+            return GenUi[Self.H](LOADING_UI, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
         return ui^
 
     def preview(mut self, agent: Agent, tool: String = "render_ui") -> Bool:
@@ -135,7 +138,7 @@ struct Screens[H: Hub = NoData](Movable):
                     if c.id == self.calls[k] and c.done:
                         done = True
             if not done:
-                self.uis[k] = GenUi[Self.H]('{"ui":{"component":"Script"}}', self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub)
+                self.uis[k] = GenUi[Self.H]('{"ui":{"component":"Script"}}', self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
                 self.uis[k].problem = "the agent stopped before this screen was finished"
                 self.live[k] = False
 
@@ -161,7 +164,7 @@ struct Screens[H: Hub = NoData](Movable):
                     self.live[was] = False
                 continue
             var k = was if was >= 0 else len(self.uis)
-            var ui = GenUi[Self.H](c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub)
+            var ui = GenUi[Self.H](c.arguments, self.base + k * MAX_CONTROLS, self.canvas_base + k * MAX_NODES, self.hub, self.album)
             if ui.problem != "":
                 agent.answer(c.id, '{"error":' + json_string("refused: " + ui.problem) + "}")
                 refused = True

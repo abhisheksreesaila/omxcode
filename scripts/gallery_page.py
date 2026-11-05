@@ -19,7 +19,7 @@ STAR = dict(
 
 APPS = [
     dict(name="Agent chat", kind="Agents build screens · AG-UI",
-         line="Ask for a map, get a map: an AG-UI agent answers with screens from 36 components, drawn natively while it streams.",
+         line="Ask for a map, get a map: an AG-UI agent answers with screens from 38 components, drawn natively while it streams.",
          proves="Standard AG-UI, checked against the official SDK; or the agent in the app's own process",
          runs=[("Linux", "ok"), ("Web", "ok")], next="A live model, A2UI, the Mac",
          shots=[("img/agents-trip.png", "A day in Lisbon: a map, a timeline, the weather"), ("img/agents-dashboard.png", "A dashboard of forty components"),

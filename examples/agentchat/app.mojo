@@ -15,6 +15,7 @@ from mojoui.agentchat import AgentChat, CHAT_PANEL, RENDER_UI_ABOUT
 from mojoui.agui import Tool
 from mojoui.genui import schema
 from mojoui.sheethub import SheetHub
+from mojoui.album import Album
 from mojoui.sampledata import sample_orders
 from themes.omxqua import omxqua
 
@@ -47,6 +48,12 @@ struct Main(App):
             except:
                 pass
         self.chat.set_hub(hub^)
+        var album = Album()  # (pictures an agent may show by name: scripts/make_tagus.py drew this one)
+        try:
+            album.add("tagus", "examples/agentchat/pictures/tagus.jpg", "an illustration of the Tagus at sunset from a viewpoint")
+        except:
+            pass  # (run from elsewhere: no pictures, and an agent naming one is told so)
+        self.chat.set_album(album^)
         self.chat.offer(Tool("refund_order", "Refund an order", '{"type":"object","properties":{"order":{"type":"string"},"amount":{"type":"number"},"reason":{"type":"string"}},"required":["order","amount"]}'), confirm=True)
         self.themed = omxqua(False)
 

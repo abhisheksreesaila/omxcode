@@ -44,6 +44,8 @@ from mojoui.datagrid import DataGrid
 from mojoui.rowsource import Rows
 from mojoui.numformat import grouped
 from mojoui.datahub import Hub, NoData
+from mojoui.album import Album
+from mojoui.disclosure import Disclosure
 from mojoui.canvas import Surface
 from mojoui.text import Font
 from mojoui.theme import Palette, mix
@@ -169,6 +171,8 @@ def catalog() -> List[Spec]:
     out.append(Spec("Tabs", "sections the user switches between: one child per tab, in order", [texts("tabs", 2, 8, True, "the tab titles"), kids()]))
     out.append(Spec("Divider", "a rule between components", List[Prop]()))
     out.append(Spec("Spacer", "empty room that pushes its neighbours apart in a row", List[Prop]()))
+    out.append(Spec("Disclosure", "a section that folds: its title, and the components inside shown while it's open (the user opens and closes it)", [
+        text("title", 200, True), flag("open", "starts open"), kids()]))
     # words
     out.append(Spec("Text", "a line of text (shown as text, never markup)", [
         text("text", 2000, True), choice("style", ["body", "title", "headline", "caption"]), choice("tone", ["plain", "accent", "good", "warn", "strong"])]))
@@ -212,6 +216,9 @@ def catalog() -> List[Spec]:
                                 Field("kind", P_ENUM, False, 0, 0, ["place", "finding"])]),
         number("height", 160, 600, False, "points")]))
     out.append(Spec("Breadcrumbs", "where you are, as a trail", [texts("items", 1, 8, True), action(False)]))
+    out.append(Spec("Picture", "a picture the app holds, by name (see the run's context; never pixels or a link), fitted, with an optional caption", [
+        Prop("name", P_WORD, True, 0, 0, List[String](), "a picture the app holds, by name", List[Field]()),
+        text("caption", 200), number("height", 80, 600, False, "points")]))
     out.append(Spec("Icon", "a Lucide icon by name (\"map-pin\", \"calendar\", \"check\")", [text("name", 40, True), number("size", 12, 64)]))
     # inputs
     out.append(Spec("Button", "a button that reports its action", [
@@ -243,6 +250,10 @@ def sample(name: String) -> String:
         n = '{"component":"Grid","columns":2,"children":[{"component":"Text","text":"a"},{"component":"Text","text":"b"}]}'
     elif name == "Tabs":
         n = '{"component":"Tabs","tabs":["One","Two"],"children":[{"component":"Text","text":"first"},{"component":"Text","text":"second"}]}'
+    elif name == "Disclosure":
+        n = '{"component":"Disclosure","title":"Getting around","open":true,"children":[{"component":"Text","text":"Tram 28 from Martim Moniz."}]}'
+    elif name == "Picture":
+        n = '{"component":"Picture","name":"tagus","caption":"The Tagus at sunset","height":160}'
     elif name == "Divider" or name == "Spacer":
         n = '{"component":"' + name + '"}'
     elif name == "Text":
@@ -718,6 +729,7 @@ comptime CV_CHART = 1
 comptime CV_KPI = 2
 comptime CV_MAP = 3
 comptime CV_GRID = 4
+comptime CV_PICTURE = 5
 
 
 @fieldwise_init
@@ -735,7 +747,7 @@ struct UiAction(Copyable, Movable):
 def is_control(comp: String) -> Bool:
     return (comp == "Button" or comp == "TextField" or comp == "TextArea" or comp == "Toggle" or comp == "Checkbox"
             or comp == "Dropdown" or comp == "Slider" or comp == "Segmented" or comp == "Radio" or comp == "DatePicker"
-            or comp == "Tabs" or comp == "CodeBlock" or comp == "Breadcrumbs" or comp == "DataGrid")
+            or comp == "Tabs" or comp == "CodeBlock" or comp == "Breadcrumbs" or comp == "DataGrid" or comp == "Disclosure")
 
 
 def canvas_kind(comp: String) -> Int:
@@ -749,6 +761,8 @@ def canvas_kind(comp: String) -> Int:
         return CV_MAP
     if comp == "DataGrid":
         return CV_GRID
+    if comp == "Picture":
+        return CV_PICTURE
     return -1
 
 
@@ -772,7 +786,7 @@ struct GenUi[H: Hub = NoData](Movable):
     var canvas_of: Dict[Int, Int]  # node → its canvas
     var stamps: List[Int]  # per canvas: a hash of its data, part of its version (a screen rebuilt while it streams
                            # redraws only the canvases whose data changed)
-    var picks: Dict[Int, Int]  # Tabs node → the open tab
+    var picks: Dict[Int, Int]  # Tabs node → the open tab; Disclosure node → 1 open, 0 folded (once the user toggled it)
     var copies: Dict[Int, Int]  # CodeBlock node → times copied (the clipboard's version)
     var charts: List[ChartView]  # per canvas (CV_CHART; a placeholder for the others)
     var grids: List[DataGrid]  # per canvas (CV_GRID)
@@ -782,8 +796,10 @@ struct GenUi[H: Hub = NoData](Movable):
     var hub: Self.H  # the app's datasets (a DataGrid or ChartView may name one: mojoui.datahub)
     var sources: List[Int]  # per canvas: the dataset it draws from (-1: its own rows)
     var notes: List[String]  # per canvas: what a dataset's chart cost ("1,000,000 rows · 2.1 ms on the GPU")
+    var album: Album  # the app's pictures (a Picture names one: mojoui.album)
+    var shown: List[Int]  # per canvas: the album's picture it draws (-1: not a Picture)
 
-    def __init__(out self, args: String, base: Int, canvas_base: Int, hub: Self.H = Self.H()):
+    def __init__(out self, args: String, base: Int, canvas_base: Int, hub: Self.H = Self.H(), album: Album = Album()):
         self.problem = validate(args)
         self.base = base
         self.canvas_base = canvas_base
@@ -804,6 +820,8 @@ struct GenUi[H: Hub = NoData](Movable):
         self.hub = hub.copy()
         self.sources = List[Int]()
         self.notes = List[String]()
+        self.album = album.copy()
+        self.shown = List[Int]()
         if self.problem != "":
             self.json = Json()
             return
@@ -885,6 +903,10 @@ struct GenUi[H: Hub = NoData](Movable):
                 self.problem = "bad prop: a DataGrid needs columns and rows, or a dataset"
             elif kind == CV_CHART and source < 0 and (self.json.get(n, "labels") < 0 or self.json.get(n, "values") < 0):
                 self.problem = "bad prop: a ChartView needs labels and values, or a dataset with group_by"
+            var picture = self.album.find(self.str(n, "name")) if kind == CV_PICTURE else -1
+            if kind == CV_PICTURE and picture < 0:
+                self.problem = "unknown picture " + json_string(self.str(n, "name")) + " (the app holds: " + self.album.names_text() + ")"
+            self.shown.append(picture)
             self.sources.append(source)
             self.notes.append("")
             if kind == CV_CHART and source >= 0:
@@ -1047,6 +1069,9 @@ struct GenUi[H: Hub = NoData](Movable):
             if at < self.json.size(ch):
                 parts.append(self.node(self.json.at(ch, at), state, version, in_card))
             return VStack(parts^, spacing=SPACE_M).align(START).fill()
+        if comp == "Disclosure":
+            var open = self.picks.get(n, 1 if self.json.flag(self.json.get(n, "open")) else 0) == 1
+            return Disclosure(self.str(n, "title"), open, self.msg(n), self.children(n, state, version, in_card) if open else List[View]())
         if comp == "Divider":
             return Divider()
         if comp == "Spacer":
@@ -1130,6 +1155,12 @@ struct GenUi[H: Hub = NoData](Movable):
             return Timeline(stages)
         if comp == "Breadcrumbs":
             return Breadcrumbs(self.texts_of(n, "items"), self.msg(n))
+        if comp == "Picture":
+            var parts = List[View]()
+            parts.append(Canvas(self.canvas(n), v + self.stamp(n)).fill().height(Int(self.num(n, "height", 200))))
+            if self.json.get(n, "caption") >= 0:
+                parts.append(Text(self.str(n, "caption"), style=CAPTION))
+            return VStack(parts^, spacing=SPACE_XS).align(START).fill()
         if comp == "Icon":
             return Icon(self.str(n, "name"), Int(self.num(n, "size", 24)))
         # inputs
@@ -1188,6 +1219,10 @@ struct GenUi[H: Hub = NoData](Movable):
         var comp = self.str(n, "component")
         var path = self.str(n, "bind")
         var value = String("")
+        if comp == "Disclosure":
+            var was = self.picks.get(n, 1 if self.json.flag(self.json.get(n, "open")) else 0)
+            self.picks[n] = 1 - was
+            return UiAction(ACT_LOCAL, "", "", "")
         if comp == "Tabs":
             self.picks[n] = max(0, min(e.number, self.json.size(self.json.get(n, "tabs")) - 1))
             return UiAction(ACT_LOCAL, "", "", "")
@@ -1261,6 +1296,10 @@ struct GenUi[H: Hub = NoData](Movable):
         elif kind == CV_MAP:
             surface.fill(p.card)
             self.map_of(n).draw(surface, font, p)
+        elif kind == CV_PICTURE:
+            surface.fill(p.card)
+            if self.shown[k] >= 0:
+                self.album.draw(self.shown[k], surface, p.card)
         elif kind == CV_GRID:
             if self.sources[k] >= 0:
                 self.hub.draw_grid(self.sources[k], self.grids[k], surface, font, p)

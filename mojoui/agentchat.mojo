@@ -34,6 +34,7 @@ from mojoui.agui import (
 )
 from mojoui.genui import schema, MAX_CONTROLS, MAX_NODES
 from mojoui.datahub import Hub, NoData
+from mojoui.album import Album
 from mojoui.agentui import Screens, MAX_RETRIES
 
 comptime CHAT_PANEL = 0  # fills what it's given (a chat app, a page)
@@ -199,8 +200,28 @@ struct AgentChat[H: Hub = NoData](Movable):
         """The datasets the agent's UI can name (DataGrid / ChartView "dataset": mojoui.datahub): their rows stay here,
         never sent. The agent hears of them in each run's context (names, rows, columns)."""
         self.screens.hub = hub^
-        self.agent.context = ('[{"description":"Datasets the app holds. Show one with render_ui: a DataGrid with \\"dataset\\", or a ChartView with \\"dataset\\", \\"group_by\\" (a text column), \\"value\\" (a number column) and \\"combine\\" (sum, average, count). Never send their rows.","value":'
-                              + json_string(self.screens.hub.describe()) + "}]")
+        self.tell()
+
+    def set_album(mut self, var album: Album):
+        """The pictures the agent's UI can name (genui's Picture, "name": mojoui.album): the agent hears their names and
+        what each shows in each run's context, and never sends pixels."""
+        self.screens.album = album^
+        self.tell()
+
+    def tell(mut self):
+        """The run's context: the datasets and pictures the app holds (each only when there are some)."""
+        var parts = List[String]()
+        var datasets = self.screens.hub.describe()
+        if datasets != "[]":
+            parts.append('{"description":"Datasets the app holds. Show one with render_ui: a DataGrid with \\"dataset\\", or a ChartView with \\"dataset\\", \\"group_by\\" (a text column), \\"value\\" (a number column) and \\"combine\\" (sum, average, count). Never send their rows.","value":'
+                         + json_string(datasets) + "}")
+        if self.screens.album.count() > 0:
+            parts.append('{"description":"Pictures the app holds. Show one with render_ui: a Picture with \\"name\\" (and a \\"caption\\"). No other pictures can be shown.","value":'
+                         + json_string(self.screens.album.describe()) + "}")
+        var out = String("[")
+        for k in range(len(parts)):
+            out += ("," if k > 0 else "") + parts[k]
+        self.agent.context = out + "]"
 
     def feed(mut self, events: List[String]):
         """AG-UI events from an agent in this process (mojoui.agui's LocalAgent), through the same handler a stream's

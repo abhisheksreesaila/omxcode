@@ -11,7 +11,7 @@ it with generic pieces any app can use; `examples/agentchat` (60 lines) only com
 | `mojoui.http` streams | `Request.stream(END)`: each SSE event is its own Event in `update()`, then the end (docs/http.md) |
 | `mojoui.jsonpatch` | `JDoc`, a JSON document you can change, and RFC 6902 JSON Patch on it (atomic) |
 | `mojoui.agui` | `Agent`: runs the agent, reads every event, keeps the conversation, the shared state and the run's steps, frontend tools, `resume()` for interrupts, `context`; `LocalAgent`: an agent in the app's own process |
-| `mojoui.genui` | the catalog (36 components) → JSON Schema, the validated "UI from data" renderer, `partial_ui` (a screen still streaming, drawable) |
+| `mojoui.genui` | the catalog (38 components) → JSON Schema, the validated "UI from data" renderer, `partial_ui` (a screen still streaming, drawable) |
 | `mojoui.partialjson` | `complete()`: JSON still arriving, cut to its last whole value and closed |
 | `mojoui.agentui` | `Screens`: an agent's render_ui calls previewed while they stream, shown or refused (told why), their actions answered |
 | `mojoui.agentchat` | `AgentChat`: the chat any app drops in (panel, sidebar, popup) with everything below |
@@ -94,18 +94,19 @@ An agent builds UI by calling the frontend tool `render_ui` with `{"ui": node}`;
   {"component": "Button", "label": "Submit", "action": "submit", "style": "prominent"}]}}
 ```
 
-- The components (goal 48 M0: 36, each the real mojoui component, one catalog: `mojoui.genui.catalog()`, printed as a
+- The components (goal 48 M0: 36; 38 with Disclosure and Picture, D-4759; each the real mojoui component, one catalog: `mojoui.genui.catalog()`, printed as a
   JSON Schema in docs/genui.schema.json, the tool's parameters; `scripts/genui_schema.py` regenerates it):
-  - layout: Card, VStack, HStack, Grid, Tabs, Divider, Spacer
+  - layout: Card, VStack, HStack, Grid, Tabs, Disclosure (folds; the person opens it), Divider, Spacer
   - words: Text, Paragraph, Markdown, CodeBlock (with Copy), Chip, Alert, Skeleton
-  - data: Table, DataGrid, ChartView (bars, line), Sparkline, KpiView, Meter, ProgressBar, Timeline, MapView, Breadcrumbs, Icon
+  - data: Table, DataGrid, ChartView (bars, line), Sparkline, KpiView, Meter, ProgressBar, Timeline, MapView, Breadcrumbs, Icon, Picture (one the app holds, by name: mojoui.album)
   - inputs: Button, TextField, TextArea, Toggle, Checkbox, Dropdown, Slider, Segmented, Radio, DatePicker
   - asking: Confirm (approve or reject)
 - Refused, with a message to the agent (a tool result `{"error": "refused: …"}`): an unknown component (WebFrame,
   Script, "card"…), a bad prop (unknown, wrong type, out of range, missing, an action that isn't one word, a bind that
   isn't a state path), more than 8 levels, more than 200 components or 32 KB.
 - Text is text: `<script>` an agent writes is shown as words on every host. No component the agent can name runs code,
-  loads a page or draws pixels it brings.
+  loads a page or draws pixels it brings: a Picture is one the app put in its Album (`chat.set_album`), named; the
+  agent hears the names and what each shows in the run's context, and an unknown name, or a link, is refused.
 - `bind` reads and edits the shared state at a JSON pointer; `action` reports a word back: the first one is render_ui's
   tool result (`{"action": "submit"}`), and the edited state goes with the run.
 
@@ -170,8 +171,8 @@ Mid-stream (GTK, 0.35 s, 0.85 s, done): ![](goals/48/m1-stream-gtk-0.png) ![](go
 ## Not for agents
 
 Components an agent can't name, and why (the rest of docs/components.md):
-- Code, pages or pixels it would bring: WebComponent, WebFrame, Canvas, Image, Picture, Clipboard (an agent's UI is data
-  drawn natively; nothing it sends runs, loads or paints).
+- Code, pages or pixels it would bring: WebComponent, WebFrame, Canvas, Image, Clipboard (an agent's UI is data drawn
+  natively; nothing it sends runs, loads or paints). Pictures only by name, from the app's Album.
 - Windows and the app's own frame: MenuBar, Menu, ContextMenu, Dialog, Popover, Toast, Overlay, NavBar, Route, the
   shells, sidebars and toolbars (an agent's UI lives inside the conversation, not around it).
 - App-only parts, bound to an app's engine or files: the workbook (PivotTable, Board, sheet objects, FormulaBar,

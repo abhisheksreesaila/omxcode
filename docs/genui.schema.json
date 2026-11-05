@@ -37,6 +37,9 @@
      "$ref": "#/$defs/components/Spacer"
     },
     {
+     "$ref": "#/$defs/components/Disclosure"
+    },
+    {
      "$ref": "#/$defs/components/Text"
     },
     {
@@ -86,6 +89,9 @@
     },
     {
      "$ref": "#/$defs/components/Breadcrumbs"
+    },
+    {
+     "$ref": "#/$defs/components/Picture"
     },
     {
      "$ref": "#/$defs/components/Icon"
@@ -303,6 +309,36 @@
     },
     "required": [
      "component"
+    ],
+    "additionalProperties": false
+   },
+   "Disclosure": {
+    "type": "object",
+    "description": "a section that folds: its title, and the components inside shown while it's open (the user opens and closes it)",
+    "properties": {
+     "component": {
+      "const": "Disclosure"
+     },
+     "title": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "open": {
+      "type": "boolean",
+      "description": "starts open"
+     },
+     "children": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+       "$ref": "#/$defs/node"
+      },
+      "description": "the components inside, in order"
+     }
+    },
+    "required": [
+     "component",
+     "title"
     ],
     "additionalProperties": false
    },
@@ -935,6 +971,35 @@
     "required": [
      "component",
      "items"
+    ],
+    "additionalProperties": false
+   },
+   "Picture": {
+    "type": "object",
+    "description": "a picture the app holds, by name (see the run's context; never pixels or a link), fitted, with an optional caption",
+    "properties": {
+     "component": {
+      "const": "Picture"
+     },
+     "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,39}$",
+      "description": "a picture the app holds, by name"
+     },
+     "caption": {
+      "type": "string",
+      "maxLength": 200
+     },
+     "height": {
+      "type": "number",
+      "minimum": 80,
+      "maximum": 600,
+      "description": "points"
+     }
+    },
+    "required": [
+     "component",
+     "name"
     ],
     "additionalProperties": false
    },

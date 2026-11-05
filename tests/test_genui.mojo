@@ -9,7 +9,20 @@ from mojoui.genui import GenUi, schema, catalog, sample, ACT_STATE, ACT_ACTION, 
 from mojoui.app import Event
 from mojoui.agui import Agent, Tool
 from mojoui.agentui import Screens, MAX_RETRIES
-from mojoui.view import BUTTON, FIELD, TOGGLE
+from mojoui.view import View, BUTTON, FIELD, TOGGLE, TEXT
+from mojoui.album import Album
+from mojoui.canvas import Surface
+from mojoui.text import Font
+from themes.omxqua import omxqua
+
+comptime TAGUS = "examples/agentchat/pictures/tagus.jpg"
+
+
+def says(v: View, word: String) -> Bool:
+    for ref n in v.nodes:
+        if (n.kind == TEXT or n.kind == BUTTON) and n.text.find(word) >= 0:
+            return True
+    return False
 
 
 def main() raises:
@@ -18,8 +31,10 @@ def main() raises:
     # goal 48 M0: every catalogued component renders from a sample node, and a bad prop on each is refused
     var blank = JDoc.parse('{"form": {}}')
     var specs = catalog()
+    var album = Album()
+    album.add("tagus", TAGUS, "the river at sunset")  # (Picture's sample names it)
     for ref s in specs:
-        var ui = GenUi(sample(s.name), 10_000, 100)
+        var ui = GenUi(sample(s.name), 10_000, 100, album=album)
         assert_equal(ui.problem, "", s.name + "'s sample is refused")
         var v = ui.view(blank, 0)
         assert_true(len(v.nodes) > 0, s.name + " renders nothing")
@@ -37,6 +52,31 @@ def main() raises:
             print("type: " + s.name + "." + p.name)
             break
     print("catalog: ok " + String(len(specs)))
+    # Picture: only a picture the app holds, by name; drawn fitted on its card
+    var unknown = GenUi('{"ui":{"component":"Picture","name":"eiffel"}}', 10_000, 100, album=album)
+    assert_true(unknown.problem.find("unknown picture") >= 0 and unknown.problem.find("tagus") >= 0, unknown.problem)
+    assert_true(GenUi('{"ui":{"component":"Picture","name":"tagus"}}', 10_000, 100).problem.find("none") >= 0, "an app without pictures says so")
+    assert_true(GenUi('{"ui":{"component":"Picture","name":"https://x.test/a.jpg"}}', 10_000, 100, album=album).problem.find("bad prop") >= 0, "a link isn't a name")
+    var pic = GenUi(sample("Picture"), 10_000, 100, album=album)
+    assert_true(says(pic.view(blank, 0), "The Tagus at sunset"), "its caption")
+    var px = List[UInt32](length=300 * 160, fill=0)
+    var surface = Surface(Int(px.unsafe_ptr()), 300, 160, 1.0)
+    var pal = omxqua(False).palette.copy()
+    pic.draw(100, surface, pal, blank, Font())
+    assert_true(surface.get(150, 80) != pal.card and surface.get(150, 80) != 0, "the picture is drawn, not only its backdrop")
+    assert_true(album.describe().find('"name":"tagus"') >= 0 and album.describe().find('"width":1200') >= 0, album.describe())
+    print("picture: ok")
+    # Disclosure: folded unless "open"; the user's tap opens or folds it (the screen's own state: no action for the agent)
+    var fold = GenUi('{"ui":{"component":"Disclosure","title":"Getting around","children":[{"component":"Text","text":"Tram 28"}]}}', 10_000, 100)
+    assert_true(says(fold.view(blank, 0), "Getting around") and not says(fold.view(blank, 0), "Tram 28"), "folded at first")
+    var tap = fold.handle(Event(10_000, "", 0), blank)
+    assert_equal(tap.kind, ACT_LOCAL)
+    assert_true(says(fold.view(blank, 0), "Tram 28"), "opened")
+    _ = fold.handle(Event(10_000, "", 0), blank)
+    assert_true(not says(fold.view(blank, 0), "Tram 28"), "folded again")
+    var opened = GenUi(sample("Disclosure"), 10_000, 100)
+    assert_true(says(opened.view(blank, 0), "Tram 28 from Martim Moniz."), "open: true starts open")
+    print("disclosure: ok")
     if len(argv()) < 2:
         return
     var text: String

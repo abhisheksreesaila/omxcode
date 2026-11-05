@@ -31,7 +31,7 @@ REQUIRED = [
 
 # M4: the example scenarios: (scenario, prompt, words that must be on screen)
 EXAMPLES = [
-    ("trip", "Plan a day in Lisbon", ["Lisbon", "Belém"]),
+    ("trip", "Plan a day in Lisbon", ["Lisbon", "Belém", "Sunset over the Tagus", "Tram 15"]),  # (a Picture by name; a Disclosure, opened)
     ("dashboard", "Show me this quarter's sales", ["Revenue", "Orders"]),
     ("booking", "Book a table for dinner", ["Party size", "Book"]),
     ("approval", "Refund order 1042", ["Approve", "Reject", "1042"]),
@@ -371,6 +371,8 @@ def m4():
         for host in ("gtk", "web"):
             shot = OUT / f"ex-{scenario}-{host}.png"
             steps = f"type:Message={prompt};tap:Send;pause:2500"
+            if scenario == "trip":
+                steps += ";tap:Getting around;pause:500"
             if scenario == "booking":
                 steps += ";type:Name=Ada;slide:0=33;select:0=19:30;radio:0=Terrace;tap:Book;pause:1500"  # (party 1–10: 33% is 4)
             try:

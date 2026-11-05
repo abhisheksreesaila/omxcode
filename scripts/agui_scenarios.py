@@ -76,7 +76,7 @@ RELEASE = """# Release 2.4
 **Faster agents, nicer charts.** Highlights:
 
 - Agent UI streams in as it's written
-- 36 components an agent can use
+- 38 components an agent can use
 - Approve or reject before anything runs
 
 ## Changes
@@ -216,7 +216,13 @@ LISBON = [("Belém Tower", 38.6916, -9.2160, "9:00", "The 16th-century tower on 
           ("Senhora do Monte", 38.7193, -9.1327, "18:30", "The highest viewpoint, for the sunset.")]
 
 
-def trip_ui():
+def holds_picture(inp, name):
+    """Whether the run's context says the app holds the picture `name` (mojoui.album: the agent may show it by name)."""
+    return any(f'"name": "{name}"' in json.dumps(json.loads(c.value)) for c in (inp.context or [])
+               if c.value.strip().startswith("[") and "Pictures" in c.description)
+
+
+def trip_ui(sunset=False):
     return {"component": "VStack", "gap": "m", "children": [
         {"component": "Card", "title": "A day in Lisbon", "subtitle": "Belém to the viewpoints, west to east, about 11 km", "children": [
             {"component": "MapView", "route": [[lat, lon] for _, lat, lon, _, _ in LISBON],
@@ -225,8 +231,11 @@ def trip_ui():
                                                  {"component": "Chip", "text": "tram 15 + 28", "hue": 3}, {"component": "Chip", "text": "€38 a person", "hue": 4}]}]},
         {"component": "Grid", "columns": 2, "children": [
             {"component": "Card", "title": "The plan", "children": [
-                {"component": "Timeline", "steps": [{"label": f"{t}  {name}", "status": "pending", "detail": why} for name, _, _, t, why in LISBON]}]},
+                {"component": "Timeline", "steps": [{"label": f"{t}  {name}", "status": "pending", "detail": why} for name, _, _, t, why in LISBON]},
+                {"component": "Disclosure", "title": "Getting around", "children": [
+                    {"component": "Markdown", "text": "- **Tram 15** from Praça da Figueira to Belém (25 min)\n- **Walk** Belém → LX Factory along the river\n- **Tram 28** from Praça do Comércio up to the castle\n- A **24-hour pass** (€6.80) covers every tram and the funicular"}]}]},
             {"component": "VStack", "gap": "m", "children": [
+                *([{"component": "Card", "children": [{"component": "Picture", "name": "tagus", "caption": "Sunset over the Tagus, the day's last stop", "height": 150}]}] if sunset else []),
                 {"component": "Card", "title": "Weather", "children": [
                     {"component": "HStack", "children": [{"component": "Icon", "name": "sun-medium", "size": 28},
                                                          {"component": "Text", "text": "21° and clear", "style": "headline"}]},
@@ -245,7 +254,7 @@ def scenario_trip(inp, r, words):
     r.add(StepFinishedEvent(step_name="route"), 80)
     text = "Here's a day in Lisbon from Belém to the viewpoints, timed so you reach Senhora do Monte for the sunset."
     mid = r.say(text, pieces=words(text), delay=10)
-    stream_call(r, "render_ui", {"ui": trip_ui()}, mid, pieces=24, delay=15)
+    stream_call(r, "render_ui", {"ui": trip_ui(sunset=holds_picture(inp, "tagus"))}, mid, pieces=24, delay=15)
     r.add(CustomEvent(name="suggestions", value=["Make it rainy-day friendly", "Add a fado dinner", "Fewer hills"]))
 
 

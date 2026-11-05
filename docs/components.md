@@ -173,10 +173,11 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Markdown` | `mojoui/markdown.mojo` | Paragraph, Text, VStack, HStack, Card, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console, consolekit |
 | `Sparkline` | `mojoui/sparkline.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, console, consolekit, widgets |
 | `Disclosure (a section that folds: a quiet header with a chevron, its body while open)` | `mojoui/disclosure.mojo` | Button with an icon, Quiet buttons, VStack | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | agentchat |
-| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `VideoSource (a video file as RGBA frames: open, next, seek, read)` | `mojoui/video.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
 | `Player (a video with play/pause, a frame-accurate scrubber, the time; Space and arrows)` | `mojoui/player.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Quiet buttons, Card | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
 | `TimeSeries (numbers over time, the row nearest a time) and the line chart's time cursor` | `mojoui/timeseries.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
 | `Picture (a still from a file: PNG, JPEG, WebP…, aspect-fit and rounded)` | `mojoui/picture.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
+| `Album (pictures an app holds for its agent's UI, by name: the agent names one, never sends pixels)` | `mojoui/album.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat |
 | `Media cards (videos and pictures on a page, each with its own messages; Board chrome; quiet actions and a work-in-progress line in the title bar)` | `mojoui/mediacard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons, ProgressBar | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
 | `MediaTimeline (an iMovie-style editor: filmstrip clips, playhead, split/trim/delete/undo, data lanes, cut by a sentence, export)` | `mojoui/mediatimeline.mojo` | Canvas, Canvas frames (animation), Canvas: pan, zoom, tap, Canvas: keys (focus on press), Overlay, ContextMenu, Card, Quiet buttons | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | media, omxplorer |
 | `Table cards (more tables on a page: a DataGrid each, Export CSV, close; SQL over the page's tables by name)` | `mojoui/tablecard.mojo` | Board: drag, resize, snap, Canvas, Card, Quiet buttons | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ | omxplorer |
@@ -195,7 +196,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Search results (result rows, source badges, suggestions)` | `mojoui/results.mojo` | Text, Button, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
 | `Meter (meter, usage bar, chart rows)` | `mojoui/meter.mojo` | Text, ProgressBar, Canvas, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | agentchat, console |
 | `Feedback (note, warning, empty state)` | `mojoui/feedback.mojo` | Text, Button, Icon, VStack, HStack, Themes on top (themes/, or yours) | ✅ | ✅ | ❌ | 🔨 | 🔨 | 🔨 | console |
-| `GenUi (UI from an agent's data: 36 catalogued components, validated, drawn natively, previewed while it streams)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, TextArea, Toggle, Checkbox, Segmented, Dropdown, Slider, Radio, DatePicker, Tabs, Grid, ProgressBar, Icon, VStack, HStack, Divider, Spacer | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat |
+| `GenUi (UI from an agent's data: 38 catalogued components, validated, drawn natively, previewed while it streams)` | `mojoui/genui.mojo` | Card, Text, Paragraph, Table, Canvas, Button, TextField, TextArea, Toggle, Checkbox, Segmented, Dropdown, Slider, Radio, DatePicker, Tabs, Grid, ProgressBar, Icon, VStack, HStack, Divider, Spacer | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ | agentchat |
 | `AgentChat (a chat on an AG-UI agent: streaming Markdown, tool stages, approvals, interrupts, suggestions, Stop, Retry, Regenerate; panel, sidebar or popup)` | `mojoui/agentchat.mojo` | Scroll pinned to its end, Card, Text, Button, TextField, Icon, Overlay, Clipboard, Arrive on a spring | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | agentchat |
 | `Rows (a DataGrid's source over plain rows of text)` | `mojoui/rowsource.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat |
 | `SheetHub (datasets an agent's UI names instead of sending rows: MX frame sheets, the GPU)` | `mojoui/sheethub.mojo` | Canvas | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | agentchat |
@@ -218,7 +219,7 @@ A composite is only as far along on a platform as the least-proven piece it's ma
 | `Document jobs (a page drawn and a document read off the UI thread; Python on a job's thread)` | `mojoui/documentjobs.mojo` |  | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | 🔨 | — |
 | `Links (explicit key, time and place links between cards; match counts; the JOIN a key link implies; a selection followed to each linked card's react hook; the link, unlink and links agent tools; the inspector's Links panel: Unlink, time offsets)` | `mojoui/links.mojo` | Button, TextField, Dropdown, Text, VStack | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Inspection tables (places as a table, two inspections compared from their tables, the next flight plan, map marks)` | `mojoui/inspection_tables.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
-| `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | media, omxplorer |
+| `FrameFeed (a video or still decoded on a thread of its own: opens without waiting, the newest seek wins, frames swapped in, the UI woken)` | `mojoui/framefeed.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | agentchat, media, omxplorer |
 | `Table jobs (Insert > Table, a SQL query, Export CSV as jobs that wake the UI; the answer placed as a card)` | `mojoui/tablejobs.mojo` |  | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | omxplorer |
 | `Link drag (a column's header dragged onto another card: the card lights up with its matching columns and counts, a panel confirms; a time column onto a video: a time link with its offset)` | `mojoui/linkdrag.mojo` | Board: tones (dimmed, lifted, held, a drop target), Button, TextField, ProgressBar, Text | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | omxplorer |
 | `Peek (hold a card: unlinked cards dim, linked ones lift on a spring, labelled ghost lines; let go and it settles)` | `mojoui/peek.mojo` | Board: hold a child (350 ms, still), Board: tones (dimmed, lifted, held, a drop target), Canvas: click-through (shows only), Canvas frames (animation), Text | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | omxplorer |
@@ -247,12 +248,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 170 | 9 | 0 |
-| Web | 162 | 9 | 8 |
-| Android | 19 | 54 | 106 |
-| Mac (AppKit) | 0 | 153 | 26 |
-| iPhone (UIKit) | 0 | 124 | 55 |
-| Agent (MCP) | 58 | 42 | 79 |
+| Linux (GTK) | 171 | 9 | 0 |
+| Web | 163 | 9 | 8 |
+| Android | 19 | 55 | 106 |
+| Mac (AppKit) | 0 | 154 | 26 |
+| iPhone (UIKit) | 0 | 125 | 55 |
+| Agent (MCP) | 58 | 43 | 79 |
 
 ## Inside one app, not components yet (the debt)
 
