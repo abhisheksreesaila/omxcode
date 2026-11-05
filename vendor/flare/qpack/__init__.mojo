@@ -19,8 +19,10 @@ that consumes it.
 """
 
 from .codec import (
+    QPACK_DEFAULT_MAX_FIELD_SECTION_SIZE,
     QpackHeader,
     decode_field_section,
+    encode_field_line,
     encode_field_section,
 )
 from .dynamic import (

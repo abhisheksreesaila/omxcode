@@ -3,7 +3,11 @@
 from std.collections import Dict, Optional
 from std.memory import Layout, Pointer, alloc
 from json import loads, Value
+from std.memory import ArcPointer
+
 from .headers import HeaderMap
+from .request_body import BodyPipe, BodyPipeSource
+from .response_stream import ChunkSourceBox
 from .cookie import Cookie, CookieJar, parse_cookie_header
 from .proto.ascii import ascii_unchecked_string
 from .proto.utf8 import utf8_lossy_string
@@ -76,6 +80,13 @@ struct Request(Movable):
     var url: String
     var headers: HeaderMap
     var body: List[UInt8]
+    var trailers: HeaderMap
+    """Trailer fields sent after the body (RFC 9110 sec 6.5); fields that
+    may not appear in a trailer are dropped."""
+    var body_pipe: Optional[ArcPointer[BodyPipe]]
+    """Set when the body is still arriving (HTTP/3 with
+    ``Http3Config.stream_request_bodies``): read it with
+    :meth:`body_stream`; :attr:`body` holds nothing then."""
     var version: String
     var peer: SocketAddr
     """Kernel-reported peer ``SocketAddr``. See struct docstring."""
@@ -131,6 +142,8 @@ struct Request(Movable):
         self.url = url
         self.headers = HeaderMap()
         self.body = body.copy()
+        self.trailers = HeaderMap()
+        self.body_pipe = None
         self.version = version
         self.peer = peer
         self.expose_errors = expose_errors
@@ -192,7 +205,7 @@ struct Request(Movable):
         var bb = body.as_bytes()
         for i in range(len(bb)):
             body_bytes.append(bb[i])
-        var req = Request(method=Method.POST, url=url, body=body_bytes^)
+        var req = Request(method=Method.POST, url=url, body=body_bytes)
         req.headers.set("Content-Type", content_type)
         return req^
 
@@ -408,6 +421,14 @@ struct Request(Movable):
             return default
         return self.query_param(name)
 
+    def body_stream(self) raises -> Optional[ChunkSourceBox]:
+        """The body as a source that yields it as it arrives, or ``None``
+        when the body is already whole in :attr:`body`. Set it as a
+        response's ``body_stream`` to stream the upload back out."""
+        if not self.body_pipe:
+            return None
+        return ChunkSourceBox.create(BodyPipeSource(self.body_pipe.value()))
+
     def text(self) -> String:
         """Decode the request body as a UTF-8 string.
 
@@ -431,7 +452,7 @@ struct Request(Movable):
         Raises:
             Error: If the body is not valid JSON.
         """
-        return loads(self.text())
+        return loads[target="cpu-simdjson"](self.text())
 
     def content_length(self) -> Int:
         """Return the Content-Length header value, or 0 if absent or not
@@ -513,3 +534,23 @@ struct Request(Movable):
             else:
                 lower += chr(Int(c))
         return lower == "close"
+
+
+def _child_request(req: Request, url: String) -> Request:
+    """A copy of ``req`` addressed to ``url``, carrying its path params,
+    for a handler that gets params added to them."""
+    var child = Request(
+        method=req.method,
+        url=url,
+        body=req.body.copy(),
+        version=req.version,
+        peer=req.peer,
+        expose_errors=req.expose_errors,
+    )
+    child.headers = req.headers.copy()
+    child.trailers = req.trailers.copy()
+    child.body_pipe = req.body_pipe
+    if req.has_params():
+        for kv in req._params.value()[].items():
+            child.params_mut()[kv.key] = kv.value
+    return child^

@@ -74,6 +74,7 @@ plumbing) lives here.
 # methods across files, so the file sits over the 1000-line Pass-B cap.
 # Allowlisted in tests/tools/check_reactor_size.sh until then.
 from std.collections import Dict, Optional
+from std.time import perf_counter_ns
 
 from .frame import (
     Frame,
@@ -88,6 +89,7 @@ from .hpack import HpackHeader
 from .state import Connection, Http2Error, Http2ErrorCode, Stream, StreamState
 
 from ._client_types import (
+    BDP_WINDOW_MAX,
     Http2ClientConfig,
     Http2Response,
     _h2_response_to_http,
@@ -96,6 +98,10 @@ from ._client_types import (
 
 
 # ── Http2ClientConnection ────────────────────────────────────────────────
+
+
+def _bdp_ping_payload() -> List[UInt8]:
+    return List[UInt8]("flarebdp".as_bytes())
 
 
 struct Http2ClientConnection(Defaultable, Movable):
@@ -183,6 +189,18 @@ struct Http2ClientConnection(Defaultable, Movable):
     (RFC 9113 §5.1.1: odd integers, monotonically increasing).
     Starts at 1 and increments by 2 on every
     :meth:`next_stream_id` call."""
+    var _bdp_window: Int
+    """Current stream and connection receive window. Grown from PING
+    round-trip samples of the bytes in flight (the bandwidth-delay
+    product), as hyper does, up to :data:`BDP_WINDOW_MAX`."""
+    var _bdp_bytes: Int
+    var _bdp_sent_ns: Int
+    """When the outstanding BDP PING went out; 0 when none is."""
+    var _bdp_next_ns: Int
+    var _bdp_hdr: List[UInt8]
+    """Partial frame header :meth:`receive` is reading."""
+    var _bdp_skip: Int
+    """Payload bytes left of the frame :meth:`receive` is in."""
 
     var _stream_errors: Dict[Int, Int]
     """Stream-id -> peer-supplied RST_STREAM error code
@@ -208,7 +226,14 @@ struct Http2ClientConnection(Defaultable, Movable):
         self.outbox = List[UInt8]()
         self.greeted = False
         self.config = Http2ClientConfig()
+        self.conn.initial_window_size = self.config.initial_window_size
         self._next_sid = 1
+        self._bdp_window = 65535
+        self._bdp_bytes = 0
+        self._bdp_sent_ns = 0
+        self._bdp_next_ns = 0
+        self._bdp_hdr = List[UInt8]()
+        self._bdp_skip = 0
         self._stream_errors = Dict[Int, Int]()
         self._pending_body = Dict[Int, List[UInt8]]()
         self._pending_body_fin = Dict[Int, Bool]()
@@ -287,7 +312,9 @@ struct Http2ClientConnection(Defaultable, Movable):
         # Connection windows start at 65535 (RFC 9113 sec 6.9.2).
         out.conn.send_window = 65535
         out.conn.recv_window = 65535
-        out.conn.max_frame_size = out.config.max_frame_size
+        # We accept up to what we advertise; what we send stays at 16384
+        # until the server's SETTINGS raise it (RFC 9113 sec 4.2).
+        out.conn.local_max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
         # What we advertise is the ceiling for a peer size update
         # (RFC 7541 sec 6.3). The decoder's *current* size stays at the
@@ -358,9 +385,19 @@ struct Http2ClientConnection(Defaultable, Movable):
             self._append_setting(p, 0x8, 1)
         f.payload = p^
         f.header.length = len(f.payload)
-        var bytes = encode_frame(f^)
+        var bytes = encode_frame(f)
         for i in range(len(bytes)):
             self.outbox.append(bytes[i])
+        # The connection window starts at 65535 (RFC 9113 sec 6.9.2);
+        # open it to match a larger configured stream window.
+        self._bdp_window = max(65535, self.config.initial_window_size)
+        if self._bdp_window > 65535:
+            self.outbox.extend(
+                encode_frame(
+                    Connection._window_update_frame(0, self._bdp_window - 65535)
+                )
+            )
+            self.conn.recv_window = self._bdp_window
         self.greeted = True
 
     def _append_setting(self, mut buf: List[UInt8], id: Int, value: Int):
@@ -518,6 +555,88 @@ struct Http2ClientConnection(Defaultable, Movable):
         if window_updated and not self.conn.goaway_sent:
             self._pump_all_pending()
 
+    def receive(mut self, data: Span[UInt8, _]) raises:
+        """:meth:`feed` that also grows the receive windows with the
+        measured bandwidth-delay product: drivers call this."""
+        var i = 0
+        while i < len(data):
+            if self._bdp_skip > 0:
+                var k = min(self._bdp_skip, len(data) - i)
+                i += k
+                self._bdp_skip -= k
+                continue
+            self._bdp_hdr.append(data[i])
+            i += 1
+            if len(self._bdp_hdr) < 9:
+                continue
+            ref h = self._bdp_hdr
+            var n = Int(h[0]) << 16 | Int(h[1]) << 8 | Int(h[2])
+            if h[3] == UInt8(FrameType.DATA().value):
+                self._bdp_on_data(n)
+            elif h[3] == UInt8(FrameType.PING().value) and (h[4] & 1) != 0:
+                self._bdp_on_ack()
+            self._bdp_skip = n
+            self._bdp_hdr.clear()
+        self.feed(data)
+
+    def _bdp_on_data(mut self, n: Int):
+        """Count DATA toward the outstanding sample, or start one with a
+        PING when the window can still grow."""
+        if self._bdp_sent_ns != 0:
+            self._bdp_bytes += n
+            return
+        if (
+            n == 0
+            or self._bdp_window >= BDP_WINDOW_MAX
+            or self.conn.goaway_sent
+        ):
+            return
+        var now = perf_counter_ns()
+        if now < self._bdp_next_ns:
+            return
+        var ping = Frame()
+        ping.header.type = FrameType.PING()
+        ping.payload = _bdp_ping_payload()
+        ping.header.length = 8
+        self.outbox.extend(encode_frame(ping))
+        self._bdp_sent_ns = now
+        self._bdp_bytes = n
+
+    def _bdp_on_ack(mut self) raises:
+        """The PING came back (the client sends no other PING): when the
+        round trip's DATA filled two thirds of the window, grow both
+        windows to twice it."""
+        if self._bdp_sent_ns == 0:
+            return
+        self._bdp_sent_ns = 0
+        if self._bdp_bytes * 3 < self._bdp_window * 2:
+            self._bdp_next_ns = perf_counter_ns() + 1_000_000_000
+            return
+        var w = min(self._bdp_bytes * 2, BDP_WINDOW_MAX)
+        if w <= self._bdp_window:
+            return
+        var delta = w - self._bdp_window
+        var p = List[UInt8]()
+        self._append_setting(p, 0x4, w)
+        var f = Frame()
+        f.header.type = FrameType.SETTINGS()
+        f.header.length = len(p)
+        f.payload = p^
+        self.outbox.extend(encode_frame(f))
+        self.conn.initial_window_size = w
+        var sids = List[Int]()
+        for entry in self.conn.streams.items():
+            sids.append(entry[0])
+        for sid in sids:
+            var st = self.conn.streams.pop(sid)
+            st.recv_window += delta
+            self.conn.streams[sid] = st^
+        self.outbox.extend(
+            encode_frame(Connection._window_update_frame(0, delta))
+        )
+        self.conn.recv_window += delta
+        self._bdp_window = w
+
     # ── Stream id allocation ─────────────────────────────────────────────
 
     def next_stream_id(mut self) -> Int:
@@ -578,7 +697,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                 dp.append(body[pos + i])
             df.payload = dp^
             df.header.length = len(df.payload)
-            var db = encode_frame(df^)
+            var db = encode_frame(df)
             for i in range(len(db)):
                 self.outbox.append(db[i])
             self.conn.send_window -= chunk
@@ -747,7 +866,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             hf.header.flags = FrameFlags(flags)
             hf.payload = enc^
             hf.header.length = len(hf.payload)
-            var hb = encode_frame(hf^)
+            var hb = encode_frame(hf)
             for i in range(len(hb)):
                 self.outbox.append(hb[i])
         else:
@@ -768,7 +887,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                 first_payload.append(enc[i])
             hf.payload = first_payload^
             hf.header.length = len(hf.payload)
-            var hb = encode_frame(hf^)
+            var hb = encode_frame(hf)
             for i in range(len(hb)):
                 self.outbox.append(hb[i])
             # CONTINUATION frames for the rest. Each carries
@@ -790,7 +909,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                     cp.append(enc[pos + i])
                 cf.payload = cp^
                 cf.header.length = len(cf.payload)
-                var cb = encode_frame(cf^)
+                var cb = encode_frame(cf)
                 for i in range(len(cb)):
                     self.outbox.append(cb[i])
                 pos += chunk
@@ -867,7 +986,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
         hf.payload = enc^
         hf.header.length = len(hf.payload)
-        var hb = encode_frame(hf^)
+        var hb = encode_frame(hf)
         for i in range(len(hb)):
             self.outbox.append(hb[i])
         var s = Stream()
@@ -911,7 +1030,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             df.header.flags = FrameFlags(FrameFlags.END_STREAM())
             df.payload = List[UInt8]()
             df.header.length = 0
-            var db = encode_frame(df^)
+            var db = encode_frame(df)
             for i in range(len(db)):
                 self.outbox.append(db[i])
             if sid in self.conn.streams:
@@ -965,7 +1084,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         p.append(UInt8(error_code & 0xFF))
         f.payload = p^
         f.header.length = len(f.payload)
-        var bytes = encode_frame(f^)
+        var bytes = encode_frame(f)
         for i in range(len(bytes)):
             self.outbox.append(bytes[i])
 
@@ -982,13 +1101,13 @@ struct Http2ClientConnection(Defaultable, Movable):
         p.append(UInt8(error_code & 0xFF))
         f.payload = p^
         f.header.length = len(f.payload)
-        var bytes = encode_frame(f^)
+        var bytes = encode_frame(f)
         for i in range(len(bytes)):
             self.outbox.append(bytes[i])
 
     # ── Inbound completion polling ───────────────────────────────────────
 
-    def response_ready(self, sid: Int) raises -> Bool:
+    def response_ready(mut self, sid: Int) raises -> Bool:
         """Return ``True`` when the response on stream ``sid`` is fully
         buffered and ready to be popped via :meth:`take_response`.
 
@@ -1004,10 +1123,14 @@ struct Http2ClientConnection(Defaultable, Movable):
             return True
         if sid not in self.conn.streams:
             return False
-        var s = self.conn.streams[sid].copy()
-        if not s.headers_complete:
-            return False
-        return s.data_complete or s.state.value == StreamState.CLOSED().value
+        # Moved out and back: a copy duplicated the whole buffered body
+        # on every poll, quadratic in the response size.
+        var s = self.conn.streams.pop(sid)
+        var ready = s.headers_complete and (
+            s.data_complete or s.state.value == StreamState.CLOSED().value
+        )
+        self.conn.streams[sid] = s^
+        return ready
 
     def stream_error(self, sid: Int) raises -> Optional[Int]:
         """Return the peer-supplied RST_STREAM error code for ``sid``,
@@ -1116,7 +1239,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
             hf.payload = enc^
             hf.header.length = len(hf.payload)
-            var hb = encode_frame(hf^)
+            var hb = encode_frame(hf)
             for i in range(len(hb)):
                 self.outbox.append(hb[i])
         else:
@@ -1129,7 +1252,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                 first_payload.append(enc[i])
             hf.payload = first_payload^
             hf.header.length = len(hf.payload)
-            var hb = encode_frame(hf^)
+            var hb = encode_frame(hf)
             for i in range(len(hb)):
                 self.outbox.append(hb[i])
             var pos = max_frame
@@ -1149,7 +1272,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                     cp.append(enc[pos + i])
                 cf.payload = cp^
                 cf.header.length = len(cf.payload)
-                var cb = encode_frame(cf^)
+                var cb = encode_frame(cf)
                 for i in range(len(cb)):
                     self.outbox.append(cb[i])
                 pos += chunk

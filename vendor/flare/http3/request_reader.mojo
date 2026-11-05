@@ -301,11 +301,19 @@ def feed_into[
         var payload = buf[header_size:total]
         var headers: List[QpackHeader]
         try:
+            # The limit applies to the *decoded* section as well: a HEADERS
+            # frame under it on the wire can expand to thousands of times
+            # its size (indexed lines, dynamic-table references).
             headers = decode_field_section_dynamic(
-                payload, reader.qpack_table[]
+                payload, reader.qpack_table[], reader.max_field_section_bytes
             )
-        except:
+        except e:
             reader.state = H3_REQUEST_STATE_DONE
+            if "field section above limit" in String(e):
+                handler.on_protocol_error(
+                    String("h3 reader: HEADERS field section above limit")
+                )
+                return total
             # An undecodable field section is a connection error of type
             # QPACK_DECOMPRESSION_FAILED (RFC 9204 sec 2.2.3, 4.5.1.1);
             # the tag lets Http3Connection raise it to the QUIC layer.
@@ -318,11 +326,11 @@ def feed_into[
             return total
         if reader.state == H3_REQUEST_STATE_INIT:
             reader.state = H3_REQUEST_STATE_BODY
-            handler.on_headers(headers^)
+            handler.on_headers(headers)
             return total
         # In BODY -- this is the trailers frame.
         reader.state = H3_REQUEST_STATE_TRAILERS
-        handler.on_trailers(headers^)
+        handler.on_trailers(headers)
         return total
 
     if ftype == H3_FRAME_TYPE_DATA:
@@ -332,11 +340,12 @@ def feed_into[
                 String("h3 reader: DATA outside body window")
             )
             return total
+        # One copy of the payload; a byte-at-a-time append loop here
+        # was the top cost of an h3 upload.
         var data = List[UInt8](capacity=Int(flen))
-        for i in range(header_size, total):
-            data.append(buf[i])
+        data.extend(buf[header_size:total])
         reader.body_bytes += flen
-        handler.on_data(data^)
+        handler.on_data(data)
         return total
 
     # CANCEL_PUSH / SETTINGS / PUSH_PROMISE / GOAWAY / MAX_PUSH_ID

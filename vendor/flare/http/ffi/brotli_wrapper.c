@@ -29,6 +29,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "scratch_cache.h"
+
 /* ── Inline brotli ABI declarations (minimal subset) ─────────────────────── */
 
 /* From <brotli/types.h> — BROTLI_BOOL is a typedef'd int. */
@@ -41,15 +43,25 @@
 #define BROTLI_MODE_TEXT      1
 #define BROTLI_MODE_FONT      2
 
-/* One-shot encoder. Matches the public BrotliEncoderCompress signature. */
-extern int BrotliEncoderCompress(
-    int quality,
-    int lgwin,
-    int mode,
-    size_t input_size,
-    const uint8_t* input_buffer,
-    size_t* encoded_size,
-    uint8_t* encoded_buffer);
+/* Streaming encoder, from <brotli/encode.h>. */
+typedef void* (*brotli_alloc_func)(void* opaque, size_t size);
+typedef void (*brotli_free_func)(void* opaque, void* address);
+typedef struct BrotliEncoderStateStruct BrotliEncoderState;
+#define BROTLI_PARAM_MODE      0
+#define BROTLI_PARAM_QUALITY   1
+#define BROTLI_PARAM_LGWIN     2
+#define BROTLI_PARAM_SIZE_HINT 5
+#define BROTLI_OPERATION_FINISH 2
+extern BrotliEncoderState* BrotliEncoderCreateInstance(
+    brotli_alloc_func alloc_func, brotli_free_func free_func, void* opaque);
+extern void BrotliEncoderDestroyInstance(BrotliEncoderState* state);
+extern int BrotliEncoderSetParameter(
+    BrotliEncoderState* state, int param, uint32_t value);
+extern int BrotliEncoderCompressStream(
+    BrotliEncoderState* state, int op,
+    size_t* available_in, const uint8_t** next_in,
+    size_t* available_out, uint8_t** next_out, size_t* total_out);
+extern int BrotliEncoderIsFinished(BrotliEncoderState* state);
 
 /* From <brotli/decode.h> — decoder one-shot result codes. */
 typedef enum {
@@ -73,20 +85,26 @@ int flare_brotli_compress(const void* src, size_t src_len,
     if (!src || !dst) return -1;
     if (quality < 0) quality = 5;
     if (quality > 11) quality = 11;
-    size_t out_len = dst_cap;
-    int rc = BrotliEncoderCompress(
-        quality,
-        BROTLI_DEFAULT_WINDOW,
-        BROTLI_MODE_GENERIC,
-        src_len,
-        (const uint8_t*)src,
-        &out_len,
-        (uint8_t*)dst);
-    if (rc == BROTLI_FALSE) {
-        if (out_len == 0 || out_len == dst_cap) return -2;
-        return -1;
-    }
-    return (int)out_len;
+    BrotliEncoderState* s =
+        BrotliEncoderCreateInstance(scratch_alloc, scratch_free, NULL);
+    if (!s) return -1;
+    BrotliEncoderSetParameter(s, BROTLI_PARAM_QUALITY, (uint32_t)quality);
+    BrotliEncoderSetParameter(s, BROTLI_PARAM_LGWIN, BROTLI_DEFAULT_WINDOW);
+    BrotliEncoderSetParameter(s, BROTLI_PARAM_MODE, BROTLI_MODE_GENERIC);
+    if (src_len < ((size_t)1 << 30))
+        BrotliEncoderSetParameter(s, BROTLI_PARAM_SIZE_HINT, (uint32_t)src_len);
+    size_t avail_in = src_len;
+    const uint8_t* next_in = (const uint8_t*)src;
+    size_t avail_out = dst_cap;
+    uint8_t* next_out = (uint8_t*)dst;
+    int ok = BrotliEncoderCompressStream(s, BROTLI_OPERATION_FINISH,
+                                         &avail_in, &next_in,
+                                         &avail_out, &next_out, NULL);
+    int done = ok && BrotliEncoderIsFinished(s);
+    BrotliEncoderDestroyInstance(s);
+    if (!ok) return -1;
+    if (!done) return -2;
+    return (int)(dst_cap - avail_out);
 }
 
 int flare_brotli_decompress(const void* src, size_t src_len,

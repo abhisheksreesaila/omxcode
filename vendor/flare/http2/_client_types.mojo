@@ -61,9 +61,15 @@ struct Http2Response(Movable):
 # ── Http2ClientConfig ─────────────────────────────────────────────────────
 
 
-comptime _DEFAULT_CLIENT_INITIAL_WINDOW_SIZE: Int = 65535
-"""RFC 9113 §6.5.2 default. The client's per-stream receive
-window size; used to flow-control inbound response DATA frames."""
+comptime _DEFAULT_CLIENT_INITIAL_WINDOW_SIZE: Int = 4 << 20
+"""The stream and connection receive window a client connection starts
+with; both grow with the measured bandwidth-delay product up to
+:data:`BDP_WINDOW_MAX`. The RFC 9113 §6.5.2 default of 64 KiB held a
+download to 64 KiB per round trip."""
+
+comptime BDP_WINDOW_MAX: Int = 16 << 20
+"""Largest stream and connection receive window the BDP estimator
+grows to."""
 
 comptime _DEFAULT_CLIENT_MAX_FRAME_SIZE: Int = 16384
 """RFC 9113 §6.5.2 default + minimum. Largest frame payload

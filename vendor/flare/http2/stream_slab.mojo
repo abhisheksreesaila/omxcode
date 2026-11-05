@@ -74,7 +74,21 @@ from std.collections import Dict, Optional
 comptime FAST_CAPACITY: Int = 256
 
 
-struct StreamSlab[S: Copyable & Deinitable](Copyable, Defaultable, Sized):
+trait SlabEntry:
+    """What the slab tracks about each entry without scanning the table."""
+
+    def slab_active(self) -> Bool:
+        """Whether the entry counts toward the active total."""
+        ...
+
+    def slab_ready(self) -> Bool:
+        """Whether the entry belongs in the ready list."""
+        ...
+
+
+struct StreamSlab[S: Copyable & Deinitable & SlabEntry](
+    Copyable, Defaultable, Sized
+):
     """Dense small-int stream table parametric over the value
     type ``S``.
 
@@ -98,6 +112,10 @@ struct StreamSlab[S: Copyable & Deinitable](Copyable, Defaultable, Sized):
     var overflow_count: Int
     """Count of entries in :attr:`overflow`. Avoids a
     ``len(self.overflow)`` walk on every ``__len__`` call."""
+    var active: Int
+    """Entries whose ``slab_active()`` holds, kept exact by every write."""
+    var ready: List[Int]
+    """Ids whose ``slab_ready()`` holds, ascending."""
 
     def __init__(out self):
         self.fast = List[Optional[Self.S]]()
@@ -106,6 +124,8 @@ struct StreamSlab[S: Copyable & Deinitable](Copyable, Defaultable, Sized):
         self.fast_count = 0
         self.overflow = Dict[Int, Self.S]()
         self.overflow_count = 0
+        self.active = 0
+        self.ready = List[Int]()
 
     @staticmethod
     @always_inline
@@ -117,20 +137,64 @@ struct StreamSlab[S: Copyable & Deinitable](Copyable, Defaultable, Sized):
             return Bool(self.fast[sid])
         return sid in self.overflow
 
-    def __getitem__(self, sid: Int) raises -> Self.S:
-        """Copy out the value at ``sid``.
+    def __getitem__(self, sid: Int) raises -> ref[self] Self.S:
+        """Read-only view of the value at ``sid``.
 
         Raises if ``sid`` is not present, matching
         ``Dict.__getitem__`` semantics so existing call sites
         that gate on a prior ``sid in slab`` check don't change.
+        Writes go through ``__setitem__`` / ``pop`` so the tracked
+        count and ready list stay exact.
         """
+        # Both tiers are fields of ``self``, and any write needs ``mut
+        # self``, so tying the view to ``self`` is what keeps it valid.
         if Self._fits_fast(sid):
             if self.fast[sid]:
-                return self.fast[sid].value().copy()
+                return Pointer(to=self.fast[sid].value()).unsafe_origin_cast[
+                    origin_of(self)
+                ]()[]
             raise Error("StreamSlab: unknown stream id")
-        return self.overflow[sid].copy()
+        return Pointer(to=self.overflow[sid]).unsafe_origin_cast[
+            origin_of(self)
+        ]()[]
+
+    def _flags(self, sid: Int) -> Tuple[Bool, Bool]:
+        """``(active, ready)`` of the entry at ``sid``, read in place."""
+        if Self._fits_fast(sid):
+            if self.fast[sid]:
+                ref v = self.fast[sid].value()
+                return (v.slab_active(), v.slab_ready())
+            return (False, False)
+        try:
+            if sid in self.overflow:
+                ref v = self.overflow[sid]
+                return (v.slab_active(), v.slab_ready())
+        except:
+            pass
+        return (False, False)
+
+    def _forget(mut self, sid: Int, was_active: Bool, was_ready: Bool):
+        if was_active:
+            self.active -= 1
+        if was_ready:
+            for i in range(len(self.ready)):
+                if self.ready[i] == sid:
+                    _ = self.ready.pop(i)
+                    break
+
+    def _remember(mut self, sid: Int, new: Self.S):
+        if new.slab_active():
+            self.active += 1
+        if new.slab_ready():
+            var i = len(self.ready)
+            while i > 0 and self.ready[i - 1] > sid:
+                i -= 1
+            self.ready.insert(i, sid)
 
     def __setitem__(mut self, sid: Int, var value: Self.S):
+        var prior = self._flags(sid)
+        self._forget(sid, prior[0], prior[1])
+        self._remember(sid, value)
         if Self._fits_fast(sid):
             if not self.fast[sid]:
                 self.fast_count += 1
@@ -149,13 +213,14 @@ struct StreamSlab[S: Copyable & Deinitable](Copyable, Defaultable, Sized):
         """
         if Self._fits_fast(sid):
             if self.fast[sid]:
-                var out = self.fast[sid].value().copy()
-                self.fast[sid] = Optional[Self.S](None)
                 self.fast_count -= 1
-                return out^
+                var v = self.fast[sid].take()
+                self._forget(sid, v.slab_active(), v.slab_ready())
+                return v^
             raise Error("StreamSlab: pop on unknown stream id")
         var out = self.overflow.pop(sid)
         self.overflow_count -= 1
+        self._forget(sid, out.slab_active(), out.slab_ready())
         return out^
 
     def get(self, sid: Int) -> Optional[Self.S]:
@@ -173,6 +238,24 @@ struct StreamSlab[S: Copyable & Deinitable](Copyable, Defaultable, Sized):
 
     def __len__(self) -> Int:
         return self.fast_count + self.overflow_count
+
+    def active_count(self) -> Int:
+        """Entries whose ``slab_active()`` holds."""
+        return self.active
+
+    def ready_ids(self) -> List[Int]:
+        """Ids whose ``slab_ready()`` holds, ascending."""
+        return self.ready.copy()
+
+    def ids(self) -> List[Int]:
+        """Every id present, fast tier ascending, then the overflow tier."""
+        var out = List[Int](capacity=len(self))
+        for sid in range(FAST_CAPACITY):
+            if self.fast[sid]:
+                out.append(sid)
+        for entry in self.overflow.items():
+            out.append(entry.key)
+        return out^
 
     def items(self) -> List[Tuple[Int, Self.S]]:
         """Eager copy of every ``(sid, value)`` pair.

@@ -101,6 +101,7 @@ struct StepResult(Copyable, ImplicitlyCopyable):
     var done: Bool
     var idle_timeout_ms: Int
     var h2c_upgrade: Bool
+    var ws_upgrade: Bool
 
     def __init__(
         out self,
@@ -109,6 +110,7 @@ struct StepResult(Copyable, ImplicitlyCopyable):
         done: Bool = False,
         idle_timeout_ms: Int = -1,
         h2c_upgrade: Bool = False,
+        ws_upgrade: Bool = False,
     ):
         """Construct a StepResult.
 
@@ -121,12 +123,14 @@ struct StepResult(Copyable, ImplicitlyCopyable):
             h2c_upgrade: True when the unified reactor should migrate
                 this fd from ``KIND_H1`` to ``KIND_H2`` after the 101
                 Switching Protocols response has been flushed.
+            ws_upgrade: Likewise, to ``KIND_WS`` after a WebSocket 101.
         """
         self.want_read = want_read
         self.want_write = want_write
         self.done = done
         self.idle_timeout_ms = idle_timeout_ms
         self.h2c_upgrade = h2c_upgrade
+        self.ws_upgrade = ws_upgrade
 
 
 # ── Monotonic clock + small ASCII helpers ─────────────────────────────────────
@@ -424,6 +428,30 @@ def _compute_close_after(req_headers: HeaderMap, req_version: String) -> Bool:
         return True
     if is_http10 and mask & 2 == 0:
         return True
+    return False
+
+
+def _has_header_line(
+    data: List[UInt8], header_end: Int, lower_name: StaticString
+) -> Bool:
+    """Whether a header line in ``data[:header_end]`` starts with
+    ``lower_name`` (which ends in ``:``), compared case-insensitively."""
+    var np = lower_name.unsafe_ptr()
+    var nn = lower_name.byte_length()
+    var i = 1
+    while i + nn <= header_end:
+        if data[i - 1] == 10:
+            var found = True
+            for j in range(nn):
+                var c = data[i + j]
+                if c >= 65 and c <= 90:
+                    c = c + 32
+                if c != np[unsafe_offset=j]:
+                    found = False
+                    break
+            if found:
+                return True
+        i += 1
     return False
 
 

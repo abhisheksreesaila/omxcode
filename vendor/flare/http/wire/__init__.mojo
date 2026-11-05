@@ -71,5 +71,10 @@ import path is the load-bearing piece.
 """
 
 from flare.http.request import Request, Method
+from flare.http.request_body import BodyPipe
 from flare.http.response import Response, Status
-from flare.http.headers import HeaderMap, HeaderInjectionError
+from flare.http.headers import (
+    HeaderMap,
+    HeaderInjectionError,
+    trailer_field_allowed,
+)

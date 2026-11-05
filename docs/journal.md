@@ -1099,3 +1099,37 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - The tightened exemption first missed `max serve` itself: MAX's bin/max execs `python -c "...from max._entrypoints.pipelines import main..." serve`, so no argv is named max. The check matches that entry point too.
 - Found two orphaned `max serve` (Qwen, ~1 GB GPU each) from the two M5 runs stopped at 23:46 and 23:51 (before consoled handled SIGTERM; their MXC_HOME was build/g50/mxc). Stopped their groups. With D-4777 a stopped consoled takes its models with it (checked by hand: load, SIGTERM, none left).
 - Final: M0–M5 PASS; M6 FAIL only on goal 33's M5 (same as unchanged main).
+
+## Goal 52 (2026-11-05): Mojo 1.2, Flare 0.13, the engine beside Flare
+Owner: "you can move to Mojo 1.2 .. not a big change anyway". Worktree ../mojo-ui-g52 (branch goal-52-mojo12 from
+goal-50-native 4352a74), its own env (D-5201). The 2026-10-26 probe (branch probe-mojo12, docs/research/mojo12-flare.md)
+was the map.
+- Env: `pixi install` with `mojo >=1.2,<1.3` → Mojo 1.2.0 (2016d0cd), MAX 26.7.0; ../mojo-ui and ../mojo-ui-g50 still 1.1.
+- Baseline: scripts/sweep.py over ../mojo-ui-g50 on 1.1: 96/101 example builds, 100/137 tests (the rest need data in
+  build/g39, g41, g47, a server, torch or a display bus; dictate and omxplorer's Mac link already fail there).
+- Engine: 834ef9a's archive builds on 1.2 after the accelerator query swap (6 lines; probe of `default_accelerator()` on
+  Linux/Mac/Mac+metal/iOS gives the same answers as 1.1's call). Its test runner said every test "uses Python": the ldd
+  grep matches PyPI's library path (D-5209); with that narrowed, 40/40 engine tests pass.
+- Flare 0.13.1 + json 0.4.2 vendored; the 0.12 stream-body patch applies with offsets (0.13.1 still drops the body);
+  flare#42 (CA bundle) is fixed upstream. test_flare_link built first try.
+- test_https/test_serve/test_process failed bare: they need goal 50's checker's set-up (build/g50, serve_demo, the TLS
+  server). A dlsym-with-CStringSpan suspicion was checked and wrong (probe: same addresses on 1.1 and 1.2).
+- test_serve hung in goal 50's M2 on 1.2. Two causes, both Flare 0.13's new runtime: (1) its multi-worker serve closes
+  the bound listener and every worker binds its own, so a connect right after Server.start was refused; (2) its serving
+  loops run as tasks on Mojo's runtime pool, and the runtime waits for pool tasks at exit (gdb: main in
+  KGEN_CompilerRT_DestroyGlobals → ReleaseCPUDevice). Server.start now returns a `Served` and waits for a worker's answer
+  (D-5206). First version stopped at once: Mojo drops a value after its last use (`var port = server.port`).
+- Engine + Flare in one program (M5): the engine's libc declarations moved behind dlsym (D-5204); then an engine job
+  inside a request hung: the job's `parallelize` waited in AsyncRT synchronize while Flare's serving loops held pool
+  workers (it ran fine before the server started). mojoui.serve now holds Flare's pool leases so its loops go to OS
+  threads (D-5207): 8 concurrent requests, each an engine group-by, all correct.
+- M2's first run: (1) `patch` left vendor/flare/http/client.mojo.orig (the tree diff caught it); (2) test_https got a
+  200 with a body that wasn't JSON: 0.13's client asks for gzip and its zlib shim, built by our script without
+  -ldeflate, never loaded ("undefined symbol: libdeflate_gzip_compress"), so the body stayed compressed (D-5211);
+  (3) goal 50's M0 pins v0.12.0 by name (D-5212). Then PASS: the tag alone sends a streamed POST with no body, the patch
+  sends it.
+- M3 sweep 1 (old objc line): every Mac/iPhone build failed on `String(unsafe_from_utf8_ptr=Pointer[Int8])` (the probe's
+  one Mac line; fixed to UInt8). Elsewhere nothing lost but test_process, which starts build/serve_demo (the 1.1
+  checkout had one from goal 50's checker; M3 now builds it first).
+- omxplorer's Mac cross-link fails on 1.1 too (baseline): its video, document and vision parts need Python and libc
+  functions apple/sdk's stubs don't list. Not this goal's; M6 is left as written.

@@ -60,6 +60,8 @@ comptime H3_SETTINGS_MAX_FIELD_SECTION_SIZE: UInt64 = 0x06
 comptime H3_SETTINGS_QPACK_BLOCKED_STREAMS: UInt64 = 0x07
 comptime H3_SETTINGS_ENABLE_CONNECT_PROTOCOL: UInt64 = 0x08
 """RFC 9220 — Bootstrapping WebSockets with HTTP/3."""
+comptime H3_SETTINGS_H3_DATAGRAM: UInt64 = 0x33
+"""RFC 9297 sec 2.1.1 — HTTP Datagrams; the value is 0 or 1."""
 
 
 @fieldwise_init
@@ -121,13 +123,9 @@ def encode_http3_frame(
     """
     var type_bytes = encode_varint(frame_type)
     var len_bytes = encode_varint(UInt64(len(payload)))
-    out.reserve(len(out) + len(type_bytes) + len(len_bytes) + len(payload))
-    for i in range(len(type_bytes)):
-        out.append(type_bytes[i])
-    for i in range(len(len_bytes)):
-        out.append(len_bytes[i])
-    for i in range(len(payload)):
-        out.append(payload[i])
+    out.extend(Span(type_bytes))
+    out.extend(Span(len_bytes))
+    out.extend(payload)
 
 
 def decode_http3_frame(buf: Span[UInt8, _]) raises -> Http3Frame:

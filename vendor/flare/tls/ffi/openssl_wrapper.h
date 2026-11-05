@@ -188,6 +188,10 @@ int flare_ssl_ctx_enable_session_tickets(flare_ssl_ctx_t ctx, int lifetime_s);
  */
 int flare_ssl_ctx_disable_session_tickets(flare_ssl_ctx_t ctx);
 
+/* Raise the minimum protocol version: TLS1_2_VERSION (0x0303) or
+ * TLS1_3_VERSION (0x0304). Anything else fails; returns 0 on success. */
+int flare_ssl_ctx_set_min_proto(flare_ssl_ctx_t ctx, int version);
+
 /* ── Error ─────────────────────────────────────────────────────────────────── */
 
 const char* flare_ssl_last_error(void);
@@ -221,6 +225,15 @@ flare_ssl_ctx_t flare_ssl_ctx_new_server(
  */
 int flare_ssl_ctx_reload(
     flare_ssl_ctx_t ctx, const char* cert_path, const char* key_path
+);
+
+/* Serve cert_path / key_path to clients whose SNI is ``host`` ("" for the
+ * default, "*.example.com" for one-label wildcards), replacing any entry
+ * for it. Safe while other threads handshake on ctx; a bad pair changes
+ * nothing. 0 on success, -1 on failure. */
+int flare_ssl_ctx_set_cert(
+    flare_ssl_ctx_t ctx, const char* host, const char* cert_path,
+    const char* key_path
 );
 
 /* 1 when the context's certificate and private key match, else 0. */

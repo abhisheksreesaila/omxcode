@@ -16,7 +16,7 @@ defensive pattern is documented at length in
 """
 
 from std.collections import List
-from std.ffi import OwnedDLHandle, c_int, CStringSpan
+from std.ffi import OwnedDLHandle, c_char, c_int, CStringSpan
 
 from ..utils.dylib import find_flare_lib, dl_sym
 
@@ -54,6 +54,62 @@ def _encode_alpn_wire(protos: List[String]) raises -> List[UInt8]:
         for b in p.as_bytes():
             out.append(b)
     return out^
+
+
+# ── Per-packet entry points, resolved once ─────────────────────────────────
+
+comptime _PacketEncryptFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
+comptime _PacketDecryptFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
+comptime _PacketDecrypt1RttFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
+comptime _HeaderProtectFn = def(Int, c_int, Int, Int, Int, Int, Int) thin abi(
+    "C"
+) -> c_int
+
+
+def _sym_addr(lib: OwnedDLHandle, name: String) -> Int:
+    var opt = lib.get_symbol[NoneType](name)
+    if not opt:
+        return 0
+    return Int(opt.value())
+
+
+def _as_fn[FT: TrivialRegisterPassable](addr: Int) -> FT:
+    return Pointer(to=addr).unsafe_bitcast[FT]()[]
+
+
+@fieldwise_init
+struct RustlsQuicPacketFns(ImplicitlyCopyable, Movable):
+    """Addresses of the four per-packet FFI entry points (AEAD seal /
+    open, header protect / unprotect), looked up once per library
+    handle. ``dlsym`` by name on every packet was the top cost of the
+    1-RTT path. A zero address (symbol missing) raises at call time,
+    the same failure :func:`dl_sym` reported before."""
+
+    var packet_encrypt: Int
+    var packet_decrypt: Int
+    var packet_decrypt_1rtt: Int
+    var header_encrypt: Int
+    var header_decrypt: Int
+
+    def __init__(out self, lib: OwnedDLHandle):
+        self.packet_encrypt = _sym_addr(lib, "flare_rustls_quic_packet_encrypt")
+        self.packet_decrypt = _sym_addr(lib, "flare_rustls_quic_packet_decrypt")
+        self.packet_decrypt_1rtt = _sym_addr(
+            lib, "flare_rustls_quic_packet_decrypt_1rtt"
+        )
+        self.header_encrypt = _sym_addr(lib, "flare_rustls_quic_header_encrypt")
+        self.header_decrypt = _sym_addr(lib, "flare_rustls_quic_header_decrypt")
+
+
+def _need(addr: Int, name: StaticString) raises:
+    if addr == 0:
+        raise Error(String("flare: FFI symbol not found: ") + name)
 
 
 # ── Acceptor lifecycle ───────────────────────────────────────────────────────
@@ -234,9 +290,7 @@ def _do_take_crypto(
     4 KiB with a deep chain).
     """
     var cap = 4096
-    var out = List[UInt8](capacity=cap)
-    for _ in range(cap):
-        out.append(UInt8(0))
+    var out = List[UInt8](length=cap, fill=0)
     var written: Int = 0
     var written_ptr = Pointer(to=written)
     var rc = _take_crypto_call(lib, session, level, out, cap, Int(written_ptr))
@@ -247,20 +301,16 @@ def _do_take_crypto(
     # If the buffer was fully consumed, the next chunk may still be
     # waiting (rustls splits at our cap). Loop until the FFI reports
     # written < cap, meaning nothing further is pending at this level.
-    var collected = List[UInt8]()
-    for i in range(written):
-        collected.append(out[i])
+    var collected = List[UInt8](capacity=written)
+    collected.extend(Span[UInt8, _](out)[:written])
     while written == cap:
-        for j in range(cap):
-            out[j] = UInt8(0)
         written = 0
         rc = _take_crypto_call(lib, session, level, out, cap, Int(written_ptr))
         if rc != 0:
             raise Error(
                 String("flare_rustls_quic_take_crypto failed: rc=") + String(rc)
             )
-        for i in range(written):
-            collected.append(out[i])
+        collected.extend(Span[UInt8, _](out)[:written])
     return collected^
 
 
@@ -441,41 +491,33 @@ def _do_is_early_data_accepted(
     return Int(f(session))
 
 
-def _do_packet_encrypt(
-    imm lib: OwnedDLHandle,
+def _packet_encrypt_to(
+    fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
     packet_number: UInt64,
-    imm header: List[UInt8],
-    mut payload: List[UInt8],
-) raises -> List[UInt8]:
-    """``flare_rustls_quic_packet_encrypt``: encrypt ``payload``
-    in place at the given encryption level and return the
-    16-byte authentication tag.
+    header: Span[UInt8, _],
+    payload_addr: Int,
+    payload_len: Int,
+    tag_addr: Int,
+) raises:
+    """``flare_rustls_quic_packet_encrypt``: encrypt the payload at
+    ``payload_addr`` in place and write its 16-byte tag at ``tag_addr``.
 
     ``header`` is the QUIC packet header (used as AEAD AAD per
-    RFC 9001 §5.3). ``payload`` is mutated in place; the caller
-    appends the returned tag to the on-wire packet.
+    RFC 9001 §5.3). Raises if the FFI returns a non-zero code: rustls
+    error text is in :func:`_do_last_error`.
 
-    Raises if the FFI returns a non-zero code: rustls error
-    text is in :func:`_do_last_error`.
+    The FFI also reports the tag length via ``tag_written``, but that
+    out-parameter read-back is unreliable across the opaque FFI call
+    (the optimizer folds it to the initial 0, which would truncate the
+    tag to an empty slice and ship unauthenticated packets). The QUIC
+    AEAD suites (AES-GCM / ChaCha20-Poly1305) always emit a 16-byte tag
+    (RFC 9001 sec 5.3), so callers keep all 16 bytes rather than depend
+    on the readback.
     """
-    var f = dl_sym[
-        def(
-            Int, c_int, UInt64, Int, Int, Int, Int, Int, Int, Int
-        ) thin abi("C") -> c_int
-    ](lib, "flare_rustls_quic_packet_encrypt")
-    var tag = List[UInt8](capacity=16)
-    for _ in range(16):
-        tag.append(UInt8(0))
-    # The FFI also reports the tag length via ``tag_written``, but
-    # that out-parameter read-back is unreliable across the opaque
-    # FFI call (the optimizer folds it to the initial 0, which would
-    # truncate the tag to an empty slice and ship unauthenticated
-    # packets). The QUIC AEAD suites (AES-GCM / ChaCha20-Poly1305)
-    # always emit a 16-byte tag (RFC 9001 sec 5.3), and rustls has
-    # already copied those 16 bytes into ``tag``, so we keep the
-    # full buffer rather than depend on the readback.
+    _need(fns.packet_encrypt, "flare_rustls_quic_packet_encrypt")
+    var f = _as_fn[_PacketEncryptFn](fns.packet_encrypt)
     var written: Int = 0
     var rc = Int(
         f(
@@ -484,10 +526,10 @@ def _do_packet_encrypt(
             packet_number,
             Int(header.unsafe_ptr()),
             len(header),
-            Int(payload.unsafe_ptr()),
-            len(payload),
-            Int(tag.unsafe_ptr()),
-            len(tag),
+            payload_addr,
+            payload_len,
+            tag_addr,
+            16,
             Int(Pointer(to=written)),
         )
     )
@@ -495,11 +537,54 @@ def _do_packet_encrypt(
         raise Error(
             String("flare_rustls_quic_packet_encrypt returned ") + String(rc)
         )
+
+
+def _do_packet_encrypt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    packet_number: UInt64,
+    imm header: List[UInt8],
+    mut payload: List[UInt8],
+) raises -> List[UInt8]:
+    """Encrypt ``payload`` in place at the given encryption level and
+    return the 16-byte authentication tag; the caller appends it to the
+    on-wire packet. See :func:`_packet_encrypt_to`."""
+    var tag = List[UInt8](length=16, fill=0)
+    _packet_encrypt_to(
+        fns,
+        session,
+        level,
+        packet_number,
+        Span(header),
+        Int(payload.unsafe_ptr()),
+        len(payload),
+        Int(tag.unsafe_ptr()),
+    )
     return tag^
 
 
+def _do_packet_seal(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    packet_number: UInt64,
+    header: Span[UInt8, _],
+    mut payload: List[UInt8],
+) raises:
+    """Encrypt ``payload`` in place and append its 16-byte tag to it, so
+    it holds the packet's whole protected payload. On a raise the tail
+    is not a tag and the payload must be discarded."""
+    var n = len(payload)
+    payload.resize(unsafe_uninit_length=n + 16)
+    var base = Int(payload.unsafe_ptr())
+    _packet_encrypt_to(
+        fns, session, level, packet_number, header, base, n, base + n
+    )
+
+
 def _do_packet_decrypt(
-    imm lib: OwnedDLHandle,
+    fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
     packet_number: UInt64,
@@ -514,9 +599,8 @@ def _do_packet_decrypt(
     Raises if rustls rejects the tag (the typical "wrong keys at
     this level" symptom).
     """
-    var f = dl_sym[
-        def(Int, c_int, UInt64, Int, Int, Int, Int, Int) thin abi("C") -> c_int
-    ](lib, "flare_rustls_quic_packet_decrypt")
+    _need(fns.packet_decrypt, "flare_rustls_quic_packet_decrypt")
+    var f = _as_fn[_PacketDecryptFn](fns.packet_decrypt)
     var plaintext_len: Int = 0
     # Keep the pointer in a named variable across the FFI call:
     # a throwaway ``Int(Pointer(to=...))`` temporary lets the
@@ -543,11 +627,60 @@ def _do_packet_decrypt(
     return len_ptr[]
 
 
+def _do_packet_decrypt_1rtt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    key_phase: Int,
+    packet_number: UInt64,
+    imm header: List[UInt8],
+    mut payload: List[UInt8],
+) raises -> Int:
+    """``flare_rustls_quic_packet_decrypt_1rtt``: open a 1-RTT payload
+    in place under the header's key phase bit (RFC 9001 sec 6.3).
+    Returns 1 when the packet carried the peer's next phase and the
+    session's keys rotated (the caller now sends in the new phase), 0
+    otherwise. Raises on any failure; a failed open never rotates."""
+    _need(fns.packet_decrypt_1rtt, "flare_rustls_quic_packet_decrypt_1rtt")
+    var f = _as_fn[_PacketDecrypt1RttFn](fns.packet_decrypt_1rtt)
+    var plaintext_len: Int = 0
+    var len_ptr = Pointer(to=plaintext_len)
+    var rc = Int(
+        f(
+            session,
+            c_int(key_phase),
+            packet_number,
+            Int(header.unsafe_ptr()),
+            len(header),
+            Int(payload.unsafe_ptr()),
+            len(payload),
+            Int(len_ptr),
+        )
+    )
+    if rc < 0:
+        raise Error(
+            String("flare_rustls_quic_packet_decrypt_1rtt returned ")
+            + String(rc)
+        )
+    return rc
+
+
+def _do_key_update(imm lib: OwnedDLHandle, session: Int) raises -> Int:
+    """``flare_rustls_quic_key_update``: rotate to the next 1-RTT key
+    generation (RFC 9001 sec 6.1); returns the new key phase bit."""
+    var f = dl_sym[def(Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_key_update"
+    )
+    var rc = Int(f(session))
+    if rc < 0:
+        raise Error("flare_rustls_quic_key_update: no 1-RTT keys")
+    return rc
+
+
 def _do_header_encrypt(
-    imm lib: OwnedDLHandle,
+    fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
-    imm sample: List[UInt8],
+    sample: Span[UInt8, _],
     first_byte_addr: Int,
     pn_addr: Int,
     pn_len: Int,
@@ -565,9 +698,8 @@ def _do_header_encrypt(
     Int) so the caller can keep the byte cells on the stack and
     let rustls write through.
     """
-    var f = dl_sym[
-        def(Int, c_int, Int, Int, Int, Int, Int) thin abi("C") -> c_int
-    ](lib, "flare_rustls_quic_header_encrypt")
+    _need(fns.header_encrypt, "flare_rustls_quic_header_encrypt")
+    var f = _as_fn[_HeaderProtectFn](fns.header_encrypt)
     var rc = Int(
         f(
             session,
@@ -586,10 +718,10 @@ def _do_header_encrypt(
 
 
 def _do_header_decrypt(
-    imm lib: OwnedDLHandle,
+    fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
-    imm sample: List[UInt8],
+    sample: Span[UInt8, _],
     first_byte_addr: Int,
     pn_addr: Int,
     pn_len: Int,
@@ -599,9 +731,8 @@ def _do_header_decrypt(
     bytes using rustls's ``Keys.remote.header.decrypt_in_place``.
     Same sample contract as :func:`_do_header_encrypt`.
     """
-    var f = dl_sym[
-        def(Int, c_int, Int, Int, Int, Int, Int) thin abi("C") -> c_int
-    ](lib, "flare_rustls_quic_header_decrypt")
+    _need(fns.header_decrypt, "flare_rustls_quic_header_decrypt")
+    var f = _as_fn[_HeaderProtectFn](fns.header_decrypt)
     var rc = Int(
         f(
             session,
@@ -631,7 +762,7 @@ def _do_last_error(imm lib: OwnedDLHandle) raises -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=p.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=p.unsafe_bitcast[c_char]()
             )
         )
     )

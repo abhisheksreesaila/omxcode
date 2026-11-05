@@ -24,6 +24,7 @@ from json import dumps, Value as JsonValue
 from ..runtime._libc_time import libc_nanosleep_ms, monotonic_now_ms
 
 from std.collections import Optional
+from std.sys import stderr
 
 from .handler import Handler, CancelHandler, ViewHandler
 from .cancel import Cancel
@@ -38,6 +39,7 @@ from ._server.config import (
     ServerConfig,
     WsUpgrade,
     _resolve_bufring_handler_env,
+    bufring_gap,
 )
 from .alpn_dispatch import (
     ALPN_HTTP_1_1,
@@ -48,11 +50,21 @@ from .alpn_dispatch import (
 )
 from ..http2.server import Http2Config
 from ..ws.server_h2 import WsH2Handler, WsH2Hooks
+from ..ws.server_h3 import WsH3Handler, WsH3Hooks
 from ..errors import map_handler_error, log_handler_error
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 from ..quic.server import QuicListener, QuicServerConfig
+from ._h3_workers import (
+    _serve_h3_stream,
+    free_h3_control,
+    h3_control_set,
+    new_h3_control,
+    pump_h3_requests,
+    serve_h3,
+)
 from ..tls._server_ffi import ServerCtx
+from ..tls.acceptor import TlsAcceptor, TlsServerConfig, TlsSniCert
 
 
 # ── ShutdownReport ───────────────────────────────────────────────────────────
@@ -66,38 +78,6 @@ from flare.runtime.scheduler import ShutdownReport
 
 
 # ── HttpServer ────────────────────────────────────────────────────────────────
-
-
-def _serve_h3_stream[
-    H: Handler & Copyable
-](mut listener: QuicListener, slot: Int, stream_id: Int, mut handler: H):
-    """Answer one completed HTTP/3 request stream, whatever happens.
-
-    Both h3 dispatch loops used to call take / serve / emit bare, so a
-    request the h3 layer could not build or a handler that raised
-    propagated out of ``serve_http3`` and stopped the server for every
-    connection. Now a request that cannot be built gets a 400, a handler
-    error is mapped the way the h1 and h2 paths map it (``500``, the
-    text only with ``expose_errors``), and a response that cannot be
-    framed ends just that stream.
-    """
-    var resp: Response
-    try:
-        var req = listener.take_http3_request(slot, stream_id)
-        var expose = req.expose_errors
-        var request_id = req.headers.get("x-request-id")
-        try:
-            resp = handler.serve(req^).lower()
-        except e:
-            log_handler_error(request_id, String(e))
-            var mapped = map_handler_error(String(e), expose)
-            resp = Response(status=mapped.status, reason=mapped.reason)
-    except:
-        resp = Response(status=400, reason="Bad Request")
-    try:
-        listener.emit_http3_response(slot, stream_id, resp^)
-    except:
-        pass
 
 
 struct HttpServer(Movable):
@@ -157,6 +137,12 @@ struct HttpServer(Movable):
     var _stopping: Bool
     """Set by ``close()`` to break the reactor loop. Read from the loop
     itself each iteration."""
+    var _h3_ctl: Int
+    """Control cell the HTTP/3 loop (every worker) reads: stop flag and
+    drain window; 0 while no loop runs."""
+    var _h3_drain_ms: Int
+    """Grace window :meth:`drain` asked the HTTP/3 loop for; -1 when no
+    drain was requested. :meth:`serve_http3` reads it each turn."""
     var _http3_listener: Optional[QuicListener]
     """Optional HTTP/3 UDP listener.
 
@@ -178,7 +164,13 @@ struct HttpServer(Movable):
     consumed by :meth:`serve` to spawn a per-connection
     :class:`flare.http._reactor.tls_conn_handle.TlsConnHandle`. Kept
     ``Optional`` so the plaintext server carries no TLS/OpenSSL cost."""
+    var _tls_certs: List[TlsSniCert]
+    """Every certificate pair the TLS context serves (host ``""`` is
+    the default), re-read by :meth:`reload_tls`."""
 
+    var _ws_h3_hooks: Optional[WsH3Hooks]
+    """Boxed RFC 9220 WebSocket-over-h3 sidecar, set by
+    :meth:`attach_ws_h3`; freed when :meth:`serve_http3` returns."""
     var _ws_h2_hooks: Optional[WsH2Hooks]
     """Boxed RFC 8441 WebSocket-over-h2 sidecar, set by
     :meth:`attach_ws_h2` and consumed by :meth:`serve`. ``None`` (the
@@ -209,9 +201,13 @@ struct HttpServer(Movable):
         self._extra_local_addrs = List[SocketAddr]()
         self.config = config^
         self._stopping = False
+        self._h3_drain_ms = -1
+        self._h3_ctl = 0
         self._http3_listener = None
         self._tls_ctx = None
+        self._tls_certs = List[TlsSniCert]()
         self._ws_h2_hooks = None
+        self._ws_h3_hooks = None
 
     def __deinit__(deinit self):
         self._listener.close()
@@ -294,9 +290,8 @@ struct HttpServer(Movable):
         first, because ``SO_REUSEPORT`` only composes with other
         ``SO_REUSEPORT`` sockets and these are plain binds.
 
-        Still single-listener: the WebSocket-over-h2 sidecar and
-        ``serve_streaming``, both of which raise when extras are
-        present rather than leaving an address unserved.
+        Still single-listener: ``serve_streaming``, which raises when
+        extras are present rather than leaving an address unserved.
 
         Args:
             addrs: One or more local addresses to listen on.
@@ -406,7 +401,7 @@ struct HttpServer(Movable):
             NetworkError: For any other OS error.
         """
         var tcp_listener = TcpListener.bind(tcp_addr)
-        var quic_listener = QuicListener.bind(udp_cfg^)
+        var quic_listener = QuicListener.bind(udp_cfg)
         var srv = HttpServer(tcp_listener^, config^)
         srv._http3_listener = quic_listener^
         return srv^
@@ -465,7 +460,44 @@ struct HttpServer(Movable):
             ctx.set_alpn(wire)
         var srv = HttpServer(listener^, config^)
         srv._tls_ctx = Optional[ServerCtx](ctx^)
+        srv._tls_certs.append(TlsSniCert("", cert_file, key_file))
         return srv^
+
+    @staticmethod
+    def bind_tls(
+        addr: SocketAddr,
+        var tls: TlsServerConfig,
+        var config: ServerConfig = ServerConfig(),
+    ) raises -> HttpServer:
+        """Bind an HTTPS server from a full :class:`TlsServerConfig`.
+
+        The context is built by :class:`TlsAcceptor`, so everything the
+        config carries applies to the reactor's handshakes: ALPN, client
+        certificate verification (mTLS), the minimum protocol version and
+        the session-ticket policy (off unless enabled). The cert/key form
+        of :meth:`bind_tls` reached none of these. A misconfiguration
+        raises here, at bind time.
+        """
+        var listener = TcpListener.bind(addr)
+        var certs = tls.sni_certs.copy()
+        certs.append(TlsSniCert("", tls.cert_file, tls.key_file))
+        var ctx = TlsAcceptor(tls^).into_ctx()
+        var srv = HttpServer(listener^, config^)
+        srv._tls_ctx = Optional[ServerCtx](ctx^)
+        srv._tls_certs = certs^
+        return srv^
+
+    def reload_tls(self) raises:
+        """Re-read every certificate and key file the server was bound
+        with and serve them to new handshakes. Safe to call from another
+        thread while :meth:`serve` runs; connections already up keep
+        their certificate. A pair that fails to load raises, and that
+        pair stays as it was."""
+        if not self._tls_ctx:
+            raise Error("HttpServer.reload_tls: not a TLS server")
+        for i in range(len(self._tls_certs)):
+            ref c = self._tls_certs[i]
+            self._tls_ctx.value().set_cert(c.host, c.cert_file, c.key_file)
 
     def has_http3(self) -> Bool:
         """Whether this server has an h3 UDP listener bound."""
@@ -604,39 +636,51 @@ struct HttpServer(Movable):
         """
         if not self.has_http3():
             raise Error("HttpServer.serve_http3: no h3 listener bound")
-        # Inline: pulled from the leaf _server_support helper module
-        # (not flare.quic.server) to avoid loading the QUIC reactor --
-        # which imports flare.http -- at flare.http.server import time.
-        from flare.quic._server_support import (
-            _monotonic_ms as _quic_monotonic_ms,
-        )
-
         var listener = self._http3_listener.take()
+        var ctl = new_h3_control()
+        h3_control_set(ctl, 1, self._h3_drain_ms)
+        if self._stopping:
+            h3_control_set(ctl, 0, 1)
+        self._h3_ctl = ctl
         try:
-            while not listener._stopping:
-                _ = listener.tick(timeout_ms=100)
-                var h_copy = handler.copy()
-                _ = self._pump_listener_h3[H](listener, h_copy^)
-                # Advance any in-flight streaming responses by one chunk
-                # each so their DATA frames ride this loop turn's drain.
-                # A streaming stream stays registered across turns until
-                # its source is exhausted, so the loop keeps pulling.
-                _ = listener.pump_http3_streams(Cancel.never())
-                # Flush H3 responses the handler just queued so they
-                # leave on this loop turn rather than waiting for the
-                # next inbound datagram to trigger a per-slot drain.
-                _ = listener.drain_all_egress()
-                var now_ms = _quic_monotonic_ms()
-                _ = listener.advance_timers(now_ms)
+            serve_h3[H](listener, handler, ctl, self._ws_h3_hooks.copy())
         except e:
+            self._h3_ctl = 0
+            free_h3_control(ctl)
             self._http3_listener = listener^
+            self._drop_ws_h3_hooks()
             raise e^
+        self._h3_ctl = 0
+        free_h3_control(ctl)
         self._http3_listener = listener^
+        self._drop_ws_h3_hooks()
+
+    def attach_ws_h3[W: WsH3Handler](mut self, var ws_handler: W) raises:
+        """Serve WebSocket over HTTP/3 (RFC 9220) through ``ws_handler``:
+        extended CONNECT is advertised, and ``:protocol: websocket``
+        requests become tunnels handed to it while :meth:`serve_http3`'s
+        handler serves everything else. Another ``:protocol`` gets 501.
+        Call after :meth:`bind_with_http3` and before
+        :meth:`serve_http3`; each worker serves its own copy."""
+        from flare.ws.server_h3 import make_ws_h3_hooks
+
+        if not self.has_http3():
+            raise Error("HttpServer.attach_ws_h3: no h3 listener bound")
+        if self._ws_h3_hooks:
+            raise Error("HttpServer.attach_ws_h3: a sidecar is attached")
+        self._http3_listener.value().config.http3.enable_connect_protocol = True
+        self._ws_h3_hooks = make_ws_h3_hooks[W](ws_handler^)
+
+    def _drop_ws_h3_hooks(mut self):
+        if self._ws_h3_hooks:
+            var h = self._ws_h3_hooks.value().copy()
+            h.destroy(h.addr)
+            self._ws_h3_hooks = None
 
     @staticmethod
     def _pump_listener_h3[
         H: Handler & Copyable
-    ](mut listener: QuicListener, var handler: H) raises -> Int:
+    ](mut listener: QuicListener, mut handler: H) raises -> Int:
         """Internal helper: drain every connection's H3
         dispatcher once on a borrowed listener. Mirrors
         :meth:`pump_http3_handler_once` but operates on a borrowed
@@ -644,14 +688,7 @@ struct HttpServer(Movable):
         its own loop variable without bouncing through the
         Optional dance every iteration.
         """
-        var dispatched = 0
-        for slot in range(listener.connection_count()):
-            var ready = listener.take_http3_completed_streams(slot)
-            for j in range(len(ready)):
-                var stream_id = ready[j]
-                _serve_h3_stream[H](listener, slot, stream_id, handler)
-                dispatched += 1
-        return dispatched
+        return pump_h3_requests[H](listener, handler)
 
     def serve(
         mut self,
@@ -670,7 +707,7 @@ struct HttpServer(Movable):
         - ``num_workers == 1`` (default): single-threaded reactor
           (kqueue on macOS, epoll on Linux). Same hot path as the
           ``serve``.
-        - ``num_workers >= 2``: multicore — N ``pthread`` workers
+        - ``num_workers >= 2``: multicore — N workers
           via ``flare.runtime.scheduler.Scheduler``. By default
           each worker binds its own ``SO_REUSEPORT`` listener
           (the kernel hashes new 4-tuples to one of N listeners;
@@ -681,7 +718,10 @@ struct HttpServer(Movable):
           ``EPOLLEXCLUSIVE`` (Linux >= 4.5), which trades
           7-22 % req/s (handler vs static fast path) for a
           uniformly tighter p99.99 σ under sustained load; see
-          ``docs/benchmark.md``.
+          ``docs/benchmark.md``. The exclusive wakeup goes to one
+          waiting worker per event, so connections are not spread
+          evenly: a lightly loaded server may keep landing them on the
+          same worker (see ``Reactor.register_exclusive``).
 
         For Router / middleware / stateful-struct handlers, use the
         Handler-typed overload ``serve[H: Handler & Copyable]``.
@@ -696,81 +736,14 @@ struct HttpServer(Movable):
         Raises:
             NetworkError: On fatal listener errors; per-connection errors
                 close the offending connection silently.
-            Error: On ``pthread_create`` failure when
+            Error: If a worker fails to spawn when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import run_uring_bufring_reactor_loop
-        from ._unified_reactor_impl import run_unified_reactor_loop
         from .handler import FnHandler
-        from flare.runtime.uring_reactor import use_uring_backend
-        from std.sys.info import CompilationTarget
-
-        from ._unified_reactor_impl import run_unified_reactor_loop_multi
 
         var h = FnHandler(handler)
         if num_workers <= 1:
-            self._stopping = False
-            # OPT-IN via FLARE_BUFRING_HANDLER=1 OR
-            # ServerConfig.use_bufring=True; the env var is read
-            # once at startup and OR-equalled into the field so
-            # later dispatch reads only the field.
-            if not self.config.use_bufring:
-                self.config.use_bufring = _resolve_bufring_handler_env()
-            # The bufring path is HTTP/1.1-only by design, and
-            # single-listener-only -- we fall through to the
-            # unified loop when extras are attached so
-            # multi-listener users get the proper accept demux.
-            #
-            # It stays default-off because it cannot stream, NOT
-            # because it is unstable. The old "crashes under
-            # sustained 64-conn wrk2 load" note was stale: the
-            # root cause was the IoUringDriver SQE mmap sized
-            # from the ring_entries OFFSET instead of the COUNT
-            # (one page, 64 slots), which is fixed. Re-probed at
-            # v0.10 -- 64 conns for 30 s and 60 s and 128 conns
-            # for 30 s, ~8M requests total, no crash.
-            #
-            # What does keep it opt-in: the send path buffers a
-            # whole response before submitting, so a streaming
-            # body cannot interleave with recv processing (see
-            # ``_drive_handler_with_submit_send``). Default-on is
-            # not defensible in a release whose headline is
-            # streaming.
-            comptime if CompilationTarget.is_linux():
-                if (
-                    use_uring_backend()
-                    and self.config.use_bufring
-                    and len(self._extra_listener_fds) == 0
-                    and not self._tls_ctx
-                ):
-                    run_uring_bufring_reactor_loop(
-                        self._listener, self.config, h, self._stopping
-                    )
-                    return
-            # Unified reactor loop: every accepted connection is
-            # auto-dispatched to either the HTTP/1.1 ConnHandle or
-            # the HTTP/2 Http2ConnHandle based on whether its first
-            # 24 bytes match the RFC 9113 §3.4 client preface.
-            if len(self._extra_listener_fds) > 0:
-                self._reject_tls_with_extra_listeners()
-                run_unified_reactor_loop_multi(
-                    self._listener,
-                    self._extra_listener_fds,
-                    self.config,
-                    self.config.h2.copy(),
-                    h,
-                    self._stopping,
-                )
-            else:
-                run_unified_reactor_loop(
-                    self._listener,
-                    self.config,
-                    self.config.h2.copy(),
-                    h,
-                    self._stopping,
-                    None,
-                    self._tls_ctx_addr(),
-                )
+            self._serve_one(h)
         else:
             self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
 
@@ -798,60 +771,66 @@ struct HttpServer(Movable):
             NetworkError: On fatal listener errors; per-connection
                 errors close the offending connection silently.
         """
+        self._serve_one(handler)
+
+    def _resolve_bufring(mut self):
+        """Decide once, at startup, whether the io_uring buffer-ring loop
+        serves: when opted into (``FLARE_BUFRING_HANDLER=1`` or
+        ``use_bufring``) and the config needs nothing that loop lacks."""
+        if not self.config.use_bufring:
+            self.config.use_bufring = _resolve_bufring_handler_env()
+        if not self.config.use_bufring:
+            return
+        var gap = bufring_gap(self.config)
+        if not gap and self._ws_h2_hooks:
+            gap = "WebSocket upgrades"
+        if gap:
+            print(
+                "flare: the io_uring buffer ring does not enforce",
+                gap + "; serving with the reactor loop",
+                file=stderr,
+            )
+            self.config.use_bufring = False
+
+    def _serve_one[H: Handler](mut self, ref handler: H) raises:
+        """The single-worker reactor: io_uring buffer ring when opted in,
+        else the unified h1/h2 loop over every bound listener, with the
+        WebSocket-over-h2 sidecar when one is attached."""
         from ._server_reactor_impl import run_uring_bufring_reactor_loop
-        from ._unified_reactor_impl import (
-            run_unified_reactor_loop,
-            run_unified_reactor_loop_multi,
-        )
+        from ._unified_reactor_impl import run_unified_reactor_loop
         from flare.runtime.uring_reactor import use_uring_backend
         from std.sys.info import CompilationTarget
 
         self._stopping = False
-        if not self.config.use_bufring:
-            self.config.use_bufring = _resolve_bufring_handler_env()
+        self._resolve_bufring()
         comptime if CompilationTarget.is_linux():
             if (
                 use_uring_backend()
                 and self.config.use_bufring
                 and len(self._extra_listener_fds) == 0
                 and not self._tls_ctx
+                and not self._ws_h2_hooks
             ):
                 run_uring_bufring_reactor_loop[H](
                     self._listener, self.config, handler, self._stopping
                 )
                 return
-        if len(self._extra_listener_fds) > 0:
-            self._reject_tls_with_extra_listeners()
-            if self._ws_h2_hooks:
-                raise Error(
-                    "HttpServer.serve: a WebSocket-over-h2 sidecar is"
-                    " single-listener; multiple bind addresses are not"
-                    " supported with attach_ws_h2 yet."
-                )
-            run_unified_reactor_loop_multi[H](
+        var hooks = Optional[WsH2Hooks](None)
+        if self._ws_h2_hooks:
+            hooks = Optional[WsH2Hooks](self._ws_h2_hooks.value().copy())
+        try:
+            run_unified_reactor_loop(
                 self._listener,
-                self._extra_listener_fds,
                 self.config,
                 self.config.h2.copy(),
                 handler,
                 self._stopping,
+                hooks,
+                self._tls_ctx_addr(),
+                self._extra_listener_fds,
             )
-        else:
-            var hooks = Optional[WsH2Hooks](None)
-            if self._ws_h2_hooks:
-                hooks = Optional[WsH2Hooks](self._ws_h2_hooks.value().copy())
-            try:
-                run_unified_reactor_loop(
-                    self._listener,
-                    self.config,
-                    self.config.h2.copy(),
-                    handler,
-                    self._stopping,
-                    hooks,
-                    self._tls_ctx_addr(),
-                )
-            finally:
-                self._drop_ws_h2_hooks()
+        finally:
+            self._drop_ws_h2_hooks()
 
     def _drop_ws_h2_hooks(mut self):
         """Release the boxed WS-over-h2 sidecar, if one was attached.
@@ -884,26 +863,6 @@ struct HttpServer(Movable):
                 " address, or use serve(), which serves every listener"
             )
 
-    @always_inline
-    def _reject_tls_with_extra_listeners(self) raises:
-        """Raise when TLS is bound alongside the extra :meth:`bind` listeners.
-
-        ``run_unified_reactor_loop_multi`` takes no TLS context, so the
-        extra-listener path can only serve cleartext. The combination is
-        not reachable today -- :meth:`bind_tls` binds exactly one address
-        and never populates ``_extra_listener_fds`` -- so this guards a
-        future wiring mistake rather than a live one. It fails loudly
-        because the alternative is a silent downgrade to plaintext on a
-        port the caller asked to be HTTPS, which is the shape of the bug
-        this guard was added with.
-        """
-        if self._tls_ctx:
-            raise Error(
-                "HttpServer.serve: TLS is not supported alongside"
-                " extra bind listeners; bind a single TLS listener"
-                " instead"
-            )
-
     def attach_ws_h2[W: WsH2Handler](mut self, var ws_handler: W) raises:
         """Bridge RFC 8441 Extended CONNECT tunnels to ``ws_handler``.
 
@@ -912,10 +871,10 @@ struct HttpServer(Movable):
         websocket`` tunnels to this sidecar. Advertising
         ``SETTINGS_ENABLE_CONNECT_PROTOCOL`` is turned on for you.
 
-        Call before :meth:`serve`. The sidecar is boxed once and shared
-        across every tunnel on the worker, which is why this is
-        single-listener and single-worker: ``serve`` raises if extra
-        listeners are bound or more than one worker is asked for.
+        Call before :meth:`serve`. One instance serves every tunnel on a
+        worker; with several workers each serves its own copy. A
+        single-worker server bound to several addresses cannot carry it
+        (``serve`` raises).
 
         **Changed in v0.11.** This replaces the two-handler
         ``serve(handler, ws_handler)`` overload (removed in v0.12). The old shape made a
@@ -996,7 +955,7 @@ struct HttpServer(Movable):
         max_in_flight: Int = 0,
         retry_after_s: Int = 1,
     ) raises:
-        """Multi-worker streaming reactor (N pthreads over the scheduler).
+        """Multi-worker streaming reactor (N workers over the scheduler).
 
         The :trait:`StreamHandler` twin of ``serve(handler, num_workers)``:
         each worker runs its own copy of ``handler`` on its own reactor +
@@ -1079,7 +1038,7 @@ struct HttpServer(Movable):
           overload; this overload's ``Copyable`` constraint is
           stricter than necessary but the dispatch is still
           correct.
-        - ``num_workers >= 2``: multicore — N ``pthread`` workers
+        - ``num_workers >= 2``: multicore — N workers
           sharing a single listener fd via
           ``flare.runtime.scheduler.Scheduler``.
 
@@ -1093,64 +1052,11 @@ struct HttpServer(Movable):
         Raises:
             NetworkError: On fatal listener errors; per-connection errors
                 close the offending connection silently.
-            Error: On ``pthread_create`` failure when
+            Error: If a worker fails to spawn when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import run_uring_bufring_reactor_loop
-        from ._unified_reactor_impl import run_unified_reactor_loop
-        from flare.runtime.uring_reactor import use_uring_backend
-        from std.sys.info import CompilationTarget
-
-        from ._unified_reactor_impl import run_unified_reactor_loop_multi
-
         if num_workers <= 1:
-            self._stopping = False
-            if not self.config.use_bufring:
-                self.config.use_bufring = _resolve_bufring_handler_env()
-            # io_uring buffer-ring path is OPT-IN via
-            # ``ServerConfig.use_bufring`` (or the
-            # ``FLARE_BUFRING_HANDLER=1`` env var resolved at
-            # startup). HTTP/1.1-only by design and
-            # single-listener-only. See the matching comment in
-            # the plain-def overload above for why it stays
-            # opt-in -- it is the no-streaming limitation, not
-            # the load crash that note used to claim.
-            comptime if CompilationTarget.is_linux():
-                if (
-                    use_uring_backend()
-                    and self.config.use_bufring
-                    and len(self._extra_listener_fds) == 0
-                    and not self._tls_ctx
-                ):
-                    run_uring_bufring_reactor_loop[H](
-                        self._listener, self.config, handler, self._stopping
-                    )
-                    return
-            # Unified reactor loop: every accepted connection is
-            # auto-dispatched to either the HTTP/1.1 ConnHandle
-            # or the HTTP/2 Http2ConnHandle based on the first 24
-            # bytes (RFC 9113 §3.4 preface peek). Same handler
-            # callback is used for both wires.
-            if len(self._extra_listener_fds) > 0:
-                self._reject_tls_with_extra_listeners()
-                run_unified_reactor_loop_multi[H](
-                    self._listener,
-                    self._extra_listener_fds,
-                    self.config,
-                    self.config.h2.copy(),
-                    handler,
-                    self._stopping,
-                )
-            else:
-                run_unified_reactor_loop(
-                    self._listener,
-                    self.config,
-                    self.config.h2.copy(),
-                    handler,
-                    self._stopping,
-                    None,
-                    self._tls_ctx_addr(),
-                )
+            self._serve_one(handler)
         else:
             self._serve_multicore[H](handler^, num_workers, pin_cores)
 
@@ -1176,11 +1082,8 @@ struct HttpServer(Movable):
         self._listener.close()
         self._close_extras()
 
-        # Read FLARE_BUFRING_HANDLER once at startup before
-        # passing the config off to per-worker scheduler threads.
-        # See `_resolve_bufring_handler_env` for the rationale.
-        if not self.config.use_bufring:
-            self.config.use_bufring = _resolve_bufring_handler_env()
+        # Before the config is handed to the worker threads.
+        self._resolve_bufring()
 
         var frontend = HttpFrontend[H](
             handler^,
@@ -1188,13 +1091,14 @@ struct HttpServer(Movable):
             self.config.h2.copy(),
             auto_protocol=True,
             tls_ctx_addr=self._tls_ctx_addr(),
+            ws_hooks=self._ws_h2_hooks.copy(),
         )
         var scheduler = Scheduler[HttpFrontend[H]].start(
             addr=addr,
             frontend=frontend^,
             num_workers=num_workers,
             pin_cores=pin_cores,
-            extra_addrs=extra_addrs^,
+            extra_addrs=extra_addrs,
         )
 
         # Block until the caller flips _stopping via close() or until
@@ -1214,6 +1118,7 @@ struct HttpServer(Movable):
             _ = libc_nanosleep_ms(50)
 
         scheduler.shutdown()
+        self._drop_ws_h2_hooks()
 
     def serve_cancellable[
         CH: CancelHandler
@@ -1398,7 +1303,7 @@ struct HttpServer(Movable):
     ) raises:
         """Multi-worker twin of :meth:`serve_static`.
 
-        Spawns ``num_workers`` pthread workers via
+        Spawns ``num_workers`` workers via
         :class:`flare.runtime.Scheduler` parameterized over
         :class:`flare.http.StaticHttpFrontend`, each running
         ``run_reactor_loop_static_shared``. Per-request work in
@@ -1433,7 +1338,7 @@ struct HttpServer(Movable):
 
         Raises:
             NetworkError: On fatal listener errors.
-            Error: On ``pthread_create`` failure (rare); partially-
+            Error: If a worker fails to spawn (rare); partially-
                 started workers are best-effort joined before raise.
         """
         from ..runtime import Scheduler
@@ -1476,6 +1381,7 @@ struct HttpServer(Movable):
         automatically next iteration).
         """
         self._stopping = True
+        h3_control_set(self._h3_ctl, 0, 1)
         self._listener.close()
 
     def drain(mut self, timeout_ms: Int) raises -> ShutdownReport:
@@ -1521,7 +1427,10 @@ struct HttpServer(Movable):
             flip and short-circuit on their next ``cancel.cancelled()``
             poll once the window has elapsed.
         """
-        # Step 1: close the listener so new accepts fail.
+        # Step 1: close the listener so new accepts fail; an HTTP/3 loop
+        # sends GOAWAY and closes each connection once it is idle.
+        self._h3_drain_ms = timeout_ms if timeout_ms > 0 else 0
+        h3_control_set(self._h3_ctl, 1, self._h3_drain_ms)
         self._listener.close()
 
         # Step 2: hold the reactor open for the grace window. The wait
@@ -1542,6 +1451,7 @@ struct HttpServer(Movable):
         # iteration, where it flips Cancel.SHUTDOWN on every live
         # connection before closing it.
         self._stopping = True
+        h3_control_set(self._h3_ctl, 0, 1)
         return ShutdownReport(
             drained=0, timed_out=0, in_flight_at_deadline=0, crashed=0
         )
@@ -1582,6 +1492,7 @@ from ._server.responses import (
     ok,
     ok_json,
     ok_json_value,
+    ok_json_of,
     redirect,
     unauthorized,
 )

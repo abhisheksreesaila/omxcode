@@ -1,0 +1,67 @@
+--- a/vendor/flare/http/client.mojo
++++ b/vendor/flare/http/client.mojo
+@@ -1814,11 +1814,11 @@
+                 headers.set("cookie", cookie)
+ 
+         if u.is_tls():
+-            return self._stream_tls(u, req.method, headers^)
+-        return self._stream_cleartext(u, req.method, headers^)
++            return self._stream_tls(u, req.method, headers^, req.body)
++        return self._stream_cleartext(u, req.method, headers^, req.body)
+ 
+     def _stream_head_wire(
+-        self, method: String, u: Url, headers: HeaderMap, default_port: Int
++        self, method: String, u: Url, headers: HeaderMap, default_port: Int, body_len: Int = 0
+     ) -> String:
+         """Serialise an HTTP/1.1 request head for a streaming request."""
+         var host_header = u.host
+@@ -1828,15 +1828,18 @@
+         wire += "Host: " + host_header + "\r\n"
+         for i in range(headers.len()):
+             wire += headers._keys[i] + ": " + headers._values[i] + "\r\n"
++        # (mojoui patch, vendor/patches/flare-0.13-stream-body.patch: the request body's length, then the body)
++        if body_len > 0 or method.upper() == "POST" or method.upper() == "PUT" or method.upper() == "PATCH":
++            wire += "Content-Length: " + String(body_len) + "\r\n"
+         # Exclusive connection: the reader owns it until the body ends.
+         wire += "Connection: close\r\n\r\n"
+         return wire^
+ 
+     def _stream_cleartext(
+-        self, u: Url, method: String, var headers: HeaderMap
++        self, u: Url, method: String, var headers: HeaderMap, body: List[UInt8] = List[UInt8]()
+     ) raises -> HttpStreamResponse:
+         """Open a cleartext streaming response, h2c or HTTP/1.1."""
+-        var wire = self._stream_head_wire(method, u, headers, 80)
++        var wire = self._stream_head_wire(method, u, headers, 80, len(body))
+         var proxy = self._resolve_proxy(u)
+         var tcp: TcpStream
+         if proxy.byte_length() > 0:
+@@ -1858,15 +1861,17 @@
+             )
+         var wb = wire.as_bytes()
+         tcp.write_all(Span[UInt8, _](wb))
++        if len(body) > 0:
++            tcp.write_all(Span[UInt8, _](body))
+         var t = _H2Transport.from_tcp(tcp^)
+         var dl = HttpDownload[_H2Transport](t^, method.upper())
+         return self._wrap_h1(dl^, String("http/1.1"))
+ 
+     def _stream_tls(
+-        self, u: Url, method: String, var headers: HeaderMap
++        self, u: Url, method: String, var headers: HeaderMap, body: List[UInt8] = List[UInt8]()
+     ) raises -> HttpStreamResponse:
+         """Open a streaming response over TLS, h2 or HTTP/1.1 by ALPN."""
+-        var wire = self._stream_head_wire(method, u, headers, 443)
++        var wire = self._stream_head_wire(method, u, headers, 443, len(body))
+         var tls_cfg = self._config.copy()
+         tls_cfg.alpn = List[String]()
+         tls_cfg.alpn.append("h2")
+@@ -1892,6 +1897,8 @@
+             )
+         var wb = wire.as_bytes()
+         stream.write_all(Span[UInt8, _](wb))
++        if len(body) > 0:
++            stream.write_all(Span[UInt8, _](body))
+         var t = _H2Transport.from_tls(stream^)
+         var dl = HttpDownload[_H2Transport](t^, method.upper())
+         return self._wrap_h1(dl^, String("http/1.1"))

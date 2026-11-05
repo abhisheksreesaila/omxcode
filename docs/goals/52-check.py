@@ -227,7 +227,7 @@ def main() raises:
         var c = s.read_chunk(65536)
         if len(c) == 0:
             break
-        got += c
+        got += c^
     s.close()
     server.stop()
     print("BODY " + String(unsafe_from_utf8=got))
@@ -315,14 +315,16 @@ def m2():
         problems.append(why)
     g50 = load("goal50", "docs/goals/50-check.py")
     (BUILD / "g50").mkdir(parents=True, exist_ok=True)
-    for name in ("m0", "m1", "m2", "m3"):
+    # (goal 50's M0 names Flare v0.12.0 in its FLARE_VERSION check; its proof, the link test, runs here instead)
+    for test, mark in (("test_flare_link", "link: ok"), ("test_hash", "hash: ok")):
+        why = g50.mojo_test(test, mark)
+        if why:
+            problems.append(why)
+    for name in ("m1", "m2", "m3"):
         ok, msg = getattr(g50, name)()
         if not ok:
             problems.append(f"goal 50's {name.upper()}: {msg[:300]}")
-    why = g50.mojo_test("test_hash", "hash: ok")
-    if why:
-        problems.append(why)
-    return not problems, "; ".join(problems) or f"Flare {FLARE_TAG} + json v0.4.2 vendored and proved against the tag; stream body: {body}; goal 50's M0-M3 (link, HTTPS, serve, process) and test_hash pass on 1.2"
+    return not problems, "; ".join(problems) or f"Flare {FLARE_TAG} + json v0.4.2 vendored and proved against the tag; stream body: {body}; test_flare_link, goal 50's M1-M3 (HTTPS, serve, process) and test_hash pass on 1.2"
 
 
 # M3 ---------------------------------------------------------------------------------------------------------------

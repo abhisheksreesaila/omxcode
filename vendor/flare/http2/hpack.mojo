@@ -34,7 +34,7 @@ inserts evict the oldest entry until ``size <= max_size``.
 from std.collections import Optional
 
 from flare.http.hpack_huffman_simd import huffman_decode_simd
-from flare.http.proto.ascii import ascii_unchecked_string
+from std.memory import unsafe_memcpy
 from flare.http.hpack_huffman import (
     huffman_decode,
     huffman_encode,
@@ -63,10 +63,10 @@ def _octets_to_string(b: Span[UInt8, _]) -> String:
     CR and LF. Consumers that need text must validate or convert it
     themselves.
     """
-    for i in range(len(b)):
-        if b[i] >= 0x80:
-            return String(unsafe_from_utf8=b)
-    return ascii_unchecked_string(b)
+    var s = String(unsafe_uninit_length=len(b))
+    if len(b) > 0:
+        unsafe_memcpy(dest=s.unsafe_ptr_mut(), src=b.unsafe_ptr(), count=len(b))
+    return s^
 
 
 comptime HPACK_BUDGET_ERROR: String = (
@@ -288,6 +288,8 @@ struct HpackDecoder(Copyable, Defaultable):
     (RFC 7541 sec 4.2, RFC 9113 sec 6.5.3), and only that update lowers
     ``max_size``."""
     var allow_huffman: Bool
+    var static: List[HpackHeader]
+    """RFC 7541 Appendix A, built once per decoder rather than per block."""
 
     def __init__(out self):
         self.dynamic = List[HpackHeader]()
@@ -295,6 +297,7 @@ struct HpackDecoder(Copyable, Defaultable):
         self.max_size = 4096
         self.settings_max_size = 4096
         self.allow_huffman = True
+        self.static = _static_table()
 
     def _entry_size(self, h: HpackHeader) -> Int:
         return h.name.byte_length() + h.value.byte_length() + 32
@@ -327,13 +330,11 @@ struct HpackDecoder(Copyable, Defaultable):
         self.dynamic[0] = ins^
         self.dynamic_size += sz
 
-    def _lookup(
-        self, idx: Int, static: Span[HpackHeader, _]
-    ) raises -> HpackHeader:
+    def _lookup(self, idx: Int) raises -> HpackHeader:
         if idx <= 0:
             raise Error("hpack: index 0")
         if idx <= STATIC_TABLE_LEN:
-            return static[idx].copy()
+            return self.static[idx].copy()
         var d = idx - STATIC_TABLE_LEN - 1
         if d >= len(self.dynamic):
             raise Error("hpack: dynamic index out of range")
@@ -382,8 +383,7 @@ struct HpackDecoder(Copyable, Defaultable):
                 dynamic table out of step with the peer, so the caller
                 must end the connection.
         """
-        var static = _static_table()
-        var headers = List[HpackHeader]()
+        var headers = List[HpackHeader](capacity=16)
         var off = 0
         var decoded = 0
         # Fields [0, charged) are already counted against the budget. A
@@ -408,7 +408,7 @@ struct HpackDecoder(Copyable, Defaultable):
                 # 6.1 Indexed Header Field
                 var pair = decode_integer(buf, off, 7)
                 off = pair.offset
-                var h = self._lookup(pair.value, Span[HpackHeader, _](static))
+                var h = self._lookup(pair.value)
                 headers.append(h^)
             elif (b0 & 0x40) != 0:
                 # 6.2.1 Literal w/ Incremental Indexing
@@ -421,9 +421,7 @@ struct HpackDecoder(Copyable, Defaultable):
                     name = p.value.copy()
                     off = p.offset
                 else:
-                    name = self._lookup(
-                        idx, Span[HpackHeader, _](static)
-                    ).name.copy()
+                    name = self._lookup(idx).name.copy()
                 var v = self._decode_string(buf, off)
                 off = v.offset
                 var h = HpackHeader(name, v.value.copy())
@@ -452,9 +450,7 @@ struct HpackDecoder(Copyable, Defaultable):
                     name = p.value.copy()
                     off = p.offset
                 else:
-                    name = self._lookup(
-                        idx, Span[HpackHeader, _](static)
-                    ).name.copy()
+                    name = self._lookup(idx).name.copy()
                 var v = self._decode_string(buf, off)
                 off = v.offset
                 headers.append(HpackHeader(name, v.value.copy()))
@@ -503,9 +499,12 @@ struct HpackEncoder(Copyable, Defaultable):
     """
 
     var allow_huffman: Bool
+    var static: List[HpackHeader]
+    """RFC 7541 Appendix A, built once per encoder rather than per block."""
 
     def __init__(out self):
         self.allow_huffman = False
+        self.static = _static_table()
 
     def _encode_string(self, mut out_buf: List[UInt8], s: String):
         var n = s.byte_length()
@@ -522,8 +521,15 @@ struct HpackEncoder(Copyable, Defaultable):
             out_buf.append(src[unsafe_offset=i])
 
     def encode(self, headers: Span[HpackHeader, _]) -> List[UInt8]:
-        var out = List[UInt8]()
-        var static = _static_table()
+        var need = 0
+        for i in range(len(headers)):
+            need += (
+                headers[i].name.byte_length()
+                + headers[i].value.byte_length()
+                + 4
+            )
+        var out = List[UInt8](capacity=need)
+        ref static = self.static
         for i in range(len(headers)):
             var h = headers[i].copy()
             # Try a static-table lookup for the *name only*. If the

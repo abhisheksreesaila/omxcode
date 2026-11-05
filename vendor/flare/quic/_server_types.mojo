@@ -19,10 +19,12 @@ keep resolving unchanged.
 - :func:`cid_to_hex` -- lowercase-hex CID key for the table.
 """
 
+from std.hash import Hasher
 from std.collections import Dict, List, Optional
 from std.collections.span import Span
 
 from ._server_0rtt import EarlyDataReplayGuard
+from ._server_support import _ack_record
 from .crypto import QuicAead
 from .packet import (
     ConnectionId,
@@ -36,7 +38,10 @@ from .protection import (
     unprotect_handshake_packet,
     unprotect_initial_packet,
 )
+from ._ecn import EcnValidator
+from ._pmtud import PmtuDiscovery
 from .state import (
+    MIN_ACK_DELAY_US,
     CONN_STATE_CLOSED,
     Connection,
     ConnectionEvents,
@@ -49,10 +54,81 @@ from .transport_params import (
     empty_transport_parameters,
     encode_transport_parameters,
 )
+from ..http3.server import Http3Config
 from ..tls.rustls_quic import RustlsQuicConfig
 
 
+# -- Per-stream response egress ---------------------------------------
+
+
+struct _StreamTx(Copyable):
+    """Response bytes queued on one request stream, and how far they
+    have gone out.
+
+    ``buf[pos:]`` is queued but not yet framed; its first byte sits at
+    QUIC stream offset ``off``. The 1-RTT drain frames no further than
+    the peer's MAX_STREAM_DATA / MAX_DATA and the congestion window
+    allow, so the rest waits here for credit (RFC 9000 sec 4.1,
+    RFC 9002 sec 7). ``done`` means nothing more will be queued: the
+    FIN goes out with the last byte.
+
+    A streaming response also keeps its chunk source, boxed in a
+    ``Pool[ChunkSourceBox]`` at ``src_addr`` (0 once freed), and its
+    pre-encoded trailers, queued after the last chunk.
+    """
+
+    var buf: List[UInt8]
+    var pos: Int
+    var off: UInt64
+    var done: Bool
+    var src_addr: Int
+    var trailer_bytes: List[UInt8]
+    var blocked_at: UInt64
+    """Stream limit we last sent STREAM_DATA_BLOCKED for, so a stalled
+    stream reports each limit once."""
+
+    def __init__(out self):
+        self.buf = List[UInt8]()
+        self.pos = 0
+        self.off = 0
+        self.done = False
+        self.src_addr = 0
+        self.trailer_bytes = List[UInt8]()
+        self.blocked_at = UInt64.MAX
+
+    def pending(self) -> Int:
+        """Queued bytes not yet framed."""
+        return len(self.buf) - self.pos
+
+    def consume(mut self, n: Int):
+        """Mark ``n`` queued bytes framed. A buffer whose sent prefix is
+        at least 64 KiB and half of it is compacted, so a long streaming
+        response does not keep everything it ever sent, while a buffered
+        body is not copied at all."""
+        self.pos += n
+        self.off += UInt64(n)
+        if self.pos == len(self.buf):
+            self.buf = List[UInt8]()
+            self.pos = 0
+        elif self.pos >= 65536 and self.pos * 2 >= len(self.buf):
+            var rest = List[UInt8](capacity=len(self.buf) - self.pos)
+            rest.extend(Span[UInt8, _](self.buf)[self.pos :])
+            self.buf = rest^
+            self.pos = 0
+
+
 # -- Configuration carrier ----------------------------------------------
+
+
+@fieldwise_init
+struct Http3Tunnel(Copyable, ImplicitlyCopyable):
+    """An accepted extended CONNECT stream (RFC 9220). It names the
+    connection's serial as well as its slot, so a handle that outlives
+    its connection never reaches the next connection given the slot."""
+
+    var slot: Int
+    var stream_id: Int
+    var serial: UInt64
 
 
 struct QuicServerConfig(Copyable, Defaultable):
@@ -140,6 +216,35 @@ struct QuicServerConfig(Copyable, Defaultable):
     short enough to bound replay. Only consulted when
     :attr:`require_address_validation` is set."""
 
+    var num_workers: Int
+    """Workers sharing this listener's port (``SO_REUSEPORT``); 1 for a
+    single-socket listener. See :mod:`flare.quic._worker_route`."""
+    var worker_id: Int
+    """This listener's index among :attr:`num_workers`."""
+    var cid_route_key: List[UInt8]
+    """Key every worker uses to tell which worker owns a CID; drawn at
+    bind time when empty and shared with the other workers."""
+    var inbox_table: Int
+    """Address of the workers' forwarded-datagram inboxes (0 when
+    single-worker)."""
+    var http3: Http3Config
+    """HTTP/3 settings every accepted connection's driver is built with
+    (field-section limit, QPACK capacity, extended CONNECT, GOAWAY
+    threshold). They were always the defaults."""
+    var key_update_interval: UInt64
+    """1-RTT packets sent under one key before the server starts a key
+    update (RFC 9001 sec 6). Default 2^23, the AES-GCM confidentiality
+    limit of RFC 9001 sec 6.6, which also covers ChaCha20-Poly1305."""
+    var ecn: Bool
+    """Mark 1-RTT packets ECT(0) and treat the client's CE reports as
+    congestion (RFC 9000 sec 13.4, RFC 9002 sec 7.1). Default True; a
+    connection whose counts fail validation, or whose marked packets
+    never come back acknowledged with counts, stops marking (sec
+    13.4.2). Counts of what clients mark are reported either way."""
+    var max_datagram_frame_size: UInt64
+    """``max_datagram_frame_size`` to advertise (RFC 9221 sec 3); 0, the
+    default, leaves DATAGRAM frames off and a peer that sends one is
+    closed with PROTOCOL_VIOLATION."""
     var max_pto_count: Int
     """Consecutive probe timeouts before the connection is given up on.
 
@@ -168,6 +273,14 @@ struct QuicServerConfig(Copyable, Defaultable):
         self.require_address_validation = False
         self.retry_token_max_age_ms = UInt64(10_000)
         self.max_pto_count = 10
+        self.max_datagram_frame_size = UInt64(0)
+        self.ecn = True
+        self.key_update_interval = UInt64(1) << 23
+        self.http3 = Http3Config()
+        self.num_workers = 1
+        self.worker_id = 0
+        self.cid_route_key = List[UInt8]()
+        self.inbox_table = 0
 
 
 # -- Per-connection driver ----------------------------------------------
@@ -289,6 +402,30 @@ struct QuicConnection(Copyable):
     var tx_1rtt_pn: UInt64
     """Next packet number to use on the outbound 1-RTT path."""
 
+    var send_timer_id: UInt64
+    """Armed timer that resumes egress once the pacer allows it (0 when
+    none)."""
+    var ctrl_off: UInt64
+    """Bytes sent so far on the server's HTTP/3 control stream."""
+    var ctrl_tx: List[UInt8]
+    """Control-stream frames (GOAWAY) queued for the next 1-RTT flight."""
+    var issued_cids: Dict[UInt64, CidKey]
+    """Connection IDs we issued that are still routable, as table keys
+    by sequence number (0 is the handshake CID). All are unrouted when
+    the slot is reclaimed; one used to stay mapped to the reused slot."""
+    var peer_cid_limit: UInt64
+    """The peer's ``active_connection_id_limit`` (RFC 9000 sec 18.2)."""
+    var cid_replenish: Int
+    """Connection IDs to issue in the next 1-RTT flight, replacing ones
+    the peer retired."""
+
+    var key_phase: Bool
+    """1-RTT key phase bit we send (RFC 9001 sec 6): flips on every key
+    update, ours or the peer's."""
+    var phase_first_pn: UInt64
+    """First packet number sent in the current key phase. A new update
+    waits until a packet from this phase is acknowledged (sec 6.1)."""
+
     var amp_rx: Int
     """Bytes received from the peer's address while it is unvalidated."""
     var amp_tx: Int
@@ -318,6 +455,22 @@ struct QuicConnection(Copyable):
     is granted from this, not from what was received."""
     var fc_closed_bidi: UInt64
     """Client request streams answered and closed."""
+    var fc_tx_sent: UInt64
+    """New stream bytes sent, summed over streams; bounded by the
+    peer's MAX_DATA (``conn.max_data_send``). Retransmits do not count."""
+    var fc_blocked_at: UInt64
+    """MAX_DATA we last sent DATA_BLOCKED for."""
+    var fc_stream_window: UInt64
+    """Receive window granted per stream beyond what has arrived.
+    Doubles, up to the cap, whenever grants come faster than twice the
+    smoothed RTT (receive-window auto-tuning, as quiche does)."""
+    var fc_last_grant_ms: UInt64
+    """Time of the last MAX_STREAM_DATA grant, for the auto-tuning."""
+    var fc_grants: List[Int]
+    """Streams whose receive limit was raised since the last 1-RTT
+    flight; each gets a MAX_STREAM_DATA in the next one."""
+    var h3_tx: Dict[Int, _StreamTx]
+    """Response egress per request stream."""
 
     var rx_largest: List[UInt64]
     """Largest packet number received per packet-number space: [0]
@@ -325,6 +478,14 @@ struct QuicConnection(Copyable):
     RFC 9000 sec 12.3). Truncated packet numbers are expanded against
     their own space's largest. There was one counter for all three, so
     a space's numbers were decoded against another space's largest."""
+
+    var rx_lh_ranges: List[List[UInt64]]
+    """Received packet numbers in the Initial [0] and Handshake [1]
+    spaces, as ACK ranges, so each level is acknowledged in its own
+    packets (RFC 9000 sec 13.1, 17.2)."""
+    var lh_ack_pending: List[Bool]
+    """Per long-header space: an ack-eliciting packet arrived there and
+    has not been acknowledged yet."""
 
     var initial_keys_discarded: Bool
     """Set once a Handshake packet has decrypted: from then on the
@@ -357,6 +518,33 @@ struct QuicConnection(Copyable):
     """Whether an ack-eliciting packet was sent since the last packet
     that was received and processed. Only the first such send restarts
     the idle timer (RFC 9000 sec 10.1)."""
+    var peer_max_datagram: UInt64
+    """The client's ``max_datagram_frame_size`` (RFC 9221 sec 3); 0 until
+    its transport parameters were read, or when it takes no DATAGRAMs."""
+    var dg_rx: List[List[UInt8]]
+    """DATAGRAM payloads received and not yet taken."""
+    var dg_tx: List[List[UInt8]]
+    """DATAGRAM payloads queued for the next drain."""
+    var dg_rx_bytes: Int
+    var dg_tx_bytes: Int
+    var stop_tx: List[Int]
+    """Streams answered before the client finished its request: each is
+    sent STOP_SENDING (H3_NO_ERROR) so the rest of the upload stops
+    (RFC 9114 sec 4.1.2)."""
+    var ecn_rx: List[UInt64]
+    """ECT(0), ECT(1) and CE counts of 1-RTT packets received, reported
+    in ACK_ECN frames (RFC 9000 sec 13.4.1)."""
+    var ecn_tx: EcnValidator
+    var ecn_mark: Bool
+    """1-RTT packets go out marked ECT(0) (``QuicServerConfig.ecn``),
+    until validation fails on this path."""
+    var pmtu: PmtuDiscovery
+    """Datagram size validated on this path (RFC 9000 sec 14.3)."""
+    var serial: UInt64
+    """Distinguishes this connection from others given the same slot."""
+    var fc_tunnel_credited: Dict[Int, UInt64]
+    """Per tunnel stream, the bytes already counted as consumed when the
+    application took them (:meth:`QuicListener.take_http3_tunnel`)."""
 
     def __init__(
         out self,
@@ -379,6 +567,18 @@ struct QuicConnection(Copyable):
         self.pto_timer_id = UInt64(0)
         self.peer_idle_ms = UInt64(0)
         self.idle_sent_since_rx = False
+        self.peer_max_datagram = 0
+        self.dg_rx = List[List[UInt8]]()
+        self.dg_tx = List[List[UInt8]]()
+        self.dg_rx_bytes = 0
+        self.dg_tx_bytes = 0
+        self.serial = 0
+        self.pmtu = PmtuDiscovery()
+        self.stop_tx = List[Int]()
+        self.ecn_rx = List[UInt64](length=3, fill=0)
+        self.ecn_tx = EcnValidator()
+        self.ecn_mark = False
+        self.fc_tunnel_credited = Dict[Int, UInt64]()
         self.closing = False
         self.closing_rx = 0
         self.close_frame = List[UInt8]()
@@ -392,6 +592,14 @@ struct QuicConnection(Copyable):
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.send_timer_id = 0
+        self.ctrl_off = 0
+        self.ctrl_tx = List[UInt8]()
+        self.issued_cids = Dict[UInt64, CidKey]()
+        self.peer_cid_limit = UInt64(2)
+        self.cid_replenish = 0
+        self.key_phase = False
+        self.phase_first_pn = UInt64(0)
         self.amp_rx = 0
         self.amp_tx = 0
         self.addr_validated = False
@@ -401,7 +609,19 @@ struct QuicConnection(Copyable):
         self.fc_received = 0
         self.fc_consumed = 0
         self.fc_closed_bidi = 0
+        self.fc_tx_sent = 0
+        self.fc_blocked_at = UInt64.MAX
+        self.fc_stream_window = initial_max_data
+        self.fc_last_grant_ms = 0
+        self.fc_grants = List[Int]()
+        self.h3_tx = Dict[Int, _StreamTx]()
+        # Nothing may be sent until the client's transport parameters
+        # are known; _client_params_ok raises both limits.
+        self.conn.max_data_send = 0
+        self.conn.peer_initial_max_stream_data = 0
         self.rx_largest = List[UInt64](length=3, fill=UInt64(0))
+        self.rx_lh_ranges = List[List[UInt64]](length=2, fill=List[UInt64]())
+        self.lh_ack_pending = List[Bool](length=2, fill=False)
         self.initial_keys_discarded = False
         self.early_guard = EarlyDataReplayGuard()
 
@@ -582,8 +802,11 @@ struct QuicConnection(Copyable):
 
     def _note_received(mut self, space: Int, pn: UInt64):
         """Record ``pn`` as received in ``space`` (see
-        :attr:`rx_largest`); ``conn.largest_received_packet`` stays
-        the largest across all spaces."""
+        :attr:`rx_largest`, and the long-header ACK ranges);
+        ``conn.largest_received_packet`` stays the largest across all
+        spaces."""
+        if space < 2:
+            _ack_record(self.rx_lh_ranges[space], pn)
         if pn > self.rx_largest[space]:
             self.rx_largest[space] = pn
         if pn > self.conn.largest_received_packet:
@@ -615,51 +838,67 @@ struct QuicConnection(Copyable):
 # -- Connection ID table ------------------------------------------------
 
 
+@fieldwise_init
+struct CidKey(Copyable, Equatable, Hashable, ImplicitlyCopyable):
+    """A Connection ID (at most 20 bytes, RFC 9000 sec 17.2) as a
+    fixed-size key: the bytes packed into three words, with the length
+    in the top byte of the last."""
+
+    var a: UInt64
+    var b: UInt64
+    var c: UInt64
+
+    def __init__(out self, cid: ConnectionId):
+        self = CidKey.of(Span[UInt8, _](cid.bytes))
+
+    @staticmethod
+    def of(bytes: Span[UInt8, _]) -> CidKey:
+        var w = (UInt64(0), UInt64(0), UInt64(0))
+        var n = min(len(bytes), 20)
+        for i in range(n):
+            var v = UInt64(bytes[i]) << UInt64((i & 7) * 8)
+            if i < 8:
+                w[0] |= v
+            elif i < 16:
+                w[1] |= v
+            else:
+                w[2] |= v
+        return CidKey(w[0], w[1], w[2] | (UInt64(n) << 56))
+
+    def __eq__(self, other: Self) -> Bool:
+        return self.a == other.a and self.b == other.b and self.c == other.c
+
+    def __ne__(self, other: Self) -> Bool:
+        return not self == other
+
+    def __hash__[H: Hasher](self, mut hasher: H):
+        self.a.__hash__(hasher)
+        self.b.__hash__(hasher)
+        self.c.__hash__(hasher)
+
+
 struct ConnectionIdTable(Copyable, Defaultable, Sized):
-    """Per-listener routing table from Connection ID to connection.
+    """Per-listener routing table from Connection ID to connection
+    slot (RFC 9000 sec 5.1). A connection can have up to
+    ``active_connection_id_limit`` CIDs at once, each pointing at the
+    same slot."""
 
-    QUIC routes inbound datagrams to the right connection via
-    the Destination Connection ID in the packet header (RFC 9000
-    §5.1). The table maps each issued CID (server-side: the
-    local_cid from :class:`QuicConnection`; client-side: the
-    Source Connection IDs the server sent in NEW_CONNECTION_ID
-    frames) to the connection slot it belongs to.
-
-    The carrier uses :class:`Dict[String, Int]` where the key is
-    the lowercase-hex CID and the value is the slot index into
-    the listener's connection slab.
-    """
-
-    var cid_to_slot: Dict[String, Int]
-    """CID (lowercase-hex of CID bytes) -> slot index. Empty
-    string is invalid; a connection can have up to
-    `active_connection_id_limit` (RFC 9000 §18.2) CIDs at once,
-    each pointing at the same slot."""
+    var cid_to_slot: Dict[CidKey, Int]
 
     def __init__(out self):
-        self.cid_to_slot = Dict[String, Int]()
+        self.cid_to_slot = Dict[CidKey, Int]()
 
-    def register(mut self, cid_hex: String, slot: Int):
-        """Add a CID -> slot mapping. Idempotent: overwriting
-        an existing mapping is allowed (the server may reissue
-        CIDs after migration)."""
-        self.cid_to_slot[cid_hex] = slot
+    def register(mut self, cid: CidKey, slot: Int):
+        """Add (or overwrite) a CID -> slot mapping."""
+        self.cid_to_slot[cid] = slot
 
-    def lookup(self, cid_hex: String) raises -> Int:
-        """Look up the slot for a CID. Returns -1 if absent.
-        The reactor uses -1 to gate the Initial packet path
-        (no slot -> potentially new connection -> run the
-        accept-handshake state machine)."""
-        if cid_hex in self.cid_to_slot:
-            return self.cid_to_slot[cid_hex]
-        return -1
+    def lookup(self, cid: CidKey) -> Int:
+        """The slot for ``cid``, or -1."""
+        return self.cid_to_slot.get(cid, -1)
 
-    def retire(mut self, cid_hex: String) raises:
-        """Drop a CID -> slot mapping. Called when the connection
-        retires a CID via RETIRE_CONNECTION_ID (RFC 9000 §19.16)
-        or when the connection itself closes."""
-        if cid_hex in self.cid_to_slot:
-            _ = self.cid_to_slot.pop(cid_hex)
+    def retire(mut self, cid: CidKey):
+        """Drop a CID -> slot mapping, if present."""
+        _ = self.cid_to_slot.pop(cid, -1)
 
     def __len__(self) -> Int:
         return len(self.cid_to_slot)
@@ -733,4 +972,8 @@ def _encode_server_transport_params(
     tp.initial_max_streams_bidi = Optional(config.initial_max_streams_bidi)
     tp.initial_max_streams_uni = Optional(config.initial_max_streams_uni)
     tp.active_connection_id_limit = Optional(UInt64(2))
+    tp.max_udp_payload_size = Optional(config.max_udp_payload_size)
+    tp.min_ack_delay = Optional(MIN_ACK_DELAY_US)
+    if config.max_datagram_frame_size > 0:
+        tp.max_datagram_frame_size = Optional(config.max_datagram_frame_size)
     return encode_transport_parameters(tp)

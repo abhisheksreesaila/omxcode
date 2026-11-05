@@ -50,6 +50,7 @@ from std.ffi import c_int, OwnedDLHandle
 from std.memory import Pointer
 
 from ..net import _find_flare_lib
+from ..net.cstr import EMPTY_PASS, EMPTY_REJECT, c_str_addr
 from ..utils.dylib import dl_sym
 
 
@@ -62,12 +63,11 @@ from ..utils.dylib import dl_sym
 # ``get_function`` and the call inside the borrow, so the dylib
 # stays mapped across the entire FFI surface.
 #
-# Path arguments are taken as owned ``var`` and NUL-terminated in place
-# with ``as_c_string_slice`` before the C call: a path materialized from
-# a StringSlice is not NUL-terminated under ``unsafe_ptr``, so OpenSSL's
-# file open would read past it (same defect as the SNI host fixed in
-# ``flare/tls/stream.mojo`` ``_do_ssl_connect``). The owned arg outlives
-# the call; the slice views its now-terminated buffer.
+# Path arguments are taken as owned ``var`` and handed to C through
+# ``c_str_addr`` (``flare/net/cstr.mojo``): it refuses an empty path or one
+# holding a NUL, and NUL-terminates the rest in place (a path materialized
+# from a StringSlice is not NUL-terminated under ``unsafe_ptr``). The owned
+# arg outlives the call.
 
 
 def _do_ssl_ctx_new_server(
@@ -76,9 +76,9 @@ def _do_ssl_ctx_new_server(
     var f = dl_sym[def(Int, Int) thin abi("C") -> Int](
         lib, "flare_ssl_ctx_new_server"
     )
-    var cert_c = cert_path.as_c_string_span()
-    var key_c = key_path.as_c_string_span()
-    var addr = f(Int(cert_c.ptr()), Int(key_c.ptr()))
+    var cert_c = c_str_addr(cert_path, EMPTY_REJECT, "TLS certificate path")
+    var key_c = c_str_addr(key_path, EMPTY_REJECT, "TLS key path")
+    var addr = f(cert_c, key_c)
     # The C-string pointers escape as raw Int, so the compiler does not
     # see that the owned path buffers must stay live across the call.
     # as_c_string_slice may reallocate (a slice-derived, exact-length
@@ -107,14 +107,35 @@ def _do_ssl_ctx_reload(
     var f = dl_sym[def(Int, Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_ctx_reload"
     )
-    var cert_c = cert_path.as_c_string_span()
-    var key_c = key_path.as_c_string_span()
-    var rc = Int(f(addr, Int(cert_c.ptr()), Int(key_c.ptr())))
+    var cert_c = c_str_addr(cert_path, EMPTY_REJECT, "TLS certificate path")
+    var key_c = c_str_addr(key_path, EMPTY_REJECT, "TLS key path")
+    var rc = Int(f(addr, cert_c, key_c))
     # Anchor the owned buffers past the call (see _do_ssl_ctx_new_server).
     _ = cert_path^
     _ = key_path^
     if rc != 0:
         raise Error("flare_ssl_ctx_reload failed")
+
+
+def _do_ssl_ctx_set_cert(
+    imm lib: OwnedDLHandle,
+    addr: Int,
+    var host: String,
+    var cert_path: String,
+    var key_path: String,
+) raises:
+    var f = dl_sym[def(Int, Int, Int, Int) thin abi("C") -> c_int](
+        lib, "flare_ssl_ctx_set_cert"
+    )
+    var host_c = c_str_addr(host, EMPTY_PASS, "TLS certificate host")
+    var cert_c = c_str_addr(cert_path, EMPTY_REJECT, "TLS certificate path")
+    var key_c = c_str_addr(key_path, EMPTY_REJECT, "TLS key path")
+    var rc = Int(f(addr, host_c, cert_c, key_c))
+    _ = host^
+    _ = cert_path^
+    _ = key_path^
+    if rc != 0:
+        raise Error("flare_ssl_ctx_set_cert failed")
 
 
 def _do_ssl_ctx_set_alpn(
@@ -133,8 +154,8 @@ def _do_ssl_ctx_set_verify_client_cert(
     var f = dl_sym[def(Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_ctx_set_verify_client_cert"
     )
-    var ca_c = ca_path.as_c_string_span()
-    var rc = Int(f(addr, Int(ca_c.ptr())))
+    var ca_c = c_str_addr(ca_path, EMPTY_REJECT, "client CA bundle path")
+    var rc = Int(f(addr, ca_c))
     # Anchor the owned buffer past the call (see _do_ssl_ctx_new_server).
     _ = ca_path^
     if rc != 0:
@@ -159,6 +180,16 @@ def _do_ssl_ctx_disable_session_tickets(
     )
     if Int(f(addr)) != 0:
         raise Error("flare_ssl_ctx_disable_session_tickets failed")
+
+
+def _do_ssl_ctx_set_min_proto(
+    imm lib: OwnedDLHandle, addr: Int, version: Int
+) raises:
+    var f = dl_sym[def(Int, c_int) thin abi("C") -> c_int](
+        lib, "flare_ssl_ctx_set_min_proto"
+    )
+    if Int(f(addr, c_int(version))) != 0:
+        raise Error("flare_ssl_ctx_set_min_proto: unsupported TLS version")
 
 
 def _do_ssl_new_accept(
@@ -285,6 +316,15 @@ struct ServerCtx(Movable):
         pair it had when it does."""
         _do_ssl_ctx_reload(self._lib, self._addr, cert_path, key_path)
 
+    def set_cert(
+        self, host: String, cert_path: String, key_path: String
+    ) raises:
+        """Serve this pair to clients whose SNI is ``host`` (``""`` for
+        the default, ``*.example.com`` for one-label wildcards),
+        replacing any pair for it. Safe while other threads handshake;
+        a pair that fails to load raises and changes nothing."""
+        _do_ssl_ctx_set_cert(self._lib, self._addr, host, cert_path, key_path)
+
     def key_matches(self) raises -> Bool:
         """Whether the context's certificate and private key match."""
         var f = dl_sym[def(Int) thin abi("C") -> c_int](
@@ -323,6 +363,12 @@ struct ServerCtx(Movable):
         NewSessionTicket messages and no server-side session cache, so no
         session is issued and none can be resumed."""
         _do_ssl_ctx_disable_session_tickets(self._lib, self._addr)
+
+    def set_min_protocol(self, version: Int) raises:
+        """Refuse protocol versions below ``version``
+        (``TLS_PROTOCOL_TLS12`` or ``TLS_PROTOCOL_TLS13``); anything else
+        raises."""
+        _do_ssl_ctx_set_min_proto(self._lib, self._addr, version)
 
     def addr(self) -> Int:
         """Underlying ``SSL_CTX*`` as an Int."""

@@ -13,8 +13,9 @@ The upgrade handshake (§4.2):
 """
 
 from std.builtin.debug_assert import debug_assert
-from std.ffi import OwnedDLHandle, c_int
-from std.memory import Pointer
+from std.atomic import Atomic
+from std.ffi import OwnedDLHandle, _get_global, c_int
+from std.memory import Layout, OptionalPointer, Pointer, alloc
 
 from .frame import (
     DEFAULT_MAX_FRAME_BYTES,
@@ -23,14 +24,17 @@ from .frame import (
     WsOpcode,
     WsCloseCode,
     WsProtocolError,
+    _DecodeResult,
     _is_valid_utf8,
+    ws_frame_length,
 )
+from .client import WsMessage
+from .protocol import _close_reply_payload
 from ..crypto.base64 import base64_decode as _b64_decode_srv
 from ..crypto.base64 import base64_encode as _b64_encode_srv
 from ..http.response import Status
 from ..tcp import TcpListener, TcpStream
 from ..net import SocketAddr, NetworkError, _find_flare_lib
-from ..runtime._asyncrt import check_asyncrt_capacity
 from ..runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 from ..runtime.reuseport import bind_reuseport
 from ..utils.dylib import dl_sym
@@ -342,7 +346,7 @@ struct _UpgradeFields(Movable):
             self.versions,
         )
         if problem.byte_length() != 0:
-            raise NetworkError(problem^)
+            raise NetworkError(problem)
         return _WsUpgradeRequest(self.keys[0].copy(), self.origin.copy())
 
 
@@ -431,14 +435,9 @@ def _read_upgrade_request(mut stream: TcpStream) raises -> _WsUpgradeRequest:
     return fields.finish()
 
 
-def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
-    """Send the 101 Switching Protocols response.
-
-    Args:
-        stream: TCP stream for the client connection.
-        accept: The computed ``Sec-WebSocket-Accept`` value.
-    """
-    var resp = (
+def _upgrade_response(accept: String) -> String:
+    """The 101 Switching Protocols response for ``accept``."""
+    return (
         "HTTP/1.1 101 Switching Protocols\r\n"
         + "Upgrade: websocket\r\n"
         + "Connection: Upgrade\r\n"
@@ -447,54 +446,20 @@ def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
         + "\r\n"
         + "\r\n"
     )
-    var resp_bytes = resp.as_bytes()
-    stream.write_all(Span[UInt8, _](resp_bytes))
+
+
+def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
+    """Send the 101 Switching Protocols response.
+
+    Args:
+        stream: TCP stream for the client connection.
+        accept: The computed ``Sec-WebSocket-Accept`` value.
+    """
+    var resp = _upgrade_response(accept)
+    stream.write_all(Span[UInt8, _](resp.as_bytes()))
 
 
 # ── WsConnection ──────────────────────────────────────────────────────────────
-
-
-def _valid_close_code(code: Int) -> Bool:
-    """Whether ``code`` may appear in a received CLOSE frame.
-
-    RFC 6455 sec 7.4.1 defines 1000-1003 and 1007-1011, the IANA registry
-    adds 1012-1014, and 3000-4999 are for libraries and applications. The
-    reserved 1004, 1005, 1006 and 1015 must never be sent on the wire.
-    """
-    return (
-        (code >= 1000 and code <= 1003)
-        or (code >= 1007 and code <= 1014)
-        or (code >= 3000 and code <= 4999)
-    )
-
-
-def _close_reply_payload(body: List[UInt8]) -> List[UInt8]:
-    """The body of the CLOSE that answers a received CLOSE with ``body``.
-
-    An empty body is echoed empty and a valid one echoes its status code
-    (RFC 6455 sec 5.5.1). A 1-byte body, an invalid code or a reason that
-    is not UTF-8 is a protocol error (sec 7.1.7, 7.4.1) and is answered
-    with 1002.
-    """
-    var out = List[UInt8]()
-    if len(body) == 0:
-        return out^
-    var valid = len(body) >= 2
-    if valid:
-        valid = _valid_close_code(Int(body[0]) * 256 + Int(body[1]))
-    if valid:
-        var reason = List[UInt8]()
-        for i in range(2, len(body)):
-            reason.append(body[i])
-        valid = _is_valid_utf8(reason)
-    if valid:
-        out.append(body[0])
-        out.append(body[1])
-    else:
-        var code = Int(WsCloseCode.PROTOCOL_ERROR)
-        out.append(UInt8(code >> 8))
-        out.append(UInt8(code & 0xFF))
-    return out^
 
 
 struct WsConnection(Movable):
@@ -758,6 +723,80 @@ struct WsConnection(Movable):
                     pass  # best-effort: the peer may be gone already
             return frame^
 
+    def recv_message(mut self) raises -> WsMessage:
+        """Receive the next complete message, reassembled.
+
+        A fragmented message (a TEXT or BINARY frame without FIN, then
+        CONTINUATION frames up to one with FIN, RFC 6455 sec 5.4) comes
+        back whole; :meth:`recv` returns its pieces one by one. PING is
+        answered and PONG skipped, between fragments too. A text message
+        is checked for UTF-8 as a whole, so a code point may be split
+        across fragments. The reassembled payload is bounded by
+        ``max_frame_size``.
+
+        Raises:
+            NetworkError: If the client sent CLOSE (already answered by
+                :meth:`recv`), or on I/O failure.
+            WsProtocolError: After failing the connection with 1002 for a
+                CONTINUATION with no message to continue or a new data
+                frame inside a fragmented one, 1007 for a text message
+                that is not UTF-8, 1009 for a message over
+                ``max_frame_size``.
+        """
+        var first = self._recv_data_frame()
+        if first.opcode == WsOpcode.CONTINUATION:
+            self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
+            raise WsProtocolError(
+                "CONTINUATION frame with no message to continue (RFC 6455"
+                " sec 5.4)"
+            )
+        var is_text = first.opcode == WsOpcode.TEXT
+        var fin = first.fin
+        var payload = List[UInt8]()
+        swap(payload, first.payload)
+        while not fin:
+            var next = self._recv_data_frame()
+            if next.opcode != WsOpcode.CONTINUATION:
+                self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
+                raise WsProtocolError(
+                    "new data frame inside a fragmented message (RFC 6455"
+                    " sec 5.4)"
+                )
+            if len(payload) + len(next.payload) > self.max_frame_size:
+                self._fail_connection(WsCloseCode.MESSAGE_TOO_BIG)
+                raise WsProtocolError(
+                    WS_TOO_BIG_MARKER
+                    + ": reassembled message exceeds "
+                    + String(self.max_frame_size)
+                    + " bytes"
+                )
+            payload.extend(Span[UInt8, _](next.payload))
+            fin = next.fin
+        if not is_text:
+            return WsMessage(payload)
+        if not _is_valid_utf8(payload):
+            self._fail_connection(WsCloseCode.INVALID_PAYLOAD)
+            raise WsProtocolError(
+                "TEXT message is not valid UTF-8 (RFC 6455 sec 8.1); closed"
+                " with 1007"
+            )
+        return WsMessage(
+            WsFrame(opcode=WsOpcode.TEXT, payload=payload).text_payload()
+        )
+
+    def _recv_data_frame(mut self) raises -> WsFrame:
+        """The next TEXT, BINARY or CONTINUATION frame; PONG is skipped
+        and a CLOSE raises (``recv`` has answered it)."""
+        while True:
+            var frame = self.recv()
+            if frame.opcode == WsOpcode.PONG:
+                continue
+            if frame.opcode == WsOpcode.CLOSE:
+                raise NetworkError(
+                    "WebSocket: the client closed the connection"
+                )
+            return frame^
+
     def _fail_connection(mut self, code: UInt16):
         """Best-effort CLOSE ``code`` before the caller raises (once).
 
@@ -774,62 +813,55 @@ struct WsConnection(Movable):
             pass  # the peer may be gone already
 
     def _recv_one(mut self) raises -> WsFrame:
-        """Read bytes from stream and decode one complete frame."""
-        var buf = List[UInt8](capacity=4096)
-        # Drain the carry-over before touching the socket: bytes the
-        # HTTP reactor pre-buffered past the handshake on the
-        # shared-listener path, and, on every later call, whatever the
-        # previous decode left behind. Empty throughout for the
-        # standalone WsServer path.
-        if len(self._prebuf) > 0:
-            for i in range(len(self._prebuf)):
-                buf.append(self._prebuf[i])
-            self._prebuf.clear()
-        var tmp = List[UInt8](capacity=4096)
-        tmp.resize(4096, 0)
+        """Read bytes from stream and decode one complete frame.
 
+        ``_prebuf`` is the connection's receive buffer: bytes the HTTP
+        reactor pre-buffered past the handshake on the shared-listener
+        path, and whatever followed the previous frame. Reads append to
+        it until :func:`ws_frame_length` says the frame is whole, or the
+        declared length is already past the cap, which ``decode_one``
+        then rejects without waiting for the payload.
+        """
         while True:
-            try:
-                var result = WsFrame.decode_one(
-                    Span[UInt8, _](buf), max_payload=self.max_frame_size
-                )
-                # RFC 6455 §5.1: server MUST close conn if client sends unmasked frame
-                if not result.frame.masked:
-                    # RFC 6455 sec 7.4.1: say why (1002), best effort.
-                    self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
-                    raise WsProtocolError(
-                        "client sent unmasked frame (RFC 6455 §5.1)"
-                    )
-                # `buf` dies with this call, so anything past the frame
-                # has to be handed back to the connection or it is lost.
-                # Two frames in one segment used to mean the second was
-                # dropped and the next recv() blocked on a socket with
-                # nothing left to send -- a hang, with no error. Reached
-                # by a client that pipelines frames behind the
-                # handshake, and by recv()'s own PING loop.
-                for i in range(result.consumed, len(buf)):
-                    self._prebuf.append(buf[i])
-                return result^.take_frame()
-            except e:
-                var msg = String(e)
-                if (
-                    "need at least" in msg
-                    or "need " in msg
-                    or "truncated" in msg
-                ):
-                    var n = self._stream.read(tmp.unsafe_ptr(), len(tmp))
-                    if n == 0:
-                        raise NetworkError(
-                            "WebSocket connection closed unexpectedly"
-                        )
-                    for i in range(n):
-                        buf.append(tmp[i])
-                else:
-                    if WS_TOO_BIG_MARKER in msg:
-                        # RFC 6455 sec 7.4.1: 1009 tells the client why.
-                        # Best effort: the raise below is what matters.
-                        self._fail_connection(WsCloseCode.MESSAGE_TOO_BIG)
-                    raise e^
+            var need = ws_frame_length(Span[UInt8, _](self._prebuf))
+            if need >= 0 and (
+                len(self._prebuf) >= need or need > self.max_frame_size + 14
+            ):
+                break
+            var have = len(self._prebuf)
+            self._prebuf.resize(unsafe_uninit_length=have + 4096)
+            var n = self._stream.read(
+                self._prebuf.unsafe_ptr().unsafe_offset(have), 4096
+            )
+            self._prebuf.resize(unsafe_uninit_length=have + max(n, 0))
+            if n <= 0:
+                raise NetworkError("WebSocket connection closed unexpectedly")
+        var result: _DecodeResult
+        try:
+            result = WsFrame.decode_one(
+                Span[UInt8, _](self._prebuf), max_payload=self.max_frame_size
+            )
+        except e:
+            if WS_TOO_BIG_MARKER in String(e):
+                # RFC 6455 sec 7.4.1: 1009 tells the client why.
+                # Best effort: the raise below is what matters.
+                self._fail_connection(WsCloseCode.MESSAGE_TOO_BIG)
+            raise e^
+        # RFC 6455 §5.1: server MUST close conn if client sends unmasked frame
+        if not result.frame.masked:
+            # RFC 6455 sec 7.4.1: say why (1002), best effort.
+            self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
+            raise WsProtocolError("client sent unmasked frame (RFC 6455 §5.1)")
+        # Whatever followed the frame stays for the next call: two frames
+        # in one segment used to lose the second and hang the next recv().
+        var used = result.consumed
+        if used >= len(self._prebuf):
+            self._prebuf.clear()
+        else:
+            var rest = List[UInt8](capacity=len(self._prebuf) - used)
+            rest.extend(Span[UInt8, _](self._prebuf)[used : len(self._prebuf)])
+            self._prebuf = rest^
+        return result^.take_frame()
 
     def close(
         mut self,
@@ -1106,6 +1138,55 @@ struct _WsOffloadCtx(Movable):
     var handler: def(mut WsConnection) raises thin -> None
 
 
+comptime DEFAULT_MAX_OFFLOADED_WS: Int = 4096
+"""Detached WebSocket threads a process runs at once by default."""
+
+
+def _offload_cell_init() -> (
+    OptionalPointer[NoneType, UntrackedOrigin[mut=True]]
+):
+    var raw = alloc(Layout[Int64](count=1)).unsafe_leak()
+    raw.unsafe_write(Int64(0))
+    return Pointer[NoneType, UntrackedOrigin[mut=True]](
+        unsafe_from_address=Int(raw)
+    )
+
+
+def _offload_cell_keep(p: OptionalPointer[NoneType, UntrackedOrigin[mut=True]]):
+    pass
+
+
+def _offload_slot() -> Pointer[Scalar[DType.int64], MutUntrackedOrigin]:
+    var p = _get_global[
+        "flare_ws_offloaded", _offload_cell_init, _offload_cell_keep
+    ]()
+    return Pointer[Scalar[DType.int64], MutUntrackedOrigin](
+        unsafe_from_address=Int(p.value())
+    )
+
+
+def ws_offload_try_acquire(limit: Int) -> Bool:
+    """Claim one of ``limit`` detached WebSocket threads, process-wide.
+    False when all are held: the upgrade is then refused rather than
+    letting clients spawn threads until the process hits its limit."""
+    var slot = _offload_slot()
+    var held = Atomic[Int64].load(slot)
+    while held < Int64(limit):
+        if Atomic[Int64].compare_exchange(slot, held, held + 1):
+            return True
+    return False
+
+
+def ws_offload_release():
+    """Give back a thread claimed by ``ws_offload_try_acquire``."""
+    _ = Atomic[Int64].fetch_add(_offload_slot(), -1)
+
+
+def ws_offloaded() -> Int:
+    """Detached WebSocket threads currently running."""
+    return Int(Atomic[Int64].load(_offload_slot()))
+
+
 def _ws_offload_entry(arg: _OpaquePtr) -> _OpaquePtr:
     """``pthread`` start routine for one offloaded WebSocket connection.
 
@@ -1129,6 +1210,7 @@ def _ws_offload_entry(arg: _OpaquePtr) -> _OpaquePtr:
         ctx.handler(ctx.conn)
     except e:
         print("[ws] offloaded connection error: " + String(e))
+    ws_offload_release()
     return _null_ptr()
 
 
@@ -1149,9 +1231,9 @@ def _spawn_ws_offload(
             reactor has already zeroed its own copy of the fd, so this
             function is the only owner left and dropping it on the floor
             would leak a live socket per failed handshake. ``EAGAIN`` at
-            the process thread limit is the reachable case, and it is
-            reachable on demand while there is no cap on offloaded
-            threads.
+            the process thread limit is the reachable case. The caller
+            claimed a slot with ``ws_offload_try_acquire``; it is given
+            back here on failure and by the thread when it ends.
     """
     from std.memory.alloc import unsafe_alloc
 
@@ -1167,12 +1249,13 @@ def _spawn_ws_offload(
     var th: ThreadHandle
     try:
         # One thread per offloaded connection, alive as long as the
-        # connection: a dedicated OS thread even under -D FLARE_ASYNCRT,
-        # where it would hold one of the pool's fixed workers each.
+        # connection: a dedicated OS thread, since a pool task would
+        # hold one of the pool's fixed workers each.
         th = ThreadHandle.spawn_os[_ws_offload_entry](arg)
     except e:
         ctx_ptr.unsafe_deinit_pointee()
         ctx_ptr.unsafe_free()
+        ws_offload_release()
         raise e
     # No free on this path even if it raises: the thread is already
     # running and owns the context, so a free here would be a double
@@ -1256,7 +1339,6 @@ def _ws_serve_multicore(
     )
     if num_workers <= 1:
         raise Error("_ws_serve_multicore: num_workers must be >= 2")
-    check_asyncrt_capacity("_ws_serve_multicore", num_workers)
 
     from std.memory.alloc import unsafe_alloc
 
@@ -1290,16 +1372,16 @@ def _ws_serve_multicore(
         var arg = ctx_ptr.unsafe_bitcast[UInt8]()
         var addr_int = Int(arg)
         ctx_addrs.append(addr_int)
-        var th = ThreadHandle.spawn[_ws_worker_entry](
+        var th = ThreadHandle.spawn_serving[_ws_worker_entry](
             Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr_int)
         )
         (threads_ptr.unsafe_offset(i)).unsafe_write(th^)
     # See Scheduler.start: no serving loop may stay queued on the
-    # AsyncRT pool. No-op for pthreads.
+    # AsyncRT pool. No-op for OS threads.
     for i in range(num_workers):
         (threads_ptr.unsafe_offset(i))[].wait_started()
 
-    # Workers run forever; this join blocks until each pthread
+    # Workers run forever; this join blocks until each worker
     # exits (normally never, since the per-worker listener
     # stays open). Closing the listener from another thread
     # would unblock the worker's accept call -- the intended

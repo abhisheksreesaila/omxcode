@@ -39,7 +39,9 @@ from flare.runtime.uring_reactor import (
     _pbuf_ring_get_tail,
     _pbuf_ring_set_tail,
 )
+from ._bufring_ledger import RECV_CLOSE, RECV_STAGE, classify_recv
 from ._reactor import ConnHandle, StepResult, STATE_READING, STATE_WRITING
+from ._server_uring_setup import _probe_bufring_setup_flags
 
 # Shared connection-lifecycle helpers live in ``_server_reactor_epoll``
 # (the epoll loops own them); imported here for the io_uring teardown path.
@@ -439,79 +441,6 @@ def _br_unpack_fd(conn_id: UInt64) -> Int:
     return Int(conn_id & _URING_BR_FD_MASK)
 
 
-def _probe_bufring_setup_flags(entries: Int = 64) -> UInt32:
-    """Probe the host kernel for the best ``IORING_SETUP_*``
-    flag mask the bufring dispatch can use.
-
-    The bufring dispatch's throughput is sensitive to how the
-    kernel runs task work relative to the dispatch loop's
-    CQE-drain rhythm. The kernel scheduler hints introduced in
-    5.19 (COOP_TASKRUN + TASKRUN_FLAG + SUBMIT_ALL) and 6.0/6.1
-    (SINGLE_ISSUER + DEFER_TASKRUN) batch task work to enter
-    boundaries instead of running it IPI-style mid-syscall.
-
-    Probes from highest-impact-first to default:
-    1. SINGLE_ISSUER | DEFER_TASKRUN | COOP_TASKRUN |
-       TASKRUN_FLAG | SUBMIT_ALL  (>= 6.1, the optimal mix)
-    2. COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL  (>= 5.19)
-    3. SUBMIT_ALL  (>= 5.18)
-    4. 0 (default; works on any 5.1+ kernel)
-
-    Returns the first mask the kernel accepts via a no-op
-    ``IoUringRing(entries)`` setup; closes the probe ring
-    immediately. Called once per worker at bufring loop init.
-
-    Args:
-        entries: SQE count for the probe ring; tiny so the
-            probe is cheap. Defaults to 64.
-
-    Returns:
-        Best-fit setup_flags mask, or 0 if no flag combination
-        is accepted (kernel < 5.18 or io_uring unavailable).
-    """
-    from flare.runtime.io_uring import IoUringRing
-    from flare.runtime.io_uring_sqe import (
-        IORING_SETUP_COOP_TASKRUN,
-        IORING_SETUP_TASKRUN_FLAG,
-        IORING_SETUP_SUBMIT_ALL,
-        IORING_SETUP_SINGLE_ISSUER,
-        IORING_SETUP_DEFER_TASKRUN,
-    )
-
-    # Probe order: COOP_TASKRUN + TASKRUN_FLAG + SUBMIT_ALL
-    # FIRST (5.19+ reliable). DEFER_TASKRUN + SINGLE_ISSUER
-    # (6.1+) are tried LAST because they require GETEVENTS-on-
-    # every-enter (which we honour in submit_and_wait), but
-    # under load the kernel still throttles multishot recv CQE
-    # delivery in unpredictable ways with DEFER_TASKRUN. Empirical
-    # observation on dev-box (kernel 6.8): bufring throughput is
-    # ~60 Hz with DEFER_TASKRUN and significantly higher without.
-    # If a future kernel version fixes this, swap the order.
-    var t1 = (
-        IORING_SETUP_COOP_TASKRUN
-        | IORING_SETUP_TASKRUN_FLAG
-        | IORING_SETUP_SUBMIT_ALL
-    )
-    var t2 = IORING_SETUP_SUBMIT_ALL
-    var t3 = (
-        IORING_SETUP_SINGLE_ISSUER
-        | IORING_SETUP_DEFER_TASKRUN
-        | IORING_SETUP_COOP_TASKRUN
-        | IORING_SETUP_TASKRUN_FLAG
-        | IORING_SETUP_SUBMIT_ALL
-    )
-
-    var candidates = [t1, t2, t3]
-    for i in range(len(candidates)):
-        try:
-            var probe = IoUringRing(entries, setup_flags=candidates[i])
-            _ = probe^
-            return candidates[i]
-        except:
-            pass
-    return UInt32(0)
-
-
 def _alloc_recv_buffer_pool() raises -> Int:
     """Allocate the worker-local recv buffer pool: ``_URING_BR_NBUFS``
     contiguous buffers of ``_URING_BR_BUF_SIZE`` bytes.
@@ -538,6 +467,23 @@ def _free_recv_buffer_pool(addr: Int):
         return
     var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
     p.unsafe_free()
+
+
+def _br_return_buf(ring_addr: Int, pool_addr: Int, bid: Int):
+    """Give provided buffer ``bid`` back to the ring (shared-memory tail
+    bump, PBUF_RING). Call exactly once for every receive completion that
+    carries ``IORING_CQE_F_BUFFER``, including ones the loop drops."""
+    var cur_tail = _pbuf_ring_get_tail(ring_addr)
+    _pbuf_ring_add(
+        ring_addr,
+        _URING_BR_NBUFS,
+        UInt64(pool_addr + bid * _URING_BR_BUF_SIZE),
+        UInt32(_URING_BR_BUF_SIZE),
+        UInt16(bid),
+        0,
+        cur_tail,
+    )
+    _pbuf_ring_set_tail(ring_addr, cur_tail + UInt16(1))
 
 
 def _cleanup_conn_uring_br(
@@ -618,11 +564,11 @@ def _drive_handler_with_submit_send[
         # cycle iter writes to write_buf; the LAST one's bytes
         # are what we submit_send.
         while not step_done:
-            if (
-                last_step.want_read
-                and len(ch_ptr[].read_buf) > 0
-                and ch_ptr[].state == STATE_READING
-            ):
+            if last_step.want_read and ch_ptr[].has_buffered_request():
+                # Only drive again for a *whole* buffered request: a
+                # partial one consumes nothing, so looping on it would spin
+                # here and starve every other connection.
+                #
                 # NOTE: we DON'T call on_writable here -- we let
                 # write_buf accumulate, then submit_send the
                 # whole thing once.
@@ -667,20 +613,37 @@ def _on_send_cqe_complete[
 ](
     fd: Int,
     conn_id: UInt64,
+    res: Int,
     config: ServerConfig,
     ref handler: H,
     ch_ptr: Pointer[ConnHandle, MutUntrackedOrigin],
     mut ureactor: UringReactor,
 ) raises -> Bool:
-    """Handle a ``URING_OP_SEND`` CQE: clear the send-in-flight
-    state, drain any read_buf bytes that were buffered while the
-    send was in flight, and start a new request cycle if there
-    are buffered bytes.
+    """Handle a ``URING_OP_SEND`` CQE that sent ``res`` bytes (or failed
+    with ``-errno``): send the rest of the response if the kernel took
+    only part of it; once all of it is out, clear the send-in-flight
+    state and start a new request cycle if bytes are buffered.
 
-    Returns True iff the conn should be cleaned up (e.g.,
-    ``should_close`` was set on the just-sent response and there
-    are no more requests to serve).
+    Returns True iff the conn should be cleaned up: the send failed, or
+    ``should_close`` was set on the response just sent.
     """
+    if res <= 0:
+        return True
+    ch_ptr[].write_pos += res
+    var rest = len(ch_ptr[].write_buf) - ch_ptr[].write_pos
+    if rest > 0:
+        try:
+            ureactor.submit_send(
+                fd,
+                ch_ptr[]
+                .write_buf.unsafe_ptr()
+                .unsafe_offset(ch_ptr[].write_pos),
+                rest,
+                conn_id,
+            )
+        except:
+            return True
+        return False
     ch_ptr[].send_in_flight = False
     # Reset the write buffer so the next request's response
     # serializes from a clean state.
@@ -710,15 +673,18 @@ def _on_send_cqe_complete[
 def _drive_handler_after_buf_recv[
     H: Handler,
 ](
+    fd: Int,
+    conn_id: UInt64,
     bytes: Span[UInt8, _],
     config: ServerConfig,
     ref handler: H,
     ch_ptr: Pointer[ConnHandle, MutUntrackedOrigin],
+    mut ureactor: UringReactor,
 ) raises -> Bool:
-    """Sync-send variant kept as a fallback / reference -- see
-    ``_drive_handler_with_submit_send`` for the production io_uring
-    path that uses ``submit_send`` instead of synchronous
-    ``on_writable``.
+    """Sync-send variant of ``_drive_handler_with_submit_send``: the
+    response is written with ``send(2)`` straight away, and whatever the
+    socket does not take is handed to a ``submit_send`` whose completion
+    (``_on_send_cqe_complete``) finishes it.
     """
     var step_done: Bool
     try:
@@ -732,14 +698,24 @@ def _drive_handler_after_buf_recv[
                 last_step = ch_ptr[].on_writable(config)
                 step_done = last_step.done
                 if (not step_done) and last_step.want_write:
-                    step_done = True
-            elif (
-                last_step.want_read
-                and len(ch_ptr[].read_buf) > 0
-                and ch_ptr[].state == STATE_READING
-            ):
-                # Pipelined request already in read_buf -- drive the
-                # parser without appending more bytes. Use stack-
+                    if ch_ptr[].body_src:
+                        # A streamed body needs the reactor loop.
+                        step_done = True
+                        break
+                    ureactor.submit_send(
+                        fd,
+                        ch_ptr[]
+                        .write_buf.unsafe_ptr()
+                        .unsafe_offset(ch_ptr[].write_pos),
+                        len(ch_ptr[].write_buf) - ch_ptr[].write_pos,
+                        conn_id,
+                    )
+                    ch_ptr[].send_in_flight = True
+                    break
+            elif last_step.want_read and ch_ptr[].has_buffered_request():
+                # Whole pipelined request already in read_buf -- drive the
+                # parser without appending more bytes (a partial one would
+                # consume nothing and spin this loop). Use stack-
                 # allocated empty span (Span over a temp List would
                 # be a use-after-free).
                 var empty_buf = stack_allocation[1, UInt8]()
@@ -896,6 +872,7 @@ def run_uring_bufring_reactor_loop_shared[
                 var send_done = _on_send_cqe_complete[H](
                     send_fd,
                     send_conn_id,
+                    Int(comp.res),
                     config,
                     handler,
                     send_ch_ptr,
@@ -909,17 +886,21 @@ def run_uring_bufring_reactor_loop_shared[
                 continue
 
             var conn_id = comp.conn_id
-            if conn_id not in conns:
-                continue
-            if comp.res <= 0:
-                _cleanup_conn_uring_br(conn_id, conns, ureactor)
-                continue
-            if (comp.flags & IORING_CQE_F_BUFFER) == UInt32(0):
-                _cleanup_conn_uring_br(conn_id, conns, ureactor)
+            var has_buf = (comp.flags & IORING_CQE_F_BUFFER) != UInt32(0)
+            var bid = Int(comp.flags >> UInt32(16))
+            # A completion carrying IORING_CQE_F_BUFFER has already taken
+            # buffer ``bid`` out of the ring, whatever happens to it next.
+            # Every path must follow ``decision.return_buf`` or the pool
+            # shrinks for good (issue #37; proved in Kernels/BufLedger).
+            var decision = classify_recv(conn_id in conns, comp.res, has_buf)
+            if decision.action != RECV_STAGE:
+                if decision.return_buf:
+                    _br_return_buf(ring_addr, pool_addr, bid)
+                if decision.action == RECV_CLOSE:
+                    _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
 
             var fd = _br_unpack_fd(conn_id)
-            var bid = Int(comp.flags >> UInt32(16))
             var n = Int(comp.res)
             var pool_ptr = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=pool_addr
@@ -931,22 +912,10 @@ def run_uring_bufring_reactor_loop_shared[
             # before the handler runs (Span-origin narrowing -- see
             # the matching block in the single-worker variant for
             # the full rationale).
-            ch_ptr[].read_buf.reserve(len(ch_ptr[].read_buf) + n)
-            for i in range(n):
-                ch_ptr[].read_buf.append(buf.unsafe_offset(i).unsafe_load())
+            ch_ptr[].read_buf.extend(Span[UInt8, _](unsafe_ptr=buf, length=n))
 
-            # Re-fill via shared-memory tail bump (PBUF_RING).
-            var cur_tail = _pbuf_ring_get_tail(ring_addr)
-            _pbuf_ring_add(
-                ring_addr,
-                _URING_BR_NBUFS,
-                UInt64(Int(buf)),
-                UInt32(_URING_BR_BUF_SIZE),
-                UInt16(bid),
-                0,
-                cur_tail,
-            )
-            _pbuf_ring_set_tail(ring_addr, cur_tail + UInt16(1))
+            if decision.return_buf:
+                _br_return_buf(ring_addr, pool_addr, bid)
 
             var step_done = False
             var empty_buf = stack_allocation[1, UInt8]()
@@ -962,9 +931,15 @@ def run_uring_bufring_reactor_loop_shared[
                         ch_ptr,
                         ureactor,
                     )
-            else:
+            elif not ch_ptr[].send_in_flight:
                 step_done = _drive_handler_after_buf_recv[H](
-                    empty_span, config, handler, ch_ptr
+                    fd,
+                    conn_id,
+                    empty_span,
+                    config,
+                    handler,
+                    ch_ptr,
+                    ureactor,
                 )
 
             if (not step_done) and (not comp.has_more):

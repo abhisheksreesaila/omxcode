@@ -1,6 +1,6 @@
-"""Multicore scheduler: 1 shared listener, N reactors, N pthread workers.
+"""Multicore scheduler: 1 shared listener, N reactors, N workers.
 
-Runs N single-threaded reactor loops in parallel, one per pthread,
+Runs N single-threaded reactor loops in parallel, one per worker thread,
 all sharing a *single* listener fd. Each worker registers the
 listener fd in its own reactor with ``EPOLLEXCLUSIVE`` (on Linux
 >= 4.5) so the kernel wakes exactly one worker per accept event.
@@ -83,14 +83,9 @@ from std.sys.info import CompilationTarget
 from ..net import SocketAddr
 from ..tcp import TcpListener
 
-from ._asyncrt import (
-    FLARE_USE_ASYNCRT,
-    asyncrt_pool_alive,
-    asyncrt_worker_capacity,
-    check_asyncrt_capacity,
-)
 from ._thread import ThreadHandle, num_cpus, _OpaquePtr
 from .frontend import Frontend
+from ._balance import balance_group_alloc, balance_group_free
 from .reuseport import bind_reuseport, bind_shared
 
 # Re-exported so the reactor loops' existing
@@ -105,6 +100,8 @@ from .scheduler_stats import (
     WORKER_STAT_STATUS,
     WORKER_STAT_DONE,
     WORKER_STAT_SLOTS,
+    WORKER_STAT_GROUP,
+    WORKER_STAT_INDEX,
     WORKER_STATUS_RUNNING,
     WORKER_STATUS_CLEAN,
     WORKER_STATUS_CRASHED,
@@ -184,7 +181,7 @@ def _scheduler_free_ctxs[F: Frontend](addrs: List[Int]):
 
 
 struct Scheduler[F: Frontend](Movable):
-    """Owns ``num_workers`` pthread workers, each running a frontend's
+    """Owns ``num_workers`` workers, each running a frontend's
     serving loop sharing a single listener fd (or its own
     SO_REUSEPORT listener when the strategy demands).
 
@@ -271,6 +268,10 @@ struct Scheduler[F: Frontend](Movable):
     # (in-flight snapshot + exit status). Read by ``drain`` after the
     # workers join; freed on teardown. Empty until ``start``.
     var _stats_addrs: List[Int]
+    # Accept-balancing group block shared by every worker
+    # (``flare.runtime._balance``); 0 when balancing is off or there is a
+    # single worker. Freed with the stats cells.
+    var _balance_addr: Int
     # Number of workers whose last run exited with WORKER_STATUS_CRASHED,
     # captured from the stats cells during ``shutdown`` / ``drain`` before
     # they are freed. Lets callers tell a crash from a clean shutdown
@@ -291,6 +292,7 @@ struct Scheduler[F: Frontend](Movable):
         self._ctx_addrs = List[Int]()
         self._stopping_addr = 0
         self._stats_addrs = List[Int]()
+        self._balance_addr = 0
         self._last_crash_count = 0
 
     @staticmethod
@@ -335,12 +337,10 @@ struct Scheduler[F: Frontend](Movable):
             serve until ``shutdown()`` is called.
 
         Raises:
-            Error: If ``num_workers`` is outside ``1..=256`` (or,
-                under ``-D FLARE_ASYNCRT``, above
-                ``parallelism_level() - 1``), if the
-                listener fails to bind, or if ``pthread_create``
-                fails; partially-started workers are best-effort
-                joined before re-raising.
+            Error: If ``num_workers`` is outside ``1..=256``, if the
+                listener fails to bind, or if spawning a worker fails;
+                partially-started workers are best-effort joined before
+                re-raising.
         """
         if num_workers < 1 or num_workers > 256:
             raise Error(
@@ -348,7 +348,6 @@ struct Scheduler[F: Frontend](Movable):
                 + String(num_workers)
                 + ")"
             )
-        check_asyncrt_capacity("Scheduler.start", num_workers)
         var s = Scheduler[Self.F]()
 
         # Heap-allocate the stopping flag. Using a struct field would
@@ -484,11 +483,17 @@ struct Scheduler[F: Frontend](Movable):
         # Allocated on this thread before any pthread spawns; the worker
         # writes them, ``drain`` reads them after join, teardown frees
         # them. Native Mojo allocator (see _scheduler_free_raw).
-        for _ in range(num_workers):
+        # Several workers share one block that balances accepted
+        # connections between them; ``FLARE_BALANCE_ACCEPT=0`` opts out.
+        if num_workers >= 2 and getenv("FLARE_BALANCE_ACCEPT") != "0":
+            s._balance_addr = balance_group_alloc(num_workers)
+        for w in range(num_workers):
             var sp = alloc(Layout[Int64](count=WORKER_STAT_SLOTS)).unsafe_leak()
             sp[unsafe_offset=WORKER_STAT_INFLIGHT] = Int64(0)
             sp[unsafe_offset=WORKER_STAT_STATUS] = Int64(WORKER_STATUS_RUNNING)
             sp[unsafe_offset=WORKER_STAT_DONE] = Int64(0)
+            sp[unsafe_offset=WORKER_STAT_GROUP] = Int64(s._balance_addr)
+            sp[unsafe_offset=WORKER_STAT_INDEX] = Int64(w)
             s._stats_addrs.append(Int(sp))
 
         # If we need per-worker listeners (io_uring buffer-ring
@@ -579,7 +584,7 @@ struct Scheduler[F: Frontend](Movable):
 
             var spawned = False
             try:
-                var th = ThreadHandle.spawn[_worker_entry[Self.F]](arg)
+                var th = ThreadHandle.spawn_serving[_worker_entry[Self.F]](arg)
                 # Move the (non-Copyable) handle into the next slot
                 # of the worker array; bump the live-slot counter.
                 s._workers_ptr.unsafe_offset(s._workers_len).unsafe_write(th^)
@@ -617,6 +622,8 @@ struct Scheduler[F: Frontend](Movable):
                         _OpaquePtr(unsafe_from_address=s._stats_addrs[k])
                     )
                 s._stats_addrs.clear()
+                balance_group_free(s._balance_addr)
+                s._balance_addr = 0
                 # The pre-bound per-worker listeners (default mode) were
                 # never freed here, so a failed start left every one of
                 # them open and bound (CONC-06). All workers joined.
@@ -636,10 +643,9 @@ struct Scheduler[F: Frontend](Movable):
                 s._stopping_addr = 0
                 raise Error("pthread_create failed in Scheduler.start")
 
-        # Under -D FLARE_ASYNCRT the workers are pool tasks. Don't hand
-        # back the scheduler while one is still queued: a donating join
-        # elsewhere could run it inline and never return. No-op for
-        # pthreads.
+        # Workers holding a lease are pool tasks. Don't hand back the
+        # scheduler while one is still queued: a donating join elsewhere
+        # could run it inline and never return. No-op for OS threads.
         for i in range(s._workers_len):
             s._workers_ptr.unsafe_offset(i)[].wait_started()
         return s^
@@ -744,6 +750,8 @@ struct Scheduler[F: Frontend](Movable):
                 _OpaquePtr(unsafe_from_address=self._stats_addrs[i])
             )
         self._stats_addrs.clear()
+        balance_group_free(self._balance_addr)
+        self._balance_addr = 0
 
         if self._stopping_addr != 0:
             var stop_raw = _OpaquePtr(unsafe_from_address=self._stopping_addr)
@@ -930,6 +938,9 @@ struct Scheduler[F: Frontend](Movable):
             # Freeing it handed the cell to the next allocation, which
             # could store False and keep the worker serving forever.
             self._stopping_addr = 0
+            # The accept-balancing group too: the worker publishes into it
+            # every iteration and locks it on the way out.
+            self._balance_addr = 0
 
         # Step 4: free everything (stats cells are read above first).
         self._free_resources()
@@ -945,12 +956,5 @@ def default_worker_count() -> Int:
     For IO-bound HTTP plaintext the best throughput is usually
     num_cpus workers; CPU-heavy handlers may prefer num_cpus // 2 to
     leave headroom for the kernel network stack.
-
-    Under ``-D FLARE_ASYNCRT`` it is capped at
-    ``parallelism_level() - 1``, the most workers ``Scheduler.start``
-    accepts on that engine.
     """
-    comptime if FLARE_USE_ASYNCRT:
-        if asyncrt_pool_alive():
-            return min(num_cpus(), asyncrt_worker_capacity())
     return num_cpus()

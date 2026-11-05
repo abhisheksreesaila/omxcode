@@ -28,7 +28,7 @@ from .frame import AckFrame, AckRange, EcnCounts
 comptime _CLOCK_MONOTONIC: c_int = c_int(
     6
 ) if CompilationTarget.is_macos() else c_int(1)
-from .varint import encode_varint
+from .varint import encode_varint, encode_varint_into
 from ..tls.rustls_quic import QuicEncryptionLevel
 
 
@@ -101,6 +101,14 @@ def _ack_record(mut flat: List[UInt64], pn: UInt64):
     to one above the highest dropped number and is stored in the trailing
     slot, so :func:`_ack_contains` keeps treating them as received.
     """
+    # In-order arrival, the common case: extend the newest range in
+    # place instead of rebuilding and re-sorting every range.
+    if len(flat) >= 2 and pn >= flat[0]:
+        if pn <= flat[1]:
+            return
+        if pn == flat[1] + UInt64(1):
+            flat[1] = pn
+            return
     var floor = _ack_floor(flat)
     var lows = List[UInt64]()
     var highs = List[UInt64]()
@@ -203,41 +211,10 @@ def _encode_h3_stream_frame(
     if fin:
         frame_type |= 0x01
     out.append(UInt8(frame_type))
-    var sid_var = encode_varint(stream_id)
-    for i in range(len(sid_var)):
-        out.append(sid_var[i])
-    var off_var = encode_varint(offset)
-    for i in range(len(off_var)):
-        out.append(off_var[i])
-    var len_var = encode_varint(UInt64(len(stream_bytes)))
-    for i in range(len(len_var)):
-        out.append(len_var[i])
+    encode_varint_into(stream_id, out)
+    encode_varint_into(offset, out)
+    encode_varint_into(UInt64(len(stream_bytes)), out)
     out.extend(stream_bytes)
-
-
-def _stream_id_from_key(k: String) -> Int:
-    """Parse the QUIC stream id out of an ``http3_response_egress``
-    key of the form ``"<slot>:<stream_id>"`` (ASCII only, so
-    byte-level iteration is safe). Returns -1 if the key has no
-    colon or no digits after it.
-    """
-    var key_bytes = k.as_bytes()
-    var sid = 0
-    var found_colon = False
-    var any_digit = False
-    for j in range(len(key_bytes)):
-        var b = Int(key_bytes[j])
-        if not found_colon:
-            if b == 0x3A:  # ':'
-                found_colon = True
-            continue
-        if b < 0x30 or b > 0x39:
-            continue
-        sid = sid * 10 + (b - 0x30)
-        any_digit = True
-    if not found_colon or not any_digit:
-        return -1
-    return sid
 
 
 def _inbound_level_for_datagram(datagram: Span[UInt8, _]) -> Int:

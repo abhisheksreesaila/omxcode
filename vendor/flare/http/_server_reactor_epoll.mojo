@@ -68,6 +68,7 @@ from flare.net import IpAddr, SocketAddr
 from flare.net._libc import _recv, _send, _close, MSG_NOSIGNAL
 from flare.net.error import NetworkError
 from flare.tcp import TcpStream, TcpListener, accept_fd
+from flare.runtime._balance import Balancer
 from flare.runtime import (
     Reactor,
     Event,
@@ -96,6 +97,8 @@ from flare.runtime.scheduler import (
 
 from ._reactor.lifecycle import (
     _poll_timeout_ms,
+    _collect_fired_timers,
+    _expired_idle_conns,
     _conn_alloc_addr,
     _conn_free_addr,
     _conn_ptr_from_int,
@@ -105,6 +108,8 @@ from ._reactor.lifecycle import (
     _arm_accept_timer,
     _accept_loop,
     _accept_loop_fd,
+    _adopt_handed_off_h1,
+    ListenerGate,
 )
 
 
@@ -147,6 +152,8 @@ def _run_handler_loop_impl[
             via a fresh externally-mutated pointer so the optimiser
             cannot LICM-hoist the load. The owning ``Scheduler`` (or
             the dedicated-path caller) flips it on shutdown.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     var reactor = Reactor()
     var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
@@ -160,6 +167,8 @@ def _run_handler_loop_impl[
     else:
         reactor.register(c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate(exclusive=is_shared)
+    gate.add(Int(listener_fd), LISTENER_TOKEN)
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
@@ -173,12 +182,9 @@ def _run_handler_loop_impl[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        var fired = List[UInt64]()
-        wheel.advance(now_ms, fired)
-        for i in range(len(fired)):
-            var fd_tok = Int(fired[i])
-            if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -256,6 +262,14 @@ def _run_handler_loop_impl[
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor, wheel)
 
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
+
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
     # Graceful shutdown: close every per-conn fd. The listener fd
@@ -302,6 +316,8 @@ def run_reactor_loop_shared[
         handler: Per-worker copy of ``H``.
         stopping: Heap-allocated stop flag mutated by the
             ``Scheduler`` from another thread on shutdown.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     _run_handler_loop_impl[H, is_shared=True](
         listener_fd, config, handler, stopping, stats_addr
@@ -342,6 +358,8 @@ def _run_static_loop_impl[
         resp: Pre-encoded static response (immutable).
         stopping: Heap-allocated stop flag re-read every iteration
             via a fresh externally-mutated pointer (LICM defeat).
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     var reactor = Reactor()
     var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
@@ -355,25 +373,38 @@ def _run_static_loop_impl[
     else:
         reactor.register(c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate(exclusive=is_shared)
+    gate.add(Int(listener_fd), LISTENER_TOKEN)
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
+    # Joins the scheduler's accept-balancing group (disabled for a lone
+    # worker or when ``FLARE_BALANCE_ACCEPT=0``).
+    var bal = Balancer.open(stats_addr, reactor.wake_fd())
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
+        bal.publish(len(conns))
         events.clear()
         try:
             _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
             exit_status = WORKER_STATUS_CRASHED
             break
+        if bal.pending() > 0:
+            _adopt_handed_off_h1(
+                bal,
+                reactor,
+                conns,
+                wheel,
+                timers,
+                config.idle_timeout_ms,
+                config.max_connections,
+            )
 
         var now_ms = UInt64(_monotonic_ms())
-        var fired = List[UInt64]()
-        wheel.advance(now_ms, fired)
-        for i in range(len(fired)):
-            var fd_tok = Int(fired[i])
-            if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -388,6 +419,7 @@ def _run_static_loop_impl[
                     timers,
                     config.idle_timeout_ms,
                     config.max_connections,
+                    bal,
                 )
                 continue
             var fd = Int(evt.token)
@@ -398,6 +430,11 @@ def _run_static_loop_impl[
             try:
                 var last_step = StepResult()
                 if evt.is_readable():
+                    # A level-triggered socket that was not filled is
+                    # empty: skip the recv that would only return EAGAIN.
+                    # Not when the peer already sent a FIN (HUP): the
+                    # drain must reach EOF to answer with ``close``.
+                    ch_ptr[].short_read_ok = not evt.is_hup()
                     last_step = ch_ptr[].on_readable_static(resp, config)
                     step_done = last_step.done
                     var cycles = 0
@@ -446,7 +483,23 @@ def _run_static_loop_impl[
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor, wheel)
 
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
+
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
+    # Stop taking hand-offs, then close what peers queued before that
+    # (a stream dropped here closes its fd).
+    bal.close()
+    while True:
+        var left = bal.pop()
+        if left == 0:
+            break
+        Pool[TcpStream].free(left)
 
     # Graceful shutdown. Dedicated path flips ``Cancel.SHUTDOWN`` on
     # every leftover ConnHandle before close (paranoia copy from the
@@ -527,6 +580,8 @@ def run_reactor_loop_static_shared(
             across workers via ``StaticScheduler``'s heap-stored copy).
         stopping: Heap-allocated stop flag mutated by
             ``StaticScheduler.shutdown`` from the main thread.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     _run_static_loop_impl[is_shared=True](
         listener_fd, config, resp, stopping, stats_addr
@@ -563,6 +618,8 @@ def run_reactor_loop_cancel[
         handler: Per-request cancel-aware callback.
         stopping: Checked each iteration; flipping it stops the loop
             and closes in-flight connections.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     listener._socket.set_nonblocking(True)
     var listener_fd = listener._socket.fd
@@ -574,6 +631,8 @@ def run_reactor_loop_cancel[
 
     reactor.register(listener_fd, LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate()
+    gate.add(Int(listener_fd), LISTENER_TOKEN)
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
@@ -587,12 +646,9 @@ def run_reactor_loop_cancel[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        var fired = List[UInt64]()
-        wheel.advance(now_ms, fired)
-        for i in range(len(fired)):
-            var fd_tok = Int(fired[i])
-            if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -665,6 +721,14 @@ def run_reactor_loop_cancel[
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor, wheel)
 
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
+
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
     # Graceful shutdown: walk every active conn and flip its
@@ -709,6 +773,8 @@ def run_reactor_loop_view[
         config: Server configuration.
         handler: Per-request view-aware handler.
         stopping: Checked each iteration.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     listener._socket.set_nonblocking(True)
     var listener_fd = listener._socket.fd
@@ -720,6 +786,8 @@ def run_reactor_loop_view[
 
     reactor.register(listener_fd, LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate()
+    gate.add(Int(listener_fd), LISTENER_TOKEN)
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
@@ -733,12 +801,9 @@ def run_reactor_loop_view[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        var fired = List[UInt64]()
-        wheel.advance(now_ms, fired)
-        for i in range(len(fired)):
-            var fd_tok = Int(fired[i])
-            if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -810,6 +875,14 @@ def run_reactor_loop_view[
                 step_done = True
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor, wheel)
+
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 

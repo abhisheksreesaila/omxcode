@@ -51,7 +51,7 @@ from .hpack import (
     HpackEncoder,
     HpackHeader,
 )
-from .stream_slab import StreamSlab
+from .stream_slab import SlabEntry, StreamSlab
 
 
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
@@ -231,7 +231,7 @@ struct StreamState(Copyable, Defaultable):
 comptime StreamId = Int
 
 
-struct Stream(Copyable, Defaultable):
+struct Stream(Copyable, Defaultable, SlabEntry):
     """Per-stream record."""
 
     var id: StreamId
@@ -296,6 +296,24 @@ struct Stream(Copyable, Defaultable):
         self.content_length = -1
         self.response_started = False
         self.extended_connect_protocol = ""
+
+    def slab_active(self) -> Bool:
+        var st = self.state.value
+        return (
+            st == StreamState.OPEN().value
+            or st == StreamState.HALF_CLOSED_LOCAL().value
+            or st == StreamState.HALF_CLOSED_REMOTE().value
+        )
+
+    def slab_ready(self) -> Bool:
+        """A request fully buffered and not yet dispatched; see
+        ``Http2Connection.take_completed_streams``."""
+        return (
+            self.headers_complete
+            and self.data_complete
+            and not self.response_started
+            and self.state.value != StreamState.CLOSED().value
+        )
 
 
 # ── Connection ──────────────────────────────────────────────────────────
@@ -513,8 +531,8 @@ struct Connection(Copyable, Defaultable):
             self._append_setting(p, 0x4, self.initial_window_size)
 
         # SETTINGS_MAX_FRAME_SIZE = 0x5 — only when != RFC default.
-        if self.max_frame_size != H2_DEFAULT_FRAME_SIZE:
-            self._append_setting(p, 0x5, self.max_frame_size)
+        if self.local_max_frame_size != H2_DEFAULT_FRAME_SIZE:
+            self._append_setting(p, 0x5, self.local_max_frame_size)
 
         # SETTINGS_MAX_HEADER_LIST_SIZE = 0x6 — only when set
         # (``0`` = unset, RFC default is "unlimited").
@@ -593,12 +611,9 @@ struct Connection(Copyable, Defaultable):
         return t if t > 256 else 256
 
     def _prune_closed_streams(mut self) raises:
-        var dead = List[Int]()
-        for entry in self.streams.items():
-            if entry[1].state.value == StreamState.CLOSED().value:
-                dead.append(entry[0])
-        for k in range(len(dead)):
-            _ = self.streams.pop(dead[k])
+        for sid in self.streams.ids():
+            if self.streams[sid].state.value == StreamState.CLOSED().value:
+                _ = self.streams.pop(sid)
 
     def _put_stream(mut self, var s: Stream):
         self.streams[s.id] = s^
@@ -741,7 +756,7 @@ struct Connection(Copyable, Defaultable):
 
         Raises when the declared pad length does not leave room for
         itself, which sec 6.1 makes a connection error."""
-        var p = f.payload.copy()
+        ref p = f.payload
         var start = 0
         var end = len(p)
         if f.header.flags.has(FrameFlags.PADDED()):
@@ -756,10 +771,7 @@ struct Connection(Copyable, Defaultable):
             if end - start < 5:
                 raise Error("h2: PRIORITY prefix truncated")
             start += 5
-        var out = List[UInt8](capacity=end - start)
-        for i in range(start, end):
-            out.append(p[i])
-        return out^
+        return List[UInt8](Span(p)[start:end])
 
     @staticmethod
     def _is_connection_specific(name: String) -> Bool:
@@ -825,17 +837,10 @@ struct Connection(Copyable, Defaultable):
 
     def _active_stream_count(self) -> Int:
         """Streams that count against SETTINGS_MAX_CONCURRENT_STREAMS
-        (RFC 9113 sec 5.1.2: open plus either half-closed state)."""
-        var n = 0
-        for entry in self.streams.items():
-            var st = entry[1].state.value
-            if (
-                st == StreamState.OPEN().value
-                or st == StreamState.HALF_CLOSED_LOCAL().value
-                or st == StreamState.HALF_CLOSED_REMOTE().value
-            ):
-                n += 1
-        return n
+        (RFC 9113 sec 5.1.2: open plus either half-closed state).
+        ``Stream.slab_active`` is the predicate; the slab keeps the
+        count exact on every write."""
+        return self.streams.active_count()
 
     def _commit_header_block(mut self, sid: StreamId) raises -> List[Frame]:
         """Decode the accumulated header block for ``sid``, validate it,
@@ -1014,6 +1019,7 @@ struct Connection(Copyable, Defaultable):
                 self._put_stream(s^)
                 return out^
 
+        s.headers.reserve(len(s.headers) + len(hdrs))
         for j in range(len(hdrs)):
             s.headers.append(hdrs[j].copy())
             # RFC 8441 sec 4: capture ``:protocol`` on Extended CONNECT
@@ -1469,7 +1475,7 @@ struct Connection(Copyable, Defaultable):
                         Http2ErrorCode.PROTOCOL_ERROR().value
                     )
                 return self._conn_error(Http2ErrorCode.STREAM_CLOSED().value)
-            var s = self.streams[sid].copy()
+            var s = self.streams.pop(sid)
             var st = s.state.value
             if (
                 st == StreamState.CLOSED().value
@@ -1480,6 +1486,7 @@ struct Connection(Copyable, Defaultable):
                 # head yet" case below: a stream the server reset before
                 # answering is closed, so its DATA is STREAM_CLOSED, not
                 # PROTOCOL_ERROR (RFC 9113 sec 5.1, H2-20).
+                self._put_stream(s^)
                 return self._conn_error(Http2ErrorCode.STREAM_CLOSED().value)
             if self.is_client and not s.headers_complete:
                 # RFC 9113 sec 8.1 / 8.1.1: a response that starts with DATA
@@ -1503,6 +1510,7 @@ struct Connection(Copyable, Defaultable):
             try:
                 body = self._strip_pad_and_priority(f, False)
             except:
+                self._put_stream(s^)
                 return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
             # Flow control is accounted on the whole frame payload,
             # padding included (sec 6.9.1).
@@ -1563,8 +1571,7 @@ struct Connection(Copyable, Defaultable):
                 if len(f.payload) > 0:
                     out.append(self._conn_window_update(len(f.payload)))
                 return out^
-            for j in range(len(body)):
-                s.data.append(body[j])
+            s.data.extend(Span[UInt8, _](body))
             s.received_body_bytes += len(body)
             # sec 8.1.1: more DATA than content-length declared is
             # malformed on the frame that goes over, not only at
@@ -1724,8 +1731,7 @@ struct Connection(Copyable, Defaultable):
             df.header.stream_id = sid
             df.header.flags = FrameFlags(FrameFlags.END_STREAM())
             var pl = List[UInt8](capacity=len(body))
-            for i in range(len(body)):
-                pl.append(body[i])
+            pl.extend(body)
             df.payload = pl^
             frames.append(df^)
         return frames^
@@ -1775,8 +1781,7 @@ struct Connection(Copyable, Defaultable):
             # No END_STREAM: the trailing HEADERS below closes the stream.
             df.header.flags = FrameFlags()
             var pl = List[UInt8](capacity=len(body))
-            for i in range(len(body)):
-                pl.append(body[i])
+            pl.extend(body)
             df.payload = pl^
             frames.append(df^)
         var tl = List[HpackHeader]()

@@ -13,14 +13,8 @@ the connection; the caller feeds/drains the underlying
 :class:`Http2Connection` (reactor or paired-driver test).
 """
 
-from .frame import (
-    DEFAULT_MAX_FRAME_BYTES,
-    WS_TOO_BIG_MARKER,
-    WsCloseCode,
-    WsFrame,
-    WsOpcode,
-    _DecodeResult,
-)
+from .frame import WsCloseCode, WsFrame, WsOpcode
+from .protocol import WS_EVENT_MESSAGE, WsProtocol
 from ..http2.server import Http2Connection
 from ..runtime.pool import Pool
 
@@ -28,110 +22,72 @@ from ..runtime.pool import Pool
 struct WsOverH2ServerStream(Copyable):
     """Stream-keyed server adapter turning one h2 stream into a WS tunnel.
 
-    Owns the per-stream receive buffer. Unlike the client carrier it does
-    NOT mask outbound frames (a server MUST NOT mask, RFC 6455 5.3) and it
-    writes through :meth:`Http2Connection.queue_stream_data` /
-    :meth:`Http2Connection.drain_stream_data`.
+    The RFC 6455 rules live in :class:`flare.ws.protocol.WsProtocol`; this
+    carrier moves its bytes. Outbound frames are unmasked (RFC 6455 5.3)
+    and go out through :meth:`Http2Connection.queue_stream_data` as far
+    as the stream's send window allows; the rest waits in the protocol's
+    bounded outbox.
     """
 
     var stream_id: Int
-    var read_buffer: List[UInt8]
+    var proto: WsProtocol
     var closed: Bool
-    var pending_out: List[UInt8]
-    """Encoded frame bytes the stream's send window has not taken yet, in
-    order. Flushed by :meth:`flush` and on every :meth:`try_pull_frame`."""
-    var max_frame_size: Int
-    """Largest frame payload :meth:`try_pull_frame` accepts. A frame
-    that declares more is answered with CLOSE 1009 (MESSAGE_TOO_BIG)
-    and the pull raises. Defaults to :data:`DEFAULT_MAX_FRAME_BYTES`."""
 
     def __init__(out self, stream_id: Int):
         self.stream_id = stream_id
-        self.read_buffer = List[UInt8]()
+        self.proto = WsProtocol()
         self.closed = False
-        self.pending_out = List[UInt8]()
-        self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
 
     def flush(mut self, mut conn: Http2Connection) raises -> Int:
-        """Push parked outbound bytes as far as the window allows; return
+        """Push queued outbound bytes as far as the window allows; return
         how many are still waiting."""
-        if len(self.pending_out) == 0:
+        if len(self.proto.outbox) == 0:
             return 0
         var n = conn.queue_stream_data(
-            self.stream_id, Span[UInt8, _](self.pending_out)
+            self.stream_id, Span[UInt8, _](self.proto.outbox)
         )
-        if n > 0:
-            var rest = List[UInt8](capacity=len(self.pending_out) - n)
-            rest.extend(Span[UInt8, _](self.pending_out)[n:])
-            self.pending_out = rest^
-        return len(self.pending_out)
+        self.proto.consumed(n)
+        return len(self.proto.outbox)
 
     def send_frame(
         mut self, mut conn: Http2Connection, frame: WsFrame
     ) raises -> None:
-        """Encode ``frame`` UNMASKED and queue it as DATA on this stream.
-        A CLOSE frame ends the tunnel (subsequent sends raise).
-
-        ``queue_stream_data`` sends only what the stream's send window
-        takes. The rest used to be discarded (``_ = ...``): any message
-        larger than the window -- 65535 bytes by default -- was cut off
-        mid-frame and every later frame on the tunnel was misframed. The
-        remainder now waits in ``pending_out``, and later frames queue
-        behind it so order is kept."""
+        """Queue ``frame`` UNMASKED as DATA on this stream. A CLOSE ends
+        the tunnel (later sends raise), and so does a send that would
+        take the outbox past its bound (closed with 1008)."""
         if self.closed:
             raise Error("WsOverH2ServerStream: send on closed stream")
-        var zero = SIMD[DType.uint8, 4](0, 0, 0, 0)
-        var wire = frame.encode_with_key(False, zero)
-        self.pending_out.extend(Span[UInt8, _](wire))
+        try:
+            self.proto.send_frame(frame)
+        except e:
+            self.closed = True
+            _ = self.flush(conn)
+            raise e^
         _ = self.flush(conn)
-        if frame.opcode == WsOpcode.CLOSE:
+        if self.proto.close_sent:
             self.closed = True
 
     def try_pull_frame(
         mut self, mut conn: Http2Connection
     ) raises -> Optional[WsFrame]:
-        """Drain inbound DATA and decode at most one WS frame; ``None``
-        when the buffer doesn't yet hold a complete frame. Client frames
-        are masked; :meth:`WsFrame.decode_one` unmasks them."""
+        """Drain inbound DATA and return the next complete message as one
+        TEXT or BINARY frame, a CLOSE frame once the session has ended
+        (by the peer, or by a protocol violation answered with its CLOSE
+        code), or ``None`` until more data arrives. PING, PONG and the
+        CLOSE reply are handled here."""
         # Readable edges (a WINDOW_UPDATE among them) come through here,
-        # so this is where parked outbound bytes get their next chance.
+        # so this is where queued outbound bytes get their next chance.
         _ = self.flush(conn)
-        var data = conn.drain_stream_data(self.stream_id)
-        for i in range(len(data)):
-            self.read_buffer.append(data[i])
-        if len(self.read_buffer) == 0:
+        self.proto.inbox.extend(
+            Span[UInt8, _](conn.drain_stream_data(self.stream_id))
+        )
+        var ev = self.proto.next_event()
+        _ = self.flush(conn)
+        if not ev:
             return None
-        var dr: _DecodeResult
-        try:
-            dr = WsFrame.decode_one(
-                Span[UInt8, _](self.read_buffer),
-                max_payload=self.max_frame_size,
-            )
-        except e:
-            var msg = String(e)
-            if msg.find("decode_one: need") >= 0 or msg.find("truncated") >= 0:
-                return None
-            if WS_TOO_BIG_MARKER in msg:
-                try:
-                    self.close(conn, WsCloseCode.MESSAGE_TOO_BIG)
-                except:
-                    self.closed = True
-            raise e^
-        var consumed = dr.consumed
-        var got = dr^.take_frame()
-        # RFC 6455 sec 5.1: a server MUST close the connection on an
-        # unmasked client frame. The h1 server enforces it; this path did
-        # not.
-        if not got.masked:
+        if ev.value().kind != WS_EVENT_MESSAGE:
             self.closed = True
-            raise Error("WsOverH2ServerStream: unmasked client frame")
-        if got.opcode == WsOpcode.CLOSE:
-            self.closed = True
-        var rest = List[UInt8]()
-        for i in range(consumed, len(self.read_buffer)):
-            rest.append(self.read_buffer[i])
-        self.read_buffer = rest^
-        return got^
+        return self.proto.event_frame(ev.value())
 
     def is_closed(imm self) -> Bool:
         return self.closed
@@ -208,6 +164,7 @@ comptime _WsCloseThunk = def(
     Int, mut WsOverH2ServerStream, mut Http2Connection
 ) raises thin -> None
 comptime _WsDestroyThunk = def(Int) thin -> None
+comptime _WsCloneThunk = def(Int) raises thin -> Int
 
 
 def _ws_h2_open_thunk[
@@ -241,6 +198,10 @@ def _ws_h2_destroy_thunk[W: WsH2Handler](addr: Int) -> None:
     Pool[W].free(addr)
 
 
+def _ws_h2_clone_thunk[W: WsH2Handler](addr: Int) raises -> Int:
+    return Pool[W].alloc_move(Pool[W].get_ptr(addr)[].copy())
+
+
 struct WsH2Hooks(Copyable):
     """Opaque, non-owning boxed WS-over-h2 handler + its thunks.
 
@@ -257,6 +218,7 @@ struct WsH2Hooks(Copyable):
     var msg_thunk: _WsMsgThunk
     var close_thunk: _WsCloseThunk
     var destroy_thunk: _WsDestroyThunk
+    var clone_thunk: _WsCloneThunk
 
     def __init__(
         out self,
@@ -265,12 +227,21 @@ struct WsH2Hooks(Copyable):
         msg_thunk: _WsMsgThunk,
         close_thunk: _WsCloseThunk,
         destroy_thunk: _WsDestroyThunk,
+        clone_thunk: _WsCloneThunk,
     ):
         self.addr = addr
         self.open_thunk = open_thunk
         self.msg_thunk = msg_thunk
         self.close_thunk = close_thunk
         self.destroy_thunk = destroy_thunk
+        self.clone_thunk = clone_thunk
+
+    def clone(self) raises -> Self:
+        """Hooks over a fresh boxed copy of the handler (one per worker);
+        the caller destroys it."""
+        var out = self.copy()
+        out.addr = self.clone_thunk(self.addr)
+        return out^
 
 
 def make_ws_h2_hooks[W: WsH2Handler](var handler: W) raises -> WsH2Hooks:
@@ -287,4 +258,5 @@ def make_ws_h2_hooks[W: WsH2Handler](var handler: W) raises -> WsH2Hooks:
         msg_thunk=_ws_h2_msg_thunk[W],
         close_thunk=_ws_h2_close_thunk[W],
         destroy_thunk=_ws_h2_destroy_thunk[W],
+        clone_thunk=_ws_h2_clone_thunk[W],
     )

@@ -132,6 +132,16 @@ struct TlsServerNotImplemented(Copyable, Writable):
 # ── TlsServerConfig ────────────────────────────────────────────────────────
 
 
+@fieldwise_init
+struct TlsSniCert(Copyable):
+    """A certificate served to clients whose SNI matches ``host`` (an
+    exact name, or ``*.example.com`` for one label)."""
+
+    var host: String
+    var cert_file: String
+    var key_file: String
+
+
 struct TlsServerConfig(Copyable):
     """Server-side TLS policy.
 
@@ -188,6 +198,9 @@ struct TlsServerConfig(Copyable):
     1.3 ``ticket_lifetime`` field. Production deployments should
     keep this short and rotate ticket keys via an out-of-band
     secret-management path."""
+    var sni_certs: List[TlsSniCert]
+    """Certificates chosen by SNI; a client whose SNI matches none, or
+    that sends none, gets ``cert_file``."""
     var handshake_timeout_ms: Int
     """Wall-clock cap (milliseconds) on a single blocking
     ``SSL_accept`` drive in ``TlsAcceptor.handshake_fd``. Default
@@ -208,6 +221,7 @@ struct TlsServerConfig(Copyable):
         enable_session_tickets: Bool = False,
         ticket_lifetime_s: Int = 7200,
         handshake_timeout_ms: Int = 10_000,
+        var sni_certs: List[TlsSniCert] = List[TlsSniCert](),
     ) raises:
         """Construct the config; validates inter-field invariants.
 
@@ -235,6 +249,10 @@ struct TlsServerConfig(Copyable):
         self.enable_session_tickets = enable_session_tickets
         self.ticket_lifetime_s = ticket_lifetime_s
         self.handshake_timeout_ms = handshake_timeout_ms
+        for i in range(len(sni_certs)):
+            if sni_certs[i].host.byte_length() == 0:
+                raise Error("TlsServerConfig: an SNI certificate needs a host")
+        self.sni_certs = sni_certs^
 
 
 # Protocol version constants. Mirror OpenSSL's
@@ -354,6 +372,11 @@ struct TlsAcceptor(Movable):
                     alpn_blob.append(b)
             self._ctx.set_alpn(alpn_blob)
 
+        # Minimum protocol version. It was stored and never applied, so a
+        # TLS 1.3-only configuration still accepted TLS 1.2.
+        if config.min_protocol != TLS_PROTOCOL_TLS12:
+            self._ctx.set_min_protocol(config.min_protocol)
+
         # mTLS.
         if config.require_client_cert:
             self._ctx.set_verify_client_cert(config.client_ca_bundle)
@@ -367,7 +390,17 @@ struct TlsAcceptor(Movable):
         else:
             self._ctx.disable_session_tickets()
 
+        for i in range(len(config.sni_certs)):
+            ref c = config.sni_certs[i]
+            self._ctx.set_cert(c.host, c.cert_file, c.key_file)
+
         self.config = config^
+
+    def into_ctx(deinit self) -> ServerCtx:
+        """Hand over the configured ``SSL_CTX`` (ALPN, mTLS, minimum
+        version, session-ticket policy applied), e.g. to the HTTP
+        reactor, which drives its own non-blocking handshakes."""
+        return self._ctx^
 
     def reload(mut self) raises:
         """Re-read the cert + key files from ``config`` and swap in

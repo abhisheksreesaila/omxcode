@@ -77,6 +77,7 @@ from flare.http3.frame import (
     H3_FRAME_TYPE_PUSH_PROMISE,
     H3_FRAME_TYPE_SETTINGS,
     H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
+    H3_SETTINGS_H3_DATAGRAM,
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
     H3_SETTINGS_QPACK_BLOCKED_STREAMS,
     H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
@@ -93,11 +94,16 @@ from flare.http3.request_reader import (
 )
 from flare.http3.response_writer import (
     encode_response_data,
-    encode_response_headers,
+    encode_response_head,
+    encode_response_trailers,
 )
-from flare.http.wire import Request, Response
+from flare.http.wire import (
+    BodyPipe,
+    Request,
+    Response,
+    trailer_field_allowed,
+)
 from flare.qpack import QpackHeader
-from flare.http2.hpack import HpackHeader
 from flare.http2.state import validate_request_fields
 from flare.qpack.dynamic import (
     QpackDynamicTable,
@@ -130,6 +136,8 @@ comptime H3_FRAME_ERROR: UInt64 = 0x106
 comptime H3_EXCESSIVE_LOAD: UInt64 = 0x107
 comptime H3_SETTINGS_ERROR: UInt64 = 0x109
 comptime H3_MISSING_SETTINGS: UInt64 = 0x10A
+comptime H3_DATAGRAM_ERROR: UInt64 = 0x33
+"""RFC 9297 sec 2.1: a malformed HTTP Datagram."""
 comptime QPACK_DECOMPRESSION_FAILED: UInt64 = 0x200
 """RFC 9204 section 6."""
 comptime QPACK_ENCODER_STREAM_ERROR: UInt64 = 0x201
@@ -164,6 +172,8 @@ def h3_error_code(message: String) -> UInt64:
         return H3_SETTINGS_ERROR
     if "H3_MISSING_SETTINGS" in message:
         return H3_MISSING_SETTINGS
+    if "H3_DATAGRAM_ERROR" in message:
+        return H3_DATAGRAM_ERROR
     return H3_GENERAL_PROTOCOL_ERROR
 
 
@@ -223,9 +233,27 @@ struct Http3Config(Copyable, Defaultable):
     0 (paired with qpack_max_table_capacity=0)."""
 
     var enable_connect_protocol: Bool
-    """RFC 9220 §3 -- whether to advertise CONNECT-Protocol
-    support for WebSocket / WebTransport bootstrapping. Default
-    True since the rest of flare supports CONNECT semantics."""
+    """RFC 9220 §3 -- whether to advertise SETTINGS_ENABLE_CONNECT_PROTOCOL
+    and accept extended CONNECT (``:protocol``) requests. Default False:
+    advertising it obliges the server to accept such requests (RFC 8441
+    sec 3), and it used to be advertised while every one was refused."""
+
+    var max_body_size: UInt64
+    """Largest request body buffered for a handler. A request with more
+    is answered 413 and the client asked to stop sending (RFC 9114 sec
+    4.1.2). Default 10 MiB, as on h2."""
+
+    var stream_request_bodies: Bool
+    """Hand a request with a body to the handler on its HEADERS, the body
+    to follow through ``Request.body_stream()`` as it arrives, instead of
+    after the whole body is buffered; credit is granted as the handler
+    reads, so ``max_body_size`` does not apply. Default False: handlers
+    otherwise expect the whole body in ``Request.body``."""
+
+    var h3_datagram: Bool
+    """RFC 9297 -- advertise SETTINGS_H3_DATAGRAM and carry HTTP
+    Datagrams on extended CONNECT tunnels. Needs QUIC DATAGRAM support
+    (``QuicServerConfig.max_datagram_frame_size`` > 0). Default False."""
 
     var goaway_threshold_streams: UInt64
     """Local soft cap on the stream count above which the server
@@ -237,7 +265,10 @@ struct Http3Config(Copyable, Defaultable):
         self.max_field_section_size = UInt64(65536)
         self.qpack_max_table_capacity = UInt64(0)
         self.qpack_blocked_streams = UInt64(0)
-        self.enable_connect_protocol = True
+        self.enable_connect_protocol = False
+        self.h3_datagram = False
+        self.stream_request_bodies = False
+        self.max_body_size = UInt64(10 * 1024 * 1024)
         self.goaway_threshold_streams = UInt64((1 << 63) - 1)
 
 
@@ -315,6 +346,21 @@ struct _Http3StreamState(Copyable, Defaultable):
     Guards against the reactor double-dispatching the same
     request through a Handler."""
 
+    var too_large: Bool
+    """The body went over ``Http3Config.max_body_size``: the request is
+    answered 413 instead of being served."""
+
+    var streaming: Bool
+    """``Http3Config.stream_request_bodies``: the request is handed over
+    on its HEADERS and its body flows through :attr:`pipe`."""
+    var pipe: Optional[ArcPointer[BodyPipe]]
+
+    var tunnel: Bool
+    """The HEADERS carry ``:protocol`` and extended CONNECT is enabled
+    (RFC 9220): the request is ready without a FIN, and the body that
+    follows is the tunnel's bytes (:meth:`Http3Connection.take_stream_body`).
+    """
+
     def __init__(out self):
         self.reader = Http3RequestReader.new()
         self.inbox = List[UInt8]()
@@ -328,6 +374,10 @@ struct _Http3StreamState(Copyable, Defaultable):
         self.outbox = List[UInt8]()
         self.response_emitted = False
         self.request_taken = False
+        self.too_large = False
+        self.streaming = False
+        self.pipe = None
+        self.tunnel = False
 
     @staticmethod
     def with_limits(max_field_section_bytes: UInt64) -> Self:
@@ -423,8 +473,11 @@ struct _Http3EventCollector(Http3RequestEventHandler, Movable):
 # ── Per-connection driver ──────────────────────────────────────────────
 
 
-comptime _MAX_OUT_OF_ORDER_BYTES: Int = 1 << 21
-"""Most stream bytes held ahead of a gap, per stream (2 MiB)."""
+comptime _MAX_OUT_OF_ORDER_BYTES: Int = 1 << 24
+"""Most stream bytes held ahead of a gap, per stream (16 MiB): the
+largest receive window the QUIC server grants a stream, so a peer within
+flow control never trips it. Across streams the connection's MAX_DATA,
+granted only as requests are answered, bounds the total held."""
 
 
 struct _StreamReassembly(Copyable, Defaultable):
@@ -473,7 +526,9 @@ struct _StreamReassembly(Copyable, Defaultable):
             if offset not in self.pending:
                 if self.pending_bytes + len(data) > _MAX_OUT_OF_ORDER_BYTES:
                     raise Error("h3: too many out-of-order stream bytes")
-                self.pending[offset] = List[UInt8](data)
+                var held = List[UInt8](capacity=len(data))
+                held.extend(data)
+                self.pending[offset] = held^
                 self.pending_bytes += len(data)
             return out^
         out.extend(data[Int(self.next_offset - offset) :])
@@ -549,8 +604,12 @@ struct Http3Connection(Copyable, Defaultable):
     field-section-size + QPACK parameters."""
 
     var goaway_emitted: Bool
-    """Whether the server has emitted GOAWAY. Once True, new
-    request streams are rejected with H3_REQUEST_CANCELLED."""
+    """Whether the server has emitted GOAWAY. Once True, request
+    streams at or above :attr:`goaway_id` are rejected."""
+    var goaway_id: UInt64
+    """The stream id the GOAWAY named: requests below it are still
+    served (RFC 9114 sec 5.2), so one reordered behind the GOAWAY is not
+    lost."""
 
     var streams: Dict[Int, _Http3StreamState]
     """Per-stream state carriers. Keys are QUIC stream IDs.
@@ -600,6 +659,12 @@ struct Http3Connection(Copyable, Defaultable):
     var peer_settings_enable_connect_protocol: Bool
     """RFC 9220 §3 -- whether the peer advertises CONNECT-
     Protocol support."""
+    var peer_settings_h3_datagram: Bool
+    """RFC 9297 -- the peer sent SETTINGS_H3_DATAGRAM = 1."""
+    var peer_quic_datagram: Bool
+    """Set by the QUIC layer: the peer advertised a non-zero
+    ``max_datagram_frame_size``. SETTINGS_H3_DATAGRAM = 1 without it is
+    an H3_SETTINGS_ERROR (RFC 9297 sec 2.1.1)."""
 
     var peer_goaway_max_stream_id: UInt64
     """RFC 9114 §5.2 -- peer-emitted GOAWAY identifier. UINT64_MAX
@@ -664,6 +729,7 @@ struct Http3Connection(Copyable, Defaultable):
         self.config = Http3Config()
         self.peer_settings_received = False
         self.goaway_emitted = False
+        self.goaway_id = UInt64.MAX
         self.streams = Dict[Int, _Http3StreamState]()
         self.control_stream_id = -1
         self.qpack_encoder_stream_id = -1
@@ -675,6 +741,8 @@ struct Http3Connection(Copyable, Defaultable):
         self.peer_settings_qpack_max_table_capacity = UInt64(0)
         self.peer_settings_qpack_blocked_streams = UInt64(0)
         self.peer_settings_enable_connect_protocol = False
+        self.peer_settings_h3_datagram = False
+        self.peer_quic_datagram = False
         self.peer_goaway_max_stream_id = UInt64((1 << 63) - 1)
         self.reassembly = Dict[Int, _StreamReassembly]()
         self.closed_request_streams = Dict[Int, Bool]()
@@ -708,7 +776,7 @@ struct Http3Connection(Copyable, Defaultable):
         """
         if stream_id in self.streams:
             return
-        if self.goaway_emitted:
+        if self.goaway_emitted and UInt64(stream_id) >= self.goaway_id:
             raise Error(
                 "Http3Connection.open_request_stream: GOAWAY emitted;"
                 " new request streams are rejected"
@@ -716,6 +784,7 @@ struct Http3Connection(Copyable, Defaultable):
         var state = _Http3StreamState.with_limits(
             self.config.max_field_section_size
         )
+        state.reader.max_body_bytes = self.config.max_body_size
         state.reader.qpack_table = self.qpack_table
         self.streams[stream_id] = state^
 
@@ -724,7 +793,9 @@ struct Http3Connection(Copyable, Defaultable):
         response FIN has been emitted (so the server doesn't
         keep parser state around for a stream that's done)."""
         if stream_id in self.streams:
-            _ = self.streams.pop(stream_id)
+            var st = self.streams.pop(stream_id)
+            if st.pipe and not st.pipe.value()[].done:
+                st.pipe.value()[].failed = True
         if stream_id in self.reassembly:
             _ = self.reassembly.pop(stream_id)
         if (stream_id & 0x3) == 0 and stream_id >= self.closed_request_floor:
@@ -775,6 +846,14 @@ struct Http3Connection(Copyable, Defaultable):
                 self.feed_stream_chunk(stream_id, ready^)
         if fin_now and not is_uni:
             self.signal_end_of_stream(stream_id)
+
+    def delivered_offset(self, stream_id: Int) -> UInt64:
+        """Bytes of ``stream_id`` delivered in order so far (0 for a
+        stream not seen)."""
+        try:
+            return self.reassembly[stream_id].next_offset
+        except:
+            return UInt64(0)
 
     def has_stream(self, stream_id: Int) -> Bool:
         """Whether the driver currently tracks a carrier for
@@ -840,8 +919,12 @@ struct Http3Connection(Copyable, Defaultable):
         # _Http3StreamState (inbox + headers + body) on every inbound
         # chunk is the dominant per-request cost under concurrency.
         ref state = self.streams[stream_id]
-        for i in range(len(chunk)):
-            state.inbox.append(chunk[i])
+        if state.reader.state == H3_REQUEST_STATE_DONE:
+            return  # nothing more is read; it used to pile up in the inbox
+        if len(state.inbox) == 0:
+            state.inbox = chunk^
+        else:
+            state.inbox.extend(Span[UInt8, _](chunk))
         var cursor = 0
         while cursor < len(state.inbox):
             var collector = _Http3EventCollector.new()
@@ -867,15 +950,22 @@ struct Http3Connection(Copyable, Defaultable):
                 else:
                     state.headers = collector.headers.copy()
                     state.headers_complete = True
+                    if self.config.enable_connect_protocol:
+                        for i in range(len(state.headers)):
+                            if state.headers[i].name == ":protocol":
+                                state.tunnel = True
+                    if self.config.stream_request_bodies and not state.tunnel:
+                        state.streaming = True
+                        state.reader.max_body_bytes = UInt64.MAX
             if collector.data_fired:
-                for j in range(len(collector.data)):
-                    state.body.append(collector.data[j])
+                state.body.extend(Span[UInt8, _](collector.data))
             if collector.trailers_fired:
                 state.trailers = collector.trailers.copy()
             if collector.unknown_fired:
                 state.unknown_frames.append(collector.unknown_frame_type)
             if collector.error_fired:
                 state.protocol_error = String(collector.error_message)
+                state.too_large = "body above limit" in state.protocol_error
                 # The server advertises no blocked streams, so a field
                 # section that cannot be decoded now is a connection
                 # error, not a stream-local one that left the request
@@ -902,9 +992,14 @@ struct Http3Connection(Copyable, Defaultable):
         # chunk doesn't re-parse old bytes.
         if cursor > 0:
             var rest = List[UInt8](capacity=len(state.inbox) - cursor)
-            for k in range(cursor, len(state.inbox)):
-                rest.append(state.inbox[k])
+            rest.extend(Span[UInt8, _](state.inbox)[cursor:])
             state.inbox = rest^
+        if state.pipe:
+            ref p = state.pipe.value()[]
+            p.data.extend(Span[UInt8, _](state.body))
+            state.body.clear()
+            if state.protocol_error.byte_length() > 0:
+                p.failed = True
 
     def signal_end_of_stream(mut self, stream_id: Int) raises:
         """Signal that the QUIC layer observed FIN on
@@ -918,6 +1013,8 @@ struct Http3Connection(Copyable, Defaultable):
             return
         ref state = self.streams[stream_id]
         state.fin_received = True
+        if state.pipe:
+            state.pipe.value()[].done = True
 
     def take_completed_streams(self) raises -> List[Int]:
         """Return the IDs of streams that have a request ready
@@ -942,10 +1039,17 @@ struct Http3Connection(Copyable, Defaultable):
                 continue
             if not entry.value.headers_complete:
                 continue
-            if entry.value.protocol_error.byte_length() != 0:
+            if (
+                entry.value.protocol_error.byte_length() != 0
+                and not entry.value.too_large
+            ):
                 continue
-            var done = entry.value.fin_received or (
-                entry.value.reader.state == H3_REQUEST_STATE_DONE
+            var done = (
+                entry.value.too_large
+                or entry.value.streaming
+                or entry.value.fin_received
+                or entry.value.tunnel
+                or entry.value.reader.state == H3_REQUEST_STATE_DONE
             )
             if not done:
                 continue
@@ -968,6 +1072,9 @@ struct Http3Connection(Copyable, Defaultable):
                 "Http3Connection.take_request: request already taken on stream "
                 + String(stream_id)
             )
+        if state.too_large:
+            state.request_taken = True
+            raise Error("Http3Connection.take_request: request body too large")
         if not state.headers_complete:
             raise Error(
                 "Http3Connection.take_request: HEADERS frame not yet parsed on"
@@ -980,12 +1087,9 @@ struct Http3Connection(Copyable, Defaultable):
         # validate_request_fields. A request with no pseudo-headers used
         # to be served as GET /. Malformed raises; the dispatcher
         # answers 400.
-        var as_hpack = List[HpackHeader]()
-        for i in range(len(state.headers)):
-            as_hpack.append(
-                HpackHeader(state.headers[i].name, state.headers[i].value)
-            )
-        if not validate_request_fields(as_hpack, False, False):
+        if not validate_request_fields(
+            state.headers, False, self.config.enable_connect_protocol
+        ) or not validate_request_fields(state.trailers, True, False):
             state.request_taken = True
             raise Error(
                 "Http3Connection.take_request: malformed request on stream "
@@ -994,20 +1098,27 @@ struct Http3Connection(Copyable, Defaultable):
         var method = String("")
         var path = String("")
         for i in range(len(state.headers)):
-            var name = state.headers[i].name
-            var value = state.headers[i].value
+            ref name = state.headers[i].name
             if name == ":method":
-                method = String(value)
+                method = state.headers[i].value
             elif name == ":path":
-                path = String(value)
-        var req = Request(method=method^, url=path^, body=state.body.copy())
+                path = state.headers[i].value
+        var body = List[UInt8]()
+        swap(body, state.body)
+        var pipe = Optional[ArcPointer[BodyPipe]](None)
+        if state.streaming and not state.fin_received:
+            pipe = ArcPointer(BodyPipe(body^, False))
+            body = List[UInt8]()
+            state.pipe = pipe
+        var req = Request(method=method, url=path, body=body)
+        req.body_pipe = pipe^
         # Same rules as h2's take_request: repeated fields are appended,
         # cookie crumbs are joined (RFC 9114 sec 4.2.1), and :authority
         # becomes Host -- it used to be dropped, leaving Host-based
         # routing blind on h3.
         var cookie = String("")
         for i in range(len(state.headers)):
-            var name = state.headers[i].name
+            ref name = state.headers[i].name
             if name == ":authority":
                 req.headers.set("Host", String(state.headers[i].value))
                 continue
@@ -1023,8 +1134,43 @@ struct Http3Connection(Copyable, Defaultable):
             req.headers.append(state.headers[i].name, state.headers[i].value)
         if cookie.byte_length() > 0:
             req.headers.append("cookie", cookie)
+        for i in range(len(state.trailers)):
+            if trailer_field_allowed(state.trailers[i].name):
+                req.trailers.append(
+                    state.trailers[i].name, state.trailers[i].value
+                )
         state.request_taken = True
         return req^
+
+    def is_tunnel(self, stream_id: Int) -> Bool:
+        """Whether ``stream_id`` carries an extended CONNECT request."""
+        try:
+            return self.streams[stream_id].tunnel
+        except:
+            return False
+
+    def body_backlog(self, stream_id: Int) -> Int:
+        """Body bytes of a streamed request received and not yet read by
+        its handler; -1 when the stream has no body being streamed."""
+        try:
+            ref st = self.streams[stream_id]
+            if st.pipe:
+                return len(st.pipe.value()[].data)
+        except:
+            pass
+        return -1
+
+    def take_stream_body(mut self, stream_id: Int) -> List[UInt8]:
+        """The DATA payload bytes received on ``stream_id`` since the
+        request (or the last call) took them: an extended CONNECT
+        tunnel's inbound bytes."""
+        var out = List[UInt8]()
+        if stream_id in self.streams:
+            try:
+                swap(out, self.streams[stream_id].body)
+            except:
+                pass
+        return out^
 
     def emit_response(mut self, stream_id: Int, var response: Response) raises:
         """Encode ``response`` into the per-stream outbox so the
@@ -1049,27 +1195,21 @@ struct Http3Connection(Copyable, Defaultable):
                 " stream "
                 + String(stream_id)
             )
-        var headers = List[QpackHeader]()
-        for i in range(response.headers.len()):
-            var name = response.headers._keys[i]
-            var value = response.headers._values[i]
-            # RFC 9114 sec 4.2: connection-specific fields are malformed
-            # in HTTP/3, and a client must reject a response carrying
-            # one. They were copied through from handlers written for
-            # h1 (Connection: close, Transfer-Encoding: chunked).
-            var lower = String(name).lower()
-            if (
-                lower == "connection"
-                or lower == "keep-alive"
-                or lower == "proxy-connection"
-                or lower == "transfer-encoding"
-                or lower == "upgrade"
-            ):
-                continue
-            headers.append(QpackHeader(String(name), String(value)))
-        encode_response_headers(response.status, headers, state.outbox)
+        encode_response_head(response.status, response.headers, state.outbox)
         if len(response.body) != 0:
             encode_response_data(Span[UInt8, _](response.body), state.outbox)
+        # Trailers follow the body as a final HEADERS frame (RFC 9114
+        # sec 4.1); a buffered response used to drop them, which breaks
+        # gRPC status over h3.
+        if len(response.trailers._keys) > 0:
+            var tr = List[QpackHeader]()
+            for i in range(len(response.trailers._keys)):
+                tr.append(
+                    QpackHeader(
+                        response.trailers._keys[i], response.trailers._values[i]
+                    )
+                )
+            encode_response_trailers(tr, state.outbox)
         state.response_emitted = True
 
     # -- Unidirectional stream type dispatch (RFC 9114 §6.2) ----------
@@ -1400,6 +1540,13 @@ struct Http3Connection(Copyable, Defaultable):
                 self.peer_settings_qpack_blocked_streams = v
             elif id_ == H3_SETTINGS_ENABLE_CONNECT_PROTOCOL:
                 self.peer_settings_enable_connect_protocol = v != UInt64(0)
+            elif id_ == H3_SETTINGS_H3_DATAGRAM:
+                if v > 1 or (v == 1 and not self.peer_quic_datagram):
+                    raise Error(
+                        "h3 server: bad SETTINGS_H3_DATAGRAM (RFC 9297"
+                        " 2.1.1 H3_SETTINGS_ERROR)"
+                    )
+                self.peer_settings_h3_datagram = v == 1
 
     def emit_initial_settings(self) raises -> List[UInt8]:
         """Build the server's outbound control-stream prefix:
@@ -1443,6 +1590,10 @@ struct Http3Connection(Copyable, Defaultable):
                     value=UInt64(1),
                 )
             )
+        if self.config.h3_datagram:
+            settings.append(
+                Http3Setting(identifier=H3_SETTINGS_H3_DATAGRAM, value=1)
+            )
         var payload = List[UInt8]()
         encode_http3_settings(settings, payload)
         encode_http3_frame(H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](payload), out)
@@ -1477,6 +1628,7 @@ struct Http3Connection(Copyable, Defaultable):
         var payload = encode_varint(max_stream_id)
         encode_http3_frame(H3_FRAME_TYPE_GOAWAY, Span[UInt8, _](payload), out)
         self.goaway_emitted = True
+        self.goaway_id = max_stream_id
         return out^
 
     def take_response_frames(mut self, stream_id: Int) raises -> List[UInt8]:

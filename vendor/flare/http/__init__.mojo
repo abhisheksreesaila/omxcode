@@ -220,6 +220,7 @@ from .server import (
     ok,
     ok_json,
     ok_json_value,
+    ok_json_of,
     bad_request,
     unauthorized,
     forbidden,
@@ -264,6 +265,7 @@ from .session import (
     signed_cookie_encode,
 )
 from .middleware import (
+    AltSvc,
     CatchPanic,
     Compress,
     Logger,

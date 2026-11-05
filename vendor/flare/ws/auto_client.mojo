@@ -352,7 +352,9 @@ struct WsAutoClient(Movable):
     # ── Connect ────────────────────────────────────────────────────────
 
     def connect(mut self) raises:
-        """Run the runtime connection sequence:
+        """Run the runtime connection sequence.
+
+        The steps are:
 
         1. Parse the URL scheme.
         2. ``ws://``: open a cleartext :class:`WsClient` (no ALPN
@@ -406,7 +408,7 @@ struct WsAutoClient(Movable):
             var cfg = self.config.tls_config.copy()
             cfg.alpn = List[String]()
             cfg.alpn.append("http/1.1")
-            var c = WsClient.connect(self.config.url, cfg^)
+            var c = WsClient.connect(self.config.url, cfg)
             self._h1_client = Optional[WsClient](c^)
             self.chosen_wire = WsWireChoice.HTTP_1_1
             return
@@ -416,7 +418,7 @@ struct WsAutoClient(Movable):
         probe_cfg.alpn = List[String]()
         probe_cfg.alpn.append("h2")
         probe_cfg.alpn.append("http/1.1")
-        var tls = TlsStream.connect(u.host, u.port, probe_cfg^)
+        var tls = TlsStream.connect(u.host, u.port, probe_cfg)
         var alpn = tls.alpn_selected()
 
         if alpn == "h2":
@@ -435,7 +437,7 @@ struct WsAutoClient(Movable):
         var h1_cfg = self.config.tls_config.copy()
         h1_cfg.alpn = List[String]()
         h1_cfg.alpn.append("http/1.1")
-        var c = WsClient.connect(self.config.url, h1_cfg^)
+        var c = WsClient.connect(self.config.url, h1_cfg)
         self._h1_client = Optional[WsClient](c^)
         self.chosen_wire = WsWireChoice.HTTP_1_1
 
@@ -490,7 +492,9 @@ struct WsAutoClient(Movable):
             # ``Span`` directly over ``scratch``'s backing storage so
             # the lifetime is the named local, not the slice's
             # anonymous temporary.
-            h2.feed(Span[UInt8, _](unsafe_ptr=scratch.unsafe_ptr(), length=n))
+            h2.receive(
+                Span[UInt8, _](unsafe_ptr=scratch.unsafe_ptr(), length=n)
+            )
             var auto_out = h2.drain()
             if len(auto_out) > 0:
                 tls.write_all(Span[UInt8, _](auto_out))
@@ -538,7 +542,9 @@ struct WsAutoClient(Movable):
             # explicit ptr+length Span form to keep the lifetime
             # tied to the named ``scratch`` rather than a slice
             # temporary that the heap may reuse.
-            h2.feed(Span[UInt8, _](unsafe_ptr=scratch.unsafe_ptr(), length=n))
+            h2.receive(
+                Span[UInt8, _](unsafe_ptr=scratch.unsafe_ptr(), length=n)
+            )
             var auto_out = h2.drain()
             if len(auto_out) > 0:
                 tls.write_all(Span[UInt8, _](auto_out))

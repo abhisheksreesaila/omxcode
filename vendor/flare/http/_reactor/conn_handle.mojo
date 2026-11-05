@@ -89,6 +89,7 @@ from .keepalive_scan import (
     _is_connection,
     _is_content_length,
     _is_date,
+    _has_header_line,
     _monotonic_ms,
     _wants_close,
 )
@@ -99,6 +100,7 @@ from flare.http.proto.chunked import (
     TE_CHUNKED,
     TE_UNSUPPORTED,
     decode_chunked_body,
+    decode_chunked_trailers,
     request_te_framing,
     scan_chunked_resume,
 )
@@ -135,6 +137,16 @@ The batch caps bound bytes per pass; this bounds passes per writable
 edge, so one connection with an endless source cannot hold the worker.
 ``STREAM_EDGE_PASSES x STREAM_BATCH_CHUNKS`` chunks is the per-edge
 ceiling, after which the connection re-arms and yields to its peers."""
+
+comptime _WS_NOT_HANDSHAKE: Int = 0
+comptime _WS_UPGRADED: Int = 1
+comptime _WS_REFUSED: Int = 2
+comptime _WS_ON_REACTOR: Int = 3
+
+comptime PIPELINE_BATCH_REQUESTS: Int = 32
+"""Pipelined requests already in ``read_buf`` served before one flush."""
+comptime PIPELINE_BATCH_BYTES: Int = 64 * 1024
+"""Response bytes a pipelined batch may hold before it is flushed."""
 
 
 # ── Connection handle ─────────────────────────────────────────────────────────
@@ -258,6 +270,9 @@ struct ConnHandle(Movable):
     """Serialised response bytes; drained by successive send calls."""
     var write_pos: Int
     """Number of bytes of ``write_buf`` already sent."""
+    var batch_out: List[UInt8]
+    """Responses to earlier pipelined requests of the current batch, sent
+    ahead of ``write_buf`` in the same flush."""
     var keepalive_count: Int
     """Number of requests already served on this keep-alive connection."""
     var idle_timer_id: UInt64
@@ -280,6 +295,11 @@ struct ConnHandle(Movable):
     ``on_writable``)."""
 
     var _h2c_upgrade_pending: Bool
+    var _ws_upgrade_pending: Bool
+    """A WebSocket 101 is queued; once it flushes the unified reactor
+    moves the connection to a ``WsConnHandle``."""
+    var _ws_prebuf: List[UInt8]
+    var _ws_origin: String
     """``True`` iff this h1 connection has received a valid
     ``Upgrade: h2c`` request (RFC 7540 §3.2), queued the
     ``101 Switching Protocols`` response into ``write_buf``, and
@@ -359,6 +379,11 @@ struct ConnHandle(Movable):
     """The peer has half-closed (FIN / close_notify) with a request still
     buffered. That request is served, with ``Connection: close``."""
 
+    var short_read_ok: Bool
+    """Set by a driver whose readiness event carried no HUP: a ``recv``
+    that does not fill the chunk then ends the drain without an extra
+    probe. Left False (full drain to EAGAIN) by every other driver."""
+
     var request_started_ms: Int
     """Monotonic ms at which the first byte of the request being read
     was seen; 0 between requests. Bounds the whole read phase (head and
@@ -401,11 +426,13 @@ struct ConnHandle(Movable):
         self.head_request = False
         self.request_started_ms = 0
         self.peer_eof = False
+        self.short_read_ok = False
         self.h2c_upgrade_allowed = False
         self.continue_sent = False
         self.continue_pending = List[UInt8]()
         self.write_buf = List[UInt8]()
         self.write_pos = 0
+        self.batch_out = List[UInt8]()
         self.keepalive_count = 0
         self.idle_timer_id = UInt64(0)
         self.should_close = False
@@ -413,6 +440,9 @@ struct ConnHandle(Movable):
         self.last_interest = 1  # INTEREST_READ
         self.send_in_flight = False
         self._h2c_upgrade_pending = False
+        self._ws_upgrade_pending = False
+        self._ws_prebuf = List[UInt8]()
+        self._ws_origin = String("")
         self._h2c_upgrade_request = Optional[Request]()
         self._h2c_upgrade_settings = List[UInt8]()
         self._date_cache = DateCache()
@@ -447,7 +477,7 @@ struct ConnHandle(Movable):
         flips_cancel_on_close: Bool
     ](mut self, config: ServerConfig) raises -> Optional[StepResult]:
         """Drain the non-blocking socket via ``_recv`` into
-        ``self.read_buf`` until EAGAIN. Returns ``Some(StepResult)``
+        ``self.read_buf`` until a short read or EAGAIN. Returns ``Some(StepResult)``
         when the state machine should bail (peer-close, oversize,
         hard error); ``None`` when the buffer is up-to-date and the
         caller should fall through to the parse step.
@@ -480,6 +510,16 @@ struct ConnHandle(Movable):
                     self._note_head_from_buf()
                     self._queue_error(413, "Content Too Large")
                     return Optional[StepResult](self._transition_to_writing())
+                # A read that did not fill the chunk emptied the socket
+                # (``recv`` returns what is queued, up to the chunk), so
+                # another call would only report EAGAIN. Registration is
+                # level-triggered: anything that arrives later raises
+                # the next event. A peer shutdown is the exception to
+                # skipping the probe: the response to a request that came
+                # with the FIN must announce ``close``, so a driver sets
+                # ``short_read_ok`` only for an event without HUP.
+                if self.short_read_ok and got_int < 8192:
+                    break
             elif got == 0:
                 self.should_close = True
                 # A FIN after a complete request is a half-close: the
@@ -803,7 +843,7 @@ struct ConnHandle(Movable):
         )
         if resp.body_stream and not bodyless:
             self.body_src = resp.body_stream.take()
-            self._serialize_response_chunked(resp^, not close_after)
+            self._serialize_response_chunked(resp, not close_after)
         else:
             # A bodyless answer to a streaming handler sends its head
             # only; the chunk source is dropped with ``resp``, unread.
@@ -825,6 +865,25 @@ struct ConnHandle(Movable):
     ](mut self, ref handler: H, config: ServerConfig,) raises -> StepResult:
         """Drive the state machine on a readable event.
 
+        Serves the request just read, then every further whole request
+        already buffered behind it (HTTP/1.1 pipelining), up to the batch
+        caps, so the responses leave in one flush.
+        """
+        var step = self._serve_next(handler, config, True)
+        var served = 1
+        while served < PIPELINE_BATCH_REQUESTS and self._batch_continues():
+            step = self._serve_next(handler, config, False)
+            served += 1
+        self._merge_batch()
+        return step
+
+    def _serve_next[
+        H: Handler
+    ](
+        mut self, ref handler: H, config: ServerConfig, drain: Bool
+    ) raises -> StepResult:
+        """Read (when ``drain``), parse and serve one request.
+
         Consumes as much as the non-blocking socket makes available per
         call. Transitions to ``STATE_WRITING`` when the full request is
         parsed and the handler has returned.
@@ -832,6 +891,8 @@ struct ConnHandle(Movable):
         Args:
             handler: Request -> Response callback.
             config: Server configuration (limits + timeouts).
+            drain: Read from the socket first; False for a request
+                already buffered behind the previous one.
 
         Returns:
             A ``StepResult`` describing the new reactor-interest state.
@@ -841,9 +902,10 @@ struct ConnHandle(Movable):
                 want_read=False, want_write=self.state == STATE_WRITING
             )
 
-        var drained = self._drain_recv[flips_cancel_on_close=False](config)
-        if drained:
-            return drained.value()
+        if drain:
+            var drained = self._drain_recv[flips_cancel_on_close=False](config)
+            if drained:
+                return drained.value()
         var pending = self._check_request_complete(
             config, body_timeout_ms=config.read_body_timeout_ms
         )
@@ -889,6 +951,11 @@ struct ConnHandle(Movable):
                     self.headers_end,
                     req.body,
                 )
+                decode_chunked_trailers(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    req.trailers,
+                )
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
@@ -911,7 +978,9 @@ struct ConnHandle(Movable):
             # the raw fd and writes the 101 and every frame in cleartext,
             # and a TLS connection has no upgrade seam (a ``wss://``
             # handshake is served as plain HTTP/1.1 inside TLS instead).
-            var ws_here = config.ws.handler and not self.tls
+            var ws_here = (
+                config.ws.handler or config.ws.reactor
+            ) and not self.tls
             if ws_here and _is_ws_version_mismatch(req):
                 # RFC 6455 sec 4.4: a handshake for a version we do not
                 # speak gets 426 with the version we do, rather than
@@ -928,7 +997,7 @@ struct ConnHandle(Movable):
                 self.should_close = True
                 return self._finalise_response(r426^, True)
             if ws_here:
-                var upgraded: Bool
+                var upgraded: Int
                 try:
                     upgraded = self._handle_ws_upgrade(req, config)
                 except:
@@ -939,7 +1008,14 @@ struct ConnHandle(Movable):
                     return StepResult(
                         want_read=False, want_write=False, done=True
                     )
-                if upgraded:
+                if upgraded == _WS_ON_REACTOR:
+                    return self._transition_to_writing()
+                if upgraded == _WS_REFUSED:
+                    self.should_close = True
+                    return self._finalise_response(
+                        build_error_response(503, "Service Unavailable"), True
+                    )
+                if upgraded == _WS_UPGRADED:
                     return StepResult(
                         want_read=False,
                         want_write=False,
@@ -982,7 +1058,7 @@ struct ConnHandle(Movable):
         var request_id = req.headers.get("x-request-id")
         var resp: Response
         try:
-            resp = handler.serve(req^).lower()
+            resp = handler.serve(req).lower()
         except e:
             log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
@@ -1069,6 +1145,11 @@ struct ConnHandle(Movable):
                     self.headers_end,
                     req.body,
                 )
+                decode_chunked_trailers(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    req.trailers,
+                )
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
@@ -1078,7 +1159,7 @@ struct ConnHandle(Movable):
         var request_id = req.headers.get("x-request-id")
         var resp: Response
         try:
-            resp = handler.serve(req^).lower()
+            resp = handler.serve(req).lower()
         except e:
             log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
@@ -1143,6 +1224,11 @@ struct ConnHandle(Movable):
                     self.headers_end,
                     req.body,
                 )
+                decode_chunked_trailers(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    req.trailers,
+                )
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
@@ -1156,7 +1242,7 @@ struct ConnHandle(Movable):
             # Hand the handler a cancel handle bound to this
             # connection's cancel cell. The cell outlives the handler
             # call (it's owned by ``self``).
-            resp = handler.serve(req^, self.cancel_cell.handle())
+            resp = handler.serve(req, self.cancel_cell.handle())
         except e:
             log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
@@ -1260,16 +1346,30 @@ struct ConnHandle(Movable):
         call, scans for the end-of-headers marker, discards the
         declared body bytes (if any), and queues the pre-encoded
         ``StaticResponse`` bytes into ``write_buf``. The parser never
-        constructs a ``Request``; no handler is called.
+        constructs a ``Request``; no handler is called. Pipelined
+        requests already buffered are answered in the same flush, as on
+        the handler path.
         """
+        var step = self._serve_static_next(resp, config, True)
+        var served = 1
+        while served < PIPELINE_BATCH_REQUESTS and self._batch_continues():
+            step = self._serve_static_next(resp, config, False)
+            served += 1
+        self._merge_batch()
+        return step
+
+    def _serve_static_next(
+        mut self, resp: StaticResponse, config: ServerConfig, drain: Bool
+    ) raises -> StepResult:
         if self.state != STATE_READING:
             return StepResult(
                 want_read=False, want_write=self.state == STATE_WRITING
             )
 
-        var drained = self._drain_recv[flips_cancel_on_close=False](config)
-        if drained:
-            return drained.value()
+        if drain:
+            var drained = self._drain_recv[flips_cancel_on_close=False](config)
+            if drained:
+                return drained.value()
         var pending = self._check_request_complete(config)
         if pending:
             return pending.value()
@@ -1343,6 +1443,59 @@ struct ConnHandle(Movable):
                 StepResult(want_read=False, want_write=False, done=True)
             )
         return Optional[StepResult]()
+
+    def _batch_continues(mut self) -> Bool:
+        """Whether the response just queued may wait for the next buffered
+        request's, and if so set it aside in ``batch_out``.
+
+        Only a plain buffered response qualifies: not one that closes the
+        connection, streams, or is still to finish an interim write, and
+        the next request must be whole and carry no ``Upgrade`` (a
+        WebSocket handshake writes on the socket itself, ahead of anything
+        still queued here).
+        """
+        if (
+            self.state != STATE_WRITING
+            or self.write_pos != 0
+            or self.should_close
+            or self.body_src
+            or self._h2c_upgrade_pending
+            or self._ws_upgrade_pending
+            or len(self.continue_pending) > 0
+            or len(self.batch_out) + len(self.write_buf) > PIPELINE_BATCH_BYTES
+        ):
+            return False
+        self.state = STATE_READING
+        if not self.has_buffered_request():
+            self.state = STATE_WRITING
+            return False
+        var end = self.headers_end
+        if end < 0:
+            end = _find_crlfcrlf(self.read_buf, 0)
+        if _has_header_line(self.read_buf, end, "upgrade:"):
+            self.state = STATE_WRITING
+            return False
+        self.batch_out.extend(Span[UInt8, _](self.write_buf))
+        self.write_buf.clear()
+        return True
+
+    def _merge_batch(mut self):
+        """Put the batch's earlier responses ahead of the last one."""
+        if len(self.batch_out) == 0:
+            return
+        self.batch_out.extend(
+            Span[UInt8, _](self.write_buf)[self.write_pos : len(self.write_buf)]
+        )
+        swap(self.write_buf, self.batch_out)
+        self.write_pos = 0
+        self.batch_out.clear()
+
+    def take_ws_upgrade(mut self, mut prebuf: List[UInt8], mut origin: String):
+        """Hand the bytes past the handshake and its ``Origin`` to the
+        ``WsConnHandle`` that takes over the connection."""
+        self._ws_upgrade_pending = False
+        swap(prebuf, self._ws_prebuf)
+        swap(origin, self._ws_origin)
 
     def has_buffered_request(self) -> Bool:
         """True when ``read_buf`` already holds a whole request that has
@@ -1454,6 +1607,9 @@ struct ConnHandle(Movable):
                     want_write=True,
                     idle_timeout_ms=config.write_timeout_ms,
                 )
+
+        if self._ws_upgrade_pending:
+            return StepResult(idle_timeout_ms=0, ws_upgrade=True)
 
         # h2c upgrade migration cue: the 101 Switching Protocols response
         # has just flushed. Tell the unified reactor to swap the conn-dict
@@ -1596,7 +1752,7 @@ struct ConnHandle(Movable):
 
     def _handle_ws_upgrade(
         mut self, req: Request, config: ServerConfig
-    ) raises -> Bool:
+    ) raises -> Int:
         """Perform an RFC 6455 upgrade on this connection, if it is one.
 
         Returns ``False`` -- cheaply and with no side effects -- when
@@ -1634,7 +1790,9 @@ struct ConnHandle(Movable):
             _compute_accept_srv,
             _send_upgrade_response,
             _spawn_ws_offload,
+            _upgrade_response,
             _ws_handshake_problem,
+            ws_offload_try_acquire,
         )
         from flare.net.socket import RawSocket
         from flare.net._libc import AF_INET, SOCK_STREAM
@@ -1654,7 +1812,37 @@ struct ConnHandle(Movable):
             ).byte_length()
             != 0
         ):
-            return False
+            return _WS_NOT_HANDSHAKE
+        if config.ws.reactor and self.h2c_upgrade_allowed:
+            self._ws_prebuf = List[UInt8]()
+            if self.body_total >= 0 and self.body_total < len(self.read_buf):
+                self._ws_prebuf.extend(
+                    Span[UInt8, _](self.read_buf)[
+                        self.body_total : len(self.read_buf)
+                    ]
+                )
+            self.read_buf.clear()
+            var reactor_origins = req.headers.get_all("origin")
+            self._ws_origin = String("")
+            if len(reactor_origins) > 0:
+                self._ws_origin = reactor_origins[
+                    len(reactor_origins) - 1
+                ].copy()
+            self.write_buf.clear()
+            self.write_buf.extend(
+                _upgrade_response(
+                    _compute_accept_srv(req.headers.get("sec-websocket-key"))
+                ).as_bytes()
+            )
+            self.write_pos = 0
+            self._ws_upgrade_pending = True
+            return _WS_ON_REACTOR
+        if not config.ws.handler:
+            return _WS_NOT_HANDSHAKE
+        if config.ws.offload and not ws_offload_try_acquire(
+            config.ws.max_offloaded
+        ):
+            return _WS_REFUSED
         var ws_key = req.headers.get("sec-websocket-key")
 
         var accept = _compute_accept_srv(ws_key)
@@ -1695,9 +1883,9 @@ struct ConnHandle(Movable):
             # fd is already detached from the reactor and back in
             # blocking mode, so that thread owns it end to end.
             _spawn_ws_offload(conn^, config.ws.handler.value())
-            return True
+            return _WS_UPGRADED
         config.ws.handler.value()(conn)
-        return True
+        return _WS_UPGRADED
 
     def _note_head_from_buf(mut self):
         """While the request head has not been fully scanned
@@ -1716,7 +1904,7 @@ struct ConnHandle(Movable):
         answering a HEAD request carries no content (APP-05)."""
         self.should_close = True
         var resp = build_error_response(status, reason)
-        self._serialize_response(resp^, False)
+        self._serialize_response(resp, False)
 
     def _serialize_static(
         mut self,

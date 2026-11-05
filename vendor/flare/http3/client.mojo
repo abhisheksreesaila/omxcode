@@ -47,6 +47,15 @@ from std.collections.span import Span
 from flare.qpack import QpackHeader
 from flare.quic.client import QuicClientConnection, _monotonic_ms
 from flare.quic.state import ConnectionEvents
+from flare.quic.varint import decode_varint
+from flare.runtime.pool import PoolableConn
+
+from .frame import (
+    H3_FRAME_TYPE_GOAWAY,
+    H3_FRAME_TYPE_SETTINGS,
+    H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
+    decode_http3_settings,
+)
 
 from .request_writer import (
     encode_client_control_stream,
@@ -212,7 +221,7 @@ struct _PendingRequest(Copyable):
         self.reader = reader^
 
 
-struct Http3ClientConnection(Movable):
+struct Http3ClientConnection(Movable, PoolableConn):
     """An HTTP/3 client over an established QUIC connection.
 
     Wraps a :class:`QuicClientConnection` (whose handshake must
@@ -236,6 +245,24 @@ struct Http3ClientConnection(Movable):
     var _cancelled: Dict[UInt64, Bool]
     """Stream ids already told to stop, so STOP_SENDING is sent once and
     not once per poll."""
+    var _ctrl: List[UInt8]
+    """The server's control stream (RFC 9114 sec 6.2.1), in order, not
+    yet parsed into frames."""
+    var _ctrl_off: UInt64
+    """Stream offset of the first byte past :attr:`_ctrl`'s parsed
+    prefix plus its unparsed bytes."""
+    var _ctrl_pending: Dict[UInt64, List[UInt8]]
+    """Control-stream chunks that arrived ahead of :attr:`_ctrl_off`."""
+    var _ctrl_typed: Bool
+    """Whether the control stream's type byte has been consumed."""
+    var goaway_id: UInt64
+    """The server's GOAWAY stream id (RFC 9114 sec 5.2): requests on
+    streams at or above it will not be processed. ``UInt64.MAX`` until
+    a GOAWAY arrives."""
+    var peer_settings: Bool
+    """The server's SETTINGS frame has arrived."""
+    var peer_connect_protocol: Bool
+    """The server enables extended CONNECT (RFC 9220 sec 3)."""
 
     def __init__(
         out self,
@@ -248,6 +275,13 @@ struct Http3ClientConnection(Movable):
         self._pending = Dict[UInt64, _PendingRequest]()
         self._ext_reasms = Dict[UInt64, _StreamReasm]()
         self._cancelled = Dict[UInt64, Bool]()
+        self._ctrl = List[UInt8]()
+        self._ctrl_off = 0
+        self._ctrl_pending = Dict[UInt64, List[UInt8]]()
+        self._ctrl_typed = False
+        self.goaway_id = UInt64.MAX
+        self.peer_settings = False
+        self.peer_connect_protocol = False
 
     def _send_stream(
         mut self,
@@ -262,9 +296,9 @@ struct Http3ClientConnection(Movable):
         :meth:`send_request` emit either flight without duplicating the
         H3 encoding."""
         if early:
-            self.quic.send_stream_early(stream_id, data^, fin)
+            self.quic.send_stream_early(stream_id, data, fin)
         else:
-            self.quic.send_stream(stream_id, data^, fin)
+            self.quic.send_stream(stream_id, data, fin)
 
     def open_streams(mut self, early: Bool = False) raises:
         """Open the client control + QPACK uni-streams (RFC 9114
@@ -306,6 +340,8 @@ struct Http3ClientConnection(Movable):
         first if not already open. When ``early`` the control/QPACK
         streams and the request ride 0-RTT (EarlyData) packets."""
         self.open_streams(early)
+        if self.goaway_id != UInt64.MAX:
+            raise Error("h3 client: server sent GOAWAY; open a new connection")
         var sid = self.quic.open_bidi_stream()
         var wire = List[UInt8]()
         encode_request_headers(method, scheme, authority, path, headers, wire)
@@ -328,6 +364,7 @@ struct Http3ClientConnection(Movable):
         single-stream API; :meth:`poll_responses` is the multiplexed
         owned-reader counterpart."""
         var events = self.quic.poll(timeout_ms)
+        self._scan_control(events)
         self._feed_ext(stream_id, events, reader)
         return reader.is_complete()
 
@@ -393,16 +430,22 @@ struct Http3ClientConnection(Movable):
         path: String,
         headers: List[QpackHeader],
         timeout_ms: Int = 30000,
+        protocol: String = "",
     ) raises -> UInt64:
-        """Send request headers without FIN and register its response reader."""
+        """Send request headers without FIN and register its response
+        reader; a non-empty ``protocol`` makes it an extended CONNECT."""
         self.open_streams()
+        if self.goaway_id != UInt64.MAX:
+            raise Error("h3 client: server sent GOAWAY; open a new connection")
         var sid = self.quic.open_bidi_stream()
         self._pending[sid] = _PendingRequest(
             _StreamReasm(),
             Http3ResponseReader(self.max_field_section_size, method),
         )
         var wire = List[UInt8]()
-        encode_request_headers(method, scheme, authority, path, headers, wire)
+        encode_request_headers(
+            method, scheme, authority, path, headers, wire, protocol
+        )
         self._send_request_wire(sid, wire, timeout_ms)
         return sid
 
@@ -441,7 +484,8 @@ struct Http3ClientConnection(Movable):
                 _ = self.poll_responses(100)
                 continue
             var count = min(cap, len(wire) - pos)
-            var part = List[UInt8](Span(wire)[pos : pos + count])
+            var part = List[UInt8](capacity=count)
+            part.extend(Span(wire)[pos : pos + count])
             self.quic.send_stream(sid, part, False)
             pos += count
             start = _monotonic_ms()
@@ -453,6 +497,7 @@ struct Http3ClientConnection(Movable):
         complete or failed. Stream errors are retained for that request's
         accessors; they do not interrupt delivery to other requests."""
         var events = self.quic.poll(timeout_ms)
+        self._scan_control(events)
         var sids = List[UInt64]()
         var credits = List[UInt64]()
         for entry in self._pending.items():
@@ -702,5 +747,76 @@ struct Http3ClientConnection(Movable):
     def is_established(self) -> Bool:
         return self.quic.is_established()
 
+    def is_usable(self) -> Bool:
+        """Established and not told to go away: a pool may reuse it for
+        a new request."""
+        return self.quic.is_established() and self.goaway_id == UInt64.MAX
+
+    def _scan_control(mut self, events: ConnectionEvents) raises:
+        """Follow the server's control stream (stream 3) for its
+        SETTINGS and GOAWAY. Chunks are taken in offset order."""
+        for i in range(len(events.stream_chunks)):
+            ref ch = events.stream_chunks[i]
+            if ch.stream_id != UInt64(3):
+                continue
+            if ch.offset + UInt64(len(ch.data)) <= self._ctrl_off:
+                continue
+            if ch.offset > self._ctrl_off:
+                if len(self._ctrl_pending) < 64:
+                    self._ctrl_pending[ch.offset] = ch.data.copy()
+                continue
+            var skip = Int(self._ctrl_off - ch.offset)
+            self._ctrl.extend(Span[UInt8, _](ch.data)[skip:])
+            self._ctrl_off = ch.offset + UInt64(len(ch.data))
+            while self._ctrl_off in self._ctrl_pending:
+                var more = self._ctrl_pending.pop(self._ctrl_off)
+                self._ctrl.extend(Span[UInt8, _](more))
+                self._ctrl_off += UInt64(len(more))
+        var pos = 0
+        if not self._ctrl_typed and len(self._ctrl) > 0:
+            pos = decode_varint(Span[UInt8, _](self._ctrl)).consumed
+            self._ctrl_typed = True
+        while pos < len(self._ctrl):
+            var view = Span[UInt8, _](self._ctrl)[pos:]
+            var hdr: Tuple[UInt64, Int, Int]
+            try:
+                hdr = _frame_header(view)
+            except:
+                break  # frame header not complete yet
+            var ftype = hdr[0]
+            var start = hdr[1]
+            var flen = hdr[2]
+            if start + flen > len(view):
+                break
+            if ftype == H3_FRAME_TYPE_SETTINGS and not self.peer_settings:
+                self.peer_settings = True
+                for st in decode_http3_settings(view[start : start + flen]):
+                    if st.identifier == H3_SETTINGS_ENABLE_CONNECT_PROTOCOL:
+                        self.peer_connect_protocol = st.value == 1
+            if ftype == H3_FRAME_TYPE_GOAWAY and flen > 0:
+                var id = decode_varint(view[start : start + flen])
+                if id.value < self.goaway_id:
+                    self.goaway_id = id.value
+            pos += start + flen
+        if pos > 0:
+            var rest = List[UInt8](capacity=len(self._ctrl) - pos)
+            rest.extend(Span[UInt8, _](self._ctrl)[pos:])
+            self._ctrl = rest^
+
     def close(mut self):
         self.quic.close()
+
+    def retire(mut self):
+        """Graceful CONNECTION_CLOSE, for a connection a pool drops."""
+        try:
+            self.quic.shutdown()
+        except:
+            pass
+
+
+def _frame_header(view: Span[UInt8, _]) raises -> Tuple[UInt64, Int, Int]:
+    """An HTTP/3 frame's (type, header length, payload length); raises
+    while the header is incomplete."""
+    var t = decode_varint(view)
+    var n = decode_varint(view[t.consumed :])
+    return (t.value, t.consumed + n.consumed, Int(n.value))

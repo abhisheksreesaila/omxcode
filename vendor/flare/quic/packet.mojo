@@ -253,15 +253,29 @@ def parse_short_header(
         raise Error("quic packet: fixed bit (0x40) not set")
     var spin = (Int(first) & 0x20) != 0
     var kp = (Int(first) & 0x04) != 0
-    var bytes = List[UInt8]()
-    for i in range(1, 1 + dcid_length):
-        bytes.append(buf[i])
+    var bytes = List[UInt8](capacity=dcid_length)
+    bytes.extend(buf[1 : 1 + dcid_length])
     return ShortHeader(
         spin_bit=spin,
         key_phase=kp,
         dcid=ConnectionId(bytes=bytes^),
         payload_offset=1 + dcid_length,
     )
+
+
+def packet_number_length(
+    pn: UInt64, largest_acked: UInt64, any_acked: Bool
+) -> Int:
+    """Bytes needed to encode ``pn`` so the peer can recover it (RFC 9000
+    sec 17.1, appendix A.2): enough bits for twice the distance from the
+    largest acknowledged packet, at least 2 bytes, at most 4."""
+    var unacked = pn - largest_acked if any_acked and pn > largest_acked else (
+        pn + 1
+    )
+    var n = 2
+    while n < 4 and (unacked << 1) >= (UInt64(1) << UInt64(8 * n)):
+        n += 1
+    return n
 
 
 def encode_long_header(
@@ -315,6 +329,20 @@ def encode_short_header(
     (value minus one). Header protection itself is the caller's
     job after this prefix is emitted.
     """
+    var out = List[UInt8](capacity=1 + dcid.length())
+    encode_short_header_into(dcid, spin_bit, key_phase, pn_length, out)
+    return out^
+
+
+def encode_short_header_into(
+    dcid: ConnectionId,
+    spin_bit: Bool,
+    key_phase: Bool,
+    pn_length: Int,
+    mut out: List[UInt8],
+) raises:
+    """Append the short-header public prefix to ``out``; see
+    :func:`encode_short_header`."""
     if dcid.length() > MAX_CID_LENGTH:
         raise Error("quic packet: dcid length exceeds 20")
     if pn_length < 1 or pn_length > 4:
@@ -325,8 +353,6 @@ def encode_short_header(
     if key_phase:
         first |= 0x04
     first |= (pn_length - 1) & 0x3
-    var out = List[UInt8]()
     out.append(UInt8(first))
     for i in range(dcid.length()):
         out.append(dcid.bytes[i])
-    return out^
