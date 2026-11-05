@@ -1,0 +1,6 @@
+# limit 150
+wait:4000;
+type:Message=Plan a day in Lisbon;tap:Send;wait:6000;
+tap:Getting around;wait:1500;
+tap:Book tickets;wait:4000;
+resize:800x600;wait:2500
