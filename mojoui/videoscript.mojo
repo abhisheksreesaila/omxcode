@@ -22,6 +22,8 @@ from mojoui.video import VideoSource
 from mojoui.videotable import RegionsAnalyzer, ColourRange, scan
 from mojoui.vision_presets import warm_range, WAREHOUSE_CELL
 from mojoui.videojobs import detections_table
+from mojoui.player import Mark
+from mojoui.sheet import Sheet
 
 comptime VIDEO_FUNCTIONS: List[String] = ["regions"]  # what a script may call on a video (the Apply buttons, in order)
 
@@ -113,3 +115,23 @@ struct VideoFunctions(ScriptFunctions, Copyable, Movable, Sized):
         ranges.append(warm_range())
         var found = scan(video, a, ranges, WAREHOUSE_CELL, limit=span[1] - span[0])
         return detections_table(found)
+
+
+def marks_from(sheet: Sheet) -> List[Mark]:
+    """Boxes for a player's overlay from any table with frame, x, y, w, h columns (what regions() or a model's detect()
+    gives); none when it hasn't them all."""
+    var out = List[Mark]()
+    var f = sheet.index("frame")
+    var x = sheet.index("x")
+    var y = sheet.index("y")
+    var w = sheet.index("w")
+    var h = sheet.index("h")
+    if f < 0 or x < 0 or y < 0 or w < 0 or h < 0:
+        return out^
+    for r in range(sheet.rows()):
+        try:
+            out.append(Mark(Int(sheet.plain_text(f, r)), Int(sheet.plain_text(x, r)), Int(sheet.plain_text(y, r)),
+                            Int(sheet.plain_text(w, r)), Int(sheet.plain_text(h, r)), False))
+        except:
+            pass
+    return out^

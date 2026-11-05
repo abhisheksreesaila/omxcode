@@ -99,7 +99,9 @@ from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE
 from mojoui.sample import sample_table
 from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, IDLE as ISLAND_IDLE, RUNNING as ISLAND_RUNNING, UNDO as ISLAND_UNDO, ERROR as ISLAND_ERROR
 from mojoui.tablejobs import TableWork, TableFile, Answer, ScriptAnswer
-from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS
+from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS, marks_from
+from mojoui.models import FRAME_MODELS
+from mojoui.script import last_call
 from mojoui.scriptpanel import ScriptPanel, SP_RUN, SP_EXPORT, SP_OPEN, SP_CLOSED
 from mojoui.recipe import Recipe, RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
@@ -2072,7 +2074,10 @@ struct Main(App):
             ref c = self.media.cards[k]
             if c.kind == OBJ_VIDEO and c.player and v.find(sql_name(c.title())) >= 0:
                 heads.append(c.player.value().state.t())
-        self.script.offer(v.names.copy(), heads^, materialize[VIDEO_FUNCTIONS]())
+        var fns = materialize[VIDEO_FUNCTIONS]()
+        for f in materialize[FRAME_MODELS]():
+            fns.append(f)
+        self.script.offer(v.names.copy(), heads^, fns^)
 
     def run_script(mut self):
         """The Script window's statements over the sheet's tables, its cards and its videos, as a job: each named result
@@ -2097,6 +2102,21 @@ struct Main(App):
             self.script.said = self.work.problem
             self.work.problem = ""
         self.version += 1
+
+    def mark_applied(mut self):
+        """The boxes the script's last call on a video found (regions, detect…), drawn over that video's player."""
+        var st = last_call(self.script.bound, self.script.functions)
+        if not st or len(st.value().args) < 1 or st.value().name == "":
+            return
+        var at = self.tables.find(st.value().name)
+        if at < 0:
+            return
+        var marks = marks_from(self.tables.cards[at].sheet)
+        for k in range(len(self.media.cards)):
+            if self.media.cards[k].kind == OBJ_VIDEO and self.media.cards[k].player and sql_name(self.media.cards[k].title()) == st.value().args[0]:
+                self.media.cards[k].player.value().set_marks(marks)
+                if self.trace:
+                    print("MARKS: " + st.value().args[0] + " " + String(len(marks)) + " boxes from " + st.value().name, flush=True)
 
     def export_recipe(mut self):
         """Export: the script, the last run's results as CSV and the applied section's clip, as a folder in your
@@ -2192,6 +2212,7 @@ struct Main(App):
                 a.problem = String(e)
         self.timed(a.milliseconds)
         self.script.ran(a.log.copy(), a.problem, names^)
+        self.mark_applied()
         if a.problem != "":
             self.message = "Script: " + a.problem
             self.say(Activity.error("Script", a.problem))

@@ -4,21 +4,29 @@
 #
 #   classified = classify(fleet, task, verbs, verb);
 #       each distinct value of fleet.task once, embedded (e5-small-v2, mojoui.textembed) with every verbs.verb; the
-#       nearest label by cosine: columns value, label, score (its cosine), margin (how far ahead of the runner-up: a
-#       small margin is a row a person, or a bigger model, should look at)
+#       nearest label by cosine: columns label, score (its cosine), margin (how far ahead of the runner-up: a
+#       small margin is a row a person, or a bigger model, should look at), value
+#
+#   boxes = detect(episode, 3.0, 8.0);
+#       YOLOX-Tiny (mojoui.detect) on every frame of the video from 3.0 to 8.0 s: a row per box: frame (the video's own
+#       number), t, kind (its COCO class), score, x, y, w, h (the video's pixels)
 #
 #   var fns = ModelFunctions(videos^)        # (the app's videos, as mojoui.videoscript has them)
 #   var run = run_script(text, catalog, fns)
 
 from std.os import getenv
-from omxcore import Catalog, Table, sql, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL
+from omxcore import Catalog, Table, sql, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL, INT as MX_INT
 from mojoui.script import ScriptFunctions
 from mojoui.sheet import Sheet
 from mojoui.videoscript import VideoFunctions
 from mojoui.maxrt import MaxRuntime
 from mojoui.textembed import Embedder
+from mojoui.detect import Detector, coco_name
+from mojoui.video import VideoSource
+from mojoui.videoscript import frame_span
 
-comptime MODEL_FUNCTIONS: List[String] = ["classify"]
+comptime MODEL_FUNCTIONS: List[String] = ["classify", "detect"]
+comptime FRAME_MODELS: List[String] = ["detect"]  # the models Apply offers on a video's section (beside mojoui.videoscript's)
 comptime CLASSIFY_PACK = "e5small"  # classify()'s model: e5-small-v2 (MIT; scripts/packs/e5small.py), D-4919
 
 
@@ -54,6 +62,8 @@ struct ModelFunctions(ScriptFunctions, Movable):
     def call(mut self, name: String, args: List[String], mut catalog: Catalog) raises -> Table:
         if name == "classify":
             return self.classify(args, catalog)
+        if name == "detect":
+            return self.detect(args)
         return self.videos.call(name, args, catalog)
 
     def classify(mut self, args: List[String], mut catalog: Catalog) raises -> Table:
@@ -69,10 +79,10 @@ struct ModelFunctions(ScriptFunctions, Movable):
         var vv = e.embed(values, 1024)
         var d = e.dim
         var t = Table.empty()
-        var c_value = t.add_column("value", MX_TEXT)
-        var c_label = t.add_column("label", MX_TEXT)
+        var c_label = t.add_column("label", MX_TEXT)  # (the short columns first: a card shows them beside the long text)
         var c_score = t.add_column("score", MX_DECIMAL, 3)
         var c_margin = t.add_column("margin", MX_DECIMAL, 3)
+        var c_value = t.add_column("value", MX_TEXT)
         for i in range(len(values)):
             var best = -1
             var top = -2.0
@@ -91,5 +101,45 @@ struct ModelFunctions(ScriptFunctions, Movable):
             t.append_text(c_label, labels[best])
             t.append(c_score, Int64(Int(top * 1000.0 + (0.5 if top >= 0 else -0.5))))
             t.append(c_margin, Int64(Int((top - second) * 1000.0 + 0.5)))
+        t.check()
+        return t^
+
+    def detect(mut self, args: List[String]) raises -> Table:
+        if len(args) < 1 or len(args) > 3:
+            raise Error("detect(video, from_s, to_s): a video's name, then seconds")
+        var k = self.videos.find(args[0])
+        if k < 0:
+            raise Error("no video " + args[0] + (": the videos are " + ", ".join(self.videos.names) if len(self.videos) > 0 else ": open one first"))
+        var from_s = Float64(args[1]) if len(args) > 1 else 0.0
+        var to_s = Float64(args[2]) if len(args) > 2 else -1.0
+        var video = VideoSource(self.videos.paths[k])
+        var span = frame_span(video.fps, video.frames, from_s, to_s)
+        if span[1] <= span[0]:
+            raise Error("detect: no frames in that section")
+        var rt = MaxRuntime()
+        var d = Detector(rt, packs_dir() + "/yolox")
+        var t = Table.empty()
+        var c_frame = t.add_column("frame", MX_INT)
+        var c_t = t.add_column("t", MX_DECIMAL, 3)
+        var c_kind = t.add_column("kind", MX_TEXT)
+        var c_score = t.add_column("score", MX_DECIMAL, 3)
+        var c_x = t.add_column("x", MX_INT)
+        var c_y = t.add_column("y", MX_INT)
+        var c_w = t.add_column("w", MX_INT)
+        var c_h = t.add_column("h", MX_INT)
+        video.seek_frame(span[0])
+        var px = List[UInt32]()
+        for f in range(span[0], span[1]):
+            if not video.next_into(px):
+                break
+            for b in d.detect_rgba(px, video.width, video.height):
+                t.append(c_frame, Int64(f))
+                t.append(c_t, Int64(Int(Float64(f) * 1000.0 / video.fps + 0.5)))
+                t.append_text(c_kind, coco_name(b.cls))
+                t.append(c_score, Int64(Int(b.score * 1000.0 + 0.5)))
+                t.append(c_x, Int64(Int(b.x + 0.5)))
+                t.append(c_y, Int64(Int(b.y + 0.5)))
+                t.append(c_w, Int64(Int(b.w + 0.5)))
+                t.append(c_h, Int64(Int(b.h + 0.5)))
         t.check()
         return t^

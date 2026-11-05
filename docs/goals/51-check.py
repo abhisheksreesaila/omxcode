@@ -142,11 +142,14 @@ def m4():
     s = scenario()
     a, b = s["range"]
     lo, hi = round(a * FPS), round(b * FPS)
-    exp = Path(s["export"])
-    f = exp / "detected.csv"
+    exp = Path(s["exports"][-1])  # (the export after detect ran; the result's name is what script.sql assigns detect(…) to)
+    named = re.findall(r"^(\w+)\s*=\s*detect\(", (exp / "script.sql").read_text(), re.M) if (exp / "script.sql").exists() else []
+    if not named:
+        return False, f"no `name = detect(…)` in {exp}/script.sql"
+    f = exp / (named[-1] + ".csv")
     bad = []
     if not f.exists():
-        return False, f"no detected.csv in {exp}"
+        return False, f"no {f.name} in {exp}"
     rows = list(csv.DictReader(open(f)))
     frames = [int(r["frame"]) for r in rows]
     outside = [x for x in frames if not lo <= x < hi]

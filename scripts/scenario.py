@@ -672,12 +672,27 @@ def models(media, out):
         landed(mark)
         read(["verbs", "classified"])
         exports.append(export())
+        # detect() on a section of the featured episode: its clip opens from its fleet row (the clip link)
+        call("script-close")
+        call("links")
+        call("link", text=ROBOT_LINKS[1], submit=True)
+        call("grid", value=float(hero_row))
+        until("video", 120)
+        call("script")
+        call("script-text", text="-- goal 51: what's in these seconds of the featured episode")
+        call("range-from", text=str(SECTION[0]))
+        call("range-to", text=str(SECTION[1]))
+        mark = len(s.log)
+        call("apply-detect")
+        landed(mark)
+        read(["apply_1"])
+        exports.append(export())
         available = s.c.names()
     finally:
         s.close()
     trace = [l for l in s.log if l.startswith(("SCRIPT:", "QUERY:", "JOB:", "SLOW:", "MARKS:", "RECIPE:"))]
     summary = {"cards": cards, "trace": trace, "tools_called": called, "tools_available": available, "hero": hero,
-               "export": exports[0] if exports else "", "exports": exports, "range": list(SECTION)}
+               "export": exports[0] if exports else "", "exports": exports, "range": list(SECTION)}  # (export: classify's; exports[-1]: detect's)
     out.mkdir(parents=True, exist_ok=True)
     (out / "models.json").write_text(json.dumps(summary, indent=1))
     for l in trace:
