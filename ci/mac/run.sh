@@ -20,6 +20,15 @@ for steps_file in ci/*.steps; do
     exe="$bundle/Contents/MacOS/$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleExecutable)"
     steps=$(grep -v '^#' "$steps_file" | tr -d '\n')
     echo "== $app: $exe"
+    replay=""
+    if [ "$app" = agentchat ]; then  # (its agent: the recorded Lisbon trip, replayed; its picture where the app looks, decoded by ffmpeg if there is one)
+        mkdir -p examples/agentchat/pictures && cp ci/tagus.jpg examples/agentchat/pictures/
+        variant=plain; command -v ffmpeg > /dev/null && variant=picture
+        echo "ffmpeg: $(command -v ffmpeg || echo none) → the $variant streams" > out/agentchat-agent.txt
+        python3 ci/agui_replay.py 8799 out/agentchat-requests.jsonl "ci/agentchat-$variant-1.sse" "ci/agentchat-$variant-2.sse" >> out/agentchat-agent.txt 2>&1 &
+        replay=$!
+        export AGUI_URL=http://127.0.0.1:8799/
+    fi
     start=$(date +%s)
     MOJOUI_TEST="$steps" "$exe" > "out/$app-stdout.txt" 2>&1 &
     pid=$!
@@ -36,6 +45,7 @@ for steps_file in ci/*.steps; do
         sleep 2
     done
     wait "$pid"; echo "exit $?" >> "out/$app-stdout.txt"
+    [ -z "$replay" ] || { kill "$replay" 2>/dev/null; unset AGUI_URL; }
     tail -5 "out/$app-stdout.txt"
 done
 # side.txt: one launch per screen at one size; the last picture of each is out/side/<app>-<screen>.png (scripts/side.py)

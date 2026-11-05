@@ -36,6 +36,8 @@ ALLOWED = {
     "_strlen", "_write", "_posix_memalign", "_free", "_sin", "_cos", "___sincos_stret",  # (sin and cos: the island's spinner, goal 30)
     # libSystem, for the MX frame package (files, mmap, time)
     "___error", "_close", "_getpid", "_lseek", "_lstat", "_mkdir", "_mmap", "_munmap", "_open", "_read", "_rename", "_stat", "_strerror", "_unlink", "_clock_gettime_nsec_np", "_getenv", "_log10", "_sysconf", "_memset_pattern16", "_strtod", "_strtod_l", "_newlocale", "_freelocale",
+    # libSystem, for mojoui.picture / video (ffmpeg through a pipe; a decoder thread) on the Mac (agentchat's Album)
+    "_pthread_mutex_lock", "_pthread_mutex_unlock", "_pthread_mutex_destroy", "_pthread_cond_signal", "_pthread_cond_destroy", "_popen", "_pclose", "_fopen", "_fread",
     # UIKit
     "_UIApplicationMain",
 }

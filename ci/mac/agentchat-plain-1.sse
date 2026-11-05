@@ -1,0 +1,106 @@
+data: {"type":"RUN_STARTED","threadId":"thread-1","runId":"thread-1-run1"}
+
+data: {"type":"STEP_STARTED","stepName":"route"}
+
+data: {"type":"STEP_FINISHED","stepName":"route"}
+
+data: {"type":"TEXT_MESSAGE_START","messageId":"thread-1-run1-m1","role":"assistant"}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"Here's "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"a "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"day "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"in "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"Lisbon "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"from "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"Belém "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"to "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"the "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"viewpoints, "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"timed "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"so "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"you "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"reach "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"Senhora "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"do "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"Monte "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"for "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"the "}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run1-m1","delta":"sunset."}
+
+data: {"type":"TEXT_MESSAGE_END","messageId":"thread-1-run1-m1"}
+
+data: {"type":"TOOL_CALL_START","toolCallId":"thread-1-run1-call2","toolCallName":"render_ui","parentMessageId":"thread-1-run1-m1"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"{\"ui\": {\"component\": \"VStack\", \"gap\": \"m\", \"children\": [{\"component\": \"Card\", \"title\": \"A day in Lisbon\", \"subtitle\": \"Bel\\u00e9m"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":" to the viewpoints, west to east, about 11 km\", \"children\": [{\"component\": \"MapView\", \"route\": [[38.6916, -9.216], [38.6979, -9.2"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"068], [38.7034, -9.1784], [38.7075, -9.1364], [38.7139, -9.1335], [38.7193, -9.1327]], \"places\": [{\"lat\": 38.6916, \"lon\": -9.216,"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":" \"label\": \"Bel\\u00e9m Tower\"}, {\"lat\": 38.6979, \"lon\": -9.2068, \"label\": \"Jer\\u00f3nimos Monastery\"}, {\"lat\": 38.7034, \"lon\": -9."}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"1784, \"label\": \"LX Factory\"}, {\"lat\": 38.7075, \"lon\": -9.1364, \"label\": \"Pra\\u00e7a do Com\\u00e9rcio\"}, {\"lat\": 38.7139, \"lon\": -"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"9.1335, \"label\": \"S\\u00e3o Jorge Castle\"}, {\"lat\": 38.7193, \"lon\": -9.1327, \"label\": \"Senhora do Monte\"}], \"height\": 300}, {\"comp"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"onent\": \"HStack\", \"children\": [{\"component\": \"Chip\", \"text\": \"11 km\", \"hue\": 1}, {\"component\": \"Chip\", \"text\": \"6 stops\", \"hue\": "}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"2}, {\"component\": \"Chip\", \"text\": \"tram 15 + 28\", \"hue\": 3}, {\"component\": \"Chip\", \"text\": \"\\u20ac38 a person\", \"hue\": 4}]}]}, {\""}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"component\": \"Grid\", \"columns\": 2, \"children\": [{\"component\": \"Card\", \"title\": \"The plan\", \"children\": [{\"component\": \"Timeline\", "}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"\"steps\": [{\"label\": \"9:00  Bel\\u00e9m Tower\", \"status\": \"pending\", \"detail\": \"The 16th-century tower on the river; go early, the "}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"queue grows by ten.\"}, {\"label\": \"10:15  Jer\\u00f3nimos Monastery\", \"status\": \"pending\", \"detail\": \"Manueline cloisters; Past\\u00"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"e9is de Bel\\u00e9m is next door.\"}, {\"label\": \"12:30  LX Factory\", \"status\": \"pending\", \"detail\": \"Lunch and the bookshop in an o"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"ld textile mill.\"}, {\"label\": \"14:30  Pra\\u00e7a do Com\\u00e9rcio\", \"status\": \"pending\", \"detail\": \"The riverside square; tram 28"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":" starts nearby.\"}, {\"label\": \"16:00  S\\u00e3o Jorge Castle\", \"status\": \"pending\", \"detail\": \"Walls over Alfama, the best view of "}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"the river.\"}, {\"label\": \"18:30  Senhora do Monte\", \"status\": \"pending\", \"detail\": \"The highest viewpoint, for the sunset.\"}]}, {\""}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"component\": \"Disclosure\", \"title\": \"Getting around\", \"children\": [{\"component\": \"Markdown\", \"text\": \"- **Tram 15** from Pra\\u00e7"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"a da Figueira to Bel\\u00e9m (25 min)\\n- **Walk** Bel\\u00e9m \\u2192 LX Factory along the river\\n- **Tram 28** from Pra\\u00e7a do C"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"om\\u00e9rcio up to the castle\\n- A **24-hour pass** (\\u20ac6.80) covers every tram and the funicular\"}]}]}, {\"component\": \"VStack"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"\", \"gap\": \"m\", \"children\": [{\"component\": \"Card\", \"title\": \"Weather\", \"children\": [{\"component\": \"HStack\", \"children\": [{\"compone"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"nt\": \"Icon\", \"name\": \"sun-medium\", \"size\": 28}, {\"component\": \"Text\", \"text\": \"21\\u00b0 and clear\", \"style\": \"headline\"}]}, {\"com"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"ponent\": \"Sparkline\", \"values\": [15, 16, 18, 20, 21, 21, 20, 18, 17], \"label\": \"\\u00b0C, 9:00 to 21:00\"}]}, {\"component\": \"Alert\""}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":", \"title\": \"Book ahead\", \"text\": \"Bel\\u00e9m Tower and the castle sell timed tickets; Mondays the monastery is closed.\", \"tone\": "}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"\"info\"}, {\"component\": \"HStack\", \"children\": [{\"component\": \"Button\", \"label\": \"Book tickets\", \"action\": \"book\", \"style\": \"promin"}
+
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"thread-1-run1-call2","delta":"ent\", \"icon\": \"calendar-days\"}, {\"component\": \"Button\", \"label\": \"Swap a stop\", \"action\": \"swap\"}]}]}]}]}}"}
+
+data: {"type":"TOOL_CALL_END","toolCallId":"thread-1-run1-call2"}
+
+data: {"type":"CUSTOM","name":"suggestions","value":["Make it rainy-day friendly","Add a fado dinner","Fewer hills"]}
+
+data: {"type":"RUN_FINISHED","threadId":"thread-1","runId":"thread-1-run1"}
+

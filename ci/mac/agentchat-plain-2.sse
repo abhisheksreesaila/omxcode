@@ -1,0 +1,10 @@
+data: {"type":"RUN_STARTED","threadId":"thread-1","runId":"thread-1-run2"}
+
+data: {"type":"TEXT_MESSAGE_START","messageId":"thread-1-run2-m1","role":"assistant"}
+
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"thread-1-run2-m1","delta":"Done: I'll hold 9:00 at the tower and 16:00 at the castle."}
+
+data: {"type":"TEXT_MESSAGE_END","messageId":"thread-1-run2-m1"}
+
+data: {"type":"RUN_FINISHED","threadId":"thread-1","runId":"thread-1-run2"}
+

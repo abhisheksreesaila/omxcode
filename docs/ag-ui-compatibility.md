@@ -44,7 +44,13 @@ most 8 levels deep, 200 components and 32 KB.
   `RunAgentInput` and Pydantic AI accept. LangGraph's scripted model doesn't think, so its handling isn't run, and a
   server on an AG-UI SDK older than the reasoning events may refuse the whole request: such an app sets
   `agent.send_reasoning = False`.
-- The Mac. omxcode builds for the Mac, but agents haven't been run there.
+- The Mac, only partly. examples/agentchat runs on GitHub's Mac runners (macOS 15 and 26, `scripts/mac-ci agentchat`)
+  against the Lisbon trip's recorded AG-UI streams, replayed: both requests it sent validate as `RunAgentInput`, the
+  trip's screen is drawn, "Getting around" opens, and tapping "Book tickets" sends the tap back as
+  `render_ui`'s tool result (the reply drawn after it is the recording's, whatever the request said). But wide agent
+  screens overflow there: the map is laid out wider than the window, and the window narrows
+  ([shot](img/agents/mac-trip-overflow.png)), a layout bug in the Mac host that's still open. The runners have no ffmpeg,
+  so the Picture wasn't decoded there, and no live agent has run on a Mac.
 
 ## Versions
 
