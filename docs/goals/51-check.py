@@ -66,13 +66,14 @@ def scenario():
 
 def m0():
     pack("tiny", "tiny_gpu.mef")
-    ok, out, missing = mojo_test("tests/test_maxrt.mojo", ["cpu", "gpu"])
+    ok, out, missing = mojo_test("tests/test_maxrt.mojo", ["cpu", "gpu", "nopython"])  # (nopython: libmax loaded, no libpython, read from /proc/self/maps)
     if not ok:
         return False, f"test_maxrt: no ok for {missing}: {out[-600:]}"
     ldd = run(["ldd", str(ROOT / "build/test_maxrt")]).stdout
-    if "libpython" in ldd or "libmax" not in ldd:
-        return False, "test_maxrt links libpython, or not libmax: " + ldd[-400:]
-    return True, "cpu; gpu (= Python's numbers); links libmax, no libpython"
+    if "libpython" in ldd:
+        return False, "test_maxrt links libpython: " + ldd[-400:]
+    gpu = re.findall(r"^gpu: ok.*$", out, re.M)
+    return True, "cpu; " + (gpu[0][len("gpu: ok "):] if gpu else "gpu") + "; libmax loaded at run time, no libpython"
 
 
 def m1():

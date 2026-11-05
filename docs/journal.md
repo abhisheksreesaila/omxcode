@@ -1076,3 +1076,4 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 
 ## 2026-11-04 · goal 51 (models in the script)
 - Found ../mojo-ui-g50 already taken by a parallel session's goal 50 (omxconsole native, uncommitted work): my `git worktree add` failed and my next commands ran there; only an empty build/g47 with a link was left behind, removed at once (pixi install was a no-op). This goal is 51.
+- M0: mojoui/maxrt.mojo + scripts/packs/{packlib,tiny}.py + tests/test_maxrt.mojo. Three crashes, one cause: Mojo frees values after their last use, and MAX keeps reading pointers I passed (the compile config cell until init, the path, the spec's shape). A debug print that used cc[0] made it work, which gave it away. GPU call 0.07 ms warm, 0.33 ms first in this test.
