@@ -78,10 +78,10 @@ def m0():
 
 def m1():
     p = pack("minilm", "ref_vectors.f32")
-    ok, out, missing = mojo_test("tests/test_embed.mojo", ["wordpiece", "embed"], env={"MINILM_PACK": str(p)})
+    ok, out, missing = mojo_test("tests/test_textembed.mojo", ["wordpiece", "embed"], env={"MINILM_PACK": str(p)})
     speed = re.findall(r"^rows/s.*$", out, re.M)
     if not ok:
-        return False, f"test_embed: no ok for {missing}: {out[-600:]}"
+        return False, f"test_textembed: no ok for {missing}: {out[-600:]}"
     return True, "wordpiece ids = Python's; cosine ≥ 0.999 with the Python pack; " + (speed[0] if speed else "no rows/s line")
 
 
