@@ -21,7 +21,7 @@ docs/research/mojo12-flare.md (branch probe-mojo12). Worktree `../mojo-ui-g52`, 
 
 ## Out of bounds
 Pushing anything but the mac-test branch and the mac-ci release (scripts/mac-ci); committing to omxcore (~/Projects/mxframe,
-another session's) or filing issues anywhere; changing engine code beyond what 1.2 and M5 need; touching
+another session's) or filing issues anywhere (the owner then allowed Flare issues: D-5215); changing engine code beyond what 1.2 and M5 need; touching
 `../mojo-ui-apple-test`, the running Python daemon on :11435 or the real `~/.mxc`; `pip`; secrets; merging into main.
 
 ## Assumptions

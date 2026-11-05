@@ -517,7 +517,7 @@ def _keep_the_pool_for_compute():
     they're all held. A loop never returns its worker, and work an app puts on the pool (`parallelize`: the omxcore
     engine's kernels, MAX) then waits on tasks queued behind it: an engine job inside a request hung (goal 52). Holding
     every lease first sends Flare's loops to OS threads, in every server of the process (each call after the first
-    finds none left)."""
+    finds none left). Upstream: https://github.com/ehsanmok/flare/issues/47."""
     while asyncrt_try_lease():
         pass
 
@@ -629,7 +629,7 @@ def _answers(host: String, port: Int, ms: Int) -> Bool:
     while now_ns() < until:
         try:
             # (50 ms each: a probe that reached the listener Flare is about to close waits out its whole timeout,
-            # which held a UI thread 515 ms with 500; loopback answers in about 1 ms)
+            # which held a UI thread 515 ms with 500; loopback answers in about 1 ms; flare#48)
             _ = HttpClient(timeout_ms=50).get("http://" + host + ":" + String(port) + READY_PATH)
             return True
         except:

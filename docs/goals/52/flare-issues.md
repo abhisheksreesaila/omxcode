@@ -1,4 +1,7 @@
-# Draft issues for Flare (not filed)
+# Issues for Flare (filed 2026-11-05, owner: "we can log tickets for flare")
+
+Filed: https://github.com/ehsanmok/flare/issues/46 (1), https://github.com/ehsanmok/flare/issues/47 (2),
+https://github.com/ehsanmok/flare/issues/48 (3), each with a Flare-only repro run first (no mojoui).
 
 ## 1. Streamed requests still lose their body (v0.13.1)
 Same as docs/goals/50/flare-issue.md, still true in v0.13.1: `HttpClient.send_streaming` / `post_streaming` over
