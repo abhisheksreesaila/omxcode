@@ -274,7 +274,7 @@ self.chat.run_local(helper)</pre></div>
       <div class="feat rv"><div class="t">In process</div><h3>The agent inside the app</h3><p>A <code>LocalAgent</code> gets the same input a server would and answers with the same events, straight into the same code path: no HTTP, no second program, nothing on the network. Datasets stay in the app too; an agent names them and never sends the rows.</p></div>
     </div>
     <ul class="lst rv">
-      <li><b>Any AG-UI server:</b> frameworks such as LangGraph, CrewAI, Mastra and Pydantic AI publish AG-UI adapters. omxcode has been proved against its own agent on the official SDK, not yet against each of those.</li>
+      <li><b>Any AG-UI server:</b> proved against its own agent on the official SDK and against Pydantic AI's own AG-UI adapter, on GTK and the web. LangGraph, CrewAI, Mastra and others publish adapters too, and those haven't been run yet. <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/ag-ui-compatibility.md">How compatibility is checked</a>, and how to run each check.</li>
       <li><b>Same events either way:</b> an app can start with an agent in process and move it to a server later without changing its screens.</li>
     </ul>
   </div>
