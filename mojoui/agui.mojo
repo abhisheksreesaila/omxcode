@@ -1,7 +1,7 @@
 # mojoui.agui: an AG-UI client (goal 35 M1, docs/agui.md). AG-UI (docs.ag-ui.com) is an open event protocol between an
 # agent backend and a UI: the app POSTs a RunAgentInput (thread, run, messages, state, tools) and reads the run as
 # server-sent events: RUN_*, TEXT_MESSAGE_*, TOOL_CALL_*, STATE_SNAPSHOT / STATE_DELTA (JSON Patch), MESSAGES_SNAPSHOT,
-# STEP_*, CUSTOM. The Agent keeps the conversation and the shared state; tools the app offers are "frontend tools": the
+# STEP_*, CUSTOM, REASONING_* (the model's thinking, kept as "reasoning" messages). The Agent keeps the conversation and the shared state; tools the app offers are "frontend tools": the
 # agent calls them, the app answers (answer()), and the answer goes back in the next run.
 #
 #   var agent = Agent("http://127.0.0.1:8765/", PIECE, END)    # PIECE / END: the app's messages for the stream
@@ -18,7 +18,7 @@ from mojoui.http import Http, Request, SseReader
 from mojoui.json import Json, json_string, J_STRING, J_ARRAY, J_OBJECT
 from mojoui.jsonpatch import JDoc
 
-# what handle() saw (one per AG-UI event; EV_OTHER for types this client only counts: REASONING_*, RAW, ACTIVITY_*, …)
+# what handle() saw (one per AG-UI event; EV_OTHER for types this client only counts: RAW, ACTIVITY_*, …)
 comptime EV_NONE = 0
 comptime EV_RUN_STARTED = 1
 comptime EV_RUN_FINISHED = 2
@@ -38,6 +38,14 @@ comptime EV_CUSTOM = 15
 comptime EV_OTHER = 16
 comptime EV_BAD = 17  # not an AG-UI event (not JSON, no type)
 comptime EV_STREAM_END = 18  # the HTTP stream ended (ended says how the run went)
+comptime EV_REASONING = 19  # the model's thinking began, grew or ended (a "reasoning" message; reasoning_open)
+
+# the *_CHUNK event open (AG-UI's chunks: only the first names its message or call; the next event of another kind
+# ends it, as @ag-ui/client's transformChunks does)
+comptime CHUNK_NONE = 0
+comptime CHUNK_TEXT = 1
+comptime CHUNK_TOOL = 2
+comptime CHUNK_REASONING = 3
 
 comptime MAX_MESSAGES = 2000
 comptime MAX_TEXT = 1024 * 1024  # one message's words (D-718): deltas past it are refused
@@ -46,6 +54,19 @@ comptime MAX_TYPES = 64  # event types counted by name (the rest under "OTHER")
 comptime MAX_INPUT_BYTES = 6 * 1024 * 1024  # the most a RunAgentInput may be (D-724): the state (≤ 4 MB, mojoui.jsonpatch)
 # plus the newest messages that fit, oldest left out first (`trimmed` says how many). scripts/agui_agent.py accepts up to
 # 8 MB (its MAX_BODY), so a run never meets a 413; tests/test_agui_agent.py checks the two numbers agree.
+
+
+def ends_chunks(t: String) -> Bool:
+    """Whether an event of type `t` ends the chunks open (every event but chunks, RAW, ACTIVITY_*,
+    REASONING_ENCRYPTED_VALUE, SUBAGENT_STARTED and types this client doesn't know, as @ag-ui/client 1.0 does)."""
+    return (t == "TEXT_MESSAGE_START" or t == "TEXT_MESSAGE_CONTENT" or t == "TEXT_MESSAGE_END"
+            or t == "TOOL_CALL_START" or t == "TOOL_CALL_ARGS" or t == "TOOL_CALL_END"
+            or t == "TOOL_CALL_RESULT" or t == "STATE_SNAPSHOT" or t == "STATE_DELTA"
+            or t == "CUSTOM" or t == "STEP_STARTED" or t == "STEP_FINISHED"
+            or t == "REASONING_START" or t == "REASONING_MESSAGE_START" or t == "REASONING_MESSAGE_CONTENT"
+            or t == "REASONING_MESSAGE_END" or t == "REASONING_END" or t == "RUN_STARTED"
+            or t == "RUN_FINISHED" or t == "RUN_ERROR" or t == "MESSAGES_SNAPSHOT"
+            or t == "SUBAGENT_FINISHED" or t == "SUBAGENT_ERROR")
 
 
 trait LocalAgent:
@@ -78,7 +99,7 @@ struct ToolCall(Copyable, Movable):
 @fieldwise_init
 struct Message(Copyable, Movable):
     var id: String
-    var role: String  # user, assistant, tool, system, developer, …
+    var role: String  # user, assistant, tool, reasoning (the model's thinking), system, developer, …
     var content: String
     var calls: List[ToolCall]
     var tool_call_id: String  # a tool message: the call it answers
@@ -125,6 +146,11 @@ struct Agent(Movable):
     var trimmed: Int  # the oldest messages the last RunAgentInput left out to fit MAX_INPUT_BYTES
     var context: String  # the run's context: a JSON list of {description, value} (what the app tells the agent; "" = [])
     var forwarded: String  # the next run's forwardedProps (JSON; "" = {}): e.g. an interrupt's resume (goal 48 M2); sent once
+    var reasoning_open: String  # the reasoning message still being written ("" none)
+    var chunk_kind: Int  # the chunks open (CHUNK_*) and the message or call they write
+    var chunk_id: String
+    var closed_call: Bool  # the last event also ended a tool call sent as chunks (an implied TOOL_CALL_END: see pending())
+    var send_reasoning: Bool  # the thinking goes back with the next run (False: for an agent on an SDK older than REASONING_*)
 
     def __init__(out self, url: String, piece_msg: Int, end_msg: Int, thread_id: String = "thread-1", tag: Int = 3500):
         self.url = url
@@ -154,6 +180,11 @@ struct Agent(Movable):
         self.trimmed = 0
         self.forwarded = ""
         self.context = ""
+        self.reasoning_open = ""
+        self.chunk_kind = CHUNK_NONE
+        self.chunk_id = ""
+        self.closed_call = False
+        self.send_reasoning = True
 
     # ---- the app's side ----
 
@@ -231,6 +262,9 @@ struct Agent(Movable):
         var used = 0
         var start = len(self.messages)
         while start > 0:
+            if self.messages[start - 1].role == "reasoning" and not self.send_reasoning:
+                start -= 1
+                continue
             var one = self.message_json(start - 1)
             if used + one.byte_length() + 1 > room:
                 break
@@ -276,7 +310,9 @@ struct Agent(Movable):
         var events = agent.respond(self.local_input())
         for ref ev in events:
             out.append(self.on_json(ev))
+        self.end_chunks()
         self.running = False
+        self.reasoning_open = ""
         if self.ended == "open":
             self.ended = "error: the run ended without RUN_FINISHED"
         return out^
@@ -289,7 +325,10 @@ struct Agent(Movable):
     def handle(mut self, e: Event) -> Int:
         """A piece or the end of the run's stream (the app's two messages); what happened (EV_*)."""
         if e.message == self.end_msg:
+            self.closed_call = False
+            self.end_chunks()
             self.running = False
+            self.reasoning_open = ""
             if e.error != "":
                 if self.ended == "open":
                     self.ended = "error: " + e.error
@@ -386,6 +425,31 @@ struct Agent(Movable):
         self.last_message = self.messages[at].id
         return EV_TOOL_START
 
+    def chunk_of(mut self, kind: Int, id: String) -> String:
+        """The message or call a *_CHUNK event writes: its own id (a new id ends the chunks open), or, without one, the
+        chunks of its kind still open ("" with `problem` set: the first chunk must name it)."""
+        if id.byte_length() > 0:
+            if self.chunk_kind != kind or self.chunk_id != id:
+                self.end_chunks()
+            return id
+        if self.chunk_kind == kind:
+            return self.chunk_id
+        self.end_chunks()
+        self.problem = "the first chunk of a message or tool call without its id"
+        return ""
+
+    def end_chunks(mut self):
+        """The chunks open end: a tool call's arguments are whole (as TOOL_CALL_END), a reasoning message is written."""
+        if self.chunk_kind == CHUNK_TOOL:
+            var where = self.find_call(self.chunk_id)
+            if where[0] >= 0 and not self.messages[where[0]].calls[where[1]].done:
+                self.messages[where[0]].calls[where[1]].done = True
+                self.closed_call = True
+        elif self.chunk_kind == CHUNK_REASONING and self.reasoning_open == self.chunk_id:
+            self.reasoning_open = ""
+        self.chunk_kind = CHUNK_NONE
+        self.chunk_id = ""
+
     def on_json(mut self, text: String) -> Int:
         """One AG-UI event (the JSON of an SSE event's data)."""
         var j: Json
@@ -398,6 +462,11 @@ struct Agent(Movable):
         var t = j.text(j.get(0, "type"))
         self.count(t)
         self.last_type = t
+        self.closed_call = False
+        if ends_chunks(t):
+            self.end_chunks()
+            if not t.startswith("REASONING"):  # (the thinking is over once anything else comes, END or not)
+                self.reasoning_open = ""
         if t == "RUN_STARTED":
             self.running = True
             self.ended = "open"
@@ -412,6 +481,8 @@ struct Agent(Movable):
             return EV_RUN_ERROR
         if t == "TEXT_MESSAGE_START" or t == "TEXT_MESSAGE_CHUNK" or t == "TEXT_MESSAGE_CONTENT":
             var id = j.text(j.get(0, "messageId"))
+            if t == "TEXT_MESSAGE_CHUNK":
+                id = self.chunk_of(CHUNK_TEXT, id)
             var role = j.text(j.get(0, "role"), "assistant")
             if role != "assistant":  # (the agent speaks as itself: no forged "You" bubbles)
                 self.problem = "a text message with the role " + json_string(role)
@@ -427,6 +498,9 @@ struct Agent(Movable):
                 self.add_message(Message(id, "assistant", "", List[ToolCall](), ""))
                 at = len(self.messages) - 1
             self.last_message = id
+            if t == "TEXT_MESSAGE_CHUNK":
+                self.chunk_kind = CHUNK_TEXT
+                self.chunk_id = id
             if t == "TEXT_MESSAGE_START":
                 return EV_TEXT_START
             return self.add_text(at, j.text(j.get(0, "delta")))
@@ -435,12 +509,19 @@ struct Agent(Movable):
         if t == "TOOL_CALL_START":
             return self.start_call(j.text(j.get(0, "toolCallId")), j.text(j.get(0, "toolCallName")), j.text(j.get(0, "parentMessageId")))
         if t == "TOOL_CALL_CHUNK":
-            var id = j.text(j.get(0, "toolCallId"))
-            var where = self.find_call(id)
-            if where[0] < 0:
-                if self.start_call(id, j.text(j.get(0, "toolCallName")), j.text(j.get(0, "parentMessageId"))) == EV_BAD:
+            var id = self.chunk_of(CHUNK_TOOL, j.text(j.get(0, "toolCallId")))
+            if id.byte_length() == 0:
+                return EV_BAD
+            if self.chunk_kind != CHUNK_TOOL:  # (the first chunk: it starts the call)
+                var name = j.text(j.get(0, "toolCallName"))
+                if name.byte_length() == 0:
+                    self.problem = "the first TOOL_CALL_CHUNK without its toolCallName"
                     return EV_BAD
-                where = self.find_call(id)
+                if self.start_call(id, name, j.text(j.get(0, "parentMessageId"))) == EV_BAD:
+                    return EV_BAD
+                self.chunk_kind = CHUNK_TOOL
+                self.chunk_id = id
+            var where = self.find_call(id)
             return self.add_args(where[0], where[1], j.text(j.get(0, "delta")))
         if t == "TOOL_CALL_ARGS" or t == "TOOL_CALL_END":
             var where = self.find_call(j.text(j.get(0, "toolCallId")))
@@ -514,6 +595,39 @@ struct Agent(Movable):
                     break
             self.step = ""
             return EV_STEP
+        if t == "REASONING_START":
+            return EV_REASONING
+        if t == "REASONING_END":
+            self.reasoning_open = ""
+            return EV_REASONING
+        if t == "REASONING_MESSAGE_START" or t == "REASONING_MESSAGE_CONTENT" or t == "REASONING_MESSAGE_CHUNK":
+            var id = j.text(j.get(0, "messageId"))
+            if t == "REASONING_MESSAGE_CHUNK":
+                id = self.chunk_of(CHUNK_REASONING, id)
+            if id.byte_length() == 0:
+                if self.problem.byte_length() == 0:
+                    self.problem = "a reasoning message without its id"
+                return EV_BAD
+            var at = self.find_message(id)
+            if at >= 0 and self.messages[at].role != "reasoning":
+                self.problem = "a reasoning message id that is another role's message"
+                return EV_BAD
+            if at < 0:
+                self.add_message(Message(id, "reasoning", "", List[ToolCall](), ""))
+                at = len(self.messages) - 1
+            self.last_message = id
+            self.reasoning_open = id
+            if t == "REASONING_MESSAGE_CHUNK":
+                self.chunk_kind = CHUNK_REASONING
+                self.chunk_id = id
+            if t == "REASONING_MESSAGE_START":
+                return EV_REASONING
+            var r = self.add_text(at, j.text(j.get(0, "delta")))
+            return EV_REASONING if r == EV_TEXT else r
+        if t == "REASONING_MESSAGE_END":
+            if self.reasoning_open == j.text(j.get(0, "messageId")):
+                self.reasoning_open = ""
+            return EV_REASONING
         if t == "CUSTOM":
             self.custom_name = j.text(j.get(0, "name"))
             try:

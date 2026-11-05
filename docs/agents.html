@@ -254,7 +254,7 @@ self.chat.run_local(helper)</pre></div>
     </div>
     <div class="need">
       <div class="rv"><h3>omxcode <span class="badge ok"><i></i>Linux, web</span></h3><p>Mojo 1.1 through <code>pixi install</code>. Linux with GTK 4 and libadwaita, or any browser through the web host. Not yet run with agents on the Mac.</p></div>
-      <div class="rv"><h3>An agent <span class="badge"><i></i>any AG-UI server</span></h3><p>Anything that speaks AG-UI over HTTP: frameworks such as LangGraph, CrewAI, Mastra or Pydantic AI publish adapters. So far omxcode has been proved against its own scripted agent, built on the official AG-UI SDK, not yet against those frameworks.</p></div>
+      <div class="rv"><h3>An agent <span class="badge"><i></i>any AG-UI server</span></h3><p>Anything that speaks AG-UI over HTTP: frameworks such as LangGraph, CrewAI, Mastra or Pydantic AI publish adapters. omxcode has been proved against its own scripted agent on the official AG-UI SDK, and against Pydantic AI's and LangGraph's own AG-UI code.</p></div>
       <div class="rv"><h3>Or no server <span class="badge"><i></i>LocalAgent</span></h3><p>Write the agent in Mojo, in the app itself. Nothing to deploy, nothing on the network.</p></div>
       <div class="rv"><h3>A GPU <span class="badge info"><i></i>optional</span></h3><p>Datasets are grouped on an NVIDIA GPU when there is one, and on the CPU otherwise. Nothing else needs it.</p></div>
     </div>
@@ -274,7 +274,7 @@ self.chat.run_local(helper)</pre></div>
       <div class="feat rv"><div class="t">In process</div><h3>The agent inside the app</h3><p>A <code>LocalAgent</code> gets the same input a server would and answers with the same events, straight into the same code path: no HTTP, no second program, nothing on the network. Datasets stay in the app too; an agent names them and never sends the rows.</p></div>
     </div>
     <ul class="lst rv">
-      <li><b>Any AG-UI server:</b> proved against its own agent on the official SDK and against Pydantic AI's own AG-UI adapter, on GTK and the web. LangGraph, CrewAI, Mastra and others publish adapters too, and those haven't been run yet. <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/ag-ui-compatibility.md">How compatibility is checked</a>, and how to run each check.</li>
+      <li><b>Any AG-UI server:</b> proved against its own agent on the official SDK and against Pydantic AI's and LangGraph's own AG-UI code, on GTK and the web. CrewAI, Mastra and others publish adapters too, and those haven't been run yet. <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/ag-ui-compatibility.md">How compatibility is checked</a>, and how to run each check.</li>
       <li><b>Same events either way:</b> an app can start with an agent in process and move it to a server later without changing its screens.</li>
     </ul>
   </div>

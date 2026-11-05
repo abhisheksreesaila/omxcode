@@ -41,6 +41,7 @@ anthropic = ">=2.3.0, <3"
 jsonpatch = ">=1.38, <2"
 jsonschema = ">=4.26.0, <5"
 pydantic-ai-slim = { version = ">=2.66.0, <3", extras = ["ag-ui"] }
+ag-ui-langgraph = ">=0.0.47, <0.0.48"
 
 [target.linux-glibc-234.dependencies]
 xorg-xvfb-server = ">=21.1.25,<22"

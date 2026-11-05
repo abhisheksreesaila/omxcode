@@ -196,6 +196,12 @@ def m1():
     miss = need_ok(lines, ["partial", "status", "steps", "state", "skeleton"])
     if miss:
         return False, f"test_agui_stream has no ok for {miss}: {lines[-6:]}"
+    lines, err = run_test("test_agui_chunks")  # (*_CHUNK events as @ag-ui/client reads them; REASONING_* as "Thought")
+    if err:
+        return False, err
+    miss = need_ok(lines, ["text chunks", "tool chunks", "reasoning", "chat"])
+    if miss:
+        return False, f"test_agui_chunks has no ok for {miss}: {lines[-6:]}"
     err = build_chat()
     if err:
         return False, err
@@ -228,7 +234,7 @@ def m1():
         notes.append(f"{host}: 3 mid-stream shots differ")
     if problems:
         return False, "; ".join(problems)
-    return True, "test_agui_stream ok (partial, status, steps, state, skeleton); " + "; ".join(notes)
+    return True, "test_agui_stream ok (partial, status, steps, state, skeleton); test_agui_chunks ok (text, tool, reasoning chunks, chat); " + "; ".join(notes)
 
 
 def m2():
