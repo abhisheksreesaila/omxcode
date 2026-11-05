@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-style="ink">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A typical GPU app (C++, CUDA, OpenGL)</title>
+<style>
+:root{
+  --bg:#f5f3ee; --ink:#1d1f25; --muted:#6a6e78; --panel:#fffffff0; --line:#dcd8ce;
+  --chip:#ffffff; --accent:#3d5bd9; --bug:#e5484d; --shadow:0 8px 30px #00000014; --r:999px;
+  --font: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14161b; --ink:#e8e9ee; --muted:#9aa0ac; --panel:#1d2027f2; --line:#30343f;
+    --chip:#1d2027; --accent:#8fa3ff; --shadow:0 8px 30px #00000066;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14161b; --ink:#e8e9ee; --muted:#9aa0ac; --panel:#1d2027f2; --line:#30343f;
+  --chip:#1d2027; --accent:#8fa3ff; --shadow:0 8px 30px #00000066;
+}
+/* Field Notes: pen, coloured pencil and paper */
+:root[data-style="fieldnotes"]{
+  --bg:#ece3d0; --ink:#201d19; --muted:#6b6152; --panel:#fbf8edf5; --line:#cdbf9f; --chip:#fbf8ed;
+  --accent:#b35f5a; --bug:#c8323a; --shadow:0 6px 22px #3b2e1a1f; --r:3px;
+  --font: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root[data-style="fieldnotes"]:not([data-theme="light"]){
+    --bg:#221f1a; --ink:#eee5d2; --muted:#a99d88; --panel:#2b2822f5; --line:#4a4337; --chip:#2b2822; --accent:#e0847a; --bug:#ff6b6b;
+  }
+}
+:root[data-style="fieldnotes"][data-theme="dark"]{
+  --bg:#221f1a; --ink:#eee5d2; --muted:#a99d88; --panel:#2b2822f5; --line:#4a4337; --chip:#2b2822; --accent:#e0847a; --bug:#ff6b6b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);display:grid;grid-template-rows:auto 1fr auto;height:100dvh;overflow:hidden}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:14px 16px 6px}
+header .t{flex:1 1 260px;min-width:0}
+h1{font-size:18px;margin:0;font-weight:700;letter-spacing:-.01em}
+.sub{margin:2px 0 0;color:var(--muted);font-size:13px}
+:root[data-style="fieldnotes"] h1{font-size:24px;font-weight:400;letter-spacing:0}
+:root[data-style="fieldnotes"] .sub{font-style:italic}
+.tools{display:flex;gap:6px;flex-wrap:wrap}
+button,select{font:inherit;font-size:12.5px;color:var(--ink);background:var(--chip);border:1px solid var(--line);border-radius:var(--r);padding:6px 11px;cursor:pointer}
+button:hover,select:hover{border-color:var(--muted)}
+button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button[hidden]{display:none}
+:root[data-style="fieldnotes"] button,:root[data-style="fieldnotes"] select{border-color:color-mix(in srgb,var(--ink) 45%,transparent)}
+#stage{position:relative;min-height:0}
+svg#svg{width:100%;height:100%;display:block;touch-action:none;cursor:grab;user-select:none}
+svg#svg.panning{cursor:grabbing}
+.node{cursor:pointer;transition:transform .25s ease, opacity .25s ease}
+.node.hot{transform:translateY(-6px)}
+.nlabel{transition:transform .25s ease, opacity .25s ease;pointer-events:none}
+.nlabel.hot{transform:translateY(-6px)}
+.edge,.elabel,.ftag,.shadow{transition:opacity .25s ease}
+.ftag{cursor:pointer}
+.dim{opacity:.22}
+.edge.on .line{stroke:var(--accent);stroke-width:3.2}
+.edge.on .head{fill:var(--accent)}
+.edge.on .chev{stroke:var(--accent)}
+#info{position:absolute;right:16px;top:12px;width:300px;max-height:calc(100% - 24px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow);}
+#info.wide{width:380px}
+:root[data-style="fieldnotes"] #info{border-radius:4px}
+#info[hidden]{display:none}
+#info .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:flex;align-items:center;gap:6px}
+#info .sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+#info h2{font-size:17px;margin:4px 0 2px}
+#info .tech{font-size:12.5px;color:var(--muted);margin:0 0 8px}
+#info p{font-size:13.5px;line-height:1.5;margin:6px 0}
+#info h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:12px 0 4px}
+#info ul{margin:0;padding:0;list-style:none;font-size:13px;line-height:1.6}
+#info li span{color:var(--muted)}
+#info .x{position:absolute;right:10px;top:10px;padding:2px 8px}
+#info .sc{margin:4px -4px 0}
+#info .sc svg{width:100%;height:auto;display:block}
+#info .sct{font-size:12px;font-style:italic;color:var(--muted);margin:0 0 2px}
+#info .rules li{line-height:1.45;margin:3px 0}
+#info .rules .ok b{color:#2f8a57}
+#info .rules .bad b{color:var(--bug)}
+#info .rules ol{margin:4px 0 6px;padding-left:22px;font-size:12px;color:var(--muted)}
+#legend{position:absolute;left:16px;bottom:12px;display:flex;flex-wrap:wrap;gap:6px;max-width:min(900px,75%);pointer-events:none}
+#legend .c{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:3px 9px}
+#legend .sw{width:9px;height:9px;border-radius:2px}
+#legend svg{width:22px;height:8px}
+footer{display:flex;align-items:center;gap:8px;padding:8px 16px 14px;flex-wrap:wrap;border-top:1px solid var(--line)}
+footer[hidden]{display:none}
+#caption{flex:1 1 280px;font-size:14px;line-height:1.4;min-height:20px}
+:root[data-style="fieldnotes"] #caption{font-style:italic}
+#caption b{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:6px;font-style:normal}
+#caption .st{font-style:normal;font-size:11.5px;border:1px solid var(--line);border-radius:3px;padding:1px 6px;margin-left:8px;color:var(--muted);white-space:nowrap}
+#caption .brk{color:var(--bug);font-style:normal;font-weight:700}
+#dots{display:flex;gap:4px}
+#dots i{width:7px;height:7px;border-radius:50%;background:var(--line);cursor:pointer}
+#dots i.on{background:var(--accent)}
+#dots.bug i.on{background:var(--bug)}
+@media (max-width:640px){
+  #info,#info.wide{left:12px;right:12px;width:auto;top:auto;bottom:12px;max-height:55%}
+  #legend{display:none}
+}
+</style>
+<!-- omx-chrome --><link rel="stylesheet" href="../../omxqua/src/fonts.css">
+<style>
+:root, :root[data-theme="dark"] { --bg:#151518; --ink:#ededef; --muted:#a9a9b1; --panel:#1d1d21; --line:#2a2a30; --chip:#1d1d21; --accent:#ff5d6c;
+  --shadow:0 8px 30px #00000066; --r:999px; --font:"Geist", system-ui, -apple-system, "Segoe UI", sans-serif; }
+header, #legend, #styleSel, #bLive, #bTheme, #bFit, #bFold, #bSvg, #bPng { display:none !important; }
+body { grid-template-rows:1fr auto; background:var(--bg); }
+footer { border-top:1px solid #202025; padding:10px 14px; gap:8px; }
+footer button, footer select { height:36px; padding:0 14px; border:0; border-radius:999px; background:var(--chip); color:var(--ink);
+  box-shadow:inset 0 0 0 1px var(--line); font:500 13px var(--font); transition:background .15s, transform .15s; }
+footer button:hover, footer select:hover { background:#25252a; }
+footer button:active { transform:scale(.96); }
+footer button:focus-visible, footer select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+#bPlay { background:var(--accent); color:#0b0b0d; box-shadow:none; font-weight:600; padding:0 18px; }
+#bPlay:hover { background:var(--accent); filter:brightness(1.08); }
+#caption { font:14px/1.45 var(--font); color:var(--ink); }
+#caption b { color:var(--accent); }
+#dots i.on { background:var(--accent); }
+#info { background:var(--panel); border:1px solid var(--line); border-radius:18px; font-family:var(--font); }
+.edge.on .line { stroke:var(--accent); } .edge.on .head { fill:var(--accent); } .edge.on .chev { stroke:var(--accent); }
+</style><!-- /omx-chrome -->
+</head>
+<body>
+<header>
+  <div class="t"><h1 id="title"></h1><p class="sub" id="subtitle"></p></div>
+  <div class="tools">
+    <select id="styleSel" aria-label="Drawing style" title="Drawing style">
+      <option value="fieldnotes">Field notes</option>
+      <option value="ink">Ink</option>
+      <option value="clean">Clean</option>
+    </select>
+    <button id="bFold" hidden title="Stack the floors into one building, or pull them apart">Fold floors</button>
+    <button id="bLive" aria-pressed="true" title="Animate traffic on every connection">Live</button>
+    <button id="bTheme" title="Switch light / dark">Theme</button>
+    <button id="bFit" title="Reset view">Fit</button>
+    <button id="bSvg">SVG</button>
+    <button id="bPng">PNG</button>
+  </div>
+</header>
+<main id="stage">
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" role="img"></svg>
+  <aside id="info" hidden></aside>
+  <div id="legend"></div>
+</main>
+<footer id="flowbar" hidden>
+  <select id="flowSel" aria-label="Flow"></select>
+  <button id="bPrev" title="Previous step (←)">◀</button>
+  <button id="bPlay" title="Play / pause (space)">▶ Play</button>
+  <button id="bNext" title="Next step (→)">▶|</button>
+  <div id="caption"></div>
+  <div id="dots"></div>
+</footer>
+<script type="application/json" id="spec">{"title": "A typical GPU app (C++, CUDA, OpenGL)", "subtitle": "A UI toolkit, host code, a kernel and a shader, each in its own language, meeting on the GPU", "style": "ink", "live": false, "floors": [{"id": "code", "label": "you write", "note": "four kinds of code, three languages", "nodes": ["ui", "host", "kernel", "shader", "cpu"]}, {"id": "plat", "label": "the platform", "note": "drivers, the GPU, the compositor", "nodes": ["cuda", "gl", "gpu", "tex", "comp", "screen"]}], "nodes": [{"id": "ui", "label": "UI code", "kind": "client", "at": [0, -5], "hue": 205, "tech": "C++ · Qt or Dear ImGui", "desc": "The windows, sliders and menus, written with a UI toolkit. Qt draws its own widgets; Dear ImGui draws every widget itself with the GPU, as triangles, each frame."}, {"id": "host", "label": "Host code", "kind": "service", "at": [5, -5], "hue": 205, "tech": "C++ · CUDA runtime, OpenGL calls", "desc": "Allocates GPU memory, launches kernels with kernel<<<grid, block>>>(…), registers OpenGL textures with CUDA, and issues the draw calls."}, {"id": "kernel", "label": "Kernel", "kind": "worker", "at": [10, -5], "hue": 18, "tech": "CUDA C++ · .cu · nvcc", "desc": "The GPU function, in CUDA C++: a dialect with __global__, threadIdx and blockIdx. Compiled by nvcc, NVIDIA's compiler, as its own build step. Runs on NVIDIA GPUs only."}, {"id": "shader", "label": "Shader", "kind": "worker", "at": [15, 4.5], "hue": 38, "tech": "GLSL · .frag", "desc": "A small program in OpenGL's shading language, compiled by the driver at run time. It samples the texture to colour the rectangle on screen."}, {"id": "cpu", "label": "Other GPUs, the CPU", "kind": "worker", "at": [0, 1], "hue": 0, "tech": "more code", "desc": "A CUDA kernel runs only on NVIDIA GPUs. The maths can be shared with the CPU (__host__ __device__ functions), but the launch code can't, and other GPUs need another kernel, in Metal or HIP."}, {"id": "cuda", "label": "CUDA driver", "kind": "edge", "at": [10, -5], "hue": 140, "tech": "libcuda", "desc": "Loads the compiled kernel and runs it."}, {"id": "gl", "label": "OpenGL driver", "kind": "edge", "at": [15, 4.5], "hue": 140, "tech": "or Vulkan, Metal, Direct3D", "desc": "Draws the rectangle with the shader into the window's buffer."}, {"id": "gpu", "label": "GPU", "kind": "service", "shape": "chip", "at": [15, -5], "hue": 140, "tech": "NVIDIA", "desc": "Thousands of threads; one per pixel here."}, {"id": "tex", "label": "Shared buffer", "kind": "storage", "at": [15, 0], "hue": 140, "tech": "CUDA–OpenGL interop", "desc": "A pixel buffer OpenGL owns, registered with CUDA (cudaGraphicsGLRegisterBuffer). The kernel writes into it, and OpenGL turns it into a texture without it leaving the GPU."}, {"id": "comp", "label": "Compositor", "kind": "edge", "at": [10, 4.5], "hue": 140, "tech": "the OS, on the GPU", "desc": "The window system puts every window together, also on the GPU."}, {"id": "screen", "label": "Screen", "kind": "client", "at": [5, 4.5], "hue": 0, "tech": "", "desc": "What the person sees."}], "edges": [{"from": "ui", "to": "host", "label": "slider"}, {"from": "host", "to": "cuda", "label": "launch"}, {"from": "kernel", "to": "cuda", "label": "nvcc", "style": "data"}, {"from": "cuda", "to": "gpu"}, {"from": "gpu", "to": "tex", "label": "writes"}, {"from": "host", "to": "gl", "label": "draw"}, {"from": "shader", "to": "gl", "style": "data"}, {"from": "tex", "to": "gl", "label": "reads"}, {"from": "gl", "to": "comp"}, {"from": "comp", "to": "screen"}, {"from": "host", "to": "cpu", "style": "async"}], "flows": [{"name": "One frame", "steps": [{"from": "ui", "to": "host", "note": "A slider moves in the UI toolkit, written in C++."}, {"from": "kernel", "to": "cuda", "note": "The kernel was written in CUDA C++ and compiled ahead of time by nvcc, a separate compiler."}, {"from": "host", "to": "cuda", "note": "Host code launches it: kernel<<<grid, block>>>(…)."}, {"from": "cuda", "to": "gpu", "note": "The GPU runs one thread per pixel."}, {"from": "gpu", "to": "tex", "note": "It writes straight into a buffer shared with OpenGL. No copy to the CPU."}, {"from": "host", "to": "gl", "note": "Host code has OpenGL turn the buffer into a texture and draw a rectangle with it."}, {"from": "shader", "to": "gl", "note": "A GLSL shader, another language, colours the rectangle from the texture."}, {"from": "gl", "to": "comp", "note": "The window's picture goes to the compositor, which also runs on the GPU."}, {"from": "comp", "to": "screen", "note": "On screen, and three languages met to do it."}]}, {"name": "Without an NVIDIA GPU", "steps": [{"at": "kernel", "note": "A CUDA kernel runs only on NVIDIA GPUs."}, {"from": "host", "to": "cpu", "note": "The maths can be shared with the CPU through __host__ __device__ functions; the launch code can't."}, {"at": "cpu", "note": "Other GPUs need another kernel: Metal on Apple, HIP on AMD."}]}]}</script>
+<script>
+(() => {
+"use strict";
+const spec = JSON.parse(document.getElementById('spec').textContent);
+const NS = 'http://www.w3.org/2000/svg';
+const U = 30, C = Math.cos(Math.PI / 6), R2 = Math.SQRT2;
+const svg = document.getElementById('svg');
+const $ = id => document.getElementById(id);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const STYLES = ['fieldnotes', 'ink', 'clean'];
+
+/* ---------- kinds: colour + default shape ---------- */
+const KINDS = {
+  client:  {hue:215, sat:28, shape:'screen',   h:1.5, label:'Client'},
+  edge:    {hue:178, sat:42, shape:'slab',     h:0.55,label:'Edge / gateway'},
+  service: {hue:232, sat:52, shape:'box',      h:1.5, label:'Service'},
+  worker:  {hue:268, sat:40, shape:'box',      h:1.2, label:'Worker / job'},
+  ai:      {hue:312, sat:42, shape:'chip',     h:1.3, label:'Model / AI'},
+  db:      {hue:36,  sat:72, shape:'cylinder', h:1.7, label:'Database'},
+  cache:   {hue:6,   sat:60, shape:'cylinder', h:0.9, label:'Cache'},
+  storage: {hue:198, sat:52, shape:'bucket',   h:1.0, label:'Object storage'},
+  queue:   {hue:148, sat:40, shape:'stack',    h:1.3, label:'Queue / stream'},
+  external:{hue:220, sat:5,  shape:'box',      h:1.0, label:'External / 3rd party'},
+};
+const EDGE_STYLES = {
+  sync:  {dash:null,  label:'Request / response'},
+  async: {dash:'7 5', label:'Async / event'},
+  data:  {dash:'2 4', label:'Data / replication'},
+};
+const FLOOR_HUES = [120, 38, 205, 280, 12, 170];
+
+/* ---------- state ---------- */
+const S = {hover:null, sel:null, floorHot:null, flow:0, step:-1, playing:false, live:!reduceMotion && spec.live !== false,
+           style:'ink', fold:!!spec.folded, vb:null, anim:null, timer:null};
+const FN = () => S.style === 'fieldnotes';
+
+function isDark(){
+  const t = document.documentElement.dataset.theme;
+  return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function theme(){
+  const d = isDark();
+  if (FN()) return d
+    ? {bg:'#221f1a', ink:'#eee5d2', muted:'#a99d88', edge:'#b9ad96', grid:'#2c2822', halo:'#221f1a', accent:'#e0847a', bug:'#ff6b6b', pill:'#2b2822', pillLine:'#eee5d2',
+       nodeInk:'#141210', shadow:'#000000', shadowOp:.45, zone:.55, plinthTop:'#3b372f', plinthSide:'#2f2b25', thread:'#e0847a', ticketInk:'#eee5d2'}
+    : {bg:'#ece3d0', ink:'#201d19', muted:'#6b6152', edge:'#5e5243', grid:'#e2d7c0', halo:'#ece3d0', accent:'#b35f5a', bug:'#c8323a', pill:'#fbf8ed', pillLine:'#201d19',
+       nodeInk:'#201d19', shadow:'#767e9a', shadowOp:.55, zone:.55, plinthTop:'#f3e6c9', plinthSide:'#dcc9a3', thread:'#b35f5a', ticketInk:'#201d19'};
+  return d
+    ? {bg:'#151518', ink:'#ededef', muted:'#a9a9b1', edge:'#8a8a94', grid:'#1d1d21', halo:'#151518', accent:'#ff5d6c', bug:'#ff6b6b', pill:'#1d1d21', pillLine:'#2a2a30', nodeInk:'#0b0b0d', shadow:'#000000', shadowOp:.09, zone:0.10, thread:'#ff5d6c', ticketInk:'#ededef'/*omx-palette*/}
+    : {bg:'#f5f3ee', ink:'#1d1f25', muted:'#6a6e78', edge:'#7c818e', grid:'#e6e2d8', halo:'#f5f3ee', accent:'#3d5bd9', bug:'#e5484d', pill:'#ffffff', pillLine:'#dcd8ce',
+       nodeInk:'#24262c', shadow:'#1d1f25', shadowOp:.09, zone:0.16, thread:'#3d5bd9', ticketInk:'#1d1f25'};
+}
+const hsl = (h,s,l,a=1) => `hsla(${h},${s}%,${l}%,${a})`;
+function colours(n){
+  const K = n._K, h = n.hue ?? K.hue, d = isDark();
+  let s = n.sat ?? K.sat, L = d ? [56,43,33] : [87,73,60];
+  if (FN()){ s = Math.round(Math.min(s, 46) * 0.78); L = d ? [50,41,33] : [88,78,67]; }
+  return {h, s, top:hsl(h,s,L[0]), left:hsl(h,s,L[1]), right:hsl(h,s,L[2]),
+          glass: d ? hsl(205,40,72) : hsl(205,55,90), swatch:hsl(h,FN() ? s + 10 : s,d?55:62)};
+}
+
+/* ---------- projection + svg helpers ---------- */
+let Z0 = 0;   // elevation of the floor being drawn
+const P = (x,y,z=0) => [(x - y) * C * U, (x + y) * 0.5 * U - (z + Z0) * U];
+const pts = a => a.map(p => P(...p).map(v => v.toFixed(1)).join(',')).join(' ');
+const at = (z, f) => { const o = Z0; Z0 = z; try { return f(); } finally { Z0 = o; } };
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  if (attrs) for (const k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const dstr = (p, closed) => 'M' + p.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join('L') + (closed ? 'Z' : '');
+
+/* ---------- hand: rounded, slightly wobbly pen lines (Field Notes) ---------- */
+let SEED = 1;
+function rnd(seed){ let t = seed >>> 0; return () => { t += 0x6D2B79F5; let r = Math.imul(t ^ t >>> 15, 1 | t); r ^= r + Math.imul(r ^ r >>> 7, 61 | r); return ((r ^ r >>> 14) >>> 0) / 4294967296; }; }
+function densify(p, closed, r, step){
+  const n = p.length, out = [];
+  const corner = i => {
+    const a = p[(i - 1 + n) % n], b = p[i], c = p[(i + 1) % n];
+    const l1 = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, l2 = Math.hypot(c[0] - b[0], c[1] - b[1]) || 1;
+    const k = Math.min(r, l1 * 0.45, l2 * 0.45);
+    return [[b[0] - (b[0] - a[0]) / l1 * k, b[1] - (b[1] - a[1]) / l1 * k], b, [b[0] + (c[0] - b[0]) / l2 * k, b[1] + (c[1] - b[1]) / l2 * k]];
+  };
+  const line = (a, b) => { const L = Math.hypot(b[0] - a[0], b[1] - a[1]), m = Math.max(1, Math.ceil(L / step)); for (let j = 1; j <= m; j++) out.push([a[0] + (b[0] - a[0]) * j / m, a[1] + (b[1] - a[1]) * j / m]); };
+  const bez = (a, b, c) => { for (let j = 1; j <= 4; j++){ const t = j / 4, u = 1 - t; out.push([u * u * a[0] + 2 * u * t * b[0] + t * t * c[0], u * u * a[1] + 2 * u * t * b[1] + t * t * c[1]]); } };
+  if (n < 2) return p.slice();
+  if (closed){
+    const cs = p.map((_, i) => corner(i));
+    out.push(cs[0][2]);
+    for (let i = 1; i <= n; i++){ const c = cs[i % n]; line(out[out.length - 1], c[0]); if (r > 0) bez(c[0], c[1], c[2]); }
+  } else {
+    out.push(p[0]);
+    for (let i = 1; i < n - 1; i++){ const c = corner(i); line(out[out.length - 1], c[0]); if (r > 0) bez(c[0], c[1], c[2]); }
+    line(out[out.length - 1], p[n - 1]);
+  }
+  return out;
+}
+function hand(p, closed, o = {}){
+  const q = densify(p, closed, o.r ?? 0, o.step ?? 8), amp = o.amp ?? 0.75;
+  if (!amp || q.length < 3) return dstr(q, closed);
+  const R = rnd(++SEED * 2654435761);
+  let total = 0; const acc = [0];
+  for (let i = 1; i < q.length; i++){ total += Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]); acc.push(total); }
+  // closed lines use whole cycles so the end meets the start
+  const cyc = f => closed ? Math.max(1, Math.round(total * f / 6.283)) * 6.283 / Math.max(1, total) : f;
+  const f1 = cyc(0.045 + R() * 0.03), f2 = cyc(0.12 + R() * 0.06), a1 = R() * 6.283, a2 = R() * 6.283;
+  const out = q.map((pt, i) => {
+    const A = q[Math.max(0, i - 1)], B = q[Math.min(q.length - 1, i + 1)];
+    const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy) || 1;
+    const taper = closed ? 1 : Math.min(1, acc[i] / 10, (total - acc[i]) / 10);
+    const k = amp * taper * (0.7 * Math.sin(acc[i] * f1 + a1) + 0.3 * Math.sin(acc[i] * f2 + a2));
+    return [pt[0] - dy / L * k, pt[1] + dx / L * k];
+  });
+  return dstr(out, closed);
+}
+
+/* ---------- paper tooth: one grain tile, reused by every colour ---------- */
+const TOOTH = {}, TN = 180;
+function tooth(){
+  const key = isDark() ? 'd' : 'l';
+  if (TOOTH[key]) return TOOTH[key];
+  const cv = document.createElement('canvas'); cv.width = cv.height = TN;
+  const ctx = cv.getContext('2d'), img = ctx.createImageData(TN, TN), R = rnd(4242);
+  const grid = g => { const a = []; for (let i = 0; i < g * g; i++) a.push(R()); return (x, y) => {
+    const gx = x / TN * g, gy = y / TN * g, x0 = Math.floor(gx), y0 = Math.floor(gy), fx = gx - x0, fy = gy - y0;
+    const v = (i, j) => a[((j % g + g) % g) * g + ((i % g + g) % g)];
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    return (v(x0, y0) * (1 - sx) + v(x0 + 1, y0) * sx) * (1 - sy) + (v(x0, y0 + 1) * (1 - sx) + v(x0 + 1, y0 + 1) * sx) * sy; }; };
+  const n1 = grid(30), n2 = grid(90), dark = isDark();
+  for (let y = 0; y < TN; y++) for (let x = 0; x < TN; x++){
+    // mostly fine grain, a little slow mottling: pencil catching the paper's tooth
+    const t = 0.18 * n1(x, y) + 0.22 * n2(x, y) + 0.6 * R(), i = (y * TN + x) * 4;
+    if (t > 0.68){ img.data[i] = 30; img.data[i + 1] = 26; img.data[i + 2] = 20; img.data[i + 3] = Math.min(dark ? 60 : 38, (t - 0.68) * (dark ? 260 : 150)); }
+    else if (t < 0.34){ img.data[i] = 255; img.data[i + 1] = 252; img.data[i + 2] = 240; img.data[i + 3] = Math.min(dark ? 26 : 80, (0.34 - t) * (dark ? 90 : 300)); }
+  }
+  ctx.putImageData(img, 0, 0);
+  return TOOTH[key] = cv.toDataURL('image/png');
+}
+let PAT = new Map(), DEFS = null;
+function fillOf(col, hatch){
+  if (!FN() || !col || col === 'none' || col.startsWith('url')) return col;
+  const key = col + (hatch ? '#h' : '');
+  if (PAT.has(key)) return PAT.get(key);
+  const id = 'pc' + PAT.size, p = el('pattern', {id, patternUnits:'userSpaceOnUse', width:TN, height:TN}, DEFS);
+  el('rect', {width:TN, height:TN, fill:col}, p);
+  if (hatch){
+    let d = ''; for (let k = 0; k <= 2 * TN; k += 6) d += `M${k},0L${k - TN},${TN}`;
+    el('path', {d, stroke:theme().ink, 'stroke-width':0.7, opacity:isDark() ? .12 : .09}, p);
+  }
+  el('use', {href:'#tooth'}, p);
+  PAT.set(key, `url(#${id})`);
+  return `url(#${id})`;
+}
+
+/* ---------- model ---------- */
+const nodes = spec.nodes || [];
+const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+const edges = (spec.edges || []).filter(e => byId[e.from] && byId[e.to]);
+const zones = spec.zones || [];
+const floors = (spec.floors || []).filter(f => (f.nodes || []).length);
+const flows = (spec.flows || []).filter(f => f.steps && f.steps.length);
+const warnings = [];
+(spec.edges || []).forEach(e => { if (!byId[e.from] || !byId[e.to]) warnings.push(`edge ${e.from}->${e.to}: unknown node`); });
+const F = Math.max(1, floors.length);
+let FB = null;   // shared footprint of every floor
+
+function layout(){
+  const gapX = spec.layout?.gapX ?? 6, gapY = spec.layout?.gapY ?? 5;
+  nodes.forEach(n => { n._fi = floors.length ? floors.length - 1 : 0; });
+  floors.forEach((f, i) => f.nodes.forEach(id => { if (byId[id]) byId[id]._fi = i; else warnings.push(`floor ${f.id}: unknown node ${id}`); }));
+  if (floors.length) nodes.forEach(n => { if (!floors.some(f => f.nodes.includes(n.id))) warnings.push(`node ${n.id} is on no floor; drawn on the bottom floor`); });
+  const tiers = {};
+  nodes.forEach(n => {
+    n._K = KINDS[n.kind] || KINDS.service;
+    n.shape = n.shape || n._K.shape;
+    n.w = n.size?.[0] ?? 2; n.d = n.size?.[1] ?? 2;
+    n.h = n.height ?? n._K.h;
+    if (!n.at) (tiers[n._fi + '|' + (n.tier ?? 0)] ??= []).push(n);
+  });
+  for (const k in tiers){
+    const list = tiers[k], t = Number(k.split('|')[1]);
+    list.forEach((n, i) => { n.at = [t * gapX, (i - (list.length - 1) / 2) * gapY]; });
+  }
+  nodes.forEach(n => { n.cx = n.at[0]; n.cy = n.at[1]; n.x = n.cx - n.w / 2; n.y = n.cy - n.d / 2; });
+  for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++){
+    const a = nodes[i], b = nodes[j];
+    if (a._fi !== b._fi) continue;
+    if (a.x < b.x + b.w + 0.4 && b.x < a.x + a.w + 0.4 && a.y < b.y + b.d + 0.4 && b.y < a.y + a.d + 0.4)
+      warnings.push(`nodes ${a.id} and ${b.id} overlap or touch; move one with "at"`);
+  }
+}
+function applyFloors(){
+  const maxH = Math.max(1, ...nodes.map(n => n.h));
+  // A point (x, y) on a lower floor sits under (x + gap, y + gap) on the floor above, so the
+  // gap must carry every node (and its label) clear of the slab above it, out the front or the side.
+  const clear = FB ? Math.max(...nodes.filter(n => n._fi > 0).map(n => Math.min(FB.x + FB.w - n.x, FB.y + FB.d - n.y) + n.h), 0) + 1.6 : 0;
+  const gap = S.fold ? maxH + 0.75 : (spec.layout?.floorGap ?? Math.min(16, Math.max(maxH + 3.4, 5.2, clear)));
+  floors.forEach((f, i) => { f._z = (F - 1 - i) * gap; });
+  nodes.forEach(n => { n.z = floors.length ? floors[n._fi]._z : 0; });
+  zones.forEach(z => { z._z = z._m?.length ? z._m[0].z : 0; });
+}
+
+function zoneMembers(z, seen = new Set()){
+  if (seen.has(z.id)) return [];
+  seen.add(z.id);
+  const out = [];
+  (z.nodes || []).forEach(id => {
+    if (byId[id]) out.push(byId[id]);
+    else { const zz = zones.find(q => q.id === id); if (zz) out.push(...zoneMembers(zz, seen)); else warnings.push(`zone ${z.id}: unknown member ${id}`); }
+  });
+  return out;
+}
+function layoutZones(){
+  zones.forEach(z => { z._m = zoneMembers(z); z._fi = z._m[0]?._fi ?? 0; });
+  zones.forEach(z => {
+    const inner = zones.filter(o => o !== z && o._m.length && o._m.every(n => z._m.includes(n)) && o._m.length < z._m.length).length;
+    const pad = (z.pad ?? 0.75) + 0.65 * inner;
+    if (!z._m.length) return;
+    if (z._m.some(n => n._fi !== z._fi)) warnings.push(`zone ${z.id} spans floors; it is drawn on the floor of ${z._m[0].id}`);
+    const x0 = Math.min(...z._m.map(n => n.x)) - pad, y0 = Math.min(...z._m.map(n => n.y)) - pad;
+    const x1 = Math.max(...z._m.map(n => n.x + n.w)) + pad, y1 = Math.max(...z._m.map(n => n.y + n.d)) + pad;
+    Object.assign(z, {x:x0, y:y0, w:x1 - x0, d:y1 - y0, _area:(x1 - x0) * (y1 - y0)});
+  });
+  if (floors.length){
+    const xs = nodes.flatMap(n => [n.x, n.x + n.w]).concat(zones.filter(z => z._m.length).flatMap(z => [z.x, z.x + z.w]));
+    const ys = nodes.flatMap(n => [n.y, n.y + n.d]).concat(zones.filter(z => z._m.length).flatMap(z => [z.y, z.y + z.d]));
+    const pad = 1.3, x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad;
+    FB = {x:x0, y:y0, w:Math.max(...xs) + pad - x0, d:Math.max(...ys) + pad - y0};
+  }
+}
+
+/* ---------- edge routing (grid space, orthogonal) ---------- */
+function overlap(a0, a1, b0, b1){ const lo = Math.max(a0, b0), hi = Math.min(a1, b1); return hi - lo > 0.3 ? [lo, hi] : null; }
+function route(a, b, mode){
+  const ox = overlap(a.x, a.x + a.w, b.x, b.x + b.w), oy = overlap(a.y, a.y + a.d, b.y, b.y + b.d);
+  if (a._fi !== b._fi && ox && oy && (!mode || mode === 'auto')){ const x = (ox[0] + ox[1]) / 2, y = (oy[0] + oy[1]) / 2; return [[x, y], [x, y]]; }
+  if (!mode || mode === 'auto'){
+    if (ox && !oy){ const x = (ox[0] + ox[1]) / 2; return [[x, a.cy], [x, b.cy]]; }
+    if (oy && !ox){ const y = (oy[0] + oy[1]) / 2; return [[a.cx, y], [b.cx, y]]; }
+    mode = 'x';
+  }
+  if (mode === 'xy') return [[a.cx, a.cy], [b.cx, a.cy], [b.cx, b.cy]];
+  if (mode === 'yx') return [[a.cx, a.cy], [a.cx, b.cy], [b.cx, b.cy]];
+  if (mode === 'y'){
+    const m = a.cy < b.cy ? (a.y + a.d + b.y) / 2 : (b.y + b.d + a.y) / 2;
+    return [[a.cx, a.cy], [a.cx, m], [b.cx, m], [b.cx, b.cy]];
+  }
+  const m = a.cx < b.cx ? (a.x + a.w + b.x) / 2 : (b.x + b.w + a.x) / 2;
+  return [[a.cx, a.cy], [m, a.cy], [m, b.cy], [b.cx, b.cy]];
+}
+function cleanPts(p){
+  const out = [p[0]];
+  for (let i = 1; i < p.length; i++){
+    const q = out[out.length - 1];
+    if (Math.abs(q[0] - p[i][0]) + Math.abs(q[1] - p[i][1]) > 1e-6) out.push(p[i]);
+  }
+  return out;
+}
+function offsetPts(p, o){
+  if (!o) return p;
+  const q = p.map(v => v.slice());
+  for (let i = 0; i < p.length - 1; i++){
+    const horiz = Math.abs(p[i][1] - p[i + 1][1]) < 1e-6;
+    if (horiz){ q[i][1] = p[i][1] + o; q[i + 1][1] = p[i + 1][1] + o; }
+    else { q[i][0] = p[i][0] + o; q[i + 1][0] = p[i + 1][0] + o; }
+  }
+  return q;
+}
+function clip(p, a, b){
+  const pad = FN() ? 0.52 : 0.14;
+  const s = p[0], s1 = p[1], e = p[p.length - 1], e1 = p[p.length - 2];
+  const sx = Math.sign(s1[0] - s[0]), sy = Math.sign(s1[1] - s[1]);
+  if (sx) s[0] = sx > 0 ? a.x + a.w + pad : a.x - pad; else if (sy) s[1] = sy > 0 ? a.y + a.d + pad : a.y - pad;
+  const ex = Math.sign(e[0] - e1[0]), ey = Math.sign(e[1] - e1[1]);
+  if (ex) e[0] = ex > 0 ? b.x - pad : b.x + b.w + pad; else if (ey) e[1] = ey > 0 ? b.y - pad : b.y + b.d + pad;
+  return p;
+}
+function buildRoute(a, b, mode, o){
+  let p = route(a, b, mode);
+  if (a._fi !== b._fi && p.length === 2 && p[0][0] === p[1][0] && p[0][1] === p[1][1]) return p.map(q => q.slice());
+  p = cleanPts(p);
+  if (p.length < 2) p = [[a.cx, a.cy], [b.cx, b.cy]];
+  return clip(offsetPts(p, o), a, b);
+}
+// grid route -> 3-D points; a route between floors climbs straight up halfway along
+function lift3(p, za, zb){
+  if (Math.abs(za - zb) < 1e-6) return p.map(q => [q[0], q[1], za + 0.02]);
+  let total = 0; for (let i = 0; i < p.length - 1; i++) total += Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1]);
+  const half = total / 2, out = []; let acc = 0;
+  for (let i = 0; i < p.length - 1; i++){
+    const a = p[i], b = p[i + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    out.push([a[0], a[1], (acc < half || total === 0 ? za : zb) + 0.02]);
+    if (acc <= half && acc + l >= half){
+      const t = l ? (half - acc) / l : 0, m = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      out.push([m[0], m[1], za + 0.02], [m[0], m[1], zb + 0.02]);
+    }
+    acc += l;
+  }
+  const L = p[p.length - 1]; out.push([L[0], L[1], zb + 0.02]);
+  return cleanPts3(out);
+}
+function cleanPts3(p){ return p.filter((q, i) => !i || Math.abs(q[0] - p[i - 1][0]) + Math.abs(q[1] - p[i - 1][1]) + Math.abs(q[2] - p[i - 1][2]) > 1e-6); }
+function routeEdges(){
+  const groups = {};
+  edges.forEach(e => { const k = [e.from, e.to].sort().join('|'); (groups[k] ??= []).push(e); });
+  Object.values(groups).forEach(list => list.forEach((e, i) => { e._o = (i - (list.length - 1) / 2) * 0.34; }));
+  edges.forEach(e => {
+    const a = byId[e.from], b = byId[e.to];
+    e._cross = a._fi !== b._fi;
+    e._pts = buildRoute(a, b, e.route, e._o);
+    if (e._cross) return;
+    for (let i = 0; i < e._pts.length - 1; i++){
+      const [p, q] = [e._pts[i], e._pts[i + 1]];
+      const x0 = Math.min(p[0], q[0]), x1 = Math.max(p[0], q[0]), y0 = Math.min(p[1], q[1]), y1 = Math.max(p[1], q[1]);
+      nodes.forEach(n => {
+        if (n.id === e.from || n.id === e.to || n._fi !== a._fi) return;
+        if (x0 < n.x + n.w && x1 > n.x && y0 < n.y + n.d && y1 > n.y)
+          warnings.push(`edge ${e.from}->${e.to} passes under ${n.id}; set "route" ("x","y","xy","yx") or move a node`);
+      });
+    }
+  });
+}
+
+/* ---------- painter's order ---------- */
+function drawOrder(list){
+  const sepX = (a, b) => a.x + a.w <= b.x + 1e-6, sepY = (a, b) => a.y + a.d <= b.y + 1e-6;
+  const before = (a, b) => (sepX(a, b) && !sepY(b, a)) || (sepY(a, b) && !sepX(b, a));
+  const left = list.slice(), out = [];
+  while (left.length){
+    let i = left.findIndex(a => !left.some(b => b !== a && before(b, a)));
+    if (i < 0){ i = 0; left.forEach((a, j) => { if (a.x + a.y < left[i].x + left[i].y) i = j; }); }
+    out.push(left.splice(i, 1)[0]);
+  }
+  return out;
+}
+
+/* ---------- shapes ---------- */
+function face(g, p3, fill, ex = {}){
+  const sp = p3.map(q => P(...q)), sw = ex.sw ?? (FN() ? 1.5 : 1.4);
+  const base = {stroke:ex.ink ?? 'none', 'stroke-width':sw, 'stroke-linejoin':'round', 'stroke-dasharray':ex.dash, opacity:ex.opacity};
+  if (FN()) return el('path', {...base, d:hand(sp, true, {r:ex.r ?? 2.4, amp:ex.amp}), fill:ex.flat ? fill : fillOf(fill, ex.hatch)}, g);
+  return el('polygon', {...base, points:sp.map(p => p.map(v => v.toFixed(1)).join(',')).join(' '), fill}, g);
+}
+function prism(g, x, y, z0, w, d, h, c, ink, extra = {}){
+  const z1 = z0 + h, o = {ink, sw:extra.sw, dash:extra.dash ?? null, r:extra.r};
+  face(g, [[x, y + d, z0], [x + w, y + d, z0], [x + w, y + d, z1], [x, y + d, z1]], c.left, o);
+  face(g, [[x + w, y, z0], [x + w, y + d, z0], [x + w, y + d, z1], [x + w, y, z1]], c.right, {...o, hatch:true});
+  face(g, [[x, y, z1], [x + w, y, z1], [x + w, y + d, z1], [x, y + d, z1]], c.top, o);
+}
+function inset(g, x, y, z, w, d, k, attrs){
+  const p = [[x + k, y + k, z], [x + w - k, y + k, z], [x + w - k, y + d - k, z], [x + k, y + d - k, z]];
+  if (FN()) el('path', {d:hand(p.map(q => P(...q)), true, {r:2, amp:.5}), fill:'none', ...attrs}, g);
+  else el('polygon', {points:pts(p), fill:'none', ...attrs}, g);
+}
+function ellPts(sx, cy, rx, ry, t0, t1, k = 28){ const out = []; for (let i = 0; i <= k; i++){ const t = t0 + (t1 - t0) * i / k; out.push([sx + rx * Math.cos(t), cy + ry * Math.sin(t)]); } return out; }
+function cylinder(g, n, c, ink, h, opts = {}){
+  const r = Math.min(n.w, n.d) / 2, rx = r * U * C * R2, ry = r * U * 0.5 * R2;
+  const [sx, yb] = P(n.cx, n.cy, 0), yt = P(n.cx, n.cy, h)[1];
+  const s = {stroke:ink, 'stroke-width':FN() ? 1.5 : 1.4, 'stroke-linejoin':'round'};
+  if (FN()){
+    const side = [[sx - rx, yt], ...ellPts(sx, yb, rx, ry, Math.PI, 0), [sx + rx, yt], ...ellPts(sx, yt, rx, ry, 0, Math.PI).slice(1, -1)];
+    el('path', {...s, d:hand(side, true, {amp:.6}), fill:fillOf(c.left)}, g);
+    const shade = [[sx + rx * 0.35, yt + ry * 0.94], ...ellPts(sx, yb, rx, ry, Math.acos(0.35), 0, 10), [sx + rx, yt], ...ellPts(sx, yt, rx, ry, 0, Math.acos(0.35), 10).slice(1, -1)];
+    el('path', {d:dstr(shade, true), fill:fillOf(c.right, true), opacity:.85}, g);
+    (opts.bands || []).forEach(f => { const yz = yb - (yb - yt) * f; el('path', {d:hand(ellPts(sx, yz, rx, ry, Math.PI, 0, 18), false, {amp:.5}), fill:'none', stroke:ink, 'stroke-width':1.1, opacity:.55}, g); });
+    el('path', {...s, d:hand(ellPts(sx, yt, rx, ry, 0, 2 * Math.PI, 36).slice(0, -1), true, {amp:.6}), fill:fillOf(c.top)}, g);
+    if (opts.mouth) el('path', {d:hand(ellPts(sx, yt + ry * 0.08, rx * 0.72, ry * 0.66, 0, 2 * Math.PI, 30).slice(0, -1), true, {amp:.5}), fill:fillOf(c.right, true), stroke:ink, 'stroke-width':1.1}, g);
+    return;
+  }
+  const gid = 'cg' + n._i;
+  if (!DEFS.querySelector('#' + gid)){
+    const lg = el('linearGradient', {id:gid, x1:0, x2:1, y1:0, y2:0}, DEFS);
+    el('stop', {offset:'0', 'stop-color':c.left}, lg);
+    el('stop', {offset:'0.55', 'stop-color':c.left}, lg);
+    el('stop', {offset:'1', 'stop-color':c.right}, lg);
+  }
+  el('path', {...s, fill:`url(#${gid})`, d:`M${sx - rx},${yt} L${sx - rx},${yb} A${rx},${ry} 0 0 0 ${sx + rx},${yb} L${sx + rx},${yt} A${rx},${ry} 0 0 1 ${sx - rx},${yt} Z`}, g);
+  (opts.bands || []).forEach(f => {
+    const yz = yb - (yb - yt) * f;
+    el('path', {d:`M${sx - rx},${yz} A${rx},${ry} 0 0 0 ${sx + rx},${yz}`, fill:'none', stroke:ink, 'stroke-width':1, opacity:.45}, g);
+  });
+  el('ellipse', {...s, cx:sx, cy:yt, rx, ry, fill:c.top}, g);
+  if (opts.mouth) el('ellipse', {cx:sx, cy:yt + ry * 0.08, rx:rx * 0.72, ry:ry * 0.66, fill:c.right, stroke:ink, 'stroke-width':1, opacity:.9}, g);
+}
+function plinth(g, n, T){   // the little tray each object stands on, as in Field Notes
+  const k = 0.36;
+  prism(g, n.x - k, n.y - k, -0.2, n.w + 2 * k, n.d + 2 * k, 0.2, {top:T.plinthTop, left:T.plinthSide, right:T.plinthSide}, T.nodeInk, {r:4, sw:1.3});
+}
+function drawNode(g, n, T){
+  const c = colours(n), ink = T.nodeInk, {x, y, w, d, h} = n;
+  const ext = n.kind === 'external';
+  if (FN()) plinth(g, n, T);
+  switch (n.shape){
+    case 'cylinder': cylinder(g, n, c, ink, h, {bands:n.kind === 'db' ? [0.34, 0.67] : []}); break;
+    case 'bucket':   cylinder(g, n, c, ink, h, {mouth:true}); break;
+    case 'stack': {
+      const k = 3, sh = h / k * 0.72, gap = h / k * 0.28;
+      for (let i = 0; i < k; i++) prism(g, x, y, i * (sh + gap), w, d, sh, c, ink);
+      break;
+    }
+    case 'slab':
+      prism(g, x, y, 0, w, d, h, c, ink);
+      inset(g, x, y, h, w, d, 0.3, {stroke:ink, 'stroke-width':1, opacity:.35});
+      break;
+    case 'screen': {
+      prism(g, x, y + d * 0.25, 0, w, d * 0.6, 0.22, c, ink);
+      const py = y + d * 0.42, pd = 0.24, ph = h;
+      prism(g, x + 0.08, py, 0.22, w - 0.16, pd, ph - 0.22, c, ink);
+      const fy = py + pd, k = 0.17;
+      face(g, [[x + 0.08 + k, fy, 0.22 + k], [x + w - 0.08 - k, fy, 0.22 + k], [x + w - 0.08 - k, fy, ph - k], [x + 0.08 + k, fy, ph - k]], c.glass, {ink, sw:1, r:1.5});
+      el('polyline', {points:pts([[x + 0.45, fy, ph - 0.35], [x + 0.85, fy, ph - 0.35]]), stroke:'#ffffff', 'stroke-width':2, 'stroke-linecap':'round', opacity:.8, fill:'none'}, g);
+      break;
+    }
+    case 'chip':
+      prism(g, x, y, 0, w, d, h * 0.62, c, ink);
+      prism(g, x + w * 0.28, y + d * 0.28, h * 0.62, w * 0.44, d * 0.44, h * 0.38, {top:c.top, left:c.left, right:c.right}, ink);
+      break;
+    default:
+      prism(g, x, y, 0, w, d, h, c, ink, ext ? {dash:'4 3'} : {});
+      inset(g, x, y, h, w, d, 0.28, {stroke:ink, 'stroke-width':1, opacity:.3});
+  }
+}
+function shadow(g, n, T){
+  if (FN()){   // a violet pencil shadow falling to the front-left, like Field Notes
+    const k = 0.36, ox = 0.18, oy = 0.62;
+    const p = [[n.x - k + ox, n.y - k + oy, -0.2], [n.x + n.w + k + ox, n.y - k + oy, -0.2], [n.x + n.w + k + ox, n.y + n.d + k + oy, -0.2], [n.x - k + ox, n.y + n.d + k + oy, -0.2]];
+    face(g, p, T.shadow, {r:6, amp:1, opacity:T.shadowOp});
+    return;
+  }
+  const o = 0.28;
+  if (['cylinder', 'bucket'].includes(n.shape)){
+    const r = Math.min(n.w, n.d) / 2, [sx, sy] = P(n.cx + o, n.cy + o, 0);
+    el('ellipse', {cx:sx, cy:sy, rx:r * U * C * R2, ry:r * U * 0.5 * R2, fill:T.shadow, opacity:T.shadowOp}, g);
+  } else el('polygon', {points:pts([[n.x + o, n.y + o], [n.x + n.w + o, n.y + o], [n.x + n.w + o, n.y + n.d + o], [n.x + o, n.y + n.d + o]]), fill:T.shadow, opacity:T.shadowOp}, g);
+}
+function topY(n){ return Math.min(P(n.x, n.y, n.h)[1], P(n.cx, n.cy, n.h)[1] - (Math.min(n.w, n.d) / 2) * U * 0.5 * R2); }
+
+/* ---------- floors: exploded storeys, like the Field Notes metro station ---------- */
+function floorColours(f, i){
+  const h = f.hue ?? FLOOR_HUES[i % FLOOR_HUES.length], d = isDark();
+  return FN() ? {top:hsl(h, d ? 16 : 30, d ? 25 : 86), left:hsl(h, d ? 14 : 22, d ? 20 : 76), right:hsl(h, d ? 14 : 22, d ? 17 : 70), wall:hsl(h, d ? 18 : 34, d ? 29 : 80), wallSide:hsl(h, d ? 16 : 28, d ? 24 : 72), tag:hsl(h, 45, d ? 60 : 55)}
+              : {top:hsl(h, 28, d ? 22 : 93), left:hsl(h, 22, d ? 18 : 84), right:hsl(h, 22, d ? 15 : 78), wall:hsl(h, 28, d ? 26 : 88), wallSide:hsl(h, 24, d ? 21 : 82), tag:hsl(h, 45, d ? 62 : 48)};
+}
+function drawPlate(g, f, i, T){
+  const c = floorColours(f, i), z = f._z, t = 0.32, {x, y, w, d} = FB;
+  if (S.fold && i < F - 1) g.setAttribute('opacity', .5);   // folded: see down through the floors above
+  if (!S.fold){
+    const wh = 1.05, k = 0.14;
+    prism(g, x, y, z, k, d, wh, {top:c.wall, left:c.wallSide, right:c.wall}, T.nodeInk, {sw:1.2, r:1.5});
+    prism(g, x + k, y, z, w - k, k, wh, {top:c.wall, left:c.wall, right:c.wallSide}, T.nodeInk, {sw:1.2, r:1.5});
+  }
+  prism(g, x, y, z - t, w, d, t, c, T.nodeInk, {sw:1.3, r:3});
+  if (S.fold) return;
+  // faint floor tiles
+  const tl = el('g', {opacity:FN() ? .18 : .25, stroke:T.nodeInk, 'stroke-width':.7}, g);
+  for (let k = Math.ceil(x) + 1; k < x + w - 0.5; k += 2){ const [a, b] = [P(k, y + 0.2, z + 0.005), P(k, y + d - 0.2, z + 0.005)]; el('line', {x1:a[0], y1:a[1], x2:b[0], y2:b[1]}, tl); }
+  for (let k = Math.ceil(y) + 1; k < y + d - 0.5; k += 2){ const [a, b] = [P(x + 0.2, k, z + 0.005), P(x + w - 0.2, k, z + 0.005)]; el('line', {x1:a[0], y1:a[1], x2:b[0], y2:b[1]}, tl); }
+}
+function floorTag(layer, f, i, T){
+  const c = floorColours(f, i), [cx, cy] = P(FB.x, FB.y + FB.d, f._z - 0.16);
+  const g = el('g', {class:'ftag', 'data-floor':i}, layer);
+  const lx = cx - 46, label = (f.label || f.id), tw = label.length * 7.4 + 18;
+  el('path', {d:FN() ? hand([[cx - 4, cy], [lx, cy]], false, {amp:.5}) : `M${cx - 4},${cy}L${lx},${cy}`, stroke:FN() ? T.accent : T.muted, 'stroke-width':1.3, fill:'none'}, g);
+  el('circle', {cx:cx - 4, cy, r:2.6, fill:FN() ? T.accent : T.muted}, g);
+  ticket(g, lx - tw / 2, cy, label, T, {pin:c.tag, size:12.5, anchor:'end'});
+  if (f.note){ const t = el('text', {x:lx, y:cy + 26, 'text-anchor':'end', 'font-size':11, 'font-style':'italic', fill:T.muted, 'font-family':'inherit'}, g); t.textContent = f.note; }
+  g.addEventListener('mouseenter', () => { S.floorHot = i; focus(); });
+  g.addEventListener('mouseleave', () => { S.floorHot = null; focus(); });
+  g.addEventListener('click', ev => { if (S.dragged) return; ev.stopPropagation(); S.floorHot = S.floorHot === i ? null : i; focus(); });
+}
+// a paper ticket with a pin, the Field Notes label; in other styles a plain pill
+function ticket(parent, cx, cy, label, T, o = {}){
+  const size = o.size ?? 12.5, tw = label.length * size * (FN() ? 0.6 : 0.58) + 18, th = size + 9;
+  let x0 = o.anchor === 'end' ? cx - tw / 2 : cx - tw / 2;
+  const g = el('g', null, parent), y0 = cy - th / 2;
+  if (FN()){
+    el('path', {d:hand([[x0, y0], [x0 + tw, y0], [x0 + tw, y0 + th], [x0, y0 + th]], true, {r:2, amp:.45, step:9}), fill:T.pill, stroke:T.ticketInk, 'stroke-width':1.1}, g);
+    if (o.pin) el('circle', {cx:x0 + tw / 2, cy:y0, r:3.3, fill:o.pin, stroke:T.ticketInk, 'stroke-width':.9}, g);
+  } else {
+    el('rect', {x:x0, y:y0, width:tw, height:th, rx:th / 2, fill:T.pill, stroke:T.pillLine}, g);
+  }
+  const t = el('text', {x:x0 + tw / 2, y:cy + size * 0.36, 'text-anchor':'middle', 'font-size':size, 'font-weight':FN() ? 400 : 700, fill:T.ink, 'font-family':'inherit'}, g);
+  t.textContent = label;
+  return g;
+}
+
+/* ---------- render ---------- */
+let layers = {}, FL = [];
+function render(){
+  const T = theme();
+  document.documentElement.dataset.style = S.style;
+  document.body.style.backgroundImage = FN() ? `url(${tooth()})` : '';
+  applyFloors(); routeEdges();
+  SEED = 1; PAT = new Map();
+  svg.innerHTML = '';
+  svg.setAttribute('font-family', FN() ? 'ui-monospace, "SF Mono", Menlo, Consolas, monospace' : 'inherit');
+  DEFS = el('defs', null, svg);
+  if (FN()) el('image', {id:'tooth', href:tooth(), width:TN, height:TN}, DEFS);
+  const f = el('filter', {id:'ink', x:'-5%', y:'-5%', width:'110%', height:'110%'}, DEFS);
+  el('feTurbulence', {type:'fractalNoise', baseFrequency:'0.035', numOctaves:2, seed:7, result:'n'}, f);
+  el('feDisplacementMap', {in:'SourceGraphic', in2:'n', scale:2.2, xChannelSelector:'R', yChannelSelector:'G'}, f);
+  const gl = el('filter', {id:'glow', x:'-100%', y:'-100%', width:'300%', height:'300%'}, DEFS);
+  el('feGaussianBlur', {stdDeviation:3}, gl);
+  const root = el('g', {id:'root'}, svg);
+  const grid = el('g', null, root);
+  const shapes = el('g', {filter:S.style === 'ink' ? 'url(#ink)' : null}, root);
+  FL = [];
+  for (let i = F - 1; i >= 0; i--){   // lowest floor first, so the floors above cover it
+    const fg = el('g', {class:'floor', 'data-floor':i}, shapes);
+    FL[i] = {plate:el('g', null, fg), zones:el('g', null, fg), edges:el('g', null, fg), trail:el('g', null, fg), shadows:el('g', null, fg), nodes:el('g', null, fg)};
+  }
+  layers = {
+    xedges: el('g', null, shapes), xtrail: el('g', null, root),
+    amb: el('g', null, root), zlabels: el('g', null, root), flabels: el('g', null, root), labels: el('g', null, root), elabels: el('g', null, root), fx: el('g', null, root),
+  };
+
+  // ground grid (single-floor diagrams)
+  if (spec.grid !== false && nodes.length && !floors.length){
+    const allX = nodes.flatMap(n => [n.x, n.x + n.w]).concat(zones.filter(z => z._m?.length).flatMap(z => [z.x, z.x + z.w]));
+    const allY = nodes.flatMap(n => [n.y, n.y + n.d]).concat(zones.filter(z => z._m?.length).flatMap(z => [z.y, z.y + z.d]));
+    const x0 = Math.floor(Math.min(...allX)) - 2, x1 = Math.ceil(Math.max(...allX)) + 2;
+    const y0 = Math.floor(Math.min(...allY)) - 2, y1 = Math.ceil(Math.max(...allY)) + 2;
+    let dd = '';
+    for (let x = x0; x <= x1; x++){ const [a, b] = [P(x, y0), P(x, y1)]; dd += `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`; }
+    for (let y = y0; y <= y1; y++){ const [a, b] = [P(x0, y), P(x1, y)]; dd += `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`; }
+    el('path', {d:dd, stroke:T.grid, 'stroke-width':FN() ? 0.7 : 0.8, fill:'none', 'stroke-dasharray':FN() ? '1 5' : null, 'stroke-linecap':'round'}, grid);
+  }
+
+  // floor plates + their tags
+  floors.forEach((fl, i) => { drawPlate(FL[i].plate, fl, i, T); floorTag(layers.flabels, fl, i, T); });
+
+  // zones (largest first)
+  zones.filter(z => z._m?.length).sort((a, b) => b._area - a._area).forEach((z, i) => {
+    const h = z.hue ?? [215, 160, 35, 280, 0][i % 5], s = z.hue != null ? 45 : (i % 5 === 4 ? 0 : 35);
+    const g = el('g', {class:'zone'}, FL[z._fi].zones);
+    const zz = -0.16 - 0.04 * i, d = isDark();
+    const ink = FN() ? T.ink : hsl(h, s, d ? 60 : 45, .7);
+    const o = {ink, sw:FN() ? 1.1 : 1.3, dash:'6 4', opacity:FN() ? .9 : null, r:3};
+    at(z._z, () => {
+      const op = FN() ? 0.6 : T.zone + .08;
+      face(g, [[z.x, z.y + z.d, zz], [z.x + z.w, z.y + z.d, zz], [z.x + z.w, z.y + z.d, 0], [z.x, z.y + z.d, 0]], hsl(h, s, d ? 30 : 70, op), o);
+      face(g, [[z.x + z.w, z.y, zz], [z.x + z.w, z.y + z.d, zz], [z.x + z.w, z.y + z.d, 0], [z.x + z.w, z.y, 0]], hsl(h, s, d ? 24 : 62, op), o);
+      face(g, [[z.x, z.y, 0], [z.x + z.w, z.y, 0], [z.x + z.w, z.y + z.d, 0], [z.x, z.y + z.d, 0]], hsl(h, s, d ? 40 : 82, FN() ? .55 : T.zone), o);
+    });
+    z._col = FN() ? hsl(h, s + 10, d ? 72 : 30, .95) : hsl(h, s, d ? 70 : 35, .9);
+  });
+
+  // edges
+  edges.forEach(e => {
+    const st = EDGE_STYLES[e.style] || EDGE_STYLES.sync, a = byId[e.from], b = byId[e.to];
+    const col = e.hue != null ? hsl(e.hue, 55, isDark() ? 65 : 45) : T.edge;
+    e._fl = e._cross ? -1 : a._fi;
+    e._p3 = lift3(e._pts, a.z, b.z);
+    const sp = e._p3.map(p => P(...p));
+    const end = e._pts[e._pts.length - 1], prev = e._pts[e._pts.length - 2] || e._pts[0];
+    const L = Math.hypot(end[0] - prev[0], end[1] - prev[1]);
+    const dash = e._cross && !st.dash ? '2 5' : st.dash, sw = FN() ? 1.6 : 2.1;
+    // a route between floors is drawn in three pieces: along floor a, the riser, along floor b.
+    // The riser lives with the lower floor, so the slab above covers the part inside it.
+    let pa = sp, pv = null, pb = null, ga, gv, gb;
+    if (e._cross){
+      const k = e._p3.findIndex((q, i) => i && Math.abs(q[0] - e._p3[i - 1][0]) + Math.abs(q[1] - e._p3[i - 1][1]) < 1e-6);
+      pa = sp.slice(0, k); pv = [sp[k - 1], sp[k]]; pb = sp.slice(k);
+      const lower = a.z < b.z ? a._fi : b._fi;
+      ga = el('g', {class:'edge', 'data-id':edgeKey(e)}, FL[a._fi].edges);
+      gv = el('g', {class:'edge', 'data-id':edgeKey(e)}, FL[lower].edges);
+      gb = el('g', {class:'edge', 'data-id':edgeKey(e)}, FL[b._fi].edges);
+      e._gs = [ga, gv, gb];
+    } else { ga = gv = gb = el('g', {class:'edge', 'data-id':edgeKey(e)}, FL[a._fi].edges); e._gs = [ga]; }
+    const line = (g, p) => { if (p && p.length > 1) el('path', {class:'line', d:FN() ? hand(p, false, {amp:.55, step:9}) : dstr(p), fill:'none', stroke:col, 'stroke-width':sw, 'stroke-dasharray':dash, 'stroke-linecap':'round', 'stroke-linejoin':'round'}, g); };
+    if (e._cross){ line(ga, pa); line(gv, pv); }
+    if (L < 1e-6){   // straight riser: no arrowhead on the grid, a small cap instead
+      if (!e._cross) line(ga, sp);
+      el('circle', {class:'head', cx:sp[sp.length - 1][0], cy:sp[sp.length - 1][1], r:3.2, fill:col}, gb);
+    } else {
+      const dx = (end[0] - prev[0]) / L, dy = (end[1] - prev[1]) / L, al = FN() ? 0.36 : 0.42, aw = FN() ? 0.17 : 0.2;
+      const base = [end[0] - dx * al, end[1] - dy * al], zb = b.z + 0.02;
+      const tail = e._cross ? pb : sp;
+      if (FN()){
+        line(gb, tail);
+        const l = P(base[0] - dy * aw, base[1] + dx * aw, zb), r = P(base[0] + dy * aw, base[1] - dx * aw, zb), tip = P(end[0], end[1], zb);
+        el('path', {class:'chev', d:`M${l[0].toFixed(1)},${l[1].toFixed(1)}L${tip[0].toFixed(1)},${tip[1].toFixed(1)}L${r[0].toFixed(1)},${r[1].toFixed(1)}`, fill:'none', stroke:col, 'stroke-width':1.7, 'stroke-linecap':'round', 'stroke-linejoin':'round'}, gb);
+      } else {
+        line(gb, tail.slice(0, -1).concat([P(base[0], base[1], zb)]));
+        el('polygon', {class:'head', points:pts([[end[0], end[1], zb], [base[0] - dy * aw, base[1] + dx * aw, zb], [base[0] + dy * aw, base[1] - dx * aw, zb]]), fill:col}, gb);
+      }
+    }
+    const g = ga;
+    e._sp = sp;
+    e._full = el('path', {d:dstr(sp), fill:'none', stroke:'none'}, g);
+    e._len = e._full.getTotalLength();
+    e._col = col; e._g = g;
+  });
+
+  // nodes, floor by floor
+  nodes.forEach((n, i) => n._i = i);
+  for (let fi = F - 1; fi >= 0; fi--) drawOrder(nodes.filter(n => n._fi === fi)).forEach(n => at(n.z, () => {
+    const sg = el('g', {class:'shadow'}, FL[fi].shadows); shadow(sg, n, T); n._sg = sg;
+    const g = el('g', {class:'node', 'data-id':n.id, tabindex:0, role:'button', 'aria-label':n.label || n.id}, FL[fi].nodes);
+    drawNode(g, n, T);
+    n._g = g;
+    g.addEventListener('mouseenter', () => { S.hover = n.id; focus(); });
+    g.addEventListener('mouseleave', () => { S.hover = null; focus(); });
+    g.addEventListener('click', ev => { if (S.dragged) return; ev.stopPropagation(); select(n.id); });
+    g.addEventListener('keydown', ev => { if (ev.key === 'Enter') select(n.id); });
+    const lg = el('g', {class:'nlabel', 'data-id':n.id}, layers.labels);
+    const [lx] = P(n.cx, n.cy, n.h), ly = topY(n) - 9;
+    const halo = {stroke:T.halo, 'stroke-width':4, 'stroke-linejoin':'round', 'paint-order':'stroke', 'font-family':'inherit', 'text-anchor':'middle'};
+    if (FN()){
+      ticket(lg, lx, ly - 10, n.label || n.id, T, {pin:colours(n).swatch, size:12});
+      if (n.tech){ const t2 = el('text', {...halo, x:lx, y:ly - 27, 'font-size':10.5, 'font-style':'italic', fill:T.muted}, lg); t2.textContent = n.tech; }
+      if (n.chart){ const m = el('text', {...halo, x:lx + (n.label || n.id).length * 3.6 + 15, y:ly - 6, 'font-size':10, fill:T.accent, 'text-anchor':'start'}, lg); m.textContent = '◆'; }
+    } else {
+      if (n.tech){ const t2 = el('text', {...halo, x:lx, y:ly, 'font-size':11, fill:T.muted}, lg); t2.textContent = n.tech; }
+      const t1 = el('text', {...halo, x:lx, y:n.tech ? ly - 14 : ly, 'font-size':13.5, 'font-weight':700, fill:T.ink}, lg);
+      t1.textContent = (n.label || n.id) + (n.chart ? ' ◆' : '');
+    }
+    n._lg = lg;
+  }));
+
+  const box = g => { const b = g.getBBox(); return [b.x - 3, b.y - 2, b.x + b.width + 3, b.y + b.height + 2]; };
+  const hit = (r, q) => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3];
+  const shrink = (r, k) => { const w = r[2] - r[0], h = r[3] - r[1]; return [r[0] + w * k, r[1] + h * k, r[2] - w * k, r[3] - h * k]; };
+  // zone labels lie flat on the ground; try four spots and keep one that misses nodes and labels
+  const zoneObs = nodes.flatMap(n => [box(n._lg), shrink(box(n._g), 0.12)]);
+  zones.filter(z => z._m?.length).forEach(z => at(z._z, () => {
+    const spots = [
+      {p:[z.x + 0.35, z.y + z.d - 0.3], m:[C, 0.5, -C, 0.5], anchor:'start'},
+      {p:[z.x + z.w - 0.35, z.y + z.d - 0.3], m:[C, 0.5, -C, 0.5], anchor:'end'},
+      {p:[z.x + z.w - 0.3, z.y + z.d - 0.35], m:[C, -0.5, C, 0.5], anchor:'start'},
+      {p:[z.x + z.w - 0.3, z.y + 0.35], m:[C, -0.5, C, 0.5], anchor:'end'},
+    ];
+    let t = null;
+    for (const sp of spots){
+      const [lx, ly] = P(...sp.p);
+      if (t) t.remove();
+      t = el('text', {transform:`matrix(${sp.m.join(',')},${lx.toFixed(1)},${ly.toFixed(1)})`, 'font-size':FN() ? 12 : 13, 'font-weight':FN() ? 400 : 700,
+        'letter-spacing':'0.06em', fill:z._col, 'text-anchor':sp.anchor, 'font-family':'inherit'}, layers.zlabels);
+      t.textContent = FN() ? (z.label || z.id).toLowerCase() : (z.label || z.id).toUpperCase();
+      const bb = t.getBBox(), cs = [[bb.x, bb.y], [bb.x + bb.width, bb.y], [bb.x, bb.y + bb.height], [bb.x + bb.width, bb.y + bb.height]]
+        .map(([u, v]) => [sp.m[0] * u + sp.m[2] * v + lx, sp.m[1] * u + sp.m[3] * v + ly]);
+      const r = [Math.min(...cs.map(c => c[0])), Math.min(...cs.map(c => c[1])), Math.max(...cs.map(c => c[0])), Math.max(...cs.map(c => c[1]))];
+      if (!zoneObs.some(q => hit(r, q))) break;
+    }
+  }));
+
+  // edge labels: try spots along the route, keep the first that hits no label, node or pill
+  const obstacles = nodes.flatMap(n => [Object.assign(box(n._lg), {name:`the label of ${n.id}`}), Object.assign(shrink(box(n._g), 0.22), {name:`node ${n.id}`})]);
+  edges.filter(e => e.label).forEach(e => {
+    const tw = e.label.length * (FN() ? 6.4 : 6.1) + 14, segs = [];
+    for (let i = 0; i < e._p3.length - 1; i++){
+      const a = e._p3[i], b = e._p3[i + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len > 1e-6) segs.push([i, len]);
+    }
+    segs.sort((p, q) => q[1] - p[1]);
+    let pick = null, first = null, blocker = null;
+    for (const [i, len] of segs){
+      if (len < 0.9 && first) continue;
+      for (const t of [0.5, 0.33, 0.67, 0.2, 0.8]){
+        const a = e._p3[i], b = e._p3[i + 1];
+        const [mx, my] = P(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2]);
+        const r = [mx - tw / 2, my - 9, mx + tw / 2, my + 9];
+        if (!first) first = [mx, my, r];
+        const q = obstacles.find(q => hit(r, q));
+        if (!q){ pick = [mx, my, r]; break; }
+        if (!blocker) blocker = q.name;
+      }
+      if (pick) break;
+    }
+    if (!first){ const m = e._sp[Math.floor(e._sp.length / 2)]; first = [m[0], m[1], [m[0] - tw / 2, m[1] - 9, m[0] + tw / 2, m[1] + 9]]; }
+    const [mx, my, r] = pick || first;
+    obstacles.push(Object.assign(r, {name:`the label of edge ${e.from}->${e.to}`}));
+    const lg = el('g', {class:'elabel', 'data-id':edgeKey(e)}, layers.elabels);
+    if (FN()){
+      const t = el('text', {x:mx, y:my + 4, 'text-anchor':'middle', 'font-size':10.5, 'font-style':'italic', fill:T.ink, stroke:T.halo, 'stroke-width':4.5, 'stroke-linejoin':'round', 'paint-order':'stroke', 'font-family':'inherit'}, lg);
+      t.textContent = e.label;
+    } else {
+      el('rect', {x:mx - tw / 2, y:my - 9, width:tw, height:18, rx:9, fill:T.pill, stroke:T.pillLine}, lg);
+      const t = el('text', {x:mx, y:my + 4, 'text-anchor':'middle', 'font-size':11, fill:T.muted, 'font-family':'inherit'}, lg);
+      t.textContent = e.label;
+    }
+    e._lg = lg;
+    if (!pick) warnings.push(`edge ${e.from}->${e.to}: label "${e.label}" overlaps ${blocker || 'another label'}; shorten it or move a node`);
+  });
+
+  makeAmbient();
+  if (!S.vb) fit(); else setVB(S.vb);
+  focus();
+}
+const edgeKey = e => e.from + '>' + e.to + (e._o ? ':' + e._o.toFixed(2) : '');
+
+/* ---------- view: fit / pan / zoom ---------- */
+function setVB(v){ S.vb = v; svg.setAttribute('viewBox', v.map(n => n.toFixed(1)).join(' ')); }
+function fit(){
+  const b = $('root') ? document.getElementById('root').getBBox() : {x:0, y:0, width:100, height:100};
+  const pad = 36, info = !$('info').hidden && innerWidth > 640 ? $('info').offsetWidth + 20 : 0;
+  const rect = svg.getBoundingClientRect();
+  let w = b.width + pad * 2, h = b.height + pad * 2;
+  const extra = info ? w * info / Math.max(1, rect.width - info) : 0;
+  setVB([b.x - pad, b.y - pad, w + extra, h]);
+}
+function svgPoint(cx, cy){ const r = svg.getBoundingClientRect(), v = S.vb; const s = Math.max(v[2] / r.width, v[3] / r.height);
+  const ox = (r.width * s - v[2]) / 2, oy = (r.height * s - v[3]) / 2; return [v[0] - ox + (cx - r.left) * s, v[1] - oy + (cy - r.top) * s, s]; }
+svg.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const k = Math.exp(ev.deltaY * 0.0015), [px, py] = svgPoint(ev.clientX, ev.clientY), v = S.vb;
+  setVB([px - (px - v[0]) * k, py - (py - v[1]) * k, v[2] * k, v[3] * k]);
+}, {passive:false});
+let drag = null;
+svg.addEventListener('pointerdown', ev => { drag = {x:ev.clientX, y:ev.clientY, vb:S.vb.slice(), moved:false}; S.dragged = false; });
+addEventListener('pointermove', ev => {
+  if (!drag) return;
+  const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+  if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+  drag.moved = S.dragged = true; svg.classList.add('panning');
+  const r = svg.getBoundingClientRect(), s = Math.max(drag.vb[2] / r.width, drag.vb[3] / r.height);
+  setVB([drag.vb[0] - dx * s, drag.vb[1] - dy * s, drag.vb[2], drag.vb[3]]);
+});
+addEventListener('pointerup', () => { drag = null; svg.classList.remove('panning'); setTimeout(() => S.dragged = false, 0); });
+svg.addEventListener('click', () => { if (!S.dragged && (S.sel || S.floorHot != null)){ S.sel = null; S.floorHot = null; showInfo(); focus(); } });
+
+/* ---------- focus / selection ---------- */
+function focus(){
+  let hotN = new Set(), onE = new Set(), active = false;
+  const step = currentStep();
+  if (step){
+    active = true;
+    [step.from, step.to, step.at].forEach(id => id && hotN.add(id));
+    if (step._edge) onE.add(step._edge);
+  } else if (S.floorHot != null && !S.hover && !S.sel){
+    active = true;
+    nodes.forEach(n => { if (n._fi === S.floorHot) hotN.add(n.id); });
+    edges.forEach(e => { if (hotN.has(e.from) && hotN.has(e.to)) onE.add(e); });
+  } else {
+    const id = S.hover || S.sel;
+    if (id){
+      active = true; hotN.add(id);
+      edges.forEach(e => { if (e.from === id || e.to === id){ onE.add(e); hotN.add(e.from); hotN.add(e.to); } });
+    }
+  }
+  const lift = step ? new Set([step.from, step.to, step.at].filter(Boolean)) : new Set([S.hover, S.sel].filter(Boolean));
+  nodes.forEach(n => {
+    [n._g, n._lg].forEach(g => { if (!g) return; g.classList.toggle('dim', active && !hotN.has(n.id)); g.classList.toggle('hot', lift.has(n.id)); });
+    n._sg?.classList.toggle('dim', active && !hotN.has(n.id));
+  });
+  edges.forEach(e => {
+    e._gs.forEach(g => { g.classList.toggle('dim', active && !onE.has(e)); g.classList.toggle('on', onE.has(e) && !step?._bug); });
+    if (e._lg) e._lg.classList.toggle('dim', active && !onE.has(e));
+  });
+  svg.querySelectorAll('.ftag').forEach(t => t.classList.toggle('dim', S.floorHot != null && +t.dataset.floor !== S.floorHot));
+}
+function select(id){ S.sel = S.sel === id ? null : id; showInfo(); focus(); }
+function esc(s){ return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'}[c])); }
+function showInfo(){
+  const box = $('info'), n = byId[S.sel];
+  if (!n){ box.hidden = true; box.classList.remove('wide'); return; }
+  const c = colours(n);
+  const out = edges.filter(e => e.from === n.id), inc = edges.filter(e => e.to === n.id);
+  const li = (e, other) => `<li>${esc(byId[other].label || other)}${e.label ? ` <span>· ${esc(e.label)}</span>` : ''}</li>`;
+  const chart = n.chart ? chartSVG(n.chart) : null;
+  const rules = Array.isArray(n.rules) && n.rules.length ? `<h3>Rules</h3><ul class="rules">${n.rules.map(r => {
+      const mark = r.holds === true ? '<b>✓</b>' : r.holds === false ? '<b>✕</b>' : '<b>?</b>';
+      const cls = r.holds === true ? 'ok' : r.holds === false ? 'bad' : '';
+      const path = r.path?.length ? `<ol start="0">${r.path.map(p => `<li>${esc(p)}</li>`).join('')}</ol>` : '';
+      return `<li class="${cls}">${mark} ${esc(r.name)}${r.text ? ` <span>— ${esc(r.text)}</span>` : ''}${r.holds === false ? ' <span>breaks</span>' : ''}${path}</li>`;
+    }).join('')}</ul>` : '';
+  const fl = floors.length ? ` · ${esc(floors[n._fi].label || floors[n._fi].id)}` : '';
+  box.innerHTML = `<button class="x" aria-label="Close">✕</button>
+    <div class="k"><i class="sw" style="background:${c.swatch}"></i>${esc(n._K.label)}${fl}</div>
+    <h2>${esc(n.label || n.id)}</h2>${n.tech ? `<p class="tech">${esc(n.tech)}</p>` : ''}
+    ${n.desc ? `<p>${esc(n.desc)}</p>` : ''}
+    ${chart ? `<h3>How it behaves</h3>${chart.title ? `<p class="sct">${esc(chart.title)}</p>` : ''}<div class="sc">${chart.svg}</div>` : ''}
+    ${rules}
+    ${out.length ? `<h3>Calls</h3><ul>${out.map(e => li(e, e.to)).join('')}</ul>` : ''}
+    ${inc.length ? `<h3>Called by</h3><ul>${inc.map(e => li(e, e.from)).join('')}</ul>` : ''}
+    ${n.notes ? `<h3>Notes</h3><p>${esc(n.notes)}</p>` : ''}`;
+  box.classList.toggle('wide', !!chart);
+  box.hidden = false;
+  box.querySelector('.x').onclick = () => select(n.id);
+}
+
+/* ---------- statecharts: /statechart's Mermaid, drawn as tickets on red thread ---------- */
+function parseChart(src){
+  const lines = String(src).split(/\r?\n/);
+  let title = '', i = 0;
+  if (lines[0]?.trim() === '---'){
+    for (i = 1; i < lines.length && lines[i].trim() !== '---'; i++){ const m = lines[i].match(/^\s*title:\s*"?(.*?)"?\s*$/); if (m) title = m[1]; }
+    i++;
+  }
+  const st = {}, order = [], edges = [], starts = [], stack = [], parents = {};
+  const top = () => stack[stack.length - 1] || null;
+  const get = id => { if (!st[id]){ st[id] = {id, label:id, parent:top(), cls:new Set()}; order.push(id); } return st[id]; };
+  for (; i < lines.length; i++){
+    const L = lines[i].trim(); let m;
+    if (!L || L.startsWith('%%') || /^stateDiagram/.test(L) || /^direction\b/.test(L) || L === '--' || L.startsWith('classDef') || L.startsWith('note')) continue;
+    if ((m = L.match(/^state\s+"([^"]*)"\s+as\s+([\w-]+)\s*(\{)?$/))){ parents[m[2]] = {id:m[2], label:m[1], parent:top()}; if (m[3]) stack.push(m[2]); continue; }
+    if ((m = L.match(/^state\s+([\w-]+)\s*\{$/))){ parents[m[1]] = {id:m[1], label:m[1], parent:top()}; stack.push(m[1]); continue; }
+    if (L === '}'){ stack.pop(); continue; }
+    if ((m = L.match(/^class\s+([\w,-]+)\s+([\w-]+)/))){ m[1].split(',').forEach(id => { if (!parents[id]) get(id).cls.add(m[2]); }); continue; }
+    if ((m = L.match(/^(\[\*\]|[\w-]+)\s*-->\s*(\[\*\]|[\w-]+)\s*(?::\s*(.*))?$/))){
+      const [, a, b, lab] = m;
+      if (a === '[*]'){ if (b !== '[*]') starts.push(b); }
+      else if (b !== '[*]') edges.push({a, b, label:(lab || '').trim()});
+      [a, b].forEach(x => { if (x !== '[*]' && !parents[x]) get(x); });
+      continue;
+    }
+    if ((m = L.match(/^([\w-]+)\s*:\s*(.*)$/))){ get(m[1]).label = m[2].trim(); continue; }
+  }
+  const inLegend = id => { let p = st[id]?.parent ?? parents[id]?.parent; for (let k = 0; p && k < 20; k++){ if (p === 'legend' || /^legend$/i.test(parents[p]?.label || '')) return true; p = parents[p]?.parent; } return id === 'legend'; };
+  const firstChild = pid => order.find(id => st[id].parent === pid);
+  const real = id => parents[id] ? real(firstChild(id) || id) : id;
+  const ids = order.filter(id => !inLegend(id) && !parents[id]);
+  return {title, ids, st, parents,
+    edges:edges.map(e => ({...e, a:real(e.a), b:real(e.b)})).filter(e => ids.includes(e.a) && ids.includes(e.b)),
+    starts:[...new Set(starts.map(real))].filter(id => ids.includes(id))};
+}
+function wrap(s, n){ const out = []; let cur = ''; String(s).split(/\s+/).forEach(w => { if (cur && (cur + ' ' + w).length > n){ out.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w; }); if (cur) out.push(cur); return out.length ? out : ['']; }
+function chartSVG(src){
+  const c = parseChart(src); if (!c.ids.length) return null;
+  const T = theme(), fn = FN(), CW = 6.5, LH = 13;
+  const thread = T.thread, bug = T.bug, paper = T.pill, ink = T.ticketInk;
+  // rank each state by its shortest distance from a start
+  const rank = {}, q = [];
+  (c.starts.length ? c.starts : [c.ids[0]]).forEach(id => { rank[id] = 0; q.push(id); });
+  while (q.length){ const a = q.shift(); c.edges.filter(e => e.a === a).forEach(e => { if (rank[e.b] == null){ rank[e.b] = rank[a] + 1; q.push(e.b); } }); }
+  let maxR = Math.max(0, ...Object.values(rank));
+  c.ids.forEach(id => { if (rank[id] == null) rank[id] = ++maxR; });
+  const rows = []; c.ids.forEach(id => (rows[rank[id]] ??= []).push(id));
+  const tk = {};
+  c.ids.forEach(id => { const lines = wrap(c.st[id].label, 18); tk[id] = {lines, w:Math.max(...lines.map(l => l.length)) * CW + 18, h:lines.length * LH + 10}; });
+  // one thread per pair of states; arrows that share ends stack their words
+  const pairs = {};
+  c.edges.forEach(e => { const k = e.a + '>' + e.b; (pairs[k] ??= {a:e.a, b:e.b, labels:[]}).labels.push(e.label); });
+  const E = Object.values(pairs).map(e => ({...e, lab:e.labels.filter(Boolean).flatMap(l => wrap(l, 18))}));
+  // words for a forward thread hang just above the ticket it reaches, so each ticket gets a slot as wide as its words
+  const inWords = {};
+  E.forEach(e => { if (rank[e.b] > rank[e.a] && e.lab.length) (inWords[e.b] ??= []).push(e); });
+  const slot = id => Math.max(tk[id].w, ...(inWords[id] || []).map(e => Math.max(...e.lab.map(l => l.length)) * 5.8 + 8));
+  const rowW = rows.map(r => (r || []).reduce((s, id) => s + slot(id), 0) + 16 * ((r || []).length - 1));
+  const W = Math.max(220, ...rowW), X0 = 16;
+  rows.forEach((r, ri) => { if (!r) return; let x = X0 + (W - rowW[ri]) / 2; r.forEach(id => { const s = slot(id); tk[id].x = x + (s - tk[id].w) / 2; x += s + 16; }); });
+  // each gap between rows is as tall as the words that hang in it
+  const gapLines = rows.map((_, ri) => Math.max(0, ...(rows[ri + 1] || []).map(id => (inWords[id] || []).reduce((s, e) => s + e.lab.length, 0))));
+  let y = 22;
+  rows.forEach((r, ri) => {
+    if (!r) return;
+    const h = Math.max(...r.map(id => tk[id].h));
+    r.forEach(id => { tk[id].y = y + (h - tk[id].h) / 2; });
+    y += h + Math.max(40, 26 + gapLines[ri] * 11);
+  });
+  const H = y - 30;
+  const bugPath = id => c.st[id].cls.has('bugPath') || c.st[id].cls.has('breaks');
+  const R = rnd(99);
+  let maxX = X0 + W, minX = 0, out = '', loops = 0;
+  const textLines = (x, y, lines, attrs) => `<text x="${x}" y="${y}" ${attrs}>${lines.map((l, i) => `<tspan x="${x}" dy="${i ? 11 : 0}">${esc(l)}</tspan>`).join('')}</text>`;
+  const halo = `stroke="${T.pill}" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke"`;
+  // composite parents: a dashed frame around their children
+  const frames = {};
+  c.ids.forEach(id => { let p = c.st[id].parent; while (p && c.parents[p]){ (frames[p] ??= []).push(id); p = c.parents[p].parent; } });
+  Object.entries(frames).forEach(([p, kids]) => {
+    const x0 = Math.min(...kids.map(k => tk[k].x)) - 10, y0 = Math.min(...kids.map(k => tk[k].y)) - 18;
+    const x1 = Math.max(...kids.map(k => tk[k].x + tk[k].w)) + 10, y1 = Math.max(...kids.map(k => tk[k].y + tk[k].h)) + 10;
+    out += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" rx="6" fill="none" stroke="${T.muted}" stroke-dasharray="4 3" opacity=".7"/>`;
+    out += `<text x="${x0 + 6}" y="${y0 + 11}" font-size="9.5" font-style="italic" fill="${T.muted}">${esc(c.parents[p].label)}</text>`;
+  });
+  // threads: forward ones fan out from across the bottom of their ticket
+  const fwd = e => rank[e.b] > rank[e.a];
+  const outs = {}, ins = {};
+  E.filter(fwd).forEach(e => { (outs[e.a] ??= []).push(e); (ins[e.b] ??= []).push(e); });
+  Object.values(outs).forEach(l => l.sort((p, q) => tk[p.b].x - tk[q.b].x));
+  Object.values(ins).forEach(l => l.sort((p, q) => tk[p.a].x - tk[q.a].x));
+  const cub = (p0, c1, c2, p1, t) => { const u = 1 - t; return [u*u*u*p0[0] + 3*u*u*t*c1[0] + 3*u*t*t*c2[0] + t*t*t*p1[0], u*u*u*p0[1] + 3*u*u*t*c1[1] + 3*u*t*t*c2[1] + t*t*t*p1[1]]; };
+  E.forEach(e => {
+    const A = tk[e.a], B = tk[e.b], red = bugPath(e.a) && bugPath(e.b) && e.a !== e.b;
+    const col = red ? bug : thread, sw = red ? 2.4 : 1.3, lab = e.lab;
+    let d, lx, ly, anchor = 'start', p0, p1;
+    if (e.a === e.b){
+      const x = A.x + A.w, yy = A.y + A.h / 2;
+      p0 = [x, yy - 5]; p1 = [x, yy + 5];
+      d = `M${p0}C${x + 26},${yy - 22} ${x + 26},${yy + 22} ${p1}`; lx = x + 24; ly = yy - lab.length * 5.5 + 9;
+    } else if (fwd(e)){
+      const o = outs[e.a], i = ins[e.b];
+      p0 = [A.x + A.w * (o.indexOf(e) + 1) / (o.length + 1), A.y + A.h];
+      p1 = [B.x + B.w * (i.indexOf(e) + 1) / (i.length + 1), B.y];
+      const my = (p0[1] + p1[1]) / 2, c1 = [p0[0], my], c2 = [p1[0], my];
+      d = `M${p0}C${c1} ${c2} ${p1}`;
+      const above = inWords[e.b] || [], k = above.indexOf(e);
+      const stackUp = above.slice(k + 1).reduce((s, q) => s + q.lab.length, 0);
+      anchor = 'middle'; lx = B.x + B.w / 2; ly = B.y - 9 - (lab.length - 1 + stackUp) * 11;
+    } else {
+      const right = Math.max(A.x + A.w, B.x + B.w) + 14 + 14 * loops++;
+      p0 = [A.x + A.w, A.y + A.h / 2 + 3]; p1 = [B.x + B.w, B.y + B.h / 2 - 3];
+      d = `M${p0}C${right + 16},${p0[1]} ${right + 16},${p1[1]} ${p1}`;
+      lx = right + 18; ly = (p0[1] + p1[1]) / 2 - lab.length * 5.5 + 9;
+    }
+    out += `<path d="${d}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-linecap="round"/>`;
+    out += `<circle cx="${p1[0]}" cy="${p1[1]}" r="2.6" fill="${col}"/>`;
+    if (lab.length){
+      out += textLines(lx, ly, lab, `font-size="9.5" font-style="italic" fill="${red ? bug : T.muted}" text-anchor="${anchor}" ${halo}`);
+      const tw = Math.max(...lab.map(l => l.length)) * 5.8;
+      if (anchor === 'start') maxX = Math.max(maxX, lx + tw); else if (anchor === 'end') minX = Math.min(minX, lx - tw);
+    }
+  });
+  // starts
+  c.starts.forEach(id => { const A = tk[id], x = A.x + A.w / 2; out += `<line x1="${x}" y1="${A.y - 14}" x2="${x}" y2="${A.y}" stroke="${ink}" stroke-width="1.2"/><circle cx="${x}" cy="${A.y - 15}" r="3.6" fill="${ink}"/>`; });
+  // tickets
+  c.ids.forEach(id => {
+    const A = tk[id], s = c.st[id], brk = s.cls.has('breaks'), may = s.cls.has('mayBreak'), onPath = s.cls.has('bugPath');
+    const rot = fn ? ((R() - 0.5) * 3).toFixed(2) : 0, cx = A.x + A.w / 2, cy = A.y + A.h / 2;
+    const fill = brk ? (isDark() ? '#4a1f22' : '#ffecee') : may ? (isDark() ? '#4a3518' : '#fff3e6') : paper;
+    const stroke = brk ? bug : may ? '#e8730c' : onPath ? bug : ink, sw = brk || may || onPath ? 2 : 1.1;
+    out += `<g transform="rotate(${rot} ${cx} ${cy})"><rect x="${A.x}" y="${A.y}" width="${A.w}" height="${A.h}" rx="${fn ? 2 : 6}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"${onPath && !brk ? ' stroke-dasharray="5 3"' : ''}/>`;
+    if (fn) out += `<circle cx="${cx}" cy="${A.y}" r="2.8" fill="${brk ? bug : thread}" stroke="${ink}" stroke-width=".8"/>`;
+    out += textLines(cx, A.y + 15, A.lines, `font-size="11" text-anchor="middle" fill="${brk ? bug : may ? '#b85a06' : ink}"${brk ? ' font-weight="700"' : ''}`);
+    out += '</g>';
+  });
+  const legend = c.ids.some(id => c.st[id].cls.has('breaks')) ? `<text x="${X0}" y="${H + 14}" font-size="9.5" fill="${bug}">red: where a rule breaks, and the way there</text>` : '';
+  const VX = Math.floor(minX - 6), VW = Math.ceil(Math.max(maxX, X0 + W, X0 + 250) + 12) - VX, VH = H + (legend ? 24 : 6);
+  return {title:c.title, svg:`<svg viewBox="${VX} 0 ${VW} ${VH}" xmlns="${NS}" font-family="inherit">${out}${legend}</svg>`};
+}
+
+/* ---------- motion: ambient packets + flows ---------- */
+function currentStep(){ const f = flows[S.flow]; return f && S.step >= 0 ? f.steps[S.step] : null; }
+function stepRoute(st){
+  if (!st.from || !st.to) return null;
+  let e = edges.find(e => e.from === st.from && e.to === st.to);
+  if (e) return {edge:e, path:e._full, len:e._len, rev:false, sp:e._sp, cross:e._cross, fi:e._fl};
+  e = edges.find(e => e.from === st.to && e.to === st.from);
+  if (e) return {edge:e, path:e._full, len:e._len, rev:true, sp:e._sp.slice().reverse(), cross:e._cross, fi:e._fl};
+  const a = byId[st.from], b = byId[st.to];
+  if (!a || !b) return null;
+  const sp = lift3(buildRoute(a, b, st.route, 0), a.z, b.z).map(q => P(...q));
+  const path = el('path', {d:dstr(sp), fill:'none', stroke:theme().accent,
+    'stroke-width':2.2, 'stroke-dasharray':'3 5', 'stroke-linecap':'round', opacity:.9, class:'adhoc'}, layers.fx);
+  return {edge:null, path, len:path.getTotalLength(), rev:false, sp, cross:a._fi !== b._fi, fi:a._fi};
+}
+let packets = [];
+function seedAmbient(){
+  packets = edges.map((e, i) => ({e, t:(i * 0.37) % 1, speed:0.22 + 0.06 * ((i * 7) % 5) / 5}));
+}
+function makeAmbient(){ packets.forEach(p => { p._el = el('circle', {class:'amb', r:FN() ? 2.6 : 3.2, fill:p.e._col, opacity:0}, layers.amb); }); }
+function drawAmbient(dt){
+  const off = !S.live || currentStep(), id = S.hover || S.sel;
+  packets.forEach(p => {
+    if (!p._el) return;
+    if (off){ p._el.setAttribute('opacity', 0); return; }
+    p.t = (p.t + dt * p.speed * (90 / Math.max(60, p.e._len))) % 1;
+    const pt = p.e._full.getPointAtLength(p.t * p.e._len);
+    const fade = Math.min(1, p.t * 6, (1 - p.t) * 6);
+    const k = id && p.e.from !== id && p.e.to !== id ? 0.15 : 0.85;
+    p._el.setAttribute('cx', pt.x.toFixed(1)); p._el.setAttribute('cy', pt.y.toFixed(1));
+    p._el.setAttribute('opacity', (k * fade).toFixed(2));
+  });
+}
+let last = performance.now();
+function tick(now){
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  drawAmbient(dt);
+  if (S.anim) S.anim(now);
+  requestAnimationFrame(tick);
+}
+
+// the red trail a flow leaves behind it, like the Field Notes plates
+function trailLayer(r){ return r.cross || r.fi == null || r.fi < 0 ? layers.xtrail : FL[r.fi].trail; }
+function trail(r, f, grow){
+  const T = theme(), col = f.bug ? T.bug : T.accent;
+  const p = el('path', {class:'trail', d:dstr(r.sp), fill:'none', stroke:col, 'stroke-width':FN() ? 6 : 5, 'stroke-linecap':'round', 'stroke-linejoin':'round', opacity:FN() ? .5 : .32}, trailLayer(r));
+  const L = p.getTotalLength();
+  if (grow){ p.setAttribute('stroke-dasharray', `${L} ${L + 1}`); p.setAttribute('stroke-dashoffset', L); }
+  return {p, L};
+}
+function clearTrails(){ svg.querySelectorAll('.trail,.stamp').forEach(n => n.remove()); }
+function redrawTrails(f, upto){
+  clearTrails();
+  for (let i = 0; i < upto; i++){ const st = f.steps[i], r = stepRoute(st); if (r) trail(r, f, false); }
+}
+function stamp(f){
+  const T = theme(), st = f.steps[f.steps.length - 1], n = byId[st.to || st.at || st.from];
+  if (!n) return;
+  at(n.z, () => {
+    const x = P(n.cx, n.cy, n.h)[0] + 56, y = topY(n) - (FN() ? 40 : 30);
+    const g = el('g', {class:'stamp', transform:`rotate(-7 ${x} ${y})`}, layers.fx);
+    const label = 'RULE BROKEN', w = label.length * 8.2 + 18;
+    el('rect', {x:x - w / 2, y:y - 13, width:w, height:24, rx:3, fill:'none', stroke:T.bug, 'stroke-width':2.2}, g);
+    const t = el('text', {x, y:y + 4, 'text-anchor':'middle', 'font-size':13, 'font-weight':700, 'letter-spacing':'0.12em', fill:T.bug, 'font-family':'inherit'}, g);
+    t.textContent = label;
+    if (!reduceMotion){ g.style.transformBox = 'fill-box'; g.style.transformOrigin = 'center'; g.animate([{transform:`rotate(-7deg) scale(1.6)`, opacity:0}, {transform:`rotate(-7deg) scale(1)`, opacity:1}], {duration:260, easing:'ease-out'}); }
+  });
+}
+
+function playStep(i, auto){
+  const f = flows[S.flow]; if (!f) return;
+  clearTimeout(S.timer); S.anim = null;
+  layers.fx.querySelectorAll('.adhoc,.pk').forEach(n => n.remove());
+  S.step = Math.max(0, Math.min(f.steps.length - 1, i));
+  const st = f.steps[S.step], lastStep = S.step === f.steps.length - 1;
+  st._bug = !!f.bug;
+  redrawTrails(f, S.step);
+  const r = stepRoute(st);
+  st._edge = r?.edge || null;
+  focus(); caption();
+  const T = theme(), col = f.bug ? T.bug : T.accent;
+  const done = () => { if (lastStep && f.bug) stamp(f); };
+  const next = () => {
+    done();
+    if (S.playing && auto){
+      if (!lastStep) S.timer = setTimeout(() => playStep(S.step + 1, true), 650);
+      else { S.timer = setTimeout(() => { setPlaying(false); }, 900); }
+    }
+  };
+  if (!r){
+    const n = byId[st.at || st.from || st.to];
+    if (n){
+      const [px, py] = at(n.z, () => P(n.cx, n.cy, n.h));
+      const ring = el('ellipse', {class:'pk', cx:px, cy:py - 6, rx:10, ry:6, fill:'none', stroke:col, 'stroke-width':2.5}, layers.fx);
+      const t0 = performance.now();
+      S.anim = now => { const k = Math.min(1, (now - t0) / 1100); ring.setAttribute('rx', 10 + 40 * k); ring.setAttribute('ry', 6 + 23 * k); ring.setAttribute('opacity', 1 - k);
+        if (k >= 1){ S.anim = null; ring.remove(); next(); } };
+    } else next();
+    return;
+  }
+  const tr = trail(r, f, true);
+  const glow = el('circle', {class:'pk', r:9, fill:col, opacity:.45, filter:'url(#glow)'}, layers.fx);
+  const dot = el('circle', {class:'pk', r:FN() ? 5.5 : 5, fill:col, stroke:FN() ? T.ink : T.halo, 'stroke-width':FN() ? 1.2 : 1.5}, layers.fx);
+  const dur = reduceMotion ? 1 : Math.max(650, Math.min(1700, 380 + r.len * 2.4)), t0 = performance.now();
+  S.anim = now => {
+    let k = Math.min(1, (now - t0) / dur); const e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    const pt = r.path.getPointAtLength((r.rev ? 1 - e : e) * r.len);
+    [dot, glow].forEach(c => { c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y); });
+    tr.p.setAttribute('stroke-dashoffset', (tr.L * (1 - e)).toFixed(1));
+    if (k >= 1){ S.anim = null; tr.p.removeAttribute('stroke-dasharray'); tr.p.removeAttribute('stroke-dashoffset'); setTimeout(() => { dot.remove(); glow.remove(); }, 500); next(); }
+  };
+}
+function caption(){
+  const f = flows[S.flow], st = currentStep();
+  const n = f ? f.steps.length : 0;
+  const tag = st?.state ? `<span class="st">${esc(st.state)}</span>` : '';
+  const brk = st && f.bug && S.step === n - 1 ? ` <span class="brk">✕ breaks: ${esc(f.bug)}</span>` : '';
+  $('caption').innerHTML = st ? `<b>${S.step + 1}/${n}</b>${esc(st.note || `${byId[st.from]?.label || st.from} → ${byId[st.to]?.label || st.to}`)}${tag}${brk}`
+    : (f ? `<span style="color:var(--muted)">${esc(f.desc || (f.bug ? `A path that breaks the rule: ${f.bug}. Press play.` : 'Press play to walk through this flow step by step.'))}</span>` : '');
+  $('dots').classList.toggle('bug', !!f?.bug);
+  $('dots').innerHTML = f ? f.steps.map((_, i) => `<i class="${i <= S.step ? 'on' : ''}" data-i="${i}" title="Step ${i + 1}"></i>`).join('') : '';
+  $('dots').querySelectorAll('i').forEach(d => d.onclick = () => { setPlaying(false); playStep(+d.dataset.i, false); });
+}
+function setPlaying(on){
+  S.playing = on; $('bPlay').textContent = on ? '❚❚ Pause' : '▶ Play';
+  if (on){ const f = flows[S.flow]; playStep(S.step < 0 || S.step >= f.steps.length - 1 ? 0 : S.step + 1, true); }
+  else clearTimeout(S.timer);
+}
+function resetFlow(){ setPlaying(false); S.anim = null; S.step = -1; if (layers.fx) layers.fx.querySelectorAll('.adhoc,.pk').forEach(n => n.remove()); clearTrails(); focus(); caption(); }
+
+/* ---------- legend ---------- */
+function legend(){
+  const kinds = [...new Set(nodes.map(n => n.kind && KINDS[n.kind] ? n.kind : 'service'))];
+  const styles = [...new Set(edges.map(e => EDGE_STYLES[e.style] ? e.style : 'sync'))];
+  const T = theme();
+  const sw = k => { const K = KINDS[k]; return colours({_K:K}).swatch; };
+  $('legend').innerHTML = kinds.map(k => `<span class="c"><i class="sw" style="background:${sw(k)}"></i>${KINDS[k].label}</span>`).join('')
+    + (styles.length > 1 ? styles.map(s => `<span class="c"><svg viewBox="0 0 22 8"><line x1="1" y1="4" x2="21" y2="4" stroke="${T.edge}" stroke-width="2" ${EDGE_STYLES[s].dash ? `stroke-dasharray="${EDGE_STYLES[s].dash.split(' ').map(v => v / 2).join(' ')}"` : ''}/></svg>${EDGE_STYLES[s].label}</span>`).join('') : '')
+    + (nodes.some(n => n.chart) ? `<span class="c"><b style="color:${T.accent}">◆</b> has a statechart (click it)</span>` : '')
+    + (flows.some(f => f.bug) ? `<span class="c"><svg viewBox="0 0 22 8"><line x1="1" y1="4" x2="21" y2="4" stroke="${T.bug}" stroke-width="4" stroke-linecap="round" opacity=".7"/></svg>Path that breaks a rule</span>` : '');
+}
+
+/* ---------- export ---------- */
+function exportSVG(){
+  const c = svg.cloneNode(true), T = theme();
+  c.querySelectorAll('.pk,.adhoc,.amb').forEach(n => n.remove());
+  const b = document.getElementById('root').getBBox(), pad = 30;
+  c.setAttribute('viewBox', `${b.x - pad} ${b.y - pad} ${b.width + pad * 2} ${b.height + pad * 2}`);
+  c.setAttribute('width', Math.round(b.width + pad * 2)); c.setAttribute('height', Math.round(b.height + pad * 2));
+  c.setAttribute('font-family', FN() ? 'ui-monospace, "SF Mono", Menlo, Consolas, monospace' : 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif');
+  c.querySelectorAll('.dim').forEach(n => n.classList.remove('dim'));
+  const bg = el('rect', {x:b.x - pad, y:b.y - pad, width:b.width + pad * 2, height:b.height + pad * 2, fill:T.bg});
+  c.insertBefore(bg, c.querySelector('#root'));
+  if (FN()){
+    const p = el('pattern', {id:'paperbg', patternUnits:'userSpaceOnUse', width:TN, height:TN}, c.querySelector('defs'));
+    el('use', {href:'#tooth'}, p);
+    c.insertBefore(el('rect', {x:b.x - pad, y:b.y - pad, width:b.width + pad * 2, height:b.height + pad * 2, fill:'url(#paperbg)'}), c.querySelector('#root'));
+  }
+  return new XMLSerializer().serializeToString(c);
+}
+const slug = () => (spec.title || 'architecture').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+function download(url, name){ const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+$('bSvg').onclick = () => { const u = URL.createObjectURL(new Blob([exportSVG()], {type:'image/svg+xml'})); download(u, slug() + '.svg'); setTimeout(() => URL.revokeObjectURL(u), 2000); };
+$('bPng').onclick = () => {
+  const s = exportSVG(), img = new Image();
+  img.onload = () => { const k = 2, cv = document.createElement('canvas'); cv.width = img.width * k; cv.height = img.height * k;
+    const ctx = cv.getContext('2d'); ctx.scale(k, k); ctx.drawImage(img, 0, 0); download(cv.toDataURL('image/png'), slug() + '.png'); };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+};
+
+/* ---------- controls ---------- */
+$('bLive').setAttribute('aria-pressed', S.live);
+$('styleSel').value = S.style;
+$('bLive').onclick = () => { S.live = !S.live; $('bLive').setAttribute('aria-pressed', S.live); };
+$('styleSel').onchange = () => { S.style = $('styleSel').value; rerender(); fit(); };
+$('bTheme').onclick = () => { document.documentElement.dataset.theme = isDark() ? 'light' : 'dark'; rerender(); };
+$('bFit').onclick = () => fit();
+if (floors.length){
+  $('bFold').hidden = false;
+  const lbl = () => { $('bFold').textContent = S.fold ? 'Explode floors' : 'Fold floors'; };
+  lbl();
+  $('bFold').onclick = () => { S.fold = !S.fold; lbl(); rerender(); fit(); };
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => rerender());
+function rerender(){
+  const step = S.step; S.anim = null; render(); legend(); showInfo();
+  if (step >= 0){ S.step = step; const f = flows[S.flow]; redrawTrails(f, step + 1); if (f.bug && step === f.steps.length - 1) stamp(f); focus(); caption(); }
+}
+addEventListener('keydown', ev => {
+  if (!flows.length || ev.target.tagName === 'SELECT') return;
+  if (ev.key === ' '){ ev.preventDefault(); setPlaying(!S.playing); }
+  if (ev.key === 'ArrowRight'){ setPlaying(false); playStep(S.step + 1, false); }
+  if (ev.key === 'ArrowLeft'){ setPlaying(false); playStep(S.step - 1, false); }
+  if (ev.key === 'Escape'){ S.sel = null; S.floorHot = null; showInfo(); resetFlow(); }
+});
+if (flows.length){
+  $('flowbar').hidden = false;
+  $('flowSel').innerHTML = flows.map((f, i) => `<option value="${i}">${f.bug ? '✕ ' : ''}${esc(f.name || 'Flow ' + (i + 1))}</option>`).join('');
+  if (flows.length < 2) $('flowSel').style.display = 'none';
+  $('flowSel').onchange = () => { S.flow = +$('flowSel').value; resetFlow(); };
+  $('bPlay').onclick = () => setPlaying(!S.playing);
+  $('bNext').onclick = () => { setPlaying(false); playStep(S.step + 1, false); };
+  $('bPrev').onclick = () => { setPlaying(false); playStep(S.step - 1, false); };
+  flows.forEach(f => f.steps.forEach(st => [st.from, st.to, st.at].forEach(id => { if (id && !byId[id]) warnings.push(`flow "${f.name}": unknown node ${id}`); })));
+}
+
+/* ---------- boot ---------- */
+$('title').textContent = spec.title || 'Architecture';
+$('subtitle').textContent = spec.subtitle || '';
+document.title = spec.title || 'Architecture';
+document.documentElement.dataset.style = S.style;
+layout(); layoutZones();
+seedAmbient(); render(); legend(); caption();
+addEventListener('resize', () => fit());
+requestAnimationFrame(tick);
+window.__isoarch = {warnings: [...new Set(warnings)], ready: true, play:(flow = 0, step = 0) => { S.flow = flow; $('flowSel').value = flow; playStep(step, false); },
+  select:id => select(id), fold:on => { S.fold = !!on; rerender(); fit(); }, style:s => { S.style = s; $('styleSel').value = s; rerender(); fit(); }};
+})();
+</script>
+</body>
+</html>

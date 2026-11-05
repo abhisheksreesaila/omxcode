@@ -1,0 +1,27 @@
+<style>
+section .head { max-width: 860px; }
+.code { margin: 0; font: 13px/1.7 var(--mono); color: var(--ink2); white-space: pre; overflow-x: auto; }
+.code .k { color: var(--ink); font-weight: 600; } .code .c { opacity: .62; } .code .s { color: var(--oq-ok); } .code .o { color: var(--ink); }
+.pane { border-radius: 20px; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); padding: 18px 20px; min-width: 0; }
+.file { font: 600 11.5px var(--mono); letter-spacing: .06em; color: var(--ink2); display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.file b { color: var(--ink); letter-spacing: 0; } .file button { margin-left: auto; font: 600 11px var(--mono); color: var(--ink2); background: none; border: 0; cursor: pointer; }
+.step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 28px; margin-top: 36px; align-items: start; }
+.step .say p { margin: 0 0 14px; color: var(--ink2); font-size: 16px; line-height: 1.6; } .step .say p b { color: var(--ink); font-weight: 600; }
+.step .say code, .facts3 code, .next code { font: 13.5px var(--mono); color: var(--ink); }
+.step .say ul { margin: 0 0 14px; padding-left: 20px; color: var(--ink2); font-size: 15.5px; line-height: 1.6; } .step .say li b { color: var(--ink); font-weight: 600; }
+.num2 { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--oq-surface-3); font: 600 13px var(--mono); color: var(--ink); margin-right: 10px; vertical-align: middle; }
+.note2 { font-size: 13.5px; color: var(--ink2); line-height: 1.5; margin-top: 12px; }
+.shots2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.shots2 figure { margin: 0; } .shots2 img { width: 100%; display: block; border-radius: 16px; box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); }
+.shots2 figcaption { font: 12.5px var(--mono); color: var(--ink2); margin-top: 8px; text-align: center; }
+.facts3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 36px; }
+.facts3 > div { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
+.facts3 .t { font: 600 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.facts3 h3 { font-size: 19px; margin: 8px 0 6px; } .facts3 p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
+.next { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 36px; }
+.next a { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; text-decoration: none; color: inherit; transition: box-shadow .2s, transform .2s; }
+.next a:hover { box-shadow: 0 0 0 1px var(--word); transform: translateY(-1px); }
+.next h3 { font-size: 18px; margin: 0 0 6px; } .next p { margin: 0; color: var(--ink2); font-size: 14.5px; line-height: 1.5; }
+@media (max-width: 960px) { .step { grid-template-columns: minmax(0, 1fr); } .facts3 { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .shots2 { grid-template-columns: 1fr; } }
+</style>

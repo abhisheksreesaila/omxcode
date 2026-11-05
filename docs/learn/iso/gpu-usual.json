@@ -1,0 +1,293 @@
+{
+ "title": "A typical GPU app (C++, CUDA, OpenGL)",
+ "subtitle": "A UI toolkit, host code, a kernel and a shader, each in its own language, meeting on the GPU",
+ "style": "ink",
+ "live": false,
+ "floors": [
+  {
+   "id": "code",
+   "label": "you write",
+   "note": "four kinds of code, three languages",
+   "nodes": [
+    "ui",
+    "host",
+    "kernel",
+    "shader",
+    "cpu"
+   ]
+  },
+  {
+   "id": "plat",
+   "label": "the platform",
+   "note": "drivers, the GPU, the compositor",
+   "nodes": [
+    "cuda",
+    "gl",
+    "gpu",
+    "tex",
+    "comp",
+    "screen"
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "id": "ui",
+   "label": "UI code",
+   "kind": "client",
+   "at": [
+    0,
+    -5
+   ],
+   "hue": 205,
+   "tech": "C++ · Qt or Dear ImGui",
+   "desc": "The windows, sliders and menus, written with a UI toolkit. Qt draws its own widgets; Dear ImGui draws every widget itself with the GPU, as triangles, each frame."
+  },
+  {
+   "id": "host",
+   "label": "Host code",
+   "kind": "service",
+   "at": [
+    5,
+    -5
+   ],
+   "hue": 205,
+   "tech": "C++ · CUDA runtime, OpenGL calls",
+   "desc": "Allocates GPU memory, launches kernels with kernel<<<grid, block>>>(…), registers OpenGL textures with CUDA, and issues the draw calls."
+  },
+  {
+   "id": "kernel",
+   "label": "Kernel",
+   "kind": "worker",
+   "at": [
+    10,
+    -5
+   ],
+   "hue": 18,
+   "tech": "CUDA C++ · .cu · nvcc",
+   "desc": "The GPU function, in CUDA C++: a dialect with __global__, threadIdx and blockIdx. Compiled by nvcc, NVIDIA's compiler, as its own build step. Runs on NVIDIA GPUs only."
+  },
+  {
+   "id": "shader",
+   "label": "Shader",
+   "kind": "worker",
+   "at": [
+    15,
+    4.5
+   ],
+   "hue": 38,
+   "tech": "GLSL · .frag",
+   "desc": "A small program in OpenGL's shading language, compiled by the driver at run time. It samples the texture to colour the rectangle on screen."
+  },
+  {
+   "id": "cpu",
+   "label": "Other GPUs, the CPU",
+   "kind": "worker",
+   "at": [
+    0,
+    1
+   ],
+   "hue": 0,
+   "tech": "more code",
+   "desc": "A CUDA kernel runs only on NVIDIA GPUs. The maths can be shared with the CPU (__host__ __device__ functions), but the launch code can't, and other GPUs need another kernel, in Metal or HIP."
+  },
+  {
+   "id": "cuda",
+   "label": "CUDA driver",
+   "kind": "edge",
+   "at": [
+    10,
+    -5
+   ],
+   "hue": 140,
+   "tech": "libcuda",
+   "desc": "Loads the compiled kernel and runs it."
+  },
+  {
+   "id": "gl",
+   "label": "OpenGL driver",
+   "kind": "edge",
+   "at": [
+    15,
+    4.5
+   ],
+   "hue": 140,
+   "tech": "or Vulkan, Metal, Direct3D",
+   "desc": "Draws the rectangle with the shader into the window's buffer."
+  },
+  {
+   "id": "gpu",
+   "label": "GPU",
+   "kind": "service",
+   "shape": "chip",
+   "at": [
+    15,
+    -5
+   ],
+   "hue": 140,
+   "tech": "NVIDIA",
+   "desc": "Thousands of threads; one per pixel here."
+  },
+  {
+   "id": "tex",
+   "label": "Shared buffer",
+   "kind": "storage",
+   "at": [
+    15,
+    0
+   ],
+   "hue": 140,
+   "tech": "CUDA–OpenGL interop",
+   "desc": "A pixel buffer OpenGL owns, registered with CUDA (cudaGraphicsGLRegisterBuffer). The kernel writes into it, and OpenGL turns it into a texture without it leaving the GPU."
+  },
+  {
+   "id": "comp",
+   "label": "Compositor",
+   "kind": "edge",
+   "at": [
+    10,
+    4.5
+   ],
+   "hue": 140,
+   "tech": "the OS, on the GPU",
+   "desc": "The window system puts every window together, also on the GPU."
+  },
+  {
+   "id": "screen",
+   "label": "Screen",
+   "kind": "client",
+   "at": [
+    5,
+    4.5
+   ],
+   "hue": 0,
+   "tech": "",
+   "desc": "What the person sees."
+  }
+ ],
+ "edges": [
+  {
+   "from": "ui",
+   "to": "host",
+   "label": "slider"
+  },
+  {
+   "from": "host",
+   "to": "cuda",
+   "label": "launch"
+  },
+  {
+   "from": "kernel",
+   "to": "cuda",
+   "label": "nvcc",
+   "style": "data"
+  },
+  {
+   "from": "cuda",
+   "to": "gpu"
+  },
+  {
+   "from": "gpu",
+   "to": "tex",
+   "label": "writes"
+  },
+  {
+   "from": "host",
+   "to": "gl",
+   "label": "draw"
+  },
+  {
+   "from": "shader",
+   "to": "gl",
+   "style": "data"
+  },
+  {
+   "from": "tex",
+   "to": "gl",
+   "label": "reads"
+  },
+  {
+   "from": "gl",
+   "to": "comp"
+  },
+  {
+   "from": "comp",
+   "to": "screen"
+  },
+  {
+   "from": "host",
+   "to": "cpu",
+   "style": "async"
+  }
+ ],
+ "flows": [
+  {
+   "name": "One frame",
+   "steps": [
+    {
+     "from": "ui",
+     "to": "host",
+     "note": "A slider moves in the UI toolkit, written in C++."
+    },
+    {
+     "from": "kernel",
+     "to": "cuda",
+     "note": "The kernel was written in CUDA C++ and compiled ahead of time by nvcc, a separate compiler."
+    },
+    {
+     "from": "host",
+     "to": "cuda",
+     "note": "Host code launches it: kernel<<<grid, block>>>(…)."
+    },
+    {
+     "from": "cuda",
+     "to": "gpu",
+     "note": "The GPU runs one thread per pixel."
+    },
+    {
+     "from": "gpu",
+     "to": "tex",
+     "note": "It writes straight into a buffer shared with OpenGL. No copy to the CPU."
+    },
+    {
+     "from": "host",
+     "to": "gl",
+     "note": "Host code has OpenGL turn the buffer into a texture and draw a rectangle with it."
+    },
+    {
+     "from": "shader",
+     "to": "gl",
+     "note": "A GLSL shader, another language, colours the rectangle from the texture."
+    },
+    {
+     "from": "gl",
+     "to": "comp",
+     "note": "The window's picture goes to the compositor, which also runs on the GPU."
+    },
+    {
+     "from": "comp",
+     "to": "screen",
+     "note": "On screen, and three languages met to do it."
+    }
+   ]
+  },
+  {
+   "name": "Without an NVIDIA GPU",
+   "steps": [
+    {
+     "at": "kernel",
+     "note": "A CUDA kernel runs only on NVIDIA GPUs."
+    },
+    {
+     "from": "host",
+     "to": "cpu",
+     "note": "The maths can be shared with the CPU through __host__ __device__ functions; the launch code can't."
+    },
+    {
+     "at": "cpu",
+     "note": "Other GPUs need another kernel: Metal on Apple, HIP on AMD."
+    }
+   ]
+  }
+ ]
+}
