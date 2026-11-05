@@ -4,6 +4,16 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 52: Mojo 1.2, Flare 0.13, the engine beside Flare (2026-11-05)
+- **Setup:** worktree ../mojo-ui-g52, branch `goal-52-mojo12` from goal-50-native 4352a74, its own env; contract GOAL.md + docs/goals/52-check.py; report docs/goals/52-report.md.
+- **Worked:** Mojo 1.2.0 / MAX 26.7.0; the engine rebuilt from 834ef9a + a patch (40/40 tests); Flare v0.13.1; nothing lost against the same sweep on 1.1; omxconsole's real chat; engine jobs inside Flare requests; a UI frame loop never stalls (≤ 5 ms gaps); maccheck/console/widgets on GitHub's Macs.
+- **Broke and fixed:** objc's Int8 pointer (Mac/iPhone builds); Flare 0.13 serving on Mojo's pool (no exit, parallelize hung: leases held, flare#47); the listener gap after bind (flare#48); the zlib shim needed libdeflate (gzip bodies left compressed); stop() held the caller 100 ms (now 0); a thread id read through a local's address crashed the engine's fan (now a lint).
+- **Open:** M6 red on omxplorer only (its Mac build failed on 1.1 too); the Metal path waits for a real Mac.
+- **Means:** the framework is on the current Mojo, and the engine, Flare and a UI share one program without blocking each other.
+- **Next:** the M4 Mac Pro; merge goals 50 and 52.
+
+---
+
 ## Goal 50: the framework serves, fetches and supervises; omxconsole's daemon in Mojo on it (2026-11-04/05)
 - **Setup:** worktree ../mojo-ui-g50, branch `goal-50-native` from main bfacc58; contract GOAL.md + docs/goals/50-check.py; report docs/goals/50-report.md; plan docs/plans/omxconsole-native.md (owner: "a convenient wrapper on Max Serve", "the star of the show is OMX code", "There is Flare … I would rather trust that").
 - **Worked:** Flare v0.12.0 (Mojo 1.1) vendored; HTTPS for every app (FlareTransport behind mojoui.http); mojoui.serve (routes, JSON, SSE pipes, proxy, ticks, SIGTERM stop); mojoui.process; mojoui.hash; examples/consoled answers the console's 18 reads from the real store and streams a real Qwen2.5-0.5B chat from `max serve` through its /v1 gateway to the OpenAI SDK, with keys, logging and idle unload.
