@@ -86,13 +86,14 @@ def m1():
 
 
 def m2():
+    pack("e5small", "e5small.mef")  # (classify's model, D-4919)
     s = scenario()
     exp = Path(s["export"])
     f = exp / "classified.csv"
     if not f.exists():
         return False, f"no classified.csv in {exp}"
     label_of = {r["value"]: r["label"] for r in csv.DictReader(open(f))}
-    fleet = list(csv.DictReader(open(FULL / "fleet.csv")))
+    fleet = [r for r in csv.DictReader(open(FULL / "fleet.csv")) if r["task"].strip()]  # (a row with no task text has nothing to classify; the baseline is counted on the same rows)
     verbs = Counter(r["verb"] for r in fleet)
     base = verbs.most_common(1)[0][1] / len(fleet)
     agree = sum(1 for r in fleet if label_of.get(r["task"]) == r["verb"]) / len(fleet)

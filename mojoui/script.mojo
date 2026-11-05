@@ -18,6 +18,7 @@
 # `;` inside single quotes doesn't end a statement; ${name} is a parameter (bind_params), so a saved script is a recipe
 # another person reruns on their own data.
 
+from std.time import perf_counter_ns
 from omxcore import Catalog, Table, SharedTable, Frame as MxFrame, sql
 
 comptime STMT_SQL = 0
@@ -274,6 +275,7 @@ def run_script[F: ScriptFunctions](text: String, mut catalog: Catalog, mut funct
     for k in range(len(statements)):
         ref st = statements[k]
         var name = st.name if st.name != "" else "result_" + String(k + 1)
+        var t0 = perf_counter_ns()
         try:
             if name in taken:
                 raise Error(name + " is a table here already: give the result another name")
@@ -290,7 +292,8 @@ def run_script[F: ScriptFunctions](text: String, mut catalog: Catalog, mut funct
             catalog.add_frame(name, MxFrame(shared))
             run.names.append(name)
             run.tables.append(shared)
-            run.log.append(name + " = " + _short(st.text) + " → " + String(rows) + " rows")
+            var ms = Float64(perf_counter_ns() - t0) / 1e6
+            run.log.append(name + " = " + _short(st.text) + " → " + String(rows) + " rows in " + String(Int(ms * 10.0 + 0.5) // 10) + "." + String(Int(ms * 10.0 + 0.5) % 10) + " ms")
         except e:
             run.problem = "line " + String(st.line) + ": " + String(e)
             run.line = st.line

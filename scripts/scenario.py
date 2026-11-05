@@ -597,15 +597,103 @@ def script(media, out):
     print(f"summary {out / 'script.json'}")
 
 
+SCRIPT_CLASSIFY = """-- goal 51: a decision model, no training: each task text labelled with the nearest verb
+verbs = SELECT DISTINCT verb FROM fleet WHERE verb IS NOT NULL;
+classified = classify(fleet, task, verbs, verb);
+"""
+
+
+def models(media, out):
+    """Models as functions in the script (goal 51): classify() over the robot fleet's task texts; detect() on a
+    section of the featured episode's video (when it exists). Only omxplorer's own tools."""
+    import csv
+    import json
+    docs = out / "documents"
+    for d in (docs, out / "config"):
+        d.mkdir(parents=True, exist_ok=True)
+    truth = json.loads((media / "truth.json").read_text())
+    hero = truth["hero"]
+    rows = list(csv.DictReader(open(media / "fleet.csv")))
+    hero_row = [r["episode"] for r in rows].index(hero) + 1
+    env = {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(out / "config"), "MOJOUI_TRACE": "1", "MOJOUI_BUDGET_MS": os.environ.get("MOJOUI_BUDGET_MS", "50"),
+           "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES", "0"), "OMX_PACKS": str((Path(__file__).resolve().parents[1] / "build/packs"))}
+    s = Session(env)
+    called, cards = [], {}
+
+    def call(tool, **args):
+        called.append(tool)
+        return s.call(tool, **args)
+
+    def until(tool, timeout=300):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if tool in s.c.names():
+                return
+            time.sleep(0.2)
+        raise SystemExit(f"{tool} never appeared; the app said: {[l for l in s.log if l.startswith(('SCRIPT:', 'JOB:'))][-6:]}")
+
+    def landed(mark, timeout=900):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if any(l.startswith(("SCRIPT: problem", "JOB: script")) for l in s.log[mark:]):
+                break
+            time.sleep(0.2)
+        problem = [l for l in s.log[mark:] if l.startswith(("SCRIPT: problem", "JOB: script failed"))]
+        if problem:
+            raise SystemExit(problem[0])
+
+    def read(names):
+        for n in names:
+            tool = "table-" + n.replace("_", "-")
+            until(tool, 60)
+            cards[f"table-{n}"] = card_facts(call("read", name=tool, count=1))
+
+    def export():
+        mark = len(s.log)
+        call("export-recipe")
+        t0 = time.time()
+        while time.time() - t0 < 300 and not any(l.startswith("RECIPE: ") for l in s.log[mark:]):
+            time.sleep(0.2)
+        said = [l for l in s.log[mark:] if l.startswith("RECIPE: ")]
+        if not said or not said[0].startswith("RECIPE: exported "):
+            raise SystemExit(f"export: {said}")
+        return said[0].split(" ")[2]
+
+    exports, available = [], []
+    try:
+        print("# Models as functions in the script: a decision model over 63,000 robot episodes. Only omxplorer's own tools.")
+        call("open-file", path=str((media / "fleet.csv").resolve()))
+        until("create-table")
+        call("create-table")
+        call("script")
+        mark = len(s.log)
+        call("script-text", text=SCRIPT_CLASSIFY)
+        call("run-script")
+        landed(mark)
+        read(["verbs", "classified"])
+        exports.append(export())
+        available = s.c.names()
+    finally:
+        s.close()
+    trace = [l for l in s.log if l.startswith(("SCRIPT:", "QUERY:", "JOB:", "SLOW:", "MARKS:", "RECIPE:"))]
+    summary = {"cards": cards, "trace": trace, "tools_called": called, "tools_available": available, "hero": hero,
+               "export": exports[0] if exports else "", "exports": exports, "range": list(SECTION)}
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "models.json").write_text(json.dumps(summary, indent=1))
+    for l in trace:
+        print(l[:300])
+    print(f"summary {out / 'models.json'}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("name", choices=["warehouse", "drone", "claims", "robots", "script"])
+    ap.add_argument("name", choices=["warehouse", "drone", "claims", "robots", "script", "models"])
     ap.add_argument("--media", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    {"warehouse": warehouse, "drone": drone, "claims": claims, "robots": robots, "script": script}[a.name](Path(a.media).resolve(), out)
+    {"warehouse": warehouse, "drone": drone, "claims": claims, "robots": robots, "script": script, "models": models}[a.name](Path(a.media).resolve(), out)
 
 
 if __name__ == "__main__":

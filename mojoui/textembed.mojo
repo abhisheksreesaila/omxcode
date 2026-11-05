@@ -3,15 +3,17 @@
 # dot product is the cosine: what classify() (mojoui.models) compares.
 #
 #   var rt = MaxRuntime()
-#   var e = Embedder(rt, "build/packs/minilm")
+#   var e = Embedder(rt, "build/packs/minilm")   # (a pack folder: <its name>.mef, .safetensors, vocab.txt, prefix.txt)
 #   var v = e.embed(texts)                 # len(texts) × e.dim floats, row by row
 #
+# Each text starts with the pack's prefix.txt when it has one (e5's "query: ", as its model card asks).
 # Batches are padded to their longest text (the mask hides the padding); texts are sorted by length first so a batch
 # pads little, and the vectors come back in the order asked.
 
 from std.math import sqrt
 from mojoui.maxrt import MaxRuntime, MaxModel, TensorIn
 from mojoui.wordpiece import Vocab
+from mojoui.video import file_exists
 
 
 struct Embedder(Movable):
@@ -19,12 +21,16 @@ struct Embedder(Movable):
     var model: MaxModel
     var dim: Int
     var most: Int  # tokens per text at most
+    var prefix: String
 
     def __init__(out self, mut rt: MaxRuntime, pack: String, dim: Int = 384, most: Int = 128) raises:
-        self.vocab = Vocab(pack + "/vocab.txt")
-        self.model = rt.load(pack + "/minilm.mef", pack + "/minilm.safetensors", gpu=True)
+        var dir = String(pack.rstrip("/"))
+        var name = String(dir[byte = dir.rfind("/") + 1 :])
+        self.vocab = Vocab(dir + "/vocab.txt")
+        self.model = rt.load(dir + "/" + name + ".mef", dir + "/" + name + ".safetensors", gpu=True)
         self.dim = dim
         self.most = most
+        self.prefix = open(dir + "/prefix.txt", "r").read() if file_exists(dir + "/prefix.txt") else String("")
 
     def embed_ids(mut self, ids: List[List[Int]]) raises -> List[Float32]:
         """Vectors for texts already tokenized (one batch: padded to the longest)."""
@@ -56,7 +62,7 @@ struct Embedder(Movable):
         var n = len(texts)
         var ids = List[List[Int]]()
         for t in texts:
-            ids.append(self.vocab.ids(t, self.most))
+            ids.append(self.vocab.ids(self.prefix + t, self.most))
         # by length, so each batch pads little
         var order = List[Int]()
         for i in range(n):

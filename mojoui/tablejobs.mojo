@@ -31,6 +31,7 @@ from mojoui.timeseries import TimeSeries
 from mojoui.trackcard import is_track, series_from_sheet
 from mojoui.script import run_script
 from mojoui.videoscript import VideoFunctions
+from mojoui.models import ModelFunctions
 
 
 struct TableFile(Movable):
@@ -172,7 +173,8 @@ struct ScriptJob(JobBody):
         for i in range(len(self.sheets)):
             catalog.add_frame(self.names[i], self.sheets[i].frame)
         self.videos.add_to(catalog)
-        var run = run_script(self.text, catalog, self.videos, self.taken)
+        var fns = ModelFunctions(self.videos.copy())  # (the videos' functions and the models: mojoui.models)
+        var run = run_script(self.text, catalog, fns, self.taken)
         var font = Font()
         var cards = List[TableCard]()
         for i in range(len(run.names)):

@@ -34,7 +34,7 @@ from bert_graph import build_graph  # noqa: E402
 from packlib import write_safetensors  # noqa: E402
 
 REPO = "sentence-transformers/all-MiniLM-L6-v2"
-FILES = ("config.json", "model.safetensors", "vocab.txt", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json")
+FILES = ("config.json", "model.safetensors", "vocab.txt", "tokenizer_config.json")
 ROOT = HERE.parents[1]
 
 
@@ -44,34 +44,38 @@ def clean_env():
     return {k: v for k, v in os.environ.items() if not k.startswith(("CONDA", "PIXI", "PYTHON", "_CE_", "_CONDA"))}
 
 
-def snapshot():
-    found = glob.glob(os.path.expanduser("~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2/snapshots/*/"))
+def snapshot(repo):
+    """The model's files: the Hugging Face cache's snapshot, else ~/.cache/omxcode/<name>, downloaded once."""
+    found = glob.glob(os.path.expanduser(f"~/.cache/huggingface/hub/models--{repo.replace('/', '--')}/snapshots/*/"))
     if found:
         return pathlib.Path(found[0])
-    d = pathlib.Path(os.path.expanduser("~/.cache/omxcode/minilm"))
+    d = pathlib.Path(os.path.expanduser("~/.cache/omxcode/" + repo.split("/")[-1]))
     d.mkdir(parents=True, exist_ok=True)
     for f in FILES:
         if not (d / f).exists():
-            urllib.request.urlretrieve(f"https://huggingface.co/{REPO}/resolve/main/{f}", d / f)
+            urllib.request.urlretrieve(f"https://huggingface.co/{repo}/resolve/main/{f}", d / f)
     return d
 
 
-def main():
-    out = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "build/packs/minilm")
+def main(repo=REPO, name="minilm", prefix=""):
+    """A BERT-family sentence-embedding model (mean pooled) as a pack: <name>.mef, <name>.safetensors, vocab.txt,
+    prefix.txt (what each text starts with, as the model's card says: e5's "query: "), and the references."""
+    out = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else f"build/packs/{name}")
     out.mkdir(parents=True, exist_ok=True)
-    snap = snapshot()
+    snap = snapshot(repo)
+    (out / "prefix.txt").write_text(prefix)
     hf = types.SimpleNamespace(**json.load(open(snap / "config.json")))
     cfg = types.SimpleNamespace(dtype=DType.float32, device=DeviceRef.GPU(0), pool_embeddings=True, huggingface_config=hf, max_seq_len=512)
     w = load_weights([snap / "model.safetensors"])
     sd = {k.replace(".LayerNorm.", ".layer_norm."): v.data() for k, v in w.items() if ".position_ids" not in k and not k.startswith("pooler.")}
     arrays = {k: np.from_dlpack(v) if not isinstance(v, np.ndarray) else v for k, v in sd.items()}
-    write_safetensors(out / "minilm.safetensors", {k: np.asarray(v, dtype=np.float32) for k, v in arrays.items()})
+    write_safetensors(out / f"{name}.safetensors", {k: np.asarray(v, dtype=np.float32) for k, v in arrays.items()})
     shutil.copyfile(snap / "vocab.txt", out / "vocab.txt")
     gpu = driver.Accelerator(0)
     sess = InferenceSession(devices=[gpu])
     graph = build_graph(cfg, sd)
     compiled = sess.compile(graph)
-    compiled.export_mef(str(out / "minilm.mef"))
+    compiled.export_mef(str(out / f"{name}.mef"))
     model = sess.init(compiled, weights_registry=sd)
 
     # references: 200 distinct task texts, HF's tokenizer's ids, this pack's vectors
@@ -85,8 +89,8 @@ def main():
     (out / "texts.txt").write_text("\n".join(texts) + "\n")
     tok = subprocess.run(["pixi", "run", "-e", "models", "python", "-c",
                           "import sys; from transformers import AutoTokenizer; t = AutoTokenizer.from_pretrained(sys.argv[1]);"
-                          "[print(' '.join(map(str, t(l.rstrip(chr(10)))['input_ids']))) for l in open(sys.argv[2])]",
-                          str(snap), str((out / "texts.txt").resolve())], cwd=ROOT, capture_output=True, text=True, env=clean_env())
+                          "[print(' '.join(map(str, t(sys.argv[3] + l.rstrip(chr(10)))['input_ids']))) for l in open(sys.argv[2])]",
+                          str(snap), str((out / "texts.txt").resolve()), prefix], cwd=ROOT, capture_output=True, text=True, env=clean_env())
     if tok.returncode:
         raise SystemExit("the reference tokenizer (pixi -e models) failed: " + tok.stderr[-1500:])
     ids = [list(map(int, l.split())) for l in tok.stdout.strip().splitlines()]
@@ -101,7 +105,7 @@ def main():
     e = model.execute(driver.Buffer.from_numpy(a).to(gpu), driver.Buffer.from_numpy(m).to(gpu))[0].to(driver.CPU()).to_numpy()
     e = (e / np.linalg.norm(e, axis=1, keepdims=True)).astype(np.float32)
     e.tofile(out / "ref_vectors.f32")
-    print(f"minilm pack: {out}; {len(texts)} references, longest {L} tokens, vectors {e.shape}")
+    print(f"{name} pack: {out}; {len(texts)} references, longest {L} tokens, vectors {e.shape}")
 
 
 if __name__ == "__main__":
