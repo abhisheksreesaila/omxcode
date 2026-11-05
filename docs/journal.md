@@ -1145,3 +1145,7 @@ was the map.
   so its file check had passed on an empty set; fixed, regenerated with a/ b/, and negative-tested with doctored
   patches. Fixes in D-5216. Macs: macOS 26's first job never got a runner (cancelled after 15 min queued); its rerun
   passed (maccheck exit 0, 110 side pictures, console renders).
+- Full run after review fixes: M1 failed: engine test_switches_threads segfaulted (30/30 once rebuilt) in pthread_join of
+  thread "0". Cause: `pthread_create(Int(Pointer(to=tid)), ...)` through my dlsym wrapper: the local's address as an
+  Int doesn't tell the compiler the call writes `tid`. Fixed in the wrapper (returns the id from its own cell) and in
+  framefeed (same line, mine); a lint now rejects the pattern (D-5217). 0/30 failures after.

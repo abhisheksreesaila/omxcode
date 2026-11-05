@@ -47,6 +47,16 @@ def main():
             for name in CALL.findall(line):
                 if name in watch and name not in ENGINE_FORM.get(rel, ()):
                     bad.append(f"{rel}:{i}: external_call[\"{name}\"]: call mojoui.libc.{name} (add it there with Flare's types)")
+    # a thread id written through a local's address handed over as an Int: the compiler may keep reading the local's
+    # old value (goal 52: the engine's fan joined thread 0 and crashed; framefeed had the same line). Write it into a
+    # buffer (List[Int], unsafe_alloc) instead.
+    LOCAL_AS_INT = re.compile(r"pthread_create.*Int\(\s*Pointer\(\s*to\s*=")
+    roots = [ROOT / "mojoui", ROOT / "examples", ROOT / "tests"] + ([built / "mojo"] if (built / "mojo").exists() else [])
+    for r in roots:
+        for p in sorted(r.rglob("*.mojo")):
+            for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
+                if LOCAL_AS_INT.search(line):
+                    bad.append(f"{p}:{i}: a thread id through Int(Pointer(to=local)): use a buffer (List[Int] / unsafe_alloc)")
     if bad:
         print("\n".join(bad))
         sys.exit(1)

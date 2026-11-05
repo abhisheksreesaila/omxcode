@@ -222,15 +222,16 @@ struct FrameFeed(Movable):
             p[].state = _READY  # (the handle's view: ready at once; the thread opens its decoder without probing)
         self.addr = Int(p)
         # (mojoui.libc looks pthread_create up: the engine, Flare and mojoui then never declare it two ways, goal 52)
-        var tid = Int(0)
-        var rc = libc.pthread_create[_feed_entry](self.addr, Int(Pointer(to=tid)))
+        var tid = List[Int](length=1, fill=0)  # (a buffer: pthread_create writes the id there; a local's address as an
+        # Int can leave the compiler reading the local's old value, as the engine's fan did, goal 52)
+        var rc = libc.pthread_create[_feed_entry](self.addr, Int(tid.unsafe_ptr()))
         if rc != 0:
             self.why = "no thread to decode on"
             _release(self.addr)  # (the thread's share)
             _release(self.addr)
             self.addr = 0
         else:
-            _ = libc.pthread_detach(tid)
+            _ = libc.pthread_detach(tid[0])
 
     def __deinit__(deinit self):
         if self.addr != 0:

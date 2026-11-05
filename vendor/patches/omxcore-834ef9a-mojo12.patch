@@ -44,10 +44,10 @@ index fb21ea0..25dafa7 100644
  comptime BLOCK: Int = 256
 diff --git a/mojo/omxcore/_libc.mojo b/mojo/omxcore/_libc.mojo
 new file mode 100644
-index 0000000..dd89978
+index 0000000..97c8997
 --- /dev/null
 +++ b/mojo/omxcore/_libc.mojo
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,100 @@
 +"""The libc functions the engine calls through a pointer instead of declaring them.
 +
 +Mojo allows one signature per external symbol in a binary. Mojo 1.2's stdlib declares `read` and `write` itself, and
@@ -60,6 +60,7 @@ index 0000000..dd89978
 +from std.ffi import external_call, c_int
 +from std.memory import Pointer
 +from std.sys import CompilationTarget
++from std.memory.alloc import unsafe_alloc
 +
 +comptime ThreadEntry = def(Int) thin abi("C") -> Int
 +"""A thread's start routine: the argument is an address, the result is ignored."""
@@ -71,12 +72,19 @@ index 0000000..dd89978
 +    return external_call["dlsym", Int](anywhere, n.as_c_string_span())
 +
 +
-+def pthread_create(tid_out: Int, attr: Int, entry: ThreadEntry, arg: Int) -> c_int:
-+    """`tid_out`: the address of an Int the thread id is written to; `attr`: a pthread_attr_t's address (0: defaults)."""
++def pthread_create(attr: Int, entry: ThreadEntry, arg: Int) -> Tuple[c_int, Int]:
++    """(pthread_create's result, the new thread's id). `attr`: a pthread_attr_t's address (0: defaults). The id is
++    written into memory of this function's own and read back here: handed the address of a caller's local as an Int,
++    the compiler could keep using the local's old value (the engine's fan joined thread 0 and crashed)."""
 +    var f = _sym("pthread_create")
 +    if f == 0:
-+        return c_int(-1)
-+    return Pointer(to=f).unsafe_bitcast[def(Int, Int, ThreadEntry, Int) thin abi("C") -> c_int]()[](tid_out, attr, entry, arg)
++        return (c_int(-1), 0)
++    var cell = unsafe_alloc[Int](1)
++    cell[0] = 0
++    var rc = Pointer(to=f).unsafe_bitcast[def(Int, Int, ThreadEntry, Int) thin abi("C") -> c_int]()[](Int(cell), attr, entry, arg)
++    var tid = cell[0]
++    cell.free()
++    return (rc, tid)
 +
 +
 +def pthread_join(tid: Int) -> c_int:
@@ -192,7 +200,7 @@ index 126a719..090c259 100644
          file.close()
      result.seconds = Float64(perf_counter_ns() - start_ns) / 1e9
 diff --git a/mojo/omxcore/fan.mojo b/mojo/omxcore/fan.mojo
-index e7db175..4fcab32 100644
+index e7db175..a1869eb 100644
 --- a/mojo/omxcore/fan.mojo
 +++ b/mojo/omxcore/fan.mojo
 @@ -12,6 +12,7 @@ Which threads:
@@ -203,16 +211,19 @@ index e7db175..4fcab32 100644
  from std.memory.alloc import unsafe_alloc
  from std.sys import CompilationTarget
  from .kernels._fpenv import SERIAL, par_n, core_count
-@@ -112,7 +113,7 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
+@@ -111,8 +112,9 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
+         var tids = unsafe_alloc[Int](workers)
          var started = 0
          for _ in range(workers - 1):                  # the calling thread is the last worker
-             var tid = Int(0)
+-            var tid = Int(0)
 -            var rc = external_call["pthread_create", c_int](Pointer(to=tid), attr, _fan_entry[T], Int(fan))
-+            var rc = _libc_pthread_create(Int(Pointer(to=tid)), Int(attr), _fan_entry[T], Int(fan))
++            var made = _libc_pthread_create(Int(attr), _fan_entry[T], Int(fan))
++            var rc = made[0]
++            var tid = made[1]
              if rc != 0:
                  break                                 # no more threads to be had: the rest of the work falls to the ones running
              tids[started] = tid
-@@ -121,7 +122,7 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
+@@ -121,7 +123,7 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
          attr.free()
          _fan_loop[T](Pointer[_Fan[T], MutUntrackedOrigin](unsafe_from_address=Int(fan)))
          for k in range(started):
@@ -241,7 +252,7 @@ index 8acded2..f4ebdc4 100644
  
  
 diff --git a/mojo/omxcore/job.mojo b/mojo/omxcore/job.mojo
-index 3dafcb2..96a6327 100644
+index 3dafcb2..9493d2c 100644
 --- a/mojo/omxcore/job.mojo
 +++ b/mojo/omxcore/job.mojo
 @@ -27,6 +27,7 @@ dropped first.
@@ -270,12 +281,14 @@ index 3dafcb2..96a6327 100644
          _release[Self.T](self.words, self.out)
  
  
-@@ -366,7 +367,7 @@ def start_job_then[B: JobBody, CB: JobDone](var body: B, var cb: CB) -> Job[B.Ou
+@@ -366,7 +367,9 @@ def start_job_then[B: JobBody, CB: JobDone](var body: B, var cb: CB) -> Job[B.Ou
              attr[i] = 0
          _ = external_call["pthread_attr_init", c_int](attr)
          _ = external_call["pthread_attr_setstacksize", c_int](attr, Int(JOB_STACK_BYTES))
 -        var rc = external_call["pthread_create", c_int](Pointer(to=tid), attr, _entry[B, CB], Int(task))
-+        var rc = _libc_pthread_create(Int(Pointer(to=tid)), Int(attr), _entry[B, CB], Int(task))
++        var made = _libc_pthread_create(Int(attr), _entry[B, CB], Int(task))
++        var rc = made[0]
++        tid = made[1]
          _ = external_call["pthread_attr_destroy", c_int](attr)
          attr.free()
          if rc != 0:                                # no thread to be had: run it here
