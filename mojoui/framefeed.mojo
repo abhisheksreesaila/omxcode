@@ -19,6 +19,7 @@
 from std.ffi import external_call, c_int
 from std.memory import Pointer
 from std.memory.alloc import unsafe_alloc
+from mojoui import libc
 from std.time import sleep
 from mojoui.video import VideoSource, VideoInfo, file_exists
 from mojoui.wake import wake_write_fd, wake_write
@@ -69,7 +70,7 @@ struct _Shared(Movable):
         self.wake_fd = wake_fd
         self.lock = Int(unsafe_alloc[UInt8](_SYNC_BYTES))
         self.cond = Int(unsafe_alloc[UInt8](_SYNC_BYTES))
-        _ = external_call["pthread_mutex_init", c_int](self.lock, 0)
+        _ = libc.pthread_mutex_init(self.lock)
         _ = external_call["pthread_cond_init", c_int](self.cond, 0)
 
 
@@ -78,11 +79,11 @@ def _at(addr: Int) -> Pointer[_Shared, MutUntrackedOrigin]:
 
 
 def _lock(addr: Int):
-    _ = external_call["pthread_mutex_lock", c_int](_at(addr)[].lock)
+    _ = libc.pthread_mutex_lock(_at(addr)[].lock)
 
 
 def _unlock(addr: Int):
-    _ = external_call["pthread_mutex_unlock", c_int](_at(addr)[].lock)
+    _ = libc.pthread_mutex_unlock(_at(addr)[].lock)
 
 
 def _release(addr: Int):
@@ -96,7 +97,7 @@ def _release(addr: Int):
     var lock = _at(addr)[].lock
     var cond = _at(addr)[].cond
     _ = external_call["pthread_cond_destroy", c_int](cond)
-    _ = external_call["pthread_mutex_destroy", c_int](lock)
+    _ = libc.pthread_mutex_destroy(lock)
     Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=lock).unsafe_free()
     Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=cond).unsafe_free()
     var p = _at(addr)
@@ -230,7 +231,7 @@ struct FrameFeed(Movable):
             _release(self.addr)
             self.addr = 0
         else:
-            _ = external_call["pthread_detach", c_int](tid)
+            _ = libc.pthread_detach(tid)
 
     def __deinit__(deinit self):
         if self.addr != 0:

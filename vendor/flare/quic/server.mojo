@@ -1,0 +1,3392 @@
+"""``flare.quic.server`` -- QUIC server reactor.
+
+Wraps the sans-I/O QUIC connection state machine
+(:class:`flare.quic.state.Connection`) in a UDP listener +
+per-connection dispatcher. The per-datagram dispatch loop
+threads bytes through :class:`OpenSslQuicCrypto` packet
+protection, the transport-frame parser, and
+:meth:`Connection.handle_frame` to produce
+:class:`ConnectionEvents` for the H3 driver above; idle
+timers sit on the shared TimerWheel.
+
+## What ships here
+
+- :class:`QuicServerConfig` -- bind configuration: host, port,
+  rustls config carrier, idle timeout, max packet size.
+- :class:`QuicListener` -- factory that owns a bound UDP
+  socket plus the per-connection dispatch table. The :meth:`bind`
+  factory opens the socket, :meth:`tick` drains one datagram
+  (unit-testable), :meth:`run` is the blocking event loop, and
+  :meth:`shutdown` requests a clean exit.
+- :class:`QuicConnection` -- per-connection driver that
+  composes the existing :class:`flare.quic.state.Connection`
+  state machine with the rustls QUIC session.
+- :class:`ConnectionIdTable` -- per-listener routing table from
+  Connection ID to connection slot, used by the dispatch loop
+  to route inbound datagrams via the Destination Connection ID
+  in the packet header (RFC 9000 §5.1).
+
+References:
+- RFC 9000 §5 "Connections" -- Connection ID routing.
+- RFC 9000 §10 "Connection Termination" -- idle / draining.
+- RFC 9000 §17 "Packet Formats" -- long / short header parse
+  for the dispatch path.
+"""
+
+# TODO(2026-08-31, track-quic-listener): this module is dominated by the
+# single ``QuicListener`` struct (bind / tick / run / shutdown + the
+# per-datagram dispatch loop). Mojo cannot split one struct's methods
+# across files, so the file stays over the 1000-line bar; the value
+# types (QuicServerConfig / QuicConnection / ConnectionIdTable) and pure
+# helpers already moved to ``_server_types`` / ``_server_support``.
+# Further shrinking needs the cold dispatch methods reworked into free
+# functions. Allowlisted in tests/tools/check_reactor_size.sh until then.
+
+from std.collections import Dict, List
+from std.collections.span import Span
+from std.os import getenv
+
+from ..net.address import IpAddr, SocketAddr
+from ..udp import UdpSocket
+from ..udp.batch import BatchReceiver, udp_batch_supported
+from flare.crypto.hmac import hmac_sha256
+
+from .crypto import QuicAead
+from .frame import (
+    ConnectionCloseFrame,
+    CryptoFrame,
+    MaxDataFrame,
+    MaxStreamsFrame,
+    NewConnectionIdFrame,
+    PathResponseFrame,
+    StreamFrame,
+    encode_ack,
+    encode_connection_close,
+    encode_crypto,
+    encode_handshake_done,
+    encode_max_data,
+    encode_max_streams,
+    encode_new_connection_id,
+    encode_path_response,
+)
+from .packet import (
+    ConnectionId,
+    InitialExtras,
+    LongHeader,
+    MAX_CID_LENGTH,
+    PACKET_TYPE_INITIAL,
+    QUIC_VERSION_1,
+    PACKET_TYPE_HANDSHAKE,
+    encode_long_header,
+    parse_initial_extras,
+    parse_long_header,
+    parse_short_header,
+)
+from .protection import (
+    decode_packet_number,
+    protect_initial_packet,
+)
+from .varint import decode_varint, encode_varint
+from .transport_params import (
+    check_client_transport_params,
+    decode_transport_parameters,
+)
+from .state import (
+    CONN_STATE_CLOSING,
+    CONN_STATE_DRAINING,
+    QUIC_FLOW_CONTROL_ERROR,
+    QUIC_PROTOCOL_VIOLATION,
+    QUIC_STREAM_LIMIT_ERROR,
+    QUIC_STREAM_STATE_ERROR,
+    Connection,
+    ConnectionEvents,
+    connection_close,
+    empty_events,
+)
+from ..http3.server import (
+    H3_SERVER_CONTROL_STREAM_ID,
+    Http3Connection,
+    h3_error_code,
+)
+from ..http3.response_writer import (
+    encode_response_data,
+    encode_response_trailers,
+)
+from ..http.request import Request
+from ..http.response import Response
+from ..http.response_stream import ChunkSourceBox
+from ..http.cancel import Cancel
+from ..qpack import QpackHeader
+from ..runtime import Pool
+from .timers import (
+    TIMER_KIND_ACK_DELAY,
+    TIMER_KIND_IDLE,
+    TIMER_KIND_PTO,
+    decode_timer_token,
+    encode_timer_token,
+)
+from ..runtime.timer_wheel import TimerWheel
+from ..tls.rustls_quic import (
+    QuicEncryptionLevel,
+    RustlsQuicAcceptor,
+    RustlsQuicConfig,
+)
+from ..tls._rustls_quic_ffi import (
+    _do_accept,
+    _do_feed_crypto,
+    _do_have_keys,
+    _do_header_decrypt,
+    _do_header_encrypt,
+    _do_install_early_keys,
+    _do_is_handshake_complete,
+    _do_packet_decrypt,
+    _do_packet_encrypt,
+    _do_peer_transport_params,
+    _do_session_free,
+    _do_take_crypto,
+)
+from .packet import encode_short_header
+from .retry import (
+    encode_retry_packet,
+    mint_retry_token,
+    validate_retry_token,
+)
+from ._server_0rtt import (
+    EarlyDataReplayGuard,
+    EarlyDataStrikeSet,
+    early_data_packet_len,
+)
+from ._server_migration import MigrationProbe, new_path_challenge
+from ._server_support import (
+    QUIC_CRYPTO_BUFFER_EXCEEDED,
+    QUIC_TRANSPORT_PARAMETER_ERROR,
+    _ACK_MAX_RANGES,
+    _ack_contains,
+    _CryptoReasm,
+    _CryptoStream,
+    _SessionSlot,
+    _ack_from_ranges,
+    _ack_record,
+    _bufsize_from_env,
+    _effective_idle_ms,
+    _encode_h3_stream_frame,
+    _inbound_level_for_datagram,
+    _monotonic_ms,
+    _random_bytes,
+    _ready_sentinel,
+    _stream_id_from_key,
+)
+from ._loss_recovery import LossRecovery
+from ._server_types import (
+    ConnectionIdTable,
+    QuicConnection,
+    QuicServerConfig,
+    _encode_server_transport_params,
+    cid_to_hex,
+)
+
+
+comptime _MAX_CLOSING_MS: UInt64 = 10_000
+"""Upper bound on the closing period (RFC 9000 sec 10.2: three PTOs).
+Bounds how long a closed slot is retained when the PTO has backed off."""
+comptime _MIN_INITIAL_DATAGRAM: Int = 1200
+"""RFC 9000 sec 14.1: a server discards an Initial carried in a datagram
+smaller than this. The floor is what keeps the 3x anti-amplification
+budget worth something."""
+comptime _HANDSHAKE_CHUNK: Int = 1100
+"""Most CRYPTO bytes per Initial / Handshake packet, so every packet
+fits a 1200-byte datagram with its header and AEAD tag."""
+comptime _LONG_PACKET_OVERHEAD: Int = 80
+"""Upper bound on a long-header packet's bytes beyond its CRYPTO data:
+header with two 20-byte CIDs, length and packet-number fields, frame
+header, AEAD tag."""
+
+# Flow-control grant windows kept ahead of consumption so the peer
+# never blocks mid-run (RFC 9000 sec 19.9 / 19.11). 64 MiB of
+# connection credit and 4096 extra bidi streams comfortably cover a
+# 30 s h2load run at the documented HTTP/3 rate.
+comptime _MAX_DATA_WINDOW: UInt64 = 64 * 1024 * 1024
+comptime _MAX_STREAMS_BIDI_WINDOW: UInt64 = 4096
+
+# Max datagrams drained per reactor tick. Bounds the time spent in one
+# tick so a single hot connection cannot starve the serve loop's H3
+# pump / timer / egress pass, while amortizing that per-tick work over
+# a burst of inbound datagrams. Measured sweet spot for the -m100 h3
+# workload: draining too aggressively (e.g. 1024) delays egress within
+# a tick and lowers throughput; 64 keeps RX and egress interleaved.
+comptime _RX_BATCH: Int = 64
+
+# Kernel UDP buffer sizes. Default 0 == leave the kernel default in
+# place. Counter-intuitively, raising SO_RCVBUF on the single-reactor
+# loopback h3 bench HURT both throughput and the p99.9 tail: a deeper
+# kernel queue lets the reactor fall further behind during a burst, so
+# queued datagrams age (bufferbloat) and median dropped ~3% while
+# p99.9 doubled. The default-small buffer applies backpressure earlier
+# and keeps the reactor closer to real time. The knob is still exposed
+# for real-network deployments where the default rmem causes genuine
+# drops -- set FLARE_QUIC_RCVBUF / FLARE_QUIC_SNDBUF (bytes) to raise
+# it. The kernel doubles the request and clamps to
+# net.core.{rmem,wmem}_max, so the effective size may be smaller.
+comptime _DEFAULT_QUIC_RCVBUF: Int = 0
+comptime _DEFAULT_QUIC_SNDBUF: Int = 0
+
+
+# -- Per-stream streaming egress state ----------------------------------
+
+
+struct _H3StreamOut(Copyable):
+    """Per-stream state for an incrementally-streamed HTTP/3 response.
+
+    A streaming :class:`Response` (one carrying a ``body_stream``
+    chunk source) is not buffered whole into ``http3_response_egress``.
+    Instead its HEADERS ride the egress buffer immediately and this
+    record tracks the still-open source so
+    :meth:`QuicListener.pump_http3_streams` can pull one chunk per
+    tick into DATA frames and :meth:`QuicListener._drain_1rtt_coalesced`
+    can frame them at the right QUIC stream offset, deferring the FIN
+    until the source is exhausted.
+
+    ``src_addr`` boxes the move-only :class:`ChunkSourceBox` in a
+    ``Pool[ChunkSourceBox]`` (0 once freed at end-of-stream) so this
+    record stays ``Copyable`` and can live in a ``Dict`` value --
+    mirroring the H2 reactor's ``_stream_out`` boxing.
+    """
+
+    var src_addr: Int
+    """Pooled ``ChunkSourceBox`` address; 0 once the source is drained
+    and freed (``done`` set)."""
+    var send_off: UInt64
+    """Cumulative QUIC stream-data offset already framed onto the wire
+    for this stream (HEADERS + every DATA fragment). The next STREAM
+    frame starts here so incremental chunks don't collide at offset 0."""
+    var trailer_bytes: List[UInt8]
+    """Pre-encoded trailing-HEADERS frame bytes (empty when the
+    response carried no trailers). Appended to the final flush right
+    before the FIN so trailers land after the last DATA frame."""
+    var done: Bool
+    """Set once the source returned end-of-stream: the drain flushes
+    any remaining bytes + trailers with FIN and reclaims the stream."""
+
+    def __init__(out self, src_addr: Int, var trailer_bytes: List[UInt8]):
+        self.src_addr = src_addr
+        self.send_off = UInt64(0)
+        self.trailer_bytes = trailer_bytes^
+        self.done = False
+
+
+# -- Listener -----------------------------------------------------------
+
+
+struct QuicListener(Movable):
+    """UDP listener + per-connection dispatcher.
+
+    Long-lived. One instance per QUIC server bind. Construct via
+    :meth:`bind`; the constructor opens the UDP socket and binds
+    it. The reactor drives the listener via :meth:`run` (blocks
+    until :meth:`shutdown`) or :meth:`tick` (single iteration --
+    used by tests + by callers that want to multiplex the event
+    loop with other work).
+    """
+
+    var config: QuicServerConfig
+    var cid_table: ConnectionIdTable
+    var connections: List[QuicConnection]
+    """Connection slab. Per-connection state lives here; the
+    :class:`ConnectionIdTable` maps each Connection ID to the
+    slot index. Slots are append-only; the closed-slot sweeper
+    runs at the end of every :meth:`advance_timers` call so
+    idle-timed-out connections get reaped against the same
+    monotonic clock the wheel uses."""
+    var tls_acceptor: RustlsQuicAcceptor
+    """Long-lived rustls QUIC acceptor built once at
+    :meth:`bind` from :attr:`QuicServerConfig.rustls_config`.
+    Owns the rustls ``ServerConfig`` (cert + key + ALPN list)
+    that every per-connection session derives keys from. When
+    the caller passes the default (empty PEM)
+    :class:`RustlsQuicConfig`, the FFI returns a NULL handle and
+    the dispatch path routes all CRYPTO frames through the
+    silent-drop branch -- existing tests that bind a listener
+    purely to exercise the UDP / routing / timer surfaces
+    continue to work without supplying real PEM material."""
+    var free_slots: List[Int]
+    """Reclaimed slots ready for the next accepted connection; see
+    :meth:`_reclaim_slot`."""
+    var slot_free: List[Bool]
+    """Per-slot: on :attr:`free_slots`, so never reclaimed twice."""
+    var tls_sessions: List[_SessionSlot]
+    """Parallel slab to :attr:`connections`: one rustls QUIC
+    session carrier per :class:`QuicConnection` slot. Each
+    :class:`_SessionSlot` holds the raw rustls
+    ``Box<Session>*`` (or 0 for the NULL-PEM sentinel) plus the
+    current outbound encryption level. The slab owns the
+    handles; :meth:`__deinit__` walks every non-zero handle through
+    :func:`flare.tls._rustls_quic_ffi._do_session_free` exactly
+    once at listener teardown. The shared FFI library handle for
+    every per-slot call is borrowed from
+    :attr:`tls_acceptor._lib` so the .so stays mapped across
+    every feed-crypto / take-crypto roundtrip."""
+    var tls_egress_queues: List[List[UInt8]]
+    """Per-slot outbound CRYPTO byte queue at the INITIAL level.
+    Each successful :meth:`feed_crypto` is followed by
+    :meth:`take_crypto` and the resulting bytes append here;
+    :meth:`_drain_and_send` wraps them in a CRYPTO frame inside an
+    Initial-level packet, AEAD-protects with
+    :func:`protect_initial_packet`, and emits via :meth:`send_to`.
+    Cleared after every successful drain."""
+    var tls_handshake_egress_queues: List[List[UInt8]]
+    """Per-slot outbound CRYPTO byte queue at the HANDSHAKE
+    level. Populated by :meth:`_dispatch_crypto_frames` after
+    rustls emits ``KeyChange::Handshake``. Drained by the egress
+    builder which wraps each batch in a CRYPTO frame inside a
+    Handshake-level packet, AEAD-protects via
+    :class:`RustlsQuicSession.packet_encrypt` at level 2, and
+    emits via :meth:`send_to`."""
+    var crypto_reasm: List[_CryptoReasm]
+    """Per-slot inbound CRYPTO reassembly state (one per
+    encryption level). Parallel slab to :attr:`connections`;
+    reorders + coalesces inbound CRYPTO fragments so rustls's
+    in-order ``read_hs`` sees a contiguous handshake stream."""
+    var tls_1rtt_egress_queues: List[List[UInt8]]
+    """Per-slot outbound CRYPTO byte queue at the 1-RTT
+    (APPLICATION) level. Populated by
+    :meth:`_dispatch_crypto_frames` after rustls emits
+    ``KeyChange::OneRtt``. Drained by the egress builder which
+    encodes each batch into a 1-RTT short-header packet,
+    AEAD-protects via :class:`RustlsQuicSession.packet_encrypt`
+    at level 3, and emits via :meth:`send_to`."""
+    var peer_addrs: List[SocketAddr]
+    """Per-slot peer UDP address. Parallel slab to
+    :attr:`connections` -- captured in :meth:`_accept_initial`
+    from the inbound datagram's sender. The egress path reads
+    this to call :meth:`send_to(slot, ...)` without re-parsing
+    the inbound datagram."""
+    var migration_probe: List[MigrationProbe]
+    """Per-slot connection-migration path-validation state (RFC 9000
+    sec 8 / sec 9): the candidate address under validation plus the
+    anti-amplification byte counters. Default (no migration) is an
+    idle probe that costs nothing."""
+    var loss: List[LossRecovery]
+    """Per-slot RFC 9002 loss-recovery state. Parallel slab to
+    :attr:`connections`, grown in :meth:`_accept_initial` alongside the
+    others. ``LossRecovery`` is Movable but not Copyable, so this slab
+    is read through ``self.loss[slot].method()`` or a ``ref`` binding --
+    never the ``.copy()`` idiom the Copyable slabs use."""
+    var rx_1rtt_ranges: List[List[UInt64]]
+    """Per-slot received 1-RTT packet numbers, stored as disjoint
+    ranges (flat [low, high] pairs, descending by high). The ACK
+    frame is built from these so we acknowledge only packets we
+    actually received: the peer skips packet numbers to detect
+    optimistic-ACK attacks (RFC 9000 sec 21.4), so acking a
+    contiguous span would acknowledge a never-sent number and the
+    peer would close with PROTOCOL_VIOLATION (sec 13.1)."""
+    var rx_1rtt_ack_pending: List[Bool]
+    """Per-slot flag: an ack-eliciting 1-RTT packet arrived and
+    has not yet been acknowledged. Cleared once the egress path
+    emits the ACK frame."""
+    var handshake_done_sent: List[Bool]
+    """Per-slot flag: the server has emitted HANDSHAKE_DONE
+    (RFC 9000 sec 19.20) once the 1-RTT keys installed. Confirms
+    the handshake so the peer stops retransmitting its Finished
+    and discards Handshake keys."""
+    var next_local_cid_seq: List[UInt64]
+    """Per-slot next NEW_CONNECTION_ID sequence number to issue
+    (RFC 9000 sec 19.15). The handshake CID is sequence 0; the
+    server issues sequence 1 with the first 1-RTT flight so a
+    migrating client has a spare Destination CID to switch to
+    (sec 9.5 requires a fresh CID per path)."""
+    var pending_migration_tx: List[List[UInt8]]
+    """Per-slot buffer of already-encoded 1-RTT migration frames
+    (PATH_RESPONSE echoes for inbound PATH_CHALLENGEs) awaiting
+    egress. Stashed in :meth:`_process_one_packet` from the
+    surfaced :class:`ConnectionEvents` and flushed by the 1-RTT
+    coalesced drain."""
+    var rx_stream_bytes: List[UInt64]
+    """Per-slot cumulative count of inbound stream payload bytes.
+    Feeds the connection-level MAX_DATA the egress path advertises
+    so the peer's flow-control window never closes (RFC 9000 sec
+    19.9)."""
+    var rx_bidi_stream_count: List[UInt64]
+    """Per-slot count of client-initiated bidi streams observed
+    (largest ``(stream_id >> 2) + 1``). Feeds the MAX_STREAMS_BIDI
+    grant (RFC 9000 sec 19.11) so HTTP/3, which opens one bidi
+    stream per request, can keep opening streams past the initial
+    transport-parameter limit."""
+    var http3_connections: List[Http3Connection]
+    """Per-slot HTTP/3 connection driver. Parallel slab to
+    :attr:`connections` -- one :class:`flare.http3.Http3Connection`
+    instance per QUIC connection. Allocated in
+    :meth:`_accept_initial` so every accepted connection has its
+    H3 driver ready; STREAM frames from the post-handshake 1-RTT
+    payload route through :meth:`_route_http3_stream_chunks` into
+    the matching slot.
+
+    The slab carries the H3 driver unconditionally rather than
+    waiting for the ``h3`` ALPN to be negotiated. The QUIC
+    layer cannot inspect ALPN without finishing the rustls
+    handshake and we want the slab indices to stay in lockstep
+    with :attr:`connections`. The H3 driver itself drops
+    non-H3 traffic (the STREAM frames simply never reach
+    :meth:`Http3Connection.feed_stream_chunk` until 1-RTT keys
+    install, at which point the peer already negotiated H3 via
+    ALPN by definition)."""
+    var http3_response_egress: Dict[String, List[UInt8]]
+    """Per-(slot, stream_id) outbound H3 response bytes,
+    awaiting QUIC STREAM frame egress. Key is
+    ``str(slot) + ":" + str(stream_id)``; value is the byte
+    buffer emitted by
+    :meth:`flare.http3.Http3Connection.take_response_frames` after a
+    handler-produced :class:`Response` is encoded. Drained by
+    the 1-RTT egress path once the per-connection 1-RTT keys
+    are installed."""
+    var http3_streams: Dict[String, _H3StreamOut]
+    """Per-(slot, stream_id) state for responses being streamed
+    incrementally (a :class:`Response` carrying a ``body_stream``).
+    Key present ⟺ the stream is mid-stream: its HEADERS are already in
+    :attr:`http3_response_egress`, its source is pumped one chunk per
+    tick by :meth:`pump_http3_streams`, and the 1-RTT drain frames DATA
+    at :attr:`_H3StreamOut.send_off` with the FIN deferred until
+    ``done``. Buffered (non-streaming) responses never appear here, so
+    their egress path stays byte-for-byte unchanged."""
+    var early_strike: EarlyDataStrikeSet
+    """Listener-level cross-connection 0-RTT replay defense (RFC 9001
+    sec 9.2). Keyed on each accepted connection's original DCID with a
+    time window from :attr:`QuicServerConfig.early_data_strike_window_ms`.
+    Consulted once per connection on its first 0-RTT packet so a
+    captured first flight replayed as a fresh accept is refused. Idle
+    (never populated) unless 0-RTT is enabled."""
+    var timer_wheel: TimerWheel
+    """Per-listener :class:`flare.runtime.timer_wheel.TimerWheel`
+    driving idle timeouts. Each scheduled timer's token is
+    :func:`flare.quic.timers.encode_timer_token(kind, slot)`;
+    :meth:`advance_timers` dispatches each fired token to the
+    matching :class:`QuicConnection` callback."""
+    var _reset_key: List[UInt8]
+    """Listener-wide static key (32 bytes from urandom) for deriving
+    stateless-reset tokens (RFC 9000 sec 10.3.1). The token for a CID is
+    ``HMAC-SHA256(_reset_key, cid)[:16]``: deterministic so a peer that
+    stored the token (issued via NEW_CONNECTION_ID) recognizes the reset,
+    yet unguessable without the key. The same key signs every issued
+    token and every emitted stateless reset, so they always match."""
+    var _retry_key: List[UInt8]
+    """Listener-wide static key (32 bytes from urandom) for HMAC Retry
+    tokens (RFC 9000 sec 8.1 address validation). Only used when
+    :attr:`QuicServerConfig.require_address_validation` is set; signs
+    every minted token and validates every replayed one."""
+    var _socket: UdpSocket
+    var _local_addr: SocketAddr
+    var _stopping: Bool
+    """Set by :meth:`shutdown`. Read by :meth:`run` at the top of
+    every loop iteration so the event loop exits cleanly after
+    the next ``recv_from`` returns or times out."""
+    var _rx_batch: BatchReceiver
+    """Reusable ``recvmmsg`` vector that drains a burst of inbound
+    datagrams in one syscall (RFC-agnostic kernel optimization).
+    Sized to :data:`_RX_BATCH` x ``max_udp_payload_size``."""
+    var _rx_batch_ok: Bool
+    """Latched capability flag: ``True`` while the batched
+    ``recvmmsg`` drain is usable. Flipped to ``False`` permanently on
+    the first ``ENOSYS`` (kernel without the syscall) so the reactor
+    falls back to the per-datagram ``try_recv_from`` loop."""
+
+    def __init__(
+        out self,
+        config: QuicServerConfig,
+        var sock: UdpSocket,
+        addr: SocketAddr,
+        var tls_acceptor: RustlsQuicAcceptor,
+    ) raises:
+        """Wrap an already-bound :class:`UdpSocket`. Internal --
+        callers use :meth:`bind`."""
+        self.config = config.copy()
+        self.cid_table = ConnectionIdTable()
+        self.connections = List[QuicConnection]()
+        self.tls_acceptor = tls_acceptor^
+        self.tls_sessions = List[_SessionSlot]()
+        self.tls_egress_queues = List[List[UInt8]]()
+        self.tls_handshake_egress_queues = List[List[UInt8]]()
+        self.crypto_reasm = List[_CryptoReasm]()
+        self.tls_1rtt_egress_queues = List[List[UInt8]]()
+        self.peer_addrs = List[SocketAddr]()
+        self.migration_probe = List[MigrationProbe]()
+        self.loss = List[LossRecovery]()
+        self.rx_1rtt_ranges = List[List[UInt64]]()
+        self.rx_1rtt_ack_pending = List[Bool]()
+        self.handshake_done_sent = List[Bool]()
+        self.next_local_cid_seq = List[UInt64]()
+        self.pending_migration_tx = List[List[UInt8]]()
+        self.rx_stream_bytes = List[UInt64]()
+        self.rx_bidi_stream_count = List[UInt64]()
+        self.free_slots = List[Int]()
+        self.slot_free = List[Bool]()
+        self.http3_connections = List[Http3Connection]()
+        self.http3_response_egress = Dict[String, List[UInt8]]()
+        self.http3_streams = Dict[String, _H3StreamOut]()
+        self.early_strike = EarlyDataStrikeSet(
+            window_ms=config.early_data_strike_window_ms
+        )
+        # Anchored at the clock advance_timers is driven by. At 0, the
+        # first advance walked every millisecond since boot (about 10^9
+        # ticks at a day's uptime) and fired every armed timer at once.
+        self.timer_wheel = TimerWheel(now_ms=_monotonic_ms())
+        self._reset_key = _random_bytes(32)
+        self._retry_key = _random_bytes(32)
+        self._socket = sock^
+        self._local_addr = addr
+        self._stopping = False
+        self._rx_batch = BatchReceiver(
+            capacity=_RX_BATCH,
+            max_payload=Int(config.max_udp_payload_size),
+        )
+        # Batched recvmmsg drain is on by default on Linux. Operators
+        # can force the per-datagram path (e.g. to A/B the syscall-
+        # batching win, or work around an exotic kernel) by setting
+        # FLARE_QUIC_NO_BATCH=1.
+        self._rx_batch_ok = udp_batch_supported() and (
+            getenv("FLARE_QUIC_NO_BATCH", "0") != "1"
+        )
+
+    def __deinit__(deinit self):
+        """Drop the listener: release every rustls session in
+        the slab exactly once.
+
+        Each :class:`_SessionSlot` is a non-owning carrier; the
+        slab itself is the unique owner of the underlying
+        ``Box<Session>*`` allocations rustls produced via
+        :func:`_do_accept`. The free routes through
+        :meth:`RustlsQuicAcceptor.free_session` so Mojo's
+        ``deinit`` rule (no sub-field access during ``deinit``)
+        is respected -- the acceptor borrows ``self`` (and its
+        ``_lib``) by reference rather than via a sub-field of
+        the listener.
+        """
+        for i in range(len(self.tls_sessions)):
+            var h = self.tls_sessions[i].handle
+            if h != 0:
+                self.tls_acceptor.free_session(h)
+        # Free any HTTP/3 streaming sources still open at teardown (a
+        # connection dropped mid-stream). The ChunkSourceBox boxed in
+        # the pool owns the concrete source; free it exactly once.
+        for entry in self.http3_streams.items():
+            if entry.value.src_addr != 0:
+                Pool[ChunkSourceBox].free(entry.value.src_addr)
+
+    @staticmethod
+    def bind(config: QuicServerConfig) raises -> QuicListener:
+        """Open the UDP socket and bind it to ``config.host`` /
+        ``config.port``. Returns a ready-to-run listener.
+
+        If ``config.port == 0`` the kernel picks an ephemeral
+        port; read it back via :meth:`local_addr`.
+
+        Constructs the per-listener rustls QUIC acceptor from
+        ``config.rustls_config`` at bind time so each accepted
+        connection's TLS session is materialized against the
+        same long-lived ``ServerConfig``. An empty / malformed
+        PEM does not raise here; the acceptor
+        surfaces a NULL handle and CRYPTO bytes route through
+        the silent-drop branch.
+        """
+        var ip = IpAddr.parse(config.host)
+        var addr = SocketAddr(ip, config.port)
+        var sock = UdpSocket.bind(addr)
+        # UDP buffer sizing is opt-in (default keeps the kernel
+        # default; see _DEFAULT_QUIC_RCVBUF for why raising it hurt the
+        # loopback bench). When the env knob requests a non-zero size we
+        # apply it; the kernel clamps to net.core.{rmem,wmem}_max, so a
+        # failure (or a smaller effective size) is non-fatal.
+        var rcvbuf = _bufsize_from_env(
+            "FLARE_QUIC_RCVBUF", _DEFAULT_QUIC_RCVBUF
+        )
+        if rcvbuf > 0:
+            try:
+                sock.set_recv_buffer(rcvbuf)
+            except:
+                pass
+        var sndbuf = _bufsize_from_env(
+            "FLARE_QUIC_SNDBUF", _DEFAULT_QUIC_SNDBUF
+        )
+        if sndbuf > 0:
+            try:
+                sock.set_send_buffer(sndbuf)
+            except:
+                pass
+        var actual = sock.local_addr()
+        var acceptor = RustlsQuicAcceptor(config.rustls_config.copy())
+        return QuicListener(config, sock^, actual, acceptor^)
+
+    def local_addr(self) -> SocketAddr:
+        """Return the address the UDP socket is actually bound to.
+        After :meth:`bind` with ``config.port == 0`` this reports
+        the kernel-chosen ephemeral port."""
+        return self._local_addr
+
+    def bound(self) -> Bool:
+        """Whether the UDP socket is bound. True for every
+        listener returned by :meth:`bind`."""
+        return True
+
+    def connection_count(self) -> Int:
+        """Number of connection slots currently allocated."""
+        return len(self.connections)
+
+    def dispatch_datagram(
+        mut self, datagram: Span[UInt8, _], peer: SocketAddr
+    ) raises -> Int:
+        """Route a single UDP datagram to the right connection slot.
+
+        Parses the first byte to pick long vs short header,
+        extracts the Destination Connection ID, looks it up in
+        :attr:`cid_table`, and either:
+
+        * Routes the datagram to the existing slot via
+          :meth:`_handle_inbound`. Decryption failures are caught
+          and converted to silent drops so a single bad sender
+          can't poison the listener.
+        * Allocates a new slot for an Initial packet with an
+          unknown DCID (the QUIC accept path -- RFC 9000 §7),
+          then drives the same inbound path on the new connection
+          so the first Initial advances the state machine.
+        * Returns ``-1`` to drop short-header packets with
+          unknown DCIDs (those datagrams are silently
+          discarded).
+        """
+        if len(datagram) < 1:
+            return -1
+        var first = Int(datagram[0])
+        var is_long = (first & 0x80) != 0
+        var slot: Int
+        if is_long:
+            slot = self._dispatch_long(datagram, peer)
+        else:
+            slot = self._dispatch_short(datagram, peer)
+            # Unknown-DCID short-header datagram (RFC 9000 sec 10.3): the
+            # peer thinks a connection exists that we have no state for.
+            # Instead of a silent drop, send a stateless reset so the peer
+            # tears the dead connection down promptly rather than waiting
+            # out its idle timeout. Bounded + loop-safe by
+            # :meth:`_build_stateless_reset`.
+            if slot < 0:
+                self._maybe_send_stateless_reset(datagram, peer)
+                return -1
+            # Connection migration (RFC 9000 sec 9): a short-header
+            # (1-RTT) packet routed by a known DCID but arriving from
+            # a new source address means the client moved paths (NAT
+            # rebind or an explicit migrate()). Follow it so the
+            # egress + PATH_RESPONSE go back to where the client now
+            # is.
+            # RFC 9000 sec 8 / sec 9 path validation: a 1-RTT packet
+            # from a new source means the client moved paths. A strict
+            # egress hold -- do NOT switch the egress address to the new
+            # path yet (the prior "follow immediately" let large 1-RTT
+            # responses reflect off the server to a spoofed source).
+            # Instead start a server-initiated PATH_CHALLENGE probe to
+            # the candidate, keep all non-probe egress on the validated
+            # path (:attr:`peer_addrs`), and only promote the candidate
+            # once the client echoes our challenge (see
+            # :meth:`_process_one_packet`). Probe egress to the
+            # unvalidated candidate is bounded at 3x received bytes
+            # (sec 8.1 / sec 21.5.4) by :meth:`_drain_migration_probe`.
+            #
+            # Only once the datagram has authenticated. The probe
+            # used to start on the header alone, before decryption, so
+            # a spoofed short-header packet with a known DCID restarted
+            # validation and aimed PATH_CHALLENGEs at any address.
+            if slot >= 0 and slot < len(self.connections):
+                var authed = self._handle_inbound(slot, datagram)
+                if (
+                    authed
+                    and slot < len(self.peer_addrs)
+                    and self.peer_addrs[slot] != peer
+                ):
+                    self._begin_path_validation(slot, peer, len(datagram))
+            return slot
+        if slot >= 0 and slot < len(self.connections):
+            _ = self._handle_inbound(slot, datagram)
+        return slot
+
+    def _handle_inbound(
+        mut self, slot: Int, datagram: Span[UInt8, _]
+    ) raises -> Bool:
+        """Decrypt + dispatch one inbound datagram by encryption
+        level.
+
+        Initial packets decrypt off the DCID-derived secret in
+        the sans-I/O connection. Handshake + 1-RTT packets carry
+        keys rustls keeps sealed, so they decrypt through the
+        slot's rustls session here (the listener owns the FFI
+        handle) and the plaintext drives the state machine via
+        :meth:`QuicConnection.dispatch_plaintext`.
+
+        Decrypt and frame-parse failures drop silently per
+        RFC 9001 sec 5.2; the slot stays alive for retransmits.
+        On success, inbound CRYPTO bytes feed rustls via
+        :meth:`_dispatch_crypto_frames` and the idle timer re-arms.
+
+        Returns whether a 1-RTT packet in the datagram decrypted, which
+        is what lets the caller trust the datagram's source address.
+        """
+        # The real clock. This was 0, so last_activity_us never moved
+        # and the 0-RTT strike set, keyed on now_us // 1000, never let
+        # an entry age out: once it filled, 0-RTT was refused for the
+        # life of the listener.
+        var now_us = _monotonic_ms() * UInt64(1000)
+        # Closing state (RFC 9000 sec 10.2.1): nothing in the packet is
+        # processed; it is answered with CONNECTION_CLOSE instead.
+        if (
+            slot >= 0
+            and slot < len(self.connections)
+            and self.connections[slot].closing
+        ):
+            self._answer_closing(slot)
+            return False
+        if slot >= 0 and slot < len(self.connections):
+            self.connections[slot].amp_rx += len(datagram)
+        # A datagram may carry several coalesced QUIC packets
+        # (RFC 9000 sec 12.2): e.g. an Initial-level ACK ahead of a
+        # Handshake packet carrying the client Finished, or a
+        # Handshake packet ahead of the first 1-RTT request. Each
+        # long-header packet's length is self-describing, so walk
+        # the datagram packet by packet; a short-header (1-RTT)
+        # packet is always last and runs to the datagram end.
+        var n = len(datagram)
+        var offset = 0
+        var processed_any = False
+        var authed_1rtt = False
+        while offset < n:
+            var first = Int(datagram[offset])
+            # A zero first byte is PADDING that trails the last real
+            # packet; nothing further to parse.
+            if first == 0:
+                break
+            var sub = datagram[offset:]
+            var lvl = _inbound_level_for_datagram(sub)
+            var is_long = (first & 0x80) != 0
+            var packet_len: Int
+            if is_long:
+                try:
+                    var lh = parse_long_header(sub)
+                    if lvl == QuicEncryptionLevel.INITIAL:
+                        var ie = parse_initial_extras(sub, lh.payload_offset)
+                        packet_len = (
+                            lh.payload_offset
+                            + ie.consumed
+                            + Int(ie.payload_length)
+                        )
+                    elif lvl == QuicEncryptionLevel.HANDSHAKE:
+                        var lv = decode_varint(sub[lh.payload_offset :])
+                        packet_len = (
+                            lh.payload_offset + lv.consumed + Int(lv.value)
+                        )
+                    elif (
+                        lvl == QuicEncryptionLevel.EARLY_DATA
+                        and len(self.connections[slot].rx_early_secret) != 0
+                    ):
+                        # 0-RTT with early keys installed: a long-header
+                        # packet with an explicit Length varint, framed
+                        # like Handshake. Step into it so the inner
+                        # 1-RTT packet (if coalesced after) is still
+                        # reached.
+                        packet_len = early_data_packet_len(sub)
+                    else:
+                        # 0-RTT without early keys, or Retry: stop the
+                        # coalescing scan.
+                        break
+                except:
+                    break
+                if packet_len <= 0 or offset + packet_len > n:
+                    break
+            else:
+                packet_len = n - offset
+            var ok = self._process_one_packet(
+                slot, datagram[offset : offset + packet_len], lvl, now_us
+            )
+            if ok and lvl == QuicEncryptionLevel.APPLICATION:
+                authed_1rtt = True
+            # RFC 9000 sec 10.1: only a packet that was received and
+            # processed successfully restarts the idle timer. Every
+            # packet used to, so anyone who knew the CID could keep a
+            # dead connection's slot alive with garbage datagrams.
+            if ok:
+                processed_any = True
+            offset += packet_len
+        if processed_any:
+            self.connections[slot].idle_sent_since_rx = False
+            _ = self.schedule_idle_timeout(slot)
+        return authed_1rtt
+
+    def _process_one_packet(
+        mut self,
+        slot: Int,
+        packet: Span[UInt8, _],
+        inbound_lvl: Int,
+        now_us: UInt64,
+    ) raises -> Bool:
+        """Decrypt + dispatch a single (already de-coalesced) QUIC
+        packet at ``inbound_lvl``. Initial decrypts in the sans-I/O
+        connection; Handshake + 1-RTT decrypt through the slot's
+        rustls session. Failures drop silently per RFC 9001 sec 5.2.
+        Returns whether the packet decrypted and was dispatched.
+        """
+        # Read the local CID length up front so the rustls decrypt
+        # helper (which takes ``mut self``) doesn't have to alias a
+        # held ref into the connection slab. Everything below mutates
+        # ``self.connections[slot]`` in place -- no whole-connection
+        # deep copy on the per-packet hot path.
+        var local_cid_len = self.connections[slot].local_cid.length()
+        var events = empty_events()
+        var ok = True
+        if inbound_lvl == QuicEncryptionLevel.INITIAL:
+            if self.connections[slot].initial_keys_discarded:
+                ok = False  # RFC 9001 sec 4.9.1
+            else:
+                try:
+                    events = self.connections[slot].handle_packet(
+                        packet, now_us
+                    )
+                except:
+                    ok = False
+                    self._close_after_state_error(slot)
+        elif inbound_lvl == QuicEncryptionLevel.HANDSHAKE:
+            if len(self.connections[slot].rx_handshake_secret) == 0:
+                ok = False  # keys not installed yet; drop
+            else:
+                try:
+                    var dec = self._decrypt_post_initial(
+                        slot, packet, inbound_lvl, local_cid_len
+                    )
+                    events = self.connections[slot].dispatch_plaintext(
+                        Span[UInt8, _](dec[0]), now_us, dec[1], True, 1
+                    )
+                    self.connections[slot].initial_keys_discarded = True
+                    # A Handshake packet proves the peer holds the
+                    # address (RFC 9000 sec 8.1).
+                    self.connections[slot].addr_validated = True
+                except:
+                    ok = False
+                    self._close_after_state_error(slot)
+        elif inbound_lvl == QuicEncryptionLevel.APPLICATION:
+            if len(self.connections[slot].rx_1rtt_secret) == 0:
+                ok = False
+            else:
+                try:
+                    var dec = self._decrypt_post_initial(
+                        slot, packet, inbound_lvl, local_cid_len
+                    )
+                    # A packet number already received is a duplicate
+                    # (a retransmit that crossed our ACK, or a replay):
+                    # drop it. It was dispatched again, so a request
+                    # in it ran twice.
+                    if _ack_contains(self.rx_1rtt_ranges[slot], dec[1]):
+                        raise Error("duplicate packet")
+                    # Clear the state-machine ack-eliciting marker so
+                    # it reflects only THIS packet after dispatch.
+                    self.connections[slot].conn.ack_pending = False
+                    events = self.connections[slot].dispatch_plaintext(
+                        Span[UInt8, _](dec[0]), now_us, dec[1]
+                    )
+                    # Record the received pn into the ACK ranges so
+                    # the egress ACK reflects exactly what arrived,
+                    # gaps and all (RFC 9000 sec 13.2 / 21.4).
+                    _ack_record(self.rx_1rtt_ranges[slot], dec[1])
+                    # Only owe an ACK for ack-eliciting packets (a
+                    # request's STREAM/CRYPTO frames). Acking the
+                    # peer's pure-ACK packets would, since our ACK
+                    # also carries MAX_DATA/MAX_STREAMS (ack-
+                    # eliciting), provoke an endless ack-of-ack storm
+                    # (RFC 9000 sec 13.2.1).
+                    if self.connections[slot].conn.ack_pending:
+                        self.rx_1rtt_ack_pending[slot] = True
+                except:
+                    ok = False
+                    self._close_after_state_error(slot)
+        elif inbound_lvl == QuicEncryptionLevel.EARLY_DATA:
+            if len(self.connections[slot].rx_early_secret) == 0:
+                ok = False  # 0-RTT keys not installed: drop
+            else:
+                try:
+                    var dec = self._decrypt_post_initial(
+                        slot, packet, inbound_lvl, local_cid_len
+                    )
+                    # Cross-connection replay defense (RFC 9001 sec
+                    # 9.2): on this connection's *first* 0-RTT packet,
+                    # strike its original DCID against the listener-wide
+                    # set. A captured first flight replayed as a fresh
+                    # accept reuses the same ODCID, so a live strike
+                    # means refuse 0-RTT (fall back to 1-RTT). The
+                    # intra-connection guard below then handles replays
+                    # within this same connection.
+                    var admit_ok = True
+                    if not self.connections[slot].early_guard.any_seen:
+                        var now_ms = now_us // UInt64(1000)
+                        var odcid = cid_to_hex(
+                            self.connections[slot].initial_dcid
+                        )
+                        if not self.early_strike.strike(odcid, now_ms):
+                            admit_ok = False
+                    # Anti-replay + byte-budget admission (RFC 9001
+                    # sec 9.2): a replayed / stale 0-RTT packet number
+                    # or an over-budget flight is dropped before it can
+                    # touch the state machine.
+                    if admit_ok and self.connections[slot].early_guard.admit(
+                        dec[1], len(dec[0])
+                    ):
+                        events = self.connections[slot].dispatch_plaintext(
+                            Span[UInt8, _](dec[0]), now_us, dec[1]
+                        )
+                    else:
+                        ok = False
+                except:
+                    ok = False
+                    self._close_after_state_error(slot)
+        else:
+            ok = False  # Retry not handled here
+        if not ok:
+            return False
+        self._dispatch_crypto_frames(slot, events, inbound_lvl)
+        # LossRecovery tracks the 1-RTT packets we send, so only
+        # application-space ACKs name its packet numbers. An Initial or
+        # Handshake ACK counts in its own space and was misread as
+        # acknowledging 1-RTT packets with those numbers.
+        if inbound_lvl == QuicEncryptionLevel.APPLICATION:
+            self._consume_acks(slot, events)
+        # Requests only from 1-RTT, or 0-RTT the early guard admitted.
+        # Dispatch used to happen at every level, so a request in an
+        # Initial reached the handler before any handshake.
+        if (
+            inbound_lvl == QuicEncryptionLevel.APPLICATION
+            or inbound_lvl == QuicEncryptionLevel.EARLY_DATA
+        ):
+            self._route_http3_stream_chunks(slot, events)
+        self._stash_migration_egress(slot, events)
+        # The client echoed our server-initiated PATH_CHALLENGE: the
+        # candidate path is validated (RFC 9000 sec 8.2). Promote it to
+        # the connection's egress address -- this is the strict-hold
+        # release point, the first moment non-probe 1-RTT egress is
+        # allowed to follow the client to the new path -- and lift the
+        # anti-amplification cap.
+        if events.path_validated and slot < len(self.migration_probe):
+            if self.migration_probe[slot].probing and slot < len(
+                self.peer_addrs
+            ):
+                self.peer_addrs[slot] = self.migration_probe[slot].candidate
+            self.migration_probe[slot].on_validated()
+        return True
+
+    def _begin_path_validation(
+        mut self, slot: Int, peer: SocketAddr, datagram_len: Int
+    ) raises:
+        """Start (or refresh) server-initiated validation of a new
+        peer address (RFC 9000 sec 8.2). Stashes a PATH_CHALLENGE for
+        the candidate and arms the connection to match the client's
+        PATH_RESPONSE. When the candidate is already being probed this
+        only grows its received-byte budget (no re-issue per packet).
+
+        The actual probe egress -- and its 3x anti-amplification
+        accounting -- happens at drain time in
+        :meth:`_drain_migration_probe`, which charges the protected
+        datagram (not just the frame) against the candidate's budget
+        and holds it back when the budget is exhausted."""
+        if slot < 0 or slot >= len(self.migration_probe):
+            return
+        if not self.migration_probe[slot].should_start(peer):
+            self.migration_probe[slot].note_rx(peer, UInt64(datagram_len))
+            return
+        self.migration_probe[slot].start(peer, UInt64(datagram_len))
+        var data = _random_bytes(8)
+        self.connections[slot].conn.outgoing_path_challenge = data.copy()
+        var frame = new_path_challenge(data)
+        var buf = self.pending_migration_tx[slot].copy()
+        for i in range(len(frame)):
+            buf.append(frame[i])
+        self.pending_migration_tx[slot] = buf^
+
+    def _stash_migration_egress(
+        mut self, slot: Int, events: ConnectionEvents
+    ) raises:
+        """Encode the migration frames surfaced this packet
+        (PATH_RESPONSE echoes for inbound PATH_CHALLENGEs, RFC 9000
+        sec 8.2 / 19.18) into the slot's pending-migration buffer.
+        The 1-RTT coalesced drain flushes them on the next egress
+        pass, back to the (possibly migrated) peer address."""
+        if slot < 0 or slot >= len(self.pending_migration_tx):
+            return
+        if len(events.path_responses) == 0:
+            return
+        var buf = self.pending_migration_tx[slot].copy()
+        for i in range(len(events.path_responses)):
+            encode_path_response(
+                PathResponseFrame(data=events.path_responses[i].copy()), buf
+            )
+        self.pending_migration_tx[slot] = buf^
+
+    def _issue_new_connection_id(
+        mut self, slot: Int, mut plaintext: List[UInt8]
+    ) raises:
+        """Encode a NEW_CONNECTION_ID frame (RFC 9000 sec 19.15)
+        into ``plaintext`` granting the peer a fresh server Source
+        CID, and register it in :attr:`cid_table` so a migrating
+        client that switches its Destination CID to this value still
+        routes to ``slot`` (sec 9.5 requires a new CID per path).
+
+        The CID length matches the listener's pinned
+        ``local_cid_length`` so the short-header parser
+        (:meth:`_dispatch_short`) reads it correctly. The CID + the
+        16-byte stateless-reset token are drawn from urandom so
+        neither is guessable (sec 5.1.1 / 10.3).
+        """
+        if slot < 0 or slot >= len(self.next_local_cid_seq):
+            return
+        var cid_len = self.config.local_cid_length
+        if cid_len <= 0 or cid_len > MAX_CID_LENGTH:
+            return
+        var seq = self.next_local_cid_seq[slot]
+        var cid_bytes = _random_bytes(cid_len)
+        var new_cid = ConnectionId(bytes=cid_bytes.copy())
+        # Derive the reset token from the CID so a later stateless reset
+        # for this CID (RFC 9000 sec 10.3) reproduces the same 16 bytes
+        # the peer stored here.
+        var token = self._stateless_reset_token(new_cid)
+        encode_new_connection_id(
+            NewConnectionIdFrame(
+                sequence_number=seq,
+                retire_prior_to=UInt64(0),
+                connection_id=cid_bytes^,
+                stateless_reset_token=token^,
+            ),
+            plaintext,
+        )
+        self.cid_table.register(cid_to_hex(new_cid), slot)
+        self.next_local_cid_seq[slot] = seq + UInt64(1)
+
+    def _stateless_reset_token(self, cid: ConnectionId) raises -> List[UInt8]:
+        """Derive the 16-byte stateless-reset token for ``cid``
+        (RFC 9000 sec 10.3.1): the first 16 bytes of
+        ``HMAC-SHA256(_reset_key, cid_bytes)``. Deterministic in the CID,
+        so the token issued via NEW_CONNECTION_ID and the token on a
+        later stateless reset for the same CID are identical."""
+        var mac = hmac_sha256(self._reset_key, cid.bytes.copy())
+        var token = List[UInt8](capacity=16)
+        for i in range(16):
+            token.append(mac[i])
+        return token^
+
+    def _build_stateless_reset(
+        self, dcid: ConnectionId, triggering_len: Int
+    ) raises -> List[UInt8]:
+        """Build a stateless-reset datagram for an unknown short-header
+        ``dcid`` (RFC 9000 sec 10.3).
+
+        Layout: a short-header-shaped packet of unpredictable bytes
+        ending in the 16-byte stateless-reset token derived from
+        ``dcid``. The first byte has the high bit clear + the fixed bit
+        set (``0x40``) so it reads as a valid short header; the leading
+        bytes are random so the datagram is indistinguishable from a
+        regular 1-RTT packet on the wire.
+
+        Returns an empty list (caller drops) when the triggering packet
+        is too small to safely reset: the reset MUST be shorter than the
+        packet that triggered it (to avoid an infinite reset loop, sec
+        10.3) yet at least 21 bytes (5 random + 16 token). When the
+        triggering packet can't accommodate both bounds we stay silent.
+        """
+        comptime MIN_RESET_LEN = 21
+        if triggering_len <= MIN_RESET_LEN:
+            return List[UInt8]()
+        # Largest reset still strictly shorter than the trigger, capped
+        # so we don't echo arbitrarily large datagrams.
+        var total = triggering_len - 1
+        if total > 64:
+            total = 64
+        var rand_len = total - 16
+        var out = _random_bytes(rand_len)
+        out[0] = (out[0] & 0x3F) | 0x40  # clear long-header + key-phase noise
+        var token = self._stateless_reset_token(dcid)
+        for i in range(16):
+            out.append(token[i])
+        return out^
+
+    def _decrypt_post_initial(
+        mut self,
+        slot: Int,
+        datagram: Span[UInt8, _],
+        level: Int,
+        dcid_length: Int,
+    ) raises -> Tuple[List[UInt8], UInt64]:
+        """Strip header protection + AEAD-decrypt a Handshake or
+        1-RTT datagram through the slot's rustls session, which
+        owns the real per-level keys.
+
+        Returns ``(plaintext, packet_number)``. Raises on any
+        bounds, FFI, or AEAD failure so the caller drops the
+        packet (RFC 9001 sec 5.2).
+
+        Header protection: rustls's ``decrypt_in_place`` unmasks
+        the first byte, derives the packet-number length from it,
+        then XORs only that many bytes of the supplied slice. A
+        4-byte scratch copy of the pn region is therefore safe --
+        only ``pn_length`` bytes are touched, the rest discarded,
+        and the datagram bytes are never mutated.
+        """
+        if slot < 0 or slot >= len(self.tls_sessions):
+            raise Error("_decrypt_post_initial: slot out of range")
+        var handle = self.tls_sessions[slot].handle
+        if handle == 0:
+            raise Error("_decrypt_post_initial: NULL session handle")
+        # pn_offset and packet_end depend on the header form. A
+        # long-header Handshake packet carries a Length varint
+        # after the SCID that bounds the protected payload (so the
+        # AEAD ciphertext stops at packet_end, not end-of-datagram,
+        # which matters when packets are coalesced or padded). A
+        # short-header 1-RTT packet has no Length field and is
+        # always last in its datagram (RFC 9000 sec 12.2), so it runs
+        # to the datagram end.
+        var pn_offset: Int
+        var packet_end: Int
+        if (
+            level == QuicEncryptionLevel.HANDSHAKE
+            or level == QuicEncryptionLevel.EARLY_DATA
+        ):
+            # Both are long-header packets carrying a Length varint
+            # after the SCID that bounds the protected payload.
+            var lh = parse_long_header(datagram)
+            var len_var = decode_varint(datagram[lh.payload_offset :])
+            pn_offset = lh.payload_offset + len_var.consumed
+            packet_end = pn_offset + Int(len_var.value)
+            if packet_end > len(datagram):
+                raise Error(
+                    "_decrypt_post_initial: handshake length exceeds datagram"
+                )
+        else:
+            pn_offset = parse_short_header(datagram, dcid_length).payload_offset
+            packet_end = len(datagram)
+        # The HP sample sits 4 bytes past the pn field start
+        # (RFC 9001 sec 5.4.2); that window must fit the datagram.
+        var sample_offset = pn_offset + 4
+        if sample_offset + 16 > len(datagram):
+            raise Error(
+                "_decrypt_post_initial: HP sample window exceeds packet"
+            )
+        var sample = List[UInt8]()
+        for i in range(16):
+            sample.append(datagram[sample_offset + i])
+        # Scratch the first byte + 4 candidate pn bytes; rustls
+        # unmasks first, reads pn_length, XORs only that many.
+        var first_local: UInt8 = datagram[0]
+        var pn_local = List[UInt8]()
+        for i in range(4):
+            pn_local.append(datagram[pn_offset + i])
+        var first_addr = Int(Pointer(to=first_local))
+        _do_header_decrypt(
+            self.tls_acceptor._lib,
+            handle,
+            level,
+            sample,
+            first_addr,
+            Int(pn_local.unsafe_ptr()),
+            4,
+        )
+        var pn_length = (Int(first_local) & 0x03) + 1
+        var truncated_pn = UInt64(0)
+        for i in range(pn_length):
+            truncated_pn = (truncated_pn << 8) | UInt64(pn_local[i])
+        var space = 1 if level == QuicEncryptionLevel.HANDSHAKE else 2
+        var packet_number = decode_packet_number(
+            truncated_pn,
+            pn_length,
+            self.connections[slot].rx_largest[space],
+        )
+        # AAD is the unprotected header: first byte + bytes up to
+        # the pn field + the pn_length real pn bytes.
+        var header = List[UInt8]()
+        header.append(first_local)
+        for i in range(1, pn_offset):
+            header.append(datagram[i])
+        for i in range(pn_length):
+            header.append(pn_local[i])
+        var ciphertext_start = pn_offset + pn_length
+        if ciphertext_start > packet_end:
+            raise Error("_decrypt_post_initial: pn length exceeds packet end")
+        var payload = List[UInt8]()
+        for i in range(ciphertext_start, packet_end):
+            payload.append(datagram[i])
+        # decrypt_in_place verifies + strips the 16-byte AEAD tag,
+        # writing plaintext over the ciphertext prefix of ``payload``.
+        # The FFI also reports the plaintext length, but the QUIC
+        # AEAD suites (AES-GCM / ChaCha20-Poly1305) always use a
+        # 16-byte tag (RFC 9001 sec 5.3), so the plaintext is exactly
+        # the leading ``len(payload) - 16`` bytes; we slice that
+        # directly rather than depend on the out-parameter readback.
+        _ = _do_packet_decrypt(
+            self.tls_acceptor._lib,
+            handle,
+            level,
+            packet_number,
+            header,
+            payload,
+        )
+        comptime QUIC_AEAD_TAG_LEN = 16
+        var plaintext_len = len(payload) - QUIC_AEAD_TAG_LEN
+        if plaintext_len < 0:
+            raise Error("_decrypt_post_initial: payload shorter than AEAD tag")
+        var plaintext = List[UInt8]()
+        for i in range(plaintext_len):
+            plaintext.append(payload[i])
+        return (plaintext^, packet_number)
+
+    def _dispatch_crypto_frames(
+        mut self, slot: Int, events: ConnectionEvents, inbound_lvl: Int
+    ) raises:
+        """Forward inbound CRYPTO frame bytes to the slot's
+        rustls QUIC session, drain outbound CRYPTO bytes at
+        EVERY encryption level into the per-slot egress queue,
+        and -- after each drain -- check whether rustls's
+        `KeyChange` pump has just installed Handshake or 1-RTT
+        keys on the slot's session.  When the keys at a level
+        flip from None to Some(_) we stamp a sentinel onto the
+        connection's per-level secret carrier so the
+        post-Initial decrypt path flips from "drop silently" to
+        "dispatch via rustls".
+
+        The Mojo side does NOT carry raw traffic secrets --
+        rustls's `quic::Secrets` is `pub(crate)`-sealed. The
+        carriers :attr:`QuicConnection.rx_handshake_secret` /
+        `.tx_handshake_secret` / `.rx_1rtt_secret` /
+        `.tx_1rtt_secret` are reused as boolean readiness
+        markers: empty list == not installed; non-empty list
+        (length 1, contents `0xff`) == installed and the rustls
+        session has the keys.
+
+        Both the feed-crypto and take-crypto FFI calls route
+        through :attr:`tls_acceptor._lib` so the .so stays
+        mapped across the call (Mojo's ASAP destructor cannot
+        unmap the library between symbol resolution and the
+        thunk).
+        """
+        if slot < 0 or slot >= len(self.tls_sessions):
+            return
+        var handle = self.tls_sessions[slot].handle
+        if handle == 0:
+            return
+
+        # Reassemble inbound CRYPTO into a contiguous, in-order
+        # byte stream before feeding rustls. A peer may fragment +
+        # reorder CRYPTO frames within a packet (RFC 9000 sec 19.6);
+        # rustls's read_hs consumes the handshake stream strictly
+        # in order, so out-of-order fragments are buffered until
+        # the gap ahead of them fills. All frames in one batch
+        # share the parent packet's encryption level (RFC 9001
+        # sec 4.1.3), so the caller supplies that level.
+        var fed_crypto = False
+        if (
+            len(events.crypto_frames) > 0
+            and inbound_lvl >= 0
+            and inbound_lvl < 4
+        ):
+            ref reasm = self.crypto_reasm[slot]
+            try:
+                for i in range(len(events.crypto_frames)):
+                    reasm.levels[inbound_lvl].insert(
+                        events.crypto_frames[i].offset,
+                        events.crypto_frames[i].data,
+                    )
+            except:
+                self._close_for(
+                    slot,
+                    QUIC_CRYPTO_BUFFER_EXCEEDED,
+                    "CRYPTO data too far ahead of the handshake",
+                )
+                return
+            var ordered = reasm.levels[inbound_lvl].drain_contiguous()
+            if len(ordered) > 0:
+                _ = _do_feed_crypto(
+                    self.tls_acceptor._lib, handle, inbound_lvl, ordered
+                )
+                fed_crypto = True
+
+        # Steady-state fast path: once 1-RTT keys are installed and
+        # this packet fed no new CRYPTO, rustls has nothing to drain
+        # or re-key, so skip the five per-packet FFI crossings below.
+        # The handshake-completing packet always feeds CRYPTO, so the
+        # post-handshake outbound drain (session tickets) still runs
+        # on that turn.
+        if not fed_crypto and len(self.connections[slot].rx_1rtt_secret) != 0:
+            return
+
+        # Drain rustls's outbound CRYPTO bytes at every level
+        # rustls might have buffered for us. The KeyChange-driven
+        # pump in `flare_rustls_quic_drain_outbound` routes bytes
+        # onto the correct per-level pending queue inside the Rust
+        # shim; we just call take_crypto once per level and append.
+        try:
+            var out_initial = _do_take_crypto(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.INITIAL,
+            )
+            for k in range(len(out_initial)):
+                self.tls_egress_queues[slot].append(out_initial[k])
+        except:
+            pass
+        try:
+            var out_hs = _do_take_crypto(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.HANDSHAKE,
+            )
+            for k in range(len(out_hs)):
+                self.tls_handshake_egress_queues[slot].append(out_hs[k])
+        except:
+            pass
+        try:
+            var out_1rtt = _do_take_crypto(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.APPLICATION,
+            )
+            for k in range(len(out_1rtt)):
+                self.tls_1rtt_egress_queues[slot].append(out_1rtt[k])
+        except:
+            pass
+
+        # After every CRYPTO pump, ask rustls whether the
+        # KeyChange-driven pump just installed Handshake or
+        # 1-RTT keys on this session. The conditional install
+        # below is idempotent (stamping the sentinel twice is a
+        # no-op): once the level flips, every subsequent call
+        # sees `have_keys == True` and we install once.
+        var have_hs = (
+            _do_have_keys(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.HANDSHAKE,
+            )
+            == 1
+        )
+        var have_1rtt = (
+            _do_have_keys(
+                self.tls_acceptor._lib,
+                handle,
+                QuicEncryptionLevel.APPLICATION,
+            )
+            == 1
+        )
+        # Install once per direction, in place. The guard conditions
+        # stay false after the first install, so post-handshake
+        # packets (where have_1rtt is always true) don't pay a
+        # whole-connection deep copy here.
+        if have_hs and len(self.connections[slot].rx_handshake_secret) == 0:
+            self.connections[slot].install_handshake_keys(
+                _ready_sentinel(), _ready_sentinel()
+            )
+        if have_1rtt and len(self.connections[slot].rx_1rtt_secret) == 0:
+            self.connections[slot].install_1rtt_keys(
+                _ready_sentinel(), _ready_sentinel()
+            )
+            # The client's transport parameters are in the ClientHello
+            # rustls has just processed (RFC 9000 sec 7.4, 18.2).
+            if not self._client_params_ok(slot, handle):
+                return
+
+        # 0-RTT (EarlyData) keys: only when the listener is configured
+        # for early data (budget > 0) and we have not already installed
+        # them. Gated this way, the default (0-RTT off) hot path pays
+        # nothing -- no FFI call, no branch beyond the budget compare.
+        # rustls exposes the resumed-ClientHello early keys after the
+        # Initial CRYPTO feed; install_early_keys returns 1 once they
+        # exist and 0-RTT was accepted (RFC 9001 sec 4.1).
+        var early_budget = self.config.rustls_config.max_early_data_size
+        if (
+            early_budget > UInt32(0)
+            and len(self.connections[slot].rx_early_secret) == 0
+        ):
+            if _do_install_early_keys(self.tls_acceptor._lib, handle) == 1:
+                self.connections[slot].install_early_data_keys(
+                    _ready_sentinel()
+                )
+                self.connections[slot].early_guard = EarlyDataReplayGuard(
+                    max_bytes=UInt64(Int(early_budget))
+                )
+
+    def _client_params_ok(mut self, slot: Int, handle: Int) -> Bool:
+        """Validate the client's ``quic_transport_parameters`` once the
+        1-RTT keys exist (RFC 9000 sec 7.3, 7.4, 18.2): they must decode,
+        carry no server-only parameter, and name the Source Connection ID
+        of the client's Initial as ``initial_source_connection_id``.
+        Closes the slot with TRANSPORT_PARAMETER_ERROR and returns
+        ``False`` otherwise."""
+        var raw = List[UInt8]()
+        try:
+            raw = _do_peer_transport_params(self.tls_acceptor._lib, handle)
+        except:
+            pass
+        try:
+            check_client_transport_params(
+                Span[UInt8, _](raw), self.connections[slot].peer_cid.bytes
+            )
+        except e:
+            self._close_for(slot, QUIC_TRANSPORT_PARAMETER_ERROR, String(e))
+            return False
+        # The idle timeout is the minimum of the two advertised values
+        # (RFC 9000 sec 10.1): remember the client's and re-arm with it.
+        try:
+            var tp = decode_transport_parameters(Span[UInt8, _](raw))
+            if Bool(tp.max_idle_timeout):
+                self.connections[
+                    slot
+                ].peer_idle_ms = tp.max_idle_timeout.value()
+            _ = self.schedule_idle_timeout(slot)
+        except:
+            pass
+        return True
+
+    # -- H3 dispatch surface ----------------------------------------------
+
+    def _route_http3_stream_chunks(
+        mut self, slot: Int, events: ConnectionEvents
+    ) raises:
+        """Route every STREAM frame surfaced on ``events`` to the
+        slot's :class:`flare.http3.Http3Connection`.
+
+        RFC 9114 §6 puts H3 traffic on QUIC bidirectional + uni
+        streams; the stream id parity bits classify which kind a
+        frame belongs to (RFC 9000 §2.1: even = client-initiated
+        bidi / uni based on the low two bits). The H3 driver
+        accepts both flavors through different entry points;
+        this method picks the right one and also signals FIN
+        when the QUIC layer observed end-of-stream.
+
+        No-op if the slot is out of range or no STREAM frames
+        were surfaced this tick. Empty payload chunks with FIN
+        still drive :meth:`flare.http3.Http3Connection.signal_end_of_stream`
+        so the H3 driver can advance request state.
+        """
+        if slot < 0 or slot >= len(self.http3_connections):
+            return
+        if len(events.stream_chunks) == 0:
+            return
+        # Pass 1: connection + stream flow-control accounting (RFC
+        # 9000 sec 4). Track total inbound stream bytes for MAX_DATA
+        # and the client bidi-stream high-water mark (id & 3 == 0)
+        # for MAX_STREAMS_BIDI; both are advertised on the next ACK
+        # so the peer never blocks over a long run. Done first so the
+        # in-place H3 feed below can hold one mutable ref into the
+        # slab without aliasing these rx_* counters.
+        #
+        # Limits are enforced here too (RFC 9000 sec 4). Any stream id
+        # was accepted, any number of streams, and any amount of data:
+        # the grants below were computed from what the peer had sent,
+        # so its credit grew with its own sending.
+        for i in range(len(events.stream_chunks)):
+            var sid = Int(events.stream_chunks[i].stream_id)
+            var is_uni = (sid & 0x2) != 0
+            var plen = len(events.stream_chunks[i].data)
+            if (sid & 0x1) != 0:
+                # Server-initiated: we open no bidi streams, and our uni
+                # streams are send-only (sec 19.8).
+                self._close_for(slot, QUIC_STREAM_STATE_ERROR, "stream id")
+                return
+            if slot < len(self.rx_stream_bytes):
+                self.rx_stream_bytes[slot] += UInt64(plen)
+            ref qc = self.connections[slot]
+            if not is_uni:
+                var count = UInt64((sid >> 2) + 1)
+                if count > qc.fc_adv_max_bidi:
+                    self._close_for(
+                        slot, QUIC_STREAM_LIMIT_ERROR, "too many streams"
+                    )
+                    return
+                if (
+                    slot < len(self.rx_bidi_stream_count)
+                    and count > self.rx_bidi_stream_count[slot]
+                ):
+                    self.rx_bidi_stream_count[slot] = count
+            elif UInt64((sid >> 2) + 1) > qc.conn.adv_max_streams_uni:
+                # RFC 9000 sec 4.6: the unidirectional limit we sent is
+                # enforced like the bidirectional one.
+                self._close_for(
+                    slot,
+                    QUIC_STREAM_LIMIT_ERROR,
+                    "too many unidirectional streams",
+                )
+                return
+            var end = events.stream_chunks[i].offset + UInt64(plen)
+            var prev = qc.fc_stream_end.get(sid, UInt64(0))
+            if end > prev:
+                qc.fc_stream_end[sid] = end
+                qc.fc_received += end - prev
+                if is_uni:
+                    qc.fc_consumed += end - prev
+            if qc.fc_received > qc.fc_adv_max_data:
+                self._close_for(
+                    slot, QUIC_FLOW_CONTROL_ERROR, "stream data past MAX_DATA"
+                )
+                return
+        # Pass 2: feed H3 in place. Mutating the slot through a ref
+        # avoids deep-copying the whole Http3Connection (its per-stream
+        # state Dict) on every inbound datagram -- the dominant
+        # per-request CPU cost under stream concurrency.
+        ref h3 = self.http3_connections[slot]
+        var h3_code = UInt64(0)
+        var h3_reason = String("")
+        for i in range(len(events.stream_chunks)):
+            # By offset: the reassembler orders, dedupes and holds back
+            # FIN until the stream is whole, and drops frames for a
+            # request stream already answered (a retransmit crossing
+            # our ACK used to run the request again).
+            try:
+                h3.feed_stream_frame(
+                    Int(events.stream_chunks[i].stream_id),
+                    events.stream_chunks[i].offset,
+                    Span[UInt8, _](events.stream_chunks[i].data),
+                    events.stream_chunks[i].fin,
+                )
+            except e:
+                # An H3 / QPACK connection error from the driver. It
+                # used to propagate out of ``tick`` and stop the serve
+                # loop; it closes this connection instead.
+                h3_reason = String(e)
+                h3_code = h3_error_code(h3_reason)
+                break
+        # A field section the driver could not decode (QPACK-05): the
+        # request stream is dead and the peer must be told, not left
+        # waiting on a connection that otherwise stays up.
+        if h3_code == 0 and h3.connection_error_code != 0:
+            h3_code = h3.connection_error_code
+            h3_reason = h3.connection_error_reason
+        if h3_code != 0:
+            self._close_for(slot, h3_code, h3_reason)
+
+    def take_http3_completed_streams(self, slot: Int) raises -> List[Int]:
+        """Return the stream ids ready for handler dispatch on
+        ``slot``. Delegates to
+        :meth:`flare.http3.Http3Connection.take_completed_streams`.
+        Empty list if the slot is out of range or has no H3
+        driver attached."""
+        if slot < 0 or slot >= len(self.http3_connections):
+            return List[Int]()
+        return self.http3_connections[slot].take_completed_streams()
+
+    def take_http3_request(
+        mut self, slot: Int, stream_id: Int
+    ) raises -> Request:
+        """Materialize the :class:`flare.http.Request` for
+        ``(slot, stream_id)``. The dispatch caller invokes a
+        Handler with this Request, then feeds the Response back
+        through :meth:`emit_http3_response`.
+
+        Raises if the slot is out of range or the H3 driver
+        does not track the stream (see
+        :meth:`flare.http3.Http3Connection.take_request` for the
+        underlying gating)."""
+        if slot < 0 or slot >= len(self.http3_connections):
+            raise Error(
+                "take_http3_request: slot " + String(slot) + " out of range"
+            )
+        ref h3 = self.http3_connections[slot]
+        return h3.take_request(stream_id)
+
+    def _append_http3_egress(
+        mut self, key: String, var frames: List[UInt8]
+    ) raises:
+        """Append ``frames`` to the ``key``'d H3 egress buffer,
+        allocating it on first use. Shared by the buffered emit path
+        and the streaming DATA pump."""
+        if key in self.http3_response_egress:
+            var existing = self.http3_response_egress[key].copy()
+            for i in range(len(frames)):
+                existing.append(frames[i])
+            self.http3_response_egress[key] = existing^
+        else:
+            self.http3_response_egress[key] = frames^
+
+    def emit_http3_response(
+        mut self, slot: Int, stream_id: Int, var response: Response
+    ) raises:
+        """Encode ``response`` into the slot's H3 outbox + drain
+        the resulting frame bytes into
+        :attr:`http3_response_egress` keyed by ``slot:stream_id``.
+
+        The byte buffer feeds the 1-RTT STREAM-frame egress pass
+        in :meth:`_drain_1rtt_coalesced`, which emits on the
+        wire once the slot's 1-RTT keys are installed.
+
+        A streaming response (one carrying a ``body_stream`` chunk
+        source) is handled incrementally: its HEADERS (and any inline
+        ``body`` prefix) ride the egress buffer now, the source is
+        boxed into :attr:`http3_streams`, and
+        :meth:`pump_http3_streams` pulls its body one chunk per tick.
+        The FIN is deferred to the drain until the source is exhausted.
+        Buffered responses take the byte-identical original path.
+        """
+        if slot < 0 or slot >= len(self.http3_connections):
+            raise Error(
+                "emit_http3_response: slot " + String(slot) + " out of range"
+            )
+        var key = String(slot) + ":" + String(stream_id)
+        # Detect streaming before the response is moved into the driver.
+        if response.body_stream:
+            # Take the source out; pre-encode trailers (emitted after the
+            # final DATA frame, right before FIN). With body_stream gone
+            # the driver's emit_response frames HEADERS + any inline body
+            # prefix only -- no buffered stream body.
+            var src = response.body_stream.take()
+            var trailer_bytes = List[UInt8]()
+            if len(response.trailers._keys) > 0:
+                var tr = List[QpackHeader]()
+                for i in range(len(response.trailers._keys)):
+                    tr.append(
+                        QpackHeader(
+                            String(response.trailers._keys[i]),
+                            String(response.trailers._values[i]),
+                        )
+                    )
+                encode_response_trailers(tr, trailer_bytes)
+            ref h3 = self.http3_connections[slot]
+            h3.emit_response(stream_id, response^)
+            var frames = h3.take_response_frames(stream_id)
+            self._append_http3_egress(key, frames^)
+            var addr = Pool[ChunkSourceBox].alloc_move(src^)
+            self.http3_streams[key] = _H3StreamOut(addr, trailer_bytes^)
+            return
+        ref h3 = self.http3_connections[slot]
+        h3.emit_response(stream_id, response^)
+        var frames = h3.take_response_frames(stream_id)
+        self._append_http3_egress(key, frames^)
+
+    def take_http3_response_egress(
+        mut self, slot: Int, stream_id: Int
+    ) raises -> List[UInt8]:
+        """Drain the per-stream response buffer accumulated by
+        :meth:`emit_http3_response`. Returns an empty list when no
+        bytes are queued. Caller (the QUIC STREAM egress path)
+        wraps the bytes in STREAM frames + protects them with
+        :func:`protect_1rtt_packet` -- the wiring lands once
+        1-RTT keys flow through the rustls bridge."""
+        var key = String(slot) + ":" + String(stream_id)
+        if key not in self.http3_response_egress:
+            return List[UInt8]()
+        var out = self.http3_response_egress.pop(key)
+        return out^
+
+    def pump_http3_streams(mut self, cancel: Cancel) raises -> Int:
+        """Advance every active HTTP/3 streaming response by one chunk.
+
+        For each stream registered in :attr:`http3_streams` whose
+        source is not yet exhausted, pulls a single chunk (mirroring
+        the H1/H2 one-chunk-per-edge yield), frames it as a DATA frame
+        into the stream's egress buffer, and on end-of-stream frees the
+        source + marks the record ``done`` so the next drain flushes any
+        trailers with the FIN. Returns the number of streams advanced
+        (produced a chunk or reached EOS) this pass; zero when no stream
+        is active, so the serve loop can treat it as a cheap no-op.
+
+        Backpressure / flow control: chunks are pulled one-per-tick and
+        the drain fragments them under the path-MTU budget, so a fast
+        source cannot outrun a single datagram. NOTE: this does not yet
+        gate on QUIC per-stream ``MAX_STREAM_DATA`` or a congestion /
+        pacing budget -- server-side 1-RTT loss recovery + congestion
+        control is not wired on the egress path (see
+        :meth:`_on_pto_expired`). When that lands, gate the pull here on
+        the available stream + connection send window and the CC budget.
+        """
+        if len(self.http3_streams) == 0:
+            return 0
+        var keys = List[String]()
+        for entry in self.http3_streams.items():
+            keys.append(entry.key)
+        var advanced = 0
+        for i in range(len(keys)):
+            var key = keys[i]
+            # Read scalars by copy so no Dict ref is held across the
+            # source pull / egress append (which touch other Dicts).
+            var src_addr = self.http3_streams[key].src_addr
+            var is_done = self.http3_streams[key].done
+            if is_done or src_addr == 0:
+                continue
+            var chunk = Pool[ChunkSourceBox].get_ptr(src_addr)[].next(cancel)
+            if chunk:
+                var payload = chunk.value().copy()
+                if len(payload) > 0:
+                    var buf = List[UInt8]()
+                    encode_response_data(Span[UInt8, _](payload), buf)
+                    self._append_http3_egress(key, buf^)
+                advanced += 1
+            else:
+                # End-of-stream: free the boxed source exactly once and
+                # flag the record so the drain FINs + reclaims it.
+                Pool[ChunkSourceBox].free(src_addr)
+                ref st = self.http3_streams[key]
+                st.src_addr = 0
+                st.done = True
+                advanced += 1
+        return advanced
+
+    def _dispatch_long(
+        mut self, datagram: Span[UInt8, _], peer: SocketAddr
+    ) raises -> Int:
+        """Long-header path: parse the full header, route by DCID,
+        and accept an Initial packet against an unknown DCID."""
+        var lh: LongHeader
+        try:
+            lh = parse_long_header(datagram)
+        except:
+            return -1
+        if (
+            lh.packet_type == PACKET_TYPE_INITIAL
+            and len(datagram) < _MIN_INITIAL_DATAGRAM
+        ):
+            return -1  # RFC 9000 sec 14.1
+        var dcid_hex = cid_to_hex(lh.dcid)
+        var slot = self.cid_table.lookup(dcid_hex)
+        if slot >= 0:
+            return slot
+        if lh.packet_type == PACKET_TYPE_INITIAL:
+            var retry_odcid = Optional[ConnectionId]()
+            if self.config.require_address_validation:
+                retry_odcid = self._retry_gate(lh, datagram, peer)
+                if not retry_odcid:
+                    # A Retry was issued, or the token was absent/invalid:
+                    # do not commit handshake state for this datagram.
+                    return -1
+            return self._accept_initial(lh, peer, retry_odcid)
+        return -1
+
+    def _retry_gate(
+        mut self, lh: LongHeader, datagram: Span[UInt8, _], peer: SocketAddr
+    ) raises -> Optional[ConnectionId]:
+        """RFC 9000 sec 8.1 address-validation gate for an unknown-DCID
+        Initial. Returns the client's original DCID, recovered from a
+        valid token, when the client may be accepted; ``None`` when the
+        caller must NOT accept (a Retry was sent, or the token was
+        missing / invalid). The ODCID used to be thrown away here, so
+        the transport parameters named the wrong one.
+
+        Token-less Initial -> mint an HMAC token bound to the peer address
+        + original DCID and answer with a Retry (the client re-sends its
+        Initial carrying the token + the server's new DCID). Tokened
+        Initial -> validate; a good token accepts, a bad / expired one is
+        dropped. The Retry datagram is tiny relative to the >=1200-byte
+        Initial that triggered it, so it is inherently within the RFC 9000
+        sec 8.1 3x anti-amplification limit.
+        """
+        var addr_bytes = List[UInt8](String(peer).as_bytes())
+        var now = _monotonic_ms()
+        var extras: InitialExtras
+        try:
+            extras = parse_initial_extras(datagram, lh.payload_offset)
+        except:
+            return None  # malformed Initial -> drop
+        if len(extras.token) == 0:
+            try:
+                var token = mint_retry_token(
+                    self._retry_key, addr_bytes, lh.dcid, now
+                )
+                var scid = ConnectionId(
+                    bytes=_random_bytes(self.config.local_cid_length)
+                )
+                var retry = encode_retry_packet(
+                    lh.version, lh.scid, scid, token, lh.dcid
+                )
+                _ = self.send_to(Span[UInt8, _](retry), peer)
+            except:
+                pass  # best-effort; a failed Retry just drops the Initial
+            return None
+        var odcid = validate_retry_token(
+            self._retry_key,
+            extras.token,
+            addr_bytes,
+            now,
+            self.config.retry_token_max_age_ms,
+        )
+        return odcid^  # the recovered ODCID, or None to drop
+
+    def _dispatch_short(
+        mut self, datagram: Span[UInt8, _], peer: SocketAddr
+    ) raises -> Int:
+        """Short-header path: parse with the listener's pinned
+        DCID length, route by DCID."""
+        var sh_dcid_len = self.config.local_cid_length
+        if sh_dcid_len <= 0 or sh_dcid_len > MAX_CID_LENGTH:
+            return -1
+        var sh = parse_short_header(datagram, sh_dcid_len)
+        var dcid_hex = cid_to_hex(sh.dcid)
+        return self.cid_table.lookup(dcid_hex)
+
+    def _maybe_send_stateless_reset(
+        mut self, datagram: Span[UInt8, _], peer: SocketAddr
+    ) raises:
+        """Emit a stateless reset for an unknown-DCID short-header
+        datagram (RFC 9000 sec 10.3), best-effort.
+
+        Parses the DCID with the listener's pinned length, derives the
+        reset token from it, and sends a loop-safe reset to ``peer``.
+        Any parse / build / send failure is swallowed (the reset is an
+        optimization over a silent drop, never a correctness
+        requirement)."""
+        var sh_dcid_len = self.config.local_cid_length
+        if sh_dcid_len <= 0 or sh_dcid_len > MAX_CID_LENGTH:
+            return
+        var dcid: ConnectionId
+        try:
+            dcid = parse_short_header(datagram, sh_dcid_len).dcid.copy()
+        except:
+            return
+        var reset = self._build_stateless_reset(dcid, len(datagram))
+        if len(reset) == 0:
+            return
+        try:
+            _ = self.send_to(Span[UInt8, _](reset), peer)
+        except:
+            pass
+
+    def _accept_initial(
+        mut self,
+        lh: LongHeader,
+        peer: SocketAddr,
+        retry_odcid: Optional[ConnectionId] = Optional[ConnectionId](),
+    ) raises -> Int:
+        """Allocate a new connection slot for an Initial packet
+        with an unknown DCID.
+
+        The server registers the client-chosen DCID in
+        :attr:`cid_table` so subsequent Initials addressed to
+        the same DCID route here. RFC 9000 §7.2 says the server
+        SHOULD choose its own SCID and switch to it on the
+        server-side response.
+
+        Also materializes the per-slot rustls QUIC session, the
+        empty CRYPTO egress queue, the peer UDP address (so the
+        egress drain can :meth:`send_to` without re-parsing), and
+        arms the per-connection idle timeout.
+        """
+        # Our own CID, of the length the short-header parser assumes
+        # (RFC 9000 sec 7.2). The client's DCID stays registered too,
+        # for its Initial retransmits and for Initial keys.
+        var local_cid = ConnectionId(
+            bytes=_random_bytes(self.config.local_cid_length)
+        )
+        var peer_cid = lh.scid.copy()
+        var qc = QuicConnection(
+            local_cid,
+            peer_cid,
+            self.config.max_idle_timeout_ms * UInt64(1_000),
+            self.config.initial_max_data,
+        )
+        qc.initial_dcid = lh.dcid.copy()
+        qc.fc_adv_max_data = self.config.initial_max_data
+        qc.fc_adv_max_bidi = self.config.initial_max_streams_bidi
+        qc.conn.adv_max_streams_bidi = self.config.initial_max_streams_bidi
+        qc.conn.adv_max_streams_uni = self.config.initial_max_streams_uni
+        if retry_odcid:
+            qc.addr_validated = True  # the Retry token proved it
+        var live = len(self.connections) - len(self.free_slots)
+        if live >= self.config.max_connections:
+            return -1
+        var reuse = len(self.free_slots) > 0
+        var slot: Int
+        if reuse:
+            slot = self.free_slots.pop()
+            self.slot_free[slot] = False
+            self.connections[slot] = qc^
+        else:
+            slot = len(self.connections)
+            self.connections.append(qc^)
+            self.slot_free.append(False)
+        # After a Retry the client's current DCID is the Retry's SCID;
+        # the original DCID came back in the token.
+        var original_dcid = lh.dcid.copy()
+        var retry_scid = List[UInt8]()
+        if retry_odcid:
+            original_dcid = retry_odcid.value().copy()
+            retry_scid = lh.dcid.bytes.copy()
+        var session = self._new_session_slot(
+            local_cid, original_dcid, retry_scid
+        )
+        if reuse:
+            self.tls_sessions[slot] = session^
+            self.tls_egress_queues[slot] = List[UInt8]()
+            self.tls_handshake_egress_queues[slot] = List[UInt8]()
+            self.crypto_reasm[slot] = _CryptoReasm()
+            self.tls_1rtt_egress_queues[slot] = List[UInt8]()
+            self.peer_addrs[slot] = peer
+            self.migration_probe[slot] = MigrationProbe()
+            self.rx_1rtt_ranges[slot] = List[UInt64]()
+            self.rx_1rtt_ack_pending[slot] = False
+            self.handshake_done_sent[slot] = False
+            self.next_local_cid_seq[slot] = UInt64(1)
+            self.pending_migration_tx[slot] = List[UInt8]()
+            self.rx_stream_bytes[slot] = UInt64(0)
+            self.rx_bidi_stream_count[slot] = UInt64(0)
+            self.http3_connections[slot] = Http3Connection()
+            self.loss[slot] = LossRecovery()
+        else:
+            self.tls_sessions.append(session^)
+            self.tls_egress_queues.append(List[UInt8]())
+            self.tls_handshake_egress_queues.append(List[UInt8]())
+            self.crypto_reasm.append(_CryptoReasm())
+            self.tls_1rtt_egress_queues.append(List[UInt8]())
+            self.peer_addrs.append(peer)
+            self.migration_probe.append(MigrationProbe())
+            self.rx_1rtt_ranges.append(List[UInt64]())
+            self.rx_1rtt_ack_pending.append(False)
+            self.handshake_done_sent.append(False)
+            self.next_local_cid_seq.append(UInt64(1))
+            self.pending_migration_tx.append(List[UInt8]())
+            self.rx_stream_bytes.append(UInt64(0))
+            self.rx_bidi_stream_count.append(UInt64(0))
+            self.http3_connections.append(Http3Connection())
+            self.loss.append(LossRecovery())
+        self.cid_table.register(cid_to_hex(local_cid), slot)
+        self.cid_table.register(cid_to_hex(lh.dcid), slot)
+        _ = self.schedule_idle_timeout(slot)
+        return slot
+
+    def _new_session_slot(
+        mut self,
+        local_cid: ConnectionId,
+        original_dcid: ConnectionId,
+        retry_scid: List[UInt8] = List[UInt8](),
+    ) -> _SessionSlot:
+        """Materialize a per-slot rustls QUIC session.
+
+        Empty-PEM configurations (the default
+        :class:`RustlsQuicConfig` shape that the existing test
+        suite + fuzz harness rely on) leave the acceptor's
+        opaque handle at 0; this method short-circuits to the
+        NULL-handle sentinel slot. Production paths with a real
+        PEM cert encode the server's QUIC transport parameters
+        (RFC 9000 sec 18) and hand them to :func:`_do_accept` so
+        rustls emits the mandatory ``quic_transport_parameters``
+        TLS extension; any FFI rejection falls through to the
+        NULL sentinel so the slab stays in lockstep with
+        :attr:`connections`.
+        """
+        if self.tls_acceptor._opaque_handle == 0:
+            return _SessionSlot(handle=0)
+        var tp_blob: List[UInt8]
+        try:
+            tp_blob = _encode_server_transport_params(
+                self.config, local_cid, original_dcid, retry_scid
+            )
+        except:
+            return _SessionSlot(handle=0)
+        try:
+            var handle = _do_accept(
+                self.tls_acceptor._lib,
+                self.tls_acceptor._opaque_handle,
+                tp_blob,
+            )
+            return _SessionSlot(handle=handle)
+        except:
+            return _SessionSlot(handle=0)
+
+    def tick(mut self, timeout_ms: Int = 100) raises -> Bool:
+        """Drain a burst of inbound datagrams and pump egress.
+
+        Reactor I/O loop step:
+
+        1. One blocking ``recv_from`` (``SO_RCVTIMEO``) wakes the
+           tick when a datagram arrives or times out cleanly.
+        2. Then ``try_recv_from`` (``MSG_DONTWAIT``) drains the
+           rest of the socket queue, up to :data:`_RX_BATCH`
+           datagrams, so the per-tick H3 pump / timer / egress
+           bookkeeping in the serve loop is amortized over the
+           whole burst instead of paid per datagram.
+        3. Each datagram routes through :meth:`dispatch_datagram`
+           by DCID; the matched slot's :meth:`_drain_and_send`
+           flushes its ACK / response.
+
+        Returns ``True`` if at least one datagram was dispatched,
+        ``False`` if the initial ``recv_from`` timed out.
+        """
+        self._socket.set_recv_timeout(timeout_ms)
+        var buf = List[UInt8]()
+        buf.resize(Int(self.config.max_udp_payload_size), 0)
+        var sender: SocketAddr
+        var got: Int
+        try:
+            var pair = self._socket.recv_from(Span[UInt8, _](buf))
+            got = pair[0]
+            sender = pair[1]
+        except e:
+            # ``UdpSocket.recv_from`` raises :class:`Timeout` for
+            # both ``EAGAIN`` and ``EWOULDBLOCK``; the dispatch
+            # loop treats both as "no datagram this tick" but
+            # still drains pending egress so an already-handshaking
+            # session can flush its ServerHello fragments.
+            var msg = String(e)
+            if msg.startswith("Timeout") or msg.startswith("recvfrom"):
+                _ = self.drain_all_egress()
+                return False
+            raise e^
+        if got <= 0:
+            _ = self.drain_all_egress()
+            return False
+        var slot = self.dispatch_datagram(Span[UInt8, _](buf[:got]), sender)
+        if slot >= 0:
+            _ = self._drain_and_send(slot)
+        # Drain the rest of the socket queue without blocking so a
+        # high-rate sender's burst is handled in one tick. On Linux a
+        # single ``recvmmsg`` pulls the whole burst across the
+        # user/kernel boundary in one syscall; everywhere else (or on a
+        # kernel without the syscall) fall back to the per-datagram
+        # ``try_recv_from`` loop with identical dispatch semantics.
+        if self._rx_batch_ok:
+            try:
+                var n = self._rx_batch.recv(self._socket.fd())
+                for i in range(n):
+                    var nslot = self.dispatch_datagram(
+                        self._rx_batch.message(i), self._rx_batch.sender(i)
+                    )
+                    if nslot >= 0:
+                        _ = self._drain_and_send(nslot)
+                return True
+            except e:
+                # ENOSYS: latch off and fall through to the per-datagram
+                # path for the rest of the process lifetime.
+                if String(e).startswith("UdpBatchUnsupported"):
+                    self._rx_batch_ok = False
+                else:
+                    raise e^
+        for _ in range(_RX_BATCH - 1):
+            var nb_got: Int
+            var nb_sender: SocketAddr
+            try:
+                var nb = self._socket.try_recv_from(Span[UInt8, _](buf))
+                nb_got = nb[0]
+                nb_sender = nb[1]
+            except:
+                break
+            if nb_got <= 0:
+                break
+            var nslot = self.dispatch_datagram(
+                Span[UInt8, _](buf[:nb_got]), nb_sender
+            )
+            if nslot >= 0:
+                _ = self._drain_and_send(nslot)
+        return True
+
+    def send_to(self, datagram: Span[UInt8, _], addr: SocketAddr) raises -> Int:
+        """Emit a single fully-protected QUIC datagram on the
+        listener's UDP socket. Thin wrapper over
+        :meth:`flare.udp.socket.UdpSocket.send_to` so the
+        egress path has the same surface the unit tests stub.
+        Returns the byte count actually written (UDP either
+        sends the whole datagram or raises)."""
+        return self._socket.send_to(datagram, addr)
+
+    def drain_all_egress(mut self) raises -> Int:
+        """Drain every slot's :attr:`tls_egress_queues` onto the
+        wire. Returns the number of datagrams emitted.
+
+        Called from the reactor between recv ticks (and on the
+        ``recv_from`` timeout path) so a slot with pending
+        outbound CRYPTO bytes can flush even if no inbound
+        datagram arrived. Pure no-op if no slot has pending
+        bytes.
+        """
+        var emitted = 0
+        for slot in range(len(self.connections)):
+            if self._drain_and_send(slot):
+                emitted += 1
+        return emitted
+
+    def _drain_and_send(mut self, slot: Int) raises -> Bool:
+        """Drain every pending egress queue for ``slot`` onto
+        the wire.
+
+        Returns ``True`` if at least one datagram was emitted.
+        Per-level queues drained (each is independent and any
+        subset can be non-empty at a given tick):
+
+        * ``tls_egress_queues[slot]`` -- Initial-level CRYPTO
+          (rustls ServerHello + EncryptedExtensions before the
+          KeyChange::Handshake fires).
+          Encrypted via flare's :func:`protect_initial_packet`
+          (DCID-derived OpenSSL secret per RFC 9001 §5.2).
+        * ``tls_handshake_egress_queues[slot]`` -- Handshake-
+          level CRYPTO (rustls Certificate + CertificateVerify
+          + Finished, between KeyChange::Handshake and
+          KeyChange::OneRtt).
+          Encrypted via :meth:`_build_handshake_response`
+          which routes through rustls's
+          ``Keys.local.packet.encrypt_in_place``.
+        * ``tls_1rtt_egress_queues[slot]`` -- 1-RTT CRYPTO
+          (rustls post-handshake messages like
+          NewSessionTicket).
+          Encrypted via :meth:`_build_1rtt_handshake_crypto`.
+        * ``http3_response_egress`` -- 1-RTT STREAM frames carrying
+          H3 response bytes (the live H3 reactor's actual
+          payload). Encrypted via the coalescing 1-RTT drain
+          (:meth:`_drain_1rtt_coalesced`).
+
+        Each builder is a no-op (returns empty) when its
+        respective queue is empty OR the matching per-level
+        readiness sentinel hasn't been installed yet by the
+        :meth:`_dispatch_crypto_frames` pump.  Slots whose
+        connection is closed (`alive == False`) skip every
+        level entirely.
+
+        Errors during build/protect short-circuit to ``False``
+        without raising; the silent-drop discipline mirrors the
+        inbound side (RFC 9001 §5.2).
+        """
+        if slot < 0 or slot >= len(self.connections):
+            return False
+        if slot >= len(self.peer_addrs):
+            return False
+        if not self.connections[slot].alive:
+            return False
+        # RFC 9000 sec 10.2.2: a draining endpoint sends no packet.
+        if self.connections[slot].conn.state == CONN_STATE_DRAINING:
+            return False
+        var emitted = False
+        var peer = self.peer_addrs[slot]
+        # The handshake flight goes out in packets of at most
+        # _HANDSHAKE_CHUNK CRYPTO bytes (a whole certificate chain in
+        # one packet overran any path MTU), and, until the peer's
+        # address is validated, only as far as 3x the bytes received
+        # from it (RFC 9000 sec 8.1). What does not fit stays queued
+        # for the next drain, after the peer sends more.
+        # Initial-level (legacy OpenSSL path).
+        while (
+            slot < len(self.tls_egress_queues)
+            and len(self.tls_egress_queues[slot]) > 0
+        ):
+            var take = min(len(self.tls_egress_queues[slot]), _HANDSHAKE_CHUNK)
+            if not self._amplification_allows(slot, take):
+                break
+            var initial_dg = self._build_initial_response(slot, max_bytes=take)
+            if len(initial_dg) == 0:
+                break
+            _ = self.send_to(Span[UInt8, _](initial_dg), peer)
+            self.connections[slot].amp_tx += len(initial_dg)
+            self.tls_egress_queues[slot] = _queue_rest(
+                self.tls_egress_queues[slot], take
+            )
+            emitted = True
+        # Handshake-level (rustls path; gated on the readiness
+        # sentinel via _build_handshake_response).
+        while (
+            slot < len(self.tls_handshake_egress_queues)
+            and len(self.tls_handshake_egress_queues[slot]) > 0
+        ):
+            var take = min(
+                len(self.tls_handshake_egress_queues[slot]), _HANDSHAKE_CHUNK
+            )
+            if not self._amplification_allows(slot, take):
+                break
+            var hs_dg = self._build_handshake_response(slot, max_bytes=take)
+            if len(hs_dg) == 0:
+                break
+            _ = self.send_to(Span[UInt8, _](hs_dg), peer)
+            self.connections[slot].amp_tx += len(hs_dg)
+            self.tls_handshake_egress_queues[slot] = _queue_rest(
+                self.tls_handshake_egress_queues[slot], take
+            )
+            emitted = True
+        # 1-RTT-level CRYPTO (rustls post-handshake; gated on
+        # the 1-RTT readiness sentinel).
+        if (
+            slot < len(self.tls_1rtt_egress_queues)
+            and len(self.tls_1rtt_egress_queues[slot]) > 0
+        ):
+            var rtt_dg = self._build_1rtt_handshake_crypto(slot)
+            if len(rtt_dg) > 0:
+                _ = self.send_to(Span[UInt8, _](rtt_dg), peer)
+                self.tls_1rtt_egress_queues[slot] = List[UInt8]()
+                emitted = True
+        # 1-RTT ACK (+ HANDSHAKE_DONE once). Only emit once a real
+        # 1-RTT packet has arrived: acking a packet number the peer
+        # never sent is a protocol violation (RFC 9000 sec 13.1).
+        # Without the ACK the peer's loss detection stalls and it
+        # retransmits forever (sec 13.2). HANDSHAKE_DONE (sec 19.20)
+        # rides the first ACK to confirm the handshake so the peer
+        # discards Handshake keys.
+        # Coalesced 1-RTT egress: the pending ACK (+ HANDSHAKE_DONE
+        # once + flow-control credit) and every ready H3 response
+        # STREAM frame are packed into as few datagrams as the MTU
+        # allows -- one AEAD encrypt + one sendto per datagram
+        # instead of one per response plus a separate ACK packet.
+        # Path-validation probe egress: routed to the candidate
+        # under its own 3x budget, kept off the validated-path drain
+        # below. No-op in steady state (nothing stashed, not probing).
+        if self._drain_migration_probe(slot):
+            emitted = True
+        if self._drain_1rtt_coalesced(slot, peer):
+            emitted = True
+        return emitted
+
+    def _drain_migration_probe(mut self, slot: Int) raises -> Bool:
+        """Strict-hold egress for path-validation frames.
+
+        PATH_CHALLENGE / PATH_RESPONSE frames stashed for ``slot`` are
+        sent in their own 1-RTT datagram. While a candidate path is
+        under validation they go ONLY to that candidate -- never the
+        validated path -- and the protected datagram is charged against
+        the candidate's 3x anti-amplification budget (RFC 9000 sec 8.1
+        / sec 21.5.4); when the budget is exhausted the frames stay
+        stashed and flush on a later drain once more bytes arrive on
+        the path. With no migration in flight (the steady state) this
+        is a pure no-op: nothing is stashed and ``probing`` is False.
+
+        Returns ``True`` iff a datagram was emitted.
+        """
+        if slot < 0 or slot >= len(self.pending_migration_tx):
+            return False
+        if len(self.pending_migration_tx[slot]) == 0:
+            return False
+        if not self._has_1rtt_keys(slot):
+            return False
+        var probing = (
+            slot < len(self.migration_probe)
+            and self.migration_probe[slot].probing
+        )
+        var dest: SocketAddr
+        if probing:
+            dest = self.migration_probe[slot].candidate
+        else:
+            # A same-path client PATH_CHALLENGE (no migration): echo on
+            # the validated path, no amplification cap.
+            dest = self.peer_addrs[slot]
+        var frames = self.pending_migration_tx[slot].copy()
+        if probing:
+            # Estimate the protected datagram size (frames + short
+            # header + pn + AEAD tag) and refuse to exceed the
+            # unvalidated path's 3x budget. Held frames stay stashed and
+            # flush once inbound bytes grow the budget.
+            var est = (
+                len(frames)
+                + self.connections[slot].peer_cid.length()
+                + 1  # short-header flags byte
+                + 2  # packet-number length
+                + 16  # AEAD tag
+            )
+            if not self.migration_probe[slot].amplification_allows(est):
+                return False
+        # Not tracked for loss recovery: this goes to the *candidate*
+        # address under an anti-amplification budget, and RFC 9002
+        # keeps congestion and loss state per path. Folding probe
+        # packets into the established path's LossRecovery would
+        # conflate two paths' RTT samples.
+        var dg = self._build_1rtt_response(slot, frames^)
+        if len(dg) == 0:
+            return False
+        _ = self.send_to(Span[UInt8, _](dg), dest)
+        self.pending_migration_tx[slot] = List[UInt8]()
+        if probing:
+            self.migration_probe[slot].note_tx(len(dg))
+        return True
+
+    def _close_after_state_error(mut self, slot: Int):
+        """A frame the state machine rejected (PROTOCOL_VIOLATION,
+        STREAM_STATE_ERROR, ...) has already put the connection into
+        CLOSING; signal it like every other connection error: a
+        CONNECTION_CLOSE and the closing period (RFC 9000 sec 10.2, 11.1)."""
+        if (
+            slot >= 0
+            and slot < len(self.connections)
+            and self.connections[slot].alive
+            and self.connections[slot].conn.state == CONN_STATE_CLOSING
+        ):
+            self._close_for(
+                slot,
+                self.connections[slot].conn.close_error_code,
+                "frame rejected",
+            )
+
+    def _close_for(mut self, slot: Int, code: UInt64, reason: String):
+        """Close ``slot`` with transport error ``code``: the connection
+        error is signalled with a 1-RTT CONNECTION_CLOSE (RFC 9000
+        sec 11.1) and the slot enters the closing state (sec 10.2) --
+        see :meth:`_enter_closing`."""
+        connection_close(self.connections[slot].conn, code, reason)
+        self.connections[slot].alive = False
+        self._enter_closing(slot, code)
+
+    def _enter_closing(mut self, slot: Int, code: UInt64):
+        """Send CONNECTION_CLOSE(``code``) and keep ``slot`` routable for
+        three PTOs (capped at :data:`_MAX_CLOSING_MS`), answering each
+        packet it receives meanwhile (RFC 9000 sec 10.2, 10.2.1).
+
+        The idle timer is replaced by one that ends the closing period,
+        and the PTO timer is dropped. When no 1-RTT keys exist yet there
+        is no packet to carry the frame: the slot then closes silently
+        and the next timer of the slot reclaims it, as before.
+        """
+        if slot < 0 or slot >= len(self.peer_addrs):
+            return
+        try:
+            var plaintext = List[UInt8]()
+            encode_connection_close(
+                ConnectionCloseFrame(False, code, UInt64(0), List[UInt8]()),
+                plaintext,
+            )
+            # Enough ciphertext for the header-protection sample.
+            while len(plaintext) < 16:
+                plaintext.append(UInt8(0))
+            var frame = plaintext.copy()
+            var dg = self._build_1rtt_response(slot, plaintext^)
+            if len(dg) == 0:
+                return
+            _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot])
+            self.connections[slot].close_frame = frame^
+        except:
+            return
+        var period = UInt64(3) * self.loss[
+            slot
+        ].pto_interval_ms() if slot < len(self.loss) else UInt64(0)
+        if period > _MAX_CLOSING_MS:
+            period = _MAX_CLOSING_MS
+        if period < UInt64(1):
+            period = UInt64(1)
+        try:
+            self._cancel_pto_timer(slot)
+            var old_id = self.connections[slot].idle_timer_id
+            if old_id != UInt64(0):
+                _ = self.timer_wheel.cancel(old_id)
+            self.connections[slot].idle_timer_id = self.timer_wheel.schedule(
+                after_ms=Int(period),
+                token=encode_timer_token(TIMER_KIND_IDLE, slot),
+            )
+            self.connections[slot].closing = True
+            self.connections[slot].closing_rx = 0
+        except:
+            pass
+
+    def _answer_closing(mut self, slot: Int):
+        """A packet arrived for a closing slot: answer with CONNECTION_CLOSE
+        (RFC 9000 sec 10.2.1), for the 1st, 2nd, 4th, 8th, ... packet so a
+        flood cannot make the server a reflector."""
+        if slot >= len(self.peer_addrs):
+            return
+        self.connections[slot].closing_rx += 1
+        var n = self.connections[slot].closing_rx
+        if (n & (n - 1)) != 0:
+            return
+        try:
+            var dg = self._build_1rtt_response(
+                slot, self.connections[slot].close_frame.copy()
+            )
+            if len(dg) > 0:
+                _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot])
+        except:
+            pass
+
+    def _note_stream_consumed(mut self, slot: Int, sid: Int):
+        """A request stream was answered: its bytes and its stream slot
+        count toward the next grant."""
+        ref qc = self.connections[slot]
+        if sid in qc.fc_stream_end:
+            try:
+                qc.fc_consumed += qc.fc_stream_end.pop(sid)
+            except:
+                pass
+        if (sid & 0x3) == 0:
+            qc.fc_closed_bidi += 1
+
+    def _amplification_allows(self, slot: Int, crypto_bytes: Int) -> Bool:
+        """Whether a long-header packet carrying ``crypto_bytes`` fits
+        the slot's 3x anti-amplification budget (RFC 9000 sec 8.1)."""
+        ref c = self.connections[slot]
+        if c.addr_validated:
+            return True
+        return c.amp_tx + crypto_bytes + _LONG_PACKET_OVERHEAD <= 3 * c.amp_rx
+
+    def _has_1rtt_keys(self, slot: Int) -> Bool:
+        """True if the slot has installed 1-RTT traffic secrets
+        (handshake complete). Gates the ACK / HANDSHAKE_DONE egress.
+        """
+        if slot < 0 or slot >= len(self.connections):
+            return False
+        return len(self.connections[slot].tx_1rtt_secret) > 0
+
+    def _drain_1rtt_coalesced(
+        mut self, slot: Int, peer: SocketAddr
+    ) raises -> Bool:
+        """Coalesced 1-RTT egress: pack the pending ACK frame and
+        every ready H3 response STREAM frame for ``slot`` into as
+        few short-header datagrams as the path MTU allows, one
+        AEAD encrypt + one ``sendto`` per datagram.
+
+        This replaces the prior one-datagram-per-response (plus a
+        separate ACK datagram) scheme. Under stream concurrency the
+        old scheme issued ~2 syscalls + 2 rustls crossings per
+        request; coalescing collapses a whole batch of responses
+        into a handful of full-size datagrams, which is the dominant
+        win for matching the Rust h3 baselines (RFC 9000 sec 12.2
+        permits any number of frames per packet).
+
+        Returns True iff at least one datagram was sent.
+        """
+        if not self._has_1rtt_keys(slot):
+            return False
+        # Plaintext budget: leave headroom for the short header
+        # (1 + dcid) + packet number + AEAD tag so the protected
+        # datagram stays within max_udp_payload_size.
+        var budget = Int(self.config.max_udp_payload_size) - 64
+        if budget < 64:
+            budget = 64
+        var plaintext = List[UInt8](capacity=budget + 64)
+        var emitted = False
+
+        # ACK (+ HANDSHAKE_DONE once + flow-control credit) leads
+        # the first datagram. These frames are small and always fit.
+        if (
+            self.rx_1rtt_ack_pending[slot]
+            and len(self.rx_1rtt_ranges[slot]) >= 2
+        ):
+            var ack = _ack_from_ranges(self.rx_1rtt_ranges[slot], UInt64(0))
+            encode_ack(ack, plaintext)
+            if not self.handshake_done_sent[slot]:
+                encode_handshake_done(plaintext)
+            # Credit from consumption: at most _MAX_DATA_WINDOW bytes
+            # and _MAX_STREAMS_BIDI_WINDOW streams outstanding beyond
+            # what has been answered. Never lowered (sec 4.1).
+            ref qc = self.connections[slot]
+            var want_data = qc.fc_consumed + _MAX_DATA_WINDOW
+            if want_data > qc.fc_adv_max_data:
+                qc.fc_adv_max_data = want_data
+            var want_bidi = qc.fc_closed_bidi + _MAX_STREAMS_BIDI_WINDOW
+            if want_bidi > qc.fc_adv_max_bidi:
+                qc.fc_adv_max_bidi = want_bidi
+                qc.conn.adv_max_streams_bidi = want_bidi
+            var max_data = MaxDataFrame(maximum_data=qc.fc_adv_max_data)
+            encode_max_data(max_data, plaintext)
+            var max_streams = MaxStreamsFrame(
+                unidirectional=False,
+                maximum_streams=qc.fc_adv_max_bidi,
+            )
+            encode_max_streams(max_streams, plaintext)
+            if not self.handshake_done_sent[slot]:
+                self._issue_new_connection_id(slot, plaintext)
+                # RFC 9114 sec 6.2.1: each side MUST initiate its control
+                # stream at the beginning of the connection and send
+                # SETTINGS first. The server's is stream 3, the first
+                # server-initiated unidirectional stream; it was never
+                # opened (H3-07). The first 1-RTT flight carries it, once.
+                var control = self.http3_connections[
+                    slot
+                ].take_control_stream_start()
+                if len(control) > 0:
+                    _encode_h3_stream_frame(
+                        plaintext,
+                        UInt64(H3_SERVER_CONTROL_STREAM_ID),
+                        UInt64(0),
+                        Span[UInt8, _](control),
+                        fin=False,
+                    )
+            self.rx_1rtt_ack_pending[slot] = False
+            self.handshake_done_sent[slot] = True
+
+        # Migration path-validation frames (PATH_CHALLENGE /
+        # PATH_RESPONSE) are NOT coalesced here -- they are routed to the
+        # candidate path under their own anti-amplification budget via
+        # :meth:`_drain_migration_probe`, which runs separately in
+        # :meth:`_drain_and_send`. This drain only ever targets the
+        # validated egress address.
+
+        # Collect this slot's ready responses.
+        var slot_prefix = String(slot) + ":"
+        var keys_to_drain = List[String]()
+        for entry in self.http3_response_egress.items():
+            if entry.key.startswith(slot_prefix):
+                keys_to_drain.append(entry.key)
+
+        for i in range(len(keys_to_drain)):
+            var k = keys_to_drain[i]
+            # Streaming responses are drained by the dedicated pass
+            # below (persistent offset + deferred FIN), never here.
+            if k in self.http3_streams:
+                continue
+            var bytes = self.http3_response_egress.pop(k)
+            if len(bytes) == 0:
+                continue
+            var sid = _stream_id_from_key(k)
+            if sid < 0:
+                continue
+            # Fragment the response across as many 1-RTT datagrams as
+            # the MTU budget needs. A STREAM frame header is <= ~24
+            # bytes (type + sid/offset/length varints); reserve that
+            # so each frame body fits the remaining budget. Only the
+            # final fragment carries FIN. Without this split a
+            # response larger than the path MTU was encoded as one
+            # oversized datagram the peer drops (RFC 9000 sec 14.1
+            # -- a QUIC packet must fit a single UDP datagram).
+            comptime _STREAM_HDR_MAX = 24
+            var n = len(bytes)
+            var off = 0
+            while off < n:
+                var room = budget - len(plaintext) - _STREAM_HDR_MAX
+                if room <= 0:
+                    var dg = self._build_1rtt_response(
+                        slot, plaintext^, ack_eliciting=True
+                    )
+                    if len(dg) > 0:
+                        _ = self.send_to(Span[UInt8, _](dg), peer)
+                        emitted = True
+                    plaintext = List[UInt8](capacity=budget + 64)
+                    room = budget - _STREAM_HDR_MAX
+                var take = room
+                if take > n - off:
+                    take = n - off
+                var is_last = (off + take) == n
+                _encode_h3_stream_frame(
+                    plaintext,
+                    UInt64(sid),
+                    UInt64(off),
+                    Span[UInt8, _](bytes)[off : off + take],
+                    fin=is_last,
+                )
+                off += take
+            # The response is complete (fin emitted on the last
+            # fragment), so reclaim the per-stream carriers now.
+            # Without this, completed streams pile up in both the H3
+            # driver's stream Dict and the QUIC connection's stream
+            # Dict, and the per-tick `take_completed_streams` scan
+            # degrades to O(streams-ever-opened) -- quadratic over a
+            # long run.
+            self.http3_connections[slot].close_request_stream(sid)
+            self._note_stream_consumed(slot, sid)
+            if UInt64(sid) in self.connections[slot].conn.streams:
+                _ = self.connections[slot].conn.streams.pop(UInt64(sid))
+
+        # Streaming H3 responses: frame whatever the pump produced this
+        # tick at the stream's persistent QUIC offset, coalescing into
+        # the same datagrams as the buffered responses + the ACK. The
+        # FIN is deferred until the source is exhausted (``done``); an
+        # exhausted stream with no residual bytes still emits an empty
+        # FIN-bearing STREAM frame to close the response side.
+        comptime _STREAM_HDR_MAX_S = 24
+        var stream_keys = List[String]()
+        for entry in self.http3_streams.items():
+            if entry.key.startswith(slot_prefix):
+                stream_keys.append(entry.key)
+        for i in range(len(stream_keys)):
+            var k = stream_keys[i]
+            var sid = _stream_id_from_key(k)
+            if sid < 0:
+                continue
+            var start_off = Int(self.http3_streams[k].send_off)
+            var is_done = self.http3_streams[k].done
+            var bytes = List[UInt8]()
+            if k in self.http3_response_egress:
+                bytes = self.http3_response_egress.pop(k)
+            if is_done:
+                # Trailers ride the final flush, right before the FIN.
+                var tb = self.http3_streams[k].trailer_bytes.copy()
+                for j in range(len(tb)):
+                    bytes.append(tb[j])
+            var n = len(bytes)
+            if n == 0 and not is_done:
+                # Nothing produced this tick; retry on a later drain.
+                continue
+            if n == 0 and is_done:
+                var room = budget - len(plaintext) - _STREAM_HDR_MAX_S
+                if room <= 0:
+                    var dg = self._build_1rtt_response(
+                        slot, plaintext^, ack_eliciting=True
+                    )
+                    if len(dg) > 0:
+                        _ = self.send_to(Span[UInt8, _](dg), peer)
+                        emitted = True
+                    plaintext = List[UInt8](capacity=budget + 64)
+                var empty = List[UInt8]()
+                _encode_h3_stream_frame(
+                    plaintext,
+                    UInt64(sid),
+                    UInt64(start_off),
+                    Span[UInt8, _](empty),
+                    fin=True,
+                )
+                # The FIN frame sits in ``plaintext``; the trailing
+                # flush below emits it and sets ``emitted``.
+                self._reclaim_http3_stream(slot, sid, k)
+                continue
+            var off = 0
+            while off < n:
+                var room = budget - len(plaintext) - _STREAM_HDR_MAX_S
+                if room <= 0:
+                    var dg = self._build_1rtt_response(
+                        slot, plaintext^, ack_eliciting=True
+                    )
+                    if len(dg) > 0:
+                        _ = self.send_to(Span[UInt8, _](dg), peer)
+                        emitted = True
+                    plaintext = List[UInt8](capacity=budget + 64)
+                    room = budget - _STREAM_HDR_MAX_S
+                var take = room
+                if take > n - off:
+                    take = n - off
+                var is_last_frag = (off + take) == n
+                var fin = is_last_frag and is_done
+                _encode_h3_stream_frame(
+                    plaintext,
+                    UInt64(sid),
+                    UInt64(start_off + off),
+                    Span[UInt8, _](bytes)[off : off + take],
+                    fin=fin,
+                )
+                off += take
+            if is_done:
+                self._reclaim_http3_stream(slot, sid, k)
+            else:
+                ref st = self.http3_streams[k]
+                st.send_off = UInt64(start_off + n)
+
+        if len(plaintext) > 0:
+            var dg = self._build_1rtt_response(
+                slot, plaintext^, ack_eliciting=True
+            )
+            if len(dg) > 0:
+                _ = self.send_to(Span[UInt8, _](dg), peer)
+                emitted = True
+        return emitted
+
+    def _reclaim_http3_stream(
+        mut self, slot: Int, sid: Int, key: String
+    ) raises:
+        """Drop every per-stream carrier for a finished streaming
+        response: free the boxed source if still open (defensive -- the
+        pump frees it at EOS), remove the :attr:`http3_streams` record,
+        close the H3 driver's stream state, and evict the QUIC stream so
+        the completed-stream scan stays linear."""
+        if key in self.http3_streams:
+            var addr = self.http3_streams[key].src_addr
+            if addr != 0:
+                Pool[ChunkSourceBox].free(addr)
+            _ = self.http3_streams.pop(key)
+        self.http3_connections[slot].close_request_stream(sid)
+        self._note_stream_consumed(slot, sid)
+        if UInt64(sid) in self.connections[slot].conn.streams:
+            _ = self.connections[slot].conn.streams.pop(UInt64(sid))
+
+    def _build_initial_response(
+        mut self, slot: Int, pn_length: Int = 2, max_bytes: Int = 0
+    ) raises -> List[UInt8]:
+        """Materialize a server-side Initial packet that carries
+        the slot's pending egress CRYPTO bytes.
+
+        Splits cleanly from :meth:`_drain_and_send` so unit tests
+        can exercise the wire-format builder without binding a
+        UDP socket. Returns the protected datagram bytes ready
+        for :meth:`send_to`.
+
+        ``pn_length`` defaults to 2 which is the comfortable
+        ServerHello / EncryptedExtensions size for any
+        reasonable cert chain (covers 0..65535 packet numbers
+        per RFC 9001 §5.3). The caller may raise this to 3 / 4
+        once long-running connections cross the 2-byte pn
+        window.
+        """
+        var qbytes = _queue_prefix(self.tls_egress_queues[slot], max_bytes)
+        var conn = self.connections[slot].copy()
+        var crypto = CryptoFrame(
+            offset=conn.tx_initial_offset, data=qbytes.copy()
+        )
+        var payload = List[UInt8]()
+        encode_crypto(crypto, payload)
+        # Build the long-header prefix: server DCID = peer's
+        # client-chosen SCID; server SCID = local_cid (same the
+        # peer sent in its first Initial's DCID). RFC 9000
+        # §17.2.2: the Initial Source Connection ID is the
+        # server's chosen CID -- here we echo local_cid so the
+        # client's CID->slot routing stays stable.
+        var first_bits = (pn_length - 1) & 0x3
+        var prefix = encode_long_header(
+            PACKET_TYPE_INITIAL,
+            QUIC_VERSION_1,
+            conn.peer_cid,
+            conn.local_cid,
+            type_specific_bits=first_bits,
+        )
+        # Token-length varint (always 0 for server-side Initial
+        # responses per RFC 9000 §17.2.2 -- only the client may
+        # echo a NEW_TOKEN-issued token).
+        var token_len_var = encode_varint(UInt64(0))
+        for i in range(len(token_len_var)):
+            prefix.append(token_len_var[i])
+        # Payload length: CRYPTO frame body + pn_length + 16-byte
+        # AEAD tag per RFC 9000 §17.2.5.
+        var payload_total = UInt64(len(payload) + pn_length + 16)
+        var len_var = encode_varint(payload_total)
+        for i in range(len(len_var)):
+            prefix.append(len_var[i])
+        var pn = conn.tx_initial_pn
+        var datagram = protect_initial_packet(
+            Span[UInt8, _](prefix),
+            packet_number=pn,
+            pn_length=pn_length,
+            plaintext=Span[UInt8, _](payload),
+            dcid=conn.initial_dcid,
+            is_server=True,
+        )
+        # Advance the connection's outbound Initial-level
+        # counters so the next drain emits a fresh pn + offset.
+        conn.tx_initial_pn = pn + UInt64(1)
+        conn.tx_initial_offset = conn.tx_initial_offset + UInt64(len(qbytes))
+        self.connections[slot] = conn^
+        return datagram^
+
+    # -- Handshake + 1-RTT egress via rustls --------------------------------
+
+    def _build_handshake_response(
+        mut self, slot: Int, pn_length: Int = 2, max_bytes: Int = 0
+    ) raises -> List[UInt8]:
+        """Wrap the slot's pending Handshake-level CRYPTO bytes
+        into a long-header Handshake packet, AEAD-protected via
+        the slot's rustls session's
+        ``Keys.local.packet.encrypt_in_place`` + header-
+        protected via ``Keys.local.header.encrypt_in_place``
+        (RFC 9001 §5.3 + §5.4).
+
+        Splits cleanly from :meth:`_drain_and_send` so unit
+        tests can exercise the wire-format builder without
+        binding a UDP socket.  Returns the protected datagram
+        bytes ready for :meth:`send_to`; empty list if the
+        slot is out of range, the per-slot Handshake queue is
+        empty, or rustls hasn't installed level-2 keys yet
+        (the post-handshake-bridge sentinel gate).
+
+        The flow mirrors :meth:`_build_initial_response` but:
+
+        * The header omits the Initial-level token field
+          (RFC 9000 §17.2.4 -- Handshake long headers carry
+          only the payload-length varint after the SCID).
+        * The AEAD + HP routes through
+          :func:`_do_packet_encrypt` and
+          :func:`_do_header_encrypt` at
+          :data:`QuicEncryptionLevel.HANDSHAKE` instead of
+          flare's :func:`protect_initial_packet` (the DCID-
+          derived OpenSSL Initial path doesn't apply at
+          Handshake -- the keys come from rustls's
+          ``KeyChange::Handshake`` at the matching session
+          slot).
+        * The per-connection ``tx_handshake_pn`` +
+          ``tx_handshake_offset`` counters advance on success.
+        """
+        if slot < 0 or slot >= len(self.connections):
+            return List[UInt8]()
+        if slot >= len(self.tls_handshake_egress_queues):
+            return List[UInt8]()
+        if len(self.tls_handshake_egress_queues[slot]) == 0:
+            return List[UInt8]()
+        var conn = self.connections[slot].copy()
+        # Per-direction sentinel gates the egress: if rustls
+        # hasn't yet emitted KeyChange::Handshake then tx_handshake
+        # keys aren't ready.  The pump in `_dispatch_crypto_frames`
+        # stamps both rx + tx sentinels together; checking the tx
+        # side here keeps the egress aligned with the inbound gate
+        # on the same level.
+        if len(conn.tx_handshake_secret) == 0:
+            return List[UInt8]()
+        var handle = self.tls_sessions[slot].handle
+        if handle == 0:
+            return List[UInt8]()
+        if pn_length < 1 or pn_length > 4:
+            raise Error(
+                "_build_handshake_response: pn_length out of [1, 4]: "
+                + String(pn_length)
+            )
+        # 1. Encode the CRYPTO frame body that wraps the
+        # rustls take_crypto output at Handshake level.
+        var qbytes = _queue_prefix(
+            self.tls_handshake_egress_queues[slot], max_bytes
+        )
+        var crypto = CryptoFrame(
+            offset=conn.tx_handshake_offset, data=qbytes.copy()
+        )
+        var payload = List[UInt8]()
+        encode_crypto(crypto, payload)
+        # 2. Build the long-header prefix (no token varint at
+        # Handshake level per RFC 9000 §17.2.4).
+        var first_bits = (pn_length - 1) & 0x3
+        var prefix = encode_long_header(
+            PACKET_TYPE_HANDSHAKE,
+            QUIC_VERSION_1,
+            conn.peer_cid,
+            conn.local_cid,
+            type_specific_bits=first_bits,
+        )
+        var payload_total = UInt64(len(payload) + pn_length + 16)
+        var len_var = encode_varint(payload_total)
+        for i in range(len(len_var)):
+            prefix.append(len_var[i])
+        # 3. Build the unprotected header = prefix + pn bytes.
+        var pn = conn.tx_handshake_pn
+        var unprotected_header = List[UInt8]()
+        for i in range(len(prefix)):
+            unprotected_header.append(prefix[i])
+        for i in range(pn_length):
+            var shift = (pn_length - 1 - i) * 8
+            unprotected_header.append(UInt8((Int(pn) >> shift) & 0xFF))
+        # 4. AEAD-encrypt the payload via rustls at level 2.
+        # The payload buffer is mutated in place; the returned
+        # tag is appended afterward.  The FFI binding helpers
+        # take `read lib: OwnedDLHandle`, which borrows without
+        # moving, so we pass `self.tls_acceptor._lib` directly
+        # at each callsite (the OwnedDLHandle itself is not
+        # ImplicitlyCopyable and cannot be aliased into a local).
+        var encrypted_payload = payload.copy()
+        var tag = _do_packet_encrypt(
+            self.tls_acceptor._lib,
+            handle,
+            QuicEncryptionLevel.HANDSHAKE,
+            pn,
+            unprotected_header,
+            encrypted_payload,
+        )
+        # 5. Assemble the protected datagram = header + ciphertext + tag.
+        var protected = List[UInt8]()
+        for i in range(len(unprotected_header)):
+            protected.append(unprotected_header[i])
+        for i in range(len(encrypted_payload)):
+            protected.append(encrypted_payload[i])
+        for i in range(len(tag)):
+            protected.append(tag[i])
+        # 6. Apply header protection via rustls at level 2.
+        var pn_offset = len(unprotected_header) - pn_length
+        var sample_offset = pn_offset + 4
+        if sample_offset + 16 > len(protected):
+            raise Error(
+                "_build_handshake_response: ciphertext too short for HP sample"
+            )
+        var sample = List[UInt8]()
+        for i in range(16):
+            sample.append(protected[sample_offset + i])
+        # Stage the first byte + pn bytes on the stack so rustls
+        # can XOR them in place; copy back afterward.
+        var first_local: UInt8 = protected[0]
+        var pn_local = List[UInt8]()
+        for i in range(pn_length):
+            pn_local.append(protected[pn_offset + i])
+        var first_addr = Int(Pointer(to=first_local))
+        _do_header_encrypt(
+            self.tls_acceptor._lib,
+            handle,
+            QuicEncryptionLevel.HANDSHAKE,
+            sample,
+            first_addr,
+            Int(pn_local.unsafe_ptr()),
+            pn_length,
+        )
+        protected[0] = first_local
+        for i in range(pn_length):
+            protected[pn_offset + i] = pn_local[i]
+        # 7. Advance the per-connection Handshake counters.
+        conn.tx_handshake_pn = pn + UInt64(1)
+        conn.tx_handshake_offset = conn.tx_handshake_offset + UInt64(
+            len(qbytes)
+        )
+        self.connections[slot] = conn^
+        return protected^
+
+    def _build_1rtt_response(
+        mut self,
+        slot: Int,
+        var plaintext: List[UInt8],
+        pn_length: Int = 2,
+        ack_eliciting: Bool = False,
+    ) raises -> List[UInt8]:
+        """Wrap an arbitrary 1-RTT plaintext payload (CRYPTO
+        bytes from rustls's post-handshake KeyChange::OneRtt
+        path, OR STREAM-frame H3 response bytes) into a
+        short-header 1-RTT packet, AEAD-protected via the
+        slot's rustls session's
+        ``Keys.local.packet.encrypt_in_place`` + header-
+        protected via ``Keys.local.header.encrypt_in_place``
+        at :data:`QuicEncryptionLevel.APPLICATION`.
+
+        ``plaintext`` is the in-place buffer of plaintext
+        bytes the caller has already encoded into QUIC frames
+        (CRYPTO at level 3 for post-handshake NEW_TOKEN /
+        HANDSHAKE_DONE / NEW_CONNECTION_ID, or STREAM for H3).
+        The function consumes it.  Returns the protected
+        datagram bytes ready for :meth:`send_to`; empty list
+        if the slot is out of range, rustls hasn't installed
+        1-RTT keys yet, or the session handle is NULL.
+        """
+        if slot < 0 or slot >= len(self.connections):
+            return List[UInt8]()
+        # RFC 9000 sec 10.2.2: "An endpoint in the draining state MUST NOT
+        # send any packets." Every 1-RTT egress path (ACKs, responses, PTO
+        # retransmits, the delayed-ACK timer) goes through this builder.
+        if self.connections[slot].conn.state == CONN_STATE_DRAINING:
+            return List[UInt8]()
+        # Read only the fields this builder needs and bump the pn
+        # counter in place at the end -- deep-copying the whole
+        # QuicConnection (its streams Dict) per outbound packet is
+        # the dominant egress-side CPU cost under concurrency.
+        if len(self.connections[slot].tx_1rtt_secret) == 0:
+            return List[UInt8]()
+        # Snapshot before the protection step consumes ``plaintext``.
+        # Only ack-eliciting packets are tracked: RFC 9002 sec 2 defines
+        # a packet as ack-eliciting iff it carries anything other than
+        # ACK, PADDING and CONNECTION_CLOSE, and only those are
+        # retransmittable.
+        var tracked_frames = List[UInt8]()
+        if ack_eliciting:
+            tracked_frames = plaintext.copy()
+        if slot >= len(self.tls_sessions):
+            return List[UInt8]()
+        var handle = self.tls_sessions[slot].handle
+        if handle == 0:
+            return List[UInt8]()
+        if pn_length < 1 or pn_length > 4:
+            raise Error(
+                "_build_1rtt_response: pn_length out of [1, 4]: "
+                + String(pn_length)
+            )
+        var peer_cid = self.connections[slot].peer_cid.copy()
+        # 1. Build the unprotected short-header prefix.
+        # spin_bit + key_phase stay 0 (no key-update yet).
+        var prefix = encode_short_header(
+            peer_cid,
+            spin_bit=False,
+            key_phase=False,
+            pn_length=pn_length,
+        )
+        # 2. Build unprotected header = prefix + pn bytes.
+        var pn = self.connections[slot].tx_1rtt_pn
+        var unprotected_header = List[UInt8](capacity=len(prefix) + pn_length)
+        for i in range(len(prefix)):
+            unprotected_header.append(prefix[i])
+        for i in range(pn_length):
+            var shift = (pn_length - 1 - i) * 8
+            unprotected_header.append(UInt8((Int(pn) >> shift) & 0xFF))
+        # 3. AEAD-encrypt via rustls at level 3.  See the
+        # _build_handshake_response comment for why we pass
+        # `self.tls_acceptor._lib` directly at each call.
+        var encrypted_payload = plaintext^
+        var tag = _do_packet_encrypt(
+            self.tls_acceptor._lib,
+            handle,
+            QuicEncryptionLevel.APPLICATION,
+            pn,
+            unprotected_header,
+            encrypted_payload,
+        )
+        # 4. Assemble the protected datagram. Move the header buffer in
+        # as the base (it is no longer needed standalone) and reserve
+        # the full datagram length so the payload + tag append in one
+        # allocation -- the per-byte grow loop here was a top _realloc /
+        # allocator-TLS cost under request concurrency.
+        var header_len = len(unprotected_header)
+        var protected = unprotected_header^
+        protected.reserve(header_len + len(encrypted_payload) + len(tag))
+        for i in range(len(encrypted_payload)):
+            protected.append(encrypted_payload[i])
+        for i in range(len(tag)):
+            protected.append(tag[i])
+        # 5. Apply header protection via rustls at level 3.
+        var pn_offset = header_len - pn_length
+        var sample_offset = pn_offset + 4
+        if sample_offset + 16 > len(protected):
+            raise Error(
+                "_build_1rtt_response: ciphertext too short for HP sample"
+            )
+        var sample = List[UInt8](capacity=16)
+        for i in range(16):
+            sample.append(protected[sample_offset + i])
+        var first_local: UInt8 = protected[0]
+        var pn_local = List[UInt8](capacity=pn_length)
+        for i in range(pn_length):
+            pn_local.append(protected[pn_offset + i])
+        var first_addr = Int(Pointer(to=first_local))
+        _do_header_encrypt(
+            self.tls_acceptor._lib,
+            handle,
+            QuicEncryptionLevel.APPLICATION,
+            sample,
+            first_addr,
+            Int(pn_local.unsafe_ptr()),
+            pn_length,
+        )
+        protected[0] = first_local
+        for i in range(pn_length):
+            protected[pn_offset + i] = pn_local[i]
+        # 6. Advance the 1-RTT pn counter (no offset counter at
+        # 1-RTT -- per-stream offsets live on each STREAM frame
+        # encoded into the plaintext).
+        self.connections[slot].tx_1rtt_pn = pn + UInt64(1)
+        # RFC 9000 sec 10.1: the first ack-eliciting packet sent after a
+        # received one restarts the idle timer; later sends do not.
+        if ack_eliciting and not self.connections[slot].idle_sent_since_rx:
+            self.connections[slot].idle_sent_since_rx = True
+            _ = self.schedule_idle_timeout(slot)
+        if ack_eliciting and slot < len(self.loss):
+            # Account the true on-wire size, not len(plaintext): the
+            # congestion window is a bound on bytes the path carries.
+            self.loss[slot].on_sent(
+                pn,
+                tracked_frames^,
+                _monotonic_ms(),
+                size=UInt64(len(protected)),
+            )
+        return protected^
+
+    def _build_1rtt_handshake_crypto(
+        mut self, slot: Int, pn_length: Int = 2
+    ) raises -> List[UInt8]:
+        """Wrap the slot's pending 1-RTT-level CRYPTO bytes
+        (rustls post-handshake messages: NewSessionTicket etc.)
+        into a 1-RTT packet via :meth:`_build_1rtt_response`.
+
+        Distinct from H3 STREAM-frame egress, which the
+        coalescing drain (:meth:`_drain_1rtt_coalesced`) encodes
+        via :func:`_encode_h3_stream_frame`; both end up calling
+        :meth:`_build_1rtt_response` with the appropriate
+        plaintext.
+        """
+        if slot >= len(self.tls_1rtt_egress_queues):
+            return List[UInt8]()
+        if len(self.tls_1rtt_egress_queues[slot]) == 0:
+            return List[UInt8]()
+        if slot < 0 or slot >= len(self.connections):
+            return List[UInt8]()
+        # Wrap the bytes in a CRYPTO frame -- the offset is
+        # tracked per-stream-id at the 1-RTT level, but for the
+        # CRYPTO frame stream the offset is just a monotonic
+        # counter.  rustls's post-handshake messages are small
+        # and infrequent so a fresh CryptoFrame(offset=0) per
+        # drain is correct as long as the egress queue gets
+        # cleared every flush (which it does in `_drain_and_send`).
+        var qbytes = self.tls_1rtt_egress_queues[slot].copy()
+        var crypto = CryptoFrame(offset=UInt64(0), data=qbytes^)
+        var plaintext = List[UInt8]()
+        encode_crypto(crypto, plaintext)
+        return self._build_1rtt_response(
+            slot, plaintext^, pn_length, ack_eliciting=True
+        )
+
+    def run(mut self) raises:
+        """Run the listener's event loop. Blocks until
+        :meth:`shutdown` flips the stop flag.
+
+        The loop drives the full I/O cycle
+        ``recv -> dispatch -> drain -> protect -> sendto ->
+        advance_timers``:
+
+        1. ``tick(100)`` blocks up to 100 ms in ``recv_from``;
+           on a datagram it runs the dispatch + handle + drain
+           chain.
+        2. On a 100 ms timeout it still calls
+           :meth:`drain_all_egress` so any session that started
+           handshaking can flush its first response.
+        3. :meth:`advance_timers` then runs the wheel against
+           the current monotonic clock so the idle-timeout
+           callbacks fire on time.
+
+        The 100 ms recv timeout caps the worst-case timer slop
+        and the shutdown-flag polling interval.
+        """
+        while not self._stopping:
+            _ = self.tick(timeout_ms=100)
+            var now_ms = _monotonic_ms()
+            _ = self.advance_timers(now_ms)
+
+    def shutdown(mut self):
+        """Request the event loop to exit. Idempotent; safe to
+        call from a signal handler (sets a single Bool flag)."""
+        self._stopping = True
+
+    # -- Timer scheduling -----------------------------------------------
+
+    def schedule_idle_timeout(mut self, slot: Int) raises -> UInt64:
+        """Arm the idle timer for ``slot`` from the current wheel tick.
+
+        The delay is the effective idle timeout of RFC 9000 sec 10.1:
+        the minimum of ``config.max_idle_timeout_ms`` and the client's
+        ``max_idle_timeout`` (when non-zero), at least three PTOs. When
+        both are 0 the timeout is disabled: nothing is armed and the
+        returned id is 0. Cancels the slot's previous idle timer if any
+        so every ``handle_packet`` only ever has one idle timer in
+        flight per connection.
+
+        Returns the new timer id (stored back into the slot's
+        :attr:`QuicConnection.idle_timer_id`).
+        """
+        if slot < 0 or slot >= len(self.connections):
+            raise Error(
+                "schedule_idle_timeout: slot " + String(slot) + " out of range"
+            )
+        # Touch only the idle_timer_id field; this runs once per
+        # inbound datagram, so a whole-connection deep copy here is
+        # pure overhead.
+        var old_id = self.connections[slot].idle_timer_id
+        if old_id != UInt64(0):
+            _ = self.timer_wheel.cancel(old_id)
+        var pto_ms = UInt64(0)
+        if slot < len(self.loss):
+            pto_ms = self.loss[slot].pto_interval_ms()
+        var effective = _effective_idle_ms(
+            self.config.max_idle_timeout_ms,
+            self.connections[slot].peer_idle_ms,
+            pto_ms,
+        )
+        if effective == UInt64(0):
+            self.connections[slot].idle_timer_id = UInt64(0)
+            return UInt64(0)
+        var token = encode_timer_token(TIMER_KIND_IDLE, slot)
+        var id = self.timer_wheel.schedule(after_ms=Int(effective), token=token)
+        self.connections[slot].idle_timer_id = id
+        return id
+
+    def advance_timers(mut self, now_ms: UInt64) raises -> Int:
+        """Advance the wheel to ``now_ms`` and dispatch every fired
+        timer token to the matching action (per
+        :mod:`flare.quic.timers`). Returns the number of tokens
+        dispatched.
+
+        Handles all three registered kinds:
+
+        * ``TIMER_KIND_IDLE`` -- RFC 9000 sec 10.1 idle timeout:
+          flips the connection to closed via ``on_idle_expired``.
+        * ``TIMER_KIND_ACK_DELAY`` -- RFC 9000 sec 13.2.1 deferred
+          ACK: flushes any owed 1-RTT ACK through the coalesced
+          egress path so a quiescent peer still learns what arrived
+          even when no further inbound packet drives a drain.
+        * ``TIMER_KIND_PTO`` -- RFC 9002 sec 6.2 probe timeout:
+          dispatched to :meth:`_on_pto_expired`.
+
+        Also sweeps the CID table for any connections whose
+        ``alive`` flag flipped False during dispatch (idle
+        timeout, draining); their CIDs are retired so a stray
+        retransmit doesn't route to a dead slot.
+        """
+        var fired = List[UInt64]()
+        self.timer_wheel.advance(now_ms, fired)
+        for i in range(len(fired)):
+            var decoded = decode_timer_token(fired[i])
+            var slot = decoded.slot
+            if slot < 0 or slot >= len(self.connections):
+                continue
+            # A closing slot (RFC 9000 sec 10.2) is ended by its closing
+            # timer alone -- the TIMER_KIND_IDLE entry _enter_closing
+            # armed. Any other timer of the slot must not cut the closing
+            # period short.
+            if (
+                self.connections[slot].closing
+                and decoded.kind != TIMER_KIND_IDLE
+            ):
+                continue
+            if decoded.kind == TIMER_KIND_IDLE:
+                self.connections[slot].on_idle_expired()
+            elif decoded.kind == TIMER_KIND_ACK_DELAY:
+                if slot < len(self.peer_addrs):
+                    var peer = self.peer_addrs[slot]
+                    _ = self._drain_1rtt_coalesced(slot, peer)
+            elif decoded.kind == TIMER_KIND_PTO:
+                self._on_pto_expired(slot)
+            if not self.connections[slot].alive:
+                self._reclaim_slot(slot)
+        return len(fired)
+
+    def _on_pto_expired(mut self, slot: Int) raises:
+        """RFC 9002 sec 6.2 probe-timeout action for ``slot``.
+
+        Re-sends the frames of the oldest unacked packet under a fresh
+        packet number, then re-arms. When nothing is tracked -- a PTO
+        armed before any ack-eliciting packet went out -- it falls back
+        to re-flushing whatever 1-RTT egress is still pending, which is
+        what this handler did before loss recovery was wired.
+
+        Gives up once ``pto_count`` passes
+        :attr:`QuicServerConfig.max_pto_count`: ``LossRecovery`` bounds
+        the backoff at 64x the base interval, but nothing bounds how
+        long the server keeps probing a peer that has gone dark.
+
+        Send pacing (RFC 9002 sec 7.7) remains out of scope. The
+        congestion window gates burst size without an inter-packet
+        timer, which is also the budget QUIC GSO would need before
+        ``send_segmented`` could be wired into egress.
+        """
+        if slot < 0 or slot >= len(self.peer_addrs):
+            return
+        if slot >= len(self.loss):
+            return
+        # A peer that has gone completely dark would otherwise be probed
+        # forever: LossRecovery caps the backoff at 64x but nothing caps
+        # the attempt count. Past the configured limit, close the slot
+        # and let the normal retire path reclaim it.
+        if self.loss[slot].pto_count > self.config.max_pto_count:
+            self.connections[slot].alive = False
+            self._cancel_pto_timer(slot)
+            return
+        var peer = self.peer_addrs[slot]
+        var frames = self.loss[slot].fire_pto()
+        if len(frames) > 0:
+            var dg = self._build_1rtt_response(
+                slot, frames^, ack_eliciting=True
+            )
+            if len(dg) > 0:
+                _ = self.send_to(Span[UInt8, _](dg), peer)
+        else:
+            # Nothing tracked to probe with: fall back to re-flushing
+            # whatever 1-RTT egress is still pending, which is what this
+            # handler did before loss recovery was wired.
+            _ = self._drain_1rtt_coalesced(slot, peer)
+        self._rearm_pto_timer(slot)
+
+    def _consume_acks(mut self, slot: Int, events: ConnectionEvents) raises:
+        """Feed inbound ACK ranges to this slot's loss recovery.
+
+        ``flare.quic.state.handle_frame_buf`` already decodes ACK frames
+        into ``events.acked_packets`` for both peers; the server simply
+        never read the field, so a dropped response sat unretransmitted
+        until the idle timeout killed the connection. Mirrors the
+        client's per-poll order: ack, then detect-and-resend, then
+        re-arm.
+        """
+        if slot < 0 or slot >= len(self.loss):
+            return
+        if len(events.acked_packets) == 0:
+            return
+        # RFC 9000 sec 13.1: acknowledging a packet never sent is a
+        # PROTOCOL_VIOLATION.
+        var next_pn = self.connections[slot].tx_1rtt_pn
+        for i in range(len(events.acked_packets)):
+            if events.acked_packets[i] >= next_pn:
+                self._close_for(
+                    slot,
+                    QUIC_PROTOCOL_VIOLATION,
+                    "ACK for a packet that was never sent",
+                )
+                return
+        _ = self.loss[slot].on_ack(
+            events.acked_packets, _monotonic_ms(), next_pn
+        )
+        self._retransmit_lost(slot)
+        self._rearm_pto_timer(slot)
+
+    def _retransmit_lost(mut self, slot: Int) raises:
+        """Re-send the frames of every packet now declared lost.
+
+        RFC 9002: frames are retransmitted, packets are not -- each
+        rides a fresh packet number via :meth:`_build_1rtt_response`.
+        """
+        if slot < 0 or slot >= len(self.loss):
+            return
+        if slot >= len(self.peer_addrs):
+            return
+        var peer = self.peer_addrs[slot]
+        var lost = self.loss[slot].detect_lost(_monotonic_ms())
+        for i in range(len(lost)):
+            var frames = lost[i].copy()
+            if len(frames) == 0:
+                continue
+            var dg = self._build_1rtt_response(
+                slot, frames^, ack_eliciting=True
+            )
+            if len(dg) > 0:
+                _ = self.send_to(Span[UInt8, _](dg), peer)
+
+    def _cancel_pto_timer(mut self, slot: Int) raises:
+        """Drop this slot's armed PTO entry, if any."""
+        if slot < 0 or slot >= len(self.connections):
+            return
+        var old_id = self.connections[slot].pto_timer_id
+        if old_id != UInt64(0):
+            _ = self.timer_wheel.cancel(old_id)
+            self.connections[slot].pto_timer_id = UInt64(0)
+
+    def _rearm_pto_timer(mut self, slot: Int) raises:
+        """Re-schedule this slot's PTO from the current deadline.
+
+        Mirrors :meth:`schedule_idle_timeout`: cancel the old entry,
+        then schedule a fresh one. Called once per dispatch tick rather
+        than once per sent packet, matching the cadence at which the
+        client calls ``_check_pto`` -- a cancel plus reschedule for
+        every packet in a burst is pure overhead when the deadline only
+        moves with the oldest in-flight packet.
+        """
+        if slot < 0 or slot >= len(self.connections):
+            return
+        if slot >= len(self.loss):
+            return
+        self._cancel_pto_timer(slot)
+        if self.loss[slot].outstanding() == 0:
+            return
+        var deadline = self.loss[slot].pto_deadline()
+        if deadline == UInt64(0):
+            return
+        var now = _monotonic_ms()
+        var after_ms = 1 if deadline <= now else Int(deadline - now)
+        var token = encode_timer_token(TIMER_KIND_PTO, slot)
+        self.connections[slot].pto_timer_id = self.timer_wheel.schedule(
+            after_ms=after_ms, token=token
+        )
+
+    def _reclaim_slot(mut self, slot: Int) raises:
+        """Retire a dead slot's CIDs, cancel its timers, free its
+        rustls session and streaming sources, and put the slot on
+        :attr:`free_slots` for the next accepted connection. A slot
+        used to stay allocated for the life of the listener, so every
+        per-slot table grew with every connection ever accepted, and
+        each tick scanned all of them."""
+        if slot < 0 or slot >= len(self.connections):
+            return
+        if slot < len(self.slot_free) and self.slot_free[slot]:
+            return
+        self._retire_slot_cids(slot)
+        # A timer left armed would fire into the next connection given
+        # this slot; the idle one would close it.
+        if self.connections[slot].idle_timer_id != UInt64(0):
+            _ = self.timer_wheel.cancel(self.connections[slot].idle_timer_id)
+            self.connections[slot].idle_timer_id = UInt64(0)
+        self._cancel_pto_timer(slot)
+        if slot < len(self.tls_sessions):
+            var h = self.tls_sessions[slot].handle
+            if h != 0:
+                self.tls_acceptor.free_session(h)
+                self.tls_sessions[slot] = _SessionSlot(handle=0)
+        var prefix = String(slot) + ":"
+        var dead_keys = List[String]()
+        for entry in self.http3_streams.items():
+            if entry.key.startswith(prefix):
+                dead_keys.append(entry.key)
+        for i in range(len(dead_keys)):
+            var addr = self.http3_streams[dead_keys[i]].src_addr
+            if addr != 0:
+                Pool[ChunkSourceBox].free(addr)
+            _ = self.http3_streams.pop(dead_keys[i])
+        var dead_egress = List[String]()
+        for entry in self.http3_response_egress.items():
+            if entry.key.startswith(prefix):
+                dead_egress.append(entry.key)
+        for i in range(len(dead_egress)):
+            _ = self.http3_response_egress.pop(dead_egress[i])
+        if slot < len(self.slot_free):
+            self.slot_free[slot] = True
+        self.free_slots.append(slot)
+
+    def _retire_slot_cids(mut self, slot: Int) raises:
+        """Drop every CID -> slot mapping that points at this
+        slot. Called when the slot's connection has closed so
+        late retransmits don't route to a dead slot."""
+        if slot < 0 or slot >= len(self.connections):
+            return
+        var cid_hex = cid_to_hex(self.connections[slot].local_cid)
+        self.cid_table.retire(cid_hex)
+        self.cid_table.retire(cid_to_hex(self.connections[slot].initial_dcid))
+
+    def close(mut self):
+        """Close the underlying UDP socket. Idempotent. The
+        :class:`UdpSocket` destructor also closes the fd, so
+        explicit calls are only required when callers want to
+        free the port before the listener goes out of scope."""
+        self._socket.close()
+
+
+def _queue_prefix(q: List[UInt8], max_bytes: Int) -> List[UInt8]:
+    """The first ``max_bytes`` of ``q`` (all of it when ``max_bytes`` is
+    0 or larger than ``q``)."""
+    var n = len(q) if max_bytes <= 0 or max_bytes > len(q) else max_bytes
+    return List[UInt8](Span[UInt8, _](q)[:n])
+
+
+def _queue_rest(q: List[UInt8], sent: Int) -> List[UInt8]:
+    """``q`` without its first ``sent`` bytes."""
+    if sent >= len(q):
+        return List[UInt8]()
+    return List[UInt8](Span[UInt8, _](q)[sent:])

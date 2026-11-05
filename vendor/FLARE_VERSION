@@ -1,0 +1,1 @@
+flare v0.12.0 (github.com/ehsanmok/flare, MIT, sources vendored unchanged 2026-11-04); json v0.4.1 (github.com/ehsanmok/json, MIT, its dependency). Both need Mojo >= 1.1. D-4757, D-4759.

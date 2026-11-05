@@ -163,15 +163,13 @@ def m1():
     """A Flare transport behind mojoui.http's Transport seam; test_http on both transports; HTTPS to Hugging Face;
     iOS and Android keep the socket transport."""
     problems = []
-    srv = subprocess.Popen([sys.executable, "scripts/http_server.py"], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    try:
-        time.sleep(1.0)
+    import http_server
+    with http_server.TestServer() as srv:  # (as goal 33's M1 runs it: the URL, a dead URL, the secret's value)
         for transport in ("socket", "flare"):
-            err = mojo_test("test_http", "test_http: all passed", env={"MOJOUI_HTTP_TRANSPORT": transport})
+            err = mojo_test("test_http", "test_http: all passed", env={"MOJOUI_HTTP_TRANSPORT": transport, "HTTP_TEST_URL": srv.url,
+                                                                      "HTTP_TEST_DEAD": srv.dead, "HTTP_TEST_SECRET": os.urandom(12).hex()})
             if err:
                 problems.append(f"{transport}: {err[:400]}")
-    finally:
-        srv.terminate()
     err = mojo_test("test_https", "https: ok", timeout=300)
     if err:
         problems.append(err[:400])

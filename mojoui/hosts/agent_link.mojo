@@ -7,6 +7,7 @@
 
 from std.ffi import external_call, c_int, c_uint
 from mojoui.json import json_string
+from mojoui import libc
 
 comptime AF_UNIX = 1
 comptime SOCK_STREAM = 1
@@ -23,7 +24,7 @@ def listen_unix(path: String) -> Int:
     var n = path.byte_length()
     if n == 0 or n >= SUN_PATH:
         return -1
-    var fd = Int(external_call["socket", c_int](c_int(AF_UNIX), c_int(SOCK_STREAM | SOCK_CLOEXEC), c_int(0)))
+    var fd = libc.socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)
     if fd < 0:
         return -1
     var addr = List[UInt8](length=2 + SUN_PATH, fill=0)  # sockaddr_un: sa_family_t (2 bytes, little-endian), then the path
@@ -32,19 +33,19 @@ def listen_unix(path: String) -> Int:
     for k in range(n):
         addr[2 + k] = b[k]
     var p = path
-    _ = external_call["unlink", c_int](p.as_c_string_span())
+    _ = libc.unlink(p.copy())
     var old = external_call["umask", c_uint](c_uint(0o177))  # (created 0600: the socket is the user's alone)
-    var bound = external_call["bind", c_int](c_int(fd), Int(addr.unsafe_ptr()), c_uint(2 + n + 1))
+    var bound = libc.bind(fd, Int(addr.unsafe_ptr()), 2 + n + 1)
     _ = external_call["umask", c_uint](old)
     _ = len(addr)
-    if Int(bound) != 0 or Int(external_call["listen", c_int](c_int(fd), c_int(4))) != 0:
-        _ = external_call["close", c_int](c_int(fd))
+    if Int(bound) != 0 or libc.listen(fd, 4) != 0:
+        _ = libc.close(fd)
         return -1
     return fd
 
 
 def accept_one(fd: Int) -> Int:
-    return Int(external_call["accept4", c_int](c_int(fd), Int(0), Int(0), c_int(SOCK_CLOEXEC)))
+    return libc.accept4(fd, 0, 0, SOCK_CLOEXEC)
 
 
 def read_some(fd: Int, mut into: List[UInt8]) -> Int:
@@ -52,7 +53,7 @@ def read_some(fd: Int, mut into: List[UInt8]) -> Int:
     (next_line), so a character split across two reads stays whole. Bytes read; 0: the other side closed; -1: nothing
     yet or an error."""
     var buf = List[UInt8](length=65536, fill=0)
-    var n = Int(external_call["recv", Int](c_int(fd), Int(buf.unsafe_ptr()), Int(65536), c_int(MSG_DONTWAIT)))
+    var n = libc.recv(fd, Int(buf.unsafe_ptr()), 65536, MSG_DONTWAIT)
     _ = len(buf)
     for k in range(max(n, 0)):
         into.append(buf[k])
@@ -97,7 +98,7 @@ def send_all(fd: Int, text: String) -> Bool:
     var at = 0
     var base = Int(t.unsafe_ptr())
     while at < total:
-        var n = Int(external_call["send", Int](c_int(fd), base + at, Int(total - at), c_int(MSG_NOSIGNAL)))
+        var n = libc.send(fd, base + at, total - at, MSG_NOSIGNAL)
         if n <= 0:
             _ = t.byte_length()
             return False
@@ -107,7 +108,7 @@ def send_all(fd: Int, text: String) -> Bool:
 
 
 def close_fd(fd: Int):
-    _ = external_call["close", c_int](c_int(fd))
+    _ = libc.close(fd)
 
 
 def link_error(why: String) -> String:

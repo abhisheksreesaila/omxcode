@@ -10,6 +10,7 @@
 
 from std.ffi import external_call
 from std.sys import CompilationTarget
+from mojoui import libc
 
 comptime J_NULL = 0
 comptime J_BOOL = 1
@@ -85,7 +86,7 @@ def c_float(text: String) -> Float64:
         v = external_call["strtod_l", Float64](Int(buf.unsafe_ptr()), Int(0), loc)
         external_call["freelocale", NoneType](loc)
     else:
-        v = external_call["strtod", Float64](Int(buf.unsafe_ptr()), Int(0))
+        v = libc.strtod(Int(buf.unsafe_ptr()))
     _ = name^
     _ = buf^
     return v

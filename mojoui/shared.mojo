@@ -14,11 +14,12 @@ from std.os import getenv, setenv, makedirs
 from std.sys import argv, exit
 from std.ffi import external_call, c_int
 from std.memory.alloc import alloc, Layout
+from mojoui import libc
 
 
 def key(slot: Int) -> String:
     """MOJOUI_SHARED_<pid>_<slot>: a child process inherits the environment but must not follow a parent's addresses."""
-    return "MOJOUI_SHARED_" + String(Int(external_call["getpid", c_int]())) + "_" + String(slot)
+    return "MOJOUI_SHARED_" + String(libc.getpid()) + "_" + String(slot)
 
 
 def put_shared(slot: Int, addr: Int):

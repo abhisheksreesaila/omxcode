@@ -17,6 +17,7 @@ from mojoui.json import json_string
 from mojoui.pdfsource import Box
 from mojoui.texttable import fixed
 from mojoui.shared import environment
+from mojoui import libc
 
 
 def _quote(s: String) -> String:
@@ -134,13 +135,13 @@ def write_pack_pdf(pack: Pack, path: String) raises:
         with open(spec, "w") as f:
             f.write(pack.json())
     except e:
-        _ = external_call["unlink", c_int](spec.as_c_string_span())  # (a half-written spec isn't left beside the pack)
+        _ = libc.unlink(spec.copy())  # (a half-written spec isn't left beside the pack)
         raise Error("the pack's PDF failed (" + path + "): couldn't write " + spec + ": " + String(e))
     var py = environment("MOJOUI_PYTHON", "python3")
     var cmd = _quote(py) + " " + _quote(_backend()) + " " + _quote(spec) + " " + _quote(path) + " > " + _quote(path + ".log") + " 2>&1"
     var c = cmd
     var rc = external_call["system", c_int](c.as_c_string_span())
-    _ = external_call["unlink", c_int](spec.as_c_string_span())
+    _ = libc.unlink(spec.copy())
     var log = path + ".log"
     if rc != 0:
         var said = String("")
@@ -149,6 +150,6 @@ def write_pack_pdf(pack: Pack, path: String) raises:
                 said = f.read()
         except:
             pass
-        _ = external_call["unlink", c_int](log.as_c_string_span())  # (what it said goes into the error)
+        _ = libc.unlink(log.copy())  # (what it said goes into the error)
         raise Error("the pack's PDF failed (" + path + "): " + String(said[byte = max(said.byte_length() - 400, 0) :]))
-    _ = external_call["unlink", c_int](log.as_c_string_span())
+    _ = libc.unlink(log.copy())

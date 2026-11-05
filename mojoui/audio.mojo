@@ -12,7 +12,8 @@
 # Also here: load_wav (16-bit PCM .wav -> floats) and best_match (normalised cross-correlation at the best lag).
 
 from std.atomic import Atomic
-from std.ffi import external_call, c_int, OwnedDLHandle
+from std.ffi import external_call, c_int
+from mojoui import libc, OwnedDLHandle
 from std.memory.alloc import unsafe_alloc
 from std.os import getenv
 from std.sys import CompilationTarget
@@ -132,14 +133,15 @@ def _capture(words: Int) raises:
         raise Error("pa_simple_read failed")  # (_entry marks the microphone failed: failed() and why() say so)
 
 
-def _entry(arg: Int) abi("C") -> Int:
+def _entry(p: libc.ThreadArg) -> libc.ThreadArg:
+    var arg = Int(p)
     try:
         _capture(arg)
         _A.store(_word(arg, W_STATE), 2)
     except:
         _A.store(_word(arg, W_STATE), -1)
     _release(arg)
-    return 0
+    return libc.null_arg()
 
 
 struct Microphone(Movable):
@@ -174,13 +176,13 @@ struct Microphone(Movable):
                 _A.store(_word(Int(words), W_SOURCE), Int64(_cstr(self.source)))
             self.words = Int(words)
             var tid = List[Int](length=1, fill=0)
-            var rc = external_call["pthread_create", c_int](Int(tid.unsafe_ptr()), Int(0), _entry, Int(words))
+            var rc = libc.pthread_create[_entry](Int(words), Int(tid.unsafe_ptr()))
             if rc != 0:
                 _A.store(_word(Int(words), W_STATE), -1)
                 _release(Int(words))
                 self.reason = "no thread for the microphone"
             else:
-                _ = external_call["pthread_detach", c_int](tid[0])
+                _ = libc.pthread_detach(tid[0])
 
     def _state(self) -> Int:
         return Int(_A.load(_word(self.words, W_STATE))) if self.words != 0 else (-1 if self.reason else 0)

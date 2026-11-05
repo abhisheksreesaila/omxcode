@@ -27,6 +27,7 @@ from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.shared import environment
 from std.ffi import external_call, c_int
+from mojoui import libc
 
 
 struct RenderJob(JobBody):
@@ -200,11 +201,11 @@ struct ReadFolderJob(JobBody):
             for f in out.fields[i]:
                 text += "," + csv_field(f.value)
             text += "\n"
-        var tmp = environment("TMPDIR", "/tmp") + "/mojoui-fields-" + String(Int(external_call["getpid", c_int]())) + "-" + String(now_ns()) + ".csv"
+        var tmp = environment("TMPDIR", "/tmp") + "/mojoui-fields-" + String(libc.getpid()) + "-" + String(now_ns()) + ".csv"
         with open(tmp, "w") as f:
             f.write(text)
         var imp = read_table(tmp)
-        _ = external_call["unlink", c_int](tmp.as_c_string_span())
+        _ = libc.unlink(tmp.copy())
         var card = TableCard(self.name, Sheet(imp.table, False), -1, 0, 0, 0, 0, Font(), self.pal)
         card.note = "read from " + String(len(self.files)) + " documents"
         out.card = card^
