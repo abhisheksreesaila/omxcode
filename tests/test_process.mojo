@@ -35,9 +35,13 @@ def main() raises:
     var t0 = now_ns()
     check(srv.wait_healthy("http://127.0.0.1:" + String(port) + "/items/1", 20_000), "serve_demo never got healthy: " + srv.log_tail())
     var up_ms = (now_ns() - t0) // 1_000_000
-    _ = srv.stop()
+    _ = libc.kill(srv.pid, 15)  # (SIGTERM to the server alone: mojoui.serve's stop watcher calls stop() and exits 0)
+    t0 = now_ns()
+    while srv.running() and now_ns() - t0 < 5_000_000_000:
+        _ = libc.poll(0, 0, 20)
+    check(not srv.running() and srv.exit_code() == 0, "serve_demo after SIGTERM: running " + String(srv.running()) + ", code " + String(srv.code))
     check(not healthy("http://127.0.0.1:" + String(port) + "/items/1"), "still answering after stop")
-    print("HEALTH: serve_demo answered after " + String(up_ms) + " ms; gone after stop")
+    print("HEALTH: serve_demo answered after " + String(up_ms) + " ms; SIGTERM: exit 0 through its stop watcher")
     # a crash
     var c = Process.start(["sh", "-c", "echo dying now; exit 3"], DIR + "/proc-crash-" + tag + ".log")
     check(not c.wait_healthy("http://127.0.0.1:9/", 3000), "a crashing child reported healthy")

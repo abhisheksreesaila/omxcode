@@ -17,8 +17,12 @@
 # Streams: a reply can be a Pipe, a byte queue another thread fills while the client reads (SSE, a long log, a proxied
 # upstream). `proxy(request, pipe)` relays an upstream reply into one byte for byte, on its own thread: what an API
 # gateway does. Built with -D MOJOUI_FLARE (scripts/mojo_flare.sh); Linux and macOS.
+# Limit: Reply.stream(pipe, wait_head_ms) holds a server worker while it waits for the upstream's head, so a proxy to the
+# same server can wait on itself (its upstream request may land on that worker); proxy to another process (D-4777).
+# SIGTERM / SIGINT: Service.stop() runs under the lock, then the process exits (a byte on a socket; see _on_stop_signal).
 
 from std.os import getenv
+from std.sys import CompilationTarget, exit
 from std.memory.alloc import unsafe_alloc
 from std.ffi import c_int
 from std.atomic import Atomic
@@ -132,13 +136,13 @@ def decode(s: String) -> String:
         var c = b[i]
         if c == 43:  # '+'
             out.append(32)
-        elif c == 37 and i + 2 < len(b) + 0 and _hex(b[i + 1]) >= 0 and _hex(b[i + 2]) >= 0:
+        elif c == 37 and i + 2 < len(b) and _hex(b[i + 1]) >= 0 and _hex(b[i + 2]) >= 0:
             out.append(UInt8(_hex(b[i + 1]) * 16 + _hex(b[i + 2])))
             i += 2
         else:
             out.append(c)
         i += 1
-    return String(unsafe_from_utf8=out)
+    return utf8_lossy(out)  # (escapes that aren't UTF-8, %FF or a lone %C3, become U+FFFD, never a broken String)
 
 
 def _hex(c: UInt8) -> Int:
@@ -413,6 +417,12 @@ struct Reply(Movable):
         self.values.append(value)
         return self^
 
+    def __deinit__(deinit self):
+        if self.pipe != 0:  # (a stream reply never handed to Flare: its share of the pipe goes)
+            var p = Pipe.at(self.pipe)
+            p._leave()
+            p.release()
+
 
 # the app's side -----------------------------------------------------------------------------------------------------
 
@@ -422,6 +432,10 @@ trait Service(Movable, Deinitable):
 
     def tick(mut self):
         """Called every `tick_ms` (Server.run/start), under the same lock as answer(): timers, sweeps, idle work."""
+        ...
+
+    def stop(mut self):
+        """The process got SIGTERM or SIGINT: tidy up (children, files) under the lock; the process exits after."""
         ...
 
 
@@ -478,6 +492,7 @@ def _flare_reply(var reply: Reply) raises -> FlareResponse:
             if pipe.status() > 0:
                 status = pipe.status()
                 ctype = pipe.content_type()
+        reply.pipe = 0  # (the source owns the share from here)
         var out = stream_response[_PipeSource](_PipeSource(pipe), status)
         for i in range(len(reply.names)):
             if ctype != "" and reply.names[i].lower() == "content-type":
@@ -513,14 +528,36 @@ struct Server:
     def run[S: Service](var service: S, port: Int, host: String = "127.0.0.1", workers: Int = 8, tick_ms: Int = 0) raises:
         """Serves until the process ends. `workers` reactors (threads) share the port; the app's answer() runs under one
         lock either way. `tick_ms` > 0: tick() that often, on a thread of its own."""
+        Server._block_stop_signals()
         var srv = Server.bind(port, host)
         var state = Server._state(service^)
         if tick_ms > 0:
             Server._ticker[S](state, tick_ms)
+        Server._watch_stop[S](state)
         if workers <= 1:
             srv.serve(_Bridge[S](state))
         else:
             srv.serve(_Bridge[S](state), num_workers=workers, pin_cores=False)
+
+    @staticmethod
+    def _block_stop_signals():
+        """SIGTERM and SIGINT turned into a byte on a socket (the self-pipe trick): Mojo has no globals for a handler to
+        set, and the runtime's own threads exist before main, so blocking the signals can't cover them. The handler only
+        calls send() on the fixed descriptor STOP_FD (async-signal-safe, no memory); the stop watcher reads the byte."""
+        var fds = List[Int32](length=2, fill=-1)
+        if libc.socketpair(1, 1, 0, Int(fds.unsafe_ptr())) != 0:  # (AF_UNIX, SOCK_STREAM)
+            return
+        _ = libc.dup2(Int(fds[1]), STOP_FD)
+        _ = libc.close(Int(fds[1]))
+        _ = libc.dup2(Int(fds[0]), STOP_FD + 1)
+        _ = libc.close(Int(fds[0]))
+        _ = libc.signal(15, _on_stop_signal)
+        _ = libc.signal(2, _on_stop_signal)
+
+    @staticmethod
+    def _watch_stop[S: Service](state: Int) raises:
+        if not spawn[_stop_loop[S]](state):
+            raise Error("no thread for the server's stop watcher")
 
     @staticmethod
     def _ticker[S: Service](state: Int, every_ms: Int) raises:
@@ -533,11 +570,13 @@ struct Server:
     @staticmethod
     def start[S: Service](var service: S, port: Int = 0, host: String = "127.0.0.1", workers: Int = 4, tick_ms: Int = 0) raises -> Int:
         """Serves on a thread of its own; returns the port (port 0: one the system picks)."""
+        Server._block_stop_signals()
         var srv = Server.bind(port, host)
         var bound = Int(srv.local_addr().port)
         var st = Server._state(service^)
         if tick_ms > 0:
             Server._ticker[S](st, tick_ms)
+        Server._watch_stop[S](st)
         var job = unsafe_alloc[_Run[S]](1)
         job.unsafe_write(_Run[S](srv^, st, workers))
         var tid = List[Int](length=1, fill=0)
@@ -582,6 +621,33 @@ def _tick_loop[S: Service](addr: Int):
         _ = libc.pthread_mutex_lock(lock)
         app[].tick()
         _ = libc.pthread_mutex_unlock(lock)
+
+
+comptime STOP_FD = 1001  # (the stop socket's write end; its read end is STOP_FD + 1)
+
+
+def _on_stop_signal(sig: c_int) abi("C"):
+    var b = Int(sig)
+    _ = libc.send(STOP_FD, Int(Pointer(to=b)), 1, 0x4040 if CompilationTarget.is_linux() else 0x80)  # (MSG_DONTWAIT | MSG_NOSIGNAL)
+
+
+def _stop_loop[S: Service](state: Int):
+    """Waits for SIGTERM or SIGINT (a byte on the stop socket), then app.stop() under the lock and exit: a daemon's
+    children go with it."""
+    var sw = _P(unsafe_from_address=state)
+    var lock = Int((sw + S_LOCK)[])
+    var app = Pointer[S, MutUntrackedOrigin](unsafe_from_address=Int((sw + S_APP)[]))
+    var buf = List[UInt8](length=8, fill=0)
+    while True:
+        var n = libc.recv(STOP_FD + 1, Int(buf.unsafe_ptr()), 8, 0)
+        if n > 0:
+            break
+        if n == 0:
+            return  # (no stop socket: signals keep their default)
+    _ = libc.pthread_mutex_lock(lock)
+    app[].stop()
+    _ = libc.pthread_mutex_unlock(lock)
+    exit(0)
 
 
 # threads and the proxy ----------------------------------------------------------------------------------------------

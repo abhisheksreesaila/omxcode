@@ -24,6 +24,9 @@ from learn import notebook_json
 from meter import meter
 
 
+comptime MAX_WAITING = 4  # (/v1 calls waiting for a model's first bytes at once; the server has 8 workers)
+
+
 @fieldwise_init
 struct Open(Copyable, Movable):
     """A proxied /v1 request still streaming: logged when its pipe closes."""
@@ -152,10 +155,13 @@ struct Daemon(Service):
         self.settle()
         self.sup.sweep()
         if self.stopping:
-            for i in range(len(self.sup.children)):
-                _ = self.sup.children[i].proc.stop(10_000)
-            self.sup.children.clear()
+            self.stop()
             exit(0)
+
+    def stop(mut self):
+        """SIGTERM/SIGINT or /admin/shutdown: every max serve child stopped before the daemon goes."""
+        self.settle()
+        self.sup.stop_all_now()
 
     def answer(mut self, mut req: Req) -> Reply:
         self.settle()
@@ -351,6 +357,13 @@ struct Daemon(Service):
         if not m:
             self.store.log_request(now, app, name, route, 404, -1, -1, -1.0, 0.0, False)
             return error(404, "The model `" + name + "` is not registered. Run `mxc pull " + name + "`.", "model_not_found")
+        var waiting = 0
+        for k in range(len(self.open)):
+            if Pipe.at(self.open[k].pipe).status() == 0:
+                waiting += 1
+        if waiting >= MAX_WAITING:  # (each waits on a server worker for its model's first bytes; keep some for the rest)
+            self.store.log_request(now, app, name, route, 503, -1, -1, -1.0, 0.0, False)
+            return error(503, String(waiting) + " requests are already waiting for a model to answer; try again shortly.", "model_unavailable", "server_error")
         var i = self.sup.ensure(m.value())
         var ready = self.sup.check_ready(i)
         self.sup.children[i].in_flight += 1

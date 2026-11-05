@@ -171,8 +171,8 @@ struct Store(Movable):
     def app_for_key(self, secret: String, key_hash: String, now: Float64) raises -> String:
         """The app a /v1 key belongs to ("" when none or revoked); stamps last_used_at."""
         var app = self.db.one_text("SELECT app FROM keys WHERE key_hash = ? AND revoked_at IS NULL", [key_hash])
-        if app != "":
-            _ = self.db.run("UPDATE keys SET last_used_at = ? WHERE app = ?", [String(now), app])
+        if app != "":  # (gateway.py: written when unset or a minute old, not on every call)
+            _ = self.db.run("UPDATE keys SET last_used_at = ? WHERE app = ? AND (last_used_at IS NULL OR last_used_at <= ? - 60)", [String(now), app, String(now)])
         return app
 
     # the request log (gateway.py) -----------------------------------------------------------------------------------

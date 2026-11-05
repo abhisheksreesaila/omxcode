@@ -209,6 +209,20 @@ struct Process(Movable):
             _ = libc.poll(0, 0, 20)
         return self.code
 
+    def begin_stop(mut self):
+        """SIGTERM to its group and return at once (finish_stop later): for a caller that mustn't wait the grace out."""
+        if self.running():
+            _ = libc.kill(-self.pid, SIGTERM)
+            self.used_ns = now_ns()  # (the grace counts from here)
+
+    def finish_stop(mut self, grace_ms: Int = 10_000) -> Bool:
+        """After begin_stop: True once it has ended; SIGKILL to the group when the grace has passed."""
+        if not self.running():
+            return True
+        if self.idle_ms() >= grace_ms:
+            _ = libc.kill(-self.pid, SIGKILL)
+        return not self.running()
+
     def log_tail(self, max_bytes: Int = 4000) -> String:
         """The end of its log (whole lines where it can)."""
         return file_tail(self.log, max_bytes)

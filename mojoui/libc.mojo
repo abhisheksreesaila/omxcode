@@ -172,6 +172,52 @@ def environ() -> Int:
     return 0 if at == 0 else Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[]
 
 
+# signals (mojoui.serve's stop watcher) ------------------------------------------------------------------------------
+
+comptime SIGSET_BYTES = 128  # (sigset_t: 128 bytes on glibc, 4 on macOS; a buffer big enough for both)
+
+
+def sigemptyset(set: Int) -> Int:
+    return Int(external_call["sigemptyset", c_int](_p(set)))
+
+
+def sigaddset(set: Int, sig: Int) -> Int:
+    return Int(external_call["sigaddset", c_int](_p(set), c_int(sig)))
+
+
+def sigismember(set: Int, sig: Int) -> Int:
+    return Int(external_call["sigismember", c_int](_p(set), c_int(sig)))
+
+
+def sigpending(set: Int) -> Int:
+    return Int(external_call["sigpending", c_int](_p(set)))
+
+
+def sigwait(set: Int, sig_out: Int) -> Int:
+    return Int(external_call["sigwait", c_int](_p(set), _p(sig_out)))
+
+
+def pthread_sigmask(how: Int, set: Int, old: Int) -> Int:
+    """how: SIG_BLOCK (0 on Linux, 1 on macOS)."""
+    return Int(external_call["pthread_sigmask", c_int](c_int(how), _p(set), _p(old)))
+
+
+def socketpair(domain: Int, kind: Int, protocol: Int, fds: Int) -> Int:
+    """`fds`: the address of two c_ints."""
+    return Int(external_call["socketpair", c_int](c_int(domain), c_int(kind), c_int(protocol), _p(fds)))
+
+
+def dup2(fd: Int, to: Int) -> Int:
+    return Int(external_call["dup2", c_int](c_int(fd), c_int(to)))
+
+
+comptime SignalHandler = def(c_int) thin abi("C") -> None
+
+
+def signal(sig: Int, handler: SignalHandler) -> Int:
+    return external_call["signal", Int](c_int(sig), handler)
+
+
 # threads ------------------------------------------------------------------------------------------------------------
 
 comptime ThreadArg = Pointer[UInt8, MutUntrackedOrigin]

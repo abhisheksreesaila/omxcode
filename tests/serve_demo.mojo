@@ -42,6 +42,9 @@ struct Demo(Service):
     def tick(mut self):
         pass
 
+    def stop(mut self):
+        pass
+
     def answer(mut self, mut req: Req) -> Reply:
         self.served += 1
         if req.matches("GET", "/items/{id}"):

@@ -440,18 +440,32 @@ def model_name(home):
     return None
 
 
+MAX_ENTRY = "from max._entrypoints.pipelines import main"  # (MAX's bin/max: exec python -c '...' "$@")
+
+
+def is_max_serve(argv):
+    """`max serve` itself, by its argv: a file named max then "serve", or Python running MAX's own entry point (what
+    bin/max execs) then "serve"."""
+    if len(argv) >= 2 and os.path.basename(argv[0]) == "max" and argv[1] == "serve":
+        return True
+    return len(argv) >= 4 and argv[1] == "-c" and MAX_ENTRY in argv[2] and argv[3] == "serve"
+
+
 def tree(pid):
-    """(pid, command line) for pid and everything under it."""
-    out, todo = [], [pid]
+    """(pid, command line) for pid and everything under it; a process started (at any depth) by `max serve` reads
+    "[max serve] <its command>": MAX's own workers are part of the named exception (D-4755, D-4776)."""
+    out, todo = [], [(pid, False)]
     while todo:
-        p = todo.pop()
+        p, under_max = todo.pop()
         try:
-            cmd = Path(f"/proc/{p}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+            argv = [a.decode(errors="replace") for a in Path(f"/proc/{p}/cmdline").read_bytes().split(b"\0") if a]
         except OSError:
             continue
-        out.append((p, cmd))
+        cmd = " ".join(argv)
+        is_max = is_max_serve(argv)
+        out.append((p, ("[max serve] " + cmd) if under_max else cmd))
         kids = run(["pgrep", "-P", str(p)]).stdout.split()
-        todo += [int(k) for k in kids]
+        todo += [(int(k), under_max or is_max) for k in kids]
     return out
 
 
@@ -509,11 +523,19 @@ def m5():
 
         def seen():
             snap["tree"] = tree(d.p.pid)
+            for pid, cmd in snap["tree"]:
+                try:
+                    argv = [x.decode(errors="replace") for x in Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0") if x]
+                except OSError:
+                    continue
+                if is_max_serve(argv):
+                    snap["max_pid"] = pid
         n, text = chat_through(d, name, key, seen)
         if n < 3 or len(text) < 5:
             problems.append(f"the SDK read {n} pieces {text!r}")
         _m5_state["tree"] = snap.get("tree", [])
-        if not any("max" in c and "serve" in c for _, c in snap.get("tree", [])):
+        _m5_state["max_pid"] = snap.get("max_pid")
+        if not snap.get("max_pid"):
             problems.append("no `max serve` under consoled while the chat ran")
         st, body, _ = d.call("GET", "/admin/requests?limit=40")
         if st != 200 or name not in body.decode(errors="replace"):
@@ -544,8 +566,12 @@ def m6():
         ok, msg = m5()
         if not ok:
             return False, f"M5 first: {msg}"
+    exempt = []
     for pid, cmd in _m5_state["tree"]:
-        if "python" in cmd.lower() and not ("max" in cmd and "serve" in cmd):
+        if pid == _m5_state.get("max_pid") or cmd.startswith("[max serve] "):
+            exempt.append(cmd[:80])
+            continue
+        if "python" in cmd.lower():
             problems.append(f"Python under consoled: {cmd[:120]}")
     exe = BUILD / "console" / "linux" / "console"
     if not exe.exists():
@@ -569,7 +595,7 @@ def m6():
     for need in ("Serve", "Process", "FlareTransport"):
         if need not in comp:
             problems.append(f"docs/components.md has no {need}")
-    return not problems, "; ".join(problems) or "no Python but max serve; 48-M0 and 33-M5 pass; the matrix is fresh"
+    return not problems, "; ".join(problems) or f"no Python but max serve and its {len(exempt) - 1} workers ({'; '.join(exempt)[:300]}); 48-M0 and 33-M5 pass; the matrix is fresh"
 
 
 MILESTONES = [("M0", m0), ("M1", m1), ("M2", m2), ("M3", m3), ("M4", m4), ("M5", m5), ("M6", m6)]

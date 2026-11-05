@@ -4,6 +4,16 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 50: the framework serves, fetches and supervises; omxconsole's daemon in Mojo on it (2026-11-04/05)
+- **Setup:** worktree ../mojo-ui-g50, branch `goal-50-native` from main bfacc58; contract GOAL.md + docs/goals/50-check.py; report docs/goals/50-report.md; plan docs/plans/omxconsole-native.md (owner: "a convenient wrapper on Max Serve", "the star of the show is OMX code", "There is Flare … I would rather trust that").
+- **Worked:** Flare v0.12.0 (Mojo 1.1) vendored; HTTPS for every app (FlareTransport behind mojoui.http); mojoui.serve (routes, JSON, SSE pipes, proxy, ticks, SIGTERM stop); mojoui.process; mojoui.hash; examples/consoled answers the console's 18 reads from the real store and streams a real Qwen2.5-0.5B chat from `max serve` through its /v1 gateway to the OpenAI SDK, with keys, logging and idle unload.
+- **Broke and fixed:** 27 libc functions declared differently by mojoui and Flare (mojoui/libc.mojo + a lint); the engine declares three of them its own way (looked up at run time instead); Flare's shims not found outside pixi (RUNPATH); Flare's streaming client dropped request bodies (patched, report drafted); `max serve` needed its own env's CONDA_PREFIX and MODULAR_HOME; Mojo's runtime threads defeated signal blocking (self-pipe trick); a proxy to its own server can wait on itself (test fixed, limit documented).
+- **Open:** M6 is red on goal 33's M5 only, which fails identically on unchanged main on this machine (baseline ../mojo-ui-g50-baseline).
+- **Means:** an all-Mojo app can now be a server, an HTTPS client and a process supervisor; omxconsole's daemon is the proof, `max serve` the one named exception.
+- **Next:** goal 33's M5 cause; pulls/search over HTTPS; the `omxc` CLI.
+
+---
+
 ## Goal 47: "Why did the robot drop it?" on real public robot data (2026-10-31)
 - **Setup:** worktree t3-32644b84, branch `t3/robot-story-droid-data` from main e670647; contract docs/goals/47-GOAL.md + 47-check.py; report docs/goals/47-report.md. Data: DROID's LeRobot 720p ports (CC-BY-4.0), grown in the background (orchestrator steer): 63,344 episodes with telemetry (16.8M rows, 13 labs), video for 3,546; 28 GB on disk.
 - **Worked:** `mojoui/lerobot.py` (LeRobot source), `mojoui/signal.mojo` + `mojoui/telemetrychart.mojo` (lanes, one cursor, marks, spec lines); a fleet row opens its episode through links alone (`fleet.clip = episode.file` plays the row's clip, `fleet.episode = telemetry.episode` slices its rows into the lanes exactly in ~2 ms through a key index built once in a job (mojoui/logindex.mojo), `telemetry.t ~ episode.t` binds the cursor: player = cursor at 3 seeks); chart and pivot by lab; `JOIN LINKED` over 16.8M rows in 15–45 ms; the DROID paper linked by its `source`, read from its own text; packs with the release frame. 0 `SLOW:` at 50 ms through agent tools and on GTK (headless Xvfb, CPU drawing). Featured failure F00118: the shirt, pinched over the box, falls outside it when the gripper opens at 12.7 s (an earlier pick, F00119, was wrong: its shirt goes into the box, D-4718).

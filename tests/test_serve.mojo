@@ -2,7 +2,7 @@
 # own client (mojoui.effects, as an app sends requests). Routes and parameters, query values, JSON bodies, status codes,
 # headers both ways, the state's lock under 50 requests at once, an SSE stream written by a thread (a Pipe), a stream
 # proxied from an upstream (proxy), a dead upstream's 502, and a quick answer while a slow stream is still open.
-from mojoui.serve import Server, Service, Req, Reply, Pipe, spawn, proxy
+from mojoui.serve import Server, Service, Req, Reply, Pipe, spawn, proxy, decode
 from mojoui.http import Request, Response, Piece
 from mojoui.effects import start, Backend, InFlight
 from mojoui.json import Json, json_string
@@ -33,6 +33,9 @@ struct Api(Service):
         self.port = 0
 
     def tick(mut self):
+        pass
+
+    def stop(mut self):
         pass
 
     def answer(mut self, mut req: Req) -> Reply:
@@ -125,7 +128,9 @@ def check(ok: Bool, what: String) raises:
 def main() raises:
     var port = Server.start(Api(), workers=4)
     var base = "http://127.0.0.1:" + String(port)
-    _ = call(Request(0, "PUT", base + "/port", String(port)))
+    # the proxy's upstream is a second server: a proxy waiting on its own server's worker can wait on itself
+    var upstream = Server.start(Api(), workers=2)
+    _ = call(Request(0, "PUT", base + "/port", String(upstream)))
     # routes, parameters, query, headers both ways
     var r = call(Request.get(0, base + "/items/a%2Fb?x=hello%20world"))
     var j = Json.parse(r.text())
@@ -138,7 +143,10 @@ def main() raises:
     var e = call(Request.post_json(0, base + "/echo", '{"name": "Ada"}'))
     check(e.status == 200 and e.text() == '{"name": "Ada"}', "echo: " + e.text())
     check(call(Request.post_json(0, base + "/echo", "{nope")).status == 400, "bad JSON is a 400")
-    print("ROUTES: ok")
+    check(decode("%FF") == "\ufffd" and decode("a%C3") == "a\ufffd" and decode("%C3%A9+x") == "é x" and decode("%zz") == "%zz", "decode: " + decode("%FF"))
+    var bad = call(Request.get(0, base + "/items/%FF"))
+    check(bad.status == 200 and bad.text().find("\ufffd") >= 0, "a %FF path part: " + String(bad.status) + " " + bad.text())
+    print("ROUTES: ok (bad escapes decode to U+FFFD)")
     # the lock: 50 at once, each a read-modify-write
     var jobs = List[InFlight]()
     for _ in range(50):

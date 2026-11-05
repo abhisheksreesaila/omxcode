@@ -123,14 +123,27 @@ struct Supervisor(Movable):
     var max_cmd: String
     var idle_override: Int
     var children: List[Child]
+    var stopping: List[Child]  # (sent SIGTERM; killed by sweep after the grace, never waited on under the lock)
     var last_error: String
+    var gpu_cache: List[Gpu]
+    var gpu_at: Int
 
     def __init__(out self, home: String, max_cmd: String, idle_override: Int):
         self.home = home
         self.max_cmd = max_cmd
         self.idle_override = idle_override
         self.children = List[Child]()
+        self.stopping = List[Child]()
         self.last_error = ""
+        self.gpu_cache = List[Gpu]()
+        self.gpu_at = 0
+
+    def gpus(mut self) -> List[Gpu]:
+        """nvidia-smi's answer, kept 5 s (it takes ~50 ms to 3 s; callers hold the daemon's lock)."""
+        if self.gpu_at == 0 or now_ns() - self.gpu_at > 5_000_000_000:
+            self.gpu_cache = gpus()
+            self.gpu_at = now_ns()
+        return self.gpu_cache.copy()
 
     def log_path(self, name: String) -> String:
         try:
@@ -219,7 +232,7 @@ struct Supervisor(Movable):
                 self.children[i].proc.touch()
                 return i
             _ = self.children.pop(i)
-        var list = gpus()
+        var list = self.gpus()
         var gpu = self.pick_gpu(list)
         var total = 0
         for g in list:
@@ -235,18 +248,29 @@ struct Supervisor(Movable):
         """Ready yet? (One quick /health probe while starting.)"""
         if self.children[i].ready:
             return True
-        if healthy(self.children[i].base() + "/health", 300):
+        if healthy(self.children[i].base() + "/health", 150):
             self.children[i].ready = True
             self.children[i].ready_ns = now_ns()
         return self.children[i].ready
 
     def stop(mut self, name: String) -> Bool:
+        """SIGTERM now; sweep() finishes it (SIGKILL after 10 s): the caller holds the daemon's lock."""
         var i = self.find(name)
         if i < 0:
             return False
-        _ = self.children[i].proc.stop(10_000)
-        _ = self.children.pop(i)
+        var c = self.children.pop(i)
+        c.proc.begin_stop()
+        self.stopping.append(c^)
         return True
+
+    def stop_all_now(mut self):
+        """At exit: every child stopped and waited for (SIGKILL after 10 s)."""
+        while len(self.children) > 0:
+            var c = self.children.pop()
+            _ = c.proc.stop(10_000)
+        while len(self.stopping) > 0:
+            var p = self.stopping.pop()
+            _ = p.proc.stop(10_000)
 
     def sweep(mut self):
         """Forget children that ended; unload ready ones idle past their keep_alive (none in flight)."""
@@ -260,10 +284,17 @@ struct Supervisor(Movable):
                 _ = self.children.pop(i)
                 continue
             if c.ready and c.in_flight == 0 and c.keep_alive > 0 and c.proc.idle_ms() > c.keep_alive * 1000:
-                _ = c.proc.stop(10_000)
-                _ = self.children.pop(i)
+                var gone = self.children.pop(i)
+                gone.proc.begin_stop()
+                self.stopping.append(gone^)
                 continue
             i += 1
+        var k = 0
+        while k < len(self.stopping):
+            if self.stopping[k].proc.finish_stop(10_000):
+                _ = self.stopping.pop(k)
+            else:
+                k += 1
 
     def state(mut self, name: String) -> String:
         var i = self.find(name)
