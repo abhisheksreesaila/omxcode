@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en" class="oq-root oq-night oq-family-dev no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build a todo app · omxcode</title>
+<meta name="description" content="The second omxcode tutorial: a todo app in one Mojo file, with a list that grows, checkboxes, and tasks kept in SQLite. It runs as a native Linux app and a web app, is tested by the framework's test mode, and an AI agent can use it.">
+<meta property="og:title" content="Build a todo app with omxcode">
+<meta property="og:description" content="A list from your data, messages that carry an id, and tasks kept in SQLite: one Mojo file, native on Linux and on the web.">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/tasks/tasks-gtk.png">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="omxqua/src/fonts.css">
+<link rel="stylesheet" href="omxqua/src/tokens.css">
+<link rel="stylesheet" href="omxqua/src/components.css">
+<link rel="stylesheet" href="site.css">
+<style>
+section .head { max-width: 860px; }
+.code { margin: 0; font: 13px/1.7 var(--mono); color: var(--ink2); white-space: pre; overflow-x: auto; }
+.code .k { color: var(--ink); font-weight: 600; } .code .c { opacity: .62; } .code .s { color: var(--oq-ok); } .code .o { color: var(--ink); }
+.pane { border-radius: 20px; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); padding: 18px 20px; min-width: 0; }
+.file { font: 600 11.5px var(--mono); letter-spacing: .06em; color: var(--ink2); display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.file b { color: var(--ink); letter-spacing: 0; } .file button { margin-left: auto; font: 600 11px var(--mono); color: var(--ink2); background: none; border: 0; cursor: pointer; }
+.step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 28px; margin-top: 36px; align-items: start; }
+.step .say p { margin: 0 0 14px; color: var(--ink2); font-size: 16px; line-height: 1.6; } .step .say p b { color: var(--ink); font-weight: 600; }
+.step .say code, .facts3 code, .next code { font: 13.5px var(--mono); color: var(--ink); }
+.step .say ul { margin: 0 0 14px; padding-left: 20px; color: var(--ink2); font-size: 15.5px; line-height: 1.6; } .step .say li b { color: var(--ink); font-weight: 600; }
+.num2 { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--oq-surface-3); font: 600 13px var(--mono); color: var(--ink); margin-right: 10px; vertical-align: middle; }
+.note2 { font-size: 13.5px; color: var(--ink2); line-height: 1.5; margin-top: 12px; }
+.shots2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.shots2 figure { margin: 0; } .shots2 img { width: 100%; display: block; border-radius: 16px; box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); }
+.shots2 figcaption { font: 12.5px var(--mono); color: var(--ink2); margin-top: 8px; text-align: center; }
+.facts3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 36px; }
+.facts3 > div { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
+.facts3 .t { font: 600 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.facts3 h3 { font-size: 19px; margin: 8px 0 6px; } .facts3 p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
+.next { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 36px; }
+.next a { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; text-decoration: none; color: inherit; transition: box-shadow .2s, transform .2s; }
+.next a:hover { box-shadow: 0 0 0 1px var(--word); transform: translateY(-1px); }
+.next h3 { font-size: 18px; margin: 0 0 6px; } .next p { margin: 0; color: var(--ink2); font-size: 14.5px; line-height: 1.5; }
+@media (max-width: 960px) { .step { grid-template-columns: minmax(0, 1fr); } .facts3 { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .shots2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<nav class="lnav">
+  <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode <span class="sub">· tutorial 2</span></a>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#tasks">Tasks</a><a href="#state">State</a><a href="#screen">Screen</a><a href="#update">Update</a><a href="#run">Run</a><a href="#test">Test</a><a href="#agent">Agents</a></div>
+  <div class="right"><a class="cta" href="#tasks">Start</a></div>
+</nav>
+
+<main id="top">
+
+<section class="hero center" style="padding-bottom:40px">
+  <div class="wrap" style="display:block">
+    <div class="eyebrow rise"><span>Tutorial 2</span></div>
+    <h1 class="rise" data-words data-step="70" data-d0="120" style="font-size:clamp(48px,7vw,100px)">Build a todo app.</h1>
+    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">A list that grows as you type, a checkbox on every task, and tasks that are still there tomorrow, kept in SQLite.</span> <span class="two" data-words data-step="26" data-d0="1100">One file, about 110 lines. After <a href="start.html">your first app</a>.</span></p>
+    <div class="ctas rise"><span style="animation-delay:1500ms"><a class="cta" href="#tasks">Start</a></span><span style="animation-delay:1580ms"><a class="more" href="https://github.com/abhisheksreesaila/omxcode/blob/main/examples/tasks/app.mojo">The whole file</a></span></div>
+  </div>
+</section>
+
+<!-- What you'll build -->
+<section id="build" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">What you'll build</div>
+      <h2 class="rv">Tasks. <span class="two">Three new ideas.</span></h2>
+      <p class="lede rv">The app is already in the repository, in <code>examples/tasks/</code>; this page goes through it part by part. Every code block here is that file's own text, and a check fails if they ever differ.</p>
+    </div>
+    <div class="facts3">
+      <div class="rv"><div class="t">A list from data</div><h3>The view is a loop</h3><p>The screen has one row per task. <code>view</code> builds the rows in a plain <code>for</code> loop, so the list is always exactly the data.</p></div>
+      <div class="rv"><div class="t">Messages with an id</div><h3>One number says what and which</h3><p>Every row's checkbox and button send a message number that holds the task's id, so <code>update</code> knows which task was tapped.</p></div>
+      <div class="rv"><div class="t">Data that stays</div><h3>SQLite, in a few lines</h3><p><code>mojoui.sqlite</code> opens a database file and runs SQL. Close the app, open it again: your tasks are where you left them.</p></div>
+    </div>
+    <div class="shots2 rv" style="margin-top:28px">
+      <figure><img src="img/tasks/tasks-gtk.png" alt="The Tasks app in a native GTK window: a field, an Add button, Buy milk ticked, Call Ada not yet, and 1 left" loading="lazy"><figcaption>Linux · GTK 4, reopened: the tasks came back from the database</figcaption></figure>
+      <figure><img src="img/tasks/tasks-web.png" alt="The same app in a browser after the same steps" loading="lazy"><figcaption>the web · same file, same steps</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- 1. The tasks -->
+<section id="tasks">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 1</div>
+      <h2 class="rv">The tasks. <span class="two">A struct and a table.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><b>The imports:</b> the components from <code>mojoui</code>, <code>Checkbox</code> from <code>mojoui.overlays</code>, and the two helpers and the database for step 1's second half. The theme is the first tutorial's.</p>
+        <p><b>The messages</b> come next: plain numbers, one for each thing that can happen. <code>TYPING</code> and <code>ADD</code> are the field and the Add button.</p>
+        <p><code>TICK</code> and <code>REMOVE</code> are bases. Ticking task 7 sends <code>TICK + 7</code>; <code>update</code> subtracts the base to get the 7 back. Ids stay below a million, so the two ranges never meet.</p>
+        <p><b>A Task</b> is a struct with three fields. <code>@fieldwise_init</code> writes its constructor, so <code>Task(7, "Buy milk", False)</code> just works.</p>
+      </div>
+      <div class="pane rv"><div class="file">examples/tasks/<b>app.mojo</b></div>
+<pre class="code" data-file="examples/tasks/app.mojo"><span class="k">from</span> mojoui <span class="k">import</span> App, Event, View, VStack, HStack, Text, Button, TextField, TITLE, CAPTION, PROMINENT
+<span class="k">from</span> mojoui.overlays <span class="k">import</span> Checkbox
+<span class="k">from</span> mojoui.files <span class="k">import</span> config_dir
+<span class="k">from</span> mojoui.shared <span class="k">import</span> make_dir
+<span class="k">from</span> mojoui.sqlite <span class="k">import</span> Database
+<span class="k">from</span> mojoui.theme <span class="k">import</span> Theme
+<span class="k">from</span> themes.liquid <span class="k">import</span> liquid
+
+<span class="k">comptime</span> TYPING = 1
+<span class="k">comptime</span> ADD = 2
+<span class="k">comptime</span> TICK = 1_000_000<span class="c">  # TICK + a task's id: its box was ticked or cleared</span>
+<span class="k">comptime</span> REMOVE = 2_000_000<span class="c">  # REMOVE + a task's id: its Remove button</span>
+
+
+@fieldwise_init
+<span class="k">struct</span> Task(Copyable, Movable):
+    <span class="k">var</span> id: Int
+    <span class="k">var</span> title: String
+    <span class="k">var</span> done: Bool</pre></div>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><b>The database is the truth.</b> <code>open_db</code> opens the file (SQLite makes it the first time) and makes the table if it isn't there yet.</p>
+        <p>The file goes in the app's settings folder, <code>~/.config/tasks/</code>; <code>config_dir</code> picks it, and the checks point it somewhere temporary with <code>OMX_CONFIG</code>.</p>
+        <p><b>load</b> reads every task back. <code>prepare</code> makes a statement, <code>step</code> moves to the next row, and <code>int</code> and <code>text</code> read its columns.</p>
+        <p>Both say <code>raises</code>: SQLite can fail (a full disk, a locked file), and Mojo makes you say so.</p>
+      </div>
+      <div class="pane rv"><div class="file">examples/tasks/<b>app.mojo</b></div>
+<pre class="code" data-file="examples/tasks/app.mojo"><span class="k">def</span> open_db() <span class="k">raises</span> -&gt; Database:
+    make_dir(config_dir(<span class="s">"tasks"</span>))
+    <span class="k">var</span> db = Database(config_dir(<span class="s">"tasks"</span>) + <span class="s">"/tasks.db"</span>)
+    db.exec(<span class="s">"CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY, title TEXT, done INTEGER)"</span>)
+    <span class="k">return</span> db^
+
+
+<span class="k">def</span> load(db: Database) <span class="k">raises</span> -&gt; List[Task]:
+    <span class="k">var</span> tasks = List[Task]()
+    <span class="k">var</span> q = db.prepare(<span class="s">"SELECT id, title, done FROM tasks ORDER BY id"</span>)
+    <span class="k">while</span> q.step():
+        tasks.append(Task(q.int(0), q.text(1), q.int(2) == 1))
+    <span class="k">return</span> tasks^</pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. State -->
+<section id="state">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 2</div>
+      <h2 class="rv">The state. <span class="two">What the screen needs.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p>The app keeps three things: the tasks it last read, what's typed in the field so far, and a problem to show if the database failed.</p>
+        <p><code>__init__</code> can't raise, because an app has to start. So it tries to load, and if that fails it keeps SQLite's message and shows it instead of crashing. The <code>try</code> is how Mojo catches a <code>raises</code>.</p>
+        <p><code>title</code> and <code>theme</code> are as in <a href="start.html#write">the first tutorial</a>: the window's name and the Liquid look.</p>
+      </div>
+      <div class="pane rv"><div class="file">examples/tasks/<b>app.mojo</b></div>
+<pre class="code" data-file="examples/tasks/app.mojo"><span class="k">struct</span> Main(App):
+    <span class="k">var</span> tasks: List[Task]
+    <span class="k">var</span> draft: String
+    <span class="k">var</span> problem: String
+
+    <span class="k">def</span> __init__(out self):
+        self.tasks = List[Task]()
+        self.draft = <span class="s">""</span>
+        self.problem = <span class="s">""</span>
+        <span class="k">try</span>:
+            self.tasks = load(open_db())
+        <span class="k">except</span> e:
+            self.problem = String(e)</pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Screen -->
+<section id="screen">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 3</div>
+      <h2 class="rv">The screen. <span class="two">A loop makes the list.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><b>The rows:</b> one <code>HStack</code> per task, a checkbox and a Remove button side by side. The checkbox sends <code>TICK + t.id</code>; the button sends <code>REMOVE + t.id</code>.</p>
+        <p><code>.grow()</code> lets the checkbox take the spare width, which pushes Remove to the right edge; <code>.fill()</code> makes the row as wide as the column.</p>
+        <p><code>.tooltip</code> says which task a Remove button is for. A person sees it on hover, a screen reader says it, and an agent reads it (step 7).</p>
+        <p><b>The page:</b> a title, the field with its Add button, the rows, and a count of what's left. The field sends <code>TYPING</code> as you type and <code>ADD</code> when you press Return. The <code>^</code> in <code>rows^</code> hands the list over instead of copying it.</p>
+      </div>
+      <div class="pane rv"><div class="file">examples/tasks/<b>app.mojo</b></div>
+<pre class="code" data-file="examples/tasks/app.mojo">    <span class="k">def</span> view(self) -&gt; View:
+        <span class="k">var</span> rows = List[View]()
+        <span class="k">var</span> left = 0
+        <span class="k">for</span> t <span class="k">in</span> self.tasks:
+            <span class="k">if</span> <span class="k">not</span> t.done:
+                left += 1
+            rows.append(HStack(
+                Checkbox(t.title, t.done, on_toggle=TICK + t.id).grow(),
+                Button(<span class="s">"Remove"</span>, on_tap=REMOVE + t.id).tooltip(<span class="s">"Remove "</span> + t.title),
+            ).fill())
+        <span class="k">if</span> len(rows) == 0:
+            rows.append(Text(<span class="s">"Nothing to do yet"</span>, style=CAPTION))
+        <span class="k">if</span> self.problem != <span class="s">""</span>:
+            rows.append(Text(self.problem, style=CAPTION))
+        <span class="k">return</span> VStack(
+            Text(<span class="s">"Tasks"</span>, style=TITLE),
+            HStack(
+                TextField(self.draft, placeholder=<span class="s">"What needs doing?"</span>, on_change=TYPING, on_submit=ADD).grow(),
+                Button(<span class="s">"Add"</span>, on_tap=ADD, style=PROMINENT),
+            ).fill(),
+            VStack(rows^, spacing=8).fill(),
+            Text(String(left) + <span class="s">" left"</span>, style=CAPTION),
+            spacing=16,
+        ).padding(8).width(360)</pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. Update -->
+<section id="update">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 4</div>
+      <h2 class="rv">What happens. <span class="two">Change the table, read it back.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><b>Typing</b> only keeps the text. Nothing is saved until Add.</p>
+        <p><b>Add</b>, <b>Remove</b> and <b>a tick</b> each run one SQL statement. The <code>?</code> marks are filled in by <code>bind</code>, never pasted into the SQL, so a task called <code>'); DROP TABLE tasks; --</code> is just a task.</p>
+        <p>A checkbox's message carries its new state in <code>event.number</code>: 1 when ticked, 0 when cleared. That goes straight into the <code>done</code> column.</p>
+        <p>Then <code>load</code> reads the table again, and the screen follows. There's one source of truth, so the screen and the file can't drift apart. Remove is checked before Tick because its numbers are bigger.</p>
+      </div>
+      <div class="pane rv"><div class="file">examples/tasks/<b>app.mojo</b></div>
+<pre class="code" data-file="examples/tasks/app.mojo">    <span class="k">def</span> update(mut self, event: Event):
+        <span class="k">var</span> m = event.message
+        <span class="k">if</span> m == TYPING:
+            self.draft = event.text
+            <span class="k">return</span>
+        self.problem = <span class="s">""</span>
+        <span class="k">try</span>:
+            <span class="k">var</span> db = open_db()
+            <span class="k">if</span> m == ADD:
+                <span class="k">var</span> title = String(self.draft.strip())
+                <span class="k">if</span> title != <span class="s">""</span>:
+                    <span class="k">var</span> add = db.prepare(<span class="s">"INSERT INTO tasks(title, done) VALUES (?, 0)"</span>)
+                    add.bind(1, title)
+                    add.run()
+                self.draft = <span class="s">""</span>
+            <span class="k">elif</span> m &gt;= REMOVE:
+                <span class="k">var</span> remove = db.prepare(<span class="s">"DELETE FROM tasks WHERE id = ?"</span>)
+                remove.bind(1, m - REMOVE)
+                remove.run()
+            <span class="k">elif</span> m &gt;= TICK:
+                <span class="k">var</span> tick = db.prepare(<span class="s">"UPDATE tasks SET done = ? WHERE id = ?"</span>)
+                tick.bind(1, event.number)
+                tick.bind(2, m - TICK)
+                tick.run()
+            self.tasks = load(db)
+        <span class="k">except</span> e:
+            self.problem = String(e)</pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. Run -->
+<section id="run">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 5</div>
+      <h2 class="rv">Build it. Run it. <span class="two">Close it, open it again.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p>The same commands as the first app, with its folder's name. Add a few tasks, tick one, close the window, and run it again: they come back from <code>~/.config/tasks/tasks.db</code>.</p>
+        <p>The web build keeps its tasks in the same kind of file, on the machine that runs the server.</p>
+        <p><b>Mac:</b> <code>scripts/build.sh tasks mac</code> cross-builds it. This app hasn't run on a Mac yet, and the Mac's layout is still being fixed (<a href="start.html#run">as in the first tutorial</a>).</p>
+      </div>
+      <div class="pane rv"><div class="file">a terminal<button type="button" data-copy="#c-run">copy</button></div>
+<pre class="code" id="c-run">scripts/build.sh tasks linux
+build/tasks/linux/tasks                       <span class="c"># a native window</span>
+
+scripts/build.sh tasks web
+pixi run python mojoui/hosts/web.py build/tasks/web
+                                              <span class="c"># → http://127.0.0.1:5001</span></pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. Test -->
+<section id="test">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 6</div>
+      <h2 class="rv">Test it. <span class="two">The real widgets, no window.</span></h2>
+      <p class="lede rv">Every omxcode app has a test mode. You give it steps; it presses the real GTK widgets (or the real page, in Chromium), then prints what each one shows and quits.</p>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><code>MOJOUI_TEST</code> holds the steps, split by <code>;</code>. <code>type:</code> finds a field by its placeholder, <code>tap:</code> a button by its title, <code>submit:</code> presses Return, <code>toggle:</code> ticks a checkbox.</p>
+        <p><code>scripts/drive.py</code> runs the same steps on the web build, in a browser with no window, and prints the same lines. When the two outputs match, the app behaves the same on both.</p>
+        <p><code>OMX_CONFIG</code> keeps the test's database away from your real tasks.</p>
+        <p class="note2">Without a display (a server, a CI machine), the checks start a private one with <code>scripts/headless.py</code>.</p>
+      </div>
+      <div class="pane rv"><div class="file">a terminal<button type="button" data-copy="#c-test">copy</button></div>
+<pre class="code" id="c-test" data-output="gtk">export OMX_CONFIG=$(mktemp -d)
+MOJOUI_TEST="type:What needs doing?=Buy milk;tap:Add;\
+type:What needs doing?=Call Ada;submit:What needs doing?;\
+toggle:Buy milk" build/tasks/linux/tasks
+<span class="o">LABEL: Tasks
+FIELD:
+BUTTON: Add
+CHECK: Buy milk=on
+BUTTON: Remove
+CHECK: Call Ada=off
+BUTTON: Remove
+LABEL: 1 left</span>
+
+pixi run python scripts/drive.py build/tasks/web "…the same steps…"
+<span class="c"># the same lines, from Chromium</span></pre>
+        <p class="note2">The output is trimmed: both also print a few lines about the host (its version, the theme, fonts).</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. Agents -->
+<section id="agent">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 7</div>
+      <h2 class="rv">An agent keeps your list. <span class="two">Still no extra code.</span></h2>
+      <p class="lede rv">As in the first tutorial, <code>scripts/agent.sh tasks</code> gives the app to an MCP client. The field, the checkboxes and the buttons become its tools, and the tools change as the list does.</p>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p>Typing into the field with <code>submit</code> adds a task, and the agent is told about the tools that came with it: one checkbox and one Remove per task.</p>
+        <p>Two buttons are both called "Remove", so they're named <code>remove</code> and <code>remove-2</code>. The tooltip from step 3 is what tells the agent which is which.</p>
+        <p>A checkbox's tool needs <code>on</code>: the agent says what it wants, not "flip it", so calling it twice does no harm. Calling it without <code>on</code> is refused.</p>
+      </div>
+      <div class="pane rv"><div class="file">a terminal · what the agent sees</div>
+<pre class="code" data-output="agent"><span class="k">what-needs-doing</span> text="Buy milk" submit=true
+<span class="o">Did what-needs-doing.
+Now: 1 left
+Tools now 4; new: buy-milk, remove</span>
+
+<span class="k">what-needs-doing</span> text="Call Ada" submit=true
+<span class="o">Did what-needs-doing.
+Now: 2 left
+Tools now 6; new: call-ada, remove-2</span>
+
+<span class="k">buy-milk</span>
+<span class="o">ValueError: buy-milk needs "on"</span>
+
+<span class="k">buy-milk</span> on=true
+<span class="o">Did buy-milk.
+Now: 1 left</span>
+
+<span class="k">screen</span>
+<span class="o">Tasks · design: Liquid · 6 tools on this screen
+"Tasks"
+Field "" (placeholder "What needs doing?") → what-needs-doing
+Button "Add" → add
+Checkbox "Buy milk" = on → buy-milk
+Button "Remove" (Remove Buy milk) → remove
+Checkbox "Call Ada" = off → call-ada
+Button "Remove" (Remove Call Ada) → remove-2
+"1 left"</span></pre>
+        <p class="note2">Real output from <code>scripts/agent_client.py</code>, the small MCP client the checks use; the screen's list of tools is left off.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- Next -->
+<section id="next" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Next</div>
+      <h2 class="rv">Where to go from here.</h2>
+    </div>
+    <div class="next rv">
+      <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/examples/todo/app.mojo"><h3>More todo</h3><p><code>examples/todo</code>: filters with a dropdown, Clear done, a progress bar, a scrolling list.</p></a>
+      <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/examples/jot/app.mojo"><h3>A notes app</h3><p><code>examples/jot</code>: SQLite with full-text search as you type, and saving a moment after you stop.</p></a>
+      <a href="components.html"><h3>Components</h3><p>Every one, from buttons to data grids, charts and maps, with what runs where.</p></a>
+      <a href="agents.html"><h3>Agents build screens</h3><p>An AG-UI agent answers with maps, charts and forms, drawn natively.</p></a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="note">Every code block on this page is <code>examples/tasks/app.mojo</code>'s own text, and every output line shown is one the app printed: <code>scripts/tutorials.py</code> checks both, on one Linux machine.</p>
+    <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="start.html">← Your first app</a></div>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+<script>document.documentElement.classList.remove("no-js");</script>
+</body>
+</html>

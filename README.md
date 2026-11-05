@@ -235,6 +235,7 @@ struct Main(App):
 
 ## Read more
 
+- **Tutorials:** [your first app](https://abhisheksreesaila.github.io/omxcode/start.html), then [a todo app](https://abhisheksreesaila.github.io/omxcode/tasks.html) that keeps its tasks in SQLite (`examples/tasks`).
 - **[Reference](docs/reference.md):** the app model, every component, layout, the GPU canvas, the examples.
 - **[How it works](docs/architecture.md):** the view tree, the update loop, how each platform is reached.
 - **[The agent host](docs/agent.md):** the tools, what an agent gets back, what it can't do yet.

@@ -468,7 +468,7 @@ def m5():
 
 
 def m6():
-    """Nothing regressed: goal 35's M0–M3, the components matrix fresh with the Agent column, docs/agui.md rewritten."""
+    """Nothing regressed: goal 35's M0–M3, the components matrix fresh with the Agent column, the tutorials (scripts/tutorials.py), docs/agui.md rewritten."""
     problems = []
     g = g35()
     for label, fn in (("35-M0", g.m0), ("35-M1", g.m1), ("35-M2", g.m2), ("35-M3", g.m3)):
@@ -478,11 +478,14 @@ def m6():
     r = run(["pixi", "run", "python", "scripts/components.py", "--check"])
     if r.returncode != 0:
         problems.append("docs/components.md is stale: " + (r.stdout + r.stderr)[-200:])
+    r = run(["pixi", "run", "python", "scripts/tutorials.py"])
+    if r.returncode != 0:
+        problems.append("the tutorials: " + (r.stdout + r.stderr)[-300:])
     doc = (ROOT / "docs/agui.md").read_text()
     for need in ("AgentChat", "LocalAgent", "Confirm", "interrupt", "Skeleton", "goal 48"):
         if need not in doc:
             problems.append(f"docs/agui.md doesn't cover {need}")
-    return not problems, "; ".join(problems) or "goal 35's M0–M3 pass; the matrix is fresh; docs/agui.md covers goal 48"
+    return not problems, "; ".join(problems) or "goal 35's M0–M3 pass; the matrix is fresh; the tutorials hold; docs/agui.md covers goal 48"
 
 
 MILESTONES = [("M0", m0), ("M1", m1), ("M2", m2), ("M3", m3), ("M4", m4), ("M5", m5), ("M6", m6)]

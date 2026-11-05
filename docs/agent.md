@@ -47,7 +47,8 @@ The rest come from the screen (D-162):
 
 After every call the server sends `notifications/tools/list_changed` (D-164): call `screen` or `tools/list` again to
 see what the screen offers now. A wrong name or value comes back as an error result that lists the tools, so the agent
-can correct itself.
+can correct itself. A call without a required argument is refused too (`buy-milk needs "on"`), rather than
+guessed: a checkbox called without `on` would otherwise be cleared.
 
 ## JavaScript widgets, and attaching to a running host (goal 34b)
 A `WebComponent` is a tool pair, named by its tag (or, without one, its custom element's tag):

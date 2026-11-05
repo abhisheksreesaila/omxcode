@@ -16,6 +16,7 @@ The README, reference, architecture, agent host and components in one file: [llm
 ## Docs
 
 - [README](https://raw.githubusercontent.com/abhisheksreesaila/omxcode/main/README.md): what it is, what it feels like, measured numbers, how to try it
+- Tutorials: [your first app](https://abhisheksreesaila.github.io/omxcode/start.html) (a counter: install, build, run, Liquid, an agent) and [a todo app](https://abhisheksreesaila.github.io/omxcode/tasks.html) (`examples/tasks`: a list from data, messages that carry an id, SQLite, test mode, an agent); their code blocks are the files' text, checked by `scripts/tutorials.py`
 - [Reference](https://abhisheksreesaila.github.io/omxcode/reference.md): the app model, every component, layout, the GPU canvas, the examples
 - [How it works](https://abhisheksreesaila.github.io/omxcode/architecture.md): the view tree, the update loop, how each platform is reached
 - [The agent host](https://abhisheksreesaila.github.io/omxcode/agent.md): the MCP tools (screen, act, read, render), what an agent gets back, what it can't do yet

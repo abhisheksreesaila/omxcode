@@ -545,6 +545,9 @@ class Host:
         a = self.action(name)
         if a is None:
             raise ValueError(f'no tool "{name}" on this screen; the tools are: ' + ", ".join(x.name for x in self.actions))
+        missing = [k for k in a.schema.get("required", []) if k not in args]
+        if missing:  # (not a guess: a checkbox called without "on" would be cleared)
+            raise ValueError(f"{name} needs " + ", ".join(f'"{k}"' for k in missing))
         if a.how == "widget-read":
             self.reload()
             return self.widget_read(a.node)

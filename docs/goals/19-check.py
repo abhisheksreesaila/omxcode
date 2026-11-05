@@ -67,6 +67,9 @@ def m1():
             problems.append(f"the Save button's tooltip isn't its description: {tools['save']['description']!r}")
         if "show-grid-lines" in tools and tools["show-grid-lines"]["inputSchema"].get("required") != ["on"]:
             problems.append("a checkbox tool doesn't require `on`")
+        text, _, err = c.call("show-grid-lines")  # (D-4761: required means required; it used to clear the box)
+        if not err or '"on"' not in text:
+            problems.append(f"a checkbox tool called without `on` wasn't refused: {text[:120]!r}")
         screen, _, err = c.call("screen")
         if err or "Menu bar: File, Edit, View, Help" not in screen or "design: Ledger" not in screen or "Canvas" not in screen:
             problems.append(f"screen lacks the menu bar, the design or the canvas: {screen[:300]!r}")
