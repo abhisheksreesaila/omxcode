@@ -200,7 +200,7 @@ index 126a719..090c259 100644
          file.close()
      result.seconds = Float64(perf_counter_ns() - start_ns) / 1e9
 diff --git a/mojo/omxcore/fan.mojo b/mojo/omxcore/fan.mojo
-index e7db175..a1869eb 100644
+index e7db175..815c0ec 100644
 --- a/mojo/omxcore/fan.mojo
 +++ b/mojo/omxcore/fan.mojo
 @@ -12,6 +12,7 @@ Which threads:
@@ -211,19 +211,18 @@ index e7db175..a1869eb 100644
  from std.memory.alloc import unsafe_alloc
  from std.sys import CompilationTarget
  from .kernels._fpenv import SERIAL, par_n, core_count
-@@ -111,8 +112,9 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
-         var tids = unsafe_alloc[Int](workers)
+@@ -112,7 +113,9 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
          var started = 0
          for _ in range(workers - 1):                  # the calling thread is the last worker
--            var tid = Int(0)
+             var tid = Int(0)
 -            var rc = external_call["pthread_create", c_int](Pointer(to=tid), attr, _fan_entry[T], Int(fan))
 +            var made = _libc_pthread_create(Int(attr), _fan_entry[T], Int(fan))
 +            var rc = made[0]
-+            var tid = made[1]
++            tid = made[1]
              if rc != 0:
                  break                                 # no more threads to be had: the rest of the work falls to the ones running
              tids[started] = tid
-@@ -121,7 +123,7 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
+@@ -121,7 +124,7 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
          attr.free()
          _fan_loop[T](Pointer[_Fan[T], MutUntrackedOrigin](unsafe_from_address=Int(fan)))
          for k in range(started):
