@@ -308,6 +308,24 @@ struct Database(Movable):
             return 0
         return q.int(0)
 
+    def one_text(self, sql: String, args: List[String] = List[String]()) raises -> String:
+        """The first column of the first row as text ("" when no row), each ? bound to the next of `args` as text: a
+        reply SQLite builds itself, e.g. "SELECT json_group_array(json_object('name', name)) FROM models WHERE kind = ?"."""
+        var q = self.prepare(sql)
+        for i in range(len(args)):
+            q.bind(i + 1, args[i])
+        if not q.step():
+            return ""
+        return q.text(0)
+
+    def run(self, sql: String, args: List[String] = List[String]()) raises -> Int:
+        """Runs one statement with each ? bound to the next of `args` as text; the rows it changed."""
+        var q = self.prepare(sql)
+        for i in range(len(args)):
+            q.bind(i + 1, args[i])
+        q.run()
+        return self.changes()
+
 
 def fts_prefix_query(typed: String) -> String:
     """What a person typed in a search box as an FTS5 query that finds every word as a prefix ("lisb tr" →

@@ -12,7 +12,7 @@ from mojoui import libc
 comptime EVENTS = 6
 
 
-def tick(addr: Int):
+def tick_events(addr: Int):
     """Writes EVENTS SSE events 60 ms apart, then closes."""
     var pipe = Pipe.at(addr)
     for i in range(EVENTS):
@@ -31,6 +31,9 @@ struct Api(Service):
     def __init__(out self):
         self.count = 0
         self.port = 0
+
+    def tick(mut self):
+        pass
 
     def answer(mut self, mut req: Req) -> Reply:
         if req.matches("PUT", "/port"):
@@ -61,7 +64,7 @@ struct Api(Service):
         if req.matches("GET", "/sse"):
             var pipe = Pipe()
             var r = Reply.stream(pipe)
-            _ = spawn[tick](pipe.share().addr)
+            _ = spawn[tick_events](pipe.share().addr)
             pipe.release()
             return r^
         if req.matches("GET", "/proxy"):

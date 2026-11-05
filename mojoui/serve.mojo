@@ -420,6 +420,10 @@ trait Service(Movable, Deinitable):
     def answer(mut self, mut req: Req) -> Reply:
         ...
 
+    def tick(mut self):
+        """Called every `tick_ms` (Server.run/start), under the same lock as answer(): timers, sweeps, idle work."""
+        ...
+
 
 comptime S_LOCK = 0
 comptime S_APP = 1
@@ -506,23 +510,36 @@ struct Server:
         return Int(w)
 
     @staticmethod
-    def run[S: Service](var service: S, port: Int, host: String = "127.0.0.1", workers: Int = 8) raises:
+    def run[S: Service](var service: S, port: Int, host: String = "127.0.0.1", workers: Int = 8, tick_ms: Int = 0) raises:
         """Serves until the process ends. `workers` reactors (threads) share the port; the app's answer() runs under one
-        lock either way."""
+        lock either way. `tick_ms` > 0: tick() that often, on a thread of its own."""
         var srv = Server.bind(port, host)
         var state = Server._state(service^)
+        if tick_ms > 0:
+            Server._ticker[S](state, tick_ms)
         if workers <= 1:
             srv.serve(_Bridge[S](state))
         else:
             srv.serve(_Bridge[S](state), num_workers=workers, pin_cores=False)
 
     @staticmethod
-    def start[S: Service](var service: S, port: Int = 0, host: String = "127.0.0.1", workers: Int = 4) raises -> Int:
+    def _ticker[S: Service](state: Int, every_ms: Int) raises:
+        var w = unsafe_alloc[Int64](2)
+        w[0] = Int64(state)
+        w[1] = Int64(every_ms)
+        if not spawn[_tick_loop[S]](Int(w)):
+            raise Error("no thread for the server's tick")
+
+    @staticmethod
+    def start[S: Service](var service: S, port: Int = 0, host: String = "127.0.0.1", workers: Int = 4, tick_ms: Int = 0) raises -> Int:
         """Serves on a thread of its own; returns the port (port 0: one the system picks)."""
         var srv = Server.bind(port, host)
         var bound = Int(srv.local_addr().port)
+        var st = Server._state(service^)
+        if tick_ms > 0:
+            Server._ticker[S](st, tick_ms)
         var job = unsafe_alloc[_Run[S]](1)
-        job.unsafe_write(_Run[S](srv^, Server._state(service^), workers))
+        job.unsafe_write(_Run[S](srv^, st, workers))
         var tid = List[Int](length=1, fill=0)
         if libc.pthread_create[_run_entry[S]](Int(job), Int(tid.unsafe_ptr())) != 0:
             raise Error("no thread for the server")
@@ -551,6 +568,20 @@ def _run_entry[S: Service](p: libc.ThreadArg) -> libc.ThreadArg:
     except e:
         print("mojoui.serve: the server stopped: " + String(e))
     return libc.null_arg()
+
+
+def _tick_loop[S: Service](addr: Int):
+    var w = _P(unsafe_from_address=addr)
+    var state = Int(w[0])
+    var every = Int((w + 1)[])
+    var sw = _P(unsafe_from_address=state)
+    var lock = Int((sw + S_LOCK)[])
+    var app = Pointer[S, MutUntrackedOrigin](unsafe_from_address=Int((sw + S_APP)[]))
+    while True:
+        _ = libc.poll(0, 0, every)
+        _ = libc.pthread_mutex_lock(lock)
+        app[].tick()
+        _ = libc.pthread_mutex_unlock(lock)
 
 
 # threads and the proxy ----------------------------------------------------------------------------------------------

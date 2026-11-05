@@ -39,6 +39,9 @@ struct Demo(Service):
     def __init__(out self):
         self.served = 0
 
+    def tick(mut self):
+        pass
+
     def answer(mut self, mut req: Req) -> Reply:
         self.served += 1
         if req.matches("GET", "/items/{id}"):

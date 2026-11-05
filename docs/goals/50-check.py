@@ -98,6 +98,9 @@ def http(method, url, body=None, headers=None, timeout=30):
         return e.code, e.read(), dict(e.headers)
 
 
+MAPS = {"by_model", "models"}  # (/admin/metrics by_model, /admin/series models: keyed by model name)
+
+
 def shape_diff(want, got, where="$"):
     """Where `got` doesn't have `want`'s shape: every key `want` has (recursively), the same JSON kind (null matches
     anything; int and float are both numbers); lists compare their first items when both have one."""
@@ -114,6 +117,14 @@ def shape_diff(want, got, where="$"):
         return []
     if kw != kg:
         return [f"{where}: {kg}, not {kw}"]
+    if isinstance(want, dict) and where.split(".")[-1] in MAPS:
+        # a map keyed by model name: which models appear is data (the store's requests), not shape; each value the
+        # reply has must have the recorded value's shape (M5 then requires the chatted model in both maps)
+        sample = next(iter(want.values()), None)
+        out = []
+        for k, v in got.items():
+            out += shape_diff(sample, v, f"{where}.{k}")
+        return out
     if isinstance(want, dict):
         out = []
         for k, v in want.items():
@@ -499,8 +510,11 @@ def m5():
         if st != 200 or name not in body.decode(errors="replace"):
             problems.append(f"/admin/requests doesn't show the chat: {st}")
         st, body, _ = d.call("GET", "/admin/metrics")
-        if st != 200:
-            problems.append(f"/admin/metrics: {st}")
+        if st != 200 or name not in json.loads(body).get("by_model", {}):
+            problems.append(f"/admin/metrics by_model doesn't have {name}: {st} {body[:200]!r}")
+        st, body, _ = d.call("GET", "/admin/series?range=5m")
+        if st != 200 or name not in json.loads(body).get("models", {}):
+            problems.append(f"/admin/series models doesn't have {name}: {st}")
         end = time.time() + 180
         while time.time() < end and any("serve" in c for _, c in tree(d.p.pid)[1:]):
             time.sleep(3)

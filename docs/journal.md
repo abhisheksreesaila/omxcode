@@ -1082,3 +1082,9 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - mojoui.process: `posix_spawnp(…, cargs[0], …, Int(cargs.unsafe_ptr()), …)` in one call: "use of invalidated interior reference" (an element and the list's pointer in one call); take them into locals first.
 - Counting processes through /proc/*/cmdline from Mojo found 1 of 3 (the files report size 0; read() then reads little); `kill(-pgid, 0)` asks the group directly.
 - test_process: SIGTERM'd child code 143; serve_demo healthy in 250 ms; crash exit 3 with its log tail; a TERM-ignoring group gone 622 ms after stop(600) with SIGKILL (137); a dropped Process stops its child.
+- consoled (M4): a helper agent wrote docs/goals/50/admin-api-spec.md from the Python daemon (389 lines, errors checked against the running app); the store's replies are built by SQLite (json_object / json_group_array), the rest in views.mojo.
+- `cp mst.db` misses the WAL (a copy without the labels table); scripts/store_copy.py and the check use SQLite's backup API.
+- An error inside a transaction left it open ("cannot start a transaction within a transaction"): answer() rolls back on any error.
+- A parameter named `range` shadows the builtin (`'String' does not implement __call__`).
+- M4's first run: only metrics by_model / series models differed (keyed by model name; the copied store has no requests in 5 minutes): the check compares them as maps now, M5 requires the chatted model in both (D-4773).
+- M4 PASS: 18 GETs in the recorded shapes, 13 models, labels and hashed keys across a restart, console Models / Overview / Keys on GTK against consoled (docs/goals/50/console-*-consoled-gtk.png).
