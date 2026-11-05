@@ -2,8 +2,8 @@
 # A pack is a MAX graph compiled once on our side (scripts/packs/*.py: Python there, never in the app) to a .mef, with
 # its weights in a .safetensors file; the app loads it through MAX's C library and calls it like a function.
 #
-#   var rt = MaxRuntime()                                         # finds MAX, loads libmax (once per process), a GPU if any
-#   var model = rt.load("build/packs/minilm/minilm.mef", "build/packs/minilm/minilm.safetensors")
+#   var m = shared_model("build/packs/minilm/minilm.mef", "build/packs/minilm/minilm.safetensors")   # loaded once per process
+#   var model = at[MaxModel](m)                                   # (kept for the process: a later call reuses it)
 #   var ins = List[TensorIn]()
 #   ins.append(TensorIn.i64(ids, [rows, cols]))
 #   var outs = model.run(ins, 1)                                  # output0 … as host arrays
@@ -14,18 +14,22 @@
 # an app that never loads a pack never loads MAX. MODULAR_MOJO_MAX_PACKAGE_ROOT is set to that root before the first
 # call (MAX needs it to find its runtime libraries). A model's inputs are named input0…, its outputs output0…; inputs
 # are host arrays (MAX stages them onto the GPU), outputs come back to host arrays. Everything the C library allocates
-# per call is freed per call. The first GPU call is slow (75–130 ms): load() runs nothing, warm() does.
+# per call is freed per call. A runtime and the packs it loads live for the process (shared_runtime, shared_model): an
+# app that runs a model again (each Apply, each script) reuses them instead of loading the weights onto the GPU again.
+# One thread at a time uses a model (a script's job: the jobs of one kind run one by one). prepare_max() sets MAX's
+# environment variable and loads the library on the calling thread (call it from the UI thread before a job's first
+# model: setenv isn't safe beside another thread's getenv). The first GPU call is slow (75–130 ms).
 
 from std.ffi import external_call, c_int, c_char
 from std.memory import Pointer
 from std.os import getenv, setenv
-from mojoui.shared import get_shared, put_shared
+from mojoui.shared import get_shared, put_shared, keep, at
 
 comptime M_FLOAT32 = 81  # MAX's M_Dtype codes (types.h)
 comptime M_INT64 = 141
 comptime M_INT32 = 139
 comptime M_UINT8 = 134
-comptime SLOT_MAX_LIB = 197  # mojoui.shared slot: libmax's handle
+comptime SLOT_MAX = 197  # mojoui.shared slot: the process's _MaxProcess (libmax's handle, the runtime, the loaded packs)
 
 comptime _P = def(Int) thin abi("C") -> Int
 comptime _V = def(Int) thin abi("C") -> NoneType
@@ -81,15 +85,47 @@ def max_root() -> String:
     return ""
 
 
+struct _MaxProcess(Movable):
+    """What this process holds of MAX, made once and kept: libmax's handle, the runtime, the loaded packs (by .mef)."""
+
+    var lib: Int
+    var runtime: Int  # at[MaxRuntime](runtime); 0: not made yet
+    var paths: List[String]
+    var models: List[Int]  # at[MaxModel](each)
+
+    def __init__(out self):
+        self.lib = 0
+        self.runtime = 0
+        self.paths = List[String]()
+        self.models = List[Int]()
+
+
+def prepare_max() raises:
+    """The environment writes, on this thread (the UI's; microseconds): MAX's package root, and the process's holder
+    for libmax, the runtime and the packs. A job then only reads the environment: the library, the runtime and each
+    pack are made into the holder in memory, by the job that first needs them (setenv beside another thread's getenv
+    isn't safe). Idempotent; without it the first call does both (fine on one thread: tests, tools)."""
+    _ = _process()
+
+
+def _process() raises -> Pointer[_MaxProcess, MutUntrackedOrigin]:
+    var have = get_shared(SLOT_MAX)
+    if have == 0:
+        var root = max_root()
+        if root == "":
+            raise Error("No MAX here: set OMX_MAX_ROOT to MAX's package root (the folder whose lib/ has libmax.so), or run inside the pixi environment")
+        if getenv("MODULAR_MOJO_MAX_PACKAGE_ROOT", "") == "":
+            _ = setenv("MODULAR_MOJO_MAX_PACKAGE_ROOT", root, True)
+        have = keep(_MaxProcess())
+        put_shared(SLOT_MAX, have)
+    return at[_MaxProcess](have)
+
+
 def _library() raises -> Int:
-    var have = get_shared(SLOT_MAX_LIB)
-    if have != 0:
-        return have
+    var proc = _process()
+    if proc[].lib != 0:
+        return proc[].lib
     var root = max_root()
-    if root == "":
-        raise Error("No MAX here: set OMX_MAX_ROOT to MAX's package root (the folder whose lib/ has libmax.so), or run inside the pixi environment")
-    if getenv("MODULAR_MOJO_MAX_PACKAGE_ROOT", "") == "":
-        _ = setenv("MODULAR_MOJO_MAX_PACKAGE_ROOT", root, True)
     var dlopen = _dlsym(0, "dlopen")
     if dlopen == 0:
         raise Error("maxrt: no dlopen in this process")
@@ -98,7 +134,7 @@ def _library() raises -> Int:
     if h == 0:
         var err = _dlsym(0, "dlerror")
         raise Error("maxrt: couldn't load " + path + ": " + (_c_text(_fn[_N](err)()) if err != 0 else String("")))
-    put_shared(SLOT_MAX_LIB, h)
+    proc[].lib = h
     return h
 
 
@@ -268,19 +304,21 @@ struct MaxModel(Movable):
                     _ = name
                     lib.check(st, name + " of " + self.path)
                     var hy = y
-                    if _fn[_I](lib.is_host_device)(_fn[_P](lib.tensor_device)(y)) == 0:
-                        hy = _fn[_PPP](lib.copy_tensor_to_device)(y, self.host, st)
-                        lib.check(st, "copying " + name + " back")
-                    var n = _fn[_P](lib.tensor_elements)(hy)
-                    var bytes = n * 4  # (packs answer in float32: maxrt's contract)
-                    var b = List[UInt8](length=bytes, fill=0)
-                    var src = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=_fn[_P](lib.tensor_data)(hy))
-                    for i in range(bytes):
-                        b[i] = src[i]
-                    if hy != y:
-                        _fn[_V](lib.free_tensor)(hy)
-                    _fn[_V](lib.free_tensor)(y)
-                    got.append(TensorOut(b^, n))
+                    try:
+                        if _fn[_I](lib.is_host_device)(_fn[_P](lib.tensor_device)(y)) == 0:
+                            hy = _fn[_PPP](lib.copy_tensor_to_device)(y, self.host, st)
+                            lib.check(st, "copying " + name + " back")
+                        var n = _fn[_P](lib.tensor_elements)(hy)
+                        var bytes = n * 4  # (packs answer in float32: maxrt's contract)
+                        var b = List[UInt8](length=bytes, fill=0)
+                        var src = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=_fn[_P](lib.tensor_data)(hy))
+                        for i in range(bytes):
+                            b[i] = src[i]
+                        got.append(TensorOut(b^, n))
+                    finally:
+                        if hy != y and hy != 0:
+                            _fn[_V](lib.free_tensor)(hy)
+                        _fn[_V](lib.free_tensor)(y)
             finally:
                 _fn[_V](lib.free_tensor_map)(outs)
             return got^
@@ -331,7 +369,14 @@ struct MaxRuntime(Movable):
         if gpu and self.gpu == 0:
             raise Error(mef + " is a GPU pack and there is no GPU here")
         var lib = self.lib
-        var st = self.status
+        var st = _fn[_N](lib.new_status)()  # (its own: a failed load leaves no error behind for the next)
+        try:
+            return self._load(mef, weights, gpu, st)
+        finally:
+            _fn[_V](lib.free_status)(st)
+
+    def _load(mut self, mef: String, weights: String, gpu: Bool, st: Int) raises -> MaxModel:
+        var lib = self.lib
         var cc = List[Int](length=1, fill=0)
         cc[0] = _fn[_N](lib.new_compile_config)()
         var path = mef + "\0"
@@ -358,3 +403,24 @@ struct MaxRuntime(Movable):
         _ = cc[0]  # (MAX reads the compile config's cell and the path until the model has started: they live until here,
         _ = path   # else Mojo frees them right after the compile call and init reads freed memory)
         return MaxModel(lib, self.ctx, self.host, self.gpu if gpu else self.host, model, gpu, mef)
+
+
+def shared_runtime(use_gpu: Bool = True) raises -> Int:
+    """The process's MaxRuntime (made the first time), as an address: at[MaxRuntime](it)."""
+    var proc = _process()
+    if proc[].runtime == 0:
+        proc[].runtime = keep(MaxRuntime(use_gpu))
+    return proc[].runtime
+
+
+def shared_model(mef: String, weights: String = "", gpu: Bool = True) raises -> Int:
+    """A pack loaded once per process (the same .mef again: the same model), as an address: at[MaxModel](it)."""
+    var proc = _process()
+    for k in range(len(proc[].paths)):
+        if proc[].paths[k] == mef:
+            return proc[].models[k]
+    var m = at[MaxRuntime](shared_runtime())[].load(mef, weights, gpu)
+    var addr = keep(m^)
+    proc[].paths.append(mef)
+    proc[].models.append(addr)
+    return addr

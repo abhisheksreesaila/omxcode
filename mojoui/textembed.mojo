@@ -2,8 +2,7 @@
 # scripts/packs/minilm.py) run through mojoui.maxrt, tokenized by mojoui.wordpiece. Vectors are L2-normalised, so a
 # dot product is the cosine: what classify() (mojoui.models) compares.
 #
-#   var rt = MaxRuntime()
-#   var e = Embedder(rt, "build/packs/minilm")   # (a pack folder: <its name>.mef, .safetensors, vocab.txt, prefix.txt)
+#   var e = Embedder("build/packs/minilm")   # (a pack folder: <its name>.mef, .safetensors, vocab.txt, prefix.txt)
 #   var v = e.embed(texts)                 # len(texts) × e.dim floats, row by row
 #
 # Each text starts with the pack's prefix.txt when it has one (e5's "query: ", as its model card asks).
@@ -11,23 +10,24 @@
 # pads little, and the vectors come back in the order asked.
 
 from std.math import sqrt
-from mojoui.maxrt import MaxRuntime, MaxModel, TensorIn
+from mojoui.maxrt import MaxModel, TensorIn, shared_model
+from mojoui.shared import at
 from mojoui.wordpiece import Vocab
 from mojoui.video import file_exists
 
 
 struct Embedder(Movable):
     var vocab: Vocab
-    var model: MaxModel
+    var model: Int  # the pack, loaded once per process (mojoui.maxrt.shared_model): at[MaxModel](model)
     var dim: Int
     var most: Int  # tokens per text at most
     var prefix: String
 
-    def __init__(out self, mut rt: MaxRuntime, pack: String, dim: Int = 384, most: Int = 128) raises:
+    def __init__(out self, pack: String, dim: Int = 384, most: Int = 128) raises:
         var dir = String(pack.rstrip("/"))
         var name = String(dir[byte = dir.rfind("/") + 1 :])
         self.vocab = Vocab(dir + "/vocab.txt")
-        self.model = rt.load(dir + "/" + name + ".mef", dir + "/" + name + ".safetensors", gpu=True)
+        self.model = shared_model(dir + "/" + name + ".mef", dir + "/" + name + ".safetensors", gpu=True)
         self.dim = dim
         self.most = most
         self.prefix = open(dir + "/prefix.txt", "r").read() if file_exists(dir + "/prefix.txt") else String("")
@@ -47,7 +47,7 @@ struct Embedder(Movable):
         var ins = List[TensorIn]()
         ins.append(TensorIn.i64(a, [rows, cols]))
         ins.append(TensorIn.f32(m, [rows, cols]))
-        var v = self.model.run(ins, 1)[0].floats()
+        var v = at[MaxModel](self.model)[].run(ins, 1)[0].floats()
         for r in range(rows):
             var s = 0.0
             for k in range(self.dim):

@@ -6,7 +6,7 @@
 from std.testing import assert_equal, assert_true
 from std.os import getenv
 from std.time import perf_counter_ns
-from mojoui.maxrt import MaxRuntime, TensorIn
+from mojoui.maxrt import MaxRuntime, TensorIn, prepare_max
 
 
 def close(a: Float64, b: Float64, tol: Float64) -> Bool:
@@ -16,6 +16,11 @@ def close(a: Float64, b: Float64, tol: Float64) -> Bool:
 def main() raises:
     var dir = getenv("TINY_PACK", "build/packs/tiny")
     var reference = open(dir + "/reference.json", "r").read()
+    var tp = perf_counter_ns()
+    prepare_max()  # (what an app does on its UI thread before a model's first job)
+    var prep_ms = Float64(perf_counter_ns() - tp) / 1e6
+    assert_true(prep_ms < 5.0, "prepare_max is cheap enough for the UI thread: " + String(prep_ms) + " ms")
+    print("prepare_max ms", prep_ms)
     var rt = MaxRuntime()
     var cpu = rt.load(dir + "/tiny_cpu.mef", gpu=False)
     var xs: List[Float32] = [1, 2, 3, 4, 0, 0, 0, 0]
@@ -23,7 +28,7 @@ def main() raises:
     ins.append(TensorIn.f32(xs, [2, 4]))
     var y = cpu.run(ins, 1)[0].floats()
     var want: List[Float32] = [7.0, 0.0, 8.5, 1.0, 0.0, 0.5]  # (reference.json's "cpu")
-    assert_true(reference.find("[7.0, 0.0, 8.5, 1.0, 0.0, 0.5]") >= 0 or reference.find("7.0,") >= 0, "the reference is Python's: " + reference[byte=:80])
+    assert_true(reference.find("\"cpu\": [\n  7.0,\n  0.0,\n  8.5,\n  1.0,\n  0.0,\n  0.5\n ]") >= 0, "the numbers are Python's: " + reference[byte=:120])
     assert_equal(len(y), 6)
     for i in range(6):
         assert_equal(y[i], want[i])

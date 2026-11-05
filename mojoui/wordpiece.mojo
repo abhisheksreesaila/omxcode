@@ -5,7 +5,7 @@
 #   var vocab = Vocab(pack + "/vocab.txt")
 #   var ids = vocab.ids("Put the peach shirt in the box")      # [101, 2404, 1996, …, 102]
 #
-# Bytes above 127 (accents, other scripts) are kept inside words as they are, not accent-stripped or split per CJK
+# Bytes above 127 (accents, other scripts) are kept inside words as they are (pieces end only between characters), not accent-stripped or split per CJK
 # character as BERT's full basic tokenizer does: English is exact, other text close (a known difference).
 
 comptime CLS = 101
@@ -47,6 +47,7 @@ struct Vocab(Movable):
     def _word(self, word: String, mut out: List[Int]):
         """One word's pieces (greedy longest match), or [UNK]."""
         var n = word.byte_length()
+        var bytes = word.as_bytes()
         if n > MAX_WORD:
             out.append(UNK)
             return
@@ -56,6 +57,9 @@ struct Vocab(Movable):
             var end = n
             var found = -1
             while end > start:
+                if end < n and (bytes[end] & 0xC0) == 0x80:  # (never inside a UTF-8 character: shorter by a whole one)
+                    end -= 1
+                    continue
                 var sub = String(word[byte=start:end])
                 if start > 0:
                     sub = "##" + sub

@@ -2,8 +2,7 @@
 # scripts/packs/yolox.py builds) through mojoui.maxrt, the network on the GPU; the letterbox before it and the box
 # decoding and non-maximum suppression after it in Mojo. 80 COCO classes.
 #
-#   var rt = MaxRuntime()
-#   var d = Detector(rt, "build/packs/yolox")
+#   var d = Detector("build/packs/yolox")          # (the pack loaded once per process: mojoui.maxrt.shared_model)
 #   var boxes = d.detect_rgb(pixels, w, h)          # RGB bytes, row by row → List[Box]: cls, score, x, y, w, h (pixels)
 #   var boxes = d.detect_rgba(frame, w, h)          # a video frame (mojoui.video: one UInt32 per pixel, RGBA in memory)
 #   COCO_NAMES[b.cls]
@@ -14,7 +13,8 @@
 
 from std.math import exp
 from std.memory import Pointer
-from mojoui.maxrt import MaxRuntime, MaxModel, TensorIn
+from mojoui.maxrt import MaxModel, TensorIn, shared_model
+from mojoui.shared import at
 
 comptime SIZE = 416
 comptime CELLS = 3549  # 52² + 26² + 13² (strides 8, 16, 32)
@@ -106,20 +106,20 @@ def decode(raw: List[Float32], conf: Float64, scale: Float64) -> List[Box]:
 
 
 struct Detector(Movable):
-    var model: MaxModel
+    var model: Int  # at[MaxModel](model)
     var conf: Float64
     var iou: Float64
 
-    def __init__(out self, mut rt: MaxRuntime, pack: String, conf: Float64 = 0.25, iou: Float64 = 0.45) raises:
+    def __init__(out self, pack: String, conf: Float64 = 0.25, iou: Float64 = 0.45) raises:
         var dir = String(pack.rstrip("/"))
-        self.model = rt.load(dir + "/yolox.mef", dir + "/yolox.safetensors", gpu=True)
+        self.model = shared_model(dir + "/yolox.mef", dir + "/yolox.safetensors", gpu=True)
         self.conf = conf
         self.iou = iou
 
     def _run(mut self, var input: List[Float32], scale: Float64) raises -> List[Box]:
         var ins = List[TensorIn]()
         ins.append(TensorIn.f32(input, [1, SIZE, SIZE, 3]))
-        var raw = self.model.run(ins, 1)[0].floats()
+        var raw = at[MaxModel](self.model)[].run(ins, 1)[0].floats()
         return nms(decode(raw, self.conf, scale), self.iou)
 
     def detect_rgb(mut self, pixels: List[UInt8], w: Int, h: Int) raises -> List[Box]:

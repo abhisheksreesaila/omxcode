@@ -5,7 +5,6 @@
 from std.testing import assert_equal, assert_true
 from std.os import getenv
 from std.time import perf_counter_ns
-from mojoui.maxrt import MaxRuntime
 from mojoui.wordpiece import Vocab
 from mojoui.textembed import Embedder
 
@@ -38,10 +37,13 @@ def main() raises:
             if differ <= 3:
                 print("differs:", texts[i])
     assert_equal(differ, 0)
-    print("wordpiece: ok", len(texts), "texts, ids = Hugging Face's")
+    # UTF-8 anywhere: accents, an emoji, CJK: pieces or [UNK], never a cut character
+    for t in ["café crème brûlée", "pick the 🍎 up", "把杯子放在桌子上", "naïve ünïcödé", "x" * 0 + "ok"]:
+        var got = vocab.ids(t)
+        assert_true(len(got) >= 3 and got[0] == 101 and got[len(got) - 1] == 102, "ids for " + t)
+    print("wordpiece: ok", len(texts), "texts, ids = Hugging Face's; UTF-8 safe")
 
-    var rt = MaxRuntime()
-    var e = Embedder(rt, pack)
+    var e = Embedder(pack)
     var v = e.embed(texts)
     var raw = open(pack + "/ref_vectors.f32", "r").read_bytes()
     var ref_v = raw.unsafe_ptr().bitcast[Float32]()
@@ -53,6 +55,8 @@ def main() raises:
             c += Float64(v[i * e.dim + d]) * Float64(ref_v[i * e.dim + d])
         worst = min(worst, c)
     assert_true(worst >= 0.999, "worst cosine " + String(worst))
+    var again = Embedder(pack)
+    assert_equal(again.model, e.model)  # (the pack is loaded once per process)
     print("embed: ok worst cosine with the Python pack", worst)
 
     var many = List[String]()

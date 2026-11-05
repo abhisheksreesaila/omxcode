@@ -16,8 +16,8 @@
 #                                  x, y, w, h … as mojoui.videojobs.detections_table has them
 # Models arrive the same way (goal 50: detect, segment): a name here, frames in, a table out.
 
-from omxcore import Catalog, Table, Frame as MxFrame, INT as MX_INT, DECIMAL as MX_DECIMAL
-from mojoui.script import ScriptFunctions
+from omxcore import Catalog, Table, SharedTable, Frame as MxFrame, INT as MX_INT, DECIMAL as MX_DECIMAL
+from mojoui.script import ScriptFunctions, last_call
 from mojoui.video import VideoSource
 from mojoui.videotable import RegionsAnalyzer, ColourRange, scan
 from mojoui.vision_presets import warm_range, WAREHOUSE_CELL
@@ -119,7 +119,7 @@ struct VideoFunctions(ScriptFunctions, Copyable, Movable, Sized):
 
 def marks_from(sheet: Sheet) -> List[Mark]:
     """Boxes for a player's overlay from any table with frame, x, y, w, h columns (what regions() or a model's detect()
-    gives); none when it hasn't them all."""
+    gives); none when it hasn't them all. A row with an empty one of them has no box (skipped, not guessed)."""
     var out = List[Mark]()
     var f = sheet.index("frame")
     var x = sheet.index("x")
@@ -129,9 +129,19 @@ def marks_from(sheet: Sheet) -> List[Mark]:
     if f < 0 or x < 0 or y < 0 or w < 0 or h < 0:
         return out^
     for r in range(sheet.rows()):
-        try:
-            out.append(Mark(Int(sheet.plain_text(f, r)), Int(sheet.plain_text(x, r)), Int(sheet.plain_text(y, r)),
-                            Int(sheet.plain_text(w, r)), Int(sheet.plain_text(h, r)), False))
-        except:
-            pass
+        if sheet.is_null(f, r) or sheet.is_null(x, r) or sheet.is_null(y, r) or sheet.is_null(w, r) or sheet.is_null(h, r):
+            continue
+        out.append(Mark(Int(sheet.value(f, r)), Int(sheet.value(x, r)), Int(sheet.value(y, r)), Int(sheet.value(w, r)), Int(sheet.value(h, r)), False))
     return out^
+
+
+def applied_marks(script: String, names: List[String], tables: List[SharedTable], functions: List[String]) -> Tuple[String, List[Mark]]:
+    """The video the script's last call to one of `functions` (regions, detect…) ran on, and the boxes its result holds
+    (a script run's `names` and `tables`, in order); ("", none) when it called none or its result isn't there."""
+    var st = last_call(script, functions)
+    if not st or len(st.value().args) < 1 or st.value().name == "":
+        return (String(""), List[Mark]())
+    for k in range(len(names)):
+        if names[k] == st.value().name:
+            return (st.value().args[0], marks_from(Sheet(tables[k], False)))
+    return (String(""), List[Mark]())

@@ -30,8 +30,10 @@ from mojoui.theme import Palette
 from mojoui.timeseries import TimeSeries
 from mojoui.trackcard import is_track, series_from_sheet
 from mojoui.script import run_script
-from mojoui.videoscript import VideoFunctions
-from mojoui.models import ModelFunctions
+from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS, applied_marks
+from mojoui.models import ModelFunctions, FRAME_MODELS
+from mojoui.player import Mark
+from mojoui.maxrt import prepare_max
 
 
 struct TableFile(Movable):
@@ -88,6 +90,8 @@ struct ScriptAnswer(Movable):
     var problem: String
     var line: Int
     var milliseconds: Float64
+    var marked: String  # the video its last call on frames (regions, detect…) ran on ("": none) …
+    var marks: List[Mark]  # … and that result's boxes, for the video's player (made here, off the UI thread)
 
     def __init__(out self, var cards: List[TableCard], var log: List[String], problem: String, line: Int, milliseconds: Float64):
         self.cards = cards^
@@ -95,6 +99,8 @@ struct ScriptAnswer(Movable):
         self.problem = problem
         self.line = line
         self.milliseconds = milliseconds
+        self.marked = ""
+        self.marks = List[Mark]()
 
 
 struct TableFileJob(JobBody):
@@ -181,7 +187,14 @@ struct ScriptJob(JobBody):
             var card = TableCard(run.names[i], Sheet(run.tables[i], False), -1, 0, 0, 0, 0, font, self.pal)
             card.note = "a script"
             cards.append(card^)
-        return ScriptAnswer(cards^, run.log.copy(), run.problem, run.line, Float64(now_ns() - t0) / 1e6)
+        var answer = ScriptAnswer(cards^, run.log.copy(), run.problem, run.line, Float64(now_ns() - t0) / 1e6)
+        var on_frames = materialize[VIDEO_FUNCTIONS]()
+        for f in materialize[FRAME_MODELS]():
+            on_frames.append(f)
+        var m = applied_marks(self.text, run.names, run.tables, on_frames)
+        answer.marked = m[0]
+        answer.marks = m[1].copy()
+        return answer^
 
 
 struct ExportJob(JobBody):
@@ -278,6 +291,12 @@ struct TableWork(Movable):
                 taken.append(names[len(names) - 1])
         for v in videos.names:
             taken.append(v)
+        if text.find("classify(") >= 0 or text.find("detect(") >= 0:  # (a model: MAX's environment set here, not in the job: mojoui.maxrt)
+            try:
+                prepare_max()
+            except e:
+                self.problem = String(e)
+                return False
         self.script_ = start_ui_job(ScriptJob(names^, sheets^, videos^, taken^, text, pal))
         return True
 

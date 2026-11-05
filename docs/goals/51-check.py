@@ -164,8 +164,10 @@ def m4():
     slow = [l for l in s["trace"] if l.startswith("SLOW:")]
     if slow:
         bad.append(f"{len(slow)} SLOW: {slow[:2]}")
-    if not any(l.startswith("MARKS:") for l in s["trace"]):
-        bad.append("the boxes never reached the player (no MARKS: line)")
+    marks = [l for l in s["trace"] if l.startswith("MARKS:")]
+    drawn = int(re.search(r" (\d+) boxes", marks[-1]).group(1)) if marks and re.search(r" (\d+) boxes", marks[-1]) else -1
+    if drawn != len(rows):  # (review round 1: every row's box on the player, not just a MARKS: line)
+        bad.append(f"the player got {drawn} boxes, the result has {len(rows)} rows")
     shots = list((OUT / "shots").glob("*.png")) if (OUT / "shots").exists() else []
     if not shots:
         bad.append("no shots in build/g51/shots")

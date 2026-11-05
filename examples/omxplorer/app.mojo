@@ -99,9 +99,8 @@ from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE
 from mojoui.sample import sample_table
 from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, IDLE as ISLAND_IDLE, RUNNING as ISLAND_RUNNING, UNDO as ISLAND_UNDO, ERROR as ISLAND_ERROR
 from mojoui.tablejobs import TableWork, TableFile, Answer, ScriptAnswer
-from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS, marks_from
+from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS
 from mojoui.models import FRAME_MODELS
-from mojoui.script import last_call
 from mojoui.scriptpanel import ScriptPanel, SP_RUN, SP_EXPORT, SP_OPEN, SP_CLOSED
 from mojoui.recipe import Recipe, RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
@@ -120,7 +119,7 @@ from mojoui.telemetrychart import TelemetryChart
 from mojoui.mapview import MapMark, MARK_PLACE, MARK_FINDING
 from mojoui.inspection_tables import is_places, read_places, compare_job, flight_plan, place_marks
 from mojoui.vision_presets import DRONE_MATCH_M
-from mojoui.player import SCRUB as PLAYER_SCRUB
+from mojoui.player import SCRUB as PLAYER_SCRUB, Mark
 from mojoui.view import SET_TO
 from mojoui.timeseries import TimeSeries
 from mojoui.videotable import VideoTable
@@ -405,6 +404,7 @@ struct Main(App):
     var query_said: String
     var script: ScriptPanel  # the Script window (its text, section, last run)
     var recipe_job: Optional[Job[Recipe]]  # Export recipe, running
+    var script_marked: String  # the video whose player shows a script's boxes ("": none)
     var inserting: Int  # Insert > Video… or Image… open: OBJ_VIDEO or OBJ_IMAGE (0: closed)
     var active: Int  # the object the inspector shows (-1: none)
     var chart_sizes: List[Tuple[Float64, Float64]]  # per canvas id: points from the last draw (taps)
@@ -538,6 +538,7 @@ struct Main(App):
         self.query_said = ""
         self.script = ScriptPanel(SCRIPT_MSG)
         self.recipe_job = None
+        self.script_marked = ""
         self.inserting = 0
         self.active = -1
         self.chart_sizes = List[Tuple[Float64, Float64]](length=1000, fill=(400.0, 240.0))
@@ -2103,20 +2104,20 @@ struct Main(App):
             self.work.problem = ""
         self.version += 1
 
-    def mark_applied(mut self):
-        """The boxes the script's last call on a video found (regions, detect…), drawn over that video's player."""
-        var st = last_call(self.script.bound, self.script.functions)
-        if not st or len(st.value().args) < 1 or st.value().name == "":
-            return
-        var at = self.tables.find(st.value().name)
-        if at < 0:
-            return
-        var marks = marks_from(self.tables.cards[at].sheet)
+    def mark_applied(mut self, video: String, marks: List[Mark]):
+        """The boxes a script's last call on a video found (made in its job: ScriptAnswer.marks), over that video's
+        player; the boxes an earlier run drew on another video go."""
         for k in range(len(self.media.cards)):
-            if self.media.cards[k].kind == OBJ_VIDEO and self.media.cards[k].player and sql_name(self.media.cards[k].title()) == st.value().args[0]:
+            if self.media.cards[k].kind != OBJ_VIDEO or not self.media.cards[k].player:
+                continue
+            var name = sql_name(self.media.cards[k].title())
+            if name == video:
                 self.media.cards[k].player.value().set_marks(marks)
-                if self.trace:
-                    print("MARKS: " + st.value().args[0] + " " + String(len(marks)) + " boxes from " + st.value().name, flush=True)
+            elif name == self.script_marked:
+                self.media.cards[k].player.value().set_marks(List[Mark]())
+        self.script_marked = video
+        if self.trace and video != "":
+            print("MARKS: " + video + " " + String(len(marks)) + " boxes", flush=True)
 
     def export_recipe(mut self):
         """Export: the script, the last run's results as CSV and the applied section's clip, as a folder in your
@@ -2212,7 +2213,7 @@ struct Main(App):
                 a.problem = String(e)
         self.timed(a.milliseconds)
         self.script.ran(a.log.copy(), a.problem, names^)
-        self.mark_applied()
+        self.mark_applied(a.marked, a.marks)
         if a.problem != "":
             self.message = "Script: " + a.problem
             self.say(Activity.error("Script", a.problem))

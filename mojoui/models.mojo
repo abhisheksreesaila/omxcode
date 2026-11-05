@@ -19,7 +19,6 @@ from omxcore import Catalog, Table, sql, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL,
 from mojoui.script import ScriptFunctions
 from mojoui.sheet import Sheet
 from mojoui.videoscript import VideoFunctions
-from mojoui.maxrt import MaxRuntime
 from mojoui.textembed import Embedder
 from mojoui.detect import Detector, coco_name
 from mojoui.video import VideoSource
@@ -73,8 +72,7 @@ struct ModelFunctions(ScriptFunctions, Movable):
         var labels = _texts(catalog, args[2], args[3])
         if len(labels) < 2:
             raise Error("classify needs at least two labels in " + args[2] + "." + args[3])
-        var rt = MaxRuntime()
-        var e = Embedder(rt, packs_dir() + "/" + CLASSIFY_PACK)
+        var e = Embedder(packs_dir() + "/" + CLASSIFY_PACK)
         var lv = e.embed(labels)
         var vv = e.embed(values, 1024)
         var d = e.dim
@@ -116,8 +114,7 @@ struct ModelFunctions(ScriptFunctions, Movable):
         var span = frame_span(video.fps, video.frames, from_s, to_s)
         if span[1] <= span[0]:
             raise Error("detect: no frames in that section")
-        var rt = MaxRuntime()
-        var d = Detector(rt, packs_dir() + "/yolox")
+        var d = Detector(packs_dir() + "/yolox")
         var t = Table.empty()
         var c_frame = t.add_column("frame", MX_INT)
         var c_t = t.add_column("t", MX_DECIMAL, 3)
