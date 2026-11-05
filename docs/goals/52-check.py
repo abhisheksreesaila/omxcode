@@ -103,7 +103,9 @@ def patch_scope():
             added.append(l[1:])
     if any("has_apple_gpu_accelerator" in l for l in added):
         return "the patch still uses has_apple_gpu_accelerator"
-    loose = [l.strip() for l in added if l.strip() and "_libc" not in l and "default_accelerator" not in l]
+    # (`made` holds a _libc_pthread_create result: (rc, thread id), D-5217)
+    loose = [l.strip() for l in added if l.strip() and "_libc" not in l and "default_accelerator" not in l
+             and not re.search(r"\bmade\[[01]\]$", l.strip())]
     if loose:
         return f"the engine patch adds other lines: {loose[:3]}"
     return None
