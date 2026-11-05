@@ -1079,3 +1079,6 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - test_serve: 50 parallel read-modify-writes all counted (the lock); 6 SSE events over 301 ms with a request answered meanwhile in 6 ms; the proxy relays them at the same pace; a dead upstream is a 502.
 - M2: the OpenAI Python SDK streamed 12 pieces from tests/serve_demo.mojo.
 - Note: this worktree's .pixi was copied (reflink) from mojo-ui-omxcode's; the Mojo it runs still points at that env's lib paths (RUNPATH shows them). Same Mojo 1.1; new packages (openai) went into this copy only.
+- mojoui.process: `posix_spawnp(…, cargs[0], …, Int(cargs.unsafe_ptr()), …)` in one call: "use of invalidated interior reference" (an element and the list's pointer in one call); take them into locals first.
+- Counting processes through /proc/*/cmdline from Mojo found 1 of 3 (the files report size 0; read() then reads little); `kill(-pgid, 0)` asks the group directly.
+- test_process: SIGTERM'd child code 143; serve_demo healthy in 250 ms; crash exit 3 with its log tail; a TERM-ignoring group gone 622 ms after stop(600) with SIGKILL (137); a dropped Process stops its child.

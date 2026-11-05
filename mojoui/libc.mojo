@@ -117,6 +117,61 @@ def strtod(text: Int) -> Float64:
     return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> Float64]()[](text, 0)
 
 
+# processes (mojoui.process) ----------------------------------------------------------------------------------------
+
+def kill(pid: Int, sig: Int) -> Int:
+    """`pid` < 0: the whole process group -pid."""
+    return Int(external_call["kill", c_int](c_int(pid), c_int(sig)))
+
+
+def waitpid(pid: Int, status_addr: Int, options: Int) -> Int:
+    """`status_addr`: where the C int status goes (an address, as Flare passes it)."""
+    return Int(external_call["waitpid", c_int](c_int(pid), status_addr, c_int(options)))
+
+
+def posix_spawnp(pid_addr: Int, file: Int, actions: Int, attr: Int, argv: Int, envp: Int) -> Int:
+    """All addresses: the pid_t out, a C string (searched on PATH), the file actions, the attributes, argv, envp."""
+    return Int(external_call["posix_spawnp", c_int](_p(pid_addr), _p(file), _p(actions), _p(attr), _p(argv), _p(envp)))
+
+
+def posix_spawn_file_actions_init(actions: Int) -> Int:
+    return Int(external_call["posix_spawn_file_actions_init", c_int](_p(actions)))
+
+
+def posix_spawn_file_actions_destroy(actions: Int) -> Int:
+    return Int(external_call["posix_spawn_file_actions_destroy", c_int](_p(actions)))
+
+
+def posix_spawn_file_actions_addopen(actions: Int, fd: Int, path: Int, flags: Int, mode: Int) -> Int:
+    return Int(external_call["posix_spawn_file_actions_addopen", c_int](_p(actions), c_int(fd), _p(path), c_int(flags), c_uint(mode)))
+
+
+def posix_spawn_file_actions_adddup2(actions: Int, fd: Int, to: Int) -> Int:
+    return Int(external_call["posix_spawn_file_actions_adddup2", c_int](_p(actions), c_int(fd), c_int(to)))
+
+
+def posix_spawnattr_init(attr: Int) -> Int:
+    return Int(external_call["posix_spawnattr_init", c_int](_p(attr)))
+
+
+def posix_spawnattr_destroy(attr: Int) -> Int:
+    return Int(external_call["posix_spawnattr_destroy", c_int](_p(attr)))
+
+
+def posix_spawnattr_setflags(attr: Int, flags: Int) -> Int:
+    return Int(external_call["posix_spawnattr_setflags", c_int](_p(attr), Int16(flags)))
+
+
+def posix_spawnattr_setpgroup(attr: Int, pgroup: Int) -> Int:
+    return Int(external_call["posix_spawnattr_setpgroup", c_int](_p(attr), c_int(pgroup)))
+
+
+def environ() -> Int:
+    """The address of the first `char *` in the process's environment (NULL-terminated)."""
+    var at = _sym("environ")
+    return 0 if at == 0 else Pointer[Int, MutUntrackedOrigin](unsafe_from_address=at)[]
+
+
 # threads ------------------------------------------------------------------------------------------------------------
 
 comptime ThreadArg = Pointer[UInt8, MutUntrackedOrigin]
