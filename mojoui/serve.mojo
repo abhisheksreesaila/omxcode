@@ -614,7 +614,7 @@ struct Server:
         if libc.pthread_create[_run_entry[S]](Int(job), Int(tid.unsafe_ptr())) != 0:
             raise Error("no thread for the server")
         _ = libc.pthread_detach(tid[0])
-        var served = Served(bound, Int(job), _close_run[S])
+        var served = Served(bound, Int(job), _close_run[S], _ended_run[S], _release_run[S])
         if not _answers(host, bound, 5000):
             raise Error("the server on port " + String(bound) + " didn't start answering")
         return served^
@@ -628,7 +628,9 @@ def _answers(host: String, port: Int, ms: Int) -> Bool:
     var until = now_ns() + ms * 1_000_000
     while now_ns() < until:
         try:
-            _ = HttpClient(timeout_ms=500).get("http://" + host + ":" + String(port) + READY_PATH)
+            # (50 ms each: a probe that reached the listener Flare is about to close waits out its whole timeout,
+            # which held a UI thread 515 ms with 500; loopback answers in about 1 ms)
+            _ = HttpClient(timeout_ms=50).get("http://" + host + ":" + String(port) + READY_PATH)
             return True
         except:
             _ = libc.poll(0, 0, 5)
@@ -637,52 +639,71 @@ def _answers(host: String, port: Int, ms: Int) -> Bool:
 
 struct Served(Movable):
     """A server Server.start runs on threads of its own. Keep it while you serve: dropping it (or stop()) closes the
-    server and waits (up to 5 s) for its loop to end, so the program can end. Mojo drops a value after its last use,
-    so call `stop()` where serving should end (`var port = Server.start(api).port` would stop it at once)."""
+    server. Mojo drops a value after its last use, so call `stop()` where serving should end (`var port =
+    Server.start(api).port` would stop it at once). stop() returns at once, so a UI thread can call it: the loop ends
+    on its own thread (Flare looks every 50 ms, then lets its workers finish); `stopped()` says when it has."""
     var port: Int
     var _job: Int
-    var _close: def(Int) thin -> Bool
+    var _closed: Bool
+    var _close: def(Int) thin -> None
+    var _ended: def(Int) thin -> Bool
+    var _release: def(Int) thin -> None
 
-    def __init__(out self, port: Int, job: Int, close: def(Int) thin -> Bool):
+    def __init__(out self, port: Int, job: Int, close: def(Int) thin -> None, ended: def(Int) thin -> Bool,
+                 release: def(Int) thin -> None):
         self.port = port
         self._job = job
+        self._closed = False
         self._close = close
+        self._ended = ended
+        self._release = release
 
     def stop(mut self):
-        if self._job != 0:
-            _ = self._close(self._job)
-            self._job = 0
+        if not self._closed:
+            self._close(self._job)
+            self._closed = True
+
+    def stopped(self) -> Bool:
+        """Has the server's loop ended? (False while serving.)"""
+        return self._ended(self._job)
 
     def __deinit__(deinit self):
-        if self._job != 0:
-            _ = self._close(self._job)
-
-
-def _close_run[S: Service](addr: Int) -> Bool:
-    """Closes a started server, waits for its thread's loop to return, frees the job (left, not freed, after 5 s)."""
-    var job = Pointer[_Run[S], MutUntrackedOrigin](unsafe_from_address=addr)
-    job[].srv.close()
-    var until = now_ns() + 5_000_000_000
-    while _A.load(_P(unsafe_from_address=Int(Pointer(to=job[].ended)))) == 0:
-        if now_ns() > until:
-            return False
-        _ = libc.poll(0, 0, 2)
-    job.unsafe_deinit_pointee()
-    job.unsafe_free()
-    return True
+        if not self._closed:
+            self._close(self._job)
+        self._release(self._job)
 
 
 struct _Run[S: Service](Movable):
+    """A started server, shared by its Served and its thread: the last of the two to let go frees it, so neither
+    ever reads it freed."""
     var srv: HttpServer
     var state: Int
     var workers: Int
-    var ended: Scalar[DType.int64]  # (1 once serve() returned; read and written atomically)
+    var refs: Scalar[DType.int64]   # (atomic: 2 at the start, the Served and the thread)
+    var ended: Scalar[DType.int64]  # (atomic: 1 once serve() returned)
 
     def __init__(out self, var srv: HttpServer, state: Int, workers: Int):
         self.srv = srv^
         self.state = state
         self.workers = workers
+        self.refs = 2
         self.ended = 0
+
+
+def _close_run[S: Service](addr: Int):
+    Pointer[_Run[S], MutUntrackedOrigin](unsafe_from_address=addr)[].srv.close()
+
+
+def _ended_run[S: Service](addr: Int) -> Bool:
+    var job = Pointer[_Run[S], MutUntrackedOrigin](unsafe_from_address=addr)
+    return _A.load(_P(unsafe_from_address=Int(Pointer(to=job[].ended)))) >= 1
+
+
+def _release_run[S: Service](addr: Int):
+    var job = Pointer[_Run[S], MutUntrackedOrigin](unsafe_from_address=addr)
+    if _A.fetch_add(_P(unsafe_from_address=Int(Pointer(to=job[].refs))), -1) == 1:
+        job.unsafe_deinit_pointee()
+        job.unsafe_free()
 
 
 def _run_entry[S: Service](p: libc.ThreadArg) -> libc.ThreadArg:
@@ -695,6 +716,7 @@ def _run_entry[S: Service](p: libc.ThreadArg) -> libc.ThreadArg:
     except e:
         print("mojoui.serve: the server stopped: " + String(e))
     _ = _A.fetch_add(_P(unsafe_from_address=Int(Pointer(to=job[].ended))), 1)
+    _release_run[S](Int(p))
     return libc.null_arg()
 
 

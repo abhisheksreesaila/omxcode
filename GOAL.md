@@ -15,8 +15,9 @@ docs/research/mojo12-flare.md (branch probe-mojo12). Worktree `../mojo-ui-g52`, 
 | M4 | omxconsole on 1.2 | goal 50's checker: M0–M5 PASS (a real Qwen chat through `max serve` and the Mojo gateway); M6 fails on nothing but what it failed on at goal 50 (goal 33's M5) |
 | M5 | The engine beside Flare | tests/test_engine_flare.mojo runs an engine job (omxcore's thread pool, a group-by on a Frame) and answers an HTTP request through mojoui.serve (Flare) in one program; omxcore's pthread_create / pthread_detach / strtod / read declarations match Flare's (the omxcore issue drafted at goal 50) |
 | M6 | The Mac on 1.2 | a fresh run on GitHub's Mac (scripts/mac-ci, side.mac_fresh) from these sources: maccheck's tests pass, omxplorer starts and draws, and the run's native GPU build used Mojo 1.2 |
+| M7 | Flare never stalls the UI thread (owner, 2026-11-05: "ensure it does not interfere with our UI thread and blocks"; added during the run, D-5213) | tests/test_ui_thread.mojo, 5 runs: a main-thread frame loop ticking every 4 ms never gaps past 25 ms while the program serves (Flare), streams SSE, proxies, fetches over HTTPS through mojoui.http and answers engine jobs (27 requests at once, all 200); Server.start holds the caller ≤ 250 ms, stop() ≤ 5 ms, and the loops end within 3 s |
 
-**Done means:** `scripts/check` prints PASS for M0–M6.
+**Done means:** `scripts/check` prints PASS for M0–M7.
 
 ## Out of bounds
 Pushing anything but the mac-test branch and the mac-ci release (scripts/mac-ci); committing to omxcore (~/Projects/mxframe,

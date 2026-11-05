@@ -1133,3 +1133,10 @@ was the map.
   checkout had one from goal 50's checker; M3 now builds it first).
 - omxplorer's Mac cross-link fails on 1.1 too (baseline): its video, document and vision parts need Python and libc
   functions apple/sdk's stubs don't list. Not this goal's; M6 is left as written.
+- M7 (owner mid-run: "ensure it does not interfere with our UI thread and blocks"): mojoui's HTTP runs on effects' own
+  threads (the UI only polls ready()), so the open questions were mojoui.serve's start/stop and shared locks. A frame
+  loop on the main thread (4 ms ticks) through 27 requests at once (SSE, proxy, engine jobs, HTTPS): longest gap 4-5 ms.
+  But stop() held the caller ~100 ms per server (waiting for Flare's 50 ms loop): now it only asks, and the record is
+  shared and freed by the last owner (D-5214; a reaper-thread version could read freed memory, dropped). Server.start
+  once took 515 ms: its ready probe hit the listener Flare was about to close and waited out a 500 ms timeout; 50 ms
+  probes: ≤ 28 ms over 15 runs. A first 502 was the test's own race (proxies before PUT /port).

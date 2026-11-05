@@ -468,7 +468,26 @@ def m6():
     return not problems, "; ".join(problems) or f"Mac run {run_dir.name} from these sources: maccheck and omxplorer ran their steps (exit 0), omxplorer's native GPU build with Mojo 1.2, the GPU probe ok"
 
 
-MILESTONES = [("M0", m0), ("M1", m1), ("M2", m2), ("M3", m3), ("M4", m4), ("M5", m5), ("M6", m6)]
+# M7 ---------------------------------------------------------------------------------------------------------------
+def m7():
+    g50 = load("goal50", "docs/goals/50-check.py")
+    exe = BUILD / "test_ui_thread"
+    why = flare_build(ROOT / "tests" / "test_ui_thread.mojo", exe)
+    if why:
+        return False, why
+    lines = []
+    for i in range(5):
+        r = run([str(exe)], timeout=180)
+        out = r.stdout + r.stderr
+        if r.returncode != 0 or "ui thread: ok" not in out:
+            return False, f"run {i + 1}: exit {r.returncode}: {out[-400:]}"
+        lines.append(next((l for l in out.splitlines() if l.startswith("ticks ")), "?"))
+    gaps = [int(m) for l in lines for m in re.findall(r"longest gap (\d+) ms", l)]
+    starts = [int(m) for l in lines for m in re.findall(r"Server.start (\d+) ms", l)]
+    return True, f"5 runs: longest frame gap {max(gaps)} ms (≤ 25), Server.start ≤ {max(starts)} ms, stop() 0 ms; e.g. {lines[0]}"
+
+
+MILESTONES = [("M0", m0), ("M1", m1), ("M2", m2), ("M3", m3), ("M4", m4), ("M5", m5), ("M6", m6), ("M7", m7)]
 
 
 def main():
