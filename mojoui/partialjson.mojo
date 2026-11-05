@@ -14,7 +14,7 @@
 struct Level(Copyable, Movable):
     var array: Bool
     var key: String  # an array: the key it's the value of; an object: the key being read or last read
-    var items: Int  # values finished in it
+    var items: Int  # values in it: whole ones, and the one still arriving
 
 
 comptime MAX_LEVELS = 64  # deeper than any UI it is used for (genui: 8 levels): past it, nothing is shown (and the
@@ -78,6 +78,8 @@ def complete(text: String, placeholder_key: String = "", placeholder: String = "
             if len(levels) >= MAX_LEVELS:
                 return ""
             var akey = levels[len(levels) - 1].key if len(levels) > 0 and not levels[len(levels) - 1].array else String("")
+            if len(levels) > 0:
+                levels[len(levels) - 1].items += 1  # (counted when it opens: a placeholder after a child still arriving needs its comma)
             levels.append(Level(c == 91, akey if c == 91 else String(""), 0))
             expect_key = c == 123
             started = True
@@ -87,8 +89,6 @@ def complete(text: String, placeholder_key: String = "", placeholder: String = "
             if len(levels) == 0:
                 break
             _ = levels.pop()
-            if len(levels) > 0:
-                levels[len(levels) - 1].items += 1
             expect_key = False
             safe = i + 1
             safe_levels = levels.copy()

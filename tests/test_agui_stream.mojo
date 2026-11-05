@@ -44,6 +44,24 @@ def main() raises:
     assert_equal(complete('{"a":"\\u00'), '{"a":""}', "half a \\u escape goes")
     assert_equal(complete('{"children":[{"x":1},', "children", "S"), '{"children":[{"x":1},S]}')
     assert_equal(complete("tr"), "")
+    assert_equal(complete('{"children":[{"x":1},{"y', "children", "S"), '{"children":[{"x":1},{},S]}', "a child still arriving: the placeholder after it, with its comma")
+    # every cut, compact or spaced as Python's json.dumps writes it, closes to JSON that parses; once a screen shows,
+    # later cuts never fall back to the loading card (the Lisbon trip stalled on it for 20 of 24 deltas)
+    for spaced in range(2):
+        var text = String(DASHBOARD) if spaced == 0 else String(DASHBOARD).replace('":', '": ').replace(',"', ', "')
+        var tb = text.as_bytes()
+        var seen = False
+        for at in range(1, len(tb) + 1):
+            if at < len(tb) and tb[at] >= 128 and tb[at] < 192:
+                continue
+            var pre = String(text[byte = : at])
+            var closed = complete(pre, "children", '{"component":"Skeleton"}')
+            if closed.byte_length() > 0:
+                _ = Json.parse(closed)  # (raises: the test fails at this cut)
+            var shows = partial_ui(pre) != partial_ui("")
+            assert_true(shows or not seen, "cut " + String(at) + " fell back to loading: " + pre)
+            seen = seen or shows
+        assert_true(seen, "a screen shows before the end")
     # hostile prefixes: deep nesting, stray closers; bounded time, never a crash (review item 2)
     var deep = String("[") * 16_000
     var t0 = perf_counter_ns()
