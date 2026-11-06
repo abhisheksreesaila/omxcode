@@ -14,7 +14,9 @@
 # mojoui.imageops (GPU when there is one) between decode and encode.
 
 from std.ffi import external_call
+from std.sys import CompilationTarget
 from mojoui.video import VideoSource, _quote
+from mojoui.avmedia import AvWriter
 from mojoui.imageops import ImageOps, Frame, Edits
 from mojoui.videotable import VideoTable, NO_CODE, Progress, NoProgress
 from mojoui.canvas import rgba
@@ -36,6 +38,7 @@ struct VideoWriter(Movable):
     var fps: Float64
     var frames: Int
     var _fp: Int
+    var _av: AvWriter  # a Mac's encoder (mojoui.avmedia: no ffmpeg there; crf and preset are ffmpeg's and don't apply)
 
     def __init__(out self, path: String, width: Int, height: Int, fps: Float64 = 30, crf: Int = 18, preset: String = "veryfast") raises:
         self.path = path
@@ -43,6 +46,11 @@ struct VideoWriter(Movable):
         self.height = height
         self.fps = fps
         self.frames = 0
+        self._fp = 0
+        self._av = AvWriter.none()
+        comptime if CompilationTarget.is_macos():
+            self._av = AvWriter(path, width, height, fps)
+            return
         var cmd = (
             "ffmpeg -y -v error -nostdin -f rawvideo -pix_fmt rgba -s " + String(width) + "x" + String(height)
             + " -r " + String(fps) + " -i - -an -c:v libx264 -preset " + preset + " -crf " + String(crf)
@@ -55,9 +63,21 @@ struct VideoWriter(Movable):
     def __deinit__(deinit self):
         if self._fp != 0:
             _ = external_call["pclose", Int32](self._fp)
+        comptime if CompilationTarget.is_macos():
+            var av = self._av.copy()
+            try:
+                av.close()
+            except:
+                pass
 
     def write_address(mut self, addr: Int) raises:
         """One frame from memory the caller owns: width × height RGBA pixels at `addr`."""
+        comptime if CompilationTarget.is_macos():
+            if self._av.writer == 0:
+                raise Error("VideoWriter: already closed: " + self.path)
+            self._av.write_address(addr)
+            self.frames += 1
+            return
         if self._fp == 0:
             raise Error("VideoWriter: already closed: " + self.path)
         var n = self.width * self.height * 4
@@ -72,7 +92,10 @@ struct VideoWriter(Movable):
         self.write_address(Int(pixels.unsafe_ptr()))
 
     def close(mut self) raises:
-        """Finishes the file; raises if ffmpeg reported a failure."""
+        """Finishes the file; raises if ffmpeg (or a Mac's AVFoundation) reported a failure."""
+        comptime if CompilationTarget.is_macos():
+            self._av.close()
+            return
         if self._fp == 0:
             return
         var status = external_call["pclose", Int32](self._fp)

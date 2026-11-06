@@ -15,6 +15,9 @@
 # below it without changing a caller. Each popen runs one /bin/sh, so paths are single-quoted (a quote in a path is escaped).
 
 from std.ffi import external_call
+from std.sys import CompilationTarget
+from std.memory import Pointer
+from mojoui.avmedia import AvReader, AvInfo, av_probe, av_picture, is_still
 
 
 comptime _CHUNK = 4096
@@ -119,6 +122,8 @@ struct VideoSource(Movable):
     var duration: Float64  # seconds
     var _fp: Int  # the open pipe (0: none)
     var _at: Int  # index of the frame next() returns
+    var _av: AvReader  # a Mac's decoder (mojoui.avmedia: no ffmpeg there); closed: none
+    var _still: List[UInt32]  # a Mac's still picture, its one frame (ImageIO)
 
     def __init__(out self, path: String) raises:
         self.path = path
@@ -129,8 +134,27 @@ struct VideoSource(Movable):
         self.duration = 0.0
         self._fp = 0
         self._at = 0
+        self._av = AvReader.none()
+        self._still = List[UInt32]()
         if not _file_exists(path):
             raise Error("VideoSource: no such file: " + path)
+        comptime if CompilationTarget.is_macos():  # (a Mac has no ffmpeg: AVFoundation and ImageIO, goal 58)
+            if is_still(path):
+                var pic = av_picture(path)
+                self._still = pic[0].copy()
+                self.width = pic[1]
+                self.height = pic[2]
+                self.fps = 1.0
+                self.frames = 1
+                self.duration = 1.0
+            else:
+                var a = av_probe(path)
+                self.width = a.width
+                self.height = a.height
+                self.fps = a.fps
+                self.frames = a.frames
+                self.duration = a.duration
+            return
         var probe = _run_text(
             "ffprobe -v error -protocol_whitelist file -select_streams v:0 -of flat -show_entries "
             + "stream=width,height,avg_frame_rate,r_frame_rate,nb_frames,duration:format=duration -i "
@@ -185,6 +209,11 @@ struct VideoSource(Movable):
         self.duration = info.duration
         self._fp = 0
         self._at = 0
+        self._av = AvReader.none()
+        self._still = List[UInt32]()
+        comptime if CompilationTarget.is_macos():
+            if is_still(self.path):
+                self._still = av_picture(self.path)[0].copy()
 
     def info(self) -> VideoInfo:
         return VideoInfo(self.path, self.width, self.height, self.fps, self.frames, self.duration)
@@ -192,14 +221,26 @@ struct VideoSource(Movable):
     def __deinit__(deinit self):
         if self._fp != 0:
             _pclose(self._fp)
+        comptime if CompilationTarget.is_macos():
+            var av = self._av.copy()
+            av.close()
 
     def frame_len(self) -> Int:
         """Pixels (UInt32) in one frame."""
         return self.width * self.height
 
+    def _open(self) -> Bool:
+        """A decoder is running (a pipe, or a Mac's reader)."""
+        return self._fp != 0 or self._av.open()
+
     def _start(mut self, frame: Int) raises:
         """Starts the decoder so the next frame it delivers is `frame`."""
         self._stop()
+        comptime if CompilationTarget.is_macos():
+            if len(self._still) == 0:
+                self._av = AvReader(self.path, AvInfo(self.width, self.height, self.fps, self.frames, self.duration), frame)
+            self._at = frame
+            return
         # Half a frame early: whatever the container's timestamps round to, frame n is the first one at or after this time.
         var t = max((Float64(frame) - 0.5) / self.fps, 0.0)
         var seek = String("")
@@ -218,9 +259,33 @@ struct VideoSource(Movable):
         if self._fp != 0:
             _pclose(self._fp)
             self._fp = 0
+        comptime if CompilationTarget.is_macos():
+            self._av.close()
+
+    def _mac_next(mut self, addr: Int) raises -> Bool:
+        """A Mac's next frame into width × height UInt32s at addr: the still's one frame, or the reader's next."""
+        if len(self._still) > 0:
+            if self._at != 0:
+                return False
+            var dst = Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=addr)
+            for i in range(len(self._still)):
+                dst.unsafe_offset(i)[] = self._still[i]
+            self._at = 1
+            return True
+        if not self._av.open():
+            self._start(self._at)
+        if not self._av.next_into_address(addr):
+            self._stop()
+            return False
+        self._at += 1
+        return True
 
     def next_into(mut self, mut pixels: List[UInt32]) raises -> Bool:
         """Reads the next frame into `pixels` (resized to one frame); False at the end of the video."""
+        comptime if CompilationTarget.is_macos():
+            if len(pixels) != self.frame_len():
+                pixels = List[UInt32](length=self.frame_len(), fill=0)
+            return self._mac_next(Int(pixels.unsafe_ptr()))
         if self._fp == 0:
             self._start(self._at)
         if len(pixels) != self.frame_len():
@@ -236,6 +301,8 @@ struct VideoSource(Movable):
     def next_into_address(mut self, addr: Int) raises -> Bool:
         """Reads the next frame into memory the caller owns (frame_len() UInt32s at `addr`: e.g. pinned memory a GPU
         copies from); False at the end of the video."""
+        comptime if CompilationTarget.is_macos():
+            return self._mac_next(addr)
         if self._fp == 0:
             self._start(self._at)
         var want = self.frame_len() * 4
@@ -260,7 +327,7 @@ struct VideoSource(Movable):
     def seek_frame(mut self, frame: Int) raises:
         """The next next() returns this frame (0-based; clamped to the video)."""
         var n = max(0, min(frame, max(self.frames - 1, 0)))
-        if n == self._at and self._fp != 0:
+        if n == self._at and self._open():
             return
         self._start(n)
 

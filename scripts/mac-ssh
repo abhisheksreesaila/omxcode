@@ -26,7 +26,7 @@ grep -v '^#' "$steps_file" | paste -sd';' - | sed 's/;;*/;/g; s/^;//; s/;$//' > 
 scp -q -i "$key" "$out/src.tar.gz" "$out/steps.txt" "$@" "$host:$remote/data/"
 "${ssh_[@]}" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt"
 set -uo pipefail
-app=$1 settings=$3
+app=$1 settings=${3:-}  # (an empty argument vanishes on its way through ssh)
 cd ~/"$2" && tar -xzf data/src.tar.gz
 steps=$(cat data/steps.txt)
 export PATH=$HOME/.pixi/bin:$PATH

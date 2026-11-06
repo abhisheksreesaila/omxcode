@@ -22,7 +22,7 @@ from std.memory.alloc import unsafe_alloc
 from mojoui import libc
 from std.time import sleep
 from mojoui.video import VideoSource, VideoInfo, file_exists
-from mojoui.wake import wake_write_fd, wake_write
+from mojoui.wake import UIWaker
 
 comptime FAR_AHEAD = 12  # a frame this far ahead of the decoder is reached by reading on; further, by seeking
 comptime _OPENING = 0
@@ -48,11 +48,11 @@ struct _Shared(Movable):
     var taken: Int  # `published` at the last take()
     var quit: Bool
     var refs: Int  # owners: the handle and the thread; the last frees
-    var wake_fd: Int
+    var waker: UIWaker  # wakes the host from the feed's thread (the pipe on Linux, jobsEnded: on a Mac)
     var lock: Int  # a pthread_mutex_t's address
     var cond: Int  # a pthread_cond_t's address
 
-    def __init__(out self, info: VideoInfo, known: Bool, once: Bool, wake_fd: Int):
+    def __init__(out self, info: VideoInfo, known: Bool, once: Bool, var waker: UIWaker):
         self.path = info.path
         self.info = info
         self.known = known
@@ -67,7 +67,7 @@ struct _Shared(Movable):
         self.taken = 0
         self.quit = False
         self.refs = 2
-        self.wake_fd = wake_fd
+        self.waker = waker^
         self.lock = Int(unsafe_alloc[UInt8](_SYNC_BYTES))
         self.cond = Int(unsafe_alloc[UInt8](_SYNC_BYTES))
         _ = libc.pthread_mutex_init(self.lock)
@@ -96,6 +96,7 @@ def _release(addr: Int):
         return
     var lock = _at(addr)[].lock
     var cond = _at(addr)[].cond
+    _at(addr)[].waker.close()
     _ = external_call["pthread_cond_destroy", c_int](cond)
     _ = libc.pthread_mutex_destroy(lock)
     Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=lock).unsafe_free()
@@ -142,8 +143,9 @@ def _feed_main(addr: Int) abi("C") -> Int:
     var info = s[].info  # (written before the thread started)
     var known = s[].known
     var once = s[].once
-    var fd = s[].wake_fd  # (the process's one wake pipe, mojoui.jobs.wake_pipe: made once, never closed, so the fd read
-    # at the start stays valid for the thread's whole life: no generation check needed, D-1343)
+    var waker = s[].waker.copy()  # (the process's one wake pipe, mojoui.jobs.wake_pipe: made once, never closed, so the fd
+    # read at the start stays valid for the thread's whole life: no generation check needed, D-1343; on a Mac the host's
+    # target, which lives as long as the process; its modes are released only when the shared state goes, after this)
     var src: VideoSource
     try:
         src = VideoSource(info) if known else VideoSource(info.path)
@@ -152,14 +154,14 @@ def _feed_main(addr: Int) abi("C") -> Int:
         s[].state = _FAILED
         s[].error = String(e)
         _unlock(addr)
-        wake_write(fd)
+        waker.wake()
         _release(addr)
         return 0
     _lock(addr)
     s[].info = src.info()
     s[].state = _READY
     _unlock(addr)
-    wake_write(fd)
+    waker.wake()
     var back = List[UInt32]()
     while True:
         _lock(addr)
@@ -183,7 +185,7 @@ def _feed_main(addr: Int) abi("C") -> Int:
             s[].error = "Couldn't decode " + info.path + (" (frame " + String(target) + ")" if target > 0 else "")
         s[].done = target
         _unlock(addr)
-        wake_write(fd)  # (landed or not: the host looks again, so nothing waits on a frame that won't come)
+        waker.wake()  # (landed or not: the host looks again, so nothing waits on a frame that won't come)
         if once:
             break
     src.close()
@@ -217,7 +219,7 @@ struct FrameFeed(Movable):
 
     def _start(mut self, info: VideoInfo, known: Bool, once: Bool):
         var p = unsafe_alloc[_Shared](1)
-        p.unsafe_write(_Shared(info, known, once, wake_write_fd()))
+        p.unsafe_write(_Shared(info, known, once, UIWaker()))
         if known:
             p[].state = _READY  # (the handle's view: ready at once; the thread opens its decoder without probing)
         self.addr = Int(p)
