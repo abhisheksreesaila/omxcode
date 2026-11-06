@@ -29,6 +29,8 @@
 # names (ones that call Google or Stripe) leave the reactor: Flare hands their socket to a thread of their own (the
 # vendored offload patch), which answers with `Connection: close`, so a slow provider stalls nobody else. Every reply
 # carries X-Request-Id; every request is one JSON line in the log (path without its query, status, ms, ip).
+# mojoui.serve binds cleartext only (TLS ends in front of it), which the offload needs: Flare offloads a cleartext
+# connection only (a TLS one would answer the bridge's 503 placeholder).
 
 from std.os import getenv
 from std.sys import CompilationTarget, exit
@@ -988,6 +990,12 @@ def _offload_hook[H: Handler](fd: Int, arg: Int):
     var fl = libc.fcntl(fd, 3)  # F_GETFL
     if fl >= 0:
         _ = libc.fcntl(fd, 4, fl & ~(0x4 if CompilationTarget.is_macos() else 0x800))  # F_SETFL without O_NONBLOCK
+    var tv = List[Int64](length=2, fill=0)  # (SO_SNDTIMEO / SO_RCVTIMEO 30 s: Flare's timeouts end with the hand-off)
+    tv[0] = 30
+    var lvl = 0xFFFF if CompilationTarget.is_macos() else 1  # SOL_SOCKET
+    _ = libc.setsockopt(fd, lvl, 0x1005 if CompilationTarget.is_macos() else 21, Int(tv.unsafe_ptr()), 16)
+    _ = libc.setsockopt(fd, lvl, 0x1006 if CompilationTarget.is_macos() else 20, Int(tv.unsafe_ptr()), 16)
+    _ = len(tv)
     if not spawn[_offload_run[H]](arg):
         _offload_run[H](arg)
 

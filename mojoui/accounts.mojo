@@ -449,8 +449,12 @@ struct Accounts(Copyable, Movable):
         try:
             var db = self.db()
             db.begin()
-            Audit.record(db, tenant, actor, action, detail)
-            db.commit()
+            try:
+                Audit.record(db, tenant, actor, action, detail)
+                db.commit()
+            except e:
+                _ = db.rollback_quiet()
+                raise e^
         except e:
             self.log.error("audit: " + String(e))
 

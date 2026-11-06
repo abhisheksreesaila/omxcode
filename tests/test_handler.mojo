@@ -36,7 +36,10 @@ struct App(Handler):
 def slow_call(port: Int):
     try:
         var r = HttpClient(timeout_ms=10_000).get("http://127.0.0.1:" + String(port) + "/slow")
-        print("slow answered " + String(r.status) + " " + r.text())
+        if r.status == 201 and r.text() == '{"slow": true}' and r.headers.get("x-request-id").byte_length() == 16:
+            print("slow answered: ok")
+        else:
+            print("slow answered wrong: " + String(r.status) + " " + r.text())
     except e:
         print("slow failed: " + String(e))
 

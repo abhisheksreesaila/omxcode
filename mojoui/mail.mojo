@@ -83,10 +83,18 @@ def escape_html(s: String) -> String:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
 
 
+def _inert(s: String) -> String:
+    """A value that can't become markdown (a name like "[Accept](https://evil.example)" stays text)."""
+    return s.replace("[", "(").replace("]", ")").replace("*", "·").replace("`", "'")
+
+
 def fill(template: String, names: List[String], values: List[String], html: Bool) -> String:
+    """{{name}} → its value, never read as markdown; HTML-escaped too when `html`. A value that is a whole link target
+    (`({{link}})`) is kept as it is."""
     var out = template
     for i in range(min(len(names), len(values))):
-        out = out.replace("{{" + names[i] + "}}", escape_html(values[i]) if html else values[i])
+        var v = values[i] if "(" + "{{" + names[i] + "}}" + ")" in template else _inert(values[i])
+        out = out.replace("{{" + names[i] + "}}", escape_html(v) if html else v)
     return out
 
 

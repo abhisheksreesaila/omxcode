@@ -147,6 +147,8 @@ struct ResponseImpl[B: Body = InlineBody](Movable):
         """
         self.status = status
         self.reason = reason^
+        self.offload_fn = 0
+        self.offload_arg = 0
         self.body.clear()
         # Drop any attached streaming source so a recycled Response
         # never carries a stale chunk source into the next request.

@@ -339,13 +339,16 @@ struct Database(Copyable, Movable):
 
     def begin(self) raises:
         """A write transaction (BEGIN IMMEDIATE); on a pooled connection, after taking the file's writer lock."""
+        var took = False
         if self.conn[].wlock != 0 and not self.conn[].held:
             _ = libc.pthread_mutex_lock(self.conn[].wlock)
             self.conn[].held = True
+            took = True
         try:
             self.exec("BEGIN IMMEDIATE")
         except e:
-            self._release()
+            if took:  # (a nested begin fails here too: never release the outer transaction's lock)
+                self._release()
             raise e^
 
     def commit(self) raises:

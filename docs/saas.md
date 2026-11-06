@@ -112,9 +112,11 @@ Audit.record(db, tenant, actor, "invite", detail)
   expiring, for the invited address only); sessions that never slid; one tenant per person (D-5712).
 - Per-IP limits use the address the kernel reports. Behind a proxy every client is the proxy: put the limit there, or
   run the server where it sees clients directly (no `X-Forwarded-For` is trusted).
-- A blocking request (the callback, checkout, portal, return) answers with `Connection: close`, and the offload works on
-  cleartext connections only (as Flare's own WebSocket offload): terminate TLS in front of the server, as before. At
-  most 256 run at once; more get 503 with Retry-After.
+- A blocking request (the callback, checkout, portal, return, purchase) answers with `Connection: close` on a thread of
+  its own, made for it: it opens its own SQLite connections (closed when it ends), and its socket gets 30 s send and
+  receive timeouts. At most 256 run at once; more get 503 with Retry-After. A small fixed pool of offload threads would
+  save the thread and the connections each time (next step). The offload needs a cleartext connection, and
+  `mojoui.serve` binds cleartext only: terminate TLS in front of it (a TLS connection would get a 503).
 - Bodies over 64 KB (the webhook 1 MB) get a 413 before any work, but only after Flare has read them (its own limit is
   64 MB, and a slow sender can hold a connection up to its request timeout); `/billing/return` makes at most 30 Stripe
   read-backs a minute for the whole server, so a stranger can spend that budget and make a real return page say 429 (the
@@ -122,6 +124,8 @@ Audit.record(db, tenant, actor, "invite", detail)
 - A desktop sign-in's one-time code shows in the browser's address bar for up to 60 s (RFC 8252's known phishing risk);
   a "sign in to the desktop app?" confirm page is the fix.
 - `GET /logout` still works (the contract's), so a page elsewhere can sign someone out; the app itself signs out by POST.
+- Template values in emails are inert: a name like `[Accept](https://evil.example)` can't become a link (brackets and
+  marks are replaced), and they are HTML-escaped in the HTML part.
 - Jobs are at least once (above). An invitation's email is built when its job runs, from the invite's row, so the job's
   payload holds no link; a used or expired invite sends nothing.
 - Goal 57's pending invites (made before goal 60's host migration 002) are dropped by it: they joined silently and had
