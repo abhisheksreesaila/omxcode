@@ -55,21 +55,32 @@ def card(p: Palette, role: String, radius: Int, pad_top: Int, pad_x: Int, pad_bo
     return s^
 
 
+def dock(p: Palette, role: String, line_top: UInt32, line_bottom: UInt32, fill: UInt32 = 0) -> Surface:
+    """A docked part of the window's chrome (goal 54, shell A: the owner's pick): opaque, square, flush with the window's
+    edge, no margin and no shadow; a 1 pt line where it meets the board."""
+    return Surface(role, fill if fill != 0 else p.chrome, 0, 0, 0, 0, 0, -1, -1, -1, [], line_top, line_bottom, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+
+
 def liquid_look(p: Palette) -> Look:
-    """Liquid's shapes as values (every host draws them): glass islands for the chrome (the header, the toolbar, the
-    inspector, the bottom strip), solid white cards for the content, Inter on one scale (11 12 13 15 17 22 34)."""
-    var tabs = island(p, "sheet-tabs", 14, 0, 0, 10, 0, -1)
-    var status = island(p, "status-bar", 0, 14, 0, 10, 10, -1)
-    status.shadows = [Shadow(8, 20, 0, rgba(15, 23, 42, 15), False)] if not p.dark else [Shadow(8, 20, 0, rgba(0, 0, 0, 77), False)]
+    """Liquid's shapes as values (every host draws them): the chrome docked to the window's edges (shell A, goal 54: the
+    menu bar and the toolbar one band along the top, the sheet tabs and the status bar one band along the bottom, the
+    rail and the inspector flush at the sides), solid white cards for the content, Inter on one scale (11 12 13 15 17 22 34)."""
+    var edge = p.line_strong
+    var tabs = dock(p, "sheet-tabs", edge, 0)
+    var status = dock(p, "status-bar", 0, 0)
     status.font, status.font_size, status.ink = "Inter", 12, p.ink3
-    var header = island(p, "menubar", 12, 12, 8, 10, 0, -1)
+    var header = dock(p, "menubar", 0, 0)
     header.min_height = 34
+    var toolbar = dock(p, "toolbar", 0, edge)
+    toolbar.pad_top, toolbar.pad_x, toolbar.pad_bottom = 2, 6, 2
     var bar = Surface("formula-bar", 0, -1, -1, 0, 10, 0, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)  # (on the backdrop: no panel)
     # an inspector row (a label, its control) as tall as a control, whichever control it holds: the Mac's checkbox (16 pt) and
     # switch rows sat closer than GTK's and the web's (2026-10-25)
     var row = Surface("inspector-row", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, 30, "", 0, 0, 0, 0, 0, 0, 0, False)
-    var surfaces: List[Surface] = [header^, row^, island(p, "toolbar", 18 if not p.dark else 12, 18 if not p.dark else 12, 0, 10, 0, 6), island(p, "inspector", 18, 18, -1, -1, -1, 10), tabs^, status^, bar^,
-                                   island(p, "sidebar", 12, 12, 0, 0, 0, -1),  # (the side rail, mojoui.sheetchrome.Rail: an island; dark rims it, 12 as the menu bar: an 18 pt corner on a 48 pt rail leaves no straight edge)
+    var inspector = dock(p, "inspector", 0, 0, p.card)
+    inspector.pad_top, inspector.pad_x, inspector.pad_bottom = 10, 10, 10
+    var surfaces: List[Surface] = [header^, row^, toolbar^, inspector^, tabs^, status^, bar^,
+                                   dock(p, "sidebar", 0, 0),  # (the side rail, mojoui.sheetchrome.Rail; its edge line: liquid_css)
                                    card(p, "table", 16, 10, 12, 12), card(p, "tile", 16, 16, 18, 16), words("sentence-line", 15, 600, p.ink),
                                    words("section-title", 0, 600, 0, 0.5), words("stat-value", 15, 600, p.ink), words("kpi-fact", 12, 0, p.ink3),
                                    chip("stat-card", p.raised, p.line_strong, 0, 0, 12, -1, -1), chip("kpi-note", p.raised, p.line, 12, p.ink2, 999, 2, 10),
@@ -79,14 +90,14 @@ def liquid_look(p: Palette) -> Look:
     surfaces.append(value^)
     return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11, True, 0), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10, 30, 14, 8, 0, 0, 0, 0, 32), surfaces^,
                 Segments(rgba(15, 23, 42, 15) if not p.dark else rgba(255, 255, 255, 15), 999, 3, 0, 24, 12, 999, 12, 500, p.ink3,
-                         rgba(255, 255, 255) if not p.dark else p.raised, p.ink, 500, True))  # (the sheet's toggle-group rules say the same: D-300)
+                         rgba(255, 255, 255) if not p.dark else p.raised, p.ink, 500, True)).with_focus(p.accent)  # (the sheet's toggle-group rules say the same: D-300; omxqua's focus ring, goal 56)
 
 
 def liquid_palette() -> Palette:
     """Liquid, light (docs/design/liquid.md): a white sheet, glass islands over a soft cool backdrop, teal (the default).
     The chrome is the glass as it looks over the backdrop (GTK can't blur what's behind a widget)."""
-    return Palette(False, hx("#e9eef4"), hx("#ffffff"), hx("#f6f8fb"), hx("#0f172a"), hx("#334155"), hx("#64748b"),
-                   hx("#edf0f4"), hx("#d9dee6"), hx("#0e7c86"), hx("#ffffff"), mix(hx("#ffffff"), hx("#0e7c86"), 0.40), hx("#e6f2f3"),
+    return Palette(False, hx("#e1e7ef"), hx("#ffffff"), hx("#f6f8fb"), hx("#0f172a"), hx("#334155"), hx("#64748b"),
+                   hx("#e3e8ef"), hx("#c9d1dc"), hx("#0e7c86"), hx("#ffffff"), mix(hx("#ffffff"), hx("#0e7c86"), 0.40), hx("#e6f2f3"),
                    hx("#6a4fd6"), hx("#16a34a"), hx("#dc2626"), hx("#d97706"), REGULAR, MEDIUM, [hx("#0e7c86"), hx("#f59e0b"), hx("#6366f1"), hx("#ec4899"), hx("#22c55e"), hx("#a16207"), hx("#64748b"), hx("#c026d3")], hx("#f7f9fc"), hx("#334155"), hx("#ffffff"))
 
 
@@ -175,11 +186,11 @@ def liquid_css(p: Palette) -> String:
     var w = String("window.liquid ")
     var d = p.dark
     var on_accent = hex_of(p.accent_ink)
-    var solid = String("background-color: #ffffff; box-shadow: 0 0 0 1px rgba(15,23,42,0.07), 0 1px 3px rgba(15,23,42,0.05);") if not d else (
+    var solid = String("background-color: #ffffff; box-shadow: 0 0 0 1px rgba(15,23,42,0.14), 0 1px 3px rgba(15,23,42,0.05);") if not d else (
         "background-color: " + hex_of(p.card) + "; box-shadow: 0 0 0 1px " + line + ", 0 1px 3px rgba(0,0,0,0.30);")
-    var solid_hover = String("0 0 0 1px rgba(15,23,42,0.07), 0 10px 30px rgba(15,23,42,0.10)") if not d else ("0 0 0 1px " + strong + ", 0 10px 30px rgba(0,0,0,0.40)")
+    var solid_hover = String("0 0 0 1px rgba(15,23,42,0.14), 0 10px 30px rgba(15,23,42,0.10)") if not d else ("0 0 0 1px " + strong + ", 0 10px 30px rgba(0,0,0,0.40)")
     var hover = String("rgba(15,23,42,0.06)") if not d else String("rgba(255,255,255,0.07)")
-    var backdrop = String("background-color: #e9eef4; background-image: linear-gradient(180deg, #eef2f7, #e4e9f1);") if not d else (
+    var backdrop = String("background-color: #e1e7ef; background-image: linear-gradient(180deg, #e6ebf2, #dbe2eb);") if not d else (
         "background-color: " + hex_of(p.page) + "; background-image: linear-gradient(180deg, " + hex_of(mix(p.page, WHITE, 0.03)) + ", " + hex_of(mix(p.page, hx("#000000"), 0.08)) + ");")
     var thumb = String("background: #ffffff; color: ") if not d else ("background: " + hex_of(p.raised) + "; color: ")
     var thumb_shadow = String("0 1px 3px rgba(15,23,42,0.12), 0 0 0 1px rgba(15,23,42,0.04)") if not d else ("0 1px 3px rgba(0,0,0,0.35), 0 0 0 1px " + strong)
@@ -188,7 +199,7 @@ def liquid_css(p: Palette) -> String:
     var pop = String("background-color: rgba(255,255,255,0.94); box-shadow: inset 0 1px rgba(255,255,255,0.9), 0 0 0 1px rgba(15,23,42,0.08), 0 12px 40px rgba(15,23,42,0.16);") if not d else (
         "background-color: " + css_rgba(mix(p.card, WHITE, 0.03), 0.97) + "; box-shadow: inset 0 1px rgba(255,255,255,0.06), 0 0 0 1px " + line + ", 0 12px 40px rgba(0,0,0,0.50);")
     var key_ink = hex_of(mix(p.ink3, rgba(255, 255, 255), 0.3)) if not d else ink2
-    var dialog_shadow = String("0 40px 100px rgba(15,23,42,0.30), 0 0 0 1px rgba(15,23,42,0.07)") if not d else ("0 40px 100px rgba(0,0,0,0.55), 0 0 0 1px " + line)
+    var dialog_shadow = String("0 40px 100px rgba(15,23,42,0.30), 0 0 0 1px rgba(15,23,42,0.14)") if not d else ("0 40px 100px rgba(0,0,0,0.55), 0 0 0 1px " + line)
     var dim = String("rgba(15,23,42,0.18)") if not d else String("rgba(0,0,0,0.45)")
     var track = String("rgba(15,23,42,0.06)") if not d else String("rgba(255,255,255,0.06)")
     var highlight = String("rgba(255,255,255,0.18)") if not d else String("rgba(255,255,255,0.10)")
@@ -203,6 +214,9 @@ def liquid_css(p: Palette) -> String:
         + w + "label.title-4 { font-size: 15px; font-weight: 600; color: " + ink + "; }\n"
         + w + "label.caption { font-size: 12px; color: " + ink2 + "; }\n"
         + w + ".mui-board { background-color: transparent; }\n"
+        # shell A (goal 54): the side parts docked, a line where each meets the board
+        + w + ".mui-tag-inspector, " + w + ".mui-card.mui-tag-inspector { border-left: 1px solid " + strong + "; border-radius: 0; box-shadow: none; }\n"
+        + w + ".mui-tag-sidebar, " + w + ".mui-card.mui-tag-sidebar { border-right: 1px solid " + strong + "; border-radius: 0; box-shadow: none; }\n"
         # the menu bar: one glass strip, one type
         + w + ".mui-tag-menubar .mui-menubar { background: transparent; }\n"
         + w + ".mui-tag-app-mark { font-size: 15px; font-weight: 700; color: " + ink + "; letter-spacing: -0.3px; margin-right: 4px; }\n"
@@ -272,12 +286,12 @@ body.liquid { --sp-snappy: cubic-bezier(.22, 1, .36, 1);  /* calm ease-out, no o
   --sp-bouncy: cubic-bezier(.22, 1, .36, 1);
   --glass-bg: rgba(255,255,255,.62); --glass-fx: blur(24px) saturate(1.6);
   --glass-shadow: inset 0 1px rgba(255,255,255,.9), 0 0 0 1px rgba(255,255,255,.75), 0 8px 32px rgba(15,23,42,.10), 0 1px 2px rgba(15,23,42,.06);
-  --solid-shadow: 0 0 0 1px rgba(15,23,42,.07), 0 1px 3px rgba(15,23,42,.05);
-  --l-backdrop: linear-gradient(180deg, #eef2f7, #e4e9f1); --l-hover: rgba(15,23,42,.06); --l-solid: #fff;
-  --l-lift: 0 0 0 1px rgba(15,23,42,.07), 0 10px 30px rgba(15,23,42,.10); --l-hi: rgba(255,255,255,.18);
+  --solid-shadow: 0 0 0 1px rgba(15,23,42,.14), 0 1px 3px rgba(15,23,42,.05);
+  --l-backdrop: linear-gradient(180deg, #e6ebf2, #dbe2eb); --l-hover: rgba(15,23,42,.06); --l-solid: #fff;
+  --l-lift: 0 0 0 1px rgba(15,23,42,.14), 0 10px 30px rgba(15,23,42,.10); --l-hi: rgba(255,255,255,.18);
   --l-track: rgba(15,23,42,.06); --l-thumb: #fff; --l-thumb-shadow: 0 1px 3px rgba(15,23,42,.12), 0 0 0 1px rgba(15,23,42,.04);
   --l-pop: rgba(255,255,255,.84); --l-pop-shadow: inset 0 1px rgba(255,255,255,.9), 0 0 0 1px rgba(15,23,42,.08), 0 12px 40px rgba(15,23,42,.16);
-  --l-sub: #fff; --l-on-accent: #fff; --l-dialog-shadow: 0 40px 100px rgba(15,23,42,.30), 0 0 0 1px rgba(15,23,42,.07); --l-scrim: rgba(15,23,42,.18);
+  --l-sub: #fff; --l-on-accent: #fff; --l-dialog-shadow: 0 40px 100px rgba(15,23,42,.30), 0 0 0 1px rgba(15,23,42,.14); --l-scrim: rgba(15,23,42,.18);
   background: var(--l-backdrop) fixed; font: 13px/18px Inter, sans-serif; }
 body.liquid .text.title { font-size: 22px; line-height: 28px; letter-spacing: -.3px; } body.liquid .text.caption { font-size: 12px; }
 body.liquid .board { background: transparent; }
@@ -289,6 +303,8 @@ body.liquid .menubar {
 body.liquid .menubar { margin: 8px 10px 0; border-radius: 12px; min-height: 34px; }
 body.liquid [data-tag=menubar] .menubar { margin: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 body.liquid [data-tag=app-mark] { font-size: 15px; font-weight: 700; color: var(--o-ink); letter-spacing: -.3px; }
+body.liquid [data-tag=inspector], body.liquid .vstack.card[data-tag=inspector] { border-radius: 0; box-shadow: none; border: 0; border-left: 1px solid var(--o-strong); margin: 0; }  /* (shell A: docked, goal 54) */
+body.liquid [data-tag=sidebar] { border-radius: 0; box-shadow: none; border: 0; border-right: 1px solid var(--o-strong); margin: 0; }
 body.liquid [data-tag=inspector] hr { border: 0; border-top: 1px solid var(--o-strong); margin: 2px 0; width: 100%; }
 body.liquid .menu-title { font-size: 13px; padding: 4px 10px; border-radius: 8px; color: var(--o-ink2); transition: background 150ms var(--sp-snappy); }
 body.liquid .menu.open > .menu-title, body.liquid .menu-title:hover { background: var(--l-hover); color: var(--o-ink); }
@@ -345,19 +361,25 @@ def liquid_dark_web(p: Palette) -> String:
             + " --l-track: rgba(255,255,255,.06); --l-thumb: " + hex_of(p.raised) + "; --l-thumb-shadow: 0 1px 3px rgba(0,0,0,.35), 0 0 0 1px " + strong + ";"
             + " --l-pop: " + css_rgba(mix(p.card, WHITE, 0.03), 0.92) + "; --l-pop-shadow: inset 0 1px rgba(255,255,255,.06), 0 0 0 1px " + line + ", 0 12px 40px rgba(0,0,0,.50);"
             + " --l-sub: " + hex_of(p.card) + "; --l-on-accent: " + hex_of(p.accent_ink) + "; --l-dialog-shadow: 0 40px 100px rgba(0,0,0,.55), 0 0 0 1px " + line + "; --l-scrim: rgba(0,0,0,.45); }\n"
-            + b + ".board-scroll { border: 1px solid " + line + "; border-radius: 16px; background-color: " + hex_of(mix(p.page, hx("#000000"), 0.15)) + "; box-sizing: border-box; }\n"
             + b + ".board > .object:not([data-tag=cell-editor]) { border: 1px solid " + line + "; border-radius: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n"
             + b + ".board > .object > .vstack.card { box-shadow: none; border-radius: 15px; }\n"
             + b + ".dialog, " + b + ".popover { background: " + hex_of(p.card) + "; }\n")
 
 
 def liquid_dark_gtk(p: Palette) -> String:
-    """Liquid dark on GTK: the sheet (a Board's scroller) and every card on it in a 1 px hairline, one soft shadow."""
+    """Liquid dark on GTK: every card on a Board in a 1 px hairline, one soft shadow (shell A, goal 54: the board itself has
+    no frame; the cards are its only islands)."""
     var w = String("window.liquid ")
     var line = hex_of(p.line)
-    return (w + ".mui-board-scroll { border: 1px solid " + line + "; border-radius: 16px; background-color: " + hex_of(mix(p.page, hx("#000000"), 0.15)) + "; }\n"
-            + w + ".mui-board > * { border: 1px solid " + line + "; border-radius: 16px; }\n"
-            + w + ".mui-board > .mui-card { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n")
+    return (w + ".mui-board > * { border: 1px solid " + line + "; border-radius: 16px; }\n"
+            + w + ".mui-board > .mui-card, " + w + ".mui-board > .mui-board-clip { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n")
+
+
+def liquid_light_gtk(p: Palette) -> String:
+    """Liquid light on GTK: every card on a Board in a 1 px border (owner, 2026-11-05: the white sheet on the pale
+    backdrop had no visible edge, in the app or a screenshot)."""
+    var w = String("window.liquid ")
+    return w + ".mui-board > * { border: 1px solid " + hex_of(p.line_strong) + "; border-radius: 16px; }\n"
 
 
 def liquid() -> Theme:
@@ -371,6 +393,6 @@ def liquid(dark: Bool) -> Theme:
 
 def liquid(pal: Palette) -> Theme:
     """Liquid over `pal`: dark when the palette is (liquid_dark_palette)."""
-    var gtk = skin_css(pal, "liquid") + liquid_css(pal) + (liquid_dark_gtk(pal) if pal.dark else String(""))
+    var gtk = skin_css(pal, "liquid") + liquid_css(pal) + (liquid_dark_gtk(pal) if pal.dark else liquid_light_gtk(pal))
     var web = String(SKIN_WEB) + String(LIQUID_WEB) + (liquid_dark_web(pal) if pal.dark else String(""))
     return Theme("liquid", "skin liquid", pal.copy(), gtk, web, pal.ink2, pal.accent_ink, True, liquid_look(pal))

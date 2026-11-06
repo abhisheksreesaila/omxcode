@@ -237,6 +237,10 @@ struct AppKitHost[A: App](Movable):
     var link: Int  # an NSTimer at 60 Hz: one tick per frame, for every canvas (0 = stopped)
     var fx_due: Int  # when the runtime's effects (HTTP replies, timers) are next polled (µs; -1: nothing asked for)
     var resize_pending: Bool  # a new window size waits for the next run-loop turn (never rebuilt inside AppKit's layout)
+    var pan_mode: Int  # a tiled Board's card being dragged: 1 by its header (moves), 2 by its corner (resizes), 0 none
+    var pan_frame: CGRect  # its frame when the drag began
+    var asked_w: Int  # a size the host itself set (a test's resize:, a window too big for its screen): asked once more after
+    var asked_h: Int  # the app lays out to what it got, when the old screen's minimum stopped it short (0: none)
     var ticks: Int  # ticks so far (the Mac report logs the first)
     var last_frame: Float64  # the link's last timestamp (seconds)
     var theme_key: String  # the app's theme (Theme.key); its palette's colours and Inter when it paints native controls (a skin, D-149, D-260)
@@ -295,6 +299,10 @@ struct AppKitHost[A: App](Movable):
         self.link = 0
         self.fx_due = -1
         self.resize_pending = False
+        self.asked_w = 0
+        self.asked_h = 0
+        self.pan_mode = 0
+        self.pan_frame = CGRect(0, 0, 0, 0)
         self.last_frame = 0
         self.ticks = 0
         var theme = self.rt.app.theme()
@@ -1060,6 +1068,8 @@ struct AppKitHost[A: App](Movable):
                     _ = msg(placed, "setTranslatesAutoresizingMaskIntoConstraints:", 1)
                     self.objects[c] = placed
                 _ = msg(placed, "setFrame:", Float64(cn.x), Float64(cn.y), Float64(cn.w), Float64(cn.h))
+                if node.text == "clips":  # (a tiled Board: the resize grip in the corner that drags, as GTK's and the web's)
+                    _ = msg(placed, "addSubview:", make_grip(cn.w, cn.h, self.pal.ink3, (msg(placed, "isFlipped") & 0xFF) != 0))
                 _ = msg(placed, "setIdentifier:", ns_string(String(tag_for(self_addr, c))))
                 _ = msg(content, "addSubview:", placed)
                 if node.msg != 0:  # on_move: drag it (by anywhere on it; the title strip in practice)
@@ -2699,6 +2709,8 @@ struct AppKitHost[A: App](Movable):
                             flags += " iosurface " + String(self.canvases[k].gpu_frames)
                         if self.canvases[k].wpx == 0:
                             problems.append("canvas node " + String(i) + " (id " + String(n.style) + ") was never drawn")
+                if n.kind == CANVAS and n.tip != "":  # (a drawn view's words aren't views: what it says, as VoiceOver reads it)
+                    flags += " says '" + n.tip + "'"
                 if (n.kind == SCROLL or n.kind == BOARD) and (msg(w, "respondsToSelector:", sel("contentView")) & 0xFF) != 0:
                     # its clip (what the content gets), its bars' style (0 legacy, 1 overlay), the vertical bar's width and
                     # whether it shows, and its content insets (top, left, bottom, right): where a narrow clip's points went
@@ -2766,6 +2778,17 @@ struct AppKitHost[A: App](Movable):
             self.fit_tables()
             self.fit_wraps()
         self.dash_paths()
+        if self.asked_w > 0 and (w != self.asked_w or h != self.asked_h):
+            # the old screen's minimum stopped the window short (omxplorer's labelled ribbon at 1,920 held a jump to 1,440
+            # at 1,529): the app has laid out to what it got, maybe to a smaller minimum; the size asked again, once
+            var aw = self.asked_w
+            var ah = self.asked_h
+            self.asked_w = 0
+            self.asked_h = 0
+            _ = msg(self.window, "setContentSize:", Float64(aw), Float64(ah))
+        else:
+            self.asked_w = 0
+            self.asked_h = 0
 
     # ---------- canvases ----------
 
@@ -2998,10 +3021,11 @@ struct AppKitHost[A: App](Movable):
         var look = msg(app, "effectiveAppearance")
         return look != 0 and "Dark" in from_ns(msg(look, "name"))
 
-    def follow_appearance(mut self, self_addr: Int):
+    def follow_appearance(mut self, self_addr: Int, said: Int = -1):
         """The system's light/dark mode, told to the app (App.appearance) when the window opens and whenever it changes
-        (a run-loop turn after the system says so, never inside its notification); the screen follows (apply)."""
-        var dark = self.system_dark()
+        (a run-loop turn after the system says so, never inside its notification); the screen follows (apply). `said`
+        (1 dark, 0 light): the mode just set, which effectiveAppearance only reports a run-loop turn later."""
+        var dark = self.system_dark() if said < 0 else said == 1
         if (1 if dark else 0) == self.dark_told:
             return
         var first = self.dark_told < 0
@@ -3521,6 +3545,11 @@ def find_node[A: App](host: AppKitHost[A], kind: Int, label: String, nth: Int, b
             if seen == nth:
                 return i
             seen += 1
+    if label != "" and nth == 0 and not by_hint:  # (no text matched: the node tagged so, as GTK's steps find a button by its tag)
+        for i in range(len(host.rt.shown.nodes)):
+            ref n = host.rt.shown.nodes[i]
+            if n.kind == kind and n.name == label:
+                return i
     return -1
 
 
@@ -3702,15 +3731,50 @@ def run_step[A: App](host_addr: Int, step: String):
     elif verb == "scheme":  # scheme:dark / scheme:light: the app's appearance switches, as the system's would (GTK's word)
         var app = msg(cls("NSApplication"), "sharedApplication")
         _ = msg(app, "setAppearance:", msg(cls("NSAppearance"), "appearanceNamed:", ns_string("NSAppearanceNameDarkAqua" if rest == "dark" else "NSAppearanceNameAqua")))
-        host[].follow_appearance(host_addr)
+        host[].follow_appearance(host_addr, 1 if rest == "dark" else 0)
     elif verb == "set":  # set:<tag>#<id>.<field>=<JSON>: what an agent's set does (Runtime.set_widget → "mojoui.set" to the page)
         var key = split_at(kv[0], "#")
         var at = split_at(key[1], ".")
         if not host[].rt.set_widget(key[0], to_int(at[0]), at[1], kv[1]):
             host[].report.note("TEST: no widget " + kv[0] + " on the screen, or a value that isn't JSON")
         host[].send_commands(host_addr)
+    elif (verb == "resize" and "=" in rest) or verb == "dragcard":
+        # resize:<card>=dx,dy: a tiled card's corner dragged that far; dragcard:<a>=<b>: a's header dragged until its
+        # middle is over b's middle; the app hears what tiled_pan sends when such a drag ends (GTK's words for both)
+        var board = -1
+        var index = -1
+        var other = -1
+        for b in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[b].kind == BOARD:
+                for k in range(len(host[].rt.shown.nodes[b].children)):
+                    var c = host[].rt.shown.nodes[b].children[k]
+                    if host[].rt.shown.nodes[c].name == kv[0]:
+                        board = b
+                        index = k
+                    elif host[].rt.shown.nodes[c].name == kv[1]:
+                        other = c
+        if board < 0:
+            host[].report.note("TEST: no card " + kv[0])
+            return
+        var dx = 0.0
+        var dy = 0.0
+        if verb == "dragcard":
+            if other < 0:
+                host[].report.note("TEST: no card " + kv[1])
+                return
+            ref a = host[].rt.shown.nodes[host[].rt.shown.nodes[board].children[index]]
+            ref t = host[].rt.shown.nodes[other]
+            dx = Float64((t.x + t.w // 2) - (a.x + a.w // 2))
+            dy = Float64((t.y + t.h // 2) - (a.y + a.h // 2))
+        else:
+            var xy = split_at(kv[1], ",")
+            dx = Float64(to_int(xy[0]))
+            dy = Float64(to_int(xy[1]))
+        end_tiled_drag[A](host_addr, board, index, verb == "resize", dx, dy)  # (what tiled_pan does when a drag ends)
     elif verb == "resize":  # resize:900x700: the window's content size, as a drag of its edge ends
         var wh = split_at(rest, "x")
+        host[].asked_w = to_int(wh[0])
+        host[].asked_h = to_int(wh[1])
         _ = msg(host[].window, "setContentSize:", Float64(to_int(wh[0])), Float64(to_int(wh[1])))
     elif verb != "wait" and verb != "pause":  # (pause:ms as GTK's and the web's; wait:ms the Mac's older word)
         host[].report.note("TEST: unknown step " + step)
@@ -3876,7 +3940,10 @@ def on_toast_timeout[A: App](target: Int, cmd: Int, number: Int) abi("C"):
 def on_board_pan[A: App](target: Int, cmd: Int, recognizer: Int) abi("C"):
     """A Board child dragged: the Board's on_move with the child's index and how far (as GTK and the web send it)."""
     var child = msg(recognizer, "view")
-    if msg(recognizer, "state") != 2:  # changed
+    var state = msg(recognizer, "state")
+    if tiled_pan[A](child, recognizer, state):
+        return
+    if state != 2:  # changed
         return
     try:
         var tag = Int(from_ns(msg(child, "identifier")))
@@ -3897,6 +3964,92 @@ def on_board_pan[A: App](target: Int, cmd: Int, recognizer: Int) abi("C"):
                     return
     except:
         return
+
+
+def make_grip(w: Int, h: Int, color: UInt32, flipped: Bool) -> Int:
+    """A tiled card's resize grip: two short diagonal strokes in its bottom-right 18 pt (mojoui.boardlook's _grip on GTK
+    and the web), taking no clicks (the Board's pan does the resizing). `flipped`: the card's y runs down (a boxed
+    object's MojoBoardView), else up (its own stack); the grip keeps to the bottom-right corner as the card resizes."""
+    var grip = new("NSView")  # (unflipped: its layer's y runs up, as the strokes below are written)
+    _ = msg(grip, "setFrame:", Float64(w - 23), Float64(h - 23) if flipped else Float64(5), Float64(18), Float64(18))
+    _ = msg(grip, "setAutoresizingMask:", 1 | (8 if flipped else 32))  # NSViewMinXMargin, and the margin above it (MinY flipped, MaxY not)
+    _ = msg(grip, "setWantsLayer:", 1)
+    var shape = new("CAShapeLayer")
+    var path = new("NSBezierPath")
+    for line in [(5.0, 1.0, 17.0, 13.0), (12.0, 1.0, 17.0, 6.0)]:  # ("/" strokes near the corner, y up)
+        _ = msg(path, "moveToPoint:", line[0], line[1])
+        _ = msg(path, "lineToPoint:", line[2], line[3])
+    _ = msg(shape, "setPath:", msg(path, "CGPath"))
+    _ = msg(shape, "setStrokeColor:", msg(ns_color(color), "CGColor"))
+    _ = msg(shape, "setLineWidth:", Float64(2))
+    _ = msg(shape, "setLineCap:", ns_string("round"))
+    _ = msg(shape, "setFillColor:", 0)
+    _ = msg(shape, "setFrame:", Float64(0), Float64(0), Float64(18), Float64(18))
+    _ = msg(msg(grip, "layer"), "addSublayer:", shape)
+    return grip
+
+
+def end_tiled_drag[A: App](host_addr: Int, board: Int, index: Int, resized: Bool, dx: Float64, dy: Float64, view: Int = 0):
+    """A tiled card's drag ended (tiled_pan's Ended, and the resize:/dragcard: test steps): the app hears ZOOM (resized)
+    or PAN (moved) with the whole distance and its tiling decides; then the dragged view goes to the card's place as the
+    app now has it, so a drop on nothing or a clamped resize snaps back (GTK's snap-back, D-5411) instead of staying
+    where the pointer left it."""
+    var host = host_at[A](host_addr)
+    var d = host[].rt.gesture(board, ZOOM if resized else PAN, Float64(index), 0, dx, dy, 1)
+    host[].apply(d, host_addr)
+    if view != 0 and msg(view, "superview") != 0 and board < len(host[].rt.shown.nodes) and index < len(host[].rt.shown.nodes[board].children):
+        ref n = host[].rt.shown.nodes[host[].rt.shown.nodes[board].children[index]]
+        _ = msg(view, "setFrame:", Float64(n.x), Float64(n.y), Float64(n.w), Float64(n.h))
+
+
+def tiled_pan[A: App](child: Int, recognizer: Int, state: Int) -> Bool:
+    """A card on a tiled Board (Board(clips=True)) dragged, as GTK's Board does it: from its corner it resizes, from its
+    header it moves; the view follows the pointer and the app hears once, at the end (ZOOM resized, PAN moved), with
+    the whole distance, so its tiling decides (a swap, an edge moved). False: not a tiled Board's card."""
+    try:
+        var tag = Int(from_ns(msg(child, "identifier")))
+        var host_addr = tag >> NODE_BITS
+        var node = tag & ((1 << NODE_BITS) - 1)
+        var host = host_at[A](host_addr)
+        var board = -1
+        var index = -1
+        for b in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[b].kind == BOARD and host[].rt.shown.nodes[b].text == "clips":
+                for k in range(len(host[].rt.shown.nodes[b].children)):
+                    if host[].rt.shown.nodes[b].children[k] == node:
+                        board = b
+                        index = k
+        if board < 0:
+            return False
+        var parent = msg(child, "superview")
+        var f = msg[CGRect](child, "frame")
+        if state == 1:  # began: where on the card (the Board's content is flipped: y runs down)
+            var at = msg[CGPoint](recognizer, "locationInView:", parent)
+            var lx = at.x - f.x
+            var ly = at.y - f.y
+            host[].pan_mode = 2 if (lx > f.width - 24 and ly > f.height - 24) else (1 if ly < 44 else 0)
+            host[].pan_frame = f.copy()
+            if host[].pan_mode == 0:  # (the card's own content: its controls, a canvas's gestures)
+                _ = msg(recognizer, "setEnabled:", 0)  # (cancels it: state is read-only from outside)
+                _ = msg(recognizer, "setEnabled:", 1)
+            return True
+        var moved = msg[CGPoint](recognizer, "translationInView:", parent)
+        ref f0 = host[].pan_frame
+        if state == 2 and host[].pan_mode == 1:
+            _ = msg(child, "setFrameOrigin:", f0.x + moved.x, f0.y + moved.y)
+        elif state == 2 and host[].pan_mode == 2:
+            _ = msg(child, "setFrameSize:", max(f0.width + moved.x, Float64(60)), max(f0.height + moved.y, Float64(60)))
+        elif state == 3 and host[].pan_mode > 0:  # ended: the app's tiling decides where everything goes
+            var resized = host[].pan_mode == 2
+            host[].pan_mode = 0
+            end_tiled_drag[A](host_addr, board, index, resized, moved.x, moved.y, child)
+        elif state >= 4:  # cancelled or failed: back where it was
+            if host[].pan_mode > 0:
+                _ = msg(child, "setFrame:", f0.x, f0.y, f0.width, f0.height)
+            host[].pan_mode = 0
+        return True
+    except:
+        return False
 
 
 def make_toast(text: String, action: String, tag: Int, target: Int, pal: Palette) -> Int:

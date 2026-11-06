@@ -92,6 +92,7 @@ struct Main(App):
             Slider(self.volume, on_change=VOLUME),
             ProgressBar(self.volume),
             Image(swatch(self.volume), 120, 40),
+            HStack(Text("1,111.11"), Text("8,888.88"), Text("Figures one width in a theme that says so (tnum)", style=CAPTION), spacing=12),
             Button("Say hello (" + String(self.greeted) + ")", on_tap=GREET, style=PROMINENT),
             spacing=14,
         )

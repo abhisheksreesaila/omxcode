@@ -622,6 +622,7 @@ struct GtkHost[A: App](Movable):
     var boards: List[BoardChild]
     var window_w: Int  # the window's width in points (boards narrower than 720 become lists)
     var board_list: Bool  # the last build showed boards as lists
+    var clip_node: Int  # the Board child being built: its outer is a clip holder exactly its node's size (-1: none)
     var board_scrollers: List[Tuple[Int, Int]]  # (Board node, its GtkScrolledWindow)
     var board_drags: List[Tuple[Int, Int]]  # (Board node, its drag gesture): a Board whose objects all change keeps it
     var hold_bi: Int  # a press on a Board child that may become a hold (Board(on_hold=…)): its index in boards, else -1
@@ -785,6 +786,7 @@ struct GtkHost[A: App](Movable):
         self.boards = List[BoardChild]()
         self.window_w = 0
         self.board_list = False
+        self.clip_node = -1
         self.board_scrollers = List[Tuple[Int, Int]]()
         self.board_drags = List[Tuple[Int, Int]]()
         self.hold_bi = -1
@@ -1028,6 +1030,7 @@ struct GtkHost[A: App](Movable):
             var child = want[k]
             var entry = BoardChild(j, c, k, child, fixed, drag)
             if child == 0:
+                self.clip_node = c if self.rt.shown.nodes[j].text == "clips" else -1
                 child = self.build(c, self_addr)
                 external_call["gtk_fixed_put", NoneType](fixed, child, Float64(self.rt.shown.nodes[c].x), Float64(self.rt.shown.nodes[c].y))
                 # (in node order: what draws on top is what a drag picks)
@@ -1063,6 +1066,19 @@ struct GtkHost[A: App](Movable):
         if outer == 0:
             return
         var target = outer
+        var clip_class = String("mui-board-clip")
+        if Int(external_call["gtk_widget_has_css_class", c_int](outer, clip_class.as_c_string_span())) != 0:
+            # (a Board child's clip: the holder takes the size, and so does what it holds, then on as below)
+            external_call["gtk_widget_set_size_request", NoneType](outer, c_int(node.w if node.w > 0 else -1), c_int(node.h if node.h > 0 else -1))
+            outer = external_call["gtk_overlay_get_child", Int](outer)  # (the scroller under the grip)
+            if outer == 0:
+                return
+            outer = external_call["gtk_scrolled_window_get_child", Int](outer)
+            if outer == 0:
+                return
+            if Int(external_call["g_type_check_instance_is_a", c_int](outer, external_call["gtk_viewport_get_type", Int]())) != 0:
+                outer = external_call["gtk_viewport_get_child", Int](outer)
+            target = outer
         var cap = node.max_w if node.max_w != 0 else node.w
         if cap != 0 and Int(external_call["g_type_check_instance_is_a", c_int](outer, external_call["adw_clamp_get_type", Int]())) != 0:
             external_call["adw_clamp_set_maximum_size", NoneType](outer, c_int(cap))
@@ -2036,8 +2052,15 @@ struct GtkHost[A: App](Movable):
                 connect_any(drag, "drag-end", on_board_drag_end[Self.A], self_addr)
                 external_call["gtk_widget_add_controller", NoneType](inner, drag)
                 self.board_drags.append((i, drag))
+                if node.text == "clips":  # (a tiled Board: the pointer says what a press does, as the web's cursors)
+                    var motion = external_call["gtk_event_controller_motion_new", Int]()
+                    var key = String(BOARD_DRAG_KEY)
+                    external_call["g_object_set_data", NoneType](motion, key.as_c_string_span(), drag)
+                    connect_any(motion, "motion", on_board_motion[Self.A], self_addr)
+                    external_call["gtk_widget_add_controller", NoneType](inner, motion)
                 for k in range(len(node.children)):
                     var c = node.children[k]
+                    self.clip_node = c if node.text == "clips" else -1
                     var child = self.build(c, self_addr)
                     external_call["gtk_fixed_put", NoneType](inner, child, Float64(self.rt.shown.nodes[c].x), Float64(self.rt.shown.nodes[c].y))
                     self.boards.append(BoardChild(i, c, k, child, inner, drag))
@@ -2126,6 +2149,9 @@ struct GtkHost[A: App](Movable):
         if self.widgets[i] == 0:  # (some branches already stored an inner control)
             self.widgets[i] = w
         var outer = self.apply_layout(i, w)
+        if i == self.clip_node:  # (a Board child: held in a clip exactly its size, as the web's absolute box with overflow hidden)
+            self.clip_node = -1
+            outer = board_clip(outer, self.rt.shown.nodes[i])
         self.outers[i] = outer
         return outer
 
@@ -4943,6 +4969,37 @@ def board_object[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], drag: In
     return -1
 
 
+comptime BOARD_DRAG_KEY = "mui-board-drag"
+
+
+def on_board_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int) abi("C"):
+    """The pointer over a tiled Board: a resize cursor over a card's corner (its grip), a move cursor over its header,
+    the default elsewhere (goal 56: a corner that drags but says nothing wasn't found)."""
+    var host = host_at[A](host_addr)
+    var key = String(BOARD_DRAG_KEY)
+    var drag = external_call["g_object_get_data", Int](motion, key.as_c_string_span())
+    var first = get_index(drag)
+    if first < 0 or first >= len(host[].boards):
+        return
+    var cursor = String("")
+    var bi = first
+    while bi < len(host[].boards) and host[].boards[bi].drag == drag:
+        ref b = host[].boards[bi]
+        ref n = host[].rt.shown.nodes[b.node]
+        var w = Float64(Int(external_call["gtk_widget_get_width", c_int](b.widget)))
+        var h = Float64(Int(external_call["gtk_widget_get_height", c_int](b.widget)))
+        var lx = x - Float64(n.x)
+        var ly = y - Float64(n.y)
+        if 0.0 <= lx and lx < w and 0.0 <= ly and ly < h and n.kind != FIELD:  # (an in-place editor is typed in, never dragged: drag-begin's rule)
+            cursor = String("nwse-resize") if lx > w - 24 and ly > h - 24 else (String("move") if ly < 44 else String(""))
+        bi += 1
+    var fixed = host[].boards[first].fixed
+    if cursor == "":
+        external_call["gtk_widget_set_cursor", NoneType](fixed, Int(0))
+    else:
+        external_call["gtk_widget_set_cursor_from_name", NoneType](fixed, cursor.as_c_string_span())
+
+
 def on_board_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var first = get_index(drag)
@@ -5050,6 +5107,15 @@ def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_ad
     var b = host[].boards[bi].copy()
     var d = host[].rt.gesture(b.board, ZOOM if b.resizing else PAN, Float64(b.index), 0, off_x, off_y, 1)
     host[].apply(d, host_addr)
+    # a clipping Board (Board(clips=True)): the app decides where the card ends, back to its node's place and size also
+    # when the app changed nothing (a tiled Board snaps a card that wasn't dropped on another back into its tile)
+    for k in range(len(host[].boards)):
+        if (host[].boards[k].widget == b.widget and 0 <= host[].boards[k].node < len(host[].rt.shown.nodes) and not host[].board_list
+                and 0 <= host[].boards[k].board < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[host[].boards[k].board].text == "clips"):
+            ref n = host[].rt.shown.nodes[host[].boards[k].node]
+            external_call["gtk_fixed_move", NoneType](host[].boards[k].fixed, b.widget, Float64(n.x), Float64(n.y))
+            host[].resize_widget(host[].boards[k].node)
+            break
 
 
 def on_clicked[A: App](button: Int, host_addr: Int) abi("C"):
@@ -5591,6 +5657,44 @@ def to_float(s: String) -> Float64:
         return 0
 
 
+def board_clip(child: Int, node: Node) -> Int:
+    """A Board child's holder: exactly the node's size whatever the child's own minimum (a GtkScrolledWindow whose
+    policy is EXTERNAL both ways: no scroll bars, and its size never follows the child's), so a tiled card that's
+    smaller than its contents is clipped at its edges instead of spreading over its neighbours (goal 54). Over it, in
+    the bottom-right corner, the resize grip: two short diagonal strokes that say the corner drags (goal 56: "I saw
+    the close button, didn't see a handle to expand"); it takes no pointer, the Board's own drag does the resizing."""
+    var scroller = external_call["gtk_scrolled_window_new", Int]()
+    external_call["gtk_scrolled_window_set_policy", NoneType](scroller, c_int(3), c_int(3))  # GTK_POLICY_EXTERNAL
+    external_call["gtk_scrolled_window_set_child", NoneType](scroller, child)
+    var holder = external_call["gtk_overlay_new", Int]()
+    external_call["gtk_overlay_set_child", NoneType](holder, scroller)
+    var grip = external_call["gtk_box_new", Int](c_int(0), c_int(0))
+    external_call["gtk_widget_set_size_request", NoneType](grip, c_int(GRIP), c_int(GRIP))
+    external_call["gtk_widget_set_halign", NoneType](grip, c_int(2))  # GTK_ALIGN_END
+    external_call["gtk_widget_set_valign", NoneType](grip, c_int(2))
+    external_call["gtk_widget_set_can_target", NoneType](grip, c_int(0))
+    add_class(grip, "mui-board-grip")
+    external_call["gtk_overlay_add_overlay", NoneType](holder, grip)
+    if node.w > 0 or node.h > 0:
+        external_call["gtk_widget_set_size_request", NoneType](holder, c_int(node.w if node.w > 0 else -1), c_int(node.h if node.h > 0 else -1))
+    external_call["gtk_widget_set_overflow", NoneType](holder, c_int(1))  # GTK_OVERFLOW_HIDDEN: the rounded corners clip too
+    add_class(holder, "mui-board-clip")
+    return holder
+
+
+comptime GRIP = 18  # the resize grip's box (its strokes are drawn inside it by CSS); the corner that drags is 24 pt
+
+
+def has_button(host: GtkHost, title: String) -> Bool:
+    """A button titled `title`, or tagged so (as tap: finds one, the way an agent names it)."""
+    if find(host, BUTTON, title, 0) >= 0:
+        return True
+    for k in range(len(host.rt.shown.nodes)):
+        if host.rt.shown.nodes[k].kind == BUTTON and host.rt.shown.nodes[k].name == title:
+            return True
+    return False
+
+
 def pump():
     """One turn of the main loop for a test's wait, never sleeping past its caller's deadline: a blocking turn waits
     for the next event, and with nothing scheduled (no timer, no frame asked for, as when the island has settled) that
@@ -5708,9 +5812,9 @@ def run_step[A: App](host_addr: Int, step: String):
         var kv = split_at(rest, "=")
         var t0 = Int(perf_counter_ns())
         var until = t0 + to_int(kv[1]) * 1_000_000
-        while find(host[], BUTTON, kv[0], 0) < 0 and not host[].closed and Int(perf_counter_ns()) < until:
+        while not has_button(host[], kv[0]) and not host[].closed and Int(perf_counter_ns()) < until:
             pump()  # (sleeps 1 ms when a turn did nothing: no core spun while the job it waits for needs the CPU)
-        if find(host[], BUTTON, kv[0], 0) < 0:
+        if not has_button(host[], kv[0]):
             print("TEST: no button " + kv[0] + " after " + kv[1] + " ms")
         else:
             print("WAITED: " + kv[0] + " after " + String((Int(perf_counter_ns()) - t0) // 1_000_000) + " ms", flush=True)
@@ -6417,6 +6521,67 @@ def run_step[A: App](host_addr: Int, step: String):
                 continue
             var got = accessible_label_is(host[].widgets[k], want)
             print("A11Y LABEL: #" + String(k) + " " + host[].rt.shown.nodes[k].name + " = " + want + (" (ok)" if got == "" else " (GTK: " + got + ")"))
+    elif verb == "boards":  # boards:<step>: every Board's size and its children's places now ("BOARDS: step WxH", then BOARD: lines)
+        pump()
+        for i in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[i].kind == BOARD and not host[].board_list:
+                var room = String("")
+                var scroller = host[].outers[i]
+                if scroller != 0:  # (the room the page gives the Board: its scroller's size; bigger content would scroll)
+                    room = " in " + String(Int(external_call["gtk_widget_get_width", c_int](scroller))) + "x" + String(Int(external_call["gtk_widget_get_height", c_int](scroller)))
+                print("BOARDS: " + rest + " " + String(host[].rt.shown.nodes[i].spacing) + "x" + String(host[].rt.shown.nodes[i].size) + room)
+                for c in host[].rt.shown.nodes[i].children:  # (the widget as GTK allocated it, not the node's wish)
+                    ref ch = host[].rt.shown.nodes[c]
+                    if ch.name == "":
+                        continue
+                    var ax = ch.x
+                    var ay = ch.y
+                    var aw = ch.w
+                    var ah = ch.h
+                    for ref b in host[].boards:
+                        if b.node == c:  # (its border box in the Board's coordinates)
+                            var rect = List[Float32](length=4, fill=0)
+                            if external_call["gtk_widget_compute_bounds", c_int](b.widget, b.fixed, Int(rect.unsafe_ptr())) != 0:
+                                ax = Int(rect[0] + 0.5)
+                                ay = Int(rect[1] + 0.5)
+                                aw = Int(rect[2] + 0.5)
+                                ah = Int(rect[3] + 0.5)
+                    print("BOARD: " + ch.name + " at " + String(ax) + "," + String(ay) + " " + String(aw) + "x" + String(ah)
+                          + ("" if aw == ch.w and ah == ch.h and ax == ch.x and ay == ch.y else " (asked " + String(ch.x) + "," + String(ch.y) + " " + String(ch.w) + "x" + String(ch.h) + ")"))
+    elif verb == "focus":  # focus:<title or tag>: that button given keyboard focus, as Tab would ("FOCUS: name at x,y wxh" in the window)
+        pump()
+        var i = find(host[], BUTTON, rest, 0)
+        if i < 0:
+            for k in range(len(host[].rt.shown.nodes)):
+                if host[].rt.shown.nodes[k].kind == BUTTON and host[].rt.shown.nodes[k].name == rest:
+                    i = k
+                    break
+        if i < 0 or i >= len(host[].widgets) or host[].widgets[i] == 0:
+            print("TEST: no button", rest)
+            return
+        external_call["gtk_window_set_focus_visible", NoneType](host[].window, c_int(1))
+        _ = external_call["gtk_widget_grab_focus", c_int](host[].widgets[i])
+        pump()
+        var rect = List[Float32](length=4, fill=0)
+        _ = external_call["gtk_widget_compute_bounds", c_int](host[].widgets[i], host[].window, Int(rect.unsafe_ptr()))
+        print("FOCUS: " + rest + " at " + String(Int(rect[0] + 0.5)) + "," + String(Int(rect[1] + 0.5)) + " " + String(Int(rect[2] + 0.5)) + "x" + String(Int(rect[3] + 0.5)))
+    elif verb == "measure":  # measure:<words>: the first label showing them, as wide and high as GTK drew it ("MEASURE: words WxH")
+        pump()
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].kind == TEXT and host[].rt.shown.nodes[k].text == rest and k < len(host[].widgets) and host[].widgets[k] != 0:
+                var w = host[].widgets[k]
+                if Int(external_call["g_type_check_instance_is_a", c_int](w, external_call["gtk_label_get_type", Int]())) == 0:
+                    continue  # (a label inside a box of its own: the box isn't the words)
+                var size = List[c_int](length=2, fill=0)  # (the words' own size: a label can be stretched wider than them)
+                var layout = external_call["gtk_label_get_layout", Int](w)
+                external_call["pango_layout_get_pixel_size", NoneType](layout, Int(size.unsafe_ptr()), Int(size.unsafe_ptr()) + 4)
+                print("MEASURE: " + rest + " " + String(Int(size[0])) + "x" + String(Int(size[1])))
+                return
+        print("TEST: no label", rest)
+    elif verb == "window":  # window:WxH: the window resized, as a person drags its edge
+        var wh = split_at(rest, "x")
+        external_call["gtk_window_set_default_size", NoneType](host[].window, c_int(to_int(wh[0])), c_int(to_int(wh[1])))
+        pump()
     elif verb == "regions":  # regions:/path.json: the window's regions (mojoui.regions) in the window's pixels, as [{"name", "x", "y", "w", "h"}]
         write_regions(host[], rest)
     elif verb == "say":  # say:TAG[@n]: what the n-th view tagged TAG says now (@-1: the last): its tooltip, else its words
@@ -6465,11 +6630,9 @@ def run_step[A: App](host_addr: Int, step: String):
         for k in range(1, len(host[].frame_times)):
             worst = max(worst, Float64(host[].frame_times[k] - host[].frame_times[k - 1]) / 1e6)
         print("GAPS: " + String(len(host[].frame_times)) + " frames, longest " + one_decimal(Float32(worst)) + " ms")
-    elif verb == "move" or verb == "resize":  # a board object dragged by its header (or its corner), as a real drag sends it
+    elif verb == "move" or verb == "resize" or verb == "dragcard":  # a board object dragged by its header (or its corner), as a real drag sends it
+        # (dragcard:<a>=<b>: a's header dragged until a's middle is over b's middle)
         var kv = split_at(rest, "=")
-        var xy = split_at(kv[1], ",")
-        var dx = Float64(to_int(xy[0]))
-        var dy = Float64(to_int(xy[1]))
         var bi = -1
         for k in range(len(host[].boards)):
             if host[].rt.shown.nodes[host[].boards[k].node].name == kv[0]:
@@ -6477,6 +6640,24 @@ def run_step[A: App](host_addr: Int, step: String):
         if bi < 0:
             print("TEST: no board object", kv[0])
             return
+        var dx = 0.0
+        var dy = 0.0
+        if verb == "dragcard":
+            var ti = -1
+            for k in range(len(host[].boards)):
+                if host[].rt.shown.nodes[host[].boards[k].node].name == kv[1]:
+                    ti = k
+            if ti < 0:
+                print("TEST: no board object", kv[1])
+                return
+            ref a = host[].rt.shown.nodes[host[].boards[bi].node]
+            ref t = host[].rt.shown.nodes[host[].boards[ti].node]
+            dx = Float64((t.x + t.w // 2) - (a.x + a.w // 2))
+            dy = Float64((t.y + t.h // 2) - (a.y + a.h // 2))
+        else:
+            var xy = split_at(kv[1], ",")
+            dx = Float64(to_int(xy[0]))
+            dy = Float64(to_int(xy[1]))
         wait_allocated(host[].boards[bi].widget)
         var w = Float64(Int(external_call["gtk_widget_get_width", c_int](host[].boards[bi].widget)))
         var h = Float64(Int(external_call["gtk_widget_get_height", c_int](host[].boards[bi].widget)))

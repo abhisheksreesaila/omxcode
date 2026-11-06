@@ -1,40 +1,36 @@
-# GOAL 55: omxconsole, LM Studio for MAX, all omxcode
+# GOAL 56: omxplorer on the owner's Mac, and omxqua's latest details
 
-**End goal (owner, 2026-11-05):** "All we need is a simple app, a desktop app, which wraps around MAX and does all the
-MAX [things] with benchmarking and an easy to use interface just like LM Studio… as long as everything is built using
-omxcode it can go into the gallery." No Python service of ours: the Mojo consoled (goals 50/52, on main) replaces
-mxstudio's daemon; only `max serve` itself is Python. Worktree `../mojo-ui-g55`, branch `goal-55-console`, off main
-(Mojo 1.2). (Goal 54 is another session's: omxplorer's shell, `../mojo-ui-g54`.)
+**End goal (owner, 2026-11-06):** "you can test this on the mac as well, we have connection to mac… omxplorer, it needs
+to have the latest design principles from omxqua, and omxcore (gpu rendering etc)… go on autopilot and dazzle me."
+Goal 54's shell A and tiling, proven on the owner's own Mac (Apple M4, Metal, a real screen) instead of only GitHub's
+GPU-less runners; and omxqua v0.1.6's details (2026-11-05: the focus ring, tabular figures) in the framework's Look, so
+every Liquid app gets them. omxcore: the vendored engine is already its newest stable (834ef9a, STABLE.md 2026-10-29;
+everything newer is in review with breaking builder changes), so nothing to vendor; the Mac build runs it on Metal.
+
+Base: main 1247c2d. Worktree ../mojo-ui-g56, branch goal-56-omxqua. (55 is another session's.)
 
 ## Milestones
-| # | Milestone | Proof (`scripts/check`, docs/goals/55-check.py) |
+| # | Milestone | Proof (`docs/goals/56-check.py`) |
 |---|---|---|
-| M0 | Baseline | console and consoled build on main; consoled on a throwaway MXC_HOME and port, with this env's MAX, answers /health |
-| M1 | Find models | `mojoui.hf` (any app: Hub search, a repo's files, sizes and revision) with tests/test_hf.mojo on the live Hub; consoled's /admin/search?q= answers any query from the Hub with sizes and a fits-this-machine flag |
-| M2 | Download | `mojoui.hf` downloads a repo's files with progress, resume and cancel; POST /admin/pulls + GET /admin/pulls/{id} pull Qwen/Qwen2.5-0.5B-Instruct into MXC_HOME (each file's sha256 = the Hub's LFS id), register it; a cancelled pull leaves no model; DELETE /admin/models/{name} removes files and row |
-| M3 | Chat | POST /admin/try/chat answers from the pulled model through `max serve`; the OpenAI SDK streams a chat with a key; the console on GTK, driven by steps, searches, pulls, shows Ready and a real reply in its chat |
-| M4 | Benchmark | POST /admin/bench runs a fixed workload; GET /admin/bench reports time to first token and decode tokens/s per model, within 25 % of the OpenAI SDK's own streaming measurement; the console's Benchmark tab draws the bars |
-| M5 | One app, one download | the console starts its own consoled when none answers and stops it on quit (a framework piece any app can use); `scripts/package.sh omxconsole linux` (console + consoled) unpacked and run with no Mojo or pixi and a fresh HOME draws its window, its consoled answers, and a chat works with MXC_MAX naming a MAX install |
-| M6 | Mac | console + consoled build for the Mac; on GitHub's macOS 15 and 26 runners the app opens, starts consoled, and says MAX isn't installed (no MAX there) without a crash |
-| M7 | In the gallery | an omxconsole card with its downloads (each one run), the gallery-apps release holding them; docs/goals/53-check.py passes |
+| M0 | Sentences size their card | `mojoui.sentence.sentence_lines` counts the lines `Sentence` draws at every width (tests/test_sentence.mojo); a chart card's title bar is as tall as its sentence's lines (mojoui.sheetpage), its words broken for the tile's width |
+| M1 | The owner's Mac | `scripts/mac-ssh` builds omxplorer natively on the owner's Mac (Metal) and runs docs/goals/56/mac.steps with appearance=system; from its report: the window keeps 1440 wide through the import (a fixed width that also filled shrank it to 1200); a jump 1920 → 1440 lands at 1440 (the labelled ribbon held it at 1529); after `scheme:light` the chrome corners are light, after `scheme:dark` dark; every chart sentence ends above its card's body and none of its words is squeezed to nothing; no two Board cards overlap; `tap:close-limits` finds the button by its tag and the limits card is gone after it; a corner drag of -100 changes the table card's width by -100 ± 10 and `dragcard:chart0=chart1` swaps their frames exactly (end_tiled_drag, which a real drag's end also calls; the drag's start — which corner, the cancel — and the snap-back of the dragged view are run only by a real drag, unverified by a step); the island says the Apple GPU is ready (its spoken words, in the dump) |
+| M2 | omxqua's focus ring | Look.focus (the accent, 2 px, 2 px clear, keyboard only) written by GTK and the web; GTK (the gallery in Liquid): a button given keyboard focus has the accent on all four sides 2–4 px outside its bounds, and not before; web (omxplorer in Chromium): Tab to the first focusable control → its computed outline is 2px solid in the app's accent (--o-accent), offset 2px |
+| M3 | Tabular figures everywhere | Liquid's TypeScale.tabular on GTK too (D-301's debt): the gallery's "1,111.11" and "8,888.88" are equally wide under Liquid and not without it; the web's computed font-feature-settings says tnum |
+| M5 | The page shows it | docs/omxplorer.html's "The look" shows the same tiled board in Liquid dark on the Mac (the M1 run's last picture), Linux (GTK) and the web (Chromium): docs/img/omxplorer-shell-{mac,linux,web}.jpg, each 1440×900 with dark corners, looked at (owner, 2026-11-06: "this will need new screenshots obviously… dark mode version") |
+| M4 | Nothing regressed | goal 54's check M1, M2 and M3 pass on this tree; tests/test_tiling, test_boardtiles, test_sentence ok |
 
 ## Done means
-`scripts/check` prints PASS for M0–M7, the reviewer passes it, and main carries it (the owner allows pushing main after
-a reviewer PASS and green checks).
+56-check PASS for M0–M5, the reviewer passes it, the Mac's pictures were looked at.
 
 ## Out of bounds
-The owner's running Python daemon on :11435 and the real `~/.mxc` (never read, written or stopped: switching over needs
-the owner's yes at that moment); `~/Projects/mxstudio`; `../mojo-ui-apple-test`; goal 54's worktree. No secrets (public
-models only, no Hugging Face token). No paid services. Pushing: the mac-test branch and mac-ci release (scripts/mac-ci),
-the gallery-apps release, and main at the end. Model porting and robotics models (later goals). LAN expose, the tray,
-the `omxc` CLI.
+Pushing (main is pushed only after the reviewer's PASS and green checks, per the owner's standing OK); the frozen
+../mojo-ui-apple-test; other sessions' worktrees (g50, g52, g53, g55); pip; deleting .pixi or anything on the owner's Mac
+outside ~/omxcode-g54; lowering a proof; vendoring an omxcore commit that isn't in its STABLE.md.
 
-## Assumptions
-- Pulled weights go to a plain folder, MXC_HOME/models/<owner>--<name>/, served with `max serve --model-path <folder>`
-  (the Python daemon's local-weights path), not Hugging Face's cache layout.
-- Tests use Qwen/Qwen2.5-0.5B-Instruct (~1 GB, Apache-2.0) on this machine's RTX 3090; the network is up.
-- The download needs MAX installed by the user (as LM Studio needs its runtime); MXC_MAX or `max` on PATH.
-- Benchmark workload: 5 chat prompts, 128 tokens each, one at a time.
+## Assumptions (taken instead of asking)
+- The owner's Mac may be used for runs (they offered it); windows open on its screen for a minute each run.
+- The Mac keeps its native focus ring (system accent); omxqua's accent ring is GTK's and the web's for now.
+- omxplorer stays dark by default (D-1241); the Mac proof sets appearance=system to see both.
 
 ## Budget
 80 turns.

@@ -590,7 +590,7 @@ def Overlay(base: View, *islands: View) -> View:
 
 
 def Board(items: List[View], width: Int, height: Int, on_move: Int = NO_MSG, on_resize: Int = NO_MSG,
-          reveal: Int = -1, reveal_count: Int = 0, tones: List[Int] = [], on_hold: Int = NO_MSG) -> View:
+          reveal: Int = -1, reveal_count: Int = 0, tones: List[Int] = [], on_hold: Int = NO_MSG, clips: Bool = False) -> View:
     """A page: children sit where their .at(x, y) says, sized by .width/.height (a Numbers-style
     free-flow layout). Dragging a child's edge area moves it (on_move: event.number = child index,
     event.dx/dy = how far); dragging its bottom-right corner resizes it (on_resize, the same fields).
@@ -601,7 +601,10 @@ def Board(items: List[View], width: Int, height: Int, on_move: Int = NO_MSG, on_
     BOARD_DIM (steps back: dimmed, grey, a little smaller; never blurred), BOARD_LIFT (rises, ringed in the accent),
     BOARD_SOURCE (the one held), BOARD_TARGET (a drop would land here); hosts ease between tones, and a change is a
     patch (nothing is built again). on_hold: pressing a child and holding still for HOLD_MS sends it with
-    event.number = the child's index and event.text = "hold"; letting go afterwards sends it again with "release"."""
+    event.number = the child's index and event.text = "hold"; letting go afterwards sends it again with "release".
+    clips: each child is held to exactly its .width × .height whatever its contents ask for (cut at its edges, as the
+    web's box always is), and a drag that ends goes back to wherever the app then puts the child (a tiled Board,
+    mojoui.boardtiles: goal 54)."""
     var n = Node(BOARD, msg=on_move, msg2=on_resize, spacing=width, size=height,
                  value=reveal_count * 64 + reveal + 1 if 0 <= reveal < 63 else 0)
     var any = False
@@ -613,6 +616,8 @@ def Board(items: List[View], width: Int, height: Int, on_move: Int = NO_MSG, on_
             n.options.append(String(t))
     if on_hold != NO_MSG:
         n.hint = String(on_hold)
+    if clips:
+        n.text = "clips"
     var v = _container(n^, items)
     return v^
 

@@ -1,0 +1,147 @@
+# mojoui.videoscript: videos in a script (goal 49 M2). Every video an app holds is a table a script reads by name, one row
+# per frame (frame, t), made from what the video says about itself (no decode, no analysis: cheap for any length); and
+# the functions a script calls on a video's frames (mojoui.script's ScriptFunctions) live here too.
+#
+#   var videos = VideoFunctions()
+#   videos.add("episode", "clips/F00118.mp4", 15.0, 244)     # its SQL name, file, rate and frame count (VideoInfo)
+#   videos.add_to(catalog)                                   # `episode` is a table: frame 0…243, t in seconds (3 places)
+#   var run = run_script("frames = SELECT * FROM episode;", catalog, videos)
+#
+# A video's rows join anything with a time or a frame: `ON CAST(tl.t * 15 AS INT) = f.frame` for a 15 Hz log (CAST
+# rounds to the nearest).
+#
+# Functions on a video's frames (each answers with a table, a row per thing seen; frames are the video's own numbers):
+#   regions(video, from_s, to_s)   every warm-coloured region on each frame from from_s to to_s (seconds; to_s left out:
+#                                  the end), measured on the GPU (mojoui.videotable's RegionsAnalyzer): frame, t, kind,
+#                                  x, y, w, h … as mojoui.videojobs.detections_table has them
+# Models arrive the same way (goal 50: detect, segment): a name here, frames in, a table out.
+
+from omxcore import Catalog, Table, SharedTable, Frame as MxFrame, INT as MX_INT, DECIMAL as MX_DECIMAL
+from mojoui.script import ScriptFunctions, last_call
+from mojoui.video import VideoSource
+from mojoui.videotable import RegionsAnalyzer, ColourRange, scan
+from mojoui.vision_presets import warm_range, WAREHOUSE_CELL
+from mojoui.videojobs import detections_table
+from mojoui.player import Mark
+from mojoui.sheet import Sheet
+
+comptime VIDEO_FUNCTIONS: List[String] = ["regions"]  # what a script may call on a video (the Apply buttons, in order)
+
+
+def frame_span(fps: Float64, frames: Int, from_s: Float64, to_s: Float64) -> Tuple[Int, Int]:
+    """Seconds [from_s, to_s) → frames [first, last + 1), rounded to the nearest frame and cut to the video (to_s < 0:
+    its end)."""
+    var a = max(0, min(frames, Int(from_s * fps + 0.5)))
+    var b = frames if to_s < 0 else max(a, min(frames, Int(to_s * fps + 0.5)))
+    return (a, b)
+
+
+def frames_table(fps: Float64, frames: Int) raises -> Table:
+    """A video's frames as rows: frame (0-based) and t (its time in seconds, 3 places: frame / fps)."""
+    var t = Table.empty()
+    var frame = t.add_column("frame", MX_INT)
+    var secs = t.add_column("t", MX_DECIMAL, 3)
+    for i in range(frames):
+        t.append(frame, Int64(i))
+        t.append(secs, Int64(Int(Float64(i) * 1000.0 / fps + 0.5)) if fps > 0 else Int64(0))
+    t.check()
+    return t^
+
+
+struct VideoFunctions(ScriptFunctions, Copyable, Movable, Sized):
+    """The videos a script can read (each a table by its SQL name) and the functions it can call on their frames."""
+
+    var names: List[String]
+    var paths: List[String]
+    var fps: List[Float64]
+    var frames: List[Int]
+
+    def __init__(out self):
+        self.names = List[String]()
+        self.paths = List[String]()
+        self.fps = List[Float64]()
+        self.frames = List[Int]()
+
+    def __len__(self) -> Int:
+        return len(self.names)
+
+    def add(mut self, name: String, path: String, fps: Float64, frames: Int):
+        """A video by its SQL name (a later one with the same name replaces it)."""
+        var k = self.find(name)
+        if k >= 0:
+            self.paths[k] = path
+            self.fps[k] = fps
+            self.frames[k] = frames
+            return
+        self.names.append(name)
+        self.paths.append(path)
+        self.fps.append(fps)
+        self.frames.append(frames)
+
+    def find(self, name: String) -> Int:
+        for k in range(len(self.names)):
+            if self.names[k] == name:
+                return k
+        return -1
+
+    def add_to(self, mut catalog: Catalog) raises:
+        """Every video as a table of its frames, by its name."""
+        for k in range(len(self.names)):
+            catalog.add_frame(self.names[k], MxFrame(frames_table(self.fps[k], self.frames[k]).share()))
+
+    def has(self, name: String) -> Bool:
+        return name in materialize[VIDEO_FUNCTIONS]()
+
+    def call(mut self, name: String, args: List[String], mut catalog: Catalog) raises -> Table:
+        if name == "regions":
+            return self.regions(args)
+        raise Error("no function " + name)
+
+    def regions(self, args: List[String]) raises -> Table:
+        if len(args) < 1 or len(args) > 3:
+            raise Error("regions(video, from_s, to_s): a video's name, then seconds")
+        var k = self.find(args[0])
+        if k < 0:
+            raise Error("no video " + args[0] + (": the videos are " + ", ".join(self.names) if len(self.names) > 0 else ": open one first"))
+        var from_s = Float64(args[1]) if len(args) > 1 else 0.0
+        var to_s = Float64(args[2]) if len(args) > 2 else -1.0
+        var video = VideoSource(self.paths[k])
+        var span = frame_span(video.fps, video.frames, from_s, to_s)
+        if span[1] <= span[0]:
+            raise Error("regions: no frames between " + String(from_s) + " s and " + ("the end" if to_s < 0 else String(to_s) + " s"))
+        video.seek_frame(span[0])
+        var a = RegionsAnalyzer("region", 0, min_w=24, min_h=24)
+        var ranges = List[ColourRange]()
+        ranges.append(warm_range())
+        var found = scan(video, a, ranges, WAREHOUSE_CELL, limit=span[1] - span[0])
+        return detections_table(found)
+
+
+def marks_from(sheet: Sheet) -> List[Mark]:
+    """Boxes for a player's overlay from any table with frame, x, y, w, h columns (what regions() or a model's detect()
+    gives); none when it hasn't them all. A row with an empty one of them has no box (skipped, not guessed)."""
+    var out = List[Mark]()
+    var f = sheet.index("frame")
+    var x = sheet.index("x")
+    var y = sheet.index("y")
+    var w = sheet.index("w")
+    var h = sheet.index("h")
+    if f < 0 or x < 0 or y < 0 or w < 0 or h < 0:
+        return out^
+    for r in range(sheet.rows()):
+        if sheet.is_null(f, r) or sheet.is_null(x, r) or sheet.is_null(y, r) or sheet.is_null(w, r) or sheet.is_null(h, r):
+            continue
+        out.append(Mark(Int(sheet.value(f, r)), Int(sheet.value(x, r)), Int(sheet.value(y, r)), Int(sheet.value(w, r)), Int(sheet.value(h, r)), False))
+    return out^
+
+
+def applied_marks(script: String, names: List[String], tables: List[SharedTable], functions: List[String]) -> Tuple[String, List[Mark]]:
+    """The video the script's last call to one of `functions` (regions, detect…) ran on, and the boxes its result holds
+    (a script run's `names` and `tables`, in order); ("", none) when it called none or its result isn't there."""
+    var st = last_call(script, functions)
+    if not st or len(st.value().args) < 1 or st.value().name == "":
+        return (String(""), List[Mark]())
+    for k in range(len(names)):
+        if names[k] == st.value().name:
+            return (st.value().args[0], marks_from(Sheet(tables[k], False)))
+    return (String(""), List[Mark]())
