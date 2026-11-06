@@ -562,9 +562,9 @@ def m6():
         return False, "no gallery card with docs/gallery/img/saas.png"
     if not re.search(r"looked at.*saas\.png", (ROOT / "docs/journal.md").read_text()):
         return False, "the gallery shot isn't recorded as looked at in docs/journal.md"
-    p = run(["scripts/package.sh", "saas"], 3600)
+    p = run(["scripts/package.sh", "saas", "linux"], 3600)
     if p.returncode:
-        return False, "scripts/package.sh saas: " + (p.stdout + p.stderr)[-400:]
+        return False, "scripts/package.sh saas linux: " + (p.stdout + p.stderr)[-400:]
     return True, "parity map, components listed, gallery card, Linux download"
 
 
