@@ -23,9 +23,11 @@ are other sessions' goals. Decisions D-6001 on.
 | M7 | Hardening | per-IP limits on `/login`, `/auth/callback`, `/api/token`: over `SAAS_RATE` a minute → 429 with `Retry-After`; sliding sessions: idle past `SAAS_SESSION_IDLE` → 401, use extends it; the security auditor's goal-57 notes in docs/saas.md "Known limits" closed or still listed, honestly |
 | M8 | Parity, demo, keys, the Mac | docs/saas.md: every fh-saas row ✅ except blog/SEO, GraphQL and AI (out of scope, said so); `scripts/saas_keys.sh` also asks for SMTP; the native demo shows the trial, the portal button and an invite accepted (GTK shot, looked at); on the owner's Mac (~/omxcode-g60 only) the server builds and M1, M3, M5 and M6 pass against it |
 | M9 | Nothing regressed | goal 57's M6–M8 and tests/test_crypto, test_accounts, test_billing, test_ui_thread, test_served pass; libc and decision lints |
+| M10 | Faster than fh-saas, measured (owner, D-6006) | scripts/saas_bench.py runs the same flows against build/saas/server and a baseline app on fh-saas itself, used as its docs say (bench/fhsaas/, its own pixi feature and env `fhsaas`, so the Mojo server stays Python-free), same data, same machine: a signed-in GET /api/me, GET and POST /api/entries on the tenant's SQLite, a signed Stripe webhook's verify, and the sign-in callback against the same OAuth stand-in. p50, p99 and requests/s at 1 and 64 concurrent clients, peak RSS and cold start for both, in docs/goals/60-bench.md as measured. Pass: omxcode faster on p50, p99 and throughput for every flow at 64 concurrent, from a run the checker does itself. Generic framework techniques only (no global lock, per-thread connections, prepared statements), never special-casing the bench |
+| M11 | Modular: drop in (owner, D-6006) | examples/saas_min uses only mojoui.accounts + mojoui.mail + mojoui.jobs (no billing): Google sign-in, tenants and a welcome email in ≤ 80 lines of app code, built and checked against the stand-ins; each module's public API in docs/saas.md with a snippet; no module imports one it doesn't need (the checker reads the imports: billing isn't linked into saas_min) |
 
 ## Done means
-60-check PASS for M0–M9; the reviewer and the security auditor pass it; M8's shot looked at; `docs/report.md`.
+60-check PASS for M0–M11; the reviewer and the security auditor pass it; M8's shot looked at; `docs/report.md`.
 
 ## Out of bounds
 Pushing; deploying; merging into main or goal-57-saas; real keys (the owner gives them later); reading or printing

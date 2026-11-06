@@ -18,6 +18,9 @@ The server's contract is goal 57's (docs/goals/57-check.py's docstring) plus:
   invites: the email holds <base>/invites/<token>; GET shows "Join <tenant>, invited by <name>?"; POST (same origin) accepts
   POST /billing/portal → {url}; /api/me gains `cancels_at` (null unless the subscription ends at its period's end)
   the welcome email's subject names the person
+M10 (D-6006): `pixi run python scripts/saas_bench.py --json <file>` writes {"started": <unix s>, "flows": {<flow>: {"omxcode"|"fhsaas":
+  {"c1"|"c64": {"p50_ms", "p99_ms", "rps"}}}}, "rss_mb": {...}, "cold_start_ms": {...}} and docs/goals/60-bench.md; flows me,
+  entries_get, entries_post, webhook, callback. M11: examples/saas_min/server.mojo, the same env, built here.
 """
 import base64
 import email
@@ -383,9 +386,9 @@ _built = False
 
 
 class Server:
-    def __init__(self, name, stand, smtp=None, extra=None, keep=False, expect_fail=False):
+    def __init__(self, name, stand, smtp=None, extra=None, keep=False, expect_fail=False, exe=None):
         global _built
-        if not _built:
+        if exe is None and not _built:
             b = run(["scripts/saas.sh", "build"], 3600)
             if b.returncode or not SERVER.exists():
                 raise RuntimeError("the server didn't build: " + (b.stdout + b.stderr)[-1500:])
@@ -406,7 +409,7 @@ class Server:
         outf = self.data / "server.out"
         mark = outf.stat().st_size if outf.exists() else 0
         self.out = open(outf, "a")
-        self.p = subprocess.Popen([str(SERVER)], cwd=ROOT, env=dict(os.environ, **env), stdout=self.out, stderr=subprocess.STDOUT)
+        self.p = subprocess.Popen([str(exe or SERVER)], cwd=ROOT, env=dict(os.environ, **env), stdout=self.out, stderr=subprocess.STDOUT)
         fresh = lambda: outf.read_bytes()[mark:].decode("utf-8", "replace")  # noqa: E731 (this run's output only)
         wait_until(lambda: "SAAS: listening" in fresh() or self.p.poll() is not None, 30)
         self.started = "SAAS: listening" in fresh() and self.p.poll() is None
@@ -929,7 +932,110 @@ def m9():
     return True, "goal 57's M6–M8, the crypto/accounts/billing/ui-thread/served tests, libc and decision lints"
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8, "M9": m9}
+FLOWS = ("me", "entries_get", "entries_post", "webhook", "callback")
+
+
+def m10():
+    t0 = time.time()
+    out = OUT / "bench.json"
+    r = run(["pixi", "run", "python", "scripts/saas_bench.py", "--json", str(out)], 5400)
+    (OUT / "m10.out").write_text(r.stdout + r.stderr)
+    if r.returncode or not out.exists():
+        return False, "scripts/saas_bench.py failed: " + (r.stdout + r.stderr)[-600:]
+    res = json.loads(out.read_text())
+    if res.get("started", 0) < t0 - 1:
+        return False, "the bench's numbers aren't from this run"
+    page = ROOT / "docs/goals/60-bench.md"
+    if not page.exists() or page.stat().st_mtime < t0:
+        return False, "docs/goals/60-bench.md wasn't written by this run"
+    slower = []
+    for f in FLOWS:
+        try:
+            o, b = res["flows"][f]["omxcode"]["c64"], res["flows"][f]["fhsaas"]["c64"]
+        except KeyError:
+            return False, f"no 64-client numbers for {f}"
+        if not o["p50_ms"] < b["p50_ms"]:
+            slower.append(f"{f} p50 {o['p50_ms']:.2f} vs {b['p50_ms']:.2f} ms")
+        if not o["p99_ms"] < b["p99_ms"]:
+            slower.append(f"{f} p99 {o['p99_ms']:.2f} vs {b['p99_ms']:.2f} ms")
+        if not o["rps"] > b["rps"]:
+            slower.append(f"{f} {o['rps']:.0f} vs {b['rps']:.0f} req/s")
+    if slower:
+        return False, "omxcode isn't faster at 64 clients: " + "; ".join(slower)
+    worst = min(res["flows"][f]["omxcode"]["c64"]["rps"] / res["flows"][f]["fhsaas"]["c64"]["rps"] for f in FLOWS)
+    return True, f"faster than fh-saas on p50, p99 and req/s for {', '.join(FLOWS)} at 64 clients (the closest: {worst:.1f}x the throughput); docs/goals/60-bench.md"
+
+
+def mojo_imports(path):
+    """The mojoui modules a .mojo file imports (from mojoui.x import / from mojoui import x, y / import mojoui.x)."""
+    text = path.read_text(errors="replace")
+    mods = set(re.findall(r"^\s*from\s+mojoui\.(\w+)", text, re.M)) | set(re.findall(r"^\s*import\s+mojoui\.(\w+)", text, re.M))
+    for names in re.findall(r"^\s*from\s+mojoui\s+import\s+([\w, ]+)", text, re.M):
+        mods |= {n.strip() for n in names.split(",") if n.strip()}
+    return mods
+
+
+def closure(files):
+    seen, todo = set(), set()
+    for f in files:
+        todo |= mojo_imports(f)
+    while todo:
+        m = todo.pop()
+        if m in seen:
+            continue
+        seen.add(m)
+        src = ROOT / "mojoui" / f"{m}.mojo"
+        if src.exists():
+            todo |= mojo_imports(src) - seen
+    return seen
+
+
+def m11():
+    src = sorted((ROOT / "examples/saas_min").glob("*.mojo"))
+    if not src:
+        return False, "no examples/saas_min/*.mojo"
+    lines = sum(1 for f in src for l in f.read_text().splitlines() if l.strip() and not l.strip().startswith("#"))
+    if lines > 80:
+        return False, f"examples/saas_min has {lines} lines of code (> 80)"
+    used = closure(src)
+    if not {"accounts", "mail", "jobs"} <= used:
+        return False, f"saas_min doesn't use accounts, mail and jobs: {sorted(used)}"
+    if "billing" in used:
+        return False, "billing is linked into saas_min: " + " → ".join(sorted(used))
+    for mod, banned in (("accounts", {"billing", "mail"}), ("mail", {"billing", "accounts"}), ("jobs", {"billing", "accounts", "mail"}),
+                        ("migrate", {"billing", "accounts", "mail", "jobs"}), ("log", {"billing", "accounts", "mail", "jobs"})):
+        extra = closure([ROOT / "mojoui" / f"{mod}.mojo"]) & banned
+        if extra:
+            return False, f"mojoui.{mod} pulls in {sorted(extra)}"
+    doc = (ROOT / "docs/saas.md").read_text()
+    for mod in ("accounts", "billing", "mail", "jobs", "migrate", "log"):
+        sec = re.search(rf"^### `?mojoui\.{mod}`?.*?\n(.*?)(?=^### |^## |\Z)", doc, re.M | re.S)
+        if not sec or "```" not in sec.group(1):
+            return False, f"docs/saas.md has no API section with a snippet for mojoui.{mod}"
+    exe = ROOT / "build/saas_min/server"
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.unlink(missing_ok=True)
+    b = run(["scripts/mojo_flare.sh", "build", "examples/saas_min/server.mojo", "-o", str(exe)], 3600)
+    if b.returncode or not exe.exists():
+        return False, "saas_min didn't build: " + (b.stdout + b.stderr)[-800:]
+    stand, smtp = StandIn(), Smtp()
+    srv = Server("m11", stand, smtp, exe=exe)
+    try:
+        cl, back = sign_in(srv, stand, ("min@example.com", "Min"))
+        me = cl.get("/api/me")
+        if me.status_code != 200 or me.json().get("email") != "min@example.com" or not me.json().get("tenant"):
+            return False, f"saas_min's /api/me: {me.status_code} {me.text[:200]}"
+        got = wait_until(lambda: smtp.to("min@example.com"), 20)
+        if not got or "Min" not in str(got[0]["Subject"]):
+            return False, "saas_min sent no welcome email naming the person"
+        return True, f"saas_min: {lines} lines on accounts + mail + jobs (billing not linked), sign-in, a tenant and a welcome email; API documented"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+
+
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8, "M9": m9, "M10": m10, "M11": m11}
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
