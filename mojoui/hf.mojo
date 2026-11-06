@@ -9,7 +9,7 @@
 #   var r = hub_download(repo, repo.files[0], "/tmp/qwen", t)   # t.done() / t.total() from any thread; t.cancel()
 
 from std.os import makedirs, getenv
-from mojoui.http import Request, Response, url_quote
+from mojoui.http import Request, Response, uri_component
 from mojoui.http_flare import FlareTransport, Transfer, fetch_to_file
 from mojoui.json import Json, J_STRING
 
@@ -75,6 +75,15 @@ def _gated(j: Json, node: Int) -> Bool:
     return node >= 0 and (j.kind(node) == J_STRING or j.flag(node))
 
 
+def _path(s: String) -> String:
+    """A repo id or file path for a URL: each part encoded, the slashes kept."""
+    var out = String("")
+    var parts = s.split("/")
+    for i in range(len(parts)):
+        out += ("/" if i > 0 else "") + uri_component(String(parts[i]))
+    return out^
+
+
 def dtype_bytes(dtype: String) -> Int:
     """Bytes per parameter of a safetensors dtype (F32 4, BF16 2, I8 1…; 2 when unknown)."""
     var d = dtype.upper()
@@ -89,11 +98,11 @@ def dtype_bytes(dtype: String) -> Int:
 
 def hub_search(query: String, limit: Int = 20, task: String = "text-generation") raises -> List[HubModel]:
     """Models whose name matches `query`, most downloaded first; `task` filters by pipeline tag ("": any)."""
-    var path = "/api/models?search=" + url_quote(query) + "&limit=" + String(limit) + "&sort=downloads&direction=-1"
+    var path = "/api/models?search=" + uri_component(query) + "&limit=" + String(limit) + "&sort=downloads&direction=-1"
     if task != "":
-        path += "&filter=" + url_quote(task)
+        path += "&filter=" + uri_component(task)
     for e in ["safetensors", "downloads", "likes", "pipeline_tag", "gated"]:
-        path += "&" + url_quote("expand[]") + "=" + e
+        path += "&" + uri_component("expand[]") + "=" + e
     var j = _get(path)
     var out = List[HubModel]()
     for i in range(j.size(0)):
@@ -116,7 +125,7 @@ def hub_search(query: String, limit: Int = 20, task: String = "text-generation")
 
 def hub_repo(repo: String, revision: String = "main") raises -> HubRepo:
     """`repo`'s files at `revision` with their sizes and LFS sha256, and the commit the revision points at."""
-    var j = _get("/api/models/" + url_quote(repo, safe="/") + "/revision/" + url_quote(revision) + "?blobs=true")
+    var j = _get("/api/models/" + _path(repo) + "/revision/" + uri_component(revision) + "?blobs=true")
     var files = List[HubFile]()
     var sib = j.get(0, "siblings")
     if sib >= 0:
@@ -129,7 +138,7 @@ def hub_repo(repo: String, revision: String = "main") raises -> HubRepo:
 
 
 def hub_file_url(repo: HubRepo, file: HubFile) -> String:
-    return HUB + "/" + url_quote(repo.id, safe="/") + "/resolve/" + repo.sha + "/" + url_quote(file.name, safe="/")
+    return HUB + "/" + _path(repo.id) + "/resolve/" + repo.sha + "/" + _path(file.name)
 
 
 def hub_download(repo: HubRepo, file: HubFile, folder: String, t: Transfer, timeout_ms: Int = 60_000) -> Response:

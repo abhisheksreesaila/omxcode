@@ -427,10 +427,22 @@ comptime STEPS = ["resolve", "architecture", "download", "verify", "register"]
 comptime STEP_LABELS = ["Resolve", "Architecture", "Download", "Verify", "Register"]
 
 
-def pulls_json(store: Store) raises -> String:
+def pull_json(store: Store, id: Int) raises -> String:
+    """One pull, in the list's shape ("" when there's no such pull)."""
+    var all = pulls_json(store, id)
+    var j = Json.parse(all)
+    var list = j.get(0, "pulls")
+    if j.size(list) == 0:
+        return ""
+    var start = all.find("[") + 1
+    var end = all.rfind('], "curated"')
+    return String(all[byte = start:end])
+
+
+def pulls_json(store: Store, only: Int = -1) raises -> String:
     var rows = store.db.one_text("""SELECT coalesce(json_group_array(json_object('id', id, 'ref', ref, 'name', name, 'repo_id', repo_id, 'status', status,
         'step', step, 'message', message, 'hint', hint, 'error_kind', error_kind, 'started_at', started_at, 'finished_at', finished_at,
-        'files', json(files), 'details', json(details), 'model', model)), '[]') FROM (SELECT * FROM pulls ORDER BY id DESC LIMIT 20)""")
+        'files', json(files), 'details', json(details), 'model', model, 'speed', speed, 'total', total_bytes)), '[]') FROM (SELECT * FROM pulls WHERE ? < 0 OR id = ? ORDER BY id DESC LIMIT 20)""", [String(only), String(only)])
     var j = Json.parse(rows)
     var out = String("[")
     for i in range(j.size(0)):
@@ -476,7 +488,11 @@ def pulls_json(store: Store) raises -> String:
         out += ', "repo_id": ' + text_or_null(j, j.get(p, "repo_id")) + ', "status": ' + json_string(status) + ', "step": ' + json_string(step)
         out += ', "message": ' + json_string(j.text(j.get(p, "message"))) + ', "hint": ' + text_or_null(j, j.get(p, "hint")) + ', "error_kind": ' + text_or_null(j, j.get(p, "error_kind"))
         out += ', "started_at": ' + num(j.real(j.get(p, "started_at"))) + ', "finished_at": ' + real_or_null(j, j.get(p, "finished_at"))
-        out += ', "total_bytes": ' + String(total) + ', "done_bytes": ' + String(done) + ', "percent": ' + percent + ', "speed": 0, "eta_seconds": null'
+        var speed = j.number(j.get(p, "speed")) if status == "running" and step == "download" else 0
+        if total == 0:
+            total = j.number(j.get(p, "total"))
+        var eta = String(Int((total - done) / speed)) if speed > 0 and total > done else String("null")
+        out += ', "total_bytes": ' + String(total) + ', "done_bytes": ' + String(done) + ', "percent": ' + percent + ', "speed": ' + String(speed) + ', "eta_seconds": ' + eta
         out += ', "files": ' + fl + ', "steps": ' + steps + ', "model": ' + text_or_null(j, j.get(p, "model")) + "}"
     return '{"pulls": ' + out + '], "curated": ' + CURATED_JSON + ', "fake_hub": false}'
 

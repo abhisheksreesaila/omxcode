@@ -21,6 +21,9 @@ from views import models_json, model_sizes, info_json, gateway_json, network_jso
 from views import requests_json, bench_json, bench_history_json, pulls_json, ports_json, window_of, num
 from search import search_json
 from learn import notebook_json
+from pulls import Pulls, ref_problem
+from mojoui.files import remove_tree
+from views import pull_json
 from meter import meter
 
 
@@ -83,6 +86,27 @@ def strings(body: String, field: String) -> Optional[List[String]]:
         return None
 
 
+comptime TRY_MAX_TOKENS = 1024  # (gateway.py: "Try it" is for a quick look, not for load)
+
+
+def messages_json(j: Json, msgs: Int) -> String:
+    """A chat's messages again as JSON: each one's role and text content (what "Try it" sends)."""
+    var out = String("[")
+    for i in range(j.size(msgs)):
+        var m = j.at(msgs, i)
+        out += (", " if i > 0 else "") + '{"role": ' + json_string(j.text(j.get(m, "role"), "user")) + ', "content": ' + json_string(j.text(j.get(m, "content"))) + "}"
+    return out + "]"
+
+
+def is_digits(s: String) -> Bool:
+    if s.byte_length() == 0 or s.byte_length() > 18:
+        return False
+    for b in s.as_bytes():
+        if Int(b) < 48 or Int(b) > 57:
+            return False
+    return True
+
+
 def text_field(body: String, field: String) -> Optional[String]:
     try:
         var j = Json.parse(body)
@@ -123,6 +147,7 @@ struct Daemon(Service):
     var sizes: Dict[String, Int]
     var open: List[Open]
     var stopping: Bool
+    var pulls: Pulls
 
     def __init__(out self, var cfg: Config) raises:
         makedirs(cfg.home, exist_ok=True)  # (a first run: no ~/.mxc yet)
@@ -131,6 +156,8 @@ struct Daemon(Service):
         self.sizes = model_sizes(self.store)
         self.open = List[Open]()
         self.stopping = False
+        self.pulls = Pulls()
+        _ = self.store.db.run("UPDATE pulls SET status = 'failed', message = 'The daemon stopped during this pull; pull again to resume.', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
         self.cfg = cfg^
         self.started = wall_seconds()
         self.counters_since = self.started
@@ -155,6 +182,13 @@ struct Daemon(Service):
         """Every second: log finished /v1 requests, unload idle models (supervisor.py's reaper), exit after shutdown."""
         self.settle()
         self.sup.sweep()
+        var was = len(self.pulls.running)
+        self.pulls.refresh(self.store)
+        if len(self.pulls.running) < was:
+            try:
+                self.sizes = model_sizes(self.store)  # (a pull registered a model, or ended)
+            except:
+                pass
         if self.stopping:
             self.stop()
             exit(0)
@@ -223,7 +257,49 @@ struct Daemon(Service):
         if req.matches("GET", "/admin/bench/history"):
             return Reply.json(bench_history_json(self.store, clamp(req.arg("limit"), 20, 1, 100)))
         if req.matches("GET", "/admin/pulls"):
+            self.pulls.refresh(self.store)
             return Reply.json(pulls_json(self.store))
+        if req.matches("POST", "/admin/pulls"):
+            var asked = text_field(req.body, "ref")
+            if not asked:
+                return error(400, "Send {\"ref\": \"owner/name\"} (a curated name or a Hugging Face repo).", "invalid_ref")
+            var why = ref_problem(String(asked.value().strip()))
+            if why != "":
+                return error(400, why, "invalid_ref")
+            var name = text_field(req.body, "name")
+            var id = self.pulls.start(self.store, String(asked.value().strip()), name.value() if name else String(""), self.cfg.home, self.cfg.max_cmd, self.sup.child_env())
+            return Reply.json(pull_json(self.store, id), 202)
+        if req.matches("GET", "/admin/pulls/{id}"):
+            self.pulls.refresh(self.store)
+            var view = pull_json(self.store, Int(atol(req.param("id")))) if is_digits(req.param("id")) else String("")
+            if view == "":
+                return error(404, "No pull " + req.param("id") + ".", "pull_not_found")
+            return Reply.json(view)
+        if req.matches("POST", "/admin/pulls/{id}/cancel"):
+            if not is_digits(req.param("id")):
+                return error(404, "No pull " + req.param("id") + ".", "pull_not_found")
+            var id = Int(atol(req.param("id")))
+            if not self.pulls.cancel(id):
+                var view = pull_json(self.store, id)
+                return error(404, "No pull " + req.param("id") + ".", "pull_not_found") if view == "" else Reply.json(view)
+            return Reply.json(pull_json(self.store, id), 202)
+        if req.matches("DELETE", "/admin/models/{name}"):
+            var m = self.model_ref(req.param("name"))
+            if not m:
+                return error(404, "The model `" + req.param("name") + "` is not registered.", "model_not_found")
+            _ = self.sup.stop(req.param("name"))
+            var path = m.value().weights_path
+            self.store.db.begin()
+            _ = self.store.db.run("DELETE FROM model_labels WHERE model = ?", [req.param("name")])
+            _ = self.store.db.run("DELETE FROM models WHERE name = ?", [req.param("name")])
+            self.store.db.commit()
+            var mine = self.cfg.home + "/models/"
+            var removed = False
+            if path.startswith(mine) and path.find("/../") < 0 and path.byte_length() > mine.byte_length():  # (only a folder a pull made: never a path elsewhere)
+                remove_tree(path)
+                removed = True
+            self.sizes = model_sizes(self.store)
+            return Reply.json('{"name": ' + json_string(req.param("name")) + ', "deleted": true, "files_removed": ' + ("true" if removed else "false") + "}")
         if req.matches("GET", "/admin/ports"):
             return Reply.json(ports_json(self.store, self.cfg.home))
         if req.matches("GET", "/admin/search"):
@@ -260,6 +336,20 @@ struct Daemon(Service):
                 return error(404, "The model `" + req.param("name") + "` is not registered.", "model_not_found")
             _ = self.sup.stop(req.param("name"))
             return Reply.json('{"name": ' + json_string(req.param("name")) + ', "state": "cold"}')
+        if req.matches("POST", "/admin/try/chat"):
+            # gateway.py admin_try_chat: one chat as the console (no app key), max_tokens capped, one completion
+            try:
+                var j = Json.parse(req.body)
+                var msgs = j.get(0, "messages")
+                var mt = j.get(0, "max_tokens")
+                if j.kind(j.get(0, "model")) != J_STRING or j.kind(msgs) != J_ARRAY or j.size(msgs) == 0 or (mt >= 0 and (not j.is_whole(mt) or j.number(mt) <= 0)):
+                    raise Error("shape")
+                var cap = min(j.number(mt) if mt >= 0 else TRY_MAX_TOKENS, TRY_MAX_TOKENS)
+                var stream = j.flag(j.get(0, "stream"))
+                var body = '{"model": ' + json_string(j.text(j.get(0, "model"))) + ', "messages": ' + messages_json(j, msgs) + ', "max_tokens": ' + String(cap) + ', "n": 1' + (', "stream": true' if stream else "") + "}"
+                return self.relay("console", "chat", "/v1/chat/completions", body, "application/json", wall_seconds())
+            except:
+                return error(400, "Send JSON with `model`, a non-empty `messages` list and optionally `max_tokens` (a positive integer, capped at " + String(TRY_MAX_TOKENS) + ") and `stream`.", "invalid_request_body")
         if req.matches("POST", "/admin/shutdown"):
             self.stopping = True
             return Reply.json('{"stopping": true}')
@@ -349,7 +439,11 @@ struct Daemon(Service):
         if route == "models":
             self.store.log_request(now, app, "", "models", 200, -1, -1, -1.0, 0.0, False)
             return Reply.json(self.v1_models())
-        var model = text_field(req.body, "model")
+        return self.relay(app, route, req.path, req.body, req.header("content-type"), now)
+
+    def relay(mut self, app: String, route: String, path: String, body: String, ctype: String, now: Float64) raises -> Reply:
+        """A /v1 request for `app` on to its model's max serve (started on demand), streamed back."""
+        var model = text_field(body, "model")
         if not model:
             self.store.log_request(now, app, "", route, 400, -1, -1, -1.0, 0.0, False)
             return error(400, "Request body must be JSON with a string `model` field.", "invalid_request_body")
@@ -369,8 +463,7 @@ struct Daemon(Service):
         var ready = self.sup.check_ready(i)
         self.sup.children[i].in_flight += 1
         self.sup.children[i].proc.touch()
-        var ctype = req.header("content-type")
-        var up = Request(0, "POST", self.sup.children[i].base() + req.path, req.body).header("Content-Type", ctype if ctype != "" else "application/json")
+        var up = Request(0, "POST", self.sup.children[i].base() + path, body).header("Content-Type", ctype if ctype != "" else "application/json")
         up = up^.header("Accept-Encoding", "identity").timeout(600_000)
         var pipe = Pipe(keep_bytes=1 << 20)
         _ = proxy(up^, pipe, "" if ready else self.sup.children[i].base() + "/health", 0 if ready else 600_000)

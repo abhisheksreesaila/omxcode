@@ -125,7 +125,7 @@ def pull(d, ref, timeout=1800, cancel_after_bytes=0):
     t0 = time.time()
     while time.time() - t0 < timeout:
         s, j = body(d.call("GET", f"/admin/pulls/{pid}"))
-        if cancel_after_bytes and isinstance(j, dict) and (j.get("bytes_done") or 0) >= cancel_after_bytes:
+        if cancel_after_bytes and isinstance(j, dict) and (j.get("done_bytes") or 0) >= cancel_after_bytes:
             d.call("POST", f"/admin/pulls/{pid}/cancel")
             cancel_after_bytes = 0
         if isinstance(j, dict) and j.get("status") in ("done", "failed", "cancelled", "unsupported"):
@@ -224,7 +224,7 @@ def m2():
         m = ensure_small(d)
         if not m:
             return False, f"{SMALL} isn't registered after its pull"
-        folder = Path(m.get("weights_path") or "")
+        folder = Path(m.get("weights_path") or HOME / "models" / SMALL.replace("/", "--"))  # (/admin/models doesn't list it: D-5502's folder)
         info = hub(f"/api/models/{SMALL}?blobs=true")
         checked = 0
         for f in info.get("siblings", []):
@@ -256,7 +256,7 @@ def m2():
             problems.append(f"{TINY}: pull {j.get('status')}")
         else:
             s, _ = d.call("DELETE", f"/admin/models/{tm['name']}")[:2]
-            if s not in (200, 204) or model_named(d, TINY) or Path(tm.get("weights_path") or "/nonexistent-x").exists():
+            if s not in (200, 204) or model_named(d, TINY) or (HOME / "models" / TINY.replace("/", "--")).exists():
                 problems.append(f"DELETE /admin/models/{tm['name']}: {s}, row or files stayed")
     return not problems, "; ".join(problems) or f"{SMALL} pulled ({checked} files match the Hub's sha256), a cancel left nothing, a delete removed {TINY}"
 
@@ -266,8 +266,9 @@ def m3():
         return False, "build failed"
     with Daemon() as d:
         m = ensure_small(d)
-        s, j = body(d.call("POST", "/admin/try/chat", {"model": m["name"], "prompt": "Say hello in five words."}))
-        reply = (j.get("text") or j.get("reply") or "") if isinstance(j, dict) else ""
+        s, j = body(d.call("POST", "/admin/try/chat", {"model": m["name"], "max_tokens": 24,
+                                                       "messages": [{"role": "user", "content": "Say hello in five words."}]}))
+        reply = (j.get("choices") or [{}])[0].get("message", {}).get("content", "") if isinstance(j, dict) else ""
         if s != 200 or len(reply.split()) < 2:
             return False, f"POST /admin/try/chat: {s} {str(j)[:200]}"
         key = new_key(d)

@@ -3,7 +3,6 @@
 from std.os import makedirs
 from std.os.path import exists, getsize
 from mojoui.hf import hub_search, hub_repo, hub_download, HubFile, dtype_bytes
-from mojoui.http import url_quote
 from mojoui.http_flare import Transfer
 from mojoui import libc
 
@@ -29,8 +28,6 @@ def read_bytes(path: String) raises -> List[UInt8]:
 
 
 def main() raises:
-    check(url_quote("a b/c?d=é") == "a%20b%2Fc%3Fd%3D%C3%A9", "url_quote: " + url_quote("a b/c?d=é"))
-    check(url_quote("Qwen/Qwen2.5-0.5B", safe="/") == "Qwen/Qwen2.5-0.5B", "url_quote safe")
     check(dtype_bytes("BF16") == 2 and dtype_bytes("F32") == 4 and dtype_bytes("I8") == 1, "dtype_bytes")
     # search: the Hub's own sizes
     var found = hub_search("SmolLM2-135M-Instruct", limit=10)

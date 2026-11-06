@@ -473,21 +473,3 @@ def uri_component(s: String) -> String:
             out += "%" + String(hexd[byte = c // 16]) + String(hexd[byte = c % 16])
     return out
 
-
-def url_quote(s: String, safe: String = "") -> String:
-    """`s` percent-encoded for a URL (RFC 3986): letters, digits and -._~ stay, and any byte of `safe` (a path's "/");
-    everything else, UTF-8 bytes included, becomes %XX."""
-    comptime HEX = "0123456789ABCDEF"
-    var out = String()
-    var keep = safe.as_bytes()
-    for b in s.as_bytes():
-        var c = Int(b)
-        var plain = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 45 or c == 46 or c == 95 or c == 126
-        for k in keep:
-            if Int(k) == c:
-                plain = True
-        if plain:
-            out += chr(c)
-        else:
-            out += "%" + String(HEX[byte=c >> 4]) + String(HEX[byte=c & 15])
-    return out^

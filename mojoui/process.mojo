@@ -259,12 +259,12 @@ def file_tail(path: String, max_bytes: Int = 4000) -> String:
         return ""
 
 
-def output(argv: List[String], timeout_ms: Int = 5000) -> String:
+def output(argv: List[String], timeout_ms: Int = 5000, env: List[String] = List[String]()) -> String:
     """Runs a short command and returns what it printed (stdout and stderr; "" when it can't start). Killed after
     `timeout_ms`. For quick questions to the system (nvidia-smi, uname), not for long jobs."""
     var path = getenv("TMPDIR", "/tmp") + "/mojoui-out-" + String(libc.getpid()) + "-" + String(now_ns()) + ".txt"
     try:
-        var p = Process.start(argv, path)
+        var p = Process.start(argv, path, env)
         var until = now_ns() + timeout_ms * 1_000_000
         while p.running() and now_ns() < until:
             _ = libc.poll(0, 0, 5)

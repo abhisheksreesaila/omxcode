@@ -123,3 +123,18 @@ def write_setting(app: String, key: String, value: String):
                 f.write(l + "\n")
     except:
         pass
+
+
+def remove_tree(path: String) raises:
+    """Deletes `path` and everything under it (rm -r). A symlink is removed, never followed: what it points at stays.
+    A missing path is no error."""
+    from std.os import listdir, remove, rmdir
+    from std.os.path import isdir, islink, exists
+    if islink(path) or (exists(path) and not isdir(path)):
+        remove(path)
+        return
+    if not isdir(path):
+        return
+    for name in listdir(path):
+        remove_tree(path + "/" + name)
+    rmdir(path)
