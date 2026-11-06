@@ -176,9 +176,12 @@ def m2():
         worst = max(worst, abs(float(logit) - float(t[int(k)])))
     if worst > 0.25:
         probs.append(f"top logits differ from torch's by up to {worst:.3f}")
-    m = re.search(r"^SCENE: (\d+) rows frame t label score", out, re.M)
+    m = re.search(r"^SCENE: (\d+) rows label score frame t", out, re.M)
     if not m or int(m.group(1)) != 15:
         probs.append("scene(clip, 3, 4): " + (re.search(r"^SCENE.*$", out, re.M) or ["no SCENE line"])[0])
+    per = re.findall(r"^PER_LABEL (.+) (\d+)$", out, re.M)
+    if sum(int(n) for _, n in per) != 15:
+        probs.append(f"per_label (the page's second line) counts {per}")
     if "HAS scene: True" not in out:
         probs.append("has(scene) False with the pack")
     # without the pack: the function is gone (the packs folder holds only classify's and detect's)
@@ -222,8 +225,8 @@ def m3():
     clip = DEMO / "clips/F00118.mp4"
     steps = ";".join([f"pick:Choose a file={DEMO / 'fleet.csv'}", "waitfor:Create table=60000", "tap:Create table", "wait:800",
                       "tap:Video", "wait:300", f"pick:Choose a video…={clip}", "wait:2500",
-                      "tap:Script", "wait:600", "type:range-from=3", "type:range-to=8", "tap:apply-scene",
-                      "waitfor:close-apply-1=300000", "tap:script-close", "wait:1500"])
+                      "tap:Script", "wait:600", "type:from s=3", "type:to s=8", "tap:apply-scene",
+                      "waitfor:close-apply-1=300000", "tap:script-close", "wait:600", "tap:close-rows", "wait:1500"])
     code, out, shot = gtk(steps, "m3-scene")
     probs = []
     if code != 0 or "TEST: " in out:
@@ -245,15 +248,16 @@ def m4():
     page = (ROOT / "docs/models.html").read_text() if (ROOT / "docs/models.html").exists() else ""
     if not page:
         return False, "no docs/models.html"
-    blocks = re.findall(r'<pre class="code"[^>]*data-from="([^"]+)"[^>]*>(.*?)</pre>', page, re.S)
+    import textwrap
+    blocks = re.findall(r'<pre[^>]*\bdata-file="([^"]+)"[^>]*>(.*?)</pre>', page, re.S)
     if len(blocks) < 3:
         probs.append(f"{len(blocks)} code blocks tied to a file")
-    for src, code in blocks:
-        text = (ROOT / src).read_text() if (ROOT / src).exists() else ""
-        for line in html.unescape(re.sub(r"<[^>]+>", "", code)).splitlines():
-            ln = line.split("  #")[0].rstrip() if not src.endswith(".json") else line.rstrip()
-            if ln.strip() and ln.strip() not in text:
-                probs.append(f"{src}: {ln.strip()[:70]!r} isn't in it")
+    for src, code in blocks:  # (scripts/tutorials.py's rule: a block is a run of the file's whole lines, give or take indent)
+        want = textwrap.dedent(html.unescape(re.sub(r"<[^>]+>", "", code))).strip("\n").split("\n")
+        have = (ROOT / src).read_text().split("\n") if (ROOT / src).exists() else []
+        n = len(want)
+        if not any(textwrap.dedent("\n".join(have[i:i + n])).split("\n") == want for i in range(len(have) - n + 1)):
+            probs.append(f"{src}: the block isn't a run of its lines")
     for img in re.findall(r'<img[^>]+src="([^"]+)"', page):
         if not (ROOT / "docs" / img).exists():
             probs.append(f"no {img}")

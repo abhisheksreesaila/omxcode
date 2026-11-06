@@ -49,7 +49,7 @@ def main() raises:
     if fns.has("scene") and path != "":
         var catalog = Catalog()
         var t0 = perf_counter_ns()
-        var run = run_script("labels = scene(clip, 3, 4);", catalog, fns)
+        var run = run_script("labels = scene(clip, 3, 4);\nper_label = SELECT label, COUNT(*) AS frames FROM labels GROUP BY label;", catalog, fns)
         if run.problem != "":
             print("SCENE problem: " + run.problem)
         else:
@@ -63,4 +63,7 @@ def main() raises:
                 for c in range(s.columns()):
                     row += " " + s.plain_text(c, r)
                 print(row)
+            var per = Sheet(run.tables[1], False)
+            for r in range(per.rows()):
+                print("PER_LABEL " + per.plain_text(0, r) + " " + per.plain_text(1, r))
     print("IMAGEMODEL: done")

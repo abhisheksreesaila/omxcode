@@ -167,14 +167,14 @@ scripts/setup --no-models    <span class="c"># everything but the packs</span></
     </div>
     <div class="step">
       <div class="say rv">
-        <p>In omxplorer, open a video and the Script window. The new model is already in the <b>Apply</b> row, beside <code>detect</code>. Apply it to a few seconds, or write the call yourself:</p>
-        <p>Each frame becomes a row: <b>frame</b>, <b>t</b> (seconds), <b>label</b> and <b>score</b> (how sure, 0 to 1). The result lands as a table card, so the next line of the script can query it, join it to the telemetry or chart it.</p>
+        <p>In omxplorer, open a video and the Script window. The new model is already in the <b>Apply</b> row, beside <code>detect</code>. Apply it to a few seconds, or write the call yourself (a video is a table named after its file, <code>f00118_mp4</code>):</p>
+        <p>Each frame becomes a row: <b>label</b>, <b>score</b> (how sure, 0 to 1), <b>frame</b> and <b>t</b> (seconds). The result lands as a table card, so the next line of the script can query it, join it to the telemetry or chart it.</p>
         <p><b>Agents</b> get it too: omxplorer's agent host offers an <code>apply-scene</code> tool as soon as the pack is there.</p>
       </div>
       <div class="pane rv"><div class="file">omxplorer · the Script window</div>
-<pre class="code">labels = scene(f00118, 3, 8);
+<pre class="code">labels = scene(f00118_mp4, 3, 8);
 per_label = SELECT label, COUNT(*) AS frames FROM labels GROUP BY label;</pre>
-        <p class="note2">The robot's camera isn't what ImageNet was trained on, so ResNet-18's labels for it are guesses ("projectile", "dishwasher"). That's fine: this page is about plugging a model in, and your own model will know your own footage.</p></div>
+        <p class="note2">The robot's camera isn't what ImageNet was trained on, so ResNet-18's labels for it are guesses: it calls these frames "projectile". That's fine: this page is about plugging a model in, and your own model will know your own footage.</p></div>
     </div>
     <figure class="shot rv"><img src="img/models-scene.png" alt="omxplorer in dark mode: the robot fleet table, the featured episode's video, and a new table card from scene() with a label and score for every frame between 3 and 8 seconds" loading="lazy"><figcaption>omxplorer on Linux: scene() applied to seconds 3–8 of episode F00118, shot by the app's test mode</figcaption></figure>
   </div>

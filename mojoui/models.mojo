@@ -13,8 +13,8 @@
 #
 #   labels = scene(episode, 3.0, 8.0);
 #       any pack whose model.json says kind "image-labels" (scripts/packs/from_torch.py writes it; ResNet-18 is
-#       `scene`): its function by the name model.json gives, on every frame from 3.0 to 8.0 s: a row per frame: frame,
-#       t, label (its best), score (how sure, 0–1). No Mojo edit adds one: a pack in the packs folder is found
+#       `scene`): its function by the name model.json gives, on every frame from 3.0 to 8.0 s: a row per frame: label
+#       (its best), score (how sure, 0–1), frame, t. No Mojo edit adds one: a pack in the packs folder is found
 #       (pack_functions), shown in a video's Apply menu (frame_models) and called (mojoui.imagemodel).
 #
 #   var fns = ModelFunctions(videos^)        # (the app's videos, as mojoui.videoscript has them)
@@ -135,7 +135,7 @@ struct ModelFunctions(ScriptFunctions, Movable):
         return self.videos.call(name, args, catalog)
 
     def image_labels(mut self, pack: PackFunction, args: List[String]) raises -> Table:
-        """pack's network on every frame of a video's section: frame, t, label, score."""
+        """pack's network on every frame of a video's section: label, score, frame, t."""
         var name = pack.function
         if len(args) < 1 or len(args) > 3:
             raise Error(name + "(video, from_s, to_s): a video's name, then seconds")
@@ -150,10 +150,10 @@ struct ModelFunctions(ScriptFunctions, Movable):
             raise Error(name + ": no frames in that section")
         var m = ImageModel(pack.dir)
         var t = Table.empty()
+        var c_label = t.add_column("label", MX_TEXT)  # (the answer first: a narrow card shows it, as classify's)
+        var c_score = t.add_column("score", MX_DECIMAL, 3)
         var c_frame = t.add_column("frame", MX_INT)
         var c_t = t.add_column("t", MX_DECIMAL, 3)
-        var c_label = t.add_column("label", MX_TEXT)
-        var c_score = t.add_column("score", MX_DECIMAL, 3)
         video.seek_frame(span[0])
         var px = List[UInt32]()
         for f in range(span[0], span[1]):
