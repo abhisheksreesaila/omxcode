@@ -141,7 +141,7 @@ def update(mut self, event: Event):
   - open one, and confirm deleting it;
   - see totals by category in a grid with icons.
 - `examples/todo/app.mojo`: a real todo: type and press Return or Add, tick tasks done, filter All/Active/Done, remove, clear done.
-- `examples/gpu/app.mojo`: a **GPU** fractal. A plain Mojo function, `mandelbrot(x, y, …)`, runs once per pixel on the NVIDIA GPU via `mojoui/gpu.mojo`: 480×320 pixels in about 0.1 ms, against about 40–80 ms on the CPU, and checked to match the CPU pixel for pixel. Linux and web (it needs an NVIDIA GPU; AMD untested).
+- `examples/gpu/app.mojo`: a **GPU** fractal. A plain Mojo function, `mandelbrot(x, y, …)`, runs once per pixel on the GPU via `mojoui/gpu.mojo` (`Gpu.draw` into a `Canvas`), checked to match the CPU pixel for pixel. On GTK with an NVIDIA GPU the picture goes to the screen without leaving the GPU; elsewhere it's copied into the canvas, and with no GPU the same function runs on the CPU. Linux and web (AMD untested).
 
 ## Write your own app
 1. Make a folder in `examples/` with an `app.mojo` that defines `struct Main(App)`: `__init__`, `title()`, `update(event)`, `view()`.

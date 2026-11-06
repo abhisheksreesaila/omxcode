@@ -1156,3 +1156,11 @@ was the map.
   thread "0". Cause: `pthread_create(Int(Pointer(to=tid)), ...)` through my dlsym wrapper: the local's address as an
   Int doesn't tell the compiler the call writes `tid`. Fixed in the wrapper (returns the id from its own cell) and in
   framefeed (same line, mine); a lint now rejects the pattern (D-5217). 0/30 failures after.
+
+## 2026-11-05 · D-5310: GPU pictures stay on the GPU (Linux)
+- `Gpu.draw` added; test first (tests/test_gpu_draw.mojo failed to parse without it, then PASS: CPU = GPU copy = GL texture, 333×197 and 1920×1080, the surface's main memory never written on the GPU path).
+- examples/gpu now draws a Canvas. On the desktop (WAYLAND_DISPLAY=wayland-1, MOJOUI_PRESENT_STATS=1): "GPU canvas pictures go to the screen without a copy to the CPU … CUDA device 1 → GL texture on NVIDIA GeForce RTX 3090", gpu_copied 3, cpu_copied 0. Headless (Xvfb, cairo): falls back to the copy, the CPU check still ✓; CUDA_VISIBLE_DEVICES="": drawn on the CPU, no CRITICAL.
+- lens declares GPU_CANVAS: on the desktop gpu_copied 1, cpu_copied 0.
+- The live deck's GPU slides and diagram now say Linux + NVIDIA stays on the GPU, the Mac and the web copy for now.
+- Gotcha: my shell had no WAYLAND_DISPLAY; GTK then crashes in gtk_icon_theme (no display). Set WAYLAND_DISPLAY=wayland-1 for desktop runs.
+- Review round 1 (NEEDS WORK): the test now compares 1920×1080 in full, goes back down to 333×197 in the same buffer, and skips a 0×0 canvas (Gpu.draw returns early). The reviewer's desktop run saw gpu_copied 0: test mode only shows the window with MOJOUI_SHOT, so nothing draws without it. The proof command: `env -u DISPLAY -u GSK_RENDERER WAYLAND_DISPLAY=wayland-1 MOJOUI_HEADLESS=0 GDK_BACKEND=wayland MOJOUI_PRESENT_STATS=1 MOJOUI_TEST="slide:0=40;slide:0=60" MOJOUI_SHOT=/tmp/shot.png build/gpu/linux/gpu` → gpu_copied 3, cpu_copied 0, three runs out of three.

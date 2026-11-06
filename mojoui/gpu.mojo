@@ -50,6 +50,11 @@ struct Gpu(Movable):
     var ctx: Optional[DeviceContext]
     var name: String
     var device: Int  # the CUDA device number (-1: none)
+    var picture: Optional[DeviceBuffer[DType.uint32]]  # draw(): the canvas's picture on the GPU (grows, kept)
+    var capacity: Int  # pixels `picture` holds
+    var handed: Int  # draw(): pictures left on the GPU for the host to show (surface.gpu_ok): no copy
+    var read_back: Int  # draw(): pictures copied into a surface's main memory (the host can't take a GPU picture)
+    var milliseconds: Float64  # the last draw(): queued (handed over), or until the copy finished
 
     def __init__(out self, use: Bool = True):
         """use=False: act as if there were no GPU (to compare with the CPU). MOJOUI_GPU_DEVICE=n picks GPU n; a desktop
@@ -57,6 +62,11 @@ struct Gpu(Movable):
         self.ctx = None
         self.name = "no GPU found"
         self.device = -1
+        self.picture = None
+        self.capacity = 0
+        self.handed = 0
+        self.read_back = 0
+        self.milliseconds = 0
         if not use:
             return
         comptime if GPU_BUILD:  # (Apple builds: the CPU path; MAX's Apple GPU runtime isn't linked)
@@ -101,6 +111,53 @@ struct Gpu(Movable):
             for i in range(width * height):
                 out.append(host[i])
         return Rendered(out^, ms)
+
+
+    def draw[f: PixelFn](mut self, mut surface: Surface, p: Params):
+        """Runs f for every pixel of a Canvas (call it from App.draw; the surface is the canvas's real size, so the
+        picture is sharp at any size). When the host can show a GPU picture (surface.gpu_ok: GTK on NVIDIA, through
+        mojoui.present), it stays on the GPU: no copy to main memory and no wait, the host's GPU→GPU copy is queued
+        after the kernel (D-745). Otherwise it's copied into the surface; with no GPU, f runs on the CPU (D-5310)."""
+        var t0 = now_ns()
+        var w = surface.width
+        var h = surface.height
+        if w <= 0 or h <= 0:  # (a canvas with no size yet: nothing to draw)
+            return
+        comptime if GPU_BUILD:
+            if self.ctx:
+                try:
+                    ref ctx = self.ctx.value()
+                    if self.capacity < w * h:
+                        self.picture = ctx.enqueue_create_buffer[DType.uint32](w * h)
+                        self.capacity = w * h
+                    var buf = self.picture.value().create_sub_buffer[DType.uint32](0, w * h)
+                    ctx.enqueue_function[_pixels_kernel[f]](
+                        buf.unsafe_ptr(), Int32(w), Int32(h), p,
+                        grid_dim=(ceildiv(w, 16), ceildiv(h, 16)), block_dim=(16, 16),
+                    )
+                    surface.gpu_drawn = True
+                    if surface.gpu_ok:
+                        surface.gpu_address = Int(buf.unsafe_ptr())
+                        surface.gpu_device = self.device
+                        self.handed += 1
+                        self.milliseconds = Float64(now_ns() - t0) / 1e6
+                        return
+                    var dst = UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=surface.address)
+                    ctx.enqueue_copy(dst_ptr=dst, src_buf=buf)
+                    ctx.synchronize()
+                    self.read_back += 1
+                    self.milliseconds = Float64(now_ns() - t0) / 1e6
+                    return
+                except e:
+                    print("mojoui.gpu: drawing on the CPU from now on (" + String(e) + ")")
+                    self.ctx = None
+                    self.name = "no GPU (it failed: " + String(e) + ")"
+                    surface.gpu_drawn = False
+        var px = surface.pixels()
+        for y in range(h):
+            for x in range(w):
+                px.unsafe_offset(y * w + x)[] = f(x, y, w, h, p)
+        self.milliseconds = Float64(now_ns() - t0) / 1e6
 
 
 def render_on_cpu[f: PixelFn](width: Int, height: Int, p: Params) -> Rendered:
