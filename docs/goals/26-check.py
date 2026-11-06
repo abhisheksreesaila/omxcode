@@ -99,7 +99,7 @@ def m0():
         lines = 0
         for yy in range(iy + 60, iy + ih - 10):
             row = [im.getpixel((xx, yy)) for xx in range(ix + 20, ix + iw - 20, 4)]
-            if row and all(near(p_, (217, 222, 230), 14) for p_ in row):  # (Liquid's line_strong #d9dee6, across the panel)
+            if row and all(near(p_, (201, 209, 220), 14) for p_ in row):  # (Liquid's line_strong #c9d1dc (D-4926), across the panel)
                 lines += 1
         if lines < 2:
             problems.append(f"GTK: the inspector shows {lines} hairlines between its sections (want 2 or more)")

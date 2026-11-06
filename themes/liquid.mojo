@@ -85,8 +85,8 @@ def liquid_look(p: Palette) -> Look:
 def liquid_palette() -> Palette:
     """Liquid, light (docs/design/liquid.md): a white sheet, glass islands over a soft cool backdrop, teal (the default).
     The chrome is the glass as it looks over the backdrop (GTK can't blur what's behind a widget)."""
-    return Palette(False, hx("#e9eef4"), hx("#ffffff"), hx("#f6f8fb"), hx("#0f172a"), hx("#334155"), hx("#64748b"),
-                   hx("#edf0f4"), hx("#d9dee6"), hx("#0e7c86"), hx("#ffffff"), mix(hx("#ffffff"), hx("#0e7c86"), 0.40), hx("#e6f2f3"),
+    return Palette(False, hx("#e1e7ef"), hx("#ffffff"), hx("#f6f8fb"), hx("#0f172a"), hx("#334155"), hx("#64748b"),
+                   hx("#e3e8ef"), hx("#c9d1dc"), hx("#0e7c86"), hx("#ffffff"), mix(hx("#ffffff"), hx("#0e7c86"), 0.40), hx("#e6f2f3"),
                    hx("#6a4fd6"), hx("#16a34a"), hx("#dc2626"), hx("#d97706"), REGULAR, MEDIUM, [hx("#0e7c86"), hx("#f59e0b"), hx("#6366f1"), hx("#ec4899"), hx("#22c55e"), hx("#a16207"), hx("#64748b"), hx("#c026d3")], hx("#f7f9fc"), hx("#334155"), hx("#ffffff"))
 
 
@@ -175,11 +175,11 @@ def liquid_css(p: Palette) -> String:
     var w = String("window.liquid ")
     var d = p.dark
     var on_accent = hex_of(p.accent_ink)
-    var solid = String("background-color: #ffffff; box-shadow: 0 0 0 1px rgba(15,23,42,0.07), 0 1px 3px rgba(15,23,42,0.05);") if not d else (
+    var solid = String("background-color: #ffffff; box-shadow: 0 0 0 1px rgba(15,23,42,0.14), 0 1px 3px rgba(15,23,42,0.05);") if not d else (
         "background-color: " + hex_of(p.card) + "; box-shadow: 0 0 0 1px " + line + ", 0 1px 3px rgba(0,0,0,0.30);")
-    var solid_hover = String("0 0 0 1px rgba(15,23,42,0.07), 0 10px 30px rgba(15,23,42,0.10)") if not d else ("0 0 0 1px " + strong + ", 0 10px 30px rgba(0,0,0,0.40)")
+    var solid_hover = String("0 0 0 1px rgba(15,23,42,0.14), 0 10px 30px rgba(15,23,42,0.10)") if not d else ("0 0 0 1px " + strong + ", 0 10px 30px rgba(0,0,0,0.40)")
     var hover = String("rgba(15,23,42,0.06)") if not d else String("rgba(255,255,255,0.07)")
-    var backdrop = String("background-color: #e9eef4; background-image: linear-gradient(180deg, #eef2f7, #e4e9f1);") if not d else (
+    var backdrop = String("background-color: #e1e7ef; background-image: linear-gradient(180deg, #e6ebf2, #dbe2eb);") if not d else (
         "background-color: " + hex_of(p.page) + "; background-image: linear-gradient(180deg, " + hex_of(mix(p.page, WHITE, 0.03)) + ", " + hex_of(mix(p.page, hx("#000000"), 0.08)) + ");")
     var thumb = String("background: #ffffff; color: ") if not d else ("background: " + hex_of(p.raised) + "; color: ")
     var thumb_shadow = String("0 1px 3px rgba(15,23,42,0.12), 0 0 0 1px rgba(15,23,42,0.04)") if not d else ("0 1px 3px rgba(0,0,0,0.35), 0 0 0 1px " + strong)
@@ -188,7 +188,7 @@ def liquid_css(p: Palette) -> String:
     var pop = String("background-color: rgba(255,255,255,0.94); box-shadow: inset 0 1px rgba(255,255,255,0.9), 0 0 0 1px rgba(15,23,42,0.08), 0 12px 40px rgba(15,23,42,0.16);") if not d else (
         "background-color: " + css_rgba(mix(p.card, WHITE, 0.03), 0.97) + "; box-shadow: inset 0 1px rgba(255,255,255,0.06), 0 0 0 1px " + line + ", 0 12px 40px rgba(0,0,0,0.50);")
     var key_ink = hex_of(mix(p.ink3, rgba(255, 255, 255), 0.3)) if not d else ink2
-    var dialog_shadow = String("0 40px 100px rgba(15,23,42,0.30), 0 0 0 1px rgba(15,23,42,0.07)") if not d else ("0 40px 100px rgba(0,0,0,0.55), 0 0 0 1px " + line)
+    var dialog_shadow = String("0 40px 100px rgba(15,23,42,0.30), 0 0 0 1px rgba(15,23,42,0.14)") if not d else ("0 40px 100px rgba(0,0,0,0.55), 0 0 0 1px " + line)
     var dim = String("rgba(15,23,42,0.18)") if not d else String("rgba(0,0,0,0.45)")
     var track = String("rgba(15,23,42,0.06)") if not d else String("rgba(255,255,255,0.06)")
     var highlight = String("rgba(255,255,255,0.18)") if not d else String("rgba(255,255,255,0.10)")
@@ -272,12 +272,12 @@ body.liquid { --sp-snappy: cubic-bezier(.22, 1, .36, 1);  /* calm ease-out, no o
   --sp-bouncy: cubic-bezier(.22, 1, .36, 1);
   --glass-bg: rgba(255,255,255,.62); --glass-fx: blur(24px) saturate(1.6);
   --glass-shadow: inset 0 1px rgba(255,255,255,.9), 0 0 0 1px rgba(255,255,255,.75), 0 8px 32px rgba(15,23,42,.10), 0 1px 2px rgba(15,23,42,.06);
-  --solid-shadow: 0 0 0 1px rgba(15,23,42,.07), 0 1px 3px rgba(15,23,42,.05);
-  --l-backdrop: linear-gradient(180deg, #eef2f7, #e4e9f1); --l-hover: rgba(15,23,42,.06); --l-solid: #fff;
-  --l-lift: 0 0 0 1px rgba(15,23,42,.07), 0 10px 30px rgba(15,23,42,.10); --l-hi: rgba(255,255,255,.18);
+  --solid-shadow: 0 0 0 1px rgba(15,23,42,.14), 0 1px 3px rgba(15,23,42,.05);
+  --l-backdrop: linear-gradient(180deg, #e6ebf2, #dbe2eb); --l-hover: rgba(15,23,42,.06); --l-solid: #fff;
+  --l-lift: 0 0 0 1px rgba(15,23,42,.14), 0 10px 30px rgba(15,23,42,.10); --l-hi: rgba(255,255,255,.18);
   --l-track: rgba(15,23,42,.06); --l-thumb: #fff; --l-thumb-shadow: 0 1px 3px rgba(15,23,42,.12), 0 0 0 1px rgba(15,23,42,.04);
   --l-pop: rgba(255,255,255,.84); --l-pop-shadow: inset 0 1px rgba(255,255,255,.9), 0 0 0 1px rgba(15,23,42,.08), 0 12px 40px rgba(15,23,42,.16);
-  --l-sub: #fff; --l-on-accent: #fff; --l-dialog-shadow: 0 40px 100px rgba(15,23,42,.30), 0 0 0 1px rgba(15,23,42,.07); --l-scrim: rgba(15,23,42,.18);
+  --l-sub: #fff; --l-on-accent: #fff; --l-dialog-shadow: 0 40px 100px rgba(15,23,42,.30), 0 0 0 1px rgba(15,23,42,.14); --l-scrim: rgba(15,23,42,.18);
   background: var(--l-backdrop) fixed; font: 13px/18px Inter, sans-serif; }
 body.liquid .text.title { font-size: 22px; line-height: 28px; letter-spacing: -.3px; } body.liquid .text.caption { font-size: 12px; }
 body.liquid .board { background: transparent; }
@@ -360,6 +360,13 @@ def liquid_dark_gtk(p: Palette) -> String:
             + w + ".mui-board > .mui-card { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n")
 
 
+def liquid_light_gtk(p: Palette) -> String:
+    """Liquid light on GTK: every card on a Board in a 1 px border (owner, 2026-11-05: the white sheet on the pale
+    backdrop had no visible edge, in the app or a screenshot)."""
+    var w = String("window.liquid ")
+    return w + ".mui-board > * { border: 1px solid " + hex_of(p.line_strong) + "; border-radius: 16px; }\n"
+
+
 def liquid() -> Theme:
     return liquid(liquid_palette())
 
@@ -371,6 +378,6 @@ def liquid(dark: Bool) -> Theme:
 
 def liquid(pal: Palette) -> Theme:
     """Liquid over `pal`: dark when the palette is (liquid_dark_palette)."""
-    var gtk = skin_css(pal, "liquid") + liquid_css(pal) + (liquid_dark_gtk(pal) if pal.dark else String(""))
+    var gtk = skin_css(pal, "liquid") + liquid_css(pal) + (liquid_dark_gtk(pal) if pal.dark else liquid_light_gtk(pal))
     var web = String(SKIN_WEB) + String(LIQUID_WEB) + (liquid_dark_web(pal) if pal.dark else String(""))
     return Theme("liquid", "skin liquid", pal.copy(), gtk, web, pal.ink2, pal.accent_ink, True, liquid_look(pal))

@@ -4061,7 +4061,7 @@ struct Main(App):
                           Text(grouped(self.imp.rows) + " rows · " + String(len(self.imp.columns)) + " columns · "
                                + ("streamed, opened in " if self.imp.streamed() else "read in ") + fixed(self.imp.seconds, 2) + " s", CAPTION).tone(TONE_GOOD), spacing=2).align(START),
                    Spacer(), Text("✓ File   ›   2  Columns   ›   3  Table", CAPTION), spacing=12).fill().align(CENTER),
-            Canvas(1, self.version + self.preview.version, on_gesture=PREVIEW).fill().height(300).tag("import-preview"),
+            Card(Canvas(1, self.version + self.preview.version, on_gesture=PREVIEW).fill().height(300).tag("import-preview"), spacing=0).padding(0).fill(),  # (framed: the preview ends where Columns begins)
             Text("Columns", HEADLINE),
             Scroll(VStack(rows^, spacing=0).fill(), height=250).fill().tag("import-columns"),
             Spacer(),

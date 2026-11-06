@@ -132,7 +132,7 @@ def islands(out, png, host):
     if x < 6 or x > 16:
         problems.append(f"{host}: the toolbar isn't inset from the window ({x:.0f} pt)")
     beside = pixel(png, max(1, x / 2), y + h / 2)
-    if not near(beside, "#eef2f7", 14) and not near(beside, "#e8edf4", 14):
+    if not near(beside, "#eef2f7", 14) and not near(beside, "#e8edf4", 14) and not near(beside, "#dce2eb", 14):  # (#dce2eb: the stronger backdrop, D-4926)
         problems.append(f"{host}: beside the toolbar is {beside}, not the Liquid backdrop")
     return problems
 
