@@ -20,33 +20,50 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download mac-ci -R "$GITHUB_REPOSITORY" -D zips
-      - name: Build omxplorer natively with the GPU (Metal), in place of the cross-built zip (omxcode#3)
+      - name: Build omxplorer and the GPU fractal natively with the GPU (Metal), in place of the cross-built zips (omxcode#3, D-5311)
         if: matrix.os == 'macos-26'
         continue-on-error: true
-        timeout-minutes: 15  # (a hung install leaves the job's time for the cross-built run)
+        timeout-minutes: 20  # (a hung install leaves the job's time for the cross-built run)
         run: |
           mkdir -p out src
-          if [ -f ci/apps.txt ] && ! grep -qx omxplorer ci/apps.txt; then echo "omxplorer isn't in this run (ci/apps.txt)"; exit 0; fi
-          trap 'echo "native build step failed at line $LINENO: the cross-built zip runs" >> "$GITHUB_WORKSPACE/out/native-build.txt"' ERR
+          native=""
+          for a in omxplorer gpu; do if [ ! -f ci/apps.txt ] || grep -qx "$a" ci/apps.txt; then native="$native $a"; fi; done
+          if [ -z "$native" ]; then echo "no natively built app in this run (ci/apps.txt)"; exit 0; fi
+          trap 'echo "native build step failed at line $LINENO: the cross-built zips run" >> "$GITHUB_WORKSPACE/out/native-build.txt"' ERR
           tar -xzf zips/omxcode-src.tar.gz -C src
           curl -fsSL https://pixi.sh/install.sh | bash > out/native-setup.txt 2>&1
           export PATH="$HOME/.pixi/bin:$PATH"
           xcodebuild -downloadComponent MetalToolchain >> out/native-setup.txt 2>&1 || echo "no Metal toolchain" >> out/native-build.txt
           cd src
           pixi install --frozen >> ../out/native-setup.txt 2>&1
-          # (the runner's GPU is a virtual one: MAX can't name it, so name M1's Metal family, as the GPU probe does)
-          if MAC_GPU=metal:1 bash scripts/build.sh omxplorer mac > ../out/native-build.txt 2>&1; then
-            pixi run mojo --version >> ../out/native-build.txt 2>&1 || true  # (which compiler built it: goal 52's M6)
-            rm -f ../zips/omxplorer-mac.zip && cp build/omxplorer/mac/OmxplorerMojo-mac.zip ../zips/omxplorer-mac.zip
-            cp build/omxplorer/mac/OmxplorerMojo-mac.zip ../out/omxplorer-mac-gpu.zip  # (the download, once its run is clean: D-309)
-            mv .pixi ../pixi-away  # (the app runs on what it carries, as on a Mac that never had pixi)
-            echo "NATIVE GPU BUILD IN USE (pixi env moved away)" | tee -a ../out/native-build.txt
-          else
-            echo "native build failed: the cross-built zip runs" | tee -a ../out/native-build.txt
+          for a in $native; do
+            log=../out/native-build.txt; [ "$a" = omxplorer ] || log=../out/native-build-$a.txt
+            # (the runner's GPU is a virtual one: MAX can't name it, so name M1's Metal family, as the GPU probe does)
+            if MAC_GPU=metal:1 bash scripts/build.sh "$a" mac > "$log" 2>&1; then
+              pixi run mojo --version >> "$log" 2>&1 || true  # (which compiler built it: goal 52's M6)
+              zip=$(ls build/"$a"/mac/*-mac.zip | head -1)
+              rm -f "../zips/$a-mac.zip" && cp "$zip" "../zips/$a-mac.zip"
+              cp "$zip" "../out/$a-mac-gpu.zip"  # (the download, once its run is clean: D-309; gpu's, to run on a real Mac)
+              echo "NATIVE GPU BUILD IN USE" | tee -a "$log"
+            else
+              echo "native build failed: the cross-built zip runs" | tee -a "$log"
+            fi
+            tail -30 "$log"
+          done
+          case " $native " in *" gpu "*)  # which pixel kernels Metal compiles, and the page-sized wrap (D-5311)
+            if pixi run mojo build -I . -D MOJOUI_MAC_GPU --target-accelerator metal:1 ../ci/pixelprobe.mojo -o ../probe > ../out/pixelprobe-build.txt 2>&1; then
+              for v in list 1d simd_int simd_int32 simd_uint float_int solid int_maths float_uint loop_int loop_int32 mandelbrot mandelbrot32 wrap; do
+                ../probe "$v" >> ../out/pixelprobe.txt 2>&1 || echo "FAIL $v: exit $?" >> ../out/pixelprobe.txt
+              done
+            else echo "probe build failed" >> ../out/pixelprobe.txt; fi
+            grep -E "^(OK|FAIL|DEVICE)|failed" ../out/pixelprobe.txt ;;
+          esac
+          if [ -d build/omxplorer/mac/OmxplorerMojo.app ]; then
+            otool -L build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo build/omxplorer/mac/OmxplorerMojo.app/Contents/Frameworks/*.dylib >> ../out/native-build.txt 2>&1 || true
+            otool -l build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo | grep -A2 LC_RPATH >> ../out/native-build.txt 2>&1 || true
           fi
-          otool -L build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo build/omxplorer/mac/OmxplorerMojo.app/Contents/Frameworks/*.dylib >> ../out/native-build.txt 2>&1 || true
-          otool -l build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo | grep -A2 LC_RPATH >> ../out/native-build.txt 2>&1 || true
-          tail -30 ../out/native-build.txt
+          mv .pixi ../pixi-away  # (the apps run on what they carry, as on a Mac that never had pixi)
+          echo "pixi env moved away" >> ../out/native-build.txt
       - name: Build omxconsole natively (console + consoled with Flare's shims; goal 55)
         timeout-minutes: 25
         run: |

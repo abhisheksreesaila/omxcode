@@ -269,7 +269,9 @@ struct ImageOps(Movable):
         self.millis = 0
 
     def on_gpu(self) -> Bool:
-        return self.gpu.available()
+        comptime if GPU_BUILD:  # (a native Mac build has a GPU for pixel functions, but these kernels run on the CPU there)
+            return self.gpu.available()
+        return False
 
     def _ensure(mut self, n: Int) raises:
         comptime if GPU_BUILD:

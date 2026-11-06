@@ -1,13 +1,13 @@
-# GPU fractal: the picture is computed by a Mojo function running on the GPU,
-# one GPU thread per pixel, and shown with each platform's native image view.
-# (Needs an NVIDIA or AMD GPU, so it builds for Linux and the web.)
+# GPU fractal: the picture is computed by a Mojo function running on the GPU, one GPU thread per pixel, at the
+# canvas's real size. On GTK with an NVIDIA GPU it goes to the screen without leaving the GPU (D-5310); elsewhere it's
+# copied into the canvas, and with no GPU the same function runs on the CPU.
 
 from mojoui import (
-    App, Event, View, VStack, HStack, Text, Button, Slider, Dropdown, Image, TITLE, CAPTION, PROMINENT,
+    App, Event, View, VStack, HStack, Text, Button, Slider, Dropdown, Canvas, Surface, TITLE, CAPTION, PROMINENT,
 )
 from mojoui.gpu import Gpu, Params, render_on_cpu
 
-comptime WIDTH = 480
+comptime WIDTH = 480  # the check against the CPU (Check on CPU)
 comptime HEIGHT = 320
 comptime ZOOM = 1
 comptime DETAIL = 2
@@ -43,20 +43,19 @@ def two_decimals(x: Float64) -> String:
 
 
 struct Main(App):
+    comptime GPU_CANVAS = True  # (the canvas draws on the GPU: a desktop host may show it straight from there)
     var gpu: Gpu
     var zoom: Int  # 0–100
     var detail: Int  # index into DETAILS
-    var pixels: List[UInt32]
+    var version: Int  # the canvas draws again when this changes
     var result: String
 
     def __init__(out self):
         self.gpu = Gpu()
-        self.zoom = 0
+        self.zoom = 40  # (opens on the spiral)
         self.detail = 1
-        self.pixels = List[UInt32]()
-        self.result = "Drag the zoom, or press Run on GPU." if self.gpu.available() else "This machine has no supported GPU (NVIDIA or AMD)."
-        self.pixels = List[UInt32](length=WIDTH * HEIGHT, fill=UInt32(0xFF202020))  # grey until rendered
-        self.render(False)
+        self.version = 0
+        self.result = "Drag the zoom, or press Check on CPU." if self.gpu.available() else "No supported GPU (NVIDIA or AMD): drawn on the CPU."
 
     def params(self) -> Params:
         var details: List[Int] = [64, 256, 1024]
@@ -64,23 +63,25 @@ struct Main(App):
         # Always centred on a spiral at the edge of the set, so zooming in stays colourful.
         return Params(scale, Float32(-0.7436439), Float32(0.1318259), Float32(details[self.detail]))
 
-    def render(mut self, check: Bool):
+    def draw(mut self, canvas: Int, mut surface: Surface):
+        self.gpu.draw[mandelbrot](surface, self.params())
+
+    def check(mut self):
+        """The same picture on the GPU and on the CPU, pixel by pixel."""
         if not self.gpu.available():
             return
         try:
             var gpu = self.gpu.render[mandelbrot](WIDTH, HEIGHT, self.params())
-            self.pixels = gpu.pixels.copy()
-            if check:
-                var cpu = render_on_cpu[mandelbrot](WIDTH, HEIGHT, self.params())
-                var same = 0
-                for i in range(len(cpu.pixels)):
-                    if cpu.pixels[i] == gpu.pixels[i]:
-                        same += 1
-                var verdict = "✓ matches CPU" if same == len(cpu.pixels) else String(same) + "/" + String(len(cpu.pixels)) + " match CPU"
-                self.result = (
-                    "Result: " + String(WIDTH * HEIGHT) + " pixels in " + two_decimals(gpu.milliseconds)
-                    + " ms on GPU · CPU took " + two_decimals(cpu.milliseconds) + " ms · " + verdict
-                )
+            var cpu = render_on_cpu[mandelbrot](WIDTH, HEIGHT, self.params())
+            var same = 0
+            for i in range(len(cpu.pixels)):
+                if cpu.pixels[i] == gpu.pixels[i]:
+                    same += 1
+            var verdict = "✓ matches CPU" if same == len(cpu.pixels) else String(same) + "/" + String(len(cpu.pixels)) + " match CPU"
+            self.result = (
+                "Result: " + String(WIDTH * HEIGHT) + " pixels in " + two_decimals(gpu.milliseconds)
+                + " ms on GPU · CPU took " + two_decimals(cpu.milliseconds) + " ms · " + verdict
+            )
         except e:
             self.result = "GPU error: " + String(e)
 
@@ -90,22 +91,22 @@ struct Main(App):
     def update(mut self, event: Event):
         if event.message == ZOOM:
             self.zoom = event.number
-            self.render(False)
+            self.version += 1
         elif event.message == DETAIL:
             self.detail = event.number
-            self.render(False)
+            self.version += 1
         elif event.message == RUN:
-            self.render(True)
+            self.check()
 
     def view(self) -> View:
         var details: List[String] = ["Fast", "Detailed", "Very detailed"]
         return VStack(
             Text("GPU fractal", style=TITLE),
             Text("GPU: " + self.gpu.name, style=CAPTION),
-            Image(self.pixels, WIDTH, HEIGHT),
+            Canvas(0, self.version).width(WIDTH).height(HEIGHT),
             HStack(Text("Zoom"), Slider(self.zoom, on_change=ZOOM), spacing=12),
             HStack(Text("Detail"), Dropdown(details, self.detail, on_select=DETAIL), spacing=12),
-            Button("Run on GPU", on_tap=RUN, style=PROMINENT),
+            Button("Check on CPU", on_tap=RUN, style=PROMINENT),
             Text(self.result, style=CAPTION),
             spacing=14,
         )

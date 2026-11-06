@@ -7,7 +7,7 @@
 from std.ffi import external_call
 from std.memory import Pointer
 
-from mojoui.hosts.objc import cls, msg, ns_data
+from mojoui.hosts.objc import cls, msg, ns_data, ns_number, ns_string
 
 comptime RTLD_DEFAULT = -2
 
@@ -51,6 +51,25 @@ def cg_image(pixels: List[UInt32], width: Int, height: Int) -> Int:
     return image
 
 
+def io_surface(width: Int, height: Int) -> Int:
+    """An IOSurface of width × height pixels, bytes B, G, R, A (the caller releases it: CFRelease). Its memory is one
+    the GPU and the CPU share (Apple silicon), and Core Animation shows it as a layer's contents without copying it:
+    the Mac's way for a GPU picture to reach the screen (D-5311). 0 if it couldn't be made."""
+    var d = msg(cls("NSMutableDictionary"), "dictionary")
+    var row = cfunc("IOSurfaceAlignProperty", ns_string("IOSurfaceBytesPerRow"), width * 4)
+    _ = msg(d, "setObject:forKey:", ns_number(width), ns_string("IOSurfaceWidth"))
+    _ = msg(d, "setObject:forKey:", ns_number(height), ns_string("IOSurfaceHeight"))
+    _ = msg(d, "setObject:forKey:", ns_number(4), ns_string("IOSurfaceBytesPerElement"))
+    _ = msg(d, "setObject:forKey:", ns_number(row), ns_string("IOSurfaceBytesPerRow"))
+    _ = msg(d, "setObject:forKey:", ns_number(0x42475241), ns_string("IOSurfacePixelFormat"))  # 'BGRA'
+    # whole pages (16 KB on Apple silicon): Metal only lends the GPU memory in pages (wrap_host_memory refused 614400 bytes)
+    _ = msg(d, "setObject:forKey:", ns_number((row * height + 16383) // 16384 * 16384), ns_string("IOSurfaceAllocSize"))
+    return cfunc("IOSurfaceCreate", d)
+
+
+comptime MISSES = 3  # draws an IOSurface is offered for before a canvas that never used one counts as a CPU canvas
+
+
 struct AppleCanvas(Copyable, Movable):
     """One Canvas on screen: its image view and the pixels last drawn."""
 
@@ -64,6 +83,18 @@ struct AppleCanvas(Copyable, Movable):
     var moved: Bool  # the current press became a drag (so its end is a RELEASE, and it wasn't a tap)
     var last_x: Float64  # where the pointer was at the last mouse event (a drag's deltas run from it)
     var last_y: Float64
+    # The Mac with its GPU (D-5311): three IOSurfaces the GPU draws into in turn (one on screen, one being drawn, one
+    # spare), the layer showing the latest, and how many pictures went to the screen that way
+    var surfaces: List[Int]
+    var sw: Int  # their size in pixels
+    var sh: Int
+    var next: Int  # the one to try first next frame
+    var locked: Int  # the one offered to this draw (-1: none)
+    var layer: Int  # a sublayer of the canvas view whose contents are an IOSurface (0: not made yet)
+    var gpu_frames: Int
+    var cpu_only: Bool  # offered IOSurfaces for MISSES draws and never drew into one: a CPU canvas, not offered again
+    var misses: Int  # draws offered an IOSurface that didn't use it, while none ever has
+    var retired: List[Int]  # IOSurfaces of the old size, released after the next draw (when the GPU has let go of them)
 
     def __init__(out self, node: Int, view: Int):
         self.node = node
@@ -76,3 +107,26 @@ struct AppleCanvas(Copyable, Movable):
         self.moved = False
         self.last_x = 0
         self.last_y = 0
+        self.surfaces = List[Int]()
+        self.sw = 0
+        self.sh = 0
+        self.next = 0
+        self.locked = -1
+        self.layer = 0
+        self.gpu_frames = 0
+        self.cpu_only = False
+        self.misses = 0
+        self.retired = List[Int]()
+
+    def drop_surfaces(mut self):
+        """Releases its IOSurfaces and its layer (the canvas is going: the host rebuilt its views)."""
+        for s in self.surfaces:
+            cfunc[NoneType]("CFRelease", s)
+        for s in self.retired:
+            cfunc[NoneType]("CFRelease", s)
+        self.surfaces.clear()
+        self.retired.clear()
+        if self.layer != 0:
+            _ = msg(self.layer, "removeFromSuperlayer")
+            _ = msg(self.layer, "release")
+            self.layer = 0

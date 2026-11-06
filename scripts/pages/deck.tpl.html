@@ -269,14 +269,14 @@
 <section id="gpu-omx" class="iso-slide">
   <div class="lvl">The GPU<span>· in omxcode</span></div>
   <h2>In omxcode: one language, top to bottom.</h2>
-  <iframe class="iso" src="iso/gpu-omx.html" data-flow="0" title="Isometric diagram: a Mojo pixel function becomes a kernel and its picture reaches a native image view"></iframe>
+  <iframe class="iso" src="iso/gpu-omx.html" data-flow="0" title="Isometric diagram: a Mojo pixel function becomes a kernel and its picture reaches the screen"></iframe>
   <span class="fragment step" data-iso="0:0"></span><span class="fragment step" data-iso="0:1"></span><span class="fragment step" data-iso="0:2"></span>
   <span class="fragment step" data-iso="0:3"></span><span class="fragment step" data-iso="0:4"></span><span class="fragment step" data-iso="0:5"></span>
   <span class="fragment step" data-iso="0:6"></span><span class="fragment step" data-iso="0:7"></span><span class="fragment step" data-iso="0:8"></span>
   <span class="fragment step" data-iso="0:9"></span>
   <span class="fragment step" data-iso="1:0"></span><span class="fragment step" data-iso="1:1"></span><span class="fragment step" data-iso="1:2"></span>
   <span class="fragment step" data-iso="2:0"></span><span class="fragment step" data-iso="2:1"></span>
-  <aside class="notes">Three flows: a frame today, which copies the picture back to the CPU; the opt-in path that stays on the GPU (Linux, NVIDIA, one example so far); and the same function on the CPU.</aside>
+  <aside class="notes">Three flows: the web today, where the picture is copied to main memory; Linux with NVIDIA and the Mac, where every GPU app's picture stays on the GPU (D-5310, D-5311); and the same function on the CPU.</aside>
 </section>
 
 <section id="gpu-code">
@@ -292,21 +292,21 @@
       <div class="side">Tomorrow · Mojo</div>
       <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b> · the maths</div>
 <pre class="code tiny" data-file="examples/gpu/app.mojo">{{BLOCK examples/gpu/app.mojo 17-17}}</pre></div>
-      <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b> · run it</div>
-<pre class="code tiny" data-file="examples/gpu/app.mojo">{{BLOCK examples/gpu/app.mojo 71-71}}</pre></div>
+      <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b> · draw it</div>
+<pre class="code tiny" data-file="examples/gpu/app.mojo">{{BLOCK examples/gpu/app.mojo 67-67}}</pre></div>
       <div class="pane"><div class="file">examples/gpu/<b>app.mojo</b> · show it</div>
-<pre class="code tiny" data-file="examples/gpu/app.mojo">{{BLOCK examples/gpu/app.mojo 105-105}}</pre></div>
+<pre class="code tiny" data-file="examples/gpu/app.mojo">{{BLOCK examples/gpu/app.mojo 106-106}}</pre></div>
     </div>
   </div>
   <div class="caption">
     <p class="fragment current-visible" data-pairs="0:1-2 1:1">The maths: a <code>__device__</code> function becomes a plain function.</p>
     <p class="fragment current-visible" data-pairs="0:4-6 1:1">Thread indices to find your pixel become two arguments, <code>x</code> and <code>y</code>.</p>
     <p class="fragment current-visible" data-pairs="0:7-8">Checking the edges and writing the pixel: omxcode does both. The function returns a colour.</p>
-    <p class="fragment current-visible" data-pairs="0:11-14 2:1">Map, launch with grid and block sizes, unmap: one call. (It also copies to main memory; next slide.)</p>
-    <p class="fragment current-visible" data-pairs="0:16-17 3:1">A texture drawn by a shader: an <code>Image</code> in <code>view()</code>.</p>
+    <p class="fragment current-visible" data-pairs="0:11-14 2:1">Map, launch with grid and block sizes, unmap: one call. On Linux and the Mac the picture stays on the GPU.</p>
+    <p class="fragment current-visible" data-pairs="0:16-17 3:1">A texture drawn by a shader: a <code>Canvas</code> in <code>view()</code>.</p>
     <p class="fragment current-visible">Three languages and two compilers become one language and one compiler.</p>
   </div>
-  <aside class="notes">Line for line, the same fractal. Yesterday: a kernel in CUDA C++, launch and interop code in C++, a GLSL shader, two compilers, NVIDIA only. Tomorrow: one Mojo file. The one thing yesterday still does better is on the next slide: its pixels never leave GPU memory.</aside>
+  <aside class="notes">Line for line, the same fractal. Yesterday: a kernel in CUDA C++, launch and interop code in C++, a GLSL shader, two compilers, NVIDIA only. Tomorrow: one Mojo file. Where yesterday still does better is on the next slide: on the web our picture still goes through main memory.</aside>
 </section>
 
 <section id="gpu-compare">
@@ -317,13 +317,13 @@
     <tr class="fragment"><td>Languages you write</td><td>C++, CUDA C++, GLSL</td><td>Swift, Metal</td><td class="win">Mojo</td></tr>
     <tr class="fragment"><td>The kernel</td><td>thread indices by hand</td><td>thread position attribute</td><td class="win">a function of x and y</td></tr>
     <tr class="fragment"><td>The same maths on the CPU</td><td>shareable (<code>__host__ __device__</code>), its own launch code</td><td>rewritten in Swift or C++</td><td class="win">the same function, through render_on_cpu</td></tr>
-    <tr class="fragment"><td>Pixels to the screen</td><td class="win">stay in GPU memory</td><td class="win">stay in GPU memory</td><td>copied to main memory, then back to the GPU to show; GPU memory only as an opt-in, on Linux</td></tr>
-    <tr class="fragment"><td>GPUs</td><td>NVIDIA</td><td>Apple</td><td>NVIDIA today, through MAX (AMD untested)</td></tr>
+    <tr class="fragment"><td>Pixels to the screen</td><td class="win">stay in GPU memory</td><td class="win">stay in GPU memory</td><td class="win">stay in GPU memory on Linux (NVIDIA) and the Mac; copied through main memory on the web, for now</td></tr>
+    <tr class="fragment"><td>GPUs</td><td>NVIDIA</td><td>Apple</td><td>NVIDIA and Apple, through MAX (AMD untested)</td></tr>
     <tr class="fragment"><td>Buttons around it</td><td>Qt or ImGui, more C++</td><td>SwiftUI</td><td class="win">each platform's own, same file</td></tr>
     <tr class="fragment"><td>An agent can use it</td><td>only through an API you write</td><td>only through an API you write</td><td class="win">yes: the controls around it are tools, and a Canvas takes gestures</td></tr>
   </table>
   <p class="fragment big" style="margin-top:22px">Not faster. One language and one file, from the button to the kernel, and agents included.</p>
-  <aside class="notes">Where the others win, say so: their pixels never leave GPU memory, and Metal runs on every Apple GPU. omxcode's GPU drawing builds for Linux only. omxcode copies back to the CPU by default; only examples/particles uses the zero-copy path, on Linux with NVIDIA. The agent can use the example's buttons and slider; the picture itself is an Image, which an agent sees only as its size. A Canvas view is different: its tool takes a gesture (pan, zoom, tap) and a position.</aside>
+  <aside class="notes">Where the others win, say so: their pixels never leave GPU memory on every platform, and Metal runs on every Apple GPU. omxcode's pictures stay on the GPU on Linux with NVIDIA (into a GL texture) and on the Mac (into an IOSurface Core Animation shows: no copy at all, since the Mac's CPU and GPU share one memory). The Mac's path is proven on an Apple M4 and on GitHub's virtual Mac GPU. On the web the picture still goes through main memory; WebGPU is being tried. The agent can use the example's buttons and slider; the picture is a Canvas, whose tool takes a gesture (pan, zoom, tap) and a position.</aside>
 </section>
 
 

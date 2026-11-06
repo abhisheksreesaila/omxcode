@@ -241,6 +241,7 @@ def clock(hours: Float64) -> String:
 # ---------- the app ----------
 
 struct Main(App):
+    comptime GPU_CANVAS = True  # (its PointCloud draws on the GPU: a desktop host may show it straight from there, D-5310)
     var cloud: PointCloud
     var kind: Int  # 0 = all, 1–3 = taxi, rideshare, bike
     var hour: Float64  # centre of the hour filter; < 0 = all day

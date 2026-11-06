@@ -53,12 +53,12 @@
     0.5
    ],
    "hue": 350,
-   "tech": "Image(pixels)",
-   "desc": "The picture is one more thing on the screen: an Image node next to the sliders and buttons."
+   "tech": "Canvas(0, version)",
+   "desc": "The picture is one more thing on the screen: a Canvas node next to the sliders and buttons."
   },
   {
    "id": "render",
-   "label": "gpu.render[f]",
+   "label": "gpu.draw[f]",
    "kind": "service",
    "at": [
     10,
@@ -66,7 +66,7 @@
    ],
    "hue": 205,
    "tech": "mojoui/gpu.mojo",
-   "desc": "Wraps the function in a kernel (one GPU thread per pixel) and launches it through MAX's DeviceContext."
+   "desc": "gpu.draw[f]: wraps the function in a kernel (one GPU thread per pixel) and launches it through MAX's DeviceContext, at the canvas's real size."
   },
   {
    "id": "cpu",
@@ -102,7 +102,7 @@
    ],
    "hue": 140,
    "tech": "Modular's GPU runtime",
-   "desc": "Compiles the Mojo kernel for the GPU and launches it. omxcode's GPU drawing builds for Linux; elsewhere the framework's drawing types use the CPU."
+   "desc": "Compiles the Mojo kernel for the GPU (CUDA on NVIDIA, Metal on the Mac) and launches it."
   },
   {
    "id": "gpu",
@@ -114,12 +114,12 @@
     -4.5
    ],
    "hue": 140,
-   "tech": "NVIDIA (AMD untested)",
+   "tech": "NVIDIA · Apple (AMD untested)",
    "desc": "One thread per pixel."
   },
   {
    "id": "pixels",
-   "label": "Pixels in main memory",
+   "label": "Main memory (fallback)",
    "kind": "storage",
    "at": [
     15,
@@ -127,19 +127,19 @@
    ],
    "hue": 18,
    "tech": "copied back",
-   "desc": "Today's default: the pixels are copied from GPU memory to main memory, handed to the toolkit, and the toolkit uploads them to the GPU again to show them. The best GPU apps keep them in GPU memory the whole way."
+   "desc": "Where the host can't take a GPU picture yet (the web, a display without GL), the pixels are copied to main memory and the toolkit uploads them again. The best GPU apps never do this."
   },
   {
    "id": "gltex",
-   "label": "GL texture",
+   "label": "GL texture · IOSurface",
    "kind": "storage",
    "at": [
     19.5,
     0.5
    ],
    "hue": 140,
-   "tech": "opt-in · Linux · NVIDIA",
-   "desc": "An app can declare GPU_CANVAS: the picture stays on the GPU and is copied GPU to GPU into an OpenGL texture GTK shows (CUDA–GL interop, mojoui/present.mojo). One example uses it today: examples/particles."
+   "tech": "Linux · Mac",
+   "desc": "The default for GPU apps. Linux with NVIDIA: copied GPU to GPU into an OpenGL texture GTK shows (CUDA–GL interop). The Mac: drawn straight into an IOSurface Core Animation shows, no copy at all (one memory for CPU and GPU)."
   },
   {
    "id": "widget",
@@ -150,7 +150,7 @@
     5
    ],
    "hue": 145,
-   "tech": "GtkPicture · NSImageView · <img>",
+   "tech": "GtkPicture · NSImageView · <canvas>",
    "desc": "Each platform's own image widget shows the picture, beside its own buttons."
   },
   {
@@ -240,7 +240,7 @@
  ],
  "flows": [
   {
-   "name": "A frame today",
+   "name": "The web today (a copy)",
    "steps": [
     {
      "at": "fn",
@@ -264,12 +264,12 @@
     {
      "from": "gpu",
      "to": "pixels",
-     "note": "The pixels are copied to main memory. The best GPU apps keep them in GPU memory."
+     "note": "The web, for now: the pixels are copied to main memory. The best GPU apps keep them in GPU memory."
     },
     {
      "from": "pixels",
      "to": "view",
-     "note": "They go into an Image in view(), like any other part of the screen."
+     "note": "They fill a Canvas in view(), like any other part of the screen."
     },
     {
      "from": "view",
@@ -294,7 +294,7 @@
    ]
   },
   {
-   "name": "Staying on the GPU (opt-in)",
+   "name": "Linux and the Mac: stays on the GPU",
    "steps": [
     {
      "from": "max",
