@@ -36,6 +36,10 @@ ALLOWED = {
     "_strlen", "_write", "_posix_memalign", "_free", "_sin", "_cos", "___sincos_stret",  # (sin and cos: the island's spinner, goal 30)
     # libSystem, for the MX frame package (files, mmap, time)
     "___error", "_close", "_getpid", "_lseek", "_lstat", "_mkdir", "_mmap", "_munmap", "_open", "_read", "_rename", "_stat", "_strerror", "_unlink", "_clock_gettime_nsec_np", "_getenv", "_log10", "_sysconf", "_memset_pattern16", "_strtod", "_strtod_l", "_newlocale", "_freelocale",
+    # goal 55: mojoui.process (an app starting its companion: posix_spawnp in its own group, waitpid, kill)
+    "_kill", "_posix_spawnattr_destroy", "_posix_spawnattr_init", "_posix_spawnattr_setflags", "_posix_spawnattr_setpgroup",
+    "_posix_spawn_file_actions_adddup2", "_posix_spawn_file_actions_addopen", "_posix_spawn_file_actions_destroy",
+    "_posix_spawn_file_actions_init", "_posix_spawnp", "_waitpid",
     # libSystem, for mojoui.picture / video (ffmpeg through a pipe; a decoder thread) on the Mac (agentchat's Album)
     "_pthread_mutex_lock", "_pthread_mutex_unlock", "_pthread_mutex_destroy", "_pthread_cond_signal", "_pthread_cond_destroy", "_popen", "_pclose", "_fopen", "_fread",
     # UIKit
