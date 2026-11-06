@@ -1,0 +1,10 @@
+43982418
+M0: PASS  own env, Mojo 1.2, serve/https/hash pass
+M1: PASS  hmac, random, base64url, compare, seal
+M2: PASS  PKCE + state, sealed HttpOnly cookie, one SQLite per tenant, no cross-tenant reads, roles, server-side sign-out
+M3: PASS  checkout session, signed webhooks (bad/old refused, once only), Pro for ada only, cancel → free
+M5: BLOCKED  no /home/abhisheksreesaila/.config/omxcode/saas.env: the owner runs scripts/saas_keys.sh (Google OAuth client + Stripe test key)
+M4: PASS  native sign-in via the system browser + loopback, an entry in ada's SQLite, upgrade → Pro; shot build/g57/m4.png
+M6: PASS  parity map, components listed, gallery card, Linux download
+M7: PASS  ui thread, served, libc and decision lints
+M8: PASS  on the Mac (macOS, arm64): the server passes M2 and M3; the AppKit app signs in and pays; shot build/g57/m8-mac.png

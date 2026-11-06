@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## 2026-11-06 · Goal 57: SaaS building blocks in Mojo (sign-in, tenants, payments)
+- Setup: worktree mojo-ui-g57 on merge-50-52, Mojo 1.2, Flare; the owner's Mac (arm64) over SSH for M8.
+- Worked: mojoui.crypto / accounts / billing / signin / browser; the saas server (Mojo only) and native app; Google and
+  Stripe proved against the checker's stand-ins on Linux and the Mac; Linux download with its server.
+- Broke and fixed: the checker's label regex (D-5719); Flare programs had never built on macOS (D-5723); review round 1's
+  sign-in CSRF and loopback hardening (D-5724–D-5727); AppKit BETWEEN rows (D-5728).
+- Means: fh-saas's core jobs run in Mojo on the framework. Open: invite accept page, provider calls off the lock,
+  real keys (M5). Next: the owner runs scripts/saas_keys.sh and M5. Report: docs/report.md.
+
 ## Goal 53: every gallery app downloads; no web builds in the showcase (2026-11-05)
 - **Setup:** worktree ../mojo-ui-g53, branch `goal-53-downloads` from main 99f5bde (Mojo 1.1); check docs/goals/53-check.py; decisions D-5301–D-5304. Owner: "it goes into the galleries so you have to provide a link… completely based on the app framework… I don't think we should have a web version".
 - **Worked:** `scripts/package.sh` packages any example (not just omxplorer); `scripts/bare_run.py` unpacks each Linux tarball and starts it with no Mojo, no pixi and a fresh HOME on a headless display (six of six drew their window). The shipped Mac zips ran on GitHub's macOS 15 and 26 runners (run 42150995806), widgets with CodeMirror and ECharts mounted. Pre-release `gallery-apps`: six Linux and four Mac downloads; every gallery card links its downloads; Agent chat (needs its agent server) and Dictate (doesn't build here) moved to Coming next; Web chips, web shots and the cover's "web, on WebGPU" stop are gone.
