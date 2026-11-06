@@ -1167,3 +1167,4 @@ GTK's `open_url` with `$MOJOUI_OPENER`, `waitfor:` (buttons only). Contract: GOA
 - M0: PASS first try (own .pixi, Mojo 1.2; test_serve, test_https, test_hash).
 - Owner mid-run: add M8 "The Mac" (D-5708): server + M2/M3 proofs and the AppKit client on the owner's Mac over SSH.
 - M1: mojoui.crypto (HMAC on mojoui.hash, getentropy, base64url, same, seal, PKCE); test_crypto passed on the first build. My memory of RFC 7636's S256 vector was wrong; fixed the test from hashlib, not the code.
+- M2: mojoui.accounts + examples/saas/server.mojo + scripts/saas.sh; two compile fixes (a module path in a type, a mutating call on a temporary), then M2 PASS on its first run. tests/test_accounts.mojo covers redirects, next, cookies, invites, sign-out, tampering without a provider.
