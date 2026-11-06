@@ -68,7 +68,10 @@ def gtk(steps, name, size=(1440, 900), appearance="light"):
 
 
 BOARD_RE = re.compile(r"^BOARD: (\S+) at (-?\d+),(-?\d+) (\d+)x(\d+)(?: \(asked -?\d+,-?\d+ \d+x\d+\))?$")
-SIZE_RE = re.compile(r"^BOARDS: (\S+) (\d+)x(\d+)$")
+SIZE_RE = re.compile(r"^BOARDS: (\S+) (\d+)x(\d+)(?: in (\d+)x(\d+))?$")
+
+
+ROOMS = {}  # each dump's room: the Board's scroller (a Board bigger than it would scroll)
 
 
 def boards(out):
@@ -79,6 +82,8 @@ def boards(out):
         if m:
             cur = (m.group(1), (int(m.group(2)), int(m.group(3))), {})
             dumps.append(cur)
+            if m.group(4):
+                ROOMS[m.group(1)] = (int(m.group(4)), int(m.group(5)))
             continue
         b = BOARD_RE.match(line)
         if b and cur is not None:
@@ -130,6 +135,7 @@ def m1_steps():
         "tap:Query", "wait:300", "textarea:0=SELECT lab, COUNT(*) AS n FROM fleet GROUP BY lab", "tap:run-query", "waitfor:close-query-1=60000", "wait:500", "boards:query",
         "tap:close-query-1", "wait:600", "boards:closed",
         "resize:table=-120,0", "wait:600", "boards:resized",
+        "resize:table=60,0", "wait:600", "boards:regrown",
         "dragcard:tablecard0=table", "wait:600", "boards:swapped",
         "window:1280x800", "wait:900", "boards:smaller",
     ])
@@ -141,7 +147,7 @@ def m1():
     out, shot = gtk(m1_steps(), "m1-tiles")
     d = boards(out)
     steps = [s for s, _, _ in d]
-    want = ["table", "telemetry", "chart", "video", "query", "closed", "resized", "swapped", "smaller"]
+    want = ["table", "telemetry", "chart", "video", "query", "closed", "resized", "regrown", "swapped", "smaller"]
     if steps != want:
         return False, f"board dumps {steps}, wanted {want}"
     probs = []
@@ -161,8 +167,21 @@ def m1():
     gave = [n for n in facing if n in by["resized"] and by["resized"][n][0] == edge0 + grew]  # (nested parts share the space, as Hyprland's splits do)
     if not facing or gave != facing:
         probs.append(f"cards facing the table's edge {facing}, moved with it {gave}")
+    # the corner dragged back out 60 pt: the table grows by that much and the same cards move their left edges with it
+    t2 = by["regrown"].get("table")
+    regrew = (t2[2] - t1[2]) if t1 and t2 else 0
+    if regrew != 60:
+        probs.append(f"the table's width changed by {regrew} after a +60 pt corner drag")
+    followed = [n for n in facing if n in by["regrown"] and by["regrown"][n][0] == edge0 + grew + regrew]
+    if followed != facing:
+        probs.append(f"after growing, cards facing the edge {facing}, moved with it {followed}")
+    # never a scroll: every layout fits the room the window gives the Board
+    for step, (W, H), _ in d:
+        room = ROOMS.get(step)
+        if not room or W > room[0] or H > room[1]:
+            probs.append(f"{step}: board {W}x{H} in room {room}")
     # the drop: the two cards' rects swapped
-    a0, b0 = by["resized"].get("table"), by["resized"].get("tablecard0")
+    a0, b0 = by["regrown"].get("table"), by["regrown"].get("tablecard0")
     a1, b1 = by["swapped"].get("table"), by["swapped"].get("tablecard0")
     if not (a0 and b0 and a1 == b0 and b1 == a0):
         probs.append(f"swap: table {a0}→{a1}, telemetry {b0}→{b1}")
@@ -174,7 +193,7 @@ def m1():
         probs.append(f"{len(slow)} SLOW lines: {slow[0]}")
     if probs:
         return False, "; ".join(probs)[:900]
-    return True, f"{len(d)} layouts, no overlap, gaps 8; corner drag {grew} pt and {', '.join(gave)} moved with the edge; swap exact; 0 SLOW; {shot}"
+    return True, f"{len(d)} layouts, no overlap, gaps 8, never a scroll; corner drag {grew} then +{regrew} pt, {', '.join(gave)} moved with the edge; swap exact; 0 SLOW; {shot}"
 
 
 def edge_pixels(png, chrome_check):
@@ -196,6 +215,41 @@ def near(a, b, tol=5):
     return all(abs(x - y) <= tol for x, y in zip(a, b))
 
 
+def lines_at(im, x, y0, y1):
+    """y where a 1–2 px line runs across column x between y0 and y1: a pixel unlike the ones 3 above and 3 below,
+    which are like each other (a line between two fills, or on one)."""
+    out = []
+    for y in range(y0 + 3, y1 - 3):
+        a, m, b = im.getpixel((x, y - 3)), im.getpixel((x, y)), im.getpixel((x, y + 3))
+        if sum(abs(p - q) for p, q in zip(m, a)) >= 9 and sum(abs(p - q) for p, q in zip(m, b)) >= 9:
+            out.append(y)
+    return out
+
+
+def cols_at(im, y, x0, x1):
+    out = []
+    for x in range(x0 + 3, x1 - 3):
+        a, m, b = im.getpixel((x - 3, y)), im.getpixel((x, y)), im.getpixel((x + 3, y))
+        if sum(abs(p - q) for p, q in zip(m, a)) >= 9 and sum(abs(p - q) for p, q in zip(m, b)) >= 9:
+            out.append(x)
+    return out
+
+
+def mockup_shot():
+    """The mockup's option A as a picture, for the compare page."""
+    from playwright.sync_api import sync_playwright
+    png = OUT / "mockup-A.png"
+    with sync_playwright() as p:
+        b = p.chromium.launch(executable_path="/usr/bin/chromium")
+        pg = b.new_page(viewport={"width": 1480, "height": 1000})
+        pg.goto("file://" + str(ROOT / "docs/design/chrome/options.html"))
+        pg.click('button[data-opt="A"]')
+        pg.wait_for_timeout(600)
+        pg.locator("#win").screenshot(path=str(png))
+        b.close()
+    return png
+
+
 def m2():
     if not (FULL / "fleet.csv").exists():
         return False, f"no {FULL}"
@@ -204,16 +258,38 @@ def m2():
         out, shot = gtk(f"pick:Choose a file={FULL / 'fleet.csv'};waitfor:Create table=60000;tap:Create table;wait:1200", f"m2-shell-{ap}", appearance=ap)
         shots.append(str(shot))
         backs = backdrop_of(ap)
-        bad, _ = edge_pixels(shot, lambda px: not any(near(px, b) for b in backs))
+        bad, im = edge_pixels(shot, lambda px: not any(near(px, b) for b in backs))
         probs += [f"{ap}: {b} is backdrop" for b in bad]
+        W, H = im.size
+        # the 1 px lines where the docked parts meet the board: under the top band, over the bottom band, beside the
+        # rail and beside the inspector (looked for along a column and a row through the board)
+        if not lines_at(im, W // 3, 40, 140):
+            probs.append(f"{ap}: no line under the top band")
+        if not lines_at(im, W // 3, H - 110, H - 40):
+            probs.append(f"{ap}: no line over the bottom band")
+        xs = cols_at(im, H // 2, 20, 90)
+        if not xs:
+            probs.append(f"{ap}: no line beside the rail")
+        if not cols_at(im, H // 2, W - 360, W - 260):
+            probs.append(f"{ap}: no line beside the inspector")
+    # a wide window: the toolbar shows its titles (taller); the Board still fits the room it's given
+    out, wide = gtk(f"pick:Choose a file={FULL / 'fleet.csv'};waitfor:Create table=60000;tap:Create table;wait:1200;boards:wide", "m2-shell-wide", size=(1920, 1080))
+    shots.append(str(wide))
+    boards(out)
+    d = boards(out)
+    room = ROOMS.get("wide")
+    if not d or not room or d[0][1][0] > room[0] or d[0][1][1] > room[1]:
+        probs.append(f"1920×1080: board {d[0][1] if d else None} in room {room}")
     if probs:
         return False, "; ".join(probs)
+    mock = mockup_shot()
     compare = OUT / "compare.html"
-    mock = ROOT / "docs/design/chrome/options.html"
     compare.write_text("<!doctype html><meta charset=utf-8><title>goal 54: shell A</title><body style='margin:0;background:#111;color:#eee;font:13px Inter,sans-serif'>"
-                       f"<p style='padding:8px'>Mockup (option A): <a style='color:#9cf' href='file://{mock}'>{mock}</a></p>"
-                       + "".join(f"<p style='padding:8px'>{Path(s).name}</p><img src='file://{s}' style='width:100%'>" for s in shots))
-    return True, f"edges are chrome in light and dark; compare page {compare} (look at it)"
+                       "<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px'>"
+                       f"<figure style='margin:0'><figcaption>Mockup, option A</figcaption><img src='file://{mock}' style='width:100%'></figure>"
+                       + "".join(f"<figure style='margin:0'><figcaption>{Path(x).name}</figcaption><img src='file://{x}' style='width:100%'></figure>" for x in shots)
+                       + "</div>")
+    return True, f"edges are chrome and the docked lines are there, light and dark; the board fits at 1920×1080 with titles; compare page {compare} (look at it)"
 
 
 def m3():

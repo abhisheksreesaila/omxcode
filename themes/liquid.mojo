@@ -372,7 +372,7 @@ def liquid_dark_gtk(p: Palette) -> String:
     var w = String("window.liquid ")
     var line = hex_of(p.line)
     return (w + ".mui-board > * { border: 1px solid " + line + "; border-radius: 16px; }\n"
-            + w + ".mui-board > .mui-card { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n")
+            + w + ".mui-board > .mui-card, " + w + ".mui-board > .mui-board-clip { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n")
 
 
 def liquid_light_gtk(p: Palette) -> String:

@@ -84,7 +84,8 @@ from mojoui.sheetchrome import Tool, Toolbar, FormulaBar, StatusBar, Tab, Bottom
 from mojoui.cellstyle import (CellStyle, BOLD, ITALIC, UNDERLINE, STRIKE, INK_MASK, FILL_MASK, ALIGN_MASK, ink_bits, fill_bits, align_bits,
                               AUTO_ALIGN, ALIGN_LEFT, ALIGN_CENTRE, ALIGN_RIGHT, SWATCH_NAMES, swatch_name)
 from mojoui.swatches import SwatchPicker, draw_swatches, swatch_at
-from mojoui.tiling import Tiling, Rect as TileRect
+from mojoui.tiling import Rect as TileRect
+from mojoui.boardtiles import BoardTiles
 from mojoui.sheetpage import (SheetObject, compute, shape_of, chart_view, chart_text, object_card, readout, free_spot, object_title, groups_of, OBJ_CHART, OBJ_PIVOT,
                               CHART_BAR, CHART_LINE, HEADER_H, chart_words, chart_choices, apply_choice, chosen, chart_sentence, SLOT_NAMES, slot_text,
                               number_columns, text_columns, COMBINES, ORDERS, TOPS, SLOT_COMBINE, SLOT_VALUE, SLOT_GROUP, SLOT_ORDER, SLOT_TOP,
@@ -321,7 +322,8 @@ comptime APP = "omxcode"  # (settings live in ~/.config/omxcode; ~/.config/omxap
 comptime W = 1440  # the window (Stitch's artboards; the web check's viewport)
 comptime INSPECTOR_W = 300
 comptime RAIL_W = 48  # the sheet's side rail (goal 41)
-comptime SHELL_CHROME_H = 228  # shell A's bands, the formula bar and the board's padding (goal 54: measured at 900 and 800 pt)
+comptime SHELL_CHROME_H = 228  # shell A's bands (icons-only toolbar), the formula bar and the board's padding (goal 54: measured)
+comptime RIBBON_TITLES_H = 26  # the toolbar's titles under its icons, when the window is wide enough for them
 comptime BOARD_PAD = 12  # the board's padding inside the docked chrome (shell A, goal 54)
 comptime TILE_MIN_W = 300  # the smallest a tiled card is made while the Board has room (goal 54)
 comptime TILE_MIN_H = 200
@@ -421,12 +423,7 @@ struct Main(App):
     var table_y: Int
     var table_w: Int
     var table_h_set: Int  # 0: automatic
-    var board_tiles: Tiling  # the Board's cards as tiles (mojoui.tiling, goal 54): every card's place comes from it
-    var tile_tags: Dict[String, String]  # each tile's card, by its tag, at the last layout (how a card is found again)
-    var tile_w: Int  # the Board's size at the last layout
-    var tile_h: Int
-    var tile_next: Int  # the next tile's number (t1, t2, …)
-    var tile_focus: Int  # the card last touched or added (a new card splits it), by its index on the Board
+    var board_tiles: BoardTiles  # the Board's cards as tiles (mojoui.boardtiles, goal 54): every card's place comes from it
     var reveal: Int  # the sheet child to scroll into view (a new object), and how many times asked
     var reveal_count: Int
     var ctx_col: Int  # the column a context menu is open for (-1: none), and where it opened on the grid
@@ -561,12 +558,7 @@ struct Main(App):
         self.table_y = 0
         self.table_w = 0
         self.table_h_set = 0
-        self.board_tiles = Tiling(TILE_MIN_W, TILE_MIN_H)
-        self.tile_tags = Dict[String, String]()
-        self.tile_w = 0
-        self.tile_h = 0
-        self.tile_next = 1
-        self.tile_focus = 0
+        self.board_tiles = BoardTiles(TILE_MIN_W, TILE_MIN_H)
         self.reveal = -1
         self.reveal_count = 0
         self.ctx_col = -1
@@ -2508,7 +2500,7 @@ struct Main(App):
 
     def board_h(self) -> Int:
         """The Board's height: the room under the formula bar (the cards fill it; nothing scrolls)."""
-        return max(TILE_MIN_H, self.win_h - SHELL_CHROME_H)  # (shell A: the board reaches the bottom band)
+        return max(TILE_MIN_H, self.win_h - SHELL_CHROME_H - (0 if self.win_w < COMPACT_W else RIBBON_TITLES_H))  # (shell A: the board reaches the bottom band)
 
     def card_tags(self) -> List[String]:
         """The Board's cards by their tags, in the Board's order (sheet_screen): the table, the objects, the media, the
@@ -2599,77 +2591,25 @@ struct Main(App):
             d.h = r.h
             d.version += 1
 
-    def tile_ids(self) -> List[String]:
-        """Each card's tile ("": none yet), found as it was left at the last layout: the same tag in the same place, else
-        the same place (the cards before it shifted: one closed), else the same tag (it resized itself)."""
-        var tags = self.card_tags()
-        var cur = self.card_rects()
-        var leaves = self.board_tiles.leaves()
-        var old = self.board_tiles.rects(self.tile_w, self.tile_h)
-        var ids = List[String]()
-        for _ in range(len(tags)):
-            ids.append("")
-        var used = List[Bool]()
-        for _ in range(len(leaves)):
-            used.append(False)
-        for phase in range(3):
-            for i in range(len(tags)):
-                if ids[i] != "":
-                    continue
-                for j in range(len(leaves)):
-                    if used[j]:
-                        continue
-                    var same_tag = self.tile_tags.get(leaves[j], "") == tags[i]
-                    var same_place = old[j] == cur[i]
-                    if (phase == 0 and same_tag and same_place) or (phase == 1 and same_place) or (phase == 2 and same_tag):
-                        ids[i] = leaves[j]
-                        used[j] = True
-                        break
-        return ids^
-
     def retile(mut self):
         """The tiles follow the cards (a new one splits the card last touched, a closed one's space goes to its
-        neighbour), then every card takes its tile's place in the Board's current size."""
+        neighbour), then every card takes its tile's place in the Board's current size (mojoui.boardtiles)."""
         if self.screen != SHEET:  # (another screen over the sheet: the tiles wait for it)
             return
-        var tags = self.card_tags()
-        var ids = self.tile_ids()
-        var W = self.sheet_width()
-        var H = self.board_h()
-        for leaf in self.board_tiles.leaves():
-            if leaf not in ids:
-                _ = self.board_tiles.remove(leaf)
-        var focus = ids[self.tile_focus] if 0 <= self.tile_focus < len(ids) else String("")
-        for i in range(len(ids)):
-            if ids[i] == "":
-                ids[i] = "t" + String(self.tile_next)
-                self.tile_next += 1
-                try:
-                    self.board_tiles.insert(ids[i], focus, W, H)
-                except:
-                    pass
-                focus = ids[i]
-                self.tile_focus = i
-        self.tile_w = W
-        self.tile_h = H
-        self.tile_tags = Dict[String, String]()
-        for i in range(len(ids)):
-            self.tile_tags[ids[i]] = tags[i]
-        self.apply_tiles(ids)
+        try:
+            self.place_cards(self.board_tiles.sync(self.card_tags(), self.card_rects(), self.sheet_width(), self.board_h()))
+        except e:
+            if self.trace:
+                print("TILES: " + String(e), flush=True)
 
-    def apply_tiles(mut self, ids: List[String]):
-        """Every card to its tile's rect (only the ones that moved: a card's version changes when it does)."""
-        var leaves = self.board_tiles.leaves()
-        var rects = self.board_tiles.rects(self.tile_w, self.tile_h)
+    def place_cards(mut self, places: List[TileRect]):
+        """Every card to its place (only the ones that moved: a card's version changes when it does)."""
         var cur = self.card_rects()
         var moved = False
-        for i in range(len(ids)):
-            for j in range(len(leaves)):
-                if leaves[j] == ids[i]:
-                    if not (rects[j] == cur[i]):
-                        self.set_card_rect(i, rects[j])
-                        moved = True
-                    break
+        for i in range(min(len(places), len(cur))):
+            if not (places[i] == cur[i]):
+                self.set_card_rect(i, places[i])
+                moved = True
         if moved:
             self.version += 1
 
@@ -3704,21 +3644,12 @@ struct Main(App):
             self.inserting = 0
             self.version += 1
         elif m == MOVE or m == RESIZE:  # a card dragged by its title bar (dropped on another: they swap) or by its corner
-            var i = event.number  # (its index on the Board: child 0 is the table)
-            var ids = self.tile_ids()
-            if 0 <= i < len(ids) and ids[i] != "":
-                self.tile_focus = i
-                if m == RESIZE:  # (its right and bottom edges moved: the cards beside it give way, mojoui.tiling)
-                    _ = self.board_tiles.resize(ids[i], Int(event.dx), Int(event.dy), self.tile_w, self.tile_h)
-                else:  # (where its middle was dropped: the card there trades places with it; anywhere else it goes back)
-                    var rs = self.card_rects()
-                    var px = rs[i].x + rs[i].w // 2 + Int(event.dx)
-                    var py = rs[i].y + rs[i].h // 2 + Int(event.dy)
-                    for j in range(len(rs)):
-                        if j != i and ids[j] != "" and rs[j].x <= px < rs[j].x + rs[j].w and rs[j].y <= py < rs[j].y + rs[j].h:
-                            _ = self.board_tiles.swap(ids[i], ids[j])
-                            break
-                self.apply_tiles(ids)
+            var tags = self.card_tags()
+            var rects = self.card_rects()
+            if m == RESIZE:  # (its edges follow the pointer: the cards beside it give way, mojoui.tiling)
+                self.place_cards(self.board_tiles.resize(event.number, Int(event.dx), Int(event.dy), tags, rects))
+            else:  # (where its middle was dropped: the card there trades places with it; anywhere else it goes back)
+                self.place_cards(self.board_tiles.drop(event.number, Int(event.dx), Int(event.dy), tags, rects))
             self.version += 1
         elif m >= OBJ_TAP and m < OBJ_TAP + 100:
             var k = m - OBJ_TAP
@@ -4851,7 +4782,7 @@ struct Main(App):
         for v in self.peek.views(width, bottom + 24):
             items.append(v.copy())
         var area = (Board(items^, width, max(bottom, self.board_h()), on_move=MOVE, on_resize=RESIZE, reveal=self.reveal, reveal_count=self.reveal_count,
-                          tones=tones, on_hold=HOLD).fill().grow()) if self.sheet_tab == 0 else self.report_view()
+                          tones=tones, on_hold=HOLD, clips=True).fill().grow()) if self.sheet_tab == 0 else self.report_view()
         # The sheet's column takes the room the inspector leaves, the row takes the height the bars leave: sizes
         # come from the window (App.resize), never asked of it, so the window never grows to fit them (goal 25 M2).
         var main = (VStack(fx, area^, spacing=BOARD_PAD) if self.sheet_tab == 0 else VStack(area^, spacing=BOARD_PAD)).padding(BOARD_PAD).grow().align(STRETCH)

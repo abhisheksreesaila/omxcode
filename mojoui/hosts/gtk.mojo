@@ -1030,7 +1030,7 @@ struct GtkHost[A: App](Movable):
             var child = want[k]
             var entry = BoardChild(j, c, k, child, fixed, drag)
             if child == 0:
-                self.clip_node = c
+                self.clip_node = c if self.rt.shown.nodes[j].text == "clips" else -1
                 child = self.build(c, self_addr)
                 external_call["gtk_fixed_put", NoneType](fixed, child, Float64(self.rt.shown.nodes[c].x), Float64(self.rt.shown.nodes[c].y))
                 # (in node order: what draws on top is what a drag picks)
@@ -2051,7 +2051,7 @@ struct GtkHost[A: App](Movable):
                 self.board_drags.append((i, drag))
                 for k in range(len(node.children)):
                     var c = node.children[k]
-                    self.clip_node = c
+                    self.clip_node = c if node.text == "clips" else -1
                     var child = self.build(c, self_addr)
                     external_call["gtk_fixed_put", NoneType](inner, child, Float64(self.rt.shown.nodes[c].x), Float64(self.rt.shown.nodes[c].y))
                     self.boards.append(BoardChild(i, c, k, child, inner, drag))
@@ -5067,10 +5067,11 @@ def on_board_drag_end[A: App](drag: Int, off_x: Float64, off_y: Float64, host_ad
     var b = host[].boards[bi].copy()
     var d = host[].rt.gesture(b.board, ZOOM if b.resizing else PAN, Float64(b.index), 0, off_x, off_y, 1)
     host[].apply(d, host_addr)
-    # the app decides where the card ends: back to its node's place and size, also when the app changed nothing (a
-    # tiled Board snaps a card that wasn't dropped on another back into its tile, mojoui.tiling)
+    # a clipping Board (Board(clips=True)): the app decides where the card ends, back to its node's place and size also
+    # when the app changed nothing (a tiled Board snaps a card that wasn't dropped on another back into its tile)
     for k in range(len(host[].boards)):
-        if host[].boards[k].widget == b.widget and 0 <= host[].boards[k].node < len(host[].rt.shown.nodes) and not host[].board_list:
+        if (host[].boards[k].widget == b.widget and 0 <= host[].boards[k].node < len(host[].rt.shown.nodes) and not host[].board_list
+                and 0 <= host[].boards[k].board < len(host[].rt.shown.nodes) and host[].rt.shown.nodes[host[].boards[k].board].text == "clips"):
             ref n = host[].rt.shown.nodes[host[].boards[k].node]
             external_call["gtk_fixed_move", NoneType](host[].boards[k].fixed, b.widget, Float64(n.x), Float64(n.y))
             host[].resize_widget(host[].boards[k].node)
@@ -6470,7 +6471,11 @@ def run_step[A: App](host_addr: Int, step: String):
         pump()
         for i in range(len(host[].rt.shown.nodes)):
             if host[].rt.shown.nodes[i].kind == BOARD and not host[].board_list:
-                print("BOARDS: " + rest + " " + String(host[].rt.shown.nodes[i].spacing) + "x" + String(host[].rt.shown.nodes[i].size))
+                var room = String("")
+                var scroller = host[].outers[i]
+                if scroller != 0:  # (the room the page gives the Board: its scroller's size; bigger content would scroll)
+                    room = " in " + String(Int(external_call["gtk_widget_get_width", c_int](scroller))) + "x" + String(Int(external_call["gtk_widget_get_height", c_int](scroller)))
+                print("BOARDS: " + rest + " " + String(host[].rt.shown.nodes[i].spacing) + "x" + String(host[].rt.shown.nodes[i].size) + room)
                 for c in host[].rt.shown.nodes[i].children:  # (the widget as GTK allocated it, not the node's wish)
                     ref ch = host[].rt.shown.nodes[c]
                     if ch.name == "":

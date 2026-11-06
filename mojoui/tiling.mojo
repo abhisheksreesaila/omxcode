@@ -6,13 +6,14 @@
 #   t.insert("table", "", W, H)                   # the first card: the whole area
 #   t.insert("chart", "table", W, H)              # halves the table's space along its longer side, the chart second
 #   t.remove("chart")                             # its sibling takes its space back
-#   t.resize("table", 120, 0, W, H)               # the table's right edge 120 further (the card beside it gives way)
+#   t.resize("table", 120, 0, W, H)               # the table's right edge 120 further (the card beside it gives way;
+#                                                 # a card on the far right moves its left edge: the edge follows the pointer)
 #   t.swap("table", "video")                      # a drop on another card: they trade places
 #   for i in range(len(t)): t.leaves()[i], t.rects(W, H)[i]     # each card's Rect, in the Board's coordinates
 #   var saved = t.to_text(); var back = Tiling.from_text(saved)   # "v0.580000(table,h0.500000(chart,%76ideo))"
 #
 # A resize moves the edge the card shares with its neighbour: the nearest split above it whose divider is that edge
-# (right or bottom; a card on the far right or bottom moves its left or top edge instead). Ratios are clamped so both
+# (right or bottom; a card on the far right or bottom moves its left or top edge instead, the same way the pointer went). Ratios are clamped so both
 # sides keep their minimum; the layout clamps again when the area shrinks, so a smaller window squeezes the biggest
 # parts first and every card keeps min_w × min_h while the space allows.
 
@@ -255,8 +256,9 @@ struct Tiling(Copyable, Movable, Sized):
         return True
 
     def resize(mut self, id: String, dx: Int, dy: Int, width: Int, height: Int) -> Bool:
-        """The card grows by dx, dy (negative: shrinks) in a width × height area: its right edge moves by dx (its left
-        edge, when it's on the far right), its bottom edge by dy (its top, at the bottom). True when anything moved."""
+        """The card's corner dragged by dx, dy in a width × height area: its right edge moves by dx (its left edge, when it's
+        on the far right: dragged left, the card grows), its bottom edge by dy (its top, at the bottom); each edge follows
+        the pointer. True when anything moved."""
         var n = self._find(id)
         if n < 0:
             return False
@@ -269,9 +271,8 @@ struct Tiling(Copyable, Movable, Sized):
 
     def _move_edge(mut self, n: Int, d: Int, kind: Int, width: Int, height: Int) -> Bool:
         # the nearest split of this kind with the card in its first part (its divider is the card's right/bottom edge);
-        # else the nearest with the card in its second part (the left/top edge, moved the other way)
+        # else the nearest with the card in its second part (its left/top edge, which then follows the pointer)
         var pick = -1
-        var grow_a = True
         var child = n
         var k = self.nodes[n].parent
         var second = -1
@@ -288,14 +289,13 @@ struct Tiling(Copyable, Movable, Sized):
             if second < 0:
                 return False
             pick = second
-            grow_a = False
         var r = self._rect_of_node(pick, width, height)
         var horizontal = kind == V
         var room = (r.w if horizontal else r.h) - GAP
         if room <= 0:
             return False
         var before = self._split_at(pick, r.w if horizontal else r.h, horizontal)
-        var want = before + (d if grow_a else -d)
+        var want = before + d  # (the edge follows the pointer: a card's right/bottom edge, or its left/top one at the far side)
         var ma = self._min(self.nodes[pick].a, horizontal)
         var mb = self._min(self.nodes[pick].b, horizontal)
         if ma + mb <= room:
@@ -313,7 +313,7 @@ struct Tiling(Copyable, Movable, Sized):
         ref node = self.nodes[n]
         if node.kind == LEAF:
             return _escape(node.id)
-        var r = Int(node.ratio * 1000000.0 + 0.5)
+        var r = max(1, min(999999, Int(node.ratio * 1000000.0 + 0.5)))  # (always 0.000001 … 0.999999: reads back as written)
         var digits = String(r)
         while digits.byte_length() < 6:
             digits = "0" + digits

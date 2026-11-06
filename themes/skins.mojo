@@ -240,7 +240,7 @@ def bordered_css(p: Palette, cls: String, sheet: UInt32) -> String:
     return (w + ".mui-board-scroll { border: 1px solid " + line + "; border-radius: 8px; background-color: " + hex_of(sheet) + "; }\n"
             + w + ".mui-board { background-color: transparent; }\n"
             + w + ".mui-board > * { border: 1px solid " + line + "; border-radius: 6px; }\n"
-            + w + ".mui-board > .mui-card { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n"
+            + w + ".mui-board > .mui-card, " + w + ".mui-board > .mui-board-clip { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n"
             + w + ".mui-tag-inspector { box-shadow: none; border: 1px solid " + line + "; }\n")
 
 

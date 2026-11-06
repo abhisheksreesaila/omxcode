@@ -103,7 +103,7 @@ def main() raises:
     assert_true(t.resize("table", 100, 0, W, H))
     assert_equal(String(at(t, "table", W, H)), "0,0 596x600")
     assert_equal(String(at(t, "video", W, H)), "604,0 396x600")
-    assert_true(t.resize("video", 50, 0, W, H))
+    assert_true(t.resize("video", -50, 0, W, H))  # (on the far right: its left edge follows the pointer, left: it grows)
     assert_equal(String(at(t, "table", W, H)), "0,0 546x600")
     assert_equal(String(at(t, "video", W, H)), "554,0 446x600")
     _ = t.resize("table", 10000, 0, W, H)
