@@ -45,7 +45,7 @@ import lerobot as lr  # noqa: E402
 DATA = Path.home() / "data" / "robot-scout"
 CAMERA = "observation.images.left_external"
 PAPER = Path(os.environ.get("DROID_PAPER", DATA / "docs" / "droid-2403.12945v2.pdf"))  # (scripts/fetch_demo.py fetches it elsewhere)
-VERB_MOST = 1000  # verbs used by fewer episodes are grouped as "other" (D-4727)
+VERB_MOST = 1000  # verbs used by fewer episodes are grouped as "other" (D-4727); a smaller fleet (the demo's) scales it
 PAPER_NAME = "droid-paper.pdf"  # where each row comes from: the dataset's paper, in paper/ (a key link marks it, D-4712)
 # libfranka "Robot and interface specifications" (frankaemika.github.io/docs/control_parameters.html): joint velocity limits
 LIMITS = [(1, 2.1750), (2, 2.1750), (3, 2.1750), (4, 2.1750), (5, 2.6100), (6, 2.6100), (7, 2.6100)]
@@ -167,8 +167,9 @@ def main():
     counts = {}
     for r in rows:
         counts[r["verb"]] = counts.get(r["verb"], 0) + 1
-    for r in rows:  # (a verb fewer than VERB_MOST episodes use reads as "other": a chart by verb then compares real groups)
-        if counts[r["verb"]] < VERB_MOST:
+    most = min(VERB_MOST, max(20, len(rows) // 60))  # (1,000 for the full 63k fleet as before; 33 for the 2,018-episode demo, D-5907)
+    for r in rows:  # (a verb fewer than `most` episodes use reads as "other": a chart by verb then compares real groups)
+        if counts[r["verb"]] < most:
             r["verb"] = "other"
     rows.sort(key=lambda r: (r["outcome"] != "failure", r["lab"], r["date"], r["uuid"]))
     cols = list(rows[0].keys())

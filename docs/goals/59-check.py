@@ -80,9 +80,11 @@ def m0():
     for p in ("e5small/e5small.mef", "yolox/yolox.mef", "scene/scene.mef", "scene/model.json"):
         if not (clone / "build/packs" / p).exists():
             probs.append(f"no build/packs/{p}")
-    for name, p in caches.items():
-        if not any(p.rglob("*")) and name != "TORCH_HOME":
-            probs.append(f"{name} stayed empty: something came from elsewhere")
+    for sub in ("droid", "e5-small-v2", "yolox/yolox_tiny.pth"):  # (fetched into the empty cache: nothing came from this machine's own)
+        if not (caches["OMX_CACHE"] / sub).exists():
+            probs.append(f"$OMX_CACHE/{sub} wasn't fetched")
+    if not any(caches["TORCH_HOME"].rglob("*.pth")):
+        probs.append("ResNet-18's weights weren't fetched into the empty TORCH_HOME")
     # the models scenario (goal 51), in the clone, over its own demo data and packs
     sc = subprocess.run(["pixi", "run", "python", "scripts/scenario.py", "models", "--media", "build/demo", "--out", "build/m0-models"],
                         cwd=clone, capture_output=True, text=True, timeout=3600, env=env)

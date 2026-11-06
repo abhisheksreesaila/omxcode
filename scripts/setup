@@ -24,7 +24,7 @@ step() {  # step <name> <what> <command…>: runs it, its output into build/setu
   printf '%-10s %s … ' "$name" "$what"
   if "$@" > "build/setup/$name.log" 2>&1; then
     printf 'done (%s s)\n' $(( $(date +%s) - t ))
-    grep '^   ' "build/setup/$name.log" | tail -3
+    grep '^   [^ ]' "build/setup/$name.log" | tail -3
   else
     printf 'FAILED (%s s)\n' $(( $(date +%s) - t ))
     tail -25 "build/setup/$name.log" | sed 's/^/   | /'
@@ -66,9 +66,13 @@ else
   step data "the robot demo data (DROID, CC-BY-4.0: about 1.2 GB, then the clips are cut)" pixi run python -I scripts/fetch_demo.py build/demo
 fi
 
-pack() {  # pack <name> <what> <command…>
-  if [ -f "build/packs/$1/$1.mef" ]; then skip "$1" "$2" "build/packs/$1 is there"; return; fi
+MAXV=$(pixi list max 2>/dev/null | awk '$1 == "max" {print $2}')
+pack() {  # pack <name> <what> <command…>: built again when MAX changed since (a compiled graph is MAX's own version's)
+  local d="build/packs/$1"
+  if [ -f "$d/$1.mef" ] && [ "$(cat "$d/max.version" 2>/dev/null)" = "$MAXV" ]; then skip "$1" "$2" "$d is there (MAX $MAXV)"; return; fi
+  if [ -e "$d" ] && [ ! -L "$d" ]; then rm -f "$d/$1.mef"; fi  # (its downloads and references stay; the graph is compiled again)
   step "$1" "$2" "${@:3}"
+  echo "$MAXV" > "$d/max.version"
 }
 if [ $models = 0 ]; then
   skip models "the model packs" "--no-models"
