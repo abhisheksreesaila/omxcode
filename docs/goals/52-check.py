@@ -394,6 +394,9 @@ def m3():
     lint = run(["pixi", "run", "python", "scripts/libc_lint.py"])
     if lint.returncode != 0:
         problems.append("libc lint: " + lint.stdout[-300:])
+    dl = run(["pixi", "run", "python", "scripts/decisions_lint.py"])
+    if dl.returncode != 0:
+        problems.append((dl.stdout + dl.stderr)[-300:])
     builds = sum(1 for v in cur["examples"].values() for r in v.values() if r["ok"])
     total = sum(len(v) for v in cur["examples"].values())
     passed = sum(1 for v in cur["tests"].values() if v["passed"])

@@ -3,7 +3,7 @@
 **End goal (owner, 2026-11-04):** omxconsole Mojo end to end as "a convenient wrapper on Max Serve", built from
 framework pieces ("the star of the show is OMX code … don't overfit OMX console"), HTTP from Flare ("I would rather trust
 that than write something on my own"). Worktree `../mojo-ui-g50`, branch `goal-50-native` (off main bfacc58). Not merged,
-not pushed. Plan: docs/plans/omxconsole-native.md; decisions D-4757..D-4777; journal "Goal 50".
+not pushed. Plan: docs/plans/omxconsole-native.md; decisions D-4766..D-4787 (D-4757..D-4765 renumbered D-4779..D-4787 at the merge into main, where main had used them); journal "Goal 50".
 
 ## How far it got
 `scripts/check` (docs/goals/50-check.py):
@@ -45,7 +45,7 @@ curl -s -X POST -H 'X-Mst-Admin: 1' -d '{"app":"demo"}' localhost:11436/admin/ke
 Screens against consoled: docs/goals/50/console-models-consoled-gtk.png, -overview-, -keys-.
 
 ## Three decisions worth a second look
-1. **D-4757: Flare v0.12, not 0.13, and no Mojo 1.2 move.** 0.12 has everything we used and runs on our Mojo 1.1; 0.13
+1. **D-4779: Flare v0.12, not 0.13, and no Mojo 1.2 move.** 0.12 has everything we used and runs on our Mojo 1.1; 0.13
    needs 1.2, which needs a new omxcore engine build in its own repo. Plan ticket F-1 moved out of this goal.
 2. **D-4774: consoled runs mxstudio's `max serve` (MXC_MAX).** This repo's MAX has no serving extras; pulling MAX's Python
    serving stack into the framework repo would undo the all-Mojo story. A shipped omxconsole needs a MAX install with
@@ -54,7 +54,7 @@ Screens against consoled: docs/goals/50/console-models-consoled-gtk.png, -overvi
    kept in vendor/patches, upstream report drafted (docs/goals/50/flare-issue.md, not filed).
 
 Also: the engine (omxcore) declares `pthread_create` differently from Flare, so one binary can't use engine jobs and
-Flare threads yet (D-4761, D-4764; issue drafted in docs/goals/50/omxcore-issue.md, not filed). mojoui itself builds beside
+Flare threads yet (D-4783, D-4786; issue drafted in docs/goals/50/omxcore-issue.md, not filed). mojoui itself builds beside
 both (it looks the three disputed functions up at run time).
 
 ## Not done (later goals)

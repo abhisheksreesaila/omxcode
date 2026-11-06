@@ -1,4 +1,4 @@
-# mojoui.http_flare: the Flare transport (goal 50 M1, D-4763): https:// (TLS 1.2/1.3 through OpenSSL), redirects,
+# mojoui.http_flare: the Flare transport (goal 50 M1, D-4785): https:// (TLS 1.2/1.3 through OpenSSL), redirects,
 # compressed replies, behind mojoui.http's Transport seam (D-320), so apps don't change. Flare (vendor/flare, MIT) does
 # the wire; this file turns a mojoui Request into Flare's and Flare's reply back into a mojoui Response.
 #

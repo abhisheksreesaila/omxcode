@@ -1,6 +1,6 @@
 # Goal 52 M5: the omxcore engine and Flare in one program. Until goal 52 they couldn't link together: the engine declared
 # pthread_create, strtod, mmap… with other types than Flare and its json (one signature per C symbol per binary,
-# D-4761); the engine's patch (vendor/patches/omxcore-834ef9a-mojo12.patch) looks them up at run time instead.
+# D-4783); the engine's patch (vendor/patches/omxcore-834ef9a-mojo12.patch) looks them up at run time instead.
 # A mojoui.serve service (on Flare) answers each request with an engine background job (its thread pool) over a table
 # read from a CSV (the engine's mmap and its float parsing), and the client parses the reply with Flare's json.
 # mojoui.serve keeps Mojo's runtime pool for compute: the engine's parallel kernels run while Flare serves.

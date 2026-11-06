@@ -45,7 +45,7 @@ struct AutoTransport(Transport):
         return SocketTransport.stream(req, sink)
 
 
-comptime Backend = AutoTransport  # (sockets everywhere; Flare for https:// where it's built in, D-4763)
+comptime Backend = AutoTransport  # (sockets everywhere; Flare for https:// where it's built in, D-4785)
 comptime POLL_US = 4_000  # how often a host looks for finished requests while any are out (µs)
 
 comptime _A = Atomic[Scalar[DType.int64]]

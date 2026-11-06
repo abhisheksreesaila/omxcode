@@ -1,4 +1,4 @@
-"""Fails when a mojoui file declares a libc function that mojoui/libc.mojo owns (goal 50 M0, D-4760).
+"""Fails when a mojoui file declares a libc function that mojoui/libc.mojo owns (goal 50 M0, D-4782).
 
 Mojo allows one signature per external symbol per binary, so mojoui declares the functions Flare (vendor/flare) and
 other libraries also declare in one place, with their types. A second `external_call["recv", ...]` elsewhere in mojoui

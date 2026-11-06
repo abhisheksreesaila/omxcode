@@ -27,7 +27,7 @@ another session's) or filing issues anywhere (the owner then allowed Flare issue
 ## Assumptions
 - The engine goes in as 834ef9a + a patch kept here (as Flare's is), not a new omxcore stable commit: omxcore's main is
   busy with another session today; the patch is ready for its stable-engine process when the owner wants it.
-- Flare moves to 0.13 now because it's why 1.2 was wanted; the newest 0.13.x tag, sources vendored as before (D-4759).
+- Flare moves to 0.13 now because it's why 1.2 was wanted; the newest 0.13.x tag, sources vendored as before (D-4781).
 - "Nothing regressed" is measured against the same sweep on 1.1, not against a hand list: tests that need a server or
   data they don't find fail on both and are listed, not counted.
 - 1.2's new "transfer has no effect" warnings are left alone (harmless; builds use --disable-warnings).

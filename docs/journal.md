@@ -1071,13 +1071,13 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - The deck in the owner's order (D-4765). focus() gains data-pairs so one step lights lines in two blocks; reveal's current-visible fragments make a caption bar that shows one sentence at a time, which fits a two-column code comparison where a list of sentences didn't.
 
 ## Goal 50 (2026-11-04): Flare, HTTPS, serve, process, omxconsole's daemon
-- Flare v0.12.0 runs on Mojo 1.1 (pixi.toml at the tag: mojo >=1.1,<2); v0.13 needs 1.2. So no Mojo bump (D-4757).
+- Flare v0.12.0 runs on Mojo 1.1 (pixi.toml at the tag: mojo >=1.1,<2); v0.13 needs 1.2. So no Mojo bump (D-4779).
 - Vendored flare + json from the GitHub tarballs (gh api …/tarball/v0.12.0). Shims compile with Flare's own lines against the pixi env (OpenSSL, zlib, brotli libs; brotli_wrapper.c needs no headers). rustls/QUIC skipped.
 - Flare alone: builds in 38 s, a refused port is a clean NetworkError.
 - mojoui + Flare: "existing function with conflicting signature" on inet_pton, then pthread_create (Flare's entry is `def(Pointer[UInt8]) thin -> Pointer[UInt8]`, pointee types don't matter, Int vs pointer does). 27 shared symbols → mojoui/libc.mojo with Flare's types + scripts/libc_lint.py.
 - `Pointer(unsafe_from_address=0)` with a literal trips "Pointer is non-nullable" at compile time; through a variable it's fine (Flare's _null_ptr trick).
-- Regression: omxplorer failed on strtod (the engine's csv.mojo declares (Int, Int)); the engine also declares pthread_create/pthread_detach its own way. Calling those three through dlsym fixes both sides (D-4764).
-- test_http had to be started with HTTP_TEST_URL/DEAD/SECRET (my check launched the server bare): fixed the check, not the proof (D-4762).
+- Regression: omxplorer failed on strtod (the engine's csv.mojo declares (Int, Int)); the engine also declares pthread_create/pthread_detach its own way. Calling those three through dlsym fixes both sides (D-4786).
+- test_http had to be started with HTTP_TEST_URL/DEAD/SECRET (my check launched the server bare): fixed the check, not the proof (D-4784).
 - HTTPS: Qwen2.5-0.5B-Instruct's config.json, 659 bytes = the HF file list's size, through effects on a worker.
 - mojoui.serve, first run: the server listened but never accepted (Recv-Q 11): the binary ran outside pixi and Flare's dlopen of libflare_tls.so failed in every worker (only visible with one worker, which raises in main). RUNPATH fix (D-4767).
 - Handler calls with user agent "node" on any port I open: another program on this machine probes ports; not Flare.

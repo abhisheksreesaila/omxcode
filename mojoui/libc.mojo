@@ -1,4 +1,4 @@
-# mojoui.libc: the one place mojoui declares the libc functions other Mojo libraries also declare (goal 50 M0, D-4760).
+# mojoui.libc: the one place mojoui declares the libc functions other Mojo libraries also declare (goal 50 M0, D-4782).
 # Mojo allows one signature per external symbol per binary: when mojoui calls `recv` with an Int address and Flare
 # (vendor/flare/net/_libc.mojo) calls it with a pointer, a program using both doesn't build ("existing function with
 # conflicting signature"). So each function here is declared with the argument types Flare uses (pointers as pointers,
@@ -15,7 +15,7 @@ comptime _Ptr = Pointer[NoneType, MutUntrackedOrigin]
 def _sym(name: String) -> Int:
     """A libc function's address, for the few that the omxcore engine and Flare declare with different types
     (pthread_create, pthread_detach, strtod): mojoui calls them through a pointer, declares neither form, and so builds
-    beside both (D-4764). dlsym is declared as every other mojoui file declares it."""
+    beside both (D-4786). dlsym is declared as every other mojoui file declares it."""
     var n = name
     var anywhere = -2 if CompilationTarget.is_macos() else 0  # RTLD_DEFAULT
     return external_call["dlsym", Int](anywhere, n.as_c_string_span())

@@ -15,7 +15,7 @@ Decisions D-5201..D-5217; journal "Goal 52".
 | M2 | Flare v0.13.1 + json v0.4.2; the stream-body patch proved still needed; link, HTTPS, serve, process, hash | PASS |
 | M3 | Same sweep as on 1.1: 96/101 example builds (1.1: 96), 104/140 tests (1.1: 100/137), nothing lost; iPhone KGEN_ set unchanged; libc lint | PASS |
 | M4 | omxconsole: a real Qwen chat through `max serve` and the Mojo gateway; goal 50's M6 red only on goal 33's M5, as before | PASS |
-| M5 | Engine jobs answering requests through Flare in one program (was impossible: D-4761) | PASS |
+| M5 | Engine jobs answering requests through Flare in one program (was impossible: D-4783) | PASS |
 | M6 | GitHub's Macs (run 42104613263, these sources): maccheck exit 0, console + widgets 110 pictures, no crashes, macOS 15 and 26 | FAIL: omxplorer only (below) |
 | M7 | A 4 ms frame loop through serving, SSE, proxy, HTTPS and engine jobs: longest gap 4-5 ms; Server.start ≤ 21 ms; stop() 0 ms; lifecycle test | PASS |
 

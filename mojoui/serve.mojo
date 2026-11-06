@@ -1,4 +1,4 @@
-# mojoui.serve: any Mojo app answers HTTP (goal 50 M2, D-4765). Flare's server (vendor/flare, MIT) does the wire:
+# mojoui.serve: any Mojo app answers HTTP (goal 50 M2, D-4787). Flare's server (vendor/flare, MIT) does the wire:
 # HTTP/1.1 keep-alive, chunked streaming, workers; this file is the app's side of it: a request in, a reply out, from the
 # app's own state, which one lock guards (one request at a time touches it, whichever worker it came in on).
 #
