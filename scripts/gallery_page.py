@@ -54,8 +54,8 @@ APPS = [
          runs=[("Linux", "ok"), ("Mac", "soon"), ("Android", "emu"), ("iPhone", "builds")], get=["Linux"],
          shots=[("img/android-todo.png", "Android"), ("img/android-gallery.png", "Android: the component gallery")],
          src="examples/todo"),
-    dict(name="JS widgets", app="widgets", kind="Bring your libraries",
-         line="A native Mojo app with CodeMirror and ECharts inside, restyled live by the theme. Every line of state is Mojo.",
+    dict(name="JS widgets", app="widgets", kind="JavaScript, first class",
+         line="CodeMirror and ECharts from npm inside a native Mojo app: the JS draws, Mojo keeps every line of state, the theme restyles them live and agents can read and set them.",
          runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"], needs="Linux: needs WebKitGTK 6.0",
          shots=[("img/widgets-gtk-dark.png", "Linux, dark"), ("img/widgets-gtk-light.png", "Linux, light")],
          src="examples/widgets"),
@@ -92,7 +92,7 @@ def gets(a):
 
 def card(a):
     s0, c0 = a["shots"][0]
-    return f'''<article class="card">
+    return f'''<article class="card" id="{e(a["name"].lower().replace(" ", "-"))}">
   <figure class="pic"><img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}" loading="lazy"></figure>
   <div class="info">
     <div class="kind">{e(a["kind"])}</div>
