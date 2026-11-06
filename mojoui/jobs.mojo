@@ -82,10 +82,6 @@ struct WakeUI(JobDone):
     def done(mut self, state: Int):
         self.waker.wake()
 
-    def __del__(deinit self):  # (once: after done(), or instead of it when the job's handle was dropped first)
-        var w = self.waker.copy()
-        w.close()
-
 
 def start_ui_job[B: JobBody](var body: B) -> Job[B.Out]:
     """mxframe.start_job, plus a wake of the UI when the job ends (done, failed or cancelled)."""

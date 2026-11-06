@@ -96,7 +96,6 @@ def _release(addr: Int):
         return
     var lock = _at(addr)[].lock
     var cond = _at(addr)[].cond
-    _at(addr)[].waker.close()
     _ = external_call["pthread_cond_destroy", c_int](cond)
     _ = libc.pthread_mutex_destroy(lock)
     Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=lock).unsafe_free()
@@ -145,7 +144,7 @@ def _feed_main(addr: Int) abi("C") -> Int:
     var once = s[].once
     var waker = s[].waker.copy()  # (the process's one wake pipe, mojoui.jobs.wake_pipe: made once, never closed, so the fd
     # read at the start stays valid for the thread's whole life: no generation check needed, D-1343; on a Mac the host's
-    # target, which lives as long as the process; its modes are released only when the shared state goes, after this)
+    # target, which lives as long as the process)
     var src: VideoSource
     try:
         src = VideoSource(info) if known else VideoSource(info.path)

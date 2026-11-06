@@ -273,6 +273,8 @@ struct VideoSource(Movable):
             self._at = 1
             return True
         if not self._av.open():
+            if self._at >= self.frames:  # (at the end: False, as ffmpeg's pipe gives; a reader past the end won't start)
+                return False
             self._start(self._at)
         if not self._av.next_into_address(addr):
             self._stop()

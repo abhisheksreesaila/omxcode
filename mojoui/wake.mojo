@@ -6,7 +6,7 @@ from std.ffi import external_call, c_int
 from std.sys import CompilationTarget
 from std.memory import Pointer
 from mojoui.shared import get_shared
-from mojoui.hosts.objc import msg, cls, sel, ns_string, fn_address
+from mojoui.hosts.objc import msg, cls, sel, fn_address
 
 comptime SLOT_WAKE_WRITE = 90  # mojoui.shared slots: the pipe's ends + 1 (0: none yet)
 comptime SLOT_WAKE_READ = 91
@@ -60,22 +60,19 @@ def _call_c(name: String, a: Int, b: Int, c: Int):
 
 struct UIWaker(Copyable, Movable):
     """Wakes the host's main loop from any thread, the way each host listens: on Linux a byte down the wake pipe, on a
-    Mac `jobsEnded:` performed on the main thread (AppKit watches no pipe). Made on the UI thread (it looks up the pipe,
-    and on a Mac the delegate and run-loop modes), used from a worker's, closed once when the worker is done. Before it
-    lived in mojoui.jobs only, so a FrameFeed's video never reached a Mac's screen (goal 58)."""
+    Mac `jobsEnded:` on the main dispatch queue (AppKit watches no pipe). Made on the UI thread (it looks up the pipe, and
+    on a Mac the delegate), used from a worker's; plain values, nothing to release. Before it lived in mojoui.jobs only,
+    so a FrameFeed's video never reached a Mac's screen (goal 58)."""
     var fd: Int
     var target: Int  # Apple: the delegate that answers jobsEnded: (0: none)
-    var modes: Int  # Apple: the run-loop modes, retained until close()
 
     def __init__(out self):
         self.fd = wake_write_fd()
         self.target = 0
-        self.modes = 0
         comptime if not CompilationTarget.is_linux():
             var target = msg(msg(cls("NSApplication"), "sharedApplication"), "delegate")
             if target != 0 and msg(target, "respondsToSelector:", sel("jobsEnded:")) != 0:
                 self.target = target  # (the host's target: it lives as long as the process, so it isn't retained)
-                self.modes = msg(msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes")), "retain")
 
     def wake(self):
         """From any thread: the host's main loop looks again (App.jobs_message to update())."""
@@ -87,9 +84,3 @@ struct UIWaker(Copyable, Movable):
             return
         wake_write(self.fd)
 
-    def close(mut self):
-        """Once, when no thread will wake with it again."""
-        comptime if not CompilationTarget.is_linux():
-            if self.modes != 0:
-                _ = msg(self.modes, "release")
-                self.modes = 0

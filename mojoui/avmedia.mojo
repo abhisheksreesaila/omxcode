@@ -15,7 +15,7 @@
 
 from std.ffi import external_call
 from std.memory import Pointer
-from mojoui.hosts.objc import cls, msg, ns_string
+from mojoui.hosts.objc import cls, msg, ns_string, pool_push
 from mojoui.hosts.apple_canvas import cfunc, CGPoint
 
 comptime _FRAMEWORKS = "/System/Library/Frameworks/"
@@ -29,6 +29,12 @@ def _load():
         var c = path.as_c_string_span()
         _ = cfunc("dlopen", Int(c.unsafe_ptr()), Int32(2 | 8))  # (through dlsym: other modules declare dlopen with their own signature)
         _ = path.byte_length()
+
+
+def _pool_pop(pool: Int):
+    """Drains an autorelease pool (pool_push's): a decoder's thread has none of its own, so each open and each frame
+    gets one, and nothing autoreleased piles up over a long scrub."""
+    _ = cfunc("objc_autoreleasePoolPop", pool)
 
 
 def _url(path: String) -> Int:
@@ -102,6 +108,7 @@ struct AvReader(Copyable, Movable):
 
     def __init__(out self, path: String, info: AvInfo, frame: Int) raises:
         _load()
+        var pool = pool_push()
         self.width = info.width
         self.height = info.height
         self.reader = 0
@@ -109,10 +116,12 @@ struct AvReader(Copyable, Movable):
         var asset = msg(cls("AVURLAsset"), "URLAssetWithURL:options:", _url(path), 0)
         var track = _video_track(asset) if asset != 0 else 0
         if track == 0:
+            _pool_pop(pool)
             raise Error("VideoSource: not a video (no picture stream found): " + path)
         var err = List[Int](length=1, fill=0)
         self.reader = msg(msg(cls("AVAssetReader"), "alloc"), "initWithAsset:error:", asset, Int(err.unsafe_ptr()))
         if self.reader == 0:
+            _pool_pop(pool)
             raise Error("VideoSource: AVFoundation can't read " + path)
         var settings = msg(cls("NSDictionary"), "dictionaryWithObject:forKey:", msg(cls("NSNumber"), "numberWithInt:", Int32(_BGRA)),
                            ns_string("PixelFormatType"))  # kCVPixelBufferPixelFormatTypeKey
@@ -129,7 +138,10 @@ struct AvReader(Copyable, Movable):
             range[4] = Int64(0) | (Int64(1 | 4) << 32)  # kCMTimePositiveInfinity: Valid | PositiveInfinity
             _ = msg(self.reader, "setTimeRange:", Int(range.unsafe_ptr()))
             _ = len(range)
-        if (msg(self.reader, "startReading") & 0xFF) == 0:
+        var started = (msg(self.reader, "startReading") & 0xFF) != 0
+        _pool_pop(pool)
+        if not started:  # (past the end, or a file AVFoundation can't decode: nothing left open)
+            self.close()
             raise Error("VideoSource: AVFoundation couldn't start reading " + path)
 
     def close(mut self):
@@ -142,7 +154,9 @@ struct AvReader(Copyable, Movable):
 
     def next_into_address(mut self, addr: Int) -> Bool:
         """The next frame as RGBA into width × height UInt32s at `addr`; False at the end."""
+        var pool = pool_push()
         var sample = msg(self.output, "copyNextSampleBuffer")
+        _pool_pop(pool)
         if sample == 0:
             return False
         var image = cfunc("CMSampleBufferGetImageBuffer", sample)
@@ -255,6 +269,10 @@ struct AvWriter(Copyable, Movable):
         self.adaptor = msg(msg(cls("AVAssetWriterInputPixelBufferAdaptor"), "alloc"), "initWithAssetWriterInput:sourcePixelBufferAttributes:", self.input, attrs)
         _ = msg(self.writer, "addInput:", self.input)
         if (msg(self.writer, "startWriting") & 0xFF) == 0:
+            _ = msg(self.adaptor, "release")
+            _ = msg(self.input, "release")
+            _ = msg(self.writer, "release")
+            self.writer = 0
             raise Error("VideoWriter: AVFoundation couldn't start writing " + path)
         var zero = List[Int64](length=3, fill=0)  # CMTime 0: value 0, timescale 1 | valid
         zero[1] = Int64(1) | (Int64(1) << 32)
@@ -265,6 +283,8 @@ struct AvWriter(Copyable, Movable):
         """One frame: width × height RGBA UInt32s at `addr`."""
         var waited = 0
         while (msg(self.input, "isReadyForMoreMediaData") & 0xFF) == 0:  # (the encoder catches up)
+            if msg(self.writer, "status") == 3:  # AVAssetWriterStatusFailed: it won't ever be ready
+                raise Error("VideoWriter: AVFoundation failed writing frame " + String(self.frames))
             _ = external_call["usleep", Int32](UInt32(1000))
             waited += 1
             if waited > 10000:

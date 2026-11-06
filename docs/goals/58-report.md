@@ -20,3 +20,4 @@
 - The status bar keeps "Opened cat.jpg · opening…" after the picture shows (Mac; the picture's ready isn't announced).
 - mojoui.watch still says a Mac app polls take() on a timer; UIWaker could wake it now.
 - The Mac encoder ignores crf/preset (AVAssetWriter's H.264 defaults).
+- An animated GIF or WebP is its first frame on a Mac (ImageIO), where ffmpeg plays it on Linux.

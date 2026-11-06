@@ -22,5 +22,9 @@ def main() raises:
             got = True
             break
         _ = feed.wait(0.05)
-    print("FEED: frame 50 " + ("taken" if got and len(buf) == info.width * info.height else "not taken"))
+    var lit = 0  # (a frame with a picture in it, not zeros)
+    for i in range(0, len(buf), 997):
+        if (buf[i] & 0xFFFFFF) != 0:
+            lit += 1
+    print("FEED: frame 50 " + ("taken" if got and len(buf) == info.width * info.height and lit > 100 else "not taken (" + String(lit) + " lit)"))
     print("FEED: done")
