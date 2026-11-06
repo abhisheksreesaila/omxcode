@@ -1448,10 +1448,13 @@ struct AppKitHost[A: App](Movable):
                 # hugging either shrank the row or lost to its fill, D-5728)
                 var first = node.children[0]
                 var last = node.children[len(node.children) - 1]
-                if self.rt.shown.nodes[first].kind == TEXT and built[0] != 0:
-                    _ = msg(built[0], "setAlignment:", 0)  # NSTextAlignmentLeft
-                if self.rt.shown.nodes[last].kind == TEXT and built[len(built) - 1] != 0:
-                    _ = msg(built[len(built) - 1], "setAlignment:", 2)  # NSTextAlignmentRight (2 on Apple Silicon)
+                # (the label itself, never a padding or margin holder: those don't take setAlignment:)
+                var first_w = self.widgets[first] if first < len(self.widgets) else 0
+                var last_w = self.widgets[last] if last < len(self.widgets) else 0
+                if self.rt.shown.nodes[first].kind == TEXT and first_w != 0:
+                    _ = msg(first_w, "setAlignment:", 0)  # NSTextAlignmentLeft
+                if self.rt.shown.nodes[last].kind == TEXT and last_w != 0:
+                    _ = msg(last_w, "setAlignment:", 2)  # NSTextAlignmentRight (2 on Apple Silicon)
             if node.justify_items == CENTER and not grows and not spacers:
                 var trail = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", trail)
