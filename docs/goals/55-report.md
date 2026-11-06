@@ -1,9 +1,17 @@
-# Goal 55 report: omxconsole, LM Studio for MAX, all omxcode
+# Goal 55 report: omxconsole, a desktop app for MAX, all omxcode
 
 **End goal (owner, 2026-11-05):** "a simple app, a desktop app, which wraps around MAX and does all the MAX [things]
-with benchmarking and an easy to use interface just like LM Studio… as long as everything is built using omxcode it
+with benchmarking and an easy to use interface… as long as everything is built using omxcode it
 can go into the gallery." Worktree `../mojo-ui-g55`, branch `goal-55-console`, off main (Mojo 1.2). Reviewer: PASS
 (round 3). Decisions D-5501–D-5532.
+
+**Follow-up (2026-11-06), D-5533–D-5539:** the console keeps the owner's design (no extra Ready line; it starts its own
+service only on its own address). omxconsole is the gallery's second flagship card and has its own cover page,
+docs/omxconsole.html, with pictures from the real app (scripts/console_shots.py), none with speed or times. Taking them
+on a fresh home found two first-run bugs the warm-home checks had hidden: Hugging Face's CDN reset a 1 GB pull at 277 MB
+on a slow line (a dropped connection now resumes on its own: fetch_to_file `tries`, tests/test_resume.mojo), and a cold
+load answered "starting", so the Add flow failed (a load now answers once the model runs, as the Python daemon's did;
+M3 loads cold first; M2 tests the failure paths with fake max programs). M2, M3 and M5 re-run on the merged tree.
 
 | # | Milestone | Result |
 |---|---|---|

@@ -1,5 +1,5 @@
 # mojoui.companion: a helper program an app keeps running beside it (goal 55: omxconsole's consoled; any app with a
-# local service of its own, LM Studio's way). Started when nothing answers at its health URL, stopped when the app
+# local service of its own). Started when nothing answers at its health URL, stopped when the app
 # closes, and only if the app started it: a service the person runs themselves is left alone. A helper it starts is
 # told the app's pid (MOJOUI_PARENT_PID) and should end when the app is gone (parent_gone(): a crash, a kill, a SIGTERM
 # that skips App.closing), so nothing keeps holding the GPU after the app. The helper is found next

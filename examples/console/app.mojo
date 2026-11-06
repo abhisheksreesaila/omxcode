@@ -23,7 +23,7 @@ from mojoui.shell import Shell, PageCard, is_compact
 from mojoui.panel import CardNote
 from mojoui.json import json_string
 from themes.omxqua import omxqua
-from api import Api, chat_curl
+from api import Api, chat_curl, LOAD_TIMEOUT_MS
 from mojoui.companion import Companion, exe_dir
 from mojoui.shared import environment
 from std.os import makedirs
@@ -71,7 +71,7 @@ struct Main(App):
     var confirm: TwoStep
     var dark: Bool
     var themed: Theme
-    var service: Companion  # the consoled this console started (goal 55: the download runs its own, LM Studio's way)
+    var service: Companion  # the consoled this console started (goal 55: the download starts its own and stops it on close)
     var service_problem: String  # why it isn't up ("" when it is, or isn't ours to start)
 
     def __init__(out self):
@@ -352,7 +352,7 @@ struct Main(App):
         elif m == CMD_STOP and p.page == "model":
             self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/stop")
         elif m == CMD_START and p.page == "model":
-            self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/load")
+            self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/load", timeout_ms=LOAD_TIMEOUT_MS)
         elif m == CMD_RESTART and p.page == "model":
             self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/stop", id=1)  # (then load, when the stop is answered)
         elif m == CMD_COPY:
@@ -436,7 +436,7 @@ struct Main(App):
                 read_ports(event.text, self.store)
             elif m == GOT_WRITE:
                 if event.id == 1 and p.page == "model":  # Restart: the stop is done, now the load
-                    self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/load")
+                    self.api.post(GOT_WRITE, "/admin/models/" + uri_component(p.model) + "/load", timeout_ms=LOAD_TIMEOUT_MS)
                 self.poll_core()
                 self.api.get(GOT_LABELS, "/admin/labels")
             elif m == GOT_BENCH:

@@ -252,6 +252,7 @@ struct Supervisor(Movable):
         if healthy(self.children[i].base() + "/health", 150):
             self.children[i].ready = True
             self.children[i].ready_ns = now_ns()
+            self.children[i].proc.touch()  # (idle from now: a start longer than keep_alive isn't reaped on its first ready sweep)
         return self.children[i].ready
 
     def stop(mut self, name: String) -> Bool:

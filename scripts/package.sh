@@ -25,7 +25,7 @@ Notes are kept in ~/.config/jot/jot.db." ;;
   widgets) META="CodeMirror and ECharts inside a native Mojo app|Development;||./$EX" ;;
   lens) META="20 million points painted on the GPU, written once in Mojo|Science;Graphics;||./$EX
 Drawn on an NVIDIA GPU when the driver is there, the CPU otherwise." ;;
-  omxconsole) META="Run language models on your own GPU with MAX: find, download, chat, benchmark|Development;Science;||./$EX
+  omxconsole) META="Run language models on your own GPU with MAX: find, download, serve, benchmark|Development;Science;||./$EX
 Needs MAX (Modular's max, with max serve) installed: https://docs.modular.com/max/packages . If max isn't on your PATH,
 start it as MXC_MAX=/path/to/max ./$EX. Models and keys live in ~/.mxc (MXC_HOME to change it); the endpoint is
 http://127.0.0.1:11435/v1 (MXC_PORT to change it)." ;;

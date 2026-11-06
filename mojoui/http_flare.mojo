@@ -14,6 +14,7 @@ from std.os import getenv
 from std.os.path import exists, getsize
 from std.atomic import Atomic
 from std.memory.alloc import unsafe_alloc
+from std.time import sleep
 from mojoui import libc
 from mojoui.http import Request, Response, Transport, Url, request_problem, has_control, Sink, SseReader, Piece, utf8_whole, utf8_lossy, MAX_STREAM_CHUNK
 from mojoui.clock import now_ns
@@ -176,14 +177,14 @@ comptime DOWNLOAD_CHUNK = 4 * 1024 * 1024
 
 struct Transfer(Copyable, Movable):
     """A download's progress and its cancel flag, shared between the thread that downloads and the ones that watch:
-    three words on the heap (bytes done, bytes in all (0: not known yet), cancel). Copies share them; whoever made it
-    frees it once nobody downloads or watches."""
+    four words on the heap (bytes done, bytes in all (0: not known yet), cancel, connections resumed after a drop).
+    Copies share them; whoever made it frees it once nobody downloads or watches."""
 
     var words: Int
 
     def __init__(out self):
-        var w = unsafe_alloc[Int64](3)
-        for i in range(3):
+        var w = unsafe_alloc[Int64](4)
+        for i in range(4):
             w[i] = 0
         self.words = Int(w)
 
@@ -201,6 +202,10 @@ struct Transfer(Copyable, Movable):
 
     def cancelled(self) -> Bool:
         return _A.load(self._w(2)) != 0
+
+    def resumes(self) -> Int:
+        """How many times a dropped connection was picked up again (fetch_to_file's `tries`)."""
+        return Int(_A.load(self._w(3)))
 
     def _set(self, k: Int, v: Int):
         _A.store(self._w(k), Int64(v))
@@ -242,14 +247,36 @@ def redirected(req: Request, location: String) raises -> Request:
     return out^
 
 
-def fetch_to_file(req: Request, path: String, t: Transfer, hops: Int = 10) -> Response:
+def fetch_to_file(req: Request, path: String, t: Transfer, hops: Int = 10, tries: Int = 1) -> Response:
     """Downloads `req`'s body into `path`, on the calling thread: into `path`.part first (a part already there is
     resumed with a Range request; a server that ignores it starts over), renamed to `path` once whole. `t` counts the
     bytes (a resumed part's included) and is polled for a cancel, which keeps the part for a later resume. The reply's
-    status and headers come back; its body is empty, or the error page's when the status isn't 2xx."""
+    status and headers come back; its body is empty, or the error page's when the status isn't 2xx.
+    `tries` > 1: a connection that drops (a failure with no reply status, not a cancel) is opened again after a short
+    wait (1, 2, 4, 8 s…), resuming from the part, until the tries run out (goal 55: Hugging Face's CDN resets long
+    downloads on a slow line); `t.resumes()` counts them."""
     var problem = _problem(req)
     if problem != "":
         return Response.failed(problem)
+    var r = _fetch_once(req, path, t, hops)
+    var wait_ms = 1000
+    for _ in range(tries - 1):
+        if r.error == "" or r.status != 0 or r.error == "cancelled" or t.cancelled():
+            break
+        var waited = 0
+        while waited < wait_ms:  # (polled for a cancel)
+            if t.cancelled():
+                return Response.failed("cancelled")
+            sleep(0.05)
+            waited += 50
+        wait_ms = min(wait_ms * 2, 8000)
+        t._set(3, t.resumes() + 1)
+        r = _fetch_once(req, path, t, hops)
+    return r^
+
+
+def _fetch_once(req: Request, path: String, t: Transfer, hops: Int) -> Response:
+    """fetch_to_file's one attempt (its redirects and a stale part's restart included)."""
     var part = path + ".part"
     try:
         var have = getsize(part) if exists(part) else 0
@@ -264,12 +291,12 @@ def fetch_to_file(req: Request, path: String, t: Transfer, hops: Int = 10) -> Re
         if r.status == 416 and have > 0:  # (the part is whole, or the file changed: start over)
             s.close()
             _ = libc.unlink(part)
-            return fetch_to_file(req, path, t, hops)
+            return _fetch_once(req, path, t, hops)
         if (r.status == 301 or r.status == 302 or r.status == 303 or r.status == 307 or r.status == 308) and r.header("location") != "":
             s.close()
             if hops <= 0:
                 return Response.failed("too many redirects from " + req.url)
-            return fetch_to_file(redirected(req, r.header("location")), path, t, hops - 1)
+            return _fetch_once(redirected(req, r.header("location")), path, t, hops - 1)
         if r.status < 200 or r.status >= 300:
             while not s.done():
                 var more = s.read_chunk(65536)

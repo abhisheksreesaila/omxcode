@@ -151,9 +151,9 @@ def hub_file_url(repo: HubRepo, file: HubFile) -> String:
     return HUB + "/" + _path(repo.id) + "/resolve/" + repo.sha + "/" + _path(file.name)
 
 
-def hub_download(repo: HubRepo, file: HubFile, folder: String, t: Transfer, timeout_ms: Int = 60_000) -> Response:
+def hub_download(repo: HubRepo, file: HubFile, folder: String, t: Transfer, timeout_ms: Int = 60_000, tries: Int = 6) -> Response:
     """`file` of `repo` (at the commit read) into `folder`/<its path>, on the calling thread (fetch_to_file: a part
-    resumes, a cancel keeps it)."""
+    resumes, a cancel keeps it, a dropped connection is picked up again up to `tries` - 1 times)."""
     if not safe_name(file.name):
         return Response.failed("refusing the file name " + file.name + " (it would land outside " + folder + ")")
     var dest = folder + "/" + file.name
@@ -163,4 +163,4 @@ def hub_download(repo: HubRepo, file: HubFile, folder: String, t: Transfer, time
     except e:
         return Response.failed("couldn't make " + String(dest[byte=:cut]) + ": " + String(e))
     var req = _auth(Request.get(0, hub_file_url(repo, file)).timeout(timeout_ms))
-    return fetch_to_file(req, dest, t)
+    return fetch_to_file(req, dest, t, tries=tries)

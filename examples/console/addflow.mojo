@@ -11,7 +11,7 @@ from mojoui.http import uri_component
 from mojoui.clock import now_ns, clock_time
 from mojoui.logview import LogLine, LOG_PLAIN, LOG_ERROR, LOG_OK, LOG_WARN, log_kind_of
 from add import Add, Run, Pick, Sugg, Job, read_pick, read_job, pull_detail, twin, last_part, trim1, DEFAULT_SUB, NOTICE_NONE, NOTICE_WARN, NOTICE_PORT
-from api import Api, chat_curl
+from api import Api, chat_curl, LOAD_TIMEOUT_MS
 from data import Store
 from msgs import *
 
@@ -20,7 +20,6 @@ comptime PULL_POLL_MS = 700
 comptime PORT_POLL_MS = 1500
 comptime TICK_MS = 500
 comptime MAX_POLL_ERRORS = 6
-
 
 def now_ms() -> Float64:
     return Float64(now_ns()) / 1e6
@@ -271,7 +270,7 @@ def bring_up(mut a: Add, mut api: Api):
         return
     advance(a, "compile")
     write_log(a, "loading " + name + " · compiling the graph (" + twin("serve", name) + ")")
-    api.post(ADD_GOT_LOAD, "/admin/models/" + uri_component(name) + "/load", id=a.flow)
+    api.post(ADD_GOT_LOAD, "/admin/models/" + uri_component(name) + "/load", id=a.flow, timeout_ms=LOAD_TIMEOUT_MS)
 
 
 def smoke_test(mut a: Add, mut api: Api):
@@ -532,7 +531,7 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
         if a.run.kind == "port":
             a.run.endpoint = st.endpoint_now()
             if state != "ready":
-                api.post(ADD_GOT_LOAD, "/admin/models/" + uri_component(a.run.name) + "/load", id=a.flow)
+                api.post(ADD_GOT_LOAD, "/admin/models/" + uri_component(a.run.name) + "/load", id=a.flow, timeout_ms=LOAD_TIMEOUT_MS)
                 return out^
             write_log(a, "serving on " + a.run.endpoint, LOG_OK)
             smoke_test(a, api)

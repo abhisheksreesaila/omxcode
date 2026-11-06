@@ -10,6 +10,7 @@ from mojoui.companion import exe_dir
 from std.os.path import exists
 
 comptime DEFAULT_URL = "http://127.0.0.1:8765"
+comptime LOAD_TIMEOUT_MS = 660_000  # (consoled answers a load once the model's server runs, up to 10 minutes: D-5539)
 
 
 def own_url() -> String:
@@ -26,19 +27,20 @@ struct Api(Movable):
         var url = environment("MXC_URL", own_url() if exists(exe_dir() + "/consoled") else String(DEFAULT_URL))
         self.base = String(url.rstrip("/"))
 
-    def admin(self, var r: Request) -> Request:
+    def admin(self, var r: Request, timeout_ms: Int = 15000) -> Request:
         if environment("MXC_ADMIN_KEY") != "":
-            return r^.header_from_env("X-Mst-Admin", "MXC_ADMIN_KEY").timeout(15000)
-        return r^.header("X-Mst-Admin", "1").timeout(15000)
+            return r^.header_from_env("X-Mst-Admin", "MXC_ADMIN_KEY").timeout(timeout_ms)
+        return r^.header("X-Mst-Admin", "1").timeout(timeout_ms)
 
     def get(mut self, message: Int, path: String, id: Int = 0):
         self.http.send(self.admin(Request.get(message, self.base + path).tagged(id)))
 
-    def post(mut self, message: Int, path: String, json: String = "", id: Int = 0):
+    def post(mut self, message: Int, path: String, json: String = "", id: Int = 0, timeout_ms: Int = 15000):
+        """`timeout_ms`: longer for a call that waits on purpose (a model's load answers once its server runs)."""
         if json == "":
-            self.http.send(self.admin(Request(message, "POST", self.base + path, "").tagged(id)))
+            self.http.send(self.admin(Request(message, "POST", self.base + path, "").tagged(id), timeout_ms))
         else:
-            self.http.send(self.admin(Request.post_json(message, self.base + path, json).tagged(id)))
+            self.http.send(self.admin(Request.post_json(message, self.base + path, json).tagged(id), timeout_ms))
 
     def send(mut self, message: Int, method: String, path: String, json: String = "", id: Int = 0):
         var r = Request(message, method, self.base + path, json)

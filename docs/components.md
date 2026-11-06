@@ -29,7 +29,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | `DatePicker` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `ProgressBar` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery, todo, expenses, themes, jot, keeper |
 | `Image` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | gallery |
-| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer, keeper |
+| `Icon` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | ✅ | kitchen, expenses, omxplorer, console, keeper |
 | `Alert` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |
 | `Tabs` | ✅ | ✅ | ✅ | 🔨 | 🔨 | 🔨 | kitchen, expenses, layout, mxstudio |
 | `NavBar` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 | kitchen, expenses |

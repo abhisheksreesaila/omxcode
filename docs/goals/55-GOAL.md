@@ -1,7 +1,7 @@
-# GOAL 55: omxconsole, LM Studio for MAX, all omxcode
+# GOAL 55: omxconsole, a desktop app for MAX, all omxcode
 
 **End goal (owner, 2026-11-05):** "All we need is a simple app, a desktop app, which wraps around MAX and does all the
-MAX [things] with benchmarking and an easy to use interface just like LM Studio… as long as everything is built using
+MAX [things] with benchmarking and an easy to use interface… as long as everything is built using
 omxcode it can go into the gallery." No Python service of ours: the Mojo consoled (goals 50/52, on main) replaces
 mxstudio's daemon; only `max serve` itself is Python. Worktree `../mojo-ui-g55`, branch `goal-55-console`, off main
 (Mojo 1.2). (Goal 54 is another session's: omxplorer's shell, `../mojo-ui-g54`.)
@@ -33,7 +33,7 @@ the `omxc` CLI.
 - Pulled weights go to a plain folder, MXC_HOME/models/<owner>--<name>/, served with `max serve --model-path <folder>`
   (the Python daemon's local-weights path), not Hugging Face's cache layout.
 - Tests use Qwen/Qwen2.5-0.5B-Instruct (~1 GB, Apache-2.0) on this machine's RTX 3090; the network is up.
-- The download needs MAX installed by the user (as LM Studio needs its runtime); MXC_MAX or `max` on PATH.
+- The download needs MAX installed by the user (as any local-model app needs its runtime); MXC_MAX or `max` on PATH.
 - Benchmark workload: 5 chat prompts, 128 tokens each, one at a time.
 
 ## Budget

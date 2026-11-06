@@ -1,4 +1,4 @@
-"""Goal 55: omxconsole, LM Studio for MAX, all omxcode (GOAL.md). Prints PASS/FAIL per milestone.
+"""Goal 55: omxconsole, a desktop app for MAX, all omxcode (GOAL.md). Prints PASS/FAIL per milestone.
   scripts/check            every milestone
   scripts/check M2 M3      only those
 Everything runs against a throwaway MXC_HOME (build/g55/home) on a free port, with a user's MAX install
@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -65,7 +66,8 @@ class Daemon:
     def start(self):
         self.home.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ, MXC_HOME=str(self.home), MXC_PORT=str(self.port), MXC_ADMIN_KEY=self.admin,
-                   MXC_MAX=user_max(), **self.extra)
+                   MXC_MAX=user_max())
+        env.update(self.extra)  # (extra may replace MXC_MAX: a fake max for the failure paths)
         self.log = open(G55 / "consoled.log", "a")
         self.p = subprocess.Popen([str(BUILD / "consoled")], cwd=ROOT, env=env, stdout=self.log, stderr=subprocess.STDOUT)
         return wait_port(self.port, 30)
@@ -249,6 +251,23 @@ def m2():
     t = run([str(BUILD / "test_consoled_paths")], timeout=120) if r.returncode == 0 else r
     if t.returncode != 0 or "consoled paths: ok" not in t.stdout:
         problems.append("test_consoled_paths: " + (t.stdout + t.stderr)[-300:])
+    # a load whose server never comes up: 503 with why, nothing left waiting; a daemon stopping answers a waiting load
+    # 503 too (D-5539). Fake `max` programs, no GPU: one that exits at once, one that never answers /health.
+    problems += parked_loads()
+    # a dropped connection is picked up where it stopped (tests/resume_server.py drops it mid-file)
+    r = run(["scripts/mojo_flare.sh", "build", "tests/test_resume.mojo", "-o", str(BUILD / "test_resume")])
+    if r.returncode != 0:
+        problems.append("test_resume build: " + (r.stdout + r.stderr)[-300:])
+    else:
+        srv = subprocess.Popen([sys.executable, "tests/resume_server.py"], cwd=ROOT, stdout=subprocess.PIPE, text=True)
+        try:
+            port = srv.stdout.readline().split()[1]
+            t = run([str(BUILD / "test_resume")], env={"RESUME_TEST_URL": f"http://127.0.0.1:{port}/"}, timeout=120)
+            if t.returncode != 0 or "resume: ok" not in t.stdout:
+                problems.append("test_resume: " + (t.stdout + t.stderr)[-300:])
+        finally:
+            srv.kill()
+            srv.wait()
     with Daemon() as d:
         m = ensure_small(d)
         if not m:
@@ -290,11 +309,62 @@ def m2():
     return not problems, "; ".join(problems) or f"{SMALL} pulled ({checked} files match the Hub's sha256), a cancel left nothing, a delete removed {TINY}"
 
 
+def parked_loads():
+    """POST /admin/models/{name}/load's failure paths with fake max programs (the 200 path is M3's, on real MAX)."""
+    problems = []
+    dies, hangs = G55 / "fake-max-dies", G55 / "fake-max-hangs"
+    dies.write_text("#!/bin/sh\necho 'fake max: no GPU here' >&2\nexit 3\n")
+    hangs.write_text("#!/bin/sh\nexec sleep 120\n")
+    for f in (dies, hangs):
+        f.chmod(0o755)
+
+    def load(d, name, timeout=120):
+        return body(http("POST", d.url + "/admin/models/" + urllib.request.quote(name) + "/load", None,
+                         {"X-Mst-Admin": d.admin}, timeout=timeout))
+
+    with Daemon(HOME, extra={"MXC_MAX": str(dies)}) as d:
+        _, ms = body(d.call("GET", "/admin/models"))
+        names = [x.get("name") for x in ms] if isinstance(ms, list) else []
+        if not names:
+            return ["parked loads: no registered model in " + str(HOME)]
+        t0 = time.time()
+        s1, j1 = load(d, names[0])
+        took = time.time() - t0
+        s2, j2 = load(d, names[0])  # (the first left nothing waiting: the same answer, not "already waiting")
+        why = str(j1)
+        if not (s1 == 503 and "failed to start" in why and "exited (3)" in why and took < 30 and s2 == 503 and "failed to start" in str(j2)):
+            problems.append(f"a load whose max exits: {s1} {why[:160]} after {took:.0f} s; again: {s2} {str(j2)[:100]}")
+    d = Daemon(HOME, extra={"MXC_MAX": str(hangs)})
+    with d:
+        got = {}
+
+        def call():
+            got["r"] = load(d, names[0], timeout=60)
+        th = threading.Thread(target=call)
+        th.start()
+        time.sleep(3)  # (parked: its server never answers /health)
+        d.stop()
+        th.join(60)
+    s3, j3 = got.get("r", (0, None))
+    if not (s3 == 503 and "stopping" in str(j3)):
+        problems.append(f"a load waiting while consoled stops: {s3} {str(j3)[:160]} (want 503, stopping)")
+    return problems
+
+
 def m3():
     if build_all():
         return False, "build failed"
     with Daemon() as d:
         m = ensure_small(d)
+        # a cold model's load answers once its server runs, as gateway.py's admin_load did: the console's Add flow reads
+        # a loaded model as ready (D-5539; a fresh install failed at "the server is starting, not ready")
+        t0 = time.time()
+        s, j = body(http("POST", d.url + "/admin/models/" + urllib.request.quote(m["name"]) + "/load", None, {"X-Mst-Admin": d.admin}, timeout=700))
+        took = time.time() - t0
+        _, ms = body(d.call("GET", "/admin/models"))
+        state = next((x.get("state") for x in ms if x.get("name") == m["name"]), None) if isinstance(ms, list) else None
+        if s != 200 or not isinstance(j, dict) or j.get("state") != "ready" or state != "ready":
+            return False, f"a cold load answered {s} {str(j)[:160]} after {took:.0f} s, then /admin/models said {state} (want ready, ready)"
         s, j = body(d.call("POST", "/admin/try/chat", {"model": m["name"], "max_tokens": 24,
                                                        "messages": [{"role": "user", "content": "Say hello in five words."}]}))
         reply = (j.get("choices") or [{}])[0].get("message", {}).get("content", "") if isinstance(j, dict) else ""
@@ -310,7 +380,7 @@ def m3():
         ok, out = console(steps, d, G55 / "console-chat.png")
         said = [x.strip("“”\"") for x in re.findall(r"SAYS: tl-detail@-1 = (.+)", out)]
         good = ok and said and len(said[-1].split()) >= 2
-        return bool(good), f"try/chat: {reply[:60]!r}; SDK streamed {n} pieces; console: " + \
+        return bool(good), f"a cold load answered ready ({took:.0f} s); try/chat: {reply[:60]!r}; SDK streamed {n} pieces; console: " + \
             (f"reply {said[-1][:60]!r}" if said else "no SAYS: tl-detail@-1 line: " + out[-300:])
 
 

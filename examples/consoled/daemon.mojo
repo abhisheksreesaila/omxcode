@@ -4,6 +4,7 @@
 
 from std.os import getenv, makedirs
 from std.sys import exit
+from std.time import sleep
 from mojoui.serve import Service, Req, Reply, Pipe, proxy
 from mojoui.http import Request
 from mojoui.process import file_tail
@@ -29,7 +30,8 @@ from views import pull_json
 from meter import meter
 
 
-comptime MAX_WAITING = 4  # (/v1 calls waiting for a model's first bytes at once; the server has 8 workers)
+comptime MAX_WAITING = 4  # (/v1 calls and loads waiting for a model at once; the server has 8 workers)
+comptime LOAD_WAIT_MS = 600_000  # (a load answers 503 if its server isn't ready by then: the relay's own wait)
 
 
 @fieldwise_init
@@ -39,6 +41,15 @@ struct Open(Copyable, Movable):
     var app: String
     var model: String
     var route: String
+
+
+@fieldwise_init
+struct Loading(Copyable, Movable):
+    """A POST /admin/models/{name}/load still waiting for its server (gateway.py's admin_load awaits ensure_running):
+    tick answers it once the server is ready, failed, or past LOAD_WAIT_MS."""
+    var pipe: Int
+    var name: String
+    var since_ns: Int
 
 
 @fieldwise_init
@@ -59,8 +70,12 @@ struct Config(Copyable, Movable):
 
 def error(status: Int, message: String, code: String, kind: String = "invalid_request_error") -> Reply:
     """The original's OpenAI-shaped error: {"error": {message, type, param, code}}."""
-    return Reply.json('{"error": {"message": ' + json_string(message) + ', "type": ' + json_string(kind)
-                      + ', "param": null, "code": ' + json_string(code) + "}}", status)
+    return Reply.json(error_json(message, code, kind), status)
+
+
+def error_json(message: String, code: String, kind: String = "invalid_request_error") -> String:
+    return ('{"error": {"message": ' + json_string(message) + ', "type": ' + json_string(kind)
+            + ', "param": null, "code": ' + json_string(code) + "}}")
 
 
 def is_loopback(host: String) -> Bool:
@@ -162,6 +177,7 @@ struct Daemon(Service):
     var sup: Supervisor
     var sizes: Dict[String, Int]
     var open: List[Open]
+    var loading: List[Loading]
     var stopping: Bool
     var pulls: Pulls
     var bench: Bench
@@ -173,6 +189,7 @@ struct Daemon(Service):
         self.sup = Supervisor(cfg.home, cfg.max_cmd, cfg.idle_seconds)
         self.sizes = model_sizes(self.store)
         self.open = List[Open]()
+        self.loading = List[Loading]()
         self.stopping = False
         self.pulls = Pulls()
         self.bench = Bench()
@@ -206,6 +223,7 @@ struct Daemon(Service):
             print("consoled: the app that started it is gone; stopping", flush=True)
             self.stopping = True
         self.sup.sweep()
+        self.answer_loads()
         var was = len(self.pulls.running)
         self.pulls.refresh(self.store)
         if len(self.pulls.running) < was:
@@ -218,8 +236,19 @@ struct Daemon(Service):
             exit(0)
 
     def stop(mut self):
-        """SIGTERM/SIGINT or /admin/shutdown: every max serve child stopped before the daemon goes."""
+        """SIGTERM/SIGINT or /admin/shutdown: every max serve child stopped before the daemon goes; a load still waiting
+        hears why (503) instead of a dropped connection."""
         self.settle()
+        for k in range(len(self.loading)):
+            var pipe = Pipe.at(self.loading[k].pipe)
+            if not pipe.gone():
+                pipe.set_head(503, "application/json")
+                pipe.write(error_json("consoled is stopping; `" + self.loading[k].name + "` was not loaded.", "model_unavailable", "server_error"))
+            pipe.close()
+            pipe.release()
+        if len(self.loading) > 0:
+            sleep(0.3)  # (their server workers send the 503 before the process exits)
+        self.loading = List[Loading]()
         self.sup.stop_all_now()
 
     def answer(mut self, mut req: Req) -> Reply:
@@ -383,8 +412,21 @@ struct Daemon(Service):
             var m = self.model_ref(req.param("name"))
             if not m:
                 return error(404, "The model `" + req.param("name") + "` is not registered. Run `mxc pull " + req.param("name") + "`.", "model_not_found")
+            var at = self.sup.find(req.param("name"))
+            if at >= 0 and self.sup.check_ready(at):  # (already running: no wait, whatever else is waiting)
+                return Reply.json(self.load_body(req.param("name"), at))
+            if self.waiting() >= MAX_WAITING:
+                return error(503, String(self.waiting()) + " requests are already waiting for a model; try again shortly.", "model_unavailable", "server_error")
             var i = self.sup.ensure(m.value())
-            return Reply.json('{"name": ' + json_string(req.param("name")) + ', "upstream": ' + json_string(self.sup.children[i].base() + "/v1") + ', "state": ' + json_string(self.sup.state(req.param("name"))) + "}")
+            if self.sup.check_ready(i):
+                return Reply.json(self.load_body(req.param("name"), i))
+            # gateway.py's admin_load answers once the model runs (or failed to start), never while it starts: the
+            # console's Add flow reads "loaded" as ready (D-5539). tick answers it; the reply waits on a server worker.
+            var pipe = Pipe()
+            self.loading.append(Loading(pipe.share().addr, req.param("name"), Int(now_ns())))
+            var reply = Reply.stream(pipe, "application/json", wait_head_ms=LOAD_WAIT_MS + 30_000)
+            pipe.release()
+            return reply^
         if req.matches("POST", "/admin/models/{name}/stop"):
             if not self.model_ref(req.param("name")):
                 return error(404, "The model `" + req.param("name") + "` is not registered.", "model_not_found")
@@ -506,10 +548,7 @@ struct Daemon(Service):
         if not m:
             self.store.log_request(now, app, name, route, 404, -1, -1, -1.0, 0.0, False)
             return error(404, "The model `" + name + "` is not registered. Run `mxc pull " + name + "`.", "model_not_found")
-        var waiting = 0
-        for k in range(len(self.open)):
-            if Pipe.at(self.open[k].pipe).status() == 0:
-                waiting += 1
+        var waiting = self.waiting()
         if waiting >= MAX_WAITING:  # (each waits on a server worker for its model's first bytes; keep some for the rest)
             self.store.log_request(now, app, name, route, 503, -1, -1, -1.0, 0.0, False)
             return error(503, String(waiting) + " requests are already waiting for a model to answer; try again shortly.", "model_unavailable", "server_error")
@@ -553,6 +592,43 @@ struct Daemon(Service):
             out += (", " if k > 0 else "") + '{"id": ' + json_string(n) + ', "object": "model", "created": 0, "owned_by": "omxconsole", "mxconsole": {"state": ' + json_string(state)
             out += ', "repo_id": ' + json_string(j.text(j.get(m, "repo_id"))) + ', "pinned": ' + ("true" if j.flag(j.get(m, "pinned")) else "false") + ', "keep_alive": ' + String(j.number(j.get(m, "keep_alive"))) + "}}"
         return out + "]}"
+
+    def waiting(self) -> Int:
+        """Requests holding a server worker while a model starts: /v1 calls before their first bytes, and loads."""
+        var n = len(self.loading)
+        for k in range(len(self.open)):
+            if Pipe.at(self.open[k].pipe).status() == 0:
+                n += 1
+        return n
+
+    def load_body(self, name: String, i: Int) -> String:
+        return '{"name": ' + json_string(name) + ', "upstream": ' + json_string(self.sup.children[i].base() + "/v1") + ', "state": "ready"}'
+
+    def answer_loads(mut self):
+        """The waiting loads whose server is ready (200), gone (503: it failed to start) or too slow (503); a load whose
+        caller went away is dropped."""
+        var i = 0
+        while i < len(self.loading):
+            var pipe = Pipe.at(self.loading[i].pipe)
+            var name = self.loading[i].name.copy()
+            var c = self.sup.find(name)
+            var late = Int(now_ns()) - self.loading[i].since_ns > LOAD_WAIT_MS * 1_000_000
+            if not pipe.gone() and c >= 0 and not self.sup.check_ready(c) and not late:
+                i += 1
+                continue
+            _ = self.loading.pop(i)
+            if not pipe.gone():
+                if c >= 0 and self.sup.children[c].ready:
+                    pipe.set_head(200, "application/json")
+                    pipe.write(self.load_body(name, c))
+                else:
+                    var why = "not ready after " + String(LOAD_WAIT_MS // 60_000) + " minutes"
+                    if c < 0:  # (sweep forgot it: it exited, and said why)
+                        why = String(self.sup.last_error) if self.sup.last_error.startswith(name + " exited") else "its server stopped while starting"
+                    pipe.set_head(503, "application/json")
+                    pipe.write(error_json("Model `" + name + "` failed to start: " + why, "model_unavailable", "server_error"))
+            pipe.close()
+            pipe.release()
 
     def settle(mut self):
         """Log the /v1 requests whose streams have ended (gateway.py's request log: ts at the end, tokens from the meter)."""

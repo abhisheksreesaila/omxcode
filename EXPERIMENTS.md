@@ -4,11 +4,12 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
-## Goal 55: omxconsole, LM Studio for MAX, all omxcode (2026-11-05/06)
+## Goal 55: omxconsole, a desktop app for MAX, all omxcode (2026-11-05/06)
 - **Setup:** worktree ../mojo-ui-g55, branch `goal-55-console` off main (Mojo 1.2); docs/goals/55-check.py; report docs/goals/55-report.md; D-5501–D-5532. A user's MAX install for the checks under build/g55/max.
 - **Worked:** find (Hugging Face from Mojo), download (resume, cancel, sha256-checked), chat, benchmark (333 tok/s on Qwen 0.5B, matching the OpenAI SDK), one Linux download that starts its own service and runs bare, a Mac app built and run on GitHub's macOS 15/26 runners; omxconsole in the gallery with both downloads. All omxcode; only max serve is Python.
 - **Broke and fixed:** a first run crashed (no store: schema now created); Hugging Face's relative 307 wasn't followed (fetch_to_file follows redirects itself, token only same-host HTTPS); Flare's shims were named .dylib on the Mac where Flare loads .so; the Mac stub lacked posix_spawn*; a killed console orphaned its consoled and 7.5 GB of GPU (helpers end with their app); my checker guessed three reply shapes wrong and once loosened M4 (withdrawn after review).
-- **Means:** an LM Studio-style app is a thin omxcode program around max serve; the framework now has downloads, a Hub client and companions any app can use. Next: the owner's yes to switch from the Python daemon; MAX on the M4 Mac.
+- **Follow-up (2026-11-06):** the console keeps the owner's design (D-5533); omxconsole is the gallery's second flagship with its own cover page, docs/omxconsole.html (D-5536); no other product named in public (D-5535); a fresh 1 GB pull on a slow line was reset by Hugging Face's CDN at 277 MB, so a dropped connection now resumes on its own (fetch_to_file tries, tests/test_resume.mojo, D-5537); the same fresh run failed at "the server is starting, not ready": a cold load now answers once the model runs, as the Python daemon's did (D-5539).
+- **Means:** a desktop app for local models is a thin omxcode program around max serve; the framework now has downloads, a Hub client and companions any app can use. Next: the owner's yes to switch from the Python daemon; MAX on the M4 Mac.
 
 ---
 

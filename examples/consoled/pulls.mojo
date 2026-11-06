@@ -240,6 +240,11 @@ struct Pulls(Movable):
                         r.last_done = done
                     _ = store.db.run("UPDATE pulls SET files = ?, done_bytes = ?, speed = ? WHERE id = ? AND status = 'running' AND step = 'download'",
                                      [files, String(done), String(Int(r.speed)), String(r.id)])
+                    var resumed = r.t.resumes()  # (a dropped connection picked up again: the person sees why the speed dipped)
+                    if resumed > 0:
+                        _ = store.db.run("UPDATE pulls SET message = ? WHERE id = ? AND status = 'running' AND step = 'download'",
+                                         ["downloading " + String(j.size(0)) + " files… (the connection dropped " + ("once" if resumed == 1 else String(resumed) + " times")
+                                          + "; picked up where it stopped)", String(r.id)])
             except:
                 pass
             keep.append(r^)

@@ -1,5 +1,5 @@
 # Writes docs/gallery/index.html: a gallery of photos, one card per app (a picture, what it does, what it proves,
-# where it runs, what's next). omxplorer is the star. Owner, 2026-10-31: "a card with an image and some details
+# where it runs, what's next). omxplorer and omxconsole are the two flagships (STARS). Owner, 2026-10-31: "a card with an image and some details
 # around it… the same theme as the cover page". Edit APPS below and run: pixi run python scripts/gallery_page.py
 import html, pathlib
 
@@ -26,16 +26,23 @@ STAR = dict(
     src="examples/omxplorer", page="../omxplorer.html", cta="See omxplorer",
     get=[("Linux", REL + "linux-app/omxplorer-linux-x86_64.tar.gz", "x86_64 · GTK 4"),
          ("Mac", REL + "mac-app/omxplorer-mac-gpu.zip", "Apple Silicon · macOS 26")])
-
-# omxconsole comes back when it's Mojo end to end (its engine is Python today; owner, 2026-11-02)
+# the second flagship (owner, 2026-11-06: "it needs to have its own cover page… this is 2nd flagship product"): a desktop
+# app around Modular's max serve, all omxcode; downloads from gallery-apps, each run before it's listed (goal 55 M5, M6).
+# No speed in its pictures or captions (docs/lessons.md, D-4762).
+CONSOLE = dict(
+    name="omxconsole", app="omxconsole", kind="The second flagship · local models on MAX",
+    line="Find a model on Hugging Face, download it and serve it on your own GPU through Modular's MAX: one OpenAI-style endpoint with a key per app, and benchmarks. All omxcode.",
+    shots=[("img/omxconsole-find.png", "Add a model: the MAX catalog and Hugging Face, each result checked against this GPU's memory"),
+           ("img/omxconsole-ready.png", "Ready after the model answered a first question: its endpoint and a curl line"),
+           ("img/omxconsole-models.png", "My models"),
+           ("img/omxconsole-keys.png", "Keys: one per app, shown by prefix")],
+    src="examples/console", page="../omxconsole.html", cta="See omxconsole",
+    needs="Needs MAX installed (docs.modular.com/max/packages). Mac: it opens and starts its service on GitHub's Mac runners; no model has been served on a Mac yet.",
+    get=[("Linux", download_url("omxconsole", "Linux"), "x86_64 · GTK 4"),
+         ("Mac", download_url("omxconsole", "Mac"), "Apple Silicon · macOS 15 or later")])
+STARS = [STAR, CONSOLE]
 
 APPS = [
-    dict(name="omxconsole", app="omxconsole", kind="LM Studio for MAX · local models",
-         line="Find a model on Hugging Face, download it, chat with it and benchmark it on your own GPU through Modular's MAX. One OpenAI-style endpoint with keys, all omxcode.",
-         # (Mac: the macOS 15 runner's build ran there; on macOS 26 the runner's own build of the same source ran)
-         runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"], needs="Needs MAX installed (docs.modular.com/max/packages)",
-         # (no speed in the pictures or captions: docs/lessons.md, D-4762; the Ready shot is cropped below its top bar's tok/s)
-         shots=[("img/omxconsole-ready.png", "Linux: a model found, downloaded and answering"), ("img/omxconsole-models.png", "Linux: My models")], src="examples/console"),
     dict(name="Sketch", app="sketch", kind="Drawing",
          line="Pressure ink with pan and zoom. Strokes taper with the pen; panning moves the kept ink, never redraws it.",
          runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"],
@@ -125,7 +132,8 @@ def star(a):
         pic = f'<img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}"><figcaption>{e(c0)}</figcaption>'
     # an introduction only: the app's own page carries the details and the downloads (owner, 2026-11-02)
     src = "" if a["page"] == GH + a["src"] else f'<a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a>'
-    links = gets(a) + f'<div class="links"><a class="cta" href="{a["page"]}">{e(a["cta"])}</a>{src}</div>'
+    needs = f'<p class="needs">{e(a["needs"])}</p>' if a.get("needs") else ""
+    links = gets(a) + needs + f'<div class="links"><a class="cta" href="{a["page"]}">{e(a["cta"])}</a>{src}</div>'
     return f'''<article class="card star" id="{e(a["name"])}">
   <div class="media">
     <figure class="pic">{pic}</figure>
@@ -227,7 +235,7 @@ footer a { color: var(--ink2); }
   <div class="head">
     <div class="eyebrow">Gallery</div>
     <h1>omxplorer, and what else it builds.</h1>
-    <p class="lede">omxplorer is the product. The rest are smaller apps, each one Mojo codebase, that show what the framework can do. Every one downloads for Linux; most for the Mac too. omxconsole wraps Modular's MAX the way LM Studio wraps its runtime.</p>
+    <p class="lede">Two flagships: omxplorer, the data explorer, and omxconsole, local models on Modular's MAX. The rest are smaller apps, each one Mojo codebase, that show what the framework can do. Every one downloads for Linux; most for the Mac too.</p>
   </div>
   <div class="grid">
 STAR_CARD
@@ -264,7 +272,7 @@ if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.querySelect
 </html>
 '''
 
-out = (PAGE.replace("STAR_CARD", star(STAR)).replace("CARDS", "\n".join(card(a) for a in APPS))
+out = (PAGE.replace("STAR_CARD", "\n".join(star(x) for x in STARS)).replace("CARDS", "\n".join(card(a) for a in APPS))
        .replace("SOON", "".join(f"<div><i>soon</i><b>{e(t)}</b><p>{e(p)}</p></div>" for t, p in SOON)))
 p = pathlib.Path(__file__).resolve().parent.parent / "docs/gallery/index.html"
 p.write_text(out)
