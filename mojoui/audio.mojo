@@ -12,8 +12,8 @@
 # Also here: load_wav (16-bit PCM .wav -> floats) and best_match (normalised cross-correlation at the best lag).
 
 from std.atomic import Atomic
-from std.ffi import external_call, c_int
-from mojoui import libc, OwnedDLHandle
+from std.ffi import external_call, c_int, OwnedDLHandle
+from mojoui import libc
 from std.memory.alloc import unsafe_alloc
 from std.os import getenv
 from std.sys import CompilationTarget
