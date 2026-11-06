@@ -1156,3 +1156,9 @@ was the map.
   thread "0". Cause: `pthread_create(Int(Pointer(to=tid)), ...)` through my dlsym wrapper: the local's address as an
   Int doesn't tell the compiler the call writes `tid`. Fixed in the wrapper (returns the id from its own cell) and in
   framefeed (same line, mine); a lint now rejects the pattern (D-5217). 0/30 failures after.
+
+## 2026-11-06 · Goal 57 set up
+Owner asked for the roadmap's "SaaS apps" item: sign-in, accounts and payments as omxcode components, Mojo only (fh-saas
+phased out), real Google and Stripe, CPU, a tiny gallery demo. Worktree ../mojo-ui-g57 on merge-50-52 (D-5701), its own
+.pixi (Mojo 1.2.0). Found: `mojoui.serve` (Flare server), `mojoui.hash` (sha256 only: HMAC is to build), `mojoui.sqlite`,
+GTK's `open_url` with `$MOJOUI_OPENER`, `waitfor:` (buttons only). Contract: GOAL.md + docs/goals/57-check.py.

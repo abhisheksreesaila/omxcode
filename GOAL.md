@@ -1,36 +1,45 @@
-# GOAL 52: everything on Mojo 1.2, Flare 0.13, and the engine beside Flare
+# GOAL 57: SaaS building blocks in omxcode, Mojo only
 
-**End goal (owner, 2026-11-05):** "you can move to Mojo 1.2 .. not a big change anyway." Goal 35's draft
-(docs/goals/35-draft.md, its number later went to AG-UI) on top of goal 50 (branch goal-50-native 4352a74), which already
-did that draft's M2 (mojoui/libc.mojo + lint) and M4 (FlareTransport behind mojoui.http). The probe:
-docs/research/mojo12-flare.md (branch probe-mojo12). Worktree `../mojo-ui-g52`, branch goal-52-mojo12.
+**End goal (owner, 2026-11-06):** "SaaS building blocks (sign-in, accounts, payments)" from the roadmap, as omxcode
+components. "fh-saas is phased out and this becomes Mojo only… enabling Google for real… Stripe yes… CPU mode, which is
+more common: you will match CPU, that's ok, this is more of a feature-parity request than a perf request; you are
+contributing to the omxcode app framework, that's the point." Plus a tiny, focused demo for the gallery.
+
+So: fh-saas's jobs (Google sign-in, sessions, users / tenants / roles, one SQLite per tenant, Stripe checkout, webhooks,
+paywall) become `mojoui` modules on `mojoui.serve` (Flare), each with its own test; a tiny native app signs in and pays
+through them. No Python in the server.
+
+Base: branch merge-50-52 d010952 (goals 50 + 52: Mojo 1.2, `mojoui.serve`, HTTPS in `mojoui.http`, `mojoui.hash`; not on
+main yet). Worktree ../mojo-ui-g57, branch goal-57-saas, its own .pixi. Decisions D-5701 on.
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/52-check.py`) |
+| # | Milestone | Proof (`docs/goals/57-check.py`; Google and Stripe stand-ins live in the checker; truth is the SQLite files) |
 |---|---|---|
-| M0 | Its own env | `mojo --version` is 1.2 here and 1.1 in ../mojo-ui and ../mojo-ui-g50; this .pixi is a directory, not a symlink; pixi.toml pins `mojo >=1.2,<1.3` |
-| M1 | The engine on 1.2 | vendor/omxcore.mojoc is the 1.2 build of omxcore 834ef9a's archive plus `vendor/patches/omxcore-834ef9a-mojo12.patch` (scripts/engine_lineage.py proves it: archive diffed, patch applied, size within 0.1 %); the patch touches only lines 1.2 or M5 need; a program built for Linux and one compiled for the Mac target see the engine's GPU switch as they did on 1.1 (Linux on; a Mac with a Metal target on and Apple's plan; a Mac without one off; wording corrected after review, D-5216) |
-| M2 | Flare 0.13 | vendor/flare is a Flare v0.13.x release (FLARE_VERSION, licences); the stream-body patch is kept only if 0.13 still drops the body (proved by a test either way); test_flare_link, test_https (a public site with the system CA bundle), test_serve, test_process, test_hash pass |
-| M3 | Everything on 1.2 | the sweep (scripts/sweep.py) builds every example for each platform it lists (linux, web, mac, ios, android) and every Mojo test in tests/; nothing that built or passed in the same sweep on goal-50-native under Mojo 1.1 (docs/goals/52/baseline.json, made in ../mojo-ui-g50) fails here; iPhone objects need no new `KGEN_` symbols; scripts/libc_lint.py passes |
-| M4 | omxconsole on 1.2 | goal 50's checker: M0–M5 PASS (a real Qwen chat through `max serve` and the Mojo gateway); M6 fails on nothing but what it failed on at goal 50 (goal 33's M5) |
-| M5 | The engine beside Flare | tests/test_engine_flare.mojo runs an engine job (omxcore's thread pool, a group-by on a Frame) and answers an HTTP request through mojoui.serve (Flare) in one program; omxcore's pthread_create / pthread_detach / strtod / read declarations match Flare's (the omxcore issue drafted at goal 50) |
-| M6 | The Mac on 1.2 | a fresh run on GitHub's Mac (scripts/mac-ci, side.mac_fresh) from these sources: maccheck's tests pass, omxplorer starts and draws, and the run's native GPU build used Mojo 1.2 |
-| M7 | Flare never stalls the UI thread (owner, 2026-11-05: "ensure it does not interfere with our UI thread and blocks"; added during the run, D-5213) | tests/test_ui_thread.mojo, 5 runs: a main-thread frame loop ticking every 4 ms never gaps past 25 ms while the program serves (Flare), streams SSE, proxies, fetches over HTTPS through mojoui.http and answers engine jobs (27 requests at once, all 200); Server.start holds the caller ≤ 250 ms, stop() ≤ 5 ms, and the loops end within 3 s; tests/test_served.mojo (added after review, D-5216): a dropped or stopped server stops answering, 30 cycles leave no threads or memory |
+| M0 | Its own env | `.pixi` is a directory here; `mojo --version` 1.2; tests/test_serve, test_https and test_hash pass on this tree |
+| M1 | `mojoui.crypto` | tests/test_crypto.mojo: `hmac: ok` (RFC 4231 vectors), `random: ok` (getrandom tokens, never repeat), `base64url: ok` (RFC 4648 vectors, round trip), `compare: ok` (constant time), `seal: ok` (a signed, expiring value: tampered, wrong key or expired → refused) |
+| M2 | `mojoui.accounts`: Google sign-in, sessions, tenants, roles | `build/saas/server` (examples/saas/server.mojo, nothing but mojoui) against the checker's OAuth stand-in: `/login` redirects with state + PKCE S256; a wrong state is refused; the callback makes the user, their tenant and its SQLite (`tenants/<id>.db`), and sets a sealed cookie; `/api/*` without it → 401, with a tampered one → 401; ada never sees ben's rows (`?tenant=`, a forged id: nothing); `/logout` ends the session server-side (the old cookie → 401); an admin's invite lets a second person join as viewer, and a viewer's write → 403 |
+| M3 | `mojoui.billing`: Stripe | against the checker's Stripe stand-in: `/billing/checkout` creates a subscription Checkout Session (form fields as Stripe's API takes them, the tenant as `client_reference_id`) and answers its URL; `/billing/webhook` checks `Stripe-Signature` (signed by the checker's own HMAC): a bad signature → 400, a 6-minute-old one → 400, the same event twice → applied once; `checkout.session.completed` makes ada Pro, ben stays free; a Pro-only route → 402 for ben; `customer.subscription.deleted` → free again |
+| M4 | The demo app, signed in and paying | examples/saas (GTK, headless, `MOJOUI_TEST`), a native client of the M2 server: "Sign in with Google" opens the system browser (`open_url`; the checker reads `$MOJOUI_OPENER` and plays the browser), the app gets its session through a loopback redirect (RFC 8252, PKCE); it shows `Signed in as ada@example.com`; an entry added in the app lands in ada's SQLite on the server; "Upgrade" opens checkout, the webhook arrives, the app shows `Pro`. `open_url` is a generic effect with its own test |
+| M5 | Live keys (owner-keyed) | with `~/.config/omxcode/saas.env` (names only: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, STRIPE_PRICE_PRO; never printed): Google's real authorize URL from `/login` answers a consent page, not an error; Google's token endpoint answers `invalid_grant` (not `invalid_client`) to a made-up code; a real test-mode Checkout Session (`cs_test_…`) made by the server over Mojo HTTPS, paid with 4242 in headless Chromium, and `/billing/return` reading it back from Stripe makes the tenant Pro. No file → `BLOCKED` naming `scripts/saas_keys.sh` (a wizard for the owner) |
+| M6 | Parity and the gallery | docs/saas.md: fh-saas's modules → the mojoui piece, ✅/❌, honest (email, jobs, migrations may be ❌); docs/components.md lists the new modules (`scripts/components.py` not stale); a gallery card with a shot of ada (Pro) and ben (free) side by side, looked at; `scripts/package.sh saas` makes the Linux download |
+| M7 | Nothing regressed | tests/test_ui_thread.mojo and test_served.mojo pass here; scripts/libc_lint.py and scripts/decisions_lint.py pass |
 
-**Done means:** `scripts/check` prints PASS for M0–M7.
+## Done means
+57-check PASS for M0–M4, M6, M7, and M5 PASS or BLOCKED only for the owner's keys; the reviewer and the security
+auditor (sign-in, sessions, tenants, payments, webhooks) pass it; M4's and M6's shots looked at. `docs/report.md`.
 
 ## Out of bounds
-Pushing anything but the mac-test branch and the mac-ci release (scripts/mac-ci); committing to omxcore (~/Projects/mxframe,
-another session's) or filing issues anywhere (the owner then allowed Flare issues: D-5215); changing engine code beyond what 1.2 and M5 need; touching
-`../mojo-ui-apple-test`, the running Python daemon on :11435 or the real `~/.mxc`; `pip`; secrets; merging into main.
+Pushing; deploying; real keys anywhere but the env file the owner writes; reading or printing secrets; sign-ups or paid
+services; merging into main (merge-50-52 isn't there yet); the frozen ../mojo-ui-apple-test and other sessions'
+worktrees; pip; another worktree's .pixi; lowering a proof; Python in the server (fixtures and the checker are fine);
+new looks (Liquid light/dark as it is); the GPU (CPU only; owner: a parity goal, not a speed one).
 
-## Assumptions
-- The engine goes in as 834ef9a + a patch kept here (as Flare's is), not a new omxcore stable commit: omxcore's main is
-  busy with another session today; the patch is ready for its stable-engine process when the owner wants it.
-- Flare moves to 0.13 now because it's why 1.2 was wanted; the newest 0.13.x tag, sources vendored as before (D-4781).
-- "Nothing regressed" is measured against the same sweep on 1.1, not against a hand list: tests that need a server or
-  data they don't find fail on both and are listed, not counted.
-- 1.2's new "transfer has no effect" warnings are left alone (harmless; builds use --disable-warnings).
+## Assumptions (taken instead of asking)
+- The client is native (gallery = downloads), the server is a Mojo program; the web host's own sign-in comes later.
+- Desktop sign-in is RFC 8252: the system browser plus a loopback redirect to the app, PKCE; tokens are sealed values.
+- Stripe: webhooks in the stand-in; for the live run, reading the session back on return (no tunnel to localhost).
+- Email, background jobs and migrations are listed in docs/saas.md, built only if time is left.
+- The Mac run (scripts/mac-ci) is next, not this goal.
 
 ## Budget
-80 turns.
+120 turns (owner's spare credit this week; more than autopilot's default 80, the scope is wider).
