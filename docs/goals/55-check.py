@@ -360,6 +360,9 @@ def parked_loads():
 def m3():
     if build_all():
         return False, "build failed"
+    room, why = wait_gpu_room()
+    if not room:
+        return False, why
     with Daemon() as d:
         m = ensure_small(d)
         # a cold model's load answers once its server runs, as gateway.py's admin_load did: the console's Add flow reads
@@ -390,6 +393,21 @@ def m3():
             (f"reply {said[-1][:60]!r}" if said else "no SAYS: tl-detail@-1 line: " + out[-300:])
 
 
+def wait_gpu_room(free_mb=10_000, limit_s=2700):
+    """Until some GPU has `free_mb` free (another project's model can fill both cards, and MAX then refuses to start: "don't
+    leave room for KV cache"): a load measures our code, not the neighbours. False, with who holds them, after limit_s."""
+    t0 = time.time()
+    while time.time() - t0 < limit_s:
+        free = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                              capture_output=True, text=True).stdout.split()
+        if any(f.isdigit() and int(f) >= free_mb for f in free):
+            return True, ""
+        time.sleep(20)
+    who = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory,process_name", "--format=csv,noheader"],
+                         capture_output=True, text=True).stdout.strip().replace("\n", "; ")
+    return False, f"no GPU had {free_mb} MB free for {limit_s // 60} min ({who[:200]})"
+
+
 def wait_quiet_gpu(limit_s=1800, under=15, hold_s=15):
     """Until GPU 0 has stayed under `under` % for `hold_s` s (other projects share it): measurements start on a quiet GPU."""
     quiet, t0 = 0, time.time()
@@ -406,6 +424,9 @@ def wait_quiet_gpu(limit_s=1800, under=15, hold_s=15):
 def m4():
     if build_all():
         return False, "build failed"
+    room, why = wait_gpu_room()
+    if not room:
+        return False, why
     with Daemon() as d:
         m = ensure_small(d)
         key = new_key(d)
