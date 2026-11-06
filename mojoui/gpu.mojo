@@ -29,7 +29,7 @@ comptime PixelFn = def(Int, Int, Int, Int, Params) thin -> UInt32
 
 
 # (GPU kernels still take UnsafePointer in MAX 26.6; the deprecation warning is expected.)
-# (Params goes in as four scalars and is rebuilt here: Metal fails to compile a kernel that reads a SIMD argument,
+# (Params goes in as four scalars and is rebuilt here: Metal fails to compile a kernel that reads a SIMD argument, modular/modular#7490,
 # "Failed to create compute pipeline state", seen on GitHub's Mac with ci/mac/pixelprobe.mojo, D-5311.)
 def _pixels_kernel[f: PixelFn](dst: UnsafePointer[UInt32, MutAnyOrigin], w32: Int32, h32: Int32, p0: Float32, p1: Float32, p2: Float32, p3: Float32):
     var p = Params(p0, p1, p2, p3)
