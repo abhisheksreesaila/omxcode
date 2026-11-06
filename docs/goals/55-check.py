@@ -244,6 +244,11 @@ def m2():
     t = run([str(BUILD / "test_safety")], timeout=120) if r.returncode == 0 else r
     if t.returncode != 0 or "safety: ok" not in t.stdout:
         problems.append("test_safety: " + (t.stdout + t.stderr)[-300:])
+    # what consoled may delete (review round 2: owned_folder, remove_parts)
+    r = run(["scripts/mojo_flare.sh", "build", "-I", "examples/consoled", "tests/test_consoled_paths.mojo", "-o", str(BUILD / "test_consoled_paths")])
+    t = run([str(BUILD / "test_consoled_paths")], timeout=120) if r.returncode == 0 else r
+    if t.returncode != 0 or "consoled paths: ok" not in t.stdout:
+        problems.append("test_consoled_paths: " + (t.stdout + t.stderr)[-300:])
     with Daemon() as d:
         m = ensure_small(d)
         if not m:
