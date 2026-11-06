@@ -1183,3 +1183,18 @@ GTK's `open_url` with `$MOJOUI_OPENER`, `waitfor:` (buttons only). Contract: GOA
 Owner: "email, background jobs, database [migrations], logging… remove fh-saas out of the equation… punch through".
 Worktree ../mojo-ui-g60 on goal-57-saas (D-6001), own .pixi. Contract: GOAL.md + docs/goals/60-check.py (Google, Stripe
 and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit modes, AUTH, 451s, dot-stuffing).
+- Owner's bar (D-6006): M10 (faster than fh-saas, measured) and M11 (modular drop-in) added before any code. Root causes
+  first: mojoui.serve's concurrent Handler (D-6007), blocking requests offloaded by a 20-line Flare patch modelled on its
+  WebSocket offload (D-6008; tests/test_handler: one reactor, fast requests ≤ 0.3 ms while a 2 s request runs),
+  per-thread SQLite connections with a writer lock and a statement cache (D-6009), mojoui.jobs → mojoui.uijobs (D-6010).
+- M0 baseline PASS on the untouched tree (goal 57 M1–M4 whole). mojoui.log, mojoui.migrate, mojoui.mail tests passed on
+  their first runs after compile fixes (Mojo: `String(x.strip())`, no std `sort` with a comparator, `Self.R` in generic
+  structs, flare's `Handler` name clash → imported as FlareHandler). My test folders build/test_log and build/test_migrate
+  collided with the checker's binaries of the same names (renamed *_files).
+- M1, M2, M3, M6, M7 PASS on their first checker runs. M4 needed only docs/saas.md's STARTTLS line (STARTTLS delivers).
+  M5 failed once: the checker invites as "editor" (fh-saas's role name); accounts now knows editor (= member) and
+  fh-saas's hierarchy (`need(req, role)`).
+- M8: the app shows "Plan: Trial · N days left" and Manage billing (portal; checkout when there's no card yet).
+  I looked at build/g60/m8.png: signed in as ada, "Plan: Trial · 14 days left" with a teal Manage billing pill, Note/Amount/Add, no
+  entries yet, Liquid light, nothing clipped. Not in the native demo: accepting an invite (it's the web page
+  /invites/<token>); the app has no tenant switcher yet.

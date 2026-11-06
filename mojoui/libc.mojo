@@ -267,11 +267,20 @@ def pthread_setspecific(key: Int, value: Int) -> Int:
 # files by address (mojoui.log): std's FileDescriptor and Flare declare write() their own ways, so these are looked up ---
 
 def open_append(var path: String) -> Int:
-    """open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600): the fd, or -1."""
-    var flags = (0x1 | 0x200 | 0x8 | 0x1000000) if CompilationTarget.is_macos() else (0x1 | 0x40 | 0x400 | 0x80000)
+    """The file opened for appending (O_WRONLY | O_APPEND | O_CLOEXEC), made with mode 0600 when missing: the fd, or -1.
+    open() is variadic, and on Apple's arm64 a variadic mode travels on the stack, where a fixed-argument call never
+    puts it (a file made with mode 0000, seen on the Mac): so open() is called without O_CREAT (two arguments) and a
+    missing file is made by creat(path, 0600), which isn't variadic."""
+    var flags = (0x1 | 0x8 | 0x1000000) if CompilationTarget.is_macos() else (0x1 | 0x400 | 0x80000)
     var f = _sym("open")
-    var call = Pointer(to=f).unsafe_bitcast[def(Int, c_int, c_uint) thin abi("C") -> c_int]()[]
-    var fd = Int(call(Int(path.as_c_string_span().unsafe_ptr()), c_int(flags), c_uint(0o600)))
+    var call = Pointer(to=f).unsafe_bitcast[def(Int, c_int) thin abi("C") -> c_int]()[]
+    var fd = Int(call(Int(path.as_c_string_span().unsafe_ptr()), c_int(flags)))
+    if fd < 0:
+        var c = _sym("creat")
+        var made = Int(Pointer(to=c).unsafe_bitcast[def(Int, c_uint) thin abi("C") -> c_int]()[](Int(path.as_c_string_span().unsafe_ptr()), c_uint(0o600)))
+        if made >= 0:
+            _ = close(made)
+        fd = Int(call(Int(path.as_c_string_span().unsafe_ptr()), c_int(flags)))
     _ = path.byte_length()
     return fd
 

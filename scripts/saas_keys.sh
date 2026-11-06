@@ -204,7 +204,7 @@ finish() {
 
 run_wizard() {
 
-TOTAL_STAGES=6
+TOTAL_STAGES=8
 mkdir -p -m 700 "$HOME/.config/omxcode"
 ENV_FILE="$HOME/.config/omxcode/saas.env"
 [ -e "$ENV_FILE" ] && chmod 600 "$ENV_FILE"  # (an older file keeps its mode under write_env: make it private first)
@@ -212,7 +212,7 @@ stripe() {  # stripe <path> <form args…>: Stripe's API with the key on stdin, 
   printf 'user = "%s:"\n' "$STRIPE_SECRET_KEY" | curl -fsS -K - "https://api.stripe.com$1" "${@:2}"
 }
 
-banner "omxcode SaaS: Google sign-in + Stripe test keys"
+banner "omxcode SaaS: Google sign-in, Stripe test keys, SMTP"
 
 stage "Google: a Cloud project"
 say "Sign-in needs an OAuth client, which lives in a Google Cloud project."
@@ -285,10 +285,47 @@ if [[ -z "$(_existing STRIPE_PRICE_PRO || true)" ]]; then
   write_env STRIPE_PRICE_PRO "$STRIPE_PRICE_PRO"
 fi
 
+stage "Stripe: the customer portal"
+say "Manage billing opens Stripe's customer portal; in test mode it needs saving once before it works."
+open_url "https://dashboard.stripe.com/test/settings/billing/portal"
+step "Check Test mode, allow customers to update payment methods, cancel subscriptions (at the end of the period), see invoices."
+step "Press Save (or Activate test link)."
+pause "Done? Press Enter"
+
+stage "Email: an SMTP account"
+say "Welcome and invitation emails go out over SMTP: any provider gives you a host, a port, a user and a password"
+say "(Postmark, Resend, Amazon SES, Fastmail, Gmail with an app password)."
+note "Implicit TLS is port 465 (SMTP_TLS=implicit); STARTTLS is port 587 (SMTP_TLS=starttls). Both are checked."
+ask SMTP_HOST "SMTP host (e.g. smtp.postmarkapp.com):"
+until [[ "$SMTP_HOST" =~ ^[A-Za-z0-9.-]+$ ]]; do
+  warn "a host name, letters, digits, dots and dashes only"
+  ask SMTP_HOST "SMTP host:"
+done
+ask SMTP_TLS "TLS: implicit (port 465) or starttls (port 587)?"
+until [[ "$SMTP_TLS" == implicit || "$SMTP_TLS" == starttls ]]; do
+  warn "type implicit or starttls"
+  ask SMTP_TLS "TLS: implicit or starttls?"
+done
+default_port=465; [[ "$SMTP_TLS" == starttls ]] && default_port=587
+ask SMTP_PORT "Port (Enter for $default_port):"
+[[ -z "$SMTP_PORT" ]] && SMTP_PORT=$default_port
+until [[ "$SMTP_PORT" =~ ^[0-9]+$ ]]; do
+  warn "a port is a number"
+  ask SMTP_PORT "Port:"
+done
+ask SMTP_USER "SMTP user name:"
+ask_secret SMTP_PASSWORD "SMTP password or API token (hidden):"
+ask SMTP_FROM "Send as (e.g. omxcode SaaS <hello@yourdomain.com>; the provider must allow this sender):"
+until [[ "$SMTP_FROM" == *@* ]]; do
+  warn "it needs an address"
+  ask SMTP_FROM "Send as:"
+done
+for k in SMTP_HOST SMTP_PORT SMTP_TLS SMTP_USER SMTP_PASSWORD SMTP_FROM; do write_env "$k" "${!k}"; done
+
 stage "Check it"
 say "The live check asks Google about the client, makes a real test-mode checkout and pays it with Stripe's 4242 card."
-if confirm "Run scripts/check M5 now (about a minute)?"; then
-  (cd "$(dirname "$0")/.." && scripts/check M5) || warn "M5 didn't pass: its line says why"
+if confirm "Run goal 57's live check M5 now (about a minute)?"; then
+  (cd "$(dirname "$0")/.." && pixi run python docs/goals/57-check.py M5) || warn "M5 didn't pass: its line says why"
   pause "Press Enter"
 fi
 note "Then sign in with Google once by hand: scripts/saas.sh run, and the app (scripts/build.sh saas linux;"

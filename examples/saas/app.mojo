@@ -11,6 +11,7 @@ from mojoui.browser import Browser
 from mojoui.signin import DesktopSignIn
 from mojoui.json import Json, json_string
 from mojoui.shared import environment
+from mojoui.clock import wall_seconds
 from mojoui.theme import Theme
 from themes.liquid import liquid
 
@@ -29,6 +30,7 @@ comptime SIGN_OUT = 12
 comptime SIGNED_OUT = 13
 comptime WAIT_PLAN = 14  # a timer while checkout is out: has the plan changed?
 comptime MANAGE = 15
+comptime GOT_PORTAL = 16
 comptime UPGRADE_WAIT_MS = 600_000  # stop asking for the plan this long after checkout opened (an abandoned checkout)
 
 
@@ -90,6 +92,7 @@ struct Main(App):
     var token: String  # the bearer token: in memory only, never in a view
     var email: String
     var plan: String
+    var trial_ends: Int
     var role: String
     var note: String
     var amount: String
@@ -106,6 +109,7 @@ struct Main(App):
         self.token = ""
         self.email = ""
         self.plan = ""
+        self.trial_ends = 0
         self.role = ""
         self.note = ""
         self.amount = ""
@@ -179,6 +183,7 @@ struct Main(App):
             self.email = self.field(e, "email")
             self.role = self.field(e, "role")
             var plan = self.field(e, "plan")
+            self.trial_ends = self.number(e, "trial_ends")
             if plan == "pro" and self.upgrading:
                 self.upgrading = False
                 self.status = "Welcome to Pro."
@@ -234,8 +239,18 @@ struct Main(App):
                 self.status = "Checkout wasn't finished: Upgrade again when you're ready."
                 return
             self.http.send(self.authed(Request.get(GOT_ME, self.server + "/api/me")))
-        elif m == MANAGE:
-            self.status = "Changing or cancelling the plan in Stripe's portal comes next."
+        elif m == MANAGE:  # (Stripe's portal: cards, invoices, cancel; with no card yet, the checkout)
+            self.http.send(self.authed(Request(GOT_PORTAL, "POST", self.server + "/billing/portal")))
+        elif m == GOT_PORTAL:
+            var url = self.field(e, "url")
+            if e.number == 409:
+                self.http.send(self.authed(Request(GOT_CHECKOUT, "POST", self.server + "/billing/checkout")))
+                return
+            if e.number != 200 or url == "":
+                self.status = "Billing isn't available (" + String(e.number) + ")."
+                return
+            self.browser.open(url)
+            self.status = "Manage billing in your browser…"
         elif m == SIGN_OUT:
             self.http.send(self.authed(Request(SIGNED_OUT, "POST", self.server + "/logout")))
         elif m == SIGNED_OUT:
@@ -249,6 +264,23 @@ struct Main(App):
         self.entries = List[Entry]()
         self.upgrading = False
         self.status = why
+
+    def number(self, e: Event, name: String) -> Int:
+        try:
+            var j = Json.parse(e.text)
+            return j.number(j.get(0, name))
+        except:
+            return 0
+
+    def plan_line(self) -> String:
+        if self.plan == "pro":
+            return "Plan: Pro"
+        if self.plan == "trial":
+            var days = max((self.trial_ends - Int(wall_seconds()) + 86399) // 86400, 0)
+            return "Plan: Trial · " + String(days) + (" day left" if days == 1 else " days left")
+        if self.plan == "past_due":
+            return "Plan: Pro · payment due"
+        return "Plan: Free"
 
     def field(self, e: Event, name: String) -> String:
         try:
@@ -276,12 +308,14 @@ struct Main(App):
         if len(rows) == 0:
             rows.append(Text("No entries yet", style=CAPTION))
         var pro = self.plan == "pro"
+        var plan_button = Button("Manage plan", on_tap=MANAGE) if pro else (
+            Button("Manage billing", on_tap=MANAGE, style=PROMINENT) if self.plan == "trial" or self.plan == "past_due" else Button("Upgrade", on_tap=UPGRADE, style=PROMINENT))
         return VStack(
             HStack(Text("omxcode SaaS", style=TITLE), Button("Sign out", on_tap=SIGN_OUT), spacing=8).fill().justify(BETWEEN),
             Text("Signed in as " + self.email, style=CAPTION).fill(),
             HStack(
-                Text("Plan: Pro" if pro else "Plan: Free"),
-                Button("Manage plan", on_tap=MANAGE) if pro else Button("Upgrade", on_tap=UPGRADE, style=PROMINENT),
+                Text(self.plan_line()),
+                plan_button^,
                 spacing=8,
             ).fill().justify(BETWEEN),
             HStack(
