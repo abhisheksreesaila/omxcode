@@ -63,8 +63,8 @@ def m0():
     (OUT / "m0-setup-1.txt").write_text(r.stdout + r.stderr)
     if r.returncode:
         return False, f"scripts/setup failed after {took:.0f} s: " + (r.stdout + r.stderr)[-1200:]
-    steps = [l for l in r.stdout.splitlines() if re.match(r"^(env|build|data|e5small|yolox|scene)\s", l)]
-    for s in ("env", "build", "data", "e5small", "yolox", "scene"):
+    steps = [l for l in r.stdout.splitlines() if re.match(r"^(env|build|data|torch|e5small|yolox|scene)\s", l)]
+    for s in ("env", "build", "data", "torch", "e5small", "yolox", "scene"):
         line = next((l for l in steps if l.startswith(s)), "")
         if not re.search(r"done \(\d+ s\)|skipped", line):
             probs.append(f"step {s}: {line or 'not printed'}")

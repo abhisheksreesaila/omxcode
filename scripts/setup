@@ -84,6 +84,14 @@ if [ $models = 0 ]; then
 elif [ "$(uname)" = Darwin ] || ! command -v nvidia-smi >/dev/null || ! nvidia-smi -L >/dev/null 2>&1; then
   skip models "the model packs" "they need Linux and an NVIDIA GPU (scripts compile them with MAX for the GPU; goal 51)"
 else
+  # the packs' builders run PyTorch in pixi's `models` environment (torch with its CUDA wheels): installed here once,
+  # with the same retry as the default one (its xkeyboard-config can race too)
+  install_models_env() { pixi install -e models && return 0; echo "   pixi install -e models failed: cleaned and installed again"; pixi clean -e models && pixi install -e models; }
+  if [ -f .pixi/envs/models/conda-meta/history ] && pixi run -e models true >/dev/null 2>&1; then
+    skip torch "PyTorch for the pack builders (pixi's models env)" "installed"
+  else
+    step torch "PyTorch for the pack builders (pixi's models env: a few GB the first time)" install_models_env
+  fi
   pack e5small "classify(): e5-small-v2, text to vectors (MIT)" pixi run python scripts/packs/e5small.py build/packs/e5small
   pack yolox "detect(): YOLOX-Tiny, boxes on video (Apache-2.0)" pixi run python scripts/packs/yolox.py build/packs/yolox
   pack scene "scene(): ResNet-18, a picture's label (BSD-3), converted from PyTorch" pixi run python scripts/packs/from_torch.py torchvision:resnet18 build/packs/scene --function scene
