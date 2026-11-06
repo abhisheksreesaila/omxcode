@@ -380,6 +380,26 @@ def m5():
         problems.append("the console didn't start a consoled on its port: " + out[-200:])
     if not closed:
         problems.append("its consoled still answers 15 s after the console quit")
+    # a console killed outright (SIGKILL: no App.closing) still takes its consoled with it (review round 1: an orphaned
+    # consoled kept a model on the GPU after M5's bare run)
+    port = free_port()
+    env.update(MXC_URL=f"http://127.0.0.1:{port}", MXC_PORT=str(port), MOJOUI_TEST="pause:60000")
+    p = subprocess.Popen([str(BUILD / "console/linux/console")], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not wait_port(port, 20):
+        problems.append("the console didn't start a consoled (kill test)")
+    p.kill()
+    p.wait()
+    t0 = time.time()
+    gone = False
+    while time.time() - t0 < 15:
+        try:
+            http("GET", f"http://127.0.0.1:{port}/health", timeout=1)
+        except Exception:  # noqa: BLE001
+            gone = True
+            break
+        time.sleep(0.5)
+    if not gone:
+        problems.append("its consoled outlived a killed console by 15 s")
     # the download, run bare
     tar = ROOT / "dist/omxconsole-linux-x86_64.tar.gz"
     # (the released download when dist/ holds it: then the run tests what people get; else a fresh package)
@@ -435,7 +455,7 @@ def m5():
                 p.kill()
             log.close()
     headless.stop()
-    return not problems, "; ".join(problems) or ("the console starts and stops its own consoled; the " + ("released" if shipped else "freshly packaged") +
+    return not problems, "; ".join(problems) or ("the console starts and stops its own consoled (a killed console's too); the " + ("released" if shipped else "freshly packaged") +
                                                  " download runs bare (fresh HOME, no Mojo or pixi): window drawn, consoled up, a chat answered")
 
 

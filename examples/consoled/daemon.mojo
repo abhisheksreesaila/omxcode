@@ -22,6 +22,7 @@ from views import requests_json, bench_json, bench_history_json, pulls_json, por
 from search import search_json
 from learn import notebook_json
 from pulls import Pulls, ref_problem
+from mojoui.companion import parent_gone
 from bench import Bench, DEFAULT_RUNS, MAX_RUNS
 from mojoui.files import remove_tree
 from views import pull_json
@@ -201,6 +202,9 @@ struct Daemon(Service):
     def tick(mut self):
         """Every second: log finished /v1 requests, unload idle models (supervisor.py's reaper), exit after shutdown."""
         self.settle()
+        if parent_gone() and not self.stopping:  # (the console that started us ended without stopping us: crash, kill)
+            print("consoled: the app that started it is gone; stopping", flush=True)
+            self.stopping = True
         self.sup.sweep()
         var was = len(self.pulls.running)
         self.pulls.refresh(self.store)

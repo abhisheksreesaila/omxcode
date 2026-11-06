@@ -1,6 +1,8 @@
 # mojoui.companion: a helper program an app keeps running beside it (goal 55: omxconsole's consoled; any app with a
 # local service of its own, LM Studio's way). Started when nothing answers at its health URL, stopped when the app
-# closes, and only if the app started it: a service the person runs themselves is left alone. The helper is found next
+# closes, and only if the app started it: a service the person runs themselves is left alone. A helper it starts is
+# told the app's pid (MOJOUI_PARENT_PID) and should end when the app is gone (parent_gone(): a crash, a kill, a SIGTERM
+# that skips App.closing), so nothing keeps holding the GPU after the app. The helper is found next
 # to the app's own binary (exe_dir(); build.sh puts examples/<app>/companions there).
 #
 #   var c = Companion()
@@ -64,6 +66,24 @@ def answers(health_url: String, timeout_ms: Int = 500) -> Bool:
     return r.error == "" and r.status == 200
 
 
+def parent_gone() -> Bool:
+    """In a helper a Companion started: True once the app that started it has ended (it was reparented away from the
+    pid in MOJOUI_PARENT_PID). False when not started by a Companion."""
+    from std.os import getenv
+    var want = getenv("MOJOUI_PARENT_PID")
+    if want == "":
+        return False
+    var f = _sym("getppid")
+    if f == 0:
+        return False
+    var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=f)
+    var now = Int(Pointer(to=raw).unsafe_bitcast[def() thin abi("C") -> c_int]()[]())
+    try:
+        return now != atol(want)
+    except:
+        return False
+
+
 struct Companion(Movable):
     var procs: List[Process]  # the helper this app started (none: it was running already, or not started yet)
 
@@ -78,8 +98,10 @@ struct Companion(Movable):
         if len(self.procs) > 0:
             return "already started; not answering at " + health_url
         var p: Process
+        var with_parent = env.copy()
+        with_parent.append("MOJOUI_PARENT_PID=" + String(libc.getpid()))
         try:
-            p = Process.start(argv, log, env)
+            p = Process.start(argv, log, with_parent)
         except e:
             return "couldn't start " + (argv[0] if len(argv) > 0 else String("the helper")) + ": " + String(e)
         var until = now_ns() + wait_ms * 1_000_000
