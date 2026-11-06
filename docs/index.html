@@ -324,7 +324,7 @@ section { padding: 96px 24px; }
       <div class="bt w6" id="t-use">
         <div class="kick">MCP, built in</div>
         <h3>Every app is an MCP tool server.</h3>
-        <p>Buttons and fields become tools, with no per-app work. <b>A disabled button isn't a tool</b>, so an agent can't do what a person couldn't.</p>
+        <p>Buttons, fields and JS widgets become tools, with no per-app work. <b>A disabled button isn't a tool</b>, so an agent can't do what a person couldn't.</p>
         <div class="tools" aria-label="Controls and the tools they become">
           <span><em class="ui">Save</em><b>→</b><code>file-save</code></span>
           <span><em class="ui fld">Search…</em><b>→</b><code>search {text}</code></span>
@@ -403,7 +403,7 @@ SLOW: update msg=7 80.06 ms</pre>
       </div>
       <div class="bt w12 not" id="t-w5">
         <div class="kick">Where to start, and where not yet</div>
-        <p>Start with apps that move a lot of data: analytics, spreadsheets, video, documents, robotics. <b>For forms, CRUD screens and marketing sites, JS wins today on ecosystem alone;</b> SaaS building blocks (sign-in, accounts, payments) are on the roadmap.</p>
+        <p>Start with apps that move a lot of data: analytics, spreadsheets, video, documents, robotics. <b>For forms, CRUD screens and marketing sites, JS wins today on ecosystem alone;</b> when a JS library is the better tool, embed it as a widget inside omxcode. SaaS building blocks (sign-in, accounts, payments) are on the roadmap.</p>
       </div>
     </div>
   </div>
@@ -428,14 +428,14 @@ SLOW: update msg=7 80.06 ms</pre>
         <div class="scard"><div class="shot chips" aria-hidden="true"><span>Sign in</span><span>Accounts</span><span>Payments</span></div>
           <div class="tx"><h3>SaaS apps</h3><p>Sign-in, accounts and payments as components, so a whole product is one Mojo program.</p><span class="badge soon"><i></i>planned</span></div></div></div>
       <div class="stop"><span class="when">By year end</span>
-        <a class="scard" href="components.html"><div class="shot chips row" aria-hidden="true"><span>Linux</span><span>Mac</span><span>Android</span><span>iPhone</span><span>Agents</span></div>
+        <a class="scard" href="components.html"><div class="shot chips row" aria-hidden="true"><span>Linux</span><span>Web</span><span>Mac</span><span>Android</span><span>iPhone</span><span>Agents</span></div>
           <div class="tx"><h3>The full collection</h3><p>Every component on every platform above, each one tested by a script.</p><span class="badge soon"><i></i>2026</span></div></a></div>
     </div>
     <div class="teasers">
-      <a class="teaser rv" href="gallery/"><img src="gallery/img/sketch-gtk.png" alt="Sketch: pressure ink drawn on omxcode's Canvas on Linux" loading="lazy">
-        <div><div class="q">Can it do a canvas app?</div><h3>Yes. The Canvas draws in Mojo.</h3><p>Sketch draws pressure ink on omxcode's own Canvas, on Linux and the Mac. Download it from the gallery.</p></div></a>
-      <a class="teaser rv" href="gallery/"><img src="gallery/img/lens-linux.jpg" alt="Data Lens: 20 million points painted by Mojo on the GPU, beside native controls" loading="lazy">
-        <div><div class="q">Do I need JavaScript?</div><h3>No. Every screen is omxcode.</h3><p>Controls, canvases and charts are drawn by Mojo with each platform's own widgets. Where a tool you don't own does the work, such as MAX's model server, the app is a thin wrapper around it.</p></div></a>
+      <a class="teaser rv" href="gallery/#drawing"><img src="gallery/img/sketch-gtk.png" alt="Sketch: pressure ink drawn on omxcode's Canvas on Linux" loading="lazy">
+        <div><div class="q">Can it do a canvas app?</div><h3>The Canvas draws today. JS canvases are next.</h3><p>Sketch draws pressure ink on Linux and the web. Next, a JS component path, so a canvas library from npm drops in the way CodeMirror and ECharts already do.</p></div></a>
+      <a class="teaser rv" href="gallery/#widgets"><img src="img/widgets-web-dark.png" alt="The widgets app: a CodeMirror note, a counter and an ECharts chart inside a native app" loading="lazy">
+        <div><div class="q">Can I use my JS libraries?</div><h3>Yes, as widgets inside native apps.</h3><p>CodeMirror and ECharts from npm run on Linux and the web, under a strict content policy, and agents can read and set them.</p></div></a>
     </div>
   </div>
 </section>
