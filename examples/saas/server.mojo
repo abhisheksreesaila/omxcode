@@ -108,7 +108,10 @@ struct Saas(Service):
 
 
 def main() raises:
-    var served = Server.start(Saas(), port=atol(getenv("SAAS_PORT", "8000")), host=getenv("SAAS_HOST", "127.0.0.1"))
+    var app = Saas()
+    if app.test_hook:
+        print("SAAS: the test-session hook is on (SAAS_TEST_HOOK=1, a test-mode Stripe key): never in production", flush=True)
+    var served = Server.start(app^, port=atol(getenv("SAAS_PORT", "8000")), host=getenv("SAAS_HOST", "127.0.0.1"))
     print("SAAS: listening " + String(served.port), flush=True)
     while not served.stopped():
         _ = libc.poll(0, 0, 500)
