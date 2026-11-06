@@ -122,8 +122,12 @@ def bench_view(b: Bench, model: String, phone: Bool) -> View:
         var decode = bars(run, True, model, 0, fr, mine, phone)
         var nd = len(decode)
         var ttft = bars(run, False, model, nd, fr, mine, phone)
+        var said = String("")  # (what the bars say for this model, for a screen reader and say:bench-bars)
+        for r in run.results:
+            if r.model == model and r.status == "done":
+                said = model + ": " + en_number(r.decode_tps, 1) + " tokens/s, first token " + en_number(r.ttft) + " ms"
         if nd > 0:
-            items.append(Card([CardHead("Decode speed · tokens/s", "higher is better"), CardBody(decode^), CardFoot(String(run.runs) + " timed runs per model, after one warm-up", note=True)]))
+            items.append(Card([CardHead("Decode speed · tokens/s", "higher is better"), CardBody(decode^), CardFoot(String(run.runs) + " timed runs per model, after one warm-up", note=True)]).tag("bench-bars").tooltip(said))
         if len(ttft) > 0:
             items.append(Card([CardHead("Time to first token · p50", "lower is better"), CardBody(ttft^), CardFoot("the median of " + String(run.runs) + " timed runs", note=True)]))
         if nd == 1:

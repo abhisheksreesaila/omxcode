@@ -305,3 +305,66 @@ def fetch_to_file(req: Request, path: String, t: Transfer, hops: Int = 10) -> Re
         return r^
     except e:
         return Response.failed(_failure(e, req))
+
+
+# ---- a stream's chunks with their arrival times (goal 55: benchmarks; time to first token, tokens/s) ----------------
+
+struct TimedStream(Movable):
+    """A streamed reply read whole on the calling thread: each chunk's text and when it arrived (ns, mojoui.clock's
+    now_ns), and when the request was sent."""
+
+    var status: Int
+    var error: String  # "" unless it failed
+    var sent_ns: Int
+    var chunks: List[String]
+    var at_ns: List[Int]
+
+    def __init__(out self):
+        self.status = 0
+        self.error = ""
+        self.sent_ns = 0
+        self.chunks = List[String]()
+        self.at_ns = List[Int]()
+
+
+def stream_timed(req: Request, max_bytes: Int = 16 * 1024 * 1024) -> TimedStream:
+    """Sends `req` and reads its streamed body chunk by chunk, timing each (an SSE reply: feed the chunks to SseReader
+    in order, each piece arriving at its chunk's time). Stops with an error past `max_bytes`."""
+    var out = TimedStream()
+    var problem = _problem(req)
+    if problem != "":
+        out.error = problem
+        return out^
+    try:
+        var client = _client(req)
+        out.sent_ns = now_ns()
+        var s = client.send_streaming(_outgoing(req))
+        out.status = s.status
+        var total = 0
+        var pending = List[UInt8]()
+        while not s.done():
+            var chunk = s.read_chunk(65536)
+            if len(chunk) == 0:
+                break
+            var at = now_ns()
+            total += len(chunk)
+            if total > max_bytes:
+                s.close()
+                out.error = "the stream from " + req.url + " is larger than " + String(max_bytes) + " bytes"
+                return out^
+            pending += chunk^
+            var whole = utf8_whole(pending)  # (a UTF-8 character cut across chunks waits for its rest)
+            if whole > 0:
+                var head = List[UInt8](capacity=whole)
+                for k in range(whole):
+                    head.append(pending[k])
+                out.chunks.append(utf8_lossy(head))
+                out.at_ns.append(at)
+                var rest = List[UInt8]()
+                for k in range(whole, len(pending)):
+                    rest.append(pending[k])
+                pending = rest^
+        return out^
+    except e:
+        out.error = _failure(e, req)
+        return out^

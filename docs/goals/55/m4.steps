@@ -1,0 +1,8 @@
+# goal 55 M4: the console's Benchmark tab after a run (the checker ran one through POST /admin/bench): its bars, read
+# through say:bench-bars (this model's decode speed and first token). limit 120 s
+pause:2500
+tap:qwen2.5-0.5b
+pause:1000
+tap:Benchmark
+pause:4000
+say:bench-bars

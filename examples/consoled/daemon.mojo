@@ -22,6 +22,7 @@ from views import requests_json, bench_json, bench_history_json, pulls_json, por
 from search import search_json
 from learn import notebook_json
 from pulls import Pulls, ref_problem
+from bench import Bench, DEFAULT_RUNS, MAX_RUNS
 from mojoui.files import remove_tree
 from views import pull_json
 from meter import meter
@@ -148,6 +149,8 @@ struct Daemon(Service):
     var open: List[Open]
     var stopping: Bool
     var pulls: Pulls
+    var bench: Bench
+    var bench_key: String  # the benchmark's own key (app "_bench", bench.py BENCH_APP): in memory only, never stored
 
     def __init__(out self, var cfg: Config) raises:
         makedirs(cfg.home, exist_ok=True)  # (a first run: no ~/.mxc yet)
@@ -157,6 +160,9 @@ struct Daemon(Service):
         self.open = List[Open]()
         self.stopping = False
         self.pulls = Pulls()
+        self.bench = Bench()
+        self.bench_key = new_secret()
+        _ = self.store.db.run("UPDATE bench_runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
         _ = self.store.db.run("UPDATE pulls SET status = 'failed', message = 'The daemon stopped during this pull; pull again to resume.', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
         self.cfg = cfg^
         self.started = wall_seconds()
@@ -253,7 +259,35 @@ struct Daemon(Service):
         if req.matches("GET", "/admin/requests"):
             return Reply.json(requests_json(self.store, clamp(req.arg("limit"), 50, 1, 500), req.arg("model")))
         if req.matches("GET", "/admin/bench"):
-            return Reply.json(bench_json(self.store))
+            return Reply.json(bench_json(self.store, self.bench.running()))
+        if req.matches("POST", "/admin/bench"):
+            if self.bench.running():
+                return error(409, "A benchmark is already running; wait for it to finish.", "bench_running")
+            var runs = DEFAULT_RUNS
+            var names = List[String]()
+            try:
+                var j = Json.parse(req.body if req.body.byte_length() > 0 else "{}")
+                var r = j.get(0, "runs")
+                if r >= 0:
+                    if not j.is_whole(r) or j.number(r) < 1 or j.number(r) > MAX_RUNS:
+                        return error(400, "`runs` is a whole number from 1 to " + String(MAX_RUNS) + ".", "invalid_runs")
+                    runs = j.number(r)
+                var ms = j.get(0, "models")
+                for k in range(j.size(ms)):
+                    names.append(j.text(j.at(ms, k)))
+            except:
+                return error(400, "Send JSON: {\"models\": [names], \"runs\": 5} (both optional).", "invalid_request_body")
+            if len(names) == 0:  # (none named: every chat model)
+                var rows = Json.parse(self.store.db.one_text("SELECT coalesce(json_group_array(name), '[]') FROM (SELECT name FROM models WHERE kind != 'embedding' ORDER BY name)"))
+                for k in range(rows.size(0)):
+                    names.append(rows.text(rows.at(0, k)))
+            for n in names:
+                if not self.model_ref(n):
+                    return error(404, "The model `" + n + "` is not registered.", "model_not_found")
+            if len(names) == 0:
+                return error(400, "No chat models to benchmark: pull one first.", "no_models")
+            var id = self.bench.start(self.store, names^, runs, self.cfg.port, self.bench_key, self.cfg.home)
+            return Reply.json('{"id": ' + String(id) + ', "running": true}', 202)
         if req.matches("GET", "/admin/bench/history"):
             return Reply.json(bench_history_json(self.store, clamp(req.arg("limit"), 20, 1, 100)))
         if req.matches("GET", "/admin/pulls"):
@@ -481,6 +515,8 @@ struct Daemon(Service):
         var token = String(String(auth[byte = sp + 1 :]).strip())
         if token == "":
             return ""
+        if token == self.bench_key:
+            return "_bench"
         return self.store.app_for_key(token, sha256_hex(token), now)
 
     def v1_models(self) raises -> String:

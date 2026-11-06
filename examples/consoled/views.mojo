@@ -409,13 +409,19 @@ def run_sql(where: String) -> String:
         FROM (SELECT * FROM bench_runs """ + where + ") r")
 
 
-def bench_json(store: Store) raises -> String:
+def bench_json(store: Store, running: Bool = False) raises -> String:
     var latest = store.db.one_text(run_sql("WHERE status IN ('done', 'failed') ORDER BY started_at DESC, id DESC LIMIT 1"))
     var j = Json.parse(latest)
     var one = String("null")
     if j.size(0) > 0:
         one = String(latest[byte = 1 : latest.byte_length() - 1])
-    return '{"running": false, "progress": null, "latest": ' + one + "}"
+    var progress = String("null")
+    if running:  # (the run going now: how many of its models are done)
+        progress = store.db.one_text("""SELECT json_object('id', r.id, 'models', json_array_length(r.models), 'done', (SELECT COUNT(*) FROM bench_results b WHERE b.run_id = r.id))
+            FROM bench_runs r WHERE r.status = 'running' ORDER BY r.id DESC LIMIT 1""")
+        if progress == "":
+            progress = "null"
+    return '{"running": ' + ("true" if running else "false") + ', "progress": ' + progress + ', "latest": ' + one + "}"
 
 
 def bench_history_json(store: Store, limit: Int) raises -> String:
