@@ -394,6 +394,7 @@ struct Look(Copyable, Movable):
     var segments: Segments
     var motion: Motion  # the press (omxqua's spring); Motion.none(): the host's own
     var space: List[Int]  # the spacing scale (SPACE_XXS … SPACE_XXL, mojoui.view): what an app's spacing and padding tokens become
+    var focus: UInt32  # the keyboard focus ring's colour (omxqua v0.1.6: 2 px, 2 px clear, keyboard only); 0: the host's own
 
     def __init__(out self, type: TypeScale, controls: Controls, var surfaces: List[Surface], segments: Segments):
         self = Look(type, controls, surfaces^, segments, Motion.none())
@@ -406,6 +407,7 @@ struct Look(Copyable, Movable):
         self.segments = segments.copy()
         self.motion = motion.copy()
         self.space = space^
+        self.focus = 0
 
     @staticmethod
     def none() -> Look:
@@ -414,6 +416,12 @@ struct Look(Copyable, Movable):
 
     def is_none(self) -> Bool:
         return len(self.surfaces) == 0 and self.controls.tool_w == 0
+
+    def with_focus(var self, ring: UInt32) -> Look:
+        """The look with a keyboard focus ring of this colour: 2 px, 2 px clear of the control, on keyboard focus only
+        (omxqua v0.1.6's :focus-visible; drawn inside rows and cells, where outside would be clipped)."""
+        self.focus = ring
+        return self^
 
     def surface(self, role: String) -> Int:
         """The index of `role`'s surface, -1 if the look has none."""

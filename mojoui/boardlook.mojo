@@ -52,6 +52,12 @@ def _pill(p: Palette) -> String:
             + "border-radius: 8px; box-shadow: inset 0 0 0 1px " + css_color(_a(p.accent, 0.75)) + ", 0 6px 16px " + _shade(p, 0.45) + "; ")
 
 
+def _grip(color: String) -> String:
+    """The resize grip: two short diagonal strokes in a corner box (goal 56), the same on GTK and the web."""
+    return ("background-image: linear-gradient(135deg, transparent 56%, " + color + " 56%, " + color + " 64%, transparent 64%, transparent 78%, "
+            + color + " 78%, " + color + " 86%, transparent 86%); ")  # (the Mac draws the same two strokes: appkit.mojo's make_grip)
+
+
 def board_gtk_css(p: Palette, scope: String, ease: String = "") -> String:
     """GTK's rules; `ease`: the theme's own curve (Look.motion.ease), else SPRING."""
     var SPRING = ease if ease != "" else String(SPRING_DEFAULT)
@@ -69,6 +75,9 @@ def board_gtk_css(p: Palette, scope: String, ease: String = "") -> String:
     out += (scope + ".mui-board > .mui-tone-source { box-shadow: " + _held_ring(p) + "; "
             + "transform: scale(1.03); transition: transform 420ms " + SPRING + ", box-shadow 300ms ease; }\n")
     out += scope + ".mui-board > .mui-tone-target { box-shadow: 0 0 0 2px " + ac + ", 0 6px 18px " + _shade(p, 0.35) + "; }\n"
+    # a tiled card's resize grip (Board(clips=True)): the ink's third tone at rest, the accent while the card is hovered
+    out += scope + ".mui-board-grip { margin: 0 5px 5px 0; " + _grip(ink3) + "opacity: .8; transition: opacity 150ms ease; }\n"
+    out += scope + ".mui-board-clip:hover > .mui-board-grip { " + _grip(ac) + "opacity: 1; }\n"
     # the link UI's floating pieces
     out += (scope + ".mui-tag-link-ghost { background: " + raised + "; color: " + ac + "; font-weight: 600; font-size: 11px; "
             + "padding: 4px 9px; border-radius: 7px; box-shadow: inset 0 0 0 1px " + ac + ", 0 8px 20px " + _shade(p, 0.5) + "; }\n")
@@ -105,6 +114,9 @@ def board_web_css(p: Palette, scope: String, ease: String = "") -> String:
     out += (scope + ".board > .object[data-tone='3'] { z-index: 7; box-shadow: " + _held_ring(p) + "; "
             + "transform: scale(1.03); transition: transform .42s " + SPRING + ", box-shadow .3s; }\n")
     out += scope + ".board > .object[data-tone='4'] { box-shadow: 0 0 0 2px " + ac + ", 0 6px 18px " + _shade(p, .35) + "; }\n"
+    # the resize grip (mojoui.css places it): the ink's third tone at rest, the accent while the card is hovered, as GTK's
+    out += scope + ".board > .object::after { border: 0; width: 18px; height: 18px; right: 5px; bottom: 5px; " + _grip(ink3) + "opacity: .8; }\n"
+    out += scope + ".board > .object:hover::after { " + _grip(ac) + "opacity: 1; }\n"
     out += scope + ".board > .object[data-tag^=link-], " + scope + ".board > .object[data-tag^=peek-] { z-index: 8; overflow: visible; }\n"
     out += scope + ".board > .object[data-tag^=link-]::after, " + scope + ".board > .object[data-tag^=peek-]::after { display: none; }\n"
     out += scope + ".board > .object[data-tag=peek-lines] { z-index: 5; pointer-events: none; }\n"

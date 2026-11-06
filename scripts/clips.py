@@ -351,6 +351,194 @@ def robots_shots(media=None, keep_raw=False):
     print(f"clip: {out} ({kept:.1f} s kept of {total:.1f} s)")
 
 
+G49 = ROOT / "build/g49"
+
+
+def script_shots(media=None):
+    """Goal 49's shots: one script over everything on the board (scenario.py script's steps), the GTK window on the
+    private display, Liquid dark. Writes build/g49/shots/NN-*.png and build/g49/clip-script.raw.mp4 (an undirected take)."""
+    import csv
+    import json
+    import covers
+    import scenario
+    media = Path(media or G47 / "full").resolve()
+    shots = G49 / "shots"
+    shots.mkdir(parents=True, exist_ok=True)
+    docs = G49 / "clip-docs"
+    shutil.rmtree(docs, ignore_errors=True)
+    (docs / "config").mkdir(parents=True)
+    (docs / "config" / "settings.txt").write_text("inspector=no\n")
+    truth = json.loads((media / "truth.json").read_text())
+    rows = list(csv.DictReader(open(media / "fleet.csv")))
+    hero = truth["hero"]
+    hero_row = [r["episode"] for r in rows].index(hero) + 1
+    r = covers.Rec(covers.copy_app("omxplorer", G49), {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(docs / "config"), "MOJOUI_BUDGET_MS": "50"},
+                   G49 / "clip-script.mp4", size=(1920, 1200))
+
+    def shot(name):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab", "-draw_mouse", "0", "-video_size", "1920x1200", "-i",
+                        os.environ["DISPLAY"] + "+0,0", "-frames:v", "1", "-vf", "scale=1440:900:flags=lanczos", str(shots / name)], check=True)
+        print("shot", shots / name, flush=True)
+
+    def until(tool, timeout=300):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if tool in r.tools():
+                return
+            time.sleep(0.2)
+        r.close()
+        raise SystemExit(f"{tool} never appeared")
+
+    try:
+        r.record()
+        r.call("open-file", 0.0, path=str(media / "fleet.csv"))
+        until("create-table")
+        r.call("create-table", 0.4)
+        r.call("insert-table", 0.2)
+        r.call("choose-table", 0.0, path=str(media / "telemetry.parquet"))
+        until("table-telemetry")
+        r.call("links", 0.3)
+        for l in scenario.ROBOT_LINKS[:3]:
+            r.call("link", 0.2, text=l, submit=True)
+        for _ in range(3):
+            if "Inspector (Ctrl+Shift+I) ✓" not in r.c.call("screen")[0]:
+                break
+            r.call("view-inspector", 0.3)
+        r.call("grid", 0.0, value=float(hero_row))
+        until("video", 120)
+        if "pause" in r.tools():
+            r.call("pause", 0.0)
+        r.call("script", 0.6)
+        r.call("script-text", 0.4, text=scenario.SCRIPT_M2)
+        until("recipe-episode", 30)
+        r.call("recipe-episode", 1.0, text=hero)
+        shot("01-script-written.png")
+        r.call("run-script", 0.0)
+        until("table-with-fleet", 120)
+        time.sleep(1.0)
+        shot("02-script-ran.png")
+        r.call("range-from", 0.2, text=str(scenario.SECTION[0]))
+        r.call("range-to", 0.6, text=str(scenario.SECTION[1]))
+        shot("03-section-picked.png")
+        r.call("apply-regions", 0.0)
+        until("table-apply-1", 120)
+        time.sleep(1.0)
+        shot("04-applied.png")
+        r.call("export-recipe", 0.0)
+        time.sleep(3.0)
+        shot("05-exported.png")
+        r.call("script-close", 0.6)
+        shot("06-results-on-board.png")
+        other_row = [x["episode"] for x in rows].index(scenario.OTHER) + 1
+        r.call("grid", 2.0, value=float(other_row))
+        r.call("script", 0.4)
+        r.call("script-text", 0.2, text="")
+        r.call("recipe-path", 0.2, text=str(docs / "recipes" / "recipe-1"))
+        r.call("open-recipe", 0.6)
+        until("recipe-episode", 30)
+        r.call("recipe-episode", 0.6, text=scenario.OTHER)
+        shot("07-recipe-reopened.png")
+        r.call("run-script", 0.0)
+        time.sleep(4.0)
+        shot("08-recipe-ran.png")
+    finally:
+        r.close()
+    print("raw take", r.raw)
+
+
+G51 = ROOT / "build/g51"
+
+
+def models_shots(media=None):
+    """Goal 51's shots: classify() over the fleet's tasks, detect() on a section of the featured episode with its
+    boxes on the player (scenario.py models's steps), GTK on the private display, Liquid dark → build/g51/shots/."""
+    import csv
+    import json
+    import covers
+    import scenario
+    media = Path(media or G47 / "full").resolve()
+    shots = G51 / "shots"
+    shots.mkdir(parents=True, exist_ok=True)
+    docs = G51 / "clip-docs"
+    shutil.rmtree(docs, ignore_errors=True)
+    (docs / "config").mkdir(parents=True)
+    (docs / "config" / "settings.txt").write_text("inspector=no\n")
+    truth = json.loads((media / "truth.json").read_text())
+    rows = list(csv.DictReader(open(media / "fleet.csv")))
+    hero_row = [r["episode"] for r in rows].index(truth["hero"]) + 1
+    r = covers.Rec(covers.copy_app("omxplorer", G51), {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(docs / "config"), "MOJOUI_BUDGET_MS": "50",
+                                                       "OMX_PACKS": str(ROOT / "build/packs")}, G51 / "clip-models.mp4", size=(1920, 1200))
+
+    def shot(name):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab", "-draw_mouse", "0", "-video_size", "1920x1200", "-i",
+                        os.environ["DISPLAY"] + "+0,0", "-frames:v", "1", "-vf", "scale=1440:900:flags=lanczos", str(shots / name)], check=True)
+        print("shot", shots / name, flush=True)
+
+    def until(tool, timeout=300):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if tool in r.tools():
+                return
+            time.sleep(0.2)
+        r.close()
+        raise SystemExit(f"{tool} never appeared")
+
+    try:
+        r.record()
+        r.call("open-file", 0.0, path=str(media / "fleet.csv"))
+        until("create-table")
+        r.call("create-table", 0.4)
+        for _ in range(3):
+            if "Inspector (Ctrl+Shift+I) ✓" not in r.c.call("screen")[0]:
+                break
+            r.call("view-inspector", 0.3)
+        r.call("script", 0.4)
+        r.call("script-text", 1.0, text=scenario.SCRIPT_CLASSIFY)
+        shot("01-classify-written.png")
+        r.call("run-script", 0.0)
+        until("table-classified", 300)
+        time.sleep(1.0)
+        shot("02-classified.png")
+        r.call("script-close", 0.8)
+        shot("03-classified-on-board.png")
+        r.call("links", 0.3)
+        r.call("link", 0.3, text=scenario.ROBOT_LINKS[1], submit=True)
+        r.call("links", 0.3)  # (the panel closes: the board gets the width)
+        for _ in range(3):  # (and the inspector it gave way to)
+            if "Inspector (Ctrl+Shift+I) ✓" not in r.c.call("screen")[0]:
+                break
+            r.call("view-inspector", 0.3)
+        r.call("grid", 0.0, value=float(hero_row))
+        until("video", 120)
+        if "pause" in r.tools():
+            r.call("pause", 0.0)
+        r.call("script", 0.4)
+        r.call("script-text", 0.2, text="-- what's in these seconds of the featured episode")
+        r.call("range-from", 0.2, text=str(scenario.SECTION[0]))
+        r.call("range-to", 0.4, text=str(scenario.SECTION[1]))
+        r.call("apply-detect", 0.0)
+        until("table-apply-1", 300)
+        time.sleep(1.0)
+        shot("04-detected.png")
+        r.call("script-close", 0.6)
+        c = covers.cards(r)  # (the board scrolled so the video card starts near the top: up, then whole wheel notches)
+        print("cards:", c, flush=True)
+        if "episode" in c:
+            r.wheel(1895, 700, -40, pause=0.3)
+            notches = max(0, round((c["episode"][1] - 12) / STEP))
+            if notches:
+                r.wheel(1895, 700, notches, pause=0.5)
+        else:
+            print(f"(no card episode: {sorted(c)})", flush=True)
+        r.call("seek", 1.0, value=4.0)
+        shot("05-boxes-on-player.png")
+        r.call("seek", 1.0, value=6.5)
+        shot("06-boxes-later.png")
+    finally:
+        r.close()
+    print("raw take", r.raw)
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -363,6 +551,12 @@ if __name__ == "__main__":
     if what == "robots-shots":  # the 11 beat shots (build/g47/shots) and an undirected take
         args = [a for a in sys.argv[2:] if not a.startswith("--")]
         robots_shots(args[0] if args else None, keep_raw="--raw" in sys.argv)
+    if what == "script-shots":  # goal 49's shots (build/g49/shots) and an undirected take
+        args = [a for a in sys.argv[2:] if not a.startswith("--")]
+        script_shots(args[0] if args else None)
+    if what == "models-shots":  # goal 51's shots (build/g51/shots)
+        args = [a for a in sys.argv[2:] if not a.startswith("--")]
+        models_shots(args[0] if args else None)
     if what == "robots":  # the directed clip (scripts/robotclip.py): docs/img/clip-robots.mp4, -15s, -raw, build/g47/clipcheck
         import robotclip
         args = [a for a in sys.argv[2:] if not a.startswith("--")]

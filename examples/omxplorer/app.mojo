@@ -84,6 +84,8 @@ from mojoui.sheetchrome import Tool, Toolbar, FormulaBar, StatusBar, Tab, Bottom
 from mojoui.cellstyle import (CellStyle, BOLD, ITALIC, UNDERLINE, STRIKE, INK_MASK, FILL_MASK, ALIGN_MASK, ink_bits, fill_bits, align_bits,
                               AUTO_ALIGN, ALIGN_LEFT, ALIGN_CENTRE, ALIGN_RIGHT, SWATCH_NAMES, swatch_name)
 from mojoui.swatches import SwatchPicker, draw_swatches, swatch_at
+from mojoui.tiling import Rect as TileRect
+from mojoui.boardtiles import BoardTiles
 from mojoui.sheetpage import (SheetObject, compute, shape_of, chart_view, chart_text, object_card, readout, free_spot, object_title, groups_of, OBJ_CHART, OBJ_PIVOT,
                               CHART_BAR, CHART_LINE, HEADER_H, chart_words, chart_choices, apply_choice, chosen, chart_sentence, SLOT_NAMES, slot_text,
                               number_columns, text_columns, COMBINES, ORDERS, TOPS, SLOT_COMBINE, SLOT_VALUE, SLOT_GROUP, SLOT_ORDER, SLOT_TOP,
@@ -98,7 +100,12 @@ from mojoui.chartview import ChartView
 from mojoui.view import TAP, PAN, ZOOM, PRESS, RELEASE
 from mojoui.sample import sample_table
 from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, IDLE as ISLAND_IDLE, RUNNING as ISLAND_RUNNING, UNDO as ISLAND_UNDO, ERROR as ISLAND_ERROR
-from mojoui.tablejobs import TableWork, TableFile, Answer
+from mojoui.tablejobs import TableWork, TableFile, Answer, ScriptAnswer
+from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS
+from mojoui.models import FRAME_MODELS
+from mojoui.scriptpanel import ScriptPanel, SP_RUN, SP_EXPORT, SP_OPEN, SP_CLOSED
+from mojoui.script import is_script
+from mojoui.recipe import Recipe, RecipeJob, read_recipe, next_recipe_folder
 from mojoui.sheetjobs import warm_gpu, ChartQueue, ColumnFigures, column_job, take_numbers, Opened, open_job, pace, stopped, Job, JOB_RUNNING, JOB_DONE
 from mojoui.clock import now_ns, shown_ms
 from mojoui.draw import rect as draw_rect, with_alpha
@@ -115,7 +122,7 @@ from mojoui.telemetrychart import TelemetryChart
 from mojoui.mapview import MapMark, MARK_PLACE, MARK_FINDING
 from mojoui.inspection_tables import is_places, read_places, compare_job, flight_plan, place_marks
 from mojoui.vision_presets import DRONE_MATCH_M
-from mojoui.player import SCRUB as PLAYER_SCRUB
+from mojoui.player import SCRUB as PLAYER_SCRUB, Mark
 from mojoui.view import SET_TO
 from mojoui.timeseries import TimeSeries
 from mojoui.videotable import VideoTable
@@ -265,8 +272,8 @@ comptime QUERY_TEXT = 3331
 comptime QUERY_NAME = 3332
 comptime QUERY_RUN = 3333
 comptime QUERY_CLOSE = 3334
-comptime QUERY_BAR = 3335  # the toolbar's query field: typed (its SQL), Return runs it (as the Query dialog's Run)
-comptime QUERY_BAR_RUN = 3336
+comptime SCRIPT_OPEN = 3360  # the toolbar's Script: opens the Script window (mojoui.scriptpanel over every card and video)
+comptime SCRIPT_MSG = 3370  # the Script window's own messages: 3370 … 3370 + SCRIPT_MESSAGES
 comptime EXPORT_CSV = 3340  # File > Export CSV: the sheet's own table as <documents>/<its name>.csv
 comptime OBJ_TABLE = 5  # (Insert > Table…'s dialog: inserting = OBJ_TABLE)
 comptime ACT_ANALYZE = 0  # a video card's actions (mojoui.mediacard CardAction)
@@ -315,8 +322,13 @@ comptime APP = "omxcode"  # (settings live in ~/.config/omxcode; ~/.config/omxap
 comptime W = 1440  # the window (Stitch's artboards; the web check's viewport)
 comptime INSPECTOR_W = 300
 comptime RAIL_W = 48  # the sheet's side rail (goal 41)
+comptime SHELL_CHROME_H = 228  # shell A's bands (icons-only toolbar), the formula bar and the board's padding (goal 54: measured)
+comptime RIBBON_TITLES_H = 26  # the toolbar's titles under its icons, when the window is wide enough for them
+comptime BOARD_PAD = 12  # the board's padding inside the docked chrome (shell A, goal 54)
+comptime TILE_MIN_W = 300  # the smallest a tiled card is made while the Board has room (goal 54)
+comptime TILE_MIN_H = 200
 comptime CHROME_H = 252  # the menu bar, toolbar, formula bar, bottom tabs, status bar and the gaps between them (goal 25: measured)
-comptime COMPACT_W = 1440  # narrower windows: the toolbar's tools show only their icons (their titles are tooltips)
+comptime COMPACT_W = 1680  # narrower windows: the toolbar's tools show only their icons (their titles are tooltips); the labelled ribbon needs 1,663 pt (goal 54)
 comptime FX_H = 42  # the formula bar and its gap (the report has none: its page is that much taller)
 comptime SYMBOLS: List[String] = ["$", "€", "£", "₹"]
 comptime NEGATIVE_STYLES: List[String] = ["−1,234", "(1,234)"]
@@ -396,6 +408,9 @@ struct Main(App):
     var query_text: String
     var query_name: String
     var query_said: String
+    var script: ScriptPanel  # the Script window (its text, section, last run)
+    var recipe_job: Optional[Job[Recipe]]  # Export recipe, running
+    var script_marked: String  # the video whose player shows a script's boxes ("": none)
     var inserting: Int  # Insert > Video… or Image… open: OBJ_VIDEO or OBJ_IMAGE (0: closed)
     var active: Int  # the object the inspector shows (-1: none)
     var chart_sizes: List[Tuple[Float64, Float64]]  # per canvas id: points from the last draw (taps)
@@ -408,6 +423,7 @@ struct Main(App):
     var table_y: Int
     var table_w: Int
     var table_h_set: Int  # 0: automatic
+    var board_tiles: BoardTiles  # the Board's cards as tiles (mojoui.boardtiles, goal 54): every card's place comes from it
     var reveal: Int  # the sheet child to scroll into view (a new object), and how many times asked
     var reveal_count: Int
     var ctx_col: Int  # the column a context menu is open for (-1: none), and where it opened on the grid
@@ -527,6 +543,9 @@ struct Main(App):
         self.query_text = ""
         self.query_name = "Query 1"
         self.query_said = ""
+        self.script = ScriptPanel(SCRIPT_MSG)
+        self.recipe_job = None
+        self.script_marked = ""
         self.inserting = 0
         self.active = -1
         self.chart_sizes = List[Tuple[Float64, Float64]](length=1000, fill=(400.0, 240.0))
@@ -539,6 +558,7 @@ struct Main(App):
         self.table_y = 0
         self.table_w = 0
         self.table_h_set = 0
+        self.board_tiles = BoardTiles(TILE_MIN_W, TILE_MIN_H)
         self.reveal = -1
         self.reveal_count = 0
         self.ctx_col = -1
@@ -628,6 +648,7 @@ struct Main(App):
         """The window's content area: the sheet, the report and the inspector fill it (goal 25 M2)."""
         self.win_w = max(width, 640)
         self.win_h = max(height, 480)
+        self.retile()
         if self.editor:
             self.editor.value().resize(self.win_w - 40, self.win_h - 32)  # (less the editor's margins)
 
@@ -865,6 +886,9 @@ struct Main(App):
         var a = self.work.take_answer()
         if a:
             self.answer_landed(a.take())
+        var sa = self.work.take_script()
+        if sa:
+            self.script_landed(sa.take())
         var x = self.work.take_export()
         if x:
             self.message = "Exported " + file_name(x.value().path) + " to your documents"
@@ -873,6 +897,8 @@ struct Main(App):
         if self.work.problem != "":
             if self.query_open:
                 self.query_said = self.work.problem
+            if self.script.open:
+                self.script.said = self.work.problem
             self.message = self.work.problem
             self.say(Activity.error("Couldn't finish", self.work.problem))
             self.work.problem = ""
@@ -1995,12 +2021,23 @@ struct Main(App):
         self.version += 1
 
     def run_query(mut self):
-        """The Query dialog's (or the toolbar's query field's) SQL over the sheet's tables (its own and every card's), as a
+        """The Query dialog's SQL over the sheet's tables (its own and every card's), as a
         job: the answer lands as a table card named as asked (run again under the same name: the same card)."""
         var called = String(self.query_name.strip())
         if called == "":
             called = "Query 1"
         var text = self.query_text
+        if is_script(text):  # (`name = …;` statements or a call: the Script window runs them, shown there, D-4925)
+            self.query_open = False
+            self.script.open = True
+            var had = String(self.script.text.strip())
+            if had == "" or had.startswith("rows = SELECT * FROM "):  # (empty, or only the window's own start)
+                self.script.set_text(text)
+            elif self.script.text.find(text) < 0:  # (a person's script stays: the paste goes below it)
+                self.script.set_text(had + "\n\n" + text)
+            self.offer_script()
+            self.run_script()
+            return
         var asked = String(self.query_ask.strip())
         if asked != "":  # (a question in words: taught with the SQL beside it, or answered by what was taught, mojoui.asksql)
             if String(text.strip()) != "":
@@ -2027,6 +2064,183 @@ struct Main(App):
         else:
             self.query_said = self.work.problem
             self.work.problem = ""
+        self.version += 1
+
+    def script_videos(self) -> VideoFunctions:
+        """Every video card on the sheet, by its SQL name, for a script (each a table of its frames)."""
+        var v = VideoFunctions()
+        for k in range(len(self.media.cards)):
+            ref c = self.media.cards[k]
+            if c.kind == OBJ_VIDEO and c.player:
+                var info = c.player.value().info
+                if info.fps > 0 and info.frames > 0:
+                    v.add(sql_name(c.title()), info.path, info.fps, info.frames)
+        return v^
+
+    def script_names(self) -> String:
+        """What a script can read, by name: the sheet's table, every card's, every video's."""
+        var names = String(sql_name(self.name)) if self.has_table else String("")
+        for k in range(len(self.tables)):
+            names += (", " if names != "" else "") + self.tables.sql_name_of(k)
+        var v = self.script_videos()
+        for k in range(len(v)):
+            names += (", " if names != "" else "") + v.names[k] + " (video)"
+        return names
+
+    def offer_script(mut self):
+        """The Script window's videos (and where each is playing) and the functions Apply offers."""
+        var v = self.script_videos()
+        var heads = List[Float64]()
+        for k in range(len(self.media.cards)):
+            ref c = self.media.cards[k]
+            if c.kind == OBJ_VIDEO and c.player and v.find(sql_name(c.title())) >= 0:
+                heads.append(c.player.value().state.t())
+        var fns = materialize[VIDEO_FUNCTIONS]()
+        for f in materialize[FRAME_MODELS]():
+            fns.append(f)
+        self.script.offer(v.names.copy(), heads^, fns^)
+
+    def run_script(mut self):
+        """The Script window's statements over the sheet's tables, its cards and its videos, as a job: each named result
+        lands as a table card (the same name again: the same card)."""
+        var text: String
+        try:
+            text = self.script.script()
+        except e:
+            self.script.said = String(e)
+            self.version += 1
+            return
+        if String(text.strip()) == "":
+            self.script.said = "Write a statement first: name = SELECT …;"
+            self.version += 1
+            return
+        if self.trace:
+            print("SCRIPT: run " + String(text.count("\n") + 1) + " lines: " + text.replace("\n", " ⏎ "), flush=True)
+        if self.work.script(self.tables, text, self.name if self.has_table else String(""), self.frame, self.script_videos(), self.pal):
+            self.script.said = "Running…"
+            self.say(Activity.running("Script", 0.0, "in the background"))
+        else:
+            self.script.said = self.work.problem
+            self.work.problem = ""
+        self.version += 1
+
+    def mark_applied(mut self, video: String, marks: List[Mark]):
+        """The boxes a script's last call on a video found (made in its job: ScriptAnswer.marks), over that video's
+        player; the boxes an earlier run drew on another video go."""
+        for k in range(len(self.media.cards)):
+            if self.media.cards[k].kind != OBJ_VIDEO or not self.media.cards[k].player:
+                continue
+            var name = sql_name(self.media.cards[k].title())
+            if name == video:
+                self.media.cards[k].player.value().set_marks(marks)
+            elif name == self.script_marked:
+                self.media.cards[k].player.value().set_marks(List[Mark]())
+        self.script_marked = video
+        if self.trace and video != "":
+            print("MARKS: " + video + " " + String(len(marks)) + " boxes", flush=True)
+
+    def export_recipe(mut self):
+        """Export: the script, the last run's results as CSV and the applied section's clip, as a folder in your
+        documents (a job)."""
+        if self.recipe_job:
+            self.script.said = "A recipe is being written already"
+            return
+        if len(self.script.results) == 0:
+            self.script.said = "Run the script first: Export keeps a run's results"
+            return
+        var names = List[String]()
+        var sheets = List[Sheet]()
+        for n in self.script.results:
+            var k = self.tables.find(n)
+            if k >= 0:
+                names.append(self.tables.sql_name_of(k))
+                sheets.append(self.tables.cards[k].sheet.snapshot())
+        var video = String("")
+        var from_s = 0.0
+        var to_s = 0.0
+        var sec = self.script.applied_section()  # (what the script applied a function to: its clip)
+        if sec:
+            var v = self.script_videos()
+            var at = v.find(sec.value()[0])
+            if at >= 0:
+                video = v.paths[at]
+                from_s = sec.value()[1]
+                to_s = sec.value()[2] if sec.value()[2] > 0 else Float64(v.frames[at]) / v.fps[at]
+        var folder = next_recipe_folder(self.documents() + "/recipes")
+        self.recipe_job = start_ui_job(RecipeJob(folder, self.script.text, names^, sheets^, video, from_s, to_s))
+        self.script.said = "Writing the recipe…"
+        self.say(Activity.running("Recipe", 0.0, "script, tables and clip"))
+
+    def take_recipe(mut self):
+        if not self.recipe_job or self.recipe_job.value().poll() == JOB_RUNNING:
+            return
+        var job = self.recipe_job.take()
+        try:
+            var r = job.result()
+            self.script.said = "Exported " + String(len(r.files)) + " files to " + r.folder
+            self.message = self.script.said
+            if self.trace:
+                print("RECIPE: exported " + r.folder + " " + String(len(r.files)) + " files, clip " + String(r.clip_frames) + " frames in " + fixed(r.milliseconds, 1) + " ms", flush=True)
+            self.say(Activity.done("Recipe", String(len(r.files)) + " files"))
+        except e:
+            self.script.said = "Couldn't export the recipe: " + String(e)
+            if self.trace:
+                print("RECIPE: failed " + String(e), flush=True)
+        self.version += 1
+
+    def open_recipe(mut self):
+        """Open recipe: a saved script, here; its questions (${…}) asked anew, Run runs it on this sheet."""
+        try:
+            var text = read_recipe(String(self.script.recipe_path.strip()))
+            self.script.set_text(text)
+            self.offer_script()
+            var n = len(self.script.params)
+            self.script.said = "Opened: " + (String(n) + (" question" if n == 1 else " questions") + " to answer, then Run" if n > 0 else "Run it")
+            self.script.log = List[String]()  # (the last run's lines belong to the script that ran, not this one)
+            self.script.results = List[String]()
+            if self.trace:
+                print("RECIPE: opened " + self.script.recipe_path + " asks " + ", ".join(self.script.params), flush=True)
+        except e:
+            self.script.said = String(e)
+
+    def script_landed(mut self, var a: ScriptAnswer):
+        """A script's results, each placed as a card (or into the card of the same name), its log kept for the window."""
+        var names = List[String]()
+        for i in range(len(a.cards)):  # (indexed: a card isn't Copyable)
+            names.append(a.cards[i].name)
+        if self.trace:
+            for l in a.log:
+                print("SCRIPT: " + l, flush=True)
+            if a.problem != "":
+                print("SCRIPT: problem " + a.problem, flush=True)
+        var placed = 0
+        while len(a.cards) > 0:
+            var card = a.cards.pop(0)
+            var called = card.name
+            try:
+                var mine = self.tables.find(called)
+                if mine >= 0 and self.tables.cards[mine].note != "a script":
+                    raise Error(called + " is a table on this sheet already: give the result another name")
+                var w = self.card_width(card.sheet.columns())
+                var at = self.tables.find(called)
+                var spot = self.free_place(w, 320) if at < 0 else (self.tables.cards[at].x, self.tables.cards[at].y)
+                var k = self.tables.adopt(card^, spot[0], spot[1], w, 320)
+                self.reveal_table(k)
+                placed += 1
+                if self.trace:
+                    print("QUERY: " + called + " " + String(self.tables.cards[k].sheet.rows()) + " rows", flush=True)
+            except e:
+                a.problem = String(e)
+        self.timed(a.milliseconds)
+        self.script.ran(a.log.copy(), a.problem, names^)
+        self.mark_applied(a.marked, a.marks)
+        if a.problem != "":
+            self.message = "Script: " + a.problem
+            self.say(Activity.error("Script", a.problem))
+        else:
+            self.script.said = String(placed) + " results in " + fixed(shown_ms(a.milliseconds), 1) + " ms"
+            self.message = "Script: " + self.script.said
+            self.say(Activity.done("Script", self.script.said))
         self.version += 1
 
     def answer_landed(mut self, var a: Answer):
@@ -2283,6 +2497,121 @@ struct Main(App):
         if self.table_h_set > 0:
             return self.table_h_set
         return TABLE_H if len(self.objects) + len(self.media) > 0 else self.grid_h() - 30  # (the Board keeps 30 pt under it)
+
+    def board_h(self) -> Int:
+        """The Board's height: the room under the formula bar (the cards fill it; nothing scrolls)."""
+        return max(TILE_MIN_H, self.win_h - SHELL_CHROME_H - (0 if self.win_w < COMPACT_W else RIBBON_TITLES_H))  # (shell A: the board reaches the bottom band)
+
+    def card_tags(self) -> List[String]:
+        """The Board's cards by their tags, in the Board's order (sheet_screen): the table, the objects, the media, the
+        table cards, the logs, the documents."""
+        var out = List[String]()
+        if self.screen != SHEET:
+            return out^
+        out.append("table")
+        for k in range(len(self.objects)):
+            out.append(("chart" if self.objects[k].kind == OBJ_CHART else "pivot") + String(k))
+        for k in range(len(self.media)):
+            out.append(("video" if self.media.cards[k].kind == OBJ_VIDEO else "image") + String(k))
+        for k in range(len(self.tables)):
+            out.append("tablecard" + String(k))
+        for k in range(len(self.tracks)):
+            out.append("track" + String(k))
+        for k in range(len(self.docs)):
+            out.append("documents" + String(k))
+        return out^
+
+    def card_rects(self) -> List[TileRect]:
+        """Where each card is now, in card_tags' order."""
+        var out = List[TileRect]()
+        if self.screen != SHEET:
+            return out^
+        out.append(TileRect(self.table_x, self.table_y, self.table_w if self.table_w > 0 else self.sheet_width(), self.table_h()))
+        for k in range(len(self.objects)):
+            out.append(TileRect(self.objects[k].x, self.objects[k].y, self.objects[k].w, self.objects[k].h))
+        for k in range(len(self.media)):
+            ref c = self.media.cards[k]
+            out.append(TileRect(c.x, c.y, c.w, c.h))
+        for k in range(len(self.tables)):
+            ref t = self.tables.cards[k]
+            out.append(TileRect(t.x, t.y, t.w, t.h))
+        for k in range(len(self.tracks)):
+            ref r = self.tracks.cards[k]
+            out.append(TileRect(r.x, r.y, r.w, r.h))
+        for k in range(len(self.docs)):
+            ref d = self.docs[k].card
+            out.append(TileRect(d.x, d.y, d.w, d.h))
+        return out^
+
+    def set_card_rect(mut self, i: Int, r: TileRect):
+        """Card i (card_tags' order) to rect r."""
+        var k = i - 1
+        if i == 0:
+            self.table_x = r.x
+            self.table_y = r.y
+            self.table_w = r.w
+            self.table_h_set = r.h
+            return
+        if k < len(self.objects):
+            self.objects[k].x = r.x
+            self.objects[k].y = r.y
+            self.objects[k].w = r.w
+            self.objects[k].h = r.h
+            return
+        k -= len(self.objects)
+        if k < len(self.media):
+            ref c = self.media.cards[k]
+            c.x = r.x
+            c.y = r.y
+            c.w = r.w
+            c.h = r.h
+            return
+        k -= len(self.media)
+        if k < len(self.tables):
+            ref t = self.tables.cards[k]
+            t.x = r.x
+            t.y = r.y
+            t.w = r.w
+            t.h = r.h
+            return
+        k -= len(self.tables)
+        if k < len(self.tracks):
+            ref q = self.tracks.cards[k]
+            q.x = r.x
+            q.y = r.y
+            q.w = r.w
+            q.h = r.h
+            return
+        k -= len(self.tracks)
+        if k < len(self.docs):
+            ref d = self.docs[k].card
+            d.x = r.x
+            d.y = r.y
+            d.w = r.w
+            d.h = r.h
+            d.version += 1
+
+    def retile(mut self):
+        """The tiles follow the cards (a new one splits the card last touched, a closed one's space goes to its
+        neighbour), then every card takes its tile's place in the Board's current size (mojoui.boardtiles)."""
+        if self.screen != SHEET:  # (another screen over the sheet: the tiles wait for it)
+            return
+        try:
+            self.place_cards(self.board_tiles.sync(self.card_tags(), self.card_rects(), self.sheet_width(), self.board_h()))
+        except e:
+            if self.trace:
+                print("TILES: " + String(e), flush=True)
+
+    def place_cards(mut self, places: List[TileRect]):
+        """Every card to its place (only the ones that moved: a card's version changes when it does)."""
+        var cur = self.card_rects()
+        var moved = False
+        for i in range(min(len(places), len(cur))):
+            if not (places[i] == cur[i]):
+                self.set_card_rect(i, places[i])
+                moved = True
+        if moved:
+            self.version += 1
 
     def first_number(self) -> Int:
         for c in range(self.frame.columns()):
@@ -2558,6 +2887,7 @@ struct Main(App):
         self.handle(event)
         if self.has_table and self.frame.edits() != self.seen_edits:  # the table changed (any way): every object and tile again
             self.refresh()
+        self.retile()  # (the Board's cards back into their tiles: one added, closed, or resized by its own work)
         self.island.still = environment("MOJOUI_REDUCE_MOTION") != ""
         var rest = self.rest_face()
         if rest.lead != self.island.rest.lead or rest.text != self.island.rest.text:
@@ -2665,6 +2995,7 @@ struct Main(App):
         find it there): landed charts move to their numbers, the column's figures arrive, the table work lands, the
         island follows (progress, then the time it took)."""
         self.take_table_work()
+        self.take_recipe()
         self.poll_documents()
         self.poll_pack()
         if self.media.poll():  # (a video's probe or frame that landed: on frames too, for hosts without the wake, D-1264)
@@ -3281,14 +3612,25 @@ struct Main(App):
             self.query_name = event.text
         elif m == QUERY_RUN:
             self.run_query()
-        elif m == QUERY_BAR:
-            self.query_text = event.text
-        elif m == QUERY_BAR_RUN:
-            if event.text != "":
-                self.query_text = event.text
-            self.run_query()
         elif m == QUERY_CLOSE:
             self.query_open = False
+            self.version += 1
+        elif m == SCRIPT_OPEN:
+            self.script.open = not self.script.open
+            if self.script.open:
+                if self.script.text == "":  # (a start: a statement over the sheet's own table)
+                    self.script.set_text("rows = SELECT * FROM " + sql_name(self.name) + " LIMIT 100;")
+                self.offer_script()
+                self.script.said = ""
+            self.version += 1
+        elif self.script.owns(m):
+            var did = self.script.update(event)
+            if did == SP_RUN:
+                self.run_script()
+            elif did == SP_EXPORT:
+                self.export_recipe()
+            elif did == SP_OPEN:
+                self.open_recipe()
             self.version += 1
         elif m == EXPORT_CSV:  # (written by a job: mojoui.tablejobs; the message comes when it lands)
             var path = self.documents() + "/" + sql_name(self.name) + ".csv"
@@ -3301,55 +3643,13 @@ struct Main(App):
         elif m == INSERT_CLOSE:
             self.inserting = 0
             self.version += 1
-        elif m == MOVE or m == RESIZE:  # a sheet object (child 0: the table) dragged by its title bar, or by its corner
-            var k = event.number - 1
-            if k == -1:
-                if m == MOVE:
-                    self.table_x = max(0, self.table_x + Int(event.dx))
-                    self.table_y = max(0, self.table_y + Int(event.dy))
-                else:
-                    self.table_w = max(360, (self.table_w if self.table_w > 0 else self.sheet_width()) + Int(event.dx))
-                    self.table_h_set = max(200, self.table_h() + Int(event.dy))
-            elif 0 <= k < len(self.objects):
-                if m == MOVE:
-                    self.objects[k].x = max(0, self.objects[k].x + Int(event.dx))
-                    self.objects[k].y = max(0, self.objects[k].y + Int(event.dy))
-                else:
-                    self.objects[k].w = max(320, self.objects[k].w + Int(event.dx))
-                    self.objects[k].h = max(220, self.objects[k].h + Int(event.dy))
-            elif 0 <= k - len(self.objects) < len(self.media):  # (a video or picture card, after the objects)
-                ref c = self.media.cards[k - len(self.objects)]
-                if m == MOVE:
-                    c.x = max(0, c.x + Int(event.dx))
-                    c.y = max(0, c.y + Int(event.dy))
-                else:
-                    c.w = max(280, c.w + Int(event.dx))
-                    c.h = max(200, c.h + Int(event.dy))
-            elif 0 <= k - len(self.objects) - len(self.media) < len(self.tables):  # (a table card, after the media)
-                ref t = self.tables.cards[k - len(self.objects) - len(self.media)]
-                if m == MOVE:
-                    t.x = max(0, t.x + Int(event.dx))
-                    t.y = max(0, t.y + Int(event.dy))
-                else:
-                    t.w = max(320, t.w + Int(event.dx))
-                    t.h = max(180, t.h + Int(event.dy))
-            elif 0 <= k - len(self.objects) - len(self.media) - len(self.tables) < len(self.tracks):  # (a log card, after the tables)
-                ref r = self.tracks.cards[k - len(self.objects) - len(self.media) - len(self.tables)]
-                if m == MOVE:
-                    r.x = max(0, r.x + Int(event.dx))
-                    r.y = max(0, r.y + Int(event.dy))
-                else:
-                    r.w = max(360, r.w + Int(event.dx))
-                    r.h = max(200, r.h + Int(event.dy))
-            elif 0 <= k - len(self.objects) - len(self.media) - len(self.tables) - len(self.tracks) < len(self.docs):  # (a folder of documents, after the logs)
-                ref d = self.docs[k - len(self.objects) - len(self.media) - len(self.tables) - len(self.tracks)].card
-                if m == MOVE:
-                    d.x = max(0, d.x + Int(event.dx))
-                    d.y = max(0, d.y + Int(event.dy))
-                else:
-                    d.w = max(360, d.w + Int(event.dx))
-                    d.h = max(300, d.h + Int(event.dy))
-                d.version += 1
+        elif m == MOVE or m == RESIZE:  # a card dragged by its title bar (dropped on another: they swap) or by its corner
+            var tags = self.card_tags()
+            var rects = self.card_rects()
+            if m == RESIZE:  # (its edges follow the pointer: the cards beside it give way, mojoui.tiling)
+                self.place_cards(self.board_tiles.resize(event.number, Int(event.dx), Int(event.dy), tags, rects))
+            else:  # (where its middle was dropped: the card there trades places with it; anywhere else it goes back)
+                self.place_cards(self.board_tiles.drop(event.number, Int(event.dx), Int(event.dy), tags, rects))
             self.version += 1
         elif m >= OBJ_TAP and m < OBJ_TAP + 100:
             var k = m - OBJ_TAP
@@ -3845,14 +4145,14 @@ struct Main(App):
                           Text(grouped(self.imp.rows) + " rows · " + String(len(self.imp.columns)) + " columns · "
                                + ("streamed, opened in " if self.imp.streamed() else "read in ") + fixed(self.imp.seconds, 2) + " s", CAPTION).tone(TONE_GOOD), spacing=2).align(START),
                    Spacer(), Text("✓ File   ›   2  Columns   ›   3  Table", CAPTION), spacing=12).fill().align(CENTER),
-            Canvas(1, self.version + self.preview.version, on_gesture=PREVIEW).fill().height(300).tag("import-preview"),
+            Card(Canvas(1, self.version + self.preview.version, on_gesture=PREVIEW).fill().height(300).tag("import-preview"), spacing=0).padding(0).fill(),  # (framed: the preview ends where Columns begins)
             Text("Columns", HEADLINE),
             Scroll(VStack(rows^, spacing=0).fill(), height=250).fill().tag("import-columns"),
             Spacer(),
             HStack(Button("Back", BACK), Text(note, CAPTION).tone(TONE_WARN if self.imp.streamed() or len(self.imp.skipped) > 0 else 0), Spacer(),
                    Button("Create table", CREATE, style=PROMINENT, icon="table"), spacing=14).fill().align(CENTER),
             spacing=14,
-        ).width(1120).fill().grow().tag("import")
+        ).max_width(1120).fill().grow().tag("import")  # (at most 1120: a fixed width that also fills made AppKit shrink the window to fit it)
         return VStack(dialog, spacing=0).padding(28, 40).fill().grow().align(CENTER)
 
     def import_row(self, name: View, kind: View, empty: View, distinct: View, first: View) -> View:
@@ -3978,6 +4278,8 @@ struct Main(App):
                        Spacer(), Button("Cancel", QUERY_CLOSE), Button("Run", QUERY_RUN, PROMINENT, icon="play").tag("run-query"), spacing=10).fill().align(CENTER),
                 Text(self.query_said, CAPTION).tone(TONE_WARN).tag("query-said") if self.query_said != "" else Spacer(),
                 spacing=12).align(START).fill(), on_close=QUERY_CLOSE, width=640))
+        if self.script.open:
+            out.append(self.script.view(self.script_names()))
         if self.compare_open:
             var pl = self.place_tables()
             var names = List[String]()
@@ -4124,7 +4426,6 @@ struct Main(App):
         extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=OPEN_TYPES).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
         extra.append(FilePicker("Table", PICK_TABLE, style=TOOL_INLINE, icon="table", accept=".csv,.tsv,.txt,.parquet").tooltip("Insert a table: a CSV or Parquet file as a card beside the sheet's own (read in the background)").tag("insert-table"))
         extra.append(FilePicker("Documents", PICK_DOCS, style=TOOL_INLINE, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)").tag("insert-documents"))
-        extra.append(TextField(self.query_text, "query", on_change=QUERY_BAR, on_submit=QUERY_BAR_RUN).width(260).tag("query-bar").label("SQL query over the sheet's tables").tooltip("SQL over the sheet's tables (its own and every card's); Return runs it, the answer lands as a table card"))
         if self.sheet_tab == 1:
             return Toolbar(left, self.report_tools(), right, extra, before=self.report_controls(), after=self.filter_controls(), inline=True)  # (its tile tools share one icon: their titles stay)
         var middle = List[Tool]()
@@ -4134,7 +4435,8 @@ struct Main(App):
         middle.append(Tool("Pivot", "pivot", INSERT_PIVOT, False, "A pivot table of the selected column (Ctrl+Shift+P)"))
         middle.append(Tool("Chart", "chart-bar", INSERT_CHART, False, "A chart of the selected column (Ctrl+Shift+C)"))
         middle.append(Tool("Query", "database", QUERY_OPEN, self.query_open, "Ask the sheet's tables in SQL: joins, IN, subqueries; the answer is a table"))
-        return Toolbar(left, middle, right, extra, toggles=self.format_tools(), inline=True, compact=self.win_w < COMPACT_W)
+        middle.append(Tool("Script", "terminal", SCRIPT_OPEN, self.script.open, "A script over every table and video here: statements in order, each result a card"))
+        return Toolbar(left, middle, right, extra, toggles=self.format_tools(), inline=False, compact=self.win_w < COMPACT_W)  # (shell A: a ribbon, each icon over its title, goal 54)
 
     def format_tools(self) -> List[List[Tool]]:
         """Excel's Home tab, in small toggles: font, colours, alignment, number. Each shows the selection's state."""
@@ -4383,7 +4685,7 @@ struct Main(App):
         return StatusBar(items, (fixed(shown_ms(self.milliseconds), 1) + " ms on " + (self.frame.device_name if self.ran_gpu else "CPU")) if self.show_timings else "")
 
     def sheet_width(self) -> Int:
-        return self.win_w - 40 - RAIL_W - 16 - (INSPECTOR_W + 16 if self.inspector_open else 0)
+        return self.win_w - RAIL_W - 1 - 2 * BOARD_PAD - (INSPECTOR_W + 1 if self.inspector_open else 0)  # (shell A: the rail, the board's padding, the inspector, their lines)
 
     def rail(self) -> View:
         """The sheet's side rail (mojoui.sheetchrome.Rail): what goes on the page from a file (a table, a video, a picture)."""
@@ -4479,18 +4781,18 @@ struct Main(App):
             items.append(v.copy())
         for v in self.peek.views(width, bottom + 24):
             items.append(v.copy())
-        var area = (Board(items^, width, bottom + 24, on_move=MOVE, on_resize=RESIZE, reveal=self.reveal, reveal_count=self.reveal_count,
-                          tones=tones, on_hold=HOLD).fill().grow()) if self.sheet_tab == 0 else self.report_view()
+        var area = (Board(items^, width, max(bottom, self.board_h()), on_move=MOVE, on_resize=RESIZE, reveal=self.reveal, reveal_count=self.reveal_count,
+                          tones=tones, on_hold=HOLD, clips=True).fill().grow()) if self.sheet_tab == 0 else self.report_view()
         # The sheet's column takes the room the inspector leaves, the row takes the height the bars leave: sizes
         # come from the window (App.resize), never asked of it, so the window never grows to fit them (goal 25 M2).
-        var main = (VStack(fx, area^, spacing=6) if self.sheet_tab == 0 else VStack(area^, spacing=6)).grow().align(STRETCH)
-        var row = (HStack(self.rail(), main, self.inspector(), spacing=16) if self.inspector_open else HStack(self.rail(), main, spacing=16)).align(STRETCH)
+        var main = (VStack(fx, area^, spacing=BOARD_PAD) if self.sheet_tab == 0 else VStack(area^, spacing=BOARD_PAD)).padding(BOARD_PAD).grow().align(STRETCH)
+        var row = (HStack(self.rail(), main, self.inspector(), spacing=0) if self.inspector_open else HStack(self.rail(), main, spacing=0)).align(STRETCH)  # (shell A: docked, goal 54)
         var tabs: List[Tab] = [Tab(self.sheet_name, "sheet"), Tab(self.report_name, "chart-bar")]
         var chip = List[View]()  # (the GPU's state shows once, in the menu bar)
         var parts = List[View]()
         parts.append(self.menu_bar())
         parts.append(self.toolbar())
-        parts.append(row^.padding(0, 20).fill().grow())
+        parts.append(row^.fill().grow())
         parts.append(BottomTabs(tabs, self.sheet_tab, TAB, self.renaming, RENAME_SUBMIT, RENAME_CANCEL, chip).height(30))  # (Excel's place for them)
         parts.append(self.status().height(30))
         if self.ctx_col >= 0 and self.sheet_tab == 0:
@@ -4498,7 +4800,7 @@ struct Main(App):
         parts.append(Clipboard(self.clip_text, self.clip_version))
         for o in self.overlays():
             parts.append(o.copy())
-        return VStack(parts^, spacing=6).fill().grow()
+        return VStack(parts^, spacing=0).fill().grow()  # (shell A: the bands join, goal 54)
 
 
 def fill_rows(mut rows: CardRows, sheet: Sheet):
