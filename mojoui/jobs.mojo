@@ -23,7 +23,7 @@ from mojoui.shared import put_shared, get_shared
 from mojoui import libc
 from mojoui.hosts.objc import msg, cls, sel, ns_string
 
-from mojoui.wake import SLOT_WAKE_WRITE, SLOT_WAKE_READ, libc_fn, fd_io
+from mojoui.wake import SLOT_WAKE_WRITE, SLOT_WAKE_READ, libc_fn, fd_io, UIWaker
 
 
 def _io(name: String, fd: Int, addr: Int, n: Int) -> Int:
@@ -72,39 +72,15 @@ def wake_ui():
 
 
 struct WakeUI(JobDone):
-    """A completion callback that wakes the UI. The pipe is looked up when the job starts (on the UI thread), so the
-    job's thread only writes a byte."""
-    var fd: Int
-    var target: Int  # Apple: the delegate that answers jobsEnded: (0: none), and the modes, looked up on the UI thread
-    var modes: Int
+    """A completion callback that wakes the UI (mojoui.wake.UIWaker: made when the job starts, on the UI thread, so the
+    job's thread only sends one wake)."""
+    var waker: UIWaker
 
     def __init__(out self):
-        self.fd = get_shared(SLOT_WAKE_WRITE) - 1
-        self.target = 0
-        self.modes = 0
-        comptime if not CompilationTarget.is_linux():
-            var target = msg(msg(cls("NSApplication"), "sharedApplication"), "delegate")
-            if target != 0 and msg(target, "respondsToSelector:", sel("jobsEnded:")) != 0:
-                self.target = target
-                # (retained until the callback goes, __del__: the job's thread uses it after this run-loop turn's pool
-                # has drained; the string is autoreleased, and the array keeps it). The delegate isn't retained: it's
-                # the host's target, which lives as long as the process
-                self.modes = msg(msg(cls("NSArray"), "arrayWithObject:", ns_string("kCFRunLoopCommonModes")), "retain")
+        self.waker = UIWaker()
 
     def done(mut self, state: Int):
-        comptime if not CompilationTarget.is_linux():  # (on the job's thread on the Mac: one message, made for any thread)
-            if self.target != 0:
-                _ = msg(self.target, "performSelectorOnMainThread:withObject:waitUntilDone:modes:", sel("jobsEnded:"), 0, 0, self.modes)
-            return
-        if self.fd >= 0:
-            var b = List[UInt8](length=1, fill=1)
-            _ = _io("write", self.fd, Int(b.unsafe_ptr()), 1)  # (-1 when the pipe is full: a wake is pending already)
-            _ = len(b)
-
-    def __del__(deinit self):  # (once: after done(), or instead of it when the job's handle was dropped first)
-        comptime if not CompilationTarget.is_linux():
-            if self.modes != 0:
-                _ = msg(self.modes, "release")
+        self.waker.wake()
 
 
 def start_ui_job[B: JobBody](var body: B) -> Job[B.Out]:

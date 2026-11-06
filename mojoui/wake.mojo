@@ -6,6 +6,7 @@ from std.ffi import external_call, c_int
 from std.sys import CompilationTarget
 from std.memory import Pointer
 from mojoui.shared import get_shared
+from mojoui.hosts.objc import msg, cls, sel, fn_address
 
 comptime SLOT_WAKE_WRITE = 90  # mojoui.shared slots: the pipe's ends + 1 (0: none yet)
 comptime SLOT_WAKE_READ = 91
@@ -40,3 +41,46 @@ def wake_write(fd: Int):
         var b = List[UInt8](length=1, fill=1)
         _ = fd_io("write", fd, Int(b.unsafe_ptr()), 1)
         _ = len(b)
+
+
+def _wake_on_main(target: Int) abi("C"):
+    """On the main queue (dispatch_async_f): the host's jobsEnded:, as a background job's end sends it."""
+    _ = msg(target, "jobsEnded:", 0)
+
+
+def _call_c(name: String, a: Int, b: Int, c: Int):
+    """A C function of three pointer-sized arguments, looked up by name (dispatch_async_f: no link-time symbol)."""
+    var f = libc_fn(name)
+    if f == 0:
+        return
+    var raw = Pointer[NoneType, MutUntrackedOrigin](unsafe_from_address=f)
+    var call = Pointer(to=raw).unsafe_bitcast[def(Int, Int, Int) thin abi("C") -> NoneType]()[]
+    call(a, b, c)
+
+
+struct UIWaker(Copyable, Movable):
+    """Wakes the host's main loop from any thread, the way each host listens: on Linux a byte down the wake pipe, on a
+    Mac `jobsEnded:` on the main dispatch queue (AppKit watches no pipe). Made on the UI thread (it looks up the pipe, and
+    on a Mac the delegate), used from a worker's; plain values, nothing to release. Before it lived in mojoui.jobs only,
+    so a FrameFeed's video never reached a Mac's screen (goal 58)."""
+    var fd: Int
+    var target: Int  # Apple: the delegate that answers jobsEnded: (0: none)
+
+    def __init__(out self):
+        self.fd = wake_write_fd()
+        self.target = 0
+        comptime if not CompilationTarget.is_linux():
+            var target = msg(msg(cls("NSApplication"), "sharedApplication"), "delegate")
+            if target != 0 and msg(target, "respondsToSelector:", sel("jobsEnded:")) != 0:
+                self.target = target  # (the host's target: it lives as long as the process, so it isn't retained)
+
+    def wake(self):
+        """From any thread: the host's main loop looks again (App.jobs_message to update())."""
+        comptime if not CompilationTarget.is_linux():
+            # the main dispatch queue (AppKit drains it in every run-loop mode): from a raw pthread,
+            # performSelectorOnMainThread:… never arrived (a FrameFeed's probe on the owner's Mac, goal 58)
+            if self.target != 0:
+                _call_c("dispatch_async_f", libc_fn("_dispatch_main_q"), self.target, fn_address(_wake_on_main))
+            return
+        wake_write(self.fd)
+

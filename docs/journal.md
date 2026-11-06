@@ -1219,3 +1219,10 @@ was the map.
 - Video on the Mac: "not a video" — VideoSource runs ffprobe/ffmpeg's command line; the owner's Mac has neither (D-5612). Scene without video on every screen.
 - M4 failed first only because this worktree had no build/g47 (robot data) or build/packs: symlinked as g54's.
 - "every outcome every row": the ", " run squeezed to 1 pt on the Mac → runs cut after their comma (D-5613), test added.
+
+## Goal 58 (2026-11-06): video and pictures on the Mac without ffmpeg
+- ffmpeg is behind video, pictures (VideoSource reads stills) and export; the Mac has none. avmedia written; first Mac run decoded every frame within 3 levels of Linux's; seeks to 12 and 100 were one frame early (AVAssetReader's start rule) → a quarter frame in.
+- omxplorer on the Mac: picture card fine, video card "0:00 / 0:00". FrameFeed worked in a test (ready, frame 50) → the app never heard: the feed wrote the wake pipe (Linux only); moved the Mac's jobsEnded: into mojoui.wake.UIWaker; still nothing; traced: the feed was ready, wake called, jobsEnded never ran → dispatch_async_f on the main queue: jobsEnded arrives, 0:16, the first frame, then play to 0:04.
+- dlopen declared by external_call clashed with another module's signature (the Mac's compiler, "existing function with conflicting signature") → through dlsym (cfunc), as the other modules do.
+- mac-ssh: an empty third argument vanished through ssh → ${3:-}.
+- Writing: AVAssetWriter + pixel-buffer adaptor; 30 frames read back within 1 level of the source on the Mac.

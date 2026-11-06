@@ -1,0 +1,5 @@
+# goal 58 M2: omxplorer's video and picture cards on the owner's Mac, no ffmpeg (scripts/mac-ssh omxplorer docs/goals/58/mac.steps fleet.csv F00118.mp4 cat.jpg)
+resize:1440x900;wait:2500;pick:Choose a file={data}/fleet.csv;wait:6000;tap:Create table;wait:4000
+tap:Video;wait:800;pick:Choose a video…={data}/F00118.mp4;wait:8000
+tap:Picture;wait:800;pick:Choose a picture…={data}/cat.jpg;wait:5000
+tap:play;wait:3000

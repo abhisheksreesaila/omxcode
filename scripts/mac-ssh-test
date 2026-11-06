@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Run a Mojo test on the owner's Mac over SSH (goal 58), as scripts/mac-ssh runs an app: the sources over, then
+# `pixi run mojo run -I . <test>` there; its output printed and kept in build/mac-ssh/test-<name>-<time>.txt.
+#   MAC_SSH=user@host scripts/mac-ssh-test <test.mojo> [VAR=value …] [-- data files…]
+# VAR=value pairs become the test's environment; `{data}` in a value is the Mac's folder holding the data files, `{src}`
+# its copy of these sources. MAC_SSH (required), MAC_SSH_KEY and MAC_SSH_DIR as scripts/mac-ssh's.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+test=$1
+shift
+envs=()
+while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+[ "${1:-}" = "--" ] && shift
+host=${MAC_SSH:?set MAC_SSH=user@host (the Mac to run on)}
+key=${MAC_SSH_KEY:-$HOME/.ssh/edx_mac}
+ssh_=(ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=10 "$host")
+remote=${MAC_SSH_DIR:-omxcode-g54}
+mkdir -p build/mac-ssh
+out=build/mac-ssh/test-$(basename "$test" .mojo)-$(date +%Y%m%d-%H%M%S).txt
+tar -czf build/mac-ssh/test-src.tar.gz --exclude=__pycache__ pixi.toml pixi.lock mojoui themes vendor tests
+"${ssh_[@]}" "mkdir -p $remote/data"
+scp -q -i "$key" build/mac-ssh/test-src.tar.gz "$@" "$host:$remote/data/"
+printf '%s\n' "${envs[@]}" > build/mac-ssh/test-env.txt
+scp -q -i "$key" build/mac-ssh/test-env.txt "$host:$remote/data/"
+"${ssh_[@]}" bash -s -- "$remote" "$test" <<'EOF' | tee "$out"
+set -uo pipefail
+cd ~/"$1" && tar -xzf data/test-src.tar.gz
+export PATH=$HOME/.pixi/bin:$PATH
+pixi install > install.txt 2>&1 || { tail -20 install.txt; exit 1; }
+while IFS= read -r kv; do
+    [ -n "$kv" ] || continue
+    kv=${kv//\{data\}/$PWD/data}
+    kv=${kv//\{src\}/$PWD}
+    export "$kv"
+done < data/test-env.txt
+pixi run mojo run -I . "$2" 2>&1 | grep -v "warning:\|^\s*\^\|~~~\|note: \|^Imported from\|^Included from"
+echo "exit ${PIPESTATUS[0]}"
+EOF
+echo "$out"
