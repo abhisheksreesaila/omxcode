@@ -71,4 +71,14 @@ def main() raises:
             if n.kind == HSTACK:
                 n2 += 1
         assert_equal(sentence_lines(two, width), n2, "two commas at " + String(width))
+    assert_equal(sentence_lines(two, 40), 1)  # (all on one line when there's room)
+    assert_equal(sentence_lines(two, 3), 3)  # ("a," | "b," | "c d": cut after each comma, no empty last line for "   ")
+    var narrow3 = Sentence(two, width=3)
+    var words3 = List[String]()
+    for n in narrow3.nodes:
+        if n.kind == TEXT or n.kind == BUTTON:
+            words3.append(n.text)
+    assert_equal(words3[0], "a")
+    assert_equal(words3[1], ",")
+    assert_equal(words3[2], "b,")
     print("SENTENCE TESTS PASSED")
