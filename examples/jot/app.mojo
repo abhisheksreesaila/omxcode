@@ -5,7 +5,7 @@
 #
 # Every change of state prints one line:   JOT: notes=<n> results=<n> open="<title>"
 # each search:                             JOT SEARCH: q=<typed> results=<n> ms=<time>
-# JOT_SEED=<n>: makes the file hold n generated notes, inserted by a background job (mojoui.jobs) while the window
+# JOT_SEED=<n>: makes the file hold n generated notes, inserted by a background job (mojoui.uijobs) while the window
 # keeps drawing; it prints `JOT SEED: done <n> notes in <ms> ms` when it ends.
 
 from mojoui import (
@@ -15,7 +15,7 @@ from mojoui import (
 from mojoui.effects import Every
 from mojoui.dragdrop import DropTarget
 from mojoui.paragraph import Paragraph, Run, Plain, Bold
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.clock import now_ns
 from mojoui.shared import environment, make_dir
 from mojoui.files import config_dir

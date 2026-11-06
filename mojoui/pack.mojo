@@ -18,7 +18,7 @@
 # clip: mojoui.videojobs.make_reel over one segment (a reel's redaction plan: faces blurred, the flagged thing outlined).
 
 from omxcore import Job, JobBody, JobCtl, JOB_RUNNING
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.packpdf import Pack, write_pack_pdf
 from mojoui.pdfsource import Box
 from mojoui.videotable import VideoTable

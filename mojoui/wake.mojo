@@ -1,6 +1,6 @@
-# mojoui.wake: the job-wake pipe's low-level ends, without omxcore (mojoui.jobs builds start_ui_job on them; a plain
+# mojoui.wake: the job-wake pipe's low-level ends, without omxcore (mojoui.uijobs builds start_ui_job on them; a plain
 # worker thread, such as mojoui.framefeed's decoder, wakes the UI with wake_write). The host makes the pipe
-# (mojoui.jobs.wake_pipe) and watches its read end on its main loop; a byte down it sends App.jobs_message() to update().
+# (mojoui.uijobs.wake_pipe) and watches its read end on its main loop; a byte down it sends App.jobs_message() to update().
 
 from std.ffi import external_call, c_int
 from std.sys import CompilationTarget

@@ -4,7 +4,7 @@
 # files_fts(path, body)), and has a search field and a list of what changed lately. Closing the window leaves it running
 # (App.background): the tray item opens it again, and a file mentioning $KEEPER_ALERT's word raises a notification
 # (mojoui.notify): one per burst (it waits until alerts stop coming for half a second, two seconds at most), naming how
-# many files and which, and none for a file saved again with the same text. Slow work runs as jobs (mojoui.jobs): the
+# many files and which, and none for a file saved again with the same text. Slow work runs as jobs (mojoui.uijobs): the
 # first scan, and indexing what changed; a reindex that fails (the database busy, say) keeps its changes and tries
 # again a second later, saying so.
 #
@@ -23,7 +23,7 @@ from mojoui import (
     CAPTION, HEADLINE, CENTER,
 )
 from mojoui.effects import Every
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.clock import now_ns
 from mojoui.shared import environment, make_dir
 from mojoui.files import config_dir

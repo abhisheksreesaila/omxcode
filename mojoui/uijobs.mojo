@@ -1,4 +1,4 @@
-# mojoui.jobs: background jobs (MX frame's `Job`) that wake the UI the moment they end, instead of waiting for the
+# mojoui.uijobs (was mojoui.jobs until goal 60, D-6010): background jobs (MX frame's `Job`) that wake the UI the moment they end, instead of waiting for the
 # app's next poll at a display frame.
 #
 #   self.running = start_ui_job(StepJob(...))        # in place of mxframe.start_job

@@ -12,7 +12,7 @@
 # Positions are kept to seven decimals (a centimetre), severities as levels 1…5 (0: none), sizes in metres.
 
 from omxcore import Table, Job, JobBody, JobCtl, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.geo import Place
 from mojoui.inspection import Finding, Change, compare, worst, write_waypoints
 from mojoui.sheet import Sheet

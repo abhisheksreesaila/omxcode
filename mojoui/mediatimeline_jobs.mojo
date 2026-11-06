@@ -11,7 +11,7 @@
 # a plain `mojo run`, and an app without omxcore can feed thumbnails itself (Thumbnails.put).
 
 from omxcore import Job, JobBody, JobCtl, JOB_RUNNING
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.imageops import ImageOps, Frame
 from mojoui.mediatimeline import MediaTimeline, ReelSpec, decode_thumbnails, write_reel, render_preview
 from mojoui.videoexport import RedactPlan

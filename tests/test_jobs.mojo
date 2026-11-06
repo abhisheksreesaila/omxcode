@@ -6,7 +6,7 @@
 from std.ffi import external_call, c_int
 from std.testing import assert_equal, assert_true
 from omxcore import JobBody, JobCtl, JOB_RUNNING
-from mojoui.jobs import wake_pipe, drain_wakes, wake_ui, start_ui_job
+from mojoui.uijobs import wake_pipe, drain_wakes, wake_ui, start_ui_job
 from mojoui.geometry import rect_of
 
 

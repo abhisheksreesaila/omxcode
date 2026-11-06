@@ -241,3 +241,61 @@ def pthread_mutex_unlock(mu: Int) -> Int:
 
 def pthread_mutex_destroy(mu: Int) -> Int:
     return Int(external_call["pthread_mutex_destroy", Int32](Pointer[Int8, MutUntrackedOrigin](unsafe_from_address=mu)))
+
+
+# thread-local storage (mojoui.sqlite's per-thread connections) ----------------------------------------------------------
+
+comptime TlsDestructor = def(Int) thin abi("C") -> None
+
+
+def pthread_key_create(destructor: TlsDestructor) -> Int:
+    """A thread-local slot whose value `destructor` gets when a thread holding one ends; the key, or -1."""
+    var key = List[UInt64](length=1, fill=0)
+    if external_call["pthread_key_create", c_int](Int(key.unsafe_ptr()), destructor) != 0:
+        return -1
+    return Int(key[0] & 0xFFFFFFFF) if CompilationTarget.is_linux() else Int(key[0])
+
+
+def pthread_getspecific(key: Int) -> Int:
+    return external_call["pthread_getspecific", Int](UInt64(key))
+
+
+def pthread_setspecific(key: Int, value: Int) -> Int:
+    return Int(external_call["pthread_setspecific", c_int](UInt64(key), value))
+
+
+# files by address (mojoui.log): std's FileDescriptor and Flare declare write() their own ways, so these are looked up ---
+
+def open_append(var path: String) -> Int:
+    """open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600): the fd, or -1."""
+    var flags = (0x1 | 0x200 | 0x8 | 0x1000000) if CompilationTarget.is_macos() else (0x1 | 0x40 | 0x400 | 0x80000)
+    var f = _sym("open")
+    var call = Pointer(to=f).unsafe_bitcast[def(Int, c_int, c_uint) thin abi("C") -> c_int]()[]
+    var fd = Int(call(Int(path.as_c_string_span().unsafe_ptr()), c_int(flags), c_uint(0o600)))
+    _ = path.byte_length()
+    return fd
+
+
+def write_fd(fd: Int, addr: Int, n: Int) -> Int:
+    var f = _sym("write")
+    return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t]()[](c_int(fd), addr, c_size_t(n)))
+
+
+def rename_path(var src: String, var dst: String) -> Int:
+    var f = _sym("rename")
+    var rc = Int(Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](
+        Int(src.as_c_string_span().unsafe_ptr()), Int(dst.as_c_string_span().unsafe_ptr())))
+    _ = src.byte_length()
+    _ = dst.byte_length()
+    return rc
+
+
+def file_size(fd: Int) -> Int:
+    """lseek(fd, 0, SEEK_END): the file's size (an O_APPEND fd writes there anyway)."""
+    var f = _sym("lseek")
+    return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int64, c_int) thin abi("C") -> Int64]()[](c_int(fd), 0, c_int(2)))
+
+
+def cpu_count() -> Int:
+    """sysconf(_SC_NPROCESSORS_ONLN), in Flare's form."""
+    return external_call["sysconf", Int, c_int](c_int(84 if CompilationTarget.is_linux() else 58))

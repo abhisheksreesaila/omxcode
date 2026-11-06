@@ -12,15 +12,22 @@
 #
 # Errors raise with SQLite's message ("near \"SELEC\": syntax error"); the connection stays usable after one.
 # How: the C library is loaded when the first Database opens (dlopen, looked up by address: libsqlite3.so.0 on Linux, the system's
-# /usr/lib/libsqlite3.dylib on the Mac), and its functions are called through their addresses, as mojoui.jobs calls
+# /usr/lib/libsqlite3.dylib on the Mac), and its functions are called through their addresses, as mojoui.uijobs calls
 # libc's read(): no link flag on any host, and `mojo run` (whose JIT can't resolve a library it wasn't given) works
 # too (D-1304). A Database and its statements belong to one thread: a job opens its own Database on the same file
 # (WAL mode lets the UI read while a job writes, D-1306).
+#
+# Servers (goal 60, D-6009): `Pool.shared().open(path)` is this thread's own connection to the file (opened on first use,
+# WAL + synchronous=NORMAL, closed when the thread ends), so request threads never share one; `begin()` on a pooled
+# connection takes the file's in-process writer lock first, so writers queue on a mutex instead of SQLite's sleeping
+# busy handler. Statements are cached per connection: prepare() of the same SQL again reuses the compiled statement.
 
 from std.ffi import external_call, c_int, c_char
 from std.sys import CompilationTarget
 from std.memory import Pointer, ArcPointer
+from std.memory.alloc import alloc, Layout, unsafe_alloc
 from mojoui.shared import get_shared, put_shared
+from mojoui import libc
 
 comptime SQLITE_OK = 0
 comptime SQLITE_ROW = 100
@@ -32,8 +39,10 @@ comptime SQLITE_BLOB = 4
 comptime SQLITE_NULL = 5
 comptime _OPEN_READWRITE = 0x2
 comptime _OPEN_CREATE = 0x4
-comptime SLOT_SQLITE_LIB = 94  # mojoui.shared slot: the loaded library (90–93 are mojoui.jobs and geometry's)
+comptime SLOT_SQLITE_LIB = 94  # mojoui.shared slot: the loaded library (90–93 are mojoui.uijobs and geometry's)
 comptime _TRANSIENT = -1  # (SQLite copies a bound value at once)
+comptime SLOT_SQLITE_POOL = 97  # mojoui.shared slot: the process's Pool (95, 96 are mojoui.dbus's)
+comptime _CACHE_MAX = 64  # statements kept per connection
 
 
 def _dlsym(handle: Int, name: String) -> Int:
@@ -132,15 +141,47 @@ comptime _F_PI_D = def(Int, c_int) thin abi("C") -> Float64
 
 struct _Conn(Movable):
     """The open connection, shared by the Database and its statements (ArcPointer): it closes after the last of them
-    goes (Mojo ends a value after its last use, which can be before a statement made from it is done)."""
+    goes (Mojo ends a value after its last use, which can be before a statement made from it is done). Keeps the idle
+    compiled statements (by their SQL) and, for a pooled connection, its file's writer lock."""
     var db: Int
     var lib: _Lib
+    var cache_sql: List[String]
+    var cache_st: List[Int]
+    var wlock: Int  # the file's in-process writer mutex (0: none, a plain Database)
+    var held: Bool  # this connection holds it (between begin and commit/rollback)
 
     def __init__(out self, db: Int, lib: _Lib):
         self.db = db
         self.lib = lib
+        self.cache_sql = List[String]()
+        self.cache_st = List[Int]()
+        self.wlock = 0
+        self.held = False
+
+    def take(mut self, sql: String) -> Int:
+        for i in range(len(self.cache_sql)):
+            if self.cache_sql[i] == sql:
+                var st = self.cache_st[i]
+                _ = self.cache_sql.pop(i)
+                _ = self.cache_st.pop(i)
+                return st
+        return 0
+
+    def give(mut self, sql: String, st: Int) -> Bool:
+        if len(self.cache_st) >= _CACHE_MAX:
+            return False
+        for s in self.cache_sql:
+            if s == sql:
+                return False
+        self.cache_sql.append(sql)
+        self.cache_st.append(st)
+        return True
 
     def __deinit__(deinit self):
+        for st in self.cache_st:
+            _ = _fn[_F_P](self.lib.finalize)(st)
+        if self.held and self.wlock != 0:
+            _ = libc.pthread_mutex_unlock(self.wlock)
         if self.db != 0:
             _ = _fn[_F_P](self.lib.close_v2)(self.db)
 
@@ -151,15 +192,21 @@ struct Statement(Movable):
     var db: Int
     var lib: _Lib
     var conn: ArcPointer[_Conn]  # (keeps the connection open while the statement lives)
+    var sql: String  # (its key in the connection's cache)
 
-    def __init__(out self, st: Int, conn: ArcPointer[_Conn]):
+    def __init__(out self, st: Int, conn: ArcPointer[_Conn], sql: String = ""):
         self.st = st
         self.db = conn[].db
         self.lib = conn[].lib
         self.conn = conn
+        self.sql = sql
 
     def __deinit__(deinit self):
-        if self.st != 0:
+        if self.st == 0:
+            return
+        _ = _fn[_F_P](self.lib.reset)(self.st)
+        _ = _fn[_F_P](self.lib.clear_bindings)(self.st)
+        if self.sql == "" or not self.conn[].give(self.sql, self.st):
             _ = _fn[_F_P](self.lib.finalize)(self.st)
 
     def _check(self, rc: c_int) raises:
@@ -238,8 +285,9 @@ struct Statement(Movable):
             return String(from_utf8_lossy=Span(out))
 
 
-struct Database(Movable):
-    """One connection to a SQLite file (made if missing). Closed when it and every statement made from it have gone."""
+struct Database(Copyable, Movable):
+    """One connection to a SQLite file (made if missing). Closed when it and every statement made from it have gone
+    (a copy shares the connection)."""
     var db: Int
     var lib: _Lib
     var path: String
@@ -273,6 +321,11 @@ struct Database(Movable):
             raise Error("sqlite: " + self.error())
 
     def prepare(self, sql: String) raises -> Statement:
+        """A compiled statement: the connection's cached one for this SQL when it has one idle (it comes back when the
+        Statement goes), else a new one."""
+        var cached = self.conn[].take(sql)
+        if cached != 0:
+            return Statement(cached, self.conn, sql)
         var s = sql
         var out = List[Int](length=1, fill=0)
         var f = _fn[def(Int, Int, c_int, Int, Int) thin abi("C") -> c_int](self.lib.prepare_v2)
@@ -282,16 +335,46 @@ struct Database(Movable):
             raise Error("sqlite: " + self.error())
         if out[0] == 0:
             raise Error("sqlite: no statement in " + sql)
-        return Statement(out[0], self.conn)
+        return Statement(out[0], self.conn, sql)
 
     def begin(self) raises:
-        self.exec("BEGIN IMMEDIATE")
+        """A write transaction (BEGIN IMMEDIATE); on a pooled connection, after taking the file's writer lock."""
+        if self.conn[].wlock != 0 and not self.conn[].held:
+            _ = libc.pthread_mutex_lock(self.conn[].wlock)
+            self.conn[].held = True
+        try:
+            self.exec("BEGIN IMMEDIATE")
+        except e:
+            self._release()
+            raise e^
 
     def commit(self) raises:
-        self.exec("COMMIT")
+        try:
+            self.exec("COMMIT")
+        except e:
+            _ = self.rollback_quiet()
+            raise e^
+        self._release()
 
     def rollback(self) raises:
-        self.exec("ROLLBACK")
+        try:
+            self.exec("ROLLBACK")
+        finally:
+            self._release()
+
+    def rollback_quiet(self) -> Bool:
+        try:
+            self.exec("ROLLBACK")
+            self._release()
+            return True
+        except:
+            self._release()
+            return False
+
+    def _release(self):
+        if self.conn[].held:
+            self.conn[].held = False
+            _ = libc.pthread_mutex_unlock(self.conn[].wlock)
 
     def last_id(self) -> Int:
         """The rowid of the last INSERT on this connection."""
@@ -343,3 +426,100 @@ def fts_prefix_query(typed: String) -> String:
             out += " "
         out += '"' + w + '"*'
     return out^
+
+
+# per-thread connections (servers, D-6009) ----------------------------------------------------------------------------
+
+struct _ThreadDbs(Movable):
+    """One thread's open connections, by path (in pthread thread-local storage; freed when the thread ends)."""
+    var paths: List[String]
+    var dbs: List[Database]
+
+    def __init__(out self):
+        self.paths = List[String]()
+        self.dbs = List[Database]()
+
+
+def _drop_thread_dbs(addr: Int) abi("C"):
+    if addr == 0:
+        return
+    var p = Pointer[_ThreadDbs, MutUntrackedOrigin](unsafe_from_address=addr)
+    p.unsafe_deinit_pointee()
+    p.unsafe_free()
+
+
+struct _PoolState(Movable):
+    var key: Int  # the thread-local slot
+    var mu: Int  # guards paths/locks
+    var paths: List[String]
+    var locks: List[Int]  # each file's writer mutex
+
+    def __init__(out self, key: Int, mu: Int):
+        self.key = key
+        self.mu = mu
+        self.paths = List[String]()
+        self.locks = List[Int]()
+
+
+struct Pool(ImplicitlyCopyable, Movable):
+    """The process's per-thread connections (one Pool per process: `Pool.shared()`). A handle: copy it freely."""
+    var addr: Int
+
+    def __init__(out self, *, addr: Int):
+        self.addr = addr
+
+    @staticmethod
+    def shared() raises -> Pool:
+        """The process's pool, made on the first call. (Call it while the program starts, before threads race to make it.)"""
+        var have = get_shared(SLOT_SQLITE_POOL)
+        if have != 0:
+            return Pool(addr=have)
+        var key = libc.pthread_key_create(_drop_thread_dbs)
+        if key < 0:
+            raise Error("sqlite: no thread-local slot for the pool")
+        var mu = Int(unsafe_alloc[UInt8](64))
+        _ = libc.pthread_mutex_init(mu)
+        var st = alloc(Layout[_PoolState].single()).unsafe_leak()
+        st.unsafe_write(_PoolState(key, mu))
+        put_shared(SLOT_SQLITE_POOL, Int(st))
+        return Pool(addr=Int(st))
+
+    def _state(self) -> Pointer[_PoolState, MutUntrackedOrigin]:
+        return Pointer[_PoolState, MutUntrackedOrigin](unsafe_from_address=self.addr)
+
+    def _writer_lock(self, path: String) -> Int:
+        var s = self._state()
+        _ = libc.pthread_mutex_lock(s[].mu)
+        var found = 0
+        for i in range(len(s[].paths)):
+            if s[].paths[i] == path:
+                found = s[].locks[i]
+        if found == 0:
+            found = Int(unsafe_alloc[UInt8](64))
+            _ = libc.pthread_mutex_init(found)
+            s[].paths.append(path)
+            s[].locks.append(found)
+        _ = libc.pthread_mutex_unlock(s[].mu)
+        return found
+
+    def open(self, path: String, setup: String = "") raises -> Database:
+        """This thread's connection to `path` (opened, with WAL and `setup`, on this thread's first use)."""
+        var key = self._state()[].key
+        var mine = libc.pthread_getspecific(key)
+        if mine == 0:
+            var rec = alloc(Layout[_ThreadDbs].single()).unsafe_leak()
+            rec.unsafe_write(_ThreadDbs())
+            mine = Int(rec)
+            _ = libc.pthread_setspecific(key, mine)
+        var dbs = Pointer[_ThreadDbs, MutUntrackedOrigin](unsafe_from_address=mine)
+        for i in range(len(dbs[].paths)):
+            if dbs[].paths[i] == path:
+                return dbs[].dbs[i].copy()
+        var db = Database(path)
+        db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON")
+        if setup != "":
+            db.exec(setup)
+        db.conn[].wlock = self._writer_lock(path)
+        dbs[].paths.append(path)
+        dbs[].dbs.append(db.copy())
+        return db^

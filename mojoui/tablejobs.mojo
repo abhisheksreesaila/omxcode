@@ -16,7 +16,7 @@
 # `JOB: table landed big.csv in 812.0 ms (1,000,000 rows)`, `JOB: export landed big.csv in 640.2 ms (1,000,000 rows)`.
 
 from omxcore import Job, JobBody, JobCtl, Catalog, JOB_RUNNING
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.clock import now_ns, trace_on
 from mojoui.charts import fixed, grouped
 from mojoui.csvio import read_table

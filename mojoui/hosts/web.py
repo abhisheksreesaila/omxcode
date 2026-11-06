@@ -1582,7 +1582,7 @@ def make_app(module_dir):
         return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches"))) or bool(s.commands)
 
     def jobs_ended(fd):
-        """mojoui.jobs: a background job ended (its wake pipe is readable): App.jobs_message through every tab's update()
+        """mojoui.uijobs: a background job ended (its wake pipe is readable): App.jobs_message through every tab's update()
         at once, and the page told as an effect's changes are (pending + /wait); the frame poll stays the fallback."""
         while True:
             try:

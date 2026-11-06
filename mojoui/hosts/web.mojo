@@ -17,7 +17,7 @@ from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
 from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
 from mojoui.clock import now_ns
-from mojoui.jobs import wake_pipe
+from mojoui.uijobs import wake_pipe
 
 
 def json_str(s: String) -> String:

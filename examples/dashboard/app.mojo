@@ -2,7 +2,7 @@
 # region; every change recomputes the KPIs, the top-20 products and the newest 50 rows from all of them, on the GPU.
 #
 # The data is read once by MX frame and put on the GPU once (dashdata.mojo); each change runs as a job off the UI thread
-# (the window never waits); a job that ends wakes the UI at once (mojoui.jobs, App.jobs_message), and frames poll it
+# (the window never waits); a job that ends wakes the UI at once (mojoui.uijobs, App.jobs_message), and frames poll it
 # too. The screen is mojoui components only: date pickers, a slider, a dropdown, KPI cards, a ChartView on a Canvas
 # and a Table, in omxqua.
 #
@@ -41,7 +41,7 @@ from mojoui.clock import now_ns
 from mojoui.theme import Theme, Palette
 from themes.omxqua import omxqua, omxqua_palette
 from omxcore import Job, JOB_RUNNING
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.geometry import rect_of
 from dashdata import (Orders, Answer, Filters, LoadJob, StepJob, ALL, TOP, money, day_number, day_text, ms_since)
 

@@ -1,4 +1,4 @@
-# Job wake (a framework check, D-771): background jobs started with mojoui.jobs.start_ui_job reach update() as soon as
+# Job wake (a framework check, D-771): background jobs started with mojoui.uijobs.start_ui_job reach update() as soon as
 # they end, not at the next display frame. A canvas animates the whole time (frames keep ticking, as in a real app);
 # each job busy-works 2–9 ms (so it ends at any point of a frame), records when it ended, and update() records when
 # App.jobs_message reached it. After RUNS jobs it prints
@@ -11,7 +11,7 @@
 
 from std.sys import exit, CompilationTarget
 from mojoui import App, Event, View, Surface, VStack, Text, Canvas
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.clock import now_ns
 from mojoui.shared import environment
 from omxcore import Job, JobBody, JobCtl, JOB_RUNNING

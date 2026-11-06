@@ -136,7 +136,7 @@ from mojoui.documentset import READ_TEXT
 from mojoui.pdfsource import Box
 from mojoui.texttable import TextTable
 from mojoui.pack import Pack, PackJob, Clip, Packed
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 
 # screens
 comptime START_SCREEN = 0

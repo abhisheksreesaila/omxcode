@@ -40,7 +40,7 @@ from mojoui.hosts.gtk_webview import (
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
-from mojoui.jobs import wake_pipe, drain_wakes
+from mojoui.uijobs import wake_pipe, drain_wakes
 from mojoui.tray import TrayItem
 from mojoui.geometry import register_rects
 from mojoui.regions import regions, headline_in

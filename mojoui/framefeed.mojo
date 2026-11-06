@@ -142,7 +142,7 @@ def _feed_main(addr: Int) abi("C") -> Int:
     var info = s[].info  # (written before the thread started)
     var known = s[].known
     var once = s[].once
-    var fd = s[].wake_fd  # (the process's one wake pipe, mojoui.jobs.wake_pipe: made once, never closed, so the fd read
+    var fd = s[].wake_fd  # (the process's one wake pipe, mojoui.uijobs.wake_pipe: made once, never closed, so the fd read
     # at the start stays valid for the thread's whole life: no generation check needed, D-1343)
     var src: VideoSource
     try:

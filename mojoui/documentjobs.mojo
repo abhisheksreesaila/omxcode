@@ -11,7 +11,7 @@
 # Both jobs call Python, so starting one lends the Python lock (mojoui.pygil.python_lend) and taking its result reclaims it.
 
 from omxcore import Job, JobBody, JobCtl, JobProgress, JOB_RUNNING
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.pygil import python_lend, python_reclaim
 from mojoui.pdfsource import PdfSource, PdfPage
 from mojoui.documentcard import DocumentCard

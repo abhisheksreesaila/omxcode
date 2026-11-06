@@ -22,7 +22,7 @@
 
 from omxcore import Job, JobCtl, JobBody, Table, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT, BOOL as MX_BOOL
 from mojoui.video import VideoSource
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.videotable import VideoTable, Progress, scan_with, RegionsAnalyzer, ColourRange, NO_CODE
 from mojoui.vision_presets import warehouse_analyzer, warehouse_ranges, warm_range, WAREHOUSE_CELL, WARM
 from mojoui.videoexport import RedactPlan, Caption, cut_with, cut_frames
