@@ -314,6 +314,19 @@ def m3():
             (f"reply {said[-1][:60]!r}" if said else "no SAYS: smoke-reply line: " + out[-300:])
 
 
+def wait_quiet_gpu(limit_s=1800, under=15, hold_s=15):
+    """Until GPU 0 has stayed under `under` % for `hold_s` s (other projects share it): measurements start on a quiet GPU."""
+    quiet, t0 = 0, time.time()
+    while time.time() - t0 < limit_s:
+        u = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits", "-i", "0"],
+                           capture_output=True, text=True).stdout.strip()
+        quiet = quiet + 1 if u.isdigit() and int(u) < under else 0
+        if quiet >= hold_s:
+            return True
+        time.sleep(1)
+    return False
+
+
 def m4():
     if build_all():
         return False, "build failed"
@@ -321,10 +334,9 @@ def m4():
         m = ensure_small(d)
         key = new_key(d)
         _, ttft, tps, _ = sdk_stream(d, m["name"], key, prompt=bench_prompt("SDK warm-up"))  # (warm: loaded before both)
+        if not wait_quiet_gpu():
+            return False, "GPU 0 never stayed quiet for 15 s in 30 min (another job on it): not measured"
         refs = [sdk_stream(d, m["name"], key, prompt=bench_prompt(f"SDK reference {i}")) for i in range(5)]
-        ttft = sorted(r[1] for r in refs)[2]   # (the medians of five, as the benchmark keeps: reported)
-        tps = sorted(r[2] for r in refs)[2]
-        best_sdk = max(r[2] for r in refs)    # (compared: the GPU is shared, and sharing only ever slows a run down)
         s, j = body(d.call("POST", "/admin/bench", {"models": [m["name"]], "runs": 5}))
         if s not in (200, 201, 202):
             return False, f"POST /admin/bench: {s} {str(j)[:200]}"
@@ -342,6 +354,12 @@ def m4():
             time.sleep(2)
         if not row:
             return False, f"no benchmark result for {m['name']}: {str(j)[:300]}"
+        refs += [sdk_stream(d, m["name"], key, prompt=bench_prompt(f"SDK reference after {i}")) for i in range(5)]
+        # the SDK's medians over five runs before the benchmark and five after it (D-5532): a burst of another job's
+        # GPU work can't sit on one instrument's side only
+        ttft = sorted(r[1] for r in refs)[len(refs) // 2]
+        tps = sorted(r[2] for r in refs)[len(refs) // 2]
+        best_sdk = max(r[2] for r in refs)
         bt, btps = float(row.get("ttft_p50_ms") or 0) / 1000, float(row.get("decode_tps") or 0)
         import sqlite3
         db = sqlite3.connect(f"file:{HOME / 'mst.db'}?mode=ro", uri=True)
