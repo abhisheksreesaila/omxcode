@@ -323,7 +323,7 @@
     <tr class="fragment"><td>An agent can use it</td><td>only through an API you write</td><td>only through an API you write</td><td class="win">yes: the controls around it are tools, and a Canvas takes gestures</td></tr>
   </table>
   <p class="fragment big" style="margin-top:22px">Not faster. One language and one file, from the button to the kernel, and agents included.</p>
-  <aside class="notes">Where the others win, say so: their pixels never leave GPU memory on every platform, and Metal runs on every Apple GPU. omxcode's pictures stay on the GPU on Linux with NVIDIA (into a GL texture) and on the Mac (into an IOSurface Core Animation shows: no copy at all, since the Mac's CPU and GPU share one memory). The Mac's GPU path is proven on GitHub's virtual Mac GPU, not yet on a real M-series chip. On the web the picture still goes through main memory; WebGPU is being tried. The agent can use the example's buttons and slider; the picture is a Canvas, whose tool takes a gesture (pan, zoom, tap) and a position.</aside>
+  <aside class="notes">Where the others win, say so: their pixels never leave GPU memory on every platform, and Metal runs on every Apple GPU. omxcode's pictures stay on the GPU on Linux with NVIDIA (into a GL texture) and on the Mac (into an IOSurface Core Animation shows: no copy at all, since the Mac's CPU and GPU share one memory). The Mac's path is proven on an Apple M4 and on GitHub's virtual Mac GPU. On the web the picture still goes through main memory; WebGPU is being tried. The agent can use the example's buttons and slider; the picture is a Canvas, whose tool takes a gesture (pan, zoom, tap) and a position.</aside>
 </section>
 
 

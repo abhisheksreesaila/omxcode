@@ -43,7 +43,7 @@ jobs:
               pixi run mojo --version >> "$log" 2>&1 || true  # (which compiler built it: goal 52's M6)
               zip=$(ls build/"$a"/mac/*-mac.zip | head -1)
               rm -f "../zips/$a-mac.zip" && cp "$zip" "../zips/$a-mac.zip"
-              [ "$a" != omxplorer ] || cp "$zip" ../out/omxplorer-mac-gpu.zip  # (the download, once its run is clean: D-309)
+              cp "$zip" "../out/$a-mac-gpu.zip"  # (the download, once its run is clean: D-309; gpu's, to run on a real Mac)
               echo "NATIVE GPU BUILD IN USE" | tee -a "$log"
             else
               echo "native build failed: the cross-built zip runs" | tee -a "$log"
