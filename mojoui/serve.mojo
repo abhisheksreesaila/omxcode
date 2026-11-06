@@ -145,6 +145,11 @@ struct Req(Copyable, Movable):
         return True
 
 
+def escape_html(s: String) -> String:
+    """Text safe inside HTML elements and quoted attributes."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+
+
 def decode(s: String) -> String:
     """%XX and '+' decoded (a query value or a path part); bad escapes stay as they are."""
     var b = s.as_bytes()
@@ -413,6 +418,11 @@ struct Reply(Movable):
     def error(status: Int, message: String, code: String = "") -> Reply:
         """{"error": {"message", "code"}} (OpenAI's shape, which the console reads too)."""
         return Reply.json('{"error": {"message": ' + json_string(message) + ', "code": ' + json_string(code) + "}}", status)
+
+    @staticmethod
+    def html(text: String, status: Int = 200) -> Reply:
+        """A page (build it with escape_html around every value): never framed, no scripts from elsewhere."""
+        return Reply(status, "text/html; charset=utf-8", text).header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
 
     @staticmethod
     def not_found() -> Reply:

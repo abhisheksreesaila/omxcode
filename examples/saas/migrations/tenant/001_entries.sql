@@ -1,0 +1,4 @@
+-- up
+CREATE TABLE IF NOT EXISTS entries(id INTEGER PRIMARY KEY, text TEXT NOT NULL, amount_cents INTEGER NOT NULL, by TEXT, at INTEGER);
+-- down
+DROP TABLE entries;

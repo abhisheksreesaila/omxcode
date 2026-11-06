@@ -180,3 +180,17 @@ def unseal(key: List[UInt8], token: String, now: Int) -> Optional[String]:
         return String(from_utf8=Span(raw.value()))
     except:
         return None
+
+
+def b64(data: List[UInt8]) -> String:
+    """Standard base64 (RFC 4648 §4: + and /, padded with =), for MIME and SMTP AUTH."""
+    var s = b64url(data).replace("-", "+").replace("_", "/")
+    var pad = (4 - s.byte_length() % 4) % 4
+    return s + "=" * pad
+
+
+def b64(text: String) -> String:
+    var d = List[UInt8]()
+    for c in text.as_bytes():
+        d.append(c)
+    return b64(d)

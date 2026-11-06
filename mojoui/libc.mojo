@@ -299,3 +299,8 @@ def file_size(fd: Int) -> Int:
 def cpu_count() -> Int:
     """sysconf(_SC_NPROCESSORS_ONLN), in Flare's form."""
     return external_call["sysconf", Int, c_int](c_int(84 if CompilationTarget.is_linux() else 58))
+
+
+def read_fd(fd: Int, addr: Int, n: Int) -> Int:
+    var f = _sym("read")
+    return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t]()[](c_int(fd), addr, c_size_t(n)))

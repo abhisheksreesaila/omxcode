@@ -1,47 +1,57 @@
-# The saas demo's server (goal 57): sign-in, tenants and payments composed from mojoui.accounts and mojoui.billing on
-# mojoui.serve. Nothing here but routes: the pieces are the framework's. Env and routes: docs/goals/57-check.py's docstring.
+# The saas demo's server (goals 57, 60): sign-in, tenants, invites, payments, email and jobs composed from mojoui's
+# modules on mojoui.serve's concurrent Handler. Nothing here but routes and wiring: the pieces are the framework's.
+# Env and routes: docs/goals/57-check.py's and 60-check.py's docstrings.
 #   scripts/saas.sh build && SAAS_SECRET=… GOOGLE_CLIENT_ID=… build/saas/server
 from std.os import getenv
-from mojoui.serve import Server, Service, Req, Reply
+from std.sys import exit
+from mojoui.serve import Handler, Req, Reply, serve
 from mojoui.accounts import Accounts, AuthConfig, Member
-from mojoui.billing import Billing, BillingConfig, paywall
+from mojoui.billing import Billing, BillingConfig
+from mojoui.jobs import Queue, QueuedJob, Runner, start_workers
+from mojoui.mail import SmtpConfig, Mail, send, welcome, invitation
+from mojoui.log import Log, Fields
 from mojoui.json import Json, json_string
-from mojoui.sqlite import Database
 from mojoui.clock import wall_seconds
 from mojoui import libc
 
+comptime PRODUCT = "omxcode SaaS"
 
-struct Saas(Service):
+
+struct Saas(Handler):
     var acc: Accounts
     var bill: Billing
+    var jobs: Queue
     var test_hook: Bool
 
-    def __init__(out self) raises:
-        var data = getenv("SAAS_DATA", "data")
-        self.acc = Accounts(data, AuthConfig.from_env())
-        self.bill = Billing(data, BillingConfig.from_env())
+    def __init__(out self, var acc: Accounts, var bill: Billing, jobs: Queue):
+        self.acc = acc^
+        self.bill = bill^
+        self.jobs = jobs
         # a session without Google, for the live Stripe check only: never with a live key
         self.test_hook = getenv("SAAS_TEST_HOOK") == "1" and self.bill.cfg.is_test_mode()
 
-    def tick(mut self):
+    def blocking(self, req: Req) -> Bool:
+        return self.acc.blocking(req) or self.bill.blocking(req)
+
+    def tick(self):
         pass
 
-    def stop(mut self):
+    def stop(self):
         pass
 
-    def answer(mut self, mut req: Req) -> Reply:
+    def answer(self, mut req: Req) -> Reply:
         var limit = 1_048_576 if req.path == "/billing/webhook" else 65_536  # (D-5727: before any work)
-        if req.body.byte_length() > limit:
+        if len(req.body.as_bytes()) > limit:
             return secure(Reply.error(413, "the request is too large", "too_large"))
         return secure(self.route(req))
 
-    def route(mut self, mut req: Req) -> Reply:
+    def route(self, mut req: Req) -> Reply:
+        var b = self.bill.handle(req, self.acc)  # (first: its /api/me adds the plan)
+        if b.status != 0:
+            return b^
         var r = self.acc.handle(req)
         if r.status != 0:
             return r^
-        var b = self.bill.handle(req, self.acc)
-        if b.status != 0:
-            return b^
         if self.test_hook and req.matches("POST", "/api/test-session"):
             return self.test_session(req.body)
         if req.matches("GET", "/"):
@@ -58,16 +68,20 @@ struct Saas(Service):
                     return Reply.error(403, "viewers can't write", "forbidden")
                 return self.add_entry(m, req.body)
             if req.matches("GET", "/api/pro"):
-                var wall = paywall(m)
+                var wall = self.bill.paywall(m)
                 if wall.status != 0:
                     return wall^
                 return Reply.json('{"pro": true}')
+            if req.matches("GET", "/api/jobs"):
+                if not m.is_admin():
+                    return Reply.error(403, "only the tenant's admin sees its jobs", "forbidden")
+                return Reply.json('{"jobs": ' + self.jobs.list_json(m.tenant) + "}")
         except e:
-            print("saas: " + String(e))
+            self.acc.log.error("saas: " + String(e))
             return Reply.error(500, "the tenant's store failed", "internal")
         return Reply.not_found()
 
-    def test_session(mut self, body: String) -> Reply:
+    def test_session(self, body: String) -> Reply:
         try:
             var j = Json.parse(body)
             var email = j.text(j.get(0, "email"))
@@ -77,20 +91,14 @@ struct Saas(Service):
         except:
             return Reply.error(400, "send {email}", "bad_request")
 
-    def open(self, m: Member) raises -> Database:
-        var db = self.acc.tenant_db(m)
-        db.exec("CREATE TABLE IF NOT EXISTS entries(id INTEGER PRIMARY KEY, text TEXT NOT NULL, amount_cents INTEGER NOT NULL, by TEXT, at INTEGER)")
-        return db^
-
     def entries(self, m: Member) raises -> Reply:
-        var db = self.open(m)
-        var q = db.prepare("SELECT text, amount_cents, by FROM entries ORDER BY id")
-        var out = String("[")
+        var q = self.acc.tenant_db(m).prepare("SELECT text, amount_cents, by FROM entries ORDER BY id")
+        var out = String('{"entries": [')
         var n = 0
         while q.step():
             out += ("," if n > 0 else "") + '{"text": ' + json_string(q.text(0)) + ', "amount_cents": ' + String(q.int(1)) + ', "by": ' + json_string(q.text(2)) + "}"
             n += 1
-        return Reply.json('{"entries": ' + out + "]}")
+        return Reply.json(out + "]}")
 
     def add_entry(self, m: Member, body: String) raises -> Reply:
         var text: String
@@ -103,14 +111,48 @@ struct Saas(Service):
             return Reply.error(400, "send {text, amount_cents}", "bad_request")
         if text == "" or text.byte_length() > 500:
             return Reply.error(400, "an entry needs a short text", "bad_request")
-        var db = self.open(m)
-        var q = db.prepare("INSERT INTO entries(text, amount_cents, by, at) VALUES (?, ?, ?, ?)")
-        q.bind(1, text)
-        q.bind(2, cents)
-        q.bind(3, m.email)
-        q.bind(4, Int(wall_seconds()))
-        q.run()
+        var db = self.acc.tenant_db(m)
+        db.begin()
+        try:
+            var q = db.prepare("INSERT INTO entries(text, amount_cents, by, at) VALUES (?, ?, ?, ?)")
+            q.bind(1, text)
+            q.bind(2, cents)
+            q.bind(3, m.email)
+            q.bind(4, Int(wall_seconds()))
+            q.run()
+            db.commit()
+        except e:
+            _ = db.rollback_quiet()
+            raise e^
         return Reply.json('{"ok": true}', 201)
+
+
+struct SaasJobs(Runner):
+    """The queue's jobs: accounts' events become emails."""
+    var smtp: SmtpConfig
+    var acc: Accounts
+
+    def __init__(out self, var smtp: SmtpConfig, var acc: Accounts):
+        self.smtp = smtp^
+        self.acc = acc^
+
+    def run(self, job: QueuedJob) -> String:
+        if not self.smtp.ready():
+            return ""  # (no SMTP set up: nothing to send)
+        try:
+            var j = Json.parse(job.payload)
+            if job.kind == "signed_up":
+                send(self.smtp, welcome(j.text(j.get(0, "email")), j.text(j.get(0, "name")), PRODUCT, self.acc.cfg.base + "/"))
+            elif job.kind == "invite":
+                var inv = self.acc.invite_details(j.number(j.get(0, "invite")))
+                if inv:  # (used or gone: nothing to send)
+                    var i = inv.value().copy()
+                    send(self.smtp, invitation(i.email, i.inviter, i.tenant_name, PRODUCT, i.link, i.days))
+            elif job.kind == "mail":
+                send(self.smtp, Mail.from_json(job.payload))
+            return ""
+        except e:
+            return String(e)
 
 
 def secure(var r: Reply) -> Reply:
@@ -118,12 +160,34 @@ def secure(var r: Reply) -> Reply:
     return r^.header("X-Content-Type-Options", "nosniff").header("Content-Security-Policy", "frame-ancestors 'none'")
 
 
+def _int(name: String, default: Int) -> Int:
+    try:
+        return atol(getenv(name, String(default)))
+    except:
+        return default
+
+
 def main() raises:
-    var app = Saas()
-    if app.test_hook:
-        print("SAAS: the test-session hook is on (SAAS_TEST_HOOK=1, a test-mode Stripe key): never in production", flush=True)
-    var served = Server.start(app^, port=atol(getenv("SAAS_PORT", "8000")), host=getenv("SAAS_HOST", "127.0.0.1"))
-    print("SAAS: listening " + String(served.port), flush=True)
-    while not served.stopped():
-        _ = libc.poll(0, 0, 500)
-    served.stop()
+    var data = getenv("SAAS_DATA", "data")
+    var log = Log.open(getenv("SAAS_LOG"))
+    log.secret(getenv("SMTP_PASSWORD"))
+    try:
+        var jobs = Queue(data + "/host.db", backoff_ms=_int("SAAS_JOB_BACKOFF_MS", 2000), max_attempts=_int("SAAS_JOB_MAX_ATTEMPTS", 5))
+        var cfg = AuthConfig.from_env()
+        if cfg.migrations == "":
+            cfg.migrations = "examples/saas/migrations"  # (the demo's own tenant schema)
+        var acc = Accounts(data, cfg^, log, jobs)
+        var bill = Billing(data, BillingConfig.from_env(), log)
+        start_workers(jobs, SaasJobs(SmtpConfig.from_env(), acc.copy()), threads=2)
+        var app = Saas(acc^, bill^, jobs)
+        if app.test_hook:
+            print("SAAS: the test-session hook is on (SAAS_TEST_HOOK=1, a test-mode Stripe key): never in production", flush=True)
+        var served = serve(app^, port=_int("SAAS_PORT", 8000), host=getenv("SAAS_HOST", "127.0.0.1"), log=log)
+        print("SAAS: listening " + String(served.port), flush=True)
+        while not served.stopped():
+            _ = libc.poll(0, 0, 500)
+        served.stop()
+    except e:
+        log.error("SAAS: not starting: " + String(e))
+        print("SAAS: not starting: " + String(e), flush=True)
+        exit(1)

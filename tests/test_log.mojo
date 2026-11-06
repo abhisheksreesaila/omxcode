@@ -24,9 +24,9 @@ def fresh(path: String) raises:
 
 
 def main() raises:
-    if not exists("build/test_log"):
-        makedirs("build/test_log")
-    var path = "build/test_log/a.log"
+    if not exists("build/test_log_files"):
+        makedirs("build/test_log_files")
+    var path = "build/test_log_files/a.log"
     fresh(path)
     # json
     var log = Log.open(path)
@@ -60,13 +60,13 @@ def main() raises:
             expect(l not in out, "leaked " + l + " in " + out)
     expect(redact("postcode=12345 grant_type=authorization_code", secrets) == "postcode=12345 grant_type=authorization_code", "a longer name isn't masked")
     expect("authorization_code" in redact("grant_type=authorization_code", secrets), "plain values stay")
-    var log2 = Log.open("build/test_log/b.log")
+    var log2 = Log.open("build/test_log_files/b.log")
     log2.secret("sk_live_reallysecret")
     log2.info("calling stripe with sk_live_reallysecret", Fields().str("note", "x sk_live_reallysecret y"))
-    expect("reallysecret" not in read("build/test_log/b.log"), "a registered secret reached the file")
+    expect("reallysecret" not in read("build/test_log_files/b.log"), "a registered secret reached the file")
     print("redact: ok")
     # rotate
-    var rp = "build/test_log/r.log"
+    var rp = "build/test_log_files/r.log"
     fresh(rp)
     var rl = Log.open(rp, max_bytes=1000, keep=3)
     for i in range(200):

@@ -212,10 +212,12 @@ struct Log(ImplicitlyCopyable, Movable):
 
     def secret(self, value: String):
         """Never write `value` (a key, a password): masked wherever it appears. (Register before serving starts.)"""
-        if value.byte_length() >= 6:
+        if self.addr != 0 and value.byte_length() >= 6:
             self._s()[].secrets.append(value)
 
     def clean(self, text: String) -> String:
+        if self.addr == 0:
+            return redact(text, List[String]())
         return redact(text, self._s()[].secrets)
 
     def write(self, level: String, msg: String, fields: Fields = Fields()):
@@ -241,6 +243,9 @@ struct Log(ImplicitlyCopyable, Movable):
         self.write("error" if status >= 500 else "info", "request", f^)
 
     def _line(self, text: String):
+        if self.addr == 0:  # (Log(addr=0): stdout, unlocked)
+            print(text, flush=True)
+            return
         var s = self._s()
         var data = text + "\n"
         _ = libc.pthread_mutex_lock(s[].mu)
