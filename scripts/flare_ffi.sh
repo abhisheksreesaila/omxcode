@@ -9,7 +9,8 @@ if [ -z "${CONDA_PREFIX:-}" ]; then exec pixi run bash "$0" "$@"; fi
 OUT=build/flare/lib
 mkdir -p "$OUT"
 P="$CONDA_PREFIX"
-if [[ "$(uname)" == "Darwin" ]]; then CC=clang CXX=clang++ EXT=dylib NODELETE=""; else CC=gcc CXX=g++ EXT=so NODELETE="-Wl,-z,nodelete"; fi
+# (.so on the Mac too: Flare dlopens "libflare_<name>.so" everywhere, flare/utils/dylib.mojo; dlopen ignores the extension, goal 55)
+if [[ "$(uname)" == "Darwin" ]]; then CC=clang CXX=clang++ EXT=so NODELETE=""; else CC=gcc CXX=g++ EXT=so NODELETE="-Wl,-z,nodelete"; fi
 one() {  # name source compiler flags...
     local name=$1 src=$2 cc=$3; shift 3
     local lib="$OUT/libflare_$name.$EXT"

@@ -1,0 +1,2 @@
+# apps scripts/mac-ci builds on the runner itself (mac.yml), not cross-built here: their companions need a Mac
+omxconsole

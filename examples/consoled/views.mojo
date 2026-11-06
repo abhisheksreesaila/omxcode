@@ -149,13 +149,26 @@ def max_version() -> String:
     return "null"
 
 
-def info_json(store: Store, port: Int, host_header: String, uptime: Int) raises -> String:
+def find_max(max_cmd: String) -> String:
+    """Where `max` runs from ("" when it isn't installed): MXC_MAX's path, or the first `max` on PATH."""
+    var first = String(max_cmd.split(" ")[0]) if max_cmd != "" else String("max")
+    if first.find("/") >= 0:
+        return first if exists(first) else String("")
+    for d in getenv("PATH").split(":"):
+        var p = String(d) + "/" + first
+        if String(d) != "" and exists(p):
+            return p
+    return ""
+
+
+def info_json(store: Store, port: Int, host_header: String, uptime: Int, max_cmd: String = "max") raises -> String:
     var base = "http://" + (host_header if host_header != "" else "127.0.0.1")
     var active = store.db.count("SELECT COUNT(*) FROM keys WHERE revoked_at IS NULL AND app NOT LIKE '\\_%' ESCAPE '\\'")
     var blocked = atol(store.db.one_text("SELECT COUNT(*) FROM requests WHERE status = 401 AND ts >= ?", [String(local_midnight())]))
     return ('{"host": ' + json_string(hostname()) + ', "endpoint": ' + json_string(base + "/v1") + ', "docs": ' + json_string(base + "/docs")
             + ', "lan_endpoint": null, "max_version": ' + max_version() + ', "uptime_seconds": ' + String(uptime)
-            + ', "active_keys": ' + String(active) + ', "blocked_today": ' + String(blocked) + "}")
+            + ', "active_keys": ' + String(active) + ', "blocked_today": ' + String(blocked)
+            + ', "max": {"found": ' + ("true" if find_max(max_cmd) != "" else "false") + ', "path": ' + json_string(find_max(max_cmd)) + "}}")
 
 
 def gateway_json(store: Store, since: Float64, unknown: Int, refused: Int) raises -> String:

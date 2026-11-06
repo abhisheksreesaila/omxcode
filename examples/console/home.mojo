@@ -17,6 +17,7 @@ from mojoui.buttons import FlatButton, PrimaryButton, TextAction, NameLink
 from mojoui.fields import SearchField
 from mojoui.lists import SplitView, ListCount, ListBody, ListEmpty, CardGrid, SelectionBar, NameCell, CellStack
 from mojoui.json import json_string
+from mojoui.feedback import Note
 from data import Store, Model, Row, row_of, sorted_models, kind_name, kind_hue, hardware, short_endpoint, KINDS, KIND_NAMES, KIND_HUES
 from msgs import ADD, SEARCH, VIEW, GROUP, LABEL_GROUP, DROP_LABEL, TICK, TICK_ALL, OPEN, TAP_LABEL, CLEAR, REMOVE_TICKED, EDIT_LABELS
 from mojoui.numformat import en_number
@@ -290,7 +291,12 @@ def home_view(st: Store, lib: Library, phone: Bool) -> View:
         # (the dense table: one line per cell, the name over its repo, the labels wrapping)
         results.append(ListBody(Table(cols, cells, align="LLR" if phone else "LLLRRRRRL", ticked=ticked, on_tick=TICK, on_tick_all=TICK_ALL,
                                       dense=True, fit="N" if phone else "NCW", compact=phone).tag("models"), compact=phone))
-    var body: List[View] = [header^, Divider().fill(), filters^, Divider().fill(),
+    var body: List[View] = [header^, Divider().fill()]
+    if st.max_missing:  # (goal 55: the app wraps MAX; without it nothing can be served, so say so first)
+        var say = String("MAX isn't installed, so models can't be served yet. Install Modular's MAX (docs.modular.com/max/packages), then open omxconsole again; if max isn't on your PATH, start it as MXC_MAX=/path/to/max.")
+        body.append(Note([Text(say)]).tag("max-banner").tooltip(say))
+        body.append(Divider().fill())
+    body += [filters^, Divider().fill(),
                             SplitView(groups_column(st, lib, phone), VStack(results^, spacing=0).align(START), compact=phone)]
     if len(lib.ticked) > 0:
         body.append(Divider().fill())

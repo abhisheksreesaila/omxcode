@@ -87,6 +87,7 @@ struct Store(Copyable, Movable):
     var gpu_total_mb: Float64
     var endpoint: String
     var lan_endpoint: String
+    var max_missing: Bool  # the daemon found no `max` to run (/admin/info's max.found): the home says how to install it
     var crew: List[Tuple[String, Float64]]  # (model name, vram GB > 0)
     var labels: List[String]
     var pull_name: String  # a running pull ("" none)
@@ -105,6 +106,7 @@ struct Store(Copyable, Movable):
         self.gpu_total_mb = 0
         self.endpoint = ""
         self.lan_endpoint = ""
+        self.max_missing = False
         self.crew = List[Tuple[String, Float64]]()
         self.labels = List[String]()
         self.pull_name = ""
@@ -203,6 +205,8 @@ def read_info(text: String, mut st: Store) raises:
     var j = Json.parse(text)
     st.endpoint = j.text(j.get(0, "endpoint"))
     st.lan_endpoint = j.text(j.get(0, "lan_endpoint"))
+    var mx = j.get(0, "max")
+    st.max_missing = mx >= 0 and not j.flag(j.get(mx, "found"), True)
 
 
 def read_system(text: String, mut st: Store) raises:

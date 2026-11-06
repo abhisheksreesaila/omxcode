@@ -240,7 +240,7 @@ struct Daemon(Service):
 
     def admin(mut self, mut req: Req) raises -> Reply:
         if req.matches("GET", "/admin/info"):
-            return Reply.json(info_json(self.store, self.cfg.port, req.header("host"), self.uptime()))
+            return Reply.json(info_json(self.store, self.cfg.port, req.header("host"), self.uptime(), self.cfg.max_cmd))
         if req.matches("GET", "/admin/system"):
             return Reply.json(system_json(self.store, self.sup, self.cfg.home, self.cfg.port, self.uptime()))
         if req.matches("GET", "/admin/models"):

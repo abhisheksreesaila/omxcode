@@ -27,6 +27,7 @@ from api import Api, chat_curl
 from mojoui.companion import Companion, exe_dir
 from mojoui.shared import environment
 from std.os import makedirs
+from std.sys import CompilationTarget
 from std.os.path import exists
 from data import Store, read_models, read_metrics, read_series, read_info, read_system, read_labels, read_pulls, read_ports
 from topbar import top_bar
@@ -116,7 +117,10 @@ struct Main(App):
             makedirs(home + "/logs", exist_ok=True)
         except:
             pass
-        self.service_problem = self.service.ensure(base + "/health", [helper], home + "/logs/consoled.log", ["MXC_PORT=" + port])
+        var env: List[String] = ["MXC_PORT=" + port]
+        if CompilationTarget.is_macos():  # (Flare's shims in the app's Frameworks: Flare looks in $FLARE_LIB_DIR first)
+            env.append("FLARE_LIB_DIR=" + exe_dir() + "/../Frameworks")
+        self.service_problem = self.service.ensure(base + "/health", [helper], home + "/logs/consoled.log", env)
         if self.service_problem == "":
             print("CONSOLED UP: " + base + (" (started)" if self.service.started() else " (already running)"), flush=True)
         else:

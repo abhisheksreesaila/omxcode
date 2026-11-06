@@ -47,6 +47,26 @@ jobs:
           otool -L build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo build/omxplorer/mac/OmxplorerMojo.app/Contents/Frameworks/*.dylib >> ../out/native-build.txt 2>&1 || true
           otool -l build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo | grep -A2 LC_RPATH >> ../out/native-build.txt 2>&1 || true
           tail -30 ../out/native-build.txt
+      - name: Build omxconsole natively (console + consoled with Flare's shims; goal 55)
+        timeout-minutes: 25
+        run: |
+          mkdir -p out src2
+          if [ ! -f ci/apps.txt ] || ! grep -qx omxconsole ci/apps.txt; then echo "omxconsole isn't in this run (ci/apps.txt)"; exit 0; fi
+          tar -xzf zips/omxcode-src.tar.gz -C src2
+          curl -fsSL https://pixi.sh/install.sh | bash > out/omxconsole-setup.txt 2>&1
+          export PATH="$HOME/.pixi/bin:$PATH"
+          cd src2
+          pixi install --frozen >> ../out/omxconsole-setup.txt 2>&1 || { echo "pixi install failed" | tee -a ../out/omxconsole-build.txt; tail -20 ../out/omxconsole-setup.txt; exit 0; }
+          if bash scripts/build.sh console mac > ../out/omxconsole-build.txt 2>&1; then
+            (cd build/console/mac && zip -qry "$GITHUB_WORKSPACE/zips/omxconsole-mac.zip" ConsoleMojo.app)
+            echo "OMXCONSOLE BUILT ($(pixi run mojo --version 2>/dev/null))" | tee -a ../out/omxconsole-build.txt
+          else
+            echo "omxconsole build failed" | tee -a ../out/omxconsole-build.txt
+          fi
+          otool -L build/console/mac/ConsoleMojo.app/Contents/MacOS/consoled >> ../out/omxconsole-build.txt 2>&1 || true
+          ls -la build/console/mac/ConsoleMojo.app/Contents/MacOS build/console/mac/ConsoleMojo.app/Contents/Frameworks >> ../out/omxconsole-build.txt 2>&1 || true
+          mv .pixi ../omxconsole-pixi-away  # (the app runs without the env, as a download does)
+          tail -40 ../out/omxconsole-build.txt
       - name: Run each app through its steps
         run: bash ci/run.sh
       - name: GPU probe (a Mojo kernel through MAX on this Mac's GPU; docs/plans/speed.md)

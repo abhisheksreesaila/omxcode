@@ -147,14 +147,15 @@ apple_objects() {  # apple_objects <dir> <triple> <host-main> [Mojo flags, e.g. 
   mojo_build mojoui/hosts/mojo_rt.mojo --target-triple "$2" --emit object -o "$1/mojo_rt.o"
 }
 
-bundle_runtime() {  # bundle_runtime <app>: Modular's runtime libraries the native build links (and theirs), byte for byte
+bundle_runtime() {  # bundle_runtime <app> [exe]: Modular's runtime libraries the native build links (and theirs), byte for byte
   # (Modular's own signatures; the executable's rpath finds them all), into the app with Modular's licence and our
-  # notice (apple/licenses), so it runs without the pixi env (D-309)
-  local exe="$1/Contents/MacOS/$NAME" fw="$1/Contents/Frameworks" dirs f dep d new=1
+  # notice (apple/licenses), so it runs without the pixi env (D-309). [exe]: another program in the app (a companion)
+  local exe="${2:-$1/Contents/MacOS/$NAME}" fw="$1/Contents/Frameworks" dirs f dep d new=1
   dirs=$(otool -l "$exe" | awk '$1=="cmd" && $2=="LC_RPATH" {getline; getline; print $2}' | sort -u)
+  local rpaths="$dirs"; dirs="$dirs $PWD/.pixi/envs/default/lib"  # (Flare's shims' OpenSSL, zlib, brotli: the env's lib)
   mkdir -p "$fw" "$1/Contents/Resources/Licenses"
   while [ $new = 1 ]; do new=0  # (until no library needs one we haven't copied)
-    for f in "$exe" "$fw"/*.dylib; do [ -e "$f" ] || continue
+    for f in "$exe" "$fw"/*.dylib "$fw"/*.so; do [ -e "$f" ] || continue
       for dep in $(otool -L "$f" | awk 'NR>1 && $1 ~ /^@rpath\// {sub("@rpath/", "", $1); print $1}'); do
         [ -e "$fw/$dep" ] && continue
         for d in $dirs; do [ -e "$d/$dep" ] && { cp "$d/$dep" "$fw/$dep"; chmod u+w "$fw/$dep"; new=1; break; }; done
@@ -162,10 +163,36 @@ bundle_runtime() {  # bundle_runtime <app>: Modular's runtime libraries the nati
       done
     done
   done
-  for d in $dirs; do install_name_tool -delete_rpath "$d" "$exe"; done
+  for d in $rpaths; do install_name_tool -delete_rpath "$d" "$exe" 2>/dev/null || true; done
   install_name_tool -add_rpath @executable_path/../Frameworks "$exe"
   cp apple/licenses/*.txt "$1/Contents/Resources/Licenses/"
   echo "   bundled: $(ls "$fw")"
+}
+
+companions_mac() {  # companions_mac <app>: on a Mac, examples/$EX/companions built into Contents/MacOS with their runtime, and
+  # Flare's shims (and theirs) in Contents/Frameworks finding each other by @loader_path (goal 55). Not on Linux: the
+  # shims are native libraries
+  [ -f "examples/$EX/companions" ] || return 0
+  if [ "$(uname)" != Darwin ]; then echo "   companions: built on a Mac only (Flare's shims are native libraries): skipped"; return 0; fi
+  local fw="$1/Contents/Frameworks" name src kind so d
+  mkdir -p "$fw"
+  while read -r name src kind; do
+    case "$name" in ''|'#'*) continue ;; esac
+    echo "   companion: $name ($src)"
+    if [ "$kind" = flare ]; then
+      scripts/mojo_flare.sh build "$src" -o "$1/Contents/MacOS/$name"
+      for so in build/flare/lib/libflare_*.so; do
+        cp -f "$so" "$fw/"; chmod u+w "$fw/$(basename "$so")"
+        for d in $(otool -l "$fw/$(basename "$so")" | awk '$1=="cmd" && $2=="LC_RPATH" {getline; getline; print $2}'); do install_name_tool -delete_rpath "$d" "$fw/$(basename "$so")"; done
+        install_name_tool -add_rpath @loader_path "$fw/$(basename "$so")"
+      done
+    else
+      mojo_build "$src" -o "$1/Contents/MacOS/$name"
+    fi
+    bundle_runtime "$1" "$1/Contents/MacOS/$name"
+  done < "examples/$EX/companions"
+  # (install_name_tool broke their signatures: an arm64 Mac runs nothing unsigned)
+  for so in "$fw"/*.so "$fw"/*.dylib "$1/Contents/MacOS"/*; do [ -f "$so" ] && codesign --force --sign - "$so" 2>/dev/null || true; done
 }
 
 build_mac() {
@@ -194,6 +221,7 @@ build_mac() {
       mojo_build hosts/mac_gpu_main.mojo -D "$jobs" --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
     fi
     bundle_runtime "$app"
+    companions_mac "$app"
   else
     echo "== Mac ($EX): AppKit, arm64 macOS 14+"
     if [ "$debug" = 1 ]; then apple_objects "$out" arm64-apple-macosx14.0 hosts/mac_main.mojo -D MOJOUI_DEBUG -D "$jobs"
@@ -201,6 +229,7 @@ build_mac() {
     rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
     pixi run ld64.lld -arch arm64 -e _mojo_entry -dead_strip -no_adhoc_codesign \
       -platform_version macos 14.0 26.0 -o "$app/Contents/MacOS/$NAME" "$out"/*.o apple/sdk/macos/*.tbd
+    companions_mac "$app"
   fi
   plist apple/mac/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$app/Contents/Resources/fonts/"

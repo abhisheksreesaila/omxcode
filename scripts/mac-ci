@@ -14,6 +14,7 @@ apps=("$@")
 mkdir -p build/mac-ci
 source_stamp=$(pixi run python scripts/side.py --stamp)  # (the sources these zips were built from: scripts/side.py's mac_fresh)
 for app in "${apps[@]}"; do
+    if grep -qx "$app" ci/mac/native.txt 2>/dev/null; then echo "$app: built on the runner (ci/mac/native.txt)"; continue; fi
     zip=$(ls build/"$app"/mac/*-mac.zip | head -1)
     newer=$(find mojoui themes hosts examples/"$app" apple -type f -newer "$zip" -not -path '*/__pycache__/*' | head -3)
     [ -z "$newer" ] || { echo "$zip is older than $newer: scripts/build.sh $app mac first"; exit 1; }
@@ -23,7 +24,8 @@ done
 # the sources too, for the macos-26 job's native GPU build of omxplorer (omxcode#3: Metal kernels need a Mac to compile);
 # everything scripts/build.sh runs for a Mac build is in it (web_assets.py since goal 34b: without it the GPU build failed, D-787)
 tar -czf build/mac-ci/omxcode-src.tar.gz --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh scripts/web_assets.py \
-    mojoui themes hosts examples/omxplorer examples/maccheck apple vendor scripts/console_fixture.py docs/goals/33/fixtures
+    mojoui themes hosts examples/omxplorer examples/maccheck apple vendor scripts/console_fixture.py docs/goals/33/fixtures \
+    examples/console examples/consoled scripts/mojo_flare.sh scripts/flare_ffi.sh
 gh release upload mac-ci build/mac-ci/omxcode-src.tar.gz --clobber -R "$REPO"
 branch=build/mac-ci/branch
 if [ ! -d "$branch/.git" ]; then
