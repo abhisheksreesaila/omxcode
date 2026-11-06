@@ -2,7 +2,10 @@
 empty folder and started with a bare environment (no pixi, no Mojo, a fresh HOME, PATH=/usr/bin:/bin) on a headless
 display. Passes when the app is still running after a few seconds and its window has something drawn in it; writes a
 screenshot per app to build/g53/bare/<app>.png and a summary to build/g53/bare.json.
-  pixi run python scripts/bare_run.py sketch jot keeper widgets lens todo"""
+  pixi run python scripts/bare_run.py sketch jot keeper widgets lens todo
+An app with a web view (widgets) needs WebKitGTK 6.0 on the machine: $WEBKITGTK_DIR (a folder from scripts/webkitgtk.sh)
+stands in for a system install, laid over /usr/lib as the app's launcher does, and then the run fails if the app fell
+back to its stand-ins. Each result records the tarball's sha256, so a repackaged download needs a new run."""
 import json
 import os
 import subprocess
@@ -14,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import headless  # noqa: E402
+import hashlib  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "build/g53/bare"
@@ -34,6 +38,9 @@ def run(app):
         with tarfile.open(tar) as t:
             t.extractall(tmp, filter="tar")
         here = Path(tmp) / f"{app}-linux-x86_64"
+        wk = os.environ.get("WEBKITGTK_DIR", "")
+        if (here / f"{app}.bin").exists() and wk:  # (as if WebKitGTK 6.0 were installed: the launcher overlays it)
+            (here / f"{app}.webkitgtk").write_text(wk)
         home = Path(tmp) / "home"
         home.mkdir()
         env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "XDG_RUNTIME_DIR": tmp}
@@ -54,9 +61,13 @@ def run(app):
             p.wait()
         log.close()
         n = colours(shot) if shot.exists() else 0
-        ok = alive and n > 16
-        why = "" if ok else ("exited with " + str(p.returncode) if not alive else f"window looks empty ({n} colours)")
-        return {"ok": ok, "alive": alive, "colours": n, "why": why,
+        text = (OUT / f"{app}.log").read_text()
+        stand_ins = "show their stand-ins" in text
+        ok = alive and n > 16 and not stand_ins
+        why = "" if ok else ("exited with " + str(p.returncode) if not alive else
+                             ("its web view didn't load (WebKitGTK 6.0: $WEBKITGTK_DIR)" if stand_ins else f"window looks empty ({n} colours)"))
+        return {"ok": ok, "alive": alive, "colours": n, "stand_ins": stand_ins, "why": why,
+                "sha256": hashlib.sha256(tar.read_bytes()).hexdigest(),
                 "log_tail": (OUT / f"{app}.log").read_text()[-400:]}
 
 

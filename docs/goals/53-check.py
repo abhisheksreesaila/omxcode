@@ -57,7 +57,11 @@ for url in links:
         continue  # (omxplorer's own releases: proved by goals 34 and 50)
     app = name.split("-")[0]
     if "linux" in name:
-        check(bare.get(app, {}).get("ok") is True, f"M2 {app}'s Linux download ran bare")
+        local = ROOT / "dist" / name
+        mine = hashlib.sha256(local.read_bytes()).hexdigest() if local.exists() else "missing"
+        b = bare.get(app, {})
+        check(b.get("ok") is True and b.get("sha256") == mine and b.get("stand_ins") is False,
+              f"M2 {app}'s Linux download (this tarball) ran bare, its window drawn, no stand-ins")
     else:
         for os_ in ("macos-15", "macos-26"):
             r = mac / f"report-{os_}"

@@ -82,7 +82,7 @@ $EX for Linux (x86_64)
 Run it here:   $RUN
 ${NOTE:+$NOTE
 }Install it:    ./install.sh     (launcher entry + ~/.local/bin/$EX; remove with $EX-uninstall)
-Built for a recent Linux with GTK 4, libadwaita and WebKitGTK 6.0 (Ubuntu 24.04 or Fedora 40 should do; not yet tried on either).
+Built for a recent Linux with GTK 4 and libadwaita$(readelf -d "$bin" 2>/dev/null | grep -q webkit || [[ "$EX" == widgets ]] && echo ", plus WebKitGTK 6.0") (Ubuntu 24.04 or Fedora 40 should do; not yet tried on either).
 Licences: LICENSE.txt (MIT, $EX's own code); NOTICE.txt (the bundled libraries).
 EOF
   rm -f "$out.tar.gz"; tar -C dist -czf "$out.tar.gz" "$(basename "$out")"
