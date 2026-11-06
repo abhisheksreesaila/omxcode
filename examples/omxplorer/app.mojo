@@ -102,7 +102,7 @@ from mojoui.sample import sample_table
 from mojoui.island import Island, Activity, IslandView, HIT_BODY, HIT_ACTION, IDLE as ISLAND_IDLE, RUNNING as ISLAND_RUNNING, UNDO as ISLAND_UNDO, ERROR as ISLAND_ERROR
 from mojoui.tablejobs import TableWork, TableFile, Answer, ScriptAnswer
 from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS
-from mojoui.models import FRAME_MODELS
+from mojoui.models import frame_models
 from mojoui.scriptpanel import ScriptPanel, SP_RUN, SP_EXPORT, SP_OPEN, SP_CLOSED
 from mojoui.script import is_script
 from mojoui.recipe import Recipe, RecipeJob, read_recipe, next_recipe_folder
@@ -2096,7 +2096,7 @@ struct Main(App):
             if c.kind == OBJ_VIDEO and c.player and v.find(sql_name(c.title())) >= 0:
                 heads.append(c.player.value().state.t())
         var fns = materialize[VIDEO_FUNCTIONS]()
-        for f in materialize[FRAME_MODELS]():
+        for f in frame_models():
             fns.append(f)
         self.script.offer(v.names.copy(), heads^, fns^)
 
