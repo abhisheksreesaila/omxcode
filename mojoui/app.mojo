@@ -10,6 +10,7 @@ from mojoui.http import Request
 from mojoui.effects import Every, Timer, InFlight, start, Backend, POLL_US
 from mojoui.webcomponent import Command, is_event_name, is_widget_tag
 from mojoui.json import Json, json_string
+from mojoui.embed import is_web_url
 from mojoui.clock import now_ns
 from std.os import getenv
 
@@ -205,6 +206,11 @@ trait App(Movable, Deinitable):
         mojoui.webcomponent.Widgets outbox and return its take(). Each answer comes back to update() as an Event."""
         return List[Command]()
 
+    def opens(mut self) -> List[String]:
+        """Pages to open in the system browser, asked for since the runtime last looked (after every update()): keep a
+        mojoui.browser.Browser outbox and return its take(). http:// and https:// only; hosts open them (goal 57)."""
+        return List[String]()
+
     @staticmethod
     def web_assets() -> List[String]:
         """The script and style bundles the app's web page loads ("editor.js", "editor.css"): built from the app's
@@ -246,6 +252,7 @@ struct Runtime[A: App](Movable):
     var undeliverable: List[Event]  # replies made without sending (an app with HTTP = False), handed over at the next poll
     var timers: List[Timer]
     var commands_out: List[Command]  # widget commands for the host to take (take_commands)
+    var opens_out: List[String]  # pages for the host to open in the browser (take_opens)
     var awaiting: List[Command]  # sent, waiting for their answer (reply)
     var command_seq: Int
     var budget_ns: Int  # the slow-frame watchdog (watch()): 0 off; else any update, view or canvas draw over it prints SLOW:
@@ -261,6 +268,7 @@ struct Runtime[A: App](Movable):
         self.undeliverable = List[Event]()
         self.timers = List[Timer]()
         self.commands_out = List[Command]()
+        self.opens_out = List[String]()
         self.awaiting = List[Command]()
         self.command_seq = 0
         self.budget_ns = 0
@@ -319,6 +327,11 @@ struct Runtime[A: App](Movable):
             if not kept:
                 next.append(Timer(w.ms, w.msg))
         self.timers = next^
+        for url in self.app.opens():
+            if is_web_url(url):
+                self.opens_out.append(url)
+            else:
+                print("mojoui: refused to open " + String(url.split(":")[0]) + ": (not an http or https URL)")
         var cmds = self.app.commands()
         for i in range(len(cmds)):
             var c = cmds[i].copy()
@@ -338,6 +351,12 @@ struct Runtime[A: App](Movable):
                 self.commands_out.append(c^)
             elif c.reply != NO_MSG:
                 self.undeliverable.append(Event(c.reply, "", 0, id=c.id, error=problem, name=c.name))
+
+    def take_opens(mut self) -> List[String]:
+        """The pages the app asked to open since the host last took them (each once): the host opens them."""
+        var out = self.opens_out^
+        self.opens_out = List[String]()
+        return out^
 
     def take_commands(mut self) -> List[Command]:
         """The widget commands asked for since the host last took them (each once, numbered by seq); the ones that

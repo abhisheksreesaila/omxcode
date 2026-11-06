@@ -2872,6 +2872,8 @@ struct GtkHost[A: App](Movable):
     def send_commands(mut self, self_addr: Int):
         """The widget commands the app asked for, each to its widget's page; one whose widget isn't on the screen is
         answered with an error (through the inbox, on the next idle turn, as a page's reply is)."""
+        for url in self.rt.take_opens():  # (pages the app asked for: mojoui.browser)
+            open_url(url)
         var commands = self.rt.take_commands()
         if len(commands) == 0:
             return

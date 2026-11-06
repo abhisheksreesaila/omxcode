@@ -10,6 +10,7 @@ from std.ffi import c_int, external_call
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
+from mojoui.browser import open_url as browser_open_url
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
@@ -2962,6 +2963,8 @@ struct AppKitHost[A: App](Movable):
     def send_commands(mut self, self_addr: Int):
         """The widget commands the app asked for, each to its widget's page; one whose widget isn't on the screen is
         answered with an error (through the inbox, on the next run-loop turn, as a page's reply is)."""
+        for url in self.rt.take_opens():  # (pages the app asked for: mojoui.browser)
+            _ = browser_open_url(url)
         var commands = self.rt.take_commands()
         if len(commands) == 0:
             return

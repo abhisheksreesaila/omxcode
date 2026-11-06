@@ -48,6 +48,11 @@ def listen(fd: Int, backlog: Int) -> Int:
     return Int(external_call["listen", c_int](c_int(fd), c_int(backlog)))
 
 
+def accept(fd: Int, addr: Int, addrlen: Int) -> Int:
+    """macOS's (Linux: accept4); Flare's form (flare/net/_libc.mojo)."""
+    return Int(external_call["accept", c_int](c_int(fd), _p(addr), Pointer[c_uint, MutUntrackedOrigin](unsafe_from_address=addrlen)))
+
+
 def accept4(fd: Int, addr: Int, addrlen: Int, flags: Int) -> Int:
     """Linux only (Flare declares it there; Apple has no accept4)."""
     return Int(external_call["accept4", c_int](c_int(fd), _p(addr), Pointer[c_uint, MutUntrackedOrigin](unsafe_from_address=addrlen), c_int(flags)))

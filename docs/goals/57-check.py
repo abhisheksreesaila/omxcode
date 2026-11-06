@@ -465,7 +465,7 @@ def m4():
         out = r.stdout + r.stderr
         (OUT / "m4.out").write_text(out)
         for want in ("Signed in as ada@example.com", "Pro"):
-            if not re.search(rf"^LABEL .*{re.escape(want)}", out, re.M):
+            if not re.search(rf"^LABEL:? .*{re.escape(want)}", out, re.M):
                 return False, f"no label `{want}` (build/g57/m4.out; browser saw {seen})"
         tenants = list((srv.data / "tenants").glob("*.db"))
         rows = [srv.tenant_rows(p.stem) for p in tenants]

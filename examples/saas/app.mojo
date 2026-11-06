@@ -1,0 +1,275 @@
+# saas: a tiny native client of the saas server (goal 57): sign in with Google in the system browser (mojoui.signin,
+# RFC 8252), keep entries in your tenant's own SQLite on the server, upgrade to Pro through Stripe Checkout
+# (mojoui.billing on the server). Everything here is framework pieces: Browser (open_url), DesktopSignIn, Http.
+#   scripts/saas.sh run &                     # the server (keys from ~/.config/omxcode/saas.env)
+#   scripts/build.sh saas linux && SAAS_SERVER=http://127.0.0.1:8000 build/saas/linux/saas
+
+from mojoui import App, Event, View, VStack, HStack, Text, Button, TextField, TITLE, CAPTION, PROMINENT, Spacer
+from mojoui.http import Http, Request
+from mojoui.effects import Every
+from mojoui.browser import Browser
+from mojoui.signin import DesktopSignIn
+from mojoui.json import Json, json_string
+from mojoui.shared import environment
+from mojoui.theme import Theme
+from themes.liquid import liquid
+
+comptime SIGN_IN = 1
+comptime WAIT_BROWSER = 2  # a timer while the browser is out: has the loopback got its code?
+comptime GOT_TOKEN = 3
+comptime GOT_ME = 4
+comptime NOTE = 5
+comptime AMOUNT = 6
+comptime ADD = 7
+comptime ADDED = 8
+comptime GOT_ENTRIES = 9
+comptime UPGRADE = 10
+comptime GOT_CHECKOUT = 11
+comptime SIGN_OUT = 12
+comptime SIGNED_OUT = 13
+comptime WAIT_PLAN = 14  # a timer while checkout is out: has the plan changed?
+comptime MANAGE = 15
+comptime ENTRY = 1000  # ENTRY + k: entry k's row (k < 100_000)
+
+
+@fieldwise_init
+struct Entry(Copyable, Movable):
+    var text: String
+    var cents: Int
+
+
+def cents_of(text: String) -> Int:
+    """"4.50" → 450, "12" → 1200, "0.5" → 50; -1 when it isn't an amount."""
+    var s = String(text.strip())
+    var whole = 0
+    var frac = 0
+    var frac_digits = 0
+    var dot = False
+    if s.byte_length() == 0:
+        return -1
+    for b in s.as_bytes():
+        if b == 46 and not dot:
+            dot = True
+        elif b >= 48 and b <= 57:
+            if dot:
+                if frac_digits == 2:
+                    return -1
+                frac = frac * 10 + Int(b - 48)
+                frac_digits += 1
+            else:
+                whole = whole * 10 + Int(b - 48)
+                if whole > 10_000_000:
+                    return -1
+        else:
+            return -1
+    if frac_digits == 1:
+        frac *= 10
+    return whole * 100 + frac
+
+
+def money(cents: Int) -> String:
+    var c = cents % 100
+    return "$" + String(cents // 100) + "." + ("0" if c < 10 else "") + String(c)
+
+
+struct Main(App):
+    comptime HTTP = True
+    var http: Http
+    var browser: Browser
+    var server: String
+    var signing: Optional[DesktopSignIn]
+    var token: String  # the bearer token: in memory only, never in a view
+    var email: String
+    var plan: String
+    var role: String
+    var note: String
+    var amount: String
+    var entries: List[Entry]
+    var upgrading: Bool
+    var status: String
+
+    def __init__(out self):
+        self.http = Http()
+        self.browser = Browser()
+        self.server = environment("SAAS_SERVER", "http://127.0.0.1:8000")
+        self.signing = None
+        self.token = ""
+        self.email = ""
+        self.plan = ""
+        self.role = ""
+        self.note = ""
+        self.amount = ""
+        self.entries = List[Entry]()
+        self.upgrading = False
+        self.status = ""
+
+    def title(self) -> String:
+        return "omxcode SaaS"
+
+    def theme(self) -> Theme:
+        return liquid()
+
+    def window_size(self) -> Tuple[Int, Int]:
+        return (520, 640)
+
+    def requests(mut self) -> List[Request]:
+        return self.http.take()
+
+    def opens(mut self) -> List[String]:
+        return self.browser.take()
+
+    def every(self) -> List[Every]:
+        var out = List[Every]()
+        if self.signing:
+            out.append(Every(100, WAIT_BROWSER))
+        if self.upgrading:
+            out.append(Every(1000, WAIT_PLAN))
+        return out^
+
+    def authed(self, var r: Request) -> Request:
+        return r^.header("Authorization", "Bearer " + self.token)
+
+    def update(mut self, e: Event):
+        var m = e.message
+        if m == SIGN_IN:
+            try:
+                var s = DesktopSignIn(self.server)
+                self.browser.open(s.url)
+                self.signing = s^
+                self.status = "Finish signing in in your browser…"
+            except err:
+                self.status = "Can't start the sign-in: " + String(err)
+        elif m == WAIT_BROWSER and self.signing:
+            var code = self.signing.value().code()
+            if code != "":
+                self.http.send(self.signing.value().token_request(GOT_TOKEN, code))
+                self.signing = None
+            elif self.signing.value().failed():
+                self.signing = None
+                self.status = "The sign-in timed out: try again."
+        elif m == GOT_TOKEN:
+            var t = self.field(e, "token")
+            if e.number != 200 or t == "":
+                self.status = "The server refused the sign-in (" + String(e.number) + ")."
+                return
+            self.token = t
+            self.http.send(self.authed(Request.get(GOT_ME, self.server + "/api/me")))
+        elif m == GOT_ME:
+            if e.number == 401:
+                self.signed_out("Signed out.")
+                return
+            if e.number != 200:
+                return
+            self.email = self.field(e, "email")
+            self.role = self.field(e, "role")
+            var plan = self.field(e, "plan")
+            if plan == "pro" and self.upgrading:
+                self.upgrading = False
+                self.status = "Welcome to Pro."
+            elif self.status.startswith("Finish signing in"):
+                self.status = ""
+            if self.plan == "":
+                self.http.send(self.authed(Request.get(GOT_ENTRIES, self.server + "/api/entries")))
+            self.plan = plan
+        elif m == NOTE:
+            self.note = e.text
+        elif m == AMOUNT:
+            self.amount = e.text
+        elif m == ADD:
+            var cents = cents_of(self.amount)
+            var text = String(self.note.strip())
+            if text == "" or cents < 0:
+                self.status = "An entry needs a note and an amount like 4.50."
+                return
+            self.http.send(self.authed(Request.post_json(ADDED, self.server + "/api/entries", '{"text": ' + json_string(text) + ', "amount_cents": ' + String(cents) + "}")))
+            self.note = ""
+            self.amount = ""
+        elif m == ADDED:
+            self.status = "" if e.number == 201 else ("Viewers can't add entries." if e.number == 403 else "The server refused it (" + String(e.number) + ").")
+            self.http.send(self.authed(Request.get(GOT_ENTRIES, self.server + "/api/entries")))
+        elif m == GOT_ENTRIES:
+            if e.number != 200:
+                return
+            try:
+                var j = Json.parse(e.text)
+                var list = j.get(0, "entries")
+                var out = List[Entry]()
+                for k in range(j.size(list)):
+                    var row = j.at(list, k)
+                    out.append(Entry(j.text(j.get(row, "text")), j.number(j.get(row, "amount_cents"))))
+                self.entries = out^
+            except:
+                pass
+        elif m == UPGRADE:
+            self.http.send(self.authed(Request(GOT_CHECKOUT, "POST", self.server + "/billing/checkout")))
+        elif m == GOT_CHECKOUT:
+            var url = self.field(e, "url")
+            if e.number != 200 or url == "":
+                self.status = "Checkout isn't available (" + String(e.number) + ")."
+                return
+            self.browser.open(url)
+            self.upgrading = True
+            self.status = "Finish checkout in your browser…"
+        elif m == WAIT_PLAN:
+            self.http.send(self.authed(Request.get(GOT_ME, self.server + "/api/me")))
+        elif m == MANAGE:
+            self.status = "Changing or cancelling the plan in Stripe's portal comes next."
+        elif m == SIGN_OUT:
+            self.http.send(self.authed(Request.get(SIGNED_OUT, self.server + "/logout")))
+        elif m == SIGNED_OUT:
+            self.signed_out("Signed out.")
+
+    def signed_out(mut self, why: String):
+        self.token = ""
+        self.email = ""
+        self.plan = ""
+        self.role = ""
+        self.entries = List[Entry]()
+        self.upgrading = False
+        self.status = why
+
+    def field(self, e: Event, name: String) -> String:
+        try:
+            var j = Json.parse(e.text)
+            return j.text(j.get(0, name))
+        except:
+            return ""
+
+    def view(self) -> View:
+        var status = Text(self.status, style=CAPTION)
+        if self.email == "":
+            return VStack(
+                Text("omxcode SaaS", style=TITLE),
+                Text("Your entries, in your own tenant. Sign in with your Google account.", style=CAPTION),
+                Button("Sign in with Google", on_tap=SIGN_IN, style=PROMINENT),
+                status^,
+                spacing=16,
+            ).padding(24).width(440)
+        var rows = List[View]()
+        var total = 0
+        for k in range(len(self.entries)):
+            ref en = self.entries[k]
+            total += en.cents
+            rows.append(HStack(Button(en.text, on_tap=ENTRY + k).grow(), Text(money(en.cents)), spacing=8).fill())
+        if len(rows) == 0:
+            rows.append(Text("No entries yet", style=CAPTION))
+        var pro = self.plan == "pro"
+        return VStack(
+            HStack(Text("omxcode SaaS", style=TITLE).grow(), Button("Sign out", on_tap=SIGN_OUT), spacing=8).fill(),
+            Text("Signed in as " + self.email, style=CAPTION),
+            HStack(
+                Text("Plan: Pro" if pro else "Plan: Free").grow(),
+                Button("Manage plan", on_tap=MANAGE) if pro else Button("Upgrade", on_tap=UPGRADE, style=PROMINENT),
+                spacing=8,
+            ).fill(),
+            HStack(
+                TextField(self.note, placeholder="Note", on_change=NOTE, on_submit=ADD).grow(),
+                TextField(self.amount, placeholder="Amount", on_change=AMOUNT, on_submit=ADD).width(110),
+                Button("Add", on_tap=ADD),
+                spacing=8,
+            ).fill(),
+            VStack(rows^, spacing=6).fill(),
+            Text(String(len(self.entries)) + (" entry · " if len(self.entries) == 1 else " entries · ") + money(total), style=CAPTION),
+            status^,
+            spacing=14,
+        ).padding(24).width(440)
