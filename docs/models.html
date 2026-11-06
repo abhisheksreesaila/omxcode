@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en" class="oq-root oq-night oq-family-dev no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add your own model · omxcode</title>
+<meta name="description" content="Turn a PyTorch network into a function an omxcode script calls, in the app's own process, on the GPU. One command converts it and checks it against PyTorch; the pack describes itself; no Mojo to write.">
+<meta property="og:title" content="Add your own model to omxcode: a PyTorch network as a script function">
+<meta property="og:description" content="Convert, check against PyTorch, drop the pack in a folder. omxplorer's Script window and its agent can call it at once.">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/models-scene.png">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="omxqua/src/fonts.css">
+<link rel="stylesheet" href="omxqua/src/tokens.css">
+<link rel="stylesheet" href="omxqua/src/components.css">
+<link rel="stylesheet" href="site.css">
+<style>
+section .head { max-width: 860px; }
+.code { margin: 0; font: 13px/1.7 var(--mono); color: var(--ink2); white-space: pre; overflow-x: auto; }
+.code .k { color: var(--ink); font-weight: 600; } .code .c { opacity: .62; } .code .s { color: var(--oq-ok); } .code .o { color: var(--ink); }
+.pane { border-radius: 20px; background: var(--oq-surface-1); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); padding: 18px 20px; min-width: 0; }
+.pane + .pane { margin-top: 14px; }
+.file { font: 600 11.5px var(--mono); letter-spacing: .06em; color: var(--ink2); display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.file b { color: var(--ink); letter-spacing: 0; } .file button { margin-left: auto; font: 600 11px var(--mono); color: var(--ink2); background: none; border: 0; cursor: pointer; }
+.step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 28px; margin-top: 36px; align-items: start; }
+.step .say p { margin: 0 0 14px; color: var(--ink2); font-size: 16px; line-height: 1.6; } .step .say p b { color: var(--ink); font-weight: 600; }
+.step .say code, .facts3 code, .next code { font: 13.5px var(--mono); color: var(--ink); }
+.step .say ul { margin: 0 0 14px; padding-left: 20px; color: var(--ink2); font-size: 15.5px; line-height: 1.6; } .step .say li b { color: var(--ink); font-weight: 600; }
+.note2 { font-size: 13.5px; color: var(--ink2); line-height: 1.5; margin-top: 12px; }
+.shot { margin: 36px 0 0; } .shot img { width: 100%; display: block; border-radius: 16px; box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); }
+.shot figcaption { font: 12.5px var(--mono); color: var(--ink2); margin-top: 10px; text-align: center; }
+.facts3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 36px; }
+.facts3 > div { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; }
+.facts3 .t { font: 600 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.facts3 h3 { font-size: 19px; margin: 8px 0 6px; } .facts3 p { margin: 0; color: var(--ink2); font-size: 15px; line-height: 1.5; }
+.next { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 36px; }
+.next a { border-radius: 20px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 20px; text-decoration: none; color: inherit; transition: box-shadow .2s, transform .2s; }
+.next a:hover { box-shadow: 0 0 0 1px var(--word); transform: translateY(-1px); }
+.next h3 { font-size: 18px; margin: 0 0 6px; } .next p { margin: 0; color: var(--ink2); font-size: 14.5px; line-height: 1.5; }
+@media (max-width: 960px) { .step { grid-template-columns: minmax(0, 1fr); } .facts3 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<nav class="lnav">
+  <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode <span class="sub">· your own model</span></a>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#setup">Set up</a><a href="#convert">Convert</a><a href="#describe">Describe</a><a href="#call">Call</a><a href="#limits">Limits</a></div>
+  <div class="right"><a class="cta" href="#setup">Start</a></div>
+</nav>
+
+<main id="top">
+
+<section class="hero center" style="padding-bottom:40px">
+  <div class="wrap" style="display:block">
+    <div class="eyebrow rise"><span>Add your own model</span></div>
+    <h1 class="rise" data-words data-step="70" data-d0="120" style="font-size:clamp(48px,7vw,100px)">Your model, as a function.</h1>
+    <p class="lede rise" style="margin-left:auto;margin-right:auto"><span data-words data-step="26" data-d0="700">A PyTorch network becomes a function an omxcode script calls. It runs inside the app, on the GPU, with no server beside it.</span> <span class="two" data-words data-step="26" data-d0="1100">One command converts it and checks it against PyTorch. You write no Mojo.</span></p>
+    <div class="ctas rise"><span style="animation-delay:1500ms"><a class="cta" href="#setup">Start</a></span><span style="animation-delay:1580ms"><a class="more" href="#limits">What it can't do yet</a></span></div>
+  </div>
+</section>
+
+<!-- 0. Set up -->
+<section id="setup" style="padding-top:40px">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 0</div>
+      <h2 class="rv">Set up. <span class="two">One command after the clone.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><code>scripts/setup</code> does everything a newcomer used to do by hand:</p>
+        <ul>
+          <li><b>env:</b> Mojo, MAX and the tools, through <a href="https://pixi.sh">pixi</a>. A half-installed environment is cleaned and installed again on its own.</li>
+          <li><b>build:</b> omxplorer, the showcase app. The first build takes about five minutes.</li>
+          <li><b>data:</b> a slice of <a href="https://droid-dataset.github.io/">DROID</a>, real robot episodes (CC-BY-4.0), fetched from the Hugging Face Hub and cut into clips with their telemetry.</li>
+          <li><b>packs:</b> the three models that come with omxcode, each built on your machine from its maker's weights.</li>
+        </ul>
+        <p>Run it again any time: a step that's done is skipped, so a second run takes seconds.</p>
+      </div>
+      <div class="pane rv"><div class="file">a terminal<button type="button" data-copy="#c-setup">copy</button></div>
+<pre class="code" id="c-setup">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode
+scripts/setup                <span class="c"># env, build, data, packs</span>
+scripts/setup --no-models    <span class="c"># everything but the packs</span></pre>
+        <p class="note2">You need Linux on x86-64 with GTK 4 and libadwaita 1.7+, <a href="https://pixi.sh">pixi</a>, and an NVIDIA GPU for the packs. On a Mac, setup does the rest and says why it skips the packs.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 1. Convert -->
+<section id="convert">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 1</div>
+      <h2 class="rv">Convert it. <span class="two">Checked against PyTorch before it's written.</span></h2>
+      <p class="lede rv"><code>scripts/packs/from_torch.py</code> reads your network's layers, rebuilds them as a <a href="https://docs.modular.com/max/">MAX</a> graph, compiles it for your GPU, and runs both on the test pictures. If MAX's answers differ from PyTorch's, nothing is written.</p>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p><b>A torchvision model</b> is one word: <code>torchvision:resnet18</code> takes ResNet-18 with its default weights. ResNet-18 is how <code>scene()</code>, the third model that comes with omxcode, was made.</p>
+        <p><b>Your own network</b> is a Python file and a function that returns it: <code>my_net.py:build</code>. The converter traces it with <code>torch.fx</code>, so ordinary <code>forward</code> code works: residual adds, joined channels, activations as modules or as calls.</p>
+        <p><b>--function</b> is what scripts will call it. The labels come from torchvision, from a <code>LABELS</code> list in your file, or from <code>--labels file.txt</code>.</p>
+      </div>
+      <div>
+      <div class="pane rv"><div class="file">a terminal<button type="button" data-copy="#c-convert">copy</button></div>
+<pre class="code" id="c-convert">pixi run python scripts/packs/from_torch.py \
+    torchvision:resnet18 build/packs/scene --function scene
+<span class="o">traced torchvision:resnet18: 51 steps, 42 weight arrays, 5 reference pictures</span>
+<span class="o">   scene: MAX matches torch on 5/5 pictures (top label), logits within 0.0351; 1000 labels</span></pre></div>
+      <div class="pane rv"><div class="file"><b>tests/fixtures/models/tiny_cnn.py</b> · a network written from scratch</div>
+<pre class="code" data-file="tests/fixtures/models/tiny_cnn.py">def forward(self, x):
+    x = self.pool(self.stem(x))
+    x = x + self.a(x)                                    # a residual add
+    x = torch.cat([self.b(x), self.c(x)], dim=1)         # channels joined
+    x = torch.sigmoid(x) * x                             # mul, a function call
+    x = self.squash(x)                                   # 4 × 4 left: flatten's order matters
+    return self.head(self.drop(torch.flatten(x, 1)))</pre>
+        <p class="note2">Converted with <code>from_torch.py tests/fixtures/models/tiny_cnn.py:tiny …</code>: MAX matches PyTorch on all 5 test pictures, its outputs within 0.00000004.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. Describe -->
+<section id="describe">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 2</div>
+      <h2 class="rv">The pack describes itself. <span class="two">That is the whole registration.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p>A pack is a folder: the compiled graph (<code>scene.mef</code>), its weights (<code>scene.safetensors</code>), <code>labels.txt</code>, and <code>model.json</code>, which the converter writes.</p>
+        <p>The framework reads every <code>model.json</code> in the packs folder (<code>build/packs</code>, or <code>$OMX_PACKS</code>). A folder there is a function. Take the folder away and the function is gone. No list to edit, no Mojo to rebuild.</p>
+        <p>For an <code>image-labels</code> pack, the framework itself crops each frame to its centre square, resizes it to the pack's size, and reads back the best label, the same way the converter's check did. Mojo and PyTorch pick the same label on every test picture.</p>
+      </div>
+      <div>
+      <div class="pane rv"><div class="file"><b>build/packs/scene/model.json</b> · written by from_torch.py</div>
+<pre class="code" data-file="build/packs/scene/model.json">{
+ "function": "scene",
+ "kind": "image-labels",
+ "about": "torchvision:resnet18 (from_torch.py)",
+ "input": {
+  "size": 224,
+  "fit": "centre-square",
+  "pixels": "RGB 0-255 NHWC float32"
+ },
+ "labels": "labels.txt",
+ "model": "torchvision:resnet18"
+}</pre></div>
+      <div class="pane rv"><div class="file"><b>mojoui/imagemodel.mojo</b> · the same pack from your own app</div>
+<pre class="code" data-file="mojoui/imagemodel.mojo">#   var m = ImageModel("build/packs/scene")        # (loaded once per process: mojoui.maxrt.shared_model)
+#   var top = m.top_rgba(frame, w, h)              # a video frame (one UInt32 a pixel, RGBA in memory) → Guess
+#   m.labels[top.label], top.score                 # its best label and how sure (softmax, 0–1)
+#   var logits = m.logits_rgba(frame, w, h)        # every label's raw output, in labels.txt's order</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Call -->
+<section id="call">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Step 3</div>
+      <h2 class="rv">Call it. <span class="two">From a script, a button or an agent.</span></h2>
+    </div>
+    <div class="step">
+      <div class="say rv">
+        <p>In omxplorer, open a video and the Script window. The new model is already in the <b>Apply</b> row, beside <code>detect</code>. Apply it to a few seconds, or write the call yourself:</p>
+        <p>Each frame becomes a row: <b>frame</b>, <b>t</b> (seconds), <b>label</b> and <b>score</b> (how sure, 0 to 1). The result lands as a table card, so the next line of the script can query it, join it to the telemetry or chart it.</p>
+        <p><b>Agents</b> get it too: omxplorer's agent host offers an <code>apply-scene</code> tool as soon as the pack is there.</p>
+      </div>
+      <div class="pane rv"><div class="file">omxplorer · the Script window</div>
+<pre class="code">labels = scene(f00118, 3, 8);
+per_label = SELECT label, COUNT(*) AS frames FROM labels GROUP BY label;</pre>
+        <p class="note2">The robot's camera isn't what ImageNet was trained on, so ResNet-18's labels for it are guesses ("projectile", "dishwasher"). That's fine: this page is about plugging a model in, and your own model will know your own footage.</p></div>
+    </div>
+    <figure class="shot rv"><img src="img/models-scene.png" alt="omxplorer in dark mode: the robot fleet table, the featured episode's video, and a new table card from scene() with a label and score for every frame between 3 and 8 seconds" loading="lazy"><figcaption>omxplorer on Linux: scene() applied to seconds 3–8 of episode F00118, shot by the app's test mode</figcaption></figure>
+  </div>
+</section>
+
+<!-- Limits -->
+<section id="limits">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Limits</div>
+      <h2 class="rv">What it can't do yet.</h2>
+    </div>
+    <div class="facts3">
+      <div class="rv"><div class="t">Layers</div><h3>Convolutional networks</h3><p>It converts Conv2d (groups 1), BatchNorm2d, Linear, the common activations, max and average pooling, add, mul, cat and flatten. Anything else stops it with the layer's name, for example an <code>Upsample</code>. Then that part's MAX graph is written by hand, as <code>scripts/packs/yolox.py</code> does.</p></div>
+      <div class="rv"><div class="t">Kinds</div><h3>Pictures to labels</h3><p>A pack the framework runs by itself takes a picture and returns labels. Text models (<code>classify()</code>, e5) and detectors (<code>detect()</code>, YOLOX) work too, but each needs its own Mojo for what goes in and comes out: a tokenizer, box decoding.</p></div>
+      <div class="rv"><div class="t">Where</div><h3>Linux with an NVIDIA GPU</h3><p>Packs are compiled by MAX for the GPU in the machine, on Linux. The converter checks every pack on that GPU before writing it. Macs run omxplorer and its video, but not packs yet.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="next">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow rv">Next</div>
+      <h2 class="rv">Where to go from here.</h2>
+    </div>
+    <div class="next rv">
+      <a href="omxplorer.html"><h3>omxplorer</h3><p>The app these functions live in: tables, video, charts and one Script window over all of them.</p></a>
+      <a href="start.html"><h3>Your first app</h3><p>One Mojo file that becomes a native Linux app and a web app.</p></a>
+      <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/scripts/packs/from_torch.py"><h3>The converter</h3><p><code>from_torch.py</code>: about 350 lines, every layer it knows in one place.</p></a>
+      <a href="llms.txt"><h3>For your agent</h3><p><code>llms.txt</code>: these docs in a form a coding agent can read.</p></a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="note">Every command on this page was run on one Linux machine with an RTX 3090. The picture is omxplorer's real window, shot by its test mode.</p>
+    <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="index.html">← Back to omxcode</a></div>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+<script>document.documentElement.classList.remove("no-js");</script>
+</body>
+</html>

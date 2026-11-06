@@ -98,7 +98,7 @@ section .head { max-width: 860px; }
 <pre class="code" id="c-install">curl -fsSL https://pixi.sh/install.sh | sh     <span class="c"># if you don't have pixi</span>
 git clone https://github.com/abhisheksreesaila/omxcode
 cd omxcode
-pixi install                                   <span class="c"># Mojo 1.1 and the rest, in .pixi/</span></pre>
+pixi install                                   <span class="c"># Mojo 1.2 and the rest, in .pixi/</span></pre>
         <p class="note2">The first <code>pixi install</code> downloads a few GB. If it stops at <code>failed to link 'share/X11/xkb'</code>, two packages raced for one path: delete the half-made <code>.pixi</code> folder and run it again.</p></div>
     </div>
   </div>
@@ -249,6 +249,7 @@ Now: Tapped 1 times</span></pre>
     <div class="next rv">
       <a href="learn/"><h3>Learn it in slides</h3><p>From this app to what's new: agents as a host, native AI screens, the GPU in the same file.</p></a>
       <a href="tasks.html"><h3>Tutorial 2: a todo app</h3><p>A list from your data, messages that carry an id, and tasks kept in SQLite.</p></a>
+      <a href="models.html"><h3>Add your own model</h3><p>A PyTorch network as a function your scripts call, on the GPU, in the app's own process.</p></a>
       <a href="components.html"><h3>Components</h3><p>124 of them, from buttons to data grids, charts and maps, with what runs where.</p></a>
       <a href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples"><h3>Examples</h3><p>Every app in <code>examples/</code> is one folder you can copy: a todo list, notes, a drawing app, a GPU canvas.</p></a>
       <a href="agents.html"><h3>Agents build screens</h3><p>An AG-UI agent answers with maps, charts and forms, drawn natively.</p></a>

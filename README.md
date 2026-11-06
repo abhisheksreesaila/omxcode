@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/licence-MIT-1d1d21?labelColor=0b0b0d"></a>
-  <img alt="Mojo 1.1" src="https://img.shields.io/badge/Mojo-1.1-1d1d21?labelColor=0b0b0d">
+  <img alt="Mojo 1.2" src="https://img.shields.io/badge/Mojo-1.2-1d1d21?labelColor=0b0b0d">
   <img alt="Linux · Web · Android · Mac · iPhone · Agent" src="https://img.shields.io/badge/hosts-Linux%20%C2%B7%20Web%20%C2%B7%20Android%20%C2%B7%20Mac%20%C2%B7%20iPhone%20%C2%B7%20Agent-1d1d21?labelColor=0b0b0d">
   <img alt="Public alpha" src="https://img.shields.io/badge/status-public%20alpha-1d1d21?labelColor=0b0b0d">
   <a href="https://abhisheksreesaila.github.io/omxcode/"><img alt="Website" src="https://img.shields.io/badge/website-omxcode-1d1d21?labelColor=0b0b0d"></a>
@@ -194,22 +194,20 @@ All on one Linux machine with an RTX 3090, and all from the checks or their benc
 
 The GPU path is NVIDIA today. Apple and phone GPUs use the CPU path, which runs the same functions.
 
-**Why Mojo, honestly.** Mojo is young (1.1). It has a small ecosystem, no official iPhone, Android or WebAssembly target (omxcode cross-compiles with two hand-written runtime functions), and no Windows release yet. Flutter, React Native and the Rust kits are far ahead on maturity, tooling and production users. What none of them has is one readable language from the button to the GPU kernel, with native controls on every platform and an agent built in as a host.
+**Why Mojo, honestly.** Mojo is young (1.2). It has a small ecosystem, no official iPhone, Android or WebAssembly target (omxcode cross-compiles with two hand-written runtime functions), and no Windows release yet. Flutter, React Native and the Rust kits are far ahead on maturity, tooling and production users. What none of them has is one readable language from the button to the GPU kernel, with native controls on every platform and an agent built in as a host.
 
 ## Try it
 
-You need x86-64 Linux with GTK 4 and libadwaita 1.7+, [pixi](https://pixi.sh), and an NVIDIA GPU for the GPU path (without one, the CPU path runs the same code).
+You need x86-64 Linux with GTK 4 and libadwaita 1.7+, [pixi](https://pixi.sh), and an NVIDIA GPU for the GPU path and the models (without one, the CPU path runs the same code).
 
 ```bash
 git clone https://github.com/abhisheksreesaila/omxcode && cd omxcode
-pixi install                                   # Mojo 1.1, MAX, FastHTML
-scripts/omxplorer.sh                           # omxplorer, native window
+scripts/setup                                  # the env, omxplorer, the robot demo data, the models
+scripts/omxplorer.sh build/demo/fleet.csv      # omxplorer, native window, with 2,000 robot episodes
 scripts/omxplorer.sh web                       # the same app at http://127.0.0.1:5001
-scripts/check                                  # rebuild everything and re-prove every goal
 ```
 
-> [!NOTE]
-> If `pixi install` stops at `failed to link 'share/X11/xkb'`, two conda-forge packages (Xvfb and xkeyboard-config) raced for one path. Remove the half-made env and run it again: `rm -rf .pixi && pixi install`.
+`scripts/setup` prints each step and its time, and skips what's done, so running it again is quick. The demo data is a slice of [DROID](https://droid-dataset.github.io/) (CC-BY-4.0) fetched from the Hugging Face Hub; the models are built from their makers' weights. To plug in your own PyTorch model as a script function, see [Add your own model](https://abhisheksreesaila.github.io/omxcode/models.html).
 
 > [!TIP]
 > Insert → Chart, then type into its ask field: *median*, *by month, as a line*, or *only paid and over 5,000*. Or tap any coloured word in the chart's title.
@@ -235,7 +233,7 @@ struct Main(App):
 
 ## Read more
 
-- **Tutorials:** [your first app](https://abhisheksreesaila.github.io/omxcode/start.html), then [a todo app](https://abhisheksreesaila.github.io/omxcode/tasks.html) that keeps its tasks in SQLite (`examples/tasks`). Or all of it, from a button to agents and the GPU, [in slides](https://abhisheksreesaila.github.io/omxcode/learn/).
+- **Tutorials:** [your first app](https://abhisheksreesaila.github.io/omxcode/start.html), then [a todo app](https://abhisheksreesaila.github.io/omxcode/tasks.html) that keeps its tasks in SQLite (`examples/tasks`), then [add your own model](https://abhisheksreesaila.github.io/omxcode/models.html) as a script function. Or all of it, from a button to agents and the GPU, [in slides](https://abhisheksreesaila.github.io/omxcode/learn/).
 - **[Reference](docs/reference.md):** the app model, every component, layout, the GPU canvas, the examples.
 - **[How it works](docs/architecture.md):** the view tree, the update loop, how each platform is reached.
 - **[The agent host](docs/agent.md):** the tools, what an agent gets back, what it can't do yet.
