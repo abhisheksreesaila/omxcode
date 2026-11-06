@@ -33,8 +33,11 @@ The demo: `examples/saas/server.mojo` (the server, routes only) and `examples/sa
 
 ## Known limits (read before real users)
 - Every request is answered under one lock (`mojoui.serve`), and the Google and Stripe calls run inside it (D-5714): a
-  slow provider stalls everyone for up to 20–30 s. Bodies are capped (64 KB; the webhook 1 MB) and `/billing/return`
-  makes at most 30 Stripe read-backs a minute (D-5727); there is no per-IP rate limit on `/login` or `/api/token` yet.
+  slow provider stalls everyone for up to 20–30 s. Bodies over 64 KB (the webhook 1 MB) get a 413 before any work,
+  but only after Flare has read them (its own limit is 64 MB, and a slow sender can hold a worker up to its request
+  timeout); `/billing/return` makes at most 30 Stripe read-backs a minute for the whole server, so a stranger can spend
+  that budget and make a real return page say 429 (the webhook still upgrades the plan) (D-5727); there is no per-IP
+  rate limit on `/login` or `/api/token` yet.
 - Invites join a person who hasn't signed in yet, on their first sign-in, without asking (D-5725): an admin of any tenant
   can pre-invite an address. An accept page is the fix.
 - A desktop sign-in's one-time code shows in the browser's address bar for up to 60 s (RFC 8252's known phishing risk);

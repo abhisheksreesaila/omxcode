@@ -1442,6 +1442,16 @@ struct AppKitHost[A: App](Movable):
                             if node.h > 0:  # (a row given its own height keeps it; a taller view stands out of it, as the web's overflow, D-559)
                                 _ = msg(held, "setPriority:", Float32(742))
                             _ = msg(held, "setActive:", 1)
+            if node.justify_items == BETWEEN and not vertical and len(built) == len(node.children) and len(built) > 1:
+                # (a row's labels stretch across their share of it, their words centred: the first text reads from the
+                # leading edge, the last from the trailing one, as GTK and the web push them to the ends; giving them
+                # hugging either shrank the row or lost to its fill, D-5728)
+                var first = node.children[0]
+                var last = node.children[len(node.children) - 1]
+                if self.rt.shown.nodes[first].kind == TEXT and built[0] != 0:
+                    _ = msg(built[0], "setAlignment:", 0)  # NSTextAlignmentLeft
+                if self.rt.shown.nodes[last].kind == TEXT and built[len(built) - 1] != 0:
+                    _ = msg(built[len(built) - 1], "setAlignment:", 2)  # NSTextAlignmentRight (2 on Apple Silicon)
             if node.justify_items == CENTER and not grows and not spacers:
                 var trail = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", trail)

@@ -65,11 +65,24 @@ def main():
             out = r.stdout + r.stderr
             assert "Signed in as " + who[0] in out, out[-1500:]
             shots.append(Image.open(shot).convert("RGB"))
-        w, h = shots[0].size
+        # each window centres its own content, so the panes' tops differ: crop both from their content's top (the
+        # first row that differs from its own edge pixel), then lay them side by side, tops aligned
+        def content_top(im):
+            px = im.load()
+            for y in range(im.size[1]):
+                edge = px[2, y]
+                if any(sum(abs(a - b) for a, b in zip(px[x, y], edge)) > 24 for x in range(0, im.size[0], 2)):
+                    return y
+            return 0
+        tops = [max(content_top(im) - 32, 0) for im in shots]
+        panes = [im.crop((0, t, im.size[0], im.size[1])) for im, t in zip(shots, tops)]
+        h = min(p.size[1] for p in panes)
+        panes = [p.crop((0, 0, p.size[0], h)) for p in panes]
+        w = panes[0].size[0]
         gap = 24
-        pic = Image.new("RGB", (w * 2 + gap, h), shots[0].getpixel((2, 2)))
-        pic.paste(shots[0], (0, 0))
-        pic.paste(shots[1], (w + gap, 0))
+        pic = Image.new("RGB", (w * 2 + gap, h), panes[0].getpixel((2, h - 2)))
+        pic.paste(panes[0], (0, 0))
+        pic.paste(panes[1], (w + gap, 0))
         dest = ROOT / "docs/gallery/img/saas.png"
         pic.save(dest, optimize=True)
         print("wrote", dest, pic.size)

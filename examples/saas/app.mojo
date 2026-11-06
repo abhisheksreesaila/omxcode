@@ -4,7 +4,7 @@
 #   scripts/saas.sh run &                     # the server (keys from ~/.config/omxcode/saas.env)
 #   scripts/build.sh saas linux && SAAS_SERVER=http://127.0.0.1:8000 build/saas/linux/saas
 
-from mojoui import App, Event, View, VStack, HStack, Text, Button, TextField, TITLE, CAPTION, PROMINENT, Spacer
+from mojoui import App, Event, View, VStack, HStack, Text, Button, TextField, TITLE, CAPTION, PROMINENT, BETWEEN
 from mojoui.http import Http, Request
 from mojoui.effects import Every
 from mojoui.browser import Browser
@@ -272,18 +272,18 @@ struct Main(App):
         for k in range(len(self.entries)):
             ref en = self.entries[k]
             total += en.cents
-            rows.append(HStack(Text(en.text).grow(), Text(money(en.cents)), spacing=8).fill())
+            rows.append(HStack(Text(en.text), Text(money(en.cents)), spacing=8).fill().justify(BETWEEN))  # (a row: the note left, its amount right)
         if len(rows) == 0:
             rows.append(Text("No entries yet", style=CAPTION))
         var pro = self.plan == "pro"
         return VStack(
-            HStack(Text("omxcode SaaS", style=TITLE).grow(), Button("Sign out", on_tap=SIGN_OUT), spacing=8).fill(),
+            HStack(Text("omxcode SaaS", style=TITLE), Button("Sign out", on_tap=SIGN_OUT), spacing=8).fill().justify(BETWEEN),
             Text("Signed in as " + self.email, style=CAPTION).fill(),
             HStack(
-                Text("Plan: Pro" if pro else "Plan: Free").grow(),
+                Text("Plan: Pro" if pro else "Plan: Free"),
                 Button("Manage plan", on_tap=MANAGE) if pro else Button("Upgrade", on_tap=UPGRADE, style=PROMINENT),
                 spacing=8,
-            ).fill(),
+            ).fill().justify(BETWEEN),
             HStack(
                 TextField(self.note, placeholder="Note", on_change=NOTE, on_submit=ADD).grow(),
                 TextField(self.amount, placeholder="Amount", on_change=AMOUNT, on_submit=ADD).width(110),
