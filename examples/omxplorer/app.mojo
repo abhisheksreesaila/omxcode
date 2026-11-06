@@ -270,8 +270,6 @@ comptime QUERY_TEXT = 3331
 comptime QUERY_NAME = 3332
 comptime QUERY_RUN = 3333
 comptime QUERY_CLOSE = 3334
-comptime QUERY_BAR = 3335  # the toolbar's query field: typed (its SQL), Return runs it (as the Query dialog's Run)
-comptime QUERY_BAR_RUN = 3336
 comptime SCRIPT_OPEN = 3360  # the toolbar's Script: opens the Script window (mojoui.scriptpanel over every card and video)
 comptime SCRIPT_MSG = 3370  # the Script window's own messages: 3370 … 3370 + SCRIPT_MESSAGES
 comptime EXPORT_CSV = 3340  # File > Export CSV: the sheet's own table as <documents>/<its name>.csv
@@ -2013,12 +2011,23 @@ struct Main(App):
         self.version += 1
 
     def run_query(mut self):
-        """The Query dialog's (or the toolbar's query field's) SQL over the sheet's tables (its own and every card's), as a
+        """The Query dialog's SQL over the sheet's tables (its own and every card's), as a
         job: the answer lands as a table card named as asked (run again under the same name: the same card)."""
         var called = String(self.query_name.strip())
         if called == "":
             called = "Query 1"
         var text = self.query_text
+        if is_script(text):  # (`name = …;` statements or a call: the Script window runs them, shown there, D-4925)
+            self.query_open = False
+            self.script.open = True
+            var had = String(self.script.text.strip())
+            if had == "" or had.startswith("rows = SELECT * FROM "):  # (empty, or only the window's own start)
+                self.script.set_text(text)
+            elif self.script.text.find(text) < 0:  # (a person's script stays: the paste goes below it)
+                self.script.set_text(had + "\n\n" + text)
+            self.offer_script()
+            self.run_script()
+            return
         var asked = String(self.query_ask.strip())
         if asked != "":  # (a question in words: taught with the SQL beside it, or answered by what was taught, mojoui.asksql)
             if String(text.strip()) != "":
@@ -3477,22 +3486,6 @@ struct Main(App):
             self.query_name = event.text
         elif m == QUERY_RUN:
             self.run_query()
-        elif m == QUERY_BAR:
-            self.query_text = event.text
-        elif m == QUERY_BAR_RUN:
-            if event.text != "":
-                self.query_text = event.text
-            if is_script(self.query_text):  # (`name = …;` statements or a call: the Script window runs them, shown there)
-                self.script.open = True
-                var had = String(self.script.text.strip())
-                if had == "" or had.startswith("rows = SELECT * FROM "):  # (empty, or only the window's own start)
-                    self.script.set_text(self.query_text)
-                elif self.script.text.find(self.query_text) < 0:  # (a person's script stays: the paste goes below it)
-                    self.script.set_text(had + "\n\n" + self.query_text)
-                self.offer_script()
-                self.run_script()
-            else:
-                self.run_query()
         elif m == QUERY_CLOSE:
             self.query_open = False
             self.version += 1
@@ -4349,7 +4342,6 @@ struct Main(App):
         extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=OPEN_TYPES).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
         extra.append(FilePicker("Table", PICK_TABLE, style=TOOL_INLINE, icon="table", accept=".csv,.tsv,.txt,.parquet").tooltip("Insert a table: a CSV or Parquet file as a card beside the sheet's own (read in the background)").tag("insert-table"))
         extra.append(FilePicker("Documents", PICK_DOCS, style=TOOL_INLINE, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)").tag("insert-documents"))
-        extra.append(TextField(self.query_text, "query", on_change=QUERY_BAR, on_submit=QUERY_BAR_RUN).width(260).tag("query-bar").label("SQL query over the sheet's tables").tooltip("SQL over the sheet's tables (its own and every card's); Return runs it, the answer lands as a table card. A script (name = …; statements) opens in the Script window and runs there"))
         if self.sheet_tab == 1:
             return Toolbar(left, self.report_tools(), right, extra, before=self.report_controls(), after=self.filter_controls(), inline=True)  # (its tile tools share one icon: their titles stay)
         var middle = List[Tool]()

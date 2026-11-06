@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>omxplorer · chrome options (fewer islands) and tiled cards</title>
+<style>
+  :root{
+    --backdrop:#eef2f7; --backdrop2:#e6ebf2; --sheet:#fff; --raised:#f6f8fb; --hair:rgba(15,23,42,.07); --hair2:rgba(15,23,42,.12);
+    --ink:#0f172a; --body:#334155; --sec:#64748b; --ter:#94a3b8; --accent:#0e7c86; --wash:rgba(14,124,134,.10);
+    --shadow:0 8px 32px rgba(15,23,42,.10); --spring:cubic-bezier(.22,1.2,.36,1); --ease:cubic-bezier(.2,.8,.2,1);
+    font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-feature-settings:"tnum";
+  }
+  *{box-sizing:border-box} body{margin:0;background:#d9dfe8;color:var(--ink)}
+  /* compare page header */
+  .pick{position:sticky;top:0;z-index:50;display:flex;gap:10px;align-items:center;padding:10px 16px;background:#111827;color:#e5e7eb;font-size:13px}
+  .pick b{color:#fff;margin-right:6px}
+  .pick button{border:0;border-radius:999px;padding:7px 14px;font:inherit;background:#1f2937;color:#e5e7eb;cursor:pointer}
+  .pick button.on{background:#fff;color:#111827;font-weight:600}
+  .pick label{display:flex;gap:6px;align-items:center;margin-left:auto}
+  .pick .note{color:#9ca3af;margin-left:12px}
+  .stage{display:flex;justify-content:center;padding:18px}
+  .scaler{transform-origin:top left}
+  /* the window, 1440 × 900 */
+  .win{width:1440px;height:900px;background:var(--backdrop);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(15,23,42,.25);position:relative}
+  /* top: title bar + ribbon, one joined surface */
+  .top{background:var(--raised);border-bottom:1px solid var(--hair2)}
+  .title{height:38px;display:flex;align-items:center;gap:18px;padding:0 14px;font-size:13px}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:650}
+  .logo i{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,#4f46e5,#0e7c86);display:inline-block}
+  .menus{display:flex;gap:2px}
+  .menus span{padding:5px 9px;border-radius:7px;color:var(--body);cursor:default}
+  .menus span:hover{background:var(--wash)}
+  .doc{margin-left:auto;margin-right:auto;color:var(--sec)}
+  .doc b{color:var(--ink);font-weight:550}
+  .wc{display:flex;gap:6px}.wc span{width:26px;height:22px;border-radius:6px;display:grid;place-items:center;color:var(--sec);font-size:12px}
+  .wc span:hover{background:var(--wash)}
+  .tabs{display:flex;gap:2px;padding:0 12px;font-size:12.5px}
+  .tabs span{padding:6px 12px 7px;color:var(--sec);border-bottom:2px solid transparent;cursor:pointer}
+  .tabs span.on{color:var(--ink);border-color:var(--accent);font-weight:600}
+  .ribbon{display:flex;align-items:stretch;gap:0;padding:6px 10px 6px;background:var(--sheet);border-top:1px solid var(--hair)}
+  .grp{display:flex;flex-direction:column;padding:0 10px;border-right:1px solid var(--hair)}
+  .grp:last-child{border-right:0}
+  .grp .tools{display:flex;gap:2px}
+  .grp .cap{font-size:10.5px;color:var(--ter);text-align:center;margin-top:2px}
+  .tool{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:52px;padding:5px 6px;border-radius:8px;font-size:11.5px;color:var(--body);cursor:pointer}
+  .tool:hover{background:var(--wash)} .tool.on{background:var(--wash);color:var(--accent)}
+  .tool svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6}
+  /* middle */
+  .mid{flex:1;display:flex;min-height:0;position:relative}
+  .rail{width:52px;background:var(--raised);border-right:1px solid var(--hair2);display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:10px}
+  .rail .tool{min-width:0;width:40px;padding:8px 0}
+  .board{flex:1;position:relative;min-width:0}
+  .side{width:300px;background:var(--sheet);border-left:1px solid var(--hair2);display:flex;flex-direction:column;font-size:12.5px;transition:width .3s var(--ease)}
+  .side.island{position:absolute;right:12px;top:12px;bottom:12px;border:1px solid var(--hair);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;z-index:5}
+  .side.shut{width:0;overflow:hidden;border:0}
+  .side h4{margin:0;padding:12px 14px 8px;font-size:13px;display:flex;justify-content:space-between}
+  .side h4 span{color:var(--ter);font-weight:400;cursor:pointer}
+  .seg{display:flex;margin:0 14px 10px;background:var(--raised);border-radius:999px;padding:3px}
+  .seg span{flex:1;text-align:center;padding:5px 0;border-radius:999px;color:var(--sec);cursor:pointer}
+  .seg span.on{background:var(--sheet);color:var(--ink);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .row{display:flex;justify-content:space-between;padding:8px 14px;border-top:1px solid var(--hair);color:var(--body)}
+  .row b{font-weight:550;color:var(--ink)}
+  /* bottom: joined to the edge */
+  .status{height:28px;display:flex;align-items:center;gap:18px;padding:0 14px;background:var(--raised);border-top:1px solid var(--hair2);font-size:11.5px;color:var(--sec)}
+  .status .ok{color:var(--accent)} .status .r{margin-left:auto;display:flex;gap:16px}
+  /* tiles */
+  .tile{position:absolute;background:var(--sheet);border:1px solid var(--hair);border-radius:16px;box-shadow:0 1px 2px rgba(15,23,42,.04);display:flex;flex-direction:column;overflow:hidden;
+        transition:left .38s var(--spring),top .38s var(--spring),width .38s var(--spring),height .38s var(--spring),box-shadow .2s,opacity .2s}
+  .board.live .tile{transition:none}
+  .tile.focus{border-color:rgba(14,124,134,.45);box-shadow:0 0 0 3px var(--wash)}
+  .tile.drop{box-shadow:0 0 0 3px rgba(14,124,134,.55);}
+  .tile.ghost{opacity:.45}
+  .th{height:34px;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;font-size:12.5px;font-weight:600;cursor:grab;border-bottom:1px solid var(--hair);user-select:none}
+  .th .k{font-weight:400;color:var(--ter);font-size:11.5px}
+  .th .x{margin-left:auto;color:var(--ter);cursor:pointer;padding:2px 6px;border-radius:6px}
+  .th .x:hover{background:var(--wash);color:var(--ink)}
+  .tb{flex:1;min-height:0;overflow:hidden;font-size:12px;color:var(--body)}
+  table{border-collapse:collapse;width:100%} td,th{padding:5px 10px;border-bottom:1px solid var(--hair);text-align:left;white-space:nowrap;font-weight:400}
+  th{color:var(--sec);font-size:11px;background:var(--raised);position:sticky;top:0}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--wash);color:var(--accent);font-size:11px}
+  .video{position:relative;height:100%;background:#0f172a}
+  .video .bx{position:absolute;border:2px solid #22d3ee;border-radius:4px}
+  .video .bx i{position:absolute;top:-17px;left:-2px;background:#22d3ee;color:#0f172a;font-size:10px;font-style:normal;padding:1px 5px;border-radius:4px}
+  .video .bar{position:absolute;left:10px;right:10px;bottom:10px;height:4px;background:rgba(255,255,255,.2);border-radius:2px}
+  .video .bar b{position:absolute;left:20%;width:21%;top:0;bottom:0;background:#22d3ee;border-radius:2px}
+  .code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;line-height:1.6;padding:10px 14px;white-space:pre;color:var(--body)}
+  .code .c{color:var(--ter)} .code .k{color:var(--accent)} .code .f{color:#4f46e5}
+  .div{position:absolute;z-index:4;border-radius:4px}
+  .div.v{cursor:col-resize} .div.h{cursor:row-resize}
+  .div:hover,.div.act{background:rgba(14,124,134,.35)}
+  .hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);background:rgba(15,23,42,.82);color:#fff;font-size:11.5px;padding:6px 12px;border-radius:999px;z-index:6;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="pick">
+  <b>omxplorer: pick a shell</b>
+  <button data-opt="A" class="on">A · Ribbon, all docked</button>
+  <button data-opt="B">B · Ribbon + side island</button>
+  <button data-opt="C">C · Ribbon + rail + docked panel</button>
+  <span class="note">Cards tile like Hyprland in all three: drag a gap to resize · drag a title onto another card to swap · ＋ Card splits the focused one · × closes, neighbours fill</span>
+  <label><input type="checkbox" id="pickbox"> I pick this one</label>
+</div>
+<div class="stage"><div class="scaler" id="scaler">
+<div class="win" id="win">
+  <div class="top">
+    <div class="title">
+      <span class="logo"><i></i>omxplorer</span>
+      <span class="menus"><span>File</span><span>Edit</span><span>View</span><span>Insert</span><span>Data</span><span>Script</span><span>Help</span></span>
+      <span class="doc"><b>droid-fleet.omx</b> · saved</span>
+      <span class="wc"><span>—</span><span>▢</span><span>✕</span></span>
+    </div>
+    <div class="tabs"><span class="on">Board</span><span>Sheet</span><span>Report</span></div>
+    <div class="ribbon" id="ribbon"></div>
+  </div>
+  <div class="mid">
+    <div class="rail" id="rail"></div>
+    <div class="board" id="board"></div>
+    <div class="side" id="side">
+      <h4>Inspector <span id="shut">✕</span></h4>
+      <div class="seg"><span class="on">Card</span><span>Links</span><span>Format</span></div>
+      <div class="row"><span>Card</span><b id="insp-name">classified</b></div>
+      <div class="row"><span>Rows</span><b>33,417</b></div>
+      <div class="row"><span>Made by</span><b>classify(fleet, task, …)</b></div>
+      <div class="row"><span>Took</span><b>2.6 s · GPU</b></div>
+      <div class="row"><span>Links</span><b>fleet.task = value</b></div>
+    </div>
+  </div>
+  <div class="status">
+    <span class="ok">● GPU · RTX 3080</span><span>fleet · 63,344 rows</span><span>telemetry · 16,847,616 rows</span><span>classified · 33,417 rows in 2.6 s</span>
+    <span class="r"><span>Tiled · 5 cards</span><span>100%</span></span>
+  </div>
+</div>
+</div></div>
+
+<script>
+const I = {
+  save:'<path d="M5 3h11l3 3v15H5z M8 3v6h8V3 M8 21v-7h8v7"/>', undo:'<path d="M9 14 4 9l5-5 M4 9h10a6 6 0 0 1 0 12h-3"/>',
+  open:'<path d="M3 7h6l2 2h10v10H3z"/>', table:'<path d="M3 5h18v14H3z M3 10h18 M9 5v14"/>', docs:'<path d="M6 3h9l4 4v14H6z M14 3v5h5"/>',
+  chart:'<path d="M4 20V10 M10 20V4 M16 20v-7 M3 20h18"/>', video:'<path d="M3 6h13v12H3z M16 10l5-3v10l-5-3"/>', note:'<path d="M5 4h14v16H5z M8 9h8 M8 13h8 M8 17h5"/>',
+  script:'<path d="M8 8l-4 4 4 4 M16 8l4 4-4 4 M13 5l-2 14"/>', query:'<path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/>',
+  model:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z M12 12l8-4.5 M12 12v9 M12 12 4 7.5"/>', links:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  format:'<path d="M4 20h4L19 9l-4-4L4 16z"/>', plus:'<path d="M12 5v14 M5 12h14"/>', grid:'<path d="M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z"/>',
+  agent:'<path d="M12 3a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V7a4 4 0 0 1 4-4z M5 21a7 7 0 0 1 14 0"/>'
+};
+const svg = k => `<svg viewBox="0 0 24 24">${I[k]}</svg>`;
+const tool = (k, label, on) => `<div class="tool${on?' on':''}" data-t="${k}">${svg(k)}<span>${label}</span></div>`;
+const groups = [
+  ['File', [['save','Save'],['undo','Undo']]],
+  ['Data', [['open','Open'],['table','Table'],['docs','Documents']]],
+  ['Insert', [['chart','Chart'],['video','Video'],['note','Note']]],
+  ['Ask', [['script','Script'],['query','Query'],['model','Models']]],
+  ['Board', [['plus','Card'],['grid','Re-tile']]],
+  ['View', [['links','Links'],['format','Inspector', true],['agent','Agent']]],
+];
+document.getElementById('ribbon').innerHTML = groups.map(([cap, ts]) =>
+  `<div class="grp"><div class="tools">${ts.map(t => tool(t[0], t[1], t[2])).join('')}</div><div class="cap">${cap}</div></div>`).join('');
+document.getElementById('rail').innerHTML = [['table','Tables'],['video','Media'],['script','Script'],['model','Models'],['agent','Agent']].map(t => tool(t[0], t[1])).join('');
+
+/* cards */
+const CARDS = {
+  fleet: ['fleet', '63,344 rows', () => tbl(['episode','lab','task','success'], [
+    ['F00118','IRIS','put the marker in the cup','1'],['F00119','IRIS','open the drawer','0'],['F00120','TRI','move the bowl to the left','1'],
+    ['F00121','AUTOLab','pick up the spoon','1'],['F00122','RAIL','close the lid','0'],['F00123','IPRL','wipe the table','1'],['F00124','ILIAD','stack the cups','1'],['F00125','GuptaLab','pour into the mug','0']])],
+  tele: ['telemetry', '16.8M rows · gripper over time', () => spark()],
+  video: ['episode F00118', 'video · detect 3–8 s · 737 boxes', () => `<div class="video">
+     <div class="bx" style="left:18%;top:22%;width:22%;height:58%"><i>person .91</i></div>
+     <div class="bx" style="left:56%;top:30%;width:26%;height:24%"><i>tv .84</i></div>
+     <div class="bx" style="left:50%;top:62%;width:16%;height:22%"><i>chair .66</i></div><div class="bar"><b></b></div></div>`],
+  script: ['Script', '2 statements · ran in 2.6 s', () => `<div class="code"><span class="c">-- a decision model, no training</span>
+<span class="k">verbs</span> = SELECT DISTINCT verb FROM fleet;
+<span class="k">classified</span> = <span class="f">classify</span>(fleet, task, verbs, verb);
+<span class="k">boxes</span> = <span class="f">detect</span>(episode, 3.0, 8.0);</div>`],
+  classified: ['classified', '33,417 rows', () => tbl(['label','score','margin','value'], [
+    ['put','<span class="pill">.912</span>','.084','put the marker in the cup'],['open','<span class="pill">.887</span>','.120','open the drawer'],
+    ['move','<span class="pill">.874</span>','.041','move the bowl to the left'],['pick','<span class="pill">.901</span>','.097','pick up the spoon'],['close','<span class="pill">.866</span>','.063','close the lid']])],
+  verbs: ['verbs', '16 rows', () => tbl(['verb'], [['put'],['pick'],['move'],['open'],['close'],['wipe']])],
+  chart: ['success by lab', 'chart', () => bars()],
+};
+function tbl(h, rows){ return `<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${/^[\d.,]+$/.test(c)&&i?'n':''}">${c}</td>`).join('')}</tr>`).join('')}</table>`; }
+function spark(){ let p='', q=''; for(let i=0;i<=120;i++){ const x=i*5, y=60+38*Math.sin(i/9)+14*Math.sin(i/2.3); p+=`${i?'L':'M'}${x},${y.toFixed(1)} `; }
+  return `<svg viewBox="0 0 600 130" preserveAspectRatio="none" style="width:100%;height:100%;padding:10px"><path d="${p}" fill="none" stroke="#0e7c86" stroke-width="2"/><rect x="120" y="0" width="125" height="130" fill="rgba(14,124,134,.08)"/></svg>`; }
+function bars(){ const v=[78,71,66,61,57,52,49,41]; return `<svg viewBox="0 0 400 160" preserveAspectRatio="none" style="width:100%;height:100%;padding:12px">${v.map((h,i)=>`<rect x="${i*50+8}" y="${150-h*1.8}" width="34" height="${h*1.8}" rx="5" fill="${i?'#94c9cd':'#0e7c86'}"/>`).join('')}</svg>`; }
+
+/* the tiling tree: a leaf is {id}; a split is {dir:'v'|'h', r, a, b} (v: a left | b right; h: a top / b bottom) */
+let tree = {dir:'v', r:.58, a:{dir:'h', r:.52, a:{id:'video'}, b:{dir:'v', r:.5, a:{id:'tele'}, b:{id:'script'}}}, b:{dir:'h', r:.45, a:{id:'fleet'}, b:{id:'classified'}}};
+let focus = 'classified', spare = ['verbs','chart'];
+const GAP = 8, PAD = 12, board = document.getElementById('board');
+
+function rects(n, x, y, w, h, out, divs){
+  if (n.id){ out[n.id] = {x, y, w, h}; return; }
+  if (n.dir === 'v'){ const wa = Math.round((w - GAP) * n.r); rects(n.a, x, y, wa, h, out, divs); rects(n.b, x + wa + GAP, y, w - wa - GAP, h, out, divs);
+    divs.push({n, dir:'v', x:x + wa, y, w:GAP, h, span:w - GAP, o:x}); }
+  else { const ha = Math.round((h - GAP) * n.r); rects(n.a, x, y, w, ha, out, divs); rects(n.b, x, y + ha + GAP, w, h - ha - GAP, out, divs);
+    divs.push({n, dir:'h', x, y:y + ha, w, h:GAP, span:h - GAP, o:y}); }
+}
+function leaves(n, out=[]){ if (n.id) out.push(n.id); else { leaves(n.a, out); leaves(n.b, out); } return out; }
+function sideInset(){ const s = document.getElementById('side'); return s.classList.contains('island') && !s.classList.contains('shut') ? 312 : 0; }
+
+function render(){
+  const W = board.clientWidth - sideInset(), H = board.clientHeight, out = {}, divs = [];
+  rects(tree, PAD, PAD, W - 2*PAD, H - 2*PAD, out, divs);
+  const ids = leaves(tree);
+  board.querySelectorAll('.tile').forEach(t => { if (!ids.includes(t.dataset.id)) t.remove(); });
+  for (const id of ids){
+    let t = board.querySelector(`.tile[data-id="${id}"]`);
+    if (!t){ const [name, kind, body] = CARDS[id]; t = document.createElement('div'); t.className = 'tile'; t.dataset.id = id;
+      t.innerHTML = `<div class="th"><span>${name}</span><span class="k">${kind}</span><span class="x" title="Close">×</span></div><div class="tb">${body()}</div>`;
+      const r0 = out[id]; Object.assign(t.style, {left:r0.x + r0.w/2 + 'px', top:r0.y + r0.h/2 + 'px', width:'0px', height:'0px'});
+      board.appendChild(t); wire(t); t.offsetWidth; }
+    const r = out[id]; Object.assign(t.style, {left:r.x + 'px', top:r.y + 'px', width:r.w + 'px', height:r.h + 'px'});
+    t.classList.toggle('focus', id === focus);
+  }
+  board.querySelectorAll('.div').forEach(d => d.remove());
+  for (const d of divs){ const e = document.createElement('div'); e.className = 'div ' + d.dir;
+    Object.assign(e.style, {left:d.x + 'px', top:d.y + 'px', width:d.w + 'px', height:d.h + 'px'}); board.appendChild(e); drag(e, d); }
+  document.querySelector('.status .r span').textContent = `Tiled · ${ids.length} cards`;
+}
+function drag(e, d){
+  e.addEventListener('pointerdown', ev => { ev.preventDefault(); e.setPointerCapture(ev.pointerId); board.classList.add('live'); e.classList.add('act');
+    const mv = m => { const p = (d.dir === 'v' ? m.offsetX + e.offsetLeft : m.offsetY + e.offsetTop);
+      const local = (d.dir === 'v' ? m.clientX - board.getBoundingClientRect().left : m.clientY - board.getBoundingClientRect().top) / scale;
+      d.n.r = Math.min(.85, Math.max(.15, (local - d.o) / d.span)); render(); };
+    const up = () => { e.removeEventListener('pointermove', mv); e.removeEventListener('pointerup', up); board.classList.remove('live'); render(); };
+    e.addEventListener('pointermove', mv); e.addEventListener('pointerup', up); });
+}
+function find(n, id, parent=null){ if (n.id === id) return {n, parent}; if (n.id) return null; return find(n.a, id, n) || find(n.b, id, n); }
+function wire(t){
+  const id = () => t.dataset.id;
+  t.addEventListener('pointerdown', () => { focus = id(); document.getElementById('insp-name').textContent = CARDS[focus][0];
+    board.querySelectorAll('.tile').forEach(x => x.classList.toggle('focus', x.dataset.id === focus)); });
+  t.querySelector('.x').addEventListener('click', ev => { ev.stopPropagation(); close(id()); });
+  const th = t.querySelector('.th');
+  th.addEventListener('pointerdown', ev => { if (ev.target.classList.contains('x')) return; th.setPointerCapture(ev.pointerId); t.classList.add('ghost'); let over = null;
+    const mv = m => { const els = document.elementsFromPoint(m.clientX, m.clientY); const o = els.find(x => x.classList && x.classList.contains('tile') && x !== t);
+      board.querySelectorAll('.tile.drop').forEach(x => x.classList.remove('drop')); over = o || null; if (over) over.classList.add('drop'); };
+    const up = () => { th.removeEventListener('pointermove', mv); th.removeEventListener('pointerup', up); t.classList.remove('ghost');
+      if (over){ over.classList.remove('drop'); const a = find(tree, id()).n, b = find(tree, over.dataset.id).n; [a.id, b.id] = [b.id, a.id]; render(); } };
+    th.addEventListener('pointermove', mv); th.addEventListener('pointerup', up); });
+}
+function close(id){
+  const ids = leaves(tree); if (ids.length === 1) return;
+  const f = find(tree, id), p = f.parent, sib = p.a === f.n ? p.b : p.a;
+  for (const k of Object.keys(p)) delete p[k]; Object.assign(p, sib);
+  spare.push(id); if (focus === id) focus = leaves(tree)[0]; render();
+}
+function add(){
+  if (!spare.length) { hint('All sample cards are on the board: close one first'); return; }
+  const id = spare.shift(), f = find(tree, focus).n, r = board.querySelector(`.tile[data-id="${focus}"]`).getBoundingClientRect();
+  const old = f.id; delete f.id; Object.assign(f, {dir: r.width >= r.height ? 'v' : 'h', r:.5, a:{id:old}, b:{id}}); focus = id; render();
+}
+function retile(){ const ids = leaves(tree); const build = (xs, d) => xs.length === 1 ? {id:xs[0]} : {dir:d, r:Math.ceil(xs.length/2)/xs.length, a:build(xs.slice(0, Math.ceil(xs.length/2)), d === 'v' ? 'h' : 'v'), b:build(xs.slice(Math.ceil(xs.length/2)), d === 'v' ? 'h' : 'v')};
+  tree = build(ids, 'v'); render(); }
+let ht; function hint(s){ let h = board.querySelector('.hint'); if (!h){ h = document.createElement('div'); h.className = 'hint'; board.appendChild(h); } h.textContent = s; clearTimeout(ht); ht = setTimeout(() => h.remove(), 1800); }
+document.getElementById('ribbon').addEventListener('click', ev => { const t = ev.target.closest('.tool'); if (!t) return;
+  if (t.dataset.t === 'plus') add(); else if (t.dataset.t === 'grid') retile();
+  else if (t.dataset.t === 'format'){ document.getElementById('side').classList.toggle('shut'); t.classList.toggle('on'); setTimeout(render, 10); setTimeout(render, 320); } });
+document.getElementById('shut').addEventListener('click', () => { document.getElementById('side').classList.add('shut'); document.querySelector('[data-t="format"]').classList.remove('on'); setTimeout(render, 10); setTimeout(render, 320); });
+
+/* options */
+function opt(o){
+  const side = document.getElementById('side'), rail = document.getElementById('rail');
+  side.classList.toggle('island', o === 'B'); rail.style.display = o === 'C' ? 'flex' : 'none';
+  document.querySelectorAll('.pick button').forEach(b => b.classList.toggle('on', b.dataset.opt === o));
+  document.getElementById('pickbox').checked = localStorage.getItem('omx-chrome-pick') === o;
+  current = o; setTimeout(render, 0);
+}
+let current = 'A';
+document.querySelectorAll('.pick button').forEach(b => b.addEventListener('click', () => opt(b.dataset.opt)));
+document.getElementById('pickbox').addEventListener('change', e => { if (e.target.checked) localStorage.setItem('omx-chrome-pick', current); else localStorage.removeItem('omx-chrome-pick'); });
+document.addEventListener('keydown', e => { if (e.key === 'Delete' || (e.key === 'w' && e.ctrlKey)) { e.preventDefault(); close(focus); } if (e.key === 'Enter' && e.ctrlKey) add(); });
+
+let scale = 1;
+function fit(){ scale = Math.min(1, (innerWidth - 36) / 1440, (innerHeight - 80) / 900); const s = document.getElementById('scaler'); s.style.transform = `scale(${scale})`; s.style.height = 900 * scale + 'px'; s.style.width = 1440 * scale + 'px'; s.firstElementChild.style.transformOrigin = 'top left'; }
+addEventListener('resize', fit); fit();
+opt(localStorage.getItem('omx-chrome-pick') || 'A');
+</script>
+</body>
+</html>
