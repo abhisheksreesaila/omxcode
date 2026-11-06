@@ -102,6 +102,11 @@ def unlink(var path: String) -> Int:
     return Int(external_call["unlink", c_int](path.as_c_string_span()))
 
 
+def getentropy(buf: Int, n: Int) -> Int:
+    """Fills `n` (≤ 256) bytes at `buf` from the OS CSPRNG; 0 on success (Flare's form: flare/crypto/random.mojo)."""
+    return Int(external_call["getentropy", c_int](_p(buf), c_size_t(n)))
+
+
 def getpid() -> Int:
     return Int(external_call["getpid", Int32]())
 
