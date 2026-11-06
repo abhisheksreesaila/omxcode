@@ -1,40 +1,37 @@
-# GOAL 51: models as functions in the script, in the app's own process
+# GOAL 54: omxplorer shell A, and cards that tile
 
-**End goal (owner, 2026-11-04):** "given a video we want to be able to apply a quick classifier or segment anything…
-as a plugin where it runs natively… the same program that is using the GUI, crunching through GPU is the same program
-that's running AI"; and for tables, "a decision model… run it against the spreadsheet data and immediately get an
-answer" ("any decision model which can give you the answer, please use it"). Framework first: every piece in `mojoui/`
-with its own test; omxplorer only composes. No Python in the running app (packs are built once, on our side).
+**End goal (owner, 2026-11-05):** "there are too many islands… the top half… has to be like a ribbon where you connect
+it to the menu bar… even the bottom has to be connected to the bottom… [cards] by default… like Hyprland… it snaps,
+I can increase something, decrease the size, it fits nicely… no dragging problems, no overlapping problems… professional
+on day one." Owner picked shell **A** of `docs/design/chrome/options.html` ("by far the best"): ribbon joined to the
+title bar, status bar on the bottom edge, inspector docked flush right, no floating chrome. Framework first: the tiling
+is a `mojoui` component with its own test; the docked look is the theme's; omxplorer only composes.
 
-Base: main 1a621e7 (goal 49's script, Script window, recipes). Worktree ../mojo-ui-g51, branch goal-51-models.
-Research: docs/research/goal50-models.md (in-process MAX from Mojo through libmax's C API: verified by probe).
-(Numbered 51: a parallel session's goal 50 is omxconsole native, ../mojo-ui-g50.)
+Base: main 809ec81. Worktree ../mojo-ui-g54, branch goal-54-shell. (52 and 53 are other sessions' goals.)
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/51-check.py`) |
+| # | Milestone | Proof (`docs/goals/54-check.py`) |
 |---|---|---|
-| M0 | `mojoui.maxrt` | load a pack (a `.mef` + `.safetensors`, built by `scripts/packs/tiny.py`) through libmax's C API, run it on the CPU and on the GPU from Mojo, inputs and outputs as host arrays; the package root found without the caller setting anything; `tests/test_maxrt.mojo` prints `cpu: ok`, `gpu: ok` (the numbers equal Python's), `nopython: ok` (the test binary links no libpython) |
-| M1 | Text embeddings in Mojo | `scripts/packs/minilm.py` builds MiniLM-L6 (Apache-2.0) as a pack; `mojoui/wordpiece.mojo` tokenizes as the Python reference does (ids equal on 200 fleet task texts); `mojoui/textembed.mojo` gives vectors whose cosine with the Python pack's ≥ 0.999 on those texts; `tests/test_textembed.mojo` prints `wordpiece: ok`, `embed: ok` and a rows/s line |
-| M2 | `classify()` in a script | `name = classify(table, column, labels_table, label_column);` (mojoui.models' registry, composed with the video functions): each unique value once, nearest label by cosine, columns value, label, score, margin; on the DROID fleet, `classify(fleet, task, verbs, verb)` (verbs: the fleet's distinct verbs) agrees with fleet.verb on ≥ 20 points more rows than always answering the most common verb; through omxplorer's Script window by agent tools only; its time and rows/s printed |
-| M3 | YOLOX-Tiny as a pack | `scripts/packs/yolox.py` (build side: Megvii's Apache-2.0 weights, BN folded, im2col convs) builds the pack and a reference from Megvii's own code on 5 fixed images; Mojo runs the pack in-process (decode + NMS in Mojo): every reference box with score ≥ 0.3 has a Mojo box of the same class with IoU ≥ 0.9, and no extra Mojo box ≥ 0.5; ms per frame printed |
-| M4 | `detect()` on a video section | `name = detect(video, from_s, to_s);` in a script and an **Apply detect** button (the Script window's functions); rows frame, t, kind (COCO class), score, x, y, w, h; the boxes drawn on the video card's player; on the featured DROID episode's 3–8 s: rows only inside the section, ≥ 1 `person` or object row per frame on ≥ 50% of frames; 0 `SLOW:` at 50 ms; shots in build/g51/shots looked at |
-| M5 | Nothing regressed | goal 49's check M1–M4 on this tree |
+| M0 | `mojoui.tiling` | a split tree as a tiling window manager keeps windows: a new card splits the focused one along its longer side; closing one gives its space to its sibling; resizing moves the card's shared edge (both neighbours change, each keeps a minimum size); a drop on another card swaps them; the layout fits any size; saved and read back as text. `tests/test_tiling.mojo` prints `insert: ok`, `remove: ok`, `resize: ok`, `swap: ok`, `fit: ok`, `text: ok`, and `random: ok` (2,000 random operations at random sizes: never an overlap, every card inside, every gap 8, every card ≥ its minimum where the space allows) |
+| M1 | omxplorer's Board tiles | every card on the Board (the sheet's table, charts, pivots, videos, table, track and document cards) placed by `mojoui.tiling`; GTK, driven by real gestures (`MOJOUI_TEST`): open the fleet, insert the telemetry table, a chart, the featured video, a query's answer; close one; drag one card's corner (its edge moves, its neighbour gives way); drag one card onto another (they swap); the window 1440×900 → 1280×800. After every step the `BOARD:` lines show no overlap, every card inside the board, gaps 8 ± 1; after the corner drag the neighbour's size changed by the same amount; after the drop the two rects swapped; 0 `SLOW:` at 50 ms |
+| M2 | Shell A on GTK, light and dark | Liquid's chrome docked: menu bar and toolbar one band on the window's top edge, sheet tabs and status bar one band on the bottom edge, the inspector flush right and the rail flush left, each with a 1 px line where it meets the board; no margin, radius or shadow on chrome. Pixels in a 1440×900 shot: the top-left, top-right, bottom-left and bottom-right corners and the right edge mid-height are chrome, not backdrop, in Liquid light and Liquid dark; the shots sit beside the mockup's on one compare page, looked at |
+| M3 | The web host too | `scripts/omxplorer.sh web`'s build in headless Chromium (`scripts/drive.py`): the same edge pixels are chrome; after inserting two cards and closing one, no overlap |
+| M4 | Nothing regressed | `tests/test_regions.mojo`, `tests/test_diff_keep.mojo`, `tests/test_script.mojo` ok; goal 49's check M1–M4 and goal 51's M4 on this tree |
 
 ## Done means
-51-check PASS for M0–M5, the reviewer passes it, M2's and M4's shots were looked at.
+54-check PASS for M0–M4, the reviewer passes it, M1's and M2's shots were looked at next to the mockup.
 
 ## Out of bounds
-Pushing; the frozen ../mojo-ui-apple-test; the parallel goal 50 worktree (../mojo-ui-g50); pip; deleting .pixi; paid
-services; secrets; lowering a proof; Ultralytics (AGPL) or LFM2 (revenue cap) models; compiling a model at app start.
+Pushing; the frozen ../mojo-ui-apple-test; other sessions' worktrees (../mojo-ui-g50, g52, g53); pip; deleting .pixi;
+lowering a proof; skins other than Liquid (Ledger, Graphite, Blueprint keep their own looks); the Mac and phones
+(their chrome reads the same Surfaces, unverified here).
 
 ## Assumptions (taken instead of asking)
-- Packs (`.mef`, `.safetensors`, vocab) live in `build/packs/` and are made by `scripts/packs/*.py` (not in git:
-  large, device-specific). The app finds them by name; a missing pack is an error that says which script makes it.
-- MAX's 3x3 `conv2d` is slow on sm_86 (research: 115x): YOLOX's convs are written as im2col + matmul.
-- M2's proof uses the robot fleet (real data, labels we have) instead of UNSPSC: no public labelled UNSPSC set is
-  known; the owner's supply-chain data can run through the same `classify()` later. The small-LLM second pass for
-  low-margin rows (research) is left for later: margin is a column, so a script can pick those rows.
-- Linux + NVIDIA only for packs (libmax); the Mac is a later check (scripts/mac-ci), phones and web can't load packs.
+- A split tree (Hyprland's dwindle) replaces goal 31's parked row tiling; `tests/test_tiling.mojo` is rewritten.
+- Resizing uses the Board's existing corner drag (the card's right and bottom edges move); no separate gap handle.
+- Moving uses the existing header drag: dropped on a card it swaps, dropped elsewhere it snaps back.
+- The rail stays, docked left (it inserts tables, documents, videos, pictures).
+- Saving the tiling in .omx files is out of scope (cards other than charts aren't saved today either).
 
 ## Budget
-150 turns.
+80 turns.

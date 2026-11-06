@@ -1086,3 +1086,6 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 ## 2026-11-05
 - Onboarding dry run (fresh clone in /tmp/omx-onboard): pixi install ok (cached); first omxplorer build 234 s with a wall of compiler warnings; the e5small pack build fails without build/g47/full/fleet.csv (its reference texts); the YOLOX pack needs Megvii's source and weights put in ~/.cache/omxcode/yolox by hand; the robot data has no in-repo fetch. Main itself runs the models scenario end to end once build/packs is there.
 - The owner pasted the classify script into the toolbar's query box: plain SQL only, failed at line 1. Fixed (D-4925): the box routes scripts to the Script window. Proven with the owner's exact paste, driven headless: verbs 16 rows, classified 33,417 in 2.6 s; a plain SELECT in the box still lands as Query 1.
+
+## 2026-11-05 · goal 54
+- Setup: worktree ../mojo-ui-g54 from main 809ec81; build/g47 and build/packs linked from main. Map of the shell (sheet_screen 4655, sheetchrome builders, liquid_look islands, Board free x/y, test verbs move:/resize:) from an Explore pass.
