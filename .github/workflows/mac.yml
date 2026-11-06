@@ -51,8 +51,12 @@ jobs:
             tail -30 "$log"
           done
           case " $native " in *" gpu "*)  # which pixel kernels Metal compiles, and the page-sized wrap (D-5311)
-            MODULAR_DEBUG=device-sync-mode pixi run mojo run -I . -D MOJOUI_MAC_GPU --target-accelerator metal:1 ../ci/pixelprobe.mojo > ../out/pixelprobe.txt 2>&1 || echo "exit $?" >> ../out/pixelprobe.txt
-            cat ../out/pixelprobe.txt | grep -E "^(OK|FAIL|DEVICE)|exit" ;;
+            if pixi run mojo build -I . -D MOJOUI_MAC_GPU --target-accelerator metal:1 ../ci/pixelprobe.mojo -o ../probe > ../out/pixelprobe-build.txt 2>&1; then
+              for v in list 1d simd_int simd_int32 simd_uint float_int solid int_maths float_uint loop_int loop_int32 mandelbrot mandelbrot32 wrap; do
+                ../probe "$v" >> ../out/pixelprobe.txt 2>&1 || echo "FAIL $v: exit $?" >> ../out/pixelprobe.txt
+              done
+            else echo "probe build failed" >> ../out/pixelprobe.txt; fi
+            grep -E "^(OK|FAIL|DEVICE)|failed" ../out/pixelprobe.txt ;;
           esac
           if [ -d build/omxplorer/mac/OmxplorerMojo.app ]; then
             otool -L build/omxplorer/mac/OmxplorerMojo.app/Contents/MacOS/OmxplorerMojo build/omxplorer/mac/OmxplorerMojo.app/Contents/Frameworks/*.dylib >> ../out/native-build.txt 2>&1 || true
