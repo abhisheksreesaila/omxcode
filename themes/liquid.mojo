@@ -303,6 +303,8 @@ body.liquid .menubar {
 body.liquid .menubar { margin: 8px 10px 0; border-radius: 12px; min-height: 34px; }
 body.liquid [data-tag=menubar] .menubar { margin: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 body.liquid [data-tag=app-mark] { font-size: 15px; font-weight: 700; color: var(--o-ink); letter-spacing: -.3px; }
+body.liquid [data-tag=inspector], body.liquid .vstack.card[data-tag=inspector] { border-radius: 0; box-shadow: none; border: 0; border-left: 1px solid var(--o-strong); margin: 0; }  /* (shell A: docked, goal 54) */
+body.liquid [data-tag=sidebar] { border-radius: 0; box-shadow: none; border: 0; border-right: 1px solid var(--o-strong); margin: 0; }
 body.liquid [data-tag=inspector] hr { border: 0; border-top: 1px solid var(--o-strong); margin: 2px 0; width: 100%; }
 body.liquid .menu-title { font-size: 13px; padding: 4px 10px; border-radius: 8px; color: var(--o-ink2); transition: background 150ms var(--sp-snappy); }
 body.liquid .menu.open > .menu-title, body.liquid .menu-title:hover { background: var(--l-hover); color: var(--o-ink); }
@@ -359,7 +361,6 @@ def liquid_dark_web(p: Palette) -> String:
             + " --l-track: rgba(255,255,255,.06); --l-thumb: " + hex_of(p.raised) + "; --l-thumb-shadow: 0 1px 3px rgba(0,0,0,.35), 0 0 0 1px " + strong + ";"
             + " --l-pop: " + css_rgba(mix(p.card, WHITE, 0.03), 0.92) + "; --l-pop-shadow: inset 0 1px rgba(255,255,255,.06), 0 0 0 1px " + line + ", 0 12px 40px rgba(0,0,0,.50);"
             + " --l-sub: " + hex_of(p.card) + "; --l-on-accent: " + hex_of(p.accent_ink) + "; --l-dialog-shadow: 0 40px 100px rgba(0,0,0,.55), 0 0 0 1px " + line + "; --l-scrim: rgba(0,0,0,.45); }\n"
-            + b + ".board-scroll { border: 1px solid " + line + "; border-radius: 16px; background-color: " + hex_of(mix(p.page, hx("#000000"), 0.15)) + "; box-sizing: border-box; }\n"
             + b + ".board > .object:not([data-tag=cell-editor]) { border: 1px solid " + line + "; border-radius: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n"
             + b + ".board > .object > .vstack.card { box-shadow: none; border-radius: 15px; }\n"
             + b + ".dialog, " + b + ".popover { background: " + hex_of(p.card) + "; }\n")
