@@ -239,6 +239,8 @@ struct Supervisor(Movable):
             if g.index == gpu:
                 total = g.total_mb
         var port = free_port()
+        if self.last_error.startswith(m.name + " exited"):
+            self.last_error = ""  # (an earlier crash of this model isn't the reason this start fails, if it does)
         var keep = self.idle_override if self.idle_override > 0 else m.keep_alive
         var p = Process.start(self.command(m, port, gpu, total), self.log_path(m.name), self.child_env())
         self.children.append(Child(m.name, p^, port, gpu, keep))

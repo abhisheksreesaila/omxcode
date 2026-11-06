@@ -1,7 +1,7 @@
 # Pictures of omxconsole for its cover page and its gallery card, from the real app: the console on GTK (headless) against
-# a consoled on a fresh throwaway home (build/g55/home-shots: no benchmark yet, so no tokens per second in any column),
-# where the console itself finds and downloads Qwen2.5-0.5B, then one key made for the Keys page. No speed in any picture
-# (docs/lessons.md, D-4762): the Ready shot is cropped below the top bar, whose Beacon can show one.
+# a consoled on a throwaway home (build/g55/home-shots: no benchmark there, so no tokens per second in any column), where
+# the console itself finds and downloads Qwen2.5-0.5B, then one key made for the Keys page. No speed or times in any
+# picture (docs/lessons.md, D-4762): the Ready picture is only its "is serving" card (see crop()).
 # The model is stopped before the other pages are taken: the Beacon then shows the GPU's memory, not a live tok/s.
 #   pixi run python scripts/console_shots.py [places|crop] -> build/g55/shots/*.png and docs/gallery/img/omxconsole-*.png
 #   (places: only the pages after Add, on the home the last run filled; crop: only the crops, from the last shots)

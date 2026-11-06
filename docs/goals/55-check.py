@@ -251,9 +251,6 @@ def m2():
     t = run([str(BUILD / "test_consoled_paths")], timeout=120) if r.returncode == 0 else r
     if t.returncode != 0 or "consoled paths: ok" not in t.stdout:
         problems.append("test_consoled_paths: " + (t.stdout + t.stderr)[-300:])
-    # a load whose server never comes up: 503 with why, nothing left waiting; a daemon stopping answers a waiting load
-    # 503 too (D-5539). Fake `max` programs, no GPU: one that exits at once, one that never answers /health.
-    problems += parked_loads()
     # a dropped connection is picked up where it stopped (tests/resume_server.py drops it mid-file)
     r = run(["scripts/mojo_flare.sh", "build", "tests/test_resume.mojo", "-o", str(BUILD / "test_resume")])
     if r.returncode != 0:
@@ -306,6 +303,10 @@ def m2():
             s, _ = d.call("DELETE", f"/admin/models/{tm['name']}")[:2]
             if s not in (200, 204) or model_named(d, TINY) or (HOME / "models" / TINY.replace("/", "--")).exists():
                 problems.append(f"DELETE /admin/models/{tm['name']}: {s}, row or files stayed")
+    # a load whose server never comes up: 503 with why, nothing left waiting; a daemon stopping answers a waiting load
+    # 503 too (D-5539). Fake `max` programs, no GPU: one that exits at once, one that never answers /health. After the
+    # pull above: on a clean tree no model is registered before it (review round 2)
+    problems += parked_loads()
     return not problems, "; ".join(problems) or f"{SMALL} pulled ({checked} files match the Hub's sha256), a cancel left nothing, a delete removed {TINY}"
 
 
@@ -330,10 +331,15 @@ def parked_loads():
         t0 = time.time()
         s1, j1 = load(d, names[0])
         took = time.time() - t0
-        s2, j2 = load(d, names[0])  # (the first left nothing waiting: the same answer, not "already waiting")
         why = str(j1)
-        if not (s1 == 503 and "failed to start" in why and "exited (3)" in why and took < 30 and s2 == 503 and "failed to start" in str(j2)):
-            problems.append(f"a load whose max exits: {s1} {why[:160]} after {took:.0f} s; again: {s2} {str(j2)[:100]}")
+        if not (s1 == 503 and "failed to start" in why and "exited (3)" in why and took < 30):
+            problems.append(f"a load whose max exits: {s1} {why[:160]} after {took:.0f} s")
+        # five more, one at a time, past the cap of MAX_WAITING (4): a load left waiting would turn one into "already waiting"
+        for k in range(5):
+            s2, j2 = load(d, names[0])
+            if not (s2 == 503 and "failed to start" in str(j2)):
+                problems.append(f"load {k + 2} after a failed start: {s2} {str(j2)[:120]} (something stayed waiting)")
+                break
     d = Daemon(HOME, extra={"MXC_MAX": str(hangs)})
     with d:
         got = {}

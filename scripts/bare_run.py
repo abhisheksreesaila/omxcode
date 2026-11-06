@@ -97,7 +97,10 @@ def main():
     for app in sys.argv[1:]:
         res[app] = run(app)
         print(f"{app}: {'ok' if res[app]['ok'] else 'FAIL ' + res[app]['why']}", flush=True)
-    (ROOT / "build/g53/bare.json").write_text(json.dumps(res, indent=1))
+    # the apps run here replace their own entries; the others' runs stay (a run of one app once wiped six, goal 55)
+    out = ROOT / "build/g53/bare.json"
+    kept = json.loads(out.read_text()) if out.exists() else {}
+    out.write_text(json.dumps({**kept, **res}, indent=1))
     headless.stop()
     sys.exit(0 if all(r["ok"] for r in res.values()) else 1)
 

@@ -413,7 +413,8 @@ struct Daemon(Service):
             if not m:
                 return error(404, "The model `" + req.param("name") + "` is not registered. Run `mxc pull " + req.param("name") + "`.", "model_not_found")
             var at = self.sup.find(req.param("name"))
-            if at >= 0 and self.sup.check_ready(at):  # (already running: no wait, whatever else is waiting)
+            if at >= 0 and self.sup.children[at].proc.running() and self.sup.check_ready(at):  # (already running: no wait, whatever else waits)
+                self.sup.children[at].proc.touch()  # (a load keeps it loaded longer, as ensure_running did)
                 return Reply.json(self.load_body(req.param("name"), at))
             if self.waiting() >= MAX_WAITING:
                 return error(503, String(self.waiting()) + " requests are already waiting for a model; try again shortly.", "model_unavailable", "server_error")
@@ -605,8 +606,8 @@ struct Daemon(Service):
         return '{"name": ' + json_string(name) + ', "upstream": ' + json_string(self.sup.children[i].base() + "/v1") + ', "state": "ready"}'
 
     def answer_loads(mut self):
-        """The waiting loads whose server is ready (200), gone (503: it failed to start) or too slow (503); a load whose
-        caller went away is dropped."""
+        """The waiting loads whose server is ready (200), gone (503: it failed to start) or too slow (503). A caller that
+        left is noticed only then (its worker waits for the head until it's written), as with /v1."""
         var i = 0
         while i < len(self.loading):
             var pipe = Pipe.at(self.loading[i].pipe)

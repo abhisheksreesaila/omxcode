@@ -72,7 +72,7 @@
     <p class="lede rise"><span data-words data-step="45" data-d0="380">Local AI on MAX.</span> <span class="two" data-words data-step="35" data-d0="560">Made easy.</span></p>
     <p class="lede rise">Find a model on Hugging Face, download it and serve it on your own GPU through Modular's MAX, behind one OpenAI-compatible endpoint. A desktop app for Linux and the Mac.</p>
     <div class="ctas rise"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-linux-x86_64.tar.gz">Download for Linux</a><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-mac-arm64.zip">Download for Mac</a></div>
-    <p class="needs rise">Needs MAX installed: <a href="https://docs.modular.com/max/packages">docs.modular.com/max/packages</a> · free · MIT licence</p>
+    <p class="needs rise">Needs MAX installed: <a href="https://docs.modular.com/max/packages">docs.modular.com/max/packages</a> · omxconsole itself is free, MIT licence</p>
   </div>
   <div class="film rv"><img src="gallery/img/omxconsole-find.png" alt="Add a model: a search for qwen2.5 lists models from the MAX catalog and Hugging Face, each marked fits, tight fit or too big for this GPU"></div>
   <p class="srcline rv">the real app on Linux · a search across the MAX catalog and Hugging Face, each result checked against this GPU's memory</p>
@@ -191,6 +191,7 @@ scripts/build.sh console linux &amp;&amp; build/console/linux/console</pre>
       <div>It needs MAX; when MAX isn't installed, the app opens and says how to get it.</div>
       <div>On the Mac it has opened and started its service on GitHub's macOS runners. Serving a model on Apple silicon through MAX hasn't been tried yet.</div>
       <div>The app has no chat window of its own yet: you talk to a model through the endpoint, from any OpenAI client.</div>
+      <div>Two things the earlier Python version did aren't in this one yet: porting a model MAX can't run, and reaching the endpoint from another machine over HTTPS. The console still shows their buttons.</div>
     </div>
     <div class="ctas rv"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode">Get it on GitHub</a><a class="more" href="gallery/">Back to the gallery</a></div>
   </div>
