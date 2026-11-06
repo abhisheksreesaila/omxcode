@@ -19,7 +19,7 @@ Reads each dataset with mojoui/lerobot.py (the generic LeRobot source) and write
                      15 frames, so a scrub lands fast), exactly `frames` frames.
   limits.csv         joint, limit_rad_s, source: the Franka Panda's joint velocity limits (libfranka's published control
                      parameters), for the peaks against the spec.
-  paper/droid-paper.pdf  the DROID paper (arXiv 2403.12945v2, CC-BY-4.0), when it is in ~/data/robot-scout/docs.
+  paper/droid-paper.pdf  the DROID paper (arXiv 2403.12945v2, CC-BY-4.0), when it is in ~/data/robot-scout/docs ($DROID_PAPER).
   truth.json         the fleet's totals, success rate by lab and by verb, the failure counts by kind and their episodes, the hero.
   ATTRIBUTION.txt    where the data came from and its licence.
 Two runs give byte-equal fleet.csv, limits.csv and truth.json (and telemetry.parquet's values).
@@ -44,7 +44,7 @@ import lerobot as lr  # noqa: E402
 
 DATA = Path.home() / "data" / "robot-scout"
 CAMERA = "observation.images.left_external"
-PAPER = DATA / "docs" / "droid-2403.12945v2.pdf"
+PAPER = Path(os.environ.get("DROID_PAPER", DATA / "docs" / "droid-2403.12945v2.pdf"))  # (scripts/fetch_demo.py fetches it elsewhere)
 VERB_MOST = 1000  # verbs used by fewer episodes are grouped as "other" (D-4727)
 PAPER_NAME = "droid-paper.pdf"  # where each row comes from: the dataset's paper, in paper/ (a key link marks it, D-4712)
 # libfranka "Robot and interface specifications" (frankaemika.github.io/docs/control_parameters.html): joint velocity limits

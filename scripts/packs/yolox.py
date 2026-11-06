@@ -24,7 +24,7 @@ from max.graph import DeviceRef, Graph, TensorType, Weight, ops
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-from packlib import write_safetensors  # noqa: E402
+from packlib import fetch_pinned, omx_cache, write_safetensors  # noqa: E402
 
 SIZE = 416
 DEV = DeviceRef.GPU(0)
@@ -124,10 +124,32 @@ def clean_env():
     return {k: v for k, v in os.environ.items() if not k.startswith(("CONDA", "PIXI", "PYTHON", "_CE_", "_CONDA"))}
 
 
+# Megvii's source and weights, from their GitHub (Apache-2.0), pinned by SHA-256 (goal 59: no hand step)
+SRC_URL = ("https://github.com/Megvii-BaseDetection/YOLOX/archive/refs/tags/0.3.0.tar.gz",
+           "972ddb9cb13d508fac3738e814449327cec29bc55fbd8a125c67d9080edfc02d")
+WEIGHTS_URL = ("https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.pth",
+               "9de513de589ac98bb92d3bca53b5af7b9acfa9b0bacb831f7999d0f7afaee8f0")
+
+
+def fetch_megvii():
+    """$OMX_CACHE/yolox/src (YOLOX 0.3.0's source) and yolox_tiny.pth, where yolox_ref.py reads them."""
+    import tarfile
+    d = omx_cache() / "yolox"
+    fetch_pinned(WEIGHTS_URL[0], d / "yolox_tiny.pth", WEIGHTS_URL[1])
+    if not (d / "src/yolox/__init__.py").exists():
+        tgz = fetch_pinned(SRC_URL[0], d / "src.tar.gz", SRC_URL[1])
+        with tarfile.open(tgz) as t:
+            for m in t.getmembers():
+                if m.isfile() and "/" in m.name:
+                    m.name = m.name.split("/", 1)[1]  # (YOLOX-0.3.0/… → src/…)
+                    t.extract(m, d / "src", filter="data")
+
+
 def main():
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "build/packs/yolox")
     out.mkdir(parents=True, exist_ok=True)
     if not (out / "folded.npz").exists():
+        fetch_megvii()
         r = subprocess.run(["pixi", "run", "-e", "models", "python", str(HERE / "yolox_ref.py"), str(out.resolve())], cwd=ROOT, env=clean_env(),
                            capture_output=True, text=True)
         print(r.stdout[-2000:])

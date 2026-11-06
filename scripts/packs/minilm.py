@@ -31,7 +31,7 @@ from max.graph.weights import load_weights
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from bert_graph import build_graph  # noqa: E402
-from packlib import write_safetensors  # noqa: E402
+from packlib import fleet_csv, hf_hub, omx_cache, write_safetensors  # noqa: E402
 
 REPO = "sentence-transformers/all-MiniLM-L6-v2"
 FILES = ("config.json", "model.safetensors", "vocab.txt", "tokenizer_config.json")
@@ -45,11 +45,11 @@ def clean_env():
 
 
 def snapshot(repo):
-    """The model's files: the Hugging Face cache's snapshot, else ~/.cache/omxcode/<name>, downloaded once."""
-    found = glob.glob(os.path.expanduser(f"~/.cache/huggingface/hub/models--{repo.replace('/', '--')}/snapshots/*/"))
+    """The model's files: the Hugging Face cache's snapshot, else $OMX_CACHE (~/.cache/omxcode)/<name>, downloaded once."""
+    found = glob.glob(str(hf_hub() / f"models--{repo.replace('/', '--')}/snapshots/*/"))
     if found:
         return pathlib.Path(found[0])
-    d = pathlib.Path(os.path.expanduser("~/.cache/omxcode/" + repo.split("/")[-1]))
+    d = omx_cache() / repo.split("/")[-1]
     d.mkdir(parents=True, exist_ok=True)
     for f in FILES:
         if not (d / f).exists():
@@ -80,7 +80,7 @@ def main(repo=REPO, name="minilm", prefix=""):
 
     # references: 200 distinct task texts, HF's tokenizer's ids, this pack's vectors
     texts = []
-    for r in csv.DictReader(open(ROOT / "build/g47/full/fleet.csv")):
+    for r in csv.DictReader(open(fleet_csv(ROOT))):
         t = r["task"].strip()
         if t and t not in texts:
             texts.append(t)

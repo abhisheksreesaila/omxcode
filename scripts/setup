@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# One command from a fresh clone to a working omxcode (goal 59): the environment, omxplorer, the robot demo data and
+# the model packs. Run it again any time: a step that's done is skipped.
+#   scripts/setup              everything this machine can do
+#   scripts/setup --no-models  skip the model packs (they need Linux and an NVIDIA GPU)
+# Each step prints its time; its full output goes to build/setup/<step>.log. Downloads go to $OMX_CACHE (default
+# ~/.cache/omxcode) and the Hugging Face cache; nothing is fetched from anywhere but each thing's own public home.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+models=1
+for a in "$@"; do
+  case $a in
+    --no-models) models=0 ;;
+    -h|--help) sed -n 2,7p "$0" | cut -c3-; exit 0 ;;
+    *) echo "unknown option $a (try --help)" >&2; exit 2 ;;
+  esac
+done
+mkdir -p build/setup
+T0=$(date +%s)
+
+step() {  # step <name> <what> <command…>: runs it, its output into build/setup/<name>.log, prints its time
+  local name=$1 what=$2; shift 2
+  local t=$(date +%s)
+  printf '%-10s %s … ' "$name" "$what"
+  if "$@" > "build/setup/$name.log" 2>&1; then
+    printf 'done (%s s)\n' $(( $(date +%s) - t ))
+    grep '^   ' "build/setup/$name.log" | tail -3
+  else
+    printf 'FAILED (%s s)\n' $(( $(date +%s) - t ))
+    tail -25 "build/setup/$name.log" | sed 's/^/   | /'
+    echo "   (all of it: build/setup/$name.log)"
+    exit 1
+  fi
+}
+
+skip() { printf '%-10s %s: skipped, %s\n' "$1" "$2" "$3"; }
+
+command -v pixi >/dev/null || { echo "pixi isn't installed: curl -fsSL https://pixi.sh/install.sh | bash (then open a new shell)"; exit 1; }
+
+env_ok() { pixi run true >/dev/null 2>&1; }
+install_env() {
+  # A half-made environment (an install stopped midway; two packages racing for share/X11/xkb) makes pixi fail to
+  # read its own records: the environment is thrown away (`pixi clean`: only .pixi/envs) and installed once more.
+  pixi install && return 0
+  echo "   pixi install failed: the environment is cleaned and installed again"
+  pixi clean && pixi install
+}
+if [ -f .pixi/envs/default/conda-meta/history ] && env_ok && pixi install --locked >/dev/null 2>&1; then
+  skip env "Mojo, MAX and the tools (pixi)" "installed"
+else
+  step env "Mojo, MAX and the tools (pixi; the first time downloads a few GB)" install_env
+fi
+
+APP=build/omxplorer/linux/omxplorer
+if [ "$(uname)" = Darwin ]; then APP=$(ls -d build/omxplorer/mac/*.app 2>/dev/null | head -1); fi
+newer=$( [ -n "$APP" ] && [ -e "$APP" ] && find examples/omxplorer mojoui themes hosts vendor -newer "$APP" -type f -print -quit)
+if [ -n "$APP" ] && [ -e "$APP" ] && [ -z "$newer" ]; then
+  skip build "omxplorer" "up to date ($APP)"
+else
+  step build "omxplorer (the first build takes about 5 minutes)" scripts/build.sh omxplorer "$([ "$(uname)" = Darwin ] && echo mac || echo linux)"
+fi
+
+if [ -f build/demo/truth.json ]; then
+  skip data "the robot demo data" "build/demo is there"
+else
+  step data "the robot demo data (DROID, CC-BY-4.0: about 1.2 GB, then the clips are cut)" pixi run python -I scripts/fetch_demo.py build/demo
+fi
+
+pack() {  # pack <name> <what> <command…>
+  if [ -f "build/packs/$1/$1.mef" ]; then skip "$1" "$2" "build/packs/$1 is there"; return; fi
+  step "$1" "$2" "${@:3}"
+}
+if [ $models = 0 ]; then
+  skip models "the model packs" "--no-models"
+elif [ "$(uname)" = Darwin ] || ! command -v nvidia-smi >/dev/null || ! nvidia-smi -L >/dev/null 2>&1; then
+  skip models "the model packs" "they need Linux and an NVIDIA GPU (scripts compile them with MAX for the GPU; goal 51)"
+else
+  pack e5small "classify(): e5-small-v2, text to vectors (MIT)" pixi run python scripts/packs/e5small.py build/packs/e5small
+  pack yolox "detect(): YOLOX-Tiny, boxes on video (Apache-2.0)" pixi run python scripts/packs/yolox.py build/packs/yolox
+  pack scene "scene(): ResNet-18, a picture's label (BSD-3), converted from PyTorch" pixi run python scripts/packs/from_torch.py torchvision:resnet18 build/packs/scene --function scene --about "ResNet-18 (torchvision, BSD-3): ImageNet's 1,000 labels"
+fi
+
+echo
+echo "ready in $(( $(date +%s) - T0 )) s. Next:"
+echo "  scripts/omxplorer.sh build/demo/fleet.csv    omxplorer with the robot fleet (its clips are in build/demo/clips)"
+echo "  docs/models.html                  add your own model as a script function"

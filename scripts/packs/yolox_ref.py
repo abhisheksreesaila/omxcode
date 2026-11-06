@@ -13,6 +13,7 @@ pixels: {"cls": COCO name, "score": obj × class, "box": [x, y, w, h]}.
 """
 import importlib.util
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -21,8 +22,9 @@ import cv2
 import numpy as np
 import torch
 
-SRC = Path.home() / ".cache/omxcode/yolox/src"
-WEIGHTS = Path.home() / ".cache/omxcode/yolox/yolox_tiny.pth"
+CACHE = Path(os.environ.get("OMX_CACHE", Path.home() / ".cache/omxcode")) / "yolox"  # (scripts/packs/yolox.py fetches them)
+SRC = CACHE / "src"
+WEIGHTS = CACHE / "yolox_tiny.pth"
 ROOT = Path(__file__).resolve().parents[2]
 SIZE = 416
 CONF, NMS = 0.25, 0.45
