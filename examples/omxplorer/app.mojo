@@ -321,10 +321,12 @@ comptime APP = "omxcode"  # (settings live in ~/.config/omxcode; ~/.config/omxap
 comptime W = 1440  # the window (Stitch's artboards; the web check's viewport)
 comptime INSPECTOR_W = 300
 comptime RAIL_W = 48  # the sheet's side rail (goal 41)
+comptime SHELL_CHROME_H = 228  # shell A's bands, the formula bar and the board's padding (goal 54: measured at 900 and 800 pt)
+comptime BOARD_PAD = 12  # the board's padding inside the docked chrome (shell A, goal 54)
 comptime TILE_MIN_W = 300  # the smallest a tiled card is made while the Board has room (goal 54)
 comptime TILE_MIN_H = 200
 comptime CHROME_H = 252  # the menu bar, toolbar, formula bar, bottom tabs, status bar and the gaps between them (goal 25: measured)
-comptime COMPACT_W = 1440  # narrower windows: the toolbar's tools show only their icons (their titles are tooltips)
+comptime COMPACT_W = 1680  # narrower windows: the toolbar's tools show only their icons (their titles are tooltips); the labelled ribbon needs 1,663 pt (goal 54)
 comptime FX_H = 42  # the formula bar and its gap (the report has none: its page is that much taller)
 comptime SYMBOLS: List[String] = ["$", "€", "£", "₹"]
 comptime NEGATIVE_STYLES: List[String] = ["−1,234", "(1,234)"]
@@ -2506,7 +2508,7 @@ struct Main(App):
 
     def board_h(self) -> Int:
         """The Board's height: the room under the formula bar (the cards fill it; nothing scrolls)."""
-        return max(TILE_MIN_H, self.grid_h() - 30)
+        return max(TILE_MIN_H, self.win_h - SHELL_CHROME_H)  # (shell A: the board reaches the bottom band)
 
     def card_tags(self) -> List[String]:
         """The Board's cards by their tags, in the Board's order (sheet_screen): the table, the objects, the media, the
@@ -4503,7 +4505,7 @@ struct Main(App):
         middle.append(Tool("Chart", "chart-bar", INSERT_CHART, False, "A chart of the selected column (Ctrl+Shift+C)"))
         middle.append(Tool("Query", "database", QUERY_OPEN, self.query_open, "Ask the sheet's tables in SQL: joins, IN, subqueries; the answer is a table"))
         middle.append(Tool("Script", "terminal", SCRIPT_OPEN, self.script.open, "A script over every table and video here: statements in order, each result a card"))
-        return Toolbar(left, middle, right, extra, toggles=self.format_tools(), inline=True, compact=self.win_w < COMPACT_W)
+        return Toolbar(left, middle, right, extra, toggles=self.format_tools(), inline=False, compact=self.win_w < COMPACT_W)  # (shell A: a ribbon, each icon over its title, goal 54)
 
     def format_tools(self) -> List[List[Tool]]:
         """Excel's Home tab, in small toggles: font, colours, alignment, number. Each shows the selection's state."""
@@ -4752,7 +4754,7 @@ struct Main(App):
         return StatusBar(items, (fixed(shown_ms(self.milliseconds), 1) + " ms on " + (self.frame.device_name if self.ran_gpu else "CPU")) if self.show_timings else "")
 
     def sheet_width(self) -> Int:
-        return self.win_w - 40 - RAIL_W - 16 - (INSPECTOR_W + 16 if self.inspector_open else 0)
+        return self.win_w - RAIL_W - 1 - 2 * BOARD_PAD - (INSPECTOR_W + 1 if self.inspector_open else 0)  # (shell A: the rail, the board's padding, the inspector, their lines)
 
     def rail(self) -> View:
         """The sheet's side rail (mojoui.sheetchrome.Rail): what goes on the page from a file (a table, a video, a picture)."""
@@ -4852,14 +4854,14 @@ struct Main(App):
                           tones=tones, on_hold=HOLD).fill().grow()) if self.sheet_tab == 0 else self.report_view()
         # The sheet's column takes the room the inspector leaves, the row takes the height the bars leave: sizes
         # come from the window (App.resize), never asked of it, so the window never grows to fit them (goal 25 M2).
-        var main = (VStack(fx, area^, spacing=6) if self.sheet_tab == 0 else VStack(area^, spacing=6)).grow().align(STRETCH)
-        var row = (HStack(self.rail(), main, self.inspector(), spacing=16) if self.inspector_open else HStack(self.rail(), main, spacing=16)).align(STRETCH)
+        var main = (VStack(fx, area^, spacing=BOARD_PAD) if self.sheet_tab == 0 else VStack(area^, spacing=BOARD_PAD)).padding(BOARD_PAD).grow().align(STRETCH)
+        var row = (HStack(self.rail(), main, self.inspector(), spacing=0) if self.inspector_open else HStack(self.rail(), main, spacing=0)).align(STRETCH)  # (shell A: docked, goal 54)
         var tabs: List[Tab] = [Tab(self.sheet_name, "sheet"), Tab(self.report_name, "chart-bar")]
         var chip = List[View]()  # (the GPU's state shows once, in the menu bar)
         var parts = List[View]()
         parts.append(self.menu_bar())
         parts.append(self.toolbar())
-        parts.append(row^.padding(0, 20).fill().grow())
+        parts.append(row^.fill().grow())
         parts.append(BottomTabs(tabs, self.sheet_tab, TAB, self.renaming, RENAME_SUBMIT, RENAME_CANCEL, chip).height(30))  # (Excel's place for them)
         parts.append(self.status().height(30))
         if self.ctx_col >= 0 and self.sheet_tab == 0:
@@ -4867,7 +4869,7 @@ struct Main(App):
         parts.append(Clipboard(self.clip_text, self.clip_version))
         for o in self.overlays():
             parts.append(o.copy())
-        return VStack(parts^, spacing=6).fill().grow()
+        return VStack(parts^, spacing=0).fill().grow()  # (shell A: the bands join, goal 54)
 
 
 def fill_rows(mut rows: CardRows, sheet: Sheet):

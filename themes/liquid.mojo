@@ -55,21 +55,32 @@ def card(p: Palette, role: String, radius: Int, pad_top: Int, pad_x: Int, pad_bo
     return s^
 
 
+def dock(p: Palette, role: String, line_top: UInt32, line_bottom: UInt32, fill: UInt32 = 0) -> Surface:
+    """A docked part of the window's chrome (goal 54, shell A: the owner's pick): opaque, square, flush with the window's
+    edge, no margin and no shadow; a 1 pt line where it meets the board."""
+    return Surface(role, fill if fill != 0 else p.chrome, 0, 0, 0, 0, 0, -1, -1, -1, [], line_top, line_bottom, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)
+
+
 def liquid_look(p: Palette) -> Look:
-    """Liquid's shapes as values (every host draws them): glass islands for the chrome (the header, the toolbar, the
-    inspector, the bottom strip), solid white cards for the content, Inter on one scale (11 12 13 15 17 22 34)."""
-    var tabs = island(p, "sheet-tabs", 14, 0, 0, 10, 0, -1)
-    var status = island(p, "status-bar", 0, 14, 0, 10, 10, -1)
-    status.shadows = [Shadow(8, 20, 0, rgba(15, 23, 42, 15), False)] if not p.dark else [Shadow(8, 20, 0, rgba(0, 0, 0, 77), False)]
+    """Liquid's shapes as values (every host draws them): the chrome docked to the window's edges (shell A, goal 54: the
+    menu bar and the toolbar one band along the top, the sheet tabs and the status bar one band along the bottom, the
+    rail and the inspector flush at the sides), solid white cards for the content, Inter on one scale (11 12 13 15 17 22 34)."""
+    var edge = p.line_strong
+    var tabs = dock(p, "sheet-tabs", edge, 0)
+    var status = dock(p, "status-bar", 0, 0)
     status.font, status.font_size, status.ink = "Inter", 12, p.ink3
-    var header = island(p, "menubar", 12, 12, 8, 10, 0, -1)
+    var header = dock(p, "menubar", 0, 0)
     header.min_height = 34
+    var toolbar = dock(p, "toolbar", 0, edge)
+    toolbar.pad_top, toolbar.pad_x, toolbar.pad_bottom = 2, 6, 2
     var bar = Surface("formula-bar", 0, -1, -1, 0, 10, 0, -1, -1, -1, [], 0, 0, 0, -1, "", 0, 0, 0, 0, 0, 0, 0, False)  # (on the backdrop: no panel)
     # an inspector row (a label, its control) as tall as a control, whichever control it holds: the Mac's checkbox (16 pt) and
     # switch rows sat closer than GTK's and the web's (2026-10-25)
     var row = Surface("inspector-row", 0, -1, -1, -1, -1, -1, -1, -1, -1, [], 0, 0, 0, 30, "", 0, 0, 0, 0, 0, 0, 0, False)
-    var surfaces: List[Surface] = [header^, row^, island(p, "toolbar", 18 if not p.dark else 12, 18 if not p.dark else 12, 0, 10, 0, 6), island(p, "inspector", 18, 18, -1, -1, -1, 10), tabs^, status^, bar^,
-                                   island(p, "sidebar", 12, 12, 0, 0, 0, -1),  # (the side rail, mojoui.sheetchrome.Rail: an island; dark rims it, 12 as the menu bar: an 18 pt corner on a 48 pt rail leaves no straight edge)
+    var inspector = dock(p, "inspector", 0, 0, p.card)
+    inspector.pad_top, inspector.pad_x, inspector.pad_bottom = 10, 10, 10
+    var surfaces: List[Surface] = [header^, row^, toolbar^, inspector^, tabs^, status^, bar^,
+                                   dock(p, "sidebar", 0, 0),  # (the side rail, mojoui.sheetchrome.Rail; its edge line: liquid_css)
                                    card(p, "table", 16, 10, 12, 12), card(p, "tile", 16, 16, 18, 16), words("sentence-line", 15, 600, p.ink),
                                    words("section-title", 0, 600, 0, 0.5), words("stat-value", 15, 600, p.ink), words("kpi-fact", 12, 0, p.ink3),
                                    chip("stat-card", p.raised, p.line_strong, 0, 0, 12, -1, -1), chip("kpi-note", p.raised, p.line, 12, p.ink2, 999, 2, 10),
@@ -203,6 +214,9 @@ def liquid_css(p: Palette) -> String:
         + w + "label.title-4 { font-size: 15px; font-weight: 600; color: " + ink + "; }\n"
         + w + "label.caption { font-size: 12px; color: " + ink2 + "; }\n"
         + w + ".mui-board { background-color: transparent; }\n"
+        # shell A (goal 54): the side parts docked, a line where each meets the board
+        + w + ".mui-tag-inspector, " + w + ".mui-card.mui-tag-inspector { border-left: 1px solid " + strong + "; border-radius: 0; box-shadow: none; }\n"
+        + w + ".mui-tag-sidebar, " + w + ".mui-card.mui-tag-sidebar { border-right: 1px solid " + strong + "; border-radius: 0; box-shadow: none; }\n"
         # the menu bar: one glass strip, one type
         + w + ".mui-tag-menubar .mui-menubar { background: transparent; }\n"
         + w + ".mui-tag-app-mark { font-size: 15px; font-weight: 700; color: " + ink + "; letter-spacing: -0.3px; margin-right: 4px; }\n"
@@ -352,11 +366,11 @@ def liquid_dark_web(p: Palette) -> String:
 
 
 def liquid_dark_gtk(p: Palette) -> String:
-    """Liquid dark on GTK: the sheet (a Board's scroller) and every card on it in a 1 px hairline, one soft shadow."""
+    """Liquid dark on GTK: every card on a Board in a 1 px hairline, one soft shadow (shell A, goal 54: the board itself has
+    no frame; the cards are its only islands)."""
     var w = String("window.liquid ")
     var line = hex_of(p.line)
-    return (w + ".mui-board-scroll { border: 1px solid " + line + "; border-radius: 16px; background-color: " + hex_of(mix(p.page, hx("#000000"), 0.15)) + "; }\n"
-            + w + ".mui-board > * { border: 1px solid " + line + "; border-radius: 16px; }\n"
+    return (w + ".mui-board > * { border: 1px solid " + line + "; border-radius: 16px; }\n"
             + w + ".mui-board > .mui-card { box-shadow: 0 6px 18px rgba(0,0,0,.35); }\n")
 
 

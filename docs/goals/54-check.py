@@ -201,7 +201,7 @@ def m2():
         return False, f"no {FULL}"
     probs, shots = [], []
     for ap in ("light", "dark"):
-        out, shot = gtk(f"pick:Choose a file={FULL / 'fleet.csv'};tap:Create table;wait:1200", f"m2-shell-{ap}", appearance=ap)
+        out, shot = gtk(f"pick:Choose a file={FULL / 'fleet.csv'};waitfor:Create table=60000;tap:Create table;wait:1200", f"m2-shell-{ap}", appearance=ap)
         shots.append(str(shot))
         backs = backdrop_of(ap)
         bad, _ = edge_pixels(shot, lambda px: not any(near(px, b) for b in backs))
