@@ -34,4 +34,4 @@ lowering a proof; skins other than Liquid (Ledger, Graphite, Blueprint keep thei
 - Saving the tiling in .omx files is out of scope (cards other than charts aren't saved today either).
 
 ## Budget
-80 turns.
+160 turns (raised from 80 on 2026-11-05, D-5407: M0–M1 took about 75; the owner asked to continue).

@@ -67,7 +67,7 @@ def gtk(steps, name, size=(1440, 900), appearance="light"):
     return out, shot
 
 
-BOARD_RE = re.compile(r"^BOARD: (\S+) at (-?\d+),(-?\d+) (\d+)x(\d+)$")
+BOARD_RE = re.compile(r"^BOARD: (\S+) at (-?\d+),(-?\d+) (\d+)x(\d+)(?: \(asked -?\d+,-?\d+ \d+x\d+\))?$")
 SIZE_RE = re.compile(r"^BOARDS: (\S+) (\d+)x(\d+)$")
 
 
@@ -123,14 +123,14 @@ HERO = "F00118"
 def m1_steps():
     fleet, tele, clip = FULL / "fleet.csv", FULL / "telemetry.parquet", FULL / "clips" / f"{HERO}.mp4"
     return ";".join([
-        f"pick:Choose a file={fleet}", "tap:Create table", "wait:800", "boards:table",
-        f"pick:Table={tele}", "waitfor:table-telemetry", "wait:500", "boards:telemetry",
+        f"pick:Choose a file={fleet}", "waitfor:Create table=60000", "tap:Create table", "wait:800", "boards:table",
+        f"pick:Table={tele}", "waitfor:close-telemetry=120000", "wait:500", "boards:telemetry",
         "tap:Chart", "wait:800", "boards:chart",
-        f"pick:Video={clip}", "wait:1500", "boards:video",
-        "tap:Query", "submit:sql=SELECT lab, COUNT(*) AS n FROM fleet GROUP BY lab", "tap:run-query", "waitfor:table-query-1", "wait:500", "boards:query",
-        "tap:close-table-query-1", "wait:600", "boards:closed",
-        "resize:table=120,0", "wait:600", "boards:resized",
-        "dragcard:table-telemetry=table", "wait:600", "boards:swapped",
+        "tap:Video", "wait:300", f"pick:Choose a video…={clip}", "wait:1500", "boards:video",
+        "tap:Query", "wait:300", "textarea:0=SELECT lab, COUNT(*) AS n FROM fleet GROUP BY lab", "tap:run-query", "waitfor:close-query-1=60000", "wait:500", "boards:query",
+        "tap:close-query-1", "wait:600", "boards:closed",
+        "resize:table=-120,0", "wait:600", "boards:resized",
+        "dragcard:tablecard0=table", "wait:600", "boards:swapped",
         "window:1280x800", "wait:900", "boards:smaller",
     ])
 
@@ -150,25 +150,31 @@ def m1():
     by = {s: r for s, _, r in d}
     if len(by["query"]) != len(by["video"]) + 1 or len(by["closed"]) != len(by["video"]):
         probs.append(f"cards: video {len(by['video'])}, query {len(by['query'])}, closed {len(by['closed'])}")
-    # the corner drag: the table's right edge moved and the card beside it gave way by as much
+    # the corner drag (120 pt in): the table's right edge moved by that much, and every card that faced that edge moved
+    # its left edge with it (they gave way), the row still tiled
     t0, t1 = by["closed"].get("table"), by["resized"].get("table")
     grew = (t1[2] - t0[2]) if t0 and t1 else 0
-    if grew < 60:
-        probs.append(f"the table's width changed by {grew} after a 120 pt corner drag")
-    gave = [n for n in by["closed"] if n != "table" and n in by["resized"] and by["closed"][n][2] - by["resized"][n][2] == grew]
-    if not gave:
-        probs.append("no neighbour gave way by the same width")
+    if grew != -120:
+        probs.append(f"the table's width changed by {grew} after a -120 pt corner drag")
+    edge0 = t0[0] + t0[2] + GAP if t0 else -1
+    facing = [n for n, r in by["closed"].items() if n != "table" and r[0] == edge0]
+    gave = [n for n in facing if n in by["resized"] and by["resized"][n][0] == edge0 + grew]  # (nested parts share the space, as Hyprland's splits do)
+    if not facing or gave != facing:
+        probs.append(f"cards facing the table's edge {facing}, moved with it {gave}")
     # the drop: the two cards' rects swapped
-    a0, b0 = by["resized"].get("table"), by["resized"].get("table-telemetry")
-    a1, b1 = by["swapped"].get("table"), by["swapped"].get("table-telemetry")
+    a0, b0 = by["resized"].get("table"), by["resized"].get("tablecard0")
+    a1, b1 = by["swapped"].get("table"), by["swapped"].get("tablecard0")
     if not (a0 and b0 and a1 == b0 and b1 == a0):
         probs.append(f"swap: table {a0}→{a1}, telemetry {b0}→{b1}")
+    sizes = {s: z for s, z, _ in d}
+    if not (sizes["smaller"][0] <= sizes["swapped"][0] - 150 and sizes["smaller"][1] <= sizes["swapped"][1] - 80):
+        probs.append(f"the window went 1440×900 → 1280×800 but the board went {sizes['swapped']} → {sizes['smaller']}")
     slow = [l for l in out.splitlines() if l.startswith("SLOW:")]
     if slow:
         probs.append(f"{len(slow)} SLOW lines: {slow[0]}")
     if probs:
         return False, "; ".join(probs)[:900]
-    return True, f"{len(d)} layouts, no overlap, gaps 8; corner drag +{grew} pt and {gave[0]} gave way; swap exact; 0 SLOW; {shot}"
+    return True, f"{len(d)} layouts, no overlap, gaps 8; corner drag {grew} pt and {', '.join(gave)} moved with the edge; swap exact; 0 SLOW; {shot}"
 
 
 def edge_pixels(png, chrome_check):

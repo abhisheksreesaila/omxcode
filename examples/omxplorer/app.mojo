@@ -84,6 +84,7 @@ from mojoui.sheetchrome import Tool, Toolbar, FormulaBar, StatusBar, Tab, Bottom
 from mojoui.cellstyle import (CellStyle, BOLD, ITALIC, UNDERLINE, STRIKE, INK_MASK, FILL_MASK, ALIGN_MASK, ink_bits, fill_bits, align_bits,
                               AUTO_ALIGN, ALIGN_LEFT, ALIGN_CENTRE, ALIGN_RIGHT, SWATCH_NAMES, swatch_name)
 from mojoui.swatches import SwatchPicker, draw_swatches, swatch_at
+from mojoui.tiling import Tiling, Rect as TileRect
 from mojoui.sheetpage import (SheetObject, compute, shape_of, chart_view, chart_text, object_card, readout, free_spot, object_title, groups_of, OBJ_CHART, OBJ_PIVOT,
                               CHART_BAR, CHART_LINE, HEADER_H, chart_words, chart_choices, apply_choice, chosen, chart_sentence, SLOT_NAMES, slot_text,
                               number_columns, text_columns, COMBINES, ORDERS, TOPS, SLOT_COMBINE, SLOT_VALUE, SLOT_GROUP, SLOT_ORDER, SLOT_TOP,
@@ -320,6 +321,8 @@ comptime APP = "omxcode"  # (settings live in ~/.config/omxcode; ~/.config/omxap
 comptime W = 1440  # the window (Stitch's artboards; the web check's viewport)
 comptime INSPECTOR_W = 300
 comptime RAIL_W = 48  # the sheet's side rail (goal 41)
+comptime TILE_MIN_W = 300  # the smallest a tiled card is made while the Board has room (goal 54)
+comptime TILE_MIN_H = 200
 comptime CHROME_H = 252  # the menu bar, toolbar, formula bar, bottom tabs, status bar and the gaps between them (goal 25: measured)
 comptime COMPACT_W = 1440  # narrower windows: the toolbar's tools show only their icons (their titles are tooltips)
 comptime FX_H = 42  # the formula bar and its gap (the report has none: its page is that much taller)
@@ -416,6 +419,12 @@ struct Main(App):
     var table_y: Int
     var table_w: Int
     var table_h_set: Int  # 0: automatic
+    var board_tiles: Tiling  # the Board's cards as tiles (mojoui.tiling, goal 54): every card's place comes from it
+    var tile_tags: Dict[String, String]  # each tile's card, by its tag, at the last layout (how a card is found again)
+    var tile_w: Int  # the Board's size at the last layout
+    var tile_h: Int
+    var tile_next: Int  # the next tile's number (t1, t2, …)
+    var tile_focus: Int  # the card last touched or added (a new card splits it), by its index on the Board
     var reveal: Int  # the sheet child to scroll into view (a new object), and how many times asked
     var reveal_count: Int
     var ctx_col: Int  # the column a context menu is open for (-1: none), and where it opened on the grid
@@ -550,6 +559,12 @@ struct Main(App):
         self.table_y = 0
         self.table_w = 0
         self.table_h_set = 0
+        self.board_tiles = Tiling(TILE_MIN_W, TILE_MIN_H)
+        self.tile_tags = Dict[String, String]()
+        self.tile_w = 0
+        self.tile_h = 0
+        self.tile_next = 1
+        self.tile_focus = 0
         self.reveal = -1
         self.reveal_count = 0
         self.ctx_col = -1
@@ -639,6 +654,7 @@ struct Main(App):
         """The window's content area: the sheet, the report and the inspector fill it (goal 25 M2)."""
         self.win_w = max(width, 640)
         self.win_h = max(height, 480)
+        self.retile()
         if self.editor:
             self.editor.value().resize(self.win_w - 40, self.win_h - 32)  # (less the editor's margins)
 
@@ -2488,6 +2504,173 @@ struct Main(App):
             return self.table_h_set
         return TABLE_H if len(self.objects) + len(self.media) > 0 else self.grid_h() - 30  # (the Board keeps 30 pt under it)
 
+    def board_h(self) -> Int:
+        """The Board's height: the room under the formula bar (the cards fill it; nothing scrolls)."""
+        return max(TILE_MIN_H, self.grid_h() - 30)
+
+    def card_tags(self) -> List[String]:
+        """The Board's cards by their tags, in the Board's order (sheet_screen): the table, the objects, the media, the
+        table cards, the logs, the documents."""
+        var out = List[String]()
+        if self.screen != SHEET:
+            return out^
+        out.append("table")
+        for k in range(len(self.objects)):
+            out.append(("chart" if self.objects[k].kind == OBJ_CHART else "pivot") + String(k))
+        for k in range(len(self.media)):
+            out.append(("video" if self.media.cards[k].kind == OBJ_VIDEO else "image") + String(k))
+        for k in range(len(self.tables)):
+            out.append("tablecard" + String(k))
+        for k in range(len(self.tracks)):
+            out.append("track" + String(k))
+        for k in range(len(self.docs)):
+            out.append("documents" + String(k))
+        return out^
+
+    def card_rects(self) -> List[TileRect]:
+        """Where each card is now, in card_tags' order."""
+        var out = List[TileRect]()
+        if self.screen != SHEET:
+            return out^
+        out.append(TileRect(self.table_x, self.table_y, self.table_w if self.table_w > 0 else self.sheet_width(), self.table_h()))
+        for k in range(len(self.objects)):
+            out.append(TileRect(self.objects[k].x, self.objects[k].y, self.objects[k].w, self.objects[k].h))
+        for k in range(len(self.media)):
+            ref c = self.media.cards[k]
+            out.append(TileRect(c.x, c.y, c.w, c.h))
+        for k in range(len(self.tables)):
+            ref t = self.tables.cards[k]
+            out.append(TileRect(t.x, t.y, t.w, t.h))
+        for k in range(len(self.tracks)):
+            ref r = self.tracks.cards[k]
+            out.append(TileRect(r.x, r.y, r.w, r.h))
+        for k in range(len(self.docs)):
+            ref d = self.docs[k].card
+            out.append(TileRect(d.x, d.y, d.w, d.h))
+        return out^
+
+    def set_card_rect(mut self, i: Int, r: TileRect):
+        """Card i (card_tags' order) to rect r."""
+        var k = i - 1
+        if i == 0:
+            self.table_x = r.x
+            self.table_y = r.y
+            self.table_w = r.w
+            self.table_h_set = r.h
+            return
+        if k < len(self.objects):
+            self.objects[k].x = r.x
+            self.objects[k].y = r.y
+            self.objects[k].w = r.w
+            self.objects[k].h = r.h
+            return
+        k -= len(self.objects)
+        if k < len(self.media):
+            ref c = self.media.cards[k]
+            c.x = r.x
+            c.y = r.y
+            c.w = r.w
+            c.h = r.h
+            return
+        k -= len(self.media)
+        if k < len(self.tables):
+            ref t = self.tables.cards[k]
+            t.x = r.x
+            t.y = r.y
+            t.w = r.w
+            t.h = r.h
+            return
+        k -= len(self.tables)
+        if k < len(self.tracks):
+            ref q = self.tracks.cards[k]
+            q.x = r.x
+            q.y = r.y
+            q.w = r.w
+            q.h = r.h
+            return
+        k -= len(self.tracks)
+        if k < len(self.docs):
+            ref d = self.docs[k].card
+            d.x = r.x
+            d.y = r.y
+            d.w = r.w
+            d.h = r.h
+            d.version += 1
+
+    def tile_ids(self) -> List[String]:
+        """Each card's tile ("": none yet), found as it was left at the last layout: the same tag in the same place, else
+        the same place (the cards before it shifted: one closed), else the same tag (it resized itself)."""
+        var tags = self.card_tags()
+        var cur = self.card_rects()
+        var leaves = self.board_tiles.leaves()
+        var old = self.board_tiles.rects(self.tile_w, self.tile_h)
+        var ids = List[String]()
+        for _ in range(len(tags)):
+            ids.append("")
+        var used = List[Bool]()
+        for _ in range(len(leaves)):
+            used.append(False)
+        for phase in range(3):
+            for i in range(len(tags)):
+                if ids[i] != "":
+                    continue
+                for j in range(len(leaves)):
+                    if used[j]:
+                        continue
+                    var same_tag = self.tile_tags.get(leaves[j], "") == tags[i]
+                    var same_place = old[j] == cur[i]
+                    if (phase == 0 and same_tag and same_place) or (phase == 1 and same_place) or (phase == 2 and same_tag):
+                        ids[i] = leaves[j]
+                        used[j] = True
+                        break
+        return ids^
+
+    def retile(mut self):
+        """The tiles follow the cards (a new one splits the card last touched, a closed one's space goes to its
+        neighbour), then every card takes its tile's place in the Board's current size."""
+        if self.screen != SHEET:  # (another screen over the sheet: the tiles wait for it)
+            return
+        var tags = self.card_tags()
+        var ids = self.tile_ids()
+        var W = self.sheet_width()
+        var H = self.board_h()
+        for leaf in self.board_tiles.leaves():
+            if leaf not in ids:
+                _ = self.board_tiles.remove(leaf)
+        var focus = ids[self.tile_focus] if 0 <= self.tile_focus < len(ids) else String("")
+        for i in range(len(ids)):
+            if ids[i] == "":
+                ids[i] = "t" + String(self.tile_next)
+                self.tile_next += 1
+                try:
+                    self.board_tiles.insert(ids[i], focus, W, H)
+                except:
+                    pass
+                focus = ids[i]
+                self.tile_focus = i
+        self.tile_w = W
+        self.tile_h = H
+        self.tile_tags = Dict[String, String]()
+        for i in range(len(ids)):
+            self.tile_tags[ids[i]] = tags[i]
+        self.apply_tiles(ids)
+
+    def apply_tiles(mut self, ids: List[String]):
+        """Every card to its tile's rect (only the ones that moved: a card's version changes when it does)."""
+        var leaves = self.board_tiles.leaves()
+        var rects = self.board_tiles.rects(self.tile_w, self.tile_h)
+        var cur = self.card_rects()
+        var moved = False
+        for i in range(len(ids)):
+            for j in range(len(leaves)):
+                if leaves[j] == ids[i]:
+                    if not (rects[j] == cur[i]):
+                        self.set_card_rect(i, rects[j])
+                        moved = True
+                    break
+        if moved:
+            self.version += 1
+
     def first_number(self) -> Int:
         for c in range(self.frame.columns()):
             if self.frame.kind(c) == DECIMAL:
@@ -2762,6 +2945,7 @@ struct Main(App):
         self.handle(event)
         if self.has_table and self.frame.edits() != self.seen_edits:  # the table changed (any way): every object and tile again
             self.refresh()
+        self.retile()  # (the Board's cards back into their tiles: one added, closed, or resized by its own work)
         self.island.still = environment("MOJOUI_REDUCE_MOTION") != ""
         var rest = self.rest_face()
         if rest.lead != self.island.rest.lead or rest.text != self.island.rest.text:
@@ -3517,55 +3701,22 @@ struct Main(App):
         elif m == INSERT_CLOSE:
             self.inserting = 0
             self.version += 1
-        elif m == MOVE or m == RESIZE:  # a sheet object (child 0: the table) dragged by its title bar, or by its corner
-            var k = event.number - 1
-            if k == -1:
-                if m == MOVE:
-                    self.table_x = max(0, self.table_x + Int(event.dx))
-                    self.table_y = max(0, self.table_y + Int(event.dy))
-                else:
-                    self.table_w = max(360, (self.table_w if self.table_w > 0 else self.sheet_width()) + Int(event.dx))
-                    self.table_h_set = max(200, self.table_h() + Int(event.dy))
-            elif 0 <= k < len(self.objects):
-                if m == MOVE:
-                    self.objects[k].x = max(0, self.objects[k].x + Int(event.dx))
-                    self.objects[k].y = max(0, self.objects[k].y + Int(event.dy))
-                else:
-                    self.objects[k].w = max(320, self.objects[k].w + Int(event.dx))
-                    self.objects[k].h = max(220, self.objects[k].h + Int(event.dy))
-            elif 0 <= k - len(self.objects) < len(self.media):  # (a video or picture card, after the objects)
-                ref c = self.media.cards[k - len(self.objects)]
-                if m == MOVE:
-                    c.x = max(0, c.x + Int(event.dx))
-                    c.y = max(0, c.y + Int(event.dy))
-                else:
-                    c.w = max(280, c.w + Int(event.dx))
-                    c.h = max(200, c.h + Int(event.dy))
-            elif 0 <= k - len(self.objects) - len(self.media) < len(self.tables):  # (a table card, after the media)
-                ref t = self.tables.cards[k - len(self.objects) - len(self.media)]
-                if m == MOVE:
-                    t.x = max(0, t.x + Int(event.dx))
-                    t.y = max(0, t.y + Int(event.dy))
-                else:
-                    t.w = max(320, t.w + Int(event.dx))
-                    t.h = max(180, t.h + Int(event.dy))
-            elif 0 <= k - len(self.objects) - len(self.media) - len(self.tables) < len(self.tracks):  # (a log card, after the tables)
-                ref r = self.tracks.cards[k - len(self.objects) - len(self.media) - len(self.tables)]
-                if m == MOVE:
-                    r.x = max(0, r.x + Int(event.dx))
-                    r.y = max(0, r.y + Int(event.dy))
-                else:
-                    r.w = max(360, r.w + Int(event.dx))
-                    r.h = max(200, r.h + Int(event.dy))
-            elif 0 <= k - len(self.objects) - len(self.media) - len(self.tables) - len(self.tracks) < len(self.docs):  # (a folder of documents, after the logs)
-                ref d = self.docs[k - len(self.objects) - len(self.media) - len(self.tables) - len(self.tracks)].card
-                if m == MOVE:
-                    d.x = max(0, d.x + Int(event.dx))
-                    d.y = max(0, d.y + Int(event.dy))
-                else:
-                    d.w = max(360, d.w + Int(event.dx))
-                    d.h = max(300, d.h + Int(event.dy))
-                d.version += 1
+        elif m == MOVE or m == RESIZE:  # a card dragged by its title bar (dropped on another: they swap) or by its corner
+            var i = event.number  # (its index on the Board: child 0 is the table)
+            var ids = self.tile_ids()
+            if 0 <= i < len(ids) and ids[i] != "":
+                self.tile_focus = i
+                if m == RESIZE:  # (its right and bottom edges moved: the cards beside it give way, mojoui.tiling)
+                    _ = self.board_tiles.resize(ids[i], Int(event.dx), Int(event.dy), self.tile_w, self.tile_h)
+                else:  # (where its middle was dropped: the card there trades places with it; anywhere else it goes back)
+                    var rs = self.card_rects()
+                    var px = rs[i].x + rs[i].w // 2 + Int(event.dx)
+                    var py = rs[i].y + rs[i].h // 2 + Int(event.dy)
+                    for j in range(len(rs)):
+                        if j != i and ids[j] != "" and rs[j].x <= px < rs[j].x + rs[j].w and rs[j].y <= py < rs[j].y + rs[j].h:
+                            _ = self.board_tiles.swap(ids[i], ids[j])
+                            break
+                self.apply_tiles(ids)
             self.version += 1
         elif m >= OBJ_TAP and m < OBJ_TAP + 100:
             var k = m - OBJ_TAP
@@ -4697,7 +4848,7 @@ struct Main(App):
             items.append(v.copy())
         for v in self.peek.views(width, bottom + 24):
             items.append(v.copy())
-        var area = (Board(items^, width, bottom + 24, on_move=MOVE, on_resize=RESIZE, reveal=self.reveal, reveal_count=self.reveal_count,
+        var area = (Board(items^, width, max(bottom, self.board_h()), on_move=MOVE, on_resize=RESIZE, reveal=self.reveal, reveal_count=self.reveal_count,
                           tones=tones, on_hold=HOLD).fill().grow()) if self.sheet_tab == 0 else self.report_view()
         # The sheet's column takes the room the inspector leaves, the row takes the height the bars leave: sizes
         # come from the window (App.resize), never asked of it, so the window never grows to fit them (goal 25 M2).
