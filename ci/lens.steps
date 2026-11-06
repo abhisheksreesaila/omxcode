@@ -1,0 +1,2 @@
+# limit 90
+segment:0=Taxi;wait:2500;drag:0=500,500,600,450;wait:2500

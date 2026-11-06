@@ -1,0 +1,2 @@
+# limit 60
+type:What needs doing?=Buy milk;tap:Add;wait:1000;type:What needs doing?=Call Sam;tap:Add;wait:1500
