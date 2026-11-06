@@ -1162,3 +1162,7 @@ Owner asked for the roadmap's "SaaS apps" item: sign-in, accounts and payments a
 phased out), real Google and Stripe, CPU, a tiny gallery demo. Worktree ../mojo-ui-g57 on merge-50-52 (D-5701), its own
 .pixi (Mojo 1.2.0). Found: `mojoui.serve` (Flare server), `mojoui.hash` (sha256 only: HMAC is to build), `mojoui.sqlite`,
 GTK's `open_url` with `$MOJOUI_OPENER`, `waitfor:` (buttons only). Contract: GOAL.md + docs/goals/57-check.py.
+
+## 2026-11-06 · Goal 57 run
+- M0: PASS first try (own .pixi, Mojo 1.2; test_serve, test_https, test_hash).
+- Owner mid-run: add M8 "The Mac" (D-5708): server + M2/M3 proofs and the AppKit client on the owner's Mac over SSH.

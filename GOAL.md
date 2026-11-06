@@ -23,9 +23,10 @@ main yet). Worktree ../mojo-ui-g57, branch goal-57-saas, its own .pixi. Decision
 | M5 | Live keys (owner-keyed) | with `~/.config/omxcode/saas.env` (names only: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, STRIPE_PRICE_PRO; never printed): Google's real authorize URL from `/login` answers a consent page, not an error; Google's token endpoint answers `invalid_grant` (not `invalid_client`) to a made-up code; a real test-mode Checkout Session (`cs_test_…`) made by the server over Mojo HTTPS, paid with 4242 in headless Chromium, and `/billing/return` reading it back from Stripe makes the tenant Pro. No file → `BLOCKED` naming `scripts/saas_keys.sh` (a wizard for the owner) |
 | M6 | Parity and the gallery | docs/saas.md: fh-saas's modules → the mojoui piece, ✅/❌, honest (email, jobs, migrations may be ❌); docs/components.md lists the new modules (`scripts/components.py` not stale); a gallery card with a shot of ada (Pro) and ben (free) side by side, looked at; `scripts/package.sh saas linux` makes the Linux download |
 | M7 | Nothing regressed | tests/test_ui_thread.mojo and test_served.mojo pass here; scripts/libc_lint.py and scripts/decisions_lint.py pass |
+| M8 | The Mac (owner, 2026-11-06, D-5708) | over SSH in ~/omxcode-g57 on the owner's Mac (own pixi env; scripts/mac-ci the fallback): build/saas/server builds and starts there and the M2 and M3 HTTP proofs pass against it; the AppKit build (`scripts/build.sh saas mac`) signs in through open_url and the loopback, shows `Signed in as ada@example.com` and `Pro`, a screenshot looked at. A real run only, never the build alone |
 
 ## Done means
-57-check PASS for M0–M4, M6, M7, and M5 PASS or BLOCKED only for the owner's keys; the reviewer and the security
+57-check PASS for M0–M4, M6, M7, M8, and M5 PASS or BLOCKED only for the owner's keys; the reviewer and the security
 auditor (sign-in, sessions, tenants, payments, webhooks) pass it; M4's and M6's shots looked at. `docs/report.md`.
 
 ## Out of bounds
