@@ -2,7 +2,7 @@
 # (mxstudio mxconsole, docs/goals/50/admin-api-spec.md), field for field; the store's replies are built by SQLite itself
 # (json_object / json_group_array), so numbers and nulls come out as they are stored.
 
-from std.os import getenv
+from std.os import getenv, makedirs
 from std.sys import exit
 from mojoui.serve import Service, Req, Reply, Pipe, proxy
 from mojoui.http import Request
@@ -125,6 +125,7 @@ struct Daemon(Service):
     var stopping: Bool
 
     def __init__(out self, var cfg: Config) raises:
+        makedirs(cfg.home, exist_ok=True)  # (a first run: no ~/.mxc yet)
         self.store = Store(cfg.home + "/mst.db")
         self.sup = Supervisor(cfg.home, cfg.max_cmd, cfg.idle_seconds)
         self.sizes = model_sizes(self.store)

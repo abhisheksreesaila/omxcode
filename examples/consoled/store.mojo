@@ -5,6 +5,41 @@ from mojoui.sqlite import Database
 from mojoui.json import json_string
 
 
+# The Python daemon's schema (mxconsole store.py, pulls.py, bench.py, port_auto.py), created when missing: a first run
+# has no store yet (goal 55 M0), and an existing ~/.mxc/mst.db is left as it is (IF NOT EXISTS; no ALTERs).
+comptime SCHEMA = """
+CREATE TABLE IF NOT EXISTS models (name TEXT PRIMARY KEY, repo_id TEXT NOT NULL, revision TEXT NOT NULL, source TEXT NOT NULL,
+    architecture TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, keep_alive INTEGER NOT NULL DEFAULT 300, weights_path TEXT,
+    custom_arch_path TEXT, kind TEXT NOT NULL DEFAULT 'chat', created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS labels (name TEXT PRIMARY KEY, position INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS model_labels (model TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY (model, label));
+CREATE INDEX IF NOT EXISTS model_labels_label ON model_labels (label);
+CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY, ts REAL NOT NULL, app TEXT, model TEXT, route TEXT NOT NULL,
+    status INTEGER NOT NULL, prompt_tokens INTEGER, completion_tokens INTEGER, ttft_ms REAL, duration_ms REAL NOT NULL,
+    estimated INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS requests_ts ON requests (ts);
+CREATE TABLE IF NOT EXISTS keys (app TEXT PRIMARY KEY, prefix TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, created_at REAL NOT NULL,
+    last_used_at REAL, revoked_at REAL);
+CREATE TABLE IF NOT EXISTS pulls (id INTEGER PRIMARY KEY, ref TEXT NOT NULL, name TEXT, repo_id TEXT, status TEXT NOT NULL,
+    step TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', hint TEXT, error_kind TEXT, started_at REAL NOT NULL, finished_at REAL,
+    total_bytes INTEGER NOT NULL DEFAULT 0, done_bytes INTEGER NOT NULL DEFAULT 0, speed REAL NOT NULL DEFAULT 0,
+    files TEXT NOT NULL DEFAULT '[]', details TEXT NOT NULL DEFAULT '{}', model TEXT);
+CREATE TABLE IF NOT EXISTS bench_runs (id INTEGER PRIMARY KEY, started_at REAL NOT NULL, finished_at REAL, status TEXT NOT NULL,
+    runs INTEGER NOT NULL, max_tokens INTEGER NOT NULL, prompt_tokens INTEGER NOT NULL, models TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS bench_results (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL,
+    error TEXT, load_seconds REAL, runs_ok INTEGER NOT NULL, errors INTEGER NOT NULL, decode_tps REAL, prefill_tps REAL,
+    ttft_p50_ms REAL, ttft_p95_ms REAL, duration_ms REAL, total_ms REAL, prompt_tokens INTEGER, completion_tokens INTEGER,
+    estimated INTEGER NOT NULL DEFAULT 0, prompt_estimated INTEGER NOT NULL DEFAULT 0, completion_estimated INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS bench_results_run ON bench_results (run_id);
+CREATE TABLE IF NOT EXISTS bench_samples (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, model TEXT NOT NULL, idx INTEGER NOT NULL,
+    ttft_ms REAL, duration_ms REAL, prompt_tokens INTEGER, completion_tokens INTEGER, decode_tps REAL, prefill_tps REAL, error TEXT);
+CREATE INDEX IF NOT EXISTS bench_samples_run ON bench_samples (run_id);
+CREATE TABLE IF NOT EXISTS ports (id INTEGER PRIMARY KEY, ref TEXT NOT NULL, name TEXT, repo_id TEXT, status TEXT NOT NULL,
+    stage TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', started_at REAL NOT NULL, finished_at REAL,
+    max_attempts INTEGER NOT NULL DEFAULT 3, stages TEXT NOT NULL DEFAULT '[]', model TEXT, procs TEXT);
+"""
+
+
 @fieldwise_init
 struct LabelProblem(Copyable, Movable):
     var code: String  # "" when it went through
@@ -35,6 +70,7 @@ struct Store(Movable):
     def __init__(out self, path: String) raises:
         self.db = Database(path)
         self.db.exec("PRAGMA journal_mode=WAL")
+        self.db.exec(SCHEMA)
 
     # labels ---------------------------------------------------------------------------------------------------------
 
