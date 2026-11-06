@@ -4,6 +4,7 @@
 from std.os import getenv
 from mojoui.serve import Server, Service, Req, Reply
 from mojoui.accounts import Accounts, AuthConfig, Member
+from mojoui.billing import Billing, BillingConfig, paywall
 from mojoui.json import Json, json_string
 from mojoui.sqlite import Database
 from mojoui.clock import wall_seconds
@@ -12,9 +13,15 @@ from mojoui import libc
 
 struct Saas(Service):
     var acc: Accounts
+    var bill: Billing
+    var test_hook: Bool
 
     def __init__(out self) raises:
-        self.acc = Accounts(getenv("SAAS_DATA", "data"), AuthConfig.from_env())
+        var data = getenv("SAAS_DATA", "data")
+        self.acc = Accounts(data, AuthConfig.from_env())
+        self.bill = Billing(data, BillingConfig.from_env())
+        # a session without Google, for the live Stripe check only: never with a live key
+        self.test_hook = getenv("SAAS_TEST_HOOK") == "1" and self.bill.cfg.is_test_mode()
 
     def tick(mut self):
         pass
@@ -26,6 +33,11 @@ struct Saas(Service):
         var r = self.acc.handle(req)
         if r.status != 0:
             return r^
+        var b = self.bill.handle(req, self.acc)
+        if b.status != 0:
+            return b^
+        if self.test_hook and req.matches("POST", "/api/test-session"):
+            return self.test_session(req.body)
         if req.matches("GET", "/"):
             return Reply.text("omxcode saas demo: sign in at /login")
         var who = self.acc.member(req)
@@ -40,13 +52,24 @@ struct Saas(Service):
                     return Reply.error(403, "viewers can't write", "forbidden")
                 return self.add_entry(m, req.body)
             if req.matches("GET", "/api/pro"):
-                if m.plan != "pro":
-                    return Reply.error(402, "this needs the Pro plan", "payment_required")
+                var wall = paywall(m)
+                if wall.status != 0:
+                    return wall^
                 return Reply.json('{"pro": true}')
         except e:
             print("saas: " + String(e))
             return Reply.error(500, "the tenant's store failed", "internal")
         return Reply.not_found()
+
+    def test_session(mut self, body: String) -> Reply:
+        try:
+            var j = Json.parse(body)
+            var email = j.text(j.get(0, "email"))
+            if not email.endswith("@example.com"):
+                return Reply.error(400, "test sessions are for @example.com", "bad_request")
+            return Reply.json('{"cookie": ' + json_string(self.acc.test_session(email)) + "}")
+        except e:
+            return Reply.error(400, String(e), "bad_request")
 
     def open(self, m: Member) raises -> Database:
         var db = self.acc.tenant_db(m)
