@@ -82,3 +82,4 @@ One line per rule that prevents a mistake that happened.
 - Before writing a new file in mojoui/ or tests/, check the name is free (`ls`): goal 51 overwrote mojoui/embed.mojo (WebFrame) by picking an obvious name (D-4918).
 - Mojo frees a value right after its last use: anything whose address is handed to C (strings, lists, config cells) needs an explicit keep-alive after the last C call that reads it (D-4917).
 - A layout proof reads what the host drew (widget bounds, pixels), never the view's own numbers: goal 54's first M1 PASS compared node rects while the real cards overlapped.
+- A fixed width or height is exact on AppKit but only a minimum on GTK: a layout proven on GTK alone can shrink the Mac's window or cut its words. Run omxplorer on the real Mac (scripts/mac-ssh) before calling a layout done (goal 56).
