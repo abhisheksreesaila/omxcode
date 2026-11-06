@@ -99,6 +99,20 @@ def messages_json(j: Json, msgs: Int) -> String:
     return out + "]"
 
 
+def owned_folder(path: String, home: String) -> Bool:
+    """True for MXC_HOME/models/<name>: exactly one part under models/, and no "", "." or ".." part anywhere."""
+    var mine = home + "/models/"
+    if not path.startswith(mine):
+        return False
+    var rest = String(path[byte = mine.byte_length() :])
+    if rest == "" or rest.find("/") >= 0 or rest == "." or rest == "..":
+        return False
+    for part in home.split("/"):
+        if String(part) == "." or String(part) == "..":
+            return False
+    return True
+
+
 def is_digits(s: String) -> Bool:
     if s.byte_length() == 0 or s.byte_length() > 18:
         return False
@@ -321,15 +335,17 @@ struct Daemon(Service):
             var m = self.model_ref(req.param("name"))
             if not m:
                 return error(404, "The model `" + req.param("name") + "` is not registered.", "model_not_found")
+            if self.store.db.one_text("SELECT 1 FROM pulls WHERE status = 'running' AND (name = ? OR model = ?) LIMIT 1", [req.param("name"), req.param("name")]) == "1":
+                return error(409, "`" + req.param("name") + "` is being pulled; cancel the pull first.", "pull_running")
             _ = self.sup.stop(req.param("name"))
             var path = m.value().weights_path
             self.store.db.begin()
             _ = self.store.db.run("DELETE FROM model_labels WHERE model = ?", [req.param("name")])
             _ = self.store.db.run("DELETE FROM models WHERE name = ?", [req.param("name")])
             self.store.db.commit()
-            var mine = self.cfg.home + "/models/"
             var removed = False
-            if path.startswith(mine) and path.find("/../") < 0 and path.byte_length() > mine.byte_length():  # (only a folder a pull made: never a path elsewhere)
+            # only a folder a pull made (MXC_HOME/models/<one part>), with no "." or ".." part, that no other model uses
+            if owned_folder(path, self.cfg.home) and self.store.db.one_text("SELECT 1 FROM models WHERE weights_path = ? LIMIT 1", [path]) == "":
                 remove_tree(path)
                 removed = True
             self.sizes = model_sizes(self.store)

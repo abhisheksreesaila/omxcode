@@ -213,7 +213,8 @@ struct Transfer(Copyable, Movable):
 
 def redirected(req: Request, location: String) raises -> Request:
     """`req` sent on to a redirect's Location (absolute, scheme-relative, host-relative or path-relative); an
-    Authorization header stays only while the host does (a token never follows a redirect to a CDN)."""
+    Authorization header stays only while the host does and HTTPS stays HTTPS (a token never follows a redirect to a
+    CDN, nor in the clear)."""
     var base = Url.parse(req.url)
     var origin = base.scheme + "://" + base.host + ("" if (base.port == 443 and base.scheme == "https") or (base.port == 80 and base.scheme == "http") else ":" + String(base.port))
     var to: String
@@ -228,7 +229,8 @@ def redirected(req: Request, location: String) raises -> Request:
         to = origin + String(dir[byte=:dir.rfind("/") + 1]) + location
     var out = req.copy()
     out.url = to
-    if Url.parse(to).host != base.host:
+    var next = Url.parse(to)
+    if next.host != base.host or (base.scheme == "https" and next.scheme != "https"):  # (another host, or https down to http)
         var names = List[String]()
         var values = List[String]()
         for i in range(len(out.names)):
@@ -277,6 +279,7 @@ def fetch_to_file(req: Request, path: String, t: Transfer, hops: Int = 10) -> Re
             return r^
         if r.status != 206:
             have = 0  # (a whole body: the server didn't resume)
+        t._set(1, 0)  # (this file's total, not the last one's: unknown until a Content-Length says)
         var length = r.header("content-length")
         if length != "":
             try:

@@ -221,8 +221,11 @@ def _work(addr: Int):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, nullif(?, ''))""", [String(job[].run_id), name, String(i + 1), String(s.ttft_ms), String(s.duration_ms),
                                                                          String(s.prompt_tokens), String(s.completion_tokens), String(s.decode_tps), String(s.prefill_tps), s.error])
         _ = store.db.run("UPDATE bench_runs SET status = ?, finished_at = ? WHERE id = ?", ["failed" if all_failed else "done", String(wall_seconds()), String(job[].run_id)])
-    except:
-        pass
+    except:  # (the store wouldn't open, or a write failed: the run is marked failed, never left running)
+        try:
+            _ = Store(job[].home + "/mst.db").db.run("UPDATE bench_runs SET status = 'failed', finished_at = ? WHERE id = ? AND status = 'running'", [String(wall_seconds()), String(job[].run_id)])
+        except:
+            pass
     job.unsafe_deinit_pointee()
     job.unsafe_free()
     _A.store(_P(unsafe_from_address=word), 1)  # (the last thing: the daemon frees the word after this)

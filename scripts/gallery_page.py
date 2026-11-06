@@ -34,8 +34,8 @@ APPS = [
          line="Find a model on Hugging Face, download it, chat with it and benchmark it on your own GPU through Modular's MAX. One OpenAI-style endpoint with keys, all omxcode.",
          # (Mac: the macOS 15 runner's build ran there; on macOS 26 the runner's own build of the same source ran)
          runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"], needs="Needs MAX installed (docs.modular.com/max/packages)",
-         shots=[("img/omxconsole-ready.png", "Linux: a model found, downloaded and answering"), ("img/omxconsole-bench.png", "Linux: its benchmark, 331 tokens/s"),
-                ("img/omxconsole-models.png", "Linux: My models")], src="examples/console"),
+         # (no speed in the pictures or captions: docs/lessons.md, D-4762; the Ready shot is cropped below its top bar's tok/s)
+         shots=[("img/omxconsole-ready.png", "Linux: a model found, downloaded and answering"), ("img/omxconsole-models.png", "Linux: My models")], src="examples/console"),
     dict(name="Sketch", app="sketch", kind="Drawing",
          line="Pressure ink with pan and zoom. Strokes taper with the pen; panning moves the kept ink, never redraws it.",
          runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"],

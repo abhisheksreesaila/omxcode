@@ -137,6 +137,16 @@ def hub_repo(repo: String, revision: String = "main") raises -> HubRepo:
     return HubRepo(j.text(j.get(0, "id"), repo), j.text(j.get(0, "sha")), _gated(j, gated), files^)
 
 
+def safe_name(name: String) -> Bool:
+    """A repo file's path that stays inside the folder it's downloaded to: relative, no "." or ".." parts, no empty ones."""
+    if name == "" or name.startswith("/") or name.find("\\") >= 0:
+        return False
+    for part in name.split("/"):
+        if String(part) == "" or String(part) == "." or String(part) == "..":
+            return False
+    return True
+
+
 def hub_file_url(repo: HubRepo, file: HubFile) -> String:
     return HUB + "/" + _path(repo.id) + "/resolve/" + repo.sha + "/" + _path(file.name)
 
@@ -144,6 +154,8 @@ def hub_file_url(repo: HubRepo, file: HubFile) -> String:
 def hub_download(repo: HubRepo, file: HubFile, folder: String, t: Transfer, timeout_ms: Int = 60_000) -> Response:
     """`file` of `repo` (at the commit read) into `folder`/<its path>, on the calling thread (fetch_to_file: a part
     resumes, a cancel keeps it)."""
+    if not safe_name(file.name):
+        return Response.failed("refusing the file name " + file.name + " (it would land outside " + folder + ")")
     var dest = folder + "/" + file.name
     var cut = dest.rfind("/")
     try:

@@ -3,7 +3,8 @@
 # MXC_HOME/max_catalog.json from `max list --json`), download its config, tokenizer and safetensors (only the shards an
 # index names) into MXC_HOME/models/<owner>--<name>/, check their sizes, register the model. The worker writes the
 # pulls row at each step; the file being downloaded counts in a Transfer the daemon reads to show live progress
-# (Pulls.refresh). A cancel keeps nothing: the folder goes, no model is registered.
+# (Pulls.refresh). A cancel keeps nothing it made: a new model's folder goes; a model already registered (a re-pull)
+# keeps its files, only this pull's unfinished .part files go; no model is registered.
 
 from std.atomic import Atomic
 from std.memory.alloc import unsafe_alloc
@@ -237,12 +238,26 @@ struct Pulls(Movable):
                         r.speed = inst if r.speed == 0 else 0.5 * r.speed + 0.5 * inst
                         r.last_ns = now
                         r.last_done = done
-                    _ = store.db.run("UPDATE pulls SET files = ?, done_bytes = ?, speed = ? WHERE id = ? AND status = 'running'",
+                    _ = store.db.run("UPDATE pulls SET files = ?, done_bytes = ?, speed = ? WHERE id = ? AND status = 'running' AND step = 'download'",
                                      [files, String(done), String(Int(r.speed)), String(r.id)])
             except:
                 pass
             keep.append(r^)
         self.running = keep^
+
+
+def remove_parts(folder: String):
+    """Deletes the unfinished downloads (*.part) under `folder`, nothing else."""
+    from std.os import listdir, remove
+    try:
+        for name in listdir(folder):
+            var p = folder + "/" + name
+            if isdir(p):
+                remove_parts(p)
+            elif name.endswith(".part"):
+                remove(p)
+    except:
+        pass
 
 
 def _set(store: Store, id: Int, step: String, message: String, detail_step: String = "", detail: String = "") raises:
@@ -277,15 +292,21 @@ def _work(addr: Int):
             var folder = folder_of(p[].home, repo_of(p[].asked))
             if p[].t.cancelled() or why == "cancelled":
                 if isdir(folder):
-                    remove_tree(folder)
+                    if store.db.one_text("SELECT 1 FROM models WHERE weights_path = ? LIMIT 1", [folder]) == "1":
+                        remove_parts(folder)  # (a re-pull of a registered model: its weights stay)
+                    else:
+                        remove_tree(folder)
                 _finish(store, p[].id, "cancelled", "Cancelled; nothing was kept.")
             elif why.startswith("unsupported: "):
                 _finish(store, p[].id, "unsupported", String(why[byte = 13 :]), "unsupported")
             else:
                 var kind = "gated" if why.find("needs access") >= 0 else ("not_found" if why.find("no such repo") >= 0 else "error")
                 _finish(store, p[].id, "failed", why, kind, "Pull again to resume the files already downloaded." if kind == "error" else "")
-    except:
-        pass
+    except e:  # (the store wouldn't open, or writing the outcome failed: try once more so the row never stays running)
+        try:
+            _finish(Store(p[].home + "/mst.db"), p[].id, "failed", "The pull stopped: " + String(e), "error")
+        except:
+            pass
     p.unsafe_deinit_pointee()
     p.unsafe_free()
     _A.store(_w(words, W_ENDED), 1)  # (the last thing: the daemon frees the words and the Transfer after this)
@@ -310,6 +331,8 @@ def _pipeline(store: Store, job: PullJob) raises -> String:
     var r = hub_download(repo, repo.files[cfg_at], folder, job.t)
     if r.error != "":
         raise Error(r.error)
+    if r.status != 200:
+        raise Error("Hugging Face answered " + String(r.status) + " for config.json")
     var cfg = Json.parse(read_text(folder + "/config.json"))
     var arch = cfg.text(cfg.at(cfg.get(0, "architectures"), 0))
     var cat_text = catalog(job.home, job.max_cmd, job.env)
@@ -334,6 +357,8 @@ def _pipeline(store: Store, job: PullJob) raises -> String:
             r = hub_download(repo, repo.files[i], folder, job.t)
             if r.error != "":
                 raise Error(r.error)
+            if r.status != 200:
+                raise Error("Hugging Face answered " + String(r.status) + " for " + repo.files[i].name)
             var idx = Json.parse(read_text(folder + "/" + repo.files[i].name))
             var wm = idx.get(0, "weight_map")
             for k in range(idx.size(wm)):

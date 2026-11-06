@@ -239,6 +239,11 @@ def m2():
     if build_all():
         return False, "build failed"
     problems = []
+    # the safety rules under downloads and deletes, offline (review round 1: redirect tokens, remove_tree, Hub names)
+    r = run(["scripts/mojo_flare.sh", "build", "tests/test_safety.mojo", "-o", str(BUILD / "test_safety")])
+    t = run([str(BUILD / "test_safety")], timeout=120) if r.returncode == 0 else r
+    if t.returncode != 0 or "safety: ok" not in t.stdout:
+        problems.append("test_safety: " + (t.stdout + t.stderr)[-300:])
     with Daemon() as d:
         m = ensure_small(d)
         if not m:
@@ -338,14 +343,14 @@ def m4():
         best_bench = db.execute("SELECT max(decode_tps) FROM bench_samples WHERE run_id = ? AND error IS NULL",
                                 (latest.get("id"),)).fetchone()[0] or 0
         db.close()
-        close = best_bench > 0 and abs(best_bench - best_sdk) / best_sdk <= 0.25
+        close = btps > 0 and abs(btps - tps) / tps <= 0.25  # (the contract's medians: D-5516's best-run comparison withdrawn, D-5528)
         steps = STEPS / "m4.steps"
         if not steps.exists():
             return False, "no docs/goals/55/m4.steps (the Benchmark tab)"
         ok, out = console(steps, d, G55 / "console-bench.png")
         bars = ok and bool(re.search(r"SAYS: bench-bars = .*\d", out))
         return close and bars, f"bench p50: ttft {bt * 1000:.0f} ms, {btps:.1f} tok/s; SDK p50: ttft {ttft * 1000:.0f} ms, {tps:.1f} tok/s; " \
-            f"best runs: bench {best_bench:.1f}, SDK {best_sdk:.1f} tok/s ({'within' if close else 'outside'} 25 %); console bars {'drawn' if bars else 'missing: ' + out[-200:]}"
+            f"medians {'within' if close else 'outside'} 25 % (best runs: bench {best_bench:.1f}, SDK {best_sdk:.1f}); console bars {'drawn' if bars else 'missing: ' + out[-200:]}"
 
 
 def m5():
