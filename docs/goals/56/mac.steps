@@ -1,0 +1,10 @@
+# goal 56 M1: omxplorer on the owner's Mac (scripts/mac-ssh omxplorer docs/goals/56/mac.steps fleet.csv limits.csv)
+resize:1440x900;wait:2500;pick:Choose a file={data}/fleet.csv;wait:6000;tap:Create table;wait:4000
+pick:Table={data}/limits.csv;wait:4000;tap:Chart;wait:4000;tap:Chart;wait:4000
+resize:1280x800;wait:3000;resize:1920x1080;wait:3000;resize:1440x900;wait:3000
+scheme:light;wait:3000;tap:close-limits;wait:3000;scheme:dark;wait:3000
+# a corner drag and a swap, as a drag ends (tiled_pan's events)
+resize:table=-100,0;wait:2500;dragcard:chart0=chart1;wait:2500
+# the page's dark shot (M5): the fleet, two charts and the limits table tiled; the last picture
+# (no video: the Mac app decodes through ffmpeg's command line, which a Mac doesn't have: D-5612)
+pick:Table={data}/limits.csv;wait:4000

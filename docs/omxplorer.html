@@ -39,6 +39,8 @@
 .twin figure { margin: 0; }
 .twin .shot img { aspect-ratio: 16 / 9; object-fit: cover; object-position: top left; }
 .twin figcaption { font: 13px var(--mono); color: var(--ink2); margin-top: 10px; text-align: center; }
+.twin.trio .lead { grid-column: 1 / -1; }
+.twin.trio .shot img { aspect-ratio: 16 / 10; }
 .stack3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 48px; text-align: left; }
 .layer { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px; }
 .layer .k { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
@@ -280,10 +282,11 @@ h3.close span { font: 600 13px var(--mono); color: var(--word); }
   <div class="wrap">
     <div class="eyebrow rv">The look</div>
     <h2 class="rv">Liquid, <span class="two">on every screen.</span></h2>
-    <p class="lede rv">Calm surfaces, motion that settles and never bounces, and three more skins a tap away: Ledger, Graphite and Blueprint. The same app, natively drawn.</p>
-    <div class="twin">
-      <figure class="rv"><div class="shot"><img src="img/omxplorer-sentence-gtk.jpg" alt="omxplorer on Linux, drawn by GTK" loading="lazy"></div><figcaption>Linux · GTK 4</figcaption></figure>
-      <figure class="rv"><div class="shot"><img src="img/omxplorer-sentence-web.jpg" alt="The same omxplorer on the web" loading="lazy"></div><figcaption>the web · the same app.mojo</figcaption></figure>
+    <p class="lede rv">One docked shell, and cards that tile like windows: a new one splits the space, a closed one gives it back, none ever overlaps. Liquid dark, and Ledger, Graphite and Blueprint a tap away. The same app, natively drawn.</p>
+    <div class="twin trio">
+      <figure class="rv lead"><div class="shot"><img src="img/omxplorer-shell-mac.jpg" alt="omxplorer on a Mac in Liquid dark: the fleet table, two charts, a limits table and a robot episode's video tiled on the board" loading="lazy"></div><figcaption>macOS · AppKit · Apple M4 GPU</figcaption></figure>
+      <figure class="rv"><div class="shot"><img src="img/omxplorer-shell-linux.jpg" alt="The same board on Linux, drawn by GTK" loading="lazy"></div><figcaption>Linux · GTK 4</figcaption></figure>
+      <figure class="rv"><div class="shot"><img src="img/omxplorer-shell-web.jpg" alt="The same board on the web" loading="lazy"></div><figcaption>the web · the same app.mojo</figcaption></figure>
     </div>
     <h3 class="close rv">Up close <span>magnified</span></h3>
     <div class="micro" id="micro">

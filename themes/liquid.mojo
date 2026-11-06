@@ -90,7 +90,7 @@ def liquid_look(p: Palette) -> Look:
     surfaces.append(value^)
     return Look(TypeScale("Inter", "", 13, 12, 15, 22, 11, True, 0), Controls(62, 52, 12, 11, 34, 10, 10, 12, 34, 10, 16, 999, 10, 30, 14, 8, 0, 0, 0, 0, 32), surfaces^,
                 Segments(rgba(15, 23, 42, 15) if not p.dark else rgba(255, 255, 255, 15), 999, 3, 0, 24, 12, 999, 12, 500, p.ink3,
-                         rgba(255, 255, 255) if not p.dark else p.raised, p.ink, 500, True))  # (the sheet's toggle-group rules say the same: D-300)
+                         rgba(255, 255, 255) if not p.dark else p.raised, p.ink, 500, True)).with_focus(p.accent)  # (the sheet's toggle-group rules say the same: D-300; omxqua's focus ring, goal 56)
 
 
 def liquid_palette() -> Palette:

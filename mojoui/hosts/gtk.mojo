@@ -1070,6 +1070,9 @@ struct GtkHost[A: App](Movable):
         if Int(external_call["gtk_widget_has_css_class", c_int](outer, clip_class.as_c_string_span())) != 0:
             # (a Board child's clip: the holder takes the size, and so does what it holds, then on as below)
             external_call["gtk_widget_set_size_request", NoneType](outer, c_int(node.w if node.w > 0 else -1), c_int(node.h if node.h > 0 else -1))
+            outer = external_call["gtk_overlay_get_child", Int](outer)  # (the scroller under the grip)
+            if outer == 0:
+                return
             outer = external_call["gtk_scrolled_window_get_child", Int](outer)
             if outer == 0:
                 return
@@ -2049,6 +2052,12 @@ struct GtkHost[A: App](Movable):
                 connect_any(drag, "drag-end", on_board_drag_end[Self.A], self_addr)
                 external_call["gtk_widget_add_controller", NoneType](inner, drag)
                 self.board_drags.append((i, drag))
+                if node.text == "clips":  # (a tiled Board: the pointer says what a press does, as the web's cursors)
+                    var motion = external_call["gtk_event_controller_motion_new", Int]()
+                    var key = String(BOARD_DRAG_KEY)
+                    external_call["g_object_set_data", NoneType](motion, key.as_c_string_span(), drag)
+                    connect_any(motion, "motion", on_board_motion[Self.A], self_addr)
+                    external_call["gtk_widget_add_controller", NoneType](inner, motion)
                 for k in range(len(node.children)):
                     var c = node.children[k]
                     self.clip_node = c if node.text == "clips" else -1
@@ -4960,6 +4969,37 @@ def board_object[A: App](host: Pointer[GtkHost[A], MutUntrackedOrigin], drag: In
     return -1
 
 
+comptime BOARD_DRAG_KEY = "mui-board-drag"
+
+
+def on_board_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int) abi("C"):
+    """The pointer over a tiled Board: a resize cursor over a card's corner (its grip), a move cursor over its header,
+    the default elsewhere (goal 56: a corner that drags but says nothing wasn't found)."""
+    var host = host_at[A](host_addr)
+    var key = String(BOARD_DRAG_KEY)
+    var drag = external_call["g_object_get_data", Int](motion, key.as_c_string_span())
+    var first = get_index(drag)
+    if first < 0 or first >= len(host[].boards):
+        return
+    var cursor = String("")
+    var bi = first
+    while bi < len(host[].boards) and host[].boards[bi].drag == drag:
+        ref b = host[].boards[bi]
+        ref n = host[].rt.shown.nodes[b.node]
+        var w = Float64(Int(external_call["gtk_widget_get_width", c_int](b.widget)))
+        var h = Float64(Int(external_call["gtk_widget_get_height", c_int](b.widget)))
+        var lx = x - Float64(n.x)
+        var ly = y - Float64(n.y)
+        if 0.0 <= lx and lx < w and 0.0 <= ly and ly < h and n.kind != FIELD:
+            cursor = String("nwse-resize") if lx > w - 24 and ly > h - 24 else (String("move") if ly < 44 else String(""))
+        bi += 1
+    var fixed = host[].boards[first].fixed
+    if cursor == "":
+        external_call["gtk_widget_set_cursor", NoneType](fixed, Int(0))
+    else:
+        external_call["gtk_widget_set_cursor_from_name", NoneType](fixed, cursor.as_c_string_span())
+
+
 def on_board_drag_begin[A: App](drag: Int, x: Float64, y: Float64, host_addr: Int) abi("C"):
     var host = host_at[A](host_addr)
     var first = get_index(drag)
@@ -5620,15 +5660,29 @@ def to_float(s: String) -> Float64:
 def board_clip(child: Int, node: Node) -> Int:
     """A Board child's holder: exactly the node's size whatever the child's own minimum (a GtkScrolledWindow whose
     policy is EXTERNAL both ways: no scroll bars, and its size never follows the child's), so a tiled card that's
-    smaller than its contents is clipped at its edges instead of spreading over its neighbours (goal 54)."""
-    var holder = external_call["gtk_scrolled_window_new", Int]()
-    external_call["gtk_scrolled_window_set_policy", NoneType](holder, c_int(3), c_int(3))  # GTK_POLICY_EXTERNAL
-    external_call["gtk_scrolled_window_set_child", NoneType](holder, child)
+    smaller than its contents is clipped at its edges instead of spreading over its neighbours (goal 54). Over it, in
+    the bottom-right corner, the resize grip: two short diagonal strokes that say the corner drags (goal 56: "I saw
+    the close button, didn't see a handle to expand"); it takes no pointer, the Board's own drag does the resizing."""
+    var scroller = external_call["gtk_scrolled_window_new", Int]()
+    external_call["gtk_scrolled_window_set_policy", NoneType](scroller, c_int(3), c_int(3))  # GTK_POLICY_EXTERNAL
+    external_call["gtk_scrolled_window_set_child", NoneType](scroller, child)
+    var holder = external_call["gtk_overlay_new", Int]()
+    external_call["gtk_overlay_set_child", NoneType](holder, scroller)
+    var grip = external_call["gtk_box_new", Int](c_int(0), c_int(0))
+    external_call["gtk_widget_set_size_request", NoneType](grip, c_int(GRIP), c_int(GRIP))
+    external_call["gtk_widget_set_halign", NoneType](grip, c_int(2))  # GTK_ALIGN_END
+    external_call["gtk_widget_set_valign", NoneType](grip, c_int(2))
+    external_call["gtk_widget_set_can_target", NoneType](grip, c_int(0))
+    add_class(grip, "mui-board-grip")
+    external_call["gtk_overlay_add_overlay", NoneType](holder, grip)
     if node.w > 0 or node.h > 0:
         external_call["gtk_widget_set_size_request", NoneType](holder, c_int(node.w if node.w > 0 else -1), c_int(node.h if node.h > 0 else -1))
     external_call["gtk_widget_set_overflow", NoneType](holder, c_int(1))  # GTK_OVERFLOW_HIDDEN: the rounded corners clip too
     add_class(holder, "mui-board-clip")
     return holder
+
+
+comptime GRIP = 18  # the resize grip's box (its strokes are drawn inside it by CSS); the corner that drags is 24 pt
 
 
 def has_button(host: GtkHost, title: String) -> Bool:
@@ -6494,6 +6548,36 @@ def run_step[A: App](host_addr: Int, step: String):
                                 ah = Int(rect[3] + 0.5)
                     print("BOARD: " + ch.name + " at " + String(ax) + "," + String(ay) + " " + String(aw) + "x" + String(ah)
                           + ("" if aw == ch.w and ah == ch.h and ax == ch.x and ay == ch.y else " (asked " + String(ch.x) + "," + String(ch.y) + " " + String(ch.w) + "x" + String(ch.h) + ")"))
+    elif verb == "focus":  # focus:<title or tag>: that button given keyboard focus, as Tab would ("FOCUS: name at x,y wxh" in the window)
+        pump()
+        var i = find(host[], BUTTON, rest, 0)
+        if i < 0:
+            for k in range(len(host[].rt.shown.nodes)):
+                if host[].rt.shown.nodes[k].kind == BUTTON and host[].rt.shown.nodes[k].name == rest:
+                    i = k
+                    break
+        if i < 0 or i >= len(host[].widgets) or host[].widgets[i] == 0:
+            print("TEST: no button", rest)
+            return
+        external_call["gtk_window_set_focus_visible", NoneType](host[].window, c_int(1))
+        _ = external_call["gtk_widget_grab_focus", c_int](host[].widgets[i])
+        pump()
+        var rect = List[Float32](length=4, fill=0)
+        _ = external_call["gtk_widget_compute_bounds", c_int](host[].widgets[i], host[].window, Int(rect.unsafe_ptr()))
+        print("FOCUS: " + rest + " at " + String(Int(rect[0] + 0.5)) + "," + String(Int(rect[1] + 0.5)) + " " + String(Int(rect[2] + 0.5)) + "x" + String(Int(rect[3] + 0.5)))
+    elif verb == "measure":  # measure:<words>: the first label showing them, as wide and high as GTK drew it ("MEASURE: words WxH")
+        pump()
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].kind == TEXT and host[].rt.shown.nodes[k].text == rest and k < len(host[].widgets) and host[].widgets[k] != 0:
+                var w = host[].widgets[k]
+                if Int(external_call["g_type_check_instance_is_a", c_int](w, external_call["gtk_label_get_type", Int]())) == 0:
+                    continue  # (a label inside a box of its own: the box isn't the words)
+                var size = List[c_int](length=2, fill=0)  # (the words' own size: a label can be stretched wider than them)
+                var layout = external_call["gtk_label_get_layout", Int](w)
+                external_call["pango_layout_get_pixel_size", NoneType](layout, Int(size.unsafe_ptr()), Int(size.unsafe_ptr()) + 4)
+                print("MEASURE: " + rest + " " + String(Int(size[0])) + "x" + String(Int(size[1])))
+                return
+        print("TEST: no label", rest)
     elif verb == "window":  # window:WxH: the window resized, as a person drags its edge
         var wh = split_at(rest, "x")
         external_call["gtk_window_set_default_size", NoneType](host[].window, c_int(to_int(wh[0])), c_int(to_int(wh[1])))

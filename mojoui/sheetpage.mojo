@@ -7,7 +7,7 @@ from mojoui.view import View, Text, Button, Canvas, VStack, HStack, Spacer, Card
 from omxcore import Expr, col, lit, least, greatest
 from mojoui.clock import shown_ms
 from mojoui.sheet import Sheet, TEXT, DECIMAL, INT, DATE, BOOL
-from mojoui.sentence import Word, Sentence, sentence_text
+from mojoui.sentence import Word, Sentence, sentence_text, sentence_lines
 from mojoui.chartview import ChartView
 from mojoui.pivot import PivotTable
 from mojoui.numformat import CURRENCY, civil
@@ -19,6 +19,7 @@ comptime CHART_BAR = 0
 comptime CHART_LINE = 1
 comptime HEADER_H = 44  # an object's title bar (its drag handle)
 comptime SENTENCE_H = 52  # a chart's title bar when its title is its sentence (two lines)
+comptime SENTENCE_LINE_H = 21  # each line past two (a headline line, 19, and the sentence's spacing, 2)
 # A chart's spec (goal 28): how its groups combine, their order, how many show, the rows it reads
 comptime COMBINE_SUM = 0
 comptime COMBINE_AVERAGE = 1
@@ -718,8 +719,12 @@ def object_card(obj: SheetObject, sheet: Sheet, canvas: Int, version: Int, on_ta
                 lit: List[Int] = [], under: List[View] = [], under_h: Int = 0) -> View:
     """The object as it sits on the sheet: a title bar (its drag handle) with a close button, then the chart (on
     Canvas `canvas`) and its readout, or the pivot. With `on_word`, a chart's title is its sentence (chart_words)."""
-    var title = Sentence(chart_words(obj, sheet, on_word, cref, lit), width=max(24, (obj.w - 130) // 8), tag="sentence-" + String(cref)) if obj.kind == OBJ_CHART and on_word != NO_MSG else Button(object_title(obj, sheet), on_pick, style=SUBTLE)
-    var head_h = SENTENCE_H if obj.kind == OBJ_CHART and on_word != NO_MSG else HEADER_H - 8  # (a sentence takes two lines)
+    var is_sentence = obj.kind == OBJ_CHART and on_word != NO_MSG
+    var words = chart_words(obj, sheet, on_word, cref, lit) if is_sentence else List[Word]()
+    var chars = max(16, (obj.w - 130) // 8)  # (a floor of 24 overran a 300 pt tile: ", as " squeezed to nothing on the Mac)
+    var title = Sentence(words, width=chars, tag="sentence-" + String(cref)) if is_sentence else Button(object_title(obj, sheet), on_pick, style=SUBTLE)
+    # (a sentence's bar is as tall as its lines: two at least; a narrow card's four lines ran under the chart on the Mac)
+    var head_h = max(SENTENCE_H, SENTENCE_H + (sentence_lines(words, chars) - 2) * SENTENCE_LINE_H) if is_sentence else HEADER_H - 8
     var head = HStack(title^, Spacer(),
                       Text(fixed(shown_ms(obj.milliseconds), 1) + " ms", CAPTION),
                       Button("Remove", on_close, ICON_ONLY, icon="close"), spacing=8).fill().align(START if on_word != NO_MSG else CENTER).height(head_h)

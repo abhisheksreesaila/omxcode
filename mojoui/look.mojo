@@ -190,6 +190,13 @@ def look_gtk_css(look: Look, scope: String) -> String:
     if look.is_none():
         return ""
     var out = String("")
+    if look.type.tabular:  # figures one width, as the web's and the Mac's (D-301's debt, goal 56)
+        out += scope + "label, " + scope + "entry, " + scope + "spinbutton { font-feature-settings: \"tnum\" 1; }\n"
+    if look.focus != 0:  # omxqua's focus ring: the accent, 2 px, 2 px clear, keyboard only (GTK's :focus-visible is keyboard focus)
+        var ring = "outline: 2px solid " + css_color(look.focus) + "; outline-offset: 2px; "
+        out += (scope + "button:focus-visible, " + scope + "checkbutton:focus-visible > check, " + scope + "switch:focus-visible, "
+                + scope + "dropdown:focus-visible > button, " + scope + "scale:focus-visible { " + ring + "}\n")
+        out += scope + "row:focus-visible, " + scope + "togglebutton:focus-visible { outline: 2px solid " + css_color(look.focus) + "; outline-offset: -2px; }\n"
     if look.type.line > 0 and look.type.body > 0:  # every label a line as high as the web's (body 14px/1.45: 20.3)
         out += scope + "label { line-height: " + line_px(look.type.body * look.type.line) + "; }\n"
     var own = String("")
@@ -257,8 +264,12 @@ def look_web_css(look: Look, scope: String) -> String:
     if look.is_none():
         return ""
     var out = String("")
-    if look.type.tabular:  # (GTK's sheet doesn't say it yet: D-301)
+    if look.type.tabular:  # (GTK's too since goal 56: D-301)
         out += String(scope.strip()) + " { font-feature-settings: \"tnum\" 1; }\n"
+    if look.focus != 0:  # omxqua v0.1.6's focus ring: the accent, 2 px, 2 px clear, keyboard only; inside a row, drawn inside
+        out += (scope + ":is(button, a, [tabindex]:not([tabindex=\"-1\"]), input[type=\"range\"], summary, select):focus-visible { outline: 2px solid "
+                + css_color(look.focus) + "; outline-offset: 2px; }\n")
+        out += scope + ":is([role=\"menuitem\"], [role=\"row\"], [role=\"tab\"]):focus-visible { outline-offset: -2px; }\n"
     for s in look.surfaces:
         # a role is worn by a tagged view (data-tag) or by a part of one that isn't a view of its own (data-role: a
         # table's cells, which may wear two: "table-cell table-num")

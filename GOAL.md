@@ -1,37 +1,36 @@
-# GOAL 54: omxplorer shell A, and cards that tile
+# GOAL 56: omxplorer on the owner's Mac, and omxqua's latest details
 
-**End goal (owner, 2026-11-05):** "there are too many islands… the top half… has to be like a ribbon where you connect
-it to the menu bar… even the bottom has to be connected to the bottom… [cards] by default… like Hyprland… it snaps,
-I can increase something, decrease the size, it fits nicely… no dragging problems, no overlapping problems… professional
-on day one." Owner picked shell **A** of `docs/design/chrome/options.html` ("by far the best"): ribbon joined to the
-title bar, status bar on the bottom edge, inspector docked flush right, no floating chrome. Framework first: the tiling
-is a `mojoui` component with its own test; the docked look is the theme's; omxplorer only composes.
+**End goal (owner, 2026-11-06):** "you can test this on the mac as well, we have connection to mac… omxplorer, it needs
+to have the latest design principles from omxqua, and omxcore (gpu rendering etc)… go on autopilot and dazzle me."
+Goal 54's shell A and tiling, proven on the owner's own Mac (Apple M4, Metal, a real screen) instead of only GitHub's
+GPU-less runners; and omxqua v0.1.6's details (2026-11-05: the focus ring, tabular figures) in the framework's Look, so
+every Liquid app gets them. omxcore: the vendored engine is already its newest stable (834ef9a, STABLE.md 2026-10-29;
+everything newer is in review with breaking builder changes), so nothing to vendor; the Mac build runs it on Metal.
 
-Base: main 809ec81. Worktree ../mojo-ui-g54, branch goal-54-shell. (52 and 53 are other sessions' goals.)
+Base: main 1247c2d. Worktree ../mojo-ui-g56, branch goal-56-omxqua. (55 is another session's.)
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/54-check.py`) |
+| # | Milestone | Proof (`docs/goals/56-check.py`) |
 |---|---|---|
-| M0 | `mojoui.tiling` | a split tree as a tiling window manager keeps windows: a new card splits the focused one along its longer side; closing one gives its space to its sibling; resizing moves the card's shared edge (both neighbours change, each keeps a minimum size); a drop on another card swaps them; the layout fits any size; saved and read back as text. `tests/test_tiling.mojo` prints `insert: ok`, `remove: ok`, `resize: ok`, `swap: ok`, `fit: ok`, `text: ok`, and `random: ok` (2,000 random operations at random sizes: never an overlap, every card inside, every gap 8, every card ≥ its minimum where the space allows) |
-| M1 | omxplorer's Board tiles | every card on the Board (the sheet's table, charts, pivots, videos, table, track and document cards) placed by `mojoui.tiling`; GTK, driven by real gestures (`MOJOUI_TEST`): open the fleet, insert the telemetry table, a chart, the featured video, a query's answer; close one; drag one card's corner (its edge moves, its neighbour gives way); drag one card onto another (they swap); the window 1440×900 → 1280×800. After every step the `BOARD:` lines show no overlap, every card inside the board, gaps 8 ± 1; after the corner drag the neighbour's size changed by the same amount; after the drop the two rects swapped; 0 `SLOW:` at 50 ms |
-| M2 | Shell A on GTK, light and dark | Liquid's chrome docked: menu bar and toolbar one band on the window's top edge, sheet tabs and status bar one band on the bottom edge, the inspector flush right and the rail flush left, each with a 1 px line where it meets the board; no margin, radius or shadow on chrome. Pixels in a 1440×900 shot: the top-left, top-right, bottom-left and bottom-right corners and the right edge mid-height are chrome, not backdrop, in Liquid light and Liquid dark; the shots sit beside the mockup's on one compare page, looked at |
-| M3 | The web host too | `scripts/omxplorer.sh web`'s build in headless Chromium (`scripts/drive.py`): the same edge pixels are chrome; after inserting two cards and closing one, no overlap |
-| M4 | Nothing regressed | `tests/test_regions.mojo`, `tests/test_diff_keep.mojo`, `tests/test_script.mojo` ok; goal 49's check M1–M4 and goal 51's M4 on this tree |
+| M0 | Sentences size their card | `mojoui.sentence.sentence_lines` counts the lines `Sentence` draws at every width (tests/test_sentence.mojo); a chart card's title bar is as tall as its sentence's lines (mojoui.sheetpage), its words broken for the tile's width |
+| M1 | The owner's Mac | `scripts/mac-ssh` builds omxplorer natively on the owner's Mac (Metal) and runs docs/goals/56/mac.steps with appearance=system; from its report: the window keeps 1440 wide through the import (a fixed width that also filled shrank it to 1200); a jump 1920 → 1440 lands at 1440 (the labelled ribbon held it at 1529); after `scheme:light` the chrome corners are light, after `scheme:dark` dark; every chart sentence ends above its card's body and none of its words is squeezed to nothing; no two Board cards overlap; `tap:close-limits` finds the button by its tag; a corner drag of -100 changes the table card's width by -100 ± 10 and `dragcard:chart0=chart1` swaps their frames exactly (the events a drag sends when it ends: tiled_pan); the island says the Apple GPU is ready (its spoken words, in the dump) |
+| M2 | omxqua's focus ring | Look.focus (the accent, 2 px, 2 px clear, keyboard only) written by GTK and the web; GTK (the gallery in Liquid): a button given keyboard focus has the accent on all four sides 2–4 px outside its bounds, and not before; web (omxplorer in Chromium): Tab to the first focusable control → its computed outline is 2px solid in the app's accent (--o-accent), offset 2px |
+| M3 | Tabular figures everywhere | Liquid's TypeScale.tabular on GTK too (D-301's debt): the gallery's "1,111.11" and "8,888.88" are equally wide under Liquid and not without it; the web's computed font-feature-settings says tnum |
+| M5 | The page shows it | docs/omxplorer.html's "The look" shows the same tiled board in Liquid dark on the Mac (the M1 run's last picture), Linux (GTK) and the web (Chromium): docs/img/omxplorer-shell-{mac,linux,web}.jpg, each 1440×900 with dark corners, looked at (owner, 2026-11-06: "this will need new screenshots obviously… dark mode version") |
+| M4 | Nothing regressed | goal 54's check M1, M2 and M3 pass on this tree; tests/test_tiling, test_boardtiles, test_sentence ok |
 
 ## Done means
-54-check PASS for M0–M4, the reviewer passes it, M1's and M2's shots were looked at next to the mockup.
+56-check PASS for M0–M5, the reviewer passes it, the Mac's pictures were looked at.
 
 ## Out of bounds
-Pushing; the frozen ../mojo-ui-apple-test; other sessions' worktrees (../mojo-ui-g50, g52, g53); pip; deleting .pixi;
-lowering a proof; skins other than Liquid (Ledger, Graphite, Blueprint keep their own looks); the Mac and phones
-(their chrome reads the same Surfaces, unverified here).
+Pushing (main is pushed only after the reviewer's PASS and green checks, per the owner's standing OK); the frozen
+../mojo-ui-apple-test; other sessions' worktrees (g50, g52, g53, g55); pip; deleting .pixi or anything on the owner's Mac
+outside ~/omxcode-g54; lowering a proof; vendoring an omxcore commit that isn't in its STABLE.md.
 
 ## Assumptions (taken instead of asking)
-- A split tree (Hyprland's dwindle) replaces goal 31's parked row tiling; `tests/test_tiling.mojo` is rewritten.
-- Resizing uses the Board's existing corner drag (the card's right and bottom edges move); no separate gap handle.
-- Moving uses the existing header drag: dropped on a card it swaps, dropped elsewhere it snaps back.
-- The rail stays, docked left (it inserts tables, documents, videos, pictures).
-- Saving the tiling in .omx files is out of scope (cards other than charts aren't saved today either).
+- The owner's Mac may be used for runs (they offered it); windows open on its screen for a minute each run.
+- The Mac keeps its native focus ring (system accent); omxqua's accent ring is GTK's and the web's for now.
+- omxplorer stays dark by default (D-1241); the Mac proof sets appearance=system to see both.
 
 ## Budget
-160 turns (raised from 80 on 2026-11-05, D-5407: M0–M1 took about 75; the owner asked to continue).
+80 turns.

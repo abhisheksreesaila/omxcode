@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Run an app on the owner's own Mac over SSH (goal 56): a native build there (Apple GPU, Metal), the steps, the report back.
+#   scripts/mac-ssh <app> <steps-file> [data files…]
+# The steps file is MOJOUI_TEST's steps, one or more per line (# lines skipped); `{data}` in it is the Mac's folder holding
+# the data files named after it. The sources go over as scripts/mac-ci's tarball does; the Mac keeps its pixi environment
+# in ~/$MAC_SSH_DIR between runs. The report (pictures and view dumps per step, log.txt) lands in build/mac-ssh/<app>-<time>/
+# and its path is the last line printed. GitHub's runners (scripts/mac-ci) stay the check's Mac; this one has a real
+# screen, a real GPU and the owner's appearance (dark or light).
+# MAC_SETTINGS (e.g. "appearance=system"): the app's settings.txt lines, comma-separated, in a fresh OMX_CONFIG folder.
+# MAC_SSH (default bhoomijaprasad@100.76.9.101) and MAC_SSH_KEY (default ~/.ssh/edx_mac) name the Mac.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+app=$1 steps_file=$2
+shift 2
+host=${MAC_SSH:-bhoomijaprasad@100.76.9.101}
+key=${MAC_SSH_KEY:-$HOME/.ssh/edx_mac}
+ssh_=(ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=10 "$host")
+remote=${MAC_SSH_DIR:-omxcode-g54}  # (the folder its pixi environment was made in: pixi environments can't move)
+stamp=$(date +%Y%m%d-%H%M%S)
+out=build/mac-ssh/$app-$stamp
+mkdir -p "$out"
+tar -czf "$out/src.tar.gz" --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh scripts/web_assets.py \
+    mojoui themes hosts "examples/$app" apple vendor
+"${ssh_[@]}" "mkdir -p $remote/data"
+grep -v '^#' "$steps_file" | paste -sd';' - | sed 's/;;*/;/g; s/^;//; s/;$//' > "$out/steps.txt"  # (a file: ssh's remote shell would split the steps at each ;)
+scp -q -i "$key" "$out/src.tar.gz" "$out/steps.txt" "$@" "$host:$remote/data/"
+"${ssh_[@]}" bash -s -- "$app" "$remote" "${MAC_SETTINGS:-}" <<'EOF' | tee "$out/run.txt"
+set -uo pipefail
+app=$1 settings=$3
+cd ~/"$2" && tar -xzf data/src.tar.gz
+steps=$(cat data/steps.txt)
+export PATH=$HOME/.pixi/bin:$PATH
+pixi install > install.txt 2>&1 || { tail -20 install.txt; exit 1; }
+if ! MAC_GPU=metal:1 bash scripts/build.sh "$app" mac > build.txt 2>&1; then tail -30 build.txt; exit 1; fi
+bundle=$(ls -d build/"$app"/mac/*.app | head -1)
+exe="$bundle/Contents/MacOS/$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleExecutable)"
+steps=${steps//\{data\}/$PWD/data}
+defaults write -g AppleShowScrollBars -string WhenScrolling
+before=$(ls -td ~/Desktop/omxcode-report-*/*/ 2>/dev/null | head -1)
+config=$PWD/config-$(date +%s) && mkdir -p "$config"
+[ -z "$settings" ] || echo "$settings" | tr ',' '\n' > "$config/settings.txt"
+OMX_CONFIG="$config" MOJOUI_TEST="$steps" "$exe" > stdout.txt 2>&1 &
+pid=$! start=$(date +%s)
+while kill -0 "$pid" 2>/dev/null; do
+    [ $(( $(date +%s) - start )) -gt 300 ] && { echo "TIMEOUT"; kill "$pid"; break; }
+    sleep 2
+done
+wait "$pid"; echo "exit $?"
+tail -5 stdout.txt
+last=$(ls -td ~/Desktop/omxcode-report-*/*/ | head -1)
+[ "$last" != "$before" ] || { echo "no new report"; exit 1; }
+echo "REPORT: $last"
+EOF
+report=$(sed -n 's/^REPORT: //p' "$out/run.txt" | tail -1)
+[ -n "$report" ] || { echo "no report: $out/run.txt"; exit 1; }
+scp -q -i "$key" -r "$host:${report// /\\ }*" "$out/"
+rm -f "$out/src.tar.gz"
+echo "$out"

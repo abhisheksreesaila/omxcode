@@ -4152,7 +4152,7 @@ struct Main(App):
             HStack(Button("Back", BACK), Text(note, CAPTION).tone(TONE_WARN if self.imp.streamed() or len(self.imp.skipped) > 0 else 0), Spacer(),
                    Button("Create table", CREATE, style=PROMINENT, icon="table"), spacing=14).fill().align(CENTER),
             spacing=14,
-        ).width(1120).fill().grow().tag("import")
+        ).max_width(1120).fill().grow().tag("import")  # (at most 1120: a fixed width that also fills made AppKit shrink the window to fit it)
         return VStack(dialog, spacing=0).padding(28, 40).fill().grow().align(CENTER)
 
     def import_row(self, name: View, kind: View, empty: View, distinct: View, first: View) -> View:

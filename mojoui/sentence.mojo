@@ -23,29 +23,67 @@ struct Word(Copyable, Movable):
         self = Self(text, msg, tag, False)
 
 
-def Sentence(words: List[Word], width: Int = 48, style: Int = HEADLINE, tag: String = "sentence") -> View:
-    """The words in lines of at most about `width` characters (a line breaks before a token or after a comma, never
-    inside a word); tokens are buttons that send their message."""
-    var lines = List[View]()
-    var line = List[View]()
-    var used = 0
+def _runs(words: List[Word]) -> List[Word]:
+    """The words with each plain run that goes on past a comma (", as ") cut after it (", " and " as "), so the line
+    may break there: whole, it couldn't, and a narrow card squeezed its comma to nothing (the Mac, goal 56)."""
+    var out = List[Word]()
     for w in words:
+        var at = w.text.find(", ")
+        if w.msg == NO_MSG and at >= 0 and at + 2 < w.text.byte_length():
+            out.append(Word(String(w.text[byte = : at + 1])))
+            out.append(Word(String(w.text[byte = at + 1 :])))
+        else:
+            out.append(w.copy())
+    return out^
+
+
+def _breaks(words: List[Word], width: Int) -> List[Int]:
+    """Where Sentence starts each line after the first: the index of the word that opens it (a line breaks before a
+    token or a run with a leading space once about `width` characters are used, never inside a word)."""
+    var out = List[Int]()
+    var used = 0
+    for i in range(len(words)):
+        ref w = words[i]
         var n = w.text.byte_length()
         if used > 0 and used + n > width and (w.msg != NO_MSG or w.text.startswith(" ")):
+            out.append(i)
+            used = 0
+            if w.msg == NO_MSG:  # (a run that would open the new line drops its leading space)
+                used += String(w.text.lstrip()).byte_length()
+                continue
+        used += n
+    return out^
+
+
+def sentence_lines(words: List[Word], width: Int = 48) -> Int:
+    """How many lines Sentence(words, width) takes: a card sizes its title bar by it, so a narrow card's sentence never
+    runs under what follows (a fixed two-line bar cut a four-line title on the Mac, goal 56)."""
+    return len(_breaks(_runs(words), width)) + (1 if len(words) > 0 else 0)
+
+
+def Sentence(words_in: List[Word], width: Int = 48, style: Int = HEADLINE, tag: String = "sentence") -> View:
+    """The words in lines of at most about `width` characters (a line breaks before a token or after a comma, never
+    inside a word); tokens are buttons that send their message."""
+    var words = _runs(words_in)
+    var breaks = _breaks(words, width)
+    var lines = List[View]()
+    var line = List[View]()
+    var b = 0
+    for i in range(len(words)):
+        ref w = words[i]
+        if b < len(breaks) and breaks[b] == i:
+            b += 1
             lines.append(HStack(line^, spacing=0).align(CENTER).justify(START).tag(SENTENCE_LINE))
             line = List[View]()
-            used = 0
             if w.msg == NO_MSG:  # (a run that would open the new line drops its leading space)
                 var trimmed = String(w.text.lstrip())
                 if trimmed != "":
                     line.append(Text(trimmed, style))
-                    used += trimmed.byte_length()
                 continue
         if w.msg != NO_MSG:
             line.append(Button(w.text, w.msg, TOKEN_LIT if w.lit else TOKEN).tag(w.tag))
         else:
             line.append(Text(w.text, style))
-        used += n
     if len(line) > 0:
         lines.append(HStack(line^, spacing=0).align(CENTER).justify(START).tag(SENTENCE_LINE))
     return VStack(lines^, spacing=2).align(START).tag(tag)

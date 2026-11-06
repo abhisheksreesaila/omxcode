@@ -1095,3 +1095,14 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - M3: web tiles with no overlap first time; its inspector still floated (the web Card CSS) and dark framed the board: docked in LIQUID_WEB, dark .board-scroll frame removed. wait: by tag done in 54-web.py with a locator (drive.py waits by title only).
 - Review round 1 fixes (D-5411): boardtiles extracted (test caught my own wrong expectation: four cards squeeze the table to its minimum share, three give it back); clip opt-in; edge follows pointer; M1 grow proof + no-scroll; M2 lines + 1920 wide + mockup on the compare page. M0–M2 PASS again.
 - Done: M0–M4 PASS, reviewer round 2 PASS. Unverified: dragging and resizing a card on the web host (only GTK drags are proven); the Mac and phones.
+
+## Goal 56 (2026-11-06): omxplorer on the owner's Mac, omxqua's details
+- First native run on the owner's Mac (goal 54's main, Metal build, 3 min): tiles held, no overlap, "Apple M4 · ready". Found: the window shrank to 1200 while importing (width + fill = equality on AppKit), the chart title cut after 2.5 lines (a 52 pt bar is exact on AppKit, a minimum on GTK), scheme:light did nothing (omxplorer is dark unless settings say system: not a bug), close-limits not found (AppKit's steps had no tag lookup).
+- mac-ssh: steps passed as an argument were split by the remote zsh at each ; → a file. Moving ~/omxcode-g54 broke its pixi env → moved back, folder name kept.
+- Second run: import 1440 throughout, title bar 94 pt for four lines; new: 1920 → 1440 landed at 1529 (the labelled ribbon's minimum before the app went compact) → asked again after relayout (D-5605); ", as " squeezed to 0 (sentence floor 24 chars too wide for 300 pt) → 16.
+- GTK: focus ring and tnum written from the Look; gallery measure 58/58 (Liquid) vs 42/62 (plain); focus ring teal, 2 px clear (looked at, zoomed).
+- Owner asked mid-goal for the omxplorer page's screenshots in dark mode (M5) and whether cards resize ("didn't see a handle"): the grip (GTK overlay, web ::after, Mac CAShapeLayer) and GTK cursors; the Mac had no tiled resize at all and its pan sent a move per pointer step (a swap never landed) → tiled_pan like GTK's.
+- Mac grip first drawn at the top-right, leaning the wrong way: a non-boxed card is an unflipped stack; the grip is a plain NSView now, placed by the card's flippedness.
+- Video on the Mac: "not a video" — VideoSource runs ffprobe/ffmpeg's command line; the owner's Mac has neither (D-5612). Scene without video on every screen.
+- M4 failed first only because this worktree had no build/g47 (robot data) or build/packs: symlinked as g54's.
+- "every outcome every row": the ", " run squeezed to 1 pt on the Mac → runs cut after their comma (D-5613), test added.
