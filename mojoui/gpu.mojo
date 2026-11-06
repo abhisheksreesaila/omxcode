@@ -15,23 +15,42 @@ from mojoui.clock import now_ns
 from std.os import getenv
 from std.memory import bitcast
 from mojoui.present import Presenter, VERTEX_BYTES
+from mojoui.canvas import MAC_GPU
 
 # The GPU path is compiled for Linux desktops only: Apple and Android builds (built with
 # -D MOJOUI_ANDROID) use the CPU path, since MAX's GPU runtime isn't linked into them.
 comptime GPU_BUILD = CompilationTarget.is_linux() and not is_defined["MOJOUI_ANDROID"]()
+# Pixel functions (Gpu.render, Gpu.draw) also run on the Mac's GPU in a native Mac build (MAX's Metal path, D-5311);
+# the rest of this module (point clouds, tables) keeps to GPU_BUILD until it's checked on Metal.
+comptime PIXEL_GPU = GPU_BUILD or MAC_GPU
 
 comptime Params = SIMD[DType.float32, 4]  # four numbers your pixel function can use
 comptime PixelFn = def(Int, Int, Int, Int, Params) thin -> UInt32
 
 
 # (GPU kernels still take UnsafePointer in MAX 26.6; the deprecation warning is expected.)
-def _pixels_kernel[f: PixelFn](dst: UnsafePointer[UInt32, MutAnyOrigin], w32: Int32, h32: Int32, p: Params):
+# (Params goes in as four scalars and is rebuilt here: Metal fails to compile a kernel that reads a SIMD argument,
+# "Failed to create compute pipeline state", seen on GitHub's Mac with ci/mac/pixelprobe.mojo, D-5311.)
+def _pixels_kernel[f: PixelFn](dst: UnsafePointer[UInt32, MutAnyOrigin], w32: Int32, h32: Int32, p0: Float32, p1: Float32, p2: Float32, p3: Float32):
+    var p = Params(p0, p1, p2, p3)
     var w = Int(w32)
     var h = Int(h32)
     var x = Int(global_idx.x)
     var y = Int(global_idx.y)
     if x < w and y < h:
         dst.unsafe_offset(y * w + x)[] = f(x, y, w, h, p)
+
+
+def _pixels_bgra_kernel[f: PixelFn](dst: UnsafePointer[UInt32, MutAnyOrigin], w32: Int32, h32: Int32, row32: Int32, p0: Float32, p1: Float32, p2: Float32, p3: Float32):
+    """The same, into an IOSurface (the Mac, D-5311): rows of `row` pixels, bytes B, G, R, A."""
+    var p = Params(p0, p1, p2, p3)
+    var w = Int(w32)
+    var h = Int(h32)
+    var x = Int(global_idx.x)
+    var y = Int(global_idx.y)
+    if x < w and y < h:
+        var c = f(x, y, w, h, p)
+        dst.unsafe_offset(y * Int(row32) + x)[] = (c & 0xFF00FF00) | ((c & 0xFF) << 16) | ((c >> 16) & 0xFF)
 
 
 @fieldwise_init
@@ -55,6 +74,10 @@ struct Gpu(Movable):
     var handed: Int  # draw(): pictures left on the GPU for the host to show (surface.gpu_ok): no copy
     var read_back: Int  # draw(): pictures copied into a surface's main memory (the host can't take a GPU picture)
     var milliseconds: Float64  # the last draw(): queued (handed over), or until the copy finished
+    var wrapped: List[DeviceBuffer[DType.uint32]]  # the Mac: IOSurfaces the GPU may write (wrap_host_memory), by id
+    var wrapped_ids: List[Int]
+    var wrapped_bytes: List[Int]
+    var shared_failed: Bool  # the Mac: writing into an IOSurface failed once (said why): the copy from then on
 
     def __init__(out self, use: Bool = True):
         """use=False: act as if there were no GPU (to compare with the CPU). MOJOUI_GPU_DEVICE=n picks GPU n; a desktop
@@ -67,9 +90,13 @@ struct Gpu(Movable):
         self.handed = 0
         self.read_back = 0
         self.milliseconds = 0
+        self.wrapped = List[DeviceBuffer[DType.uint32]]()
+        self.wrapped_ids = List[Int]()
+        self.wrapped_bytes = List[Int]()
+        self.shared_failed = False
         if not use:
             return
-        comptime if GPU_BUILD:  # (Apple builds: the CPU path; MAX's Apple GPU runtime isn't linked)
+        comptime if PIXEL_GPU:  # (the Mac's cross build: the CPU path; MAX's runtime isn't linked into it)
             try:
                 var count = DeviceContext.number_of_devices()
                 if count > 0:
@@ -94,24 +121,26 @@ struct Gpu(Movable):
 
     def render[f: PixelFn](self, width: Int, height: Int, p: Params) raises -> Rendered:
         """Runs f for every pixel on the GPU; returns the pixels and how long it took."""
-        if not self.ctx:
-            raise Error("no GPU found")
-        ref ctx = self.ctx.value()
-        var buf = ctx.enqueue_create_buffer[DType.uint32](width * height)
-        ctx.synchronize()
-        var t0 = now_ns()
-        ctx.enqueue_function[_pixels_kernel[f]](
-            buf.unsafe_ptr(), Int32(width), Int32(height), p,
-            grid_dim=(ceildiv(width, 16), ceildiv(height, 16)), block_dim=(16, 16),
-        )
-        ctx.synchronize()
-        var ms = Float64(now_ns() - t0) / 1e6
-        var out = List[UInt32](capacity=width * height)
-        with buf.map_to_host() as host:
-            for i in range(width * height):
-                out.append(host[i])
-        return Rendered(out^, ms)
-
+        comptime if not PIXEL_GPU:  # (the Mac's cross build has no GPU runtime)
+            raise Error("no GPU in this build")
+        else:
+            if not self.ctx:
+                raise Error("no GPU found")
+            ref ctx = self.ctx.value()
+            var buf = ctx.enqueue_create_buffer[DType.uint32](width * height)
+            ctx.synchronize()
+            var t0 = now_ns()
+            ctx.enqueue_function[_pixels_kernel[f]](
+                buf.unsafe_ptr(), Int32(width), Int32(height), p[0], p[1], p[2], p[3],
+                grid_dim=(ceildiv(width, 16), ceildiv(height, 16)), block_dim=(16, 16),
+            )
+            ctx.synchronize()
+            var ms = Float64(now_ns() - t0) / 1e6
+            var out = List[UInt32](capacity=width * height)
+            with buf.map_to_host() as host:
+                for i in range(width * height):
+                    out.append(host[i])
+            return Rendered(out^, ms)
 
     def draw[f: PixelFn](mut self, mut surface: Surface, p: Params):
         """Runs f for every pixel of a Canvas (call it from App.draw; the surface is the canvas's real size, so the
@@ -123,7 +152,44 @@ struct Gpu(Movable):
         var h = surface.height
         if w <= 0 or h <= 0:  # (a canvas with no size yet: nothing to draw)
             return
-        comptime if GPU_BUILD:
+        comptime if MAC_GPU:  # the Mac: straight into the IOSurface the host shows (one memory: no copy at all)
+            if self.ctx and surface.shared_address != 0 and not self.shared_failed:
+                try:
+                    ref ctx = self.ctx.value()
+                    var at = -1
+                    for i in range(len(self.wrapped_ids)):
+                        if self.wrapped_ids[i] == surface.shared_id:
+                            at = i
+                    if at < 0:  # a new IOSurface: the wraps of other sizes go (the host releases those after this draw)
+                        ctx.synchronize()
+                        var keep = List[DeviceBuffer[DType.uint32]]()
+                        var keep_ids = List[Int]()
+                        for i in range(len(self.wrapped)):
+                            if self.wrapped_bytes[i] == surface.shared_bytes and len(keep) < 5:
+                                keep.append(self.wrapped[i])
+                                keep_ids.append(self.wrapped_ids[i])
+                        self.wrapped = keep^
+                        self.wrapped_ids = keep_ids^
+                        self.wrapped_bytes = List[Int](length=len(self.wrapped), fill=surface.shared_bytes)
+                        var base = Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=surface.shared_address)
+                        self.wrapped.append(ctx.wrap_host_memory(base, surface.shared_bytes // 4))
+                        self.wrapped_ids.append(surface.shared_id)
+                        self.wrapped_bytes.append(surface.shared_bytes)
+                        at = len(self.wrapped) - 1
+                    ctx.enqueue_function[_pixels_bgra_kernel[f]](
+                        self.wrapped[at].unsafe_ptr(), Int32(w), Int32(h), Int32(surface.shared_row), p[0], p[1], p[2], p[3],
+                        grid_dim=(ceildiv(w, 16), ceildiv(h, 16)), block_dim=(16, 16),
+                    )
+                    ctx.synchronize()  # (the host shows it next: the picture must be finished)
+                    surface.gpu_drawn = True
+                    surface.gpu_address = surface.shared_address
+                    self.handed += 1
+                    self.milliseconds = Float64(now_ns() - t0) / 1e6
+                    return
+                except e:
+                    print("mojoui.gpu: can't draw into the IOSurface (" + String(e) + "): the picture is copied from now on", flush=True)
+                    self.shared_failed = True
+        comptime if PIXEL_GPU:
             if self.ctx:
                 try:
                     ref ctx = self.ctx.value()
@@ -132,7 +198,7 @@ struct Gpu(Movable):
                         self.capacity = w * h
                     var buf = self.picture.value().create_sub_buffer[DType.uint32](0, w * h)
                     ctx.enqueue_function[_pixels_kernel[f]](
-                        buf.unsafe_ptr(), Int32(w), Int32(h), p,
+                        buf.unsafe_ptr(), Int32(w), Int32(h), p[0], p[1], p[2], p[3],
                         grid_dim=(ceildiv(w, 16), ceildiv(h, 16)), block_dim=(16, 16),
                     )
                     surface.gpu_drawn = True
@@ -172,7 +238,7 @@ def render_on_cpu[f: PixelFn](width: Int, height: Int, p: Params) -> Rendered:
 
 def gpu_present() -> Bool:
     """Whether this machine has a GPU mojoui can use (cheap: doesn't start it)."""
-    comptime if GPU_BUILD:
+    comptime if PIXEL_GPU:
         try:
             return DeviceContext.number_of_devices() > 0
         except:

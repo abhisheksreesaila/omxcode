@@ -1,6 +1,12 @@
 # The pixels a Canvas is painted into. Hosts own the memory; the app's draw() fills it.
 
 from std.memory import Pointer
+from std.sys import CompilationTarget, is_defined
+
+
+# A native Mac build with the GPU (scripts/build.sh with MAC_GPU on a Mac: Mojo's runtime and MAX's Metal path linked,
+# D-309): GPU pictures may go straight into an IOSurface the host shows (D-5311). The cross build has neither.
+comptime MAC_GPU = CompilationTarget.is_macos() and is_defined["MOJOUI_MAC_GPU"]()
 
 
 struct Surface(Movable):
@@ -25,6 +31,14 @@ struct Surface(Movable):
     # code may blend straight into one of its textures with the GPU's fixed-function blending and say which (gpu_slot).
     var gpu_painter: Int
     var gpu_slot: Int
+    # The Mac with its GPU (D-5311): shared_address is an IOSurface's memory, locked for this draw (page-aligned,
+    # shared_bytes long, rows of shared_row pixels, bytes B, G, R, A; shared_id names it). The GPU and the CPU share one
+    # memory there, so GPU drawing code may write the picture straight into it and say so (gpu_address =
+    # shared_address); the host then shows the IOSurface itself: the picture is never copied. 0: not offered.
+    var shared_address: Int
+    var shared_bytes: Int
+    var shared_row: Int
+    var shared_id: Int
 
     def __init__(out self, address: Int, width: Int, height: Int, scale: Float64):
         self.address = address
@@ -39,6 +53,10 @@ struct Surface(Movable):
         self.gpu_drawn = False
         self.gpu_painter = 0
         self.gpu_slot = -1
+        self.shared_address = 0
+        self.shared_bytes = 0
+        self.shared_row = 0
+        self.shared_id = 0
 
     def pixels(self) -> Pointer[UInt32, MutUntrackedOrigin]:
         return Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=self.address)

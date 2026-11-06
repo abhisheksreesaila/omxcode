@@ -102,7 +102,7 @@
    ],
    "hue": 140,
    "tech": "Modular's GPU runtime",
-   "desc": "Compiles the Mojo kernel for the GPU and launches it. omxcode's GPU drawing builds for Linux; elsewhere the framework's drawing types use the CPU."
+   "desc": "Compiles the Mojo kernel for the GPU (CUDA on NVIDIA, Metal on the Mac) and launches it."
   },
   {
    "id": "gpu",
@@ -114,7 +114,7 @@
     -4.5
    ],
    "hue": 140,
-   "tech": "NVIDIA (AMD untested)",
+   "tech": "NVIDIA · Apple (AMD untested)",
    "desc": "One thread per pixel."
   },
   {
@@ -127,19 +127,19 @@
    ],
    "hue": 18,
    "tech": "copied back",
-   "desc": "Where the host can't take a GPU picture yet (the Mac, the web, a display without GL), the pixels are copied to main memory and the toolkit uploads them again. The best GPU apps never do this."
+   "desc": "Where the host can't take a GPU picture yet (the web, a display without GL), the pixels are copied to main memory and the toolkit uploads them again. The best GPU apps never do this."
   },
   {
    "id": "gltex",
-   "label": "GL texture",
+   "label": "GL texture · IOSurface",
    "kind": "storage",
    "at": [
     19.5,
     0.5
    ],
    "hue": 140,
-   "tech": "Linux · NVIDIA",
-   "desc": "The default for GPU apps on GTK with NVIDIA: the picture stays on the GPU and is copied GPU to GPU into an OpenGL texture GTK shows (CUDA–GL interop, mojoui/present.mojo)."
+   "tech": "Linux · Mac",
+   "desc": "The default for GPU apps. Linux with NVIDIA: copied GPU to GPU into an OpenGL texture GTK shows (CUDA–GL interop). The Mac: drawn straight into an IOSurface Core Animation shows, no copy at all (one memory for CPU and GPU)."
   },
   {
    "id": "widget",
@@ -240,7 +240,7 @@
  ],
  "flows": [
   {
-   "name": "Mac and web today (a copy)",
+   "name": "The web today (a copy)",
    "steps": [
     {
      "at": "fn",
@@ -264,7 +264,7 @@
     {
      "from": "gpu",
      "to": "pixels",
-     "note": "Mac and web, for now: the pixels are copied to main memory. The best GPU apps keep them in GPU memory."
+     "note": "The web, for now: the pixels are copied to main memory. The best GPU apps keep them in GPU memory."
     },
     {
      "from": "pixels",
@@ -294,7 +294,7 @@
    ]
   },
   {
-   "name": "Linux + NVIDIA: stays on the GPU",
+   "name": "Linux and the Mac: stays on the GPU",
    "steps": [
     {
      "from": "max",

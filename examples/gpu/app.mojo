@@ -52,7 +52,7 @@ struct Main(App):
 
     def __init__(out self):
         self.gpu = Gpu()
-        self.zoom = 0
+        self.zoom = 40  # (opens on the spiral)
         self.detail = 1
         self.version = 0
         self.result = "Drag the zoom, or press Check on CPU." if self.gpu.available() else "No supported GPU (NVIDIA or AMD): drawn on the CPU."

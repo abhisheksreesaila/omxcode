@@ -169,18 +169,19 @@ build_mac() {
   local jobs=MXFRAME_JOB_THREADS; [ "${MOJOUI_SERIAL_JOBS:-}" = 1 ] && jobs=MOJOUI_SERIAL_JOBS && echo "   (jobs on the main thread)"
   if [ "$(uname)" = Darwin ] && [ -n "${MAC_GPU:-}" ]; then
     # On a Mac, with its GPU (omxcode#3): a native build, Metal kernels compiled by Apple's toolchain, Mojo's runtime
-    # libraries bundled in the app (bundle_runtime, D-309). MAC_GPU: an accelerator
+    # libraries bundled in the app (bundle_runtime, D-309); MOJOUI_MAC_GPU lets pixel functions draw on the GPU straight
+    # into an IOSurface the host shows (D-5311). MAC_GPU: an accelerator
     # (metal:1 on GitHub's virtual GPU) or "native" (MAX names this Mac's own GPU)
     echo "== Mac ($EX): AppKit, arm64, native, GPU ($MAC_GPU)"
     rm -rf "$app"; mkdir -p "$app/Contents/MacOS"
     local frameworks=(-Xlinker -framework -Xlinker AppKit -Xlinker -lobjc)
     if [ "$MAC_GPU" = native ]; then  # (two calls: an empty array is "unbound" under set -u in macOS's bash 3.2)
-      if [ "$debug" = 1 ]; then mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_DEBUG -D "$jobs" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
-      else mojo_build hosts/mac_gpu_main.mojo -D "$jobs" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"; fi
+      if [ "$debug" = 1 ]; then mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_MAC_GPU -D MOJOUI_DEBUG -D "$jobs" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
+      else mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_MAC_GPU -D "$jobs" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"; fi
     elif [ "$debug" = 1 ]; then
-      mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_DEBUG -D "$jobs" --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
+      mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_MAC_GPU -D MOJOUI_DEBUG -D "$jobs" --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
     else
-      mojo_build hosts/mac_gpu_main.mojo -D "$jobs" --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
+      mojo_build hosts/mac_gpu_main.mojo -D MOJOUI_MAC_GPU -D "$jobs" --target-accelerator "$MAC_GPU" -o "$app/Contents/MacOS/$NAME" "${frameworks[@]}"
     fi
     bundle_runtime "$app"
   else

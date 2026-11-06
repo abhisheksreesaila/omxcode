@@ -31,8 +31,8 @@ from mojoui.diff import Diff, SET_TEXT, SET_VALUE, SET_IMAGE, SET_PLACE, SET_SIZ
 from mojoui.png import encode_png
 from mojoui.app import App, Event, Runtime, budget_from_env
 from mojoui.clock import now_ns
-from mojoui.canvas import Surface
-from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, AppleCanvas
+from mojoui.canvas import Surface, MAC_GPU
+from mojoui.hosts.apple_canvas import CGPoint, CGRect, cfunc, cg_image, io_surface, AppleCanvas, MISSES
 from mojoui.hosts.mac_report import MacReport, MAX_SHOTS, pts
 from mojoui.hosts.appkit_webview import (
     MacWebViews, mac_at, start as webviews_start, new_view as webview_new, send as webview_send, drop as webview_drop,
@@ -1981,6 +1981,8 @@ struct AppKitHost[A: App](Movable):
                     self.parents[c] = k
         self.size_h = List[Int](length=len(self.rt.shown.nodes), fill=0)
         self.sized = List[Tuple[Int, Int, Int, Int]](length=len(self.rt.shown.nodes), fill=(0, 0, 0, 0))
+        for ref c in self.canvases:
+            c.drop_surfaces()
         self.canvases = List[AppleCanvas]()
         if self.link != 0:
             _ = msg(self.link, "invalidate")
@@ -2693,6 +2695,8 @@ struct AppKitHost[A: App](Movable):
                     var k = self.canvas_at(i)
                     if k >= 0:
                         flags += " canvas " + String(self.canvases[k].wpx) + "x" + String(self.canvases[k].hpx) + " px drawn v" + String(self.canvases[k].drawn) + " of v" + String(n.value)
+                        if self.canvases[k].gpu_frames > 0:
+                            flags += " iosurface " + String(self.canvases[k].gpu_frames)
                         if self.canvases[k].wpx == 0:
                             problems.append("canvas node " + String(i) + " (id " + String(n.style) + ") was never drawn")
                 if (n.kind == SCROLL or n.kind == BOARD) and (msg(w, "respondsToSelector:", sel("contentView")) & 0xFF) != 0:
@@ -2835,22 +2839,112 @@ struct AppKitHost[A: App](Movable):
         if len(self.canvases[k].pixels) != wpx * hpx:
             self.canvases[k].pixels = List[UInt32](length=wpx * hpx, fill=0)
         var surface = Surface(Int(self.canvases[k].pixels.unsafe_ptr()), wpx, hpx, scale)
+        comptime if MAC_GPU:
+            self.offer_iosurface(k, wpx, hpx, surface)
         var d = self.rt.draw(node, surface)
         if wpx != self.canvases[k].wpx or hpx != self.canvases[k].hpx:
             self.report.note("canvas node " + String(node) + " (id " + String(self.rt.shown.nodes[node].style) + ") drew " + String(wpx) + "x" + String(hpx) + " px, "
                              + pts(bounds.width) + "x" + pts(bounds.height) + " pt")
-        var image = cg_image(self.canvases[k].pixels, wpx, hpx)
-        if image == 0:
-            self.report.note("canvas node " + String(node) + ": no CGImage from its pixels")
-            return
-        var picture = msg(msg(cls("NSImage"), "alloc"), "initWithCGImage:size:", image, bounds.width, bounds.height)
-        _ = msg(view, "setImage:", picture)
-        _ = msg(picture, "release")
-        cfunc[NoneType]("CGImageRelease", image)
+        var on_gpu = False
+        comptime if MAC_GPU:
+            on_gpu = self.show_iosurface(k, surface, bounds)
+        if not on_gpu:
+            var image = cg_image(self.canvases[k].pixels, wpx, hpx)
+            if image == 0:
+                self.report.note("canvas node " + String(node) + ": no CGImage from its pixels")
+                return
+            var picture = msg(msg(cls("NSImage"), "alloc"), "initWithCGImage:size:", image, bounds.width, bounds.height)
+            _ = msg(view, "setImage:", picture)
+            _ = msg(picture, "release")
+            cfunc[NoneType]("CGImageRelease", image)
         self.canvases[k].wpx = wpx
         self.canvases[k].hpx = hpx
         self.canvases[k].drawn = version
         self.apply(d, self_addr)
+
+    def offer_iosurface(mut self, k: Int, wpx: Int, hpx: Int, mut surface: Surface):
+        """The Mac with its GPU (D-5311): offers this draw an IOSurface to draw into (surface.shared_*), the first of the
+        canvas's three that Core Animation isn't showing, locked until show_iosurface. MOJOUI_CANVAS_GPU=0: never."""
+        if env("MOJOUI_CANVAS_GPU") == "0" or self.canvases[k].cpu_only:
+            return
+        ref c = self.canvases[k]
+        if c.sw != wpx or c.sh != hpx:
+            for s in c.surfaces:  # (released after this draw: the GPU may still hold them, Gpu.draw lets go first)
+                c.retired.append(s)
+            c.surfaces.clear()
+            for _ in range(3):
+                var s = io_surface(wpx, hpx)
+                if s == 0:
+                    break
+                c.surfaces.append(s)
+            c.sw = wpx
+            c.sh = hpx
+            c.next = 0
+            if len(c.surfaces) < 3:
+                self.report.note("canvas node " + String(c.node) + ": no IOSurface of " + String(wpx) + "x" + String(hpx) + " px (the picture is copied)")
+                for s in c.surfaces:
+                    cfunc[NoneType]("CFRelease", s)
+                c.surfaces.clear()
+                return
+        var pick = -1
+        for j in range(3):
+            var at = (c.next + j) % 3
+            if cfunc[UInt8]("IOSurfaceIsInUse", c.surfaces[at]) == 0:
+                pick = at
+                break
+        if pick < 0:  # (all three still with Core Animation: this frame is copied rather than torn)
+            return
+        var s = c.surfaces[pick]
+        _ = cfunc[Int32]("IOSurfaceLock", s, UInt32(0), 0)
+        c.locked = pick
+        surface.shared_address = cfunc("IOSurfaceGetBaseAddress", s)
+        surface.shared_bytes = cfunc("IOSurfaceGetAllocSize", s)
+        surface.shared_row = cfunc("IOSurfaceGetBytesPerRow", s) // 4
+        surface.shared_id = Int(cfunc[UInt32]("IOSurfaceGetID", s))
+
+    def show_iosurface(mut self, k: Int, surface: Surface, bounds: CGRect) -> Bool:
+        """After the app drew: if its drawing code wrote the picture into the offered IOSurface, a sublayer of the canvas
+        view shows that IOSurface as its contents (no copy: Core Animation reads the same memory the GPU wrote). False:
+        it wasn't offered or wasn't used, and the host shows the pixels as before."""
+        ref c = self.canvases[k]
+        for x in c.retired:  # (the old size's: this draw's Gpu.draw has let go of their wraps)
+            cfunc[NoneType]("CFRelease", x)
+        c.retired.clear()
+        if c.locked < 0:
+            return False
+        var s = c.surfaces[c.locked]
+        _ = cfunc[Int32]("IOSurfaceUnlock", s, UInt32(0), 0)
+        var at = c.locked
+        c.locked = -1
+        if surface.gpu_address == 0 or surface.gpu_address != surface.shared_address:
+            if c.layer != 0:
+                _ = msg(c.layer, "setHidden:", 1)
+            elif c.gpu_frames == 0:  # (never drawn on the GPU yet: its IOSurfaces go now, made again if offered again;
+                c.misses += 1  # after MISSES such draws it counts as a CPU canvas and isn't offered any more)
+                c.cpu_only = c.misses >= MISSES
+                for x in c.surfaces:
+                    cfunc[NoneType]("CFRelease", x)
+                c.surfaces.clear()
+                c.sw = 0
+                c.sh = 0
+            return False
+        if c.layer == 0:
+            _ = msg(c.view, "setWantsLayer:", 1)
+            _ = msg(c.view, "setImage:", 0)
+            c.layer = msg(msg(cls("CALayer"), "alloc"), "init")
+            _ = msg(c.layer, "setContentsGravity:", ns_string("resize"))
+            _ = msg(msg(c.view, "layer"), "addSublayer:", c.layer)
+            self.report.note("canvas node " + String(c.node) + ": its GPU picture is shown from an IOSurface (Metal, no copy)")
+            print("mojoui: GPU canvas pictures go to the screen without a copy (Metal draws into an IOSurface; Core Animation shows it)", flush=True)
+        _ = msg(cls("CATransaction"), "begin")
+        _ = msg(cls("CATransaction"), "setDisableActions:", 1)  # (no implicit fade between frames)
+        _ = msg(c.layer, "setFrame:", Float64(0), Float64(0), bounds.width, bounds.height)
+        _ = msg(c.layer, "setContents:", s)
+        _ = msg(c.layer, "setHidden:", 0)
+        _ = msg(cls("CATransaction"), "commit")
+        c.next = (at + 1) % 3
+        c.gpu_frames += 1
+        return True
 
     def send(mut self, node: Int, second: Bool, text: String, number: Int, self_addr: Int):
         """A control changed: build the event, run update(), patch the controls."""

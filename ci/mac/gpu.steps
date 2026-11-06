@@ -1,0 +1,2 @@
+# limit 120
+wait:8000;select:0=Very detailed;wait:3000;select:0=Fast;wait:3000;tap:Check on CPU;wait:3000

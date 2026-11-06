@@ -14,7 +14,11 @@ apps=("$@")
 mkdir -p build/mac-ci
 source_stamp=$(pixi run python scripts/side.py --stamp)  # (the sources these zips were built from: scripts/side.py's mac_fresh)
 for app in "${apps[@]}"; do
-    zip=$(ls build/"$app"/mac/*-mac.zip | head -1)
+    zip=$(ls build/"$app"/mac/*-mac.zip 2>/dev/null | head -1 || true)
+    if [ -z "$zip" ]; then  # (omxplorer and gpu are built natively on the macos-26 job: a cross-built zip is optional)
+        case " omxplorer gpu " in *" $app "*) echo "$app: no cross-built zip; the macos-26 job builds it natively"; continue ;; esac
+        echo "no build/$app/mac/*-mac.zip: scripts/build.sh $app mac first"; exit 1
+    fi
     newer=$(find mojoui themes hosts examples/"$app" apple -type f -newer "$zip" -not -path '*/__pycache__/*' | head -3)
     [ -z "$newer" ] || { echo "$zip is older than $newer: scripts/build.sh $app mac first"; exit 1; }
     cp "$zip" "build/mac-ci/$app-mac.zip"
@@ -23,7 +27,7 @@ done
 # the sources too, for the macos-26 job's native GPU build of omxplorer (omxcode#3: Metal kernels need a Mac to compile);
 # everything scripts/build.sh runs for a Mac build is in it (web_assets.py since goal 34b: without it the GPU build failed, D-787)
 tar -czf build/mac-ci/omxcode-src.tar.gz --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh scripts/web_assets.py \
-    mojoui themes hosts examples/omxplorer examples/maccheck apple vendor scripts/console_fixture.py docs/goals/33/fixtures
+    mojoui themes hosts examples/omxplorer examples/maccheck examples/gpu apple vendor scripts/console_fixture.py docs/goals/33/fixtures
 gh release upload mac-ci build/mac-ci/omxcode-src.tar.gz --clobber -R "$REPO"
 branch=build/mac-ci/branch
 if [ ! -d "$branch/.git" ]; then
