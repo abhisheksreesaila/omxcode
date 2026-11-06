@@ -28,7 +28,7 @@ def check(ok, what):
 
 page = (ROOT / "docs/gallery/index.html").read_text()
 links = re.findall(r'<a class="dl" href="([^"]+)"', page)
-check(len(links) >= 12, f"{len(links)} download buttons in the gallery")
+check(len(links) >= 10, f"{len(links)} download buttons in the gallery")
 
 # M1
 rel = json.loads(subprocess.run(["gh", "release", "view", "gallery-apps", "-R", REPO, "--json", "assets,body"],
@@ -81,6 +81,8 @@ cover = (ROOT / "docs/index.html").read_text()
 plorer = (ROOT / "docs/omxplorer.html").read_text()
 check("agentchat-web" not in cover and "omxplorer-sheet-web" not in cover and "The web, on WebGPU" not in cover,
       "M3 no web shot or web tile on the cover")
+check("JS widgets" not in page and "Can I use my JS libraries" not in cover and "#widgets" not in cover,
+      "M3 no JavaScript app in the showcase (owner: \"where do you need JS for anything?\")")
 check("sentence-web" not in plorer, "M3 no web shot on omxplorer's page")
 before = page
 subprocess.run([sys.executable, str(ROOT / "scripts/gallery_page.py")], capture_output=True)

@@ -54,14 +54,9 @@ APPS = [
          runs=[("Linux", "ok"), ("Mac", "soon"), ("Android", "emu"), ("iPhone", "builds")], get=["Linux"],
          shots=[("img/android-todo.png", "Android"), ("img/android-gallery.png", "Android: the component gallery")],
          src="examples/todo"),
-    dict(name="JS widgets", app="widgets", kind="Bring your libraries",
-         line="A native Mojo app with CodeMirror and ECharts inside, restyled live by the theme. Every line of state is Mojo.",
-         runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"], needs="Linux: needs WebKitGTK 6.0",
-         shots=[("img/widgets-gtk-dark.png", "Linux, dark"), ("img/widgets-gtk-light.png", "Linux, light")],
-         src="examples/widgets"),
 ]
 
-# no web builds in the showcase (owner, 2026-11-05); these come into the grid once they have a download
+# no web builds and no JavaScript in the showcase (owner, 2026-11-05: "where do you need JS for anything?"); these come into the grid once they have a download
 SOON = [("Agent chat", "Ask for a map, get a map: an agent answers with native screens. A download once it carries its agent inside."),
         ("Dictate", "Talk, and words appear, Whisper on the GPU in the app's own process. A download once the model ships with it."),
         ("Ask your data", "Type a question; a model writes the chart and the query; the GPU runs it; omxcode draws it.")]
@@ -228,7 +223,7 @@ STAR_CARD
   </div>
   <div class="more2">
     <div class="eyebrow">More, built from the same parts</div>
-    <p class="sub">Ink, a database, a background app, a GPU canvas, every platform's own controls, JavaScript libraries as guests. Native apps, no web builds.</p>
+    <p class="sub">Ink, a database, a background app, a GPU canvas, every platform's own controls. Native apps in Mojo: no web builds, no JavaScript.</p>
     <div class="photos">
 CARDS
     </div>
