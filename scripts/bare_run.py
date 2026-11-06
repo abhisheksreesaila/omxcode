@@ -1,0 +1,78 @@
+"""Runs packaged Linux downloads the way a stranger would (goal 53): each dist/<app>-linux-x86_64.tar.gz unpacked into an
+empty folder and started with a bare environment (no pixi, no Mojo, a fresh HOME, PATH=/usr/bin:/bin) on a headless
+display. Passes when the app is still running after a few seconds and its window has something drawn in it; writes a
+screenshot per app to build/g53/bare/<app>.png and a summary to build/g53/bare.json.
+  pixi run python scripts/bare_run.py sketch jot keeper widgets lens todo"""
+import json
+import os
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import headless  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "build/g53/bare"
+WAIT_S = 6
+
+
+def colours(png):
+    """How many distinct colours the screenshot has: a blank or crashed window has one or two."""
+    r = subprocess.run(["magick", str(png), "-format", "%k", "info:"], capture_output=True, text=True)
+    return int(r.stdout.strip() or 0)
+
+
+def run(app):
+    tar = ROOT / "dist" / f"{app}-linux-x86_64.tar.gz"
+    if not tar.exists():
+        return {"ok": False, "why": f"no {tar.name}: scripts/package.sh {app} linux"}
+    with tempfile.TemporaryDirectory() as tmp:
+        with tarfile.open(tar) as t:
+            t.extractall(tmp, filter="tar")
+        here = Path(tmp) / f"{app}-linux-x86_64"
+        home = Path(tmp) / "home"
+        home.mkdir()
+        env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "XDG_RUNTIME_DIR": tmp}
+        env.update({k: os.environ[k] for k in ("DISPLAY", "GDK_BACKEND", "GSK_RENDERER", "GDK_DISABLE", "GDK_SCALE",
+                                               "XKB_CONFIG_ROOT") if k in os.environ})
+        log = open(OUT / f"{app}.log", "w")
+        p = subprocess.Popen([str(here / app)], cwd=here, env=env, stdout=log, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL)
+        time.sleep(WAIT_S)
+        alive = p.poll() is None
+        shot = OUT / f"{app}.png"
+        subprocess.run(["import", "-display", env["DISPLAY"], "-window", "root", str(shot)], capture_output=True)
+        p.terminate()
+        try:
+            p.wait(5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+        log.close()
+        n = colours(shot) if shot.exists() else 0
+        ok = alive and n > 16
+        why = "" if ok else ("exited with " + str(p.returncode) if not alive else f"window looks empty ({n} colours)")
+        return {"ok": ok, "alive": alive, "colours": n, "why": why,
+                "log_tail": (OUT / f"{app}.log").read_text()[-400:]}
+
+
+def main():
+    OUT.mkdir(parents=True, exist_ok=True)
+    headless.ensure()
+    if "DISPLAY" not in os.environ:
+        sys.exit("no headless display")
+    res = {}
+    for app in sys.argv[1:]:
+        res[app] = run(app)
+        print(f"{app}: {'ok' if res[app]['ok'] else 'FAIL ' + res[app]['why']}", flush=True)
+    (ROOT / "build/g53/bare.json").write_text(json.dumps(res, indent=1))
+    headless.stop()
+    sys.exit(0 if all(r["ok"] for r in res.values()) else 1)
+
+
+if __name__ == "__main__":
+    main()

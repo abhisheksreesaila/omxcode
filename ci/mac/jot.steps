@@ -1,0 +1,2 @@
+# limit 60
+tap:New;wait:1500;tap:New;wait:12000

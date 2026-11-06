@@ -4,6 +4,16 @@
 import html, pathlib
 
 GH = "https://github.com/abhisheksreesaila/omxcode/tree/main/"
+REL = "https://github.com/abhisheksreesaila/omxcode/releases/download/"
+# goal 53 (owner, 2026-11-05: "it goes into the galleries so you have to provide a link"; no web version): every card in
+# the grid links its downloads, each one run before it's listed (Linux: unpacked and started with no Mojo or pixi,
+# scripts/bare_run.py; Mac: on GitHub's Mac runners, scripts/mac-ci). An app with no download waits under Coming next.
+GET = {"Linux": ("gallery-apps", "{app}-linux-x86_64.tar.gz"), "Mac": ("gallery-apps", "{app}-mac-arm64.zip")}
+
+
+def download_url(app, plat):
+    tag, name = GET[plat]
+    return REL + tag + "/" + name.format(app=app)
 
 STAR = dict(
     name="omxplorer", kind="The product · data explorer",
@@ -13,55 +23,50 @@ STAR = dict(
            ("img/robots-fleet.jpg", "63,344 episodes as one sheet"),
            ("img/robots-by-lab.jpg", "Success by lab, from the chart's sentence"),
            ("img/robots-ask.jpg", "Asked in words: 2,997 regrasped failures, the DROID paper linked")],
-    src="examples/omxplorer", page="../omxplorer.html", cta="See omxplorer")
+    src="examples/omxplorer", page="../omxplorer.html", cta="See omxplorer",
+    get=[("Linux", REL + "linux-app/omxplorer-linux-x86_64.tar.gz", "x86_64 · GTK 4"),
+         ("Mac", REL + "mac-app/omxplorer-mac-gpu.zip", "Apple Silicon · macOS 26")])
 
 # omxconsole comes back when it's Mojo end to end (its engine is Python today; owner, 2026-11-02)
 
 APPS = [
-    dict(name="Agent chat", kind="Agents build screens · AG-UI",
-         line="Ask for a map, get a map: an AG-UI agent answers with screens from 38 components, drawn natively while it streams.",
-         proves="Standard AG-UI, checked against the official SDK; or the agent in the app's own process",
-         runs=[("Linux", "ok"), ("Web", "ok")], next="A live model, A2UI, the Mac",
-         shots=[("img/agents-trip.png", "A day in Lisbon: a map, a timeline, the weather"), ("img/agents-dashboard.png", "A dashboard of forty components"),
-                ("img/agents-approval.png", "A refund that waits for Approve")], src="examples/agentchat"),
-    dict(name="Dictate", kind="Speech to text",
-         line="Talk, and words appear. Whisper runs on the GPU inside the app's own process: no file, no socket, no server.",
-         proves="Final text 134 ms after the audio went in (median)", runs=[("Linux", "ok")],
-         next="The Mac, then phones", shots=[("img/dictate-gtk.png", "Linux: five sentences, each timed")], src="examples/dictate"),
-    dict(name="Sketch", kind="Drawing",
+    dict(name="Sketch", app="sketch", kind="Drawing",
          line="Pressure ink with pan and zoom. Strokes taper with the pen; panning moves the kept ink, never redraws it.",
-         proves="1,000 strokes, 3 ms per frame while panning (p95)", runs=[("Linux", "ok"), ("Web", "ok")],
-         next="Tried with a real pen; the Mac", shots=[("img/sketch-gtk.png", "Linux"), ("img/sketch-web.png", "Web")], src="examples/sketch"),
-    dict(name="Jot", kind="Notes in a database",
+         runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"],
+         shots=[("img/sketch-gtk.png", "Linux")], src="examples/sketch"),
+    dict(name="Jot", app="jot", kind="Notes in a database",
          line="Notes in a SQLite file, searched as you type, still there tomorrow. Quit mid-sentence and the words are saved.",
-         proves="Search over 1M notes 2.6× faster than SQLite in the browser", runs=[("Linux", "ok"), ("Web", "ok")],
-         next="The Mac's save dialog and file drop", shots=[("img/jot-gtk.png", "Linux"), ("img/jot-web.png", "Web")], src="examples/jot"),
-    dict(name="Keeper", kind="Works when closed",
+         runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"],
+         shots=[("img/jot-gtk.png", "Linux")], src="examples/jot"),
+    dict(name="Keeper", app="keeper", kind="Works when closed",
          line="Keeps a folder searchable with its window shut: a tray item, notifications, and a watcher on its own thread.",
-         proves="New files searchable 2.5 ms after they're written, window closed", runs=[("Linux", "ok")],
-         next="The Mac's menu bar", shots=[("img/keeper-gtk.png", "Linux: found with the window closed")], src="examples/keeper"),
-    dict(name="JS widgets", kind="Bring your libraries",
-         line="CodeMirror and ECharts from npm, inside a native app, restyled live by the theme. Agents can read and set them.",
-         proves="0 content-policy violations; one mount per widget across rebuilds", runs=[("Linux", "ok"), ("Web", "ok")],
-         next="JS canvases: Excalidraw-style editors", shots=[("img/widgets-web-dark.png", "Web, dark"), ("img/widgets-gtk-dark.png", "Linux, dark")],
-         src="examples/widgets"),
-    dict(name="Data Lens", kind="20 million points",
+         # (Mac: its FSEvents watcher fails to start on GitHub's Macs and there's no menu-bar item yet, so it
+         # doesn't keep working when closed there; goal 45's Mac half, unfinished)
+         runs=[("Linux", "ok"), ("Mac", "soon")], get=["Linux"],
+         shots=[("img/keeper-gtk.png", "Linux: found with the window closed")], src="examples/keeper"),
+    dict(name="Data Lens", app="lens", kind="20 million points",
          line="A canvas the app paints itself, around native controls: how map and photo apps are built.",
-         proves="20M points per 1080p frame in 1.5 ms on the GPU", runs=[("Linux", "ok"), ("Web", "ok"), ("Android", "emu")],
-         next="Apple's GPU", shots=[("img/lens-linux.jpg", "Linux, 59 fps"), ("img/lens-web.jpg", "Web, streamed"),
-                                    ("img/android-lens.jpg", "Android (CPU)")], src="examples/lens"),
-    dict(name="Native controls", kind="Every platform's own widgets",
-         line="Mojo drives GTK, AppKit, UIKit and Android views directly: no Swift, no Kotlin, the platform's own keyboard and screen reader.",
-         proves="The same taps on Android and Linux end in the same state", runs=[("Linux", "ok"), ("Android", "emu"), ("iPhone", "builds")],
-         next="Real phones", shots=[("img/android-todo.png", "Android"), ("img/android-gallery.png", "Android: the component gallery")],
+         runs=[("Linux", "ok"), ("Mac", "ci"), ("Android", "emu")], get=["Linux", "Mac"],
+         shots=[("img/lens-linux.jpg", "Linux, 59 fps"), ("img/android-lens.jpg", "Android (CPU)")], src="examples/lens"),
+    dict(name="Native controls", app="todo", kind="Every platform's own widgets",
+         line="A to-do list in GTK, AppKit, UIKit and Android's own controls, driven by Mojo: no Swift, no Kotlin.",
+         # (Mac: runs on GitHub's Macs, but the title wraps a letter short ("Tod / o"): its download after that fix)
+         runs=[("Linux", "ok"), ("Mac", "soon"), ("Android", "emu"), ("iPhone", "builds")], get=["Linux"],
+         shots=[("img/android-todo.png", "Android"), ("img/android-gallery.png", "Android: the component gallery")],
          src="examples/todo"),
+    dict(name="JS widgets", app="widgets", kind="Bring your libraries",
+         line="A native Mojo app with CodeMirror and ECharts inside, restyled live by the theme. Every line of state is Mojo.",
+         runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"], needs="Linux: needs WebKitGTK 6.0",
+         shots=[("img/widgets-gtk-dark.png", "Linux, dark"), ("img/widgets-gtk-light.png", "Linux, light")],
+         src="examples/widgets"),
 ]
 
-SOON = [("Ask your data", "Type a question; a model writes the chart and the query; the GPU runs it; omxcode draws it."),
-        ("A JS canvas editor", "An Excalidraw-style editor as a widget on the web and in a native web view, the page logic in Mojo."),
-        ("The web on WebGPU", "The same app in a browser with the work on the visitor's GPU.")]
+# no web builds in the showcase (owner, 2026-11-05); these come into the grid once they have a download
+SOON = [("Agent chat", "Ask for a map, get a map: an agent answers with native screens. A download once it carries its agent inside."),
+        ("Dictate", "Talk, and words appear, Whisper on the GPU in the app's own process. A download once the model ships with it."),
+        ("Ask your data", "Type a question; a model writes the chart and the query; the GPU runs it; omxcode draws it.")]
 
-RUN = {"ok": ("runs", "ok"), "ci": ("runs on CI Macs", "ok"), "emu": ("emulator", "am"), "builds": ("builds", "bl")}
+RUN = {"soon": ("coming", "am"), "ok": ("runs", "ok"), "ci": ("runs on CI Macs", "ok"), "emu": ("emulator", "am"), "builds": ("builds", "bl")}
 e = html.escape
 
 
@@ -77,6 +82,14 @@ def thumbs(shots):
         f'<img src="{e(s)}" alt="" loading="lazy"></button>' for i, (s, c) in enumerate(shots)) + "</div>"
 
 
+def gets(a):
+    """The card's download buttons: (platform, url, note) for the star, platform names for the rest."""
+    items = [(g, download_url(a["app"], g), "") if isinstance(g, str) else g for g in a["get"]]
+    return '<div class="get">' + "".join(
+        f'<a class="dl" href="{e(u)}" download><b>Download for {e(pl)}</b>{f"<span>{e(n)}</span>" if n else ""}</a>'
+        for pl, u, n in items) + "</div>"
+
+
 def card(a):
     s0, c0 = a["shots"][0]
     return f'''<article class="card">
@@ -86,6 +99,8 @@ def card(a):
     <h3>{e(a["name"])}</h3>
     <p class="line">{e(a["line"])}</p>
     <div class="plats">{chips(a["runs"])}</div>
+    {gets(a)}{f'<p class="needs">{e(a["needs"])}</p>' if a.get("needs") else ""}
+    <a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a>
   </div>
 </article>'''
 
@@ -104,7 +119,7 @@ def star(a):
         pic = f'<img src="{e(s0)}" alt="{e(a["name"])}: {e(c0)}"><figcaption>{e(c0)}</figcaption>'
     # an introduction only: the app's own page carries the details and the downloads (owner, 2026-11-02)
     src = "" if a["page"] == GH + a["src"] else f'<a class="src" href="{GH}{a["src"]}">{e(a["src"])}</a>'
-    links = f'<div class="links"><a class="cta" href="{a["page"]}">{e(a["cta"])}</a>{src}</div>'
+    links = gets(a) + f'<div class="links"><a class="cta" href="{a["page"]}">{e(a["cta"])}</a>{src}</div>'
     return f'''<article class="card star" id="{e(a["name"])}">
   <div class="media">
     <figure class="pic">{pic}</figure>
@@ -124,7 +139,7 @@ PAGE = '''<!doctype html>
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>omxcode · gallery</title>
-<meta name="description" content="What omxcode builds today: omxplorer and ten apps, each with a picture, what it proves, where it runs and what's next.">
+<meta name="description" content="What omxcode builds today: omxplorer and the apps built with omxcode, each with a picture, where it runs and its Linux and Mac downloads.">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="../img/logo.svg" type="image/svg+xml">
 <!-- generated by scripts/gallery_page.py; edit it there -->
@@ -162,7 +177,12 @@ section { padding: 64px 24px 96px; }
 .plats span { display: inline-flex; align-items: center; gap: 6px; font: 500 12px var(--mono); color: var(--ink2); padding: 4px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); }
 .plats b { color: var(--ink); font-weight: 600; font-family: var(--sans); }
 .plats i { width: 7px; height: 7px; border-radius: 50%; background: var(--oq-ok); } .plats .bl i { background: var(--oq-info); } .plats .am i { background: var(--soon); }
-.src { margin-top: auto; font: 12px var(--mono); color: var(--ink2); text-decoration: none; } .src:hover { color: var(--ink); text-decoration: underline; }
+.get { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.dl { display: inline-flex; flex-direction: column; gap: 1px; padding: 8px 14px; border-radius: 12px; text-decoration: none; color: var(--ink); background: rgb(var(--oq-state) / .06); box-shadow: inset 0 0 0 1px var(--line); transition: background .15s; }
+.dl:hover { background: rgb(var(--oq-state) / .12); } .dl b { font: 600 13.5px var(--sans); } .dl b::before { content: "↓ "; color: var(--word); }
+.dl span { font: 11.5px var(--mono); color: var(--ink2); }
+.needs { margin: 0; font: 12px var(--mono); color: var(--ink2); }
+.src { font: 12px var(--mono); color: var(--ink2); text-decoration: none; } .src:hover { color: var(--ink); text-decoration: underline; }
 .src::before { content: "↳ "; opacity: .6; }
 .star { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); box-shadow: 0 0 0 1px color-mix(in srgb, var(--word) 45%, var(--line)), var(--oq-shadow-2); }
 .star .media { display: flex; flex-direction: column; padding-bottom: 14px; min-width: 0; }
@@ -172,7 +192,7 @@ section { padding: 64px 24px 96px; }
 .star .line { font-size: 17px; color: var(--ink); }
 .links { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: auto; } .links .src { margin-top: 0; }
 .more2 { margin-top: 64px; } .sub { margin: 10px 0 0; color: var(--ink2); font-size: 16px; max-width: 640px; }
-.photos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+.photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
 .mini .pic { aspect-ratio: 4 / 3; } .mini .info { padding: 14px 16px 16px; gap: 6px; } .mini h3 { font-size: 18px; }
 .mini .line { font-size: 14px; } .mini .kind { font-size: 10.5px; }
 .card.star + .card.star { margin-top: 0; }
@@ -201,14 +221,14 @@ footer a { color: var(--ink2); }
   <div class="head">
     <div class="eyebrow">Gallery</div>
     <h1>omxplorer, and what else it builds.</h1>
-    <p class="lede">omxplorer is the product; its page has the downloads. The rest are smaller apps, each one Mojo codebase, that show what the framework can do.</p>
+    <p class="lede">omxplorer is the product. The rest are smaller apps, each one Mojo codebase, that show what the framework can do. Every one downloads for Linux; most for the Mac too.</p>
   </div>
   <div class="grid">
 STAR_CARD
   </div>
   <div class="more2">
     <div class="eyebrow">More, built from the same parts</div>
-    <p class="sub">Smaller apps that show it can be done: speech, ink, a database, a background app, JavaScript libraries, a GPU canvas, phone controls.</p>
+    <p class="sub">Ink, a database, a background app, a GPU canvas, every platform's own controls, JavaScript libraries as guests. Native apps, no web builds.</p>
     <div class="photos">
 CARDS
     </div>
@@ -219,7 +239,7 @@ CARDS
   </div>
 </div></section>
 </main>
-<footer><div class="wrap">Numbers from scripts on one Linux machine with an RTX 3090; Mac results from GitHub's macOS runners. "Runs" means a script drives the app there today. <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/benchmarks.md">How we measured</a> · <a href="../">Back to omxcode</a></div></footer>
+<footer><div class="wrap">Numbers from scripts on one Linux machine with an RTX 3090; Mac results from GitHub's macOS runners. "Runs" means a script drives the app there today. Downloads are pre-releases: the Mac apps aren't notarised yet (if macOS refuses one, run <code>xattr -dr com.apple.quarantine</code> on it). <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/benchmarks.md">How we measured</a> · <a href="../">Back to omxcode</a></div></footer>
 <script>
 document.querySelectorAll(".card").forEach(card => {
   const pic = card.querySelector(".pic"), img = pic.querySelector("img"), vid = pic.querySelector("video"), cap = pic.querySelector("figcaption");

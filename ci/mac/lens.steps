@@ -1,0 +1,2 @@
+# limit 90
+wait:12000;segment:0=Taxi;wait:4000
