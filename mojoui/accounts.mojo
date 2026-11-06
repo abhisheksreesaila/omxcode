@@ -500,6 +500,14 @@ struct Accounts(Copyable, Movable):
         var uid: Int
         db.begin()
         try:
+            var again = db.prepare("SELECT id FROM users WHERE email = ?")  # (under the writer lock: two first sign-ins at once)
+            again.bind(1, email)
+            if again.step():
+                uid = again.int(0)
+                again.reset()
+                db.commit()
+                return (uid, self.home_tenant(uid))
+            again.reset()
             var ins = db.prepare("INSERT INTO users(email, name, sub, created, last_tenant) VALUES (?, ?, ?, ?, ?)")
             ins.bind(1, email)
             ins.bind(2, name)

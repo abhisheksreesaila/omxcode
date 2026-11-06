@@ -962,7 +962,7 @@ def m10():
             slower.append(f"{f} {o['rps']:.0f} vs {b['rps']:.0f} req/s")
     if slower:
         return False, "omxcode isn't faster at 64 clients: " + "; ".join(slower)
-    worst = min(res["flows"][f]["omxcode"]["c64"]["rps"] / res["flows"][f]["fhsaas"]["c64"]["rps"] for f in FLOWS)
+    worst = min(res["flows"][f]["omxcode"]["c64"]["rps"] / max(res["flows"][f]["fhsaas"]["c64"]["rps"], 1e-9) for f in FLOWS)
     return True, f"faster than fh-saas on p50, p99 and req/s for {', '.join(FLOWS)} at 64 clients (the closest: {worst:.1f}x the throughput); docs/goals/60-bench.md"
 
 
