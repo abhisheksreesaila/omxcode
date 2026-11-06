@@ -2,7 +2,9 @@
 
 fh-saas (Python, FastHTML) is being phased out; its jobs move into Mojo modules on `mojoui.serve` (Flare). This page maps
 each fh-saas module to the mojoui piece that does its job now, honestly: ✅ done and checked, 🟡 part of it, ❌ not yet.
-Checked means `docs/goals/57-check.py` (against its Google and Stripe stand-ins) or a module test ran it on Linux.
+Checked means `docs/goals/57-check.py` (against its Google and Stripe stand-ins) or a module test ran it, on Linux and on a
+Mac (M8). Against the real Google and Stripe it is proved only once the owner's keys exist (M5 is BLOCKED until then):
+`email_verified` and the redirect URI are checked against the stand-in, not yet against Google.
 
 The demo: `examples/saas/server.mojo` (the server, routes only) and `examples/saas/app.mojo` (a native GTK client).
 
@@ -28,6 +30,18 @@ The demo: `examples/saas/server.mojo` (the server, routes only) and `examples/sa
   expiring values), PKCE: plain Mojo on `mojoui.hash` so every host has it (D-5709).
 - `mojoui.browser`: open a page in the system browser as an effect (`App.opens`), GTK and AppKit (D-5718).
 - `mojoui.signin`: the desktop half of sign-in: a loopback listener (libc sockets) and the PKCE verifier (D-5720).
+
+## Known limits (read before real users)
+- Every request is answered under one lock (`mojoui.serve`), and the Google and Stripe calls run inside it (D-5714): a
+  slow provider stalls everyone for up to 20–30 s. Bodies are capped (64 KB; the webhook 1 MB) and `/billing/return`
+  makes at most 30 Stripe read-backs a minute (D-5727); there is no per-IP rate limit on `/login` or `/api/token` yet.
+- Invites join a person who hasn't signed in yet, on their first sign-in, without asking (D-5725): an admin of any tenant
+  can pre-invite an address. An accept page is the fix.
+- A desktop sign-in's one-time code shows in the browser's address bar for up to 60 s (RFC 8252's known phishing risk);
+  a "sign in to the desktop app?" confirm page is the fix.
+- `GET /logout` still works (the contract's), so a page elsewhere can sign someone out; the app itself signs out by POST.
+- Plans follow Stripe's events; a paid session counts only in subscription mode with a subscription (not a Payment
+  Link's one-off payment), and a deleted subscription is final (a late `updated` event can't revive it).
 
 ## Running it
 ```

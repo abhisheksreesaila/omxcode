@@ -205,8 +205,12 @@ finish() {
 run_wizard() {
 
 TOTAL_STAGES=6
-mkdir -p "$HOME/.config/omxcode"
+mkdir -p -m 700 "$HOME/.config/omxcode"
 ENV_FILE="$HOME/.config/omxcode/saas.env"
+[ -e "$ENV_FILE" ] && chmod 600 "$ENV_FILE"  # (an older file keeps its mode under write_env: make it private first)
+stripe() {  # stripe <path> <form args…>: Stripe's API with the key on stdin, never on the command line
+  printf 'user = "%s:"\n' "$STRIPE_SECRET_KEY" | curl -fsS -K - "https://api.stripe.com$1" "${@:2}"
+}
 
 banner "omxcode SaaS: Google sign-in + Stripe test keys"
 
@@ -258,10 +262,10 @@ current=$(_existing STRIPE_PRICE_PRO || true)
 if [[ -n "$current" ]] && ! confirm "A Pro price is saved already. Make a new one?"; then
   note "keeping the saved price"
 elif confirm "Create it for you now through Stripe's API (product \"omxcode Pro\", \$9.00 a month, test mode)?"; then
-  product=$(curl -fsS https://api.stripe.com/v1/products -u "$STRIPE_SECRET_KEY:" -d name="omxcode Pro" | grep -o '"id": *"prod_[A-Za-z0-9]*"' | head -1 | grep -o 'prod_[A-Za-z0-9]*') || product=""
+  product=$(stripe /v1/products -d name="omxcode Pro" | grep -o '"id": *"prod_[A-Za-z0-9]*"' | head -1 | grep -o 'prod_[A-Za-z0-9]*') || product=""
   price=""
   if [[ -n "$product" ]]; then
-    price=$(curl -fsS https://api.stripe.com/v1/prices -u "$STRIPE_SECRET_KEY:" -d product="$product" -d unit_amount=900 -d currency=usd -d "recurring[interval]=month" | grep -o '"id": *"price_[A-Za-z0-9]*"' | head -1 | grep -o 'price_[A-Za-z0-9]*') || price=""
+    price=$(stripe /v1/prices -d product="$product" -d unit_amount=900 -d currency=usd -d "recurring[interval]=month" | grep -o '"id": *"price_[A-Za-z0-9]*"' | head -1 | grep -o 'price_[A-Za-z0-9]*') || price=""
   fi
   if [[ -n "$price" ]]; then
     write_env STRIPE_PRICE_PRO "$price"
@@ -290,6 +294,7 @@ fi
 note "Then sign in with Google once by hand: scripts/saas.sh run, and the app (scripts/build.sh saas linux;"
 note "SAAS_SERVER=http://127.0.0.1:8000 build/saas/linux/saas) → Sign in with Google."
 
+chmod 600 "$ENV_FILE"
 finish
 }
 

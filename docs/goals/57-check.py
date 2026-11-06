@@ -467,7 +467,7 @@ def m4():
         r = run([str(APP)], 600, {"MOJOUI_TEST": steps, "MOJOUI_OPENER": str(opener), "SAAS_SERVER": srv.base, "MOJOUI_SHOT": str(shot), "MOJOUI_WINDOW": "900x700"})
         out = r.stdout + r.stderr
         (OUT / "m4.out").write_text(out)
-        for want in ("Signed in as ada@example.com", "Pro"):
+        for want in ("Signed in as ada@example.com", "Plan: Pro"):
             if not re.search(rf"^LABEL:? .*{re.escape(want)}", out, re.M):
                 return False, f"no label `{want}` (build/g57/m4.out; browser saw {seen})"
         tenants = list((srv.data / "tenants").glob("*.db"))

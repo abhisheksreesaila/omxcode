@@ -23,6 +23,7 @@ from mojoui.crypto import hmac_sha256, same
 from mojoui.hash import hex
 from mojoui.accounts import Accounts, Member, form, now_s
 
+comptime RETURNS_PER_MINUTE = 30  # /billing/return's Stripe read-backs, for the whole server (anyone may call it; D-5727)
 comptime TOLERANCE_S = 300  # Stripe's default: a signature older (or newer) than this is refused
 
 
@@ -91,6 +92,8 @@ def _id_ok(s: String, prefix: String) -> Bool:
 struct Billing(Movable):
     var db: Database
     var cfg: BillingConfig
+    var window_start: Int  # (the read-back budget's minute and what it has spent)
+    var window_used: Int
 
     def __init__(out self, data_dir: String, var cfg: BillingConfig) raises:
         if not exists(data_dir):
@@ -99,6 +102,8 @@ struct Billing(Movable):
         self.db.exec("PRAGMA journal_mode=WAL")
         self.db.exec("CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, type TEXT, tenant TEXT, at INTEGER)")
         self.cfg = cfg^
+        self.window_start = 0
+        self.window_used = 0
 
     def handle(mut self, mut req: Req, mut acc: Accounts) -> Reply:
         """Answers /billing/*; any other request: a Reply with status 0."""
@@ -170,7 +175,9 @@ struct Billing(Movable):
         var tenant = j.text(j.get(s, "client_reference_id"))
         var paid = j.text(j.get(s, "payment_status"))
         var key = "session:" + j.text(j.get(s, "id"))
-        if tenant == "" or (paid != "paid" and paid != "no_payment_required") or self._seen(id) or self._seen(key):
+        # (a subscription this server sold: not a Payment Link's one-off payment that carries someone's tenant id)
+        var sold = j.text(j.get(s, "mode")) == "subscription" and j.text(j.get(s, "subscription")) != "" and j.text(j.get(s, "status")) == "complete"
+        if tenant == "" or not sold or (paid != "paid" and paid != "no_payment_required") or self._seen(id) or self._seen(key):
             return False
         if not acc.set_plan(tenant, "pro", j.text(j.get(s, "customer")), j.text(j.get(s, "subscription"))):
             return False
@@ -192,10 +199,15 @@ struct Billing(Movable):
             return Reply.json('{"received": true, "duplicate": true}')
         if kind == "checkout.session.completed":
             _ = self._session_paid(id, j, obj, acc)
-        elif kind == "customer.subscription.deleted" or kind == "customer.subscription.updated":
+        elif kind == "customer.subscription.deleted":
+            var tenant = acc.end_subscription(j.text(j.get(obj, "id")))
+            if tenant != "":
+                _ = self._once(id, kind, tenant)
+                print(id + " applied: " + tenant + " is free", flush=True)
+        elif kind == "customer.subscription.updated":
             var tenant = acc.tenant_of_subscription(j.text(j.get(obj, "id")))
             var status = j.text(j.get(obj, "status"))
-            var plan = "pro" if kind == "customer.subscription.updated" and (status == "active" or status == "trialing") else "free"
+            var plan = "pro" if status == "active" or status == "trialing" else "free"
             if tenant != "" and acc.set_plan(tenant, plan):
                 _ = self._once(id, kind, tenant)
                 print(id + " applied: " + tenant + " is " + plan, flush=True)
@@ -208,6 +220,14 @@ struct Billing(Movable):
             return Reply.text("Checkout cancelled: nothing was charged.")
         if not _id_ok(sid, "cs_"):
             return Reply.error(400, "no checkout session", "bad_session")
+        if self._seen("session:" + sid):
+            return Reply.text("Thanks: your plan is Pro. You can close this page.")
+        if now_s() - self.window_start >= 60:
+            self.window_start = now_s()
+            self.window_used = 0
+        self.window_used += 1
+        if self.window_used > RETURNS_PER_MINUTE:
+            return Reply.error(429, "too many checks: try again in a minute", "rate_limited").header("Retry-After", "60")
         var r = self._stripe("GET", "/v1/checkout/sessions/" + sid)
         if r.status != 200:
             return Reply.error(502, "Stripe didn't confirm the session", "stripe_failed")

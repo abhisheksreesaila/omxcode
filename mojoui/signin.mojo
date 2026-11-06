@@ -15,7 +15,7 @@ from std.sys import CompilationTarget
 from std.memory.alloc import unsafe_alloc
 from mojoui import libc
 from mojoui.crypto import random_token, random_bytes, pkce_challenge, same
-from mojoui.http import Request, uri_component
+from mojoui.http import Request, uri_component, utf8_lossy
 from mojoui.json import json_string
 from mojoui.clock import now_ns
 
@@ -147,10 +147,10 @@ def _serve(p: libc.ThreadArg) -> libc.ThreadArg:
                 break
             for i in range(n):
                 got.append(buf[i])
-            if String(unsafe_from_utf8=Span(got)).find("\r\n\r\n") >= 0:
+            if utf8_lossy(got).find("\r\n\r\n") >= 0:  # (any local process may connect: bytes that aren't UTF-8 become U+FFFD)
                 break
         _ = len(buf)
-        var head = String(unsafe_from_utf8=Span(got))
+        var head = utf8_lossy(got)
         var line = String(head.split("\r\n")[0]) if head.byte_length() > 0 else String("")
         var parts = line.split(" ")
         var code = String("")
@@ -189,12 +189,19 @@ struct Loopback(Movable):
     var port: Int
 
     def __init__(out self, state: String, wait_ms: Int = 300_000) raises:
-        var fd = libc.socket(2, 1, 0)  # AF_INET, SOCK_STREAM
+        var seeds = random_bytes(80)  # (drawn first: nothing to clean up if the OS has no randomness)
+        var fd: Int
+        comptime if CompilationTarget.is_linux():
+            fd = libc.socket(2, 1 | 0o2000000, 0)  # AF_INET, SOCK_STREAM | SOCK_CLOEXEC: the browser we start doesn't inherit it
+        else:
+            fd = libc.socket(2, 1, 0)
+            if fd >= 0:
+                _ = libc.fcntl(fd, 2, 1)  # F_SETFD, FD_CLOEXEC
         if fd < 0:
             raise Error("no socket for the sign-in's loopback")
         var port = 0
-        for _ in range(40):  # a random port in the dynamic range (49152–65535); the system picks none we can read back
-            var r = random_bytes(2)
+        for k in range(40):  # a random port in the dynamic range (49152–65535); the system picks none we can read back
+            var r: List[UInt8] = [seeds[2 * k], seeds[2 * k + 1]]
             var p = 49152 + ((Int(r[0]) << 8) | Int(r[1])) % 16384
             var sa = _sockaddr(p)
             if libc.bind(fd, Int(sa.unsafe_ptr()), 16) == 0:
@@ -223,6 +230,7 @@ struct Loopback(Movable):
         if libc.pthread_create[_serve](self.addr, Int(tid.unsafe_ptr())) != 0:
             _ = libc.close(fd)
             (w + L_REFS)[] = 1
+            _release(self.addr)  # (frees the record: a raising __init__ never reaches __deinit__)
             raise Error("no thread for the sign-in's loopback")
         _ = libc.pthread_detach(tid[0])
         _ = len(tid)

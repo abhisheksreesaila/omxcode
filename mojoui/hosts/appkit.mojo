@@ -3635,8 +3635,8 @@ def on_test_step[A: App](target: Int, cmd: Int, number: Int) abi("C"):
         host[].probe_pending = False
         var mw = mac_at(host[].webviews)
         host[].report.note("JS: " + (mw[].core.probe_result if mw[].core.probe_done else String('"timed out"')))
-    if host[].wait_title != "":  # waitfor:Title=N: until a button titled Title is on the screen, N ms at most (GTK's step)
-        var found = find_node(host[], BUTTON, host[].wait_title, 0) >= 0
+    if host[].wait_title != "":  # waitfor:Title=N: until a button titled Title (or a text saying it) is on the screen, N ms at most (GTK's step)
+        var found = find_node(host[], BUTTON, host[].wait_title, 0) >= 0 or find_node(host[], TEXT, host[].wait_title, 0) >= 0
         if not found and Int(now_ns()) < host[].wait_until:
             _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), Float64(0.1))
             return

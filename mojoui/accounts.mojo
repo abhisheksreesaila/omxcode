@@ -14,7 +14,8 @@
 # /auth/callback refuses a state it didn't issue (or one used before, or older than 10 minutes), trades the code for a
 # token (client secret + verifier), reads the verified email, makes the user (and their tenant, admin, or joins the tenant
 # that invited them) and starts a session: a random id kept hashed in host.db, sent as a sealed HttpOnly SameSite=Lax
-# cookie (Secure on https). /logout deletes the session's row, so an old cookie stops working at once.
+# cookie (Secure on https). /logout deletes the session's row, so an old cookie stops working at once. The web flow's state
+# is bound to its browser by a short saas_state cookie; cookie-authenticated writes from another Origin are refused.
 # Desktop apps (RFC 8252): /login?client=desktop&redirect=<http://127.0.0.1:port/…>&challenge=<S256>&app_state=<s>: the
 # callback then sends the browser to the app's loopback with a one-time code (60 s), which the app trades at /api/token
 # for a bearer token with its own PKCE verifier. Only loopback IP redirects are taken: no open redirect.
@@ -32,6 +33,7 @@ from mojoui.hash import sha256_hex, hex
 from mojoui.clock import wall_seconds
 
 comptime COOKIE = "saas"
+comptime STATE_COOKIE = "saas_state"  # the web sign-in's state, bound to the browser that started it (D-5726)
 comptime SESSION_S = 7 * 24 * 3600
 comptime STATE_S = 600
 comptime CODE_S = 60
@@ -183,8 +185,8 @@ struct Accounts(Movable):
             "CREATE TABLE IF NOT EXISTS tenants(id TEXT PRIMARY KEY, name TEXT, plan TEXT NOT NULL DEFAULT 'free',"
             " customer TEXT, subscription TEXT, created INTEGER);"
             "CREATE TABLE IF NOT EXISTS members(user_id INTEGER PRIMARY KEY, tenant TEXT NOT NULL, role TEXT NOT NULL);"
-            "CREATE TABLE IF NOT EXISTS invites(email TEXT PRIMARY KEY, tenant TEXT NOT NULL, role TEXT NOT NULL,"
-            " by INTEGER, created INTEGER);"
+            "CREATE TABLE IF NOT EXISTS invites(email TEXT NOT NULL, tenant TEXT NOT NULL, role TEXT NOT NULL,"
+            " by INTEGER, created INTEGER, PRIMARY KEY(email, tenant));"
             "CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires INTEGER NOT NULL);"
             "CREATE TABLE IF NOT EXISTS oauth_states(id TEXT PRIMARY KEY, verifier TEXT NOT NULL, next TEXT,"
             " redirect TEXT, challenge TEXT, app_state TEXT, expires INTEGER NOT NULL);"
@@ -228,6 +230,8 @@ struct Accounts(Movable):
             token = String(auth[byte = 7 :])
         else:
             token = cookie(req, COOKIE)
+            if req.method != "GET" and req.method != "HEAD" and not _origin_ok(req, self.cfg.base):
+                return None  # (a browser's cross-site write with the cookie: refused on every route, D-5726)
         if token == "":
             return None
         var sid = unseal(self.key, token, now_s())
@@ -267,6 +271,16 @@ struct Accounts(Movable):
         q.run()
         return self.db.changes() > 0
 
+    def end_subscription(self, subscription: String) raises -> String:
+        """Billing's hook: the subscription ended: its tenant goes back to free and forgets it, so an `updated` event
+        that arrives late finds no tenant (Stripe doesn't order events). The tenant's id, or "" when none had it."""
+        var tenant = self.tenant_of_subscription(subscription)
+        if tenant != "":
+            var q = self.db.prepare("UPDATE tenants SET plan = 'free', subscription = NULL WHERE id = ?")
+            q.bind(1, tenant)
+            q.run()
+        return tenant
+
     def tenant_of_subscription(self, subscription: String) raises -> String:
         var q = self.db.prepare("SELECT id FROM tenants WHERE subscription = ?")
         q.bind(1, subscription)
@@ -302,7 +316,7 @@ struct Accounts(Movable):
             ins.bind(4, now_s())
             ins.run()
             var uid = self.db.last_id()
-            var inv = self.db.prepare("SELECT tenant, role FROM invites WHERE email = ?")
+            var inv = self.db.prepare("SELECT tenant, role FROM invites WHERE email = ? ORDER BY created, rowid LIMIT 1")
             inv.bind(1, email)
             var tenant: String
             var role: String
@@ -354,9 +368,10 @@ struct Accounts(Movable):
             nxt = "/"
         var state = random_token(32)
         var verifier = random_token(32)
-        var old = self.db.prepare("DELETE FROM oauth_states WHERE expires < ?")
-        old.bind(1, now_s())
-        old.run()
+        for table in ["oauth_states", "desktop_codes", "sessions"]:  # (what has expired goes; D-5727)
+            var old = self.db.prepare("DELETE FROM " + table + " WHERE expires < ?")
+            old.bind(1, now_s())
+            old.run()
         var q = self.db.prepare("INSERT INTO oauth_states(id, verifier, next, redirect, challenge, app_state, expires) VALUES (?, ?, ?, ?, ?, ?, ?)")
         q.bind(1, sha256_hex(state))
         q.bind(2, verifier)
@@ -369,7 +384,11 @@ struct Accounts(Movable):
         var names: List[String] = ["response_type", "client_id", "redirect_uri", "scope", "state", "code_challenge", "code_challenge_method", "prompt"]
         var values: List[String] = ["code", self.cfg.client_id, self.cfg.callback(), "openid email profile", state, pkce_challenge(verifier), "S256", "select_account"]
         var sep = "&" if "?" in self.cfg.authorize_url else "?"
-        return Reply.empty(303).header("Location", self.cfg.authorize_url + sep + form(names, values)).header("Cache-Control", "no-store")
+        var r = Reply.empty(303).header("Location", self.cfg.authorize_url + sep + form(names, values)).header("Cache-Control", "no-store")
+        if redirect == "":  # (the web: the callback must come back to this browser; a desktop app checks its own state)
+            r = r^.header("Set-Cookie", STATE_COOKIE + "=" + state + "; Path=/auth/callback; HttpOnly; SameSite=Lax; Max-Age=" + String(STATE_S)
+                + ("; Secure" if self.cfg.base.startswith("https://") else ""))
+        return r^
 
     def _callback(mut self, req: Req) raises -> Reply:
         var state = req.arg("state")
@@ -386,6 +405,8 @@ struct Accounts(Movable):
         var redirect = q.text(2)
         var challenge = q.text(3)
         var app_state = q.text(4)
+        if redirect == "" and not same(cookie(req, STATE_COOKIE), state):
+            return Reply.error(400, "this sign-in was started in another browser: start again here", "bad_state")
         var gone = self.db.prepare("DELETE FROM oauth_states WHERE id = ?")  # (one use)
         gone.bind(1, sha256_hex(state))
         gone.run()
@@ -421,6 +442,7 @@ struct Accounts(Movable):
             var values: List[String] = [once, app_state]
             return Reply.text("Signed in: you can go back to the app.", 303).header("Location", redirect + sep + form(names, values)).header("Cache-Control", "no-store")
         var token = self.start_session(uid)
+        # (one Set-Cookie per reply in mojoui.serve: the state cookie is scoped to /auth/callback and expires in 10 minutes)
         return Reply.empty(303).header("Location", nxt if is_local_path(nxt) else "/").header("Set-Cookie", self.session_cookie(token)).header("Cache-Control", "no-store")
 
     def _token(mut self, req: Req) raises -> Reply:
@@ -476,7 +498,7 @@ struct Accounts(Movable):
             known = known or r == role
         if not known or "@" not in email or email.byte_length() > 254:
             return Reply.error(400, "an email and a role (admin, member, viewer)", "bad_request")
-        var q = self.db.prepare("INSERT OR REPLACE INTO invites(email, tenant, role, by, created) VALUES (?, ?, ?, ?, ?)")
+        var q = self.db.prepare("INSERT OR IGNORE INTO invites(email, tenant, role, by, created) VALUES (?, ?, ?, ?, ?)")  # (never replaces another tenant's, D-5725)
         q.bind(1, email)
         q.bind(2, m.value().tenant)
         q.bind(3, role)

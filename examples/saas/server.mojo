@@ -30,6 +30,12 @@ struct Saas(Service):
         pass
 
     def answer(mut self, mut req: Req) -> Reply:
+        var limit = 1_048_576 if req.path == "/billing/webhook" else 65_536  # (D-5727: before any work)
+        if req.body.byte_length() > limit:
+            return secure(Reply.error(413, "the request is too large", "too_large"))
+        return secure(self.route(req))
+
+    def route(mut self, mut req: Req) -> Reply:
         var r = self.acc.handle(req)
         if r.status != 0:
             return r^
@@ -68,8 +74,8 @@ struct Saas(Service):
             if not email.endswith("@example.com"):
                 return Reply.error(400, "test sessions are for @example.com", "bad_request")
             return Reply.json('{"cookie": ' + json_string(self.acc.test_session(email)) + "}")
-        except e:
-            return Reply.error(400, String(e), "bad_request")
+        except:
+            return Reply.error(400, "send {email}", "bad_request")
 
     def open(self, m: Member) raises -> Database:
         var db = self.acc.tenant_db(m)
@@ -105,6 +111,11 @@ struct Saas(Service):
         q.bind(4, Int(wall_seconds()))
         q.run()
         return Reply.json('{"ok": true}', 201)
+
+
+def secure(var r: Reply) -> Reply:
+    """Headers every reply carries: no type sniffing, never framed."""
+    return r^.header("X-Content-Type-Options", "nosniff").header("Content-Security-Policy", "frame-ancestors 'none'")
 
 
 def main() raises:

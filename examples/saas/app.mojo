@@ -29,7 +29,7 @@ comptime SIGN_OUT = 12
 comptime SIGNED_OUT = 13
 comptime WAIT_PLAN = 14  # a timer while checkout is out: has the plan changed?
 comptime MANAGE = 15
-comptime ENTRY = 1000  # ENTRY + k: entry k's row (k < 100_000)
+comptime UPGRADE_WAIT_MS = 600_000  # stop asking for the plan this long after checkout opened (an abandoned checkout)
 
 
 @fieldwise_init
@@ -44,6 +44,7 @@ def cents_of(text: String) -> Int:
     var whole = 0
     var frac = 0
     var frac_digits = 0
+    var digits = 0
     var dot = False
     if s.byte_length() == 0:
         return -1
@@ -51,6 +52,7 @@ def cents_of(text: String) -> Int:
         if b == 46 and not dot:
             dot = True
         elif b >= 48 and b <= 57:
+            digits += 1
             if dot:
                 if frac_digits == 2:
                     return -1
@@ -62,9 +64,16 @@ def cents_of(text: String) -> Int:
                     return -1
         else:
             return -1
+    if digits == 0:  # (".")
+        return -1
     if frac_digits == 1:
         frac *= 10
     return whole * 100 + frac
+
+
+def safe_server(url: String) -> Bool:
+    """https://, or http:// on this machine only (the bearer token goes to it)."""
+    return url.startswith("https://") or url.startswith("http://127.0.0.1:") or url.startswith("http://[::1]:") or url.startswith("http://localhost:")
 
 
 def money(cents: Int) -> String:
@@ -86,6 +95,7 @@ struct Main(App):
     var amount: String
     var entries: List[Entry]
     var upgrading: Bool
+    var upgrade_ticks: Int  # WAIT_PLAN ticks since checkout opened
     var status: String
 
     def __init__(out self):
@@ -101,7 +111,11 @@ struct Main(App):
         self.amount = ""
         self.entries = List[Entry]()
         self.upgrading = False
+        self.upgrade_ticks = 0
         self.status = ""
+        if not safe_server(self.server):
+            self.status = "SAAS_SERVER must be https:// (or http:// on 127.0.0.1): the sign-in token would travel in the clear."
+            self.server = ""
 
     def title(self) -> String:
         return "omxcode SaaS"
@@ -132,6 +146,8 @@ struct Main(App):
     def update(mut self, e: Event):
         var m = e.message
         if m == SIGN_IN:
+            if self.server == "":
+                return
             try:
                 var s = DesktopSignIn(self.server)
                 self.browser.open(s.url)
@@ -209,13 +225,19 @@ struct Main(App):
                 return
             self.browser.open(url)
             self.upgrading = True
+            self.upgrade_ticks = 0
             self.status = "Finish checkout in your browser…"
         elif m == WAIT_PLAN:
+            self.upgrade_ticks += 1
+            if self.upgrade_ticks * 1000 > UPGRADE_WAIT_MS:
+                self.upgrading = False
+                self.status = "Checkout wasn't finished: Upgrade again when you're ready."
+                return
             self.http.send(self.authed(Request.get(GOT_ME, self.server + "/api/me")))
         elif m == MANAGE:
             self.status = "Changing or cancelling the plan in Stripe's portal comes next."
         elif m == SIGN_OUT:
-            self.http.send(self.authed(Request.get(SIGNED_OUT, self.server + "/logout")))
+            self.http.send(self.authed(Request(SIGNED_OUT, "POST", self.server + "/logout")))
         elif m == SIGNED_OUT:
             self.signed_out("Signed out.")
 
@@ -250,7 +272,7 @@ struct Main(App):
         for k in range(len(self.entries)):
             ref en = self.entries[k]
             total += en.cents
-            rows.append(HStack(Button(en.text, on_tap=ENTRY + k).grow(), Text(money(en.cents)), spacing=8).fill())
+            rows.append(HStack(Text(en.text).grow(), Text(money(en.cents)), spacing=8).fill())
         if len(rows) == 0:
             rows.append(Text("No entries yet", style=CAPTION))
         var pro = self.plan == "pro"

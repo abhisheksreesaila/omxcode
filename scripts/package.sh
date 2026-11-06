@@ -59,7 +59,13 @@ if [[ "$WHAT" == "linux" ]]; then
 # The saas server on http://127.0.0.1:${SAAS_PORT:-8000}, its data in ~/.local/share/saas-data, keys from ~/.config/omxcode/saas.env.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-set -a; [ -f "$HOME/.config/omxcode/saas.env" ] && . "$HOME/.config/omxcode/saas.env"; set +a
+keys="$HOME/.config/omxcode/saas.env"
+if [ -f "$keys" ]; then  # (sourced as shell: only if it's ours and nobody else can read or write it)
+  mode=$(stat -c %a "$keys" 2>/dev/null || stat -f %Lp "$keys")
+  [ -O "$keys" ] && [ "$mode" = 600 ] || { echo "refusing $keys: make it yours with mode 600 (chmod 600)" >&2; exit 1; }
+  set -a; . "$keys"; set +a
+fi
+umask 077
 mkdir -p "$HOME/.local/share/saas-data"; chmod 700 "$HOME/.local/share/saas-data"
 secret="$HOME/.local/share/saas-data/secret"
 [ -s "$secret" ] || (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$secret")
