@@ -20,6 +20,19 @@ import headless  # noqa: E402
 import hashlib  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+# an app's own settings for the run (goal 55: omxconsole on a spare port and a throwaway home, with no MAX, so it never
+# finds or touches a service already running on this machine; its home then says MAX isn't installed)
+APP_ENV = {"omxconsole": lambda tmp: {"MXC_PORT": str(_free_port()), "MXC_HOME": tmp + "/mxc", "MXC_MAX": tmp + "/no-max"}}
+MUST_SAY = {"omxconsole": "CONSOLED UP"}
+
+
+def _free_port():
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
 OUT = ROOT / "build/g53/bare"
 WAIT_S = 6
 
@@ -46,6 +59,8 @@ def run(app):
         env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "XDG_RUNTIME_DIR": tmp}
         env.update({k: os.environ[k] for k in ("DISPLAY", "GDK_BACKEND", "GSK_RENDERER", "GDK_DISABLE", "GDK_SCALE",
                                                "XKB_CONFIG_ROOT") if k in os.environ})
+        if app in APP_ENV:
+            env.update(APP_ENV[app](tmp))
         log = open(OUT / f"{app}.log", "w")
         p = subprocess.Popen([str(here / app)], cwd=here, env=env, stdout=log, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL)
@@ -63,9 +78,11 @@ def run(app):
         n = colours(shot) if shot.exists() else 0
         text = (OUT / f"{app}.log").read_text()
         stand_ins = "show their stand-ins" in text
-        ok = alive and n > 16 and not stand_ins
+        said = MUST_SAY.get(app, "") in text
+        ok = alive and n > 16 and not stand_ins and said
         why = "" if ok else ("exited with " + str(p.returncode) if not alive else
-                             ("its web view didn't load (WebKitGTK 6.0: $WEBKITGTK_DIR)" if stand_ins else f"window looks empty ({n} colours)"))
+                             ("its web view didn't load (WebKitGTK 6.0: $WEBKITGTK_DIR)" if stand_ins else
+                              (f"no '{MUST_SAY.get(app)}' line" if not said else f"window looks empty ({n} colours)")))
         return {"ok": ok, "alive": alive, "colours": n, "stand_ins": stand_ins, "why": why,
                 "sha256": hashlib.sha256(tar.read_bytes()).hexdigest(),
                 "log_tail": (OUT / f"{app}.log").read_text()[-400:]}
