@@ -34,6 +34,7 @@ check(len(links) >= 12, f"{len(links)} download buttons in the gallery")
 rel = json.loads(subprocess.run(["gh", "release", "view", "gallery-apps", "-R", REPO, "--json", "assets,body"],
                                 capture_output=True, text=True).stdout or "{}")
 digests = {a["name"]: (a.get("digest") or "").removeprefix("sha256:") for a in rel.get("assets", [])}
+check(bool(rel.get("assets")) and bool(rel.get("body")), "M1 the gallery-apps release was read (gh release view)")  # (a failed call once read as "run none", goal 55)
 for url in links:
     try:
         req = urllib.request.Request(url, method="HEAD")
