@@ -41,7 +41,7 @@ def mojo_test(src, marker, timeout=1800):
 def m0():
     ok, out = mojo_test("tests/test_sentence.mojo", "SENTENCE TESTS PASSED")
     src = (ROOT / "mojoui/sheetpage.mojo").read_text()
-    sized = "sentence_lines(words, chars)" in src and "max(16, (obj.w - 130) // 8)" in src
+    sized = "sentence_lines(words, chars)" in src and "max(16, (obj.w - 130) // 8)" in src  # (wiring only: M1's Mac dumps prove the bar holds its lines)
     return ok and sized, ("sentence_lines = the lines drawn at widths 4–200; a chart's title bar follows its lines" if ok and sized
                           else f"test ok={ok}, sheetpage sized={sized}: {out}")
 
@@ -110,7 +110,7 @@ def m1():
     rep = newest_report()
     if rep is None or sources_newer(rep):
         r = run(["scripts/mac-ssh", "omxplorer", "docs/goals/56/mac.steps", str(FULL / "fleet.csv"), str(FULL / "limits.csv")], 1800,
-                env={"MAC_SETTINGS": "appearance=system"})
+                env={"MAC_SETTINGS": "appearance=system", "MAC_SSH": os.environ.get("MAC_SSH", "")})
         rep = newest_report()
         if r.returncode or rep is None:
             return False, "scripts/mac-ssh failed: " + (r.stdout + r.stderr)[-800:]
@@ -185,6 +185,13 @@ def m1():
         if board is None:
             return {}
         return {nodes[i][4]: nodes[i][5:9] for i in block(nodes, board) if nodes[i][0] == nodes[board][0] + 1 and nodes[i][4]}
+    cl = next((k for k, (t, _) in steps.items() if t == "tap:close-limits"), None)
+    if cl is None:
+        probs.append("no tap:close-limits step")
+    else:
+        b0, a0 = cards_at(cl - 1), cards_at(cl + 1)
+        if not (any(k.startswith("tablecard") for k in b0) and not any(k.startswith("tablecard") for k in a0) and len(a0) == len(b0) - 1):
+            probs.append(f"tap:close-limits didn't close the limits card: {sorted(b0)} → {sorted(a0)}")
     rz = next((k for k, (t, _) in steps.items() if t.startswith("resize:table=")), None)
     dc = next((k for k, (t, _) in steps.items() if t.startswith("dragcard:")), None)
     resized = swapped = None

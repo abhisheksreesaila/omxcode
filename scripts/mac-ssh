@@ -7,12 +7,12 @@
 # and its path is the last line printed. GitHub's runners (scripts/mac-ci) stay the check's Mac; this one has a real
 # screen, a real GPU and the owner's appearance (dark or light).
 # MAC_SETTINGS (e.g. "appearance=system"): the app's settings.txt lines, comma-separated, in a fresh OMX_CONFIG folder.
-# MAC_SSH (default bhoomijaprasad@100.76.9.101) and MAC_SSH_KEY (default ~/.ssh/edx_mac) name the Mac.
+# MAC_SSH (user@host, required) and MAC_SSH_KEY (default ~/.ssh/edx_mac) name the Mac.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 app=$1 steps_file=$2
 shift 2
-host=${MAC_SSH:-bhoomijaprasad@100.76.9.101}
+host=${MAC_SSH:?set MAC_SSH=user@host (the Mac to run on)}
 key=${MAC_SSH_KEY:-$HOME/.ssh/edx_mac}
 ssh_=(ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=10 "$host")
 remote=${MAC_SSH_DIR:-omxcode-g54}  # (the folder its pixi environment was made in: pixi environments can't move)
@@ -35,7 +35,8 @@ if ! MAC_GPU=metal:1 bash scripts/build.sh "$app" mac > build.txt 2>&1; then tai
 bundle=$(ls -d build/"$app"/mac/*.app | head -1)
 exe="$bundle/Contents/MacOS/$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleExecutable)"
 steps=${steps//\{data\}/$PWD/data}
-defaults write -g AppleShowScrollBars -string WhenScrolling
+# scroll bars as a trackpad shows them, for this app only (its own defaults domain: the Mac's own setting is left alone)
+defaults write "$(defaults read "$PWD/$bundle/Contents/Info.plist" CFBundleIdentifier)" AppleShowScrollBars -string WhenScrolling
 before=$(ls -td ~/Desktop/omxcode-report-*/*/ 2>/dev/null | head -1)
 config=$PWD/config-$(date +%s) && mkdir -p "$config"
 [ -z "$settings" ] || echo "$settings" | tr ',' '\n' > "$config/settings.txt"

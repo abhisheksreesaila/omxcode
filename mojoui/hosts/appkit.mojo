@@ -3662,8 +3662,7 @@ def run_step[A: App](host_addr: Int, step: String):
             var xy = split_at(kv[1], ",")
             dx = Float64(to_int(xy[0]))
             dy = Float64(to_int(xy[1]))
-        var d = host[].rt.gesture(board, ZOOM if verb == "resize" else PAN, Float64(index), 0, dx, dy, 1)
-        host[].apply(d, host_addr)
+        end_tiled_drag[A](host_addr, board, index, verb == "resize", dx, dy)  # (what tiled_pan does when a drag ends)
     elif verb == "resize":  # resize:900x700: the window's content size, as a drag of its edge ends
         var wh = split_at(rest, "x")
         host[].asked_w = to_int(wh[0])
@@ -3882,6 +3881,19 @@ def make_grip(w: Int, h: Int, color: UInt32, flipped: Bool) -> Int:
     return grip
 
 
+def end_tiled_drag[A: App](host_addr: Int, board: Int, index: Int, resized: Bool, dx: Float64, dy: Float64, view: Int = 0):
+    """A tiled card's drag ended (tiled_pan's Ended, and the resize:/dragcard: test steps): the app hears ZOOM (resized)
+    or PAN (moved) with the whole distance and its tiling decides; then the dragged view goes to the card's place as the
+    app now has it, so a drop on nothing or a clamped resize snaps back (GTK's snap-back, D-5411) instead of staying
+    where the pointer left it."""
+    var host = host_at[A](host_addr)
+    var d = host[].rt.gesture(board, ZOOM if resized else PAN, Float64(index), 0, dx, dy, 1)
+    host[].apply(d, host_addr)
+    if view != 0 and msg(view, "superview") != 0 and board < len(host[].rt.shown.nodes) and index < len(host[].rt.shown.nodes[board].children):
+        ref n = host[].rt.shown.nodes[host[].rt.shown.nodes[board].children[index]]
+        _ = msg(view, "setFrame:", Float64(n.x), Float64(n.y), Float64(n.w), Float64(n.h))
+
+
 def tiled_pan[A: App](child: Int, recognizer: Int, state: Int) -> Bool:
     """A card on a tiled Board (Board(clips=True)) dragged, as GTK's Board does it: from its corner it resizes, from its
     header it moves; the view follows the pointer and the app hears once, at the end (ZOOM resized, PAN moved), with
@@ -3920,10 +3932,9 @@ def tiled_pan[A: App](child: Int, recognizer: Int, state: Int) -> Bool:
         elif state == 2 and host[].pan_mode == 2:
             _ = msg(child, "setFrameSize:", max(f0.width + moved.x, Float64(60)), max(f0.height + moved.y, Float64(60)))
         elif state == 3 and host[].pan_mode > 0:  # ended: the app's tiling decides where everything goes
-            var kind = ZOOM if host[].pan_mode == 2 else PAN
+            var resized = host[].pan_mode == 2
             host[].pan_mode = 0
-            var d = host[].rt.gesture(board, kind, Float64(index), 0, moved.x, moved.y, 1)
-            host[].apply(d, host_addr)
+            end_tiled_drag[A](host_addr, board, index, resized, moved.x, moved.y, child)
         elif state >= 4:  # cancelled or failed: back where it was
             if host[].pan_mode > 0:
                 _ = msg(child, "setFrame:", f0.x, f0.y, f0.width, f0.height)

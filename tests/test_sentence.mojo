@@ -62,4 +62,13 @@ def main() raises:
     assert_equal(cut_lines, 2)
     assert_equal(sentence_lines(chart, 24), 2)
     assert_equal(sentence_text(chart), "every outcome, every row, as bars")
+    # a run with two commas cut at both; a trailing space-only run never adds an empty line
+    var two: List[Word] = [Word("a", 1, "a"), Word(", b, c "), Word("d", 2, "d"), Word("   ")]
+    for width in [1, 2, 3, 5, 8, 40]:
+        var v2 = Sentence(two, width=width)
+        var n2 = 0
+        for n in v2.nodes:
+            if n.kind == HSTACK:
+                n2 += 1
+        assert_equal(sentence_lines(two, width), n2, "two commas at " + String(width))
     print("SENTENCE TESTS PASSED")

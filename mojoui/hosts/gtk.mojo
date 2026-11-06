@@ -4990,7 +4990,7 @@ def on_board_motion[A: App](motion: Int, x: Float64, y: Float64, host_addr: Int)
         var h = Float64(Int(external_call["gtk_widget_get_height", c_int](b.widget)))
         var lx = x - Float64(n.x)
         var ly = y - Float64(n.y)
-        if 0.0 <= lx and lx < w and 0.0 <= ly and ly < h and n.kind != FIELD:
+        if 0.0 <= lx and lx < w and 0.0 <= ly and ly < h and n.kind != FIELD:  # (an in-place editor is typed in, never dragged: drag-begin's rule)
             cursor = String("nwse-resize") if lx > w - 24 and ly > h - 24 else (String("move") if ly < 44 else String(""))
         bi += 1
     var fixed = host[].boards[first].fixed
