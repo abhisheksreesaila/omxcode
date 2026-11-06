@@ -7,7 +7,7 @@ from std.os import getenv, listdir
 from std.time import perf_counter_ns
 from omxcore import Catalog
 from mojoui.models import ModelFunctions, pack_functions, frame_models, packs_dir
-from mojoui.imagemodel import ImageModel, top
+from mojoui.imagemodel import ImageModel, top, centre_square
 from mojoui.video import VideoSource
 from mojoui.videoscript import VideoFunctions
 from mojoui.script import run_script
@@ -23,6 +23,18 @@ def main() raises:
             scene = p.dir
     print(line)
     print("FRAME_MODELS: " + " ".join(frame_models()))
+    # parity with from_torch.py's centre_square: one fixed 37 × 23 RGBA picture, resized to 16 × 16 (the check compares)
+    var syn = List[UInt32](length=37 * 23, fill=0)
+    for y in range(23):
+        for x in range(37):
+            var r = UInt32((x * 7 + y * 13) % 256)
+            var g = UInt32((x * 29 + y * 3) % 256)
+            var b = UInt32((x * x + y) % 256)
+            syn[y * 37 + x] = r | (g << 8) | (b << 16) | (UInt32(255) << 24)
+    var par = String("PARITY:")
+    for v in centre_square(syn, 37, 23, 16):
+        par += " " + String(v)
+    print(par)
     if scene != "":
         var m = ImageModel(scene)
         var names = List[String]()

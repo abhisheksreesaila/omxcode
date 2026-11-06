@@ -687,6 +687,12 @@ def models(media, out):
         landed(mark)
         read(["apply_1"])
         exports.append(export())
+        # goal 59: a pack that describes itself (scripts/packs/from_torch.py: ResNet-18 as scene) is an agent tool too
+        if "apply-scene" in s.c.names():
+            mark = len(s.log)
+            call("apply-scene")
+            landed(mark)
+            read(["apply_2"])
         available = s.c.names()
     finally:
         s.close()

@@ -71,7 +71,7 @@ section .head { max-width: 860px; }
         <p><code>scripts/setup</code> does everything a newcomer used to do by hand:</p>
         <ul>
           <li><b>env:</b> Mojo, MAX and the tools, through <a href="https://pixi.sh">pixi</a>. A half-installed environment is cleaned and installed again on its own.</li>
-          <li><b>build:</b> omxplorer, the showcase app. The first build takes about five minutes.</li>
+          <li><b>build:</b> omxplorer, the showcase app. The first build takes a few minutes.</li>
           <li><b>data:</b> a slice of <a href="https://droid-dataset.github.io/">DROID</a>, real robot episodes (CC-BY-4.0), fetched from the Hugging Face Hub and cut into clips with their telemetry.</li>
           <li><b>packs:</b> the three models that come with omxcode, each built on your machine from its maker's weights.</li>
         </ul>
@@ -214,7 +214,7 @@ per_label = SELECT label, COUNT(*) AS frames FROM labels GROUP BY label;</pre>
 
 <footer>
   <div class="wrap">
-    <p class="note">Every command on this page was run on one Linux machine with an RTX 3090. The picture is omxplorer's real window, shot by its test mode.</p>
+    <p class="note">Every command and script on this page was run on one Linux machine with an RTX 3090, by <code>docs/goals/59-check.py</code>: setup from a fresh clone with empty download caches (with and without <code>--no-models</code>), the conversions, both script lines, Apply in the window and the agent's <code>apply-scene</code>. The picture is omxplorer's real window, shot by its test mode.</p>
     <div class="fine"><span>omxcode · public alpha · MIT licence · built in Mojo, 2026 · styled with <a href="https://abhisheksreesaila.github.io/omxqua/">omxqua</a></span><a href="index.html">← Back to omxcode</a></div>
   </div>
 </footer>

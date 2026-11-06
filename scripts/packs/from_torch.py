@@ -109,6 +109,10 @@ def trace(args):
                 weights[n.name + ".b"] = (m.bias.detach().double().numpy() if m.bias is not None else np.zeros(m.out_channels))
                 nodes.append({"name": n.name, "op": "conv", "args": [src], "k": list(m.kernel_size), "stride": list(m.stride), "pad": list(m.padding)})
             elif t == "BatchNorm2d":
+                if not m.track_running_stats or m.running_mean is None:
+                    stop(n, "BatchNorm2d without running statistics (track_running_stats=False)")
+                if not m.affine:  # (no learned scale and shift: 1 and 0)
+                    m.weight, m.bias = torch.nn.Parameter(torch.ones(m.num_features)), torch.nn.Parameter(torch.zeros(m.num_features))
                 scale = (m.weight.detach().double() / torch.sqrt(m.running_var.double() + m.eps)).numpy()
                 shift = (m.bias.detach().double() - m.running_mean.double() * torch.from_numpy(scale)).numpy()
                 prev = next((x for x in nodes if x["name"] == src), None)
@@ -131,12 +135,16 @@ def trace(args):
                 k, s, p = (v if isinstance(v, (tuple, list)) else (v, v) for v in (m.kernel_size, m.stride or m.kernel_size, m.padding))
                 if getattr(m, "ceil_mode", False) or getattr(m, "dilation", 1) not in (1, (1, 1)):
                     stop(n, f"{t} with ceil_mode or dilation")
+                if t == "AvgPool2d" and (not m.count_include_pad or m.divisor_override) and p != (0, 0):
+                    stop(n, "AvgPool2d with padding that isn't counted (count_include_pad=False) or a divisor_override")
                 nodes.append({"name": n.name, "op": "maxpool" if t == "MaxPool2d" else "avgpool", "args": [src], "k": list(k), "stride": list(s), "pad": list(p)})
             elif t == "AdaptiveAvgPool2d":
                 if m.output_size not in (1, (1, 1)):
                     stop(n, f"AdaptiveAvgPool2d({m.output_size})")
                 nodes.append({"name": n.name, "op": "gap", "args": [src]})
             elif t == "Flatten":
+                if m.start_dim != 1 or m.end_dim != -1:
+                    stop(n, f"Flatten(start_dim={m.start_dim}, end_dim={m.end_dim})")
                 nodes.append({"name": n.name, "op": "flatten", "args": [src]})
             else:
                 stop(n, t)
@@ -150,6 +158,8 @@ def trace(args):
             elif f in ("relu", "relu_", "sigmoid", "tanh", "silu", "gelu", "hardswish"):
                 nodes.append({"name": n.name, "op": f.rstrip("_"), "args": a[:1]})
             elif f == "flatten":
+                if (a[1] if len(a) > 1 else n.kwargs.get("start_dim", 0)) != 1 or (a[2] if len(a) > 2 else n.kwargs.get("end_dim", -1)) != -1:
+                    stop(n, f"flatten{tuple(a)} (only from dimension 1 on converts)")
                 nodes.append({"name": n.name, "op": "flatten", "args": a[:1]})
             elif f == "cat" and n.kwargs.get("dim", a[1] if len(a) > 1 else 0) == 1:
                 nodes.append({"name": n.name, "op": "cat", "args": list(a[0])})
@@ -160,6 +170,8 @@ def trace(args):
         else:
             stop(n, f"{n.op} {n.target}")
     # references: the test pictures as the app will see them, and torch's outputs
+    if not PICTURES:
+        raise SystemExit("from_torch: no test pictures in tests/fixtures/vision (*.jpg): the check needs them")
     size, mean, std = args.size, np.array(args.mean), np.array(args.std)
     ins = np.stack([centre_square(np.asarray(Image.open(p).convert("RGB")), size) for p in PICTURES])
     x = torch.from_numpy(((ins / 255.0 - mean) / std).transpose(0, 3, 1, 2).astype(np.float32))

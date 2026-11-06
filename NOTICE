@@ -6,13 +6,20 @@ installed by pixi, under the Modular Community License; their source-published p
 standard library) under the Apache License 2.0 with LLVM Exceptions. scripts/packs/bert_graph.py is a copy of MAX's
 max/pipelines/architectures/bert/graph.py (Apache 2.0 with LLVM Exceptions; its header kept).
 
-Models a pack is built from (scripts/packs/*.py download them; the packs are not in this repository):
-- YOLOX-Tiny, Megvii (github.com/Megvii-BaseDetection/YOLOX): code and weights, Apache License 2.0
+Models a pack is built from (scripts/setup and scripts/packs/*.py download them from their makers; the packs are not in
+this repository):
+- YOLOX-Tiny, Megvii (github.com/Megvii-BaseDetection/YOLOX): code (the 0.3.0 source tarball) and weights (release
+  0.1.1rc0), both fetched from Megvii's GitHub and checked by SHA-256 (scripts/packs/yolox.py), Apache License 2.0
+- ResNet-18, torchvision (github.com/pytorch/vision): code and ImageNet weights (download.pytorch.org), BSD 3-Clause
+  License; converted by scripts/packs/from_torch.py as scene()
 - e5-small-v2, intfloat (huggingface.co/intfloat/e5-small-v2): MIT
 - all-MiniLM-L6-v2, sentence-transformers (huggingface.co/sentence-transformers/all-MiniLM-L6-v2): Apache License 2.0
 
 Test pictures in tests/fixtures/vision: scikit-image sample data, CC0 / public domain (see its README.md).
-Robot data in the goal 47/49/51 demos: DROID (CC-BY-4.0), fetched by scripts/robot_data.py, not in this repository.
+Robot data: DROID (Khazatsky et al. 2024, CC-BY-4.0; the LeRobot port jnogga/droid_success and jnogga/droid_failure on
+the Hugging Face Hub) and its paper (arXiv 2403.12945v2, CC-BY-4.0), not in this repository: scripts/setup fetches a slice
+(scripts/fetch_demo.py) and scripts/robot_data.py builds build/demo from it, with its ATTRIBUTION.txt; goal 47's full
+set is built the same way from a larger download.
 
 Vendored source (vendor/, each with its licence in vendor/LICENSES/):
 - Flare v0.13.1, Copyright (c) 2025 Ehsan M. Kermani, MIT License: vendor/flare, licence in vendor/LICENSES/flare.txt.

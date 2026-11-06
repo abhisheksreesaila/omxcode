@@ -94,7 +94,7 @@ def m0():
         cards = json.loads((clone / "build/m0-models/models.json").read_text())["cards"]
     except Exception:
         probs.append("models scenario: " + (sc.stdout + sc.stderr)[-500:])
-    for c in ("table-classified", "table-apply-1"):
+    for c in ("table-classified", "table-apply-1", "table-apply-2"):  # (apply-2: scene, through the agent's apply-scene tool)
         rows_ = (cards.get(c) or {}).get("rows", 0)
         if not rows_:
             probs.append(f"models scenario: {c} has {rows_} rows")
@@ -104,6 +104,10 @@ def m0():
     done2 = [l for l in r2.stdout.splitlines() if " done (" in l]
     if r2.returncode or done2 or took2 >= 60:
         probs.append(f"second run: exit {r2.returncode}, {took2:.0f} s, ran {done2}")
+    r4 = subprocess.run(["scripts/setup", "--no-models"], cwd=clone, capture_output=True, text=True, timeout=600, env=env)
+    (OUT / "m0-setup-nomodels.txt").write_text(r4.stdout + r4.stderr)
+    if r4.returncode or "skipped, --no-models" not in r4.stdout:
+        probs.append(f"--no-models: exit {r4.returncode}: " + r4.stdout[-300:])
     # a broken environment: a package record emptied (what an install stopped midway leaves)
     recs = sorted((clone / ".pixi/envs/default/conda-meta").glob("*.json"))
     recs[len(recs) // 2].write_text("")
@@ -115,7 +119,7 @@ def m0():
     times = ", ".join(f"{k} {re.search(r'\((\d+) s\)', v).group(1)} s" for k, v in first.items() if re.search(r"\((\d+) s\)", v))
     return (not probs), ("; ".join(probs)[:1200] if probs else
                          f"fresh clone, empty caches: setup in {took:.0f} s ({times}); {len(rows)} episodes, {len(clips)} with clips; "
-                         f"models scenario: classified {cards['table-classified']['rows']} rows, detect {cards['table-apply-1']['rows']} boxes; "
+                         f"models scenario: classified {cards['table-classified']['rows']} rows, detect {cards['table-apply-1']['rows']} boxes, the agent's apply-scene {cards['table-apply-2']['rows']} rows; --no-models ok; "
                          f"second run {took2:.0f} s, all skipped; an emptied package record repaired in {took3:.0f} s")
 
 
@@ -184,6 +188,15 @@ def m2():
     per = re.findall(r"^PER_LABEL (.+) (\d+)$", out, re.M)
     if sum(int(n) for _, n in per) != 15:
         probs.append(f"per_label (the page's second line) counts {per}")
+    sys.path.insert(0, str(ROOT / "scripts/packs"))
+    from from_torch import centre_square
+    xs, ys = np.meshgrid(np.arange(37), np.arange(23))
+    syn = np.stack([(xs * 7 + ys * 13) % 256, (xs * 29 + ys * 3) % 256, (xs * xs + ys) % 256], axis=-1).astype(np.uint8)
+    mine = np.array([float(v) for v in (re.search(r"^PARITY:(.*)$", out, re.M) or ["", ""])[1].split()])
+    want = centre_square(syn, 16).reshape(-1)
+    parity = float(np.abs(mine - want).max()) if mine.shape == want.shape else 999.0
+    if parity > 1e-3:
+        probs.append(f"Mojo's centre_square differs from from_torch.py's by {parity}")
     if "HAS scene: True" not in out:
         probs.append("has(scene) False with the pack")
     # without the pack: the function is gone (the packs folder holds only classify's and detect's)
@@ -193,14 +206,21 @@ def m2():
     for p in ("e5small", "yolox"):
         if (PACKS / p).exists():
             (bare / p).symlink_to(PACKS / p)
+    # and two packs that mustn't be offered: one whose build failed (no .mef), one named like a video function
+    for name, fn, mef in (("broken", "broken", False), ("shadow", "regions", True)):
+        (bare / name).mkdir()
+        (bare / name / "model.json").write_text(json.dumps({"function": fn, "kind": "image-labels"}))
+        if mef:
+            (bare / name / f"{name}.mef").write_text("")
     out2 = imagemodel_test(bare)
     (OUT / "m2-without.txt").write_text(out2)
-    if "HAS scene: False" not in out2 or not re.search(r"^FRAME_MODELS: detect$", out2, re.M):
+    if "HAS scene: False" not in out2 or not re.search(r"^FRAME_MODELS: detect$", out2, re.M) or not re.search(r"^PACKS:$", out2, re.M):
         probs.append("without the pack: " + " | ".join(l for l in out2.splitlines() if l.startswith(("HAS", "FRAME"))))
     rows = re.findall(r"^ROW .*$", out, re.M)
     return (not probs), ("; ".join(probs)[:1200] if probs else
                          f"found from model.json alone; Apply offers detect, scene; {len(pics)} pictures with torch's top label (top logits within {worst:.3f}); "
-                         f"scene(clip, 3, 4): 15 rows ({rows[0][4:] if rows else ''}); without the pack: no scene")
+                         f"scene(clip, 3, 4): 15 rows ({rows[0][4:] if rows else ''}); the same centre square as from_torch.py's to {parity:.1g}; "
+                         f"without the pack (and with a failed and a shadowing one): no scene, nothing extra")
 
 
 def gtk(steps, name, size=(1440, 900)):

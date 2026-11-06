@@ -53,11 +53,14 @@ fi
 
 APP=build/omxplorer/linux/omxplorer
 if [ "$(uname)" = Darwin ]; then APP=$(ls -d build/omxplorer/mac/*.app 2>/dev/null | head -1); fi
-newer=$( [ -n "$APP" ] && [ -e "$APP" ] && find examples/omxplorer mojoui themes hosts vendor -newer "$APP" -type f -print -quit)
+# (what the build reads: the sources, the pinned Mojo (pixi.lock), the build scripts; not __pycache__, which the data
+# step's Python leaves in mojoui/ after the build)
+newer=$( [ -n "$APP" ] && [ -e "$APP" ] && find examples/omxplorer mojoui themes hosts vendor bridge pixi.toml pixi.lock \
+  scripts/build.sh scripts/web_assets.py scripts/mxlink.sh -newer "$APP" -type f -not -path '*/__pycache__/*' -print -quit 2>/dev/null)
 if [ -n "$APP" ] && [ -e "$APP" ] && [ -z "$newer" ]; then
   skip build "omxplorer" "up to date ($APP)"
 else
-  step build "omxplorer (the first build takes about 5 minutes)" scripts/build.sh omxplorer "$([ "$(uname)" = Darwin ] && echo mac || echo linux)"
+  step build "omxplorer (the first build takes a few minutes)" scripts/build.sh omxplorer "$([ "$(uname)" = Darwin ] && echo mac || echo linux)"
 fi
 
 if [ -f build/demo/truth.json ]; then
@@ -67,12 +70,14 @@ else
 fi
 
 MAXV=$(pixi list max 2>/dev/null | awk '$1 == "max" {print $2}')
+[ -n "$MAXV" ] || echo "(MAX's version couldn't be read: every pack is compiled again)"
 pack() {  # pack <name> <what> <command…>: built again when MAX changed since (a compiled graph is MAX's own version's)
   local d="build/packs/$1"
-  if [ -f "$d/$1.mef" ] && [ "$(cat "$d/max.version" 2>/dev/null)" = "$MAXV" ]; then skip "$1" "$2" "$d is there (MAX $MAXV)"; return; fi
-  if [ -e "$d" ] && [ ! -L "$d" ]; then rm -f "$d/$1.mef"; fi  # (its downloads and references stay; the graph is compiled again)
+  if [ -n "$MAXV" ] && [ -f "$d/$1.mef" ] && [ "$(cat "$d/max.version" 2>/dev/null)" = "$MAXV" ]; then skip "$1" "$2" "$d is there (MAX $MAXV)"; return; fi
+  # (its downloads and references stay; the graph and the model.json that offers it go, so a failed rebuild offers nothing)
+  if [ -e "$d" ] && [ ! -L "$d" ]; then rm -f "$d/$1.mef" "$d/model.json" "$d/max.version"; fi
   step "$1" "$2" "${@:3}"
-  echo "$MAXV" > "$d/max.version"
+  [ -n "$MAXV" ] && echo "$MAXV" > "$d/max.version"
 }
 if [ $models = 0 ]; then
   skip models "the model packs" "--no-models"
@@ -81,7 +86,7 @@ elif [ "$(uname)" = Darwin ] || ! command -v nvidia-smi >/dev/null || ! nvidia-s
 else
   pack e5small "classify(): e5-small-v2, text to vectors (MIT)" pixi run python scripts/packs/e5small.py build/packs/e5small
   pack yolox "detect(): YOLOX-Tiny, boxes on video (Apache-2.0)" pixi run python scripts/packs/yolox.py build/packs/yolox
-  pack scene "scene(): ResNet-18, a picture's label (BSD-3), converted from PyTorch" pixi run python scripts/packs/from_torch.py torchvision:resnet18 build/packs/scene --function scene --about "ResNet-18 (torchvision, BSD-3): ImageNet's 1,000 labels"
+  pack scene "scene(): ResNet-18, a picture's label (BSD-3), converted from PyTorch" pixi run python scripts/packs/from_torch.py torchvision:resnet18 build/packs/scene --function scene
 fi
 
 echo

@@ -24,7 +24,7 @@ from std.os import getenv
 from omxcore import Catalog, Table, sql, TEXT as MX_TEXT, DECIMAL as MX_DECIMAL, INT as MX_INT
 from mojoui.script import ScriptFunctions
 from mojoui.sheet import Sheet
-from mojoui.videoscript import VideoFunctions
+from mojoui.videoscript import VideoFunctions, VIDEO_FUNCTIONS
 from mojoui.textembed import Embedder
 from mojoui.detect import Detector, coco_name
 from mojoui.video import VideoSource
@@ -51,8 +51,9 @@ struct PackFunction(Copyable, Movable):
 
 
 def pack_functions(packs: String = "") -> List[PackFunction]:
-    """Every pack in `packs` (packs_dir() when empty) with a model.json naming a function, in name order. A folder without
-    one (classify's and detect's packs: their Mojo is built in) or with one that doesn't read is skipped."""
+    """Every pack in `packs` (packs_dir() when empty) with a model.json naming a function, in name order. Skipped: a folder
+    without one (classify's and detect's packs: their Mojo is built in), one that doesn't read, one without its compiled
+    graph (<folder>.mef: a failed build), and a name already taken (a built-in, a video function, an earlier pack)."""
     from std.os import listdir
     from std.os.path import isdir, exists
     var dir = packs if packs != "" else packs_dir()
@@ -73,7 +74,10 @@ def pack_functions(packs: String = "") -> List[PackFunction]:
         try:
             var j = Json.parse(open(d + "/model.json", "r").read())
             var f = j.text(j.get(0, "function"))
-            if f != "" and not f in materialize[MODEL_FUNCTIONS]():
+            var taken = f in materialize[MODEL_FUNCTIONS]() or f in materialize[VIDEO_FUNCTIONS]()
+            for p in out:
+                taken = taken or p.function == f
+            if f != "" and not taken and exists(d + "/" + n + ".mef"):
                 out.append(PackFunction(f, j.text(j.get(0, "kind")), d, j.text(j.get(0, "about"))))
         except:
             pass

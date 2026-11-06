@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -40,8 +41,9 @@ def cache() -> Path:
 
 def _open(url, start=0):
     req = urllib.request.Request(url, headers={"User-Agent": "omxcode-setup"})
-    if os.environ.get("HF_TOKEN") and "huggingface.co" in url:
-        req.add_header("Authorization", "Bearer " + os.environ["HF_TOKEN"])
+    if os.environ.get("HF_TOKEN") and url.startswith("https://huggingface.co/"):
+        # (unredirected: the Hub answers with a redirect to its file CDN, which must not get the token)
+        req.add_unredirected_header("Authorization", "Bearer " + os.environ["HF_TOKEN"])
     if start:
         req.add_header("Range", f"bytes={start}-")
     return urllib.request.urlopen(req, timeout=60)
@@ -68,6 +70,14 @@ def fetch(url, dst: Path) -> int:
                 raise IOError(f"{dst.name}: {part.stat().st_size} of {total} bytes")
             part.rename(dst)
             return got
+        except urllib.error.HTTPError as e:
+            if e.code == 416 and have:  # (the .part was already whole: nothing left to fetch)
+                part.rename(dst)
+                return got
+            if attempt == 4:
+                raise
+            print(f"   {dst.name}: {e}; again", flush=True)
+            time.sleep(2 * (attempt + 1))
         except Exception as e:  # a dropped connection resumes from the .part file
             if attempt == 4:
                 raise
