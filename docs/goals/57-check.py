@@ -47,7 +47,10 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "build/g57"
 SERVER = ROOT / "build/saas/server"
 APP = ROOT / "build/saas/linux/saas"
+MAC_APP = ROOT / "build/saas/mac/SaasMojo.app/Contents/MacOS/SaasMojo"
 KEYS = Path.home() / ".config/omxcode/saas.env"
+MAC = "bhoomijaprasad@100.76.9.101"  # the owner's Mac (M8, D-5708): only ~/omxcode-g57 there
+MAC_SSH = ["ssh", "-i", str(Path.home() / ".ssh/edx_mac"), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 CLIENT_ID, CLIENT_SECRET = "client-57.apps.example", "secret-57"
 STRIPE_KEY, WEBHOOK_SECRET, PRICE = "sk_test_stand_in_57", "whsec_stand_in_57", "price_pro_57"
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -580,11 +583,109 @@ def m7():
     return True, "ui thread, served, libc and decision lints"
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7}
+def play_browser(srv, stand, opened, seen, stop):
+    """The system browser, as the checks play it: a /login URL is followed to the app's loopback; a checkout is paid and
+    its webhook sent. (M4's own copy stays as written.)"""
+    while not stop.is_set():
+        for url in [l for l in opened.read_text().splitlines() if l][len(seen):]:
+            seen.append(url)
+            try:
+                if url.startswith(srv.base + "/login"):
+                    u = url
+                    for _ in range(4):
+                        r = httpx.get(u, follow_redirects=False, timeout=20)
+                        if r.status_code not in (301, 302, 303, 307):
+                            break
+                        u = urllib.parse.urljoin(u, r.headers["location"])
+                elif "/pay/cs_test_" in url:
+                    s = stand.pay(url.rsplit("/", 1)[1])
+                    body, h = signed(event("checkout.session.completed", s))
+                    httpx.post(srv.base + "/billing/webhook", content=body, headers=h)
+            except Exception as e:  # noqa: BLE001
+                seen.append(f"error {e}")
+        time.sleep(0.1)
+
+
+def m8_app():
+    """Run ON the Mac (m8 calls it over SSH): the AppKit build signs in through open_url and the loopback, adds an entry,
+    upgrades; truth is the report's last view dump (every view's text), the tenant's SQLite and the stand-ins."""
+    stand = StandIn()
+    srv = Server("m8", stand)
+    opened, opener = OUT / "m8-opened.txt", OUT / "m8-opener.sh"
+    opened.write_text("")
+    opener.write_text(f'#!/bin/sh\necho "$1" >> {opened}\n')
+    opener.chmod(0o755)
+    stop, seen = threading.Event(), []
+    stand.who = ("ada@example.com", "Ada")
+    threading.Thread(target=play_browser, args=(srv, stand, opened, seen, stop), daemon=True).start()
+    try:
+        b = run(["scripts/build.sh", "saas", "mac"], 3600)
+        if b.returncode or not MAC_APP.exists():
+            return False, "the Mac app didn't build: " + (b.stdout + b.stderr)[-1200:]
+        reports = OUT / "m8-report"
+        subprocess.run(["rm", "-rf", str(reports)])
+        steps = "waitfor:Sign in with Google=10000;tap:Sign in with Google;waitfor:Sign out=20000;type:Note=Coffee;type:Amount=4.50;tap:Add;waitfor:Coffee=10000;tap:Upgrade;waitfor:Manage plan=20000;pause:1500"
+        r = run([str(MAC_APP)], 600, {"MOJOUI_TEST": steps, "MOJOUI_OPENER": str(opener), "SAAS_SERVER": srv.base, "MOJOUI_OFFSCREEN": "1",
+                                     "MOJOUI_REPORT_DIR": str(reports)})
+        runs = sorted(reports.glob("*"))
+        if not runs:
+            return False, f"the app wrote no report (exit {r.returncode}): {(r.stdout + r.stderr)[-600:]}"
+        dumps = sorted(runs[-1].glob("[0-9]*.txt"))
+        last = dumps[-1].read_text() if dumps else ""
+        (OUT / "m8-views.txt").write_text(last)
+        pngs = sorted(runs[-1].glob("[0-9]*.png"))
+        if pngs:
+            subprocess.run(["cp", str(pngs[-1]), str(OUT / "m8-mac.png")])
+        log = (runs[-1] / "log.txt").read_text() if (runs[-1] / "log.txt").exists() else ""
+        (OUT / "m8-log.txt").write_text(log)
+        for want in ("Signed in as ada@example.com", "Plan: Pro"):
+            if want not in last:
+                return False, f"the Mac's last screen lacks `{want}` (build/g57/m8-views.txt; browser saw {seen}; log: {log[-400:]})"
+        rows = [srv.tenant_rows(p.stem) for p in (srv.data / "tenants").glob("*.db")]
+        if rows != [[("Coffee", 450)]]:
+            return False, f"the server's tenant files hold {rows}"
+        if not any(u.startswith(srv.base + "/login?") and "client=desktop" in u for u in seen):
+            return False, f"the Mac app didn't open a desktop sign-in: {seen}"
+        if stand.problems:
+            return False, f"the stand-ins saw: {stand.problems}"
+        return True, "AppKit: signed in through open_url + loopback, an entry in ada's SQLite, upgrade → Pro"
+    finally:
+        stop.set()
+        srv.stop()
+        stand.close()
+
+
+def m8():
+    """The owner's Mac over SSH (D-5708, D-5721): sources to ~/omxcode-g57, its own pixi env, then this checker's M2, M3
+    and m8_app run there; the app's last picture comes back as build/g57/m8-mac.png. A real run only."""
+    ssh = MAC_SSH + [MAC]
+    if subprocess.run(ssh + ["true"], capture_output=True, timeout=30).returncode:
+        return None, f"the Mac ({MAC}) isn't reachable over SSH: scripts/mac-ci (GitHub's Macs) is the fallback"
+    sync = subprocess.run(["rsync", "-az", "--delete", "-e", " ".join(MAC_SSH), "--exclude=/build", "--exclude=/.pixi", "--exclude=/dist",
+                           "--exclude=/.git", "--exclude=node_modules", "--exclude=__pycache__", f"{ROOT}/", f"{MAC}:omxcode-g57/"],
+                          capture_output=True, text=True, timeout=600)
+    if sync.returncode:
+        return False, "rsync to the Mac: " + sync.stderr[-300:]
+    r = subprocess.run(ssh + ["cd ~/omxcode-g57 && export PATH=$HOME/.pixi/bin:$PATH && pixi install >/dev/null && "
+                              "pixi run python docs/goals/57-check.py M2 M3 M8app"], capture_output=True, text=True, timeout=5400)
+    out = r.stdout + r.stderr
+    (OUT / "m8.out").write_text(out)
+    for f in ("m8-mac.png", "m8-views.txt", "m8-log.txt"):
+        subprocess.run(["scp", "-q"] + MAC_SSH[1:5] + [f"{MAC}:omxcode-g57/build/g57/{f}", str(OUT / f)], capture_output=True, timeout=120)
+    lines = {k: re.search(rf"^{k}: (\w+)  (.*)$", out, re.M) for k in ("M2", "M3", "M8app")}
+    bad = [f"{k}: {m.group(1)} {m.group(2)[:300]}" if m else f"{k}: no result" for k, m in lines.items() if not m or m.group(1) != "PASS"]
+    if bad:
+        return False, "on the Mac: " + "; ".join(bad) + " (build/g57/m8.out)"
+    return True, "on the Mac (macOS, arm64): the server passes M2 and M3; the AppKit app signs in and pays; shot build/g57/m8-mac.png"
+
+
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8}
+EXTRA = {"M8app": m8_app}  # (not a milestone: m8 runs it on the Mac)
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     picked = sys.argv[1:] or list(MILESTONES)
+    MILESTONES.update(EXTRA)
     failed = False
     for name in picked:
         try:

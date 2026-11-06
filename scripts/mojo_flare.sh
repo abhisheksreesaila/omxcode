@@ -9,5 +9,6 @@ source scripts/mxlink.sh
 cmd=$1; shift
 # Flare dlopens its shims by bare name: the binary's RUNPATH finds them beside it ($ORIGIN, where a shipped app puts them)
 # or in build/flare/lib, so it runs outside pixi too.
-FLARE_RPATH=(-Xlinker -rpath -Xlinker '$ORIGIN' -Xlinker -rpath -Xlinker "$PWD/build/flare/lib")
-exec pixi run mojo "$cmd" --disable-warnings -D MOJOUI_FLARE -I . -I vendor "$@" "${LINK[@]}" "${FLARE_RPATH[@]}"
+ORIGIN='$ORIGIN'; [ "$(uname)" = Darwin ] && ORIGIN='@executable_path'  # (the Mac's word for it)
+FLARE_RPATH=(-Xlinker -rpath -Xlinker "$ORIGIN" -Xlinker -rpath -Xlinker "$PWD/build/flare/lib")
+exec pixi run mojo "$cmd" --disable-warnings -D MOJOUI_FLARE -I . -I vendor "$@" ${LINK[@]+"${LINK[@]}"} "${FLARE_RPATH[@]}"  # (bash 3.2 on the Mac: an empty array is "unbound" under set -u)

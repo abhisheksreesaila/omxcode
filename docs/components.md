@@ -111,11 +111,11 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | HTTP server (mojoui.serve on Flare: routes, JSON, SSE Pipes, proxy) | `Service.answer(req) -> Reply · Server.run(service, port) · Pipe · proxy(request, pipe)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Child processes (mojoui.process: spawn, log, health, stop the group, idle) | `Process.start(argv, log) · wait_healthy(url) · stop() · idle_ms()` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | SHA-256 (mojoui.hash, plain Mojo) | `sha256_hex(text)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Crypto (mojoui.crypto: HMAC-SHA256, OS random, base64url, constant-time compare, seals, PKCE) | `hmac_sha256 · random_token · b64url · same · seal/unseal · pkce_challenge` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant) | `Accounts(dir, AuthConfig.from_env()) · handle(req) · member(req) · tenant_db(member)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall) | `Billing(dir, BillingConfig.from_env()) · handle(req, accounts) · paywall(member)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252) | `DesktopSignIn(server) · .url · code() · token_request(msg, code)` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
-| Open in the system browser (an effect: App.opens, mojoui.browser) | `Browser.open(url) · def opens(mut self) -> List[String]` | ✅ | ❌ | ❌ | 🔨 | ❌ | ❌ |
+| Crypto (mojoui.crypto: HMAC-SHA256, OS random, base64url, constant-time compare, seals, PKCE) | `hmac_sha256 · random_token · b64url · same · seal/unseal · pkce_challenge` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant) | `Accounts(dir, AuthConfig.from_env()) · handle(req) · member(req) · tenant_db(member)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall) | `Billing(dir, BillingConfig.from_env()) · handle(req, accounts) · paywall(member)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252) | `DesktopSignIn(server) · .url · code() · token_request(msg, code)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Open in the system browser (an effect: App.opens, mojoui.browser) | `Browser.open(url) · def opens(mut self) -> List[String]` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 - File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
 - Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
@@ -263,7 +263,7 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 | Linux (GTK) | 180 | 9 | 0 |
 | Web | 163 | 9 | 17 |
 | Android | 19 | 55 | 115 |
-| Mac (AppKit) | 0 | 156 | 33 |
+| Mac (AppKit) | 5 | 154 | 30 |
 | iPhone (UIKit) | 0 | 125 | 64 |
 | Agent (MCP) | 58 | 43 | 88 |
 

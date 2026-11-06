@@ -121,12 +121,13 @@ BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, F
            "HTTP server (mojoui.serve on Flare: routes, JSON, SSE Pipes, proxy)": {"Linux (GTK)": "✅"},
            "Child processes (mojoui.process: spawn, log, health, stop the group, idle)": {"Linux (GTK)": "✅"},
            "SHA-256 (mojoui.hash, plain Mojo)": {"Linux (GTK)": "✅"},
-           # goal 57: run by tests/test_crypto, test_accounts, test_billing, test_open_url and docs/goals/57-check.py M2–M4 on Linux
-           "Crypto (mojoui.crypto: HMAC-SHA256, OS random, base64url, constant-time compare, seals, PKCE)": {"Linux (GTK)": "✅"},
-           "Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant)": {"Linux (GTK)": "✅"},
-           "Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)": {"Linux (GTK)": "✅"},
-           "Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
-           "Open in the system browser (an effect: App.opens, mojoui.browser)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"}}
+           # goal 57: run by tests/test_crypto, test_accounts, test_billing, test_open_url and docs/goals/57-check.py M2–M4 on Linux;
+           # M8 on the owner's Mac (macOS 27, arm64): the server passes M2/M3 there, the AppKit app signs in and pays
+           "Crypto (mojoui.crypto: HMAC-SHA256, OS random, base64url, constant-time compare, seals, PKCE)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
+           "Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
+           "Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
+           "Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"},
+           "Open in the system browser (an effect: App.opens, mojoui.browser)": {"Linux (GTK)": "✅", "Mac (AppKit)": "✅"}}
 
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)

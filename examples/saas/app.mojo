@@ -110,7 +110,7 @@ struct Main(App):
         return liquid()
 
     def window_size(self) -> Tuple[Int, Int]:
-        return (520, 640)
+        return (440, 600)
 
     def requests(mut self) -> List[Request]:
         return self.http.take()
@@ -236,11 +236,11 @@ struct Main(App):
             return ""
 
     def view(self) -> View:
-        var status = Text(self.status, style=CAPTION)
+        var status = Text(self.status, style=CAPTION).fill()
         if self.email == "":
             return VStack(
                 Text("omxcode SaaS", style=TITLE),
-                Text("Your entries, in your own tenant. Sign in with your Google account.", style=CAPTION),
+                Text("Your entries, in your own tenant. Sign in with your Google account.", style=CAPTION).fill(),
                 Button("Sign in with Google", on_tap=SIGN_IN, style=PROMINENT),
                 status^,
                 spacing=16,
@@ -256,7 +256,7 @@ struct Main(App):
         var pro = self.plan == "pro"
         return VStack(
             HStack(Text("omxcode SaaS", style=TITLE).grow(), Button("Sign out", on_tap=SIGN_OUT), spacing=8).fill(),
-            Text("Signed in as " + self.email, style=CAPTION),
+            Text("Signed in as " + self.email, style=CAPTION).fill(),
             HStack(
                 Text("Plan: Pro" if pro else "Plan: Free").grow(),
                 Button("Manage plan", on_tap=MANAGE) if pro else Button("Upgrade", on_tap=UPGRADE, style=PROMINENT),
@@ -269,7 +269,7 @@ struct Main(App):
                 spacing=8,
             ).fill(),
             VStack(rows^, spacing=6).fill(),
-            Text(String(len(self.entries)) + (" entry · " if len(self.entries) == 1 else " entries · ") + money(total), style=CAPTION),
+            Text(String(len(self.entries)) + (" entry · " if len(self.entries) == 1 else " entries · ") + money(total), style=CAPTION).fill(),
             status^,
             spacing=14,
         ).padding(24).width(440)
