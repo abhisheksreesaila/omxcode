@@ -4,6 +4,14 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 55: omxconsole, LM Studio for MAX, all omxcode (2026-11-05/06)
+- **Setup:** worktree ../mojo-ui-g55, branch `goal-55-console` off main (Mojo 1.2); docs/goals/55-check.py; report docs/goals/55-report.md; D-5501–D-5532. A user's MAX install for the checks under build/g55/max.
+- **Worked:** find (Hugging Face from Mojo), download (resume, cancel, sha256-checked), chat, benchmark (333 tok/s on Qwen 0.5B, matching the OpenAI SDK), one Linux download that starts its own service and runs bare, a Mac app built and run on GitHub's macOS 15/26 runners; omxconsole in the gallery with both downloads. All omxcode; only max serve is Python.
+- **Broke and fixed:** a first run crashed (no store: schema now created); Hugging Face's relative 307 wasn't followed (fetch_to_file follows redirects itself, token only same-host HTTPS); Flare's shims were named .dylib on the Mac where Flare loads .so; the Mac stub lacked posix_spawn*; a killed console orphaned its consoled and 7.5 GB of GPU (helpers end with their app); my checker guessed three reply shapes wrong and once loosened M4 (withdrawn after review).
+- **Means:** an LM Studio-style app is a thin omxcode program around max serve; the framework now has downloads, a Hub client and companions any app can use. Next: the owner's yes to switch from the Python daemon; MAX on the M4 Mac.
+
+---
+
 ## Goal 53: every gallery app downloads; no web builds in the showcase (2026-11-05)
 - **Setup:** worktree ../mojo-ui-g53, branch `goal-53-downloads` from main 99f5bde (Mojo 1.1); check docs/goals/53-check.py; decisions D-5301–D-5304. Owner: "it goes into the galleries so you have to provide a link… completely based on the app framework… I don't think we should have a web version".
 - **Worked:** `scripts/package.sh` packages any example (not just omxplorer); `scripts/bare_run.py` unpacks each Linux tarball and starts it with no Mojo, no pixi and a fresh HOME on a headless display (six of six drew their window). The shipped Mac zips ran on GitHub's macOS 15 and 26 runners (run 42150995806), widgets with CodeMirror and ECharts mounted. Pre-release `gallery-apps`: six Linux and four Mac downloads; every gallery card links its downloads; Agent chat (needs its agent server) and Dictate (doesn't build here) moved to Coming next; Web chips, web shots and the cover's "web, on WebGPU" stop are gone.
