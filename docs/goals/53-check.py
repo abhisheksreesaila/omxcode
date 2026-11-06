@@ -49,8 +49,17 @@ for url in links:
 
 # M2
 bare = json.loads((ROOT / "build/g53/bare.json").read_text()) if (ROOT / "build/g53/bare.json").exists() else {}
-run = re.search(r"run (\d{8,})", rel.get("body", ""))
-mac = ROOT / "build/mac-ci" / (run.group(1) if run else "none")
+runs = re.findall(r"run (\d{8,})", rel.get("body", ""))  # (one per batch of Mac apps; goal 55 added omxconsole's)
+
+
+def mac_run(app):
+    """The first run named in the release notes whose reports have `app` (goal 55: apps tested in separate runs)."""
+    for r in runs:
+        d = ROOT / "build/mac-ci" / r
+        if (d / "report-macos-26" / f"{app}-stdout.txt").exists() or (d / "report-macos-26" / "side").exists() and app == "widgets":
+            return d
+    return ROOT / "build/mac-ci" / (runs[0] if runs else "none")
+
 for url in links:
     name = url.rsplit("/", 1)[-1]
     if "/gallery-apps/" not in url:
@@ -63,6 +72,7 @@ for url in links:
         check(b.get("ok") is True and b.get("sha256") == mine and b.get("stand_ins") is False,
               f"M2 {app}'s Linux download (this tarball) ran bare, its window drawn, no stand-ins")
     else:
+        mac = mac_run(app)
         for os_ in ("macos-15", "macos-26"):
             r = mac / f"report-{os_}"
             out = r / f"{app}-stdout.txt"

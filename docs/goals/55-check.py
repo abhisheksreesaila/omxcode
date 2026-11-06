@@ -376,11 +376,16 @@ def m5():
     if not closed:
         problems.append("its consoled still answers 15 s after the console quit")
     # the download, run bare
-    r = run(["scripts/package.sh", "omxconsole", "linux"])
     tar = ROOT / "dist/omxconsole-linux-x86_64.tar.gz"
-    if r.returncode != 0 or not tar.exists():
-        problems.append("package: " + (r.stdout + r.stderr)[-300:])
-        return False, "; ".join(problems)
+    # (the released download when dist/ holds it: then the run tests what people get; else a fresh package)
+    rel = subprocess.run(["gh", "release", "view", "gallery-apps", "-R", "abhisheksreesaila/omxcode", "--json", "assets",
+                          "-q", '.assets[] | select(.name == "omxconsole-linux-x86_64.tar.gz") | .digest'], capture_output=True, text=True).stdout.strip()
+    shipped = tar.exists() and rel == "sha256:" + hashlib.sha256(tar.read_bytes()).hexdigest()
+    if not shipped:
+        r = run(["scripts/package.sh", "omxconsole", "linux"])
+        if r.returncode != 0 or not tar.exists():
+            problems.append("package: " + (r.stdout + r.stderr)[-300:])
+            return False, "; ".join(problems)
     import headless
     headless.ensure()
     with tempfile.TemporaryDirectory() as tmp:
@@ -425,7 +430,8 @@ def m5():
                 p.kill()
             log.close()
     headless.stop()
-    return not problems, "; ".join(problems) or "the console starts and stops its own consoled; the download runs bare (fresh HOME, no Mojo or pixi): window drawn, consoled up, a chat answered"
+    return not problems, "; ".join(problems) or ("the console starts and stops its own consoled; the " + ("released" if shipped else "freshly packaged") +
+                                                 " download runs bare (fresh HOME, no Mojo or pixi): window drawn, consoled up, a chat answered")
 
 
 def m6():

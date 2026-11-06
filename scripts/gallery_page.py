@@ -30,6 +30,12 @@ STAR = dict(
 # omxconsole comes back when it's Mojo end to end (its engine is Python today; owner, 2026-11-02)
 
 APPS = [
+    dict(name="omxconsole", app="omxconsole", kind="LM Studio for MAX · local models",
+         line="Find a model on Hugging Face, download it, chat with it and benchmark it on your own GPU through Modular's MAX. One OpenAI-style endpoint with keys, all omxcode.",
+         # (Mac: the macOS 15 runner's build ran there; on macOS 26 the runner's own build of the same source ran)
+         runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"], needs="Needs MAX installed (docs.modular.com/max/packages)",
+         shots=[("img/omxconsole-ready.png", "Linux: a model found, downloaded and answering"), ("img/omxconsole-bench.png", "Linux: its benchmark, 331 tokens/s"),
+                ("img/omxconsole-models.png", "Linux: My models")], src="examples/console"),
     dict(name="Sketch", app="sketch", kind="Drawing",
          line="Pressure ink with pan and zoom. Strokes taper with the pen; panning moves the kept ink, never redraws it.",
          runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"],
@@ -221,7 +227,7 @@ footer a { color: var(--ink2); }
   <div class="head">
     <div class="eyebrow">Gallery</div>
     <h1>omxplorer, and what else it builds.</h1>
-    <p class="lede">omxplorer is the product. The rest are smaller apps, each one Mojo codebase, that show what the framework can do. Every one downloads for Linux; most for the Mac too.</p>
+    <p class="lede">omxplorer is the product. The rest are smaller apps, each one Mojo codebase, that show what the framework can do. Every one downloads for Linux; most for the Mac too. omxconsole wraps Modular's MAX the way LM Studio wraps its runtime.</p>
   </div>
   <div class="grid">
 STAR_CARD
