@@ -1,36 +1,40 @@
-# GOAL 52: everything on Mojo 1.2, Flare 0.13, and the engine beside Flare
+# GOAL 55: omxconsole, LM Studio for MAX, all omxcode
 
-**End goal (owner, 2026-11-05):** "you can move to Mojo 1.2 .. not a big change anyway." Goal 35's draft
-(docs/goals/35-draft.md, its number later went to AG-UI) on top of goal 50 (branch goal-50-native 4352a74), which already
-did that draft's M2 (mojoui/libc.mojo + lint) and M4 (FlareTransport behind mojoui.http). The probe:
-docs/research/mojo12-flare.md (branch probe-mojo12). Worktree `../mojo-ui-g52`, branch goal-52-mojo12.
+**End goal (owner, 2026-11-05):** "All we need is a simple app, a desktop app, which wraps around MAX and does all the
+MAX [things] with benchmarking and an easy to use interface just like LM Studio… as long as everything is built using
+omxcode it can go into the gallery." No Python service of ours: the Mojo consoled (goals 50/52, on main) replaces
+mxstudio's daemon; only `max serve` itself is Python. Worktree `../mojo-ui-g55`, branch `goal-55-console`, off main
+(Mojo 1.2). (Goal 54 is another session's: omxplorer's shell, `../mojo-ui-g54`.)
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/52-check.py`) |
+| # | Milestone | Proof (`scripts/check`, docs/goals/55-check.py) |
 |---|---|---|
-| M0 | Its own env | `mojo --version` is 1.2 here and 1.1 in ../mojo-ui and ../mojo-ui-g50; this .pixi is a directory, not a symlink; pixi.toml pins `mojo >=1.2,<1.3` |
-| M1 | The engine on 1.2 | vendor/omxcore.mojoc is the 1.2 build of omxcore 834ef9a's archive plus `vendor/patches/omxcore-834ef9a-mojo12.patch` (scripts/engine_lineage.py proves it: archive diffed, patch applied, size within 0.1 %); the patch touches only lines 1.2 or M5 need; a program built for Linux and one compiled for the Mac target see the engine's GPU switch as they did on 1.1 (Linux on; a Mac with a Metal target on and Apple's plan; a Mac without one off; wording corrected after review, D-5216) |
-| M2 | Flare 0.13 | vendor/flare is a Flare v0.13.x release (FLARE_VERSION, licences); the stream-body patch is kept only if 0.13 still drops the body (proved by a test either way); test_flare_link, test_https (a public site with the system CA bundle), test_serve, test_process, test_hash pass |
-| M3 | Everything on 1.2 | the sweep (scripts/sweep.py) builds every example for each platform it lists (linux, web, mac, ios, android) and every Mojo test in tests/; nothing that built or passed in the same sweep on goal-50-native under Mojo 1.1 (docs/goals/52/baseline.json, made in ../mojo-ui-g50) fails here; iPhone objects need no new `KGEN_` symbols; scripts/libc_lint.py passes |
-| M4 | omxconsole on 1.2 | goal 50's checker: M0–M5 PASS (a real Qwen chat through `max serve` and the Mojo gateway); M6 fails on nothing but what it failed on at goal 50 (goal 33's M5) |
-| M5 | The engine beside Flare | tests/test_engine_flare.mojo runs an engine job (omxcore's thread pool, a group-by on a Frame) and answers an HTTP request through mojoui.serve (Flare) in one program; omxcore's pthread_create / pthread_detach / strtod / read declarations match Flare's (the omxcore issue drafted at goal 50) |
-| M6 | The Mac on 1.2 | a fresh run on GitHub's Mac (scripts/mac-ci, side.mac_fresh) from these sources: maccheck's tests pass, omxplorer starts and draws, and the run's native GPU build used Mojo 1.2 |
-| M7 | Flare never stalls the UI thread (owner, 2026-11-05: "ensure it does not interfere with our UI thread and blocks"; added during the run, D-5213) | tests/test_ui_thread.mojo, 5 runs: a main-thread frame loop ticking every 4 ms never gaps past 25 ms while the program serves (Flare), streams SSE, proxies, fetches over HTTPS through mojoui.http and answers engine jobs (27 requests at once, all 200); Server.start holds the caller ≤ 250 ms, stop() ≤ 5 ms, and the loops end within 3 s; tests/test_served.mojo (added after review, D-5216): a dropped or stopped server stops answering, 30 cycles leave no threads or memory |
+| M0 | Baseline | console and consoled build on main; consoled on a throwaway MXC_HOME and port, with this env's MAX, answers /health |
+| M1 | Find models | `mojoui.hf` (any app: Hub search, a repo's files, sizes and revision) with tests/test_hf.mojo on the live Hub; consoled's /admin/search?q= answers any query from the Hub with sizes and a fits-this-machine flag |
+| M2 | Download | `mojoui.hf` downloads a repo's files with progress, resume and cancel; POST /admin/pulls + GET /admin/pulls/{id} pull Qwen/Qwen2.5-0.5B-Instruct into MXC_HOME (each file's sha256 = the Hub's LFS id), register it; a cancelled pull leaves no model; DELETE /admin/models/{name} removes files and row |
+| M3 | Chat | POST /admin/try/chat answers from the pulled model through `max serve`; the OpenAI SDK streams a chat with a key; the console on GTK, driven by steps, searches, pulls, shows Ready and a real reply in its chat |
+| M4 | Benchmark | POST /admin/bench runs a fixed workload; GET /admin/bench reports time to first token and decode tokens/s per model, within 25 % of the OpenAI SDK's own streaming measurement; the console's Benchmark tab draws the bars |
+| M5 | One app, one download | the console starts its own consoled when none answers and stops it on quit (a framework piece any app can use); `scripts/package.sh omxconsole linux` (console + consoled) unpacked and run with no Mojo or pixi and a fresh HOME draws its window, its consoled answers, and a chat works with MXC_MAX naming a MAX install |
+| M6 | Mac | console + consoled build for the Mac; on GitHub's macOS 15 and 26 runners the app opens, starts consoled, and says MAX isn't installed (no MAX there) without a crash |
+| M7 | In the gallery | an omxconsole card with its downloads (each one run), the gallery-apps release holding them; docs/goals/53-check.py passes |
 
-**Done means:** `scripts/check` prints PASS for M0–M7.
+## Done means
+`scripts/check` prints PASS for M0–M7, the reviewer passes it, and main carries it (the owner allows pushing main after
+a reviewer PASS and green checks).
 
 ## Out of bounds
-Pushing anything but the mac-test branch and the mac-ci release (scripts/mac-ci); committing to omxcore (~/Projects/mxframe,
-another session's) or filing issues anywhere (the owner then allowed Flare issues: D-5215); changing engine code beyond what 1.2 and M5 need; touching
-`../mojo-ui-apple-test`, the running Python daemon on :11435 or the real `~/.mxc`; `pip`; secrets; merging into main.
+The owner's running Python daemon on :11435 and the real `~/.mxc` (never read, written or stopped: switching over needs
+the owner's yes at that moment); `~/Projects/mxstudio`; `../mojo-ui-apple-test`; goal 54's worktree. No secrets (public
+models only, no Hugging Face token). No paid services. Pushing: the mac-test branch and mac-ci release (scripts/mac-ci),
+the gallery-apps release, and main at the end. Model porting and robotics models (later goals). LAN expose, the tray,
+the `omxc` CLI.
 
 ## Assumptions
-- The engine goes in as 834ef9a + a patch kept here (as Flare's is), not a new omxcore stable commit: omxcore's main is
-  busy with another session today; the patch is ready for its stable-engine process when the owner wants it.
-- Flare moves to 0.13 now because it's why 1.2 was wanted; the newest 0.13.x tag, sources vendored as before (D-4781).
-- "Nothing regressed" is measured against the same sweep on 1.1, not against a hand list: tests that need a server or
-  data they don't find fail on both and are listed, not counted.
-- 1.2's new "transfer has no effect" warnings are left alone (harmless; builds use --disable-warnings).
+- Pulled weights go to a plain folder, MXC_HOME/models/<owner>--<name>/, served with `max serve --model-path <folder>`
+  (the Python daemon's local-weights path), not Hugging Face's cache layout.
+- Tests use Qwen/Qwen2.5-0.5B-Instruct (~1 GB, Apache-2.0) on this machine's RTX 3090; the network is up.
+- The download needs MAX installed by the user (as LM Studio needs its runtime); MXC_MAX or `max` on PATH.
+- Benchmark workload: 5 chat prompts, 128 tokens each, one at a time.
 
 ## Budget
 80 turns.
