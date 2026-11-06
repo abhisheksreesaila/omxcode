@@ -25,7 +25,7 @@ done
 # everything scripts/build.sh runs for a Mac build is in it (web_assets.py since goal 34b: without it the GPU build failed, D-787)
 tar -czf build/mac-ci/omxcode-src.tar.gz --exclude=__pycache__ pixi.toml pixi.lock scripts/build.sh scripts/mxlink.sh scripts/web_assets.py \
     mojoui themes hosts examples/omxplorer examples/maccheck apple vendor scripts/console_fixture.py docs/goals/33/fixtures \
-    examples/console examples/consoled scripts/mojo_flare.sh scripts/flare_ffi.sh
+    examples/console examples/consoled scripts/mojo_flare.sh scripts/flare_ffi.sh scripts/package.sh LICENSE
 gh release upload mac-ci build/mac-ci/omxcode-src.tar.gz --clobber -R "$REPO"
 branch=build/mac-ci/branch
 if [ ! -d "$branch/.git" ]; then

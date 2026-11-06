@@ -58,8 +58,10 @@ jobs:
           cd src2
           pixi install --frozen >> ../out/omxconsole-setup.txt 2>&1 || { echo "pixi install failed" | tee -a ../out/omxconsole-build.txt; tail -20 ../out/omxconsole-setup.txt; exit 0; }
           if bash scripts/build.sh console mac > ../out/omxconsole-build.txt 2>&1; then
-            (cd build/console/mac && zip -qry "$GITHUB_WORKSPACE/zips/omxconsole-mac.zip" ConsoleMojo.app)
-            cp "$GITHUB_WORKSPACE/zips/omxconsole-mac.zip" "$GITHUB_WORKSPACE/out/"  # (back with the report: the zip that ran is the one that ships)
+            # the download as it ships (omxconsole.app, its icon, signed): the zip that runs below is the one that ships
+            bash scripts/package.sh omxconsole mac >> ../out/omxconsole-build.txt 2>&1
+            cp dist/omxconsole-mac-arm64.zip "$GITHUB_WORKSPACE/zips/omxconsole-mac.zip"
+            cp dist/omxconsole-mac-arm64.zip "$GITHUB_WORKSPACE/out/"
             echo "OMXCONSOLE BUILT ($(pixi run mojo --version 2>/dev/null))" | tee -a ../out/omxconsole-build.txt
           else
             echo "omxconsole build failed" | tee -a ../out/omxconsole-build.txt

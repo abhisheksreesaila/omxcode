@@ -69,7 +69,8 @@ def LogPane(title: String, lines: List[LogLine], open: Bool, on_toggle: Int, hei
             var words: List[View] = []
             if l.stamp != "":
                 words.append(Text(l.stamp + chr(160)).tag("log-time"))
-            words.append(Text(keep_spaces(l.text) if l.text != "" else chr(160)).tag(log_role(l.kind)).grow())
+            words.append(Text(keep_spaces(l.text) if l.text != "" else chr(160)).tag(log_role(l.kind)))
+            words.append(Spacer())  # (the line keeps its own width: a grown label sat centred in the rest on GTK, goal 55)
             rows.append(HStack(words^, spacing=0).align(START).fill())
         var sc = Scroll(VStack(rows^, spacing=0).align(START).fill().tag("log-lines"), height=height, pinned=True).fill().tag("log-scroll")
         items.append(sc^.grow() if height == 0 else sc^)  # (0: as tall as the pane is given)

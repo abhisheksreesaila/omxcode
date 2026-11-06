@@ -3527,6 +3527,15 @@ def run_step[A: App](host_addr: Int, step: String):
             host[].report.note("TEST: no option " + kv[1])
             return
         host[].send(i, False, kv[1], index, host_addr)
+    elif verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip), as on GTK (goal 55: the Mac's checks read it)
+        var said = False
+        for ref n in host[].rt.shown.nodes:
+            if n.name == rest:
+                print("SAYS: " + rest + " = " + n.tip, flush=True)
+                said = True
+                break
+        if not said:
+            print("TEST: nothing tagged " + rest, flush=True)
     elif verb == "menu":  # menu:File>Save: the bar's File menu's Save item
         var t = split_at(rest, ">")
         var menu = -1

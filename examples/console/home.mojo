@@ -294,7 +294,7 @@ def home_view(st: Store, lib: Library, phone: Bool) -> View:
     var body: List[View] = [header^, Divider().fill()]
     if st.max_missing:  # (goal 55: the app wraps MAX; without it nothing can be served, so say so first)
         var say = String("MAX isn't installed, so models can't be served yet. Install Modular's MAX (docs.modular.com/max/packages), then open omxconsole again; if max isn't on your PATH, start it as MXC_MAX=/path/to/max.")
-        body.append(Note([Text(say)]).tag("max-banner").tooltip(say))
+        body.append(HStack(Note([Icon("triangle-alert", 16), Text(say).grow()]), spacing=0).fill().tag("max-banner").tooltip(say))  # (the Note keeps its own role)
         body.append(Divider().fill())
     body += [filters^, Divider().fill(),
                             SplitView(groups_column(st, lib, phone), VStack(results^, spacing=0).align(START), compact=phone)]

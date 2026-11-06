@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 EX="${1:?example}"; WHAT="${2:?linux or mac}"
 APP="$EX"; case "$EX" in omxconsole) APP=console ;; esac  # (a product named apart from its example folder)
-NAME="$(tr '[:lower:]' '[:upper:]' <<< "${EX:0:1}")${EX:1}Mojo"
+NAME="$(tr '[:lower:]' '[:upper:]' <<< "${APP:0:1}")${APP:1}Mojo"
 ICON_SVG="docs/design/brand/logo-1-icon.svg"  # (D-254: Lens · bars; green, D-4733)
 mkdir -p dist
 # what the launcher entry and README say, per app: comment|categories|mime types|how to run it
@@ -106,16 +106,20 @@ EOF
   rm -f "$out.tar.gz"; tar -C dist -czf "$out.tar.gz" "$(basename "$out")"
   echo "$out.tar.gz ($(du -h "$out.tar.gz" | cut -f1))"
 elif [[ "$WHAT" == "mac" ]]; then
-  app="build/$EX/mac/$NAME.app"; [[ -d "$app" ]] || { echo "build it first: scripts/build.sh $EX mac"; exit 1; }
+  app="build/$APP/mac/$NAME.app"; [[ -d "$app" ]] || { echo "build it first: scripts/build.sh $APP mac"; exit 1; }
   stage="dist/mac-$EX"; rm -rf "$stage"; mkdir -p "$stage"
   cp -R "$app" "$stage/$EX.app"
   res="$stage/$EX.app/Contents/Resources"; mkdir -p "$res"
-  icon_png 1024 "$stage/icon.png"
-  pixi run python -c "from PIL import Image; Image.open('$stage/icon.png').save('$res/$EX.icns', sizes=[(16,16),(32,32),(64,64),(128,128),(256,256),(512,512),(1024,1024)])"
+  if command -v rsvg-convert >/dev/null; then
+    icon_png 1024 "$stage/icon.png"
+    pixi run python -c "from PIL import Image; Image.open('$stage/icon.png').save('$res/$EX.icns', sizes=[(16,16),(32,32),(64,64),(128,128),(256,256),(512,512),(1024,1024)])"
+  else
+    cp apple/mac/app.icns "$res/$EX.icns"  # (a Mac runner has no SVG renderer: the same icon, rendered on Linux)
+  fi
   plist="$stage/$EX.app/Contents/Info.plist"
-  sed -i -e "s#<key>CFBundleName</key><string>[^<]*</string>#<key>CFBundleName</key><string>$EX</string>#" \
+  sed -i.orig -e "s#<key>CFBundleName</key><string>[^<]*</string>#<key>CFBundleName</key><string>$EX</string>#" \
          -e "s#<key>CFBundleDisplayName</key><string>[^<]*</string>#<key>CFBundleDisplayName</key><string>$EX</string>#" \
-         -e "s#<key>CFBundlePackageType</key>#<key>CFBundleIconFile</key><string>$EX</string>\n\t<key>CFBundlePackageType</key>#" "$plist"
+         -e "s#<key>CFBundlePackageType</key>#<key>CFBundleIconFile</key><string>$EX</string>\n\t<key>CFBundlePackageType</key>#" "$plist" && rm -f "$plist.orig"  # (-i.orig: BSD sed on a Mac too)
   rm -rf "$stage/$EX.app/Contents/_CodeSignature"
   if command -v codesign >/dev/null; then codesign --force --sign - "$stage/$EX.app"; else rcodesign sign "$stage/$EX.app" >/dev/null; fi
   zip_out="dist/$EX-mac-arm64.zip"; rm -f "$zip_out"
