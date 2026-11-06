@@ -661,6 +661,7 @@ def ready_card(a: Add, name: String, endpoint: String) -> View:
     return Card([CardHead(name + " is serving.", tail=[Badge("ready · localhost", BADGE_OK, dot=True)]),
                  CardBody([CopyRow("local", endpoint, ADD_COPY_EP, "Copied" if a.copied_ep else "Copy"),
                            CodeBlock(chat_curl(endpoint, name, "Hello", spaced=True), on_copy=ADD_COPY_CURL, copies=a.copies, copied=a.copies > 0, title="Copy curl").fill(),
+                           QuietText("It answered: “" + a.run.smoke + "”").tag("smoke-reply").tooltip(a.run.smoke),
                            QuietText("It is on localhost only. Make it secure to reach it from your phone or another machine with HTTPS and an API key."),
                            ButtonRow([SmallButton("Open", ADD_OPEN, "chevron-right", FILL), SmallButton("Make it secure", ADD_SECURE, "lock"),
                                       SmallButton("Add another", ADD_ANOTHER, "plus", TEXT)])]),

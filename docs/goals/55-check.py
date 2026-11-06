@@ -279,10 +279,10 @@ def m3():
         if not steps.exists():
             return False, "no docs/goals/55/m3.steps (search, pull, Ready, chat)"
         ok, out = console(steps, d, G55 / "console-chat.png")
-        said = re.findall(r"CHAT REPLY: (.+)", out)
+        said = re.findall(r"SAYS: smoke-reply = (.+)", out)
         good = ok and said and len(said[-1].split()) >= 2
         return bool(good), f"try/chat: {reply[:60]!r}; SDK streamed {n} pieces; console: " + \
-            (f"reply {said[-1][:60]!r}" if said else "no CHAT REPLY line: " + out[-300:])
+            (f"reply {said[-1][:60]!r}" if said else "no SAYS: smoke-reply line: " + out[-300:])
 
 
 def m4():
@@ -314,7 +314,7 @@ def m4():
         if not steps.exists():
             return False, "no docs/goals/55/m4.steps (the Benchmark tab)"
         ok, out = console(steps, d, G55 / "console-bench.png")
-        bars = ok and "BENCH BARS:" in out
+        bars = ok and bool(re.search(r"SAYS: bench-bars = .*\d", out))
         return close and bars, f"bench: ttft {bt * 1000:.0f} ms, {btps:.1f} tok/s; SDK: ttft {ttft * 1000:.0f} ms, {tps:.1f} tok/s " \
             f"({'within' if close else 'outside'} 25 %); console bars {'drawn' if bars else 'missing: ' + out[-200:]}"
 
