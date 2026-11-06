@@ -1089,3 +1089,4 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 
 ## 2026-11-05 · goal 54
 - Setup: worktree ../mojo-ui-g54 from main 809ec81; build/g47 and build/packs linked from main. Map of the shell (sheet_screen 4655, sheetchrome builders, liquid_look islands, Board free x/y, test verbs move:/resize:) from an Explore pass.
+- M0: mojoui.tiling as a split tree; first full test run failed only on text round trip (ratios kept to 3 decimals moved a card 1 px), fixed with 6 decimals. 2,000 random operations clean.
