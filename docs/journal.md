@@ -1178,3 +1178,8 @@ GTK's `open_url` with `$MOJOUI_OPENER`, `waitfor:` (buttons only). Contract: GOA
 - Owner's look at the shots: entries drew as full-width pills (fixed in round 1: text) and the note sat centred; rows now HStack(...).justify(BETWEEN) (note left, amount right; title and plan rows too). The gallery panes sat at different heights (each window centres its content): scripts/saas_shot.py crops both from their content's top. Looked at build/g57/m4.png and docs/gallery/img/saas.png: rows as rows, tops aligned. D-5726's wording corrected (the state cookie expires, it isn't cleared) and docs/saas.md's body-cap line (checked after Flare's read) after the auditor's round 2.
 - The AppKit row: BETWEEN mapped to equal spacing, but the labels stretched (words centred): hugging 750 shrank the row, 460 lost to its fill; then (premise changed, D-5728) the first text aligns leading and the last trailing. M8 PASS; looked at build/g57/m8-mac.png: Coffee left, $4.50 right, title and plan rows likewise, matching GTK's m4.png.
 - Review rounds 2 and 3: reviewer PASS (round 3's latent note fixed: align the label, never its holder), security auditor PASS (one open Medium, D-5725, documented). Final tree 43982418 checked milestone by milestone: M0–M4, M6–M8 PASS, M5 BLOCKED (docs/goals/57/check.txt). docs/report.md written.
+
+## 2026-11-06 · Goal 60 set up
+Owner: "email, background jobs, database [migrations], logging… remove fh-saas out of the equation… punch through".
+Worktree ../mojo-ui-g60 on goal-57-saas (D-6001), own .pixi. Contract: GOAL.md + docs/goals/60-check.py (Google, Stripe
+and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit modes, AUTH, 451s, dot-stuffing).

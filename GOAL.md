@@ -1,46 +1,42 @@
-# GOAL 57: SaaS building blocks in omxcode, Mojo only
+# GOAL 60: the whole SaaS backend in Mojo (fh-saas out of the equation)
 
-**End goal (owner, 2026-11-06):** "SaaS building blocks (sign-in, accounts, payments)" from the roadmap, as omxcode
-components. "fh-saas is phased out and this becomes Mojo only… enabling Google for real… Stripe yes… CPU mode, which is
-more common: you will match CPU, that's ok, this is more of a feature-parity request than a perf request; you are
-contributing to the omxcode app framework, that's the point." Plus a tiny, focused demo for the gallery.
+**End goal (owner, 2026-11-06):** "can you do email, background jobs, database [migrations], logging… why can't you go and
+do it… remove fh-saas out of the equation… a Mojo backend is the easiest thing you can have… just punch through."
+Goal 57 built sign-in, sessions, tenants and Stripe as `mojoui` modules; its `docs/saas.md` left email, jobs, migrations,
+logging, the audit log, multiple tenants per person, the customer portal, trials and rate limits ❌ or 🟡, and the
+security auditor left one Medium (invites join without asking). Close them, framework first: each a generic `mojoui`
+module with its own test; `examples/saas` only composes. Real Google, Stripe and SMTP keys come later from the owner.
 
-So: fh-saas's jobs (Google sign-in, sessions, users / tenants / roles, one SQLite per tenant, Stripe checkout, webhooks,
-paywall) become `mojoui` modules on `mojoui.serve` (Flare), each with its own test; a tiny native app signs in and pays
-through them. No Python in the server.
-
-Base: branch merge-50-52 d010952 (goals 50 + 52: Mojo 1.2, `mojoui.serve`, HTTPS in `mojoui.http`, `mojoui.hash`; not on
-main yet). Worktree ../mojo-ui-g57, branch goal-57-saas, its own .pixi. Decisions D-5701 on.
+Base: goal-57-saas 14392f0 (on merge-50-52). Worktree ../mojo-ui-g60, branch goal-60-backend, its own .pixi. 58 and 59
+are other sessions' goals. Decisions D-6001 on.
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/57-check.py`; Google and Stripe stand-ins live in the checker; truth is the SQLite files) |
+| # | Milestone | Proof (`docs/goals/60-check.py`; stand-ins for Google, Stripe and SMTP live in the checker; truth is the SQLite files, the log file and what the stand-ins received) |
 |---|---|---|
-| M0 | Its own env | `.pixi` is a directory here; `mojo --version` 1.2; tests/test_serve, test_https and test_hash pass on this tree |
-| M1 | `mojoui.crypto` | tests/test_crypto.mojo: `hmac: ok` (RFC 4231 vectors), `random: ok` (getrandom tokens, never repeat), `base64url: ok` (RFC 4648 vectors, round trip), `compare: ok` (constant time), `seal: ok` (a signed, expiring value: tampered, wrong key or expired → refused) |
-| M2 | `mojoui.accounts`: Google sign-in, sessions, tenants, roles | `build/saas/server` (examples/saas/server.mojo, nothing but mojoui) against the checker's OAuth stand-in: `/login` redirects with state + PKCE S256; a wrong state is refused; the callback makes the user, their tenant and its SQLite (`tenants/<id>.db`), and sets a sealed cookie; `/api/*` without it → 401, with a tampered one → 401; ada never sees ben's rows (`?tenant=`, a forged id: nothing); `/logout` ends the session server-side (the old cookie → 401); an admin's invite lets a second person join as viewer, and a viewer's write → 403 |
-| M3 | `mojoui.billing`: Stripe | against the checker's Stripe stand-in: `/billing/checkout` creates a subscription Checkout Session (form fields as Stripe's API takes them, the tenant as `client_reference_id`) and answers its URL; `/billing/webhook` checks `Stripe-Signature` (signed by the checker's own HMAC): a bad signature → 400, a 6-minute-old one → 400, the same event twice → applied once; `checkout.session.completed` makes ada Pro, ben stays free; a Pro-only route → 402 for ben; `customer.subscription.deleted` → free again |
-| M4 | The demo app, signed in and paying | examples/saas (GTK, headless, `MOJOUI_TEST`), a native client of the M2 server: "Sign in with Google" opens the system browser (`open_url`; the checker reads `$MOJOUI_OPENER` and plays the browser), the app gets its session through a loopback redirect (RFC 8252, PKCE); it shows `Signed in as ada@example.com`; an entry added in the app lands in ada's SQLite on the server; "Upgrade" opens checkout, the webhook arrives, the app shows `Pro`. `open_url` is a generic effect with its own test |
-| M5 | Live keys (owner-keyed) | with `~/.config/omxcode/saas.env` (names only: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY, STRIPE_PRICE_PRO; never printed): Google's real authorize URL from `/login` answers a consent page, not an error; Google's token endpoint answers `invalid_grant` (not `invalid_client`) to a made-up code; a real test-mode Checkout Session (`cs_test_…`) made by the server over Mojo HTTPS, paid with 4242 in headless Chromium, and `/billing/return` reading it back from Stripe makes the tenant Pro. No file → `BLOCKED` naming `scripts/saas_keys.sh` (a wizard for the owner) |
-| M6 | Parity and the gallery | docs/saas.md: fh-saas's modules → the mojoui piece, ✅/❌, honest (email, jobs, migrations may be ❌); docs/components.md lists the new modules (`scripts/components.py` not stale); a gallery card with a shot of ada (Pro) and ben (free) side by side, looked at; `scripts/package.sh saas linux` makes the Linux download |
-| M7 | Nothing regressed | tests/test_ui_thread.mojo and test_served.mojo pass here; scripts/libc_lint.py and scripts/decisions_lint.py pass |
-| M8 | The Mac (owner, 2026-11-06, D-5708) | over SSH in ~/omxcode-g57 on the owner's Mac (own pixi env; scripts/mac-ci the fallback): build/saas/server builds and starts there and the M2 and M3 HTTP proofs pass against it; the AppKit build (`scripts/build.sh saas mac`) signs in through open_url and the loopback, shows `Signed in as ada@example.com` and `Pro`, a screenshot looked at. A real run only, never the build alone |
+| M0 | Its own env, goal 57 still green | `.pixi` a directory; Mojo 1.2; goal 57's checker M1–M4 pass on this tree, except M2's silent-invite step, which M5 replaces on purpose (it must fail only there, at "the invited viewer") |
+| M1 | `mojoui.log` + the audit log | tests/test_log.mojo `json: ok`, `redact: ok`, `rotate: ok`. The server writes JSON lines to `$SAAS_LOG`: one per request (ts, level, rid, method, path without the query, status, ms) and the reply's `X-Request-Id` is that rid; after a sign-in, an entry, an invite, a checkout and a webhook, no line holds the cookie, an access token, a code, a state, the client secret, the Stripe key or the SMTP password; host.db's `audit` has sign_in, invite, invite_accept and plan_change rows with tenant and actor |
+| M2 | `mojoui.migrate` | tests/test_migrate.mojo `apply`, `idempotent`, `broken`, `checksum`, `down`. The server applies `$SAAS_MIGRATIONS/tenant/NNN_name.sql` (`-- up` / `-- down`) to every tenant's SQLite at start and to new tenants: two tenants made under 001, the server stopped, 002 (a new column) added, restarted: both files have the column and `schema_migrations` lists 1 and 2 with checksums; a broken 003 → the server refuses to start and both files stay at 2, unchanged; an applied file edited → refuses to start |
+| M3 | `mojoui.jobs` on the server, slow providers off the lock | a durable queue in host.db (status, attempts, run_at, error), workers off `mojoui.serve`'s lock, retries with backoff, `dead` after max attempts, pending jobs resume after a `kill -9` and restart. While Stripe's stand-in takes 8 s to answer a checkout and Google's 8 s to answer a token, 20 `/api/me` calls from another person each answer in < 300 ms. `GET /api/jobs` (admin) lists the tenant's jobs |
+| M4 | `mojoui.mail` | tests/test_mail.mojo `dotstuff`, `header_inject`, `encode`, `multipart`. SMTP with AUTH, markdown templates → text + HTML parts, UTF-8 subjects encoded; sent as jobs. Against the checker's SMTP stand-in: a welcome email on first sign-in; implicit TLS (`SMTP_TLS=implicit`, the checker's own CA in `SMTP_CA_FILE`) delivers; STARTTLS reported (PASS or ❌ in docs/saas.md, honest); the stand-in refusing twice (4xx) → delivered on the 3rd attempt, `attempts` 3; refusing always → `dead` with the reason; a name with CR/LF adds no header |
+| M5 | Invites you accept, many tenants per person | an admin's invite emails a link (sealed, expiring, single use); the invited person signing in is **not** joined; the link signed in as the invited address shows "Join <tenant>, invited by <name>?" and only a same-origin POST accept joins them, with the invited role; another person on the link → 403; the link again → 410; an expired one → 410. A person in two tenants lists both (`GET /api/tenants`) and switches (`POST /api/switch`); rows follow the switch, never leak |
+| M6 | Billing parity | `/billing/portal` creates a Stripe customer-portal session (stand-in checks the form) and answers its URL; `SAAS_TRIAL_DAYS` gives a new tenant a trial (`/api/pro` 200) that expires (→ 402); `STRIPE_TRIAL_DAYS` puts `subscription_data[trial_period_days]` on checkout; `customer.subscription.updated` with `cancel_at_period_end` keeps Pro and shows when it ends; status `past_due` → 402 after `SAAS_GRACE_DAYS` |
+| M7 | Hardening | per-IP limits on `/login`, `/auth/callback`, `/api/token`: over `SAAS_RATE` a minute → 429 with `Retry-After`; sliding sessions: idle past `SAAS_SESSION_IDLE` → 401, use extends it; the security auditor's goal-57 notes in docs/saas.md "Known limits" closed or still listed, honestly |
+| M8 | Parity, demo, keys, the Mac | docs/saas.md: every fh-saas row ✅ except blog/SEO, GraphQL and AI (out of scope, said so); `scripts/saas_keys.sh` also asks for SMTP; the native demo shows the trial, the portal button and an invite accepted (GTK shot, looked at); on the owner's Mac (~/omxcode-g60 only) the server builds and M1, M3, M5 and M6 pass against it |
+| M9 | Nothing regressed | goal 57's M6–M8 and tests/test_crypto, test_accounts, test_billing, test_ui_thread, test_served pass; libc and decision lints |
 
 ## Done means
-57-check PASS for M0–M4, M6, M7, M8, and M5 PASS or BLOCKED only for the owner's keys; the reviewer and the security
-auditor (sign-in, sessions, tenants, payments, webhooks) pass it; M4's and M6's shots looked at. `docs/report.md`.
+60-check PASS for M0–M9; the reviewer and the security auditor pass it; M8's shot looked at; `docs/report.md`.
 
 ## Out of bounds
-Pushing; deploying; real keys anywhere but the env file the owner writes; reading or printing secrets; sign-ups or paid
-services; merging into main (merge-50-52 isn't there yet); the frozen ../mojo-ui-apple-test and other sessions'
-worktrees; pip; another worktree's .pixi; lowering a proof; Python in the server (fixtures and the checker are fine);
-new looks (Liquid light/dark as it is); the GPU (CPU only; owner: a parity goal, not a speed one).
+Pushing; deploying; merging into main or goal-57-saas; real keys (the owner gives them later); reading or printing
+secrets; sign-ups or paid services; the frozen ../mojo-ui-apple-test and other sessions' worktrees (g50–g59); other
+folders on the owner's Mac; pip; another worktree's .pixi; lowering a proof; Python in the server; new looks; the GPU.
 
 ## Assumptions (taken instead of asking)
-- The client is native (gallery = downloads), the server is a Mojo program; the web host's own sign-in comes later.
-- Desktop sign-in is RFC 8252: the system browser plus a loopback redirect to the app, PKCE; tokens are sealed values.
-- Stripe: webhooks in the stand-in; for the live run, reading the session back on return (no tunnel to localhost).
-- Email, background jobs and migrations are listed in docs/saas.md, built only if time is left.
-- The Mac run (scripts/mac-ci) is next, not this goal.
+- No new product name: the pieces are `mojoui.*` modules, "omxcode SaaS" in docs; a brand ("omxsaas"?) is the owner's call.
+- SMTP, as fh-saas does (any provider speaks it); an HTTP mail API is a later adapter.
+- Jobs are at-least-once (an email may go twice after a crash, never zero times); said so in docs/saas.md.
+- Migrations are forward-first; `down` exists and is tested, but the server never runs it on its own.
 
 ## Budget
-120 turns (owner's spare credit this week; more than autopilot's default 80, the scope is wider).
+150 turns.
