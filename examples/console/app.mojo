@@ -105,11 +105,12 @@ struct Main(App):
         self.api.get(GOT_LABELS, "/admin/labels")
 
     def start_service(mut self):
-        """A consoled next to this binary, and nothing answering at the console's address on this machine: start it
-        (MXC_HOME, MXC_MAX and the port come from the environment, as consoled reads them). Stopped in closing()."""
+        """A consoled next to this binary, the console on its own address (no MXC_URL: 127.0.0.1:$MXC_PORT), and nothing
+        answering there: start it (MXC_HOME, MXC_MAX and the port come from the environment, as consoled reads them).
+        Stopped in closing(). Pointed elsewhere with MXC_URL, the console starts and probes nothing (goal 33's fixture)."""
         var helper = exe_dir() + "/consoled"
         var base = self.api.base
-        if not exists(helper) or not (base.startswith("http://127.0.0.1:") or base.startswith("http://localhost:")):
+        if not exists(helper) or environment("MXC_URL") != "":
             return
         var port = String(base[byte = base.rfind(":") + 1 :])
         var home = environment("MXC_HOME", environment("HOME", ".") + "/.mxc")

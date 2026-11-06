@@ -308,10 +308,10 @@ def m3():
         if not steps.exists():
             return False, "no docs/goals/55/m3.steps (search, pull, Ready, chat)"
         ok, out = console(steps, d, G55 / "console-chat.png")
-        said = re.findall(r"SAYS: smoke-reply = (.+)", out)
+        said = [x.strip("“”\"") for x in re.findall(r"SAYS: tl-detail@-1 = (.+)", out)]
         good = ok and said and len(said[-1].split()) >= 2
         return bool(good), f"try/chat: {reply[:60]!r}; SDK streamed {n} pieces; console: " + \
-            (f"reply {said[-1][:60]!r}" if said else "no SAYS: smoke-reply line: " + out[-300:])
+            (f"reply {said[-1][:60]!r}" if said else "no SAYS: tl-detail@-1 line: " + out[-300:])
 
 
 def wait_quiet_gpu(limit_s=1800, under=15, hold_s=15):
@@ -383,9 +383,9 @@ def m5():
     # the console starts its own consoled and stops it on quit
     port = free_port()
     steps = "wait:8000"
-    env = dict(os.environ, MXC_URL=f"http://127.0.0.1:{port}", MXC_PORT=str(port), MXC_HOME=str(G55 / "home-m5"),
-               MXC_MAX=user_max(), MOJOUI_TEST=steps)
+    env = dict(os.environ, MXC_PORT=str(port), MXC_HOME=str(G55 / "home-m5"), MXC_MAX=user_max(), MOJOUI_TEST=steps)
     env.pop("MXC_ADMIN_KEY", None)
+    env.pop("MXC_URL", None)  # (its own address: MXC_URL would point it elsewhere, where it starts nothing)
     p = subprocess.Popen([str(BUILD / "console/linux/console")], cwd=ROOT, env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True)
     up = wait_port(port, 20)
@@ -406,7 +406,7 @@ def m5():
     # a console killed outright (SIGKILL: no App.closing) still takes its consoled with it (review round 1: an orphaned
     # consoled kept a model on the GPU after M5's bare run)
     port = free_port()
-    env.update(MXC_URL=f"http://127.0.0.1:{port}", MXC_PORT=str(port), MOJOUI_TEST="pause:60000")
+    env.update(MXC_PORT=str(port), MOJOUI_TEST="pause:60000")
     p = subprocess.Popen([str(BUILD / "console/linux/console")], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not wait_port(port, 20):
         problems.append("the console didn't start a consoled (kill test)")
@@ -444,7 +444,7 @@ def m5():
         fresh.mkdir()
         port = free_port()
         benv = {"HOME": str(fresh), "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "XDG_RUNTIME_DIR": tmp,
-                "MXC_MAX": user_max(), "MXC_PORT": str(port), "MXC_URL": f"http://127.0.0.1:{port}", "MXC_HOME": str(HOME)}
+                "MXC_MAX": user_max(), "MXC_PORT": str(port), "MXC_HOME": str(HOME)}
         benv.update({k: os.environ[k] for k in ("DISPLAY", "GDK_BACKEND", "GSK_RENDERER", "GDK_DISABLE", "GDK_SCALE",
                                                 "XKB_CONFIG_ROOT") if k in os.environ})
         log = open(G55 / "bare-omxconsole.log", "w")

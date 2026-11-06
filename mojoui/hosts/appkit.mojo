@@ -3621,14 +3621,19 @@ def run_step[A: App](host_addr: Int, step: String):
             host[].report.note("TEST: no option " + kv[1])
             return
         host[].send(i, False, kv[1], index, host_addr)
-    elif verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip), as on GTK (goal 55: the Mac's checks read it)
-        var said = False
-        for ref n in host[].rt.shown.nodes:
-            if n.name == rest:
-                print("SAYS: " + rest + " = " + n.tip, flush=True)
-                said = True
-                break
-        if not said:
+    elif verb == "say":  # say:TAG[@n]: what the n-th view tagged TAG says now (@-1: the last): its tooltip, else its words
+        var ts = split_at(rest, "@")
+        var tag = ts[0]
+        var want = to_int(ts[1]) if ts[1] != "" else 0
+        var hits = List[Int]()
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].name == tag:
+                hits.append(k)
+        var at = want if want >= 0 else len(hits) + want
+        if at >= 0 and at < len(hits):
+            ref n = host[].rt.shown.nodes[hits[at]]
+            print("SAYS: " + rest + " = " + (n.tip if n.tip != "" else n.text), flush=True)
+        else:
             print("TEST: nothing tagged " + rest, flush=True)
     elif verb == "menu":  # menu:File>Save: the bar's File menu's Save item
         var t = split_at(rest, ">")

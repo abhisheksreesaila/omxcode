@@ -1,5 +1,5 @@
 # goal 55 M3: the console, on GTK, against a consoled with MAX: search, pull (a model already pulled resumes in seconds),
-# load, the smoke test's reply on the Ready card. limit 900 s
+# load, the smoke test's reply in its stage (the last stage's detail). limit 900 s
 wait:3000
 tap:Add a model
 wait:2000
@@ -7,4 +7,4 @@ enter:Search models=qwen2.5-0.5b
 wait:6000
 tap:qwen2.5-0.5b
 waitfor:Open=600000
-say:smoke-reply
+say:tl-detail@-1

@@ -6419,15 +6419,20 @@ def run_step[A: App](host_addr: Int, step: String):
             print("A11Y LABEL: #" + String(k) + " " + host[].rt.shown.nodes[k].name + " = " + want + (" (ok)" if got == "" else " (GTK: " + got + ")"))
     elif verb == "regions":  # regions:/path.json: the window's regions (mojoui.regions) in the window's pixels, as [{"name", "x", "y", "w", "h"}]
         write_regions(host[], rest)
-    elif verb == "say":  # say:TAG: what the view tagged TAG says now (its tooltip, a drawn view's words), mid-run
-        var said = False
-        for ref n in host[].rt.shown.nodes:
-            if n.name == rest:
-                print("SAYS: " + rest + " = " + n.tip)
-                said = True
-                break
-        if not said:
-            print("TEST: nothing tagged", rest)
+    elif verb == "say":  # say:TAG[@n]: what the n-th view tagged TAG says now (@-1: the last): its tooltip, else its words
+        var ts = split_at(rest, "@")
+        var tag = ts[0]
+        var want = to_int(ts[1]) if ts[1] != "" else 0
+        var hits = List[Int]()
+        for k in range(len(host[].rt.shown.nodes)):
+            if host[].rt.shown.nodes[k].name == tag:
+                hits.append(k)
+        var at = want if want >= 0 else len(hits) + want
+        if at >= 0 and at < len(hits):
+            ref n = host[].rt.shown.nodes[hits[at]]
+            print("SAYS: " + rest + " = " + (n.tip if n.tip != "" else n.text), flush=True)
+        else:
+            print("TEST: nothing tagged " + rest, flush=True)
     elif verb == "gaps":  # gaps:start forgets the frames painted so far; gaps:N runs the main loop N ms, then prints the longest gap between painted frames
         # (a freeze detector, D-1309: gaps:start shows the window if a test hasn't, listens to its paints as MOJOUI_TRACE
         # does, and asks for a redraw on every frame until gaps:N ends, so a window with nothing moving still paints at the
