@@ -2,7 +2,7 @@
 # a wrong secret, a changed body, an old or future timestamp, several v1 values (a key being rolled), malformed headers.
 # The checkout, the webhook route and plans are proved by docs/goals/57-check.py M3 against its Stripe stand-in.
 from mojoui.billing import signature_ok
-from mojoui.crypto import hmac_sha256
+from mojoui.crypto import hmac_sha256, hmac_hex_ok
 from mojoui.hash import hex
 
 
@@ -27,3 +27,9 @@ def main() raises:
     for bad in ["", "v1=" + sig, "t=" + String(t), "t=x,v1=" + sig, "t=" + String(t) + ",v1=" + sig[byte = : 63]]:
         expect(not signature_ok(bad, body, secret, t), "a malformed header: " + bad)
     print("webhook signature: ok")
+    # a generic source's signature (GitHub's documented example: secret "It's a Secret to Everybody", body "Hello, World!")
+    var gh = "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+    expect(hmac_hex_ok(gh, "Hello, World!", "It's a Secret to Everybody"), "GitHub's example")
+    expect(not hmac_hex_ok(gh, "Hello, World?", "It's a Secret to Everybody") and not hmac_hex_ok(gh, "Hello, World!", ""), "a wrong body or no secret")
+    print("generic signature: ok")
+

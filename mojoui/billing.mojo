@@ -39,6 +39,7 @@ comptime BILLING_001 = (
     " period_end INTEGER, cancel_at_period_end INTEGER NOT NULL DEFAULT 0, past_due_since REAL, event_at INTEGER NOT NULL DEFAULT 0, updated REAL);\n"
     "CREATE INDEX IF NOT EXISTS billing_subscription ON billing(subscription);\n"
     "CREATE TABLE IF NOT EXISTS stripe_events(id TEXT PRIMARY KEY, type TEXT, tenant TEXT, at INTEGER);\n"
+    "CREATE TABLE IF NOT EXISTS payments(session TEXT PRIMARY KEY, tenant TEXT NOT NULL, amount INTEGER, currency TEXT, at INTEGER);\n"
     "INSERT OR IGNORE INTO billing(tenant, status, customer, subscription) SELECT id, CASE plan WHEN 'pro' THEN 'active' ELSE 'none' END,"
     " customer, subscription FROM tenants WHERE plan = 'pro' OR customer IS NOT NULL;\n"
     "-- down\n"
@@ -60,13 +61,20 @@ struct BillingConfig(Copyable, Movable):
     var webhook_secret: String
     var price: String  # the Pro plan's recurring price id
     var base: String  # this server's URL (return pages)
+    var price_yearly: String  # the Pro plan's yearly price ("": none)
+    var prices_once: List[String]  # one-time prices a tenant may buy (POST /billing/purchase)
 
     @staticmethod
     def from_env() -> BillingConfig:
         """SAAS_STRIPE_API (default https://api.stripe.com), STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_PRO,
         SAAS_BASE."""
+        var once = List[String]()
+        for p in getenv("STRIPE_PRICES_ONCE").split(","):
+            if String(String(p).strip()) != "":
+                once.append(String(String(p).strip()))
         return BillingConfig(getenv("SAAS_STRIPE_API", "https://api.stripe.com"), getenv("STRIPE_SECRET_KEY"),
-            getenv("STRIPE_WEBHOOK_SECRET"), getenv("STRIPE_PRICE_PRO"), getenv("SAAS_BASE", "http://127.0.0.1:8000"))
+            getenv("STRIPE_WEBHOOK_SECRET"), getenv("STRIPE_PRICE_PRO"), getenv("SAAS_BASE", "http://127.0.0.1:8000"),
+            getenv("STRIPE_PRICE_PRO_YEARLY"), once^)
 
     def is_test_mode(self) -> Bool:
         return self.secret_key.startswith("sk_test_")
@@ -161,7 +169,7 @@ struct Billing(Copyable, Movable):
 
     def blocking(self, req: Req) -> Bool:
         """The routes that call Stripe."""
-        return req.path == "/billing/checkout" or req.path == "/billing/portal" or req.path == "/billing/return"
+        return req.path == "/billing/checkout" or req.path == "/billing/portal" or req.path == "/billing/return" or req.path == "/billing/purchase"
 
     def plan(self, tenant: String) raises -> Plan:
         var q = self.db().prepare(
@@ -210,7 +218,7 @@ struct Billing(Copyable, Movable):
                 return self._webhook(req, acc)
             if req.matches("GET", "/billing/return"):
                 return self._return(req, acc)
-            if req.matches("POST", "/billing/checkout") or req.matches("POST", "/billing/portal"):
+            if req.matches("POST", "/billing/checkout") or req.matches("POST", "/billing/portal") or req.matches("POST", "/billing/purchase"):
                 var m = acc.member(req)
                 if not m:
                     return Reply.error(401, "sign in first", "unauthorized")
@@ -221,7 +229,10 @@ struct Billing(Copyable, Movable):
                     return Reply.error(403, "billing starts from this site", "forbidden")
                 if req.path == "/billing/portal":
                     return self._portal(m.value())
-                return self._checkout(m.value())
+                var j = Json.parse(req.body if String(req.body.strip()) != "" else String("{}"))
+                if req.path == "/billing/purchase":
+                    return self._purchase(m.value(), j.text(j.get(0, "price")))
+                return self._checkout(m.value(), j.text(j.get(0, "interval"), "month"))
         except e:
             self.log.error("billing: " + String(e))
             return Reply.error(500, "billing failed", "internal")
@@ -236,15 +247,32 @@ struct Billing(Copyable, Movable):
             self.log.warn("Stripe refused", Fields().int("status", res.status).str("call", method + " " + path).str("error", res.error))
         return res^
 
-    def _checkout(self, m: Member) raises -> Reply:
-        if self.cfg.secret_key == "" or self.cfg.price == "":
-            return Reply.error(503, "billing isn't set up (STRIPE_SECRET_KEY, STRIPE_PRICE_PRO)", "not_configured")
+    def _purchase(self, m: Member, price: String) raises -> Reply:
+        """A one-time Checkout Session for a price in STRIPE_PRICES_ONCE (recorded in `payments` once paid)."""
+        var known = False
+        for p in self.cfg.prices_once:
+            known = known or p == price
+        if self.cfg.secret_key == "" or not known:
+            return Reply.error(400, "not a price this server sells", "bad_price")
+        var names: List[String] = ["mode", "line_items[0][price]", "line_items[0][quantity]", "success_url", "cancel_url", "client_reference_id", "metadata[tenant]"]
+        var values: List[String] = ["payment", price, "1", self.cfg.base + "/billing/return?session_id={CHECKOUT_SESSION_ID}",
+            self.cfg.base + "/billing/return?cancelled=1", m.tenant, m.tenant]
+        var r = self._stripe("POST", "/v1/checkout/sessions", form(names, values))
+        if r.status != 200:
+            return Reply.error(502, "Stripe refused the checkout", "stripe_failed")
+        var j = Json.parse(r.text())
+        return Reply.json('{"url": ' + json_string(j.text(j.get(0, "url"))) + ', "id": ' + json_string(j.text(j.get(0, "id"))) + "}")
+
+    def _checkout(self, m: Member, interval: String = "month") raises -> Reply:
+        var price = self.cfg.price_yearly if interval == "year" else self.cfg.price
+        if self.cfg.secret_key == "" or price == "":
+            return Reply.error(503, "billing isn't set up (STRIPE_SECRET_KEY, STRIPE_PRICE_PRO, STRIPE_PRICE_PRO_YEARLY)", "not_configured")
         var p = self.plan(m.tenant)
         if p.name == "pro":
             return Reply.error(409, "already on Pro", "already_pro")
         var names: List[String] = ["mode", "line_items[0][price]", "line_items[0][quantity]", "success_url", "cancel_url",
             "client_reference_id", "metadata[tenant]", "subscription_data[metadata][tenant]", "customer_email"]
-        var values: List[String] = ["subscription", self.cfg.price, "1", self.cfg.base + "/billing/return?session_id={CHECKOUT_SESSION_ID}",
+        var values: List[String] = ["subscription", price, "1", self.cfg.base + "/billing/return?session_id={CHECKOUT_SESSION_ID}",
             self.cfg.base + "/billing/return?cancelled=1", m.tenant, m.tenant, m.tenant, m.email]
         if self.stripe_trial_days > 0:
             names.append("subscription_data[trial_period_days]")
@@ -301,6 +329,18 @@ struct Billing(Copyable, Movable):
         var paid = j.text(j.get(s, "payment_status"))
         var key = "session:" + j.text(j.get(s, "id"))
         # (a subscription this server sold: not a Payment Link's one-off payment that carries someone's tenant id)
+        if j.text(j.get(s, "mode")) == "payment" and j.text(j.get(s, "status")) == "complete" and paid == "paid" and tenant != "":
+            var pay = db.prepare("INSERT OR IGNORE INTO payments(session, tenant, amount, currency, at) VALUES (?, ?, ?, ?, ?)")
+            pay.bind(1, j.text(j.get(s, "id")))
+            pay.bind(2, tenant)
+            pay.bind(3, j.number(j.get(s, "amount_total")))
+            pay.bind(4, j.text(j.get(s, "currency")))
+            pay.bind(5, now_s())
+            pay.run()
+            if db.changes() > 0:
+                Audit.record(db, tenant, "stripe", "payment", j.text(j.get(s, "id")))
+            self._once(db, id, "checkout.session.completed", tenant)
+            return False  # (a purchase, never a plan)
         var sold = j.text(j.get(s, "mode")) == "subscription" and j.text(j.get(s, "subscription")) != "" and j.text(j.get(s, "status")) == "complete"
         if tenant == "" or not sold or (paid != "paid" and paid != "no_payment_required") or self._seen(db, id) or self._seen(db, key):
             return False

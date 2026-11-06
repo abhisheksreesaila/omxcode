@@ -45,7 +45,7 @@ comptime STATE_COOKIE = "saas_state"  # the web sign-in's state, bound to the br
 comptime SESSION_S = 30 * 24 * 3600  # (no session outlives this, however often it's used)
 comptime STATE_S = 600
 comptime CODE_S = 60
-comptime ROLES = ["admin", "member", "viewer"]
+comptime ROLES = ["admin", "editor", "member", "viewer"]  # (editor: fh-saas's name for member)
 
 comptime HOST_001 = (
     "-- up\n"
@@ -154,7 +154,11 @@ struct Member(Copyable, Movable):
     var tenant_name: String
 
     def can_write(self) -> Bool:
-        return self.role == "admin" or self.role == "member"
+        return self.role == "admin" or self.role == "member" or self.role == "editor"
+
+    def at_least(self, role: String) -> Bool:
+        """fh-saas's ROLE_HIERARCHY: admin 3 > editor (= member) 2 > viewer 1."""
+        return role_rank(self.role) >= role_rank(role) and role_rank(role) > 0
 
     def is_admin(self) -> Bool:
         return self.role == "admin"
@@ -169,6 +173,16 @@ struct Invite(Copyable, Movable):
     var tenant_name: String
     var role: String
     var days: Int
+
+
+def role_rank(role: String) -> Int:
+    if role == "admin":
+        return 3
+    if role == "editor" or role == "member":
+        return 2
+    if role == "viewer":
+        return 1
+    return 0
 
 
 def form(names: List[String], values: List[String]) -> String:
@@ -393,6 +407,15 @@ struct Accounts(Copyable, Movable):
         except e:
             self.log.error("accounts: " + String(e))
         return None
+
+    def need(self, req: Req, role: String) -> Tuple[Optional[Member], Reply]:
+        """fh-saas's @require_role: the member when their role is at least `role`, else None and the 401 or 403 to answer."""
+        var m = self.member(req)
+        if not m:
+            return (Optional[Member](None), Reply.error(401, "sign in first", "unauthorized"))
+        if not m.value().at_least(role):
+            return (Optional[Member](None), Reply.error(403, "this needs the " + role + " role", "forbidden"))
+        return (m^, Reply(0, "", ""))
 
     def tenant_db(self, m: Member) raises -> Database:
         """The member's tenant's own SQLite file, this thread's connection (tenant ids are hex this module makes:
@@ -703,7 +726,7 @@ struct Accounts(Copyable, Movable):
         for r in materialize[ROLES]():
             known = known or r == role
         if not known or "@" not in email or email.byte_length() > 254 or "\r" in email or "\n" in email:
-            return Reply.error(400, "an email and a role (admin, member, viewer)", "bad_request")
+            return Reply.error(400, "an email and a role (admin, editor, member, viewer)", "bad_request")
         var v = m.value().copy()
         var db = self.db()
         var id: Int

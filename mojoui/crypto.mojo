@@ -194,3 +194,17 @@ def b64(text: String) -> String:
     for c in text.as_bytes():
         d.append(c)
     return b64(d)
+
+
+def hmac_hex_ok(signature_hex: String, body: String, secret: String) -> Bool:
+    """A generic webhook signature (GitHub's `X-Hub-Signature-256: sha256=<hex>`, most `X-Webhook-Signature`s): the
+    hex HMAC-SHA256 of the raw body under the shared secret, compared in constant time (any "sha256=" prefix dropped)."""
+    if secret == "" or signature_hex == "":
+        return False
+    var sig = String(signature_hex[byte = 7 :]) if signature_hex.startswith("sha256=") else signature_hex
+    var d = hmac_sha256(secret, body)
+    var digits = "0123456789abcdef"
+    var want = String("")
+    for b in d:
+        want += String(digits[byte = Int(b >> 4) : Int(b >> 4) + 1]) + String(digits[byte = Int(b & 15) : Int(b & 15) + 1])
+    return same(want, sig.lower())
