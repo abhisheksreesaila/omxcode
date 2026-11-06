@@ -102,6 +102,11 @@ def unlink(var path: String) -> Int:
     return Int(external_call["unlink", c_int](path.as_c_string_span()))
 
 
+def rename(var old: String, var new: String) -> Int:
+    """0 when `old` now has the name `new` (replacing it, in one step on one file system)."""
+    return Int(external_call["rename", c_int](old.as_c_string_span(), new.as_c_string_span()))
+
+
 def getpid() -> Int:
     return Int(external_call["getpid", Int32]())
 

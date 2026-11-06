@@ -1,12 +1,13 @@
 # /admin/search?q=: the curated models and MAX's catalog (MXC_HOME/max_catalog.json), each with its size estimate and
-# whether it fits the roomiest GPU (or the RAM) now (spec §4 search). Offline: no Hugging Face lookup for an owner/name
-# query that isn't in the pool (D-4772: a warning says so).
+# whether it fits the roomiest GPU (or the RAM) now (spec §4 search). A query also asks the Hugging Face Hub
+# (mojoui.hf, goal 55): its models follow the local matches, sized from the Hub's own figures; offline, a warning says so.
 
 from std.os.path import exists
 from mojoui.json import Json, json_string
 from supervisor import gpus
 from views import num, rnd
 from learn import read_text
+from mojoui.hf import hub_search
 
 comptime CURATED = ["qwen2.5-0.5b", "qwen2.5-1.5b", "qwen2.5-3b", "smollm2-1.7b", "llama3.2-1b", "all-minilm-l6"]
 comptime CURATED_REPOS = ["Qwen/Qwen2.5-0.5B-Instruct", "Qwen/Qwen2.5-1.5B-Instruct", "Qwen/Qwen2.5-3B-Instruct", "HuggingFaceTB/SmolLM2-1.7B-Instruct", "meta-llama/Llama-3.2-1B-Instruct", "sentence-transformers/all-MiniLM-L6-v2"]
@@ -19,6 +20,7 @@ struct Entry(Copyable, Movable):
     var arch: String  # "" when the catalog doesn't name one
     var params: Int  # -1: unknown
     var curated: Bool
+    var bytes: Int  # its weights' size from the Hub (-1: from params, 2 bytes each)
 
 
 def params_from_name(repo: String) -> Int:
@@ -100,7 +102,7 @@ def fit_of(est: Float64, free: Float64) -> String:
 
 
 def row(e: Entry, free: Float64, suggestions: String = "[]") -> String:
-    var size = -1.0 if e.params < 0 else Float64(e.params) * 2 / 1e9
+    var size = Float64(e.bytes) / 1e9 if e.bytes > 0 else (-1.0 if e.params < 0 else Float64(e.params) * 2 / 1e9)
     var est = est_of(e.params)
     return ('{"id": ' + json_string(e.id) + ', "repo_id": ' + json_string(e.repo) + ', "source": "max", "architecture": '
             + (json_string(e.arch) if e.arch != "" else "null") + ', "params": ' + (String(e.params) if e.params >= 0 else "null")
@@ -130,7 +132,7 @@ def search_json(q: String, home: String) raises -> String:
         warnings.append("No MAX catalog cache in " + home + " (max_catalog.json): architectures are unknown.")
     for i in range(len(materialize[CURATED]())):
         var repo = String(materialize[CURATED_REPOS]()[i])
-        pool.append(Entry(String(materialize[CURATED]()[i]), repo, arch_of.get(repo.lower(), ""), params_from_name(repo), True))
+        pool.append(Entry(String(materialize[CURATED]()[i]), repo, arch_of.get(repo.lower(), ""), params_from_name(repo), True, -1))
         seen.append(repo.lower())
     if catalog_text != "":
         var cat = Json.parse(catalog_text)
@@ -146,7 +148,7 @@ def search_json(q: String, home: String) raises -> String:
                     if r.lower() in seen:
                         continue
                     seen.append(r.lower())
-                    pool.append(Entry(r, r, name, params_from_name(r), False))
+                    pool.append(Entry(r, r, name, params_from_name(r), False, -1))
     var mem = memory()
     var free = mem[1]
     var picked = List[Int]()
@@ -181,8 +183,15 @@ def search_json(q: String, home: String) raises -> String:
             picked.append(i)
         if len(picked) > 20:
             picked.resize(20, 0)
-        if query.find("/") > 0 and len(picked) == 0:
-            warnings.append("Looking up " + query + " on Hugging Face isn't available in this daemon yet.")
+        try:  # the Hub's matches after the local ones (most downloaded first)
+            for m in hub_search(query, limit=20):
+                if m.id.lower() in seen or len(picked) >= 30:
+                    continue
+                seen.append(m.id.lower())
+                pool.append(Entry(m.id, m.id, arch_of.get(m.id.lower(), ""), m.params if m.params > 0 else params_from_name(m.id), False, m.bytes if m.bytes > 0 else -1))
+                picked.append(len(pool) - 1)
+        except e:
+            warnings.append("Couldn't search Hugging Face (" + String(e) + "): showing local matches only.")
     var results = String("[")
     for k in range(len(picked)):
         ref e = pool[picked[k]]

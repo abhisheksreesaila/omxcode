@@ -167,6 +167,10 @@ struct Json(Movable):
                 return self.kids[node][k]
         return -1
 
+    def key(self, node: Int, i: Int) -> String:
+        """The key of an object's i-th member ("" for anything else)."""
+        return self.keys[node][i] if node >= 0 and self.kinds[node] == J_OBJECT and 0 <= i < len(self.keys[node]) else String("")
+
     def text(self, node: Int, default: String = "") -> String:
         return self.texts[node] if node >= 0 and self.kinds[node] == J_STRING else default
 

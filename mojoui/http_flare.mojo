@@ -11,7 +11,10 @@
 # stream sees a cancel when its next bytes arrive (or after the timeout's silence), not every 50 ms.
 
 from std.os import getenv
-from std.os.path import exists
+from std.os.path import exists, getsize
+from std.atomic import Atomic
+from std.memory.alloc import unsafe_alloc
+from mojoui import libc
 from mojoui.http import Request, Response, Transport, Url, request_problem, has_control, Sink, SseReader, Piece, utf8_whole, utf8_lossy, MAX_STREAM_CHUNK
 from mojoui.clock import now_ns
 from flare.http import HttpClient, HeaderMap
@@ -162,3 +165,143 @@ struct FlareTransport(Transport):
             return r^
         except e:
             return Response.failed(_failure(e, req))
+
+
+# ---- downloads to a file (goal 55: a model's weights; any app's large files) -----------------------------------------
+
+comptime _A = Atomic[Scalar[DType.int64]]
+comptime _P = Pointer[Int64, MutUntrackedOrigin]
+comptime DOWNLOAD_CHUNK = 4 * 1024 * 1024
+
+
+struct Transfer(Copyable, Movable):
+    """A download's progress and its cancel flag, shared between the thread that downloads and the ones that watch:
+    three words on the heap (bytes done, bytes in all (0: not known yet), cancel). Copies share them; whoever made it
+    frees it once nobody downloads or watches."""
+
+    var words: Int
+
+    def __init__(out self):
+        var w = unsafe_alloc[Int64](3)
+        for i in range(3):
+            w[i] = 0
+        self.words = Int(w)
+
+    def _w(self, k: Int) -> _P:
+        return _P(unsafe_from_address=self.words + 8 * k)
+
+    def done(self) -> Int:
+        return Int(_A.load(self._w(0)))
+
+    def total(self) -> Int:
+        return Int(_A.load(self._w(1)))
+
+    def cancel(self):
+        _A.store(self._w(2), 1)
+
+    def cancelled(self) -> Bool:
+        return _A.load(self._w(2)) != 0
+
+    def _set(self, k: Int, v: Int):
+        _A.store(self._w(k), Int64(v))
+
+    def free(mut self):
+        if self.words != 0:
+            _P(unsafe_from_address=self.words).unsafe_free()
+            self.words = 0
+
+
+def redirected(req: Request, location: String) raises -> Request:
+    """`req` sent on to a redirect's Location (absolute, scheme-relative, host-relative or path-relative); an
+    Authorization header stays only while the host does (a token never follows a redirect to a CDN)."""
+    var base = Url.parse(req.url)
+    var origin = base.scheme + "://" + base.host + ("" if (base.port == 443 and base.scheme == "https") or (base.port == 80 and base.scheme == "http") else ":" + String(base.port))
+    var to: String
+    if location.startswith("http://") or location.startswith("https://"):
+        to = location
+    elif location.startswith("//"):
+        to = base.scheme + ":" + location
+    elif location.startswith("/"):
+        to = origin + location
+    else:
+        var dir = base.target.split("?")[0]
+        to = origin + String(dir[byte=:dir.rfind("/") + 1]) + location
+    var out = req.copy()
+    out.url = to
+    if Url.parse(to).host != base.host:
+        var names = List[String]()
+        var values = List[String]()
+        for i in range(len(out.names)):
+            if out.names[i].lower() != "authorization":
+                names.append(out.names[i])
+                values.append(out.values[i])
+        out.names = names^
+        out.values = values^
+    return out^
+
+
+def fetch_to_file(req: Request, path: String, t: Transfer, hops: Int = 10) -> Response:
+    """Downloads `req`'s body into `path`, on the calling thread: into `path`.part first (a part already there is
+    resumed with a Range request; a server that ignores it starts over), renamed to `path` once whole. `t` counts the
+    bytes (a resumed part's included) and is polled for a cancel, which keeps the part for a later resume. The reply's
+    status and headers come back; its body is empty, or the error page's when the status isn't 2xx."""
+    var problem = _problem(req)
+    if problem != "":
+        return Response.failed(problem)
+    var part = path + ".part"
+    try:
+        var have = getsize(part) if exists(part) else 0
+        var client = _client(req)
+        var out = _outgoing(req)
+        if have > 0:
+            out.headers.set("Range", "bytes=" + String(have) + "-")
+        var s = client.send_streaming(out^)
+        var r = Response()
+        r.status = s.status
+        _headers(s.headers, r)
+        if r.status == 416 and have > 0:  # (the part is whole, or the file changed: start over)
+            s.close()
+            _ = libc.unlink(part)
+            return fetch_to_file(req, path, t, hops)
+        if (r.status == 301 or r.status == 302 or r.status == 303 or r.status == 307 or r.status == 308) and r.header("location") != "":
+            s.close()
+            if hops <= 0:
+                return Response.failed("too many redirects from " + req.url)
+            return fetch_to_file(redirected(req, r.header("location")), path, t, hops - 1)
+        if r.status < 200 or r.status >= 300:
+            while not s.done():
+                var more = s.read_chunk(65536)
+                if len(more) == 0:
+                    break
+                r.body += more^
+            return r^
+        if r.status != 206:
+            have = 0  # (a whole body: the server didn't resume)
+        var length = r.header("content-length")
+        if length != "":
+            try:
+                t._set(1, have + atol(length))
+            except:
+                pass
+        t._set(0, have)
+        var done = have
+        with open(part, "a" if have > 0 else "w") as f:
+            while not s.done():
+                if t.cancelled():
+                    s.close()
+                    return Response.failed("cancelled")
+                var chunk = s.read_chunk(DOWNLOAD_CHUNK)
+                if len(chunk) == 0:
+                    break
+                f.write_bytes(Span(chunk))
+                done += len(chunk)
+                t._set(0, done)
+        if t.total() > 0 and done != t.total():
+            return Response.failed("the download of " + req.url + " ended at " + String(done) + " of " + String(t.total()) + " bytes")
+        if libc.rename(part, path) != 0:
+            return Response.failed("couldn't rename " + part + " to " + path)
+        if r.status == 206:
+            r.status = 200
+        return r^
+    except e:
+        return Response.failed(_failure(e, req))
