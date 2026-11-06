@@ -1,12 +1,20 @@
-# The daemon's admin API as requests: the base URL from $MXC_URL (default: the fixture server's,
+# The daemon's admin API as requests: the base URL from $MXC_URL (default: the console's own consoled, when one sits
+# next to its binary (the download: http://127.0.0.1:$MXC_PORT, 11435 unless set); else the fixture server's,
 # scripts/console_fixture.py), the admin key from $MXC_ADMIN_KEY sent as the original's X-Mst-Admin header (core.js
 # ADMIN: "1" when unset, as the original sends). Replies come back to update() as Events.
 
 from mojoui.http import Http, Request
 from mojoui.shared import environment
 from mojoui.json import json_string
+from mojoui.companion import exe_dir
+from std.os.path import exists
 
 comptime DEFAULT_URL = "http://127.0.0.1:8765"
+
+
+def own_url() -> String:
+    """Where the console's own consoled listens: 127.0.0.1 and $MXC_PORT (11435, the Python daemon's, unless set)."""
+    return "http://127.0.0.1:" + environment("MXC_PORT", "11435")
 
 
 struct Api(Movable):
@@ -15,7 +23,7 @@ struct Api(Movable):
 
     def __init__(out self):
         self.http = Http()
-        var url = environment("MXC_URL", DEFAULT_URL)
+        var url = environment("MXC_URL", own_url() if exists(exe_dir() + "/consoled") else String(DEFAULT_URL))
         self.base = String(url.rstrip("/"))
 
     def admin(self, var r: Request) -> Request:

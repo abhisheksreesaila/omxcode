@@ -24,6 +24,10 @@ from mojoui.panel import CardNote
 from mojoui.json import json_string
 from themes.omxqua import omxqua
 from api import Api, chat_curl
+from mojoui.companion import Companion, exe_dir
+from mojoui.shared import environment
+from std.os import makedirs
+from std.os.path import exists
 from data import Store, read_models, read_metrics, read_series, read_info, read_system, read_labels, read_pulls, read_ports
 from topbar import top_bar
 from home import Library, home_view, visible, label_models, names_json, bulk_state
@@ -66,9 +70,13 @@ struct Main(App):
     var confirm: TwoStep
     var dark: Bool
     var themed: Theme
+    var service: Companion  # the consoled this console started (goal 55: the download runs its own, LM Studio's way)
+    var service_problem: String  # why it isn't up ("" when it is, or isn't ours to start)
 
     def __init__(out self):
         self.api = Api()
+        self.service = Companion()
+        self.service_problem = ""
         self.store = Store()
         self.path = "/"
         self.width = 1440
@@ -89,10 +97,33 @@ struct Main(App):
         self.confirm = TwoStep()
         self.dark = False
         self.themed = omxqua(False)
+        self.start_service()  # (before the first polls: they go to it)
         self.poll_core(True)  # (startPolling, startSystemPolling and the Beacon's loop each poll once at the start)
         self.api.get(GOT_SYSTEM, "/admin/system")
         self.poll_jobs()
         self.api.get(GOT_LABELS, "/admin/labels")
+
+    def start_service(mut self):
+        """A consoled next to this binary, and nothing answering at the console's address on this machine: start it
+        (MXC_HOME, MXC_MAX and the port come from the environment, as consoled reads them). Stopped in closing()."""
+        var helper = exe_dir() + "/consoled"
+        var base = self.api.base
+        if not exists(helper) or not (base.startswith("http://127.0.0.1:") or base.startswith("http://localhost:")):
+            return
+        var port = String(base[byte = base.rfind(":") + 1 :])
+        var home = environment("MXC_HOME", environment("HOME", ".") + "/.mxc")
+        try:
+            makedirs(home + "/logs", exist_ok=True)
+        except:
+            pass
+        self.service_problem = self.service.ensure(base + "/health", [helper], home + "/logs/consoled.log", ["MXC_PORT=" + port])
+        if self.service_problem == "":
+            print("CONSOLED UP: " + base + (" (started)" if self.service.started() else " (already running)"), flush=True)
+        else:
+            print("CONSOLED: " + self.service_problem, flush=True)
+
+    def closing(mut self):
+        self.service.stop()
 
     def title(self) -> String:
         return "omxconsole"

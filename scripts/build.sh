@@ -36,6 +36,16 @@ plist() {  # plist <template> <out>
   sed -e "s/__BUNDLE_ID__/$BUNDLE_ID/" -e "s/HelloMojo/$NAME/g" "$1" > "$2"
 }
 
+companions() {  # companions <dir>: examples/$EX/companions' programs built beside the app (mojoui.companion starts them, goal 55)
+  [ -f "examples/$EX/companions" ] || return 0
+  grep -v '^#' "examples/$EX/companions" | while read -r name src kind; do
+    [ -n "$name" ] || continue
+    echo "   companion: $name ($src)"
+    if [ "$kind" = flare ]; then scripts/mojo_flare.sh build "$src" -o "$1/$name" || return 1
+    else mojo_build "$src" -o "$1/$name" || return 1; fi
+  done
+}
+
 build_linux() {
   local out="build/$EX/linux"; mkdir -p "$out"; rm -f "$out/$EX"
   echo "== Linux ($EX): GTK4 + libadwaita"
@@ -43,6 +53,7 @@ build_linux() {
   mojo_build hosts/linux_main.mojo "${debug[@]}" -o "$out/$EX" \
     -Xlinker -lgtk-4 -Xlinker -ladwaita-1 -Xlinker -lgobject-2.0 -Xlinker -lglib-2.0 -Xlinker -lgio-2.0 -Xlinker -lfontconfig -Xlinker -lpango-1.0 "${LINK[@]}"
   mkdir -p "$out/fonts"; cp mojoui/hosts/static/fonts/*.ttf "$out/fonts/"  # the app's own fonts, beside the binary (D-155)
+  companions "$out" || return 1
   # Its JavaScript (docs/js.md, goal 34 M3): each WebComponent runs in a WebKitGTK view loading the web's own bundles,
   # built into $out/webview by the same esbuild step. Where WebKitGTK 6.0 isn't installed, scripts/webkitgtk.sh fetches
   # the pinned package and $out/$EX becomes a launcher that lays it over /usr/lib (bubblewrap, no root: D-608)

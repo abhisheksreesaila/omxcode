@@ -1,0 +1,3 @@
+# Programs built beside the app (scripts/build.sh; mojoui.companion starts them): name, source, and "flare" when it
+# needs Flare (scripts/mojo_flare.sh)
+consoled examples/consoled/main.mojo flare
