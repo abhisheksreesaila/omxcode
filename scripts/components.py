@@ -103,6 +103,11 @@ FEATURES = [
     ("HTTP server (mojoui.serve on Flare: routes, JSON, SSE Pipes, proxy)", "Service.answer(req) -> Reply · Server.run(service, port) · Pipe · proxy(request, pipe)", r"(?!)", "consoled"),
     ("Child processes (mojoui.process: spawn, log, health, stop the group, idle)", "Process.start(argv, log) · wait_healthy(url) · stop() · idle_ms()", r"(?!)", "consoled"),
     ("SHA-256 (mojoui.hash, plain Mojo)", "sha256_hex(text)", r"(?!)", "consoled"),
+    ("Crypto (mojoui.crypto: HMAC-SHA256, OS random, base64url, constant-time compare, seals, PKCE)", "hmac_sha256 · random_token · b64url · same · seal/unseal · pkce_challenge", r"(?!)", "saas"),
+    ("Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant)", "Accounts(dir, AuthConfig.from_env()) · handle(req) · member(req) · tenant_db(member)", r"(?!)", "saas"),
+    ("Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)", "Billing(dir, BillingConfig.from_env()) · handle(req, accounts) · paywall(member)", r"(?!)", "saas"),
+    ("Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252)", "DesktopSignIn(server) · .url · code() · token_request(msg, code)", r"(?!)", "saas"),
+    ("Open in the system browser (an effect: App.opens, mojoui.browser)", "Browser.open(url) · def opens(mut self) -> List[String]", r"(?!)", "saas"),
 ]
 
 # Library features no host draws (pure Mojo over a C library): their state per host, set by hand from what ran
@@ -115,7 +120,13 @@ BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, F
            "HTTPS requests (FlareTransport behind mojoui.http; https:// through Flare, -D MOJOUI_FLARE)": {"Linux (GTK)": "✅"},
            "HTTP server (mojoui.serve on Flare: routes, JSON, SSE Pipes, proxy)": {"Linux (GTK)": "✅"},
            "Child processes (mojoui.process: spawn, log, health, stop the group, idle)": {"Linux (GTK)": "✅"},
-           "SHA-256 (mojoui.hash, plain Mojo)": {"Linux (GTK)": "✅"}}
+           "SHA-256 (mojoui.hash, plain Mojo)": {"Linux (GTK)": "✅"},
+           # goal 57: run by tests/test_crypto, test_accounts, test_billing, test_open_url and docs/goals/57-check.py M2–M4 on Linux
+           "Crypto (mojoui.crypto: HMAC-SHA256, OS random, base64url, constant-time compare, seals, PKCE)": {"Linux (GTK)": "✅"},
+           "Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant)": {"Linux (GTK)": "✅"},
+           "Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)": {"Linux (GTK)": "✅"},
+           "Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
+           "Open in the system browser (an effect: App.opens, mojoui.browser)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"}}
 
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)
@@ -327,7 +338,16 @@ UNPROVEN = {("Linux (GTK)", "File picker"): "the checks hand the path in with th
 
 
 # What a reader should know about a feature row beyond its cells (limits, not states).
-NOTES = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
+NOTES = {"Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant)":
+         "a server piece (mojoui.serve, Flare: Linux and macOS); proved against the checker's OAuth stand-in (goal 57 M2) and, with "
+         "the owner's keys, Google itself (M5); one tenant per user, invites join new people only (D-5712); docs/saas.md maps fh-saas",
+         "Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall)":
+         "subscriptions only (no one-off payments, no customer portal yet); webhooks proved against the checker's signer, the live "
+         "run reads the session back on return (D-5706, D-5716)",
+         "Open in the system browser (an effect: App.opens, mojoui.browser)":
+         "GTK: xdg-open or $MOJOUI_OPENER; AppKit: `open` or $MOJOUI_OPENER through posix_spawnp; the web and the phones don't open "
+         "pages yet (D-5718)",
+         "SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
          "the system's libsqlite3 loaded at run time (dlopen, D-1304/D-1311); Android and iPhone don't build it yet; the Mac links "
          "against nothing new and loads /usr/lib/libsqlite3.dylib (built, not run)",
          "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)":
