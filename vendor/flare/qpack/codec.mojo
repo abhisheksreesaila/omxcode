@@ -1,0 +1,401 @@
+"""QPACK encoder + decoder (RFC 9204) -- static-only.
+
+QPACK is the HPACK-shaped header compression layer that HTTP/3
+uses on top of QUIC. The full RFC 9204 codec ships a dynamic
+table that streams insertions on a dedicated unidirectional
+QUIC stream (the "encoder stream"), with field sections
+referencing entries in the dynamic table by index. The dynamic
+table introduces head-of-line blocking risk on the QUIC layer
+(field sections may need to wait for inserts they reference)
+and a non-trivial encoder-stream protocol on top of the simple
+field-section codec.
+
+This module is the **static-only** subset:
+
+* Field section prefix: required-insert-count and base both
+  fixed at 0 on encode; decoder rejects field sections whose
+  required-insert-count is not 0 (no dynamic-table support yet).
+* Field lines: indexed-static, literal-with-static-name, and
+  literal-with-literal-name. The dynamic-reference variants
+  (``1Tppppppp`` with T=0, plus ``001Nhppp`` post-base) are
+  rejected on decode.
+* String literals: optional Huffman per RFC 7541 Appendix B
+  (shared with HPACK; the encoder picks the shorter form).
+
+The static-only subset is enough for an HTTP/3 server that
+talks to a real client: the most common request and response
+shapes (``:method GET``, ``:status 200``, common content types)
+all hit the static table directly, and literal field lines cover
+everything else without head-of-line risk.
+
+Public surface:
+
+* :class:`QpackHeader` -- ``(name, value)`` pair, re-exported
+  from ``flare.http2.hpack`` for ergonomic interop.
+* :func:`encode_field_section` -- emit the field section prefix
+  plus all field lines into a fresh byte list.
+* :func:`decode_field_section` -- parse a field section into a
+  list of :class:`QpackHeader`. Rejects dynamic-table references.
+* :data:`QPACK_STATIC_TABLE_SIZE` -- the 99 of the static table.
+
+Sans-I/O contract: zero I/O imports; registered in
+``tests/tools/check_sans_io.sh``.
+
+References:
+- RFC 9204 "QPACK: Field Compression for HTTP/3".
+- RFC 9114 §4.2 "HTTP Fields" (lowercase mandate).
+- RFC 7541 Appendix B (Huffman -- shared with HPACK).
+"""
+
+from std.collections import List
+from std.collections.span import Span
+
+from flare.http.proto.ascii import ascii_unchecked_string
+from flare.http2.hpack import (
+    HpackHeader as QpackHeader,
+    decode_integer,
+    encode_integer,
+)
+from flare.http.hpack_huffman_simd import huffman_decode_simd
+from flare.http.hpack_huffman import (
+    HuffmanError,
+    huffman_decode,
+    huffman_encode,
+    huffman_encoded_length,
+)
+
+from .static_table import (
+    QPACK_STATIC_TABLE_SIZE,
+    static_name,
+    static_table_find,
+    static_table_find_name,
+    static_table_lookup,
+    static_value,
+)
+
+
+comptime QPACK_DEFAULT_MAX_FIELD_SECTION_SIZE: UInt64 = 65536
+"""Default cap on a *decoded* field section: the sum of
+``name + value + 32`` over its field lines, the size RFC 9114 section
+4.2.2 gives SETTINGS_MAX_FIELD_SECTION_SIZE. Matches the 64 KiB flare
+advertises."""
+
+comptime QPACK_FIELD_SECTION_TOO_LARGE = "qpack: field section above limit"
+"""Error text raised when a decoded section passes the cap. Callers match
+on ``field section above limit``."""
+
+
+@always_inline
+def _charge_field(
+    mut used: UInt64, name_len: Int, value_len: Int, limit: UInt64
+) raises:
+    """Add one decoded field line to ``used`` and raise once the section
+    passes ``limit``.
+
+    Called as each line is decoded, before it is stored. The caller's cap
+    on the *compressed* section does not bound the decoded one: an indexed
+    line is one byte on the wire and a whole header in memory, and a
+    dynamic-table entry can be referenced over and over (CVE-2025-64702 and
+    the FoxIO QPACK disclosure, Oct 2026). Checking afterwards, once the
+    section is fully expanded, is the same bug."""
+    used += UInt64(name_len) + UInt64(value_len) + 32
+    if used > limit:
+        raise Error(QPACK_FIELD_SECTION_TOO_LARGE)
+
+
+# ── Encoder ────────────────────────────────────────────────────────────────
+
+
+def _encode_string_literal(
+    mut out: List[UInt8],
+    value: String,
+    prefix_byte: UInt8,
+    prefix_bits: Int,
+    huffman_flag: UInt8,
+):
+    """Emit a QPACK string literal at the current ``out`` cursor.
+
+    The high bits of ``prefix_byte`` are preserved; the Huffman
+    flag bit (one above ``prefix_bits``) is set when Huffman
+    actually shortens the encoding. Falls back to the raw bytes
+    otherwise so we never spend cycles encoding strings that get
+    longer (a real concern for already-compressed payloads).
+    """
+    var raw = value.as_bytes()
+    var raw_len = len(raw)
+    var huff_len = huffman_encoded_length(raw)
+    if huff_len < raw_len:
+        # Use Huffman path, encoded straight into ``out``.
+        encode_integer(out, huff_len, prefix_bits, prefix_byte | huffman_flag)
+        huffman_encode(raw, out)
+    else:
+        encode_integer(out, raw_len, prefix_bits, prefix_byte)
+        out.extend(raw)
+
+
+def encode_field_section(
+    headers: List[QpackHeader],
+    mut out: List[UInt8],
+) raises:
+    """Append the QPACK-encoded field section bytes (RFC 9204 §4.5) to ``out``.
+
+    The caller owns the buffer and may pass the same
+    ``List[UInt8]`` through repeated encode calls, clearing
+    between calls so the underlying allocation amortises across
+    the stream. The encoder appends only; it never reads from or
+    truncates the existing contents.
+
+    The static-only codec emits:
+
+    * Field section prefix: required_insert_count=0,
+      sign=0 + delta_base=0 (two single-byte 0x00s).
+    * Per header, the lowest-cost wire shape:
+      - full match in the static table -> indexed field line
+        (``11pppppp`` for indices < 63, with continuation bytes
+        for higher indices; the static-table flag T is always 1).
+      - name-only match -> literal-with-name-reference
+        (``0101pppp`` with T=1 for static, then string literal).
+      - no match -> literal-with-literal-name
+        (``0010nnnn`` with H+name length, then name, then value).
+
+    Header names must be lowercase per RFC 9114 §4.2; the
+    encoder emits whatever case the caller provides and trusts
+    the call site. The decoder mirrors this -- it surfaces the
+    bytes verbatim.
+    """
+    # Field section prefix: required_insert_count = 0 + Base = 0.
+    # 8-bit prefix integer for required_insert_count == 0; the
+    # short form is a single 0x00 byte.
+    out.append(UInt8(0x00))
+    # Sign + Delta Base; sign=0 + 7-bit prefix integer 0 -> 0x00.
+    out.append(UInt8(0x00))
+    for i in range(len(headers)):
+        encode_field_line(headers[i].name, headers[i].value, out)
+
+
+def encode_field_line(name: String, value: String, mut out: List[UInt8]):
+    """Append one static-only field line (RFC 9204 §4.5) for
+    ``name: value`` to ``out``: indexed when the pair is in the static
+    table, a name reference when only the name is, otherwise a literal
+    name. Follows the two-byte prefix :func:`encode_field_section`
+    writes; exposed so an encoder can stream fields without building a
+    header list first."""
+    var idx = static_table_find(name, value)
+    if idx >= 0:
+        # 4.5.2 Indexed Field Line: 1Txxxxxx, T=1 for static,
+        # 6-bit prefix integer for the index. Prefix byte
+        # 0xC0 carries the high "1T" bits.
+        encode_integer(out, idx, 6, UInt8(0xC0))
+        return
+    var name_idx = static_table_find_name(name)
+    if name_idx >= 0:
+        # 4.5.4 Literal Field Line With Name Reference:
+        # 01NTxxxx, T=1 for static, 4-bit prefix index.
+        # Prefix byte 0x50 carries the high "0101" bits with
+        # N=0 (allow indexing); 0x70 sets N=1 (never-indexed).
+        encode_integer(out, name_idx, 4, UInt8(0x50))
+        # 1-byte string-literal prefix: Hxxxxxxx (H=Huffman
+        # flag, 7-bit prefix length).
+        _encode_string_literal(out, value, UInt8(0x00), 7, UInt8(0x80))
+        return
+    # 4.5.6 Literal Field Line With Literal Name:
+    # 001Nhppp, N=0, h=Huffman flag, 3-bit prefix name length.
+    # Prefix byte 0x20 carries the high "001N" bits; the
+    # Huffman flag occupies the next bit (0x08 = 1 << 3).
+    _encode_string_literal(out, name, UInt8(0x20), 3, UInt8(0x08))
+    _encode_string_literal(out, value, UInt8(0x00), 7, UInt8(0x80))
+
+
+# ── Decoder ────────────────────────────────────────────────────────────────
+
+
+def _literal_to_string(bytes: Span[UInt8, _]) raises -> String:
+    """Build a ``String`` from decoded QPACK literal bytes.
+
+    Pure-ASCII input (the overwhelmingly common case) goes through
+    ``ascii_unchecked_string``, which is valid by construction and skips
+    the UTF-8 validator. Any byte ``>= 0x80`` sends the whole literal
+    through ``String(from_utf8=...)``, which raises when the bytes are
+    not valid UTF-8, so a peer can never put an ill-formed ``String``
+    into a decoded header (QPACK-03).
+
+    Raises:
+        Error: If the bytes are not valid UTF-8.
+    """
+    for i in range(len(bytes)):
+        if bytes[i] >= UInt8(0x80):
+            try:
+                return String(from_utf8=bytes)
+            except:
+                raise Error("qpack: literal is not valid UTF-8")
+    return ascii_unchecked_string(bytes)
+
+
+def _decode_string_literal(
+    buf: Span[UInt8, _],
+    offset: Int,
+    prefix_bits: Int,
+    huffman_mask: UInt8,
+) raises -> Tuple[String, Int]:
+    """Decode a QPACK string literal.
+
+    Reads the leading byte's Huffman flag (mask
+    ``huffman_mask``), then the ``prefix_bits``-bit prefix
+    integer length, then the payload bytes. If the Huffman bit
+    is set, the payload is decoded via the shared codec.
+    """
+    if offset >= len(buf):
+        raise Error("qpack: literal truncated at flag byte")
+    var huffman = (buf[offset] & huffman_mask) != UInt8(0)
+    var ip = decode_integer(buf, offset, prefix_bits)
+    var n = ip.value
+    if ip.offset + n > len(buf):
+        raise Error("qpack: literal payload truncated")
+    # Slice the payload directly out of the input span instead of
+    # rebuilding it byte-by-byte; the per-byte append loop here was a
+    # top _realloc cost under request concurrency.
+    var payload = buf[ip.offset : ip.offset + n]
+    # The bytes are peer-controlled (raw, or Huffman-decoded), so they
+    # are not necessarily ASCII. ``_literal_to_string`` keeps the
+    # one-``memcpy`` fast path for pure ASCII and validates anything
+    # else as UTF-8, raising on failure (QPACK-03).
+    if huffman:
+        # Huffman expands ~8:5 worst case; reserve a generous estimate
+        # up front so the decode loop fills one allocation instead of
+        # growing the backing store byte-by-byte (a top allocator cost
+        # under request concurrency).
+        var bytes = List[UInt8](capacity=n + (n // 2) + 8)
+        # Cached-table decoder (see hpack_huffman_simd): O(1) per
+        # short code via the comptime _ROOT_TABLE instead of the
+        # scalar codec's per-byte 257-symbol linear scan, which
+        # dominated QPACK decode CPU under request concurrency.
+        huffman_decode_simd(payload, bytes)
+        var s = _literal_to_string(Span[UInt8, _](bytes))
+        return Tuple[String, Int](s^, ip.offset + n)
+    var s = _literal_to_string(payload)
+    return Tuple[String, Int](s^, ip.offset + n)
+
+
+def decode_field_section(
+    buf: Span[UInt8, _],
+    max_field_section_size: UInt64 = QPACK_DEFAULT_MAX_FIELD_SECTION_SIZE,
+) raises -> List[QpackHeader]:
+    """Parse a QPACK field section.
+
+    Static-only: rejects field sections whose
+    required-insert-count is not 0 (the encoder never emits one
+    above 0 either; a peer that sends a non-zero count is
+    using the dynamic table we don't support yet, and the right
+    behaviour is to surface a connection error rather than mis-
+    interpret the payload).
+
+    Returns the parsed headers in wire order. Field-line type
+    dispatch:
+
+    * ``1Txxxxxx`` -- indexed; rejects T=0 (dynamic; not supported).
+    * ``01NTxxxx`` -- literal with name reference; rejects T=0.
+    * ``001Nhxxx`` -- literal with literal name.
+    * ``0001xxxx`` -- indexed post-base (dynamic only) -> reject.
+    * ``0000Nhxx`` -- literal with name reference post-base
+      (dynamic only) -> reject.
+
+    The decoded size (``name + value + 32`` per line) is capped at
+    ``max_field_section_size``; the section is rejected as soon as a line
+    would pass it.
+    """
+    var headers = List[QpackHeader]()
+    var used = UInt64(0)
+    if len(buf) < 2:
+        raise Error("qpack: field section prefix truncated")
+    # Required Insert Count (8-bit prefix).
+    var ric = decode_integer(buf, 0, 8)
+    if ric.value != 0:
+        raise Error(
+            "qpack: required_insert_count "
+            + String(ric.value)
+            + " > 0; dynamic table not supported"
+        )
+    # Sign + Delta Base (1-bit + 7-bit prefix). The Base value is
+    # only relevant when required_insert_count > 0; we still
+    # parse the byte to advance the cursor.
+    var base = decode_integer(buf, ric.offset, 7)
+    var pos = base.offset
+    while pos < len(buf):
+        var b0 = buf[pos]
+        if (b0 & UInt8(0x80)) != UInt8(0):
+            # Indexed Field Line: 1Txxxxxx
+            var t_static = (b0 & UInt8(0x40)) != UInt8(0)
+            if not t_static:
+                raise Error(
+                    "qpack: indexed dynamic field line; dynamic"
+                    " table not supported"
+                )
+            var ip = decode_integer(buf, pos, 6)
+            if ip.value < 0 or ip.value >= QPACK_STATIC_TABLE_SIZE:
+                raise Error(
+                    "qpack: static index " + String(ip.value) + " out of range"
+                )
+            var sname = String(static_name(ip.value))
+            var svalue = String(static_value(ip.value))
+            _charge_field(
+                used,
+                sname.byte_length(),
+                svalue.byte_length(),
+                max_field_section_size,
+            )
+            headers.append(QpackHeader(sname^, svalue^))
+            pos = ip.offset
+            continue
+        if (b0 & UInt8(0x40)) != UInt8(0):
+            # Literal Field Line With Name Reference: 01NTxxxx
+            var t_static = (b0 & UInt8(0x10)) != UInt8(0)
+            if not t_static:
+                raise Error(
+                    "qpack: literal-with-name-ref dynamic; dynamic"
+                    " table not supported"
+                )
+            var ip = decode_integer(buf, pos, 4)
+            if ip.value < 0 or ip.value >= QPACK_STATIC_TABLE_SIZE:
+                raise Error(
+                    "qpack: static name index "
+                    + String(ip.value)
+                    + " out of range"
+                )
+            var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
+            var nm = String(static_name(ip.value))
+            _charge_field(
+                used,
+                nm.byte_length(),
+                lit[0].byte_length(),
+                max_field_section_size,
+            )
+            headers.append(QpackHeader(nm^, lit[0]))
+            pos = lit[1]
+            continue
+        if (b0 & UInt8(0x20)) != UInt8(0):
+            # Literal Field Line With Literal Name: 001Nhxxx
+            var name_lit = _decode_string_literal(buf, pos, 3, UInt8(0x08))
+            var value_lit = _decode_string_literal(
+                buf, name_lit[1], 7, UInt8(0x80)
+            )
+            _charge_field(
+                used,
+                name_lit[0].byte_length(),
+                value_lit[0].byte_length(),
+                max_field_section_size,
+            )
+            headers.append(QpackHeader(name_lit[0], value_lit[0]))
+            pos = value_lit[1]
+            continue
+        if (b0 & UInt8(0x10)) != UInt8(0):
+            # Indexed Field Line With Post-Base Index (dynamic).
+            raise Error(
+                "qpack: indexed-post-base dynamic field line;"
+                " dynamic table not supported"
+            )
+        # Literal Field Line With Post-Base Name Reference: 0000Nhxx
+        raise Error(
+            "qpack: literal-post-base dynamic field line;"
+            " dynamic table not supported"
+        )
+    return headers^

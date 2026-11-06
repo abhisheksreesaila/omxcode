@@ -11,8 +11,41 @@ from std.ffi import external_call, c_int
 from std.memory.alloc import unsafe_alloc
 from mojoui.http import Request, Response, Transport, Sink, Piece, new_node, S_CANCEL, S_HEAD
 from mojoui.http_socket import SocketTransport
+from mojoui import libc
 
-comptime Backend = SocketTransport  # (the only one today: plain HTTP/1.1 over libc sockets)
+from std.sys import is_defined
+from std.os import getenv
+
+
+struct AutoTransport(Transport):
+    """With Flare built in (-D MOJOUI_FLARE): https:// goes through Flare, http:// through the socket transport (or Flare
+    too when MOJOUI_HTTP_TRANSPORT=flare; =socket keeps everything on sockets, https then refused as before)."""
+
+    @staticmethod
+    def flare(req: Request) -> Bool:
+        var choice = getenv("MOJOUI_HTTP_TRANSPORT")
+        if choice == "socket":
+            return False
+        return choice == "flare" or req.url.startswith("https://")
+
+    @staticmethod
+    def send(req: Request) -> Response:
+        comptime if is_defined["MOJOUI_FLARE"]():
+            from mojoui.http_flare import FlareTransport
+            if AutoTransport.flare(req):
+                return FlareTransport.send(req)
+        return SocketTransport.send(req)
+
+    @staticmethod
+    def stream(req: Request, mut sink: Sink) -> Response:
+        comptime if is_defined["MOJOUI_FLARE"]():
+            from mojoui.http_flare import FlareTransport
+            if AutoTransport.flare(req):
+                return FlareTransport.stream(req, sink)
+        return SocketTransport.stream(req, sink)
+
+
+comptime Backend = AutoTransport  # (sockets everywhere; Flare for https:// where it's built in, D-4763)
 comptime POLL_US = 4_000  # how often a host looks for finished requests while any are out (µs)
 
 comptime _A = Atomic[Scalar[DType.int64]]
@@ -98,9 +131,10 @@ def _work[T: Transport](words: Int, slot: Int):
     _release(words, slot)
 
 
-def _entry[T: Transport](arg: Int) abi("C") -> Int:
+def _entry[T: Transport](p: libc.ThreadArg) -> libc.ThreadArg:
+    var arg = Int(p)
     _work[T](arg, Int(_A.load(_word(arg, W_SLOT))))
-    return 0
+    return libc.null_arg()
 
 
 struct InFlight(Movable):
@@ -172,9 +206,9 @@ def start[T: Transport](var req: Request) -> InFlight:
     slot.unsafe_write(_Slot(req^))
     _A.store(_word(Int(words), W_SLOT), Int64(Int(slot)))
     var tid = List[Int](length=1, fill=0)  # (a buffer: pthread_create writes the thread's id into it)
-    var rc = external_call["pthread_create", c_int](Int(tid.unsafe_ptr()), Int(0), _entry[T], Int(words))
+    var rc = libc.pthread_create[_entry[T]](Int(words), Int(tid.unsafe_ptr()))
     if rc != 0:
         _work[T](Int(words), Int(slot))
     else:
-        _ = external_call["pthread_detach", c_int](tid[0])
+        _ = libc.pthread_detach(tid[0])
     return InFlight(Int(words), Int(slot), msg, id, stream_end)

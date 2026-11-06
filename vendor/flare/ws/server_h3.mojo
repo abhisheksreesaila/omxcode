@@ -1,0 +1,281 @@
+"""Server-side WebSocket over HTTP/3 (RFC 9220).
+
+The HTTP/3 counterpart of :mod:`flare.ws.server_h2`: a client opens a
+WebSocket with an extended CONNECT (``:protocol: websocket``) request
+stream, the server answers 200 without ending the stream, and the
+WebSocket frames ride DATA frames on it both ways. The handler shape is
+the h2 sidecar's: edge-driven ``on_open`` / ``on_message`` /
+``on_close`` over a per-tunnel :class:`WsOverH3ServerStream`, attached
+with :meth:`flare.http.HttpServer.attach_ws_h3`.
+"""
+
+from .frame import (
+    DEFAULT_MAX_FRAME_BYTES,
+    WS_TOO_BIG_MARKER,
+    WsCloseCode,
+    WsFrame,
+    WsOpcode,
+)
+from .protocol import WS_EVENT_MESSAGE, WsProtocol
+from ..http.response import Response
+from ..quic.server import Http3Tunnel, QuicListener
+from ..runtime.pool import Pool
+
+
+struct WsOverH3ServerStream(Copyable):
+    """One WebSocket tunnel on an HTTP/3 stream. The RFC 6455 rules live
+    in :class:`flare.ws.protocol.WsProtocol`; outbound frames are unmasked
+    (RFC 6455 sec 5.3) and queued on the stream."""
+
+    var tunnel: Http3Tunnel
+    var proto: WsProtocol
+    var closed: Bool
+
+    def __init__(out self, tunnel: Http3Tunnel, var initial: List[UInt8]):
+        self.tunnel = tunnel
+        self.proto = WsProtocol()
+        self.proto.inbox = initial^
+        self.closed = False
+
+    def _flush(mut self, mut listener: QuicListener) raises:
+        if len(self.proto.outbox) == 0:
+            return
+        if not listener.send_http3_tunnel(
+            self.tunnel, Span[UInt8, _](self.proto.outbox)
+        ):
+            self.closed = True
+            raise Error("WsOverH3ServerStream: tunnel closed")
+        self.proto.consumed(len(self.proto.outbox))
+
+    def send_frame(
+        mut self, mut listener: QuicListener, frame: WsFrame
+    ) raises -> None:
+        """Queue ``frame`` on the tunnel; a CLOSE frame ends it."""
+        if self.closed:
+            raise Error("WsOverH3ServerStream: send on closed stream")
+        try:
+            self.proto.send_frame(frame)
+        except e:
+            self.closed = True
+            self._flush(listener)
+            raise e^
+        self._flush(listener)
+        if self.proto.close_sent:
+            self.closed = True
+
+    def try_pull_frame(
+        mut self, mut listener: QuicListener
+    ) raises -> Optional[WsFrame]:
+        """The next complete message as one TEXT or BINARY frame, a CLOSE
+        frame once the session has ended (its reply already sent), or
+        ``None`` until more data arrives."""
+        self.proto.inbox.extend(
+            Span[UInt8, _](listener.take_http3_tunnel(self.tunnel))
+        )
+        var ev = self.proto.next_event()
+        try:
+            self._flush(listener)
+        except:
+            pass
+        if not ev:
+            return None
+        if ev.value().kind != WS_EVENT_MESSAGE:
+            self.closed = True
+        return self.proto.event_frame(ev.value())
+
+    def is_closed(imm self) -> Bool:
+        return self.closed
+
+    def close(
+        mut self,
+        mut listener: QuicListener,
+        code: UInt16 = WsCloseCode.NORMAL,
+        reason: String = "",
+    ) raises -> None:
+        """Send a CLOSE frame; the tunnel ends once it is sent."""
+        if self.closed:
+            return
+        self.send_frame(listener, WsFrame.close(code, reason))
+
+
+trait WsH3Handler(Copyable, Deinitable):
+    """Edge-driven handler for WebSocket-over-HTTP/3 tunnels, shared by
+    every tunnel on the server like :trait:`flare.ws.WsH2Handler`."""
+
+    def on_open(
+        mut self, mut carrier: WsOverH3ServerStream, mut listener: QuicListener
+    ) raises -> None:
+        """Called once when a tunnel is accepted."""
+        ...
+
+    def on_message(
+        mut self,
+        mut carrier: WsOverH3ServerStream,
+        mut listener: QuicListener,
+        frame: WsFrame,
+    ) raises -> None:
+        """Called per decoded client frame."""
+        ...
+
+    def on_close(
+        mut self, mut carrier: WsOverH3ServerStream, mut listener: QuicListener
+    ) raises -> None:
+        """Called once when the tunnel ends, whichever side ended it."""
+        ...
+
+
+# Type erasure, as in server_h2: the HTTP/3 serve loop is generic over
+# the HTTP handler only, so the sidecar travels as a boxed address and
+# monomorphised thunks.
+
+comptime _OpenThunk = def(
+    Int, mut WsOverH3ServerStream, mut QuicListener
+) raises thin -> None
+comptime _MsgThunk = def(
+    Int, mut WsOverH3ServerStream, mut QuicListener, WsFrame
+) raises thin -> None
+comptime _DestroyThunk = def(Int) thin -> None
+comptime _CloneThunk = def(Int) raises thin -> Int
+
+
+def _open_thunk[
+    W: WsH3Handler
+](addr: Int, mut c: WsOverH3ServerStream, mut l: QuicListener) raises:
+    Pool[W].get_ptr(addr)[].on_open(c, l)
+
+
+def _msg_thunk[
+    W: WsH3Handler
+](
+    addr: Int, mut c: WsOverH3ServerStream, mut l: QuicListener, f: WsFrame
+) raises:
+    Pool[W].get_ptr(addr)[].on_message(c, l, f)
+
+
+def _close_thunk[
+    W: WsH3Handler
+](addr: Int, mut c: WsOverH3ServerStream, mut l: QuicListener) raises:
+    Pool[W].get_ptr(addr)[].on_close(c, l)
+
+
+def _destroy_thunk[W: WsH3Handler](addr: Int):
+    Pool[W].free(addr)
+
+
+def _clone_thunk[W: WsH3Handler](addr: Int) raises -> Int:
+    return Pool[W].alloc_move(Pool[W].get_ptr(addr)[].copy())
+
+
+struct WsH3Hooks(Copyable):
+    """A boxed :trait:`WsH3Handler` and its thunks. Copies are
+    non-owning; the owner runs ``destroy`` once."""
+
+    var addr: Int
+    var open: _OpenThunk
+    var msg: _MsgThunk
+    var close: _OpenThunk
+    var destroy: _DestroyThunk
+    var clone_box: _CloneThunk
+
+    def __init__(
+        out self,
+        addr: Int,
+        open: _OpenThunk,
+        msg: _MsgThunk,
+        close: _OpenThunk,
+        destroy: _DestroyThunk,
+        clone_box: _CloneThunk,
+    ):
+        self.addr = addr
+        self.open = open
+        self.msg = msg
+        self.close = close
+        self.destroy = destroy
+        self.clone_box = clone_box
+
+    def clone(self) raises -> Self:
+        """Hooks over a fresh boxed copy of the handler (one per worker);
+        the caller destroys it."""
+        var out = self.copy()
+        out.addr = self.clone_box(self.addr)
+        return out^
+
+
+def make_ws_h3_hooks[W: WsH3Handler](var handler: W) raises -> WsH3Hooks:
+    """Box ``handler``; the caller runs ``hooks.destroy(hooks.addr)``
+    once after the serve loop exits."""
+    return WsH3Hooks(
+        Pool[W].alloc_move(handler^),
+        _open_thunk[W],
+        _msg_thunk[W],
+        _close_thunk[W],
+        _destroy_thunk[W],
+        _clone_thunk[W],
+    )
+
+
+def ws_h3_accept(
+    hooks: WsH3Hooks,
+    mut listener: QuicListener,
+    mut tunnels: List[WsOverH3ServerStream],
+) raises:
+    """Take every extended CONNECT stream that has arrived: a WebSocket
+    one (``:protocol: websocket``, ``sec-websocket-version: 13``, RFC
+    9220 sec 3 and RFC 8441 sec 5) becomes a tunnel and gets
+    ``on_open``; any other is refused (400 malformed, 501 another
+    protocol) and its stream ends. Other requests are left for the
+    HTTP handler."""
+    for slot in listener.ready_slots():
+        var ready = listener.take_http3_completed_streams(slot)
+        for i in range(len(ready)):
+            var sid = ready[i]
+            if not listener.is_http3_tunnel_request(slot, sid):
+                continue
+            var status = 400
+            try:
+                var req = listener.take_http3_request(slot, sid)
+                if req.headers.get(":protocol") != "websocket":
+                    status = 501
+                elif req.headers.get("sec-websocket-version") == "13":
+                    var early = List[UInt8]()
+                    swap(early, req.body)
+                    var c = WsOverH3ServerStream(
+                        listener.open_http3_tunnel(slot, sid), early^
+                    )
+                    hooks.open(hooks.addr, c, listener)
+                    tunnels.append(c^)
+                    continue
+            except:
+                pass
+            listener.emit_http3_response(slot, sid, Response(status=status))
+
+
+def ws_h3_dispatch(
+    hooks: WsH3Hooks,
+    mut listener: QuicListener,
+    mut tunnels: List[WsOverH3ServerStream],
+) raises:
+    """Hand each tunnel's arrived frames to ``on_message``; a tunnel
+    whose CLOSE went out, whose peer ended or reset it, or that sent a
+    bad frame gets ``on_close`` and is ended and dropped."""
+    var i = 0
+    while i < len(tunnels):
+        ref c = tunnels[i]
+        while not c.closed:
+            var f: Optional[WsFrame]
+            try:
+                f = c.try_pull_frame(listener)
+            except:
+                break  # the carrier queued its CLOSE, if one applies
+            if not f:
+                break
+            hooks.msg(hooks.addr, c, listener, f.take())
+        if c.closed or not listener.http3_tunnel_open(c.tunnel):
+            try:
+                hooks.close(hooks.addr, c, listener)
+            except:
+                pass
+            listener.close_http3_tunnel(c.tunnel)
+            _ = tunnels.pop(i)
+        else:
+            i += 1

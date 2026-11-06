@@ -1,0 +1,987 @@
+"""QUIC connection + stream state machines (RFC 9000 §3 + §13).
+
+Pure sans-I/O state model for a QUIC connection. The reactor
+wrapping wraps this in UDP I/O + crypto; the codec layer here
+just walks the state machines as packets / frames / timer ticks
+arrive.
+
+Public surface:
+
+* :class:`StreamState` -- the 7-state RFC 9000 §3.1 / §3.2 stream
+  state machine (IDLE / OPEN / HALF_CLOSED_LOCAL / HALF_CLOSED_
+  REMOTE / RESET_SENT / RESET_RECVD / CLOSED).
+* :class:`Stream` -- one bidi or uni stream's state, including
+  send/recv high-water-marks for flow control.
+* :class:`ConnectionState` -- the connection-level state
+  (HANDSHAKE / ESTABLISHED / CLOSING / DRAINING / CLOSED) per
+  RFC 9000 §10.
+* :class:`Connection` -- top-level container holding
+  - per-side keying state (handshake_complete flag),
+  - flow-control limits,
+  - per-stream :class:`Stream` instances keyed by stream-id,
+  - the timer-driven idle / pto / loss-detection deadlines.
+* :func:`handle_frame_buf` -- per-buffer ingestion entry point.
+  Reads one wire frame from the start of ``buf``, dispatches the
+  matching :trait:`FrameHandler` callback into the connection
+  state machines, and returns the number of bytes consumed. The
+  caller drains a packet payload by advancing its cursor and
+  re-invoking the dispatcher.
+* :class:`ConnectionEvents` -- the value the driver returns from
+  one tick: bytes the caller should send, the next deadline at
+  which to call back, plus connection-level events (handshake
+  done, stream finished, connection closed).
+* :func:`apply_stream` / :func:`apply_ack` / etc. -- per-typed
+  payload helpers the dispatcher calls; exposed so the reactor
+  layer (and tests) can drive transitions directly when they
+  already have a typed payload in hand.
+
+The state-machine layer is intentionally sans-I/O: there are no
+sockets, no TLS handshake, no time source. The caller passes
+``now_us`` into every entry point and receives
+:class:`ConnectionEvents` carrying the next deadline; the timer
+shape lives in the reactor wrapper.
+
+References:
+- RFC 9000 §3 "Stream States" + §10 "Connection Termination".
+- RFC 9000 §13 "Packetization and Reliability".
+"""
+
+from std.collections import List, Optional, Dict
+from std.memory import Pointer
+from std.collections.span import Span
+from ._state_helpers import (
+    append_ack_ranges,
+    expand_ack_ranges,
+    frame_allowed_before_1rtt,
+)
+from .frame import (
+    AckFrequencyFrame,
+    EcnCounts,
+    AckFrame,
+    AckRange,
+    ConnectionCloseFrame,
+    CryptoFrame,
+    DataBlockedFrame,
+    DatagramFrame,
+    FrameHandler,
+    MaxDataFrame,
+    MaxStreamDataFrame,
+    MaxStreamsFrame,
+    NewConnectionIdFrame,
+    NewTokenFrame,
+    PathChallengeFrame,
+    PathResponseFrame,
+    ResetStreamFrame,
+    RetireConnectionIdFrame,
+    StopSendingFrame,
+    StreamDataBlockedFrame,
+    StreamFrame,
+    StreamsBlockedFrame,
+    parse_frame_into,
+)
+
+
+from ._state_types import (
+    STREAM_STATE_IDLE,
+    STREAM_STATE_OPEN,
+    STREAM_STATE_HALF_CLOSED_LOCAL,
+    STREAM_STATE_HALF_CLOSED_REMOTE,
+    STREAM_STATE_RESET_SENT,
+    STREAM_STATE_RESET_RECVD,
+    STREAM_STATE_CLOSED,
+    Stream,
+    ConnectionEvents,
+    new_stream,
+    empty_events,
+)
+
+
+# ── Connection state machine (RFC 9000 §10) ────────────────────────────────
+
+
+comptime CONN_STATE_HANDSHAKE: Int = 0
+comptime CONN_STATE_ESTABLISHED: Int = 1
+comptime CONN_STATE_CLOSING: Int = 2
+comptime CONN_STATE_DRAINING: Int = 3
+comptime CONN_STATE_CLOSED: Int = 4
+
+
+# ── Connection migration limits (RFC 9000 §19.15-§19.18) ──────────────────
+comptime _CID_MIN_LEN: Int = 1
+comptime _CID_MAX_LEN: Int = 20
+comptime _RESET_TOKEN_LEN: Int = 16
+comptime _PATH_DATA_LEN: Int = 8
+
+
+@fieldwise_init
+struct _PeerConnId(Copyable):
+    """One entry in the peer's connection-ID table (RFC 9000
+    §5.1.1): a Source CID the peer issued via NEW_CONNECTION_ID
+    plus its stateless-reset token. Keyed by sequence number in
+    :attr:`Connection.peer_cids`; the client picks one of these as
+    the active Destination CID when it migrates paths."""
+
+    var cid: List[UInt8]
+    var reset_token: List[UInt8]
+
+
+@fieldwise_init
+struct Connection(Copyable):
+    """Top-level connection state.
+
+    Holds the connection-level state, the per-stream map, and the
+    timer-shape fields the driver uses to schedule the next tick.
+    The connection here only tracks the data-plane state machines.
+
+    Uses :class:`Dict` for the stream map so the driver can look
+    up by stream id in O(1); RFC 9000 caps stream ids at 2**62-1
+    so the key space is wide enough that stream-id overflow is a
+    non-concern.
+    """
+
+    var state: Int
+    var handshake_complete: Bool
+    var idle_timeout_us: UInt64
+    var last_activity_us: UInt64
+    var max_data_send: UInt64
+    var max_data_recv: UInt64
+    var bytes_in_flight: UInt64
+    var streams: Dict[UInt64, Stream]
+    var ack_pending: Bool
+    var largest_received_packet: UInt64
+    var largest_acked_by_peer: UInt64
+    var close_error_code: UInt64
+    var close_reason: List[UInt8]
+    var peer_cids: Dict[UInt64, _PeerConnId]
+    """Peer-issued Source CIDs (RFC 9000 §5.1.1) keyed by sequence
+    number, learned from NEW_CONNECTION_ID. The migration path
+    picks a spare entry as the next active Destination CID."""
+    var active_dcid_seq: UInt64
+    """Sequence number of the peer CID currently used as the active
+    Destination CID. ``0`` is the handshake CID (§5.1.1)."""
+    var peer_retire_prior_to: UInt64
+    """Highest ``retire_prior_to`` the peer has sent; every sequence
+    number below it is retired for good."""
+    var outgoing_path_challenge: List[UInt8]
+    """The 8-byte PATH_CHALLENGE payload we last sent while probing
+    a new path; an inbound PATH_RESPONSE must echo it to validate
+    the path (§8.2). Empty when no probe is outstanding."""
+    var path_validated: Bool
+    """True once the outstanding path probe was confirmed by a
+    matching PATH_RESPONSE."""
+    var is_server: Bool
+    """True for the server role (set by :class:`QuicConnection`). A
+    server treats a received HANDSHAKE_DONE as a PROTOCOL_VIOLATION
+    (RFC 9000 §19.20)."""
+    var adv_max_streams_bidi: UInt64
+    """Peer-initiated bidirectional streams we have allowed
+    (``initial_max_streams_bidi`` plus any MAX_STREAMS raise); a stream
+    id above it is a STREAM_LIMIT_ERROR (RFC 9000 §4.6)."""
+    var adv_max_streams_uni: UInt64
+    """The same for peer-initiated unidirectional streams."""
+    var check_stream_ids: Bool
+    """Whether :func:`check_stream_frame_id` runs on received stream
+    frames. Set by the server (:class:`QuicConnection`) and the client
+    (:class:`QuicClientConnection`); off for a bare sans-I/O connection,
+    which has no notion of which streams its driver opened."""
+    var next_local_bidi: UInt64
+    """The next locally initiated bidirectional stream id that has not
+    been opened (client 0, 4, ...; server 1, 5, ...). The client advances
+    it in ``open_bidi_stream``; the server opens none."""
+    var next_local_uni: UInt64
+    """The same for unidirectional streams (client 2, 6, ...; server 3, ...)."""
+    var peer_initial_max_stream_data: UInt64
+    """Send limit a peer-initiated stream starts with: the peer's
+    ``initial_max_stream_data_bidi_local`` (RFC 9000 sec 18.2). The
+    server holds it at 0 until it has read the client's transport
+    parameters, then raises it and every open stream's limit."""
+    var new_token: List[UInt8]
+    """The latest NEW_TOKEN token the server sent (client side, RFC 9000
+    sec 8.1.3), for the Initial of a later connection to it."""
+    var ack_freq_set: Bool
+    """The peer sent ACK_FREQUENCY (draft-ietf-quic-ack-frequency): ACKs
+    follow its threshold and delay instead of going out with every
+    burst of packets."""
+    var ack_freq_seq: UInt64
+    """The lowest ACK_FREQUENCY sequence number still applied."""
+    var ack_threshold: UInt64
+    var ack_max_delay_us: UInt64
+    var ack_immediate: Bool
+    var ack_unacked: Int
+    """Ack-eliciting packets received since the last ACK was sent."""
+    var ack_first_us: UInt64
+    var max_datagram_recv: UInt64
+    """The ``max_datagram_frame_size`` we advertised (RFC 9221 sec 3); 0
+    when we did not, and then any DATAGRAM frame is a PROTOCOL_VIOLATION,
+    as is one larger than this."""
+
+
+comptime MIN_ACK_DELAY_US: UInt64 = 1000
+"""The ``min_ack_delay`` both ends advertise (draft-ietf-quic-ack-
+frequency): a requested ACK delay below it is refused."""
+
+
+def note_ack_eliciting(mut conn: Connection, now_us: UInt64):
+    """An ack-eliciting packet was received."""
+    if conn.ack_unacked == 0:
+        conn.ack_first_us = now_us
+    conn.ack_unacked += 1
+
+
+def ack_due(conn: Connection, now_us: UInt64) -> Bool:
+    """Whether an owed ACK goes out now: always, unless the peer asked
+    for fewer with ACK_FREQUENCY."""
+    if not conn.ack_freq_set or conn.ack_immediate:
+        return True
+    return (
+        UInt64(conn.ack_unacked) > conn.ack_threshold
+        or now_us >= conn.ack_first_us + conn.ack_max_delay_us
+    )
+
+
+def note_ack_sent(mut conn: Connection):
+    conn.ack_unacked = 0
+    conn.ack_immediate = False
+
+
+comptime MAX_QUEUED_DATAGRAM_BYTES: Int = 64 * 1024
+"""Most DATAGRAM payload bytes a connection queues in either direction
+(RFC 9221 sec 5: unreliable, so past it a datagram is dropped rather
+than letting a peer or a slow application pin memory)."""
+
+
+def new_connection(
+    idle_timeout_us: UInt64 = UInt64(30_000_000),
+    initial_max_data: UInt64 = UInt64(1 << 20),
+    is_server: Bool = False,
+    adv_max_streams_bidi: UInt64 = UInt64(100),
+    adv_max_streams_uni: UInt64 = UInt64(3),
+    check_stream_ids: Bool = False,
+) -> Connection:
+    """Build a fresh :class:`Connection` in the HANDSHAKE state."""
+    return Connection(
+        state=CONN_STATE_HANDSHAKE,
+        handshake_complete=False,
+        idle_timeout_us=idle_timeout_us,
+        last_activity_us=UInt64(0),
+        max_data_send=initial_max_data,
+        max_data_recv=initial_max_data,
+        bytes_in_flight=UInt64(0),
+        streams=Dict[UInt64, Stream](),
+        ack_pending=False,
+        largest_received_packet=UInt64(0),
+        largest_acked_by_peer=UInt64(0),
+        close_error_code=UInt64(0),
+        close_reason=List[UInt8](),
+        peer_cids=Dict[UInt64, _PeerConnId](),
+        active_dcid_seq=UInt64(0),
+        peer_retire_prior_to=UInt64(0),
+        outgoing_path_challenge=List[UInt8](),
+        path_validated=False,
+        is_server=is_server,
+        adv_max_streams_bidi=adv_max_streams_bidi,
+        adv_max_streams_uni=adv_max_streams_uni,
+        check_stream_ids=check_stream_ids,
+        next_local_bidi=UInt64(1) if is_server else UInt64(0),
+        next_local_uni=UInt64(3) if is_server else UInt64(2),
+        peer_initial_max_stream_data=initial_max_data,
+        new_token=List[UInt8](),
+        ack_freq_set=False,
+        ack_freq_seq=0,
+        ack_threshold=1,
+        ack_max_delay_us=25_000,
+        ack_immediate=False,
+        ack_unacked=0,
+        ack_first_us=0,
+        max_datagram_recv=UInt64(0),
+    )
+
+
+comptime STREAM_FRAME_RECV_HALF: Int = 0
+"""RESET_STREAM / STREAM_DATA_BLOCKED: the frame concerns the sender's
+half, our receiving half."""
+comptime STREAM_FRAME_SEND_HALF: Int = 1
+"""STOP_SENDING / MAX_STREAM_DATA: the frame concerns our sending half."""
+comptime STREAM_FRAME_DATA: Int = 2
+"""STREAM: data for our receiving half."""
+
+
+def mark_local_stream_opened(mut conn: Connection, sid: UInt64):
+    """Record that we opened local stream ``sid`` by sending on it outside
+    ``conn.streams`` (the server's HTTP/3 control stream), so
+    :func:`check_stream_frame_id` accepts the peer's STOP_SENDING /
+    MAX_STREAM_DATA for it (RFC 9000 sec 19.10)."""
+    if (sid & UInt64(2)) != 0:
+        if sid >= conn.next_local_uni:
+            conn.next_local_uni = sid + UInt64(4)
+    elif sid >= conn.next_local_bidi:
+        conn.next_local_bidi = sid + UInt64(4)
+
+
+def check_stream_frame_id(mut conn: Connection, sid: UInt64, kind: Int) raises:
+    """RFC 9000 §4.6 / §19.4 / §19.5 / §19.8 / §19.10 / §19.13: check the
+    stream id of a received stream frame (``kind`` is one of
+    ``STREAM_FRAME_*``).
+
+    A peer-initiated stream above the stream limit we advertised is a
+    STREAM_LIMIT_ERROR; a frame for a half the stream does not have (a
+    send-only stream the peer initiated, a stream we initiated that is
+    receive-only) is a STREAM_STATE_ERROR, and so is STOP_SENDING /
+    MAX_STREAM_DATA / STREAM for a stream we initiated and have not
+    opened. Closes the connection and raises on a violation.
+    """
+    var server_initiated = (sid & UInt64(1)) != 0
+    var mine = server_initiated == conn.is_server
+    var uni = (sid & UInt64(2)) != 0
+    if not mine:
+        var limit = (
+            conn.adv_max_streams_uni if uni else conn.adv_max_streams_bidi
+        )
+        if (sid >> 2) + 1 > limit:
+            connection_close(
+                conn,
+                QUIC_STREAM_LIMIT_ERROR,
+                "stream id above the stream limit",
+            )
+            raise Error("QUIC STREAM_LIMIT_ERROR: stream id above the limit")
+    var opened = sid in conn.streams or sid < (
+        conn.next_local_uni if uni else conn.next_local_bidi
+    )
+    var bad: Bool
+    if kind == STREAM_FRAME_SEND_HALF:
+        bad = (uni and not mine) or (mine and not opened)
+    elif kind == STREAM_FRAME_DATA:
+        bad = (uni and mine) or (mine and not opened)
+    else:
+        bad = uni and mine
+    if bad:
+        connection_close(
+            conn,
+            QUIC_STREAM_STATE_ERROR,
+            "frame names a stream half that does not exist",
+        )
+        raise Error(
+            "QUIC STREAM_STATE_ERROR: wrong direction or unopened stream"
+        )
+
+
+# ── Per-typed-payload state transitions ────────────────────────────────────
+
+
+@always_inline
+def _arrive(mut conn: Connection, now_us: UInt64, ack_eliciting: Bool):
+    """Per-frame bookkeeping: update activity time + ack-pending.
+
+    Every frame ingestion calls this first. ACK / PADDING /
+    CONNECTION_CLOSE pass ``ack_eliciting=False`` per RFC 9002 §2;
+    everything else is ack-eliciting.
+    """
+    conn.last_activity_us = now_us
+    if ack_eliciting:
+        conn.ack_pending = True
+
+
+def apply_stream(
+    mut conn: Connection,
+    sf: StreamFrame,
+    mut events: ConnectionEvents,
+) raises:
+    """Apply a STREAM frame (§19.8) to the connection.
+
+    Creates the stream on first sight, advances the recv offset
+    high-water-mark, enforces the flow-control limit, and emits a
+    ``finished_streams`` entry when the FIN bit closes the recv
+    side. Raises on flow-control violation. The full
+    :class:`StreamFrame` is also appended to
+    :attr:`ConnectionEvents.stream_chunks` so the H3 reactor
+    wrapper can route the payload bytes to its
+    per-connection :class:`flare.http3.Http3Connection` without
+    re-parsing the QUIC packet.
+    """
+    var sid = sf.stream_id
+    var existing = conn.streams.get(sid)
+    var s: Stream
+    if Bool(existing):
+        s = existing.value()
+    else:
+        s = new_stream(sid, conn.max_data_recv)
+        s.max_send_data = conn.peer_initial_max_stream_data
+        events.new_streams.append(sid)
+    var end = sf.offset + UInt64(len(sf.data))
+    if end > s.max_recv_data:
+        raise Error(
+            "quic state: stream " + String(sid) + " flow-control violation"
+        )
+    if end > s.recv_offset:
+        s.recv_offset = end
+    if sf.fin and not s.fin_received:
+        s.fin_received = True
+        events.finished_streams.append(sid)
+        if s.state == STREAM_STATE_OPEN:
+            s.state = STREAM_STATE_HALF_CLOSED_REMOTE
+        elif s.state == STREAM_STATE_HALF_CLOSED_LOCAL:
+            s.state = STREAM_STATE_CLOSED
+    conn.streams[sid] = s
+    events.stream_chunks.append(sf.copy())
+
+
+def apply_ack(mut conn: Connection, ack: AckFrame):
+    """Apply an ACK frame to the connection-level bookkeeping.
+
+    ``largest_acknowledged`` names the largest packet WE sent that
+    the peer received; it lives in its own packet-number space and
+    must NOT touch ``largest_received_packet`` (the largest packet
+    WE received, which seeds inbound pn reconstruction).
+    """
+    if ack.largest_acknowledged > conn.largest_acked_by_peer:
+        conn.largest_acked_by_peer = ack.largest_acknowledged
+
+
+def apply_connection_close(
+    mut conn: Connection,
+    cc: ConnectionCloseFrame,
+    mut events: ConnectionEvents,
+):
+    """Apply a CONNECTION_CLOSE frame to the connection. Marks the
+    connection as DRAINING and stores the close reason."""
+    conn.state = CONN_STATE_DRAINING
+    conn.close_error_code = cc.error_code
+    var reason = List[UInt8]()
+    for i in range(len(cc.reason_phrase)):
+        reason.append(cc.reason_phrase[i])
+    conn.close_reason = reason^
+    events.connection_closed = True
+    events.error_code = cc.error_code
+
+
+def apply_max_data(mut conn: Connection, m: MaxDataFrame):
+    """Apply a MAX_DATA frame: monotonically advance the
+    connection's send-side flow-control limit."""
+    if m.maximum_data > conn.max_data_send:
+        conn.max_data_send = m.maximum_data
+
+
+def apply_max_stream_data(mut conn: Connection, m: MaxStreamDataFrame):
+    """Apply a MAX_STREAM_DATA frame: advance the per-stream send
+    high-water-mark for the addressed stream (no-op if the stream
+    has not been seen yet)."""
+    var sid = m.stream_id
+    var s_opt = conn.streams.get(sid)
+    if Bool(s_opt):
+        var s = s_opt.value()
+        if m.maximum_stream_data > s.max_send_data:
+            s.max_send_data = m.maximum_stream_data
+        conn.streams[sid] = s
+
+
+def apply_reset_stream(mut conn: Connection, rs: ResetStreamFrame):
+    """Apply a RESET_STREAM frame: transition the stream to
+    RESET_RECVD and record the receive-half reset in ``peer_reset``
+    (no-op if the stream is unknown)."""
+    var sid = rs.stream_id
+    var s_opt = conn.streams.get(sid)
+    if Bool(s_opt):
+        var s = s_opt.value()
+        s.state = STREAM_STATE_RESET_RECVD
+        s.peer_reset = True
+        conn.streams[sid] = s
+
+
+def apply_stop_sending(mut conn: Connection, ss: StopSendingFrame):
+    """Apply a STOP_SENDING frame: transition the stream to
+    RESET_SENT and record the send-half reset in ``send_reset``
+    (no-op if the stream is unknown)."""
+    var sid = ss.stream_id
+    var s_opt = conn.streams.get(sid)
+    if Bool(s_opt):
+        var s = s_opt.value()
+        s.state = STREAM_STATE_RESET_SENT
+        s.send_reset = True
+        conn.streams[sid] = s
+
+
+def apply_handshake_done(mut conn: Connection, mut events: ConnectionEvents):
+    """Apply a HANDSHAKE_DONE frame: flip the connection to
+    ESTABLISHED and surface the event.
+
+    Acts only in HANDSHAKE (as :func:`mark_handshake_complete` does).
+    CLOSING, DRAINING and CLOSED only lead to closed (RFC 9000 §10.2),
+    so a HANDSHAKE_DONE that arrives after CONNECTION_CLOSE must not
+    make the connection usable again; an ESTABLISHED connection has
+    nothing left to change.
+    """
+    if conn.state != CONN_STATE_HANDSHAKE:
+        return
+    conn.handshake_complete = True
+    conn.state = CONN_STATE_ESTABLISHED
+    events.handshake_done = True
+
+
+def apply_new_connection_id(
+    mut conn: Connection,
+    ncid: NewConnectionIdFrame,
+    mut events: ConnectionEvents,
+) raises:
+    """Apply a NEW_CONNECTION_ID frame (RFC 9000 §19.15).
+
+    Records the peer's spare Source CID + stateless-reset token in
+    :attr:`Connection.peer_cids`, then honors ``retire_prior_to``:
+    every stored CID with a lower sequence number is dropped and a
+    RETIRE_CONNECTION_ID is queued in
+    :attr:`ConnectionEvents.retire_connection_ids` (§5.1.2). If the
+    active DCID is among those retired, the active sequence advances
+    to this freshly issued CID.
+
+    Validates the wire fields at this trust boundary: CID length in
+    [1, 20], a 16-byte reset token, and ``retire_prior_to`` no
+    greater than ``sequence_number`` (a PROTOCOL_VIOLATION per
+    §19.15 otherwise).
+    """
+    if (
+        len(ncid.connection_id) < _CID_MIN_LEN
+        or len(ncid.connection_id) > _CID_MAX_LEN
+    ):
+        raise Error("quic state: NEW_CONNECTION_ID length out of [1, 20]")
+    if len(ncid.stateless_reset_token) != _RESET_TOKEN_LEN:
+        raise Error(
+            "quic state: NEW_CONNECTION_ID reset token must be 16 bytes"
+        )
+    if ncid.retire_prior_to > ncid.sequence_number:
+        raise Error(
+            "quic state: NEW_CONNECTION_ID retire_prior_to > sequence_number"
+        )
+    var seq = ncid.sequence_number
+    if seq in conn.peer_cids:
+        # A retransmit repeats the frame exactly. Anything else reuses
+        # a sequence number, which used to overwrite the stored CID.
+        ref have = conn.peer_cids[seq]
+        if (
+            have.cid != ncid.connection_id
+            or have.reset_token != ncid.stateless_reset_token
+        ):
+            connection_close(
+                conn,
+                QUIC_PROTOCOL_VIOLATION,
+                "NEW_CONNECTION_ID reuses a sequence number",
+            )
+            raise Error("quic state: NEW_CONNECTION_ID sequence reused")
+        return
+    if seq < conn.peer_retire_prior_to:
+        # Already retired by an earlier retire_prior_to (a late
+        # frame): retire it again instead of storing it.
+        events.retire_connection_ids.append(seq)
+        return
+    conn.peer_cids[seq] = _PeerConnId(
+        cid=ncid.connection_id.copy(),
+        reset_token=ncid.stateless_reset_token.copy(),
+    )
+    if ncid.retire_prior_to > conn.peer_retire_prior_to:
+        conn.peer_retire_prior_to = ncid.retire_prior_to
+    if ncid.retire_prior_to > UInt64(0):
+        var to_retire = List[UInt64]()
+        for entry in conn.peer_cids.items():
+            if entry.key < ncid.retire_prior_to:
+                to_retire.append(entry.key)
+        for i in range(len(to_retire)):
+            _ = conn.peer_cids.pop(to_retire[i])
+            events.retire_connection_ids.append(to_retire[i])
+        if conn.active_dcid_seq < ncid.retire_prior_to:
+            conn.active_dcid_seq = ncid.sequence_number
+    # RFC 9000 sec 5.1.1: more active CIDs than we allow (the
+    # handshake CID counts until it is retired) is a
+    # CONNECTION_ID_LIMIT_ERROR. They were stored without limit.
+    var active = len(conn.peer_cids)
+    if UInt64(0) not in conn.peer_cids and conn.peer_retire_prior_to == 0:
+        active += 1
+    if active > LOCAL_ACTIVE_CONNECTION_ID_LIMIT:
+        connection_close(
+            conn,
+            QUIC_CONNECTION_ID_LIMIT_ERROR,
+            "peer issued more connection IDs than active_connection_id_limit",
+        )
+        raise Error("quic state: CONNECTION_ID_LIMIT_ERROR")
+
+
+def apply_retire_connection_id(
+    mut conn: Connection,
+    rcid: RetireConnectionIdFrame,
+    mut events: ConnectionEvents,
+):
+    """Apply a RETIRE_CONNECTION_ID frame (RFC 9000 §19.16): the peer
+    is retiring one of the CIDs WE issued. The driver owns SCID
+    issuance, so the sequence number is surfaced in
+    :attr:`ConnectionEvents.retired_local_cids` for it to unroute,
+    validate against what it issued, and replace."""
+    events.retired_local_cids.append(rcid.sequence_number)
+
+
+def apply_path_challenge(
+    mut conn: Connection,
+    pc: PathChallengeFrame,
+    mut events: ConnectionEvents,
+) raises:
+    """Apply a PATH_CHALLENGE frame (RFC 9000 §19.17): queue a
+    PATH_RESPONSE echoing the exact 8-byte payload so the peer can
+    validate the path (§8.2). Validates the fixed 8-byte length at
+    this trust boundary."""
+    if len(pc.data) != _PATH_DATA_LEN:
+        raise Error("quic state: PATH_CHALLENGE data must be 8 bytes")
+    events.path_responses.append(pc.data.copy())
+
+
+def apply_path_response(
+    mut conn: Connection,
+    pr: PathResponseFrame,
+    mut events: ConnectionEvents,
+) raises:
+    """Apply a PATH_RESPONSE frame (RFC 9000 §19.18): if it echoes
+    our outstanding PATH_CHALLENGE byte-for-byte, the probed path is
+    validated -- clear the probe and surface ``path_validated`` so
+    the driver can promote the new path (§8.2). A non-matching
+    response is ignored (a stale or spoofed echo). Validates the
+    fixed 8-byte length at this trust boundary."""
+    if len(pr.data) != _PATH_DATA_LEN:
+        raise Error("quic state: PATH_RESPONSE data must be 8 bytes")
+    if len(conn.outgoing_path_challenge) != _PATH_DATA_LEN:
+        return
+    for i in range(_PATH_DATA_LEN):
+        if pr.data[i] != conn.outgoing_path_challenge[i]:
+            return
+    conn.path_validated = True
+    conn.outgoing_path_challenge = List[UInt8]()
+    events.path_validated = True
+
+
+# ── Frame-dispatch adapter ────────────────────────────────────────────────
+
+
+@fieldwise_init
+struct _ConnFrameHandler(FrameHandler):
+    """:trait:`FrameHandler` impl bridging the parser into the
+    connection state machines.
+
+    Holds raw addresses for the caller's :class:`Connection` and
+    :class:`ConnectionEvents` so the dispatcher can mutate them
+    in place without owning them. The handler is built once per
+    :func:`handle_frame_buf` call and discarded immediately; the
+    pointer lifetimes are bounded by the calling stack frame.
+    """
+
+    var conn_addr: Int
+    var events_addr: Int
+    var now_us: UInt64
+
+    @always_inline
+    def _conn(self) -> Pointer[Connection, MutUntrackedOrigin]:
+        return Pointer[Connection, MutUntrackedOrigin](
+            unsafe_from_address=self.conn_addr
+        )
+
+    @always_inline
+    def _events(
+        self,
+    ) -> Pointer[ConnectionEvents, MutUntrackedOrigin]:
+        return Pointer[ConnectionEvents, MutUntrackedOrigin](
+            unsafe_from_address=self.events_addr
+        )
+
+    def on_padding(mut self, count: Int) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=False)
+
+    def on_ping(mut self) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+
+    def on_ack(mut self, ack: AckFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=False)
+        apply_ack(self._conn()[], ack)
+        append_ack_ranges(ack, self._events()[].acked_ranges)
+        if len(ack.ecn) > 0:
+            self._events()[].ack_ecn.append(ack.ecn[0])
+
+    def on_reset_stream(mut self, rs: ResetStreamFrame) raises:
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], rs.stream_id, STREAM_FRAME_RECV_HALF
+            )
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_reset_stream(self._conn()[], rs)
+
+    def on_stop_sending(mut self, ss: StopSendingFrame) raises:
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], ss.stream_id, STREAM_FRAME_SEND_HALF
+            )
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        var sid = ss.stream_id
+        var already_reset = False
+        if sid in self._conn()[].streams:
+            already_reset = self._conn()[].streams[sid].send_reset
+        if not already_reset:
+            self._events()[].stop_sending_resets.append(ss)
+        apply_stop_sending(self._conn()[], ss)
+
+    def on_crypto(mut self, c: CryptoFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        # CRYPTO frames carry TLS-handshake bytes that the sans-I/O
+        # state machine deliberately does not interpret. Surface the
+        # raw frame on :class:`ConnectionEvents` so the reactor
+        # can forward the bytes to the rustls QUIC
+        # session at the matching encryption level after this
+        # :func:`handle_frame_buf` call returns. Handshake completion
+        # is still signalled separately via
+        # :func:`mark_handshake_complete`.
+        self._events()[].crypto_frames.append(c.copy())
+
+    def on_new_token(mut self, t: NewTokenFrame) raises:
+        # RFC 9000 sec 19.7: only a server issues tokens.
+        if self._conn()[].is_server:
+            connection_close(
+                self._conn()[],
+                QUIC_PROTOCOL_VIOLATION,
+                "NEW_TOKEN received by a server",
+            )
+            raise Error("QUIC PROTOCOL_VIOLATION: NEW_TOKEN sent to a server")
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        self._conn()[].new_token = t.token.copy()
+
+    def on_stream(mut self, sf: StreamFrame) raises:
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], sf.stream_id, STREAM_FRAME_DATA
+            )
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_stream(self._conn()[], sf, self._events()[])
+
+    def on_max_data(mut self, m: MaxDataFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_max_data(self._conn()[], m)
+
+    def on_max_stream_data(mut self, m: MaxStreamDataFrame) raises:
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], m.stream_id, STREAM_FRAME_SEND_HALF
+            )
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_max_stream_data(self._conn()[], m)
+
+    def on_max_streams(mut self, m: MaxStreamsFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+
+    def on_data_blocked(mut self, db: DataBlockedFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+
+    def on_stream_data_blocked(mut self, sdb: StreamDataBlockedFrame) raises:
+        if self._conn()[].check_stream_ids:
+            check_stream_frame_id(
+                self._conn()[], sdb.stream_id, STREAM_FRAME_RECV_HALF
+            )
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+
+    def on_streams_blocked(mut self, sb: StreamsBlockedFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+
+    def on_new_connection_id(mut self, ncid: NewConnectionIdFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_new_connection_id(self._conn()[], ncid, self._events()[])
+
+    def on_retire_connection_id(mut self, rcid: RetireConnectionIdFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_retire_connection_id(self._conn()[], rcid, self._events()[])
+
+    def on_path_challenge(mut self, pc: PathChallengeFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_path_challenge(self._conn()[], pc, self._events()[])
+
+    def on_path_response(mut self, pr: PathResponseFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_path_response(self._conn()[], pr, self._events()[])
+
+    def on_connection_close(mut self, cc: ConnectionCloseFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=False)
+        apply_connection_close(self._conn()[], cc, self._events()[])
+
+    def on_handshake_done(mut self) raises:
+        if self._conn()[].is_server:
+            # RFC 9000 §19.20: only a server sends HANDSHAKE_DONE.
+            connection_close(
+                self._conn()[],
+                QUIC_PROTOCOL_VIOLATION,
+                "HANDSHAKE_DONE received by a server",
+            )
+            raise Error(
+                "QUIC PROTOCOL_VIOLATION: HANDSHAKE_DONE sent to a server"
+            )
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        apply_handshake_done(self._conn()[], self._events()[])
+
+    def on_ack_frequency(mut self, f: AckFrequencyFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        if f.request_max_ack_delay < MIN_ACK_DELAY_US:
+            connection_close(
+                self._conn()[],
+                QUIC_PROTOCOL_VIOLATION,
+                "ACK_FREQUENCY delay below min_ack_delay",
+            )
+            raise Error("QUIC PROTOCOL_VIOLATION: ACK_FREQUENCY delay")
+        if f.sequence_number < self._conn()[].ack_freq_seq:
+            return  # an older request, superseded
+        ref c = self._conn()[]
+        c.ack_freq_seq = f.sequence_number + 1
+        c.ack_freq_set = True
+        c.ack_threshold = f.ack_eliciting_threshold
+        c.ack_max_delay_us = f.request_max_ack_delay
+
+    def on_immediate_ack(mut self) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        self._conn()[].ack_immediate = True
+
+    def on_datagram(mut self, dg: DatagramFrame) raises:
+        # RFC 9221 §5: DATAGRAM frames are ack-eliciting; the payload
+        # is surfaced for the reactor/application to drain. The
+        # sans-I/O layer keeps no per-datagram ordering or retransmit
+        # state -- they are unreliable by contract. One we did not
+        # advertise, or larger than we advertised, is a PROTOCOL_VIOLATION
+        # (RFC 9221 sec 3); they used to be accepted from any peer.
+        var n = len(dg.data)
+        var size = 1 + n
+        if dg.has_length:
+            size += 1 if n < 64 else (2 if n < 16384 else 4)
+        if UInt64(size) > self._conn()[].max_datagram_recv:
+            connection_close(
+                self._conn()[],
+                QUIC_PROTOCOL_VIOLATION,
+                "DATAGRAM frame not allowed or too large",
+            )
+            raise Error("QUIC PROTOCOL_VIOLATION: DATAGRAM frame refused")
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        self._events()[].datagrams.append(dg.data.copy())
+
+
+# ── Top-level frame ingestion ─────────────────────────────────────────────
+
+
+def handle_frame_buf(
+    mut conn: Connection,
+    buf: Span[UInt8, _],
+    now_us: UInt64,
+    mut events: ConnectionEvents,
+) raises -> Int:
+    """Apply one wire frame from the start of ``buf`` to the
+    connection state machines.
+
+    Returns the number of bytes the dispatcher consumed; the
+    caller drains the rest of a packet payload by advancing its
+    cursor and re-invoking the dispatcher on the remainder.
+    Internally builds a small adapter implementing
+    :trait:`flare.quic.frame.FrameHandler` and delegates to
+    :func:`flare.quic.frame.parse_frame_into`.
+    """
+    if conn.state == CONN_STATE_CLOSED:
+        # Drop bytes silently — caller will advance past closed
+        # connections in its packet drain.
+        return len(buf)
+    var conn_addr = Int(Pointer[Connection, _](to=conn))
+    var events_addr = Int(Pointer[ConnectionEvents, _](to=events))
+    var h = _ConnFrameHandler(
+        conn_addr=conn_addr, events_addr=events_addr, now_us=now_us
+    )
+    return parse_frame_into(buf, h)
+
+
+comptime QUIC_PROTOCOL_VIOLATION: UInt64 = 0x0A
+"""RFC 9000 sec 20.1 transport error code."""
+comptime QUIC_CONNECTION_ID_LIMIT_ERROR: UInt64 = 0x09
+comptime QUIC_FLOW_CONTROL_ERROR: UInt64 = 0x03
+comptime QUIC_STREAM_LIMIT_ERROR: UInt64 = 0x04
+comptime QUIC_STREAM_STATE_ERROR: UInt64 = 0x05
+comptime LOCAL_ACTIVE_CONNECTION_ID_LIMIT: Int = 2
+"""The ``active_connection_id_limit`` both flare endpoints advertise."""
+
+
+def dispatch_frames(
+    mut conn: Connection,
+    payload: Span[UInt8, _],
+    now_us: UInt64,
+    mut events: ConnectionEvents,
+    before_1rtt: Bool,
+) raises:
+    """Apply every frame in a decrypted packet payload.
+
+    ``before_1rtt`` is set for Initial and Handshake packets. A frame
+    those levels do not permit is a PROTOCOL_VIOLATION connection
+    error (RFC 9000 sec 12.4): the connection is closed and this
+    raises, so the caller drops the packet. The Initial keys come
+    from the public DCID, so without this rule anyone who saw a
+    client's first packet could send STREAM frames at Initial and
+    have the server run them as a request, no handshake needed.
+    """
+    var cursor = 0
+    while cursor < len(payload):
+        if before_1rtt and not frame_allowed_before_1rtt(payload[cursor:]):
+            connection_close(
+                conn,
+                QUIC_PROTOCOL_VIOLATION,
+                "frame type not permitted in Initial or Handshake packets",
+            )
+            raise Error(
+                "QUIC PROTOCOL_VIOLATION: frame type "
+                + String(Int(payload[cursor]))
+                + " before 1-RTT"
+            )
+        var consumed = handle_frame_buf(conn, payload[cursor:], now_us, events)
+        if consumed <= 0:
+            break
+        cursor += consumed
+
+
+def mark_handshake_complete(
+    mut conn: Connection, now_us: UInt64, mut events: ConnectionEvents
+):
+    """Explicit hook the TLS handshake adapter calls when its key
+    schedule reaches HANDSHAKE_DONE. Mirrors the
+    :data:`FRAME_TYPE_HANDSHAKE_DONE` path so the connection state
+    advances regardless of which side the signal came from.
+    """
+    if conn.state == CONN_STATE_HANDSHAKE:
+        conn.handshake_complete = True
+        conn.state = CONN_STATE_ESTABLISHED
+        events.handshake_done = True
+        conn.last_activity_us = now_us
+
+
+def is_idle_timeout_expired(conn: Connection, now_us: UInt64) -> Bool:
+    """Whether the idle timeout has elapsed since ``last_activity_us``.
+
+    Returns ``False`` if no traffic has been observed yet (the
+    handshake hasn't started); the reactor uses this to retire
+    stalled connections per RFC 9000 §10.1.
+    """
+    if conn.last_activity_us == UInt64(0):
+        return False
+    if conn.idle_timeout_us == UInt64(0):
+        return False
+    return (now_us - conn.last_activity_us) >= conn.idle_timeout_us
+
+
+def connection_close(
+    mut conn: Connection,
+    error_code: UInt64,
+    reason: String,
+    application: Bool = False,
+):
+    """Mark the connection as closing with the given error code +
+    reason. The driver later emits a CONNECTION_CLOSE frame and
+    transitions to DRAINING.
+    """
+    if (
+        conn.state == CONN_STATE_CLOSING
+        or conn.state == CONN_STATE_DRAINING
+        or conn.state == CONN_STATE_CLOSED
+    ):
+        return
+    conn.state = CONN_STATE_CLOSING
+    conn.close_error_code = error_code
+    var bytes = List[UInt8]()
+    for c in reason.as_bytes():
+        bytes.append(c)
+    conn.close_reason = bytes^

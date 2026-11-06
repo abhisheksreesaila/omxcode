@@ -10,6 +10,23 @@ A dated record of what was tried, what happened, and what it means. Newest first
 - **Broke:** on the Mac, Keeper's FSEvents watcher fails to start ("FSEventStreamCreate failed") and it has no menu-bar item, so it quits when closed; the to-do title wraps a letter short ("Tod / o") in a centred column (AppKit `fit_wraps`, unskinned labels). Both keep Linux-only downloads, their cards say "Mac coming". Widgets on Linux needs WebKitGTK 6.0 installed (this machine has only a local copy: with it laid over, the packaged webview loads).
 - **Review (PASS, notes fixed):** each Linux pass now records its tarball's sha256 and the check compares it; widgets runs with WebKitGTK laid over (WEBKITGTK_DIR) and fails on stand-ins; READMEs name WebKitGTK only where it's needed; release notes say "built for macOS 14, run on 15 and 26". Left: the bare run's pass bar is a live process plus a drawn window (no app-level assertion); widgets' Mac side logs flag "Picked: tap a point" outside the window (pre-existing, unchecked).
 - **Means:** the gallery is now proof you can run: every card is a native app you download. Next, on the owner's M4 Mac: the to-do wrap and Keeper's watcher (then their Mac downloads), and the four Mac downloads on real hardware. After goals 50/52 merge, rebuild the downloads on Mojo 1.2.
+## Goal 52: Mojo 1.2, Flare 0.13, the engine beside Flare (2026-11-05)
+- **Setup:** worktree ../mojo-ui-g52, branch `goal-52-mojo12` from goal-50-native 4352a74, its own env; contract GOAL.md + docs/goals/52-check.py; report docs/goals/52-report.md.
+- **Worked:** Mojo 1.2.0 / MAX 26.7.0; the engine rebuilt from 834ef9a + a patch (40/40 tests); Flare v0.13.1; nothing lost against the same sweep on 1.1; omxconsole's real chat; engine jobs inside Flare requests; a UI frame loop never stalls (≤ 5 ms gaps); maccheck/console/widgets on GitHub's Macs.
+- **Broke and fixed:** objc's Int8 pointer (Mac/iPhone builds); Flare 0.13 serving on Mojo's pool (no exit, parallelize hung: leases held, flare#47); the listener gap after bind (flare#48); the zlib shim needed libdeflate (gzip bodies left compressed); stop() held the caller 100 ms (now 0); a thread id read through a local's address crashed the engine's fan (now a lint).
+- **Open:** M6 red on omxplorer only (its Mac build failed on 1.1 too); the Metal path waits for a real Mac.
+- **Means:** the framework is on the current Mojo, and the engine, Flare and a UI share one program without blocking each other.
+- **Next:** the M4 Mac Pro; merge goals 50 and 52.
+
+---
+
+## Goal 50: the framework serves, fetches and supervises; omxconsole's daemon in Mojo on it (2026-11-04/05)
+- **Setup:** worktree ../mojo-ui-g50, branch `goal-50-native` from main bfacc58; contract GOAL.md + docs/goals/50-check.py; report docs/goals/50-report.md; plan docs/plans/omxconsole-native.md (owner: "a convenient wrapper on Max Serve", "the star of the show is OMX code", "There is Flare … I would rather trust that").
+- **Worked:** Flare v0.12.0 (Mojo 1.1) vendored; HTTPS for every app (FlareTransport behind mojoui.http); mojoui.serve (routes, JSON, SSE pipes, proxy, ticks, SIGTERM stop); mojoui.process; mojoui.hash; examples/consoled answers the console's 18 reads from the real store and streams a real Qwen2.5-0.5B chat from `max serve` through its /v1 gateway to the OpenAI SDK, with keys, logging and idle unload.
+- **Broke and fixed:** 27 libc functions declared differently by mojoui and Flare (mojoui/libc.mojo + a lint); the engine declares three of them its own way (looked up at run time instead); Flare's shims not found outside pixi (RUNPATH); Flare's streaming client dropped request bodies (patched, report drafted); `max serve` needed its own env's CONDA_PREFIX and MODULAR_HOME; Mojo's runtime threads defeated signal blocking (self-pipe trick); a proxy to its own server can wait on itself (test fixed, limit documented).
+- **Open:** M6 is red on goal 33's M5 only, which fails identically on unchanged main on this machine (baseline ../mojo-ui-g50-baseline).
+- **Means:** an all-Mojo app can now be a server, an HTTPS client and a process supervisor; omxconsole's daemon is the proof, `max serve` the one named exception.
+- **Next:** goal 33's M5 cause; pulls/search over HTTPS; the `omxc` CLI.
 
 ---
 

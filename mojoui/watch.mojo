@@ -31,6 +31,7 @@ from std.sys import CompilationTarget
 from std.collections import Dict
 from mojoui.clock import now_ns
 from mojoui.shared import get_shared
+from mojoui import libc
 
 comptime CREATED = 1
 comptime MODIFIED = 2
@@ -651,13 +652,13 @@ struct FolderWatcher(Movable):
         self.read_fd = Int(fds[0])
         var w = Int(fds[1])
         comptime nonblock = 4 if CompilationTarget.is_macos() else 2048
-        _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(self.read_fd), c_int(4), c_int(nonblock))  # F_SETFL O_NONBLOCK
-        _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(self.read_fd), c_int(2), c_int(1))  # FD_CLOEXEC
-        _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(2), c_int(1))
+        _ = libc.fcntl(self.read_fd, 4, Int(nonblock))  # F_SETFL O_NONBLOCK
+        _ = libc.fcntl(self.read_fd, 2, 1)  # FD_CLOEXEC
+        _ = libc.fcntl(w, 2, 1)
         comptime if CompilationTarget.is_linux():  # F_SETPIPE_SZ: 1 MB of events, else 256 KB; what it got is kept (F_GETPIPE_SZ)
-            if Int(external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(1031), c_int(1 << 20))) < 0:
-                _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(1031), c_int(1 << 18))
-            self.pipe_size = Int(external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(1032), c_int(0)))
+            if libc.fcntl(w, 1031, 1 << 20) < 0:
+                _ = libc.fcntl(w, 1031, 1 << 18)
+            self.pipe_size = libc.fcntl(w, 1032, 0)
         else:
             self.pipe_size = 16384
         var words = unsafe_alloc[Int64](W_WORDS)

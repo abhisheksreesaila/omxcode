@@ -1,0 +1,410 @@
+diff --git a/kernels_aot/kernels_aot_gpu.mojo b/kernels_aot/kernels_aot_gpu.mojo
+index 484e76c..ca91e23 100644
+--- a/kernels_aot/kernels_aot_gpu.mojo
++++ b/kernels_aot/kernels_aot_gpu.mojo
+@@ -7,7 +7,7 @@ from max.gpu.primitives.id import lane_id
+ from std.bit import pop_count, count_trailing_zeros
+ from std.sys._assembly import inlined_assembly
+ from std.memory import stack_allocation
+-from std.sys import has_apple_gpu_accelerator, is_defined
++from std.sys import default_accelerator, is_defined
+ from _atomic import Atomic
+ 
+ comptime BLOCK: Int = 256
+@@ -249,7 +249,7 @@ comptime OP_MIN: Int = 2
+ comptime OP_MAX: Int = 3
+ # Dynamic shared memory a block may ask for: an Apple GPU (Metal) has 32 KB, NVIDIA 48 KB without opt-in. Same test
+ # as pipeline_gpu's APPLE_GPU / SMEM_LIMIT (`-D OMXCORE_APPLE_GPU_SHAPE` gives any GPU Apple's limits). F-195.
+-comptime GROUP_SMEM_LIMIT: Int = (32 if has_apple_gpu_accelerator() or is_defined["OMXCORE_APPLE_GPU_SHAPE"]() else 48) * 1024
++comptime GROUP_SMEM_LIMIT: Int = (32 if default_accelerator().is_apple_gpu() or is_defined["OMXCORE_APPLE_GPU_SHAPE"]() else 48) * 1024
+ comptime SHARED_MAX_GROUPS: Int = GROUP_SMEM_LIMIT // 4   # Float32 slots: 12288 on NVIDIA, 8192 on Apple
+ comptime SM_SHARED_BYTES: Int = 96 * 1024     # usable per SM on sm_80/86
+ comptime MAX_BLOCKS_PER_SM: Int = 6           # global path: 1536 threads / 256
+diff --git a/kernels_aot/pipeline_gpu.mojo b/kernels_aot/pipeline_gpu.mojo
+index fb21ea0..25dafa7 100644
+--- a/kernels_aot/pipeline_gpu.mojo
++++ b/kernels_aot/pipeline_gpu.mojo
+@@ -56,7 +56,7 @@ from max.gpu import thread_idx, block_idx, grid_dim, barrier
+ from max.gpu.primitives.warp import shuffle_down
+ from max.gpu.memory import AddressSpace, external_memory
+ from std.memory import Pointer, stack_allocation, bitcast
+-from std.sys import has_apple_gpu_accelerator, is_defined
++from std.sys import default_accelerator, is_defined
+ from std.sys.info import is_apple_gpu
+ 
+ comptime F64 = DType.float64
+@@ -66,7 +66,7 @@ comptime F64 = DType.float64
+ # `-D OMXCORE_APPLE_GPU_SHAPE` gives any GPU Apple's plan (the Int64 word, the atomic-free modes, 32 KB, 64-thread
+ # narrow blocks), so the Apple path is tested on an NVIDIA card too: scripts/check_apple_gpu.py's M6 runs the GPU
+ # Mojo suites and the orders check with it. Never set in a release build.
+-comptime APPLE_GPU = has_apple_gpu_accelerator() or is_defined["OMXCORE_APPLE_GPU_SHAPE"]()
++comptime APPLE_GPU = default_accelerator().is_apple_gpu() or is_defined["OMXCORE_APPLE_GPU_SHAPE"]()
+ comptime WORD = DType.int64 if APPLE_GPU else F64
+ comptime SMEM_LIMIT: Int = (32 if APPLE_GPU else 48) * 1024     # dynamic shared memory per block: Apple 32 KB, NVIDIA 48 KB
+ comptime BLOCK: Int = 256
+diff --git a/mojo/omxcore/_libc.mojo b/mojo/omxcore/_libc.mojo
+new file mode 100644
+index 0000000..2db5901
+--- /dev/null
++++ b/mojo/omxcore/_libc.mojo
+@@ -0,0 +1,101 @@
++"""The libc functions the engine calls through a pointer instead of declaring them.
++
++Mojo allows one signature per external symbol in a binary. Mojo 1.2's stdlib declares `read` and `write` itself, and
++the libraries an app links beside the engine (Flare, its json, the apps' mojoui) declare pthread_create, strtod, mmap
++and others with their own types, so an engine declaration of any of them breaks that app's build ("existing function
++with conflicting signature"). Looked up with dlsym and called through a typed pointer, the engine declares none of
++them and builds beside any of those. dlsym itself is declared as the apps' mojoui declares it. A lookup costs about a
++hash probe: none of these is on a per-row path. A function libc doesn't have (dlsym gives 0) is never called: each
++wrapper returns the C function's own failure value instead (-1, or NaN for strtod)."""
++from std.ffi import external_call, c_int
++from std.memory import Pointer
++from std.sys import CompilationTarget
++from std.memory.alloc import unsafe_alloc
++
++comptime ThreadEntry = def(Int) thin abi("C") -> Int
++"""A thread's start routine: the argument is an address, the result is ignored."""
++
++
++def _sym(name: String) -> Int:
++    var n = name
++    var anywhere = -2 if CompilationTarget.is_macos() else 0  # RTLD_DEFAULT
++    return external_call["dlsym", Int](anywhere, n.as_c_string_span())
++
++
++def pthread_create(attr: Int, entry: ThreadEntry, arg: Int) -> Tuple[c_int, Int]:
++    """(pthread_create's result, the new thread's id). `attr`: a pthread_attr_t's address (0: defaults). The id is
++    written into memory of this function's own and read back here: handed the address of a caller's local as an Int,
++    the compiler could keep using the local's old value (the engine's fan joined thread 0 and crashed). Guard: the
++    engine's test_switches_threads (a save's fan joins every thread it started) and mojo_test.sh's job tests."""
++    var f = _sym("pthread_create")
++    if f == 0:
++        return (c_int(-1), 0)
++    var cell = unsafe_alloc[Int](1)
++    cell[0] = 0
++    var rc = Pointer(to=f).unsafe_bitcast[def(Int, Int, ThreadEntry, Int) thin abi("C") -> c_int]()[](Int(cell), attr, entry, arg)
++    var tid = cell[0]
++    cell.free()
++    return (rc, tid)
++
++
++def pthread_join(tid: Int) -> c_int:
++    var f = _sym("pthread_join")
++    if f == 0:
++        return c_int(-1)
++    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](tid, 0)
++
++
++def pthread_detach(tid: Int) -> c_int:
++    var f = _sym("pthread_detach")
++    if f == 0:
++        return c_int(-1)
++    return Pointer(to=f).unsafe_bitcast[def(Int) thin abi("C") -> c_int]()[](tid)
++
++
++def strtod(text: Int) -> Float64:
++    """`text`: the address of a NUL-terminated number in the process locale."""
++    var f = _sym("strtod")
++    if f == 0:
++        return Float64(0) / Float64(0)
++    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> Float64]()[](text, 0)
++
++
++def read(fd: Int, buf: Int, count: Int) -> Int:
++    var f = _sym("read")
++    if f == 0:
++        return -1
++    return Pointer(to=f).unsafe_bitcast[def(c_int, Int, Int) thin abi("C") -> Int]()[](c_int(fd), buf, count)
++
++
++def write(fd: Int, buf: Int, count: Int) -> Int:
++    var f = _sym("write")
++    if f == 0:
++        return -1
++    return Pointer(to=f).unsafe_bitcast[def(c_int, Int, Int) thin abi("C") -> Int]()[](c_int(fd), buf, count)
++
++
++def mmap(addr: Int, length: Int, prot: Int, flags: Int, fd: Int, offset: Int) -> Int:
++    """The mapping's address, or -1 (MAP_FAILED)."""
++    var f = _sym("mmap")
++    if f == 0:
++        return -1
++    return Pointer(to=f).unsafe_bitcast[def(Int, Int, c_int, c_int, c_int, Int) thin abi("C") -> Int]()[](
++        addr, length, c_int(prot), c_int(flags), c_int(fd), offset)
++
++
++def munmap(addr: Int, length: Int) -> c_int:
++    var f = _sym("munmap")
++    if f == 0:
++        return c_int(-1)
++    return Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](addr, length)
++
++
++def unlink(path: String) -> c_int:
++    var p = path
++    var f = _sym("unlink")
++    if f == 0:
++        return c_int(-1)
++    var at = Int(p.as_c_string_span().unsafe_ptr())
++    var rc = Pointer(to=f).unsafe_bitcast[def(Int) thin abi("C") -> c_int]()[](at)
++    _ = p^
++    return rc
+diff --git a/mojo/omxcore/csv.mojo b/mojo/omxcore/csv.mojo
+index 126a719..090c259 100644
+--- a/mojo/omxcore/csv.mojo
++++ b/mojo/omxcore/csv.mojo
+@@ -64,6 +64,7 @@ File format decisions:
+     non-UTF-8 encoding. The parsed columns are held twice for a moment while the chunks are stitched together.
+ """
+ from std.ffi import external_call
++from ._libc import strtod as _libc_strtod, read as _libc_read, mmap as _libc_mmap, munmap as _libc_munmap
+ from std.sys import CompilationTarget
+ from std.memory import Pointer
+ from std.time import perf_counter_ns
+@@ -421,7 +422,7 @@ def _parse_float(p: BP, n: Int, mut out: Float64) -> Int:
+         v = external_call["strtod_l", Float64](Int(buf.unsafe_ptr()), Int(0), loc)
+         external_call["freelocale", NoneType](loc)
+     else:
+-        v = external_call["strtod", Float64](Int(buf.unsafe_ptr()), Int(0))     # (no locale object: the process locale, normally "C")
++        v = _libc_strtod(Int(buf.unsafe_ptr()))     # (no locale object: the process locale, normally "C")
+     _ = name^
+     _ = buf^
+     if v - v != 0.0:                                    # inf: the text was past the largest float64
+@@ -1072,7 +1073,7 @@ def read_csv(path: String, options: CsvOptions = CsvOptions(), job: JobCtl = Job
+         raise Error("couldn't open `" + path + "`: no such file, or no permission to read it")
+     var fd = file._get_raw_fd()
+     var one = List[UInt8](length=1, fill=0)
+-    var got = external_call["read", Int](fd, one.unsafe_ptr(), Int(1))
++    var got = _libc_read(Int(fd), Int(one.unsafe_ptr()), 1)
+     _ = one^
+     if got < 0:                                                       # a directory opens, but cannot be read
+         file.close()
+@@ -1083,7 +1084,7 @@ def read_csv(path: String, options: CsvOptions = CsvOptions(), job: JobCtl = Job
+         raise Error("couldn't read `" + path + "`: not a regular file")
+     var result = CsvResult()
+     if size > 0:
+-        var addr = external_call["mmap", Int](Int(0), size, Int32(1), Int32(2), fd, Int(0))
++        var addr = _libc_mmap(0, size, 1, 2, Int(fd), 0)
+         file.close()  # the mapping stays valid
+         if addr == -1:
+             raise Error("couldn't read `" + path + "`: the file could not be mapped into memory")
+@@ -1094,9 +1095,9 @@ def read_csv(path: String, options: CsvOptions = CsvOptions(), job: JobCtl = Job
+             _check_text_encoding(BP(unsafe_from_address=addr), size, path)
+             _parse(BP(unsafe_from_address=addr), size, delim, options, result, job)
+         except e:
+-            _ = external_call["munmap", Int32](addr, size)
++            _ = _libc_munmap(addr, size)
+             raise Error(String(e))
+-        _ = external_call["munmap", Int32](addr, size)
++        _ = _libc_munmap(addr, size)
+     else:
+         file.close()
+     result.seconds = Float64(perf_counter_ns() - start_ns) / 1e9
+diff --git a/mojo/omxcore/fan.mojo b/mojo/omxcore/fan.mojo
+index e7db175..815c0ec 100644
+--- a/mojo/omxcore/fan.mojo
++++ b/mojo/omxcore/fan.mojo
+@@ -12,6 +12,7 @@ Which threads:
+ """
+ from std.atomic import Atomic
+ from std.ffi import external_call, c_int
++from ._libc import pthread_create as _libc_pthread_create, pthread_join as _libc_pthread_join
+ from std.memory.alloc import unsafe_alloc
+ from std.sys import CompilationTarget
+ from .kernels._fpenv import SERIAL, par_n, core_count
+@@ -112,7 +113,9 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
+         var started = 0
+         for _ in range(workers - 1):                  # the calling thread is the last worker
+             var tid = Int(0)
+-            var rc = external_call["pthread_create", c_int](Pointer(to=tid), attr, _fan_entry[T], Int(fan))
++            var made = _libc_pthread_create(Int(attr), _fan_entry[T], Int(fan))
++            var rc = made[0]
++            tid = made[1]
+             if rc != 0:
+                 break                                 # no more threads to be had: the rest of the work falls to the ones running
+             tids[started] = tid
+@@ -121,7 +124,7 @@ def run_tasks[T: ParTask](task: T, n: Int, threads: Int = 0):
+         attr.free()
+         _fan_loop[T](Pointer[_Fan[T], MutUntrackedOrigin](unsafe_from_address=Int(fan)))
+         for k in range(started):
+-            _ = external_call["pthread_join", c_int](tids[k], Int(0))
++            _ = _libc_pthread_join(tids[k])
+         tids.free()
+         _ = fan.take_pointee()
+         fan.free()
+diff --git a/mojo/omxcore/gpu.mojo b/mojo/omxcore/gpu.mojo
+index 8acded2..f4ebdc4 100644
+--- a/mojo/omxcore/gpu.mojo
++++ b/mojo/omxcore/gpu.mojo
+@@ -26,12 +26,12 @@ Why it looks like this:
+ """
+ from std.memory import ArcPointer
+ from std.memory.alloc import unsafe_alloc
+-from std.sys import is_defined, CompilationTarget, has_apple_gpu_accelerator
++from std.sys import is_defined, CompilationTarget, default_accelerator
+ from std.os import getenv
+ from max.gpu.host import DeviceContext, DeviceBuffer, HostBuffer
+ from .table import SharedTable
+ 
+-comptime HAS_GPU = (CompilationTarget.is_linux() or (CompilationTarget.is_macos() and has_apple_gpu_accelerator())) and not is_defined["MXFRAME_NO_GPU"]()
++comptime HAS_GPU = (CompilationTarget.is_linux() or (CompilationTarget.is_macos() and default_accelerator().is_apple_gpu())) and not is_defined["MXFRAME_NO_GPU"]()
+ comptime NO_GPU_MESSAGE = "no GPU on this build"
+ 
+ 
+diff --git a/mojo/omxcore/job.mojo b/mojo/omxcore/job.mojo
+index 3dafcb2..9493d2c 100644
+--- a/mojo/omxcore/job.mojo
++++ b/mojo/omxcore/job.mojo
+@@ -27,6 +27,7 @@ dropped first.
+ """
+ from std.atomic import Atomic
+ from std.ffi import external_call, c_int
++from ._libc import pthread_create as _libc_pthread_create, pthread_join as _libc_pthread_join, pthread_detach as _libc_pthread_detach
+ from std.memory.alloc import unsafe_alloc
+ from std.sys import is_defined
+ from .kernels._fpenv import SERIAL, start_pool
+@@ -297,7 +298,7 @@ struct Job[T: Movable & Deinitable](Movable):
+         """Blocks until the job's thread has ended; returns the state. After `cancel()` it waits for the work to stop at its next check."""
+         comptime if THREADS:
+             if self.threaded and not self.joined:
+-                _ = external_call["pthread_join", c_int](self.tid, Int(0))
++                _ = _libc_pthread_join(self.tid)
+                 self.joined = True
+         return self.poll()
+ 
+@@ -335,7 +336,7 @@ struct Job[T: Movable & Deinitable](Movable):
+         _ = _A.compare_exchange(w + W_CANCEL, expect, CANCEL_ASKED)
+         comptime if THREADS:
+             if self.threaded and not self.joined:
+-                _ = external_call["pthread_detach", c_int](self.tid)
++                _ = _libc_pthread_detach(self.tid)
+         _release[Self.T](self.words, self.out)
+ 
+ 
+@@ -366,7 +367,9 @@ def start_job_then[B: JobBody, CB: JobDone](var body: B, var cb: CB) -> Job[B.Ou
+             attr[i] = 0
+         _ = external_call["pthread_attr_init", c_int](attr)
+         _ = external_call["pthread_attr_setstacksize", c_int](attr, Int(JOB_STACK_BYTES))
+-        var rc = external_call["pthread_create", c_int](Pointer(to=tid), attr, _entry[B, CB], Int(task))
++        var made = _libc_pthread_create(Int(attr), _entry[B, CB], Int(task))
++        var rc = made[0]
++        tid = made[1]
+         _ = external_call["pthread_attr_destroy", c_int](attr)
+         attr.free()
+         if rc != 0:                                # no thread to be had: run it here
+diff --git a/mojo/omxcore/mapped.mojo b/mojo/omxcore/mapped.mojo
+index b64eb93..f2c9a3d 100644
+--- a/mojo/omxcore/mapped.mojo
++++ b/mojo/omxcore/mapped.mojo
+@@ -1,5 +1,6 @@
+ """A read-only mapping of part of a file (Parquet column chunks, CSV row groups): in the process only while it is held."""
+ from std.ffi import external_call
++from ._libc import mmap as _libc_mmap, munmap as _libc_munmap
+ 
+ comptime _MAP_ALIGN = 16384          # mmap offsets must be page multiples: 4 KB (Linux x86), 16 KB (Apple arm64)
+ 
+@@ -19,7 +20,7 @@ struct _Mapped(Movable):
+     def __init__(out self, fd: Int, offset: Int, length: Int, path: String) raises:
+         var start = offset - offset % _MAP_ALIGN
+         self.span = length + (offset - start)
+-        self.addr = external_call["mmap", Int](Int(0), self.span, Int32(1), Int32(2), fd, start)
++        self.addr = _libc_mmap(0, self.span, 1, 2, Int(fd), start)
+         self.data = 0
+         if self.addr == -1:
+             self.span = 0
+@@ -28,9 +29,9 @@ struct _Mapped(Movable):
+ 
+     def release(mut self):
+         if self.span > 0:
+-            _ = external_call["munmap", Int32](self.addr, self.span)
++            _ = _libc_munmap(self.addr, self.span)
+             self.span = 0
+ 
+     def __del__(deinit self):
+         if self.span > 0:
+-            _ = external_call["munmap", Int32](self.addr, self.span)
++            _ = _libc_munmap(self.addr, self.span)
+diff --git a/mojo/omxcore/parquet.mojo b/mojo/omxcore/parquet.mojo
+index bc8f854..3ac4248 100644
+--- a/mojo/omxcore/parquet.mojo
++++ b/mojo/omxcore/parquet.mojo
+@@ -30,6 +30,7 @@ from std.atomic import Atomic
+ from std.time import perf_counter_ns
+ from std.memory.alloc import unsafe_alloc
+ from std.ffi import external_call
++from ._libc import read as _libc_read, unlink as _libc_unlink
+ from std.sys import is_defined, CompilationTarget
+ from std.bit import pop_count, byte_swap
+ from .codec import zstd_compress, zstd_decompress, snappy_compress, snappy_decompress
+@@ -720,7 +721,7 @@ struct ParquetWriter(Movable):
+             self.file.close()
+         except:
+             pass
+-        _ = external_call["unlink", Int32](self.tmp.as_c_string_span().ptr())
++        _ = _libc_unlink(self.tmp)
+ 
+     def finish(mut self, metadata: String, extra: List[String] = List[String]()) raises:
+         """Writes the footer and moves the file into place. `extra`: other key-value metadata to keep, key then value,
+@@ -735,7 +736,7 @@ struct ParquetWriter(Movable):
+         self.file.close()
+         var dest = self.path
+         if external_call["rename", Int32](self.tmp.as_c_string_span().ptr(), dest.as_c_string_span().ptr()) != 0:
+-            _ = external_call["unlink", Int32](self.tmp.as_c_string_span().ptr())
++            _ = _libc_unlink(self.tmp)
+             raise Error("could not move `" + self.tmp + "` to `" + self.path + "`")
+ 
+ 
+@@ -3238,7 +3239,7 @@ def scan_csv(path: String, options: CsvOptions = CsvOptions(), job: JobCtl = Job
+     var file = _open_file(path)
+     var fd = file._get_raw_fd()
+     var one = List[UInt8](length=1, fill=0)
+-    var got = external_call["read", Int](fd, one.unsafe_ptr(), Int(1))
++    var got = _libc_read(Int(fd), Int(one.unsafe_ptr()), 1)
+     _ = one^
+     if got < 0:                                                       # a directory opens, but cannot be read
+         raise Error("couldn't read `" + path + "`: not a regular file")
+diff --git a/mojo/omxcore/sortspill.mojo b/mojo/omxcore/sortspill.mojo
+index 0d417cf..7104b79 100644
+--- a/mojo/omxcore/sortspill.mojo
++++ b/mojo/omxcore/sortspill.mojo
+@@ -16,6 +16,7 @@ Run file layout: run after run, each column by column: n values (Int64), then n
+ of a run is read with one seek and read per column. The file is removed when the sorter is dropped: on success, on an error, on a cancel.
+ """
+ from std.ffi import external_call
++from ._libc import read as _libc_read, write as _libc_write, unlink as _libc_unlink
+ from std.memory.alloc import unsafe_alloc
+ from std.os import getenv, mkdir
+ from std.sys import CompilationTarget
+@@ -96,7 +97,7 @@ def _write_all(fd: Int, addr: Int, count: Int, offset: Int, path: String) raises
+         raise Error("couldn't write the sort's temporary file `" + path + "`")
+     var done = 0
+     while done < count:
+-        var n = external_call["write", Int](fd, UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=addr + done), count - done)
++        var n = _libc_write(fd, addr + done, count - done)
+         if n <= 0:
+             raise Error("couldn't write the sort's temporary file `" + path + "`: the disk may be full, or the folder not writable (PlannerOptions.spill_dir)")
+         done += n
+@@ -107,7 +108,7 @@ def _read_all(fd: Int, addr: Int, count: Int, offset: Int, path: String) raises:
+         raise Error("couldn't read the sort's temporary file `" + path + "` back")
+     var done = 0
+     while done < count:
+-        var n = external_call["read", Int](fd, UnsafePointer[UInt8, MutAnyOrigin](unsafe_from_address=addr + done), count - done)
++        var n = _libc_read(fd, addr + done, count - done)
+         if n <= 0:
+             raise Error("couldn't read the sort's temporary file `" + path + "` back (was it removed?)")
+         done += n
+@@ -222,12 +223,12 @@ struct SpillSort(Movable):
+                         "`: no such folder, or no permission to write there (PlannerOptions.spill_dir)")
+         self.fd = self.file._get_raw_fd()
+         # the open descriptor keeps the data; the name goes now, so a crash or a kill leaves nothing (where unlink fails, `__del__` tries again)
+-        var gone = external_call["unlink", Int32](path.as_c_string_span().ptr()) == 0
++        var gone = _libc_unlink(path) == 0
+         self.path = String() if gone else path^
+ 
+     def __del__(deinit self):
+         if self.path.byte_length() > 0:
+-            _ = external_call["unlink", Int32](self.path.as_c_string_span().ptr())
++            _ = _libc_unlink(self.path)
+ 
+     def run_count(self) -> Int:
+         return len(self.runs)

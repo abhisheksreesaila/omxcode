@@ -8,6 +8,7 @@ from std.sys import CompilationTarget, is_defined
 from std.os import getenv
 from mojoui.http import Request, Response, Transport, Url, TLS_NEEDED, request_problem, has_control, Sink, SseReader, Piece, utf8_whole, utf8_lossy, MAX_STREAM_CHUNK
 from mojoui.clock import now_ns
+from mojoui import libc
 
 comptime APPLE = not CompilationTarget.is_linux()  # (BSD sockets: sin_len, other constants)
 comptime AF_INET = 2
@@ -44,13 +45,13 @@ def ipv4(host: String) raises -> UInt32:
     var name = String("127.0.0.1") if host == "localhost" else host
     var dst = List[UInt8](length=4, fill=0)
     var c = name.copy()
-    if external_call["inet_pton", c_int](c_int(AF_INET), c.as_c_string_span(), Int(dst.unsafe_ptr())) == 1:
+    if libc.inet_pton(AF_INET, c.copy(), Int(dst.unsafe_ptr())) == 1:
         return UInt32(dst[0]) | (UInt32(dst[1]) << 8) | (UInt32(dst[2]) << 16) | (UInt32(dst[3]) << 24)
     var hints = List[UInt8](length=64, fill=0)  # struct addrinfo, zeroed: ai_family at 4, ai_socktype at 8
     hints[4] = AF_INET
     hints[8] = SOCK_STREAM
     var out = List[Int](length=1, fill=0)  # (a buffer: getaddrinfo writes the list's address into it)
-    var rc = external_call["getaddrinfo", c_int](c.as_c_string_span(), Int(0), Int(hints.unsafe_ptr()), Int(out.unsafe_ptr()))
+    var rc = libc.getaddrinfo(c.copy(), Int(hints.unsafe_ptr()), Int(out.unsafe_ptr()))
     _ = len(hints)
     var res = out[0]
     if rc != 0 or res == 0:
@@ -58,7 +59,7 @@ def ipv4(host: String) raises -> UInt32:
     comptime ADDR_AT = 32 if APPLE else 24  # (ai_addr and ai_canonname swap places between Linux and Apple)
     var sa = Pointer[Int, MutUntrackedOrigin](unsafe_from_address=res + ADDR_AT)[]
     var a = Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=sa + 4)[]
-    external_call["freeaddrinfo", NoneType](res)
+    libc.freeaddrinfo(res)
     return a
 
 
@@ -76,7 +77,7 @@ def wait_for(fd: c_int, events: Int, deadline: Int) -> Bool:
         var ms = left_ms(deadline)
         pfd[6] = 0
         pfd[7] = 0
-        var n = external_call["poll", c_int](Int(pfd.unsafe_ptr()), Int(1), c_int(min(ms, 1_000_000)))
+        var n = libc.poll(Int(pfd.unsafe_ptr()), 1, min(ms, 1_000_000))
         if n > 0:
             _ = len(pfd)
             return True
@@ -161,11 +162,11 @@ struct SocketTransport(Transport):
             addr = ipv4(url.host)
         except e:
             return Response.failed(String(e))
-        var fd = external_call["socket", c_int](c_int(AF_INET), c_int(SOCK_STREAM), c_int(0))
+        var fd = c_int(libc.socket(AF_INET, SOCK_STREAM, 0))
         if fd < 0:
             return Response.failed("no socket: " + why(errno()))
         var r = SocketTransport.exchange(fd, addr, url, where, req, deadline)
-        _ = external_call["close", c_int](fd)
+        _ = libc.close(Int(fd))
         return r^
 
     @staticmethod
@@ -178,11 +179,11 @@ struct SocketTransport(Transport):
     @staticmethod
     def open_send(fd: c_int, addr: UInt32, url: Url, where: String, req: Request, deadline: Int) -> String:
         """Connects and sends the request: "" or why not."""
-        var flags = external_call["fcntl", c_int, num_fixed_args=2](fd, c_int(F_GETFL))
-        _ = external_call["fcntl", c_int, num_fixed_args=2](fd, c_int(F_SETFL), flags | c_int(O_NONBLOCK))
+        var flags = c_int(libc.fcntl(Int(fd), F_GETFL))
+        _ = libc.fcntl(Int(fd), F_SETFL, Int(flags | c_int(O_NONBLOCK)))
         comptime if APPLE:
             var one = List[c_int](length=1, fill=1)
-            _ = external_call["setsockopt", c_int](fd, c_int(SOL_SOCKET), c_int(SO_NOSIGPIPE), Int(one.unsafe_ptr()), c_int(4))
+            _ = libc.setsockopt(Int(fd), SOL_SOCKET, SO_NOSIGPIPE, Int(one.unsafe_ptr()), 4)
             _ = len(one)
         # connect
         var sa = List[UInt8](length=16, fill=0)  # struct sockaddr_in
@@ -194,7 +195,7 @@ struct SocketTransport(Transport):
         sa[2] = UInt8(url.port >> 8)
         sa[3] = UInt8(url.port & 255)
         Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=Int(sa.unsafe_ptr()) + 4)[] = addr
-        var rc = external_call["connect", c_int](fd, Int(sa.unsafe_ptr()), c_int(16))
+        var rc = libc.connect(Int(fd), Int(sa.unsafe_ptr()), 16)
         _ = len(sa)
         if rc != 0:
             var e = errno()
@@ -204,7 +205,7 @@ struct SocketTransport(Transport):
                 return "timed out after " + String(req.timeout_ms) + " ms connecting to " + where
             var out = List[c_int](length=2, fill=0)  # SO_ERROR's value, and its size (a buffer: C writes into it)
             out[1] = 4
-            _ = external_call["getsockopt", c_int](fd, c_int(SOL_SOCKET), c_int(SO_ERROR), Int(out.unsafe_ptr()), Int(out.unsafe_ptr()) + 4)
+            _ = libc.getsockopt(Int(fd), SOL_SOCKET, SO_ERROR, Int(out.unsafe_ptr()), Int(out.unsafe_ptr()) + 4)
             var err = Int(out[0])
             if err != 0:
                 return SocketTransport.connect_error(err, where)
@@ -229,7 +230,7 @@ struct SocketTransport(Transport):
             out.append(b)
         var sent = 0
         while sent < len(out):
-            var n = external_call["send", Int](fd, Int(out.unsafe_ptr()) + sent, len(out) - sent, c_int(MSG_NOSIGNAL))
+            var n = libc.send(Int(fd), Int(out.unsafe_ptr()) + sent, len(out) - sent, MSG_NOSIGNAL)
             if n > 0:
                 sent += n
                 continue
@@ -261,7 +262,7 @@ struct SocketTransport(Transport):
                         break
             if not wait_for(fd, POLLIN, deadline):
                 return Response.failed("timed out after " + String(req.timeout_ms) + " ms waiting for " + where)
-            var n = external_call["recv", Int](fd, Int(chunk.unsafe_ptr()), CHUNK, c_int(0))
+            var n = libc.recv(Int(fd), Int(chunk.unsafe_ptr()), CHUNK, 0)
             if n < 0:
                 var e = errno()
                 if e == EAGAIN or e == EINTR:
@@ -333,7 +334,7 @@ struct SocketTransport(Transport):
             addr = ipv4(url.host)
         except e:
             return Response.failed(String(e))
-        var fd = external_call["socket", c_int](c_int(AF_INET), c_int(SOCK_STREAM), c_int(0))
+        var fd = c_int(libc.socket(AF_INET, SOCK_STREAM, 0))
         if fd < 0:
             return Response.failed("no socket: " + why(errno()))
         var sent = SocketTransport.open_send(fd, addr, url, where, req, now_ns() + idle)
@@ -342,7 +343,7 @@ struct SocketTransport(Transport):
             r = Response.failed(sent)
         else:
             r = SocketTransport.read_stream(fd, where, req, idle, sink)
-        _ = external_call["close", c_int](fd)
+        _ = libc.close(Int(fd))
         return r^
 
     @staticmethod
@@ -375,7 +376,7 @@ struct SocketTransport(Transport):
                 return Response.failed("timed out after " + String(req.timeout_ms) + " ms waiting for the stream from " + where)
             if not wait_for(fd, POLLIN, min(last + idle, now + 50_000_000)):
                 continue
-            var n = external_call["recv", Int](fd, Int(chunk.unsafe_ptr()), CHUNK, c_int(0))
+            var n = libc.recv(Int(fd), Int(chunk.unsafe_ptr()), CHUNK, 0)
             if n < 0:
                 var e = errno()
                 if e == EAGAIN or e == EINTR:

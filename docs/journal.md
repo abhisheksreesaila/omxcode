@@ -1069,3 +1069,90 @@ Owner asked how omxapp/omxplorer become agent-native. Drew `docs/design/agent/bo
 - The learning deck (D-4762). First screenshots were unreadable: reveal.js paints .reveal-viewport white, and omxqua's tokens override a plain :root --ink with a more specific selector, so the deck has its own --d-* colours and sets --r-background-color. Long code lines are clipped (overflow hidden at 1280×720), so code panes take the wider column, long blocks use the small size, and the LocalAgent docstring wraps. The agent transcript on the slides had to follow a real order (add both, then the screen; refuse, then tick), so the check now keeps the screen from before the tick too and reads every output block on a page, not only the first.
 - The deck's two ideas first (D-4764; reviewer round 1: a pixel function is called on the CPU, not an automatic fallback; the example's picture is an Image, not a tool; no Apple-GPU claim; AMD untested; no "fast" in notes). isoarch floors overlap at deck size: with three floors on one footprint the upper plate hides the middle one unless the gap is so large the drawing shrinks to nothing, so the main diagram is two floors (Mojo / already there) with zones for app.mojo and omxcode. Inside the deck the diagrams are iframes; file:// iframes are separate origins in Chromium, so checking needs a local http server (GitHub Pages is one origin, fine). The skill's template has no reset call; dispatching "change" on its flow picker resets a flow. Fact-finding for the GPU slides corrected two things the owner's brief assumed: the best GPU apps do draw with the GPU (Zed, Blender, Figma, Chrome, and GTK 4 and Core Animation composite on it), and omxcode's own GPU path copies the picture back to the CPU unless an app opts into the CUDA–GL path (examples/particles only). Both are said on the slides.
 - The deck in the owner's order (D-4765). focus() gains data-pairs so one step lights lines in two blocks; reveal's current-visible fragments make a caption bar that shows one sentence at a time, which fits a two-column code comparison where a list of sentences didn't.
+
+## Goal 50 (2026-11-04): Flare, HTTPS, serve, process, omxconsole's daemon
+- Flare v0.12.0 runs on Mojo 1.1 (pixi.toml at the tag: mojo >=1.1,<2); v0.13 needs 1.2. So no Mojo bump (D-4757).
+- Vendored flare + json from the GitHub tarballs (gh api …/tarball/v0.12.0). Shims compile with Flare's own lines against the pixi env (OpenSSL, zlib, brotli libs; brotli_wrapper.c needs no headers). rustls/QUIC skipped.
+- Flare alone: builds in 38 s, a refused port is a clean NetworkError.
+- mojoui + Flare: "existing function with conflicting signature" on inet_pton, then pthread_create (Flare's entry is `def(Pointer[UInt8]) thin -> Pointer[UInt8]`, pointee types don't matter, Int vs pointer does). 27 shared symbols → mojoui/libc.mojo with Flare's types + scripts/libc_lint.py.
+- `Pointer(unsafe_from_address=0)` with a literal trips "Pointer is non-nullable" at compile time; through a variable it's fine (Flare's _null_ptr trick).
+- Regression: omxplorer failed on strtod (the engine's csv.mojo declares (Int, Int)); the engine also declares pthread_create/pthread_detach its own way. Calling those three through dlsym fixes both sides (D-4764).
+- test_http had to be started with HTTP_TEST_URL/DEAD/SECRET (my check launched the server bare): fixed the check, not the proof (D-4762).
+- HTTPS: Qwen2.5-0.5B-Instruct's config.json, 659 bytes = the HF file list's size, through effects on a worker.
+- mojoui.serve, first run: the server listened but never accepted (Recv-Q 11): the binary ran outside pixi and Flare's dlopen of libflare_tls.so failed in every worker (only visible with one worker, which raises in main). RUNPATH fix (D-4767).
+- Handler calls with user agent "node" on any port I open: another program on this machine probes ports; not Flare.
+- `spawn[f: def(Int) -> None]` refuses a plain def ("a thin function cannot bind to a closure trait"): parameter type `def(Int) thin -> None`.
+- `Atomic.fetch_sub` isn't static; mojoui uses `_A.fetch_add(ptr, -1)`.
+- test_serve: 50 parallel read-modify-writes all counted (the lock); 6 SSE events over 301 ms with a request answered meanwhile in 6 ms; the proxy relays them at the same pace; a dead upstream is a 502.
+- M2: the OpenAI Python SDK streamed 12 pieces from tests/serve_demo.mojo.
+- Note: this worktree's .pixi was copied (reflink) from mojo-ui-omxcode's; the Mojo it runs still points at that env's lib paths (RUNPATH shows them). Same Mojo 1.1; new packages (openai) went into this copy only.
+- mojoui.process: `posix_spawnp(…, cargs[0], …, Int(cargs.unsafe_ptr()), …)` in one call: "use of invalidated interior reference" (an element and the list's pointer in one call); take them into locals first.
+- Counting processes through /proc/*/cmdline from Mojo found 1 of 3 (the files report size 0; read() then reads little); `kill(-pgid, 0)` asks the group directly.
+- test_process: SIGTERM'd child code 143; serve_demo healthy in 250 ms; crash exit 3 with its log tail; a TERM-ignoring group gone 622 ms after stop(600) with SIGKILL (137); a dropped Process stops its child.
+- consoled (M4): a helper agent wrote docs/goals/50/admin-api-spec.md from the Python daemon (389 lines, errors checked against the running app); the store's replies are built by SQLite (json_object / json_group_array), the rest in views.mojo.
+- `cp mst.db` misses the WAL (a copy without the labels table); scripts/store_copy.py and the check use SQLite's backup API.
+- An error inside a transaction left it open ("cannot start a transaction within a transaction"): answer() rolls back on any error.
+- A parameter named `range` shadows the builtin (`'String' does not implement __call__`).
+- M4's first run: only metrics by_model / series models differed (keyed by model name; the copied store has no requests in 5 minutes): the check compares them as maps now, M5 requires the chatted model in both (D-4773).
+- M4 PASS: 18 GETs in the recorded shapes, 13 models, labels and hashed keys across a restart, console Models / Overview / Keys on GTK against consoled (docs/goals/50/console-*-consoled-gtk.png).
+- M5, try 1: `max serve` from this repo's env fails (MAX without its serving extras: no opentelemetry exporter). consoled runs mxstudio's install through MXC_MAX (D-4774).
+- Try 2: "failed to resolve built-in kernel package paths": the child inherited this env's CONDA_PREFIX; try 3 still failed until MODULAR_HOME=<env>/share/max (set by that env's activation) was passed too. consoled now gives `max serve` its own env's variables. Model up in 8.6 s.
+- Try 4: max serve 400 "Missing JSON": Flare 0.12's send_streaming writes only the request head (raw bytes captured on a socket). Patched the vendored copy (D-4775), upstream report drafted.
+- Try 5: everything but the idle unload: a child still starting at the chat was never probed again, so never "ready", so never idle. The sweep probes starting children.
+- M5 PASS: Qwen2.5-0.5B streamed 9 pieces through consoled's /v1 with the OpenAI SDK; 401 without a key; the request in /admin/requests and metrics by_model; max serve gone after the 45 s idle.
+- First full run: M0–M5 PASS, M6 FAIL: max serve's own Python workers listed as "Python under consoled" (exempted by argv match on `max serve` and its descendants, D-4776), and goal 33's M5 (console vs fixture: stray `GET /`, faster polls). Baseline at bfacc58 (../mojo-ui-g50-baseline) fails goal 33's M5 the same way: not this goal's regression.
+- Review round 1: NEEDS WORK (M6 writeup, the substring exemption, bad %XX escapes, no SIGTERM handling, slow work under the lock, a write per /v1 call, pipe leaks). Fixed (D-4777). Signal blocking in main didn't help (Mojo's runtime threads exist before main: exit 143); `var` at module scope: "global variables are not supported"; the self-pipe trick (send() to a fixed fd from the handler) works: serve_demo exits 0 on SIGTERM, consoled's max serve goes with it.
+- test_serve's proxy relayed 0 events in 3 of 8 runs after the changes: it proxied to its own server, whose worker was waiting for that very request's head. A second upstream server: 10 of 10.
+- The tightened exemption first missed `max serve` itself: MAX's bin/max execs `python -c "...from max._entrypoints.pipelines import main..." serve`, so no argv is named max. The check matches that entry point too.
+- Found two orphaned `max serve` (Qwen, ~1 GB GPU each) from the two M5 runs stopped at 23:46 and 23:51 (before consoled handled SIGTERM; their MXC_HOME was build/g50/mxc). Stopped their groups. With D-4777 a stopped consoled takes its models with it (checked by hand: load, SIGTERM, none left).
+- Final: M0–M5 PASS; M6 FAIL only on goal 33's M5 (same as unchanged main).
+
+## Goal 52 (2026-11-05): Mojo 1.2, Flare 0.13, the engine beside Flare
+Owner: "you can move to Mojo 1.2 .. not a big change anyway". Worktree ../mojo-ui-g52 (branch goal-52-mojo12 from
+goal-50-native 4352a74), its own env (D-5201). The 2026-10-26 probe (branch probe-mojo12, docs/research/mojo12-flare.md)
+was the map.
+- Env: `pixi install` with `mojo >=1.2,<1.3` → Mojo 1.2.0 (2016d0cd), MAX 26.7.0; ../mojo-ui and ../mojo-ui-g50 still 1.1.
+- Baseline: scripts/sweep.py over ../mojo-ui-g50 on 1.1: 96/101 example builds, 100/137 tests (the rest need data in
+  build/g39, g41, g47, a server, torch or a display bus; dictate and omxplorer's Mac link already fail there).
+- Engine: 834ef9a's archive builds on 1.2 after the accelerator query swap (6 lines; probe of `default_accelerator()` on
+  Linux/Mac/Mac+metal/iOS gives the same answers as 1.1's call). Its test runner said every test "uses Python": the ldd
+  grep matches PyPI's library path (D-5209); with that narrowed, 40/40 engine tests pass.
+- Flare 0.13.1 + json 0.4.2 vendored; the 0.12 stream-body patch applies with offsets (0.13.1 still drops the body);
+  flare#42 (CA bundle) is fixed upstream. test_flare_link built first try.
+- test_https/test_serve/test_process failed bare: they need goal 50's checker's set-up (build/g50, serve_demo, the TLS
+  server). A dlsym-with-CStringSpan suspicion was checked and wrong (probe: same addresses on 1.1 and 1.2).
+- test_serve hung in goal 50's M2 on 1.2. Two causes, both Flare 0.13's new runtime: (1) its multi-worker serve closes
+  the bound listener and every worker binds its own, so a connect right after Server.start was refused; (2) its serving
+  loops run as tasks on Mojo's runtime pool, and the runtime waits for pool tasks at exit (gdb: main in
+  KGEN_CompilerRT_DestroyGlobals → ReleaseCPUDevice). Server.start now returns a `Served` and waits for a worker's answer
+  (D-5206). First version stopped at once: Mojo drops a value after its last use (`var port = server.port`).
+- Engine + Flare in one program (M5): the engine's libc declarations moved behind dlsym (D-5204); then an engine job
+  inside a request hung: the job's `parallelize` waited in AsyncRT synchronize while Flare's serving loops held pool
+  workers (it ran fine before the server started). mojoui.serve now holds Flare's pool leases so its loops go to OS
+  threads (D-5207): 8 concurrent requests, each an engine group-by, all correct.
+- M2's first run: (1) `patch` left vendor/flare/http/client.mojo.orig (the tree diff caught it); (2) test_https got a
+  200 with a body that wasn't JSON: 0.13's client asks for gzip and its zlib shim, built by our script without
+  -ldeflate, never loaded ("undefined symbol: libdeflate_gzip_compress"), so the body stayed compressed (D-5211);
+  (3) goal 50's M0 pins v0.12.0 by name (D-5212). Then PASS: the tag alone sends a streamed POST with no body, the patch
+  sends it.
+- M3 sweep 1 (old objc line): every Mac/iPhone build failed on `String(unsafe_from_utf8_ptr=Pointer[Int8])` (the probe's
+  one Mac line; fixed to UInt8). Elsewhere nothing lost but test_process, which starts build/serve_demo (the 1.1
+  checkout had one from goal 50's checker; M3 now builds it first).
+- omxplorer's Mac cross-link fails on 1.1 too (baseline): its video, document and vision parts need Python and libc
+  functions apple/sdk's stubs don't list. Not this goal's; M6 is left as written.
+- M7 (owner mid-run: "ensure it does not interfere with our UI thread and blocks"): mojoui's HTTP runs on effects' own
+  threads (the UI only polls ready()), so the open questions were mojoui.serve's start/stop and shared locks. A frame
+  loop on the main thread (4 ms ticks) through 27 requests at once (SSE, proxy, engine jobs, HTTPS): longest gap 4-5 ms.
+  But stop() held the caller ~100 ms per server (waiting for Flare's 50 ms loop): now it only asks, and the record is
+  shared and freed by the last owner (D-5214; a reaper-thread version could read freed memory, dropped). Server.start
+  once took 515 ms: its ready probe hit the listener Flare was about to close and waited out a 500 ms timeout; 50 ms
+  probes: ≤ 28 ms over 15 runs. A first 502 was the test's own race (proxies before PUT /port).
+- Review round 1: NEEDS WORK (no memory-safety bug in the Served/_Run refcount). The sharpest find was mine while
+  fixing it: patch_scope matched only `+++ w/`/`b/` lines and both patches carried git's mnemonic `c/`/`i/` prefixes,
+  so its file check had passed on an empty set; fixed, regenerated with a/ b/, and negative-tested with doctored
+  patches. Fixes in D-5216. Macs: macOS 26's first job never got a runner (cancelled after 15 min queued); its rerun
+  passed (maccheck exit 0, 110 side pictures, console renders).
+- Full run after review fixes: M1 failed: engine test_switches_threads segfaulted (30/30 once rebuilt) in pthread_join of
+  thread "0". Cause: `pthread_create(Int(Pointer(to=tid)), ...)` through my dlsym wrapper: the local's address as an
+  Int doesn't tell the compiler the call writes `tid`. Fixed in the wrapper (returns the id from its own cell) and in
+  framefeed (same line, mine); a lint now rejects the pattern (D-5217). 0/30 failures after.

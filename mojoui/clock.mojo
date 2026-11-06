@@ -6,6 +6,7 @@ from std.ffi import external_call, c_int
 from std.sys import is_defined, CompilationTarget
 from std.time import perf_counter_ns
 from std.os import getenv
+from mojoui import libc
 
 comptime NOW_ENV = "MOJOUI_NOW"
 comptime ELAPSED_ENV = "MOJOUI_ELAPSED_MS"
@@ -26,7 +27,7 @@ def shown_ms(ms: Float64) -> Float64:
 def now_ns() -> Int:
     comptime if is_defined["MOJOUI_ANDROID"]():
         var ts = List[Int](length=2, fill=0)  # struct timespec { seconds; nanoseconds }
-        _ = external_call["clock_gettime", c_int](c_int(1), Int(ts.unsafe_ptr()))  # CLOCK_MONOTONIC
+        _ = libc.clock_gettime(1, Int(ts.unsafe_ptr()))  # CLOCK_MONOTONIC
         var ns = ts[0] * 1_000_000_000 + ts[1]
         _ = len(ts)
         return ns
@@ -56,7 +57,7 @@ def wall_seconds() -> Float64:
         return Float64(external_call["clock_gettime_nsec_np", UInt64](c_int(0))) / 1e9  # CLOCK_REALTIME
     else:
         var ts = List[Int](length=2, fill=0)  # struct timespec { seconds; nanoseconds }
-        _ = external_call["clock_gettime", c_int](c_int(0), ts.unsafe_ptr())  # CLOCK_REALTIME (Linux, Android)
+        _ = libc.clock_gettime(0, Int(ts.unsafe_ptr()))  # CLOCK_REALTIME (Linux, Android)
         var s = Float64(ts[0]) + Float64(ts[1]) / 1e9
         _ = len(ts)
         return s

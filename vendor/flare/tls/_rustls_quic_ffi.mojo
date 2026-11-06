@@ -1,0 +1,768 @@
+"""`flare.tls._rustls_quic_ffi` -- FFI plumbing for the rustls QUIC cdylib.
+
+This is the internal binding layer for ``libflare_rustls_quic.so``,
+the Rust crate at ``flare/tls/ffi/rustls_wrapper/`` exposing
+``rustls::quic::ServerConnection`` over a C ABI. The
+``flare.tls.rustls_quic`` public surface (``RustlsQuicAcceptor``,
+``RustlsQuicSession``, etc.) holds the typed Mojo carriers; this
+module is the unsafe / FFI bottom layer.
+
+Every helper routes through ``read lib: OwnedDLHandle`` so Mojo's
+ASAP destructor cannot unmap the .so between the
+``get_function`` call and the actual invocation. The same
+defensive pattern is documented at length in
+``flare/tls/stream.mojo`` for the OpenSSL FFI surface and in
+``flare/tls/ffi/build.sh`` for the ``-z nodelete`` safety net.
+"""
+
+from std.collections import List
+from std.ffi import OwnedDLHandle, c_char, c_int, CStringSpan
+
+from ..utils.dylib import find_flare_lib, dl_sym
+
+
+def _find_rustls_quic_lib() -> String:
+    """Resolve the canonical path to ``libflare_rustls_quic.so``.
+
+    Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
+    pinned to the ``"rustls_quic"`` shim name. The activation
+    script ``flare/tls/ffi/build_rustls.sh`` populates
+    ``$CONDA_PREFIX/lib/libflare_rustls_quic.so``; see
+    :func:`flare.utils.dylib.find_flare_lib` for the full order.
+    """
+    return find_flare_lib("rustls_quic")
+
+
+def _encode_alpn_wire(protos: List[String]) raises -> List[UInt8]:
+    """Convert an ALPN protocol list to the wire format the rustls
+    FFI expects: ``len_byte || proto_bytes || len_byte || proto_bytes || ...``.
+
+    Mirrors the encoding used by :func:`TlsAcceptor.__init__` for the
+    OpenSSL backend so the two sides accept the same ALPN list shape.
+    Raises if any protocol identifier is empty or longer than 255
+    bytes (RFC 7301 §3.1 caps the wire-format length at 255).
+    """
+    var out = List[UInt8]()
+    for i in range(len(protos)):
+        var p = protos[i]
+        var n = p.byte_length()
+        if n == 0 or n > 255:
+            raise Error(
+                String("ALPN protocol must be 1..255 bytes: '") + p + "'"
+            )
+        out.append(UInt8(n))
+        for b in p.as_bytes():
+            out.append(b)
+    return out^
+
+
+# ── Per-packet entry points, resolved once ─────────────────────────────────
+
+comptime _PacketEncryptFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
+comptime _PacketDecryptFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
+comptime _PacketDecrypt1RttFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
+comptime _HeaderProtectFn = def(Int, c_int, Int, Int, Int, Int, Int) thin abi(
+    "C"
+) -> c_int
+
+
+def _sym_addr(lib: OwnedDLHandle, name: String) -> Int:
+    var opt = lib.get_symbol[NoneType](name)
+    if not opt:
+        return 0
+    return Int(opt.value())
+
+
+def _as_fn[FT: TrivialRegisterPassable](addr: Int) -> FT:
+    return Pointer(to=addr).unsafe_bitcast[FT]()[]
+
+
+@fieldwise_init
+struct RustlsQuicPacketFns(ImplicitlyCopyable, Movable):
+    """Addresses of the four per-packet FFI entry points (AEAD seal /
+    open, header protect / unprotect), looked up once per library
+    handle. ``dlsym`` by name on every packet was the top cost of the
+    1-RTT path. A zero address (symbol missing) raises at call time,
+    the same failure :func:`dl_sym` reported before."""
+
+    var packet_encrypt: Int
+    var packet_decrypt: Int
+    var packet_decrypt_1rtt: Int
+    var header_encrypt: Int
+    var header_decrypt: Int
+
+    def __init__(out self, lib: OwnedDLHandle):
+        self.packet_encrypt = _sym_addr(lib, "flare_rustls_quic_packet_encrypt")
+        self.packet_decrypt = _sym_addr(lib, "flare_rustls_quic_packet_decrypt")
+        self.packet_decrypt_1rtt = _sym_addr(
+            lib, "flare_rustls_quic_packet_decrypt_1rtt"
+        )
+        self.header_encrypt = _sym_addr(lib, "flare_rustls_quic_header_encrypt")
+        self.header_decrypt = _sym_addr(lib, "flare_rustls_quic_header_decrypt")
+
+
+def _need(addr: Int, name: StaticString) raises:
+    if addr == 0:
+        raise Error(String("flare: FFI symbol not found: ") + name)
+
+
+# ── Acceptor lifecycle ───────────────────────────────────────────────────────
+
+
+def _do_acceptor_new(
+    imm lib: OwnedDLHandle,
+    imm cert_pem: List[UInt8],
+    imm key_pem: List[UInt8],
+    imm alpn_wire: List[UInt8],
+    max_early_data: UInt32,
+) raises -> Int:
+    """Call ``flare_rustls_quic_acceptor_new`` and return the
+    ``Box<Acceptor>*`` as an ``Int``. Zero on failure (read
+    :func:`_do_last_error` for the reason).
+
+    ``max_early_data`` (ABI 4) is the 0-RTT toggle: 0 leaves the
+    server 1-RTT-only (prior behavior); any non-zero value installs
+    a TLS1.3 ticketer and sets the RFC-9001 0xffffffff QUIC early-data
+    window on the rustls ServerConfig.
+    """
+    var f = dl_sym[
+        def(Int, Int, Int, Int, Int, Int, UInt32) thin abi("C") -> Int
+    ](lib, "flare_rustls_quic_acceptor_new")
+    return f(
+        Int(cert_pem.unsafe_ptr()),
+        len(cert_pem),
+        Int(key_pem.unsafe_ptr()),
+        len(key_pem),
+        Int(alpn_wire.unsafe_ptr()),
+        len(alpn_wire),
+        max_early_data,
+    )
+
+
+def _do_acceptor_free(imm lib: OwnedDLHandle, handle: Int) raises:
+    """Free an acceptor allocated by :func:`_do_acceptor_new`.
+    NULL handle is a no-op (so the destructor is safe to call on
+    a zero-initialised carrier whose construction failed)."""
+    if handle == 0:
+        return
+    var f = dl_sym[def(Int) thin abi("C") -> None](
+        lib, "flare_rustls_quic_acceptor_free"
+    )
+    f(handle)
+
+
+# ── Session lifecycle ────────────────────────────────────────────────────────
+
+
+def _do_accept(
+    imm lib: OwnedDLHandle, acceptor: Int, imm transport_params: List[UInt8]
+) raises -> Int:
+    """Call ``flare_rustls_quic_accept`` to construct a fresh
+    per-connection session. Returns the ``Box<Session>*`` as
+    ``Int``; zero on failure (read :func:`_do_last_error`)."""
+    var f = dl_sym[def(Int, Int, Int) thin abi("C") -> Int](
+        lib, "flare_rustls_quic_accept"
+    )
+    return f(
+        acceptor,
+        Int(transport_params.unsafe_ptr()),
+        len(transport_params),
+    )
+
+
+def _do_session_free(imm lib: OwnedDLHandle, handle: Int) raises:
+    """Free a session allocated by :func:`_do_accept`. NULL is a
+    no-op."""
+    if handle == 0:
+        return
+    var f = dl_sym[def(Int) thin abi("C") -> None](
+        lib, "flare_rustls_quic_session_free"
+    )
+    f(handle)
+
+
+# ── Connector lifecycle (client role) ────────────────────────────────────────
+
+
+def _do_connector_new(
+    imm lib: OwnedDLHandle,
+    imm ca_pem: List[UInt8],
+    imm alpn_wire: List[UInt8],
+) raises -> Int:
+    """Call ``flare_rustls_quic_connector_new`` and return the
+    ``Box<Connector>*`` as an ``Int``. Zero on failure (read
+    :func:`_do_last_error` for the reason). The client-role mirror
+    of :func:`_do_acceptor_new`.
+    """
+    var f = dl_sym[def(Int, Int, Int, Int) thin abi("C") -> Int](
+        lib, "flare_rustls_quic_connector_new"
+    )
+    return f(
+        Int(ca_pem.unsafe_ptr()),
+        len(ca_pem),
+        Int(alpn_wire.unsafe_ptr()),
+        len(alpn_wire),
+    )
+
+
+def _do_connector_new_native_roots(
+    imm lib: OwnedDLHandle,
+    imm alpn_wire: List[UInt8],
+) raises -> Int:
+    """Call ``flare_rustls_quic_connector_new_native_roots`` and
+    return the ``Box<Connector>*`` as an ``Int``. Zero on failure
+    (read :func:`_do_last_error` for the reason). Builds a connector
+    trusting the OS CA bundle (loaded via rustls-native-certs)."""
+    var f = dl_sym[def(Int, Int) thin abi("C") -> Int](
+        lib, "flare_rustls_quic_connector_new_native_roots"
+    )
+    return f(
+        Int(alpn_wire.unsafe_ptr()),
+        len(alpn_wire),
+    )
+
+
+def _do_connector_free(imm lib: OwnedDLHandle, handle: Int) raises:
+    """Free a connector allocated by :func:`_do_connector_new`.
+    NULL handle is a no-op."""
+    if handle == 0:
+        return
+    var f = dl_sym[def(Int) thin abi("C") -> None](
+        lib, "flare_rustls_quic_connector_free"
+    )
+    f(handle)
+
+
+def _do_connect(
+    imm lib: OwnedDLHandle,
+    connector: Int,
+    imm server_name: List[UInt8],
+    imm transport_params: List[UInt8],
+) raises -> Int:
+    """Call ``flare_rustls_quic_connect`` to construct a fresh
+    client-role per-connection session for ``server_name`` (SNI).
+    Returns the ``Box<Session>*`` as ``Int``; zero on failure
+    (read :func:`_do_last_error`)."""
+    var f = dl_sym[def(Int, Int, Int, Int, Int) thin abi("C") -> Int](
+        lib, "flare_rustls_quic_connect"
+    )
+    return f(
+        connector,
+        Int(server_name.unsafe_ptr()),
+        len(server_name),
+        Int(transport_params.unsafe_ptr()),
+        len(transport_params),
+    )
+
+
+# ── Handshake driving ────────────────────────────────────────────────────────
+
+
+def _do_feed_crypto(
+    imm lib: OwnedDLHandle, session: Int, level: Int, imm data: List[UInt8]
+) raises -> Int:
+    """Push inbound CRYPTO frame bytes into the rustls handshake
+    state machine. Returns 0 on success, -1 on bad pointer, -2 on
+    a rustls protocol error (read :func:`_do_last_error`)."""
+    var f = dl_sym[def(Int, c_int, Int, Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_feed_crypto"
+    )
+    return Int(f(session, c_int(level), Int(data.unsafe_ptr()), len(data)))
+
+
+def _do_take_crypto(
+    imm lib: OwnedDLHandle, session: Int, level: Int
+) raises -> List[UInt8]:
+    """Drain pending outbound CRYPTO frame bytes at ``level``.
+
+    Returns an owned buffer; empty when nothing is pending. The
+    helper allocates a 4 KiB scratch and re-tries with a larger
+    buffer once if the FFI reports the same byte count came back
+    (rustls coalesces outbound bytes per level, and 4 KiB is
+    enough for a full ClientHello / EncryptedExtensions burst in
+    practice -- the loop covers ServerCertificate which may exceed
+    4 KiB with a deep chain).
+    """
+    var cap = 4096
+    var out = List[UInt8](length=cap, fill=0)
+    var written: Int = 0
+    var written_ptr = Pointer(to=written)
+    var rc = _take_crypto_call(lib, session, level, out, cap, Int(written_ptr))
+    if rc != 0:
+        raise Error(
+            String("flare_rustls_quic_take_crypto failed: rc=") + String(rc)
+        )
+    # If the buffer was fully consumed, the next chunk may still be
+    # waiting (rustls splits at our cap). Loop until the FFI reports
+    # written < cap, meaning nothing further is pending at this level.
+    var collected = List[UInt8](capacity=written)
+    collected.extend(Span[UInt8, _](out)[:written])
+    while written == cap:
+        written = 0
+        rc = _take_crypto_call(lib, session, level, out, cap, Int(written_ptr))
+        if rc != 0:
+            raise Error(
+                String("flare_rustls_quic_take_crypto failed: rc=") + String(rc)
+            )
+        collected.extend(Span[UInt8, _](out)[:written])
+    return collected^
+
+
+def _take_crypto_call(
+    imm lib: OwnedDLHandle,
+    session: Int,
+    level: Int,
+    mut out_buf: List[UInt8],
+    cap: Int,
+    written_addr: Int,
+) raises -> Int:
+    """Inner one-shot helper: route the FFI thunk through a
+    ``read lib`` borrow so Mojo's ASAP destructor cannot unmap
+    the .so between the symbol resolution and the call.
+
+    `written_addr` is a raw pointer (as ``Int``) to a stack-resident
+    ``Int`` cell that the FFI writes back the actual byte count
+    copied into ``out_buf``.
+    """
+    var f = dl_sym[def(Int, c_int, Int, Int, Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_take_crypto"
+    )
+    return Int(
+        f(
+            session,
+            c_int(level),
+            Int(out_buf.unsafe_ptr()),
+            cap,
+            written_addr,
+        )
+    )
+
+
+def _do_is_handshake_complete(
+    imm lib: OwnedDLHandle, session: Int
+) raises -> Bool:
+    """``flare_rustls_quic_is_handshake_complete`` returns 1 once
+    the 1-RTT keys are derived, 0 while still handshaking, -1 on
+    NULL session (treated as "not complete" by callers)."""
+    if session == 0:
+        return False
+    var f = dl_sym[def(Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_is_handshake_complete"
+    )
+    return Int(f(session)) == 1
+
+
+def _do_alpn(imm lib: OwnedDLHandle, session: Int) raises -> String:
+    """Return the negotiated ALPN identifier (empty if none).
+    Raises on the FFI's bad-pointer / out-cap-too-small codes."""
+    if session == 0:
+        raise Error(
+            "flare_rustls_quic_alpn: NULL session (the rustls"
+            " session handle is zero -- typically because the"
+            " acceptor failed to construct with the supplied PEM)"
+        )
+    var f = dl_sym[def(Int, Int, Int, Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_alpn"
+    )
+    var buf = List[UInt8](capacity=256)
+    for _ in range(256):
+        buf.append(UInt8(0))
+    var written: Int = 0
+    var written_addr = Int(Pointer(to=written))
+    # The FFI returns the ALPN byte count as its return value (and
+    # also writes it through ``written``). Use the return value as
+    # the length: the ``written`` out-parameter readback is folded to
+    # its initial 0 by the optimizer across the opaque FFI call (the
+    # same hazard documented on ``_do_packet_encrypt`` / ``_decrypt``),
+    # which would truncate a real ALPN id to an empty string.
+    var rc = Int(f(session, Int(buf.unsafe_ptr()), 256, written_addr))
+    if rc < 0:
+        raise Error(String("flare_rustls_quic_alpn returned ") + String(rc))
+    if rc == 0:
+        return String("")
+    # Build the ALPN identifier as a String from the bytes the
+    # FFI just wrote. The identifiers we care about are ASCII
+    # (RFC 7301 §3.1 -- "Protocols are named by IANA-registered
+    # byte strings, with no embedded NUL bytes"); the
+    # ``unsafe_from_utf8 = Span(buf[:n])`` shape is the
+    # canonical path used by ``flare.tls._server_ffi`` for the
+    # OpenSSL alpn-selected helper.
+    return String(unsafe_from_utf8=Span[UInt8, _](buf[:rc]))
+
+
+def _do_peer_transport_params(
+    imm lib: OwnedDLHandle, session: Int
+) raises -> List[UInt8]:
+    """Copy the peer's raw ``quic_transport_parameters`` extension
+    out of the rustls session. Returns an empty list when rustls
+    has not yet surfaced them (handshake flight not processed).
+    Raises on the FFI's bad-pointer / out-cap-too-small codes.
+
+    The readback uses a fixed 1024-byte buffer. A peer's
+    transport-parameters blob is a handful of varint params (well
+    under 256 bytes in practice); the FFI returns -1 (raise) rather
+    than truncating if a peer ever exceeds the cap -- upgrade path
+    is a grow-and-retry loop keyed off ``written``.
+    """
+    if session == 0:
+        raise Error("flare_rustls_quic_peer_transport_params: NULL session")
+    var f = dl_sym[def(Int, Int, Int, Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_peer_transport_params"
+    )
+    var cap = 1024
+    var buf = List[UInt8](capacity=cap)
+    for _ in range(cap):
+        buf.append(UInt8(0))
+    var written: Int = 0
+    var written_addr = Int(Pointer(to=written))
+    var rc = Int(f(session, Int(buf.unsafe_ptr()), cap, written_addr))
+    if rc < 0:
+        raise Error(
+            String("flare_rustls_quic_peer_transport_params returned ")
+            + String(rc)
+        )
+    var out = List[UInt8]()
+    for i in range(rc):
+        out.append(buf[i])
+    return out^
+
+
+# ── Per-level AEAD + header protection ─────────────────────────────────────
+
+
+def _do_have_keys(
+    imm lib: OwnedDLHandle, session: Int, level: Int
+) raises -> Int:
+    """``flare_rustls_quic_have_keys``: 1 if rustls has installed
+    keys at ``level``, 0 otherwise, -1 on bad pointer / level out
+    of range.
+
+    The QuicListener reactor calls this after every take_crypto
+    pump to learn whether the Handshake (2) or 1-RTT (3) `Keys`
+    slot has flipped from None to Some(_). Once
+    installed, the matching packet/header thunks below dispatch
+    AEAD + HP through rustls's already-derived `Keys` instead of
+    re-deriving them from a traffic secret on the flare side
+    (rustls's `quic::Secrets` is `pub(crate)`-sealed).
+    """
+    if session == 0:
+        return -1
+    var f = dl_sym[def(Int, c_int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_have_keys"
+    )
+    return Int(f(session, c_int(level)))
+
+
+def _do_install_early_keys(imm lib: OwnedDLHandle, session: Int) raises -> Int:
+    """``flare_rustls_quic_install_early_keys``: capture rustls's
+    0-RTT (EarlyData) ``DirectionalKeys`` into the session's slot.
+
+    Returns 1 if 0-RTT keys are available (resumed client / accepted
+    server), 0 if rustls has none for this connection, -1 on a NULL
+    session. After a ``1``, the EARLY_DATA (level 1) packet/header
+    thunks below encrypt/decrypt 0-RTT packets.
+    """
+    if session == 0:
+        return -1
+    var f = dl_sym[def(Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_install_early_keys"
+    )
+    return Int(f(session))
+
+
+def _do_is_early_data_accepted(
+    imm lib: OwnedDLHandle, session: Int
+) raises -> Int:
+    """``flare_rustls_quic_is_early_data_accepted``: 1 if the server
+    accepted the client's 0-RTT data, 0 if not (or not a resumed
+    client), -1 on a NULL session. Client-role only; the server
+    side always returns 0."""
+    if session == 0:
+        return -1
+    var f = dl_sym[def(Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_is_early_data_accepted"
+    )
+    return Int(f(session))
+
+
+def _packet_encrypt_to(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    packet_number: UInt64,
+    header: Span[UInt8, _],
+    payload_addr: Int,
+    payload_len: Int,
+    tag_addr: Int,
+) raises:
+    """``flare_rustls_quic_packet_encrypt``: encrypt the payload at
+    ``payload_addr`` in place and write its 16-byte tag at ``tag_addr``.
+
+    ``header`` is the QUIC packet header (used as AEAD AAD per
+    RFC 9001 §5.3). Raises if the FFI returns a non-zero code: rustls
+    error text is in :func:`_do_last_error`.
+
+    The FFI also reports the tag length via ``tag_written``, but that
+    out-parameter read-back is unreliable across the opaque FFI call
+    (the optimizer folds it to the initial 0, which would truncate the
+    tag to an empty slice and ship unauthenticated packets). The QUIC
+    AEAD suites (AES-GCM / ChaCha20-Poly1305) always emit a 16-byte tag
+    (RFC 9001 sec 5.3), so callers keep all 16 bytes rather than depend
+    on the readback.
+    """
+    _need(fns.packet_encrypt, "flare_rustls_quic_packet_encrypt")
+    var f = _as_fn[_PacketEncryptFn](fns.packet_encrypt)
+    var written: Int = 0
+    var rc = Int(
+        f(
+            session,
+            c_int(level),
+            packet_number,
+            Int(header.unsafe_ptr()),
+            len(header),
+            payload_addr,
+            payload_len,
+            tag_addr,
+            16,
+            Int(Pointer(to=written)),
+        )
+    )
+    if rc != 0:
+        raise Error(
+            String("flare_rustls_quic_packet_encrypt returned ") + String(rc)
+        )
+
+
+def _do_packet_encrypt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    packet_number: UInt64,
+    imm header: List[UInt8],
+    mut payload: List[UInt8],
+) raises -> List[UInt8]:
+    """Encrypt ``payload`` in place at the given encryption level and
+    return the 16-byte authentication tag; the caller appends it to the
+    on-wire packet. See :func:`_packet_encrypt_to`."""
+    var tag = List[UInt8](length=16, fill=0)
+    _packet_encrypt_to(
+        fns,
+        session,
+        level,
+        packet_number,
+        Span(header),
+        Int(payload.unsafe_ptr()),
+        len(payload),
+        Int(tag.unsafe_ptr()),
+    )
+    return tag^
+
+
+def _do_packet_seal(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    packet_number: UInt64,
+    header: Span[UInt8, _],
+    mut payload: List[UInt8],
+) raises:
+    """Encrypt ``payload`` in place and append its 16-byte tag to it, so
+    it holds the packet's whole protected payload. On a raise the tail
+    is not a tag and the payload must be discarded."""
+    var n = len(payload)
+    payload.resize(unsafe_uninit_length=n + 16)
+    var base = Int(payload.unsafe_ptr())
+    _packet_encrypt_to(
+        fns, session, level, packet_number, header, base, n, base + n
+    )
+
+
+def _do_packet_decrypt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    packet_number: UInt64,
+    imm header: List[UInt8],
+    mut payload: List[UInt8],
+) raises -> Int:
+    """``flare_rustls_quic_packet_decrypt``: verify + strip the
+    AEAD tag from ``payload`` in place at the given encryption
+    level. Returns the plaintext length (always
+    ``len(payload) - 16`` for AEAD-GCM / ChaCha20-Poly1305).
+
+    Raises if rustls rejects the tag (the typical "wrong keys at
+    this level" symptom).
+    """
+    _need(fns.packet_decrypt, "flare_rustls_quic_packet_decrypt")
+    var f = _as_fn[_PacketDecryptFn](fns.packet_decrypt)
+    var plaintext_len: Int = 0
+    # Keep the pointer in a named variable across the FFI call:
+    # a throwaway ``Int(Pointer(to=...))`` temporary lets the
+    # optimizer treat ``plaintext_len`` as non-escaping and fold the
+    # write-back to the initial 0. Dereferencing the live pointer
+    # forces a reload of the value rustls actually wrote.
+    var len_ptr = Pointer(to=plaintext_len)
+    var rc = Int(
+        f(
+            session,
+            c_int(level),
+            packet_number,
+            Int(header.unsafe_ptr()),
+            len(header),
+            Int(payload.unsafe_ptr()),
+            len(payload),
+            Int(len_ptr),
+        )
+    )
+    if rc != 0:
+        raise Error(
+            String("flare_rustls_quic_packet_decrypt returned ") + String(rc)
+        )
+    return len_ptr[]
+
+
+def _do_packet_decrypt_1rtt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    key_phase: Int,
+    packet_number: UInt64,
+    imm header: List[UInt8],
+    mut payload: List[UInt8],
+) raises -> Int:
+    """``flare_rustls_quic_packet_decrypt_1rtt``: open a 1-RTT payload
+    in place under the header's key phase bit (RFC 9001 sec 6.3).
+    Returns 1 when the packet carried the peer's next phase and the
+    session's keys rotated (the caller now sends in the new phase), 0
+    otherwise. Raises on any failure; a failed open never rotates."""
+    _need(fns.packet_decrypt_1rtt, "flare_rustls_quic_packet_decrypt_1rtt")
+    var f = _as_fn[_PacketDecrypt1RttFn](fns.packet_decrypt_1rtt)
+    var plaintext_len: Int = 0
+    var len_ptr = Pointer(to=plaintext_len)
+    var rc = Int(
+        f(
+            session,
+            c_int(key_phase),
+            packet_number,
+            Int(header.unsafe_ptr()),
+            len(header),
+            Int(payload.unsafe_ptr()),
+            len(payload),
+            Int(len_ptr),
+        )
+    )
+    if rc < 0:
+        raise Error(
+            String("flare_rustls_quic_packet_decrypt_1rtt returned ")
+            + String(rc)
+        )
+    return rc
+
+
+def _do_key_update(imm lib: OwnedDLHandle, session: Int) raises -> Int:
+    """``flare_rustls_quic_key_update``: rotate to the next 1-RTT key
+    generation (RFC 9001 sec 6.1); returns the new key phase bit."""
+    var f = dl_sym[def(Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_key_update"
+    )
+    var rc = Int(f(session))
+    if rc < 0:
+        raise Error("flare_rustls_quic_key_update: no 1-RTT keys")
+    return rc
+
+
+def _do_header_encrypt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    sample: Span[UInt8, _],
+    first_byte_addr: Int,
+    pn_addr: Int,
+    pn_len: Int,
+) raises:
+    """``flare_rustls_quic_header_encrypt``: apply QUIC header
+    protection (RFC 9001 §5.4) to the packet's first byte +
+    packet-number bytes using rustls's
+    ``Keys.local.header.encrypt_in_place``.
+
+    ``sample`` MUST be 16 bytes from the encrypted payload (the
+    region starting 4 bytes after the start of the packet-number
+    field, regardless of declared pn length -- rustls samples
+    exactly 16 bytes for the cipher suites we speak).
+    ``first_byte_addr`` / ``pn_addr`` are raw pointer values (as
+    Int) so the caller can keep the byte cells on the stack and
+    let rustls write through.
+    """
+    _need(fns.header_encrypt, "flare_rustls_quic_header_encrypt")
+    var f = _as_fn[_HeaderProtectFn](fns.header_encrypt)
+    var rc = Int(
+        f(
+            session,
+            c_int(level),
+            Int(sample.unsafe_ptr()),
+            len(sample),
+            first_byte_addr,
+            pn_addr,
+            pn_len,
+        )
+    )
+    if rc != 0:
+        raise Error(
+            String("flare_rustls_quic_header_encrypt returned ") + String(rc)
+        )
+
+
+def _do_header_decrypt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    sample: Span[UInt8, _],
+    first_byte_addr: Int,
+    pn_addr: Int,
+    pn_len: Int,
+) raises:
+    """``flare_rustls_quic_header_decrypt``: remove QUIC header
+    protection from the packet's first byte + packet-number
+    bytes using rustls's ``Keys.remote.header.decrypt_in_place``.
+    Same sample contract as :func:`_do_header_encrypt`.
+    """
+    _need(fns.header_decrypt, "flare_rustls_quic_header_decrypt")
+    var f = _as_fn[_HeaderProtectFn](fns.header_decrypt)
+    var rc = Int(
+        f(
+            session,
+            c_int(level),
+            Int(sample.unsafe_ptr()),
+            len(sample),
+            first_byte_addr,
+            pn_addr,
+            pn_len,
+        )
+    )
+    if rc != 0:
+        raise Error(
+            String("flare_rustls_quic_header_decrypt returned ") + String(rc)
+        )
+
+
+def _do_last_error(imm lib: OwnedDLHandle) raises -> String:
+    """Read the thread-local last-error message set by the
+    rustls FFI. Returns an empty string when no message is
+    recorded.
+    """
+    var f = dl_sym[def() thin abi("C") -> Pointer[UInt8, MutUntrackedOrigin]](
+        lib, "flare_rustls_quic_last_error"
+    )
+    var p = f()
+    return String(
+        StringSlice(
+            unsafe_from_utf8=CStringSpan(
+                unsafe_from_ptr=p.unsafe_bitcast[c_char]()
+            )
+        )
+    )

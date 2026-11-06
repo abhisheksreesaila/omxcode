@@ -48,6 +48,12 @@ def vendored_at_least(pin):
                            shell=True, capture_output=True, text=True)
         if a.returncode != 0:
             return f"git archive {want} failed: {a.stderr[-200:]}"
+        # goal 52: a stable commit can be vendored with patches of ours (vendor/patches/omxcore-<commit>-*.patch, as
+        # Flare's are), applied to its archive before the comparison
+        for p in sorted((ROOT / "vendor/patches").glob(f"omxcore-{want}-*.patch")):
+            r = subprocess.run(["patch", "-p1", "-s", "-i", str(p)], cwd=tmp, capture_output=True, text=True)
+            if r.returncode != 0:
+                return f"{p.name} doesn't apply to {want}'s archive: {(r.stdout + r.stderr)[-200:]}"
         d = subprocess.run(["diff", "-rq", "-x", "build", "-x", ".omxcore-pkg.lock", "-x", ".mxframe-pkg.lock", "-x", "__pycache__", tmp, str(src)],
                            capture_output=True, text=True)
         if d.returncode != 0:

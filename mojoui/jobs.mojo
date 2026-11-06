@@ -20,6 +20,7 @@ from std.sys import CompilationTarget
 from std.memory import Pointer
 from omxcore import Job, JobBody, JobDone, start_job_then
 from mojoui.shared import put_shared, get_shared
+from mojoui import libc
 from mojoui.hosts.objc import msg, cls, sel, ns_string
 
 from mojoui.wake import SLOT_WAKE_WRITE, SLOT_WAKE_READ, libc_fn, fd_io
@@ -38,7 +39,7 @@ def wake_pipe() -> Int:
     if have > 0:
         return have - 1
     var fds = List[Int32](length=2, fill=-1)
-    var ok = external_call["pipe", c_int](Int(fds.unsafe_ptr()))
+    var ok = libc.pipe(Int(fds.unsafe_ptr()))
     var r = Int(fds[0])
     var w = Int(fds[1])
     _ = len(fds)
@@ -47,10 +48,10 @@ def wake_pipe() -> Int:
     # The write end never blocks: a full pipe already means "a wake is pending", and nothing may drain it (no host
     # watching, MOJOUI_JOB_WAKE=0, an app whose jobs_message is 0), so a job's thread must not wait on write().
     # The read end stays blocking: the web host's thread waits on it. Neither end leaks into child processes.
-    # (fcntl declared as mojoui.http_socket declares it, variadic: one C function, one signature per program)
-    _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(4), c_int(2048))  # F_SETFL, O_NONBLOCK (Linux: 0o4000)
-    _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(w), c_int(2), c_int(1))  # F_SETFD, FD_CLOEXEC
-    _ = external_call["fcntl", c_int, num_fixed_args=2](c_int(r), c_int(2), c_int(1))
+    # (fcntl through mojoui.libc: one C function, one signature per program)
+    _ = libc.fcntl(w, 4, 2048)  # F_SETFL, O_NONBLOCK (Linux: 0o4000)
+    _ = libc.fcntl(w, 2, 1)  # F_SETFD, FD_CLOEXEC
+    _ = libc.fcntl(r, 2, 1)
     put_shared(SLOT_WAKE_WRITE, w + 1)
     put_shared(SLOT_WAKE_READ, r + 1)
     return r

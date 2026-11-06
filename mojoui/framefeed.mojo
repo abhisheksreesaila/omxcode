@@ -19,6 +19,7 @@
 from std.ffi import external_call, c_int
 from std.memory import Pointer
 from std.memory.alloc import unsafe_alloc
+from mojoui import libc
 from std.time import sleep
 from mojoui.video import VideoSource, VideoInfo, file_exists
 from mojoui.wake import wake_write_fd, wake_write
@@ -69,7 +70,7 @@ struct _Shared(Movable):
         self.wake_fd = wake_fd
         self.lock = Int(unsafe_alloc[UInt8](_SYNC_BYTES))
         self.cond = Int(unsafe_alloc[UInt8](_SYNC_BYTES))
-        _ = external_call["pthread_mutex_init", c_int](self.lock, 0)
+        _ = libc.pthread_mutex_init(self.lock)
         _ = external_call["pthread_cond_init", c_int](self.cond, 0)
 
 
@@ -78,11 +79,11 @@ def _at(addr: Int) -> Pointer[_Shared, MutUntrackedOrigin]:
 
 
 def _lock(addr: Int):
-    _ = external_call["pthread_mutex_lock", c_int](_at(addr)[].lock)
+    _ = libc.pthread_mutex_lock(_at(addr)[].lock)
 
 
 def _unlock(addr: Int):
-    _ = external_call["pthread_mutex_unlock", c_int](_at(addr)[].lock)
+    _ = libc.pthread_mutex_unlock(_at(addr)[].lock)
 
 
 def _release(addr: Int):
@@ -96,7 +97,7 @@ def _release(addr: Int):
     var lock = _at(addr)[].lock
     var cond = _at(addr)[].cond
     _ = external_call["pthread_cond_destroy", c_int](cond)
-    _ = external_call["pthread_mutex_destroy", c_int](lock)
+    _ = libc.pthread_mutex_destroy(lock)
     Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=lock).unsafe_free()
     Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=cond).unsafe_free()
     var p = _at(addr)
@@ -128,6 +129,11 @@ def _decode(mut src: VideoSource, target: Int, mut back: List[UInt32], addr: Int
         return 1 if src.next_into(back) else 0
     except:
         return 0
+
+
+def _feed_entry(arg: libc.ThreadArg) -> libc.ThreadArg:
+    _ = _feed_main(Int(arg))
+    return libc.null_arg()
 
 
 def _feed_main(addr: Int) abi("C") -> Int:
@@ -215,22 +221,17 @@ struct FrameFeed(Movable):
         if known:
             p[].state = _READY  # (the handle's view: ready at once; the thread opens its decoder without probing)
         self.addr = Int(p)
-        # (declared as omxcore's jobs declare it: one C function has one signature in a program)
-        var tid = Int(0)
-        var attr = unsafe_alloc[UInt8](256)
-        for i in range(256):
-            attr[i] = 0
-        _ = external_call["pthread_attr_init", c_int](attr)
-        var rc = external_call["pthread_create", c_int](Pointer(to=tid), attr, _feed_main, self.addr)
-        _ = external_call["pthread_attr_destroy", c_int](attr)
-        attr.free()
+        # (mojoui.libc looks pthread_create up: the engine, Flare and mojoui then never declare it two ways, goal 52)
+        var tid = List[Int](length=1, fill=0)  # (a buffer: pthread_create writes the id there; a local's address as an
+        # Int can leave the compiler reading the local's old value, as the engine's fan did, goal 52)
+        var rc = libc.pthread_create[_feed_entry](self.addr, Int(tid.unsafe_ptr()))
         if rc != 0:
             self.why = "no thread to decode on"
             _release(self.addr)  # (the thread's share)
             _release(self.addr)
             self.addr = 0
         else:
-            _ = external_call["pthread_detach", c_int](tid)
+            _ = libc.pthread_detach(tid[0])
 
     def __deinit__(deinit self):
         if self.addr != 0:

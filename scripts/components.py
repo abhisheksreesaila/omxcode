@@ -99,6 +99,10 @@ FEATURES = [
     ("One instance (a second launch opens the running app)", "@staticmethod def one_instance() -> String", r"A\.one_instance\(\)", "keeper"),
     ("Tray item (StatusNotifierItem; NSStatusItem)", "published by the host for a background() app; Activate opens the window", r"TrayItem\(", "keeper"),
     ("Notifications (mojoui.notify)", "notify(app, title, body)", r"(?!)", "keeper"),
+    ("HTTPS requests (FlareTransport behind mojoui.http; https:// through Flare, -D MOJOUI_FLARE)", "the same Request; AutoTransport picks FlareTransport", r"(?!)", "consoled"),
+    ("HTTP server (mojoui.serve on Flare: routes, JSON, SSE Pipes, proxy)", "Service.answer(req) -> Reply · Server.run(service, port) · Pipe · proxy(request, pipe)", r"(?!)", "consoled"),
+    ("Child processes (mojoui.process: spawn, log, health, stop the group, idle)", "Process.start(argv, log) · wait_healthy(url) · stop() · idle_ms()", r"(?!)", "consoled"),
+    ("SHA-256 (mojoui.hash, plain Mojo)", "sha256_hex(text)", r"(?!)", "consoled"),
 ]
 
 # Library features no host draws (pure Mojo over a C library): their state per host, set by hand from what ran
@@ -106,7 +110,12 @@ FEATURES = [
 BY_HAND = {"SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5)":
            {"Linux (GTK)": "✅", "Web": "✅", "Mac (AppKit)": "🔨"},
            "Folder watcher (mojoui.watch: inotify / FSEvents on its own thread)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
-           "Notifications (mojoui.notify)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"}}
+           "Notifications (mojoui.notify)": {"Linux (GTK)": "✅", "Mac (AppKit)": "🔨"},
+           # goal 50: run by tests/test_https, test_serve, test_process and consoled on Linux; Flare targets macOS too (not built here yet)
+           "HTTPS requests (FlareTransport behind mojoui.http; https:// through Flare, -D MOJOUI_FLARE)": {"Linux (GTK)": "✅"},
+           "HTTP server (mojoui.serve on Flare: routes, JSON, SSE Pipes, proxy)": {"Linux (GTK)": "✅"},
+           "Child processes (mojoui.process: spawn, log, health, stop the group, idle)": {"Linux (GTK)": "✅"},
+           "SHA-256 (mojoui.hash, plain Mojo)": {"Linux (GTK)": "✅"}}
 
 # Components built in Mojo from the ones above (drawn on a Canvas or assembled from native controls):
 # (name, module, what it's made of: component or feature names above, the constructor apps call)
