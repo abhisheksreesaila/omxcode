@@ -24,7 +24,16 @@
  
      def reset(mut self, status: Int = 200, var reason: String = ""):
          """Recycle this ``Response`` in place for the next request on
-@@ -287,6 +297,8 @@
+@@ -137,6 +147,8 @@
+         """
+         self.status = status
+         self.reason = reason^
++        self.offload_fn = 0
++        self.offload_arg = 0
+         self.body.clear()
+         # Drop any attached streaming source so a recycled Response
+         # never carries a stale chunk source into the next request.
+@@ -287,6 +299,8 @@
          out.headers = self.headers^
          out.trailers = self.trailers^
          out.body_stream = self.body_stream^
@@ -44,25 +53,33 @@
  
  from flare.crypto.hmac import base64url_decode
  from flare.errors import map_handler_error, log_handler_error
-@@ -1064,6 +1064,8 @@
+@@ -1064,6 +1064,12 @@
              var mapped = map_handler_error(String(e), expose_errors)
              self._queue_error(mapped.status, mapped.reason)
              return self._transition_to_writing()
 +        if resp.offload_fn != 0 and not self.tls:
 +            return self._offload(resp.offload_fn, resp.offload_arg)
++        if resp.offload_fn != 0:  # (omxcode patch: no hand-off here; the hook takes back its slot, fd -1)
++            var f = resp.offload_fn
++            Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[](-1, resp.offload_arg)
++            resp.offload_fn = 0
          return self._finalise_response(resp^, final_close)
  
      def on_readable_from_buf[
-@@ -1165,6 +1167,8 @@
+@@ -1165,6 +1171,12 @@
              var mapped = map_handler_error(String(e), expose_errors)
              self._queue_error(mapped.status, mapped.reason)
              return self._transition_to_writing()
 +        if resp.offload_fn != 0 and not self.tls:
 +            return self._offload(resp.offload_fn, resp.offload_arg)
++        if resp.offload_fn != 0:  # (omxcode patch: no hand-off here; the hook takes back its slot, fd -1)
++            var f = resp.offload_fn
++            Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[](-1, resp.offload_arg)
++            resp.offload_fn = 0
          return self._finalise_response(resp^, final_close)
  
      def on_readable_cancel[
-@@ -1887,6 +1891,20 @@
+@@ -1887,6 +1899,20 @@
          config.ws.handler.value()(conn)
          return _WS_UPGRADED
  
@@ -83,3 +100,16 @@
      def _note_head_from_buf(mut self):
          """While the request head has not been fully scanned
          (``headers_end < 0``) the method is read off the buffered request
+--- a/vendor/flare/http/_h2_conn_handle.mojo
++++ b/vendor/flare/http/_h2_conn_handle.mojo
+@@ -559,6 +559,10 @@
+                 log_handler_error(request_id, String(e))
+                 var mapped = map_handler_error(String(e), expose_errors)
+                 resp = Response(status=mapped.status, reason=mapped.reason)
++            if resp.offload_fn != 0:  # (omxcode patch: no hand-off here; the hook takes back its slot, fd -1)
++                var f = resp.offload_fn
++                Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[](-1, resp.offload_arg)
++                resp.offload_fn = 0
+             try:
+                 if resp.body_stream:
+                     self._begin_stream(sid, resp^)

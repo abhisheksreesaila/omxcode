@@ -465,6 +465,8 @@ def send(cfg: SmtpConfig, m: Mail) raises:
     """One message over SMTP; raises with the server's reply (or the network's error) when it isn't accepted."""
     if not cfg.ready():
         raise Error("mail: SMTP isn't set up (SMTP_HOST, SMTP_FROM)")
+    if cfg.tls != "implicit" and cfg.tls != "starttls" and not (cfg.tls == "off" and (cfg.host == "127.0.0.1" or cfg.host == "::1" or cfg.host == "localhost")):
+        raise Error("mail: SMTP_TLS must be implicit or starttls (off only for a relay on this machine)")
     var token = hex(random_bytes(12))
     var data = dotstuff(compose(cfg.sender, m, Int(wall_seconds()), token))
     var from_addr = split_sender(cfg.sender)[1]

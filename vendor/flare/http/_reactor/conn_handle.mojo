@@ -1066,6 +1066,10 @@ struct ConnHandle(Movable):
             return self._transition_to_writing()
         if resp.offload_fn != 0 and not self.tls:
             return self._offload(resp.offload_fn, resp.offload_arg)
+        if resp.offload_fn != 0:  # (omxcode patch: no hand-off here; the hook takes back its slot, fd -1)
+            var f = resp.offload_fn
+            Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[](-1, resp.offload_arg)
+            resp.offload_fn = 0
         return self._finalise_response(resp^, final_close)
 
     def on_readable_from_buf[
@@ -1169,6 +1173,10 @@ struct ConnHandle(Movable):
             return self._transition_to_writing()
         if resp.offload_fn != 0 and not self.tls:
             return self._offload(resp.offload_fn, resp.offload_arg)
+        if resp.offload_fn != 0:  # (omxcode patch: no hand-off here; the hook takes back its slot, fd -1)
+            var f = resp.offload_fn
+            Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[](-1, resp.offload_arg)
+            resp.offload_fn = 0
         return self._finalise_response(resp^, final_close)
 
     def on_readable_cancel[

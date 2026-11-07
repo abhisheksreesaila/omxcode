@@ -945,7 +945,7 @@ struct _HBridge[H: Handler](Copyable, FlareHandler):
         r.rid = request_id()
         var w = _P(unsafe_from_address=self.state)
         var app = Pointer[Self.H, MutUntrackedOrigin](unsafe_from_address=Int((w + H_APP)[]))
-        if app[].blocking(r):
+        if app[].blocking(r) and req.version.startswith("HTTP/1"):  # (HTTP/2 streams share a connection: answered inline)
             if _A.fetch_add(w + H_OFFLOADED, 1) < (w + H_MAX_OFFLOADED)[]:
                 var job = unsafe_alloc[_Offload](1)
                 job.unsafe_write(_Offload(self.state, r^, t0))
@@ -986,6 +986,11 @@ struct _Offload(Movable):
 def _offload_hook[H: Handler](fd: Int, arg: Int):
     """Flare's reactor gives up the connection (on its worker): the socket goes blocking and a thread answers it."""
     var job = Pointer[_Offload, MutUntrackedOrigin](unsafe_from_address=arg)
+    if fd < 0:  # (Flare couldn't hand the connection over (TLS, HTTP/2): the slot and the record go back; it got the 503)
+        _ = _A.fetch_add(_P(unsafe_from_address=job[].state) + H_OFFLOADED, -1)
+        job.unsafe_deinit_pointee()
+        job.unsafe_free()
+        return
     job[].fd = fd
     var fl = libc.fcntl(fd, 3)  # F_GETFL
     if fl >= 0:

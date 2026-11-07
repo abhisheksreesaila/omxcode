@@ -559,6 +559,10 @@ struct Http2ConnHandle(Movable):
                 log_handler_error(request_id, String(e))
                 var mapped = map_handler_error(String(e), expose_errors)
                 resp = Response(status=mapped.status, reason=mapped.reason)
+            if resp.offload_fn != 0:  # (omxcode patch: no hand-off here; the hook takes back its slot, fd -1)
+                var f = resp.offload_fn
+                Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[](-1, resp.offload_arg)
+                resp.offload_fn = 0
             try:
                 if resp.body_stream:
                     self._begin_stream(sid, resp^)

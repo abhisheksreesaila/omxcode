@@ -272,6 +272,7 @@ struct Accounts(Copyable, Movable):
     var pool: Pool
     var log: Log
     var limits: RateLimit
+    var invites: RateLimit  # (per admin and tenant: an invite sends an email)
     var events: Optional[Queue]
     var tenant_migrations: Optional[Migrations]
 
@@ -289,6 +290,7 @@ struct Accounts(Copyable, Movable):
         for b in cfg.secret.as_bytes():
             self.key.append(b)
         self.limits = RateLimit(cfg.rate, 60)
+        self.invites = RateLimit(50, 3600)
         self.log = log
         self.events = events
         self.tenant_migrations = None
@@ -740,6 +742,9 @@ struct Accounts(Copyable, Movable):
         if not known or "@" not in email or email.byte_length() > 254 or "\r" in email or "\n" in email:
             return Reply.error(400, "an email and a role (admin, editor, member, viewer)", "bad_request")
         var v = m.value().copy()
+        var wait = self.invites.hit(String(v.user_id) + " " + v.tenant)
+        if wait > 0:
+            return Reply.error(429, "too many invitations this hour", "rate_limited").header("Retry-After", String(wait))
         var db = self.db()
         var id: Int
         var expires = now_s() + self.cfg.invite_ttl_s
