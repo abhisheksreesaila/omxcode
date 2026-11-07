@@ -1198,3 +1198,5 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
   I looked at build/g60/m8.png: signed in as ada, "Plan: Trial · 14 days left" with a teal Manage billing pill, Note/Amount/Add, no
   entries yet, Liquid light, nothing clipped. Not in the native demo: accepting an invite (it's the web page
   /invites/<token>); the app has no tenant switcher yet.
+- Final-tree reruns: M1, M3, M5, M10 PASS; M9 FAIL: goal 57's tests/test_accounts.mojo calls the old Accounts API
+  (not ported: budget). Reviewer and auditor round 1 fixed (D-6014), not re-run. Report: docs/report.md.

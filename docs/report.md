@@ -1,86 +1,59 @@
-# Goal 57 report: SaaS building blocks in omxcode, Mojo only
+# Goal 60 report: the whole SaaS backend in Mojo (fh-saas out of the equation)
 
-**End goal (owner, 2026-11-06):** fh-saas's jobs (Google sign-in, sessions, users, tenants and roles, one SQLite per
-tenant, Stripe checkout, webhooks, a paywall) as `mojoui` modules on `mojoui.serve` (Flare), with no Python in the
-server and CPU only (parity, not speed). Plus a tiny native demo for the gallery. The owner added M8 mid-run: the same
-on the Mac.
+**Goal (owner, 2026-11-06):** email, background jobs, migrations, logging, invites you accept, many tenants per person,
+billing parity and hardening as generic `mojoui` modules; then the owner's bar (D-6006): "speed, modular, best
+implementation… not a compromise". So: M10, faster than fh-saas and measured, and M11, modular drop-in.
 
-**Where it stands:** it works end to end against the checker's Google and Stripe stand-ins, on Linux and on the owner's
-Mac. Real Google and Stripe wait for your keys (M5).
+## Checker output (docs/goals/60-check.py, branch goal-60-backend)
+Full run 1 (build/g60/full-1.txt) and the final-tree reruns after the review fixes (build/g60/full-2.txt):
 
-## Checker output (final tree 43982418, `docs/goals/57/check.txt`)
-```
-M0: PASS  own env, Mojo 1.2, serve/https/hash pass
-M1: PASS  hmac, random, base64url, compare, seal
-M2: PASS  PKCE + state, sealed HttpOnly cookie, one SQLite per tenant, no cross-tenant reads, roles, server-side sign-out
-M3: PASS  checkout session, signed webhooks (bad/old refused, once only), Pro for ada only, cancel → free
-M4: PASS  native sign-in via the system browser + loopback, an entry in ada's SQLite, upgrade → Pro; shot build/g57/m4.png
-M5: BLOCKED  no ~/.config/omxcode/saas.env: the owner runs scripts/saas_keys.sh (Google OAuth client + Stripe test key)
-M6: PASS  parity map, components listed, gallery card, Linux download
-M7: PASS  ui thread, served, libc and decision lints
-M8: PASS  on the Mac (macOS, arm64): the server passes M2 and M3; the AppKit app signs in and pays; shot build/g57/m8-mac.png
-```
-**Reviews:** the reviewer and the security auditor both said NEEDS WORK in round 1. I fixed what they flagged
-(D-5724–D-5728) and proved the fixes on the live server (`build/g57/probe_fixes.py`):
-- a callback finished in another browser gets 400;
-- a cross-origin cookie write gets 401 (the same write from the site's own origin gets 201);
-- a 2 MB webhook gets 413.
-
-Both reviewers passed rounds 2 and 3. No Critical or High findings at any point.
-
-## What was built (framework first: the app only composes)
-| Piece | Does | Test |
+| | result | |
 |---|---|---|
-| `mojoui.crypto` | HMAC-SHA256, OS random (getentropy), base64url, constant-time compare, seals, PKCE: plain Mojo, every host | tests/test_crypto.mojo |
-| `mojoui.accounts` | Google OAuth with state and PKCE; server-side sessions in sealed HttpOnly cookies; tenants, roles and invites; one SQLite file per tenant; RFC 8252 desktop sign-in | tests/test_accounts.mojo, M2 |
-| `mojoui.billing` | Stripe Checkout, signed webhooks applied once, reading the session back on return, a paywall (402) | tests/test_billing.mojo, M3 |
-| `mojoui.signin` | the desktop side: a loopback listener (libc sockets, no Flare) and the PKCE verifier | M4, M8 |
-| `mojoui.browser` + `App.opens` | open_url as an effect, like HTTP: GTK and AppKit | tests/test_open_url.mojo |
-| AppKit host | `waitfor:` steps, offscreen test runs (`MOJOUI_OFFSCREEN=1`), `MOJOUI_REPORT_DIR`, BETWEEN rows read like GTK's | M8 |
-| `examples/saas` | `server.mojo` (routes only) and `app.mojo` (native client, Liquid light) | M2–M4, M8 |
+| M0 | PASS | own env, Mojo 1.2; goal 57 M1, M3, M4 PASS, M2 fails only at the silent invite (replaced by M5, D-6004) |
+| M1 | PASS (final tree) | JSON request lines with rids, no secrets in either log, audit sign_up/sign_in/invite/plan_change |
+| M2 | PASS | 002 reached both tenants on restart; a broken 003 and an edited 002 each refused, files unchanged |
+| M3 | PASS (final tree) | 20 × /api/me < 300 ms while Stripe and Google each sat 8 s; a job resumed after kill -9 |
+| M4 | PASS | implicit TLS + AUTH, text + HTML, RFC 2047, 3rd-attempt delivery, dead with the 451, no header injection; **STARTTLS delivers** |
+| M5 | PASS (final tree) | invite by email, no silent join, same-origin accept only, 403 for others, 410 used/expired, switching without leaks |
+| M6 | PASS | trial, Stripe trial days, customer portal, cancel at period end, past_due after grace |
+| M7 | PASS | 429 + Retry-After per IP, sliding sessions |
+| M8 | PASS | parity rows ✅, the wizard asks for SMTP, GTK shot looked at, M1/M3/M5/M6 pass on the owner's Mac |
+| M9 | **FAIL** | goal 57's M6–M8 and the lints pass (with D-6013), but `tests/test_accounts.mojo` (goal 57's) no longer compiles: it calls the old `Accounts` API (one tenant per person, `user_for` returning an id). Blocker: that test must be ported to the new API (`user_for` → (uid, tenant), `start_session(uid, tenant)`), which the budget didn't leave room for |
+| M10 | PASS (final tree) | faster than fh-saas on p50, p99 and req/s for every flow at 64 clients (closest 7.1× the throughput) |
+| M11 | PASS | saas_min: 50 lines on accounts + mail + jobs, billing not linked, sign-in + tenant + welcome email |
 
-The fh-saas → mojoui parity map is in `docs/saas.md`, with honest ❌ marks: email, background jobs, migrations, logging,
-the customer portal and trials. Its "Known limits" section lists what to close before real users.
+Reviews: reviewer NEEDS WORK → its must-fixes fixed (writer lock can't leak on a raise or a nested begin, rollbacks in
+Queue.add and audit(), offload socket timeouts, test_handler asserts the offloaded reply, inert template values).
+Security auditor NEEDS WORK (1 High, 3 Medium) → the High and two Mediums fixed (D-6014: offload only on HTTP/1, slots
+handed back on TLS/HTTP/2; invites limited per admin; strict SMTP_TLS). **Neither was re-run on the fixed tree.**
+
+## The benchmark (docs/goals/60-bench.md, the checker's own run; 24 CPUs)
+64 clients: `me` 69,006 vs 9,736 req/s; `entries_get` 54,935 vs 1,118 (fh-saas 230 errors); `entries_post` 10,997 vs
+10; `webhook` 5,286 vs 18; `callback` 728 vs 0 (fh-saas answered none of 64 concurrent callbacks: its host-DB
+connection is shared across uvicorn's threadpool). p50 and p99 lower everywhere. omxcode had zero errors on every flow.
+Honest caveats: the callback numbers swing run to run (p50 at 1 client 1–143 ms across runs on a loaded machine) and
+entries_post/webhook p99 at 64 clients (35–75 ms) are writer-lock convoys on one file; both are next-step work.
 
 ## 30-second demo
 ```
-scripts/saas_keys.sh                                   # once: your Google Desktop client + Stripe test key → ~/.config/omxcode/saas.env
-scripts/saas.sh run &                                  # the Mojo server on http://127.0.0.1:8000
+scripts/saas.sh run                                   # server on :8000 (keys from scripts/saas_keys.sh)
 scripts/build.sh saas linux && SAAS_SERVER=http://127.0.0.1:8000 build/saas/linux/saas
+pixi run python scripts/saas_bench.py                 # omxcode vs fh-saas, writes docs/goals/60-bench.md
 ```
-1. Press **Sign in with Google**. Your browser opens and you sign in.
-2. The app shows `Signed in as <you>`.
-3. Add *Coffee 4.50*. The entry lands in your tenant's own `build/saas/data/tenants/<id>.db`.
-4. Press **Upgrade** and pay with 4242 4242 4242 4242 on Stripe's test page.
-5. The app shows `Plan: Pro`.
+Sign in → "Plan: Trial · 14 days left" + Manage billing; invite someone from /api/invites → they get a link, see
+"Join <tenant>, invited by <name>?", accept, and switch tenants.
 
-Without keys, `scripts/check M4` plays the same story against the stand-ins.
+## Three decisions worth a second look
+1. **D-6008: the Flare offload patch** (vendor/patches/flare-0.13-offload.patch). Blocking requests leave the reactor on
+   a thread of their own with `Connection: close`. It's the root-cause fix for slow providers, but it is a fork of
+   Flare to send upstream, and each offload makes a thread and fresh SQLite connections (a fixed pool is next).
+2. **D-6010: mojoui.jobs became the server queue, the UI's moved to mojoui.uijobs.** A mechanical rename across ~20
+   files so a server doesn't link the UI hosts; merging other branches must grep for `mojoui.jobs`.
+3. **D-6012: the fh-saas baseline.** uvicorn with 8 workers (stronger than the docs' single process) and fh-saas's own
+   webhook route with one fix. fh-saas bugs found for its author: that route crashes on stripe-python's Event,
+   `handle_webhook_request` never awaits `process_webhook`, the host DB connection is shared across threads.
 
-![Linux: ada on Pro](goals/57/m4-linux.png)
-![The Mac (AppKit): the same run on the owner's Mac](goals/57/m8-mac.png)
-![Gallery: ada on Pro beside ben on Free](gallery/img/saas.png)
-
-## Three decisions worth your second look
-1. **D-5725: invites still join silently.** An invited person lands in the inviting tenant on their first sign-in,
-   with no accept step, because M2's contract says so. The auditor's one open Medium: an admin of *any* tenant can
-   pre-invite an address before that person signs up. Fix: an accept page ("Join X, invited by Y?"). It must close
-   before real users.
-2. **D-5714 / D-5727: Google and Stripe calls run under the server's one lock.** This was a parity choice. A slow
-   provider stalls every request for up to 20–30 s. There are only cheap limits: body caps, and a global budget of 30
-   `/billing/return` read-backs a minute. Moving these calls into jobs and adding per-IP limits is the scale-up step.
-3. **D-5719 / D-5724: two edits to the checker's M4 proof, each logged before the edit.**
-   - The label regex could never match GTK's `LABEL: ` lines, so no app could have passed it. Fixed.
-   - The check was tightened from any label containing "Pro" to `Plan: Pro`.
-
-   Neither edit lowered a bar.
-
-## What needs you
-- **Run `scripts/saas_keys.sh`.** It walks you through a Google "Desktop app" OAuth client and a Stripe test-mode key
-  plus the Pro price, then offers to run M5. I never read that file.
-- **Then sign in with Google once by hand** (D-5705: Google blocks scripted sign-ins). That first real run also
-  confirms the browser-bound state cookie survives Google's redirect, which so far is proved only against the
-  stand-in.
-- **Optional: upload `dist/saas-linux-x86_64.tar.gz`** (the app with its server) to the `gallery-apps` release.
-  The gallery card links there.
-
-**Next step:** run the wizard and M5, then add the invite accept page.
+## Next step
+Port tests/test_accounts.mojo to the new Accounts API (M9), re-run the reviewer and auditor on the fixed tree, then
+the auditor's open items: rate-limit table eviction under a flood, saas_min getting body caps and security headers
+from the framework, subscription events that arrive before the checkout, and a fixed offload thread pool.
