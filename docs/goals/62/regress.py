@@ -42,7 +42,14 @@ NOT_RUN = re.compile(r"FileNotFoundError|No such file|cannot open input file|\bn
 OUT = ROOT / "build/g62/m6"
 # CHANGED rows looked at and explained (round 4: a row fails on both sides for a different reason, a changed count or a new
 # mention, isn't SAME until someone has read both): "check:fn" → what was found
-EXPLAINED = {}
+EXPLAINED = {  # (round 4, each read in full on both sides)
+    "08-check.py:m1": "both stop at the same compile error, mojoui/http_flare.mojo:126 (indentation); the stored reasons began at different lines",
+    "08-check.py:m6": "both fail tests/test_analytics.mojo:77 (left 1, right 0); the base's reason began with a pixi warning",
+    "14-check.py:m2": "both: 'GTK run failed (exit 0)' with the same Start screen dump; the reasons are the dump's tail cut at different points",
+    "14-check.py:m3": "as M2: the same GTK failure and dump, cut at different points",
+    "14-check.py:m4": "as M2: the same GTK failure and dump, cut at different points",
+    "33-check.py:m4": "the same four liquid.mojo lints (sidebar and inspector shaped by hand), listed in another order",
+}
 
 
 def reason_key(why, tree):
@@ -207,6 +214,10 @@ def run_all(only=None, base_only=False):
     for check, fn in todo:
         ok, why, took = run_milestone(check, fn)
         name = f"goal {check.name.split('-')[0]} {fn.upper()}" + (" (required)" if required(check, fn) else "")
+        if not ok:  # (once more here before the base is asked: round 4's goal 34b M1 failed once and passed on its rerun)
+            ok2, why2, took2 = run_milestone(check, fn)
+            if ok2:
+                ok, why, took = True, f"(passed on its second run; the first: {why[:120]}) {why2}", took2
         if ok:
             say("PASS", f"{name} ({took:.0f} s): {why[:160]}")
         else:

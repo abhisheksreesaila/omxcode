@@ -1,9 +1,8 @@
 # Goal 62 report: omxplorer on the web, safe to share
 
 `docs/goals/62-check.py`, Linux, CPU only (`CUDA_VISIBLE_DEVICES=""`), on a shared machine (other projects kept its load
-at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), rounds 2 and 3 (2026-11-07). Branch `t3/hosted-omxplorer-safety`, not merged: round 3 fixed
-every finding of the round-3 reviews (both NEEDS WORK) and ran no reviewer this round, as asked; the owner's round-4
-review comes next.
+at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), rounds 2–4 (2026-11-07). Branch `t3/hosted-omxplorer-safety`, not merged: round 4 fixed every
+finding of the round-4 reviews (both NEEDS WORK) and ran no reviewer, as asked; the owner's next review comes next.
 
 | # | Result (round 3; the outputs kept in docs/goals/62/runs/) |
 |---|---|
@@ -15,6 +14,27 @@ review comes next.
 | M5 | image half BLOCKED, the rest PASS · `scripts/web-start` held to Hobby's caps (8 GB, 8 vCPU), visitors only clicking, each from its own address. At the cap of 6 (D-6230), three runs in a row (load 3.7–9.8): video 15.0–15.2, 14.8–15.0 and 15.0–15.1 pictures a second each, p95 click → answer 270, 277 and 398 ms (runs/m5-run1–3). Docker: the socket still refuses this user |
 | M6 | PASS · 59 PASS, 24 SAME (each ran on both sides), 3 NOT RUN (two need a Mac run, one a data file this machine lacks), 0 FAIL: goal 47's GTK robot story M0–M3, the web host's tests (test_web_public.py among them) and 79 archived web milestones; every row the owner named ran (runs/m6-progress.txt); 22 regenerated files under docs/ put back; docs/components.md fresh |
 | M7 | PASS · while another visitor plays every beat: a question past the time budget stops in 1.4 s, one past the row cap in 0.4 s, a join past the memory budget in ~3 s, each in plain words; WITH (also behind a parenthesis), UNION ALL and script statements are refused; malformed CSV, Parquet and MP4 uploads refused in plain words, valid ones open; the 516 KB decode bomb refused three times with the server's memory unchanged; a stopped sort over every telemetry row: at most 2 cores while it ran, CPU and memory back at baseline seconds after; 40 push streams leave /health quick; D-6218's sequences leave the server up |
+
+## Round 4 (2026-11-07): the round-4 review's findings
+
+Each exploit the review found is in M7 now, proven by the server's own memory, threads and latency:
+- **One question filling 8 GB** (D-6239): an answer may take 64 MB (columns × rows), its rows capped from its width before
+  it runs; kept answers count with the visitor's tables (384 MB); 8 answers at most. The review's 400 columns over a 1M-row
+  upload is refused; the server went 2,876 → at most 2,881 MB meanwhile.
+- **Uploads for no session** (D-6240): refused before the body is read; every upload in flight together is held to 512 MB.
+  Three slow 200 MB uploads for a made-up session were answered after 64 KB each, the server's memory unchanged.
+- **One session stalling everyone** (D-6241): a session's blocking requests in flight are capped at 6, answered "retry"
+  without a worker thread; /health is async; uvicorn's limit_concurrency 512, keep-alive 75 s. 300 open /frame requests
+  at 3840×2400 from one session: /health median 1 ms, worst 179 ms (the review: 7.9 s median).
+- **The image** (D-6242): Playwright's Chromium (with its headless shell) is installed for Export pack's PDFs, and
+  scripts/image-check fails unless the pack arrives from the container. Not built: Docker still refuses this user.
+- **Smaller ones:** X-Real-IP keys parse as addresses (45 characters, IPv6 by /64), the table bounded, and the wizard checks
+  what the live server records for a made-up one; 2 places per address at all times; an untouched session frees its place
+  in 10 s and says why truthfully; the "being made" count and the session list change under one lock; the page's frame and
+  drop fetches retry after a network error (the M4 "Failed to fetch" flake); a refused upload's body is read and dropped so
+  Chromium shows the notice (proven in M7 with a 60 MB upload past a 50 MB cap); BodyLimit's answers carry the security
+  headers; regress.py calls a row SAME only for the same reason (goal 27's change was mine: a comment in
+  mojoui/starter.mojo said "paper"; reworded); docs/web-public.md says how a shared address is treated.
 
 ## Round 3 (2026-11-07): the round-3 review's findings
 

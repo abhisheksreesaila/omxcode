@@ -1,0 +1,48 @@
+PASS test_web_public.py: web public: ok
+PASS goal 08 M5 (39 s): dashboard over 20M rows; GTK and web identical after year/channel/bar/column/line taps; fits 1440×900 and 1280×800 on both
+PASS goal 14 M1 (47 s): TOOL buttons, FilePicker, Inspector/Section/Row/Stepper, Toolbar/FormulaBar/StatusBar, column formats and the CSV reader in mojoui, with tests (formats, parser,
+PASS goal 34b M1 (45 s): ECharts 6.1.0 from npm (lockfile, npm ci --ignore-scripts), tree-shaken (echarts/core, SVG renderer), no eval/new Function; fed Mojo's word counts [9, 9, 9, 10,
+PASS goal 34b M1C (165 s): scripts/dev.sh rebuilt .js, .css and .ts edits into the open page (same page, the typed note and Words: 4 kept, widgets mounted again); the counter's error logg
+SAME goal 08 M1: fails on both sides for a different reason, looked at: both stop at the same compile error, mojoui/http_flare.mojo:126 (indentation); the stored reasons began at different lines | here canvas tests: 
+Imported from ./mojoui/app.mojo:10:
+Imported from ./mojoui/effects.mojo:34:
+./mojoui/http_flare.mojo:126:21: error: statement indentation must ma | base canvas tests: ./mojoui/app.mojo:10:
+Imported from ./mojoui/effects.mojo:34:
+./mojoui/http_flare.mojo:126:21: error: statement indentation must match the rest of
+SAME goal 08 M6: fails on both sides for a different reason, looked at: both fail tests/test_analytics.mojo:77 (left 1, right 0); the base's reason began with a pixi warning | here engine/app tests: stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`
+Unhandled exceptio | base engine/app tests: ronment variable `PIXI_PROJECT_MANIFEST`
+stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG
+SAME goal 14 M2: fails on both sides for a different reason, looked at: both: 'GTK run failed (exit 0)' with the same Start screen dump; the reasons are the dump's tail cut at different points | here GTK run failed (exit 0): Blank sheet
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/scale.m | base GTK run failed (exit 0): EL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/scale.md)
+LABEL: Comin
+SAME goal 14 M3: fails on both sides for a different reason, looked at: as M2: the same GTK failure and dump, cut at different points | here GTK run failed (exit 0): ABEL: Blank sheet
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/s | base GTK run failed (exit 0): et
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/scale.md)
+LABEL:
+SAME goal 14 M4: fails on both sides for a different reason, looked at: as M2: the same GTK failure and dump, cut at different points | here GTK run failed (exit 0): 
+LABEL: Blank sheet
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs | base GTK run failed (exit 0): heet
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/scale.md)
+LABE
+SAME goal 33 M4: fails on both sides for a different reason, looked at: the same four liquid.mojo lints (sidebar and inspector shaped by hand), listed in another order | here lint: liquid.mojo still shapes sidebar by hand (mui-tag-sidebar { border-right: 1px solid " + strong + "; bo); lint: liquid.mojo still shapes sidebar by hand ([ | base lint: liquid.mojo still shapes inspector by hand (mui-tag-inspector { border-left: 1px solid " + strong + "; b); lint: liquid.mojo still shapes inspector by han
+SAME goal 34b M1B: ran on both sides and fails on 882155b too (not this goal's): here the gallery doesn't show widgets-web-light.png; the gallery doesn't show widgets-web-dark.png; the gallery doesn't show widgets-gtk-light.png | base the gallery doesn't show widgets-web-light.png; the gallery doesn't show widgets-web-dark.png; the gallery doesn't show widgets-gtk-light.png
+PASS docs/components.md is fresh: docs/components.md is current
+SUMMARY 6 PASS, 7 SAME, 0 CHANGED, 0 NOT-RUN, 0 FAIL
