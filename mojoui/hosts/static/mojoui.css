@@ -188,3 +188,5 @@ button.tool.inline span, label.picker.tool.inline span { font-size: 12px; }
 .mojoui-busy-page { max-width: 460px; margin: 18vh auto 0; padding: 28px; border-radius: 12px; display: flex; flex-direction: column; gap: 12px;
   background: light-dark(#fff, #2c2c2e); box-shadow: 0 4px 16px rgba(16,24,40,.12), 0 0 0 1px var(--line, rgba(0,0,0,.08)); }
 .mojoui-busy-page a.button { align-self: flex-start; text-decoration: none; }
+.mojoui-busy-page a.button { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; border-radius: 8px; font-weight: 600;
+  background: var(--accent, #2f7d6d); color: light-dark(#fff, #0b0d10); }

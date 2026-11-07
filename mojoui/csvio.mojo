@@ -82,14 +82,14 @@ def read_csv(path: String, job: JobCtl = JobCtl()) raises -> CsvImport:
     return CsvImport(path, r.rows, info^, skipped^, r.seconds, r.take_table().share(), r.seconds, None, False)
 
 
-def read_table(path: String, job: JobCtl = JobCtl()) raises -> CsvImport:
+def read_table(path: String, job: JobCtl = JobCtl(), whole: Bool = False) raises -> CsvImport:
     """A CSV or Parquet file (by its extension), as the Import step shows it. A file the process shared (share_file, from
     App.init_shared) isn't read again: its columns are handed over as they are, read-only."""
     var shared = shared_import(path)
     if shared:
         return shared.take()
     if path.lower().endswith(".parquet"):
-        return read_parquet_file(path, job)
+        return read_parquet_file(path, job, whole)
     return read_csv(path, job)
 
 
@@ -123,7 +123,7 @@ def cell_text(t: Table, c: Int, row: Int) -> String:
     return String(v)
 
 
-def read_parquet_file(path: String, job: JobCtl = JobCtl()) raises -> CsvImport:
+def read_parquet_file(path: String, job: JobCtl = JobCtl(), whole: Bool = False) raises -> CsvImport:
     """A Parquet file: read whole, or opened for streaming when it's too big (then its empty cells aren't counted)."""
     var t0 = perf_counter_ns()
     var scan: ParquetScan
@@ -132,7 +132,7 @@ def read_parquet_file(path: String, job: JobCtl = JobCtl()) raises -> CsvImport:
     except e:
         raise Error("couldn't read " + path + " as Parquet: " + String(e))
     var info = List[CsvColumn]()
-    if streams(scan.rows(), scan.columns()):
+    if not whole and streams(scan.rows(), scan.columns()):
         var biggest = 0
         for g in range(scan.row_groups()):
             biggest = max(biggest, scan.group_rows(g))
@@ -190,9 +190,7 @@ def share_file(path: String) raises -> Int:
     """Reads a CSV or Parquet file once for the whole process (from App.init_shared, before any session): every later
     read_table of the same path, in any session or job, gets these columns, read-only, instead of a new read (goal 62:
     the hosted copy's visitors share its starter). Returns its rows. A file too big to read whole isn't shared."""
-    var imp = read_table(path)
-    if imp.streamed():
-        raise Error("too big to share (it would be streamed): " + path)
+    var imp = read_table(path, whole=True)  # (read whole whatever the memory: a shared table is read once, by design)
     var addr = get_shared(SLOT_SHARED_FILES)
     if addr == 0:
         addr = keep(SharedFiles())

@@ -93,7 +93,10 @@ def remember(app: String, path: String, mut recent: List[String]):
 
 
 def read_setting(app: String, key: String, fallback: String = "") -> String:
-    """One value from <config>/settings.txt ("skin=dark"), or the fallback."""
+    """One value from <config>/settings.txt ("skin=dark"), or the fallback. The public web copy keeps none on disk (a
+    visitor's choices stay in its session: one visitor's Light opened the next one's Start screen, goal 62's review)."""
+    if environment("MOJOUI_PUBLIC") == "1":
+        return fallback
     try:
         with open(config_dir(app) + "/settings.txt", "r") as f:
             for line in f.read().split("\n"):
@@ -106,7 +109,9 @@ def read_setting(app: String, key: String, fallback: String = "") -> String:
 
 
 def write_setting(app: String, key: String, value: String):
-    """Sets one value in <config>/settings.txt, keeping the others."""
+    """Sets one value in <config>/settings.txt, keeping the others (never on the public web copy)."""
+    if environment("MOJOUI_PUBLIC") == "1":
+        return
     var lines = List[String]()
     var found = False
     try:
@@ -144,3 +149,12 @@ def remove_tree(path: String) raises:
     for name in listdir(path):
         remove_tree(path + "/" + name)
     rmdir(path)
+
+
+def visitor_path_ok(path: String, own: String) -> Bool:
+    """A path a person typed, before the app opens it: anywhere on a desktop; on the public web copy only inside `own`,
+    the visitor's own folder (no "..", no other place on the server: goal 62's review found Open recipe reading any)."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return True
+    var p = String(path.strip())
+    return own != "" and p.startswith(own.rstrip("/") + "/") and p.find("..") < 0

@@ -60,6 +60,7 @@ class Probe:
         self.dir.mkdir(parents=True, exist_ok=True)
         (self.dir / "secret.csv").write_text(f"who,what\n{MARK},never uploaded\n")
         (self.dir / "secret.omx").write_text(MARK)
+        (self.dir / "secret.sql").write_text(f"SELECT '{MARK}'")  # (a recipe: Open recipe reads *.sql, goal 62's review)
         self.watch = Watch(self.dir)
 
     def say(self, ok, what):
@@ -101,6 +102,20 @@ def post(url, fields, files=None):
 # page), so each one names the screen as it is now: a press that rebuilds the screen moves `v` on, and urllib posts with
 # the first `v` would all be ignored as "from an older screen", passing while proving nothing. second=1 first: the
 # value a picker, saver or drop target hands the app; then 2 (Escape) and 0 (presses, which move between screens).
+# Numbers no control offers (an app may index its own list with one): every control on the screen, as it changes.
+NUMBERS = """async ([most]) => {
+  let sent = 0;
+  const nodesNow = () => [...new Set([...document.querySelectorAll('[hx-vals]')].map(e => { try { return JSON.parse(e.getAttribute('hx-vals')).n } catch (x) { return null } })
+                                     .filter(n => typeof n === 'number'))];
+  for (const number of [2000000000, -7, 4096]) for (const n of nodesNow()) {
+    const root = document.getElementById('mojoui-root');
+    if (!root || !root.dataset.sid || sent >= most) return sent;
+    try { await htmx.ajax('POST', `/e/${root.dataset.sid}`, {values: {n, v: document.getElementById('mojoui-v').value, second: 0, text: '', number, x: 1e9, y: -1e9, dx: 1e9, dy: -1e9, zoom: 1e9}, swap: 'none', source: document.body}); } catch (e) {}
+    sent++;
+  }
+  return sent;
+}"""
+
 CRAFT = """async ([paths, route, most]) => {
   let sent = 0;
   const nodesNow = () => [...new Set([...document.querySelectorAll('[hx-vals]')].map(e => { try { return JSON.parse(e.getAttribute('hx-vals')).n } catch (x) { return null } })
@@ -172,7 +187,7 @@ def run_all(out):
     roots = [str(ROOT), str(G47), str(srv.out), str(srv.uploads), str(srv.home), str(Path.home()), str(P.dir), "/home/"]
     from harness import STARTER
     roots += [str(STARTER), str(STARTER.resolve())]
-    paths = [str(P.dir / "secret.csv"), str(P.dir), str(P.dir / "secret.omx"), "/etc/passwd", "../../../../etc/passwd", "file://" + str(P.dir / "secret.csv")]
+    paths = [str(P.dir / "secret.csv"), str(P.dir), str(P.dir / "secret.omx"), str(P.dir / "secret.sql"), "/etc/passwd", "../../../../etc/passwd", "file://" + str(P.dir / "secret.csv")]
     try:
         # ---- the agent link and /dev are off
         sock = out.parent / "m2-agent.sock"
@@ -256,12 +271,32 @@ def run_all(out):
             P.say("visitor-one-secret" not in body2 and "part0" not in body2, "a second visitor's Start screen shows nothing from the first: "
                   + ("it lists the first's file" if "visitor-one-secret" in body2 else "nothing"))
             import story as S
+            m_story = srv.mark()
             R = S.play(page2, out / "visitor-2", Net(page2), pack=True)
+            cut = [l for l in srv.log[m_story:] if l.startswith("SCRUB")]  # (the server's own record: what the scrubber had to cut)
+            P.say(not cut, "the app put no server path in any answer during the story (the scrubber cut nothing): " + (cut[0][:200] if cut else "none"))
             bad = [f"{k}: {v['note'][:120]}" for k, v in R["beats"].items() if not v["ok"]]
             P.say(not bad, "the story, played with every response scanned: " + ("; ".join(bad) if bad else "every beat"))
             texts2 = []
             page2.on("response", lambda r: texts2.append(r.text()) if "image" not in r.headers.get("content-type", "") else None)
             crafted_routes(P, page2, srv.url, paths, "the story's screen", texts2)
+            page2.goto(srv.url)
+            settle(page2)
+            page2.locator("button", has_text=re.compile("Start the robot story")).first.click()
+            page2.wait_for_function("() => /16,847,616/.test(document.body.innerText)", timeout=180000)
+            try_settle(page2)
+            sent = page2.evaluate(NUMBERS, [3000])
+            time.sleep(1)
+            alive = srv.p.poll() is None and get(srv.url + "health")[0] == 200
+            P.say(alive, f"numbers no control offers (2e9, -7, 4096, huge gestures), {sent} crafted requests on the story's screen: " + ("the server answers" if alive else "the server died"))
+            # a flood of bare page loads (?boot=1, no page behind them) can't keep a visitor out
+            for _ in range(60):
+                get(srv.url + "?boot=1")
+            late = b.new_context(viewport={"width": 1440, "height": 900}).new_page()
+            late.goto(srv.url)
+            late.wait_for_timeout(1500)
+            P.say(late.locator("button", has_text=re.compile("Start the robot story")).count() > 0, "after 60 bare ?boot=1 loads from one client, a visitor still gets in: "
+                  + ("yes" if late.locator("button", has_text=re.compile("Start the robot story")).count() else "no: " + late.inner_text("body")[:80]))
             page2.goto(srv.url)  # (the crafted requests pressed every button: a fresh tab for the Script window and SQL)
             settle(page2)
             page2.locator("button", has_text=re.compile("Start the robot story")).first.click()
@@ -282,6 +317,9 @@ def run_all(out):
                     page2.keyboard.press("Escape")
                     try_settle(page2)
             P.expect_untouched("SQL that names a server path (read_csv, a quoted file, read_parquet, COPY TO, ATTACH)", [page2.inner_text("body")])
+            asked = [l for l in srv.log if l.startswith("ASK:") and ("read_csv" in l or "read_parquet" in l or "ATTACH" in l or "COPY" in l)]
+            P.say(bool(asked) or "not supported" in page2.inner_text("body") or "SQL error" in page2.inner_text("body"),
+                  f"the SQL probes reached the engine ({len(asked)} asked) and were refused there")
             page2.locator("button[data-kind=button]", has_text=re.compile(r"^\s*Script\s*$")).first.click()
             try_settle(page2)
             area = page2.locator("textarea").last

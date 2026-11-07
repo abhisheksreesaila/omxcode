@@ -64,6 +64,7 @@ WAIT_S = float(os.environ.get("MOJOUI_WAIT_S", "0"))  # how long /wait holds wit
 JPEG_QUALITY = 85
 MAX_SESSIONS = int(os.environ.get("MOJOUI_MAX_SESSIONS", "8" if PUBLIC else "200"))  # public: past it, a busy page; else the oldest tab closes
 IDLE_S = float(os.environ.get("MOJOUI_IDLE_S", "900" if PUBLIC else "0"))  # a tab with no input this long ends (0: never)
+UNTOUCHED_S = 45.0  # public mode: a session whose page never came back (no /wait, frame or event) ends after this
 STATIC = Path(__file__).parent / "static"
 ICONS = {p.stem: re.sub(r">\s+<", "><", re.sub(r"\s+", " ", p.read_text().split("-->", 1)[-1].strip()))
          for p in (STATIC / "icons").glob("*.svg")}  # Lucide (ISC)
@@ -587,7 +588,7 @@ CANVAS_JS = r"""
     // A canvas the screen rebuilt (same tag) shows its last picture at once and asks with its digest: an unchanged
     // picture then costs a 204, not the picture again (goal 62 M4: a new card rebuilt the screen over a slow link)
     const kept = div.dataset.tag && shownPics.get(div.dataset.tag);
-    if (kept) { cv.width = kept.w; cv.height = kept.h; g.drawImage(kept.bmp, 0, 0); st.pic = kept.pic; }
+    if (kept) { cv.width = kept.w; cv.height = kept.h; g.drawImage(kept.bmp, 0, 0); st.pic = kept.pic; st.count = 1; }
     const meta = () => document.getElementById('n' + n + '-meta');
     const playing = () => { const m = meta(); return !!m && m.dataset.frames !== '0'; };
     // One frame request; `seq` orders answers (a playing canvas keeps up to three out, so a slow link's round trips
@@ -828,7 +829,8 @@ CSP = "; ".join([
 ])
 SECURITY_HEADERS = [(k.lower().encode(), v.encode()) for k, v in (
     ("Content-Security-Policy", CSP), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "same-origin"),
-    ("X-Frame-Options", "SAMEORIGIN"), ("Cross-Origin-Opener-Policy", "same-origin"))]
+    ("X-Frame-Options", "SAMEORIGIN"), ("Cross-Origin-Opener-Policy", "same-origin"))] + (
+    [(b"strict-transport-security", b"max-age=31536000")] if os.environ.get("MOJOUI_PUBLIC") == "1" else [])
 IMMUTABLE = "public, max-age=31536000, immutable"  # a file named by its content's hash never changes
 FONT_URLS = {}  # font file name → its hashed URL (theme sheets name /static/fonts/<name>; skin() rewrites them)
 FONT_REF = re.compile(r"url\(/static/fonts/([A-Za-z0-9_.-]+\.ttf)\)")
@@ -855,6 +857,43 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
+class BodyLimit:
+    """ASGI middleware (public mode): a request body over its route's limit is refused (413) before anything reads it:
+    FastHTML parses every form before its handler runs, so the upload caps alone came after the bytes were on the box
+    (goal 62's review). Uploads may carry their cap (and a little form), every other route 1 MB."""
+
+    def __init__(self, app, big):
+        self.app, self.big = app, big
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") not in ("POST", "PUT", "PATCH"):
+            return await self.app(scope, receive, send)
+        path = scope.get("path", "")
+        limit = self.big if path.startswith(("/upload/", "/dropfile/")) else 1 << 20
+        length = dict(scope.get("headers", [])).get(b"content-length")
+        if length is not None and (not length.isdigit() or int(length) > limit):
+            return await _too_large(send)
+        seen = [0]
+
+        async def counted():
+            message = await receive()
+            if message["type"] == "http.request":
+                seen[0] += len(message.get("body", b""))
+                if seen[0] > limit:
+                    raise ValueError("body over its limit")
+            return message
+
+        try:
+            await self.app(scope, counted, send)
+        except ValueError:
+            pass  # (a chunked body that ran past its limit: the connection is dropped)
+
+
+async def _too_large(send):
+    await send({"type": "http.response.start", "status": 413, "headers": [(b"content-type", b"text/plain")]})
+    await send({"type": "http.response.body", "body": b"too large"})
+
+
 class Scrub:
     """ASGI middleware (public mode): any server path left in a text answer (an engine's error naming its file, a
     message) is cut to what follows the folder, so no answer carries a server path. Each cut is logged (SCRUB:), so its
@@ -864,8 +903,10 @@ class Scrub:
         self.app = app
         uploads = re.escape(str(uploads_base().parent))
         alts = [re.escape(r) for r in sorted({str(x).rstrip("/") for x in roots if x and len(str(x)) > 1}, key=len, reverse=True)]
-        # (an upload's folder names its session: the session and the file's own folder go too)
-        self.rx = re.compile(("(?:" + uploads + r")(?:/[a-z]+)?(?:/[0-9a-f]{32})?(?:/[0-9a-f]{12})?/?|(?:" + "|".join(alts) + ")/?").encode())
+        # (an upload's folder names its session: the session and the file's own folder go too; a root counts only as a
+        # whole path segment: the image's /app must not cut "/appearance", goal 62's review)
+        end = r"(?=/|[^A-Za-z0-9._~-]|$)"
+        self.rx = re.compile(("(?:" + uploads + r")(?:/[a-z]+)?(?:/[0-9a-f]{32})?(?:/[0-9a-f]{12})?" + end + "/?|(?:" + "|".join(alts) + ")" + end + "/?").encode())
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -987,6 +1028,9 @@ class Session:
         self.origin = ""  # this page's origin (WebFrame: allow-same-origin only for another one)
         self.widget_facts = {}  # (tag, id) → what the widget says about itself (mojoui-widgets.js facts), while an agent is attached
         self.last_active = time.monotonic()  # the visitor's last input (IDLE_S ends the tab after that long)
+        self.made = time.monotonic()
+        self.touched = False  # the page came back for anything (/wait, a frame, an event): a page, not a bare GET
+        self.client = ""  # who made it (public mode's per-client cap)
         self.gone_reason = ""  # why the server ended it (the page says so)
         self.deliveries = []  # (url, name) of files the app handed over (App.take_download), for the next answer
 
@@ -1687,11 +1731,13 @@ def make_app(module_dir):
             if os.environ.get(name):
                 roots += [Path(os.environ[name]), Path(os.environ[name]).resolve()]
         app.add_middleware(Scrub, roots=roots)
+        app.add_middleware(BodyLimit, big=upload_limit() + (1 << 20))
         print(f"mojoui web: public mode: no agent link, no dev routes, {MAX_SESSIONS} sessions at most"
               + (f", idle ones end after {IDLE_S / 60:g} min" if IDLE_S else "") + f"; uploads {size_words(upload_limit())} a file, "
               + f"{size_words(visitor_limit())} a visitor", flush=True)
     sessions = OrderedDict()  # sid → Session, oldest first
     sessions_lock = threading.Lock()
+    jslog_counts = {}  # sid → JS errors logged (at most 100 a page)
 
     def end_session(sid, s, reason):
         """The server ends a tab (idle, or the server is full and it was the oldest): its app closes, its files go, and
@@ -1705,6 +1751,8 @@ def make_app(module_dir):
                 s.gone_reason = reason
                 mod.close(s.handle)
         forget_files(sid)
+        jslog_counts.pop(sid, None)
+        getattr(s, "downloads", {}).clear()
         s.wake()
 
     def reap():
@@ -1714,6 +1762,8 @@ def make_app(module_dir):
             now = time.monotonic()
             with sessions_lock:
                 idle = [(sid, s) for sid, s in sessions.items() if now - s.last_active > IDLE_S]
+            with sessions_lock:  # (a session no page ever came back to: a bare ?boot=1, a crawler; out of the cap in 45 s)
+                idle += [(sid, s) for sid, s in sessions.items() if not s.touched and now - s.made > UNTOUCHED_S and (sid, s) not in idle]
             for sid, s in idle:
                 mins = IDLE_S / 60
                 said = f"{mins:g} minutes" if mins >= 1 else f"{IDLE_S:g} seconds"
@@ -1756,9 +1806,18 @@ def make_app(module_dir):
             if not src.exists():
                 return
         out = file_folder(sid, "downloads")
+        size = sum(f.stat().st_size for f in src.rglob("*") if f.is_file()) if src.is_dir() else src.stat().st_size
+        if PUBLIC and size > 300 << 20:  # (a download from a shared server: kept small)
+            print("REFUSED: a hand-over over 300 MB", flush=True)
+            shutil.rmtree(src, ignore_errors=True) if src.is_dir() else src.unlink(missing_ok=True)
+            return
         if src.is_dir():
-            base = out / (src.name or "files")
-            made = Path(shutil.make_archive(str(base), "zip", root_dir=src))
+            import zipfile
+            made = out / f"{src.name or 'files'}.zip"
+            with zipfile.ZipFile(made, "w") as z:  # (pictures, clips and PDFs are compressed already: stored as they are)
+                for f in sorted(src.rglob("*")):
+                    if f.is_file():
+                        z.write(f, f.relative_to(src), compress_type=zipfile.ZIP_STORED if f.suffix.lower() in (".mp4", ".pdf", ".png", ".jpg", ".zip") else zipfile.ZIP_DEFLATED)
             shutil.rmtree(src, ignore_errors=True) if PUBLIC else None
         else:
             made = out / src.name
@@ -1952,8 +2011,8 @@ def make_app(module_dir):
         if not load:
             return Title("omxplorer" if not hasattr(mod, "title") else "omxcode"), Main(P("Opening…", cls="text caption"), id="mojoui-root", data_boot="1")
         if PUBLIC:
-            with sessions_lock:
-                full = len(sessions) >= MAX_SESSIONS
+            with sessions_lock:  # (only pages that came back count: a bare load, ?boot=1 from a script, holds no place)
+                full = sum(1 for v in sessions.values() if v.touched) >= MAX_SESSIONS
             if full:
                 return (Title("Busy"), Main(Div(H2("Busy right now", cls="text headline"),
                                                 P(f"{MAX_SESSIONS} visitors are exploring this copy, the most it holds at once. Try again in a few minutes.", cls="text"),
@@ -1964,14 +2023,25 @@ def make_app(module_dir):
         if hasattr(mod, "hosted"):  # (where this tab's documents go: its own folder in public mode, as the app likes else)
             with s.lock:
                 mod.hosted(s.handle, str(file_folder(sid, "documents")) if PUBLIC else "", PUBLIC)
-        with sessions_lock:
-            sessions[sid] = s
-            while len(sessions) > MAX_SESSIONS:
-                old_sid, old = sessions.popitem(last=False)
+        gone = []
+        with sessions_lock:  # (the cap checked again where the place is taken: a burst can't pass it together)
+            if PUBLIC and sum(1 for v in sessions.values() if v.touched) >= MAX_SESSIONS:
+                gone.append((None, s))
+            else:
+                sessions[sid] = s
+                bare = [(k, v) for k, v in sessions.items() if not v.touched]
+                gone += bare[:max(0, len(bare) - 2 * MAX_SESSIONS)] if PUBLIC else []  # (bare loads: at most twice the cap, oldest first)
+                if not PUBLIC:
+                    gone += list(sessions.items())[:max(0, len(sessions) - MAX_SESSIONS)]  # (local: the oldest tab gives way)
+        for old_sid, old in gone:
+            if old_sid is None:  # (lost the race for the last place: a busy page, and its app closes)
                 with old.lock:
                     old.closed = True
                     mod.close(old.handle)
-                forget_files(old_sid)  # (its uploads and downloads go with it)
+                return (Title("Busy"), Main(Div(H2("Busy right now", cls="text headline"),
+                                                P(f"{MAX_SESSIONS} visitors are exploring this copy, the most it holds at once. Try again in a few minutes.", cls="text"),
+                                                A("Try again", href="/", cls="button prominent"), cls="mojoui-busy-page"), id="mojoui-root"))
+            end_session(old_sid, old, "This page was closed to make room. Reload it to start again.")
         # The whole first page under the session's lock: once note() hands the tab to the clock thread, its effects'
         # replies can change the screen at any moment, and a page rendered meanwhile was torn (a deep link's Route
         # missing from the first page under load, so the route was never asked for; D-545).
@@ -2140,6 +2210,7 @@ def make_app(module_dir):
                 return ""  # from an older screen (e.g. a double click on a row that's gone): ignore
             source = s.nodes[n]
             s.last_active = time.monotonic()
+            s.touched = True
             if PUBLIC and second != 0 and takes_path(source):  # (a picker's, saver's or drop's path: only the host makes it; any second
                 # but 0 reaches its second message: 2, Escape for a field, is a picker's pick too)
                 print("REFUSED: a path for a file control sent as text", flush=True)
@@ -2203,8 +2274,6 @@ def make_app(module_dir):
                 d, s.pending = merge(s.pending, d), None
             s.nodes = json.loads(mod.view(s.handle))
             return changes(s, sid, d)
-
-    jslog_counts = {}
 
     @app.post("/jslog/{sid}")
     def jslog(sid: str, message: str = "", source: str = "", line: int = 0, column: int = 0, widget: str = ""):
@@ -2609,10 +2678,13 @@ def make_app(module_dir):
         the screen wait in the session until the page asks for /pending. No frame: 204 with X-Mojoui-Retry (the screen
         changed under it: ask again once the page has caught up) or X-Mojoui-Gone (the tab or the canvas is gone), never a
         4xx, which every browser logs as a console error (goal 34 M2 reads the console)."""
+        if PUBLIC:  # (pixels the page asks for: at most a big screen's, not 4096², goal 62's audit)
+            w, h = min(max(w, 0), 3840), min(max(h, 0), 2400)
         sess = sessions.get(sid)
         if sess is None:  # a gone session (a closed or expired tab, a restarted server) reads as 204 + X-Mojoui-Gone, no
             # longer 404 (D-607): the page's poller stops on the header as it did on 404, and the browser logs no error
             return Response(status_code=204, headers={"X-Mojoui-Gone": "1"})
+        sess.touched = True
         with sess.lock:
             if sess.closed:
                 return Response(status_code=204, headers={"X-Mojoui-Gone": "1"})
@@ -2641,18 +2713,23 @@ def make_app(module_dir):
         # display's rate changes 15 times a second, and each unchanged picture was encoded and sent anyway (goal 62 M4)
         pic = f"{zlib.crc32(rgba):08x}{r['width']:x}{r['height']:x}"
         # (a playing canvas keeps a few requests out: one already sent this picture to this canvas element, `cid`)
-        sent = getattr(sess, "sent_pics", None)
-        if sent is None:
-            sent = sess.sent_pics = OrderedDict()
         key = (n, cid[:16])
-        if (have and have == pic) or (cid and sent.get(key) == pic):
+        with sess.lock:
+            sent = getattr(sess, "sent_pics", None)
+            if sent is None:
+                sent = sess.sent_pics = OrderedDict()
+            was = sent.get(key)
+        # (sent to this canvas element under 2 s ago: still on its way; after that the page's own `have` decides, so a
+        # picture lost on the way is sent again, goal 62's review)
+        if (have and have == pic) or (cid and was is not None and was[0] == pic and time.monotonic() - was[1] < 2.0):
             return Response(status_code=204, headers={"Cache-Control": "no-store", "X-Mojoui-Same": "1", "X-Mojoui-Pending": "1" if pending else "0",
                                                       "X-Mojoui-Again": "1" if r.get("again") else "0"})
         if cid:
-            sent[key] = pic
-            sent.move_to_end(key)
-            while len(sent) > 64:
-                sent.popitem(last=False)
+            with sess.lock:
+                sent[key] = (pic, time.monotonic())
+                sent.move_to_end(key)
+                while len(sent) > 64:
+                    sent.popitem(last=False)
         out = io.BytesIO()
         picture = Image.frombuffer("RGBA", (r["width"], r["height"]), rgba, "raw", "RGBA", 0, 1)
         clear = sess.nodes[n]["kind"] == CANVAS and sess.nodes[n]["size"] == 2 if 0 <= n < len(sess.nodes) else False
@@ -2679,6 +2756,7 @@ def make_app(module_dir):
         s = sessions.get(sid)
         if s is None or s.closed:
             return "gone"
+        s.touched = True
         if has_changes(s) or s.busy != s.busy_sent:
             return "1"
         ev = asyncio.Event()
@@ -2732,5 +2810,4 @@ if __name__ == "__main__":
     print(f"mojoui web: http://{host}:{port}/", flush=True)
     # timeout_graceful_shutdown: a page's /wait is held while the tab lives; a stop (Ctrl+C, a platform's redeploy)
     # waits at most 3 s for answers in flight instead of for every tab to close
-    uvicorn.run(make_app(module_dir), host=host, port=port, log_level="warning", timeout_graceful_shutdown=3,
-                proxy_headers=PUBLIC, forwarded_allow_ips="*" if PUBLIC else None)
+    uvicorn.run(make_app(module_dir), host=host, port=port, log_level="warning", timeout_graceful_shutdown=3, proxy_headers=False)

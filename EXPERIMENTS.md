@@ -4,6 +4,16 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 62: omxplorer on the web, safe to share (2026-11-06/07)
+- **Setup:** worktree t3-7e13f4cf (fast-forwarded to origin/main 882155b), branch `t3/7e13f4cf`, its own env; contract GOAL.md + docs/goals/62-check.py (helpers in docs/goals/62/); report docs/goals/62-report.md; D-6201–D-6221. CPU only; the robot data read-only from goal 47's set; a shared machine under memory pressure.
+- **Worked:** jobs wake the page (sheetjobs used start_job; the page now always holds one /wait): 20/20 tabs land fleet.csv with no moving canvas. The robot starter (scripts/starter.py, mojoui.starter): one click plays the story's set-up in 0.8 s; its tables are read once per process (mojoui.csvio.share_file) and each further tab adds 30–50 MB instead of 2.5 GB. Public mode (MOJOUI_PUBLIC=1, docs/web-public.md): no agent link or /dev, sessions only for page loads, a cap with a busy page, idle tabs end and say so, file controls take only host-made paths, upload caps, per-visitor documents with downloads (Export pack as one zip, nothing left), no server path in answers (scrubbed and fixed at the source), PDF text only. 38 kernel-watched probes refused. Picture digests (no unchanged picture resent): the video went 2.6× → 1.0× its new pictures' bytes. Dockerfile.web, scripts/web-start, stage-web, image-check, deploy-railway (wizard).
+- **Broke:** the network video (M4: 8.2 pictures/s through 100 ms RTT, ≥ 12 asked) and concurrent videos (M5: 5 at once get ~7 each, 10 at once ~4–6): every picture is drawn under Python's GIL. A WebSocket for pictures and a page-wide batch didn't help or broke playback (taken out). Docker unreachable: the image never built. One omxcore assert crash seen once under crafted requests (not reproduced).
+- **Review:** reviewer NEEDS WORK (must-fixes fixed: starter sharing at the plan's memory, path-boundary scrubbing, a body-size guard, Open recipe's typed path, per-visitor settings, the cap race, two web tests, M2's blind spots); security auditor PASS WITH NOTES (2 high fixed; malformed uploads in-process, unbounded query cost and the image's full env left as residual risks).
+- **Means:** omxplorer can be shared on the public internet safely and cheaply (~$29/month at rest on Railway Hobby), and the robot story plays by clicks alone; full-speed video for several visitors at once needs the paint off the GIL. Not merged.
+- **Next:** release the GIL around the web host's Mojo draws (mojoui.pygil), then rerun M4/M5; the owner adds Docker access and runs scripts/image-check; then scripts/deploy-railway.
+
+---
+
 ## Goal 55: omxconsole, a desktop app for MAX, all omxcode (2026-11-05/06)
 - **Setup:** worktree ../mojo-ui-g55, branch `goal-55-console` off main (Mojo 1.2); docs/goals/55-check.py; report docs/goals/55-report.md; D-5501–D-5532. A user's MAX install for the checks under build/g55/max.
 - **Worked:** find (Hugging Face from Mojo), download (resume, cancel, sha256-checked), chat, benchmark (333 tok/s on Qwen 0.5B, matching the OpenAI SDK), one Linux download that starts its own service and runs bare, a Mac app built and run on GitHub's macOS 15/26 runners; omxconsole in the gallery with both downloads. All omxcode; only max serve is Python.

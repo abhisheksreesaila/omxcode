@@ -33,7 +33,7 @@ def load_web():
 
 
 def page(client):
-    html = client.get("/").text
+    html = client.get("/", headers={"Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate"}).text  # (a page load: goal 62)
     sid = re.search(r'data-sid="([0-9a-f]+)"', html).group(1)
     drop = re.search(r'data-kind="drop" data-node="(\d+)"', html).group(1)
     v = re.search(r'id="mojoui-v"[^>]*value="(-?\d+)"|value="(-?\d+)"[^>]*id="mojoui-v"', html)

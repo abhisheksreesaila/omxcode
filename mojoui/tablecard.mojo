@@ -376,8 +376,8 @@ struct TableCards(Movable, Sized):
             for a in acts:
                 parts.append(a.copy())
         var head = HStack(parts^, spacing=8).fill().align(CENTER).height(TABLE_HEAD_H)
-        var buttons = HStack(row^, spacing=4).fill().align(CENTER).height(TABLE_ROW_H if c.w < STACK_W else 0)
+        var buttons = HStack(row^, spacing=4).fill().align(CENTER).height(TABLE_ROW_H + 4 if c.w < STACK_W else 4)
         var grid = Canvas(self.canvas(k), version + c.grid.version, on_gesture=self.msg(k) + TC_GRID, keys=True).fill().grow().tag("table-" + name.replace("_", "-"))
         grid = grid^.label("Table " + c.name + ", " + c.facts())  # (a drawn grid: its name for a screen reader)
         grid = grid^.settable("row", 1, Float64(max(rows, 1)))  # (an agent picks a row by its number: SET_TO, as a tap would)
-        return Card(head^, buttons^, grid^, spacing=4)
+        return Card(head^, buttons^, grid^, spacing=0)  # (the button row carries the old 4-point gap)

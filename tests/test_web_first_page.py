@@ -80,7 +80,8 @@ def main():
 
     problems = []
     for i in range(4):
-        html = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=30).read().decode()
+        page_load = urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate"})  # (goal 62: only a page load makes a session)
+        html = urllib.request.urlopen(page_load, timeout=30).read().decode()
         if 'data-kind="route"' not in html:
             problems.append(f"page {i + 1} has no Route")
         time.sleep(0.2)

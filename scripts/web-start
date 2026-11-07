@@ -9,7 +9,7 @@ export MOJOUI_PUBLIC=1
 export HOST="${HOST:-0.0.0.0}"
 export PORT="${PORT:-8080}"
 # the most visitors at once: what goal 62 M5 measured on the plan's limits (docs/research/railway.md, its PLAN: line)
-export MOJOUI_MAX_SESSIONS="${MOJOUI_MAX_SESSIONS:-10}"
+export MOJOUI_MAX_SESSIONS="${MOJOUI_MAX_SESSIONS:-5}"
 export MOJOUI_IDLE_S="${MOJOUI_IDLE_S:-900}"  # a tab with no input for 15 minutes ends (its files go)
 export MOJOUI_WAIT_S="${MOJOUI_WAIT_S:-240}"  # Railway closes a request after 5 minutes without data: /wait renews within 4
 export OMX_STARTER="${OMX_STARTER:-/data/robot}"

@@ -258,4 +258,4 @@ how many visitors play video and run questions at once. goal 62 M5 runs `scripts
 (systemd-run: MemoryMax, CPUQuota) and plays the story with this many visitors at once; the server's session cap
 (`MOJOUI_MAX_SESSIONS` in scripts/web-start) is that number.
 
-PLAN: MemoryMax=8G CPUQuota=800% visitors=10
+PLAN: MemoryMax=8G CPUQuota=800% visitors=5

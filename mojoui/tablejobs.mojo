@@ -19,6 +19,7 @@
 
 from omxcore import Job, JobBody, JobCtl, Catalog, JOB_RUNNING
 from mojoui.jobs import start_ui_job
+from mojoui.shared import environment
 from mojoui.clock import now_ns, trace_on
 from mojoui.charts import fixed, grouped
 from mojoui.csvio import read_table
@@ -321,6 +322,9 @@ struct TableWork(Movable):
         """Starts writing `sheet` (a snapshot of it) as CSV to `path` (False: an export runs already)."""
         if self.export_:
             self.problem = "Still exporting " + file_name(self.export_path)
+            return False
+        if environment("MOJOUI_PUBLIC") == "1" and sheet.rows() > 1_000_000:  # (a download from a shared server, goal 62's review)
+            self.problem = "The web copy exports at most 1,000,000 rows: ask a question for fewer first"
             return False
         self.export_path = path
         self.export_ = start_ui_job(ExportJob(sheet.snapshot(), path))

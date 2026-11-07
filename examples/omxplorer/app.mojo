@@ -74,7 +74,7 @@ from mojoui.datagrid import (DataGrid, GRID_SELECTED, GRID_COLUMN, GRID_EDIT, GR
                              GRID_TYPED, GRID_CLEAR, GRID_CANCEL, GRID_COMMIT)
 from mojoui.sheet import Sheet, placeholder_sheet, blank_table, INT, DECIMAL, TEXT, DATE, BOOL
 from mojoui.shared import environment, make_dir
-from mojoui.files import file_name, file_stem, file_size, file_exists, read_recent, remember, read_setting, write_setting, adopt_config
+from mojoui.files import file_name, file_stem, file_size, file_exists, read_recent, remember, read_setting, write_setting, adopt_config, visitor_path_ok
 from mojoui.csvio import read_table, empty_import, CsvImport, CsvColumn, kind_name
 from mojoui.omxfile import save_omx, open_document
 from mojoui.numformat import (ColumnFormat, format_number, AUTO, NUMBER, CURRENCY, PERCENT, COMPACT, DATE_LONG, DATE_MONTH, DATE_ISO,
@@ -2340,6 +2340,10 @@ struct Main(App):
 
     def open_recipe(mut self):
         """Open recipe: a saved script, here; its questions (${…}) asked anew, Run runs it on this sheet."""
+        if not visitor_path_ok(self.script.recipe_path, self.documents()):
+            self.script.said = "On the web copy a recipe opens from your own files only"
+            self.version += 1
+            return
         try:
             var text = read_recipe(String(self.script.recipe_path.strip()))
             self.script.set_text(text)
@@ -3587,7 +3591,7 @@ struct Main(App):
                 f.style = NUMBER
             f.parens = event.number == 1
             self.set_format(f^)
-        elif m == SYMBOL:
+        elif m == SYMBOL and 0 <= event.number < len(materialize[SYMBOLS]()):  # (a page's number is checked: goal 62's audit)
             var f = self.column_format()
             f.style = CURRENCY
             f.symbol = materialize[SYMBOLS]()[event.number]
@@ -4273,6 +4277,8 @@ struct Main(App):
             spacing=16,
         )
         var top = List[View]()
+        if self.win_w < 700:  # (a phone gets a look, not a layout of its own yet: goal 62's assumption)
+            top.append(Card(Text("omxplorer is best on a laptop or a desktop: the story's cards need the room.", CAPTION).tone(TONE_ACCENT), spacing=0).fill().tag("best-on-laptop"))
         if self.starter.has():  # (a starter: its story first, one click, goal 62)
             top.append(Text("Try the story", HEADLINE))
             top.append(Card(HStack(Icon("bot", 28),

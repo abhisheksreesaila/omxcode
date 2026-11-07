@@ -222,8 +222,11 @@ def control_event(shown: View, node: Int, second: Bool, text: String, number: In
         return Event(0, "", 0)
     var event_text = text
     if n.kind == DROPDOWN or n.kind == SEGMENTED or n.kind == RADIO or n.kind == TABS or n.kind == ALERT:
-        # the option's text comes from the screen, not the browser
-        event_text = n.options[number] if 0 <= number < len(n.options) else String("")
+        # the option's text comes from the screen, not the browser; a number that names no option is no event (an app
+        # indexes its own list with it: a crafted number out of range read past its end, goal 62's security audit)
+        if number < 0 or number >= len(n.options):
+            return Event(0, "", 0)
+        event_text = n.options[number]
     elif n.kind == PARAGRAPH:  # a link's tap: its href from the screen (number = the run), never the browser's word
         event_text = link_href(n, number)
         if event_text == "":

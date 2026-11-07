@@ -16,6 +16,7 @@
 
 from mojoui.json import Json
 from mojoui.csvio import share_file
+from mojoui.shared import environment, exit_with
 
 
 @fieldwise_init
@@ -126,4 +127,7 @@ def share_starter(folder: String) -> Int:
         return n
     except e:
         print("STARTER: not loaded: " + String(e), flush=True)
+        if environment("MOJOUI_PUBLIC") == "1":  # (a public copy without its shared starter would read it once a visitor)
+            print("STARTER: a public copy needs its starter: stopping", flush=True)
+            exit_with(1)
         return 0
