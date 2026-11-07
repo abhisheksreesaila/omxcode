@@ -481,15 +481,14 @@ struct _ThreadDbs(Movable):
                 best = i
         return best
 
-    def close_at(mut self, i: Int) -> Int:
-        """Closes connection i (call with `mu` held): its file's index."""
+    def take_at(mut self, i: Int) -> Tuple[Int, Database]:
+        """Removes connection i (call with `mu` held): its file's index and the Database, whose last reference it is
+        (dropping it closes the connection, a WAL checkpoint: the caller does that outside the pool's lock)."""
         var f = self.files[i]
         _ = self.paths.pop(i)
         _ = self.used.pop(i)
         _ = self.files.pop(i)
-        var gone = self.dbs.pop(i)
-        _ = gone^  # (the last reference: the connection and its cached statements close here)
-        return f
+        return (f, self.dbs.pop(i))
 
 
 struct _PoolState(Movable):
@@ -527,13 +526,24 @@ struct _PoolState(Movable):
         self.index[path] = len(self.locks) - 1
         return len(self.locks) - 1
 
-    def opened(mut self, f: Int):
-        """One more connection to file f: its .db (or a kept one SQLite reuses), its -wal, the file's -shm if first."""
-        if self.pending[f] > 0:
+    def opened(mut self, f: Int) -> Bool:
+        """One more connection to file f: its .db (or a kept one SQLite reuses), its -wal, the file's -shm if first.
+        True when it reuses a kept descriptor (unopened() needs to know)."""
+        var reused = self.pending[f] > 0
+        if reused:
             self.pending[f] -= 1  # (findReusableFd: the kept .db descriptor is this one's)
             self.fds -= 1
         self.fds += 2 + (1 if self.conns[f] == 0 else 0)
         self.conns[f] += 1
+        return reused
+
+    def unopened(mut self, f: Int, reused: Bool):
+        """opened(f) undone exactly (the open failed: SQLite took nothing)."""
+        self.conns[f] -= 1
+        self.fds -= 2 + (1 if self.conns[f] == 0 else 0)
+        if reused:
+            self.pending[f] += 1
+            self.fds += 1
 
     def closed(mut self, f: Int):
         """One connection to file f gone: its -wal goes; its .db goes now if it was the file's last (with every kept
@@ -559,7 +569,8 @@ def _drop_thread_dbs(addr: Int) abi("C"):
             break
     _ = libc.pthread_mutex_lock(p[].mu)
     while len(p[].paths) > 0:  # (each closes now: a Database copy the thread left would end with it anyway)
-        st[].closed(p[].close_at(len(p[].paths) - 1))
+        var gone = p[].take_at(len(p[].paths) - 1)
+        st[].closed(gone[0])
     _ = libc.pthread_mutex_unlock(p[].mu)
     _ = libc.pthread_mutex_unlock(st[].mu)
     p.unsafe_deinit_pointee()
@@ -628,8 +639,9 @@ struct Pool(ImplicitlyCopyable, Movable):
         _ = libc.pthread_mutex_unlock(t[].mu)
         return n
 
-    def _close_one(self, mine: Int, from_others: Bool) -> Bool:
-        """Closes the best idle connection of this thread (or of another one): False when none is idle. `mu` held."""
+    def _take_one(self, mine: Int, from_others: Bool, mut out: List[Database]) -> Bool:
+        """Takes the best idle connection of this thread (or of another one) into `out`, counted closed: False when
+        none is idle. `mu` held."""
         var s = self._state()
         for r in s[].recs:
             if (r == mine) == from_others:
@@ -638,24 +650,30 @@ struct Pool(ImplicitlyCopyable, Movable):
             _ = libc.pthread_mutex_lock(t[].mu)
             var i = t[].idle_best(s[].conns)
             if i >= 0:
-                s[].closed(t[].close_at(i))
+                var gone = t[].take_at(i)
+                s[].closed(gone[0])
+                out.append(gone[1].copy())
             _ = libc.pthread_mutex_unlock(t[].mu)
             if i >= 0:
                 return True
         return False
 
-    def _reserve(self, mine: Int, path: String) -> Int:
-        """Room for one more connection to `path` (closing idle ones while it would pass the budget), counted at once
-        so racing threads see it: the file's index."""
+    def _reserve(self, mine: Int, path: String) -> Tuple[Int, Bool]:
+        """Room for one more connection to `path` (taking idle ones while it would pass the budget), counted at once
+        so racing threads see it: the file's index, and whether it reuses a kept descriptor. The taken connections
+        close after the lock is let go (each close checkpoints its WAL: no other thread's open waits on that disk work;
+        for that moment the count is below the real number by what's closing)."""
         var s = self._state()
+        var closing = List[Database]()
         _ = libc.pthread_mutex_lock(s[].mu)
         var f = s[].file(path)
         while s[].fds + 3 > s[].budget:
-            if not self._close_one(mine, False) and not self._close_one(mine, True):
+            if not self._take_one(mine, False, closing) and not self._take_one(mine, True, closing):
                 break  # (every connection in use: over the budget until they're done)
-        s[].opened(f)
+        var reused = s[].opened(f)
         _ = libc.pthread_mutex_unlock(s[].mu)
-        return f
+        closing.clear()  # (the last references: they close here, outside the lock)
+        return (f, reused)
 
     def open(self, path: String, setup: String = "") raises -> Database:
         """This thread's connection to `path` (opened, with WAL and `setup`, on this thread's first use)."""
@@ -680,7 +698,8 @@ struct Pool(ImplicitlyCopyable, Movable):
                 _ = libc.pthread_mutex_unlock(t[].mu)
                 return hit^
         _ = libc.pthread_mutex_unlock(t[].mu)
-        var f = self._reserve(mine, path)
+        var room = self._reserve(mine, path)
+        var f = room[0]
         var s = self._state()
         try:
             var db = Database(path)
@@ -699,6 +718,6 @@ struct Pool(ImplicitlyCopyable, Movable):
             return db^
         except e:
             _ = libc.pthread_mutex_lock(s[].mu)
-            s[].closed(f)
+            s[].unopened(f, room[1])
             _ = libc.pthread_mutex_unlock(s[].mu)
             raise e^

@@ -29,8 +29,8 @@
 # (mojoui.jobs.add_in: an outbox) and carry ids only ({user}, {invite}): the job reads the person when it runs.
 # On an https base the cookies are __Host-saas and __Host-saas_state (Secure, Path=/, no Domain: a sibling subdomain
 # can't set them); a request carrying two cookies of one of those names is refused (400). Expired states, sessions and
-# desktop codes are swept by tick() (sweep()), a thousand rows a table at a time; at most SAAS_MAX_SIGNINS (10,000)
-# sign-ins may be pending at once (503 past it).
+# desktop codes are swept by tick() (sweep()), a thousand rows a table at a time; one client (its rate key) may hold at
+# most SIGNINS_PER_CLIENT (20) pending sign-ins (429 past it), and the server at most SAAS_MAX_SIGNINS (200,000; 503).
 # Desktop apps (RFC 8252): /login?client=desktop&redirect=<http://127.0.0.1:port/…>&challenge=<S256>&app_state=<s>: the
 # callback sends the browser to the app's loopback with a one-time code (60 s), traded at /api/token for a bearer token.
 
@@ -54,6 +54,7 @@ comptime COOKIE = "saas"
 comptime STATE_COOKIE = "saas_state"  # the web sign-in's state, bound to the browser that started it (D-5726)
 comptime SESSION_S = 30 * 24 * 3600  # (no session outlives this, however often it's used)
 comptime STATE_S = 600
+comptime SIGNINS_PER_CLIENT = 20  # pending sign-ins one client (rate_key) may hold: a browser needs one or two
 comptime CODE_S = 60
 comptime ROLES = ["admin", "editor", "member", "viewer"]  # (editor: fh-saas's name for member)
 comptime PROVIDER = "google"
@@ -112,12 +113,22 @@ comptime HOST_003 = (  # goal 60 round 3: identities by (provider, sub), expiry 
 )
 
 
+comptime HOST_004 = (  # round 3 review: pending sign-ins counted per client, so a few clients can't fill the cap
+    "-- up\n"
+    "ALTER TABLE oauth_states ADD COLUMN client TEXT;\n"
+    "CREATE INDEX oauth_states_client ON oauth_states(client, expires);\n"
+    "-- down\n"
+    "DROP INDEX oauth_states_client; ALTER TABLE oauth_states DROP COLUMN client;\n"
+)
+
+
 def host_migrations() raises -> Migrations:
     """mojoui.accounts' own tables in host.db, versioned in `accounts_migrations`."""
     var l = List[Migration]()
     l.append(parse(1, "001_accounts.sql", HOST_001))
     l.append(parse(2, "002_tenants_invites_audit.sql", HOST_002))
     l.append(parse(3, "003_identity_expiry.sql", HOST_003))
+    l.append(parse(4, "004_signin_client.sql", HOST_004))
     return Migrations(l^, "accounts_migrations")
 
 
@@ -151,7 +162,7 @@ struct AuthConfig(Copyable, Movable):
     def from_env() -> AuthConfig:
         """GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SAAS_BASE, SAAS_SECRET; SAAS_OAUTH_AUTHORIZE/TOKEN/USERINFO (default
         Google's endpoints); SAAS_INVITE_TTL (s, 7 days), SAAS_SESSION_IDLE (s, 7 days), SAAS_RATE (60), SAAS_MIGRATIONS,
-        SAAS_MAX_SIGNINS (10,000)."""
+        SAAS_MAX_SIGNINS (200,000: ~40 MB of rows; each client holds at most SIGNINS_PER_CLIENT)."""
         return AuthConfig(
             getenv("GOOGLE_CLIENT_ID"),
             getenv("GOOGLE_CLIENT_SECRET"),
@@ -164,7 +175,7 @@ struct AuthConfig(Copyable, Movable):
             _env_int("SAAS_SESSION_IDLE", 7 * 86400),
             _env_int("SAAS_RATE", 60),
             getenv("SAAS_MIGRATIONS", ""),
-            _env_int("SAAS_MAX_SIGNINS", 10_000),
+            _env_int("SAAS_MAX_SIGNINS", 200_000),
         )
 
     def callback(self) -> String:
@@ -225,9 +236,9 @@ def form(names: List[String], values: List[String]) -> String:
 
 
 def cookie_count(req: Req, name: String) -> Int:
-    """How many cookies named `name` the request carries."""
+    """How many cookies named `name` the request carries (every Cookie line: HTTP/2 may split them)."""
     var n = 0
-    for part in req.header("cookie").split(";"):
+    for part in req.header_all("cookie", "; ").split(";"):
         var p = String(part).strip()
         var eq = p.find("=")
         if eq > 0 and String(p[byte = : eq]) == name:
@@ -240,7 +251,7 @@ def cookie(req: Req, name: String) -> String:
     an http page can't shadow the real one, D-6021)."""
     var out = String("")
     var n = 0
-    for part in req.header("cookie").split(";"):
+    for part in req.header_all("cookie", "; ").split(";"):
         var p = String(part).strip()
         var eq = p.find("=")
         if eq > 0 and String(p[byte = : eq]) == name:
@@ -372,8 +383,10 @@ struct Accounts(Copyable, Movable):
     def handle(self, mut req: Req) -> Reply:
         """Answers the account routes; any other request: a Reply with status 0 (not mine)."""
         try:
-            if cookie_count(req, self.cookie_name()) > 1 or cookie_count(req, self.state_cookie_name()) > 1:
-                return Reply.error(400, "two cookies with one name: clear this site's cookies and sign in again", "bad_cookie")
+            var twice = self.cookie_name() if cookie_count(req, self.cookie_name()) > 1 else (self.state_cookie_name() if cookie_count(req, self.state_cookie_name()) > 1 else String(""))
+            if twice != "":  # (refused, not guessed between; and expired, so the next request works: D-6027)
+                return Reply.error(400, "two cookies named " + twice + ": signed out, sign in again", "bad_cookie").header(
+                    "Set-Cookie", twice + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" + ("; Secure" if self.secure() else ""))
             if req.path == "/login" or req.path == "/auth/callback" or req.path == "/api/token":
                 var wait = self.limits.hit(rate_key(req.client if req.client != "" else req.peer) + " " + req.path)
                 if wait > 0:
@@ -588,18 +601,44 @@ struct Accounts(Copyable, Movable):
         join anyone here: they're accepted (/invites/…). `sub` "" (a test session): the email alone."""
         var db = self.db()
         if sub != "":
-            var by_sub = db.prepare("SELECT id FROM users WHERE provider = ? AND sub = ?")
+            var by_sub = db.prepare("SELECT id, email FROM users WHERE provider = ? AND sub = ?")  # (the common case: no lock)
             by_sub.bind(1, PROVIDER)
             by_sub.bind(2, sub)
-            if by_sub.step():
-                var uid = by_sub.int(0)
+            if by_sub.step() and by_sub.text(1) == email:
+                var known = by_sub.int(0)
                 by_sub.reset()
-                return (uid, self.home_tenant(uid))
+                return (known, self.home_tenant(known))
             by_sub.reset()
         var tenant = hex(random_bytes(12))
         var uid: Int
         db.begin()
         try:
+            if sub != "":  # (under the writer lock: a first sign-in racing another with this sub sees it here)
+                var mine = db.prepare("SELECT id, email FROM users WHERE provider = ? AND sub = ?")
+                mine.bind(1, PROVIDER)
+                mine.bind(2, sub)
+                if mine.step():
+                    uid = mine.int(0)
+                    var had = mine.text(1)
+                    mine.reset()
+                    if had != email:  # (the provider vouches for another address now: invites must match it, D-6027)
+                        var taken = db.prepare("SELECT 1 FROM users WHERE email = ? AND id != ?")
+                        taken.bind(1, email)
+                        taken.bind(2, uid)
+                        var clash = taken.step()
+                        taken.reset()
+                        if clash:
+                            Audit.record(db, self.home_tenant(uid), had, "identity_mismatch", "the " + PROVIDER + " account's address is another account's now")
+                            db.commit()
+                            return (-1, String(""))
+                        var mv = db.prepare("UPDATE users SET email = ? WHERE id = ?")
+                        mv.bind(1, email)
+                        mv.bind(2, uid)
+                        mv.run()
+                        Audit.record(db, self.home_tenant(uid), email, "email_changed", had + " → " + email)
+                    db.commit()
+                    return (uid, self.home_tenant(uid))
+                mine.reset()
             var again = db.prepare("SELECT id, COALESCE(sub, '') FROM users WHERE email = ?")  # (under the writer lock: two first sign-ins at once)
             again.bind(1, email)
             if again.step():
@@ -679,9 +718,20 @@ struct Accounts(Copyable, Movable):
             nxt = "/"
         var state = random_token(32)
         var verifier = random_token(32)
+        var client = String(sha256_hex("signin:" + rate_key(req.client if req.client != "" else req.peer))[byte = : 32])  # (hashed: no address kept)
         var db = self.db()
         db.begin()
         try:
+            var mine = db.prepare("SELECT count(*) FROM (SELECT 1 FROM oauth_states WHERE client = ? AND expires >= ? LIMIT ?)")  # (by its client index)
+            mine.bind(1, client)
+            mine.bind(2, now_s())
+            mine.bind(3, SIGNINS_PER_CLIENT)
+            _ = mine.step()
+            var held = mine.int(0) >= SIGNINS_PER_CLIENT
+            mine.reset()
+            if held:
+                db.commit()
+                return Reply.error(429, "too many unfinished sign-ins from here: finish one, or wait 10 minutes", "rate_limited").header("Retry-After", "60")
             var pending = db.prepare("SELECT count(*) FROM (SELECT 1 FROM oauth_states WHERE expires >= ? LIMIT ?)")  # (by its expiry index)
             pending.bind(1, now_s())
             pending.bind(2, self.cfg.max_signins)
@@ -692,7 +742,7 @@ struct Accounts(Copyable, Movable):
                 db.commit()
                 self.log.warn("sign-in: too many pending", Fields().int("max", self.cfg.max_signins))
                 return Reply.error(503, "too many sign-ins at once: try again in a minute", "busy").header("Retry-After", "60")
-            var q = db.prepare("INSERT INTO oauth_states(id, verifier, next, redirect, challenge, app_state, expires) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            var q = db.prepare("INSERT INTO oauth_states(id, verifier, next, redirect, challenge, app_state, expires, client) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
             q.bind(1, sha256_hex(state))
             q.bind(2, verifier)
             q.bind(3, nxt)
@@ -700,6 +750,7 @@ struct Accounts(Copyable, Movable):
             q.bind(5, challenge)
             q.bind(6, app_state)
             q.bind(7, now_s() + STATE_S)
+            q.bind(8, client)
             q.run()
             db.commit()
         except e:

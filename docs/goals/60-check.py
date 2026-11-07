@@ -882,6 +882,19 @@ def m7_proxies():
             return False, f"one IPv6 /64, 4 sign-ins: {v6}"
         if logins(srv, "2001:db8:1:3::1", 1) != [303]:
             return False, "the next /64 shared the first one's limit"
+        two = [srv.client().get("/login", headers=[("X-Forwarded-For", f"198.51.100.{i}"), ("X-Forwarded-For", "203.0.113.77")]).status_code for i in range(4)]
+        if two != [303, 303, 303, 429]:
+            return False, f"a client rotating its own X-Forwarded-For line before the proxy's: {two} (D-6027: every line is read)"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+    stand, smtp, srv = scenario("m7c", "off", {"SAAS_RATE": "0", "SAAS_TRUSTED_PROXIES": "127.0.0.1/32"})
+    try:
+        held = [srv.client().get("/login", headers={"X-Forwarded-For": "203.0.113.90"}).status_code for _ in range(21)]
+        other = srv.client().get("/login", headers={"X-Forwarded-For": "203.0.113.91"}).status_code
+        if held[:20] != [303] * 20 or held[20] != 429 or other != 303:
+            return False, f"pending sign-ins per client: one client's 21 → {held[-2:]}, another's → {other} (D-6027)"
     finally:
         srv.stop()
         stand.close()
@@ -904,7 +917,7 @@ def m7_proxies():
         bad.stop()
         stand.close()
         smtp.close()
-    return True, "trusted proxy: a client per X-Forwarded-For, IPv6 per /64; an untrusted peer's header ignored; a bad list refuses to start"
+    return True, "trusted proxy: a client per X-Forwarded-For, IPv6 per /64; an untrusted peer's header ignored; two X-Forwarded-For lines read whole; 20 pending sign-ins a client; a bad list refuses to start"
 
 
 def m8():
@@ -971,7 +984,7 @@ def m9():
             continue  # (D-6013: only goal 57's silent invite, which M5 replaced on purpose, as M0 allows)
         if not m or m.group(1) != "PASS":
             return False, f"goal 57's {k}: {m.group(0) if m else 'no result'}"
-    tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep"],
+    tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep", "per_client"],
              "tests/test_billing.mojo": ["out_of_order"], "tests/test_ui_thread.mojo": [], "tests/test_served.mojo": [],
              # (D-6025: round 3's tests in the goal's checker)
              "tests/test_handler.mojo": ["handler", "offload", "header_inject", "body_cap", "client_ip"],

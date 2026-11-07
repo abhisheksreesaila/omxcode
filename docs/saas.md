@@ -128,7 +128,9 @@ Audit.record(db, tenant, actor, "invite", detail)
   minute each, 429 with Retry-After); invites that join without asking (D-5725: now an accept page, single use,
   expiring, for the invited address only); sessions that never slid; one tenant per person (D-5712).
 - Per-client limits key on `req.client`: the socket's peer, or, when the peer is in `SAAS_TRUSTED_PROXIES` (CIDRs:
-  set it to your TLS proxy's addresses), X-Forwarded-For's rightmost hop that isn't a trusted proxy. Behind a proxy
+  set it to your TLS proxy's addresses), X-Forwarded-For's rightmost hop that isn't a trusted proxy, read across every
+  X-Forwarded-For line (nginx, Caddy and Envoy join the hops into one line; HAProxy's `option forwardfor` adds its own:
+  both work, checked with one and two lines). Behind a proxy
   that isn't listed, every client is the proxy and shares one limit: list it. IPv6 clients are keyed by their /64.
 - Durability: WAL with synchronous=NORMAL (above): a crash of the process loses nothing committed, a power cut can
   lose the last moments of writes (sessions, entries, jobs alike).
@@ -151,8 +153,16 @@ Audit.record(db, tenant, actor, "invite", detail)
   SMTP set up the demos start no mail workers: the emails wait, pending, and go after a restart with SMTP set.
 - A Stripe subscription event that arrives before its checkout's completion is held (the newest per subscription, 30
   days at most) and applied when the checkout lands (D-6023).
+- Pending sign-ins (a /login not yet called back, 10 minutes each): 20 a client, 200,000 for the server
+  (`SAAS_MAX_SIGNINS`); a client past its 20 gets 429, the server past its cap 503. Someone with ~10,000 addresses (or
+  /64s) could still fill the global cap: raise it (rows are ~200 bytes) or put the sign-in state in the cookie (next).
+- A request carrying two cookies named `saas` (or `__Host-saas`, or the state cookie) gets 400 and that cookie expired:
+  a page that can set cookies for this site could sign someone out that way (an availability cost, chosen over guessing
+  which copy is real). On https the `__Host-` names can't be set by a sibling subdomain or an http page.
 - Identity: the first sign-in with a Google `sub` claims the account with that address; a sign-in from another `sub`
-  with the same address gets 403 and an audit row (D-6021). Accounts made by goal 57's test hook have no `sub` until
+  with the same address gets 403 and an audit row (D-6021). A known `sub` signing in with a new verified address moves
+  its account to it (an `email_changed` audit row; refused if another account has that address), so invitations match
+  the address Google vouches for now (D-6027). Accounts made by goal 57's test hook have no `sub` until
   their first real sign-in.
 - Goal 57's pending invites (made before goal 60's host migration 002) are dropped by it: they joined silently and had
   no link; send them again.

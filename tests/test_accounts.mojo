@@ -107,7 +107,7 @@ def main() raises:
     var j = Json.parse(hdb.one_text("SELECT payload FROM jobs WHERE kind = 'signed_up' ORDER BY id LIMIT 1"))
     expect(j.number(j.get(0, "user")) == first[0] and "dan" not in hdb.one_text("SELECT payload FROM jobs WHERE kind = 'signed_up' ORDER BY id LIMIT 1"), "a signed_up payload of ids only")
     expect(hdb.count("SELECT count(*) FROM jobs WHERE kind = 'signed_up'") == hdb.count("SELECT count(*) FROM users"), "a job per account")
-    expect(a3.user_email(first[0]).value()[0] == "dan@example.com", "user_email")
+    expect(a3.user_email(first[0]).value()[0] == "dan.new@example.com", "user_email (the address the provider vouched for last)")
     print("outbox: ok")
     var tok = a3.test_session("dan@example.com")
     var lg = Req("GET", "/login")
@@ -141,3 +141,40 @@ def main() raises:
     expect(hdb.count("SELECT count(*) FROM sqlite_master WHERE name IN ('oauth_states_expires', 'sessions_expires', 'desktop_codes_expires')") == 3, "the expiry indexes")
     _ = plan
     print("sweep: ok")
+    # round 3 review: pending sign-ins per client, cookies over several lines, a changed address under the same sub
+    var dir4 = "build/test_accounts.data4"
+    _ = libc.unlink(dir4 + "/host.db")
+    _ = libc.unlink(dir4 + "/host.db-wal")
+    var a4 = Accounts(dir4, AuthConfig("id", "secret", "https://p.example/a", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 1000))
+    for _ in range(20):
+        var la = Req("GET", "/login")
+        la.client = "198.51.100.1"
+        expect(a4.handle(la).status == 303, "a client's first 20 pending sign-ins")
+    var la21 = Req("GET", "/login")
+    la21.client = "198.51.100.1"
+    expect(a4.handle(la21).status == 429, "a client's 21st pending sign-in")
+    var lb = Req("GET", "/login")
+    lb.client = "198.51.100.2"
+    expect(a4.handle(lb).status == 303, "another client blocked by the first one's pending sign-ins")
+    var tk = a4.test_session("gil@example.com")
+    var split = Req("GET", "/api/me")
+    split.names.append("cookie")
+    split.values.append("a=1")
+    split.names.append("cookie")
+    split.values.append("saas=" + tk)
+    expect(a4.handle(split).status == 200, "a session in the second Cookie line")
+    var dup2 = Req("GET", "/api/me")
+    dup2.names.append("cookie")
+    dup2.values.append("saas=" + tk)
+    dup2.names.append("cookie")
+    dup2.values.append("saas=planted")
+    var dr = a4.handle(dup2)
+    var cleared = False
+    for i in range(len(dr.names)):
+        cleared = cleared or (dr.names[i] == "Set-Cookie" and dr.values[i].startswith("saas=;") and "Max-Age=0" in dr.values[i])
+    expect(dr.status == 400 and cleared, "two session cookies over two lines: refused and expired")
+    var hal = a4.user_for("hal@example.com", "Hal", "sub-h")
+    expect(a4.user_for("hal@new.example", "Hal", "sub-h")[0] == hal[0] and a4.user_email(hal[0]).value()[0] == "hal@new.example", "the provider's new address replaces the old one")
+    _ = a4.user_for("ivy@example.com", "Ivy", "sub-i")
+    expect(a4.user_for("ivy@example.com", "Hal", "sub-h")[0] == -1, "a sub moving onto another account's address")
+    print("per_client: ok")

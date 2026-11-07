@@ -460,7 +460,7 @@ struct Billing(Copyable, Movable):
         var q = db.prepare("SELECT tenant, status, event_at, past_due_since FROM billing WHERE subscription = ?")
         q.bind(1, j.text(j.get(obj, "id")))
         if not q.step():
-            return False  # (not sold yet: held; or already deleted: final, since the row's subscription is gone)
+            return False  # (not sold yet: held; a late event for a canceled one (its row's subscription is gone) is held too, harmlessly, until the sweep)
         var tenant = q.text(0)
         var was = q.text(1)
         var event_at = q.int(2)

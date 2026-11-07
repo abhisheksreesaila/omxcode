@@ -98,6 +98,18 @@ struct Req(Copyable, Movable):
                 return self.values[i]
         return ""
 
+    def header_all(self, name: String, sep: String = ", ") -> String:
+        """Every line of a header joined in order (RFC 9110 §5.3: repeated lines mean one comma-joined value; cookies
+        join with "; "): a proxy may add its own X-Forwarded-For line after the client's."""
+        var n = name.lower()
+        var out = String("")
+        var first = True
+        for i in range(len(self.names)):
+            if self.names[i] == n:
+                out += ("" if first else sep) + self.values[i]
+                first = False
+        return out^
+
     def arg(self, name: String, default: String = "") -> String:
         """A query value, %-decoded (`?limit=40` → arg("limit") == "40")."""
         for part in self.query.split("&"):
@@ -950,7 +962,7 @@ struct _HBridge[H: Handler](Copyable, FlareHandler):
             r.values.append(req.headers._values[i])
         r.peer = _peer(req)
         var w = _P(unsafe_from_address=self.state)
-        r.client = client_ip(r.peer, r.header("x-forwarded-for"), Pointer[TrustedProxies, MutUntrackedOrigin](unsafe_from_address=Int((w + H_PROXIES)[]))[])
+        r.client = client_ip(r.peer, r.header_all("x-forwarded-for"), Pointer[TrustedProxies, MutUntrackedOrigin](unsafe_from_address=Int((w + H_PROXIES)[]))[])
         r.rid = request_id()
         var app = Pointer[Self.H, MutUntrackedOrigin](unsafe_from_address=Int((w + H_APP)[]))
         if app[].blocking(r) and req.version.startswith("HTTP/1"):  # (HTTP/2 streams share a connection: answered inline)

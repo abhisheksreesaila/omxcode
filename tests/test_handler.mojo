@@ -112,6 +112,11 @@ def main() raises:
     var b2 = "http://127.0.0.1:" + String(behind.port) + "/x"
     var via = get_via(c, b2, "6.6.6.6, 203.0.113.5")
     expect('"client": "203.0.113.5"' in via, "a trusted proxy's client: " + via)
+    var two = FlareRequest("GET", b2)  # (a proxy that adds its own line after the client's, as HAProxy's forwardfor)
+    two.headers.append("X-Forwarded-For", "198.51.100.66")
+    two.headers.append("X-Forwarded-For", "203.0.113.5")
+    var tt = c.send(two).text()
+    expect('"client": "203.0.113.5"' in tt, "two X-Forwarded-For lines: the client's own line was believed: " + tt)
     behind.stop()
     var direct = serve(App(), port=0, workers=1, proxies=TrustedProxies.parse("10.0.0.0/8"))
     var d = get_via(c, "http://127.0.0.1:" + String(direct.port) + "/x", "203.0.113.5")
