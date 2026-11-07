@@ -1,0 +1,12 @@
+M0: PASS  own env, Mojo 1.2; goal 57 M1, M3, M4 PASS, M2 FAIL (at the silent invite, replaced by M5)
+M1: PASS  7 JSON request lines with rids, no secrets in either log, audit ['invite', 'plan_change', 'sign_in', 'sign_up']
+M2: PASS  002_category.sql reached both tenants on restart; a broken 003_broken.sql and an edited 002_category.sql each refused, files unchanged
+M3: PASS  20 × /api/me < 300 ms while Stripe and Google each sat 8 s; /api/jobs per tenant; a job resumed after kill -9 (delivered, done)
+M4: PASS  implicit TLS with AUTH, text + HTML, encoded UTF-8 subject, 3rd-attempt delivery, dead with the 451, no header injection; STARTTLS delivers
+M5: PASS  invite by email, no silent join, same-origin accept only, 403 for others, 410 used/expired, two tenants listed and switched without leaks
+M6: PASS  trial on first sign-in that expires, Stripe trial days, customer portal, cancel at period end, past_due after grace
+M7: PASS  429 + Retry-After over the per-IP limit, sliding sessions (use extends, idle ends); trusted proxy: a client per X-Forwarded-For, IPv6 per /64; an untrusted peer's header ignored; a bad list refuses to start
+M8: PASS  parity rows ✅, keys wizard asks for SMTP, GTK demo shows the trial and billing (shot looked at); M1, M3, M5, M6 pass on the Mac
+M9: PASS  goal 57's M6–M8, the crypto/accounts/billing/ui-thread/served/handler/ratelimit/queue/clientip tests, the pool under ulimit -n 256, libc and decision lints
+M10: PASS  faster than fh-saas on p50, p99 and req/s for me, entries_get, entries_post, webhook, callback at 64 clients (the closest: 3.8x the throughput); docs/goals/60-bench.md
+M11: PASS  saas_min: 62 lines on accounts + mail + jobs (billing not linked), sign-in, a tenant and a welcome email; API documented
