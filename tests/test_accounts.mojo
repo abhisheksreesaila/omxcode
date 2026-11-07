@@ -30,9 +30,9 @@ def main() raises:
     r.values.append("a=1; saas=xyz.1.abc; b=2")
     expect(cookie(r, "saas") == "xyz.1.abc" and cookie(r, "nope") == "", "cookie parsing")
     print("cookie: ok")
-    var dir = "build/test_accounts"
+    var dir = "build/test_accounts.data"
     _ = libc.unlink(dir + "/host.db")
-    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32)))
+    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, ""))
     var ada = acc.test_session("Ada@Example.com")
     var req = Req("GET", "/api/me")
     req.names.append("authorization")
@@ -48,6 +48,21 @@ def main() raises:
     cy.names.append("authorization")
     cy.values.append("Bearer " + acc.test_session("cy@example.com"))
     var c = acc.member(cy)
+    expect(Bool(c) and c.value().tenant != tenant, "an invite joins only once accepted (goal 60 M5)")
+    var link = acc.invite_details(1).value().link
+    var path = String(link[byte = link.find("/invites/") :])
+    var accept = Req("POST", path)
+    accept.names.append("authorization")
+    accept.values.append(cy.values[0])
+    accept.names.append("origin")
+    accept.values.append("http://127.0.0.1:1")
+    var took = acc.handle(accept).status
+    expect(took == 200 or took == 201 or took == 303, "the invited person accepts")
+    var sw = Req("POST", "/api/switch", '{"tenant": "' + tenant + '"}')
+    sw.names.append("authorization")
+    sw.values.append(cy.values[0])
+    expect(acc.handle(sw).status == 200, "switching to the inviting tenant")
+    c = acc.member(cy)
     expect(Bool(c) and c.value().tenant == tenant and c.value().role == "viewer" and not c.value().can_write(), "the invited viewer")
     var db = acc.tenant_db(m.value())
     expect(db.path.endswith("/tenants/" + tenant + ".db"), "the tenant's file")

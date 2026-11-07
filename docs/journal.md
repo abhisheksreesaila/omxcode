@@ -1200,3 +1200,4 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
   /invites/<token>); the app has no tenant switcher yet.
 - Final-tree reruns: M1, M3, M5, M10 PASS; M9 FAIL: goal 57's tests/test_accounts.mojo calls the old Accounts API
   (not ported: budget). Reviewer and auditor round 1 fixed (D-6014), not re-run. Report: docs/report.md.
+- Main session, after the run's budget: M9's blocker was two bugs in tests/test_accounts.mojo, not one: the old AuthConfig call, and its data folder sharing the checker's binary path (build/test_accounts). Ported the invite step to accept + switch. Fixed the auditor's flood Medium in mojoui.ratelimit, with tests/test_ratelimit.mojo (old code: >300 s for 250,000 keys; new: seconds).

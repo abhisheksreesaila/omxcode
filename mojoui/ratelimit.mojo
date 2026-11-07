@@ -1,6 +1,8 @@
 # mojoui.ratelimit: a thread-safe sliding-window limiter (goal 60 M7): at most `limit` hits per `window_s` per key (an
 # IP, an IP and a route, "global"), exact (each allowed hit's time is kept, at most `limit` per key), so a burst at a
-# window's edge can't double the rate. Keys idle for a window are dropped as the table is swept.
+# window's edge can't double the rate. Keys idle for a window are dropped as the table is swept; under a flood of keys
+# that are all still live, the least recently seen are evicted down to 90 % of the cap, so the table stays bounded and
+# a sweep happens once per 10 % of the cap's new keys, never on every hit.
 #
 #   var rl = RateLimit(limit=30, window_s=60)
 #   var wait = rl.hit(req.peer + " /login")          # 0: allowed; else seconds until it would be (Retry-After)
@@ -12,6 +14,7 @@ from mojoui import libc
 from mojoui.clock import wall_seconds
 
 comptime _MAX_KEYS = 100_000  # (a flood of new keys sweeps the table early, never grows it without bound)
+comptime _KEEP_KEYS = _MAX_KEYS * 9 // 10  # what an over-full sweep evicts down to
 
 
 struct _Table(Movable):
@@ -78,13 +81,31 @@ struct RateLimit(ImplicitlyCopyable, Movable):
         _ = libc.pthread_mutex_unlock(t[].mu)
         return wait
 
+    def size(self) -> Int:
+        """How many keys the table tracks (tests)."""
+        var t = Pointer[_Table, MutUntrackedOrigin](unsafe_from_address=self.addr)
+        _ = libc.pthread_mutex_lock(t[].mu)
+        var n = len(t[].keys)
+        _ = libc.pthread_mutex_unlock(t[].mu)
+        return n
+
     def _sweep(self, now: Float64):
         var t = Pointer[_Table, MutUntrackedOrigin](unsafe_from_address=self.addr)
         var gone = List[String]()
+        var live = List[Float64]()  # the last hit of each key that stays
         for e in t[].keys.items():
             ref h = t[].hits[e.value]
             if len(h) == 0 or now - h[len(h) - 1] >= self.window_s:
                 gone.append(e.key)
+            else:
+                live.append(h[len(h) - 1])
+        if len(live) > _MAX_KEYS:  # every key still live: evict the least recently seen down to _KEEP_KEYS
+            sort(live)
+            var cut = live[len(live) - _KEEP_KEYS]  # keys last seen before this go (ties at the cut stay)
+            for e in t[].keys.items():
+                ref h = t[].hits[e.value]
+                if len(h) > 0 and now - h[len(h) - 1] < self.window_s and h[len(h) - 1] < cut:
+                    gone.append(e.key)
         for k in gone:
             try:
                 var slot = t[].keys.pop(k)
