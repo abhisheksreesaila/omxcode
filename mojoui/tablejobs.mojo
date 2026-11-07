@@ -17,7 +17,7 @@
 # Tracing (MOJOUI_TRACE / MOJOUI_TEST) prints one line as each lands: `JOB: query landed in 12.3 ms (4 rows)`,
 # `JOB: table landed big.csv in 812.0 ms (1,000,000 rows)`, `JOB: export landed big.csv in 640.2 ms (1,000,000 rows)`.
 
-from omxcore import Job, JobBody, JobCtl, Catalog, Table, JOB_RUNNING
+from omxcore import Job, JobBody, JobCtl, Catalog, Table, SharedTable, JOB_RUNNING, TEXT
 from mojoui.jobs import start_ui_job
 from std.time import sleep
 from mojoui.shared import environment, count_add, count_of
@@ -154,30 +154,59 @@ struct QueryJob(JobBody):
         for i in range(len(self.sheets)):
             catalog.add_frame(self.names[i], self.sheets[i].frame)
         var cap = public_rows()
-        var width = 1
-        if cap > 0 and self.room > 0:  # (round 4: rows alone let 400 columns of 1M rows fill 6 GB; the engine stops at the
-            # outer LIMIT, so the rows an answer may have come from its width, estimated from the SQL before it runs)
-            var star = 0
-            for i in range(len(self.sheets)):
-                star += self.sheets[i].columns()
-            width = answer_width(self.text, star)
-            cap = max(1, min(cap, self.room // (8 * width)))
+        var sources = List[Int]()  # the dictionaries the question reads (an answer that projects them shares, not copies)
+        var maxword = 0
+        for i in range(len(self.sheets)):
+            ref base = self.sheets[i].frame.base
+            for c in range(base.columns()):
+                if base.kind(c) == TEXT:
+                    var d = base.dictionary(c)
+                    sources.append(Int(d.unsafe_ptr()))
+                    for w in d:
+                        maxword = max(maxword, w.byte_length())
         var held = take_question()  # (public: one of the server's places for questions, held until the engine ends, even past a stop)
-        var table: Table
+        var table: SharedTable
         try:
-            table = query_table(catalog, capped_sql(self.text, cap), ctl, public_join_bytes(), public_threads(), public_sort_bytes())
+            if cap > 0 and self.room > 0:  # (round 5: the answer's real bytes, strings included, are what's budgeted)
+                var star = 0
+                for i in range(len(self.sheets)):
+                    star += self.sheets[i].columns()
+                var width = answer_width(self.text, star)
+                var grows = text_growth(self.text)
+                if grows > 0:  # (round 5: the engine computes a built string for every row before an outer LIMIT, so the worst
+                    # it could build is bounded before it runs: each operand at the longest word read, the literals, a REPLACE
+                    # as long as the text; over the most rows a table here has)
+                    var length = self.text.byte_length()
+                    var operands = 1 + self.text.count("||") + self.text.count(",")
+                    var per_cell = 40 + operands * maxword * (length if grows == 2 else 1) + length
+                    var most_rows = 0
+                    for i in range(len(self.sheets)):
+                        most_rows = max(most_rows, self.sheets[i].rows())
+                    if per_cell * width * most_rows > self.room:
+                        give_back_question(held)
+                        held = False
+                        raise Error("this question builds strings that could take more than the " + grouped(self.room >> 20)
+                                    + " MB the web copy gives an answer (" + grouped(most_rows) + " rows × " + grouped(width)
+                                    + " columns): ask about a smaller table, or without building strings")
+                cap = max(1, min(cap, self.room // (8 * width)))
+                table = query_table(catalog, capped_sql(self.text, cap), ctl, public_join_bytes(), public_threads(), public_sort_bytes()).share()
+                var real = table_bytes(table, sources)
+                if real > self.room or (table.rows() > cap and cap < public_rows()):
+                    give_back_question(held)
+                    held = False
+                    raise Error("the answer would take more than " + grouped(self.room >> 20) + " MB (" + grouped(table.columns()) + " columns, "
+                                + grouped(real >> 20) + " MB in " + grouped(table.rows()) + " rows), more than the web copy keeps for it: ask for fewer columns or rows")
+            else:
+                table = query_table(catalog, capped_sql(self.text, cap), ctl, public_join_bytes(), public_threads(), public_sort_bytes()).share()
         except e:  # (the engine's words for a join past its budget name its options: the visitor gets plain ones)
             give_back_question(held)
             if cap > 0 and String(e).find("join_budget") >= 0:
                 raise Error("this question's join would take more memory than the web copy gives one question: join on a key with fewer matches, or filter first")
             raise e^
         give_back_question(held)
-        if self.room > 0 and table.rows() > cap and cap < public_rows():
-            raise Error("the answer would take more than " + grouped(self.room >> 20) + " MB (" + grouped(table.columns()) + " columns × more than "
-                        + grouped(cap) + " rows), more than the web copy keeps for it: ask for fewer columns or rows")
         if cap > 0 and table.rows() > cap:  # (the public copy keeps no answer over its cap: memory a visitor can't take from others)
             raise Error("the answer has more than " + grouped(cap) + " rows, more than the web copy keeps: ask for fewer (a filter, a GROUP BY or a LIMIT)")
-        var answer = Sheet(table^.share(), False)
+        var answer = Sheet(table^, False)
         var ms = Float64(now_ns() - t0) / 1e6
         var font = Font()
         var card = TableCard(self.called, answer^, -1, 0, 0, 0, 0, font, self.pal)
@@ -303,12 +332,20 @@ struct TableWork(Movable):
             var held = 0
             var answers = 0
             var starter = environment("OMX_STARTER")
+            var shared = List[Int]()  # (dictionaries of the tables an answer may project: not the answer's own bytes)
+            for k in range(len(tables)):
+                if tables.cards[k].note != "a query":
+                    ref base = tables.cards[k].sheet.frame.base
+                    for c in range(base.columns()):
+                        if base.kind(c) == TEXT:
+                            shared.append(Int(base.dictionary(c).unsafe_ptr()))
             for k in range(len(tables)):
                 ref c = tables.cards[k]
-                if c.note == "a query":
+                if c.note == "a query":  # (round 5: kept answers by their real size, strings included)
                     answers += 1
-                if c.note == "a query" or (c.source != "" and (starter == "" or not c.source.startswith(starter))):
-                    held += 8 * c.sheet.rows() * c.sheet.columns()
+                    held += table_bytes(c.sheet.frame.base, shared)
+                elif c.source != "" and (starter == "" or not c.source.startswith(starter)):
+                    held += table_bytes(c.sheet.frame.base, List[Int]())
             if answers >= public_answers():
                 self.problem = "You have " + String(answers) + " answers on the page, the most the web copy keeps: remove one first"
                 return False
@@ -531,6 +568,12 @@ def public_refusal(text: String) -> String:
     for w in words:
         if w == "UNION" or w == "INTERSECT" or w == "EXCEPT":
             return "The web copy asks one SELECT at a time: UNION, INTERSECT and EXCEPT aren't offered here"
+    var replaces = 0
+    for w in words:
+        if w == "REPLACE":
+            replaces += 1
+    if replaces > 1:  # (each REPLACE can multiply a string's length: round 5)
+        return "The web copy takes one REPLACE a question"
     var first = 0
     while first < len(words) and words[first] == "(":
         first += 1
@@ -620,16 +663,51 @@ def public_answers() -> Int:
         return 8
 
 
+def table_bytes(t: SharedTable, skip: List[Int]) -> Int:
+    """A table's real bytes: 8 a cell (and its nulls), and the words of each TEXT dictionary it holds that isn't in
+    `skip` (a dictionary shared with a table it was read from isn't its own), each counted once."""
+    var total = 0
+    var seen = List[Int]()
+    for c in range(t.columns()):
+        total += 8 * t.rows() + ((t.rows() + 7) // 8 if t.null_count(c) > 0 else 0)
+        if t.kind(c) == TEXT:
+            var d = t.dictionary(c)
+            var at = Int(d.unsafe_ptr())
+            if at in skip or at in seen:
+                continue
+            seen.append(at)
+            for w in d:
+                total += w.byte_length() + 32
+    return total
+
+
+def text_growth(text: String) -> Int:
+    """Whether a question builds strings longer than the ones it reads: 0 no; 1 by joining them (||, CONCAT, a CAST);
+    2 by a REPLACE (one at most on the public copy: public_refusal)."""
+    var words = sql_words(text)
+    var out = 0
+    for w in words:
+        if w == "REPLACE":
+            return 2
+        if w == "CONCAT" or w == "CAST":
+            out = 1
+    if out == 0 and (text.find("||") >= 0 or text.find("::") >= 0):
+        out = 1
+    return out
+
+
 def answer_width(text: String, star: Int) -> Int:
-    """The columns a SELECT's answer has, estimated from its text before it runs: the items of its outermost select list
-    (a `*` or `t.*` counts as `star`, every column the question can see), outside quotes and comments."""
+    """The columns a SELECT's answer may have, estimated from its text before it runs: the most items of any of its
+    select lists (a subquery's `SELECT *` passes its inner list's columns up: round 5), a `*` or `t.*` counting `star`
+    (every column the question can see); outside quotes and comments."""
     var b = text.as_bytes()
     var n = len(b)
     var i = 0
     var depth = 0
-    var at = -1  # the depth of the first SELECT
-    var items = 1
-    var stars = 0
+    var depths = List[Int]()  # the open select lists: their depth, items and stars
+    var items = List[Int]()
+    var stars = List[Int]()
+    var most = 1
     while i < n:
         var c = Int(b[i])
         if c == 45 and i + 1 < n and Int(b[i + 1]) == 45:
@@ -648,27 +726,39 @@ def answer_width(text: String, star: Int) -> Int:
                 i += 1
             i += 1
             continue
+        var top = len(depths) - 1
         if c == 40:
             depth += 1
         elif c == 41:
             depth -= 1
-        elif at >= 0 and depth == at and c == 44:
-            items += 1
-        elif at >= 0 and depth == at and c == 42:
-            stars += 1
+            while len(depths) > 0 and depths[len(depths) - 1] > depth:
+                _ = depths.pop()
+                _ = items.pop()
+                _ = stars.pop()
+        elif top >= 0 and depths[top] == depth and c == 44:
+            items[top] += 1
+        elif top >= 0 and depths[top] == depth and c == 42:
+            stars[top] += 1
         elif is_word_byte(c):
             var j = i
             while j < n and is_word_byte(Int(b[j])):
                 j += 1
             var w = String(text[byte = i : j]).upper()
-            if at < 0 and w == "SELECT":
-                at = depth
-            elif at >= 0 and depth == at and w == "FROM":
-                break
+            if w == "SELECT":
+                depths.append(depth)
+                items.append(1)
+                stars.append(0)
+            elif w == "FROM" and top >= 0 and depths[top] == depth:
+                most = max(most, items[top] - stars[top] + stars[top] * max(star, 1))
+                _ = depths.pop()
+                _ = items.pop()
+                _ = stars.pop()
             i = j
             continue
         i += 1
-    return max(1, items - stars + stars * max(star, 1))
+    for k in range(len(depths)):  # (a SELECT with no FROM)
+        most = max(most, items[k] - stars[k] + stars[k] * max(star, 1))
+    return most
 
 
 def public_threads() -> Int:

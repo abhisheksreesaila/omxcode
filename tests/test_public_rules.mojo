@@ -206,7 +206,8 @@ def answers(folder: String) raises:
     assert_equal(answer_width("SELECT COUNT(*), f(x, y) FROM t", 10), 2)
     assert_equal(answer_width("SELECT * FROM t", 10), 10)
     assert_equal(answer_width("SELECT t.*, x FROM t", 7), 8)
-    assert_equal(answer_width("-- a, b\nSELECT 'a,b', (SELECT 1, 2) FROM t", 3), 2)
+    assert_equal(answer_width("-- a, b\nSELECT 'a,b', (SELECT 1 FROM u) FROM t", 3), 2)
+    assert_equal(answer_width("SELECT * FROM (SELECT a, b, c, d FROM t) AS s", 2), 4)  # (round 5: the inner list's width)
     _ = setenv("MOJOUI_QUERY_S", "60", True)
     _ = setenv("MOJOUI_QUESTION_WAIT_S", "1", True)
     var path = folder + "/public_rules_wide.csv"
@@ -230,9 +231,37 @@ def answers(folder: String) raises:
     var grew = peak_mb() - before
     assert_true(work.problem.find("would take more than") >= 0, work.problem)
     assert_true(grew < 600, "the refused wide answer took " + String(grew) + " MB at its peak")
+    # round 5: 40 columns behind a subquery's SELECT * (the outer list says 1), and strings the question builds
+    var forty = String("")
+    for i in range(40):
+        forty += ("" if i == 0 else ", ") + "v AS c" + String(i)
+    var tail = String("")
+    for _ in range(50):
+        tail += "0123456789"
+    var cases: List[String] = ["SELECT * FROM (SELECT " + forty + " FROM wide) AS s",
+                               "SELECT CAST(id AS TEXT) || '" + tail + "' AS s FROM wide"]
+    for q in cases:
+        with open("/proc/self/clear_refs", "w") as f:
+            f.write("5")
+        before = peak_mb()
+        assert_true(work.ask(tables, q, "wide", page, "Q", pal), work.problem)
+        assert_false(land(work), "an answer past 64 MB was kept: " + String(q[byte=0:60]))
+        grew = peak_mb() - before
+        assert_true(work.problem.find("would take more than") >= 0 or work.problem.find("could take more than") >= 0, work.problem)
+        assert_true(grew < 400, "a refused answer took " + String(grew) + " MB at its peak: " + String(q[byte=0:60]))
+    # a string-building answer over a small table lands (over the 1M-row one it's refused before it runs: its worst case)
+    var small_path = folder + "/public_rules_small.csv"
+    var small_out = String("id,v\n")
+    for i in range(5000):
+        small_out += String(i) + "," + String(i % 97) + "\n"
+    with open(small_path, "w") as f:
+        f.write(small_out)
+    var small = Sheet(read_table(small_path).table, False)
+    assert_true(work.ask(tables, "SELECT CAST(id AS TEXT) || '-x' AS s FROM small", "small", small, "S", pal), work.problem)
+    assert_true(land(work), "a small string answer didn't land: " + work.problem)
     # an answer within the budget lands; with MOJOUI_ANSWERS=1 the next is refused until it's removed
     _ = setenv("MOJOUI_ANSWERS", "1", True)
-    assert_true(work.ask(tables, "SELECT id, v FROM wide WHERE id < 1000", "wide", page, "A1", pal), work.problem)
+    assert_true(work.ask(tables, "SELECT id, v FROM wide WHERE id < 200000", "wide", page, "A1", pal), work.problem)
     var got = work.take_answer()
     var waited = 0
     while not got and waited < 60_000:
@@ -243,14 +272,15 @@ def answers(folder: String) raises:
     _ = tables.adopt(got.take().take_card(), 0, 0, 400, 300)
     assert_false(work.ask(tables, "SELECT id FROM wide WHERE id < 10", "wide", page, "A2", pal), "a second answer past MOJOUI_ANSWERS=1")
     assert_true(work.problem.find("answers on the page") >= 0, work.problem)
-    # kept answers count in the visitor's tables: a 1 MB budget leaves no room once one answer is kept
+    # kept answers count in the visitor's tables: the kept one is 3.2 MB (200,000 rows × 2 columns); a 3 MB budget for
+    # the visitor leaves no room only if it's counted (round 5: the old check passed either way, with a budget of 0)
     _ = setenv("MOJOUI_ANSWERS", "8", True)
-    _ = setenv("MOJOUI_VISITOR_TABLES_MB", "0", True)
-    assert_false(work.ask(tables, "SELECT id FROM wide WHERE id < 10", "wide", page, "A3", pal), "a question past the visitor's tables")
+    _ = setenv("MOJOUI_VISITOR_TABLES_MB", "3", True)
+    assert_false(work.ask(tables, "SELECT id FROM wide WHERE id < 10", "wide", page, "A3", pal), "a question past the visitor's tables: the kept answer wasn't counted")
     assert_true(work.problem.find("Your tables and answers") >= 0, work.problem)
     _ = setenv("MOJOUI_VISITOR_TABLES_MB", "384", True)
     public(False)
-    print("answers: ok (400 columns × 1M rows refused, +" + String(grew) + " MB at the peak; the answer cap and the visitor's budget hold)")
+    print("answers: ok (400 columns, 40 behind a subquery and built strings refused at small peaks; real sizes counted; the answer cap and the visitor's budget hold)")
 
 
 def main() raises:

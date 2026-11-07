@@ -97,6 +97,15 @@ def round4(page, srv, out, say):
     time.sleep(1)
     stop.set()
     say(said is not None and peak[0] - m0 < 400, f"400 columns over a 1M-row upload: “{said}”; the server {m0} MB, at most {peak[0]} MB meanwhile")
+    for what, q in (("40 columns behind a subquery's SELECT *", "SELECT * FROM (SELECT " + ", ".join(f"v AS c{i}" for i in range(40)) + " FROM wide) AS s"),
+                    ("a built 500-character string a row", "SELECT CAST(id AS TEXT) || '" + "0123456789" * 50 + "' AS s FROM wide")):
+        m0, peak[0] = srv.memory()["mem_mb"], 0
+        stop = threading.Event()
+        threading.Thread(target=watch, daemon=True).start()
+        said = ask(page, q, r"(?:would|could) take more than [^:]*", 60)
+        time.sleep(1)
+        stop.set()
+        say(said is not None and peak[0] - m0 < 400, f"round 5, {what} over 1M rows: “{said}”; the server {m0} MB, at most {peak[0]} MB meanwhile")
     page.keyboard.press("Escape")
     # 2. three slow uploads for a made-up session, 200 MB each by their headers: refused before their bodies
     m0, th0, fd0 = server_state(srv)
@@ -117,8 +126,9 @@ def round4(page, srv, out, say):
     took = time.time() - t0
     m1, th1, fd1 = server_state(srv)
     [c.close() for c in conns]
-    ok = all("expired" in a for a in answers) and took < 5 and m1 - m0 < 50 and fd1 - fd0 <= 3
-    say(ok, f"3 slow 200 MB uploads for a made-up session: answered in {took:.1f} s after 64 KB each ({sum('expired' in a for a in answers)} say it expired); "
+    gone = sum(1 for a in answers if "204" in a.split("\r\n")[0] and "x-mojoui-gone" in a.lower())
+    ok = gone == 3 and took < 5 and m1 - m0 < 50 and fd1 - fd0 <= 3
+    say(ok, f"3 slow 200 MB uploads for a made-up session: answered in {took:.1f} s after 64 KB each ({gone} “gone”, before the upload gate since round 5); "
         f"the server {m0} → {m1} MB, open files {fd0} → {fd1}")
     # 3. 300 open /frame requests at 3840×2400 from one session: /health stays quick
     fresh(page, srv.url)
@@ -160,6 +170,126 @@ def round4(page, srv, out, say):
             break
         page.wait_for_timeout(250)
     say(said is not None, f"a 60 MB upload past a 50 MB visitor cap, from Chromium: " + (f"“{said}”" if said else "no notice (a reset connection?)"))
+
+
+def connections(out, say):
+    """Round 5: slow and idle connections, and slow uploads, on a server with no proxy in front (the per-peer cap live),
+    each proven by the server's open files and its upload budget. /health is asked from another address (127.0.0.2)."""
+    import http.client
+    import socket
+    srv = Server(out / "srv-conn", public=True, env={"MOJOUI_UPLOADS_IN_FLIGHT_MB": "50", "OMXCODE_VISITOR_MAX": str(100 << 20)})
+    host, port = "127.0.0.1", int(srv.url.split(":")[2].strip("/"))
+
+    def other(path, headers=None):  # (another visitor, from 127.0.0.2)
+        c = http.client.HTTPConnection(host, port, timeout=10, source_address=("127.0.0.2", 0))
+        t0 = time.perf_counter()
+        try:
+            c.request("GET", path, headers=headers or {})
+            r = c.getresponse()
+            body = r.read().decode(errors="replace")
+            return r.status, (time.perf_counter() - t0) * 1000, body
+        except OSError as e:
+            return 0, (time.perf_counter() - t0) * 1000, str(e)
+        finally:
+            c.close()
+
+    def fds():  # (the server's open sockets: a page load's new session opens files of its own)
+        d = f"/proc/{srv.pid()}/fd"
+        out = 0
+        for f in os.listdir(d):
+            try:
+                out += os.readlink(f"{d}/{f}").startswith("socket:")
+            except OSError:
+                pass
+        return out
+    try:
+        time.sleep(1)
+        base = fds()
+        socks = []
+        for k in range(600):  # 600 idle sockets and 100 that send half a request's headers, all from 127.0.0.1
+            try:
+                c = socket.create_connection((host, port), timeout=5)
+                if k >= 500:
+                    c.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n")
+                socks.append(c)
+            except OSError:
+                pass
+        time.sleep(1)
+        held = fds() - base
+        st = [other("/health"), other("/", {"Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "X-Real-IP": "198.51.100.7"})]
+        ok_now = all(code == 200 and ms < 1000 for code, ms, _ in st)
+        time.sleep(HEADER_WAIT)
+        left = fds() - base
+        [c.close() for c in socks]
+        say(ok_now and held <= 70 and left <= 5, f"600 idle and 100 half-header sockets from one address: the server held {held} of them "
+            f"(64 a peer), /health and / answered another address {[c for c, _, _ in st]} in {max(ms for _, ms, _ in st):.0f} ms; "
+            f"{HEADER_WAIT} s later {left} were left")
+        # slow POSTs for a made-up session: answered before their bodies
+        t0, answers = time.time(), []
+        for k in range(50):
+            c = socket.create_connection((host, port), timeout=5, source_address=("127.0.0.3", 0))
+            c.sendall(f"POST /e/{'2' * 31}{k % 10} HTTP/1.1\r\nHost: x\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 100000\r\n\r\nn=1".encode())
+            try:
+                answers.append(c.recv(200).decode(errors="replace").split("\r\n")[0])
+            except OSError:
+                answers.append("")
+            c.close()
+        say(all("204" in a for a in answers) and time.time() - t0 < 10, f"50 slow POSTs to /e/<made-up session>: {sum('204' in a for a in answers)} answered "
+            f"“gone” before their bodies, in {time.time() - t0:.1f} s")
+        # slow uploads: one whose session ends, one under the rate floor; the server's 50 MB of uploads in flight comes back
+        def page_of(ip):
+            code, _, html = other("/", {"Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "X-Real-IP": ip})
+            sid = re.search(r'data-sid="([0-9a-f]+)"', html).group(1)
+            v = re.search(r'id="mojoui-v"[^>]*value="(-?\d+)"|value="(-?\d+)"[^>]*id="mojoui-v"', html)
+            n = re.search(r'hx-post="/upload/' + sid + r'"[^>]*hx-vals=\'\{"n": (\d+)\}\'', html).group(1)
+            return sid, int(v.group(1) or v.group(2)), int(n)
+
+        def slow_upload(sid, v, n, size):
+            head = (f'--b\r\nContent-Disposition: form-data; name="n"\r\n\r\n{n}\r\n--b\r\nContent-Disposition: form-data; name="v"\r\n\r\n{v}\r\n'
+                    f'--b\r\nContent-Disposition: form-data; name="file"; filename="slow.csv"\r\nContent-Type: text/csv\r\n\r\n').encode()
+            c = socket.create_connection((host, port), timeout=5, source_address=("127.0.0.4", 0))
+            c.sendall(f"POST /upload/{sid} HTTP/1.1\r\nHost: x\r\nX-Real-IP: 198.51.100.{n % 200}\r\nContent-Type: multipart/form-data; boundary=b\r\nContent-Length: {size}\r\n\r\n".encode() + head + b"a,b\n" * 1000)
+            return c
+
+        def closed_within(c, seconds):
+            t0 = time.time()
+            c.settimeout(1)
+            while time.time() - t0 < seconds:
+                try:
+                    c.sendall(b"1,2\n" * 64)
+                    if c.recv(4096) == b"":
+                        return time.time() - t0
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return time.time() - t0
+            return None
+        a = page_of("198.51.100.21")
+        ca = slow_upload(*a, 40 << 20)
+        time.sleep(1)
+        other(f"/health")
+        c = http.client.HTTPConnection(host, port, timeout=10, source_address=("127.0.0.2", 0))
+        c.request("POST", f"/bye/{a[0]}")
+        c.getresponse().read()
+        gone_a = closed_within(ca, 30)
+        b = page_of("198.51.100.22")
+        cb = slow_upload(*b, 30 << 20)
+        cb.settimeout(2)
+        try:
+            refused_b = b"other visitors' uploads" in cb.recv(4096)
+        except socket.timeout:
+            refused_b = False
+        cut_b = closed_within(cb, BODY_WAIT)
+        say(gone_a is not None and not refused_b and cut_b is not None,
+            f"a slow 40 MB upload whose session ends: its connection closed {gone_a and round(gone_a, 1)} s after; then another visitor's 30 MB "
+            f"upload {'was refused' if refused_b else 'was taken'} under the server's 50 MB in flight, and trickling under the rate floor "
+            f"it was cut after {cut_b and round(cut_b, 1)} s")
+    finally:
+        srv.stop()
+
+
+HEADER_WAIT = 14  # (10 s for headers, and a little)
+BODY_WAIT = 40  # (10 s of grace, then 16 KB/s)
 
 
 def resources(out, say):
@@ -248,7 +378,7 @@ def run_all(out):
 
     srv = Server(out / "srv", public=True, env={"MOJOUI_QUERY_S": "1", "MOJOUI_QUERY_ROWS": "100000", "MOJOUI_JOIN_BYTES": str(1 << 20),
                                                 "MOJOUI_MAX_SESSIONS": "20",
-                                                "MOJOUI_PER_IP": "20", "OMXCODE_VISITOR_MAX": str(50 << 20)})  # (budgets shortened for the check)
+                                                "MOJOUI_PER_IP": "20", "OMXCODE_VISITOR_MAX": str(50 << 20), "MOJOUI_BEHIND_PROXY": "1"})  # (budgets shortened for the check)
     try:
         b_out = out / "visitor-b"
         pb = subprocess.Popen([sys.executable, str(ROOT / "docs/goals/62/story.py"), "--url", srv.url, "--out", str(b_out), "--no-pack"],
@@ -411,6 +541,7 @@ def run_all(out):
             say(alive, "D-6218's sequences (a pivot and the last column, then the sample, then a blank sheet): " + ("the server is up" if alive else "the server died"))
             b.close()
         resources(out, say)
+        connections(out, say)
         # the join budget alone (the engine counts a join's matches before it refuses: ~3 s here, so the time budget is
         # long on this second server); columns from both sides: its pairs are materialized, which the budget holds
         srv2 = Server(out / "srv-join", public=True, env={"MOJOUI_QUERY_S": "60", "MOJOUI_JOIN_BYTES": str(1 << 20)})

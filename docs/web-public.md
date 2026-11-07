@@ -9,12 +9,12 @@ Any omxcode web app can run on the public internet with one switch, `MOJOUI_PUBL
 | | Local (`scripts/omxplorer.sh web`) | Public (`MOJOUI_PUBLIC=1`) |
 |---|---|---|
 | Agent link, `/dev` routes | as configured | off, whatever the environment says |
-| Sessions | one per page load; the oldest closes past 200 | one per page load, holding a place from the moment it's made; past `MOJOUI_MAX_SESSIONS` (6, D-6230) a busy page; an address (`X-Real-IP`, an IPv6 one by its /64) holds `MOJOUI_PER_IP` (2) places at most, at all times; new sessions at most `MOJOUI_NEW_PER_S` (2) a second on the server (bursts of 6) and `MOJOUI_IP_NEW_PER_S` (0.5) from an address (bursts of 3); a page that never comes back frees its place in 10 s; a visit ends after `MOJOUI_SESSION_MAX_S` (an hour), and the page says so |
+| Sessions | one per page load; the oldest closes past 200 | one per page load, holding a place from the moment it's made; past `MOJOUI_MAX_SESSIONS` (6, D-6230) a busy page; an address (`X-Real-IP`, an IPv6 one by its /48, an IPv4-mapped one as IPv4, one that doesn't parse a shared "unknown") holds `MOJOUI_PER_IP` (2) places at most, at all times; new sessions at most `MOJOUI_NEW_PER_S` (2) a second on the server (bursts of 6) and `MOJOUI_IP_NEW_PER_S` (0.5) from an address (bursts of 3);  a visit ends after `MOJOUI_SESSION_MAX_S` (an hour), and the page says so; only input keeps a tab alive (`MOJOUI_IDLE_S`, 5 minutes), and a page that never comes back frees its place in 25 s |
 | Idle tabs | stay | end after `MOJOUI_IDLE_S` (900 s) without input (a `/resize` isn't input); the page says so; their files go |
 | Plain GETs (crawlers, link previews, health checks) | no session (both modes: only a browser's page load makes one) | same |
 | File controls (pickers, savers, drop targets) | the page may send a path | only paths the host made (an upload, a save) reach the app |
 | Uploads | 32 GB a file | `OMXCODE_UPLOAD_MAX` (200 MB) a file, `OMXCODE_VISITOR_MAX` (500 MB) a visitor, 2 in flight, each reserving its length (an upload must say it), every visitor's in flight together `MOJOUI_UPLOADS_IN_FLIGHT_MB` (512); an upload for no open page is refused before its body is read, and a refused one's body is read and dropped first, so the page shows why; read first in a process of its own (`validate`, held by `prlimit` to 4 GB and 60 s of CPU, first for the out-of-memory killer): a table past `MOJOUI_TABLE_MB` (256) once read, or a visitor's tables past `MOJOUI_VISITOR_TABLES_MB` (384) together, is refused |
-| Questions | anything the engine takes | an answer up to `MOJOUI_ANSWER_MB` (64 MB, columns × rows at 8 bytes a cell: its rows are capped from its width before it runs), counted with the visitor's tables in `MOJOUI_VISITOR_TABLES_MB`, `MOJOUI_ANSWERS` (8) answers kept; one SELECT (no WITH, UNION, INTERSECT or EXCEPT, no script statements); answers up to `MOJOUI_QUERY_ROWS` (1M); `MOJOUI_QUERY_S` (20 s), then stopped, still counting until the engine ends it; one at a time a visitor, `MOJOUI_QUESTIONS` (2) on the server; `MOJOUI_QUERY_THREADS` (2) cores and `MOJOUI_SORT_BYTES` (256 MB) of sort a question; `MOJOUI_JOIN_BYTES` (512 MB) a join |
+| Questions | anything the engine takes | an answer up to `MOJOUI_ANSWER_MB` (64 MB, its real size once built, strings included; a question that builds strings is refused before it runs when its worst case could pass that; one REPLACE a question), counted with the visitor's tables in `MOJOUI_VISITOR_TABLES_MB`, `MOJOUI_ANSWERS` (8) answers kept; one SELECT (no WITH, UNION, INTERSECT or EXCEPT, no script statements); answers up to `MOJOUI_QUERY_ROWS` (1M); `MOJOUI_QUERY_S` (20 s), then stopped, still counting until the engine ends it; one at a time a visitor, `MOJOUI_QUESTIONS` (2) on the server; `MOJOUI_QUERY_THREADS` (2) cores and `MOJOUI_SORT_BYTES` (256 MB) of sort a question; `MOJOUI_JOIN_BYTES` (512 MB) a join |
 | Files a visitor makes (Save, Export CSV, Export pack) | in their documents folder | in the tab's own folder, then sent as a download (a folder as one zip) and removed |
 | Recent files | `OMX_CONFIG/recent.txt`, with paths | in the tab only, names only |
 | Server paths in answers | as the app shows them | cut from every text answer (logged as `SCRUB:` so the source can be fixed) |
@@ -48,5 +48,13 @@ restart policy to Always).
 Everyone behind one address counts as one visitor for the per-address limits: together they hold at most 2 tabs at once,
 and new tabs open 3 at once, then about one every 2 seconds. Anyone past that sees the busy page and can try again in a
 minute. A visit ends after an hour whatever happens (the page says so, and a reload starts a new one); a tab with no input
-for 15 minutes ends sooner. Each session's blocking requests in flight (frames, events) are at most 6, so one tab can't
+for 5 minutes ends sooner. Each session's blocking requests in flight (frames, events) are at most 6, so one tab can't
 hold the server's worker threads; `/health` doesn't need one.
+
+### Connections
+
+A request's headers must arrive within 10 seconds and its body at 16 KB/s or more after 10 seconds, with no gap past
+15 seconds; an idle connection is kept 20 seconds after an answer. Requests for a session that doesn't exist are answered
+"gone" before anything is read. One address has 48 requests in flight at most; with no proxy in front, one peer holds 64
+connections (`MOJOUI_BEHIND_PROXY=1`, which scripts/web-start sets for Railway, turns that off: there every connection
+comes from the proxy, so the limits read `X-Real-IP`).

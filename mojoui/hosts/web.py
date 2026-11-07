@@ -67,8 +67,8 @@ PUSH_HZ = float(os.environ.get("MOJOUI_PUSH_HZ", "30"))  # how often /push paint
 PUSH_MAX_S = float(os.environ.get("MOJOUI_PUSH_MAX_S", "240"))  # a push stream's longest life (a platform's request limit)
 JPEG_QUALITY = 85
 MAX_SESSIONS = int(os.environ.get("MOJOUI_MAX_SESSIONS", "6" if PUBLIC else "200"))  # public: past it, a busy page; else the oldest tab closes
-IDLE_S = float(os.environ.get("MOJOUI_IDLE_S", "900" if PUBLIC else "0"))  # a tab with no input this long ends (0: never)
-UNTOUCHED_S = 10.0  # public mode: a session whose page never came back (no /wait, frame or event) ends after this (round 4: 45 → 10)
+IDLE_S = float(os.environ.get("MOJOUI_IDLE_S", "300" if PUBLIC else "0"))  # a tab with no input this long ends (0: never)
+UNTOUCHED_S = 25.0  # public mode: a session whose page never came back (no /wait, frame or event) ends after this (round 4: 45 → 10)
 SESSION_MAX_S = float(os.environ.get("MOJOUI_SESSION_MAX_S", "3600" if PUBLIC else "0"))  # public: a visit's longest life (0: none)
 # public mode, new sessions (goal 62 round 3: 60 loads a second slowed every other tab): the whole server's rate and burst,
 # one address's (X-Real-IP, which the platform's proxy sets), and, near the cap, the sessions one address may hold
@@ -79,6 +79,12 @@ IP_BURST = 3.0
 PER_IP = int(os.environ.get("MOJOUI_PER_IP", "2"))  # (round 4: at all times, not only near the cap)
 UPLOADS_AT_ONCE = 2  # public mode: a visitor's uploads in flight
 UPLOADS_IN_FLIGHT = int(os.environ.get("MOJOUI_UPLOADS_IN_FLIGHT_MB", "512")) << 20  # public mode: every upload in flight together
+HEADER_S = 10.0  # public mode: a connection's request headers arrive within this (from its start, or partial ones after a response)
+BODY_RATE = 16 << 10  # public mode: a request body arrives at this many bytes a second at least, after BODY_GRACE_S
+BODY_GRACE_S = 10.0
+BODY_IDLE_S = 15.0  # public mode: no part of a body for this long ends the request
+PER_PEER = int(os.environ.get("MOJOUI_PER_PEER", "64"))  # public mode, no proxy in front: connections from one peer at once
+ADDRESS_REQUESTS = 48  # public mode: one address's requests in flight (a tab holds about 12: /wait, /push, frames, events)
 SESSION_REQUESTS = 6  # public mode: a session's blocking requests in flight (frames, events): past them, "retry" without a thread
 # public mode: a table's memory once read (the upload check measures it), one table's and a visitor's tables' together
 TABLE_KB = int(os.environ.get("MOJOUI_TABLE_MB", "256")) << 10
@@ -591,6 +597,18 @@ CANVAS_JS = r"""
   const shownPics = new Map();  // canvas tag → {pic, bmp, w, h}: its last picture (40 at most)
   // (a fetch that fails on the network, a dropped keep-alive connection: a short wait and again, as /wait does; after a few,
   // a "retry" answer, so the canvas's loop goes on instead of ending in an unhandled "Failed to fetch", round 4)
+  // (an event answered 204 + X-Mojoui-Retry, its session's requests full: sent again shortly, at most 5 times, round 5)
+  const retried = new Map();
+  document.addEventListener('htmx:afterRequest', e => {
+    const x = e.detail.xhr, c = e.detail.requestConfig;
+    if (!x || !c || x.status !== 204 || x.getResponseHeader('X-Mojoui-Retry') !== '1') return;
+    const key = c.path + ' ' + JSON.stringify(c.parameters || {}), now = Date.now(), seen = retried.get(key);
+    const tries = seen && now - seen.at < 10000 ? seen.tries + 1 : 1;
+    retried.set(key, { tries, at: now }); if (retried.size > 200) retried.clear();
+    if (tries > 5) return;
+    setTimeout(() => { const p = htmx.ajax(c.verb.toUpperCase(), c.path, { values: c.parameters, swap: 'none', source: e.detail.elt });
+                       if (p && p.catch) p.catch(() => {}); }, 100 * tries);
+  });
   const getFrame = async (sid, n, params) => {
     for (let tries = 0; ; tries++) {
       try { return await fetch(`/frame/${sid}/${n}?${new URLSearchParams(params)}`); }
@@ -997,8 +1015,8 @@ class BodyLimit:
     (goal 62's review). Uploads may carry their cap (and a little form), every other route 1 MB. An upload must say its
     length, and `gate(path, length)` may refuse it before a byte is read: (words for the page or None, release)."""
 
-    def __init__(self, app, big, gate=None):
-        self.app, self.big, self.gate = app, big, gate
+    def __init__(self, app, big, gate=None, alive=None):
+        self.app, self.big, self.gate, self.alive = app, big, gate, alive
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope.get("method") not in ("POST", "PUT", "PATCH"):
@@ -1017,13 +1035,24 @@ class BodyLimit:
             if refused:  # (read and dropped first, up to `drain` bytes: a browser shows an answer, not a reset connection)
                 await _drain(receive, drain)
                 return await _answer(send, 200, b"text/html; charset=utf-8", to_xml(notice(refused)).encode())
-        seen, over, started = [0], [False], [False]
+        seen, over, started, t0 = [0], [False], [False], time.monotonic()
+        sid = (path.split("/") + ["", "", ""])[2]
 
         async def counted():
-            message = await receive()
+            import anyio
+            # (round 5: a body arrives at BODY_RATE at least after BODY_GRACE_S, with no gap past BODY_IDLE_S, and an upload
+            # stops when its session ends: slow ones held the server's upload budget and its connections)
+            try:
+                with anyio.fail_after(BODY_IDLE_S):
+                    message = await receive()
+            except TimeoutError:
+                over[0] = True
+                raise BodyTooLarge()
             if message["type"] == "http.request":
                 seen[0] += len(message.get("body", b""))
-                if seen[0] > limit:
+                took = time.monotonic() - t0
+                if seen[0] > limit or (took > BODY_GRACE_S and seen[0] < BODY_RATE * (took - BODY_GRACE_S)) \
+                        or (upload and self.alive is not None and message.get("more_body") and not self.alive(sid)):
                     over[0] = True
                     raise BodyTooLarge()
             return message
@@ -1070,35 +1099,54 @@ async def _drain(receive, most, seconds=60):
 
 
 class SessionRequests:
-    """ASGI middleware (public mode): a session's blocking requests (frames, events, …) in flight are at most
-    SESSION_REQUESTS; past them the page gets a 204 with X-Mojoui-Retry at once, without a worker thread (round 4: 300
-    open /frame requests from one session took every one of anyio's 40 threads, and /health to 8 s)."""
+    """ASGI middleware (public mode), before anything of a request is read (round 5):
+    - a request for a session that doesn't exist (every /{route}/{sid} but the EXEMPT routes) is answered at once, "gone";
+    - a session's requests in flight are at most SESSION_REQUESTS (past them a 204 with X-Mojoui-Retry, which the page
+      retries, without a worker thread: round 4, 300 open /frame requests took anyio's 40 threads and /health to 8 s);
+    - an address's requests in flight are at most ADDRESS_REQUESTS (429)."""
 
-    PATHS = ("/frame/", "/e/", "/w/", "/pending/", "/resize/", "/save/", "/reply/", "/widget/", "/appearance/")
+    EXEMPT = ("static", "assets", "health", "wait", "push", "bye", "download", "img", "favicon.ico", "")  # (no session work, or a few a tab holds)
 
-    def __init__(self, app):
-        self.app, self.open, self.lock = app, {}, threading.Lock()
+    def __init__(self, app, alive):
+        self.app, self.alive, self.open, self.lock = app, alive, {}, threading.Lock()
+        self.said = [0.0]
 
     async def __call__(self, scope, receive, send):
-        path = scope.get("path", "") if scope["type"] == "http" else ""
-        if not path.startswith(self.PATHS):
+        if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        sid = (path.split("/") + ["", ""])[2]
+        parts = scope.get("path", "").split("/")
+        route, sid = parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""
+        h = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        addr = address_key(h["x-real-ip"]) if "x-real-ip" in h else address_key((scope.get("client") or ("", 0))[0])
+        keys = ["a:" + addr]
+        if route not in self.EXEMPT and len(parts) > 2:
+            if not self.alive(sid):
+                if time.monotonic() - self.said[0] > 10:  # (said at most every 10 s: a flood can't fill the log)
+                    self.said[0] = time.monotonic()
+                    print(f"REFUSED: requests for sessions that don't exist (/{route}/…)", flush=True)
+                return await send_empty(send, 204, [(b"x-mojoui-gone", b"1")] + list(SECURITY_HEADERS))
+            keys.append("s:" + sid)
         with self.lock:
-            if self.open.get(sid, 0) >= SESSION_REQUESTS:
-                busy = True
+            if self.open.get(keys[0], 0) >= ADDRESS_REQUESTS:
+                busy = 429
+            elif len(keys) > 1 and self.open.get(keys[1], 0) >= SESSION_REQUESTS:
+                busy = 204
             else:
-                busy = False
-                self.open[sid] = self.open.get(sid, 0) + 1
+                busy = 0
+                for k in keys:
+                    self.open[k] = self.open.get(k, 0) + 1
+        if busy == 429:
+            return await send_empty(send, 429, [(b"retry-after", b"5")] + list(SECURITY_HEADERS))
         if busy:
             return await send_empty(send, 204, [(b"x-mojoui-retry", b"1")] + list(SECURITY_HEADERS))
         try:
             await self.app(scope, receive, send)
         finally:
             with self.lock:
-                self.open[sid] -= 1
-                if self.open[sid] <= 0:
-                    del self.open[sid]
+                for k in keys:
+                    self.open[k] -= 1
+                    if self.open[k] <= 0:
+                        del self.open[k]
 
 
 async def send_empty(send, status, headers):
@@ -1248,6 +1296,7 @@ class Session:
         self.made = time.monotonic()
         self.touched = False  # the page came back for anything (/wait, a frame, an event): a page, not a bare GET
         self.client = ""  # who made it: its address (public mode's places per address near the cap)
+        self.upload_bytes = 0  # the bytes of this tab's uploads kept (a running total, round 5)
         self.tables_kb = {}  # public mode: path → a checked table's memory once read (the visitor's tables together)
         self.gone_reason = ""  # why the server ended it (the page says so)
         self.deliveries = []  # (url, name) of files the app handed over (App.take_download), for the next answer
@@ -2002,13 +2051,21 @@ def client_address(req, h):
     office holds."""
     import ipaddress
     peer = req.client.host if req.client else ""
-    for text in ((h.get("x-real-ip") or "").strip()[:45], peer):
-        try:
-            ip = ipaddress.ip_address(text)
-        except ValueError:
-            continue
-        return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else str(ip)
-    return "?"
+    header = h.get("x-real-ip")
+    return address_key(header if header is not None else peer)
+
+
+def address_key(text):
+    """An address as a key: IPv4 (an IPv4-mapped IPv6 one too), IPv6 by its /48; anything that doesn't parse is one shared
+    "unknown" (round 5: not the proxy's own address, which every visitor shares)."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address((text or "").strip()[:45])
+    except ValueError:
+        return "unknown"
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return str(ipaddress.ip_network(f"{ip}/48", strict=False)) if ip.version == 6 else str(ip)
 
 
 def loopback(host):
@@ -2068,8 +2125,9 @@ def make_app(module_dir):
             if os.environ.get(name):
                 roots += [Path(os.environ[name]), Path(os.environ[name]).resolve()]
         app.add_middleware(Scrub, roots=roots)
-        app.add_middleware(BodyLimit, big=upload_limit() + (1 << 20), gate=lambda path, length: upload_gate(path, length))
-        app.add_middleware(SessionRequests)
+        app.add_middleware(BodyLimit, big=upload_limit() + (1 << 20), gate=lambda path, length: upload_gate(path, length),
+                           alive=lambda sid: sid in sessions)
+        app.add_middleware(SessionRequests, alive=lambda sid: sid in sessions)
         print(f"mojoui web: public mode: no agent link, no dev routes, {MAX_SESSIONS} sessions at most"
               + (f", idle ones end after {IDLE_S / 60:g} min" if IDLE_S else "") + f"; uploads {size_words(upload_limit())} a file, "
               + f"{size_words(visitor_limit())} a visitor", flush=True)
@@ -2095,7 +2153,7 @@ def make_app(module_dir):
             everyone = sum(b for _, b in flights.values())
             if n >= UPLOADS_AT_ONCE:
                 return "Wait for your other uploads to finish first.", None, length
-            if cap and folder_bytes(uploads_base() / sid) + held + length > cap:
+            if cap and sessions[sid].upload_bytes + held + length > cap:  # (a running total: no folder walk on the event loop)
                 print(f"UPLOAD: refused an upload past the visitor's cap ({cap:,} bytes, {n} in flight)", flush=True)
                 return f"This upload wasn't taken: your files here would pass {size_words(cap)}, the most one visitor keeps.", None, length
             if everyone + length > UPLOADS_IN_FLIGHT:  # (round 4: every visitor's uploads in flight together)
@@ -2163,6 +2221,8 @@ def make_app(module_dir):
         forget_files(sid)
         jslog_counts.pop(sid, None)
         getattr(s, "downloads", {}).clear()
+        with sessions_lock:  # (round 5: its uploads in flight no longer hold the server's budget; BodyLimit stops reading them)
+            flights.pop(sid, None)
         if reason:
             with sessions_lock:
                 ended[sid] = reason
@@ -3016,7 +3076,7 @@ def make_app(module_dir):
             if (file.size or 0) > limit:
                 refused.append(too_big(name, limit))
                 continue
-            if cap and folder_bytes(uploads_base() / sid) + (file.size or 0) > cap:
+            if cap and s.upload_bytes + (file.size or 0) > cap:
                 refused.append(over_cap(name, cap))
                 continue
             try:
@@ -3056,6 +3116,7 @@ def make_app(module_dir):
                     n = next((k for k, node in enumerate(s.nodes) if node["kind"] == DROP and node["msg2"] == msg), -1)
                     if n < 0:
                         break
+                s.upload_bytes += path.stat().st_size if path.exists() else 0
                 d = json.loads(mod.event(s.handle, n, 1, str(path), 0))
                 if d.get("ignored"):
                     continue
@@ -3083,7 +3144,7 @@ def make_app(module_dir):
             return too_big(name, limit)
         cap = visitor_limit()
         if cap:  # (this visitor's uploads together: what's kept, plus this one, within the cap)
-            limit = min(limit, cap - folder_bytes(uploads_base() / sid))
+            limit = min(limit, cap - s.upload_bytes)
             if limit <= 0 or (file.size or 0) > limit:
                 return over_cap(name, cap)
         size = 0
@@ -3119,6 +3180,7 @@ def make_app(module_dir):
             if v != s.shape or not 0 <= n < len(s.nodes) or not s.nodes[n]["msg2"]:
                 path.unlink(missing_ok=True)
                 return ""
+            s.upload_bytes += path.stat().st_size if path.exists() else 0
             d = json.loads(mod.event(s.handle, n, 1, str(path), 0))
             if d.get("ignored"):
                 return ""
@@ -3332,6 +3394,53 @@ def make_app(module_dir):
     return app
 
 
+def deadline_protocol():
+    """uvicorn's h11 protocol with the public copy's connection rules (round 5: 520 idle or slow sockets made the site
+    answer 503): a request's headers arrive within HEADER_S, from the connection's start or, after a response, once its
+    next bytes come; with no proxy in front (MOJOUI_BEHIND_PROXY unset), one peer holds PER_PEER connections at most."""
+    from uvicorn.protocols.http.h11_impl import H11Protocol
+    peers = {}
+    behind = os.environ.get("MOJOUI_BEHIND_PROXY") == "1"
+
+    class Deadlines(H11Protocol):
+        def connection_made(self, transport):
+            peer = (transport.get_extra_info("peername") or ("", 0))[0]
+            self._peer = None if behind else peer
+            if self._peer is not None:
+                peers[peer] = peers.get(peer, 0) + 1
+                if peers[peer] > PER_PEER:
+                    transport.close()
+            super().connection_made(transport)
+            self._arm(first=True)
+
+        def connection_lost(self, exc):
+            if self._peer is not None:
+                peers[self._peer] -= 1
+                if peers[self._peer] <= 0:
+                    del peers[self._peer]
+                self._peer = None
+            super().connection_lost(exc)
+
+        def _arm(self, first=False):
+            self._seen, self._got, self._first = self.cycle, False, first
+            self.loop.call_later(HEADER_S, self._late, self.cycle)
+
+        def data_received(self, data):
+            self._got = True
+            super().data_received(data)
+
+        def _late(self, seen):
+            if self.transport.is_closing() or self.cycle is not seen:
+                return  # (a request came: its own body rules apply)
+            if self._first or self._got:  # (nothing whole in time: a slow or idle socket; plain idle after a response is keep-alive's)
+                self.transport.close()
+
+        def on_response_complete(self):
+            super().on_response_complete()
+            self._arm()
+    return Deadlines
+
+
 if __name__ == "__main__":
     module_dir = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("MOJOUI_MODULE", "build/hello/web")
     port = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("PORT", "5001"))  # (a platform's port: $PORT)
@@ -3347,4 +3456,5 @@ if __name__ == "__main__":
     # timeout_graceful_shutdown: a page's /wait is held while the tab lives; a stop (Ctrl+C, a platform's redeploy)
     # waits at most 3 s for answers in flight instead of for every tab to close
     uvicorn.run(make_app(module_dir), host=host, port=port, log_level="warning", timeout_graceful_shutdown=3, proxy_headers=False,
-                limit_concurrency=512 if PUBLIC else None, timeout_keep_alive=75)  # (round 4: a bound on connections; idle ones kept 75 s)
+                limit_concurrency=2048 if PUBLIC else None, timeout_keep_alive=20 if PUBLIC else 75,
+                http=deadline_protocol() if PUBLIC else "auto")  # (round 5: idle and slow connections are dropped, not counted)

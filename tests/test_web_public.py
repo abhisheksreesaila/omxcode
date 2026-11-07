@@ -250,10 +250,13 @@ def round4(web, module_dir, d):
         def __init__(self, peer):
             self.client = type("C", (), {"host": peer})()
     assert web.client_address(Req("127.0.0.1"), {"x-real-ip": "203.0.113.7"}) == "203.0.113.7"
-    assert web.client_address(Req("127.0.0.1"), {"x-real-ip": "x" * 5000}) == "127.0.0.1", "a junk X-Real-IP became a key"
+    assert web.client_address(Req("127.0.0.1"), {"x-real-ip": "x" * 5000}) == "unknown", "a junk X-Real-IP became a key"
+    assert web.client_address(Req("127.0.0.1"), {}) == "127.0.0.1"
+    assert web.address_key("::ffff:203.0.113.9") == "203.0.113.9", "an IPv4-mapped address wasn't turned back into IPv4"
     a = web.client_address(Req("127.0.0.1"), {"x-real-ip": "2001:db8:1:2:aaaa::1"})
     b = web.client_address(Req("127.0.0.1"), {"x-real-ip": "2001:db8:1:2:bbbb::9"})
-    assert a == b == "2001:db8:1:2::/64", (a, b)
+    c = web.client_address(Req("127.0.0.1"), {"x-real-ip": "2001:db8:1:ffff::1"})
+    assert a == b == c == "2001:db8:1::/48", (a, b, c)
     web.reset_rates()
     for i in range(20000):
         web.rate_ok(f"198.51.{i // 250}.{i % 250}")
@@ -265,9 +268,13 @@ def round4(web, module_dir, d):
     with TestClient(web.make_app(module_dir)) as client:
         t0 = time.time()
         r = client.post("/upload/" + "0" * 32, data={"n": "1", "v": "0"}, files=[("file", ("x.csv", b"a,b\n" * (4 << 20), "text/csv"))])
-        assert "expired" in r.text and time.time() - t0 < 5, f"an upload for no session: {r.status_code} {r.text[:100]}"
+        assert r.status_code == 204 and r.headers.get("x-mojoui-gone") == "1" and time.time() - t0 < 5, f"an upload for no session: {r.status_code} {r.text[:100]}"
         r = client.post("/e/x", content=(b"x" * (1 << 20) for _ in range(3)))
-        assert r.status_code == 413 and r.headers.get("x-content-type-options"), f"413 without the security headers: {dict(r.headers)}"
+        assert r.status_code in (204, 413) and r.headers.get("x-content-type-options"), f"no security headers: {r.status_code} {dict(r.headers)}"
+        # round 5: a request for a session that doesn't exist is answered "gone" before anything is read, on every route
+        for path in ("/e/" + "1" * 32, "/frame/" + "1" * 32 + "/0", "/resize/" + "1" * 32, "/w/" + "1" * 32):
+            r = client.post(path, data={"n": "1"}) if not path.startswith("/frame") else client.get(path)
+            assert r.status_code == 204 and r.headers.get("x-mojoui-gone") == "1", f"{path}: {r.status_code} {dict(r.headers)}"
         # two visitors' 6 MB uploads at once under an 8 MB server-wide budget: one is refused
         got, threads = {}, []
         for k in range(2):

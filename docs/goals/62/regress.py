@@ -42,13 +42,13 @@ NOT_RUN = re.compile(r"FileNotFoundError|No such file|cannot open input file|\bn
 OUT = ROOT / "build/g62/m6"
 # CHANGED rows looked at and explained (round 4: a row fails on both sides for a different reason, a changed count or a new
 # mention, isn't SAME until someone has read both): "check:fn" → what was found
-EXPLAINED = {  # (round 4, each read in full on both sides)
-    "08-check.py:m1": "both stop at the same compile error, mojoui/http_flare.mojo:126 (indentation); the stored reasons began at different lines",
-    "08-check.py:m6": "both fail tests/test_analytics.mojo:77 (left 1, right 0); the base's reason began with a pixi warning",
-    "14-check.py:m2": "both: 'GTK run failed (exit 0)' with the same Start screen dump; the reasons are the dump's tail cut at different points",
-    "14-check.py:m3": "as M2: the same GTK failure and dump, cut at different points",
-    "14-check.py:m4": "as M2: the same GTK failure and dump, cut at different points",
-    "33-check.py:m4": "the same four liquid.mojo lints (sidebar and inspector shaped by hand), listed in another order",
+EXPLAINED = {  # (round 4, each read in full on both sides; round 5: keyed by the failure too, so a new reason isn't excused)
+    ("08-check.py:m1", "http_flare.mojo:126"): "both stop at the same compile error, mojoui/http_flare.mojo:126 (indentation); the stored reasons began at different lines",
+    ("08-check.py:m6", "test_analytics.mojo:77"): "both fail tests/test_analytics.mojo:77 (left 1, right 0); the base's reason began with a pixi warning",
+    ("14-check.py:m2", "GTK run failed (exit 0)"): "both: 'GTK run failed (exit 0)' with the same Start screen dump; the reasons are the dump's tail cut at different points",
+    ("14-check.py:m3", "GTK run failed (exit 0)"): "as M2: the same GTK failure and dump, cut at different points",
+    ("14-check.py:m4", "GTK run failed (exit 0)"): "as M2: the same GTK failure and dump, cut at different points",
+    ("33-check.py:m4", "liquid.mojo still shapes"): "the same four liquid.mojo lints (sidebar and inspector shaped by hand), listed in another order",
 }
 
 
@@ -230,9 +230,9 @@ def run_all(only=None, base_only=False):
         elif NOT_RUN.search(why) or NOT_RUN.search(bwhy):
             say("NOT-RUN", f"{name}: something it reads isn't there (here or on {BASE}), so it proves nothing: here {why[:160]} | base {bwhy[:160]}")
         elif reason_key(why, ROOT) != reason_key(bwhy, base_tree()):
-            key = f"{check.name}:{fn}"
-            if key in EXPLAINED:
-                say("SAME", f"{name}: fails on both sides for a different reason, looked at: {EXPLAINED[key]} | here {why[:160]} | base {bwhy[:160]}")
+            found = [text for (key, part), text in EXPLAINED.items() if key == f"{check.name}:{fn}" and part in why and part in bwhy]
+            if found:
+                say("SAME", f"{name}: fails on both sides for a different reason, looked at: {found[0]} | here {why[:160]} | base {bwhy[:160]}")
             else:
                 say("CHANGED", f"{name}: fails on both sides, differently (look at it): here {why[:300]} | base {bwhy[:300]}")
         else:

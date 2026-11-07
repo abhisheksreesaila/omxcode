@@ -160,7 +160,11 @@ def main():
 
     with sync_playwright() as p:
         exe = os.environ.get("MOJOUI_CHROMIUM") or ("/usr/bin/chromium" if os.path.exists("/usr/bin/chromium") else None)
-        browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+        # (--disable-dev-shm-usage: a container's /dev/shm is 64 MB; Playwright already launches without the sandbox, which a
+        # non-root container can't set up, and says so here)
+        args = ["--disable-dev-shm-usage"]
+        print("PACK: Chromium with --disable-dev-shm-usage" + (" (no sandbox: Playwright's default)" if os.environ.get("MOJOUI_PUBLIC") == "1" else ""), flush=True)
+        browser = p.chromium.launch(executable_path=exe, args=args) if exe else p.chromium.launch(args=args)
         page = browser.new_page()
         page.set_content(doc, wait_until="load")
         page.pdf(path=out, format="A4", print_background=True, prefer_css_page_size=True)

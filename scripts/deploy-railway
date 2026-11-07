@@ -288,6 +288,8 @@ SEEN=$( (cd "$DEPLOY" && timeout 20 railway logs --service "$SERVICE" 2>/dev/nul
 step "The server recorded: ${SEEN:-nothing yet}"
 case "$SEEN" in
   *203.0.113.77*) warn "the made-up address came through: X-Real-IP isn't the proxy's own, so the per-address limits can be dodged (the cap and the server-wide rates still hold). Tell Claude before going live." ;;
+  *"made for 10."*|*"made for 172.1"*|*"made for 172.2"*|*"made for 172.3"*|*"made for 192.168."*|*"made for 100.6"*|*"made for 100.7"*|*"made for 100.8"*|*"made for 100.9"*|*"made for 100.1"*|*"made for 127."*|*"made for unknown"*|*"made for fd"*|*"made for fc"*)
+     warn "it recorded a private or proxy address, not yours: every visitor would share one address's limits. Tell Claude before going live." ;;
   "") warn "no 'SESSION: made for' line yet: run railway logs --service $SERVICE and look for it" ;;
   *) step "It recorded your own address, not the made-up one: the per-address limits see real visitors." ;;
 esac
