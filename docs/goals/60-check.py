@@ -919,7 +919,7 @@ def m9():
     (OUT / "m9-57.txt").write_text(r.stdout + r.stderr)
     for k in ("M6", "M7", "M8"):
         m = re.search(rf"^{k}: (\w+)  (.*)$", r.stdout, re.M)
-        if m and k == "M8" and m.group(1) == "FAIL" and re.fullmatch(r"on the Mac: M2: FAIL the invited viewer: .*", m.group(2)):
+        if m and k == "M8" and m.group(1) == "FAIL" and re.fullmatch(r"on the Mac: M2: FAIL the invited viewer: [^;]*", m.group(2)):
             continue  # (D-6013: only goal 57's silent invite, which M5 replaced on purpose, as M0 allows)
         if not m or m.group(1) != "PASS":
             return False, f"goal 57's {k}: {m.group(0) if m else 'no result'}"
