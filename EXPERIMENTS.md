@@ -4,6 +4,14 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 62, round 3: the round-3 review's findings (2026-11-07)
+
+- **Setup:** same branch and worktree; CPU only; no reviewer or auditor this round (the owner reviews next); not merged, not pushed.
+- **Worked:** uploads are budgeted by what their read takes (the review's 516 KB Parquet, 918 MB once read, refused; the server's memory unchanged); a stopped question counts until the engine ends it (per visitor and server-wide, 2 cores and a 256 MB sort each), proven by the server's CPU and memory coming back; WITH anywhere and set operations refused; the server refuses to start open (non-loopback without public mode, a bad MOJOUI_PUBLIC, no prlimit); session places reserved at creation, per-address soft cap, rate limits, an hour's longest visit; uploads must say their length, 2 in flight, reserved; M6 really runs both sides now (59 PASS, 24 SAME, 3 NOT RUN, 0 FAIL); M5 three runs at 6 visitors, 14.8–15.2 pictures/s, p95 270–398 ms.
+- **Broke and fixed:** my own rate limit failed M7 and M5 (every simulated visitor was 127.0.0.1, then every visitor process started at the same address): each simulated visitor has its own X-Real-IP. The first server-wide question limit refused at once, so six visitors' story questions failed: a full server now waits up to 10 s for a place. The phone notice took three tries: the page lays out 480 wide on a 390 phone, and the menu bar's floating island covers the row below it.
+- **Means:** the engine's missing stop checks (joins, set operations, subqueries, sorts) are the root cause behind the question budget's limits: an omxcore change, not filed.
+- **Next:** the owner's round-4 review, then merge with goal 61.
+
 ## Goal 62, round 2: the speed, a visitor can't stall the server, the reviews (2026-11-07)
 - **Setup:** same worktree and branch; the owner's round-2 brief (speed fix approved, still no deploy); GOAL.md gained M7 (D-6222); D-6222–D-6229.
 - **Worked:** paint, frame events and job wakes run without Python's lock (mojoui.pygil.gil_release/gil_restore per call; Pillow's PNG encode and crc32 measured to let go of it, its JPEG path only 1.4×); /frame stopped re-reading the screen's JSON twice a picture. M4, measured first (172 ms a picture = 33 queued + 120 to first byte + 2; 7 in flight on six connections), fixed by pushing playing canvases' pictures in one stream (GET /push): 15 pictures/s at 100 ms RTT. M5: 8 visitors at once on Hobby's caps pass three of three (13.6–15.1 pictures/s); the cap is 8. M7: question budgets (time, answer rows, join memory) and uploads read in their own process before the app opens them, each refusal in plain words. Round 1's batch removal had cut the page's canvas event queue (flushEvents): restored, and stories now fail on any page script error.
