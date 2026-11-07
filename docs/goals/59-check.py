@@ -108,7 +108,7 @@ def m0():
         cards = json.loads((clone / "build/m0-models/models.json").read_text())["cards"]
     except Exception:
         probs.append("models scenario: " + (sc.stdout + sc.stderr)[-500:])
-    for c in ("table-classified", "table-apply-1", "table-apply-2"):  # (apply-2: scene, through the agent's apply-scene tool)
+    for c in ("table-classified", "table-apply_1", "table-apply_2"):  # (apply-2: scene, through the agent's apply-scene tool)
         rows_ = (cards.get(c) or {}).get("rows", 0)
         if not rows_:
             probs.append(f"models scenario: {c} has {rows_} rows")
@@ -122,19 +122,31 @@ def m0():
     (OUT / "m0-setup-nomodels.txt").write_text(r4.stdout + r4.stderr)
     if r4.returncode or "skipped, --no-models" not in r4.stdout:
         probs.append(f"--no-models: exit {r4.returncode}: " + r4.stdout[-300:])
-    # a broken environment: a package record emptied (what an install stopped midway leaves)
-    recs = sorted((clone / ".pixi/envs/default/conda-meta").glob("*.json"))
-    recs[len(recs) // 2].write_text("")
-    r3, took3 = setup_in(clone, env)
+    # a failed install (the xkb race, a stopped download): a stand-in pixi first on PATH fails the first `pixi install`
+    # with the race's message, then passes everything to the real one; setup must clean and install again on its own
+    shim = FRESH / "shim"
+    shim.mkdir(exist_ok=True)
+    real = shutil.which("pixi")
+    (shim / "pixi").write_text(f"""#!/usr/bin/env bash
+if [ "$1" = install ] && [ ! -e "{shim}/failed-once" ]; then
+  touch "{shim}/failed-once"; echo "  × failed to link 'share/X11/xkb': Is a directory (os error 21)" >&2; exit 1
+fi
+exec "{real}" "$@"
+""")
+    (shim / "pixi").chmod(0o755)
+    (clone / ".pixi/envs/default/conda-meta/history").unlink(missing_ok=True)  # (setup then installs: the path a broken env takes)
+    r3, took3 = setup_in(clone, dict(env, PATH=f"{shim}:{env['PATH']}"))
     (OUT / "m0-setup-3.txt").write_text(r3.stdout + r3.stderr)
-    if r3.returncode or not re.search(r"^env .*done", r3.stdout, re.M) or run(["pixi", "run", "true"], 300, cwd=clone).returncode:
-        probs.append(f"broken env: exit {r3.returncode}: " + r3.stdout[-400:])
+    envlog = (clone / "build/setup/env.log").read_text() if (clone / "build/setup/env.log").exists() else ""
+    if (r3.returncode or not (shim / "failed-once").exists() or "cleaned and installed again" not in envlog
+            or run(["pixi", "run", "true"], 300, cwd=clone).returncode):
+        probs.append(f"a failed install: exit {r3.returncode}, env.log: " + envlog[-300:])
     first = {l.split()[0]: l for l in steps}
     times = ", ".join(f"{k} {re.search(r'\((\d+) s\)', v).group(1)} s" for k, v in first.items() if re.search(r"\((\d+) s\)", v))
     return (not probs), ("; ".join(probs)[:1200] if probs else
                          f"fresh clone, empty caches: setup in {took:.0f} s ({times}); {len(rows)} episodes, {len(clips)} with clips; "
-                         f"models scenario: classified {cards['table-classified']['rows']} rows, detect {cards['table-apply-1']['rows']} boxes, the agent's apply-scene {cards['table-apply-2']['rows']} rows; --no-models ok; "
-                         f"second run {took2:.0f} s, all skipped; an emptied package record repaired in {took3:.0f} s")
+                         f"models scenario: classified {cards['table-classified']['rows']} rows, detect {cards['table-apply_1']['rows']} boxes, the agent's apply-scene {cards['table-apply_2']['rows']} rows; --no-models ok; "
+                         f"second run {took2:.0f} s, all skipped; a failed install cleaned and installed again by setup in {took3:.0f} s")
 
 
 def from_torch(model, out, *extra):
