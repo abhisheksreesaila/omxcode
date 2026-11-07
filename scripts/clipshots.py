@@ -312,7 +312,7 @@ def timing(line):
 def compose_island(t):
     full = [0, 0, WIN[0], WIN[1]]
     fr = []
-    still(fr, card("100 million rows.", sub="Opened on your GPU while the window stays live"), 2.4, check="01-title", fade_in=0.4)
+    still(fr, card("100 million rows.", sub="Opened while the window stays live"), 2.4, check="01-title", fade_in=0.4)
     fs, s = frames_of(t, "opening")
     # (the island lives in the title bar, one place for the whole take: during the opening its bounds can't be asked yet,
     # so the take's first measured one)
@@ -375,7 +375,7 @@ def compose_models(t):
     shot(fr, fs, [0, 0, WIN[0], WIN[1]], grown(panel, 30 * SCALE),
          "The Script window offers every model in the packs folder.", check="03-script")
     fs, s = frames_of(t, "apply")
-    shot(fr, fs, grown(panel, 30 * SCALE), grown(panel, 30 * SCALE), "Apply scene(): ResNet-18, from PyTorch, on the GPU.", lead=0.2, check="04-apply")
+    shot(fr, fs, grown(panel, 30 * SCALE), grown(panel, 30 * SCALE), "Apply scene(): ResNet-18, converted from PyTorch. Agents call it too: apply-scene.", lead=0.2, check="04-apply")
     fs, s = frames_of(t, "labels")
     rows = re.search(r"→ ([\d,]+) rows in ([\d.,]+) ms", t["applied"])
     # (the first call of a session loads the pack onto the GPU: its time includes that, and the caption says so)

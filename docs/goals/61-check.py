@@ -155,9 +155,14 @@ def m4():
         probs.append(f"the applied line isn't the take's: {line!r}")
     if "scene(" not in line:
         probs.append("not a scene() call")
+    labels = next((x for x in t["scenes"] if x["name"] == "labels"), {})
+    if not labels.get("card"):
+        probs.append("the labels card never landed in the take")
+    if "apply-scene" not in (ROOT / "scripts/clipshots.py").read_text().split("def compose_models")[1].split("def contact")[0]:
+        probs.append("no caption names the agent's tool")
     if "clip-models.mp4" not in (ROOT / "docs/models.html").read_text():
         probs.append("docs/models.html doesn't show it")
-    return (not probs), ("; ".join(probs)[:1200] if probs else f"{d:.1f} s; {line.split(': ', 1)[-1][:90]}; on models.html")
+    return (not probs), ("; ".join(probs)[:1200] if probs else f"{d:.1f} s; {line.split(': ', 1)[-1][:90]}; the labels card landed; the agent's tool named (apply-scene); on models.html")
 
 
 def m5():
