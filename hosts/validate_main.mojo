@@ -12,7 +12,7 @@ def main():
         print("usage: validate <file.csv|file.parquet>")
         exit_with(2)
     try:
-        var imp = read_table(args[1])
+        var imp = read_table(args[1], whole=True)  # (every row group decoded here, not only a big file's first: goal 62's audit)
         print(String(imp.rows) + " rows, " + String(len(imp.columns)) + " columns")
     except e:
         print("not a table: " + String(e))

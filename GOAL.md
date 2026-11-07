@@ -28,7 +28,7 @@ Base: origin/main 882155b (goal 59).
 | M7 | A visitor can't stall or crash the server for the others (added in round 2, from the security audit: D-6222) | while another visitor plays the story and every beat passes: a question past the time budget (shortened for the check), an answer past the row cap and a join past the memory budget each stop with a plain message; malformed CSV, Parquet and MP4 uploads (random bytes, a truncated file, wrong bytes behind the right name) are refused in plain words with the server up; D-6218's suspected sequences (a pivot or a far column, then another table) replayed with real clicks, the server up |
 
 ## Done means
-62-check PASS for M0–M4 and M6; M5 PASS, or only its image half BLOCKED on Docker access; the reviewer and the security auditor pass the diff; the screenshots were looked at.
+62-check PASS for M0–M4, M6 and M7; M5 PASS, or only its image half BLOCKED on Docker access; the reviewer and the security auditor pass the diff; the screenshots were looked at.
 
 ## Out of bounds
 Deploying, pushing images, uploading data anywhere, Railway commands that create, link or deploy, sign-ups and paid services (the owner runs scripts/deploy-railway); sudo; secrets (none are needed); the frozen ../mojo-ui-apple-test; other sessions' worktrees (read-only use of the check's results and the robot data is fine); pip; deleting anything outside this goal's scratch folders; lowering a proof; WebAssembly (parked by the owner); app-only fixes for what belongs in the web host or the framework.

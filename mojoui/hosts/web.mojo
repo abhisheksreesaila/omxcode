@@ -302,6 +302,7 @@ def web_jobs[A: App](handle: Int) -> String:
 def web_hosted[A: App](handle: Int, documents: String, public: Bool):
     """App.hosted: this tab's own documents folder, and whether the app runs on the public internet (goal 62)."""
     session_at[A](handle)[].app.hosted(documents, public)
+    _ = session_at[A](handle)[].refresh()  # (the screen shown is the public one from the first page, goal 62's review)
 
 
 def web_take_download[A: App](handle: Int) -> String:

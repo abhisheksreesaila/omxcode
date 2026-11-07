@@ -115,8 +115,8 @@ def python_guard(what: String) raises:
     """Raises when this thread doesn't hold the Python lock, so a bare Python call can't hang (the UI thread while a job
     holds the lock lent) or crash (a job's thread outside python_enter()). Call it first in code that calls Python bare.
     Nothing to check before CPython runs (the first bare call starts it, holding the lock) or when Python hosts the app."""
-    if _sym("Py_IsInitialized") == 0 or _call0(_sym("Py_IsInitialized")) == 0 or get_shared(SLOT_HOSTED) == 2:
-        return
+    if _sym("Py_IsInitialized") == 0 or _call0(_sym("Py_IsInitialized")) == 0:
+        return  # (hosted by Python too it checks: the web host's paint runs without the lock, goal 62's audit)
     var check = _sym("PyGILState_Check")
     if check != 0 and _call0(check) & 0xFFFFFFFF == 0:
         raise Error(what + ": Python called without its lock on this thread ("

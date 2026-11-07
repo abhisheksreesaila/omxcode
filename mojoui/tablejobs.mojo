@@ -25,6 +25,7 @@ from mojoui.charts import fixed, grouped
 from mojoui.csvio import read_table
 from mojoui.files import file_name, file_stem
 from mojoui.sheet import Sheet
+from mojoui.sheetjobs import stopped
 from mojoui.tablecard import TableCard, TableCards, query_table, sql_name
 from mojoui.text import Font
 from mojoui.theme import Palette
@@ -231,6 +232,7 @@ struct TableWork(Movable):
     var file_path: String
     var query: Optional[Job[Answer]]
     var query_t0: Int  # when the running question started (the public copy's time budget)
+    var stopped_queries: List[Job[Answer]]  # questions stopped by the budget, kept until their threads end (never joined: D-284)
     var budget_hit: Bool  # the running question was stopped by its time budget
     var export_: Optional[Job[Exported]]
     var export_path: String
@@ -244,6 +246,7 @@ struct TableWork(Movable):
         self.query = None
         self.query_t0 = 0
         self.budget_hit = False
+        self.stopped_queries = List[Job[Answer]]()
         self.export_ = None
         self.export_path = ""
         self.problem = ""
@@ -269,6 +272,10 @@ struct TableWork(Movable):
         answer's card is named `called` (False: a query runs already)."""
         if self.query:
             self.problem = "A query is running already"
+            return False
+        var refused = public_refusal(text)
+        if refused != "":
+            self.problem = refused
             return False
         var names = List[String]()
         var sheets = List[Sheet]()
@@ -379,7 +386,17 @@ struct TableWork(Movable):
             return None
 
     def take_answer(mut self) -> Optional[Answer]:
+        var kept = List[Job[Answer]]()  # (stopped questions whose threads still run: let go of only once they've ended)
+        while len(self.stopped_queries) > 0:
+            var old = self.stopped_queries.pop()
+            if not stopped(old):
+                kept.append(old^)
+        self.stopped_queries = kept^
         if not self.query or self.query.value().poll() == JOB_RUNNING:
+            return None
+        if self.budget_hit:  # (stopped by the time budget: its result would wait for the engine's next check, so park it)
+            self.stopped_queries.append(self.query.take())
+            self.budget_hit = False
             return None
         var job = self.query.take()
         try:
@@ -442,8 +459,34 @@ def public_query_s() -> Float64:
 def capped_sql(text: String, cap: Int) -> String:
     """A SELECT with an outer LIMIT of cap + 1, so an answer past the cap stops being built there (no cap: as it was)."""
     var t = String(text.strip())
+    while t.startswith("--") or t.startswith("/*"):  # (a comment in front must not hide the SELECT from the cap)
+        var end = t.find("\n") if t.startswith("--") else t.find("*/")
+        if end < 0:
+            return text
+        t = String(String(t[byte = end + (1 if t.startswith("--") else 2) :]).strip())
     while t.endswith(";"):
         t = String(String(t[byte = 0 : t.byte_length() - 1]).strip())
-    if cap <= 0 or not t.upper().startswith("SELECT"):
+    var up = t.upper()
+    if cap <= 0 or not (up.startswith("SELECT") or up.startswith("(")):
         return text
-    return "SELECT * FROM (" + t + ") AS answer LIMIT " + String(cap + 1)
+    # (the parentheses on lines of their own: a trailing `-- comment` ends at its line, not over the wrapper)
+    return "SELECT * FROM (\n" + t + "\n) AS answer LIMIT " + String(cap + 1)
+
+
+def public_refusal(text: String) -> String:
+    """Why the public copy won't run this question ("" when it will): one SELECT at a time, so every answer is capped
+    while it's built (a WITH builds its whole answer first; a script's statements run outside the question's budgets)."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return ""
+    var t = String(text.strip())
+    while t.startswith("--") or t.startswith("/*"):
+        var end = t.find("\n") if t.startswith("--") else t.find("*/")
+        if end < 0:
+            return ""
+        t = String(String(t[byte = end + (1 if t.startswith("--") else 2) :]).strip())
+    var up = t.upper()
+    if up.startswith("WITH"):
+        return "The web copy asks one SELECT at a time: write the WITH part as a subquery"
+    if not (up.startswith("SELECT") or up.startswith("(")):
+        return "The web copy asks one SELECT at a time"
+    return ""

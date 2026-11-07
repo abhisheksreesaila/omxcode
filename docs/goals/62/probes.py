@@ -56,8 +56,10 @@ class Probe:
     def __init__(self, out):
         self.out = Path(out)
         self.lines = []
-        self.dir = self.out.parent / "m2-probe"  # (outside the server's scratch folder: nothing there is the server's)
-        self.dir.mkdir(parents=True, exist_ok=True)
+        # (outside every folder the server uses, and outside the worktree: inotify sees any process's opens, and a reviewer's
+        # grep over the worktree listed the old build/g62/m2-probe in round 2: a fresh random folder nothing else reads)
+        import tempfile
+        self.dir = Path(tempfile.mkdtemp(prefix="g62-probe-"))
         (self.dir / "secret.csv").write_text(f"who,what\n{MARK},never uploaded\n")
         (self.dir / "secret.omx").write_text(MARK)
         (self.dir / "secret.sql").write_text(f"SELECT '{MARK}'")  # (a recipe: Open recipe reads *.sql, goal 62's review)
@@ -184,7 +186,8 @@ def run_all(out):
     P = Probe(out)
     srv = Server(out, public=True, env={"OMXCODE_UPLOAD_MAX": str(1 << 20), "OMXCODE_VISITOR_MAX": str(3 << 20), "MOJOUI_MAX_SESSIONS": "50",
                                         "MOJOUI_AGENT_SOCKET": str(out.parent / "m2-agent.sock"), "MOJOUI_DEV": "1", "MOJOUI_DEV_TOKEN": "probe"})
-    roots = [str(ROOT), str(G47), str(srv.out), str(srv.uploads), str(srv.home), str(Path.home()), str(P.dir), "/home/"]
+    # (the server's own folders: the probe folder is a path the attacker types, and the app may echo a visitor's own text)
+    roots = [str(ROOT), str(G47), str(srv.out), str(srv.uploads), str(srv.home), str(Path.home()), "/home/"]
     from harness import STARTER
     roots += [str(STARTER), str(STARTER.resolve())]
     paths = [str(P.dir / "secret.csv"), str(P.dir), str(P.dir / "secret.omx"), str(P.dir / "secret.sql"), "/etc/passwd", "../../../../etc/passwd", "file://" + str(P.dir / "secret.csv")]
@@ -247,9 +250,11 @@ def run_all(out):
             page.locator("input[type=file]").first.set_input_files(str(secret))
             try_settle(page)
             # ---- the story: crafted requests on its screen, the Script window, SQL, and every response scanned
-            leaks = []
+            leaks, scanning = [], [True]
 
-            def scan(resp):
+            def scan(resp):  # (during the story; the crafted requests after it echo the attacker's own text)
+                if not scanning[0]:
+                    return
                 try:
                     ct = resp.headers.get("content-type", "")
                     text = json.dumps(dict(resp.headers))
@@ -273,6 +278,7 @@ def run_all(out):
             import story as S
             m_story = srv.mark()
             R = S.play(page2, out / "visitor-2", Net(page2), pack=True)
+            scanning[0] = False
             cut = [l for l in srv.log[m_story:] if l.startswith("SCRUB")]  # (the server's own record: what the scrubber had to cut)
             P.say(not cut, "the app put no server path in any answer during the story (the scrubber cut nothing): " + (cut[0][:200] if cut else "none"))
             bad = [f"{k}: {v['note'][:120]}" for k, v in R["beats"].items() if not v["ok"]]
@@ -320,9 +326,9 @@ def run_all(out):
             asked = [l for l in srv.log if l.startswith("ASK:") and ("read_csv" in l or "read_parquet" in l or "ATTACH" in l or "COPY" in l)]
             P.say(bool(asked) or "not supported" in page2.inner_text("body") or "SQL error" in page2.inner_text("body"),
                   f"the SQL probes reached the engine ({len(asked)} asked) and were refused there")
-            page2.locator("button[data-kind=button]", has_text=re.compile(r"^\s*Script\s*$")).first.click()
-            try_settle(page2)
-            area = page2.locator("textarea").last
+            scripts = page2.locator("button[data-kind=button]", has_text=re.compile(r"^\s*Script\s*$"))
+            P.say(scripts.count() == 0, "the Script window isn't offered on the public copy (its statements would run outside a question's budgets)")
+            area = page2.locator("[data-tag=script] textarea, [data-tag=script-text]")  # (none: nothing to type into)
             for p_ in paths[:2] + ["/etc/passwd"]:
                 script = (f"a = SELECT * FROM read_csv('{p_}');\nb = SELECT * FROM '{p_}';\nc = regions('{p_}', 0, 1);\n"
                           f"d = scene('{p_}', 0, 1);\ne = SELECT * FROM read_text('{p_}')")

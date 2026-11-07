@@ -90,7 +90,11 @@ def run_all(out, only=None):
         full.parent.mkdir(parents=True, exist_ok=True)
         os.symlink(G47, full)
     todo = [(ROOT / "docs/goals/47-check.py", m) for m in ("m0", "m1", "m2", "m3")] + web_milestones()
-    tests = sorted((ROOT / "tests").glob("test_web_*.py"))
+    # (test_web_dev.py takes a debug and a release build as arguments: goal 34b's own milestones run it, among the web ones)
+    tests = sorted(t for t in (ROOT / "tests").glob("test_web_*.py") if t.name != "test_web_dev.py")
+    for ex in ("console", "jot"):  # (the web tests read these builds: made here when missing, as a check makes what it reads)
+        if not (ROOT / f"build/{ex}/web").exists():
+            subprocess.run(["scripts/build.sh", ex, "web"], cwd=ROOT, capture_output=True, text=True, timeout=1800)
     if only:
         todo = [t for t in todo if any(o in f"{t[0].name}:{t[1]}" for o in only)]
         tests = [t for t in tests if any(o in t.name for o in only)]

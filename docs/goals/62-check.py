@@ -36,7 +36,7 @@ def build_web():
     if r.returncode:
         raise RuntimeError("build: " + (r.stdout + r.stderr)[-800:])
     v = MODULE / "validate"
-    if not v.exists() or v.stat().st_mtime < (ROOT / "mojoui/csvio.mojo").stat().st_mtime:
+    if not v.exists() or v.stat().st_mtime < max((ROOT / f).stat().st_mtime for f in ("mojoui/csvio.mojo", "hosts/validate_main.mojo")):
         r = run(["scripts/mxbuild.sh", "hosts/validate_main.mojo", "-o", str(v)], 1800)
         if r.returncode:
             raise RuntimeError("validator build: " + (r.stdout + r.stderr)[-800:])
@@ -150,6 +150,10 @@ def m1():
     srv = Server(OUT / "m1", public=True)
     mems, results = [], []
     try:
+        first = get(srv.url, headers={"Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate"})[2].decode(errors="replace")
+        for gone in ("Taxi trips", "Connect a database"):  # (the first HTML itself, not only the page once it settled)
+            if gone in first:
+                probs.append(f"the first public page holds “{gone}”")
         if any("agent link at" in l for l in srv.log):
             probs.append("the agent link is on")
         mems.append(("server up", srv.memory()))

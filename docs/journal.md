@@ -1251,3 +1251,11 @@ was the map.
 - Video rate: measured with 7 tabs (6 idle on the story): wake rounds 31/s, 0.3 ms a session-call; draws 0.9 ms each; ~22% of one core in Mojo. Not the server: the sampler (see D-6217).
 - Final runs: M1, M2 (38 probes), M3 PASS; M4 FAIL (video 8.2 pictures/s through the proxy; the rest passes); M5 FAIL at 10 and at 5 visitors (video only); image BLOCKED on Docker. Measured through the proxy: a picture's median latency 238 ms on a 100 ms round trip, and 114 other requests in 6 s before the shared /pending (fixed); after it, the GIL is what's left (single visitor 15 pictures/s, five at once ~7).
 - M6 subset: goal 47 M0–M3 PASS on GTK; web tests pass once their example builds exist (jot, console); test_web_dev takes two build folders as arguments (goal 34b runs it): regress.py's bare call was wrong for it. The 75 archived web milestones were not run in this session.
+
+## Goal 62 round 2 (2026-11-07)
+- Docker: `sg` isn't installed and the socket still refuses this user: the image half stays BLOCKED.
+- M5 step by step: GIL released around the paint → 10 visitors 5.5–7 pictures/s; per-thread CPU showed the server at ~150% of its 800% quota with no thread pinned, and the machine at load 28 from other projects; after push and the GIL released in frame/jobs and wakes coalesced: 12.6–14 (one run), 9.8–11 in a run beside both reviews (machine load).
+- M4 measured first: a picture's 172 ms = 33 queued + 120 to first byte (server 4) + 2; 7 in flight on six connections; then push: 15 pictures/s at 100 ms RTT.
+- Found: `flushEvents is not defined` in the page (round 1's batch removal took it): restored; every story now has a "no script errors" beat.
+- D-6218: three real-click hypotheses (a far column then a blank sheet; the last column then the sample; a pivot then the sample), none crashed; plus M7's replay. Not reproduced.
+- M2's "probe folder touched" in the round-2 full run was the reviewers' own grep over the worktree (the probe folder now lives in a fresh /tmp folder); the leak scan counted the attacker's echoed text after the story (scoped to the story).

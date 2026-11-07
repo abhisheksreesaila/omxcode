@@ -854,6 +854,10 @@ struct Main(App):
             out.append(Every(500, BUDGET_TICK))
         return out^
 
+    def open_types(self) -> String:
+        """What the pickers offer: the public copy opens only what its host checks (CSV, Parquet, video)."""
+        return ".csv,.tsv,.txt,.parquet,.mp4,.mov,.m4v,.webm" if self.public else OPEN_TYPES
+
     def hosted(mut self, documents: String, public: Bool):
         """The web host's word (App.hosted): this visitor's own documents folder, and whether it's the public copy."""
         self.docs_dir = documents
@@ -2186,6 +2190,11 @@ struct Main(App):
         if called == "":
             called = "Query 1"
         var text = self.query_text
+        if is_script(text) and self.public:  # (the public copy: one SELECT at a time, inside the question's budgets)
+            self.query_said = "The web copy asks one SELECT at a time"
+            self.message = self.query_said
+            self.version += 1
+            return
         if is_script(text):  # (`name = …;` statements or a call: the Script window runs them, shown there, D-4925)
             self.query_open = False
             self.script.open = True
@@ -3804,7 +3813,7 @@ struct Main(App):
         elif m == QUERY_CLOSE:
             self.query_open = False
             self.version += 1
-        elif m == SCRIPT_OPEN:
+        elif m == SCRIPT_OPEN and not self.public:
             self.script.open = not self.script.open
             if self.script.open:
                 if self.script.text == "":  # (a start: a statement over the sheet's own table)
@@ -4263,7 +4272,7 @@ struct Main(App):
         var side = List[View]()
         side.append(Button("Start", NO_MSG, SUBTLE, icon="file").fill().align(START))  # (rows read from their leading edge, one icon set)
         side.append(Button("New blank sheet", BLANK, SUBTLE, icon="grid").fill().align(START))
-        side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=OPEN_TYPES).fill().align(START))
+        side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=self.open_types()).fill().align(START))
         side.append(FilePicker("Table", PICK_TABLE, style=SUBTLE, icon="table", accept=".csv,.tsv,.txt,.parquet").fill().align(START).tooltip("A CSV or Parquet file as a table card on a new sheet (read in the background)").tag("insert-table"))
         if not self.public:  # (the public copy shows only what a visitor can use there, goal 62)
             side.append(HStack(Icon("database", 16), Text("Connect a database", CAPTION), Spacer(), Text("soon", CAPTION).tone(TONE_ACCENT), spacing=10).fill().align(CENTER).padding(6, 12).tag("soon").tooltip("With MX frame, next"))
@@ -4276,7 +4285,7 @@ struct Main(App):
             HStack(Icon("upload", 28),
                    VStack(Text("Drop a CSV, Parquet or .omx file here", HEADLINE),
                           Text("or choose a file. A million rows is fine: you see a preview first, and the rest loads while you work.", CAPTION), spacing=4).align(START),
-                   Spacer(), FilePicker("Choose a file", PICK, style=PROMINENT, icon="import", accept=OPEN_TYPES), spacing=16).fill().align(CENTER),
+                   Spacer(), FilePicker("Choose a file", PICK, style=PROMINENT, icon="import", accept=self.open_types()), spacing=16).fill().align(CENTER),
             spacing=0,
         ).fill()
         var recent = List[View]()
@@ -4623,9 +4632,10 @@ struct Main(App):
         var extra = List[View]()
         if streamed:
             extra.append(Text("Streamed from disk", CAPTION).tone(TONE_ACCENT).tooltip("This file is bigger than memory: its rows are read from disk as they're shown, and your edits are kept beside it until you save").tag("streamed"))
-        extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=OPEN_TYPES).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
+        extra.append(FilePicker("Open", PICK, style=ICON_ONLY if self.win_w < COMPACT_W else TOOL_INLINE, icon="import", accept=self.open_types()).tooltip("Open a CSV, Parquet or .omx file, or a video or picture"))
         extra.append(FilePicker("Table", PICK_TABLE, style=TOOL_INLINE, icon="table", accept=".csv,.tsv,.txt,.parquet").tooltip("Insert a table: a CSV or Parquet file as a card beside the sheet's own (read in the background)").tag("insert-table"))
-        extra.append(FilePicker("Documents", PICK_DOCS, style=TOOL_INLINE, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)").tag("insert-documents"))
+        if not self.public:  # (the public copy's host opens CSV, Parquet and video only)
+            extra.append(FilePicker("Documents", PICK_DOCS, style=TOOL_INLINE, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs (or one) as a card; say which fields to read and Read finds them (OCR)").tag("insert-documents"))
         if self.sheet_tab == 1:
             return Toolbar(left, self.report_tools(), right, extra, before=self.report_controls(), after=self.filter_controls(), inline=True)  # (its tile tools share one icon: their titles stay)
         var middle = List[Tool]()
@@ -4635,7 +4645,8 @@ struct Main(App):
         middle.append(Tool("Pivot", "pivot", INSERT_PIVOT, False, "A pivot table of the selected column (Ctrl+Shift+P)"))
         middle.append(Tool("Chart", "chart-bar", INSERT_CHART, False, "A chart of the selected column (Ctrl+Shift+C)"))
         middle.append(Tool("Query", "database", QUERY_OPEN, self.query_open, "Ask the sheet's tables in SQL: joins, IN, subqueries; the answer is a table"))
-        middle.append(Tool("Script", "terminal", SCRIPT_OPEN, self.script.open, "A script over every table and video here: statements in order, each result a card"))
+        if not self.public:  # (the public copy asks one SELECT at a time, inside its budgets: no Script window, goal 62's review)
+            middle.append(Tool("Script", "terminal", SCRIPT_OPEN, self.script.open, "A script over every table and video here: statements in order, each result a card"))
         return Toolbar(left, middle, right, extra, toggles=self.format_tools(), inline=False, compact=self.win_w < COMPACT_W)  # (shell A: a ribbon, each icon over its title, goal 54)
 
     def format_tools(self) -> List[List[Tool]]:
