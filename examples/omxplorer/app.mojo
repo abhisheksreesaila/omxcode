@@ -3417,7 +3417,7 @@ struct Main(App):
             self.version += 1
         if m == PICK_DOCS:
             self.inserting = 0
-            if event.text != "":
+            if event.text != "" and not self.public:  # (no documents on the public copy: a crafted pick opens nothing, round 3)
                 self.open_documents(event.text)
             return
         if m == PICK or (m >= RECENT and m < RECENT + 10):
@@ -4303,8 +4303,6 @@ struct Main(App):
             cards.append(Card(Text("Taxi trips", HEADLINE), Text("100M rows · a GPU workout (docs/scale.md)", CAPTION), Spacer(), Text("Coming with MX frame", CAPTION), spacing=8).width(330).height(150))
         var samples = HStack(cards^, spacing=16)
         var top = List[View]()
-        if self.win_w < 700:  # (a phone gets a look, not a layout of its own yet: goal 62's assumption)
-            top.append(Card(Text("omxplorer is best on a laptop or a desktop: the story's cards need the room.", CAPTION).tone(TONE_ACCENT), spacing=0).fill().tag("best-on-laptop"))
         if self.starter.has():  # (a starter: its story first, one click, goal 62)
             top.append(Text("Try the story", HEADLINE))
             top.append(Card(HStack(Icon("bot", 28),
@@ -4323,6 +4321,10 @@ struct Main(App):
         var body = HStack(sidebar, main, spacing=24).padding(24, 32).fill().grow().align(STRETCH)
         var parts = List[View]()
         parts.append(self.menu_bar())
+        if self.win_w < 700:  # (a phone gets a look, not a layout of its own yet: goal 62's assumption; the window's whole width,
+            # above the columns: in the main column a phone's ~90 points wrapped it a letter a line, round 3)
+            parts.append(HStack(Card(Text("omxplorer is best on a laptop or a desktop: the story's cards need the room.", CAPTION).tone(TONE_ACCENT),
+                                     spacing=0).fill().tag("best-on-laptop"), spacing=0).padding(12, 16).fill())
         parts.append(body^)
         parts.append(StatusBar(["Ready"], "omxplorer · omxcode"))
         for o in self.overlays():
@@ -4904,7 +4906,8 @@ struct Main(App):
         """The sheet's side rail (mojoui.sheetchrome.Rail): what goes on the page from a file (a table, a video, a picture)."""
         var items = List[View]()
         items.append(FilePicker("Table", PICK_TABLE, style=ICON_ONLY, icon="table", accept=TABLE_TYPES).tooltip("Insert a table from a CSV or Parquet file"))
-        items.append(FilePicker("Documents", PICK_DOCS, style=ICON_ONLY, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs, read into a table of their fields"))
+        if not self.public:  # (the public copy opens the tables and clips a visitor uploads: no folder of documents)
+            items.append(FilePicker("Documents", PICK_DOCS, style=ICON_ONLY, icon="file", accept="folder,.pdf").tooltip("Insert documents: a folder of PDFs, read into a table of their fields"))
         items.append(Button("Video", INSERT_VIDEO, ICON_ONLY, icon="video").tooltip("Insert a video"))
         items.append(Button("Picture", INSERT_IMAGE, ICON_ONLY, icon="image").tooltip("Insert a picture"))
         return Rail(items^, RAIL_W)

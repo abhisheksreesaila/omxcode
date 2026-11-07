@@ -6,6 +6,7 @@ don't start it): prints RESULT<TAB>[ok, why].
 import importlib.util
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -16,7 +17,13 @@ sys.path.insert(0, str(root / "scripts"))
 import headless  # noqa: E402
 
 headless.ensure()
-spec = importlib.util.spec_from_file_location("archived_check", check)
+# Goals 03–05's checkers were written one folder below the repo (ROOT = parent.parent): archived in docs/goals/ they
+# looked for docs/build/… and built nothing (round 3's review). They're loaded as if they still lived in scripts/.
+from importlib.machinery import SourceFileLoader  # noqa: E402
+
+below = re.search(r"^ROOT = Path\(__file__\)\.resolve\(\)\.parent\.parent\s*$", check.read_text(), re.M)
+where = root / "scripts" / check.name if below else check
+spec = importlib.util.spec_from_file_location("archived_check", where, loader=SourceFileLoader("archived_check", str(check)))
 mod = importlib.util.module_from_spec(spec)
 sys.argv = [str(check)]
 try:

@@ -19,7 +19,7 @@
 
 from omxcore import Job, JobBody, JobCtl, Catalog, Table, JOB_RUNNING
 from mojoui.jobs import start_ui_job
-from mojoui.shared import environment
+from mojoui.shared import environment, count_add, count_of
 from mojoui.clock import now_ns, trace_on
 from mojoui.charts import fixed, grouped
 from mojoui.csvio import read_table
@@ -151,13 +151,16 @@ struct QueryJob(JobBody):
         for i in range(len(self.sheets)):
             catalog.add_frame(self.names[i], self.sheets[i].frame)
         var cap = public_rows()
+        var held = take_question()  # (public: one of the server's places for questions, held until the engine ends, even past a stop)
         var table: Table
         try:
-            table = query_table(catalog, capped_sql(self.text, cap), ctl, public_join_bytes())
+            table = query_table(catalog, capped_sql(self.text, cap), ctl, public_join_bytes(), public_threads(), public_sort_bytes())
         except e:  # (the engine's words for a join past its budget name its options: the visitor gets plain ones)
+            give_back_question(held)
             if cap > 0 and String(e).find("join_budget") >= 0:
                 raise Error("this question's join would take more memory than the web copy gives one question: join on a key with fewer matches, or filter first")
             raise e^
+        give_back_question(held)
         if cap > 0 and table.rows() > cap:  # (the public copy keeps no answer over its cap: memory a visitor can't take from others)
             raise Error("the answer has more than " + grouped(cap) + " rows, more than the web copy keeps: ask for fewer (a filter, a GROUP BY or a LIMIT)")
         var answer = Sheet(table^.share(), False)
@@ -273,6 +276,14 @@ struct TableWork(Movable):
         if self.query:
             self.problem = "A query is running already"
             return False
+        self.reap_stopped()
+        if len(self.stopped_queries) > 0:  # (a question stopped at the time budget runs on in the engine until its next check)
+            self.problem = PARKED_WORDS
+            return False
+        var most = public_questions()
+        if most > 0 and questions_running() >= most:  # (QueryJob takes its place for sure: this says so before it starts)
+            self.problem = BUSY_WORDS
+            return False
         var refused = public_refusal(text)
         if refused != "":
             self.problem = refused
@@ -385,13 +396,17 @@ struct TableWork(Movable):
                 print("JOB: table failed " + file_name(self.file_path) + ": " + String(e), flush=True)
             return None
 
-    def take_answer(mut self) -> Optional[Answer]:
-        var kept = List[Job[Answer]]()  # (stopped questions whose threads still run: let go of only once they've ended)
+    def reap_stopped(mut self):
+        """Lets go of the stopped questions whose threads have ended (the others stay: they still count as running)."""
+        var kept = List[Job[Answer]]()
         while len(self.stopped_queries) > 0:
             var old = self.stopped_queries.pop()
             if not stopped(old):
                 kept.append(old^)
         self.stopped_queries = kept^
+
+    def take_answer(mut self) -> Optional[Answer]:
+        self.reap_stopped()
         if not self.query or self.query.value().poll() == JOB_RUNNING:
             return None
         if self.budget_hit:  # (stopped by the time budget: its result would wait for the engine's next check, so park it)
@@ -475,18 +490,123 @@ def capped_sql(text: String, cap: Int) -> String:
 
 def public_refusal(text: String) -> String:
     """Why the public copy won't run this question ("" when it will): one SELECT at a time, so every answer is capped
-    while it's built (a WITH builds its whole answer first; a script's statements run outside the question's budgets)."""
+    while it's built and every part of it is held to the engine's budgets. No WITH, anywhere (it builds its whole answer
+    first); no UNION, INTERSECT or EXCEPT (the engine builds each side whole, with no stop between: goal 62's round-3
+    review); no script statements (they run outside the question's budgets). Words in quotes or comments don't count,
+    and parentheses in front don't hide what follows ("(WITH …)" is a WITH)."""
     if environment("MOJOUI_PUBLIC") != "1":
         return ""
-    var t = String(text.strip())
-    while t.startswith("--") or t.startswith("/*"):
-        var end = t.find("\n") if t.startswith("--") else t.find("*/")
-        if end < 0:
-            return ""
-        t = String(String(t[byte = end + (1 if t.startswith("--") else 2) :]).strip())
-    var up = t.upper()
-    if up.startswith("WITH"):
-        return "The web copy asks one SELECT at a time: write the WITH part as a subquery"
-    if not (up.startswith("SELECT") or up.startswith("(")):
+    var words = sql_words(text)
+    for w in words:
+        if w == "WITH":
+            return "The web copy asks one SELECT at a time: WITH isn't offered here (write its part as a subquery in FROM)"
+    for w in words:
+        if w == "UNION" or w == "INTERSECT" or w == "EXCEPT":
+            return "The web copy asks one SELECT at a time: UNION, INTERSECT and EXCEPT aren't offered here"
+    var first = 0
+    while first < len(words) and words[first] == "(":
+        first += 1
+    if first >= len(words) or words[first] != "SELECT":
         return "The web copy asks one SELECT at a time"
     return ""
+
+
+def is_word_byte(c: Int) -> Bool:
+    return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95 or c >= 128
+
+
+def sql_words(text: String) -> List[String]:
+    """A SQL text's words in capitals, and "(" for each opening parenthesis, outside quotes ('…', "…", `…`) and comments
+    (-- … and /* … */): what the public copy's one-SELECT rule reads."""
+    var out = List[String]()
+    var b = text.as_bytes()
+    var n = len(b)
+    var i = 0
+    while i < n:
+        var c = Int(b[i])
+        if c == 45 and i + 1 < n and Int(b[i + 1]) == 45:  # -- to the line's end
+            while i < n and Int(b[i]) != 10:
+                i += 1
+        elif c == 47 and i + 1 < n and Int(b[i + 1]) == 42:  # /* … */
+            i += 2
+            while i + 1 < n and not (Int(b[i]) == 42 and Int(b[i + 1]) == 47):
+                i += 1
+            i += 2
+        elif c == 39 or c == 34 or c == 96:  # a quoted string or name ('' inside: two back to back, the same words)
+            i += 1
+            while i < n and Int(b[i]) != c:
+                i += 1
+            i += 1
+        elif c == 40:
+            out.append("(")
+            i += 1
+        elif is_word_byte(c):
+            var j = i
+            while j < n and is_word_byte(Int(b[j])):
+                j += 1
+            out.append(String(text[byte = i : j]).upper())
+            i = j
+        else:
+            i += 1
+    return out^
+
+
+comptime SLOT_QUESTIONS = 88  # mojoui.shared slot: the questions the engine runs in this process now (the public copy counts)
+comptime BUSY_WORDS = "The server is answering other visitors' questions: ask again in a moment"
+comptime PARKED_WORDS = "Your last question is still finishing on the server (it was stopped at the time budget): ask again in a moment"
+
+
+def public_questions() -> Int:
+    """The public copy's questions at once on the whole server (MOJOUI_QUESTIONS, 2), each counted until the engine ends
+    it, even past a stop (the engine's joins, set operations, subqueries and sorts have no stop checks yet); 0 on a
+    desktop: no limit."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return 0
+    try:
+        return max(1, Int(environment("MOJOUI_QUESTIONS", "2")))
+    except:
+        return 2
+
+
+def public_threads() -> Int:
+    """The cores one public question may use (MOJOUI_QUERY_THREADS, 2: a shared server's other visitors keep the rest);
+    0 on a desktop: every core."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return 0
+    try:
+        return max(1, Int(environment("MOJOUI_QUERY_THREADS", "2")))
+    except:
+        return 2
+
+
+def public_sort_bytes() -> Int:
+    """The bytes a public question's sort holds before it spills to disk (MOJOUI_SORT_BYTES, 256 MB); 0 on a desktop:
+    the engine's own (2 GB)."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return 0
+    try:
+        return max(1 << 20, Int(environment("MOJOUI_SORT_BYTES", String(256 << 20))))
+    except:
+        return 256 << 20
+
+
+def questions_running() -> Int:
+    """The questions the engine is running in this process now (counted on the public copy only)."""
+    return count_of(SLOT_QUESTIONS)
+
+
+def take_question() raises -> Bool:
+    """A place among the server's questions (public copy): True when one was taken (give_back_question once the engine
+    has ended); raises in plain words when the server is answering its most; False on a desktop (nothing counted)."""
+    var most = public_questions()
+    if most <= 0:
+        return False
+    if count_add(SLOT_QUESTIONS, 1) >= most:
+        _ = count_add(SLOT_QUESTIONS, -1)
+        raise Error(BUSY_WORDS)
+    return True
+
+
+def give_back_question(held: Bool):
+    if held:
+        _ = count_add(SLOT_QUESTIONS, -1)

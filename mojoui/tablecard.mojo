@@ -43,14 +43,20 @@ comptime GRID_LEFT = 16  # where a card's grid starts inside it (the card's padd
 comptime GRID_TOP = 16 + TABLE_HEAD_H + 4
 
 
-def query_table(mut catalog: Catalog, text: String, ctl: JobCtl = JobCtl(), join_budget: Int = 0) raises -> Table:
+def query_table(mut catalog: Catalog, text: String, ctl: JobCtl = JobCtl(), join_budget: Int = 0, threads: Int = 0,
+                sort_budget: Int = 0) raises -> Table:
     """The answer of a SQL query over the catalog's tables, as a table (raises with the engine's message, which names the
     place in the text: "SQL error at line 1, column 21: …"). `ctl`: the job it runs for (the engine stops when it's
-    cancelled); `join_budget`: the bytes a materialized join may take (0: the engine's default; goal 62 M7)."""
+    cancelled); `join_budget`: the bytes a materialized join may take; `threads`: the cores it may use; `sort_budget`:
+    the bytes a sort holds before it spills to disk (each 0: the engine's default; goal 62 M7)."""
     var o = PlannerOptions()
     o.job = ctl
     if join_budget > 0:
         o.join_budget = join_budget
+    if threads > 0:
+        o.threads = threads
+    if sort_budget > 0:
+        o.sort_budget = sort_budget
     var r = sql(catalog, text, o)
     return r.take_table()
 

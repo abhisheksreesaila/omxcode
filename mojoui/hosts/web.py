@@ -52,7 +52,8 @@ CHECKED, DISABLED, DANGER = 1, 2, 4  # menu item flags (mojoui/menus.mojo)
 # The hosted copy's switch (goal 62, docs/web-public.md): a server on the public internet. The agent link and the dev
 # routes are off, a visitor's files live only in its session, controls that name a file take only what the visitor
 # uploaded, no answer carries a server path, sessions are made only for a page load, held to a cap and ended when idle.
-PUBLIC = os.environ.get("MOJOUI_PUBLIC") == "1"
+PUBLIC_SETTING = os.environ.get("MOJOUI_PUBLIC", "")  # (1 or 0: anything else stops the server, which won't guess)
+PUBLIC = PUBLIC_SETTING == "1"
 AGENT_SOCKET = "" if PUBLIC else os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an agent host may attach here (docs/agent.md: the agent link)
 # scripts/dev.sh's server (goal 34b M1c): widgets reload when their sources change, source maps are served; only
 # 127.0.0.1 may ask, /dev/reload only with the token. Refused unless the app's build is a debug build (D-678), and never
@@ -68,6 +69,18 @@ JPEG_QUALITY = 85
 MAX_SESSIONS = int(os.environ.get("MOJOUI_MAX_SESSIONS", "6" if PUBLIC else "200"))  # public: past it, a busy page; else the oldest tab closes
 IDLE_S = float(os.environ.get("MOJOUI_IDLE_S", "900" if PUBLIC else "0"))  # a tab with no input this long ends (0: never)
 UNTOUCHED_S = 45.0  # public mode: a session whose page never came back (no /wait, frame or event) ends after this
+SESSION_MAX_S = float(os.environ.get("MOJOUI_SESSION_MAX_S", "3600" if PUBLIC else "0"))  # public: a visit's longest life (0: none)
+# public mode, new sessions (goal 62 round 3: 60 loads a second slowed every other tab): the whole server's rate and burst,
+# one address's (X-Real-IP, which the platform's proxy sets), and, near the cap, the sessions one address may hold
+NEW_PER_S = float(os.environ.get("MOJOUI_NEW_PER_S", "2"))
+NEW_BURST = float(os.environ.get("MOJOUI_NEW_BURST", "6"))
+IP_PER_S = float(os.environ.get("MOJOUI_IP_NEW_PER_S", "0.5"))
+IP_BURST = 3.0
+PER_IP = int(os.environ.get("MOJOUI_PER_IP", "2"))
+UPLOADS_AT_ONCE = 2  # public mode: a visitor's uploads in flight
+# public mode: a table's memory once read (the upload check measures it), one table's and a visitor's tables' together
+TABLE_KB = int(os.environ.get("MOJOUI_TABLE_MB", "256")) << 10
+VISITOR_TABLES_KB = int(os.environ.get("MOJOUI_VISITOR_TABLES_MB", "384")) << 10
 STATIC = Path(__file__).parent / "static"
 ICONS = {p.stem: re.sub(r">\s+<", "><", re.sub(r"\s+", " ", p.read_text().split("-->", 1)[-1].strip()))
          for p in (STATIC / "icons").glob("*.svg")}  # Lucide (ISC)
@@ -958,36 +971,70 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
+class BodyTooLarge(Exception):
+    """A request body ran past its route's limit while it was read (BodyLimit)."""
+
+
 class BodyLimit:
     """ASGI middleware (public mode): a request body over its route's limit is refused (413) before anything reads it:
     FastHTML parses every form before its handler runs, so the upload caps alone came after the bytes were on the box
-    (goal 62's review). Uploads may carry their cap (and a little form), every other route 1 MB."""
+    (goal 62's review). Uploads may carry their cap (and a little form), every other route 1 MB. An upload must say its
+    length, and `gate(path, length)` may refuse it before a byte is read: (words for the page or None, release)."""
 
-    def __init__(self, app, big):
-        self.app, self.big = app, big
+    def __init__(self, app, big, gate=None):
+        self.app, self.big, self.gate = app, big, gate
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope.get("method") not in ("POST", "PUT", "PATCH"):
             return await self.app(scope, receive, send)
         path = scope.get("path", "")
-        limit = self.big if path.startswith(("/upload/", "/dropfile/")) else 1 << 20
+        upload = path.startswith(("/upload/", "/dropfile/"))
+        limit = self.big if upload else 1 << 20
         length = dict(scope.get("headers", [])).get(b"content-length")
         if length is not None and (not length.isdigit() or int(length) > limit):
             return await _too_large(send)
-        seen = [0]
+        release = None
+        if upload and self.gate is not None:
+            if length is None:  # (a browser's upload says its length; one that doesn't can't reserve it)
+                return await _answer(send, 411, b"text/plain", b"an upload says its length")
+            refused, release = self.gate(path, int(length))
+            if refused:
+                return await _answer(send, 200, b"text/html; charset=utf-8", to_xml(notice(refused)).encode())
+        seen, over, started = [0], [False], [False]
 
         async def counted():
             message = await receive()
             if message["type"] == "http.request":
                 seen[0] += len(message.get("body", b""))
                 if seen[0] > limit:
-                    raise ValueError("body over its limit")
+                    over[0] = True
+                    raise BodyTooLarge()
             return message
 
+        async def watched(message):
+            if over[0]:  # (the app answered a body that ran past the limit, with its own 500: the page gets 413, once)
+                if message["type"] == "http.response.start" and not started[0]:
+                    started[0] = True
+                    await _too_large(send)
+                return
+            if message["type"] == "http.response.start":
+                started[0] = True
+            await send(message)
+
         try:
-            await self.app(scope, counted, send)
-        except ValueError:
-            pass  # (a chunked body that ran past its limit: the connection is dropped)
+            await self.app(scope, counted, watched)
+        except BodyTooLarge:  # (a chunked body that ran past its limit; a handler's own errors go on up)
+            if not started[0]:
+                started[0] = True
+                await _too_large(send)
+        finally:
+            if release:
+                release()
+
+
+async def _answer(send, status, kind, body):
+    await send({"type": "http.response.start", "status": status, "headers": [(b"content-type", kind)]})
+    await send({"type": "http.response.body", "body": body})
 
 
 async def _too_large(send):
@@ -1131,7 +1178,8 @@ class Session:
         self.last_active = time.monotonic()  # the visitor's last input (IDLE_S ends the tab after that long)
         self.made = time.monotonic()
         self.touched = False  # the page came back for anything (/wait, a frame, an event): a page, not a bare GET
-        self.client = ""  # who made it (public mode's per-client cap)
+        self.client = ""  # who made it: its address (public mode's places per address near the cap)
+        self.tables_kb = {}  # public mode: path → a checked table's memory once read (the visitor's tables together)
         self.gone_reason = ""  # why the server ended it (the page says so)
         self.deliveries = []  # (url, name) of files the app handed over (App.take_download), for the next answer
 
@@ -1717,14 +1765,15 @@ def folder_bytes(folder):
 
 
 TABLE_TYPES = (".csv", ".tsv", ".txt", ".parquet")
-CHECKS = threading.BoundedSemaphore(2)  # upload checks running at once
 VIDEO_TYPES = (".mp4", ".mov", ".m4v", ".webm")
 
 
 def check_upload(path, validator):
     """Public mode: a visitor's file is read before the app opens it, where a crash ends only the check (goal 62 M7): a
-    table by `validator` (the app's own reader in a process of its own, hosts/validate_main.mojo), held to 4 GB and
-    60 s of CPU; a video by ffprobe. "" when it may open; else why not, in plain words (no paths)."""
+    table by `validator` (the app's own reader in a process of its own, hosts/validate_main.mojo), held to 4 GB and 60 s
+    of CPU and first in line for the kernel's out-of-memory killer; a video by ffmpeg. (why not in plain words, no paths;
+    "" when it may open, the table's memory once read in KB: past TABLE_KB it's refused, round 3's review). Runs in a
+    worker thread under the app's CapacityLimiter (two at once)."""
     import shutil as _sh
     import subprocess
 
@@ -1732,7 +1781,7 @@ def check_upload(path, validator):
     if kind in TABLE_TYPES:
         if not validator or not Path(validator).exists():
             print("UPLOAD: no validator: tables aren't opened (build hosts/validate_main.mojo beside the module)", flush=True)
-            return "this copy can't check tables right now"
+            return "this copy can't check tables right now", 0
         cmd, why = [validator, str(path)], "it couldn't be read as a table"
     elif kind in VIDEO_TYPES:
         # (its first picture decoded, not just its header read: a truncated clip's header can be whole)
@@ -1740,19 +1789,31 @@ def check_upload(path, validator):
                "-map", "0:v:0", "-frames:v", "1", "-f", "null", "-"]  # manifest may send it to a URL; as mojoui.video plays them)
         why = "it isn't a video this copy can play"
     else:
-        return "the web copy opens CSV, Parquet and MP4 files"
-    if _sh.which("prlimit"):  # (the check's own limits, 4 GB and 60 s of CPU: a file can't take the server's either)
-        cmd = ["prlimit", f"--as={4 << 30}", "--cpu=60", "--"] + cmd
+        return "the web copy opens CSV, Parquet and MP4 files", 0
+    if not _sh.which("prlimit"):  # (make_app won't start a public copy without it)
+        return "this copy can't check files right now", 0
+    # (the check's own limits, 4 GB and 60 s of CPU, so a file can't take the server's; and if memory runs out anyway, the
+    # kernel ends the check first, not the server)
+    cmd = ["prlimit", f"--as={4 << 30}", "--cpu=60", "--", "sh", "-c", '{ echo 1000 > /proc/self/oom_score_adj; } 2>/dev/null; exec "$0" "$@"'] + cmd
     try:
-        with CHECKS:  # (two checks at once at most)
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=90,
-                               env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": "/tmp", "LANG": "C.UTF-8"})  # (none of the server's settings)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=90,
+                           env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": "/tmp", "LANG": "C.UTF-8", "MALLOC_ARENA_MAX": "2"})  # (none of the server's settings)
     except (subprocess.TimeoutExpired, OSError):
-        return why
+        return why, 0
     if r.returncode != 0 or (kind in VIDEO_TYPES and r.stderr.strip()):
         print(f"UPLOAD: refused a file ({why}; exit {r.returncode})", flush=True)
-        return why
-    return ""
+        return why, 0
+    if kind not in TABLE_TYPES:
+        return "", 0
+    m = re.search(r"(\d+) rows, (\d+) columns(?:, (\d+) KB)?", r.stdout)
+    if not m:
+        return why, 0
+    kb = max(int(m.group(3) or 0), int(m.group(1)) * int(m.group(2)) * 8 >> 10)  # (what the read took, and 8 bytes a cell at least)
+    if TABLE_KB and kb > TABLE_KB:
+        print(f"UPLOAD: refused a table that reads to {kb:,} KB (MOJOUI_TABLE_MB)", flush=True)
+        return (f"it would take {size_words(kb << 10)} in memory once read, more than the web copy gives one table "
+                f"({size_words(TABLE_KB << 10)}): open a smaller sample of it, or use the desktop app"), kb
+    return "", kb
 
 
 def takes_path(n):
@@ -1831,7 +1892,62 @@ def sweep_files(day=86400):
         print(f"UPLOADS: swept {swept} folders a stopped server left", flush=True)
 
 
+class Bucket:
+    """A token bucket: ready() while a token is there; refills `rate` a second, up to `burst`."""
+
+    def __init__(self, rate, burst):
+        self.rate, self.burst, self.level, self.t = rate, burst, burst, time.monotonic()
+
+    def ready(self):
+        now = time.monotonic()
+        self.level, self.t = min(self.burst, self.level + (now - self.t) * self.rate), now
+        return self.level >= 1
+
+
+RATES = {}  # public mode, new sessions: "" → the whole server's Bucket; an address → its own
+
+
+def reset_rates():
+    RATES.clear()
+
+
+def rate_ok(addr):
+    """Public mode: may `addr` make a session now? A token from the server's bucket and the address's, or none taken."""
+    server = RATES.get("") or RATES.setdefault("", Bucket(NEW_PER_S, NEW_BURST))
+    mine = RATES.get(addr) or RATES.setdefault(addr, Bucket(IP_PER_S, IP_BURST))
+    if not (server.ready() and mine.ready()):
+        return False
+    server.level -= 1
+    mine.level -= 1
+    if len(RATES) > 10000:  # (addresses whose buckets are full again are forgotten)
+        for k in [k for k, b in RATES.items() if k and b.ready() and b.level >= b.burst]:
+            del RATES[k]
+    return True
+
+
+def client_address(req, h):
+    """Who loaded the page: X-Real-IP, which the platform's proxy sets (Railway's does), else the connection's peer."""
+    return h.get("x-real-ip") or (req.client.host if req.client else "")
+
+
+def loopback(host):
+    import ipaddress
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
 def make_app(module_dir):
+    if PUBLIC_SETTING not in ("", "0", "1"):  # (a public copy whose switch reads "true" would otherwise start wide open)
+        raise SystemExit(f"mojoui web: MOJOUI_PUBLIC is 1 (the public copy) or 0, not {PUBLIC_SETTING!r}: set one")
+    if PUBLIC:
+        import shutil as _sh
+        if not _sh.which("prlimit"):  # (each upload is read in a process held by prlimit: without it, no limits at all)
+            raise SystemExit("mojoui web: the public copy reads visitors' files in a process held by prlimit (util-linux), "
+                             "and there's none on PATH: install util-linux")
     if DEV and not debug_build(module_dir):  # (the dev server's endpoints never run on a release build, D-678)
         raise SystemExit(f"mojoui web: MOJOUI_DEV=1 needs a debug build ({module_dir} is a release build: "
                          "MOJOUI_DEBUG=1 scripts/build.sh <app> web, or scripts/dev.sh <app>); never set it on a deployed host")
@@ -1871,12 +1987,78 @@ def make_app(module_dir):
             if os.environ.get(name):
                 roots += [Path(os.environ[name]), Path(os.environ[name]).resolve()]
         app.add_middleware(Scrub, roots=roots)
-        app.add_middleware(BodyLimit, big=upload_limit() + (1 << 20))
+        app.add_middleware(BodyLimit, big=upload_limit() + (1 << 20), gate=lambda path, length: upload_gate(path, length))
         print(f"mojoui web: public mode: no agent link, no dev routes, {MAX_SESSIONS} sessions at most"
               + (f", idle ones end after {IDLE_S / 60:g} min" if IDLE_S else "") + f"; uploads {size_words(upload_limit())} a file, "
               + f"{size_words(visitor_limit())} a visitor", flush=True)
     sessions = OrderedDict()  # sid → Session, oldest first
     sessions_lock = threading.Lock()
+    making = {}  # public mode: address → sessions being made now (their places are taken already)
+    ended = OrderedDict()  # sid → why the server ended it (a page whose /wait comes back after that is told; the newest 1,000)
+    flights = {}  # public mode: sid → (uploads in flight, the bytes they reserved)
+    limiter = []  # the upload checks' anyio.CapacityLimiter (two at once), made in the event loop on first use
+
+    def upload_gate(path, length):
+        """BodyLimit's gate for /upload and /dropfile (public mode), before a byte is read: a visitor's uploads in flight
+        are at most UPLOADS_AT_ONCE, and each reserves its length, so two at once can't pass the visitor's cap together
+        (goal 62 round 3). (words for the page or None, release)."""
+        parts = path.split("/")
+        sid = parts[2] if len(parts) > 2 else ""
+        if sid not in sessions:
+            return None, None  # (the handler answers a gone page as it always has)
+        cap = visitor_limit()
+        with sessions_lock:
+            n, held = flights.get(sid, (0, 0))
+            if n >= UPLOADS_AT_ONCE:
+                return "Wait for your other uploads to finish first.", None
+            if cap and folder_bytes(uploads_base() / sid) + held + length > cap:
+                print(f"UPLOAD: refused an upload past the visitor's cap ({cap:,} bytes, {n} in flight)", flush=True)
+                return f"This upload wasn't taken: your files here would pass {size_words(cap)}, the most one visitor keeps.", None
+            flights[sid] = (n + 1, held + length)
+
+        def release():
+            with sessions_lock:
+                n, held = flights.pop(sid, (1, length))
+                if n > 1:
+                    flights[sid] = (n - 1, held - length)
+        return None, release
+
+    def checks():
+        import anyio
+        if not limiter:
+            limiter.append(anyio.CapacityLimiter(2))
+        return limiter[0]
+
+    def take_table(s, path, kb):
+        """Public mode: a checked table counted against its visitor's tables together (VISITOR_TABLES_KB): "" when it
+        fits, else why not in plain words."""
+        with sessions_lock:
+            held = sum(k for p, k in s.tables_kb.items() if Path(p).exists())
+            if VISITOR_TABLES_KB and held + kb > VISITOR_TABLES_KB:
+                print(f"UPLOAD: refused a table past the visitor's tables together ({held + kb:,} KB)", flush=True)
+                return (f"with your tables already here it would take {size_words((held + kb) << 10)} in memory, more than "
+                        f"the web copy holds for one visitor ({size_words(VISITOR_TABLES_KB << 10)}): use the desktop app for more")
+            s.tables_kb[str(path)] = kb
+        return ""
+
+    def busy_page(words):
+        return (Title("Busy"), Main(Div(H2("Busy right now", cls="text headline"), P(words, cls="text"),
+                                        A("Try again", href="/", cls="button prominent"), cls="mojoui-busy-page"), id="mojoui-root"))
+
+    def admit(addr):
+        """Public mode, under sessions_lock: why a new session from `addr` can't be made now ("": it can, its place is
+        taken). Every session holds a place from the moment it's made, a bare load's too (goal 62 round 3: bare loads
+        overshot the cap twice over); near the cap one address can't take the last places; and loads are rate-limited."""
+        taken = len(sessions) + sum(making.values())
+        if taken >= MAX_SESSIONS:
+            return f"{MAX_SESSIONS} visitors are exploring this copy, the most it holds at once. Try again in a few minutes."
+        held = sum(1 for v in sessions.values() if v.client == addr) + making.get(addr, 0)
+        if MAX_SESSIONS - taken <= max(1, MAX_SESSIONS // 3) and held >= PER_IP:
+            return f"This copy is nearly full, and {held} of its places are open from your address already: close a tab, or try again in a few minutes."
+        if not rate_ok(addr):
+            return "Many visitors are arriving at once. Try again in a few seconds."
+        making[addr] = making.get(addr, 0) + 1
+        return ""
     jslog_counts = {}  # sid → JS errors logged (at most 100 a page)
     validator = os.environ.get("MOJOUI_VALIDATE") or str(Path(module_dir) / "validate")  # (public mode: uploads read here first)
 
@@ -1894,24 +2076,36 @@ def make_app(module_dir):
         forget_files(sid)
         jslog_counts.pop(sid, None)
         getattr(s, "downloads", {}).clear()
+        if reason:
+            with sessions_lock:
+                ended[sid] = reason
+                while len(ended) > 1000:
+                    ended.popitem(last=False)
         s.wake()
 
     def reap():
-        """IDLE_S: tabs with no input for that long end (their page says so); checked a few times a minute."""
+        """IDLE_S: tabs with no input for that long end (their page says so); SESSION_MAX_S: a visit ends at that age;
+        public mode: a session no page came back to ends after UNTOUCHED_S. Checked a few times a minute."""
         while True:
-            time.sleep(max(0.5, min(5.0, IDLE_S / 4)))
+            time.sleep(max(0.5, min([5.0] + [t / 4 for t in (IDLE_S, SESSION_MAX_S) if t > 0])))
             now = time.monotonic()
+            gone = []
             with sessions_lock:
-                idle = [(sid, s) for sid, s in sessions.items() if now - s.last_active > IDLE_S]
-            with sessions_lock:  # (a session no page ever came back to: a bare ?boot=1, a crawler; out of the cap in 45 s)
-                idle += [(sid, s) for sid, s in sessions.items() if not s.touched and now - s.made > UNTOUCHED_S and (sid, s) not in idle]
-            for sid, s in idle:
-                mins = IDLE_S / 60
-                said = f"{mins:g} minutes" if mins >= 1 else f"{IDLE_S:g} seconds"
-                end_session(sid, s, f"This session ended after {said} without use, and its files are gone. Reload the page to start a new one.")
-                print(f"SESSION: ended an idle tab ({len(sessions)} open)", flush=True)
+                for sid, s in sessions.items():
+                    if SESSION_MAX_S > 0 and now - s.made > SESSION_MAX_S:
+                        mins = SESSION_MAX_S / 60
+                        said = f"{mins:g} minutes" if mins >= 1 else f"{SESSION_MAX_S:g} seconds"
+                        gone.append((sid, s, f"This visit reached its longest, {said}, and its files are gone. Reload the page to start a new one."))
+                    elif (IDLE_S > 0 and now - s.last_active > IDLE_S) or (PUBLIC and not s.touched and now - s.made > UNTOUCHED_S):
+                        # (a session no page came back to: a bare ?boot=1, a crawler; its place is free again in 45 s)
+                        mins = IDLE_S / 60
+                        said = f"{mins:g} minutes" if mins >= 1 else f"{IDLE_S:g} seconds"
+                        gone.append((sid, s, f"This session ended after {said} without use, and its files are gone. Reload the page to start a new one."))
+            for sid, s, why in gone:
+                end_session(sid, s, why)
+                print(f"SESSION: ended {'a visit at its longest' if 'longest' in why else 'an idle tab'} ({len(sessions)} open)", flush=True)
 
-    if IDLE_S > 0:
+    if IDLE_S > 0 or SESSION_MAX_S > 0 or PUBLIC:
         threading.Thread(target=reap, daemon=True, name="mojoui-idle").start()
 
     @app.post("/bye/{sid}")
@@ -2160,38 +2354,33 @@ def make_app(module_dir):
         load = boot == "1" or (h.get("sec-fetch-dest") == "document" and h.get("sec-fetch-mode") == "navigate" and "prefetch" not in h.get("sec-purpose", ""))
         if not load:
             return Title("omxplorer" if not hasattr(mod, "title") else "omxcode"), Main(P("Opening…", cls="text caption"), id="mojoui-root", data_boot="1")
+        addr = client_address(req, h) if PUBLIC else ""
         if PUBLIC:
-            with sessions_lock:  # (only pages that came back count: a bare load, ?boot=1 from a script, holds no place)
-                full = sum(1 for v in sessions.values() if v.touched) >= MAX_SESSIONS
-            if full:
-                return (Title("Busy"), Main(Div(H2("Busy right now", cls="text headline"),
-                                                P(f"{MAX_SESSIONS} visitors are exploring this copy, the most it holds at once. Try again in a few minutes.", cls="text"),
-                                                A("Try again", href="/", cls="button prominent"), cls="mojoui-busy-page"), id="mojoui-root"))
+            with sessions_lock:  # (the place is taken here, before the session is made: a burst can't pass the cap together)
+                why = admit(addr)
+            if why:
+                return busy_page(why)
         sid = uuid.uuid4().hex  # one app session per page load (tab)
-        s = Session(mod, shared=bool(loads))
-        s.origin = page_origin(req.url.scheme, req.url.netloc, h)
-        if hasattr(mod, "hosted"):  # (where this tab's documents go: its own folder in public mode, as the app likes else)
-            with s.lock:
-                mod.hosted(s.handle, str(file_folder(sid, "documents")) if PUBLIC else "", PUBLIC)
-                s.nodes = json.loads(mod.view(s.handle))  # (the first screen as the app has it now: a public Start screen differs)
+        try:
+            s = Session(mod, shared=bool(loads))
+            s.client = addr
+            s.origin = page_origin(req.url.scheme, req.url.netloc, h)
+            if hasattr(mod, "hosted"):  # (where this tab's documents go: its own folder in public mode, as the app likes else)
+                with s.lock:
+                    mod.hosted(s.handle, str(file_folder(sid, "documents")) if PUBLIC else "", PUBLIC)
+                    s.nodes = json.loads(mod.view(s.handle))  # (the first screen as the app has it now: a public Start screen differs)
+        finally:
+            if PUBLIC:
+                with sessions_lock:
+                    making[addr] -= 1
+                    if making[addr] <= 0:
+                        del making[addr]
         gone = []
-        with sessions_lock:  # (the cap checked again where the place is taken: a burst can't pass it together)
-            if PUBLIC and sum(1 for v in sessions.values() if v.touched) >= MAX_SESSIONS:
-                gone.append((None, s))
-            else:
-                sessions[sid] = s
-                bare = [(k, v) for k, v in sessions.items() if not v.touched]
-                gone += bare[:max(0, len(bare) - 2 * MAX_SESSIONS)] if PUBLIC else []  # (bare loads: at most twice the cap, oldest first)
-                if not PUBLIC:
-                    gone += list(sessions.items())[:max(0, len(sessions) - MAX_SESSIONS)]  # (local: the oldest tab gives way)
+        with sessions_lock:
+            sessions[sid] = s
+            if not PUBLIC:
+                gone += list(sessions.items())[:max(0, len(sessions) - MAX_SESSIONS)]  # (local: the oldest tab gives way)
         for old_sid, old in gone:
-            if old_sid is None:  # (lost the race for the last place: a busy page, and its app closes)
-                with old.lock:
-                    old.closed = True
-                    mod.close(old.handle)
-                return (Title("Busy"), Main(Div(H2("Busy right now", cls="text headline"),
-                                                P(f"{MAX_SESSIONS} visitors are exploring this copy, the most it holds at once. Try again in a few minutes.", cls="text"),
-                                                A("Try again", href="/", cls="button prominent"), cls="mojoui-busy-page"), id="mojoui-root"))
             end_session(old_sid, old, "This page was closed to make room. Reload it to start again.")
         # The whole first page under the session's lock: once note() hands the tab to the clock thread, its effects'
         # replies can change the screen at any moment, and a page rendered meanwhile was torn (a deep link's Route
@@ -2617,8 +2806,7 @@ def make_app(module_dir):
         with s.lock:
             if s.closed:
                 return ""
-            s.last_active = time.monotonic()
-            d = json.loads(mod.resize(s.handle, w, h))
+            d = json.loads(mod.resize(s.handle, w, h))  # (not input: a page that resizes itself doesn't keep an idle tab alive)
             s.nodes = json.loads(mod.view(s.handle))
             return changes(s, sid, d)
 
@@ -2753,7 +2941,8 @@ def make_app(module_dir):
                 continue
             if PUBLIC:
                 import anyio
-                why = await anyio.to_thread.run_sync(check_upload, path, validator)
+                why, kb = await anyio.to_thread.run_sync(check_upload, path, validator, limiter=checks())
+                why = why or (take_table(s, path, kb) if kb else "")  # (a visitor's tables together: round 3)
                 if why:
                     shutil_rmtree(folder)
                     refused.append(notice(f"{name} wasn't opened: {why}."))
@@ -2822,7 +3011,8 @@ def make_app(module_dir):
             return over_cap(name, cap) if cap and limit < upload_limit() else too_big(name, limit)
         if PUBLIC:
             import anyio
-            why = await anyio.to_thread.run_sync(check_upload, path, validator)
+            why, kb = await anyio.to_thread.run_sync(check_upload, path, validator, limiter=checks())
+            why = why or (take_table(s, path, kb) if kb else "")  # (a visitor's tables together: round 3)
             if why:
                 shutil_rmtree(folder)
                 return notice(f"{name} wasn't opened: {why}.")
@@ -3000,7 +3190,7 @@ def make_app(module_dir):
         import asyncio
         s = sessions.get(sid)
         if s is None or s.closed:
-            return "gone"
+            return "gone" + (" " + ended[sid] if ended.get(sid) else "")
         s.touched = True
         if has_changes(s) or s.busy != s.busy_sent:
             return "1"
@@ -3050,6 +3240,11 @@ if __name__ == "__main__":
     module_dir = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("MOJOUI_MODULE", "build/hello/web")
     port = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("PORT", "5001"))  # (a platform's port: $PORT)
     host = os.environ.get("HOST", "127.0.0.1")  # (a container listens on 0.0.0.0: HOST)
+    if PUBLIC_SETTING not in ("", "0", "1"):
+        raise SystemExit(f"mojoui web: MOJOUI_PUBLIC is 1 (the public copy) or 0, not {PUBLIC_SETTING!r}: set one")
+    if not PUBLIC and not loopback(host):  # (beyond this machine only with the public copy's rules: goal 62 round 3)
+        raise SystemExit(f"mojoui web: HOST={host} would serve this app beyond this machine without the public copy's rules: "
+                         "set MOJOUI_PUBLIC=1 (scripts/web-start does), or HOST=127.0.0.1")
     import uvicorn
 
     print(f"mojoui web: http://{host}:{port}/", flush=True)

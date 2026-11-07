@@ -14,6 +14,7 @@ from std.os import getenv, setenv, makedirs
 from std.sys import argv, exit
 from std.ffi import external_call, c_int
 from std.memory.alloc import alloc, Layout
+from std.atomic import Atomic
 from mojoui import libc
 
 
@@ -77,6 +78,27 @@ def keep[T: Movable](var value: T) -> Int:
 
 def at[T: Movable](addr: Int) -> Pointer[T, MutUntrackedOrigin]:
     return Pointer[T, MutUntrackedOrigin](unsafe_from_address=addr)
+
+
+def count_at(slot: Int) -> Int:
+    """The address of a process-wide count at `slot` (an Int64 every thread changes atomically: count_add, count_of),
+    made the first time it's asked for. The first thread's wins (setenv won't overwrite, under the C library's lock), so
+    two threads asking at once share one count."""
+    var addr = get_shared(slot)
+    if addr != 0:
+        return addr
+    _ = setenv(key(slot), String(keep(Int64(0))), False)  # (a thread that lost the race leaves its 8 bytes, once)
+    return get_shared(slot)
+
+
+def count_add(slot: Int, n: Int) -> Int:
+    """Adds n to the process-wide count at `slot` (count_at); returns the count before."""
+    return Int(Atomic[Scalar[DType.int64]].fetch_add(Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=count_at(slot)), Int64(n)))
+
+
+def count_of(slot: Int) -> Int:
+    """The process-wide count at `slot` now (count_at)."""
+    return Int(Atomic[Scalar[DType.int64]].load(Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=count_at(slot))))
 
 
 def make_dir(path: String):
