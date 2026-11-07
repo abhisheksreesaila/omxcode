@@ -57,7 +57,11 @@ def adopt_config(app: String, old: String):
 
 
 def read_recent(app: String) -> List[String]:
+    """The files opened last (newest first). On the public web copy (MOJOUI_PUBLIC=1) none: each visitor's own list lives
+    only in its session (goal 62: a second visitor saw the first's files, with their server paths)."""
     var out = List[String]()
+    if environment("MOJOUI_PUBLIC") == "1":
+        return out^
     try:
         with open(config_dir(app) + "/recent.txt", "r") as f:
             for line in f.read().split("\n"):
@@ -77,6 +81,8 @@ def remember(app: String, path: String, mut recent: List[String]):
         if p != path and len(out) < 10:
             out.append(p)
     recent = out^
+    if environment("MOJOUI_PUBLIC") == "1":  # (the public copy: the list stays in this session, never on disk)
+        return
     try:
         make_dir(config_dir(app))
         with open(config_dir(app) + "/recent.txt", "w") as f:

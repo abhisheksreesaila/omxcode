@@ -48,16 +48,21 @@ SET_TEXT, SET_MSG, SET_VALUE, SET_IMAGE, SET_FRAMES, SET_PLACE, SET_SIZE, SET_TI
 KEY = 7  # a canvas gesture: a key pressed while it had focus (text = the key, dx = modifiers)
 SECONDARY = 8  # a right click on a canvas (x, y): where a context menu opens
 CHECKED, DISABLED, DANGER = 1, 2, 4  # menu item flags (mojoui/menus.mojo)
-AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an agent host may attach here (docs/agent.md: the agent link)
+# The hosted copy's switch (goal 62, docs/web-public.md): a server on the public internet. The agent link and the dev
+# routes are off, a visitor's files live only in its session, controls that name a file take only what the visitor
+# uploaded, no answer carries a server path, sessions are made only for a page load, held to a cap and ended when idle.
+PUBLIC = os.environ.get("MOJOUI_PUBLIC") == "1"
+AGENT_SOCKET = "" if PUBLIC else os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an agent host may attach here (docs/agent.md: the agent link)
 # scripts/dev.sh's server (goal 34b M1c): widgets reload when their sources change, source maps are served; only
 # 127.0.0.1 may ask, /dev/reload only with the token. Refused unless the app's build is a debug build (D-678), and never
 # to be set on a deployed host (docs/js.md).
-DEV = os.environ.get("MOJOUI_DEV") == "1"
+DEV = os.environ.get("MOJOUI_DEV") == "1" and not PUBLIC
 DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 WAIT_S = float(os.environ.get("MOJOUI_WAIT_S", "0"))  # how long /wait holds with nothing to say (0: as long as the tab lives)
 JPEG_QUALITY = 85
-MAX_SESSIONS = 200  # oldest tabs are closed beyond this
+MAX_SESSIONS = int(os.environ.get("MOJOUI_MAX_SESSIONS", "8" if PUBLIC else "200"))  # public: past it, a busy page; else the oldest tab closes
+IDLE_S = float(os.environ.get("MOJOUI_IDLE_S", "900" if PUBLIC else "0"))  # a tab with no input this long ends (0: never)
 STATIC = Path(__file__).parent / "static"
 ICONS = {p.stem: re.sub(r">\s+<", "><", re.sub(r"\s+", " ", p.read_text().split("-->", 1)[-1].strip()))
          for p in (STATIC / "icons").glob("*.svg")}  # Lucide (ISC)
@@ -371,6 +376,23 @@ PAGE_JS = r"""
     const el = e.detail && e.detail.elt;
     if (el && el.dataset && el.dataset.kind === 'list') e.detail.parameters.top = el.scrollTop;
   });
+  // The shell (a GET that wasn't a page load, from a browser that sends no Sec-Fetch headers): load the page for real.
+  // A page loaded that way drops ?boot=1 from its address.
+  document.addEventListener('DOMContentLoaded', () => {
+    const root = document.getElementById('mojoui-root');
+    if (root && root.dataset.boot === '1') location.replace('/?boot=1' + location.hash);
+    else if (/[?&]boot=1/.test(location.search)) history.replaceState(null, '', '/' + location.hash);
+  });
+  // The server ended this tab (idle too long, or it restarted): the page says so, over everything, and offers a reload.
+  window.mojouiGone = text => {
+    let d = document.getElementById('mojoui-gone');
+    if (!d) { d = document.createElement('div'); d.id = 'mojoui-gone'; d.className = 'mojoui-gone'; d.setAttribute('role', 'alertdialog'); document.body.appendChild(d); }
+    const p = document.createElement('p'), b = document.createElement('button');
+    p.textContent = text || 'This page has expired. Reload it to start a new one.';
+    b.textContent = 'Reload'; b.className = 'button prominent'; b.addEventListener('click', () => location.reload());
+    d.replaceChildren(p, b);
+    const root = document.getElementById('mojoui-root'); if (root) root.inert = true;
+  };
 })();
 """
 
@@ -575,7 +597,14 @@ CANVAS_JS = r"""
           const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
           const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;  // (less motion: animations jump to their end)
-          const res = await fetch(`/frame/${sid}/${n}?w=${w}&h=${h}&scale=${dpr}&v=${shape()}&tick=${tick}&still=${still}`);
+          const res = await fetch(`/frame/${sid}/${n}?w=${w}&h=${h}&scale=${dpr}&v=${shape()}&tick=${tick}&still=${still}&have=${st.pic || ''}`);
+          if (res.status === 204 && res.headers.get('X-Mojoui-Same') === '1') {  // (the picture it shows is still the one: nothing sent)
+            st.drawn = version; st.skin = skin;
+            if (res.headers.get('X-Mojoui-Pending') === '1') update();
+            if ((meta() && meta().dataset.version !== String(st.drawn)) || st.skin !== skinNow()) st.want = true;
+            if (res.headers.get('X-Mojoui-Again') === '1') { st.want = true; await new Promise(ok => requestAnimationFrame(ok)); }
+            continue;
+          }
           if (res.status !== 200) {
             if (res.headers.get('X-Mojoui-Pending') === '1') update();  // e.g. a frame changed the screen's shape
             if (res.headers.get('X-Mojoui-Retry') === '1') await new Promise(ok => setTimeout(ok, 50));
@@ -583,6 +612,7 @@ CANVAS_JS = r"""
             if (res.status !== 204) await new Promise(ok => setTimeout(ok, 50));  // (anything else: a short wait, then again)
             continue;
           }
+          st.pic = res.headers.get('X-Mojoui-Pic') || '';
           const img = await createImageBitmap(await res.blob());
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
           if (div.dataset.passthrough === '1') g.clearRect(0, 0, cv.width, cv.height);  // (its alpha: the last frame mustn't show through)
@@ -773,6 +803,50 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
+class Scrub:
+    """ASGI middleware (public mode): any server path left in a text answer (an engine's error naming its file, a
+    message) is cut to what follows the folder, so no answer carries a server path. Each cut is logged (SCRUB:), so its
+    source can be fixed too. Downloads and pictures pass as they are."""
+
+    def __init__(self, app, roots):
+        self.app = app
+        uploads = re.escape(str(uploads_base().parent))
+        alts = [re.escape(r) for r in sorted({str(x).rstrip("/") for x in roots if x and len(str(x)) > 1}, key=len, reverse=True)]
+        # (an upload's folder names its session: the session and the file's own folder go too)
+        self.rx = re.compile(("(?:" + uploads + r")(?:/[a-z]+)?(?:/[0-9a-f]{32})?(?:/[0-9a-f]{12})?/?|(?:" + "|".join(alts) + ")/?").encode())
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        start, chunks = {}, []
+
+        async def buffered(message):
+            if message["type"] == "http.response.start":
+                headers = dict((k.lower(), v) for k, v in message.get("headers", []))
+                ctype = headers.get(b"content-type", b"")
+                if ctype.startswith((b"text/html", b"text/plain", b"application/json")):
+                    start["msg"] = message
+                    return
+                return await send(message)
+            if message["type"] == "http.response.body" and "msg" in start:
+                chunks.append(message.get("body", b""))
+                if message.get("more_body"):
+                    return
+                body = b"".join(chunks)
+                cut = self.rx.sub(b"", body)
+                if cut != body:  # (the server's own log: where it was, so its source can be fixed)
+                    m = self.rx.search(body)
+                    near = body[max(0, m.start() - 60):m.end() + 40].decode(errors="replace").replace("\n", " ")
+                    print(f"SCRUB: {scope.get('path', '').split('/')[1][:12]}: cut a server path from the answer: …{near}…", flush=True)
+                headers = [(k, v) for k, v in start["msg"].get("headers", []) if k.lower() != b"content-length"]
+                headers.append((b"content-length", str(len(cut)).encode()))
+                await send(dict(start["msg"], headers=headers))
+                return await send({"type": "http.response.body", "body": cut})
+            await send(message)
+
+        await self.app(scope, receive, buffered)
+
+
 def content_name(name, data):
     """name.js → name.<sha256[:16]>.js: the file's URL changes whenever its bytes do."""
     stem, ext = name.rsplit(".", 1)
@@ -856,6 +930,9 @@ class Session:
         self.commands = []  # widget commands the app asked for (mojoui.webcomponent), not yet sent to the page
         self.origin = ""  # this page's origin (WebFrame: allow-same-origin only for another one)
         self.widget_facts = {}  # (tag, id) → what the widget says about itself (mojoui-widgets.js facts), while an agent is attached
+        self.last_active = time.monotonic()  # the visitor's last input (IDLE_S ends the tab after that long)
+        self.gone_reason = ""  # why the server ended it (the page says so)
+        self.deliveries = []  # (url, name) of files the app handed over (App.take_download), for the next answer
 
     def wake(self):
         """Tell the page's open /wait that changes are pending."""
@@ -1422,7 +1499,26 @@ def uploads_base():
 
 
 def upload_limit():
-    return int(os.environ.get("OMXCODE_UPLOAD_MAX", os.environ.get("OMXAPP_UPLOAD_MAX", str(32 << 30))))  # (32 GB by default: a 100M-row CSV is ~10 GB)
+    """One file's cap: OMXCODE_UPLOAD_MAX (32 GB by default: a 100M-row CSV is ~10 GB; 200 MB in public mode)."""
+    return int(os.environ.get("OMXCODE_UPLOAD_MAX", os.environ.get("OMXAPP_UPLOAD_MAX", str(200 << 20) if PUBLIC else str(32 << 30))))
+
+
+def visitor_limit():
+    """What one page may keep in uploads, all files together: OMXCODE_VISITOR_MAX (public mode: 500 MB; else no cap, 0)."""
+    return int(os.environ.get("OMXCODE_VISITOR_MAX", str(500 << 20) if PUBLIC else "0"))
+
+
+def folder_bytes(folder):
+    try:
+        return sum(f.stat().st_size for f in Path(folder).rglob("*") if f.is_file() and f.name != ".owner")
+    except OSError:
+        return 0
+
+
+def takes_path(n):
+    """A control that hands the app a file path: a FilePicker or FileSaver (a button with a second message) or a
+    DropTarget's on_file. In public mode only the host makes those paths (an upload, /save), never the page's text."""
+    return bool(n["msg2"]) and n["kind"] in (BUTTON, DROP)
 
 
 def size_words(n):
@@ -1472,7 +1568,7 @@ def sweep_files(day=86400):
     here); a reused pid keeps a gone server's folder until a later start; an older-version server's session untouched
     for a day is swept."""
     swept = 0
-    for kind in (uploads_base(), uploads_base().parent / "downloads"):
+    for kind in (uploads_base(), uploads_base().parent / "downloads", uploads_base().parent / "documents"):
         if not kind.is_dir():
             continue
         for folder in kind.iterdir():
@@ -1529,15 +1625,95 @@ def make_app(module_dir):
         Script(src=f"/static/{files['htmx.min.js'][0]}"), Script(src=f"/static/{files['mojoui.js'][0]}"),
         Link(rel="stylesheet", href=f"/static/{files['mojoui.css'][0]}"), *head_tags))
     app.add_middleware(SecurityHeaders)
+    if PUBLIC:
+        roots = [Path(module_dir).resolve(), Path(__file__).resolve().parents[2], Path.home(), uploads_base().parent]
+        for name in ("OMX_STARTER", "OMX_DOCUMENTS", "OMX_CONFIG"):
+            if os.environ.get(name):
+                roots += [Path(os.environ[name]), Path(os.environ[name]).resolve()]
+        app.add_middleware(Scrub, roots=roots)
+        print(f"mojoui web: public mode: no agent link, no dev routes, {MAX_SESSIONS} sessions at most"
+              + (f", idle ones end after {IDLE_S / 60:g} min" if IDLE_S else "") + f"; uploads {size_words(upload_limit())} a file, "
+              + f"{size_words(visitor_limit())} a visitor", flush=True)
     sessions = OrderedDict()  # sid → Session, oldest first
     sessions_lock = threading.Lock()
+
+    def end_session(sid, s, reason):
+        """The server ends a tab (idle, or the server is full and it was the oldest): its app closes, its files go, and
+        its page, waiting on /wait, is told why."""
+        with sessions_lock:
+            if sessions.get(sid) is s:
+                del sessions[sid]
+        with s.lock:
+            if not s.closed:
+                s.closed = True
+                s.gone_reason = reason
+                mod.close(s.handle)
+        forget_files(sid)
+        s.wake()
+
+    def reap():
+        """IDLE_S: tabs with no input for that long end (their page says so); checked a few times a minute."""
+        while True:
+            time.sleep(max(0.5, min(5.0, IDLE_S / 4)))
+            now = time.monotonic()
+            with sessions_lock:
+                idle = [(sid, s) for sid, s in sessions.items() if now - s.last_active > IDLE_S]
+            for sid, s in idle:
+                mins = IDLE_S / 60
+                said = f"{mins:g} minutes" if mins >= 1 else f"{IDLE_S:g} seconds"
+                end_session(sid, s, f"This session ended after {said} without use, and its files are gone. Reload the page to start a new one.")
+                print(f"SESSION: ended an idle tab ({len(sessions)} open)", flush=True)
+
+    if IDLE_S > 0:
+        threading.Thread(target=reap, daemon=True, name="mojoui-idle").start()
+
+    @app.get("/health")
+    def health():
+        """Is the server up, and how full (a platform's health check; no page, no session, no paths)."""
+        from starlette.responses import JSONResponse
+        with sessions_lock:
+            n = len(sessions)
+        return JSONResponse({"ok": True, "sessions": n, "max": MAX_SESSIONS}, headers={"Cache-Control": "no-store"})
 
     clock = threading.Condition()
     due = {}  # sid → (monotonic time its effects are due, its Session)
 
+    def deliver(sid, s, path):
+        """A file or folder the app made for the person (App.take_download): into this tab's downloads folder (a folder
+        as one zip), removed from where the app wrote it, and named to the page by a one-time token (/download), never
+        by its path. Only what lies in the tab's own folders (its documents, uploads) is sent."""
+        import shutil
+        src = Path(path).resolve()
+        mine = [d.resolve() for d in (uploads_base().parent / "documents" / sid, uploads_base() / sid)]
+        if not any(src == d or d in src.parents for d in mine) or not src.exists():
+            if PUBLIC:
+                print("REFUSED: a hand-over outside the tab's own folders", flush=True)
+                return
+            if not src.exists():
+                return
+        out = file_folder(sid, "downloads")
+        if src.is_dir():
+            base = out / (src.name or "files")
+            made = Path(shutil.make_archive(str(base), "zip", root_dir=src))
+            shutil.rmtree(src, ignore_errors=True) if PUBLIC else None
+        else:
+            made = out / src.name
+            if PUBLIC:
+                shutil.move(str(src), made)
+            else:
+                shutil.copyfile(src, made)
+        token = uuid.uuid4().hex
+        s.downloads = getattr(s, "downloads", {})
+        s.downloads[token] = made
+        s.deliveries.append((f"/download/{sid}/{token}", made.name))
+
     def note(sid, s):
         """After any call that ran update() (s.lock held): when this tab's effects (HTTP replies, timer ticks) are due
-        next (Runtime.wake_in), for the clock thread."""
+        next (Runtime.wake_in), for the clock thread; and what the app handed over, made ready for the page."""
+        if hasattr(mod, "take_download"):
+            got = mod.take_download(s.handle)
+            if got:
+                deliver(sid, s, got)
         if hasattr(mod, "commands"):  # (widget commands the update asked for: sent with the next answer, cmds_mark)
             taken = json.loads(mod.commands(s.handle))
             if taken:
@@ -1583,7 +1759,13 @@ def make_app(module_dir):
         threading.Thread(target=tick, daemon=True, name="mojoui-effects").start()
 
     def has_changes(s):
-        return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches"))) or bool(s.commands)
+        return bool(s.pending and (s.pending.get("rebuild") or s.pending.get("patches"))) or bool(s.commands) or bool(s.deliveries)
+
+    def delivery_marks(s):
+        """The downloads the app handed over since the last answer: the page fetches each (DOWNLOAD_JS), then they're gone."""
+        marks = tuple(Div(I(cls="mojoui-download", hidden=True, data_url=url, data_name=name), hx_swap_oob="beforeend:body") for url, name in s.deliveries)
+        s.deliveries = []
+        return marks
 
     def jobs_ended(fd):
         """mojoui.jobs: a background job ended (its wake pipe is readable): App.jobs_message through every tab's update()
@@ -1696,10 +1878,28 @@ def make_app(module_dir):
     atexit.register(close_all)
 
     @app.get("/")
-    def index(req):
+    def index(req, boot: str = ""):
+        """A page load: a new app session, its first screen. Only a browser loading the page makes one (Sec-Fetch-Dest:
+        document, Sec-Fetch-Mode: navigate, not a prefetch), or the page itself (?boot=1, from a browser that sends no
+        Sec-Fetch headers): a link preview, a crawler or a script's plain GET gets the shell, which makes nothing (goal
+        62 M3). Public mode: past MAX_SESSIONS, a busy page."""
+        h = {k.lower(): v for k, v in req.headers.items()}
+        load = boot == "1" or (h.get("sec-fetch-dest") == "document" and h.get("sec-fetch-mode") == "navigate" and "prefetch" not in h.get("sec-purpose", ""))
+        if not load:
+            return Title("omxplorer" if not hasattr(mod, "title") else "omxcode"), Main(P("Opening…", cls="text caption"), id="mojoui-root", data_boot="1")
+        if PUBLIC:
+            with sessions_lock:
+                full = len(sessions) >= MAX_SESSIONS
+            if full:
+                return (Title("Busy"), Main(Div(H2("Busy right now", cls="text headline"),
+                                                P(f"{MAX_SESSIONS} visitors are exploring this copy, the most it holds at once. Try again in a few minutes.", cls="text"),
+                                                A("Try again", href="/", cls="button prominent"), cls="mojoui-busy-page"), id="mojoui-root"))
         sid = uuid.uuid4().hex  # one app session per page load (tab)
         s = Session(mod, shared=bool(loads))
-        s.origin = page_origin(req.url.scheme, req.url.netloc, {k.lower(): v for k, v in req.headers.items()})
+        s.origin = page_origin(req.url.scheme, req.url.netloc, h)
+        if hasattr(mod, "hosted"):  # (where this tab's documents go: its own folder in public mode, as the app likes else)
+            with s.lock:
+                mod.hosted(s.handle, str(file_folder(sid, "documents")) if PUBLIC else "", PUBLIC)
         with sessions_lock:
             sessions[sid] = s
             while len(sessions) > MAX_SESSIONS:
@@ -1783,6 +1983,8 @@ def make_app(module_dir):
             out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (mark,)
         if s.commands:  # (after the screen: a command can name a widget this answer puts on it)
             out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + (cmds_mark(s, oob=True),)
+        if s.deliveries:  # (files the app handed over: downloads, App.take_download)
+            out = (out if isinstance(out, tuple) else ((out,) if out != "" else ())) + delivery_marks(s)
         return out
 
     def changes_of(s, sid, d, n=-1, text="", number=0):
@@ -1873,6 +2075,10 @@ def make_app(module_dir):
             if v != s.shape or not 0 <= n < len(s.nodes):
                 return ""  # from an older screen (e.g. a double click on a row that's gone): ignore
             source = s.nodes[n]
+            s.last_active = time.monotonic()
+            if PUBLIC and second == 1 and takes_path(source):  # (a picker's, saver's or drop's path: only the host makes it)
+                print("REFUSED: a path for a file control sent as text", flush=True)
+                return ""
             if source["kind"] == TOGGLE:
                 number = 1 if on else 0
             if source["kind"] == CANVAS and number == KEY:
@@ -1902,6 +2108,7 @@ def make_app(module_dir):
         with s.lock:
             if s.closed:
                 return ""
+            s.last_active = time.monotonic()
             found = [i for i, node in enumerate(s.nodes) if node["kind"] == WEBCOMP and node["hint"] == tag and node["value"] == id]
             if not found:
                 return ""
@@ -2125,6 +2332,7 @@ def make_app(module_dir):
         with s.lock:
             if s.closed:
                 return ""
+            s.last_active = time.monotonic()
             d = json.loads(mod.resize(s.handle, w, h))
             s.nodes = json.loads(mod.view(s.handle))
             return changes(s, sid, d)
@@ -2144,7 +2352,7 @@ def make_app(module_dir):
     def file_folder(sid, kind="uploads"):
         """Where a page's files live where the app runs: uploads (FilePicker, a file drop) and downloads (FileSaver).
         Each folder names this server's process in `.owner`, so a later start can sweep what a crash left (sweep_files)."""
-        folder = (uploads_base() / sid) if kind == "uploads" else (uploads_base().parent / "downloads" / sid)
+        folder = (uploads_base() / sid) if kind == "uploads" else (uploads_base().parent / kind / sid)  # (downloads, documents)
         folder.mkdir(parents=True, exist_ok=True)
         owner = folder / ".owner"
         if not owner.exists():
@@ -2152,15 +2360,20 @@ def make_app(module_dir):
         return folder
 
     def forget_files(sid):
-        """A session ended: its uploads and downloads go."""
+        """A session ended: its uploads, downloads and documents go."""
         import shutil
-        for folder in (uploads_base() / sid, uploads_base().parent / "downloads" / sid):
+        for folder in (uploads_base() / sid, uploads_base().parent / "downloads" / sid, uploads_base().parent / "documents" / sid):
             shutil.rmtree(folder, ignore_errors=True)
 
     def too_big(name, limit):
         """A file over the upload limit: nothing kept, and the page says so (D-1704: it used to be skipped in silence)."""
-        print(f"UPLOAD: refused {name}: over OMXCODE_UPLOAD_MAX ({limit:,} bytes)", flush=True)
+        print(f"UPLOAD: refused a file over OMXCODE_UPLOAD_MAX ({limit:,} bytes)", flush=True)
         return notice(f"{name} wasn't uploaded: it's larger than this server's limit ({size_words(limit)}).")
+
+    def over_cap(name, cap):
+        """Public mode: this visitor's uploads would pass OMXCODE_VISITOR_MAX: nothing kept, and the page says so."""
+        print(f"UPLOAD: refused a file past the visitor's cap ({cap:,} bytes)", flush=True)
+        return notice(f"{name} wasn't uploaded: your files here would pass {size_words(cap)}, the most one visitor keeps.")
 
     @app.post("/save/{sid}")
     def save(sid: str, n: int, v: int = -1):
@@ -2197,11 +2410,13 @@ def make_app(module_dir):
     def download(sid: str, token: str):
         """A file a FileSaver's app wrote, as an attachment under its suggested name."""
         from starlette.responses import FileResponse
+        from starlette.background import BackgroundTask
         s = sessions.get(sid)
-        path = getattr(s, "downloads", {}).get(token) if s is not None else None
+        path = getattr(s, "downloads", {}).pop(token, None) if s is not None else None
         if path is None or not Path(path).exists():
             return Response(status_code=404)
-        return FileResponse(path, filename=Path(path).name)
+        # (once sent, it's gone: a download leaves nothing on the server, goal 62 M3)
+        return FileResponse(path, filename=Path(path).name, background=BackgroundTask(lambda: Path(path).unlink(missing_ok=True)))
 
     @app.post("/dropfile/{sid}")
     async def dropfile(sid: str, req):
@@ -2222,6 +2437,8 @@ def make_app(module_dir):
                 return ""
             msg = s.nodes[n]["msg2"]
         limit = upload_limit()
+        cap = visitor_limit()
+        s.last_active = time.monotonic()
         paths, refused = [], []
         for file in files:
             if s.closed:  # (evicted mid-upload: nothing more is written; D-1704)
@@ -2229,6 +2446,9 @@ def make_app(module_dir):
             name = safe_name(file.filename, "dropped")
             if (file.size or 0) > limit:
                 refused.append(too_big(name, limit))
+                continue
+            if cap and folder_bytes(uploads_base() / sid) + (file.size or 0) > cap:
+                refused.append(over_cap(name, cap))
                 continue
             try:
                 folder = file_folder(sid) / uuid.uuid4().hex[:12]
@@ -2276,11 +2496,19 @@ def make_app(module_dir):
         with s.lock:  # (from this screen, to a picker: checked before anything is written)
             if s.closed or v != s.shape or not 0 <= n < len(s.nodes) or not s.nodes[n]["msg2"]:
                 return ""
+            if PUBLIC and s.nodes[n]["kind"] != BUTTON:  # (public: only a FilePicker takes an upload)
+                return ""
+            s.last_active = time.monotonic()
         # each page its own folder; only a plain file name (no folders, no "..")
         name = safe_name(file.filename, "upload")
         limit = upload_limit()
         if (file.size or 0) > limit:
             return too_big(name, limit)
+        cap = visitor_limit()
+        if cap:  # (this visitor's uploads together: what's kept, plus this one, within the cap)
+            limit = min(limit, cap - folder_bytes(uploads_base() / sid))
+            if limit <= 0 or (file.size or 0) > limit:
+                return over_cap(name, cap)
         size = 0
         try:
             path = file_folder(sid) / name
@@ -2295,7 +2523,7 @@ def make_app(module_dir):
             return ""
         if size > limit:
             path.unlink(missing_ok=True)
-            return too_big(name, limit)
+            return over_cap(name, cap) if cap and limit < upload_limit() else too_big(name, limit)
         with s.lock:
             if s.closed:  # (evicted while it was written: its app is closed, D-1704; the file goes too)
                 forget_files(sid)
@@ -2310,7 +2538,7 @@ def make_app(module_dir):
             return changes(s, sid, d, n, str(path), 0)
 
     @app.get("/frame/{sid}/{n}")
-    def frame(sid: str, n: int, w: int = 0, h: int = 0, scale: float = 1, v: int = -1, tick: int = 0, still: int = 0):
+    def frame(sid: str, n: int, w: int = 0, h: int = 0, scale: float = 1, v: int = -1, tick: int = 0, still: int = 0, have: str = ""):
         """One canvas frame as a JPEG, painted by the app at w × h pixels. With tick=1 (the
         canvas asked for frames), a frame event goes to the app first. Changes to the rest of
         the screen wait in the session until the page asks for /pending. No frame: 204 with X-Mojoui-Retry (the screen
@@ -2344,6 +2572,12 @@ def make_app(module_dir):
             sess.nodes = json.loads(mod.view(sess.handle))
             rgba = ctypes.string_at(r["address"], r["width"] * r["height"] * 4)
             pending = bool(sess.pending and (sess.pending.get("rebuild") or sess.pending.get("patches"))) or bool(sess.commands)
+        # The picture the page already shows (`have`, the digest it was sent with) isn't sent again: a video drawn at the
+        # display's rate changes 15 times a second, and each unchanged picture was encoded and sent anyway (goal 62 M4)
+        pic = f"{zlib.crc32(rgba):08x}{r['width']:x}{r['height']:x}"
+        if have and have == pic:
+            return Response(status_code=204, headers={"Cache-Control": "no-store", "X-Mojoui-Same": "1", "X-Mojoui-Pending": "1" if pending else "0",
+                                                      "X-Mojoui-Again": "1" if r.get("again") else "0"})
         out = io.BytesIO()
         picture = Image.frombuffer("RGBA", (r["width"], r["height"]), rgba, "raw", "RGBA", 0, 1)
         clear = sess.nodes[n]["kind"] == CANVAS and sess.nodes[n]["size"] == 2 if 0 <= n < len(sess.nodes) else False
@@ -2357,7 +2591,7 @@ def make_app(module_dir):
             picture.save(out, "PNG", compress_level=1)
         return Response(out.getvalue(), media_type="image/jpeg" if tick else "image/png",
                         headers={"Cache-Control": "no-store", "X-Mojoui-Pending": "1" if pending else "0", "X-Mojoui-Again": "1" if r.get("again") else "0",
-                                 "X-Mojoui-Draw-Ms": f"{(time.perf_counter() - now) * 1000:.2f}"})
+                                 "X-Mojoui-Draw-Ms": f"{(time.perf_counter() - now) * 1000:.2f}", "X-Mojoui-Pic": pic})
 
     @app.get("/wait/{sid}")
     async def wait(sid: str):
@@ -2384,9 +2618,11 @@ def make_app(module_dir):
                 return "1"
             await asyncio.wait_for(ev.wait(), WAIT_S or None)
             if s.closed:
-                return "gone"
+                return "gone" + (" " + s.gone_reason if s.gone_reason else "")
             return "1" if has_changes(s) or s.busy != s.busy_sent else "0"
         except asyncio.TimeoutError:
+            return "0"
+        except asyncio.CancelledError:  # (the server is stopping: the page will find it gone, or back)
             return "0"
         finally:
             with s.waiters_lock:
@@ -2401,9 +2637,10 @@ def make_app(module_dir):
         with s.lock:
             if s.closed:
                 return ""
-            if s.pending is None:  # (nothing changed, but the page may have to stop waiting, or run a widget's command)
+            if s.pending is None:  # (nothing changed, but the page may have to stop waiting, run a widget's command, or download)
                 out = (busy_mark(s, oob=True),) if s.busy != s.busy_sent else ()
                 out += (cmds_mark(s, oob=True),) if s.commands else ()
+                out += delivery_marks(s) if s.deliveries else ()
                 return out or ""
             d, s.pending = s.pending, None
             return changes(s, sid, d)
@@ -2412,11 +2649,13 @@ def make_app(module_dir):
 
 
 if __name__ == "__main__":
-    module_dir = sys.argv[1] if len(sys.argv) > 1 else "build/hello/web"
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else 5001
+    module_dir = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("MOJOUI_MODULE", "build/hello/web")
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("PORT", "5001"))  # (a platform's port: $PORT)
+    host = os.environ.get("HOST", "127.0.0.1")  # (a container listens on 0.0.0.0: HOST)
     import uvicorn
 
-    print(f"mojoui web: http://127.0.0.1:{port}/", flush=True)
+    print(f"mojoui web: http://{host}:{port}/", flush=True)
     # timeout_graceful_shutdown: a page's /wait is held while the tab lives; a stop (Ctrl+C, a platform's redeploy)
     # waits at most 3 s for answers in flight instead of for every tab to close
-    uvicorn.run(make_app(module_dir), host="127.0.0.1", port=port, log_level="warning", timeout_graceful_shutdown=3)
+    uvicorn.run(make_app(module_dir), host=host, port=port, log_level="warning", timeout_graceful_shutdown=3,
+                proxy_headers=PUBLIC, forwarded_allow_ips="*" if PUBLIC else None)

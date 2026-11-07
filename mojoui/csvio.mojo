@@ -11,7 +11,7 @@ from omxcore import (read_csv as mx_read_csv, CsvOptions, CsvResult, Table, Shar
                      scan_parquet, ParquetScan, JobCtl)
 from mojoui.sheet import INT, DECIMAL, TEXT, DATE, BOOL, FLOAT, float_cell
 from mojoui.numformat import date_text, decimal_text
-from mojoui.shared import environment, memory_bytes
+from mojoui.shared import environment, memory_bytes, get_shared, put_shared, keep, at
 from std.time import perf_counter_ns
 
 
@@ -83,7 +83,11 @@ def read_csv(path: String, job: JobCtl = JobCtl()) raises -> CsvImport:
 
 
 def read_table(path: String, job: JobCtl = JobCtl()) raises -> CsvImport:
-    """A CSV or Parquet file (by its extension), as the Import step shows it."""
+    """A CSV or Parquet file (by its extension), as the Import step shows it. A file the process shared (share_file, from
+    App.init_shared) isn't read again: its columns are handed over as they are, read-only."""
+    var shared = shared_import(path)
+    if shared:
+        return shared.take()
     if path.lower().endswith(".parquet"):
         return read_parquet_file(path, job)
     return read_csv(path, job)
@@ -159,3 +163,56 @@ def read_parquet_file(path: String, job: JobCtl = JobCtl()) raises -> CsvImport:
     var seconds = Float64(perf_counter_ns() - t0) / 1e9
     var rows = t.rows()
     return CsvImport(path, rows, info^, List[String](), seconds, t^.share(), seconds, None, False)
+
+
+comptime SLOT_SHARED_FILES = 98  # mojoui.shared slot: the process's SharedFiles (its address; 0: none shared)
+
+
+struct SharedFiles(Movable):
+    """The files App.init_shared() read for the whole process (mojoui.starter): each one's path, its columns (one
+    SharedTable: copies share them), and what its Import step showed. Written before any session, read-only after."""
+
+    var paths: List[String]
+    var tables: List[SharedTable]
+    var rows: List[Int]
+    var columns: List[List[CsvColumn]]
+    var seconds: List[Float64]
+
+    def __init__(out self):
+        self.paths = List[String]()
+        self.tables = List[SharedTable]()
+        self.rows = List[Int]()
+        self.columns = List[List[CsvColumn]]()
+        self.seconds = List[Float64]()
+
+
+def share_file(path: String) raises -> Int:
+    """Reads a CSV or Parquet file once for the whole process (from App.init_shared, before any session): every later
+    read_table of the same path, in any session or job, gets these columns, read-only, instead of a new read (goal 62:
+    the hosted copy's visitors share its starter). Returns its rows. A file too big to read whole isn't shared."""
+    var imp = read_table(path)
+    if imp.streamed():
+        raise Error("too big to share (it would be streamed): " + path)
+    var addr = get_shared(SLOT_SHARED_FILES)
+    if addr == 0:
+        addr = keep(SharedFiles())
+        put_shared(SLOT_SHARED_FILES, addr)
+    ref f = at[SharedFiles](addr)[]
+    f.paths.append(path)
+    f.tables.append(imp.table)
+    f.rows.append(imp.rows)
+    f.columns.append(imp.columns.copy())
+    f.seconds.append(imp.seconds)
+    return imp.rows
+
+
+def shared_import(path: String) -> Optional[CsvImport]:
+    """The import of a file the process shared (share_file), over the same columns; None when it shared no such file."""
+    var addr = get_shared(SLOT_SHARED_FILES)
+    if addr == 0:
+        return None
+    ref f = at[SharedFiles](addr)[]
+    for i in range(len(f.paths)):
+        if f.paths[i] == path:
+            return CsvImport(path, f.rows[i], f.columns[i].copy(), List[String](), f.seconds[i], f.tables[i], 0.0, None, False)
+    return None

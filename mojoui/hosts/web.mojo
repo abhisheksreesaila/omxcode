@@ -283,6 +283,16 @@ def web_jobs[A: App](handle: Int) -> String:
     return diff_to_json(d, rt[].shown)
 
 
+def web_hosted[A: App](handle: Int, documents: String, public: Bool):
+    """App.hosted: this tab's own documents folder, and whether the app runs on the public internet (goal 62)."""
+    session_at[A](handle)[].app.hosted(documents, public)
+
+
+def web_take_download[A: App](handle: Int) -> String:
+    """App.take_download: a file or folder the app made for the person to keep ("" for none); web.py sends it."""
+    return session_at[A](handle)[].app.take_download()
+
+
 def web_wake_fd() -> Int:
     """The read end of the jobs' wake pipe (mojoui.jobs.wake_pipe): web.py's jobs thread blocks on it."""
     return wake_pipe()

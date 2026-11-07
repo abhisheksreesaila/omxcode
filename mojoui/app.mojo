@@ -177,6 +177,19 @@ trait App(Movable, Deinitable):
         (True). What it changes shows at the next update(). The default ignores it."""
         pass
 
+    def hosted(mut self, documents: String, public: Bool):
+        """The web host, once a tab's session starts (goal 62): `documents` is this visitor's own folder for what the app
+        would put in the person's documents (saves, exports, packs; "" to keep the app's own place), and `public` says
+        the app runs on the public internet (show file names, never server paths; hand files over with take_download).
+        The default ignores it."""
+        pass
+
+    def take_download(mut self) -> String:
+        """A file (or folder) the app just made for the person to keep, handed over once ("" for none): the web host sends
+        it to the browser as a download (a folder as one zip) and removes it from the server. Desktop hosts don't ask:
+        the file is already in the person's documents. The default: none."""
+        return ""
+
     def jobs_message(self) -> Int:
         """A message update() gets on the UI thread as soon as a background job started with mojoui.jobs.start_ui_job
         ends (0: none; the app polls its jobs on its own, e.g. at display frames). Every host watches the jobs' wake

@@ -132,7 +132,8 @@ from mojoui.linkdrag import LinkDrag, DropCard, column_values, match_columns, is
 from mojoui.timelane import TimeLane
 from mojoui.peek import Peek
 from mojoui.datagrid import GRID_HEADER_DRAG, GRID_HEADER_DROP
-from mojoui.links import Selection, CardRows, Follow, Reaction, Link, End, BY_AGENT, LINKS_ADD, REACT_SEEK, REACT_HIGHLIGHT, REACT_SELECT
+from mojoui.links import Selection, CardRows, Follow, Reaction, Link, End, BY_AGENT, BY_PERSON, LINKS_ADD, REACT_SEEK, REACT_HIGHLIGHT, REACT_SELECT, parse_link
+from mojoui.starter import Starter, Question, share_starter
 from mojoui.asksql import AskBook, implied_sql, lineage
 from mojoui.sqlname import sql_name
 from mojoui.documentset import DocumentSet, SET_MESSAGES
@@ -297,8 +298,17 @@ comptime DOCS_MSG = 7700  # folders of documents (mojoui.documentset): SET_MESSA
 comptime DOCS_CANVAS = 270
 comptime MAX_DOCS = 2
 comptime PICK_DOCS = 7750  # Insert > Documents…: a folder of PDFs (or one PDF) as a card
+comptime PUBLIC_PACK_ROWS = 20  # the public web copy packs at most this many rows (a download, and a job on a shared server)
 comptime PACK_DIR = "pack"  # Export pack writes <documents>/pack/<row's key>.pdf and .mp4
 comptime ASK_TEXT = 7751  # the Query dialog's "Ask in words" (taught with the SQL beside it: mojoui.asksql.AskBook)
+comptime STORY_START = 7800  # the Start screen's starter (OMX_STARTER, mojoui.starter): its story, one click (goal 62)
+comptime STORY_TOGGLE = 7801  # the toolbar's Story: the inspector shows the story's questions
+comptime STORY_RUN = 7810  # + k (k < STORY_MAX, 7810–7819): run the story's question k
+comptime STORY_MAX = 10
+comptime STORY_SHEET = 1  # story_step: its sheet being read, its tables being read, its documents opening, ready
+comptime STORY_TABLES = 2
+comptime STORY_DOCS = 3
+comptime STORY_READY = 4
 comptime LINKS_TOGGLE = 7682  # the toolbar's Links: the inspector shows the sheet's links
 comptime PEEK_CANVAS = 180
 comptime EDITOR_MSG = 4300  # the video editor (mojoui.mediatimeline: 64 messages, 3 canvases), opened from a video card's Edit
@@ -465,6 +475,13 @@ struct Main(App):
     var ld: LinkDrag  # a column being dragged onto a card, and the panel that confirms the link
     var peek: Peek  # a card held: what it's linked to
     var links_open: Bool  # the inspector shows the Links panel
+    var starter: Starter  # the starter the Start screen offers (OMX_STARTER; none: no folder)
+    var story_step: Int  # 0, or how far the starter's story has got (STORY_SHEET … STORY_READY)
+    var story_tables: Int  # the starter's tables landed so far
+    var story_open: Bool  # the inspector shows the story's questions
+    var docs_dir: String  # where documents go ("": OMX_DOCUMENTS or ~/Documents/omxplorer); the web host's per-visitor folder (App.hosted)
+    var public: Bool  # on the public internet (App.hosted): files the person keeps are handed over as downloads
+    var handover: String  # a file or folder made for the person to keep, until the host takes it (App.take_download)
     var docs: List[DocumentSet]  # folders of documents on the sheet (Board children after the logs)
     var doc_feeds: List[FolderFeed]  # their page pictures and reads (jobs), one per set
     var query_ask: String  # the Query dialog's question in words
@@ -600,6 +617,18 @@ struct Main(App):
         self.ld = LinkDrag(LINKDRAG_MSG)
         self.peek = Peek(PEEK_CANVAS, PEEK_FRAME)
         self.links_open = False
+        self.starter = Starter()
+        if environment("OMX_STARTER") != "":
+            try:
+                self.starter = Starter.read(environment("OMX_STARTER"))
+            except e:
+                print("STARTER: " + String(e), flush=True)
+        self.story_step = 0
+        self.story_tables = 0
+        self.story_open = False
+        self.docs_dir = ""
+        self.public = False
+        self.handover = ""
         self.docs = List[DocumentSet]()
         self.doc_feeds = List[FolderFeed]()
         self.query_ask = ""
@@ -617,7 +646,9 @@ struct Main(App):
 
     @staticmethod
     def init_shared():
-        pass
+        """The starter's tables, read once for every session of the process (mojoui.starter, goal 62): a visitor's
+        story reads them where they are. Nothing without OMX_STARTER."""
+        _ = share_starter(environment("OMX_STARTER"))
 
     def title(self) -> String:
         return "omxplorer" + (" · " + self.name if self.name != "" else "")
@@ -698,7 +729,7 @@ struct Main(App):
         D-184); an .omx document → straight to its sheet; a video or picture → a card on the sheet (a new one when none is
         open). A bare file name is looked up in the documents folder (OMX_DOCUMENTS), where Save puts documents."""
         if not path.startswith("/") and path.find("/") < 0 and not file_exists(path):
-            var docs = environment("OMX_DOCUMENTS", environment("HOME", ".") + "/Documents/omxplorer") + "/" + path
+            var docs = self.documents() + "/" + path
             if file_exists(docs):
                 self.open_path(docs)
                 return
@@ -814,9 +845,24 @@ struct Main(App):
                 return k
         return -1
 
+    def hosted(mut self, documents: String, public: Bool):
+        """The web host's word (App.hosted): this visitor's own documents folder, and whether it's the public copy."""
+        self.docs_dir = documents
+        self.public = public
+
+    def hand_over(mut self, path: String):
+        """A file or folder made for the person to keep: on the public copy the host sends it as a download (App.take_download)."""
+        if self.public:
+            self.handover = path
+
+    def take_download(mut self) -> String:
+        var h = self.handover
+        self.handover = ""
+        return h
+
     def documents(self) -> String:
-        """Where Save, Export CSV and reels put files (OMX_DOCUMENTS), made when missing."""
-        var d = environment("OMX_DOCUMENTS", environment("HOME", ".") + "/Documents/omxplorer")
+        """Where Save, Export CSV and reels put files (the web host's folder for this visitor, else OMX_DOCUMENTS), made when missing."""
+        var d = self.docs_dir if self.docs_dir != "" else environment("OMX_DOCUMENTS", environment("HOME", ".") + "/Documents/omxplorer")
         try:
             make_dir(d)
         except:
@@ -854,6 +900,12 @@ struct Main(App):
             self.message = "Couldn't add " + file_name(path) + ": " + String(e)
             self.say(Activity.error("Couldn't add " + file_name(path), String(e)))
         self.version += 1
+        if self.story_step == STORY_TABLES:
+            for t in self.starter.tables:
+                if path == self.starter.path(t):
+                    self.story_tables += 1
+            if self.story_tables >= len(self.starter.tables):
+                self.story_tables_read()
 
     def take_index(mut self):
         """A log's key index that finished building: kept; the slice asked for meanwhile runs now."""
@@ -891,7 +943,8 @@ struct Main(App):
             self.script_landed(sa.take())
         var x = self.work.take_export()
         if x:
-            self.message = "Exported " + file_name(x.value().path) + " to your documents"
+            self.message = "Exported " + file_name(x.value().path) + (", downloading" if self.public else " to your documents")
+            self.hand_over(x.value().path)
             self.say(Activity.done(file_name(x.value().path), grouped(x.value().rows) + " rows exported"))
             self.version += 1
         if self.work.problem != "":
@@ -1251,9 +1304,101 @@ struct Main(App):
             if self.trace:
                 print("DOCUMENTS: " + self.docs[k].name + " " + String(len(self.docs[k].files)) + " documents", flush=True)
         except e:
-            self.message = "Couldn't open " + path + ": " + String(e)
+            self.message = "Couldn't open " + file_name(path) + ": " + String(e)
             self.say(Activity.error("Couldn't open " + file_name(path), String(e)))
         self.version += 1
+        if self.story_step == STORY_DOCS:
+            self.story_ready()
+
+    # ---------- the starter's story (mojoui.starter, goal 62): one click on the Start screen plays its set-up ----------
+
+    def start_story(mut self):
+        """The starter's sheet first (read in a job, or shared: OMX_STARTER's files were read once for the process);
+        each step's end starts the next: its tables, its links, its featured row, its documents. The questions show at once."""
+        if not self.starter.has():
+            return
+        self.story_step = STORY_SHEET
+        self.story_tables = 0
+        self.story_open = True
+        self.links_open = False
+        if self.trace:
+            print("STORY: start " + self.starter.title, flush=True)
+        self.open_path(self.starter.path(self.starter.sheet))
+
+    def story_sheet_read(mut self):
+        """The sheet is read: straight to it (the Import step is the starter's to skip), then its tables."""
+        self.to_sheet()
+        self.story_step = STORY_TABLES
+        self.inspector_open = True
+        for t in self.starter.tables:
+            self.add_table_file(self.starter.path(t))
+        if len(self.starter.tables) == 0:
+            self.story_tables_read()
+
+    def story_tables_read(mut self):
+        """Its tables are cards: its links, typed as a person would; its featured row followed; its documents opened."""
+        self.story_step = STORY_DOCS
+        self.know_tables()
+        for text in self.starter.links:
+            try:
+                _ = self.links.add(parse_link(text, BY_PERSON))
+            except e:
+                print("STORY: link " + text + ": " + String(e), flush=True)
+        self.resolve_links()
+        self.sync_lanes()
+        self.story_hero()
+        if self.starter.documents != "":
+            self.open_documents(self.starter.path(self.starter.documents))
+        else:
+            self.story_ready()
+
+    def story_hero(mut self):
+        """The run the story opens on: its row picked, as a tap on it would, so its video and lanes show."""
+        var row = -1
+        for r in range(self.frame.rows()):
+            if self.frame.plain_text(0, r) == self.starter.hero:
+                row = r
+                break
+        if row < 0:
+            return
+        self.grid.select(row, 0)
+        self.grid.reveal_cell(row, 0, self.frame)
+        self.select_cell(row, 0)
+        if len(self.links.for_card(self.name)) > 0:
+            self.followed_row = row
+            self.followed_links = self.links.changed
+            self.follow_selection(self.sheet_selection(), -1)
+
+    def story_ready(mut self):
+        self.story_step = STORY_READY
+        if self.trace:
+            print("STORY: ready · " + String(len(self.links)) + " links · " + String(len(self.tables)) + " table cards", flush=True)
+        self.say(Activity.done(self.starter.title, "ready: run a question"))
+        self.version += 1
+
+    def run_question(mut self, k: Int):
+        """The story's question k, as the Query dialog runs it (its words taught with its SQL): the answer is a card."""
+        if k >= len(self.starter.questions):
+            return
+        self.query_ask = self.starter.questions[k].question
+        self.query_text = self.starter.questions[k].sql
+        self.query_name = self.starter.questions[k].name
+        self.run_query()
+
+    def story_panel(self) -> List[View]:
+        """The inspector's Story: the starter's words, each question with its SQL and a Run, and whose data it is."""
+        var parts = List[View]()
+        parts.append(Text(self.starter.title, HEADLINE))
+        parts.append(Text(self.starter.lead, CAPTION))
+        for k in range(min(len(self.starter.questions), STORY_MAX)):
+            parts.append(VStack(Text(self.starter.questions[k].question),
+                                Text(self.starter.questions[k].sql, CAPTION),
+                                HStack(Spacer(), Button("Run", STORY_RUN + k, PROMINENT, icon="play").tag("run-question-" + String(k + 1))).fill(),
+                                spacing=6).fill().align(START).tag("question-" + String(k + 1)))
+        parts.append(Text(self.starter.credit, CAPTION))
+        var out = List[View]()
+        out.append(VStack(parts^, spacing=14).fill().align(START).tag("questions"))
+        return out^
 
     def docs_busy(self) -> Bool:
         for k in range(len(self.doc_feeds)):
@@ -1647,6 +1792,7 @@ struct Main(App):
             return
         var folder = self.documents() + "/" + PACK_DIR
         make_dir(folder)
+        var most = PUBLIC_PACK_ROWS if self.public else c.sheet.rows()  # (the public copy: a pack is a download, kept small)
         var job = PackJob(self.video.found)
         var keep = c.grid.cur_row
         var keep_col = c.grid.cur_col
@@ -1655,6 +1801,9 @@ struct Main(App):
         for row in range(c.sheet.rows()):
             if not c.sheet.alive(row):
                 continue
+            if n >= most:
+                self.message = "The web copy packs the first " + String(most) + " rows: ask for fewer to pack them all"
+                break
             var key = c.sheet.display(0, row)
             var title = capital(key_name.replace("_", " ")) + " " + key
             var p = Pack(title, c.name + (" · " + self.query_ask if self.query_ask != "" else String("")), "omxplorer · " + self.sheet_name + " · " + c.name + " row " + String(row + 1))
@@ -1801,7 +1950,8 @@ struct Main(App):
         var job = self.packing.take()
         try:
             var r = job.result()
-            self.message = "Packed " + self.pack_card + ": " + String(len(r.pdfs)) + " PDFs and " + String(len(r.clips)) + " clips in your documents (" + PACK_DIR + ")"
+            self.message = "Packed " + self.pack_card + ": " + String(len(r.pdfs)) + " PDFs and " + String(len(r.clips)) + (" clips, downloading as one file" if self.public else " clips in your documents (" + PACK_DIR + ")")
+            self.hand_over(self.documents() + "/" + PACK_DIR)
             self.say(Activity.done("Packed " + self.pack_card, String(len(r.pdfs)) + " PDFs · " + String(len(r.clips)) + " clips · " + fixed(r.milliseconds / 1000.0, 1) + " s"))
             if self.trace:
                 print("JOB: landed pack " + self.pack_card + " " + String(len(r.pdfs)) + " pdfs " + String(len(r.clips)) + " clips " + fixed(r.milliseconds, 1) + " ms", flush=True)
@@ -2297,6 +2447,8 @@ struct Main(App):
         self.screen = IMPORT
         self.message = ""
         remember(APP, path, self.recent)
+        if self.story_step == STORY_SHEET and path == self.starter.path(self.starter.sheet):
+            self.story_sheet_read()
 
     def shape_of(self, c: Int) -> List[Float64]:
         """A column's distribution over every row, for the header's small histogram."""
@@ -3115,6 +3267,23 @@ struct Main(App):
 
     def handle(mut self, event: Event):
         var m = event.message
+        if m == STORY_START:
+            self.start_story()
+            self.version += 1
+            return
+        if m == STORY_TOGGLE:
+            self.story_open = not self.story_open
+            if self.story_open:
+                self.inspector_open = True
+                self.links_open = False
+            self.version += 1
+            return
+        if m >= STORY_RUN and m < STORY_RUN + STORY_MAX:
+            self.run_question(m - STORY_RUN)
+            self.version += 1
+            return
+        if m == INSERT_PIVOT or m == INSERT_CHART or m == LINKS_TOGGLE or m == TOGGLE_INSPECTOR:
+            self.story_open = False  # (the inspector turns to what was asked for)
         if self.editor and self.editor.value().owns(m):  # (the editor over the window: its own messages)
             _ = self.editor.value().update(event)
             self.feed.poll(self.editor.value())
@@ -3492,15 +3661,15 @@ struct Main(App):
             self.picking = 0
             self.version += 1
         elif m == SAVE:
-            var folder = environment("OMX_DOCUMENTS", environment("HOME", ".") + "/Documents/omxplorer")
-            make_dir(folder)
-            var path = folder + "/" + self.name + ".omx"
+            var folder = self.documents()
+            var path = folder + "/" + (self.name if self.name != "" else "omxplorer") + ".omx"
             try:
                 var tabs: List[String] = [self.sheet_name, self.report_name]
                 save_omx(path, self.frame, self.objects, self.tiles, self.filter, tabs)
                 self.source = path
                 remember(APP, path, self.recent)
-                self.message = "Saved " + path
+                self.message = "Saved " + file_name(path) if self.public else "Saved " + path
+                self.hand_over(path)
             except e:
                 self.message = "Couldn't save: " + String(e)
             self.version += 1
@@ -4093,7 +4262,7 @@ struct Main(App):
         if len(self.recent) == 0:
             recent.append(HStack(Text("Files you open show up here.", CAPTION), Spacer()).fill())
         for k in range(min(len(self.recent), 6)):
-            recent.append(HStack(Icon("file", 16), Text(file_name(self.recent[k])), Text(self.recent[k], CAPTION), Spacer(),
+            recent.append(HStack(Icon("file", 16), Text(file_name(self.recent[k])), Text("" if self.public else self.recent[k], CAPTION), Spacer(),  # (the public copy: names, never server paths)
                                  Button("Open", RECENT + k, SUBTLE), spacing=12).fill().align(CENTER))
         var samples = HStack(
             Card(Text("Orders", HEADLINE), Text("1M rows · a year of sales by region, product and carrier", CAPTION), Spacer(),
@@ -4103,16 +4272,22 @@ struct Main(App):
             Card(Text("Taxi trips", HEADLINE), Text("100M rows · a GPU workout (docs/scale.md)", CAPTION), Spacer(), Text("Coming with MX frame", CAPTION), spacing=8).width(330).height(150),
             spacing=16,
         )
-        var main = VStack(
-            Text("Open a file", HEADLINE),
-            drop,
-            Text("Recent", HEADLINE),
-            Card(VStack(recent^, spacing=8).fill(), spacing=8).fill(),
-            Text("Try a sample", HEADLINE),
-            samples,
-            Text(self.message, CAPTION).tone(TONE_WARN) if self.message != "" else Spacer(),
-            spacing=16,
-        ).grow().align(START)
+        var top = List[View]()
+        if self.starter.has():  # (a starter: its story first, one click, goal 62)
+            top.append(Text("Try the story", HEADLINE))
+            top.append(Card(HStack(Icon("bot", 28),
+                                   VStack(Text(self.starter.title, HEADLINE), Text(self.starter.lead, CAPTION),
+                                          Text(self.starter.credit, CAPTION), spacing=4).align(START),
+                                   Spacer(), Button(self.starter.start, STORY_START, PROMINENT, icon="play").tag("story-start"), spacing=16).fill().align(CENTER),
+                            spacing=0).fill().tag("starter"))
+        top.append(Text("Open a file", HEADLINE))
+        top.append(drop^)
+        top.append(Text("Recent", HEADLINE))
+        top.append(Card(VStack(recent^, spacing=8).fill(), spacing=8).fill())
+        top.append(Text("Try a sample", HEADLINE))
+        top.append(samples^)
+        top.append(Text(self.message, CAPTION).tone(TONE_WARN) if self.message != "" else Spacer())
+        var main = VStack(top^, spacing=16).grow().align(START)
         var body = HStack(sidebar, main, spacing=24).padding(24, 32).fill().grow().align(STRETCH)
         var parts = List[View]()
         parts.append(self.menu_bar())
@@ -4419,7 +4594,9 @@ struct Main(App):
         var streamed = self.frame.streamed()  # (from disk, editable: D-213)
         var left: List[Tool] = [Tool("Save", "save", SAVE, False, "Save the document (Ctrl+S)"), Tool("Undo", "undo", UNDO, False, "Undo the last change (Ctrl+Z)")]
         var right: List[Tool] = [Tool("Links", "share", LINKS_TOGGLE, self.links_open, "The links on this sheet (" + String(len(self.links)) + "): see, unlink, set a time offset"),
-                                 Tool("Format", "format", TOGGLE_INSPECTOR, self.inspector_open and not self.links_open, "Show or hide the inspector (Ctrl+Shift+I)")]
+                                 Tool("Format", "format", TOGGLE_INSPECTOR, self.inspector_open and not self.links_open and not self.story_open, "Show or hide the inspector (Ctrl+Shift+I)")]
+        if self.story_step > 0:
+            right.insert(0, Tool("Story", "book-open", STORY_TOGGLE, self.story_open, "The story's questions, each with its SQL: Run one"))
         var extra = List[View]()
         if streamed:
             extra.append(Text("Streamed from disk", CAPTION).tone(TONE_ACCENT).tooltip("This file is bigger than memory: its rows are read from disk as they're shown, and your edits are kept beside it until you save").tag("streamed"))
@@ -4600,6 +4777,8 @@ struct Main(App):
         return sections^
 
     def inspector(self) -> View:
+        if self.story_open and self.starter.has():  # (the starter's story: its questions, each with its SQL and a Run)
+            return Inspector(["Story"], 0, STORY_TOGGLE, self.story_panel(), INSPECTOR_W)
         if self.links_open:  # (the toolbar's Links: the sheet's links, their offsets, Unlink)
             return Inspector(["Links"], 0, LINKS_TOGGLE, self.links.panel(), INSPECTOR_W)
         if self.sheet_tab == 1:

@@ -281,7 +281,7 @@ struct DocumentSet(Movable):
     def view(self) -> View:
         var b = self.msg_base
         var top = List[View]()
-        top.append(Text(self.name, HEADLINE).tag("documents-title").tooltip(String(len(self.files)) + " documents in " + self.folder))
+        top.append(Text(self.name, HEADLINE).tag("documents-title").tooltip(String(len(self.files)) + " documents in " + self.name))  # (the folder's name: a hosted copy shows no server path)
         if self.card.w >= 680:  # (narrower: the count is in the title's tooltip and the file list)
             top.append(Text(String(len(self.files)) + (" document" if len(self.files) == 1 else " documents"), CAPTION).tone(TONE_ACCENT))
         top.append(Spacer())

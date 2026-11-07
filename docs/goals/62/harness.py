@@ -198,21 +198,23 @@ class Net:
     (Network.loadingFinished's encodedDataLength: bytes on the wire for that request)."""
 
     def __init__(self, page):
-        self.events = []  # (perf time, kind, url, bytes)
+        self.events = []  # (perf time, kind, url, bytes, status)
         self.urls = {}
+        self.status = {}
         self.cdp = page.context.new_cdp_session(page)
         self.cdp.send("Network.enable")
         self.cdp.on("Network.requestWillBeSent", self._req)
         self.cdp.on("Network.loadingFinished", self._done)
-        self.cdp.on("Network.webSocketFrameReceived", lambda e: self.events.append((time.perf_counter(), "ws", "", len(e["response"]["payloadData"]))))
-        self.cdp.on("Network.webSocketCreated", lambda e: self.events.append((time.perf_counter(), "ws-open", e.get("url", ""), 0)))
+        self.cdp.on("Network.responseReceived", lambda e: self.status.__setitem__(e["requestId"], e["response"]["status"]))
+        self.cdp.on("Network.webSocketFrameReceived", lambda e: self.events.append((time.perf_counter(), "ws", "", len(e["response"]["payloadData"]), 101)))
+        self.cdp.on("Network.webSocketCreated", lambda e: self.events.append((time.perf_counter(), "ws-open", e.get("url", ""), 0, 101)))
 
     def _req(self, e):
         self.urls[e["requestId"]] = e["request"]["url"]
-        self.events.append((time.perf_counter(), "request", e["request"]["url"], 0))
+        self.events.append((time.perf_counter(), "request", e["request"]["url"], 0, 0))
 
     def _done(self, e):
-        self.events.append((time.perf_counter(), "response", self.urls.get(e["requestId"], ""), int(e.get("encodedDataLength", 0))))
+        self.events.append((time.perf_counter(), "response", self.urls.get(e["requestId"], ""), int(e.get("encodedDataLength", 0)), self.status.get(e["requestId"], 0)))
 
     def since(self, t0, kinds=("response", "ws")):
         return [ev for ev in self.events if ev[0] >= t0 and ev[1] in kinds]

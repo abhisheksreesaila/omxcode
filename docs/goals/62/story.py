@@ -7,7 +7,7 @@ Chromium), no agent link, no upload. One visitor per process, so M5 can run N at
 Beats: start (one click on the Start screen: the fleet linked to its telemetry, clips and paper, F00118 on screen),
 pivot (n by lab × outcome, chosen in the inspector), video (F00118 plays: distinct pictures a second, bytes per new
 picture), question 1 (regrasps: 2,997 rows) and question 2 (the 4 fastest), each one click on Run (click → rows shown),
-pack (Export pack arrives as one download). Writes results.json in --out and prints one JSON line at the end."""
+pack (question 3, the three picked failures, then Export pack: it arrives as one download). Writes results.json in --out and prints one JSON line at the end."""
 
 import argparse
 import json
@@ -93,7 +93,8 @@ class Visitor:
         took = None
         while time.perf_counter() - t0 < timeout:
             objs = " | ".join(self.objects())
-            if TRUTH["fleet"] in page.inner_text("body") and TRUTH["telemetry"] in objs and "video" in objs.lower() and "questions" in objs.lower():
+            if (TRUTH["fleet"] in page.inner_text("body") and TRUTH["telemetry"] in objs and "video" in objs.lower() and "track" in objs.lower()
+                    and "documents" in objs.lower() and page.locator("[data-tag=questions]").count()):
                 took = time.perf_counter() - t0
                 break
             page.wait_for_timeout(250)
@@ -101,9 +102,10 @@ class Visitor:
         objs = self.objects()
         self.R["timings"]["start_s"] = round(took, 2) if took else None
         self.R["start_objects"] = objs
-        links = page.inner_text("body").count("Unlink")
-        ok = took is not None and TRUTH["hero"] in " ".join(objs)
-        return self.beat("start", ok, f"{'%.1f s' % took if took else 'never'}; {len(objs)} cards; {links} links shown; " + "; ".join(o[:60] for o in objs))
+        hero = [o for o in objs if o.startswith("video") and TRUTH["hero"] in o]  # (its clip: the fleet's row followed through the links)
+        lanes = [o for o in objs if o.startswith("track") and "244 rows" in o]  # (its telemetry's slice: the key link)
+        ok = took is not None and bool(hero) and bool(lanes)
+        return self.beat("start", ok, f"{'%.1f s' % took if took else 'never'}; {len(objs)} cards: " + "; ".join(o[:60] for o in objs))
 
     def pivot(self):
         page = self.page
@@ -139,12 +141,13 @@ class Visitor:
         frames = [e for e in self.net.events[n0:] if e[1] == "response" and "/frame/" in e[2]]
         node = page.get_attribute(vsel, "data-node")
         vframes = [e for e in frames if f"/frame/" in e[2] and f"/{node}?" in e[2]]
-        vbytes = sum(e[3] for e in vframes)
-        # bytes of the new pictures alone: each distinct picture once, at the average size of a frame answer
-        per = (vbytes / len(vframes)) if vframes else 0
+        vbytes = sum(e[3] for e in vframes)  # (every answer for the video canvas: pictures, and "same" answers' headers)
+        pictures = [e for e in vframes if e[4] == 200]
+        # the new pictures' bytes: each distinct picture shown once, at the average size of an answer that carried one
+        per = (sum(e[3] for e in pictures) / len(pictures)) if pictures else 0
         new_bytes = per * sample["distinct"]
         ratio = (vbytes / new_bytes) if new_bytes else None
-        sample.update({"frameAnswers": len(vframes), "videoBytes": vbytes, "allFrameBytes": sum(e[3] for e in frames),
+        sample.update({"frameAnswers": len(vframes), "pictureAnswers": len(pictures), "videoBytes": vbytes, "allFrameBytes": sum(e[3] for e in frames),
                        "bytesPerNewPictureRatio": round(ratio, 2) if ratio else None, "secsSinceClick": round(t0 - t_click, 2)})
         self.R["timings"]["video"] = sample
         try:
@@ -158,6 +161,9 @@ class Visitor:
 
     def question(self, k, name, rows_re, expect):
         page = self.page
+        if not page.locator("[data-tag=questions]").count():  # (the inspector turned to a pivot: back to the story, as a visitor would)
+            page.locator("button[data-kind=button]", has_text=re.compile(r"^\s*Story\s*$")).first.click()
+            try_settle(page)
         run = page.locator(f"[data-tag=questions] button[data-tag=run-question-{k}]").first
         run.wait_for(timeout=30000)
         page.evaluate(WATCH, [rf"\b{name}\b", rows_re])
@@ -181,10 +187,10 @@ class Visitor:
         self.R["questions_text"] = text[:2000]
         return self.beat("questions in words with their SQL", ok, text[:200], shot=False)
 
-    def pack(self, name="regrasped"):
+    def pack(self, name="picked"):
         page = self.page
-        card = page.locator("[data-kind=object]", has_text=re.compile(rf"\b{name}\b")).last
-        btn = card.locator("button", has_text=re.compile(r"Export pack")).first
+        card = page.locator("[data-tag^=tablecard]:has(button[data-tag=export-pack])", has_text=re.compile(rf"\b{name}\b")).last
+        btn = card.locator("button[data-tag=export-pack]").first
         with page.expect_download(timeout=300000) as dl:
             btn.click()
         d = dl.value
@@ -215,7 +221,8 @@ def play(page, out, net, pack=True, video=True):
         v.question(1, "regrasped", r"2,997", TRUTH["regrasps"])
         v.question(2, "fastest", r"\b4 rows", TRUTH["fastest"])
         if pack:
-            v.pack()
+            v.question(3, "picked", r"\b3 rows", "3 rows")
+            v.pack("picked")
     except Exception as e:
         v.beat("crashed", False, repr(e)[:400])
     return v.R

@@ -29,6 +29,9 @@ from mojoui.view import View, Text, Button, Canvas, HStack, Spacer, Card, HEADLI
 from omxcore import Catalog, Table, sql
 from mojoui.sqlname import sql_name  # (kept importable from here; links.mojo needs it without omxcore)
 
+comptime COMPACT_W = 560  # a card narrower than this shows its buttons as icons (goal 62)
+comptime STACK_W = 420  # … and narrower than this, on a row of their own under its title
+comptime TABLE_ROW_H = 30  # that row's height
 comptime ACTION_MIN_W = 460  # a card with its own action (act_with): its name, size, the action, Export CSV and Remove in one title bar
 comptime TABLE_MESSAGES = 4  # a card's block: its grid's gestures (0), Export CSV (1), close (2), its action (3)
 comptime TC_GRID = 0
@@ -354,13 +357,27 @@ struct TableCards(Movable, Sized):
         parts.append(Spacer())
         if c.note != "" and c.w >= 560:  # (where it came from, when there's room: else in the title's tooltip)
             parts.append(Text(c.note, CAPTION))
+        # A narrow card (a Board's tiles split as cards arrive: 260 points at 1440×900, goal 62) keeps every button: icons
+        # only under COMPACT_W (their words stay as tooltips and names), and on a row of their own under STACK_W, so the
+        # grid never covers them. Three slots either way (title bar, button row, grid): only what's in them changes.
+        var style = ICON_ONLY if c.w < COMPACT_W else SUBTLE
+        var acts = List[View]()
         if c.action != "":
-            parts.append(Button(c.action, self.msg(k) + TC_ACTION, SUBTLE, icon=c.action_icon).tag(c.action_tag).tooltip(c.action_tip))
-        parts.append(Button("Export CSV", self.msg(k) + TC_EXPORT, SUBTLE, icon="download").tag("export-" + name.replace("_", "-"))
-                     .tooltip("Save " + c.name + " as " + name + ".csv in your documents"))
-        parts.append(Button("Remove", self.msg(k) + TC_CLOSE, ICON_ONLY, icon="close").tag("close-" + name.replace("_", "-")).tooltip("Close " + c.name))
+            acts.append(Button(c.action, self.msg(k) + TC_ACTION, style, icon=c.action_icon).tag(c.action_tag).tooltip(c.action_tip))
+        acts.append(Button("Export CSV", self.msg(k) + TC_EXPORT, style, icon="download").tag("export-" + name.replace("_", "-"))
+                    .tooltip("Save " + c.name + " as " + name + ".csv in your documents"))
+        acts.append(Button("Remove", self.msg(k) + TC_CLOSE, ICON_ONLY, icon="close").tag("close-" + name.replace("_", "-")).tooltip("Close " + c.name))
+        var row = List[View]()
+        if c.w < STACK_W:
+            row.append(Spacer())
+            for a in acts:
+                row.append(a.copy())
+        else:
+            for a in acts:
+                parts.append(a.copy())
         var head = HStack(parts^, spacing=8).fill().align(CENTER).height(TABLE_HEAD_H)
+        var buttons = HStack(row^, spacing=4).fill().align(CENTER).height(TABLE_ROW_H if c.w < STACK_W else 0)
         var grid = Canvas(self.canvas(k), version + c.grid.version, on_gesture=self.msg(k) + TC_GRID, keys=True).fill().grow().tag("table-" + name.replace("_", "-"))
         grid = grid^.label("Table " + c.name + ", " + c.facts())  # (a drawn grid: its name for a screen reader)
         grid = grid^.settable("row", 1, Float64(max(rows, 1)))  # (an agent picks a row by its number: SET_TO, as a tap would)
-        return Card(head^, grid^, spacing=4)
+        return Card(head^, buttons^, grid^, spacing=4)

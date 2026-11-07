@@ -6,7 +6,7 @@ from std.python.bindings import PythonModuleBuilder
 
 from app import Main
 from mojoui.shared import shared_loads
-from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_jobs, web_wake_fd, web_widget_event, web_reply, web_commands, web_assets, web_set_widget, web_spot
+from mojoui.hosts.web import web_init_shared, web_new, web_title, web_view, web_event, web_image, web_rows, web_close, web_draw, web_gesture, web_frame, web_theme, web_theme_key, web_key, web_cancel, web_describe, web_resize, web_appearance, web_logo, web_poll, web_wake_in, web_jobs, web_wake_fd, web_widget_event, web_reply, web_commands, web_assets, web_set_widget, web_spot, web_hosted, web_take_download
 
 
 @export
@@ -42,6 +42,8 @@ def PyInit_mojoui_app() abi("C") -> PythonObject:
         m.def_function[set_widget]("set_widget", docstring="An agent's set (tag, id, field, value JSON): the widget's built-in mojoui.set command; True if sent.")
         m.def_function[assets]("web_assets", docstring="App.web_assets(): the bundles the page loads, as a JSON list.")
         m.def_function[wake_in]("wake_in", docstring="Microseconds until poll() has something to do (-1: nothing until the next event).")
+        m.def_function[hosted]("hosted", docstring="App.hosted (handle, documents folder, public): where this tab's documents go, and whether the app is on the public internet.")
+        m.def_function[take_download]("take_download", docstring="App.take_download: a file or folder the app made for the person to keep ('' for none).")
         return m.finalize()
     except e:
         abort(String("mojoui: couldn't create the Python module: ", e))
@@ -166,3 +168,12 @@ def commands(handle: PythonObject) raises -> PythonObject:
 
 def assets() raises -> PythonObject:
     return PythonObject(web_assets[Main]())
+
+
+def hosted(handle: PythonObject, documents: PythonObject, public: PythonObject) raises -> PythonObject:
+    web_hosted[Main](Int(py=handle), String(py=documents), Int(py=public) != 0)
+    return PythonObject(None)
+
+
+def take_download(handle: PythonObject) raises -> PythonObject:
+    return PythonObject(web_take_download[Main](Int(py=handle)))

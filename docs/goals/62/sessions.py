@@ -106,8 +106,8 @@ def run_all(out):
             import story as S
             v = S.Visitor(page, out / "pack-visitor", Net(page))
             v.start()
-            v.question(1, "regrasped", r"2,997", "2,997")
-            ok = v.pack()
+            v.question(3, "picked", r"\b3 rows", "3 rows")
+            ok = v.pack("picked")
             page.wait_for_timeout(2000)
             left = files_under(srv.out)
             pk = v.R.get("pack", {})

@@ -88,7 +88,8 @@ def make_dir(path: String):
 
 
 def memory_bytes() -> Int:
-    """The machine's memory (Linux: /proc/meminfo); 8 GB where it can't be read. OMX_MEMORY_BYTES stands in for it
+    """The machine's memory (Linux: /proc/meminfo, or the cgroup's memory.max when that's lower: a container's or a
+    scope's limit); 8 GB where it can't be read. OMX_MEMORY_BYTES stands in for it
     (checks use it to act as a smaller machine: what streams, what a sort may hold)."""
     var asked = environment("OMX_MEMORY_BYTES")
     if asked != "":
@@ -96,12 +97,20 @@ def memory_bytes() -> Int:
             return Int(asked)
         except:
             pass
+    var total = 8 << 30
     try:
         with open("/proc/meminfo", "r") as f:
             for line in f.read().split("\n"):
                 if line.startswith("MemTotal:"):
                     var parts = line.split()
-                    return Int(parts[1]) * 1024
+                    total = Int(parts[1]) * 1024
     except:
         pass
-    return 8 << 30
+    try:  # (in a container, or a systemd scope held to a limit: the limit is the memory there is, goal 62)
+        with open("/sys/fs/cgroup/memory.max", "r") as f:
+            var limit = String(f.read().strip())
+            if limit != "max" and limit != "":
+                total = min(total, Int(limit))
+    except:
+        pass
+    return total
