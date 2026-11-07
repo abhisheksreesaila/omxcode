@@ -2,7 +2,9 @@
 fh-saas's docs say (the standard app shape in its skill: create_auth_beforeware with setup_tenant_db=False and the
 session cache, handle_login_request / handle_oauth_callback, require_tenant_access in routes that touch tenant data,
 the billing orchestrator's webhook). The only change is where Google lives: GoogleAppClient's endpoints point at the
-bench's OAuth stand-in (as examples/saas's SAAS_OAUTH_* do).
+bench's OAuth stand-in (as examples/saas's SAAS_OAUTH_* do). And (goal 60 round 3, D-6026) every SQLite connection it opens
+runs in WAL mode with synchronous=NORMAL, the durability omxcode's pool uses, set the way SQLAlchemy documents (an
+Engine "connect" listener), so the two run the same durability: the strongest fair fh-saas deployment.
 
     cd <data dir> && pixi run -e fhsaas uvicorn --app-dir bench/fhsaas app:app --port N --workers W
 env: FH_OAUTH_BASE (the stand-in), GOOGLE_CLIENT_ID/SECRET, STRIPE_*, DB_TYPE=SQLITE, DB_NAME, FH_SECRET
@@ -13,12 +15,23 @@ import time
 
 from fasthtml.common import FastHTML, JSONResponse, RedirectResponse
 from fasthtml.oauth import GoogleAppClient
-from sqlalchemy import text
+from sqlalchemy import text, event
+from sqlalchemy.engine import Engine
 
 from fh_saas.utils_auth import create_auth_beforeware, handle_login_request, handle_oauth_callback, require_tenant_access
 from fh_saas.utils_billing import BillingConfig, register_billing_routes, _build_default_stores
 from fh_saas.utils_stripe import StripeService
 from starlette.responses import Response
+
+@event.listens_for(Engine, "connect")
+def _sqlite_wal(dbapi_connection, _record):
+    """WAL + synchronous=NORMAL on every SQLite connection (host and tenant databases), as omxcode's Pool does."""
+    if type(dbapi_connection).__module__.startswith("sqlite3"):
+        cur = dbapi_connection.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.close()
+
 
 base = os.environ["FH_OAUTH_BASE"]
 GoogleAppClient.base_url = base + "/authorize"

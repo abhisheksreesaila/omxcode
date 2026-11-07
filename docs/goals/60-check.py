@@ -81,12 +81,12 @@ def free_port():
     return p
 
 
-def mojo_test(src, labels, timeout=1800):
+def mojo_test(src, labels, timeout=1800, nofile=0):
     exe = ROOT / "build" / Path(src).stem
     b = run(["scripts/mojo_flare.sh", "build", src, "-o", str(exe)], timeout)
     if b.returncode:
         return False, (b.stdout + b.stderr)[-1500:]
-    r = run([str(exe)], timeout)
+    r = run(["bash", "-c", f"ulimit -n {nofile} && exec {exe}"] if nofile else [str(exe)], timeout)  # (D-6025: a low open-file limit)
     out = r.stdout + r.stderr
     missing = [l for l in labels if not re.search(rf"^{re.escape(l)}: ok", out, re.M)]
     return (r.returncode == 0 and not missing), (f"missing {missing} " if missing else "") + out[-600:]
@@ -492,7 +492,7 @@ def scenario(name, smtp_mode="off", extra=None):
 
 
 def m1():
-    ok, why = mojo_test("tests/test_log.mojo", ["json", "redact", "rotate"])
+    ok, why = mojo_test("tests/test_log.mojo", ["json", "redact", "rotate", "secrets"])
     if not ok:
         return False, "tests/test_log.mojo: " + why
     stand, smtp, srv = scenario("m1")
@@ -538,7 +538,7 @@ def m1():
 
 
 def m2():
-    ok, why = mojo_test("tests/test_migrate.mojo", ["apply", "idempotent", "broken", "checksum", "down"])
+    ok, why = mojo_test("tests/test_migrate.mojo", ["apply", "idempotent", "broken", "checksum", "down", "race"])
     if not ok:
         return False, "tests/test_migrate.mojo: " + why
     src = MIGRATIONS / "tenant"
@@ -662,7 +662,7 @@ def m3():
 
 
 def m4():
-    ok, why = mojo_test("tests/test_mail.mojo", ["dotstuff", "header_inject", "encode", "multipart"])
+    ok, why = mojo_test("tests/test_mail.mojo", ["dotstuff", "header_inject", "encode", "multipart", "deadline"])
     if not ok:
         return False, "tests/test_mail.mojo: " + why
     notes = []
@@ -852,11 +852,59 @@ def m7():
         doc = (ROOT / "docs/saas.md").read_text()
         if "Known limits" not in doc:
             return False, "docs/saas.md lost its Known limits"
-        return True, "429 + Retry-After over the per-IP limit, sliding sessions (use extends, idle ends)"
     finally:
         srv.stop()
         stand.close()
         smtp.close()
+    ok, why = m7_proxies()
+    if not ok:
+        return False, why
+    return True, "429 + Retry-After over the per-IP limit, sliding sessions (use extends, idle ends); " + why
+
+
+def m7_proxies():
+    """D-6025: behind a trusted proxy each client has its own limit (IPv6 by /64); an untrusted peer's header is ignored."""
+    def logins(srv, xff, n):
+        out = []
+        for _ in range(n):
+            out.append(srv.client().get("/login", headers={"X-Forwarded-For": xff} if xff else {}).status_code)
+        return out
+    stand, smtp, srv = scenario("m7p", "off", {"SAAS_RATE": "3", "SAAS_TRUSTED_PROXIES": "127.0.0.1/32"})
+    try:
+        a = logins(srv, "198.51.100.7, 203.0.113.5", 4)
+        if a != [303, 303, 303, 429]:
+            return False, f"a client behind the trusted proxy, 4 sign-ins: {a} (want 3 × 303, then 429)"
+        b = logins(srv, "203.0.113.6", 1)
+        if b != [303]:
+            return False, f"another client behind the same proxy shared the first one's limit: {b}"
+        v6 = logins(srv, "2001:db8:1:2::1", 3) + logins(srv, "2001:db8:1:2::ffff", 1)
+        if v6 != [303, 303, 303, 429]:
+            return False, f"one IPv6 /64, 4 sign-ins: {v6}"
+        if logins(srv, "2001:db8:1:3::1", 1) != [303]:
+            return False, "the next /64 shared the first one's limit"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+    stand, smtp, srv = scenario("m7u", "off", {"SAAS_RATE": "3", "SAAS_TRUSTED_PROXIES": "10.0.0.0/8"})
+    try:
+        u = [srv.client().get("/login", headers={"X-Forwarded-For": f"203.0.113.{i}"}).status_code for i in range(4)]
+        if u != [303, 303, 303, 429]:
+            return False, f"an untrusted peer rotating X-Forwarded-For: {u} (its header must be ignored)"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+    stand, smtp = StandIn(), Smtp("off")
+    bad = Server("m7b", stand, smtp, {"SAAS_TRUSTED_PROXIES": "proxy.internal"}, expect_fail=True)
+    try:
+        if bad.started:
+            return False, "a proxy list it can't read (a name) started anyway"
+    finally:
+        bad.stop()
+        stand.close()
+        smtp.close()
+    return True, "trusted proxy: a client per X-Forwarded-For, IPv6 per /64; an untrusted peer's header ignored; a bad list refuses to start"
 
 
 def m8():
@@ -923,15 +971,25 @@ def m9():
             continue  # (D-6013: only goal 57's silent invite, which M5 replaced on purpose, as M0 allows)
         if not m or m.group(1) != "PASS":
             return False, f"goal 57's {k}: {m.group(0) if m else 'no result'}"
-    for src in ("tests/test_crypto.mojo", "tests/test_accounts.mojo", "tests/test_billing.mojo", "tests/test_ui_thread.mojo", "tests/test_served.mojo"):
-        ok, why = mojo_test(src, [])
+    tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep"],
+             "tests/test_billing.mojo": ["out_of_order"], "tests/test_ui_thread.mojo": [], "tests/test_served.mojo": [],
+             # (D-6025: round 3's tests in the goal's checker)
+             "tests/test_handler.mojo": ["handler", "offload", "header_inject", "body_cap", "client_ip"],
+             "tests/test_ratelimit.mojo": ["limit", "window", "flood"],
+             "tests/test_queue.mojo": ["claim_race", "backoff", "resume", "outbox", "sweep"],
+             "tests/test_clientip.mojo": ["parse", "trusted", "untrusted", "ipv6"]}
+    for src, labels in tests.items():
+        ok, why = mojo_test(src, labels)
         if not ok:
             return False, f"{src}: {why}"
+    ok, why = mojo_test("tests/test_pool.mojo", ["tenants", "held", "threads"], nofile=256)
+    if not ok:
+        return False, f"tests/test_pool.mojo (ulimit -n 256): {why}"
     for lint in ("scripts/libc_lint.py", "scripts/decisions_lint.py"):
         rr = run(["pixi", "run", "python", lint])
         if rr.returncode:
             return False, f"{lint}: " + (rr.stdout + rr.stderr)[-300:]
-    return True, "goal 57's M6–M8, the crypto/accounts/billing/ui-thread/served tests, libc and decision lints"
+    return True, "goal 57's M6–M8, the crypto/accounts/billing/ui-thread/served/handler/ratelimit/queue/clientip tests, the pool under ulimit -n 256, libc and decision lints"
 
 
 FLOWS = ("me", "entries_get", "entries_post", "webhook", "callback")
