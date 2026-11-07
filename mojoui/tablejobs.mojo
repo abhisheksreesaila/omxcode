@@ -17,7 +17,7 @@
 # Tracing (MOJOUI_TRACE / MOJOUI_TEST) prints one line as each lands: `JOB: query landed in 12.3 ms (4 rows)`,
 # `JOB: table landed big.csv in 812.0 ms (1,000,000 rows)`, `JOB: export landed big.csv in 640.2 ms (1,000,000 rows)`.
 
-from omxcore import Job, JobBody, JobCtl, Catalog, JOB_RUNNING
+from omxcore import Job, JobBody, JobCtl, Catalog, Table, JOB_RUNNING
 from mojoui.jobs import start_ui_job
 from mojoui.shared import environment
 from mojoui.clock import now_ns, trace_on
@@ -149,7 +149,17 @@ struct QueryJob(JobBody):
         var catalog = Catalog()
         for i in range(len(self.sheets)):
             catalog.add_frame(self.names[i], self.sheets[i].frame)
-        var answer = Sheet(query_table(catalog, self.text).share(), False)
+        var cap = public_rows()
+        var table: Table
+        try:
+            table = query_table(catalog, capped_sql(self.text, cap), ctl, public_join_bytes())
+        except e:  # (the engine's words for a join past its budget name its options: the visitor gets plain ones)
+            if cap > 0 and String(e).find("join_budget") >= 0:
+                raise Error("this question's join would take more memory than the web copy gives one question: join on a key with fewer matches, or filter first")
+            raise e^
+        if cap > 0 and table.rows() > cap:  # (the public copy keeps no answer over its cap: memory a visitor can't take from others)
+            raise Error("the answer has more than " + grouped(cap) + " rows, more than the web copy keeps: ask for fewer (a filter, a GROUP BY or a LIMIT)")
+        var answer = Sheet(table^.share(), False)
         var ms = Float64(now_ns() - t0) / 1e6
         var font = Font()
         var card = TableCard(self.called, answer^, -1, 0, 0, 0, 0, font, self.pal)
@@ -220,6 +230,8 @@ struct TableWork(Movable):
     var file: Optional[Job[TableFile]]
     var file_path: String
     var query: Optional[Job[Answer]]
+    var query_t0: Int  # when the running question started (the public copy's time budget)
+    var budget_hit: Bool  # the running question was stopped by its time budget
     var export_: Optional[Job[Exported]]
     var export_path: String
     var script_: Optional[Job[ScriptAnswer]]
@@ -230,6 +242,8 @@ struct TableWork(Movable):
         self.file = None
         self.file_path = ""
         self.query = None
+        self.query_t0 = 0
+        self.budget_hit = False
         self.export_ = None
         self.export_path = ""
         self.problem = ""
@@ -267,6 +281,24 @@ struct TableWork(Movable):
             names.append(tables.sql_name_of(k, page_sql))
             sheets.append(tables.cards[k].sheet.snapshot())
         self.query = start_ui_job(QueryJob(names^, sheets^, text, called, pal))
+        self.query_t0 = now_ns()
+        self.budget_hit = False
+        return True
+
+    def running_query(self) -> Bool:
+        return Bool(self.query)
+
+    def check_budget(mut self) -> Bool:
+        """The public copy's time budget (MOJOUI_QUERY_S, 20 s): a question running past it is stopped, and `problem` says
+        so in plain words. True when it stopped one now (goal 62 M7: a visitor's question can't hold the shared server)."""
+        var limit = public_query_s()
+        if limit <= 0 or not self.query or self.query.value().poll() != JOB_RUNNING:
+            return False
+        if Float64(now_ns() - self.query_t0) / 1e9 < limit:
+            return False
+        self.query.value().cancel()
+        self.budget_hit = True
+        self.problem = "This question ran past the web copy's " + String(Int(limit)) + " s, so it was stopped: ask for less (a filter, a GROUP BY or a LIMIT)"
         return True
 
     def script(mut self, tables: TableCards, text: String, page_name: String, page: Sheet, var videos: VideoFunctions, pal: Palette) -> Bool:
@@ -356,7 +388,9 @@ struct TableWork(Movable):
                 print("JOB: query landed in " + fixed(a.milliseconds, 1) + " ms (" + grouped(a.card.sheet.rows()) + " rows)", flush=True)
             return a^
         except e:
-            self.problem = String(e)
+            if not self.budget_hit:  # (stopped by the time budget: its own words stay)
+                self.problem = String(e)
+            self.budget_hit = False
             if trace_on():
                 print("JOB: query failed: " + String(e), flush=True)
             return None
@@ -373,3 +407,43 @@ struct TableWork(Movable):
         except e:
             self.problem = "Couldn't export " + file_name(self.export_path) + ": " + String(e)
             return None
+
+
+def public_rows() -> Int:
+    """The public copy's cap on a question's answer (MOJOUI_QUERY_ROWS, 1,000,000 rows); 0 on a desktop: no cap."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return 0
+    try:
+        return Int(environment("MOJOUI_QUERY_ROWS", "1000000"))
+    except:
+        return 1_000_000
+
+
+def public_join_bytes() -> Int:
+    """The public copy's budget for a materialized join (MOJOUI_JOIN_BYTES, 512 MB); 0 on a desktop: the engine's own."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return 0
+    try:
+        return Int(environment("MOJOUI_JOIN_BYTES", String(512 << 20)))
+    except:
+        return 512 << 20
+
+
+def public_query_s() -> Float64:
+    """The public copy's time budget for a question (MOJOUI_QUERY_S, 20 s); 0 on a desktop: none."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return 0
+    try:
+        return Float64(Int(environment("MOJOUI_QUERY_S", "20")))
+    except:
+        return 20.0
+
+
+def capped_sql(text: String, cap: Int) -> String:
+    """A SELECT with an outer LIMIT of cap + 1, so an answer past the cap stops being built there (no cap: as it was)."""
+    var t = String(text.strip())
+    while t.endswith(";"):
+        t = String(String(t[byte = 0 : t.byte_length() - 1]).strip())
+    if cap <= 0 or not t.upper().startswith("SELECT"):
+        return text
+    return "SELECT * FROM (" + t + ") AS answer LIMIT " + String(cap + 1)

@@ -18,6 +18,7 @@ from mojoui.canvas import Surface
 from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
 from mojoui.clock import now_ns
 from mojoui.jobs import wake_pipe
+from mojoui.pygil import python_hosted, gil_release, gil_restore
 
 
 def json_str(s: String) -> String:
@@ -109,7 +110,9 @@ def web_init_shared[A: App]():
 
 
 def web_new[A: App]() -> Int:
-    """Starts one app session (one browser tab) and returns its handle."""
+    """Starts one app session (one browser tab) and returns its handle. (Python hosts the app here: said once, under the
+    lock, so pygil never needs a Python call to learn it: web_draw paints without the lock.)"""
+    _ = python_hosted()
     var tab = alloc(Layout[WebSession[A]].single()).unsafe_leak()
     tab.unsafe_write(WebSession[A]())
     return Int(tab)
@@ -154,7 +157,11 @@ def web_draw[A: App](handle: Int, node: Int, width: Int, height: Int, scale: Flo
         tab[].pixels = List[UInt32](length=w * h, fill=0)
     var surface = Surface(Int(tab[].pixels.unsafe_ptr()), w, h, scale if scale > 0 else 1.0)
     surface.still = still  # (the page asked for reduced motion, or an agent wants the settled picture)
+    # The paint runs without Python's lock (goal 62 M5): each tab has its own lock in web.py, so tabs paint in parallel
+    # on every core instead of one at a time; the app's Python calls take the lock themselves (python_enter)
+    var ts = gil_release()
     var d = tab[].rt.draw(node, surface)
+    gil_restore(ts)
     return ('{"address":' + String(Int(tab[].pixels.unsafe_ptr())) + ',"width":' + String(w) + ',"height":' + String(h)
             + ',"again":' + ("true" if surface.again else "false") + ',"diff":' + diff_to_json(d, tab[].rt.shown) + "}")
 
@@ -193,8 +200,11 @@ def web_appearance[A: App](handle: Int, dark: Bool) -> String:
 
 def web_frame[A: App](handle: Int, node: Int, microseconds: Int) -> String:
     var rt = session_at[A](handle)
+    var ts = gil_release()  # (a playing canvas's frame event: on every core, as its paint, goal 62 M5)
     var d = rt[].frame(node, microseconds)
-    return diff_to_json(d, rt[].shown)
+    var out = diff_to_json(d, rt[].shown)
+    gil_restore(ts)
+    return out
 
 
 def web_event[A: App](handle: Int, node: Int, second: Bool, text: String, number: Int) -> String:
@@ -282,8 +292,11 @@ def web_jobs[A: App](handle: Int) -> String:
     var m = rt[].app.jobs_message()
     if m == 0:
         return "{}"
+    var ts = gil_release()  # (every decoded video frame wakes every tab: their updates run on every core, goal 62 M5)
     var d = rt[].dispatch(Event(m, String(""), 0))
-    return diff_to_json(d, rt[].shown)
+    var out = diff_to_json(d, rt[].shown)
+    gil_restore(ts)
+    return out
 
 
 def web_hosted[A: App](handle: Int, documents: String, public: Bool):

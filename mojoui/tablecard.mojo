@@ -26,7 +26,7 @@ from mojoui.sheet import Sheet, TEXT
 from mojoui.text import Font
 from mojoui.theme import Palette
 from mojoui.view import View, Text, Button, Canvas, HStack, Spacer, Card, HEADLINE, CAPTION, ICON_ONLY, SUBTLE, CENTER, TONE_ACCENT, SET_TO
-from omxcore import Catalog, Table, sql
+from omxcore import Catalog, Table, sql, PlannerOptions, JobCtl
 from mojoui.sqlname import sql_name  # (kept importable from here; links.mojo needs it without omxcore)
 
 comptime COMPACT_W = 560  # a card narrower than this shows its buttons as icons (goal 62)
@@ -43,10 +43,15 @@ comptime GRID_LEFT = 16  # where a card's grid starts inside it (the card's padd
 comptime GRID_TOP = 16 + TABLE_HEAD_H + 4
 
 
-def query_table(mut catalog: Catalog, text: String) raises -> Table:
+def query_table(mut catalog: Catalog, text: String, ctl: JobCtl = JobCtl(), join_budget: Int = 0) raises -> Table:
     """The answer of a SQL query over the catalog's tables, as a table (raises with the engine's message, which names the
-    place in the text: "SQL error at line 1, column 21: …")."""
-    var r = sql(catalog, text)
+    place in the text: "SQL error at line 1, column 21: …"). `ctl`: the job it runs for (the engine stops when it's
+    cancelled); `join_budget`: the bytes a materialized join may take (0: the engine's default; goal 62 M7)."""
+    var o = PlannerOptions()
+    o.job = ctl
+    if join_budget > 0:
+        o.join_budget = join_budget
+    var r = sql(catalog, text, o)
     return r.take_table()
 
 

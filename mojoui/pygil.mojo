@@ -78,7 +78,10 @@ def python_hosted() -> Bool:
 
 def python_lend() raises:
     """UI thread: lets other threads take the Python lock until the matching python_reclaim() (nothing to do when a
-    Python program hosts the app)."""
+    Python program hosts the app: then no Python call is made here either, so it's safe in a paint the web host runs
+    without the lock, goal 62)."""
+    if get_shared(SLOT_HOSTED) == 2:
+        return
     python_start()
     if python_hosted():
         return
@@ -119,3 +122,18 @@ def python_guard(what: String) raises:
         raise Error(what + ": Python called without its lock on this thread ("
                     + (String(python_lent()) + " job(s) hold it lent" if python_lent() > 0 else "not taken")
                     + "): wrap the call in python_enter()/python_exit(), or run it inside the job")
+
+
+def gil_release() -> Int:
+    """The web host's paint (goal 62 M5): this thread lets go of the Python lock so other requests' threads run Python
+    (and their own paints) meanwhile; returns this thread's state for gil_restore(). Only on a thread that holds the lock
+    (a call from Python); code run in between takes the lock itself for Python calls (python_enter, as mojoui.pdfsource
+    does) and must not call Python bare. 0: Python isn't loaded (nothing released)."""
+    var f = _sym("PyEval_SaveThread")
+    return _call0(f) if f != 0 else 0
+
+
+def gil_restore(state: Int):
+    """Takes the Python lock back on this thread (the state gil_release() returned)."""
+    if state != 0:
+        _ = _call1(_sym("PyEval_RestoreThread"), state)

@@ -31,10 +31,15 @@ def run(cmd, timeout=3600, env=None, cwd=ROOT):
 
 
 def build_web():
-    """The web version, built from this tree (scripts/build.sh skips what didn't change)."""
+    """The web version, built from this tree (scripts/build.sh skips what didn't change), and the upload check beside it."""
     r = run(["scripts/build.sh", "omxplorer", "web"], 1800)
     if r.returncode:
         raise RuntimeError("build: " + (r.stdout + r.stderr)[-800:])
+    v = MODULE / "validate"
+    if not v.exists() or v.stat().st_mtime < (ROOT / "mojoui/csvio.mojo").stat().st_mtime:
+        r = run(["scripts/mxbuild.sh", "hosts/validate_main.mojo", "-o", str(v)], 1800)
+        if r.returncode:
+            raise RuntimeError("validator build: " + (r.stdout + r.stderr)[-800:])
 
 
 def starter():
@@ -162,6 +167,9 @@ def m1():
                     body = page.inner_text("body")
                     if not ("DROID" in body and "CC-BY-4.0" in body):
                         probs.append("the Start screen doesn't credit DROID (CC-BY-4.0)")
+                    for gone in ("Taxi trips", "Coming with MX frame", "Connect a database"):  # (round 2: what a visitor can't use there)
+                        if gone in body:
+                            probs.append(f"the public Start screen shows “{gone}”")
                     page.screenshot(path=str(OUT / "m1-start.png"))
                 R = S.play(page, OUT / f"m1/tab{k}", net, pack=(k == 1))
                 results.append(R)
@@ -378,7 +386,18 @@ def m6():
     return ok and not bad, ("; ".join(bad)[:1500] if bad else f"{len(lines)} checks: " + "; ".join(l[4:60] for l in lines)[:1400])
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6}
+# ---------------------------------------------------------------- M7
+def m7():
+    build_web()
+    starter()
+    import budgets  # (docs/goals/62/budgets.py)
+    ok, lines = budgets.run_all(OUT / "m7")
+    (OUT / "m7-budgets.txt").write_text("\n".join(lines))
+    bad = [l for l in lines if l.startswith("FAIL")]
+    return ok and not bad, ("; ".join(bad)[:1500] if bad else "; ".join(l[5:] for l in lines)[:1500])
+
+
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7}
 
 if __name__ == "__main__":
     wanted = sys.argv[1:] or list(MILESTONES)

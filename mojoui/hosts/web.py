@@ -61,6 +61,8 @@ DEV = os.environ.get("MOJOUI_DEV") == "1" and not PUBLIC
 DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
 WAIT_S = float(os.environ.get("MOJOUI_WAIT_S", "0"))  # how long /wait holds with nothing to say (0: as long as the tab lives)
+PUSH_HZ = float(os.environ.get("MOJOUI_PUSH_HZ", "30"))  # how often /push paints its playing canvases (new pictures only are sent)
+PUSH_MAX_S = float(os.environ.get("MOJOUI_PUSH_MAX_S", "240"))  # a push stream's longest life (a platform's request limit)
 JPEG_QUALITY = 85
 MAX_SESSIONS = int(os.environ.get("MOJOUI_MAX_SESSIONS", "8" if PUBLIC else "200"))  # public: past it, a busy page; else the oldest tab closes
 IDLE_S = float(os.environ.get("MOJOUI_IDLE_S", "900" if PUBLIC else "0"))  # a tab with no input this long ends (0: never)
@@ -570,6 +572,76 @@ CANVAS_JS = r"""
   const events = window.mojouiEvents = { queue: [], sending: false };
   const shownPics = new Map();  // canvas tag → {pic, bmp, w, h}: its last picture (40 at most)
   const getFrame = (sid, n, params) => fetch(`/frame/${sid}/${n}?${new URLSearchParams(params)}`);
+  // Pictures pushed to playing canvases (/push): one streamed answer a page carries every playing canvas's new pictures,
+  // painted on the server's clock, so a slow link pays no round trip a picture (goal 62 M4: a pull a picture held one
+  // visitor's video near 10 a second at 100 ms). Canvases join when they start playing; the stream opens again when the
+  // set or a size changes, or the screen changed under it; if it can't open, each canvas pulls as before.
+  const push = { members: new Map(), ctrl: null, key: '', failed: !window.ReadableStream, timer: 0 };
+  const pushSize = div => { const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    return `${Math.max(1, Math.round(r.width * dpr))}:${Math.max(1, Math.round(r.height * dpr))}:${dpr}`; };
+  function pushChanged() { if (!push.timer) push.timer = setTimeout(() => { push.timer = 0; pushOpen(); }, 30); }
+  async function pushOpen() {
+    const live = [...push.members].filter(([div]) => div.isConnected);
+    const c = live.map(([div, m]) => `${div.dataset.node}:${m.size}:${m.st.cid}`).join(','), key = c + '|' + shape();
+    if (push.ctrl && key === push.key) return;
+    if (push.ctrl) push.ctrl.abort();
+    push.ctrl = null; push.key = '';
+    if (!live.length || push.failed) return;
+    const ctrl = push.ctrl = new AbortController(); push.key = key;
+    let got = 0;
+    try {
+      const res = await fetch(`/push/${live[0][0].dataset.sid}?v=${shape()}&c=${c}`, { signal: ctrl.signal, cache: 'no-store' });
+      if (res.status !== 200 || !res.body) { if (res.headers.get('X-Mojoui-Gone') !== '1') push.failed = true; return; }
+      const reader = res.body.getReader();
+      let buf = new Uint8Array(0);
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const joined = new Uint8Array(buf.length + value.length); joined.set(buf); joined.set(value, buf.length); buf = joined;
+        for (;;) {
+          if (buf.length < 4) break;
+          const dv = new DataView(buf.buffer, buf.byteOffset), hl = dv.getUint32(0);
+          if (buf.length < 8 + hl) break;
+          const bl = dv.getUint32(4 + hl);
+          if (buf.length < 8 + hl + bl) break;
+          const head = JSON.parse(new TextDecoder().decode(buf.subarray(4, 4 + hl))), body = buf.slice(8 + hl, 8 + hl + bl);
+          buf = buf.slice(8 + hl + bl); got++;
+          const fs = window.mojouiFrameStats = window.mojouiFrameStats || {}, k = fs[head.n] = fs[head.n] || { answers: 0, bytes: 0, pictures: 0, pictureBytes: 0 };
+          k.answers++; k.bytes += 8 + hl + bl; if (head.status === 200) { k.pictures++; k.pictureBytes += bl; }  // (for checks: each canvas's share)
+          if (head['x-mojoui-pending'] === '1') window.mojouiPending();
+          const m = [...push.members].find(([div]) => Number(div.dataset.node) === head.n);
+          if (m && head.status === 200) m[1].picture(head, body);
+        }
+      }
+    } catch (e) { if (e.name !== 'AbortError' && !got) push.failed = true; }
+    finally {
+      if (push.ctrl === ctrl) { push.ctrl = null; push.key = ''; if ([...push.members.keys()].some(d => d.isConnected)) setTimeout(pushOpen, 100); }
+    }
+  }
+  async function flushEvents() {
+    if (events.sending) return;
+    events.sending = true;
+    try {
+      while (events.queue.length) {
+        const { sid, ...e } = events.queue.shift();
+        if (e.number === KEY) early.inflight++;
+        try { await htmx.ajax('POST', `/e/${sid}`, { values: { ...e, v: shape() }, swap: 'none', source: document.body }); }
+        catch (err) { console.warn('mojoui: event not sent', err); }
+        finally { if (e.number === KEY) { early.inflight--; setTimeout(release, 50); } }
+        const div = document.querySelector(`[data-kind=canvas][data-node="${e.n}"]`);
+        if (div && div.mojoui) { div.mojoui.want = true; div.mojoui.pump(); }
+      }
+    } finally { events.sending = false; }
+  }
+  // A key pressed while nothing has the keyboard (the screen was just rebuilt under it) goes to the canvas that had it.
+  document.addEventListener('keydown', e => {
+    if (e.target !== document.body || early.typing || window.mojouiKeyCanvas === undefined) return;
+    const div = document.querySelector(`[data-kind=canvas][data-keys="1"][data-node="${window.mojouiKeyCanvas}"]`);
+    if (!div) return;
+    if (!div.mojoui) attach(div);  // (a screen still settling: its canvas isn't wired up yet)
+    const cv = div.querySelector('canvas');
+    e.preventDefault(); e.stopPropagation(); cv.focus({ preventScroll: true }); cv.dispatchEvent(new KeyboardEvent('keydown', e));
+  }, true);
   window.mojouiAttach = attach;  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
   // A drawn view's words (SET_TIP, in its meta): its tooltip, and its accessible name unless a label names it. After every
   // swap, not only when a frame arrives: words can change while the picture doesn't.
@@ -626,8 +698,30 @@ CANVAS_JS = r"""
       window.mojouiWords(div);
       return res.headers.get('X-Mojoui-Again') === '1' ? 'again' : 'ok';
     }
-    // Playing: requests paced by the display, at most three out at once.
+    // Playing: its pictures pushed (the page's one /push stream), or, where that can't open, pulled: requests paced by
+    // the display, at most three out at once.
     async function play() {
+      if (!push.failed) {
+        const member = { st, size: pushSize(div), picture: async (head, body) => {
+          const img = await createImageBitmap(new Blob([body]));
+          const m = meta(); st.pic = head['x-mojoui-pic'] || ''; st.drawn = m ? m.dataset.version : st.drawn; st.skin = skinNow();
+          if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
+          if (div.dataset.passthrough === '1') g.clearRect(0, 0, cv.width, cv.height);
+          g.drawImage(img, 0, 0);
+          if (div.dataset.tag) { shownPics.delete(div.dataset.tag); shownPics.set(div.dataset.tag, { pic: st.pic, bmp: img, w: img.width, h: img.height }); }
+          st.count++; st.times.push(performance.now()); if (st.times.length > 1200) st.times.splice(0, 600);
+          window.mojouiWords(div);
+        } };
+        push.members.set(div, member); pushChanged();
+        while (div.isConnected && playing() && !push.failed) {
+          await new Promise(ok => setTimeout(ok, 100));
+          const size = pushSize(div);
+          if (size !== member.size) { member.size = size; pushChanged(); }
+          if (!push.ctrl && !push.timer) pushChanged();
+        }
+        push.members.delete(div); pushChanged();
+        if (!push.failed) return false;
+      }
       const out = new Set();
       let gone = false;
       while (div.isConnected && playing() && !gone) {
@@ -1615,6 +1709,43 @@ def folder_bytes(folder):
         return 0
 
 
+TABLE_TYPES = (".csv", ".tsv", ".txt", ".parquet")
+VIDEO_TYPES = (".mp4", ".mov", ".m4v", ".webm")
+
+
+def check_upload(path, validator):
+    """Public mode: a visitor's file is read before the app opens it, where a crash ends only the check (goal 62 M7): a
+    table by `validator` (the app's own reader in a process of its own, hosts/validate_main.mojo), held to 4 GB and
+    60 s of CPU; a video by ffprobe. "" when it may open; else why not, in plain words (no paths)."""
+    import resource
+    import subprocess
+
+    def held():  # (the check's own limits: a file can't take the server's memory or time either)
+        resource.setrlimit(resource.RLIMIT_AS, (4 << 30, 4 << 30))
+        resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
+
+    kind = Path(path).suffix.lower()
+    if kind in TABLE_TYPES:
+        if not validator or not Path(validator).exists():
+            print("UPLOAD: no validator: tables aren't opened (build hosts/validate_main.mojo beside the module)", flush=True)
+            return "this copy can't check tables right now"
+        cmd, why = [validator, str(path)], "it couldn't be read as a table"
+    elif kind in VIDEO_TYPES:
+        # (its first picture decoded, not just its header read: a truncated clip's header can be whole)
+        cmd = ["ffmpeg", "-nostdin", "-v", "error", "-xerror", "-i", str(path), "-map", "0:v:0", "-frames:v", "1", "-f", "null", "-"]
+        why = "it isn't a video this copy can play"
+    else:
+        return "the web copy opens CSV, Parquet and MP4 files"
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=90, preexec_fn=held)
+    except (subprocess.TimeoutExpired, OSError):
+        return why
+    if r.returncode != 0 or (kind in VIDEO_TYPES and r.stderr.strip()):
+        print(f"UPLOAD: refused a file ({why}; exit {r.returncode})", flush=True)
+        return why
+    return ""
+
+
 def takes_path(n):
     """A control that hands the app a file path: a FilePicker or FileSaver (a button with a second message) or a
     DropTarget's on_file. In public mode only the host makes those paths (an upload, /save), never the page's text."""
@@ -1738,6 +1869,7 @@ def make_app(module_dir):
     sessions = OrderedDict()  # sid → Session, oldest first
     sessions_lock = threading.Lock()
     jslog_counts = {}  # sid → JS errors logged (at most 100 a page)
+    validator = os.environ.get("MOJOUI_VALIDATE") or str(Path(module_dir) / "validate")  # (public mode: uploads read here first)
 
     def end_session(sid, s, reason):
         """The server ends a tab (idle, or the server is full and it was the oldest): its app closes, its files go, and
@@ -1897,6 +2029,14 @@ def make_app(module_dir):
             try:
                 if not os.read(fd, 4096):
                     return
+                time.sleep(0.01)  # (a burst of wakes, every playing video's every frame, is one round: goal 62 M5)
+                os.set_blocking(fd, False)
+                try:
+                    os.read(fd, 65536)
+                except BlockingIOError:
+                    pass
+                finally:
+                    os.set_blocking(fd, True)
             except OSError:
                 return
             with sessions_lock:
@@ -2023,6 +2163,7 @@ def make_app(module_dir):
         if hasattr(mod, "hosted"):  # (where this tab's documents go: its own folder in public mode, as the app likes else)
             with s.lock:
                 mod.hosted(s.handle, str(file_folder(sid, "documents")) if PUBLIC else "", PUBLIC)
+                s.nodes = json.loads(mod.view(s.handle))  # (the first screen as the app has it now: a public Start screen differs)
         gone = []
         with sessions_lock:  # (the cap checked again where the place is taken: a burst can't pass it together)
             if PUBLIC and sum(1 for v in sessions.values() if v.touched) >= MAX_SESSIONS:
@@ -2600,6 +2741,13 @@ def make_app(module_dir):
                 shutil_rmtree(folder)
                 refused.append(too_big(name, limit))
                 continue
+            if PUBLIC:
+                import anyio
+                why = await anyio.to_thread.run_sync(check_upload, path, validator)
+                if why:
+                    shutil_rmtree(folder)
+                    refused.append(notice(f"{name} wasn't opened: {why}."))
+                    continue
             paths.append(path)
         outs = list(refused)
         with s.lock:
@@ -2658,6 +2806,12 @@ def make_app(module_dir):
         if size > limit:
             path.unlink(missing_ok=True)
             return over_cap(name, cap) if cap and limit < upload_limit() else too_big(name, limit)
+        if PUBLIC:
+            import anyio
+            why = await anyio.to_thread.run_sync(check_upload, path, validator)
+            if why:
+                path.unlink(missing_ok=True)
+                return notice(f"{name} wasn't opened: {why}.")
         with s.lock:
             if s.closed:  # (evicted while it was written: its app is closed, D-1704; the file goes too)
                 forget_files(sid)
@@ -2697,8 +2851,10 @@ def make_app(module_dir):
                 last = sess.frame_time.get(n)
                 us = int((now - last) * 1e6) if last else 16667
                 sess.frame_time[n] = now
-                sess.pending = merge(sess.pending, json.loads(mod.frame(sess.handle, n, us)))
-                sess.nodes = json.loads(mod.view(sess.handle))
+                fd = json.loads(mod.frame(sess.handle, n, us))
+                sess.pending = merge(sess.pending, fd)
+                if fd.get("rebuild") or fd.get("patches"):  # (the screen's JSON again only when it changed: twice a picture
+                    sess.nodes = json.loads(mod.view(sess.handle))  # was most of a picture's time under Python's lock)
                 note(sid, sess)
                 if sess.pending.get("rebuild") or sess.nodes[n]["kind"] != CANVAS:
                     return Response(status_code=204, headers={"X-Mojoui-Retry": "1", "X-Mojoui-Pending": "1"})
@@ -2706,7 +2862,8 @@ def make_app(module_dir):
                 sess.frame_time.pop(n, None)
             r = json.loads(mod.draw(sess.handle, n, w, h, scale, still))
             sess.pending = merge(sess.pending, r["diff"])
-            sess.nodes = json.loads(mod.view(sess.handle))
+            if r["diff"].get("rebuild") or r["diff"].get("patches"):
+                sess.nodes = json.loads(mod.view(sess.handle))
             rgba = ctypes.string_at(r["address"], r["width"] * r["height"] * 4)
             pending = bool(sess.pending and (sess.pending.get("rebuild") or sess.pending.get("patches"))) or bool(sess.commands)
         # The picture the page already shows (`have`, the digest it was sent with) isn't sent again: a video drawn at the
@@ -2744,6 +2901,73 @@ def make_app(module_dir):
         return Response(out.getvalue(), media_type="image/jpeg" if tick else "image/png",
                         headers={"Cache-Control": "no-store", "X-Mojoui-Pending": "1" if pending else "0", "X-Mojoui-Again": "1" if r.get("again") else "0",
                                  "X-Mojoui-Draw-Ms": f"{(time.perf_counter() - now) * 1000:.2f}", "X-Mojoui-Pic": pic})
+
+    @app.get("/push/{sid}")
+    async def push(sid: str, req, v: int = -1, c: str = ""):
+        """Pictures pushed to a page's playing canvases (goal 62 M4): one streamed answer carries the new pictures of every
+        canvas named in `c` ("n:w:h:scale:cid,…", at most 8), each painted on the server's clock (PUSH_HZ times a second;
+        a picture the canvas already shows isn't sent), so a slow link pays no round trip a picture. Per item: 4 bytes of
+        header length, the header (JSON: n, status, the X-Mojoui-* headers), 4 bytes of body length, the body. It ends when
+        none of its canvases plays any more, the screen changed under it (Retry: the page opens a new one), the tab is
+        gone, or the page goes; a stream lasts PUSH_MAX_S at most (the page opens another)."""
+        import anyio
+        from starlette.responses import StreamingResponse
+        try:
+            subs = []
+            for part in [x for x in c.split(",") if x][:8]:
+                n_, w_, h_, sc_, cid_ = part.split(":")
+                subs.append((int(n_), int(w_), int(h_), float(sc_), cid_[:16]))
+        except ValueError:
+            return Response(status_code=400)
+        s = sessions.get(sid)
+        if s is None or s.closed or not subs:
+            return Response(status_code=204, headers={"X-Mojoui-Gone": "1"})
+        s.touched = True
+
+        def item(head, body=b""):
+            hb = json.dumps(head).encode()
+            return struct.pack(">I", len(hb)) + hb + struct.pack(">I", len(body)) + body
+
+        def one_round(have, live):
+            """Every live canvas once: (items to send, whether the stream ends)."""
+            out, end = [], False
+            for n_, w_, h_, sc_, cid_ in subs:
+                if n_ not in live:
+                    continue
+                node = s.nodes[n_] if 0 <= n_ < len(s.nodes) else None
+                if node is None or node["kind"] != CANVAS or not node["msg2"]:  # (it stopped playing: the page pulls its last picture)
+                    live.discard(n_)
+                    out.append(item({"n": n_, "status": 0, "stop": 1}))
+                    continue
+                r = frame(sid, n_, w_, h_, sc_, v, 1, 0, have.get(n_, ""), cid_)
+                head = {"n": n_, "status": r.status_code, **{k.lower(): val for k, val in r.headers.items() if k.lower().startswith("x-mojoui-")}}
+                if r.status_code == 200:
+                    have[n_] = r.headers.get("X-Mojoui-Pic", "")
+                    out.append(item(head, r.body or b""))
+                elif head.get("x-mojoui-gone") == "1" or head.get("x-mojoui-retry") == "1":
+                    out.append(item(head))
+                    end = True
+                    break
+                elif head.get("x-mojoui-pending") == "1":
+                    out.append(item({"n": n_, "status": 204, "x-mojoui-pending": "1"}))
+            return out, end
+
+        async def stream():
+            have, live = {}, {sub[0] for sub in subs}
+            t_end = time.monotonic() + PUSH_MAX_S
+            while live and time.monotonic() < t_end:
+                if await req.is_disconnected():
+                    return
+                t0 = time.monotonic()
+                out, end = await anyio.to_thread.run_sync(lambda: one_round(have, live))
+                for x in out:
+                    yield x
+                if end:
+                    return
+                await anyio.sleep(max(0.0, 1.0 / PUSH_HZ - (time.monotonic() - t0)))
+            yield item({"status": 0, "end": 1})
+
+        return StreamingResponse(stream(), media_type="application/octet-stream", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     @app.get("/wait/{sid}")
     async def wait(sid: str):

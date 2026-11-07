@@ -134,6 +134,7 @@ from mojoui.peek import Peek
 from mojoui.datagrid import GRID_HEADER_DRAG, GRID_HEADER_DROP
 from mojoui.links import Selection, CardRows, Follow, Reaction, Link, End, BY_AGENT, BY_PERSON, LINKS_ADD, REACT_SEEK, REACT_HIGHLIGHT, REACT_SELECT, parse_link
 from mojoui.starter import Starter, Question, share_starter
+from mojoui.effects import Every
 from mojoui.asksql import AskBook, implied_sql, lineage
 from mojoui.sqlname import sql_name
 from mojoui.documentset import DocumentSet, SET_MESSAGES
@@ -305,6 +306,7 @@ comptime STORY_START = 7800  # the Start screen's starter (OMX_STARTER, mojoui.s
 comptime STORY_TOGGLE = 7801  # the toolbar's Story: the inspector shows the story's questions
 comptime STORY_RUN = 7810  # + k (k < STORY_MAX, 7810–7819): run the story's question k
 comptime STORY_MAX = 10
+comptime BUDGET_TICK = 7830  # the public copy's question budget: a tick while a question runs (goal 62 M7)
 comptime STORY_SHEET = 1  # story_step: its sheet being read, its tables being read, its documents opening, ready
 comptime STORY_TABLES = 2
 comptime STORY_DOCS = 3
@@ -844,6 +846,13 @@ struct Main(App):
             if self.media.cards[k].path == path:
                 return k
         return -1
+
+    def every(self) -> List[Every]:
+        """The public copy's question budget (goal 62 M7): while a question runs, a tick twice a second checks its time."""
+        var out = List[Every]()
+        if self.public and self.work.running_query():
+            out.append(Every(500, BUDGET_TICK))
+        return out^
 
     def hosted(mut self, documents: String, public: Bool):
         """The web host's word (App.hosted): this visitor's own documents folder, and whether it's the public copy."""
@@ -3275,6 +3284,13 @@ struct Main(App):
             self.start_story()
             self.version += 1
             return
+        if m == BUDGET_TICK:
+            if self.work.check_budget():
+                self.message = self.work.problem
+                self.query_said = self.work.problem
+                self.say(Activity.error("Stopped", self.work.problem))
+                self.version += 1
+            return
         if m == STORY_TOGGLE:
             self.story_open = not self.story_open
             if self.story_open:
@@ -4249,7 +4265,8 @@ struct Main(App):
         side.append(Button("New blank sheet", BLANK, SUBTLE, icon="grid").fill().align(START))
         side.append(FilePicker("Open file…", PICK, style=SUBTLE, icon="open", accept=OPEN_TYPES).fill().align(START))
         side.append(FilePicker("Table", PICK_TABLE, style=SUBTLE, icon="table", accept=".csv,.tsv,.txt,.parquet").fill().align(START).tooltip("A CSV or Parquet file as a table card on a new sheet (read in the background)").tag("insert-table"))
-        side.append(HStack(Icon("database", 16), Text("Connect a database", CAPTION), Spacer(), Text("soon", CAPTION).tone(TONE_ACCENT), spacing=10).fill().align(CENTER).padding(6, 12).tag("soon").tooltip("With MX frame, next"))
+        if not self.public:  # (the public copy shows only what a visitor can use there, goal 62)
+            side.append(HStack(Icon("database", 16), Text("Connect a database", CAPTION), Spacer(), Text("soon", CAPTION).tone(TONE_ACCENT), spacing=10).fill().align(CENTER).padding(6, 12).tag("soon").tooltip("With MX frame, next"))
         side.append(Divider().fill())
         side.append(Button("Settings…", SETTINGS, SUBTLE, icon="settings").fill().align(START))
         side.append(Spacer())
@@ -4268,14 +4285,14 @@ struct Main(App):
         for k in range(min(len(self.recent), 6)):
             recent.append(HStack(Icon("file", 16), Text(file_name(self.recent[k])), Text("" if self.public else self.recent[k], CAPTION), Spacer(),  # (the public copy: names, never server paths)
                                  Button("Open", RECENT + k, SUBTLE), spacing=12).fill().align(CENTER))
-        var samples = HStack(
-            Card(Text("Orders", HEADLINE), Text("1M rows · a year of sales by region, product and carrier", CAPTION), Spacer(),
-                 Button("Open the sample", SAMPLE, icon="sample"), spacing=8).width(330).height(150),
-            Card(Text("Blank sheet", HEADLINE), Text("An empty table to type into", CAPTION), Spacer(),
-                 Button("New blank sheet", BLANK, icon="grid"), spacing=8).width(330).height(150),
-            Card(Text("Taxi trips", HEADLINE), Text("100M rows · a GPU workout (docs/scale.md)", CAPTION), Spacer(), Text("Coming with MX frame", CAPTION), spacing=8).width(330).height(150),
-            spacing=16,
-        )
+        var cards = List[View]()
+        cards.append(Card(Text("Orders", HEADLINE), Text("1M rows · a year of sales by region, product and carrier", CAPTION), Spacer(),
+                          Button("Open the sample", SAMPLE, icon="sample"), spacing=8).width(330).height(150))
+        cards.append(Card(Text("Blank sheet", HEADLINE), Text("An empty table to type into", CAPTION), Spacer(),
+                          Button("New blank sheet", BLANK, icon="grid"), spacing=8).width(330).height(150))
+        if not self.public:
+            cards.append(Card(Text("Taxi trips", HEADLINE), Text("100M rows · a GPU workout (docs/scale.md)", CAPTION), Spacer(), Text("Coming with MX frame", CAPTION), spacing=8).width(330).height(150))
+        var samples = HStack(cards^, spacing=16)
         var top = List[View]()
         if self.win_w < 700:  # (a phone gets a look, not a layout of its own yet: goal 62's assumption)
             top.append(Card(Text("omxplorer is best on a laptop or a desktop: the story's cards need the room.", CAPTION).tone(TONE_ACCENT), spacing=0).fill().tag("best-on-laptop"))

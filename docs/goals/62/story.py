@@ -64,6 +64,8 @@ class Visitor:
         self.shots = self.out / "shots"
         self.shots.mkdir(parents=True, exist_ok=True)
         self.R = {"beats": {}, "timings": {}, "notes": []}
+        self.page_errors = []  # (a script error in the page fails the story: round 1 lost canvas events to one unseen)
+        page.on("pageerror", lambda e: self.page_errors.append(str(e)[:300]))
 
     def save(self):
         (self.out / "results.json").write_text(json.dumps(self.R, indent=1))
@@ -164,11 +166,11 @@ class Visitor:
         vbytes = sum(e[3] for e in vframes)  # (every answer for the video canvas: pictures, and "same" answers' headers)
         pictures = [e for e in vframes if e[4] == 200]
         per = (sum(e[3] for e in pictures) / len(pictures)) if pictures else 0
-        # batched answers (POST /frames: every playing canvas's pictures in one): the page counts each canvas's share; the
-        # batches' own HTTP bytes are shared out by those shares
+        # pushed pictures (one /push stream carries every playing canvas's): the page counts each canvas's share (framing
+        # included); a stream's own HTTP bytes, when it ended inside the window, are shared out by those shares
         d = lambda k: {f: fs1.get(k, {}).get(f, 0) - fs0.get(k, {}).get(f, 0) for f in ("answers", "bytes", "pictures", "pictureBytes")}
         mine, every = d(node0), {f: sum(d(k)[f] for k in fs1) for f in ("answers", "bytes", "pictures", "pictureBytes")}
-        batches = [e for e in self.net.events[n0:] if e[1] == "response" and "/frames/" in e[2]]
+        batches = [e for e in self.net.events[n0:] if e[1] == "response" and "/push/" in e[2]]  # (a push stream's own HTTP bytes, when it ended in the window)
         if mine["answers"]:
             overhead = max(0, sum(e[3] for e in batches) - every["bytes"])
             vbytes += mine["bytes"] + overhead * (mine["bytes"] / every["bytes"] if every["bytes"] else 0)
@@ -255,6 +257,7 @@ def play(page, out, net, pack=True, video=True):
             v.pack("picked")
     except Exception as e:
         v.beat("crashed", False, repr(e)[:400])
+    v.beat("no script errors in the page", not v.page_errors, "; ".join(v.page_errors[:3]) or "none", shot=False)
     return v.R
 
 

@@ -11,7 +11,8 @@ WORKDIR /app
 COPY pixi.toml pixi.lock ./
 RUN pixi install --locked -e default
 COPY . .
-RUN rm -rf starter && pixi run bash scripts/build.sh omxplorer web
+RUN rm -rf starter && pixi run bash scripts/build.sh omxplorer web \
+    && pixi run bash scripts/mxbuild.sh hosts/validate_main.mojo -o build/omxplorer/web/validate
 
 # ---- run
 FROM ubuntu:24.04
