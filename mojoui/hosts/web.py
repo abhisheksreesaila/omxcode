@@ -65,7 +65,7 @@ PUSH = os.environ.get("MOJOUI_PUSH", "1" if PUBLIC else "0") == "1"  # (local ap
 PUSH_HZ = float(os.environ.get("MOJOUI_PUSH_HZ", "30"))  # how often /push paints its playing canvases (new pictures only are sent)
 PUSH_MAX_S = float(os.environ.get("MOJOUI_PUSH_MAX_S", "240"))  # a push stream's longest life (a platform's request limit)
 JPEG_QUALITY = 85
-MAX_SESSIONS = int(os.environ.get("MOJOUI_MAX_SESSIONS", "8" if PUBLIC else "200"))  # public: past it, a busy page; else the oldest tab closes
+MAX_SESSIONS = int(os.environ.get("MOJOUI_MAX_SESSIONS", "6" if PUBLIC else "200"))  # public: past it, a busy page; else the oldest tab closes
 IDLE_S = float(os.environ.get("MOJOUI_IDLE_S", "900" if PUBLIC else "0"))  # a tab with no input this long ends (0: never)
 UNTOUCHED_S = 45.0  # public mode: a session whose page never came back (no /wait, frame or event) ends after this
 STATIC = Path(__file__).parent / "static"

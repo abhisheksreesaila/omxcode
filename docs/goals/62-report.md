@@ -1,8 +1,9 @@
 # Goal 62 report: omxplorer on the web, safe to share
 
 `docs/goals/62-check.py`, Linux, CPU only (`CUDA_VISIBLE_DEVICES=""`), on a shared machine (other projects kept its load
-at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07) and round 2 (2026-11-07). Branch `t3/7e13f4cf`, not merged: M5 failed its last run, and the round-2 reviews (reviewer and security auditor
-both NEEDS WORK, every finding fixed since) haven't re-reviewed to a PASS.
+at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), round 2 and M5 measured again at a cap of 6 (2026-11-07). Branch `t3/hosted-omxplorer-safety`
+(reported earlier as `t3/7e13f4cf`), not merged yet: the round-2 reviews (reviewer and security auditor both NEEDS WORK,
+every finding fixed since) haven't re-reviewed to a PASS.
 
 | # | Result (round 2) |
 |---|---|
@@ -11,7 +12,7 @@ both NEEDS WORK, every finding fixed since) haven't re-reviewed to a PASS.
 | M2 | PASS · 39 probes refused with nothing opened, written or listed (inotify on a fresh /tmp folder): crafted requests from inside the page to every control as the screens changed, file names that walk out, traversals, upload caps, the agent link and /dev off, SQL naming server paths, the Script window not offered, numbers no control offers, a flood of bare page loads, a second visitor sees nothing of the first, the scrubber cut nothing during the story |
 | M3 | PASS · 500 plain GETs → 0 sessions; a real tab → 1; idle past 6 s → the page says it ended and its upload is gone; past a cap of 2 → a busy page (200); Export pack → one `pack.zip` (3 PDFs, 3 clips, 4.7 MB), nothing left on the server |
 | M4 | PASS · through a delaying proxy (100 ms RTT, 10/5 Mbit/s): every beat; F00118 at 15 pictures a second (pushed: round 1's pulls gave 8.2); 1.02× its new pictures' bytes; click → answer 398 and 123 ms; a still view fetched 0 bytes in 5 s; screenshots looked at |
-| M5 | FAIL on the last run, image half BLOCKED · `scripts/web-start` held to Hobby's caps (8 GB, 8 vCPU), visitors only clicking: 8 at once passed three runs (13.6–15.1 pictures a second each, p95 click → answer 322–482 ms) and dipped to 10.8–11.5 in the final full run (machine load 10.98 11.44 10.61 from other projects then); 10 at once passed once and dipped to 11.5–11.8 twice. The session cap is 8; MOJOUI_MAX_SESSIONS=6 would give margin. Docker: `sg` isn't installed and the socket refuses this user |
+| M5 | image half BLOCKED, the rest PASS · `scripts/web-start` held to Hobby's caps (8 GB, 8 vCPU), visitors only clicking. At the cap of 6 (D-6230), three runs in a row with the machine at load 9.7–17.9: video 14.6–15.0, 13.5–14.1 and 14.8–15.1 pictures a second each, p95 click → answer 238, 302 and 250 ms. Earlier, 8 at once passed three runs (13.6–15.1, p95 322–482 ms) and dipped to 10.8–11.5 in a fourth (load ~11 from other projects); 10 at once passed once and dipped to 11.5–11.8 twice. Docker: `sg` isn't installed and the socket refuses this user |
 | M6 | 29 PASS, 55 SAME, 1 FAIL fixed · `docs/goals/62/regress.py`: goal 47's GTK robot story M0–M3, the web host's tests and 75 archived web milestones in 24 checks; 55 fail on 882155b too (builds, data and machines this fresh worktree lacks), so they aren't this goal's; the one regression, test_web_files.py (an upload's own folder in every mode), was fixed (public mode only) and passes; docs/components.md fresh |
 | M7 | PASS · while another visitor plays every beat: a question past the time budget stops in 1.4 s, one past the row cap in 0.5 s, a join past the memory budget in ~3 s, each in plain words; WITH and script statements are refused (one SELECT at a time); malformed CSV, Parquet and MP4 uploads are refused in plain words and valid ones open; a refused upload leaves an accepted one of the same name alone; 40 push streams on one tab leave /health quick; D-6218's suspected sequences leave the server up |
 
@@ -42,8 +43,8 @@ Pictures: `build/g62/m1-start.png` (the Start screen with the story card and the
 ## Visitors per server, memory per visitor
 
 - **Memory:** the shared starter, ~2.6 GB from the start; each visitor who plays the whole story adds **22–50 MB**.
-- **Visitors:** **8 at once** on Hobby's 8 GB / 8 vCPU, every beat, video 13.6–15.1 pictures a second each (session cap 8);
-  10 at once passes on a calmer machine and dips just under 12 on a busy one.
+- **Visitors:** **6 at once** on Hobby's 8 GB / 8 vCPU (the session cap, D-6230), every beat, video 13.5–15.1 pictures a second each;
+  8 at once passed three runs of four and 10 one of three, dipping just under 12 when other projects loaded the machine.
 
 ## What Railway costs at that size
 
@@ -57,6 +58,6 @@ Eight visitors at once add ~0.4 GB and a few vCPU while they play (cents an hour
 
 1. If you want the image checked here first: `sudo usermod -aG docker $USER && newgrp docker`, then `scripts/image-check`.
 2. `scripts/deploy-railway` (a wizard): `railway whoami`, the starter and the build folder (`scripts/stage-web`), the
-   project and service, variables (cap 8), then in the dashboard **Healthcheck Path `/health`** and **Restart Policy
+   project and service, variables (cap 6), then in the dashboard **Healthcheck Path `/health`** and **Restart Policy
    Always**, `railway up`, the story against the railway.app address, `railway domain app.omxlabs.tech` (a CNAME and a
    TXT at your DNS host), and the story again on https://app.omxlabs.tech.
