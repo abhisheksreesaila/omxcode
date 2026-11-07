@@ -22,6 +22,7 @@ DEMO = ROOT / "build/demo"
 FRESH = Path.home() / "scratch/omx-g59-fresh"
 APP = ROOT / "build/omxplorer/linux/omxplorer"
 sys.path.insert(0, str(ROOT / "scripts"))
+from gpuroom import roomiest_gpu  # noqa: E402
 
 
 def run(cmd, timeout=3600, env=None, cwd=ROOT):
@@ -33,19 +34,6 @@ def clean_env(extra=None):
     e = {k: v for k, v in os.environ.items() if not k.startswith(("CONDA", "PIXI", "PYTHON", "_CE_", "_CONDA"))}
     e.update(extra or {})
     return e
-
-
-def roomiest_gpu(free_mb=8000, limit_s=2700):
-    """The GPU with the most free memory, once one has free_mb (another project's model server comes and goes on this
-    machine and can fill both cards: a pack build measures our code, not the neighbours; goal 55's wait_gpu_room)."""
-    t0 = time.time()
-    while time.time() - t0 < limit_s:
-        rows = subprocess.run(["nvidia-smi", "--query-gpu=index,memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True).stdout
-        cards = sorted(((int(f), i.strip()) for i, f in (l.split(",") for l in rows.strip().splitlines())), reverse=True)
-        if cards and cards[0][0] >= free_mb:
-            return cards[0][1]
-        time.sleep(20)
-    raise RuntimeError(f"no GPU had {free_mb} MB free for {limit_s // 60} min")
 
 
 def setup_in(clone, env):
@@ -74,13 +62,15 @@ def m0():
     env["CUDA_VISIBLE_DEVICES"] = roomiest_gpu()
     r, took = setup_in(clone, env)
     gpu_waits = 0
-    while r.returncode and "MB free on GPU" in r.stdout and gpu_waits < 3:
+    last = r.stdout
+    while r.returncode and "MB free on GPU" in last and gpu_waits < 3:
         # (another project filled the card mid-run and setup stopped, saying so: as its message asks, run it again once
         # a card has room; the time spent waiting isn't setup's)
         gpu_waits += 1
         env["CUDA_VISIBLE_DEVICES"] = roomiest_gpu()
         r2_, took_ = setup_in(clone, env)
         r = subprocess.CompletedProcess(r2_.args, r2_.returncode, r.stdout + r2_.stdout, r.stderr + r2_.stderr)
+        last = r2_.stdout  # (only the latest run's reason decides another try)
         took += took_
     (OUT).mkdir(parents=True, exist_ok=True)
     (OUT / "m0-setup-1.txt").write_text(r.stdout + r.stderr)

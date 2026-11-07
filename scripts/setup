@@ -40,10 +40,10 @@ command -v pixi >/dev/null || { echo "pixi isn't installed: curl -fsSL https://p
 env_ok() { pixi run true >/dev/null 2>&1; }
 install_env() {
   # A half-made environment (an install stopped midway; two packages racing for share/X11/xkb) makes pixi fail to
-  # read its own records: the environment is thrown away (`pixi clean`: only .pixi/envs) and installed once more.
+  # read its own records: the environment is thrown away (`pixi clean -e default`: only that one) and installed once more.
   pixi install && return 0
   echo "   pixi install failed: the environment is cleaned and installed again"
-  pixi clean && pixi install
+  pixi clean -e default && pixi install
 }
 if [ -f .pixi/envs/default/conda-meta/history ] && env_ok && pixi install --locked >/dev/null 2>&1; then
   skip env "Mojo, MAX and the tools (pixi)" "installed"
@@ -77,6 +77,10 @@ pack() {  # pack <name> <what> <command…>: built again when MAX changed since 
   # (its downloads and references stay; the graph and the model.json that offers it go, so a failed rebuild offers nothing)
   # (a card another program has filled makes MAX fail deep in a traceback: too little room stops here, with what to do)
   local free; free=$(nvidia-smi -i "${CUDA_VISIBLE_DEVICES%%,*}" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')
+  if [ -z "$free" ]; then
+    echo "$1: couldn't read GPU ${CUDA_VISIBLE_DEVICES%%,*}'s free memory (nvidia-smi -i ${CUDA_VISIBLE_DEVICES%%,*}): check CUDA_VISIBLE_DEVICES"
+    exit 1
+  fi
   if [ "${free:-0}" -lt 3000 ]; then
     echo "$1: only ${free:-0} MB free on GPU ${CUDA_VISIBLE_DEVICES%%,*} (a pack needs about 3 GB to compile): close what's using it (nvidia-smi lists it) and run scripts/setup again"
     exit 1

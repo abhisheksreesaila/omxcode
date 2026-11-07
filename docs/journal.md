@@ -1226,3 +1226,12 @@ was the map.
 - dlopen declared by external_call clashed with another module's signature (the Mac's compiler, "existing function with conflicting signature") → through dlsym (cfunc), as the other modules do.
 - mac-ssh: an empty third argument vanished through ssh → ${3:-}.
 - Writing: AVAssetWriter + pixel-buffer adaptor; 30 frames read back within 1 level of the source on the Mac.
+
+## Goal 59 (2026-11-06): one command to set up, your own model as a script function
+- Fresh clone in /tmp failed silently twice: /tmp is a 32 GB RAM disk with ~6 GB free; the env is bigger. Fresh clones go on the home disk (~/scratch).
+- fetch_demo.py: plain HTTPS from the Hub, 1.2 GB in 17 s; robot_data.py 3 min cutting 265 clips. YOLOX's GitHub URLs hash the same as the files placed by hand on 11-05: pinned.
+- from_torch.py: ResNet-18 5/5 first try; the custom net failed once (cat's list of nodes not mapped to names). "Logits within 0.0000" was checked: outputs ~0.1, error 4e-8, top labels vary.
+- Mojo: a default argument calling getenv is evaluated at compile time ("unable to interpret call to unknown external function: getenv") → "" default resolved at run time. Tests with omxcore need scripts/mxbuild.sh (codecs), not mojo run.
+- M3: typing into the Script window's fields goes by their hint ("from s"), not tag or label.
+- M0 rounds: (1) verbs all "other" on 2,018 episodes; (2) a linked pack from an older MAX ("region_605"); (3) the torch env's xkb race; (4) CUDA out of memory (a neighbour's llama-server, ~43 GB of 48); (5) scene's labels cleared the player's boxes, card keys; (6) the GPU-room stop ran with every pack built. PASS on the seventh.
+- Claude Code's temp dir (/tmp) hit its quota mid-goal: commands lost their output; worked around by writing output to ~/scratch; freed space by `pixi clean` in yesterday's /tmp/omx-onboard clone only (5 GB, recreatable).
