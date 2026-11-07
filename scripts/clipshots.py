@@ -108,6 +108,35 @@ class Take:
             time.sleep(0.2)
         raise SystemExit(f"never printed {pattern!r}")
 
+    def read(self, tag):
+        """The card's text as an agent reads it (its title sentence, its 'answered in … ms on …' line)."""
+        got = self.r.c.call("read", name=tag)
+        return got[0] if isinstance(got, (list, tuple)) else str(got)
+
+    def answered(self, tag, before, since, timeout=600):
+        """The answer to what was just asked, once it has landed: (the card's text, its time as the app measured it).
+        A big file's chart runs as a job ("JOB: start chart0 …", then "JOB: landed chart0 1,409.9 ms"): its time is that
+        line's, and the card has drawn it; a small one answers at once: the time under the card's sentence ("0.8 ms")."""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            log = self.log()[since:]
+            start = re.search(r"^JOB: start (chart\d+) .*$", log, re.M)
+            if start:
+                done = re.search(rf"^JOB: landed {start.group(1)} ([\d.,]+) ms", log[start.end():], re.M)
+                if done:
+                    time.sleep(0.8)  # (the card draws what landed)
+                    return self.read(tag), f"{done.group(1)} ms"
+            elif time.time() - t0 > 1.5:  # (no job: the answer came at once)
+                text = self.read(tag)
+                if text != before:
+                    time.sleep(0.4)
+                    screen = self.r.c.call("screen")[0]
+                    (self.dir / "screens.txt").open("a").write(f"=== {tag}\n{screen}\n")
+                    m = re.search(r'^\s+"([\d.,]+ ms)"\s*$', screen, re.M)  # (the line under the chart's sentence)
+                    return text, (m.group(1) if m else "")
+            time.sleep(0.25)
+        raise SystemExit(f"{tag} never answered: {self.read(tag)[:300]!r}")
+
     def scene(self, name, secs, **rects):
         t = self.now()
         time.sleep(secs)
@@ -156,25 +185,25 @@ def record_island():
     try:
         r.record()
         mark = len(k.log())
+        t_open = k.now()
         r.call("open-file", 0.0, path=str(BIG))  # (the 100M-row file opens in a job: the island counts, the window stays live)
-        time.sleep(0.6)
-        k.scene("opening", 3.0, island=k.bounds("island"), full=[0, 0, WIN[0], WIN[1]])
+        opened = k.wait_log(r"^JOB: landed open \S+ ([\d.,]+) ms.*$", mark, 600)
+        k.scenes.append(dict(name="opening", t0=t_open, t1=k.now() + 0.3, island=None))  # (from the call to the landing)
         k.until("create-table", 600)
-        opened = k.wait_log(r"^JOB: open\S* landed in ([\d.,]+) ms.*$", mark, 600)
         r.call("create-table", 1.0)
         r.call("chart", 1.2)
         chart = k.card_of(k.bounds("chart-1")) or k.bounds("chart-1")
         k.scene("chart", 2.2, card=chart)
         answers = []
         for q in ("median by region", "by month, as a line"):
-            mark = len(k.log())
-            k.keys(k.bounds("ask"), q, enter=True)
+            before, since = k.read("chart-1"), len(k.log())
             t_ask = k.now()
-            line = k.wait_log(r"^(CHART|JOB): .*?([\d.,]+) (ms|s)\b.*$", mark, 300)
-            time.sleep(1.4)
-            answers.append(line.group(0))
-            k.scenes.append(dict(name="ask:" + q, t0=t_ask - 2.2, t1=k.now(), card=k.card_of(k.bounds("chart-1")) or chart,
-                                 island=k.bounds("island")))
+            k.keys(k.bounds("ask"), q, enter=True)
+            text, line = k.answered("chart-1", before, since)
+            time.sleep(2.6)  # (the payoff held: the chart drawn, the island saying where it ran)
+            answers.append(line)
+            k.scenes.append(dict(name="ask:" + q, t0=t_ask - 0.3, t1=k.now(), card=k.card_of(k.bounds("chart-1")) or chart,
+                                 island=k.bounds("island"), ask=k.bounds("ask")))
         time.sleep(0.6)
     finally:
         r.close()
@@ -194,12 +223,12 @@ def record_sentence():
         k.scene("chart", 2.0, card=chart)
         answers = []
         for q in ("by product, largest first, top 5", "median", "sum by month, every month, in data order, as a line"):
-            mark = len(k.log())
+            before, since = k.read("chart-1"), len(k.log())
             t0 = k.now()
             k.keys(k.bounds("ask"), q, enter=True)
-            line = k.wait_log(r"^(CHART|JOB): .*?([\d.,]+) (ms|s)\b.*$", mark, 120)
+            text, line = k.answered("chart-1", before, since)
             time.sleep(2.2)
-            answers.append(line.group(0))
+            answers.append(line)
             k.scenes.append(dict(name="ask:" + q, t0=t0, t1=k.now(), card=k.card_of(k.bounds("chart-1")) or chart, ask=k.bounds("ask")))
     finally:
         r.close()
@@ -275,9 +304,9 @@ def still(frames, im, secs, cap=None, check=None, fade_in=0.0):
 
 
 def timing(line):
-    """'0.7 s' / '42 ms' from an app trace line."""
-    m = re.search(r"([\d.,]+) (ms|s)\b", line)
-    return f"{m.group(1)} {m.group(2)}" if m else ""
+    """The chart's own time as it shows it ("51.0 ms"), or "" when the take didn't read one."""
+    m = re.fullmatch(r"([\d.,]+) ms", line or "")
+    return f"{m.group(1)} ms" if m else ""
 
 
 def compose_island(t):
@@ -285,26 +314,54 @@ def compose_island(t):
     fr = []
     still(fr, card("100 million rows.", sub="Opened on your GPU while the window stays live"), 2.4, check="01-title", fade_in=0.4)
     fs, s = frames_of(t, "opening")
-    isl = s["island"] or [WIN[0] - 900, 0, 900, 160]
-    shot(fr, fs, full, grown(isl, 24 * SCALE), "It opens in the background: the island counts.", check="02-opening")
+    # (the island lives in the title bar, one place for the whole take: during the opening its bounds can't be asked yet,
+    # so the take's first measured one)
+    isl = s["island"] or next((x["island"] for x in t["scenes"] if x.get("island")), None)
+    if not isl:
+        raise SystemExit("the take has no island bounds")
+    shot(fr, fs, full, fit169(grown(isl, 160 * SCALE), pad=0.0), "It opens in the background: the island counts.", lift=False, check="02-opening")
     fs, s = frames_of(t, "chart")
-    shot(fr, fs, full, grown(s["card"], 10 * SCALE), "A chart over all 100M rows.", check="03-chart")
-    for n, (q, line) in enumerate(zip(("median by region", "by month, as a line"), t["answers"])):
-        fs, s = frames_of(t, "ask:" + q)
-        shot(fr, fs, grown(s["card"], 10 * SCALE), grown(s["card"], 10 * SCALE), f"“{q}” · {timing(line)}", lead=0.2, check=f"0{4 + n}-ask")
+    shot(fr, fs, full, card_top(s["card"]), "A chart over all 100M rows.", check="03-chart")
+    asked(fr, t, ("median by region", "by month, as a line"), 4)
     still(fr, card("omxplorer", sub="built on omxcode · one Mojo app, on your GPU", small=URL), 3.0, check="09-end")
     return fr
+
+
+def sentence_strip(card, ask):
+    """The card's top down to its ask field: the chart's sentence (its title) and what's being typed, wide and short, so a
+    lifted view makes the words big."""
+    bottom = (ask[1] + ask[3] + 14 * SCALE) if ask else card[1] + card[2] * 0.3
+    return [card[0], card[1], card[2], bottom - card[1]]
+
+
+def card_top(card):
+    """The card from its top, as tall as 0.85 of its width: the sentence and the bars, at a size that reads."""
+    return [card[0], card[1], card[2], min(card[3], card[2] * 0.85)]
+
+
+SHORT = {"by product, largest first, top 5": "top 5 products", "sum by month, every month, in data order, as a line": "by month, as a line"}
+
+
+def asked(fr, t, questions, first_check):
+    """Each question: typed into the chart's ask field (the sentence strip held), then the answer (eased down to the
+    card's top: the bars)."""
+    for n, (q, line) in enumerate(zip(questions, t["answers"])):
+        fs, s = frames_of(t, "ask:" + q)
+        strip, top = sentence_strip(s["card"], s.get("ask")), card_top(s["card"])
+        typing = int(min(len(fs) * 0.45, (len(q) * 0.045 + 0.6) * FPS))
+        words = "\u201c" + SHORT.get(q, q) + "\u201d"
+        cap = words + (" \u00b7 " + timing(line) if timing(line) else "")
+        shot(fr, fs[:typing], strip, strip, "Type what you want:", lead=0.15)
+        shot(fr, fs[typing:], strip, top, cap, lead=0.0, move=0.9, check=f"{first_check + n:02d}-ask")
 
 
 def compose_sentence(t):
     fr = []
     still(fr, card("The title is the chart.", sub="Type what you want; the sentence and the bars follow"), 2.4, check="01-title", fade_in=0.4)
     fs, s = frames_of(t, "chart")
-    shot(fr, fs, [0, 0, WIN[0], WIN[1]], grown(s["card"], 10 * SCALE), "A chart over 1,000,000 orders.", check="02-chart")
-    for n, (q, line) in enumerate(zip(("by product, largest first, top 5", "median", "sum by month, every month, in data order, as a line"), t["answers"])):
-        fs, s = frames_of(t, "ask:" + q)
-        shot(fr, fs, grown(s["card"], 10 * SCALE), grown(s["card"], 10 * SCALE), f"“{q}” · {timing(line)}", lead=0.2, check=f"0{3 + n}-ask")
-    still(fr, card("omxplorer", sub="built on omxcode · one Mojo app, on your GPU", small=URL), 3.0, check="09-end")
+    shot(fr, fs, [0, 0, WIN[0], WIN[1]], card_top(s["card"]), "A chart over 1,000,000 orders.", check="02-chart")
+    asked(fr, t, ("by product, largest first, top 5", "median", "sum by month, every month, in data order, as a line"), 3)
+    still(fr, card("omxplorer", sub="built on omxcode \u00b7 one Mojo app, on your GPU", small=URL), 3.0, check="09-end")
     return fr
 
 
@@ -321,7 +378,8 @@ def compose_models(t):
     shot(fr, fs, grown(panel, 30 * SCALE), grown(panel, 30 * SCALE), "Apply scene(): ResNet-18, from PyTorch, on the GPU.", lead=0.2, check="04-apply")
     fs, s = frames_of(t, "labels")
     rows = re.search(r"→ ([\d,]+) rows in ([\d.,]+) ms", t["applied"])
-    cap = f"A label for every frame: {rows.group(1)} rows in {rows.group(2)} ms" if rows else "A label for every frame."
+    # (the first call of a session loads the pack onto the GPU: its time includes that, and the caption says so)
+    cap = f"A label for every frame: {rows.group(1)} rows, {rows.group(2)} ms with the model's load" if rows else "A label for every frame."
     shot(fr, fs, [0, 0, WIN[0], WIN[1]], grown(s["card"], 10 * SCALE) if s["card"] else [0, 0, WIN[0], WIN[1]], cap, check="05-labels")
     still(fr, card(["Any PyTorch image network:", "one command, no Mojo to write."], sub=URL + "/models.html"), 3.2, check="09-end")
     return fr

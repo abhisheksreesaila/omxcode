@@ -227,7 +227,7 @@ def spotlight(im, rect_out, alpha):
 
 def write(frames, path, check_dir=None):
     p = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{OUT[0]}x{OUT[1]}", "-r", str(FPS), "-i", "-",
-                          "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path)],
+                          "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path)],
                          stdin=subprocess.PIPE)
     for im, check in frames:
         rgb = im.convert("RGB")
