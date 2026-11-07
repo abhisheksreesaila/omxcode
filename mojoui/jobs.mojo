@@ -3,12 +3,23 @@
 # (The UI's background jobs are mojoui.uijobs.)
 #
 #   var q = Queue(data + "/host.db", backoff_ms=1000, max_attempts=5)     # jobs(id, tenant, kind, payload, status, …)
-#   _ = q.add("mail", payload_json, tenant=t)                             # durable once add() returns
+#   _ = q.add("mail", payload_json, tenant=t)                             # committed once add() returns
+#   db.begin(); …; _ = q.add_in(db, "invite", '{"invite": 7}', t); db.commit(); q.wake()   # an outbox: with the rows
 #   start_workers(q, MyRunner(...), threads=2)                            # MyRunner(Runner).run(job) -> "" or the error
 #   q.list_json(tenant)                                                   # a tenant's jobs for an admin page
+#   q.sweep()                                                             # (a server's tick) old done and dead jobs go
 #
+# Durable means committed to host.db in WAL mode with synchronous=NORMAL (mojoui.sqlite's Pool): a job survives the
+# process being killed at any point after add() returns; a power cut or an OS crash can lose the last transactions
+# before the next checkpoint (SQLite's synchronous=NORMAL: "durability is lost on power failure"). A queue that must
+# survive power loss needs synchronous=FULL on every connection to the file, so each commit waits for an fsync of the WAL
+# (a disk's flush time on every write): not offered yet (D-6020).
+# A job made because of a change (a sign-up, an invite) is written with add_in() inside that change's transaction, so
+# neither exists without the other (a crash between two commits can't lose the email).
 # A job is `pending` → `running` (claimed, attempts + 1) → `done`; a run that returns an error goes back to `pending`
-# with run_at = now + backoff·2^(attempts−1), and to `dead` (the error kept) once attempts reach max_attempts. At start,
+# with run_at = now + backoff·2^(attempts−1), and to `dead` (the error kept) once attempts reach max_attempts, or at once
+# when the error starts with PERMANENT ("permanent: ", `permanent(why)`: an SMTP 5xx, a payload that can't parse). Done
+# jobs are deleted after keep_done_s (7 days), dead ones after keep_dead_s (30 days), by sweep(). At start,
 # `resume()` puts jobs a killed process left `running` back to `pending`: delivery is at least once (a job may run twice
 # after a crash, never zero times). Workers sleep on a pipe that add() writes to, so a new job starts at once.
 
@@ -26,8 +37,16 @@ comptime SCHEMA = (
     " status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL,"
     " run_at REAL NOT NULL, error TEXT, created REAL NOT NULL, updated REAL NOT NULL);"
     "CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status, run_at);"
-    "CREATE INDEX IF NOT EXISTS jobs_tenant ON jobs(tenant, id)"
+    "CREATE INDEX IF NOT EXISTS jobs_tenant ON jobs(tenant, id);"
+    "CREATE INDEX IF NOT EXISTS jobs_old ON jobs(status, updated)"
 )
+comptime PERMANENT = "permanent: "  # a Runner's error that no retry can fix: dead at once
+comptime _SWEEP_LIMIT = 1000  # rows a sweep deletes per statement (short write transactions)
+
+
+def permanent(why: String) -> String:
+    """A Runner's error that retrying can't fix (dead at once, `why` kept)."""
+    return why if why.startswith(PERMANENT) else PERMANENT + why
 
 
 @fieldwise_init
@@ -53,14 +72,19 @@ struct Queue(ImplicitlyCopyable, Movable):
     var pool: Pool
     var backoff_ms: Int
     var max_attempts: Int
+    var keep_done_s: Int
+    var keep_dead_s: Int
     var wake_r: Int
     var wake_w: Int
 
-    def __init__(out self, path: String, backoff_ms: Int = 1000, max_attempts: Int = 5) raises:
+    def __init__(out self, path: String, backoff_ms: Int = 1000, max_attempts: Int = 5, keep_done_s: Int = 7 * 86400,
+                 keep_dead_s: Int = 30 * 86400) raises:
         self.path = path
         self.pool = Pool.shared()
         self.backoff_ms = max(backoff_ms, 1)
         self.max_attempts = max(max_attempts, 1)
+        self.keep_done_s = max(keep_done_s, 0)
+        self.keep_dead_s = max(keep_dead_s, 0)
         var fds = List[Int32](length=2, fill=-1)
         if libc.pipe(Int(fds.unsafe_ptr())) != 0:
             raise Error("jobs: no wake pipe")
@@ -74,26 +98,62 @@ struct Queue(ImplicitlyCopyable, Movable):
 
     def add(self, kind: String, payload: String, tenant: String = "", delay_s: Float64 = 0) raises -> Int:
         """A new pending job (committed before this returns); its id."""
-        var now = wall_seconds()
         var db = self.db()
         db.begin()
+        var id: Int
         try:
-            var q = db.prepare("INSERT INTO jobs(tenant, kind, payload, max_attempts, run_at, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)")
-            q.bind(1, tenant)
-            q.bind(2, kind)
-            q.bind(3, payload)
-            q.bind(4, self.max_attempts)
-            q.bind(5, now + delay_s)
-            q.bind(6, now)
-            q.bind(7, now)
-            q.run()
+            id = self.add_in(db, kind, payload, tenant, delay_s)
             db.commit()
         except e:
             _ = db.rollback_quiet()
             raise e^
-        var id = db.last_id()
         self.wake()
         return id
+
+    def add_in(self, db: Database, kind: String, payload: String, tenant: String = "", delay_s: Float64 = 0) raises -> Int:
+        """A new pending job inside the caller's transaction on this queue's file (`db` from the same mojoui.sqlite
+        Pool, begun): it exists only if that transaction commits. Call wake() after the commit. Its id."""
+        if db.path != self.path:
+            raise Error("jobs: add_in on another file (" + db.path + ", not " + self.path + ")")
+        var now = wall_seconds()
+        var q = db.prepare("INSERT INTO jobs(tenant, kind, payload, max_attempts, run_at, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        q.bind(1, tenant)
+        q.bind(2, kind)
+        q.bind(3, payload)
+        q.bind(4, self.max_attempts)
+        q.bind(5, now + delay_s)
+        q.bind(6, now)
+        q.bind(7, now)
+        q.run()
+        return db.last_id()
+
+    def sweep(self) raises -> Int:
+        """Deletes done jobs older than keep_done_s and dead ones older than keep_dead_s (their payloads name people),
+        a thousand rows a transaction: how many went. A server's tick calls it."""
+        var now = wall_seconds()
+        var gone = 0
+        var db = self.db()
+        for which in range(2):
+            var status = "done" if which == 0 else "dead"
+            var before = now - Float64(self.keep_done_s if which == 0 else self.keep_dead_s)
+            while True:
+                db.begin()
+                var n: Int
+                try:
+                    var q = db.prepare("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE status = ? AND updated < ? LIMIT ?)")
+                    q.bind(1, status)
+                    q.bind(2, before)
+                    q.bind(3, _SWEEP_LIMIT)
+                    q.run()
+                    n = db.changes()
+                    db.commit()
+                except e:
+                    _ = db.rollback_quiet()
+                    raise e^
+                gone += n
+                if n < _SWEEP_LIMIT:
+                    break
+        return gone
 
     def wake(self):
         var b = List[UInt8](length=1, fill=1)
@@ -158,7 +218,7 @@ struct Queue(ImplicitlyCopyable, Movable):
                 q.bind(2, job.id)
                 q.run()
             else:
-                var dead = job.attempts >= job.max_attempts
+                var dead = job.attempts >= job.max_attempts or error.startswith(PERMANENT)
                 var delay = Float64(self.backoff_ms) / 1000.0 * Float64(1 << min(job.attempts - 1, 16))
                 var q = db.prepare("UPDATE jobs SET status = ?, error = ?, run_at = ?, updated = ? WHERE id = ?")
                 q.bind(1, "dead" if dead else "pending")

@@ -41,9 +41,10 @@ from mojoui import libc
 from mojoui.http import Request, utf8_lossy
 from mojoui.json import json_string
 from mojoui.clock import now_ns
-from mojoui.log import Log
+from mojoui.log import Log, Fields
 from mojoui.crypto import random_bytes
 from mojoui.hash import hex
+from mojoui.clientip import TrustedProxies, client_ip
 from flare.http import HttpServer, HeaderMap, Cancel, ChunkSource, stream_response, HttpClient
 from flare.http import Request as FlareRequest
 from flare.http import Handler as FlareHandler
@@ -71,7 +72,8 @@ struct Req(Copyable, Movable):
     var body: String
     var param_names: List[String]
     var param_values: List[String]
-    var peer: String  # the client's IP, as the kernel reported it ("" in a test)
+    var peer: String  # the socket's peer, as the kernel reported it ("" in a test)
+    var client: String  # the client's IP: the peer, or X-Forwarded-For's rightmost untrusted hop from a trusted proxy (mojoui.clientip)
     var rid: String  # this request's id (X-Request-Id on the reply, `rid` in the log)
 
     def __init__(out self, method: String, target: String, body: String = ""):
@@ -85,6 +87,7 @@ struct Req(Copyable, Movable):
         self.param_names = List[String]()
         self.param_values = List[String]()
         self.peer = String("")
+        self.client = String("")
         self.rid = String("")
 
     def header(self, name: String) -> String:
@@ -550,10 +553,13 @@ def _keep_the_pool_for_compute():
 
 struct Server:
     @staticmethod
-    def bind(port: Int, host: String = "127.0.0.1") raises -> HttpServer:
+    def bind(port: Int, host: String = "127.0.0.1", max_body: Int = 64 * 1024 * 1024, request_timeout_ms: Int = 600_000) raises -> HttpServer:
+        """A listening Flare server. `max_body`: Flare refuses a bigger request body (413) as it reads it;
+        `request_timeout_ms`: a request's head and body must arrive within it (a slow sender can't hold a connection
+        longer). A Service keeps the wide defaults (uploads, long streams); `serve()`'s Handlers default to 1 MB, 30 s."""
         _keep_the_pool_for_compute()
-        var cfg = ServerConfig(idle_timeout_ms=30_000, handler_timeout_ms=600_000, request_timeout_ms=600_000, write_timeout_ms=60_000)
-        cfg.max_body_size = 64 * 1024 * 1024
+        var cfg = ServerConfig(idle_timeout_ms=30_000, handler_timeout_ms=600_000, request_timeout_ms=request_timeout_ms, write_timeout_ms=60_000)
+        cfg.max_body_size = max_body
         return HttpServer.bind(SocketAddr(IpAddr(host, False), UInt16(port)), cfg^)
 
     @staticmethod
@@ -914,7 +920,8 @@ comptime H_APP = 0
 comptime H_LOG = 1
 comptime H_OFFLOADED = 2  # requests answering on threads of their own now (atomic)
 comptime H_MAX_OFFLOADED = 3
-comptime H_WORDS = 4
+comptime H_PROXIES = 4  # a TrustedProxies (read-only once serving)
+comptime H_WORDS = 5
 comptime MAX_OFFLOADED = 256
 
 
@@ -942,8 +949,9 @@ struct _HBridge[H: Handler](Copyable, FlareHandler):
             r.names.append(req.headers._keys[i].lower())
             r.values.append(req.headers._values[i])
         r.peer = _peer(req)
-        r.rid = request_id()
         var w = _P(unsafe_from_address=self.state)
+        r.client = client_ip(r.peer, r.header("x-forwarded-for"), Pointer[TrustedProxies, MutUntrackedOrigin](unsafe_from_address=Int((w + H_PROXIES)[]))[])
+        r.rid = request_id()
         var app = Pointer[Self.H, MutUntrackedOrigin](unsafe_from_address=Int((w + H_APP)[]))
         if app[].blocking(r) and req.version.startswith("HTTP/1"):  # (HTTP/2 streams share a connection: answered inline)
             if _A.fetch_add(w + H_OFFLOADED, 1) < (w + H_MAX_OFFLOADED)[]:
@@ -966,7 +974,7 @@ def _finish(state: Int, req: Req, var reply: Reply, t0: Int) -> Reply:
     var w = _P(unsafe_from_address=state)
     var log = Log(addr=Int((w + H_LOG)[]))
     if log.addr != 0:
-        log.request(req.rid, req.method, req.path, reply.status, Float64(now_ns() - t0) / 1e6, req.peer)
+        log.request(req.rid, req.method, req.path, reply.status, Float64(now_ns() - t0) / 1e6, req.client if req.client != "" else req.peer)
     return reply^.header("X-Request-Id", req.rid)
 
 
@@ -1013,6 +1021,14 @@ def _offload_run[H: Handler](arg: Int):
     if reply.pipe != 0:
         reply = Reply.error(500, "a streamed reply can't come from a blocking request", "internal")
     reply = _finish(job[].state, job[].req, reply^, job[].t0)
+    var bad = False
+    for i in range(len(reply.names)):
+        bad = bad or not header_safe(reply.names[i], reply.values[i])
+    if bad:  # (a CR, LF or NUL would split the reply: Flare's own path refuses them too)
+        var log = Log(addr=Int((w + H_LOG)[]))
+        if log.addr != 0:
+            log.error("a reply header with CR, LF or NUL refused", Fields().str("rid", job[].req.rid).str("path", job[].req.path))
+        reply = _finish(job[].state, job[].req, Reply.error(500, "the server built a bad reply header", "internal"), job[].t0)
     var head = "HTTP/1.1 " + String(reply.status) + " " + _reason(reply.status) + "\r\n"
     var has_type = False
     for i in range(len(reply.names)):
@@ -1035,6 +1051,19 @@ def _offload_run[H: Handler](arg: Int):
     _ = _A.fetch_add(w + H_OFFLOADED, -1)
     job.unsafe_deinit_pointee()
     job.unsafe_free()
+
+
+def header_safe(name: String, value: String) -> Bool:
+    """A header a reply may carry: a token name (no separators, spaces or controls), a value without CR, LF or NUL."""
+    if name.byte_length() == 0:
+        return False
+    for b in name.as_bytes():
+        if b <= 32 or b >= 127 or b == 58:
+            return False
+    for b in value.as_bytes():
+        if b == 13 or b == 10 or b == 0:
+            return False
+    return True
 
 
 def _send_all(fd: Int, p: Int, n: Int):
@@ -1153,11 +1182,14 @@ def _hstop_loop[H: Handler](state: Int):
 
 
 def serve[H: Handler](var handler: H, port: Int = 0, host: String = "127.0.0.1", workers: Int = 0, tick_ms: Int = 0,
-                      log: Log = Log(addr=0)) raises -> Served:
+                      log: Log = Log(addr=0), var proxies: TrustedProxies = TrustedProxies(), max_body: Int = 1024 * 1024,
+                      request_timeout_ms: Int = 30_000) raises -> Served:
     """Serves `handler` concurrently on threads of its own until the returned Served is dropped or stopped (`.port`:
-    the port). `workers` 0: one reactor per CPU core (up to 16). `log`: a request line each (Log(addr=0): none)."""
+    the port). `workers` 0: one reactor per CPU core (up to 16). `log`: a request line each (Log(addr=0): none).
+    `proxies`: the reverse proxies whose X-Forwarded-For names the client (`req.client`; none: the socket's peer).
+    `max_body` (1 MB) and `request_timeout_ms` (30 s): Flare's limits on reading a request (Server.bind)."""
     var handles_signals = Server._install_stop_handler()
-    var srv = Server.bind(port, host)
+    var srv = Server.bind(port, host, max_body, request_timeout_ms)
     var bound = Int(srv.local_addr().port)
     var n = workers
     if n <= 0:
@@ -1169,6 +1201,9 @@ def serve[H: Handler](var handler: H, port: Int = 0, host: String = "127.0.0.1",
     (w + H_LOG)[] = Int64(log.addr)
     (w + H_OFFLOADED)[] = 0
     (w + H_MAX_OFFLOADED)[] = MAX_OFFLOADED
+    var px = unsafe_alloc[TrustedProxies](1)
+    px.unsafe_write(proxies^)
+    (w + H_PROXIES)[] = Int64(Int(px))
     var st = Int(w)
     if tick_ms > 0:
         var tw = unsafe_alloc[Int64](2)
