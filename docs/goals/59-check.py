@@ -73,6 +73,15 @@ def m0():
     env = clean_env({k: str(v) for k, v in caches.items()})
     env["CUDA_VISIBLE_DEVICES"] = roomiest_gpu()
     r, took = setup_in(clone, env)
+    gpu_waits = 0
+    while r.returncode and "MB free on GPU" in r.stdout and gpu_waits < 3:
+        # (another project filled the card mid-run and setup stopped, saying so: as its message asks, run it again once
+        # a card has room; the time spent waiting isn't setup's)
+        gpu_waits += 1
+        env["CUDA_VISIBLE_DEVICES"] = roomiest_gpu()
+        r2_, took_ = setup_in(clone, env)
+        r = subprocess.CompletedProcess(r2_.args, r2_.returncode, r.stdout + r2_.stdout, r.stderr + r2_.stderr)
+        took += took_
     (OUT).mkdir(parents=True, exist_ok=True)
     (OUT / "m0-setup-1.txt").write_text(r.stdout + r.stderr)
     if r.returncode:
@@ -144,7 +153,7 @@ exec "{real}" "$@"
     first = {l.split()[0]: l for l in steps}
     times = ", ".join(f"{k} {re.search(r'\((\d+) s\)', v).group(1)} s" for k, v in first.items() if re.search(r"\((\d+) s\)", v))
     return (not probs), ("; ".join(probs)[:1200] if probs else
-                         f"fresh clone, empty caches: setup in {took:.0f} s ({times}); {len(rows)} episodes, {len(clips)} with clips; "
+                         f"fresh clone, empty caches: setup in {took:.0f} s ({times}){f'; run again {gpu_waits}× after a neighbour filled the GPU' if gpu_waits else ''}; {len(rows)} episodes, {len(clips)} with clips; "
                          f"models scenario: classified {cards['table-classified']['rows']} rows, detect {cards['table-apply_1']['rows']} boxes, the agent's apply-scene {cards['table-apply_2']['rows']} rows; --no-models ok; "
                          f"second run {took2:.0f} s, all skipped; a failed install cleaned and installed again by setup in {took3:.0f} s")
 
