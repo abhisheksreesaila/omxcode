@@ -55,6 +55,7 @@ def sql_rules() raises:
 def places() raises:
     public(True)
     _ = setenv("MOJOUI_QUESTIONS", "2", True)
+    _ = setenv("MOJOUI_QUESTION_WAIT_S", "1", True)
     var before = questions_running()
     var a = take_question()
     var b = take_question()
@@ -64,7 +65,7 @@ def places() raises:
     try:
         _ = take_question()
     except e:
-        refused = String(e).find("other visitors") >= 0
+        refused = String(e).find("other visitors") >= 0  # (after waiting MOJOUI_QUESTION_WAIT_S for a place)
     assert_true(refused, "a third question at once was let in")
     assert_equal(questions_running(), before + 2)
     give_back_question(a)
@@ -123,7 +124,7 @@ def parking(folder: String) raises:
     assert_equal(got.value().card.sheet.rows(), 1)
     assert_equal(questions_running(), before)
     public(False)
-    print("check_budget and parking: ok (the stopped sort held its place for " + String(waited) + " ms more after it)")
+    print("check_budget and parking: ok (the stopped sort held its places, for the visitor and the server, until the engine ended it)")
 
 
 def paths_and_files(folder: String) raises:

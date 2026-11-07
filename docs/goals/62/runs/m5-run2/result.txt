@@ -1,0 +1,3 @@
+M5: BLOCKED  the image wasn't built: this user can't reach Docker (permission denied while trying to connect to the docker API at unix:///var/run/docker.sock); the owner runs: sudo usermod -aG docker $USER && newgrp docker, then scripts/image-check | the rest passes: 6 visitors at once in 8G / 800% CPU, video [15, 15, 14.8, 15, 15, 15] pictures/s, p95 click → answer 277 ms  (65 s)
+ 11:16:42 up 3 days,  3:05,  1 user,  load average: 10.58, 5.46, 4.27
+(on the build before the phone notice's last fix: desktop viewports only, unaffected)

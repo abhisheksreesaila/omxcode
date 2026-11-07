@@ -222,7 +222,8 @@ class Net:
         return [ev for ev in self.events if ev[0] >= t0 and ev[1] in kinds]
 
 
-ADDRESSES = iter(f"10.62.{i // 250}.{i % 250 + 1}" for i in range(1 << 16))
+_FIRST = (os.getpid() % 200) * 250  # (each visitor process its own run of addresses: M5 starts six at once)
+ADDRESSES = iter(f"10.{62 + (i // 62500) % 100}.{(i // 250) % 250}.{i % 250 + 1}" for i in range(_FIRST, _FIRST + (1 << 16)))
 
 
 def address():

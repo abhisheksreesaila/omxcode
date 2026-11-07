@@ -1,0 +1,1 @@
+M4: PASS  through 100 ms RTT, 10/5 Mbit/s: every beat; F00118 15 pictures/s, 1.02× the new pictures' bytes; click → answer [319.4, 113.8] ms; a still view fetched 0 bytes in 5 s; 21.2 MB down, 1.4 MB up; screenshots m4-desktop-start.png, m4-desktop-story.png, m4-phone-start.png, m4-phone-story.png (look at them)  (120 s)

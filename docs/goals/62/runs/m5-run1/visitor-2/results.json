@@ -1,0 +1,92 @@
+{
+ "beats": {
+  "start": {
+   "ok": true,
+   "note": "0.9 s; 5 cards: table: fleet 63,344 rows; video0: episode F00118.mp4 \u00b7 0:16 Remove play 0:16 / 0:16; tablecard0: telemetry 16,847,616 rows Export CSVRemove; track0: telemetry 244 rows \u00b7 16 channels Raw Smoothed Remove; documents0: paper Previous page 1 / 26 Next page\u2212+FitRemove ",
+   "shot": "/home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-7e13f4cf/build/g62/m5/visitor-2/shots/00-start.png"
+  },
+  "questions in words with their SQL": {
+   "ok": true,
+   "note": "Why did the robot drop it?\n\n63,344 robot runs from DROID, with their telemetry, video and the paper, linked\n\nfailures where the gripper closed, let go and closed again\n\nSELECT fleet.episode AS episode",
+   "shot": ""
+  },
+  "pivot by lab": {
+   "ok": true,
+   "note": "pivot0: n \u00b7 lab \u00d7 outcome 2.1 ms Remove lab failure success Total AUTOLab 3,374 6,553 9,927 CLVR 388 3,602 3,990 GuptaLab 182 1,113 1,295 ILIAD 1,160 2,056 3,216 IPRL 1",
+   "shot": "/home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-7e13f4cf/build/g62/m5/visitor-2/shots/02-pivot-by-lab.png"
+  },
+  "F00118 plays": {
+   "ok": true,
+   "note": "15.2 pictures/s (91 distinct in 6 s), 149 frame answers, 1199 KB, 1.01\u00d7 the new pictures' bytes",
+   "shot": "/home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-7e13f4cf/build/g62/m5/visitor-2/shots/03-f00118-plays.png"
+  },
+  "question 1: regrasped": {
+   "ok": true,
+   "note": "click \u2192 rows 255.1 ms; tablecard1: regrasped 2,997 rows Export packExport CSVRemove",
+   "shot": "/home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-7e13f4cf/build/g62/m5/visitor-2/shots/04-question-1-regrasped.png"
+  },
+  "question 2: fastest": {
+   "ok": true,
+   "note": "click \u2192 rows 50.9 ms; tablecard2: fastest 4 rows Export packExport CSVRemove",
+   "shot": "/home/abhisheksreesaila/.abode/home/worktrees/mojo-ui/t3-7e13f4cf/build/g62/m5/visitor-2/shots/05-question-2-fastest.png"
+  },
+  "no script errors in the page": {
+   "ok": true,
+   "note": "none",
+   "shot": ""
+  }
+ },
+ "timings": {
+  "start_s": 0.9,
+  "pivot": [
+   {
+    "choice": "Value=n",
+    "wallMs": 313
+   },
+   {
+    "choice": "Rows=lab",
+    "wallMs": 313
+   },
+   {
+    "choice": "Columns=outcome",
+    "wallMs": 309
+   }
+  ],
+  "video": {
+   "distinct": 91,
+   "changes": 91,
+   "changesPerSec": 15.2,
+   "secs": 6,
+   "startMs": 187,
+   "drawsPerSec": 15,
+   "frameAnswers": 149,
+   "pictureAnswers": 91,
+   "videoBytes": 1228203.0,
+   "allFrameBytes": 1261312,
+   "bytesPerNewPictureRatio": 1.01,
+   "secsSinceClick": 0.01
+  },
+  "question1": {
+   "clickToRowsMs": 255.1,
+   "cardAppearedMs": 255.1,
+   "wallMs": 274
+  },
+  "question2": {
+   "clickToRowsMs": 50.9,
+   "cardAppearedMs": 50.9,
+   "wallMs": 95
+  }
+ },
+ "notes": [],
+ "start_objects": [
+  "table: fleet 63,344 rows",
+  "video0: episode F00118.mp4 \u00b7 0:16 Remove play 0:16 / 0:16",
+  "tablecard0: telemetry 16,847,616 rows Export CSVRemove",
+  "track0: telemetry 244 rows \u00b7 16 channels Raw Smoothed Remove",
+  "documents0: paper Previous page 1 / 26 Next page\u2212+FitRemove PDF textRead"
+ ],
+ "questions_text": "Why did the robot drop it?\n\n63,344 robot runs from DROID, with their telemetry, video and the paper, linked\n\nfailures where the gripper closed, let go and closed again\n\nSELECT fleet.episode AS episode, fleet.lab AS lab, fleet.task AS task, fleet.clip AS clip, fleet.source AS source, COUNT(*) AS closes FROM fleet JOIN LINKED WHERE fleet.success = 0 AND telemetry.gripper_event = 'close' GROUP BY fleet.episode, fleet.lab, fleet.task, fleet.clip, fleet.source HAVING COUNT(*) >= 2 ORDER BY closes DESC, episode\n\nRun\n\nepisodes within 30% of the arm's joint speed limit\n\nSELECT fleet.episode AS episode, fleet.lab AS lab, fleet.outcome AS outcome, MAX(telemetry.speed) AS peak FROM fleet JOIN LINKED WHERE telemetry.speed > 1.5225 GROUP BY fleet.episode, fleet.lab, fleet.outcome ORDER BY peak DESC\n\nRun\n\nthe featured drop and the two failures beside it on its bench (Export pack them)\n\nSELECT fleet.episode AS episode, fleet.lab AS lab, fleet.date AS date, fleet.task AS task, fleet.duration_s AS duration_s, fleet.grasps AS grasps, fleet.peak_speed AS peak_speed, fleet.clip AS clip, fleet.source AS source FROM fleet WHERE fleet.episode IN ('F00118', 'F00119', 'F00124') ORDER BY episode\n\nRun\n\nRobot runs: DROID (Khazatsky et al., 2024), CC-BY-4.0",
+ "first_load_s": 29.53,
+ "errors": [],
+ "ok": true
+}

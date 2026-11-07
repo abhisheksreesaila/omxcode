@@ -63,7 +63,7 @@ def resources(out, say):
     question place on this server (MOJOUI_QUESTIONS=1), 2 cores and a 256 MB sort a question, a 1 s budget."""
     from playwright.sync_api import sync_playwright
     import story as S
-    srv = Server(out / "srv-resources", public=True, env={"MOJOUI_QUERY_S": "1", "MOJOUI_QUESTIONS": "1", "MOJOUI_QUERY_THREADS": "2"})
+    srv = Server(out / "srv-resources", public=True, env={"MOJOUI_QUERY_S": "1", "MOJOUI_QUESTIONS": "1", "MOJOUI_QUERY_THREADS": "2", "MOJOUI_QUESTION_WAIT_S": "1"})
     try:
         with sync_playwright() as p:
             b = chromium(p)

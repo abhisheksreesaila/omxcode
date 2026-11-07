@@ -19,6 +19,7 @@
 
 from omxcore import Job, JobBody, JobCtl, Catalog, Table, JOB_RUNNING
 from mojoui.jobs import start_ui_job
+from std.time import sleep
 from mojoui.shared import environment, count_add, count_of
 from mojoui.clock import now_ns, trace_on
 from mojoui.charts import fixed, grouped
@@ -279,10 +280,6 @@ struct TableWork(Movable):
         self.reap_stopped()
         if len(self.stopped_queries) > 0:  # (a question stopped at the time budget runs on in the engine until its next check)
             self.problem = PARKED_WORDS
-            return False
-        var most = public_questions()
-        if most > 0 and questions_running() >= most:  # (QueryJob takes its place for sure: this says so before it starts)
-            self.problem = BUSY_WORDS
             return False
         var refused = public_refusal(text)
         if refused != "":
@@ -597,14 +594,24 @@ def questions_running() -> Int:
 
 def take_question() raises -> Bool:
     """A place among the server's questions (public copy): True when one was taken (give_back_question once the engine
-    has ended); raises in plain words when the server is answering its most; False on a desktop (nothing counted)."""
+    has ended). A full server is waited on for up to MOJOUI_QUESTION_WAIT_S (10 s: the story's questions take well
+    under a second), then this raises in plain words; False on a desktop (nothing counted)."""
     var most = public_questions()
     if most <= 0:
         return False
-    if count_add(SLOT_QUESTIONS, 1) >= most:
+    var wait_s = 10.0
+    try:
+        wait_s = Float64(Int(environment("MOJOUI_QUESTION_WAIT_S", "10")))
+    except:
+        pass
+    var t0 = now_ns()
+    while True:
+        if count_add(SLOT_QUESTIONS, 1) < most:
+            return True
         _ = count_add(SLOT_QUESTIONS, -1)
-        raise Error(BUSY_WORDS)
-    return True
+        if Float64(now_ns() - t0) / 1e9 >= wait_s:
+            raise Error(BUSY_WORDS)
+        sleep(0.02)
 
 
 def give_back_question(held: Bool):

@@ -4323,8 +4323,8 @@ struct Main(App):
         parts.append(self.menu_bar())
         if self.win_w < 700:  # (a phone gets a look, not a layout of its own yet: goal 62's assumption; the window's whole width,
             # above the columns: in the main column a phone's ~90 points wrapped it a letter a line, round 3)
-            parts.append(HStack(Card(Text("omxplorer is best on a laptop or a desktop: the story's cards need the room.", CAPTION).tone(TONE_ACCENT),
-                                     spacing=0).fill().tag("best-on-laptop"), spacing=0).padding(12, 16).fill())
+            parts.append(VStack(Text("", CAPTION).height(86), Card(Text("omxplorer is best on a laptop or a desktop: the story's cards need the room.", CAPTION).tone(TONE_ACCENT).max_width(300),
+                                     spacing=0).fill().tag("best-on-laptop"), spacing=0).padding(0, 16).fill())  # (300: the page is laid out 480 wide, a phone shows 390; the empty line keeps it below the menu bar's floating island)
         parts.append(body^)
         parts.append(StatusBar(["Ready"], "omxplorer · omxcode"))
         for o in self.overlays():

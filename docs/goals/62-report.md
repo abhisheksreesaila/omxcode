@@ -16,6 +16,39 @@ every finding fixed since) haven't re-reviewed to a PASS.
 | M6 | 29 PASS, 55 SAME, 1 FAIL fixed · `docs/goals/62/regress.py`: goal 47's GTK robot story M0–M3, the web host's tests and 75 archived web milestones in 24 checks; 55 fail on 882155b too (builds, data and machines this fresh worktree lacks), so they aren't this goal's; the one regression, test_web_files.py (an upload's own folder in every mode), was fixed (public mode only) and passes; docs/components.md fresh |
 | M7 | PASS · while another visitor plays every beat: a question past the time budget stops in 1.4 s, one past the row cap in 0.5 s, a join past the memory budget in ~3 s, each in plain words; WITH and script statements are refused (one SELECT at a time); malformed CSV, Parquet and MP4 uploads are refused in plain words and valid ones open; a refused upload leaves an accepted one of the same name alone; 40 push streams on one tab leave /health quick; D-6218's suspected sequences leave the server up |
 
+## Round 3 (2026-11-07): the round-3 review's findings
+
+Both reviews said NEEDS WORK: the availability half (M7) and M6's proof didn't hold. Each fix has a test written for it
+(tests/test_public_rules.mojo, tests/test_web_public.py) and, where the review asked, a proof on the running server.
+
+- **Uploads that decode huge** (D-6231, D-6232): the upload check measures what its read took; a table past 256 MB once
+  read, or a visitor's tables past 384 MB together, is refused in plain words before the server reads it. M7: the
+  review's case (516 KB of Parquet → 120M rows, 918 MB) uploaded three times is refused, the server 2,891 → 2,891 MB.
+  The check is first for the out-of-memory killer and runs under an anyio CapacityLimiter.
+- **Questions the engine can't stop** (D-6233, D-6234): a stopped question counts until the engine ends it, for its
+  visitor and for the server (2 places, waited on up to 10 s); 2 cores and a 256 MB sort a question; WITH anywhere,
+  UNION, INTERSECT and EXCEPT are refused. M7 proves it by resources: the server sampled every 0.25 s from Run, at most
+  2 cores while the stopped question ran, CPU and memory back at baseline seconds later.
+  **Root cause, for an omxcore change (nothing filed, omxcore untouched):** at 834ef9a the engine calls `cancelled()`
+  only in group-by (`query.mojo`), window and CSV loops; its joins (`join`/`joincore`), set operations (`setops`),
+  subqueries (`subq`) and sorts have no stop checks, so a stopped question runs on to its end.
+- **M6** (D-6238): goals 03–05's archived checkers looked for `docs/build/…` (their root one folder too high) and built
+  nothing; regress.py now builds what each goal reads in both trees, runs a failure on the base, and calls SAME only a
+  row that ran on both sides. Result: 59 PASS, 24 SAME, 3 NOT RUN (Mac-only, one missing data file), 0 FAIL; every
+  row the owner named ran (docs/goals/62/runs/m6-progress.txt). Files the re-runs regenerated (22 under docs/) were put back.
+- **Fails closed** (D-6237): a non-loopback HOST without MOJOUI_PUBLIC=1, MOJOUI_PUBLIC other than 1 or 0, or public
+  mode without prlimit: the server doesn't start.
+- **Sessions** (D-6235): every session holds a place from the start (bare loads can't overshoot the cap); near the cap
+  one address (X-Real-IP) can't take the last places; new sessions are rate-limited; a visit lasts an hour at most;
+  /resize isn't input. The checks' simulated visitors each have their own address.
+- **Uploads in flight** (D-6236): an upload must say its length; 2 in flight a visitor, each reserving its length.
+- **Smaller ones:** a leading parenthesis no longer hides a WITH; story.py exits 1 on a failed beat; the image keeps
+  only what the server runs (not built here: Docker is still blocked); M5's $PORT test reads the start command, not a
+  comment; the phone notice spans the window above the columns; Insert ▸ Documents isn't offered on the public copy and
+  its handler opens nothing there; BodyLimit lets a handler's errors through and answers a chunked body past its limit
+  with 413; docs/web-public.md says cap 6 and that proxy headers aren't trusted; the M4 and three M5 runs below are kept
+  in docs/goals/62/runs/.
+
 ## A 30-second demo
 
     pixi run python scripts/starter.py --from <goal 47's full set> --to build/starter/robot   # once: 1.15 GB
