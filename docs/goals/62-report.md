@@ -1,8 +1,8 @@
 # Goal 62 report: omxplorer on the web, safe to share
 
 `docs/goals/62-check.py`, Linux, CPU only (`CUDA_VISIBLE_DEVICES=""`), on a shared machine (other projects kept its load
-at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), rounds 2–4 (2026-11-07). Branch `t3/hosted-omxplorer-safety`, not merged: round 4 fixed every
-finding of the round-4 reviews (both NEEDS WORK) and ran no reviewer, as asked; the owner's next review comes next.
+at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), rounds 2–5 (2026-11-07). Branch `t3/hosted-omxplorer-safety`, not merged: round 5 fixed every
+finding of the round-5 reviews (both NEEDS WORK) and ran no reviewer, as asked; the owner's next review comes next.
 
 | # | Result (round 3; the outputs kept in docs/goals/62/runs/) |
 |---|---|
@@ -14,6 +14,27 @@ finding of the round-4 reviews (both NEEDS WORK) and ran no reviewer, as asked; 
 | M5 | image half BLOCKED, the rest PASS · `scripts/web-start` held to Hobby's caps (8 GB, 8 vCPU), visitors only clicking, each from its own address. At the cap of 6 (D-6230), three runs in a row (load 3.7–9.8): video 15.0–15.2, 14.8–15.0 and 15.0–15.1 pictures a second each, p95 click → answer 270, 277 and 398 ms (runs/m5-run1–3). Docker: the socket still refuses this user |
 | M6 | PASS · round 4's full run: 58 PASS, 18 SAME, 3 NOT RUN, and 7 rows looked at again: goal 34b M1 failed once and passed on its rerun, and the 6 CHANGED rows (goals 08, 14, 33) proved to fail the same way on both sides once read in full (runs/m6-progress.txt, runs/m6-recheck.txt: 0 CHANGED, 0 FAIL). With the rows looked at: 59 PASS, 24 SAME, 3 NOT RUN (two need a Mac run, one a data file this machine lacks), 0 FAIL; every row the owner named ran; regenerated files under docs/ put back; docs/components.md fresh |
 | M7 | PASS · while another visitor plays every beat: a question past the time budget stops in 1.4 s, one past the row cap in 0.4 s, a join past the memory budget in ~3 s, each in plain words; WITH (also behind a parenthesis), UNION ALL and script statements are refused; malformed CSV, Parquet and MP4 uploads refused in plain words, valid ones open; the 516 KB decode bomb refused three times with the server's memory unchanged; a stopped sort over every telemetry row: at most 2 cores while it ran, CPU and memory back at baseline seconds after; 40 push streams leave /health quick; D-6218's sequences leave the server up |
+
+## Round 5 (2026-11-07): the round-5 review's findings
+
+Each exploit is in M7, read from the server:
+- **Answers by their real size** (D-6245): measured once built, strings included, refused past 64 MB; kept answers count by
+  that size. Questions that build strings are bounded before they run, since the engine computes a built string for every
+  row before an outer LIMIT (plain projections do stop there). 400 columns, 40 behind a subquery, and a 500-character
+  string a row over 1M rows: each refused, the server within +8 MB. The kept-answers test now fails when the counting line
+  is removed (checked by removing it).
+- **Slow and idle connections** (D-6246): header and body deadlines with a byte-rate floor, keep-alive 20 s,
+  limit_concurrency 2048, 64 connections a peer with no proxy in front, 48 requests in flight an address. 600 idle and
+  100 half-header sockets from one address: the server held 64, another address's /health and / answered in 25 ms, and 14 s
+  later none were left. 50 slow POSTs to a made-up session were answered "gone" before their bodies.
+- **Uploads that outlive their session** (D-6247): end_session drops the session's uploads in flight and the server stops
+  reading them; uploads keep the body rate floor. A slow 40 MB upload was cut 10 s after its session ended, and another
+  visitor's 30 MB upload then fit the 50 MB budget; trickling under the floor, it was cut after 19 s.
+- **Smaller ones** (D-6248): a request cap on every session route but an exempt list; events answered "retry" are sent
+  again; idle 5 minutes on the public copy, only input counts; untouched 25 s; IPv4-mapped addresses as IPv4, IPv6 by /48,
+  an unparsable X-Real-IP a shared "unknown", and the wizard fails on a private or proxy address; a running byte total per
+  visitor instead of folder walks; Chromium with --disable-dev-shm-usage; regress.py's EXPLAINED keyed by the failure's
+  words; the made-up-session log line said once every 10 s; docs/goals/34b/m1-chart-gtk.png back to 882155b.
 
 ## Round 4 (2026-11-07): the round-4 review's findings
 

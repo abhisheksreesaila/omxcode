@@ -606,7 +606,7 @@ CANVAS_JS = r"""
     const tries = seen && now - seen.at < 10000 ? seen.tries + 1 : 1;
     retried.set(key, { tries, at: now }); if (retried.size > 200) retried.clear();
     if (tries > 5) return;
-    setTimeout(() => { const p = htmx.ajax(c.verb.toUpperCase(), c.path, { values: c.parameters, swap: 'none', source: e.detail.elt });
+    setTimeout(() => { const p = htmx.ajax(c.verb.toUpperCase(), c.path, { values: c.parameters, swap: 'none', source: window.mojouiLane('retry') });
                        if (p && p.catch) p.catch(() => {}); }, 100 * tries);
   });
   const getFrame = async (sid, n, params) => {
