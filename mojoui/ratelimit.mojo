@@ -32,6 +32,39 @@ struct _Table(Movable):
         self.swept = wall_seconds()
 
 
+def _kth(mut v: List[Float64], k: Int) -> Float64:
+    """The k-th smallest (from 0) of v, reordering v: Hoare's quickselect, O(n) on average (a sweep needs one cut, not
+    a sorted table)."""
+    var lo = 0
+    var hi = len(v) - 1
+    var seed: UInt64 = 0x9E3779B97F4A7C15
+    while lo < hi:
+        seed ^= seed << 13
+        seed ^= seed >> 7
+        seed ^= seed << 17
+        var pivot = v[lo + Int(seed % UInt64(hi - lo + 1))]
+        var i = lo
+        var j = hi
+        while i <= j:
+            while v[i] < pivot:
+                i += 1
+            while v[j] > pivot:
+                j -= 1
+            if i <= j:
+                var t = v[i]
+                v[i] = v[j]
+                v[j] = t
+                i += 1
+                j -= 1
+        if k <= j:
+            hi = j
+        elif k >= i:
+            lo = i
+        else:
+            return v[k]
+    return v[k]
+
+
 struct RateLimit(ImplicitlyCopyable, Movable):
     var addr: Int
     var limit: Int
@@ -100,12 +133,23 @@ struct RateLimit(ImplicitlyCopyable, Movable):
             else:
                 live.append(h[len(h) - 1])
         if len(live) > _MAX_KEYS:  # every key still live: evict the least recently seen down to _KEEP_KEYS
-            sort(live)
-            var cut = live[len(live) - _KEEP_KEYS]  # keys last seen before this go (ties at the cut stay)
+            var cut = _kth(live, len(live) - _KEEP_KEYS)  # keys last seen before this go, then as many at it as still must
+            var ties = 0  # how many at the cut must go too (exactly down to _KEEP_KEYS)
+            var below = 0
+            for x in live:
+                if x < cut:
+                    below += 1
+            ties = len(live) - _KEEP_KEYS - below
             for e in t[].keys.items():
                 ref h = t[].hits[e.value]
-                if len(h) > 0 and now - h[len(h) - 1] < self.window_s and h[len(h) - 1] < cut:
+                if len(h) == 0 or now - h[len(h) - 1] >= self.window_s:
+                    continue
+                var seen = h[len(h) - 1]
+                if seen < cut:
                     gone.append(e.key)
+                elif seen == cut and ties > 0:
+                    gone.append(e.key)
+                    ties -= 1
         for k in gone:
             try:
                 var slot = t[].keys.pop(k)
