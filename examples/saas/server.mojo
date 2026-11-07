@@ -7,7 +7,8 @@ from std.sys import exit
 from mojoui.serve import Handler, Req, Reply, serve
 from mojoui.accounts import Accounts, AuthConfig, Member
 from mojoui.billing import Billing, BillingConfig
-from mojoui.jobs import Queue, QueuedJob, Runner, start_workers
+from mojoui.jobs import Queue, QueuedJob, Runner, start_workers, permanent
+from mojoui.clientip import TrustedProxies
 from mojoui.mail import SmtpConfig, Mail, send, welcome, invitation
 from mojoui.log import Log, Fields
 from mojoui.json import Json, json_string
@@ -34,7 +35,13 @@ struct Saas(Handler):
         return self.acc.blocking(req) or self.bill.blocking(req)
 
     def tick(self):
-        pass
+        """Every minute: expired sign-in states, sessions and desktop codes, and old done/dead jobs, go."""
+        try:
+            _ = self.acc.sweep()
+            _ = self.jobs.sweep()
+            _ = self.bill.sweep()
+        except e:
+            self.acc.log.error("saas: sweep: " + String(e))
 
     def stop(self):
         pass
@@ -137,12 +144,17 @@ struct SaasJobs(Runner):
         self.acc = acc^
 
     def run(self, job: QueuedJob) -> String:
-        if not self.smtp.ready():
-            return ""  # (no SMTP set up: nothing to send)
+        """(Started only when SMTP is set up: until then the jobs wait, pending, and send after a restart with it.)"""
+        var j: Json
         try:
-            var j = Json.parse(job.payload)
-            if job.kind == "signed_up":
-                send(self.smtp, welcome(j.text(j.get(0, "email")), j.text(j.get(0, "name")), PRODUCT, self.acc.cfg.base + "/"))
+            j = Json.parse(job.payload)
+        except e:
+            return permanent("a payload that isn't JSON: " + String(e))
+        try:
+            if job.kind == "signed_up":  # {user}: the person is read now (the payload names nobody)
+                var who = self.acc.user_email(j.number(j.get(0, "user")))
+                if who:
+                    send(self.smtp, welcome(who.value()[0], who.value()[1], PRODUCT, self.acc.cfg.base + "/"))
             elif job.kind == "invite":
                 var inv = self.acc.invite_details(j.number(j.get(0, "invite")))
                 if inv:  # (used or gone: nothing to send)
@@ -178,11 +190,16 @@ def main() raises:
             cfg.migrations = "examples/saas/migrations"  # (the demo's own tenant schema)
         var acc = Accounts(data, cfg^, log, jobs)
         var bill = Billing(data, BillingConfig.from_env(), log)
-        start_workers(jobs, SaasJobs(SmtpConfig.from_env(), acc.copy()), threads=2)
+        var smtp = SmtpConfig.from_env()
+        if smtp.ready():
+            start_workers(jobs, SaasJobs(smtp^, acc.copy()), threads=2)
+        else:
+            log.warn("SMTP isn't set up (SMTP_HOST, SMTP_FROM): emails wait in the queue until it is")
+        var proxies = TrustedProxies.parse(getenv("SAAS_TRUSTED_PROXIES"))  # (a typo refuses to start)
         var app = Saas(acc^, bill^, jobs)
         if app.test_hook:
             print("SAAS: the test-session hook is on (SAAS_TEST_HOOK=1, a test-mode Stripe key): never in production", flush=True)
-        var served = serve(app^, port=_int("SAAS_PORT", 8000), host=getenv("SAAS_HOST", "127.0.0.1"), log=log)
+        var served = serve(app^, port=_int("SAAS_PORT", 8000), host=getenv("SAAS_HOST", "127.0.0.1"), tick_ms=60_000, log=log, proxies=proxies^)
         print("SAAS: listening " + String(served.port), flush=True)
         while not served.stopped():
             _ = libc.poll(0, 0, 500)

@@ -651,7 +651,7 @@ def m3():
             return False, f"after kill -9 dee's welcome arrived {len(smtp.to('dee@example.com'))} times"
         time.sleep(1)
         with srv.db("host.db") as c:
-            rows = c.execute("select status, attempts from jobs where payload like '%dee@example.com%'").fetchall()
+            rows = c.execute("select status, attempts from jobs where json_extract(payload, '$.user') = (select id from users where email = ?)", ("dee@example.com",)).fetchall()  # (D-6022)
         if not rows or any(s != "done" for s, _ in rows):
             return False, f"dee's job rows: {rows}"
         return True, "20 × /api/me < 300 ms while Stripe and Google each sat 8 s; /api/jobs per tenant; a job resumed after kill -9 (delivered, done)"
@@ -694,7 +694,7 @@ def m4():
 
         def row(addr):
             with srv.db("host.db") as c:
-                return c.execute("select status, attempts, error from jobs where payload like ? order by rowid desc", (f"%{addr}%",)).fetchone()
+                return c.execute("select status, attempts, error from jobs where json_extract(payload, '$.user') = (select id from users where email = ?) order by rowid desc", (addr,)).fetchone()  # (D-6022)
 
         fay = wait_until(lambda: (r := row("fay@example.com")) and r[0] == "done" and r, 10)
         if not fay or fay[1] != 3:

@@ -444,14 +444,16 @@ struct _Wire(Movable):
                 return (code, all)
 
     def expect(mut self, want: Int, what: String) raises -> String:
+        """The reply when its class is `want`'s; else raises with it: a 5xx (RFC 5321 §4.2.1: permanent, sending
+        again won't help) starts "permanent: " (mojoui.jobs' PERMANENT: such a job is dead at once)."""
         var r = self.reply()
         if r[0] // 100 != want // 100:
-            raise Error("SMTP " + what + ": " + String(String(r[1]).strip()))
+            raise Error(("permanent: " if r[0] // 100 == 5 else "") + "SMTP " + what + ": " + String(String(r[1]).strip()))
         return r[1]
 
 
 def _connect(host: String, port: Int, timeout_ms: Int) raises -> TcpStream:
-    var tcp = TcpStream.connect(host, UInt16(port))
+    var tcp = TcpStream.connect(host, UInt16(port), timeout_ms)  # (each resolved address within the deadline)
     tcp.set_recv_timeout(timeout_ms)
     tcp.set_send_timeout(timeout_ms)
     return tcp^
@@ -472,7 +474,7 @@ def send(cfg: SmtpConfig, m: Mail) raises:
     var from_addr = split_sender(cfg.sender)[1]
     var w: _Wire
     if cfg.tls == "implicit":
-        var tls = TlsStream.connect(cfg.host, UInt16(cfg.port), _tls_config(cfg))
+        var tls = TlsStream.connect_timeout(cfg.host, UInt16(cfg.port), _tls_config(cfg), cfg.timeout_ms)  # (the connect and the handshake each bounded)
         tls.set_recv_timeout(cfg.timeout_ms)
         w = _Wire(tls^)
     else:
@@ -486,7 +488,7 @@ def send(cfg: SmtpConfig, m: Mail) raises:
             raise Error("mail: the server doesn't offer STARTTLS (SMTP_TLS=starttls): not sending in the clear")
         w.send("STARTTLS" + CRLF)
         _ = w.expect(220, "STARTTLS")
-        var tls = TlsStream.connect_over_tcp(w.tcp.take(), cfg.host, _tls_config(cfg))
+        var tls = TlsStream.connect_over_tcp(w.tcp.take(), cfg.host, _tls_config(cfg))  # (the socket's receive timeout bounds the handshake)
         tls.set_recv_timeout(cfg.timeout_ms)
         w = _Wire(tls^)
         w.send("EHLO " + me + CRLF)

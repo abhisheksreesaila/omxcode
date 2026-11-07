@@ -1,7 +1,12 @@
 # Goal 60 M4: mojoui.mail without a server: dot-stuffing, header injection refused, RFC 2047 words, the MIME message.
 # SMTP itself (AUTH, implicit TLS, STARTTLS, 4xx retries as jobs) is proved by 60-check.py M4 against its stand-in.
+# Round 3 (S-L4): a server that accepts and never speaks can't hold a sender past its deadline, in every TLS mode.
 from mojoui.mail import Mail, dotstuff, compose, encode_word, header_value, address_ok, mailbox, markdown_html, markdown_text, welcome, rfc5322_date
+from mojoui.mail import SmtpConfig, send
 from mojoui.crypto import b64
+from mojoui.clock import now_ns
+from flare.tcp import TcpListener
+from flare.net import SocketAddr, IpAddr
 
 
 def expect(ok: Bool, what: String) raises:
@@ -53,3 +58,18 @@ def main() raises:
     expect(full.endswith("--=_omx_tok2--\r\n"), "closed")
     expect("MIME-Version: 1.0\r\n" in full and "Message-ID: <tok2@saas.example>" in full, "headers")
     print("multipart: ok")
+    # deadline: a listener whose kernel completes the handshake from its backlog and never says a word
+    var silent = TcpListener.bind(SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)))
+    var port = Int(silent.local_addr().port)
+    for mode in ["implicit", "starttls", "off"]:
+        var cfg = SmtpConfig("127.0.0.1", port, "", "", "App <app@example.com>", String(mode), "", 800)
+        var t0 = now_ns()
+        var raised = False
+        try:
+            send(cfg, welcome("ada@example.com", "Ada", "omxcode SaaS", "https://example.com/"))
+        except:
+            raised = True
+        var ms = Int(now_ns() - t0) // 1_000_000
+        expect(raised and ms < 5000, "SMTP_TLS=" + String(mode) + " against a silent server: " + ("raised" if raised else "sent") + " after " + String(ms) + " ms")
+    _ = silent.local_addr()
+    print("deadline: ok (a silent server: each mode gave up within its 800 ms deadline)")

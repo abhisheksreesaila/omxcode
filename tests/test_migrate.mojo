@@ -4,6 +4,26 @@ from std.os import makedirs, remove, listdir
 from std.os.path import exists
 from mojoui.migrate import Migrations, apply_all
 from mojoui.sqlite import Database
+from mojoui.serve import spawn
+from mojoui import libc
+from std.memory import Pointer
+from std.atomic import Atomic
+
+comptime _A = Atomic[Scalar[DType.int64]]
+comptime RACE_DIR = "build/test_migrate_files"
+
+
+def racer(addr: Int):
+    """Applies the migrations on a connection of its own to race.db: word 0 counts finished, word 1 errors, word 2 the
+    migrations applied in total."""
+    var w = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
+    try:
+        var n = Migrations.from_dir(RACE_DIR + "/m").apply(Database(RACE_DIR + "/race.db"))
+        _ = _A.fetch_add(w + 2, Int64(n))
+    except e:
+        print("racer: " + String(e))
+        _ = _A.fetch_add(w + 1, 1)
+    _ = _A.fetch_add(w, 1)
 
 
 def expect(ok: Bool, what: String) raises:
@@ -27,7 +47,7 @@ def main() raises:
         makedirs(dir + "/m")
     for f in listdir(dir + "/m"):
         remove(dir + "/m/" + String(f))
-    for f in ["a.db", "b.db"]:
+    for f in ["a.db", "b.db", "race.db"]:
         for s in ["", "-wal", "-shm"]:
             if exists(dir + "/" + f + s):
                 remove(dir + "/" + f + s)
@@ -88,3 +108,23 @@ def main() raises:
     expect(mm.rollback(db, 1) == 1 and cols(db) == "id,title" and len(mm.applied(db)) == 1, "down to 1: " + cols(db))
     expect(mm.apply(db) == 1 and cols(db) == "id,title,body", "up again")
     print("down: ok")
+    # race: two processes' worth of apply() wait on a third's write lock; each read "nothing applied" before it got the
+    # lock, so the one that goes second must look again under the lock (round 3, R19)
+    var hold = Database(dir + "/race.db")
+    hold.exec("PRAGMA journal_mode=WAL")
+    _ = Migrations.from_dir(dir + "/m").applied(hold)  # (its version table exists, empty: reading it needs no lock)
+    hold.exec("BEGIN IMMEDIATE")
+    var w = List[Int64](length=3, fill=0)
+    for _ in range(2):
+        _ = spawn[racer](Int(w.unsafe_ptr()))
+    _ = libc.poll(0, 0, 400)  # (both have read the version and wait in BEGIN IMMEDIATE)
+    hold.exec("ROLLBACK")
+    var waited = 0
+    while _A.load(w.unsafe_ptr()) < 2 and waited < 100:
+        _ = libc.poll(0, 0, 100)
+        waited += 1
+    var total = len(Migrations.from_dir(dir + "/m").list)
+    expect(_A.load(w.unsafe_ptr()) == 2 and w[1] == 0, "a racing apply failed (" + String(w[1]) + " of 2)")
+    expect(Int(w[2]) == total, "applied " + String(w[2]) + " in total, want " + String(total) + " (once each)")
+    _ = len(w)
+    print("race: ok")

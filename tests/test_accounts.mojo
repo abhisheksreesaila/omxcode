@@ -1,8 +1,11 @@
 # Goal 57 M2: mojoui.accounts without a provider: which redirects and next pages it takes (no open redirect), cookies,
 # users and tenants (own tenant as admin; an invite joins as its role), sessions (sealed, looked up, ended), one SQLite
 # file per tenant. The OAuth round trip itself is proved by docs/goals/57-check.py M2 against its stand-in.
-from std.os import getenv
+from std.os import getenv, makedirs
+from std.os.path import exists
 from mojoui.accounts import Accounts, AuthConfig, is_loopback_redirect, is_local_path, cookie
+from mojoui.jobs import Queue
+from mojoui.json import Json
 from mojoui.serve import Req
 from mojoui.crypto import random_token
 from mojoui import libc
@@ -29,10 +32,14 @@ def main() raises:
     r.names.append("cookie")
     r.values.append("a=1; saas=xyz.1.abc; b=2")
     expect(cookie(r, "saas") == "xyz.1.abc" and cookie(r, "nope") == "", "cookie parsing")
+    var two = Req("GET", "/api/me")
+    two.names.append("cookie")
+    two.values.append("saas=planted.1.x; saas=xyz.1.abc")
+    expect(cookie(two, "saas") == "", "a cookie sent twice read as one of them")
     print("cookie: ok")
     var dir = "build/test_accounts.data"
     _ = libc.unlink(dir + "/host.db")
-    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, ""))
+    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 10_000))
     var ada = acc.test_session("Ada@Example.com")
     var req = Req("GET", "/api/me")
     req.names.append("authorization")
@@ -77,3 +84,60 @@ def main() raises:
     flip.values.append("Bearer " + String(ada[byte = : ada.byte_length() - 2]) + "!!")
     expect(not acc.member(flip), "a tampered token")
     print("accounts: ok")
+    # round 3: identities, __Host- cookies, two cookies refused, the sweep and the pending cap, the outbox
+    var dir3 = "build/test_accounts.data3"
+    _ = libc.unlink(dir3 + "/host.db")
+    _ = libc.unlink(dir3 + "/host.db-wal")
+    if not exists(dir3):
+        makedirs(dir3)
+    var q = Queue(dir3 + "/host.db")
+    var a3 = Accounts(dir3, AuthConfig("id", "secret", "https://p.example/a", "", "", "https://app.example", random_token(32), 7 * 86400, 7 * 86400, 0, "", 3), events=q)
+    var first = a3.user_for("dan@example.com", "Dan", "sub-1")
+    expect(first[0] > 0, "a new person")
+    expect(a3.user_for("dan@example.com", "Dan", "sub-1")[0] == first[0], "the same sub: the same person")
+    var other = a3.user_for("dan@example.com", "Mallory", "sub-2")
+    expect(other[0] == -1, "another sub with dan's address signed in as dan")
+    var hdb = a3.db()
+    expect(hdb.count("SELECT count(*) FROM audit WHERE action = 'identity_mismatch'") == 1, "the refused sign-in's audit row")
+    expect(a3.user_for("dan.new@example.com", "Dan", "sub-1")[0] == first[0], "the sub found under a changed address")
+    var t = a3.user_for("tess@example.com", "", "")  # (a test session: no sub yet)
+    expect(a3.user_for("tess@example.com", "Tess", "sub-t")[0] == t[0], "the first sub claims the row")
+    expect(a3.user_for("tess@example.com", "Tess", "sub-u")[0] == -1, "a second sub after the claim")
+    print("identity: ok")
+    var j = Json.parse(hdb.one_text("SELECT payload FROM jobs WHERE kind = 'signed_up' ORDER BY id LIMIT 1"))
+    expect(j.number(j.get(0, "user")) == first[0] and "dan" not in hdb.one_text("SELECT payload FROM jobs WHERE kind = 'signed_up' ORDER BY id LIMIT 1"), "a signed_up payload of ids only")
+    expect(hdb.count("SELECT count(*) FROM jobs WHERE kind = 'signed_up'") == hdb.count("SELECT count(*) FROM users"), "a job per account")
+    expect(a3.user_email(first[0]).value()[0] == "dan@example.com", "user_email")
+    print("outbox: ok")
+    var tok = a3.test_session("dan@example.com")
+    var lg = Req("GET", "/login")
+    var lr = a3.handle(lg)
+    var set = String("")
+    for i in range(len(lr.names)):
+        if lr.names[i] == "Set-Cookie":
+            set = lr.values[i]
+    expect(set.startswith("__Host-saas_state=") and "; Path=/;" in set and "Secure" in set, "the https state cookie: " + set)
+    expect(a3.session_cookie(tok).startswith("__Host-saas=") and "Secure" in a3.session_cookie(tok), "the https session cookie")
+    var me = Req("GET", "/api/me")
+    me.names.append("cookie")
+    me.values.append("__Host-saas=" + tok)
+    expect(a3.handle(me).status == 200, "a __Host- session")
+    var dup = Req("GET", "/api/me")
+    dup.names.append("cookie")
+    dup.values.append("__Host-saas=" + tok + "; __Host-saas=planted")
+    expect(a3.handle(dup).status == 400, "two session cookies weren't refused")
+    print("cookies: ok")
+    for _ in range(2):
+        lg = Req("GET", "/login")
+        _ = a3.handle(lg)
+    lg = Req("GET", "/login")
+    expect(a3.handle(lg).status == 503, "a 4th pending sign-in past the cap of 3")
+    _ = hdb.run("UPDATE oauth_states SET expires = 1")
+    _ = hdb.run("INSERT INTO sessions(id, user_id, tenant, expires, last_seen) VALUES ('old', 1, '', 1, 1)")
+    expect(a3.sweep() == 4, "the sweep: 3 states and a session")
+    lg = Req("GET", "/login")
+    expect(a3.handle(lg).status == 303, "sign-in after the sweep")
+    var plan = hdb.one_text("EXPLAIN QUERY PLAN DELETE FROM oauth_states WHERE rowid IN (SELECT rowid FROM oauth_states WHERE expires < 5 LIMIT 10)")
+    expect(hdb.count("SELECT count(*) FROM sqlite_master WHERE name IN ('oauth_states_expires', 'sessions_expires', 'desktop_codes_expires')") == 3, "the expiry indexes")
+    _ = plan
+    print("sweep: ok")

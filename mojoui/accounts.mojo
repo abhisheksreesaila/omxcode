@@ -21,7 +21,16 @@
 # event `invite` {invite, email}; its link (/invites/<sealed id>, expiring, single use) shows "Join <tenant>, invited by
 # <name>?" to the invited address only, and a same-origin POST accepts it with the invited role. A person in several
 # tenants lists them (GET /api/tenants) and switches (POST /api/switch {tenant}); the session carries the current one.
-# Per-IP limits on /login, /auth/callback and /api/token (SAAS_RATE a minute each): 429 with Retry-After.
+# Per-client limits on /login, /auth/callback and /api/token (SAAS_RATE a minute each; the client is mojoui.serve's
+# req.client: X-Forwarded-For only from SAAS_TRUSTED_PROXIES, IPv6 by its /64): 429 with Retry-After.
+# A person is their provider's (provider, sub), not their email: the first sign-in with a sub stores it, and a sign-in
+# whose sub differs from the stored one is refused (403, an `identity_mismatch` audit row): an address reassigned at
+# the provider can't take over its old owner's account. Events go on the queue inside the change's own transaction
+# (mojoui.jobs.add_in: an outbox) and carry ids only ({user}, {invite}): the job reads the person when it runs.
+# On an https base the cookies are __Host-saas and __Host-saas_state (Secure, Path=/, no Domain: a sibling subdomain
+# can't set them); a request carrying two cookies of one of those names is refused (400). Expired states, sessions and
+# desktop codes are swept by tick() (sweep()), a thousand rows a table at a time; at most SAAS_MAX_SIGNINS (10,000)
+# sign-ins may be pending at once (503 past it).
 # Desktop apps (RFC 8252): /login?client=desktop&redirect=<http://127.0.0.1:port/…>&challenge=<S256>&app_state=<s>: the
 # callback sends the browser to the app's loopback with a one-time code (60 s), traded at /api/token for a bearer token.
 
@@ -39,6 +48,7 @@ from mojoui.log import Log, Fields, Audit
 from mojoui.migrate import Migrations, Migration, parse, apply_all
 from mojoui.jobs import Queue
 from mojoui.ratelimit import RateLimit
+from mojoui.clientip import rate_key
 
 comptime COOKIE = "saas"
 comptime STATE_COOKIE = "saas_state"  # the web sign-in's state, bound to the browser that started it (D-5726)
@@ -46,6 +56,8 @@ comptime SESSION_S = 30 * 24 * 3600  # (no session outlives this, however often 
 comptime STATE_S = 600
 comptime CODE_S = 60
 comptime ROLES = ["admin", "editor", "member", "viewer"]  # (editor: fh-saas's name for member)
+comptime PROVIDER = "google"
+comptime _SWEEP_LIMIT = 1000
 
 comptime HOST_001 = (
     "-- up\n"
@@ -85,11 +97,27 @@ comptime HOST_002 = (  # goal 60: many tenants per person, sliding sessions, inv
 )
 
 
+comptime HOST_003 = (  # goal 60 round 3: identities by (provider, sub), expiry indexes for the sweep and the cap
+    "-- up\n"
+    "ALTER TABLE users ADD COLUMN provider TEXT;\n"
+    "UPDATE users SET provider = 'google' WHERE sub IS NOT NULL AND sub != '' AND sub != 'test';\n"
+    "UPDATE users SET sub = NULL WHERE sub = '' OR sub = 'test';\n"
+    "CREATE UNIQUE INDEX users_identity ON users(provider, sub) WHERE sub IS NOT NULL;\n"
+    "CREATE INDEX oauth_states_expires ON oauth_states(expires);\n"
+    "CREATE INDEX sessions_expires ON sessions(expires);\n"
+    "CREATE INDEX desktop_codes_expires ON desktop_codes(expires);\n"
+    "-- down\n"
+    "DROP INDEX desktop_codes_expires; DROP INDEX sessions_expires; DROP INDEX oauth_states_expires; DROP INDEX users_identity;\n"
+    "ALTER TABLE users DROP COLUMN provider;\n"
+)
+
+
 def host_migrations() raises -> Migrations:
     """mojoui.accounts' own tables in host.db, versioned in `accounts_migrations`."""
     var l = List[Migration]()
     l.append(parse(1, "001_accounts.sql", HOST_001))
     l.append(parse(2, "002_tenants_invites_audit.sql", HOST_002))
+    l.append(parse(3, "003_identity_expiry.sql", HOST_003))
     return Migrations(l^, "accounts_migrations")
 
 
@@ -117,11 +145,13 @@ struct AuthConfig(Copyable, Movable):
     var idle_s: Int
     var rate: Int  # requests a minute per IP on each sign-in route (0: no limit)
     var migrations: String  # a folder with tenant/NNN_name.sql ("" or missing: none)
+    var max_signins: Int  # sign-ins pending at once (OAuth states not yet used or expired)
 
     @staticmethod
     def from_env() -> AuthConfig:
         """GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SAAS_BASE, SAAS_SECRET; SAAS_OAUTH_AUTHORIZE/TOKEN/USERINFO (default
-        Google's endpoints); SAAS_INVITE_TTL (s, 7 days), SAAS_SESSION_IDLE (s, 7 days), SAAS_RATE (60), SAAS_MIGRATIONS."""
+        Google's endpoints); SAAS_INVITE_TTL (s, 7 days), SAAS_SESSION_IDLE (s, 7 days), SAAS_RATE (60), SAAS_MIGRATIONS,
+        SAAS_MAX_SIGNINS (10,000)."""
         return AuthConfig(
             getenv("GOOGLE_CLIENT_ID"),
             getenv("GOOGLE_CLIENT_SECRET"),
@@ -134,6 +164,7 @@ struct AuthConfig(Copyable, Movable):
             _env_int("SAAS_SESSION_IDLE", 7 * 86400),
             _env_int("SAAS_RATE", 60),
             getenv("SAAS_MIGRATIONS", ""),
+            _env_int("SAAS_MAX_SIGNINS", 10_000),
         )
 
     def callback(self) -> String:
@@ -193,14 +224,29 @@ def form(names: List[String], values: List[String]) -> String:
     return out
 
 
-def cookie(req: Req, name: String) -> String:
-    """A request cookie's value ("" when absent)."""
+def cookie_count(req: Req, name: String) -> Int:
+    """How many cookies named `name` the request carries."""
+    var n = 0
     for part in req.header("cookie").split(";"):
         var p = String(part).strip()
         var eq = p.find("=")
         if eq > 0 and String(p[byte = : eq]) == name:
-            return String(p[byte = eq + 1 :])
-    return ""
+            n += 1
+    return n
+
+
+def cookie(req: Req, name: String) -> String:
+    """A request cookie's value ("" when absent, and when two carry the name: a cookie tossed in by a sibling site or
+    an http page can't shadow the real one, D-6021)."""
+    var out = String("")
+    var n = 0
+    for part in req.header("cookie").split(";"):
+        var p = String(part).strip()
+        var eq = p.find("=")
+        if eq > 0 and String(p[byte = : eq]) == name:
+            out = String(p[byte = eq + 1 :])
+            n += 1
+    return out if n == 1 else String("")
 
 
 def _safe_path_char(c: Int) -> Bool:
@@ -326,14 +372,16 @@ struct Accounts(Copyable, Movable):
     def handle(self, mut req: Req) -> Reply:
         """Answers the account routes; any other request: a Reply with status 0 (not mine)."""
         try:
+            if cookie_count(req, self.cookie_name()) > 1 or cookie_count(req, self.state_cookie_name()) > 1:
+                return Reply.error(400, "two cookies with one name: clear this site's cookies and sign in again", "bad_cookie")
             if req.path == "/login" or req.path == "/auth/callback" or req.path == "/api/token":
-                var wait = self.limits.hit(req.peer + " " + req.path)
+                var wait = self.limits.hit(rate_key(req.client if req.client != "" else req.peer) + " " + req.path)
                 if wait > 0:
                     return Reply.error(429, "too many sign-in attempts from here: try again shortly", "rate_limited").header("Retry-After", String(wait))
             if req.matches("GET", "/login"):
                 return self._login(req)
             if req.matches("GET", "/auth/callback"):
-                return self._callback(req)
+                return self._callback(req).header("Referrer-Policy", "no-referrer")  # (its URL holds the code)
             if req.matches("POST", "/api/token"):
                 return self._token(req)
             if req.matches("GET", "/logout") or req.matches("POST", "/logout"):
@@ -350,7 +398,7 @@ struct Accounts(Copyable, Movable):
             if req.matches("POST", "/api/switch"):
                 return self._switch(req)
             if req.matches("GET", "/invites/{token}") or req.matches("POST", "/invites/{token}"):
-                return self._invitation(req)
+                return self._invitation(req).header("Referrer-Policy", "no-referrer")  # (its URL is the invitation)
         except e:
             self.log.error("accounts: " + String(e))
             return Reply.error(500, "the sign-in store failed", "internal")
@@ -369,7 +417,7 @@ struct Accounts(Copyable, Movable):
         if auth.startswith("Bearer "):
             token = String(auth[byte = 7 :])
         else:
-            token = cookie(req, COOKIE)
+            token = cookie(req, self.cookie_name())
             if req.method != "GET" and req.method != "HEAD" and not _origin_ok(req, self.cfg.base):
                 return None  # (a browser's cross-site write with the cookie: refused on every route, D-5726)
         if token == "":
@@ -479,9 +527,51 @@ struct Accounts(Copyable, Movable):
             raise e^
         return seal(self.key, sid, SESSION_S, now_s())
 
+    def secure(self) -> Bool:
+        return self.cfg.base.startswith("https://")
+
+    def cookie_name(self) -> String:
+        """The session cookie: __Host-saas on https (Secure, Path=/, no Domain), else saas."""
+        return ("__Host-" if self.secure() else "") + COOKIE
+
+    def state_cookie_name(self) -> String:
+        return ("__Host-" if self.secure() else "") + STATE_COOKIE
+
     def session_cookie(self, token: String) -> String:
-        var c = COOKIE + "=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + String(SESSION_S)
-        return c + ("; Secure" if self.cfg.base.startswith("https://") else "")
+        var c = self.cookie_name() + "=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + String(SESSION_S)
+        return c + ("; Secure" if self.secure() else "")
+
+    def sweep(self) raises -> Int:
+        """Expired OAuth states, sessions and desktop codes deleted (a thousand rows a table a transaction, by their
+        expiry indexes): for a server's tick. How many went."""
+        var gone = 0
+        var db = self.db()
+        for table in ["oauth_states", "desktop_codes", "sessions"]:
+            while True:
+                db.begin()
+                var n: Int
+                try:
+                    var q = db.prepare("DELETE FROM " + table + " WHERE rowid IN (SELECT rowid FROM " + table + " WHERE expires < ? LIMIT ?)")
+                    q.bind(1, now_s())
+                    q.bind(2, _SWEEP_LIMIT)
+                    q.run()
+                    n = db.changes()
+                    db.commit()
+                except e:
+                    _ = db.rollback_quiet()
+                    raise e^
+                gone += n
+                if n < _SWEEP_LIMIT:
+                    break
+        return gone
+
+    def user_email(self, user_id: Int) raises -> Optional[Tuple[String, String]]:
+        """A user's (email, name), for a job that reads its person when it runs (None: gone)."""
+        var q = self.db().prepare("SELECT email, COALESCE(name, '') FROM users WHERE id = ?")
+        q.bind(1, user_id)
+        if not q.step():
+            return None
+        return (q.text(0), q.text(1))
 
     def home_tenant(self, user_id: Int) raises -> String:
         """The tenant a sign-in lands in: the last one used, while still a member; else the first joined."""
@@ -492,34 +582,54 @@ struct Accounts(Copyable, Movable):
         return q.text(0) if q.step() else String("")
 
     def user_for(self, email: String, name: String, sub: String) raises -> Tuple[Int, String]:
-        """The user with this (verified) email and the tenant to sign in to; made on first sign-in with a tenant of
-        their own (admin) and a `signed_up` event. Invites never join anyone here: they're accepted (/invites/…)."""
+        """The user this provider identity (sub) or, the first time, this verified email is, and the tenant to sign in
+        to; (-1, "") when the email's account belongs to another sub (refused, an `identity_mismatch` audit row). Made on
+        first sign-in with a tenant of their own (admin) and a `signed_up` event {user}, in one transaction. Invites never
+        join anyone here: they're accepted (/invites/…). `sub` "" (a test session): the email alone."""
         var db = self.db()
-        var q = db.prepare("SELECT id FROM users WHERE email = ?")
-        q.bind(1, email)
-        if q.step():
-            var uid = q.int(0)
-            q.reset()
-            return (uid, self.home_tenant(uid))
-        q.reset()
+        if sub != "":
+            var by_sub = db.prepare("SELECT id FROM users WHERE provider = ? AND sub = ?")
+            by_sub.bind(1, PROVIDER)
+            by_sub.bind(2, sub)
+            if by_sub.step():
+                var uid = by_sub.int(0)
+                by_sub.reset()
+                return (uid, self.home_tenant(uid))
+            by_sub.reset()
         var tenant = hex(random_bytes(12))
         var uid: Int
         db.begin()
         try:
-            var again = db.prepare("SELECT id FROM users WHERE email = ?")  # (under the writer lock: two first sign-ins at once)
+            var again = db.prepare("SELECT id, COALESCE(sub, '') FROM users WHERE email = ?")  # (under the writer lock: two first sign-ins at once)
             again.bind(1, email)
             if again.step():
                 uid = again.int(0)
+                var have = again.text(1)
                 again.reset()
+                if sub != "" and have != "" and have != sub:
+                    Audit.record(db, self.home_tenant(uid), email, "identity_mismatch", "a sign-in from another " + PROVIDER + " account with this address")
+                    db.commit()
+                    return (-1, String(""))
+                if sub != "" and have == "":
+                    var claim = db.prepare("UPDATE users SET provider = ?, sub = ? WHERE id = ?")  # (the first sign-in with a sub: it's theirs now)
+                    claim.bind(1, PROVIDER)
+                    claim.bind(2, sub)
+                    claim.bind(3, uid)
+                    claim.run()
                 db.commit()
                 return (uid, self.home_tenant(uid))
             again.reset()
-            var ins = db.prepare("INSERT INTO users(email, name, sub, created, last_tenant) VALUES (?, ?, ?, ?, ?)")
+            var ins = db.prepare("INSERT INTO users(email, name, sub, provider, created, last_tenant) VALUES (?, ?, ?, ?, ?, ?)")
             ins.bind(1, email)
             ins.bind(2, name)
-            ins.bind(3, sub)
-            ins.bind(4, now_s())
-            ins.bind(5, tenant)
+            if sub != "":
+                ins.bind(3, sub)
+                ins.bind(4, PROVIDER)
+            else:
+                ins.bind_null(3)
+                ins.bind_null(4)
+            ins.bind(5, now_s())
+            ins.bind(6, tenant)
             ins.run()
             uid = db.last_id()
             var t = db.prepare("INSERT INTO tenants(id, name, created) VALUES (?, ?, ?)")
@@ -532,17 +642,19 @@ struct Accounts(Copyable, Movable):
             mem.bind(2, tenant)
             mem.bind(3, now_s())
             mem.run()
+            Audit.record(db, tenant, email, "sign_up")
+            if self.events:  # (the outbox: the welcome exists if and only if the account does)
+                _ = self.events.value().add_in(db, "signed_up", '{"user": ' + String(uid) + "}", tenant)
             db.commit()
         except e:
             _ = db.rollback_quiet()
             raise e^
+        if self.events:
+            self.events.value().wake()
         var tdb = Database(self.data + "/tenants/" + tenant + ".db")  # (the tenant's file exists from its first sign-in, migrated)
         tdb.exec("PRAGMA journal_mode=WAL")
         if self.tenant_migrations:
             _ = self.tenant_migrations.value().apply(tdb)
-        self.audit(tenant, email, "sign_up")
-        if self.events:
-            _ = self.events.value().add("signed_up", '{"email": ' + json_string(email) + ', "name": ' + json_string(name) + ', "tenant": ' + json_string(tenant) + "}", tenant)
         return (uid, tenant)
 
     # the routes -----------------------------------------------------------------------------------------------------
@@ -570,10 +682,16 @@ struct Accounts(Copyable, Movable):
         var db = self.db()
         db.begin()
         try:
-            for table in ["oauth_states", "desktop_codes", "sessions"]:  # (what has expired goes; D-5727)
-                var old = db.prepare("DELETE FROM " + table + " WHERE expires < ?")
-                old.bind(1, now_s())
-                old.run()
+            var pending = db.prepare("SELECT count(*) FROM (SELECT 1 FROM oauth_states WHERE expires >= ? LIMIT ?)")  # (by its expiry index)
+            pending.bind(1, now_s())
+            pending.bind(2, self.cfg.max_signins)
+            _ = pending.step()
+            var full = pending.int(0) >= self.cfg.max_signins
+            pending.reset()
+            if full:
+                db.commit()
+                self.log.warn("sign-in: too many pending", Fields().int("max", self.cfg.max_signins))
+                return Reply.error(503, "too many sign-ins at once: try again in a minute", "busy").header("Retry-After", "60")
             var q = db.prepare("INSERT INTO oauth_states(id, verifier, next, redirect, challenge, app_state, expires) VALUES (?, ?, ?, ?, ?, ?, ?)")
             q.bind(1, sha256_hex(state))
             q.bind(2, verifier)
@@ -592,8 +710,9 @@ struct Accounts(Copyable, Movable):
         var sep = "&" if "?" in self.cfg.authorize_url else "?"
         var r = Reply.empty(303).header("Location", self.cfg.authorize_url + sep + form(names, values)).header("Cache-Control", "no-store")
         if redirect == "":  # (the web: the callback must come back to this browser; a desktop app checks its own state)
-            r = r^.header("Set-Cookie", STATE_COOKIE + "=" + state + "; Path=/auth/callback; HttpOnly; SameSite=Lax; Max-Age=" + String(STATE_S)
-                + ("; Secure" if self.cfg.base.startswith("https://") else ""))
+            var path = "/" if self.secure() else "/auth/callback"  # (__Host- needs Path=/)
+            r = r^.header("Set-Cookie", self.state_cookie_name() + "=" + state + "; Path=" + path + "; HttpOnly; SameSite=Lax; Max-Age=" + String(STATE_S)
+                + ("; Secure" if self.secure() else ""))
         return r^
 
     def _callback(self, req: Req) raises -> Reply:
@@ -626,7 +745,7 @@ struct Accounts(Copyable, Movable):
         except e:
             _ = db.rollback_quiet()
             raise e^
-        if redirect == "" and not same(cookie(req, STATE_COOKIE), state):
+        if redirect == "" and not same(cookie(req, self.state_cookie_name()), state):
             return Reply.error(400, "this sign-in was started in another browser: start again here", "bad_state")
         # the code → a token (client secret + PKCE verifier) → who it is
         var tn: List[String] = ["grant_type", "code", "redirect_uri", "client_id", "client_secret", "code_verifier"]
@@ -646,9 +765,15 @@ struct Accounts(Copyable, Movable):
         var email = uj.text(uj.get(0, "email")).lower()
         if email == "" or not uj.flag(uj.get(0, "email_verified")):
             return Reply.error(403, "this account has no verified email", "unverified")
-        var who = self.user_for(email, uj.text(uj.get(0, "name")), uj.text(uj.get(0, "sub")))
+        var sub = uj.text(uj.get(0, "sub"))
+        if sub == "":
+            return Reply.error(502, "the sign-in provider didn't say which account this is", "userinfo_failed")
+        var who = self.user_for(email, uj.text(uj.get(0, "name")), sub)
         var uid = who[0]
         var tenant = who[1]
+        if uid < 0:
+            self.log.warn("sign-in refused: the address belongs to another account", Fields().str("provider", PROVIDER))
+            return Reply.error(403, "this address is already used by another " + PROVIDER + " account: sign in with that one", "identity_mismatch")
         self.audit(tenant, email, "sign_in", "desktop" if redirect != "" else "web")
         if redirect != "":
             var once = random_token(32)
@@ -716,7 +841,7 @@ struct Accounts(Copyable, Movable):
             except e:
                 _ = db.rollback_quiet()
                 raise e^
-        var clear = COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+        var clear = self.cookie_name() + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" + ("; Secure" if self.secure() else "")
         if req.header("authorization") != "":
             return Reply.json('{"ok": true}')
         return Reply.empty(303).header("Location", "/").header("Set-Cookie", clear)
@@ -759,12 +884,14 @@ struct Accounts(Copyable, Movable):
             q.run()
             id = db.last_id()
             Audit.record(db, v.tenant, v.email, "invite", email + " as " + role)
+            if self.events:  # (the outbox: the email's job exists if and only if the invite does)
+                _ = self.events.value().add_in(db, "invite", '{"invite": ' + String(id) + "}", v.tenant)
             db.commit()
         except e:
             _ = db.rollback_quiet()
             raise e^
         if self.events:
-            _ = self.events.value().add("invite", '{"invite": ' + String(id) + ', "email": ' + json_string(email) + "}", v.tenant)
+            self.events.value().wake()
         return Reply.json('{"invited": ' + json_string(email) + ', "role": ' + json_string(role) + ', "expires": ' + String(expires) + "}", 201)
 
     def invite_token(self, id: Int, expires: Int) -> String:
@@ -912,7 +1039,7 @@ struct Accounts(Copyable, Movable):
     def test_session(self, email: String) raises -> String:
         """A session for `email` without a provider: for test runs only; the caller gates it (SAAS_TEST_HOOK=1 and a test
         key) and never builds it into a route otherwise."""
-        var who = self.user_for(email.lower(), "", "test")
+        var who = self.user_for(email.lower(), "", "")
         return self.start_session(who[0], who[1])
 
 

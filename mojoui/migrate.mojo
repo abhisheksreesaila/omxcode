@@ -151,6 +151,10 @@ struct Migrations(Copyable, Movable):
             return 0
         db.begin()
         try:
+            cur = self._current(db)  # (again, under the writer lock: another process may have applied them meanwhile)
+            if cur >= len(self.list):
+                db.commit()
+                return 0
             for i in range(cur, len(self.list)):
                 ref m = self.list[i]
                 try:
@@ -177,6 +181,7 @@ struct Migrations(Copyable, Movable):
             return 0
         db.begin()
         try:
+            cur = self._current(db)  # (again, under the writer lock)
             var v = cur
             while v > to:
                 ref m = self.list[v - 1]

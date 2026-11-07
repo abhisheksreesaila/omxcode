@@ -32,6 +32,12 @@ from mojoui.ratelimit import RateLimit
 from mojoui.accounts import Accounts, Member, form, now_s
 
 comptime RETURNS_PER_MINUTE = 30  # /billing/return's Stripe read-backs, for the whole server (anyone may call it; D-5727)
+comptime BILLING_002 = (  # round 3 (S-L3): a subscription's events that come before its checkout, kept until it does
+    "-- up\n"
+    "CREATE TABLE stripe_pending(subscription TEXT PRIMARY KEY, event TEXT NOT NULL, kind TEXT NOT NULL, created INTEGER NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);\n"
+    "-- down\n"
+    "DROP TABLE stripe_pending;\n"
+)
 comptime TOLERANCE_S = 300  # Stripe's default: a signature older (or newer) than this is refused
 comptime BILLING_001 = (
     "-- up\n"
@@ -162,6 +168,7 @@ struct Billing(Copyable, Movable):
         var db = Database(self.host)
         var l = List[Migration]()
         l.append(parse(1, "001_billing.sql", BILLING_001))
+        l.append(parse(2, "002_pending_events.sql", BILLING_002))
         _ = Migrations(l^, "billing_migrations").apply(db)
 
     def db(self) raises -> Database:
@@ -367,6 +374,7 @@ struct Billing(Copyable, Movable):
         self._once(db, key, "checkout.session.completed", tenant)
         Audit.record(db, tenant, "stripe", "plan_change", "pro")
         self.log.info(id + " applied: " + tenant + " is pro")
+        self._apply_held(db, j.text(j.get(s, "subscription")))  # (an update that came first: applied now)
         return True
 
     def _webhook(self, req: Req, acc: Accounts) raises -> Reply:
@@ -388,7 +396,8 @@ struct Billing(Copyable, Movable):
             if kind == "checkout.session.completed":
                 _ = self._session_paid(db, id, j, obj, acc)
             elif kind == "customer.subscription.updated" or kind == "customer.subscription.deleted":
-                self._subscription(db, id, kind, created, j, obj)
+                if not self._subscription(db, id, kind, created, j, obj):
+                    self._hold(db, id, kind, created, j.text(j.get(obj, "id")), req.body)
             else:
                 self._once(db, id, kind, "")  # (not ours to act on: recorded so a retry is a duplicate)
             db.commit()
@@ -397,11 +406,61 @@ struct Billing(Copyable, Movable):
             raise e^
         return Reply.json('{"received": true}')
 
-    def _subscription(self, db: Database, id: String, kind: String, created: Int, j: Json, obj: Int) raises:
+    def _hold(self, db: Database, id: String, kind: String, created: Int, subscription: String, body: String) raises:
+        """A subscription event for a subscription no tenant has yet (Stripe doesn't order events: its checkout's
+        completion may come later): the newest per subscription is kept, applied when the checkout lands."""
+        if not _id_ok(subscription, "sub_"):
+            self._once(db, id, kind, "")
+            return
+        var q = db.prepare(
+            "INSERT INTO stripe_pending(subscription, event, kind, created, body, at) VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(subscription) DO UPDATE SET event = excluded.event, kind = excluded.kind, created = excluded.created,"
+            " body = excluded.body, at = excluded.at WHERE excluded.created >= stripe_pending.created AND stripe_pending.kind != 'customer.subscription.deleted'")
+        q.bind(1, subscription)
+        q.bind(2, id)
+        q.bind(3, kind)
+        q.bind(4, created)
+        q.bind(5, body)
+        q.bind(6, now_s())
+        q.run()
+        self._once(db, id, kind, "")  # (a retry is a duplicate; the row above is applied with the checkout)
+        self.log.info(id + " held: its subscription has no tenant yet")
+
+    def _apply_held(self, db: Database, subscription: String) raises:
+        """The held newest event of a subscription a checkout just sold, applied now (inside the caller's transaction)."""
+        var q = db.prepare("DELETE FROM stripe_pending WHERE subscription = ? RETURNING event, kind, created, body")
+        q.bind(1, subscription)
+        if not q.step():
+            return
+        var id = q.text(0)
+        var kind = q.text(1)
+        var created = q.int(2)
+        var body = q.text(3)
+        q.reset()
+        var j = Json.parse(body)
+        _ = self._subscription(db, id, kind, created, j, j.get(j.get(0, "data"), "object"))
+
+    def sweep(self) raises -> Int:
+        """Held events older than 30 days (their checkout never came) deleted: for a server's tick."""
+        var db = self.db()
+        db.begin()
+        try:
+            var q = db.prepare("DELETE FROM stripe_pending WHERE at < ?")
+            q.bind(1, now_s() - 30 * 86400)
+            q.run()
+            var n = db.changes()
+            db.commit()
+            return n
+        except e:
+            _ = db.rollback_quiet()
+            raise e^
+
+    def _subscription(self, db: Database, id: String, kind: String, created: Int, j: Json, obj: Int) raises -> Bool:
+        """Applies a subscription event to the tenant that bought it: False when no tenant has that subscription."""
         var q = db.prepare("SELECT tenant, status, event_at, past_due_since FROM billing WHERE subscription = ?")
         q.bind(1, j.text(j.get(obj, "id")))
         if not q.step():
-            return  # (a subscription we never sold, or one already deleted: final)
+            return False  # (not sold yet: held; or already deleted: final, since the row's subscription is gone)
         var tenant = q.text(0)
         var was = q.text(1)
         var event_at = q.int(2)
@@ -409,7 +468,7 @@ struct Billing(Copyable, Movable):
         q.reset()
         if created > 0 and created < event_at:
             self._once(db, id, kind, tenant)  # (older than what we know: Stripe doesn't order events)
-            return
+            return True
         var status = "canceled" if kind == "customer.subscription.deleted" else j.text(j.get(obj, "status"))
         var period_end = j.number(j.get(obj, "current_period_end"))
         if period_end == 0:  # (newer API versions keep it on the items)
@@ -444,6 +503,7 @@ struct Billing(Copyable, Movable):
         if status != was or cancel_end != 0:
             Audit.record(db, tenant, "stripe", "plan_change", status + (" (cancels at period end)" if cancel_end != 0 else ""))
         self.log.info(id + " applied: " + tenant + " is " + status)
+        return True
 
     def _return(self, req: Req, acc: Accounts) raises -> Reply:
         """Stripe sends the payer back here: the session is read from Stripe itself (never trusted from the URL)."""
