@@ -17,6 +17,7 @@ compose: 1920×1080, 30 fps: eased push-ins onto those rectangles, a lower-third
 
 import csv
 import json
+import re
 import math
 import os
 import shutil
@@ -31,15 +32,13 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+import director  # noqa: E402
+from director import *  # noqa: E402,F401,F403  (the director: cards, captions, cameras, encoding)
 G47 = ROOT / "build/g47"
 STORY = G47 / "story"
-WIN = (2560, 1440)  # the recorded window (16:9, like the output)
-OUT = (1920, 1080)
-FPS = 30
-FONT = ROOT / "mojoui/hosts/static/fonts/Geist-Variable.ttf"
-# Liquid dark (themes/liquid.mojo, liquid_dark_palette): page, card, hairline, ink, ink2, accent, warn (the link colour)
-PAGE, CARD, LINE, INK, INK2 = (18, 21, 27), (27, 31, 39), (50, 57, 70), (241, 244, 249), (196, 202, 214)
-ACCENT, WARN, GOOD = (60, 196, 207), (251, 191, 36), (126, 210, 176)  # (GOOD: the grid cursor's outline as drawn on a dark card)
+SCALE = 2  # the take at 2×: the app lays out as on a 1920×1080 screen with every pixel doubled, so a push-in onto one tile stays sharp
+WIN = (1920 * SCALE, 1080 * SCALE)  # the recorded window, device pixels (16:9, like the output)
+director.configure(WIN)
 HERO = "F00118"
 DROP_T = 12.7  # the video's time when the gripper starts to open over the box's edge (D-4718)
 
@@ -58,8 +57,10 @@ def record(media=None):
     rows = list(csv.DictReader(open(media / "fleet.csv")))
     hero_row = [r["episode"] for r in rows].index(HERO) + 1
     hero_frames = int(next(r["frames"] for r in rows if r["episode"] == HERO))
-    r = covers.Rec(covers.copy_app("omxplorer", STORY), {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(docs / "config"), "MOJOUI_BUDGET_MS": "50"},
-                   STORY / "raw.mp4", size=WIN)
+    os.environ.setdefault("MOJOUI_HEADLESS_SCREEN", f"{WIN[0]}x{WIN[1] + 200}")
+    r = covers.Rec(covers.copy_app("omxplorer", STORY), {"OMX_DOCUMENTS": str(docs), "OMX_CONFIG": str(docs / "config"), "MOJOUI_BUDGET_MS": "50",
+                                                         "GDK_SCALE": str(SCALE)},
+                   STORY / "raw.mp4", size=WIN, window=(WIN[0] // SCALE, WIN[1] // SCALE))
     scenes = []
 
     def now():
@@ -77,11 +78,11 @@ def record(media=None):
 
     def bounds(tag):
         b = link({"op": "bounds", "tag": tag})
-        return [b["x"], b["y"], b["w"], b["h"]] if b.get("ok") else None
+        return [b["x"] * SCALE, b["y"] * SCALE, b["w"] * SCALE, b["h"] * SCALE] if b.get("ok") else None  # (the app's points → recorded pixels)
 
     def region(name):
         got = [g for g in link({"op": "regions"})["regions"] if g["name"] == name]
-        return [[g["x"], g["y"], g["w"], g["h"]] for g in got]
+        return [[g["x"] * SCALE, g["y"] * SCALE, g["w"] * SCALE, g["h"] * SCALE] for g in got]
 
     def until(tool, timeout=300):
         t0 = time.time()
@@ -163,7 +164,11 @@ def record(media=None):
             r.call("pause", 0.0)
         r.call("seek", 0.6, value=5.5)
         video, chart = bounds("video"), bounds("telemetry-chart")
-        cards = {"episode": region("card:episode")[0], "telemetry": [c for c in region("card:telemetry") if c[0] > region("card:episode")[0][0]][0]}
+        # (two cards are called telemetry, the 16.8M-row table and the episode's chart: the one holding the chart, wherever
+        # the tiles put it)
+        holds = lambda c, r_: c[0] <= r_[0] + 2 and c[1] <= r_[1] + 2 and c[0] + c[2] >= r_[0] + r_[2] - 2 and c[1] + c[3] >= r_[1] + r_[3] - 2
+        cards = {"episode": next(c for c in region("card:episode") if holds(c, video)),
+                 "telemetry": next(c for c in region("card:telemetry") if holds(c, chart))}
         r.call("play", 0.0)
         scene("video", 2.8, video=video, cards=cards)
         r.call("pause", 0.0)
@@ -190,7 +195,7 @@ def record(media=None):
         t = now()
         type_into(box[0], scenario.ROBOT_Q1)  # (real keys: a focused field keeps what a person types, D-4729)
         time.sleep(0.4)
-        r.call("sql", 0.9, text=scenario.ROBOT_SQL1)
+        r.call("sql", 2.2, text=scenario.ROBOT_SQL1)  # (held: the question's SQL is what a viewer reads)
         scenes.append(dict(name="ask", t0=t, t1=now(), box=box))
         r.call("query-name", 0.0, text="regrasped")
         r.call("run-query", 0.0)
@@ -232,7 +237,10 @@ def record(media=None):
     log = (STORY / "raw.log").read_text()
     ms = [l for l in log.splitlines() if l.startswith("JOB: query landed")]
     slow = [l for l in log.splitlines() if l.startswith("SLOW:")]
+    import pyarrow.parquet as pq
+    tele_rows = pq.ParquetFile(media / "telemetry.parquet").metadata.num_rows
     timeline = dict(raw=str(r.raw), win=WIN, scenes=scenes, hero_frames=hero_frames, query_ms=ms[0] if ms else "",
+                    fleet_rows=len(rows), tele_rows=tele_rows,
                     pack=str(docs / "pack" / f"{HERO}.pdf"), clip=str(media / "clips" / f"{HERO}.mp4"), slow=slow)
     (STORY / "timeline.json").write_text(json.dumps(timeline, indent=1))
     print(f"recorded {len(scenes)} scenes; {len(slow)} SLOW lines; {STORY / 'timeline.json'}")
@@ -241,173 +249,19 @@ def record(media=None):
 
 # ---------------------------------------------------------------------------------------------------------------- compose
 
-def font(size, weight=600):
-    f = ImageFont.truetype(str(FONT), size)
-    try:
-        f.set_variation_by_axes([weight])
-    except Exception:
-        pass
-    return f
-
-
-def ease(u):
-    u = min(max(u, 0.0), 1.0)
-    return u * u * (3 - 2 * u)
-
-
-def fit169(rect, pad=0.06, win=WIN):
-    """A rectangle grown to 16:9 around its centre (plus a margin), kept inside the window."""
-    x, y, w, h = rect
-    w, h = w * (1 + 2 * pad), h * (1 + 2 * pad)
-    if w / h > 16 / 9:
-        h = w * 9 / 16
-    else:
-        w = h * 16 / 9
-    w, h = min(w, win[0]), min(h, win[1])
-    cx, cy = rect[0] + rect[2] / 2, rect[1] + rect[3] / 2
-    x0 = min(max(cx - w / 2, 0), win[0] - w)
-    y0 = min(max(cy - h / 2, 0), win[1] - h)
-    return [x0, y0, w, h]
-
-
-def union(*rs):
-    x0 = min(r[0] for r in rs)
-    y0 = min(r[1] for r in rs)
-    x1 = max(r[0] + r[2] for r in rs)
-    y1 = max(r[1] + r[3] for r in rs)
-    return [x0, y0, x1 - x0, y1 - y0]
-
-
-def lerp_rect(a, b, u):
-    return [a[k] + (b[k] - a[k]) * u for k in range(4)]
-
-
-def raw_frames(raw, t0, t1):
-    """The raw take's frames from t0 to t1 (seconds), as RGB arrays."""
-    w, h = WIN
-    p = subprocess.Popen(["ffmpeg", "-v", "error", "-ss", f"{max(t0, 0):.3f}", "-i", str(raw), "-t", f"{max(t1 - t0, 0.04):.3f}", "-vf", f"fps={FPS}",
-                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
-    n = w * h * 3
-    while True:
-        b = p.stdout.read(n)
-        if len(b) < n:
-            break
-        yield np.frombuffer(b, np.uint8).reshape(h, w, 3)
-    p.wait()
-
-
-def raw_at(raw, t):
-    return next(raw_frames(raw, t, t + 0.1))
-
-
-class Canvas:
-    """One output frame: the camera's view of a raw frame, then overlays drawn in window coordinates."""
-
-    def __init__(self, frame, cam):
-        self.cam = cam
-        x, y, w, h = cam
-        im = Image.fromarray(frame).crop((int(x), int(y), int(x + w), int(y + h)))
-        self.im = im.resize(OUT, Image.LANCZOS).convert("RGBA")
-        self.k = OUT[0] / w
-
-    def at(self, px, py):
-        return ((px - self.cam[0]) * self.k, (py - self.cam[1]) * self.k)
-
-    def box(self, rect, colour, width=6, glow=0.0, radius=12):
-        x0, y0 = self.at(rect[0], rect[1])
-        x1, y1 = self.at(rect[0] + rect[2], rect[1] + rect[3])
-        layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
-        d = ImageDraw.Draw(layer)
-        if glow > 0:
-            g = Image.new("RGBA", OUT, (0, 0, 0, 0))
-            ImageDraw.Draw(g).rounded_rectangle([x0, y0, x1, y1], radius, outline=colour + (int(200 * glow),), width=width * 4)
-            layer = Image.alpha_composite(layer, g.filter(ImageFilter.GaussianBlur(14)))
-            d = ImageDraw.Draw(layer)
-        d.rounded_rectangle([x0, y0, x1, y1], radius, outline=colour + (255,), width=width)
-        self.im = Image.alpha_composite(self.im, layer)
-        return ((x0 + x1) / 2, y0, (x0 + x1) / 2, y1, x0, x1)
-
-    def ring(self, cx, cy, r, colour, width=7, glow=0.0):
-        x, y = self.at(cx, cy)
-        rr = r * self.k
-        layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
-        if glow > 0:
-            g = Image.new("RGBA", OUT, (0, 0, 0, 0))
-            ImageDraw.Draw(g).ellipse([x - rr, y - rr, x + rr, y + rr], outline=colour + (int(220 * glow),), width=width * 4)
-            layer = Image.alpha_composite(layer, g.filter(ImageFilter.GaussianBlur(16)))
-        ImageDraw.Draw(layer).ellipse([x - rr, y - rr, x + rr, y + rr], outline=colour + (255,), width=width)
-        self.im = Image.alpha_composite(self.im, layer)
-        return x, y, rr
-
-    def line(self, a, b, colour, width=5):
-        layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
-        ImageDraw.Draw(layer).line([a, b], fill=colour + (235,), width=width)
-        self.im = Image.alpha_composite(self.im, layer)
-
-    def label(self, text, x, y, colour):
-        """A small tag (a chip) at output pixels x, y: dark, a coloured edge, white words."""
-        f = font(36, 600)
-        w = f.getlength(text)
-        layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
-        d = ImageDraw.Draw(layer)
-        d.rounded_rectangle([x, y, x + w + 36, y + 58], 14, fill=PAGE + (225,), outline=colour + (255,), width=3)
-        d.text((x + 18, y + 9), text, font=f, fill=INK)
-        self.im = Image.alpha_composite(self.im, layer)
-
-
-def caption(im, text, alpha=1.0, sub=None):
-    """The lower third: a semi-opaque Liquid-dark bar, one line of white Geist, a teal tick; centred near the bottom."""
-    if alpha <= 0:
-        return im
-    f = font(58, 600)
-    w = f.getlength(text)
-    bw, bh = w + 120, 112
-    x0, y0 = (OUT[0] - bw) / 2, OUT[1] - 96 - bh
-    layer = Image.new("RGBA", OUT, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    a = int(255 * alpha)
-    d.rounded_rectangle([x0, y0, x0 + bw, y0 + bh], 28, fill=PAGE + (int(214 * alpha),), outline=LINE + (a,), width=2)
-    d.rounded_rectangle([x0 + 34, y0 + 30, x0 + 42, y0 + bh - 30], 4, fill=ACCENT + (a,))
-    d.text((x0 + 68, y0 + 22), text, font=f, fill=INK + (a,))
-    return Image.alpha_composite(im, layer)
-
-
-def card(title, sub=None, small=None, glow=ACCENT):
-    """A full-frame Liquid-dark title card: big words, an optional line under them, a soft glow behind."""
-    im = Image.new("RGBA", OUT, PAGE + (255,))
-    g = Image.new("RGBA", OUT, (0, 0, 0, 0))
-    ImageDraw.Draw(g).ellipse([OUT[0] * 0.2, OUT[1] * 0.05, OUT[0] * 0.8, OUT[1] * 0.95], fill=glow + (34,))
-    im = Image.alpha_composite(im, g.filter(ImageFilter.GaussianBlur(160)))
-    d = ImageDraw.Draw(im)
-    lines = title if isinstance(title, list) else [title]
-    f = font(96 if len(lines) == 1 else 70, 650)
-    total = len(lines) * (f.size * 1.3) + (90 if sub else 0) + (70 if small else 0)
-    y = (OUT[1] - total) / 2
-    for ln in lines:
-        d.text(((OUT[0] - f.getlength(ln)) / 2, y), ln, font=f, fill=INK)
-        y += f.size * 1.3
-    if sub:
-        fs = font(46, 500)
-        d.text(((OUT[0] - fs.getlength(sub)) / 2, y + 24), sub, font=fs, fill=ACCENT)
-        y += 90
-    if small:
-        fm = font(38, 500)
-        d.text(((OUT[0] - fm.getlength(small)) / 2, y + 30), small, font=fm, fill=INK2)
-    return im
-
-
 def selected_cell(frame, grid):
     """The grid's selected cell, from its own outline (the theme's "good" green, the grid's cursor) inside the grid's bounds:
     x, y, w, h."""
     x, y, w, h = grid
     y0 = max(y, 0)
-    sub = frame[y0:y + h, x + 60:x + w].astype(np.int16)
+    gut = 60 * SCALE // 2  # (the row numbers' column, cut: 30 pt)
+    sub = frame[y0:y + h, x + gut:x + w].astype(np.int16)
     m = (np.abs(sub - np.array(GOOD)).sum(2) < 45)
     ys, xs = np.nonzero(m)
     if len(xs) < 20:
         return None
     # the outline is the biggest accent shape; the row number beside it is left of x + 60 (cut)
-    return [int(np.percentile(xs, 1)) + x + 60, int(np.percentile(ys, 1)) + y0, int(np.percentile(xs, 99) - np.percentile(xs, 1)),
+    return [int(np.percentile(xs, 1)) + x + gut, int(np.percentile(ys, 1)) + y0, int(np.percentile(xs, 99) - np.percentile(xs, 1)),
             int(np.percentile(ys, 99) - np.percentile(ys, 1))]
 
 
@@ -432,31 +286,40 @@ def lane_rect(chart, lane, n_lanes, t0, t1, duration):
     """A lane of the telemetry chart (mojoui/telemetrychart.mojo's layout: 4 pt top, a 20 pt time axis, 6 pt gaps, a 132 pt
     gutter, 8 pt right margin), between times t0 and t1 of a recording `duration` seconds long; window pixels."""
     x, y, w, h = chart
-    top, bottom = y + 4, y + h - 20
-    lane_h = (bottom - top - 6 * (n_lanes - 1)) / n_lanes
-    ly = top + lane * (lane_h + 6)
-    left, right = x + 132, x + w - 8
+    k = SCALE  # (the chart's layout is in points: × SCALE in recorded pixels)
+    top, bottom = y + 4 * k, y + h - 20 * k
+    lane_h = (bottom - top - 6 * k * (n_lanes - 1)) / n_lanes
+    ly = top + lane * (lane_h + 6 * k)
+    left, right = x + 132 * k, x + w - 8 * k
     xa = left + t0 / duration * (right - left)
     xb = left + t1 / duration * (right - left)
-    return [xa, ly - 4, xb - xa, lane_h + 8]
+    return [xa, ly - 4 * k, xb - xa, lane_h + 8 * k]
 
 
 def split(frame, video, chart):
-    """The video above, the telemetry chart full width below, from one raw frame (the same instant): a 16:9 frame both
-    fill. Returns the image and the two maps (window pixels → output pixels)."""
-    vh = 560
-    vw = int(vh * video[2] / video[3])
-    ch = int(OUT[0] * chart[3] / chart[2])
+    """The video and the telemetry chart from one raw frame (the same instant), side by side when the chart isn't wide
+    (the tiled shell's chart is nearly square), else the video above and the chart below; both fitted above the caption.
+    Returns the image and the two maps (window pixels → output pixels)."""
     im = Image.new("RGBA", OUT, PAGE + (255,))
     f = Image.fromarray(frame)
-    v = f.crop((video[0], video[1], video[0] + video[2], video[1] + video[3])).resize((vw, vh), Image.LANCZOS)
-    c = f.crop((chart[0], chart[1], chart[0] + chart[2], chart[1] + chart[3])).resize((OUT[0], ch), Image.LANCZOS)
-    vx = (OUT[0] - vw) // 2
-    im.paste(v, (vx, 0))
-    im.paste(c, (0, OUT[1] - ch))
-    mv = (vx, 0, vw / video[2], video)
-    mc = (0, OUT[1] - ch, OUT[0] / chart[2], chart)
-    return im, mv, mc
+    sx, sy, sw, sh = STAGE
+    gap = 32
+    av, ac = video[2] / video[3], chart[2] / chart[3]
+    if ac > 2.2:  # (stacked: one width, the two heights share the stage)
+        wd = min(sw, (sh - gap) / (1 / av + 1 / ac))
+        vw, vh, cw, chh = wd, wd / av, wd, wd / ac
+        vx, vy = sx + (sw - wd) / 2, sy + (sh - vh - gap - chh) / 2
+        cx, cy = vx, vy + vh + gap
+    else:  # (side by side: one height, the two widths share the stage)
+        ht = min(sh, (sw - gap) / (av + ac))
+        vw, vh, cw, chh = av * ht, ht, ac * ht, ht
+        vx, vy = sx + (sw - vw - gap - cw) / 2, sy + (sh - ht) / 2
+        cx, cy = vx + vw + gap, vy
+    v = f.crop((video[0], video[1], video[0] + video[2], video[1] + video[3])).resize((int(vw), int(vh)), Image.LANCZOS)
+    c = f.crop((chart[0], chart[1], chart[0] + chart[2], chart[1] + chart[3])).resize((int(cw), int(chh)), Image.LANCZOS)
+    im.paste(v, (int(vx), int(vy)))
+    im.paste(c, (int(cx), int(cy)))
+    return im, (vx, vy, vw / video[2], video), (cx, cy, cw / chart[2], chart)
 
 
 def mapped(m, px, py):
@@ -478,15 +341,6 @@ class Split(Canvas):
         return self
 
 
-def spotlight(im, rect_out, alpha):
-    """Everything outside rect_out (output pixels) dimmed: the eye goes to the subject."""
-    if alpha <= 0:
-        return im
-    layer = Image.new("RGBA", OUT, PAGE + (int(150 * alpha),))
-    ImageDraw.Draw(layer).rounded_rectangle([rect_out[0], rect_out[1], rect_out[2], rect_out[3]], 18, fill=(0, 0, 0, 0))
-    return Image.alpha_composite(im, layer)
-
-
 def compose(timeline=None, which="full"):
     t = timeline or json.loads((STORY / "timeline.json").read_text())
     raw = t["raw"]
@@ -499,7 +353,13 @@ def compose(timeline=None, which="full"):
     ring_r = max(sx1 - sx0, sy1 - sy0) / 2 / 1280 * v[2] * 0.85
     grip = lane_rect(chr_, 1, 4, 12.35, 13.75, duration)
     grip_lane = lane_rect(chr_, 1, 4, 0, duration, duration)
-    ms = t["query_ms"].split(" in ")[-1].split(" ms")[0] if t["query_ms"] else "40"
+    # (the answer's numbers as the app printed them: "JOB: query landed in 333.2 ms (2,997 rows)")
+    qm = re.search(r"in ([\d.,]+) ms \(([\d,]+) rows\)", t["query_ms"] or "")
+    if not qm:
+        raise SystemExit(f"no query time and rows in the take's log: {t['query_ms']!r}")
+    ms, n_rows = qm.group(1), qm.group(2)
+    fleet_n = f"{t['fleet_rows']:,}"
+    tele_n = f"{t['tele_rows'] / 1e6:.1f}M"
     full = [0, 0, WIN[0], WIN[1]]
     frames = []
 
@@ -514,7 +374,7 @@ def compose(timeline=None, which="full"):
                 out = Image.blend(Image.new("RGBA", OUT, PAGE + (255,)), out, i / (fade_in * FPS))
             push(out, check if i == n * 2 // 3 else None)
 
-    def shot(name, cam_from, cam_to, cap, lead=0.5, move=1.0, cap_secs=None, speed=1, check=None, extra=None, spot=None):
+    def shot(name, cam_from, cam_to, cap, lead=0.5, move=1.0, cap_secs=None, speed=1, check=None, extra=None, spot=None, lift=False):
         """A raw scene: its caption first (`lead` s on the first frame), then an eased push from cam_from to cam_to; at most
         cap_secs of the take, every `speed`-th frame; spot: a window rectangle the rest of the frame dims around."""
         s = sc[name]
@@ -526,7 +386,7 @@ def compose(timeline=None, which="full"):
         for i in range(total):
             f = fs[max(i - int(lead * FPS), 0)]
             u = ease((i - lead * FPS) / (move * FPS)) if i >= lead * FPS else 0.0
-            c = Canvas(f, lerp_rect(cam_from, cam_to, u))
+            c = Canvas(f, lerp_rect(cam_from, cam_to, u), lerp_stage(u) if lift else None)
             if extra:
                 extra(c, u, i - int(lead * FPS))
             im = c.im
@@ -538,26 +398,27 @@ def compose(timeline=None, which="full"):
 
     if which == "full":
         still(card("Why did the robot drop it?", sub="A real failure, investigated in one app"), 2.4, check="01-title", fade_in=0.4)
-        still(card(["To find out: 16.8M telemetry rows", "and the robot's video, in one app."]), 3.0, check="02-setup")
+        still(card([f"To find out: {tele_n} telemetry rows", "and the robot's video, in one app."]), 3.0, check="02-setup")
         g = sc["sheet"]["grid"]
-        sheet_cam = fit169([g[0], g[1] - 30, 1300, 700], pad=0.0)
+        fleet = sc["sheet"]["card"]  # (the fleet card as the tiles drew it: the camera is its top, at its own width)
+        sheet_cam = fit169([fleet[0], g[1] - 30 * SCALE, fleet[2], fleet[2] * 9 / 16], pad=0.0)
         cell = selected_cell(raw_at(raw, sc["sheet"]["t1"] - 0.2), g)
 
         def sheet_marks(c, u, i):
             if cell and u > 0.55:
-                c.box([cell[0] - 4, g[1] - 2, cell[2] + 8, sheet_cam[1] + sheet_cam[3] - g[1] - 140], ACCENT, width=5)
-                c.box([g[0] + 2, cell[1] - 4, 1290, cell[3] + 8], WARN, width=5)
-                x, y = c.at(cell[0] + cell[2] + 16, g[1] + 34)
+                c.box([cell[0] - 4, g[1] - 2, cell[2] + 8, sheet_cam[1] + sheet_cam[3] - g[1] - 140 * SCALE], ACCENT, width=5)
+                c.box([g[0] + 2, cell[1] - 4, g[2] - 8, cell[3] + 8], WARN, width=5)
+                x, y = c.at(cell[0] + cell[2] + 16 * SCALE, g[1] + 34 * SCALE)
                 c.label("outcome: failure", x, y, ACCENT)
-        shot("sheet", full, sheet_cam, "63,344 real robot runs. Some failed.", cap_secs=3.6, check="03-sheet", extra=sheet_marks)
+        shot("sheet", full, sheet_cam, f"{fleet_n} real robot runs. Some failed.", cap_secs=3.6, check="03-sheet", extra=sheet_marks)
         pcell = selected_cell(raw_at(raw, sc["pick"]["t1"] - 0.2), sc["pick"]["grid"])
-        pick_cam = fit169([g[0], pcell[1] - 330, 1300, 700], pad=0.0) if pcell else sheet_cam
+        pick_cam = fit169([fleet[0], pcell[1] - sheet_cam[3] * 0.45, fleet[2], sheet_cam[3]], pad=0.0) if pcell else sheet_cam
 
         def pick_marks(c, u, i):
             if not pcell:
                 return
             if u > 0.6:
-                c.box([g[0] + 2, pcell[1] - 4, 1290, pcell[3] + 8], WARN, width=6)
+                c.box([g[0] + 2, pcell[1] - 4, g[2] - 8, pcell[3] + 8], WARN, width=6)
             if 0.3 < u:  # (a click: a ring that grows and fades once)
                 k = min(max((i - 0.3 * FPS) / (0.6 * FPS), 0.0), 1.0)
                 if k < 1:
@@ -573,18 +434,18 @@ def compose(timeline=None, which="full"):
     def grip_mark(c, u, i):
         if u > 0.7:
             c.box(grip_lane, WARN, width=5)
-            x, y = c.at(grip_lane[0] + grip_lane[2] * 0.55, grip_lane[1] - 70)
+            x, y = c.at(grip_lane[0] + grip_lane[2] * 0.55, grip_lane[1] - 70 * SCALE)
             c.label("gripper: closed ↔ open", x, y, WARN)
-    shot("telemetry", fit169(vid, pad=0.02), fit169(ch, pad=0.02), "Its telemetry: joints and gripper, 15 a second.", lead=lead, cap_secs=3.4,
-         check="06-telemetry", extra=grip_mark)
+    tele_cam = grown(ch, 10 * SCALE)
+    shot("telemetry", fit169(vid, pad=0.02), tele_cam, "Its telemetry: joints and gripper, 15 a second.", lead=lead, cap_secs=3.4,
+         check="06-telemetry", extra=grip_mark, lift=True)
     # scrub: the split screen (video above, telemetry below), playing
     fs = list(raw_frames(raw, sc["scrub"]["t0"], sc["scrub"]["t1"]))
-    tele_cam = fit169(ch, pad=0.02)
     for i, f in enumerate(fs):
         sp = Split(f, vid, ch)
         im = sp.im
         if i < 12:  # (from the telemetry alone into the split: a short dissolve)
-            im = Image.blend(Canvas(f, tele_cam).im, im, i / 12)
+            im = Image.blend(Canvas(f, tele_cam, STAGE).im, im, i / 12)
         push(caption(im, "Scrub through it…", alpha=ease(i / (FPS * 0.3))), "07-scrub" if i == len(fs) * 3 // 4 else None)
     # the moment: frozen at 12.7 s, three beats
     f = raw_at(raw, sc["freeze"]["t0"] + 0.4)
@@ -611,12 +472,12 @@ def compose(timeline=None, which="full"):
         abox = union(*got) if got else full
         shot("ask", fit169(abox, pad=0.5), fit169(abox, pad=0.12), "Is it just this one? Ask in words.", check="10-ask")
         ans = sc["answer"]["card"] or full
-        shot("answer", fit169(ans, pad=0.25), fit169(ans, pad=0.06), f"2,997 runs that grasped twice · {ms} ms, 16.8M rows", cap_secs=3.0,
-             check="11-answer", spot=ans)
+        shot("answer", full, grown(ans, 10 * SCALE), f"{n_rows} runs that grasped twice · {ms} ms, {tele_n} rows", cap_secs=3.0,
+             check="11-answer", lift=True)
         pc = sc["paper"]["card"] or full
-        shot("paper", fit169(pc, pad=0.25), fit169(pc, pad=0.04), "Linked to the paper.", lead=0.4, move=0.8, cap_secs=2.4, check="12-paper", spot=pc)
+        shot("paper", full, grown(pc, 10 * SCALE), "Linked to the paper.", lead=0.4, move=0.8, cap_secs=2.4, check="12-paper", lift=True)
         pk = sc["pack"]["card"] or full
-        shot("pack", fit169(pk, pad=0.25), fit169(pk, pad=0.08), "Export the evidence.", lead=0.4, move=0.8, cap_secs=1.6, spot=pk)
+        shot("pack", full, grown(pk, 10 * SCALE), "Export the evidence.", lead=0.4, move=0.8, cap_secs=1.6, lift=True)
         if Path(t["pack"]).exists():
             import pymupdf
             doc = pymupdf.open(t["pack"])
@@ -630,20 +491,6 @@ def compose(timeline=None, which="full"):
         still(card(["Usually: a spreadsheet, a notebook and a video", "player, lined up by hand."], sub="Here: one app."), 3.4, check="14-conclusion")
         still(card("omxplorer", sub="built on omxcode · one Mojo app, on your GPU", small="abhisheksreesaila.github.io/omxcode"), 3.4, check="15-end")
     return frames
-
-
-def write(frames, path, check_dir=None):
-    p = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{OUT[0]}x{OUT[1]}", "-r", str(FPS), "-i", "-",
-                          "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path)],
-                         stdin=subprocess.PIPE)
-    for im, check in frames:
-        rgb = im.convert("RGB")
-        p.stdin.write(rgb.tobytes())
-        if check and check_dir:
-            rgb.save(check_dir / f"{check}.png")
-    p.stdin.close()
-    p.wait()
-    print(f"{path}: {len(frames) / FPS:.1f} s")
 
 
 def compose_all():

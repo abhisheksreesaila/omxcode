@@ -43,7 +43,9 @@ SIZE = (1440, 900)
 class Rec:
     """One app on the headless display with its agent link, and an x11grab recording of its window."""
 
-    def __init__(self, app, env, out, size=SIZE):
+    def __init__(self, app, env, out, size=SIZE, window=None):
+        """size: the recorded pixels; window: the app's own window size when it differs (a 2× take: GDK_SCALE=2 in env,
+        a window half the recorded size)."""
         self.size = size
         headless.ensure()
         from Xlib import X, display
@@ -54,7 +56,7 @@ class Rec:
         d.close()
         self.dir = tempfile.TemporaryDirectory()
         self.sock = Path(self.dir.name) / "app.sock"
-        env = dict(os.environ, MOJOUI_AGENT_SOCKET=str(self.sock), MOJOUI_WINDOW=f"{size[0]}x{size[1]}", MOJOUI_TRACE="1",
+        env = dict(os.environ, MOJOUI_AGENT_SOCKET=str(self.sock), MOJOUI_WINDOW="{}x{}".format(*(window or size)), MOJOUI_TRACE="1",
                    CUDA_VISIBLE_DEVICES=os.environ.get("CUDA_VISIBLE_DEVICES", "0"), **env)
         env.pop("MOJOUI_TEST", None)
         self.log = open(out.with_suffix(".log"), "w")
