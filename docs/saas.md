@@ -154,11 +154,16 @@ Audit.record(db, tenant, actor, "invite", detail)
 - A Stripe subscription event that arrives before its checkout's completion is held (the newest per subscription, 30
   days at most) and applied when the checkout lands (D-6023).
 - Pending sign-ins (a /login not yet called back, 10 minutes each): 20 a client (`SAAS_SIGNINS_PER_CLIENT`), 200,000 for the server
-  (`SAAS_MAX_SIGNINS`); a client past its 20 gets 429, the server past its cap 503. Someone with ~10,000 addresses (or
-  /64s) could still fill the global cap: raise it (rows are ~200 bytes) or put the sign-in state in the cookie (next).
+  (`SAAS_MAX_SIGNINS`); a client past its 20 gets 429, the server past its cap 503. Someone with ~10,000 IPv4
+  addresses, or a single IPv6 /48 (a free tunnel broker hands those out: 65,536 /64s), can still fill the global cap and
+  make /login answer 503 for everyone (people already signed in are unaffected): a /48 tier per client, or the sign-in
+  state in the cookie (no row at all), is the next step. Behind a proxy that isn't in `SAAS_TRUSTED_PROXIES`, every
+  user shares the proxy's 20: list the proxy.
 - A request carrying two cookies named `saas` (or `__Host-saas`, or the state cookie) gets 400 and that cookie expired:
   a page that can set cookies for this site could sign someone out that way (an availability cost, chosen over guessing
-  which copy is real). On https the `__Host-` names can't be set by a sibling subdomain or an http page.
+  which copy is real). On https the `__Host-` names can't be set by a sibling subdomain or an http page. On a plain-http
+  base (local runs only) the expiring Set-Cookie removes only the site's own copy: a copy planted with another Domain or
+  Path survives, and could be an attacker's session: never serve real users over http.
 - Identity: the first sign-in with a Google `sub` claims the account with that address; a sign-in from another `sub`
   with the same address gets 403 and an audit row (D-6021). A known `sub` signing in with a new verified address moves
   its account to it (an `email_changed` audit row; refused if another account has that address), so invitations match

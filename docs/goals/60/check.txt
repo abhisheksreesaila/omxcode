@@ -8,14 +8,5 @@ M6: PASS  trial on first sign-in that expires, Stripe trial days, customer porta
 M7: PASS  429 + Retry-After over the per-IP limit, sliding sessions (use extends, idle ends); trusted proxy: a client per X-Forwarded-For, IPv6 per /64; an untrusted peer's header ignored; two X-Forwarded-For lines read whole; 20 pending sign-ins a client; a bad list refuses to start
 M8: PASS  parity rows ✅, keys wizard asks for SMTP, GTK demo shows the trial and billing (shot looked at); M1, M3, M5, M6 pass on the Mac
 M9: PASS  goal 57's M6–M8, the crypto/accounts/billing/ui-thread/served/handler/ratelimit/queue/clientip tests, the pool under ulimit -n 256, libc and decision lints
-M10: FAIL  scripts/saas_bench.py failed: Traceback (most recent call last):
-  File "/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g60/scripts/saas_bench.py", line 462, in <module>
-    main()
-    ~~~~^^
-  File "/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g60/scripts/saas_bench.py", line 409, in main
-    r = measure(f, impl, port, oauth_port, cookies, conc, a.seconds)
-  File "/home/abhisheksreesaila/Projects/mxapp/mojo-ui-g60/scripts/saas_bench.py", line 286, in measure
-    raise RuntimeError(f"{impl} {flow} c{conc}: {len(errors)} errors, e.g. {errors[0]}")
-RuntimeError: omxcode callback c64: 2576 errors, e.g. /login answered 429 
-
+M10: PASS  faster than fh-saas on p50, p99 and req/s for me, entries_get, entries_post, webhook, callback at 64 clients (the closest: 3.9x the throughput); docs/goals/60-bench.md
 M11: PASS  saas_min: 62 lines on accounts + mail + jobs (billing not linked), sign-in, a tenant and a welcome email; API documented
