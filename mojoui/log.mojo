@@ -8,9 +8,12 @@
 #   → {"ts": 1762470000.123, "level": "info", "msg": "checkout", "tenant": "…", "ms": 12}
 #   Audit.record(db, tenant, actor, "invite", detail)                         # host.db's audit(ts, tenant, actor, action, detail)
 #
-# Redaction (redact()): every registered secret, anywhere; and by shape: what follows "Bearer ", Stripe keys (sk_/rk_/
-# whsec_ + their tail), cookie and query values named saas, code, state, token, access_token, refresh_token, id_token,
-# client_secret, password, verifier, and anything under such a JSON key. Paths are logged without their query.
+# Redaction (redact()): every registered secret, anywhere; and by shape: what follows "Bearer ", "Basic " after an
+# Authorization name, Stripe keys (sk_/rk_/whsec_ + their tail), cookie and query values named saas, code, state, token,
+# access_token, refresh_token, id_token, client_secret, password, verifier, and anything under such a JSON key. Paths
+# are logged without their query, and a path segment shaped like a mojoui.crypto seal (an invitation link's token) is
+# masked. Registered secrets are the process's configuration (keys, passwords: at most MAX_SECRETS, under the log's
+# lock); a value met per request (an access token) is never registered: shape-based redaction covers it.
 
 from std.os import getenv
 from std.memory import Pointer
@@ -24,6 +27,7 @@ comptime MASK = "[redacted]"
 comptime _SECRET_NAMES = ["saas", "code", "state", "token", "access_token", "refresh_token", "id_token", "client_secret",
                           "password", "verifier", "code_verifier", "secret", "authorization", "cookie", "session_id"]
 comptime _SECRET_PREFIXES = ["sk_live_", "sk_test_", "rk_live_", "rk_test_", "whsec_", "Bearer ", "Basic "]
+comptime MAX_SECRETS = 64  # (configuration values: a per-request value registered here would grow without bound)
 
 
 def _is_word(c: UInt8) -> Bool:
@@ -59,6 +63,8 @@ def redact(text: String, secrets: List[String]) -> String:
                     if b[i + k] != pb[k]:
                         hit = False
                         break
+            if hit and pre == "Basic " and not _after_authorization(b, i):
+                hit = False  # ("Basic " is plain English elsewhere: only an Authorization value is a credential)
             if hit:
                 var j = i + m
                 while j < n and _is_word(b[j]):
@@ -76,6 +82,53 @@ def redact(text: String, secrets: List[String]) -> String:
     for name in materialize[_SECRET_NAMES]():
         out = _mask_named(out, name)
     return out
+
+
+def _after_authorization(b: Span[UInt8, _], at: Int) -> Bool:
+    """The bytes just before `at` end an Authorization name: `authorization: `, `authorization=`, `"authorization": "`."""
+    var name = "authorization".as_bytes()
+    var j = at - 1
+    while j >= 0 and (b[j] == 32 or b[j] == 58 or b[j] == 61 or b[j] == 34):  # (spaces, ':', '=', quotes)
+        j -= 1
+    if j + 1 == at or j + 1 < len(name):
+        return False
+    for k in range(len(name)):
+        var c = b[j - len(name) + 1 + k]
+        if c >= 65 and c <= 90:
+            c += 32
+        if c != name[k]:
+            return False
+    return True
+
+
+def is_seal_shaped(seg: String) -> Bool:
+    """`<b64url value>.<digits>.<b64url tag>` (mojoui.crypto.seal's form), the tag at least 20 characters."""
+    var parts = seg.split(".")
+    if len(parts) != 3 or parts[0].byte_length() == 0 or parts[1].byte_length() == 0 or parts[2].byte_length() < 20:
+        return False
+    for b in parts[1].as_bytes():
+        if b < 48 or b > 57:
+            return False
+    for i in [0, 2]:
+        for b in parts[i].as_bytes():
+            var c = Int(b)
+            if not ((c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 45 or c == 95):
+                return False
+    return True
+
+
+def log_path(path: String) -> String:
+    """A request path as it is logged: no query, sealed segments masked (`/invites/<token>` → `/invites/[redacted]`)."""
+    var q = path.find("?")
+    var bare = String(path[byte = : q]) if q >= 0 else path
+    if "." not in bare:
+        return bare
+    var out = String("")
+    var first = True
+    for seg in bare.split("/"):
+        out += ("" if first else "/") + (MASK if is_seal_shaped(String(seg)) else String(seg))
+        first = False
+    return out^
 
 
 def _mask_named(text: String, name: String) -> String:
@@ -210,15 +263,43 @@ struct Log(ImplicitlyCopyable, Movable):
     def _s(self) -> Pointer[_LogState, MutUntrackedOrigin]:
         return Pointer[_LogState, MutUntrackedOrigin](unsafe_from_address=self.addr)
 
-    def secret(self, value: String):
-        """Never write `value` (a key, a password): masked wherever it appears. (Register before serving starts.)"""
-        if self.addr != 0 and value.byte_length() >= 6:
-            self._s()[].secrets.append(value)
+    def secret(self, value: String) -> Bool:
+        """Never write `value` (a key, a password: configuration, not a per-request value): masked wherever it appears.
+        False when it can't be kept: shorter than 6 bytes, a stdout-only Log(addr=0), or MAX_SECRETS already held."""
+        if self.addr == 0 or value.byte_length() < 6:
+            return False
+        var s = self._s()
+        _ = libc.pthread_mutex_lock(s[].mu)
+        var ok = True
+        for have in s[].secrets:
+            if have == value:
+                _ = libc.pthread_mutex_unlock(s[].mu)
+                return True
+        if len(s[].secrets) >= MAX_SECRETS:
+            ok = False
+        else:
+            s[].secrets.append(value)
+        _ = libc.pthread_mutex_unlock(s[].mu)
+        return ok
+
+    def secrets(self) -> Int:
+        """How many values are registered (tests)."""
+        if self.addr == 0:
+            return 0
+        var s = self._s()
+        _ = libc.pthread_mutex_lock(s[].mu)
+        var n = len(s[].secrets)
+        _ = libc.pthread_mutex_unlock(s[].mu)
+        return n
 
     def clean(self, text: String) -> String:
         if self.addr == 0:
             return redact(text, List[String]())
-        return redact(text, self._s()[].secrets)
+        var s = self._s()
+        _ = libc.pthread_mutex_lock(s[].mu)  # (a copy under the lock: secret() may append on another thread)
+        var mine = s[].secrets.copy()
+        _ = libc.pthread_mutex_unlock(s[].mu)
+        return redact(text, mine)
 
     def write(self, level: String, msg: String, fields: Fields = Fields()):
         var line = '{"ts": ' + String(Float64(Int(wall_seconds() * 1000)) / 1000) + ', "level": ' + json_string(level) + ', "msg": ' + json_string(msg) + fields.body + "}"
@@ -234,10 +315,8 @@ struct Log(ImplicitlyCopyable, Movable):
         self.write("error", msg, fields)
 
     def request(self, rid: String, method: String, path: String, status: Int, ms: Float64, ip: String = ""):
-        """One served request: its path without the query."""
-        var q = path.find("?")
-        var bare = String(path[byte = : q]) if q >= 0 else path
-        var f = Fields().str("rid", rid).str("method", method).str("path", bare).int("status", status).num("ms", Float64(Int(ms * 1000)) / 1000)
+        """One served request: its path without the query, sealed segments masked (log_path)."""
+        var f = Fields().str("rid", rid).str("method", method).str("path", log_path(path)).int("status", status).num("ms", Float64(Int(ms * 1000)) / 1000)
         if ip != "":
             f = f^.str("ip", ip)
         self.write("error" if status >= 500 else "info", "request", f^)

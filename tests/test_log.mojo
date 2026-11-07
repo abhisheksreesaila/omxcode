@@ -3,7 +3,11 @@
 # The server's request lines and the audit table are proved by docs/goals/60-check.py M1.
 from std.os import remove, makedirs
 from std.os.path import exists
-from mojoui.log import Log, Fields, redact, MASK
+from mojoui.log import Log, Fields, redact, MASK, MAX_SECRETS, log_path
+from mojoui.serve import spawn
+from mojoui import libc
+from mojoui.crypto import seal
+from std.memory import Pointer
 from mojoui.json import Json
 
 
@@ -21,6 +25,14 @@ def fresh(path: String) raises:
     for suffix in ["", ".1", ".2", ".3", ".4"]:
         if exists(path + suffix):
             remove(path + suffix)
+
+
+def _register_many(addr: Int):
+    """A request thread's worth of registrations and lines at once (round 3, R1: secret() vs clean() raced)."""
+    var log = Log(addr=addr)
+    for i in range(500):
+        _ = log.secret("per-request-token-" + String(i) + "-" + String(Int(libc.getpid())))
+        log.info("line with Bearer abc.def-" + String(i))
 
 
 def main() raises:
@@ -64,7 +76,47 @@ def main() raises:
     log2.secret("sk_live_reallysecret")
     log2.info("calling stripe with sk_live_reallysecret", Fields().str("note", "x sk_live_reallysecret y"))
     expect("reallysecret" not in read("build/test_log_files/b.log"), "a registered secret reached the file")
+    expect(MASK in redact("Authorization: Basic dXNlcjpwYXNz", secrets) and "dXNlcjpwYXNz" not in redact("Authorization: Basic dXNlcjpwYXNz", secrets), "an Authorization Basic credential")
+    expect(MASK in redact('{"authorization": "Basic dXNlcjpwYXNz"}', secrets), "a JSON Authorization Basic credential")
+    expect(redact("Basic plan for Basic users", secrets) == "Basic plan for Basic users", "plain-English Basic is masked: " + redact("Basic plan for Basic users", secrets))
+    var key = List[UInt8]()
+    for b in String("k" * 32).as_bytes():
+        key.append(b)
+    var tok = seal(key, "invite:7", 3600, 0)
+    expect(log_path("/invites/" + tok) == "/invites/" + MASK, "an invitation token in a path: " + log_path("/invites/" + tok))
+    expect(log_path("/api/v1.2/files/report.pdf?x=1") == "/api/v1.2/files/report.pdf", "a dotted path kept: " + log_path("/api/v1.2/files/report.pdf"))
+    var lp = "build/test_log_files/p.log"
+    fresh(lp)
+    var plog = Log.open(lp)
+    plog.request("rid2", "GET", "/invites/" + tok, 200, 1.0)
+    expect(tok not in read(lp) and "/invites/" + MASK in read(lp), "the request line holds the invitation token")
     print("redact: ok")
+    # secrets: configuration values only, a bounded list, safe while other threads log (round 3, R1)
+    var sp = "build/test_log_files/s.log"
+    fresh(sp)
+    var slog = Log.open(sp)
+    for i in range(MAX_SECRETS + 50):
+        _ = slog.secret("config-secret-" + String(i))
+    expect(slog.secrets() == MAX_SECRETS, "the secret list grew past its cap: " + String(slog.secrets()))
+    expect(not slog.secret("one-too-many-secret"), "a secret past the cap reported as kept")
+    expect(slog.secret("config-secret-3"), "a secret already held isn't kept")
+    var tp = "build/test_log_files/t.log"
+    fresh(tp)
+    var tlog = Log.open(tp)
+    for _ in range(4):
+        _ = spawn[_register_many](tlog.addr)
+    for i in range(2000):
+        tlog.info("main line Bearer xyz-" + String(i))
+    var waited = 0
+    while len(read(tp).strip().split("\n")) < 4000 and waited < 200:  # (4 threads × 500 lines + these 2000)
+        _ = libc.poll(0, 0, 50)
+        waited += 1
+    var tl = read(tp).strip().split("\n")
+    expect(len(tl) == 4000, "lines lost or torn under threads: " + String(len(tl)))
+    for l in tl:
+        _ = Json.parse(String(l))
+    expect(tlog.secrets() <= MAX_SECRETS, "threads grew the list past its cap")
+    print("secrets: ok")
     # rotate
     var rp = "build/test_log_files/r.log"
     fresh(rp)

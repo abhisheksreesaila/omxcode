@@ -156,8 +156,8 @@ struct Billing(Copyable, Movable):
         self.trial_s = _env_days("SAAS_TRIAL_DAYS") * 86400
         self.stripe_trial_days = Int(_env_days("STRIPE_TRIAL_DAYS"))
         self.grace_s = _env_days("SAAS_GRACE_DAYS") * 86400
-        log.secret(cfg.secret_key)
-        log.secret(cfg.webhook_secret)
+        _ = log.secret(cfg.secret_key)
+        _ = log.secret(cfg.webhook_secret)
         self.cfg = cfg^
         var db = Database(self.host)
         var l = List[Migration]()

@@ -170,7 +170,7 @@ def _int(name: String, default: Int) -> Int:
 def main() raises:
     var data = getenv("SAAS_DATA", "data")
     var log = Log.open(getenv("SAAS_LOG"))
-    log.secret(getenv("SMTP_PASSWORD"))
+    _ = log.secret(getenv("SMTP_PASSWORD"))
     try:
         var jobs = Queue(data + "/host.db", backoff_ms=_int("SAAS_JOB_BACKOFF_MS", 2000), max_attempts=_int("SAAS_JOB_MAX_ATTEMPTS", 5))
         var cfg = AuthConfig.from_env()

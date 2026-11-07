@@ -55,7 +55,7 @@ struct Welcome(Runner):
 def main() raises:
     var data = getenv("SAAS_DATA", "data")
     var log = Log.open(getenv("SAAS_LOG"))
-    log.secret(getenv("SMTP_PASSWORD"))
+    _ = log.secret(getenv("SMTP_PASSWORD"))
     var jobs = Queue(data + "/host.db")
     var acc = Accounts(data, AuthConfig.from_env(), log, jobs)
     start_workers(jobs, Welcome(SmtpConfig.from_env(), acc.cfg.base + "/"))

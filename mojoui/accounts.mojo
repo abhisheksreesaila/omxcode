@@ -298,8 +298,8 @@ struct Accounts(Copyable, Movable):
         if cfg.migrations != "" and exists(dir):
             self.tenant_migrations = Migrations.from_dir(dir)
         self.cfg = cfg^
-        log.secret(self.cfg.client_secret)
-        log.secret(self.cfg.secret)
+        _ = log.secret(self.cfg.client_secret)
+        _ = log.secret(self.cfg.secret)
         var db = Database(self.host)
         db.exec("PRAGMA journal_mode=WAL")
         _ = host_migrations().apply(db)
@@ -639,7 +639,6 @@ struct Accounts(Copyable, Movable):
         var access = tj.text(tj.get(0, "access_token"))
         if access == "":
             return Reply.error(502, "the sign-in provider sent no token", "token_failed")
-        self.log.secret(access)
         var ur = Backend.send(Request(0, "GET", self.cfg.userinfo_url).header("Authorization", "Bearer " + access).header("Accept", "application/json").timeout(20_000))
         if ur.status != 200:
             return Reply.error(502, "the sign-in provider didn't say who you are", "userinfo_failed")
