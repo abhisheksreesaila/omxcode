@@ -30,7 +30,7 @@
 # On an https base the cookies are __Host-saas and __Host-saas_state (Secure, Path=/, no Domain: a sibling subdomain
 # can't set them); a request carrying two cookies of one of those names is refused (400). Expired states, sessions and
 # desktop codes are swept by tick() (sweep()), a thousand rows a table at a time; one client (its rate key) may hold at
-# most SIGNINS_PER_CLIENT (20) pending sign-ins (429 past it), and the server at most SAAS_MAX_SIGNINS (200,000; 503).
+# most SAAS_SIGNINS_PER_CLIENT (20) pending sign-ins (429 past it), and the server at most SAAS_MAX_SIGNINS (200,000; 503).
 # Desktop apps (RFC 8252): /login?client=desktop&redirect=<http://127.0.0.1:port/…>&challenge=<S256>&app_state=<s>: the
 # callback sends the browser to the app's loopback with a one-time code (60 s), traded at /api/token for a bearer token.
 
@@ -54,7 +54,7 @@ comptime COOKIE = "saas"
 comptime STATE_COOKIE = "saas_state"  # the web sign-in's state, bound to the browser that started it (D-5726)
 comptime SESSION_S = 30 * 24 * 3600  # (no session outlives this, however often it's used)
 comptime STATE_S = 600
-comptime SIGNINS_PER_CLIENT = 20  # pending sign-ins one client (rate_key) may hold: a browser needs one or two
+
 comptime CODE_S = 60
 comptime ROLES = ["admin", "editor", "member", "viewer"]  # (editor: fh-saas's name for member)
 comptime PROVIDER = "google"
@@ -157,12 +157,14 @@ struct AuthConfig(Copyable, Movable):
     var rate: Int  # requests a minute per IP on each sign-in route (0: no limit)
     var migrations: String  # a folder with tenant/NNN_name.sql ("" or missing: none)
     var max_signins: Int  # sign-ins pending at once (OAuth states not yet used or expired)
+    var signins_per_client: Int  # of those, one client's (rate_key) at most (0: no per-client cap)
 
     @staticmethod
     def from_env() -> AuthConfig:
         """GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SAAS_BASE, SAAS_SECRET; SAAS_OAUTH_AUTHORIZE/TOKEN/USERINFO (default
         Google's endpoints); SAAS_INVITE_TTL (s, 7 days), SAAS_SESSION_IDLE (s, 7 days), SAAS_RATE (60), SAAS_MIGRATIONS,
-        SAAS_MAX_SIGNINS (200,000: ~40 MB of rows; each client holds at most SIGNINS_PER_CLIENT)."""
+        SAAS_MAX_SIGNINS (200,000: ~40 MB of rows), SAAS_SIGNINS_PER_CLIENT (20: a browser needs one or two; 0 turns
+        the per-client cap off, like SAAS_RATE=0, for limits kept at a proxy)."""
         return AuthConfig(
             getenv("GOOGLE_CLIENT_ID"),
             getenv("GOOGLE_CLIENT_SECRET"),
@@ -176,6 +178,7 @@ struct AuthConfig(Copyable, Movable):
             _env_int("SAAS_RATE", 60),
             getenv("SAAS_MIGRATIONS", ""),
             _env_int("SAAS_MAX_SIGNINS", 200_000),
+            _env_int("SAAS_SIGNINS_PER_CLIENT", 20),
         )
 
     def callback(self) -> String:
@@ -725,9 +728,9 @@ struct Accounts(Copyable, Movable):
             var mine = db.prepare("SELECT count(*) FROM (SELECT 1 FROM oauth_states WHERE client = ? AND expires >= ? LIMIT ?)")  # (by its client index)
             mine.bind(1, client)
             mine.bind(2, now_s())
-            mine.bind(3, SIGNINS_PER_CLIENT)
+            mine.bind(3, max(self.cfg.signins_per_client, 1))
             _ = mine.step()
-            var held = mine.int(0) >= SIGNINS_PER_CLIENT
+            var held = self.cfg.signins_per_client > 0 and mine.int(0) >= self.cfg.signins_per_client
             mine.reset()
             if held:
                 db.commit()

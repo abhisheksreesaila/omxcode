@@ -153,7 +153,7 @@ Audit.record(db, tenant, actor, "invite", detail)
   SMTP set up the demos start no mail workers: the emails wait, pending, and go after a restart with SMTP set.
 - A Stripe subscription event that arrives before its checkout's completion is held (the newest per subscription, 30
   days at most) and applied when the checkout lands (D-6023).
-- Pending sign-ins (a /login not yet called back, 10 minutes each): 20 a client, 200,000 for the server
+- Pending sign-ins (a /login not yet called back, 10 minutes each): 20 a client (`SAAS_SIGNINS_PER_CLIENT`), 200,000 for the server
   (`SAAS_MAX_SIGNINS`); a client past its 20 gets 429, the server past its cap 503. Someone with ~10,000 addresses (or
   /64s) could still fill the global cap: raise it (rows are ~200 bytes) or put the sign-in state in the cookie (next).
 - A request carrying two cookies named `saas` (or `__Host-saas`, or the state cookie) gets 400 and that cookie expired:
