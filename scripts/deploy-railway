@@ -247,7 +247,7 @@ stage "The service and its settings"
 say "A service named $SERVICE, and its variables (the image sets the rest: public mode, the starter, \$PORT)."
 (cd "$DEPLOY" && railway add --service "$SERVICE") || note "(the service may exist already)"
 (cd "$DEPLOY" && railway variable set --service "$SERVICE" --skip-deploys \
-  MOJOUI_MAX_SESSIONS=5 MOJOUI_IDLE_S=900 MOJOUI_WAIT_S=240 RAILWAY_DEPLOYMENT_DRAINING_SECONDS=10)
+  MOJOUI_MAX_SESSIONS=8 MOJOUI_IDLE_S=900 MOJOUI_WAIT_S=240 RAILWAY_DEPLOYMENT_DRAINING_SECONDS=10)
 say "Two settings the CLI can't make (dashboard → the project → $SERVICE → Settings):"
 step "Deploy → Healthcheck Path: /health   (Healthcheck Timeout: 300)"
 step "Deploy → Restart Policy: Always   (a crash restarts it; On Failure stops after 10)"
