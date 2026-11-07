@@ -75,6 +75,12 @@ pack() {  # pack <name> <what> <command…>: built again when MAX changed since 
   local d="build/packs/$1"
   if [ -n "$MAXV" ] && [ -f "$d/$1.mef" ] && [ "$(cat "$d/max.version" 2>/dev/null)" = "$MAXV" ]; then skip "$1" "$2" "$d is there (MAX $MAXV)"; return; fi
   # (its downloads and references stay; the graph and the model.json that offers it go, so a failed rebuild offers nothing)
+  # (a card another program has filled makes MAX fail deep in a traceback: too little room stops here, with what to do)
+  local free; free=$(nvidia-smi -i "${CUDA_VISIBLE_DEVICES%%,*}" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')
+  if [ "${free:-0}" -lt 3000 ]; then
+    echo "$1: only ${free:-0} MB free on GPU ${CUDA_VISIBLE_DEVICES%%,*} (a pack needs about 3 GB to compile): close what's using it (nvidia-smi lists it) and run scripts/setup again"
+    exit 1
+  fi
   if [ -e "$d" ] && [ ! -L "$d" ]; then rm -f "$d/$1.mef" "$d/model.json" "$d/max.version"; fi
   step "$1" "$2" "${@:3}"
   [ -n "$MAXV" ] && echo "$MAXV" > "$d/max.version"
@@ -84,15 +90,9 @@ if [ $models = 0 ]; then
 elif [ "$(uname)" = Darwin ] || ! command -v nvidia-smi >/dev/null || ! nvidia-smi -L >/dev/null 2>&1; then
   skip models "the model packs" "they need Linux and an NVIDIA GPU (scripts compile them with MAX for the GPU; goal 51)"
 else
-  # the GPU the packs compile on: CUDA_VISIBLE_DEVICES when set, else the card with the most free memory; a card another
-  # program has filled makes MAX fail deep in a traceback, so too little room stops here with what to do
+  # the GPU the packs compile on: CUDA_VISIBLE_DEVICES when set, else the card with the most free memory
   if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
     export CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits | sort -t, -k2 -n -r | head -1 | cut -d, -f1)
-  fi
-  free=$(nvidia-smi -i "${CUDA_VISIBLE_DEVICES%%,*}" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')
-  if [ "${free:-0}" -lt 3000 ]; then
-    echo "packs      only ${free:-0} MB free on GPU ${CUDA_VISIBLE_DEVICES%%,*} (the packs need about 3 GB): close what's using it (nvidia-smi lists it) and run scripts/setup again"
-    exit 1
   fi
   # the packs' builders run PyTorch in pixi's `models` environment (torch with its CUDA wheels): installed here once,
   # with the same retry as the default one (its xkeyboard-config can race too)
