@@ -8,206 +8,206 @@
   900
  ],
  "machine": "ablearn \u00b7 x86_64 \u00b7 Linux 7.2.5-3-omarchy",
- "when": "2026-11-07 05:46",
+ "when": "2026-11-04 16:57",
  "definitions": ", the same way for every runner, from the moment Send is pressed:\n  first_ui_ms       the agent's screen's first component (\"Orders, live\") is on screen\n  last_event_ms     its last component (\"end of dashboard\") is on screen: every event drawn\n  frames_over_16ms  web: requestAnimationFrame gaps over 25 ms (at least one 60 Hz frame dropped) until the end;\n                    GTK: main-loop turns that took over 16.7 ms (the UI thread missed a frame)\n  peak_mb           web: the tab's peak JS heap (performance.memory; omxcode's web host does its work in its server\n                    process, not counted); GTK: the whole process's peak resident memory (VmHWM: GTK, fonts, the Mojo\n                    runtime and, when there is one, the GPU driver), started without the demo's million-row dataset",
  "runners": {
   "omxcode-gtk": {
-   "first_ui_ms": 12.095,
-   "last_event_ms": 69.718,
-   "frames_over_16ms": 1,
-   "worst_ms": 37.025,
-   "peak_mb": 76,
+   "first_ui_ms": 12.245,
+   "last_event_ms": 70.16,
+   "frames_over_16ms": 2,
+   "worst_ms": 29.401,
+   "peak_mb": 74,
    "burst": {
-    "first_ui_ms": 12.095,
-    "last_event_ms": 69.718,
-    "frames_over_16ms": 1,
-    "worst_ms": 37.025,
-    "peak_mb": 76,
+    "first_ui_ms": 12.245,
+    "last_event_ms": 70.16,
+    "frames_over_16ms": 2,
+    "worst_ms": 29.401,
+    "peak_mb": 74,
     "samples": [
      {
-      "first_ui_ms": 13.383,
-      "last_event_ms": 69.718,
-      "frames_over_16ms": 1,
-      "worst_ms": 37.025,
-      "peak_mb": 78
-     },
-     {
-      "first_ui_ms": 12.095,
-      "last_event_ms": 68.189,
-      "frames_over_16ms": 1,
-      "worst_ms": 34.969,
-      "peak_mb": 76
-     },
-     {
-      "first_ui_ms": 11.602,
-      "last_event_ms": 105.524,
+      "first_ui_ms": 10.5,
+      "last_event_ms": 70.16,
       "frames_over_16ms": 2,
-      "worst_ms": 56.489,
+      "worst_ms": 29.401,
+      "peak_mb": 74
+     },
+     {
+      "first_ui_ms": 12.245,
+      "last_event_ms": 70.335,
+      "frames_over_16ms": 2,
+      "worst_ms": 26.883,
+      "peak_mb": 73
+     },
+     {
+      "first_ui_ms": 14.032,
+      "last_event_ms": 65.311,
+      "frames_over_16ms": 1,
+      "worst_ms": 46.675,
       "peak_mb": 74
      }
     ]
    },
    "paced": {
-    "first_ui_ms": 1507.41,
-    "last_event_ms": 9013.307,
+    "first_ui_ms": 1424.052,
+    "last_event_ms": 8759.737,
     "frames_over_16ms": 0,
-    "worst_ms": 10.782,
-    "peak_mb": 79,
+    "worst_ms": 2.56,
+    "peak_mb": 78,
     "samples": [
      {
-      "first_ui_ms": 1507.41,
-      "last_event_ms": 9360.48,
+      "first_ui_ms": 1424.33,
+      "last_event_ms": 8779.723,
       "frames_over_16ms": 0,
-      "worst_ms": 15.364,
+      "worst_ms": 2.56,
       "peak_mb": 78
      },
      {
-      "first_ui_ms": 1509.308,
-      "last_event_ms": 9013.307,
+      "first_ui_ms": 1424.052,
+      "last_event_ms": 8759.737,
       "frames_over_16ms": 0,
-      "worst_ms": 10.782,
-      "peak_mb": 79
+      "worst_ms": 2.578,
+      "peak_mb": 78
      },
      {
-      "first_ui_ms": 1401.297,
-      "last_event_ms": 8675.295,
+      "first_ui_ms": 1406.474,
+      "last_event_ms": 8640.643,
       "frames_over_16ms": 0,
-      "worst_ms": 2.885,
-      "peak_mb": 79
+      "worst_ms": 1.134,
+      "peak_mb": 77
      }
     ]
    }
   },
   "omxcode-web": {
-   "first_ui_ms": 113.7,
-   "last_event_ms": 180.4,
+   "first_ui_ms": 130.8,
+   "last_event_ms": 131.0,
    "frames_over_16ms": 0,
-   "worst_ms": 16.8,
-   "peak_mb": 4.4,
+   "worst_ms": 16.7,
+   "peak_mb": 3.9,
    "burst": {
-    "first_ui_ms": 113.7,
-    "last_event_ms": 180.4,
+    "first_ui_ms": 130.8,
+    "last_event_ms": 131.0,
     "frames_over_16ms": 0,
-    "worst_ms": 16.8,
-    "peak_mb": 4.4,
+    "worst_ms": 16.7,
+    "peak_mb": 3.9,
     "samples": [
      {
-      "first_ui_ms": 62.0,
-      "last_event_ms": 178.7,
+      "first_ui_ms": 131.0,
+      "last_event_ms": 131.0,
       "frames_over_16ms": 0,
       "worst_ms": 16.8,
-      "peak_mb": 4.3
+      "peak_mb": 3.9
      },
      {
-      "first_ui_ms": 113.7,
-      "last_event_ms": 180.4,
+      "first_ui_ms": 113.8,
+      "last_event_ms": 147.1,
       "frames_over_16ms": 0,
-      "worst_ms": 16.8,
-      "peak_mb": 4.5
+      "worst_ms": 16.7,
+      "peak_mb": 3.9
      },
      {
-      "first_ui_ms": 163.9,
-      "last_event_ms": 197.2,
-      "frames_over_16ms": 1,
-      "worst_ms": 33.4,
-      "peak_mb": 4.4
+      "first_ui_ms": 130.8,
+      "last_event_ms": 130.8,
+      "frames_over_16ms": 0,
+      "worst_ms": 16.7,
+      "peak_mb": 3.9
      }
     ]
    },
    "paced": {
-    "first_ui_ms": 1616.0,
-    "last_event_ms": 9196.0,
-    "frames_over_16ms": 6,
+    "first_ui_ms": 1447.5,
+    "last_event_ms": 9046.1,
+    "frames_over_16ms": 8,
     "worst_ms": 33.4,
-    "peak_mb": 8.5,
+    "peak_mb": 10.6,
     "samples": [
      {
-      "first_ui_ms": 1629.6,
-      "last_event_ms": 9196.0,
-      "frames_over_16ms": 6,
-      "worst_ms": 50,
-      "peak_mb": 8.5
-     },
-     {
-      "first_ui_ms": 1495.7,
-      "last_event_ms": 8795.5,
+      "first_ui_ms": 1447.5,
+      "last_event_ms": 8747.2,
       "frames_over_16ms": 0,
       "worst_ms": 16.8,
-      "peak_mb": 8.6
+      "peak_mb": 10.7
      },
      {
-      "first_ui_ms": 1616.0,
-      "last_event_ms": 9482.3,
+      "first_ui_ms": 1446.4,
+      "last_event_ms": 9046.1,
+      "frames_over_16ms": 19,
+      "worst_ms": 50.1,
+      "peak_mb": 10.6
+     },
+     {
+      "first_ui_ms": 1523.1,
+      "last_event_ms": 9072.8,
       "frames_over_16ms": 8,
       "worst_ms": 33.4,
-      "peak_mb": 8.5
+      "peak_mb": 8.7
      }
     ]
    }
   },
   "copilotkit": {
-   "first_ui_ms": 138.5,
-   "last_event_ms": 530.5,
-   "frames_over_16ms": 2,
-   "worst_ms": 216.7,
-   "peak_mb": 35.2,
+   "first_ui_ms": 111.9,
+   "last_event_ms": 552.8,
+   "frames_over_16ms": 3,
+   "worst_ms": 200,
+   "peak_mb": 37.9,
    "burst": {
-    "first_ui_ms": 138.5,
-    "last_event_ms": 530.5,
-    "frames_over_16ms": 2,
-    "worst_ms": 216.7,
-    "peak_mb": 35.2,
+    "first_ui_ms": 111.9,
+    "last_event_ms": 552.8,
+    "frames_over_16ms": 3,
+    "worst_ms": 200,
+    "peak_mb": 37.9,
     "samples": [
      {
-      "first_ui_ms": 530.5,
-      "last_event_ms": 530.5,
-      "frames_over_16ms": 2,
-      "worst_ms": 216.7,
-      "peak_mb": 35.2
+      "first_ui_ms": 102.9,
+      "last_event_ms": 552.8,
+      "frames_over_16ms": 4,
+      "worst_ms": 200,
+      "peak_mb": 40.9
      },
      {
-      "first_ui_ms": 138.5,
-      "last_event_ms": 521.8,
-      "frames_over_16ms": 2,
-      "worst_ms": 216.6,
+      "first_ui_ms": 111.9,
+      "last_event_ms": 528.7,
+      "frames_over_16ms": 3,
+      "worst_ms": 183.3,
       "peak_mb": 35.1
      },
      {
-      "first_ui_ms": 116.1,
-      "last_event_ms": 549.4,
+      "first_ui_ms": 232.0,
+      "last_event_ms": 832.0,
       "frames_over_16ms": 3,
-      "worst_ms": 216.7,
-      "peak_mb": 39.7
+      "worst_ms": 283.4,
+      "peak_mb": 37.9
      }
     ]
    },
    "paced": {
-    "first_ui_ms": 1523.6,
-    "last_event_ms": 9046.2,
-    "frames_over_16ms": 1,
-    "worst_ms": 33.3,
-    "peak_mb": 39.2,
+    "first_ui_ms": 1421.4,
+    "last_event_ms": 8721.1,
+    "frames_over_16ms": 0,
+    "worst_ms": 16.8,
+    "peak_mb": 40.1,
     "samples": [
      {
-      "first_ui_ms": 1415.9,
-      "last_event_ms": 8732.3,
+      "first_ui_ms": 1440.6,
+      "last_event_ms": 8773.7,
       "frames_over_16ms": 0,
       "worst_ms": 16.8,
-      "peak_mb": 38.6
+      "peak_mb": 42.9
      },
      {
-      "first_ui_ms": 1523.6,
-      "last_event_ms": 9356.5,
-      "frames_over_16ms": 4,
-      "worst_ms": 33.4,
+      "first_ui_ms": 1406.4,
+      "last_event_ms": 8672.7,
+      "frames_over_16ms": 0,
+      "worst_ms": 16.8,
+      "peak_mb": 40.1
+     },
+     {
+      "first_ui_ms": 1421.4,
+      "last_event_ms": 8721.1,
+      "frames_over_16ms": 0,
+      "worst_ms": 16.8,
       "peak_mb": 39.2
-     },
-     {
-      "first_ui_ms": 1529.8,
-      "last_event_ms": 9046.2,
-      "frames_over_16ms": 1,
-      "worst_ms": 33.3,
-      "peak_mb": 41.8
      }
     ]
    }
