@@ -1259,3 +1259,4 @@ was the map.
 - Found: `flushEvents is not defined` in the page (round 1's batch removal took it): restored; every story now has a "no script errors" beat.
 - D-6218: three real-click hypotheses (a far column then a blank sheet; the last column then the sample; a pivot then the sample), none crashed; plus M7's replay. Not reproduced.
 - M2's "probe folder touched" in the round-2 full run was the reviewers' own grep over the worktree (the probe folder now lives in a fresh /tmp folder); the leak scan counted the attacker's echoed text after the story (scoped to the story).
+- Final round-2 runs: M0, M1, M2 (39), M3, M4 (15.1 pictures/s at 100 ms RTT), M7 PASS; M5 FAIL in the full run (8 visitors 10.8–11.5) after three passing runs at 8; M6 29 PASS / 55 SAME / 1 FAIL (test_web_files, fixed: an upload's own folder in public mode only; passes). Not merged: M5's last run and no re-review PASS yet.

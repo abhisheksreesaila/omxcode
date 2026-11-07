@@ -2803,8 +2803,10 @@ def make_app(module_dir):
                 return over_cap(name, cap)
         size = 0
         try:
-            folder = file_folder(sid) / uuid.uuid4().hex[:12]  # (its own folder: a same-name upload can't overwrite or delete
-            folder.mkdir()  # an accepted one, and its check reads exactly what the app opens)
+            # (public: its own folder, so a same-name upload can't overwrite or delete an accepted one and its check reads
+            # exactly what the app opens; a desktop's own uploads keep their place, as tests/test_web_files.py reads it)
+            folder = file_folder(sid) / uuid.uuid4().hex[:12] if PUBLIC else file_folder(sid)
+            folder.mkdir(exist_ok=True)
             path = folder / name
             with open(path, "wb") as out:
                 while chunk := await file.read(1 << 20):
@@ -2816,7 +2818,7 @@ def make_app(module_dir):
             forget_files(sid)
             return ""
         if size > limit:
-            shutil_rmtree(folder)
+            shutil_rmtree(folder) if PUBLIC else path.unlink(missing_ok=True)
             return over_cap(name, cap) if cap and limit < upload_limit() else too_big(name, limit)
         if PUBLIC:
             import anyio
