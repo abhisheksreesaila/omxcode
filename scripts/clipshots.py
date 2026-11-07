@@ -323,7 +323,7 @@ def compose_island(t):
     fs, s = frames_of(t, "chart")
     shot(fr, fs, full, card_top(s["card"]), "A chart over all 100M rows.", check="03-chart")
     asked(fr, t, ("median by region", "by month, as a line"), 4)
-    still(fr, card("omxplorer", sub="built on omxcode · one Mojo app, on your GPU", small=URL), 3.0, check="09-end")
+    still(fr, card("omxplorer", sub="built on omxcode · one Mojo app", small=URL), 3.0, check="09-end")
     return fr
 
 
@@ -361,7 +361,7 @@ def compose_sentence(t):
     fs, s = frames_of(t, "chart")
     shot(fr, fs, [0, 0, WIN[0], WIN[1]], card_top(s["card"]), "A chart over 1,000,000 orders.", check="02-chart")
     asked(fr, t, ("by product, largest first, top 5", "median", "sum by month, every month, in data order, as a line"), 3)
-    still(fr, card("omxplorer", sub="built on omxcode \u00b7 one Mojo app, on your GPU", small=URL), 3.0, check="09-end")
+    still(fr, card("omxplorer", sub="built on omxcode \u00b7 one Mojo app", small=URL), 3.0, check="09-end")
     return fr
 
 

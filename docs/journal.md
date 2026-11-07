@@ -1235,3 +1235,9 @@ was the map.
 - M3: typing into the Script window's fields goes by their hint ("from s"), not tag or label.
 - M0 rounds: (1) verbs all "other" on 2,018 episodes; (2) a linked pack from an older MAX ("region_605"); (3) the torch env's xkb race; (4) CUDA out of memory (a neighbour's llama-server, ~43 GB of 48); (5) scene's labels cleared the player's boxes, card keys; (6) the GPU-room stop ran with every pack built. PASS on the seventh.
 - Claude Code's temp dir (/tmp) hit its quota mid-goal: commands lost their output; worked around by writing output to ~/scratch; freed space by `pixi clean` in yesterday's /tmp/omx-onboard clone only (5 GB, recreatable).
+
+## Goal 61 (2026-11-06): fresh videos for the omxplorer page
+- The robot take broke where it assumed the telemetry card right of the video (tiles stack them); then the split covered the video (square chart); then soft text (1× tiles pushed in 3×) → 2× takes.
+- Chart answers print no trace line; the status bar's "… ms on …" lags; the first island take credited the default chart's 51 ms to the median → each answer's own JOB line, or the time under the sentence when no job runs.
+- /tmp hit the user quota (other projects' test copies): command output lost, pixi couldn't write its activation script → TMPDIR=~/scratch/tmp, output to files.
+- A stray recording ran after a failed build (a `;` chain started with &): stopped by its PIDs (the hook blocks pkill -f).
