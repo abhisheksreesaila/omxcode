@@ -15,5 +15,8 @@ for _ in $(seq 1 300); do curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2
 curl -fsS "http://127.0.0.1:$PORT/health"; echo
 [ "$(docker exec "$ID" id -u)" != 0 ] || { echo "the container runs as root" >&2; exit 1; }
 docker exec "$ID" sh -c 'touch /app/x 2>/dev/null || touch /data/robot/x 2>/dev/null' && { echo "the app or the data is writable" >&2; exit 1; }
+# the whole story against the container, Export pack included (its PDFs print with the image's Chromium: round 4)
 pixi run python docs/goals/62/story.py --url "http://127.0.0.1:$PORT/" --out build/g62/image-visitor
+pixi run python -I -c 'import json, sys; b = json.load(open(sys.argv[1]))["beats"]; p = b.get("Export pack downloads", {}); print("Export pack:", p.get("note")); sys.exit(0 if p.get("ok") else 1)' build/g62/image-visitor/results.json \
+    || { echo "Export pack didn't arrive from the container" >&2; exit 1; }
 docker logs "$ID" 2>&1 | tail -5

@@ -68,7 +68,7 @@ PUSH_MAX_S = float(os.environ.get("MOJOUI_PUSH_MAX_S", "240"))  # a push stream'
 JPEG_QUALITY = 85
 MAX_SESSIONS = int(os.environ.get("MOJOUI_MAX_SESSIONS", "6" if PUBLIC else "200"))  # public: past it, a busy page; else the oldest tab closes
 IDLE_S = float(os.environ.get("MOJOUI_IDLE_S", "900" if PUBLIC else "0"))  # a tab with no input this long ends (0: never)
-UNTOUCHED_S = 45.0  # public mode: a session whose page never came back (no /wait, frame or event) ends after this
+UNTOUCHED_S = 10.0  # public mode: a session whose page never came back (no /wait, frame or event) ends after this (round 4: 45 → 10)
 SESSION_MAX_S = float(os.environ.get("MOJOUI_SESSION_MAX_S", "3600" if PUBLIC else "0"))  # public: a visit's longest life (0: none)
 # public mode, new sessions (goal 62 round 3: 60 loads a second slowed every other tab): the whole server's rate and burst,
 # one address's (X-Real-IP, which the platform's proxy sets), and, near the cap, the sessions one address may hold
@@ -76,8 +76,10 @@ NEW_PER_S = float(os.environ.get("MOJOUI_NEW_PER_S", "2"))
 NEW_BURST = float(os.environ.get("MOJOUI_NEW_BURST", "6"))
 IP_PER_S = float(os.environ.get("MOJOUI_IP_NEW_PER_S", "0.5"))
 IP_BURST = 3.0
-PER_IP = int(os.environ.get("MOJOUI_PER_IP", "2"))
+PER_IP = int(os.environ.get("MOJOUI_PER_IP", "2"))  # (round 4: at all times, not only near the cap)
 UPLOADS_AT_ONCE = 2  # public mode: a visitor's uploads in flight
+UPLOADS_IN_FLIGHT = int(os.environ.get("MOJOUI_UPLOADS_IN_FLIGHT_MB", "512")) << 20  # public mode: every upload in flight together
+SESSION_REQUESTS = 6  # public mode: a session's blocking requests in flight (frames, events): past them, "retry" without a thread
 # public mode: a table's memory once read (the upload check measures it), one table's and a visitor's tables' together
 TABLE_KB = int(os.environ.get("MOJOUI_TABLE_MB", "256")) << 10
 VISITOR_TABLES_KB = int(os.environ.get("MOJOUI_VISITOR_TABLES_MB", "384")) << 10
@@ -209,8 +211,10 @@ MENU_JS = r"""
       // can't make the rest arrive for a version that's gone)
       const form = new FormData(); for (const f of e.dataTransfer.files) form.append('file', f);
       form.append('n', t.dataset.node); form.append('v', v ? v.value : -1);
-      fetch(`/dropfile/${t.dataset.sid}`, { method: 'POST', body: form }).then(r => r.text()).then(html => {
-        if (html) htmx.swap(document.body, html, { swapStyle: 'none' }); });
+      const send = tries => fetch(`/dropfile/${t.dataset.sid}`, { method: 'POST', body: form }).then(r => r.text()).then(html => {
+        if (html) htmx.swap(document.body, html, { swapStyle: 'none' }); })
+        .catch(() => { if (tries < 2) setTimeout(() => send(tries + 1), 1000); });  // (a dropped connection: once or twice more, round 4)
+      send(0);
       return;
     }
     htmx.ajax('POST', `/e/${t.dataset.sid}`, { values: { n: Number(t.dataset.node), text: e.dataTransfer.getData('text/plain'), v: v ? v.value : -1 }, swap: 'none', source: lane('drop') });
@@ -585,7 +589,17 @@ CANVAS_JS = r"""
   // the keys typed after it are still waiting to go.
   const events = window.mojouiEvents = { queue: [], sending: false };
   const shownPics = new Map();  // canvas tag → {pic, bmp, w, h}: its last picture (40 at most)
-  const getFrame = (sid, n, params) => fetch(`/frame/${sid}/${n}?${new URLSearchParams(params)}`);
+  // (a fetch that fails on the network, a dropped keep-alive connection: a short wait and again, as /wait does; after a few,
+  // a "retry" answer, so the canvas's loop goes on instead of ending in an unhandled "Failed to fetch", round 4)
+  const getFrame = async (sid, n, params) => {
+    for (let tries = 0; ; tries++) {
+      try { return await fetch(`/frame/${sid}/${n}?${new URLSearchParams(params)}`); }
+      catch (e) {
+        if (tries >= 3) return new Response(null, { status: 204, headers: { 'X-Mojoui-Retry': '1' } });
+        await new Promise(ok => setTimeout(ok, 250 * (tries + 1)));
+      }
+    }
+  };
   // Pictures pushed to playing canvases (/push): one streamed answer a page carries every playing canvas's new pictures,
   // painted on the server's clock, so a slow link pays no round trip a picture (goal 62 M4: a pull a picture held one
   // visitor's video near 10 a second at 100 ms). Canvases join when they start playing; the stream opens again when the
@@ -785,7 +799,9 @@ CANVAS_JS = r"""
             continue;
           }
           st.pic = res.headers.get('X-Mojoui-Pic') || '';
-          const img = await createImageBitmap(await res.blob());
+          let img;
+          try { img = await createImageBitmap(await res.blob()); }
+          catch (e) { st.want = true; await new Promise(ok => setTimeout(ok, 250)); continue; }  // (cut mid-picture: again)
           if (div.dataset.tag) { shownPics.delete(div.dataset.tag); shownPics.set(div.dataset.tag, { pic: st.pic, bmp: img, w: img.width, h: img.height });
                                  if (shownPics.size > 40) shownPics.delete(shownPics.keys().next().value); }
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
@@ -997,8 +1013,9 @@ class BodyLimit:
         if upload and self.gate is not None:
             if length is None:  # (a browser's upload says its length; one that doesn't can't reserve it)
                 return await _answer(send, 411, b"text/plain", b"an upload says its length")
-            refused, release = self.gate(path, int(length))
-            if refused:
+            refused, release, drain = self.gate(path, int(length))
+            if refused:  # (read and dropped first, up to `drain` bytes: a browser shows an answer, not a reset connection)
+                await _drain(receive, drain)
                 return await _answer(send, 200, b"text/html; charset=utf-8", to_xml(notice(refused)).encode())
         seen, over, started = [0], [False], [False]
 
@@ -1033,12 +1050,64 @@ class BodyLimit:
 
 
 async def _answer(send, status, kind, body):
-    await send({"type": "http.response.start", "status": status, "headers": [(b"content-type", kind)]})
+    """BodyLimit's own answers: outside SecurityHeaders, so they carry its headers themselves (round 4)."""
+    await send({"type": "http.response.start", "status": status, "headers": [(b"content-type", kind)] + list(SECURITY_HEADERS)})
     await send({"type": "http.response.body", "body": body})
 
 
+async def _drain(receive, most, seconds=60):
+    """Reads and drops a request's body, up to `most` bytes or `seconds`, so its answer reaches the browser."""
+    import anyio
+    seen = 0
+    with anyio.move_on_after(seconds):
+        while seen < most:
+            m = await receive()
+            if m["type"] != "http.request":
+                return
+            seen += len(m.get("body", b""))
+            if not m.get("more_body"):
+                return
+
+
+class SessionRequests:
+    """ASGI middleware (public mode): a session's blocking requests (frames, events, …) in flight are at most
+    SESSION_REQUESTS; past them the page gets a 204 with X-Mojoui-Retry at once, without a worker thread (round 4: 300
+    open /frame requests from one session took every one of anyio's 40 threads, and /health to 8 s)."""
+
+    PATHS = ("/frame/", "/e/", "/w/", "/pending/", "/resize/", "/save/", "/reply/", "/widget/", "/appearance/")
+
+    def __init__(self, app):
+        self.app, self.open, self.lock = app, {}, threading.Lock()
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if not path.startswith(self.PATHS):
+            return await self.app(scope, receive, send)
+        sid = (path.split("/") + ["", ""])[2]
+        with self.lock:
+            if self.open.get(sid, 0) >= SESSION_REQUESTS:
+                busy = True
+            else:
+                busy = False
+                self.open[sid] = self.open.get(sid, 0) + 1
+        if busy:
+            return await send_empty(send, 204, [(b"x-mojoui-retry", b"1")] + list(SECURITY_HEADERS))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            with self.lock:
+                self.open[sid] -= 1
+                if self.open[sid] <= 0:
+                    del self.open[sid]
+
+
+async def send_empty(send, status, headers):
+    await send({"type": "http.response.start", "status": status, "headers": headers})
+    await send({"type": "http.response.body", "body": b""})
+
+
 async def _too_large(send):
-    await send({"type": "http.response.start", "status": 413, "headers": [(b"content-type", b"text/plain")]})
+    await send({"type": "http.response.start", "status": 413, "headers": [(b"content-type", b"text/plain")] + list(SECURITY_HEADERS)})
     await send({"type": "http.response.body", "body": b"too large"})
 
 
@@ -1922,12 +1991,24 @@ def rate_ok(addr):
     if len(RATES) > 10000:  # (addresses whose buckets are full again are forgotten)
         for k in [k for k, b in RATES.items() if k and b.ready() and b.level >= b.burst]:
             del RATES[k]
+        for k in list(RATES)[1:max(1, len(RATES) - 5000)]:  # (still too many: the oldest go, bounded whatever comes)
+            del RATES[k]
     return True
 
 
 def client_address(req, h):
-    """Who loaded the page: X-Real-IP, which the platform's proxy sets (Railway's does), else the connection's peer."""
-    return h.get("x-real-ip") or (req.client.host if req.client else "")
+    """Who loaded the page: X-Real-IP, which the platform's proxy sets (Railway's does), else the connection's peer;
+    as a key (round 4): a valid address only (at most 45 characters), and an IPv6 one as its /64, the block one home or
+    office holds."""
+    import ipaddress
+    peer = req.client.host if req.client else ""
+    for text in ((h.get("x-real-ip") or "").strip()[:45], peer):
+        try:
+            ip = ipaddress.ip_address(text)
+        except ValueError:
+            continue
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else str(ip)
+    return "?"
 
 
 def loopback(host):
@@ -1988,6 +2069,7 @@ def make_app(module_dir):
                 roots += [Path(os.environ[name]), Path(os.environ[name]).resolve()]
         app.add_middleware(Scrub, roots=roots)
         app.add_middleware(BodyLimit, big=upload_limit() + (1 << 20), gate=lambda path, length: upload_gate(path, length))
+        app.add_middleware(SessionRequests)
         print(f"mojoui web: public mode: no agent link, no dev routes, {MAX_SESSIONS} sessions at most"
               + (f", idle ones end after {IDLE_S / 60:g} min" if IDLE_S else "") + f"; uploads {size_words(upload_limit())} a file, "
               + f"{size_words(visitor_limit())} a visitor", flush=True)
@@ -2004,16 +2086,21 @@ def make_app(module_dir):
         (goal 62 round 3). (words for the page or None, release)."""
         parts = path.split("/")
         sid = parts[2] if len(parts) > 2 else ""
-        if sid not in sessions:
-            return None, None  # (the handler answers a gone page as it always has)
+        if sid not in sessions:  # (round 4: no page, no upload: refused before a byte is read, nothing drained)
+            print("UPLOAD: refused an upload for no session", flush=True)
+            return "This page expired: reload it.", None, 0
         cap = visitor_limit()
         with sessions_lock:
             n, held = flights.get(sid, (0, 0))
+            everyone = sum(b for _, b in flights.values())
             if n >= UPLOADS_AT_ONCE:
-                return "Wait for your other uploads to finish first.", None
+                return "Wait for your other uploads to finish first.", None, length
             if cap and folder_bytes(uploads_base() / sid) + held + length > cap:
                 print(f"UPLOAD: refused an upload past the visitor's cap ({cap:,} bytes, {n} in flight)", flush=True)
-                return f"This upload wasn't taken: your files here would pass {size_words(cap)}, the most one visitor keeps.", None
+                return f"This upload wasn't taken: your files here would pass {size_words(cap)}, the most one visitor keeps.", None, length
+            if everyone + length > UPLOADS_IN_FLIGHT:  # (round 4: every visitor's uploads in flight together)
+                print(f"UPLOAD: refused an upload past the server's uploads in flight ({everyone:,} bytes)", flush=True)
+                return "The server is taking other visitors' uploads right now: try again in a minute.", None, length
             flights[sid] = (n + 1, held + length)
 
         def release():
@@ -2021,7 +2108,7 @@ def make_app(module_dir):
                 n, held = flights.pop(sid, (1, length))
                 if n > 1:
                     flights[sid] = (n - 1, held - length)
-        return None, release
+        return None, release, 0
 
     def checks():
         import anyio
@@ -2048,13 +2135,13 @@ def make_app(module_dir):
     def admit(addr):
         """Public mode, under sessions_lock: why a new session from `addr` can't be made now ("": it can, its place is
         taken). Every session holds a place from the moment it's made, a bare load's too (goal 62 round 3: bare loads
-        overshot the cap twice over); near the cap one address can't take the last places; and loads are rate-limited."""
+        overshot the cap twice over); one address holds PER_IP places at most; and loads are rate-limited."""
         taken = len(sessions) + sum(making.values())
         if taken >= MAX_SESSIONS:
             return f"{MAX_SESSIONS} visitors are exploring this copy, the most it holds at once. Try again in a few minutes."
         held = sum(1 for v in sessions.values() if v.client == addr) + making.get(addr, 0)
-        if MAX_SESSIONS - taken <= max(1, MAX_SESSIONS // 3) and held >= PER_IP:
-            return f"This copy is nearly full, and {held} of its places are open from your address already: close a tab, or try again in a few minutes."
+        if held >= PER_IP:  # (round 4: always; near the cap only, one address held 4 of 6)
+            return f"{held} of this copy's places are open from your address already, the most one address holds: close a tab, or try again in a few minutes."
         if not rate_ok(addr):
             return "Many visitors are arriving at once. Try again in a few seconds."
         making[addr] = making.get(addr, 0) + 1
@@ -2087,7 +2174,7 @@ def make_app(module_dir):
         """IDLE_S: tabs with no input for that long end (their page says so); SESSION_MAX_S: a visit ends at that age;
         public mode: a session no page came back to ends after UNTOUCHED_S. Checked a few times a minute."""
         while True:
-            time.sleep(max(0.5, min([5.0] + [t / 4 for t in (IDLE_S, SESSION_MAX_S) if t > 0])))
+            time.sleep(max(0.25, min([5.0] + [t / 4 for t in (IDLE_S, SESSION_MAX_S, UNTOUCHED_S if PUBLIC else 0) if t > 0])))
             now = time.monotonic()
             gone = []
             with sessions_lock:
@@ -2096,8 +2183,10 @@ def make_app(module_dir):
                         mins = SESSION_MAX_S / 60
                         said = f"{mins:g} minutes" if mins >= 1 else f"{SESSION_MAX_S:g} seconds"
                         gone.append((sid, s, f"This visit reached its longest, {said}, and its files are gone. Reload the page to start a new one."))
-                    elif (IDLE_S > 0 and now - s.last_active > IDLE_S) or (PUBLIC and not s.touched and now - s.made > UNTOUCHED_S):
-                        # (a session no page came back to: a bare ?boot=1, a crawler; its place is free again in 45 s)
+                    elif PUBLIC and not s.touched and now - s.made > UNTOUCHED_S:
+                        # (a session no page came back to: a bare ?boot=1, a crawler; its place is free again in 10 s)
+                        gone.append((sid, s, "This session ended because its page never came back to it. Reload the page to start a new one."))
+                    elif IDLE_S > 0 and now - s.last_active > IDLE_S:
                         mins = IDLE_S / 60
                         said = f"{mins:g} minutes" if mins >= 1 else f"{IDLE_S:g} seconds"
                         gone.append((sid, s, f"This session ended after {said} without use, and its files are gone. Reload the page to start a new one."))
@@ -2117,7 +2206,7 @@ def make_app(module_dir):
         return Response(status_code=204)
 
     @app.get("/health")
-    def health():
+    async def health():  # (async: no worker thread, so a flood of blocking requests can't hold it up, round 4)
         """Is the server up, and how full (a platform's health check; no page, no session, no paths)."""
         from starlette.responses import JSONResponse
         with sessions_lock:
@@ -2361,6 +2450,12 @@ def make_app(module_dir):
             if why:
                 return busy_page(why)
         sid = uuid.uuid4().hex  # one app session per page load (tab)
+
+        def made():  # (under sessions_lock: its place moves from "being made" to the session, in one step, round 4)
+            if PUBLIC:
+                making[addr] -= 1
+                if making[addr] <= 0:
+                    del making[addr]
         try:
             s = Session(mod, shared=bool(loads))
             s.client = addr
@@ -2369,14 +2464,15 @@ def make_app(module_dir):
                 with s.lock:
                     mod.hosted(s.handle, str(file_folder(sid, "documents")) if PUBLIC else "", PUBLIC)
                     s.nodes = json.loads(mod.view(s.handle))  # (the first screen as the app has it now: a public Start screen differs)
-        finally:
-            if PUBLIC:
-                with sessions_lock:
-                    making[addr] -= 1
-                    if making[addr] <= 0:
-                        del making[addr]
+        except BaseException:
+            with sessions_lock:
+                made()
+            raise
+        if PUBLIC:
+            print(f"SESSION: made for {addr}", flush=True)  # (scripts/deploy-railway reads this: is X-Real-IP the proxy's?)
         gone = []
         with sessions_lock:
+            made()
             sessions[sid] = s
             if not PUBLIC:
                 gone += list(sessions.items())[:max(0, len(sessions) - MAX_SESSIONS)]  # (local: the oldest tab gives way)
@@ -3250,4 +3346,5 @@ if __name__ == "__main__":
     print(f"mojoui web: http://{host}:{port}/", flush=True)
     # timeout_graceful_shutdown: a page's /wait is held while the tab lives; a stop (Ctrl+C, a platform's redeploy)
     # waits at most 3 s for answers in flight instead of for every tab to close
-    uvicorn.run(make_app(module_dir), host=host, port=port, log_level="warning", timeout_graceful_shutdown=3, proxy_headers=False)
+    uvicorn.run(make_app(module_dir), host=host, port=port, log_level="warning", timeout_graceful_shutdown=3, proxy_headers=False,
+                limit_concurrency=512 if PUBLIC else None, timeout_keep_alive=75)  # (round 4: a bound on connections; idle ones kept 75 s)

@@ -31,6 +31,11 @@ COPY --from=build /app/mojoui/hosts/static /app/mojoui/hosts/static
 COPY --from=build /app/mojoui/pack_pdf.py /app/mojoui/pack_pdf.py
 COPY --from=build /app/scripts/web-start /app/scripts/web-start
 COPY --from=build /app/build/omxplorer/web /app/build/omxplorer/web
+# Export pack prints its PDFs with Chromium (mojoui/pack_pdf.py, through Playwright): Ubuntu's chromium is a snap, which
+# doesn't run in a container, so Playwright's own build goes in, with the libraries it needs (round 4)
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright
+RUN /app/.pixi/envs/default/bin/python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 COPY starter /data/robot
 RUN chmod -R a-w /app /data && mkdir -p /tmp/omxcode /tmp/home && chown omx /tmp/omxcode /tmp/home
 WORKDIR /app

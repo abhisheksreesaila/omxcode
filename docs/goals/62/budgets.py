@@ -58,6 +58,110 @@ def cores(pid, seconds):
     return (cpu_s(pid) - a) / (time.time() - t0)
 
 
+def server_state(srv):
+    """What the server holds now: memory (RSS + swap, MB), its threads and its open files."""
+    pid = srv.pid()
+    st = Path(f"/proc/{pid}/status").read_text()
+    return srv.memory()["mem_mb"], int(re.search(r"Threads:\s+(\d+)", st).group(1)), len(os.listdir(f"/proc/{pid}/fd"))
+
+
+def round4(page, srv, out, say):
+    """Round 4's exploits, each proven by the server's resources."""
+    import socket
+    import threading
+    # 1. a 20 MB CSV of 1M rows and a 400-column answer (the review: ~4.8 GB, a 6.1 GB peak)
+    wide = out / "files/wide.csv"
+    with open(wide, "w") as f:
+        f.write("id,v\n")
+        f.writelines(f"{i},{i % 997}\n" for i in range(1_000_000))
+    fresh(page, srv.url)
+    settle(page)
+    page.locator("input[data-kind=picker]").first.set_input_files(str(wide))
+    t0 = time.time()
+    while time.time() - t0 < 60 and "1,000,000" not in page.inner_text("body"):
+        page.wait_for_timeout(250)
+    create = page.locator("button", has_text=re.compile(r"^\s*Create table\s*$"))  # (an upload opens on the Import step)
+    if create.count():
+        create.first.click()
+        try_settle(page)
+    page.locator("button[data-kind=button]", has_text=re.compile(r"^\s*Query\s*$")).first.wait_for(timeout=60000)
+    m0, peak = srv.memory()["mem_mb"], [0]
+    stop = threading.Event()
+
+    def watch():
+        while not stop.is_set():
+            peak[0] = max(peak[0], srv.memory()["mem_mb"])
+            time.sleep(0.1)
+    threading.Thread(target=watch, daemon=True).start()
+    said = ask(page, "SELECT " + ", ".join(f"v AS c{i}" for i in range(400)) + " FROM wide", r"would take more than [^:]*", 60)
+    time.sleep(1)
+    stop.set()
+    say(said is not None and peak[0] - m0 < 400, f"400 columns over a 1M-row upload: “{said}”; the server {m0} MB, at most {peak[0]} MB meanwhile")
+    page.keyboard.press("Escape")
+    # 2. three slow uploads for a made-up session, 200 MB each by their headers: refused before their bodies
+    m0, th0, fd0 = server_state(srv)
+    host, port = srv.url.split("//")[1].rstrip("/").split(":")
+    answers, conns = [], []
+    for k in range(3):
+        c = socket.create_connection((host, int(port)))
+        c.sendall((f"POST /upload/{'0' * 31}{k} HTTP/1.1\r\nHost: x\r\nContent-Type: multipart/form-data; boundary=b\r\n"
+                   f"Content-Length: {200 << 20}\r\n\r\n").encode() + b"--b\r\n" + b"x" * 65536)
+        conns.append(c)
+    t0 = time.time()
+    for c in conns:
+        c.settimeout(10)
+        try:
+            answers.append(c.recv(4096).decode(errors="replace"))
+        except OSError:
+            answers.append("")
+    took = time.time() - t0
+    m1, th1, fd1 = server_state(srv)
+    [c.close() for c in conns]
+    ok = all("expired" in a for a in answers) and took < 5 and m1 - m0 < 50 and fd1 - fd0 <= 3
+    say(ok, f"3 slow 200 MB uploads for a made-up session: answered in {took:.1f} s after 64 KB each ({sum('expired' in a for a in answers)} say it expired); "
+        f"the server {m0} → {m1} MB, open files {fd0} → {fd1}")
+    # 3. 300 open /frame requests at 3840×2400 from one session: /health stays quick
+    fresh(page, srv.url)
+    settle(page)
+    sid = page.evaluate("() => document.getElementById('mojoui-root').dataset.sid")
+    node = page.evaluate("() => { const d = document.querySelector('[data-kind=canvas]'); return d ? d.dataset.node : '0' }")
+    import urllib.request
+
+    def frame():
+        try:
+            urllib.request.urlopen(f"{srv.url}frame/{sid}/{node}?w=3840&h=2400&scale=1&v=0&tick=1", timeout=60).read()
+        except Exception:
+            pass
+    ts = [threading.Thread(target=frame, daemon=True) for _ in range(300)]
+    [t.start() for t in ts]
+    lat, threads = [], 0
+    for _ in range(20):
+        t1 = time.perf_counter()
+        get(srv.url + "health")
+        lat.append((time.perf_counter() - t1) * 1000)
+        threads = max(threads, server_state(srv)[1])
+        time.sleep(0.1)
+    [t.join(60) for t in ts]
+    lat.sort()
+    say(lat[10] < 200 and lat[-1] < 1000 and srv.p.poll() is None,
+        f"300 open /frame requests at 3840×2400 from one session: /health median {lat[10]:.0f} ms, worst {lat[-1]:.0f} ms; the server at most {threads} threads")
+    # 4. a real browser's upload past the visitor's cap (50 MB here): the notice, not a reset connection
+    big = out / "files/past-cap.csv"
+    with open(big, "wb") as f:
+        f.write(b"a,b\n" + b"1,2\n" * ((60 << 20) // 4))
+    fresh(page, srv.url)
+    settle(page)
+    page.locator("input[data-kind=picker]").first.set_input_files(str(big))
+    said, t0 = None, time.time()
+    while time.time() - t0 < 120:
+        m = re.search(r"wasn't taken: [^.]*\.|wasn't uploaded: [^.]*\.", page.inner_text("body"))
+        if m:
+            said = m.group(0)
+            break
+        page.wait_for_timeout(250)
+    say(said is not None, f"a 60 MB upload past a 50 MB visitor cap, from Chromium: " + (f"“{said}”" if said else "no notice (a reset connection?)"))
+
+
 def resources(out, say):
     """Round 3's review: a budget is proven by the server's CPU and memory coming back, not by the page's words. One
     question place on this server (MOJOUI_QUESTIONS=1), 2 cores and a 256 MB sort a question, a 1 s budget."""
@@ -143,7 +247,8 @@ def run_all(out):
         print(lines[-1], flush=True)
 
     srv = Server(out / "srv", public=True, env={"MOJOUI_QUERY_S": "1", "MOJOUI_QUERY_ROWS": "100000", "MOJOUI_JOIN_BYTES": str(1 << 20),
-                                                "MOJOUI_MAX_SESSIONS": "20"})  # (budgets shortened for the check)
+                                                "MOJOUI_MAX_SESSIONS": "20",
+                                                "MOJOUI_PER_IP": "20", "OMXCODE_VISITOR_MAX": str(50 << 20)})  # (budgets shortened for the check)
     try:
         b_out = out / "visitor-b"
         pb = subprocess.Popen([sys.executable, str(ROOT / "docs/goals/62/story.py"), "--url", srv.url, "--out", str(b_out), "--no-pack"],
@@ -211,6 +316,7 @@ def run_all(out):
             after = srv.memory()["mem_mb"]
             say(said is not None and "one table" in said and after - before < 150 and srv.p.poll() is None,
                 f"a 516 KB Parquet that reads to 120M rows, uploaded 3 times: “{said}”; the server {before} → {after} MB")
+            round4(page, srv, out, say)
             # valid files still open: a small Parquet (pyarrow) and a real clip
             import pyarrow as pa
             import pyarrow.parquet as pq

@@ -279,6 +279,20 @@ pixi run python docs/goals/62/story.py --url "${RAILWAY_URL%/}/" --out build/g62
   | grep -E "^### BEAT|^RESULT" || warn "the story didn't pass there: build/g62/railway-visitor/results.json"
 pause
 
+stage "Who the server thinks visits (X-Real-IP)"
+say "The per-address limits read X-Real-IP, which Railway's proxy should set to the visitor's own address."
+say "A page load that sends a made-up one (203.0.113.77, an address kept for examples), then what the server recorded:"
+curl -fsS -o /dev/null -H "X-Real-IP: 203.0.113.77" -H "Sec-Fetch-Dest: document" -H "Sec-Fetch-Mode: navigate" "${RAILWAY_URL%/}/" || true
+sleep 3
+SEEN=$( (cd "$DEPLOY" && timeout 20 railway logs --service "$SERVICE" 2>/dev/null) | grep "SESSION: made for" | tail -1 || true)
+step "The server recorded: ${SEEN:-nothing yet}"
+case "$SEEN" in
+  *203.0.113.77*) warn "the made-up address came through: X-Real-IP isn't the proxy's own, so the per-address limits can be dodged (the cap and the server-wide rates still hold). Tell Claude before going live." ;;
+  "") warn "no 'SESSION: made for' line yet: run railway logs --service $SERVICE and look for it" ;;
+  *) step "It recorded your own address, not the made-up one: the per-address limits see real visitors." ;;
+esac
+pause
+
 stage "Your domain: $DOMAIN"
 say "Railway gives the DNS records to add at your DNS host (a CNAME and a TXT for the check)."
 (cd "$DEPLOY" && railway domain "$DOMAIN" --service "$SERVICE") || true

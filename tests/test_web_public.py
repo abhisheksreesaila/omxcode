@@ -133,10 +133,10 @@ def sessions_rules(web, module_dir):
         r = client.post(f"/e/{sids[0]}", content=(b"x" * (1 << 20) for _ in range(3)))
         assert r.status_code == 413, f"a chunked event body over 1 MB got {r.status_code} from the app, not 413"
         end_all(client, sids)
-        # near the cap one address can't take the last places; another still gets in
+        # one address holds 2 places at most, at all times (round 4: near the cap only, it held 4 of 6); another still gets in
         web.MAX_SESSIONS, web.PER_IP = 6, 2
-        mine = [page(client, "10.2.0.1")[0] for _ in range(5)]
-        assert all(mine[:4]) and mine[4] is None, f"one address got {sum(1 for s in mine if s)} of 6 places (4 at most near the cap)"
+        mine = [page(client, "10.2.0.1")[0] for _ in range(3)]
+        assert all(mine[:2]) and mine[2] is None, f"one address got {sum(1 for s in mine if s)} of 6 places (2 at most)"
         other, _ = page(client, "10.2.0.2")
         assert other, "another address was refused while places were free"
         end_all(client, mine + [other])
@@ -240,6 +240,55 @@ def uploads(web, module_dir, d):
           "per-visitor read budgets refuse in plain words)")
 
 
+def round4(web, module_dir, d):
+    """Round 4: an upload for no session is refused before its body is read; every upload in flight together is
+    budgeted; X-Real-IP keys are valid addresses (IPv6 by its /64); a session no page came back to says so; BodyLimit's
+    own answers carry the security headers."""
+    from starlette.testclient import TestClient
+
+    class Req:
+        def __init__(self, peer):
+            self.client = type("C", (), {"host": peer})()
+    assert web.client_address(Req("127.0.0.1"), {"x-real-ip": "203.0.113.7"}) == "203.0.113.7"
+    assert web.client_address(Req("127.0.0.1"), {"x-real-ip": "x" * 5000}) == "127.0.0.1", "a junk X-Real-IP became a key"
+    a = web.client_address(Req("127.0.0.1"), {"x-real-ip": "2001:db8:1:2:aaaa::1"})
+    b = web.client_address(Req("127.0.0.1"), {"x-real-ip": "2001:db8:1:2:bbbb::9"})
+    assert a == b == "2001:db8:1:2::/64", (a, b)
+    web.reset_rates()
+    for i in range(20000):
+        web.rate_ok(f"198.51.{i // 250}.{i % 250}")
+    assert len(web.RATES) <= 10001, f"the address table grew to {len(web.RATES)}"
+    web.reset_rates()
+    web.MAX_SESSIONS, web.PER_IP, web.UNTOUCHED_S, web.WAIT_S = 6, 99, 1.0, 1.0
+    web.UPLOADS_IN_FLIGHT = 8 << 20
+    os.environ["OMXCODE_VISITOR_MAX"] = str(100 << 20)
+    with TestClient(web.make_app(module_dir)) as client:
+        t0 = time.time()
+        r = client.post("/upload/" + "0" * 32, data={"n": "1", "v": "0"}, files=[("file", ("x.csv", b"a,b\n" * (4 << 20), "text/csv"))])
+        assert "expired" in r.text and time.time() - t0 < 5, f"an upload for no session: {r.status_code} {r.text[:100]}"
+        r = client.post("/e/x", content=(b"x" * (1 << 20) for _ in range(3)))
+        assert r.status_code == 413 and r.headers.get("x-content-type-options"), f"413 without the security headers: {dict(r.headers)}"
+        # two visitors' 6 MB uploads at once under an 8 MB server-wide budget: one is refused
+        got, threads = {}, []
+        for k in range(2):
+            sid, v, n = picker(client, f"10.6.0.{k}")
+            threads.append(threading.Thread(target=send, args=(client, sid, v, n, f"w{k}.csv", b"#kb=1\n" + b"1,2\n" * ((6 << 20) // 4), got, k)))
+            threads[-1].start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join(60)
+        assert sum(1 for r in got.values() if "other visitors' uploads" in r.text) == 1, [r.text[:80] for r in got.values()]
+        # a session no page came back to ends in 1 s here, and says why truthfully
+        sid, _ = page(client, "10.6.0.9", boot=True)
+        time.sleep(2)
+        said = client.get(f"/wait/{sid}").text
+        assert "never came back" in said, f"an untouched session ended saying {said[:120]!r}"
+    web.UNTOUCHED_S, web.UPLOADS_IN_FLIGHT = 45.0, 512 << 20
+    os.environ["OMXCODE_VISITOR_MAX"] = str(10 << 20)
+    print("round 4: ok (no-session upload refused at once; uploads in flight budgeted server-wide; address keys bounded, "
+          "IPv6 by /64; an untouched session says why; 413 carries the security headers)")
+
+
 def check_words(web, d):
     fake = Path(d) / "validate-bomb"
     fake.write_text('#!/bin/sh\necho "120000000 rows, 1 columns, 983040 KB once read"\n')
@@ -261,6 +310,7 @@ def main():
         check_words(web, d)
         sessions_rules(web, module_dir)
         uploads(web, module_dir, d)
+        round4(web, module_dir, d)
     print("web public: ok")
 
 

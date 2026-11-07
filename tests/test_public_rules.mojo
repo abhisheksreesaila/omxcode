@@ -10,7 +10,7 @@
 from std.testing import assert_equal, assert_true, assert_false
 from std.os import setenv, getenv, makedirs
 from std.time import sleep
-from mojoui.tablejobs import TableWork, capped_sql, public_refusal, take_question, give_back_question, questions_running
+from mojoui.tablejobs import TableWork, capped_sql, public_refusal, take_question, give_back_question, questions_running, answer_width
 from mojoui.tablecard import TableCards
 from mojoui.sheet import Sheet
 from mojoui.csvio import read_table
@@ -172,6 +172,87 @@ def choices() raises:
     print("control_event's choices: ok")
 
 
+def peak_mb() -> Int:
+    try:
+        var text: String
+        with open("/proc/self/status", "r") as f:
+            text = f.read()
+        for line in text.split("\n"):
+            if line.startswith("VmHWM:"):
+                return Int(String(String(String(line[byte = 6 :]).strip()).split(" ")[0])) // 1024
+    except:
+        pass
+    return 0
+
+
+def land(mut work: TableWork) raises -> Bool:
+    var waited = 0
+    while waited < 120_000:
+        var a = work.take_answer()
+        if a:
+            return True
+        if not work.query:
+            return False
+        sleep(0.01)
+        waited += 10
+    return False
+
+
+def answers(folder: String) raises:
+    """Round 4: an answer's bytes (columns × rows) are budgeted, kept answers count in the visitor's tables, and answers
+    are capped: the review's 400 columns over 1M rows took ~4.8 GB."""
+    public(True)
+    assert_equal(answer_width("SELECT a, b, c FROM t", 10), 3)
+    assert_equal(answer_width("SELECT COUNT(*), f(x, y) FROM t", 10), 2)
+    assert_equal(answer_width("SELECT * FROM t", 10), 10)
+    assert_equal(answer_width("SELECT t.*, x FROM t", 7), 8)
+    assert_equal(answer_width("-- a, b\nSELECT 'a,b', (SELECT 1, 2) FROM t", 3), 2)
+    _ = setenv("MOJOUI_QUERY_S", "60", True)
+    _ = setenv("MOJOUI_QUESTION_WAIT_S", "1", True)
+    var path = folder + "/public_rules_wide.csv"
+    var out = String("id,v\n")
+    for i in range(1_000_000):
+        out += String(i) + "," + String(i % 997) + "\n"
+    with open(path, "w") as f:
+        f.write(out)
+    var pal = liquid_palette()
+    var tables = TableCards(4100, 230, 4)
+    var page = Sheet(read_table(path).table, False)
+    var work = TableWork()
+    var cols = String("")
+    for i in range(400):
+        cols += ("" if i == 0 else ", ") + "v AS c" + String(i)
+    with open("/proc/self/clear_refs", "w") as f:  # (5: the peak starts again from now)
+        f.write("5")
+    var before = peak_mb()
+    assert_true(work.ask(tables, "SELECT " + cols + " FROM wide", "wide", page, "Q", pal), work.problem)
+    assert_false(land(work), "400 columns of 1M rows were kept")
+    var grew = peak_mb() - before
+    assert_true(work.problem.find("would take more than") >= 0, work.problem)
+    assert_true(grew < 600, "the refused wide answer took " + String(grew) + " MB at its peak")
+    # an answer within the budget lands; with MOJOUI_ANSWERS=1 the next is refused until it's removed
+    _ = setenv("MOJOUI_ANSWERS", "1", True)
+    assert_true(work.ask(tables, "SELECT id, v FROM wide WHERE id < 1000", "wide", page, "A1", pal), work.problem)
+    var got = work.take_answer()
+    var waited = 0
+    while not got and waited < 60_000:
+        sleep(0.01)
+        waited += 10
+        got = work.take_answer()
+    assert_true(Bool(got), work.problem)
+    _ = tables.adopt(got.take().take_card(), 0, 0, 400, 300)
+    assert_false(work.ask(tables, "SELECT id FROM wide WHERE id < 10", "wide", page, "A2", pal), "a second answer past MOJOUI_ANSWERS=1")
+    assert_true(work.problem.find("answers on the page") >= 0, work.problem)
+    # kept answers count in the visitor's tables: a 1 MB budget leaves no room once one answer is kept
+    _ = setenv("MOJOUI_ANSWERS", "8", True)
+    _ = setenv("MOJOUI_VISITOR_TABLES_MB", "0", True)
+    assert_false(work.ask(tables, "SELECT id FROM wide WHERE id < 10", "wide", page, "A3", pal), "a question past the visitor's tables")
+    assert_true(work.problem.find("Your tables and answers") >= 0, work.problem)
+    _ = setenv("MOJOUI_VISITOR_TABLES_MB", "384", True)
+    public(False)
+    print("answers: ok (400 columns × 1M rows refused, +" + String(grew) + " MB at the peak; the answer cap and the visitor's budget hold)")
+
+
 def main() raises:
     var folder = getenv("PUBLIC_RULES_DIR", "build/test_public_rules.d")
     makedirs(folder, exist_ok=True)
@@ -180,4 +261,5 @@ def main() raises:
     paths_and_files(folder)
     choices()
     parking(folder)
+    answers(folder)
     print("public rules: ok")

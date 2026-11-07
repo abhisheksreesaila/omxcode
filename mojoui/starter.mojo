@@ -11,7 +11,7 @@
 #   s.path(s.sheet)  → folder + "/fleet.csv"
 #
 # story.json: {"title", "start", "lead", "credit", "license", "source", "sheet": "fleet.csv", "tables": ["telemetry.parquet"],
-#              "documents": "paper", "links": ["fleet.episode = telemetry.episode", …], "hero": "F00118",
+#              "documents": "docs", "links": ["fleet.episode = telemetry.episode", …], "hero": "F00118",
 #              "questions": [{"name": "regrasped", "question": "failures where…", "sql": "SELECT …"}, …]}
 
 from mojoui.json import Json

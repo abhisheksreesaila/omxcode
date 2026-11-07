@@ -40,6 +40,15 @@ REQUIRED = {"03": None, "04": None, "05": None, "06": {"m6"}, "09": {"m3", "m4",
 NOT_RUN = re.compile(r"FileNotFoundError|No such file|cannot open input file|\bno /\S*build/|not built|ModuleNotFoundError|"
                      r"no Mac run|stale: no|ANDROID|emulator|adb\b|xcrun|Xcode")
 OUT = ROOT / "build/g62/m6"
+# CHANGED rows looked at and explained (round 4: a row fails on both sides for a different reason, a changed count or a new
+# mention, isn't SAME until someone has read both): "check:fn" → what was found
+EXPLAINED = {}
+
+
+def reason_key(why, tree):
+    """A failure's words, comparable across the two trees: their paths dropped, decimals (timings) made N."""
+    why = why.replace(str(tree) + "/", "").replace(str(ROOT) + "/", "").replace(str(ROOT / "build/g62/base") + "/", "")
+    return re.sub(r"\d+\.\d+", "N", why)[:600]
 
 
 def web_milestones():
@@ -209,6 +218,12 @@ def run_all(only=None, base_only=False):
             say("FAIL", f"{name}: fails here, passes on {BASE}: {why[:300]}")
         elif NOT_RUN.search(why) or NOT_RUN.search(bwhy):
             say("NOT-RUN", f"{name}: something it reads isn't there (here or on {BASE}), so it proves nothing: here {why[:160]} | base {bwhy[:160]}")
+        elif reason_key(why, ROOT) != reason_key(bwhy, base_tree()):
+            key = f"{check.name}:{fn}"
+            if key in EXPLAINED:
+                say("SAME", f"{name}: fails on both sides for a different reason, looked at: {EXPLAINED[key]} | here {why[:160]} | base {bwhy[:160]}")
+            else:
+                say("CHANGED", f"{name}: fails on both sides, differently (look at it): here {why[:300]} | base {bwhy[:300]}")
         else:
             say("SAME", f"{name}: ran on both sides and fails on {BASE} too (not this goal's): here {why[:160]} | base {bwhy[:160]}")
     r = subprocess.run([PY, "scripts/components.py", "--check"], cwd=ROOT, capture_output=True, text=True, timeout=600)
@@ -217,7 +232,9 @@ def run_all(only=None, base_only=False):
     unproven = [l for l in lines if l.startswith("NOT-RUN") and "(required)" in l]
     for l in unproven:
         say("FAIL", "a required row didn't run: " + l[8:200])
-    counts = {w: sum(1 for l in lines if l.startswith(w + " ")) for w in ("PASS", "SAME", "NOT-RUN", "FAIL")}
+    for l in [l for l in lines if l.startswith("CHANGED ")]:
+        say("FAIL", "a row fails differently than on the base and nobody has looked: " + l[8:200])
+    counts = {w: sum(1 for l in lines if l.startswith(w + " ")) for w in ("PASS", "SAME", "CHANGED", "NOT-RUN", "FAIL")}
     say("SUMMARY", ", ".join(f"{n} {w}" for w, n in counts.items()))
     return not any(l.startswith("FAIL") for l in lines), lines
 

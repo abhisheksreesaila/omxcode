@@ -138,13 +138,15 @@ struct QueryJob(JobBody):
     var text: String
     var called: String
     var pal: Palette
+    var room: Int  # public: the bytes this answer may take (the answer budget, or what the visitor's tables leave); 0: no limit
 
-    def __init__(out self, var names: List[String], var sheets: List[Sheet], text: String, called: String, pal: Palette):
+    def __init__(out self, var names: List[String], var sheets: List[Sheet], text: String, called: String, pal: Palette, room: Int = 0):
         self.names = names^
         self.sheets = sheets^
         self.text = text
         self.called = called
         self.pal = pal.copy()
+        self.room = room
 
     def run(mut self, ctl: JobCtl) raises -> Answer:
         var t0 = now_ns()
@@ -152,6 +154,14 @@ struct QueryJob(JobBody):
         for i in range(len(self.sheets)):
             catalog.add_frame(self.names[i], self.sheets[i].frame)
         var cap = public_rows()
+        var width = 1
+        if cap > 0 and self.room > 0:  # (round 4: rows alone let 400 columns of 1M rows fill 6 GB; the engine stops at the
+            # outer LIMIT, so the rows an answer may have come from its width, estimated from the SQL before it runs)
+            var star = 0
+            for i in range(len(self.sheets)):
+                star += self.sheets[i].columns()
+            width = answer_width(self.text, star)
+            cap = max(1, min(cap, self.room // (8 * width)))
         var held = take_question()  # (public: one of the server's places for questions, held until the engine ends, even past a stop)
         var table: Table
         try:
@@ -162,6 +172,9 @@ struct QueryJob(JobBody):
                 raise Error("this question's join would take more memory than the web copy gives one question: join on a key with fewer matches, or filter first")
             raise e^
         give_back_question(held)
+        if self.room > 0 and table.rows() > cap and cap < public_rows():
+            raise Error("the answer would take more than " + grouped(self.room >> 20) + " MB (" + grouped(table.columns()) + " columns × more than "
+                        + grouped(cap) + " rows), more than the web copy keeps for it: ask for fewer columns or rows")
         if cap > 0 and table.rows() > cap:  # (the public copy keeps no answer over its cap: memory a visitor can't take from others)
             raise Error("the answer has more than " + grouped(cap) + " rows, more than the web copy keeps: ask for fewer (a filter, a GROUP BY or a LIMIT)")
         var answer = Sheet(table^.share(), False)
@@ -285,6 +298,24 @@ struct TableWork(Movable):
         if refused != "":
             self.problem = refused
             return False
+        var room = 0
+        if public_rows() > 0:  # (round 4: the visitor's kept answers and uploaded tables count, and answers are capped)
+            var held = 0
+            var answers = 0
+            var starter = environment("OMX_STARTER")
+            for k in range(len(tables)):
+                ref c = tables.cards[k]
+                if c.note == "a query":
+                    answers += 1
+                if c.note == "a query" or (c.source != "" and (starter == "" or not c.source.startswith(starter))):
+                    held += 8 * c.sheet.rows() * c.sheet.columns()
+            if answers >= public_answers():
+                self.problem = "You have " + String(answers) + " answers on the page, the most the web copy keeps: remove one first"
+                return False
+            room = min(public_answer_bytes(), visitor_table_bytes() - held)
+            if room < 8 << 10:
+                self.problem = "Your tables and answers here take " + grouped(held >> 20) + " MB, the most the web copy holds for one visitor: remove one first"
+                return False
         var names = List[String]()
         var sheets = List[Sheet]()
         var page_sql = String("")
@@ -295,7 +326,7 @@ struct TableWork(Movable):
         for k in range(len(tables)):
             names.append(tables.sql_name_of(k, page_sql))
             sheets.append(tables.cards[k].sheet.snapshot())
-        self.query = start_ui_job(QueryJob(names^, sheets^, text, called, pal))
+        self.query = start_ui_job(QueryJob(names^, sheets^, text, called, pal, room))
         self.query_t0 = now_ns()
         self.budget_hit = False
         return True
@@ -563,6 +594,81 @@ def public_questions() -> Int:
         return max(1, Int(environment("MOJOUI_QUESTIONS", "2")))
     except:
         return 2
+
+
+def public_answer_bytes() -> Int:
+    """The most one public answer may take (MOJOUI_ANSWER_MB, 64 MB at 8 bytes a cell)."""
+    try:
+        return Int(environment("MOJOUI_ANSWER_MB", "64")) << 20
+    except:
+        return 64 << 20
+
+
+def visitor_table_bytes() -> Int:
+    """A visitor's tables and answers together on the public copy (MOJOUI_VISITOR_TABLES_MB, 384, as the host's uploads)."""
+    try:
+        return Int(environment("MOJOUI_VISITOR_TABLES_MB", "384")) << 20
+    except:
+        return 384 << 20
+
+
+def public_answers() -> Int:
+    """The answer cards a visitor may keep on the public copy (MOJOUI_ANSWERS, 8)."""
+    try:
+        return max(1, Int(environment("MOJOUI_ANSWERS", "8")))
+    except:
+        return 8
+
+
+def answer_width(text: String, star: Int) -> Int:
+    """The columns a SELECT's answer has, estimated from its text before it runs: the items of its outermost select list
+    (a `*` or `t.*` counts as `star`, every column the question can see), outside quotes and comments."""
+    var b = text.as_bytes()
+    var n = len(b)
+    var i = 0
+    var depth = 0
+    var at = -1  # the depth of the first SELECT
+    var items = 1
+    var stars = 0
+    while i < n:
+        var c = Int(b[i])
+        if c == 45 and i + 1 < n and Int(b[i + 1]) == 45:
+            while i < n and Int(b[i]) != 10:
+                i += 1
+            continue
+        if c == 47 and i + 1 < n and Int(b[i + 1]) == 42:
+            i += 2
+            while i + 1 < n and not (Int(b[i]) == 42 and Int(b[i + 1]) == 47):
+                i += 1
+            i += 2
+            continue
+        if c == 39 or c == 34 or c == 96:
+            i += 1
+            while i < n and Int(b[i]) != c:
+                i += 1
+            i += 1
+            continue
+        if c == 40:
+            depth += 1
+        elif c == 41:
+            depth -= 1
+        elif at >= 0 and depth == at and c == 44:
+            items += 1
+        elif at >= 0 and depth == at and c == 42:
+            stars += 1
+        elif is_word_byte(c):
+            var j = i
+            while j < n and is_word_byte(Int(b[j])):
+                j += 1
+            var w = String(text[byte = i : j]).upper()
+            if at < 0 and w == "SELECT":
+                at = depth
+            elif at >= 0 and depth == at and w == "FROM":
+                break
+            i = j
+            continue
+        i += 1
+    return max(1, items - stars + stars * max(star, 1))
 
 
 def public_threads() -> Int:

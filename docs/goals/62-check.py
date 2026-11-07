@@ -320,6 +320,10 @@ def m5():
                       ('CMD ["/app/scripts/web-start"]', "the start command")):
         if need not in code:
             probs.append(f"Dockerfile.web: no {why}")
+    if "playwright install --with-deps chromium" not in code or "PLAYWRIGHT_BROWSERS_PATH" not in code:
+        probs.append("Dockerfile.web: no Chromium for Export pack's PDFs (mojoui/pack_pdf.py)")
+    if "Export pack downloads" not in (ROOT / "scripts/image-check").read_text():
+        probs.append("scripts/image-check doesn't check that Export pack arrives from the container")
     if "HOST=0.0.0.0" not in code or "os.environ.get('PORT'" not in code:
         probs.append("Dockerfile.web: doesn't listen on 0.0.0.0 at $PORT, or its health check doesn't ask there")
     ws = (ROOT / "scripts/web-start").read_text()
