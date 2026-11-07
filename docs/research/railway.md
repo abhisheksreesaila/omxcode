@@ -249,3 +249,13 @@ export default defineRailway(() => {
 
 At per-second prices over a 30-day month the first two rows are $82.54 and $162.58; a 31-day month adds about
 3%. A 2 GB volume would add $0.30. CDN cache hits would lower egress. [pricing](https://railway.com/pricing) [cdn](https://docs.railway.com/networking/cdn)
+
+## The plan chosen for omxplorer (goal 62, 2026-11-06)
+
+Hobby: a replica may use up to 8 GB and 8 vCPU, billed on what it actually uses (sections 1–2 above). The server holds
+the shared starter (about 2.7 GB at rest) and each visitor adds 25–40 MB, so memory is set by the starter, and CPU by
+how many visitors play video and run questions at once. goal 62 M5 runs `scripts/web-start` held to these limits
+(systemd-run: MemoryMax, CPUQuota) and plays the story with this many visitors at once; the server's session cap
+(`MOJOUI_MAX_SESSIONS` in scripts/web-start) is that number.
+
+PLAN: MemoryMax=8G CPUQuota=800% visitors=10

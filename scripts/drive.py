@@ -129,7 +129,7 @@ CANVASES_DRAWN = """() => [...document.querySelectorAll('[data-kind=canvas]')].e
   if (!st || !m) return false;
   if (m.dataset.frames !== '0') return st.count > 0;  // playing: frames keep coming
   const ev = window.mojouiEvents;
-  return !st.busy && !(ev && (ev.sending || ev.queue.length)) && !st.updating && !st.again && !st.timer && String(st.drawn) === m.dataset.version;
+  return !st.busy && !(ev && (ev.sending || ev.queue.length)) && !st.updating && !st.again && !st.timer && !(window.mojouiPendingBusy && window.mojouiPendingBusy()) && String(st.drawn) === m.dataset.version;
 })"""
 
 

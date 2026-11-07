@@ -13,6 +13,7 @@ Run: pixi run python mojoui/hosts/web.py build/hello/web [port]
 """
 
 import ctypes
+import gzip
 import hashlib
 import os
 import importlib
@@ -305,6 +306,24 @@ EFFECTS_JS = r"""
       n.querySelectorAll && n.querySelectorAll('.mojoui-arrive').forEach(mark); } } })
     .observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
 })();
+// The rest of the screen, fetched once for the whole page (/pending): one request at a time, at most ten a second, and once
+// more after the last change. Every playing canvas used to ask on its own beside /wait's loop: dozens a second, which
+// crowded a slow link's six connections and left the pictures queued (goal 62 M4).
+(() => {
+  let out = null, last = 0, again = false, timer = 0;
+  window.mojouiPending = () => {
+    if (out || timer) { again = true; return out || Promise.resolve(); }
+    const wait = 100 - (performance.now() - last);
+    if (wait > 0) { timer = setTimeout(() => { timer = 0; window.mojouiPending(); }, wait); return Promise.resolve(); }
+    const root = document.getElementById('mojoui-root');
+    if (!root || !root.dataset.sid) return Promise.resolve();
+    last = performance.now(); again = false;
+    out = htmx.ajax('POST', `/pending/${root.dataset.sid}`, { values: { v: document.getElementById('mojoui-v').value }, swap: 'none', source: window.mojouiLane('effects') })
+      .catch(() => {}).finally(() => { out = null; if (again) window.mojouiPending(); });
+    return out;
+  };
+  window.mojouiPendingBusy = () => !!(out || timer || again);
+})();
 // Changes the page didn't ask for (goal 33, goal 62 M0): an effect's answer, a timer, a background job that ended, an
 // agent's step. The page always holds one /wait open; the server answers it only when changes are pending (then the page
 // fetches them, /pending, as frames do) or the tab is gone, so an idle page fetches nothing. Before goal 62 it listened
@@ -322,7 +341,7 @@ EFFECTS_JS = r"""
         try { said = await (await fetch(`/wait/${root.dataset.sid}`, { cache: 'no-store' })).text(); }
         catch (e) { await new Promise(ok => setTimeout(ok, 1000)); continue; }
         if (said.startsWith('gone')) { if (window.mojouiGone) window.mojouiGone(said.slice(5)); break; }
-        if (said === '1') await htmx.ajax('POST', `/pending/${root.dataset.sid}`, { values: { v: document.getElementById('mojoui-v').value }, swap: 'none', source: window.mojouiLane('effects') });
+        if (said === '1') await window.mojouiPending();
         else if (said !== '0') await new Promise(ok => setTimeout(ok, 1000));  // (an answer the page doesn't know: a proxy's error page)
       }
     } finally { running = false; }
@@ -383,6 +402,9 @@ PAGE_JS = r"""
     if (root && root.dataset.boot === '1') location.replace('/?boot=1' + location.hash);
     else if (/[?&]boot=1/.test(location.search)) history.replaceState(null, '', '/' + location.hash);
   });
+  // A page that goes away (closed, reloaded, left) ends its session at once, so a reload doesn't hold two (public mode
+  // counts them against its cap). A page brought back from the back-forward cache then finds it gone and says so.
+  addEventListener('pagehide', () => { const r = document.getElementById('mojoui-root'); if (r && r.dataset.sid) navigator.sendBeacon(`/bye/${r.dataset.sid}`); });
   // The server ended this tab (idle too long, or it restarted): the page says so, over everything, and offers a reload.
   window.mojouiGone = text => {
     let d = document.getElementById('mojoui-gone');
@@ -545,30 +567,8 @@ CANVAS_JS = r"""
   // element, because an answer can replace the element (a key that opens an editor rebuilds the screen) while
   // the keys typed after it are still waiting to go.
   const events = window.mojouiEvents = { queue: [], sending: false };
-  async function flushEvents() {
-    if (events.sending) return;
-    events.sending = true;
-    try {
-      while (events.queue.length) {
-        const { sid, ...e } = events.queue.shift();
-        if (e.number === KEY) early.inflight++;
-        try { await htmx.ajax('POST', `/e/${sid}`, { values: { ...e, v: shape() }, swap: 'none', source: document.body }); }
-        catch (err) { console.warn('mojoui: event not sent', err); }
-        finally { if (e.number === KEY) { early.inflight--; setTimeout(release, 50); } }
-        const div = document.querySelector(`[data-kind=canvas][data-node="${e.n}"]`);
-        if (div && div.mojoui) { div.mojoui.want = true; div.mojoui.pump(); }
-      }
-    } finally { events.sending = false; }
-  }
-  // A key pressed while nothing has the keyboard (the screen was just rebuilt under it) goes to the canvas that had it.
-  document.addEventListener('keydown', e => {
-    if (e.target !== document.body || early.typing || window.mojouiKeyCanvas === undefined) return;
-    const div = document.querySelector(`[data-kind=canvas][data-keys="1"][data-node="${window.mojouiKeyCanvas}"]`);
-    if (!div) return;
-    if (!div.mojoui) attach(div);  // (a screen still settling: its canvas isn't wired up yet)
-    const cv = div.querySelector('canvas');
-    e.preventDefault(); e.stopPropagation(); cv.focus({ preventScroll: true }); cv.dispatchEvent(new KeyboardEvent('keydown', e));
-  }, true);
+  const shownPics = new Map();  // canvas tag → {pic, bmp, w, h}: its last picture (40 at most)
+  const getFrame = (sid, n, params) => fetch(`/frame/${sid}/${n}?${new URLSearchParams(params)}`);
   window.mojouiAttach = attach;  // (a drag that outlives its canvas wires up the one that replaced it: MENU_JS's forwarder)
   // A drawn view's words (SET_TIP, in its meta): its tooltip, and its accessible name unless a label names it. After every
   // swap, not only when a frame arrives: words can change while the picture doesn't.
@@ -582,14 +582,71 @@ CANVAS_JS = r"""
     if (div.mojoui) return;
     const cv = div.querySelector('canvas'), g = cv.getContext('2d');
     const n = Number(div.dataset.node), sid = div.dataset.sid;
-    const st = div.mojoui = { want: true, busy: false, drawn: -1, skin: '', count: 0, times: [], queue: [], sending: false, updating: false };
+    const st = div.mojoui = { want: true, busy: false, drawn: -1, skin: '', count: 0, times: [], queue: [], sending: false, updating: false,
+                              cid: Math.random().toString(36).slice(2, 10), seq: 0, drawnSeq: 0 };
+    // A canvas the screen rebuilt (same tag) shows its last picture at once and asks with its digest: an unchanged
+    // picture then costs a 204, not the picture again (goal 62 M4: a new card rebuilt the screen over a slow link)
+    const kept = div.dataset.tag && shownPics.get(div.dataset.tag);
+    if (kept) { cv.width = kept.w; cv.height = kept.h; g.drawImage(kept.bmp, 0, 0); st.pic = kept.pic; }
     const meta = () => document.getElementById('n' + n + '-meta');
     const playing = () => { const m = meta(); return !!m && m.dataset.frames !== '0'; };
+    // One frame request; `seq` orders answers (a playing canvas keeps up to three out, so a slow link's round trips
+    // overlap): only an answer newer than the picture shown is drawn. Returns what the loop does next.
+    async function one(tick) {
+      const m = meta(), version = m ? m.dataset.version : '', skin = skinNow(), seq = ++st.seq;
+      const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;
+      const params = { w, h, scale: dpr, v: shape(), tick, still, have: st.pic || '', cid: st.cid };
+      const res = await getFrame(sid, n, params);
+      if (res.status === 204 && res.headers.get('X-Mojoui-Same') === '1') {
+        if (seq > st.drawnSeq) { st.drawn = version; st.skin = skin; }
+        if (res.headers.get('X-Mojoui-Pending') === '1') update();
+        return res.headers.get('X-Mojoui-Again') === '1' ? 'again' : 'ok';
+      }
+      if (res.status !== 200) {
+        if (res.headers.get('X-Mojoui-Pending') === '1') update();
+        if (res.headers.get('X-Mojoui-Gone') === '1' || res.status === 404) return 'gone';
+        return 'retry';
+      }
+      const pic = res.headers.get('X-Mojoui-Pic') || '';
+      const img = await createImageBitmap(await res.blob());
+      if (seq < st.drawnSeq) return 'ok';  // (an older answer overtaken by a newer one)
+      st.drawnSeq = seq; st.pic = pic;
+      if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
+      if (div.dataset.passthrough === '1') g.clearRect(0, 0, cv.width, cv.height);
+      g.drawImage(img, 0, 0);
+      if (div.dataset.tag) { shownPics.delete(div.dataset.tag); shownPics.set(div.dataset.tag, { pic, bmp: img, w: img.width, h: img.height });
+                             if (shownPics.size > 40) shownPics.delete(shownPics.keys().next().value); }
+      st.drawn = version; st.skin = skin; st.count++; st.times.push(performance.now());
+      if (st.times.length > 1200) st.times.splice(0, 600);
+      div.dataset.frame = `${st.count} ${cv.width}x${cv.height} ${r.width.toFixed(0)}x${r.height.toFixed(0)} ${dpr}`;
+      if (res.headers.get('X-Mojoui-Pending') === '1') update();
+      window.mojouiWords(div);
+      return res.headers.get('X-Mojoui-Again') === '1' ? 'again' : 'ok';
+    }
+    // Playing: requests paced by the display, at most three out at once.
+    async function play() {
+      const out = new Set();
+      let gone = false;
+      while (div.isConnected && playing() && !gone) {
+        while (out.size < 3 && playing() && !gone) {
+          const p = one(1).then(r => { if (r === 'gone') gone = true; else if (r === 'retry') return new Promise(ok => setTimeout(ok, 50)); })
+                          .catch(() => new Promise(ok => setTimeout(ok, 50))).finally(() => out.delete(p));
+          out.add(p);
+          await new Promise(ok => requestAnimationFrame(ok));
+        }
+        if (out.size) await Promise.race(out);
+      }
+      await Promise.allSettled([...out]);
+      return gone;
+    }
     async function pump() {
       if (st.busy) return;
       st.busy = true;
       try {
         while (div.isConnected && (st.want || playing())) {
+          if (playing()) { st.want = false; if (await play()) return; st.want = true; continue; }
           const tick = playing() ? 1 : 0, m = meta();
           if (tick) await new Promise(ok => requestAnimationFrame(ok));  // at most one frame per display refresh
           const version = m ? m.dataset.version : '', skin = skinNow();
@@ -597,7 +654,7 @@ CANVAS_JS = r"""
           const r = div.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
           const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
           const still = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0;  // (less motion: animations jump to their end)
-          const res = await fetch(`/frame/${sid}/${n}?w=${w}&h=${h}&scale=${dpr}&v=${shape()}&tick=${tick}&still=${still}&have=${st.pic || ''}`);
+          const res = await getFrame(sid, n, { w, h, scale: dpr, v: shape(), tick, still, have: st.pic || '', cid: st.cid });
           if (res.status === 204 && res.headers.get('X-Mojoui-Same') === '1') {  // (the picture it shows is still the one: nothing sent)
             st.drawn = version; st.skin = skin;
             if (res.headers.get('X-Mojoui-Pending') === '1') update();
@@ -614,6 +671,8 @@ CANVAS_JS = r"""
           }
           st.pic = res.headers.get('X-Mojoui-Pic') || '';
           const img = await createImageBitmap(await res.blob());
+          if (div.dataset.tag) { shownPics.delete(div.dataset.tag); shownPics.set(div.dataset.tag, { pic: st.pic, bmp: img, w: img.width, h: img.height });
+                                 if (shownPics.size > 40) shownPics.delete(shownPics.keys().next().value); }
           if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
           if (div.dataset.passthrough === '1') g.clearRect(0, 0, cv.width, cv.height);  // (its alpha: the last frame mustn't show through)
           g.drawImage(img, 0, 0);
@@ -629,14 +688,7 @@ CANVAS_JS = r"""
     }
     // The rest of the screen (labels the app changed while drawing): fetched alongside the
     // frames, at most ~10 times a second, and always once more after the last change.
-    function update() {
-      if (st.updating) { st.again = true; return; }
-      const wait = 100 - (performance.now() - (st.updated || 0));
-      if (wait > 0) { st.again = true; if (!st.timer) st.timer = setTimeout(() => { st.timer = 0; update(); }, wait); return; }
-      st.updating = true; st.again = false; st.updated = performance.now();
-      htmx.ajax('POST', `/pending/${sid}`, { values: { v: shape() }, swap: 'none', source: window.mojouiLane('canvas-' + n) })
-        .finally(() => { st.updating = false; if (st.again) update(); });
-    }
+    const update = () => window.mojouiPending();  // (the page's one /pending: see EFFECTS_JS)
     st.pump = pump;
     st.sendKey = (k, m) => send(KEY, 0, 0, m, 0, 1, k);
     // pressure: PointerEvent.pressure on PRESS, PAN and RELEASE, from a pen only (0: the device has none; a mouse
@@ -839,6 +891,10 @@ class Scrub:
                     near = body[max(0, m.start() - 60):m.end() + 40].decode(errors="replace").replace("\n", " ")
                     print(f"SCRUB: {scope.get('path', '').split('/')[1][:12]}: cut a server path from the answer: …{near}…", flush=True)
                 headers = [(k, v) for k, v in start["msg"].get("headers", []) if k.lower() != b"content-length"]
+                accept = dict((k.lower(), v) for k, v in scope.get("headers", [])).get(b"accept-encoding", b"")
+                if len(cut) > 1024 and b"gzip" in accept and not any(k.lower() == b"content-encoding" for k, _ in headers):
+                    cut = gzip.compress(cut, 5)  # (a screen's HTML is 100+ KB: a slow link's seconds, goal 62 M4)
+                    headers += [(b"content-encoding", b"gzip"), (b"vary", b"Accept-Encoding")]
                 headers.append((b"content-length", str(len(cut)).encode()))
                 await send(dict(start["msg"], headers=headers))
                 return await send({"type": "http.response.body", "body": cut})
@@ -1667,6 +1723,14 @@ def make_app(module_dir):
     if IDLE_S > 0:
         threading.Thread(target=reap, daemon=True, name="mojoui-idle").start()
 
+    @app.post("/bye/{sid}")
+    def bye(sid: str):
+        """The page went away (pagehide's beacon): its session ends now, not when it would have idled out."""
+        s = sessions.get(sid)
+        if s is not None:
+            end_session(sid, s, "")
+        return Response(status_code=204)
+
     @app.get("/health")
     def health():
         """Is the server up, and how full (a platform's health check; no page, no session, no paths)."""
@@ -2076,7 +2140,8 @@ def make_app(module_dir):
                 return ""  # from an older screen (e.g. a double click on a row that's gone): ignore
             source = s.nodes[n]
             s.last_active = time.monotonic()
-            if PUBLIC and second == 1 and takes_path(source):  # (a picker's, saver's or drop's path: only the host makes it)
+            if PUBLIC and second != 0 and takes_path(source):  # (a picker's, saver's or drop's path: only the host makes it; any second
+                # but 0 reaches its second message: 2, Escape for a field, is a picker's pick too)
                 print("REFUSED: a path for a file control sent as text", flush=True)
                 return ""
             if source["kind"] == TOGGLE:
@@ -2538,7 +2603,7 @@ def make_app(module_dir):
             return changes(s, sid, d, n, str(path), 0)
 
     @app.get("/frame/{sid}/{n}")
-    def frame(sid: str, n: int, w: int = 0, h: int = 0, scale: float = 1, v: int = -1, tick: int = 0, still: int = 0, have: str = ""):
+    def frame(sid: str, n: int, w: int = 0, h: int = 0, scale: float = 1, v: int = -1, tick: int = 0, still: int = 0, have: str = "", cid: str = ""):
         """One canvas frame as a JPEG, painted by the app at w × h pixels. With tick=1 (the
         canvas asked for frames), a frame event goes to the app first. Changes to the rest of
         the screen wait in the session until the page asks for /pending. No frame: 204 with X-Mojoui-Retry (the screen
@@ -2575,9 +2640,19 @@ def make_app(module_dir):
         # The picture the page already shows (`have`, the digest it was sent with) isn't sent again: a video drawn at the
         # display's rate changes 15 times a second, and each unchanged picture was encoded and sent anyway (goal 62 M4)
         pic = f"{zlib.crc32(rgba):08x}{r['width']:x}{r['height']:x}"
-        if have and have == pic:
+        # (a playing canvas keeps a few requests out: one already sent this picture to this canvas element, `cid`)
+        sent = getattr(sess, "sent_pics", None)
+        if sent is None:
+            sent = sess.sent_pics = OrderedDict()
+        key = (n, cid[:16])
+        if (have and have == pic) or (cid and sent.get(key) == pic):
             return Response(status_code=204, headers={"Cache-Control": "no-store", "X-Mojoui-Same": "1", "X-Mojoui-Pending": "1" if pending else "0",
                                                       "X-Mojoui-Again": "1" if r.get("again") else "0"})
+        if cid:
+            sent[key] = pic
+            sent.move_to_end(key)
+            while len(sent) > 64:
+                sent.popitem(last=False)
         out = io.BytesIO()
         picture = Image.frombuffer("RGBA", (r["width"], r["height"]), rgba, "raw", "RGBA", 0, 1)
         clear = sess.nodes[n]["kind"] == CANVAS and sess.nodes[n]["size"] == 2 if 0 <= n < len(sess.nodes) else False

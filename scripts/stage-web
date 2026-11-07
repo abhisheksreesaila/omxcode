@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# The hosted copy's build folder (goal 62): this repo at its last commit (git archive: nothing uncommitted, no .pixi, no
+# build/), the robot starter as starter/ (scripts/starter.py makes it), and Dockerfile.web as its Dockerfile. Both
+# scripts/image-check (a local image) and scripts/deploy-railway (`railway up` of this folder) start here.
+#   scripts/stage-web [folder]        # default build/deploy/app; prints the folder
+set -euo pipefail
+cd "$(dirname "$0")/.."
+OUT="${1:-build/deploy/app}"
+STARTER="${OMX_STARTER_SRC:-build/starter/robot}"
+[ -f "$STARTER/story.json" ] || { echo "no starter in $STARTER: pixi run python scripts/starter.py --from <goal 47's full set> --to $STARTER" >&2; exit 1; }
+rm -rf "$OUT" && mkdir -p "$OUT"  # (this script's own folder, made by its last run)
+git archive --format=tar HEAD | tar -x -C "$OUT"
+cp Dockerfile.web "$OUT/Dockerfile"
+cp -rL "$STARTER" "$OUT/starter" && chmod -R u+w "$OUT/starter"
+printf '.git\nbuild\n.pixi\n' > "$OUT/.dockerignore"
+echo "$OUT ($(du -sh "$OUT" | cut -f1), commit $(git rev-parse --short HEAD))"

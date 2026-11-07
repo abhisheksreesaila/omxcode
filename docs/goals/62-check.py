@@ -182,16 +182,16 @@ def m1():
     if before != after:
         changed = [k for k in set(before) | set(after) if before.get(k) != after.get(k)]
         probs.append(f"the starter changed: {changed[:5]}")
-    rss = [m["rss_mb"] for _, m in mems]
+    rss = [m["mem_mb"] for _, m in mems]  # (RSS + swap: the process's memory, wherever the kernel keeps it)
     adds = [rss[i + 1] - rss[i] for i in range(1, len(rss) - 1)]  # (tabs 2 and 3: each further tab)
     if not adds or max(adds) >= 300:
-        probs.append(f"a further tab adds {adds} MB (RSS {rss})")
+        probs.append(f"a further tab adds {adds} MB (RSS + swap {rss})")
     (OUT / "m1/memory.json").write_text(json.dumps(mems, indent=1))
     q1 = results[0].get("timings", {}).get("question1", {}) if results else {}
     return (not probs), ("; ".join(probs)[:1500] if probs else
                          f"one click → fleet 63,344 + telemetry 16,847,616 + links, clips, paper in {results[0]['timings'].get('start_s')} s; "
                          f"{len(story.get('questions', []))} questions with their SQL, regrasps 2,997 in {q1.get('clickToRowsMs')} ms; "
-                         f"RSS {rss} MB: tabs 2 and 3 add {adds} MB; starter hashes unchanged ({len(before)} files); DROID credited")
+                         f"RSS + swap {rss} MB: tabs 2 and 3 add {adds} MB; starter hashes unchanged ({len(before)} files); DROID credited")
 
 
 # ---------------------------------------------------------------- M2

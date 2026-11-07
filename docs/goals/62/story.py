@@ -24,17 +24,26 @@ TRUTH = {"fleet": "63,344", "telemetry": "16,847,616", "regrasps": "2,997", "fas
 
 # Records when a Board card whose text matches re1 first shows up, and when its text first also matches re2.
 WATCH = """([re1, re2]) => {
-  const a = new RegExp(re1), b = new RegExp(re2); window.__watch = {appeared: null, filled: null};
-  const check = () => { for (const o of document.querySelectorAll('[data-kind=object]')) { const t = o.textContent || '';
+  const a = new RegExp(re1), b = new RegExp(re2); window.__watch = {appeared: null, filled: null, armed: false};
+  const check = () => { if (!window.__watch.armed) return;  // (only what changes after the click counts)
+    for (const o of document.querySelectorAll('[data-kind=object]')) { const t = o.textContent || '';
       if (a.test(t)) { if (window.__watch.appeared === null) window.__watch.appeared = performance.now();
                        if (b.test(t) && window.__watch.filled === null) window.__watch.filled = performance.now(); } } };
-  check(); new MutationObserver(check).observe(document.body, {childList: true, subtree: true, characterData: true});
+  document.addEventListener('click', () => { window.__watch.armed = true; }, {capture: true, once: true});
+  new MutationObserver(check).observe(document.body, {childList: true, subtree: true, characterData: true});
 }"""
 
 # 8 s (by default) of one canvas: its pixels hashed every 15 ms (a 48x27 copy) → distinct pictures and changes a second.
 SAMPLE = """async ([sel, ms]) => {
-  const t0 = performance.now(), off = document.createElement('canvas'); off.width = 48; off.height = 27;
+  const off = document.createElement('canvas'); off.width = 48; off.height = 27;
   const g = off.getContext('2d', {willReadFrequently: true}); let distinct = new Set(), last = '', changes = 0;
+  const hash = () => { const v = document.querySelector(sel), cv = v && v.querySelector('canvas'); if (!cv || !cv.width) return '';
+    g.drawImage(cv, 0, 0, 48, 27); const d = g.getImageData(0, 0, 48, 27).data; let h = 0;
+    for (let i = 0; i < d.length; i += 4) h = (h * 31 + d[i] + d[i + 1] * 7 + d[i + 2] * 13) >>> 0; return String(h); };
+  // (playing: from its first new picture, so the start-up after Play is its own number, startMs)
+  const tc = performance.now(), first = hash();
+  while (hash() === first && performance.now() - tc < 5000) await new Promise(r => setTimeout(r, 10));
+  const t0 = performance.now(), startMs = +(t0 - tc).toFixed(0);
   const div0 = document.querySelector(sel), c0 = div0 && div0.mojoui ? div0.mojoui.count : 0;
   while (performance.now() - t0 < ms) {
     const v = document.querySelector(sel), cv = v && v.querySelector('canvas');
@@ -44,7 +53,7 @@ SAMPLE = """async ([sel, ms]) => {
     await new Promise(r => setTimeout(r, 15));
   }
   const secs = (performance.now() - t0) / 1000, div1 = document.querySelector(sel);
-  return {distinct: distinct.size, changes, changesPerSec: +(changes / secs).toFixed(1), secs: +secs.toFixed(2),
+  return {distinct: distinct.size, changes, changesPerSec: +(changes / secs).toFixed(1), secs: +secs.toFixed(2), startMs,
           drawsPerSec: +(((div1 && div1.mojoui ? div1.mojoui.count : 0) - c0) / secs).toFixed(1)};
 }"""
 
@@ -124,34 +133,55 @@ class Visitor:
         ok = bool(piv) and "lab" in piv[0] and "outcome" in piv[0] and "AUTOLab" in piv[0]
         return self.beat("pivot by lab", ok, piv[0] if piv else "no pivot card")
 
-    def video(self, seconds=8.0):
+    def video(self, seconds=6.0):
         page = self.page
         vsel = "[data-kind=canvas][data-tag=video]"
         page.wait_for_selector(vsel, timeout=30000)
-        play = page.locator("[data-kind=object][data-tag^=video] button[aria-label=Play], [data-kind=object][data-tag^=video] button", has_text=re.compile("^$|play", re.I))
-        btn = page.locator("button[aria-label='Play']").first
-        if not btn.count():
-            btn = play.first
+        card = page.locator("[data-kind=object][data-tag^=video]").first
+        # (the story's opening plays the clip once, as following a row does: from the start again, as a person would:
+        # pause it if it plays, tap the start of the seek bar, then Play)
+        pause = card.locator("button", has_text=re.compile(r"^\s*pause\s*$", re.I))
+        if pause.count():
+            pause.first.click()
+            try_settle(page)
+        seek = card.locator("[data-kind=canvas][data-tag=seek]").first
+        if seek.count():
+            box = seek.bounding_box()
+            page.mouse.click(box["x"] + 1, box["y"] + box["height"] / 2)
+            try_settle(page)
+        btn = card.locator("button", has_text=re.compile(r"^\s*play\s*$", re.I)).first
         t_click = time.perf_counter()
         btn.click()
-        page.wait_for_timeout(400)
         t0 = time.perf_counter()
         n0 = len(self.net.events)
+        node0 = page.get_attribute(vsel, "data-node")
+        fs0 = page.evaluate("() => JSON.parse(JSON.stringify(window.mojouiFrameStats || {}))")
         sample = page.evaluate(SAMPLE, [vsel, int(seconds * 1000)])
+        fs1 = page.evaluate("() => JSON.parse(JSON.stringify(window.mojouiFrameStats || {}))")
         frames = [e for e in self.net.events[n0:] if e[1] == "response" and "/frame/" in e[2]]
         node = page.get_attribute(vsel, "data-node")
         vframes = [e for e in frames if f"/frame/" in e[2] and f"/{node}?" in e[2]]
         vbytes = sum(e[3] for e in vframes)  # (every answer for the video canvas: pictures, and "same" answers' headers)
         pictures = [e for e in vframes if e[4] == 200]
-        # the new pictures' bytes: each distinct picture shown once, at the average size of an answer that carried one
         per = (sum(e[3] for e in pictures) / len(pictures)) if pictures else 0
-        new_bytes = per * sample["distinct"]
+        # batched answers (POST /frames: every playing canvas's pictures in one): the page counts each canvas's share; the
+        # batches' own HTTP bytes are shared out by those shares
+        d = lambda k: {f: fs1.get(k, {}).get(f, 0) - fs0.get(k, {}).get(f, 0) for f in ("answers", "bytes", "pictures", "pictureBytes")}
+        mine, every = d(node0), {f: sum(d(k)[f] for k in fs1) for f in ("answers", "bytes", "pictures", "pictureBytes")}
+        batches = [e for e in self.net.events[n0:] if e[1] == "response" and "/frames/" in e[2]]
+        if mine["answers"]:
+            overhead = max(0, sum(e[3] for e in batches) - every["bytes"])
+            vbytes += mine["bytes"] + overhead * (mine["bytes"] / every["bytes"] if every["bytes"] else 0)
+            per = mine["pictureBytes"] / mine["pictures"] if mine["pictures"] else per
+            pictures = pictures + [None] * mine["pictures"]
+            vframes = vframes + [None] * mine["answers"]
+        new_bytes = per * sample["distinct"]  # (each distinct picture shown once, at the average size of one picture)
         ratio = (vbytes / new_bytes) if new_bytes else None
         sample.update({"frameAnswers": len(vframes), "pictureAnswers": len(pictures), "videoBytes": vbytes, "allFrameBytes": sum(e[3] for e in frames),
                        "bytesPerNewPictureRatio": round(ratio, 2) if ratio else None, "secsSinceClick": round(t0 - t_click, 2)})
         self.R["timings"]["video"] = sample
         try:
-            page.locator("button[aria-label='Pause']").first.click(timeout=3000)
+            card.locator("button", has_text=re.compile(r"^\s*pause\s*$", re.I)).first.click(timeout=3000)
         except Exception:
             pass
         try_settle(page)
@@ -167,12 +197,12 @@ class Visitor:
         run = page.locator(f"[data-tag=questions] button[data-tag=run-question-{k}]").first
         run.wait_for(timeout=30000)
         page.evaluate(WATCH, [rf"\b{name}\b", rows_re])
-        t0c = page.evaluate("() => performance.now()")
         w0 = time.perf_counter()
         run.click()
         page.wait_for_function("() => window.__watch.filled !== null", timeout=300000)
         wall = time.perf_counter() - w0
         w = page.evaluate("() => window.__watch")
+        t0c = page.evaluate("() => window.__probe.clicks[window.__probe.clicks.length - 1]")  # (the click itself, in the page)
         try_settle(page)
         ms = round(w["filled"] - t0c, 1)
         t = {"clickToRowsMs": ms, "cardAppearedMs": round(w["appeared"] - t0c, 1) if w["appeared"] else None, "wallMs": round(wall * 1000)}

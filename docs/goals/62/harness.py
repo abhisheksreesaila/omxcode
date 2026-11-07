@@ -56,7 +56,7 @@ class Server:
             e["OMX_STARTER"] = str(starter)
         e.update(env or {})
         self.env = e
-        cmd = [sys.executable, str(ROOT / "mojoui/hosts/web.py"), str(module), str(self.port)]
+        cmd = [sys.executable, os.environ.get("G62_WEB", str(ROOT / "mojoui/hosts/web.py")), str(module), str(self.port)]
         if start:
             e["MOJOUI_MODULE"] = str(module)
             e["MOJOUI_PYTHON"] = sys.executable
@@ -117,7 +117,9 @@ class Server:
         hwm = int(re.search(r"VmHWM:\s+(\d+)", st).group(1)) / 1024
         roll = Path(f"/proc/{pid}/smaps_rollup").read_text()
         pss = int(re.search(r"^Pss:\s+(\d+)", roll, re.M).group(1)) / 1024
-        out = {"rss_mb": round(rss), "peak_rss_mb": round(hwm), "pss_mb": round(pss)}
+        swap = int(re.search(r"VmSwap:\s+(\d+)", st).group(1)) / 1024
+        # (mem_mb: RSS + swap: this machine is shared, and under pressure the kernel swaps the idle starter out)
+        out = {"mem_mb": round(rss + swap), "rss_mb": round(rss), "swap_mb": round(swap), "peak_rss_mb": round(hwm), "pss_mb": round(pss)}
         cg = cgroup_of(pid)
         if self.unit and cg:
             for k, f in (("cgroup_mb", "memory.current"), ("cgroup_peak_mb", "memory.peak")):
@@ -161,7 +163,7 @@ CANVASES_DRAWN = """() => [...document.querySelectorAll('[data-kind=canvas]')].e
   if (!st || !m) return false;
   if (m.dataset.frames !== '0') return st.count > 0;
   const ev = window.mojouiEvents;
-  return !st.busy && !(ev && (ev.sending || ev.queue.length)) && !st.updating && !st.again && !st.timer && String(st.drawn) === m.dataset.version;
+  return !st.busy && !(ev && (ev.sending || ev.queue.length)) && !st.updating && !st.again && !st.timer && !(window.mojouiPendingBusy && window.mojouiPendingBusy()) && String(st.drawn) === m.dataset.version;
 })"""
 
 # In-page probes: htmx swaps settled, clicks and changes (performance.now()).

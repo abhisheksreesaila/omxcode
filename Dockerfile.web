@@ -1,0 +1,39 @@
+# omxplorer's hosted copy (goal 62, docs/web-public.md): the web host in public mode with the robot starter baked in,
+# CPU only. Built from the folder scripts/stage-web makes (this repo at its last commit, plus build/starter/robot as
+# starter/, plus this file as Dockerfile); scripts/image-check builds and plays the story against it, and
+# scripts/deploy-railway sends it to Railway. Listens on $PORT (8080 if unset), answers GET /health, logs on stdout.
+# Runs as a user that owns nothing in /app or /data (app and data read-only); it writes only under /tmp.
+
+# ---- build: the repo's locked pixi environment (unchanged: the one every check here runs on), and the Mojo module,
+# built at /app (its library path is absolute: the runtime image keeps the same paths)
+FROM ghcr.io/prefix-dev/pixi:0.80.0 AS build
+WORKDIR /app
+COPY pixi.toml pixi.lock ./
+RUN pixi install --locked -e default
+COPY . .
+RUN rm -rf starter && pixi run bash scripts/build.sh omxplorer web
+
+# ---- run
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin omx
+COPY --from=build /app /app
+COPY starter /data/robot
+RUN rm -rf /app/starter && chmod -R a-w /app /data && mkdir -p /tmp/omxcode /tmp/home && chown omx /tmp/omxcode /tmp/home
+WORKDIR /app
+USER 10001
+ENV MOJOUI_PUBLIC=1 \
+    OMX_STARTER=/data/robot \
+    HOST=0.0.0.0 \
+    HOME=/tmp/home \
+    OMXCODE_UPLOADS=/tmp/omxcode/uploads \
+    OMX_DOCUMENTS=/tmp/omxcode/documents \
+    OMX_CONFIG=/tmp/omxcode/config \
+    MOJOUI_PYTHON=/app/.pixi/envs/default/bin/python \
+    PATH=/app/.pixi/envs/default/bin:/usr/local/bin:/usr/bin:/bin \
+    PYTHONDONTWRITEBYTECODE=1
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s \
+    CMD ["/app/.pixi/envs/default/bin/python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '8080'), timeout=4)"]
+CMD ["/app/scripts/web-start"]

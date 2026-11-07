@@ -97,36 +97,63 @@ def post(url, fields, files=None):
     return get(url, urllib.parse.urlencode(fields).encode(), {"Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true"})
 
 
-def crafted_routes(P, base, sid, v, nodes, paths, where):
-    """Every route that takes text, each control on the screen, each probe path."""
-    texts = []
-    for n in nodes:
-        for path in paths:
-            for second in (0, 1, 2):
-                _, _, body = post(f"{base}e/{sid}", {"n": n, "v": v, "second": second, "text": path, "number": 0})
-                texts.append(body.decode(errors="replace"))
-    P.expect_untouched(f"/e on {where}: {len(nodes)} controls × {len(paths)} paths × second 0/1/2", texts)
-    texts = []
-    for n in nodes:
-        texts.append(post(f"{base}save/{sid}", {"n": n, "v": v})[2].decode(errors="replace"))
-    P.expect_untouched(f"/save on {where}: each control", texts)
+# Crafted requests sent from inside the page (htmx, no swap target: the answers' out-of-band parts still update the
+# page), so each one names the screen as it is now: a press that rebuilds the screen moves `v` on, and urllib posts with
+# the first `v` would all be ignored as "from an older screen", passing while proving nothing. second=1 first: the
+# value a picker, saver or drop target hands the app; then 2 (Escape) and 0 (presses, which move between screens).
+CRAFT = """async ([paths, route, most]) => {
+  let sent = 0;
+  const nodesNow = () => [...new Set([...document.querySelectorAll('[hx-vals]')].map(e => { try { return JSON.parse(e.getAttribute('hx-vals')).n } catch (x) { return null } })
+                                     .filter(n => typeof n === 'number'))];
+  for (const second of (route === 'e' ? [1, 2, 0] : [0])) for (const path of (route === 'e' ? paths : [''])) for (const n of nodesNow()) {
+    const root = document.getElementById('mojoui-root');
+    if (!root || !root.dataset.sid || sent >= most) return sent;
+    const values = {n, v: document.getElementById('mojoui-v').value, second, text: path, number: 0};
+    try { await htmx.ajax('POST', `/${route}/${root.dataset.sid}`, {values, swap: 'none', source: document.body}); } catch (e) {}
+    sent++;
+  }
+  return sent;
+}"""
+
+WRITTEN = ("written.csv", "written.omx", "written")
+
+
+def crafted_routes(P, page, base, paths, where, texts):
+    """Every route that takes text, each control on the screen as it changes, each probe path; texts: every answer the
+    page got meanwhile (a page.on('response') list), scanned for the secret."""
+    n0 = len(texts)
+    sent = page.evaluate(CRAFT, [paths, "e", 4000])
+    try_settle(page)
+    P.expect_untouched(f"/e on {where}: {sent} crafted requests (every control as the screens changed, {len(paths)} paths, second 1/2/0)", texts[n0:])
+    page.goto(base)
+    settle(page)
+    n0 = len(texts)
+    sent = page.evaluate(CRAFT, [paths, "save", 400])
+    try_settle(page)
+    P.expect_untouched(f"/save on {where}: {sent} crafted requests", texts[n0:])
+    page.goto(base)
+    settle(page)
+    st = page_state(page)
+    sid, v = st["sid"], st["v"]
+    out = []
     for path in paths:
-        texts += [post(f"{base}{route}/{sid}", f)[2].decode(errors="replace") for route, f in (
+        out += [post(f"{base}{route}/{sid}", f)[2].decode(errors="replace") for route, f in (
             ("w", {"tag": "omx-probe", "id": 0, "name": "open", "data": json.dumps({"path": path})}),
             ("reply", {"seq": 1, "data": json.dumps({"path": path}), "error": path}),
             ("describe", {"tag": "omx-probe", "id": 0, "data": json.dumps({"path": path})}),
             ("jslog", {"message": path, "source": path}),
             ("pending", {"v": v}), ("resize", {"w": 900, "h": 700}), ("appearance", {"dark": 1}))]
-        texts.append(get(f"{base}spot/{sid}/0?name=" + urllib.parse.quote(path))[2].decode(errors="replace"))
-        texts.append(get(f"{base}download/{sid}/" + urllib.parse.quote(path, safe=""))[2].decode(errors="replace"))
-        texts.append(get(f"{base}img/{sid}/0")[2].decode(errors="replace"))
-    P.expect_untouched(f"/w, /reply, /describe, /jslog, /spot, /download, /img on {where}", texts)
-    # uploads whose file name walks out of the visitor's folder
+        out.append(get(f"{base}spot/{sid}/0?name=" + urllib.parse.quote(path))[2].decode(errors="replace"))
+        out.append(get(f"{base}download/{sid}/" + urllib.parse.quote(path, safe=""))[2].decode(errors="replace"))
+        out.append(get(f"{base}img/{sid}/0")[2].decode(errors="replace"))
+    P.expect_untouched(f"/w, /reply, /describe, /jslog, /spot, /download, /img on {where}", out)
+    # uploads whose file name walks out of the visitor's folder, to the page's own picker and to every node
+    picker = page.evaluate("() => { const i = document.querySelector('input[data-kind=picker]'); return i ? JSON.parse(i.getAttribute('hx-vals')).n : -1 }")
     for route in ("upload", "dropfile"):
-        for n in nodes[:40]:
+        for n in sorted({picker, *st["nodes"][:30]}):
             for name in ("../../../m2-probe/written.csv", str(P.dir / "written.csv"), "..%2f..%2fwritten.csv", "/etc/written.csv"):
                 post(f"{base}{route}/{sid}?n={n}&v={v}", {"n": n, "v": v}, files=[(name, b"a,b\n1,2\n")])
-    wrote = list(P.dir.glob("written*")) + [p for p in (Path("/etc/written.csv"),) if p.exists()]
+    wrote = [str(P.dir / w) for w in WRITTEN if (P.dir / w).exists()] + [p for p in ("/etc/written.csv",) if Path(p).exists()]
     P.say(not wrote, f"/upload and /dropfile with file names that walk out ({where}): " + (f"wrote {wrote}" if wrote else "every file stayed in its visitor's folder"))
     P.expect_untouched(f"uploads named outside ({where})")
 
@@ -140,7 +167,7 @@ def type_and_run(page, field_sel, text, button_re):
 def run_all(out):
     out = Path(out)
     P = Probe(out)
-    srv = Server(out, public=True, env={"OMXCODE_UPLOAD_MAX": str(1 << 20), "OMXCODE_VISITOR_MAX": str(3 << 20),
+    srv = Server(out, public=True, env={"OMXCODE_UPLOAD_MAX": str(1 << 20), "OMXCODE_VISITOR_MAX": str(3 << 20), "MOJOUI_MAX_SESSIONS": "50",
                                         "MOJOUI_AGENT_SOCKET": str(out.parent / "m2-agent.sock"), "MOJOUI_DEV": "1", "MOJOUI_DEV_TOKEN": "probe"})
     roots = [str(ROOT), str(G47), str(srv.out), str(srv.uploads), str(srv.home), str(Path.home()), str(P.dir), "/home/"]
     from harness import STARTER
@@ -168,30 +195,35 @@ def run_all(out):
             ctx = b.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
             page = ctx.new_page()
             page.add_init_script(PROBE)
+            texts1 = []
+            page.on("response", lambda r: texts1.append(r.text()) if "image" not in r.headers.get("content-type", "") and r.request.method != "HEAD" else None)
             page.goto(srv.url)
             settle(page)
-            st = page_state(page)
-            crafted_routes(P, srv.url, st["sid"], st["v"], st["nodes"], paths, "the Start screen")
+            crafted_routes(P, page, srv.url, paths, "the Start screen", texts1)
             page.goto(srv.url)
             settle(page)
             st = page_state(page)
             mine = srv.uploads / st["sid"]
-            # per file: one byte past 1 MB
-            r = post(f"{srv.url}upload/{st['sid']}?n={st['nodes'][0]}&v={st['v']}", {}, files=[("big.csv", b"x" * ((1 << 20) + 1))])
-            kept = sum(f.stat().st_size for f in mine.rglob("*") if f.is_file()) if mine.exists() else 0
-            P.say(kept <= 64 and b"larger than" in r[2], f"an upload one byte over the per-file cap (1 MB): refused, {kept} bytes kept")
-            pick = page.locator("input[type=file]").first
+            # per file: one byte past 1 MB, to the page's own picker
+            said = page.evaluate("""async () => { const i = document.querySelector('input[data-kind=picker]'), root = document.getElementById('mojoui-root');
+                const f = new FormData(); f.append('n', JSON.parse(i.getAttribute('hx-vals')).n); f.append('v', document.getElementById('mojoui-v').value);
+                f.append('file', new Blob([new Uint8Array(1048577)]), 'big.csv');
+                return await (await fetch(`/upload/${root.dataset.sid}`, {method: 'POST', body: f})).text(); }""")
+            kept = sum(f.stat().st_size for f in mine.rglob("*") if f.is_file() and f.name != ".owner") if mine.exists() else 0
+            P.say(kept == 0 and "larger than" in said, f"an upload one byte over the per-file cap (1 MB): {'refused' if 'larger than' in said else 'not refused'}, {kept} bytes kept")
             sizes = []
-            for k in range(4):  # (0.9 MB each: the fourth would take this visitor past 3 MB)
+            for k in range(4):  # (0.9 MB each, through the picker: the fourth would take this visitor past 3 MB)
                 f = out / f"part{k}.csv"
-                f.write_text("a,b\n" + "1,2\n" * (230000))
-                pick.set_input_files(str(f))
+                f.write_text("a,b\n" + "1,2\n" * 230000)
+                page.locator("input[data-kind=picker]").first.set_input_files(str(f))
                 try_settle(page)
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(400)
                 sizes.append(sum(x.stat().st_size for x in mine.rglob("*") if x.is_file() and x.name != ".owner") if mine.exists() else 0)
-                page.goto(srv.url) if k == 1 else None
-            body = page.inner_text("body")
-            P.say(max(sizes) <= 3 << 20, f"uploads past the per-visitor cap (3 MB): kept {[round(s / 2**20, 2) for s in sizes]} MB")
+                back = page.locator("button", has_text=re.compile(r"^\s*Back\s*$"))
+                if back.count():  # (the Import step: back to the Start screen, in the same session)
+                    back.first.click()
+                    try_settle(page)
+            P.say(max(sizes) <= 3 << 20 and len([x for x in sizes if x]) >= 1, f"uploads past the per-visitor cap (3 MB): kept {[round(x / 2**20, 2) for x in sizes]} MB")
             # visitor 1 opens a file of its own, named so a later visitor would recognise it
             secret = out / "visitor-one-secret.csv"
             secret.write_text("a,b\n1,2\n")
@@ -227,8 +259,9 @@ def run_all(out):
             R = S.play(page2, out / "visitor-2", Net(page2), pack=True)
             bad = [f"{k}: {v['note'][:120]}" for k, v in R["beats"].items() if not v["ok"]]
             P.say(not bad, "the story, played with every response scanned: " + ("; ".join(bad) if bad else "every beat"))
-            st = page_state(page2)
-            crafted_routes(P, srv.url, st["sid"], st["v"], st["nodes"], paths, "the story's screen")
+            texts2 = []
+            page2.on("response", lambda r: texts2.append(r.text()) if "image" not in r.headers.get("content-type", "") else None)
+            crafted_routes(P, page2, srv.url, paths, "the story's screen", texts2)
             page2.goto(srv.url)  # (the crafted requests pressed every button: a fresh tab for the Script window and SQL)
             settle(page2)
             page2.locator("button", has_text=re.compile("Start the robot story")).first.click()

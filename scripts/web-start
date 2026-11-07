@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# The hosted copy's start command (goal 62): Dockerfile.web's CMD, and what docs/goals/62-check.py M5 runs under the
+# Railway plan's memory and CPU. Public mode, CPU only, the robot starter; every setting can be overridden by the
+# environment (Railway variables).
+#   PORT=8080 OMX_STARTER=build/starter/robot scripts/web-start
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export MOJOUI_PUBLIC=1
+export HOST="${HOST:-0.0.0.0}"
+export PORT="${PORT:-8080}"
+# the most visitors at once: what goal 62 M5 measured on the plan's limits (docs/research/railway.md, its PLAN: line)
+export MOJOUI_MAX_SESSIONS="${MOJOUI_MAX_SESSIONS:-10}"
+export MOJOUI_IDLE_S="${MOJOUI_IDLE_S:-900}"  # a tab with no input for 15 minutes ends (its files go)
+export MOJOUI_WAIT_S="${MOJOUI_WAIT_S:-240}"  # Railway closes a request after 5 minutes without data: /wait renews within 4
+export OMX_STARTER="${OMX_STARTER:-/data/robot}"
+export OMXCODE_UPLOADS="${OMXCODE_UPLOADS:-/tmp/omxcode/uploads}"
+export OMXCODE_UPLOAD_MAX="${OMXCODE_UPLOAD_MAX:-209715200}"  # 200 MB a file
+export OMXCODE_VISITOR_MAX="${OMXCODE_VISITOR_MAX:-524288000}"  # 500 MB a visitor
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-}"  # CPU only
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-4}"  # (fewer malloc arenas: freed memory goes back sooner on a many-threaded server)
+export PYTHONUNBUFFERED=1
+exec "${MOJOUI_PYTHON:-python}" mojoui/hosts/web.py "${MOJOUI_MODULE:-build/omxplorer/web}"
