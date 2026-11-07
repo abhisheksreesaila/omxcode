@@ -313,3 +313,36 @@ def cpu_count() -> Int:
 def read_fd(fd: Int, addr: Int, n: Int) -> Int:
     var f = _sym("read")
     return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t]()[](c_int(fd), addr, c_size_t(n)))
+
+
+def nofile_limit() -> Tuple[Int, Int]:
+    """getrlimit(RLIMIT_NOFILE): (soft, hard) open-file limits ((0, 0) when it can't say). Looked up (_sym): no
+    declaration to clash with, no symbol for the Mac's stub."""
+    var lim = List[UInt64](length=2, fill=0)
+    var f = _sym("getrlimit")
+    if f == 0:
+        return (0, 0)
+    var rc = Pointer(to=f).unsafe_bitcast[def(c_int, Int) thin abi("C") -> c_int]()[](c_int(7 if CompilationTarget.is_linux() else 8), Int(lim.unsafe_ptr()))
+    if Int(rc) != 0:
+        return (0, 0)
+    var soft = Int(min(lim[0], UInt64(1) << 40))  # (RLIM_INFINITY: plenty)
+    var hard = Int(min(lim[1], UInt64(1) << 40))
+    return (soft, hard)
+
+
+def raise_nofile() -> Int:
+    """The soft open-file limit raised to the hard one (Go's runtime does the same at start; macOS caps it at OPEN_MAX,
+    10240): the soft limit now."""
+    var have = nofile_limit()
+    var want = have[1] if CompilationTarget.is_linux() else min(have[1], 10240)
+    if want <= have[0]:
+        return have[0]
+    var lim = List[UInt64](length=2, fill=0)
+    lim[0] = UInt64(want)
+    lim[1] = UInt64(have[1]) if have[1] < (1 << 40) else UInt64.MAX
+    var f = _sym("setrlimit")
+    if f == 0:
+        return have[0]
+    var rc = Pointer(to=f).unsafe_bitcast[def(c_int, Int) thin abi("C") -> c_int]()[](c_int(7 if CompilationTarget.is_linux() else 8), Int(lim.unsafe_ptr()))
+    _ = len(lim)
+    return want if Int(rc) == 0 else have[0]
