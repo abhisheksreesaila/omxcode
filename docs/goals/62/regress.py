@@ -32,7 +32,7 @@ WEB = re.compile(r"web_run\(|hosts/web\.py|drive\.web|web_story|scripts/drive\.p
 SKIP_GOALS = {"62"}  # (this goal)
 # the examples each goal's milestones read, built (linux and web) in both trees before any of them runs: a later milestone
 # reads what an earlier one built, and here each runs on its own
-PREBUILD = {"03": ["todo"], "04": ["kitchen", "expenses"], "05": ["layout"], "06": ["lens"], "08": ["gallery"],
+PREBUILD = {"03": ["hello", "todo", "gallery", "gpu"], "04": ["kitchen", "expenses"], "05": ["layout"], "06": ["lens"], "08": ["gallery"],
             "09": ["workbook", "analytics"], "10": ["workbook"], "11": ["mxstudio"], "12": ["mxstudio"], "13": ["mxstudio"],
             "14": ["mxstudio"]}
 REQUIRED = {"03": None, "04": None, "05": None, "06": {"m6"}, "09": {"m3", "m4", "m8"}}  # (None: every web milestone of the goal)

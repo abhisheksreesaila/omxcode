@@ -222,5 +222,28 @@ class Net:
         return [ev for ev in self.events if ev[0] >= t0 and ev[1] in kinds]
 
 
+ADDRESSES = iter(f"10.62.{i // 250}.{i % 250 + 1}" for i in range(1 << 16))
+
+
+def address():
+    """A visitor's own address (X-Real-IP, as Railway's proxy sends it): the public copy's per-address limits (round 3)
+    see each simulated visitor as a person, not every one of them as 127.0.0.1."""
+    return next(ADDRESSES)
+
+
+def fresh(page, url):
+    """A page load as a new visitor would make it (a new address): checks that reload one tab many times."""
+    page.set_extra_http_headers({"X-Real-IP": address()})
+    page.goto(url)
+
+
 def chromium(p, **kw):
-    return p.chromium.launch(executable_path=CHROMIUM, headless=True, **kw)
+    """Headless Chromium; each new context is a visitor of its own address."""
+    b = p.chromium.launch(executable_path=CHROMIUM, headless=True, **kw)
+    make = b.new_context
+
+    def new_context(**ckw):
+        ckw["extra_http_headers"] = {"X-Real-IP": address(), **ckw.get("extra_http_headers", {})}
+        return make(**ckw)
+    b.new_context = new_context
+    return b

@@ -315,9 +315,16 @@ def m5():
     starter()
     df = ROOT / "Dockerfile.web"
     text = df.read_text() if df.exists() else ""
-    for need, why in (("USER ", "non-root"), ("HEALTHCHECK", "a health check"), ("$PORT", "listens on $PORT"), ("MOJOUI_PUBLIC=1", "public mode")):
-        if need not in text:
+    code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))  # (round 3: "$PORT" matched a comment)
+    for need, why in (("\nUSER ", "non-root"), ("\nHEALTHCHECK", "a health check"), ("MOJOUI_PUBLIC=1", "public mode"),
+                      ('CMD ["/app/scripts/web-start"]', "the start command")):
+        if need not in code:
             probs.append(f"Dockerfile.web: no {why}")
+    if "HOST=0.0.0.0" not in code or "os.environ.get('PORT'" not in code:
+        probs.append("Dockerfile.web: doesn't listen on 0.0.0.0 at $PORT, or its health check doesn't ask there")
+    ws = (ROOT / "scripts/web-start").read_text()
+    if not re.search(r'^export PORT="\$\{PORT:-\d+\}"', ws, re.M) or "mojoui/hosts/web.py" not in ws:
+        probs.append("scripts/web-start doesn't hand $PORT to web.py")
     d = run(["docker", "info", "--format", "{{.ServerVersion}}"], 60)
     if d.returncode:
         blocked.append("the image wasn't built: this user can't reach Docker (" + (d.stderr.strip().splitlines() or ["?"])[-1][:120]

@@ -1,0 +1,136 @@
+PASS test_web_files.py: JOT QUIT: nothing pending; 0 notes
+PASS test_web_first_page.py: web_first_page: ok (4 polls, none inside a render)
+PASS test_web_lanes.py: web_lanes: ok (a replaced source loses its answer, a lane keeps it; every htmx.ajax in web.py from a lane or the body)
+PASS test_web_links.py: web_links: ok
+PASS test_web_public.py: JOT QUIT: nothing pending; 2 notes
+PASS test_web_viewport.py: web_viewport: ok (posted ['w=390&h=844']; the window read [390, 844] with a 780 px view in it)
+PASS goal 47 M0 (18 s): 63,344 episodes, 13 labs, 13,746 failures; hero F00118 (244 frames, clip ok); two runs byte-equal; lerobot + droid ok
+PASS goal 47 M1 (21 s): signal; lanes; draw; seek; follow; index; slice; moment; card; named; page
+PASS goal 47 M2 (60 s): telemetry episode=F00118 244 rows, 16 channels, 1.4 ms; cursor = player at 3 seeks; 0 SLOW at 50 ms
+PASS goal 47 M3 (59 s): chart: success by 13 labs = truth (PennPAL 95.11 … RAD 61.35); by verb, 16 verbs = truth; pivot: failure/success/total for all 13 labs = fleet.csv
+PASS goal 03 M1 (required) (7 s): Chromium clicked Greet 3x on the FastHTML page → 'Hello, Ada! (click 3)'; GTK hello still passes and draws
+PASS goal 03 M4 (required) (9 s): Chromium: same interactions, same echoed state
+PASS goal 04 M1 (required) (6 s): Segmented + Radio: chosen on GTK and web, echoed, identical
+PASS goal 04 M2 (required) (9 s): TextArea: two lines typed and echoed on GTK and web, identical
+PASS goal 04 M3 (required) (22 s): Alert shown on screen while in the view; Cancel, Delete and Escape answered on GTK and web, identical
+PASS goal 04 M4 (required) (12 s): Tabs switch sections; NavBar opens a screen and Back returns, on GTK and web, identical
+PASS goal 04 M5 (required) (6 s): DatePicker set on GTK and web; event carried 2026-12-25; identical
+PASS goal 04 M6 (required) (6 s): Icons: star, trash, gear shown with each platform's own icons
+PASS goal 04 M7 (required) (6 s): Grid: 6 items in rows of 3 on GTK and web
+PASS goal 04 M8 (required) (20 s): 10,000-row list: scrolled to and tapped row 7500 on GTK and web; GTK made 410 row widgets in all (rows near the screen, re-made on each refresh), the web page h
+PASS goal 05 M2 (required) (6 s): padding 16: the child sits 16 in from the box's left and top, on GTK + web
+PASS goal 05 M3 (required) (6 s): fixed 200×60 exact; max width 200 and min width 150 respected, on GTK + web
+PASS goal 05 M4 (required) (6 s): a filled child spans its 320-wide box minus 10+10 padding, on GTK + web
+PASS goal 05 M5 (required) (6 s): a growing child takes the rest of its 320-wide row, on GTK + web
+PASS goal 05 M6 (required) (6 s): justify START/CENTER/END/BETWEEN in 320-wide rows, on GTK + web
+PASS goal 05 M7 (required) (6 s): align START/CENTER/END/STRETCH in 320-wide columns, on GTK + web
+PASS goal 08 M5 (37 s): dashboard over 20M rows; GTK and web identical after year/channel/bar/column/line taps; fits 1440×900 and 1280×800 on both
+PASS goal 09 M4 (required) (30 s): Board: absolute positions, drag, resize + snap identical on GTK and web; narrow windows show a list
+PASS goal 09 M8 (required) (13 s): 20M rows loaded once per process and shared by every session (workbook and analytics)
+PASS goal 10 M1 (16 s): islands, quiet icon buttons, hairline fields, dotted page on GTK and web (screenshots at 1440×900 and 1280×800 in build/workbook/look-*.png)
+PASS goal 11 M4 (83 s): the Sheet on both hosts: grid, Pivot 1, Chart 1, inspector, exact status; an in-place edit regroups the pivot and shows in Your edits; also at 20M rows
+PASS goal 11 M5 (61 s): the agent finds 3 spellings with their rows; Merge regroups (20 → 18 customers) as one undoable step; identical on both hosts
+PASS goal 12 M3 (42 s): the Report on both hosts: filters, four KPIs, weekly revenue and margin (the marker proven in test_components), top customers, product mix, heatmap, 'Worth a lo
+PASS goal 12 M4 (91 s): one engine: the Sheet's merge reaches the Report; Open the rows filters the Sheet to the finding's rows; a product bar filters the tiles; identical on both host
+PASS goal 13 M1 (46 s): KEY events, canvas focus and on_cancel in mojoui; arrows then F2 edit the same cell on GTK and web (real key presses); the matrix shows them ✅ on Linux and web
+PASS goal 14 M1 (56 s): TOOL buttons, FilePicker, Inspector/Section/Row/Stepper, Toolbar/FormulaBar/StatusBar, column formats and the CSV reader in mojoui, with tests (formats, parser,
+PASS goal 21 M1 (37 s): Bold, Italic, Underline, Strikethrough, colours, fills and alignment on a cell, identical on GTK and the web, and Ctrl+B/I/U; a column's format (after Currency 
+PASS goal 21 M2 (19 s): the tabs sit along the bottom on GTK and the web; tapping the current one (or View > Rename tab…) renames it; Escape keeps the name, an empty one is refused; bo
+PASS goal 24 M4 (9 s): transitions and arrival animations on GTK and the web; the ring glides: [(13, 0.3, 'yes'), (13, 0.3, 'yes')]
+PASS goal 26 M8 (34 s): logo 1 in the menu bar (GTK, web); the brand green on the start screen, the sheet (the ring too) and the report, its chart too (Liquid dark's lift; #0e7a43 in L
+PASS goal 33 M1 (68 s): tests/test_http.mojo: GET, POST JSON, env header, chunked, 1 MiB, timeout, refused, 500, https refused; gtk 120 frames in 2004 ms, longest gap 17 ms; web 119 fr
+PASS goal 33 M2 (36 s): 10 ticks of 100 ms within ±20 ms on GTK and the web; json.mojo = json.loads on 17 recorded replies and 2 edge-case files, 4513 values (3240 decimals, 715 negati
+PASS goal 33 M5 (283 s): examples/console on gtk and web and a forged deep link sends nothing forged against the fixtures: the list (table, cards, drag onto #work, tick two and #favorit
+PASS goal 33 M6 (309 s): examples/console on GTK and the web against the fixtures: Add a model (search with fit badges, a pull through the five stages with elapsed times and the live lo
+PASS goal 34 M0 (38 s): WebComponent + commands + web_assets(); the counter mounts, shows Mojo's props as text, 5 clicks reach update(), a props change and a full rebuild keep it (coun
+PASS goal 34 M1 (37 s): CodeMirror 6 from npm (lockfile), bundled and minified offline by esbuild, its widget in TypeScript; typing reaches update() (word count), a rebuild mid-typing 
+PASS goal 34 M2 (64 s): strict CSP (script-src 'self', no eval, no inline script or handler), every asset by its content hash with immutable caching; the widgets app and the console ra
+PASS goal 34 M3 (99 s): each WebComponent in its own WebKitGTK 6.0 view (mojoui:// origin, the web's bundles byte for byte, the web's CSP with frame-src 'none', no network): real typin
+PASS goal 34b M1 (44 s): ECharts 6.1.0 from npm (lockfile, npm ci --ignore-scripts), tree-shaken (echarts/core, SVG renderer), no eval/new Function; fed Mojo's word counts [9, 9, 9, 10,
+PASS goal 34b M1C (171 s): scripts/dev.sh rebuilt .js, .css and .ts edits into the open page (same page, the typed note and Words: 4 kept, widgets mounted again); the counter's error logg
+PASS goal 34b M0 (105 s): the agent host lists each WebComponent as <name>-read/<name>-set tools (typed fields only), reads describe() JSON and sets through the widget's own event on the
+PASS goal 41 M1 (80 s): SLOW: update msg=1 80.05 ms; web too; jobwake PASS
+PASS goal 41 M8 (112 s): 1 link(s) shipments.shipment_id (14 of 18); peek lit ['dock.mp4 · detections', 'dock.mp4']; web too; 0 SLOW
+PASS goal 42 M3 (50 s): imported, exported byte for byte, and a dropped file became a note (GTK and the web); two dropped together (one name) became two
+PASS goal 48 M3 (128 s): test_agentchat ok (10 behaviours); examples/agentchat is 82 lines; gtk: chip, regenerate, retry, markdown light + dark; web: chip, regenerate, retry, markdown l
+PASS goal 48 M5 (195 s): local: ok 2004 events in 84 ms (23810 events/s; previews rebuilt when a component finishes or 64 bytes arrive); the whole chat's view in 115 µs; no HTTP, no oth
+PASS goal 56 M2 (59 s): GTK: accent 2–4 px outside Reset on all four sides once focused, none before; web: Tab → CANVAS 'Table fleet, 63,344 rows' outline 2px solid rgb(14, 122, 67) (t
+PASS goal 56 M3 (58 s): GTK Liquid {'1,111.11': 58, '8,888.88': 58} (equal), plain {'1,111.11': 42, '8,888.88': 62} (not); web body font-feature-settings "tnum"
+SAME goal 03 M6 (required): ran on both sides and fails on 882155b too (not this goal's): here todo/mac: no objects; todo/ios: no objects; agentchat: imports ['themes.omxqua'], platform words []; analytics: imports ['themes.fluent'], platform words []; ca | base todo/mac: no objects; todo/ios: no objects; agentchat: imports ['themes.omxqua'], platform words []; analytics: imports ['themes.fluent'], platform words []; ca
+SAME goal 03 M8 (required): ran on both sides and fails on 882155b too (not this goal's): here GTK:  GPU fractal
+LABEL: GPU: no GPU found
+LABEL: Zoom
+SLIDER: 40
+LABEL: Detail
+DROPDOWN: Detailed
+BUTTON: Check on CPU
+LABEL: No supported GPU (NVIDIA or AMD): | base GTK:  GPU fractal
+LABEL: GPU: no GPU found
+LABEL: Zoom
+SLIDER: 40
+LABEL: Detail
+DROPDOWN: Detailed
+BUTTON: Check on CPU
+LABEL: No supported GPU (NVIDIA or AMD):
+SAME goal 04 M9 (required): ran on both sides and fails on 882155b too (not this goal's): here expenses/mac: no objects; expenses/ios: no objects | base expenses/mac: no objects; expenses/ios: no objects
+SAME goal 05 M9 (required): ran on both sides and fails on 882155b too (not this goal's): here expenses/mac: no objects; expenses/ios: no objects; todo/mac: no objects; todo/ios: no objects; console: imports ['std.os.path', 'std.os', 'std.sys', 'std.os.pa | base expenses/mac: no objects; expenses/ios: no objects; todo/mac: no objects; todo/ios: no objects; console: imports ['std.os.path', 'std.os', 'std.sys', 'std.os.pa
+SAME goal 06 M6 (required): ran on both sides and fails on 882155b too (not this goal's): here web canvas looks blank (10% painted, 7 colours) | base web canvas looks blank (10% painted, 7 colours)
+SAME goal 08 M1: ran on both sides and fails on 882155b too (not this goal's): here canvas tests: 
+Imported from ./mojoui/app.mojo:10:
+Imported from ./mojoui/effects.mojo:34:
+./mojoui/http_flare.mojo:126:21: error: statement indentation must ma | base canvas tests: ./mojoui/app.mojo:10:
+Imported from ./mojoui/effects.mojo:34:
+./mojoui/http_flare.mojo:126:21: error: statement indentation must match the rest of
+SAME goal 08 M6: ran on both sides and fails on 882155b too (not this goal's): here engine/app tests: stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG=stack-trace-on-error`
+Unhandled exceptio | base engine/app tests: ronment variable `PIXI_PROJECT_MANIFEST`
+stack trace was not collected. Enable stack trace collection with environment variable `MODULAR_DEBUG
+SAME goal 09 M3 (required): ran on both sides and fails on 882155b too (not this goal's): here GTK and web start differently: ['LABEL: `Optional.value()` called on empty `Optional`. Consider using `if optional:` to check whether the `Optional` is empty be | base GTK and web start differently: ['LABEL: `Optional.value()` called on empty `Optional`. Consider using `if optional:` to check whether the `Optional` is empty be
+SAME goal 10 M10: ran on both sides and fails on 882155b too (not this goal's): here another theme's colours didn't come through: OMARCHY: dark=False accent=#ff5500 card=#fafafa ink=#262626 | base another theme's colours didn't come through: OMARCHY: dark=False accent=#ff5500 card=#fafafa ink=#262626
+SAME goal 13 M3: ran on both sides and fails on 882155b too (not this goal's): here workbook GTK: after Escape the cell isn't what it was: ['FIELD: ', 'FIELD: North America', 'FIELD: Ze'] vs ['FIELD: ', 'FIELD: Asia Pacific', 'FIELD: North Amer | base workbook GTK: after Escape the cell isn't what it was: ['FIELD: ', 'FIELD: North America', 'FIELD: Ze'] vs ['FIELD: ', 'FIELD: Asia Pacific', 'FIELD: North Amer
+SAME goal 14 M2: ran on both sides and fails on 882155b too (not this goal's): here GTK run failed (exit 0): Blank sheet
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/scale.m | base GTK run failed (exit 0): EL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/scale.md)
+LABEL: Comin
+SAME goal 14 M3: ran on both sides and fails on 882155b too (not this goal's): here GTK run failed (exit 0): ABEL: Blank sheet
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/s | base GTK run failed (exit 0): et
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/scale.md)
+LABEL:
+SAME goal 14 M4: ran on both sides and fails on 882155b too (not this goal's): here GTK run failed (exit 0): 
+LABEL: Blank sheet
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs | base GTK run failed (exit 0): heet
+LABEL: An empty table to type into
+BUTTON: New blank sheet
+LABEL: Taxi trips
+LABEL: 100M rows · a GPU workout (docs/scale.md)
+LABE
+NOT-RUN goal 18 M1: something it reads isn't there (here or on 882155b), so it proves nothing: here crashed: FileNotFoundError(2, 'No such file or directory') | base crashed: FileNotFoundError(2, 'No such file or directory')
+SAME goal 25 M2: ran on both sides and fails on 882155b too (not this goal's): here GTK report 1280x720: the window grew to (1419, 720); GTK report 1280x720: the report-page stops None pt short of the inspector | base GTK report 1280x720: the window grew to (1419, 720); GTK report 1280x720: the report-page stops None pt short of the inspector
+SAME goal 25 M3: ran on both sides and fails on 882155b too (not this goal's): here GTK 1742: tools not on one line (centres 76.0–76.0, heights 34.0–60.0); web 1742: tools not on one line (centres 68.0–68.0, heights 34.0–52.0) | base GTK 1742: tools not on one line (centres 76.0–76.0, heights 34.0–60.0); web 1742: tools not on one line (centres 68.0–68.0, heights 34.0–52.0)
+SAME goal 27 M1: ran on both sides and fails on 882155b too (not this goal's): here 14 theme mentions in mojoui/: mojoui/boardlook.mojo:19, mojoui/boardlook.mojo:24, mojoui/links.mojo:698, mojoui/pack_pdf.py:10, mojoui/pack_pdf.py:111, mojoui/p | base 13 theme mentions in mojoui/: mojoui/boardlook.mojo:19, mojoui/boardlook.mojo:24, mojoui/links.mojo:698, mojoui/pack_pdf.py:10, mojoui/pack_pdf.py:111, mojoui/p
+SAME goal 27 M2: ran on both sides and fails on 882155b too (not this goal's): here GTK hello: THEME: none sheet=0 bytes | base GTK hello: THEME: none sheet=0 bytes
+SAME goal 27 M4: ran on both sides and fails on 882155b too (not this goal's): here mojoui/ mentions Paper: ['mojoui/pack_pdf.py', 'mojoui/packpdf.mojo', 'mojoui/starter.mojo'] | base mojoui/ mentions Paper: ['mojoui/pack_pdf.py', 'mojoui/packpdf.mojo']
+SAME goal 27 M6: ran on both sides and fails on 882155b too (not this goal's): here no BENCH lines without the flag | base no BENCH lines without the flag
+SAME goal 27 M5: ran on both sides and fails on 882155b too (not this goal's): here 1742x876: the toolbar is 65.0 pt on the sheet, 39.0 on the report (P7); theme tests (P11): tests/test_theme.mojo fails: OMARCHY: dark=True accent=#89b4fa card=# | base 1742x876: the toolbar is 65.0 pt on the sheet, 39.0 on the report (P7); theme tests (P11): tests/test_theme.mojo fails: OMARCHY: dark=True accent=#89b4fa card=#
+SAME goal 33 M3: ran on both sides and fails on 882155b too (not this goal's): here lint: liquid.mojo still shapes sidebar by hand (mui-tag-sidebar { border-right: 1px solid " + strong + "; bo); lint: liquid.mojo still shapes sidebar by hand ([ | base lint: liquid.mojo still shapes inspector by hand (mui-tag-inspector { border-left: 1px solid " + strong + "; b); lint: liquid.mojo still shapes inspector by han
+SAME goal 33 M4: ran on both sides and fails on 882155b too (not this goal's): here lint: liquid.mojo still shapes inspector by hand (mui-tag-inspector { border-left: 1px solid " + strong + "; b); lint: liquid.mojo still shapes inspector by han | base lint: liquid.mojo still shapes inspector by hand (mui-tag-inspector { border-left: 1px solid " + strong + "; b); lint: liquid.mojo still shapes inspector by han
+NOT-RUN goal 33 M7: something it reads isn't there (here or on 882155b), so it proves nothing: here Mac: stale: no Mac run with side pictures (scripts/mac-ci); mac models: no view dump console-models-views.txt in the newest mac-ci run (None); mac overview: no  | base Mac: stale: no Mac run with side pictures (scripts/mac-ci); mac models: no view dump console-models-views.txt in the newest mac-ci run (None); mac overview: no 
+SAME goal 34b M1B: ran on both sides and fails on 882155b too (not this goal's): here the gallery doesn't show widgets-web-light.png; the gallery doesn't show widgets-web-dark.png; the gallery doesn't show widgets-gtk-light.png | base the gallery doesn't show widgets-web-light.png; the gallery doesn't show widgets-web-dark.png; the gallery doesn't show widgets-gtk-light.png
+NOT-RUN goal 34b M2: something it reads isn't there (here or on 882155b), so it proves nothing: here Mac: stale: no Mac run with side pictures (scripts/mac-ci) (scripts/build.sh widgets mac; scripts/mac-ci widgets) | base Mac: stale: no Mac run with side pictures (scripts/mac-ci) (scripts/build.sh widgets mac; scripts/mac-ci widgets)
+SAME goal 41 M5: ran on both sides and fails on 882155b too (not this goal's): here gtk: weak borders ['toolbar#0 0.03', 'card:dock.mp4#3 0.03', 'status#0 0.04'] | base gtk: weak borders ['toolbar#0 0.03', 'card:dock.mp4#3 0.02', 'status#0 0.04']
+PASS docs/components.md is fresh: docs/components.md is current
+RESTORED 22 files under docs/ the archived checks regenerated (copies in build/g62/m6/regenerated/): docs/agui.md, docs/goals/33/console-add-gtk.png, docs/goals/33/console-keys-gtk.png, docs/goals/33/console-keys-web.png, docs/goals/33/console-logs-web.png, docs/goals/33/httpcheck-gtk.png, docs/goals/33/httpcheck-web.png, docs/goals/33/ours/bench-390x844.png, docs/goals/33/ours/gateway-390x844.png, docs/goals/33/ours/overview-390x844.png, docs/goals/33/ours/security-390x844.png, docs/goals/33/ticks-gtk.png …
+SUMMARY 59 PASS, 24 SAME, 3 NOT-RUN, 0 FAIL

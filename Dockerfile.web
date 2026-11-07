@@ -16,12 +16,23 @@ RUN rm -rf starter && pixi run bash scripts/build.sh omxplorer web \
 
 # ---- run
 FROM ubuntu:24.04
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin omx
-COPY --from=build /app /app
+# only what the server runs (round 3: the whole checkout, its build outputs and the 5 GB environment were copied): the
+# environment without its headers, docs and static libraries or the tools only checks use (Polars, DuckDB); the web host
+# and its files, the PDF printer an export pack uses, the start command, the module and its upload check
+COPY --from=build /app/.pixi/envs/default /app/.pixi/envs/default
+RUN cd /app/.pixi/envs/default && rm -rf include share/doc share/man share/info \
+        lib/python3*/site-packages/polars* lib/python3*/site-packages/_polars* lib/python3*/site-packages/duckdb* lib/python3*/site-packages/_duckdb* \
+    && find lib -name '*.a' -delete
+COPY --from=build /app/mojoui/hosts/web.py /app/mojoui/hosts/web.py
+COPY --from=build /app/mojoui/hosts/static /app/mojoui/hosts/static
+COPY --from=build /app/mojoui/pack_pdf.py /app/mojoui/pack_pdf.py
+COPY --from=build /app/scripts/web-start /app/scripts/web-start
+COPY --from=build /app/build/omxplorer/web /app/build/omxplorer/web
 COPY starter /data/robot
-RUN rm -rf /app/starter && chmod -R a-w /app /data && mkdir -p /tmp/omxcode /tmp/home && chown omx /tmp/omxcode /tmp/home
+RUN chmod -R a-w /app /data && mkdir -p /tmp/omxcode /tmp/home && chown omx /tmp/omxcode /tmp/home
 WORKDIR /app
 USER 10001
 ENV MOJOUI_PUBLIC=1 \

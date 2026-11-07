@@ -295,7 +295,8 @@ def main():
         (out / "results.json").write_text(json.dumps(R, indent=1))
         print("RESULT " + json.dumps({"ok": R["ok"], "beats": {k: v["ok"] for k, v in R["beats"].items()}, "timings": R["timings"]}), flush=True)
         b.close()
+    return R["ok"]
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(0 if main() else 1)  # (round 3: a failed beat exits 1, so a script's `|| warn` hears it)

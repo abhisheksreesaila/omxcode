@@ -9,16 +9,18 @@ Any omxcode web app can run on the public internet with one switch, `MOJOUI_PUBL
 | | Local (`scripts/omxplorer.sh web`) | Public (`MOJOUI_PUBLIC=1`) |
 |---|---|---|
 | Agent link, `/dev` routes | as configured | off, whatever the environment says |
-| Sessions | one per page load; the oldest closes past 200 | one per page load; past `MOJOUI_MAX_SESSIONS` (default 8; the image: 10) a busy page |
-| Idle tabs | stay | end after `MOJOUI_IDLE_S` (900 s) without input; the page says so; their files go |
+| Sessions | one per page load; the oldest closes past 200 | one per page load, holding a place from the moment it's made; past `MOJOUI_MAX_SESSIONS` (6, D-6230) a busy page; near the cap (a third of the places left) an address (`X-Real-IP`) holding `MOJOUI_PER_IP` (2) gets the busy page; new sessions at most `MOJOUI_NEW_PER_S` (2) a second on the server (bursts of 6) and `MOJOUI_IP_NEW_PER_S` (0.5) from an address (bursts of 3); a visit lasts at most `MOJOUI_SESSION_MAX_S` (3,600 s) |
+| Idle tabs | stay | end after `MOJOUI_IDLE_S` (900 s) without input (a `/resize` isn't input); the page says so; their files go |
 | Plain GETs (crawlers, link previews, health checks) | no session (both modes: only a browser's page load makes one) | same |
 | File controls (pickers, savers, drop targets) | the page may send a path | only paths the host made (an upload, a save) reach the app |
-| Uploads | 32 GB a file | `OMXCODE_UPLOAD_MAX` (200 MB) a file, `OMXCODE_VISITOR_MAX` (500 MB) a visitor |
+| Uploads | 32 GB a file | `OMXCODE_UPLOAD_MAX` (200 MB) a file, `OMXCODE_VISITOR_MAX` (500 MB) a visitor, 2 in flight, each reserving its length (an upload must say it); read first in a process of its own (`validate`, held by `prlimit` to 4 GB and 60 s of CPU, first for the out-of-memory killer): a table past `MOJOUI_TABLE_MB` (256) once read, or a visitor's tables past `MOJOUI_VISITOR_TABLES_MB` (384) together, is refused |
+| Questions | anything the engine takes | one SELECT (no WITH, UNION, INTERSECT or EXCEPT, no script statements); answers up to `MOJOUI_QUERY_ROWS` (1M); `MOJOUI_QUERY_S` (20 s), then stopped, still counting until the engine ends it; one at a time a visitor, `MOJOUI_QUESTIONS` (2) on the server; `MOJOUI_QUERY_THREADS` (2) cores and `MOJOUI_SORT_BYTES` (256 MB) of sort a question; `MOJOUI_JOIN_BYTES` (512 MB) a join |
 | Files a visitor makes (Save, Export CSV, Export pack) | in their documents folder | in the tab's own folder, then sent as a download (a folder as one zip) and removed |
 | Recent files | `OMX_CONFIG/recent.txt`, with paths | in the tab only, names only |
 | Server paths in answers | as the app shows them | cut from every text answer (logged as `SCRUB:` so the source can be fixed) |
 | Documents' Read | OCR model or PDF text | PDF text only (no model on a shared server) |
-| Listening | 127.0.0.1:5001 | `HOST`, `PORT` (the image: 0.0.0.0:$PORT), proxy headers trusted |
+| Listening | 127.0.0.1:5001; any other `HOST` refuses to start | `HOST`, `PORT` (the image: 0.0.0.0:$PORT); proxy headers aren't trusted for the scheme or host (`proxy_headers=False`); `X-Real-IP` is read only for the per-address limits (Railway's proxy sets it; elsewhere it can be forged, so those limits are soft) |
+| Start | | `MOJOUI_PUBLIC` other than 1 or 0, or no `prlimit` on PATH: the server doesn't start |
 
 Both modes: `GET /health` answers `{"ok", "sessions", "max"}`; a page keeps one `/wait` open and the server answers it
 only with changes or a gone tab (`MOJOUI_WAIT_S` caps the hold: 240 s in the image, as Railway closes a request after 5
