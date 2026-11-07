@@ -1,12 +1,14 @@
 # mojoui.sheetjobs: a sheet's slow work off the UI thread, on MX frame's background jobs (23edc59, F-175). A start
-# function returns a `Job` the app polls once a display frame (a Canvas's on_frame) for its progress and its result, and
-# can cancel. Each job works on what it owns (a snapshot of the sheet, a copy of the object): the app goes on drawing,
+# function returns a `Job` the app polls for its progress and its result, and can cancel. Each job wakes the host when it
+# ends (mojoui.jobs.start_ui_job: App.jobs_message), so a host with no display frames to poll on (the web host's tab with
+# no moving canvas) still hears it (goal 62 M0); a Canvas's on_frame may poll too. Each job works on what it owns (a snapshot of the sheet, a copy of the object): the app goes on drawing,
 # scrolling and editing meanwhile. Builds without job threads (the Mac's, unless built with -D MXFRAME_JOB_THREADS) do the
 # work inside the start call: the job comes back done and the app reads it on the next frame, as before.
 
 # (Job and its states are also what apps take from here: an app imports mojoui, never the engine, goal 5's rule)
 from omxcore import Job, JobCtl, JobBody, JobProgress, start_job, JOB_RUNNING, JOB_DONE, JOB_FAILED, JOB_CANCELLED
 from mojoui.sheet import Sheet
+from mojoui.jobs import start_ui_job
 from mojoui.sheetpage import SheetObject, compute, shape_of
 from mojoui.csvio import CsvImport, read_table, empty_import
 from mojoui.sheet import placeholder_sheet, empty_table
@@ -72,7 +74,7 @@ struct ChartJob(JobBody):
 
 def chart_job(sheet: Sheet, obj: SheetObject) -> Job[Charted]:
     """A chart's (or pivot's) numbers off the caller's thread, over the sheet as it is now."""
-    return start_job(ChartJob(sheet.snapshot(), obj.copy()))
+    return start_ui_job(ChartJob(sheet.snapshot(), obj.copy()))
 
 
 def take_numbers(mut obj: SheetObject, done: SheetObject):
@@ -291,7 +293,7 @@ struct ColumnJob(JobBody):
 
 def column_job(sheet: Sheet, col: Int, stats: Bool) -> Job[ColumnFigures]:
     """Column `col`'s total (and, with `stats`, its median and distinct count) off the caller's thread."""
-    return start_job(ColumnJob(sheet.snapshot(), col, stats))
+    return start_ui_job(ColumnJob(sheet.snapshot(), col, stats))
 
 
 struct Opened(Movable):
@@ -351,7 +353,7 @@ struct OpenJob(JobBody):
 
 def open_job(path: String) -> Job[Opened]:
     """Reads a CSV or Parquet file (as the Import step shows it) into a sheet, off the caller's thread."""
-    return start_job(OpenJob(path))
+    return start_ui_job(OpenJob(path))
 
 
 def pace(rows: Int, seconds: Float64) -> String:
@@ -387,4 +389,4 @@ struct WarmJob(JobBody):
 def warm_gpu() -> Job[Int]:
     """The GPU started off the UI thread (WarmJob): call it when the app starts (its __init__) and keep the handle until
     it ends; a sheet the app makes later (a blank one, an analysis' rows) then waits for no driver."""
-    return start_job(WarmJob())
+    return start_ui_job(WarmJob())

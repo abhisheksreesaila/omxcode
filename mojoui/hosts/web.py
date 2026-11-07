@@ -55,6 +55,7 @@ AGENT_SOCKET = os.environ.get("MOJOUI_AGENT_SOCKET", "")  # an agent host may at
 DEV = os.environ.get("MOJOUI_DEV") == "1"
 DEV_TOKEN = os.environ.get("MOJOUI_DEV_TOKEN", "")
 EVENT_DELAY = float(os.environ.get("MOJOUI_EVENT_DELAY_MS", "0")) / 1000  # checks only: answers events this much later
+WAIT_S = float(os.environ.get("MOJOUI_WAIT_S", "0"))  # how long /wait holds with nothing to say (0: as long as the tab lives)
 JPEG_QUALITY = 85
 MAX_SESSIONS = 200  # oldest tabs are closed beyond this
 STATIC = Path(__file__).parent / "static"
@@ -299,22 +300,25 @@ EFFECTS_JS = r"""
       n.querySelectorAll && n.querySelectorAll('.mojoui-arrive').forEach(mark); } } })
     .observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
 })();
-// Effects (goal 33): while the app has HTTP requests out or timers running (#mojoui-busy), the page waits on /wait for
-// the server's clock thread to hand their answers to update(), then fetches what changed (/pending), as frames do.
+// Changes the page didn't ask for (goal 33, goal 62 M0): an effect's answer, a timer, a background job that ended, an
+// agent's step. The page always holds one /wait open; the server answers it only when changes are pending (then the page
+// fetches them, /pending, as frames do) or the tab is gone, so an idle page fetches nothing. Before goal 62 it listened
+// only while #mojoui-busy said requests or timers were out, and a job's end (an open, a chart) had nobody to tell.
 (() => {
   let running = false;
-  const busy = () => { const b = document.getElementById('mojoui-busy'); return !!b && b.dataset.busy === '1'; };
   async function loop() {
     if (running) return;
     running = true;
     try {
-      while (busy()) {
+      for (;;) {
         const root = document.getElementById('mojoui-root');
+        if (!root || !root.dataset.sid) break;
         let said = '0';
         try { said = await (await fetch(`/wait/${root.dataset.sid}`, { cache: 'no-store' })).text(); }
-        catch (e) { await new Promise(ok => setTimeout(ok, 500)); continue; }
-        if (said === 'gone') break;
+        catch (e) { await new Promise(ok => setTimeout(ok, 1000)); continue; }
+        if (said.startsWith('gone')) { if (window.mojouiGone) window.mojouiGone(said.slice(5)); break; }
         if (said === '1') await htmx.ajax('POST', `/pending/${root.dataset.sid}`, { values: { v: document.getElementById('mojoui-v').value }, swap: 'none', source: window.mojouiLane('effects') });
+        else if (said !== '0') await new Promise(ok => setTimeout(ok, 1000));  // (an answer the page doesn't know: a proxy's error page)
       }
     } finally { running = false; }
   }
@@ -2357,8 +2361,11 @@ def make_app(module_dir):
 
     @app.get("/wait/{sid}")
     async def wait(sid: str):
-        """Returns "1" once changes made by the tab's effects are pending (or the page must start or stop waiting),
-        "0" after 20 s without any, "gone" for a closed tab. Async: an open wait holds no worker thread."""
+        """Returns "1" once changes the page didn't ask for are pending (an effect's answer, a timer, a background job
+        that ended, an agent's step; or the page must start or stop waiting), "gone" for a closed tab, "0" after
+        MOJOUI_WAIT_S without any (0, the default: it waits as long as the tab lives, so an idle page fetches nothing;
+        a platform whose proxy cuts idle requests sets it under that). Async: an open wait holds no worker thread. A
+        tab holds at most 4 (a fifth ends the oldest with "0")."""
         import asyncio
         s = sessions.get(sid)
         if s is None or s.closed:
@@ -2368,12 +2375,17 @@ def make_app(module_dir):
         ev = asyncio.Event()
         entry = (asyncio.get_running_loop(), ev)
         with s.waiters_lock:
+            while len(s.waiters) >= 4:
+                old_loop, old_ev = s.waiters.pop()
+                old_loop.call_soon_threadsafe(old_ev.set)
             s.waiters.add(entry)
         try:
             if has_changes(s) or s.busy != s.busy_sent:  # (it came while we registered)
                 return "1"
-            await asyncio.wait_for(ev.wait(), 20)
-            return "1"
+            await asyncio.wait_for(ev.wait(), WAIT_S or None)
+            if s.closed:
+                return "gone"
+            return "1" if has_changes(s) or s.busy != s.busy_sent else "0"
         except asyncio.TimeoutError:
             return "0"
         finally:
@@ -2405,4 +2417,6 @@ if __name__ == "__main__":
     import uvicorn
 
     print(f"mojoui web: http://127.0.0.1:{port}/", flush=True)
-    uvicorn.run(make_app(module_dir), host="127.0.0.1", port=port, log_level="warning")
+    # timeout_graceful_shutdown: a page's /wait is held while the tab lives; a stop (Ctrl+C, a platform's redeploy)
+    # waits at most 3 s for answers in flight instead of for every tab to close
+    uvicorn.run(make_app(module_dir), host="127.0.0.1", port=port, log_level="warning", timeout_graceful_shutdown=3)
