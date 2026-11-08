@@ -618,10 +618,14 @@ def m5():
         if stale in cover.lower():
             problems.append(f"the cover still says {stale!r}")
     # the console's own Mojo tests, and goal 64's
-    for name in ("test_consoled_paths", "test_console_api", "test_console_places", "test_port_donor",
-                 "test_port_sandbox", "test_ports_pure", "test_porter", "test_caddyfile", "test_process_cwd"):
+    tests = {"test_consoled_paths": "examples/consoled", "test_console_api": "examples/console",
+             "test_console_places": "examples/console", "test_port_donor": "examples/consoled",
+             "test_port_sandbox": "examples/consoled", "test_ports_pure": "examples/consoled",
+             "test_porter": "examples/consoled", "test_caddyfile": "examples/consoled",
+             "test_process_cwd": "examples/consoled"}
+    for name, include in tests.items():
         src = f"tests/{name}.mojo"
-        r = run(["scripts/mojo_flare.sh", "build", "-I", "examples/consoled", src, "-o", str(BUILD / name)])
+        r = run(["scripts/mojo_flare.sh", "build", "-I", include, src, "-o", str(BUILD / name)])
         t = run([str(BUILD / name)], timeout=300) if r.returncode == 0 else r
         if t.returncode != 0:
             problems.append(f"{name}: " + (t.stdout + t.stderr)[-200:])
@@ -632,12 +636,22 @@ def m5():
     diff = run(["git", "diff", "--stat", "--", "docs/components.md"])
     if diff.stdout.strip():
         problems.append("docs/components.md was stale: " + diff.stdout.strip()[-120:])
-    # goal 55's own check (the console's milestones) is run where it does not need a GPU-sized download
-    g55 = run([sys.executable, "docs/goals/55-check.py", "M0"], timeout=1800)
-    if g55.returncode != 0:
-        problems.append("goal 55 M0: " + (g55.stdout + g55.stderr)[-300:])
-    return not problems, "; ".join(problems) or ("both features marked beta with the real hit rate in the app and on "
-                                                 "the cover, nine Mojo tests pass, docs/components.md is fresh, and goal 55's M0 still passes")
+    # goal 55's own check: its first milestone needs a real MAX install (a user's, several GB), which this
+    # machine does not have, so that half is BLOCKED rather than faked
+    have_max = Path(g55.user_max()).exists() if hasattr(g55, "user_max") else False
+    if have_max:
+        r55 = run([sys.executable, "docs/goals/55-check.py", "M0", "M1"], timeout=3600)
+        if r55.returncode != 0:
+            problems.append("goal 55: " + (r55.stdout + r55.stderr)[-300:])
+        tail = "and goal 55's M0 and M1 still pass"
+    else:
+        tail = ("and goal 55's own check is BLOCKED here: it needs a user's MAX install (build/g55/max or $MXC_MAX), "
+                "which this machine does not have")
+    if problems:
+        return False, "; ".join(problems)
+    word = True if have_max else BLOCKED
+    return word, ("both features marked beta with the real hit rate in the app and on the cover, nine Mojo tests "
+                  "pass, docs/components.md is fresh, " + tail)
 
 
 
