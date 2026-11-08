@@ -4,6 +4,13 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Short forum covers (2026-11-07)
+
+- **Purpose:** the owner wants a short hook, real screenshots/GIFs, downloads and a feedback invitation for Modular’s forum; onboarding belongs in the README.
+- **Changed:** shortened the omxcode and omxconsole covers using the existing omxqua/coral design; captured the real GTK console’s library, search and app-key screens against Mojo consoled with a copied test registry; made a 13-second framework GIF and nine-second console slideshow; replaced the old forum drafts with short, current copy. README now starts with downloads and console first-run steps, with the actual Mac and headless limits.
+- **Checked:** source media/cover check (goal 61 M5), optional component-summary generation, local asset links, images and layout at 390/1280 widths, and git diff whitespace. Covers have reduced-motion still posters. A first GIF lost scenes when ffmpeg reconfigured for mixed colour metadata; normalising each scene fixed it, and the media check now verifies both GIF durations.
+- **Learning:** use one hook and visible app proof on the cover; keep setup, compatibility and implementation detail in the README. The generic headless proxy stays out of shipped-feature claims until complete. The forum posts are drafts for the owner to post.
+
 ## Goal 62, round 3: the round-3 review's findings (2026-11-07)
 
 - **Setup:** same branch and worktree; CPU only; no reviewer or auditor this round (the owner reviews next); not merged, not pushed.

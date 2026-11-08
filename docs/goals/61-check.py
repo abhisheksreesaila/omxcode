@@ -168,8 +168,25 @@ def m4():
 def m5():
     from playwright.sync_api import sync_playwright
     probs, played = [], []
+    # The short forum cover uses a GIF; the full recordings stay on the product pages.
     pages = {"docs/omxplorer.html": ["clip-island-100m", "clip-robots", "clip-sentence-gtk"], "docs/models.html": ["clip-models"],
-             "docs/index.html": ["clip-island-100m"], "docs/gallery/index.html": ["clip-robots"]}
+             "docs/index.html": [], "docs/omxconsole.html": [], "docs/gallery/index.html": ["clip-robots"]}
+    from PIL import Image
+    for page, name, size, seconds in (("docs/index.html", "omxcode", (800, 508), 13),
+                                      ("docs/omxconsole.html", "omxconsole", (800, 558), 9)):
+        text = (ROOT / page).read_text()
+        if f'img/forum/{name}.gif' not in text or f'img/forum/{name}-poster.jpg' not in text:
+            probs.append(f"{page}: forum GIF or reduced-motion poster missing")
+        try:
+            with Image.open(IMG / "forum" / f"{name}.gif") as im:
+                duration = 0
+                for frame in range(im.n_frames):
+                    im.seek(frame)
+                    duration += im.info.get("duration", 0)
+                if im.size != size or abs(duration / 1000 - seconds) > .15:
+                    probs.append(f"{name}.gif: {im.size}, {duration / 1000:.2f} s (wanted {size}, {seconds} s)")
+        except Exception as e:
+            probs.append(f"{name}.gif: {e}")
     for page, clips in pages.items():
         text = (ROOT / page).read_text()
         for c in clips:
@@ -192,6 +209,9 @@ def m5():
         for page in pages:
             pg.goto((ROOT / page).as_uri())
             pg.wait_for_timeout(500)
+            for img in pg.locator('img[src$=".gif"]').all():
+                if not img.evaluate("el => el.complete && el.naturalWidth > 0"):
+                    probs.append(f"{page}: a GIF did not load")
             states = pg.evaluate("""async () => { const vs = [...document.querySelectorAll('video')];
                 return await Promise.all(vs.map(v => new Promise(res => { v.muted = true; v.preload = 'auto'; v.load();
                   const done = () => res([v.currentSrc.split('/').pop(), v.readyState, v.error ? v.error.code : 0]);
@@ -202,7 +222,7 @@ def m5():
                 elif src.startswith("clip-"):
                     played.append(src)
         b.close()
-    return (not probs), ("; ".join(probs)[:1200] if probs else f"the pages use the four clips with posters and descriptions; {len(played)} videos load in Chromium; all under 12 MB")
+    return (not probs), ("; ".join(probs)[:1200] if probs else f"the product pages use the four clips with posters and descriptions; {len(played)} videos and both cover GIFs load in Chromium; all clips under 12 MB")
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5}
