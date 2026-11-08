@@ -589,7 +589,14 @@ def m4():
                 problems.append(f"an admin route over the LAN: {admin} (must not be forwarded)")
             if plain != "200":
                 problems.append(f"localhost over plain http: {plain}")
-            # a revoked key is as good as none (GOAL.md M4)
+            # /auth/check itself, as Caddy's forward_auth calls it
+            s1 = d.call("GET", "/auth/check", None, admin=False)[0]
+            if s1 != 401:
+                problems.append(f"/auth/check with no key: {s1}")
+            r2 = http("GET", d.url + "/auth/check", None, {"Authorization": "Bearer " + key}, timeout=30)
+            if r2[0] != 200:
+                problems.append(f"/auth/check with a valid key: {r2[0]}")
+            # a revoked key is as good as none (GOAL.md M4) — last, so nothing above loses its key
             apps = body(d.call("GET", "/admin/keys"))[1]
             app = (apps[0]["app"] if isinstance(apps, list) and apps else
                    (apps.get("keys") or [{}])[0].get("app") if isinstance(apps, dict) else None)
@@ -600,13 +607,6 @@ def m4():
                 revoked = curl("-H", f"Authorization: Bearer {key}", f"https://localhost:{https}/v1/models")
                 if revoked != "401":
                     problems.append(f"https with a revoked key: {revoked} (must be 401)")
-            # /auth/check itself, as Caddy calls it
-            s1 = d.call("GET", "/auth/check", None, admin=False)[0]
-            if s1 != 401:
-                problems.append(f"/auth/check with no key: {s1}")
-            s2, _ = http("GET", d.url + "/auth/check", None, {"Authorization": "Bearer " + key}, timeout=30)[:2]
-            if s2 != 200:
-                problems.append(f"/auth/check with a valid key: {s2}")
         s, j = body(d.call("POST", "/admin/expose/stop"))
         time.sleep(1)
         if s != 200 or j.get("exposed") is not False:
