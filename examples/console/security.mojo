@@ -178,12 +178,16 @@ def security_view(sp: SecurityPage, st: Store, phone: Bool) -> View:
         body.append(ButtonRow([SmallButton("Manage API keys", SEC_KEYS, "key-round"),
                                SmallButton("Click again to stop exposing" if sp.stop_armed else "Stop exposing", SEC_STOP, "unlock", DANGER, armed=sp.stop_armed, off=sp.stop_busy)]))
     else:
+        # beta (goal 64): HTTPS on your own network needs Caddy installed, and each machine trusts the
+        # certificate once, so say that before the button rather than after it fails
+        body.append(QuietText("beta: this needs Caddy on this machine (omxconsole does not bundle it), and every "
+                              + "device you call from trusts the certificate once."))
         body.append(ButtonRow([SmallButton("Try again" if sp.phase == "fail" else "Make it secure", SEC_SECURE, "lock", FILL)]))
     var cards: List[View] = [Card([head^, CardBody(body^), CardFoot("mxc expose --stop" if secure else "mxc expose")])]
     cards.append(Card([CardHead("What “Make it secure” does"), CardBody([FactGrid(["Certificate", "API key", "HTTPS"], [
         FactText("a local CA, “mxconsole local”, signs a certificate for this machine's name", plain=True),
         FactText("the gateway has its own key; requests without a valid app key get 401", plain=True),
-        FactText("Caddy and LiteLLM listen on your LAN; localhost keeps working over HTTP", plain=True)])]),
+        FactText("Caddy listens on your LAN; localhost keeps working over plain HTTP", plain=True)])]),
         CardFoot("all three happen in one request", note=True)]))
     if secure:
         cards.append(Card([CardHead("Endpoint"), CardBody([CopyRow("https · lan", url, SEC_COPY_URL, "Copy")]), CardFoot("mxc status")]))

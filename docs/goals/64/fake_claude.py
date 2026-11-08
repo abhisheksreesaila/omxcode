@@ -1,4 +1,5 @@
-"""Stand-in for `claude -p`. Env: FAKE_CLAUDE_MODE = ok | fail_once | broken | broken_n | regress | parity_once |
+"""Goal 64's stand-in for `claude -p` (copied from the Python version's tests; it writes its state inside its own
+working directory, which is the only place a sandboxed agent may write). Env: FAKE_CLAUDE_MODE = ok | fail_once | broken | broken_n | regress | parity_once |
 hang | crash (broken_n: a different build error each call; regress: call 1 gets to parity, later calls break the build),
 FAKE_CLAUDE_LOG (append argv, cwd and prompt as a JSON line), FAKE_CLAUDE_PIDS (hang: write own pid and a
 grandchild's). It finds the package folder in the prompt ("Package folder: <path>") and writes a minimal
@@ -13,15 +14,22 @@ from pathlib import Path
 
 argv = sys.argv[1:]
 prompt = argv[argv.index("-p") + 1]
-if os.environ.get("FAKE_CLAUDE_LOG"):
-    with open(os.environ["FAKE_CLAUDE_LOG"], "a") as f:
-        cfg = os.environ.get("CLAUDE_CONFIG_DIR", "")
-        creds = Path(cfg, ".credentials.json")
-        f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "prompt": prompt, "env": sorted(os.environ),
-                            "config_dir": cfg, "creds": creds.read_text() if creds.is_file() else None}) + "\n")
+with open(Path(os.getcwd()) / ".fake-claude.jsonl", "a") as f:  # in the workspace: the only writable place
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR", "")
+    probe = os.environ.get("FAKE_CLAUDE_PROBE", "")
+    f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "prompt": prompt, "env": sorted(os.environ),
+                        "config_dir": cfg, "home_listing": sorted(os.listdir(os.path.expanduser("~"))),
+                        "probe": probe, "probe_exists": bool(probe) and os.path.exists(probe),
+                        "writable": [d for d in (os.getcwd(), os.path.expanduser("~"), "/", "/tmp")
+                                     if os.access(d, os.W_OK)],
+                        "ro_writable": [d for d in os.environ.get("FAKE_CLAUDE_RO", "").split(":")
+                                        if d and os.access(d, os.W_OK)]}) + "\n")
 if os.environ.get("FAKE_CLAUDE_TAMPER"):  # an agent that escaped and edited a gate script
-    with open(os.environ["FAKE_CLAUDE_TAMPER"], "a") as f:
-        f.write("\n# pwned\n")
+    try:
+        with open(os.environ["FAKE_CLAUDE_TAMPER"], "a") as f:
+            f.write("\n# pwned\n")
+    except OSError as e:
+        print(f"tamper refused: {e}", flush=True)
 mode = os.environ.get("FAKE_CLAUDE_MODE", "ok")
 state = Path(os.getcwd()) / ".fake-claude-calls"
 calls = int(state.read_text()) + 1 if state.exists() else 1
@@ -39,9 +47,9 @@ if mode == "crash":
     print("claude: authentication failed", file=sys.stderr)
     sys.exit(2)
 if mode == "hang":
-    gc = subprocess.Popen(["sleep", "60"])
-    Path(os.environ["FAKE_CLAUDE_PIDS"]).write_text(f"{os.getpid()} {gc.pid}")
-    time.sleep(60)
+    gc = subprocess.Popen(["sleep", "600"])
+    (Path(os.getcwd()) / ".fake-claude-pids").write_text(f"{os.getpid()} {gc.pid}")
+    time.sleep(600)
     sys.exit(0)
 
 folder = Path(prompt.split("Package folder: ", 1)[1].split()[0])

@@ -15,6 +15,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 args = sys.argv[1:]
+if "--version" in args:  # goal 64: the skill's environment is pinned to the MAX that will serve the port
+    print("max 26.7.0.dev2026100905")
+    sys.exit(0)
 if os.environ.get("FAKE_MAX_ARGS_FILE"):
     open(os.environ["FAKE_MAX_ARGS_FILE"], "w").write(json.dumps(args))
 if os.environ.get("FAKE_MAX_ARGS_LOG"):

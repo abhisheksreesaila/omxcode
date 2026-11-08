@@ -191,6 +191,12 @@ def start_pull(mut a: Add, mut api: Api, var r: Pick):
     api.post(ADD_GOT_PULL_START, "/admin/pulls", "{\"ref\": " + json_string(mref) + "}", id=a.flow)
 
 
+def ask_porter(mut a: Add, mut api: Api):
+    """What is set up to write a port, and what was detected on this machine (goal 64 M1): the port screen makes
+    the choice itself, so the person is never sent to another screen and back."""
+    api.get(ADD_GOT_PORTER, "/admin/porter")
+
+
 def start_port(mut a: Add, mut api: Api, var r: Pick):
     var mref = r.repo if r.repo != "" else r.id
     a.noticed = r^
@@ -221,6 +227,7 @@ def pick(mut a: Add, mut api: Api, var r: Pick):
     elif r.fit == "port":
         a.noticed = r^
         a.notice = NOTICE_PORT
+        ask_porter(a, api)
     else:
         start_pull(a, api, r^)
 
@@ -251,6 +258,7 @@ def finish_pull(mut a: Add, mut api: Api, job: Job, mut out: AddOut):
         r.fit = "port"
         a.noticed = r^
         a.notice = NOTICE_PORT
+        ask_porter(a, api)
         a.note = pull_detail(job)
         return
     if job.status != "done":
@@ -347,6 +355,23 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
             start_pull(a, api, Pick(s.id, s.repo, "max", s.arch, s.params, s.size_gb, s.est_gb, "ok", List[Sugg]()))
     elif m == ADD_PORT_IT:
         start_port(a, api, a.noticed.copy())
+    elif m == ADD_PORTER_CLAUDE:
+        a.porter_note = ""
+        api.post(ADD_GOT_PORTER_SAVE, "/admin/porter", '{"kind": "claude-code"}')
+    elif m == ADD_PORTER_SETTINGS:
+        a.porter_open = True
+        a.porter_note = ""
+    elif m == ADD_PORTER_KEY:
+        a.porter_key = event.text
+    elif m == ADD_PORTER_BASE:
+        a.porter_base = event.text
+    elif m == ADD_PORTER_SAVE and not a.porter_saving:
+        a.porter_saving = True
+        a.porter_note = ""
+        var kind = "openai-compatible" if String(a.porter_base.strip()) != "" else String("anthropic")
+        api.post(ADD_GOT_PORTER_SAVE, "/admin/porter", '{"kind": ' + json_string(kind) + ', "key": ' + json_string(String(a.porter_key.strip()))
+                 + ', "base_url": ' + json_string(String(a.porter_base.strip())) + "}")
+
     elif m == ADD_COPY_CMD:
         out.clip = twin("guided", a.noticed.repo if a.noticed.repo != "" else a.noticed.id)
     elif m == ADD_CANCEL and a.running and not a.aborted:
@@ -458,6 +483,32 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
                 finish_pull(a, api, job, out)
         except e:
             a.errors += 1
+    elif m == ADD_GOT_PORTER:
+        a.porter_asked = True
+        if not failed:
+            try:
+                var j = Json.parse(event.text)
+                a.porter = j.text(j.get(0, "kind"))
+                a.porter_found = j.text(j.get(j.get(0, "detected"), "path"))
+            except:
+                pass
+    elif m == ADD_GOT_PORTER_SAVE:
+        a.porter_saving = False
+        if failed:
+            a.porter_note = problem(event)
+        else:
+            a.porter_asked = True
+            try:
+                var j = Json.parse(event.text)
+                a.porter = j.text(j.get(0, "kind"))
+                a.porter_found = j.text(j.get(j.get(0, "detected"), "path"))
+            except:
+                a.porter = "claude-code"
+            a.refused = ""
+            a.note = ""
+            a.porter_note = ""
+            a.porter_key = ""  # (sent; never kept in the app)
+            a.porter_open = False
     elif m == ADD_GOT_PORT_START:
         if failed:
             var code = error_code(event)
@@ -474,6 +525,11 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
                 except:
                     pass
                 a.note = "Could not start the port: " + problem(event)
+            elif event.number == 400 and (code == "porter_not_configured" or code == "porter_unusable"):
+                a.porter = ""
+                a.porter_asked = True
+                a.porter_note = problem(event)
+                ask_porter(a, api)
             elif event.number == 400 and code == "no_sandbox":
                 a.refused = problem(event)
                 a.sandbox = True

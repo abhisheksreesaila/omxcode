@@ -191,7 +191,8 @@ scripts/build.sh console linux &amp;&amp; build/console/linux/console</pre>
       <div>It needs MAX; when MAX isn't installed, the app opens and says how to get it.</div>
       <div>On the Mac it has opened and started its service on GitHub's macOS runners. Serving a model on Apple silicon through MAX hasn't been tried yet.</div>
       <div>The app has no chat window of its own yet: you talk to a model through the endpoint, from any OpenAI client.</div>
-      <div>Two things the earlier Python version did aren't in this one yet: porting a model MAX can't run, and reaching the endpoint from another machine over HTTPS. The console still shows their buttons.</div>
+      <div>Porting a model MAX can't run is back, and it's <b>beta</b>: Claude Code (or an API key for a frontier model) writes the architecture under the import-model skill, in a sandbox, and three gates check it. Of the 14 models tried on this machine, <b>8 of 14</b> ported and served, and everything that worked was 1 to 3 billion parameters. When it fails, the screen hands you the workspace, the whole log, the gate that failed and the best attempt it kept.</div>
+      <div>Reaching the endpoint from another machine over HTTPS is back too, and it's <b>beta</b>: Caddy (which you install, we don't bundle it) fronts the gateway with a certificate it signs itself, and every request carries an app key. Your machines have to trust that certificate once.</div>
     </div>
     <div class="ctas rv"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode">Get it on GitHub</a><a class="more" href="gallery/">Back to the gallery</a></div>
   </div>

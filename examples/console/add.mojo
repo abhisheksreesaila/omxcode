@@ -36,6 +36,8 @@ comptime DEFAULT_SUB = "Search the MAX catalog and Hugging Face · every result 
 comptime ORDER: List[String] = ["check", "fetch", "compile", "serve", "smoke"]
 comptime LABELS: List[String] = ["Check hardware", "Fetch the model", "Compile graph", "Serve on localhost", "Smoke test"]
 comptime FILTER_TITLES: List[String] = ["All", "Fits", "Needs porting"]
+comptime PORT_BETA = ("beta: of the 14 models tried on the owner’s machine, 8 ported and served, and everything that worked was 1 to 3 "
+                      + "billion parameters. Expect to finish some ports by hand.")
 comptime PORT_NOTE = ("“Port it” runs Claude Code with Modular’s import-model skill, unattended and in a sandbox: it reads the config, writes the model "
                       + "as a MAX graph, checks it against the reference and fixes what fails. It may take a while, often several minutes and sometimes "
                       + "much longer, and it uses your Claude Code session. You will see every stage and the full log, and you can cancel.")
@@ -445,6 +447,16 @@ struct Add(Copyable, Movable):
     # the notice above the results (too big, needs porting)
     var notice: Int
     var noticed: Pick
+    # the porting assistant, read from /admin/porter when a port is offered (goal 64 M1): a port never starts
+    # without one, so the choice is made here, on the port screen, instead of sending the person to Settings
+    var porter: String  # the kind set up ("" none yet)
+    var porter_found: String  # Claude Code on this machine, as the daemon detected it ("" none)
+    var porter_asked: Bool  # /admin/porter answered
+    var porter_note: String
+    var porter_key: String  # what is typed into the inline key field (sent once, never kept after it is saved)
+    var porter_base: String
+    var porter_open: Bool  # the inline key fields are showing
+    var porter_saving: Bool
     var guided: Bool
     var refused: String
     var sandbox: Bool
@@ -486,6 +498,14 @@ struct Add(Copyable, Movable):
         self.mem_total = 0
         self.notice = NOTICE_NONE
         self.noticed = Pick("", "", "", "", -1, -1, -1, "", List[Sugg]())
+        self.porter = ""
+        self.porter_found = ""
+        self.porter_asked = False
+        self.porter_note = ""
+        self.porter_key = ""
+        self.porter_base = ""
+        self.porter_open = False
+        self.porter_saving = False
         self.guided = False
         self.refused = ""
         self.sandbox = False
@@ -618,7 +638,7 @@ def port_card(a: Add) -> View:
     """The port offer: what porting does, the facts, and Port it (or the guided command)."""
     var r = a.noticed.copy()
     var mref = r.repo if r.repo != "" else r.id
-    var body: List[View] = [QuietText(PORT_NOTE)]
+    var body: List[View] = [QuietText(PORT_NOTE), QuietText(PORT_BETA)]
     if a.guided:
         body.append(WarnLine("Automatic porting is not in this daemon yet. Run the guided port from a terminal instead:"))
     if a.note != "":
@@ -628,15 +648,34 @@ def port_card(a: Add) -> View:
     if a.sandbox:
         body.append(QuietText("Without a sandbox the agent would run with your full permissions, so it is not offered here. If you accept that, the terminal can: "
                               + twin("port", mref) + " --unsandboxed"))
+    var ready = a.porter != "" or not a.porter_asked
+    if a.porter_asked and a.porter == "":  # the choice, here, instead of a trip to Settings (goal 64 M1)
+        body.append(QuietText("Porting needs a frontier model to write the architecture. "
+                              + ("Claude Code is on this machine: " + a.porter_found if a.porter_found != ""
+                                 else "Claude Code was not found on this machine.")))
+    if a.porter_note != "":
+        body.append(WarnLine(a.porter_note))
     var size = joined([params_text(r.params), size_text(r.size_gb)])
     body.append(FactList([Fact("architecture", FactText(r.arch if r.arch != "" else String("unknown"))), Fact("size", FactText(size if size != "" else String("unknown"))),
                           Fact("skill", FactText("import-model"))]))
     if a.guided:
         body.append(ButtonRow([SmallButton("Copy the command", ADD_COPY_CMD, "copy")]))
     elif a.refused == "":
-        body.append(ButtonRow([SmallButton("Port it", ADD_PORT_IT, "hammer", FILL)]))
+        if ready:
+            body.append(ButtonRow([SmallButton("Port it", ADD_PORT_IT, "hammer", FILL)]))
+        elif a.porter_open:
+            body.append(FieldWithHelp(OutlinedField(a.porter_base, "Base URL (an OpenAI-compatible endpoint; leave empty for Anthropic)", ADD_PORTER_BASE, ADD_PORTER_SAVE),
+                                      "https://… only, and never the key in the URL"))
+            body.append(FieldWithHelp(OutlinedField(a.porter_key, "API key for a frontier model", ADD_PORTER_KEY, ADD_PORTER_SAVE),
+                                      "Kept for omxconsole only, readable by you alone, never shown again and never logged. Removable at any time."))
+            body.append(ButtonRow([SmallButton("Checking the key…" if a.porter_saving else String("Save and port"), ADD_PORTER_SAVE, "key", FILL)]))
+        elif a.porter_found != "":
+            body.append(ButtonRow([SmallButton("Use Claude Code on this machine", ADD_PORTER_CLAUDE, "sparkles", FILL),
+                                   SmallButton("Use an API key", ADD_PORTER_SETTINGS, "key")]))
+        else:
+            body.append(ButtonRow([SmallButton("Use an API key for a frontier model", ADD_PORTER_SETTINGS, "key", FILL)]))
     return Card([CardHead(last_part(mref) + " uses " + (r.arch if r.arch != "" else String("an architecture")) + ", which MAX cannot run yet.",
-                          lead=[IconSquare("hammer", hue=1)], tail=[Badge("architecture check")]),
+                          lead=[IconSquare("hammer", hue=1)], tail=[Badge("beta", BADGE_WARN), Badge("architecture check")]),
                  CardBody(body^), CardFoot(twin("guided", mref) if a.guided or a.refused != "" else twin("port", mref))])
 
 

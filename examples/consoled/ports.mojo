@@ -617,10 +617,20 @@ def _drop_pid(mut w: W, pid: Int):
 
 # ---- the workspace the agent reads ------------------------------------------------------------------------------
 
+def gate_prefix(skills_root: String) -> String:
+    """How the skill's own scripts are run: through its pixi environment, or whatever MXC_GATE_CMD names. The
+    Python version made the gates injectable so its tests could run stand-ins (port_auto.PortTools); this is the
+    same seam, and goal 64's check drives the fake-port harness through it."""
+    var override = getenv("MXC_GATE_CMD")
+    if override != "":
+        return override
+    return "pixi run --manifest-path " + skills_root + "/" + ENTRY_SKILL + "/pixi.toml python"
+
+
 def skill_script_command(skills_root: String, script: String) -> String:
     """How the agent runs one of the skill's scripts from its workspace (it can't change into the skill root)."""
     var root = skills_root + "/" + ENTRY_SKILL
-    return "pixi run --manifest-path " + root + "/pixi.toml python " + root + "/scripts/" + script
+    return gate_prefix(skills_root) + " " + root + "/scripts/" + script
 
 
 def skill_script_allowed(skills_root: String) -> List[String]:
@@ -905,7 +915,7 @@ def _parity(mut w: W, mut store: Store, job: PortJob, mut ctx: Ctx, at: Int) rai
                         for line in ran.output.split("\n"):
                             if String(line).find(" PASS") >= 0:
                                 passes += 1
-                        out = Fail("parity check failed (exit " + String(ran.code) + "): the port's output does not match Hugging Face",
+                        out = Fail("parity check failed (exit " + String(ran.code) + "): " + last_words(ran.output),
                                    True, ran.output, 3.0 + Float64(passes) / 100.0)
                     else:
                         w.detail(at, "matches the Hugging Face reference")
@@ -918,6 +928,23 @@ def _parity(mut w: W, mut store: Store, job: PortJob, mut ctx: Ctx, at: Int) rai
     _drop_pid(w, p.pid)
     w.note_pids(store)
     return out^
+
+
+def last_words(output: String, keep: Int = 200) -> String:
+    """The last line of a command's output that says something (what a failed gate complained about)."""
+    var lines = output.split("\n")
+    for i in reversed(range(len(lines))):
+        var l = String(String(lines[i]).strip())
+        if l != "" and not _is_noise(l):
+            return String(l[byte = : min(keep, l.byte_length())])
+    return ""
+
+
+def _is_noise(line: String) -> Bool:
+    for w in ["%|", "it/s]", "s/it]"]:
+        if line.find(String(w)) >= 0:
+            return True
+    return False
 
 
 def _script_argv_list(ctx: Ctx, script: String, args: List[String]) -> List[String]:
@@ -978,7 +1005,8 @@ def _attempt(mut w: W, mut store: Store, job: PortJob, mut ctx: Ctx, attempt: In
         var cmd = _script_argv_list(ctx, "check_port.py", [ctx.weights if ctx.weights != "" else ctx.repo_id, "--port-dir", ctx.port_dir])
         var r = exec_cmd(w, store, job, cmd, ctx.skills_root + "/" + ENTRY_SKILL, CHECK_TIMEOUT_MS, "check", ctx, "", False)
         if r.code != 0:
-            var msg2 = "the build check failed (exit " + String(r.code) + ")"
+            # the gate's own last words go in the row, so the screen hands them over without opening the log
+            var msg2 = "the build check failed (exit " + String(r.code) + "): " + last_words(r.output)
             w.end(store, at, "failed", msg2)
             return Fail("build failed: " + msg2, True, r.output, 1.0)
         w.end(store, at, "done", "the package imports and every weight maps")
@@ -1079,7 +1107,7 @@ def _pipeline(mut w: W, mut store: Store, job: PortJob) raises -> Fail:
         _ = output(["git", "-C", ctx.skills_root, "pull", "--ff-only"], 180_000)
     else:
         makedirs(_parent(ctx.skills_root), exist_ok=True)
-        var out = output(["git", "clone", "--depth", "1", SKILLS_REPO, ctx.skills_root], 600_000)
+        var out = output(["git", "clone", "--depth", "1", getenv("MXC_SKILLS_REPO", SKILLS_REPO), ctx.skills_root], 600_000)
         if not isdir(ctx.skills_root + "/" + ENTRY_SKILL):
             return Fail("could not install Modular's skills from " + SKILLS_REPO + ": " + String(out[byte = : min(300, out.byte_length())]), False, "", 0)
     if not isdir(ctx.skills_root + "/" + ENTRY_SKILL):
@@ -1107,7 +1135,7 @@ def _pipeline(mut w: W, mut store: Store, job: PortJob) raises -> Fail:
     for d in [donor.source_dir, donor.v3_dir]:
         if String(d) != "":
             ctx.extra_allowed.append("Bash(cp -r " + String(d) + "/:*)")
-    if exists(ctx.skills_root + "/" + ENTRY_SKILL + "/pixi.toml"):
+    if exists(ctx.skills_root + "/" + ENTRY_SKILL + "/pixi.toml") and getenv("MXC_GATE_CMD") == "":
         w.detail(at, "installing the skill's environment (outside the sandbox; the first time takes a while)…")
         var ran = exec_cmd(w, store, job, ["pixi", "install"], ctx.skills_root + "/" + ENTRY_SKILL, INSTALL_TIMEOUT_MS,
                            "install", ctx, "", False)

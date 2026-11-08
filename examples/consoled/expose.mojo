@@ -16,6 +16,16 @@ from sandbox import which
 from sysinfo import hostname
 
 comptime EXPOSE_PORT = 8443
+
+
+def expose_port() raises -> Int:
+    """The HTTPS port Caddy listens on: 8443, or MXC_EXPOSE_PORT when something else on this machine already has
+    8443 (which is what the checks use; D-6410)."""
+    var asked = getenv("MXC_EXPOSE_PORT")
+    if asked == "":
+        return EXPOSE_PORT
+    var n = Int(atol(asked))
+    return n if n > 0 and n < 65536 else EXPOSE_PORT
 comptime CADDY_ADMIN = "127.0.0.1:2099"
 comptime API_PATHS = ["/v1/models", "/v1/chat/completions", "/v1/completions", "/v1/embeddings"]
 comptime SETTLE_MS = 1000  # Caddy is watched this long: a bad config exits at once and the caller hears why
@@ -115,7 +125,7 @@ def lan_endpoint(home: String) -> String:
     if not exposed(home):
         return ""
     try:
-        return "https://" + String(read_text(home + "/expose/host").strip()) + ":" + String(EXPOSE_PORT) + "/v1"
+        return "https://" + String(read_text(home + "/expose/host").strip()) + ":" + String(expose_port()) + "/v1"
     except:
         return ""
 
@@ -175,7 +185,7 @@ struct Exposing(Movable):
         if host != "localhost":
             hosts.append("localhost")
         var caddyfile = dir + "/Caddyfile"
-        write_text(caddyfile, render_caddyfile(hosts, EXPOSE_PORT))
+        write_text(caddyfile, render_caddyfile(hosts, expose_port()))
         write_text(dir + "/host", host)
         var log = dir + "/caddy.log"
         # Only what Caddy needs: no key in the daemon's environment belongs in a LAN-facing process.

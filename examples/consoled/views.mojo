@@ -11,6 +11,7 @@ from mojoui.clock import wall_seconds
 from mojoui import libc
 from mojoui.libc import _sym
 from store import Store
+from expose import expose_port
 from portprep import workspace_name, package_slug
 from supervisor import Supervisor, gpus, gpus_json, Gpu
 from sysinfo import hostname, rss_mb, tree_bytes
@@ -221,11 +222,11 @@ def system_json(store: Store, mut sup: Supervisor, home: String, port: Int, upti
     var me = libc.getpid()
     var crew = String('[{"id": "daemon", "kind": "daemon", "name": "omxconsole daemon", "state": "running", "pid": ') + String(me)
     crew += ', "port": ' + String(port) + ', "rss_mb": ' + num(rss_mb(me)) + ', "uptime_seconds": ' + String(uptime) + "}"
-    crew += ', {"id": "caddy", "kind": "caddy", "name": "Caddy", "state": ' + ('"running"' if lan != "" else '"stopped"') + ', "pid": null, "port": 8443, "rss_mb": null, "uptime_seconds": null}'
+    crew += ', {"id": "caddy", "kind": "caddy", "name": "Caddy", "state": ' + ('"running"' if lan != "" else '"stopped"') + ', "pid": null, "port": ' + String(expose_port()) + ', "rss_mb": null, "uptime_seconds": null}'
     var listeners = String('[{"name": "omxconsole daemon", "kind": "daemon", "host": "127.0.0.1", "port": ') + String(port)
     listeners += ', "exposed": false, "state": "listening", "talks_to": "the mxc CLI, this console, your apps on this machine, and Caddy (key check, then every LAN request)"}'
     var caddy_state = '"listening"' if lan != "" else '"off"'
-    listeners += ', {"name": "Caddy", "kind": "caddy", "host": "0.0.0.0", "port": 8443, "exposed": true, "state": ' + caddy_state + ', "talks_to": "LAN clients over HTTPS, each with an app key"}'
+    listeners += ', {"name": "Caddy", "kind": "caddy", "host": "0.0.0.0", "port": ' + String(expose_port()) + ', "exposed": true, "state": ' + caddy_state + ', "talks_to": "LAN clients over HTTPS, each with an app key"}'
     listeners += ', {"name": "Caddy admin", "kind": "caddy", "host": "127.0.0.1", "port": 2099, "exposed": false, "state": ' + caddy_state + ', "talks_to": "Caddy itself (its config API)"}'
     for i in range(len(sup.children)):
         var name = sup.children[i].name

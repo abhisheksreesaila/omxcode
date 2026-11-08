@@ -17,6 +17,13 @@ comptime HUB = "https://huggingface.co"
 comptime HUB_TIMEOUT_MS = 30_000
 
 
+def hub_base() -> String:
+    """The Hub, or the stand-in a check puts in its place (MOJOUI_HF_BASE; goal 64's fake-port harness, as the
+    Python version injected its own hub in tests). Only a check sets it: whoever can set this process's
+    environment can already do anything it can."""
+    return getenv("MOJOUI_HF_BASE", HUB)
+
+
 @fieldwise_init
 struct HubModel(Copyable, Movable):
     var id: String
@@ -50,11 +57,11 @@ struct HubRepo(Copyable, Movable):
 
 
 def _get(path: String) raises -> Json:
-    var r = FlareTransport.send(_auth(Request.get(0, HUB + path).timeout(HUB_TIMEOUT_MS)))
+    var r = FlareTransport.send(_auth(Request.get(0, hub_base() + path).timeout(HUB_TIMEOUT_MS)))
     if r.error != "":
         raise Error("Hugging Face: " + r.error)
     if r.status == 401 or r.status == 403:
-        raise Error("Hugging Face: " + HUB + path + " needs access (a gated or private repo: accept its terms on the Hub, set HF_TOKEN)")
+        raise Error("Hugging Face: " + hub_base() + path + " needs access (a gated or private repo: accept its terms on the Hub, set HF_TOKEN)")
     if r.status == 404:
         raise Error("Hugging Face: no such repo or revision (" + path + ")")
     if r.status != 200:
@@ -148,7 +155,7 @@ def safe_name(name: String) -> Bool:
 
 
 def hub_file_url(repo: HubRepo, file: HubFile) -> String:
-    return HUB + "/" + _path(repo.id) + "/resolve/" + repo.sha + "/" + _path(file.name)
+    return hub_base() + "/" + _path(repo.id) + "/resolve/" + repo.sha + "/" + _path(file.name)
 
 
 def hub_download(repo: HubRepo, file: HubFile, folder: String, t: Transfer, timeout_ms: Int = 60_000, tries: Int = 6) -> Response:
