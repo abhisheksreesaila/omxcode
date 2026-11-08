@@ -48,6 +48,7 @@ EXPLAINED = {  # (round 4, each read in full on both sides; round 5: keyed by th
     ("14-check.py:m2", "GTK run failed (exit 0)"): "both: 'GTK run failed (exit 0)' with the same Start screen dump; the reasons are the dump's tail cut at different points",
     ("14-check.py:m3", "GTK run failed (exit 0)"): "as M2: the same GTK failure and dump, cut at different points",
     ("14-check.py:m4", "GTK run failed (exit 0)"): "as M2: the same GTK failure and dump, cut at different points",
+    ("33-check.py:m3", "liquid.mojo still shapes"): "the same liquid.mojo lints (sidebar and inspector shaped by hand) on both sides, listed in another order (round 5)",
     ("33-check.py:m4", "liquid.mojo still shapes"): "the same four liquid.mojo lints (sidebar and inspector shaped by hand), listed in another order",
 }
 
