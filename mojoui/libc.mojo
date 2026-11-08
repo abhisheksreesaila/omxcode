@@ -102,6 +102,11 @@ def unlink(var path: String) -> Int:
     return Int(external_call["unlink", c_int](path.as_c_string_span()))
 
 
+def chmod(var path: String, mode: Int) -> Int:
+    """A file's permissions (0o600 for a stored key: only this user may read it)."""
+    return Int(external_call["chmod", c_int](path.as_c_string_span(), c_uint(mode)))
+
+
 def rename(var old: String, var new: String) -> Int:
     """0 when `old` now has the name `new` (replacing it, in one step on one file system)."""
     return Int(external_call["rename", c_int](old.as_c_string_span(), new.as_c_string_span()))
@@ -149,6 +154,16 @@ def posix_spawn_file_actions_destroy(actions: Int) -> Int:
 
 def posix_spawn_file_actions_addopen(actions: Int, fd: Int, path: Int, flags: Int, mode: Int) -> Int:
     return Int(external_call["posix_spawn_file_actions_addopen", c_int](_p(actions), c_int(fd), _p(path), c_int(flags), c_uint(mode)))
+
+
+def posix_spawn_file_actions_addchdir(actions: Int, path: Int) -> Int:
+    """posix_spawn_file_actions_addchdir_np: the child changes into `path` before it runs (glibc 2.29+, macOS 10.15+).
+    0 on success; a non-zero errno, or -1 when this libc doesn't have it (the caller then runs in its own cwd)."""
+    var f = _sym("posix_spawn_file_actions_addchdir_np")
+    if f == 0:
+        return -1
+    var call = Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[]
+    return Int(call(actions, path))
 
 
 def posix_spawn_file_actions_adddup2(actions: Int, fd: Int, to: Int) -> Int:

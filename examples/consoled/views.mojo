@@ -11,6 +11,7 @@ from mojoui.clock import wall_seconds
 from mojoui import libc
 from mojoui.libc import _sym
 from store import Store
+from portprep import workspace_name, package_slug
 from supervisor import Supervisor, gpus, gpus_json, Gpu
 from sysinfo import hostname, rss_mb, tree_bytes
 
@@ -161,21 +162,22 @@ def find_max(max_cmd: String) -> String:
     return ""
 
 
-def info_json(store: Store, port: Int, host_header: String, uptime: Int, max_cmd: String = "max") raises -> String:
+def info_json(store: Store, port: Int, host_header: String, uptime: Int, max_cmd: String = "max", lan: String = "") raises -> String:
     var base = "http://" + (host_header if host_header != "" else "127.0.0.1")
     var active = store.db.count("SELECT COUNT(*) FROM keys WHERE revoked_at IS NULL AND app NOT LIKE '\\_%' ESCAPE '\\'")
     var blocked = atol(store.db.one_text("SELECT COUNT(*) FROM requests WHERE status = 401 AND ts >= ?", [String(local_midnight())]))
     return ('{"host": ' + json_string(hostname()) + ', "endpoint": ' + json_string(base + "/v1") + ', "docs": ' + json_string(base + "/docs")
-            + ', "lan_endpoint": null, "max_version": ' + max_version() + ', "uptime_seconds": ' + String(uptime)
+            + ', "lan_endpoint": ' + (json_string(lan) if lan != "" else "null") + ', "max_version": ' + max_version() + ', "uptime_seconds": ' + String(uptime)
             + ', "active_keys": ' + String(active) + ', "blocked_today": ' + String(blocked)
             + ', "max": {"found": ' + ("true" if find_max(max_cmd) != "" else "false") + ', "path": ' + json_string(find_max(max_cmd)) + "}}")
 
 
-def gateway_json(store: Store, since: Float64, unknown: Int, refused: Int) raises -> String:
+def gateway_json(store: Store, since: Float64, unknown: Int, refused: Int, lan: String = "") raises -> String:
     var active = store.db.count("SELECT COUNT(*) FROM keys WHERE revoked_at IS NULL AND app NOT LIKE '\\_%' ESCAPE '\\'")
     var revoked = store.db.count("SELECT COUNT(*) FROM keys WHERE revoked_at IS NOT NULL AND app NOT LIKE '\\_%' ESCAPE '\\'")
     var unauth = atol(store.db.one_text("SELECT COUNT(*) FROM requests WHERE status = 401 AND ts >= ?", [String(local_midnight())]))
-    return ('{"counters_since": ' + num(since) + ', "tls": {"on": false, "endpoint": null}, "keys": {"active": ' + String(active)
+    return ('{"counters_since": ' + num(since) + ', "tls": {"on": ' + ("true" if lan != "" else "false") + ', "endpoint": '
+            + (json_string(lan) if lan != "" else "null") + '}, "keys": {"active": ' + String(active)
             + ', "revoked": ' + String(revoked) + '}, "unauthorized_today": ' + String(unauth) + ', "unknown_routes_today": ' + String(unknown)
             + ', "admin_refused_today": ' + String(refused) + ', "enforced_by_caddy": ["dot_segments", "secrets"]}')
 
@@ -185,7 +187,7 @@ def ca_path() -> String:
     return data + "/caddy/pki/authorities/local/root.crt"
 
 
-def network_json(store: Store, mut sup: Supervisor, port: Int) raises -> String:
+def network_json(store: Store, mut sup: Supervisor, port: Int, lan: String = "") raises -> String:
     var now = wall_seconds()
     var recent = Dict[String, Int]()
     var total_recent = 0
@@ -208,21 +210,23 @@ def network_json(store: Store, mut sup: Supervisor, port: Int) raises -> String:
         SELECT app, COUNT(*) AS requests, MAX(ts) AS last_ts FROM requests WHERE ts >= ? AND app IS NOT NULL
         AND app NOT LIKE '\\_%' ESCAPE '\\' AND app != 'console' GROUP BY app ORDER BY last_ts DESC LIMIT 8)""", [String(now - 86400)])
     var host = hostname()
-    return ('{"host": ' + json_string(host) + ', "expose": {"caddy": false, "litellm": false}, "exposed": false, "lan_endpoint": null, "default_host": '
+    return ('{"host": ' + json_string(host) + ', "expose": {"caddy": ' + ("true" if lan != "" else "false") + ', "litellm": false}, "exposed": '
+            + ("true" if lan != "" else "false") + ', "lan_endpoint": ' + (json_string(lan) if lan != "" else "null") + ', "default_host": '
             + json_string(host + ".local") + ', "ca_path": ' + json_string(ca_path()) + ', "ca_exists": ' + ("true" if exists(ca_path()) else "false")
             + ', "ports": {"daemon": ' + String(port) + ', "litellm": 4000, "caddy": 8443}, "models": ' + models + ', "apps": ' + apps
             + ', "recent_requests": ' + String(total_recent) + "}")
 
 
-def system_json(store: Store, mut sup: Supervisor, home: String, port: Int, uptime: Int) raises -> String:
+def system_json(store: Store, mut sup: Supervisor, home: String, port: Int, uptime: Int, lan: String = "") raises -> String:
     var me = libc.getpid()
     var crew = String('[{"id": "daemon", "kind": "daemon", "name": "omxconsole daemon", "state": "running", "pid": ') + String(me)
     crew += ', "port": ' + String(port) + ', "rss_mb": ' + num(rss_mb(me)) + ', "uptime_seconds": ' + String(uptime) + "}"
-    crew += ', {"id": "caddy", "kind": "caddy", "name": "Caddy", "state": "stopped", "pid": null, "port": 8443, "rss_mb": null, "uptime_seconds": null}'
+    crew += ', {"id": "caddy", "kind": "caddy", "name": "Caddy", "state": ' + ('"running"' if lan != "" else '"stopped"') + ', "pid": null, "port": 8443, "rss_mb": null, "uptime_seconds": null}'
     var listeners = String('[{"name": "omxconsole daemon", "kind": "daemon", "host": "127.0.0.1", "port": ') + String(port)
     listeners += ', "exposed": false, "state": "listening", "talks_to": "the mxc CLI, this console, your apps on this machine, and Caddy (key check, then every LAN request)"}'
-    listeners += ', {"name": "Caddy", "kind": "caddy", "host": "0.0.0.0", "port": 8443, "exposed": true, "state": "off", "talks_to": "LAN clients over HTTPS, each with an app key"}'
-    listeners += ', {"name": "Caddy admin", "kind": "caddy", "host": "127.0.0.1", "port": 2099, "exposed": false, "state": "off", "talks_to": "Caddy itself (its config API)"}'
+    var caddy_state = '"listening"' if lan != "" else '"off"'
+    listeners += ', {"name": "Caddy", "kind": "caddy", "host": "0.0.0.0", "port": 8443, "exposed": true, "state": ' + caddy_state + ', "talks_to": "LAN clients over HTTPS, each with an app key"}'
+    listeners += ', {"name": "Caddy admin", "kind": "caddy", "host": "127.0.0.1", "port": 2099, "exposed": false, "state": ' + caddy_state + ', "talks_to": "Caddy itself (its config API)"}'
     for i in range(len(sup.children)):
         var name = sup.children[i].name
         var state = sup.state(name)
@@ -528,10 +532,15 @@ def real_or_null(j: Json, node: Int) -> String:
     return num(j.real(node))
 
 
-def ports_json(store: Store, home: String) raises -> String:
+def ports_json(store: Store, home: String, only: Int = 0) raises -> String:
+    """The last 20 ports (`only`: that one alone, "" when there is no such port), each with the tail of its log and
+    what a person needs to carry a failed port on by hand (goal 64 M3): the workspace, the full log, the gate that
+    failed and the best attempt kept."""
+    var where = " WHERE id = " + String(only) if only > 0 else String("")
     var rows = store.db.one_text("""SELECT coalesce(json_group_array(json_object('id', id, 'ref', ref, 'name', name, 'repo_id', repo_id, 'status', status,
         'stage', stage, 'message', message, 'started_at', started_at, 'finished_at', finished_at, 'max_attempts', max_attempts,
-        'stages', json(stages), 'log', ? || '/ports/' || id || '/port.log', 'model', model)), '[]') FROM (SELECT * FROM ports ORDER BY id DESC LIMIT 20)""", [home])
+        'stages', json(stages), 'log', ? || '/ports/' || id || '/port.log', 'model', model)), '[]') FROM (SELECT * FROM ports""" + where
+        + " ORDER BY id DESC LIMIT 20)", [home])
     var j = Json.parse(rows)
     var out = String("[")
     for i in range(j.size(0)):
@@ -544,8 +553,31 @@ def ports_json(store: Store, home: String) raises -> String:
         for k in range(from_line, len(lines)):
             last += ("\n" if k > from_line else "") + String(lines[k])
         var text = rows_item(rows, j, i)
-        out += (", " if i > 0 else "") + String(text[byte = : text.byte_length() - 1]) + ', "log_tail": ' + json_string(last) + "}"
+        var id = j.number(j.get(p, "id"))
+        var name = j.text(j.get(p, "name"))
+        var workspace = home + "/ports/" + workspace_name(name) if name != "" else String("")
+        var best = home + "/ports/" + String(id) + "/best"
+        # the gate that failed, as the screen shows it: the last failed row, with its attempt and what it said
+        var failed = String("null")
+        var stages = j.get(p, "stages")
+        for k in range(j.size(stages)):
+            var s = j.at(stages, k)
+            if j.text(j.get(s, "status")) == "failed":
+                failed = ('{"name": ' + json_string(j.text(j.get(s, "name"))) + ', "attempt": ' + text_or_number(j, j.get(s, "attempt"))
+                          + ', "detail": ' + json_string(j.text(j.get(s, "detail"))) + "}")
+        out += (", " if i > 0 else "") + String(text[byte = : text.byte_length() - 1]) + ', "log_tail": ' + json_string(last)
+        out += ', "workspace": ' + json_string(workspace) + ', "port_dir": ' + json_string(workspace + "/port/" + package_slug(name) if name != "" else String(""))
+        out += ', "failed_stage": ' + failed + ', "best_kept": ' + ("true" if isdir(best) else "false")
+        out += ', "best_path": ' + (json_string(best) if isdir(best) else "null") + ', "beta": true}'
+    if only > 0:
+        return String(out[byte = 1 :]) if j.size(0) > 0 else String("")
     return '{"ports": ' + out + "]}"
+
+
+def text_or_number(j: Json, node: Int) -> String:
+    if node < 0 or j.kind(node) != J_NUMBER:
+        return "null"
+    return String(j.number(node))
 
 
 def rows_item(rows: String, j: Json, i: Int) -> String:

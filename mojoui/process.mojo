@@ -101,9 +101,10 @@ struct Process(Movable):
         self.code = -1
 
     @staticmethod
-    def start(argv: List[String], log: String, env: List[String] = List[String]()) raises -> Process:
+    def start(argv: List[String], log: String, env: List[String] = List[String](), cwd: String = "") raises -> Process:
         """Runs argv[0] (looked up on PATH) with argv, this environment plus `env`, stdout and stderr appended to `log`
-        (stdin from /dev/null)."""
+        (stdin from /dev/null), in `cwd` when given (a libc without posix_spawn_file_actions_addchdir_np raises
+        instead of silently running somewhere else)."""
         if len(argv) == 0:
             raise Error("no program to start")
         var envs = _environment(env)
@@ -126,6 +127,20 @@ struct Process(Movable):
         _ = libc.posix_spawn_file_actions_addopen(actions, 0, null_c, 0, 0)
         _ = libc.posix_spawn_file_actions_addopen(actions, 1, log_c, O_WRONLY | O_CREAT | O_APPEND, 0o644)
         _ = libc.posix_spawn_file_actions_adddup2(actions, 1, 2)
+        var cwd_c = _cstr(cwd) if cwd != "" else 0
+        if cwd != "":
+            if libc.posix_spawn_file_actions_addchdir(actions, cwd_c) != 0:
+                _ = libc.posix_spawn_file_actions_destroy(actions)
+                _free(actions)
+                _free(attr)
+                _free(log_c)
+                _free(null_c)
+                _free(cwd_c)
+                for c in cargs:
+                    _free(c)
+                for c in cenv:
+                    _free(c)
+                raise Error("this libc cannot start a program in another directory (posix_spawn_file_actions_addchdir_np)")
         _ = libc.posix_spawnattr_init(attr)
         _ = libc.posix_spawnattr_setflags(attr, POSIX_SPAWN_SETPGROUP)
         _ = libc.posix_spawnattr_setpgroup(attr, 0)
@@ -140,6 +155,8 @@ struct Process(Movable):
         _free(attr)
         _free(log_c)
         _free(null_c)
+        if cwd_c != 0:
+            _free(cwd_c)
         for c in cargs:
             _free(c)
         for c in cenv:

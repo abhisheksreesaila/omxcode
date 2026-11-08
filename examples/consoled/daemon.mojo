@@ -10,7 +10,7 @@ from mojoui.http import Request
 from mojoui.process import file_tail
 from std.os.path import exists, getsize
 from mojoui.sqlite import Database
-from mojoui.json import Json, json_string, J_ARRAY, J_STRING
+from mojoui.json import Json, json_string, J_ARRAY, J_STRING, J_BOOL
 from mojoui.hash import sha256_hex
 from mojoui.clock import now_ns, wall_seconds
 from flare.crypto.random import random_bytes
@@ -23,6 +23,10 @@ from views import requests_json, bench_json, bench_history_json, pulls_json, por
 from search import search_json
 from learn import notebook_json
 from pulls import Pulls, ref_problem
+from ports import Ports, MAX_ATTEMPTS, DEFAULT_ATTEMPTS
+from porter import (Porter, read_porter, write_porter, remove_porter, porter_env, porter_json, kind_problem,
+                    test_porter, detect_claude)
+from expose import Exposing, lan_endpoint, default_host, exposed, hostname_ok, NO_CADDY
 from mojoui.companion import parent_gone
 from bench import Bench, DEFAULT_RUNS, MAX_RUNS
 from mojoui.files import remove_tree
@@ -180,6 +184,8 @@ struct Daemon(Service):
     var loading: List[Loading]
     var stopping: Bool
     var pulls: Pulls
+    var ports: Ports
+    var exposing: Exposing
     var bench: Bench
     var bench_key: String  # the benchmark's own key (app "_bench", bench.py BENCH_APP): in memory only, never stored
 
@@ -192,10 +198,13 @@ struct Daemon(Service):
         self.loading = List[Loading]()
         self.stopping = False
         self.pulls = Pulls()
+        self.ports = Ports()
+        self.exposing = Exposing()
         self.bench = Bench()
         self.bench_key = new_secret()
         _ = self.store.db.run("UPDATE bench_runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
         _ = self.store.db.run("UPDATE pulls SET status = 'failed', message = 'The daemon stopped during this pull; pull again to resume.', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
+        _ = self.store.db.run("UPDATE ports SET status = 'failed', message = 'The daemon stopped during this port; the workspace and log are kept.', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
         self.cfg = cfg^
         self.started = wall_seconds()
         self.counters_since = self.started
@@ -224,6 +233,7 @@ struct Daemon(Service):
             self.stopping = True
         self.sup.sweep()
         self.answer_loads()
+        self.ports.sweep()
         var was = len(self.pulls.running)
         self.pulls.refresh(self.store)
         if len(self.pulls.running) < was:
@@ -249,6 +259,11 @@ struct Daemon(Service):
         if len(self.loading) > 0:
             sleep(0.3)  # (their server workers send the 503 before the process exits)
         self.loading = List[Loading]()
+        self.ports.cancel_all()  # (a stopping daemon must not leave a porting agent running)
+        try:
+            _ = self.exposing.stop(self.cfg.home)
+        except:
+            pass
         self.sup.stop_all_now()
 
     def answer(mut self, mut req: Req) -> Reply:
@@ -262,6 +277,16 @@ struct Daemon(Service):
                 return self.gateway(req)
             if req.matches("GET", "/health"):
                 return Reply.json('{"ok": true}')
+            if req.matches("GET", "/auth/check"):
+                # Caddy's forward_auth asks before it proxies a LAN request (goal 64 M4; gateway.py's auth_check):
+                # a valid app key answers 200 with the app's name, anything else 401, and the refusal is counted
+                # with the rest, since the client never reaches a /v1 route.
+                var now = wall_seconds()
+                var who = self.key_app(req, now)
+                if who == "":
+                    self.store.log_request(now, "", "", "auth_check", 401, -1, -1, -1.0, 0.0, False)
+                    return Reply.empty(401)
+                return Reply.empty(200).header("X-Mst-App", who)
             return Reply.not_found()
         except e:
             try:
@@ -287,17 +312,17 @@ struct Daemon(Service):
 
     def admin(mut self, mut req: Req) raises -> Reply:
         if req.matches("GET", "/admin/info"):
-            return Reply.json(info_json(self.store, self.cfg.port, req.header("host"), self.uptime(), self.cfg.max_cmd))
+            return Reply.json(info_json(self.store, self.cfg.port, req.header("host"), self.uptime(), self.cfg.max_cmd, lan_endpoint(self.cfg.home)))
         if req.matches("GET", "/admin/system"):
-            return Reply.json(system_json(self.store, self.sup, self.cfg.home, self.cfg.port, self.uptime()))
+            return Reply.json(system_json(self.store, self.sup, self.cfg.home, self.cfg.port, self.uptime(), lan_endpoint(self.cfg.home)))
         if req.matches("GET", "/admin/models"):
             return Reply.json(models_json(self.store, self.sup, self.sizes))
         if req.matches("GET", "/admin/status"):
             return Reply.json(models_json(self.store, self.sup, self.sizes))
         if req.matches("GET", "/admin/gateway"):
-            return Reply.json(gateway_json(self.store, self.counters_since, self.unknown_routes, self.admin_refused))
+            return Reply.json(gateway_json(self.store, self.counters_since, self.unknown_routes, self.admin_refused, lan_endpoint(self.cfg.home)))
         if req.matches("GET", "/admin/network"):
-            return Reply.json(network_json(self.store, self.sup, self.cfg.port))
+            return Reply.json(network_json(self.store, self.sup, self.cfg.port, lan_endpoint(self.cfg.home)))
         if req.matches("GET", "/admin/metrics") or req.matches("GET", "/admin/series"):
             var range = req.arg("range", "5m" if req.path.endswith("metrics") else "1h")
             if window_of(range) < 0:
@@ -385,6 +410,102 @@ struct Daemon(Service):
             return Reply.json('{"name": ' + json_string(req.param("name")) + ', "deleted": true, "files_removed": ' + ("true" if removed else "false") + "}")
         if req.matches("GET", "/admin/ports"):
             return Reply.json(ports_json(self.store, self.cfg.home))
+        if req.matches("POST", "/admin/ports"):
+            # admin_port.py's route: {"ref": "owner/repo", "name": …, "max_attempts": 3, "unsandboxed": false}
+            var asked = text_field(req.body, "ref")
+            if not asked:
+                return error(400, 'Send JSON like {"ref": "owner/repo", "max_attempts": 3}.', "invalid_request_body")
+            var pname = text_field(req.body, "name")
+            var attempts = DEFAULT_ATTEMPTS
+            var unsandboxed = False
+            try:
+                var j = Json.parse(req.body if req.body.byte_length() > 0 else "{}")
+                var a = j.get(0, "max_attempts")
+                if a >= 0:
+                    if not j.is_whole(a):
+                        return error(400, "`max_attempts` must be a whole number from 1 to " + String(MAX_ATTEMPTS) + ".", "invalid_request_body")
+                    attempts = j.number(a)
+                var u = j.get(0, "unsandboxed")
+                if u >= 0:
+                    if j.kind(u) != J_BOOL:
+                        return error(400, "`unsandboxed` must be true or false.", "invalid_request_body")
+                    unsandboxed = j.flag(u)
+            except:
+                return error(400, 'Send JSON like {"ref": "owner/repo", "max_attempts": 3}.', "invalid_request_body")
+            # the porting assistant must be set up, and its key must work, before an agent is started (goal 64 M1)
+            var p = read_porter(self.cfg.home)
+            if not p.configured():
+                var found = detect_claude()
+                return error(400, ("Set the porting assistant up first: Claude Code is on this machine (" + found + "), or give an API key for a frontier model.")
+                             if found != "" else "Set the porting assistant up first: install Claude Code, or give an API key for a frontier model.",
+                             "porter_not_configured")
+            var tried = test_porter(p)
+            if not tried.ok:
+                return error(400, "The porting assistant could not be used: " + tried.message, "porter_unusable")
+            var started = self.ports.start(self.store, String(asked.value().strip()), pname.value() if pname else String(""),
+                                           attempts, unsandboxed, self.cfg.home, self.cfg.max_cmd, self.sup.child_env(),
+                                           self.cfg.admin, self.cfg.port, porter_env(p))
+            if started.code == "port_in_progress":
+                var busy = ports_json(self.store, self.cfg.home, started.busy)
+                return Reply.json('{"error": {"message": ' + json_string(started.message)
+                                  + ', "type": "invalid_request_error", "param": null, "code": "port_in_progress"}, "port": '
+                                  + (busy if busy != "" else "null") + "}", 409)
+            if started.code != "":
+                return error(400, started.message, started.code)
+            return Reply.json(ports_json(self.store, self.cfg.home, started.id), 202)
+        if req.matches("GET", "/admin/ports/{id}"):
+            var view = ports_json(self.store, self.cfg.home, Int(atol(req.param("id")))) if is_digits(req.param("id")) else String("")
+            if view == "":
+                return error(404, "There is no port number " + req.param("id") + ".", "port_not_found")
+            return Reply.json(view)
+        if req.matches("POST", "/admin/ports/{id}/cancel"):
+            if not is_digits(req.param("id")):
+                return error(404, "There is no port number " + req.param("id") + ".", "port_not_found")
+            var pid = Int(atol(req.param("id")))
+            var view2 = ports_json(self.store, self.cfg.home, pid)
+            if view2 == "":
+                return error(404, "There is no port number " + req.param("id") + ".", "port_not_found")
+            _ = self.ports.cancel(pid)
+            return Reply.json(view2, 202)
+        if req.matches("GET", "/admin/porter"):
+            return Reply.json(porter_json(self.cfg.home))
+        if req.matches("POST", "/admin/porter"):
+            var kind = text_field(req.body, "kind")
+            if not kind:
+                return error(400, 'Send JSON like {"kind": "claude-code"} or {"kind": "anthropic", "key": "…"}.', "invalid_request_body")
+            var base = text_field(req.body, "base_url")
+            var key = text_field(req.body, "key")
+            var model = text_field(req.body, "model")
+            var want = Porter(String(kind.value().strip()), String(base.value().strip()) if base else String(""),
+                              String(key.value().strip()) if key else String(""), String(model.value().strip()) if model else String(""))
+            var why = kind_problem(want.kind, want.base_url, want.key)
+            if why != "":
+                return error(400, why, "invalid_porter")
+            var tried2 = test_porter(want)
+            if not tried2.ok:
+                return error(400, tried2.message, "porter_unusable")
+            write_porter(self.cfg.home, want)
+            return Reply.json(porter_json(self.cfg.home))
+        if req.matches("DELETE", "/admin/porter"):
+            var gone = remove_porter(self.cfg.home)
+            return Reply.json('{"removed": ' + ("true" if gone else "false") + ", " + String(porter_json(self.cfg.home)[byte = 1 :]))
+        if req.matches("POST", "/admin/expose"):
+            var host = text_field(req.body, "host")
+            var want_host = String(host.value().strip()) if host else default_host()
+            if not hostname_ok(want_host):
+                return error(400, 'Send JSON like {"host": "box.local"} (optional).', "invalid_host")
+            var problem = String("")
+            try:
+                problem = self.exposing.start(self.cfg.home, want_host)
+            except e:
+                return error(500, String(e), "expose_failed", "server_error")
+            if problem != "":
+                return error(500, problem, "expose_failed", "server_error")
+            return Reply.json('{"exposed": true, "lan_endpoint": ' + json_string(lan_endpoint(self.cfg.home)) + ', "host": '
+                              + json_string(want_host) + ', "beta": true}')
+        if req.matches("POST", "/admin/expose/stop"):
+            _ = self.exposing.stop(self.cfg.home)
+            return Reply.json('{"exposed": false}')
         if req.matches("GET", "/admin/search"):
             if req.arg("q").byte_length() > 200:
                 return error(400, "The search text is too long.", "invalid_query")
