@@ -1,0 +1,1 @@
+{"architectures": ["WeirdForCausalLM"], "model_type": "weird", "hidden_size": 64, "num_hidden_layers": 2, "vocab_size": 10, "extra": 1}

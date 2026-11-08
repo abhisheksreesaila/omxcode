@@ -1,46 +1,46 @@
-# GOAL 62: omxplorer on the web, safe to share
+# GOAL 64: the two things omxconsole still can't do
 
-**End goal (owner, 2026-11-06: "start the fixes – always good to host a working copy… we can deploy to railway and reduce load if we have to… nothing like touching the app on the web without installs"):** anyone with the link opens omxplorer in a browser, installs nothing, and plays the whole robot story on a hosted copy: the 63,344 DROID runs, the pivot by lab, F00118's video with its sensor lanes, and the question that finds the 2,997 regrasps. The web host is safe on the public internet, serves several visitors at once from one CPU-only server, and is packaged for Railway, so going live at app.omxlabs.tech is one step the owner takes.
+**End goal (owner, 2026-11-07):** omxconsole's cover page admits two things the earlier Python version did and the
+Mojo one doesn't: **porting a model MAX can't run**, and **reaching the endpoint from another machine over HTTPS**.
+Both buttons are still in the app, so a stranger who downloads the alpha clicks them and hits a dead end. "Kind of
+embarrassing not to… yes please copy this." Copy the decisions of the working Python version (`~/Projects/mxstudio`,
+read-only), re-expressed in Mojo: the orchestration (stage machine, gates, attempt and early-stop rules, SQLite rows,
+log format, Caddyfile, process supervision) lives in `examples/consoled/`. No Python ships inside omxconsole; the only
+Python is what we drive as external programs, as the old version did (Claude Code, Modular's skill scripts, `max
+serve`, `pixi`, `caddy`) and the generated port itself, which is MAX's own format.
 
-Today (the browser check, 2026-11-06; results in ~/.abode/home/worktrees/mojo-ui/t3-4d3cae42/build/webcheck/): every beat works in headless Chromium on localhost, and a CPU-only server does as well as a GPU one. It isn't safe to share:
-- a crafted POST /e/{sid} makes the app open any server path;
-- the Start screen's Recent list shows other visitors' files, with their server paths;
-- Export pack writes PDFs and clips into the server's documents folder;
-- every GET / makes an app session (cap 200, no idle timeout);
-- each tab loads its own copy of the data, about 3 GB per visitor (omxplorer's init_shared loads nothing);
-- visitors can only open files by uploading them, and the story's questions need an agent to write their SQL;
-- open, chart and column jobs never wake the page when they finish, so a tab with no moving canvas can hang;
-- a canvas fetches one picture at a time and fetches unchanged ones again (the video panel pulled 580 KB/s for 90 KB/s of new pictures); nothing was measured over a network;
-- the Board's layout at 1440×900 is on the check's polish list.
+Measured on the owner's 14 real runs (`~/.mxc/ports/`, read-only): 8 ported and served (gpt2, pythia-1.4b, phi-2,
+starcoder2-3b, OLMoE-1B-7B, granite-3.1-1b MoE, SmolLM3-3B), 6 failed, and everything that worked was 1–3B. So both
+features ship labelled **beta**, with that real hit rate in the app, not a vague badge.
 
-Base: origin/main 882155b (goal 59).
+Base: origin/main 2abf5775 (after goal 62).
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/62-check.py`) |
+| # | Milestone | Proof (`docs/goals/64-check.py`; PASS, FAIL or BLOCKED each) |
 |---|---|---|
-| M0 | Jobs wake the page | 20 fresh web servers, each opening fleet.csv in a tab with no moving canvas: the table lands in all 20 within 10 s; a test per background job kind in mojoui/sheetjobs.mojo shows the host is woken when the job ends |
-| M1 | The robot starter, shared | CPU-only server (CUDA_VISIBLE_DEVICES=""): a visitor starts the robot story from the Start screen with one click, with no upload and no agent link, and gets the fleet (63,344 rows) linked to its telemetry (16,847,616 rows), clips and paper. The story's questions are there in words, each run with one click (2,997 regrasps; the 4 fastest), with their SQL shown. The starter loads once per server and read-only: each further tab that plays the whole story adds under 300 MB at rest, and the starter's files hash the same before and after the check. The Start screen credits DROID (CC-BY-4.0) |
-| M2 | Nothing on the server is reachable | in public mode, a probe suite, each refused with nothing opened, written or listed: crafted requests naming a server path to every route that takes text (/e, /w, /save, /upload, /dropfile, /reply, …) for pickers, savers and other controls; reading a server path from the Script window and from SQL; path traversal on /static, /assets and /static/fonts; uploads over the per-file and per-visitor caps; the agent link and /dev routes are off. A second visitor's Start screen shows nothing from the first, and no response any visitor gets during the story contains a server path |
-| M3 | Visitors' sessions end | 500 plain GET / (no browser) make no app session; a real tab makes one; a tab idle past the timeout (shortened for the check) closes, says so, and its files are gone; past the cap a new visitor gets a busy page, not an error; Export pack arrives in the browser as one download and leaves nothing on the server |
-| M4 | Over a real network | through a delaying proxy in front of the server (every connection the page uses, WebSockets included) adding 100 ms of round trip, 10 Mbit/s down and 5 up: the story passes, F00118 plays at ≥ 12 pictures a second, and a click to the answer takes ≤ 600 ms; a still view fetches nothing once drawn (0 bytes in 5 s); the playing video uses ≤ 1.5× the bytes of its new pictures; screenshots at 1440×900 and 390×844 (phone), looked at |
-| M5 | Packaged for Railway | an image with the web version and the starter: non-root, app and data read-only, listens on $PORT, a health check, logs on stdout; the image builds and the story passes against it (BLOCKED, not FAIL, while this user can't reach Docker). With the same start command held to the memory and CPU of the Railway plan chosen (docs/research/railway.md; for example systemd-run --user -p MemoryMax=… -p CPUQuota=…), driven through the page only, as a visitor would: N visitors play the story at once, every beat passing in each, video ≥ 12 pictures a second, click-to-answer p95 ≤ 1 s; N ≥ 5 (target 10), and the server's session cap is the measured N. scripts/deploy-railway (a wizard) takes the owner from `railway login` to app.omxlabs.tech and ends by running the story against the live URL |
-| M6 | Nothing regressed | the robot story on GTK (goal 47's scenario), the web host's own tests, every goal check that drives web.py (find them by grep), and a fresh docs/components.md |
-| M7 | A visitor can't stall or crash the server for the others (added in round 2, from the security audit: D-6222) | while another visitor plays the story and every beat passes: a question past the time budget (shortened for the check), an answer past the row cap and a join past the memory budget each stop with a plain message; malformed CSV, Parquet and MP4 uploads (random bytes, a truncated file, wrong bytes behind the right name) are refused in plain words with the server up; D-6218's suspected sequences (a pivot or a far column, then another table) replayed with real clicks, the server up |
+| M0 | The porting assistant setting | A Settings card: Claude Code on this machine (detected, no key), or an API key for a frontier model (Anthropic, or an OpenAI-compatible base URL). Frontier models only; the user's own small local model is never offered as the porter. The key is stored for omxconsole only, mode 0600, never logged, never shown in full (prefix only), never in a URL, and removable. Proved against a stand-in server, never a real key: POST/GET/DELETE the setting, the file's mode is 0600, the plaintext appears in no log, no response and no stored row but its own file, and a wrong key fails the small test call in seconds |
+| M1 | Guided, not a dead end | Clicking "Port it" with nothing configured opens that card **inline on the port screen**, not a bounce to Settings: it says what was detected, takes the choice, saves it, and the button becomes "Port it". The daemon's small test call happens first, so a bad key fails in seconds. GTK step run with screenshots, looked at, plus the web host |
+| M2 | The worker | `POST /admin/ports` runs the pipeline and writes stages and the log where `ports_json` and the existing screen already read them; `GET /admin/ports/<id>`; cancel really stops the agent and its children. Proved with no GPU and no real port, with the old project's fake-port harness re-used (a fake `claude`, fake skill gates, fake `max`, and the tiny `WeirdForCausalLM` fixture): the seven stages land in order with their attempt numbers, the log streams `== stage`/`-- stage done` lines, a build failure feeds the error back and the next attempt fixes it, the same failure twice stops early, cancel leaves no process of ours running |
+| M3 | When it fails, hand it over | The failed job and the screen give: the workspace folder, the full log path, the exact gate that failed, and the best attempt kept. Proved on a fake run that always fails: `GET /admin/ports/<id>` carries all four, and a GTK step run shows them on the port screen |
+| M4 | Reach it on your network | `POST /admin/expose` writes a Caddyfile with `tls internal` and `forward_auth` to the daemon's `/auth/check`, runs Caddy through `mojoui.process`, and `POST /admin/expose/stop` really stops it. `/auth/check` answers 200 with `X-Mst-App` for a valid app key and 401 for none or a revoked one. Caddy is found, not bundled: when it is missing the answer says so with how to install it. Proved on this machine from a second process: `https://localhost:8443/v1/models` with a valid key works, without one is 401, a dot-segment path is 400, and localhost over plain HTTP still works; stop leaves nothing listening |
+| M5 | Honest labels and no regressions | Both features marked beta in the app and on `docs/omxconsole.html`, with the 8-of-14 hit rate; the cover's honest-edges section no longer says these two are missing. Goal 55's check (the console's own milestones) and the console's Mojo tests still pass, and `docs/components.md` is fresh |
 
 ## Done means
-62-check PASS for M0–M4, M6 and M7; M5 PASS, or only its image half BLOCKED on Docker access; the reviewer and the security auditor pass the diff; the screenshots were looked at.
+`docs/goals/64-check.py` prints PASS for M0–M5 (BLOCKED only where this machine genuinely can't: no GPU-hours
+real port run, which needs the owner's machine and hours); the `reviewer` and `security-auditor` subagents pass;
+`docs/goals/64-report.md` and an `EXPERIMENTS.md` entry; merged into main and pushed only if all of that holds.
 
 ## Out of bounds
-Deploying, pushing images, uploading data anywhere, Railway commands that create, link or deploy, sign-ups and paid services (the owner runs scripts/deploy-railway); sudo; secrets (none are needed); the frozen ../mojo-ui-apple-test; other sessions' worktrees (read-only use of the check's results and the robot data is fine); pip; deleting anything outside this goal's scratch folders; lowering a proof; WebAssembly (parked by the owner); app-only fixes for what belongs in the web host or the framework.
+A real multi-hour porting run (the fake harness is the proof; a real one is the owner's GPU and hours → BLOCKED).
+Real API keys, sign-ups, releases, deploys. `~/Projects/mxstudio` and `~/.mxc` are read-only references; the owner's
+daemon on :11435 is never touched. `mojoui/hosts/web.py` belongs to another session. The frozen
+`../mojo-ui-apple-test` and other worktrees are never touched. Never the words "LM Studio" in anything public.
 
 ## Assumptions (taken instead of asking)
-- One server process, scaled up rather than out: the starter is shared in memory and per-visitor state stays small. Several processes would each need the data and sticky sessions.
-- Public mode is a switch the image turns on (for example MOJOUI_PUBLIC=1); local `scripts/omxplorer.sh web` keeps working as today.
-- No AI on the public copy: the story's questions come written, with their SQL. An LLM there would need keys and a budget, which is a later decision.
-- The starter is goal 47's full set. Its clips are re-encoded to the size the page shows if they fit the plan's volume; otherwise it carries the story's clips plus a sample, and other runs say their video isn't in the web sample.
-- Visitors can still upload their own CSV, Parquet or MP4 (capped): "send me your robot data" is the YouTube series' ask. An upload lives only in its visitor's session.
-- The phone gets a look, not a new layout: if the story can't be followed at 390×844, the Start screen says it's best on a laptop. A phone layout is a later goal.
-- Railway's limits, volume sizes and prices come from docs.railway.com (cited), not memory. The owner is already logged in to the Railway CLI on this machine.
+- The porter is a frontier model only (owner's steer). Claude Code on the machine is preferred when present.
+- `port_try` (the old project's agent-facing "see it run" helper, Python) becomes a subcommand of our own Mojo
+  daemon binary rather than travelling as Python (D-6403).
+- Arbitrary flags, patches and timeouts earned by the 14 real runs are kept verbatim and logged as kept (D-6404).
 
 ## Budget
-150 turns.
+140 turns.
