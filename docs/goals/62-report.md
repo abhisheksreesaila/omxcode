@@ -1,8 +1,10 @@
 # Goal 62 report: omxplorer on the web, safe to share
 
 `docs/goals/62-check.py`, Linux, CPU only (`CUDA_VISIBLE_DEVICES=""`), on a shared machine (other projects kept its load
-at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), rounds 2–6 (2026-11-07). Branch `t3/hosted-omxplorer-safety`, not merged: round 6 fixed the
-final review's two blocking finds and its should-fixes (both NEEDS WORK) and ran no reviewer, as asked; the owner's next review comes next.
+at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), rounds 2–6 (2026-11-07). **Done means is met except M5's image half** (Docker refuses this
+user, so the image was never built), which the owner accepted on 2026-11-07 ("good enough is fine: the hosted copy is a
+small taste, the Linux download is the product"). Round 6 closed the final review's three blocking finds; merged with
+goal 61 (origin/main), M2 and M7 pass on the merged tree, and the branch is merged into main.
 
 | # | Result (round 3; the outputs kept in docs/goals/62/runs/) |
 |---|---|
