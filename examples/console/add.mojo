@@ -36,7 +36,7 @@ comptime DEFAULT_SUB = "Search the MAX catalog and Hugging Face · every result 
 comptime ORDER: List[String] = ["check", "fetch", "compile", "serve", "smoke"]
 comptime LABELS: List[String] = ["Check hardware", "Fetch the model", "Compile graph", "Serve on localhost", "Smoke test"]
 comptime FILTER_TITLES: List[String] = ["All", "Fits", "Needs porting"]
-comptime PORT_BETA = ("beta: of the 14 models tried on the owner’s machine, 8 ported and served, and everything that worked was 1 to 3 "
+comptime PORT_BETA = ("beta: of the 14 models tried while this was built, 8 ported and served, and everything that worked was 1 to 3 "
                       + "billion parameters. Expect to finish some ports by hand.")
 comptime PORT_NOTE = ("“Port it” runs Claude Code with Modular’s import-model skill, unattended and in a sandbox: it reads the config, writes the model "
                       + "as a MAX graph, checks it against the reference and fixes what fails. It may take a while, often several minutes and sometimes "
@@ -664,7 +664,7 @@ def port_card(a: Add) -> View:
         if ready:
             body.append(ButtonRow([SmallButton("Port it", ADD_PORT_IT, "hammer", FILL)]))
         elif a.porter_open:
-            body.append(FieldWithHelp(OutlinedField(a.porter_base, "Base URL (an OpenAI-compatible endpoint; leave empty for Anthropic)", ADD_PORTER_BASE, ADD_PORTER_SAVE),
+            body.append(FieldWithHelp(OutlinedField(a.porter_base, "Base URL of a gateway that answers the Anthropic API (leave empty for Anthropic itself)", ADD_PORTER_BASE, ADD_PORTER_SAVE),
                                       "https://… only, and never the key in the URL"))
             body.append(FieldWithHelp(OutlinedField(a.porter_key, "API key for a frontier model", ADD_PORTER_KEY, ADD_PORTER_SAVE),
                                       "Kept for omxconsole only, readable by you alone, never shown again and never logged. Removable at any time."))

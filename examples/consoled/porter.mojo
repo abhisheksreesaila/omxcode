@@ -1,5 +1,5 @@
 # consoled's porting assistant (goal 64 M0): which frontier model writes a port. Either Claude Code on this machine
-# (detected, no key needed) or an API key for a frontier model — Anthropic's, or an OpenAI-compatible base URL that
+# (detected, no key needed) or an API key for a frontier model — Anthropic's, or a gateway's base URL that
 # answers for one. Frontier models only: nothing in the owner's 14 real runs says a small local model can write a
 # MAX architecture, so offering one would be a dead end of its own.
 # The key lives in MXC_HOME/porter.json, mode 0600, never in the store and never in a URL (D-6405): only its prefix
@@ -100,7 +100,7 @@ struct Tested(Copyable, Movable):
     var message: String
 
 
-def kind_problem(kind: String, base_url: String, key: String) -> String:
+def kind_problem(kind: String, base_url: String, key: String, model: String = "") -> String:
     """Why this setting can't be stored, or ""."""
     var known = False
     for k in materialize[PORTER_KINDS]():
@@ -108,6 +108,8 @@ def kind_problem(kind: String, base_url: String, key: String) -> String:
             known = True
     if not known:
         return 'Send {"kind": "claude-code" | "anthropic" | "openai-compatible", …}.'
+    if base_url.byte_length() > 300 or model.byte_length() > 120:
+        return "That base URL or model name is too long."
     if kind == "claude-code":
         return "" if detect_claude() != "" else "Claude Code was not found on this machine. Install it, or give an API key for a frontier model instead."
     if key.byte_length() < 8 or key.byte_length() > 400:
@@ -135,12 +137,17 @@ def test_porter(p: Porter) -> Tested:
         var req = Request(0, "POST", "https://api.anthropic.com/v1/messages", body).header("content-type", "application/json")
         req = req^.header("x-api-key", p.key).header("anthropic-version", "2023-06-01")
         return _answer(FlareTransport.send(req^.timeout(TEST_TIMEOUT_MS)), "Anthropic")
+    # A gateway is tested the way Claude Code will use it: the Anthropic Messages API, one token, the key in a
+    # header. An endpoint that only speaks OpenAI's API answers 404 here, which is the truth: the agent would
+    # fail on it too (reviewer round 1).
     var base = p.base_url
     while base.endswith("/"):
         var shorter = String(base[byte = : base.byte_length() - 1])
         base = shorter
-    var req2 = Request(0, "GET", base + "/v1/models" if not base.endswith("/v1") else base + "/models", "")
-    return _answer(FlareTransport.send(req2^.header("authorization", "Bearer " + p.key).timeout(TEST_TIMEOUT_MS)), "that endpoint")
+    var body2 = '{"model": ' + json_string(p.model if p.model != "" else String("claude-haiku-5-5")) + ', "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}'
+    var req2 = Request(0, "POST", base + "/v1/messages", body2).header("content-type", "application/json")
+    req2 = req2^.header("x-api-key", p.key).header("authorization", "Bearer " + p.key).header("anthropic-version", "2023-06-01")
+    return _answer(FlareTransport.send(req2^.timeout(TEST_TIMEOUT_MS)), "that endpoint")
 
 
 def _answer(r: Response, who: String) -> Tested:
@@ -149,7 +156,8 @@ def _answer(r: Response, who: String) -> Tested:
     if r.status == 401 or r.status == 403:
         return Tested(False, who + " refused that key (HTTP " + String(r.status) + ").")
     if r.status == 404:
-        return Tested(False, who + " has no such endpoint (HTTP 404). Check the base URL.")
+        return Tested(False, who + " has no such endpoint (HTTP 404): check the base URL, and that it answers the "
+                      + "Anthropic Messages API, which is what the porting agent speaks.")
     if r.status >= 400:
         return Tested(False, who + " answered HTTP " + String(r.status) + ".")
     return Tested(True, who + " accepted the key.")

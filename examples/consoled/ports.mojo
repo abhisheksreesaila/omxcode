@@ -82,6 +82,20 @@ comptime BASE_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "WebFetch(domain
                        "Bash(pixi install)", "Bash(pixi install --locked)"]
 
 
+def port_name_ok(name: String) -> Bool:
+    """pulls.py NAME_RE / keys.py APP_NAME: 1 to 64 of letters, digits, '.', '_' and '-', starting with a letter or
+    digit. It is also the only rule that keeps the workspace inside MXC_HOME/ports (no '/', no '..')."""
+    var b = name.as_bytes()
+    if len(b) == 0 or len(b) > 64:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        var alnum = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+        if not (alnum or ((c == 46 or c == 95 or c == 45) and i > 0)):
+            return False
+    return True
+
+
 def allowed_tools(extra: List[String]) -> List[String]:
     var out = List[String]()
     for t in materialize[BASE_TOOLS]():
@@ -411,7 +425,9 @@ def confine(mut w: W, job: PortJob, argv: List[String], role: String, ctx: Ctx, 
             binds.append(creds + ">" + cfg + "/.credentials.json")
     var bw = have_bwrap() if not w.unsandboxed else String("")
     if bw == "":
-        var why = "bubblewrap (bwrap) not found; unsandboxed was given" if not w.unsandboxed else "the caller asked for no sandbox"
+        var why = ("bubblewrap (bwrap) not found; unsandboxed was given" if not w.unsandboxed
+                   else "the caller asked for no sandbox") + " — the agent runs with this user's own permissions, "
+        why += "and Claude Code's own sandbox setting is not used in its place (D-6412)"
         for b in binds:  # no mount namespace: link the login into the private config dir instead
             var at = String(b).find(">")
             _ = output(["ln", "-sfn", String(String(b)[byte = : at]), String(String(b)[byte = at + 1 :])], 2000)
@@ -808,10 +824,10 @@ def _pristine(mut w: W, mut store: Store, job: PortJob, mut ctx: Ctx) raises -> 
     var paths = List[String]()
     for g in ["scripts", "pixi.toml", "SKILL.md"]:
         paths.append(ENTRY_SKILL + "/" + String(g))
-    var argv: List[String] = ["git", "checkout", "--"]
+    var argv: List[String] = ["git", "-C", ctx.skills_root, "checkout", "--"]
     argv += paths.copy()
     _ = output(argv, 60_000)
-    var clean: List[String] = ["git", "clean", "-fd", "--"]
+    var clean: List[String] = ["git", "-C", ctx.skills_root, "clean", "-fd", "--"]
     clean += paths.copy()
     _ = output(clean, 60_000)
     _ = apply_skill_patches(ctx.skills_root, ctx.serving_max)
@@ -977,10 +993,11 @@ def _attempt(mut w: W, mut store: Store, job: PortJob, mut ctx: Ctx, attempt: In
         # try-port only under bubblewrap: its PID namespace takes a detached try down with the agent
         var state_dir = w.dir + "/work/try-" + String(attempt)
         makedirs(state_dir, exist_ok=True)
+        # try-N.json is written for the record and for whoever carries the port on by hand; the agent is NOT
+        # told to run it, because the harness that reads it is not built yet (D-6403, revised): telling it to run
+        # a command that does not exist would waste a whole attempt on a 600 s timeout.
         ctx.try_config = w.dir + "/try-" + String(attempt) + ".json"
         write_text(ctx.try_config, try_config_json(ctx, job.max_cmd, state_dir))
-        ctx.try_command = _self_dir() + "/consoled port-try --config " + ctx.try_config
-        extra.append("Bash(" + ctx.try_command + ":*)")
     var argv = claude_argv(claude, build_prompt(ctx, attempt, feedback, donor_note), extra)
     var ran = exec_cmd(w, store, job, argv, ctx.workspace, GENERATE_TIMEOUT_MS, "agent", ctx,
                        w.dir + "/agent-" + String(attempt) + ".jsonl", True)
@@ -1068,8 +1085,13 @@ def _pipeline(mut w: W, mut store: Store, job: PortJob) raises -> Fail:
     if cfg_at < 0:
         return Fail(repo.id + " has no config.json: not a transformers model MAX could serve.", False, "", 0)
     ctx.name = job.name if job.name != "" else model_name(job.asked, repo.id)
+    if not port_name_ok(ctx.name):  # the name derived from the ref is not a safe path component either
+        return Fail("`" + ctx.name + "` is not a name a port can be registered under: pass a name of letters, digits, "
+                    + "'.', '_' and '-'.", False, "", 0)
     w.name = ctx.name
     ctx.workspace = job.home + "/ports/" + workspace_name(ctx.name)
+    if ctx.workspace.find("/..") >= 0 or _parent(ctx.workspace) != job.home + "/ports":
+        return Fail("the workspace for this port would be outside " + job.home + "/ports", False, "", 0)
     makedirs(ctx.workspace, exist_ok=True)
     var r = hub_download(repo, repo.files[cfg_at], ctx.workspace, w.t)
     if r.error != "" or r.status != 200:
@@ -1341,6 +1363,11 @@ struct Ports(Movable):
         var why = ref_problem(asked)
         if why != "":
             return Started(0, "invalid_request_body", why, 0)
+        # `name` becomes a folder under MXC_HOME/ports that is bound read-write into the agent's sandbox, so it is
+        # checked here, at the boundary, exactly as the Python did (pulls.py NAME_RE): without this, "name": ".."
+        # binds MXC_HOME itself writable into the sandbox, where porter.json and mst.db live (security audit).
+        if name != "" and not port_name_ok(name):
+            return Started(0, "invalid_request_body", "`name` may use letters, digits, '.', '_' and '-' (64 characters at most).", 0)
         if max_attempts < 1 or max_attempts > MAX_ATTEMPTS:
             return Started(0, "invalid_request_body", "`max_attempts` must be a whole number from 1 to " + String(MAX_ATTEMPTS) + ".", 0)
         if not CompilationTarget.is_linux():
@@ -1395,7 +1422,18 @@ struct Ports(Movable):
             keep.append(r^)
         self.running = keep^
 
-    def cancel_all(mut self):
-        """A stopping daemon must not leave an agent running (port_auto.cleanup_at_exit)."""
+    def cancel_all(mut self, grace_ms: Int = 3000):
+        """A stopping daemon must not leave an agent running (port_auto.cleanup_at_exit waited too): the flag is
+        set, then this waits for each worker to say it has let go — it is the worker that stops the process group,
+        so leaving before it does would orphan the agent (bwrap's --die-with-parent covers only sandboxed runs)."""
         for r in self.running:
             r.t.cancel()
+        var until = now_ns() + grace_ms * 1_000_000
+        while now_ns() < until:
+            var busy = False
+            for r in self.running:
+                if _A.load(_P(unsafe_from_address=r.words)) == 0:
+                    busy = True
+            if not busy:
+                return
+            _ = libc.poll(0, 0, 50)

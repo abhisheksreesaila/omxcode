@@ -34,6 +34,7 @@ from views import pull_json
 from meter import meter
 
 
+comptime MAX_ADMIN_BODY = 4096  # (admin_port.py's cap: neither a port nor a porter setting is bigger than this)
 comptime MAX_WAITING = 4  # (/v1 calls and loads waiting for a model at once; the server has 8 workers)
 comptime LOAD_WAIT_MS = 600_000  # (a load answers 503 if its server isn't ready by then: the relay's own wait)
 
@@ -411,6 +412,8 @@ struct Daemon(Service):
         if req.matches("GET", "/admin/ports"):
             return Reply.json(ports_json(self.store, self.cfg.home))
         if req.matches("POST", "/admin/ports"):
+            if req.body.byte_length() > MAX_ADMIN_BODY:
+                return error(413, "That request is too large for a port.", "request_too_large")
             # admin_port.py's route: {"ref": "owner/repo", "name": …, "max_attempts": 3, "unsandboxed": false}
             var asked = text_field(req.body, "ref")
             if not asked:
@@ -470,6 +473,8 @@ struct Daemon(Service):
         if req.matches("GET", "/admin/porter"):
             return Reply.json(porter_json(self.cfg.home))
         if req.matches("POST", "/admin/porter"):
+            if req.body.byte_length() > MAX_ADMIN_BODY:
+                return error(413, "That request is too large.", "request_too_large")
             var kind = text_field(req.body, "kind")
             if not kind:
                 return error(400, 'Send JSON like {"kind": "claude-code"} or {"kind": "anthropic", "key": "…"}.', "invalid_request_body")
@@ -478,7 +483,7 @@ struct Daemon(Service):
             var model = text_field(req.body, "model")
             var want = Porter(String(kind.value().strip()), String(base.value().strip()) if base else String(""),
                               String(key.value().strip()) if key else String(""), String(model.value().strip()) if model else String(""))
-            var why = kind_problem(want.kind, want.base_url, want.key)
+            var why = kind_problem(want.kind, want.base_url, want.key, want.model)
             if why != "":
                 return error(400, why, "invalid_porter")
             var tried2 = test_porter(want)

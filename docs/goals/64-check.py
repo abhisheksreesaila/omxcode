@@ -298,6 +298,16 @@ def m1():
                 problems.append(f"the refusal must say what was detected: {text[:200]}")
             if body(d.call("GET", "/admin/ports"))[1].get("ports"):
                 problems.append("a refused port must leave no job behind")
+            # the workspace is bound read-write into the agent's sandbox, so a name that would leave
+            # MXC_HOME/ports is refused at the boundary (security audit round 1)
+            setup_porter(d)
+            for bad in ("..", "../skills/modular", "a/b", "/etc", ".hidden"):
+                s, j = start_port(d, name=bad)
+                if s != 400:
+                    problems.append(f'a port named {bad!r} must be refused: {s} {str(j)[:120]}')
+            if list((Path(d.home) / "ports").glob("*")):
+                problems.append("a refused port must make no folder: " + str(list((Path(d.home) / "ports").glob("*"))))
+            d.call("DELETE", "/admin/porter")
             # the detected assistant is offered, and saving it takes one call from the same screen
             s, j = body(d.call("GET", "/admin/porter"))
             if not (j.get("detected", {}).get("claude_code") and j["detected"]["path"]):
@@ -566,7 +576,6 @@ def m4():
                 return p.stdout.strip()
             with_key = curl("-H", f"Authorization: Bearer {key}", f"https://localhost:{https}/v1/models")
             without = curl(f"https://localhost:{https}/v1/models")
-            revoked_app = body(d.call("GET", "/admin/keys"))[1]
             unclean = curl("-H", f"Authorization: Bearer {key}", "--path-as-is", f"https://localhost:{https}/admin/../v1/models")
             admin = curl("-H", f"Authorization: Bearer {key}", f"https://localhost:{https}/admin/models")
             plain = curl(f"http://127.0.0.1:{d.port}/health")
@@ -574,12 +583,23 @@ def m4():
                 problems.append(f"https with a valid key: {with_key}")
             if without != "401":
                 problems.append(f"https without a key: {without} (must be 401)")
-            if unclean not in ("400", "404"):
-                problems.append(f"a path cleaning would change: {unclean} (must be refused)")
+            if unclean != "400":
+                problems.append(f"a path cleaning would change: {unclean} (must be 400)")
             if admin != "404":
                 problems.append(f"an admin route over the LAN: {admin} (must not be forwarded)")
             if plain != "200":
                 problems.append(f"localhost over plain http: {plain}")
+            # a revoked key is as good as none (GOAL.md M4)
+            apps = body(d.call("GET", "/admin/keys"))[1]
+            app = (apps[0]["app"] if isinstance(apps, list) and apps else
+                   (apps.get("keys") or [{}])[0].get("app") if isinstance(apps, dict) else None)
+            if not app:
+                problems.append("no app key to revoke")
+            else:
+                d.call("DELETE", f"/admin/keys/{app}")
+                revoked = curl("-H", f"Authorization: Bearer {key}", f"https://localhost:{https}/v1/models")
+                if revoked != "401":
+                    problems.append(f"https with a revoked key: {revoked} (must be 401)")
             # /auth/check itself, as Caddy calls it
             s1 = d.call("GET", "/auth/check", None, admin=False)[0]
             if s1 != 401:
@@ -611,18 +631,19 @@ def m5():
     if "beta" not in sec:
         problems.append("the network screen does not say beta")
     cover = (ROOT / "docs/omxconsole.html").read_text()
-    for want in ("beta", "8 of", "port"):
+    for want in ("beta", "8 of 14", "porting a model max can't run is back", "caddy"):
         if want not in cover.lower():
             problems.append(f"the cover page does not mention {want}")
-    for stale in ("can't port", "cannot port", "no way to reach it", "not yet: porting"):
-        if stale in cover.lower():
-            problems.append(f"the cover still says {stale!r}")
+    if "aren't in this one yet" in cover or "porting a model MAX can't run, and reaching the endpoint" in cover:
+        problems.append("the cover's honest edges still say these two are missing")
+    if "8 of 14" not in cover:
+        problems.append("the cover does not give the real hit rate")
     # the console's own Mojo tests, and goal 64's
     tests = {"test_consoled_paths": "examples/consoled", "test_console_api": "examples/console",
              "test_console_places": "examples/console", "test_port_donor": "examples/consoled",
              "test_port_sandbox": "examples/consoled", "test_ports_pure": "examples/consoled",
              "test_porter": "examples/consoled", "test_caddyfile": "examples/consoled",
-             "test_process_cwd": "examples/consoled"}
+             "test_process_cwd": "examples/consoled", "test_port_boundary": "examples/consoled"}
     for name, include in tests.items():
         src = f"tests/{name}.mojo"
         r = run(["scripts/mojo_flare.sh", "build", "-I", include, src, "-o", str(BUILD / name)])
@@ -650,7 +671,7 @@ def m5():
     if problems:
         return False, "; ".join(problems)
     word = True if have_max else BLOCKED
-    return word, ("both features marked beta with the real hit rate in the app and on the cover, nine Mojo tests "
+    return word, ("both features marked beta with the real hit rate in the app and on the cover, ten Mojo tests "
                   "pass, docs/components.md is fresh, " + tail)
 
 

@@ -537,11 +537,15 @@ def ports_json(store: Store, home: String, only: Int = 0) raises -> String:
     """The last 20 ports (`only`: that one alone, "" when there is no such port), each with the tail of its log and
     what a person needs to carry a failed port on by hand (goal 64 M3): the workspace, the full log, the gate that
     failed and the best attempt kept."""
-    var where = " WHERE id = " + String(only) if only > 0 else String("")
+    var where = " WHERE id = ?" if only > 0 else String("")
+    var args = List[String]()
+    args.append(home)
+    if only > 0:
+        args.append(String(only))
     var rows = store.db.one_text("""SELECT coalesce(json_group_array(json_object('id', id, 'ref', ref, 'name', name, 'repo_id', repo_id, 'status', status,
         'stage', stage, 'message', message, 'started_at', started_at, 'finished_at', finished_at, 'max_attempts', max_attempts,
         'stages', json(stages), 'log', ? || '/ports/' || id || '/port.log', 'model', model)), '[]') FROM (SELECT * FROM ports""" + where
-        + " ORDER BY id DESC LIMIT 20)", [home])
+        + " ORDER BY id DESC LIMIT 20)", args)
     var j = Json.parse(rows)
     var out = String("[")
     for i in range(j.size(0)):

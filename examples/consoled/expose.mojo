@@ -12,7 +12,7 @@ from mojoui.process import Process, file_tail
 from mojoui.workbook import read_text, write_text
 from mojoui.clock import now_ns
 from mojoui import libc
-from sandbox import which
+from sandbox import which, scrub, env_names
 from sysinfo import hostname
 
 comptime EXPOSE_PORT = 8443
@@ -98,9 +98,9 @@ def start_time(pid: Int) -> String:
     if at < 0:
         return ""
     var fields = String(text[byte = at + 1 :]).split()
-    if len(fields) < 21 or String(fields[0]) == "Z":
+    if len(fields) < 20 or String(fields[0]) == "Z":
         return ""
-    return String(fields[20])
+    return String(fields[19])  # starttime (field 22 of /proc/<pid>/stat; index 0 here is `state`, field 3)
 
 
 def running_pid(home: String) -> Int:
@@ -188,8 +188,11 @@ struct Exposing(Movable):
         write_text(caddyfile, render_caddyfile(hosts, expose_port()))
         write_text(dir + "/host", host)
         var log = dir + "/caddy.log"
-        # Only what Caddy needs: no key in the daemon's environment belongs in a LAN-facing process.
-        var env: List[String] = ["MXC_API_KEY=", "ANTHROPIC_API_KEY=", "HF_TOKEN=", "OPENAI_API_KEY="]
+        # Only what Caddy needs: no key in the daemon's environment belongs in a LAN-facing process (expose.py
+        # passed an allow-list; mojoui.process applies overrides, so every name that looks like a credential is
+        # removed by the same rule the port's sandbox uses).
+        var env = scrub(env_names(), False)
+        env += ["MXC_ADMIN_KEY=", "MXC_API_KEY="]
         var p = Process.start(caddy_argv(caddyfile), log, env)
         write_text(dir + "/caddy.pid", String(p.pid) + " " + start_time(p.pid))
         var until = now_ns() + SETTLE_MS * 1_000_000
