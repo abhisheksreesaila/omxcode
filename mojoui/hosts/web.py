@@ -1100,12 +1100,14 @@ async def _drain(receive, most, seconds=60):
 
 class SessionRequests:
     """ASGI middleware (public mode), before anything of a request is read (round 5):
-    - a request for a session that doesn't exist (every /{route}/{sid} but the EXEMPT routes) is answered at once, "gone";
+    - a request for a session that doesn't exist (every session route, ROUTES: all but the EXEMPT ones) is answered at once, "gone";
     - a session's requests in flight are at most SESSION_REQUESTS (past them a 204 with X-Mojoui-Retry, which the page
       retries, without a worker thread: round 4, 300 open /frame requests took anyio's 40 threads and /health to 8 s);
     - an address's requests in flight are at most ADDRESS_REQUESTS (429)."""
 
     EXEMPT = ("static", "assets", "health", "wait", "push", "bye", "download", "img", "favicon.ico", "")  # (no session work, or a few a tab holds)
+    # (the routes that name a session, but the exempt ones; any other path, /dev/… on a public copy, gets its own answer)
+    ROUTES = ("e", "w", "frame", "pending", "resize", "save", "reply", "appearance", "describe", "dropfile", "jslog", "rows", "spot", "upload")
 
     def __init__(self, app, alive):
         self.app, self.alive, self.open, self.lock = app, alive, {}, threading.Lock()
@@ -1119,7 +1121,7 @@ class SessionRequests:
         h = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
         addr = address_key(h["x-real-ip"]) if "x-real-ip" in h else address_key((scope.get("client") or ("", 0))[0])
         keys = ["a:" + addr]
-        if route not in self.EXEMPT and len(parts) > 2:
+        if route in self.ROUTES and len(parts) > 2:
             if not self.alive(sid):
                 if time.monotonic() - self.said[0] > 10:  # (said at most every 10 s: a flood can't fill the log)
                     self.said[0] = time.monotonic()
