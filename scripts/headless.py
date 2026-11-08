@@ -41,7 +41,8 @@ def ensure():
         print("headless: no Xvfb in the pixi environment (pixi install); windows will show")
         return False
     n = _free_display()
-    cmd = [str(xvfb), f":{n}", "-screen", "0", "2560x1600x24", "-nolisten", "tcp"]
+    screen = os.environ.get("MOJOUI_HEADLESS_SCREEN", "2560x1600")  # (a bigger one for 2× recordings: scripts/robotclip.py)
+    cmd = [str(xvfb), f":{n}", "-screen", "0", f"{screen}x24", "-nolisten", "tcp"]
     xkb = _xkb_dir()
     if xkb:
         cmd += ["-xkbdir", xkb]

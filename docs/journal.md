@@ -1236,6 +1236,11 @@ was the map.
 - M0 rounds: (1) verbs all "other" on 2,018 episodes; (2) a linked pack from an older MAX ("region_605"); (3) the torch env's xkb race; (4) CUDA out of memory (a neighbour's llama-server, ~43 GB of 48); (5) scene's labels cleared the player's boxes, card keys; (6) the GPU-room stop ran with every pack built. PASS on the seventh.
 - Claude Code's temp dir (/tmp) hit its quota mid-goal: commands lost their output; worked around by writing output to ~/scratch; freed space by `pixi clean` in yesterday's /tmp/omx-onboard clone only (5 GB, recreatable).
 
+## Goal 61 (2026-11-06): fresh videos for the omxplorer page
+- The robot take broke where it assumed the telemetry card right of the video (tiles stack them); then the split covered the video (square chart); then soft text (1× tiles pushed in 3×) → 2× takes.
+- Chart answers print no trace line; the status bar's "… ms on …" lags; the first island take credited the default chart's 51 ms to the median → each answer's own JOB line, or the time under the sentence when no job runs.
+- /tmp hit the user quota (other projects' test copies): command output lost, pixi couldn't write its activation script → TMPDIR=~/scratch/tmp, output to files.
+- A stray recording ran after a failed build (a `;` chain started with &): stopped by its PIDs (the hook blocks pkill -f).
 ## Goal 62: omxplorer on the web, safe to share (2026-11-06)
 - Base: fast-forwarded this worktree (t3-7e13f4cf, was at goal 28's merge) to origin/main 882155b. Own .pixi (a real folder, not a link).
 - Read: the browser check's results (cpu/results.json: every beat OK on CPU; telemetry adds ~2.5 GB RSS per tab; the video canvas drew 58 fps for 15 distinct pictures/s, 582 KB/s of 6 KB JPEGs; a second tab doubled RSS to 5.3 GB), its probes (repro_open, prove_wake: one byte down the wake pipe landed a hung open).

@@ -176,6 +176,7 @@ scripts/setup --no-models    <span class="c"># everything but the packs</span></
 per_label = SELECT label, COUNT(*) AS frames FROM labels GROUP BY label;</pre>
         <p class="note2">The robot's camera isn't what ImageNet was trained on, so ResNet-18's labels for it are guesses: it calls these frames "projectile". That's fine: this page is about plugging a model in, and your own model will know your own footage.</p></div>
     </div>
+    <figure class="shot rv"><video src="img/clip-models.mp4" poster="img/clip-models.jpg" muted loop playsinline autoplay preload="metadata" aria-label="Your model as a function: a robot's camera in omxplorer, the Script window offering detect and scene beside regions, Apply scene on seconds 3 to 8, and a card with a label and a score for every frame"></video><figcaption>The whole flow in 22 seconds, recorded from the app (silent)</figcaption></figure>
     <figure class="shot rv"><img src="img/models-scene.png" alt="omxplorer in dark mode: the robot fleet table, the featured episode's video, and a new table card from scene() with a label and score for every frame between 3 and 8 seconds" loading="lazy"><figcaption>omxplorer on Linux: scene() applied to seconds 3–8 of episode F00118, shot by the app's test mode</figcaption></figure>
   </div>
 </section>
