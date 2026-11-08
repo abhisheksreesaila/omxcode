@@ -4,6 +4,41 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 64: the two things omxconsole still couldn't do (2026-11-08)
+
+**Setup.** This machine (Arch, bwrap and caddy installed, no MAX install), a throwaway MXC_HOME under `build/g64`,
+and the Python project's own fake-port harness: a stand-in `claude`, a stand-in skill clone with stand-in gates, a
+stand-in `max serve` and a stand-in Hugging Face Hub. Never the owner's daemon on :11435, never `~/.mxc`, no real
+API key, no real port.
+
+**What worked.** Both features the cover page admitted were missing are back, in Mojo, and labelled beta with the
+real hit rate (8 of 14). The port worker (`examples/consoled/ports.mojo`) runs the Python version's seven stages in
+order, writes the same `== stage` / `-- stage done` log, feeds a failed gate's output back into the next attempt,
+stops when the same failure repeats, keeps the attempt that got furthest, and stops the agent's process group on
+cancel. The porting assistant (`porter.mojo`) takes Claude Code on this machine or a key for a frontier model,
+stores it 0600 outside the SQLite store, shows only its prefix and makes one small call so a bad key fails in
+seconds. The LAN endpoint (`expose.mojo`) writes the same Caddyfile (`tls internal`, forward_auth to the daemon's
+new `/auth/check`), and a second process fetched `https://localhost:<port>/v1/models` with a key (200) and without
+one (401), with the admin routes and dirty paths refused and localhost's plain HTTP untouched.
+
+**What broke and how it was fixed.** The sandbox's empty `$HOME` hid the stand-in's own Python (the real `claude` is
+bound back by `tool_roots`); the first sandbox assertions were wrong in letter (bwrap makes empty ancestor
+directories for its binds) and were replaced by probes for what actually matters — nothing of the person's in
+`$HOME`, nothing shared writable, this checkout unreadable; the cancel check was passing by accident because the
+pids the stand-in reports are the sandbox's own (`--unshare-pid`); and 8443 belongs to another listener on this
+machine, so the HTTPS port is now configurable. `mojoui.process` gained a `cwd` (the skill's gates only run from the
+skill root).
+
+**What it means.** The machinery is proved without a GPU or hours, and the hard-won details of 14 real runs are kept
+verbatim (the five conservative serve flags, the two `compare_layers.py` patches, pinning the skill environment's
+MAX, the gate-script hash, three attempts, stop-on-repeat, two infrastructure retries). One thing is weaker than the
+Python original and is marked as such: the `auto_map` pre-check (EXAONE) needs transformers' own registry, so the
+port now warns in the log and lets the build gate refuse it a few minutes later.
+
+**Next small step.** One real port on the owner's machine (gpt2 or pythia-1.4b), watched end to end.
+
+---
+
 ## Goal 62, round 3: the round-3 review's findings (2026-11-07)
 
 - **Setup:** same branch and worktree; CPU only; no reviewer or auditor this round (the owner reviews next); not merged, not pushed.
