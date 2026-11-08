@@ -70,11 +70,19 @@ class H(BaseHTTPRequestHandler):
         if not body.get("stream"):
             choice = ({"index": 0, "message": {"role": "assistant", "content": f"hello from {model}"},
                        "finish_reason": "stop"} if chat else
-                      {"index": 0, "text": f"hello from {model}", "finish_reason": "stop"})
-            return self._json({"id": "cmpl-1", "object": "chat.completion" if chat else "text_completion",
-                               "created": 1, "model": model, "choices": [choice],
+                      {"index": 0, "text": f"hello from {model}", "finish_reason": "stop",
+                       "logprobs": {"text_offset": None, "token_logprobs": [], "tokens": None, "top_logprobs": []}})
+            # real `max serve`'s whole shape (26.7, ~730 bytes for a completion): a reader that only looks at the first
+            # 500 bytes can't parse it, which a short stand-in reply hid (D-6417)
+            return self._json({"id": "37f7f3ae71c74fccbd544782f0400f9f", "object": "chat.completion" if chat else "text_completion",
+                               "created": 1, "model": model, "choices": [choice], "system_fingerprint": None,
                                "seen_limits": {k: body.get(k) for k in ("max_tokens", "max_completion_tokens") if k in body},
-                               "usage": {"prompt_tokens": 4, "completion_tokens": 12, "total_tokens": 16}})
+                               "usage": {"prompt_tokens": 4, "completion_tokens": 12, "total_tokens": 16,
+                                         "completion_tokens_details": {"accepted_prediction_tokens": None, "audio_tokens": None,
+                                                                       "reasoning_tokens": 0, "rejected_prediction_tokens": None,
+                                                                       "text_tokens": None},
+                                         "prompt_tokens_details": {"audio_tokens": None, "cache_write_tokens": None,
+                                                                   "cached_tokens": 0, "image_tokens": None, "text_tokens": None}}})
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()

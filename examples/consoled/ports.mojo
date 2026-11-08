@@ -29,7 +29,7 @@
 from std.atomic import Atomic
 from std.sys import CompilationTarget
 from std.memory.alloc import unsafe_alloc
-from std.os import makedirs, getenv, listdir
+from std.os import makedirs, getenv, listdir, remove
 from std.os.path import exists, isdir, getsize
 from mojoui.clock import wall_seconds, now_ns
 from mojoui.files import remove_tree
@@ -41,7 +41,7 @@ from mojoui.process import Process, file_tail, output, healthy
 from mojoui.serve import spawn
 from mojoui.workbook import read_text, write_text
 from mojoui import libc
-from portprep import (ENTRY_SKILL, SKILLS_REPO, SKILL_SCRIPTS, PARITY_SERVE_FLAGS, KEY_FIELDS, Donor, pick_donor,
+from portprep import (ENTRY_SKILL, SKILLS_REPO, SKILLS_REV, SKILL_SCRIPTS, PARITY_SERVE_FLAGS, KEY_FIELDS, Donor, pick_donor,
                       catalog_names, max_arch_dir, package_slug, workspace_name, check_port_dir, apply_skill_patches,
                       stale_patches, gate_hash, max_pinned, failure_signature, infra_error, reached_text, norm)
 from sandbox import bwrap_argv, Confine, scrub, env_names, have_bwrap, which, tool_roots
@@ -861,7 +861,7 @@ def _smoke(mut w: W, mut store: Store, mut p: Process, port: Int, ctx: Ctx, at: 
                     "request failed\n" + file_tail(w.log, 8000), 0)
     var text = String("")
     try:
-        var j = Json.parse(_body_text(r.body))
+        var j = Json.parse(_body_text(r.body, len(r.body)))  # the whole reply: a real one is longer than 500 bytes
         text = j.text(j.get(j.at(j.get(0, "choices"), 0), "text"))
     except:
         pass
@@ -1122,16 +1122,34 @@ def _pipeline(mut w: W, mut store: Store, job: PortJob) raises -> Fail:
     var paths = List[String]()
     for g in ["scripts", "pixi.toml", "SKILL.md"]:
         paths.append(ENTRY_SKILL + "/" + String(g))
+    # the real repo is pinned to SKILLS_REV (D-6416); a stand-in repo (MXC_SKILLS_REPO, the goal 64 harness) follows its HEAD.
+    # Either way: fetch it, then check out exactly what was fetched (a branch, a tag or a full commit id; a
+    # clone left detached by an earlier run moves on too)
+    var rev = getenv("MXC_SKILLS_REV", SKILLS_REV if getenv("MXC_SKILLS_REPO") == "" else "")
     if isdir(ctx.skills_root + "/.git"):
-        var argv: List[String] = ["git", "-C", ctx.skills_root, "checkout", "--"]  # drop our own patches, or pull --ff-only refuses
+        var argv: List[String] = ["git", "-C", ctx.skills_root, "checkout", "--"]  # drop our own patches, or git refuses to move
         argv += paths.copy()
         _ = output(argv, 60_000)
-        _ = output(["git", "-C", ctx.skills_root, "pull", "--ff-only"], 180_000)
     else:
         makedirs(_parent(ctx.skills_root), exist_ok=True)
         var out = output(["git", "clone", "--depth", "1", getenv("MXC_SKILLS_REPO", SKILLS_REPO), ctx.skills_root], 600_000)
         if not isdir(ctx.skills_root + "/" + ENTRY_SKILL):
             return Fail("could not install Modular's skills from " + SKILLS_REPO + ": " + String(out[byte = : min(300, out.byte_length())]), False, "", 0)
+    var want = rev if rev != "" else String("HEAD")
+    try:
+        remove(ctx.skills_root + "/.git/FETCH_HEAD")  # a failed fetch must not leave an earlier run's tip to check out
+    except:
+        pass
+    var fetched = output(["git", "-C", ctx.skills_root, "fetch", "-q", "origin", want], 180_000)
+    var tip = String(output(["git", "-C", ctx.skills_root, "rev-parse", "--verify", "-q", "FETCH_HEAD^{commit}"], 30_000).strip())
+    if tip != "":
+        _ = output(["git", "-C", ctx.skills_root, "checkout", "-q", "--detach", tip], 60_000)
+    var head = String(output(["git", "-C", ctx.skills_root, "rev-parse", "HEAD"], 30_000).strip())
+    if tip == "" or head != tip or (rev.byte_length() == 40 and head != rev):
+        return Fail("could not check Modular's skills out at " + want + (", the commit that matches the serving MAX" if rev != "" else "")
+                    + " (HEAD is " + head + "): " + String(fetched[byte = : min(300, fetched.byte_length())]), False, "", 0)
+    if rev != "":
+        w.say("-- Modular's skills at " + head[byte = : 7] + ", the commit that matches the serving MAX")
     if not isdir(ctx.skills_root + "/" + ENTRY_SKILL):
         return Fail("Modular's skills in " + ctx.skills_root + " have no " + ENTRY_SKILL + " skill", False, "", 0)
     ctx.serving_max = max_version(job.max_cmd)
@@ -1220,9 +1238,10 @@ def _pipeline(mut w: W, mut store: Store, job: PortJob) raises -> Fail:
     return Fail.none()
 
 
-def _body_text(body: List[UInt8]) -> String:
+def _body_text(body: List[UInt8], limit: Int = 500) -> String:
+    """The reply's first `limit` bytes as text (500: enough for an error message, never enough to parse)."""
     var bytes = List[UInt8]()
-    for i in range(min(500, len(body))):
+    for i in range(min(limit, len(body))):
         bytes.append(body[i])
     return String(unsafe_from_utf8=bytes)
 

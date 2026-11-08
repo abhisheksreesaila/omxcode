@@ -4,6 +4,38 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## The first real port on the Mojo daemon: gpt2 (2026-11-08)
+
+**Setup.** This machine's RTX 3090, the Mojo `consoled` from goal 64 on a throwaway MXC_HOME (`build/realport/home`,
+port 11477), Claude Code as the porting assistant, `max serve` from the skill env (MAX 26.7.0.dev2026100905). Not the
+owner's daemon on :11435. Run 1 linked the owner's `~/.mxc/skills` in; runs 2 and 3 used their own fresh clone.
+
+**What happened.** Three runs of `openai-community/gpt2`:
+1. **Failed at the build gate, twice:** `cannot import name 'functional' from 'max'`. The skills stage pulled
+   Modular's HEAD, whose gate scripts moved to `max.functional` on 2026-10-29; the serving MAX 26.7 doesn't have it.
+   The gate crashed before reading the port. Fixed by pinning the skills to c771908, the commit the owner's 14 runs
+   used (D-6416). Side effect: run 1's pull moved the owner's real `~/.mxc/skills` clone to HEAD (148fb58).
+2. **Build passed, then failed at parity twice with "smoke generation returned no text".** The port was fine:
+   served by hand, it answered "The capital of France is" with " the capital of the French Republic, and the capital
+   of the Republic of the Republic", the Python version's own gpt2 text. The daemon parsed only the first 500 bytes of
+   MAX's ~730-byte reply (D-6417). The goal 64 stand-in now answers with MAX's whole shape: M2 fails with the fix
+   reverted and passes with it.
+3. **Done in 16.3 minutes.** Attempt 1's parity check failed and was fed back; attempt 2 matched Hugging Face,
+   registered and served. Through the daemon's own `/v1/completions` with an app key, "Robots are useful because"
+   gave " they can be used to create a new character, or to create a new character from scratch."
+
+Goal 64's M0–M4 pass after both fixes (run with `ANTHROPIC_API_KEY` unset: inside a Claude Code session the stand-in
+agent sees the key Claude Code keeps on purpose, and M2 reports it as a leak). The reviewer's round (NEEDS WORK)
+moved the skills stage to "fetch, then check out FETCH_HEAD", proved on a fresh clone and a reused one.
+
+**What it means.** The Mojo port pipeline works on a real model. Both bugs would have failed every user's port.
+Still not built: `consoled port-try`.
+
+**Next small step.** A bigger proven model (pythia-1.4b or OLMoE-1B-7B) on the Mojo daemon; then the port screen run
+on GTK and the web.
+
+---
+
 ## Goal 64: the two things omxconsole still couldn't do (2026-11-08)
 
 **Setup.** This machine (Arch, bwrap and caddy installed, no MAX install), a throwaway MXC_HOME under `build/g64`,

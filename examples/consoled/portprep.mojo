@@ -10,6 +10,10 @@ from mojoui.json import Json
 from mojoui.workbook import read_text, write_text
 
 comptime SKILLS_REPO = "https://github.com/modular/skills"
+# The skills commit the owner's 14 real runs used (2026-10-12). Modular's HEAD follows MAX nightly: on 2026-10-29 its
+# gate scripts moved to `max.functional`, which the pinned serving MAX (26.7) doesn't have, so a pull from HEAD
+# failed every port at the build gate (D-6416). Move this together with the serving MAX, never alone.
+comptime SKILLS_REV = "c77190849f2029459082b3e1092134558ff787ab"
 comptime ENTRY_SKILL = "import-model"
 comptime FALLBACK_DONOR = "LlamaForCausalLM"
 comptime KEY_FIELDS = ["model_type", "architectures", "hidden_size", "num_hidden_layers", "num_attention_heads",

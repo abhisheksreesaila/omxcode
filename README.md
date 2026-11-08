@@ -194,6 +194,19 @@ All on one Linux machine with an RTX 3090, and all from the checks or their benc
 
 The GPU path is NVIDIA today. Apple and phone GPUs use the CPU path, which runs the same functions.
 
+### omxconsole: which models it runs
+
+omxconsole, the second app, runs models on your own GPU through [MAX](https://www.modular.com/max), in the spirit of Ollama and LM Studio. The app and its daemon are Mojo (`examples/console`, `examples/consoled`). Python appears only as programs the daemon starts: `max serve`, Modular's skill scripts and Claude Code.
+
+| Kind of model | Status |
+|---|---|
+| **An LLM that MAX already supports** | ✅ Pull it, serve it, chat with it, benchmark it |
+| **An LLM that MAX can't run yet** ("Port it", beta) | ✅ Built. Claude Code writes a MAX architecture for it, starting from the closest one MAX has, then checks that its output matches Hugging Face. On the owner's machine, 8 of 14 models ported and served, all of them 1 to 3 billion parameters. On the Mojo daemon, gpt2 ported end to end on 2026-11-08: 16 minutes, the second attempt matched Hugging Face, then it served through the app's own API. |
+| **A PyTorch model that isn't an LLM** (ResNet, SAM, YOLO, robot policies) | ❌ Not in the console. The framework can run some through PyTorch inside the app (`mojoui/visionmodel.mojo`: OWLv2, SAM 2), but nothing is converted to MAX yet ([the research](docs/research/visionmodel-spike.md)) |
+| **scikit-learn and other classic models** | ❌ Not started |
+
+Not yet: `consoled port-try`, the agent's own "see it run" loop, which the Python version had.
+
 **Why Mojo, honestly.** Mojo is young (1.2). It has a small ecosystem, no official iPhone, Android or WebAssembly target (omxcode cross-compiles with two hand-written runtime functions), and no Windows release yet. Flutter, React Native and the Rust kits are far ahead on maturity, tooling and production users. What none of them has is one readable language from the button to the GPU kernel, with native controls on every platform and an agent built in as a host.
 
 ## Try it
