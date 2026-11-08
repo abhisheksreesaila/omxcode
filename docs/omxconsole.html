@@ -1,21 +1,210 @@
 <!doctype html>
-<html lang="en" class="oq-root oq-night oq-family-dev"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>omxconsole · local AI on MAX, made easy</title><meta name="description" content="Find, download, serve and benchmark local models in a native desktop app built with omxcode. MAX runs the models. Download the alpha and give feedback.">
-<meta property="og:title" content="omxconsole · local AI on MAX, made easy"><meta property="og:description" content="Find, download, serve and benchmark local models in a native desktop app built with omxcode. MAX runs the models. Download the alpha and give feedback.">
-<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/img/forum/omxconsole-poster.jpg">
-<meta name="theme-color" content="#000000"><link rel="icon" href="img/logo.svg" type="image/svg+xml">
-<link rel="stylesheet" href="omxqua/src/fonts.css"><link rel="stylesheet" href="omxqua/src/tokens.css"><link rel="stylesheet" href="showcase.css">
-</head><body>
-<nav class="nav" aria-label="Main navigation"><a class="brand" href="omxconsole.html"><img src="img/logo.svg" alt="">omxconsole</a><div class="nav-links"><a href="index.html">Built with omxcode</a><a href="https://github.com/abhisheksreesaila/omxcode#try-omxconsole">README</a><a href="https://github.com/abhisheksreesaila/omxcode">GitHub ↗</a></div></nav>
+<html lang="en" class="oq-root oq-night oq-family-dev">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omxconsole · local AI on MAX, made easy</title>
+<meta name="description" content="omxconsole, a desktop app built on omxcode: find a model on Hugging Face, download it and serve it on your own GPU through Modular's MAX, behind one OpenAI-compatible endpoint with a key per app.">
+<meta property="og:title" content="omxconsole: local AI on MAX, made easy">
+<meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/gallery/img/omxconsole-find.png">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="img/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="omxqua/src/fonts.css">
+<link rel="stylesheet" href="omxqua/src/tokens.css">
+<link rel="stylesheet" href="omxqua/src/components.css">
+<link rel="stylesheet" href="site.css">
+<!-- omxconsole's cover (owner, 2026-11-06: "it needs to have its own cover page… this is 2nd flagship product"): omxplorer's
+     page as the template, the headlines of the front page the owner picked for omxconsole (2026-10-24, the dark Statement),
+     only what the Mojo version does today. No speed in any picture (docs/lessons.md, D-4762). -->
+<style>
+.ohero { padding-top: 90px; padding-bottom: 40px; text-align: center; }
+.ohero h1 { font-size: clamp(60px, 10vw, 140px); }
+.ohero .lede { max-width: 820px; margin-left: auto; margin-right: auto; }
+.film { margin: 56px auto 0; width: min(1180px, 94vw); border-radius: 28px; overflow: hidden; box-shadow: var(--oq-shadow-4), 0 0 0 1px var(--line); background: #111; }
+.film img { display: block; width: 100%; height: auto; }
+.film + .srcline { text-align: center; }
+.needs { font: 12.5px/1.6 var(--mono); color: var(--ink2); margin-top: 14px; } .needs a { color: var(--ink); }
+.dog { font: 600 clamp(24px, 3vw, 38px)/1.25 var(--sans); letter-spacing: -.025em; max-width: 900px; margin: 0 auto; text-align: center; }
+.dog .two { font-weight: 500; }
+.split { display: grid; grid-template-columns: 1fr 1.35fr; gap: 48px; align-items: center; }
+.split.flip { grid-template-columns: 1.35fr 1fr; }
+.split.flip > :first-child { order: 2; }
+.shot { border-radius: 22px; overflow: hidden; box-shadow: var(--oq-shadow-3), 0 0 0 1px var(--line); background: #f4f4f4; }
+.shot img { display: block; width: 100%; height: auto; }
+.facts { display: grid; gap: 10px; margin-top: 22px; }
+.facts div { display: flex; gap: 12px; align-items: baseline; color: var(--ink2); font-size: 16px; }
+.facts b { font: 600 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; min-width: 92px; color: var(--ink); }
+.split .code { margin-top: 22px; font-size: 13.5px; }
+.steps5 { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.steps5 span { font: 500 13px var(--mono); color: var(--ink2); padding: 7px 12px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line); }
+.stack3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 48px; text-align: left; }
+.layer { border-radius: 22px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); padding: 22px; }
+.layer .k { font: 600 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--word); }
+.layer h3 { font: 700 26px/1.1 var(--display); letter-spacing: -.03em; margin-top: 10px; }
+.layer p { color: var(--ink2); font-size: 16px; margin: 10px 0 0; }
+.reads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+.reads a { display: block; text-decoration: none; border-radius: 16px; padding: 16px 18px; box-shadow: inset 0 0 0 1px var(--line); transition: background .2s, transform .2s; }
+.reads a:hover { background: var(--oq-surface-1); transform: translateY(-2px); }
+.reads b { display: block; font: 600 16px var(--sans); }
+.reads span { font: 12.5px var(--mono); color: var(--ink2); }
+.edges { max-width: 760px; margin: 40px auto 0; display: grid; gap: 10px; text-align: left; }
+.edges div { padding: 14px 18px; border-radius: 14px; box-shadow: inset 2px 0 0 var(--oq-warn), 0 0 0 1px var(--oq-line-2); color: var(--ink2); font-size: 16px; }
+.edges b { color: var(--ink); }
+@media (max-width: 860px) {
+  .split, .split.flip, .stack3, .reads { grid-template-columns: 1fr; } .split.flip > :first-child { order: 0; }
+}
+</style>
+<noscript><style>.rv { opacity: 1; transform: none; }</style></noscript>
+</head>
+<body>
+
+<nav class="lnav">
+  <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode <span class="sub">/ omxconsole</span></a>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#endpoint">Endpoint</a><a href="#find">Find</a><a href="#models">Models</a><a href="#keys">Keys</a><a href="#bench">Benchmark</a><a href="#inside">Inside</a></div>
+  <div class="right"><a class="cta" href="#run">Get it</a></div>
+</nav>
+
 <main>
-<section class="hero"><p class="kicker">A native desktop app · built with omxcode</p><h1>Local AI on MAX.<br><span>Made easy.</span></h1><p class="intro">Find a model, download it and serve it from one app. MAX runs the models; omxconsole gives you a friendly place to manage them.</p><div class="actions"><a class="button" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-linux-x86_64.tar.gz">Download for Linux ↓</a><a class="button secondary" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-mac-arm64.zip">Download for Mac ↓</a></div><p class="note">Public alpha · needs MAX installed · Linux serving verified; Mac launch tested<br><a href="https://github.com/abhisheksreesaila/omxcode#try-omxconsole">Setup, first model and platform notes → README</a></p>
-<figure class="film"><picture><source media="(prefers-reduced-motion: reduce)" srcset="img/forum/omxconsole-poster.jpg"><img src="img/forum/omxconsole.gif" width="800" height="558" alt="Real omxconsole screens: find a model, manage downloaded models and make an app key" fetchpriority="high"></picture><figcaption>The real app on Linux · model search, library and app keys</figcaption></figure>
+<section class="ohero">
+  <div class="wrap">
+    <div class="eyebrow rise"><span>The second flagship · built on omxcode</span></div>
+    <h1 class="rise" data-words data-step="0" data-d0="120">omxconsole</h1>
+    <p class="lede rise"><span data-words data-step="45" data-d0="380">Local AI on MAX.</span> <span class="two" data-words data-step="35" data-d0="560">Made easy.</span></p>
+    <p class="lede rise">Find a model on Hugging Face, download it and serve it on your own GPU through Modular's MAX, behind one OpenAI-compatible endpoint. A desktop app for Linux and the Mac.</p>
+    <div class="ctas rise"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-linux-x86_64.tar.gz">Download for Linux</a><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-mac-arm64.zip">Download for Mac</a></div>
+    <p class="needs rise">Needs MAX installed: <a href="https://docs.modular.com/max/packages">docs.modular.com/max/packages</a> · omxconsole itself is free, MIT licence</p>
+  </div>
+  <div class="film rv"><img src="gallery/img/omxconsole-find.png" alt="Add a model: a search for qwen2.5 lists models from the MAX catalog and Hugging Face, each marked fits, tight fit or too big for this GPU"></div>
+  <p class="srcline rv">the real app on Linux · a search across the MAX catalog and Hugging Face, each result checked against this GPU's memory</p>
 </section>
-<section class="section"><p class="kicker">Your models, in one place</p><h2>Find it. Run it. Make it yours.</h2><div class="cards two-cards">
-<article class="card"><a href="img/forum/console-find.png"><img src="img/forum/console-find.png" width="1440" height="900" alt="Search results show which models fit the GPU" loading="lazy"></a><h3>Find a model that fits.</h3><p>Search the MAX catalog and Hugging Face. Download with progress, resume and cancel.</p></article>
-<article class="card"><a href="img/forum/console-models.png"><img src="img/forum/console-models.png" width="1440" height="900" alt="The native model library, with the model’s overview, logs and benchmark available" loading="lazy"></a><h3>One endpoint for your apps.</h3><p>Start and stop models, make an app key, inspect logs and run a benchmark. Use the endpoint from an OpenAI-compatible client.</p></article>
-</div><p class="agent-line"><strong>People use the app. Agents use the same actions.</strong> omxcode exposes interactive controls as tools through its shared agent host. <a href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/agent.md">How it works ↗</a></p></section>
-<section class="invite" id="run"><h2>MAX users: give it a try.</h2><p>I’d love to know how it runs on your machine, what you’d use it for and what’s missing. Feedback and contributions are welcome.</p><div class="actions"><a class="button" href="https://github.com/abhisheksreesaila/omxcode#try-omxconsole">Get started →</a><a class="text-link" href="https://github.com/abhisheksreesaila/omxcode/issues">Give feedback ↗</a></div></section>
-</main><footer class="foot"><span>omxconsole · built with <a href="index.html">omxcode</a> · MIT</span><span>Mojo and MAX are Modular’s. This is an independent project.</span></footer>
-</body></html>
+
+<section style="padding-top:70px;padding-bottom:70px">
+  <p class="dog rv">MAX already serves models well. <span class="two">omxconsole is the convenience around it: it finds and downloads them, keeps one endpoint and a key per app, and measures them.</span></p>
+</section>
+
+<section id="endpoint">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow rv">The endpoint</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">One endpoint. <span class="two">Every model you've pulled.</span></h2>
+      <p class="body rv">Your apps call one address and name a model. A model starts on its first request and stops after five idle minutes, so GPU memory goes only to the models in use.</p>
+      <div class="facts rv"><div><b>address</b>http://127.0.0.1:11435/v1</div><div><b>speaks</b>the OpenAI API: chat, completions, embeddings, models</div><div><b>idle</b>a model unloads after 5 minutes unused</div></div>
+    </div>
+    <pre class="code rv"><span class="k">from</span> openai <span class="k">import</span> OpenAI
+
+client = OpenAI(base_url=<span class="s">"http://127.0.0.1:11435/v1"</span>,
+                api_key=<span class="s">"mst-…"</span>)   <span class="c"># a key you made in Keys</span>
+r = client.chat.completions.<span class="f">create</span>(
+    model=<span class="s">"qwen2.5-0.5b"</span>,
+    messages=[{<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: <span class="s">"Say hello in five words."</span>}])
+<span class="k">print</span>(r.choices[0].message.content)</pre>
+  </div>
+</section>
+
+<section id="find" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Find and download</div>
+    <h2 class="rv">Find it. <span class="two">Download it.</span></h2>
+    <p class="lede rv">Search the MAX catalog and Hugging Face by name, as in the picture above: every result is checked against this machine's GPU memory. Before any weights come down, it checks that MAX supports the model's architecture. Downloads resume where they stopped, even when the connection drops, and are checked against the Hub's file sizes; a cancel leaves nothing half-made.</p>
+    <div class="steps5 rv" style="justify-content:center"><span>Resolve</span><span>Architecture</span><span>Download</span><span>Verify</span><span>Register</span></div>
+  </div>
+</section>
+
+<section id="ready">
+  <div class="wrap split flip">
+    <div>
+      <div class="eyebrow rv">Ready means it answered</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">It answers <span class="two">before it says Ready.</span></h2>
+      <p class="body rv">After the download, the app starts the model on MAX and asks it a first question. The Ready card, with the endpoint and a curl line to copy, comes only after the reply.</p>
+    </div>
+    <div>
+      <div class="shot rv"><img src="gallery/img/omxconsole-ready.png" alt="qwen2.5-0.5b is serving: ready on localhost, its endpoint and a curl line to copy"></div>
+      <p class="srcline rv">the Ready card from a test run on its own port; the app's own address is 127.0.0.1:11435</p>
+    </div>
+  </div>
+</section>
+
+<section id="models">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow rv">The console</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">Every model, <span class="two">one page.</span></h2>
+      <p class="body rv">Your models as one list: search it, group it by kind or by your own labels, see it as rows or cards. Open one and its Overview, Benchmark, Logs and Notebook are tabs, with Start, Stop and Remove beside them.</p>
+    </div>
+    <div class="shot rv"><img src="gallery/img/omxconsole-models.png" alt="My models: the list with its groups by kind and your labels, and the GPU's memory in the top bar"></div>
+  </div>
+</section>
+
+<section id="keys">
+  <div class="wrap split flip">
+    <div>
+      <div class="eyebrow rv">Keys</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">Safe to share. <span class="two">One key per app.</span></h2>
+      <p class="body rv">Each app that calls the endpoint gets its own key. A key is shown once and stored only as a hash; revoke one and only that app stops.</p>
+    </div>
+    <div class="shot rv"><img src="gallery/img/omxconsole-keys.png" alt="Keys: one key per app, shown by its prefix only"></div>
+  </div>
+</section>
+
+<section id="bench" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Benchmark</div>
+    <h2 class="rv">Measure it, <span class="two">the same way every time.</span></h2>
+    <p class="lede rv">A 512-token prompt, 128 tokens back, a warm-up and then five timed runs, through the same endpoint your apps use: time to first token and tokens per second, with their spread.</p>
+    <p class="srcline rv">checked against a stopwatch around the OpenAI SDK's own streaming call on one RTX 3090: within 1% in the recorded run; the check allows 25%, since the SDK alone varies by about 10% from run to run · docs/goals/55-report.md, M4</p>
+  </div>
+</section>
+
+<section id="inside" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Inside</div>
+    <h2 class="rv">All omxcode. <span class="two">MAX runs the models.</span></h2>
+    <div class="stack3">
+      <div class="layer rv"><div class="k">the app</div><h3>omxconsole</h3><p>Native on each platform: GTK on Linux, AppKit on the Mac. One Mojo codebase, built on omxcode.</p></div>
+      <div class="layer rv"><div class="k">the service</div><h3>consoled</h3><p>A Mojo service beside the app: Hugging Face downloads, keys, the endpoint, benchmarks. It starts with the app and stops when the app closes.</p></div>
+      <div class="layer rv"><div class="k">the engine</div><h3>MAX</h3><p>Modular's <code>max serve</code>, installed by you. It loads and runs the models; omxconsole wraps it.</p></div>
+    </div>
+    <p class="srcline rv" style="text-align:left">read more</p>
+    <div class="reads">
+      <a class="rv" href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/goals/55-report.md"><b>How it was built</b><span>goal 55's report, check by check</span></a>
+      <a class="rv" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/console"><b>The app</b><span>examples/console</span></a>
+      <a class="rv" href="https://github.com/abhisheksreesaila/omxcode/tree/main/examples/consoled"><b>The service</b><span>examples/consoled</span></a>
+      <a class="rv" href="https://github.com/abhisheksreesaila/omxcode/blob/main/docs/decisions.md"><b>Decisions</b><span>every call we made, with reasons</span></a>
+    </div>
+  </div>
+</section>
+
+<section id="run" class="center">
+  <div class="wrap">
+    <div class="eyebrow rv">Available today</div>
+    <h2 class="rv">Try it <span class="two">on your GPU.</span></h2>
+    <p class="body rv"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-linux-x86_64.tar.gz">Download for Linux</a> &nbsp;<a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-mac-arm64.zip">Download for Mac</a></p>
+    <p class="rv" style="font: 12px/1.6 var(--mono); color: var(--ink2); max-width: 680px; margin: 10px auto 0">Linux: x86_64, GTK 4; unpack, then <code>./omxconsole</code> · Mac: Apple Silicon, not notarised: <code>xattr -dr com.apple.quarantine omxconsole.app</code> · both need MAX: <code>max</code> on your PATH, or <code>MXC_MAX=/path/to/max</code></p>
+    <div class="card install rv">
+<pre id="cmds">git clone https://github.com/abhisheksreesaila/omxcode
+cd omxcode &amp;&amp; pixi install
+scripts/build.sh console linux &amp;&amp; build/console/linux/console</pre>
+      <div class="src">or from the source · Linux<button class="cp" data-copy="#cmds">copy</button></div>
+    </div>
+    <div class="edges">
+      <div><b>Honest edges.</b> It's an alpha.</div>
+      <div>It needs MAX; when MAX isn't installed, the app opens and says how to get it.</div>
+      <div>On the Mac it has opened and started its service on GitHub's macOS runners. Serving a model on Apple silicon through MAX hasn't been tried yet.</div>
+      <div>The app has no chat window of its own yet: you talk to a model through the endpoint, from any OpenAI client.</div>
+      <div>Two things the earlier Python version did aren't in this one yet: porting a model MAX can't run, and reaching the endpoint from another machine over HTTPS. The console still shows their buttons.</div>
+    </div>
+    <div class="ctas rv"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode">Get it on GitHub</a><a class="more" href="gallery/">Back to the gallery</a></div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="note">Measured on one Linux machine with an NVIDIA RTX 3090, by scripts in the repository. Mac results are from GitHub's macOS runners.</p>
+    <div class="fine"><span>omxconsole · built on omxcode · MIT licence · MAX and Mojo are Modular's; omxlabs is independent</span><a href="https://github.com/abhisheksreesaila/omxcode/issues">Report an issue</a></div>
+  </div>
+</footer>
+<script src="site.js"></script>
+<script src="omxqua/src/omxqua.js" defer></script>
+</body>
+</html>

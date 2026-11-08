@@ -9,7 +9,6 @@
 
 Nothing here is typed by hand per component: names, statuses and counts come from those files. The only hand-written
 words are each family's one line on what it solves and each platform's next step (the roadmap), below.
-The short showcase cover links to the catalog; its embedded component summary is optional.
 """
 import html
 import json
@@ -203,12 +202,8 @@ def page(items):
 def outputs():
     items = load()
     cover = COVER.read_text()
-    # The short showcase cover links to the catalog instead of embedding its full summary.
-    # Older/detailed covers can still opt into the generated block with both markers.
-    if (BEGIN in cover) != (END in cover):
-        raise SystemExit(f"docs/index.html needs both {BEGIN} … {END} markers, or neither")
-    if BEGIN not in cover:
-        return {PAGE: page(items)}
+    if BEGIN not in cover or END not in cover:
+        raise SystemExit(f"docs/index.html has no {BEGIN} … {END} markers")
     head, rest = cover.split(BEGIN, 1)
     new_cover = head + cover_block(items) + rest.split(END, 1)[1]
     return {PAGE: page(items), COVER: new_cover}
@@ -221,7 +216,7 @@ def main():
         if stale:
             print("stale: " + ", ".join(stale) + ": run pixi run python scripts/site_components.py")
             return 1
-        print("docs/components.html and any embedded cover component block are current")
+        print("docs/components.html and the cover's component block are current")
         return 0
     for p, t in outs.items():
         p.write_text(t)

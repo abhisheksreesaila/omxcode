@@ -21,47 +21,6 @@
   <a href="https://abhisheksreesaila.github.io/omxcode/"><img alt="Website" src="https://img.shields.io/badge/website-omxcode-1d1d21?labelColor=0b0b0d"></a>
 </p>
 
-## Download and run
-
-Want to try the apps before writing Mojo? Download a public-alpha build. You do **not** need the Mojo compiler or pixi to run these packages.
-
-| App | Linux x86_64 | Apple Silicon Mac |
-|---|---|---|
-| **omxconsole** — find, download, serve and benchmark models on MAX | [Download](https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-linux-x86_64.tar.gz) | [Download](https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-mac-arm64.zip) |
-| **omxplorer** — tables, charts, video and data on your GPU | [Download](https://github.com/abhisheksreesaila/omxcode/releases/download/linux-app/omxplorer-linux-x86_64.tar.gz) | [Download](https://github.com/abhisheksreesaila/omxcode/releases/download/mac-app/omxplorer-mac-gpu.zip) |
-
-Linux: unpack and run the app, or use the included `install.sh` for a launcher entry. The packages need GTK 4 and libadwaita from your distribution; web widgets also need WebKitGTK 6.0. They have been run on one Arch-based machine; other distributions are not yet verified. NVIDIA is the tested Linux GPU path.
-
-Mac: unzip and open the `.app`. The apps are not notarised. If macOS blocks the console, remove the download quarantine from the app you just downloaded with `xattr -dr com.apple.quarantine omxconsole.app`, then open it again. **omxplorer’s GPU download needs macOS 26**; [the CPU build](https://github.com/abhisheksreesaila/omxcode/releases/download/mac-ci/omxplorer-mac.zip) is the alternative for macOS 14/15. No Intel Mac or native Windows build is provided.
-
-The downloads are tested snapshots. For the latest robot-data and model workflow, [build from source](#try-it). The Mac framework has run on a real Apple M4, including GPU rendering and video; the downloadable console has been launch-tested on macOS 15/26 CI, **not yet tested serving a model through MAX on a real Mac**.
-
-## Try omxconsole
-
-1. Install [Modular’s MAX with its serving support](https://docs.modular.com/max/packages). omxconsole wraps `max serve`; it does not install MAX for you yet. Check that `max` is available in the environment used to launch the app.
-2. Download the package above. On Linux:
-
-   ```bash
-   tar -xzf omxconsole-linux-x86_64.tar.gz
-   cd omxconsole-linux-x86_64
-   ./omxconsole
-   ```
-
-   On a Mac, unzip and open `omxconsole.app`. If MAX is not on the app’s PATH, launch from a terminal with its full path:
-
-   ```bash
-   MXC_MAX=/absolute/path/to/max ./omxconsole.app/Contents/MacOS/ConsoleMojo
-   ```
-
-3. Choose **Add a model**, search for a small supported model such as `qwen2.5-0.5b`, and pick one that fits your GPU. Download it and wait for its **Ready** card: it appears after the model has answered a test question.
-4. Make an app key in **Keys**, then use an OpenAI-compatible client with `http://127.0.0.1:11435/v1`. Copy the request example from the Ready card and use your app key. The console does not have a full chat window yet.
-
-Models and the store live under `~/.mxc`. The app starts its Mojo companion service and stops the service it started when you close it. Public Hugging Face models need no token; for a gated/private repository, first accept its terms on the Hub and provide `HF_TOKEN` in the app’s environment. If MAX lives in another environment, set `MXC_MAX` to that environment’s `max` executable.
-
-**Current limits:** Linux serving is verified on an RTX 3090. Real-Mac MAX inference remains unverified. Model porting and HTTPS/LAN exposure from the older Python version are not in this download. The shared developer MCP host exposes app controls as tools; a packaged persistent headless command proxy is not shipped yet. [Agent setup](docs/agent.md).
-
-**Feedback is the point of this alpha.** [Tell us what happened](https://github.com/abhisheksreesaila/omxcode/issues): your app, download version, OS/GPU, what you tried and what you expected. Ideas, bug reports and contributions are welcome.
-
 <p align="center">
   <img src="docs/img/readme-report.jpg" alt="omxplorer: a report over 1,000,000 orders. Sum, median, average and count tiles, and a chart, recomputed in 0.3 ms on the GPU" width="100%">
   <br><sub>omxplorer, written in Mojo with omxcode: a million orders, every tile and chart recomputed in 0.3 ms on the GPU. A native Linux window.</sub>
@@ -84,15 +43,15 @@ Models and the store live under `~/.mxc`. The app starts its Mojo companion serv
 
 Imagine writing an app once, in a language that reads like Python.
 
-It runs as a native app on Linux and the Mac, and through the web host. Android controls run on the emulator; iPhone builds are not yet device-tested. Each one uses that platform's own buttons, menus and text fields, not an imitation of them. The heavy lifting, a million rows summed, sorted or charted, runs on the GPU, in the same language and the same file. And when an AI agent wants to use the app, it doesn't scrape pixels or guess at buttons. The app is already a set of tools the agent can call.
+It opens as a real app on Linux, in the browser, on Android, on a Mac and on an iPhone. Each one uses that platform's own buttons, menus and text fields, not an imitation of them. The heavy lifting, a million rows summed, sorted or charted, runs on the GPU, in the same language and the same file. And when an AI agent wants to use the app, it doesn't scrape pixels or guess at buttons. The app is already a set of tools the agent can call.
 
-That's **omxcode**. Its showcase, **omxplorer**, is a data app in the spirit of Numbers and Power BI, built from the framework’s reusable components.
+That's **omxcode**. Its showcase, **omxplorer**, is a data app in the spirit of Numbers and Power BI, and the app itself is one Mojo file of about 4,500 lines, built from the framework's components.
 
 ## Why omxcode exists
 1. **No boundary tax.** No JSON, no HTTP, no second process to start, keep alive and debug. Apps that move a lot of data between the screen and the computing are faster and simpler.
 2. **One language from pixels to GPU kernels.** Mojo writes the interface and the CUDA-class kernels. In omxplorer, the group-by kernel sits in the same codebase as the sheet that shows its totals.
 3. **Every app can be driven by an agent.** omxcode has an [agent host](docs/agent.md), so each app can be operated by an agent through the same code that draws its screens. JS apps need that built in separately.
-4. **Native on every device from one codebase.** Linux, Mac and web hosts run today; the Mac has both CI and real Apple M4 checks. Android runs on the emulator and iPhone builds ([where it stands](#where-it-stands)).
+4. **Native on every device from one codebase.** Linux and the Mac run today (Mac checks run on GitHub's macOS runners); the web, Android and iPhone are next ([where it stands](#where-it-stands)).
 
 **Where to start, and where not yet:** start with apps that move a lot of data: analytics, spreadsheets, video, documents, robotics. For forms, CRUD screens and marketing sites, JS wins today on ecosystem alone; when a JS library is the better tool, embed it as a widget inside omxcode. SaaS building blocks (sign-in, accounts, payments) are on the roadmap.
 
@@ -218,25 +177,24 @@ All on one Linux machine with an RTX 3090, and all from the checks or their benc
 | Opening a 100M-row file, streamed | **0.2 s** |
 
 > [!NOTE]
-> Long data jobs, imports and media decoding run off the UI thread. Timing depends on the workload and machine; see [the UI-thread checks](docs/ui-threads.md).
+> **The honest edge:** at 100M rows in memory a median chart takes about 0.7 s, and today the window waits for it. Moving that work off the UI thread is next.
 
 ## Where it stands
 
 **Runs** means a script runs it on that platform. **Builds** means it builds but no check runs it there yet. The full matrix is generated from the code: [docs/components.md](docs/components.md).
 
-| Host | Current evidence |
-|---|---|
-| **Linux** (GTK 4) | Native apps and GPU/data workflows run on Linux; the main development and acceptance-test platform. |
-| **Mac** (AppKit) | App packages run on macOS 15/26 CI; GPU rendering, layouts and media have also run on a real Apple M4. Coverage varies by feature. |
-| **Web** | The same app code runs through the web host and is checked in Chromium. |
-| **Agent** (MCP) | The shared agent host derives tools from supported interactive controls; the tool list follows the current screen. |
-| **Android** | Classic controls run on the emulator; newer components have partial coverage. |
-| **iPhone** | Builds and signs, not yet run on a phone. |
-| **Windows** | No native host or downloadable package. |
+| Host | Runs | Builds | Notes |
+|---|---|---|---|
+| **Linux** (GTK 4) | 78 | 1 | Every component, gesture and theme; omxplorer's home |
+| **Web** (FastHTML) | 79 | 0 | The same results as Linux, checked in Chromium |
+| **Agent** (MCP) | 29 | 17 | Every app, no per-app work |
+| **Android** (views over JNI) | 19 | 16 | runs the classic controls on the emulator; the newer ones are still to come |
+| **Mac** (AppKit) | 0 | 60 | Builds and signs; not proven by a check yet |
+| **iPhone** (UIKit) | 0 | 61 | Builds and signs; not proven by a check yet |
 
-NVIDIA is the tested Linux GPU path. Apple Silicon GPU rendering and omxplorer data work have run through Metal; compiled in-process model packs are still verified only on Linux/NVIDIA. See [the component matrix](docs/components.md) and [the Mac reports](docs/goals/58-report.md) for the scope of individual checks.
+The GPU path is NVIDIA today. Apple and phone GPUs use the CPU path, which runs the same functions.
 
-**Why Mojo, honestly.** Mojo is young (1.2). It has a small ecosystem, no official iPhone, Android or WebAssembly target (omxcode cross-compiles with two hand-written runtime functions), and omxcode has no native Windows host yet. Flutter, React Native and the Rust kits are far ahead on maturity, tooling and production users. What none of them has is one readable language from the button to the GPU kernel, with native controls on every platform and an agent built in as a host.
+**Why Mojo, honestly.** Mojo is young (1.2). It has a small ecosystem, no official iPhone, Android or WebAssembly target (omxcode cross-compiles with two hand-written runtime functions), and no Windows release yet. Flutter, React Native and the Rust kits are far ahead on maturity, tooling and production users. What none of them has is one readable language from the button to the GPU kernel, with native controls on every platform and an agent built in as a host.
 
 ## Try it
 

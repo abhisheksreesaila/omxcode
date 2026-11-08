@@ -4,6 +4,6 @@ I’ve been building **omxcode**: a Mojo framework where the native interface, G
 
 ![Real omxcode apps: robot data, agent-built UI and omxconsole](../../../img/forum/omxcode.gif)
 
-[See it and download an app](https://abhisheksreesaila.github.io/omxcode/) · [Setup in the README](https://github.com/abhisheksreesaila/omxcode#download-and-run)
+[See it and download an app](https://abhisheksreesaila.github.io/omxcode/) · [Setup in the README](https://github.com/abhisheksreesaila/omxcode#readme)
 
 It’s a public alpha. Try it on your machine and tell me what works, what’s missing, or what you’d build with it. [Feedback and contributions welcome.](https://github.com/abhisheksreesaila/omxcode/issues)
