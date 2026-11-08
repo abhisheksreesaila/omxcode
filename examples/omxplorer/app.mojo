@@ -74,7 +74,7 @@ from mojoui.datagrid import (DataGrid, GRID_SELECTED, GRID_COLUMN, GRID_EDIT, GR
                              GRID_TYPED, GRID_CLEAR, GRID_CANCEL, GRID_COMMIT)
 from mojoui.sheet import Sheet, placeholder_sheet, blank_table, INT, DECIMAL, TEXT, DATE, BOOL
 from mojoui.shared import environment, make_dir
-from mojoui.files import file_name, file_stem, file_size, file_exists, read_recent, remember, read_setting, write_setting, adopt_config, visitor_path_ok
+from mojoui.files import file_name, file_stem, file_size, file_exists, read_recent, remember, read_setting, write_setting, adopt_config, visitor_path_ok, export_path, media_path_ok
 from mojoui.csvio import read_table, empty_import, CsvImport, CsvColumn, kind_name
 from mojoui.omxfile import save_omx, open_document
 from mojoui.numformat import (ColumnFormat, format_number, AUTO, NUMBER, CURRENCY, PERCENT, COMPACT, DATE_LONG, DATE_MONTH, DATE_ISO,
@@ -1573,13 +1573,21 @@ struct Main(App):
         """A path read from a cell: as it is when absolute, else beside the file `table` came from (the sheet's own
         source, or a table card's)."""
         if path.startswith("/") or path == "":
-            return path
+            return self.confined(path)
         var src = self.source
         var t = self.tables.find(table)
         if t >= 0 and self.tables.cards[t].source != "":
             src = self.tables.cards[t].source
         var cut = src.rfind("/")
-        return (String(src[byte=0:cut + 1]) if cut >= 0 else String("")) + path
+        return self.confined((String(src[byte=0:cut + 1]) if cut >= 0 else String("")) + path)
+
+    def confined(self, path: String) -> String:
+        """A path read from a cell, or "" on the public copy when it's outside the starter and this visitor's own folders
+        (its documents and its uploads: round 6)."""
+        var own = List[String]()
+        own.append(self.documents())
+        own.append(self.documents().replace("/documents/", "/uploads/"))
+        return path if media_path_ok(path, own) else String("")
 
     def time_linked_video(self, table: String) -> Int:
         """The video card a log table runs with (a time link between them), else -1."""
@@ -1916,9 +1924,10 @@ struct Main(App):
             else:
                 p.page("Document")
                 p.text("No document is linked to this row.")
-            job.add(p^, folder + "/" + key + ".pdf")
+            var named = export_path(folder, key, "", "row-" + String(row + 1))  # (a cell's words, made a safe name inside the pack: round 6)
+            job.add(p^, named + ".pdf")
             if frame_t >= 0:
-                job.clip(Clip(frame_video, folder + "/" + key + ".mp4", max(frame_t - 1.5, 0.0), frame_t + 4.5, title + " · {t}", frame_no >= 0))  # (blur: the analysis' face rows; a row's own clip has none)
+                job.clip(Clip(frame_video, named + ".mp4", max(frame_t - 1.5, 0.0), frame_t + 4.5, title + " · {t}", frame_no >= 0))  # (blur: the analysis' face rows; a row's own clip has none)
             n += 1
         if keep >= 0:
             c.grid.select(keep, keep_col)
@@ -3831,7 +3840,7 @@ struct Main(App):
                 self.open_recipe()
             self.version += 1
         elif m == EXPORT_CSV:  # (written by a job: mojoui.tablejobs; the message comes when it lands)
-            var path = self.documents() + "/" + sql_name(self.name) + ".csv"
+            var path = export_path(self.documents(), sql_name(self.name), ".csv", "table")
             if self.work.export(self.frame, path):
                 self.say(Activity.running("Exporting " + file_name(path), 0.0, grouped(self.frame.rows()) + " rows"))
             else:

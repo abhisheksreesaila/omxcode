@@ -158,3 +158,45 @@ def visitor_path_ok(path: String, own: String) -> Bool:
         return True
     var p = String(path.strip())
     return own != "" and p.startswith(own.rstrip("/") + "/") and p.find("..") < 0
+
+
+def safe_name(text: String, fallback: String) -> String:
+    """A file name made from text the app didn't choose (a cell, a table's name): only letters, digits, '.', '_' and
+    '-', no leading dot, at most 100 bytes; `fallback` when nothing is left (goal 62 round 6: a pack named by a cell
+    reading ../../../x wrote outside its folder)."""
+    var out = String("")
+    for b in text.as_bytes():
+        var c = Int(b)
+        if (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 46 or c == 95 or c == 45:
+            if out.byte_length() < 100 and not (out == "" and c == 46):
+                out += chr(c)
+    return out if out != "" else fallback
+
+
+def export_path(folder: String, name: String, ext: String, fallback: String) -> String:
+    """The one seam every export names its file through: `folder`/safe name + ext, and only ever directly inside
+    `folder` (a name that would leave it becomes `fallback`)."""
+    var base = String(folder.rstrip("/"))
+    var path = base + "/" + safe_name(name, fallback) + ext
+    var rest = String(path[byte = base.byte_length() + 1 :])
+    if rest.find("/") >= 0 or rest.startswith("."):
+        return base + "/" + safe_name(fallback, "export") + ext
+    return path
+
+
+def media_path_ok(path: String, own: List[String]) -> Bool:
+    """A video or document path read from a table's cell, before the app opens it: anywhere on a desktop; on the public
+    web copy only inside the starter (OMX_STARTER) or one of the visitor's own folders (round 6: a cell naming any .mp4
+    on the server played it, or cut it into a pack)."""
+    if environment("MOJOUI_PUBLIC") != "1":
+        return True
+    var p = String(path.strip())
+    if p == "" or p.find("..") >= 0:
+        return p == ""
+    var starter = String(environment("OMX_STARTER").rstrip("/"))
+    if starter != "" and p.startswith(starter + "/"):
+        return True
+    for f in own:
+        if f != "" and p.startswith(String(f.rstrip("/")) + "/"):
+            return True
+    return False

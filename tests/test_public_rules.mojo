@@ -14,7 +14,7 @@ from mojoui.tablejobs import TableWork, capped_sql, public_refusal, take_questio
 from mojoui.tablecard import TableCards
 from mojoui.sheet import Sheet
 from mojoui.csvio import read_table
-from mojoui.files import visitor_path_ok, read_setting, write_setting, read_recent, remember, config_dir, file_exists
+from mojoui.files import visitor_path_ok, read_setting, write_setting, read_recent, remember, config_dir, file_exists, safe_name, export_path, media_path_ok
 from mojoui.hosts.web import control_event
 from mojoui.view import View, Dropdown, VStack
 from mojoui.clock import now_ns
@@ -283,6 +283,53 @@ def answers(folder: String) raises:
     print("answers: ok (400 columns, 40 behind a subquery and built strings refused at small peaks; real sizes counted; the answer cap and the visitor's budget hold)")
 
 
+def round6(folder: String) raises:
+    """Round 6: strings built from two large dictionaries (the engine makes a word per combination, whatever the rows);
+    export names from cells; video paths from cells."""
+    public(True)
+    _ = setenv("MOJOUI_QUESTION_WAIT_S", "1", True)
+    var path = folder + "/public_rules_pairs.csv"
+    var pad = String("")
+    for _ in range(700):
+        pad += "abcdefghij"
+    var out = String("w,v\n")
+    for i in range(1023):
+        out += "w" + String(i) + pad + ",v" + String(i) + pad + "\n"
+    with open(path, "w") as f:
+        f.write(out)
+    var pal = liquid_palette()
+    var tables = TableCards(4100, 230, 4)
+    var page = Sheet(read_table(path).table, False)
+    var work = TableWork()
+    with open("/proc/self/clear_refs", "w") as f:
+        f.write("5")
+    var before = peak_mb()
+    assert_true(work.ask(tables, "SELECT w || v AS s FROM pairs", "pairs", page, "P", pal), work.problem)
+    assert_false(land(work), "strings from 1,023 × 1,023 words of 7 KB were built")
+    var grew = peak_mb() - before
+    assert_true(work.problem.find("joins words from large lists") >= 0, work.problem)
+    assert_true(grew < 100, "the refused pairs question took " + String(grew) + " MB at its peak")
+    assert_true(work.ask(tables, "SELECT w || '-' AS s FROM pairs", "pairs", page, "P1", pal), work.problem)  # (one list: lands)
+    assert_true(land(work), "one dictionary's words with a suffix didn't land: " + work.problem)
+    # export names from a cell's words
+    assert_equal(safe_name("../../../g62escaped", "row-1"), "g62escaped")
+    assert_equal(export_path("/tmp/pack", "../../../g62escaped", ".pdf", "row-1"), "/tmp/pack/g62escaped.pdf")
+    assert_equal(export_path("/tmp/pack", "...", ".pdf", "row-7"), "/tmp/pack/row-7.pdf")
+    assert_equal(export_path("/tmp/pack", "F00118", ".mp4", "row-1"), "/tmp/pack/F00118.mp4")
+    assert_equal(export_path("/tmp/pack/", "a/b\\c d", ".pdf", "r"), "/tmp/pack/abcd.pdf")
+    # video paths from cells: the starter and the visitor's own folders only
+    _ = setenv("OMX_STARTER", "/data/robot", True)
+    var own: List[String] = ["/tmp/omx/documents/abc", "/tmp/omx/uploads/abc"]
+    assert_true(media_path_ok("/data/robot/clips/F00118.mp4", own))
+    assert_true(media_path_ok("/tmp/omx/uploads/abc/x/clip.mp4", own))
+    assert_false(media_path_ok("/home/someone/secret.mp4", own), "a server path outside the starter played")
+    assert_false(media_path_ok("/data/robot/../../etc/x.mp4", own))
+    assert_false(media_path_ok("/tmp/omx/uploads/abcd/clip.mp4", own))
+    public(False)
+    assert_true(media_path_ok("/home/someone/secret.mp4", own))  # (a desktop: anywhere)
+    print("round 6: ok (two 1,023-word lists refused at +" + String(grew) + " MB; export names stay in their folder; videos only from the starter and the visitor's folders)")
+
+
 def main() raises:
     var folder = getenv("PUBLIC_RULES_DIR", "build/test_public_rules.d")
     makedirs(folder, exist_ok=True)
@@ -292,4 +339,5 @@ def main() raises:
     choices()
     parking(folder)
     answers(folder)
+    round6(folder)
     print("public rules: ok")

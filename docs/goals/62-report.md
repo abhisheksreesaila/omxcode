@@ -1,8 +1,8 @@
 # Goal 62 report: omxplorer on the web, safe to share
 
 `docs/goals/62-check.py`, Linux, CPU only (`CUDA_VISIBLE_DEVICES=""`), on a shared machine (other projects kept its load
-at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), rounds 2–5 (2026-11-07). Branch `t3/hosted-omxplorer-safety`, not merged: round 5 fixed every
-finding of the round-5 reviews (both NEEDS WORK) and ran no reviewer, as asked; the owner's next review comes next.
+at 7–31 on 24 cores and up to 39 GB in swap). Round 1 (2026-11-06/07), rounds 2–6 (2026-11-07). Branch `t3/hosted-omxplorer-safety`, not merged: round 6 fixed the
+final review's two blocking finds and its should-fixes (both NEEDS WORK) and ran no reviewer, as asked; the owner's next review comes next.
 
 | # | Result (round 3; the outputs kept in docs/goals/62/runs/) |
 |---|---|
@@ -14,6 +14,19 @@ finding of the round-5 reviews (both NEEDS WORK) and ran no reviewer, as asked; 
 | M5 | image half BLOCKED, the rest PASS · `scripts/web-start` held to Hobby's caps (8 GB, 8 vCPU), visitors only clicking, each from its own address. At the cap of 6 (D-6230), three runs in a row (load 3.7–9.8): video 15.0–15.2, 14.8–15.0 and 15.0–15.1 pictures a second each, p95 click → answer 270, 277 and 398 ms (runs/m5-run1–3). Docker: the socket still refuses this user |
 | M6 | PASS · round 4's full run: 58 PASS, 18 SAME, 3 NOT RUN, and 7 rows looked at again: goal 34b M1 failed once and passed on its rerun, and the 6 CHANGED rows (goals 08, 14, 33) proved to fail the same way on both sides once read in full (runs/m6-progress.txt, runs/m6-recheck.txt: 0 CHANGED, 0 FAIL). With the rows looked at: 59 PASS, 24 SAME, 3 NOT RUN (two need a Mac run, one a data file this machine lacks), 0 FAIL; every row the owner named ran; regenerated files under docs/ put back; docs/components.md fresh |
 | M7 | PASS · while another visitor plays every beat: a question past the time budget stops in 1.4 s, one past the row cap in 0.4 s, a join past the memory budget in ~3 s, each in plain words; WITH (also behind a parenthesis), UNION ALL and script statements are refused; malformed CSV, Parquet and MP4 uploads refused in plain words, valid ones open; the 516 KB decode bomb refused three times with the server's memory unchanged; a stopped sort over every telemetry row: at most 2 cores while it ran, CPU and memory back at baseline seconds after; 40 push streams leave /health quick; D-6218's sequences leave the server up |
+
+## Round 6 (2026-11-07): the final review's blocking finds
+
+Each in M7, read from the server:
+- **One question killing the server** (D-6249): strings built from two large word lists are refused before they run (the
+  engine makes a word per combination of dictionary words, whatever the rows). `w || v` over two 1,023-word lists of
+  7 KB words: refused, the server 2,952 → at most 2,953 MB.
+- **Export pack writing outside its folder** (D-6250): every export names its file through one seam, a safe name only
+  directly inside its folder. A row named `../../../g62escaped`: the pack holds `g62escaped.pdf`, nothing outside.
+- **Video paths from cells** (D-6251): only the starter and the visitor's own folders. A cell naming a real clip outside
+  them: inotify saw it opened 0 times, and no clip was packed.
+- **Should-fixes** (D-6252): NaN, inf and huge numbers in an event are no event; X-Real-IP read only behind the proxy;
+  a drop is 20 files at most and counts as it goes; two pack PDFs print at once at most; docs say 300 s idle.
 
 ## Round 5 (2026-11-07): the round-5 review's findings
 

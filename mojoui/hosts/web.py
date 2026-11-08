@@ -83,6 +83,7 @@ HEADER_S = 10.0  # public mode: a connection's request headers arrive within thi
 BODY_RATE = 16 << 10  # public mode: a request body arrives at this many bytes a second at least, after BODY_GRACE_S
 BODY_GRACE_S = 10.0
 BODY_IDLE_S = 15.0  # public mode: no part of a body for this long ends the request
+BEHIND_PROXY = os.environ.get("MOJOUI_BEHIND_PROXY") == "1"  # public: a proxy sets X-Real-IP; without one it's the visitor's to forge, so unread (round 6)
 PER_PEER = int(os.environ.get("MOJOUI_PER_PEER", "64"))  # public mode, no proxy in front: connections from one peer at once
 ADDRESS_REQUESTS = 48  # public mode: one address's requests in flight (a tab holds about 12: /wait, /push, frames, events)
 SESSION_REQUESTS = 6  # public mode: a session's blocking requests in flight (frames, events): past them, "retry" without a thread
@@ -1119,7 +1120,7 @@ class SessionRequests:
         parts = scope.get("path", "").split("/")
         route, sid = parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""
         h = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
-        addr = address_key(h["x-real-ip"]) if "x-real-ip" in h else address_key((scope.get("client") or ("", 0))[0])
+        addr = address_key(h["x-real-ip"]) if BEHIND_PROXY and "x-real-ip" in h else address_key((scope.get("client") or ("", 0))[0])
         keys = ["a:" + addr]
         if route in self.ROUTES and len(parts) > 2:
             if not self.alive(sid):
@@ -2053,7 +2054,7 @@ def client_address(req, h):
     office holds."""
     import ipaddress
     peer = req.client.host if req.client else ""
-    header = h.get("x-real-ip")
+    header = h.get("x-real-ip") if BEHIND_PROXY else None  # (round 6: only a proxy's word; index and SessionRequests read the same)
     return address_key(header if header is not None else peer)
 
 
@@ -2685,6 +2686,9 @@ def make_app(module_dir):
     @app.post("/e/{sid}")
     def event(sid: str, n: int, v: int = -1, second: int = 0, text: str = "", number: int = 0, on: str = "",
               x: float = 0, y: float = 0, dx: float = 0, dy: float = 0, zoom: float = 1, route: int = 0, pressure: float = 0):
+        import math
+        if not all(math.isfinite(f) and abs(f) < 1e9 for f in (x, y, dx, dy, zoom, pressure)):
+            return ""  # (NaN, inf or a huge number is no event: int() of one was a 500, round 6)
         if EVENT_DELAY:  # (checks only: a slow network, so keys typed meanwhile really wait for the answer)
             time.sleep(EVENT_DELAY)
         s = sessions.get(sid)
@@ -3063,6 +3067,8 @@ def make_app(module_dir):
         except ValueError:
             return ""
         files = [f for f in form.getlist("file") if hasattr(f, "read")]
+        if PUBLIC and len(files) > 20:  # (round 6: a drop is 20 files at most)
+            return notice(f"A drop takes 20 files at most here, not {len(files)}: drop fewer at once.")
         with s.lock:
             if s.closed or v != s.shape or not 0 <= n < len(s.nodes) or s.nodes[n]["kind"] != DROP or not s.nodes[n]["msg2"]:
                 return ""
@@ -3070,7 +3076,7 @@ def make_app(module_dir):
         limit = upload_limit()
         cap = visitor_limit()
         s.last_active = time.monotonic()
-        paths, refused = [], []
+        paths, refused, dropped = [], [], 0
         for file in files:
             if s.closed:  # (evicted mid-upload: nothing more is written; D-1704)
                 break
@@ -3078,7 +3084,7 @@ def make_app(module_dir):
             if (file.size or 0) > limit:
                 refused.append(too_big(name, limit))
                 continue
-            if cap and s.upload_bytes + (file.size or 0) > cap:
+            if cap and s.upload_bytes + dropped + (file.size or 0) > cap:  # (this drop's earlier files count too: round 6)
                 refused.append(over_cap(name, cap))
                 continue
             try:
@@ -3106,6 +3112,7 @@ def make_app(module_dir):
                     refused.append(notice(f"{name} wasn't opened: {why}."))
                     continue
             paths.append(path)
+            dropped += size
         outs = list(refused)
         with s.lock:
             if s.closed:  # (evicted while the files were written: what this request wrote goes too)
@@ -3402,7 +3409,7 @@ def deadline_protocol():
     next bytes come; with no proxy in front (MOJOUI_BEHIND_PROXY unset), one peer holds PER_PEER connections at most."""
     from uvicorn.protocols.http.h11_impl import H11Protocol
     peers = {}
-    behind = os.environ.get("MOJOUI_BEHIND_PROXY") == "1"
+    behind = BEHIND_PROXY
 
     class Deadlines(H11Protocol):
         def connection_made(self, transport):

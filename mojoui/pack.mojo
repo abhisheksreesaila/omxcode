@@ -25,6 +25,11 @@ from mojoui.videotable import VideoTable
 from mojoui.videoexport import Caption
 from mojoui.videojobs import make_reel
 from mojoui.clock import now_ns
+from mojoui.shared import count_add
+
+comptime SLOT_PRINTERS = 87  # mojoui.shared slot: the Chromiums printing pack PDFs in this process now
+comptime PRINTERS = 2
+from std.time import sleep
 
 
 @fieldwise_init
@@ -80,7 +85,16 @@ struct PackJob(JobBody):
         ctl.add_total(len(self.packs) + len(self.clips))
         for i in range(len(self.packs)):
             ctl.check()
-            write_pack_pdf(self.packs[i], self.paths[i])
+            while count_add(SLOT_PRINTERS, 1) >= PRINTERS:  # (each PDF starts a Chromium: at most two at once in the
+                _ = count_add(SLOT_PRINTERS, -1)          # process, whatever the visitors ask, goal 62 round 6)
+                ctl.check()
+                sleep(0.05)
+            try:
+                write_pack_pdf(self.packs[i], self.paths[i])
+            except e:
+                _ = count_add(SLOT_PRINTERS, -1)
+                raise e^
+            _ = count_add(SLOT_PRINTERS, -1)
             out.pdfs.append(self.paths[i])
             ctl.advance(1)
         for ref c in self.clips:

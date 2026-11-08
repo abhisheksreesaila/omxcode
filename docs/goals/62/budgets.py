@@ -177,7 +177,7 @@ def connections(out, say):
     each proven by the server's open files and its upload budget. /health is asked from another address (127.0.0.2)."""
     import http.client
     import socket
-    srv = Server(out / "srv-conn", public=True, env={"MOJOUI_UPLOADS_IN_FLIGHT_MB": "50", "OMXCODE_VISITOR_MAX": str(100 << 20)})
+    srv = Server(out / "srv-conn", public=True, env={"MOJOUI_UPLOADS_IN_FLIGHT_MB": "50", "OMXCODE_VISITOR_MAX": str(100 << 20), "MOJOUI_BEHIND_PROXY": "0"})
     host, port = "127.0.0.1", int(srv.url.split(":")[2].strip("/"))
 
     def other(path, headers=None):  # (another visitor, from 127.0.0.2)
@@ -290,6 +290,72 @@ def connections(out, say):
 
 HEADER_WAIT = 14  # (10 s for headers, and a little)
 BODY_WAIT = 40  # (10 s of grace, then 16 KB/s)
+
+
+def round6(page, srv, out, say):
+    """Round 6's blocking finds: strings built from two large dictionaries; a pack named by a cell that walks out of its
+    folder; a video path from a cell outside the starter and the visitor's folders."""
+    import tempfile
+    import threading
+    import zipfile
+    import story as S
+    from probes import Watch
+    # 1. two text columns of 1,023 distinct 7 KB words each (14 MB), then `w || v` (the review: ~15 GB, the server killed)
+    pairs = out / "files/pairs.csv"
+    pad = "abcdefghij" * 700
+    with open(pairs, "w") as f:
+        f.write("w,v\n")
+        f.writelines(f"w{i}{pad},v{i}{pad}\n" for i in range(1023))
+    fresh(page, srv.url)
+    settle(page)
+    page.locator("input[data-kind=picker]").first.set_input_files(str(pairs))
+    t0 = time.time()
+    while time.time() - t0 < 60 and "1,023" not in page.inner_text("body"):
+        page.wait_for_timeout(250)
+    create = page.locator("button", has_text=re.compile(r"^\s*Create table\s*$"))
+    if create.count():
+        create.first.click()
+        try_settle(page)
+    page.locator("button[data-kind=button]", has_text=re.compile(r"^\s*Query\s*$")).first.wait_for(timeout=60000)
+    m0, peak, stop = srv.memory()["mem_mb"], [0], threading.Event()
+
+    def watch():
+        while not stop.is_set():
+            peak[0] = max(peak[0], srv.memory()["mem_mb"])
+            time.sleep(0.1)
+    threading.Thread(target=watch, daemon=True).start()
+    said = ask(page, "SELECT w || v AS s FROM pairs", r"joins words from large lists[^:]*|would take more than [^:]*", 60)
+    time.sleep(1)
+    stop.set()
+    say(said is not None and peak[0] - m0 < 30 and srv.p.poll() is None,
+        f"`w || v` over two 1,023-word lists of 7 KB words: “{said}”; the server {m0} MB, at most {peak[0]} MB meanwhile")
+    page.keyboard.press("Escape")
+    # 2 and 3. a pack row named ../../../g62escaped, with a clip path outside the starter (a real clip, watched by inotify)
+    outside = Path(tempfile.mkdtemp(prefix="g62-outside-"))
+    secret = outside / "secret.mp4"
+    secret.write_bytes((STARTER / "clips/F00118.mp4").read_bytes())
+    w = Watch(outside)
+    fresh(page, srv.url)
+    settle(page)
+    v = S.Visitor(page, out / "visitor-r6", Net(page))
+    v.start()
+    q = f"SELECT '../../../g62escaped' AS episode, '{secret}' AS clip, '{secret}' AS source, 1 AS closes FROM fleet LIMIT 1"
+    ask(page, q, r"\b1 row\b", 60)
+    page.keyboard.press("Escape")
+    try_settle(page)
+    entries = []
+    try:
+        v.pack("Query")
+        entries = v.R.get("pack", {}).get("entries", [])
+    except Exception as e:
+        entries = [f"(no pack: {e!r})"]
+    roots = [srv.out] + list(srv.out.parents)[:3]
+    escaped = [str(x) for r in roots for x in r.glob("g62escaped*")] + [str(x) for x in srv.out.rglob("g62escaped*")]
+    opened = [n for _, n in w.events() if "secret" in n] if hasattr(w, "events") else []
+    say(any(e.endswith("g62escaped.pdf") for e in entries) and not any(".." in e for e in entries) and not escaped,
+        f"a pack row named ../../../g62escaped: the pack holds {[e for e in entries if 'g62' in e] or entries[:3]}; outside its folder: {escaped or 'nothing'}")
+    say(not opened and not any(e.endswith(".mp4") and "g62" in e for e in entries),
+        f"a cell naming a clip outside the starter ({secret.name}): opened {len(opened)} times, packed {[e for e in entries if e.endswith('.mp4')] or 'no clip'}")
 
 
 def resources(out, say):
@@ -447,6 +513,7 @@ def run_all(out):
             say(said is not None and "one table" in said and after - before < 150 and srv.p.poll() is None,
                 f"a 516 KB Parquet that reads to 120M rows, uploaded 3 times: “{said}”; the server {before} → {after} MB")
             round4(page, srv, out, say)
+            round6(page, srv, out, say)
             # valid files still open: a small Parquet (pyarrow) and a real clip
             import pyarrow as pa
             import pyarrow.parquet as pq

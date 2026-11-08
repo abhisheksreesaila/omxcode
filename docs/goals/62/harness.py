@@ -52,6 +52,7 @@ class Server:
         e.pop("MOJOUI_AGENT_SOCKET", None)
         if public:
             e["MOJOUI_PUBLIC"] = "1"
+            e["MOJOUI_BEHIND_PROXY"] = "1"  # (as on Railway: the simulated visitors' X-Real-IP stands for the proxy's; round 6)
         if starter:
             e["OMX_STARTER"] = str(starter)
         e.update(env or {})

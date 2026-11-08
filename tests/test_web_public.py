@@ -272,6 +272,11 @@ def round4(web, module_dir, d):
         r = client.post("/e/x", content=(b"x" * (1 << 20) for _ in range(3)))
         assert r.status_code in (204, 413) and r.headers.get("x-content-type-options"), f"no security headers: {r.status_code} {dict(r.headers)}"
         # round 5: a request for a session that doesn't exist is answered "gone" before anything is read, on every route
+        sid_ok, _ = page(client, "10.6.0.8")
+        r = client.post(f"/e/{sid_ok}", data={"n": "1", "v": "0", "dx": "nan"})
+        assert r.status_code == 200, f"a NaN in an event: {r.status_code}"  # (round 6: no event, not a 500)
+        r = client.post(f"/e/{sid_ok}", data={"n": "1", "v": "0", "dx": "1e300"})
+        assert r.status_code == 200, f"a huge number in an event: {r.status_code}"
         for path in ("/e/" + "1" * 32, "/frame/" + "1" * 32 + "/0", "/resize/" + "1" * 32, "/w/" + "1" * 32):
             r = client.post(path, data={"n": "1"}) if not path.startswith("/frame") else client.get(path)
             assert r.status_code == 204 and r.headers.get("x-mojoui-gone") == "1", f"{path}: {r.status_code} {dict(r.headers)}"
@@ -312,6 +317,7 @@ def main():
         fail_closed(module_dir, d)
         os.environ.update(MOJOUI_PUBLIC="1", OMXCODE_UPLOADS=str(Path(d) / "uploads"), JOT_DB=str(Path(d) / "jot.db"), JOT_HOME=d)
         web = load_web()
+        web.BEHIND_PROXY = True  # (as on Railway: the test's X-Real-IP headers stand for the proxy's)
         (Path(d) / "bomb.parquet").write_bytes(b"PAR1")
         body_limit(web)
         check_words(web, d)

@@ -182,6 +182,38 @@ struct QueryJob(JobBody):
                     var most_rows = 0
                     for i in range(len(self.sheets)):
                         most_rows = max(most_rows, self.sheets[i].rows())
+                    # (round 6: the engine builds a result word for each combination of its operands' dictionary words,
+                    # whatever the rows: 1,023 × 1,023 words of 7 KB came to ~15 GB. So the referenced TEXT columns' distinct
+                    # words, the largest `operands` of them multiplied, times their longest words together, are bounded too)
+                    var said = sql_words(self.text)
+                    var counts = List[Int]()
+                    var longest = List[Int]()
+                    for i in range(len(self.sheets)):
+                        ref base = self.sheets[i].frame.base
+                        for c in range(base.columns()):
+                            if base.kind(c) == TEXT and base.name(c).upper() in said:
+                                var d = base.dictionary(c)
+                                var most = 0
+                                for w in d:
+                                    most = max(most, w.byte_length())
+                                counts.append(len(d))
+                                longest.append(most)
+                    var combos = 1
+                    var together = length
+                    for _ in range(min(operands, len(counts))):
+                        var at = 0
+                        for k in range(len(counts)):
+                            if counts[k] > counts[at]:
+                                at = k
+                        combos = min(combos * max(counts[at], 1), 1 << 40)
+                        together += longest[at]
+                        counts[at] = 0
+                    if combos * together > self.room:
+                        give_back_question(held)
+                        held = False
+                        raise Error("this question joins words from large lists (" + grouped(combos) + " combinations of up to "
+                                    + grouped(together) + " bytes), more than the " + grouped(self.room >> 20)
+                                    + " MB the web copy gives an answer: build strings from fewer distinct words")
                     if per_cell * width * most_rows > self.room:
                         give_back_question(held)
                         held = False
