@@ -5,7 +5,7 @@
 from std.os import makedirs
 from std.os.path import exists
 from mojoui.process import output
-from porter import Porter, read_porter, write_porter, remove_porter, porter_env, kind_problem, porter_json, path_of
+from porter import Porter, read_porter, write_porter, remove_porter, porter_env, kind_problem, porter_json, path_of, port_preflight
 
 
 def check(ok: Bool, what: String) raises:
@@ -56,6 +56,21 @@ def main() raises:
     check(kind_problem("openai-compatible", "https://gw.example/v1?key=" + key, key) != "", "no key in the query either")
     check(kind_problem("openai-compatible", "https://gw.example/v1", key) == "", "a plain https base URL goes through")
     check(kind_problem("anthropic", "", "sk ant with a space in it") != "", "a key is one line of printable characters")
+
+    # porting always runs Claude Code: a key only signs it in, so no claude binary refuses the port even with a key
+    var link = "https://docs.anthropic.com/en/docs/claude-code"
+    var keyed = port_preflight(Porter("anthropic", "", key, ""), "")
+    check(keyed.code == "no_claude" and keyed.message.find(link) >= 0 and keyed.message.find("Install") >= 0,
+          "a key without Claude Code must be refused with the install link: " + keyed.code + " " + keyed.message)
+    check(port_preflight(gw, "").code == "no_claude", "a gateway key without Claude Code must be refused")
+    var nothing = port_preflight(Porter.none(), "")
+    check(nothing.code == "porter_not_configured" and nothing.message.find(link) >= 0, "nothing set up, no Claude Code: " + nothing.message)
+    var found = port_preflight(Porter.none(), "/usr/bin/claude")
+    check(found.code == "porter_not_configured" and found.message.find("/usr/bin/claude") >= 0 and found.message.find("API key") >= 0,
+          "nothing set up, Claude Code found: " + found.message)
+    check(port_preflight(Porter("anthropic", "", key, ""), "/usr/bin/claude").code == "", "a key with Claude Code may port")
+    check(port_preflight(Porter("claude-code", "", "", ""), "/usr/bin/claude").code == "", "Claude Code's own login may port")
+    check(port_preflight(Porter("claude-code", "", "", ""), "").code == "no_claude", "Claude Code chosen, then removed")
 
     # removable
     check(remove_porter(home) and not exists(path_of(home)), "the setting is removable")

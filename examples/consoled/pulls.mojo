@@ -10,7 +10,7 @@ from std.atomic import Atomic
 from std.memory.alloc import unsafe_alloc
 from std.os import makedirs
 from std.os.path import exists, isdir, getsize
-from mojoui.hf import hub_repo, hub_download, HubRepo, HubFile
+from mojoui.hf import hub_repo, hub_download, hub_ref, HubRepo, HubFile
 from mojoui.http_flare import Transfer
 from mojoui.serve import spawn
 from mojoui.json import Json, json_string
@@ -34,19 +34,30 @@ def _w(words: Int, k: Int) -> _P:
 
 
 def ref_problem(asked: String) -> String:
-    """"" when `asked` is a curated name or owner/name we'd pass on (pulls.py REF_RE)."""
-    var b = asked.as_bytes()
-    if len(b) == 0 or len(b) > 193:
-        return "A model reference is a curated name or owner/name from Hugging Face."
+    """"" when `asked` is a curated name, owner/name or a Hugging Face model URL we'd pass on (pulls.py REF_RE, after
+    mojoui.hf.hub_ref reduced a URL to owner/name: callers pass `hub_ref(asked)` on). Each part starts with a letter
+    or digit, so no "." or ".." part can reach a path."""
+    var bare = String(asked.strip())
+    if bare == "":
+        return "A model reference is a curated name, owner/name or a huggingface.co link."
+    var canon = hub_ref(bare)
+    if canon == "":
+        return ("`" + bare + "` isn't a Hugging Face model link: use https://huggingface.co/owner/name, owner/name, "
+                + "or a curated name.")
+    var b = canon.as_bytes()
+    if len(b) > 193:
+        return "A model reference is a curated name, owner/name or a huggingface.co link."
     var slashes = 0
     for i in range(len(b)):
         var c = Int(b[i])
-        var ok = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 46 or c == 95 or c == 45
+        var alnum = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+        var ok = alnum or c == 46 or c == 95 or c == 45
         if c == 47:
             slashes += 1
             ok = i > 0 and i < len(b) - 1
-        if not ok or slashes > 1 or (i == 0 and not ((c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122))):
-            return "`" + asked + "` isn't a model reference: use a curated name or owner/name from Hugging Face."
+        var starts_part = i == 0 or Int(b[i - 1]) == 47
+        if not ok or slashes > 1 or (starts_part and not alnum):
+            return "`" + bare + "` isn't a model reference: use a curated name, owner/name or a huggingface.co link."
     return ""
 
 

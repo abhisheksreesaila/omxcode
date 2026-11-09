@@ -1,7 +1,7 @@
-# consoled's porting assistant (goal 64 M0): which frontier model writes a port. Either Claude Code on this machine
-# (detected, no key needed) or an API key for a frontier model — Anthropic's, or a gateway's base URL that
-# answers for one. Frontier models only: nothing in the owner's 14 real runs says a small local model can write a
-# MAX architecture, so offering one would be a dead end of its own.
+# consoled's porting assistant (goal 64 M0): how Claude Code, which always writes a port (ports.mojo `_attempt` runs
+# the `claude` CLI), signs in. Claude Code must be installed; then either its own login on this machine (detected,
+# no key needed) or an API key it uses: Anthropic's, or a gateway's base URL that answers the Anthropic API. A key
+# never replaces Claude Code: `port_preflight` refuses a port when `claude` isn't found, key or not.
 # The key lives in MXC_HOME/porter.json, mode 0600, never in the store and never in a URL (D-6405): only its prefix
 # is ever answered or logged, and the whole file goes when the setting is removed. It reaches the agent as
 # environment variables on the claude process alone (ports.mojo's `porter_env`), which is how Claude Code takes a
@@ -17,6 +17,9 @@ from sandbox import which
 
 comptime PORTER_KINDS = ["claude-code", "anthropic", "openai-compatible"]
 comptime TEST_TIMEOUT_MS = 12_000  # a bad key must fail in seconds, not minutes into a port
+comptime CLAUDE_CODE_URL = "https://docs.anthropic.com/en/docs/claude-code"
+comptime INSTALL_CLAUDE = ("Porting runs Claude Code, which was not found on this machine. Install it first (" + CLAUDE_CODE_URL
+                           + "), then sign in with its own login or give it an API key. (MXC_CLAUDE can name its full path.)")
 comptime BETA_NOTE = "beta: of the 14 models tried on the owner's machine, 8 ported and served; everything that worked was 1 to 3 billion parameters"
 
 
@@ -100,6 +103,25 @@ struct Tested(Copyable, Movable):
     var message: String
 
 
+@fieldwise_init
+struct Preflight(Copyable, Movable):
+    var code: String  # "" when a port may start
+    var message: String
+
+
+def port_preflight(p: Porter, found: String) -> Preflight:
+    """May a port start? `found` is the claude binary (detect_claude), "" when none. Claude Code always does the
+    work, so without it the answer is no even when a key is set: the key would only have signed it in."""
+    if not p.configured():
+        if found == "":
+            return Preflight("porter_not_configured", INSTALL_CLAUDE)
+        return Preflight("porter_not_configured", "Set the porting assistant up first: Claude Code is on this machine ("
+                         + found + "). Use its own login, or give it an API key.")
+    if found == "":
+        return Preflight("no_claude", INSTALL_CLAUDE)
+    return Preflight("", "")
+
+
 def kind_problem(kind: String, base_url: String, key: String, model: String = "") -> String:
     """Why this setting can't be stored, or ""."""
     var known = False
@@ -111,7 +133,7 @@ def kind_problem(kind: String, base_url: String, key: String, model: String = ""
     if base_url.byte_length() > 300 or model.byte_length() > 120:
         return "That base URL or model name is too long."
     if kind == "claude-code":
-        return "" if detect_claude() != "" else "Claude Code was not found on this machine. Install it, or give an API key for a frontier model instead."
+        return "" if detect_claude() != "" else INSTALL_CLAUDE
     if key.byte_length() < 8 or key.byte_length() > 400:
         return "That doesn't look like an API key."
     for b in key.as_bytes():

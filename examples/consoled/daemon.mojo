@@ -23,9 +23,10 @@ from views import requests_json, bench_json, bench_history_json, pulls_json, por
 from search import search_json
 from learn import notebook_json
 from pulls import Pulls, ref_problem
+from mojoui.hf import hub_ref
 from ports import Ports, MAX_ATTEMPTS, DEFAULT_ATTEMPTS
 from porter import (Porter, read_porter, write_porter, remove_porter, porter_env, porter_json, kind_problem,
-                    test_porter, detect_claude)
+                    test_porter, detect_claude, port_preflight)
 from expose import Exposing, lan_endpoint, default_host, exposed, hostname_ok, NO_CADDY
 from mojoui.companion import parent_gone
 from bench import Bench, DEFAULT_RUNS, MAX_RUNS
@@ -370,11 +371,11 @@ struct Daemon(Service):
             var asked = text_field(req.body, "ref")
             if not asked:
                 return error(400, "Send {\"ref\": \"owner/name\"} (a curated name or a Hugging Face repo).", "invalid_ref")
-            var why = ref_problem(String(asked.value().strip()))
+            var why = ref_problem(asked.value())
             if why != "":
                 return error(400, why, "invalid_ref")
             var name = text_field(req.body, "name")
-            var id = self.pulls.start(self.store, String(asked.value().strip()), name.value() if name else String(""), self.cfg.home, self.cfg.max_cmd, self.sup.child_env())
+            var id = self.pulls.start(self.store, hub_ref(asked.value()), name.value() if name else String(""), self.cfg.home, self.cfg.max_cmd, self.sup.child_env())
             return Reply.json(pull_json(self.store, id), 202)
         if req.matches("GET", "/admin/pulls/{id}"):
             self.pulls.refresh(self.store)
@@ -436,12 +437,11 @@ struct Daemon(Service):
             except:
                 return error(400, 'Send JSON like {"ref": "owner/repo", "max_attempts": 3}.', "invalid_request_body")
             # the porting assistant must be set up, and its key must work, before an agent is started (goal 64 M1)
+            # Claude Code always writes the port: a key only signs it in, so no `claude` refuses the port, key or not
             var p = read_porter(self.cfg.home)
-            if not p.configured():
-                var found = detect_claude()
-                return error(400, ("Set the porting assistant up first: Claude Code is on this machine (" + found + "), or give an API key for a frontier model.")
-                             if found != "" else "Set the porting assistant up first: install Claude Code, or give an API key for a frontier model.",
-                             "porter_not_configured")
+            var pre = port_preflight(p, detect_claude())
+            if pre.code != "":
+                return error(400, pre.message, pre.code)
             var tried = test_porter(p)
             if not tried.ok:
                 return error(400, "The porting assistant could not be used: " + tried.message, "porter_unusable")

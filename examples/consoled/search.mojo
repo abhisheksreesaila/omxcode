@@ -7,7 +7,7 @@ from mojoui.json import Json, json_string
 from supervisor import gpus
 from views import num, rnd
 from learn import read_text
-from mojoui.hf import hub_search
+from mojoui.hf import hub_search, hub_ref
 
 comptime CURATED = ["qwen2.5-0.5b", "qwen2.5-1.5b", "qwen2.5-3b", "smollm2-1.7b", "llama3.2-1b", "all-minilm-l6"]
 comptime CURATED_REPOS = ["Qwen/Qwen2.5-0.5B-Instruct", "Qwen/Qwen2.5-1.5B-Instruct", "Qwen/Qwen2.5-3B-Instruct", "HuggingFaceTB/SmolLM2-1.7B-Instruct", "meta-llama/Llama-3.2-1B-Instruct", "sentence-transformers/all-MiniLM-L6-v2"]
@@ -112,6 +112,9 @@ def row(e: Entry, free: Float64, suggestions: String = "[]") -> String:
 
 def search_json(q: String, home: String) raises -> String:
     var query = String(q.strip())
+    var linked = hub_ref(query)
+    if linked != "":  # (a pasted huggingface.co link searches for the model it names; one naming no model stays as typed)
+        query = linked
     var warnings = List[String]()
     var catalog_text = read_text(home + "/max_catalog.json")
     var pool = List[Entry]()

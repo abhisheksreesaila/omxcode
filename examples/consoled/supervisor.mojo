@@ -18,28 +18,102 @@ comptime MIN_FREE_GPU_MB = 4096
 comptime LOG_TAIL_BYTES = 2000
 
 
+comptime UNSET = "\x00unset"  # (getenv's answer for a variable that isn't set at all; "" is set and empty)
+
+
 @fieldwise_init
 struct Gpu(Copyable, Movable):
-    var index: Int
+    var index: Int  # nvidia-smi's (physical) index
     var name: String
     var used_mb: Int
     var total_mb: Int
     var util: Int
+    var uuid: String
+    var device: Int  # its number among the GPUs CUDA_VISIBLE_DEVICES leaves visible: what `--devices gpu:N` means
 
 
-def gpus() -> List[Gpu]:
-    """nvidia-smi's GPUs (none when it isn't there)."""
+def parse_smi(text: String) -> List[Gpu]:
+    """nvidia-smi's `index,uuid,name,memory.used,memory.total,utilization.gpu` lines (csv, no header, no units)."""
     var out = List[Gpu]()
-    var text = output(["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu", "--format=csv,noheader,nounits"], 3000)
     for line in text.split("\n"):
         var f = String(line).split(",")
-        if len(f) < 5:
+        if len(f) < 6:
             continue
         try:
-            out.append(Gpu(atol(String(f[0]).strip()), String(String(f[1]).strip()), atol(String(f[2]).strip()), atol(String(f[3]).strip()), atol(String(f[4]).strip())))
+            var i = atol(String(f[0]).strip())
+            out.append(Gpu(i, String(String(f[2]).strip()), atol(String(f[3]).strip()), atol(String(f[4]).strip()),
+                           atol(String(f[5]).strip()), String(String(f[1]).strip()), i))
         except:
             pass
     return out^
+
+
+def _uuid_match(list: List[Gpu], entry: String) -> Int:
+    """The one GPU whose UUID starts with `entry` (with or without "GPU-"), or -1 (none, or more than one)."""
+    var want = entry.lower()
+    var found = -1
+    for k in range(len(list)):
+        var u = list[k].uuid.lower()
+        var bare = String(u[byte = 4 :]) if u.startswith("gpu-") else u
+        if u.startswith(want) or bare.startswith(want):
+            if found >= 0:
+                return -1
+            found = k
+    return found
+
+
+def visible_gpus(list: List[Gpu], cvd: String, is_set: Bool) -> List[Gpu]:
+    """The GPUs CUDA_VISIBLE_DEVICES (`cvd`) leaves visible, in its order, each numbered by its place in it (MAX and
+    CUDA renumber visible devices from 0). Unset: every GPU, as nvidia-smi numbers them. CUDA's rules: entries are
+    indices or (prefixes of) UUIDs, and the list ends at the first entry that names no GPU or repeats one, so "",
+    "-1" or "NoDevBackend" leaves none. (An index is matched to nvidia-smi's, which is PCI bus order; CUDA's own
+    default order can differ on a machine with mixed GPUs unless CUDA_DEVICE_ORDER=PCI_BUS_ID: UUIDs are exact. A MIG
+    UUID names no GPU here, so the list ends there: fail safe, onto fewer GPUs or the CPU path.)"""
+    if not is_set:
+        return list.copy()
+    var out = List[Gpu]()
+    var taken = List[Int]()
+    for raw in cvd.split(","):
+        var e = String(String(raw).strip())
+        var at = -1
+        if e == "":
+            break
+        var digits = True
+        for b in e.as_bytes():
+            if Int(b) < 48 or Int(b) > 57:
+                digits = False
+        if digits:
+            try:
+                var want = atol(e)
+                for k in range(len(list)):
+                    if list[k].index == want:
+                        at = k
+            except:
+                at = -1
+        else:
+            at = _uuid_match(list, e)
+        if at < 0 or at in taken:
+            break
+        taken.append(at)
+        var g = list[at].copy()
+        g.device = len(out)
+        out.append(g^)
+    return out^
+
+
+def device_of(list: List[Gpu], index: Int) -> Int:
+    """The `--devices gpu:N` number of the GPU nvidia-smi calls `index` (-1: none, the CPU path)."""
+    for g in list:
+        if g.index == index:
+            return g.device
+    return -1
+
+
+def gpus() -> List[Gpu]:
+    """nvidia-smi's GPUs that CUDA_VISIBLE_DEVICES leaves visible (none when it isn't there, or none are visible)."""
+    var text = output(["nvidia-smi", "--query-gpu=index,uuid,name,memory.used,memory.total,utilization.gpu", "--format=csv,noheader,nounits"], 3000)
+    var cvd = getenv("CUDA_VISIBLE_DEVICES", UNSET)
+    return visible_gpus(parse_smi(text), cvd, cvd != UNSET)
 
 
 def gpus_json(list: List[Gpu]) -> String:
@@ -183,7 +257,8 @@ struct Supervisor(Movable):
                 best_free = free
         return best
 
-    def command(self, m: ModelRef, port: Int, gpu: Int, total_mb: Int) -> List[String]:
+    def command(self, m: ModelRef, port: Int, device: Int, total_mb: Int) -> List[String]:
+        """The `max serve` argv; `device` is the GPU's number among the visible ones (device_of), -1 for none."""
         var cmd = List[String]()
         for part in self.max_cmd.split(" "):
             var w = String(part)
@@ -192,8 +267,8 @@ struct Supervisor(Movable):
         cmd += ["serve", "--port", String(port), "--served-model-name", m.name]
         if getenv("MXC_GRAPH_CAPTURE") != "1":
             cmd.append("--no-device-graph-capture")
-        if gpu >= 0:
-            cmd += ["--devices", "gpu:" + String(gpu)]
+        if device >= 0:
+            cmd += ["--devices", "gpu:" + String(device)]
         var frac = getenv("MXC_GPU_MEMORY_FRACTION")
         cmd += ["--device-memory-utilization", frac if frac != "" else memory_fraction(weights_bytes(m.weights_path), total_mb)]
         if m.custom_arch_path != "":
@@ -238,11 +313,12 @@ struct Supervisor(Movable):
         for g in list:
             if g.index == gpu:
                 total = g.total_mb
+        var device = device_of(list, gpu)  # (its number under CUDA_VISIBLE_DEVICES, which max serve inherits)
         var port = free_port()
         if self.last_error.startswith(m.name + " exited"):
             self.last_error = ""  # (an earlier crash of this model isn't the reason this start fails, if it does)
         var keep = self.idle_override if self.idle_override > 0 else m.keep_alive
-        var p = Process.start(self.command(m, port, gpu, total), self.log_path(m.name), self.child_env())
+        var p = Process.start(self.command(m, port, device, total), self.log_path(m.name), self.child_env())
         self.children.append(Child(m.name, p^, port, gpu, keep))
         self.gpu_at = 0  # (the next start reads nvidia-smi again: this model's memory isn't in the cached answer)
         return len(self.children) - 1

@@ -503,8 +503,9 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
         if not failed:
             try:
                 var j = Json.parse(event.text)
-                a.porter = j.text(j.get(0, "kind"))
                 a.porter_found = j.text(j.get(j.get(0, "detected"), "path"))
+                # (a stored key without Claude Code is no porter: Claude Code does the work, the key only signs it in)
+                a.porter = j.text(j.get(0, "kind")) if a.porter_found != "" else String("")
             except:
                 pass
     elif m == ADD_GOT_PORTER_SAVE:
@@ -515,8 +516,8 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
             a.porter_asked = True
             try:
                 var j = Json.parse(event.text)
-                a.porter = j.text(j.get(0, "kind"))
                 a.porter_found = j.text(j.get(j.get(0, "detected"), "path"))
+                a.porter = j.text(j.get(0, "kind")) if a.porter_found != "" else String("")  # (as ADD_GOT_PORTER)
             except:
                 a.porter = "claude-code"
             a.refused = ""
@@ -540,7 +541,7 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
                 except:
                     pass
                 a.note = "Could not start the port: " + problem(event)
-            elif event.number == 400 and (code == "porter_not_configured" or code == "porter_unusable"):
+            elif event.number == 400 and (code == "porter_not_configured" or code == "porter_unusable" or code == "no_claude"):
                 a.porter = ""
                 a.porter_asked = True
                 a.porter_note = problem(event)

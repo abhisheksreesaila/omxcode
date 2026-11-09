@@ -144,6 +144,61 @@ def hub_repo(repo: String, revision: String = "main") raises -> HubRepo:
     return HubRepo(j.text(j.get(0, "id"), repo), j.text(j.get(0, "sha")), _gated(j, gated), files^)
 
 
+comptime HUB_HOSTS = ["huggingface.co", "www.huggingface.co"]
+# First path parts on huggingface.co that are not a model's owner (a dataset, a Space, the site's own pages).
+comptime NOT_OWNERS = ["datasets", "spaces", "models", "docs", "api", "collections", "papers", "blog", "organizations",
+                       "settings", "login", "join", "new", "tasks", "learn", "posts", "pricing", "enterprise", "chat"]
+
+
+def hub_ref(text: String) -> String:
+    """A model reference as someone pasted it. A Hub model URL (https://huggingface.co/owner/name, http://, no scheme,
+    www.; a trailing /, /tree/<rev>, /blob/…, ?query and #fragment are ignored) becomes "owner/name"; text that isn't
+    a URL comes back stripped and otherwise unchanged (a curated name, owner/name). "" for a URL that names no model
+    on the Hub: another host, a user or port in it, a dataset or Space, no owner/name. The caller still checks the
+    characters of what comes back."""
+    var s = String(text.strip())
+    var low = s.lower()
+    var rest: String
+    if low.startswith("https://"):
+        rest = String(s[byte = 8 :])
+    elif low.startswith("http://"):
+        rest = String(s[byte = 7 :])
+    elif low.find("://") >= 0:
+        return ""
+    else:
+        var looks_hosted = False
+        for h in materialize[HUB_HOSTS]():
+            if low.startswith(String(h) + "/") or low == String(h):
+                looks_hosted = True
+        if not looks_hosted:
+            return s
+        rest = s
+    for mark in ["#", "?"]:
+        var at = rest.find(String(mark))
+        if at >= 0:
+            var cut = String(rest[byte = : at])
+            rest = cut
+    var slash = rest.find("/")
+    var host = (String(rest[byte = : slash]) if slash >= 0 else rest).lower()
+    var known = False
+    for h in materialize[HUB_HOSTS]():
+        if host == String(h):
+            known = True
+    if not known or slash < 0:
+        return ""
+    var parts = String(rest[byte = slash + 1 :]).split("/")
+    if len(parts) < 2:
+        return ""
+    var owner = String(parts[0])
+    var name = String(parts[1])
+    if owner == "" or name == "":
+        return ""
+    for n in materialize[NOT_OWNERS]():
+        if owner.lower() == String(n):
+            return ""
+    return owner + "/" + name
+
+
 def safe_name(name: String) -> Bool:
     """A repo file's path that stays inside the folder it's downloaded to: relative, no "." or ".." parts, no empty ones."""
     if name == "" or name.startswith("/") or name.find("\\") >= 0:

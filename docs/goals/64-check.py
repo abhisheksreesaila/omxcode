@@ -209,7 +209,7 @@ def port_log(d, pid):
 # ---- milestones -------------------------------------------------------------------------------------------------------
 
 def m0():
-    """The porting assistant setting: Claude Code on this machine, or a key for a frontier model, stored 0600,
+    """The porting assistant setting: Claude Code's own login, or an API key Claude Code signs in with, stored 0600,
     never logged, never shown in full, never in a URL, removable; and a bad key fails in seconds."""
     err = build_all()
     if err:
@@ -274,7 +274,7 @@ def m0():
                 problems.append(f"DELETE /admin/porter: {s} {str(j)[:160]}")
     finally:
         gw.kill()
-    return not problems, "; ".join(problems) or ("the setting takes Claude Code or a frontier key, stores it 0600 "
+    return not problems, "; ".join(problems) or ("the setting takes Claude Code's own login or an API key for it, stores it 0600 "
                                                  "(prefix only in every view, in no log and in no other file), refuses a bad key in seconds, and removes it")
 
 
@@ -340,8 +340,8 @@ def m1():
     # the screen's side: the inline card, its buttons and its fields are on the port screen, not in Settings
     card = (ROOT / "examples/console/add.mojo").read_text()
     flow = (ROOT / "examples/console/addflow.mojo").read_text()
-    for want in ["ADD_PORTER_CLAUDE", "ADD_PORTER_KEY", "ADD_PORTER_SAVE", "Use Claude Code on this machine",
-                 "API key for a frontier model", "porter_found"]:
+    for want in ["ADD_PORTER_CLAUDE", "ADD_PORTER_KEY", "ADD_PORTER_SAVE", "Use Claude Code's own login",
+                 "API key Claude Code signs in with", "porter_found", "Install it first", "Linux only for now"]:
         if want not in card:
             problems.append(f"the port card is missing {want}")
     for want in ['api.post(ADD_GOT_PORTER_SAVE, "/admin/porter"', 'api.get(ADD_GOT_PORTER, "/admin/porter")',
@@ -643,7 +643,8 @@ def m5():
              "test_console_places": "examples/console", "test_console_labels": "examples/console", "test_port_donor": "examples/consoled",
              "test_port_sandbox": "examples/consoled", "test_ports_pure": "examples/consoled",
              "test_porter": "examples/consoled", "test_caddyfile": "examples/consoled",
-             "test_process_cwd": "examples/consoled", "test_port_boundary": "examples/consoled"}
+             "test_process_cwd": "examples/consoled", "test_port_boundary": "examples/consoled",
+             "test_model_refs": "examples/consoled", "test_gpu_visible": "examples/consoled"}
     for name, include in tests.items():
         src = f"tests/{name}.mojo"
         r = run(["scripts/mojo_flare.sh", "build", "-I", include, src, "-o", str(BUILD / name)])
@@ -671,8 +672,8 @@ def m5():
     if problems:
         return False, "; ".join(problems)
     word = True if have_max else BLOCKED
-    return word, ("both features marked beta with the real hit rate in the app and on the cover, ten Mojo tests "
-                  "pass, docs/components.md is fresh, " + tail)
+    return word, ("both features marked beta with the real hit rate in the app and on the cover, the console's "
+                  f"{len(tests)} Mojo tests pass, docs/components.md is fresh, " + tail)
 
 
 

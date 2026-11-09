@@ -41,7 +41,9 @@ comptime PORT_BETA = ("beta: of the 14 models tried while this was built, 8 port
                       + "billion parameters. Expect to finish some ports by hand.")
 comptime PORT_NOTE = ("“Port it” runs Claude Code with Modular’s import-model skill, unattended and in a sandbox: it reads the config, writes the model "
                       + "as a MAX graph, checks it against the reference and fixes what fails. It may take a while, often several minutes and sometimes "
-                      + "much longer, and it uses your Claude Code session. You will see every stage and the full log, and you can cancel.")
+                      + "much longer, and it uses your Claude Code session. You will see every stage and the full log, and you can cancel. "
+                      + "Linux only for now: the sandbox is bubblewrap (bwrap).")
+comptime CLAUDE_CODE_URL = "https://docs.anthropic.com/en/docs/claude-code"
 
 
 # ---------- pure: formatting (blade-add.js) ----------
@@ -577,7 +579,7 @@ def results_view(a: Add) -> View:
     var rows = a.shown()
     if len(rows) == 0:
         if len(a.results) == 0 or query != "":
-            var text = ("Nothing matches “" + query + "”. Try a Hugging Face repo id like owner/name.") if query != "" else String("No curated models are listed.")
+            var text = ("Nothing matches “" + query + "”. Try a Hugging Face repo id like owner/name, or paste its huggingface.co link.") if query != "" else String("No curated models are listed.")
             if len(a.results) > 0:
                 text = "Nothing in this filter."
             return EmptyState("search", "No results", text, "Clear search", ADD_EMPTY) if query != "" else EmptyState("search", "No models listed", text)
@@ -627,9 +629,10 @@ def port_card(a: Add) -> View:
         body.append(QuietText("Without a sandbox the agent would run with your full permissions, so it is not offered here."))
     var ready = a.porter != "" or not a.porter_asked
     if a.porter_asked and a.porter == "":  # the choice, here, instead of a trip to Settings (goal 64 M1)
-        body.append(QuietText("Porting needs a frontier model to write the architecture. "
-                              + ("Claude Code is on this machine: " + a.porter_found if a.porter_found != ""
-                                 else "Claude Code was not found on this machine.")))
+        body.append(QuietText(("Porting runs Claude Code, and it is on this machine (" + a.porter_found + "). Use its own login, "
+                               + "or give it an API key: Anthropic's, or a gateway's that answers the Anthropic API.") if a.porter_found != ""
+                              else ("Porting runs Claude Code, which was not found on this machine. Install it first ("
+                                    + CLAUDE_CODE_URL + "), then sign in with its own login or give it an API key here.")))
     if a.porter_note != "":
         body.append(WarnLine(a.porter_note))
     var size = joined([params_text(r.params), size_text(r.size_gb)])
@@ -639,16 +642,16 @@ def port_card(a: Add) -> View:
         if ready:
             body.append(ButtonRow([SmallButton("Port it", ADD_PORT_IT, "hammer", FILL)]))
         elif a.porter_open:
-            body.append(FieldWithHelp(OutlinedField(a.porter_base, "Base URL of a gateway that answers the Anthropic API (leave empty for Anthropic itself)", ADD_PORTER_BASE, ADD_PORTER_SAVE),
+            body.append(FieldWithHelp(OutlinedField(a.porter_base, "Base URL of a gateway that answers the Anthropic API (optional: empty means Anthropic itself)", ADD_PORTER_BASE, ADD_PORTER_SAVE),
                                       "https://… only, and never the key in the URL"))
-            body.append(FieldWithHelp(OutlinedField(a.porter_key, "API key for a frontier model", ADD_PORTER_KEY, ADD_PORTER_SAVE),
+            body.append(FieldWithHelp(OutlinedField(a.porter_key, "API key Claude Code signs in with", ADD_PORTER_KEY, ADD_PORTER_SAVE),
                                       "Kept for omxconsole only, readable by you alone, never shown again and never logged. Removable at any time."))
             body.append(ButtonRow([SmallButton("Checking the key…" if a.porter_saving else String("Save and port"), ADD_PORTER_SAVE, "key", FILL)]))
         elif a.porter_found != "":
-            body.append(ButtonRow([SmallButton("Use Claude Code on this machine", ADD_PORTER_CLAUDE, "sparkles", FILL),
-                                   SmallButton("Use an API key", ADD_PORTER_SETTINGS, "key")]))
-        else:
-            body.append(ButtonRow([SmallButton("Use an API key for a frontier model", ADD_PORTER_SETTINGS, "key", FILL)]))
+            body.append(ButtonRow([SmallButton("Use Claude Code's own login", ADD_PORTER_CLAUDE, "sparkles", FILL),
+                                   SmallButton("Give it an API key", ADD_PORTER_SETTINGS, "key")]))
+        else:  # (a key can't stand in for Claude Code: it only signs Claude Code in)
+            body.append(ButtonRow([SmallButton("Installed it? Check again", ADD_PORT_IT, "refresh-cw", FILL)]))
     return Card([CardHead(last_part(mref) + " uses " + (r.arch if r.arch != "" else String("an architecture")) + ", which MAX cannot run yet.",
                           lead=[IconSquare("hammer", hue=1)], tail=[Badge("beta", BADGE_WARN), Badge("architecture check")]),
                  CardBody(body^)])
@@ -656,7 +659,7 @@ def port_card(a: Add) -> View:
 
 def find_view(a: Add, phone: Bool) -> View:
     var query = String(a.q.strip())
-    var items: List[View] = [FieldWithHelp(OutlinedField(a.q, "Search models", ADD_FIELD, ADD_ENTER), "Search the MAX catalog, or paste a Hugging Face repo id (owner/name)"),
+    var items: List[View] = [FieldWithHelp(OutlinedField(a.q, "Search models", ADD_FIELD, ADD_ENTER), "Search the MAX catalog, or paste a Hugging Face repo id (owner/name) or its huggingface.co link"),
                              FilterChips(materialize[FILTER_TITLES](), a.filter, ADD_FILTER)]
     if a.notice == NOTICE_WARN:
         items.append(warn_card(a))

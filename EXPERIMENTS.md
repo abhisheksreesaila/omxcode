@@ -4,6 +4,33 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## omxconsole: huggingface.co links, CUDA_VISIBLE_DEVICES, honest porting wording (2026-11-09)
+
+**Setup.** Three small fixes before a Modular team member tries omxconsole. Throwaway homes under /tmp, free ports,
+stand-in `max` (a catalog without GPT-2, so a pull stops after config.json) and stand-in `claude`; never :11435 or ~/.mxc.
+
+**What worked.**
+1. A pasted `https://huggingface.co/owner/name` (http, no scheme, www., trailing /, /tree/<rev>, /blob/…, ?query, #frag)
+   becomes owner/name in one place (`mojoui.hf.hub_ref`), used by pulls, ports and search. Other hosts, user or port in
+   the host, datasets and Spaces are refused; each part must start with a letter or digit (no `.`/`..` parts).
+   Live: a pull of `https://huggingface.co/openai-community/gpt2/tree/main?x=1#readme` recorded ref and repo_id
+   `openai-community/gpt2`; the GTK search field took the link and listed gpt2 first. `tests/test_model_refs.mojo`.
+2. `CUDA_VISIBLE_DEVICES` is honoured: only the listed GPUs (indices or UUID prefixes, CUDA's stop rules), and
+   `--devices gpu:N` is the GPU's place in that list. On this machine's two 3090s: unset → physical 0 as gpu:0;
+   `=1` → physical 1 as gpu:0; `=1,0` choosing physical 0 → gpu:1; `-1` or empty → no `--devices` (the CPU path, as
+   with no GPU). The port sandbox keeps the variable. `tests/test_gpu_visible.mojo`.
+3. Porting always runs Claude Code; a key only signs it in. The daemon refuses a port with `no_claude` when `claude`
+   isn't found even with a key stored (live), the port card says "install it first, then its own login or an API
+   key" and "Linux only for now: the sandbox is bubblewrap", and the cover page says the same.
+
+**Checks.** goal 64: M0–M4 PASS, M5 BLOCKED only for goal 55's MAX install (13 console Mojo tests pass). Linux
+download rebuilt (dist/, 18 MB), started headless on a throwaway home: consoled up, exit 0, nothing left running.
+
+**Unverified.** The Mac build was not rebuilt (the changes are platform-neutral Mojo). CUDA index entries are matched
+to nvidia-smi's PCI order; CUDA's default order can differ on mixed-GPU machines (UUIDs are exact).
+
+---
+
 ## omxconsole's highlight clip, and the port screen's first real run (2026-11-08)
 
 **Setup.** `scripts/consoleclip.py` (`clips.py console`): the Mojo `consoled` on a throwaway home (`build/clipconsole/home`,

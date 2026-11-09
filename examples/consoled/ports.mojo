@@ -33,7 +33,7 @@ from std.os import makedirs, getenv, listdir, remove
 from std.os.path import exists, isdir, getsize
 from mojoui.clock import wall_seconds, now_ns
 from mojoui.files import remove_tree
-from mojoui.hf import hub_repo, hub_download, HubRepo
+from mojoui.hf import hub_repo, hub_download, hub_ref, HubRepo
 from mojoui.http import Request
 from mojoui.http_flare import FlareTransport, Transfer
 from mojoui.json import Json, json_string, J_NULL, J_BOOL, J_NUMBER, J_STRING
@@ -46,6 +46,7 @@ from portprep import (ENTRY_SKILL, SKILLS_REPO, SKILLS_REV, SKILL_SCRIPTS, PARIT
                       stale_patches, gate_hash, max_pinned, failure_signature, infra_error, reached_text, norm)
 from sandbox import bwrap_argv, Confine, scrub, env_names, have_bwrap, which, tool_roots
 from store import Store
+from porter import INSTALL_CLAUDE
 from pulls import repo_of, model_name, folder_of, wanted, catalog, ref_problem
 from supervisor import free_port
 
@@ -72,9 +73,9 @@ comptime SMOKE_PROMPT = "The capital of France is"
 comptime POLL_MS = 150
 
 comptime NO_SANDBOX = ("Automatic port needs bubblewrap (`bwrap`) to confine the agent that reads the model's untrusted files, "
-                       + "and it was not found. Install bubblewrap, or pass unsandboxed to run without confinement (not recommended).")
-comptime NO_CLAUDE = ("Claude Code (`claude`) was not found, and no API key for a frontier model is set up. Set the porting "
-                      + "assistant up in Settings, or install Claude Code. (MXC_CLAUDE can name its full path.)")
+                       + "and it was not found. Install bubblewrap (the `bubblewrap` package on most Linux distributions), or pass "
+                       + "unsandboxed to run without confinement (not recommended).")
+comptime NO_CLAUDE = INSTALL_CLAUDE
 # What the agent may do. Files: Read/Edit/Write/Glob/Grep (acceptEdits confines edits to the workspace). Commands:
 # only the skill's own scripts through its pixi env, `pixi install`, and `cd` (to reach the skill root). No general
 # shell tools. The model card may be read from huggingface.co. Anything else would prompt, and prompts are denied.
@@ -1376,12 +1377,13 @@ struct Ports(Movable):
     def __init__(out self):
         self.running = List[RunningPort]()
 
-    def start(mut self, mut store: Store, asked: String, name: String, max_attempts: Int, unsandboxed: Bool,
+    def start(mut self, mut store: Store, raw_ref: String, name: String, max_attempts: Int, unsandboxed: Bool,
               home: String, max_cmd: String, env: List[String], admin_key: String, daemon_port: Int,
               porter_env: List[String]) raises -> Started:
-        var why = ref_problem(asked)
+        var why = ref_problem(raw_ref)
         if why != "":
             return Started(0, "invalid_request_body", why, 0)
+        var asked = hub_ref(raw_ref)  # (a pasted huggingface.co link, as owner/name from here on)
         # `name` becomes a folder under MXC_HOME/ports that is bound read-write into the agent's sandbox, so it is
         # checked here, at the boundary, exactly as the Python did (pulls.py NAME_RE): without this, "name": ".."
         # binds MXC_HOME itself writable into the sandbox, where porter.json and mst.db live (security audit).
