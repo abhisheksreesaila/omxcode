@@ -660,18 +660,18 @@ def cut(tight=False):
     b = B["pull"]
     raw = OUT / b["raw"]
     facts = pull_facts(b["stages"])
-    mb, fetch = facts.get("fetch_mb"), facts.get("fetch_s")
     fetched = b["fetched"]
-    cap1 = f"Pull from Hugging Face: {mb:,.0f} MB in {fetch:.1f} s" if mb and fetch else "Pull from Hugging Face"
+    # no download or compile time in a caption: public pages make no speed claims, pictures included (docs/lessons.md,
+    # D-4762), and the same 1 GB pull took 6 s and 10 min on one day. A time-lapse still says it's one.
+    cap1 = "Pull from Hugging Face"
     if fetched - b["pick"] <= 15:
         yield from push(caption_on(_frames(raw, (b["pick"] - 3.5) if tight else max(0.5, b["pick"] - 5.8), fetched + 1.0), cap1), "pull", at=3.0)
     else:  # (a slow network: the download is a time-lapse too, and the caption says so)
         yield from push(caption_on(_frames(raw, (b["pick"] - 3.5) if tight else max(0.5, b["pick"] - 5.8), b["pick"] + 3.0), "Pull from Hugging Face"), "pull", at=3.0)
         kf = max(1, round((fetched + 1.0 - b["pick"] - 3.0) / (3.0 if tight else 6.0)))
-        yield from push(caption_on(_frames(raw, b["pick"] + 3.0, fetched + 1.0, speed=kf), cap1.replace(f"{fetch:.1f} s", _secs(fetch)) + f", sped up {kf}×", fade=0), "fetch")
-    comp_s = facts.get("compile_s") or (b["ready"] - fetched)  # (the screen's Compile graph time; the span filmed is that stretch)
+        yield from push(caption_on(_frames(raw, b["pick"] + 3.0, fetched + 1.0, speed=kf), cap1 + f", sped up {kf}×", fade=0), "fetch")
     k = max(1, round((b["ready"] - fetched - 1.0) / (2.0 if tight else 4.0)))
-    yield from push(caption_on(_frames(raw, fetched + 1.0, b["ready"], speed=k), f"MAX compiles it for this GPU: {_secs(comp_s)}, sped up {k}×", fade=0), "compile")
+    yield from push(caption_on(_frames(raw, fetched + 1.0, b["ready"], speed=k), f"MAX compiles it for this GPU, sped up {k}×", fade=0), "compile")
     yield from push(caption_on(_frames(raw, b["ready"], b["ready"] + 1.8 if tight else b["end"] - 0.3), "Ready, with its local endpoint", fade=0.2), "ready")
 
     # 2 port: the offer in real time, the port as a time-lapse, the result
