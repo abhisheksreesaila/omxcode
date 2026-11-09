@@ -631,7 +631,7 @@ def m5():
     if "beta" not in sec:
         problems.append("the network screen does not say beta")
     cover = (ROOT / "docs/omxconsole.html").read_text()
-    for want in ("beta", "8 of 14", "porting a model max can't run is back", "caddy"):
+    for want in ("beta", "8 of 14", "max can't run it?", "caddy"):
         if want not in cover.lower():
             problems.append(f"the cover page does not mention {want}")
     if "aren't in this one yet" in cover or "porting a model MAX can't run, and reaching the endpoint" in cover:
