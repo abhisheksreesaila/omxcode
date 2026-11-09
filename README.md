@@ -259,4 +259,6 @@ struct Main(App):
 
 ## License
 
-MIT: see [LICENSE](LICENSE). Vendored third-party files keep their own licences: HTMX (BSD 0-Clause) and Lucide icons (ISC), in `mojoui/hosts/static/`.
+MIT: see [LICENSE](LICENSE). Vendored third-party files keep their own licences: HTMX (BSD 0-Clause) and Lucide icons (ISC), in `mojoui/hosts/static/`. See [NOTICE](NOTICE) for MAX and Mojo.
+
+Mojo and MAX are trademarks of Modular Inc.; omxlabs is an independent project, not affiliated with or endorsed by Modular.

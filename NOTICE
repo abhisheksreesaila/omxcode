@@ -2,9 +2,10 @@ omxcode (this repository) is MIT licensed (see LICENSE). It runs on, and its bui
 made by others, which keep their own licences. None of them is included in this repository unless said below.
 
 MAX and Mojo (Modular Inc.): the Mojo compiler and standard library, and the MAX engine and its C library (libmax),
-installed by pixi, under the Modular Community License; their source-published parts (the MAX pipelines, the Mojo
+installed by pixi, under the MAX License (modular.com/legal/max-license); their source-published parts (the MAX pipelines, the Mojo
 standard library) under the Apache License 2.0 with LLVM Exceptions. scripts/packs/bert_graph.py is a copy of MAX's
 max/pipelines/architectures/bert/graph.py (Apache 2.0 with LLVM Exceptions; its header kept).
+Mojo and MAX are trademarks of Modular Inc.; omxlabs is an independent project, not affiliated with or endorsed by Modular.
 
 Models a pack is built from (scripts/setup and scripts/packs/*.py download them from their makers; the packs are not in
 this repository):
