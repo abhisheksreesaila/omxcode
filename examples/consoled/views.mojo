@@ -224,7 +224,7 @@ def system_json(store: Store, mut sup: Supervisor, home: String, port: Int, upti
     crew += ', "port": ' + String(port) + ', "rss_mb": ' + num(rss_mb(me)) + ', "uptime_seconds": ' + String(uptime) + "}"
     crew += ', {"id": "caddy", "kind": "caddy", "name": "Caddy", "state": ' + ('"running"' if lan != "" else '"stopped"') + ', "pid": null, "port": ' + String(expose_port()) + ', "rss_mb": null, "uptime_seconds": null}'
     var listeners = String('[{"name": "omxconsole daemon", "kind": "daemon", "host": "127.0.0.1", "port": ') + String(port)
-    listeners += ', "exposed": false, "state": "listening", "talks_to": "the mxc CLI, this console, your apps on this machine, and Caddy (key check, then every LAN request)"}'
+    listeners += ', "exposed": false, "state": "listening", "talks_to": "this console, your apps on this machine, and Caddy (key check, then every LAN request)"}'
     var caddy_state = '"listening"' if lan != "" else '"off"'
     listeners += ', {"name": "Caddy", "kind": "caddy", "host": "0.0.0.0", "port": ' + String(expose_port()) + ', "exposed": true, "state": ' + caddy_state + ', "talks_to": "LAN clients over HTTPS, each with an app key"}'
     listeners += ', {"name": "Caddy admin", "kind": "caddy", "host": "127.0.0.1", "port": 2099, "exposed": false, "state": ' + caddy_state + ', "talks_to": "Caddy itself (its config API)"}'

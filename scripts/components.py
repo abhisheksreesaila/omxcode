@@ -164,7 +164,7 @@ COMPOSITES = [
     ("Sidebar (heads, rows to pick, chips when compact)", "mojoui/sidebar.mojo", ["Text", "Button", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "Sidebar("),
     ("Cards and panels (head, body, foot, stat tiles, facts)", "mojoui/panel.mojo", ["Text", "Button", "VStack", "HStack", "Themes on top (themes/, or yours)"], "PanelGrid("),
     ("Marks (hue and signal dots, status marks, hued icons)", "mojoui/marks.mojo", ["Text", "Icon", "VStack", "HStack", "Themes on top (themes/, or yours)"], "StatusMark("),
-    ("Words (quiet, strong, mono lines, command lines)", "mojoui/words.mojo", ["Text", "HStack", "Themes on top (themes/, or yours)"], "CommandLine("),
+    ("Words (quiet, strong, mono lines, hints)", "mojoui/words.mojo", ["Text", "HStack", "Themes on top (themes/, or yours)"], "QuietText("),
     ("Buttons (flat, primary, small looks, text actions, links, Back)", "mojoui/buttons.mojo", ["Button", "Button with an icon", "Themes on top (themes/, or yours)"], "SmallButton("),
     ("Lists (split view, count line, name cells, selection bar)", "mojoui/lists.mojo", ["Text", "Button", "VStack", "HStack", "Divider", "Themes on top (themes/, or yours)"], "SplitView("),
     ("Document (markdown and code cells, outline, three columns)", "mojoui/document.mojo", ["Text", "Button", "Scroll", "Card", "Themes on top (themes/, or yours)"], "DocLayout("),

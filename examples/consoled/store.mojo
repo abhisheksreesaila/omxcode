@@ -108,7 +108,7 @@ struct Store(Movable):
         self.db.begin()
         if not self.label_exists(old):
             self.db.rollback()
-            return LabelProblem("label_not_found", "no label named " + old + ". See: mxc labels")
+            return LabelProblem("label_not_found", "no label named " + old)
         if new != old and self.label_exists(new):
             self.db.rollback()
             return LabelProblem("label_exists", "a label named " + new + " already exists")
@@ -138,7 +138,7 @@ struct Store(Movable):
         self.db.begin()
         if not self.label_exists(name):
             self.db.rollback()
-            return LabelProblem("label_not_found", "no label named " + name + ". See: mxc labels")
+            return LabelProblem("label_not_found", "no label named " + name)
         _ = self.db.run("DELETE FROM model_labels WHERE label = ?", [name])
         _ = self.db.run("DELETE FROM labels WHERE name = ?", [name])
         self.db.commit()
@@ -159,7 +159,7 @@ struct Store(Movable):
         var gone = self._missing_model(models)
         if gone != "":
             self.db.rollback()
-            return LabelProblem("model_not_found", "no model named " + gone + ". See: mxc list")
+            return LabelProblem("model_not_found", "no model named " + gone)
         if not self.label_exists(label):
             self._make_label(label)
         for m in models:
@@ -172,10 +172,10 @@ struct Store(Movable):
         var gone = self._missing_model(models)
         if gone != "":
             self.db.rollback()
-            return LabelProblem("model_not_found", "no model named " + gone + ". See: mxc list")
+            return LabelProblem("model_not_found", "no model named " + gone)
         if not self.label_exists(label):
             self.db.rollback()
-            return LabelProblem("label_not_found", "no label named " + label + ". See: mxc labels")
+            return LabelProblem("label_not_found", "no label named " + label)
         for m in models:
             _ = self.db.run("DELETE FROM model_labels WHERE model = ? AND label = ?", [m, label])
         self.db.commit()

@@ -167,7 +167,7 @@ def security_view(sp: SecurityPage, st: Store, phone: Bool) -> View:
                         tail=[StatusMark(word, WARN if sp.phase == "run" else (GOOD if secure else QUIET))])
     var body: List[View] = []
     if running:
-        var metas: List[String] = [("for " + host) if host != "" else String(""), "mxc gateway key", ("port " + String(sp.caddy_port)) if sp.caddy_port > 0 else String("")]
+        var metas: List[String] = [("for " + host) if host != "" else String(""), "the gateway's own key", ("port " + String(sp.caddy_port)) if sp.caddy_port > 0 else String("")]
         var stages: List[Stage] = []
         for k in range(3):
             stages.append(Stage(materialize[STEP_LABELS]()[k], STAGE_DONE if sp.phase == "done" else STAGE_RUNNING, -1, metas[k]))
@@ -183,14 +183,14 @@ def security_view(sp: SecurityPage, st: Store, phone: Bool) -> View:
         body.append(QuietText("beta: this needs Caddy on this machine (omxconsole does not bundle it), and every "
                               + "device you call from trusts the certificate once."))
         body.append(ButtonRow([SmallButton("Try again" if sp.phase == "fail" else "Make it secure", SEC_SECURE, "lock", FILL)]))
-    var cards: List[View] = [Card([head^, CardBody(body^), CardFoot("mxc expose --stop" if secure else "mxc expose")])]
+    var cards: List[View] = [Card([head^, CardBody(body^)])]
     cards.append(Card([CardHead("What “Make it secure” does"), CardBody([FactGrid(["Certificate", "API key", "HTTPS"], [
         FactText("a local CA, “mxconsole local”, signs a certificate for this machine's name", plain=True),
         FactText("the gateway has its own key; requests without a valid app key get 401", plain=True),
         FactText("Caddy listens on your LAN; localhost keeps working over plain HTTP", plain=True)])]),
         CardFoot("all three happen in one request", note=True)]))
     if secure:
-        cards.append(Card([CardHead("Endpoint"), CardBody([CopyRow("https · lan", url, SEC_COPY_URL, "Copy")]), CardFoot("mxc status")]))
+        cards.append(Card([CardHead("Endpoint"), CardBody([CopyRow("https · lan", url, SEC_COPY_URL, "Copy")])]))
         var file = file_name(sp.ca_path)
         var trust: List[View] = [QuietText("Other devices need to trust the mxconsole CA once, or HTTPS calls fail with a certificate error. This machine already knows it."
                                            if sp.ca_exists else "The CA file is created the first time Caddy starts; it is not there yet."),

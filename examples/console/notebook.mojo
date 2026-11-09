@@ -126,8 +126,7 @@ def notebook_view(nb: Notebook, st: Store, model: String, phone: Bool) -> View:
         return TabBody(head^, items^, compact=phone).grow()
     if not nb.loaded:
         items.append(Card([CardHead("Building the notebook" if nb.error == "" else "Could not build the notebook"),
-                           CardBody([QuietText(nb.error if nb.error != "" else "Reading the model's config and card from Hugging Face the first time, then it is saved for next time.")]),
-                           CardFoot("mxc learn " + model)]))
+                           CardBody([QuietText(nb.error if nb.error != "" else "Reading the model's config and card from Hugging Face the first time, then it is saved for next time.")])]))
         return TabBody(head^, items^, compact=phone)
     # chapters
     var sources = List[String]()
@@ -160,6 +159,6 @@ def notebook_view(nb: Notebook, st: Store, model: String, phone: Bool) -> View:
     facts.append(SpecRows(keys, values))
     var aside = CardColumn([Card([CardHead("Architecture"), CardBody(facts^), CardFoot("read from the model's config", note=True)]),
                                 Card([CardHead("Kernel"), CardBody([QuietText(nb.kernel)]), CardFoot("Run in Jupyter above to execute cells", note=True)]),
-                                Card([CardHead("File"), CardBody([MonoLine(nb.path)]), CardFoot("mxc learn " + model)])])
+                                Card([CardHead("File"), CardBody([MonoLine(nb.path)])])])
     items.append(DocLayout(Outline("Chapters", titles, levels, NB_CHAPTER), CardColumn(cells^), aside^, compact=phone))
     return TabBody(head^, items^, compact=phone, flush=True).grow()

@@ -1,5 +1,5 @@
 # Gateway (blade-gateway.js): LiteLLM's status, its routes (model name -> upstream), recent requests to /v1, the
-# safeguards the daemon counts today, the LiteLLM log's last lines, Restart, and the CLI twins. Data: GET /admin/network,
+# safeguards the daemon counts today, the LiteLLM log's last lines, Restart and the API reference. Data: GET /admin/network,
 # /admin/gateway and /admin/litellm/log?bytes=8000 on arrival and every 4 s; the recent requests are core.js's poll
 # (/admin/requests?limit=40, handed over by app.mojo); POST /admin/litellm/restart.
 
@@ -12,7 +12,7 @@ from mojoui.table import Table
 from mojoui.lists import SideScroll
 from mojoui.logview import LogView
 from mojoui.header import PageHeader
-from mojoui.panel import Card, CardHead, CardBody, CardFoot, CopyFoot, CardStack, CardNote, FactText, FactGrid
+from mojoui.panel import Card, CardHead, CardBody, CardFoot, CardStack, CardNote, FactText, FactGrid
 from mojoui.buttons import SmallButton, ButtonRow, TONAL, FILL
 from mojoui.words import Mono, QuietText, Hint
 from mojoui.marks import StatusMark, GOOD, QUIET, BAD
@@ -23,7 +23,6 @@ from msgs import *
 from mojoui.numformat import en_number
 
 comptime LOG_LINES = 60
-comptime COPIES: List[String] = ["mxc status", "mxc requests --limit 200", "mxc console api", "mxc expose", "mxc expose --stop"]
 
 
 @fieldwise_init
@@ -138,8 +137,6 @@ struct GatewayPage(Copyable, Movable):
         elif m == GW_RESTART and not self.busy and self.litellm:
             self.busy = True
             api.post(GW_GOT_RESTART, "/admin/litellm/restart")
-        elif GW_COPY <= m < GW_COPY + 5:
-            return materialize[COPIES]()[m - GW_COPY]
         elif m == GW_GOT_RESTART:
             self.busy = False
             self.load(api)
@@ -247,9 +244,8 @@ def gateway_view(gp: GatewayPage, st: Store, phone: Bool) -> View:
                                   FactText(st.endpoint if st.endpoint != "" else String("—")), FactText(gp.lan if gp.lan != "" else String("off"))]
         var facts: List[View] = [FactGrid(keys, values^)]
         if not gp.litellm:
-            facts.append(Hint("LiteLLM is off, so only the daemon's own /v1 answers. The routes below apply once mxc expose starts it."))
+            facts.append(Hint("LiteLLM is off, so only the daemon's own /v1 answers."))
         status.append(CardBody(facts^, flow=True))
-    status.append(CopyFoot("mxc status", GW_COPY))
     cards.append(Card(status^))
     # Routes
     if gp.loaded:
@@ -286,7 +282,6 @@ def gateway_view(gp: GatewayPage, st: Store, phone: Bool) -> View:
         recent.append(EmptyState("scroll-text", "No requests yet", "They show up here once an app calls /v1."))
     else:
         recent.append(CardNote("Loading…"))
-    recent.append(CopyFoot("mxc requests --limit 200", GW_COPY + 1))
     cards.append(Card(recent^))
     # Safeguards
     if gp.has_gw:
@@ -294,15 +289,13 @@ def gateway_view(gp: GatewayPage, st: Store, phone: Bool) -> View:
             [FactText(("HTTPS on · " + gp.tls_endpoint) if gp.tls_on else "off: nothing listens beyond this machine"),
              FactText(String(gp.keys_active) + " active · " + String(gp.keys_revoked) + " revoked · " + counted(gp.unauthorized, "request", "requests") + " refused today (401)"),
              FactText(counted(gp.unknown_routes, "request", "requests") + " to other /v1 paths today"),
-             FactText(counted(gp.admin_refused, "refusal", "refusals") + " today")])]), CopyFoot("mxc status", GW_COPY)]))
+             FactText(counted(gp.admin_refused, "refusal", "refusals") + " today")])])]))
     # The LiteLLM log
     var lines = gp.log_lines()
-    var empty = String("Loading…") if not gp.log_loaded else (("Could not read the LiteLLM log: " + gp.log_failed) if gp.log_failed != "" else "No LiteLLM log yet: it appears once `mxc expose` starts LiteLLM.")
+    var empty = String("Loading…") if not gp.log_loaded else (("Could not read the LiteLLM log: " + gp.log_failed) if gp.log_failed != "" else "No LiteLLM log yet.")
     cards.append(Card([CardHead("LiteLLM log", "last lines"), CardBody([LogView(lines.copy() if gp.log_failed == "" else List[String](), empty=empty, short=True).fill()]),
                        CardFoot("refreshed every few seconds", note=True)]))
-    # The API reference, the terminal
+    # The API reference
     cards.append(Card([CardHead("API reference"), CardBody([QuietText("Base URL, auth, every endpoint and a request you can copy."),
-                                                            ButtonRow([SmallButton("Open the API reference", GW_DOCS, "book-open", FILL)])]),
-                       CopyFoot("mxc console api", GW_COPY + 2)]))
-    cards.append(Card([CardHead("From the terminal"), CopyFoot("mxc status", GW_COPY), CopyFoot("mxc expose", GW_COPY + 3), CopyFoot("mxc expose --stop", GW_COPY + 4)]))
+                                                            ButtonRow([SmallButton("Open the API reference", GW_DOCS, "book-open", FILL)])])]))
     return CardStack(cards^)

@@ -12,7 +12,7 @@ from mojoui.table import Table
 from mojoui.lists import SideScroll
 from mojoui.clock import wall_seconds
 from mojoui.header import PageHeader, SegmentButtons, HUE_QUIET
-from mojoui.panel import Card, CardHead, CardBody, CardFoot, CopyFoot, CardStack, CardNote, FactText, FactGrid
+from mojoui.panel import Card, CardHead, CardBody, CardFoot, CardStack, CardNote, FactText, FactGrid
 from mojoui.buttons import SmallButton, ButtonRow, DANGER, TEXT
 from mojoui.words import Mono, QuietText, MonoLine, Hint
 from mojoui.marks import StatusMark, GOOD, WARN, QUIET
@@ -23,7 +23,6 @@ from msgs import *
 from mojoui.numformat import duration_short
 
 comptime DEFAULT_KEEP_ALIVE = 300.0  # models registered without --keep-alive unload after this long
-comptime COPIES: List[String] = ["mxc set <model> --keep-alive 10m", "mxc set <model> --pin", "mxc stop --all", "mxc ps"]
 
 
 @fieldwise_init
@@ -134,8 +133,6 @@ struct SettingsPage(Copyable, Movable):
         elif m == SET_STOP_SURE and not self.stopping:
             self.stopping = True
             api.post(SET_GOT_STOP, "/admin/shutdown")
-        elif SET_COPY <= m < SET_COPY + 4:
-            return materialize[COPIES]()[m - SET_COPY]
         elif m == SET_GOT_STOP:
             if event.error != "" or event.number >= 400:
                 self.stopping = False
@@ -164,7 +161,7 @@ def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
             names.append(m.name)
             values.append(FactText("pinned: never unloads" if m.pinned else "after " + duration_short(m.keep_alive) + " idle"))
         idle.append(FactGrid(names, values^, mono_keys=True))
-    cards.append(Card([CardHead("Idle unload", "per model"), CardBody(idle^, flow=True), CopyFoot(materialize[COPIES]()[0], SET_COPY), CopyFoot(materialize[COPIES]()[1], SET_COPY + 1)]))
+    cards.append(Card([CardHead("Idle unload", "per model"), CardBody(idle^, flow=True)]))
     # Daemon
     var daemon: List[View] = []
     if sp.has_info:
@@ -181,11 +178,11 @@ def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
     if sp.stopping:
         daemon.append(StatusMark("Stopping… the console goes offline in a moment.", WARN))
     elif sp.confirming:
-        daemon.append(Warning([QuietText("Stop the daemon? Every model unloads and this console goes offline until you run mxc daemon (or any command that starts it) again."),
+        daemon.append(Warning([QuietText("Stop the daemon? Every model unloads and this console goes offline. Quit and reopen omxconsole to start it again."),
                                ButtonRow([SmallButton("Stop daemon", SET_STOP_SURE, "square", DANGER), SmallButton("Cancel", SET_CANCEL, "", TEXT)])]))
     else:
         daemon.append(ButtonRow([SmallButton("Stop daemon", SET_STOP, "square", DANGER)]))
-    cards.append(Card([CardHead("Daemon"), CardBody(daemon^), CopyFoot(materialize[COPIES]()[2], SET_COPY + 2)]))
+    cards.append(Card([CardHead("Daemon"), CardBody(daemon^)]))
     # Ports & processes
     var ports: List[View] = [CardHead("Ports & processes", "most listen on this machine only")]
     if len(sp.listeners) > 0:
@@ -200,6 +197,5 @@ def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
     else:
         ports.append(CardNote("No listeners reported." if sp.system_at else "Loading…"))
     ports.append(CardNote("Apps talk to the daemon, which starts one max serve per model on a loopback port. Only Caddy listens beyond this machine, and only after you make a model secure."))
-    ports.append(CopyFoot(materialize[COPIES]()[3], SET_COPY + 3))
     cards.append(Card(ports^))
     return CardStack(cards^)

@@ -537,7 +537,7 @@ struct Daemon(Service):
         if req.matches("POST", "/admin/models/{name}/load"):
             var m = self.model_ref(req.param("name"))
             if not m:
-                return error(404, "The model `" + req.param("name") + "` is not registered. Run `mxc pull " + req.param("name") + "`.", "model_not_found")
+                return error(404, "The model `" + req.param("name") + "` is not registered. Add it in omxconsole first.", "model_not_found")
             var at = self.sup.find(req.param("name"))
             if at >= 0 and self.sup.children[at].proc.running() and self.sup.check_ready(at):  # (already running: no wait, whatever else waits)
                 self.sup.children[at].proc.touch()  # (a load keeps it loaded longer, as ensure_running did)
@@ -670,7 +670,7 @@ struct Daemon(Service):
         if app == "":
             if route != "":
                 self.store.log_request(now, "", "", route, 401, -1, -1, -1.0, 0.0, False)
-            return error(401, "Incorrect API key provided. Create one with `mxc keys new <app>`.", "invalid_api_key", "authentication_error")
+            return error(401, "Incorrect API key provided. Create one in omxconsole under API keys.", "invalid_api_key", "authentication_error")
         if route == "":
             return error(404, "omxconsole does not serve " + req.path + ". Supported: /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings.", "unknown_route")
         if route == "models":
@@ -688,7 +688,7 @@ struct Daemon(Service):
         var m = self.model_ref(name)
         if not m:
             self.store.log_request(now, app, name, route, 404, -1, -1, -1.0, 0.0, False)
-            return error(404, "The model `" + name + "` is not registered. Run `mxc pull " + name + "`.", "model_not_found")
+            return error(404, "The model `" + name + "` is not registered. Add it in omxconsole first.", "model_not_found")
         var waiting = self.waiting()
         if waiting >= MAX_WAITING:  # (each waits on a server worker for its model's first bytes; keep some for the rest)
             self.store.log_request(now, app, name, route, 503, -1, -1, -1.0, 0.0, False)

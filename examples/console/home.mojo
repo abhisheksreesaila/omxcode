@@ -12,7 +12,7 @@ from mojoui.header import PageHeader, FilterBar, SegmentButtons
 from mojoui.sidebar import Sidebar, SidebarHead, SidebarItem
 from mojoui.marks import SignalDot, StatusMark, GOOD, QUIET
 from mojoui.panel import Panel, StatTile, StatRow
-from mojoui.words import MonoLine, MonoText, Strong, QuietText, CommandLine
+from mojoui.words import MonoLine, MonoText, Strong, QuietText
 from mojoui.buttons import FlatButton, PrimaryButton, TextAction, NameLink
 from mojoui.fields import SearchField, OutlinedField
 from mojoui.lists import SplitView, ListCount, ListBody, ListEmpty, CardGrid, SelectionBar, NameCell, CellStack
@@ -266,8 +266,6 @@ def home_view(st: Store, lib: Library, phone: Bool) -> View:
     var sub = String(len(all)) + " model" + ("" if len(all) == 1 else "s") + " · " + String(running) + " running" + \
         ((" · " + en_number(hw.used_gb, 1) + " of " + en_number(hw.total_gb, 1) + " GB GPU") if hw.present else String("")) + " · " + short_endpoint(st.endpoint_now())
     var tools: List[View] = []
-    if not phone:
-        tools.append(CommandLine("mxc ls"))
     tools.append(PrimaryButton("Add a model", ADD, icon="plus", compact=phone))
     var header = PageHeader("layout-grid", "My models", String(len(all)), sub, tools^, compact=phone)
     var search = SearchField(lib.q, "Search " + String(len(all)) + " model" + ("" if len(all) == 1 else "s") + " by name, kind or #label", SEARCH,

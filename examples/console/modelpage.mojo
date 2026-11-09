@@ -7,9 +7,8 @@ from mojoui.codeblock import CodeBlock
 from mojoui.sparkline import SparklineView
 from mojoui.header import PillTabs, TabHeader, ActionGroup
 from mojoui.buttons import FlatButton
-from mojoui.panel import Panel, PanelTitle, PanelFoot, PanelRow, PanelGrid, StatTile, StatGrid, Fact, FactText, FactLink, FactList, KEYS_WIDE, KEYS_COMPACT
+from mojoui.panel import Panel, PanelTitle, PanelRow, PanelGrid, StatTile, StatGrid, Fact, FactText, FactLink, FactList, KEYS_WIDE, KEYS_COMPACT
 from mojoui.marks import StatusMark, GOOD, QUIET
-from mojoui.words import CommandLines
 from mojoui.copy import CopyRow, LabeledValue, CodePanel
 from mojoui.meter import UsageBar
 from mojoui.chip import TagEditor
@@ -82,8 +81,8 @@ def overview_view(st: Store, m: Model, phone: Bool, copies: Int) -> View:
                           StatTile("Speed", en_number(r.tps_value) if r.tps_value >= 0 else String("—"), "tok/s" if r.tps_value >= 0 else String(""), "decode, median"),
                           StatTile("Latency p50", en_number(r.ttft_value) if r.ttft_value >= 0 else String("—"), "ms" if r.ttft_value >= 0 else String(""), "time to first token"),
                           StatTile("Memory", en_number(fit.this_gb, 1) if fit.this_gb > 0 else String("—"), "GB" if fit.this_gb > 0 else String(""), "GPU, this model")])
-    var right_now = Panel([PanelTitle("gauge", "Right now", 1), tiles^, PanelFoot("mxc status")])
-    var tokens = Panel([PanelTitle("scroll-text", "Tokens", 1), SparklineView(SPARK, len(st.points(m.name)) * 1000 + Int(r.tps_value)), PanelFoot("mxc metrics --json")])
+    var right_now = Panel([PanelTitle("gauge", "Right now", 1), tiles^])
+    var tokens = Panel([PanelTitle("scroll-text", "Tokens", 1), SparklineView(SPARK, len(st.points(m.name)) * 1000 + Int(r.tps_value))])
     # About
     var unload = "never (pinned)" if m.pinned else (("after " + duration_short(m.keep_alive) + " idle") if m.keep_alive > 0 else String("—"))
     var vram = String("—")
@@ -100,15 +99,12 @@ def overview_view(st: Store, m: Model, phone: Bool, copies: Int) -> View:
                           Fact("GPU memory", FactText(vram), keys),
                           Fact("State", StatusMark(state_text, GOOD if r.running else QUIET, mono=True, live=r.running), keys),
                           Fact("Labels", TagEditor(m.labels, REMOVE_LABEL, "label", ADD_LABEL), keys)])
-    var about = Panel([PanelTitle("box", "About", 2), facts^, PanelFoot("mxc ls --json")])
+    var about = Panel([PanelTitle("box", "About", 2), facts^])
     var figures: List[String] = ["this " + en_number(fit.this_gb, 1) + " GB" if fit.present else "no GPU found", ("others " + en_number(fit.others_gb, 1) + " GB") if fit.present else "",
                                  ("free " + en_number(fit.free_gb, 1) + " GB of " + en_number(fit.total_gb, 1) + " GB") if fit.present else ""]
     var gpu = Panel([PanelTitle("gauge", "GPU fit", 3), HStack(UsageBar(FIT, Int(fit.this_gb * 10) + Int(fit.total_gb * 1000), figures).grow(), spacing=0).fill().tag("gpu-fit")])
     var call = Panel([PanelTitle("terminal", "Call it", 4),
                       CopyRow("local" if st.lan_endpoint == "" else "https · lan", url, CMD_COPY),
                       LabeledValue("API key", "$MXC_API_KEY", "manage keys", KEYS),
-                      CodePanel(chat_curl(url, m.name, "hi"), on_copy=COPY_CURL, copies=copies, copied=copies > 0),
-                      PanelFoot("mxc keys new <app>")])
-    var power = ("mxc stop " if m.state == "ready" or m.state == "starting" else "mxc serve ") + m.name
-    var twins = CommandLines([power, "mxc rm " + m.name])
-    return PanelGrid([PanelRow([right_now^, tokens^], compact=phone), PanelRow([about^, gpu^], compact=phone), call^, twins^], compact=phone)
+                      CodePanel(chat_curl(url, m.name, "hi"), on_copy=COPY_CURL, copies=copies, copied=copies > 0)])
+    return PanelGrid([PanelRow([right_now^, tokens^], compact=phone), PanelRow([about^, gpu^], compact=phone), call^], compact=phone)

@@ -116,7 +116,7 @@ def bench_view(b: Bench, model: String, phone: Bool) -> View:
     elif not b.has_latest:
         items.append(Card([CardHead("No benchmark has run yet"),
                            CardBody([QuietText("A run loads the model if it is not running, sends one warm-up request that is not counted, then 5 timed ones."),
-                                     PrimaryButton("Run benchmark", BENCH_RUN, "gauge")]), CardFoot("mxc bench " + model)]))
+                                     PrimaryButton("Run benchmark", BENCH_RUN, "gauge")])]))
     else:
         var run = b.latest.copy()
         var decode = bars(run, True, model, 0, fr, mine, phone)
@@ -132,7 +132,7 @@ def bench_view(b: Bench, model: String, phone: Bool) -> View:
             items.append(Card([CardHead("Time to first token · p50", "lower is better"), CardBody(ttft^), CardFoot("the median of " + String(run.runs) + " timed runs", note=True)]))
         if nd == 1:
             items.append(Note([Text("Only this model has a result. To compare it with the others, run all of them."), NoteAction("Run all models", BENCH_ALL)]))
-        items.append(Card([CardHead("This run"), CardBody([MonoParagraph(workload(run))]), CardFoot("mxc bench " + model)]))
+        items.append(Card([CardHead("This run"), CardBody([MonoParagraph(workload(run))])]))
         if len(b.history) > 0:
             var rows: List[View] = []
             for k in range(len(b.history)):

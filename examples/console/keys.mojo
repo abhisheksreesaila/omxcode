@@ -1,5 +1,5 @@
 # API keys (blade-keys.js): every app key by its prefix, New key (the secret shown once, with Copy), Rotate (shown once;
-# it says when it brings a revoked app back) and Revoke, each acting on the second tap. Each action shows its mxc twin.
+# it says when it brings a revoked app back) and Revoke, each acting on the second tap.
 # Data: GET /admin/keys (on arrival, after each action, and every 12 s while you look: "last used" moves); POST
 # /admin/keys {"app"}, POST /admin/keys/<app>/rotate, DELETE /admin/keys/<app>, all with the admin key.
 
@@ -12,7 +12,7 @@ from mojoui.table import Table
 from mojoui.lists import SideScroll
 from mojoui.clock import wall_seconds
 from mojoui.header import PageHeader, IconSquare, ActionGroup
-from mojoui.panel import Card, CardHead, CardBody, CardFoot, CardStack, CardNote
+from mojoui.panel import Card, CardHead, CardBody, CardStack, CardNote
 from mojoui.buttons import SmallButton, ButtonRow, TONAL, FILL, TEXT, DANGER
 from mojoui.words import QuietText, MonoLine, MonoStrong, ErrorLine, CellText
 from mojoui.marks import StatusMark, GOOD, QUIET
@@ -80,7 +80,6 @@ struct KeysPage(Copyable, Movable):
     var secret: String  # shown once ("" hidden)
     var secret_title: String
     var secret_note: String
-    var secret_twin: String
     var armed_app: String  # the button waiting for its second tap ("" none)
     var armed_act: Int
 
@@ -95,7 +94,6 @@ struct KeysPage(Copyable, Movable):
         self.secret = ""
         self.secret_title = ""
         self.secret_note = ""
-        self.secret_twin = ""
         self.armed_app = ""
         self.armed_act = -1
 
@@ -122,9 +120,9 @@ struct KeysPage(Copyable, Movable):
         self.armed_act = act
         return False
 
-    def show(mut self, key: String, title: String, note: String, twin: String):
+    def show(mut self, key: String, title: String, note: String):
         self.form_error = ""
-        self.secret, self.secret_title, self.secret_note, self.secret_twin = key, title, note, twin
+        self.secret, self.secret_title, self.secret_note = key, title, note
 
     def update(mut self, m: Int, event: Event, mut api: Api) -> String:
         """A tap or a reply in Keys' range; returns text to put on the clipboard ("" none)."""
@@ -186,8 +184,7 @@ struct KeysPage(Copyable, Movable):
                 try:
                     var j = Json.parse(event.text)
                     self.form = False
-                    self.show(j.text(j.get(0, "key")), "Key for " + app, "Copy it now. It is shown once and cannot be recovered; rotate it if you lose it.",
-                              "mxc keys new " + app)
+                    self.show(j.text(j.get(0, "key")), "Key for " + app, "Copy it now. It is shown once and cannot be recovered; rotate it if you lose it.")
                 except:
                     self.form_error = "the daemon's answer wasn't JSON"
             api.get(KEYS_GOT_LIST, "/admin/keys")
@@ -198,7 +195,7 @@ struct KeysPage(Copyable, Movable):
                     var app = j.text(j.get(0, "app"))
                     var note = String("Shown once. The old secret stopped working, and this brings the revoked app back to life.") if j.flag(j.get(0, "revived")) else String(
                         "Shown once. The old secret has stopped working: update the app that uses it.")
-                    self.show(j.text(j.get(0, "key")), "New key for " + app, note, "mxc keys rotate " + app)
+                    self.show(j.text(j.get(0, "key")), "New key for " + app, note)
                 except:
                     pass
             api.get(KEYS_GOT_LIST, "/admin/keys")
@@ -240,10 +237,10 @@ def keys_view(kp: KeysPage, phone: Bool) -> View:
         if kp.form_error != "":
             body.append(ErrorLine(kp.form_error))
         body.append(ButtonRow([SmallButton("Create key", KEYS_CREATE, "plus", FILL), SmallButton("Cancel", KEYS_CANCEL, "", TEXT)]))
-        cards.append(Card([CardHead("New key"), CardBody(body^), CardFoot("mxc keys new <app>")]))
+        cards.append(Card([CardHead("New key"), CardBody(body^)]))
     if kp.secret != "":
         var head = CardHead(kp.secret_title, lead=[IconSquare("key-round", tone=GOOD)], tail=[Button("Done", KEYS_DONE, ICON_ONLY, icon="x")])
-        cards.append(Card([head^, CardBody([QuietText(kp.secret_note), SecretField(kp.secret, "Copy", KEYS_COPY)]), CardFoot(kp.secret_twin)]))
+        cards.append(Card([head^, CardBody([QuietText(kp.secret_note), SecretField(kp.secret, "Copy", KEYS_COPY)])]))
     var table: List[View] = [CardHead("Keys", "prefix only")]
     if kp.loaded and len(kp.rows) == 0 and kp.error == "":
         table.append(EmptyState("key-round", "No keys yet", "Create one for each app that calls your models.", "New key", KEYS_NEW))
@@ -265,6 +262,5 @@ def keys_view(kp: KeysPage, phone: Bool) -> View:
                                                        SmallButton("Click again to revoke" if rev else "Revoke", KEYS_REVOKE + k, "trash-2", DANGER, armed=rev, off=not active)]),
                                 spacing=0).align(CENTER).fill())
         table.append(SideScroll(Table(["App", "Key", "Created", "Last used", "Status", ""], cells, align="LLLLLL").fill().tag("keys")))
-    table.append(CardFoot("mxc keys ls"))
     cards.append(Card(table^))
     return CardStack(cards^)

@@ -10,7 +10,7 @@ from mojoui.json import Json, json_string, J_OBJECT, J_STRING, J_ARRAY
 from mojoui.http import uri_component
 from mojoui.clock import now_ns, clock_time
 from mojoui.logview import LogLine, LOG_PLAIN, LOG_ERROR, LOG_OK, LOG_WARN, log_kind_of
-from add import Add, Run, Pick, Sugg, Job, read_pick, read_job, pull_detail, twin, last_part, trim1, DEFAULT_SUB, NOTICE_NONE, NOTICE_WARN, NOTICE_PORT
+from add import Add, Run, Pick, Sugg, Job, read_pick, read_job, pull_detail, last_part, trim1, DEFAULT_SUB, NOTICE_NONE, NOTICE_WARN, NOTICE_PORT
 from api import Api, chat_curl, LOAD_TIMEOUT_MS
 from data import Store
 from msgs import *
@@ -185,7 +185,7 @@ def start_pull(mut a: Add, mut api: Api, var r: Pick):
     var repo = r.repo if r.repo != "" else mref
     var hw = a.hw_detail(r)
     a.run = Run("pull", r^, mref, hw, now_ms())
-    show_setup(a, "Setting up " + mref, twin("pull", repo) + " && " + twin("serve", mref), mref)
+    show_setup(a, "Setting up " + mref, "from " + repo + " · download, compile, serve, test", mref)
     a.acts = 1
     write_log(a, "hardware: " + hw, pre=True)
     api.post(ADD_GOT_PULL_START, "/admin/pulls", "{\"ref\": " + json_string(mref) + "}", id=a.flow)
@@ -212,7 +212,7 @@ def begin_port(mut a: Add, job: Job):
     a.run = Run("port", r^, mref, hw, now_ms())
     a.run.name = job.name if job.name != "" else mref
     a.run.port = job.copy()
-    show_setup(a, "Porting " + last_part(mref), twin("port", mref) + " · Claude Code with Modular’s import-model skill", mref)
+    show_setup(a, "Porting " + last_part(mref), "Claude Code with Modular’s import-model skill", mref)
     a.acts = 1
     write_log(a, "hardware: " + hw, pre=True)
     write_log(a, "Claude Code is running Modular’s import-model skill in a sandbox. This may take a while.", pre=True)
@@ -290,7 +290,7 @@ def bring_up(mut a: Add, mut api: Api):
         api.get(ADD_GOT_MODELS, "/admin/models", id=a.flow)
         return
     advance(a, "compile")
-    write_log(a, "loading " + name + " · compiling the graph (" + twin("serve", name) + ")")
+    write_log(a, "loading " + name + " · compiling the graph")
     api.post(ADD_GOT_LOAD, "/admin/models/" + uri_component(name) + "/load", id=a.flow, timeout_ms=LOAD_TIMEOUT_MS)
 
 
@@ -389,8 +389,6 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
         api.post(ADD_GOT_PORTER_SAVE, "/admin/porter", '{"kind": ' + json_string(kind) + ', "key": ' + json_string(String(a.porter_key.strip()))
                  + ', "base_url": ' + json_string(String(a.porter_base.strip())) + "}")
 
-    elif m == ADD_COPY_CMD:
-        out.clip = twin("guided", a.noticed.repo if a.noticed.repo != "" else a.noticed.id)
     elif m == ADD_CANCEL and a.running and not a.aborted:
         cancel(a, api)
     elif m == ADD_RETRY:

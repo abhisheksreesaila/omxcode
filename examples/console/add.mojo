@@ -89,23 +89,6 @@ def arch_short(a: String) -> String:
     return a
 
 
-def twin(kind: String, mref: String) -> String:
-    """The mxc command that does the same thing as an action here."""
-    if kind == "pull":
-        return "mxc pull " + mref
-    if kind == "serve":
-        return "mxc serve " + mref
-    if kind == "port":
-        return "mxc port " + mref + " --auto"
-    if kind == "guided":
-        return "mxc port " + mref
-    if kind == "search":
-        return "mxc search " + mref
-    if kind == "ps":
-        return "mxc ps"
-    return ""
-
-
 def joined(parts: List[String]) -> String:
     """parts.filter(Boolean).join(" · ")"""
     var out = String("")
@@ -375,7 +358,6 @@ def setup_stages(run: Run, now: Float64) -> List[Stage]:
     var rows = List[Stage]()
     var check = base_stage(run, cur, 0, now)
     check.detail = run.hw
-    check.twin = twin("search", run.mref)
     rows.append(check^)
     if run.kind == "port":
         var pr = List[Stage]()
@@ -387,11 +369,9 @@ def setup_stages(run: Run, now: Float64) -> List[Stage]:
         if len(pr) == 0:
             var st = STAGE_FAILED if run.phase == "failed" else (STAGE_CANCELLED if run.phase == "cancelled" else (STAGE_DONE if cur > 1 else STAGE_RUNNING))
             pr.append(Stage("Start the port", st, stage_elapsed(run.starts[1], run.ends[1], STAGE_RUNNING, now), run.error))
-        pr[0].twin = twin("port", run.mref)
         rows += pr^
     else:
         var f = base_stage(run, cur, 1, now)
-        f.twin = twin("pull", run.mref)
         if f.status == STAGE_DONE:
             f.percent = 100
         elif f.status == STAGE_RUNNING and run.fetch.percent >= 0:
@@ -403,13 +383,11 @@ def setup_stages(run: Run, now: Float64) -> List[Stage]:
             f.detail = "cancelled"
         rows.append(f^)
     var compile = base_stage(run, cur, 2, now)
-    compile.twin = twin("serve", name)
     if compile.status == STAGE_RUNNING:
         compile.detail = "building the graph for this GPU · the first start takes a while"
     elif compile.status == STAGE_DONE:
         compile.detail = "graph compiled"
     var serve = base_stage(run, cur, 3, now)
-    serve.twin = twin("ps", "")
     if serve.status == STAGE_RUNNING:
         serve.detail = "waiting for the server to answer"
     elif serve.status == STAGE_DONE:
@@ -626,8 +604,7 @@ def warn_card(a: Add) -> View:
         for k in range(len(r.suggestions)):
             var s = r.suggestions[k].copy()
             picks.append(SuggestionTile([SmallButton(s.repo, ADD_SUGGEST + k, look=TEXT), Text("fits · ~" + trim1(s.est_gb) + " GB").tag("status-good"),
-                                         Text(joined([arch_short(s.arch), params_text(s.params), size_text(s.size_gb)])).tag("result-meta"),
-                                         Text("$ " + twin("pull", s.id)).tag("result-figure")]))
+                                         Text(joined([arch_short(s.arch), params_text(s.params), size_text(s.size_gb)])).tag("result-meta")]))
         body.append(SuggestionRow(picks^))
     else:
         body.append(QuietText("Nothing smaller in the catalog fits either."))
@@ -636,19 +613,18 @@ def warn_card(a: Add) -> View:
 
 
 def port_card(a: Add) -> View:
-    """The port offer: what porting does, the facts, and Port it (or the guided command)."""
+    """The port offer: what porting does, the facts, and Port it."""
     var r = a.noticed.copy()
     var mref = r.repo if r.repo != "" else r.id
     var body: List[View] = [QuietText(PORT_NOTE), QuietText(PORT_BETA)]
     if a.guided:
-        body.append(WarnLine("Automatic porting is not in this daemon yet. Run the guided port from a terminal instead:"))
+        body.append(WarnLine("Automatic porting is not in this daemon yet."))
     if a.note != "":
         body.append(WarnLine(a.note))
     if a.refused != "":
         body.append(WarnLine(a.refused))
     if a.sandbox:
-        body.append(QuietText("Without a sandbox the agent would run with your full permissions, so it is not offered here. If you accept that, the terminal can: "
-                              + twin("port", mref) + " --unsandboxed"))
+        body.append(QuietText("Without a sandbox the agent would run with your full permissions, so it is not offered here."))
     var ready = a.porter != "" or not a.porter_asked
     if a.porter_asked and a.porter == "":  # the choice, here, instead of a trip to Settings (goal 64 M1)
         body.append(QuietText("Porting needs a frontier model to write the architecture. "
@@ -659,9 +635,7 @@ def port_card(a: Add) -> View:
     var size = joined([params_text(r.params), size_text(r.size_gb)])
     body.append(FactList([Fact("architecture", FactText(r.arch if r.arch != "" else String("unknown"))), Fact("size", FactText(size if size != "" else String("unknown"))),
                           Fact("skill", FactText("import-model"))]))
-    if a.guided:
-        body.append(ButtonRow([SmallButton("Copy the command", ADD_COPY_CMD, "copy")]))
-    elif a.refused == "":
+    if not a.guided and a.refused == "":
         if ready:
             body.append(ButtonRow([SmallButton("Port it", ADD_PORT_IT, "hammer", FILL)]))
         elif a.porter_open:
@@ -677,7 +651,7 @@ def port_card(a: Add) -> View:
             body.append(ButtonRow([SmallButton("Use an API key for a frontier model", ADD_PORTER_SETTINGS, "key", FILL)]))
     return Card([CardHead(last_part(mref) + " uses " + (r.arch if r.arch != "" else String("an architecture")) + ", which MAX cannot run yet.",
                           lead=[IconSquare("hammer", hue=1)], tail=[Badge("beta", BADGE_WARN), Badge("architecture check")]),
-                 CardBody(body^), CardFoot(twin("guided", mref) if a.guided or a.refused != "" else twin("port", mref))])
+                 CardBody(body^)])
 
 
 def find_view(a: Add, phone: Bool) -> View:
@@ -692,8 +666,10 @@ def find_view(a: Add, phone: Bool) -> View:
     if a.answered and a.error == "" and len(a.results) > 0:
         title = (String(len(a.results)) + " result" + ("" if len(a.results) == 1 else "s")) if query != "" else String("Curated models")
     var mem = a.memory_text()
-    items.append(Card([CardHead(title), results_view(a), CardFoot(twin("search", query) if query != "" else String("mxc search <query>"),
-                                                                  tail=("fit checked against " + mem) if mem != "" else String(""))]))
+    var results: List[View] = [CardHead(title), results_view(a)]
+    if mem != "":
+        results.append(CardFoot("fit checked against " + mem, note=True))
+    items.append(Card(results^))
     return PageColumn(items^, compact=phone)
 
 
@@ -703,13 +679,12 @@ def ready_card(a: Add, name: String, endpoint: String) -> View:
                            CodeBlock(chat_curl(endpoint, name, "Hello", spaced=True), on_copy=ADD_COPY_CURL, copies=a.copies, copied=a.copies > 0, title="Copy curl").fill(),
                            QuietText("It is on localhost only. Make it secure to reach it from your phone or another machine with HTTPS and an API key."),
                            ButtonRow([SmallButton("Open", ADD_OPEN, "chevron-right", FILL), SmallButton("Make it secure", ADD_SECURE, "lock"),
-                                      SmallButton("Add another", ADD_ANOTHER, "plus", TEXT)])]),
-                 CardFoot(twin("serve", name))])
+                                      SmallButton("Add another", ADD_ANOTHER, "plus", TEXT)])])])
 
 
 def setup_view(a: Add, now: Float64, phone: Bool) -> View:
     """Stages on the left, the live log on the right (below on a phone)."""
-    var left: List[View] = [Card([CardBody([Timeline(setup_stages(a.run, now))]), CardFoot(a.sub)])]
+    var left: List[View] = [Card([CardBody([Timeline(setup_stages(a.run, now))]), CardFoot(a.sub, note=True)])]
     if a.acts == 1:
         left.append(ButtonRow([SmallButton("Cancel", ADD_CANCEL, "x")]))
     elif a.acts >= 2:

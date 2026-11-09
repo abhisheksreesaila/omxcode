@@ -77,5 +77,5 @@ def logs_view(lg: Logs, model: String, phone: Bool) -> View:
                                                   SmallButton("Copy", LOG_COPY, "copy")], compact=phone)
     var bar = ToolRow([ShortField(lg.needle, "Filter lines", LOG_FILTER, compact=phone, filter=True), Spacer(), MonoLine(count)])
     var pane = Card([LogView(shown.copy() if lg.error == "" else List[String](), height=0, empty=empty, exact=True).grow(),
-                     CardFoot("mxc logs " + model + " -f", tail="the last 8 KB · refreshes every 2 s")]).grow()
+                     CardFoot("the last 8 KB · refreshes every 2 s", note=True)]).grow()
     return TabBody(head^, [bar^, pane^], compact=phone, tight=True).grow()
