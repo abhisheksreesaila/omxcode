@@ -5,6 +5,8 @@
 
   pixi run python scripts/clips.py robots [DATA]         → the directed clip (scripts/robotclip.py): docs/img/clip-robots.mp4 (+ .jpg),
                                                            clip-robots-15s.mp4, clip-robots-raw.mp4, build/g47/clipcheck/ (--compose: no new take)
+  pixi run python scripts/clips.py console [--compose]   → omxconsole's highlight (scripts/consoleclip.py): a throwaway daemon, a real
+                                                           pull, a real port, labels, HTTPS: docs/img/clip-console.mp4, .gif, .jpg
   pixi run python scripts/clips.py robots-shots [DATA]   → build/g47/shots/*.png, the 11 beat shots (goal 47 M8)
 
 island: the native window over goal 20's 100M-row file, from launch: it opens in the background (the island counts),
@@ -557,6 +559,11 @@ if __name__ == "__main__":
     if what == "models-shots":  # goal 51's shots (build/g51/shots)
         args = [a for a in sys.argv[2:] if not a.startswith("--")]
         models_shots(args[0] if args else None)
+    if what == "console":  # omxconsole's highlight (scripts/consoleclip.py): record (about 25 min: the port), then compose
+        import consoleclip
+        if "--compose" not in sys.argv:
+            consoleclip.record()
+        consoleclip.compose()
     if what == "robots":  # the directed clip (scripts/robotclip.py): docs/img/clip-robots.mp4, -15s, -raw, build/g47/clipcheck
         import robotclip
         args = [a for a in sys.argv[2:] if not a.startswith("--")]

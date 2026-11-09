@@ -31,6 +31,7 @@ from mojoui.shell import PageCard
 from api import chat_curl
 from msgs import *
 from mojoui.numformat import en_number
+from mojoui.clock import wall_seconds
 
 comptime DEFAULT_SUB = "Search the MAX catalog and Hugging Face · every result is checked against this machine's memory"
 comptime ORDER: List[String] = ["check", "fetch", "compile", "serve", "smoke"]
@@ -380,7 +381,7 @@ def setup_stages(run: Run, now: Float64) -> List[Stage]:
         var pr = List[Stage]()
         for s in run.port.stages:
             var st = stage_status(s.status)
-            var end = s.ended * 1000 if s.ended >= 0 else (now if st == STAGE_RUNNING else -1.0)
+            var end = s.ended * 1000 if s.ended >= 0 else (wall_seconds() * 1000 if st == STAGE_RUNNING else -1.0)  # (the daemon's times are wall-clock seconds; `now` is this process's monotonic clock, D-6418)
             var el = max(0.0, end - s.started * 1000) if s.started >= 0 and end >= 0 else -1.0
             pr.append(Stage(port_label(s.name) + (" · attempt " + String(s.attempt) if s.attempt > 1 else String("")), st, el, s.detail))
         if len(pr) == 0:

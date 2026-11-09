@@ -31,7 +31,7 @@ from std.sys import CompilationTarget
 from std.os.path import exists
 from data import Store, read_models, read_metrics, read_series, read_info, read_system, read_labels, read_pulls, read_ports
 from topbar import top_bar
-from home import Library, home_view, visible, label_models, names_json, bulk_state
+from home import Library, home_view, visible, label_models, names_json, bulk_state, clean_label
 from modelpage import model_header, overview_view, tab_index, fit_of, TAB_KEYS
 from bench import Bench, bench_view, bench_bars
 from logs import Logs, logs_view
@@ -340,6 +340,19 @@ struct Main(App):
                 var label = self.store.labels[k].copy()
                 var add = bulk_state(self.store, self.lib.ticked, label) != "all"  # (toggleOn: add unless all have it)
                 self.label_write(self.lib.ticked.copy(), label, add)
+        elif m == NEW_LABEL:
+            self.lib.adding, self.lib.new_label = True, ""
+        elif m == NEW_LABEL_TEXT:
+            self.lib.new_label = event.text
+        elif m == NEW_LABEL_ENTER:  # (library.js makeLabel: on the ticked models straight away, if any)
+            var name = clean_label(self.lib.new_label)
+            self.lib.adding, self.lib.new_label = False, ""
+            if name != "" and name not in self.store.labels and len(self.store.labels) < MAX_LABELS:
+                self.store.labels.append(name)
+                if len(self.lib.ticked) > 0:
+                    self.label_write(self.lib.ticked.copy(), name, True)
+                else:
+                    self.api.post(GOT_WRITE, "/admin/labels", '{"name": ' + json_string(name) + "}")
         elif m == CLEAR:
             self.lib.ticked = List[String]()
         elif m == REMOVE_TICKED:

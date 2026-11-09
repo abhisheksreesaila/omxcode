@@ -289,6 +289,10 @@ class Fixtures:
             time.sleep(CHAT_S)
             return ok({"id": "chatcmpl-fixture", "object": "chat.completion", "model": (sent or {}).get("model", ""),
                        "choices": [{"index": 0, "message": {"role": "assistant", "content": TRY_REPLY}, "finish_reason": "stop"}]})
+        if method == "POST" and path == "/admin/try/complete":  # (a port's smoke test: a plain completion, /v1/completions' shape; D-6418)
+            time.sleep(CHAT_S)
+            return ok({"id": "cmpl-fixture", "object": "text_completion", "model": (sent or {}).get("model", ""),
+                       "choices": [{"index": 0, "text": " " + TRY_REPLY, "finish_reason": "length", "logprobs": None}]})
         return None
 
     def _secret(self, app):

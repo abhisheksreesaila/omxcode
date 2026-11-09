@@ -214,7 +214,7 @@ def network_json(store: Store, mut sup: Supervisor, port: Int, lan: String = "")
     return ('{"host": ' + json_string(host) + ', "expose": {"caddy": ' + ("true" if lan != "" else "false") + ', "litellm": false}, "exposed": '
             + ("true" if lan != "" else "false") + ', "lan_endpoint": ' + (json_string(lan) if lan != "" else "null") + ', "default_host": '
             + json_string(host + ".local") + ', "ca_path": ' + json_string(ca_path()) + ', "ca_exists": ' + ("true" if exists(ca_path()) else "false")
-            + ', "ports": {"daemon": ' + String(port) + ', "litellm": 4000, "caddy": 8443}, "models": ' + models + ', "apps": ' + apps
+            + ', "ports": {"daemon": ' + String(port) + ', "litellm": 4000, "caddy": ' + String(expose_port()) + '}, "models": ' + models + ', "apps": ' + apps
             + ', "recent_requests": ' + String(total_recent) + "}")
 
 

@@ -60,7 +60,8 @@ def log_kind_of(line: String) -> Int:
 def LogPane(title: String, lines: List[LogLine], open: Bool, on_toggle: Int, height: Int = 320) -> View:
     """The pane: its head (an icon, `title` in small caps, Hide log / Show log sending `on_toggle`), then, while
     `open`, its lines pinned to the end in a Scroll `height` high."""
-    var head = HStack(Icon("terminal", 13), Text(title), Spacer(), Button("Hide log" if open else "Show log", on_toggle, SUBTLE).height(20).tag("log-toggle"),
+    var head = HStack(Icon("terminal", 13), Text(title).min_width(title.byte_length() * 8), Spacer(),  # (its width in the mono at 11 with its spacing: "LIVE LOG" broke into two lines on GTK, D-6418)
+                      Button("Hide log" if open else "Show log", on_toggle, SUBTLE).height(20).tag("log-toggle"),
                       spacing=8).align(CENTER).fill().tag("log-pane-head")
     var items: List[View] = [head^]
     if open:
@@ -95,5 +96,7 @@ def logpane_roles(p: Palette, mono: String, code: UInt32, code_text: UInt32, rad
     var inks: List[UInt32] = [code_text, dim, mix(code_text, p.bad, 0.60), mix(code_text, p.good, 0.60), mix(code_text, p.warn, 0.60)]
     var roles: List[String] = ["log-text", "log-time", "log-er", "log-ok", "log-warn"]
     for k in range(5):
-        out.append(Surface(roles[k], 0, -1, -1, -1, -1, -1, -1, -1, -1, List[Shadow](), 0, 0, 0, -1, mono, 12, inks[k], 0, 0, 19.2, 0, 0, False))
+        var line = Surface(roles[k], 0, -1, -1, -1, -1, -1, -1, -1, -1, List[Shadow](), 0, 0, 0, -1, mono, 12, inks[k], 0, 0, 19.2, 0, 0, False)
+        line.breaks_words = k != 1  # (a line can hold a long path: it breaks anywhere instead of widening the page, D-6418)
+        out.append(line^)
     return out^

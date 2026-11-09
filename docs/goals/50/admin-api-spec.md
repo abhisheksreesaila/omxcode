@@ -303,7 +303,7 @@ Label name rule: `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`, ≤ 40 characters, else 40
 | `POST /admin/models/{name}/stop` | not registered → 404; stop the child (a no-op when cold) | `{"name","state":"cold"}` | 404 `The model `{name}` is not registered.` |
 | `POST /admin/shutdown` | stop_all children, then SIGTERM itself 0.2 s later | `{"stopping":true}` | none |
 
-Also present, outside the requested list: `PATCH /admin/models/{name}` (`{pinned:bool, keep_alive:int>=0, kind}` → model row), `DELETE /admin/models/{name}?purge=1` (→ `{"name","removed":true,"graph_cache_deleted","purged","purged_path","purge_note"}`; the 798ef8c version also had `lan_refreshed`), `POST /admin/bench`, `POST /admin/pulls`, `POST /admin/ports`, `/admin/expose`, `/admin/status` (= supervisor status array), `/admin/insights`, `/admin/try/chat`.
+Also present, outside the requested list: `PATCH /admin/models/{name}` (`{pinned:bool, keep_alive:int>=0, kind}` → model row), `DELETE /admin/models/{name}?purge=1` (→ `{"name","removed":true,"graph_cache_deleted","purged","purged_path","purge_note"}`; the 798ef8c version also had `lan_refreshed`), `POST /admin/bench`, `POST /admin/pulls`, `POST /admin/ports`, `/admin/expose`, `/admin/status` (= supervisor status array), `/admin/insights`, `/admin/try/chat`, `/admin/try/complete` (the Mojo daemon, D-6418: `{model, prompt, max_tokens?}` → a `/v1/completions` reply, for a ported base model's smoke test).
 
 ## 6. The /v1 gateway
 

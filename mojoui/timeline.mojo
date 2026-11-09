@@ -177,4 +177,7 @@ def timeline_roles(p: Palette, mono: String) -> List[Surface]:
         _role("tl-rail", p.line_strong),
         _role("tl-rail-done", p.good),
     ]
+    for ref r in out:  # (a detail can be a long path: it breaks anywhere instead of widening the page, D-6418)
+        if r.role.startswith("tl-detail"):
+            r.breaks_words = True
     return out^

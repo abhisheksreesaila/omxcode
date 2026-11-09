@@ -640,7 +640,7 @@ def m5():
         problems.append("the cover does not give the real hit rate")
     # the console's own Mojo tests, and goal 64's
     tests = {"test_consoled_paths": "examples/consoled", "test_console_api": "examples/console",
-             "test_console_places": "examples/console", "test_port_donor": "examples/consoled",
+             "test_console_places": "examples/console", "test_console_labels": "examples/console", "test_port_donor": "examples/consoled",
              "test_port_sandbox": "examples/consoled", "test_ports_pure": "examples/consoled",
              "test_porter": "examples/consoled", "test_caddyfile": "examples/consoled",
              "test_process_cwd": "examples/consoled", "test_port_boundary": "examples/consoled"}

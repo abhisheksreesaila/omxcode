@@ -42,6 +42,9 @@ comptime TAP_LABEL = 260  # + the label's index (the tick bar)
 comptime CLEAR = 300
 comptime REMOVE_TICKED = 301
 comptime EDIT_LABELS = 302
+comptime NEW_LABEL = 303  # the sidebar's New label: its field (library.js newLabelRow)
+comptime NEW_LABEL_TEXT = 304
+comptime NEW_LABEL_ENTER = 305
 # the model page (modelpage.mojo)
 comptime TAB = 310  # + 0 overview, 1 benchmark, 2 logs, 3 notebook
 comptime CMD_STOP = 320
@@ -167,3 +170,7 @@ comptime RING = 0  # the Beacon's ring
 comptime SPARK = 1  # Overview's Tokens chart
 comptime FIT = 2  # Overview's GPU fit bar
 comptime BAR = 10  # + the bar (Benchmark)
+
+# not a message: the most labels the ranges above have room for (LABEL_GROUP, DROP_LABEL and TAP_LABEL hold 40 each;
+# a 41st label's message would be the next range's first). The sidebar and the tick bar show at most this many.
+comptime MAX_LABELS = 40

@@ -573,6 +573,20 @@ struct Daemon(Service):
                 return self.relay("console", "chat", "/v1/chat/completions", body, "application/json", wall_seconds())
             except:
                 return error(400, "Send JSON with `model`, a non-empty `messages` list and optionally `max_tokens` (a positive integer, capped at " + String(TRY_MAX_TOKENS) + ") and `stream`.", "invalid_request_body")
+        if req.matches("POST", "/admin/try/complete"):
+            # the same for a plain completion (no chat template): a ported base model's smoke test (gpt2 has no
+            # chat template, so /admin/try/chat fails it with MAX's "Value error" though it serves; D-6418)
+            try:
+                var j = Json.parse(req.body)
+                var mt = j.get(0, "max_tokens")
+                if j.kind(j.get(0, "model")) != J_STRING or j.kind(j.get(0, "prompt")) != J_STRING or (mt >= 0 and (not j.is_whole(mt) or j.number(mt) <= 0)):
+                    raise Error("shape")
+                var cap = min(j.number(mt) if mt >= 0 else TRY_MAX_TOKENS, TRY_MAX_TOKENS)
+                var body = ('{"model": ' + json_string(j.text(j.get(0, "model"))) + ', "prompt": ' + json_string(j.text(j.get(0, "prompt")))
+                            + ', "max_tokens": ' + String(cap) + ', "n": 1}')
+                return self.relay("console", "completions", "/v1/completions", body, "application/json", wall_seconds())
+            except:
+                return error(400, "Send JSON with `model`, a `prompt` and optionally `max_tokens` (a positive integer, capped at " + String(TRY_MAX_TOKENS) + ").", "invalid_request_body")
         if req.matches("POST", "/admin/shutdown"):
             self.stopping = True
             return Reply.json('{"stopping": true}')

@@ -14,12 +14,12 @@ from mojoui.marks import SignalDot, StatusMark, GOOD, QUIET
 from mojoui.panel import Panel, StatTile, StatRow
 from mojoui.words import MonoLine, MonoText, Strong, QuietText, CommandLine
 from mojoui.buttons import FlatButton, PrimaryButton, TextAction, NameLink
-from mojoui.fields import SearchField
+from mojoui.fields import SearchField, OutlinedField
 from mojoui.lists import SplitView, ListCount, ListBody, ListEmpty, CardGrid, SelectionBar, NameCell, CellStack
 from mojoui.json import json_string
 from mojoui.feedback import Note
 from data import Store, Model, Row, row_of, sorted_models, kind_name, kind_hue, hardware, short_endpoint, KINDS, KIND_NAMES, KIND_HUES
-from msgs import ADD, SEARCH, VIEW, GROUP, LABEL_GROUP, DROP_LABEL, TICK, TICK_ALL, OPEN, TAP_LABEL, CLEAR, REMOVE_TICKED, EDIT_LABELS
+from msgs import ADD, SEARCH, VIEW, GROUP, LABEL_GROUP, DROP_LABEL, TICK, TICK_ALL, OPEN, TAP_LABEL, CLEAR, REMOVE_TICKED, EDIT_LABELS, NEW_LABEL, NEW_LABEL_TEXT, NEW_LABEL_ENTER, MAX_LABELS
 from mojoui.numformat import en_number
 
 
@@ -31,12 +31,16 @@ struct Library(Copyable, Movable):
     var group: String
     var ticked: List[String]
     var cards: Bool
+    var adding: Bool  # New label's field is showing (library.js `adding`)
+    var new_label: String  # what is typed in it
 
     def __init__(out self):
         self.q = ""
         self.group = "all"
         self.ticked = List[String]()
         self.cards = False
+        self.adding = False
+        self.new_label = ""
 
     def is_ticked(self, name: String) -> Bool:
         for t in self.ticked:
@@ -111,6 +115,22 @@ def group_name(g: String) -> String:
     if g.startswith("kind:"):
         return kind_name(String(g[byte=5:]))
     return "#" + String(g[byte=6:])
+
+
+def clean_label(raw: String) -> String:
+    """library-logic.js cleanLabel: lower case, spaces as '-', only a-z 0-9 '-', no '-' at either end, 40 at most."""
+    var out = String("")
+    for b in String(raw.strip()).lower().as_bytes():
+        var c = Int(b)
+        var ch = String(chr(c)) if c < 128 else String("")
+        if (c >= 97 and c <= 122) or (c >= 48 and c <= 57):
+            out += ch
+        elif (ch == "-" or ch == " " or ch == "\t") and not out.endswith("-") and out != "":
+            out += "-"
+    var n = min(out.byte_length(), 40)  # (only ASCII here: bytes are letters)
+    while n > 0 and out.as_bytes()[n - 1] == 45:  # (no '-' at the end)
+        n -= 1
+    return String(out[byte = :n])
 
 
 def bulk_state(st: Store, names: List[String], label: String) -> String:
@@ -202,11 +222,14 @@ def groups_column(st: Store, lib: Library, phone: Bool) -> View:
                 n += 1
         items.append(SidebarItem(materialize[KIND_NAMES]()[k], String(n), GROUP + 2 + k, lib.group == "kind:" + kinds[k], dot=materialize[KIND_HUES]()[k], compact=phone))
     items.append(SidebarHead("Your labels", tail=[TextAction("Edit labels", EDIT_LABELS)], compact=phone))
-    for k in range(len(st.labels)):
+    for k in range(min(len(st.labels), MAX_LABELS)):
         var l = st.labels[k]
         var row = SidebarItem(l, String(count_label(st, l)), LABEL_GROUP + k, lib.group == "label:" + l, hash=True, compact=phone)
         items.append(DropTarget(row, DROP_LABEL + k).fill().tag("label-" + l))
-    items.append(SidebarItem("New label", "", EDIT_LABELS, icon="plus", quiet=True, compact=phone))
+    if lib.adding:  # (library.js newLabelRow: a field, "Name, then Enter"; wrapped: the field's own name is its look's role)
+        items.append(HStack(OutlinedField(lib.new_label, "Name, then Enter", NEW_LABEL_TEXT, NEW_LABEL_ENTER, icon="plus"), spacing=0).fill().tag("new-label"))
+    elif len(st.labels) < MAX_LABELS:
+        items.append(SidebarItem("New label", "", NEW_LABEL, icon="plus", quiet=True, compact=phone))
     return Sidebar(items^, compact=phone)
 
 
@@ -221,7 +244,7 @@ def card_of(r: Row, row: Int, hue: Int, lib: Library) -> View:
 def tick_bar(st: Store, lib: Library) -> View:
     var n = len(lib.ticked)
     var items: List[View] = [Strong(String(n) + " selected"), QuietText("Labels:")]
-    for k in range(len(st.labels)):
+    for k in range(min(len(st.labels), MAX_LABELS)):
         var state = bulk_state(st, lib.ticked, st.labels[k])
         items.append(FlatButton("#" + st.labels[k], TAP_LABEL + k, filled=state == "all"))
     if len(st.labels) == 0:

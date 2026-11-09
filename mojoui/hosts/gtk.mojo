@@ -922,6 +922,7 @@ struct GtkHost[A: App](Movable):
                 external_call["gtk_label_set_wrap_mode", NoneType](w, c_int(2))  # PANGO_WRAP_WORD_CHAR
                 external_call["gtk_label_set_natural_wrap_mode", NoneType](w, c_int(0))  # (INHERIT: one-line naturals with char wrapping made boxes ask for more height than their natural)
                 external_call["gtk_label_set_xalign", NoneType](w, Float32(0))
+                external_call["gtk_label_set_justify", NoneType](w, c_int(0))  # (its wrapped lines from the leading edge too: a Text centres them)
         if node.tip != "":
             var tip = node.tip
             external_call["gtk_widget_set_tooltip_text", NoneType](w, tip.as_c_string_span())
@@ -3730,10 +3731,11 @@ struct GtkHost[A: App](Movable):
                         + ',"busy":' + ("true" if busy_now else "false") + "}")
             if op == "regions":  # (where each region and card is in the window, in pixels: mojoui.regions; a recorder frames them)
                 return '{"ok":true,"regions":' + regions_json(self) + "}"
-            if op == "bounds":  # (where the view tagged `tag` is in the window, in pixels: x, y, w, h; w = 0 when it isn't shown)
+            if op == "bounds":  # (where the view tagged `tag`, or node `node` of `view`, is in the window, in pixels: x, y, w, h; w = 0 when it isn't shown)
                 var want = j.text(j.get(0, "tag"))
+                var at = j.number(j.get(0, "node"), -1)
                 for i in range(len(self.rt.shown.nodes)):
-                    if self.rt.shown.nodes[i].name == want and i < len(self.widgets) and self.widgets[i] != 0:
+                    if (i == at or (at < 0 and self.rt.shown.nodes[i].name == want)) and i < len(self.widgets) and self.widgets[i] != 0:
                         var b = widget_rect(self, self.widgets[i])
                         return ('{"ok":true,"x":' + String(Int(b[0] + 0.5)) + ',"y":' + String(Int(b[1] + 0.5)) + ',"w":' + String(Int(b[2] + 0.5))
                                 + ',"h":' + String(Int(b[3] + 0.5)) + "}")

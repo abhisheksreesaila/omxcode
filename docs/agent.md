@@ -69,7 +69,7 @@ MOJOUI_AGENT_SOCKET=/run/user/$UID/widgets.sock build/widgets/linux/widgets     
 claude mcp add widgets -- pixi run python mojoui/hosts/agent.py --attach /run/user/$UID/widgets.sock
 ```
 **The agent link** is the host's side: a Unix socket (mode 0600, only when the variable is set), one JSON request per
-line, one JSON answer per line. `{"op":"view"}` → `{ok, title, design, nodes, widgets, busy}` (the tree every host `{"op":"regions"}` → `{ok, regions: [{name, x, y, w, h}]}` (the window's regions and cards, mojoui.regions, in pixels; GTK) and `{"op":"bounds","tag":T}` → `{ok, x, y, w, h}` (the view tagged T): a recorder frames what it films with them (goal 47).
+line, one JSON answer per line. `{"op":"view"}` → `{ok, title, design, nodes, widgets, busy}` (the tree every host `{"op":"regions"}` → `{ok, regions: [{name, x, y, w, h}]}` (the window's regions and cards, mojoui.regions, in pixels; GTK) and `{"op":"bounds","tag":T}` (or `"node":N`, node N of `view`) → `{ok, x, y, w, h}` (the view tagged T): a recorder frames what it films with them (goal 47).
 reads, plus what each widget says about itself); `event {node, second, text, number}`, `gesture {node, kind, x, y, dx,
 dy, zoom}`, `key {node, name, modifiers}`, `set {tag, id, field, value: JSON text}`, `describe {node, first, count}`,
 `rows {node, first, count}`. The web host serves it from web.py for the newest open page and pushes changes to the page

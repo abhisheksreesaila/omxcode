@@ -4,6 +4,67 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## omxconsole's highlight clip, and the port screen's first real run (2026-11-08)
+
+**Setup.** `scripts/consoleclip.py` (`clips.py console`): the Mojo `consoled` on a throwaway home (`build/clipconsole/home`,
+port 11491, its own admin key, HTTPS on 8453 because 8443 is taken here, Caddy's CA kept in that home), MAX from the
+import-model skill env (read-only), Modular's skills cloned fresh (c771908), Claude Code as the porting assistant; the
+console on GTK on the private display at 2× (1280×720 points), every tap and key real XTest input at the place the agent
+link says the view is (`bounds` now takes a node of `view`). All four beats are GTK; the web host wasn't needed (no
+popovers in these screens). Never the owner's :11435 or `~/.mxc` (only its MAX binary, read).
+
+**The clip** (`docs/img/clip-console.mp4` 105.9 s, 9.5 MB, crf 26; `.gif` its own tighter cut, 72.5 s, 800 px, 12 fps,
+7.7 MB; `.jpg` the port mid-time-lapse). Every caption number is from the run:
+1. **Pull** Qwen/Qwen2.5-0.5B-Instruct: 1,000 MB in 6.4 s, compile 18.1 s (sped up 4×), Ready with a smoke reply. The same
+   pull took 10.5 s, 11.2 s and 10 min 9 s earlier today (the Hub's speed varied); `mojoui.hf` has no local cache.
+2. **Port** openai-community/gpt2: done in 18 min 49 s, parity passed on the 3rd attempt (two parity failures fed back),
+   registered, served, the console's smoke test answered; time-lapse 51× (GIF 103×), both said on screen.
+3. **Labels**: "chat" and "ported" made in the app, each model dragged onto one, the label as a group.
+4. **Make it secure**: the three steps tick, the HTTPS endpoint shows; then from outside the app,
+   `curl --cacert <Caddy's CA> https://ablearn.local:8453/v1/models` (resolved to 192.168.1.82) → **200** with an app key,
+   **401** without.
+The clip is three shots on one home: beat 2 from take 6; beats 3–4 re-shot after the first review's fixes (the console's
+label field and label cap; consoled's source unchanged, rebuilt); beat 1 re-shot last, because the recording ffmpeg
+segfaulted mid-beat (kernel log) and left a file with no index.
+
+**The port screen's first real run (GTK): what broke and what was fixed** (D-6418):
+- long paths in the log and the stage details widened the window past its edge (the nav and the log cut off): those
+  roles break long words now; wrapped details were centred: left-justified;
+- "LIVE LOG" broke into two lines; a running stage read 0.0 s for 7 minutes (the daemon's wall-clock times against the
+  console's monotonic clock);
+- the port card said "gpt2 uses an architecture, which MAX cannot run yet" with no name;
+- gpt2 ported, served, and was then failed red by the console's chat smoke test ("Value error.": a base model has no
+  chat template): a port is smoked with a plain completion (new `POST /admin/try/complete`).
+Also fixed: My models' "New label" did nothing (no label could be made in the app; D-6419), and the Security screen said
+"port 8443" while Caddy listened on 8453 (D-6420).
+
+**Found, not fixed** (the daemon, not the screen):
+- consoled crashed twice mid-port (segfaults: once in `dlsym` under Flare's TLS setup for the Hub call, once in
+  `listdir` inside an admin request), and twice on SIGTERM shutdown (in `libgcc_s`); traces in
+  `build/clipconsole/take2-crash/`, `take3-crash/`. Different sites in worker threads: memory corruption is likelier than
+  either call. Not reproduced on demand.
+- `/admin/search` marks every Hugging Face match "MAX · fits" (`supported: true`), gpt2 included; "needs porting" shows
+  only after the pull reads the config.
+- consoled picks the roomiest GPU by nvidia-smi's index: with `CUDA_VISIBLE_DEVICES=0` it asked MAX for gpu:1 and the
+  serve failed (the clip runs without it).
+- `/admin/ports` didn't answer for 30 s+ while a port's serve stage loaded the model.
+- "Edit labels" (rename, delete) and the model page's "+ label" are still stubs; gpt2 is filed under kind "Chat".
+- The first progress sample of a pull reads "231 B/s · 72120m left" for a moment.
+
+**gpt2 on the Mojo daemon today:** of five ports that ran to an end, 4 passed parity (two on attempt 1, one on 2, one
+on 3) and 1 failed it three times (17.6 min, "first top-1 mismatch at prefix length 50"). Of the four, two were served
+by the port itself (15.7 and 18.8 min); one serve failed on my `CUDA_VISIBLE_DEVICES`, one was stopped by my script's
+timeout. Two more runs died with the daemon; one exploratory port I cancelled. The beta label's "expect to finish some ports by hand"
+holds.
+
+**For the owner:** the Ready card in beat 2 shows gpt2's raw smoke reply, an odd sentence about a "so-called "Christian"
+Jewish Brotherhood" (a base model continuing "The capital of France is"). It is real output; re-shooting gives another.
+
+**Next small step.** Find the consoled crash (run the port under a debug build or ASan with the console polling), then
+the search's "supported" flag from the Hub's own config.
+
+---
+
 ## The first real port on the Mojo daemon: gpt2 (2026-11-08)
 
 **Setup.** This machine's RTX 3090, the Mojo `consoled` from goal 64 on a throwaway MXC_HOME (`build/realport/home`,

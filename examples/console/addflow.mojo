@@ -251,11 +251,24 @@ def on_pull_job(mut a: Add, job: Job):
                 a.seen.append((s.id, key))
 
 
+def arch_in(message: String) -> String:
+    """The architecture an unsupported pull names ("<repo> is a GPT2LMHeadModel, which MAX doesn't run.": consoled's
+    pulls.mojo wording); "" when it names none."""
+    var at = message.find(" is a ")
+    var end = message.find(", which MAX")
+    if at < 0 or end <= at + 6:
+        return ""
+    var arch = String(message[byte = at + 6 : end])
+    return arch if arch.find(" ") < 0 else String("")
+
+
 def finish_pull(mut a: Add, mut api: Api, job: Job, mut out: AddOut):
     if job.status == "unsupported":
         var r = a.run.source.copy()
         show_find(a)
         r.fit = "port"
+        if r.arch == "":  # (a Hub result's architecture is known only once the pull read its config: the card names it)
+            r.arch = arch_in(job.message)
         a.noticed = r^
         a.notice = NOTICE_PORT
         ask_porter(a, api)
@@ -284,6 +297,10 @@ def bring_up(mut a: Add, mut api: Api):
 def smoke_test(mut a: Add, mut api: Api):
     advance(a, "smoke")
     write_log(a, "smoke test: asking for one short reply")
+    if a.run.kind == "port":  # (a port is often a base model with no chat template: a plain completion, the port's own smoke prompt)
+        api.post(ADD_GOT_SMOKE, "/admin/try/complete", "{\"model\": " + json_string(a.run.name)
+                 + ", \"prompt\": \"The capital of France is\", \"max_tokens\": 24}", id=a.flow)
+        return
     api.post(ADD_GOT_SMOKE, "/admin/try/chat", "{\"model\": " + json_string(a.run.name)
              + ", \"messages\": [{\"role\": \"user\", \"content\": \"Say hello in five words.\"}], \"max_tokens\": 24}", id=a.flow)
 
@@ -606,7 +623,7 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
         try:
             var j = Json.parse(event.text)
             var c = j.at(j.get(0, "choices"), 0)
-            text = j.text(j.get(j.get(c, "message"), "content"))
+            text = j.text(j.get(j.get(c, "message"), "content"), j.text(j.get(c, "text")))  # (a chat's message, or a completion's text)
         except:
             pass
         var words = String("")
