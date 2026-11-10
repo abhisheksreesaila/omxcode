@@ -28,7 +28,8 @@ Drawn on an NVIDIA GPU when the driver is there, the CPU otherwise." ;;
   omxconsole) META="Run language models on your own GPU with MAX: find, download, serve, benchmark|Development;Science;||./$EX
 Needs MAX (Modular's max, with max serve) installed: https://docs.modular.com/max/packages . If max isn't on your PATH,
 start it as MXC_MAX=/path/to/max ./$EX. Models and keys live in ~/.mxc (MXC_HOME to change it); the endpoint is
-http://127.0.0.1:11435/v1 (MXC_PORT to change it)." ;;
+http://127.0.0.1:11435/v1 (MXC_PORT to change it).
+./omxc, beside it, is the command line for agents (and you): ./omxc help lists its commands." ;;
   globe) META="A 3D globe with a day of air traffic, drawn per pixel on the GPU, written once in Mojo|Science;Education;||./$EX
 Drawn on an NVIDIA GPU when the driver is there, the CPU otherwise." ;;
   todo) META="A to-do list in the platform's own controls, written once in Mojo|Utility;||./$EX" ;;
@@ -77,6 +78,7 @@ rm -rf "\$dest"; mkdir -p "\$dest" "\$HOME/.local/bin" "\$HOME/.local/share/appl
 cp -r "\$here"/. "\$dest/"; rm -f "\$dest/install.sh"  # (the licences travel with the libraries)
 cp "\$here/$EX.png" "\$HOME/.local/share/icons/hicolor/256x256/apps/$EX.png"
 ln -sf "\$dest/$EX" "\$HOME/.local/bin/$EX"
+if [ -x "\$dest/omxc" ]; then ln -sf "\$dest/omxc" "\$HOME/.local/bin/omxc"; fi  # (omxconsole's command line for agents, D-6502)
 cat > "\$HOME/.local/share/applications/$EX.desktop" <<DESK
 [Desktop Entry]
 Type=Application
@@ -91,6 +93,7 @@ DESK
 cat > "\$HOME/.local/bin/$EX-uninstall" <<UN
 #!/usr/bin/env bash
 rm -rf "\$dest" "\$HOME/.local/bin/$EX" "\$HOME/.local/share/applications/$EX.desktop" "\$HOME/.local/share/icons/hicolor/256x256/apps/$EX.png" "\$HOME/.local/bin/$EX-uninstall"
+[ "\\\$(readlink "\$HOME/.local/bin/omxc")" != "\$dest/omxc" ] || rm -f "\$HOME/.local/bin/omxc"
 echo "$EX removed"
 UN
 chmod +x "\$HOME/.local/bin/$EX-uninstall"

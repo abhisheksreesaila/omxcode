@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>omxconsole · local AI on your own GPU, made easy</title>
-<meta name="description" content="omxconsole, a desktop app built on omxcode: find a model on Hugging Face, download it and serve it on your own GPU through MAX (Modular's inference platform), behind one OpenAI-compatible endpoint with a key per app. An independent project, not affiliated with or endorsed by Modular.">
+<meta name="description" content="omxconsole, a desktop app built on omxcode: find a model on Hugging Face, download it and serve it on your own GPU through MAX (Modular's inference platform), behind one OpenAI-compatible endpoint with a key per app; a notebook per model in Jupyter, and omxc, a command line for agents. An independent project, not affiliated with or endorsed by Modular.">
 <meta property="og:title" content="omxconsole: local AI on your own GPU, made easy">
 <meta property="og:image" content="https://abhisheksreesaila.github.io/omxcode/gallery/img/omxconsole-find.png">
 <meta name="theme-color" content="#000000">
@@ -47,6 +47,11 @@
 .reads a:hover { background: var(--oq-surface-1); transform: translateY(-2px); }
 .reads b { display: block; font: 600 16px var(--sans); }
 .reads span { font: 12.5px var(--mono); color: var(--ink2); }
+.newbar { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 22px; }
+.newbar a { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font: 600 15px var(--sans); padding: 10px 16px; border-radius: 999px; background: var(--oq-surface-1); box-shadow: 0 0 0 1px var(--line); transition: transform .2s, box-shadow .2s; }
+.newbar a:hover { transform: translateY(-2px); box-shadow: var(--oq-shadow-2), 0 0 0 1px var(--line); }
+.newbar a > span:not(.badge) { color: var(--ink2); font-weight: 500; }
+.split pre.term { font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
 .edges { max-width: 760px; margin: 40px auto 0; display: grid; gap: 10px; text-align: left; }
 .edges div { padding: 14px 18px; border-radius: 14px; box-shadow: inset 2px 0 0 var(--oq-warn), 0 0 0 1px var(--oq-line-2); color: var(--ink2); font-size: 16px; }
 .edges b { color: var(--ink); }
@@ -60,7 +65,7 @@
 
 <nav class="lnav">
   <a class="brand" href="index.html"><span class="mark" aria-hidden="true"><svg class="snap" viewBox="0 0 24 24"><path class="p1" d="m6 8-4 4 4 4"/><path class="p2" d="m14.5 4-5 16"/><path class="p3" d="m18 16 4-4-4-4"/><circle class="k" cx="8" cy="12" r="1"/><circle class="k" cx="16" cy="12" r="1"/></svg></span>omxcode <span class="sub">/ omxconsole</span></a>
-  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#endpoint">Endpoint</a><a href="#find">Find</a><a href="#models">Models</a><a href="#keys">Keys</a><a href="#port">Port</a><a href="#network">Network</a><a href="#bench">Benchmark</a><a href="#inside">Inside</a></div>
+  <div class="pill"><span class="ind" aria-hidden="true"></span><a href="#endpoint">Endpoint</a><a href="#find">Find</a><a href="#notebook">Notebook</a><a href="#agents">Agents</a><a href="#models">Models</a><a href="#keys">Keys</a><a href="#port">Port</a><a href="#network">Network</a><a href="#bench">Benchmark</a><a href="#inside">Inside</a></div>
   <div class="right"><a class="cta" href="#run">Get it</a></div>
 </nav>
 
@@ -72,6 +77,7 @@
     <p class="lede rise"><span data-words data-step="45" data-d0="380">Local AI on your GPU.</span> <span class="two" data-words data-step="35" data-d0="560">Made easy.</span></p>
     <p class="lede rise">Find a model on Hugging Face, download it and serve it on your own GPU behind one OpenAI-compatible endpoint. A desktop app for Linux and the Mac, around <a href="https://www.modular.com/max">MAX</a>*, Modular's inference platform, which runs the models.</p>
     <div class="ctas rise"><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-linux-x86_64.tar.gz">Download for Linux</a><a class="cta" href="https://github.com/abhisheksreesaila/omxcode/releases/download/gallery-apps/omxconsole-mac-arm64.zip">Download for Mac</a></div>
+    <div class="newbar rise"><a href="#notebook"><span class="badge ok"><i></i>new</span>📓 Run in Jupyter <span>a notebook per model</span></a><a href="#agents"><span class="badge ok"><i></i>new</span>🤖 omxc <span>tools for agents</span></a></div>
     <p class="needs rise">Needs MAX installed: <a href="https://docs.modular.com/max/packages">docs.modular.com/max/packages</a> · omxconsole itself is free, MIT licence</p>
   </div>
   <div class="film rv"><video src="img/clip-console.mp4" poster="img/clip-console.jpg" autoplay muted loop playsinline aria-label="omxconsole pulls a model from Hugging Face and MAX compiles it for this GPU; Claude Code ports gpt2, an architecture MAX can't run, and it's served; models get labels; the endpoint is reached over HTTPS with an app key"></video></div>
@@ -120,6 +126,48 @@ r = client.chat.completions.<span class="f">create</span>(
     <div>
       <div class="shot rv"><img src="gallery/img/omxconsole-ready.png" alt="qwen2.5-0.5b is serving: ready on localhost, its endpoint and a curl line to copy"></div>
       <p class="srcline rv">the Ready card from a test run on its own port; the app's own address is 127.0.0.1:11435</p>
+    </div>
+  </div>
+</section>
+
+<section id="notebook">
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow rv"><span class="badge ok big"><i></i>new</span> &nbsp;📓 Notebooks</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">Pull a model. <span class="two">Open it in Jupyter.</span></h2>
+      <p class="body rv">Every model gets a notebook: its architecture read from its own <code>config.json</code> (layers, attention heads, the KV cache), its model card, and cells that call your endpoint. Run in Jupyter starts JupyterLab on this machine with the endpoint and a key already set, so the cells just run.</p>
+      <p class="body rv">No Jupyter installed? It runs one through <a href="https://pixi.sh">pixi</a> without installing anything. Jupyter stops when the app closes.</p>
+      <div class="facts rv"><div><b>listens on</b>127.0.0.1 only, with its own token</div><div><b>kernels get</b>the endpoint and a key that lasts as long as the app, never the admin key</div><div><b>your edits</b>the notebook is a file in ~/.mxc/notebooks and is never overwritten</div></div>
+    </div>
+    <div>
+      <div class="shot rv"><img src="img/console-jupyter.jpg" alt="qwen2.5-0.5b's notebook in JupyterLab: the Try it cells ran, the OpenAI client's reply and the streamed count from 1 to 10 below them"></div>
+      <p class="srcline rv">qwen2.5-0.5b's notebook, its cells run against the model on MAX on one RTX 3090</p>
+    </div>
+  </div>
+</section>
+
+<section id="agents">
+  <div class="wrap split flip">
+    <div>
+      <div class="eyebrow rv"><span class="badge ok big"><i></i>new</span> &nbsp;🤖 For agents</div>
+      <h2 class="rv" style="font-size:clamp(36px,4.6vw,64px)">Your agent runs it too. <span class="two">omxc.</span></h2>
+      <p class="body rv"><code>omxc</code> is a small command that ships beside the app. Each command is one call to omxconsole: search, pull, serve, chat, keys, port, notebook. It prints omxconsole's JSON and exits with a code an agent can act on, so a coding agent like Claude Code can set up and run local models by itself, while you watch the same models change in the app.</p>
+      <p class="body rv">It is a thin pass-through, not another CLI on top of MAX: everything it does, a button in the app does too.</p>
+      <div class="facts rv"><div><b>exit codes</b>0 done · 1 refused or failed · 2 usage · 3 not running</div><div><b>start with</b>./omxc help</div></div>
+    </div>
+    <div>
+      <pre class="code term rv"><span class="c">$</span> omxc serve qwen2.5-0.5b
+{<span class="s">"name"</span>: <span class="s">"qwen2.5-0.5b"</span>, <span class="s">"upstream"</span>: <span class="s">"http://127.0.0.1:33745/v1"</span>, <span class="s">"state"</span>: <span class="s">"ready"</span>}
+
+<span class="c">$</span> omxc chat qwen2.5-0.5b "In one sentence, what is a GPU?"
+{… <span class="s">"content"</span>: <span class="s">"A GPU (Graphics Processing Unit) is an electronic component that processes and generates graphics data, …"</span> …}
+
+<span class="c">$</span> omxc keys create robot-arm
+{<span class="s">"app"</span>: <span class="s">"robot-arm"</span>, <span class="s">"key"</span>: <span class="s">"mst-…"</span>}
+
+<span class="c">$</span> omxc notebook qwen2.5-0.5b
+{<span class="s">"url"</span>: <span class="s">"http://127.0.0.1:39425/lab/tree/qwen2.5-0.5b.ipynb?token=…"</span>, …}</pre>
+      <p class="srcline rv">a real run against MAX on one RTX 3090, cut where it shows …; keys and tokens hidden</p>
     </div>
   </div>
 </section>
@@ -185,7 +233,7 @@ r = client.chat.completions.<span class="f">create</span>(
     <h2 class="rv">All omxcode. <span class="two">MAX runs the models.</span></h2>
     <div class="stack3">
       <div class="layer rv"><div class="k">the app</div><h3>omxconsole</h3><p>Native on each platform: GTK on Linux, AppKit on the Mac. One Mojo codebase, built on omxcode.</p></div>
-      <div class="layer rv"><div class="k">the service</div><h3>consoled</h3><p>A Mojo service beside the app: Hugging Face downloads, keys, the endpoint, benchmarks. It starts with the app and stops when the app closes.</p></div>
+      <div class="layer rv"><div class="k">the service</div><h3>consoled</h3><p>A Mojo service beside the app: Hugging Face downloads, keys, the endpoint, benchmarks, notebooks. It starts with the app and stops when the app closes; <code>omxc</code> talks to it from a terminal.</p></div>
       <div class="layer rv"><div class="k">the engine</div><h3>MAX</h3><p>Modular's <code>max serve</code>, installed by you. It loads and runs the models; omxconsole wraps it.</p></div>
     </div>
     <p class="srcline rv" style="text-align:left">read more</p>
