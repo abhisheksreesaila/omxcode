@@ -29,6 +29,8 @@ Drawn on an NVIDIA GPU when the driver is there, the CPU otherwise." ;;
 Needs MAX (Modular's max, with max serve) installed: https://docs.modular.com/max/packages . If max isn't on your PATH,
 start it as MXC_MAX=/path/to/max ./$EX. Models and keys live in ~/.mxc (MXC_HOME to change it); the endpoint is
 http://127.0.0.1:11435/v1 (MXC_PORT to change it)." ;;
+  globe) META="A 3D globe with a day of air traffic, drawn per pixel on the GPU, written once in Mojo|Science;Education;||./$EX
+Drawn on an NVIDIA GPU when the driver is there, the CPU otherwise." ;;
   todo) META="A to-do list in the platform's own controls, written once in Mojo|Utility;||./$EX" ;;
   *) META="Written once in Mojo|Utility;||./$EX" ;;
 esac

@@ -2657,7 +2657,12 @@ struct AppKitHost[A: App](Movable):
                 line += "  "
             line += kind_name(n.kind)
             if n.text != "" and n.kind != IMAGE:
-                var t = n.text if n.text.byte_length() <= 60 else String(n.text[byte=:57]) + "..."
+                var t = n.text
+                if n.text.byte_length() > 60:
+                    var cut = 57
+                    while cut > 0 and (Int(n.text.as_bytes()[cut]) & 0xC0) == 0x80:  # (not inside a character: "×" at byte 56 crashed it)
+                        cut -= 1
+                    t = String(n.text[byte=:cut]) + "..."
                 line += " '" + t + "'"
             var asked = String("")
             if n.w != 0:

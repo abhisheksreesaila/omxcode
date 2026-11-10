@@ -4,6 +4,15 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Globe sample: a geospatial globe drawn per pixel on the GPU (2026-11-09)
+- **Setup:** worktree ../mojo-ui-globe, branch `globe-sample` off main (Mojo 1.2), for a prospective adopter (HPC geospatial, uses rerun, has his own Mojo rasterizer for OGC APIs). `examples/globe` (app, earth.mojo, render.mojo, prep.py, test_globe.mojo); framework: `Gpu.set_data` / `draw_with` / `render_with` (tests/test_gpu_data.mojo). Report for him: https://claude.ai/artifact/XqmAx6prRrZPT9gVRqvQsA (private).
+- **Worked:** Natural Earth 1:50m land rasterized in Mojo at start-up (4096×2048, 2×2 samples a texel) + 5,530,780 synthetic aircraft reports binned into a 24 h × 0.25° cube (133 MB on the GPU); one pixel function draws the globe. RTX 3090: 0.10 ms at 1080p, 0.40 ms at 4K, 1.22 ms at 8K (batch), 0.54 ms a frame in the GTK app. Apple M4 (Metal, IOSurface): 4.8 ms at 1080p, 10.9 ms at 4K, ≈ 15 ms in the app, ≈ 85 ms first frame. Linux GTK, web and the owner's M4 answer the same tap identically (40.18°N 1.98°E, near Barcelona, 120 reports). Downloads: dist/globe-linux-x86_64.tar.gz (bare_run ok), dist/globe-mac-arm64.zip (built on the M4).
+- **Broke and fixed:** an equator band (the rasterizer's row range used floor+1 where the half-open test needs ceil: rows were open when a vertex sat on a row centre; test_globe pins it); the Mac host's test-mode view dump cut a label at byte 57 inside "×" and crashed (appkit.mojo backs up to a character start); labels that start as " " stay 4 pt wide on AppKit (the query lines fill the sidebar); 64-bit `%` in pixel code cost the M4 ~30% (masks and compares now); reviewer round: draw_with/render_with before set_data read nothing (guarded), the data was held three times (now once), --hour ≥ 48 read past the cube.
+- **Means:** the framework can host a real GPU visualization with app-owned data on every desktop host and the web, from one file. Not tried: a datacenter GPU, a node without X for the windowed app, multi-GPU, data bigger than GPU memory (tiling is the next step). Gallery card and downloads are ready; the GitHub release and Pages push wait for the owner.
+
+---
+
+## Goal 55: omxconsole, LM Studio for MAX, all omxcode (2026-11-05/06)
 ## omxconsole: huggingface.co links, CUDA_VISIBLE_DEVICES, honest porting wording (2026-11-09)
 
 **Setup.** Three small fixes before a Modular team member tries omxconsole. Throwaway homes under /tmp, free ports,

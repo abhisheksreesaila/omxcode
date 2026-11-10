@@ -61,6 +61,10 @@ APPS = [
          line="A canvas the app paints itself, around native controls: how map and photo apps are built.",
          runs=[("Linux", "ok"), ("Mac", "ci"), ("Android", "emu")], get=["Linux", "Mac"],
          shots=[("img/lens-linux.jpg", "Linux, 59 fps"), ("img/android-lens.jpg", "Android (CPU)")], src="examples/lens"),
+    dict(name="Globe", app="globe", kind="Geospatial · GPU per pixel",
+         line="A 3D Earth drawn by one Mojo function per pixel on the GPU: Natural Earth coastlines rasterized at start-up, 5.5 million aircraft reports in a 24-hour data cube, the sun and city lights. Tap to query a cell.",
+         runs=[("Linux", "ok"), ("Mac", "ok")], get=["Linux", "Mac"],
+         shots=[("img/globe-linux.jpg", "Linux, RTX 3090: 0.5 ms a frame"), ("img/globe-mac.jpg", "Mac, Apple M4 (Metal)")], src="examples/globe"),
     dict(name="Native controls", app="todo", kind="Every platform's own widgets",
          line="A to-do list in GTK, AppKit, UIKit and Android's own controls, driven by Mojo: no Swift, no Kotlin.",
          # (Mac: runs on GitHub's Macs, but the title wraps a letter short ("Tod / o"): its download after that fix)

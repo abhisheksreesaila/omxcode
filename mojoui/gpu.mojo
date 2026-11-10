@@ -53,6 +53,30 @@ def _pixels_bgra_kernel[f: PixelFn](dst: UnsafePointer[UInt32, MutAnyOrigin], w3
         dst.unsafe_offset(y * Int(row32) + x)[] = (c & 0xFF00FF00) | ((c & 0xFF) << 16) | ((c >> 16) & 0xFF)
 
 
+# A pixel function that also reads the app's own data on the GPU (Gpu.set_data: textures, data cubes, lookup tables,
+# packed however the app likes), with eight knobs:
+#   def shade(x: Int, y: Int, width: Int, height: Int, k: Knobs, data: UnsafePointer[UInt32, MutAnyOrigin]) -> UInt32
+comptime DataPixelFn = def(Int, Int, Int, Int, SIMD[DType.float32, 8], UnsafePointer[UInt32, MutAnyOrigin]) thin -> UInt32
+
+
+# (the knobs go in as eight scalars, for Metal: see _pixels_kernel)
+def _data_pixels_kernel[f: DataPixelFn](
+    dst: UnsafePointer[UInt32, MutAnyOrigin], w32: Int32, h32: Int32, row32: Int32, bgra: Int32, data: UnsafePointer[UInt32, MutAnyOrigin],
+    k0: Float32, k1: Float32, k2: Float32, k3: Float32, k4: Float32, k5: Float32, k6: Float32, k7: Float32,
+):
+    """Rows of `row` pixels; bgra != 0: bytes B, G, R, A (the Mac's IOSurface)."""
+    var k = SIMD[DType.float32, 8](k0, k1, k2, k3, k4, k5, k6, k7)
+    var w = Int(w32)
+    var h = Int(h32)
+    var x = Int(global_idx.x)
+    var y = Int(global_idx.y)
+    if x < w and y < h:
+        var c = f(x, y, w, h, k, data)
+        if bgra != 0:
+            c = (c & 0xFF00FF00) | ((c & 0xFF) << 16) | ((c >> 16) & 0xFF)
+        dst.unsafe_offset(y * Int(row32) + x)[] = c
+
+
 @fieldwise_init
 struct Rendered(Copyable, Movable):
     var pixels: List[UInt32]
@@ -78,6 +102,8 @@ struct Gpu(Movable):
     var wrapped_ids: List[Int]
     var wrapped_bytes: List[Int]
     var shared_failed: Bool  # the Mac: writing into an IOSurface failed once (said why): the copy from then on
+    var data: Optional[DeviceBuffer[DType.uint32]]  # set_data(): the app's data on the GPU
+    var data_host: List[UInt32]  # and on the CPU (the CPU path reads it; kept so a failed GPU can fall back)
 
     def __init__(out self, use: Bool = True):
         """use=False: act as if there were no GPU (to compare with the CPU). MOJOUI_GPU_DEVICE=n picks GPU n; a desktop
@@ -94,6 +120,8 @@ struct Gpu(Movable):
         self.wrapped_ids = List[Int]()
         self.wrapped_bytes = List[Int]()
         self.shared_failed = False
+        self.data = None
+        self.data_host = List[UInt32]()
         if not use:
             return
         comptime if PIXEL_GPU:  # (the Mac's cross build: the CPU path; MAX's runtime isn't linked into it)
@@ -142,6 +170,29 @@ struct Gpu(Movable):
                     out.append(host[i])
             return Rendered(out^, ms)
 
+    def _wrap(mut self, surface: Surface) raises -> Int:
+        """The Mac: the GPU's wrap of the IOSurface the host shows (made on first sight; the wraps of other sizes go,
+        the host releases those after this draw)."""
+        for i in range(len(self.wrapped_ids)):
+            if self.wrapped_ids[i] == surface.shared_id:
+                return i
+        ref ctx = self.ctx.value()
+        ctx.synchronize()
+        var keep = List[DeviceBuffer[DType.uint32]]()
+        var keep_ids = List[Int]()
+        for i in range(len(self.wrapped)):
+            if self.wrapped_bytes[i] == surface.shared_bytes and len(keep) < 5:
+                keep.append(self.wrapped[i])
+                keep_ids.append(self.wrapped_ids[i])
+        self.wrapped = keep^
+        self.wrapped_ids = keep_ids^
+        self.wrapped_bytes = List[Int](length=len(self.wrapped), fill=surface.shared_bytes)
+        var base = Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=surface.shared_address)
+        self.wrapped.append(ctx.wrap_host_memory(base, surface.shared_bytes // 4))
+        self.wrapped_ids.append(surface.shared_id)
+        self.wrapped_bytes.append(surface.shared_bytes)
+        return len(self.wrapped) - 1
+
     def draw[f: PixelFn](mut self, mut surface: Surface, p: Params):
         """Runs f for every pixel of a Canvas (call it from App.draw; the surface is the canvas's real size, so the
         picture is sharp at any size). When the host can show a GPU picture (surface.gpu_ok: GTK on NVIDIA, through
@@ -156,26 +207,7 @@ struct Gpu(Movable):
             if self.ctx and surface.shared_address != 0 and not self.shared_failed:
                 try:
                     ref ctx = self.ctx.value()
-                    var at = -1
-                    for i in range(len(self.wrapped_ids)):
-                        if self.wrapped_ids[i] == surface.shared_id:
-                            at = i
-                    if at < 0:  # a new IOSurface: the wraps of other sizes go (the host releases those after this draw)
-                        ctx.synchronize()
-                        var keep = List[DeviceBuffer[DType.uint32]]()
-                        var keep_ids = List[Int]()
-                        for i in range(len(self.wrapped)):
-                            if self.wrapped_bytes[i] == surface.shared_bytes and len(keep) < 5:
-                                keep.append(self.wrapped[i])
-                                keep_ids.append(self.wrapped_ids[i])
-                        self.wrapped = keep^
-                        self.wrapped_ids = keep_ids^
-                        self.wrapped_bytes = List[Int](length=len(self.wrapped), fill=surface.shared_bytes)
-                        var base = Pointer[UInt32, MutUntrackedOrigin](unsafe_from_address=surface.shared_address)
-                        self.wrapped.append(ctx.wrap_host_memory(base, surface.shared_bytes // 4))
-                        self.wrapped_ids.append(surface.shared_id)
-                        self.wrapped_bytes.append(surface.shared_bytes)
-                        at = len(self.wrapped) - 1
+                    var at = self._wrap(surface)
                     ctx.enqueue_function[_pixels_bgra_kernel[f]](
                         self.wrapped[at].unsafe_ptr(), Int32(w), Int32(h), Int32(surface.shared_row), p[0], p[1], p[2], p[3],
                         grid_dim=(ceildiv(w, 16), ceildiv(h, 16)), block_dim=(16, 16),
@@ -224,6 +256,132 @@ struct Gpu(Movable):
             for x in range(w):
                 px.unsafe_offset(y * w + x)[] = f(x, y, w, h, p)
         self.milliseconds = Float64(now_ns() - t0) / 1e6
+
+
+    def set_data(mut self, var words: List[UInt32]):
+        """The data draw_with's pixel function reads (one array of 32-bit words: textures, a data cube, tables, packed
+        however the app likes; floats go in as their bits). Copied to the GPU once; call again to replace it. If the
+        copy fails, this Gpu stops using the GPU altogether (as draw() does when a kernel fails) and draws on the CPU."""
+        self.data_host = words^
+        self.data = None
+        comptime if PIXEL_GPU:
+            if self.ctx and len(self.data_host) > 0:
+                try:
+                    ref ctx = self.ctx.value()
+                    var buf = ctx.enqueue_create_buffer[DType.uint32](len(self.data_host))
+                    ctx.enqueue_copy(dst_buf=buf, src_ptr=self.data_host.unsafe_ptr())
+                    ctx.synchronize()
+                    self.data = buf^
+                except e:
+                    print("mojoui.gpu: the data stays on the CPU, and so does drawing (" + String(e) + ")", flush=True)
+                    self.ctx = None
+                    self.name = "no GPU (it failed: " + String(e) + ")"
+
+    def _data_ptr(self) -> UnsafePointer[UInt32, MutAnyOrigin]:
+        if self.data:
+            return UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=Int(self.data.value().unsafe_ptr()))
+        return UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=Int(self.data_host.unsafe_ptr()))
+
+    def draw_with[f: DataPixelFn](mut self, mut surface: Surface, k: SIMD[DType.float32, 8]):
+        """draw(), for a pixel function that also reads set_data()'s data, with eight knobs. The same three paths: into
+        the Mac's IOSurface, on the GPU (kept there when the host can show it), or on the CPU."""
+        var t0 = now_ns()
+        var w = surface.width
+        var h = surface.height
+        if w <= 0 or h <= 0:
+            return
+        if len(self.data_host) == 0:  # (no set_data yet: f would read nothing)
+            surface.fill(0)
+            return
+        comptime if MAC_GPU:
+            if self.ctx and self.data and surface.shared_address != 0 and not self.shared_failed:
+                try:
+                    ref ctx = self.ctx.value()
+                    var at = self._wrap(surface)
+                    ctx.enqueue_function[_data_pixels_kernel[f]](
+                        self.wrapped[at].unsafe_ptr(), Int32(w), Int32(h), Int32(surface.shared_row), Int32(1), self._data_ptr(),
+                        k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7],
+                        grid_dim=(ceildiv(w, 16), ceildiv(h, 16)), block_dim=(16, 16),
+                    )
+                    ctx.synchronize()
+                    surface.gpu_drawn = True
+                    surface.gpu_address = surface.shared_address
+                    self.handed += 1
+                    self.milliseconds = Float64(now_ns() - t0) / 1e6
+                    return
+                except e:
+                    print("mojoui.gpu: can't draw into the IOSurface (" + String(e) + "): the picture is copied from now on", flush=True)
+                    self.shared_failed = True
+        comptime if PIXEL_GPU:
+            if self.ctx and self.data:
+                try:
+                    ref ctx = self.ctx.value()
+                    if self.capacity < w * h:
+                        self.picture = ctx.enqueue_create_buffer[DType.uint32](w * h)
+                        self.capacity = w * h
+                    var buf = self.picture.value().create_sub_buffer[DType.uint32](0, w * h)
+                    ctx.enqueue_function[_data_pixels_kernel[f]](
+                        buf.unsafe_ptr(), Int32(w), Int32(h), Int32(w), Int32(0), self._data_ptr(),
+                        k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7],
+                        grid_dim=(ceildiv(w, 16), ceildiv(h, 16)), block_dim=(16, 16),
+                    )
+                    surface.gpu_drawn = True
+                    if surface.gpu_ok:
+                        surface.gpu_address = Int(buf.unsafe_ptr())
+                        surface.gpu_device = self.device
+                        self.handed += 1
+                        self.milliseconds = Float64(now_ns() - t0) / 1e6
+                        return
+                    var dst = UnsafePointer[UInt32, MutAnyOrigin](unsafe_from_address=surface.address)
+                    ctx.enqueue_copy(dst_ptr=dst, src_buf=buf)
+                    ctx.synchronize()
+                    self.read_back += 1
+                    self.milliseconds = Float64(now_ns() - t0) / 1e6
+                    return
+                except e:
+                    print("mojoui.gpu: drawing on the CPU from now on (" + String(e) + ")")
+                    self.ctx = None
+                    self.data = None
+                    self.name = "no GPU (it failed: " + String(e) + ")"
+                    surface.gpu_drawn = False
+        var px = surface.pixels()
+        var data = self._data_ptr()
+        for y in range(h):
+            for x in range(w):
+                px.unsafe_offset(y * w + x)[] = f(x, y, w, h, k, data)
+        self.milliseconds = Float64(now_ns() - t0) / 1e6
+
+    def render_with[f: DataPixelFn](mut self, width: Int, height: Int, k: SIMD[DType.float32, 8]) -> Rendered:
+        """A picture of any size with no window (batch jobs, a map server): on the GPU when there is one, else the CPU.
+        milliseconds: the GPU's work alone (the copy back not counted)."""
+        var out = List[UInt32](length=width * height, fill=0)
+        if len(self.data_host) == 0:  # (no set_data yet: f would read nothing)
+            return Rendered(out^, 0)
+        comptime if PIXEL_GPU:
+            if self.ctx and self.data:
+                try:
+                    ref ctx = self.ctx.value()
+                    var buf = ctx.enqueue_create_buffer[DType.uint32](width * height)
+                    ctx.synchronize()
+                    var t0 = now_ns()
+                    ctx.enqueue_function[_data_pixels_kernel[f]](
+                        buf.unsafe_ptr(), Int32(width), Int32(height), Int32(width), Int32(0), self._data_ptr(),
+                        k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7],
+                        grid_dim=(ceildiv(width, 16), ceildiv(height, 16)), block_dim=(16, 16),
+                    )
+                    ctx.synchronize()
+                    var ms = Float64(now_ns() - t0) / 1e6
+                    ctx.enqueue_copy(dst_ptr=out.unsafe_ptr(), src_buf=buf)
+                    ctx.synchronize()
+                    return Rendered(out^, ms)
+                except e:
+                    print("mojoui.gpu: rendering on the CPU (" + String(e) + ")", flush=True)
+        var t0 = now_ns()
+        var data = self._data_ptr()
+        for y in range(height):
+            for x in range(width):
+                out[y * width + x] = f(x, y, width, height, k, data)
+        return Rendered(out^, Float64(now_ns() - t0) / 1e6)
 
 
 def render_on_cpu[f: PixelFn](width: Int, height: Int, p: Params) -> Rendered:
