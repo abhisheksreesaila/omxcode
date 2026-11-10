@@ -21,7 +21,8 @@ from supervisor import Supervisor, ModelRef
 from views import models_json, model_sizes, info_json, gateway_json, network_json, system_json, metrics_json, series_json
 from views import requests_json, bench_json, bench_history_json, pulls_json, ports_json, window_of, num
 from search import search_json
-from learn import notebook_json
+from learn import notebook_json, ensure_ipynb
+from jupyter import Jupyter
 from pulls import Pulls, ref_problem
 from mojoui.hf import hub_ref
 from ports import Ports, MAX_ATTEMPTS, DEFAULT_ATTEMPTS
@@ -190,6 +191,8 @@ struct Daemon(Service):
     var exposing: Exposing
     var bench: Bench
     var bench_key: String  # the benchmark's own key (app "_bench", bench.py BENCH_APP): in memory only, never stored
+    var jupyter: Jupyter
+    var notebook_key: String  # Jupyter kernels' key (app "_notebook"): in memory only, so it ends with the daemon
 
     def __init__(out self, var cfg: Config) raises:
         makedirs(cfg.home, exist_ok=True)  # (a first run: no ~/.mxc yet)
@@ -204,6 +207,8 @@ struct Daemon(Service):
         self.exposing = Exposing()
         self.bench = Bench()
         self.bench_key = new_secret()
+        self.jupyter = Jupyter()
+        self.notebook_key = new_secret()
         _ = self.store.db.run("UPDATE bench_runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
         _ = self.store.db.run("UPDATE pulls SET status = 'failed', message = 'The daemon stopped during this pull; pull again to resume.', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
         _ = self.store.db.run("UPDATE ports SET status = 'failed', message = 'The daemon stopped during this port; the workspace and log are kept.', finished_at = ? WHERE status = 'running'", [String(wall_seconds())])
@@ -235,6 +240,7 @@ struct Daemon(Service):
             self.stopping = True
         self.sup.sweep()
         self.answer_loads()
+        self.jupyter.answer()
         self.ports.sweep()
         var was = len(self.pulls.running)
         self.pulls.refresh(self.store)
@@ -266,6 +272,10 @@ struct Daemon(Service):
             _ = self.exposing.stop(self.cfg.home)
         except:
             pass
+        var opens = len(self.jupyter.waiting)
+        self.jupyter.shutdown()  # (Jupyter stops with the daemon; an open still waiting hears why)
+        if opens > 0:
+            sleep(0.3)  # (as for loads: their workers send the 503 before the process exits)
         self.sup.stop_all_now()
 
     def answer(mut self, mut req: Req) -> Reply:
@@ -521,6 +531,25 @@ struct Daemon(Service):
                 return error(404, "The model `" + req.param("name") + "` is not registered.", "model_not_found")
             ref r = m.value()
             return Reply.json(notebook_json(r.name, r.repo_id, r.revision, r.weights_path, self.cfg.home, self.cfg.port))
+        if req.matches("POST", "/admin/learn/{name}/open"):
+            var m = self.model_ref(req.param("name"))
+            if not m:
+                return error(404, "The model `" + req.param("name") + "` is not registered.", "model_not_found")
+            ref r = m.value()
+            if r.name.find("/") >= 0 or r.name.startswith("."):
+                return error(400, "`" + r.name + "` can't be a notebook's file name.", "invalid_name")
+            var file = ensure_ipynb(r.name, r.repo_id, r.revision, r.weights_path, self.cfg.home, self.cfg.port)
+            var root = self.cfg.home + "/notebooks"
+            var why = self.jupyter.start(root, self.cfg.home, self.cfg.port, self.notebook_key)
+            if why != "":
+                return error(424, why, "jupyter_missing")
+            if self.jupyter.check():
+                return Reply.json(self.jupyter.reply(file, root + "/" + file))
+            # jupyter.py waited for the port before answering; tick answers this one (a first pixi exec downloads)
+            var pipe = self.jupyter.wait(file)
+            var reply = Reply.stream(pipe, "application/json", wait_head_ms=300_000)
+            pipe.release()
+            return reply^
         if req.matches("GET", "/admin/models/{name}/log"):
             if not self.model_ref(req.param("name")):
                 return error(404, "The model `" + req.param("name") + "` is not registered.", "model_not_found")
@@ -626,7 +655,7 @@ struct Daemon(Service):
                     msg = "app names starting with '_' are reserved for omxconsole"
                 return error(400, msg, "invalid_request_body")
             if self.store.key_active(app.value()):
-                return error(409, app.value() + " already has a key. Use --rotate to replace it (the old key stops working).", "key_exists")
+                return error(409, app.value() + " already has a key. Rotate it to replace it (`omxc keys rotate " + app.value() + "`; the old key stops working).", "key_exists")
             var secret = new_secret()
             self.store.put_key(app.value(), secret, sha256_hex(secret), wall_seconds())
             return Reply.json('{"app": ' + json_string(app.value()) + ', "key": ' + json_string(secret) + "}", 201)
@@ -717,6 +746,8 @@ struct Daemon(Service):
             return ""
         if token == self.bench_key:
             return "_bench"
+        if token == self.notebook_key:
+            return "_notebook"
         return self.store.app_for_key(token, sha256_hex(token), now)
 
     def v1_models(self) raises -> String:

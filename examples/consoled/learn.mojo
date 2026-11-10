@@ -258,3 +258,30 @@ def _reply(name: String, path: String, generated: Bool, arch: String, cells: Str
     return ('{"name": ' + json_string(name) + ', "path": ' + json_string(path) + ', "generated": ' + ("true" if generated else "false")
             + ', "kernelspec": {"name": "python3", "display_name": "Python 3", "language": "python"}, "architecture": ' + arch
             + ', "cells": ' + cells + "}")
+
+
+def ensure_ipynb(name: String, repo: String, revision: String, weights: String, home: String, port: Int) raises -> String:
+    """Run in Jupyter needs a file: MXC_HOME/notebooks/<name>.ipynb as it is, or the generated notebook written there
+    (nbformat 4, with the architecture in metadata.mxconsole so the console's saved view reads it back unchanged).
+    Returns the file's name in that folder."""
+    if name == "" or name.find("/") >= 0 or name.startswith("."):
+        raise Error("`" + name + "` can't be a notebook's file name")
+    var file = name + ".ipynb"
+    var dir = home + "/notebooks"
+    if exists(dir + "/" + file):
+        return file
+    var j = Json.parse(notebook_json(name, repo, revision, weights, home, port))
+    var cells = j.get(0, "cells")
+    var out = String('{"cells": [')
+    for i in range(j.size(cells)):
+        var c = j.at(cells, i)
+        var code = j.text(j.get(c, "type")) == "code"
+        out += (", " if i > 0 else "") + '{"id": "cell-' + String(i) + '", "cell_type": ' + ('"code"' if code else '"markdown"') + ', "metadata": {}, "source": ' + json_string(j.text(j.get(c, "source")))
+        out += (', "outputs": [], "execution_count": null}' if code else "}")
+    out += '], "metadata": {"kernelspec": ' + serialize(j, j.get(0, "kernelspec"))
+    out += ', "language_info": {"name": "python"}, "mxconsole": {"architecture": ' + serialize(j, j.get(0, "architecture")) + "}}"
+    out += ', "nbformat": 4, "nbformat_minor": 5}'
+    makedirs(dir, exist_ok=True)
+    with open(dir + "/" + file, "w") as f:
+        f.write(out)
+    return file
