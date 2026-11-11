@@ -23,7 +23,8 @@
 # The thread hands events over through a pipe (a few bytes each), so nothing is shared but the pipe, and a consumer
 # can sleep on it (wait()). wake=True wakes the host after each batch through mojoui.wake.UIWaker, as jobs and
 # FrameFeed do (D-5808): a byte down the job-wake pipe on Linux, jobsEnded: on the main queue on a Mac; either way
-# App.jobs_message() reaches update(), so neither host polls take() on a timer. Also here: walk_files, every file under a folder (what a first scan needs).
+# App.jobs_message() reaches update(), so neither host polls take() on a timer (the Mac's wake: built, not run in an
+# app yet). Also here: walk_files, every file under a folder (what a first scan needs).
 
 from std.atomic import Atomic
 from std.ffi import external_call, c_int, c_char

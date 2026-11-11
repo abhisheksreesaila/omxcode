@@ -181,7 +181,7 @@ def m6():
     probs = []
     if r.returncode or "TEST: " in out:
         probs.append(f"Linux run failed (exit {r.returncode})")
-    if STATUS_OK not in said:
+    if STATUS_OK not in said or any("opening…" in l for l in said):
         probs.append(f"Linux's status bar: {said}")
     if os.environ.get("MAC_SSH"):
         m = run(["scripts/mac-ssh", "omxplorer", str(STATUS_STEPS), str(FULL / "fleet.csv"), "tests/fixtures/vision/cat.jpg"], 2400)

@@ -841,7 +841,10 @@ struct Main(App):
         for k in self.media.opened:
             var name = file_name(self.media.cards[k].path)
             if self.message == "Opened " + name + " · opening…":
-                self.message = "Opened " + name + " · " + self.media.cards[k].facts()
+                if self.media.cards[k].problem() != "":
+                    self.message = "Couldn't open " + name
+                else:
+                    self.message = "Opened " + name + " · " + self.media.cards[k].facts()
                 changed = True
         return changed
 

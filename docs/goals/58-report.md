@@ -18,7 +18,7 @@
 
 ## Polish (2026-11-11)
 - M6 (new): the status bar after cat.jpg opens says "Opened cat.jpg · 451×300 JPG" on Linux and the Mac (it said "opening…" on both: D-5807).
-- mojoui.watch wakes through UIWaker on Linux and the Mac (D-5808).
+- mojoui.watch wakes through UIWaker on Linux and the Mac (D-5808); the Mac's watcher wake is built, not run in an app yet (unverified).
 - The last two items below are known limits, written in avmedia.mojo, videoexport.mojo and picture.mojo (D-5809).
 
 ## Found, not fixed (the first two fixed in the polish above)
