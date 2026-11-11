@@ -3,7 +3,11 @@
 # with an X-Request-Id. Proved over real sockets with Flare's client. Round 3: the offloaded reply's result is checked
 # in main (R4), a header with CR/LF from an offloaded answer becomes a 500 (S-L5), req.client follows a trusted proxy's
 # X-Forwarded-For only (R3), and a body over serve()'s 1 MB cap is refused before the app sees it.
+# Hardening (2026-11-11, D-6033): blocking requests run on a small fixed pool of offload threads (made when serving
+# starts, so their SQLite connections are kept), behind a bounded queue: past both, 503 with Retry-After.
 from std.memory import Pointer
+from std.os import listdir
+from std.sys import CompilationTarget
 from std.atomic import Atomic
 from mojoui.serve import Handler, Req, Reply, serve, spawn
 from mojoui.clientip import TrustedProxies
@@ -34,6 +38,8 @@ struct App(Handler):
             return Reply.json('{"slow": true}', 201)
         if req.path == "/slow-bad":
             return Reply.json('{"bad": true}').header("X-Echo", "a\r\nSet-Cookie: evil=1")
+        if req.path == "/slow-threads" or req.path == "/threads":  # (this process's threads now, Linux)
+            return Reply.json('{"threads": ' + String(threads()) + "}")
         if req.path == "/body":
             return Reply.json('{"bytes": ' + String(req.body.byte_length()) + "}")
         return Reply.json('{"fast": true, "peer": "' + req.peer + '", "client": "' + req.client + '"}')
@@ -49,6 +55,60 @@ struct App(Handler):
 
 
 comptime _A = Atomic[Scalar[DType.int64]]
+
+
+def threads() -> Int:
+    try:
+        return len(listdir("/proc/self/task"))
+    except:
+        return -1
+
+
+def raw_get(port: Int, path: String) -> String:
+    """GET over a plain libc socket, the whole reply as text ("" when it fails). (Flare's HttpClient would do; this
+    keeps the burst's clients free of any client-side pooling.)"""
+    var fd = libc.socket(2, 1, 0)  # AF_INET, SOCK_STREAM
+    if fd < 0:
+        return ""
+    var sa = List[UInt8](length=16, fill=0)
+    if CompilationTarget.is_macos():
+        sa[0] = 16
+        sa[1] = 2
+    else:
+        sa[0] = 2
+    sa[2] = UInt8((port >> 8) & 255)
+    sa[3] = UInt8(port & 255)
+    sa[4] = 127
+    sa[7] = 1
+    var out = String("")
+    if libc.connect(fd, Int(sa.unsafe_ptr()), 16) == 0:
+        var rq = "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+        _ = libc.send(fd, Int(rq.unsafe_ptr()), rq.byte_length(), 0)
+        _ = rq.byte_length()
+        var buf = List[UInt8](length=4096, fill=0)
+        var got = List[UInt8]()
+        while True:
+            var n = libc.recv(fd, Int(buf.unsafe_ptr()), 4096, 0)
+            if n <= 0:
+                break
+            for i in range(n):
+                got.append(buf[i])
+        out = String(from_utf8_lossy=Span(got))
+    _ = len(sa)
+    _ = libc.close(fd)
+    return out
+
+
+def burst_call(addr: Int):
+    """Calls /slow on the port in word 0, then counts the answer: word 1 (201), 2 (503 with Retry-After), 3 (other)."""
+    var w = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
+    var r = raw_get(Int(w[]), "/slow")
+    var k = 3
+    if r.startswith("HTTP/1.1 201"):
+        k = 1
+    elif r.startswith("HTTP/1.1 503") and "retry-after:" in r.lower():
+        k = 2
+    _ = _A.fetch_add(w + k, 1)
 
 
 def slow_call(addr: Int):
@@ -123,3 +183,32 @@ def main() raises:
     expect('"client": "127.0.0.1"' in d, "an untrusted peer's X-Forwarded-For was believed: " + d)
     direct.stop()
     print("client_ip: ok")
+    # the fixed pool: 2 threads and a queue of 2 take 4 of 6 slow requests at once; the other 2 get 503 + Retry-After
+    var gone = 0
+    while not direct.stopped() and gone < 100:  # (a stopped server's loop ends on its own thread: let it, D-6033)
+        _ = libc.poll(0, 0, 50)
+        gone += 1
+    var pooled = serve(App(), port=0, workers=1, offload_threads=2, offload_queue=2)
+    var counts = List[Int64](length=4, fill=0)
+    counts[0] = Int64(pooled.port)
+    for _ in range(6):
+        _ = spawn[burst_call](Int(counts.unsafe_ptr()))
+    var spent = 0
+    while _A.load(counts.unsafe_ptr() + 1) + _A.load(counts.unsafe_ptr() + 2) + _A.load(counts.unsafe_ptr() + 3) < 6 and spent < 200:
+        _ = libc.poll(0, 0, 100)
+        spent += 1
+    var took = Int(_A.load(counts.unsafe_ptr() + 1))
+    var busy = Int(_A.load(counts.unsafe_ptr() + 2))
+    expect(took == 4 and busy == 2, "6 slow requests on 2 threads + a queue of 2: " + String(took) + " answered, " + String(busy) + " 503 with Retry-After, " + String(Int(_A.load(counts.unsafe_ptr() + 3))) + " other")
+    expect(spent >= 30, "the 4 taken ran 2 at a time (2 waves of 2 s): done in " + String(spent * 100) + " ms")
+    _ = len(counts)
+    if CompilationTarget.is_linux():  # (no thread made per request: the offloaded answer sees the threads the reactor sees)
+        var pb = "http://127.0.0.1:" + String(pooled.port)
+        _ = libc.poll(0, 0, 300)  # (the burst's client threads have ended)
+        for _ in range(5):
+            var on_reactor = c.get(pb + "/threads").text()
+            var offloaded = c.get(pb + "/slow-threads").text()
+            expect(on_reactor.startswith('{"threads": '), "the thread count: " + on_reactor)
+            expect(on_reactor == offloaded, "an offloaded request ran on a new thread: reactor " + on_reactor + ", offloaded " + offloaded)
+    pooled.stop()
+    print("pool: ok")

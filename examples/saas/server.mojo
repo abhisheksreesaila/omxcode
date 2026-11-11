@@ -206,7 +206,8 @@ def main() raises:
         var app = Saas(acc^, bill^, jobs)
         if app.test_hook:
             print("SAAS: the test-session hook is on (SAAS_TEST_HOOK=1, a test-mode Stripe key): never in production", flush=True)
-        var served = serve(app^, port=_int("SAAS_PORT", 8000), host=getenv("SAAS_HOST", "127.0.0.1"), tick_ms=60_000, log=log, proxies=proxies^)
+        var served = serve(app^, port=_int("SAAS_PORT", 8000), host=getenv("SAAS_HOST", "127.0.0.1"), tick_ms=60_000, log=log, proxies=proxies^,
+                           offload_threads=_int("SAAS_OFFLOAD_THREADS", 16), offload_queue=_int("SAAS_OFFLOAD_QUEUE", 64))  # (the callback, checkout, portal, return, purchase)
         print("SAAS: listening " + String(served.port), flush=True)
         while not served.stopped():
             _ = libc.poll(0, 0, 500)

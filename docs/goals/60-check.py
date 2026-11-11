@@ -12,6 +12,7 @@ The server's contract is goal 57's (docs/goals/57-check.py's docstring) plus:
         SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM SMTP_TLS (implicit|starttls|off) SMTP_CA_FILE
         SAAS_JOB_BACKOFF_MS SAAS_JOB_MAX_ATTEMPTS  SAAS_TRIAL_DAYS STRIPE_TRIAL_DAYS SAAS_GRACE_DAYS (floats)
         SAAS_INVITE_TTL SAAS_SESSION_IDLE (seconds)  SAAS_RATE (requests a minute per IP on /login, /auth/callback, /api/token)
+        SAAS_OFFLOAD_THREADS (16) SAAS_OFFLOAD_QUEUE (64): the pool that answers blocking requests, and how many may wait (M12)
   host.db   audit(ts, tenant, actor, action, detail)   jobs(id, tenant, kind, payload, status, attempts, max_attempts, run_at, error)
   tenant db schema_migrations(version, checksum, …)
   every reply has X-Request-Id; GET /api/jobs (admin); GET /api/tenants; POST /api/switch {tenant}
@@ -1010,7 +1011,7 @@ def m9():
     tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep", "per_client"],
              "tests/test_billing.mojo": ["out_of_order"], "tests/test_ui_thread.mojo": [], "tests/test_served.mojo": [],
              # (D-6025: round 3's tests in the goal's checker)
-             "tests/test_handler.mojo": ["handler", "offload", "header_inject", "body_cap", "client_ip"],
+             "tests/test_handler.mojo": ["handler", "offload", "header_inject", "body_cap", "client_ip", "pool"],
              "tests/test_ratelimit.mojo": ["limit", "window", "flood"],
              "tests/test_queue.mojo": ["claim_race", "backoff", "resume", "outbox", "sweep"],
              "tests/test_clientip.mojo": ["parse", "trusted", "untrusted", "ipv6"]}
@@ -1249,12 +1250,55 @@ def m12_state():
         smtp.close()
 
 
+def m12_pool():
+    """Item 3 (D-6033): blocking requests run on a fixed pool (SAAS_OFFLOAD_THREADS=2, SAAS_OFFLOAD_QUEUE=2 here): six
+    checkouts at once while Stripe sits 2 s → four answered, two 503 with Retry-After; no thread is made for them (the
+    server's thread count never rises); /api/me stays fast throughout."""
+    stand, smtp, srv = scenario("m12p", "off", {"SAAS_OFFLOAD_THREADS": "2", "SAAS_OFFLOAD_QUEUE": "2"})
+    try:
+        ada, _ = sign_in(srv, stand, ("ada@example.com", "Ada"))
+        ben, _ = sign_in(srv, stand, ("ben@example.com", "Ben"))
+        tasks = lambda: len(os.listdir(f"/proc/{srv.p.pid}/task"))  # noqa: E731
+        idle = tasks()
+        stand.delay_checkout = 2
+        out, peak = [], [0]
+
+        def checkout():
+            with httpx.Client(base_url=srv.base, cookies=dict(ada.cookies), timeout=30) as c:
+                r = c.post("/billing/checkout")
+                out.append((r.status_code, r.headers.get("retry-after")))
+        ts = [threading.Thread(target=checkout) for _ in range(6)]
+        for t in ts:
+            t.start()
+        slow = 0.0
+        while any(t.is_alive() for t in ts):
+            peak[0] = max(peak[0], tasks())
+            t0 = time.perf_counter()
+            if ben.get("/api/me").status_code != 200:
+                return False, "/api/me failed during the burst"
+            slow = max(slow, time.perf_counter() - t0)
+            time.sleep(0.05)
+        stand.delay_checkout = 0
+        ok = sorted(c for c, _ in out)
+        if ok != [200, 200, 200, 200, 503, 503] or any(c == 503 and not ra for c, ra in out):
+            return False, f"six checkouts on 2 threads + a queue of 2: {sorted(out)}"
+        if peak[0] > idle:
+            return False, f"the server made threads for blocking requests: {idle} idle, {peak[0]} during the burst"
+        if slow >= 0.3:
+            return False, f"/api/me took {slow * 1000:.0f} ms during the burst"
+        return True, f"2 threads + queue of 2: 4 checkouts answered, 2 × 503 + Retry-After; threads {idle} idle, {peak[0]} at most during; /api/me ≤ {slow * 1000:.0f} ms"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+
+
 def m12():
-    for step in (m12_desktop, m12_state):
+    for step in (m12_desktop, m12_state, m12_pool):
         ok, why = step()
         if not ok:
             return False, f"{step.__name__}: {why}"
-    return True, "hardening: desktop confirm page; sign-in state in a sealed cookie (no rows to flood, bound to the browser, single use)"
+    return True, "hardening: desktop confirm page; sign-in state in a sealed cookie (no rows to flood, bound to the browser, single use); a fixed offload pool (503 + Retry-After past it, no thread per request)"
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8, "M9": m9, "M10": m10, "M11": m11, "M12": m12}

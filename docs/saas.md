@@ -35,7 +35,8 @@ one it doesn't need: `accounts` doesn't know billing or mail (it puts `signed_up
 
 ### `mojoui.serve` (concurrent)
 A `Handler`'s `answer(self, …)` runs on every worker at once: no lock. Requests its `blocking()` names (they wait on
-Google or Stripe) leave the reactor on a thread of their own, so a slow provider stalls nobody (D-6007, D-6008).
+Google or Stripe) leave the reactor for a small fixed pool of offload threads, so a slow provider stalls nobody (D-6007,
+D-6008, D-6033).
 ```mojo
 struct Api(Handler):
     var acc: Accounts
@@ -45,7 +46,8 @@ struct Api(Handler):
     def stop(self): pass
 var served = serve(Api(acc^), port=8000, log=Log.open("saas.log"),   # X-Request-Id + a JSON line per request
                    proxies=TrustedProxies.parse(getenv("SAAS_TRUSTED_PROXIES")),   # req.client: X-Forwarded-For from these only
-                   tick_ms=60_000)                                    # tick(): the sweeps
+                   tick_ms=60_000,                                    # tick(): the sweeps
+                   offload_threads=16, offload_queue=64)              # blocking requests: 16 at once, 64 waiting, then 503
 ```
 Bodies over `max_body` (1 MB) and requests slower than `request_timeout_ms` (30 s) are refused by Flare as it reads
 them; a reply header with CR, LF or NUL becomes a 500.
@@ -139,6 +141,8 @@ Audit.record(db, tenant, actor, "invite", detail)
     `signin_used` row written only once the provider has traded the code (a flood can't write one), checked before the
     provider is asked again. `SAAS_MAX_SIGNINS` and `SAAS_SIGNINS_PER_CLIENT` are gone; `SAAS_RATE` per client stays
     (D-6031, D-6032).
+  - A new thread and new SQLite connections for every blocking request (up to 256 at once). A fixed pool of offload
+    threads now takes them from a bounded queue (a pipe of job addresses), 503 with Retry-After past it (D-6033).
 - Per-client limits key on `req.client`: the socket's peer, or, when the peer is in `SAAS_TRUSTED_PROXIES` (CIDRs:
   set it to your TLS proxy's addresses), X-Forwarded-For's rightmost hop that isn't a trusted proxy, read across every
   X-Forwarded-For line (nginx, Caddy and Envoy join the hops into one line; HAProxy's `option forwardfor` adds its own:
@@ -146,11 +150,16 @@ Audit.record(db, tenant, actor, "invite", detail)
   that isn't listed, every client is the proxy and shares one limit: list it. IPv6 clients are keyed by their /64.
 - Durability: WAL with synchronous=NORMAL (above): a crash of the process loses nothing committed, a power cut can
   lose the last moments of writes (sessions, entries, jobs alike).
-- A blocking request (the callback, checkout, portal, return, purchase) answers with `Connection: close` on a thread of
-  its own, made for it: it opens its own SQLite connections (closed when it ends), and its socket gets 30 s send and
-  receive timeouts. At most 256 run at once; more get 503 with Retry-After. A small fixed pool of offload threads would
-  save the thread and the connections each time (next step). The offload needs a cleartext connection, and
-  `mojoui.serve` binds cleartext only: terminate TLS in front of it (a TLS connection would get a 503).
+- A blocking request (the callback, checkout, portal, return, purchase) answers with `Connection: close` on one of the
+  offload pool's threads (`SAAS_OFFLOAD_THREADS`, 16, made at start and kept, so their SQLite connections stay open),
+  and its socket gets 30 s send and receive timeouts. At most `SAAS_OFFLOAD_QUEUE` (64) more wait for a thread; past
+  that, 503 with Retry-After. Sixteen providers each sitting 20 s (the callback's timeout) fill the pool for that long:
+  the reactor still answers every other request. The offload needs a cleartext connection, and `mojoui.serve` binds
+  cleartext only: terminate TLS in front of it (a TLS connection would get a 503).
+- `serve()` stopped and started again in one process (tests do; the demos don't): the stopped server's loop ends on its
+  own thread a little later and can close a descriptor number the new server has reused (its listener: connections
+  refused). Observed in tests/test_handler.mojo with the old offload too; wait for `served.stopped()` before serving
+  again. Not yet fixed in mojoui.serve / Flare.
 - Bodies over 64 KB (the webhook 1 MB) get a 413 before any work; Flare itself refuses a body over 1 MB as it reads it
   and gives a request 30 s to arrive (serve()'s `max_body`, `request_timeout_ms`); `/billing/return` makes at most 30 Stripe
   read-backs a minute for the whole server, so a stranger can spend that budget and make a real return page say 429 (the

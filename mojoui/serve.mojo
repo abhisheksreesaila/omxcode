@@ -26,8 +26,10 @@
 #
 # Concurrent servers (goal 60, D-6007, D-6008): a `Handler` (answer(self, …): an immutable self, its state thread-safe)
 # runs on every worker at once, no lock: `Server.serve(handler, port, log=Log.open(path))`. Requests its `blocking()`
-# names (ones that call Google or Stripe) leave the reactor: Flare hands their socket to a thread of their own (the
-# vendored offload patch), which answers with `Connection: close`, so a slow provider stalls nobody else. Every reply
+# names (ones that call Google or Stripe) leave the reactor: Flare hands their socket over (the vendored offload patch)
+# to a small fixed pool of offload threads, made when serving starts (`offload_threads`, 16; their SQLite connections
+# stay open between requests), behind a bounded queue (`offload_queue`, 64): one answers with `Connection: close`, so a
+# slow provider stalls nobody else; past the threads and the queue, 503 with Retry-After (D-6033). Every reply
 # carries X-Request-Id; every request is one JSON line in the log (path without its query, status, ms, ip).
 # mojoui.serve binds cleartext only (TLS ends in front of it), which the offload needs: Flare offloads a cleartext
 # connection only (a TLS one would answer the bridge's 503 placeholder).
@@ -915,8 +917,8 @@ trait Handler(Movable, Deinitable):
         ...
 
     def blocking(self, req: Req) -> Bool:
-        """True for a request whose answer waits on the network (an OAuth token, a Stripe call): it is answered on a
-        thread of its own instead of the reactor worker its connection came in on."""
+        """True for a request whose answer waits on the network (an OAuth token, a Stripe call): it is answered on one
+        of the offload pool's threads instead of the reactor worker its connection came in on."""
         ...
 
     def tick(self):
@@ -930,11 +932,13 @@ trait Handler(Movable, Deinitable):
 
 comptime H_APP = 0
 comptime H_LOG = 1
-comptime H_OFFLOADED = 2  # requests answering on threads of their own now (atomic)
-comptime H_MAX_OFFLOADED = 3
+comptime H_OFFLOADED = 2  # blocking requests queued for or running on the offload pool now (atomic)
+comptime H_MAX_OFFLOADED = 3  # the pool's threads + its queue
 comptime H_PROXIES = 4  # a TrustedProxies (read-only once serving)
-comptime H_WORDS = 5
-comptime MAX_OFFLOADED = 256
+comptime H_QUEUE_W = 5  # the offload queue: a pipe of job addresses (8 bytes each: one write, one read, never split)
+comptime H_QUEUE_R = 6
+comptime H_WORDS = 7
+comptime MAX_OFFLOAD_QUEUE = 4096  # (threads + queue stay far inside a pipe's 64 KB: a hand-off never blocks)
 
 
 def request_id() -> String:
@@ -1021,8 +1025,32 @@ def _offload_hook[H: Handler](fd: Int, arg: Int):
     _ = libc.setsockopt(fd, lvl, 0x1005 if CompilationTarget.is_macos() else 21, Int(tv.unsafe_ptr()), 16)
     _ = libc.setsockopt(fd, lvl, 0x1006 if CompilationTarget.is_macos() else 20, Int(tv.unsafe_ptr()), 16)
     _ = len(tv)
-    if not spawn[_offload_run[H]](arg):
+    var job_addr = List[Int64](length=1, fill=Int64(arg))
+    var wfd = Int((_P(unsafe_from_address=job[].state) + H_QUEUE_W)[])
+    var n = libc.write_fd(wfd, Int(job_addr.unsafe_ptr()), 8)
+    while n < 0 and get_errno() == ErrNo.EINTR:
+        n = libc.write_fd(wfd, Int(job_addr.unsafe_ptr()), 8)
+    _ = len(job_addr)
+    if n != 8:  # (no queue: answered here, as a last resort; the slot counts held it to the pool's size)
         _offload_run[H](arg)
+
+
+def _offload_worker[H: Handler](state: Int):
+    """One of the offload pool's threads: forever takes the next queued job (a blocking read of 8 bytes) and answers it.
+    Its SQLite connections (mojoui.sqlite's Pool, per thread) stay open between jobs."""
+    var rfd = Int((_P(unsafe_from_address=state) + H_QUEUE_R)[])
+    var buf = List[Int64](length=1, fill=0)
+    while True:
+        var got = 0
+        while got < 8:
+            var n = libc.read_fd(rfd, Int(buf.unsafe_ptr()) + got, 8 - got)
+            if n > 0:
+                got += n
+            elif n < 0 and get_errno() == ErrNo.EINTR:
+                continue
+            else:
+                return  # (the queue closed: nothing more comes)
+        _offload_run[H](Int(buf[0]))
 
 
 def _offload_run[H: Handler](arg: Int):
@@ -1195,11 +1223,15 @@ def _hstop_loop[H: Handler](state: Int):
 
 def serve[H: Handler](var handler: H, port: Int = 0, host: String = "127.0.0.1", workers: Int = 0, tick_ms: Int = 0,
                       log: Log = Log(addr=0), var proxies: TrustedProxies = TrustedProxies(), max_body: Int = 1024 * 1024,
-                      request_timeout_ms: Int = 30_000) raises -> Served:
+                      request_timeout_ms: Int = 30_000, offload_threads: Int = 16, offload_queue: Int = 64) raises -> Served:
     """Serves `handler` concurrently on threads of its own until the returned Served is dropped or stopped (`.port`:
     the port). `workers` 0: one reactor per CPU core (up to 16). `log`: a request line each (Log(addr=0): none).
     `proxies`: the reverse proxies whose X-Forwarded-For names the client (`req.client`; none: the socket's peer).
-    `max_body` (1 MB) and `request_timeout_ms` (30 s): Flare's limits on reading a request (Server.bind)."""
+    `max_body` (1 MB) and `request_timeout_ms` (30 s): Flare's limits on reading a request (Server.bind).
+    `offload_threads` (16) answer the requests `blocking()` names, made now and kept; at most `offload_queue` (64) more
+    wait for one; past that a blocking request gets 503 with Retry-After. (The threads live as long as the process.)"""
+    if offload_threads < 1 or offload_queue < 0 or offload_threads + offload_queue > MAX_OFFLOAD_QUEUE:
+        raise Error("serve: offload_threads ≥ 1, offload_queue ≥ 0, together at most " + String(MAX_OFFLOAD_QUEUE))
     var handles_signals = Server._install_stop_handler()
     var srv = Server.bind(port, host, max_body, request_timeout_ms)
     var bound = Int(srv.local_addr().port)
@@ -1212,11 +1244,20 @@ def serve[H: Handler](var handler: H, port: Int = 0, host: String = "127.0.0.1",
     (w + H_APP)[] = Int64(Int(app))
     (w + H_LOG)[] = Int64(log.addr)
     (w + H_OFFLOADED)[] = 0
-    (w + H_MAX_OFFLOADED)[] = MAX_OFFLOADED
+    (w + H_MAX_OFFLOADED)[] = Int64(offload_threads + offload_queue)
+    var fds = List[Int32](length=2, fill=-1)
+    if libc.pipe(Int(fds.unsafe_ptr())) != 0:
+        raise Error("serve: no pipe for the offload queue")
+    (w + H_QUEUE_R)[] = Int64(fds[0])
+    (w + H_QUEUE_W)[] = Int64(fds[1])
+    _ = len(fds)
     var px = unsafe_alloc[TrustedProxies](1)
     px.unsafe_write(proxies^)
     (w + H_PROXIES)[] = Int64(Int(px))
     var st = Int(w)
+    for _ in range(offload_threads):
+        if not spawn[_offload_worker[H]](st):
+            raise Error("serve: no thread for the offload pool")
     if tick_ms > 0:
         var tw = unsafe_alloc[Int64](2)
         tw[0] = Int64(st)
