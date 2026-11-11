@@ -456,6 +456,11 @@ def fin(name, stand, smtp=None, extra=None, keep=False, expect_fail=False):
     return g60.Server(name, stand, smtp, extra, keep=keep, expect_fail=expect_fail, exe=FIN)
 
 
+def mail_text(m):
+    """A message's decoded text parts (its raw form is base64 or quoted-printable)."""
+    return "\n".join(str(p.get_content()) for p in m.walk() if p.get_content_type() in ("text/plain", "text/html")) + "\n" + str(m["Subject"])
+
+
 def csrf_of(page):
     m = re.search(r'name="csrf" value="([^"]+)"', page)
     return m.group(1) if m else ""
@@ -502,12 +507,12 @@ def m5():
         if r.status_code not in (200, 303):
             return False, f"the contact POST answered {r.status_code} {r.text[:200]}"
         got = wait_until(lambda: smtp.to("owner@saas.example"), 20)
-        if not got or "Hello from the form 66" not in got[0].as_string() or "ben@example.com" not in got[0].as_string():
+        if not got or "Hello from the form 66" not in mail_text(got[0]) or "ben@example.com" not in mail_text(got[0]):
             return False, f"the message never reached SMTP: {got}"
         tok = csrf_of(c.get("/contact").text)
         c.post("/contact", data=dict(msg, csrf=tok, website="http://spam.example", message="SPAM 66"), headers=hdr)
         time.sleep(3)
-        if any("SPAM 66" in m.as_string() for m in smtp.to("owner@saas.example")):
+        if any("SPAM 66" in mail_text(m) for m in smtp.to("owner@saas.example")):
             return False, "the honeypot's message was sent"
         codes = []
         for _ in range(6):
@@ -897,7 +902,7 @@ def m9():
             br.close()
             pw.stop()
         digest = wait_until(lambda: [m for m in smtp.to("ada@example.com") if "digest" in m["Subject"].lower()], 75)
-        if not digest or "Groceries" not in digest[0].as_string():
+        if not digest or "Groceries" not in mail_text(digest[0]):
             return False, f"no weekly digest email: {[m['Subject'] for m in smtp.to('ada@example.com')]}"
         h = srv.db("host.db")
         hooks = h.execute("SELECT count(*) FROM webhook_events").fetchone()[0]
