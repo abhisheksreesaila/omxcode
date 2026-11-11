@@ -47,7 +47,8 @@ struct Api(Handler):
 var served = serve(Api(acc^), port=8000, log=Log.open("saas.log"),   # X-Request-Id + a JSON line per request
                    proxies=TrustedProxies.parse(getenv("SAAS_TRUSTED_PROXIES")),   # req.client: X-Forwarded-For from these only
                    tick_ms=60_000,                                    # tick(): the sweeps
-                   offload_threads=16, offload_queue=64)              # blocking requests: 16 at once, 64 waiting, then 503
+                   offload_threads=16, offload_queue=64,              # blocking requests: 16 at once, 64 waiting, then 503
+                   offload_per_client=4)                              # one client's share of them (429 past it)
 ```
 Bodies over `max_body` (1 MB) and requests slower than `request_timeout_ms` (30 s) are refused by Flare as it reads
 them; a reply header with CR, LF or NUL becomes a 500.
@@ -158,8 +159,12 @@ Audit.record(db, tenant, actor, "invite", detail)
 - A blocking request (the callback, checkout, portal, return, purchase) answers with `Connection: close` on one of the
   offload pool's threads (`SAAS_OFFLOAD_THREADS`, 16, made at start and kept, so their SQLite connections stay open),
   and its socket gets 30 s send and receive timeouts. At most `SAAS_OFFLOAD_QUEUE` (64) more wait for a thread; past
-  that, 503 with Retry-After. Sixteen providers each sitting 20 s (the callback's timeout) fill the pool for that long:
-  the reactor still answers every other request. The offload needs a cleartext connection, and `mojoui.serve` binds
+  that, 503 with Retry-After, and a job that waited past the 30 s request timeout is dropped with 503, never answered
+  late; the queue's pipe never blocks the reactor (full: 503). One client (`req.client`, IPv6 by /64) holds at most
+  `SAAS_OFFLOAD_PER_CLIENT` (4) of the slots: 429 with Retry-After past it (D-6036). Sixteen providers each sitting
+  20 s (the callback's timeout) fill the pool for that long: the reactor still answers every other request. The pool's
+  threads aren't joined when a server stops: one server per process (they wait on the queue until the process ends).
+- The demo server refuses to start on a `SAAS_*` number that isn't a whole number in range, naming it (D-6036). The offload needs a cleartext connection, and `mojoui.serve` binds
   cleartext only: terminate TLS in front of it (a TLS connection would get a 503).
 - `serve()` stopped and started again in one process (tests do; the demos don't): the stopped server's loop ends on its
   own thread a little later and can close a descriptor number the new server has reused (its listener: connections
@@ -178,6 +183,8 @@ Audit.record(db, tenant, actor, "invite", detail)
   days at most) and applied when the checkout lands (D-6023).
 - One pending sign-in per browser: the state is one cookie, so a second /login in another tab replaces the first's
   (that tab's callback says to start again).
+- Deploying this version cancels the sign-ins in progress once: host migration 006 drops `oauth_states`, so a
+  callback for a /login started before the upgrade says to start again.
 - A request carrying two cookies named `saas` (or `__Host-saas`, or the state cookie) gets 400 and that cookie expired:
   a page that can set cookies for this site could sign someone out that way (an availability cost, chosen over guessing
   which copy is real). On https the `__Host-` names can't be set by a sibling subdomain or an http page. On a plain-http

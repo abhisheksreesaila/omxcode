@@ -46,7 +46,7 @@ from mojoui.clock import now_ns
 from mojoui.log import Log, Fields
 from mojoui.crypto import random_bytes
 from mojoui.hash import hex
-from mojoui.clientip import TrustedProxies, client_ip
+from mojoui.clientip import TrustedProxies, client_ip, rate_key
 from flare.http import HttpServer, HeaderMap, Cancel, ChunkSource, stream_response, HttpClient
 from flare.http import Request as FlareRequest
 from flare.http import Handler as FlareHandler
@@ -937,7 +937,11 @@ comptime H_MAX_OFFLOADED = 3  # the pool's threads + its queue
 comptime H_PROXIES = 4  # a TrustedProxies (read-only once serving)
 comptime H_QUEUE_W = 5  # the offload queue: a pipe of job addresses (8 bytes each: one write, one read, never split)
 comptime H_QUEUE_R = 6
-comptime H_WORDS = 7
+comptime H_PER_CLIENT = 7  # pool slots one client (rate_key of req.client) may hold at once (0: no cap)
+comptime H_SLOTS = 8  # the address of CLIENT_SLOTS atomic counters, a client's slots by its key's hash
+comptime H_DEADLINE_NS = 9  # a queued job not taken by then is dropped with 503 (the request timeout)
+comptime H_WORDS = 10
+comptime CLIENT_SLOTS = 4096  # (two clients sharing a counter by hash only ever share a cap: never more than it)
 comptime MAX_OFFLOAD_QUEUE = 4096  # (threads + queue stay far inside a pipe's 64 KB: a hand-off never blocks)
 
 
@@ -970,15 +974,25 @@ struct _HBridge[H: Handler](Copyable, FlareHandler):
         r.rid = request_id()
         var app = Pointer[Self.H, MutUntrackedOrigin](unsafe_from_address=Int((w + H_APP)[]))
         if app[].blocking(r) and req.version.startswith("HTTP/1"):  # (HTTP/2 streams share a connection: answered inline)
+            var slot = -1
+            var per = Int((w + H_PER_CLIENT)[])
+            if per > 0:  # (one client can't take the whole pool: D-6036)
+                slot = _client_slot(rate_key(r.client if r.client != "" else r.peer))
+                var counts = _P(unsafe_from_address=Int((w + H_SLOTS)[]))
+                if _A.fetch_add(counts + slot, 1) >= Int64(per):
+                    _ = _A.fetch_add(counts + slot, -1)
+                    var mine = Reply.error(429, "too many slow requests from here at once: try again", "rate_limited").header("Retry-After", "1")
+                    return _flare_reply(_finish(self.state, r, mine^, t0))
             if _A.fetch_add(w + H_OFFLOADED, 1) < (w + H_MAX_OFFLOADED)[]:
                 var job = unsafe_alloc[_Offload](1)
-                job.unsafe_write(_Offload(self.state, r^, t0))
+                job.unsafe_write(_Offload(self.state, r^, t0, slot))
                 var out = FlareResponse(status=503, body=_bytes("the server can't hand this request off"))
                 var hook = _offload_hook[Self.H]
                 out.offload_fn = Pointer(to=hook).unsafe_bitcast[Int]()[]
                 out.offload_arg = Int(job)
                 return out^
             _ = _A.fetch_add(w + H_OFFLOADED, -1)
+            _release_client_slot(self.state, slot)
             var busy = Reply.error(503, "too many slow requests at once: try again", "busy").header("Retry-After", "1")
             return _flare_reply(_finish(self.state, r, busy^, t0))
         var reply = app[].answer(r)
@@ -999,12 +1013,55 @@ struct _Offload(Movable):
     var req: Req
     var t0: Int
     var fd: Int
+    var slot: Int  # its client's counter (-1: no per-client cap)
+    var queued: Int  # when it was put on the queue (now_ns)
 
-    def __init__(out self, state: Int, var req: Req, t0: Int):
+    def __init__(out self, state: Int, var req: Req, t0: Int, slot: Int):
         self.state = state
         self.req = req^
         self.t0 = t0
         self.fd = -1
+        self.slot = slot
+        self.queued = 0
+
+
+def _client_slot(key: String) -> Int:
+    """A client's counter: FNV-1a of its rate key, mod CLIENT_SLOTS."""
+    var h: UInt64 = 14695981039346656037
+    for b in key.as_bytes():
+        h = (h ^ UInt64(b)) * 1099511628211
+    return Int(h % UInt64(CLIENT_SLOTS))
+
+
+def _release_client_slot(state: Int, slot: Int):
+    if slot >= 0:
+        var counts = _P(unsafe_from_address=Int((_P(unsafe_from_address=state) + H_SLOTS)[]))
+        _ = _A.fetch_add(counts + slot, -1)
+
+
+def offload_queue_pipe() raises -> Tuple[Int, Int]:
+    """The offload queue: a pipe (read end, write end) whose write end never blocks: a full pipe (the Mac's is smaller,
+    and Linux shrinks them past pipe-user-pages-soft) says EAGAIN, and the request gets 503 instead (D-6036)."""
+    var fds = List[Int32](length=2, fill=-1)
+    if libc.pipe(Int(fds.unsafe_ptr())) != 0:
+        raise Error("serve: no pipe for the offload queue")
+    var r = Int(fds[0])
+    var wr = Int(fds[1])
+    _ = len(fds)
+    var fl = libc.fcntl(wr, 3)  # F_GETFL
+    if fl < 0 or libc.fcntl(wr, 4, fl | (0x4 if CompilationTarget.is_macos() else 0x800)) < 0:  # F_SETFL O_NONBLOCK
+        raise Error("serve: the offload queue can't be made non-blocking")
+    return (r, wr)
+
+
+def queue_job(wfd: Int, addr: Int) -> Bool:
+    """Puts a job's address on the queue: False when the pipe is full (EAGAIN) or gone. Never blocks."""
+    var a = List[Int64](length=1, fill=Int64(addr))
+    var n = libc.write_fd(wfd, Int(a.unsafe_ptr()), 8)
+    while n < 0 and get_errno() == ErrNo.EINTR:
+        n = libc.write_fd(wfd, Int(a.unsafe_ptr()), 8)
+    _ = len(a)
+    return n == 8
 
 
 def _offload_hook[H: Handler](fd: Int, arg: Int):
@@ -1012,6 +1069,7 @@ def _offload_hook[H: Handler](fd: Int, arg: Int):
     var job = Pointer[_Offload, MutUntrackedOrigin](unsafe_from_address=arg)
     if fd < 0:  # (Flare couldn't hand the connection over (TLS, HTTP/2): the slot and the record go back; it got the 503)
         _ = _A.fetch_add(_P(unsafe_from_address=job[].state) + H_OFFLOADED, -1)
+        _release_client_slot(job[].state, job[].slot)
         job.unsafe_deinit_pointee()
         job.unsafe_free()
         return
@@ -1025,14 +1083,9 @@ def _offload_hook[H: Handler](fd: Int, arg: Int):
     _ = libc.setsockopt(fd, lvl, 0x1005 if CompilationTarget.is_macos() else 21, Int(tv.unsafe_ptr()), 16)
     _ = libc.setsockopt(fd, lvl, 0x1006 if CompilationTarget.is_macos() else 20, Int(tv.unsafe_ptr()), 16)
     _ = len(tv)
-    var job_addr = List[Int64](length=1, fill=Int64(arg))
-    var wfd = Int((_P(unsafe_from_address=job[].state) + H_QUEUE_W)[])
-    var n = libc.write_fd(wfd, Int(job_addr.unsafe_ptr()), 8)
-    while n < 0 and get_errno() == ErrNo.EINTR:
-        n = libc.write_fd(wfd, Int(job_addr.unsafe_ptr()), 8)
-    _ = len(job_addr)
-    if n != 8:  # (no queue: answered here, as a last resort; the slot counts held it to the pool's size)
-        _offload_run[H](arg)
+    job[].queued = now_ns()
+    if not queue_job(Int((_P(unsafe_from_address=job[].state) + H_QUEUE_W)[]), arg):  # (full: 503 now, on this worker)
+        _offload_answer(arg, _busy())
 
 
 def _offload_worker[H: Handler](state: Int):
@@ -1050,14 +1103,28 @@ def _offload_worker[H: Handler](state: Int):
                 continue
             else:
                 return  # (the queue closed: nothing more comes)
-        _offload_run[H](Int(buf[0]))
+        var job = Pointer[_Offload, MutUntrackedOrigin](unsafe_from_address=Int(buf[0]))
+        if now_ns() - job[].queued > Int((_P(unsafe_from_address=state) + H_DEADLINE_NS)[]):
+            _offload_answer(Int(buf[0]), _busy())  # (it waited past the request timeout: dropped, never answered late)
+        else:
+            _offload_run[H](Int(buf[0]))
+
+
+def _busy() -> Reply:
+    return Reply.error(503, "too many slow requests at once: try again", "busy").header("Retry-After", "1")
 
 
 def _offload_run[H: Handler](arg: Int):
     var job = Pointer[_Offload, MutUntrackedOrigin](unsafe_from_address=arg)
     var w = _P(unsafe_from_address=job[].state)
     var app = Pointer[H, MutUntrackedOrigin](unsafe_from_address=Int((w + H_APP)[]))
-    var reply = app[].answer(job[].req)
+    _offload_answer(arg, app[].answer(job[].req))
+
+
+def _offload_answer(arg: Int, var reply: Reply):
+    """Writes `reply` on the job's socket, closes it, gives back its slots and frees the job."""
+    var job = Pointer[_Offload, MutUntrackedOrigin](unsafe_from_address=arg)
+    var w = _P(unsafe_from_address=job[].state)
     if reply.pipe != 0:
         reply = Reply.error(500, "a streamed reply can't come from a blocking request", "internal")
     reply = _finish(job[].state, job[].req, reply^, job[].t0)
@@ -1089,6 +1156,7 @@ def _offload_run[H: Handler](arg: Int):
         _ = len(reply.body)
     _ = libc.close(fd)
     _ = _A.fetch_add(w + H_OFFLOADED, -1)
+    _release_client_slot(job[].state, job[].slot)
     job.unsafe_deinit_pointee()
     job.unsafe_free()
 
@@ -1223,13 +1291,17 @@ def _hstop_loop[H: Handler](state: Int):
 
 def serve[H: Handler](var handler: H, port: Int = 0, host: String = "127.0.0.1", workers: Int = 0, tick_ms: Int = 0,
                       log: Log = Log(addr=0), var proxies: TrustedProxies = TrustedProxies(), max_body: Int = 1024 * 1024,
-                      request_timeout_ms: Int = 30_000, offload_threads: Int = 16, offload_queue: Int = 64) raises -> Served:
+                      request_timeout_ms: Int = 30_000, offload_threads: Int = 16, offload_queue: Int = 64,
+                      offload_per_client: Int = 4) raises -> Served:
     """Serves `handler` concurrently on threads of its own until the returned Served is dropped or stopped (`.port`:
     the port). `workers` 0: one reactor per CPU core (up to 16). `log`: a request line each (Log(addr=0): none).
     `proxies`: the reverse proxies whose X-Forwarded-For names the client (`req.client`; none: the socket's peer).
     `max_body` (1 MB) and `request_timeout_ms` (30 s): Flare's limits on reading a request (Server.bind).
     `offload_threads` (16) answer the requests `blocking()` names, made now and kept; at most `offload_queue` (64) more
-    wait for one; past that a blocking request gets 503 with Retry-After. (The threads live as long as the process.)"""
+    wait for one; past that a blocking request gets 503 with Retry-After, and so does one that waited longer than
+    `request_timeout_ms` for a thread. One client (req.client, IPv6 by /64) holds at most `offload_per_client` (4; 0: no
+    cap) of them at once: 429 with Retry-After past it. (The threads live as long as the process: one server a
+    process, they aren't joined on stop.)"""
     if offload_threads < 1 or offload_queue < 0 or offload_threads + offload_queue > MAX_OFFLOAD_QUEUE:
         raise Error("serve: offload_threads ≥ 1, offload_queue ≥ 0, together at most " + String(MAX_OFFLOAD_QUEUE))
     var handles_signals = Server._install_stop_handler()
@@ -1245,12 +1317,15 @@ def serve[H: Handler](var handler: H, port: Int = 0, host: String = "127.0.0.1",
     (w + H_LOG)[] = Int64(log.addr)
     (w + H_OFFLOADED)[] = 0
     (w + H_MAX_OFFLOADED)[] = Int64(offload_threads + offload_queue)
-    var fds = List[Int32](length=2, fill=-1)
-    if libc.pipe(Int(fds.unsafe_ptr())) != 0:
-        raise Error("serve: no pipe for the offload queue")
-    (w + H_QUEUE_R)[] = Int64(fds[0])
-    (w + H_QUEUE_W)[] = Int64(fds[1])
-    _ = len(fds)
+    var qp = offload_queue_pipe()
+    (w + H_QUEUE_R)[] = Int64(qp[0])
+    (w + H_QUEUE_W)[] = Int64(qp[1])
+    (w + H_PER_CLIENT)[] = Int64(max(offload_per_client, 0))
+    var slots = unsafe_alloc[Int64](CLIENT_SLOTS)
+    for i in range(CLIENT_SLOTS):
+        (slots + i)[] = 0
+    (w + H_SLOTS)[] = Int64(Int(slots))
+    (w + H_DEADLINE_NS)[] = Int64(request_timeout_ms) * 1_000_000
     var px = unsafe_alloc[TrustedProxies](1)
     px.unsafe_write(proxies^)
     (w + H_PROXIES)[] = Int64(Int(px))

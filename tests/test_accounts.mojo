@@ -149,7 +149,8 @@ def main() raises:
     expect(before == after and hdb.count("SELECT count(*) FROM sqlite_master WHERE name = 'oauth_states'") == 0, "10,000 /logins wrote rows: " + before + " → " + after)
     _ = hdb.run("INSERT INTO sessions(id, user_id, tenant, expires, last_seen) VALUES ('old', 1, '', 1, 1)")
     _ = hdb.run("INSERT INTO signin_used(id, expires) VALUES ('old', 1)")
-    expect(a3.sweep() == 2, "the sweep: a used state and a session")
+    _ = hdb.run("INSERT INTO desktop_pending(id, user_id, challenge, redirect, app_state, expires) VALUES ('old', 1, 'c', 'http://127.0.0.1:1/', 's', 1)")
+    expect(a3.sweep() == 3 and hdb.count("SELECT count(*) FROM desktop_pending") == 0, "the sweep: a used state, an unanswered desktop confirm and a session")
     expect(hdb.count("SELECT count(*) FROM sqlite_master WHERE name IN ('signin_used_expires', 'sessions_expires', 'desktop_codes_expires', 'desktop_pending_expires')") == 4, "the expiry indexes")
     print("sweep: ok")
     # round 3 review: pending sign-ins per client, cookies over several lines, a changed address under the same sub

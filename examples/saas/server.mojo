@@ -179,11 +179,20 @@ def secure(var r: Reply) -> Reply:
     return r^.header("Content-Security-Policy", "frame-ancestors 'none'")
 
 
-def _int(name: String, default: Int) -> Int:
-    try:
-        return atol(getenv(name, String(default)))
-    except:
+def _int(name: String, default: Int, lo: Int = 0, hi: Int = 1_000_000_000) raises -> Int:
+    """A whole-number setting: unset → `default`; anything else that isn't a whole number from lo to hi refuses to
+    start, naming it (a typo never turns into a default quietly, D-6036)."""
+    var text = getenv(name, "")
+    if text == "":
         return default
+    var v: Int
+    try:
+        v = atol(text)
+    except:
+        raise Error(name + " must be a whole number (it is " + json_string(text) + ")")
+    if v < lo or v > hi:
+        raise Error(name + " must be from " + String(lo) + " to " + String(hi) + " (it is " + String(v) + ")")
+    return v
 
 
 def main() raises:
@@ -191,7 +200,7 @@ def main() raises:
     var log = Log.open(getenv("SAAS_LOG"))
     _ = log.secret(getenv("SMTP_PASSWORD"))
     try:
-        var jobs = Queue(data + "/host.db", backoff_ms=_int("SAAS_JOB_BACKOFF_MS", 2000), max_attempts=_int("SAAS_JOB_MAX_ATTEMPTS", 5))
+        var jobs = Queue(data + "/host.db", backoff_ms=_int("SAAS_JOB_BACKOFF_MS", 2000, 1), max_attempts=_int("SAAS_JOB_MAX_ATTEMPTS", 5, 1, 100))
         var cfg = AuthConfig.from_env()
         if cfg.migrations == "":
             cfg.migrations = "examples/saas/migrations"  # (the demo's own tenant schema)
@@ -206,8 +215,12 @@ def main() raises:
         var app = Saas(acc^, bill^, jobs)
         if app.test_hook:
             print("SAAS: the test-session hook is on (SAAS_TEST_HOOK=1, a test-mode Stripe key): never in production", flush=True)
-        var served = serve(app^, port=_int("SAAS_PORT", 8000), host=getenv("SAAS_HOST", "127.0.0.1"), tick_ms=60_000, log=log, proxies=proxies^,
-                           offload_threads=_int("SAAS_OFFLOAD_THREADS", 16), offload_queue=_int("SAAS_OFFLOAD_QUEUE", 64))  # (the callback, checkout, portal, return, purchase)
+        var port = _int("SAAS_PORT", 8000, 0, 65535)
+        var threads = _int("SAAS_OFFLOAD_THREADS", 16, 1, 1024)  # (the callback, checkout, portal, return, purchase)
+        var queue = _int("SAAS_OFFLOAD_QUEUE", 64, 0, 3072)
+        var per_client = _int("SAAS_OFFLOAD_PER_CLIENT", 4, 0, 4096)
+        var served = serve(app^, port=port, host=getenv("SAAS_HOST", "127.0.0.1"), tick_ms=60_000, log=log, proxies=proxies^,
+                           offload_threads=threads, offload_queue=queue, offload_per_client=per_client)
         print("SAAS: listening " + String(served.port), flush=True)
         while not served.stopped():
             _ = libc.poll(0, 0, 500)

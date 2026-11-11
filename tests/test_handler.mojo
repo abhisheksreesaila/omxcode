@@ -9,7 +9,7 @@ from std.memory import Pointer
 from std.os import listdir
 from std.sys import CompilationTarget
 from std.atomic import Atomic
-from mojoui.serve import Handler, Req, Reply, serve, spawn
+from mojoui.serve import Handler, Req, Reply, serve, spawn, offload_queue_pipe, queue_job
 from mojoui.clientip import TrustedProxies
 from mojoui.clock import now_ns
 from mojoui import libc
@@ -64,7 +64,7 @@ def threads() -> Int:
         return -1
 
 
-def raw_get(port: Int, path: String) -> String:
+def raw_get(port: Int, path: String, xff: String = "") -> String:
     """GET over a plain libc socket, the whole reply as text ("" when it fails). (Flare's HttpClient would do; this
     keeps the burst's clients free of any client-side pooling.)"""
     var fd = libc.socket(2, 1, 0)  # AF_INET, SOCK_STREAM
@@ -82,7 +82,7 @@ def raw_get(port: Int, path: String) -> String:
     sa[7] = 1
     var out = String("")
     if libc.connect(fd, Int(sa.unsafe_ptr()), 16) == 0:
-        var rq = "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+        var rq = "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n" + ("X-Forwarded-For: " + xff + "\r\n" if xff != "" else "") + "\r\n"
         _ = libc.send(fd, Int(rq.unsafe_ptr()), rq.byte_length(), 0)
         _ = rq.byte_length()
         var buf = List[UInt8](length=4096, fill=0)
@@ -100,15 +100,38 @@ def raw_get(port: Int, path: String) -> String:
 
 
 def burst_call(addr: Int):
-    """Calls /slow on the port in word 0, then counts the answer: word 1 (201), 2 (503 with Retry-After), 3 (other)."""
+    """Calls /slow on the port in word 0, then counts the answer: word 1 (201), 2 (503 with Retry-After), 3 (other),
+    4 (429 with Retry-After). Word 5: an X-Forwarded-For client number (0: none)."""
     var w = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
-    var r = raw_get(Int(w[]), "/slow")
+    var who = Int((w + 5)[])
+    var r = raw_get(Int(w[]), "/slow", "203.0.113." + String(who) if who > 0 else String(""))
     var k = 3
     if r.startswith("HTTP/1.1 201"):
         k = 1
     elif r.startswith("HTTP/1.1 503") and "retry-after:" in r.lower():
         k = 2
+    elif r.startswith("HTTP/1.1 429") and "retry-after:" in r.lower():
+        k = 4
     _ = _A.fetch_add(w + k, 1)
+
+
+def answered(addr: Int) -> Int:
+    var w = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=addr)
+    return Int(_A.load(w + 1) + _A.load(w + 2) + _A.load(w + 3) + _A.load(w + 4))
+
+
+def burst(port: Int, n: Int, who: Int = 0) -> List[Int64]:
+    """n concurrent /slow calls as client `who`; waits for them: [port, 201s, 503s, others, 429s, who]."""
+    var counts = List[Int64](length=6, fill=0)
+    counts[0] = Int64(port)
+    counts[5] = Int64(who)
+    for _ in range(n):
+        _ = spawn[burst_call](Int(counts.unsafe_ptr()))
+    var spent = 0
+    while _A.load(counts.unsafe_ptr() + 1) + _A.load(counts.unsafe_ptr() + 2) + _A.load(counts.unsafe_ptr() + 3) + _A.load(counts.unsafe_ptr() + 4) < Int64(n) and spent < 300:
+        _ = libc.poll(0, 0, 100)
+        spent += 1
+    return counts^
 
 
 def slow_call(addr: Int):
@@ -188,7 +211,7 @@ def main() raises:
     while not direct.stopped() and gone < 100:  # (a stopped server's loop ends on its own thread: let it, D-6033)
         _ = libc.poll(0, 0, 50)
         gone += 1
-    var pooled = serve(App(), port=0, workers=1, offload_threads=2, offload_queue=2)
+    var pooled = serve(App(), port=0, workers=1, offload_threads=2, offload_queue=2, offload_per_client=0)
     var counts = List[Int64](length=4, fill=0)
     counts[0] = Int64(pooled.port)
     for _ in range(6):
@@ -212,3 +235,45 @@ def main() raises:
             expect(on_reactor == offloaded, "an offloaded request ran on a new thread: reactor " + on_reactor + ", offloaded " + offloaded)
     pooled.stop()
     print("pool: ok")
+    # one client holds at most offload_per_client slots (429 past it); another client still gets its own (D-6036)
+    while not pooled.stopped():
+        _ = libc.poll(0, 0, 50)
+    var fair = serve(App(), port=0, workers=1, offload_threads=4, offload_queue=4, offload_per_client=2, proxies=TrustedProxies.parse("127.0.0.1"))
+    var a = List[Int64](length=6, fill=0)
+    var b = List[Int64](length=6, fill=0)
+    a[0] = Int64(fair.port)
+    a[5] = 7
+    b[0] = Int64(fair.port)
+    b[5] = 8
+    for _ in range(4):
+        _ = spawn[burst_call](Int(a.unsafe_ptr()))
+    for _ in range(2):
+        _ = spawn[burst_call](Int(b.unsafe_ptr()))
+    var waited2 = 0
+    while (answered(Int(a.unsafe_ptr())) < 4 or answered(Int(b.unsafe_ptr())) < 2) and waited2 < 300:
+        _ = libc.poll(0, 0, 100)
+        waited2 += 1
+    expect(Int(a[1]) == 2 and Int(a[4]) == 2 and Int(b[1]) == 2, "per client: A's 4 → " + String(Int(a[1])) + " answered, " + String(Int(a[4])) + " 429; B's 2 → " + String(Int(b[1])) + " answered")
+    _ = len(a)
+    _ = len(b)
+    fair.stop()
+    while not fair.stopped():
+        _ = libc.poll(0, 0, 50)
+    print("per_client: ok")
+    # a job that waited in the queue past the request timeout is dropped with 503 + Retry-After, never answered late
+    var late = serve(App(), port=0, workers=1, offload_threads=1, offload_queue=4, offload_per_client=0, request_timeout_ms=1000)
+    var l = burst(late.port, 3)
+    expect(Int(l[1]) == 1 and Int(l[2]) == 2, "1 thread, 3 slow requests of 2 s, a 1 s deadline: " + String(Int(l[1])) + " answered, " + String(Int(l[2])) + " 503")
+    late.stop()
+    while not late.stopped():
+        _ = libc.poll(0, 0, 50)
+    print("deadline: ok")
+    # the queue's hand-off never blocks the reactor: a full pipe says so (EAGAIN) and the request gets 503
+    var q = offload_queue_pipe()
+    var taken = 0
+    while queue_job(q[1], 12345) and taken < 100_000:
+        taken += 1
+    expect(taken > 0 and taken < 100_000, "a full queue pipe refused at once after " + String(taken) + " jobs (never blocked)")
+    _ = libc.close(q[0])
+    _ = libc.close(q[1])
+    print("queue_full: ok")

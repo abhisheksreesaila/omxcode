@@ -12,7 +12,8 @@ The server's contract is goal 57's (docs/goals/57-check.py's docstring) plus:
         SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM SMTP_TLS (implicit|starttls|off) SMTP_CA_FILE
         SAAS_JOB_BACKOFF_MS SAAS_JOB_MAX_ATTEMPTS  SAAS_TRIAL_DAYS STRIPE_TRIAL_DAYS SAAS_GRACE_DAYS (floats)
         SAAS_INVITE_TTL SAAS_SESSION_IDLE (seconds)  SAAS_RATE (requests a minute per IP on /login, /auth/callback, /api/token)
-        SAAS_OFFLOAD_THREADS (16) SAAS_OFFLOAD_QUEUE (64): the pool that answers blocking requests, and how many may wait (M12)
+        SAAS_OFFLOAD_THREADS (16) SAAS_OFFLOAD_QUEUE (64) SAAS_OFFLOAD_PER_CLIENT (4): the pool for blocking requests, how many may
+        wait, how many one client may hold (M12); a SAAS_* number that is not one refuses to start
   host.db   audit(ts, tenant, actor, action, detail)   jobs(id, tenant, kind, payload, status, attempts, max_attempts, run_at, error)
   tenant db schema_migrations(version, checksum, …)
   every reply has X-Request-Id; GET /api/jobs (admin); GET /api/tenants; POST /api/switch {tenant}
@@ -1011,7 +1012,7 @@ def m9():
     tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep", "per_client", "logout", "origins"],
              "tests/test_billing.mojo": ["out_of_order"], "tests/test_ui_thread.mojo": [], "tests/test_served.mojo": [],
              # (D-6025: round 3's tests in the goal's checker)
-             "tests/test_handler.mojo": ["handler", "offload", "header_inject", "body_cap", "client_ip", "pool"],
+             "tests/test_handler.mojo": ["handler", "offload", "header_inject", "body_cap", "client_ip", "pool", "per_client", "deadline", "queue_full"],
              "tests/test_ratelimit.mojo": ["limit", "window", "flood"],
              "tests/test_queue.mojo": ["claim_race", "backoff", "resume", "outbox", "sweep"],
              "tests/test_clientip.mojo": ["parse", "trusted", "untrusted", "ipv6"]}
@@ -1257,7 +1258,7 @@ def m12_pool():
     """Item 3 (D-6033): blocking requests run on a fixed pool (SAAS_OFFLOAD_THREADS=2, SAAS_OFFLOAD_QUEUE=2 here): six
     checkouts at once while Stripe sits 2 s → four answered, two 503 with Retry-After; no thread is made for them (the
     server's thread count never rises); /api/me stays fast throughout."""
-    stand, smtp, srv = scenario("m12p", "off", {"SAAS_OFFLOAD_THREADS": "2", "SAAS_OFFLOAD_QUEUE": "2"})
+    stand, smtp, srv = scenario("m12p", "off", {"SAAS_OFFLOAD_THREADS": "2", "SAAS_OFFLOAD_QUEUE": "2", "SAAS_OFFLOAD_PER_CLIENT": "0"})
     try:
         ada, _ = sign_in(srv, stand, ("ada@example.com", "Ada"))
         ben, _ = sign_in(srv, stand, ("ben@example.com", "Ben"))
@@ -1289,11 +1290,50 @@ def m12_pool():
             return False, f"the server made threads for blocking requests: {idle} idle, {peak[0]} during the burst"
         if slow >= 0.3:
             return False, f"/api/me took {slow * 1000:.0f} ms during the burst"
-        return True, f"2 threads + queue of 2: 4 checkouts answered, 2 × 503 + Retry-After; threads {idle} idle, {peak[0]} at most during; /api/me ≤ {slow * 1000:.0f} ms"
+        why = f"2 threads + queue of 2: 4 checkouts answered, 2 × 503 + Retry-After; threads {idle} idle, {peak[0]} at most during; /api/me ≤ {slow * 1000:.0f} ms"
     finally:
         srv.stop()
         stand.close()
         smtp.close()
+    # D-6036: one client holds at most SAAS_OFFLOAD_PER_CLIENT slots (429 past it); another client still gets in
+    stand, smtp, srv = scenario("m12f", "off", {"SAAS_OFFLOAD_THREADS": "4", "SAAS_OFFLOAD_QUEUE": "4", "SAAS_OFFLOAD_PER_CLIENT": "2",
+                                                "SAAS_TRUSTED_PROXIES": "127.0.0.1/32"})
+    try:
+        ada, _ = sign_in(srv, stand, ("ada@example.com", "Ada"))
+        ben, _ = sign_in(srv, stand, ("ben@example.com", "Ben"))
+        stand.delay_checkout = 2
+        got = {"ada": [], "ben": []}
+
+        def checkout(who, cl, ip):
+            with httpx.Client(base_url=srv.base, cookies=dict(cl.cookies), timeout=30, headers={"X-Forwarded-For": ip}) as c:
+                r = c.post("/billing/checkout")
+                got[who].append((r.status_code, r.headers.get("retry-after")))
+        ts = [threading.Thread(target=checkout, args=("ada", ada, "203.0.113.7")) for _ in range(4)]
+        ts.append(threading.Thread(target=checkout, args=("ben", ben, "203.0.113.8")))
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(30)
+        stand.delay_checkout = 0
+        if sorted(c for c, _ in got["ada"]) != [200, 200, 429, 429] or any(c == 429 and not ra for c, ra in got["ada"]) or [c for c, _ in got["ben"]] != [200]:
+            return False, f"per client (2 slots): ada's 4 → {sorted(got['ada'])}, ben's 1 → {got['ben']}"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+    # a SAAS_* number that isn't one refuses to start (as one out of range does), naming it
+    stand, smtp = StandIn(), Smtp("off")
+    for name, val in (("SAAS_OFFLOAD_THREADS", "lots"), ("SAAS_OFFLOAD_THREADS", "0"), ("SAAS_PORT", "80x")):
+        bad = Server("m12n", stand, smtp, {name: val}, expect_fail=True)
+        try:
+            out = (bad.data / "server.out").read_text()
+            if bad.started or name not in out.split("SAAS: not starting")[-1]:
+                return False, f"{name}={val} started anyway, or the refusal didn't name it: {out[-200:]}"
+        finally:
+            bad.stop()
+    stand.close()
+    smtp.close()
+    return True, why + "; 2 slots a client (429 past them, another client served); a bad SAAS_* number refuses to start"
 
 
 def m12_logout():
