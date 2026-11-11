@@ -1375,3 +1375,4 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - M1 mojoui.webhooks: one Mojo aliasing error (String(t[...]) assigned to t), then the unit test (Standard Webhooks' published vector, Python-made vectors) and the HTTP check passed first run.
 - M2 mojoui.apiclient (+ Json.dump): two Mojo ownership errors (a mutating method on an rvalue; self.graphql_path aliasing self), then all eight checks passed against an in-process stand-in API.
 - M3 mojoui.schedule: one Mojo aliasing error; the unit test passed first run (9 zone offsets equal Python's zoneinfo, both DST days), and the kill -9 / downtime process check passed first run on a fake clock 600x.
+- M4 bulk_upsert/set_edited in mojoui.sqlite, Statement.kind, Reply.csv, mojoui.csvstream: passed first build; 100k rows upsert in ~110–140 ms (one prepared statement, one transaction).

@@ -270,6 +270,10 @@ struct Statement(Movable):
     def is_null(self, col: Int) -> Bool:
         return Int(_fn[_F_PI](self.lib.column_type)(self.st, c_int(col))) == SQLITE_NULL
 
+    def kind(self, col: Int) -> Int:
+        """The column's storage class in this row: SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_TEXT, SQLITE_BLOB, SQLITE_NULL."""
+        return Int(_fn[_F_PI](self.lib.column_type)(self.st, c_int(col)))
+
     def int(self, col: Int) -> Int:
         return _fn[_F_PI_P](self.lib.column_int64)(self.st, c_int(col))
 
@@ -721,3 +725,89 @@ struct Pool(ImplicitlyCopyable, Movable):
             s[].unopened(f, room[1])
             _ = libc.pthread_mutex_unlock(s[].mu)
             raise e^
+
+
+# bulk writes (goal 66 M4) ------------------------------------------------------------------------------------------
+
+def _ident_ok(name: String) -> Bool:
+    """A plain SQL identifier: a letter or '_', then letters, digits, '_' (tables and columns a bulk write names)."""
+    if name == "" or name.byte_length() > 64:
+        return False
+    var first = True
+    for b in name.as_bytes():
+        var c = Int(b)
+        var letter = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+        if not (letter or (not first and c >= 48 and c <= 57)):
+            return False
+        first = False
+    return True
+
+
+def bulk_upsert(db: Database, table: String, key: List[String], columns: List[String], rows: List[List[String]],
+                keep_edited: List[String] = List[String]()) raises -> Int:
+    """Writes `rows` (values in `columns`' order, bound as text: SQLite's column affinity turns numbers into numbers) in
+    one transaction: a row whose `key` columns match an existing row updates it, else it is inserted. A column in
+    `keep_edited` keeps its stored value when the row's `edited` column (a comma list, set by `set_edited`) names it:
+    a sync never overwrites what a person changed. The table needs a UNIQUE index on `key` (and an `edited TEXT`
+    column when `keep_edited` is used). Returns the rows written. Raises (and writes nothing) on any failure."""
+    for c in columns:
+        if not _ident_ok(c):
+            raise Error("bulk_upsert: not a plain column name: " + c)
+    for c in key:
+        if not _ident_ok(c):
+            raise Error("bulk_upsert: not a plain column name: " + c)
+    if not _ident_ok(table) or len(key) == 0 or len(columns) == 0:
+        raise Error("bulk_upsert: a table, a key and columns are needed")
+    var names = String("")
+    var marks = String("")
+    var sets = String("")
+    for i in range(len(columns)):
+        var c = columns[i]
+        names += ("," if i > 0 else "") + c
+        marks += ("," if i > 0 else "") + "?"
+        var is_key = False
+        for k in key:
+            is_key = is_key or k == c
+        if is_key:
+            continue
+        var kept = False
+        for k in keep_edited:
+            kept = kept or k == c
+        if kept:
+            sets += ("," if sets != "" else "") + c + " = CASE WHEN instr(',' || coalesce(edited, '') || ',', '," + c + ",') > 0 THEN " + c + " ELSE excluded." + c + " END"
+        else:
+            sets += ("," if sets != "" else "") + c + " = excluded." + c
+    var conflict = String("")
+    for i in range(len(key)):
+        conflict += ("," if i > 0 else "") + key[i]
+    var sql = "INSERT INTO " + table + "(" + names + ") VALUES (" + marks + ") ON CONFLICT(" + conflict + ") DO " + (
+        "UPDATE SET " + sets if sets != "" else "NOTHING")
+    db.begin()
+    var n = 0
+    try:
+        var st = db.prepare(sql)
+        for r in rows:
+            if len(r) != len(columns):
+                raise Error("bulk_upsert: a row has " + String(len(r)) + " values for " + String(len(columns)) + " columns")
+            for i in range(len(r)):
+                st.bind(i + 1, r[i])
+            st.run()
+            n += 1
+        db.commit()
+    except e:
+        _ = db.rollback_quiet()
+        raise e^
+    return n
+
+
+def set_edited(db: Database, table: String, id_column: String, id: String, column: String, value: String) raises -> Int:
+    """A person's change to one column of one row: the value, and the column added to the row's `edited` list (so
+    bulk_upsert's `keep_edited` keeps it). The rows changed (0: no such row)."""
+    if not _ident_ok(table) or not _ident_ok(id_column) or not _ident_ok(column):
+        raise Error("set_edited: not a plain name")
+    var st = db.prepare("UPDATE " + table + " SET " + column + " = ?, edited = CASE WHEN instr(',' || coalesce(edited, '') || ',', '," + column
+                        + ",') > 0 THEN edited ELSE trim(coalesce(edited, '') || '," + column + "', ',') END WHERE " + id_column + " = ?")
+    st.bind(1, value)
+    st.bind(2, id)
+    st.run()
+    return db.changes()

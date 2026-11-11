@@ -459,6 +459,20 @@ struct Reply(Movable):
             r.values.append("no-cache")
         return r^
 
+    @staticmethod
+    def csv(pipe: Pipe, filename: String) -> Reply:
+        """Stream `pipe` as a CSV download (mojoui.csvstream writes it): text/csv, an attachment named `filename`
+        (letters, digits, '.', '-', '_' kept; anything else becomes '_')."""
+        var safe = String("")
+        for b in filename.as_bytes():
+            var c = Int(b)
+            var keep = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 46 or c == 45 or c == 95
+            safe += chr(c) if keep else "_"
+        if safe == "" or safe.startswith("."):
+            safe = "export.csv"
+        return Reply.stream(pipe, "text/csv; charset=utf-8").header("Content-Disposition", 'attachment; filename="' + safe + '"').header(
+            "X-Content-Type-Options", "nosniff").header("Cache-Control", "no-store")
+
     def header(var self, name: String, value: String) -> Self:
         self.names.append(name)
         self.values.append(value)
