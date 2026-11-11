@@ -605,10 +605,10 @@ def m6():
 # ---------------------------------------------------------------- M7 leaving fh-saas
 
 def m7():
-    work = OUT / "m7"
+    work = OUT / "m7-fh"  # (not under the server's own folder, which a fresh server wipes)
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
-    seed = run(["pixi", "run", "-e", "fhsaas", "python", "scripts/fhsaas_seed.py", str(work / "fh")], 600)
+    seed = run(["pixi", "run", "-e", "fhsaas", "python", "scripts/fhsaas_seed.py", str(work)], 600)
     if seed.returncode:
         return False, "fh-saas itself didn't make the host database: " + (seed.stdout + seed.stderr)[-800:]
     try:

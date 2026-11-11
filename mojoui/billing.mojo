@@ -171,8 +171,8 @@ struct Billing(Copyable, Movable):
         var period_end = 0 if q.is_null(1) else q.int(1)
         var cancels = period_end if q.int(2) != 0 else 0
         var now = wall_seconds()
-        if status == "active" or status == "trialing":
-            return Plan("pro", status, True, 0, cancels)
+        if status == "active" or status == "trialing":  # (trialing: Stripe's trial ends with the period, goal 66 M7)
+            return Plan("pro", status, True, period_end if status == "trialing" else 0, cancels)
         if status == "past_due" and not q.is_null(3):
             var within = now < q.float(3) + self.grace_s
             return Plan("pro" if within else "past_due", status, within, 0, cancels)
