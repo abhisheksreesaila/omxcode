@@ -5,7 +5,8 @@
 #
 #   var acc = Accounts(data_dir, AuthConfig.from_env(), log, events=queue)   # data_dir/host.db + tenants/<tenant>.db
 #   def answer(self, mut req: Req) -> Reply:
-#       var r = self.acc.handle(req)          # /login /auth/callback /api/token /logout /api/me /api/invites /api/tenants
+#       var r = self.acc.handle(req)          # /login /auth/callback /auth/desktop /api/token /logout (POST; GET: a page)
+#                                             # /api/me /api/invites /api/tenants
 #       if r.status != 0: return r^           # /api/switch /invites/<token>
 #       var m = self.acc.member(req)          # the session's person in their current tenant, or None: answer 401
 #       var db = self.acc.tenant_db(m.value())  # their tenant's file, from the session only
@@ -475,7 +476,9 @@ struct Accounts(Copyable, Movable):
                 return self._token(req)
             if req.matches("POST", "/auth/desktop"):
                 return self._desktop_confirm(req).header("Referrer-Policy", "no-referrer").header("Cache-Control", "no-store")
-            if req.matches("GET", "/logout") or req.matches("POST", "/logout"):
+            if req.matches("GET", "/logout"):  # (a link or an img must sign nobody out: a page with the button, D-6034)
+                return self._logout_page()
+            if req.matches("POST", "/logout"):
                 return self._logout(req)
             if req.matches("GET", "/api/me"):
                 var m = self.member(req)
@@ -1016,7 +1019,19 @@ struct Accounts(Copyable, Movable):
             return Reply.error(400, "that code isn't good (used, expired, or the verifier doesn't match)", "invalid_grant")
         return Reply.json('{"token": ' + json_string(self.start_session(uid, self.home_tenant(uid))) + "}").header("Cache-Control", "no-store")
 
+    def _logout_page(self) -> Reply:
+        var app = escape_html(self.cfg.app_name)
+        return Reply.html("<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+            + "<title>Sign out of " + app + "?</title></head>"
+            + "<body style='font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem'>"
+            + "<h1>Sign out of " + app + "?</h1><form method=post action=/logout><button type=submit>Sign out</button></form>"
+            + "</body></html>").header("Cache-Control", "no-store")
+
     def _logout(self, req: Req) raises -> Reply:
+        """POST only (a GET answers _logout_page). A cookie's sign-out from another site is refused (403) and its
+        cookie left alone; a bearer token's (a native app) ends that session."""
+        if req.header("authorization") == "" and not _origin_ok(req, self.cfg.base):
+            return Reply.error(403, "sign out on this site", "forbidden")
         var m = self.member(req)
         if m:
             var db = self.db()

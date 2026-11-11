@@ -12,7 +12,7 @@ and `examples/saas_min/server.mojo` (sign-in, tenants and a welcome email from a
 
 | fh-saas module | What it did | mojoui piece | State |
 |---|---|---|---|
-| `utils_auth` | Google OAuth with CSRF state, sessions, provisioning, roles, logout | `mojoui.accounts`: `/login` (state in a sealed cookie, bound to the browser, single use, no row + PKCE S256), `/auth/callback`, a desktop sign-in confirmed on a same-origin page before its code goes to the app (D-6029), server-side sessions in sealed HttpOnly SameSite cookies that slide (idle `SAAS_SESSION_IDLE`, 30 days at most), `/logout` ends them on the server, roles admin/member/viewer (`acc.need(req, "member")` in place of `@require_role`), desktop apps through `mojoui.signin` (RFC 8252), per-client limits on the sign-in routes (behind `SAAS_TRUSTED_PROXIES`, IPv6 by /64), people identified by Google's `sub` (a reassigned address can't take over an account), `__Host-` cookies on https | ✅ (57 M2, M4; 60 M5, M7). Google only, as fh-saas |
+| `utils_auth` | Google OAuth with CSRF state, sessions, provisioning, roles, logout | `mojoui.accounts`: `/login` (state in a sealed cookie, bound to the browser, single use, no row + PKCE S256), `/auth/callback`, a desktop sign-in confirmed on a same-origin page before its code goes to the app (D-6029), server-side sessions in sealed HttpOnly SameSite cookies that slide (idle `SAAS_SESSION_IDLE`, 30 days at most), `POST /logout` ends them on the server (a GET only shows the button, D-6034), roles admin/member/viewer (`acc.need(req, "member")` in place of `@require_role`), desktop apps through `mojoui.signin` (RFC 8252), per-client limits on the sign-in routes (behind `SAAS_TRUSTED_PROXIES`, IPv6 by /64), people identified by Google's `sub` (a reassigned address can't take over an account), `__Host-` cookies on https | ✅ (57 M2, M4; 60 M5, M7). Google only, as fh-saas |
 | `db_host` | Users, tenants, memberships, subscriptions, webhook events, audit log, jobs, pricing plans | host.db: `mojoui.accounts`' users, tenants, members (many tenants per person), invites, sessions, used sign-in states, desktop confirms and codes, audit; `mojoui.billing`'s billing and stripe_events; `mojoui.jobs`' jobs; each module's tables versioned by `mojoui.migrate` (accounts_migrations, billing_migrations) | ✅ (60 M1, M3, M5, M6). Pricing plans are configuration (`STRIPE_PRICE_PRO`, `STRIPE_PRICE_PRO_YEARLY`, `STRIPE_PRICES_ONCE`), not a table |
 | `db_tenant` | One database per tenant, tenant users, permissions, settings | `Accounts.tenant_db(member)`: `tenants/<id>.db`, chosen from the session only (never a request's `?tenant=`), this thread's own connection, migrated by `mojoui.migrate` | ✅ the file per tenant, its isolation and its schema (57 M2, 60 M2, M5). Who is in a tenant and with which role lives in host.db's `members` (one source of truth) rather than fh-saas's per-tenant TenantUser/TenantPermission copies; a tenant's settings are the app's own table in its migrations |
 | `utils_billing` | Billing config, access decisions, checkout return, trials, paywall hooks | `mojoui.billing`: `BillingConfig.from_env()`, `/billing/checkout` (monthly, or `{"interval": "year"}`), `/billing/return` (reads the session back), `bill.paywall(member)` → 402, our own trial for new tenants (`SAAS_TRIAL_DAYS`), past_due with a grace period (`SAAS_GRACE_DAYS`), `/api/me`'s plan, status, trial_ends, cancels_at | ✅ (57 M3; 60 M6) |
@@ -55,7 +55,7 @@ them; a reply header with CR, LF or NUL becomes a 500.
 ### `mojoui.accounts`
 ```mojo
 var acc = Accounts(data_dir, AuthConfig.from_env(), log, events=queue)   # host.db + tenants/<id>.db, migrated
-var r = acc.handle(req)            # /login /auth/callback /api/token /logout /api/me /api/invites /api/tenants /api/switch /invites/<token>
+var r = acc.handle(req)            # /login /auth/callback /auth/desktop /api/token /logout (POST) /api/me /api/invites /api/tenants /api/switch /invites/<token>
 if r.status != 0: return r^
 var m = acc.member(req)            # Optional[Member]: user, current tenant, role
 var db = acc.tenant_db(m.value())  # this thread's connection to the tenant's file
@@ -143,6 +143,9 @@ Audit.record(db, tenant, actor, "invite", detail)
     (D-6031, D-6032).
   - A new thread and new SQLite connections for every blocking request (up to 256 at once). A fixed pool of offload
     threads now takes them from a bounded queue (a pipe of job addresses), 503 with Retry-After past it (D-6033).
+  - `GET /logout` signing people out (a link or an img on any page could). Sign-out is `POST /logout` from the site
+    itself (Origin this site, or none) or with a bearer token; another site's POST gets 403 and the cookie is left
+    alone; `GET /logout` shows a "Sign out?" page with the button (D-6034).
 - Per-client limits key on `req.client`: the socket's peer, or, when the peer is in `SAAS_TRUSTED_PROXIES` (CIDRs:
   set it to your TLS proxy's addresses), X-Forwarded-For's rightmost hop that isn't a trusted proxy, read across every
   X-Forwarded-For line (nginx, Caddy and Envoy join the hops into one line; HAProxy's `option forwardfor` adds its own:
@@ -164,7 +167,6 @@ Audit.record(db, tenant, actor, "invite", detail)
   and gives a request 30 s to arrive (serve()'s `max_body`, `request_timeout_ms`); `/billing/return` makes at most 30 Stripe
   read-backs a minute for the whole server, so a stranger can spend that budget and make a real return page say 429 (the
   webhook still upgrades the plan) (D-5727).
-- `GET /logout` still works (the contract's), so a page elsewhere can sign someone out; the app itself signs out by POST.
 - Template values in emails are inert: a name like `[Accept](https://evil.example)` can't become a link (brackets and
   marks are replaced), and they are HTML-escaped in the HTML part.
 - Jobs are at least once (above). An invitation's email is built when its job runs, from the invite's row, so the job's

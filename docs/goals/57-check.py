@@ -21,7 +21,8 @@ The contract the server keeps (build/saas/server, built by `scripts/saas.sh buil
   GET  /api/entries   POST /api/entries {text, amount_cents}     the tenant's tenants/<tenant>.db, table entries(text, amount_cents)
   POST /api/invites {email, role}         admin only
   GET  /api/pro                           200 for Pro, 402 otherwise
-  GET  /logout                            ends the session server-side
+  POST /logout                            ends the session server-side (same site, or a bearer token); GET /logout: a page with
+                                          the button, signing nobody out (hardening, D-6034)
   POST /billing/checkout                  {url}       GET /billing/return?session_id=   POST /billing/webhook
 """
 import base64
@@ -358,7 +359,7 @@ def m2():
             return False, "a desktop sign-in to a non-loopback redirect was accepted"
         # sign-out ends the session on the server
         old = ada.cookies.get("saas")
-        ada.get("/logout")
+        ada.post("/logout", headers={"Origin": srv.base})  # (D-6034: sign-out is the site's own POST; a GET signs nobody out)
         if httpx.get(srv.base + "/api/me", cookies={"saas": old}).status_code != 401:
             return False, "the old cookie still works after /logout"
         if stand.problems:

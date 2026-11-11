@@ -1008,7 +1008,7 @@ def m9():
             continue  # (D-6013: only goal 57's silent invite, which M5 replaced on purpose, as M0 allows)
         if not m or m.group(1) != "PASS":
             return False, f"goal 57's {k}: {m.group(0) if m else 'no result'}"
-    tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep", "per_client"],
+    tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep", "per_client", "logout"],
              "tests/test_billing.mojo": ["out_of_order"], "tests/test_ui_thread.mojo": [], "tests/test_served.mojo": [],
              # (D-6025: round 3's tests in the goal's checker)
              "tests/test_handler.mojo": ["handler", "offload", "header_inject", "body_cap", "client_ip", "pool"],
@@ -1293,12 +1293,39 @@ def m12_pool():
         smtp.close()
 
 
+def m12_logout():
+    """Item 4 (D-6034): signing out is a same-site POST: GET /logout (a link, an img, a top-level visit) shows a page with
+    the button and signs nobody out; a cross-site POST is 403 and leaves the cookie; the site's own POST ends it."""
+    stand, smtp, srv = scenario("m12o")
+    try:
+        ada, _ = sign_in(srv, stand, ("ada@example.com", "Ada"))
+        old = ada.cookies.get("saas")
+        live = lambda: httpx.get(srv.base + "/api/me", cookies={"saas": old}).status_code  # noqa: E731
+        g = ada.get("/logout", headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "image"})
+        page = ada.get("/logout")
+        if live() != 200 or "set-cookie" in g.headers or "set-cookie" in page.headers:
+            return False, f"GET /logout signed ada out ({live()}) or touched her cookie"
+        if page.status_code != 200 or not re.search(r"<form[^>]*method=post[^>]*action=/logout", page.text):
+            return False, f"GET /logout isn't a page with a POST button: {page.status_code} {page.text[:200]}"
+        x = ada.post("/logout", headers={"Origin": "https://evil.example"})
+        if x.status_code != 403 or "set-cookie" in x.headers or live() != 200:
+            return False, f"a cross-site POST /logout: {x.status_code} {x.headers.get('set-cookie')} (session {live()})"
+        out = ada.post("/logout", headers={"Origin": srv.base})
+        if out.status_code != 303 or "max-age=0" not in out.headers.get("set-cookie", "").lower() or live() != 401:
+            return False, f"the site's own POST /logout: {out.status_code}, session {live()}"
+        return True, "GET /logout: a page, nobody signed out; cross-site POST 403; same-origin POST ends the session"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+
+
 def m12():
-    for step in (m12_desktop, m12_state, m12_pool):
+    for step in (m12_desktop, m12_state, m12_pool, m12_logout):
         ok, why = step()
         if not ok:
             return False, f"{step.__name__}: {why}"
-    return True, "hardening: desktop confirm page; sign-in state in a sealed cookie (no rows to flood, bound to the browser, single use); a fixed offload pool (503 + Retry-After past it, no thread per request)"
+    return True, "hardening: desktop confirm page; sign-in state in a sealed cookie (no rows to flood, bound to the browser, single use); a fixed offload pool (503 + Retry-After past it, no thread per request); sign-out by POST only"
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8, "M9": m9, "M10": m10, "M11": m11, "M12": m12}

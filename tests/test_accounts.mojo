@@ -216,3 +216,43 @@ def main() raises:
     _ = a4.user_for("ivy@example.com", "Ivy", "sub-i")
     expect(a4.user_for("ivy@example.com", "Hal", "sub-h")[0] == -1, "a sub moving onto another account's address")
     print("per_client: ok")
+    # hardening (D-6034): signing out is a POST from this site; a GET (a link, an img) signs nobody out
+    var dir5 = "build/test_accounts.data5"
+    _ = libc.unlink(dir5 + "/host.db")
+    _ = libc.unlink(dir5 + "/host.db-wal")
+    var a5 = Accounts(dir5, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", "omxcode SaaS"))
+    var kim = a5.test_session("kim@example.com")
+    var alive = Req("GET", "/api/me")
+    alive.names.append("cookie")
+    alive.values.append("saas=" + kim)
+    var get_out = Req("GET", "/logout")
+    get_out.names.append("cookie")
+    get_out.values.append("saas=" + kim)
+    var page = a5.handle(get_out)
+    var page_text = String(from_utf8_lossy=Span(page.body))
+    var sets = False
+    for i in range(len(page.names)):
+        sets = sets or page.names[i] == "Set-Cookie"
+    expect(page.status == 200 and "method=post" in page_text and "action=/logout" in page_text and not sets, "GET /logout: a page with a POST button, no cookie change: " + String(page.status))
+    expect(Bool(a5.member(alive)), "GET /logout signed the person out")
+    var cross = Req("POST", "/logout")
+    cross.names.append("cookie")
+    cross.values.append("saas=" + kim)
+    cross.names.append("origin")
+    cross.values.append("https://evil.example")
+    var cr = a5.handle(cross)
+    var cr_sets = False
+    for i in range(len(cr.names)):
+        cr_sets = cr_sets or cr.names[i] == "Set-Cookie"
+    expect(cr.status == 403 and not cr_sets and Bool(a5.member(alive)), "a cross-site POST /logout: " + String(cr.status))
+    var mine = Req("POST", "/logout")
+    mine.names.append("cookie")
+    mine.values.append("saas=" + kim)
+    mine.names.append("origin")
+    mine.values.append("http://127.0.0.1:1")
+    var mr = a5.handle(mine)
+    var cleared5 = False
+    for i in range(len(mr.names)):
+        cleared5 = cleared5 or (mr.names[i] == "Set-Cookie" and "Max-Age=0" in mr.values[i])
+    expect(mr.status == 303 and cleared5 and not a5.member(alive), "a same-origin POST /logout: " + String(mr.status))
+    print("logout: ok")
