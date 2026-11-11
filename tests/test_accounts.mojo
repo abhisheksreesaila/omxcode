@@ -3,7 +3,7 @@
 # file per tenant. The OAuth round trip itself is proved by docs/goals/57-check.py M2 against its stand-in.
 from std.os import getenv, makedirs
 from std.os.path import exists
-from mojoui.accounts import Accounts, AuthConfig, is_loopback_redirect, is_local_path, cookie
+from mojoui.accounts import Accounts, AuthConfig, is_loopback_redirect, is_local_path, cookie, origin_ok, same_origin_post
 from mojoui.jobs import Queue
 from mojoui.json import Json
 from mojoui.serve import Req
@@ -256,3 +256,40 @@ def main() raises:
         cleared5 = cleared5 or (mr.names[i] == "Set-Cookie" and "Max-Age=0" in mr.values[i])
     expect(mr.status == 303 and cleared5 and not a5.member(alive), "a same-origin POST /logout: " + String(mr.status))
     print("logout: ok")
+    # D-6035: a browser's form POST from a no-referrer page says Origin "null" (with Sec-Fetch-Site same-origin): taken
+    # only with that; a base written with a trailing slash still matches the browser's Origin
+    for base in ["http://127.0.0.1:1", "http://127.0.0.1:1/"]:
+        var cases = List[Tuple[String, String, Bool, Bool]]()  # origin, sec-fetch-site, origin_ok, same_origin_post
+        cases.append(("http://127.0.0.1:1", "", True, True))
+        cases.append(("http://127.0.0.1:1", "same-origin", True, True))
+        cases.append(("null", "same-origin", True, True))
+        cases.append(("null", "", False, False))
+        cases.append(("null", "cross-site", False, False))
+        cases.append(("null", "same-site", False, False))
+        cases.append(("https://evil.example", "same-origin", False, False))
+        cases.append(("http://127.0.0.1:1/", "", False, False))
+        cases.append(("", "", True, False))
+        cases.append(("", "same-origin", True, True))
+        cases.append(("", "cross-site", False, False))
+        for c in cases:
+            var r = Req("POST", "/x")
+            if c[0] != "":
+                r.names.append("origin")
+                r.values.append(c[0])
+            if c[1] != "":
+                r.names.append("sec-fetch-site")
+                r.values.append(c[1])
+            expect(origin_ok(r, base) == c[2], "origin_ok(" + c[0] + ", " + c[1] + ") under " + base)
+            expect(same_origin_post(r, base) == c[3], "same_origin_post(" + c[0] + ", " + c[1] + ") under " + base)
+    var dir6 = "build/test_accounts.data6"
+    _ = libc.unlink(dir6 + "/host.db")
+    _ = libc.unlink(dir6 + "/host.db-wal")
+    var a6 = Accounts(dir6, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1/", random_token(32), 7 * 86400, 7 * 86400, 0, "", "omxcode SaaS"))
+    var lee = a6.test_session("lee@example.com")
+    var lo = Req("POST", "/logout")
+    lo.names.append("cookie")
+    lo.values.append("saas=" + lee)
+    lo.names.append("origin")
+    lo.values.append("http://127.0.0.1:1")
+    expect(a6.handle(lo).status == 303, "sign-out under a base with a trailing slash")
+    print("origins: ok")

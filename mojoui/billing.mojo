@@ -29,7 +29,7 @@ from mojoui.clock import wall_seconds
 from mojoui.log import Log, Fields, Audit
 from mojoui.migrate import Migrations, Migration, parse
 from mojoui.ratelimit import RateLimit
-from mojoui.accounts import Accounts, Member, form, now_s
+from mojoui.accounts import Accounts, Member, form, now_s, origin_ok
 
 comptime RETURNS_PER_MINUTE = 30  # /billing/return's Stripe read-backs, for the whole server (anyone may call it; D-5727)
 comptime BILLING_002 = (  # round 3 (S-L3): a subscription's events that come before its checkout, kept until it does
@@ -231,8 +231,7 @@ struct Billing(Copyable, Movable):
                     return Reply.error(401, "sign in first", "unauthorized")
                 if not m.value().is_admin():
                     return Reply.error(403, "only the tenant's admin changes the plan", "forbidden")
-                var o = req.header("origin")
-                if o != "" and o != self.cfg.base:
+                if not origin_ok(req, self.cfg.base):
                     return Reply.error(403, "billing starts from this site", "forbidden")
                 if req.path == "/billing/portal":
                     return self._portal(m.value())

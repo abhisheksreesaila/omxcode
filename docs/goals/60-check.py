@@ -63,7 +63,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 _spec = importlib.util.spec_from_file_location("g57check", ROOT / "docs/goals/57-check.py")
 g57 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(g57)
-s256, signed_57, event = g57.s256, g57.signed, g57.event
+s256, signed_57, event, form_post_headers = g57.s256, g57.signed, g57.event, g57.form_post_headers
 
 
 def signed(ev, secret=WEBHOOK_SECRET, age=0):
@@ -750,9 +750,9 @@ def m5():
             return False, f"the accept page: {page.status_code} {page.text[:200]}"
         if cy.post(path, headers={"Origin": "https://evil.example"}).status_code not in (403, 400):
             return False, "a cross-origin accept wasn't refused"
-        if cy.post(path, headers={"Origin": srv.base}).status_code not in (200, 201, 303):
+        if cy.post(path, headers=form_post_headers(page, srv.base)).status_code not in (200, 201, 303):  # (D-6035: what a browser sends from the page)
             return False, "the same-origin accept failed"
-        if cy.get(path).status_code != 410 or cy.post(path, headers={"Origin": srv.base}).status_code != 410:
+        if cy.get(path).status_code != 410 or cy.post(path, headers=form_post_headers(page, srv.base)).status_code != 410:
             return False, "a used invite link isn't 410"
         ts = cy.get("/api/tenants").json()
         ids = {t["tenant"] if isinstance(t, dict) else t for t in (ts.get("tenants", ts) if isinstance(ts, dict) else ts)}
@@ -1008,7 +1008,7 @@ def m9():
             continue  # (D-6013: only goal 57's silent invite, which M5 replaced on purpose, as M0 allows)
         if not m or m.group(1) != "PASS":
             return False, f"goal 57's {k}: {m.group(0) if m else 'no result'}"
-    tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep", "per_client", "logout"],
+    tests = {"tests/test_crypto.mojo": [], "tests/test_accounts.mojo": ["accounts", "identity", "outbox", "cookies", "sweep", "per_client", "logout", "origins"],
              "tests/test_billing.mojo": ["out_of_order"], "tests/test_ui_thread.mojo": [], "tests/test_served.mojo": [],
              # (D-6025: round 3's tests in the goal's checker)
              "tests/test_handler.mojo": ["handler", "offload", "header_inject", "body_cap", "client_ip", "pool"],
@@ -1171,21 +1171,24 @@ def m12_desktop():
             return False, f"the callback's GET released a code ({codes()} rows, headers {dict(back.headers)})"
         if "no-store" not in back.headers.get("cache-control", "") or "frame-ancestors 'none'" not in back.headers.get("content-security-policy", ""):
             return False, f"the confirm page can be cached or framed: {dict(back.headers)}"
+        if back.headers.get("referrer-policy") != "same-origin":  # (no-referrer would make its form's Origin "null", D-6035)
+            return False, f"the confirm page's Referrer-Policy: {back.headers.get('referrer-policy')}"
         act, fields = confirm_form(page)
         if act != "/auth/desktop" or not fields.get("confirm"):
             return False, f"no confirm form posting to /auth/desktop: {act} {fields}"
         if br.get(path).status_code < 400:
             return False, "the callback's URL worked twice"
-        for label, h in (("cross-site", {"Origin": "https://evil.example"}), ("no Origin", {}), ("Sec-Fetch-Site cross-site", {"Sec-Fetch-Site": "cross-site"})):
+        for label, h in (("cross-site", {"Origin": "https://evil.example"}), ("no Origin", {}), ("Sec-Fetch-Site cross-site", {"Sec-Fetch-Site": "cross-site"}),
+                         ("Origin null alone", {"Origin": "null"}), ("Origin null, cross-site", {"Origin": "null", "Sec-Fetch-Site": "cross-site"})):
             r = br.post(act, data=dict(fields, do="yes"), headers=h)
             if r.status_code != 403 or "location" in r.headers or codes() != 0:
                 return False, f"a {label} confirm: {r.status_code} {r.headers.get('location', '')[:80]} ({codes()} codes)"
-        r = br.post(act, data=dict(fields, do="yes"), headers={"Origin": srv.base})
+        r = br.post(act, data=dict(fields, do="yes"), headers=form_post_headers(back, srv.base))
         loc = r.headers.get("location", "")
         q = {k: x[0] for k, x in urllib.parse.parse_qs(urllib.parse.urlsplit(loc).query).items()}
         if r.status_code != 303 or not loc.startswith(loop + "?") or not q.get("code") or q.get("state") != "app-state-1":
             return False, f"the same-origin confirm: {r.status_code} {loc[:120]}"
-        if br.post(act, data=dict(fields, do="yes"), headers={"Origin": srv.base}).status_code < 400:
+        if br.post(act, data=dict(fields, do="yes"), headers=form_post_headers(back, srv.base)).status_code < 400:
             return False, "the confirm worked twice"
         tok = srv.client().post("/api/token", json={"code": q["code"], "verifier": v})
         if tok.status_code != 200 or srv.client().get("/api/me", headers={"Authorization": "Bearer " + tok.json()["token"]}).json().get("email") != "ada@example.com":
@@ -1193,8 +1196,8 @@ def m12_desktop():
         # cancelled: no code, ever
         br2, back2, loop2, _ = desktop_login(srv, stand, ("ada@example.com", "Ada"), v)
         act2, f2 = confirm_form(back2.text)
-        no = br2.post(act2, data=dict(f2, do="no"), headers={"Origin": srv.base})
-        yes = br2.post(act2, data=dict(f2, do="yes"), headers={"Origin": srv.base})
+        no = br2.post(act2, data=dict(f2, do="no"), headers=form_post_headers(back2, srv.base))
+        yes = br2.post(act2, data=dict(f2, do="yes"), headers=form_post_headers(back2, srv.base))
         if no.status_code != 200 or "location" in no.headers or yes.status_code < 400 or "location" in yes.headers or codes() != 0:
             return False, f"cancel then confirm: {no.status_code}/{yes.status_code} {yes.headers.get('location', '')[:80]} ({codes()} codes)"
         return True, "desktop: the confirm page (no code on GET, no-store, never framed), cross-site / Origin-less confirms 403, one same-origin confirm releases the code, cancel releases none"
@@ -1310,7 +1313,7 @@ def m12_logout():
         x = ada.post("/logout", headers={"Origin": "https://evil.example"})
         if x.status_code != 403 or "set-cookie" in x.headers or live() != 200:
             return False, f"a cross-site POST /logout: {x.status_code} {x.headers.get('set-cookie')} (session {live()})"
-        out = ada.post("/logout", headers={"Origin": srv.base})
+        out = ada.post("/logout", headers=form_post_headers(page, srv.base))
         if out.status_code != 303 or "max-age=0" not in out.headers.get("set-cookie", "").lower() or live() != 401:
             return False, f"the site's own POST /logout: {out.status_code}, session {live()}"
         return True, "GET /logout: a page, nobody signed out; cross-site POST 403; same-origin POST ends the session"
@@ -1320,12 +1323,96 @@ def m12_logout():
         smtp.close()
 
 
+def m12_browser():
+    """D-6035: a real browser (headless Chromium, as scripts/drive.py runs it), real form submissions, nothing set by
+    hand: a desktop sign-in's confirm button sends the code to the app's loopback, which trades it for the person's
+    token; then a web sign-in, and the Sign out page's button ends that session."""
+    from playwright.sync_api import sync_playwright
+    stand, smtp, srv = scenario("m12b")
+    hits, port = [], free_port()
+
+    class Loop(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            hits.append(self.path)
+            body = b"signed in: back to the app"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    loop_srv = ThreadingHTTPServer(("127.0.0.1", port), Loop)
+    threading.Thread(target=loop_srv.serve_forever, daemon=True).start()
+    try:
+        stand.who = ("ada@example.com", "Ada")
+        v = "v" * 20 + secrets.token_urlsafe(24)
+        loop = f"http://127.0.0.1:{port}/done"
+        with sync_playwright() as pw:
+            br = pw.chromium.launch(executable_path="/usr/bin/chromium", headless=True)
+            try:
+                ctx = br.new_context()
+                page = ctx.new_page()
+                page.goto(srv.base + "/login?" + urllib.parse.urlencode({"client": "desktop", "redirect": loop, "challenge": s256(v), "app_state": "chromium-1"}))
+                if "on this computer" not in page.content():
+                    return False, f"Chromium didn't land on the confirm page: {page.url} {page.content()[:200]}"
+                page.click("button[value=yes]")
+                try:
+                    page.wait_for_url(loop + "?*", timeout=15000)
+                except Exception:  # noqa: BLE001 (say what the browser shows instead)
+                    return False, f"Chromium's confirm didn't reach the loopback: {page.url} {page.content()[:240]}"
+                q = {k: x[0] for k, x in urllib.parse.parse_qs(urllib.parse.urlsplit(hits[-1] if hits else "").query).items()}
+                if q.get("state") != "chromium-1" or not q.get("code"):
+                    return False, f"the loopback got {hits} (page at {page.url}: {page.content()[:200]})"
+                tok = srv.client().post("/api/token", json={"code": q["code"], "verifier": v})
+                if tok.status_code != 200 or srv.client().get("/api/me", headers={"Authorization": "Bearer " + tok.json()["token"]}).json().get("email") != "ada@example.com":
+                    return False, f"Chromium's confirmed code didn't trade for ada's token: {tok.status_code} {tok.text[:160]}"
+                page.goto(srv.base + "/login?next=/")
+                session = next((ck["value"] for ck in ctx.cookies() if ck["name"] == "saas"), None)
+                live = lambda: httpx.get(srv.base + "/api/me", cookies={"saas": session}).status_code  # noqa: E731
+                if not session or live() != 200:
+                    return False, f"Chromium's web sign-in: no live session ({page.url})"
+                page.goto(srv.base + "/logout")
+                if live() != 200:
+                    return False, "visiting /logout in Chromium signed ada out"
+                page.click("button[type=submit]")
+                page.wait_for_load_state()
+                if live() != 401:
+                    return False, f"the Sign out button in Chromium didn't end the session (page {page.url}: {page.content()[:160]})"
+                # an invitation accepted with its page's Join button (the same no-referrer trap, D-6035)
+                ada, _ = sign_in(srv, stand, ("ada@example.com", "Ada"))
+                at = ada.get("/api/me").json()["tenant"]
+                if ada.post("/api/invites", json={"email": "cy@example.com", "role": "viewer"}).status_code not in (200, 201):
+                    return False, "ada's invite was refused"
+                link = invite_link(smtp, "cy@example.com")
+                if not link:
+                    return False, "no invite email with a link"
+                stand.who = ("cy@example.com", "Cy")
+                page.goto(link)  # (→ /login → the provider → back to the invitation, signed in as cy)
+                if "Join" not in page.content():
+                    return False, f"Chromium didn't reach the Join page: {page.url} {page.content()[:200]}"
+                page.click("button[type=submit]")
+                page.wait_for_load_state()
+                cy_session = next((ck["value"] for ck in ctx.cookies() if ck["name"] == "saas"), None)
+                ts = httpx.get(srv.base + "/api/tenants", cookies={"saas": cy_session}).json().get("tenants", [])
+                if at not in [x.get("tenant") for x in ts]:
+                    return False, f"the Join button in Chromium didn't join ada's tenant: {ts} (page {page.url}: {page.content()[:160]})"
+            finally:
+                br.close()
+        return True, "headless Chromium: the confirm button sent the code to the loopback (traded for ada's token); the Sign out button ended the session; the Join button accepted an invitation"
+    finally:
+        loop_srv.shutdown()
+        srv.stop()
+        stand.close()
+        smtp.close()
+
+
 def m12():
-    for step in (m12_desktop, m12_state, m12_pool, m12_logout):
+    for step in (m12_desktop, m12_state, m12_pool, m12_logout, m12_browser):
         ok, why = step()
         if not ok:
             return False, f"{step.__name__}: {why}"
-    return True, "hardening: desktop confirm page; sign-in state in a sealed cookie (no rows to flood, bound to the browser, single use); a fixed offload pool (503 + Retry-After past it, no thread per request); sign-out by POST only"
+    return True, "hardening: desktop confirm page; sign-in state in a sealed cookie (no rows to flood, bound to the browser, single use); a fixed offload pool (503 + Retry-After past it, no thread per request); sign-out by POST only; both driven in headless Chromium"
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8, "M9": m9, "M10": m10, "M11": m11, "M12": m12}

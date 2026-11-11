@@ -350,19 +350,33 @@ def is_loopback_redirect(url: String) -> Bool:
     return True
 
 
-def _origin_ok(req: Req, base: String) -> Bool:
-    """A browser's cross-site write carries another Origin: refused. (No Origin: a native client or an old browser,
-    SameSite=Lax covers the cookie.)"""
-    var o = req.header("origin")
-    return o == "" or o == base
+def site_origin(base: String) -> String:
+    """SAAS_BASE as a browser's Origin header says it: no trailing slash."""
+    var n = base.byte_length()
+    while n > 0 and base.as_bytes()[n - 1] == 47:  # '/'
+        n -= 1
+    return String(base[byte = : n])
 
 
-def _same_origin_post(req: Req, base: String) -> Bool:
-    """A form POST provably from this site's own page: Origin is this site, or (no Origin) Sec-Fetch-Site says
-    same-origin. Neither header (a script, an old browser): refused, unlike _origin_ok."""
+def origin_ok(req: Req, base: String) -> Bool:
+    """A browser's cross-site write carries another Origin: refused. "null" (a form on a no-referrer page, by the Fetch
+    standard) only with Sec-Fetch-Site same-origin. No Origin: a native client or an old browser (SameSite=Lax covers
+    the cookie), unless Sec-Fetch-Site says it came from elsewhere. (D-6035)"""
     var o = req.header("origin")
-    if o != "":
-        return o == base
+    var fetch_site = req.header("sec-fetch-site")
+    if o == "":
+        return fetch_site == "" or fetch_site == "same-origin" or fetch_site == "none"
+    if o == "null":
+        return fetch_site == "same-origin"
+    return o == site_origin(base)
+
+
+def same_origin_post(req: Req, base: String) -> Bool:
+    """A form POST provably from this site's own page: Origin is this site, or ("null" or none) Sec-Fetch-Site says
+    same-origin. Neither (a script, an old browser): refused, unlike origin_ok."""
+    var o = req.header("origin")
+    if o != "" and o != "null":
+        return o == site_origin(base)
     return req.header("sec-fetch-site") == "same-origin"
 
 
@@ -471,7 +485,11 @@ struct Accounts(Copyable, Movable):
             if req.matches("GET", "/login"):
                 return self._login(req)
             if req.matches("GET", "/auth/callback"):
-                return self._callback(req).header("Referrer-Policy", "no-referrer")  # (its URL holds the code)
+                var cb = self._callback(req)
+                for n in cb.names:
+                    if n == "Referrer-Policy":  # (the desktop confirm page sets its own: same-origin, D-6035)
+                        return cb^
+                return cb^.header("Referrer-Policy", "no-referrer")  # (its URL holds the code)
             if req.matches("POST", "/api/token"):
                 return self._token(req)
             if req.matches("POST", "/auth/desktop"):
@@ -492,7 +510,8 @@ struct Accounts(Copyable, Movable):
             if req.matches("POST", "/api/switch"):
                 return self._switch(req)
             if req.matches("GET", "/invites/{token}") or req.matches("POST", "/invites/{token}"):
-                return self._invitation(req).header("Referrer-Policy", "no-referrer")  # (its URL is the invitation)
+                # (its URL is the invitation: sent to this site only; no-referrer would make the accept form's Origin "null")
+                return self._invitation(req).header("Referrer-Policy", "same-origin")
         except e:
             self.log.error("accounts: " + String(e))
             return Reply.error(500, "the sign-in store failed", "internal")
@@ -512,7 +531,7 @@ struct Accounts(Copyable, Movable):
             token = String(auth[byte = 7 :])
         else:
             token = cookie(req, self.cookie_name())
-            if req.method != "GET" and req.method != "HEAD" and not _origin_ok(req, self.cfg.base):
+            if req.method != "GET" and req.method != "HEAD" and not origin_ok(req, self.cfg.base):
                 return None  # (a browser's cross-site write with the cookie: refused on every route, D-5726)
         if token == "":
             return None
@@ -853,7 +872,7 @@ struct Accounts(Copyable, Movable):
             return Reply.error(400, "sign-in was cancelled or refused: " + req.arg("error"), "bad_callback")
         var opened = self.open_state(cookie(req, self.state_cookie_name()), state, now_s())
         if not opened:
-            return Reply.error(400, "this sign-in wasn't started in this browser, or it expired: start again here", "bad_state")
+            return Reply.error(400, "this sign-in wasn't started in this browser, or it expired, or another sign-in started since: start again here", "bad_state")
         if self.state_used(state):  # (a replayed callback: refused before the provider is asked again)
             return Reply.error(400, "this sign-in was already used: start again", "bad_state")
         var st = opened.value().copy()
@@ -932,12 +951,13 @@ struct Accounts(Copyable, Movable):
         # (form-action: this site, and the loopback the confirm's 303 goes on to; never framed, never cached)
         return Reply(200, "text/html; charset=utf-8", page).header("Content-Security-Policy",
             "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' " + _origin_of(redirect) + "; frame-ancestors 'none'").header(
-            "X-Frame-Options", "DENY").header("Cache-Control", "no-store")
+            "X-Frame-Options", "DENY").header("Cache-Control", "no-store").header(
+            "Referrer-Policy", "same-origin")  # (no-referrer would make the form's Origin "null"; its URL goes to this site only)
 
     def _desktop_confirm(self, req: Req) raises -> Reply:
         """The confirm page's answer: a same-origin POST {confirm, do}; "yes" releases the one-time code to the app's
         loopback (303), anything else cancels. Either way the pending row is used up."""
-        if not _same_origin_post(req, self.cfg.base):
+        if not same_origin_post(req, self.cfg.base):
             return Reply.error(403, "a desktop sign-in is confirmed on this site's own page only", "forbidden")
         var ask = form_arg(req.body, "confirm")
         if ask == "" or ask.byte_length() > 64:
@@ -1025,12 +1045,12 @@ struct Accounts(Copyable, Movable):
             + "<title>Sign out of " + app + "?</title></head>"
             + "<body style='font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem'>"
             + "<h1>Sign out of " + app + "?</h1><form method=post action=/logout><button type=submit>Sign out</button></form>"
-            + "</body></html>").header("Cache-Control", "no-store")
+            + "</body></html>").header("Cache-Control", "no-store").header("Referrer-Policy", "same-origin")  # (its form's Origin is the site's)
 
     def _logout(self, req: Req) raises -> Reply:
         """POST only (a GET answers _logout_page). A cookie's sign-out from another site is refused (403) and its
         cookie left alone; a bearer token's (a native app) ends that session."""
-        if req.header("authorization") == "" and not _origin_ok(req, self.cfg.base):
+        if req.header("authorization") == "" and not origin_ok(req, self.cfg.base):
             return Reply.error(403, "sign out on this site", "forbidden")
         var m = self.member(req)
         if m:
@@ -1053,7 +1073,7 @@ struct Accounts(Copyable, Movable):
         var m = self.member(req)
         if not m:
             return Reply.error(401, "sign in first", "unauthorized")
-        if not m.value().is_admin() or not _origin_ok(req, self.cfg.base):
+        if not m.value().is_admin() or not origin_ok(req, self.cfg.base):
             return Reply.error(403, "only the tenant's admin invites", "forbidden")
         var email: String
         var role: String
@@ -1124,7 +1144,7 @@ struct Accounts(Copyable, Movable):
             id = atol(String(opened.value()[byte = 7 :]))
         except:
             return Reply.error(404, "no such invitation", "not_found")
-        if req.method == "POST" and req.header("origin") != "" and req.header("origin") != self.cfg.base:
+        if req.method == "POST" and not origin_ok(req, self.cfg.base):
             return Reply.error(403, "an invitation is accepted on this site only", "forbidden")
         var db = self.db()
         var q = db.prepare(

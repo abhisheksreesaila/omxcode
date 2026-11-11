@@ -133,8 +133,10 @@ Audit.record(db, tenant, actor, "invite", detail)
   - A desktop sign-in's one-time code in the browser's address bar after a bare GET (RFC 8252 §8.12's phishing risk: a
     stranger's link with their own loopback port and verifier). The callback now answers "Sign in to <app> on this
     computer?" (`SAAS_APP_NAME`), and only a same-origin POST from that page (`/auth/desktop`: Origin is the site's, or
-    Sec-Fetch-Site same-origin) makes the code and sends it to the loopback; cancel, or 5 minutes, and there is none
-    (D-6029).
+    Sec-Fetch-Site same-origin, or Origin "null" with Sec-Fetch-Site same-origin) makes the code and sends it to the
+    loopback; cancel, or 5 minutes, and there is none (D-6029). The page is served with Referrer-Policy: same-origin, so
+    a browser's form sends the real Origin (no-referrer made it "null" and every real confirm 403: D-6035, found by the
+    security audit; 60-check M12 now drives the confirm, Sign out and an invitation's Join in headless Chromium).
   - Pending sign-ins as host.db rows under a global cap (`SAAS_MAX_SIGNINS`), which one IPv6 /48 could fill and make
     /login answer 503 for everyone. A pending sign-in is now the browser's sealed HttpOnly cookie (10 minutes; the PKCE
     verifier is an HMAC of the state under the server's key, never sent), so /login writes nothing; single use is a

@@ -580,10 +580,19 @@ def m7():
     return True, "ui thread, served, libc and decision lints"
 
 
+def form_post_headers(page, base):
+    """What a browser sends with a form POST from `page` (a reply from `base`) back to the same site, by the Fetch
+    standard: Origin is "null" when the page's Referrer-Policy is no-referrer, else the site's origin; Sec-Fetch-Site
+    same-origin. (Headless Chromium sends exactly these, D-6035.) Never the site's Origin by hand."""
+    policy = page.headers.get("referrer-policy", "").split(",")[-1].strip().lower()
+    return {"Origin": "null" if policy == "no-referrer" else base.rstrip("/"), "Sec-Fetch-Site": "same-origin"}
+
+
 def browse(url, base):
     """The system browser on a sign-in URL, as a person drives it: redirects followed with one cookie jar, and on the
-    desktop sign-in's "Sign in to … on this computer?" page the Sign in button pressed (its form POSTed from the page,
-    so with the site's Origin, as a browser sends it). Ends at the first page that is neither (the app's loopback)."""
+    desktop sign-in's "Sign in to … on this computer?" page the Sign in button pressed (its form POSTed from the page
+    with the headers a browser sends from it, form_post_headers). Ends at the first page that is neither (the app's
+    loopback)."""
     with httpx.Client(follow_redirects=False, timeout=20) as br:
         r = br.get(url)
         for _ in range(8):
@@ -596,7 +605,7 @@ def browse(url, base):
                 return r
             fields = dict(re.findall(r"<input type=hidden name=['\"]?(\w+)['\"]? value=['\"]?([^'\" >]*)", r.text))
             url = urllib.parse.urljoin(url, form.group(1))
-            r = br.post(url, data=dict(fields, do="yes"), headers={"Origin": base})
+            r = br.post(url, data=dict(fields, do="yes"), headers=form_post_headers(r, base))
         return r
 
 
