@@ -726,7 +726,7 @@ def _bundle_runs(rootfs):
     env = dict(SAAS_PORT=str(port), SAAS_DATA=str(data), SAAS_BASE=f"http://127.0.0.1:{port}", SAAS_SECRET="k" * 64,
                GOOGLE_CLIENT_ID=g60.CLIENT_ID, GOOGLE_CLIENT_SECRET=g60.CLIENT_SECRET, SAAS_OAUTH_AUTHORIZE=stand.base + "/authorize",
                SAAS_OAUTH_TOKEN=stand.base + "/token", SAAS_OAUTH_USERINFO=stand.base + "/userinfo", PATH="/usr/bin:/bin",
-               SAAS_STATIC=str(rootfs / "app/static"))
+               SAAS_STATIC=str(rootfs / "app/examples/finance_min/static"), FIN_ROOT=str(rootfs / "app/examples/finance_min"))
     exe = rootfs / "app/server"
     ldd = run(["ldd", str(exe)], 60).stdout
     if ".pixi" in ldd or "not found" in ldd:
