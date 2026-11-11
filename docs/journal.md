@@ -1372,3 +1372,4 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 ## 2026-11-11 · goal 66 (worktree ../mojo-ui-g66)
 - Checker first (docs/goals/66-check.py, imports 60-check's stand-ins). Docker's socket refuses this user (not in the docker group; sudo needs a password): M8 will prove the image's folder without Docker and say BLOCKED.
 - M0 mojoui.static: first build failed on `FileHandle.seek` taking Int (not UInt64) and a StringSpan/String mix; then the unit test passed first run. The checker's own bug: httpx sends `Accept-Encoding: gzip, deflate` by default, so "no gzip without asking" needed an explicit `identity`. PASS with Chromium loading JS, CSS and a woff2 font.
+- M1 mojoui.webhooks: one Mojo aliasing error (String(t[...]) assigned to t), then the unit test (Standard Webhooks' published vector, Python-made vectors) and the HTTP check passed first run.

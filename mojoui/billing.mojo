@@ -24,6 +24,7 @@ from mojoui.effects import Backend
 from mojoui.json import Json, json_string
 from mojoui.sqlite import Database, Pool
 from mojoui.crypto import hmac_sha256, same
+from mojoui.webhooks import stripe_signature_ok
 from mojoui.hash import hex
 from mojoui.clock import wall_seconds
 from mojoui.log import Log, Fields, Audit
@@ -104,27 +105,8 @@ def paywall(m: Member) -> Reply:
 
 def signature_ok(header: String, body: String, secret: String, now: Int, tolerance_s: Int = TOLERANCE_S) -> Bool:
     """Stripe-Signature: `t=<unix>,v1=<hex hmac>[,v1=…]`: HMAC-SHA256 of "<t>.<body>" under the endpoint secret, any v1
-    matching (compared in constant time), t within `tolerance_s` of now."""
-    if secret == "":
-        return False
-    var t = -1
-    var sigs = List[String]()
-    for part in header.split(","):
-        var p = String(part).strip()
-        if p.startswith("t="):
-            try:
-                t = atol(String(p[byte = 2 :]))
-            except:
-                return False
-        elif p.startswith("v1="):
-            sigs.append(String(p[byte = 3 :]))
-    if t < 0 or len(sigs) == 0 or abs(now - t) > tolerance_s:
-        return False
-    var want = hex(hmac_sha256(secret, String(t) + "." + body))
-    var ok = False
-    for s in sigs:
-        ok = same(want, s) or ok
-    return ok
+    matching (compared in constant time), t within `tolerance_s` of now (mojoui.webhooks' Stripe scheme, goal 66)."""
+    return stripe_signature_ok(header, body, secret, now, tolerance_s)
 
 
 def _id_ok(s: String, prefix: String) -> Bool:
