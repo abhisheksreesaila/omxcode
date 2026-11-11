@@ -161,7 +161,7 @@ Audit.record(db, tenant, actor, "invite", detail)
   and its socket gets 30 s send and receive timeouts. At most `SAAS_OFFLOAD_QUEUE` (64) more wait for a thread; past
   that, 503 with Retry-After, and a job that waited past the 30 s request timeout is dropped with 503, never answered
   late; the queue's pipe never blocks the reactor (full: 503). One client (`req.client`, IPv6 by /64) holds at most
-  `SAAS_OFFLOAD_PER_CLIENT` (4) of the slots: 429 with Retry-After past it (D-6036). Sixteen providers each sitting
+  `SAAS_OFFLOAD_PER_CLIENT` (4) of the slots: 429 with Retry-After past it (D-6036). Behind a reverse proxy that isn't in `SAAS_TRUSTED_PROXIES`, every visitor is the proxy and the whole site shares those 4 (as with `SAAS_RATE`): list the proxy. Counters are keyed by a hash seeded at start, so no one can choose addresses that share a victim's counter (D-6038). Sixteen providers each sitting
   20 s (the callback's timeout) fill the pool for that long: the reactor still answers every other request. The pool's
   threads aren't joined when a server stops: one server per process (they wait on the queue until the process ends).
 - The demo server refuses to start on a `SAAS_*` number that isn't a whole number in range, naming it (D-6036). The offload needs a cleartext connection, and `mojoui.serve` binds

@@ -940,7 +940,8 @@ comptime H_QUEUE_R = 6
 comptime H_PER_CLIENT = 7  # pool slots one client (rate_key of req.client) may hold at once (0: no cap)
 comptime H_SLOTS = 8  # the address of CLIENT_SLOTS atomic counters, a client's slots by its key's hash
 comptime H_DEADLINE_NS = 9  # a queued job not taken by then is dropped with 503 (the request timeout)
-comptime H_WORDS = 10
+comptime H_SEED = 10  # a random seed for _client_slot, made at start, so no one can pick addresses that share a victim's counter
+comptime H_WORDS = 11
 comptime CLIENT_SLOTS = 4096  # (two clients sharing a counter by hash only ever share a cap: never more than it)
 comptime MAX_OFFLOAD_QUEUE = 4096  # (threads + queue stay far inside a pipe's 64 KB: a hand-off never blocks)
 
@@ -977,7 +978,7 @@ struct _HBridge[H: Handler](Copyable, FlareHandler):
             var slot = -1
             var per = Int((w + H_PER_CLIENT)[])
             if per > 0:  # (one client can't take the whole pool: D-6036)
-                slot = _client_slot(rate_key(r.client if r.client != "" else r.peer))
+                slot = _client_slot(rate_key(r.client if r.client != "" else r.peer), UInt64((w + H_SEED)[]))
                 var counts = _P(unsafe_from_address=Int((w + H_SLOTS)[]))
                 if _A.fetch_add(counts + slot, 1) >= Int64(per):
                     _ = _A.fetch_add(counts + slot, -1)
@@ -1025,9 +1026,12 @@ struct _Offload(Movable):
         self.queued = 0
 
 
-def _client_slot(key: String) -> Int:
-    """A client's counter: FNV-1a of its rate key, mod CLIENT_SLOTS."""
+def _client_slot(key: String, seed: UInt64) -> Int:
+    """A client's counter: FNV-1a of the server's random seed and its rate key, mod CLIENT_SLOTS (seeded, so which
+    addresses share a counter can't be worked out from outside)."""
     var h: UInt64 = 14695981039346656037
+    for k in range(8):
+        h = (h ^ ((seed >> UInt64(8 * k)) & 0xFF)) * 1099511628211
     for b in key.as_bytes():
         h = (h ^ UInt64(b)) * 1099511628211
     return Int(h % UInt64(CLIENT_SLOTS))
@@ -1326,6 +1330,10 @@ def serve[H: Handler](var handler: H, port: Int = 0, host: String = "127.0.0.1",
         (slots + i)[] = 0
     (w + H_SLOTS)[] = Int64(Int(slots))
     (w + H_DEADLINE_NS)[] = Int64(request_timeout_ms) * 1_000_000
+    var seed: UInt64 = 0
+    for b in random_bytes(8):
+        seed = (seed << 8) | UInt64(b)
+    (w + H_SEED)[] = Int64(seed)
     var px = unsafe_alloc[TrustedProxies](1)
     px.unsafe_write(proxies^)
     (w + H_PROXIES)[] = Int64(Int(px))
