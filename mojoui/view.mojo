@@ -87,7 +87,9 @@ comptime ICON_NAMES: List[String] = [
 
 # Text styles (each platform maps them to its own type scale)
 comptime BODY = 0
-comptime FIELD_SECRET = 1  # a TextField's style: masked as typed, never read back in a dump (.secret())
+comptime FIELD_SECRET = 1  # a TextField's style: masked as typed, never read back in a dump (.secret()). The same number
+# as TITLE (a Text's style) and a Checkbox's: a node's style means something only for its own kind, so hosts read it as
+# FIELD_SECRET only on a FIELD node
 comptime TITLE = 1
 comptime HEADLINE = 2
 comptime CAPTION = 3

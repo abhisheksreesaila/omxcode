@@ -373,6 +373,8 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
             var s = a.noticed.suggestions[k].copy()
             start_pull(a, api, Pick(s.id, s.repo, "max", s.arch, s.params, s.size_gb, s.est_gb, "ok", List[Sugg]()))
     elif m == ADD_PORT_IT:
+        a.pa.note = ""  # (the last refusal's reason goes while this try is asked: a new one says its own)
+        a.note = ""
         start_port(a, api, a.noticed.copy())
     elif ADD_PORTER <= m < ADD_PORTER + P_SPAN:  # the porting assistant inline (porter.mojo, shared with Settings)
         if a.pa.update(m - ADD_PORTER, event, api, ADD_PORTER):

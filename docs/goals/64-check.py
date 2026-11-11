@@ -259,13 +259,10 @@ TYPED = "sk-g64-typed-" + os.urandom(6).hex()  # (typed into GTK's key field, ne
 REFUSED = "The porting assistant could not be used"
 
 
-def drive_gtk(d):
-    """The console on GTK (headless) against `d`: the port screen's inline card, Claude Code's own login chosen, the
-    button becomes Port it; Settings' card shows that choice, Remove, the choice made again from Settings and removed
-    again; back on the port screen the choice is offered afresh (not a stale Port it), and the key typed into the
-    key field is masked (the run ends there, so the host's own dump reports that field)."""
-    SHOTS.mkdir(parents=True, exist_ok=True)
-    steps = steps_of("window:1280x900" + to_port_card("waitfor:Use Claude Code's own login=90000") + f"""
+def gtk_steps_choose():
+    """Run 1: the port screen's inline card, Claude Code's own login chosen, the button becomes Port it, and Settings'
+    card shows that choice with Remove (the run ends there: the daemon is then asked what was saved)."""
+    return steps_of("window:1280x900" + to_port_card("waitfor:Use Claude Code's own login=90000") + f"""
         wait:500
         shot:{SHOTS}/gtk-port-card.png
         tap:Use Claude Code's own login
@@ -275,7 +272,18 @@ def drive_gtk(d):
         tap:Settings
         waitfor:Remove=20000
         wait:800
-        shot:{SHOTS}/gtk-settings-set.png
+        shot:{SHOTS}/gtk-settings-set.png""")
+
+
+def gtk_steps_remove():
+    """Run 2: Settings' Remove, the choice made again from Settings and removed again; back on the port screen the
+    choice is offered afresh (not a stale Port it), and the key typed into the key field is masked (the run ends
+    there, so the host's own dump reports that field)."""
+    return steps_of(f"""
+        window:1280x900
+        wait:3000
+        tap:Settings
+        waitfor:Remove=20000
         tap:Remove
         waitfor:Use Claude Code's own login=20000
         wait:800
@@ -292,6 +300,11 @@ def drive_gtk(d):
         type:API key Claude Code signs in with={TYPED}
         wait:800
         shot:{SHOTS}/gtk-port-key.png""")
+
+
+def drive_gtk(d, steps):
+    """The console on GTK (headless) against `d`, driven by `steps`; (exit code, output)."""
+    SHOTS.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, MXC_URL=d.url, MXC_ADMIN_KEY=d.admin, MOJOUI_TEST=steps)
     r = subprocess.run([str(BUILD / "console/linux/console")], cwd=ROOT, env=env, capture_output=True, text=True, timeout=600)
     return r.returncode, r.stdout + r.stderr
@@ -346,14 +359,23 @@ def driven_card():
     d = console_daemon(G64 / "home-m1-screen")
     try:
         with d:
-            # GTK: Claude Code's own login from the port screen and from Settings, Remove, a fresh port screen, the key masked
-            code, out = drive_gtk(d)
+            # GTK, run 1: Claude Code's own login from the port screen, then Settings shows it
+            code, out = drive_gtk(d, gtk_steps_choose())
             if code != 0:
                 problems.append(f"GTK: the console exited {code}: {out[-300:]}")
-            for want in ["WAITED: Use Claude Code's own login", "WAITED: Port it", "WAITED: Remove", "WAITED: Give it an API key"]:
+            for want in ["WAITED: Use Claude Code's own login", "WAITED: Port it", "WAITED: Remove"]:
                 if want not in out:
                     problems.append(f"GTK: never saw {want[8:]!r}")
-            if out.count("WAITED: Remove") < 2 or out.count("WAITED: Give it an API key") < 2:
+            if "TEST: no " in out:
+                problems.append("GTK: " + "; ".join(l for l in out.splitlines() if l.startswith("TEST: no "))[:300])
+            s, j = body(d.call("GET", "/admin/porter"))
+            if not (j.get("configured") and j.get("kind") == "claude-code"):
+                problems.append(f"GTK: the daemon does not have the choice the screen made: {str(j)[:160]}")
+            # GTK, run 2: Remove, chosen again from Settings, removed again, a fresh port screen, the key masked
+            code, out = drive_gtk(d, gtk_steps_remove())
+            if code != 0:
+                problems.append(f"GTK: the console exited {code}: {out[-300:]}")
+            if out.count("WAITED: Remove") < 2 or out.count("WAITED: Give it an API key") < 2 or "WAITED: Use Claude Code's own login" not in out:
                 problems.append("GTK: the choice made again from Settings, or the fresh port screen after Remove, was not seen")
             if "TEST: no " in out:
                 problems.append("GTK: " + "; ".join(l for l in out.splitlines() if l.startswith("TEST: no "))[:300])
@@ -856,6 +878,10 @@ def m5():
         t = run([str(BUILD / name)], timeout=300) if r.returncode == 0 else r
         if t.returncode != 0:
             problems.append(f"{name}: " + (t.stdout + t.stderr)[-200:])
+    # a secret field never reaches an agent (TextField.secret(), D-6509)
+    r = run([sys.executable, "tests/test_agent_secret.py"], timeout=120)
+    if r.returncode != 0 or "agent_secret: ok" not in r.stdout:
+        problems.append("test_agent_secret: " + (r.stdout + r.stderr)[-200:])
     # the component matrix is fresh
     r = run([sys.executable, "scripts/components.py"])
     if r.returncode != 0:

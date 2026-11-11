@@ -71,6 +71,14 @@ def prop(kind, description, **more):
     return dict({"type": kind, "description": description}, **more)
 
 
+FIELD_SECRET = 1  # a FIELD's style when it is TextField.secret() (mojoui/view.mojo); the same number as TITLE, but only ever read on a FIELD
+
+
+def is_secret(n):
+    """A masked field (TextField.secret()): what it holds never reaches an agent, only how long it is."""
+    return n["kind"] == FIELD and n["style"] == FIELD_SECRET
+
+
 class Action:
     """One thing an agent can do on the current screen: a node, how to send it, and the tool that names it."""
 
@@ -196,7 +204,7 @@ class Host:
                     self.add(slug(other), i, f'"{other}": the other face of the "{text}" button (does nothing when already so)', how="second", prefix=prefix)
         elif k == FIELD:
             if n["msg"] or n["msg2"]:
-                said = n["hint"] if n["style"] == 1 else (n["hint"] or text)  # (a secret field is named by its placeholder, never its contents)
+                said = n["hint"] if is_secret(n) else (n["hint"] or text)  # (a secret field is named by its placeholder, never its contents)
                 self.add(tag or slug(said) or "field", i, tip or f'Text field "{said}"',
                          {"text": prop("string", "the new contents"), "submit": prop("boolean", "press Return after typing")}, how="field", required=("text",), prefix=prefix)
         elif k == TEXTAREA:
@@ -365,7 +373,7 @@ class Host:
                 line(depth, f'"{text}"')
             elif k == BUTTON:
                 line(depth, f'Button "{text}"' + (" = on" if n["style"] in (6, 7) else "") + (f' ({n["tip"]})' if n["tip"] else "") + arrow(i))  # (TOOL_ON, ICON_ON: pressed)
-            elif k == FIELD and n["style"] == 1:  # .secret(): an agent learns that it holds something, never what
+            elif is_secret(n):  # .secret(): an agent learns that it holds something, never what
                 line(depth, f'Secret field ({len(text)} characters)' + (f' (placeholder "{n["hint"]}")' if n["hint"] else "") + arrow(i))
             elif k == FIELD:
                 line(depth, f'Field "{text}"' + (f' (placeholder "{n["hint"]}")' if n["hint"] else "") + arrow(i))
@@ -647,6 +655,8 @@ class Host:
         if n["kind"] == LAZYLIST:
             rows = json.loads(self.mod.rows(self.handle, i, int(first), int(count) if count > 0 else 50))
             return "\n".join(f"{int(first) + k}\t{t}" for k, t in enumerate(rows)) or "(no rows)"
+        if is_secret(n):  # (.secret(): an agent learns that it holds something, never what)
+            return f"(secret, {len(n['text'])} characters)"
         texts = []
 
         def walk(j):

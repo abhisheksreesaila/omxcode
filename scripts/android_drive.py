@@ -80,6 +80,7 @@ def nodes(root, inside_content=True):
                 b = [int(v) for v in re.findall(r"\d+", el.get("bounds", "[0,0][0,0]"))]
                 out.append(dict(cls=el.get("class", ""), text=el.get("text", ""), desc=el.get("content-desc", ""),
                                 hint=el.get("hint", ""), checked=el.get("checked") == "true", bounds=b, el=el,
+                                secret=el.get("password") == "true",  # (TextField.secret(): Android's password input type)
                                 parents=parents, package=el.get("package", "")))
             parents = parents + [el.get("class", "")]
         for c in el:
@@ -225,7 +226,7 @@ def report(scale):
         elif cls == "Button":
             lines.append("BUTTON: " + n["text"])
         elif cls == "EditText":
-            lines.append("FIELD: " + field_text(n))
+            lines.append(f"FIELD: (secret, {len(field_text(n))} characters, masked)" if n["secret"] else "FIELD: " + field_text(n))
         elif cls == "Switch":
             lines.append(f"TOGGLE: {n['text']}={'on' if n['checked'] else 'off'}")
         elif cls == "Spinner":
