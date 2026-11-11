@@ -180,8 +180,8 @@ def porter_choice(p: Porter, at: Int) -> List[View]:
         body.append(WarnLine(p.note))
     if p.open:
         body.append(FieldWithHelp(OutlinedField(p.base, "Base URL of a gateway that answers the Anthropic API (optional: empty means Anthropic itself)", at + P_BASE, at + P_SAVE, icon="route"),
-                                  "https://… only, and never the key in the URL"))
-        body.append(FieldWithHelp(OutlinedField(p.key, "API key Claude Code signs in with", at + P_KEY, at + P_SAVE, icon="key-round"),
+                                  "https://…, or http:// only to this machine (localhost, 127.0.0.1); never the key in the URL"))
+        body.append(FieldWithHelp(OutlinedField(p.key, "API key Claude Code signs in with", at + P_KEY, at + P_SAVE, icon="key-round", secret=True),
                                   "Kept for omxconsole only, readable by you alone, never shown again and never logged. Removable at any time."))
         var row: List[View] = [SmallButton("Checking the key…" if p.saving else String("Check and save the key"), at + P_SAVE, "key-round", FILL)]
         if p.found != "":  # (a way back to the other choice)

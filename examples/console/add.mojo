@@ -618,6 +618,8 @@ def port_card(a: Add) -> View:
                           Fact("skill", FactText("import-model"))]))
     if not a.guided and a.refused == "":
         if a.pa.ready():
+            if a.pa.note != "":  # (a saved choice the daemon refused, e.g. a key that stopped working: say why, every time)
+                body.append(WarnLine(a.pa.note))
             body.append(ButtonRow([SmallButton("Port it", ADD_PORT_IT, "hammer", FILL)]))
         else:  # the choice, here, instead of a trip to Settings (goal 64 M1): Settings' card is the same component
             body += porter_choice(a.pa, ADD_PORTER)

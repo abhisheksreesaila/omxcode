@@ -1,12 +1,14 @@
 """Stand-in for a frontier model's endpoint, so goal 64's checks never need a real API key: a one-token Anthropic
 Messages call (POST /v1/messages, the API the porting agent speaks) with the good key in `x-api-key` or
 `Authorization: Bearer` is 200, anything else 401.
-  python fake_porter.py <port> <good key>"""
+  python fake_porter.py <port> <good key> [accept]
+`accept`: how many calls the good key passes before it is refused too (a key that stops working after it was saved)."""
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 port, good = int(sys.argv[1]), sys.argv[2]
+accept = int(sys.argv[3]) if len(sys.argv) > 3 else -1
 seen = []
 
 
@@ -22,7 +24,10 @@ class H(BaseHTTPRequestHandler):
         auth = self.headers.get("authorization", "")
         key = self.headers.get("x-api-key", "")
         seen.append({"path": self.path, "auth": auth})
-        ok = auth == "Bearer " + good or key == good
+        global accept
+        ok = (auth == "Bearer " + good or key == good) and accept != 0
+        if ok and accept > 0:
+            accept -= 1
         body = json.dumps({"content": [{"type": "text", "text": "hi"}], "model": "a-frontier-model"}
                           if ok else {"error": "bad key"}).encode()
         self.send_response(200 if ok else 401)

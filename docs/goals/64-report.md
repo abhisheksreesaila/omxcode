@@ -66,7 +66,7 @@ cancelled worker to let go.
 - No real port was run: that needs the owner's GPU and hours (deliberately out of bounds). The harness proves the
   machinery, not that any particular model ports.
 - ~~The port screen's own GTK and web run was not driven~~: driven since the 2026-11-11 polish (M1). Still not run:
-  the Mac and iPhone hosts, and the key field is not masked (mojoui has no masked field yet, D-6506).
+  the Mac and iPhone hosts. The key field is masked since the review round (D-6507; Mac, iPhone and Android built, not run).
 - Goal 55's check, for want of a MAX install on this machine.
 - The porter's test call and the gateway route were only ever run against a stand-in server — never a real key or a
   real endpoint, by instruction.
@@ -76,5 +76,4 @@ cancelled worker to let go.
 ## Next
 
 One real port on the owner's machine (gpt2 or pythia-1.4b, which both worked before), watched end to end. (The porting assistant's
-card in Settings as well as on the port screen: done in the 2026-11-11 polish, D-6504.) A masked field in mojoui for
-the key.
+card in Settings as well as on the port screen: done in the 2026-11-11 polish, D-6504.) (A masked field in mojoui for the key: done, D-6507.)

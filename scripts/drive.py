@@ -36,7 +36,7 @@ DUMP = """() => { const mojouiRect = e => {  // (a view whose parts join its row
   if (k === 'dialog') return 'DIALOG: ' + e.dataset.title;
   if (k === 'toast') return 'TOAST: ' + e.dataset.title + (e.dataset.action ? ' | ' + e.dataset.action : '');
   if (k === 'popover') return 'POPOVER: ' + e.dataset.title;
-  if (k === 'field') return 'FIELD: ' + e.value;
+  if (k === 'field') return 'FIELD: ' + (e.type === 'password' ? '(secret, ' + e.value.length + ' characters, masked)' : e.value);
   if (k === 'toggle') return (e.dataset.check ? 'CHECK: ' : 'TOGGLE: ') + e.querySelector('span').textContent + (e.querySelector('input').checked ? '=on' : '=off');
   if (k === 'dropdown') return 'DROPDOWN: ' + e.options[e.selectedIndex].text;
   if (k === 'slider') return 'SLIDER: ' + e.value;

@@ -196,7 +196,8 @@ class Host:
                     self.add(slug(other), i, f'"{other}": the other face of the "{text}" button (does nothing when already so)', how="second", prefix=prefix)
         elif k == FIELD:
             if n["msg"] or n["msg2"]:
-                self.add(tag or slug(n["hint"] or text) or "field", i, tip or f'Text field "{n["hint"] or text}"',
+                said = n["hint"] if n["style"] == 1 else (n["hint"] or text)  # (a secret field is named by its placeholder, never its contents)
+                self.add(tag or slug(said) or "field", i, tip or f'Text field "{said}"',
                          {"text": prop("string", "the new contents"), "submit": prop("boolean", "press Return after typing")}, how="field", required=("text",), prefix=prefix)
         elif k == TEXTAREA:
             if n["msg"]:
@@ -364,6 +365,8 @@ class Host:
                 line(depth, f'"{text}"')
             elif k == BUTTON:
                 line(depth, f'Button "{text}"' + (" = on" if n["style"] in (6, 7) else "") + (f' ({n["tip"]})' if n["tip"] else "") + arrow(i))  # (TOOL_ON, ICON_ON: pressed)
+            elif k == FIELD and n["style"] == 1:  # .secret(): an agent learns that it holds something, never what
+                line(depth, f'Secret field ({len(text)} characters)' + (f' (placeholder "{n["hint"]}")' if n["hint"] else "") + arrow(i))
             elif k == FIELD:
                 line(depth, f'Field "{text}"' + (f' (placeholder "{n["hint"]}")' if n["hint"] else "") + arrow(i))
             elif k == TEXTAREA:

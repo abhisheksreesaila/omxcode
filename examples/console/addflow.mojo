@@ -222,6 +222,7 @@ def begin_port(mut a: Add, job: Job):
 def pick(mut a: Add, mut api: Api, var r: Pick):
     a.notice = NOTICE_NONE
     a.guided, a.refused, a.sandbox, a.note = False, "", False, ""
+    a.pa.note = ""
     if r.fit == "no":
         a.noticed = r^
         a.notice = NOTICE_WARN

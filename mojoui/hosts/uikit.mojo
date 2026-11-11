@@ -11,6 +11,7 @@ from std.ffi import external_call, c_int
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
+from mojoui.view import FIELD_SECRET
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
@@ -349,6 +350,9 @@ struct UIKitHost[A: App](Movable):
             _ = msg(w, "setText:", ns_string(node.text))
             _ = msg(w, "setPlaceholder:", ns_string(node.hint))
             _ = msg(w, "setReturnKeyType:", 9)  # Done
+            if node.style == FIELD_SECRET:  # .secret(): masked as typed, no autocorrect or suggestions
+                _ = msg(w, "setSecureTextEntry:", 1)
+                _ = msg(w, "setAutocorrectionType:", 1)  # UITextAutocorrectionTypeNo
             self.wire(w, i, self_addr, "changed:", EDITING_CHANGED)
             _ = msg(w, "addTarget:action:forControlEvents:", self.target, sel("submit:"), EDITING_DID_END_ON_EXIT)
             if not sized:  # (the app sized it: its settings decide)
