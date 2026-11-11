@@ -1,4 +1,4 @@
-# mojoui.jobs and mojoui.geometry without a host: wake_ui() before any pipe does nothing; wake_pipe() makes one pipe
+# mojoui.uijobs and mojoui.geometry without a host: wake_ui() before any pipe does nothing; wake_pipe() makes one pipe
 # (the same read end every call); a job started with start_ui_job leaves a wake in it when it ends; 100,000 wakes
 # nobody drains never block the waker (the write end is non-blocking: a full pipe means a wake is pending); and
 # rect_of() answers [] when no host registered a lookup.
