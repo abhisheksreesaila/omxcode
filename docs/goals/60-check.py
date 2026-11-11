@@ -862,6 +862,30 @@ def m7():
     return True, "429 + Retry-After over the per-IP limit, sliding sessions (use extends, idle ends); " + why
 
 
+def host_rows(srv):
+    """Every host.db table's row count (the pending sign-ins' table, if any, among them)."""
+    with srv.db("host.db") as c:
+        return {t: c.execute(f'select count(*) from "{t}"').fetchone()[0] for (t,) in c.execute("select name from sqlite_master where type = 'table'")}
+
+
+def flood_logins(srv, n):
+    """D-6031: n /logins from n IPv6 /64s of one /48 (behind the trusted proxy) all 303, no host.db table gains a row
+    (no oauth_states at all), and then a fresh person signs in end to end: None, or what went wrong."""
+    before = host_rows(srv)
+    codes = {}
+    with srv.client() as c:
+        for i in range(n):
+            st = c.get("/login", headers={"X-Forwarded-For": f"2001:db8:77:{i:x}::1"}).status_code
+            codes[st] = codes.get(st, 0) + 1
+            c.cookies.clear()
+    after = host_rows(srv)
+    if codes != {303: n}:
+        return f"{n} /logins from one /48: {codes} (want all 303: no cap to fill)"
+    if "oauth_states" in after or before != after:
+        return f"{n} /logins wrote rows: {before} → {after}"
+    return None
+
+
 def m7_proxies():
     """D-6025: behind a trusted proxy each client has its own limit (IPv6 by /64); an untrusted peer's header is ignored."""
     def logins(srv, xff, n):
@@ -890,11 +914,10 @@ def m7_proxies():
         stand.close()
         smtp.close()
     stand, smtp, srv = scenario("m7c", "off", {"SAAS_RATE": "0", "SAAS_TRUSTED_PROXIES": "127.0.0.1/32"})
-    try:
-        held = [srv.client().get("/login", headers={"X-Forwarded-For": "203.0.113.90"}).status_code for _ in range(21)]
-        other = srv.client().get("/login", headers={"X-Forwarded-For": "203.0.113.91"}).status_code
-        if held[:20] != [303] * 20 or held[20] != 429 or other != 303:
-            return False, f"pending sign-ins per client: one client's 21 → {held[-2:]}, another's → {other} (D-6027)"
+    try:  # (D-6031: pending sign-ins are sealed cookies, no rows: a /48's flood fills nothing and nobody gets 503)
+        flood = flood_logins(srv, 5000)
+        if flood:
+            return False, flood
     finally:
         srv.stop()
         stand.close()
@@ -917,7 +940,7 @@ def m7_proxies():
         bad.stop()
         stand.close()
         smtp.close()
-    return True, "trusted proxy: a client per X-Forwarded-For, IPv6 per /64; an untrusted peer's header ignored; two X-Forwarded-For lines read whole; 20 pending sign-ins a client; a bad list refuses to start"
+    return True, "trusted proxy: a client per X-Forwarded-For, IPv6 per /64; an untrusted peer's header ignored; two X-Forwarded-For lines read whole; 5,000 /64s of one /48 hold no sign-in rows and lock nobody out; a bad list refuses to start"
 
 
 def m8():
@@ -1180,12 +1203,58 @@ def m12_desktop():
         smtp.close()
 
 
+def m12_state():
+    """Item 2 (D-6031): the pending sign-in lives in a sealed cookie, not a row: bound to the browser, used once, and a
+    /48's flood of /login holds nothing, so a fresh person signs in right after it."""
+    stand, smtp, srv = scenario("m12s", "off", {"SAAS_RATE": "0", "SAAS_TRUSTED_PROXIES": "127.0.0.1/32", "SAAS_MAX_SIGNINS": "3", "SAAS_SIGNINS_PER_CLIENT": "1"})
+    try:
+        flood = flood_logins(srv, 3000)
+        if flood:
+            return False, flood + " (with the old SAAS_MAX_SIGNINS=3 set: it's gone)"
+        ada, back = sign_in(srv, stand, ("ada@example.com", "Ada"))
+        if back.status_code != 303 or ada.get("/api/me").json().get("email") != "ada@example.com":
+            return False, f"after the flood a fresh sign-in: {back.status_code} {back.text[:160]}"
+        sessions = lambda: srv.db("host.db").execute("select count(*) from sessions").fetchone()[0]  # noqa: E731
+        n = sessions()
+        # a replayed callback (the same browser, the same URL): refused before the provider is asked again
+        stand.who = ("ben@example.com", "Ben")
+        c = srv.client()
+        loc = c.get("/login", params={"next": "/app"}).headers["location"]
+        cb = urllib.parse.urlsplit(httpx.get(loc, follow_redirects=False, timeout=30).headers["location"])
+        path = cb.path + "?" + cb.query
+        # another browser (no state cookie, or another sign-in's) with this callback URL: refused, and it doesn't burn it
+        stranger = srv.client()
+        stranger.get("/login")
+        if srv.client().get(path).status_code != 400 or stranger.get(path).status_code != 400:
+            return False, "a callback from another browser (no cookie / another sign-in's cookie) wasn't 400"
+        tampered = srv.client()
+        jar = dict(c.cookies)
+        name = next(k for k in jar if k.endswith("saas_state"))
+        tampered.cookies.set(name, jar[name][:-2] + ("AA" if not jar[name].endswith("AA") else "BB"))
+        if tampered.get(path).status_code != 400:
+            return False, "a tampered state cookie wasn't 400"
+        first = c.get(path)
+        if first.status_code != 303 or "saas=" not in first.headers.get("set-cookie", ""):
+            return False, f"the right browser's callback, after the refused ones: {first.status_code} {first.text[:160]}"
+        tokens = len(stand.tokens)
+        again = c.get(path)
+        if again.status_code != 400 or sessions() != n + 1 or len(stand.tokens) != tokens:
+            return False, f"a replayed callback: {again.status_code}, sessions {n} → {sessions()} (want +1), provider tokens {tokens} → {len(stand.tokens)}"
+        if host_rows(srv).get("signin_used", 0) < 2:
+            return False, f"no used-state records for the two sign-ins: {host_rows(srv)}"
+        return True, "3,000 /64s of one /48: no rows, nobody locked out; the state is the browser's (no cookie / another's / tampered: 400, the right one still works), used once"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+
+
 def m12():
-    for step in (m12_desktop,):
+    for step in (m12_desktop, m12_state):
         ok, why = step()
         if not ok:
             return False, f"{step.__name__}: {why}"
-    return True, "hardening: desktop confirm page"
+    return True, "hardening: desktop confirm page; sign-in state in a sealed cookie (no rows to flood, bound to the browser, single use)"
 
 
 MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8, "M9": m9, "M10": m10, "M11": m11, "M12": m12}

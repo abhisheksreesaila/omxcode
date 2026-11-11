@@ -12,8 +12,8 @@ and `examples/saas_min/server.mojo` (sign-in, tenants and a welcome email from a
 
 | fh-saas module | What it did | mojoui piece | State |
 |---|---|---|---|
-| `utils_auth` | Google OAuth with CSRF state, sessions, provisioning, roles, logout | `mojoui.accounts`: `/login` (state bound to the browser + PKCE S256), `/auth/callback`, a desktop sign-in confirmed on a same-origin page before its code goes to the app (D-6029), server-side sessions in sealed HttpOnly SameSite cookies that slide (idle `SAAS_SESSION_IDLE`, 30 days at most), `/logout` ends them on the server, roles admin/member/viewer (`acc.need(req, "member")` in place of `@require_role`), desktop apps through `mojoui.signin` (RFC 8252), per-client limits on the sign-in routes (behind `SAAS_TRUSTED_PROXIES`, IPv6 by /64), people identified by Google's `sub` (a reassigned address can't take over an account), `__Host-` cookies on https | ✅ (57 M2, M4; 60 M5, M7). Google only, as fh-saas |
-| `db_host` | Users, tenants, memberships, subscriptions, webhook events, audit log, jobs, pricing plans | host.db: `mojoui.accounts`' users, tenants, members (many tenants per person), invites, sessions, OAuth states, desktop codes, audit; `mojoui.billing`'s billing and stripe_events; `mojoui.jobs`' jobs; each module's tables versioned by `mojoui.migrate` (accounts_migrations, billing_migrations) | ✅ (60 M1, M3, M5, M6). Pricing plans are configuration (`STRIPE_PRICE_PRO`, `STRIPE_PRICE_PRO_YEARLY`, `STRIPE_PRICES_ONCE`), not a table |
+| `utils_auth` | Google OAuth with CSRF state, sessions, provisioning, roles, logout | `mojoui.accounts`: `/login` (state in a sealed cookie, bound to the browser, single use, no row + PKCE S256), `/auth/callback`, a desktop sign-in confirmed on a same-origin page before its code goes to the app (D-6029), server-side sessions in sealed HttpOnly SameSite cookies that slide (idle `SAAS_SESSION_IDLE`, 30 days at most), `/logout` ends them on the server, roles admin/member/viewer (`acc.need(req, "member")` in place of `@require_role`), desktop apps through `mojoui.signin` (RFC 8252), per-client limits on the sign-in routes (behind `SAAS_TRUSTED_PROXIES`, IPv6 by /64), people identified by Google's `sub` (a reassigned address can't take over an account), `__Host-` cookies on https | ✅ (57 M2, M4; 60 M5, M7). Google only, as fh-saas |
+| `db_host` | Users, tenants, memberships, subscriptions, webhook events, audit log, jobs, pricing plans | host.db: `mojoui.accounts`' users, tenants, members (many tenants per person), invites, sessions, used sign-in states, desktop confirms and codes, audit; `mojoui.billing`'s billing and stripe_events; `mojoui.jobs`' jobs; each module's tables versioned by `mojoui.migrate` (accounts_migrations, billing_migrations) | ✅ (60 M1, M3, M5, M6). Pricing plans are configuration (`STRIPE_PRICE_PRO`, `STRIPE_PRICE_PRO_YEARLY`, `STRIPE_PRICES_ONCE`), not a table |
 | `db_tenant` | One database per tenant, tenant users, permissions, settings | `Accounts.tenant_db(member)`: `tenants/<id>.db`, chosen from the session only (never a request's `?tenant=`), this thread's own connection, migrated by `mojoui.migrate` | ✅ the file per tenant, its isolation and its schema (57 M2, 60 M2, M5). Who is in a tenant and with which role lives in host.db's `members` (one source of truth) rather than fh-saas's per-tenant TenantUser/TenantPermission copies; a tenant's settings are the app's own table in its migrations |
 | `utils_billing` | Billing config, access decisions, checkout return, trials, paywall hooks | `mojoui.billing`: `BillingConfig.from_env()`, `/billing/checkout` (monthly, or `{"interval": "year"}`), `/billing/return` (reads the session back), `bill.paywall(member)` → 402, our own trial for new tenants (`SAAS_TRIAL_DAYS`), past_due with a grace period (`SAAS_GRACE_DAYS`), `/api/me`'s plan, status, trial_ends, cancels_at | ✅ (57 M3; 60 M6) |
 | `utils_stripe` | Stripe service: subscription and one-time checkout, portal, cancel, change plan | `mojoui.billing` over `mojoui.http` (HTTPS through Flare): subscription checkout with Stripe's trial (`STRIPE_TRIAL_DAYS`), one-time checkout (`POST /billing/purchase {price}` for a price in `STRIPE_PRICES_ONCE`, recorded in `payments`), the customer portal (`POST /billing/portal`: cards, invoices, cancel, change plan, as Stripe's portal is set up), cancel at period end | ✅ subscription checkout, Stripe's trial, the portal, cancel at period end (60 M6). The one-time checkout is built and type-checked but no proof runs it against a stand-in yet |
@@ -133,6 +133,12 @@ Audit.record(db, tenant, actor, "invite", detail)
     computer?" (`SAAS_APP_NAME`), and only a same-origin POST from that page (`/auth/desktop`: Origin is the site's, or
     Sec-Fetch-Site same-origin) makes the code and sends it to the loopback; cancel, or 5 minutes, and there is none
     (D-6029).
+  - Pending sign-ins as host.db rows under a global cap (`SAAS_MAX_SIGNINS`), which one IPv6 /48 could fill and make
+    /login answer 503 for everyone. A pending sign-in is now the browser's sealed HttpOnly cookie (10 minutes; the PKCE
+    verifier is an HMAC of the state under the server's key, never sent), so /login writes nothing; single use is a
+    `signin_used` row written only once the provider has traded the code (a flood can't write one), checked before the
+    provider is asked again. `SAAS_MAX_SIGNINS` and `SAAS_SIGNINS_PER_CLIENT` are gone; `SAAS_RATE` per client stays
+    (D-6031, D-6032).
 - Per-client limits key on `req.client`: the socket's peer, or, when the peer is in `SAAS_TRUSTED_PROXIES` (CIDRs:
   set it to your TLS proxy's addresses), X-Forwarded-For's rightmost hop that isn't a trusted proxy, read across every
   X-Forwarded-For line (nginx, Caddy and Envoy join the hops into one line; HAProxy's `option forwardfor` adds its own:
@@ -157,12 +163,8 @@ Audit.record(db, tenant, actor, "invite", detail)
   SMTP set up the demos start no mail workers: the emails wait, pending, and go after a restart with SMTP set.
 - A Stripe subscription event that arrives before its checkout's completion is held (the newest per subscription, 30
   days at most) and applied when the checkout lands (D-6023).
-- Pending sign-ins (a /login not yet called back, 10 minutes each): 20 a client (`SAAS_SIGNINS_PER_CLIENT`), 200,000 for the server
-  (`SAAS_MAX_SIGNINS`); a client past its 20 gets 429, the server past its cap 503. Someone with ~10,000 IPv4
-  addresses, or a single IPv6 /48 (a free tunnel broker hands those out: 65,536 /64s), can still fill the global cap and
-  make /login answer 503 for everyone (people already signed in are unaffected): a /48 tier per client, or the sign-in
-  state in the cookie (no row at all), is the next step. Behind a proxy that isn't in `SAAS_TRUSTED_PROXIES`, every
-  user shares the proxy's 20: list the proxy.
+- One pending sign-in per browser: the state is one cookie, so a second /login in another tab replaces the first's
+  (that tab's callback says to start again).
 - A request carrying two cookies named `saas` (or `__Host-saas`, or the state cookie) gets 400 and that cookie expired:
   a page that can set cookies for this site could sign someone out that way (an availability cost, chosen over guessing
   which copy is real). On https the `__Host-` names can't be set by a sibling subdomain or an http page. On a plain-http

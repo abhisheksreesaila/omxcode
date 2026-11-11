@@ -11,11 +11,16 @@
 #       var db = self.acc.tenant_db(m.value())  # their tenant's file, from the session only
 #   def blocking(self, req: Req) -> Bool: return self.acc.blocking(req)   # the callback calls Google: off the reactor
 #
-# Sign-in: /login sends the browser to the provider with a random state and a PKCE S256 challenge (kept hashed here);
-# /auth/callback refuses a state it didn't issue (or used, or older than 10 minutes, or from another browser), trades the
-# code for a token (client secret + verifier), reads the verified email and starts a session: a random id kept hashed in
+# Sign-in: /login sends the browser to the provider with a random state and a PKCE S256 challenge, and keeps nothing:
+# the pending sign-in (state, next page, a desktop app's loopback, challenge and app_state) is the browser's sealed
+# HttpOnly cookie (10 minutes), and the PKCE verifier is an HMAC of the state under the server's key (never sent). So a
+# flood of /login writes no row and fills no cap (D-6031). /auth/callback refuses a state its browser's cookie doesn't
+# seal (another browser, tampered, older than 10 minutes) or one already used (signin_used: written only once the
+# provider has traded the code, so a flood can't write it), trades the code for a token (client secret + verifier),
+# reads the verified email and starts a session: a random id kept hashed in
 # host.db, sent as a sealed HttpOnly SameSite=Lax cookie (Secure on https). Sessions slide: one idle longer than
 # SAAS_SESSION_IDLE ends (use moves it on; written at most every tenth of that), and none outlives 30 days.
+# (One pending sign-in per browser: a second /login in another tab replaces the first one's cookie.)
 # A new person gets a tenant of their own as its admin, and an event `signed_up` {email, name, tenant} on the jobs queue
 # (the app sends the welcome email from it). Nobody joins a tenant without saying so: an admin's invite is a row and an
 # event `invite` {invite, email}; its link (/invites/<sealed id>, expiring, single use) shows "Join <tenant>, invited by
@@ -28,9 +33,8 @@
 # the provider can't take over its old owner's account. Events go on the queue inside the change's own transaction
 # (mojoui.jobs.add_in: an outbox) and carry ids only ({user}, {invite}): the job reads the person when it runs.
 # On an https base the cookies are __Host-saas and __Host-saas_state (Secure, Path=/, no Domain: a sibling subdomain
-# can't set them); a request carrying two cookies of one of those names is refused (400). Expired states, sessions and
-# desktop codes are swept by tick() (sweep()), a thousand rows a table at a time; one client (its rate key) may hold at
-# most SAAS_SIGNINS_PER_CLIENT (20) pending sign-ins (429 past it), and the server at most SAAS_MAX_SIGNINS (200,000; 503).
+# can't set them); a request carrying two cookies of one of those names is refused (400). Expired used states,
+# sessions and desktop codes are swept by tick() (sweep()), a thousand rows a table at a time.
 # Desktop apps (RFC 8252): /login?client=desktop&redirect=<http://127.0.0.1:port/…>&challenge=<S256>&app_state=<s>: the
 # callback answers "Sign in to <app> on this computer?" (a pending row, 5 minutes; no code yet), and only a same-origin
 # POST /auth/desktop from that page (Origin is this site, or Sec-Fetch-Site same-origin) sends the browser to the app's
@@ -44,7 +48,7 @@ from mojoui.http import Request, Response, uri_component
 from mojoui.effects import Backend
 from mojoui.json import Json, json_string
 from mojoui.sqlite import Database, Pool
-from mojoui.crypto import random_token, random_bytes, same, seal, unseal, pkce_challenge, b64url
+from mojoui.crypto import random_token, random_bytes, same, seal, unseal, pkce_challenge, b64url, hmac_sha256
 from mojoui.hash import sha256_hex, hex
 from mojoui.clock import wall_seconds
 from mojoui.log import Log, Fields, Audit
@@ -135,6 +139,30 @@ comptime HOST_005 = (  # hardening (2026-11-11): a desktop sign-in waits for its
 )
 
 
+comptime HOST_006 = (  # hardening (2026-11-11): pending sign-ins live in a sealed cookie; only used states are rows
+    "-- up\n"
+    "DROP TABLE oauth_states;\n"
+    "CREATE TABLE signin_used(id TEXT PRIMARY KEY, expires INTEGER NOT NULL);\n"
+    "CREATE INDEX signin_used_expires ON signin_used(expires);\n"
+    "-- down\n"
+    "DROP INDEX signin_used_expires; DROP TABLE signin_used;\n"
+    "CREATE TABLE oauth_states(id TEXT PRIMARY KEY, verifier TEXT NOT NULL, next TEXT, redirect TEXT, challenge TEXT, app_state TEXT, expires INTEGER NOT NULL, client TEXT);\n"
+    "CREATE INDEX oauth_states_expires ON oauth_states(expires);\n"
+    "CREATE INDEX oauth_states_client ON oauth_states(client, expires);\n"
+)
+
+
+@fieldwise_init
+struct SigninState(Copyable, Movable):
+    """A pending sign-in, as its browser's sealed cookie holds it (Accounts.open_state)."""
+    var state: String
+    var next: String
+    var redirect: String  # a desktop app's loopback ("" on the web)
+    var challenge: String
+    var app_state: String
+    var verifier: String  # (the server's HMAC of the state: never in the cookie)
+
+
 def host_migrations() raises -> Migrations:
     """mojoui.accounts' own tables in host.db, versioned in `accounts_migrations`."""
     var l = List[Migration]()
@@ -143,6 +171,7 @@ def host_migrations() raises -> Migrations:
     l.append(parse(3, "003_identity_expiry.sql", HOST_003))
     l.append(parse(4, "004_signin_client.sql", HOST_004))
     l.append(parse(5, "005_desktop_confirm.sql", HOST_005))
+    l.append(parse(6, "006_signin_cookie.sql", HOST_006))
     return Migrations(l^, "accounts_migrations")
 
 
@@ -170,16 +199,14 @@ struct AuthConfig(Copyable, Movable):
     var idle_s: Int
     var rate: Int  # requests a minute per IP on each sign-in route (0: no limit)
     var migrations: String  # a folder with tenant/NNN_name.sql ("" or missing: none)
-    var max_signins: Int  # sign-ins pending at once (OAuth states not yet used or expired)
-    var signins_per_client: Int  # of those, one client's (rate_key) at most (0: no per-client cap)
     var app_name: String  # what a desktop sign-in's confirm page calls the app ("Sign in to <app> on this computer?")
 
     @staticmethod
     def from_env() -> AuthConfig:
         """GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SAAS_BASE, SAAS_SECRET; SAAS_OAUTH_AUTHORIZE/TOKEN/USERINFO (default
-        Google's endpoints); SAAS_INVITE_TTL (s, 7 days), SAAS_SESSION_IDLE (s, 7 days), SAAS_RATE (60), SAAS_MIGRATIONS,
-        SAAS_MAX_SIGNINS (200,000: ~40 MB of rows), SAAS_SIGNINS_PER_CLIENT (20: a browser needs one or two; 0 turns
-        the per-client cap off, like SAAS_RATE=0, for limits kept at a proxy), SAAS_APP_NAME ("omxcode SaaS")."""
+        Google's endpoints); SAAS_INVITE_TTL (s, 7 days), SAAS_SESSION_IDLE (s, 7 days), SAAS_RATE (60; 0: off, for
+        limits kept at a proxy), SAAS_MIGRATIONS, SAAS_APP_NAME ("omxcode SaaS"). (SAAS_MAX_SIGNINS and
+        SAAS_SIGNINS_PER_CLIENT are gone: a pending sign-in is a cookie, D-6031.)"""
         return AuthConfig(
             getenv("GOOGLE_CLIENT_ID"),
             getenv("GOOGLE_CLIENT_SECRET"),
@@ -192,8 +219,6 @@ struct AuthConfig(Copyable, Movable):
             _env_int("SAAS_SESSION_IDLE", 7 * 86400),
             _env_int("SAAS_RATE", 60),
             getenv("SAAS_MIGRATIONS", ""),
-            _env_int("SAAS_MAX_SIGNINS", 200_000),
-            _env_int("SAAS_SIGNINS_PER_CLIENT", 20),
             getenv("SAAS_APP_NAME", "omxcode SaaS"),
         )
 
@@ -354,6 +379,13 @@ def _origin_of(url: String) -> String:
     """http://host:port of a URL (a loopback redirect is checked before this sees it)."""
     var rest = url.find("/", 7) if url.startswith("http://") else -1
     return String(url[byte = : rest]) if rest > 0 else url
+
+
+def _utf8(s: String) -> List[UInt8]:
+    var out = List[UInt8](capacity=s.byte_length())
+    for b in s.as_bytes():
+        out.append(b)
+    return out^
 
 
 def _is_tenant_id(t: String) -> Bool:
@@ -601,11 +633,11 @@ struct Accounts(Copyable, Movable):
         return c + ("; Secure" if self.secure() else "")
 
     def sweep(self) raises -> Int:
-        """Expired OAuth states, sessions and desktop codes deleted (a thousand rows a table a transaction, by their
+        """Expired used sign-in states, sessions and desktop codes deleted (a thousand rows a table a transaction, by their
         expiry indexes): for a server's tick. How many went."""
         var gone = 0
         var db = self.db()
-        for table in ["oauth_states", "desktop_codes", "desktop_pending", "sessions"]:
+        for table in ["signin_used", "desktop_codes", "desktop_pending", "sessions"]:
             while True:
                 db.begin()
                 var n: Int
@@ -763,87 +795,70 @@ struct Accounts(Copyable, Movable):
         elif not is_local_path(nxt):
             nxt = "/"
         var state = random_token(32)
-        var verifier = random_token(32)
-        var client = String(sha256_hex("signin:" + rate_key(req.client if req.client != "" else req.peer))[byte = : 32])  # (hashed: no address kept)
-        var db = self.db()
-        db.begin()
-        try:
-            var mine = db.prepare("SELECT count(*) FROM (SELECT 1 FROM oauth_states WHERE client = ? AND expires >= ? LIMIT ?)")  # (by its client index)
-            mine.bind(1, client)
-            mine.bind(2, now_s())
-            mine.bind(3, max(self.cfg.signins_per_client, 1))
-            _ = mine.step()
-            var held = self.cfg.signins_per_client > 0 and mine.int(0) >= self.cfg.signins_per_client
-            mine.reset()
-            if held:
-                db.commit()
-                return Reply.error(429, "too many unfinished sign-ins from here: finish one, or wait 10 minutes", "rate_limited").header("Retry-After", "60")
-            var pending = db.prepare("SELECT count(*) FROM (SELECT 1 FROM oauth_states WHERE expires >= ? LIMIT ?)")  # (by its expiry index)
-            pending.bind(1, now_s())
-            pending.bind(2, self.cfg.max_signins)
-            _ = pending.step()
-            var full = pending.int(0) >= self.cfg.max_signins
-            pending.reset()
-            if full:
-                db.commit()
-                self.log.warn("sign-in: too many pending", Fields().int("max", self.cfg.max_signins))
-                return Reply.error(503, "too many sign-ins at once: try again in a minute", "busy").header("Retry-After", "60")
-            var q = db.prepare("INSERT INTO oauth_states(id, verifier, next, redirect, challenge, app_state, expires, client) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-            q.bind(1, sha256_hex(state))
-            q.bind(2, verifier)
-            q.bind(3, nxt)
-            q.bind(4, redirect)
-            q.bind(5, challenge)
-            q.bind(6, app_state)
-            q.bind(7, now_s() + STATE_S)
-            q.bind(8, client)
-            q.run()
-            db.commit()
-        except e:
-            _ = db.rollback_quiet()
-            raise e^
+        var sealed = seal(self.key, "signin\n" + state + "\n" + nxt + "\n" + redirect + "\n" + challenge + "\n" + app_state, STATE_S, now_s())
+        var verifier = self._verifier(state)
         var names: List[String] = ["response_type", "client_id", "redirect_uri", "scope", "state", "code_challenge", "code_challenge_method", "prompt"]
         var values: List[String] = ["code", self.cfg.client_id, self.cfg.callback(), "openid email profile", state, pkce_challenge(verifier), "S256", "select_account"]
         var sep = "&" if "?" in self.cfg.authorize_url else "?"
-        var r = Reply.empty(303).header("Location", self.cfg.authorize_url + sep + form(names, values)).header("Cache-Control", "no-store")
-        if redirect == "":  # (the web: the callback must come back to this browser; a desktop app checks its own state)
-            var path = "/" if self.secure() else "/auth/callback"  # (__Host- needs Path=/)
-            r = r^.header("Set-Cookie", self.state_cookie_name() + "=" + state + "; Path=" + path + "; HttpOnly; SameSite=Lax; Max-Age=" + String(STATE_S)
-                + ("; Secure" if self.secure() else ""))
-        return r^
+        var path = "/" if self.secure() else "/auth/callback"  # (__Host- needs Path=/)
+        return Reply.empty(303).header("Location", self.cfg.authorize_url + sep + form(names, values)).header("Cache-Control", "no-store").header(
+            "Set-Cookie", self.state_cookie_name() + "=" + sealed + "; Path=" + path + "; HttpOnly; SameSite=Lax; Max-Age=" + String(STATE_S)
+            + ("; Secure" if self.secure() else ""))
+
+    def _verifier(self, state: String) -> String:
+        """The PKCE verifier for a state: an HMAC under the server's key (43 characters), so it needs no row and the
+        browser never holds it."""
+        return b64url(hmac_sha256(self.key, _utf8("pkce:" + state)))
+
+    def open_state(self, sealed: String, state: String, now: Int) -> Optional[SigninState]:
+        """The pending sign-in a browser's state cookie seals, if it's this server's, unexpired, and for `state`."""
+        var v = unseal(self.key, sealed, now)
+        if not v or not v.value().startswith("signin\n"):
+            return None
+        var f = v.value().split("\n")
+        if len(f) != 6 or not same(String(f[1]), state):
+            return None
+        return SigninState(String(f[1]), String(f[2]), String(f[3]), String(f[4]), String(f[5]), self._verifier(state))
+
+    def state_used(self, state: String) raises -> Bool:
+        var q = self.db().prepare("SELECT 1 FROM signin_used WHERE id = ?")
+        q.bind(1, sha256_hex("state:" + state))
+        var used = q.step()
+        q.reset()
+        return used
+
+    def use_state(self, state: String) raises -> Bool:
+        """Marks a state used (until its cookie could have expired anyway): False when it already was (a replay)."""
+        var db = self.db()
+        db.begin()
+        try:
+            var q = db.prepare("INSERT OR IGNORE INTO signin_used(id, expires) VALUES (?, ?)")
+            q.bind(1, sha256_hex("state:" + state))
+            q.bind(2, now_s() + STATE_S)
+            q.run()
+            var fresh = db.changes() == 1
+            db.commit()
+            return fresh
+        except e:
+            _ = db.rollback_quiet()
+            raise e^
 
     def _callback(self, req: Req) raises -> Reply:
         var state = req.arg("state")
         var code = req.arg("code")
         if state == "" or code == "":
             return Reply.error(400, "sign-in was cancelled or refused: " + req.arg("error"), "bad_callback")
-        var db = self.db()
-        db.begin()
-        var verifier: String
-        var nxt: String
-        var redirect: String
-        var challenge: String
-        var app_state: String
-        try:
-            var q = db.prepare("DELETE FROM oauth_states WHERE id = ? AND expires > ? RETURNING verifier, next, redirect, challenge, app_state")  # (one use)
-            q.bind(1, sha256_hex(state))
-            q.bind(2, now_s())
-            if not q.step():
-                q.reset()
-                db.commit()
-                return Reply.error(400, "this sign-in wasn't started here, or it expired: start again", "bad_state")
-            verifier = q.text(0)
-            nxt = q.text(1)
-            redirect = q.text(2)
-            challenge = q.text(3)
-            app_state = q.text(4)
-            q.reset()
-            db.commit()
-        except e:
-            _ = db.rollback_quiet()
-            raise e^
-        if redirect == "" and not same(cookie(req, self.state_cookie_name()), state):
-            return Reply.error(400, "this sign-in was started in another browser: start again here", "bad_state")
+        var opened = self.open_state(cookie(req, self.state_cookie_name()), state, now_s())
+        if not opened:
+            return Reply.error(400, "this sign-in wasn't started in this browser, or it expired: start again here", "bad_state")
+        if self.state_used(state):  # (a replayed callback: refused before the provider is asked again)
+            return Reply.error(400, "this sign-in was already used: start again", "bad_state")
+        var st = opened.value().copy()
+        var verifier = st.verifier
+        var nxt = st.next
+        var redirect = st.redirect
+        var challenge = st.challenge
+        var app_state = st.app_state
         # the code → a token (client secret + PKCE verifier) → who it is
         var tn: List[String] = ["grant_type", "code", "redirect_uri", "client_id", "client_secret", "code_verifier"]
         var tv: List[String] = ["authorization_code", code, self.cfg.callback(), self.cfg.client_id, self.cfg.client_secret, verifier]
@@ -851,6 +866,8 @@ struct Accounts(Copyable, Movable):
         if tr.status != 200:
             self.log.warn("the token endpoint refused the code", Fields().int("status", tr.status).str("error", tr.error))
             return Reply.error(502, "the sign-in provider refused the code", "token_failed")
+        if not self.use_state(state):  # (two callbacks with one state at once: the provider traded the code once; this one too)
+            return Reply.error(400, "this sign-in was already used: start again", "bad_state")
         var tj = Json.parse(tr.text())
         var access = tj.text(tj.get(0, "access_token"))
         if access == "":

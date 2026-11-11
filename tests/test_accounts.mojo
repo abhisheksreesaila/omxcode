@@ -8,7 +8,17 @@ from mojoui.jobs import Queue
 from mojoui.json import Json
 from mojoui.serve import Req
 from mojoui.crypto import random_token
+from mojoui.clock import wall_seconds
 from mojoui import libc
+
+
+def hex4(i: Int) -> String:
+    var d = "0123456789abcdef"
+    var out = String("")
+    for k in range(4):
+        var n = (i >> (12 - 4 * k)) & 15
+        out += String(d[byte = n : n + 1])
+    return out
 
 
 def expect(ok: Bool, what: String) raises:
@@ -39,7 +49,7 @@ def main() raises:
     print("cookie: ok")
     var dir = "build/test_accounts.data"
     _ = libc.unlink(dir + "/host.db")
-    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 10_000, 20, "omxcode SaaS"))
+    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", "omxcode SaaS"))
     var ada = acc.test_session("Ada@Example.com")
     var req = Req("GET", "/api/me")
     req.names.append("authorization")
@@ -91,7 +101,7 @@ def main() raises:
     if not exists(dir3):
         makedirs(dir3)
     var q = Queue(dir3 + "/host.db")
-    var a3 = Accounts(dir3, AuthConfig("id", "secret", "https://p.example/a", "", "", "https://app.example", random_token(32), 7 * 86400, 7 * 86400, 0, "", 3, 20, "omxcode SaaS"), events=q)
+    var a3 = Accounts(dir3, AuthConfig("id", "secret", "https://p.example/a", "", "", "https://app.example", random_token(32), 7 * 86400, 7 * 86400, 0, "", "omxcode SaaS"), events=q)
     var first = a3.user_for("dan@example.com", "Dan", "sub-1")
     expect(first[0] > 0, "a new person")
     expect(a3.user_for("dan@example.com", "Dan", "sub-1")[0] == first[0], "the same sub: the same person")
@@ -127,35 +137,63 @@ def main() raises:
     dup.values.append("__Host-saas=" + tok + "; __Host-saas=planted")
     expect(a3.handle(dup).status == 400, "two session cookies weren't refused")
     print("cookies: ok")
-    for _ in range(2):
+    # (hardening, D-6031: a pending sign-in is a sealed cookie, no row: a flood of /login from 10,000 clients, one
+    # IPv6 /48's /64s, writes nothing, so there is no server-wide cap to fill and nobody gets 503)
+    var before = hdb.one_text("SELECT group_concat(name || ':' || n) FROM (SELECT 'sessions' AS name, count(*) AS n FROM sessions UNION ALL SELECT 'users', count(*) FROM users UNION ALL SELECT 'signin_used', count(*) FROM signin_used UNION ALL SELECT 'desktop_codes', count(*) FROM desktop_codes UNION ALL SELECT 'desktop_pending', count(*) FROM desktop_pending UNION ALL SELECT 'audit', count(*) FROM audit)")
+    for i in range(10_000):
         lg = Req("GET", "/login")
-        _ = a3.handle(lg)
-    lg = Req("GET", "/login")
-    expect(a3.handle(lg).status == 503, "a 4th pending sign-in past the cap of 3")
-    _ = hdb.run("UPDATE oauth_states SET expires = 1")
+        lg.client = "2001:db8:77:" + hex4(i) + "::1"
+        if a3.handle(lg).status != 303:
+            raise Error("a /login in the flood wasn't 303 (the old cap was 3)")
+    var after = hdb.one_text("SELECT group_concat(name || ':' || n) FROM (SELECT 'sessions' AS name, count(*) AS n FROM sessions UNION ALL SELECT 'users', count(*) FROM users UNION ALL SELECT 'signin_used', count(*) FROM signin_used UNION ALL SELECT 'desktop_codes', count(*) FROM desktop_codes UNION ALL SELECT 'desktop_pending', count(*) FROM desktop_pending UNION ALL SELECT 'audit', count(*) FROM audit)")
+    expect(before == after and hdb.count("SELECT count(*) FROM sqlite_master WHERE name = 'oauth_states'") == 0, "10,000 /logins wrote rows: " + before + " → " + after)
     _ = hdb.run("INSERT INTO sessions(id, user_id, tenant, expires, last_seen) VALUES ('old', 1, '', 1, 1)")
-    expect(a3.sweep() == 4, "the sweep: 3 states and a session")
-    lg = Req("GET", "/login")
-    expect(a3.handle(lg).status == 303, "sign-in after the sweep")
-    var plan = hdb.one_text("EXPLAIN QUERY PLAN DELETE FROM oauth_states WHERE rowid IN (SELECT rowid FROM oauth_states WHERE expires < 5 LIMIT 10)")
-    expect(hdb.count("SELECT count(*) FROM sqlite_master WHERE name IN ('oauth_states_expires', 'sessions_expires', 'desktop_codes_expires')") == 3, "the expiry indexes")
-    _ = plan
+    _ = hdb.run("INSERT INTO signin_used(id, expires) VALUES ('old', 1)")
+    expect(a3.sweep() == 2, "the sweep: a used state and a session")
+    expect(hdb.count("SELECT count(*) FROM sqlite_master WHERE name IN ('signin_used_expires', 'sessions_expires', 'desktop_codes_expires', 'desktop_pending_expires')") == 4, "the expiry indexes")
     print("sweep: ok")
     # round 3 review: pending sign-ins per client, cookies over several lines, a changed address under the same sub
     var dir4 = "build/test_accounts.data4"
     _ = libc.unlink(dir4 + "/host.db")
     _ = libc.unlink(dir4 + "/host.db-wal")
-    var a4 = Accounts(dir4, AuthConfig("id", "secret", "https://p.example/a", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 1000, 20, "omxcode SaaS"))
-    for _ in range(20):
+    var a4 = Accounts(dir4, AuthConfig("id", "secret", "https://p.example/a", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", "omxcode SaaS"))
+    # (hardening, D-6031: the sign-in state is the browser's sealed cookie: bound to it (another state, another
+    # browser's cookie, a tampered one, an expired one: refused), used once, and a client's limit is SAAS_RATE a minute)
+    var l1 = Req("GET", "/login")
+    var started = a4.handle(l1)
+    var jar = String("")
+    var loc = String("")
+    for i in range(len(started.names)):
+        if started.names[i] == "Set-Cookie":
+            jar = started.values[i]
+        if started.names[i] == "Location":
+            loc = started.values[i]
+    var sealed = String(jar[byte = jar.find("=") + 1 : jar.find(";")])
+    var tail = String(loc[byte = loc.find("&state=") + 7 :])
+    var st = String(tail[byte = : tail.find("&")])
+    var now = Int(wall_seconds())
+    expect(Bool(a4.open_state(sealed, st, now)), "the browser's own state")
+    expect(not a4.open_state(sealed, "x" * 43, now), "another state with this browser's cookie")
+    var l2 = Req("GET", "/login")
+    var second = a4.handle(l2)
+    var jar2 = String("")
+    for i in range(len(second.names)):
+        if second.names[i] == "Set-Cookie":
+            jar2 = second.values[i]
+    expect(not a4.open_state(String(jar2[byte = jar2.find("=") + 1 : jar2.find(";")]), st, now), "this state with another browser's cookie")
+    expect(not a4.open_state(String(sealed[byte = : sealed.byte_length() - 2]) + "AA", st, now), "a tampered state cookie")
+    expect(not a4.open_state(sealed, st, now + 601), "a state cookie past its 10 minutes")
+    expect(a4.open_state(sealed, st, now).value().verifier.byte_length() == 43 and a4.open_state(sealed, st, now).value().verifier not in jar, "the PKCE verifier is the server's (not in the cookie)")
+    expect(a4.use_state(st) and not a4.use_state(st), "a state used twice")
+    var limited = Accounts(dir4 + "r", AuthConfig("id", "secret", "https://p.example/a", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 3, "", "omxcode SaaS"))
+    var codes = String("")
+    for _ in range(4):
         var la = Req("GET", "/login")
         la.client = "198.51.100.1"
-        expect(a4.handle(la).status == 303, "a client's first 20 pending sign-ins")
-    var la21 = Req("GET", "/login")
-    la21.client = "198.51.100.1"
-    expect(a4.handle(la21).status == 429, "a client's 21st pending sign-in")
+        codes += String(limited.handle(la).status) + " "
     var lb = Req("GET", "/login")
     lb.client = "198.51.100.2"
-    expect(a4.handle(lb).status == 303, "another client blocked by the first one's pending sign-ins")
+    expect(codes == "303 303 303 429 " and limited.handle(lb).status == 303, "SAAS_RATE per client: " + codes)
     var tk = a4.test_session("gil@example.com")
     var split = Req("GET", "/api/me")
     split.names.append("cookie")
