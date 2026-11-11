@@ -1368,3 +1368,7 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - Audit HIGH: Origin "null" from no-referrer pages. Proved red twice before the fix: m12_desktop on the confirm page's Referrer-Policy, then headless Chromium (/usr/bin/chromium via Playwright, as scripts/drive.py) stuck on `/auth/desktop` with our own 403 JSON. The invitation page had the same header (goal 60): fixed with it and joined in Chromium too.
 - Lesson: a check that sets a security header by hand to "be a browser" proves nothing about browsers. 57-check's form_post_headers() now derives Origin from the page's Referrer-Policy, and M12 keeps a real Chromium step.
 - The per-client pool cap first showed up in M12's own first phase (six checkouts from one client → 4 × 200 + 2 × 429 before the server read the setting), then in M10's bench (one address): both now turn it off explicitly where one client is the point.
+
+## 2026-11-11 · goal 66 (worktree ../mojo-ui-g66)
+- Checker first (docs/goals/66-check.py, imports 60-check's stand-ins). Docker's socket refuses this user (not in the docker group; sudo needs a password): M8 will prove the image's folder without Docker and say BLOCKED.
+- M0 mojoui.static: first build failed on `FileHandle.seek` taking Int (not UInt64) and a StringSpan/String mix; then the unit test passed first run. The checker's own bug: httpx sends `Accept-Encoding: gzip, deflate` by default, so "no gzip without asking" needed an explicit `identity`. PASS with Chromium loading JS, CSS and a woff2 font.

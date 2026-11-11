@@ -185,7 +185,7 @@ def m0():
         st, head, body = raw_get(port, "/app.js", "Accept-Encoding: gzip, br\r\n")
         if st != 200 or "chunked" in head.lower() or gzip.decompress(body).decode() != js:
             return False, "the raw gzip body doesn't inflate to the file"
-        if c.get("/app.js").headers.get("content-encoding"):
+        if c.get("/app.js", headers={"Accept-Encoding": "identity"}).headers.get("content-encoding"):
             return False, "gzip without Accept-Encoding"
         rg = c.get("/media/clip.mp4", headers={"Range": "bytes=1000-1999"})
         if rg.status_code != 206 or rg.content != media[1000:2000] or rg.headers.get("content-range") != f"bytes 1000-1999/{len(media)}":
