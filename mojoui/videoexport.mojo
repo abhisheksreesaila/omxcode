@@ -12,6 +12,9 @@
 # How: one `ffmpeg -f rawvideo -pix_fmt rgba -i - … libx264` process fed through a pipe (libc popen "w" / fwrite), the
 # mirror of VideoSource's reader; an in-process encoder can replace _Pipe without changing a caller. Frames are edited by
 # mojoui.imageops (GPU when there is one) between decode and encode.
+# Known limit (goal 58, D-5809): on a Mac the encoder is AVAssetWriter (mojoui.avmedia.AvWriter, no ffmpeg there), and
+# crf and preset are ignored: it writes H.264 at AVFoundation's own default quality, so a Mac's file can be larger or
+# smaller than Linux's for the same crf. Left as is: AVAssetWriter has no crf; a bit rate chosen from crf is the way in.
 
 from std.ffi import external_call
 from std.sys import CompilationTarget

@@ -1,13 +1,14 @@
 # mojoui.picture (Picture, draw_fitted) and mojoui.mediacard (MediaCards) (goal 39 M6), on the generated footage:
 #   G39_MEDIA=build/g39/media pixi run mojo run -I . tests/test_mediacard.mojo
-# Prints "picture: ok", "cards: ok", "seek set: ok". The still is written here with mojoui.png (its pixels known), then read
+# Prints "picture: ok", "opened: ok", "cards: ok", "seek set: ok". The still is written here with mojoui.png (its pixels known), then read
 # back through Picture; the second still is a frame ffmpeg writes as JPEG (lossy: compared within a tolerance).
 from std.testing import assert_equal, assert_true, assert_false
 from std.os import getenv
+from std.time import sleep
 from std.ffi import external_call
 from mojoui.app import Event
 from mojoui.canvas import Surface
-from mojoui.mediacard import MediaCards, OBJ_VIDEO, OBJ_IMAGE, CARD_MESSAGES, CARD_CLOSE, is_video_file, is_image_file, extension
+from mojoui.mediacard import MediaCards, OBJ_VIDEO, OBJ_IMAGE, CARD_MESSAGES, CARD_CANVASES, CARD_CLOSE, is_video_file, is_image_file, extension
 from mojoui.picture import Picture, draw_fitted
 from mojoui.player import PLAY, PAUSE, SCRUB, FRAME
 from mojoui.png import encode_png
@@ -61,6 +62,38 @@ def picture_tests(media: String) raises:
     print("picture: ok")
 
 
+def opened_tests() raises:
+    # a card's opening ends once and poll() says so (MediaCards.opened), so an app can replace "Opened x · opening…"
+    # with what it is (goal 58 polish: omxplorer's status bar kept "opening…" after the picture showed, D-5807)
+    var cards = MediaCards(4000, 200)
+    var k = cards.add("build/g39/m6-still.png", 0, 0, 200)
+    var junk = List[UInt8]()
+    for c in String("not a picture at all").as_bytes():
+        junk.append(c)
+    write_bytes("build/g39/m6-junk.png", junk)
+    var bad = cards.add("build/g39/m6-junk.png", 0, 300, 200)
+    assert_true(cards.cards[k].facts() == "opening…")
+    var seen = List[Int](length=2, fill=0)
+    var facts = List[String](length=2, fill=String(""))
+    for _ in range(5000):
+        _ = cards.poll()
+        for j in cards.opened:
+            seen[j] += 1
+            facts[j] = cards.cards[j].facts()
+        if not cards.pending() and seen[k] > 0 and seen[bad] > 0:
+            break
+        sleep(0.001)
+    for _ in range(20):  # (and never again)
+        _ = cards.poll()
+        for j in cards.opened:
+            seen[j] += 1
+    assert_equal(seen[k], 1, "the still's opening is reported once")
+    assert_equal(facts[k], "4×2 PNG")
+    assert_equal(seen[bad], 1, "a file that can't be opened is reported once too")
+    assert_equal(facts[bad], "can't be opened")
+    print("opened: ok")
+
+
 def card_tests(media: String) raises:
     var cards = MediaCards(4000, 200, most=3)
     var a = cards.add(media + "/warehouse.mp4", 0, 0, 640)
@@ -72,7 +105,7 @@ def card_tests(media: String) raises:
     assert_equal(cards.cards[c].kind, OBJ_IMAGE)
     assert_equal(cards.msg(a), 4000)
     assert_equal(cards.msg(b), 4000 + CARD_MESSAGES)
-    assert_equal(cards.canvas(b), 202)
+    assert_equal(cards.canvas(b), 200 + CARD_CANVASES)  # (was 202: stale since goal 41 gave a card a third canvas, its lane)
     assert_equal(cards.cards[a].h, (640 - 28) * 720 // 1280 + 132)  # (the media's own shape, with the card's chrome)
     assert_true(cards.cards[a].facts().startswith("0:"))
     assert_true(cards.cards[c].facts() == "4×2 PNG")
@@ -91,11 +124,11 @@ def card_tests(media: String) raises:
     assert_false(cards.cards[a].player.value().state.playing)
     assert_false(cards.update(Event(7, "", 0)))
     # each card draws on its own canvases
-    assert_true(cards.draws(200) and cards.draws(203) and cards.draws(204) and not cards.draws(206))
+    assert_true(cards.draws(200) and cards.draws(203) and cards.draws(206) and not cards.draws(200 + 3 * CARD_CANVASES))
     var px = List[UInt32](length=64 * 36, fill=0)
     var s = Surface(Int(px.unsafe_ptr()), 64, 36, 1.0)
     assert_true(cards.settle())
-    cards.draw(202, s, Palette.plain())  # (drone_a's frame at 1 s)
+    cards.draw(cards.canvas(b), s, Palette.plain())  # (drone_a's frame at 1 s)
     var lit = 0
     for p in px:
         if p != px[0]:
@@ -167,5 +200,6 @@ def seek_tests(media: String) raises:
 def main() raises:
     var media = getenv("G39_MEDIA", "build/g39/media")
     picture_tests(media)
+    opened_tests()
     card_tests(media)
     seek_tests(media)

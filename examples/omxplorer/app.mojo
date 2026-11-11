@@ -832,6 +832,19 @@ struct Main(App):
             self.say(Activity.error("Couldn't open " + file_name(path), "it isn't a video or picture"))
         self.version += 1
 
+    def poll_media(mut self) -> Bool:
+        """The cards' decoders' news (media.poll); a card whose opening just ended replaces the status bar's
+        "Opened x · opening…" with what it is, unless something has been said since (D-5807: it stayed "opening…"
+        after the picture showed, on Linux and the Mac alike: the message was written once, at add). Every poll of
+        the cards goes through here, so no card's `opened` is missed. True when something changed."""
+        var changed = self.media.poll()
+        for k in self.media.opened:
+            var name = file_name(self.media.cards[k].path)
+            if self.message == "Opened " + name + " · opening…":
+                self.message = "Opened " + name + " · " + self.media.cards[k].facts()
+                changed = True
+        return changed
+
     def video_number(self, k: Int) -> Int:
         """Card k is the how-manyth video card (0: the first), which names its actions for an agent (analyze, analyze-2)."""
         var n = 0
@@ -1709,7 +1722,7 @@ struct Main(App):
         if sel.row < 0:
             return
         var follows = self.links.follow(sel)
-        _ = self.media.poll()  # (a probe that landed since: the player knows its length before it seeks)
+        _ = self.poll_media()  # (a probe that landed since: the player knows its length before it seeks)
         if self.trace:
             var cells = String("")
             for i in range(min(len(sel.names), 4)):
@@ -3181,7 +3194,7 @@ struct Main(App):
         self.take_recipe()
         self.poll_documents()
         self.poll_pack()
-        if self.media.poll():  # (a video's probe or frame that landed: on frames too, for hosts without the wake, D-1264)
+        if self.poll_media():  # (a video's probe or frame that landed: on frames too, for hosts without the wake, D-1264)
             self.version += 1
         if self.opening:
             var state = self.opening.value().poll()
@@ -3502,7 +3515,7 @@ struct Main(App):
             self.version += 1
         elif m == JOBS_WAKE:  # (a job ended or a decoder landed a frame: take it now, not at the next display frame)
             self.poll_jobs()
-            if self.media.poll():
+            if self.poll_media():
                 self.version += 1
             if self.editor:
                 self.feed.poll(self.editor.value())

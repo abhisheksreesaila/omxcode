@@ -217,6 +217,23 @@ omxconsole, the second app, runs models on your own GPU through [MAX](https://ww
 
 Not yet: `consoled port-try`, the agent's own "see it run" loop, which the Python version had.
 
+### omxconsole: notebooks and tools for agents (new)
+
+- **📓 Run in Jupyter.** Every model has a notebook: its architecture from `config.json`, its model card, and cells that call your endpoint. The Notebook tab's Run in Jupyter writes it to `~/.mxc/notebooks/<model>.ipynb` (never overwriting your edits) and starts JupyterLab on 127.0.0.1 with its own token. The kernels get `MXC_BASE_URL` and a key that lasts as long as the app, so the cells just run. Without `jupyter` on your PATH it runs one through `pixi exec`, installing nothing; `MXC_JUPYTER` picks your own. Jupyter stops when the app closes.
+- **🤖 `omxc`, tools for agents.** A small command shipped beside the app (`examples/consoled/omxc.mojo`). Each command is one call to omxconsole's admin API, and it prints the JSON reply as it is: a thin pass-through, not another CLI on top of MAX. A coding agent such as Claude Code can find, pull, serve and port models itself while you watch the same state in the app.
+
+```
+./omxc help                                   # every command, for you or your agent
+./omxc search smollm                          # models that fit this GPU
+./omxc pull HuggingFaceTB/SmolLM2-135M-Instruct --wait
+./omxc serve qwen2.5-0.5b                     # answers once MAX serves it
+./omxc chat qwen2.5-0.5b "Say hello in five words."
+./omxc keys create my-app                     # a key for an app; shown once
+./omxc notebook qwen2.5-0.5b                  # Jupyter's link to the model's notebook
+```
+
+Exit codes: 0 done, 1 refused or failed (the JSON says why), 2 usage, 3 omxconsole isn't running. `MXC_PORT` points it at another daemon.
+
 **Why Mojo, honestly.** Mojo is young (1.2). It has a small ecosystem, no official iPhone, Android or WebAssembly target (omxcode cross-compiles with two hand-written runtime functions), and no Windows release yet. Flutter, React Native and the Rust kits are far ahead on maturity, tooling and production users. What none of them has is one readable language from the button to the GPU kernel, with native controls on every platform and an agent built in as a host.
 
 ## Try it

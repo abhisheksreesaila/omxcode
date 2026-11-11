@@ -9,6 +9,8 @@
 #
 # How: decoding goes through VideoSource reading one frame (ffmpeg reads stills as one-frame videos), so there is one decoder
 # for pictures and video and nothing new to link; a decoder in the process can replace VideoSource without changing a caller.
+# A Picture is one frame everywhere. On a Mac VideoSource reads stills through ImageIO (mojoui.avmedia, goal 58), so an
+# animated GIF or WebP is only ever its first frame there, while ffmpeg on Linux also opens it as a video (known limit, D-5809).
 
 from mojoui.canvas import Surface
 from mojoui.video import VideoSource
