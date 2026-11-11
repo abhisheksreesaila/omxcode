@@ -18,6 +18,9 @@ args = sys.argv[1:]
 if "--version" in args:  # goal 64: the skill's environment is pinned to the MAX that will serve the port
     print("max 26.7.0.dev2026100905")
     sys.exit(0)
+if args[:1] == ["list"] and os.environ.get("FAKE_MAX_CATALOG"):  # `max list --json`: MAX's architectures, from a file
+    print(open(os.environ["FAKE_MAX_CATALOG"]).read())
+    sys.exit(0)
 if os.environ.get("FAKE_MAX_ARGS_FILE"):
     open(os.environ["FAKE_MAX_ARGS_FILE"], "w").write(json.dumps(args))
 if os.environ.get("FAKE_MAX_ARGS_LOG"):

@@ -2,7 +2,8 @@
 # loaded (per model), the daemon's own info with Stop daemon (the first tap asks, the second sends POST /admin/shutdown),
 # and every port and process mxconsole owns. Data: /admin/info (core.js's poll, handed over by app.mojo; uptime keeps
 # counting between polls), /admin/system (MXC_HOME, read on arrival; the listeners from system-data.js's 5 s poll), the
-# Store's models.
+# Store's models. The porting assistant's card (goal 64, D-6504) is porter.mojo's, the same component the port screen
+# shows inline: /admin/porter, read on arrival.
 
 from mojoui.view import View, Text, VStack, HStack, Spacer, CENTER, START
 from mojoui.app import Event
@@ -18,6 +19,7 @@ from mojoui.words import Mono, QuietText, MonoLine, Hint
 from mojoui.marks import StatusMark, GOOD, WARN, QUIET
 from mojoui.feedback import Warning, EmptyState
 from api import Api
+from porter import Porter, porter_card, P_SPAN
 from data import Store, real_or
 from msgs import *
 from mojoui.numformat import duration_short
@@ -63,6 +65,7 @@ struct SettingsPage(Copyable, Movable):
     var confirming: Bool
     var stopping: Bool
     var pick: Int  # the theme picked: -1 the system's, 0 light, 1 dark
+    var porter: Porter  # who writes ports (porter.mojo)
 
     def __init__(out self):
         self.has_info = False
@@ -79,10 +82,12 @@ struct SettingsPage(Copyable, Movable):
         self.confirming = False
         self.stopping = False
         self.pick = -1
+        self.porter = Porter()
 
     def enter(mut self, mut api: Api):
         self.confirming = False
         api.get(GOT_SYSTEM, "/admin/system")  # (its mount reads /admin/system for MXC_HOME)
+        self.porter.ask(api, SET_PORTER)
 
     def every(self) -> List[Every]:
         return List[Every]()
@@ -124,7 +129,9 @@ struct SettingsPage(Copyable, Movable):
 
     def update(mut self, m: Int, event: Event, mut api: Api) -> String:
         """A tap or a reply in Settings' range; returns text to put on the clipboard ("" none)."""
-        if SET_THEME <= m < SET_THEME + 2:
+        if SET_PORTER <= m < SET_PORTER + P_SPAN:
+            _ = self.porter.update(m - SET_PORTER, event, api, SET_PORTER)
+        elif SET_THEME <= m < SET_THEME + 2:
             self.pick = m - SET_THEME
         elif m == SET_STOP:
             self.confirming = True
@@ -162,6 +169,7 @@ def settings_view(sp: SettingsPage, st: Store, dark: Bool, phone: Bool) -> View:
             values.append(FactText("pinned: never unloads" if m.pinned else "after " + duration_short(m.keep_alive) + " idle"))
         idle.append(FactGrid(names, values^, mono_keys=True))
     cards.append(Card([CardHead("Idle unload", "per model"), CardBody(idle^, flow=True)]))
+    cards.append(porter_card(sp.porter, SET_PORTER))
     # Daemon
     var daemon: List[View] = []
     if sp.has_info:

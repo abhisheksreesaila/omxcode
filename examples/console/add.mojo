@@ -29,6 +29,7 @@ from mojoui.skeleton import SkeletonList
 from mojoui.shell import PageCard
 
 from api import chat_curl
+from porter import Porter, porter_choice
 from msgs import *
 from mojoui.numformat import en_number
 from mojoui.clock import wall_seconds
@@ -43,7 +44,6 @@ comptime PORT_NOTE = ("“Port it” runs Claude Code with Modular’s import-mo
                       + "as a MAX graph, checks it against the reference and fixes what fails. It may take a while, often several minutes and sometimes "
                       + "much longer, and it uses your Claude Code session. You will see every stage and the full log, and you can cancel. "
                       + "Linux only for now: the sandbox is bubblewrap (bwrap).")
-comptime CLAUDE_CODE_URL = "https://docs.anthropic.com/en/docs/claude-code"
 
 
 # ---------- pure: formatting (blade-add.js) ----------
@@ -428,16 +428,9 @@ struct Add(Copyable, Movable):
     # the notice above the results (too big, needs porting)
     var notice: Int
     var noticed: Pick
-    # the porting assistant, read from /admin/porter when a port is offered (goal 64 M1): a port never starts
-    # without one, so the choice is made here, on the port screen, instead of sending the person to Settings
-    var porter: String  # the kind set up ("" none yet)
-    var porter_found: String  # Claude Code on this machine, as the daemon detected it ("" none)
-    var porter_asked: Bool  # /admin/porter answered
-    var porter_note: String
-    var porter_key: String  # what is typed into the inline key field (sent once, never kept after it is saved)
-    var porter_base: String
-    var porter_open: Bool  # the inline key fields are showing
-    var porter_saving: Bool
+    # the porting assistant, read from /admin/porter when a port is offered (goal 64 M1): the same component as
+    # Settings' card (porter.mojo, D-6504), shown inline here so a port with nothing set up is never a dead end
+    var pa: Porter
     var guided: Bool
     var refused: String
     var sandbox: Bool
@@ -479,14 +472,7 @@ struct Add(Copyable, Movable):
         self.mem_total = 0
         self.notice = NOTICE_NONE
         self.noticed = Pick("", "", "", "", -1, -1, -1, "", List[Sugg]())
-        self.porter = ""
-        self.porter_found = ""
-        self.porter_asked = False
-        self.porter_note = ""
-        self.porter_key = ""
-        self.porter_base = ""
-        self.porter_open = False
-        self.porter_saving = False
+        self.pa = Porter()
         self.guided = False
         self.refused = ""
         self.sandbox = False
@@ -627,31 +613,16 @@ def port_card(a: Add) -> View:
         body.append(WarnLine(a.refused))
     if a.sandbox:
         body.append(QuietText("Without a sandbox the agent would run with your full permissions, so it is not offered here."))
-    var ready = a.porter != "" or not a.porter_asked
-    if a.porter_asked and a.porter == "":  # the choice, here, instead of a trip to Settings (goal 64 M1)
-        body.append(QuietText(("Porting runs Claude Code, and it is on this machine (" + a.porter_found + "). Use its own login, "
-                               + "or give it an API key: Anthropic's, or a gateway's that answers the Anthropic API.") if a.porter_found != ""
-                              else ("Porting runs Claude Code, which was not found on this machine. Install it first ("
-                                    + CLAUDE_CODE_URL + "), then sign in with its own login or give it an API key here.")))
-    if a.porter_note != "":
-        body.append(WarnLine(a.porter_note))
     var size = joined([params_text(r.params), size_text(r.size_gb)])
     body.append(FactList([Fact("architecture", FactText(r.arch if r.arch != "" else String("unknown"))), Fact("size", FactText(size if size != "" else String("unknown"))),
                           Fact("skill", FactText("import-model"))]))
     if not a.guided and a.refused == "":
-        if ready:
+        if a.pa.ready():
             body.append(ButtonRow([SmallButton("Port it", ADD_PORT_IT, "hammer", FILL)]))
-        elif a.porter_open:
-            body.append(FieldWithHelp(OutlinedField(a.porter_base, "Base URL of a gateway that answers the Anthropic API (optional: empty means Anthropic itself)", ADD_PORTER_BASE, ADD_PORTER_SAVE),
-                                      "https://… only, and never the key in the URL"))
-            body.append(FieldWithHelp(OutlinedField(a.porter_key, "API key Claude Code signs in with", ADD_PORTER_KEY, ADD_PORTER_SAVE),
-                                      "Kept for omxconsole only, readable by you alone, never shown again and never logged. Removable at any time."))
-            body.append(ButtonRow([SmallButton("Checking the key…" if a.porter_saving else String("Save and port"), ADD_PORTER_SAVE, "key", FILL)]))
-        elif a.porter_found != "":
-            body.append(ButtonRow([SmallButton("Use Claude Code's own login", ADD_PORTER_CLAUDE, "sparkles", FILL),
-                                   SmallButton("Give it an API key", ADD_PORTER_SETTINGS, "key")]))
-        else:  # (a key can't stand in for Claude Code: it only signs Claude Code in)
-            body.append(ButtonRow([SmallButton("Installed it? Check again", ADD_PORT_IT, "refresh-cw", FILL)]))
+        else:  # the choice, here, instead of a trip to Settings (goal 64 M1): Settings' card is the same component
+            body += porter_choice(a.pa, ADD_PORTER)
+            if a.pa.asked and a.pa.found == "":  # (a key can't stand in for Claude Code: it only signs Claude Code in)
+                body.append(ButtonRow([SmallButton("Installed it? Check again", ADD_PORT_IT, "refresh-cw", FILL)]))
     return Card([CardHead(last_part(mref) + " uses " + (r.arch if r.arch != "" else String("an architecture")) + ", which MAX cannot run yet.",
                           lead=[IconSquare("hammer", hue=1)], tail=[Badge("beta", BADGE_WARN), Badge("architecture check")]),
                  CardBody(body^)])

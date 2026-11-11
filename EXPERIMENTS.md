@@ -4,6 +4,14 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 64 polish: the porting assistant's card driven on GTK and the web, and in Settings (2026-11-11)
+- **Setup:** worktree ../mojo-ui-p64, branch `polish-64-port-screen` off main e5fc9e4b. A throwaway daemon (build/g64/home-m1-screen, a free port, its own admin key) with goal 64's stand-ins: a fake Hub that now answers a search, a fake `max` that lists a catalog without WeirdForCausalLM, a fake `claude`, and `fake_porter.py` for the key; never :11435, ~/.mxc or a real key.
+- **Worked:** the console itself, headless, on GTK and the web: Add a model → `acme/weird` → the pull says MAX doesn't run it → the inline card says what was detected → GTK takes Claude Code's own login, the web an API key checked against the stand-in → the button becomes Port it → Settings shows the same card (now one component, `examples/console/porter.mojo`, D-6504) with what writes ports, the key by its prefix only, and Remove; GTK removes it and chooses again from Settings. Part of `docs/goals/64-check.py` M1 (`scripts/check M1`), screenshots in build/g64/shots.
+- **Broke and fixed:** without a catalog the pull registered the model ("trying it") instead of offering a port, so the stand-in `max` answers `list --json` (D-6505). The screenshots showed a missing "key" icon on GTK, a search magnifier in the key fields, a doubled prefix ellipsis and a "Save and port" button that only saved; fixed (D-6506).
+- **Means:** goal 64's M1 is now proved on the screen, not only in the source. Not done: the key field shows what is typed (mojoui has no masked field yet); the Mac and iPhone hosts were not run.
+
+---
+
 ## Globe sample: a geospatial globe drawn per pixel on the GPU (2026-11-09)
 - **Setup:** worktree ../mojo-ui-globe, branch `globe-sample` off main (Mojo 1.2), for a prospective adopter (HPC geospatial, uses rerun, has his own Mojo rasterizer for OGC APIs). `examples/globe` (app, earth.mojo, render.mojo, prep.py, test_globe.mojo); framework: `Gpu.set_data` / `draw_with` / `render_with` (tests/test_gpu_data.mojo). Report for him: https://claude.ai/artifact/XqmAx6prRrZPT9gVRqvQsA (private).
 - **Worked:** Natural Earth 1:50m land rasterized in Mojo at start-up (4096×2048, 2×2 samples a texel) + 5,530,780 synthetic aircraft reports binned into a 24 h × 0.25° cube (133 MB on the GPU); one pixel function draws the globe. RTX 3090: 0.10 ms at 1080p, 0.40 ms at 4K, 1.22 ms at 8K (batch), 0.54 ms a frame in the GTK app. Apple M4 (Metal, IOSurface): 4.8 ms at 1080p, 10.9 ms at 4K, ≈ 15 ms in the app, ≈ 85 ms first frame. Linux GTK, web and the owner's M4 answer the same tap identically (40.18°N 1.98°E, near Barcelona, 120 reports). Downloads: dist/globe-linux-x86_64.tar.gz (bare_run ok), dist/globe-mac-arm64.zip (built on the M4).
