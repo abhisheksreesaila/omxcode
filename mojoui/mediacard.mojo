@@ -8,6 +8,8 @@
 #   var k = media.add(path, x, y, width)                            # returns at once (raises only when the file is missing): the card
 #                                                                   # opens in place (16:9 until the probe lands, then its own shape)
 #   jobs / frames: if media.poll(): …                               # takes what the cards' decoder threads finished (sizes, frames)
+#                  for k in media.opened: … media.cards[k].facts()   # cards whose opening ended in that poll (ready, or can't be
+#                                                                   # opened): once each, to replace an "opening…" the app said
 #   update():   if media.update(event): …                           # True when the event was a card's (a close removes it: media.closed)
 #   view():     media.view(k).at(c.x, c.y).width(c.w).height(c.h)   # for k in range(len(media)): c = media.cards[k]
 #   draw():     if media.draws(canvas): media.draw(canvas, surface, palette)
@@ -105,9 +107,11 @@ struct MediaCard(Movable):
     var lane: Optional[TimeLane]  # a log linked to the video by time: its measure under the picture
     var lane_w: Float64  # the lane's width in points (its last draw: a tap on it seeks)
     var name: String  # what the card is called when it isn't its file's name ("episode": a card whose file follows a row)
+    var announced: Bool  # its opening's end (ready, or a problem) went out in MediaCards.opened
 
     def __init__(out self, path: String, slot: Int, msg: Int, canvas: Int, x: Int, y: Int, w: Int) raises:
         self.path = path
+        self.announced = False
         self.name = ""
         self.actions = List[CardAction]()
         self.status = ""
@@ -197,9 +201,11 @@ struct MediaCards(Movable, Sized):
     var closed: Int  # the card the last update() removed (its index then), else -1
     var acted_card: Int  # the card whose action the last update() was (its index), else -1
     var acted: Int  # which of its actions, else -1
+    var opened: List[Int]  # the cards whose opening ended in the last poll() (ready, or can't be opened): once per card
 
     def __init__(out self, msg_base: Int, canvas_base: Int, most: Int = 8):
         self.cards = List[MediaCard]()
+        self.opened = List[Int]()
         self.msg_base = msg_base
         self.canvas_base = canvas_base
         self.most = most
@@ -292,11 +298,17 @@ struct MediaCards(Movable, Sized):
 
     def poll(mut self) -> Bool:
         """Takes what every card's decoder thread finished (a probe, a frame, a picture): call it on the app's
-        jobs_message (the decoders wake it) or any event. True when a card changed."""
+        jobs_message (the decoders wake it) or any event. True when a card changed. `opened` lists the cards whose
+        opening ended here (D-5807: omxplorer's status bar said "opening…" until something else replaced it)."""
         var changed = False
+        self.opened = List[Int]()
         for k in range(len(self.cards)):
             if self.cards[k].poll():
                 changed = True
+            ref c = self.cards[k]
+            if not c.announced and (c.ready() or c.problem() != ""):
+                c.announced = True
+                self.opened.append(k)
         return changed
 
     def settle(mut self, seconds: Float64 = 10.0) -> Bool:

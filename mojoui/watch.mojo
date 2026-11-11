@@ -21,7 +21,10 @@
 # it before the watch was added is found by listing it (reported when its writer closes it, or within 20 ms if it
 # already had). Mac: FSEvents (file-level events on a dispatch queue of its own), built, not run (docs/components.md).
 # The thread hands events over through a pipe (a few bytes each), so nothing is shared but the pipe, and a consumer
-# can sleep on it (wait()). Also here: walk_files, every file under a folder (what a first scan needs).
+# can sleep on it (wait()). wake=True wakes the host after each batch through mojoui.wake.UIWaker, as jobs and
+# FrameFeed do (D-5808): a byte down the job-wake pipe on Linux, jobsEnded: on the main queue on a Mac; either way
+# App.jobs_message() reaches update(), so neither host polls take() on a timer (the Mac's wake: built, not run in an
+# app yet). Also here: walk_files, every file under a folder (what a first scan needs).
 
 from std.atomic import Atomic
 from std.ffi import external_call, c_int, c_char
@@ -30,7 +33,7 @@ from std.memory.alloc import unsafe_alloc
 from std.sys import CompilationTarget
 from std.collections import Dict
 from mojoui.clock import now_ns
-from mojoui.shared import get_shared
+from mojoui.wake import UIWaker, wake_write_fd
 from mojoui import libc
 
 comptime CREATED = 1
@@ -54,7 +57,8 @@ comptime W_QUEUE = 9  # Mac: its dispatch queue
 comptime W_MISSED = 10  # folders the system wouldn't watch (inotify_add_watch failed: EACCES, ENOSPC, …)
 comptime W_MISSED_ERR = 11  # the errno of the last one
 comptime W_HOLD = 12  # 1: the thread doesn't read (tests: lets the kernel's queue overflow)
-comptime W_WORDS = 13
+comptime W_WAKE_TARGET = 13  # Mac: the delegate UIWaker found at start() (0: none yet; UIWaker then asks on the main queue)
+comptime W_WORDS = 14
 
 comptime IN_CLOSE_WRITE = 0x8
 comptime IN_MOVED_FROM = 0x40
@@ -98,16 +102,11 @@ def _word(words: Int, k: Int) -> _P:
     return _P(unsafe_from_address=words + 8 * k)
 
 
-def wake_ui():
-    """mojoui.uijobs.wake_ui without its engine import (mojoui.watch runs under `mojo run` too): one byte down the
-    host's job-wake pipe (mojoui.shared slot 90), so App.jobs_message() reaches update() at once. Linux only; the Mac
-    host's wake is a message to its delegate (mojoui.uijobs.WakeUI): a Mac app polls take() on a timer for now."""
-    comptime if CompilationTarget.is_linux():
-        var fd = get_shared(90) - 1
-        if fd >= 0:
-            var b = List[UInt8](length=1, fill=1)
-            _ = _c[Int]("write", c_int(fd), Int(b.unsafe_ptr()), 1)
-            _ = len(b)
+def wake_ui(words: Int):
+    """Wakes the host from the watcher's thread (Linux) or FSEvents' queue (Mac) through mojoui.wake.UIWaker, so
+    App.jobs_message() reaches update() at once: a byte down the job-wake pipe on Linux (looked up here, so a pipe the
+    host makes after start() still counts), jobsEnded: on the main queue on a Mac (the delegate found at start())."""
+    UIWaker(wake_write_fd() if CompilationTarget.is_linux() else -1, Int(_A.load(_word(words, W_WAKE_TARGET)))).wake()
 
 
 def _sym(name: String) -> Int:
@@ -497,7 +496,7 @@ def _watch_linux(words: Int) raises:
                 off += 16 + len_
         st.flush_due()
         if wake and st.emitted != before:
-            wake_ui()
+            wake_ui(words)
     buf.unsafe_free()
     pfd.unsafe_free()
     _ = _c[c_int]("close", c_int(fd))
@@ -539,7 +538,7 @@ def _fs_callback(stream: Int, info: Int, count: Int, paths: Int, flags: Int, ids
             continue
         emitted += 1
     if emitted > 0 and _A.load(_word(info, W_WAKE)) != 0:
-        wake_ui()
+        wake_ui(info)
 
 
 def _watch_mac(words: Int) raises:
@@ -668,6 +667,8 @@ struct FolderWatcher(Movable):
         _A.store(_word(Int(words), W_OUT), Int64(w))
         _A.store(_word(Int(words), W_ROOT), Int64(_cstr(self.root)))
         _A.store(_word(Int(words), W_WAKE), Int64(1 if self.wake else 0))
+        if self.wake:  # (on the UI thread: a Mac's delegate is looked up here, not on FSEvents' queue)
+            _A.store(_word(Int(words), W_WAKE_TARGET), Int64(UIWaker().target))
         self.words = Int(words)
         comptime if CompilationTarget.is_macos():
             _A.store(_word(self.words, W_REFS), 1)  # (FSEvents' queue isn't an owner: dropping the handle ends the stream first)

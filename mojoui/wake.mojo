@@ -48,6 +48,21 @@ def _wake_on_main(target: Int) abi("C"):
     _ = msg(target, "jobsEnded:", 0)
 
 
+def _wake_main_lookup(unused: Int) abi("C"):
+    """On the main queue, for a waker made before the host had its delegate (an app's __init__ runs before AppKit's
+    setDelegate:): the delegate looked up here, on the main thread, then jobsEnded: as _wake_on_main sends it."""
+    var target = msg(msg(cls("NSApplication"), "sharedApplication"), "delegate")
+    if target != 0 and msg(target, "respondsToSelector:", sel("jobsEnded:")) != 0:
+        _ = msg(target, "jobsEnded:", 0)
+
+
+def _app_running() -> Bool:
+    """An AppKit app exists (AppKit's NSApp global is set), so its main queue is drained: read from any thread, where
+    asking NSApplication would make one. No AppKit (a test under `mojo run`, a web server, UIKit): nothing to wake."""
+    var addr = libc_fn("NSApp")
+    return addr != 0 and Pointer[Int, MutUntrackedOrigin](unsafe_from_address=addr)[] != 0
+
+
 def _call_c(name: String, a: Int, b: Int, c: Int):
     """A C function of three pointer-sized arguments, looked up by name (dispatch_async_f: no link-time symbol)."""
     var f = libc_fn(name)
@@ -74,6 +89,11 @@ struct UIWaker(Copyable, Movable):
             if target != 0 and msg(target, "respondsToSelector:", sel("jobsEnded:")) != 0:
                 self.target = target  # (the host's target: it lives as long as the process, so it isn't retained)
 
+    def __init__(out self, fd: Int, target: Int):
+        """A waker from values another UIWaker found on the UI thread (a worker that keeps them in its own words)."""
+        self.fd = fd
+        self.target = target
+
     def wake(self):
         """From any thread: the host's main loop looks again (App.jobs_message to update())."""
         comptime if not CompilationTarget.is_linux():
@@ -81,6 +101,8 @@ struct UIWaker(Copyable, Movable):
             # performSelectorOnMainThread:… never arrived (a FrameFeed's probe on the owner's Mac, goal 58)
             if self.target != 0:
                 _call_c("dispatch_async_f", libc_fn("_dispatch_main_q"), self.target, fn_address(_wake_on_main))
+            elif _app_running():  # (made before the host set its delegate: the main queue looks it up, D-5808)
+                _call_c("dispatch_async_f", libc_fn("_dispatch_main_q"), 0, fn_address(_wake_main_lookup))
             return
         wake_write(self.fd)
 

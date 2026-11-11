@@ -10,6 +10,9 @@
 #   var px = av_picture(path)                      # (pixels, width, height) of a still: PNG, JPEG, WebP, GIF, HEIC…
 #
 # Call these only on a Mac (comptime if CompilationTarget.is_macos()): on Linux their symbols don't exist.
+# Known limits (goal 58, D-5809), left as they are: AvWriter ignores VideoWriter's crf and preset (AVAssetWriter's H.264
+# defaults); an animated GIF or WebP is its first frame on a Mac (av_picture reads image 0 through ImageIO, and
+# av_probe doesn't take it as a video), where ffmpeg on Linux reads all its frames.
 # Structs: arm64 passes a struct over 16 bytes (CMTime 24, CMTimeRange 48) by a pointer to a copy, so they are written
 # into memory here and their address passed; CGSize (two doubles) comes back in registers, as CGPoint.
 

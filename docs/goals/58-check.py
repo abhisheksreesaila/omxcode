@@ -4,7 +4,8 @@
 
 Linux is the reference: the same test prints the same lines on Linux (ffmpeg) and on the owner's Mac (AVFoundation,
 ImageIO; scripts/mac-ssh-test), and the lines are compared here cell by cell. M4 runs omxplorer on the Mac
-(scripts/mac-ssh) and reads its view dumps and pictures.
+(scripts/mac-ssh) and reads its view dumps and pictures. M6 (goal 58 polish) reads the status bar after a picture
+opens, on Linux (GTK) and the Mac (docs/goals/58/status.steps).
 """
 import os
 import re
@@ -144,7 +145,59 @@ def m5():
     return ok, ("goal 54 M1 PASS on Linux (the tiled board with the featured video)" if ok else (r.stdout + r.stderr)[-800:])
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5}
+STATUS_OK = "Opened cat.jpg · 451×300 JPG"
+STATUS_STEPS = ROOT / "docs/goals/58/status.steps"
+
+
+def status_steps(data):
+    """status.steps as one MOJOUI_TEST string, `{data}` → the folder holding fleet.csv and cat.jpg (scripts/mac-ssh's form)."""
+    steps = ";".join(l.strip() for l in STATUS_STEPS.read_text().splitlines() if l.strip() and not l.startswith("#"))
+    return steps.replace("{data}", str(data))
+
+
+def m6():
+    """The status bar after a picture opens (goal 58 polish, D-5807): GTK on Linux (its LABEL lines), then the owner's
+    Mac (scripts/mac-ssh's last view dump). Before the fix both said "Opened cat.jpg · opening…" after the picture showed."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import headless
+    import shutil
+    headless.ensure()
+    app = ROOT / "build/omxplorer/linux/omxplorer"
+    b = run(["scripts/build.sh", "omxplorer", "linux"], 3600)
+    if b.returncode or not app.exists():
+        return False, "omxplorer didn't build: " + (b.stdout + b.stderr)[-800:]
+    data = OUT / "status-data"
+    home = OUT / "status-home"
+    for d in (data, home / "docs", home / "config"):
+        d.mkdir(parents=True, exist_ok=True)
+    shutil.copy(FULL / "fleet.csv", data / "fleet.csv")
+    shutil.copy(ROOT / "tests/fixtures/vision/cat.jpg", data / "cat.jpg")
+    gtk_steps = ";".join(s for s in status_steps(data).split(";") if not s.startswith("resize:"))  # (GTK's resize: is a Board object's; the window is MOJOUI_WINDOW)
+    r = run([str(app)], 900, {"OMX_DOCUMENTS": str(home / "docs"), "OMX_CONFIG": str(home / "config"),
+                              "MOJOUI_TEST": gtk_steps, "MOJOUI_WINDOW": "1440x900"})
+    out = r.stdout + r.stderr
+    (OUT / "status-linux.log").write_text(out)
+    said = [l[len("LABEL: "):] for l in out.splitlines() if l.startswith("LABEL: Opened ")]
+    probs = []
+    if r.returncode or "TEST: " in out:
+        probs.append(f"Linux run failed (exit {r.returncode})")
+    if STATUS_OK not in said or any("opening…" in l for l in said):
+        probs.append(f"Linux's status bar: {said}")
+    if os.environ.get("MAC_SSH"):
+        m = run(["scripts/mac-ssh", "omxplorer", str(STATUS_STEPS), str(FULL / "fleet.csv"), "tests/fixtures/vision/cat.jpg"], 2400)
+        rep = Path(m.stdout.strip().splitlines()[-1]) if m.stdout.strip() else None
+        if m.returncode or rep is None or not (ROOT / rep / "log.txt").exists():
+            probs.append("scripts/mac-ssh failed: " + (m.stdout + m.stderr)[-600:])
+        else:
+            last = sorted((ROOT / rep).glob("[0-9]*.txt"))[-1].read_text()
+            if f"Text '{STATUS_OK}'" not in last or "opening…" in last:
+                probs.append("the Mac's status bar: " + "; ".join(re.findall(r"Text '(Opened [^']*)'", last)))
+    else:
+        probs.append("MAC_SSH not set: the Mac's half didn't run")
+    return (not probs), ("; ".join(probs) if probs else f"after cat.jpg opens the status bar says '{STATUS_OK}' on Linux (GTK) and the Mac")
+
+
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6}
 
 if __name__ == "__main__":
     wanted = sys.argv[1:] or list(MILESTONES)
