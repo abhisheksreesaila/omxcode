@@ -87,6 +87,9 @@ comptime ICON_NAMES: List[String] = [
 
 # Text styles (each platform maps them to its own type scale)
 comptime BODY = 0
+comptime FIELD_SECRET = 1  # a TextField's style: masked as typed, never read back in a dump (.secret()). The same number
+# as TITLE (a Text's style) and a Checkbox's: a node's style means something only for its own kind, so hosts read it as
+# FIELD_SECRET only on a FIELD node
 comptime TITLE = 1
 comptime HEADLINE = 2
 comptime CAPTION = 3
@@ -388,6 +391,13 @@ struct View(Copyable, Movable):
         GTK: libadwaita's AdwSpringAnimation on its opacity and top margin; the web: a spring curve (CSS linear()).
         Hosts skip it when the system asks for less motion."""
         self.nodes[0].arrives = True
+        return self^
+
+    def secret(var self) -> View:
+        """A TextField whose contents are masked as they are typed (an API key, a password): GTK's entry with its
+        visibility off, the web's <input type=password autocomplete=off>, NSSecureTextField, UITextField's secure
+        entry, Android's password input type. Test dumps and agents see only how many characters it holds."""
+        self.nodes[0].style = FIELD_SECRET
         return self^
 
     def focused(var self) -> View:

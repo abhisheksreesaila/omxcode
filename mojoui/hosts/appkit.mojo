@@ -11,6 +11,7 @@ from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
 from mojoui.browser import open_url as browser_open_url
+from mojoui.view import FIELD_SECRET
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
@@ -756,7 +757,8 @@ struct AppKitHost[A: App](Movable):
                 if node.hint != "":
                     _ = msg(w, "setImagePosition:", 7)  # NSImageLeading: icon, then title, from the leading edge
         elif node.kind == FIELD:
-            w = msg(cls("NSTextField"), "textFieldWithString:", ns_string(node.text))
+            # (.secret(): NSSecureTextField, AppKit's masked field, which also keeps the text off the pasteboard)
+            w = msg(cls(String("NSSecureTextField") if node.style == FIELD_SECRET else String("NSTextField")), "textFieldWithString:", ns_string(node.text))
             _ = msg(w, "setPlaceholderString:", ns_string(node.hint))
             _ = msg(w, "setDelegate:", self.target)  # controlTextDidChange: as you type
             self.wire(w, i, self_addr, "submit:")  # the action fires on Return

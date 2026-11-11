@@ -35,6 +35,7 @@ from mojoui.embed import is_web_url
 from mojoui.webcomponent import is_widget_tag
 from mojoui.json import json_string
 from mojoui.view import NO_MSG, HOLD_MS, is_file_saver
+from mojoui.view import FIELD_SECRET
 from mojoui.hosts.gtk_webview import (
     WebViews, Inbound, webviews_at, start as webviews_start, new_view, send as webview_send, probe as webview_probe, drop as webview_drop,
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
@@ -1496,6 +1497,10 @@ struct GtkHost[A: App](Movable):
             w = external_call["gtk_entry_new", Int]()
             if node.value >= 1:
                 add_class(w, "mui-cell-editor")
+            if node.style == FIELD_SECRET:  # (.secret(): masked as typed; GTK_INPUT_PURPOSE_PASSWORD keeps it out of input methods' memory)
+                external_call["gtk_entry_set_visibility", NoneType](w, c_int(0))
+                external_call["gtk_entry_set_input_purpose", NoneType](w, c_int(8))
+                add_class(w, "mui-secret")
             if node.size != 0:  # on_cancel: Escape
                 var esc = external_call["gtk_event_controller_key_new", Int]()
                 set_node(esc, i)
@@ -6924,6 +6929,10 @@ def report_pass[A: App](host_addr: Int, alerts: Bool):
                 print("BUTTON: " + c_str(external_call["gtk_button_get_label", Int](w)))
             if n.tip != "":
                 print("TIP: " + n.text + " = " + n.tip)
+        elif n.kind == FIELD and n.style == FIELD_SECRET:  # (never its contents: how many characters, and whether GTK masks them)
+            var masked = external_call["gtk_entry_get_visibility", c_int](w) == 0
+            print("FIELD: (secret, " + String(c_str(external_call["gtk_editable_get_text", Int](w)).byte_length()) + " characters, "
+                  + ("masked" if masked else "SHOWN") + ")")
         elif n.kind == FIELD:
             print("FIELD: " + c_str(external_call["gtk_editable_get_text", Int](w)))
         elif n.kind == TOGGLE:

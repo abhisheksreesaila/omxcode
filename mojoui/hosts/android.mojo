@@ -10,6 +10,7 @@ from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 from std.math import sqrt
 
+from mojoui.view import FIELD_SECRET
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, PARAGRAPH, PAN, ZOOM, TAP,
@@ -174,6 +175,8 @@ struct AndroidHost[A: App](Movable):
             if node.kind == FIELD:
                 _ = self.jni.call(v, "android/widget/TextView", "setSingleLine", "(Z)V", [1])
                 _ = self.jni.call(v, "android/widget/TextView", "setImeOptions", "(I)V", [6])  # Done
+                if node.style == FIELD_SECRET:  # .secret(): TYPE_CLASS_TEXT | TYPE_TEXT_VARIATION_PASSWORD (masked, no suggestions)
+                    _ = self.jni.call(v, "android/widget/TextView", "setInputType", "(I)V", [0x81])
                 self.listen(v, "android/widget/TextView", "setOnEditorActionListener", "android/widget/TextView$OnEditorActionListener")
             else:
                 _ = self.jni.call(v, "android/widget/TextView", "setMinLines", "(I)V", [3])

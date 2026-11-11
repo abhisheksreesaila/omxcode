@@ -19,11 +19,13 @@ def SearchField(value: String, placeholder: String, on_change: Int, key: String 
     return HStack(items^, spacing=SPACE_S).align(CENTER).tag("search-box")
 
 
-def OutlinedField(value: String, label: String, on_change: Int, on_submit: Int = NO_MSG, icon: String = "search") -> View:
+def OutlinedField(value: String, label: String, on_change: Int, on_submit: Int = NO_MSG, icon: String = "search", secret: Bool = False) -> View:
     """An outlined field: a lead icon and a borderless field in a box with a hairline ring; `label` shows until something
-    is typed (role outlined-field)."""
-    return HStack(Icon(icon, 16), TextField(value, placeholder=label, on_change=on_change, on_submit=on_submit).grow(),
-                  spacing=SPACE_M).align(CENTER).fill().tag("outlined-field")
+    is typed (role outlined-field). `secret`: masked as typed (TextField.secret(): a key, a password)."""
+    var field = TextField(value, placeholder=label, on_change=on_change, on_submit=on_submit).grow()
+    if secret:
+        field = field^.secret()
+    return HStack(Icon(icon, 16), field, spacing=SPACE_M).align(CENTER).fill().tag("outlined-field")
 
 
 def FieldHelp(text: String) -> View:

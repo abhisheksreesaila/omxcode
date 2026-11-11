@@ -12,6 +12,7 @@ from mojoui.clock import now_ns, clock_time
 from mojoui.logview import LogLine, LOG_PLAIN, LOG_ERROR, LOG_OK, LOG_WARN, log_kind_of
 from add import Add, Run, Pick, Sugg, Job, read_pick, read_job, pull_detail, last_part, trim1, DEFAULT_SUB, NOTICE_NONE, NOTICE_WARN, NOTICE_PORT
 from api import Api, chat_curl, LOAD_TIMEOUT_MS
+from porter import P_SPAN
 from data import Store
 from msgs import *
 
@@ -194,7 +195,7 @@ def start_pull(mut a: Add, mut api: Api, var r: Pick):
 def ask_porter(mut a: Add, mut api: Api):
     """What is set up to write a port, and what was detected on this machine (goal 64 M1): the port screen makes
     the choice itself, so the person is never sent to another screen and back."""
-    api.get(ADD_GOT_PORTER, "/admin/porter")
+    a.pa.ask(api, ADD_PORTER)
 
 
 def start_port(mut a: Add, mut api: Api, var r: Pick):
@@ -221,6 +222,7 @@ def begin_port(mut a: Add, job: Job):
 def pick(mut a: Add, mut api: Api, var r: Pick):
     a.notice = NOTICE_NONE
     a.guided, a.refused, a.sandbox, a.note = False, "", False, ""
+    a.pa.note = ""
     if r.fit == "no":
         a.noticed = r^
         a.notice = NOTICE_WARN
@@ -371,24 +373,13 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
             var s = a.noticed.suggestions[k].copy()
             start_pull(a, api, Pick(s.id, s.repo, "max", s.arch, s.params, s.size_gb, s.est_gb, "ok", List[Sugg]()))
     elif m == ADD_PORT_IT:
+        a.pa.note = ""  # (the last refusal's reason goes while this try is asked: a new one says its own)
+        a.note = ""
         start_port(a, api, a.noticed.copy())
-    elif m == ADD_PORTER_CLAUDE:
-        a.porter_note = ""
-        api.post(ADD_GOT_PORTER_SAVE, "/admin/porter", '{"kind": "claude-code"}')
-    elif m == ADD_PORTER_SETTINGS:
-        a.porter_open = True
-        a.porter_note = ""
-    elif m == ADD_PORTER_KEY:
-        a.porter_key = event.text
-    elif m == ADD_PORTER_BASE:
-        a.porter_base = event.text
-    elif m == ADD_PORTER_SAVE and not a.porter_saving:
-        a.porter_saving = True
-        a.porter_note = ""
-        var kind = "openai-compatible" if String(a.porter_base.strip()) != "" else String("anthropic")
-        api.post(ADD_GOT_PORTER_SAVE, "/admin/porter", '{"kind": ' + json_string(kind) + ', "key": ' + json_string(String(a.porter_key.strip()))
-                 + ', "base_url": ' + json_string(String(a.porter_base.strip())) + "}")
-
+    elif ADD_PORTER <= m < ADD_PORTER + P_SPAN:  # the porting assistant inline (porter.mojo, shared with Settings)
+        if a.pa.update(m - ADD_PORTER, event, api, ADD_PORTER):
+            a.refused = ""
+            a.note = ""
     elif m == ADD_CANCEL and a.running and not a.aborted:
         cancel(a, api)
     elif m == ADD_RETRY:
@@ -498,33 +489,6 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
                 finish_pull(a, api, job, out)
         except e:
             a.errors += 1
-    elif m == ADD_GOT_PORTER:
-        a.porter_asked = True
-        if not failed:
-            try:
-                var j = Json.parse(event.text)
-                a.porter_found = j.text(j.get(j.get(0, "detected"), "path"))
-                # (a stored key without Claude Code is no porter: Claude Code does the work, the key only signs it in)
-                a.porter = j.text(j.get(0, "kind")) if a.porter_found != "" else String("")
-            except:
-                pass
-    elif m == ADD_GOT_PORTER_SAVE:
-        a.porter_saving = False
-        if failed:
-            a.porter_note = problem(event)
-        else:
-            a.porter_asked = True
-            try:
-                var j = Json.parse(event.text)
-                a.porter_found = j.text(j.get(j.get(0, "detected"), "path"))
-                a.porter = j.text(j.get(0, "kind")) if a.porter_found != "" else String("")  # (as ADD_GOT_PORTER)
-            except:
-                a.porter = "claude-code"
-            a.refused = ""
-            a.note = ""
-            a.porter_note = ""
-            a.porter_key = ""  # (sent; never kept in the app)
-            a.porter_open = False
     elif m == ADD_GOT_PORT_START:
         if failed:
             var code = error_code(event)
@@ -542,10 +506,8 @@ def add_update(mut a: Add, mut api: Api, st: Store, m: Int, event: Event) -> Add
                     pass
                 a.note = "Could not start the port: " + problem(event)
             elif event.number == 400 and (code == "porter_not_configured" or code == "porter_unusable" or code == "no_claude"):
-                a.porter = ""
-                a.porter_asked = True
-                a.porter_note = problem(event)
-                ask_porter(a, api)
+                a.pa.forget(problem(event))
+                a.pa.ask(api, ADD_PORTER)
             elif event.number == 400 and code == "no_sandbox":
                 a.refused = problem(event)
                 a.sandbox = True

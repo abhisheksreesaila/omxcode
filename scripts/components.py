@@ -56,6 +56,7 @@ FEATURES = [
     ("Quiet buttons", "style=SUBTLE / ICON_ONLY", r"\bSUBTLE\b|\bICON_ONLY\b", "workbook"),
     ("Lucide icon set", "Button(icon=\"table\")…", r"lucide|mojoui-", "workbook"),
     ("In-place editor", "TextField(…).focused()", r"value == 1|cell-editor", "workbook"),
+    ("Secret field", "TextField(…).secret(), OutlinedField(secret=True): masked as typed, only its length in dumps and to agents", r"FIELD_SECRET|\"password\"|Secret field", "console"),
     ("Layout modifiers", ".padding .width .grow .fill .align .justify", r"pad_v", "layout"),
     ("Canvas: pan, zoom, tap", "on_gesture: PAN, ZOOM, TAP", r"\bPAN\b|PAN =", "lens"),
     ("Canvas: press, release, double", "PRESS, RELEASE, DOUBLE", r"\bDOUBLE\b|DOUBLE =", "workbook"),

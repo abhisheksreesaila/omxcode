@@ -29,6 +29,10 @@ class H(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
+        if self.path.startswith("/api/models?"):  # a search (the console's Add a model): the one model, if it matches
+            hit = "weird" in self.path.lower() or "acme" in self.path.lower()
+            found = [{"id": "acme/weird", "pipeline_tag": "text-generation", "downloads": 1, "likes": 0}] if hit else []
+            return self._send(200, json.dumps(found).encode())
         if self.path.startswith("/api/models/acme/weird"):
             siblings = [{"rfilename": n, "size": len(b)} for n, b in FILES.items()]
             body = {"id": "acme/weird", "sha": SHA, "siblings": siblings,

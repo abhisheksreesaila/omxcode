@@ -64,6 +64,7 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | Quiet buttons | `style=SUBTLE / ICON_ONLY` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
 | Lucide icon set | `Button(icon="table")…` | ✅ | ✅ | ❌ | 🔨 | ❌ | ❌ |
 | In-place editor | `TextField(…).focused()` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
+| Secret field | `TextField(…).secret(), OutlinedField(secret=True): masked as typed, only its length in dumps and to agents` | ✅ | ✅ | 🔨 | 🔨 | 🔨 | 🔨 |
 | Layout modifiers | `.padding .width .grow .fill .align .justify` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: pan, zoom, tap | `on_gesture: PAN, ZOOM, TAP` | ✅ | ✅ | ✅ | 🔨 | 🔨 | ❌ |
 | Canvas: press, release, double | `PRESS, RELEASE, DOUBLE` | ✅ | ✅ | ❌ | 🔨 | 🔨 | ❌ |
@@ -260,12 +261,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 180 | 9 | 0 |
-| Web | 163 | 9 | 17 |
-| Android | 19 | 55 | 115 |
-| Mac (AppKit) | 5 | 154 | 30 |
-| iPhone (UIKit) | 0 | 125 | 64 |
-| Agent (MCP) | 58 | 43 | 88 |
+| Linux (GTK) | 181 | 9 | 0 |
+| Web | 164 | 9 | 17 |
+| Android | 19 | 56 | 115 |
+| Mac (AppKit) | 5 | 155 | 30 |
+| iPhone (UIKit) | 0 | 126 | 64 |
+| Agent (MCP) | 58 | 44 | 88 |
 
 ## Inside one app, not components yet (the debt)
 

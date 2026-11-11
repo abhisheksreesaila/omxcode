@@ -117,6 +117,7 @@ comptime SET_STOP = 6610  # Stop daemon (the first tap asks)
 comptime SET_STOP_SURE = 6611  # Stop daemon in the warning box
 comptime SET_CANCEL = 6612
 comptime SET_ADD = 6630  # (no models yet) Add a model
+comptime SET_PORTER = 6700  # the porting assistant's card (D-6504): porter.mojo's P_* offsets, P_SPAN of them
 comptime SET_GOT_STOP = 6790
 comptime SET_LAST = 6799
 
@@ -143,11 +144,6 @@ comptime ADD_OPEN = 7310  # Open <name>
 comptime ADD_SECURE = 7311  # Make it secure
 comptime ADD_ANOTHER = 7312
 comptime ADD_BACK = 7313  # the header's Back (My models)
-comptime ADD_PORTER_CLAUDE = 7315  # the port card's "Use Claude Code on this machine" (goal 64 M1)
-comptime ADD_PORTER_SETTINGS = 7316  # the port card's "Use an API key instead"
-comptime ADD_PORTER_KEY = 7317  # the inline key field's text
-comptime ADD_PORTER_BASE = 7318  # the inline base-URL field's text
-comptime ADD_PORTER_SAVE = 7319  # save the key (one small test call first)
 comptime ADD_GOT_SEARCH = 7500
 comptime ADD_GOT_PULL_START = 7501
 comptime ADD_GOT_PULL = 7502
@@ -158,8 +154,7 @@ comptime ADD_GOT_LOAD = 7506
 comptime ADD_GOT_MODELS = 7507
 comptime ADD_GOT_SMOKE = 7508
 comptime ADD_GOT_CANCEL = 7509
-comptime ADD_GOT_PORTER = 7510  # GET /admin/porter: what is set up and what was detected
-comptime ADD_GOT_PORTER_SAVE = 7511  # POST /admin/porter from the port card
+comptime ADD_PORTER = 7600  # the porting assistant inline on the port card (goal 64 M1): porter.mojo's P_* offsets, P_SPAN of them
 comptime ADD_LAST = 7999
 
 # canvases

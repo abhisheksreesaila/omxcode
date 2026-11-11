@@ -13,7 +13,7 @@ and everything that worked was 1 to 3 billion parameters).
 | # | Milestone | Result |
 |---|---|---|
 | M0 | The porting assistant setting | **PASS** — Claude Code on this machine, or a key for a frontier model (Anthropic, or an OpenAI-compatible base URL); 0600, prefix only in every view, in no log and in no other file, refused in the URL, removable, and a bad key fails in seconds |
-| M1 | Guided, not a dead end | **PASS** — a port with nothing set up is refused with what was detected, the choice is saved from the port screen in one call and the next click ports. The screen's own GTK/web run was not driven (budget); the card and its wiring are asserted in the source |
+| M1 | Guided, not a dead end | **PASS** — a port with nothing set up is refused with what was detected, the choice is saved from the port screen in one call and the next click ports. Polish (2026-11-11): the screen itself is now driven on GTK and the web, through the inline card to Port it and the same card in Settings, with screenshots (D-6504, D-6505) |
 | M2 | The worker | **PASS** — seven stages in order with their attempt numbers, the log streamed in the Python version's own format, a build failure fed back and fixed on the next attempt, the same failure twice stopping early with the best attempt kept, and a cancel that left nothing of ours running. No GPU, no real port: the Python project's fake-port harness drives it |
 | M3 | When it fails, hand it over | **PASS** — the failed job carries the workspace, the package folder, the full log, the gate that failed *with its own last words*, and the best attempt kept |
 | M4 | Reach it on your network | **PASS** — Caddy (`tls internal`, forward_auth → `/auth/check`) fetched over HTTPS from another process: 200 with a valid app key, 401 without, the admin routes and a path cleaning would change refused, localhost over plain HTTP untouched, and stop leaves nothing listening. Caddy is found, not bundled: with none installed the answer says how to install it |
@@ -65,8 +65,8 @@ cancelled worker to let go.
 
 - No real port was run: that needs the owner's GPU and hours (deliberately out of bounds). The harness proves the
   machinery, not that any particular model ports.
-- The port screen's own GTK and web run (clicking through the inline card) was not driven; the daemon half it talks
-  to is.
+- ~~The port screen's own GTK and web run was not driven~~: driven since the 2026-11-11 polish (M1). Still not run:
+  the Mac and iPhone hosts. The key field is masked since the review round (D-6507; Mac, iPhone and Android built, not run).
 - Goal 55's check, for want of a MAX install on this machine.
 - The porter's test call and the gateway route were only ever run against a stand-in server — never a real key or a
   real endpoint, by instruction.
@@ -75,5 +75,5 @@ cancelled worker to let go.
 
 ## Next
 
-One real port on the owner's machine (gpt2 or pythia-1.4b, which both worked before), watched end to end, then the
-porting assistant's card in Settings as well as on the port screen.
+One real port on the owner's machine (gpt2 or pythia-1.4b, which both worked before), watched end to end. (The porting assistant's
+card in Settings as well as on the port screen: done in the 2026-11-11 polish, D-6504.) (A masked field in mojoui for the key: done, D-6507.)

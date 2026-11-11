@@ -206,6 +206,219 @@ def port_log(d, pid):
     return p.read_text(errors="replace") if p.exists() else ""
 
 
+# ---- the console's own run: the porting assistant's card, driven on GTK and the web (goal 64 polish, D-6504) -----
+
+SHOTS = G64 / "shots"
+CATALOG = {"LlamaForCausalLM": {"example_repo_ids": ["meta-llama/Llama-3.2-1B"], "supported_encodings": ["bfloat16"]}}
+
+
+def build_web():
+    r = run(["scripts/build.sh", "console", "web"], timeout=1800)
+    return None if r.returncode == 0 else "console web build: " + (r.stdout + r.stderr)[-400:]
+
+
+def console_daemon(home):
+    """port_daemon, plus what the console's own Add a model needs to reach the port card through the screen: the
+    stand-in Hub answers a search for acme/weird, and a stand-in max lists a catalog without WeirdForCausalLM, so the
+    pull answers "MAX doesn't run it". Claude Code is the stand-in, found on this machine; no key is real."""
+    cat = G64 / "catalog.json"
+    cat.write_text(json.dumps({"architectures": CATALOG}))  # (`max list --json` wraps them so)
+    max_exe = wrapper(G64 / "bin" / "max-catalog", FIX / "fake_max.py", {"FAKE_MAX_CATALOG": str(cat)})
+    return port_daemon(home, extra={"MXC_MAX": max_exe})
+
+
+def steps_of(text):
+    return ";".join(l.strip() for l in text.strip().splitlines() if l.strip() and not l.strip().startswith("#"))
+
+
+def to_port_card(until):
+    """Add a model, search, pick the model MAX can't run: the port screen with its inline card (`until`: the host's
+    own wait for the card's first button)."""
+    return f"""
+        wait:3000
+        tap:Add a model
+        wait:1500
+        enter:Search models=acme/weird
+        wait:4000
+        tap:acme/weird
+        {until}"""
+
+
+def picture_ok(path):
+    """A real picture: present, the size asked for, and not one flat colour."""
+    try:
+        from PIL import Image
+        im = Image.open(path).convert("L")
+        lo, hi = im.getextrema()
+        return im.width >= 600 and hi - lo > 60
+    except Exception:  # noqa: BLE001
+        return False
+
+
+TYPED = "sk-g64-typed-" + os.urandom(6).hex()  # (typed into GTK's key field, never saved: only its length may show)
+REFUSED = "The porting assistant could not be used"
+
+
+def gtk_steps_choose():
+    """Run 1: the port screen's inline card, Claude Code's own login chosen, the button becomes Port it, and Settings'
+    card shows that choice with Remove (the run ends there: the daemon is then asked what was saved)."""
+    return steps_of("window:1280x900" + to_port_card("waitfor:Use Claude Code's own login=90000") + f"""
+        wait:500
+        shot:{SHOTS}/gtk-port-card.png
+        tap:Use Claude Code's own login
+        waitfor:Port it=20000
+        wait:500
+        shot:{SHOTS}/gtk-port-ready.png
+        tap:Settings
+        waitfor:Remove=20000
+        wait:800
+        shot:{SHOTS}/gtk-settings-set.png""")
+
+
+def gtk_steps_remove():
+    """Run 2: Settings' Remove, the choice made again from Settings and removed again; back on the port screen the
+    choice is offered afresh (not a stale Port it), and the key typed into the key field is masked (the run ends
+    there, so the host's own dump reports that field)."""
+    return steps_of(f"""
+        window:1280x900
+        wait:3000
+        tap:Settings
+        waitfor:Remove=20000
+        tap:Remove
+        waitfor:Use Claude Code's own login=20000
+        wait:800
+        shot:{SHOTS}/gtk-settings-choice.png
+        tap:Use Claude Code's own login
+        waitfor:Remove=20000
+        wait:500
+        tap:Remove
+        waitfor:Give it an API key=20000
+        wait:500""" + to_port_card("waitfor:Give it an API key=90000") + f"""
+        wait:500
+        tap:Give it an API key
+        wait:800
+        type:API key Claude Code signs in with={TYPED}
+        wait:800
+        shot:{SHOTS}/gtk-port-key.png""")
+
+
+def drive_gtk(d, steps):
+    """The console on GTK (headless) against `d`, driven by `steps`; (exit code, output)."""
+    SHOTS.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, MXC_URL=d.url, MXC_ADMIN_KEY=d.admin, MOJOUI_TEST=steps)
+    r = subprocess.run([str(BUILD / "console/linux/console")], cwd=ROOT, env=env, capture_output=True, text=True, timeout=600)
+    return r.returncode, r.stdout + r.stderr
+
+
+def drive_web(d, good, gw_port):
+    """The same port screen on the web host (headless Chromium): the inline card, the key field a password input, the
+    API key path against the stand-in endpoint, the button becomes Port it; then the endpoint stops taking the key
+    (fake_porter's `accept`), Port it is refused, and the refusal stays on screen; Settings shows the key's prefix."""
+    import drive
+    SHOTS.mkdir(parents=True, exist_ok=True)
+    seen = f"js:document.querySelector('#mojoui-root').innerText.includes({REFUSED!r})"
+    steps = steps_of(to_port_card("wait:Use Claude Code's own login") + f"""
+        wait:800
+        shot:{SHOTS}/web-port-card.png
+        tap:Give it an API key
+        wait:800
+        attr:input[placeholder="API key Claude Code signs in with"]=type
+        attr:input[placeholder="API key Claude Code signs in with"]=autocomplete
+        type:Base URL of a gateway that answers the Anthropic API (optional: empty means Anthropic itself)=http://127.0.0.1:{gw_port}/v1
+        type:API key Claude Code signs in with={good}
+        shot:{SHOTS}/web-port-key.png
+        tap:Check and save the key
+        wait:Port it
+        wait:800
+        shot:{SHOTS}/web-port-ready.png
+        tap:Port it
+        wait:2500
+        {seen}
+        wait:4000
+        {seen}
+        wait:Port it
+        shot:{SHOTS}/web-port-refused.png
+        tap:Settings
+        wait:Remove
+        wait:1000""")
+    r, out = drive.web_run(ROOT / "build/console/web", steps, shot=str(SHOTS / "web-settings-set.png"), viewport=(1280, 900),
+                           env={"MXC_URL": d.url, "MXC_ADMIN_KEY": d.admin})
+    return r.returncode, out
+
+
+def driven_card():
+    """Problems with the porting assistant's card as the console itself shows it (GTK and web); [] when it works."""
+    problems = []
+    err = build_web()
+    if err:
+        return [err]
+    if SHOTS.exists():
+        shutil.rmtree(SHOTS)
+    good = "sk-g64-" + os.urandom(8).hex()
+    gw_port, gw = serve_fixture("fake_porter.py", good, 1)  # (takes the key once: the save's test call, then refuses it)
+    d = console_daemon(G64 / "home-m1-screen")
+    try:
+        with d:
+            # GTK, run 1: Claude Code's own login from the port screen, then Settings shows it
+            code, out = drive_gtk(d, gtk_steps_choose())
+            if code != 0:
+                problems.append(f"GTK: the console exited {code}: {out[-300:]}")
+            for want in ["WAITED: Use Claude Code's own login", "WAITED: Port it", "WAITED: Remove"]:
+                if want not in out:
+                    problems.append(f"GTK: never saw {want[8:]!r}")
+            if "TEST: no " in out:
+                problems.append("GTK: " + "; ".join(l for l in out.splitlines() if l.startswith("TEST: no "))[:300])
+            s, j = body(d.call("GET", "/admin/porter"))
+            if not (j.get("configured") and j.get("kind") == "claude-code"):
+                problems.append(f"GTK: the daemon does not have the choice the screen made: {str(j)[:160]}")
+            # GTK, run 2: Remove, chosen again from Settings, removed again, a fresh port screen, the key masked
+            code, out = drive_gtk(d, gtk_steps_remove())
+            if code != 0:
+                problems.append(f"GTK: the console exited {code}: {out[-300:]}")
+            if out.count("WAITED: Remove") < 2 or out.count("WAITED: Give it an API key") < 2 or "WAITED: Use Claude Code's own login" not in out:
+                problems.append("GTK: the choice made again from Settings, or the fresh port screen after Remove, was not seen")
+            if "TEST: no " in out:
+                problems.append("GTK: " + "; ".join(l for l in out.splitlines() if l.startswith("TEST: no "))[:300])
+            if f"FIELD: (secret, {len(TYPED)} characters, masked)" not in out:
+                problems.append("GTK: the key field is not masked: " + "; ".join(l for l in out.splitlines() if l.startswith("FIELD:"))[:200])
+            if TYPED in out:
+                problems.append("GTK: the typed key is in the host's dump")
+            for name in ("gtk-port-card", "gtk-port-ready", "gtk-settings-set", "gtk-settings-choice", "gtk-port-key"):
+                if not picture_ok(SHOTS / f"{name}.png"):
+                    problems.append(f"GTK: no real picture {name}.png")
+            s, j = body(d.call("GET", "/admin/porter"))
+            if j.get("configured") is not False:
+                problems.append(f"GTK: Remove in Settings did not reach the daemon: {str(j)[:160]}")
+            # the web: the API key path against the stand-in endpoint, which then stops taking the key
+            code, out = drive_web(d, good, gw_port)
+            if code != 0:
+                problems.append("web: " + out[-400:])
+            if 'ATTR: input[placeholder="API key Claude Code signs in with"] type password' not in out:
+                problems.append("web: the key field is not an <input type=password>")
+            if 'ATTR: input[placeholder="API key Claude Code signs in with"] autocomplete off' not in out:
+                problems.append("web: the key field does not say autocomplete=off")
+            if out.count("JS: true") != 2:
+                problems.append(f"web: a refused port's reason is not on screen and staying there ({out.count('JS: true')} of 2 looks)")
+            if "BUTTON: Remove" not in out:
+                problems.append("web: Settings' card does not show the saved choice with Remove")
+            if good in out:
+                problems.append("web: the key is on the page")
+            if good[:8] not in out:
+                problems.append("web: Settings does not show the key's prefix")
+            for name in ("web-port-card", "web-port-key", "web-port-ready", "web-port-refused", "web-settings-set"):
+                if not picture_ok(SHOTS / f"{name}.png"):
+                    problems.append(f"web: no real picture {name}.png")
+            s, j = body(d.call("GET", "/admin/porter"))
+            if not (j.get("configured") and j.get("kind") == "openai-compatible" and j.get("has_key")):
+                problems.append(f"web: the daemon does not have the key the screen saved: {str(j)[:160]}")
+            if d.log_text().find(good) >= 0 or d.log_text().find(TYPED) >= 0:
+                problems.append("a key is in the daemon's log")
+    finally:
+        gw.kill()
+        d.hub.kill()
+    return problems
+
+
 # ---- milestones -------------------------------------------------------------------------------------------------------
 
 def m0():
@@ -281,8 +494,8 @@ def m0():
 def m1():
     """Guided, not a dead end: clicking "Port it" with nothing set up gets an answer that says what was detected,
     the choice is made and saved without leaving the port screen, and the button becomes "Port it". The daemon
-    half is driven here; the screen's own half is the port card in examples/console/add.mojo, whose inline card is
-    asserted to be wired to it (its GTK and web run is NOT proven here: see docs/goals/64-report.md)."""
+    half is driven here, and so is the screen's: the console on GTK and on the web, against a daemon on a scratch
+    home, clicks through the inline card (and the same card in Settings), with screenshots (driven_card)."""
     if build_all():
         return False, "build failed"
     problems = []
@@ -337,20 +550,33 @@ def m1():
                 gw.kill()
     finally:
         d.hub.kill()
-    # the screen's side: the inline card, its buttons and its fields are on the port screen, not in Settings
+    # the screen's side: the inline card, its buttons and its fields are on the port screen (and the same
+    # component, not a copy, is Settings' card: examples/console/porter.mojo, D-6504)
     card = (ROOT / "examples/console/add.mojo").read_text()
+    shared = (ROOT / "examples/console/porter.mojo").read_text()
     flow = (ROOT / "examples/console/addflow.mojo").read_text()
-    for want in ["ADD_PORTER_CLAUDE", "ADD_PORTER_KEY", "ADD_PORTER_SAVE", "Use Claude Code's own login",
-                 "API key Claude Code signs in with", "porter_found", "Install it first", "Linux only for now"]:
+    settings = (ROOT / "examples/console/settings.mojo").read_text()
+    for want in ["porter_choice(a.pa, ADD_PORTER)", "PORT_NOTE", "Linux only for now"]:
         if want not in card:
             problems.append(f"the port card is missing {want}")
-    for want in ['api.post(ADD_GOT_PORTER_SAVE, "/admin/porter"', 'api.get(ADD_GOT_PORTER, "/admin/porter")',
-                 'porter_not_configured', 'a.porter_key = ""']:
+    for want in ["P_CLAUDE", "P_KEY", "P_SAVE", "Use Claude Code's own login", "API key Claude Code signs in with",
+                 "self.found", "Install it first", 'api.post(at + P_GOT_SAVE, "/admin/porter"',
+                 'api.get(at + P_GOT, "/admin/porter")', 'self.key = ""']:
+        if want not in shared:
+            problems.append(f"the porting assistant's card is missing {want}")
+    for want in ["porter_not_configured", "a.pa.forget(", "a.pa.ask(api, ADD_PORTER)"]:
         if want not in flow:
             problems.append(f"the port flow is missing {want}")
+    if "porter_card(sp.porter, SET_PORTER)" not in settings:
+        problems.append("Settings does not show the porting assistant's card")
+    # ... and driven: the console itself on GTK and the web, with screenshots
+    problems += driven_card()
     return not problems, "; ".join(problems) or ("the port is refused with what was detected, the choice is saved from "
-                                                 "the port screen in one call and the next click ports, and a bad key fails in seconds (the screen's own "
-                                                 "GTK and web run is not proven: budget)")
+                                                 "the port screen in one call and the next click ports, and a bad key fails in seconds; "
+                                                 "driven on GTK (Claude Code's own login) and the web (an API key against a stand-in): the "
+                                                 "inline card, then Port it, then the same card in Settings with Remove; a fresh port screen "
+                                                 "after Remove, the key field masked on both, and a key that stops working refused on screen "
+                                                 f"(screenshots in {SHOTS.relative_to(ROOT)})")
 
 
 def m2():
@@ -644,13 +870,18 @@ def m5():
              "test_port_sandbox": "examples/consoled", "test_ports_pure": "examples/consoled",
              "test_porter": "examples/consoled", "test_caddyfile": "examples/consoled",
              "test_process_cwd": "examples/consoled", "test_port_boundary": "examples/consoled",
-             "test_model_refs": "examples/consoled", "test_gpu_visible": "examples/consoled"}
+             "test_model_refs": "examples/consoled", "test_gpu_visible": "examples/consoled",
+             "test_secret_field": "examples/console"}
     for name, include in tests.items():
         src = f"tests/{name}.mojo"
         r = run(["scripts/mojo_flare.sh", "build", "-I", include, src, "-o", str(BUILD / name)])
         t = run([str(BUILD / name)], timeout=300) if r.returncode == 0 else r
         if t.returncode != 0:
             problems.append(f"{name}: " + (t.stdout + t.stderr)[-200:])
+    # a secret field never reaches an agent (TextField.secret(), D-6509)
+    r = run([sys.executable, "tests/test_agent_secret.py"], timeout=120)
+    if r.returncode != 0 or "agent_secret: ok" not in r.stdout:
+        problems.append("test_agent_secret: " + (r.stdout + r.stderr)[-200:])
     # the component matrix is fresh
     r = run([sys.executable, "scripts/components.py"])
     if r.returncode != 0:

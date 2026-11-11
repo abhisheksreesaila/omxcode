@@ -1615,7 +1615,8 @@ def render_node(s, i, sid):
         editor = n["value"] in (1, 3)  # an in-place editor: .focused() (1) takes the keyboard, its text selected; .echo() (3) doesn't
         # (no inline handlers, D-593: PAGE_JS selects the text or puts the caret at the end on focus (data-focus), and posts
         # Escape as on_cancel (data-cancel), from document.body: the input's own hx-vals would win)
-        field = Input(type="text", name="text", value=n["text"], placeholder=n["hint"], data_kind="field",
+        secret = n["style"] == 1  # .secret() (FIELD_SECRET): masked as typed, never offered for saving
+        field = Input(type="password" if secret else "text", name="text", value=n["text"], placeholder=n["hint"], data_kind="field",
                       cls="cell-editor" if editor else None, data_focus=("end" if n["value"] == 3 else "select") if editor else None,
                       data_cancel=post if n["size"] else None, data_node=str(i) if n["size"] else None,
                       autocomplete="off", autofocus=(s.focus == i or n["value"] == 1), hx_trigger="input",
