@@ -23,6 +23,14 @@
 # One Server per process handles them (the first); a Service's ticker lives as long as the process.
 # Server.start returns a Served: keep it while you serve; dropping it stops the server. Flare 0.13 runs its workers on
 # Mojo's runtime pool, and a program can't end while a serving loop holds a pool worker (goal 52).
+#
+# Concurrent servers (goal 60, D-6007, D-6008): a `Handler` (answer(self, …): an immutable self, its state thread-safe)
+# runs on every worker at once, no lock: `Server.serve(handler, port, log=Log.open(path))`. Requests its `blocking()`
+# names (ones that call Google or Stripe) leave the reactor: Flare hands their socket to a thread of their own (the
+# vendored offload patch), which answers with `Connection: close`, so a slow provider stalls nobody else. Every reply
+# carries X-Request-Id; every request is one JSON line in the log (path without its query, status, ms, ip).
+# mojoui.serve binds cleartext only (TLS ends in front of it), which the offload needs: Flare offloads a cleartext
+# connection only (a TLS one would answer the bridge's 503 placeholder).
 
 from std.os import getenv
 from std.sys import CompilationTarget, exit
@@ -33,8 +41,13 @@ from mojoui import libc
 from mojoui.http import Request, utf8_lossy
 from mojoui.json import json_string
 from mojoui.clock import now_ns
-from flare.http import HttpServer, Handler, HeaderMap, Cancel, ChunkSource, stream_response, HttpClient
+from mojoui.log import Log, Fields
+from mojoui.crypto import random_bytes
+from mojoui.hash import hex
+from mojoui.clientip import TrustedProxies, client_ip
+from flare.http import HttpServer, HeaderMap, Cancel, ChunkSource, stream_response, HttpClient
 from flare.http import Request as FlareRequest
+from flare.http import Handler as FlareHandler
 from flare.http import Response as FlareResponse
 from flare.http._server.config import ServerConfig
 from flare.net import SocketAddr, IpAddr
@@ -59,6 +72,9 @@ struct Req(Copyable, Movable):
     var body: String
     var param_names: List[String]
     var param_values: List[String]
+    var peer: String  # the socket's peer, as the kernel reported it ("" in a test)
+    var client: String  # the client's IP: the peer, or X-Forwarded-For's rightmost untrusted hop from a trusted proxy (mojoui.clientip)
+    var rid: String  # this request's id (X-Request-Id on the reply, `rid` in the log)
 
     def __init__(out self, method: String, target: String, body: String = ""):
         self.method = method
@@ -70,6 +86,9 @@ struct Req(Copyable, Movable):
         self.body = body
         self.param_names = List[String]()
         self.param_values = List[String]()
+        self.peer = String("")
+        self.client = String("")
+        self.rid = String("")
 
     def header(self, name: String) -> String:
         """A request header's value ("" when absent); any case."""
@@ -78,6 +97,18 @@ struct Req(Copyable, Movable):
             if self.names[i] == n:
                 return self.values[i]
         return ""
+
+    def header_all(self, name: String, sep: String = ", ") -> String:
+        """Every line of a header joined in order (RFC 9110 §5.3: repeated lines mean one comma-joined value; cookies
+        join with "; "): a proxy may add its own X-Forwarded-For line after the client's."""
+        var n = name.lower()
+        var out = String("")
+        var first = True
+        for i in range(len(self.names)):
+            if self.names[i] == n:
+                out += ("" if first else sep) + self.values[i]
+                first = False
+        return out^
 
     def arg(self, name: String, default: String = "") -> String:
         """A query value, %-decoded (`?limit=40` → arg("limit") == "40")."""
@@ -129,6 +160,11 @@ struct Req(Copyable, Movable):
         self.param_names = names^
         self.param_values = values^
         return True
+
+
+def escape_html(s: String) -> String:
+    """Text safe inside HTML elements and quoted attributes."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
 
 
 def decode(s: String) -> String:
@@ -401,6 +437,11 @@ struct Reply(Movable):
         return Reply.json('{"error": {"message": ' + json_string(message) + ', "code": ' + json_string(code) + "}}", status)
 
     @staticmethod
+    def html(text: String, status: Int = 200) -> Reply:
+        """A page (build it with escape_html around every value): never framed, no scripts from elsewhere."""
+        return Reply(status, "text/html; charset=utf-8", text).header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+
+    @staticmethod
     def not_found() -> Reply:
         return Reply.error(404, "no such route", "not_found")
 
@@ -449,7 +490,7 @@ comptime S_MAX_BODY = 2
 
 
 @fieldwise_init
-struct _Bridge[S: Service](Copyable, Handler):
+struct _Bridge[S: Service](Copyable, FlareHandler):
     """Flare's Handler: every worker holds a copy (just the address of the app and its lock)."""
 
     var state: Int
@@ -524,10 +565,13 @@ def _keep_the_pool_for_compute():
 
 struct Server:
     @staticmethod
-    def bind(port: Int, host: String = "127.0.0.1") raises -> HttpServer:
+    def bind(port: Int, host: String = "127.0.0.1", max_body: Int = 64 * 1024 * 1024, request_timeout_ms: Int = 600_000) raises -> HttpServer:
+        """A listening Flare server. `max_body`: Flare refuses a bigger request body (413) as it reads it;
+        `request_timeout_ms`: a request's head and body must arrive within it (a slow sender can't hold a connection
+        longer). A Service keeps the wide defaults (uploads, long streams); `serve()`'s Handlers default to 1 MB, 30 s."""
         _keep_the_pool_for_compute()
-        var cfg = ServerConfig(idle_timeout_ms=30_000, handler_timeout_ms=600_000, request_timeout_ms=600_000, write_timeout_ms=60_000)
-        cfg.max_body_size = 64 * 1024 * 1024
+        var cfg = ServerConfig(idle_timeout_ms=30_000, handler_timeout_ms=600_000, request_timeout_ms=request_timeout_ms, write_timeout_ms=60_000)
+        cfg.max_body_size = max_body
         return HttpServer.bind(SocketAddr(IpAddr(host, False), UInt16(port)), cfg^)
 
     @staticmethod
@@ -859,3 +903,337 @@ def _bytes(s: String) -> List[UInt8]:
     for b in s.as_bytes():
         out.append(b)
     return out^
+
+
+# concurrent handlers (goal 60, D-6007, D-6008) -----------------------------------------------------------------------
+
+trait Handler(Movable, Deinitable):
+    """A server's app whose answer() may run on many threads at once: its state is read-only or thread-safe itself
+    (mojoui.sqlite's per-thread connections, a locked table)."""
+
+    def answer(self, mut req: Req) -> Reply:
+        ...
+
+    def blocking(self, req: Req) -> Bool:
+        """True for a request whose answer waits on the network (an OAuth token, a Stripe call): it is answered on a
+        thread of its own instead of the reactor worker its connection came in on."""
+        ...
+
+    def tick(self):
+        """Every `tick_ms`, on a thread of its own (no lock): sweeps, timers."""
+        ...
+
+    def stop(self):
+        """SIGTERM / SIGINT: tidy up; the process exits after."""
+        ...
+
+
+comptime H_APP = 0
+comptime H_LOG = 1
+comptime H_OFFLOADED = 2  # requests answering on threads of their own now (atomic)
+comptime H_MAX_OFFLOADED = 3
+comptime H_PROXIES = 4  # a TrustedProxies (read-only once serving)
+comptime H_WORDS = 5
+comptime MAX_OFFLOADED = 256
+
+
+def request_id() -> String:
+    try:
+        return hex(random_bytes(8))
+    except:
+        return String(now_ns())
+
+
+def _peer(req: FlareRequest) -> String:
+    return String(req.peer.ip)
+
+
+@fieldwise_init
+struct _HBridge[H: Handler](Copyable, FlareHandler):
+    var state: Int
+
+    def serve(self, req: FlareRequest) raises -> FlareResponse:
+        var t0 = now_ns()
+        var r = Req(req.method, _target(req.url), _text(req.body))
+        if r.path == READY_PATH:
+            return _flare_reply(Reply.empty())
+        for i in range(len(req.headers._keys)):
+            r.names.append(req.headers._keys[i].lower())
+            r.values.append(req.headers._values[i])
+        r.peer = _peer(req)
+        var w = _P(unsafe_from_address=self.state)
+        r.client = client_ip(r.peer, r.header_all("x-forwarded-for"), Pointer[TrustedProxies, MutUntrackedOrigin](unsafe_from_address=Int((w + H_PROXIES)[]))[])
+        r.rid = request_id()
+        var app = Pointer[Self.H, MutUntrackedOrigin](unsafe_from_address=Int((w + H_APP)[]))
+        if app[].blocking(r) and req.version.startswith("HTTP/1"):  # (HTTP/2 streams share a connection: answered inline)
+            if _A.fetch_add(w + H_OFFLOADED, 1) < (w + H_MAX_OFFLOADED)[]:
+                var job = unsafe_alloc[_Offload](1)
+                job.unsafe_write(_Offload(self.state, r^, t0))
+                var out = FlareResponse(status=503, body=_bytes("the server can't hand this request off"))
+                var hook = _offload_hook[Self.H]
+                out.offload_fn = Pointer(to=hook).unsafe_bitcast[Int]()[]
+                out.offload_arg = Int(job)
+                return out^
+            _ = _A.fetch_add(w + H_OFFLOADED, -1)
+            var busy = Reply.error(503, "too many slow requests at once: try again", "busy").header("Retry-After", "1")
+            return _flare_reply(_finish(self.state, r, busy^, t0))
+        var reply = app[].answer(r)
+        return _flare_reply(_finish(self.state, r, reply^, t0))
+
+
+def _finish(state: Int, req: Req, var reply: Reply, t0: Int) -> Reply:
+    """The request id on the reply, the request's line in the log."""
+    var w = _P(unsafe_from_address=state)
+    var log = Log(addr=Int((w + H_LOG)[]))
+    if log.addr != 0:
+        log.request(req.rid, req.method, req.path, reply.status, Float64(now_ns() - t0) / 1e6, req.client if req.client != "" else req.peer)
+    return reply^.header("X-Request-Id", req.rid)
+
+
+struct _Offload(Movable):
+    var state: Int
+    var req: Req
+    var t0: Int
+    var fd: Int
+
+    def __init__(out self, state: Int, var req: Req, t0: Int):
+        self.state = state
+        self.req = req^
+        self.t0 = t0
+        self.fd = -1
+
+
+def _offload_hook[H: Handler](fd: Int, arg: Int):
+    """Flare's reactor gives up the connection (on its worker): the socket goes blocking and a thread answers it."""
+    var job = Pointer[_Offload, MutUntrackedOrigin](unsafe_from_address=arg)
+    if fd < 0:  # (Flare couldn't hand the connection over (TLS, HTTP/2): the slot and the record go back; it got the 503)
+        _ = _A.fetch_add(_P(unsafe_from_address=job[].state) + H_OFFLOADED, -1)
+        job.unsafe_deinit_pointee()
+        job.unsafe_free()
+        return
+    job[].fd = fd
+    var fl = libc.fcntl(fd, 3)  # F_GETFL
+    if fl >= 0:
+        _ = libc.fcntl(fd, 4, fl & ~(0x4 if CompilationTarget.is_macos() else 0x800))  # F_SETFL without O_NONBLOCK
+    var tv = List[Int64](length=2, fill=0)  # (SO_SNDTIMEO / SO_RCVTIMEO 30 s: Flare's timeouts end with the hand-off)
+    tv[0] = 30
+    var lvl = 0xFFFF if CompilationTarget.is_macos() else 1  # SOL_SOCKET
+    _ = libc.setsockopt(fd, lvl, 0x1005 if CompilationTarget.is_macos() else 21, Int(tv.unsafe_ptr()), 16)
+    _ = libc.setsockopt(fd, lvl, 0x1006 if CompilationTarget.is_macos() else 20, Int(tv.unsafe_ptr()), 16)
+    _ = len(tv)
+    if not spawn[_offload_run[H]](arg):
+        _offload_run[H](arg)
+
+
+def _offload_run[H: Handler](arg: Int):
+    var job = Pointer[_Offload, MutUntrackedOrigin](unsafe_from_address=arg)
+    var w = _P(unsafe_from_address=job[].state)
+    var app = Pointer[H, MutUntrackedOrigin](unsafe_from_address=Int((w + H_APP)[]))
+    var reply = app[].answer(job[].req)
+    if reply.pipe != 0:
+        reply = Reply.error(500, "a streamed reply can't come from a blocking request", "internal")
+    reply = _finish(job[].state, job[].req, reply^, job[].t0)
+    var bad = False
+    for i in range(len(reply.names)):
+        bad = bad or not header_safe(reply.names[i], reply.values[i])
+    if bad:  # (a CR, LF or NUL would split the reply: Flare's own path refuses them too)
+        var log = Log(addr=Int((w + H_LOG)[]))
+        if log.addr != 0:
+            log.error("a reply header with CR, LF or NUL refused", Fields().str("rid", job[].req.rid).str("path", job[].req.path))
+        reply = _finish(job[].state, job[].req, Reply.error(500, "the server built a bad reply header", "internal"), job[].t0)
+    var head = "HTTP/1.1 " + String(reply.status) + " " + _reason(reply.status) + "\r\n"
+    var has_type = False
+    for i in range(len(reply.names)):
+        var n = reply.names[i].lower()
+        if n == "content-length" or n == "connection" or n == "transfer-encoding":
+            continue
+        has_type = has_type or n == "content-type"
+        head += reply.names[i] + ": " + reply.values[i] + "\r\n"
+    if not has_type and len(reply.body) > 0:
+        head += "Content-Type: text/plain; charset=utf-8\r\n"
+    var body_len = 0 if job[].req.method == "HEAD" else len(reply.body)
+    head += "Content-Length: " + String(len(reply.body)) + "\r\nConnection: close\r\n\r\n"
+    var fd = job[].fd
+    _send_all(fd, Int(head.unsafe_ptr()), head.byte_length())
+    _ = head.byte_length()
+    if body_len > 0:
+        _send_all(fd, Int(reply.body.unsafe_ptr()), body_len)
+        _ = len(reply.body)
+    _ = libc.close(fd)
+    _ = _A.fetch_add(w + H_OFFLOADED, -1)
+    job.unsafe_deinit_pointee()
+    job.unsafe_free()
+
+
+def header_safe(name: String, value: String) -> Bool:
+    """A header a reply may carry: a token name (no separators, spaces or controls), a value without CR, LF or NUL."""
+    if name.byte_length() == 0:
+        return False
+    for b in name.as_bytes():
+        if b <= 32 or b >= 127 or b == 58:
+            return False
+    for b in value.as_bytes():
+        if b == 13 or b == 10 or b == 0:
+            return False
+    return True
+
+
+def _send_all(fd: Int, p: Int, n: Int):
+    var off = 0
+    while off < n:
+        var s = libc.send(fd, p + off, n - off, 0x4000 if CompilationTarget.is_linux() else 0)  # (MSG_NOSIGNAL)
+        if s <= 0:
+            if s < 0 and get_errno() == ErrNo.EINTR:
+                continue
+            break
+        off += s
+
+
+def _reason(status: Int) -> String:
+    if status == 200:
+        return "OK"
+    if status == 201:
+        return "Created"
+    if status == 204:
+        return "No Content"
+    if status == 302:
+        return "Found"
+    if status == 303:
+        return "See Other"
+    if status == 400:
+        return "Bad Request"
+    if status == 401:
+        return "Unauthorized"
+    if status == 402:
+        return "Payment Required"
+    if status == 403:
+        return "Forbidden"
+    if status == 404:
+        return "Not Found"
+    if status == 410:
+        return "Gone"
+    if status == 413:
+        return "Content Too Large"
+    if status == 429:
+        return "Too Many Requests"
+    if status == 500:
+        return "Internal Server Error"
+    if status == 502:
+        return "Bad Gateway"
+    if status == 503:
+        return "Service Unavailable"
+    return "Status"
+
+
+struct _HRun[H: Handler](Movable):
+    var srv: HttpServer
+    var state: Int
+    var workers: Int
+    var refs: Scalar[DType.int64]
+    var ended: Scalar[DType.int64]
+
+    def __init__(out self, var srv: HttpServer, state: Int, workers: Int):
+        self.srv = srv^
+        self.state = state
+        self.workers = workers
+        self.refs = 2
+        self.ended = 0
+
+
+def _hclose_run[H: Handler](addr: Int):
+    Pointer[_HRun[H], MutUntrackedOrigin](unsafe_from_address=addr)[].srv.close()
+
+
+def _hended_run[H: Handler](addr: Int) -> Bool:
+    var job = Pointer[_HRun[H], MutUntrackedOrigin](unsafe_from_address=addr)
+    return _A.load(_P(unsafe_from_address=Int(Pointer(to=job[].ended)))) >= 1
+
+
+def _hrelease_run[H: Handler](addr: Int):
+    var job = Pointer[_HRun[H], MutUntrackedOrigin](unsafe_from_address=addr)
+    if _A.fetch_add(_P(unsafe_from_address=Int(Pointer(to=job[].refs))), -1) == 1:
+        job.unsafe_deinit_pointee()
+        job.unsafe_free()
+
+
+def _hrun_entry[H: Handler](p: libc.ThreadArg) -> libc.ThreadArg:
+    var job = Pointer[_HRun[H], MutUntrackedOrigin](unsafe_from_address=Int(p))
+    try:
+        if job[].workers <= 1:
+            job[].srv.serve(_HBridge[H](job[].state))
+        else:
+            job[].srv.serve(_HBridge[H](job[].state), num_workers=job[].workers, pin_cores=False)
+    except e:
+        print("mojoui.serve: the server stopped: " + String(e))
+    _ = _A.fetch_add(_P(unsafe_from_address=Int(Pointer(to=job[].ended))), 1)
+    _hrelease_run[H](Int(p))
+    return libc.null_arg()
+
+
+def _htick_loop[H: Handler](addr: Int):
+    var w = _P(unsafe_from_address=addr)
+    var app = Pointer[H, MutUntrackedOrigin](unsafe_from_address=Int((_P(unsafe_from_address=Int(w[0])) + H_APP)[]))
+    var every = Int((w + 1)[])
+    while True:
+        _ = libc.poll(0, 0, every)
+        app[].tick()
+
+
+def _hstop_loop[H: Handler](state: Int):
+    var w = _P(unsafe_from_address=state)
+    var app = Pointer[H, MutUntrackedOrigin](unsafe_from_address=Int((w + H_APP)[]))
+    var buf = List[UInt8](length=8, fill=0)
+    while True:
+        var n = libc.recv(STOP_FD + 1, Int(buf.unsafe_ptr()), 8, 0)
+        if n > 0:
+            break
+        if n == 0 or get_errno() != ErrNo.EINTR:
+            return
+    app[].stop()
+    exit(0)
+
+
+def serve[H: Handler](var handler: H, port: Int = 0, host: String = "127.0.0.1", workers: Int = 0, tick_ms: Int = 0,
+                      log: Log = Log(addr=0), var proxies: TrustedProxies = TrustedProxies(), max_body: Int = 1024 * 1024,
+                      request_timeout_ms: Int = 30_000) raises -> Served:
+    """Serves `handler` concurrently on threads of its own until the returned Served is dropped or stopped (`.port`:
+    the port). `workers` 0: one reactor per CPU core (up to 16). `log`: a request line each (Log(addr=0): none).
+    `proxies`: the reverse proxies whose X-Forwarded-For names the client (`req.client`; none: the socket's peer).
+    `max_body` (1 MB) and `request_timeout_ms` (30 s): Flare's limits on reading a request (Server.bind)."""
+    var handles_signals = Server._install_stop_handler()
+    var srv = Server.bind(port, host, max_body, request_timeout_ms)
+    var bound = Int(srv.local_addr().port)
+    var n = workers
+    if n <= 0:
+        n = min(max(libc.cpu_count(), 2), 16)
+    var w = unsafe_alloc[Int64](H_WORDS)
+    var app = unsafe_alloc[H](1)
+    app.unsafe_write(handler^)
+    (w + H_APP)[] = Int64(Int(app))
+    (w + H_LOG)[] = Int64(log.addr)
+    (w + H_OFFLOADED)[] = 0
+    (w + H_MAX_OFFLOADED)[] = MAX_OFFLOADED
+    var px = unsafe_alloc[TrustedProxies](1)
+    px.unsafe_write(proxies^)
+    (w + H_PROXIES)[] = Int64(Int(px))
+    var st = Int(w)
+    if tick_ms > 0:
+        var tw = unsafe_alloc[Int64](2)
+        tw[0] = Int64(st)
+        tw[1] = Int64(tick_ms)
+        if not spawn[_htick_loop[H]](Int(tw)):
+            raise Error("no thread for the server's tick")
+    if handles_signals and not spawn[_hstop_loop[H]](st):
+        raise Error("no thread for the server's stop watcher")
+    var job = unsafe_alloc[_HRun[H]](1)
+    job.unsafe_write(_HRun[H](srv^, st, n))
+    var tid = List[Int](length=1, fill=0)
+    if libc.pthread_create[_hrun_entry[H]](Int(job), Int(tid.unsafe_ptr())) != 0:
+        job.unsafe_deinit_pointee()
+        job.unsafe_free()
+        raise Error("no thread for the server")
+    _ = libc.pthread_detach(tid[0])
+    var served = Served(bound, Int(job), _hclose_run[H], _hended_run[H], _hrelease_run[H])
+    if not _answers(host, bound, 5000):
+        raise Error("the server on port " + String(bound) + " didn't start answering")
+    return served^

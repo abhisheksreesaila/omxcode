@@ -1,6 +1,6 @@
 # mojoui.sheetjobs: a sheet's slow work off the UI thread, on MX frame's background jobs (23edc59, F-175). A start
 # function returns a `Job` the app polls for its progress and its result, and can cancel. Each job wakes the host when it
-# ends (mojoui.jobs.start_ui_job: App.jobs_message), so a host with no display frames to poll on (the web host's tab with
+# ends (mojoui.uijobs.start_ui_job: App.jobs_message), so a host with no display frames to poll on (the web host's tab with
 # no moving canvas) still hears it (goal 62 M0); a Canvas's on_frame may poll too. Each job works on what it owns (a snapshot of the sheet, a copy of the object): the app goes on drawing,
 # scrolling and editing meanwhile. Builds without job threads (the Mac's, unless built with -D MXFRAME_JOB_THREADS) do the
 # work inside the start call: the job comes back done and the app reads it on the next frame, as before.
@@ -8,7 +8,7 @@
 # (Job and its states are also what apps take from here: an app imports mojoui, never the engine, goal 5's rule)
 from omxcore import Job, JobCtl, JobBody, JobProgress, start_job, JOB_RUNNING, JOB_DONE, JOB_FAILED, JOB_CANCELLED
 from mojoui.sheet import Sheet
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.sheetpage import SheetObject, compute, shape_of
 from mojoui.csvio import CsvImport, read_table, empty_import
 from mojoui.sheet import placeholder_sheet, empty_table

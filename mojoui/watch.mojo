@@ -99,9 +99,9 @@ def _word(words: Int, k: Int) -> _P:
 
 
 def wake_ui():
-    """mojoui.jobs.wake_ui without its engine import (mojoui.watch runs under `mojo run` too): one byte down the
+    """mojoui.uijobs.wake_ui without its engine import (mojoui.watch runs under `mojo run` too): one byte down the
     host's job-wake pipe (mojoui.shared slot 90), so App.jobs_message() reaches update() at once. Linux only; the Mac
-    host's wake is a message to its delegate (mojoui.jobs.WakeUI): a Mac app polls take() on a timer for now."""
+    host's wake is a message to its delegate (mojoui.uijobs.WakeUI): a Mac app polls take() on a timer for now."""
     comptime if CompilationTarget.is_linux():
         var fd = get_shared(90) - 1
         if fd >= 0:

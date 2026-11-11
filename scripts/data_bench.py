@@ -152,7 +152,7 @@ CAVEATS = [
     "last 50 matching rows (hand-written, not plain Polars; its README records the plain forms' slower numbers); D "
     "finds the cut-off day from a per-day histogram its GPU group-by already makes (product × day), then the rows on "
     "the GPU. B's and C's searches and D's histogram are equivalent hand-made shortcuts (coordinator, 2026-10-28).",
-    "D wakes its UI the moment a background job ends (mojoui.jobs, a framework feature for every app, D-771); the "
+    "D wakes its UI the moment a background job ends (mojoui.uijobs, a framework feature for every app, D-771); the "
     "others redraw when their own event loops see the result.",
     "Chromium's flags for A and B are --ozone-platform=wayland --use-angle=vulkan --ignore-gpu-blocklist: the "
     "protocol's --enable-features=Vulkan was dropped because Chromium can't composite with Vulkan on Wayland (its "

@@ -78,3 +78,16 @@ soundfile = "*"
 [environments]
 models = { features = ["models"], solve-group = "models" }
 speech = { features = ["speech"], solve-group = "speech" }
+fhsaas = { features = ["fhsaas"], solve-group = "fhsaas" }
+
+# Goal 60 M10 (D-6006): the fh-saas baseline for scripts/saas_bench.py, in its own feature + environment so the default
+# environment (and the Mojo server, which has no Python in it) stay unchanged. Run with `pixi run -e fhsaas ...`.
+[feature.fhsaas]
+platforms = ["linux-glibc-234"]
+
+[feature.fhsaas.dependencies]
+nbdev = "*"
+uvicorn = "*"
+
+[feature.fhsaas.pypi-dependencies]
+fh-saas = "*"

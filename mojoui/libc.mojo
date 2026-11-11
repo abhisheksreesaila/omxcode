@@ -48,6 +48,11 @@ def listen(fd: Int, backlog: Int) -> Int:
     return Int(external_call["listen", c_int](c_int(fd), c_int(backlog)))
 
 
+def accept(fd: Int, addr: Int, addrlen: Int) -> Int:
+    """macOS's (Linux: accept4); Flare's form (flare/net/_libc.mojo)."""
+    return Int(external_call["accept", c_int](c_int(fd), _p(addr), Pointer[c_uint, MutUntrackedOrigin](unsafe_from_address=addrlen)))
+
+
 def accept4(fd: Int, addr: Int, addrlen: Int, flags: Int) -> Int:
     """Linux only (Flare declares it there; Apple has no accept4)."""
     return Int(external_call["accept4", c_int](c_int(fd), _p(addr), Pointer[c_uint, MutUntrackedOrigin](unsafe_from_address=addrlen), c_int(flags)))
@@ -110,6 +115,16 @@ def chmod(var path: String, mode: Int) -> Int:
 def rename(var old: String, var new: String) -> Int:
     """0 when `old` now has the name `new` (replacing it, in one step on one file system)."""
     return Int(external_call["rename", c_int](old.as_c_string_span(), new.as_c_string_span()))
+
+
+def getentropy(buf: Int, n: Int) -> Int:
+    """Fills `n` (≤ 256) bytes at `buf` from the OS CSPRNG; 0 on success (Flare's form: flare/crypto/random.mojo)."""
+    return Int(external_call["getentropy", c_int](_p(buf), c_size_t(n)))
+
+
+def usleep(us: Int) -> Int:
+    """Sleeps `us` microseconds; Flare's form (flare/runtime/_libc_time.mojo)."""
+    return Int(external_call["usleep", Int32, Int32](Int32(us)))
 
 
 def getpid() -> Int:
@@ -251,3 +266,108 @@ def pthread_mutex_unlock(mu: Int) -> Int:
 
 def pthread_mutex_destroy(mu: Int) -> Int:
     return Int(external_call["pthread_mutex_destroy", Int32](Pointer[Int8, MutUntrackedOrigin](unsafe_from_address=mu)))
+
+
+# thread-local storage (mojoui.sqlite's per-thread connections) ----------------------------------------------------------
+
+comptime TlsDestructor = def(Int) thin abi("C") -> None
+
+
+def pthread_key_create(destructor: TlsDestructor) -> Int:
+    """A thread-local slot whose value `destructor` gets when a thread holding one ends; the key, or -1."""
+    var key = List[UInt64](length=1, fill=0)
+    if external_call["pthread_key_create", c_int](Int(key.unsafe_ptr()), destructor) != 0:
+        return -1
+    return Int(key[0] & 0xFFFFFFFF) if CompilationTarget.is_linux() else Int(key[0])
+
+
+def pthread_getspecific(key: Int) -> Int:
+    return external_call["pthread_getspecific", Int](UInt64(key))
+
+
+def pthread_setspecific(key: Int, value: Int) -> Int:
+    return Int(external_call["pthread_setspecific", c_int](UInt64(key), value))
+
+
+# files by address (mojoui.log): std's FileDescriptor and Flare declare write() their own ways, so these are looked up ---
+
+def open_append(var path: String) -> Int:
+    """The file opened for appending (O_WRONLY | O_APPEND | O_CLOEXEC), made with mode 0600 when missing: the fd, or -1.
+    open() is variadic, and on Apple's arm64 a variadic mode travels on the stack, where a fixed-argument call never
+    puts it (a file made with mode 0000, seen on the Mac): so open() is called without O_CREAT (two arguments) and a
+    missing file is made by creat(path, 0600), which isn't variadic."""
+    var flags = (0x1 | 0x8 | 0x1000000) if CompilationTarget.is_macos() else (0x1 | 0x400 | 0x80000)
+    var f = _sym("open")
+    var call = Pointer(to=f).unsafe_bitcast[def(Int, c_int) thin abi("C") -> c_int]()[]
+    var fd = Int(call(Int(path.as_c_string_span().unsafe_ptr()), c_int(flags)))
+    if fd < 0:
+        var c = _sym("creat")
+        var made = Int(Pointer(to=c).unsafe_bitcast[def(Int, c_uint) thin abi("C") -> c_int]()[](Int(path.as_c_string_span().unsafe_ptr()), c_uint(0o600)))
+        if made >= 0:
+            _ = close(made)
+        fd = Int(call(Int(path.as_c_string_span().unsafe_ptr()), c_int(flags)))
+    _ = path.byte_length()
+    return fd
+
+
+def write_fd(fd: Int, addr: Int, n: Int) -> Int:
+    var f = _sym("write")
+    return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t]()[](c_int(fd), addr, c_size_t(n)))
+
+
+def rename_path(var src: String, var dst: String) -> Int:
+    var f = _sym("rename")
+    var rc = Int(Pointer(to=f).unsafe_bitcast[def(Int, Int) thin abi("C") -> c_int]()[](
+        Int(src.as_c_string_span().unsafe_ptr()), Int(dst.as_c_string_span().unsafe_ptr())))
+    _ = src.byte_length()
+    _ = dst.byte_length()
+    return rc
+
+
+def file_size(fd: Int) -> Int:
+    """lseek(fd, 0, SEEK_END): the file's size (an O_APPEND fd writes there anyway)."""
+    var f = _sym("lseek")
+    return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int64, c_int) thin abi("C") -> Int64]()[](c_int(fd), 0, c_int(2)))
+
+
+def cpu_count() -> Int:
+    """sysconf(_SC_NPROCESSORS_ONLN), in Flare's form."""
+    return external_call["sysconf", Int, c_int](c_int(84 if CompilationTarget.is_linux() else 58))
+
+
+def read_fd(fd: Int, addr: Int, n: Int) -> Int:
+    var f = _sym("read")
+    return Int(Pointer(to=f).unsafe_bitcast[def(c_int, Int, c_size_t) thin abi("C") -> c_ssize_t]()[](c_int(fd), addr, c_size_t(n)))
+
+
+def nofile_limit() -> Tuple[Int, Int]:
+    """getrlimit(RLIMIT_NOFILE): (soft, hard) open-file limits ((0, 0) when it can't say). Looked up (_sym): no
+    declaration to clash with, no symbol for the Mac's stub."""
+    var lim = List[UInt64](length=2, fill=0)
+    var f = _sym("getrlimit")
+    if f == 0:
+        return (0, 0)
+    var rc = Pointer(to=f).unsafe_bitcast[def(c_int, Int) thin abi("C") -> c_int]()[](c_int(7 if CompilationTarget.is_linux() else 8), Int(lim.unsafe_ptr()))
+    if Int(rc) != 0:
+        return (0, 0)
+    var soft = Int(min(lim[0], UInt64(1) << 40))  # (RLIM_INFINITY: plenty)
+    var hard = Int(min(lim[1], UInt64(1) << 40))
+    return (soft, hard)
+
+
+def raise_nofile() -> Int:
+    """The soft open-file limit raised to the hard one (Go's runtime does the same at start; macOS caps it at OPEN_MAX,
+    10240): the soft limit now."""
+    var have = nofile_limit()
+    var want = have[1] if CompilationTarget.is_linux() else min(have[1], 10240)
+    if want <= have[0]:
+        return have[0]
+    var lim = List[UInt64](length=2, fill=0)
+    lim[0] = UInt64(want)
+    lim[1] = UInt64(have[1]) if have[1] < (1 << 40) else UInt64.MAX
+    var f = _sym("setrlimit")
+    if f == 0:
+        return have[0]
+    var rc = Pointer(to=f).unsafe_bitcast[def(c_int, Int) thin abi("C") -> c_int]()[](c_int(7 if CompilationTarget.is_linux() else 8), Int(lim.unsafe_ptr()))
+    _ = len(lim)
+    return want if Int(rc) == 0 else have[0]

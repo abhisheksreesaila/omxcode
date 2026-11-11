@@ -217,6 +217,23 @@ omxconsole, the second app, runs models on your own GPU through [MAX](https://ww
 
 Not yet: `consoled port-try`, the agent's own "see it run" loop, which the Python version had.
 
+### omxconsole: notebooks and tools for agents (new)
+
+- **📓 Run in Jupyter.** Every model has a notebook: its architecture from `config.json`, its model card, and cells that call your endpoint. The Notebook tab's Run in Jupyter writes it to `~/.mxc/notebooks/<model>.ipynb` (never overwriting your edits) and starts JupyterLab on 127.0.0.1 with its own token. The kernels get `MXC_BASE_URL` and a key that lasts as long as the app, so the cells just run. Without `jupyter` on your PATH it runs one through `pixi exec`, installing nothing; `MXC_JUPYTER` picks your own. Jupyter stops when the app closes.
+- **🤖 `omxc`, tools for agents.** A small command shipped beside the app (`examples/consoled/omxc.mojo`). Each command is one call to omxconsole's admin API, and it prints the JSON reply as it is: a thin pass-through, not another CLI on top of MAX. A coding agent such as Claude Code can find, pull, serve and port models itself while you watch the same state in the app.
+
+```
+./omxc help                                   # every command, for you or your agent
+./omxc search smollm                          # models that fit this GPU
+./omxc pull HuggingFaceTB/SmolLM2-135M-Instruct --wait
+./omxc serve qwen2.5-0.5b                     # answers once MAX serves it
+./omxc chat qwen2.5-0.5b "Say hello in five words."
+./omxc keys create my-app                     # a key for an app; shown once
+./omxc notebook qwen2.5-0.5b                  # Jupyter's link to the model's notebook
+```
+
+Exit codes: 0 done, 1 refused or failed (the JSON says why), 2 usage, 3 omxconsole isn't running. `MXC_PORT` points it at another daemon.
+
 **Why Mojo, honestly.** Mojo is young (1.2). It has a small ecosystem, no official iPhone, Android or WebAssembly target (omxcode cross-compiles with two hand-written runtime functions), and no Windows release yet. Flutter, React Native and the Rust kits are far ahead on maturity, tooling and production users. What none of them has is one readable language from the button to the GPU kernel, with native controls on every platform and an agent built in as a host.
 
 ## Try it
@@ -811,7 +828,7 @@ UI thread, so there are no locks, no races and no "which thread am I on?" in app
 | Widgets are only touched on the UI thread | the platform runs the loop and calls into Mojo; Mojo never runs a loop of its own | every host |
 | Network requests never block the screen | `Http.get(...)` queues a request; it runs on a worker thread; the reply arrives as an `Event` | `mojoui/effects.mojo`, goal 33 |
 | Timers never block | `App.every()` lists `Every(ms, msg)`; ticks arrive as events | `mojoui/effects.mojo` |
-| Data work never blocks | `start_ui_job(...)` runs a query, import or sort on its own thread; when it ends, `App.jobs_message()` reaches `update()` | `mojoui/jobs.mojo`, D-771, D-792 |
+| Data work never blocks | `start_ui_job(...)` runs a query, import or sort on its own thread; when it ends, `App.jobs_message()` reaches `update()` | `mojoui/uijobs.mojo`, D-771, D-792 |
 | Video and pictures never block | a decoder thread per video (`mojoui/framefeed.mojo`): opening, seeking and decoding run there; the newest seek wins; a frame that lands wakes the UI | goal 41 M2, D-1116 |
 | Documents never block | opening a folder, drawing its pages, reading it (OCR) and writing a pack (PDFs, clips) run as jobs (`mojoui/documentjobs.mojo`, `mojoui/pack.mojo`) | goal 41 M10, D-1271 |
 | Tables, queries and exports never block | `mojoui/tablejobs.mojo` (Insert > Table, SQL, Export CSV) and `mojoui/videocard.mojo` (Analyze, reels) run as jobs that wake the UI | goal 41 M3–M4, D-1124, D-1131 |
@@ -1015,6 +1032,11 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 | HTTP server (mojoui.serve on Flare: routes, JSON, SSE Pipes, proxy) | `Service.answer(req) -> Reply · Server.run(service, port) · Pipe · proxy(request, pipe)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Child processes (mojoui.process: spawn, log, health, stop the group, idle) | `Process.start(argv, log) · wait_healthy(url) · stop() · idle_ms()` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | SHA-256 (mojoui.hash, plain Mojo) | `sha256_hex(text)` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Crypto (mojoui.crypto: HMAC-SHA256, OS random, base64url, constant-time compare, seals, PKCE) | `hmac_sha256 · random_token · b64url · same · seal/unseal · pkce_challenge` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant) | `Accounts(dir, AuthConfig.from_env()) · handle(req) · member(req) · tenant_db(member)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall) | `Billing(dir, BillingConfig.from_env()) · handle(req, accounts) · paywall(member)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Desktop sign-in (mojoui.signin: system browser + loopback redirect, PKCE; RFC 8252) | `DesktopSignIn(server) · .url · code() · token_request(msg, code)` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Open in the system browser (an effect: App.opens, mojoui.browser) | `Browser.open(url) · def opens(mut self) -> List[String]` | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 - File picker (Linux (GTK)): 🔨 though a check runs it: the checks hand the path in with the pick: step; GTK's own dialog isn't driven.
 - Canvas: pen pressure (Linux (GTK)): 🔨 though a check runs it: only injected pressure ran (the stroke: test step sets it where GDK's pressure axis is read); no real pen yet.
@@ -1022,6 +1044,9 @@ Mac and iPhone builds are signed but haven't run on hardware yet; Android runs o
 - File drop from outside the app (Linux (GTK)): 🔨 though a check runs it: the dropfile: step builds a real GdkFileList and emits the GtkDropTarget's drop signal; a drag from a real file manager isn't driven headless.
 - File drop from outside the app (Web): 🔨 though a check runs it: drive.py's dropfile: dispatches a drop event carrying a File (no OS drag).
 - Quit hook (Web): 🔨 though a check runs it: the session's App.closing runs when it's evicted or the server stops (tried by hand: a SIGINT); no check runs it, and closing a tab doesn't end its session.
+- Accounts (mojoui.accounts: Google sign-in with PKCE, server-side sessions, tenants, roles, invites, one SQLite per tenant): a server piece (mojoui.serve, Flare: Linux and macOS); proved against the checker's OAuth stand-in (goal 57 M2) and, with the owner's keys, Google itself (M5); one tenant per user, invites join new people only (D-5712); docs/saas.md maps fh-saas.
+- Billing (mojoui.billing: Stripe Checkout, signed webhooks applied once, return read-back, paywall): subscriptions only (no one-off payments, no customer portal yet); webhooks proved against the checker's signer, the live run reads the session back on return (D-5706, D-5716).
+- Open in the system browser (an effect: App.opens, mojoui.browser): GTK: xdg-open or $MOJOUI_OPENER; AppKit: `open` or $MOJOUI_OPENER through posix_spawnp; the web and the phones don't open pages yet (D-5718).
 - SQLite database (mojoui.sqlite: prepared statements, transactions, FTS5): the system's libsqlite3 loaded at run time (dlopen, D-1304/D-1311); Android and iPhone don't build it yet; the Mac links against nothing new and loads /usr/lib/libsqlite3.dylib (built, not run).
 - Folder watcher (mojoui.watch: inotify / FSEvents on its own thread): Linux: inotify on a pthread, new folders followed, one event per change, p95 lag 0.01 ms for 1,000 changes (goal 45 M0); a folder renamed inside reports its files under the new name, an overflow re-watches and says rescan, a folder it can't watch makes it partial() with the reason, names with newlines or non-UTF-8 bytes arrive whole (tests/test_watch_edges.mojo); Mac: FSEvents (file-level events, a dispatch queue), built, not run, and it doesn't pair a rename's two halves; the web has FileSystemObserver only on a folder the person picked or dropped, only while the tab is open (docs/goals/45/web.json).
 - Background mode (keeps running with the window closed): GTK: the window hides on close only while a panel's StatusNotifierWatcher has the tray item (otherwise closing ends the app); an app that declares one_instance() runs once (see the row below); the Mac has none yet (the AppKit host still quits when its last window closes); a web page's code stops when its tab closes (docs/goals/45/web.json).
@@ -1156,12 +1181,12 @@ Each is a `WebComponent` (above) with its own bundle; a cell is the WebComponent
 
 | Platform | ✅ | 🔨 | ❌ |
 |---|---|---|---|
-| Linux (GTK) | 175 | 9 | 0 |
-| Web | 163 | 9 | 12 |
-| Android | 19 | 55 | 110 |
-| Mac (AppKit) | 0 | 154 | 30 |
-| iPhone (UIKit) | 0 | 125 | 59 |
-| Agent (MCP) | 58 | 43 | 83 |
+| Linux (GTK) | 180 | 9 | 0 |
+| Web | 163 | 9 | 17 |
+| Android | 19 | 55 | 115 |
+| Mac (AppKit) | 5 | 154 | 30 |
+| iPhone (UIKit) | 0 | 125 | 64 |
+| Agent (MCP) | 58 | 43 | 88 |
 
 ## Inside one app, not components yet (the debt)
 

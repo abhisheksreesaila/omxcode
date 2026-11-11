@@ -1,5 +1,5 @@
 # mojoui.visionmodel_jobs: the learned model's slow work as jobs (goal 41 M3): loading a model (seconds: weights, CUDA)
-# and a find-more-like-this scan over a whole video run on a job's thread (mojoui.jobs.start_ui_job), so the UI thread
+# and a find-more-like-this scan over a whole video run on a job's thread (mojoui.uijobs.start_ui_job), so the UI thread
 # only starts them and takes their rows when the end wakes it. Separate from mojoui.visionmodel, which stays a plain
 # module (no omxcore) its own test runs with `mojo run`.
 #
@@ -11,7 +11,7 @@
 # must be checked in the models env (tests/test_findlike.mojo through this job) before an app relies on it.
 
 from omxcore import Job, JobBody, JobCtl
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.video import VideoSource
 from mojoui.visionmodel import VisionModel, Example, LikeResult, find_like, DETECT
 

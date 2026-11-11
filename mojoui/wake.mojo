@@ -1,6 +1,6 @@
-# mojoui.wake: the job-wake pipe's low-level ends, without omxcore (mojoui.jobs builds start_ui_job on them; a plain
+# mojoui.wake: the job-wake pipe's low-level ends, without omxcore (mojoui.uijobs builds start_ui_job on them; a plain
 # worker thread, such as mojoui.framefeed's decoder, wakes the UI with wake_write). The host makes the pipe
-# (mojoui.jobs.wake_pipe) and watches its read end on its main loop; a byte down it sends App.jobs_message() to update().
+# (mojoui.uijobs.wake_pipe) and watches its read end on its main loop; a byte down it sends App.jobs_message() to update().
 
 from std.ffi import external_call, c_int
 from std.sys import CompilationTarget
@@ -61,7 +61,7 @@ def _call_c(name: String, a: Int, b: Int, c: Int):
 struct UIWaker(Copyable, Movable):
     """Wakes the host's main loop from any thread, the way each host listens: on Linux a byte down the wake pipe, on a
     Mac `jobsEnded:` on the main dispatch queue (AppKit watches no pipe). Made on the UI thread (it looks up the pipe, and
-    on a Mac the delegate), used from a worker's; plain values, nothing to release. Before it lived in mojoui.jobs only,
+    on a Mac the delegate), used from a worker's; plain values, nothing to release. Before it lived in mojoui.uijobs only,
     so a FrameFeed's video never reached a Mac's screen (goal 58)."""
     var fd: Int
     var target: Int  # Apple: the delegate that answers jobsEnded: (0: none)

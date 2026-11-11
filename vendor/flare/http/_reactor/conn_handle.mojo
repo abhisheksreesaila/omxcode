@@ -47,7 +47,7 @@ and the fuzz corpus.
 
 from std.collections import List, Optional
 from std.ffi import c_int, c_size_t, ErrNo, get_errno
-from std.memory import unsafe_memcpy, stack_allocation
+from std.memory import unsafe_memcpy, stack_allocation, Pointer
 
 from flare.crypto.hmac import base64url_decode
 from flare.errors import map_handler_error, log_handler_error
@@ -1064,6 +1064,12 @@ struct ConnHandle(Movable):
             var mapped = map_handler_error(String(e), expose_errors)
             self._queue_error(mapped.status, mapped.reason)
             return self._transition_to_writing()
+        if resp.offload_fn != 0 and not self.tls:
+            return self._offload(resp.offload_fn, resp.offload_arg)
+        if resp.offload_fn != 0:  # (omxcode patch: no hand-off here; the hook takes back its slot, fd -1)
+            var f = resp.offload_fn
+            Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[](-1, resp.offload_arg)
+            resp.offload_fn = 0
         return self._finalise_response(resp^, final_close)
 
     def on_readable_from_buf[
@@ -1165,6 +1171,12 @@ struct ConnHandle(Movable):
             var mapped = map_handler_error(String(e), expose_errors)
             self._queue_error(mapped.status, mapped.reason)
             return self._transition_to_writing()
+        if resp.offload_fn != 0 and not self.tls:
+            return self._offload(resp.offload_fn, resp.offload_arg)
+        if resp.offload_fn != 0:  # (omxcode patch: no hand-off here; the hook takes back its slot, fd -1)
+            var f = resp.offload_fn
+            Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[](-1, resp.offload_arg)
+            resp.offload_fn = 0
         return self._finalise_response(resp^, final_close)
 
     def on_readable_cancel[
@@ -1886,6 +1898,20 @@ struct ConnHandle(Movable):
             return _WS_UPGRADED
         config.ws.handler.value()(conn)
         return _WS_UPGRADED
+
+    def _offload(mut self, fn_addr: Int, arg: Int) -> StepResult:
+        """(omxcode patch, flare-0.13-offload) Hand the socket to the
+        response's offload function: the fd is detached from this handle
+        (its destructor won't close it) and the reactor drops the
+        connection, as after a WebSocket offload. The function owns the
+        fd from here: it answers and closes it, typically on a thread of
+        its own, so this worker keeps serving every other connection."""
+        var fd = Int(self._stream._socket.fd)
+        self._stream._socket.fd = c_int(-1)
+        var f = fn_addr
+        var call = Pointer(to=f).unsafe_bitcast[def(Int, Int) thin -> None]()[]
+        call(fd, arg)
+        return StepResult(want_read=False, want_write=False, done=True, idle_timeout_ms=0)
 
     def _note_head_from_buf(mut self):
         """While the request head has not been fully scanned

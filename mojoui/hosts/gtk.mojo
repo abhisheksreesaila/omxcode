@@ -40,7 +40,7 @@ from mojoui.hosts.gtk_webview import (
     take_message, theme_message, IN_EVENT, IN_REPLY, kill as webview_kill, show_instead,
 )
 from mojoui.hosts.gtk_webview import facts_json, inspect as webview_inspect, wk
-from mojoui.jobs import wake_pipe, drain_wakes
+from mojoui.uijobs import wake_pipe, drain_wakes
 from mojoui.tray import TrayItem
 from mojoui.geometry import register_rects
 from mojoui.regions import regions, headline_in
@@ -2899,6 +2899,8 @@ struct GtkHost[A: App](Movable):
     def send_commands(mut self, self_addr: Int):
         """The widget commands the app asked for, each to its widget's page; one whose widget isn't on the screen is
         answered with an error (through the inbox, on the next idle turn, as a page's reply is)."""
+        for url in self.rt.take_opens():  # (pages the app asked for: mojoui.browser)
+            open_url(url)
         var commands = self.rt.take_commands()
         if len(commands) == 0:
             return
@@ -4051,7 +4053,7 @@ def on_input_read[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C")
 
 
 def on_jobs_woken[A: App](fd: c_int, condition: c_uint, host_addr: Int) abi("C") -> c_int:
-    """App.jobs_message: a background job ended (mojoui.jobs wrote to the pipe): update() now, unless a rebuild is
+    """App.jobs_message: a background job ended (mojoui.uijobs wrote to the pipe): update() now, unless a rebuild is
     under way (then in a millisecond)."""
     _ = drain_wakes(Int(fd))
     var host = host_at[A](host_addr)
@@ -5808,15 +5810,15 @@ def run_step[A: App](host_addr: Int, step: String):
             pass
         print("WATCH: first=" + String(Float64(first) / 1000.0) + " last=" + String(Float64(last) / 1000.0) + " stalls=" + String(stalls)
               + " worst=" + String(Float64(worst // 1000) / 1000.0) + " turns=" + String(turns) + " peak_mb=" + String(peak), flush=True)
-    elif verb == "waitfor":  # waitfor:Title=N: run the main loop until a button titled Title exists (a job's result landed), N ms at most
+    elif verb == "waitfor":  # waitfor:Title=N: run the main loop until a button titled Title (or a text saying it) exists (a job's result landed), N ms at most
         # (probe fixes, D-1701: a fixed pause before a tap races the job's run time, which follows the machine's load; goal
         # 30 M1's "no button Create table". Never blocks inside the loop: the deadline is read every turn)
         var kv = split_at(rest, "=")
         var t0 = Int(perf_counter_ns())
         var until = t0 + to_int(kv[1]) * 1_000_000
-        while not has_button(host[], kv[0]) and not host[].closed and Int(perf_counter_ns()) < until:
+        while not has_button(host[], kv[0]) and find(host[], TEXT, kv[0], 0) < 0 and not host[].closed and Int(perf_counter_ns()) < until:
             pump()  # (sleeps 1 ms when a turn did nothing: no core spun while the job it waits for needs the CPU)
-        if not has_button(host[], kv[0]):
+        if not has_button(host[], kv[0]) and find(host[], TEXT, kv[0], 0) < 0:
             print("TEST: no button " + kv[0] + " after " + kv[1] + " ms")
         else:
             print("WAITED: " + kv[0] + " after " + String((Int(perf_counter_ns()) - t0) // 1_000_000) + " ms", flush=True)

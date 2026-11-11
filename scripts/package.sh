@@ -32,6 +32,9 @@ http://127.0.0.1:11435/v1 (MXC_PORT to change it).
 ./omxc, beside it, is the command line for agents (and you): ./omxc help lists its commands." ;;
   globe) META="A 3D globe with a day of air traffic, drawn per pixel on the GPU, written once in Mojo|Science;Education;||./$EX
 Drawn on an NVIDIA GPU when the driver is there, the CPU otherwise." ;;
+  saas) META="Sign in with Google, a tenant of your own, Stripe checkout: SaaS blocks in Mojo|Office;||./run-server.sh \& then ./$EX
+The server (saas-server, Mojo on Flare) reads its keys from ~/.config/omxcode/saas.env (make it with scripts/saas_keys.sh
+from the omxcode repo); the app finds it at \$SAAS_SERVER (default http://127.0.0.1:8000)." ;;
   todo) META="A to-do list in the platform's own controls, written once in Mojo|Utility;||./$EX" ;;
   *) META="Written once in Mojo|Utility;||./$EX" ;;
 esac
@@ -65,8 +68,44 @@ if [[ "$WHAT" == "linux" ]]; then
     done
   fi
   for e in "${exes[@]}"; do patchelf --set-rpath '$ORIGIN/lib' "$e"; done  # (the libraries stay byte for byte: each already finds its neighbours at $ORIGIN)
+  if [[ "$EX" == saas ]]; then  # (the demo's server travels with its client: saas-server, Flare's shims and what they load)
+    cp build/saas/server "$out/saas-server"; cp build/flare/lib/libflare_*.so "$out/lib/"
+    for f in build/saas/server build/flare/lib/libflare_*.so; do
+      { ldd "$f" | awk '/=> \// {print $3}' | grep -v -E '^/(usr/)?lib' || true; } | while read -r so; do cp -L "$so" "$out/lib/"; done
+    done
+    patchelf --set-rpath '$ORIGIN/lib' "$out/saas-server"
+    for so in "$out"/lib/libflare_*.so; do patchelf --set-rpath '$ORIGIN' "$so"; done
+    cat > "$out/run-server.sh" <<'RUN'
+#!/usr/bin/env bash
+# The saas server on http://127.0.0.1:${SAAS_PORT:-8000}, its data in ~/.local/share/saas-data, keys from ~/.config/omxcode/saas.env.
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+keys="$HOME/.config/omxcode/saas.env"
+if [ -f "$keys" ]; then  # (sourced as shell: only if it's ours and nobody else can read or write it)
+  mode=$(stat -c %a "$keys" 2>/dev/null || stat -f %Lp "$keys")
+  [ -O "$keys" ] && [ "$mode" = 600 ] || { echo "refusing $keys: make it yours with mode 600 (chmod 600)" >&2; exit 1; }
+  set -a; . "$keys"; set +a
+fi
+umask 077
+mkdir -p "$HOME/.local/share/saas-data"; chmod 700 "$HOME/.local/share/saas-data"
+secret="$HOME/.local/share/saas-data/secret"
+[ -s "$secret" ] || (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$secret")
+export SAAS_SECRET="$(cat "$secret")" SAAS_DATA="$HOME/.local/share/saas-data" SAAS_PORT="${SAAS_PORT:-8000}"
+export SAAS_BASE="${SAAS_BASE:-http://127.0.0.1:$SAAS_PORT}"
+exec "$here/saas-server"
+RUN
+    chmod +x "$out/run-server.sh"
+  fi
   mkdir -p "$out/licenses"; cp apple/licenses/MODULAR-*.txt linux/licenses/*-*.txt mojoui/hosts/static/fonts/LICENSE-*.txt "$out/licenses/"; cp linux/licenses/NOTICE.txt "$out/"
   cp LICENSE "$out/LICENSE.txt"
+  if [[ "$EX" == saas ]]; then cat >> "$out/NOTICE.txt" <<'NOTE'
+
+saas-server also bundles, from conda-forge, unmodified: OpenSSL 3 (libssl, libcrypto; Apache-2.0,
+https://www.openssl.org/source/license.html), Brotli (MIT, https://github.com/google/brotli), zlib (zlib licence,
+https://zlib.net/zlib_license.html), libdeflate (MIT, https://github.com/ebiggers/libdeflate), and GCC's libstdc++ and
+libgcc_s (GPL-3.0 with the GCC Runtime Library Exception); Flare's shims (libflare_*.so) are MIT (vendor/flare).
+NOTE
+  fi
   icon_png 256 "$out/$EX.png"
   cat > "$out/install.sh" <<EOF
 #!/usr/bin/env bash

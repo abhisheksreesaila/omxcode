@@ -13,9 +13,9 @@
 # Structs: arm64 passes a struct over 16 bytes (CMTime 24, CMTimeRange 48) by a pointer to a copy, so they are written
 # into memory here and their address passed; CGSize (two doubles) comes back in registers, as CGPoint.
 
-from std.ffi import external_call
 from std.memory import Pointer
 from mojoui.hosts.objc import cls, msg, ns_string, pool_push
+from mojoui import libc
 from mojoui.hosts.apple_canvas import cfunc, CGPoint
 
 comptime _FRAMEWORKS = "/System/Library/Frameworks/"
@@ -285,7 +285,7 @@ struct AvWriter(Copyable, Movable):
         while (msg(self.input, "isReadyForMoreMediaData") & 0xFF) == 0:  # (the encoder catches up)
             if msg(self.writer, "status") == 3:  # AVAssetWriterStatusFailed: it won't ever be ready
                 raise Error("VideoWriter: AVFoundation failed writing frame " + String(self.frames))
-            _ = external_call["usleep", Int32](UInt32(1000))
+            _ = libc.usleep(1000)
             waited += 1
             if waited > 10000:
                 raise Error("VideoWriter: the encoder stopped taking frames")

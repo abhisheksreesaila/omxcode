@@ -101,6 +101,14 @@ struct ResponseImpl[B: Body = InlineBody](Movable):
     source a bounded batch of chunks at a time per writable edge instead
     of sending ``body``. Move-only, so ``Response`` stays move-only."""
 
+    var offload_fn: Int
+    """(omxcode patch, flare-0.13-offload) The address of a
+    ``def(fd: Int, arg: Int) thin -> None`` that takes the connection
+    over: the reactor detaches the socket (as a WebSocket offload does)
+    and calls it with the raw fd, so a slow handler can answer on a
+    thread of its own. 0: an ordinary response."""
+    var offload_arg: Int
+
     def __init__(
         out self,
         status: Int,
@@ -115,6 +123,8 @@ struct ResponseImpl[B: Body = InlineBody](Movable):
         self.version = version^
         self.trailers = HeaderMap()
         self.body_stream = Optional[ChunkSourceBox]()
+        self.offload_fn = 0
+        self.offload_arg = 0
 
     def reset(mut self, status: Int = 200, var reason: String = ""):
         """Recycle this ``Response`` in place for the next request on
@@ -137,6 +147,8 @@ struct ResponseImpl[B: Body = InlineBody](Movable):
         """
         self.status = status
         self.reason = reason^
+        self.offload_fn = 0
+        self.offload_arg = 0
         self.body.clear()
         # Drop any attached streaming source so a recycled Response
         # never carries a stale chunk source into the next request.
@@ -287,6 +299,8 @@ struct ResponseImpl[B: Body = InlineBody](Movable):
         out.headers = self.headers^
         out.trailers = self.trailers^
         out.body_stream = self.body_stream^
+        out.offload_fn = self.offload_fn
+        out.offload_arg = self.offload_arg
         return out^
 
 

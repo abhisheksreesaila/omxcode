@@ -21,7 +21,7 @@ UI thread, so there are no locks, no races and no "which thread am I on?" in app
 | Widgets are only touched on the UI thread | the platform runs the loop and calls into Mojo; Mojo never runs a loop of its own | every host |
 | Network requests never block the screen | `Http.get(...)` queues a request; it runs on a worker thread; the reply arrives as an `Event` | `mojoui/effects.mojo`, goal 33 |
 | Timers never block | `App.every()` lists `Every(ms, msg)`; ticks arrive as events | `mojoui/effects.mojo` |
-| Data work never blocks | `start_ui_job(...)` runs a query, import or sort on its own thread; when it ends, `App.jobs_message()` reaches `update()` | `mojoui/jobs.mojo`, D-771, D-792 |
+| Data work never blocks | `start_ui_job(...)` runs a query, import or sort on its own thread; when it ends, `App.jobs_message()` reaches `update()` | `mojoui/uijobs.mojo`, D-771, D-792 |
 | Video and pictures never block | a decoder thread per video (`mojoui/framefeed.mojo`): opening, seeking and decoding run there; the newest seek wins; a frame that lands wakes the UI | goal 41 M2, D-1116 |
 | Documents never block | opening a folder, drawing its pages, reading it (OCR) and writing a pack (PDFs, clips) run as jobs (`mojoui/documentjobs.mojo`, `mojoui/pack.mojo`) | goal 41 M10, D-1271 |
 | Tables, queries and exports never block | `mojoui/tablejobs.mojo` (Insert > Table, SQL, Export CSV) and `mojoui/videocard.mojo` (Analyze, reels) run as jobs that wake the UI | goal 41 M3–M4, D-1124, D-1131 |

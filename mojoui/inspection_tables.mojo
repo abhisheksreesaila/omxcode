@@ -12,7 +12,7 @@
 # Positions are kept to seven decimals (a centimetre), severities as levels 1…5 (0: none), sizes in metres.
 
 from omxcore import Table, Job, JobBody, JobCtl, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.geo import Place
 from mojoui.inspection import Finding, Change, compare, worst, write_waypoints
 from mojoui.sheet import Sheet
@@ -204,5 +204,5 @@ struct CompareJob(JobBody):
 
 def compare_job(a: Sheet, b: Sheet, match_m: Float64) -> Job[Sheet]:
     """The later flight's places (b) against the earlier one's (a), as a job (snapshots of both): its answer is the
-    "worse" table compare_tables makes; the end wakes the UI (mojoui.jobs.start_ui_job)."""
+    "worse" table compare_tables makes; the end wakes the UI (mojoui.uijobs.start_ui_job)."""
     return start_ui_job(CompareJob(a.snapshot(), b.snapshot(), match_m))

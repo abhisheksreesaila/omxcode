@@ -1,6 +1,6 @@
 # mojoui.tablejobs: a page's table work off the UI thread (goal 41 M3), for TableCards (mojoui.tablecard): a CSV or
 # Parquet file read into a card (Insert > Table…), a SQL query over the page's tables, Export CSV. Each runs as a job
-# (mojoui.jobs.start_ui_job): its end wakes the UI, update() takes the answer and places it. A job owns its inputs (a
+# (mojoui.uijobs.start_ui_job): its end wakes the UI, update() takes the answer and places it. A job owns its inputs (a
 # snapshot of each sheet, docs/ui-threads.md rule 3), so the person goes on scrolling and editing meanwhile.
 #
 #   var work = TableWork()
@@ -18,7 +18,7 @@
 # `JOB: table landed big.csv in 812.0 ms (1,000,000 rows)`, `JOB: export landed big.csv in 640.2 ms (1,000,000 rows)`.
 
 from omxcore import Job, JobBody, JobCtl, Catalog, Table, SharedTable, JOB_RUNNING, TEXT
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from std.time import sleep
 from mojoui.shared import environment, count_add, count_of
 from mojoui.clock import now_ns, trace_on

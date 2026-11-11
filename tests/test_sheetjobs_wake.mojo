@@ -10,7 +10,7 @@ from mojoui.csvio import read_csv
 from mojoui.sheet import Sheet
 from mojoui.shared import make_dir
 from mojoui.sheetpage import SheetObject
-from mojoui.jobs import wake_pipe, drain_wakes
+from mojoui.uijobs import wake_pipe, drain_wakes
 from mojoui.sheetjobs import chart_job, column_job, open_job, warm_gpu, stopped, Job, JOB_RUNNING
 
 

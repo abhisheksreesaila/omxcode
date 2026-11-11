@@ -17,7 +17,7 @@ from mojoui.webcomponent import commands_json, assets_json
 from mojoui.canvas import Surface
 from mojoui.theme import Palette, hex_of, palette_css, tokens_css, theme_tokens
 from mojoui.clock import now_ns
-from mojoui.jobs import wake_pipe
+from mojoui.uijobs import wake_pipe
 from mojoui.pygil import python_hosted, gil_release, gil_restore
 
 
@@ -286,7 +286,7 @@ def web_poll[A: App](handle: Int) -> String:
 
 
 def web_jobs[A: App](handle: Int) -> String:
-    """A background job ended (mojoui.jobs' pipe was readable): App.jobs_message through update(); what changed (web.py's
+    """A background job ended (mojoui.uijobs' pipe was readable): App.jobs_message through update(); what changed (web.py's
     jobs thread calls it for every tab). '{}' when the app takes no such message."""
     var rt = session_at[A](handle)
     var m = rt[].app.jobs_message()
@@ -311,7 +311,7 @@ def web_take_download[A: App](handle: Int) -> String:
 
 
 def web_wake_fd() -> Int:
-    """The read end of the jobs' wake pipe (mojoui.jobs.wake_pipe): web.py's jobs thread blocks on it."""
+    """The read end of the jobs' wake pipe (mojoui.uijobs.wake_pipe): web.py's jobs thread blocks on it."""
     return wake_pipe()
 
 

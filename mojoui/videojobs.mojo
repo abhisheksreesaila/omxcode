@@ -1,5 +1,5 @@
 # mojoui.videojobs: a video's slow work as background jobs (goal 39 M7), on the same jobs as a sheet's (mojoui.sheetjobs,
-# omxcore's F-175), started with mojoui.jobs.start_ui_job: a job's end wakes the UI (App.jobs_message), so the app takes
+# omxcore's F-175), started with mojoui.uijobs.start_ui_job: a job's end wakes the UI (App.jobs_message), so the app takes
 # its result at once; it can read its progress (frames done of frames) to show, and cancel it. The one analysis path:
 # omxplorer's Analyze, its editor and examples/media's editor all run analyze_job and apply its rows with use_analysis
 # (goal 41 M3; mediatimeline_jobs keeps the editor's thumbnails, preview and export). Two kinds:
@@ -22,7 +22,7 @@
 
 from omxcore import Job, JobCtl, JobBody, Table, INT as MX_INT, DECIMAL as MX_DECIMAL, TEXT as MX_TEXT, BOOL as MX_BOOL
 from mojoui.video import VideoSource
-from mojoui.jobs import start_ui_job
+from mojoui.uijobs import start_ui_job
 from mojoui.videotable import VideoTable, Progress, scan_with, RegionsAnalyzer, ColourRange, NO_CODE
 from mojoui.vision_presets import warehouse_analyzer, warehouse_ranges, warm_range, WAREHOUSE_CELL, WARM
 from mojoui.videoexport import RedactPlan, Caption, cut_with, cut_frames

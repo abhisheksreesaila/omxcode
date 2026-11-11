@@ -12,15 +12,29 @@
 #
 # Errors raise with SQLite's message ("near \"SELEC\": syntax error"); the connection stays usable after one.
 # How: the C library is loaded when the first Database opens (dlopen, looked up by address: libsqlite3.so.0 on Linux, the system's
-# /usr/lib/libsqlite3.dylib on the Mac), and its functions are called through their addresses, as mojoui.jobs calls
+# /usr/lib/libsqlite3.dylib on the Mac), and its functions are called through their addresses, as mojoui.uijobs calls
 # libc's read(): no link flag on any host, and `mojo run` (whose JIT can't resolve a library it wasn't given) works
 # too (D-1304). A Database and its statements belong to one thread: a job opens its own Database on the same file
 # (WAL mode lets the UI read while a job writes, D-1306).
+#
+# Servers (goal 60, D-6009): `Pool.shared().open(path)` is this thread's own connection to the file (opened on first use,
+# WAL + synchronous=NORMAL, closed when the thread ends), so request threads never share one; `begin()` on a pooled
+# connection takes the file's in-process writer lock first, so writers queue on a mutex instead of SQLite's sleeping
+# busy handler. Statements are cached per connection: prepare() of the same SQL again reuses the compiled statement.
+# The pool's connections use at most `budget()` file descriptors (half the process's open-file limit; the soft limit is
+# raised to the hard one when the pool is made), counted as SQLite's unix VFS uses them: a .db and a -wal descriptor a
+# connection, one -shm a file, and a closed connection's .db descriptor kept until the last connection to its file
+# closes (os_unix.c's pUnused: POSIX locks are per process). A thread opening one more first closes idle connections,
+# its own before another thread's, a file with one connection before a shared one, least recently used first, so 16
+# threads × a thousand tenants never run out of descriptors (EMFILE). Idle: nothing holds it but the pool (no Database
+# copy, no statement) and it isn't inside a transaction (its file's writer lock): one in use is never closed (D-6018).
 
 from std.ffi import external_call, c_int, c_char
 from std.sys import CompilationTarget
 from std.memory import Pointer, ArcPointer
+from std.memory.alloc import alloc, Layout, unsafe_alloc
 from mojoui.shared import get_shared, put_shared
+from mojoui import libc
 
 comptime SQLITE_OK = 0
 comptime SQLITE_ROW = 100
@@ -32,8 +46,11 @@ comptime SQLITE_BLOB = 4
 comptime SQLITE_NULL = 5
 comptime _OPEN_READWRITE = 0x2
 comptime _OPEN_CREATE = 0x4
-comptime SLOT_SQLITE_LIB = 94  # mojoui.shared slot: the loaded library (90–93 are mojoui.jobs and geometry's)
+comptime SLOT_SQLITE_LIB = 94  # mojoui.shared slot: the loaded library (90–93 are mojoui.uijobs and geometry's)
 comptime _TRANSIENT = -1  # (SQLite copies a bound value at once)
+comptime SLOT_SQLITE_POOL = 97  # mojoui.shared slot: the process's Pool (95, 96 are mojoui.dbus's)
+comptime _CACHE_MAX = 64  # statements kept per connection
+comptime _MIN_BUDGET = 24  # descriptors
 
 
 def _dlsym(handle: Int, name: String) -> Int:
@@ -132,15 +149,47 @@ comptime _F_PI_D = def(Int, c_int) thin abi("C") -> Float64
 
 struct _Conn(Movable):
     """The open connection, shared by the Database and its statements (ArcPointer): it closes after the last of them
-    goes (Mojo ends a value after its last use, which can be before a statement made from it is done)."""
+    goes (Mojo ends a value after its last use, which can be before a statement made from it is done). Keeps the idle
+    compiled statements (by their SQL) and, for a pooled connection, its file's writer lock."""
     var db: Int
     var lib: _Lib
+    var cache_sql: List[String]
+    var cache_st: List[Int]
+    var wlock: Int  # the file's in-process writer mutex (0: none, a plain Database)
+    var held: Bool  # this connection holds it (between begin and commit/rollback)
 
     def __init__(out self, db: Int, lib: _Lib):
         self.db = db
         self.lib = lib
+        self.cache_sql = List[String]()
+        self.cache_st = List[Int]()
+        self.wlock = 0
+        self.held = False
+
+    def take(mut self, sql: String) -> Int:
+        for i in range(len(self.cache_sql)):
+            if self.cache_sql[i] == sql:
+                var st = self.cache_st[i]
+                _ = self.cache_sql.pop(i)
+                _ = self.cache_st.pop(i)
+                return st
+        return 0
+
+    def give(mut self, sql: String, st: Int) -> Bool:
+        if len(self.cache_st) >= _CACHE_MAX:
+            return False
+        for s in self.cache_sql:
+            if s == sql:
+                return False
+        self.cache_sql.append(sql)
+        self.cache_st.append(st)
+        return True
 
     def __deinit__(deinit self):
+        for st in self.cache_st:
+            _ = _fn[_F_P](self.lib.finalize)(st)
+        if self.held and self.wlock != 0:
+            _ = libc.pthread_mutex_unlock(self.wlock)
         if self.db != 0:
             _ = _fn[_F_P](self.lib.close_v2)(self.db)
 
@@ -151,15 +200,21 @@ struct Statement(Movable):
     var db: Int
     var lib: _Lib
     var conn: ArcPointer[_Conn]  # (keeps the connection open while the statement lives)
+    var sql: String  # (its key in the connection's cache)
 
-    def __init__(out self, st: Int, conn: ArcPointer[_Conn]):
+    def __init__(out self, st: Int, conn: ArcPointer[_Conn], sql: String = ""):
         self.st = st
         self.db = conn[].db
         self.lib = conn[].lib
         self.conn = conn
+        self.sql = sql
 
     def __deinit__(deinit self):
-        if self.st != 0:
+        if self.st == 0:
+            return
+        _ = _fn[_F_P](self.lib.reset)(self.st)
+        _ = _fn[_F_P](self.lib.clear_bindings)(self.st)
+        if self.sql == "" or not self.conn[].give(self.sql, self.st):
             _ = _fn[_F_P](self.lib.finalize)(self.st)
 
     def _check(self, rc: c_int) raises:
@@ -238,8 +293,9 @@ struct Statement(Movable):
             return String(from_utf8_lossy=Span(out))
 
 
-struct Database(Movable):
-    """One connection to a SQLite file (made if missing). Closed when it and every statement made from it have gone."""
+struct Database(Copyable, Movable):
+    """One connection to a SQLite file (made if missing). Closed when it and every statement made from it have gone
+    (a copy shares the connection)."""
     var db: Int
     var lib: _Lib
     var path: String
@@ -273,6 +329,11 @@ struct Database(Movable):
             raise Error("sqlite: " + self.error())
 
     def prepare(self, sql: String) raises -> Statement:
+        """A compiled statement: the connection's cached one for this SQL when it has one idle (it comes back when the
+        Statement goes), else a new one."""
+        var cached = self.conn[].take(sql)
+        if cached != 0:
+            return Statement(cached, self.conn, sql)
         var s = sql
         var out = List[Int](length=1, fill=0)
         var f = _fn[def(Int, Int, c_int, Int, Int) thin abi("C") -> c_int](self.lib.prepare_v2)
@@ -282,16 +343,49 @@ struct Database(Movable):
             raise Error("sqlite: " + self.error())
         if out[0] == 0:
             raise Error("sqlite: no statement in " + sql)
-        return Statement(out[0], self.conn)
+        return Statement(out[0], self.conn, sql)
 
     def begin(self) raises:
-        self.exec("BEGIN IMMEDIATE")
+        """A write transaction (BEGIN IMMEDIATE); on a pooled connection, after taking the file's writer lock."""
+        var took = False
+        if self.conn[].wlock != 0 and not self.conn[].held:
+            _ = libc.pthread_mutex_lock(self.conn[].wlock)
+            self.conn[].held = True
+            took = True
+        try:
+            self.exec("BEGIN IMMEDIATE")
+        except e:
+            if took:  # (a nested begin fails here too: never release the outer transaction's lock)
+                self._release()
+            raise e^
 
     def commit(self) raises:
-        self.exec("COMMIT")
+        try:
+            self.exec("COMMIT")
+        except e:
+            _ = self.rollback_quiet()
+            raise e^
+        self._release()
 
     def rollback(self) raises:
-        self.exec("ROLLBACK")
+        try:
+            self.exec("ROLLBACK")
+        finally:
+            self._release()
+
+    def rollback_quiet(self) -> Bool:
+        try:
+            self.exec("ROLLBACK")
+            self._release()
+            return True
+        except:
+            self._release()
+            return False
+
+    def _release(self):
+        if self.conn[].held:
+            self.conn[].held = False
+            _ = libc.pthread_mutex_unlock(self.conn[].wlock)
 
     def last_id(self) -> Int:
         """The rowid of the last INSERT on this connection."""
@@ -343,3 +437,287 @@ def fts_prefix_query(typed: String) -> String:
             out += " "
         out += '"' + w + '"*'
     return out^
+
+
+# per-thread connections (servers, D-6009, D-6018) --------------------------------------------------------------------
+
+struct _ThreadDbs(Movable):
+    """One thread's open connections, by path (in pthread thread-local storage; freed when the thread ends), each with
+    its file's index in the pool and the tick it was last opened at. Its mutex guards the lists: the owner takes it to
+    look one up, another thread over the budget takes it to close an idle one."""
+    var paths: List[String]
+    var dbs: List[Database]
+    var files: List[Int]
+    var used: List[Int]
+    var tick: Int
+    var mu: Int
+    var pool: Int  # its _PoolState
+
+    def __init__(out self, pool: Int):
+        self.paths = List[String]()
+        self.dbs = List[Database]()
+        self.files = List[Int]()
+        self.used = List[Int]()
+        self.tick = 0
+        self.mu = Int(unsafe_alloc[UInt8](64))
+        _ = libc.pthread_mutex_init(self.mu)
+        self.pool = pool
+
+    def idle_best(self, conns: List[Int]) -> Int:
+        """The connection to close first (call with `mu` held): idle (the pool's reference the only one: no Database
+        copy, no statement; not inside a transaction), its file's only connection before a shared one, then least
+        recently used. -1: none is idle."""
+        var best = -1
+        for i in range(len(self.paths)):
+            ref d = self.dbs[i]
+            if d.conn.count() != 1 or d.conn[].held:
+                continue
+            if best < 0:
+                best = i
+                continue
+            var lone = conns[self.files[i]] == 1
+            var best_lone = conns[self.files[best]] == 1
+            if (lone and not best_lone) or (lone == best_lone and self.used[i] < self.used[best]):
+                best = i
+        return best
+
+    def take_at(mut self, i: Int) -> Tuple[Int, Database]:
+        """Removes connection i (call with `mu` held): its file's index and the Database, whose last reference it is
+        (dropping it closes the connection, a WAL checkpoint: the caller does that outside the pool's lock)."""
+        var f = self.files[i]
+        _ = self.paths.pop(i)
+        _ = self.used.pop(i)
+        _ = self.files.pop(i)
+        return (f, self.dbs.pop(i))
+
+
+struct _PoolState(Movable):
+    var key: Int  # the thread-local slot
+    var mu: Int  # guards everything below (taken before a thread's own mutex, never after)
+    var index: Dict[String, Int]  # a file's path → its index below
+    var locks: List[Int]  # each file's writer mutex
+    var conns: List[Int]  # each file's open pooled connections, all threads
+    var pending: List[Int]  # each file's closed connections whose .db descriptor SQLite keeps until the last closes
+    var recs: List[Int]  # every live thread's _ThreadDbs
+    var fds: Int  # descriptors the pool's connections hold now (the model above)
+    var budget: Int  # at most this many
+
+    def __init__(out self, key: Int, mu: Int, budget: Int):
+        self.key = key
+        self.mu = mu
+        self.index = Dict[String, Int]()
+        self.locks = List[Int]()
+        self.conns = List[Int]()
+        self.pending = List[Int]()
+        self.recs = List[Int]()
+        self.fds = 0
+        self.budget = budget
+
+    def file(mut self, path: String) -> Int:
+        """The file's index (made on first sight, with its writer mutex). Call with `mu` held."""
+        var at = self.index.get(path, -1)
+        if at >= 0:
+            return at
+        var mu = Int(unsafe_alloc[UInt8](64))
+        _ = libc.pthread_mutex_init(mu)
+        self.locks.append(mu)
+        self.conns.append(0)
+        self.pending.append(0)
+        self.index[path] = len(self.locks) - 1
+        return len(self.locks) - 1
+
+    def opened(mut self, f: Int) -> Bool:
+        """One more connection to file f: its .db (or a kept one SQLite reuses), its -wal, the file's -shm if first.
+        True when it reuses a kept descriptor (unopened() needs to know)."""
+        var reused = self.pending[f] > 0
+        if reused:
+            self.pending[f] -= 1  # (findReusableFd: the kept .db descriptor is this one's)
+            self.fds -= 1
+        self.fds += 2 + (1 if self.conns[f] == 0 else 0)
+        self.conns[f] += 1
+        return reused
+
+    def unopened(mut self, f: Int, reused: Bool):
+        """opened(f) undone exactly (the open failed: SQLite took nothing)."""
+        self.conns[f] -= 1
+        self.fds -= 2 + (1 if self.conns[f] == 0 else 0)
+        if reused:
+            self.pending[f] += 1
+            self.fds += 1
+
+    def closed(mut self, f: Int):
+        """One connection to file f gone: its -wal goes; its .db goes now if it was the file's last (with every kept
+        one, and the -shm), else it is kept."""
+        self.conns[f] -= 1
+        if self.conns[f] == 0:
+            self.fds -= 2 + 1 + self.pending[f]
+            self.pending[f] = 0
+        else:
+            self.fds -= 1
+            self.pending[f] += 1
+
+
+def _drop_thread_dbs(addr: Int) abi("C"):
+    if addr == 0:
+        return
+    var p = Pointer[_ThreadDbs, MutUntrackedOrigin](unsafe_from_address=addr)
+    var st = Pointer[_PoolState, MutUntrackedOrigin](unsafe_from_address=p[].pool)
+    _ = libc.pthread_mutex_lock(st[].mu)  # (out of the registry first: no other thread reaches it after this)
+    for i in range(len(st[].recs)):
+        if st[].recs[i] == addr:
+            _ = st[].recs.pop(i)
+            break
+    _ = libc.pthread_mutex_lock(p[].mu)
+    while len(p[].paths) > 0:  # (each closes now: a Database copy the thread left would end with it anyway)
+        var gone = p[].take_at(len(p[].paths) - 1)
+        st[].closed(gone[0])
+    _ = libc.pthread_mutex_unlock(p[].mu)
+    _ = libc.pthread_mutex_unlock(st[].mu)
+    p.unsafe_deinit_pointee()
+    p.unsafe_free()
+
+
+struct Pool(ImplicitlyCopyable, Movable):
+    """The process's per-thread connections (one Pool per process: `Pool.shared()`). A handle: copy it freely."""
+    var addr: Int
+
+    def __init__(out self, *, addr: Int):
+        self.addr = addr
+
+    @staticmethod
+    def shared() raises -> Pool:
+        """The process's pool, made on the first call. (Call it while the program starts, before threads race to make it.)"""
+        var have = get_shared(SLOT_SQLITE_POOL)
+        if have != 0:
+            return Pool(addr=have)
+        var key = libc.pthread_key_create(_drop_thread_dbs)
+        if key < 0:
+            raise Error("sqlite: no thread-local slot for the pool")
+        var mu = Int(unsafe_alloc[UInt8](64))
+        _ = libc.pthread_mutex_init(mu)
+        var soft = libc.raise_nofile()
+        var st = alloc(Layout[_PoolState].single()).unsafe_leak()
+        st.unsafe_write(_PoolState(key, mu, max((soft if soft > 0 else 1024) // 2, _MIN_BUDGET)))
+        put_shared(SLOT_SQLITE_POOL, Int(st))
+        return Pool(addr=Int(st))
+
+    def _state(self) -> Pointer[_PoolState, MutUntrackedOrigin]:
+        return Pointer[_PoolState, MutUntrackedOrigin](unsafe_from_address=self.addr)
+
+    def budget(self) -> Int:
+        """The pool's connections hold at most this many file descriptors, all threads together (beyond it only while
+        every connection is in use)."""
+        var s = self._state()
+        _ = libc.pthread_mutex_lock(s[].mu)
+        var b = s[].budget
+        _ = libc.pthread_mutex_unlock(s[].mu)
+        return b
+
+    def set_budget(self, fds: Int):
+        """Another budget (an app that knows its limits better; tests)."""
+        var s = self._state()
+        _ = libc.pthread_mutex_lock(s[].mu)
+        s[].budget = max(fds, 4)
+        _ = libc.pthread_mutex_unlock(s[].mu)
+
+    def fds_now(self) -> Int:
+        """Descriptors the pool's connections hold now, by the model above (tests)."""
+        var s = self._state()
+        _ = libc.pthread_mutex_lock(s[].mu)
+        var n = s[].fds
+        _ = libc.pthread_mutex_unlock(s[].mu)
+        return n
+
+    def open_here(self) -> Int:
+        """This thread's open connections (tests)."""
+        var mine = libc.pthread_getspecific(self._state()[].key)
+        if mine == 0:
+            return 0
+        var t = Pointer[_ThreadDbs, MutUntrackedOrigin](unsafe_from_address=mine)
+        _ = libc.pthread_mutex_lock(t[].mu)
+        var n = len(t[].paths)
+        _ = libc.pthread_mutex_unlock(t[].mu)
+        return n
+
+    def _take_one(self, mine: Int, from_others: Bool, mut out: List[Database]) -> Bool:
+        """Takes the best idle connection of this thread (or of another one) into `out`, counted closed: False when
+        none is idle. `mu` held."""
+        var s = self._state()
+        for r in s[].recs:
+            if (r == mine) == from_others:
+                continue
+            var t = Pointer[_ThreadDbs, MutUntrackedOrigin](unsafe_from_address=r)
+            _ = libc.pthread_mutex_lock(t[].mu)
+            var i = t[].idle_best(s[].conns)
+            if i >= 0:
+                var gone = t[].take_at(i)
+                s[].closed(gone[0])
+                out.append(gone[1].copy())
+            _ = libc.pthread_mutex_unlock(t[].mu)
+            if i >= 0:
+                return True
+        return False
+
+    def _reserve(self, mine: Int, path: String) -> Tuple[Int, Bool]:
+        """Room for one more connection to `path` (taking idle ones while it would pass the budget), counted at once
+        so racing threads see it: the file's index, and whether it reuses a kept descriptor. The taken connections
+        close after the lock is let go (each close checkpoints its WAL: no other thread's open waits on that disk work;
+        for that moment the count is below the real number by what's closing)."""
+        var s = self._state()
+        var closing = List[Database]()
+        _ = libc.pthread_mutex_lock(s[].mu)
+        var f = s[].file(path)
+        while s[].fds + 3 > s[].budget:
+            if not self._take_one(mine, False, closing) and not self._take_one(mine, True, closing):
+                break  # (every connection in use: over the budget until they're done)
+        var reused = s[].opened(f)
+        _ = libc.pthread_mutex_unlock(s[].mu)
+        closing.clear()  # (the last references: they close here, outside the lock)
+        return (f, reused)
+
+    def open(self, path: String, setup: String = "") raises -> Database:
+        """This thread's connection to `path` (opened, with WAL and `setup`, on this thread's first use)."""
+        var key = self._state()[].key
+        var mine = libc.pthread_getspecific(key)
+        if mine == 0:
+            var rec = alloc(Layout[_ThreadDbs].single()).unsafe_leak()
+            rec.unsafe_write(_ThreadDbs(self.addr))
+            mine = Int(rec)
+            _ = libc.pthread_setspecific(key, mine)
+            var s = self._state()
+            _ = libc.pthread_mutex_lock(s[].mu)
+            s[].recs.append(mine)
+            _ = libc.pthread_mutex_unlock(s[].mu)
+        var t = Pointer[_ThreadDbs, MutUntrackedOrigin](unsafe_from_address=mine)
+        _ = libc.pthread_mutex_lock(t[].mu)
+        t[].tick += 1
+        for i in range(len(t[].paths)):
+            if t[].paths[i] == path:
+                t[].used[i] = t[].tick
+                var hit = t[].dbs[i].copy()
+                _ = libc.pthread_mutex_unlock(t[].mu)
+                return hit^
+        _ = libc.pthread_mutex_unlock(t[].mu)
+        var room = self._reserve(mine, path)
+        var f = room[0]
+        var s = self._state()
+        try:
+            var db = Database(path)
+            db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON")
+            if setup != "":
+                db.exec(setup)
+            _ = libc.pthread_mutex_lock(s[].mu)
+            db.conn[].wlock = s[].locks[f]
+            _ = libc.pthread_mutex_lock(t[].mu)
+            t[].paths.append(path)
+            t[].dbs.append(db.copy())
+            t[].files.append(f)
+            t[].used.append(t[].tick)
+            _ = libc.pthread_mutex_unlock(t[].mu)
+            _ = libc.pthread_mutex_unlock(s[].mu)
+            return db^
+        except e:
+            _ = libc.pthread_mutex_lock(s[].mu)
+            s[].unopened(f, room[1])
+            _ = libc.pthread_mutex_unlock(s[].mu)
+            raise e^

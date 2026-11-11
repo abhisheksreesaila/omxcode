@@ -48,7 +48,7 @@ a file import or a big query, must run elsewhere, and its result must come back 
 - **Effects** ([mojoui/effects.mojo](../mojoui/effects.mojo), goal 33, D-320–D-326): `update()` asks for HTTP requests
   and timers; requests run on worker threads; each reply comes back to `update()` as an ordinary `Event`, on the UI
   thread. Requests can be cancelled; streamed replies arrive piece by piece.
-- **Data jobs** ([mojoui/jobs.mojo](../mojoui/jobs.mojo), D-771): a background job's end wakes the UI at once through
+- **Data jobs** ([mojoui/uijobs.mojo](../mojoui/uijobs.mojo), D-771): a background job's end wakes the UI at once through
   a self-pipe the main loop watches (GTK: `g_unix_fd_add`; the web: a thread blocking on it). Measured
   ([examples/jobwake](../examples/jobwake/app.mojo)): job end → `update()` median 0.05 ms, p95 1.0–2.2 ms on GTK.
 - **The Mac too** (D-792): jobs get threads of their own there, and a job's end wakes the window through

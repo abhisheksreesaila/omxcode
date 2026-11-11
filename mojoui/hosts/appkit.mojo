@@ -10,6 +10,7 @@ from std.ffi import c_int, external_call
 from std.memory import Pointer
 from std.memory.alloc import alloc, Layout
 
+from mojoui.browser import open_url as browser_open_url
 from mojoui.view import (
     TEXT, BUTTON, VSTACK, HSTACK, SPACER, FIELD, TOGGLE, DROPDOWN, SLIDER, PROGRESS, DIVIDER, SCROLL, IMAGE,
     SEGMENTED, RADIO, TEXTAREA, ALERT, TABS, NAVBAR, DATE, ICON, GRID, LAZYLIST, CANVAS, BOARD, OVERLAY,
@@ -274,6 +275,8 @@ struct AppKitHost[A: App](Movable):
     var web_focus: Int  # a WKWebView that had the keyboard when a rebuild moved it (it gets it back), or 0
     var shots_taken: Bool  # the web views' pictures for the next snapshot have arrived
     var step_wait_from: Int  # (test steps) when the next step started waiting for the pages (ns; 0: not waiting)
+    var wait_title: String  # (test steps) waitfor:Title=N: the button being waited for ("" when none)
+    var wait_until: Int  # (test steps) its deadline (now_ns)
     var probe_pending: Bool  # (test steps) a webjs: step's answer is still to be written in the log
     var dark_told: Int  # the system's light (0) or dark (1) mode as the app last heard it (App.appearance); -1: not yet
 
@@ -330,6 +333,8 @@ struct AppKitHost[A: App](Movable):
         self.web_focus = 0
         self.shots_taken = False
         self.step_wait_from = 0
+        self.wait_title = ""
+        self.wait_until = 0
         self.probe_pending = False
         self.dark_told = -1
         self.size_w = List[Int]()
@@ -1447,6 +1452,19 @@ struct AppKitHost[A: App](Movable):
                             if node.h > 0:  # (a row given its own height keeps it; a taller view stands out of it, as the web's overflow, D-559)
                                 _ = msg(held, "setPriority:", Float32(742))
                             _ = msg(held, "setActive:", 1)
+            if node.justify_items == BETWEEN and not vertical and len(built) == len(node.children) and len(built) > 1:
+                # (a row's labels stretch across their share of it, their words centred: the first text reads from the
+                # leading edge, the last from the trailing one, as GTK and the web push them to the ends; giving them
+                # hugging either shrank the row or lost to its fill, D-5728)
+                var first = node.children[0]
+                var last = node.children[len(node.children) - 1]
+                # (the label itself, never a padding or margin holder: those don't take setAlignment:)
+                var first_w = self.widgets[first] if first < len(self.widgets) else 0
+                var last_w = self.widgets[last] if last < len(self.widgets) else 0
+                if self.rt.shown.nodes[first].kind == TEXT and first_w != 0:
+                    _ = msg(first_w, "setAlignment:", 0)  # NSTextAlignmentLeft
+                if self.rt.shown.nodes[last].kind == TEXT and last_w != 0:
+                    _ = msg(last_w, "setAlignment:", 2)  # NSTextAlignmentRight (2 on Apple Silicon)
             if node.justify_items == CENTER and not grows and not spacers:
                 var trail = flexible_spacer(vertical)
                 _ = msg(w, "addArrangedSubview:", trail)
@@ -3085,6 +3103,8 @@ struct AppKitHost[A: App](Movable):
     def send_commands(mut self, self_addr: Int):
         """The widget commands the app asked for, each to its widget's page; one whose widget isn't on the screen is
         answered with an error (through the inbox, on the next run-loop turn, as a page's reply is)."""
+        for url in self.rt.take_opens():  # (pages the app asked for: mojoui.browser)
+            _ = browser_open_url(url)
         var commands = self.rt.take_commands()
         if len(commands) == 0:
             return
@@ -3781,7 +3801,7 @@ def run_step[A: App](host_addr: Int, step: String):
         host[].asked_w = to_int(wh[0])
         host[].asked_h = to_int(wh[1])
         _ = msg(host[].window, "setContentSize:", Float64(to_int(wh[0])), Float64(to_int(wh[1])))
-    elif verb != "wait" and verb != "pause":  # (pause:ms as GTK's and the web's; wait:ms the Mac's older word)
+    elif verb != "wait" and verb != "pause" and verb != "waitfor":  # (pause:ms as GTK's and the web's; wait:ms the Mac's older word)
         host[].report.note("TEST: unknown step " + step)
 
 
@@ -3805,6 +3825,13 @@ def on_test_step[A: App](target: Int, cmd: Int, number: Int) abi("C"):
         host[].probe_pending = False
         var mw = mac_at(host[].webviews)
         host[].report.note("JS: " + (mw[].core.probe_result if mw[].core.probe_done else String('"timed out"')))
+    if host[].wait_title != "":  # waitfor:Title=N: until a button titled Title (or a text saying it) is on the screen, N ms at most (GTK's step)
+        var found = find_node(host[], BUTTON, host[].wait_title, 0) >= 0 or find_node(host[], TEXT, host[].wait_title, 0) >= 0
+        if not found and Int(now_ns()) < host[].wait_until:
+            _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), Float64(0.1))
+            return
+        host[].report.note(("WAITED: " if found else "TEST: no button ") + host[].wait_title)
+        host[].wait_title = ""
     if host[].step_at >= len(host[].steps):
         host[].report.note("TEST: done, " + String(len(host[].steps)) + " steps")
         if host[].sheet != 0:  # (an open sheet refuses terminate: the Settings run hung until the runner killed it, 2026-10-24)
@@ -3819,6 +3846,12 @@ def on_test_step[A: App](target: Int, cmd: Int, number: Int) abi("C"):
     var step = host[].steps[host[].step_at]
     host[].step_at += 1
     host[].report.note("step " + String(host[].step_at) + ": " + step)
+    if step.startswith("waitfor:"):
+        var kw = split_at(split_at(step, ":")[1], "=")
+        host[].wait_title = kw[0]
+        host[].wait_until = Int(now_ns()) + to_int(kw[1]) * 1_000_000
+        _ = msg(host[].target, "performSelector:withObject:afterDelay:", sel("testStep:"), ns_number(addr), Float64(0.1))
+        return
     run_step[A](addr, step)
     host[].report.cause = "step-" + String(host[].step_at)
     host[].queue_snapshot(addr)
@@ -3853,7 +3886,7 @@ def on_appearance_later[A: App](target: Int, cmd: Int, number: Int) abi("C"):
 
 
 def on_jobs_ended[A: App](target: Int, cmd: Int, nothing: Int) abi("C"):
-    """mojoui.jobs: a background job ended: App.jobs_message to update() on this run-loop turn, the screen patched."""
+    """mojoui.uijobs: a background job ended: App.jobs_message to update() on this run-loop turn, the screen patched."""
     var addr = 0
     var wins = msg(msg(cls("NSApplication"), "sharedApplication"), "windows")
     for i in range(msg(wins, "count")):  # (the host's window: its delegate is this target, its identifier the host's address)
@@ -4255,7 +4288,10 @@ def run[A: App]() -> c_int:
         return 1
 
     var app = msg(cls("NSApplication"), "sharedApplication")
-    _ = msg(app, "setActivationPolicy:", 0)  # a regular app: Dock icon and menu bar
+    # a regular app: Dock icon and menu bar; MOJOUI_OFFSCREEN=1 (a check on someone's own Mac): an accessory app whose
+    # window is never shown or focused, its pictures still drawn by cacheDisplayInRect: (D-5722)
+    var offscreen = env("MOJOUI_OFFSCREEN") == "1"
+    _ = msg(app, "setActivationPolicy:", 1 if offscreen else 0)
     var title = host[].rt.app.title()
     make_menu(app, title)  # (replaced by the app's own MenuBar when its screen has one, D-150)
 
@@ -4286,7 +4322,7 @@ def run[A: App]() -> c_int:
     add_method(c, "systemAppearance:", on_system_appearance[A], "v@:@")
     add_method(c, "appearanceLater:", on_appearance_later[A], "v@:@")
     add_method(c, "windowDidResize:", on_window_resized[A], "v@:@")
-    add_method(c, "jobsEnded:", on_jobs_ended[A], "v@:@")  # (mojoui.jobs: a background job ended → App.jobs_message)
+    add_method(c, "jobsEnded:", on_jobs_ended[A], "v@:@")  # (mojoui.uijobs: a background job ended → App.jobs_message)
     add_method(c, "windowResizeLater:", on_window_resize_later[A], "v@:@")
     add_method(c, "showPopover:", on_show_popover[A], "v@:@")
     add_method(c, "popoverDidClose:", on_popover_closed[A], "v@:@")
@@ -4351,14 +4387,20 @@ def run[A: App]() -> c_int:
     host[].show(addr)
     host[].schedule_effects(addr)  # (what the starting state asked for)
     _ = msg(host[].window, "center")
-    _ = msg(host[].window, "makeKeyAndOrderFront:", 0)
+    if offscreen:
+        _ = msg(host[].window, "setAlphaValue:", Float64(0))
+        _ = msg(host[].window, "setIgnoresMouseEvents:", 1)
+        _ = msg(host[].window, "orderBack:", 0)
+    else:
+        _ = msg(host[].window, "makeKeyAndOrderFront:", 0)
     if forced != "":  # (a window larger than its screen was shrunk to fit: the runner's screen is 1024 pt wide)
         _ = msg(host[].window, "setContentSize:", Float64(size[0]), Float64(size[1]))
     _ = msg(host[].window, "setDelegate:", host[].target)  # windowDidResize: → App.resize
     # the size it really got: a window larger than its screen is shrunk before the delegate listens (GitHub's
     # 1024 pt screen: the app laid out to 1,432 pt in a 1,410 pt window, cutting the Report's right edge)
     host[].queue_resize(addr)
-    _ = msg(app, "activateIgnoringOtherApps:", 1)
+    if not offscreen:
+        _ = msg(app, "activateIgnoringOtherApps:", 1)
     var steps = env("MOJOUI_TEST")
     if host[].rt.app.records() or steps != "":  # the app asks for a report from the start (the Mac check app), or a test run
         host[].start_report()

@@ -76,6 +76,10 @@ APPS = [
          runs=[("Linux", "ok"), ("Mac", "ci")], get=["Linux", "Mac"], needs="Linux: needs WebKitGTK 6.0",
          shots=[("img/widgets-gtk-dark.png", "Linux, dark"), ("img/widgets-gtk-light.png", "Linux, light")],
          src="examples/widgets"),
+    dict(name="SaaS blocks", app="saas", kind="Sign-in and payments",
+         line="Sign in with Google, a tenant and SQLite file of your own, Stripe checkout and its webhooks: SaaS building blocks written in Mojo, server and app.",
+         runs=[("Linux", "ok"), ("Mac", "ok")], get=["Linux"], needs="Its server needs a Google client and Stripe test keys (docs/saas.md)",
+         shots=[("img/saas.png", "Linux: ada on Pro, ben on Free")], src="examples/saas"),
 ]
 
 # no web builds in the showcase (owner, 2026-11-05); these come into the grid once they have a download

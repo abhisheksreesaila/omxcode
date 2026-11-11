@@ -4,6 +4,14 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Merge: goals 57 and 60 (SaaS building blocks, the Mojo backend) into main (2026-11-11)
+- **Setup:** worktree ../mojo-ui-m60, branch `merge-57-60` at origin/main e5fc9e4 (goal 64 done); `git merge goal-60-backend` (it holds goal-57-saas), 62 commits apart; 14 files conflicted.
+- **Resolved:** goal 60 renamed the UI's job wake `mojoui.jobs` → `mojoui.uijobs` (D-6010) while main reworked it (mojoui.wake.UIWaker, D-5804): uijobs.mojo is main's version, jobs.mojo goal 60's durable queue, and every main-side importer (framefeed, tablejobs, sheetjobs, the GTK/web/AppKit hosts, tests) follows the rename; libc.mojo, the Mac's libSystem.tbd, package.sh (main's companions + goal 60's saas-server) and the GTK `waitfor:` step (a button or a text) are unions; logs keep both sides; GOAL.md stays goal 64, goal 57's and 60's archived as docs/goals/57-GOAL.md and 60-GOAL.md; scripts/check runs 64-check.py.
+- **Broke and fixed:** libc_lint failed on main itself (goal 58's avmedia declared `usleep`, which Flare declares too): mojoui.libc.usleep in Flare's form, avmedia calls it (still compiles for arm64-apple-macosx).
+- **Checks:** 60-check M0–M11 PASS (M10 after `pixi install -e fhsaas`: 3.3× fh-saas's throughput at the closest); 57-check M0, M1, M3, M4, M6, M7 PASS, M5 BLOCKED (owner's keys), M2 and M8 FAIL only at the silent invite goal 60 replaced on purpose (D-6013); 64-check M0–M4 PASS, M5 BLOCKED (no MAX install); test_jobs, test_sheetjobs_wake, test_tablejobs, test_videojobs, test_framefeed_same and jobwake's freeze line pass; libc and decision lints, components matrix current.
+
+---
+
 ## Globe sample: a geospatial globe drawn per pixel on the GPU (2026-11-09)
 - **Setup:** worktree ../mojo-ui-globe, branch `globe-sample` off main (Mojo 1.2), for a prospective adopter (HPC geospatial, uses rerun, has his own Mojo rasterizer for OGC APIs). `examples/globe` (app, earth.mojo, render.mojo, prep.py, test_globe.mojo); framework: `Gpu.set_data` / `draw_with` / `render_with` (tests/test_gpu_data.mojo). Report for him: https://claude.ai/artifact/XqmAx6prRrZPT9gVRqvQsA (private).
 - **Worked:** Natural Earth 1:50m land rasterized in Mojo at start-up (4096×2048, 2×2 samples a texel) + 5,530,780 synthetic aircraft reports binned into a 24 h × 0.25° cube (133 MB on the GPU); one pixel function draws the globe. RTX 3090: 0.10 ms at 1080p, 0.40 ms at 4K, 1.22 ms at 8K (batch), 0.54 ms a frame in the GTK app. Apple M4 (Metal, IOSurface): 4.8 ms at 1080p, 10.9 ms at 4K, ≈ 15 ms in the app, ≈ 85 ms first frame. Linux GTK, web and the owner's M4 answer the same tap identically (40.18°N 1.98°E, near Barcelona, 120 reports). Downloads: dist/globe-linux-x86_64.tar.gz (bare_run ok), dist/globe-mac-arm64.zip (built on the M4).
@@ -195,6 +203,15 @@ port now warns in the log and lets the build gate refuse it a few minutes later.
 - **Next:** release the GIL around the web host's Mojo draws (mojoui.pygil), then rerun M4/M5; the owner adds Docker access and runs scripts/image-check; then scripts/deploy-railway.
 
 ---
+
+## 2026-11-06 · Goal 57: SaaS building blocks in Mojo (sign-in, tenants, payments)
+- Setup: worktree mojo-ui-g57 on merge-50-52, Mojo 1.2, Flare; the owner's Mac (arm64) over SSH for M8.
+- Worked: mojoui.crypto / accounts / billing / signin / browser; the saas server (Mojo only) and native app; Google and
+  Stripe proved against the checker's stand-ins on Linux and the Mac; Linux download with its server.
+- Broke and fixed: the checker's label regex (D-5719); Flare programs had never built on macOS (D-5723); review round 1's
+  sign-in CSRF and loopback hardening (D-5724–D-5727); AppKit BETWEEN rows (D-5728).
+- Means: fh-saas's core jobs run in Mojo on the framework. Open: invite accept page, provider calls off the lock,
+  real keys (M5). Next: the owner runs scripts/saas_keys.sh and M5. Report: docs/report.md.
 
 ## Goal 55: omxconsole, a desktop app for MAX, all omxcode (2026-11-05/06)
 - **Setup:** worktree ../mojo-ui-g55, branch `goal-55-console` off main (Mojo 1.2); docs/goals/55-check.py; report docs/goals/55-report.md; D-5501–D-5532. A user's MAX install for the checks under build/g55/max.
