@@ -188,6 +188,26 @@ struct Json(Movable):
     def flag(self, node: Int, default: Bool = False) -> Bool:
         return self.numbers[node] == 1 if node >= 0 and self.kinds[node] == J_BOOL else default
 
+    def dump(self, node: Int) -> String:
+        """A node written back as compact JSON (numbers as parsed: whole ones exactly, decimals as Float64)."""
+        var k = self.kind(node)
+        if k == J_NULL or k < 0:
+            return "null"
+        if k == J_BOOL:
+            return "true" if self.numbers[node] == 1 else "false"
+        if k == J_NUMBER:
+            return String(self.numbers[node]) if self.whole[node] else String(self.reals[node])
+        if k == J_STRING:
+            return json_string(self.texts[node])
+        var out = String("[") if k == J_ARRAY else String("{")
+        for i in range(len(self.kids[node])):
+            if i > 0:
+                out += ","
+            if k == J_OBJECT:
+                out += json_string(self.keys[node][i]) + ":"
+            out += self.dump(self.kids[node][i])
+        return out + ("]" if k == J_ARRAY else "}")
+
     # ---- parsing ----
 
     def fail(self, why: String) -> Error:
