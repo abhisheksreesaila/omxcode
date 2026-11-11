@@ -1,46 +1,46 @@
-# GOAL 64: the two things omxconsole still can't do
+# GOAL 66: everything a Finxplorer-class SaaS needs, on the server side
 
-**End goal (owner, 2026-11-07):** omxconsole's cover page admits two things the earlier Python version did and the
-Mojo one doesn't: **porting a model MAX can't run**, and **reaching the endpoint from another machine over HTTPS**.
-Both buttons are still in the app, so a stranger who downloads the alpha clicks them and hits a dead end. "Kind of
-embarrassing not to… yes please copy this." Copy the decisions of the working Python version (`~/Projects/mxstudio`,
-read-only), re-expressed in Mojo: the orchestration (stage machine, gates, attempt and early-stop rules, SQLite rows,
-log format, Caddyfile, process supervision) lives in `examples/consoled/`. No Python ships inside omxconsole; the only
-Python is what we drive as external programs, as the old version did (Claude Code, Modular's skill scripts, `max
-serve`, `pixi`, `caddy`) and the generated port itself, which is MAX's own format.
+**End goal (owner, 2026-11-11):** "Set up to build Finxplorer.com, meaning all the ingredients should be there… don't
+move [Finxplorer] ever… we just [want] a capability… to provide the framework… nothing to do with Finxplorer."
+Finxplorer (a live personal-finance SaaS on FastHTML + fh-saas) is the yardstick only: never read its data, never
+change it. Its inventory against omxcode is docs/research/finxplorer-ingredients.md. Goals 57 and 60 gave sign-in,
+tenants, billing, mail, jobs, migrations and logs; this goal adds the generic server-side pieces still missing, each
+a `mojoui` module with its own test, and ends with a small finance sample that uses all of them together. The UI
+ingredients (a signed-in multi-user web host, Sankey/donut/calendar charts, a bottom sheet, the Money·Ledger family)
+are goal 67 (docs/goals/67-draft.md).
 
-Measured on the owner's 14 real runs (`~/.mxc/ports/`, read-only): 8 ported and served (gpt2, pythia-1.4b, phi-2,
-starcoder2-3b, OLMoE-1B-7B, granite-3.1-1b MoE, SmolLM3-3B), 6 failed, and everything that worked was 1–3B. So both
-features ship labelled **beta**, with that real hit rate in the app, not a vague badge.
-
-Base: origin/main 2abf5775 (after goal 62).
+Base: origin/main f0268d58. Worktree ../mojo-ui-g66, branch goal-66-saas-ingredients. Decisions D-66xx (D-65xx were
+used by the omxconsole work after goal 64).
 
 ## Milestones
-| # | Milestone | Proof (`docs/goals/64-check.py`; PASS, FAIL or BLOCKED each) |
+| # | Milestone | Proof (`docs/goals/66-check.py`; PASS, FAIL or BLOCKED each) |
 |---|---|---|
-| M0 | The porting assistant setting | A Settings card: Claude Code on this machine (detected, no key), or an API key for a frontier model (Anthropic, or an OpenAI-compatible base URL). Frontier models only; the user's own small local model is never offered as the porter. The key is stored for omxconsole only, mode 0600, never logged, never shown in full (prefix only), never in a URL, and removable. Proved against a stand-in server, never a real key: POST/GET/DELETE the setting, the file's mode is 0600, the plaintext appears in no log, no response and no stored row but its own file, and a wrong key fails the small test call in seconds |
-| M1 | Guided, not a dead end | Clicking "Port it" with nothing configured opens that card **inline on the port screen**, not a bounce to Settings: it says what was detected, takes the choice, saves it, and the button becomes "Port it". The daemon's small test call happens first, so a bad key fails in seconds. GTK step run with screenshots, looked at, plus the web host |
-| M2 | The worker | `POST /admin/ports` runs the pipeline and writes stages and the log where `ports_json` and the existing screen already read them; `GET /admin/ports/<id>`; cancel really stops the agent and its children. Proved with no GPU and no real port, with the old project's fake-port harness re-used (a fake `claude`, fake skill gates, fake `max`, and the tiny `WeirdForCausalLM` fixture): the seven stages land in order with their attempt numbers, the log streams `== stage`/`-- stage done` lines, a build failure feeds the error back and the next attempt fixes it, the same failure twice stops early, cancel leaves no process of ours running |
-| M3 | When it fails, hand it over | The failed job and the screen give: the workspace folder, the full log path, the exact gate that failed, and the best attempt kept. Proved on a fake run that always fails: `GET /admin/ports/<id>` carries all four, and a GTK step run shows them on the port screen |
-| M4 | Reach it on your network | `POST /admin/expose` writes a Caddyfile with `tls internal` and `forward_auth` to the daemon's `/auth/check`, runs Caddy through `mojoui.process`, and `POST /admin/expose/stop` really stops it. `/auth/check` answers 200 with `X-Mst-App` for a valid app key and 401 for none or a revoked one. Caddy is found, not bundled: when it is missing the answer says so with how to install it. Proved on this machine from a second process: `https://localhost:8443/v1/models` with a valid key works, without one is 401, a dot-segment path is 400, and localhost over plain HTTP still works; stop leaves nothing listening |
-| M5 | Honest labels and no regressions | Both features marked beta in the app and on `docs/omxconsole.html`, with the 8-of-14 hit rate; the cover's honest-edges section no longer says these two are missing. Goal 55's check (the console's own milestones) and the console's Mojo tests still pass, and `docs/components.md` is fresh |
+| M0 | Static files | `mojoui.serve` serves a folder: content types, ETag + 304, a content-hashed URL cached a year, gzip when asked, Range for media; `..`, absolute paths, symlinks out of the folder and dotfiles refused (404); a test, and a served page loads its JS/CSS/font in headless Chromium |
+| M1 | Webhooks from anyone | `mojoui.webhooks`: a receiver for signed third-party events (HMAC-SHA256 schemes: Stripe-style `t=,v1=`, a plain hex/base64 header, Svix/Standard Webhooks), a time window, an event log in host.db applied once (id unique), processing handed to `mojoui.jobs` with retries; bad signature 401, old 400, replay 200 without effect, a 1 MB cap; `mojoui.billing`'s Stripe path keeps passing goal 60 |
+| M2 | Talking to other APIs | `mojoui.http` gains a JSON API client: bearer/basic auth, a token cache that refreshes before expiry, GraphQL over POST with cursor paging, retries with backoff on 429/5xx honouring Retry-After, a per-call timeout; proven against a local stand-in server (pagination over 3 pages, a 429 then success, an expired token refreshed once) |
+| M3 | Schedules | `mojoui.schedule`: recurring jobs from a cron expression or "every Monday 08:00", per-tenant time zone (IANA, DST-safe: a 02:30 job on a spring-forward day runs once, an autumn 01:30 once), at most once per slot across restarts (a kill -9 mid-run neither loses nor doubles it), missed slots after downtime caught up once |
+| M4 | Data in bulk | `mojoui.sqlite` gains bulk upsert (by a key, keeping the columns a user edited, in one transaction, 100k rows in < 2 s) and `Reply.csv` (streamed, RFC 4180 quoting, formula-injection guard on `=+-@`) |
+| M5 | Public pages | crawlable server-rendered pages from `mojoui.serve`: templates with escaping, a sitemap.xml and robots.txt, a contact form (CSRF token, rate limit, honeypot, sent through `mojoui.mail`), a PWA manifest and service worker served with the right headers; a page's HTML has its text with JS off |
+| M6 | The operator | a site-wide operator role (`SAAS_OPERATORS`, emails), and an operator API: tenants with plan and last activity, a tail of the JSON log with filters, a tenant's SQLite snapshot as a download (consistent: `VACUUM INTO`), audit rows for every operator action; nobody else reaches it (403), not even a tenant admin |
+| M7 | Leaving fh-saas | `scripts/fhsaas_import.py` (or Mojo) moves an fh-saas host database (users, tenants, memberships, roles, subscriptions, trial ends, Stripe ids) into omxcode's host.db and copies tenant databases, dry-run first, idempotent; proven on a host database made by fh-saas itself (pixi env `fhsaas`), never a real one; a signed-in user keeps their tenant, role and plan |
+| M8 | Shipping it | a Dockerfile and `scripts/saas_image.sh` build an image for a `mojoui.serve` SaaS server (one process, a volume for host.db and tenants, health check); the image runs locally and passes /health and a sign-in against the stand-ins; nothing deployed |
+| M9 | A finance sample | `examples/finance_min`: sign-in, a stand-in bank aggregator (its API through M2, its webhooks through M1) synced by a job into the tenant's transactions with bulk upsert (M4), a spending-by-category query, a weekly digest email on a schedule (M3), a CSV export, a static JS front end (M0), a public landing page (M5); driven end to end in headless Chromium |
+| M10 | Nothing regressed | goal 60's check (M0–M12), goal 57's (as before: M2/M8 at the replaced invite, M5 BLOCKED without keys), goal 64's (M5 BLOCKED without MAX) |
 
 ## Done means
-`docs/goals/64-check.py` prints PASS for M0–M5 (BLOCKED only where this machine genuinely can't: no GPU-hours
-real port run, which needs the owner's machine and hours); the `reviewer` and `security-auditor` subagents pass;
-`docs/goals/64-report.md` and an `EXPERIMENTS.md` entry; merged into main and pushed only if all of that holds.
+66-check PASS for M0–M10 (BLOCKED only where named above); the reviewer and the security auditor pass M1, M5, M6
+and M7; docs/saas.md gains each module's API and its known limits; `docs/goals/66-report.md`, EXPERIMENTS.md;
+merged into main and pushed only after the owner's yes.
 
 ## Out of bounds
-A real multi-hour porting run (the fake harness is the proof; a real one is the owner's GPU and hours → BLOCKED).
-Real API keys, sign-ups, releases, deploys. `~/Projects/mxstudio` and `~/.mxc` are read-only references; the owner's
-daemon on :11435 is never touched. `mojoui/hosts/web.py` belongs to another session. The frozen
-`../mojo-ui-apple-test` and other worktrees are never touched. Never the words "LM Studio" in anything public.
+Finxplorer's repo, data, keys and services (read-only reference, and only its code); real Quiltt, Stripe, Google,
+SMTP or Railway calls (stand-ins only); deploying; pip; the frozen ../mojo-ui-apple-test and other worktrees;
+lowering a proof or deleting a test.
 
 ## Assumptions (taken instead of asking)
-- The porter is a frontier model only (owner's steer). Claude Code on the machine is preferred when present.
-- `port_try` (the old project's agent-facing "see it run" helper, Python) becomes a subcommand of our own Mojo
-  daemon binary rather than travelling as Python (D-6403).
-- Arbitrary flags, patches and timeouts earned by the 14 real runs are kept verbatim and logged as kept (D-6404).
+- Generic modules, no vendor names in `mojoui/` (no "quiltt"); the sample's aggregator is a made-up stand-in.
+- Server side only; the UI ingredients are goal 67.
+- Python stays allowed only where goals 57/60 allowed it (checks, stand-ins, the import script); the server is Mojo.
 
 ## Budget
-140 turns.
+120 turns.
