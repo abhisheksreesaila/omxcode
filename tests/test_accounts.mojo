@@ -39,7 +39,7 @@ def main() raises:
     print("cookie: ok")
     var dir = "build/test_accounts.data"
     _ = libc.unlink(dir + "/host.db")
-    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 10_000, 20))
+    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 10_000, 20, "omxcode SaaS"))
     var ada = acc.test_session("Ada@Example.com")
     var req = Req("GET", "/api/me")
     req.names.append("authorization")
@@ -91,7 +91,7 @@ def main() raises:
     if not exists(dir3):
         makedirs(dir3)
     var q = Queue(dir3 + "/host.db")
-    var a3 = Accounts(dir3, AuthConfig("id", "secret", "https://p.example/a", "", "", "https://app.example", random_token(32), 7 * 86400, 7 * 86400, 0, "", 3, 20), events=q)
+    var a3 = Accounts(dir3, AuthConfig("id", "secret", "https://p.example/a", "", "", "https://app.example", random_token(32), 7 * 86400, 7 * 86400, 0, "", 3, 20, "omxcode SaaS"), events=q)
     var first = a3.user_for("dan@example.com", "Dan", "sub-1")
     expect(first[0] > 0, "a new person")
     expect(a3.user_for("dan@example.com", "Dan", "sub-1")[0] == first[0], "the same sub: the same person")
@@ -145,7 +145,7 @@ def main() raises:
     var dir4 = "build/test_accounts.data4"
     _ = libc.unlink(dir4 + "/host.db")
     _ = libc.unlink(dir4 + "/host.db-wal")
-    var a4 = Accounts(dir4, AuthConfig("id", "secret", "https://p.example/a", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 1000, 20))
+    var a4 = Accounts(dir4, AuthConfig("id", "secret", "https://p.example/a", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 1000, 20, "omxcode SaaS"))
     for _ in range(20):
         var la = Req("GET", "/login")
         la.client = "198.51.100.1"

@@ -1108,7 +1108,87 @@ def m11():
         smtp.close()
 
 
-MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8, "M9": m9, "M10": m10, "M11": m11}
+# ---------------------------------------------------------------- M12: hardening after goal 60 (2026-11-11)
+
+def desktop_login(srv, stand, who, verifier, app_state="app-state-1"):
+    """A browser (one cookie jar, as a real one) through a desktop /login → the provider → /auth/callback:
+    (browser, the callback's reply, the app's loopback URL, the callback's path and query)."""
+    stand.who = who
+    loop = f"http://127.0.0.1:{free_port()}/done"
+    br = srv.client()
+    r = br.get("/login", params={"client": "desktop", "redirect": loop, "challenge": s256(verifier), "app_state": app_state})
+    assert r.status_code == 303, f"desktop /login answered {r.status_code}: {r.text[:200]}"
+    a = httpx.get(r.headers["location"], follow_redirects=False, timeout=30)
+    assert a.status_code == 302, f"the provider refused: {a.text}"
+    cb = urllib.parse.urlsplit(a.headers["location"])
+    path = cb.path + "?" + cb.query
+    return br, br.get(path), loop, path
+
+
+def confirm_form(page):
+    """The confirm page's form: (action, {hidden fields})."""
+    act = re.search(r"<form[^>]*action=['\"]?([^'\" >]+)", page)
+    fields = dict(re.findall(r"<input type=hidden name=['\"]?(\w+)['\"]? value=['\"]?([^'\" >]*)", page))
+    return (act.group(1) if act else None), fields
+
+
+def m12_desktop():
+    """Item 1 (RFC 8252's phishing risk): a desktop sign-in's code is released only by a same-origin POST from a
+    "Sign in to <app> on this computer?" page; a GET never puts it in the address bar."""
+    stand, smtp, srv = scenario("m12d")
+    try:
+        codes = lambda: srv.db("host.db").execute("select count(*) from desktop_codes").fetchone()[0]  # noqa: E731
+        v = "v" * 20 + secrets.token_urlsafe(24)
+        br, back, loop, path = desktop_login(srv, stand, ("ada@example.com", "Ada"), v)
+        page = back.text
+        if back.status_code != 200 or "location" in back.headers or "on this computer" not in page or "omxcode SaaS" not in page:
+            return False, f"the desktop callback didn't answer the confirm page: {back.status_code} {back.headers.get('location', '')[:80]} {page[:200]}"
+        if "code=" in str(back.headers) or loop in str(back.headers) or codes() != 0:
+            return False, f"the callback's GET released a code ({codes()} rows, headers {dict(back.headers)})"
+        if "no-store" not in back.headers.get("cache-control", "") or "frame-ancestors 'none'" not in back.headers.get("content-security-policy", ""):
+            return False, f"the confirm page can be cached or framed: {dict(back.headers)}"
+        act, fields = confirm_form(page)
+        if act != "/auth/desktop" or not fields.get("confirm"):
+            return False, f"no confirm form posting to /auth/desktop: {act} {fields}"
+        if br.get(path).status_code < 400:
+            return False, "the callback's URL worked twice"
+        for label, h in (("cross-site", {"Origin": "https://evil.example"}), ("no Origin", {}), ("Sec-Fetch-Site cross-site", {"Sec-Fetch-Site": "cross-site"})):
+            r = br.post(act, data=dict(fields, do="yes"), headers=h)
+            if r.status_code != 403 or "location" in r.headers or codes() != 0:
+                return False, f"a {label} confirm: {r.status_code} {r.headers.get('location', '')[:80]} ({codes()} codes)"
+        r = br.post(act, data=dict(fields, do="yes"), headers={"Origin": srv.base})
+        loc = r.headers.get("location", "")
+        q = {k: x[0] for k, x in urllib.parse.parse_qs(urllib.parse.urlsplit(loc).query).items()}
+        if r.status_code != 303 or not loc.startswith(loop + "?") or not q.get("code") or q.get("state") != "app-state-1":
+            return False, f"the same-origin confirm: {r.status_code} {loc[:120]}"
+        if br.post(act, data=dict(fields, do="yes"), headers={"Origin": srv.base}).status_code < 400:
+            return False, "the confirm worked twice"
+        tok = srv.client().post("/api/token", json={"code": q["code"], "verifier": v})
+        if tok.status_code != 200 or srv.client().get("/api/me", headers={"Authorization": "Bearer " + tok.json()["token"]}).json().get("email") != "ada@example.com":
+            return False, f"the released code didn't trade for ada's token: {tok.status_code} {tok.text[:200]}"
+        # cancelled: no code, ever
+        br2, back2, loop2, _ = desktop_login(srv, stand, ("ada@example.com", "Ada"), v)
+        act2, f2 = confirm_form(back2.text)
+        no = br2.post(act2, data=dict(f2, do="no"), headers={"Origin": srv.base})
+        yes = br2.post(act2, data=dict(f2, do="yes"), headers={"Origin": srv.base})
+        if no.status_code != 200 or "location" in no.headers or yes.status_code < 400 or "location" in yes.headers or codes() != 0:
+            return False, f"cancel then confirm: {no.status_code}/{yes.status_code} {yes.headers.get('location', '')[:80]} ({codes()} codes)"
+        return True, "desktop: the confirm page (no code on GET, no-store, never framed), cross-site / Origin-less confirms 403, one same-origin confirm releases the code, cancel releases none"
+    finally:
+        srv.stop()
+        stand.close()
+        smtp.close()
+
+
+def m12():
+    for step in (m12_desktop,):
+        ok, why = step()
+        if not ok:
+            return False, f"{step.__name__}: {why}"
+    return True, "hardening: desktop confirm page"
+
+
+MILESTONES = {"M0": m0, "M1": m1, "M2": m2, "M3": m3, "M4": m4, "M5": m5, "M6": m6, "M7": m7, "M8": m8, "M9": m9, "M10": m10, "M11": m11, "M12": m12}
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)

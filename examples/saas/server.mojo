@@ -168,8 +168,15 @@ struct SaasJobs(Runner):
 
 
 def secure(var r: Reply) -> Reply:
-    """Headers every reply carries: no type sniffing, never framed."""
-    return r^.header("X-Content-Type-Options", "nosniff").header("Content-Security-Policy", "frame-ancestors 'none'")
+    """Headers every reply carries: no type sniffing, never framed (a page's own policy, which says so too, is kept:
+    a second Content-Security-Policy would replace it on Flare's path and be added to it on the offload's)."""
+    var has_csp = False
+    for n in r.names:
+        has_csp = has_csp or n.lower() == "content-security-policy"
+    r = r^.header("X-Content-Type-Options", "nosniff")
+    if has_csp:
+        return r^
+    return r^.header("Content-Security-Policy", "frame-ancestors 'none'")
 
 
 def _int(name: String, default: Int) -> Int:

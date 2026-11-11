@@ -32,7 +32,10 @@
 # desktop codes are swept by tick() (sweep()), a thousand rows a table at a time; one client (its rate key) may hold at
 # most SAAS_SIGNINS_PER_CLIENT (20) pending sign-ins (429 past it), and the server at most SAAS_MAX_SIGNINS (200,000; 503).
 # Desktop apps (RFC 8252): /login?client=desktop&redirect=<http://127.0.0.1:port/…>&challenge=<S256>&app_state=<s>: the
-# callback sends the browser to the app's loopback with a one-time code (60 s), traded at /api/token for a bearer token.
+# callback answers "Sign in to <app> on this computer?" (a pending row, 5 minutes; no code yet), and only a same-origin
+# POST /auth/desktop from that page (Origin is this site, or Sec-Fetch-Site same-origin) sends the browser to the app's
+# loopback with a one-time code (60 s), traded at /api/token for a bearer token. A GET never releases a code, so a
+# stranger's link to a desktop sign-in shows a question, not a code in the address bar (RFC 8252 §8.12's phishing risk).
 
 from std.os import getenv, makedirs
 from std.os.path import exists
@@ -56,6 +59,7 @@ comptime SESSION_S = 30 * 24 * 3600  # (no session outlives this, however often 
 comptime STATE_S = 600
 
 comptime CODE_S = 60
+comptime CONFIRM_S = 300  # (a desktop sign-in's "on this computer?" page waits this long for its answer)
 comptime ROLES = ["admin", "editor", "member", "viewer"]  # (editor: fh-saas's name for member)
 comptime PROVIDER = "google"
 comptime _SWEEP_LIMIT = 1000
@@ -122,6 +126,15 @@ comptime HOST_004 = (  # round 3 review: pending sign-ins counted per client, so
 )
 
 
+comptime HOST_005 = (  # hardening (2026-11-11): a desktop sign-in waits for its "on this computer?" confirm
+    "-- up\n"
+    "CREATE TABLE desktop_pending(id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, challenge TEXT NOT NULL, redirect TEXT NOT NULL, app_state TEXT, expires INTEGER NOT NULL);\n"
+    "CREATE INDEX desktop_pending_expires ON desktop_pending(expires);\n"
+    "-- down\n"
+    "DROP INDEX desktop_pending_expires; DROP TABLE desktop_pending;\n"
+)
+
+
 def host_migrations() raises -> Migrations:
     """mojoui.accounts' own tables in host.db, versioned in `accounts_migrations`."""
     var l = List[Migration]()
@@ -129,6 +142,7 @@ def host_migrations() raises -> Migrations:
     l.append(parse(2, "002_tenants_invites_audit.sql", HOST_002))
     l.append(parse(3, "003_identity_expiry.sql", HOST_003))
     l.append(parse(4, "004_signin_client.sql", HOST_004))
+    l.append(parse(5, "005_desktop_confirm.sql", HOST_005))
     return Migrations(l^, "accounts_migrations")
 
 
@@ -158,13 +172,14 @@ struct AuthConfig(Copyable, Movable):
     var migrations: String  # a folder with tenant/NNN_name.sql ("" or missing: none)
     var max_signins: Int  # sign-ins pending at once (OAuth states not yet used or expired)
     var signins_per_client: Int  # of those, one client's (rate_key) at most (0: no per-client cap)
+    var app_name: String  # what a desktop sign-in's confirm page calls the app ("Sign in to <app> on this computer?")
 
     @staticmethod
     def from_env() -> AuthConfig:
         """GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SAAS_BASE, SAAS_SECRET; SAAS_OAUTH_AUTHORIZE/TOKEN/USERINFO (default
         Google's endpoints); SAAS_INVITE_TTL (s, 7 days), SAAS_SESSION_IDLE (s, 7 days), SAAS_RATE (60), SAAS_MIGRATIONS,
         SAAS_MAX_SIGNINS (200,000: ~40 MB of rows), SAAS_SIGNINS_PER_CLIENT (20: a browser needs one or two; 0 turns
-        the per-client cap off, like SAAS_RATE=0, for limits kept at a proxy)."""
+        the per-client cap off, like SAAS_RATE=0, for limits kept at a proxy), SAAS_APP_NAME ("omxcode SaaS")."""
         return AuthConfig(
             getenv("GOOGLE_CLIENT_ID"),
             getenv("GOOGLE_CLIENT_SECRET"),
@@ -179,6 +194,7 @@ struct AuthConfig(Copyable, Movable):
             getenv("SAAS_MIGRATIONS", ""),
             _env_int("SAAS_MAX_SIGNINS", 200_000),
             _env_int("SAAS_SIGNINS_PER_CLIENT", 20),
+            getenv("SAAS_APP_NAME", "omxcode SaaS"),
         )
 
     def callback(self) -> String:
@@ -315,6 +331,31 @@ def _origin_ok(req: Req, base: String) -> Bool:
     return o == "" or o == base
 
 
+def _same_origin_post(req: Req, base: String) -> Bool:
+    """A form POST provably from this site's own page: Origin is this site, or (no Origin) Sec-Fetch-Site says
+    same-origin. Neither header (a script, an old browser): refused, unlike _origin_ok."""
+    var o = req.header("origin")
+    if o != "":
+        return o == base
+    return req.header("sec-fetch-site") == "same-origin"
+
+
+def form_arg(body: String, name: String) -> String:
+    """A field of an application/x-www-form-urlencoded body ("" when absent)."""
+    for part in body.split("&"):
+        var p = String(part)
+        var eq = p.find("=")
+        if eq > 0 and decode(String(p[byte = : eq])) == name:
+            return decode(String(p[byte = eq + 1 :]))
+    return String("")
+
+
+def _origin_of(url: String) -> String:
+    """http://host:port of a URL (a loopback redirect is checked before this sees it)."""
+    var rest = url.find("/", 7) if url.startswith("http://") else -1
+    return String(url[byte = : rest]) if rest > 0 else url
+
+
 def _is_tenant_id(t: String) -> Bool:
     if t.byte_length() != 24:
         return False
@@ -400,6 +441,8 @@ struct Accounts(Copyable, Movable):
                 return self._callback(req).header("Referrer-Policy", "no-referrer")  # (its URL holds the code)
             if req.matches("POST", "/api/token"):
                 return self._token(req)
+            if req.matches("POST", "/auth/desktop"):
+                return self._desktop_confirm(req).header("Referrer-Policy", "no-referrer").header("Cache-Control", "no-store")
             if req.matches("GET", "/logout") or req.matches("POST", "/logout"):
                 return self._logout(req)
             if req.matches("GET", "/api/me"):
@@ -562,7 +605,7 @@ struct Accounts(Copyable, Movable):
         expiry indexes): for a server's tick. How many went."""
         var gone = 0
         var db = self.db()
-        for table in ["oauth_states", "desktop_codes", "sessions"]:
+        for table in ["oauth_states", "desktop_codes", "desktop_pending", "sessions"]:
             while True:
                 db.begin()
                 var n: Int
@@ -828,28 +871,102 @@ struct Accounts(Copyable, Movable):
         if uid < 0:
             self.log.warn("sign-in refused: the address belongs to another account", Fields().str("provider", PROVIDER))
             return Reply.error(403, "this address is already used by another " + PROVIDER + " account: sign in with that one", "identity_mismatch")
-        self.audit(tenant, email, "sign_in", "desktop" if redirect != "" else "web")
-        if redirect != "":
-            var once = random_token(32)
-            db.begin()
-            try:
-                var c = db.prepare("INSERT INTO desktop_codes(id, user_id, challenge, expires) VALUES (?, ?, ?, ?)")
-                c.bind(1, sha256_hex(once))
-                c.bind(2, uid)
-                c.bind(3, challenge)
-                c.bind(4, now_s() + CODE_S)
-                c.run()
-                db.commit()
-            except e:
-                _ = db.rollback_quiet()
-                raise e^
-            var sep = "&" if "?" in redirect else "?"
-            var names: List[String] = ["code", "state"]
-            var values: List[String] = [once, app_state]
-            return Reply.text("Signed in: you can go back to the app.", 303).header("Location", redirect + sep + form(names, values)).header("Cache-Control", "no-store")
+        if redirect != "":  # (no code yet: the person says it's their app first)
+            return self._confirm_page(uid, email, challenge, redirect, app_state)
+        self.audit(tenant, email, "sign_in", "web")
         var token = self.start_session(uid, tenant)
         # (one Set-Cookie per reply in mojoui.serve: the state cookie is scoped to /auth/callback and expires in 10 minutes)
         return Reply.empty(303).header("Location", nxt if is_local_path(nxt) else "/").header("Set-Cookie", self.session_cookie(token)).header("Cache-Control", "no-store")
+
+    def _confirm_page(self, uid: Int, email: String, challenge: String, redirect: String, app_state: String) raises -> Reply:
+        """"Sign in to <app> on this computer?": a pending row under a random id that only this page holds (in its
+        body, never a URL), answered by POST /auth/desktop."""
+        var ask = random_token(32)
+        var db = self.db()
+        db.begin()
+        try:
+            var q = db.prepare("INSERT INTO desktop_pending(id, user_id, challenge, redirect, app_state, expires) VALUES (?, ?, ?, ?, ?, ?)")
+            q.bind(1, sha256_hex(ask))
+            q.bind(2, uid)
+            q.bind(3, challenge)
+            q.bind(4, redirect)
+            q.bind(5, app_state)
+            q.bind(6, now_s() + CONFIRM_S)
+            q.run()
+            db.commit()
+        except e:
+            _ = db.rollback_quiet()
+            raise e^
+        var app = escape_html(self.cfg.app_name)
+        var page = ("<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+            + "<title>Sign in to " + app + " on this computer?</title></head>"
+            + "<body style='font-family: system-ui, sans-serif; max-width: 34rem; margin: 4rem auto; padding: 0 1rem'>"
+            + "<h1>Sign in to " + app + " on this computer?</h1>"
+            + "<p>You're signed in as <b>" + escape_html(email) + "</b>. The " + app + " desktop app on this computer asked to sign in"
+            + " (it is waiting at <code>" + escape_html(_origin_of(redirect)) + "</code>).</p>"
+            + "<p>Continue only if you just pressed Sign in in the app yourself. If a link someone sent you brought you here, cancel:"
+            + " they may be trying to get into your account.</p>"
+            + "<form method=post action=/auth/desktop><input type=hidden name=confirm value=" + ask + ">"
+            + "<button type=submit name=do value=yes>Sign in to " + app + "</button> "
+            + "<button type=submit name=do value=no>Cancel</button></form></body></html>")
+        # (form-action: this site, and the loopback the confirm's 303 goes on to; never framed, never cached)
+        return Reply(200, "text/html; charset=utf-8", page).header("Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' " + _origin_of(redirect) + "; frame-ancestors 'none'").header(
+            "X-Frame-Options", "DENY").header("Cache-Control", "no-store")
+
+    def _desktop_confirm(self, req: Req) raises -> Reply:
+        """The confirm page's answer: a same-origin POST {confirm, do}; "yes" releases the one-time code to the app's
+        loopback (303), anything else cancels. Either way the pending row is used up."""
+        if not _same_origin_post(req, self.cfg.base):
+            return Reply.error(403, "a desktop sign-in is confirmed on this site's own page only", "forbidden")
+        var ask = form_arg(req.body, "confirm")
+        if ask == "" or ask.byte_length() > 64:
+            return Reply.error(400, "send the confirm page's form", "bad_request")
+        var db = self.db()
+        var uid: Int
+        var challenge: String
+        var redirect: String
+        var app_state: String
+        db.begin()
+        try:
+            var q = db.prepare("DELETE FROM desktop_pending WHERE id = ? AND expires > ? RETURNING user_id, challenge, redirect, app_state")  # (one answer)
+            q.bind(1, sha256_hex(ask))
+            q.bind(2, now_s())
+            if not q.step():
+                q.reset()
+                db.commit()
+                return Reply.error(400, "this sign-in was answered, cancelled or expired: start again from the app", "bad_state")
+            uid = q.int(0)
+            challenge = q.text(1)
+            redirect = q.text(2)
+            app_state = q.text(3)
+            q.reset()
+            db.commit()
+        except e:
+            _ = db.rollback_quiet()
+            raise e^
+        if form_arg(req.body, "do") != "yes":
+            return Reply.html("<!doctype html><title>Sign-in cancelled</title><p>Cancelled: nothing was sent to the app.</p>")
+        var once = random_token(32)
+        db.begin()
+        try:
+            var c = db.prepare("INSERT INTO desktop_codes(id, user_id, challenge, expires) VALUES (?, ?, ?, ?)")
+            c.bind(1, sha256_hex(once))
+            c.bind(2, uid)
+            c.bind(3, challenge)
+            c.bind(4, now_s() + CODE_S)
+            c.run()
+            db.commit()
+        except e:
+            _ = db.rollback_quiet()
+            raise e^
+        var who = self.user_email(uid)
+        if who:
+            self.audit(self.home_tenant(uid), who.value()[0], "sign_in", "desktop")
+        var sep = "&" if "?" in redirect else "?"
+        var names: List[String] = ["code", "state"]
+        var values: List[String] = [once, app_state]
+        return Reply.text("Signed in: you can go back to the app.", 303).header("Location", redirect + sep + form(names, values))
 
     def _token(self, req: Req) raises -> Reply:
         """A desktop app trades its one-time code and PKCE verifier for a bearer token."""

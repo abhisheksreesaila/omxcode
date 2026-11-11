@@ -14,7 +14,8 @@ The contract the server keeps (build/saas/server, built by `scripts/saas.sh buil
   GET  /login[?next=]                     303 to the provider (response_type=code, client_id, redirect_uri=<base>/auth/callback,
                                           scope with openid email, state, code_challenge, code_challenge_method=S256)
   GET  /login?client=desktop&redirect=<loopback>&challenge=<S256>&app_state=<s>   the same, for a native app (RFC 8252)
-  GET  /auth/callback?code&state          web: 303 to next with Set-Cookie saas=…; desktop: 303 to redirect?code=<once>&state=<app_state>
+  GET  /auth/callback?code&state          web: 303 to next with Set-Cookie saas=…; desktop: 200 "Sign in to <app> on this computer?"
+  POST /auth/desktop {confirm, do=yes}    desktop, same origin only: 303 to redirect?code=<once>&state=<app_state> (hardening, D-6029)
   POST /api/token {code, verifier}        desktop: {token}; `Authorization: Bearer <token>` then works on /api/*
   GET  /api/me                            {email, tenant, role, plan} | 401
   GET  /api/entries   POST /api/entries {text, amount_cents}     the tenant's tenants/<tenant>.db, table entries(text, amount_cents)
@@ -436,12 +437,7 @@ def m4():
                 seen.append(url)
                 try:
                     if url.startswith(srv.base + "/login"):
-                        u = url
-                        for _ in range(4):  # /login → provider → callback → the app's loopback
-                            r = httpx.get(u, follow_redirects=False, timeout=20)
-                            if r.status_code not in (301, 302, 303, 307):
-                                break
-                            u = urllib.parse.urljoin(u, r.headers["location"])
+                        browse(url, srv.base)  # /login → provider → callback → confirm → the app's loopback
                     elif "/pay/cs_test_" in url:
                         s = stand.pay(url.rsplit("/", 1)[1])
                         body, h = signed(event("checkout.session.completed", s))
@@ -583,20 +579,35 @@ def m7():
     return True, "ui thread, served, libc and decision lints"
 
 
+def browse(url, base):
+    """The system browser on a sign-in URL, as a person drives it: redirects followed with one cookie jar, and on the
+    desktop sign-in's "Sign in to … on this computer?" page the Sign in button pressed (its form POSTed from the page,
+    so with the site's Origin, as a browser sends it). Ends at the first page that is neither (the app's loopback)."""
+    with httpx.Client(follow_redirects=False, timeout=20) as br:
+        r = br.get(url)
+        for _ in range(8):
+            if r.status_code in (301, 302, 303, 307):
+                url = urllib.parse.urljoin(url, r.headers["location"])
+                r = br.get(url)
+                continue
+            form = re.search(r"<form[^>]*action=['\"]?(/auth/desktop)", r.text) if r.status_code == 200 and url.startswith(base) else None
+            if not form:
+                return r
+            fields = dict(re.findall(r"<input type=hidden name=['\"]?(\w+)['\"]? value=['\"]?([^'\" >]*)", r.text))
+            url = urllib.parse.urljoin(url, form.group(1))
+            r = br.post(url, data=dict(fields, do="yes"), headers={"Origin": base})
+        return r
+
+
 def play_browser(srv, stand, opened, seen, stop):
-    """The system browser, as the checks play it: a /login URL is followed to the app's loopback; a checkout is paid and
-    its webhook sent. (M4's own copy stays as written.)"""
+    """The system browser, as the checks play it: a /login URL is followed to the app's loopback (confirming the
+    desktop sign-in on its page, browse()); a checkout is paid and its webhook sent."""
     while not stop.is_set():
         for url in [l for l in opened.read_text().splitlines() if l][len(seen):]:
             seen.append(url)
             try:
                 if url.startswith(srv.base + "/login"):
-                    u = url
-                    for _ in range(4):
-                        r = httpx.get(u, follow_redirects=False, timeout=20)
-                        if r.status_code not in (301, 302, 303, 307):
-                            break
-                        u = urllib.parse.urljoin(u, r.headers["location"])
+                    browse(url, srv.base)
                 elif "/pay/cs_test_" in url:
                     s = stand.pay(url.rsplit("/", 1)[1])
                     body, h = signed(event("checkout.session.completed", s))

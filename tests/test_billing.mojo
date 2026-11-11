@@ -49,7 +49,7 @@ def main() raises:
     var dir = "build/test_billing.data"
     _ = libc.unlink(dir + "/host.db")
     _ = libc.unlink(dir + "/host.db-wal")
-    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 10_000, 20))
+    var acc = Accounts(dir, AuthConfig("id", "secret", "", "", "", "http://127.0.0.1:1", random_token(32), 7 * 86400, 7 * 86400, 0, "", 10_000, 20, "omxcode SaaS"))
     var bill = Billing(dir, BillingConfig("http://127.0.0.1:1", "sk_test_x", "whsec_test_1", "price_1", "http://127.0.0.1:1", "", List[String]()), acc.log)
     var tok = acc.test_session("pat@example.com")
     var me = Req("GET", "/api/me")

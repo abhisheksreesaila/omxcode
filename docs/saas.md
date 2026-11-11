@@ -12,7 +12,7 @@ and `examples/saas_min/server.mojo` (sign-in, tenants and a welcome email from a
 
 | fh-saas module | What it did | mojoui piece | State |
 |---|---|---|---|
-| `utils_auth` | Google OAuth with CSRF state, sessions, provisioning, roles, logout | `mojoui.accounts`: `/login` (state bound to the browser + PKCE S256), `/auth/callback`, server-side sessions in sealed HttpOnly SameSite cookies that slide (idle `SAAS_SESSION_IDLE`, 30 days at most), `/logout` ends them on the server, roles admin/member/viewer (`acc.need(req, "member")` in place of `@require_role`), desktop apps through `mojoui.signin` (RFC 8252), per-client limits on the sign-in routes (behind `SAAS_TRUSTED_PROXIES`, IPv6 by /64), people identified by Google's `sub` (a reassigned address can't take over an account), `__Host-` cookies on https | ✅ (57 M2, M4; 60 M5, M7). Google only, as fh-saas |
+| `utils_auth` | Google OAuth with CSRF state, sessions, provisioning, roles, logout | `mojoui.accounts`: `/login` (state bound to the browser + PKCE S256), `/auth/callback`, a desktop sign-in confirmed on a same-origin page before its code goes to the app (D-6029), server-side sessions in sealed HttpOnly SameSite cookies that slide (idle `SAAS_SESSION_IDLE`, 30 days at most), `/logout` ends them on the server, roles admin/member/viewer (`acc.need(req, "member")` in place of `@require_role`), desktop apps through `mojoui.signin` (RFC 8252), per-client limits on the sign-in routes (behind `SAAS_TRUSTED_PROXIES`, IPv6 by /64), people identified by Google's `sub` (a reassigned address can't take over an account), `__Host-` cookies on https | ✅ (57 M2, M4; 60 M5, M7). Google only, as fh-saas |
 | `db_host` | Users, tenants, memberships, subscriptions, webhook events, audit log, jobs, pricing plans | host.db: `mojoui.accounts`' users, tenants, members (many tenants per person), invites, sessions, OAuth states, desktop codes, audit; `mojoui.billing`'s billing and stripe_events; `mojoui.jobs`' jobs; each module's tables versioned by `mojoui.migrate` (accounts_migrations, billing_migrations) | ✅ (60 M1, M3, M5, M6). Pricing plans are configuration (`STRIPE_PRICE_PRO`, `STRIPE_PRICE_PRO_YEARLY`, `STRIPE_PRICES_ONCE`), not a table |
 | `db_tenant` | One database per tenant, tenant users, permissions, settings | `Accounts.tenant_db(member)`: `tenants/<id>.db`, chosen from the session only (never a request's `?tenant=`), this thread's own connection, migrated by `mojoui.migrate` | ✅ the file per tenant, its isolation and its schema (57 M2, 60 M2, M5). Who is in a tenant and with which role lives in host.db's `members` (one source of truth) rather than fh-saas's per-tenant TenantUser/TenantPermission copies; a tenant's settings are the app's own table in its migrations |
 | `utils_billing` | Billing config, access decisions, checkout return, trials, paywall hooks | `mojoui.billing`: `BillingConfig.from_env()`, `/billing/checkout` (monthly, or `{"interval": "year"}`), `/billing/return` (reads the session back), `bill.paywall(member)` → 402, our own trial for new tenants (`SAAS_TRIAL_DAYS`), past_due with a grace period (`SAAS_GRACE_DAYS`), `/api/me`'s plan, status, trial_ends, cancels_at | ✅ (57 M3; 60 M6) |
@@ -127,6 +127,12 @@ Audit.record(db, tenant, actor, "invite", detail)
   and the calls run off the reactor); no per-IP limit on `/login`, `/auth/callback`, `/api/token` (now `SAAS_RATE` a
   minute each, 429 with Retry-After); invites that join without asking (D-5725: now an accept page, single use,
   expiring, for the invited address only); sessions that never slid; one tenant per person (D-5712).
+- Closed in the hardening of 2026-11-11 (60-check M12):
+  - A desktop sign-in's one-time code in the browser's address bar after a bare GET (RFC 8252 §8.12's phishing risk: a
+    stranger's link with their own loopback port and verifier). The callback now answers "Sign in to <app> on this
+    computer?" (`SAAS_APP_NAME`), and only a same-origin POST from that page (`/auth/desktop`: Origin is the site's, or
+    Sec-Fetch-Site same-origin) makes the code and sends it to the loopback; cancel, or 5 minutes, and there is none
+    (D-6029).
 - Per-client limits key on `req.client`: the socket's peer, or, when the peer is in `SAAS_TRUSTED_PROXIES` (CIDRs:
   set it to your TLS proxy's addresses), X-Forwarded-For's rightmost hop that isn't a trusted proxy, read across every
   X-Forwarded-For line (nginx, Caddy and Envoy join the hops into one line; HAProxy's `option forwardfor` adds its own:
@@ -143,8 +149,6 @@ Audit.record(db, tenant, actor, "invite", detail)
   and gives a request 30 s to arrive (serve()'s `max_body`, `request_timeout_ms`); `/billing/return` makes at most 30 Stripe
   read-backs a minute for the whole server, so a stranger can spend that budget and make a real return page say 429 (the
   webhook still upgrades the plan) (D-5727).
-- A desktop sign-in's one-time code shows in the browser's address bar for up to 60 s (RFC 8252's known phishing risk);
-  a "sign in to the desktop app?" confirm page is the fix.
 - `GET /logout` still works (the contract's), so a page elsewhere can sign someone out; the app itself signs out by POST.
 - Template values in emails are inert: a name like `[Accept](https://evil.example)` can't become a link (brackets and
   marks are replaced), and they are HTML-escaped in the HTML part.
