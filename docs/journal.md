@@ -1381,3 +1381,4 @@ and SMTP stand-ins; the SMTP one checked with smtplib in off/starttls/implicit m
 - M8: the bundle's server hung at start until patchelf stopped touching Mojo's runtime libraries (bisected); the checker pointed SAAS_STATIC at the wrong folder (a checker bug). Docker: permission denied on the socket → BLOCKED with the folder proven.
 - Review round 1: both FAIL (MUST-FIX importer identity clash; MEDIUM bank-connection claim; LOW/SHOULD replays via an unsigned id header, snapshot leftovers, re-run rollback, duplicate Cache-Control, M6 check too lax). All fixed and the checks strengthened; M1 M5 M6 M7 M9 PASS again.
 - Review round 2: code reviewer PASS, security auditor PASS (one LOW: re-runs re-adding deleted rows, fixed with an import record; M7 proves it).
+- M9 examples/finance_min: PASS on its first full run and again after the review fixes (bank links by one-time token).
