@@ -619,7 +619,6 @@ def m7():
     srv = fin("m7", stand, smtp)  # (a fresh omxcode host.db, migrated, then stopped)
     srv.stop()
     host = srv.data / "host.db"
-    before = hashlib.sha256(host.read_bytes()).hexdigest()
     clash = made["users"][-1]  # (host.db already has this address under another Google sign-in: the import must leave them out)
     with sqlite3.connect(host) as hc:
         hc.execute("INSERT INTO users(email, name, sub, provider, created) VALUES (?, 'Imposter', 'sub-imposter', 'google', 0)", (clash["email"],))
@@ -637,6 +636,15 @@ def m7():
     again = run(args, 300)
     if again.returncode or snap() != once:
         return False, "a second import changed host.db: " + again.stdout[-400:]
+    gone = h.execute("SELECT m.user_id, m.tenant FROM members m JOIN users u ON u.id = m.user_id WHERE u.email = ?", (made["users"][1]["email"],)).fetchone()
+    h.execute("DELETE FROM members WHERE user_id = ? AND tenant = ?", gone)
+    h.commit()
+    third = run(args, 300)
+    back = h.execute("SELECT count(*) FROM members WHERE user_id = ? AND tenant = ?", gone).fetchone()[0]
+    h.execute("INSERT INTO members(user_id, tenant, role, joined) VALUES (?, ?, 'member', 0)", gone)  # (put back for the sign-ins below)
+    h.commit()
+    if third.returncode or back:
+        return False, "a re-run brought back a membership omxcode removed: " + third.stdout[-300:]
     for t in made["tenants"]:
         f = srv.data / "tenants" / f"{t['id']}.db"
         if not f.exists() or sqlite3.connect(f).execute("SELECT count(*) FROM fh_rows").fetchone()[0] != t["rows"]:
@@ -662,7 +670,7 @@ def m7():
         if not cust:
             return False, "no Stripe ids were carried"
         return True, (f"fh-saas {made['version']} made {len(made['users'])} users, {len(made['tenants'])} tenants; the dry run wrote "
-                      f"nothing; the import twice gives the same host.db; tenant files copied; each person signs in to their own "
+                      f"nothing; the import twice gives the same host.db and a re-run doesn't bring back a removed membership; tenant files copied; each person signs in to their own "
                       f"tenant, role and plan ({', '.join(notes)}); an address already bound to another Google sign-in left out "
                       f"(no memberships, its sign-in 403); Stripe ids carried ({len(cust)})")
     finally:

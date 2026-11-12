@@ -18,7 +18,8 @@ Identity (D-6021): a person is their Google sub. Someone whose email host.db alr
 host.db already has under another email, is not imported, nor are their memberships (a warning names their fh-saas id).
 Idempotent and never rolls omxcode back: rows that exist (people, tenants, members, billing) are left as they are, only
 new ones are written, so running it again after go-live can't undo a role change, a cancellation or a Stripe event.
-Nothing is deleted.
+A row deleted in omxcode after the import stays deleted: each fh-saas person, tenant and membership imported is
+recorded (fhsaas_imported in host.db) and skipped on later runs. Nothing is deleted.
 Never reads anything but the two databases and the tenant files it is pointed at; prints counts, never people's data.
 """
 import argparse
@@ -140,13 +141,26 @@ def main():
     host = sqlite3.connect(host_path, timeout=30)
     host.execute("PRAGMA foreign_keys = ON")
     with host:  # (one transaction: all or nothing)
-        uid = {}
+        host.execute("CREATE TABLE IF NOT EXISTS fhsaas_imported(kind TEXT NOT NULL, fh_id TEXT NOT NULL, PRIMARY KEY(kind, fh_id))")
+        seen = {(k, i) for k, i in host.execute("SELECT kind, fh_id FROM fhsaas_imported")}
+        mark = lambda kind, fh_id: host.execute("INSERT OR IGNORE INTO fhsaas_imported(kind, fh_id) VALUES (?, ?)", (kind, fh_id))  # noqa: E731
+        uid_seen = {}
+        for u in users:  # (people imported before: their new memberships still find them, unless omxcode deleted them)
+            if ("user", u["id"]) in seen:
+                row = host.execute("SELECT id FROM users WHERE email = ?", ((u["email"] or "").strip().lower(),)).fetchone()
+                if row:
+                    uid_seen[u["id"]] = row[0]
+        users = [u for u in users if ("user", u["id"]) not in seen]
+        live = [t for t in live if ("tenant", t["id"]) not in seen]
+        members = [m for m in members if ("member", f"{m['user_id']}/{m['tenant_id']}") not in seen]
+        uid = dict(uid_seen)
         for u in users:
             ok, why = person(host, u)
             if why:
                 warnings.append(why)
             if ok is not None:
                 uid[u["id"]] = ok
+                mark("user", u["id"])
         for t in live:
             s = sub_by_tenant.get(t["id"])
             status = (s["status"] or "none") if s else "none"
@@ -159,7 +173,9 @@ def main():
                              " VALUES (?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(tenant) DO NOTHING",
                              (t["id"], status, s["stripe_cust_id"], s["stripe_sub_id"], end, 1 if s["cancel_at_period_end"] else 0,
                               epoch(s["current_period_end"]) if status == "past_due" else None))
-        tids = {t["id"] for t in live}
+        for t in live:
+            mark("tenant", t["id"])
+        tids = {t["id"] for t in live} | {i for k, i in seen if k == "tenant"}
         for m in members:
             if m["is_active"] not in (1, True, None) or m["tenant_id"] not in tids or m["user_id"] not in uid:
                 continue
@@ -167,12 +183,14 @@ def main():
             if role is None:
                 warnings.append(f"a membership with role {m['role']!r}: imported as viewer")
                 role = "viewer"
+            mark("member", f"{m['user_id']}/{m['tenant_id']}")
             host.execute("INSERT INTO members(user_id, tenant, role, joined) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, tenant) DO NOTHING",
                          (uid[m["user_id"]], m["tenant_id"], role, epoch(m["created_at"])))
     (data / "tenants").mkdir(exist_ok=True)
     copied = 0
+    new_tenants = {t["id"] for t in live}
     for tid, src, dst in files:
-        if dst.exists():
+        if dst.exists() or tid not in new_tenants:
             continue
         if not src.exists():
             warnings.append(f"tenant {tid}: no file at {src}")
