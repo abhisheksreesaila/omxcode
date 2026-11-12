@@ -53,7 +53,7 @@ Relative links are relative to the repository root: https://github.com/abhisheks
 
 Imagine writing an app once, in a language that reads like Python.
 
-It opens as a real app on Linux, in the browser, on Android, on a Mac and on an iPhone. Each one uses that platform's own buttons, menus and text fields, not an imitation of them. The heavy lifting, a million rows summed, sorted or charted, runs on the GPU, in the same language and the same file. And when an AI agent wants to use the app, it doesn't scrape pixels or guess at buttons. The app is already a set of tools the agent can call.
+It opens as a real app on Linux, in the browser and on Android, and builds for the Mac and the iPhone. Each one uses that platform's own buttons, menus and text fields, not an imitation of them. The heavy lifting, a million rows summed, sorted or charted, runs on the GPU, in the same language and the same file. And when an AI agent wants to use the app, it doesn't scrape pixels or guess at buttons. The app is already a set of tools the agent can call.
 
 That's **omxcode**. Its showcase, **omxplorer**, is a data app in the spirit of Numbers and Power BI, and the app itself is one Mojo file of about 4,500 lines, built from the framework's components.
 
@@ -61,7 +61,7 @@ That's **omxcode**. Its showcase, **omxplorer**, is a data app in the spirit of 
 1. **No boundary tax.** No JSON, no HTTP, no second process to start, keep alive and debug. Apps that move a lot of data between the screen and the computing are faster and simpler.
 2. **One language from pixels to GPU kernels.** Mojo writes the interface and the CUDA-class kernels. In omxplorer, the group-by kernel sits in the same codebase as the sheet that shows its totals.
 3. **Every app can be driven by an agent.** omxcode has an [agent host](docs/agent.md), so each app can be operated by an agent through the same code that draws its screens. JS apps need that built in separately.
-4. **Native on every device from one codebase.** Linux and the Mac run today (Mac checks run on GitHub's macOS runners); the web, Android and iPhone are next ([where it stands](#where-it-stands)).
+4. **Native on every device from one codebase.** Linux and the web run under checks today. Android runs the classic controls on the emulator. The Mac runs our apps, but most components aren't proven there by a check yet, and the iPhone builds but hasn't run on a phone ([where it stands](#where-it-stands)).
 
 **Where to start, and where not yet:** start with apps that move a lot of data: analytics, spreadsheets, video, documents, robotics. For forms, CRUD screens and marketing sites, JS wins today on ecosystem alone; when a JS library is the better tool, embed it as a widget inside omxcode. SaaS building blocks (sign-in, accounts, payments) are on the roadmap.
 
@@ -191,18 +191,18 @@ All on one Linux machine with an RTX 3090, and all from the checks or their benc
 
 ## Where it stands
 
-**Runs** means a script runs it on that platform. **Builds** means it builds but no check runs it there yet. The full matrix is generated from the code: [docs/components.md](docs/components.md).
+**Proven** means a check runs it on that platform. **Built** means it compiles there but no check runs it yet. Counts are the 190 entries of the matrix generated from the code ([docs/components.md](docs/components.md)); what's next is in the [roadmap](ROADMAP.md).
 
-| Host | Runs | Builds | Notes |
-|---|---|---|---|
-| **Linux** (GTK 4) | 78 | 1 | Every component, gesture and theme; omxplorer's home |
-| **Web** (FastHTML) | 79 | 0 | The same results as Linux, checked in Chromium |
-| **Agent** (MCP) | 29 | 17 | Every app, no per-app work |
-| **Android** (views over JNI) | 19 | 16 | runs the classic controls on the emulator; the newer ones are still to come |
-| **Mac** (AppKit) | 0 | 60 | Builds and signs; not proven by a check yet |
-| **iPhone** (UIKit) | 0 | 61 | Builds and signs; not proven by a check yet |
+| Host | Proven | Built | Missing | Notes |
+|---|---|---|---|---|
+| **Linux** (GTK 4) | 181 | 9 | 0 | Every component, gesture and theme; omxplorer's home |
+| **Web** (FastHTML) | 164 | 9 | 17 | The same results as Linux, checked in Chromium |
+| **Agent** (MCP) | 58 | 44 | 88 | Every app, no per-app work |
+| **Android** (views over JNI) | 19 | 56 | 115 | The classic controls on the emulator; overlays, menus, dialogs and the Board are still to come |
+| **Mac** (AppKit) | 5 | 155 | 30 | omxplorer and other apps have run on an Apple M4, but only checks that run a component count |
+| **iPhone** (UIKit) | 0 | 126 | 64 | Builds and signs; never run on a phone |
 
-The GPU path is NVIDIA today. Apple and phone GPUs use the CPU path, which runs the same functions.
+The GPU path runs on NVIDIA under the checks, and on Apple's GPU on the owner's Mac (no check yet). Phones use the CPU path, which runs the same functions.
 
 ### omxconsole: which models it runs
 
@@ -281,7 +281,7 @@ struct Main(App):
 - **[llms.txt](https://abhisheksreesaila.github.io/omxcode/llms.txt):** these docs for an agent; [llms-full.txt](https://abhisheksreesaila.github.io/omxcode/llms-full.txt) is all of them in one file.
 - **[Decisions](docs/decisions.md):** every one, with reasons.
 - **[Experiments](EXPERIMENTS.md)** and the **[goal reports](docs/goals/):** what was tried, what broke, what was learned. The latest is [docs/report.md](docs/report.md).
-- **[The long view](ROADMAP.md):** the original vision.
+- **[The roadmap](ROADMAP.md):** where it is, what's next, and where to help.
 - **[Gallery](https://abhisheksreesaila.github.io/omxcode/gallery/):** the earlier showcases (analytics, the Workbook, the Data Lens).
 
 ## License

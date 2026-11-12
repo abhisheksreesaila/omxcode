@@ -1,74 +1,130 @@
-# mojo-ui roadmap and decisions
+# omxcode roadmap
 
-_Last updated: 2026-10-14 · a long-term, speculative side project, developed slowly and organically_
+_Last updated: 2026-11-12 · public alpha · MIT_
 
-## Vision
-One language, Mojo, from the button you tap to the GPU kernel underneath it, on every device and on the server. App logic and UI are written once as `State` + `update()` + `view() → ViewTree`; thin native "skins" put the ViewTree on screen.
+## What omxcode is
 
-The dream: one Mojo codebase that ships a web app, a Mac app and a touch-native iOS app at the same time.
+omxcode is a UI framework written in Mojo. You write an app once, as `view()` (the screen, from state) and `update(event)` (what changes it), and it runs as a native app on Linux (GTK 4), on the web (a FastHTML server), on Android (real Android views), and builds for the Mac (AppKit) and the iPhone (UIKit). The same app is also an MCP server: an agent host turns every control on screen into a tool, so an agent uses the app through the code that draws it. Why one language: in a data app, the button, the table it shows and the GPU kernel that computes it can live in one codebase, with no JSON, HTTP or second process between the screen and the computing. Mojo reads like Python, calls C and Objective-C directly, and writes GPU kernels in the same program as the UI.
 
-## Why one language, if agents can write many?
-The fair counter-argument: fragmentation is a human problem; an agent can write Swift, Kotlin and TypeScript just as easily. Agents do remove most of the *writing* cost. They don't remove:
-- **Runtime boundaries.** Data crossing between languages gets copied and serialized. For data, GPU and AI apps, moving data is the bottleneck, and one language sharing memory is a performance win no agent can write around.
-- **N codebases to verify.** Every platform version needs its own tests, and behavior drifts between them.
-- **Capability gaps.** Most UI languages can't write GPU kernels or SIMD code; Mojo can, in the same program as the UI.
+This roadmap replaces the first one (2026-10-14). That plan used SDL3 and Clay on Linux and a SwiftUI skin on Apple. What got built instead: each platform's own widgets, driven straight from Mojo ([docs/decisions.md](docs/decisions.md) has every decision with its reasons; [EXPERIMENTS.md](EXPERIMENTS.md) has what was tried).
 
-So the strongest case for Mojo is speed and zero-copy for data-heavy apps, not developer convenience.
+## Where it is today
 
-## The split
-| Layer | Written in | Can use |
-|---|---|---|
-| App logic, UI, GPU, AI | Mojo, once | Mojo kernels, MAX for models |
-| Backend | Mojo | Any Python library (Mojo's Python interop), any C library, any HTTP service |
-| Desktop and mobile front end | Nothing extra | Native skins draw the ViewTree |
-| Web front end | Small JS adapters per library | The whole JS ecosystem, via islands (decision 7) |
+Two words matter here, and the repo uses them strictly:
 
-## Decisions so far
-1. **Architecture: Mojo core, thin hosts.** The UI is data (ViewTree), events are data (Msg). Hosts never touch state directly. (See SPEC.md.)
-2. **The platform owns the loop; Mojo is called.** SDL3 main callbacks call exported Mojo functions, Flutter-style. Required for iOS, fine everywhere. *(Proven on Linux in Experiment 1.)*
-3. **No dlopen.** The C bridge is resolved at link time. *(Proven on Linux in Experiment 1.)*
-4. **Native skins per platform:** SwiftUI on Apple, Jetpack Compose on Android, SDL3 + Clay on Linux, HTML + HTMX on web. All fed by the same ViewTree (as JSON for Swift/Kotlin skins).
-5. **Desktop first (decided 2026-10-14).** Linux first, then Mac, where Mojo already runs. iOS is an experimental side track. Windows uses the web host until Mojo for Windows ships. Android waits for the iOS answer.
-6. **Flagship app: a native data workstation.** Every row, no sampling; GPU-drawn charts; billions of records through the user's own Mojo dataframe library, MX frame; local embedding and language models (for example Gemma) running on the machine. Check which models MAX supports when this stage arrives.
-7. **Web keeps the JS ecosystem through "islands" (decided 2026-10-14).** A ViewTree node kind `ISLAND(id, lib, props_json, on_event)` renders on the web as a placeholder `<div data-island="<lib>" data-props='…' hx-preserve="true">`. A small JS registry mounts the library into it; the library handles fast interactions locally and sends only meaningful events back as Msgs. Prior art: Phoenix LiveView JS hooks, Streamlit components.
-   - Islands must survive HTMX swaps (`hx-preserve` or a morphing swap).
-   - Each library needs a small adapter (typically 10–30 lines of JS).
-   - On native, each island needs a decision: native equivalent, web-only, or (desktop only) a single-widget embedded web view.
-   - Keep island events coarse ("drag ended", not every move).
-   - Pin and self-host third-party JS.
-8. **iOS from Linux: xtool + SwiftUI skin (decided 2026-10-14).** Mojo cross-compiles to an iPhone static library on Linux; a SwiftUI skin (a Swift package) calls it; xtool builds, signs and installs it on a real iPhone, no Mac or Xcode app needed. This also skips porting SDL3 to iOS. A Mac with Xcode remains the fallback, and is the only way to use the iOS Simulator.
+- **Proven (✅):** a script in `scripts/check` or a goal's checker runs it on that platform and checks the result.
+- **Built (🔨):** the code exists and compiles for that platform, but no check runs it there yet.
 
-9. **Apple UI straight from Mojo (decided 2026-10-14, Experiment 2).** Supersedes the SwiftUI skin in decision 8 for Apple platforms: Mojo calls AppKit/UIKit through the Objective-C runtime, so the Mac and iPhone apps contain no Swift or C. xtool is still used, but only to sign and install the finished `.ipa`. Cons: every Objective-C call is untyped (mistakes show up at run time), Apple Silicon only, and the hand-written Mojo runtime functions are unofficial.
+From [docs/components.md](docs/components.md), which is generated from the code and the checks:
 
-10. **Layout = the platforms' own layout systems, driven by flexbox-style settings (decided 2026-10-15).** Apps say `padding`, `gap`, `grow`, `align`, `justify`, widths and heights; each host maps them onto GtkBox, CSS flexbox, NSStackView and UIStackView. No layout engine of our own for now: the translation layer stays thin. A Mojo flexbox engine (Yoga-like) is a possible separate project later, needed only for a self-drawn (GPU) renderer; the flexbox names keep app code unchanged if that ever happens.
+**The 43 core components** (`Text`, `Button`, `TextField`, `Dropdown`, `Canvas`, `Board`, `Menu`, `Dialog`, `Table`, …):
 
-## Tracks
-| Track | Steps |
-|---|---|
-| Main: Linux, then Mac | ✅ M0 → M1 core + tests → M2 web host → M3 Linux window → M4 Mac window → Framework (widgets, text input, layout in Mojo, GPU charts) → MX frame hookup → Flagship workstation |
-| Side: iOS (experimental) | ✅ M5 steps 1–2 (iPhone objects, runtime needs measured) → M5 step 3: "Hello, Ada!" from Mojo in a SwiftUI app on an iPhone via xtool → grow the skin to render the ViewTree → Android (M6) later |
+| Platform | Proven | Built, not run | Missing |
+|---|---|---|---|
+| Linux (GTK 4) | 41 | 2 | 0 |
+| Web (FastHTML + HTMX) | 43 | 0 | 0 |
+| Android (views over JNI, on the emulator) | 16 | 11 | 16 |
+| Mac (AppKit) | 0 | 43 | 0 |
+| iPhone (UIKit) | 0 | 36 | 7 |
+| Agent (MCP tools) | 26 | 10 | 7 |
 
-## Long-term stages
-1. Foundation: mojo-ui v0 on Linux, then Mac; iOS test on the side
-2. Framework: widgets, layout in Mojo, real text input, accessibility, web islands for JS libraries
-3. GPU renderer: UI and charts drawn by Mojo GPU kernels
-4. Data and AI layer: MX frame as the data engine; on-device embedding and language models
-5. Ecosystem: plugins (payments, push, storage), templates, docs
+**Everything in the matrix** (190 entries: core components, variants and gestures, native services, composites built from them, and JavaScript widgets):
 
-## Watch for
-- Official Mojo on Windows (announced with Microsoft at ModCon 2026, no date)
-- Any official Mojo iOS or Android target
-- Maturity of Mojo's Apple GPU support (check before betting the Mac flagship on it)
-- xtool progress (debugging on iOS 17+, App Store upload)
+| Platform | Proven | Built, not run | Missing |
+|---|---|---|---|
+| Linux | 181 | 9 | 0 |
+| Web | 164 | 9 | 17 |
+| Android | 19 | 56 | 115 |
+| Mac | 5 | 155 | 30 |
+| iPhone | 0 | 126 | 64 |
+| Agent | 58 | 44 | 88 |
 
-## Known risks
-- Speculative by design: parts may turn out impossible; the milestones are built to find out cheaply
-- Agents write Mojo less fluently than Swift, Kotlin or TypeScript (less training data, a young language); lean on Modular's docs (`.md` pages, llms.txt) and agent skills
-- iOS runtime needs: today only two allocation functions, covered by an unofficial 10-line stand-in; bigger features may pull in more. Re-measure as `core/` grows
-- xtool: real iPhone only (no simulator on Linux), Xcode.xip license terms, short-lived signing on free Apple IDs, limited debugging
-- Text input, accessibility and GPU battery cost need real-device testing
-- Apple's Neural Engine is only reachable through Core ML
-- Phone memory limits on-device model size
-- Desktop distribution: signing, notarization, installers, auto-update
-- Web islands: per-library adapters, native parity decisions, third-party JS security
-- Focus: one flagship app, not every use case at once
+What those numbers mean in plain words:
+
+- **Linux and the web** are where omxcode lives. Every component, gesture and theme runs there under a check, with real input on a headless display and in headless Chromium.
+- **The Mac** is further along than its column shows. omxplorer, the globe sample and the SaaS client have run on an Apple M4 (Metal GPU) during goal runs over SSH (`scripts/mac-ssh`), and some apps run on GitHub's macOS runners (`scripts/mac-ci`). But only 5 entries (the SaaS server pieces) are counted as proven, because the matrix counts a component only when a check that runs it is wired in.
+- **Android** runs the classic controls on the emulator. Overlays, menus, dialogs, the Board and the newer composites are not built there yet.
+- **The iPhone** builds and signs, and has never run on a phone.
+- **Windows** has no Mojo release yet; the web host is the way to reach it for now. WebAssembly is parked ([docs/wasm.md](docs/wasm.md)).
+- **The GPU path** runs on NVIDIA under the checks, and on Apple's GPU on the owner's Mac. Phones use the CPU path, which runs the same functions.
+
+Beyond widgets, the framework has grown building blocks apps need:
+
+- **Data:** omxcore (formerly MX frame), a Mojo dataframe engine on the GPU, vendored in `vendor/`.
+- **Agents:** the MCP agent host ([docs/agent.md](docs/agent.md)), and an AG-UI client that draws an agent's streamed screen from 38 components ([docs/ag-ui-compatibility.md](docs/ag-ui-compatibility.md)).
+- **Server:** `mojoui.serve` (HTTP on Flare), and SaaS modules for sign-in, tenants, billing, email, background jobs, migrations and logging ([docs/saas.md](docs/saas.md)). These are checked against stand-ins for Google, Stripe and SMTP on Linux and the Mac. They have not yet run against the real services.
+- **Themes:** looks as plugins in `themes/` (omxqua, Liquid, Fluent, Omarchy, Paper and others). The framework itself names no theme, and a check proves it.
+
+Two apps are built entirely with it: **omxplorer**, a data app over a million-row table (`examples/omxplorer`), and **omxconsole**, a desktop app that runs models on your own GPU through MAX (`examples/console`, `examples/consoled`).
+
+## Now (November 2026)
+
+- **Mac: from "built" to "proven".** Wire the Mac runs that already happen (owner's M4, GitHub runners) into the matrix, so a component counts as proven on the Mac when a check runs it there. Start with the core 43.
+- **Server hardening.** Fix the known stop-and-restart race in `mojoui.serve` (a stopped server can close a socket a new one reused; see docs/saas.md). Run the SaaS modules once against real Google, Stripe and an SMTP provider.
+- **omxconsole stability.** Its daemon crashed a few times in worker threads during long runs; the traces point at memory corruption, not one call. Find and fix it. Model porting stays labelled beta, with its real hit rate (8 of 14 models on the owner's machine).
+- **Pay down the debt.** The matrix lists 10 pieces still living inside one app (mostly omxplorer). Move them into `mojoui/` as components with their own tests.
+
+## Next (December 2026)
+
+- **Downloads people can run.** Linux and Mac downloads of omxplorer and omxconsole, with a page on omxlabs.tech, by mid-December.
+- **A contributor guide.** `CONTRIBUTING.md`: how to build, how checks work, how to add a component to every host, how to add a row to the matrix.
+- **An agent that writes omxcode apps.** `AGENTS.md` plus a "build an omxcode app" skill, so a coding agent can write a working app from one sentence (it builds on [llms.txt](docs/llms.txt)).
+- **Android: the missing core components.** Board, Overlay, MenuBar, Menu, Item, ContextMenu, Dialog, Toast, Popover and the rest of the 16, on the emulator under a check.
+- **Agent host: the rest of the core.** The 17 core components the agent can't fully drive yet (sliders, date pickers, tabs, lazy lists and others).
+
+## Later (no dates yet)
+
+- **iPhone on a real phone.** It builds and signs today; the next step is running it on hardware, then wiring a check.
+- **Windows,** once Mojo ships for Windows.
+- **WebAssembly,** if and when Mojo targets it well (parked; docs/wasm.md).
+- **Phone GPUs.** Today phones use the CPU path.
+- **Accessibility on every host,** checked, not only accessible names.
+- **Packaging and updates:** signing, notarization, installers and auto-update for desktop apps.
+- **A stable API and a package** you can depend on, instead of cloning the repo.
+
+## Where help is wanted
+
+Each of these is a self-contained piece of work. The component matrix shows exactly what is missing, and `scripts/components.py` regenerates it, so progress is visible.
+
+1. **Android host: the missing components.** 16 core components and most composites are ❌ on Android. Start from `mojoui/hosts/android.mojo`, `mojoui/hosts/jni.mojo` and the one Java file, `mojoui/hosts/android/MojoActivity.java`. Build with `scripts/build.sh <example> android`; drive the emulator with `scripts/android_drive.py`. Setup notes: [docs/android.md](docs/android.md).
+2. **Mac checks.** 155 entries are built but not proven on the Mac. If you have an Apple Silicon Mac, run the AppKit test steps and help turn them into checks. Start from `mojoui/hosts/appkit.mojo`, `scripts/mac-ci` and `scripts/mac-ssh`. Known Mac gaps (no save or open panel yet, no tray item, a quit-on-last-window host) are listed in the matrix's notes.
+3. **iPhone on hardware.** Nobody has run an omxcode app on an iPhone yet. Start from `mojoui/hosts/uikit.mojo`, `apple/install_iphone.sh` and `apple/README.md`. The app needs two Mojo runtime functions that an unofficial stand-in provides (`spike/kgen_shim.c`); re-check its symbols when the code changes.
+4. **The agent host.** 88 entries are ❌ for agents. Start from `mojoui/hosts/agent.py`, `mojoui/hosts/agent_link.mojo` and [docs/agent.md](docs/agent.md), which lists what the agent can't do yet (read a chart's figures as text, drag objects on a page).
+5. **Web gaps.** 17 web entries are ❌, mostly machine services a browser doesn't offer the same way (a folder watcher, a tray item, holding a card on the Board). Start from `mojoui/hosts/web.mojo` and `mojoui/hosts/web.py`.
+6. **Components out of apps.** The "debt" table at the bottom of docs/components.md lists pieces that live in `examples/omxplorer` or `examples/workbook` and should be `mojoui/` components. Each one says what it is and where it belongs.
+7. **`mojoui.serve` and Flare.** The stop-and-reuse descriptor race described in docs/saas.md. Start from `mojoui/serve.mojo` and the server tests in `tests/`.
+8. **Docs and examples.** Small, plain examples beyond `examples/hello`, `examples/todo` and `examples/tasks`; corrections to [docs/reference.md](docs/reference.md); a theme of your own (copy `themes/paper.mojo`).
+
+If you want to pick one up, open an issue first saying which, so two people don't build the same host twice.
+
+## How to start
+
+You need x86-64 Linux with GTK 4 and libadwaita 1.7 or newer, and [pixi](https://pixi.sh). An NVIDIA GPU is used when present; without one the CPU path runs the same code. Mojo 1.2 is installed by pixi.
+
+```bash
+git clone https://github.com/abhisheksreesaila/omxcode && cd omxcode
+pixi install                                   # Mojo, MAX and the tools, pinned in pixi.toml
+
+scripts/build.sh hello linux                   # one app file → a native GTK app
+build/hello/linux/hello
+
+scripts/build.sh hello web                     # the same file → the web host
+pixi run python mojoui/hosts/web.py build/hello/web   # → http://127.0.0.1:5001
+
+scripts/build.sh hello android                 # an APK for the emulator
+```
+
+The whole showcase, with demo data and models (large downloads):
+
+```bash
+scripts/setup
+scripts/omxplorer.sh build/demo/fleet.csv
+```
+
+**Checks.** `scripts/check` runs the current goal's milestones and prints PASS, FAIL or BLOCKED for each (`scripts/check M2` runs one). Earlier goals keep their checkers in `docs/goals/NN-check.py`. GTK checks run on a private headless display, so no windows open on your desktop (`MOJOUI_HEADLESS=0` to watch them). After adding or changing a component, run `pixi run python scripts/components.py`; the checks fail when the matrix is stale.
+
+**Read next:** [your first app](https://abhisheksreesaila.github.io/omxcode/start.html), [docs/architecture.md](docs/architecture.md) (how the view tree reaches each platform), [docs/reference.md](docs/reference.md) (every component), [docs/components.md](docs/components.md) (what exists where).
+
+---
+
+*Mojo and MAX are trademarks of Modular Inc.; omxcode is independent, not affiliated with or endorsed by Modular.*
