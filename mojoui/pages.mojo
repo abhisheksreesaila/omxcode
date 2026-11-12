@@ -52,10 +52,11 @@ def render(template: String, names: List[String], values: List[String]) -> Strin
     return out^
 
 
-def public_page(html: String, status: Int = 200) -> Reply:
-    """A public HTML page: its own scripts, styles and images only, never framed, cached briefly by browsers."""
+def public_page(html: String, status: Int = 200, cache: String = "public, max-age=300") -> Reply:
+    """A public HTML page: its own scripts, styles and images only, never framed; `cache` its one Cache-Control (a page
+    that sets a cookie or shows a person's data: "no-store")."""
     return Reply(status, "text/html; charset=utf-8", html).header("Content-Security-Policy", CSP_PUBLIC).header(
-        "Referrer-Policy", "strict-origin-when-cross-origin").header("Cache-Control", "public, max-age=300")
+        "Referrer-Policy", "strict-origin-when-cross-origin").header("Cache-Control", cache)
 
 
 def _xml(s: String) -> String:
@@ -180,7 +181,8 @@ struct ContactForm(Copyable, Movable):
             ["csrf"], [token])
 
     def page(self, page_template: String) -> Reply:
-        """The form inside `page_template` at {{{form}}}, with a fresh token in its hidden field and its sealed cookie."""
+        """The form put in place of `{{{form}}}` in an already rendered page, with a fresh token in its hidden field and
+        its sealed cookie."""
         var token: String
         try:
             token = random_token(24)
@@ -188,13 +190,14 @@ struct ContactForm(Copyable, Movable):
             return Reply.error(503, "no randomness: try again", "busy")
         var sealed = seal(self.key, "contact\n" + token, CSRF_TTL_S, Int(wall_seconds()))
         var secure = "; Secure" if self.base.startswith("https://") else ""
-        return public_page(render(page_template, ["form"], [self.form_html(token)])).header(
-            "Set-Cookie", CSRF_COOKIE + "=" + sealed + "; Path=/contact; HttpOnly; SameSite=Strict; Max-Age=" + String(CSRF_TTL_S) + secure).header(
-            "Cache-Control", "no-store")
+        return public_page(page_template.replace("{{{form}}}", self.form_html(token)), cache="no-store").header(  # (not a second render: the page's own text stays as it is)
+            "Set-Cookie", CSRF_COOKIE + "=" + sealed + "; Path=/contact; HttpOnly; SameSite=Strict; Max-Age=" + String(CSRF_TTL_S) + secure)
 
     def post(self, req: Req, thanks_html: String) -> Reply:
         """403 another site or a bad token, 429 too many from this client, 400 a bad field; a filled honeypot gets the
         same thanks and sends nothing; otherwise the message is queued as a mail job."""
+        if self.to == "":
+            return Reply.error(503, "the contact form isn't set up", "not_configured")
         if not _origin_ok(req, self.base):
             return Reply.error(403, "this form posts from its own page only", "forbidden")
         var wait = self.limit.hit("contact " + rate_key(req.client if req.client != "" else req.peer))
@@ -205,7 +208,7 @@ struct ContactForm(Copyable, Movable):
         if token == "" or not opened or not same(opened.value(), "contact\n" + token):
             return Reply.error(403, "the form has expired: reload the page", "bad_csrf")
         if form_value(req.body, "website") != "":
-            return public_page(thanks_html)  # (a bot: thanked, nothing sent)
+            return public_page(thanks_html, cache="no-store")  # (a bot: thanked, nothing sent)
         var name = String(form_value(req.body, "name").strip())
         var email = String(form_value(req.body, "email").strip())
         var message = String(form_value(req.body, "message").strip())
@@ -221,4 +224,4 @@ struct ContactForm(Copyable, Movable):
             _ = self.queue.add(self.mail_kind, mail.to_json())
         except:
             return Reply.error(503, "can't take the message now: try again", "busy")
-        return public_page(thanks_html).header("Set-Cookie", CSRF_COOKIE + "=; Path=/contact; Max-Age=0; HttpOnly; SameSite=Strict")
+        return public_page(thanks_html, cache="no-store").header("Set-Cookie", CSRF_COOKIE + "=; Path=/contact; Max-Age=0; HttpOnly; SameSite=Strict")

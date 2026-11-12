@@ -23,8 +23,8 @@ and `examples/saas_min/server.mojo` (sign-in, tenants and a welcome email from a
 | `utils_migrate` | Schema migrations per tenant | `mojoui.migrate`: `NNN_name.sql` with `-- up` / `-- down`, a checksum per applied file, every tenant verified and dry-run before any changes, each file in its own transaction; the server refuses to start on a broken or edited migration; `rollback(to)` exists but a server never runs it on its own | ✅ (60 M2, tests/test_migrate.mojo) |
 | `utils_db`, `utils_sql` | Database helpers, SQL builders | `mojoui.sqlite` (prepared statements cached per connection, transactions, FTS5, `Pool`: a connection per thread, a writer lock per file) | 🟡 statements yes, no query builder |
 | `utils_log` | Structured logging | `mojoui.log`: JSON lines (one per request: ts, level, rid, method, path without its query and with sealed segments such as an invitation's token masked, status, ms, the client's ip; `X-Request-Id` on the reply), secrets masked by value (configuration only, at most 64, under the log's lock) and by shape, rotation by size; `Audit` rows (sign_up, sign_in, invite, invite_accept, plan_change) | ✅ (60 M1, tests/test_log.mojo) |
-| `utils_api`, `utils_graphql` | API helpers | `mojoui.serve`'s `Req.matches`, `Reply.json` | 🟡 REST routes yes; GraphQL out of scope |
-| `utils_seo`, `utils_blog` | Blog and SEO pages | none (the gallery is static) | out of scope here |
+| `utils_api`, `utils_graphql` | API helpers | `mojoui.serve`'s routes; `mojoui.apiclient` for calling others (auth, token cache, retries, GraphQL paging) | ✅ (66 M2) |
+| `utils_seo`, `utils_blog` | Blog and SEO pages | `mojoui.pages` (templates, sitemap, robots, PWA, contact form), `mojoui.static` | ✅ SEO and public pages (66 M0, M5); no blog engine |
 | `utils_ai_interface`, `utils_ai_queue`, `utils_workflow`, `utils_polars_mapper` | AI calls, queues, workflows, dataframes | elsewhere in omxcode (`mojoui.agui`, the omxcore engine) | out of scope here |
 
 ## The modules' APIs
@@ -108,6 +108,105 @@ _ = log.secret(getenv("SMTP_PASSWORD"))                                # configu
 log.info("checkout", Fields().str("tenant", t).int("ms", 12))
 Audit.record(db, tenant, actor, "invite", detail)
 ```
+
+## Goal 66: the rest of a Finxplorer-class SaaS (server side)
+
+Each is a generic `mojoui` module with its own test (tests/test_<name>.mojo); `examples/finance_min` uses them all
+together (docs/goals/66-check.py M9). fh-saas's `utils_api`, `utils_graphql`, `utils_seo` and its webhook handler for
+anyone but Stripe now have a Mojo counterpart; leaving fh-saas is `scripts/fhsaas_import.py`.
+
+### `mojoui.static` (M0)
+```mojo
+var files = Static("examples/finance_min/static", prefix="/static/")
+var f = files.handle(req)        # status 0: not under the prefix, or not GET/HEAD
+if f.status != 0: return f^
+files.url("app.js")              # "/static/app.<10 hex of sha256>.js": served "public, max-age=31536000, immutable"
+```
+Content types by extension, an ETag from size + mtime (If-None-Match → 304; plain URLs `no-cache`), gzip for text types
+when asked (Vary: Accept-Encoding), one byte Range (206, 416), a folder's index.html. Refused with 404 before the disk
+is touched: `..`/`.`/empty/dot segments, NUL, backslash, an encoded `/` or `\`; then realpath must stay in the folder
+(symlinks out). Limits: a file is read on every request (no cache); a hashed URL hashes the file on every request; whole
+files over 64 MB are 413 (a Range still works); one range per request (several → the whole file).
+
+### `mojoui.webhooks` (M1)
+```mojo
+var hooks = Webhooks(data + "/host.db", queue)
+var bank = Source.standard("bank", getenv("BANK_WEBHOOK_SECRET"))   # Standard Webhooks / Svix
+# Source.stripe(name, secret) · Source.hmac_hex(name, secret, "X-Hub-Signature-256") · Source.hmac_b64(name, secret, header)
+if req.matches("POST", "/webhooks/bank"): return hooks.receive(req, bank)
+# a Runner: job.kind == "webhook" → var ev = hooks.job_event(job.payload)   # (source, id, type, body)
+```
+200 accepted or a duplicate (no effect), 401 no or wrong signature, 400 a good signature outside the 5-minute window or
+no event id, 413 over 1 MB. The event's row and its job are one transaction (an outbox); the job's payload holds ids
+only. Limits: the hex/base64 shapes have no timestamp: a replay is stopped by the body's `id` while the log keeps it
+(`sweep(keep_days=30)`); the signature is checked over the body as text (a body that isn't UTF-8 is not supported).
+
+### `mojoui.apiclient` (M2)
+```mojo
+var bank = ApiClient(api, Auth.client_credentials(api + "/oauth/token", id, secret))   # or Auth.bearer / Auth.basic
+var r = bank.get("/v1/accounts")              # ApiReply: status, body, error, attempts; r.ok(); r.json()
+var nodes = bank.graphql_pages(QUERY, '{"connection": "c1"}', "transactions")   # every page's nodes (JSON texts)
+```
+Retries 429 and 503 always, other 5xx and no reply for idempotent calls, honouring Retry-After (seconds), exponential
+backoff with jitter, `max_wait_ms` (30 s) at most; a 401 fetches one new token and tries once more; the token is fetched
+again before it expires. Limits: blocking (call it from a job or an offloaded request); one client per thread (its token
+cache is its own: a job making a client per run asks for a token per run); Retry-After as an HTTP date falls back to backoff.
+
+### `mojoui.schedule` (M3)
+```mojo
+var sched = Scheduler(data + "/host.db", queue)
+_ = sched.due(Schedule("digest", tenant, Cron.parse_any("every Monday 08:00"), Zone.load("Europe/London"), "digest", ""), now)
+```
+Cron's five fields or words ("every minute", "every 15 minutes", "every day 08:00", "every Monday 08:00", "every
+weekday 09:30", "every month on the 1st 09:00"); IANA zones from the system's tz database (TZif + its POSIX rule);
+DST as Vixie cron (a skipped 02:30 runs once just after the gap, a repeated 01:30 once, every-hour schedules on real
+time). A slot's row and its job are one transaction: queued at most once across restarts and kill -9; after a downtime
+only the latest missed slot runs (`"catchup": true, "missed": n`). Limits: running is at least once (mojoui.jobs):
+make the effect idempotent by `slot`; needs /usr/share/zoneinfo (or $TZDIR); slots more than 400 days back are skipped.
+
+### `mojoui.sqlite` bulk writes and `mojoui.csvstream` (M4)
+```mojo
+_ = bulk_upsert(db, "transactions", ["id"], ["id", "date", "amount", "category"], rows, keep_edited=["category"])
+_ = set_edited(db, "transactions", "id", id, "category", "Coffee")     # a person's change, kept by later syncs
+return stream_csv(db.path, "SELECT date, amount FROM transactions", args, header, "transactions.csv")   # Reply.csv
+```
+One transaction (any failure writes nothing), one prepared statement: 100k rows in ~0.14 s here. The table needs a
+UNIQUE key and, for `keep_edited`, an `edited TEXT` column. CSV: RFC 4180 quoting, CRLF; text cells starting with
+= + - @ tab or CR get a leading ' (numbers stored as numbers stay numbers); written by a thread into a Pipe.
+
+### `mojoui.pages` (M5)
+```mojo
+public_page(render(TEMPLATE, names, values), cache="no-store")   # {{x}} escaped, {{{x}}} trusted HTML; CSP: own files only
+sitemap_reply(base, paths) · robots_reply(base, disallow) · manifest_reply(manifest_json(...)) · worker_reply(service_worker_js(...))
+var contact = ContactForm(key, base, to, site_name, per_minute=5, queue=jobs)    # contact.page(page) / contact.post(req, thanks)
+```
+The contact form: a sealed HttpOnly SameSite=Strict cookie and a hidden field (double submit), same-origin only, a
+per-client limit counted before the token is checked, a honeypot that gets the same thanks, the message queued as a
+`mail` job (mojoui.mail's header and markdown safety). Limits: the limit is per process; no captcha.
+
+### `mojoui.operator` (M6)
+```mojo
+var op = Operator(data, getenv("SAAS_OPERATORS"), getenv("SAAS_LOG"))    # emails, comma-separated
+var o = op.handle(req, acc)     # GET /operator/api/tenants  /operator/api/log?level=&path=&tenant=&rid=&limit=
+if o.status != 0: return o^     # GET /operator/api/tenants/{id}/snapshot (blocking: offloaded)
+```
+Anyone else signed in: 403 and an `operator_refused` audit row; not signed in: 401. Every action is an audit row
+(`operator_tenants`, `operator_log`, `operator_snapshot`, `operator_snapshot_failed`). Snapshots are `VACUUM INTO` a
+temporary file (consistent under writes), removed after sending; leftovers are removed at start. Limits: operators are
+configuration (a restart to change); a snapshot sits whole in memory while it is sent (512 MB cap); the log tail reads
+the file's last 4 MB only (rotated files aren't read).
+
+### Leaving fh-saas (M7)
+`scripts/fhsaas_import.py --from <fh host .db> --tenants <folder> --to <SAAS_DATA> [--dry-run]` (start the server once
+first). People keep their tenant (same id), role (editor → member) and plan (Stripe ids, status, period and trial
+ends). A person whose address or Google sub is already someone else's in host.db is left out with their memberships.
+Existing rows are never overwritten, so a second run changes nothing and can't roll omxcode back. SQLite fh-saas only
+(a PostgreSQL fh-saas: dump to SQLite first).
+
+### The image (M8)
+`scripts/saas_image.sh build` (needs Docker) makes `omxcode-saas:g66` from debian:trixie-slim and a pixi-free bundle;
+`/data` is the volume (host.db, tenants/), the server checks its own health (`server --health <url>`), a non-root
+user. Not run in Docker yet on this machine (the user can't reach Docker's socket): the bundle itself is proven.
 
 ## The pieces under it
 - `mojoui.crypto`: HMAC-SHA256, the OS's random bytes (getentropy), base64 and base64url, a constant-time compare,

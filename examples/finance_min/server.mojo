@@ -25,6 +25,7 @@ from mojoui.csvstream import stream_csv
 from mojoui.schedule import Scheduler, Schedule, Cron, Zone
 from mojoui.pages import render, public_page, sitemap_reply, robots_reply, manifest_json, manifest_reply, service_worker_js, worker_reply, ContactForm
 from mojoui.operator import Operator
+from mojoui.crypto import random_token
 from mojoui.http import Request
 from mojoui.effects import Backend
 from mojoui import libc
@@ -75,7 +76,6 @@ struct Fin(Handler):
     var sched: Scheduler
     var digest: Cron
     var zone: Zone
-    var ticks: Int
 
     def __init__(out self, var acc: Accounts, var bill: Billing, jobs: Queue, var files: Static, hooks: Webhooks, var bank: Source,
                  var contact: ContactForm, var op: Operator, sched: Scheduler, var digest: Cron, var zone: Zone):
@@ -90,10 +90,9 @@ struct Fin(Handler):
         self.sched = sched
         self.digest = digest^
         self.zone = zone^
-        self.ticks = 0
 
     def blocking(self, req: Req) -> Bool:
-        return self.acc.blocking(req) or self.bill.blocking(req) or self.op.blocking(req)
+        return self.acc.blocking(req) or self.bill.blocking(req) or self.op.blocking(req) or req.path == "/api/bank/connect"  # (waits on the bank)
 
     def tick(self):
         """Every second: each tenant's digest schedule; every minute: the sweeps."""
@@ -102,7 +101,7 @@ struct Fin(Handler):
             var now = Int(wall_seconds())
             while q.step():
                 _ = self.sched.due(Schedule("digest", q.text(0), self.digest.copy(), self.zone.copy(), "digest", ""), now)
-            if now % 60 == 0:
+            if now % 60 <= 1:  # (a 1 s tick can land on either second: the sweeps are idempotent, twice is harmless)
                 _ = self.acc.sweep()
                 _ = self.jobs.sweep()
                 _ = self.bill.sweep()
@@ -162,7 +161,7 @@ struct Fin(Handler):
         if req.matches("GET", "/app"):
             if not who:
                 return Reply(303, "", "").header("Location", "/login?next=/app")
-            return public_page(self.page("Your money · finance_min", "", render(APP, ["js"], [self.files.url("app.js")]))).header("Cache-Control", "no-store")
+            return public_page(self.page("Your money · finance_min", "", render(APP, ["js"], [self.files.url("app.js")])), cache="no-store")
         if not who:
             return Reply.error(401, "sign in first", "unauthorized")
         var m = who.value().copy()
@@ -225,7 +224,7 @@ struct Fin(Handler):
             return Reply.error(400, "send {date, amount, merchant, category}", "bad_request")
         var rows = List[List[String]]()
         var row = List[String]()
-        row.append("manual-" + String(Int(wall_seconds() * 1000)) + "-" + String(libc.getpid()))
+        row.append("manual-" + random_token(12))
         row.append(j.text(j.get(0, "date")))
         row.append(String(j.real(j.get(0, "amount"))))
         row.append(j.text(j.get(0, "merchant")))
@@ -250,16 +249,36 @@ struct Fin(Handler):
         return Reply.json('{"ok": true}')
 
     def connect(self, m: Member, body: String) raises -> Reply:
+        """Links a bank connection the person just made in the aggregator's own link screen: its one-time public token is
+        traded server to server for the connection id (a connection id from the browser is never trusted: anyone could
+        send someone else's)."""
         if not m.is_admin():
             return Reply.error(403, "only the tenant's admin links a bank", "forbidden")
-        var conn: String
+        var token: String
         try:
             var j = Json.parse(body)
+            token = j.text(j.get(0, "public_token"))
+        except:
+            return Reply.error(400, "send {public_token}", "bad_request")
+        if token == "" or token.byte_length() > 200:
+            return Reply.error(400, "send the link screen's public_token", "bad_request")
+        var api = getenv("BANK_API")
+        if api == "":
+            return Reply.error(503, "no bank is set up", "not_configured")
+        var client = ApiClient(api, Auth.client_credentials(api + "/oauth/token", getenv("BANK_CLIENT_ID"), getenv("BANK_CLIENT_SECRET")), timeout_ms=10_000)
+        var r = client.post_json("/link/exchange", '{"public_token": ' + json_string(token) + "}")
+        if r.status == 400 or r.status == 404:
+            return Reply.error(400, "the bank didn't recognise that link", "bad_link")
+        if not r.ok():
+            return Reply.error(502, "the bank didn't answer: try again", "bank_unavailable")
+        var conn = String("")
+        try:
+            var j = r.json()
             conn = j.text(j.get(0, "connection"))
         except:
-            return Reply.error(400, "send {connection}", "bad_request")
+            pass
         if conn == "" or conn.byte_length() > 100:
-            return Reply.error(400, "a connection id", "bad_request")
+            return Reply.error(502, "the bank's answer had no connection", "bank_unavailable")
         var q = self.acc.db().prepare("INSERT INTO bank_links(connection, tenant, at) VALUES (?, ?, ?) ON CONFLICT(connection) DO NOTHING")
         q.bind(1, conn)
         q.bind(2, m.tenant)

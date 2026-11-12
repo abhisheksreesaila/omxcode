@@ -11,7 +11,7 @@
 #
 # Identity is mojoui.accounts' session: the email Google verified, bound to the account's `sub` (an address reassigned
 # to someone else can't sign in as the operator). Operators are configuration only: changing them is a restart.
-from std.os import remove, makedirs
+from std.os import remove, makedirs, listdir
 from std.os.path import exists
 from mojoui.serve import Req, Reply
 from mojoui.accounts import Accounts, Member
@@ -36,6 +36,18 @@ def tenant_id_ok(id: String) -> Bool:
     return True
 
 
+def clear_snapshots(data: String):
+    """Snapshots a crash left behind (a copy of a tenant outliving its deletion): removed at start."""
+    try:
+        var dir = data + "/snapshots"
+        if exists(dir):
+            for name in listdir(dir):
+                if String(name).endswith(".db"):
+                    remove(dir + "/" + String(name))
+    except:
+        pass
+
+
 struct Operator(Copyable, Movable):
     var data: String
     var emails: List[String]
@@ -53,6 +65,7 @@ struct Operator(Copyable, Movable):
                 self.emails.append(t)
         self.log_path = log_path
         self.pool = Pool.shared()
+        clear_snapshots(data)
 
     def host(self) raises -> Database:
         return self.pool.open(self.data + "/host.db")
@@ -170,19 +183,21 @@ struct Operator(Copyable, Movable):
             return Reply.error(404, "the tenant has no database yet", "not_found")
         makedirs(self.data + "/snapshots", exist_ok=True)
         var tmp = self.data + "/snapshots/" + id + "-" + random_token(8) + ".db"
-        var db = self.pool.open(src)
-        var into = db.prepare("VACUUM INTO ?")
-        into.bind(1, tmp)
-        into.run()
         var bytes: List[UInt8]
         try:
+            var db = self.pool.open(src)
+            var into = db.prepare("VACUUM INTO ?")
+            into.bind(1, tmp)
+            into.run()
             var size = file_stamp(tmp)[1]
             if size > MAX_SNAPSHOT:
                 raise Error("the snapshot is over " + String(MAX_SNAPSHOT // (1024 * 1024)) + " MB")
             with open(tmp, "r") as f:
                 bytes = f.read_bytes(size)
         except e:
-            remove(tmp)
+            if exists(tmp):
+                remove(tmp)
+            Audit.record(host, id, m.email, "operator_snapshot_failed", String(e))
             raise e^
         remove(tmp)
         Audit.record(host, id, m.email, "operator_snapshot", String(len(bytes)) + " bytes")

@@ -13,8 +13,9 @@
 #   # a Runner gets kind "webhook", payload {"source", "event"}: hooks.event(source, id) → (type, body)
 #
 # Answers: 200 accepted (or a duplicate: no effect), 401 a missing or wrong signature, 400 a timestamp outside the window
-# (or no event id), 413 a body over the source's cap (1 MB). The plain hex/base64 shapes carry no timestamp: replays of
-# them are stopped only by the event id (the log keeps ids for `keep_days`).
+# (or no event id), 413 a body over the source's cap (1 MB). The plain hex/base64 shapes carry no timestamp: a replay of
+# one is stopped by its id, which is read from the signed body only (the log keeps ids for `keep_days`; after that a
+# captured event would be taken as new).
 # Limits: the signature is checked over the body as text (mojoui.serve's Req.body): a body that isn't UTF-8 is refused
 # rather than checked byte for byte.
 
@@ -22,7 +23,7 @@ from mojoui.serve import Req, Reply
 from mojoui.jobs import Queue
 from mojoui.json import Json, json_string
 from mojoui.sqlite import Database, Pool
-from mojoui.crypto import hmac_sha256, same, b64, b64url_decode
+from mojoui.crypto import hmac_sha256, same, b64, b64url_decode, hmac_hex_ok
 from mojoui.hash import hex
 from mojoui.clock import wall_seconds
 
@@ -46,7 +47,7 @@ struct Source(Copyable, Movable):
     var scheme: Int
     var secret: String
     var header: String  # the signature's header (HMAC_HEX / HMAC_B64)
-    var id_header: String  # where the event id is ("" : the JSON body's "id"; STANDARD: webhook-id)
+    var id_header: String  # where the event id is: "" the signed JSON body's "id"; STANDARD: webhook-id (signed too)
     var window_s: Int
     var max_bytes: Int
 
@@ -55,12 +56,14 @@ struct Source(Copyable, Movable):
         return Source(name, STRIPE, secret, "stripe-signature", "", WINDOW_S, MAX_BYTES)
 
     @staticmethod
-    def hmac_hex(name: String, secret: String, header: String = "X-Signature", id_header: String = "") -> Source:
-        return Source(name, HMAC_HEX, secret, header.lower(), id_header.lower(), WINDOW_S, MAX_BYTES)
+    def hmac_hex(name: String, secret: String, header: String = "X-Signature") -> Source:
+        """The id is the body's "id": these shapes sign only the body, so an id from a header could be changed to
+        replay a captured event as new."""
+        return Source(name, HMAC_HEX, secret, header.lower(), "", WINDOW_S, MAX_BYTES)
 
     @staticmethod
-    def hmac_b64(name: String, secret: String, header: String = "X-Signature", id_header: String = "") -> Source:
-        return Source(name, HMAC_B64, secret, header.lower(), id_header.lower(), WINDOW_S, MAX_BYTES)
+    def hmac_b64(name: String, secret: String, header: String = "X-Signature") -> Source:
+        return Source(name, HMAC_B64, secret, header.lower(), "", WINDOW_S, MAX_BYTES)
 
     @staticmethod
     def standard(name: String, secret: String) -> Source:
@@ -148,10 +151,9 @@ def check(src: Source, req: Req, now: Int) -> Int:
     var got = req.header(src.header)
     if got == "":
         return 401
-    var mac = hmac_sha256(src.secret, req.body)
     if src.scheme == HMAC_HEX:
-        var sig = String(got[byte = 7 :]) if got.startswith("sha256=") else got
-        return 0 if same(hex(mac), sig.lower()) else 401
+        return 0 if hmac_hex_ok(got, req.body, src.secret) else 401
+    var mac = hmac_sha256(src.secret, req.body)
     var sig = String(got[byte = 7 :]) if got.startswith("sha256=") else got
     return 0 if same(b64(mac), sig) else 401
 

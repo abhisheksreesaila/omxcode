@@ -14,7 +14,11 @@ What moves (fh-saas → omxcode):
                                                                        a trial's end is its period end (/api/me's trial_ends)
   each tenant's file (core_tenants.db_url, sqlite:///…)             → tenants/<id>.db (SQLite's backup: a consistent copy),
                                                                        skipped when it is there already
-Idempotent: keys are email, tenant id, (user, tenant) and tenant; a second run writes the same rows. Nothing is deleted.
+Identity (D-6021): a person is their Google sub. Someone whose email host.db already has under another sub, or whose sub
+host.db already has under another email, is not imported, nor are their memberships (a warning names their fh-saas id).
+Idempotent and never rolls omxcode back: rows that exist (people, tenants, members, billing) are left as they are, only
+new ones are written, so running it again after go-live can't undo a role change, a cancellation or a Stripe event.
+Nothing is deleted.
 Never reads anything but the two databases and the tenant files it is pointed at; prints counts, never people's data.
 """
 import argparse
@@ -53,6 +57,27 @@ def read_fh(path):
                                          " trial_end, payment_type, created_at FROM core_subscriptions ORDER BY created_at")]
     src.close()
     return users, tenants, members, subs
+
+
+def person(host, u):
+    """(host.db's user id, or None to leave this person out; a warning or ""). Matches by sub first, then email."""
+    email = (u["email"] or "").strip().lower()
+    sub = u["oauth_id"] or None
+    if not email or "@" not in email:
+        return None, f"user {u['id']}: no usable email: left out"
+    by_sub = host.execute("SELECT id, email FROM users WHERE provider = 'google' AND sub = ?", (sub,)).fetchone() if sub else None
+    by_email = host.execute("SELECT id, sub FROM users WHERE email = ?", (email,)).fetchone()
+    if by_sub and by_sub[1] != email:
+        return None, f"user {u['id']}: their Google sign-in already belongs to another address in host.db: left out with their memberships"
+    if by_email and by_email[1] and sub and by_email[1] != sub:
+        return None, f"user {u['id']}: host.db has this address under another Google sign-in: left out with their memberships"
+    if by_email:
+        if not by_email[1] and sub:
+            host.execute("UPDATE users SET sub = ?, provider = 'google' WHERE id = ?", (sub, by_email[0]))
+        return by_email[0], ""
+    host.execute("INSERT INTO users(email, name, sub, provider, created) VALUES (?, ?, ?, ?, ?)",
+                 (email, email.split("@")[0], sub, "google" if sub else None, epoch(u["created_at"])))
+    return host.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()[0], ""
 
 
 def tenant_ok(tid):
@@ -100,6 +125,15 @@ def main():
         host = sqlite3.connect(f"file:{host_path}?mode=ro", uri=True)
         known = {r[0] for r in host.execute("SELECT email FROM users")}
         print(f"dry run: {sum(1 for u in users if u['email'].lower() in known)} of {len(users)} people already in host.db")
+        clashes = 0
+        for u in users:
+            sub, email = u["oauth_id"], (u["email"] or "").strip().lower()
+            a = host.execute("SELECT 1 FROM users WHERE provider = 'google' AND sub = ? AND email != ?", (sub, email)).fetchone() if sub else None
+            b = host.execute("SELECT 1 FROM users WHERE email = ? AND sub IS NOT NULL AND sub != ?", (email, sub)).fetchone() if sub else None
+            if a or b:
+                clashes += 1
+                warnings.append(f"user {u['id']}: their address or Google sign-in belongs to someone else in host.db: would be left out")
+        print(f"dry run: {clashes} identity clashes")
         for w in warnings:
             print("warning: " + w)
         return
@@ -108,28 +142,21 @@ def main():
     with host:  # (one transaction: all or nothing)
         uid = {}
         for u in users:
-            email = u["email"].strip().lower()
-            host.execute("INSERT INTO users(email, name, sub, provider, created) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email) DO NOTHING",
-                         (email, email.split("@")[0], u["oauth_id"] or None, "google" if u["oauth_id"] else None, epoch(u["created_at"])))
-            row = host.execute("SELECT id, sub FROM users WHERE email = ?", (email,)).fetchone()
-            if row[1] and u["oauth_id"] and row[1] != u["oauth_id"]:
-                warnings.append(f"user {u['id']}: host.db already has this address under another sign-in: kept host.db's")
-            elif not row[1] and u["oauth_id"]:
-                host.execute("UPDATE users SET sub = ?, provider = 'google' WHERE id = ?", (u["oauth_id"], row[0]))
-            uid[u["id"]] = row[0]
+            ok, why = person(host, u)
+            if why:
+                warnings.append(why)
+            if ok is not None:
+                uid[u["id"]] = ok
         for t in live:
             s = sub_by_tenant.get(t["id"])
             status = (s["status"] or "none") if s else "none"
             pro = status in PRO
-            host.execute("INSERT INTO tenants(id, name, plan, customer, subscription, created) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET"
-                         " name = excluded.name, plan = excluded.plan, customer = excluded.customer, subscription = excluded.subscription",
+            host.execute("INSERT INTO tenants(id, name, plan, customer, subscription, created) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
                          (t["id"], t["name"], "pro" if pro else "free", s["stripe_cust_id"] if s else None, s["stripe_sub_id"] if s else None, epoch(t["created_at"])))
             if s:
                 end = epoch(s["trial_end"]) if status == "trialing" and s["trial_end"] else epoch(s["current_period_end"])
                 host.execute("INSERT INTO billing(tenant, status, customer, subscription, period_end, cancel_at_period_end, past_due_since, event_at)"
-                             " VALUES (?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(tenant) DO UPDATE SET status = excluded.status, customer = excluded.customer,"
-                             " subscription = excluded.subscription, period_end = excluded.period_end, cancel_at_period_end = excluded.cancel_at_period_end,"
-                             " past_due_since = coalesce(billing.past_due_since, excluded.past_due_since)",
+                             " VALUES (?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(tenant) DO NOTHING",
                              (t["id"], status, s["stripe_cust_id"], s["stripe_sub_id"], end, 1 if s["cancel_at_period_end"] else 0,
                               epoch(s["current_period_end"]) if status == "past_due" else None))
         tids = {t["id"] for t in live}
@@ -140,7 +167,7 @@ def main():
             if role is None:
                 warnings.append(f"a membership with role {m['role']!r}: imported as viewer")
                 role = "viewer"
-            host.execute("INSERT INTO members(user_id, tenant, role, joined) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, tenant) DO UPDATE SET role = excluded.role",
+            host.execute("INSERT INTO members(user_id, tenant, role, joined) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, tenant) DO NOTHING",
                          (uid[m["user_id"]], m["tenant_id"], role, epoch(m["created_at"])))
     (data / "tenants").mkdir(exist_ok=True)
     copied = 0

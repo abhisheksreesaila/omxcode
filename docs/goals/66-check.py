@@ -562,7 +562,7 @@ def m6():
         for who, cl in (("anonymous", anon), ("a tenant admin", ada), ("another tenant's admin", ben)):
             for path in ("/operator/api/tenants", "/operator/api/log", f"/operator/api/tenants/{tenant}/snapshot"):
                 st = cl.get(path).status_code
-                if st not in (401, 403):
+                if st != (401 if who == "anonymous" else 403):
                     return False, f"{who} reached {path}: {st}"
         r = op.get("/operator/api/tenants")
         rows = r.json().get("tenants", []) if r.status_code == 200 else []
@@ -620,6 +620,10 @@ def m7():
     srv.stop()
     host = srv.data / "host.db"
     before = hashlib.sha256(host.read_bytes()).hexdigest()
+    clash = made["users"][-1]  # (host.db already has this address under another Google sign-in: the import must leave them out)
+    with sqlite3.connect(host) as hc:
+        hc.execute("INSERT INTO users(email, name, sub, provider, created) VALUES (?, 'Imposter', 'sub-imposter', 'google', 0)", (clash["email"],))
+    before = hashlib.sha256(host.read_bytes()).hexdigest()
     args = ["pixi", "run", "python", "scripts/fhsaas_import.py", "--from", made["host_db"], "--tenants", made["tenants_dir"], "--to", str(srv.data)]
     dry = run(args + ["--dry-run"], 300)
     if dry.returncode or hashlib.sha256(host.read_bytes()).hexdigest() != before or list((srv.data / "tenants").glob("*.db")):
@@ -640,7 +644,13 @@ def m7():
     srv = fin("m7", stand, smtp, keep=True)
     try:
         notes = []
-        for u in made["users"]:
+        imposter = h.execute("SELECT count(*) FROM members m JOIN users u ON u.id = m.user_id WHERE u.email = ?", (clash["email"],)).fetchone()[0]
+        if imposter or "left out" not in first.stdout:
+            return False, f"the address bound to another sign-in got {imposter} memberships: {first.stdout[-300:]}"
+        cl, back = sign_in(srv, stand, (clash["email"], clash["name"]))
+        if back.status_code != 403:
+            return False, f"the fh-saas person whose address is someone else's here signed in: {back.status_code}"
+        for u in made["users"][:-1]:
             cl, back = sign_in(srv, stand, (u["email"], u["name"]))
             me = cl.get("/api/me").json()
             if me.get("tenant") != u["tenant"] or me.get("role") != u["role"] or me.get("plan") != u["plan"]:
@@ -653,7 +663,8 @@ def m7():
             return False, "no Stripe ids were carried"
         return True, (f"fh-saas {made['version']} made {len(made['users'])} users, {len(made['tenants'])} tenants; the dry run wrote "
                       f"nothing; the import twice gives the same host.db; tenant files copied; each person signs in to their own "
-                      f"tenant, role and plan ({', '.join(notes)}); Stripe ids carried ({len(cust)})")
+                      f"tenant, role and plan ({', '.join(notes)}); an address already bound to another Google sign-in left out "
+                      f"(no memberships, its sign-in 403); Stripe ids carried ({len(cust)})")
     finally:
         srv.stop()
         stand.close()
@@ -760,7 +771,7 @@ class Bank:
         self.client_id, self.client_secret = "bank-client-66", "bank-secret-66"
         self.secret = "whsec_" + base64.b64encode(b"bank-webhook-secret-66").decode()
         self.txns = {}  # connection -> [txn]
-        self.tokens, self.calls, self.problems, self.throttled = {}, [], [], set()
+        self.tokens, self.calls, self.problems, self.throttled, self.links = {}, [], [], set(), {}
         me = self
 
         class H(BaseHTTPRequestHandler):
@@ -790,6 +801,12 @@ class Bank:
                     me.tokens[tok] = time.time() + 3
                     me.calls.append("token")
                     return self.reply(200, {"access_token": tok, "token_type": "Bearer", "expires_in": 3})
+                if self.path == "/link/exchange":  # (the link screen's one-time token → the connection, server to server)
+                    tok = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
+                    if me.tokens.get(tok, 0) < time.time():
+                        return self.reply(401, {"error": "invalid_token"})
+                    conn = me.links.pop(json.loads(body or "{}").get("public_token", ""), None)
+                    return self.reply(200, {"connection": conn}) if conn else self.reply(400, {"error": "unknown public_token"})
                 if self.path == "/graphql":
                     tok = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
                     if me.tokens.get(tok, 0) < time.time():
@@ -811,6 +828,12 @@ class Bank:
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", self.port), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def link_token(self, connection):
+        """What the aggregator's link screen hands the browser after the person links their bank (single use)."""
+        t = "public-" + secrets.token_hex(8)
+        self.links[t] = connection
+        return t
 
     def env(self):
         return {"BANK_API": self.base, "BANK_CLIENT_ID": self.client_id, "BANK_CLIENT_SECRET": self.client_secret, "BANK_WEBHOOK_SECRET": self.secret}
@@ -854,7 +877,11 @@ def m9():
             page.wait_for_selector("#status", timeout=10000)
             cookies = {c["name"]: c["value"] for c in ctx.cookies()}
             cl = httpx.Client(base_url=srv.base, cookies=cookies, timeout=30)
-            r = cl.post("/api/bank/connect", json={"connection": conn}, headers={"Origin": srv.base})
+            if cl.post("/api/bank/connect", json={"connection": conn}, headers={"Origin": srv.base}).status_code != 400:
+                return False, "a bare connection id from the browser was accepted"
+            if cl.post("/api/bank/connect", json={"public_token": "public-forged"}, headers={"Origin": srv.base}).status_code != 400:
+                return False, "a link token the bank never issued was accepted"
+            r = cl.post("/api/bank/connect", json={"public_token": bank.link_token(conn)}, headers={"Origin": srv.base})
             if r.status_code != 200:
                 return False, f"connect: {r.status_code} {r.text[:200]}"
             ev = bank.send_event(srv.base + "/webhooks/bank", conn)
