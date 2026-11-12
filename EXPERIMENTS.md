@@ -4,6 +4,16 @@ A dated record of what was tried, what happened, and what it means. Newest first
 
 ---
 
+## Goal 66: the server-side ingredients of a Finxplorer-class SaaS (2026-11-11)
+- **Setup:** worktree ../mojo-ui-g66, branch `goal-66-saas-ingredients` off origin/main f0268d58, .pixi linked to ../mojo-ui-m60's. Stand-ins only (goal 60's Google, Stripe, SMTP; a made-up bank aggregator). Checker docs/goals/66-check.py, committed before the work.
+- **Worked:** eight new generic modules, each with its own test: mojoui.static, webhooks, apiclient, schedule (TZif zones, DST as Vixie cron), sqlite bulk_upsert/set_edited, csvstream (Reply.csv), pages, operator; scripts/fhsaas_import.py (proven on a host db made by fh-saas 0.9.14); a Dockerfile and scripts/saas_image.sh; examples/finance_min using all of them, driven end to end in headless Chromium. M0–M7 and M9 PASS.
+- **Broke and fixed:** mostly Mojo ownership errors on first builds; the bundle's server hung until patchelf stopped touching Mojo's runtime libraries (bisected); four checker bugs (httpx's default gzip, raw MIME instead of decoded mail, the seed inside a folder the server wipes, goal 64's "PASS  M0" line format), fixed in the checker, never by weakening a proof.
+- **Review:** both reviewers FAILed round 1 (importer attached memberships across Google identities; any tenant could claim a bank connection; webhook replays via an unsigned id header; snapshot leftovers; re-runs rolling back): all fixed with stronger checks; round 2 PASS for both.
+- **Blocked:** M8 needs Docker's socket (this user isn't in the docker group): the bundle is proven to run without pixi.
+- **Means:** omxcode now has every server-side ingredient docs/research/finxplorer-ingredients.md listed; goal 67 is the UI half. Report: docs/goals/66-report.md.
+
+---
+
 ## SaaS hardening: four of docs/saas.md's known limits closed (2026-11-11)
 - **Setup:** worktree ../mojo-ui-saas, branch `saas-hardening` at ee63f717 (main + goals 57 and 60), its .pixi a symlink to ../mojo-ui-m60's (shared env). Stand-ins only (Google, Stripe, SMTP in the checkers); no keys, no Mac. Each fix test-first: the new check step or test failed, then passed.
 - **Worked:** (1) a desktop sign-in's callback answers "Sign in to omxcode SaaS on this computer?" and only a same-origin POST /auth/desktop releases the code (D-6029, D-6030). (2) The pending sign-in is a sealed cookie with an HMAC-derived PKCE verifier; single use is a row written only after the provider trades the code. Before the fix, the new check showed the attack: 3,000 /logins from one /48 got 2,997 × 503. After it, all 303 and no rows (D-6031, D-6032). (3) Blocking requests run on a fixed offload pool (16 threads, a queue of 64, a pipe of job addresses), with 503 + Retry-After past it; the server's thread count never rises (D-6033). (4) Sign-out is POST only; GET /logout shows a page with the button (D-6034). 60-check gains M12 for all four.

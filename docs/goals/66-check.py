@@ -964,6 +964,7 @@ def m10():
         r = run(args, 7200)
         (OUT / f"m10-{goal}.txt").write_text(r.stdout + r.stderr)
         res = dict(re.findall(r"^(M\d+): (PASS|FAIL|BLOCKED)", r.stdout, re.M))
+        res.update({m: w for w, m in re.findall(r"^(PASS|FAIL|BLOCKED)\s+(M\d+)\s", r.stdout, re.M)})  # (goal 64 prints "PASS  M0")
         good, why = rule(res, r.stdout)
         ok_all &= good
         out.append(f"goal {goal}: {why}")
@@ -981,7 +982,7 @@ def _g57_rule(res, text):
     allowed = {"M5": ("BLOCKED",), "M2": ("PASS", "FAIL"), "M8": ("PASS", "FAIL")}
     bad = {k: v for k, v in res.items() if v not in allowed.get(k, ("PASS",))}
     for k in ("M2", "M8"):
-        if res.get(k) == "FAIL" and not re.search(rf"^{k}: FAIL .*invit", text, re.M):
+        if res.get(k) == "FAIL" and not re.search(rf"^{k}: FAIL .*invited viewer", text, re.M):
             bad[k] = "FAIL (not at the invite)"
     return (not bad and len(res) >= 6), f"{res}" + (f" bad {bad}" if bad else "")
 
